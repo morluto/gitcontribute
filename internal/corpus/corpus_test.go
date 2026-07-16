@@ -2,8 +2,10 @@ package corpus
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,6 +48,32 @@ func TestOpenAndPragmas(t *testing.T) {
 	}
 	if journal != "wal" {
 		t.Fatalf("journal_mode = %q, want wal", journal)
+	}
+}
+
+func TestConcurrentOpenUsesIndependentMigrationProviders(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	const count = 8
+	errs := make(chan error, count)
+	var wg sync.WaitGroup
+	for i := range count {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c, err := Open(ctx, filepath.Join(root, fmt.Sprintf("corpus-%d.db", i)))
+			if err == nil {
+				err = c.Close()
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent open: %v", err)
+		}
 	}
 }
 

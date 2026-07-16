@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"embed"
 	"fmt"
+	"io/fs"
 	"strings"
 	"time"
 
@@ -71,10 +72,15 @@ func buildDSN(path string) string {
 }
 
 func (c *Corpus) applyMigrations(ctx context.Context) error {
-	goose.SetBaseFS(migrationsFS)
-	goose.SetDialect("sqlite3")
-	goose.SetLogger(noopLogger{})
-	if err := goose.UpContext(ctx, c.db, "migrations"); err != nil {
+	migrations, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("open migration filesystem: %w", err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, c.db, migrations, goose.WithLogger(noopLogger{}))
+	if err != nil {
+		return fmt.Errorf("create migration provider: %w", err)
+	}
+	if _, err := provider.Up(ctx); err != nil {
 		return fmt.Errorf("apply migrations: %w", err)
 	}
 	return nil
