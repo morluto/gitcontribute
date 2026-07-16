@@ -1,0 +1,12 @@
+/bin/
+/dist/
+/.cache/
+/.gitcontribute/
+*.db
+*.db-shm
+*.db-wal
+*.test
+coverage.out
+
+# Local research snapshot; not part of the product source.
+codedb.snapshot
