@@ -168,8 +168,8 @@ func TestCompareValidation(t *testing.T) {
 	repo := newFakeRepo()
 	svc := NewService(repo, &fakeRunner{})
 
-	base := &ValidationRun{ID: "base", Kind: RunKindBase, ExitCode: 1, Classification: RunClassificationFailing}
-	candidate := &ValidationRun{ID: "candidate", Kind: RunKindCandidate, ExitCode: 0, Classification: RunClassificationPassing}
+	base := &ValidationRun{ID: "base", DefinitionID: "def", Kind: RunKindBase, ExitCode: 1, Classification: RunClassificationFailing}
+	candidate := &ValidationRun{ID: "candidate", DefinitionID: "def", Kind: RunKindCandidate, ExitCode: 0, Classification: RunClassificationPassing}
 	_ = repo.SaveValidationRun(context.Background(), base)
 	_ = repo.SaveValidationRun(context.Background(), candidate)
 
@@ -180,6 +180,42 @@ func TestCompareValidation(t *testing.T) {
 	if cmp.Classification != ComparisonFixed {
 		t.Fatalf("classification: got %q, want fixed", cmp.Classification)
 	}
+}
+
+func TestCompareValidationRejectsDifferentDefinitions(t *testing.T) {
+	repo := newFakeRepo()
+	svc := NewService(repo, &fakeRunner{})
+	_ = repo.SaveValidationRun(context.Background(), &ValidationRun{ID: "base", DefinitionID: "a", Kind: RunKindBase})
+	_ = repo.SaveValidationRun(context.Background(), &ValidationRun{ID: "candidate", DefinitionID: "b", Kind: RunKindCandidate})
+	if _, err := svc.CompareValidation(context.Background(), "base", "candidate"); !errors.Is(err, ErrInvalidComparison) {
+		t.Fatalf("comparison error = %v, want ErrInvalidComparison", err)
+	}
+}
+
+func TestRunValidationUsesKindSpecificWorkspace(t *testing.T) {
+	repo := newFakeRepo()
+	runner := &capturingRunner{result: &RunResult{Classification: RunClassificationPassing}}
+	svc := NewService(repo, runner)
+	def := &ValidationDefinition{ID: "def", Command: []string{"test"}, BaseWorkingDir: "/base", CandidateDir: "/candidate"}
+	if err := svc.DefineValidation(context.Background(), def); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RunValidation(context.Background(), def.ID, RunKindCandidate); err != nil {
+		t.Fatal(err)
+	}
+	if runner.request.Dir != "/candidate" {
+		t.Fatalf("runner dir = %q, want candidate workspace", runner.request.Dir)
+	}
+}
+
+type capturingRunner struct {
+	request RunRequest
+	result  *RunResult
+}
+
+func (r *capturingRunner) Run(_ context.Context, request RunRequest) (*RunResult, error) {
+	r.request = request
+	return r.result, nil
 }
 
 func TestEvidenceWithSourceRef(t *testing.T) {

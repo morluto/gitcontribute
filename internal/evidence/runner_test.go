@@ -2,6 +2,7 @@ package evidence
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"strings"
 	"testing"
@@ -15,6 +16,14 @@ func findOrSkip(t *testing.T, name string) string {
 		t.Skipf("%s not found in PATH", name)
 	}
 	return p
+}
+
+func TestExecRunnerRejectsUnboundedCapture(t *testing.T) {
+	r := NewExecRunner()
+	_, err := r.Run(context.Background(), RunRequest{Args: []string{"ignored"}, Dir: t.TempDir(), MaxOutputBytes: maxOutputBytes + 1})
+	if !errors.Is(err, ErrInvalidOutputLimit) {
+		t.Fatalf("runner error = %v, want ErrInvalidOutputLimit", err)
+	}
 }
 
 func TestExecRunnerEcho(t *testing.T) {

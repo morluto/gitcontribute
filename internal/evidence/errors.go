@@ -11,4 +11,5 @@ var (
 	ErrInvalidRelation     = errors.New("evidence: invalid relation")
 	ErrMissingRunKind      = errors.New("evidence: run kind is required")
 	ErrInvalidComparison   = errors.New("evidence: comparison requires one base and one candidate run")
+	ErrInvalidOutputLimit  = errors.New("evidence: output limit is invalid")
 )

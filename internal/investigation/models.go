@@ -150,7 +150,7 @@ func (o *Opportunity) ContradictingEvidence(all []*evidence.Evidence) []*evidenc
 func filterEvidence(all []*evidence.Evidence, want evidence.Relation) []*evidence.Evidence {
 	var out []*evidence.Evidence
 	for _, e := range all {
-		if e.Relation == want {
+		if e != nil && e.Relation == want {
 			out = append(out, e)
 		}
 	}

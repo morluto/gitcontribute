@@ -86,6 +86,8 @@ type ValidationDefinition struct {
 	Name            string
 	Command         []string
 	WorkingDir      string
+	BaseWorkingDir  string
+	CandidateDir    string
 	Env             []string
 	CreatedAt       time.Time
 }

@@ -4,14 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
-	"sync"
 	"time"
 )
 
 const defaultMaxOutputBytes = 64 * 1024
+const maxOutputBytes = 64 * 1024 * 1024
 
 // ExecRunner executes commands directly, without a shell, with bounded output capture.
 type ExecRunner struct{}
@@ -37,7 +36,10 @@ func (r *ExecRunner) Run(ctx context.Context, req RunRequest) (*RunResult, error
 	}
 
 	max := req.MaxOutputBytes
-	if max <= 0 {
+	if max < 0 || max > maxOutputBytes {
+		return nil, ErrInvalidOutputLimit
+	}
+	if max == 0 {
 		max = defaultMaxOutputBytes
 	}
 
@@ -46,29 +48,12 @@ func (r *ExecRunner) Run(ctx context.Context, req RunRequest) (*RunResult, error
 	if req.Env != nil {
 		cmd.Env = req.Env
 	}
-
-	stdoutPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("runner: stdout pipe: %w", err)
-	}
-	stderrPipe, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, fmt.Errorf("runner: stderr pipe: %w", err)
-	}
-
 	stdoutBuf := newBoundedWriter(int(max))
 	stderrBuf := newBoundedWriter(int(max))
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		_, _ = io.Copy(stdoutBuf, stdoutPipe)
-		wg.Done()
-	}()
-	go func() {
-		_, _ = io.Copy(stderrBuf, stderrPipe)
-		wg.Done()
-	}()
+	cmd.Stdout = stdoutBuf
+	cmd.Stderr = stderrBuf
+	configureCommandCancellation(cmd)
+	cmd.WaitDelay = 2 * time.Second
 
 	started := time.Now()
 	if err := cmd.Start(); err != nil {
@@ -76,7 +61,6 @@ func (r *ExecRunner) Run(ctx context.Context, req RunRequest) (*RunResult, error
 	}
 
 	runErr := cmd.Wait()
-	wg.Wait()
 	completed := time.Now()
 
 	if ctx.Err() != nil {

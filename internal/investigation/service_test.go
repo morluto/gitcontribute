@@ -199,8 +199,23 @@ func TestOpportunityTransitionAuditTrail(t *testing.T) {
 		t.Fatalf("reproduce: %v", err)
 	}
 	got, _ := svc.repo.GetOpportunity(context.Background(), o.ID)
-	if len(got.AuditTrail) != 2 {
-		t.Fatalf("expected 2 status changes, got %d", len(got.AuditTrail))
+	if len(got.AuditTrail) != 1 {
+		t.Fatalf("expected 1 status change, got %d", len(got.AuditTrail))
+	}
+}
+
+func TestUpdateCollisionStatusRecordsPreviousValue(t *testing.T) {
+	svc := NewService(newFakeRepo(), &fakeEvidenceStore{})
+	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	h, _ := svc.RecordHypothesis(context.Background(), inv.ID, "race", "race desc", CategoryBug, nil)
+	o, _ := svc.PromoteOpportunity(context.Background(), h.ID, "problem", "scope", "impact", "small", 0.5)
+	updated, err := svc.UpdateCollisionStatus(context.Background(), o.ID, CollisionPossible, "similar open PR")
+	if err != nil {
+		t.Fatal(err)
+	}
+	change := updated.AuditTrail[len(updated.AuditTrail)-1]
+	if change.From != string(CollisionUnknown) || change.To != string(CollisionPossible) {
+		t.Fatalf("collision audit = %+v", change)
 	}
 }
 

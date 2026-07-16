@@ -27,7 +27,7 @@ func (s *Service) DefineValidation(ctx context.Context, d *ValidationDefinition)
 	if len(d.Command) == 0 {
 		return ErrMissingCommand
 	}
-	if d.WorkingDir == "" {
+	if d.WorkingDir == "" && (d.BaseWorkingDir == "" || d.CandidateDir == "") {
 		return ErrMissingWorkspace
 	}
 	if d.ID == "" {
@@ -48,10 +48,20 @@ func (s *Service) RunValidation(ctx context.Context, defID string, kind RunKind)
 	if err != nil {
 		return nil, err
 	}
+	workingDir := def.WorkingDir
+	if kind == RunKindBase && def.BaseWorkingDir != "" {
+		workingDir = def.BaseWorkingDir
+	}
+	if kind == RunKindCandidate && def.CandidateDir != "" {
+		workingDir = def.CandidateDir
+	}
+	if workingDir == "" {
+		return nil, ErrMissingWorkspace
+	}
 
 	result, err := s.runner.Run(ctx, RunRequest{
 		Args:           def.Command,
-		Dir:            def.WorkingDir,
+		Dir:            workingDir,
 		Env:            def.Env,
 		MaxOutputBytes: defaultMaxOutputBytes,
 	})
@@ -90,6 +100,12 @@ func (s *Service) CompareValidation(ctx context.Context, baseRunID, candidateRun
 	candidate, err := s.repo.GetValidationRun(ctx, candidateRunID)
 	if err != nil {
 		return nil, fmt.Errorf("load candidate run: %w", err)
+	}
+	if base.DefinitionID == "" || base.DefinitionID != candidate.DefinitionID ||
+		base.InvestigationID != candidate.InvestigationID ||
+		base.HypothesisID != candidate.HypothesisID ||
+		base.OpportunityID != candidate.OpportunityID {
+		return nil, ErrInvalidComparison
 	}
 	return Compare(base, candidate)
 }

@@ -2,6 +2,7 @@ package investigation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -88,6 +89,9 @@ func (s *Service) TransitionHypothesis(ctx context.Context, id string, to Hypoth
 
 // PromoteOpportunity converts a confirmed hypothesis into an opportunity.
 func (s *Service) PromoteOpportunity(ctx context.Context, hypothesisID, problem, scope, impact, effort string, confidence float64) (*Opportunity, error) {
+	if confidence < 0 || confidence > 1 {
+		return nil, fmt.Errorf("confidence must be between 0 and 1")
+	}
 	h, err := s.repo.GetHypothesis(ctx, hypothesisID)
 	if err != nil {
 		return nil, err
@@ -116,7 +120,6 @@ func (s *Service) PromoteOpportunity(ctx context.Context, hypothesisID, problem,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	_ = o.Transition(OpportunityHypothesis, "promoted from hypothesis")
 	if err := s.repo.SaveHypothesis(ctx, h); err != nil {
 		return nil, err
 	}
@@ -158,6 +161,9 @@ func (s *Service) SetOpportunityStatus(ctx context.Context, id string, to Opport
 
 // RecordEvidence attaches an evidence item to an opportunity and stores it.
 func (s *Service) RecordEvidence(ctx context.Context, opportunityID string, e *evidence.Evidence) (*evidence.Evidence, error) {
+	if e == nil {
+		return nil, errors.New("evidence is required")
+	}
 	if _, err := s.repo.GetOpportunity(ctx, opportunityID); err != nil {
 		return nil, err
 	}
@@ -191,18 +197,26 @@ func (s *Service) SummarizeEvidence(ctx context.Context, opportunityID string) (
 
 // UpdateCollisionStatus explicitly sets the collision status with rationale.
 func (s *Service) UpdateCollisionStatus(ctx context.Context, id string, status CollisionStatus, rationale string) (*Opportunity, error) {
+	if !isValidCollisionStatus(status) {
+		return nil, fmt.Errorf("invalid collision status %q", status)
+	}
 	o, err := s.repo.GetOpportunity(ctx, id)
 	if err != nil {
 		return nil, err
 	}
+	previous := o.CollisionStatus
+	if previous == status {
+		return o, nil
+	}
+	now := time.Now().UTC()
 	o.CollisionStatus = status
 	o.AuditTrail = append(o.AuditTrail, StatusChange{
-		From:      string(o.CollisionStatus),
+		From:      string(previous),
 		To:        string(status),
 		Rationale: rationale,
-		At:        time.Now().UTC(),
+		At:        now,
 	})
-	o.UpdatedAt = time.Now().UTC()
+	o.UpdatedAt = now
 	if err := s.repo.SaveOpportunity(ctx, o); err != nil {
 		return nil, err
 	}
@@ -231,6 +245,14 @@ func isAdvancingStatus(status OpportunityStatus) bool {
 	switch status {
 	case OpportunityValidated, OpportunityMaintainerAligned, OpportunityImplemented,
 		OpportunitySubmitted, OpportunityMerged:
+		return true
+	}
+	return false
+}
+
+func isValidCollisionStatus(status CollisionStatus) bool {
+	switch status {
+	case CollisionUnknown, CollisionNone, CollisionPossible, CollisionConfirmed, CollisionBlocked:
 		return true
 	}
 	return false

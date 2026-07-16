@@ -109,8 +109,15 @@ func (r *Renderer) writeEvidenceSection(b *strings.Builder, heading string, all 
 	if len(all) == 0 {
 		return
 	}
-	sorted := make([]*evidence.Evidence, len(all))
-	copy(sorted, all)
+	sorted := make([]*evidence.Evidence, 0, len(all))
+	for _, item := range all {
+		if item != nil {
+			sorted = append(sorted, item)
+		}
+	}
+	if len(sorted) == 0 {
+		return
+	}
 	sort.SliceStable(sorted, func(i, j int) bool {
 		pi, pj := relationPriority[sorted[i].Relation], relationPriority[sorted[j].Relation]
 		if pi != pj {
@@ -135,6 +142,9 @@ func (r *Renderer) writeEvidenceSection(b *strings.Builder, heading string, all 
 func (r *Renderer) writeReproductionSection(b *strings.Builder, all []*evidence.Evidence) {
 	var repros []*evidence.Evidence
 	for _, e := range all {
+		if e == nil {
+			continue
+		}
 		if e.Type == evidence.EvidenceTypeMinimalReproduction ||
 			e.Type == evidence.EvidenceTypeBaseFailingRegression {
 			repros = append(repros, e)

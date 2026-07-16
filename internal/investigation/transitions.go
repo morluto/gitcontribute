@@ -55,14 +55,18 @@ func (o *Opportunity) Transition(to OpportunityStatus, rationale string) error {
 	if !ValidOpportunityTransition(o.Status, to) {
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, o.Status, to)
 	}
+	if o.Status == to {
+		return nil
+	}
+	now := time.Now().UTC()
 	o.AuditTrail = append(o.AuditTrail, StatusChange{
 		From:      string(o.Status),
 		To:        string(to),
 		Rationale: rationale,
-		At:        time.Now().UTC(),
+		At:        now,
 	})
 	o.Status = to
-	o.UpdatedAt = time.Now().UTC()
+	o.UpdatedAt = now
 	return nil
 }
 
@@ -71,13 +75,17 @@ func (h *Hypothesis) Transition(to HypothesisStatus, rationale string) error {
 	if !ValidHypothesisTransition(h.Status, to) {
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, h.Status, to)
 	}
+	if h.Status == to {
+		return nil
+	}
+	now := time.Now().UTC()
 	h.AuditTrail = append(h.AuditTrail, StatusChange{
 		From:      string(h.Status),
 		To:        string(to),
 		Rationale: rationale,
-		At:        time.Now().UTC(),
+		At:        now,
 	})
 	h.Status = to
-	h.UpdatedAt = time.Now().UTC()
+	h.UpdatedAt = now
 	return nil
 }
