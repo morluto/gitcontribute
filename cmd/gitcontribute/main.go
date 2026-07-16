@@ -8,14 +8,26 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/morluto/gitcontribute/internal/app"
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/config"
 )
+
+const version = "dev"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	c := cli.New(cli.NewBootstrapService(), cli.NewBootstrapMCPRunner(), os.Stdout, os.Stderr)
+	paths := config.NewPaths(nil)
+	svc, err := app.New(paths, version)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(ExitGeneral)
+	}
+	defer func() { _ = svc.Close() }()
+
+	c := cli.New(svc, svc.NewMCPRunner(), os.Stdout, os.Stderr)
 	if err := c.Run(ctx, os.Args[1:]); err != nil {
 		var ce *cli.CLIError
 		if errors.As(err, &ce) {

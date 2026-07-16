@@ -8,6 +8,17 @@ type Repository struct {
 	Owner               string
 	Name                string
 	ExternalID          string
+	Description         string
+	DefaultBranch       string
+	Language            string
+	License             string
+	Topics              []string
+	Stars               int
+	Watchers            int
+	Forks               int
+	OpenIssues          int
+	Archived            bool
+	Fork                bool
 	SourceUpdatedAt     time.Time
 	ObservationSequence int64
 	CreatedAt           time.Time
@@ -34,6 +45,10 @@ type Thread struct {
 	Title               string
 	Body                string
 	Author              string
+	Labels              []string
+	ClosedAt            time.Time
+	MergedAt            time.Time
+	Merged              bool
 	SourceUpdatedAt     time.Time
 	ObservationSequence int64
 	CreatedAt           time.Time

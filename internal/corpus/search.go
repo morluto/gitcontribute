@@ -2,54 +2,53 @@ package corpus
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 )
+
+// SearchFilter scopes a thread keyword search.
+type SearchFilter struct {
+	RepoID int64
+	Kind   string
+	Limit  int
+}
 
 // SearchThreads performs an FTS5 keyword search over thread titles and bodies.
 // It returns matching threads ordered by FTS5 rank and limited to at most limit
 // results. No network access occurs.
 func (c *Corpus) SearchThreads(ctx context.Context, query string, limit int) ([]Thread, error) {
-	if limit <= 0 {
-		limit = 20
+	return c.SearchThreadsWithFilter(ctx, query, SearchFilter{Limit: limit})
+}
+
+// SearchThreadsWithFilter performs the same search as SearchThreads but
+// supports filtering to a repository and thread kind.
+func (c *Corpus) SearchThreadsWithFilter(ctx context.Context, query string, filter SearchFilter) ([]Thread, error) {
+	if limit := filter.Limit; limit <= 0 {
+		filter.Limit = 20
 	}
 
-	rows, err := c.db.QueryContext(ctx, `
-		SELECT t.id, t.repository_id, t.kind, t.number, t.state, t.title, t.body, t.author,
-		       t.source_updated_at, t.observation_sequence, t.created_at, t.updated_at
+	sql := `
+		SELECT t.id, t.repository_id, t.kind, t.number, t.state, t.title, t.body, t.author, t.labels,
+		       t.source_updated_at, t.observation_sequence, t.created_at, t.updated_at, t.closed_at, t.merged_at, t.merged
 		FROM threads_fts fts
 		JOIN threads t ON t.id = fts.rowid
-		WHERE threads_fts MATCH ?
-		ORDER BY rank
-		LIMIT ?
-	`, query, limit)
+		WHERE threads_fts MATCH ?`
+	args := []any{query}
+	if filter.RepoID != 0 {
+		sql += ` AND t.repository_id = ?`
+		args = append(args, filter.RepoID)
+	}
+	if filter.Kind != "" {
+		sql += ` AND t.kind = ?`
+		args = append(args, filter.Kind)
+	}
+	sql += ` ORDER BY rank LIMIT ?`
+	args = append(args, filter.Limit)
+
+	rows, err := c.db.QueryContext(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search threads: %w", err)
 	}
 	defer rows.Close()
 
 	return scanThreads(rows)
-}
-
-func scanThreads(rows *sql.Rows) ([]Thread, error) {
-	var out []Thread
-	for rows.Next() {
-		var t Thread
-		var body, author sql.NullString
-		var src, created, updated int64
-		if err := rows.Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &t.Title, &body, &author,
-			&src, &t.ObservationSequence, &created, &updated); err != nil {
-			return nil, err
-		}
-		t.Body = body.String
-		t.Author = author.String
-		t.SourceUpdatedAt = scanTime(src)
-		t.CreatedAt = scanTime(created)
-		t.UpdatedAt = scanTime(updated)
-		out = append(out, t)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
 }

@@ -141,6 +141,24 @@ func encodeTime(t time.Time) int64 {
 	return t.UTC().UnixNano()
 }
 
+// Status holds corpus health and count metadata.
+type Status struct {
+	Repositories int
+	Threads      int
+}
+
+// Status returns the number of repositories and threads in the corpus.
+func (c *Corpus) Status(ctx context.Context) (Status, error) {
+	var s Status
+	if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM repositories`).Scan(&s.Repositories); err != nil {
+		return s, fmt.Errorf("count repositories: %w", err)
+	}
+	if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM threads`).Scan(&s.Threads); err != nil {
+		return s, fmt.Errorf("count threads: %w", err)
+	}
+	return s, nil
+}
+
 func scanTime(nsec int64) time.Time {
 	if nsec == 0 {
 		return time.Time{}
