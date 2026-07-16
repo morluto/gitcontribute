@@ -138,6 +138,32 @@ func TestRepositoryLookup(t *testing.T) {
 	}
 }
 
+func TestRepositorySearchPreservesCountIncompleteAndPagination(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v3/search/repositories" || r.URL.Query().Get("q") != "language:go" {
+			http.NotFound(w, r)
+			return
+		}
+		setRateHeaders(w.Header())
+		w.Header().Set("Link", `<https://api.github.com/search/repositories?page=2>; rel="next"`)
+		writeJSON(w, map[string]any{
+			"total_count": 1200, "incomplete_results": true,
+			"items": []any{repoPayload(123, testRepo, testOwner)},
+		})
+	}))
+	defer srv.Close()
+	client := newTestClient(t, srv, StaticTokenSource(""))
+	result, err := client.SearchRepositories(context.Background(), RepositorySearchOptions{
+		Query: "language:go", PageOptions: PageOptions{Page: 1, PerPage: 100},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1200 || !result.Incomplete || len(result.Items) != 1 || !result.Page.HasNext {
+		t.Fatalf("search result = %+v", result)
+	}
+}
+
 func TestAuthRedaction(t *testing.T) {
 	token := "super-secret-token-12345"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

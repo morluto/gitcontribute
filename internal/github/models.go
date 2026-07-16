@@ -195,3 +195,20 @@ type ListIssueOptions struct {
 	Labels    []string
 	PageOptions
 }
+
+// RepositorySearchOptions controls one GitHub repository search page.
+type RepositorySearchOptions struct {
+	Query string
+	Sort  string
+	Order string
+	PageOptions
+}
+
+// RepositorySearchResult preserves GitHub's truncation and pagination facts.
+type RepositorySearchResult struct {
+	Total      int
+	Incomplete bool
+	Items      []Repository
+	Page       PageInfo
+	Rate       RateInfo
+}

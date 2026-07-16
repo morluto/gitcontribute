@@ -28,6 +28,12 @@ type Reader interface {
 	ListPullRequestComments(ctx context.Context, owner, name string, number int, opts PageOptions) (ListResult[ReviewComment], error)
 }
 
+// RepositorySearcher is the optional GitHub Search capability used by broad
+// discovery. Keeping it separate lets archive-only readers stay small.
+type RepositorySearcher interface {
+	SearchRepositories(ctx context.Context, opts RepositorySearchOptions) (RepositorySearchResult, error)
+}
+
 // Client wraps go-github behind a narrow, domain-neutral interface.
 type Client struct {
 	gh *gh.Client
@@ -103,6 +109,26 @@ func (c *Client) GetRepository(ctx context.Context, owner, name string) (Reposit
 		return Repository{}, RateInfo{}, classifyError(err)
 	}
 	return convertRepository(repo), rateInfo(resp.Rate), nil
+}
+
+// SearchRepositories reads one page from GitHub's repository Search API.
+func (c *Client) SearchRepositories(ctx context.Context, opts RepositorySearchOptions) (RepositorySearchResult, error) {
+	result, resp, err := c.gh.Search.Repositories(ctx, opts.Query, &gh.SearchOptions{
+		Sort:        opts.Sort,
+		Order:       opts.Order,
+		ListOptions: gh.ListOptions{Page: opts.Page, PerPage: opts.PerPage},
+	})
+	if err != nil {
+		return RepositorySearchResult{}, classifyError(err)
+	}
+	items := make([]Repository, 0, len(result.Repositories))
+	for _, repo := range result.Repositories {
+		items = append(items, convertRepository(repo))
+	}
+	return RepositorySearchResult{
+		Total: result.GetTotal(), Incomplete: result.GetIncompleteResults(), Items: items,
+		Page: pageInfo(resp), Rate: rateInfo(resp.Rate),
+	}, nil
 }
 
 func (c *Client) ListIssues(ctx context.Context, owner, name string, opts ListIssueOptions) (ListResult[Issue], error) {
