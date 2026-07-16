@@ -54,6 +54,17 @@ var (
 
 	// ErrNotARepository means repoPath is not inside a non-bare git worktree.
 	ErrNotARepository = errors.New("not a git repository")
+
+	// ErrOutputLimit means git produced more metadata than the bounded indexer
+	// was willing to retain in memory.
+	ErrOutputLimit = errors.New("git output exceeds limit")
+)
+
+const (
+	defaultMaxFiles        = 10_000
+	defaultMaxBytesPerFile = 1 << 20
+	defaultMaxTotalBytes   = 64 << 20
+	maxPathListBytes       = 64 << 20
 )
 
 // Index enumerates tracked files in repoPath and returns a bounded Snapshot.
@@ -61,6 +72,11 @@ var (
 // repository root. Only regular tracked files are read; symlinks, binaries,
 // non-UTF-8 content, and files exceeding the configured limits are skipped.
 func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error) {
+	var err error
+	opts, err = normalizeOptions(opts)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
 		return Snapshot{}, fmt.Errorf("resolve repo path: %w", err)
@@ -106,7 +122,7 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 	defer root.Close()
 
 	createdAt := time.Now().UTC()
-	paths, err := gitLsFiles(ctx, absPath)
+	paths, err := gitLsFiles(ctx, absPath, opts.MaxFiles)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -124,7 +140,7 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 		if err := ctx.Err(); err != nil {
 			return snap, err
 		}
-		if opts.MaxFiles > 0 && files >= opts.MaxFiles {
+		if files >= opts.MaxFiles {
 			break
 		}
 
@@ -146,10 +162,10 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 		}
 
 		size := int(info.Size())
-		if opts.MaxBytesPerFile > 0 && size > opts.MaxBytesPerFile {
+		if size > opts.MaxBytesPerFile {
 			continue
 		}
-		if opts.MaxTotalBytes > 0 && size > opts.MaxTotalBytes-total {
+		if size > opts.MaxTotalBytes-total {
 			continue
 		}
 
@@ -160,7 +176,7 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 		if !isText(content) {
 			continue
 		}
-		if opts.MaxTotalBytes > 0 && total+len(content) > opts.MaxTotalBytes {
+		if total+len(content) > opts.MaxTotalBytes {
 			continue
 		}
 
@@ -175,7 +191,30 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 	}
 
 	snap.TotalBytes = total
+	status, err = gitStatus(ctx, absPath)
+	if err != nil {
+		return snap, err
+	}
+	if status != "" {
+		return snap, ErrDirtyWorktree
+	}
 	return snap, nil
+}
+
+func normalizeOptions(opts Options) (Options, error) {
+	if opts.MaxFiles < 0 || opts.MaxBytesPerFile < 0 || opts.MaxTotalBytes < 0 {
+		return Options{}, errors.New("code index limits cannot be negative")
+	}
+	if opts.MaxFiles == 0 {
+		opts.MaxFiles = defaultMaxFiles
+	}
+	if opts.MaxBytesPerFile == 0 {
+		opts.MaxBytesPerFile = defaultMaxBytesPerFile
+	}
+	if opts.MaxTotalBytes == 0 {
+		opts.MaxTotalBytes = defaultMaxTotalBytes
+	}
+	return opts, nil
 }
 
 func validateRepo(ctx context.Context, repoPath string) (string, error) {
@@ -221,14 +260,24 @@ func gitHead(ctx context.Context, repoPath string) (string, error) {
 
 func gitStatus(ctx context.Context, repoPath string) (string, error) {
 	out, err := runGit(ctx, repoPath, "status", "--porcelain", "--untracked-files=all")
+	if errors.Is(err, ErrOutputLimit) {
+		return "dirty", nil
+	}
 	if err != nil {
 		return "", fmt.Errorf("git status: %w", err)
 	}
 	return strings.TrimSpace(out), nil
 }
 
-func gitLsFiles(ctx context.Context, repoPath string) ([]string, error) {
-	out, err := runGit(ctx, repoPath, "ls-files", "-z")
+func gitLsFiles(ctx context.Context, repoPath string, maxFiles int) ([]string, error) {
+	limit := maxPathListBytes
+	if maxFiles <= maxPathListBytes/4096 {
+		limit = maxFiles * 4096
+	}
+	if limit < 1<<20 {
+		limit = 1 << 20
+	}
+	out, err := runGitLimited(ctx, repoPath, limit, "ls-files", "-z")
 	if err != nil {
 		return nil, fmt.Errorf("list tracked files: %w", err)
 	}
@@ -248,9 +297,62 @@ func gitLsFiles(ctx context.Context, repoPath string) ([]string, error) {
 }
 
 func runGit(ctx context.Context, repoPath string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repoPath}, args...)...)
-	out, err := cmd.Output()
-	return string(out), err
+	return runGitLimited(ctx, repoPath, 1<<20, args...)
+}
+
+func runGitLimited(ctx context.Context, repoPath string, limit int, args ...string) (string, error) {
+	gitArgs := []string{
+		"--no-optional-locks",
+		"-c", "core.fsmonitor=false",
+		"-c", "core.untrackedCache=false",
+		"-c", "core.hooksPath=/dev/null",
+		"-C", repoPath,
+	}
+	cmd := exec.CommandContext(ctx, "git", append(gitArgs, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_OPTIONAL_LOCKS=0",
+		"GIT_TERMINAL_PROMPT=0",
+	)
+	var stdout limitedBuffer
+	stdout.remaining = limit
+	cmd.Stdout = &stdout
+	var stderr limitedBuffer
+	stderr.remaining = 64 << 10
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if errors.Is(stdout.err, ErrOutputLimit) || errors.Is(stderr.err, ErrOutputLimit) {
+		return stdout.buf.String(), ErrOutputLimit
+	}
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitErr.Stderr = append([]byte(nil), stderr.buf.Bytes()...)
+		}
+	}
+	return stdout.buf.String(), err
+}
+
+type limitedBuffer struct {
+	buf       bytes.Buffer
+	remaining int
+	err       error
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	if len(p) > b.remaining {
+		written := b.remaining
+		if b.remaining > 0 {
+			_, _ = b.buf.Write(p[:b.remaining])
+			b.remaining = 0
+		}
+		b.err = ErrOutputLimit
+		return written, b.err
+	}
+	n, err := b.buf.Write(p)
+	b.remaining -= n
+	return n, err
 }
 
 func safeGitPath(p string) (string, bool) {

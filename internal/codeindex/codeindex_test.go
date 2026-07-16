@@ -353,3 +353,43 @@ func TestIndexCancellation(t *testing.T) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
+
+func TestIndexRejectsNegativeLimits(t *testing.T) {
+	_, err := Index(context.Background(), t.TempDir(), Options{MaxFiles: -1})
+	if err == nil || !strings.Contains(err.Error(), "cannot be negative") {
+		t.Fatalf("expected negative-limit error, got %v", err)
+	}
+}
+
+func TestRunGitDisablesRepositoryFSMonitor(t *testing.T) {
+	repo := newRepo(t)
+	writeFile(t, repo, "a.txt", "a\n")
+	commitAll(t, repo, "initial")
+	marker := filepath.Join(t.TempDir(), "executed")
+	hook := filepath.Join(repo, "fsmonitor.sh")
+	writeFile(t, repo, "fsmonitor.sh", "#!/bin/sh\ntouch \""+marker+"\"\n")
+	if err := os.Chmod(hook, 0755); err != nil {
+		t.Fatal(err)
+	}
+	testGit(t, repo, "config", "core.fsmonitor", hook)
+
+	// The untracked hook file makes the tree dirty, but inspecting it must not
+	// execute the repository-controlled fsmonitor command.
+	_, err := Index(context.Background(), repo, Options{})
+	if !errors.Is(err, ErrDirtyWorktree) {
+		t.Fatalf("Index error = %v, want ErrDirtyWorktree", err)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("repository-controlled fsmonitor executed; stat error = %v", err)
+	}
+}
+
+func TestRunGitOutputIsBounded(t *testing.T) {
+	repo := newRepo(t)
+	writeFile(t, repo, "a.txt", "a\n")
+	commitAll(t, repo, "initial")
+	_, err := runGitLimited(context.Background(), repo, 1, "rev-parse", "HEAD")
+	if !errors.Is(err, ErrOutputLimit) {
+		t.Fatalf("runGitLimited error = %v, want ErrOutputLimit", err)
+	}
+}
