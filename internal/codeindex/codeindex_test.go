@@ -361,6 +361,19 @@ func TestIndexRejectsNegativeLimits(t *testing.T) {
 	}
 }
 
+func TestIndexRejectsLimitsAboveHardCeilings(t *testing.T) {
+	tests := []Options{
+		{MaxFiles: hardMaxFiles + 1},
+		{MaxBytesPerFile: hardMaxBytesPerFile + 1},
+		{MaxTotalBytes: hardMaxTotalBytes + 1},
+	}
+	for _, opts := range tests {
+		if _, err := Index(context.Background(), t.TempDir(), opts); err == nil || !strings.Contains(err.Error(), "hard limit") {
+			t.Fatalf("Index(%+v) error = %v, want hard-limit rejection", opts, err)
+		}
+	}
+}
+
 func TestRunGitDisablesRepositoryFSMonitor(t *testing.T) {
 	repo := newRepo(t)
 	writeFile(t, repo, "a.txt", "a\n")

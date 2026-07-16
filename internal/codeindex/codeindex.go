@@ -64,6 +64,9 @@ const (
 	defaultMaxFiles        = 10_000
 	defaultMaxBytesPerFile = 1 << 20
 	defaultMaxTotalBytes   = 64 << 20
+	hardMaxFiles           = 100_000
+	hardMaxBytesPerFile    = 16 << 20
+	hardMaxTotalBytes      = 512 << 20
 	maxPathListBytes       = 64 << 20
 )
 
@@ -188,6 +191,15 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 func normalizeOptions(opts Options) (Options, error) {
 	if opts.MaxFiles < 0 || opts.MaxBytesPerFile < 0 || opts.MaxTotalBytes < 0 {
 		return Options{}, errors.New("code index limits cannot be negative")
+	}
+	if opts.MaxFiles > hardMaxFiles {
+		return Options{}, fmt.Errorf("max files exceeds hard limit %d", hardMaxFiles)
+	}
+	if opts.MaxBytesPerFile > hardMaxBytesPerFile {
+		return Options{}, fmt.Errorf("max bytes per file exceeds hard limit %d", hardMaxBytesPerFile)
+	}
+	if opts.MaxTotalBytes > hardMaxTotalBytes {
+		return Options{}, fmt.Errorf("max total bytes exceeds hard limit %d", hardMaxTotalBytes)
 	}
 	if opts.MaxFiles == 0 {
 		opts.MaxFiles = defaultMaxFiles
