@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/cli"
@@ -16,12 +17,14 @@ type fakeService struct {
 	syncCalled    bool
 	searchCalled  bool
 	dossierCalled bool
+	indexCalled   bool
 
 	initResult    *cli.InitResult
 	statusResult  *cli.StatusResult
 	syncResult    *cli.SyncResult
 	searchResult  *cli.SearchResult
 	dossierResult *cli.DossierResult
+	indexResult   *cli.IndexResult
 
 	lastSyncArg    cli.RepoRef
 	lastSearchArgs struct {
@@ -29,6 +32,8 @@ type fakeService struct {
 		Opts  cli.SearchOptions
 	}
 	lastDossierArg cli.RepoRef
+	lastIndexRepo  cli.RepoRef
+	lastIndexPath  string
 
 	err error
 }
@@ -60,6 +65,25 @@ func (f *fakeService) Dossier(ctx context.Context, repo cli.RepoRef) (*cli.Dossi
 	f.dossierCalled = true
 	f.lastDossierArg = repo
 	return f.dossierResult, f.err
+}
+
+func (f *fakeService) Index(ctx context.Context, repo cli.RepoRef, path string) (*cli.IndexResult, error) {
+	f.indexCalled = true
+	f.lastIndexRepo = repo
+	f.lastIndexPath = path
+	return f.indexResult, f.err
+}
+
+func TestIndex(t *testing.T) {
+	svc := &fakeService{indexResult: &cli.IndexResult{Repo: cli.RepoRef{Owner: "o", Repo: "r"}, Commit: "abc", Files: 2}}
+	c, stdout, stderr := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"index", "o/r", "/checkout"}))
+	if !svc.indexCalled || svc.lastIndexRepo.String() != "o/r" || svc.lastIndexPath != "/checkout" {
+		t.Fatalf("index call = called:%v repo:%v path:%q", svc.indexCalled, svc.lastIndexRepo, svc.lastIndexPath)
+	}
+	if !strings.Contains(stdout.String(), "abc") || !strings.Contains(stderr.String(), "indexing") {
+		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
 }
 
 type fakeMCPRunner struct {

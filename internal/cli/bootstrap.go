@@ -27,6 +27,10 @@ func (bootstrapService) Dossier(ctx context.Context, repo RepoRef) (*DossierResu
 	return nil, NewCLIError(ExitNotWired, ErrNotWired)
 }
 
+func (bootstrapService) Index(ctx context.Context, repo RepoRef, path string) (*IndexResult, error) {
+	return nil, NewCLIError(ExitNotWired, ErrNotWired)
+}
+
 // bootstrapMCPRunner is a placeholder MCP runner that returns ErrNotWired.
 type bootstrapMCPRunner struct{}
 

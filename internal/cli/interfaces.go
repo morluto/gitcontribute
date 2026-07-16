@@ -11,6 +11,7 @@ type Service interface {
 	Sync(ctx context.Context, repo RepoRef) (*SyncResult, error)
 	Search(ctx context.Context, query string, opts SearchOptions) (*SearchResult, error)
 	Dossier(ctx context.Context, repo RepoRef) (*DossierResult, error)
+	Index(ctx context.Context, repo RepoRef, path string) (*IndexResult, error)
 }
 
 // MCPRunner is the product-owned boundary for running an MCP server. The CLI
@@ -89,4 +90,15 @@ type DossierResult struct {
 	OpenIssues int      `json:"open_issues"`
 	Coverage   []string `json:"coverage"`
 	Freshness  string   `json:"freshness"`
+}
+
+// IndexResult reports one immutable local code snapshot.
+type IndexResult struct {
+	Repo     RepoRef `json:"repo"`
+	Path     string  `json:"path"`
+	Commit   string  `json:"commit"`
+	Files    int     `json:"files"`
+	Bytes    int     `json:"bytes"`
+	Inserted bool    `json:"inserted"`
+	Message  string  `json:"message"`
 }

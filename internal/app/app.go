@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -486,6 +487,34 @@ func (s *Service) Dossier(ctx context.Context, repo cli.RepoRef) (*cli.DossierRe
 		OpenIssues: d.Repository.OpenIssueCount,
 		Coverage:   coverageNames(d.Coverage),
 		Freshness:  d.AsOf.Format(time.RFC3339),
+	}, nil
+}
+
+// Index records a bounded immutable code snapshot from a clean local checkout.
+func (s *Service) Index(ctx context.Context, repo cli.RepoRef, path string) (*cli.IndexResult, error) {
+	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
+	if err := ref.Validate(); err != nil {
+		return nil, err
+	}
+	snapshot, err := codeindex.Index(ctx, path, codeindex.Options{})
+	if err != nil {
+		return nil, err
+	}
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	_, inserted, err := c.StoreCodeSnapshot(ctx, ref, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	message := "snapshot already indexed"
+	if inserted {
+		message = "snapshot stored"
+	}
+	return &cli.IndexResult{
+		Repo: repo, Path: snapshot.RepoPath, Commit: snapshot.Commit,
+		Files: len(snapshot.Documents), Bytes: snapshot.TotalBytes, Inserted: inserted, Message: message,
 	}, nil
 }
 

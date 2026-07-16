@@ -32,6 +32,8 @@ func humanOutput(v any) (string, error) {
 		return searchHuman(r), nil
 	case *DossierResult:
 		return dossierHuman(r), nil
+	case *IndexResult:
+		return fmt.Sprintf("Indexed %s at %s: %d files, %d bytes.\n%s", r.Repo, r.Commit, r.Files, r.Bytes, r.Message), nil
 	default:
 		return "", fmt.Errorf("unsupported result type %T", v)
 	}

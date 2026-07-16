@@ -38,6 +38,7 @@ type rootCmd struct {
 	Sync    syncCmd    `cmd:"" help:"Sync a repository into the corpus"`
 	Search  searchCmd  `cmd:"" help:"Search the local corpus"`
 	Dossier dossierCmd `cmd:"" help:"Show repository dossier"`
+	Index   indexCmd   `cmd:"" help:"Index a clean local checkout at its current commit"`
 	MCP     mcpCmd     `cmd:"" name:"mcp" help:"Run the MCP server"`
 }
 
@@ -64,6 +65,12 @@ type searchCmd struct {
 
 type dossierCmd struct {
 	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type indexCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	Path      string `arg:"" optional:"" default:"." help:"Path to a clean repository checkout"`
 	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
 
@@ -100,11 +107,26 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runSearch(ctx, &cli.Search)
 	case "dossier":
 		return c.runDossier(ctx, &cli.Dossier)
+	case "index":
+		return c.runIndex(ctx, &cli.Index)
 	case "mcp":
 		return c.runMCP(ctx, &cli.MCP)
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown command: %s", cmd))
 	}
+}
+
+func (c *CLI) runIndex(ctx context.Context, cmd *indexCmd) error {
+	repo, err := parseRepo(cmd.OwnerRepo)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(c.stderr, "indexing %s from %s...\n", repo, cmd.Path)
+	result, err := c.svc.Index(ctx, repo, cmd.Path)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
 }
 
 func (c *CLI) runInit(ctx context.Context, cmd *initCmd) error {
