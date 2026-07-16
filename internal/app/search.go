@@ -45,7 +45,7 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts cli.Searc
 	}
 
 	var repoID int64
-	if opts.Repo != "" {
+	if opts.Repo != "" && opts.Kind != "code" && opts.Kind != "all" && opts.Kind != "repos" {
 		ref := domain.RepoRef{}
 		parts := strings.Split(opts.Repo, "/")
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
@@ -71,10 +71,14 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts cli.Searc
 		kind = corpus.ThreadKindIssue
 	case "pr", "prs", "pull_request":
 		kind = corpus.ThreadKindPullRequest
-	case "threads", "all", "":
+	case "threads", "":
 		kind = ""
 	case "repos":
 		return s.searchRepositories(ctx, query, opts.Limit)
+	case "code":
+		return s.searchCode(ctx, query, opts.Repo, opts.Limit)
+	case "all":
+		return s.searchAll(ctx, query, opts)
 	default:
 		return searchResult{}, fmt.Errorf("unsupported search kind %q", opts.Kind)
 	}
@@ -122,6 +126,58 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts cli.Searc
 		})
 	}
 	return searchResult{Query: query, Total: len(matches), Matches: matches}, nil
+}
+
+func (s *Service) searchAll(ctx context.Context, query string, opts cli.SearchOptions) (searchResult, error) {
+	var combined []searchMatch
+	for _, kind := range []string{"threads", "repos", "code"} {
+		part := opts
+		part.Kind = kind
+		result, err := s.searchCorpus(ctx, query, part)
+		if err != nil {
+			return searchResult{}, err
+		}
+		combined = append(combined, result.Matches...)
+	}
+	if len(combined) > opts.Limit {
+		combined = combined[:opts.Limit]
+	}
+	return searchResult{Query: query, Total: len(combined), Matches: combined}, nil
+}
+
+func (s *Service) searchCode(ctx context.Context, query, repository string, limit int) (searchResult, error) {
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return searchResult{}, err
+	}
+	var ref domain.RepoRef
+	if repository != "" {
+		parts := strings.Split(repository, "/")
+		if len(parts) != 2 {
+			return searchResult{}, fmt.Errorf("invalid repository filter %q", repository)
+		}
+		ref = domain.RepoRef{Owner: parts[0], Repo: parts[1]}
+	}
+	matches, err := c.SearchCode(ctx, query, ref, limit)
+	if err != nil {
+		return searchResult{}, err
+	}
+	out := make([]searchMatch, len(matches))
+	for i, match := range matches {
+		out[i] = searchMatch{
+			Repo: match.Repo, Kind: "code", Title: match.Path,
+			Body: boundedText(match.Content, 2000),
+		}
+	}
+	return searchResult{Query: query, Total: len(out), Matches: out}, nil
+}
+
+func boundedText(value string, maxRunes int) string {
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	return string(runes[:maxRunes]) + "…"
 }
 
 func (s *Service) searchRepositories(ctx context.Context, query string, limit int) (searchResult, error) {

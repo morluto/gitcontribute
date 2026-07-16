@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
@@ -333,5 +334,32 @@ func TestMCPSearchRequiresCompleteRepositoryFilter(t *testing.T) {
 	_, err := svc.MCPReader().Search(context.Background(), mcpserver.SearchInput{Query: "bug", Owner: "owner"})
 	if err == nil || !strings.Contains(err.Error(), "provided together") {
 		t.Fatalf("Search error = %v", err)
+	}
+}
+
+func TestSearchCodeUsesStoredSnapshotWithoutNetwork(t *testing.T) {
+	ctx := context.Background()
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = svc.corpus.StoreCodeSnapshot(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, codeindex.Snapshot{
+		RepoPath: "/repo", Commit: "abc", CreatedAt: time.Now(), TotalBytes: 20,
+		Documents: []codeindex.Document{{Path: "parser.go", Content: "func searchableParser() {}", Bytes: 25, LanguageHint: "go"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.Search(ctx, "searchableParser", cli.SearchOptions{Kind: "code", Repo: "owner/repo", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Matches) != 1 || result.Matches[0].Title != "parser.go" {
+		t.Fatalf("code search = %+v", result)
 	}
 }
