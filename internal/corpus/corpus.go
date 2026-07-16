@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"os"
 	"strings"
 	"time"
 
@@ -27,6 +28,9 @@ type Corpus struct {
 // enables WAL, foreign keys, and a busy timeout. The returned Corpus is safe
 // for concurrent use by a single writer with multiple readers.
 func Open(ctx context.Context, path string) (*Corpus, error) {
+	if err := prepareDatabaseFile(path); err != nil {
+		return nil, err
+	}
 	dsn := buildDSN(path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -48,6 +52,23 @@ func Open(ctx context.Context, path string) (*Corpus, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+func prepareDatabaseFile(path string) error {
+	if path == ":memory:" || strings.HasPrefix(path, "file:") || strings.Contains(path, "?") {
+		return nil
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return fmt.Errorf("prepare corpus db: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close prepared corpus db: %w", err)
+	}
+	if err := os.Chmod(path, 0600); err != nil {
+		return fmt.Errorf("protect corpus db: %w", err)
+	}
+	return nil
 }
 
 // Close closes the underlying database connection.

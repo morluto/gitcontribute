@@ -116,7 +116,7 @@ func (s *Service) openCorpus(ctx context.Context) (*corpus.Corpus, error) {
 	if cfg.Database == "" {
 		return nil, errors.New("database path not configured")
 	}
-	if err := os.MkdirAll(filepath.Dir(cfg.Database), 0755); err != nil {
+	if err := ensureDatabaseDir(cfg.Database); err != nil {
 		return nil, err
 	}
 	c, err := corpus.Open(ctx, cfg.Database)
@@ -133,6 +133,20 @@ func (s *Service) openCorpus(ctx context.Context) (*corpus.Corpus, error) {
 	s.corpus = c
 	s.mu.Unlock()
 	return c, nil
+}
+
+func ensurePrivateDir(path string) error {
+	if err := os.MkdirAll(path, 0700); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0700)
+}
+
+func ensureDatabaseDir(database string) error {
+	if database == ":memory:" || strings.HasPrefix(database, "file:") {
+		return nil
+	}
+	return ensurePrivateDir(filepath.Dir(database))
 }
 
 func (s *Service) newGitHubReader() (github.Reader, error) {
@@ -205,7 +219,7 @@ func (s *Service) Init(ctx context.Context) (*cli.InitResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(cfg.Database), 0755); err != nil {
+	if err := ensureDatabaseDir(cfg.Database); err != nil {
 		return nil, err
 	}
 	_, err = s.openCorpus(ctx)
