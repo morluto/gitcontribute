@@ -3,6 +3,7 @@ package corpus
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // SearchFilter scopes a thread keyword search.
@@ -25,10 +26,17 @@ func (c *Corpus) SearchThreadsWithFilter(ctx context.Context, query string, filt
 	if limit := filter.Limit; limit <= 0 {
 		filter.Limit = 20
 	}
+	if filter.Limit > 1000 {
+		return nil, fmt.Errorf("search limit cannot exceed 1000")
+	}
+	query = literalFTSQuery(query)
+	if query == "" {
+		return []Thread{}, nil
+	}
 
 	sql := `
 		SELECT t.id, t.repository_id, t.kind, t.number, t.state, t.title, t.body, t.author, t.labels,
-		       t.source_updated_at, t.observation_sequence, t.created_at, t.updated_at, t.closed_at, t.merged_at, t.merged
+		       t.source_created_at, t.source_updated_at, t.observation_sequence, t.created_at, t.updated_at, t.closed_at, t.merged_at, t.merged
 		FROM threads_fts fts
 		JOIN threads t ON t.id = fts.rowid
 		WHERE threads_fts MATCH ?`
@@ -51,4 +59,14 @@ func (c *Corpus) SearchThreadsWithFilter(ctx context.Context, query string, filt
 	defer rows.Close()
 
 	return scanThreads(rows)
+}
+
+// literalFTSQuery treats user input as terms rather than exposing FTS5 query
+// operators. This keeps ordinary punctuation and unmatched quotes searchable.
+func literalFTSQuery(query string) string {
+	terms := strings.Fields(query)
+	for i, term := range terms {
+		terms[i] = `"` + strings.ReplaceAll(term, `"`, `""`) + `"`
+	}
+	return strings.Join(terms, " ")
 }

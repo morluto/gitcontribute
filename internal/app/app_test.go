@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
 )
@@ -204,6 +206,70 @@ func TestEndToEndSyncSearchDossier(t *testing.T) {
 	}
 }
 
+func TestSearchReportsDefaultLimit(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestServer("octocat", "test")
+	defer srv.Close()
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.Sync(ctx, cli.RepoRef{Owner: "octocat", Repo: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.Search(ctx, "searchable", cli.SearchOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Limit != 20 {
+		t.Fatalf("reported limit = %d, want 20", result.Limit)
+	}
+}
+
+func TestLocalInitializationDoesNotResolveUnsupportedAuth(t *testing.T) {
+	ctx := context.Background()
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	configPath, err := paths.ConfigFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.TokenSource.Method = "keyring"
+	if err := config.ApplyDefaults(cfg, paths); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(paths, "test")
+	if err != nil {
+		t.Fatalf("local service construction resolved GitHub auth: %v", err)
+	}
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatalf("local init resolved GitHub auth: %v", err)
+	}
+	if _, err := svc.Sync(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}); err == nil || !strings.Contains(err.Error(), "keyring") {
+		t.Fatalf("network sync error = %v, want explicit unsupported auth", err)
+	}
+}
+
+func TestContributionGuidanceDoesNotClaimUnfetchedSource(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestServer("octocat", "test")
+	defer srv.Close()
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.Sync(ctx, cli.RepoRef{Owner: "octocat", Repo: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	guidance, refs, err := (&corpusReader{s: svc}).ReadContributionGuidance(ctx, domain.RepoRef{Owner: "octocat", Repo: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if guidance != "" || len(refs) != 0 {
+		t.Fatalf("unfetched guidance = %q refs=%+v", guidance, refs)
+	}
+}
+
 func TestMCPReaderLocalReads(t *testing.T) {
 	ctx := context.Background()
 	srv := newTestServer("acme", "rocket")
@@ -259,5 +325,13 @@ func TestMCPReaderLocalReads(t *testing.T) {
 	}
 	if !errors.Is(err, mcpserver.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestMCPSearchRequiresCompleteRepositoryFilter(t *testing.T) {
+	svc := &Service{}
+	_, err := svc.MCPReader().Search(context.Background(), mcpserver.SearchInput{Query: "bug", Owner: "owner"})
+	if err == nil || !strings.Contains(err.Error(), "provided together") {
+		t.Fatalf("Search error = %v", err)
 	}
 }

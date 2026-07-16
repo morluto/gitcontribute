@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
@@ -21,6 +22,7 @@ import (
 // Service is the product-owned application layer that satisfies cli.Service.
 // MCP reads are exposed through MCPReader.
 type Service struct {
+	mu       sync.Mutex
 	cfg      *config.Config
 	paths    *config.Paths
 	corpus   *corpus.Corpus
@@ -28,8 +30,8 @@ type Service struct {
 	version  string
 }
 
-// New creates a Service, resolving defaults and building a GitHub reader from
-// the configured token source. The token itself is never persisted.
+// New creates a Service and resolves local configuration. GitHub credentials
+// are resolved lazily only when a network-reading operation is requested.
 func New(paths *config.Paths, version string) (*Service, error) {
 	if paths == nil {
 		paths = config.NewPaths(nil)
@@ -38,23 +40,24 @@ func New(paths *config.Paths, version string) (*Service, error) {
 	if _, err := s.loadConfig(false); err != nil {
 		return nil, err
 	}
-	ghReader, err := s.newGitHubReader()
-	if err != nil {
-		return nil, err
-	}
-	s.ghReader = ghReader
 	return s, nil
 }
 
 // SetGitHubReader overrides the GitHub reader. It is intended for tests.
 func (s *Service) SetGitHubReader(r github.Reader) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.ghReader = r
 }
 
 // Close closes the corpus database connection.
 func (s *Service) Close() error {
-	if s.corpus != nil {
-		return s.corpus.Close()
+	s.mu.Lock()
+	c := s.corpus
+	s.corpus = nil
+	s.mu.Unlock()
+	if c != nil {
+		return c.Close()
 	}
 	return nil
 }
@@ -72,8 +75,10 @@ func (s *Service) loadConfig(save bool) (*config.Config, error) {
 			return nil, fmt.Errorf("load config: %w", err)
 		}
 		exists = true
-	} else {
+	} else if errors.Is(err, os.ErrNotExist) {
 		cfg = config.Default()
+	} else {
+		return nil, fmt.Errorf("inspect config: %w", err)
 	}
 	if err := config.ApplyDefaults(cfg, s.paths); err != nil {
 		return nil, err
@@ -90,14 +95,20 @@ func (s *Service) loadConfig(save bool) (*config.Config, error) {
 			return nil, fmt.Errorf("save config: %w", err)
 		}
 	}
+	s.mu.Lock()
 	s.cfg = cfg
+	s.mu.Unlock()
 	return cfg, nil
 }
 
 func (s *Service) openCorpus(ctx context.Context) (*corpus.Corpus, error) {
+	s.mu.Lock()
 	if s.corpus != nil {
-		return s.corpus, nil
+		c := s.corpus
+		s.mu.Unlock()
+		return c, nil
 	}
+	s.mu.Unlock()
 	cfg, err := s.loadConfig(false)
 	if err != nil {
 		return nil, err
@@ -112,12 +123,29 @@ func (s *Service) openCorpus(ctx context.Context) (*corpus.Corpus, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.mu.Lock()
+	if s.corpus != nil {
+		existing := s.corpus
+		s.mu.Unlock()
+		_ = c.Close()
+		return existing, nil
+	}
 	s.corpus = c
+	s.mu.Unlock()
 	return c, nil
 }
 
 func (s *Service) newGitHubReader() (github.Reader, error) {
-	tokenSrc := s.tokenSource()
+	s.mu.Lock()
+	cfg := s.cfg
+	s.mu.Unlock()
+	if cfg == nil {
+		return nil, errors.New("configuration is not loaded")
+	}
+	if strings.EqualFold(cfg.TokenSource.Method, "keyring") {
+		return nil, errors.New("keyring token source is not supported")
+	}
+	tokenSrc := tokenSource(cfg)
 	client, err := github.NewClient(github.Config{TokenSource: tokenSrc})
 	if err != nil {
 		return nil, fmt.Errorf("create github reader: %w", err)
@@ -125,21 +153,49 @@ func (s *Service) newGitHubReader() (github.Reader, error) {
 	return client, nil
 }
 
-func (s *Service) tokenSource() github.TokenSource {
-	method := strings.ToLower(s.cfg.TokenSource.Method)
+func tokenSource(cfg *config.Config) github.TokenSource {
+	method := strings.ToLower(cfg.TokenSource.Method)
 	switch method {
 	case "env":
-		name := s.cfg.TokenSource.Key
+		name := cfg.TokenSource.Key
 		if name == "" {
 			name = github.DefaultEnvToken
 		}
 		return github.EnvTokenSource(name)
 	case "gh-cli":
 		return github.GhCLITokenSource(nil)
-	case "keyring":
-		// Not supported in the first vertical slice; fall through to none.
 	}
 	return github.StaticTokenSource("")
+}
+
+func (s *Service) githubReader() (github.Reader, error) {
+	s.mu.Lock()
+	if s.ghReader != nil {
+		reader := s.ghReader
+		s.mu.Unlock()
+		return reader, nil
+	}
+	s.mu.Unlock()
+	reader, err := s.newGitHubReader()
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	if s.ghReader == nil {
+		s.ghReader = reader
+	}
+	reader = s.ghReader
+	s.mu.Unlock()
+	return reader, nil
+}
+
+func (s *Service) databasePath() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cfg == nil {
+		return ""
+	}
+	return s.cfg.Database
 }
 
 // Init opens or creates the configured corpus and persists a default
@@ -152,11 +208,10 @@ func (s *Service) Init(ctx context.Context) (*cli.InitResult, error) {
 	if err := os.MkdirAll(filepath.Dir(cfg.Database), 0755); err != nil {
 		return nil, err
 	}
-	c, err := corpus.Open(ctx, cfg.Database)
+	_, err = s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
-	s.corpus = c
 	return &cli.InitResult{Path: cfg.Database, Message: "corpus initialized"}, nil
 }
 
@@ -164,15 +219,15 @@ func (s *Service) Init(ctx context.Context) (*cli.InitResult, error) {
 func (s *Service) Status(ctx context.Context) (*cli.StatusResult, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
-		return &cli.StatusResult{Healthy: false, Corpus: s.cfg.Database, Version: s.version, Message: err.Error()}, nil
+		return &cli.StatusResult{Healthy: false, Corpus: s.databasePath(), Version: s.version, Message: err.Error()}, nil
 	}
 	st, err := c.Status(ctx)
 	if err != nil {
-		return &cli.StatusResult{Healthy: false, Corpus: s.cfg.Database, Version: s.version, Message: err.Error()}, nil
+		return &cli.StatusResult{Healthy: false, Corpus: s.databasePath(), Version: s.version, Message: err.Error()}, nil
 	}
 	return &cli.StatusResult{
 		Healthy: true,
-		Corpus:  s.cfg.Database,
+		Corpus:  s.databasePath(),
 		Version: s.version,
 		Message: fmt.Sprintf("%d repositories, %d threads", st.Repositories, st.Threads),
 	}, nil
@@ -189,6 +244,10 @@ func (s *Service) Sync(ctx context.Context, repo cli.RepoRef) (*cli.SyncResult, 
 	if err != nil {
 		return nil, err
 	}
+	reader, err := s.githubReader()
+	if err != nil {
+		return nil, err
+	}
 
 	run, err := c.StartRun(ctx, "sync")
 	if err != nil {
@@ -197,19 +256,28 @@ func (s *Service) Sync(ctx context.Context, repo cli.RepoRef) (*cli.SyncResult, 
 	var syncErr error
 	defer func() {
 		if syncErr != nil {
-			_ = c.FailRun(ctx, run.ID, syncErr.Error())
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = c.FailRun(cleanupCtx, run.ID, syncErr.Error())
 		}
 	}()
 
-	_ = c.RecordRunEvent(ctx, run.ID, "info", fmt.Sprintf("syncing %s", ref))
+	if err := c.RecordRunEvent(ctx, run.ID, "info", fmt.Sprintf("syncing %s", ref)); err != nil {
+		syncErr = err
+		return nil, syncErr
+	}
 
-	ghRepo, _, err := s.ghReader.GetRepository(ctx, ref.Owner, ref.Repo)
+	ghRepo, _, err := reader.GetRepository(ctx, ref.Owner, ref.Repo)
 	if err != nil {
 		syncErr = fmt.Errorf("get repository: %w", err)
 		return nil, syncErr
 	}
 	repoProjection := corpusRepoFromGitHub(ghRepo)
-	repoPayload, _ := json.Marshal(ghRepo)
+	repoPayload, err := json.Marshal(ghRepo)
+	if err != nil {
+		syncErr = fmt.Errorf("marshal repository: %w", err)
+		return nil, syncErr
+	}
 	upsertedRepo, err := c.UpsertRepository(ctx, repoProjection, string(repoPayload))
 	if err != nil {
 		syncErr = fmt.Errorf("upsert repository: %w", err)
@@ -235,7 +303,7 @@ func (s *Service) Sync(ctx context.Context, repo cli.RepoRef) (*cli.SyncResult, 
 	pages := 0
 	lastSourceUpdated := ghRepo.UpdatedAt
 	for {
-		res, err := s.ghReader.ListIssues(ctx, ref.Owner, ref.Repo, opts)
+		res, err := reader.ListIssues(ctx, ref.Owner, ref.Repo, opts)
 		if err != nil {
 			syncErr = fmt.Errorf("list issues page %d: %w", opts.Page, err)
 			return nil, syncErr
@@ -243,7 +311,7 @@ func (s *Service) Sync(ctx context.Context, repo cli.RepoRef) (*cli.SyncResult, 
 		pages++
 
 		for _, issue := range res.Items {
-			thread, payload, err := s.threadFromIssue(ctx, ref, issue)
+			thread, payload, err := s.threadFromIssue(ctx, reader, ref, issue)
 			if err != nil {
 				syncErr = err
 				return nil, syncErr
@@ -283,7 +351,7 @@ func (s *Service) Sync(ctx context.Context, repo cli.RepoRef) (*cli.SyncResult, 
 	}, nil
 }
 
-func (s *Service) threadFromIssue(ctx context.Context, ref domain.RepoRef, issue github.Issue) (corpus.Thread, string, error) {
+func (s *Service) threadFromIssue(ctx context.Context, reader github.Reader, ref domain.RepoRef, issue github.Issue) (corpus.Thread, string, error) {
 	thread := corpus.Thread{
 		Kind:            string(issue.Kind),
 		Number:          issue.Number,
@@ -292,8 +360,7 @@ func (s *Service) threadFromIssue(ctx context.Context, ref domain.RepoRef, issue
 		Body:            issue.Body,
 		Author:          issue.Author,
 		Labels:          issue.Labels,
-		CreatedAt:       issue.CreatedAt,
-		UpdatedAt:       issue.UpdatedAt,
+		SourceCreatedAt: issue.CreatedAt,
 		SourceUpdatedAt: issue.UpdatedAt,
 	}
 	if issue.ClosedAt != nil {
@@ -306,7 +373,7 @@ func (s *Service) threadFromIssue(ctx context.Context, ref domain.RepoRef, issue
 	}
 
 	if issue.Kind == github.ThreadKindPullRequest {
-		pr, _, err := s.ghReader.GetPullRequestDetails(ctx, ref.Owner, ref.Repo, issue.Number)
+		pr, _, err := reader.GetPullRequestDetails(ctx, ref.Owner, ref.Repo, issue.Number)
 		if err != nil {
 			return corpus.Thread{}, "", fmt.Errorf("get pull request %d details: %w", issue.Number, err)
 		}
@@ -319,7 +386,6 @@ func (s *Service) threadFromIssue(ctx context.Context, ref domain.RepoRef, issue
 			thread.ClosedAt = *pr.ClosedAt
 		}
 		if !pr.UpdatedAt.IsZero() {
-			thread.UpdatedAt = pr.UpdatedAt
 			thread.SourceUpdatedAt = pr.UpdatedAt
 		}
 		payload, err = json.Marshal(pr)
@@ -347,14 +413,19 @@ func corpusRepoFromGitHub(r github.Repository) corpus.Repository {
 		OpenIssues:      r.OpenIssues,
 		Archived:        r.Archived,
 		Fork:            r.Fork,
+		SourceCreatedAt: r.CreatedAt,
 		SourceUpdatedAt: r.UpdatedAt,
-		CreatedAt:       r.CreatedAt,
-		UpdatedAt:       r.UpdatedAt,
 	}
 }
 
 // Search performs a local-only corpus search and supports repo and kind filters.
 func (s *Service) Search(ctx context.Context, query string, opts cli.SearchOptions) (*cli.SearchResult, error) {
+	if opts.Limit <= 0 {
+		opts.Limit = 20
+	}
+	if opts.Limit > 1000 {
+		return nil, errors.New("search limit cannot exceed 1000")
+	}
 	res, err := s.searchCorpus(ctx, query, opts)
 	if err != nil {
 		return nil, err

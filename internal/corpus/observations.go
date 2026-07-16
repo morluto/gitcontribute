@@ -39,24 +39,17 @@ func (c *Corpus) UpsertRepository(ctx context.Context, repo Repository, payload 
 	}
 
 	srcSec := encodeTime(repo.SourceUpdatedAt)
+	sourceCreated := encodeTime(repo.SourceCreatedAt)
 
 	var repoID int64
 	err = tx.QueryRowContext(ctx, `
 		SELECT id FROM repositories WHERE owner = ? AND name = ?
 	`, repo.Owner, repo.Name).Scan(&repoID)
 	if errors.Is(err, sql.ErrNoRows) {
-		created := now
-		if !repo.CreatedAt.IsZero() {
-			created = encodeTime(repo.CreatedAt)
-		}
-		updated := srcSec
-		if !repo.UpdatedAt.IsZero() {
-			updated = encodeTime(repo.UpdatedAt)
-		}
 		res, err := tx.ExecContext(ctx, `
-			INSERT INTO repositories (owner, name, external_id, description, default_branch, language, license, topics, stars, watchers, forks, open_issues, archived, fork, source_updated_at, observation_sequence, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, repo.Owner, repo.Name, repo.ExternalID, repo.Description, repo.DefaultBranch, repo.Language, repo.License, joinLabels(repo.Topics), repo.Stars, repo.Watchers, repo.Forks, repo.OpenIssues, boolToInt(repo.Archived), boolToInt(repo.Fork), srcSec, seq, created, updated)
+			INSERT INTO repositories (owner, name, external_id, description, default_branch, language, license, topics, stars, watchers, forks, open_issues, archived, fork, source_created_at, source_updated_at, observation_sequence, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, repo.Owner, repo.Name, repo.ExternalID, repo.Description, repo.DefaultBranch, repo.Language, repo.License, joinLabels(repo.Topics), repo.Stars, repo.Watchers, repo.Forks, repo.OpenIssues, boolToInt(repo.Archived), boolToInt(repo.Fork), sourceCreated, srcSec, seq, now, now)
 		if err != nil {
 			return nil, fmt.Errorf("insert repository: %w", err)
 		}
@@ -67,10 +60,6 @@ func (c *Corpus) UpsertRepository(ctx context.Context, repo Repository, payload 
 	} else if err != nil {
 		return nil, fmt.Errorf("select repository: %w", err)
 	} else {
-		updated := srcSec
-		if !repo.UpdatedAt.IsZero() {
-			updated = encodeTime(repo.UpdatedAt)
-		}
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE repositories
 			SET owner = ?,
@@ -87,12 +76,13 @@ func (c *Corpus) UpsertRepository(ctx context.Context, repo Repository, payload 
 			    open_issues = ?,
 			    archived = ?,
 			    fork = ?,
+			    source_created_at = ?,
 			    source_updated_at = ?,
 			    observation_sequence = ?,
 			    updated_at = ?
 			WHERE id = ?
 			  AND (source_updated_at < ? OR (source_updated_at = ? AND observation_sequence < ?))
-		`, repo.Owner, repo.Name, repo.ExternalID, repo.Description, repo.DefaultBranch, repo.Language, repo.License, joinLabels(repo.Topics), repo.Stars, repo.Watchers, repo.Forks, repo.OpenIssues, boolToInt(repo.Archived), boolToInt(repo.Fork), srcSec, seq, updated, repoID, srcSec, srcSec, seq); err != nil {
+		`, repo.Owner, repo.Name, repo.ExternalID, repo.Description, repo.DefaultBranch, repo.Language, repo.License, joinLabels(repo.Topics), repo.Stars, repo.Watchers, repo.Forks, repo.OpenIssues, boolToInt(repo.Archived), boolToInt(repo.Fork), sourceCreated, srcSec, seq, now, repoID, srcSec, srcSec, seq); err != nil {
 			return nil, fmt.Errorf("update repository projection: %w", err)
 		}
 	}
@@ -114,14 +104,14 @@ func (c *Corpus) UpsertRepository(ctx context.Context, repo Repository, payload 
 // has not been observed.
 func (c *Corpus) GetRepository(ctx context.Context, owner, name string) (*Repository, error) {
 	var r Repository
-	var src, created, updated int64
+	var sourceCreated, src, created, updated int64
 	var archived, fork int
 	var topics string
 	err := c.db.QueryRowContext(ctx, `
-		SELECT id, owner, name, external_id, description, default_branch, language, license, topics, stars, watchers, forks, open_issues, archived, fork, source_updated_at, observation_sequence, created_at, updated_at
+		SELECT id, owner, name, external_id, description, default_branch, language, license, topics, stars, watchers, forks, open_issues, archived, fork, source_created_at, source_updated_at, observation_sequence, created_at, updated_at
 		FROM repositories
 		WHERE owner = ? AND name = ?
-	`, owner, name).Scan(&r.ID, &r.Owner, &r.Name, &r.ExternalID, &r.Description, &r.DefaultBranch, &r.Language, &r.License, &topics, &r.Stars, &r.Watchers, &r.Forks, &r.OpenIssues, &archived, &fork, &src, &r.ObservationSequence, &created, &updated)
+	`, owner, name).Scan(&r.ID, &r.Owner, &r.Name, &r.ExternalID, &r.Description, &r.DefaultBranch, &r.Language, &r.License, &topics, &r.Stars, &r.Watchers, &r.Forks, &r.OpenIssues, &archived, &fork, &sourceCreated, &src, &r.ObservationSequence, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -131,6 +121,7 @@ func (c *Corpus) GetRepository(ctx context.Context, owner, name string) (*Reposi
 	r.Topics = splitLabels(topics)
 	r.Archived = archived != 0
 	r.Fork = fork != 0
+	r.SourceCreatedAt = scanTime(sourceCreated)
 	r.SourceUpdatedAt = scanTime(src)
 	r.CreatedAt = scanTime(created)
 	r.UpdatedAt = scanTime(updated)
@@ -140,14 +131,14 @@ func (c *Corpus) GetRepository(ctx context.Context, owner, name string) (*Reposi
 // GetRepositoryByID returns the current projection of a repository by id.
 func (c *Corpus) GetRepositoryByID(ctx context.Context, id int64) (*Repository, error) {
 	var r Repository
-	var src, created, updated int64
+	var sourceCreated, src, created, updated int64
 	var archived, fork int
 	var topics string
 	err := c.db.QueryRowContext(ctx, `
-		SELECT id, owner, name, external_id, description, default_branch, language, license, topics, stars, watchers, forks, open_issues, archived, fork, source_updated_at, observation_sequence, created_at, updated_at
+		SELECT id, owner, name, external_id, description, default_branch, language, license, topics, stars, watchers, forks, open_issues, archived, fork, source_created_at, source_updated_at, observation_sequence, created_at, updated_at
 		FROM repositories
 		WHERE id = ?
-	`, id).Scan(&r.ID, &r.Owner, &r.Name, &r.ExternalID, &r.Description, &r.DefaultBranch, &r.Language, &r.License, &topics, &r.Stars, &r.Watchers, &r.Forks, &r.OpenIssues, &archived, &fork, &src, &r.ObservationSequence, &created, &updated)
+	`, id).Scan(&r.ID, &r.Owner, &r.Name, &r.ExternalID, &r.Description, &r.DefaultBranch, &r.Language, &r.License, &topics, &r.Stars, &r.Watchers, &r.Forks, &r.OpenIssues, &archived, &fork, &sourceCreated, &src, &r.ObservationSequence, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -157,6 +148,7 @@ func (c *Corpus) GetRepositoryByID(ctx context.Context, id int64) (*Repository, 
 	r.Topics = splitLabels(topics)
 	r.Archived = archived != 0
 	r.Fork = fork != 0
+	r.SourceCreatedAt = scanTime(sourceCreated)
 	r.SourceUpdatedAt = scanTime(src)
 	r.CreatedAt = scanTime(created)
 	r.UpdatedAt = scanTime(updated)
@@ -169,16 +161,20 @@ func (c *Corpus) ListRepositories(ctx context.Context, query string, limit int) 
 	args := []any{}
 	where := ""
 	if query != "" {
-		where = `WHERE owner || '/' || name LIKE ? OR description LIKE ?`
+		where = `WHERE owner || '/' || name LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\'`
+		query = escapeLike(query)
 		args = append(args, "%"+query+"%", "%"+query+"%")
 	}
 	if limit <= 0 {
-		limit = -1
+		limit = 100
+	}
+	if limit > 1000 {
+		return nil, fmt.Errorf("repository list limit cannot exceed 1000")
 	}
 	args = append(args, limit)
 
 	rows, err := c.db.QueryContext(ctx, `
-		SELECT id, owner, name, external_id, description, default_branch, language, license, topics, stars, watchers, forks, open_issues, archived, fork, source_updated_at, observation_sequence, created_at, updated_at
+		SELECT id, owner, name, external_id, description, default_branch, language, license, topics, stars, watchers, forks, open_issues, archived, fork, source_created_at, source_updated_at, observation_sequence, created_at, updated_at
 		FROM repositories
 		`+where+`
 		ORDER BY source_updated_at DESC
@@ -192,21 +188,27 @@ func (c *Corpus) ListRepositories(ctx context.Context, query string, limit int) 
 	var out []Repository
 	for rows.Next() {
 		var r Repository
-		var src, created, updated int64
+		var sourceCreated, src, created, updated int64
 		var archived, fork int
 		var topics string
-		if err := rows.Scan(&r.ID, &r.Owner, &r.Name, &r.ExternalID, &r.Description, &r.DefaultBranch, &r.Language, &r.License, &topics, &r.Stars, &r.Watchers, &r.Forks, &r.OpenIssues, &archived, &fork, &src, &r.ObservationSequence, &created, &updated); err != nil {
+		if err := rows.Scan(&r.ID, &r.Owner, &r.Name, &r.ExternalID, &r.Description, &r.DefaultBranch, &r.Language, &r.License, &topics, &r.Stars, &r.Watchers, &r.Forks, &r.OpenIssues, &archived, &fork, &sourceCreated, &src, &r.ObservationSequence, &created, &updated); err != nil {
 			return nil, err
 		}
 		r.Topics = splitLabels(topics)
 		r.Archived = archived != 0
 		r.Fork = fork != 0
+		r.SourceCreatedAt = scanTime(sourceCreated)
 		r.SourceUpdatedAt = scanTime(src)
 		r.CreatedAt = scanTime(created)
 		r.UpdatedAt = scanTime(updated)
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+func escapeLike(value string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(value)
 }
 
 // ListRepositoryObservations returns immutable observations for a repository
@@ -249,7 +251,6 @@ func (c *Corpus) ApplyThreadObservation(ctx context.Context, repoID int64, kind 
 		Body:            body,
 		Author:          author,
 		SourceUpdatedAt: sourceUpdatedAt,
-		UpdatedAt:       time.Now().UTC(),
 	}
 	return c.UpsertThread(ctx, thread, payload)
 }
@@ -270,14 +271,7 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 	}
 
 	srcSec := encodeTime(thread.SourceUpdatedAt)
-	created := now
-	if !thread.CreatedAt.IsZero() {
-		created = encodeTime(thread.CreatedAt)
-	}
-	updated := srcSec
-	if !thread.UpdatedAt.IsZero() {
-		updated = encodeTime(thread.UpdatedAt)
-	}
+	sourceCreated := encodeTime(thread.SourceCreatedAt)
 	closed := sql.NullInt64{}
 	if !thread.ClosedAt.IsZero() {
 		closed.Int64 = encodeTime(thread.ClosedAt)
@@ -295,9 +289,9 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 	`, thread.RepositoryID, thread.Kind, thread.Number).Scan(&threadID)
 	if errors.Is(err, sql.ErrNoRows) {
 		res, err := tx.ExecContext(ctx, `
-			INSERT INTO threads (repository_id, kind, number, state, title, body, author, labels, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, thread.RepositoryID, thread.Kind, thread.Number, thread.State, thread.Title, thread.Body, thread.Author, joinLabels(thread.Labels), srcSec, seq, created, updated, closed, merged, boolToInt(thread.Merged))
+			INSERT INTO threads (repository_id, kind, number, state, title, body, author, labels, source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, thread.RepositoryID, thread.Kind, thread.Number, thread.State, thread.Title, thread.Body, thread.Author, joinLabels(thread.Labels), sourceCreated, srcSec, seq, now, now, closed, merged, boolToInt(thread.Merged))
 		if err != nil {
 			return nil, fmt.Errorf("insert thread: %w", err)
 		}
@@ -315,6 +309,7 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 			    body = ?,
 			    author = ?,
 			    labels = ?,
+			    source_created_at = ?,
 			    source_updated_at = ?,
 			    observation_sequence = ?,
 			    updated_at = ?,
@@ -323,7 +318,7 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 			    merged = ?
 			WHERE id = ?
 			  AND (source_updated_at < ? OR (source_updated_at = ? AND observation_sequence < ?))
-		`, thread.State, thread.Title, thread.Body, thread.Author, joinLabels(thread.Labels), srcSec, seq, updated, closed, merged, boolToInt(thread.Merged), threadID, srcSec, srcSec, seq); err != nil {
+		`, thread.State, thread.Title, thread.Body, thread.Author, joinLabels(thread.Labels), sourceCreated, srcSec, seq, now, closed, merged, boolToInt(thread.Merged), threadID, srcSec, srcSec, seq); err != nil {
 			return nil, fmt.Errorf("update thread projection: %w", err)
 		}
 	}
@@ -346,15 +341,15 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 func (c *Corpus) GetThread(ctx context.Context, repoID int64, kind string, number int) (*Thread, error) {
 	var t Thread
 	var body, author, labels sql.NullString
-	var src, created, updated int64
+	var sourceCreated, src, created, updated int64
 	var closed, mergedAt sql.NullInt64
 	var merged int
 	err := c.db.QueryRowContext(ctx, `
 		SELECT id, repository_id, kind, number, state, title, body, author, labels,
-		       source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged
+		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged
 		FROM threads
 		WHERE repository_id = ? AND kind = ? AND number = ?
-	`, repoID, kind, number).Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &t.Title, &body, &author, &labels, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged)
+	`, repoID, kind, number).Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &t.Title, &body, &author, &labels, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -364,6 +359,7 @@ func (c *Corpus) GetThread(ctx context.Context, repoID int64, kind string, numbe
 	t.Body = body.String
 	t.Author = author.String
 	t.Labels = splitLabels(labels.String)
+	t.SourceCreatedAt = scanTime(sourceCreated)
 	t.SourceUpdatedAt = scanTime(src)
 	t.CreatedAt = scanTime(created)
 	t.UpdatedAt = scanTime(updated)
@@ -376,9 +372,15 @@ func (c *Corpus) GetThread(ctx context.Context, repoID int64, kind string, numbe
 // ListThreads returns threads for a repository, optionally filtered by kind,
 // ordered by source update time descending and then number descending.
 func (c *Corpus) ListThreads(ctx context.Context, repoID int64, kind string, limit int) ([]Thread, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	if limit > 10_000 {
+		return nil, fmt.Errorf("thread list limit cannot exceed 10000")
+	}
 	sql := `
 		SELECT id, repository_id, kind, number, state, title, body, author, labels,
-		       source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged
+		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged
 		FROM threads
 		WHERE repository_id = ?`
 	args := []any{repoID}
@@ -387,10 +389,8 @@ func (c *Corpus) ListThreads(ctx context.Context, repoID int64, kind string, lim
 		args = append(args, kind)
 	}
 	sql += ` ORDER BY source_updated_at DESC, number DESC`
-	if limit > 0 {
-		sql += ` LIMIT ?`
-		args = append(args, limit)
-	}
+	sql += ` LIMIT ?`
+	args = append(args, limit)
 
 	rows, err := c.db.QueryContext(ctx, sql, args...)
 	if err != nil {
@@ -434,15 +434,16 @@ func scanThreads(rows *sql.Rows) ([]Thread, error) {
 	for rows.Next() {
 		var t Thread
 		var body, author, labels sql.NullString
-		var src, created, updated int64
+		var sourceCreated, src, created, updated int64
 		var closed, mergedAt sql.NullInt64
 		var merged int
-		if err := rows.Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &t.Title, &body, &author, &labels, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged); err != nil {
+		if err := rows.Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &t.Title, &body, &author, &labels, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged); err != nil {
 			return nil, err
 		}
 		t.Body = body.String
 		t.Author = author.String
 		t.Labels = splitLabels(labels.String)
+		t.SourceCreatedAt = scanTime(sourceCreated)
 		t.SourceUpdatedAt = scanTime(src)
 		t.CreatedAt = scanTime(created)
 		t.UpdatedAt = scanTime(updated)

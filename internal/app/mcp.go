@@ -32,6 +32,9 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 	}
 
 	repo := ""
+	if (in.Owner == "") != (in.Repo == "") {
+		return mcpserver.SearchOutput{}, errors.New("owner and repo must be provided together")
+	}
 	if in.Owner != "" && in.Repo != "" {
 		repo = in.Owner + "/" + in.Repo
 	}

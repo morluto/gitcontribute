@@ -166,6 +166,57 @@ func TestRepositoryObservationOrderingPreservesNanoseconds(t *testing.T) {
 	}
 }
 
+func TestSearchTreatsFTSOperatorsAndQuotesLiterally(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Now(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", `fix OR unmatched " quote`, "body", "author", time.Now(), `{}`); err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{"OR", `unmatched "`, "fix"} {
+		results, err := c.SearchThreads(ctx, query, 10)
+		if err != nil {
+			t.Fatalf("SearchThreads(%q): %v", query, err)
+		}
+		if len(results) != 1 {
+			t.Fatalf("SearchThreads(%q) returned %d results", query, len(results))
+		}
+	}
+}
+
+func TestSourceAndLocalProjectionTimesRemainDistinct(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	sourceCreated := time.Unix(100, 123).UTC()
+	sourceUpdated := time.Unix(200, 456).UTC()
+	before := time.Now().UTC()
+	repo, err := c.UpsertRepository(ctx, Repository{
+		Owner: "owner", Name: "repo", SourceCreatedAt: sourceCreated, SourceUpdatedAt: sourceUpdated,
+	}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !repo.SourceCreatedAt.Equal(sourceCreated) || !repo.SourceUpdatedAt.Equal(sourceUpdated) {
+		t.Fatalf("source times = (%v, %v)", repo.SourceCreatedAt, repo.SourceUpdatedAt)
+	}
+	if repo.CreatedAt.Before(before) || repo.UpdatedAt.Before(before) {
+		t.Fatalf("local projection times reused source clocks: %+v", repo)
+	}
+	thread, err := c.UpsertThread(ctx, Thread{
+		RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 1, State: "open", Title: "title",
+		SourceCreatedAt: sourceCreated, SourceUpdatedAt: sourceUpdated,
+	}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !thread.SourceCreatedAt.Equal(sourceCreated) || thread.CreatedAt.Before(before) {
+		t.Fatalf("thread times = %+v", thread)
+	}
+}
+
 func TestRepositoryEqualTimestampSequenceOrdering(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)

@@ -19,6 +19,7 @@ type Repository struct {
 	OpenIssues          int
 	Archived            bool
 	Fork                bool
+	SourceCreatedAt     time.Time
 	SourceUpdatedAt     time.Time
 	ObservationSequence int64
 	CreatedAt           time.Time
@@ -49,6 +50,7 @@ type Thread struct {
 	ClosedAt            time.Time
 	MergedAt            time.Time
 	Merged              bool
+	SourceCreatedAt     time.Time
 	SourceUpdatedAt     time.Time
 	ObservationSequence int64
 	CreatedAt           time.Time

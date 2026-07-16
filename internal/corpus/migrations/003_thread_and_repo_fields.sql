@@ -10,11 +10,13 @@ ALTER TABLE repositories ADD COLUMN forks INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE repositories ADD COLUMN open_issues INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE repositories ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE repositories ADD COLUMN fork INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE repositories ADD COLUMN source_created_at INTEGER NOT NULL DEFAULT 0;
 
 ALTER TABLE threads ADD COLUMN closed_at INTEGER;
 ALTER TABLE threads ADD COLUMN merged_at INTEGER;
 ALTER TABLE threads ADD COLUMN merged INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE threads ADD COLUMN labels TEXT;
+ALTER TABLE threads ADD COLUMN source_created_at INTEGER NOT NULL DEFAULT 0;
 
 -- +goose Down
 -- SQLite column removal is intentionally omitted for this additive migration.

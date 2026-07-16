@@ -155,14 +155,9 @@ func (r *corpusReader) ReadContributionGuidance(ctx context.Context, ref domain.
 	if repo == nil {
 		return "", nil, fmt.Errorf("repository not found: %s", ref)
 	}
-	// Contribution guidance files are not fetched in the first vertical slice.
-	sourceRef := domain.SourceRef{
-		Source:     "github:raw",
-		URL:        fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/CONTRIBUTING.md", ref, repo.DefaultBranch),
-		ObservedAt: repo.SourceUpdatedAt,
-		AsOf:       repo.SourceUpdatedAt,
-	}
-	return "", []domain.SourceRef{sourceRef}, nil
+	// Contribution guidance files are not fetched in the first vertical slice,
+	// so no source reference is claimed here.
+	return "", nil, nil
 }
 
 type threadCounts struct {
@@ -209,8 +204,8 @@ func corpusRepoToDomain(ref domain.RepoRef, repo *corpus.Repository) domain.Repo
 		Stars:         repo.Stars,
 		Watchers:      repo.Watchers,
 		Forks:         repo.Forks,
-		CreatedAt:     repo.CreatedAt,
-		UpdatedAt:     repo.UpdatedAt,
+		CreatedAt:     repo.SourceCreatedAt,
+		UpdatedAt:     repo.SourceUpdatedAt,
 	}
 	if repo.Language != "" {
 		dr.Languages = []string{repo.Language}
@@ -229,8 +224,8 @@ func corpusThreadToDomain(ref domain.RepoRef, t corpus.Thread) domain.Thread {
 		Author:    t.Author,
 		State:     domain.ThreadState(t.State),
 		Labels:    t.Labels,
-		CreatedAt: t.CreatedAt,
-		UpdatedAt: t.UpdatedAt,
+		CreatedAt: t.SourceCreatedAt,
+		UpdatedAt: t.SourceUpdatedAt,
 		ClosedAt:  t.ClosedAt,
 	}
 	if t.Kind == corpus.ThreadKindPullRequest {

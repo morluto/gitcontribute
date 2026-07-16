@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -35,6 +36,9 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts cli.Searc
 	if opts.Limit <= 0 {
 		opts.Limit = 20
 	}
+	if opts.Limit > 1000 {
+		return searchResult{}, errors.New("search limit cannot exceed 1000")
+	}
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return searchResult{}, err
@@ -48,6 +52,9 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts cli.Searc
 			return searchResult{}, fmt.Errorf("invalid repository filter %q", opts.Repo)
 		}
 		ref.Owner, ref.Repo = parts[0], parts[1]
+		if err := ref.Validate(); err != nil {
+			return searchResult{}, fmt.Errorf("invalid repository filter %q: %w", opts.Repo, err)
+		}
 		repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
 		if err != nil {
 			return searchResult{}, err
