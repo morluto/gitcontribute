@@ -78,6 +78,9 @@ func (p *SearchPartitioner) limit() int {
 // the configured limit or the window cannot be split further. Unsplittable
 // windows with more than the limit are returned with Unsplittable set.
 func (p *SearchPartitioner) Partition(ctx context.Context, baseQuery string, start, end time.Time, qual Qualifier) ([]Window, error) {
+	if p == nil || p.Searcher == nil {
+		return nil, fmt.Errorf("searcher is required")
+	}
 	if start.IsZero() || end.IsZero() {
 		return nil, fmt.Errorf("start and end must be set")
 	}
@@ -90,6 +93,8 @@ func (p *SearchPartitioner) Partition(ctx context.Context, baseQuery string, sta
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	start = start.UTC().Truncate(time.Second)
+	end = end.UTC().Truncate(time.Second)
 
 	var windows []Window
 	if err := p.partition(ctx, baseQuery, start, end, qual, &windows); err != nil {
@@ -107,6 +112,9 @@ func (p *SearchPartitioner) partition(ctx context.Context, baseQuery string, sta
 	resp, err := p.Searcher.Search(ctx, query)
 	if err != nil {
 		return err
+	}
+	if resp.Total < 0 {
+		return fmt.Errorf("search returned negative total %d", resp.Total)
 	}
 
 	if resp.Total <= p.limit() || !canSplit(start, end) {
@@ -161,6 +169,9 @@ func (p *SearchPartitioner) Refresh(ctx context.Context, key, baseQuery string, 
 	}
 	if store == nil {
 		return nil, fmt.Errorf("checkpoint store is required")
+	}
+	if overlap < 0 {
+		return nil, fmt.Errorf("overlap cannot be negative")
 	}
 
 	refreshStart := start

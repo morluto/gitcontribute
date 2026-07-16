@@ -74,6 +74,16 @@ func TestParseRepoRef(t *testing.T) {
 			input:   "https://gitlab.com/golang/go",
 			wantErr: "unsupported host",
 		},
+		{
+			name:    "github subdomain is not a repository host",
+			input:   "https://gist.github.com/golang/go",
+			wantErr: "unsupported host",
+		},
+		{
+			name:  "uppercase git suffix",
+			input: "https://github.com/golang/go.GIT",
+			want:  domain.RepoRef{Owner: "golang", Repo: "go"},
+		},
 	}
 
 	for _, tc := range cases {

@@ -2,7 +2,6 @@ package discovery
 
 import (
 	"bufio"
-	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -18,6 +17,8 @@ import (
 // ErrAlreadyImported is returned by ArchiveReader when a GH Archive hour has
 // already been recorded as imported.
 var ErrAlreadyImported = errors.New("hour already imported")
+
+const defaultMaxEventBytes = 4 << 20
 
 // EventType identifies a GH Archive event type.
 type EventType string
@@ -63,8 +64,9 @@ type Signal struct {
 // ArchiveReader streams an hourly GH Archive gzip file line by line, retains
 // only configured event types, and emits normalized repository/thread signals.
 type ArchiveReader struct {
-	Include map[string]bool
-	Store   CheckpointStore
+	Include       map[string]bool
+	Store         CheckpointStore
+	MaxEventBytes int
 }
 
 // NewArchiveReader creates a reader that retains the given event types. An
@@ -74,7 +76,7 @@ func NewArchiveReader(include []string, store CheckpointStore) *ArchiveReader {
 	for _, t := range include {
 		m[t] = true
 	}
-	return &ArchiveReader{Include: m, Store: store}
+	return &ArchiveReader{Include: m, Store: store, MaxEventBytes: defaultMaxEventBytes}
 }
 
 // Read decompresses the hourly gzip stream, parses JSON lines, and emits a
@@ -82,6 +84,12 @@ func NewArchiveReader(include []string, store CheckpointStore) *ArchiveReader {
 // idempotency and marks the hour imported on successful completion. Malformed
 // lines are skipped. If ctx is cancelled, Read returns the cancellation error.
 func (r *ArchiveReader) Read(ctx context.Context, hour time.Time, in io.Reader, emit func(Signal) error) error {
+	if in == nil {
+		return errors.New("archive input is required")
+	}
+	if emit == nil {
+		return errors.New("archive emitter is required")
+	}
 	key := HourKey(hour)
 	if r.Store != nil {
 		imported, err := r.Store.IsImported(ctx, key)
@@ -99,23 +107,17 @@ func (r *ArchiveReader) Read(ctx context.Context, hour time.Time, in io.Reader, 
 	}
 	defer gzr.Close()
 
-	br := bufio.NewReader(gzr)
-	for {
+	maxEventBytes := r.MaxEventBytes
+	if maxEventBytes <= 0 {
+		maxEventBytes = defaultMaxEventBytes
+	}
+	scanner := bufio.NewScanner(gzr)
+	scanner.Buffer(make([]byte, min(64<<10, maxEventBytes)), maxEventBytes)
+	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-
-		line, err := br.ReadBytes('\n')
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				if len(line) == 0 {
-					break
-				}
-			} else {
-				return err
-			}
-		}
-		line = bytes.TrimSpace(line)
+		line := scanner.Bytes()
 		if len(line) == 0 {
 			continue
 		}
@@ -136,6 +138,9 @@ func (r *ArchiveReader) Read(ctx context.Context, hour time.Time, in io.Reader, 
 		if err := emit(sig); err != nil {
 			return err
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("read archive event: %w", err)
 	}
 
 	if r.Store != nil {
@@ -400,10 +405,14 @@ func fillIssueSignal(sig *Signal, issue issueObj, kind domain.ThreadKind) {
 }
 
 func mapState(state string) domain.ThreadState {
-	if state == "open" {
+	switch state {
+	case "open":
 		return domain.OpenState
+	case "closed":
+		return domain.ClosedState
+	default:
+		return ""
 	}
-	return domain.ClosedState
 }
 
 func parseRepoRef(name string) (domain.RepoRef, bool) {

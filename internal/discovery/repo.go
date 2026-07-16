@@ -45,7 +45,9 @@ func ParseRepoRef(s string) (domain.RepoRef, error) {
 	}
 
 	s = strings.Trim(s, "/")
-	s = strings.TrimSuffix(s, ".git")
+	if strings.HasSuffix(strings.ToLower(s), ".git") {
+		s = s[:len(s)-len(".git")]
+	}
 
 	parts := strings.Split(s, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
@@ -92,5 +94,5 @@ func stripURLScheme(s string) string {
 
 func isGitHubHost(host string) bool {
 	h := strings.ToLower(strings.TrimSpace(host))
-	return h == "github.com" || strings.HasSuffix(h, ".github.com")
+	return h == "github.com"
 }

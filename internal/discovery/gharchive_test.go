@@ -197,3 +197,22 @@ func TestHourKey(t *testing.T) {
 		t.Fatalf("expected UTC hour key 2023010107*, got %q", got)
 	}
 }
+
+func TestArchiveReaderBoundsEventLines(t *testing.T) {
+	reader := NewArchiveReader(nil, nil)
+	reader.MaxEventBytes = 128
+	line := eventLine("PushEvent", map[string]any{"head": strings.Repeat("a", 256)})
+	err := reader.Read(context.Background(), time.Now(), bytes.NewReader(gzipLines(line)), func(Signal) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "token too long") {
+		t.Fatalf("expected bounded-line error, got %v", err)
+	}
+}
+
+func TestMemoryCheckpointStoreRespectsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	store := NewMemoryCheckpointStore()
+	if err := store.MarkImported(ctx, "hour"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("MarkImported error = %v, want context.Canceled", err)
+	}
+}

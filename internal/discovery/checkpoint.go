@@ -43,6 +43,9 @@ func NewMemoryCheckpointStore() *MemoryCheckpointStore {
 
 // GetTime returns the timestamp checkpoint for key.
 func (m *MemoryCheckpointStore) GetTime(ctx context.Context, key string) (time.Time, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return time.Time{}, false, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	t, ok := m.times[key]
@@ -51,6 +54,9 @@ func (m *MemoryCheckpointStore) GetTime(ctx context.Context, key string) (time.T
 
 // SetTime stores a timestamp checkpoint for key.
 func (m *MemoryCheckpointStore) SetTime(ctx context.Context, key string, t time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.times[key] = t
@@ -59,6 +65,9 @@ func (m *MemoryCheckpointStore) SetTime(ctx context.Context, key string, t time.
 
 // IsImported reports whether the given hour has already been imported.
 func (m *MemoryCheckpointStore) IsImported(ctx context.Context, hour string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	_, ok := m.hours[hour]
@@ -67,6 +76,9 @@ func (m *MemoryCheckpointStore) IsImported(ctx context.Context, hour string) (bo
 
 // MarkImported records the given hour as imported.
 func (m *MemoryCheckpointStore) MarkImported(ctx context.Context, hour string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.hours[hour] = struct{}{}

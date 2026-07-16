@@ -90,14 +90,30 @@ func TestPartitionSplitsOverLimit(t *testing.T) {
 			t.Fatalf("window %d total %d over limit but not unsplittable", i, w.Total)
 		}
 	}
-	allGood := true
-	for _, w := range windows {
-		if !w.Unsplittable && w.Total <= p.limit() {
-			continue
+	for i := 1; i < len(windows); i++ {
+		want := windows[i-1].End.Add(time.Second)
+		if !windows[i].Start.Equal(want) {
+			t.Fatalf("window %d starts at %v, want contiguous %v", i, windows[i].Start, want)
 		}
-		allGood = false
 	}
-	_ = allGood
+}
+
+func TestPartitionRequiresSearcher(t *testing.T) {
+	start := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := (&SearchPartitioner{}).Partition(context.Background(), "", start, start, Created); err == nil {
+		t.Fatal("expected missing searcher error")
+	}
+}
+
+func TestRefreshRejectsNegativeOverlap(t *testing.T) {
+	start := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+	p := &SearchPartitioner{Searcher: &fakeSearcher{fn: func(context.Context, string) (SearchResponse, error) {
+		return SearchResponse{}, nil
+	}}}
+	_, err := p.Refresh(context.Background(), "key", "", start, start, -time.Second, NewMemoryCheckpointStore())
+	if err == nil {
+		t.Fatal("expected negative overlap error")
+	}
 }
 
 func TestPartitionDetectsUnsplittable(t *testing.T) {
