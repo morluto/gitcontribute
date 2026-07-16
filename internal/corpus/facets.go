@@ -19,7 +19,7 @@ func (c *Corpus) AdvanceFacet(ctx context.Context, repoID int64, threadID *int64
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	now := time.Now().UTC().Unix()
+	now := encodeTime(time.Now())
 	seq, err := c.nextSequence(ctx, tx)
 	if err != nil {
 		return err
@@ -47,7 +47,7 @@ func (c *Corpus) AdvanceFacet(ctx context.Context, repoID int64, threadID *int64
 		WHERE repository_id = ? AND COALESCE(thread_id, -1) = COALESCE(?, -1) AND facet = ?
 	`, repoID, tid, facet).Scan(&existing.id, &existing.src, &existing.seq)
 
-	srcSec := sourceUpdatedAt.Unix()
+	srcSec := encodeTime(sourceUpdatedAt)
 	completeInt := 0
 	if complete {
 		completeInt = 1

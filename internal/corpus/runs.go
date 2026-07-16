@@ -10,7 +10,7 @@ import (
 
 // StartRun creates and returns a new run record in the running state.
 func (c *Corpus) StartRun(ctx context.Context, kind string) (*Run, error) {
-	now := time.Now().UTC().Unix()
+	now := encodeTime(time.Now())
 	res, err := c.db.ExecContext(ctx, `
 		INSERT INTO runs (kind, status, started_at)
 		VALUES (?, ?, ?)
@@ -54,7 +54,7 @@ func (c *Corpus) GetRun(ctx context.Context, id int64) (*Run, error) {
 
 // FinishRun marks a run as completed with optional statistics.
 func (c *Corpus) FinishRun(ctx context.Context, id int64, stats string) error {
-	now := time.Now().UTC().Unix()
+	now := encodeTime(time.Now())
 	res, err := c.db.ExecContext(ctx, `
 		UPDATE runs
 		SET status = ?, completed_at = ?, stats = ?
@@ -71,7 +71,7 @@ func (c *Corpus) FinishRun(ctx context.Context, id int64, stats string) error {
 
 // FailRun marks a run as failed and stores an error message.
 func (c *Corpus) FailRun(ctx context.Context, id int64, message string) error {
-	now := time.Now().UTC().Unix()
+	now := encodeTime(time.Now())
 	res, err := c.db.ExecContext(ctx, `
 		UPDATE runs
 		SET status = ?, completed_at = ?, error = ?
@@ -88,7 +88,7 @@ func (c *Corpus) FailRun(ctx context.Context, id int64, message string) error {
 
 // RecordRunEvent appends a durable event to a run.
 func (c *Corpus) RecordRunEvent(ctx context.Context, runID int64, level, message string) error {
-	now := time.Now().UTC().Unix()
+	now := encodeTime(time.Now())
 	if _, err := c.db.ExecContext(ctx, `
 		INSERT INTO run_events (run_id, level, message, recorded_at)
 		VALUES (?, ?, ?, ?)

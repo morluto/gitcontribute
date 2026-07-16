@@ -128,9 +128,16 @@ func (c *Corpus) nextSequence(ctx context.Context, tx *sql.Tx) (int64, error) {
 	return seq, nil
 }
 
-func scanTime(sec int64) time.Time {
-	if sec == 0 {
+func encodeTime(t time.Time) int64 {
+	if t.IsZero() {
+		return 0
+	}
+	return t.UTC().UnixNano()
+}
+
+func scanTime(nsec int64) time.Time {
+	if nsec == 0 {
 		return time.Time{}
 	}
-	return time.Unix(sec, 0).UTC()
+	return time.Unix(0, nsec).UTC()
 }

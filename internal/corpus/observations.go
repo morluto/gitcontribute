@@ -18,7 +18,7 @@ func (c *Corpus) ApplyRepositoryObservation(ctx context.Context, owner, name, ex
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	now := time.Now().UTC().Unix()
+	now := encodeTime(time.Now())
 	seq, err := c.nextSequence(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -44,7 +44,7 @@ func (c *Corpus) ApplyRepositoryObservation(ctx context.Context, owner, name, ex
 		return nil, fmt.Errorf("select repository: %w", err)
 	}
 
-	srcSec := sourceUpdatedAt.Unix()
+	srcSec := encodeTime(sourceUpdatedAt)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO repository_observations (repository_id, source_updated_at, observation_sequence, payload, observed_at)
 		VALUES (?, ?, ?, ?, ?)
@@ -129,7 +129,7 @@ func (c *Corpus) ApplyThreadObservation(ctx context.Context, repoID int64, kind 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	now := time.Now().UTC().Unix()
+	now := encodeTime(time.Now())
 	seq, err := c.nextSequence(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -155,7 +155,7 @@ func (c *Corpus) ApplyThreadObservation(ctx context.Context, repoID int64, kind 
 		return nil, fmt.Errorf("select thread: %w", err)
 	}
 
-	srcSec := sourceUpdatedAt.Unix()
+	srcSec := encodeTime(sourceUpdatedAt)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO thread_observations (thread_id, source_updated_at, observation_sequence, payload, observed_at)
 		VALUES (?, ?, ?, ?, ?)

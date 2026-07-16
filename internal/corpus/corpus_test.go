@@ -116,6 +116,28 @@ func TestRepositoryDelayedObservations(t *testing.T) {
 	}
 }
 
+func TestRepositoryObservationOrderingPreservesNanoseconds(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+
+	base := time.Unix(2000, 100).UTC()
+	newer := time.Unix(2000, 200).UTC()
+	if _, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "old", base, `{}`); err != nil {
+		t.Fatalf("apply base observation: %v", err)
+	}
+	if _, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "new", newer, `{}`); err != nil {
+		t.Fatalf("apply newer observation: %v", err)
+	}
+
+	repo, err := c.GetRepository(ctx, "owner", "repo")
+	if err != nil {
+		t.Fatalf("get repository: %v", err)
+	}
+	if !repo.SourceUpdatedAt.Equal(newer) || repo.ExternalID != "new" {
+		t.Fatalf("repository = %+v, want nanosecond-newer observation", repo)
+	}
+}
+
 func TestRepositoryEqualTimestampSequenceOrdering(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
