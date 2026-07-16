@@ -315,3 +315,58 @@ func TestManager_InvalidName(t *testing.T) {
 		t.Fatal("expected error for invalid workspace name")
 	}
 }
+
+func TestManager_RejectsExecutableRemoteTransport(t *testing.T) {
+	mgr := newManager(t)
+	err := mgr.Clone(context.Background(), "ext::sh -c touch /tmp/pwned", "origin")
+	if !errors.Is(err, ErrInvalidRemote) {
+		t.Fatalf("Clone executable transport error = %v, want ErrInvalidRemote", err)
+	}
+}
+
+func TestManager_StatusDisablesRepositoryFSMonitor(t *testing.T) {
+	ctx := context.Background()
+	remote, _, _ := setupRemote(t)
+	mgr := newManager(t)
+	if err := mgr.Clone(ctx, remote, "origin"); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := mgr.Create(ctx, "origin", "master", "feature", "ws1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "executed")
+	hook := filepath.Join(t.TempDir(), "fsmonitor.sh")
+	writeFile(t, hook, "#!/bin/sh\ntouch \""+marker+"\"\n")
+	if err := os.Chmod(hook, 0755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, ws.Path, "config", "core.fsmonitor", hook)
+	if _, err := mgr.Status(ctx, "ws1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("repository-controlled fsmonitor executed; stat error = %v", err)
+	}
+}
+
+func TestManager_DiffIncludesWorkingChanges(t *testing.T) {
+	ctx := context.Background()
+	remote, _, _ := setupRemote(t)
+	mgr := newManager(t)
+	if err := mgr.Clone(ctx, remote, "origin"); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := mgr.Create(ctx, "origin", "master", "feature", "ws1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(ws.Path, "feature.txt"), "working")
+	diff, err := mgr.Diff(ctx, "ws1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diff, "+working") {
+		t.Fatalf("working-tree diff missing untracked file:\n%s", diff)
+	}
+}

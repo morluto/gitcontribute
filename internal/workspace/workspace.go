@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -22,7 +23,11 @@ var (
 	ErrMirrorExists   = errors.New("mirror already exists")
 	ErrMirrorNotFound = errors.New("mirror not found")
 	ErrInvalidName    = errors.New("invalid name")
+	ErrInvalidRemote  = errors.New("invalid remote")
+	ErrOutputLimit    = errors.New("git output exceeds limit")
 )
+
+const maxGitOutputBytes = 64 << 20
 
 // Runner executes an external command.
 type Runner interface {
@@ -40,21 +45,45 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) (string,
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_NO_PAGER=1",
 		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_SSH_COMMAND=/bin/false",
+		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_OPTIONAL_LOCKS=0",
 	)
-	out, err := cmd.Output()
+	stdout := &cappedBuffer{remaining: maxGitOutputBytes}
+	stderr := &cappedBuffer{remaining: 64 << 10}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	err := cmd.Run()
 	if ctx.Err() != nil {
 		return "", ctx.Err()
 	}
-	if err != nil {
-		var exitErr *exec.ExitError
-		stderr := ""
-		if errors.As(err, &exitErr) {
-			stderr = string(exitErr.Stderr)
-		}
-		return "", fmt.Errorf("exec %s: %w (stderr: %s)", name, err, stderr)
+	if stdout.exceeded || stderr.exceeded {
+		return stdout.buf.String(), ErrOutputLimit
 	}
-	return string(out), nil
+	if err != nil {
+		return "", fmt.Errorf("exec %s: %w (stderr: %s)", name, err, strings.TrimSpace(stderr.buf.String()))
+	}
+	return stdout.buf.String(), nil
+}
+
+type cappedBuffer struct {
+	buf       bytes.Buffer
+	remaining int
+	exceeded  bool
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	if len(p) <= b.remaining {
+		n, err := b.buf.Write(p)
+		b.remaining -= n
+		return n, err
+	}
+	written := b.remaining
+	if written > 0 {
+		_, _ = b.buf.Write(p[:written])
+		b.remaining = 0
+	}
+	b.exceeded = true
+	return written, ErrOutputLimit
 }
 
 // DefaultRunner returns a Runner backed by the local git executable.
@@ -106,6 +135,10 @@ func NewManager(root string, runner Runner) (*Manager, error) {
 	if err := os.MkdirAll(root, 0755); err != nil {
 		return nil, fmt.Errorf("create root: %w", err)
 	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, fmt.Errorf("resolve managed root: %w", err)
+	}
 	return &Manager{
 		root:       root,
 		runner:     runner,
@@ -115,13 +148,39 @@ func NewManager(root string, runner Runner) (*Manager, error) {
 }
 
 func validateName(name string) error {
-	if name == "" || name == "." || name == ".." {
+	if name == "" || name == "." || name == ".." || len(name) > 128 {
 		return ErrInvalidName
 	}
 	if strings.ContainsAny(name, `/\`) {
 		return ErrInvalidName
 	}
+	for _, char := range name {
+		if char < 0x20 || char == 0x7f {
+			return ErrInvalidName
+		}
+	}
 	return nil
+}
+
+func validateRemote(remote string) error {
+	remote = strings.TrimSpace(remote)
+	if remote == "" || strings.HasPrefix(remote, "-") || strings.ContainsAny(remote, "\x00\r\n") {
+		return ErrInvalidRemote
+	}
+	if strings.Contains(remote, "::") {
+		return ErrInvalidRemote
+	}
+	if filepath.IsAbs(remote) || strings.HasPrefix(remote, "file://") ||
+		strings.HasPrefix(remote, "https://") || strings.HasPrefix(remote, "ssh://") {
+		return nil
+	}
+	if at := strings.IndexByte(remote, '@'); at > 0 {
+		hostPath := remote[at+1:]
+		if colon := strings.IndexByte(hostPath, ':'); colon > 0 && colon < len(hostPath)-1 {
+			return nil
+		}
+	}
+	return ErrInvalidRemote
 }
 
 func (m *Manager) git(ctx context.Context, dir string, args ...string) (string, error) {
@@ -130,9 +189,15 @@ func (m *Manager) git(ctx context.Context, dir string, args ...string) (string, 
 	}
 	all := []string{
 		"--no-pager",
+		"--no-optional-locks",
 		"-c", "core.hooksPath=/dev/null",
-		"-c", "core.sshCommand=/bin/false",
+		"-c", "core.fsmonitor=false",
+		"-c", "core.untrackedCache=false",
 		"-c", "init.templateDir=",
+		"-c", "protocol.allow=never",
+		"-c", "protocol.file.allow=always",
+		"-c", "protocol.https.allow=always",
+		"-c", "protocol.ssh.allow=always",
 		"-C", dir,
 	}
 	all = append(all, args...)
@@ -142,6 +207,9 @@ func (m *Manager) git(ctx context.Context, dir string, args ...string) (string, 
 // Clone clones remote into a bare mirror under the managed root.
 func (m *Manager) Clone(ctx context.Context, remote, name string) error {
 	if err := validateName(name); err != nil {
+		return err
+	}
+	if err := validateRemote(remote); err != nil {
 		return err
 	}
 	m.mu.Lock()
@@ -157,7 +225,7 @@ func (m *Manager) Clone(ctx context.Context, remote, name string) error {
 	if _, err := os.Stat(path); err == nil {
 		return ErrMirrorExists
 	}
-	if _, err := m.git(ctx, mirrorsDir, "clone", "--mirror", "--no-hardlinks", "--template=", remote, name); err != nil {
+	if _, err := m.git(ctx, mirrorsDir, "clone", "--mirror", "--no-hardlinks", "--template=", "--", remote, name); err != nil {
 		return fmt.Errorf("clone mirror: %w", err)
 	}
 	m.mirrors[name] = &mirror{name: name, remote: remote, path: path}
@@ -197,7 +265,7 @@ func (m *Manager) resolveRef(ctx context.Context, mi *mirror, ref string) (strin
 		candidates = append(candidates, "origin/"+ref, "refs/remotes/origin/"+ref, "refs/tags/"+ref)
 	}
 	for _, c := range candidates {
-		out, err := m.git(ctx, mi.path, "rev-parse", "--verify", c)
+		out, err := m.git(ctx, mi.path, "rev-parse", "--verify", "--end-of-options", c+"^{commit}")
 		if err == nil {
 			return strings.TrimSpace(out), nil
 		}
@@ -253,7 +321,11 @@ func (m *Manager) Create(ctx context.Context, mirrorName, baseRef, candidateRef,
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 
-	st, _ := m.status(ctx, path)
+	st, err := m.status(ctx, path)
+	if err != nil {
+		_, _ = m.git(context.Background(), mi.path, "worktree", "remove", "--force", path)
+		return nil, fmt.Errorf("inspect new worktree: %w", err)
+	}
 
 	ws := &Workspace{
 		Name:         name,
@@ -268,11 +340,8 @@ func (m *Manager) Create(ctx context.Context, mirrorName, baseRef, candidateRef,
 	}
 
 	m.mu.Lock()
-	if existing, ok := m.workspaces[name]; ok {
+	if _, ok := m.workspaces[name]; ok {
 		m.mu.Unlock()
-		// Race: another goroutine created the workspace. Clean up ours.
-		_ = existing
-		_, _ = m.git(context.Background(), mi.path, "worktree", "remove", "--force", path)
 		return nil, ErrExists
 	}
 	m.workspaces[name] = ws
@@ -329,6 +398,9 @@ func (m *Manager) Status(ctx context.Context, name string) (Status, error) {
 
 func (m *Manager) status(ctx context.Context, path string) (Status, error) {
 	out, err := m.git(ctx, path, "status", "--porcelain")
+	if errors.Is(err, ErrOutputLimit) {
+		return Status{Dirty: true}, nil
+	}
 	if err != nil {
 		return Status{}, err
 	}
@@ -340,7 +412,8 @@ func (m *Manager) status(ctx context.Context, path string) (Status, error) {
 	return Status{}, nil
 }
 
-// Diff returns the diff between the workspace base and candidate SHAs.
+// Diff returns the current worktree diff against its recorded base SHA,
+// including staged and unstaged changes without invoking external diff tools.
 func (m *Manager) Diff(ctx context.Context, name string) (string, error) {
 	m.mu.Lock()
 	ws, ok := m.workspaces[name]
@@ -348,7 +421,7 @@ func (m *Manager) Diff(ctx context.Context, name string) (string, error) {
 	if !ok {
 		return "", ErrNotFound
 	}
-	out, err := m.git(ctx, ws.Path, "diff", ws.BaseSHA+".."+ws.CandidateSHA)
+	out, err := m.git(ctx, ws.Path, "diff", "--no-ext-diff", "--no-textconv", ws.BaseSHA, "--")
 	if err != nil {
 		return "", fmt.Errorf("diff: %w", err)
 	}
