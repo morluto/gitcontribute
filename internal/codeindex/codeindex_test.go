@@ -393,3 +393,23 @@ func TestRunGitOutputIsBounded(t *testing.T) {
 		t.Fatalf("runGitLimited error = %v, want ErrOutputLimit", err)
 	}
 }
+
+func TestGitBlobReadsCapturedCommitNotWorktree(t *testing.T) {
+	repo := newRepo(t)
+	writeFile(t, repo, "a.txt", "committed\n")
+	commitAll(t, repo, "initial")
+	commit := strings.TrimSpace(testGit(t, repo, "rev-parse", "HEAD"))
+	entries, err := gitTree(context.Background(), repo, commit, 10)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("gitTree = (%+v, %v)", entries, err)
+	}
+
+	writeFile(t, repo, "a.txt", "worktree replacement\n")
+	content, err := gitBlob(context.Background(), repo, entries[0].object, entries[0].size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "committed\n" {
+		t.Fatalf("blob content = %q, want captured commit bytes", content)
+	}
+}

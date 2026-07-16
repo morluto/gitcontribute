@@ -1,7 +1,7 @@
 // Package codeindex indexes a bounded snapshot of tracked UTF-8 text files
 // from a clean Git checkout using the native git executable and the standard
-// library. It reads files through os.OpenRoot so paths cannot escape the
-// repository root.
+// library. File bytes come from immutable Git blobs at the captured commit,
+// not from mutable worktree paths.
 package codeindex
 
 import (
@@ -9,12 +9,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -115,18 +115,12 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 		return Snapshot{}, err
 	}
 
-	root, err := os.OpenRoot(absPath)
-	if err != nil {
-		return Snapshot{}, fmt.Errorf("open repo root: %w", err)
-	}
-	defer root.Close()
-
 	createdAt := time.Now().UTC()
-	paths, err := gitLsFiles(ctx, absPath, opts.MaxFiles)
+	entries, err := gitTree(ctx, absPath, commit, opts.MaxFiles)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	sort.Strings(paths)
+	sort.Slice(entries, func(i, j int) bool { return entries[i].path < entries[j].path })
 
 	snap := Snapshot{
 		RepoPath:  absPath,
@@ -136,7 +130,7 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 
 	total := 0
 	files := 0
-	for _, p := range paths {
+	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return snap, err
 		}
@@ -144,7 +138,7 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 			break
 		}
 
-		clean, ok := safeGitPath(p)
+		clean, ok := safeGitPath(entry.path)
 		if !ok {
 			continue
 		}
@@ -152,16 +146,10 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 			continue
 		}
 
-		localName := filepath.FromSlash(clean)
-		info, err := root.Lstat(localName)
-		if err != nil {
-			return snap, fmt.Errorf("stat %q: %w", clean, err)
-		}
-		if !info.Mode().IsRegular() {
+		if entry.kind != "blob" || !strings.HasPrefix(entry.mode, "100") {
 			continue
 		}
-
-		size := int(info.Size())
+		size := entry.size
 		if size > opts.MaxBytesPerFile {
 			continue
 		}
@@ -169,17 +157,13 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 			continue
 		}
 
-		content, err := readFileContext(ctx, root, localName, opts.MaxBytesPerFile)
+		content, err := gitBlob(ctx, absPath, entry.object, size)
 		if err != nil {
 			return snap, fmt.Errorf("read %q: %w", clean, err)
 		}
 		if !isText(content) {
 			continue
 		}
-		if total+len(content) > opts.MaxTotalBytes {
-			continue
-		}
-
 		snap.Documents = append(snap.Documents, Document{
 			Path:         clean,
 			Content:      string(content),
@@ -269,7 +253,15 @@ func gitStatus(ctx context.Context, repoPath string) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
-func gitLsFiles(ctx context.Context, repoPath string, maxFiles int) ([]string, error) {
+type treeEntry struct {
+	mode   string
+	kind   string
+	object string
+	size   int
+	path   string
+}
+
+func gitTree(ctx context.Context, repoPath, commit string, maxFiles int) ([]treeEntry, error) {
 	limit := maxPathListBytes
 	if maxFiles <= maxPathListBytes/4096 {
 		limit = maxFiles * 4096
@@ -277,23 +269,61 @@ func gitLsFiles(ctx context.Context, repoPath string, maxFiles int) ([]string, e
 	if limit < 1<<20 {
 		limit = 1 << 20
 	}
-	out, err := runGitLimited(ctx, repoPath, limit, "ls-files", "-z")
+	out, err := runGitLimited(ctx, repoPath, limit, "ls-tree", "-r", "-z", "--long", "--full-tree", commit)
 	if err != nil {
-		return nil, fmt.Errorf("list tracked files: %w", err)
+		return nil, fmt.Errorf("list commit tree: %w", err)
 	}
 	if out == "" {
 		return nil, nil
 	}
-	// git ls-files -z terminates the list with a NUL.
 	out = strings.TrimSuffix(out, "\x00")
-	parts := strings.Split(out, "\x00")
-	paths := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p != "" {
-			paths = append(paths, p)
+	records := strings.Split(out, "\x00")
+	entries := make([]treeEntry, 0, len(records))
+	for _, record := range records {
+		header, entryPath, ok := strings.Cut(record, "\t")
+		fields := strings.Fields(header)
+		if !ok || len(fields) != 4 || entryPath == "" {
+			return nil, fmt.Errorf("parse commit tree record %q", record)
+		}
+		size, err := strconv.Atoi(fields[3])
+		if err != nil {
+			// Git reports '-' for non-blob entries such as submodules.
+			size = -1
+		}
+		entries = append(entries, treeEntry{
+			mode: fields[0], kind: fields[1], object: fields[2], size: size, path: entryPath,
+		})
+	}
+	return entries, nil
+}
+
+func gitBlob(ctx context.Context, repoPath, object string, size int) ([]byte, error) {
+	if size < 0 {
+		return nil, errors.New("git blob size is unavailable")
+	}
+	if !isHexObjectID(object) {
+		return nil, fmt.Errorf("invalid Git object ID %q", object)
+	}
+	out, err := runGitLimited(ctx, repoPath, size, "cat-file", "blob", object)
+	if err != nil {
+		return nil, fmt.Errorf("read Git blob %s: %w", object, err)
+	}
+	if len(out) != size {
+		return nil, fmt.Errorf("Git blob %s size changed: got %d, want %d", object, len(out), size)
+	}
+	return []byte(out), nil
+}
+
+func isHexObjectID(value string) bool {
+	if len(value) != 40 && len(value) != 64 {
+		return false
+	}
+	for _, char := range value {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+			return false
 		}
 	}
-	return paths, nil
+	return true
 }
 
 func runGit(ctx context.Context, repoPath string, args ...string) (string, error) {
@@ -396,46 +426,6 @@ func isExcluded(p string, patterns []string) bool {
 		}
 	}
 	return false
-}
-
-func readFileContext(ctx context.Context, root *os.Root, name string, limit int) ([]byte, error) {
-	f, err := root.Open(name)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	chunk := 8192
-	if limit > 0 && limit < chunk {
-		chunk = limit
-	}
-	buf := make([]byte, chunk)
-	var out []byte
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
-		toRead := chunk
-		if limit > 0 && limit-len(out) < toRead {
-			toRead = limit - len(out)
-		}
-		if toRead <= 0 {
-			break
-		}
-
-		n, err := f.Read(buf[:toRead])
-		if n > 0 {
-			out = append(out, buf[:n]...)
-		}
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
 }
 
 func isText(b []byte) bool {
