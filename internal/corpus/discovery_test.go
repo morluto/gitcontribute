@@ -43,3 +43,29 @@ func TestArchiveImportIsIdempotent(t *testing.T) {
 		t.Fatalf("archive import rows = %d, want 1", count)
 	}
 }
+
+func TestDiscoverySourcesAndPartitionsPersist(t *testing.T) {
+	c, _ := openTestCorpus(t)
+	ctx := context.Background()
+	source, err := c.SaveDiscoverySource(ctx, DiscoverySource{Name: "go", Kind: "search", Definition: `{"query":"language:go"}`, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RecordSourcePartition(ctx, SourcePartition{
+		SourceID: source.ID, Key: "created:1:2", Query: "language:go created:1..2",
+		Qualifier: "created", Start: time.Unix(1, 0), End: time.Unix(2, 0), Total: 10, ObservedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sources, err := c.ListDiscoverySources(ctx)
+	if err != nil || len(sources) != 1 || sources[0].Name != "go" {
+		t.Fatalf("ListDiscoverySources = (%+v, %v)", sources, err)
+	}
+	var count int
+	if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM source_partitions WHERE source_id=?`, source.ID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("source partitions = %d", count)
+	}
+}
