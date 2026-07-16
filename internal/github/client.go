@@ -1,0 +1,537 @@
+package github
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+	"time"
+
+	gh "github.com/google/go-github/v89/github"
+)
+
+const (
+	DefaultBaseURL           = "https://api.github.com/"
+	DefaultUploadURL         = "https://uploads.github.com/"
+	DefaultRequestsPerSecond = 10.0
+	DefaultBurst             = 20
+)
+
+// Reader is the product-owned read contract for GitHub.
+type Reader interface {
+	GetRepository(ctx context.Context, owner, name string) (Repository, RateInfo, error)
+	ListIssues(ctx context.Context, owner, name string, opts ListIssueOptions) (ListResult[Issue], error)
+	ListIssueComments(ctx context.Context, owner, name string, issueNumber int, opts PageOptions) (ListResult[IssueComment], error)
+	GetPullRequestDetails(ctx context.Context, owner, name string, number int) (PullRequestDetails, RateInfo, error)
+	ListPullRequestReviews(ctx context.Context, owner, name string, number int, opts PageOptions) (ListResult[Review], error)
+	ListPullRequestComments(ctx context.Context, owner, name string, number int, opts PageOptions) (ListResult[ReviewComment], error)
+}
+
+// Client wraps go-github behind a narrow, domain-neutral interface.
+type Client struct {
+	gh *gh.Client
+}
+
+// Config controls how the GitHub client is constructed.
+type Config struct {
+	BaseURL           string
+	UploadURL         string
+	TokenSource       TokenSource
+	HTTPClient        *http.Client
+	Limiter           Limiter
+	RequestsPerSecond float64
+	Burst             int
+}
+
+// NewClient creates a GitHub read client.
+func NewClient(cfg Config) (*Client, error) {
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = DefaultBaseURL
+	}
+	if cfg.UploadURL == "" {
+		cfg.UploadURL = DefaultUploadURL
+	}
+	if cfg.HTTPClient == nil {
+		cfg.HTTPClient = &http.Client{}
+	}
+
+	baseTransport := cfg.HTTPClient.Transport
+	if baseTransport == nil {
+		baseTransport = http.DefaultTransport
+	}
+
+	limiter := cfg.Limiter
+	if limiter == nil {
+		rps := cfg.RequestsPerSecond
+		if rps <= 0 {
+			rps = DefaultRequestsPerSecond
+		}
+		burst := cfg.Burst
+		if burst <= 0 {
+			burst = DefaultBurst
+		}
+		limiter = NewRateLimiter(rps, burst)
+	}
+	cfg.HTTPClient.Transport = &RateLimitedTransport{Base: baseTransport, Limiter: limiter}
+
+	opts := []gh.ClientOptionsFunc{
+		gh.WithHTTPClient(cfg.HTTPClient),
+		gh.WithEnterpriseURLs(cfg.BaseURL, cfg.UploadURL),
+	}
+
+	if cfg.TokenSource != nil {
+		token, err := cfg.TokenSource.Token(context.Background())
+		if err != nil && !errors.Is(err, ErrNoToken) {
+			return nil, fmt.Errorf("resolve token: %w", err)
+		}
+		if token != "" {
+			opts = append(opts, gh.WithAuthToken(token))
+		}
+	}
+
+	ghc, err := gh.NewClient(opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{gh: ghc}, nil
+}
+
+func (c *Client) GetRepository(ctx context.Context, owner, name string) (Repository, RateInfo, error) {
+	repo, resp, err := c.gh.Repositories.Get(ctx, owner, name)
+	if err != nil {
+		return Repository{}, RateInfo{}, classifyError(err)
+	}
+	return convertRepository(repo), rateInfo(resp.Rate), nil
+}
+
+func (c *Client) ListIssues(ctx context.Context, owner, name string, opts ListIssueOptions) (ListResult[Issue], error) {
+	gopts := &gh.IssueListByRepoOptions{
+		State:     opts.State,
+		Sort:      opts.Sort,
+		Direction: opts.Direction,
+		Labels:    opts.Labels,
+		Since:     opts.Since,
+	}
+	gopts.ListOptions = gh.ListOptions{Page: opts.Page, PerPage: opts.PerPage}
+
+	issues, resp, err := c.gh.Issues.ListByRepo(ctx, owner, name, gopts)
+	if err != nil {
+		return ListResult[Issue]{}, classifyError(err)
+	}
+
+	items := make([]Issue, len(issues))
+	for i, issue := range issues {
+		items[i] = convertIssue(issue)
+	}
+	return ListResult[Issue]{
+		Items: items,
+		Page:  pageInfo(resp),
+		Rate:  rateInfo(resp.Rate),
+	}, nil
+}
+
+func (c *Client) ListIssueComments(ctx context.Context, owner, name string, issueNumber int, opts PageOptions) (ListResult[IssueComment], error) {
+	gopts := &gh.IssueListCommentsOptions{}
+	gopts.ListOptions = gh.ListOptions{Page: opts.Page, PerPage: opts.PerPage}
+
+	comments, resp, err := c.gh.Issues.ListComments(ctx, owner, name, issueNumber, gopts)
+	if err != nil {
+		return ListResult[IssueComment]{}, classifyError(err)
+	}
+
+	items := make([]IssueComment, len(comments))
+	for i, comment := range comments {
+		items[i] = convertIssueComment(comment)
+	}
+	return ListResult[IssueComment]{
+		Items: items,
+		Page:  pageInfo(resp),
+		Rate:  rateInfo(resp.Rate),
+	}, nil
+}
+
+func (c *Client) GetPullRequestDetails(ctx context.Context, owner, name string, number int) (PullRequestDetails, RateInfo, error) {
+	pr, resp, err := c.gh.PullRequests.Get(ctx, owner, name, number)
+	if err != nil {
+		return PullRequestDetails{}, RateInfo{}, classifyError(err)
+	}
+	return convertPullRequestDetails(pr), rateInfo(resp.Rate), nil
+}
+
+func (c *Client) ListPullRequestReviews(ctx context.Context, owner, name string, number int, opts PageOptions) (ListResult[Review], error) {
+	reviews, resp, err := c.gh.PullRequests.ListReviews(ctx, owner, name, number, &gh.ListOptions{
+		Page:    opts.Page,
+		PerPage: opts.PerPage,
+	})
+	if err != nil {
+		return ListResult[Review]{}, classifyError(err)
+	}
+
+	items := make([]Review, len(reviews))
+	for i, review := range reviews {
+		items[i] = convertReview(review)
+	}
+	return ListResult[Review]{
+		Items: items,
+		Page:  pageInfo(resp),
+		Rate:  rateInfo(resp.Rate),
+	}, nil
+}
+
+func (c *Client) ListPullRequestComments(ctx context.Context, owner, name string, number int, opts PageOptions) (ListResult[ReviewComment], error) {
+	gopts := &gh.PullRequestListCommentsOptions{}
+	gopts.ListOptions = gh.ListOptions{Page: opts.Page, PerPage: opts.PerPage}
+
+	comments, resp, err := c.gh.PullRequests.ListComments(ctx, owner, name, number, gopts)
+	if err != nil {
+		return ListResult[ReviewComment]{}, classifyError(err)
+	}
+
+	items := make([]ReviewComment, len(comments))
+	for i, comment := range comments {
+		items[i] = convertReviewComment(comment)
+	}
+	return ListResult[ReviewComment]{
+		Items: items,
+		Page:  pageInfo(resp),
+		Rate:  rateInfo(resp.Rate),
+	}, nil
+}
+
+func classifyError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+
+	var rl *gh.RateLimitError
+	if errors.As(err, &rl) {
+		return &PrimaryRateLimitError{
+			Rate:       rateInfo(rl.Rate),
+			RetryAfter: time.Until(rl.Rate.Reset.Time),
+			Message:    rl.Message,
+		}
+	}
+
+	var abuse *gh.AbuseRateLimitError
+	if errors.As(err, &abuse) {
+		ra := time.Duration(0)
+		if abuse.RetryAfter != nil {
+			ra = *abuse.RetryAfter
+		}
+		return &SecondaryRateLimitError{
+			RetryAfter: ra,
+			Message:    abuse.Message,
+		}
+	}
+
+	var er *gh.ErrorResponse
+	if errors.As(err, &er) && er.Response != nil {
+		switch {
+		case er.Response.StatusCode == http.StatusNotFound:
+			return &NotFoundError{Resource: er.Message}
+		case er.Response.StatusCode >= 500:
+			return &TransientError{Cause: err}
+		}
+	}
+
+	return err
+}
+
+func rateInfo(r gh.Rate) RateInfo {
+	return RateInfo{
+		Limit:     r.Limit,
+		Remaining: r.Remaining,
+		Used:      r.Used,
+		Reset:     r.Reset.Time,
+		Resource:  r.Resource,
+	}
+}
+
+func pageInfo(resp *gh.Response) PageInfo {
+	if resp == nil {
+		return PageInfo{}
+	}
+	p := PageInfo{
+		NextPage:  resp.NextPage,
+		PrevPage:  resp.PrevPage,
+		FirstPage: resp.FirstPage,
+		LastPage:  resp.LastPage,
+		HasNext:   resp.NextPage != 0,
+		HasPrev:   resp.PrevPage != 0,
+		HasFirst:  resp.FirstPage != 0,
+		HasLast:   resp.LastPage != 0,
+	}
+	if resp.Response != nil && resp.Request != nil && resp.Request.URL != nil {
+		q := resp.Request.URL.Query()
+		if v := q.Get("page"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				p.Page = n
+			}
+		}
+		if v := q.Get("per_page"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				p.PerPage = n
+			}
+		}
+	}
+	if p.PerPage == 0 {
+		p.PerPage = 30
+	}
+	return p
+}
+
+func stringVal(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}
+
+func intVal(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func int64Val(p *int64) int64 {
+	if p == nil {
+		return 0
+	}
+	return *p
+}
+
+func boolVal(p *bool) bool {
+	if p == nil {
+		return false
+	}
+	return *p
+}
+
+func timeVal(t *gh.Timestamp) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return t.Time
+}
+
+func timePtr(t *gh.Timestamp) *time.Time {
+	if t == nil {
+		return nil
+	}
+	v := t.Time
+	return &v
+}
+
+func labelNames(labels []*gh.Label) []string {
+	out := make([]string, 0, len(labels))
+	for _, l := range labels {
+		if l == nil {
+			continue
+		}
+		if n := l.GetName(); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func userLogins(users []*gh.User) []string {
+	out := make([]string, 0, len(users))
+	for _, u := range users {
+		if u == nil {
+			continue
+		}
+		if n := u.GetLogin(); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+func convertRepository(r *gh.Repository) Repository {
+	if r == nil {
+		return Repository{}
+	}
+	openIssues := r.GetOpenIssuesCount()
+	if openIssues == 0 {
+		openIssues = r.GetOpenIssues()
+	}
+	return Repository{
+		ID:            r.GetID(),
+		NodeID:        r.GetNodeID(),
+		Owner:         r.Owner.GetLogin(),
+		Name:          r.GetName(),
+		FullName:      r.GetFullName(),
+		Description:   r.GetDescription(),
+		DefaultBranch: r.GetDefaultBranch(),
+		HTMLURL:       r.GetHTMLURL(),
+		Private:       r.GetPrivate(),
+		Fork:          r.GetFork(),
+		Archived:      r.GetArchived(),
+		IsTemplate:    r.GetIsTemplate(),
+		Stars:         r.GetStargazersCount(),
+		Watchers:      r.GetWatchersCount(),
+		Forks:         r.GetForksCount(),
+		OpenIssues:    openIssues,
+		Language:      r.GetLanguage(),
+		License:       r.License.GetName(),
+		Topics:        r.Topics,
+		CreatedAt:     timeVal(r.CreatedAt),
+		UpdatedAt:     timeVal(r.UpdatedAt),
+		PushedAt:      timePtr(r.PushedAt),
+	}
+}
+
+func convertIssue(i *gh.Issue) Issue {
+	if i == nil {
+		return Issue{}
+	}
+	kind := ThreadKindIssue
+	prURL := ""
+	if i.PullRequestLinks != nil {
+		kind = ThreadKindPullRequest
+		prURL = i.PullRequestLinks.GetHTMLURL()
+	}
+	return Issue{
+		ID:                i.GetID(),
+		NodeID:            i.GetNodeID(),
+		Number:            i.GetNumber(),
+		Kind:              kind,
+		Title:             i.GetTitle(),
+		Body:              i.GetBody(),
+		State:             i.GetState(),
+		StateReason:       i.GetStateReason(),
+		Draft:             i.GetDraft(),
+		Locked:            i.GetLocked(),
+		Author:            i.User.GetLogin(),
+		AuthorAssociation: i.GetAuthorAssociation(),
+		Labels:            labelNames(i.Labels),
+		Assignees:         userLogins(i.Assignees),
+		Milestone:         i.Milestone.GetTitle(),
+		CommentsCount:     i.GetComments(),
+		CreatedAt:         timeVal(i.CreatedAt),
+		UpdatedAt:         timeVal(i.UpdatedAt),
+		ClosedAt:          timePtr(i.ClosedAt),
+		HTMLURL:           i.GetHTMLURL(),
+		PullRequestURL:    prURL,
+	}
+}
+
+func convertIssueComment(c *gh.IssueComment) IssueComment {
+	if c == nil {
+		return IssueComment{}
+	}
+	return IssueComment{
+		ID:                c.GetID(),
+		NodeID:            c.GetNodeID(),
+		Body:              c.GetBody(),
+		Author:            c.User.GetLogin(),
+		AuthorAssociation: c.GetAuthorAssociation(),
+		CreatedAt:         timeVal(c.CreatedAt),
+		UpdatedAt:         timeVal(c.UpdatedAt),
+		HTMLURL:           c.GetHTMLURL(),
+		IssueURL:          c.GetIssueURL(),
+	}
+}
+
+func convertPullRequestDetails(pr *gh.PullRequest) PullRequestDetails {
+	if pr == nil {
+		return PullRequestDetails{}
+	}
+	headRef, headSHA := "", ""
+	if pr.Head != nil {
+		headRef = pr.Head.GetRef()
+		headSHA = pr.Head.GetSHA()
+	}
+	baseRef, baseSHA := "", ""
+	if pr.Base != nil {
+		baseRef = pr.Base.GetRef()
+		baseSHA = pr.Base.GetSHA()
+	}
+	return PullRequestDetails{
+		ID:                pr.GetID(),
+		NodeID:            pr.GetNodeID(),
+		Number:            pr.GetNumber(),
+		State:             pr.GetState(),
+		Title:             pr.GetTitle(),
+		Body:              pr.GetBody(),
+		Draft:             pr.GetDraft(),
+		Locked:            pr.GetLocked(),
+		Author:            pr.User.GetLogin(),
+		AuthorAssociation: pr.GetAuthorAssociation(),
+		Labels:            labelNames(pr.Labels),
+		Assignees:         userLogins(pr.Assignees),
+		Milestone:         pr.Milestone.GetTitle(),
+		CreatedAt:         timeVal(pr.CreatedAt),
+		UpdatedAt:         timeVal(pr.UpdatedAt),
+		ClosedAt:          timePtr(pr.ClosedAt),
+		MergedAt:          timePtr(pr.MergedAt),
+		Merged:            pr.GetMerged(),
+		Mergeable:         pr.Mergeable,
+		MergeCommitSHA:    pr.GetMergeCommitSHA(),
+		HeadRef:           headRef,
+		HeadSHA:           headSHA,
+		BaseRef:           baseRef,
+		BaseSHA:           baseSHA,
+		CommentsCount:     pr.GetComments(),
+		Commits:           pr.GetCommits(),
+		Additions:         pr.GetAdditions(),
+		Deletions:         pr.GetDeletions(),
+		ChangedFiles:      pr.GetChangedFiles(),
+		HTMLURL:           pr.GetHTMLURL(),
+	}
+}
+
+func convertReview(r *gh.PullRequestReview) Review {
+	if r == nil {
+		return Review{}
+	}
+	return Review{
+		ID:                r.GetID(),
+		NodeID:            r.GetNodeID(),
+		State:             r.GetState(),
+		Body:              r.GetBody(),
+		Author:            r.User.GetLogin(),
+		AuthorAssociation: r.GetAuthorAssociation(),
+		CommitID:          r.GetCommitID(),
+		SubmittedAt:       timeVal(r.SubmittedAt),
+		HTMLURL:           r.GetHTMLURL(),
+		PullRequestURL:    r.GetPullRequestURL(),
+	}
+}
+
+func convertReviewComment(c *gh.PullRequestComment) ReviewComment {
+	if c == nil {
+		return ReviewComment{}
+	}
+	return ReviewComment{
+		ID:                c.GetID(),
+		NodeID:            c.GetNodeID(),
+		InReplyTo:         c.GetInReplyTo(),
+		Body:              c.GetBody(),
+		Path:              c.GetPath(),
+		DiffHunk:          c.GetDiffHunk(),
+		Author:            c.User.GetLogin(),
+		AuthorAssociation: c.GetAuthorAssociation(),
+		CommitID:          c.GetCommitID(),
+		OriginalCommitID:  c.GetOriginalCommitID(),
+		PullRequestURL:    c.GetPullRequestURL(),
+		HTMLURL:           c.GetHTMLURL(),
+		CreatedAt:         timeVal(c.CreatedAt),
+		UpdatedAt:         timeVal(c.UpdatedAt),
+		Line:              c.GetLine(),
+		OriginalLine:      c.GetOriginalLine(),
+		StartLine:         c.GetStartLine(),
+		OriginalStartLine: c.GetOriginalStartLine(),
+		Side:              c.GetSide(),
+		StartSide:         c.GetStartSide(),
+		Position:          c.GetPosition(),
+		OriginalPosition:  c.GetOriginalPosition(),
+		SubjectType:       c.GetSubjectType(),
+	}
+}
