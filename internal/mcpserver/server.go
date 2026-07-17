@@ -22,6 +22,11 @@ type Reader interface {
 	Repository(context.Context, RepoInput) (RepositoryOutput, error)
 	Thread(context.Context, ThreadInput) (ThreadOutput, error)
 	Dossier(context.Context, RepoInput) (DossierOutput, error)
+	SearchCode(context.Context, SearchCodeInput) (SearchCodeOutput, error)
+	Investigation(context.Context, InvestigationInput) (InvestigationOutput, error)
+	ListOpportunities(context.Context, ListOpportunitiesInput) (ListOpportunitiesOutput, error)
+	Opportunity(context.Context, OpportunityInput) (OpportunityOutput, error)
+	Evidence(context.Context, EvidenceInput) (EvidenceOutput, error)
 }
 
 type RepoInput struct {
@@ -75,6 +80,132 @@ type DossierOutput struct {
 	Repo     string         `json:"repo"`
 	AsOf     string         `json:"as_of,omitempty"`
 	Sections map[string]any `json:"sections"`
+}
+
+type SourceRef struct {
+	Source     string `json:"source" jsonschema:"Source identifier"`
+	URL        string `json:"url,omitempty" jsonschema:"Source URL"`
+	CommitSHA  string `json:"commit_sha,omitempty" jsonschema:"Source commit SHA"`
+	ObservedAt string `json:"observed_at,omitempty" jsonschema:"Observation timestamp"`
+	AsOf       string `json:"as_of,omitempty" jsonschema:"As-of timestamp"`
+}
+
+type SearchCodeInput struct {
+	Query string `json:"query" jsonschema:"Code search query"`
+	Owner string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
+	Repo  string `json:"repo,omitempty" jsonschema:"Optional repository name"`
+	Limit int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+}
+
+type CodeMatchOutput struct {
+	ID       string `json:"id"`
+	Repo     string `json:"repo"`
+	Commit   string `json:"commit"`
+	Path     string `json:"path"`
+	Language string `json:"language,omitempty"`
+	Snippet  string `json:"snippet"`
+	Bytes    int    `json:"bytes"`
+}
+
+type SearchCodeOutput struct {
+	Query   string            `json:"query"`
+	Total   int               `json:"total"`
+	Matches []CodeMatchOutput `json:"matches"`
+}
+
+type InvestigationInput struct {
+	ID string `json:"id" jsonschema:"Investigation ID"`
+}
+
+type HypothesisSummary struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Category    string `json:"category"`
+	Status      string `json:"status"`
+	Description string `json:"description,omitempty"`
+}
+
+type InvestigationOutput struct {
+	ID         string              `json:"id"`
+	Owner      string              `json:"owner"`
+	Repo       string              `json:"repo"`
+	CommitSHA  string              `json:"commit_sha,omitempty"`
+	Lens       string              `json:"lens,omitempty"`
+	Status     string              `json:"status"`
+	CreatedAt  string              `json:"created_at"`
+	UpdatedAt  string              `json:"updated_at"`
+	SourceRefs []SourceRef         `json:"source_refs,omitempty"`
+	Hypotheses []HypothesisSummary `json:"hypotheses,omitempty"`
+}
+
+type ListOpportunitiesInput struct {
+	InvestigationID string `json:"investigation_id" jsonschema:"Investigation ID"`
+	Limit           int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+}
+
+type OpportunitySummary struct {
+	ID              string  `json:"id"`
+	InvestigationID string  `json:"investigation_id"`
+	Title           string  `json:"title"`
+	Category        string  `json:"category"`
+	Status          string  `json:"status"`
+	Confidence      float64 `json:"confidence"`
+	CollisionStatus string  `json:"collision_status"`
+	CreatedAt       string  `json:"created_at"`
+	UpdatedAt       string  `json:"updated_at"`
+}
+
+type ListOpportunitiesOutput struct {
+	Opportunities []OpportunitySummary `json:"opportunities"`
+	Total         int                  `json:"total"`
+}
+
+type OpportunityInput struct {
+	ID string `json:"id" jsonschema:"Opportunity ID"`
+}
+
+type OpportunityOutput struct {
+	ID                  string      `json:"id"`
+	InvestigationID     string      `json:"investigation_id"`
+	HypothesisID        string      `json:"hypothesis_id,omitempty"`
+	Title               string      `json:"title"`
+	ProblemStatement    string      `json:"problem_statement"`
+	Category            string      `json:"category"`
+	Scope               string      `json:"scope"`
+	Impact              string      `json:"impact"`
+	Confidence          float64     `json:"confidence"`
+	ExpectedEffort      string      `json:"expected_effort,omitempty"`
+	Dependencies        []string    `json:"dependencies,omitempty"`
+	CollisionStatus     string      `json:"collision_status"`
+	MaintainerAlignment string      `json:"maintainer_alignment,omitempty"`
+	SourceRefs          []SourceRef `json:"source_refs,omitempty"`
+	EvidenceIDs         []string    `json:"evidence_ids,omitempty"`
+	Status              string      `json:"status"`
+	CreatedAt           string      `json:"created_at"`
+	UpdatedAt           string      `json:"updated_at"`
+}
+
+type EvidenceInput struct {
+	InvestigationID string `json:"investigation_id,omitempty" jsonschema:"Filter by investigation ID"`
+	OpportunityID   string `json:"opportunity_id,omitempty" jsonschema:"Filter by opportunity ID"`
+	Relation        string `json:"relation,omitempty" jsonschema:"Optional relation filter: supporting, contradicting, inconclusive, stale, invalid"`
+	Limit           int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+}
+
+type EvidenceItem struct {
+	ID          string      `json:"id"`
+	Type        string      `json:"type"`
+	Relation    string      `json:"relation"`
+	Description string      `json:"description"`
+	SourceRefs  []SourceRef `json:"source_refs,omitempty"`
+	CreatedAt   string      `json:"created_at"`
+}
+
+type EvidenceOutput struct {
+	InvestigationID string         `json:"investigation_id,omitempty"`
+	OpportunityID   string         `json:"opportunity_id,omitempty"`
+	Total           int            `json:"total"`
+	Evidence        []EvidenceItem `json:"evidence"`
 }
 
 // Server owns the MCP protocol adapter around a local Reader.
@@ -132,6 +263,31 @@ func (s *Server) register() {
 		Description: "Read a source-backed repository dossier from the local corpus",
 		Annotations: annotations,
 	}, s.dossier)
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "search_code",
+		Description: "Search indexed code snapshots in the local corpus without network access",
+		Annotations: annotations,
+	}, s.searchCode)
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "get_investigation",
+		Description: "Read a local investigation workspace from the corpus",
+		Annotations: annotations,
+	}, s.investigation)
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "list_opportunities",
+		Description: "List opportunities for a local investigation",
+		Annotations: annotations,
+	}, s.listOpportunities)
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "get_opportunity",
+		Description: "Read a local contribution opportunity",
+		Annotations: annotations,
+	}, s.opportunity)
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "get_evidence",
+		Description: "Read evidence for a local investigation or opportunity",
+		Annotations: annotations,
+	}, s.evidence)
 
 	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
 		URITemplate: "gitcontribute://repository/{owner}/{repo}",
@@ -149,6 +305,30 @@ func (s *Server) register() {
 		URITemplate: "gitcontribute://dossier/{owner}/{repo}",
 		Name:        "Dossier",
 		Description: "Local source-backed repository dossier",
+		MIMEType:    "application/json",
+	}, s.readResource)
+	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
+		URITemplate: "gitcontribute://investigation/{id}",
+		Name:        "Investigation",
+		Description: "Local investigation workspace",
+		MIMEType:    "application/json",
+	}, s.readResource)
+	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
+		URITemplate: "gitcontribute://opportunities/{investigation_id}",
+		Name:        "Opportunities",
+		Description: "Local opportunities for an investigation",
+		MIMEType:    "application/json",
+	}, s.readResource)
+	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
+		URITemplate: "gitcontribute://opportunity/{id}",
+		Name:        "Opportunity",
+		Description: "Local contribution opportunity",
+		MIMEType:    "application/json",
+	}, s.readResource)
+	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
+		URITemplate: "gitcontribute://evidence/{scope}/{id}",
+		Name:        "Evidence",
+		Description: "Local evidence for an investigation or opportunity",
 		MIMEType:    "application/json",
 	}, s.readResource)
 }
@@ -199,6 +379,67 @@ func (s *Server) dossier(ctx context.Context, _ *mcp.CallToolRequest, in RepoInp
 	return nil, out, err
 }
 
+func (s *Server) searchCode(ctx context.Context, _ *mcp.CallToolRequest, in SearchCodeInput) (*mcp.CallToolResult, SearchCodeOutput, error) {
+	if in.Query == "" {
+		return nil, SearchCodeOutput{}, errors.New("query is required")
+	}
+	if in.Limit == 0 {
+		in.Limit = 20
+	}
+	if in.Limit < 1 || in.Limit > 100 {
+		return nil, SearchCodeOutput{}, errors.New("limit must be between 1 and 100")
+	}
+	if (in.Owner == "") != (in.Repo == "") {
+		return nil, SearchCodeOutput{}, errors.New("owner and repo must be provided together")
+	}
+	out, err := s.reader.SearchCode(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) investigation(ctx context.Context, _ *mcp.CallToolRequest, in InvestigationInput) (*mcp.CallToolResult, InvestigationOutput, error) {
+	if strings.TrimSpace(in.ID) == "" {
+		return nil, InvestigationOutput{}, errors.New("id is required")
+	}
+	out, err := s.reader.Investigation(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) listOpportunities(ctx context.Context, _ *mcp.CallToolRequest, in ListOpportunitiesInput) (*mcp.CallToolResult, ListOpportunitiesOutput, error) {
+	if strings.TrimSpace(in.InvestigationID) == "" {
+		return nil, ListOpportunitiesOutput{}, errors.New("investigation_id is required")
+	}
+	if in.Limit == 0 {
+		in.Limit = 20
+	}
+	if in.Limit < 1 || in.Limit > 100 {
+		return nil, ListOpportunitiesOutput{}, errors.New("limit must be between 1 and 100")
+	}
+	out, err := s.reader.ListOpportunities(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) opportunity(ctx context.Context, _ *mcp.CallToolRequest, in OpportunityInput) (*mcp.CallToolResult, OpportunityOutput, error) {
+	if strings.TrimSpace(in.ID) == "" {
+		return nil, OpportunityOutput{}, errors.New("id is required")
+	}
+	out, err := s.reader.Opportunity(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) evidence(ctx context.Context, _ *mcp.CallToolRequest, in EvidenceInput) (*mcp.CallToolResult, EvidenceOutput, error) {
+	if in.InvestigationID == "" && in.OpportunityID == "" {
+		return nil, EvidenceOutput{}, errors.New("investigation_id or opportunity_id is required")
+	}
+	if in.Limit == 0 {
+		in.Limit = 20
+	}
+	if in.Limit < 1 || in.Limit > 100 {
+		return nil, EvidenceOutput{}, errors.New("limit must be between 1 and 100")
+	}
+	out, err := s.reader.Evidence(ctx, in)
+	return nil, out, err
+}
+
 func validateRepo(in RepoInput) error {
 	if strings.TrimSpace(in.Owner) == "" || strings.TrimSpace(in.Repo) == "" {
 		return errors.New("owner and repo are required")
@@ -236,6 +477,36 @@ func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest)
 		value, err = s.reader.Thread(ctx, ThreadInput{
 			Owner: parts[0], Repo: parts[1], Kind: parts[2], Number: number,
 		})
+	case "investigation":
+		if len(parts) != 1 {
+			return nil, mcp.ResourceNotFoundError(uri)
+		}
+		value, err = s.reader.Investigation(ctx, InvestigationInput{ID: parts[0]})
+	case "opportunities":
+		if len(parts) != 1 {
+			return nil, mcp.ResourceNotFoundError(uri)
+		}
+		value, err = s.reader.ListOpportunities(ctx, ListOpportunitiesInput{InvestigationID: parts[0], Limit: 100})
+	case "opportunity":
+		if len(parts) != 1 {
+			return nil, mcp.ResourceNotFoundError(uri)
+		}
+		value, err = s.reader.Opportunity(ctx, OpportunityInput{ID: parts[0]})
+	case "evidence":
+		if len(parts) != 2 {
+			return nil, mcp.ResourceNotFoundError(uri)
+		}
+		var in EvidenceInput
+		switch parts[0] {
+		case "investigation":
+			in.InvestigationID = parts[1]
+		case "opportunity":
+			in.OpportunityID = parts[1]
+		default:
+			return nil, mcp.ResourceNotFoundError(uri)
+		}
+		in.Limit = 100
+		value, err = s.reader.Evidence(ctx, in)
 	default:
 		return nil, mcp.ResourceNotFoundError(uri)
 	}
