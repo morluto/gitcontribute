@@ -439,31 +439,6 @@ func (s *Server) registerV1() {
 	s.registerV1ResourceTemplates()
 }
 
-func (s *Server) registerV1ResourceTemplates() {
-	templates := []struct {
-		template, name, description string
-	}{
-		{"github-index://repositories/{owner}/{repo}", "Repository", "Local repository record"},
-		{"github-index://threads/{owner}/{repo}/{number}", "Thread", "Local issue or pull request by number"},
-		{"github-index://dossiers/{owner}/{repo}", "Dossier", "Local source-backed repository dossier"},
-		{"github-index://investigations/{id}", "Investigation", "Local investigation workspace"},
-		{"github-index://opportunities/{id}", "Opportunity", "Local contribution opportunity"},
-		{"github-index://evidence/{investigation_id}", "Evidence", "Evidence for an investigation"},
-		{"github-index://readiness/{opportunity_id}", "Readiness", "Local contribution readiness report"},
-		{"github-index://workflows/contribution/{opportunity_id}", "Contribution workflow", "Safe contribution workflow links and prompts"},
-		{"github-index://lenses/{name}", "Lens", "Saved lens definition"},
-		{"github-index://jobs/{id}", "Job", "Durable job state"},
-	}
-	for _, t := range templates {
-		s.server.AddResourceTemplate(&mcp.ResourceTemplate{
-			URITemplate: t.template,
-			Name:        t.name,
-			Description: t.description,
-			MIMEType:    "application/json",
-		}, s.readResource)
-	}
-}
-
 func (s *Server) searchRepositories(ctx context.Context, _ *mcp.CallToolRequest, in SearchRepositoriesInput) (*mcp.CallToolResult, SearchRepositoriesOutput, error) {
 	if in.Limit == 0 {
 		in.Limit = 20

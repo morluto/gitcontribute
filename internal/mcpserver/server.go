@@ -551,67 +551,7 @@ func (s *Server) register() {
 		}), output: outputSchema[HydrateThreadOutput]("Completed thread-facet hydration summary."), handler: s.hydrateThread,
 	})
 
-	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
-		URITemplate: "gitcontribute://repository/{owner}/{repo}",
-		Name:        "Repository",
-		Description: "Local repository record",
-		MIMEType:    "application/json",
-	}, s.readResource)
-	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
-		URITemplate: "gitcontribute://thread/{owner}/{repo}/{kind}/{number}",
-		Name:        "Thread",
-		Description: "Local issue or pull request",
-		MIMEType:    "application/json",
-	}, s.readResource)
-	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
-		URITemplate: "gitcontribute://dossier/{owner}/{repo}",
-		Name:        "Dossier",
-		Description: "Local source-backed repository dossier",
-		MIMEType:    "application/json",
-	}, s.readResource)
-	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
-		URITemplate: "gitcontribute://investigation/{id}",
-		Name:        "Investigation",
-		Description: "Local investigation workspace",
-		MIMEType:    "application/json",
-	}, s.readResource)
-	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
-		URITemplate: "gitcontribute://opportunities/{investigation_id}",
-		Name:        "Opportunities",
-		Description: "Local opportunities for an investigation",
-		MIMEType:    "application/json",
-	}, s.readResource)
-	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
-		URITemplate: "gitcontribute://opportunity/{id}",
-		Name:        "Opportunity",
-		Description: "Local contribution opportunity",
-		MIMEType:    "application/json",
-	}, s.readResource)
-	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
-		URITemplate: "gitcontribute://evidence/{scope}/{id}",
-		Name:        "Evidence",
-		Description: "Local evidence for an investigation or opportunity",
-		MIMEType:    "application/json",
-	}, s.readResource)
-	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
-		URITemplate: "gitcontribute://readiness/{opportunity_id}",
-		Name:        "Readiness",
-		Description: "Local contribution readiness report",
-		MIMEType:    "application/json",
-	}, s.readResource)
-	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
-		URITemplate: "gitcontribute://workflow/contribution/{opportunity_id}",
-		Name:        "Contribution workflow",
-		Description: "Safe contribution workflow resource links and prompts",
-		MIMEType:    "application/json",
-	}, s.readResource)
-	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
-		URITemplate: "gitcontribute://lens/{name}",
-		Name:        "Lens",
-		Description: "Saved lens definition",
-		MIMEType:    "application/json",
-	}, s.readResource)
-
+	s.registerResourceTemplates()
 	s.registerContributionPrompts()
 	s.registerV1()
 }
