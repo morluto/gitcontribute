@@ -41,6 +41,9 @@ func TestMetadataIsLocalAndDoesNotCreateCorpus(t *testing.T) {
 	if !result.Features["contribution_radar"] || !containsString(result.Capabilities, "contribution-radar") {
 		t.Fatalf("radar capability missing from metadata: %+v", result)
 	}
+	if !result.Features["contribution_readiness"] || !containsString(result.Capabilities, "contribution-readiness") {
+		t.Fatalf("readiness capability missing from metadata: %+v", result)
+	}
 	if !result.Features["thread_research"] || !containsString(result.Capabilities, "thread-research-brief") {
 		t.Fatalf("thread research capability missing from metadata: %+v", result)
 	}

@@ -82,6 +82,10 @@ func humanOutput(v any) (string, error) {
 		return validationComparisonHuman(r), nil
 	case *EvidenceResult:
 		return evidenceHuman(r), nil
+	case *ReadinessResult:
+		return readinessHuman(r), nil
+	case *ReadinessCheck:
+		return readinessCheckHuman(r), nil
 	case *DraftResult:
 		return draftHuman(r), nil
 	case *ClusterListResult:
