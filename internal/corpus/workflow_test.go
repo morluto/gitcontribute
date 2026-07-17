@@ -59,6 +59,10 @@ func TestContributionWorkflowPersistsAcrossReopen(t *testing.T) {
 	if err != nil || len(proofs) != 1 || proofs[0].Description != "base crashes" {
 		t.Fatalf("ListEvidence = (%+v, %v)", proofs, err)
 	}
+	byInvestigation, err := c.ListEvidence(ctx, evidence.EvidenceFilter{InvestigationID: inv.ID})
+	if err != nil || len(byInvestigation) != 1 || byInvestigation[0].ID != proof.ID {
+		t.Fatalf("investigation ListEvidence = (%+v, %v)", byInvestigation, err)
+	}
 	gotDraft, err := c.GetIssueDraft(ctx, opportunity.ID)
 	if err != nil || gotDraft.Body != "proof" {
 		t.Fatalf("GetIssueDraft = (%+v, %v)", gotDraft, err)

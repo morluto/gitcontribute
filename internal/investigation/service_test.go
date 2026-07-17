@@ -282,7 +282,7 @@ func TestContradictingEvidenceBlocksValidation(t *testing.T) {
 	}
 
 	// Supporting evidence lets the opportunity advance.
-	_, err = svc.RecordEvidence(context.Background(), o.ID, &evidence.Evidence{
+	recorded, err := svc.RecordEvidence(context.Background(), o.ID, &evidence.Evidence{
 		ID:          "ev-support",
 		Type:        evidence.EvidenceTypeBaseFailingRegression,
 		Relation:    evidence.RelationSupporting,
@@ -290,6 +290,14 @@ func TestContradictingEvidenceBlocksValidation(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("record supporting: %v", err)
+	}
+	if recorded.InvestigationID != inv.ID || recorded.HypothesisID != h.ID || recorded.OpportunityID != o.ID {
+		t.Fatalf("evidence scope = %+v", recorded)
+	}
+	if _, err := svc.RecordEvidence(context.Background(), o.ID, &evidence.Evidence{
+		ID: "wrong-scope", InvestigationID: "different-investigation",
+	}); err == nil {
+		t.Fatal("accepted evidence with a conflicting investigation")
 	}
 
 	_, err = svc.SetOpportunityStatus(context.Background(), o.ID, OpportunityValidated, "candidate fixes it")

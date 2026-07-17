@@ -388,25 +388,29 @@ func (c *Corpus) CreateEvidence(ctx context.Context, item *evidence.Evidence) er
 }
 
 func (c *Corpus) ListEvidence(ctx context.Context, filter evidence.EvidenceFilter) ([]*evidence.Evidence, error) {
-	query := `SELECT payload FROM evidence WHERE 1=1`
+	query := `SELECT e.payload FROM evidence e WHERE 1=1`
 	var args []any
 	if filter.InvestigationID != "" {
-		query += ` AND investigation_id=?`
-		args = append(args, filter.InvestigationID)
+		query += ` AND (
+			e.investigation_id=?
+			OR e.opportunity_id IN (SELECT id FROM opportunities WHERE investigation_id=?)
+			OR e.hypothesis_id IN (SELECT id FROM hypotheses WHERE investigation_id=?)
+		)`
+		args = append(args, filter.InvestigationID, filter.InvestigationID, filter.InvestigationID)
 	}
 	if filter.HypothesisID != "" {
-		query += ` AND hypothesis_id=?`
+		query += ` AND e.hypothesis_id=?`
 		args = append(args, filter.HypothesisID)
 	}
 	if filter.OpportunityID != "" {
-		query += ` AND opportunity_id=?`
+		query += ` AND e.opportunity_id=?`
 		args = append(args, filter.OpportunityID)
 	}
 	if filter.Relation != "" {
-		query += ` AND relation=?`
+		query += ` AND e.relation=?`
 		args = append(args, filter.Relation)
 	}
-	query += ` ORDER BY created_at, id LIMIT 10000`
+	query += ` ORDER BY e.created_at, e.id LIMIT 10000`
 	rows, err := c.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list evidence: %w", err)

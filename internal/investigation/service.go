@@ -196,10 +196,19 @@ func (s *Service) RecordEvidence(ctx context.Context, opportunityID string, e *e
 	if e == nil {
 		return nil, errors.New("evidence is required")
 	}
-	if _, err := s.repo.GetOpportunity(ctx, opportunityID); err != nil {
+	opportunity, err := s.repo.GetOpportunity(ctx, opportunityID)
+	if err != nil {
 		return nil, err
 	}
+	if e.InvestigationID != "" && e.InvestigationID != opportunity.InvestigationID {
+		return nil, errors.New("evidence investigation does not match opportunity")
+	}
+	if e.HypothesisID != "" && e.HypothesisID != opportunity.HypothesisID {
+		return nil, errors.New("evidence hypothesis does not match opportunity")
+	}
 	e.OpportunityID = opportunityID
+	e.InvestigationID = opportunity.InvestigationID
+	e.HypothesisID = opportunity.HypothesisID
 	if err := s.evidence.CreateEvidence(ctx, e); err != nil {
 		return nil, err
 	}

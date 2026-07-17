@@ -71,17 +71,16 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 		t.Fatalf("promote opportunity: %v", err)
 	}
 	if err := evSvc.CreateEvidence(ctx, &evidence.Evidence{
-		InvestigationID: inv.ID,
-		OpportunityID:   opp.ID,
-		Type:            evidence.EvidenceTypeMinimalReproduction,
-		Relation:        evidence.RelationSupporting,
-		Description:     "base branch crashes with attached input",
+		OpportunityID: opp.ID,
+		Type:          evidence.EvidenceTypeMinimalReproduction,
+		Relation:      evidence.RelationSupporting,
+		Description:   "base branch crashes with attached input",
 	}); err != nil {
 		t.Fatalf("create evidence: %v", err)
 	}
 	if err := evSvc.CreateEvidence(ctx, &evidence.Evidence{
-		InvestigationID: inv.ID, OpportunityID: opp.ID,
-		Type: evidence.EvidenceTypeManualObservation, Relation: evidence.RelationSupporting,
+		OpportunityID: opp.ID,
+		Type:          evidence.EvidenceTypeManualObservation, Relation: evidence.RelationSupporting,
 		Description: "maintainer confirmed the expected behavior",
 	}); err != nil {
 		t.Fatalf("create second evidence: %v", err)
