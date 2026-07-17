@@ -28,6 +28,7 @@ type SourcePartition struct {
 	Start        time.Time
 	End          time.Time
 	Total        int
+	Pages        int
 	Incomplete   bool
 	Unsplittable bool
 	Retries      int
@@ -106,14 +107,14 @@ func (c *Corpus) RecordSourcePartition(ctx context.Context, partition SourcePart
 	}
 	_, err := c.db.ExecContext(ctx, `
 		INSERT INTO source_partitions (source_id, partition_key, query, qualifier, start_at, end_at,
-			total_count, incomplete_results, unsplittable, retries, observed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			total_count, pages, incomplete_results, unsplittable, retries, observed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (source_id, partition_key) DO UPDATE SET query=excluded.query,
-			total_count=excluded.total_count, incomplete_results=excluded.incomplete_results,
+			total_count=excluded.total_count, pages=excluded.pages, incomplete_results=excluded.incomplete_results,
 			unsplittable=excluded.unsplittable, retries=excluded.retries, observed_at=excluded.observed_at
 	`, partition.SourceID, partition.Key, partition.Query, partition.Qualifier,
 		encodeTime(partition.Start), encodeTime(partition.End), partition.Total,
-		boolToInt(partition.Incomplete), boolToInt(partition.Unsplittable), partition.Retries,
+		partition.Pages, boolToInt(partition.Incomplete), boolToInt(partition.Unsplittable), partition.Retries,
 		encodeTime(partition.ObservedAt))
 	if err != nil {
 		return fmt.Errorf("record source partition: %w", err)

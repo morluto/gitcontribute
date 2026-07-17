@@ -266,10 +266,11 @@ func (s *Service) crawlSearchSource(ctx context.Context, c *corpus.Corpus, sourc
 	discovered := 0
 	seen := make(map[string]struct{})
 	for _, window := range windows {
+		pages := (window.Total + 99) / 100
 		partition := corpus.SourcePartition{
 			SourceID: source.ID, Key: fmt.Sprintf("%s:%d:%d", qualifier, window.Start.Unix(), window.End.Unix()),
 			Query: window.Query, Qualifier: string(qualifier), Start: window.Start, End: window.End,
-			Total: window.Total, Incomplete: window.Incomplete, Unsplittable: window.Unsplittable, ObservedAt: now,
+			Total: window.Total, Pages: pages, Incomplete: window.Incomplete, Unsplittable: window.Unsplittable, ObservedAt: now,
 		}
 		if err := c.RecordSourcePartition(ctx, partition); err != nil {
 			return nil, err
@@ -277,7 +278,6 @@ func (s *Service) crawlSearchSource(ctx context.Context, c *corpus.Corpus, sourc
 		if window.Unsplittable || window.Incomplete {
 			return nil, fmt.Errorf("search window %s is incomplete or exceeds GitHub's result ceiling", partition.Key)
 		}
-		pages := (window.Total + 99) / 100
 		for page := 1; page <= pages; page++ {
 			response, err := budgeted.page(ctx, window.Query, page, 100)
 			if err != nil {

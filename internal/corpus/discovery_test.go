@@ -53,7 +53,7 @@ func TestDiscoverySourcesAndPartitionsPersist(t *testing.T) {
 	}
 	if err := c.RecordSourcePartition(ctx, SourcePartition{
 		SourceID: source.ID, Key: "created:1:2", Query: "language:go created:1..2",
-		Qualifier: "created", Start: time.Unix(1, 0), End: time.Unix(2, 0), Total: 10, ObservedAt: time.Now(),
+		Qualifier: "created", Start: time.Unix(1, 0), End: time.Unix(2, 0), Total: 210, Pages: 3, ObservedAt: time.Now(),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -67,5 +67,12 @@ func TestDiscoverySourcesAndPartitionsPersist(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("source partitions = %d", count)
+	}
+	var pages int
+	if err := c.db.QueryRowContext(ctx, `SELECT pages FROM source_partitions WHERE source_id=?`, source.ID).Scan(&pages); err != nil {
+		t.Fatal(err)
+	}
+	if pages != 3 {
+		t.Fatalf("source partition pages = %d, want 3", pages)
 	}
 }
