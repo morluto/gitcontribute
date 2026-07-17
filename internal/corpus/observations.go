@@ -155,33 +155,73 @@ func (c *Corpus) GetRepositoryByID(ctx context.Context, id int64) (*Repository, 
 	return &r, nil
 }
 
+// RepositorySearchOptions scopes a paginated repository search.
+type RepositorySearchOptions struct {
+	Limit  int
+	Cursor string
+}
+
+// RepositorySearchPage is a paginated result of a repository keyword search.
+type RepositorySearchPage struct {
+	Repositories []Repository
+	NextCursor   string
+	Total        int
+}
+
 // ListRepositories returns repositories matching an optional name query.
 // An empty query lists all repositories ordered by most recently updated.
 func (c *Corpus) ListRepositories(ctx context.Context, query string, limit int) ([]Repository, error) {
+	page, err := c.ListRepositoriesWithOptions(ctx, query, RepositorySearchOptions{Limit: limit})
+	if err != nil {
+		return nil, err
+	}
+	return page.Repositories, nil
+}
+
+// ListRepositoriesWithOptions returns repositories matching an optional name
+// query with stable cursor pagination. Results are ordered by source_updated_at
+// descending, then id descending, so the same cursor always returns the same
+// next page on an unchanged corpus.
+func (c *Corpus) ListRepositoriesWithOptions(ctx context.Context, query string, opts RepositorySearchOptions) (RepositorySearchPage, error) {
+	if opts.Limit <= 0 {
+		opts.Limit = 20
+	}
+	if opts.Limit > 100 {
+		return RepositorySearchPage{}, errors.New("repository list limit cannot exceed 100")
+	}
+
+	cursor, err := c.decodeRepoCursor(opts.Cursor, query)
+	if err != nil {
+		return RepositorySearchPage{}, err
+	}
+
 	args := []any{}
 	where := ""
 	if query != "" {
 		where = `WHERE owner || '/' || name LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\'`
-		query = escapeLike(query)
-		args = append(args, "%"+query+"%", "%"+query+"%")
+		esc := escapeLike(query)
+		args = append(args, "%"+esc+"%", "%"+esc+"%")
 	}
-	if limit <= 0 {
-		limit = 100
+	if cursor != nil {
+		if where == "" {
+			where = `WHERE `
+		} else {
+			where += ` AND `
+		}
+		where += `(source_updated_at < ? OR (source_updated_at = ? AND id < ?))`
+		args = append(args, cursor.UpdatedAt, cursor.UpdatedAt, cursor.ID)
 	}
-	if limit > 1000 {
-		return nil, fmt.Errorf("repository list limit cannot exceed 1000")
-	}
-	args = append(args, limit)
+	args = append(args, opts.Limit+1)
 
 	rows, err := c.db.QueryContext(ctx, `
 		SELECT id, owner, name, external_id, description, default_branch, language, license, topics, stars, watchers, forks, open_issues, archived, fork, source_created_at, source_updated_at, observation_sequence, created_at, updated_at
 		FROM repositories
 		`+where+`
-		ORDER BY source_updated_at DESC
+		ORDER BY source_updated_at DESC, id DESC
 		LIMIT ?
 	`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list repositories: %w", err)
+		return RepositorySearchPage{}, fmt.Errorf("list repositories: %w", err)
 	}
 	defer rows.Close()
 
@@ -192,7 +232,7 @@ func (c *Corpus) ListRepositories(ctx context.Context, query string, limit int) 
 		var archived, fork int
 		var topics string
 		if err := rows.Scan(&r.ID, &r.Owner, &r.Name, &r.ExternalID, &r.Description, &r.DefaultBranch, &r.Language, &r.License, &topics, &r.Stars, &r.Watchers, &r.Forks, &r.OpenIssues, &archived, &fork, &sourceCreated, &src, &r.ObservationSequence, &created, &updated); err != nil {
-			return nil, err
+			return RepositorySearchPage{}, err
 		}
 		r.Topics = splitLabels(topics)
 		r.Archived = archived != 0
@@ -203,7 +243,65 @@ func (c *Corpus) ListRepositories(ctx context.Context, query string, limit int) 
 		r.UpdatedAt = scanTime(updated)
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return RepositorySearchPage{}, err
+	}
+
+	page := RepositorySearchPage{Repositories: out}
+	if len(out) > opts.Limit {
+		page.Repositories = out[:opts.Limit]
+		last := page.Repositories[len(page.Repositories)-1]
+		page.NextCursor = encodeCursor(searchCursor{
+			Scope:     "repos",
+			Query:     query,
+			Kind:      "repo",
+			UpdatedAt: encodeTime(last.SourceUpdatedAt),
+			ID:        last.ID,
+		})
+	}
+	if len(out) > opts.Limit || opts.Cursor != "" {
+		page.Total, err = c.countRepositories(ctx, query)
+		if err != nil {
+			return RepositorySearchPage{}, err
+		}
+	} else {
+		page.Total = len(out)
+	}
+
+	return page, nil
+}
+
+func (c *Corpus) countRepositories(ctx context.Context, query string) (int, error) {
+	args := []any{}
+	where := ""
+	if query != "" {
+		where = `WHERE owner || '/' || name LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\'`
+		esc := escapeLike(query)
+		args = append(args, "%"+esc+"%", "%"+esc+"%")
+	}
+	var total int
+	err := c.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM repositories
+		`+where, args...).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("count repositories: %w", err)
+	}
+	return total, nil
+}
+
+func (c *Corpus) decodeRepoCursor(cursor, query string) (*searchCursor, error) {
+	if cursor == "" {
+		return nil, nil
+	}
+	sc, err := decodeCursor(cursor)
+	if err != nil {
+		return nil, err
+	}
+	if sc.Scope != "repos" || sc.Query != query || sc.Kind != "repo" {
+		return nil, errors.New("invalid search cursor")
+	}
+	return &sc, nil
 }
 
 func escapeLike(value string) string {

@@ -593,39 +593,6 @@ func corpusRepoFromGitHub(r github.Repository) corpus.Repository {
 	}
 }
 
-// Search performs a local-only corpus search and supports repo and kind filters.
-func (s *Service) Search(ctx context.Context, query string, opts cli.SearchOptions) (*cli.SearchResult, error) {
-	if opts.Limit <= 0 {
-		opts.Limit = 20
-	}
-	if opts.Limit > 1000 {
-		return nil, errors.New("search limit cannot exceed 1000")
-	}
-	res, err := s.searchCorpus(ctx, query, opts)
-	if err != nil {
-		return nil, err
-	}
-	matches := make([]cli.SearchMatch, len(res.Matches))
-	for i, m := range res.Matches {
-		matches[i] = cli.SearchMatch{
-			Kind:   m.Kind,
-			Repo:   cli.RepoRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo},
-			Title:  m.Title,
-			Number: m.Number,
-			URL:    m.URL,
-			Score:  m.Score,
-		}
-	}
-	return &cli.SearchResult{
-		Query:   query,
-		Kind:    opts.Kind,
-		Repo:    opts.Repo,
-		Limit:   opts.Limit,
-		Total:   res.Total,
-		Matches: matches,
-	}, nil
-}
-
 // Dossier builds a deterministic, local-corpus-backed repository dossier.
 func (s *Service) Dossier(ctx context.Context, repo cli.RepoRef) (*cli.DossierResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}

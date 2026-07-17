@@ -55,6 +55,8 @@ type Thread struct {
 	ObservationSequence int64
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	// Rank is the query-specific FTS rank populated only by search results.
+	Rank float64
 }
 
 // ThreadKind names the thread types stored by the corpus.
