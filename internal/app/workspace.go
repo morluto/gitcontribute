@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -119,6 +120,120 @@ func (s *Service) ShowWorkspace(ctx context.Context, id string) (*cli.WorkspaceR
 	}
 
 	return workspaceResult(ws), nil
+}
+
+// ReviewStep is one suggested review item with a stable priority.
+type ReviewStep struct {
+	Path      string `json:"path"`
+	Priority  int    `json:"priority"`
+	Rationale string `json:"rationale"`
+}
+
+// WorkspaceDiffResult is the complete diff metadata for a workspace.
+type WorkspaceDiffResult struct {
+	ID               string       `json:"id"`
+	Repo             cli.RepoRef  `json:"repo"`
+	BaseSHA          string       `json:"base_sha"`
+	CandidateSHA     string       `json:"candidate_sha"`
+	MergeBase        string       `json:"merge_base"`
+	Dirty            bool         `json:"dirty"`
+	HasUntracked     bool         `json:"has_untracked"`
+	Diff             string       `json:"diff"`
+	ChangedFiles     []string     `json:"changed_files"`
+	ChangedFileCount int          `json:"changed_file_count"`
+	DiffBytes        int          `json:"diff_bytes"`
+	ReviewOrder      []ReviewStep `json:"review_order"`
+}
+
+// WorkspaceDiff returns the current diff of a workspace against its recorded
+// base, including changed files and a suggested review order.
+func (s *Service) WorkspaceDiff(ctx context.Context, id string) (*WorkspaceDiffResult, error) {
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ws, err := c.GetWorkspace(ctx, id)
+	if err != nil {
+		return nil, mapWorkspaceError(err)
+	}
+
+	mgr, err := s.workspaceManager(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	st, err := mgr.StatusByPath(ctx, ws.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	hasUntracked, err := mgr.HasUntrackedByPath(ctx, ws.Path)
+	if err != nil {
+		return nil, err
+	}
+
+	diff, err := mgr.DiffByPath(ctx, ws.Path, ws.BaseSHA)
+	if err != nil {
+		return nil, err
+	}
+
+	files, err := mgr.ChangedFilesByPath(ctx, ws.Path, ws.BaseSHA)
+	if err != nil {
+		return nil, err
+	}
+	result := &WorkspaceDiffResult{
+		ID:               ws.Name,
+		Repo:             cli.RepoRef{Owner: ws.RepoOwner, Repo: ws.RepoName},
+		BaseSHA:          ws.BaseSHA,
+		CandidateSHA:     ws.CandidateSHA,
+		MergeBase:        ws.MergeBase,
+		Dirty:            st.Dirty,
+		HasUntracked:     hasUntracked,
+		Diff:             diff,
+		ChangedFiles:     files,
+		ChangedFileCount: len(files),
+		DiffBytes:        len(diff),
+		ReviewOrder:      reviewOrderFromFiles(files),
+	}
+	return result, nil
+}
+
+func reviewOrderFromFiles(files []string) []ReviewStep {
+	steps := make([]ReviewStep, 0, len(files))
+	for _, f := range files {
+		steps = append(steps, ReviewStep{Path: f, Priority: reviewPriority(f), Rationale: reviewRationale(f)})
+	}
+	sort.Slice(steps, func(i, j int) bool {
+		if steps[i].Priority != steps[j].Priority {
+			return steps[i].Priority < steps[j].Priority
+		}
+		return steps[i].Path < steps[j].Path
+	})
+	return steps
+}
+
+func reviewPriority(path string) int {
+	lower := strings.ToLower(path)
+	if strings.Contains(lower, "readme") || strings.Contains(lower, "contributing") ||
+		strings.Contains(lower, "docs/") || strings.HasSuffix(lower, ".md") {
+		return 0
+	}
+	if strings.Contains(lower, "_test.go") || strings.Contains(lower, "/test") ||
+		strings.Contains(lower, "tests/") {
+		return 1
+	}
+	return 2
+}
+
+func reviewRationale(path string) string {
+	switch reviewPriority(path) {
+	case 0:
+		return "documentation and contribution guidance first"
+	case 1:
+		return "tests and validation next"
+	default:
+		return "implementation changes last"
+	}
 }
 
 func safeMirrorName(s string) string {

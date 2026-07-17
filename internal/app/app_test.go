@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -19,9 +20,11 @@ import (
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/config"
+	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/github"
+	"github.com/morluto/gitcontribute/internal/investigation"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
 	"github.com/morluto/gitcontribute/internal/workspace"
 )
@@ -303,7 +306,7 @@ func TestDiscoveryCrawlPersistsRepositoryFrontierAndCheckpoint(t *testing.T) {
 		t.Fatalf("incremental crawl result = %+v", second)
 	}
 	queries := tracked.searches()
-	if len(queries) != 4 || !strings.Contains(queries[0], "created:") || !strings.Contains(queries[2], "updated:") {
+	if len(queries) != 4 || !strings.Contains(queries[0], "created:") || !strings.Contains(queries[2], "updated:") || strings.Contains(queries[2], "pushed:") {
 		t.Fatalf("search queries = %q", queries)
 	}
 	status, err := c.Status(ctx)
@@ -312,6 +315,27 @@ func TestDiscoveryCrawlPersistsRepositoryFrontierAndCheckpoint(t *testing.T) {
 	}
 	if status.Repositories != 1 {
 		t.Fatalf("repositories = %d, want canonical deduplication", status.Repositories)
+	}
+}
+
+func TestTailSourceRunsOneIdempotentIteration(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestServer("octocat", "tail")
+	defer srv.Close()
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+
+	if _, err := svc.AddRepoSource(ctx, "explicit", []cli.RepoRef{{Owner: "octocat", Repo: "tail"}}); err != nil {
+		t.Fatalf("add source: %v", err)
+	}
+	result, err := svc.TailSource(ctx, "explicit", cli.TailOptions{
+		Since: time.Hour, Budget: 1, Interval: time.Minute, Once: true,
+	})
+	if err != nil {
+		t.Fatalf("tail source: %v", err)
+	}
+	if result.Iterations != 1 || result.Last == nil || result.Last.Repositories != 1 {
+		t.Fatalf("tail result = %+v", result)
 	}
 }
 
@@ -462,7 +486,7 @@ func TestMCPReaderLocalReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mcp repository: %v", err)
 	}
-	if repo.Owner != "acme" || repo.Repo != "rocket" || repo.Fields["stars"] != 42 {
+	if repo.Owner != "acme" || repo.Repo != "rocket" || repo.Fields["stars"] != 42 || repo.UpdatedAt != "2024-01-01T00:00:00Z" {
 		t.Fatalf("unexpected repository output: %+v", repo)
 	}
 
@@ -470,7 +494,7 @@ func TestMCPReaderLocalReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mcp thread: %v", err)
 	}
-	if thread.Number != 1 || thread.State != "open" {
+	if thread.Number != 1 || thread.State != "open" || thread.UpdatedAt != "2024-02-01T00:00:00Z" {
 		t.Fatalf("unexpected thread output: %+v", thread)
 	}
 
@@ -904,5 +928,438 @@ func writeAppFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func newLocalService(t *testing.T) *Service {
+	t.Helper()
+	ctx := context.Background()
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	return svc
+}
+
+func TestCreateAndUpdateHypothesis(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	defer func() { _ = svc.Close() }()
+
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+	h, err := svc.CreateHypothesis(ctx, inv.ID, investigation.CreateHypothesisInput{
+		Title:              "race in parser",
+		Description:        "data race under load",
+		Category:           investigation.CategoryBug,
+		ExpectedBehavior:   "parser should not panic",
+		ObservedBehavior:   "parser panics",
+		PotentialImpact:    "crash",
+		OpenQuestions:      []string{"reproducible?"},
+		AffectedComponents: []string{"pkg/parser"},
+		SourceRefs: []domain.SourceRef{
+			{Source: "github", URL: "https://github.com/owner/repo/issues/1"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create hypothesis: %v", err)
+	}
+	if h.Status != investigation.HypothesisProposed {
+		t.Fatalf("unexpected status: %q", h.Status)
+	}
+	if len(h.SourceRefs) != 1 || h.ExpectedBehavior == "" {
+		t.Fatalf("structured fields missing: %+v", h)
+	}
+
+	updated, err := svc.UpdateHypothesis(ctx, h.ID, investigation.UpdateHypothesisInput{
+		Title:       "race in parser (confirmed)",
+		Description: "data race under load",
+		Category:    investigation.CategoryBug,
+		Rationale:   "confirmed by stress test",
+	})
+	if err != nil {
+		t.Fatalf("update hypothesis: %v", err)
+	}
+	if updated.Title != "race in parser (confirmed)" || len(updated.AuditTrail) != 1 {
+		t.Fatalf("update failed: %+v", updated)
+	}
+
+	trans, err := svc.TransitionHypothesis(ctx, h.ID, "rejected", "not reproducible")
+	if err != nil {
+		t.Fatalf("transition hypothesis: %v", err)
+	}
+	if trans.Status != investigation.HypothesisRejected {
+		t.Fatalf("unexpected status after transition: %q", trans.Status)
+	}
+}
+
+func TestRecordEvidence(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	defer func() { _ = svc.Close() }()
+
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+	h, err := svc.CreateHypothesis(ctx, inv.ID, investigation.CreateHypothesisInput{
+		Title: "race", Description: "desc", Category: investigation.CategoryBug,
+	})
+	if err != nil {
+		t.Fatalf("create hypothesis: %v", err)
+	}
+	e, err := svc.RecordEvidence(ctx, RecordEvidenceInput{
+		HypothesisID: h.ID,
+		Type:         string(evidence.EvidenceTypeManualObservation),
+		Relation:     string(evidence.RelationSupporting),
+		Description:  "stress test reproduces panic",
+	})
+	if err != nil {
+		t.Fatalf("record evidence: %v", err)
+	}
+	if e.InvestigationID != inv.ID || e.HypothesisID != h.ID || e.OpportunityID != "" {
+		t.Fatalf("evidence scope wrong: %+v", e)
+	}
+	if e.Type != evidence.EvidenceTypeManualObservation || e.Relation != evidence.RelationSupporting {
+		t.Fatalf("evidence fields wrong: %+v", e)
+	}
+}
+
+func TestPromoteOpportunityWithDependencies(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	defer func() { _ = svc.Close() }()
+
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+	h, err := svc.CreateHypothesis(ctx, inv.ID, investigation.CreateHypothesisInput{
+		Title: "race", Description: "desc", Category: investigation.CategoryBug,
+	})
+	if err != nil {
+		t.Fatalf("create hypothesis: %v", err)
+	}
+	o, err := svc.PromoteOpportunityWithInput(ctx, h.ID, investigation.PromoteOpportunityInput{
+		ProblemStatement:    "parser panics",
+		Scope:               "pkg/parser",
+		Impact:              "crash",
+		ExpectedEffort:      "small",
+		Confidence:          0.8,
+		Dependencies:        []string{"go1.22"},
+		MaintainerAlignment: "maintainer confirmed scope",
+	})
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if o.Status != investigation.OpportunityHypothesis {
+		t.Fatalf("unexpected status: %q", o.Status)
+	}
+	if len(o.Dependencies) != 1 || o.MaintainerAlignment == "" {
+		t.Fatalf("missing opportunity fields: %+v", o)
+	}
+	if len(o.EvidenceIDs) != 1 {
+		t.Fatalf("expected maintainer-alignment evidence, got %+v", o.EvidenceIDs)
+	}
+	c, err := svc.openCorpus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := c.ListEvidence(ctx, evidence.EvidenceFilter{OpportunityID: o.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != o.EvidenceIDs[0] {
+		t.Fatalf("promotion evidence was not stored atomically: %+v", items)
+	}
+}
+
+func TestDuplicateAndCollisionChecks(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	defer func() { _ = svc.Close() }()
+
+	c, err := svc.openCorpus(ctx)
+	if err != nil {
+		t.Fatalf("open corpus: %v", err)
+	}
+	repo, err := c.UpsertRepository(ctx, corpus.Repository{
+		Owner:           "owner",
+		Name:            "repo",
+		ExternalID:      "R_1",
+		Description:     "test repo",
+		DefaultBranch:   "main",
+		SourceCreatedAt: time.Now().UTC(),
+		SourceUpdatedAt: time.Now().UTC(),
+	}, "{}")
+	if err != nil {
+		t.Fatalf("upsert repository: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := c.UpsertThread(ctx, corpus.Thread{
+		RepositoryID:    repo.ID,
+		Kind:            corpus.ThreadKindIssue,
+		Number:          1,
+		State:           "open",
+		Title:           "race in parser",
+		Body:            "data race under load",
+		Author:          "alice",
+		SourceCreatedAt: now,
+		SourceUpdatedAt: now,
+	}, "{}"); err != nil {
+		t.Fatalf("upsert issue: %v", err)
+	}
+	if _, err := c.UpsertThread(ctx, corpus.Thread{
+		RepositoryID:    repo.ID,
+		Kind:            corpus.ThreadKindPullRequest,
+		Number:          2,
+		State:           "open",
+		Title:           "fix race in parser",
+		Body:            "addresses the panic",
+		Author:          "bob",
+		SourceCreatedAt: now,
+		SourceUpdatedAt: now,
+	}, "{}"); err != nil {
+		t.Fatalf("upsert pr: %v", err)
+	}
+
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+	h, err := svc.CreateHypothesis(ctx, inv.ID, investigation.CreateHypothesisInput{
+		Title:       "race in parser",
+		Description: "data race under load",
+		Category:    investigation.CategoryBug,
+	})
+	if err != nil {
+		t.Fatalf("create hypothesis: %v", err)
+	}
+
+	dup, err := svc.CheckHypothesisDuplicates(ctx, h.ID, 10)
+	if err != nil {
+		t.Fatalf("check duplicates: %v", err)
+	}
+	if dup.Total == 0 {
+		t.Fatalf("expected duplicate candidates, got 0")
+	}
+
+	coll, err := svc.CheckHypothesisCollisions(ctx, h.ID, 10)
+	if err != nil {
+		t.Fatalf("check collisions: %v", err)
+	}
+	if coll.Total == 0 {
+		t.Fatalf("expected open PR collisions, got 0")
+	}
+	for _, f := range coll.Findings {
+		if f.Relation != evidence.RelationContradicting {
+			t.Fatalf("collision finding should be contradicting, got %q", f.Relation)
+		}
+	}
+}
+
+func TestWorkspaceDiffAndReviewReport(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	svc := newLocalService(t)
+	defer func() { _ = svc.Close() }()
+
+	remote, baseSHA, candidateSHA := setupAppGitRemote(t)
+
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+	ws, err := svc.CreateWorkspace(ctx, inv.ID, cli.WorkspaceCreateOptions{
+		Remote:       remote,
+		BaseRef:      "master",
+		CandidateRef: "feature",
+		Name:         "ws-review",
+	})
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := os.Remove(filepath.Join(ws.Path, "base.txt")); err != nil {
+		t.Fatalf("delete tracked workspace file: %v", err)
+	}
+
+	diff, err := svc.WorkspaceDiff(ctx, ws.ID)
+	if err != nil {
+		t.Fatalf("workspace diff: %v", err)
+	}
+	if diff.BaseSHA != baseSHA || diff.CandidateSHA != candidateSHA {
+		t.Fatalf("unexpected diff metadata: %+v", diff)
+	}
+	if len(diff.ChangedFiles) == 0 {
+		t.Fatalf("expected changed files")
+	}
+	if !slices.Contains(diff.ChangedFiles, "base.txt") {
+		t.Fatalf("deleted file missing from changed files: %v", diff.ChangedFiles)
+	}
+	if len(diff.ReviewOrder) == 0 {
+		t.Fatalf("expected review order")
+	}
+
+	c, err := svc.openCorpus(ctx)
+	if err != nil {
+		t.Fatalf("open corpus: %v", err)
+	}
+
+	h, err := svc.CreateHypothesis(ctx, inv.ID, investigation.CreateHypothesisInput{
+		Title: "race", Description: "desc", Category: investigation.CategoryBug,
+	})
+	if err != nil {
+		t.Fatalf("create hypothesis: %v", err)
+	}
+	o, err := svc.PromoteOpportunityWithInput(ctx, h.ID, investigation.PromoteOpportunityInput{
+		ProblemStatement: "missing feature",
+		Scope:            "pkg/feature",
+		Impact:           "improvement",
+		ExpectedEffort:   "small",
+		Confidence:       0.7,
+	})
+	if err != nil {
+		t.Fatalf("promote opportunity: %v", err)
+	}
+
+	report, err := svc.PrepareReviewReport(ctx, PrepareReviewReportInput{
+		OpportunityID: o.ID,
+		WorkspaceID:   ws.ID,
+	})
+	if err != nil {
+		t.Fatalf("prepare review report: %v", err)
+	}
+	if report.DiffMetadata == nil || len(report.DiffMetadata.ChangedFiles) == 0 {
+		t.Fatalf("review report missing diff metadata: %+v", report)
+	}
+	if len(report.SuggestedReviewOrder) == 0 {
+		t.Fatalf("review report missing suggested review order")
+	}
+
+	// Wrong-workspace rejection: an unrelated workspace cannot be attached to the opportunity.
+	if err := c.SaveWorkspace(ctx, &workspace.Workspace{
+		Name:            "unrelated-workspace",
+		InvestigationID: "another-investigation",
+		RepoOwner:       "other",
+		RepoName:        "repo",
+		Path:            t.TempDir(),
+		CreatedAt:       time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.PrepareReviewReport(ctx, PrepareReviewReportInput{
+		OpportunityID: o.ID,
+		WorkspaceID:   "unrelated-workspace",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("expected wrong-workspace rejection, got %v", err)
+	}
+}
+
+type threadMetadataReader struct {
+	repo   github.Repository
+	issues []github.Issue
+}
+
+func (f *threadMetadataReader) GetRepository(ctx context.Context, owner, name string) (github.Repository, github.RateInfo, error) {
+	return f.repo, github.RateInfo{}, nil
+}
+
+func (f *threadMetadataReader) ListIssues(ctx context.Context, owner, name string, opts github.ListIssueOptions) (github.ListResult[github.Issue], error) {
+	return github.ListResult[github.Issue]{Items: f.issues, Page: github.PageInfo{}}, nil
+}
+
+func (f *threadMetadataReader) ListIssueComments(ctx context.Context, owner, name string, issueNumber int, opts github.PageOptions) (github.ListResult[github.IssueComment], error) {
+	return github.ListResult[github.IssueComment]{}, nil
+}
+
+func (f *threadMetadataReader) GetPullRequestDetails(ctx context.Context, owner, name string, number int) (github.PullRequestDetails, github.RateInfo, error) {
+	return github.PullRequestDetails{}, github.RateInfo{}, nil
+}
+
+func (f *threadMetadataReader) ListPullRequestReviews(ctx context.Context, owner, name string, number int, opts github.PageOptions) (github.ListResult[github.Review], error) {
+	return github.ListResult[github.Review]{}, nil
+}
+
+func (f *threadMetadataReader) ListPullRequestComments(ctx context.Context, owner, name string, number int, opts github.PageOptions) (github.ListResult[github.ReviewComment], error) {
+	return github.ListResult[github.ReviewComment]{}, nil
+}
+
+func TestSyncMapsIssueMetadataToThread(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestServiceNoNetwork(t)
+	defer func() { _ = svc.Close() }()
+
+	now := time.Unix(1000, 0).UTC()
+	reader := &threadMetadataReader{
+		repo: github.Repository{Owner: "owner", Name: "repo", NodeID: "R_1", UpdatedAt: now},
+		issues: []github.Issue{{
+			Number:            1,
+			Kind:              github.ThreadKindIssue,
+			State:             "closed",
+			StateReason:       "completed",
+			Title:             "bug",
+			Body:              "details",
+			Author:            "alice",
+			AuthorAssociation: "OWNER",
+			Labels:            []string{"bug"},
+			Assignees:         []string{"charlie", "bob", "alice"},
+			Draft:             false,
+			Locked:            true,
+			Milestone:         "v1.0",
+			CreatedAt:         now,
+			UpdatedAt:         now,
+			ClosedAt:          &now,
+		}},
+	}
+	svc.SetGitHubReader(reader)
+
+	if _, err := svc.Sync(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	c, err := svc.openCorpus(ctx)
+	if err != nil {
+		t.Fatalf("open corpus: %v", err)
+	}
+	repo, err := c.GetRepository(ctx, "owner", "repo")
+	if err != nil {
+		t.Fatalf("get repository: %v", err)
+	}
+	if repo == nil {
+		t.Fatal("repository not found")
+	}
+	thread, err := c.GetThread(ctx, repo.ID, corpus.ThreadKindIssue, 1)
+	if err != nil {
+		t.Fatalf("get thread: %v", err)
+	}
+	if thread == nil {
+		t.Fatal("thread not found")
+	}
+	if thread.StateReason != "completed" {
+		t.Errorf("state_reason = %q, want completed", thread.StateReason)
+	}
+	if thread.AuthorAssociation != "OWNER" {
+		t.Errorf("author_association = %q, want OWNER", thread.AuthorAssociation)
+	}
+	if thread.Milestone != "v1.0" {
+		t.Errorf("milestone = %q, want v1.0", thread.Milestone)
+	}
+	if !thread.Locked {
+		t.Errorf("locked = false, want true")
+	}
+	if thread.Draft {
+		t.Errorf("draft = true, want false")
+	}
+	if len(thread.Assignees) != 3 || thread.Assignees[0] != "alice" || thread.Assignees[1] != "bob" || thread.Assignees[2] != "charlie" {
+		t.Errorf("assignees = %v, want [alice bob charlie]", thread.Assignees)
 	}
 }

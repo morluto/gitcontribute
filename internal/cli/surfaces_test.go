@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,31 +16,35 @@ import (
 type fakeSurfacesService struct {
 	*fakeService
 
-	clustersCalled  bool
-	clusterCalled   bool
-	addLensCalled   bool
-	listLensCalled  bool
-	showLensCalled  bool
-	createColCalled bool
-	addColCalled    bool
-	listColCalled   bool
-	archiveCalled   bool
-	hydrateCalled   bool
-	coverageCalled  bool
-	runsCalled      bool
-	neighborsCalled bool
-	exportCalled    bool
+	clustersCalled    bool
+	clusterCalled     bool
+	addLensCalled     bool
+	listLensCalled    bool
+	showLensCalled    bool
+	explainLensCalled bool
+	createColCalled   bool
+	addColCalled      bool
+	listColCalled     bool
+	archiveCalled     bool
+	hydrateCalled     bool
+	threadsCalled     bool
+	coverageCalled    bool
+	runsCalled        bool
+	neighborsCalled   bool
+	exportCalled      bool
 
-	lastClustersArg   cli.RepoRef
-	lastClusterID     string
-	lastClusterLimit  int
-	lastLensName      string
-	lastLensDef       lens.Definition
-	lastCreateColName string
-	lastAddColName    string
-	lastAddColMembers []cli.CollectionMember
-	lastArchiveOpts   cli.ArchiveSyncOptions
-	lastHydrateOpts   cli.HydrateOptions
+	lastClustersArg     cli.RepoRef
+	lastClusterID       string
+	lastClusterLimit    int
+	lastLensName        string
+	lastLensExplainRef  string
+	lastLensExplainOpts cli.LensExplainOptions
+	lastLensDef         lens.Definition
+	lastCreateColName   string
+	lastAddColName      string
+	lastAddColMembers   []cli.CollectionMember
+	lastArchiveOpts     cli.ArchiveSyncOptions
+	lastHydrateOpts     cli.HydrateOptions
 }
 
 func (f *fakeSurfacesService) Clusters(ctx context.Context, repo cli.RepoRef, limit int) (*cli.ClusterListResult, error) {
@@ -107,6 +112,32 @@ func (f *fakeSurfacesService) ShowLens(ctx context.Context, name string) (*cli.L
 	}, f.err
 }
 
+func (f *fakeSurfacesService) ExplainLens(ctx context.Context, name, ref string, opts cli.LensExplainOptions) (*cli.LensExplainResult, error) {
+	f.explainLensCalled = true
+	f.lastLensName = name
+	f.lastLensExplainRef = ref
+	f.lastLensExplainOpts = opts
+	return &cli.LensExplainResult{
+		Lens: cli.LensResult{
+			Name: name,
+			Definition: lens.Definition{
+				Name:    name,
+				Filter:  lens.Filter{Kinds: []string{"issue"}},
+				Weights: map[string]float64{"relevance": 1},
+			},
+		},
+		Candidate: cli.LensExplainCandidate{
+			Kind:  "issue",
+			Repo:  cli.RepoRef{Owner: "o", Repo: "r"},
+			Title: "fix it",
+		},
+		Score: 0.75,
+		Signals: []cli.LensExplainSignal{
+			{Name: "relevance", Value: 0.8, Weight: 1, Contribution: 0.75},
+		},
+	}, f.err
+}
+
 func (f *fakeSurfacesService) CreateCollection(ctx context.Context, name string) (*cli.CollectionResult, error) {
 	f.createColCalled = true
 	f.lastCreateColName = name
@@ -140,6 +171,11 @@ func (f *fakeSurfacesService) Hydrate(ctx context.Context, repo cli.RepoRef, num
 func (f *fakeSurfacesService) Coverage(ctx context.Context, repo cli.RepoRef) (*cli.CoverageResult, error) {
 	f.coverageCalled = true
 	return &cli.CoverageResult{Repo: repo, Facets: []cli.CoverageFacet{{Facet: "threads", Present: true, Complete: true}}}, f.err
+}
+
+func (f *fakeSurfacesService) ArchiveThreads(ctx context.Context, repo cli.RepoRef, kind, state string, limit int) (*cli.ThreadListResult, error) {
+	f.threadsCalled = true
+	return &cli.ThreadListResult{Repo: repo, Threads: []cli.ThreadListItem{{Kind: "issue", Number: 1, State: "open", Title: "one"}}}, f.err
 }
 
 func (f *fakeSurfacesService) RunHistory(ctx context.Context, limit int) (*cli.RunListResult, error) {
@@ -237,6 +273,32 @@ func TestLensAddListShow(t *testing.T) {
 	if !strings.Contains(stdout.String(), "active-go") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
+
+	c4, stdout, _ := newSurfacesCLI(svc)
+	requireNoErr(t, c4.Run(context.Background(), []string{
+		"lens", "explain", "active-go", "o/r#1", "--query", "fix", "--repo", "o/r",
+		"--kind", "all", "--state", "open", "--author", "octo", "--association", "member",
+		"--assignee", "hubot", "--label", "bug", "--updated-after", "2026-07-01T00:00:00Z",
+	}))
+	wantUpdatedAfter := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	if !svc.explainLensCalled || svc.lastLensName != "active-go" || svc.lastLensExplainRef != "o/r#1" ||
+		svc.lastLensExplainOpts.Query != "fix" || svc.lastLensExplainOpts.Repo != "o/r" ||
+		svc.lastLensExplainOpts.Kind != "all" || svc.lastLensExplainOpts.State != "open" ||
+		svc.lastLensExplainOpts.Author != "octo" || svc.lastLensExplainOpts.Association != "member" ||
+		svc.lastLensExplainOpts.Assignee != "hubot" || !slices.Equal(svc.lastLensExplainOpts.Labels, []string{"bug"}) ||
+		!svc.lastLensExplainOpts.UpdatedAfter.Equal(wantUpdatedAfter) {
+		t.Fatalf("explain lens not called: called=%v name=%q ref=%q", svc.explainLensCalled, svc.lastLensName, svc.lastLensExplainRef)
+	}
+	if !strings.Contains(stdout.String(), "Lens: active-go") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestLensExplainRequiresRef(t *testing.T) {
+	svc := &fakeSurfacesService{fakeService: &fakeService{}}
+	c, _, _ := newSurfacesCLI(svc)
+	err := c.Run(context.Background(), []string{"lens", "explain", "active-go"})
+	requireCLIError(t, err, cli.ExitUsage)
 }
 
 func TestCollectionCreateAddList(t *testing.T) {
@@ -292,6 +354,13 @@ func TestArchiveAndLocalQueryCommands(t *testing.T) {
 	requireNoErr(t, c.Run(context.Background(), []string{"archive", "hydrate", "o/r#1", "--with", "issue_comments", "--json"}))
 	if !svc.hydrateCalled || len(svc.lastHydrateOpts.Facets) != 1 {
 		t.Fatalf("hydrate options = %+v", svc.lastHydrateOpts)
+	}
+	stdout.Reset()
+	requireNoErr(t, c.Run(context.Background(), []string{"archive", "refresh", "o/r", "--json"}))
+	requireNoErr(t, c.Run(context.Background(), []string{"archive", "threads", "o/r", "--kind", "issue", "--json"}))
+	requireNoErr(t, c.Run(context.Background(), []string{"archive", "coverage", "o/r", "--json"}))
+	if !svc.threadsCalled {
+		t.Fatal("archive threads was not dispatched")
 	}
 	stdout.Reset()
 	requireNoErr(t, c.Run(context.Background(), []string{"coverage", "o/r", "--json"}))

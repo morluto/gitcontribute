@@ -44,9 +44,10 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 		repo = in.Owner + "/" + in.Repo
 	}
 	res, err := r.Service.searchCorpus(ctx, in.Query, cli.SearchOptions{
-		Kind:  in.Kind,
-		Repo:  repo,
-		Limit: in.Limit,
+		Kind:   in.Kind,
+		Repo:   repo,
+		Limit:  in.Limit,
+		Cursor: in.Cursor,
 	})
 	if err != nil {
 		return mcpserver.SearchOutput{}, err
@@ -71,7 +72,7 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 			UpdatedAt: updatedAt,
 		}
 	}
-	return mcpserver.SearchOutput{Query: in.Query, Total: res.Total, Matches: matches}, nil
+	return mcpserver.SearchOutput{Query: in.Query, Total: res.Total, Matches: matches, NextCursor: res.NextCursor}, nil
 }
 
 // Repository reads a repository projection from the local corpus.
@@ -94,7 +95,7 @@ func (r *MCPReader) Repository(ctx context.Context, in mcpserver.RepoInput) (mcp
 	return mcpserver.RepositoryOutput{
 		Owner:     repo.Owner,
 		Repo:      repo.Name,
-		UpdatedAt: repo.SourceUpdatedAt.Format(time.RFC3339),
+		UpdatedAt: formatTime(repo.SourceUpdatedAt),
 		Fields: map[string]any{
 			"description":    repo.Description,
 			"default_branch": repo.DefaultBranch,
@@ -148,10 +149,6 @@ func (r *MCPReader) Thread(ctx context.Context, in mcpserver.ThreadInput) (mcpse
 }
 
 func corpusThreadToMCPOutput(t *corpus.Thread) mcpserver.ThreadOutput {
-	updatedAt := ""
-	if !t.UpdatedAt.IsZero() {
-		updatedAt = t.UpdatedAt.Format(time.RFC3339)
-	}
 	return mcpserver.ThreadOutput{
 		Owner:     "", // filled by caller
 		Repo:      "",
@@ -162,7 +159,7 @@ func corpusThreadToMCPOutput(t *corpus.Thread) mcpserver.ThreadOutput {
 		Body:      t.Body,
 		Author:    t.Author,
 		Labels:    t.Labels,
-		UpdatedAt: updatedAt,
+		UpdatedAt: formatTime(t.SourceUpdatedAt),
 	}
 }
 
@@ -207,10 +204,11 @@ func (r *MCPReader) SearchCode(ctx context.Context, in mcpserver.SearchCodeInput
 	if err != nil {
 		return mcpserver.SearchCodeOutput{}, err
 	}
-	matches, err := c.SearchCode(ctx, in.Query, ref, in.Limit)
+	page, err := c.SearchCodeWithOptions(ctx, in.Query, corpus.CodeSearchOptions{Ref: ref, Limit: in.Limit, Cursor: in.Cursor})
 	if err != nil {
 		return mcpserver.SearchCodeOutput{}, fmt.Errorf("search code: %w", err)
 	}
+	matches := page.Matches
 	out := make([]mcpserver.CodeMatchOutput, len(matches))
 	for i, m := range matches {
 		repo := m.Repo.String()
@@ -224,7 +222,7 @@ func (r *MCPReader) SearchCode(ctx context.Context, in mcpserver.SearchCodeInput
 			Bytes:    m.Bytes,
 		}
 	}
-	return mcpserver.SearchCodeOutput{Query: in.Query, Total: len(out), Matches: out}, nil
+	return mcpserver.SearchCodeOutput{Query: in.Query, Total: page.Total, Matches: out, NextCursor: page.NextCursor}, nil
 }
 
 // Investigation reads a local investigation workspace from the corpus.

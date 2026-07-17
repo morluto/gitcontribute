@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -70,22 +71,35 @@ func validateCollectionMember(member cli.CollectionMember) error {
 	if ref == "" {
 		return errors.New("collection member reference is required")
 	}
-	if kind == "repository" {
+	switch kind {
+	case "repository":
 		return validateCollectionRepoRef(ref)
-	}
-	if kind != "issue" && kind != "pull_request" {
+	case "issue", "pull_request", "thread":
+		return validateCollectionThreadRef(kind, ref)
+	case "opportunity", "investigation":
+		if len(ref) > 64 {
+			return fmt.Errorf("invalid %s reference %q: exceeds 64 bytes", kind, ref)
+		}
+		if _, err := uuid.Parse(ref); err != nil {
+			return fmt.Errorf("invalid %s reference %q: expected durable id", kind, ref)
+		}
+		return nil
+	default:
 		return fmt.Errorf("unsupported collection member kind %q", kind)
 	}
+}
+
+func validateCollectionThreadRef(kind, ref string) error {
 	if strings.Count(ref, "#") != 1 {
-		return fmt.Errorf("invalid thread reference %q: expected OWNER/REPO#NUMBER", ref)
+		return fmt.Errorf("invalid %s reference %q: expected OWNER/REPO#NUMBER", kind, ref)
 	}
 	repoRef, numberText, _ := strings.Cut(ref, "#")
 	if err := validateCollectionRepoRef(repoRef); err != nil {
-		return fmt.Errorf("invalid thread reference %q: %w", ref, err)
+		return fmt.Errorf("invalid %s reference %q: %w", kind, ref, err)
 	}
 	number, err := strconv.Atoi(strings.TrimSpace(numberText))
 	if err != nil || number <= 0 {
-		return fmt.Errorf("invalid thread reference %q: expected positive number", ref)
+		return fmt.Errorf("invalid %s reference %q: expected positive number", kind, ref)
 	}
 	return nil
 }

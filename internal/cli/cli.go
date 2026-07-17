@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/morluto/gitcontribute/internal/discovery"
+	"github.com/morluto/gitcontribute/internal/health"
 	"github.com/morluto/gitcontribute/internal/lens"
 )
 
@@ -23,6 +25,8 @@ const maxSearchLimit = 100
 type CLI struct {
 	svc    Service
 	runner MCPRunner
+	tui    TUIRunner
+	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
 }
@@ -35,39 +39,96 @@ func New(service Service, runner MCPRunner, stdout, stderr io.Writer) *CLI {
 	if stderr == nil {
 		stderr = io.Discard
 	}
-	return &CLI{svc: service, runner: runner, stdout: stdout, stderr: stderr}
+	return &CLI{svc: service, runner: runner, stdin: os.Stdin, stdout: stdout, stderr: stderr}
+}
+
+// SetTUIRunner wires the optional terminal UI adapter.
+func (c *CLI) SetTUIRunner(runner TUIRunner) { c.tui = runner }
+
+// SetInput replaces stdin for commands that explicitly import from "-".
+func (c *CLI) SetInput(input io.Reader) {
+	if input == nil {
+		input = strings.NewReader("")
+	}
+	c.stdin = input
 }
 
 type rootCmd struct {
 	Init          initCmd          `cmd:"" help:"Initialize the local corpus"`
+	Configure     configureCmd     `cmd:"" help:"Inspect or update typed configuration"`
+	Metadata      metadataCmd      `cmd:"" help:"Show application metadata and capabilities"`
 	Status        statusCmd        `cmd:"" help:"Show corpus status"`
+	Doctor        doctorCmd        `cmd:"" help:"Diagnose local configuration and dependencies"`
+	Health        healthCmd        `cmd:"" help:"Compute offline repository health and community metrics"`
 	Sync          syncCmd          `cmd:"" help:"Sync a repository into the corpus"`
 	Search        searchCmd        `cmd:"" help:"Search the local corpus"`
 	Dossier       dossierCmd       `cmd:"" help:"Show repository dossier"`
+	Seeds         seedsCmd         `cmd:"" help:"Extract evidence-backed contribution seeds"`
 	Index         indexCmd         `cmd:"" help:"Index a clean local checkout at its current commit"`
+	Acquire       acquireCmd       `cmd:"" help:"Clone or fetch a repository into the managed cache and index it"`
 	Source        sourceCmd        `cmd:"" help:"Manage repository discovery sources"`
 	Crawl         crawlCmd         `cmd:"" help:"Run a named discovery source"`
+	Tail          tailCmd          `cmd:"" help:"Continuously run a named discovery source"`
 	Investigation investigationCmd `cmd:"" help:"Manage investigations"`
 	Hypothesis    hypothesisCmd    `cmd:"" help:"Manage hypotheses"`
+	Duplicates    checkCmd         `cmd:"" help:"Check local duplicate candidates"`
+	Collisions    checkCmd         `cmd:"" help:"Check competing open pull requests"`
 	Opportunity   opportunityCmd   `cmd:"" help:"Manage opportunities"`
 	Workspace     workspaceCmd     `cmd:"" help:"Manage workspaces"`
+	Diff          diffCmd          `cmd:"" help:"Show a workspace diff against its recorded base"`
 	Validation    validationCmd    `cmd:"" help:"Manage validation definitions and runs"`
 	Evidence      evidenceCmd      `cmd:"" help:"Show evidence packets"`
 	Prepare       prepareCmd       `cmd:"" help:"Prepare contribution drafts"`
 	Archive       archiveCmd       `cmd:"" help:"Synchronize and hydrate the local archive"`
 	Coverage      coverageCmd      `cmd:"" help:"Show local repository facet coverage"`
 	Runs          runsCmd          `cmd:"" help:"List durable operation runs"`
+	Jobs          jobsCmd          `cmd:"" help:"List durable background jobs"`
+	Job           jobCmd           `cmd:"" help:"Inspect or cancel a durable job"`
 	Neighbors     neighborsCmd     `cmd:"" help:"Find similar local threads"`
 	Export        exportCmd        `cmd:"" help:"Export redacted local bundles"`
 	Clusters      clustersCmd      `cmd:"" help:"Compute and list duplicate-candidate clusters for a repository"`
 	Cluster       clusterCmd       `cmd:"" help:"Inspect duplicate-candidate clusters"`
 	Lens          lensCmd          `cmd:"" help:"Manage saved lenses"`
 	Collection    collectionCmd    `cmd:"" help:"Manage named collections"`
+	Triage        triageCmd        `cmd:"" help:"Manage triage outcomes"`
+	Contribution  contributionCmd  `cmd:"" help:"Manage contributions"`
+	Tracking      trackingCmd      `cmd:"" help:"Export or import local tracking metadata"`
 	MCP           mcpCmd           `cmd:"" name:"mcp" help:"Run the MCP server"`
+	TUI           tuiCmd           `cmd:"" name:"tui" help:"Browse the local corpus interactively"`
 }
 
 type initCmd struct {
 	JSON bool `name:"json" help:"Print the result as JSON"`
+}
+
+type configureCmd struct {
+	Database         *string `name:"database" help:"Corpus database path"`
+	TokenSource      *string `name:"token-source" help:"GitHub token source (none, env, gh-cli, or keyring)"`
+	TokenSourceKey   *string `name:"token-source-key" help:"Environment variable or keyring entry name"`
+	CrawlBudget      *int    `name:"crawl-budget" help:"Default request budget"`
+	CrawlConcurrency *int    `name:"crawl-concurrency" help:"Default crawl concurrency"`
+	CrawlRetryLimit  *int    `name:"crawl-retry-limit" help:"Default retry limit"`
+	CrawlTimeout     *string `name:"crawl-timeout" help:"Default request timeout"`
+	OutputFormat     *string `name:"output-format" help:"Default output format (text or json)"`
+	OutputMaxResults *int    `name:"output-max-results" help:"Default maximum result count"`
+	DryRun           bool    `name:"dry-run" help:"Validate and show without saving"`
+	JSON             bool    `name:"json" help:"Print the result as JSON"`
+}
+
+type metadataCmd struct {
+	JSON bool `name:"json" help:"Print the result as JSON"`
+}
+
+type doctorCmd struct {
+	JSON bool `name:"json" help:"Print the result as JSON"`
+}
+
+type healthCmd struct {
+	OwnerRepo  string        `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	Start      string        `name:"start" help:"Window start as RFC3339"`
+	End        string        `name:"end" help:"Window end as RFC3339"`
+	StaleAfter time.Duration `name:"stale-after" default:"336h" help:"Open PR inactivity threshold"`
+	JSON       bool          `name:"json" help:"Print the result as JSON"`
 }
 
 type statusCmd struct {
@@ -80,21 +141,67 @@ type syncCmd struct {
 }
 
 type searchCmd struct {
-	Query string `arg:"" name:"query" help:"Search query"`
-	Kind  string `name:"kind" short:"k" default:"all" enum:"repos,issues,prs,threads,code,all" help:"Search kind"`
-	Repo  string `name:"repo" help:"Restrict to repository OWNER/REPO"`
-	Limit int    `name:"limit" default:"20" help:"Maximum number of results"`
-	JSON  bool   `name:"json" help:"Print the result as JSON"`
+	Repos   searchKindCmd `cmd:"" help:"Search repositories"`
+	Issues  searchKindCmd `cmd:"" help:"Search issues"`
+	PRs     searchKindCmd `cmd:"" name:"prs" help:"Search pull requests"`
+	Threads searchKindCmd `cmd:"" help:"Search issues and pull requests"`
+	Code    searchKindCmd `cmd:"" help:"Search indexed code documents"`
+	All     searchKindCmd `cmd:"" help:"Search repositories, threads, and code"`
+}
+
+type searchKindCmd struct {
+	Query        string   `arg:"" name:"query" help:"Search query"`
+	Repo         string   `name:"repo" help:"Restrict to repository OWNER/REPO"`
+	State        string   `name:"state" default:"all" enum:"open,closed,all" help:"Restrict thread state"`
+	Author       string   `name:"author" help:"Restrict thread author"`
+	Association  string   `name:"association" help:"Restrict author association (e.g. OWNER, MEMBER, CONTRIBUTOR, NONE)"`
+	Assignee     string   `name:"assignee" help:"Restrict to threads assigned to a user"`
+	Labels       []string `name:"label" help:"Require a label (repeatable)"`
+	UpdatedAfter string   `name:"updated-after" help:"Restrict source updates to RFC3339 timestamp or later"`
+	Limit        int      `name:"limit" default:"20" help:"Maximum number of results"`
+	Cursor       string   `name:"cursor" help:"Opaque cursor returned by the previous page"`
+	Lens         string   `name:"lens" help:"Rank and filter with a saved lens"`
+	JSON         bool     `name:"json" help:"Print the result as JSON"`
 }
 
 type dossierCmd struct {
+	Build  dossierBuildCmd  `cmd:"" help:"Build and persist a repository dossier"`
+	Show   dossierShowCmd   `cmd:"" help:"Show the latest persisted dossier"`
+	Export dossierExportCmd `cmd:"" help:"Export a repository dossier"`
+}
+
+type dossierBuildCmd struct {
 	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type dossierShowCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type dossierExportCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	Format    string `name:"format" default:"markdown" enum:"json,markdown,md" help:"Export format"`
+	Output    string `name:"output" help:"Write to a file instead of stdout"`
+}
+
+type seedsCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	From      string `name:"from" default:"merged-prs,closed-prs,issues" help:"Comma-separated seed source classes"`
+	Limit     int    `name:"limit" default:"20" help:"Maximum seeds to return"`
 	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type indexCmd struct {
 	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
 	Path      string `arg:"" optional:"" default:"." help:"Path to a clean repository checkout"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type acquireCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	Remote    string `name:"remote" help:"Git remote URL (defaults to GitHub HTTPS)"`
 	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
 
@@ -118,6 +225,7 @@ type sourceAddSearchCmd struct {
 
 type sourceAddReposCmd struct {
 	Name  string   `name:"name" help:"Stable source name (defaults to the first repo)"`
+	File  string   `name:"file" help:"Read repository refs or structured JSON from a file ('-' for stdin)"`
 	Repos []string `arg:"" optional:"" help:"Repositories as OWNER/REPO or GitHub URLs"`
 	JSON  bool     `name:"json" help:"Print the result as JSON"`
 }
@@ -144,6 +252,15 @@ type crawlCmd struct {
 	JSON   bool          `name:"json" help:"Print the result as JSON"`
 }
 
+type tailCmd struct {
+	Name     string        `arg:"" help:"Source name"`
+	Since    time.Duration `name:"since" default:"2h" help:"Overlapping source window per iteration"`
+	Budget   int           `name:"budget" default:"500" help:"Maximum requests per iteration"`
+	Interval time.Duration `name:"interval" default:"1h" help:"Delay between iterations"`
+	Once     bool          `name:"once" help:"Run one iteration and exit"`
+	JSON     bool          `name:"json" help:"Print the final result as JSON"`
+}
+
 type investigationCmd struct {
 	Start startInvestigationCmd `cmd:"" help:"Start an investigation"`
 	Show  showInvestigationCmd  `cmd:"" help:"Show an investigation"`
@@ -167,8 +284,42 @@ type listInvestigationCmd struct {
 }
 
 type hypothesisCmd struct {
-	Add  addHypothesisCmd  `cmd:"" help:"Add a hypothesis"`
-	List listHypothesisCmd `cmd:"" help:"List hypotheses"`
+	Add       addHypothesisCmd       `cmd:"" help:"Add a hypothesis"`
+	Update    updateHypothesisCmd    `cmd:"" help:"Update structured hypothesis fields"`
+	SetStatus setHypothesisStatusCmd `cmd:"" name:"set-status" help:"Transition hypothesis status"`
+	List      listHypothesisCmd      `cmd:"" help:"List hypotheses"`
+}
+
+type updateHypothesisCmd struct {
+	ID                 string   `arg:"" help:"Hypothesis ID"`
+	Title              *string  `name:"title" help:"Replacement title"`
+	Description        *string  `name:"description" help:"Replacement description"`
+	Category           *string  `name:"category" help:"Replacement category"`
+	ExpectedBehavior   *string  `name:"expected" help:"Expected behavior"`
+	ObservedBehavior   *string  `name:"observed" help:"Observed behavior"`
+	PotentialImpact    *string  `name:"impact" help:"Potential impact"`
+	OpenQuestions      []string `name:"question" help:"Open question (repeatable)"`
+	AffectedComponents []string `name:"component" help:"Affected component (repeatable)"`
+	Rationale          string   `name:"rationale" required:"" help:"Reason for the update"`
+	JSON               bool     `name:"json" help:"Print the result as JSON"`
+}
+
+type setHypothesisStatusCmd struct {
+	ID        string `arg:"" help:"Hypothesis ID"`
+	Status    string `arg:"" enum:"proposed,promoted,rejected,deferred,superseded" help:"Target status"`
+	Rationale string `name:"rationale" required:"" help:"Reason for transition"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type checkCmd struct {
+	Check checkTargetCmd `cmd:"" help:"Run the local check"`
+}
+
+type checkTargetCmd struct {
+	ID     string `arg:"" help:"Hypothesis or opportunity ID"`
+	Target string `name:"target" default:"hypothesis" enum:"hypothesis,opportunity" help:"Target kind"`
+	Limit  int    `name:"limit" default:"20" help:"Maximum findings"`
+	JSON   bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type addHypothesisCmd struct {
@@ -185,10 +336,18 @@ type listHypothesisCmd struct {
 }
 
 type opportunityCmd struct {
-	Promote   promoteOpportunityCmd   `cmd:"" help:"Promote a hypothesis to an opportunity"`
-	Show      showOpportunityCmd      `cmd:"" help:"Show an opportunity"`
-	List      listOpportunityCmd      `cmd:"" help:"List opportunities"`
-	SetStatus setStatusOpportunityCmd `cmd:"" name:"set-status" help:"Set opportunity status"`
+	Promote      promoteOpportunityCmd      `cmd:"" help:"Promote a hypothesis to an opportunity"`
+	Show         showOpportunityCmd         `cmd:"" help:"Show an opportunity"`
+	List         listOpportunityCmd         `cmd:"" help:"List opportunities"`
+	SetStatus    setStatusOpportunityCmd    `cmd:"" name:"set-status" help:"Set opportunity status"`
+	SetCollision setCollisionOpportunityCmd `cmd:"" name:"set-collision" help:"Set collision status"`
+}
+
+type setCollisionOpportunityCmd struct {
+	ID        string `arg:"" help:"Opportunity ID"`
+	Status    string `arg:"" enum:"unknown,none,possible,confirmed,blocked" help:"Collision status"`
+	Rationale string `name:"rationale" required:"" help:"Reason for the status"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type promoteOpportunityCmd struct {
@@ -237,6 +396,11 @@ type showWorkspaceCmd struct {
 	JSON bool   `name:"json" help:"Print the result as JSON"`
 }
 
+type diffCmd struct {
+	WorkspaceID string `arg:"" help:"Workspace ID"`
+	JSON        bool   `name:"json" help:"Print the result as JSON"`
+}
+
 type validationCmd struct {
 	Define  defineValidationCmd  `cmd:"" help:"Define a validation"`
 	Run     runValidationCmd     `cmd:"" help:"Run a validation definition"`
@@ -270,7 +434,19 @@ type compareValidationCmd struct {
 }
 
 type evidenceCmd struct {
-	Show showEvidenceCmd `cmd:"" help:"Show evidence for an investigation"`
+	Add    addEvidenceCmd    `cmd:"" help:"Record evidence"`
+	Show   showEvidenceCmd   `cmd:"" help:"Show evidence for an investigation"`
+	Export exportEvidenceCmd `cmd:"" help:"Export an evidence packet"`
+}
+
+type addEvidenceCmd struct {
+	Investigation string `name:"investigation" help:"Investigation ID"`
+	Hypothesis    string `name:"hypothesis" help:"Hypothesis ID"`
+	Opportunity   string `name:"opportunity" help:"Opportunity ID"`
+	Type          string `name:"type" required:"" help:"Evidence type"`
+	Relation      string `name:"relation" required:"" enum:"supporting,contradicting,inconclusive,stale,invalid" help:"Evidence relation"`
+	Description   string `name:"description" required:"" help:"Evidence description"`
+	JSON          bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type showEvidenceCmd struct {
@@ -279,8 +455,15 @@ type showEvidenceCmd struct {
 }
 
 type prepareCmd struct {
-	Issue issueCmd `cmd:"" help:"Prepare an issue draft"`
-	PR    prCmd    `cmd:"" name:"pr" help:"Prepare a pull request draft"`
+	Issue  issueCmd  `cmd:"" help:"Prepare an issue draft"`
+	PR     prCmd     `cmd:"" name:"pr" help:"Prepare a pull request draft"`
+	Review reviewCmd `cmd:"" help:"Prepare a read-only review report"`
+}
+
+type reviewCmd struct {
+	OpportunityID string `arg:"" optional:"" help:"Opportunity ID"`
+	WorkspaceID   string `name:"workspace" help:"Workspace ID"`
+	JSON          bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type issueCmd struct {
@@ -319,8 +502,11 @@ type clusterShowCmd struct {
 }
 
 type archiveCmd struct {
-	Sync    archiveSyncCmd    `cmd:"" help:"Synchronize repository threads"`
-	Hydrate archiveHydrateCmd `cmd:"" help:"Hydrate one issue or pull request"`
+	Sync     archiveSyncCmd    `cmd:"" help:"Synchronize repository threads"`
+	Hydrate  archiveHydrateCmd `cmd:"" help:"Hydrate one issue or pull request"`
+	Refresh  archiveRefreshCmd `cmd:"" help:"Refresh all repository threads"`
+	Threads  archiveThreadsCmd `cmd:"" help:"List archived repository threads"`
+	Coverage coverageCmd       `cmd:"" help:"Show repository facet coverage"`
 }
 
 type archiveSyncCmd struct {
@@ -339,6 +525,20 @@ type archiveHydrateCmd struct {
 	JSON     bool   `name:"json" help:"Print the result as JSON"`
 }
 
+type archiveRefreshCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	MaxPages  int    `name:"max-pages" default:"1000" help:"Maximum issue-list pages"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type archiveThreadsCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	Kind      string `name:"kind" default:"all" enum:"all,issue,pr,pull_request" help:"Restrict by thread kind"`
+	State     string `name:"state" default:"all" enum:"open,closed,all" help:"Restrict by state"`
+	Limit     int    `name:"limit" default:"100" help:"Maximum threads to return"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
 type coverageCmd struct {
 	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
 	JSON      bool   `name:"json" help:"Print the result as JSON"`
@@ -347,6 +547,27 @@ type coverageCmd struct {
 type runsCmd struct {
 	Limit int  `name:"limit" default:"50" help:"Maximum runs to return"`
 	JSON  bool `name:"json" help:"Print the result as JSON"`
+}
+
+type jobsCmd struct {
+	Status string `name:"status" help:"Filter by status (queued, running, succeeded, failed, or cancelled)"`
+	Limit  int    `name:"limit" default:"50" help:"Maximum jobs to return"`
+	JSON   bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type jobCmd struct {
+	Show   jobShowCmd   `cmd:"" help:"Show one durable job"`
+	Cancel jobCancelCmd `cmd:"" help:"Request cancellation"`
+}
+
+type jobShowCmd struct {
+	ID   string `arg:"" help:"Opaque job ID"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type jobCancelCmd struct {
+	ID   string `arg:"" help:"Opaque job ID"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type neighborsCmd struct {
@@ -374,9 +595,10 @@ type exportEvidenceCmd struct {
 }
 
 type lensCmd struct {
-	Add  lensAddCmd  `cmd:"" help:"Add or replace a saved lens from a JSON file"`
-	List lensListCmd `cmd:"" help:"List saved lenses"`
-	Show lensShowCmd `cmd:"" help:"Show a saved lens"`
+	Add     lensAddCmd     `cmd:"" help:"Add or replace a saved lens from a JSON file"`
+	List    lensListCmd    `cmd:"" help:"List saved lenses"`
+	Show    lensShowCmd    `cmd:"" help:"Show a saved lens"`
+	Explain lensExplainCmd `cmd:"" help:"Explain a saved lens score for a result"`
 }
 
 type lensAddCmd struct {
@@ -392,6 +614,21 @@ type lensListCmd struct {
 type lensShowCmd struct {
 	Name string `arg:"" help:"Lens name"`
 	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type lensExplainCmd struct {
+	Name         string   `arg:"" help:"Lens name"`
+	Ref          string   `arg:"" help:"Result reference (e.g. owner/repo, owner/repo#number, issue:owner/repo#number, code:owner/repo/path)"`
+	Query        string   `name:"query" required:"" help:"Original search query"`
+	Repo         string   `name:"repo" help:"Original repository scope (OWNER/REPO)"`
+	Kind         string   `name:"kind" help:"Original search kind; defaults to the result kind"`
+	State        string   `name:"state" default:"all" enum:"open,closed,all" help:"Original thread state filter"`
+	Author       string   `name:"author" help:"Original thread author filter"`
+	Association  string   `name:"association" help:"Original author association filter"`
+	Assignee     string   `name:"assignee" help:"Original assignee filter"`
+	Labels       []string `name:"label" help:"Original required label (repeatable)"`
+	UpdatedAfter string   `name:"updated-after" help:"Original RFC3339 source update cutoff"`
+	JSON         bool     `name:"json" help:"Print the result as JSON"`
 }
 
 type collectionCmd struct {
@@ -416,12 +653,22 @@ type collectionListCmd struct {
 }
 
 type mcpCmd struct {
+	Serve mcpServeCmd `cmd:"" help:"Serve MCP over the selected transport"`
+}
+
+type mcpServeCmd struct {
 	Transport string `name:"transport" default:"stdio" enum:"stdio" help:"MCP transport protocol"`
+}
+
+type tuiCmd struct {
+	OwnerRepo string `arg:"" optional:"" name:"owner/repo" help:"Optional repository scope"`
+	JSON      bool   `name:"json" help:"Print an offline snapshot instead of starting an interactive terminal"`
 }
 
 // Run parses arguments and dispatches to the appropriate Service or MCPRunner
 // method. It respects context cancellation.
 func (c *CLI) Run(ctx context.Context, args []string) error {
+	args = normalizeCompatibilityArgs(args)
 	var cli rootCmd
 	parser, err := kong.New(&cli,
 		kong.Name("gitcontribute"),
@@ -450,28 +697,48 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	switch cmd {
 	case "init":
 		return c.runInit(ctx, &cli.Init)
+	case "configure":
+		return c.runConfigure(ctx, &cli.Configure)
+	case "metadata":
+		return c.runMetadata(ctx, &cli.Metadata)
 	case "status":
 		return c.runStatus(ctx, &cli.Status)
+	case "doctor":
+		return c.runDoctor(ctx, &cli.Doctor)
+	case "health":
+		return c.runHealth(ctx, &cli.Health)
 	case "sync":
 		return c.runSync(ctx, &cli.Sync)
 	case "search":
-		return c.runSearch(ctx, &cli.Search)
+		return c.runSearch(ctx, command, &cli.Search)
 	case "dossier":
-		return c.runDossier(ctx, &cli.Dossier)
+		return c.runDossier(ctx, command, &cli.Dossier)
+	case "seeds":
+		return c.runSeeds(ctx, &cli.Seeds)
 	case "index":
 		return c.runIndex(ctx, &cli.Index)
+	case "acquire":
+		return c.runAcquire(ctx, &cli.Acquire)
 	case "source":
 		return c.runSource(ctx, command, &cli.Source)
 	case "crawl":
 		return c.runCrawl(ctx, &cli.Crawl)
+	case "tail":
+		return c.runTail(ctx, &cli.Tail)
 	case "investigation":
 		return c.runInvestigation(ctx, command, &cli.Investigation)
 	case "hypothesis":
 		return c.runHypothesis(ctx, command, &cli.Hypothesis)
+	case "duplicates":
+		return c.runCheck(ctx, command, "duplicates", &cli.Duplicates)
+	case "collisions":
+		return c.runCheck(ctx, command, "collisions", &cli.Collisions)
 	case "opportunity":
 		return c.runOpportunity(ctx, command, &cli.Opportunity)
 	case "workspace":
 		return c.runWorkspace(ctx, command, &cli.Workspace)
+	case "diff":
+		return c.runDiff(ctx, &cli.Diff)
 	case "validation":
 		return c.runValidation(ctx, command, &cli.Validation)
 	case "evidence":
@@ -484,6 +751,10 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runCoverage(ctx, &cli.Coverage)
 	case "runs":
 		return c.runRuns(ctx, &cli.Runs)
+	case "jobs":
+		return c.runJobs(ctx, &cli.Jobs)
+	case "job":
+		return c.runJob(ctx, command, &cli.Job)
 	case "neighbors":
 		return c.runNeighbors(ctx, &cli.Neighbors)
 	case "export":
@@ -496,15 +767,112 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runLens(ctx, command, &cli.Lens)
 	case "collection":
 		return c.runCollection(ctx, command, &cli.Collection)
+	case "triage":
+		return c.runTriage(ctx, command, &cli.Triage)
+	case "contribution":
+		return c.runContribution(ctx, command, &cli.Contribution)
+	case "tracking":
+		return c.runTracking(ctx, command, &cli.Tracking)
 	case "mcp":
 		return c.runMCP(ctx, &cli.MCP)
+	case "tui":
+		return c.runTUI(ctx, &cli.TUI)
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown command: %s", cmd))
 	}
 }
 
+func normalizeCompatibilityArgs(args []string) []string {
+	if len(args) == 0 {
+		return args
+	}
+	switch args[0] {
+	case "mcp":
+		if len(args) > 1 && args[1] == "serve" {
+			return args
+		}
+		out := make([]string, 0, len(args)+1)
+		out = append(out, "mcp", "serve")
+		return append(out, args[1:]...)
+	case "dossier":
+		if len(args) > 1 && (args[1] == "build" || args[1] == "show" || args[1] == "export") {
+			return args
+		}
+		out := make([]string, 0, len(args)+1)
+		out = append(out, "dossier", "show")
+		return append(out, args[1:]...)
+	case "search":
+		if len(args) > 1 {
+			switch args[1] {
+			case "repos", "issues", "prs", "threads", "code", "all", "--help", "-h":
+				return args
+			}
+		}
+		kind := "all"
+		out := make([]string, 0, len(args)+1)
+		out = append(out, "search")
+		for i := 1; i < len(args); i++ {
+			arg := args[i]
+			switch {
+			case strings.HasPrefix(arg, "--kind="):
+				kind = strings.TrimPrefix(arg, "--kind=")
+			case arg == "--kind" || arg == "-k":
+				if i+1 < len(args) {
+					kind = args[i+1]
+					i++
+				}
+			default:
+				out = append(out, arg)
+			}
+		}
+		return append([]string{"search", kind}, out[1:]...)
+	default:
+		return args
+	}
+}
+
 func (c *CLI) discoveryService() (DiscoveryService, error) {
 	service, ok := c.svc.(DiscoveryService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) tailService() (TailService, error) {
+	service, ok := c.svc.(TailService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) controlService() (ControlService, error) {
+	service, ok := c.svc.(ControlService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) jobService() (JobService, error) {
+	service, ok := c.svc.(JobService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) workflowExtensionService() (WorkflowExtensionService, error) {
+	service, ok := c.svc.(WorkflowExtensionService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) dossierExtensionService() (DossierExtensionService, error) {
+	service, ok := c.svc.(DossierExtensionService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -591,6 +959,30 @@ func (c *CLI) localQueryService() (LocalQueryService, error) {
 	return service, nil
 }
 
+func (c *CLI) archiveThreadService() (ArchiveThreadService, error) {
+	service, ok := c.svc.(ArchiveThreadService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) acquisitionService() (AcquisitionService, error) {
+	service, ok := c.svc.(AcquisitionService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) healthService() (HealthService, error) {
+	service, ok := c.svc.(HealthService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
 func (c *CLI) exportService() (ExportService, error) {
 	service, ok := c.svc.(ExportService)
 	if !ok {
@@ -612,7 +1004,7 @@ func (c *CLI) runSource(ctx context.Context, command string, cmd *sourceCmd) err
 		}
 		return c.render(cmd.Add.Search.JSON, result)
 	case "source add repos":
-		refs, name, err := parseRepoSourceArgs(cmd.Add.Repos)
+		refs, name, err := c.parseRepoSourceArgs(cmd.Add.Repos)
 		if err != nil {
 			return NewCLIError(ExitUsage, err)
 		}
@@ -648,12 +1040,40 @@ func (c *CLI) runSource(ctx context.Context, command string, cmd *sourceCmd) err
 	}
 }
 
-func parseRepoSourceArgs(cmd sourceAddReposCmd) ([]RepoRef, string, error) {
-	if len(cmd.Repos) == 0 {
+func (c *CLI) parseRepoSourceArgs(cmd sourceAddReposCmd) ([]RepoRef, string, error) {
+	rawRepos := append([]string(nil), cmd.Repos...)
+	file := strings.TrimSpace(cmd.File)
+	if len(rawRepos) == 1 && rawRepos[0] == "-" && file == "" {
+		file = "-"
+		rawRepos = nil
+	}
+	if file != "" && len(rawRepos) > 0 {
+		return nil, "", errors.New("repository arguments cannot be combined with --file")
+	}
+	if file != "" {
+		var reader io.Reader
+		if file == "-" {
+			reader = c.stdin
+		} else {
+			opened, err := os.Open(file)
+			if err != nil {
+				return nil, "", fmt.Errorf("open repository file: %w", err)
+			}
+			defer opened.Close()
+			reader = opened
+		}
+		var err error
+		rawRepos, err = readRepositoryImport(reader)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+	if len(rawRepos) == 0 {
 		return nil, "", errors.New("at least one repository is required")
 	}
-	refs := make([]RepoRef, 0, len(cmd.Repos))
-	for _, raw := range cmd.Repos {
+	refs := make([]RepoRef, 0, len(rawRepos))
+	seen := make(map[string]struct{}, len(rawRepos))
+	for _, raw := range rawRepos {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			continue
@@ -662,7 +1082,13 @@ func parseRepoSourceArgs(cmd sourceAddReposCmd) ([]RepoRef, string, error) {
 		if err != nil {
 			return nil, "", err
 		}
-		refs = append(refs, RepoRef{Owner: dr.Owner, Repo: dr.Repo})
+		ref := RepoRef{Owner: dr.Owner, Repo: dr.Repo}
+		key := strings.ToLower(ref.String())
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		refs = append(refs, ref)
 	}
 	if len(refs) == 0 {
 		return nil, "", errors.New("at least one valid repository is required")
@@ -676,6 +1102,85 @@ func parseRepoSourceArgs(cmd sourceAddReposCmd) ([]RepoRef, string, error) {
 		name = strings.ToLower(name)
 	}
 	return refs, name, nil
+}
+
+const maxRepositoryImportBytes = 4 << 20
+
+func readRepositoryImport(reader io.Reader) ([]string, error) {
+	data, err := io.ReadAll(io.LimitReader(reader, maxRepositoryImportBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read repository import: %w", err)
+	}
+	if len(data) > maxRepositoryImportBytes {
+		return nil, fmt.Errorf("repository import exceeds %d bytes", maxRepositoryImportBytes)
+	}
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		return nil, errors.New("repository import is empty")
+	}
+	if strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "{") {
+		return parseRepositoryImportJSON([]byte(trimmed))
+	}
+	var refs []string
+	scanner := bufio.NewScanner(strings.NewReader(trimmed))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" && !strings.HasPrefix(line, "#") {
+			refs = append(refs, line)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan repository import: %w", err)
+	}
+	return refs, nil
+}
+
+func parseRepositoryImportJSON(data []byte) ([]string, error) {
+	var items []json.RawMessage
+	if data[0] == '[' {
+		if err := json.Unmarshal(data, &items); err != nil {
+			return nil, fmt.Errorf("parse repository import: %w", err)
+		}
+	} else {
+		var wrapper struct {
+			Repositories []json.RawMessage `json:"repositories"`
+		}
+		if err := json.Unmarshal(data, &wrapper); err != nil {
+			return nil, fmt.Errorf("parse repository import: %w", err)
+		}
+		items = wrapper.Repositories
+	}
+	refs := make([]string, 0, len(items))
+	for _, item := range items {
+		var text string
+		if json.Unmarshal(item, &text) == nil {
+			refs = append(refs, text)
+			continue
+		}
+		var object struct {
+			Owner    string `json:"owner"`
+			Repo     string `json:"repo"`
+			FullName string `json:"full_name"`
+			URL      string `json:"url"`
+		}
+		if err := json.Unmarshal(item, &object); err != nil {
+			return nil, fmt.Errorf("parse repository import item: %w", err)
+		}
+		switch {
+		case object.Owner != "" && object.Repo != "":
+			refs = append(refs, object.Owner+"/"+object.Repo)
+		case object.FullName != "":
+			refs = append(refs, object.FullName)
+		case object.URL != "":
+			refs = append(refs, object.URL)
+		default:
+			return nil, errors.New("repository import item requires owner/repo, full_name, or url")
+		}
+	}
+	if len(refs) == 0 {
+		return nil, errors.New("repository import contains no repositories")
+	}
+	return refs, nil
 }
 
 func parseGHArchiveEvents(events string) ([]string, error) {
@@ -719,6 +1224,24 @@ func (c *CLI) runCrawl(ctx context.Context, cmd *crawlCmd) error {
 	}
 	fmt.Fprintf(c.stderr, "crawling %s...\n", cmd.Name)
 	result, err := service.Crawl(ctx, cmd.Name, CrawlOptions{Since: cmd.Since, Budget: cmd.Budget})
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runTail(ctx context.Context, cmd *tailCmd) error {
+	if cmd.Since <= 0 || cmd.Budget <= 0 || cmd.Budget > 5000 || cmd.Interval <= 0 {
+		return NewCLIError(ExitUsage, errors.New("since, budget, and interval must be positive; budget cannot exceed 5000"))
+	}
+	service, err := c.tailService()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(c.stderr, "tailing source %s every %s...\n", cmd.Name, cmd.Interval)
+	result, err := service.TailSource(ctx, cmd.Name, TailOptions{
+		Since: cmd.Since, Budget: cmd.Budget, Interval: cmd.Interval, Once: cmd.Once,
+	})
 	if err != nil {
 		return c.mapError(err)
 	}
@@ -772,6 +1295,31 @@ func (c *CLI) runHypothesis(ctx context.Context, command string, cmd *hypothesis
 			return c.mapError(err)
 		}
 		return c.render(cmd.Add.JSON, result)
+	case "hypothesis update":
+		extended, err := c.workflowExtensionService()
+		if err != nil {
+			return err
+		}
+		result, err := extended.UpdateHypothesisForCLI(ctx, cmd.Update.ID, HypothesisUpdateOptions{
+			Title: cmd.Update.Title, Description: cmd.Update.Description, Category: cmd.Update.Category,
+			ExpectedBehavior: cmd.Update.ExpectedBehavior, ObservedBehavior: cmd.Update.ObservedBehavior,
+			PotentialImpact: cmd.Update.PotentialImpact, OpenQuestions: cmd.Update.OpenQuestions,
+			AffectedComponents: cmd.Update.AffectedComponents, Rationale: cmd.Update.Rationale,
+		})
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Update.JSON, result)
+	case "hypothesis set-status":
+		extended, err := c.workflowExtensionService()
+		if err != nil {
+			return err
+		}
+		result, err := extended.TransitionHypothesisForCLI(ctx, cmd.SetStatus.ID, cmd.SetStatus.Status, cmd.SetStatus.Rationale)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.SetStatus.JSON, result)
 	case "hypothesis list":
 		result, err := service.ListHypotheses(ctx, cmd.List.InvestigationID)
 		if err != nil {
@@ -814,9 +1362,42 @@ func (c *CLI) runOpportunity(ctx context.Context, command string, cmd *opportuni
 			return c.mapError(err)
 		}
 		return c.render(cmd.SetStatus.JSON, result)
+	case "opportunity set-collision":
+		extended, err := c.workflowExtensionService()
+		if err != nil {
+			return err
+		}
+		result, err := extended.SetCollisionForCLI(ctx, cmd.SetCollision.ID, cmd.SetCollision.Status, cmd.SetCollision.Rationale)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.SetCollision.JSON, result)
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown opportunity command: %s", command))
 	}
+}
+
+func (c *CLI) runCheck(ctx context.Context, command, kind string, cmd *checkCmd) error {
+	if command != kind+" check" {
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown %s command: %s", kind, command))
+	}
+	if cmd.Check.Limit <= 0 || cmd.Check.Limit > 100 {
+		return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 100"))
+	}
+	service, err := c.workflowExtensionService()
+	if err != nil {
+		return err
+	}
+	var result any
+	if kind == "duplicates" {
+		result, err = service.CheckDuplicatesForCLI(ctx, cmd.Check.Target, cmd.Check.ID, cmd.Check.Limit)
+	} else {
+		result, err = service.CheckCollisionsForCLI(ctx, cmd.Check.Target, cmd.Check.ID, cmd.Check.Limit)
+	}
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.Check.JSON, result)
 }
 
 func (c *CLI) runWorkspace(ctx context.Context, command string, cmd *workspaceCmd) error {
@@ -846,6 +1427,18 @@ func (c *CLI) runWorkspace(ctx context.Context, command string, cmd *workspaceCm
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown workspace command: %s", command))
 	}
+}
+
+func (c *CLI) runDiff(ctx context.Context, cmd *diffCmd) error {
+	service, err := c.workflowExtensionService()
+	if err != nil {
+		return err
+	}
+	result, err := service.WorkspaceDiffForCLI(ctx, cmd.WorkspaceID)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
 }
 
 func (c *CLI) runValidation(ctx context.Context, command string, cmd *validationCmd) error {
@@ -917,12 +1510,28 @@ func (c *CLI) runEvidence(ctx context.Context, command string, cmd *evidenceCmd)
 		return err
 	}
 	switch command {
+	case "evidence add":
+		extended, err := c.workflowExtensionService()
+		if err != nil {
+			return err
+		}
+		result, err := extended.RecordEvidenceForCLI(ctx, RecordEvidenceOptions{
+			InvestigationID: cmd.Add.Investigation, HypothesisID: cmd.Add.Hypothesis,
+			OpportunityID: cmd.Add.Opportunity, Type: cmd.Add.Type,
+			Relation: cmd.Add.Relation, Description: cmd.Add.Description,
+		})
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Add.JSON, result)
 	case "evidence show":
 		result, err := service.ShowEvidence(ctx, cmd.Show.InvestigationID)
 		if err != nil {
 			return c.mapError(err)
 		}
 		return c.render(cmd.Show.JSON, result)
+	case "evidence export":
+		return c.runExport(ctx, "export evidence", &exportCmd{Evidence: cmd.Export})
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown evidence command: %s", command))
 	}
@@ -959,6 +1568,16 @@ func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) e
 			return c.mapError(err)
 		}
 		return c.render(cmd.PR.JSON, result)
+	case "prepare review":
+		extended, err := c.workflowExtensionService()
+		if err != nil {
+			return err
+		}
+		result, err := extended.PrepareReviewForCLI(ctx, cmd.Review.OpportunityID, cmd.Review.WorkspaceID)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Review.JSON, result)
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown prepare command: %s", command))
 	}
@@ -977,6 +1596,23 @@ func (c *CLI) runIndex(ctx context.Context, cmd *indexCmd) error {
 	return c.render(cmd.JSON, result)
 }
 
+func (c *CLI) runAcquire(ctx context.Context, cmd *acquireCmd) error {
+	repo, err := parseRepo(cmd.OwnerRepo)
+	if err != nil {
+		return err
+	}
+	service, err := c.acquisitionService()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(c.stderr, "acquiring and indexing %s...\n", repo)
+	result, err := service.Acquire(ctx, repo, cmd.Remote)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
 func (c *CLI) runInit(ctx context.Context, cmd *initCmd) error {
 	fmt.Fprintln(c.stderr, "initializing...")
 	res, err := c.svc.Init(ctx)
@@ -986,7 +1622,95 @@ func (c *CLI) runInit(ctx context.Context, cmd *initCmd) error {
 	return c.render(cmd.JSON, res)
 }
 
+func (c *CLI) runConfigure(ctx context.Context, cmd *configureCmd) error {
+	service, err := c.controlService()
+	if err != nil {
+		return err
+	}
+	result, err := service.Configure(ctx, ConfigureOptions{
+		Database: cmd.Database, TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey,
+		CrawlBudget: cmd.CrawlBudget, CrawlConcurrency: cmd.CrawlConcurrency,
+		CrawlRetryLimit: cmd.CrawlRetryLimit, CrawlTimeout: cmd.CrawlTimeout,
+		OutputFormat: cmd.OutputFormat, OutputMaxResults: cmd.OutputMaxResults, DryRun: cmd.DryRun,
+	})
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runMetadata(ctx context.Context, cmd *metadataCmd) error {
+	service, err := c.controlService()
+	if err != nil {
+		return err
+	}
+	result, err := service.Metadata(ctx)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runDoctor(ctx context.Context, cmd *doctorCmd) error {
+	service, err := c.controlService()
+	if err != nil {
+		return err
+	}
+	result, err := service.Doctor(ctx)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runHealth(ctx context.Context, cmd *healthCmd) error {
+	repo, err := parseRepo(cmd.OwnerRepo)
+	if err != nil {
+		return err
+	}
+	if cmd.StaleAfter <= 0 {
+		return NewCLIError(ExitUsage, errors.New("stale-after must be positive"))
+	}
+	parseBound := func(name, value string) (time.Time, error) {
+		if value == "" {
+			return time.Time{}, nil
+		}
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return time.Time{}, NewCLIError(ExitUsage, fmt.Errorf("invalid --%s value: %w", name, err))
+		}
+		return parsed, nil
+	}
+	start, err := parseBound("start", cmd.Start)
+	if err != nil {
+		return err
+	}
+	end, err := parseBound("end", cmd.End)
+	if err != nil {
+		return err
+	}
+	if !start.IsZero() && !end.IsZero() && end.Before(start) {
+		return NewCLIError(ExitUsage, errors.New("end cannot be before start"))
+	}
+	service, err := c.healthService()
+	if err != nil {
+		return err
+	}
+	result, err := service.RepositoryHealthWithOptions(ctx, repo, health.Options{Start: start, End: end, StaleThreshold: cmd.StaleAfter})
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
 func (c *CLI) runStatus(ctx context.Context, cmd *statusCmd) error {
+	if service, ok := c.svc.(ControlService); ok {
+		res, err := service.ControlStatus(ctx)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.JSON, res)
+	}
 	res, err := c.svc.Status(ctx)
 	if err != nil {
 		return c.mapError(err)
@@ -1007,8 +1731,42 @@ func (c *CLI) runSync(ctx context.Context, cmd *syncCmd) error {
 	return c.render(cmd.JSON, res)
 }
 
-func (c *CLI) runSearch(ctx context.Context, cmd *searchCmd) error {
-	opts := SearchOptions{Kind: cmd.Kind, Repo: cmd.Repo, Limit: cmd.Limit}
+func (c *CLI) runSearch(ctx context.Context, command string, cmd *searchCmd) error {
+	kind := strings.TrimPrefix(command, "search ")
+	var selected *searchKindCmd
+	switch kind {
+	case "repos":
+		selected = &cmd.Repos
+	case "issues":
+		selected = &cmd.Issues
+	case "prs":
+		selected = &cmd.PRs
+	case "threads":
+		selected = &cmd.Threads
+	case "code":
+		selected = &cmd.Code
+	case "all":
+		selected = &cmd.All
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown search kind: %s", kind))
+	}
+	opts := SearchOptions{
+		Kind: kind, Repo: selected.Repo, State: selected.State, Author: selected.Author,
+		Association: selected.Association, Assignee: selected.Assignee,
+		Labels: selected.Labels, Limit: selected.Limit, Cursor: selected.Cursor,
+		Lens: selected.Lens,
+	}
+	if kind == "all" && opts.Cursor != "" {
+		return NewCLIError(ExitUsage, errors.New("combined search does not support cursor pagination; choose a result kind"))
+	}
+	if opts.Lens != "" && opts.Cursor != "" {
+		return NewCLIError(ExitUsage, errors.New("cursor pagination cannot be combined with --lens because lens ranking is not cursor-stable"))
+	}
+	if kind == "repos" || kind == "code" {
+		if opts.State != "all" || opts.Author != "" || opts.Association != "" || opts.Assignee != "" || len(opts.Labels) > 0 || selected.UpdatedAfter != "" {
+			return NewCLIError(ExitUsage, fmt.Errorf("thread metadata filters are not supported for %s search", kind))
+		}
+	}
 	if opts.Limit <= 0 || opts.Limit > maxSearchLimit {
 		return NewCLIError(ExitUsage, fmt.Errorf("limit must be between 1 and %d", maxSearchLimit))
 	}
@@ -1017,28 +1775,104 @@ func (c *CLI) runSearch(ctx context.Context, cmd *searchCmd) error {
 			return NewCLIError(ExitUsage, fmt.Errorf("invalid --repo value: %w", err))
 		}
 	}
-	res, err := c.svc.Search(ctx, cmd.Query, opts)
+	if selected.UpdatedAfter != "" {
+		updatedAfter, err := time.Parse(time.RFC3339, selected.UpdatedAfter)
+		if err != nil {
+			return NewCLIError(ExitUsage, fmt.Errorf("invalid --updated-after value: %w", err))
+		}
+		opts.UpdatedAfter = updatedAfter
+	}
+	res, err := c.svc.Search(ctx, selected.Query, opts)
 	if err != nil {
 		return c.mapError(err)
 	}
-	return c.render(cmd.JSON, res)
+	return c.render(selected.JSON, res)
 }
 
-func (c *CLI) runDossier(ctx context.Context, cmd *dossierCmd) error {
+func (c *CLI) runDossier(ctx context.Context, command string, cmd *dossierCmd) error {
+	service, err := c.dossierExtensionService()
+	if err != nil {
+		// Preserve the original dossier command for lightweight implementations.
+		if command == "dossier show" {
+			repo, parseErr := parseRepo(cmd.Show.OwnerRepo)
+			if parseErr != nil {
+				return parseErr
+			}
+			res, callErr := c.svc.Dossier(ctx, repo)
+			if callErr != nil {
+				return c.mapError(callErr)
+			}
+			return c.render(cmd.Show.JSON, res)
+		}
+		return err
+	}
+	var result any
+	var jsonOutput bool
+	switch command {
+	case "dossier build":
+		repo, err := parseRepo(cmd.Build.OwnerRepo)
+		if err != nil {
+			return err
+		}
+		result, err = service.BuildDossierForCLI(ctx, repo)
+		jsonOutput = cmd.Build.JSON
+	case "dossier show":
+		repo, err := parseRepo(cmd.Show.OwnerRepo)
+		if err != nil {
+			return err
+		}
+		result, err = service.GetDossierForCLI(ctx, repo)
+		jsonOutput = cmd.Show.JSON
+	case "dossier export":
+		return c.runExport(ctx, "export dossier", &exportCmd{Dossier: exportDossierCmd{
+			OwnerRepo: cmd.Export.OwnerRepo, Format: cmd.Export.Format, Output: cmd.Export.Output,
+		}})
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown dossier command: %s", command))
+	}
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(jsonOutput, result)
+}
+
+func (c *CLI) runSeeds(ctx context.Context, cmd *seedsCmd) error {
+	if cmd.Limit <= 0 || cmd.Limit > 100 {
+		return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 100"))
+	}
 	repo, err := parseRepo(cmd.OwnerRepo)
 	if err != nil {
 		return err
 	}
-	res, err := c.svc.Dossier(ctx, repo)
+	service, err := c.dossierExtensionService()
+	if err != nil {
+		return err
+	}
+	result, err := service.ExtractSeedsForCLI(ctx, repo, splitCSV(cmd.From), cmd.Limit)
 	if err != nil {
 		return c.mapError(err)
 	}
-	return c.render(cmd.JSON, res)
+	return c.render(cmd.JSON, result)
 }
 
 func (c *CLI) runMCP(ctx context.Context, cmd *mcpCmd) error {
-	fmt.Fprintf(c.stderr, "starting mcp server (transport=%s)...\n", cmd.Transport)
-	return c.mapError(c.runner.Run(ctx, MCPOptions{Transport: cmd.Transport}))
+	fmt.Fprintf(c.stderr, "starting mcp server (transport=%s)...\n", cmd.Serve.Transport)
+	return c.mapError(c.runner.Run(ctx, MCPOptions{Transport: cmd.Serve.Transport}))
+}
+
+func (c *CLI) runTUI(ctx context.Context, cmd *tuiCmd) error {
+	if c.tui == nil {
+		return NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	var repo RepoRef
+	var err error
+	if cmd.OwnerRepo != "" {
+		repo, err = parseRepo(cmd.OwnerRepo)
+		if err != nil {
+			return err
+		}
+	}
+	return c.mapError(c.tui.Run(ctx, TUIOptions{Repo: repo, JSON: cmd.JSON}))
 }
 
 func (c *CLI) render(json bool, v any) error {
@@ -1118,12 +1952,12 @@ func (c *CLI) runCluster(ctx context.Context, command string, cmd *clusterCmd) e
 }
 
 func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) error {
-	service, err := c.archiveService()
-	if err != nil {
-		return err
-	}
 	switch command {
 	case "archive sync":
+		service, err := c.archiveService()
+		if err != nil {
+			return err
+		}
 		repo, err := parseRepo(cmd.Sync.OwnerRepo)
 		if err != nil {
 			return err
@@ -1147,6 +1981,10 @@ func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) e
 		}
 		return c.render(cmd.Sync.JSON, result)
 	case "archive hydrate":
+		service, err := c.archiveService()
+		if err != nil {
+			return err
+		}
 		repo, number, err := parseThreadRef(cmd.Hydrate.Thread)
 		if err != nil {
 			return NewCLIError(ExitUsage, err)
@@ -1159,6 +1997,40 @@ func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) e
 			return c.mapError(err)
 		}
 		return c.render(cmd.Hydrate.JSON, result)
+	case "archive refresh":
+		service, err := c.archiveService()
+		if err != nil {
+			return err
+		}
+		repo, err := parseRepo(cmd.Refresh.OwnerRepo)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(c.stderr, "refreshing archive for %s...\n", repo)
+		result, err := service.ArchiveSync(ctx, repo, ArchiveSyncOptions{State: "all", MaxPages: cmd.Refresh.MaxPages})
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Refresh.JSON, result)
+	case "archive threads":
+		repo, err := parseRepo(cmd.Threads.OwnerRepo)
+		if err != nil {
+			return err
+		}
+		if cmd.Threads.Limit <= 0 || cmd.Threads.Limit > 1000 {
+			return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 1000"))
+		}
+		service, err := c.archiveThreadService()
+		if err != nil {
+			return err
+		}
+		result, err := service.ArchiveThreads(ctx, repo, cmd.Threads.Kind, cmd.Threads.State, cmd.Threads.Limit)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Threads.JSON, result)
+	case "archive coverage":
+		return c.runCoverage(ctx, &cmd.Coverage)
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown archive command: %s", command))
 	}
@@ -1193,6 +2065,51 @@ func (c *CLI) runRuns(ctx context.Context, cmd *runsCmd) error {
 		return c.mapError(err)
 	}
 	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runJobs(ctx context.Context, cmd *jobsCmd) error {
+	if cmd.Limit <= 0 || cmd.Limit > 1000 {
+		return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 1000"))
+	}
+	if cmd.Status != "" {
+		switch cmd.Status {
+		case "queued", "running", "succeeded", "failed", "cancelled":
+		default:
+			return NewCLIError(ExitUsage, fmt.Errorf("invalid job status %q", cmd.Status))
+		}
+	}
+	service, err := c.jobService()
+	if err != nil {
+		return err
+	}
+	result, err := service.ListJobs(ctx, cmd.Status, cmd.Limit)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runJob(ctx context.Context, command string, cmd *jobCmd) error {
+	service, err := c.jobService()
+	if err != nil {
+		return err
+	}
+	var result *JobResult
+	var jsonOutput bool
+	switch command {
+	case "job show":
+		result, err = service.GetJob(ctx, cmd.Show.ID)
+		jsonOutput = cmd.Show.JSON
+	case "job cancel":
+		result, err = service.CancelJob(ctx, cmd.Cancel.ID)
+		jsonOutput = cmd.Cancel.JSON
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown job command: %s", command))
+	}
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(jsonOutput, result)
 }
 
 func (c *CLI) runNeighbors(ctx context.Context, cmd *neighborsCmd) error {
@@ -1330,6 +2247,29 @@ func (c *CLI) runLens(ctx context.Context, command string, cmd *lensCmd) error {
 			return c.mapError(err)
 		}
 		return c.render(cmd.Show.JSON, res)
+	case "lens explain":
+		if strings.TrimSpace(cmd.Explain.Name) == "" {
+			return NewCLIError(ExitUsage, errors.New("lens name is required"))
+		}
+		if strings.TrimSpace(cmd.Explain.Ref) == "" {
+			return NewCLIError(ExitUsage, errors.New("result reference is required"))
+		}
+		var updatedAfter time.Time
+		if cmd.Explain.UpdatedAfter != "" {
+			updatedAfter, err = time.Parse(time.RFC3339, cmd.Explain.UpdatedAfter)
+			if err != nil {
+				return NewCLIError(ExitUsage, fmt.Errorf("invalid --updated-after: %w", err))
+			}
+		}
+		res, err := service.ExplainLens(ctx, cmd.Explain.Name, cmd.Explain.Ref, LensExplainOptions{
+			Query: cmd.Explain.Query, Repo: cmd.Explain.Repo, Kind: cmd.Explain.Kind,
+			State: cmd.Explain.State, Author: cmd.Explain.Author, Association: cmd.Explain.Association,
+			Assignee: cmd.Explain.Assignee, Labels: cmd.Explain.Labels, UpdatedAfter: updatedAfter,
+		})
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Explain.JSON, res)
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown lens command: %s", command))
 	}

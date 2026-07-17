@@ -23,6 +23,9 @@ const (
 	Created Qualifier = "created"
 	// Updated windows incremental refresh.
 	Updated Qualifier = "updated"
+	// Pushed windows incremental repository-search refreshes. GitHub repository
+	// search supports pushed, not updated.
+	Pushed Qualifier = "pushed"
 )
 
 // SearchItem is a product-owned search result item used when partitioning.
@@ -87,7 +90,7 @@ func (p *SearchPartitioner) Partition(ctx context.Context, baseQuery string, sta
 	if end.Before(start) {
 		return nil, fmt.Errorf("end %v before start %v", end, start)
 	}
-	if qual != Created && qual != Updated {
+	if qual != Created && qual != Updated && qual != Pushed {
 		return nil, fmt.Errorf("invalid qualifier %q", qual)
 	}
 	if err := ctx.Err(); err != nil {

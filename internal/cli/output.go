@@ -27,6 +27,14 @@ func humanOutput(v any) (string, error) {
 		return initHuman(r), nil
 	case *StatusResult:
 		return statusHuman(r), nil
+	case *MetadataResult:
+		return metadataHuman(r), nil
+	case *ConfigureResult:
+		return configureHuman(r), nil
+	case *ControlStatusResult:
+		return controlStatusHuman(r), nil
+	case *DoctorResult:
+		return doctorHuman(r), nil
 	case *SyncResult:
 		return syncHuman(r), nil
 	case *SearchResult:
@@ -78,6 +86,8 @@ func humanOutput(v any) (string, error) {
 		return lensHuman(r), nil
 	case *LensListResult:
 		return lensListHuman(r), nil
+	case *LensExplainResult:
+		return lensExplainHuman(r), nil
 	case *CollectionResult:
 		return collectionHuman(r), nil
 	case *CollectionListResult:
@@ -88,11 +98,110 @@ func humanOutput(v any) (string, error) {
 		return coverageHuman(r), nil
 	case *RunListResult:
 		return runsHuman(r), nil
+	case *JobListResult:
+		return jobsHuman(r), nil
+	case *JobResult:
+		return jobHuman(r), nil
 	case *NeighborListResult:
 		return neighborsHuman(r), nil
+	case *TriageEventResult:
+		return triageEventHuman(r), nil
+	case *TriageEventListResult:
+		return triageEventListHuman(r), nil
+	case *ContributionResult:
+		return contributionHuman(r), nil
+	case *ContributionListResult:
+		return contributionListHuman(r), nil
+	case *ContributionOutcomeResult:
+		return contributionOutcomeHuman(r), nil
+	case *ContributionOutcomeListResult:
+		return contributionOutcomeListHuman(r), nil
+	case *MetadataImportResult:
+		return metadataImportHuman(r), nil
 	default:
-		return "", fmt.Errorf("unsupported result type %T", v)
+		payload, err := json.MarshalIndent(v, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("render %T: %w", v, err)
+		}
+		return string(payload), nil
 	}
+}
+
+func metadataHuman(r *MetadataResult) string {
+	return fmt.Sprintf("%s %s (%s/%s, %s)\nSchema: %d\nCorpus: %s\nCapabilities: %s",
+		r.Name, r.Version, r.OS, r.Architecture, r.GoVersion, r.SchemaVersion, r.CorpusPath, strings.Join(r.Capabilities, ", "))
+}
+
+func configureHuman(r *ConfigureResult) string {
+	action := "Configuration unchanged"
+	if r.Changed {
+		action = "Configuration updated"
+	}
+	if r.DryRun {
+		action = "Configuration dry run"
+	}
+	return fmt.Sprintf("%s: %s\nDatabase: %s\nToken source: %s\nCrawl: budget=%d concurrency=%d retries=%d timeout=%s\nOutput: %s, max=%d",
+		action, r.Path, r.Config.Database, r.Config.TokenSource, r.Config.CrawlBudget,
+		r.Config.CrawlConcurrency, r.Config.CrawlRetryLimit, r.Config.CrawlTimeout,
+		r.Config.OutputFormat, r.Config.OutputMaxResults)
+}
+
+func controlStatusHuman(r *ControlStatusResult) string {
+	state := "healthy"
+	if !r.Healthy {
+		state = "not healthy"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Status: %s (corpus=%s version=%s schema=%d)", state, r.Corpus, r.Version, r.SchemaVersion)
+	fmt.Fprintf(&b, "\n%d repositories, %d threads, %d sources; %d ready frontier items, %d active runs, %d active jobs",
+		r.Counts.Repositories, r.Counts.Threads, r.Counts.Sources, r.Counts.FrontierReady, r.Counts.ActiveRuns, r.Counts.ActiveJobs)
+	if r.FreshestSource != "" {
+		fmt.Fprintf(&b, "\nFreshest source: %s", r.FreshestSource)
+	}
+	for _, rate := range r.RateLimits {
+		fmt.Fprintf(&b, "\nGitHub rate limit %s: %d/%d remaining (observed %s)",
+			rate.Resource, rate.Remaining, rate.Limit, rate.ObservedAt)
+		if rate.ResetAt != "" {
+			fmt.Fprintf(&b, ", resets %s", rate.ResetAt)
+		}
+	}
+	for _, warning := range r.Warnings {
+		fmt.Fprintf(&b, "\nWarning: %s", warning)
+	}
+	return b.String()
+}
+
+func doctorHuman(r *DoctorResult) string {
+	state := "healthy"
+	if !r.Healthy {
+		state = "unhealthy"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Doctor: %s", state)
+	for _, check := range r.Checks {
+		fmt.Fprintf(&b, "\n- %s [%s]: %s", check.Name, check.Status, check.Message)
+	}
+	return b.String()
+}
+
+func jobsHuman(r *JobListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d jobs", len(r.Jobs))
+	for i := range r.Jobs {
+		fmt.Fprintf(&b, "\n- %s", jobHuman(&r.Jobs[i]))
+	}
+	return b.String()
+}
+
+func jobHuman(r *JobResult) string {
+	line := fmt.Sprintf("%s %s [%s] created %s", r.ID, r.Kind, r.Status, r.CreatedAt)
+	if r.Progress != "" {
+		line += ": " + r.Progress
+	}
+	if r.Error != "" {
+		line += ": " + r.Error
+	}
+	return line
 }
 
 func hydrateHuman(r *HydrateResult) string {
@@ -474,6 +583,45 @@ func lensListHuman(r *LensListResult) string {
 	return b.String()
 }
 
+func lensExplainHuman(r *LensExplainResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Lens: %s\n", r.Lens.Name)
+	c := r.Candidate
+	fmt.Fprintf(&b, "Candidate: %s %s", c.Kind, c.Repo)
+	if c.Number > 0 {
+		fmt.Fprintf(&b, "#%d", c.Number)
+	}
+	fmt.Fprintf(&b, ": %s\n", c.Title)
+	if c.State != "" {
+		fmt.Fprintf(&b, "State: %s\n", c.State)
+	}
+	if c.URL != "" {
+		fmt.Fprintf(&b, "URL: %s\n", c.URL)
+	}
+	if c.UpdatedAt != "" {
+		fmt.Fprintf(&b, "Updated: %s\n", c.UpdatedAt)
+	}
+	fmt.Fprintf(&b, "Population: %d (%s), evaluated at %s\n", r.PopulationSize, r.PopulationScope, r.EvaluatedAt)
+	if r.Query != "" {
+		fmt.Fprintf(&b, "Query: %s\n", r.Query)
+	}
+	fmt.Fprintf(&b, "Final score: %.2f\n", r.Score)
+	if len(r.Signals) > 0 {
+		b.WriteString("Signals:\n")
+		for _, sig := range r.Signals {
+			status := ""
+			if sig.Missing {
+				status = " [missing]"
+			}
+			fmt.Fprintf(&b, "- %s: value=%.3f normalized=%.3f weight=%.3f contribution=%.3f%s\n", sig.Name, sig.Value, sig.Normalized, sig.Weight, sig.Contribution, status)
+		}
+	}
+	if len(r.MissingSignals) > 0 {
+		fmt.Fprintf(&b, "Missing signals: %s", strings.Join(r.MissingSignals, ", "))
+	}
+	return strings.TrimSpace(b.String())
+}
+
 func collectionHuman(r *CollectionResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Collection: %s\n", r.Name)
@@ -489,4 +637,85 @@ func collectionListHuman(r *CollectionListResult) string {
 		fmt.Fprintf(&b, "\n- %s (%d members)", col.Name, col.MemberCount)
 	}
 	return b.String()
+}
+
+func triageEventHuman(r *TriageEventResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Triage event: %s (%s)\n", r.ID, r.Outcome)
+	fmt.Fprintf(&b, "Target: %s %s\n", r.TargetKind, r.TargetRef)
+	if r.Lens != "" {
+		fmt.Fprintf(&b, "Lens: %s\n", r.Lens)
+	}
+	if r.Reason != "" {
+		fmt.Fprintf(&b, "Reason: %s\n", r.Reason)
+	}
+	fmt.Fprintf(&b, "Created: %s\nUpdated: %s", r.CreatedAt, r.UpdatedAt)
+	return b.String()
+}
+
+func triageEventListHuman(r *TriageEventListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d triage events (limit %d)", len(r.Events), r.Limit)
+	for _, e := range r.Events {
+		fmt.Fprintf(&b, "\n- %s %s=%s [%s]", e.ID, e.TargetKind, e.TargetRef, e.Outcome)
+		if e.Lens != "" {
+			fmt.Fprintf(&b, " (lens: %s)", e.Lens)
+		}
+		if e.Reason != "" {
+			fmt.Fprintf(&b, ": %s", e.Reason)
+		}
+	}
+	return b.String()
+}
+
+func contributionHuman(r *ContributionResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Contribution: %s (%s)\n", r.ID, r.Kind)
+	fmt.Fprintf(&b, "Opportunity: %s\n", r.OpportunityID)
+	fmt.Fprintf(&b, "Title: %s\n", r.Title)
+	if r.Reference != "" {
+		fmt.Fprintf(&b, "Reference: %s\n", r.Reference)
+	}
+	if r.ReferenceURL != "" {
+		fmt.Fprintf(&b, "Reference URL: %s\n", r.ReferenceURL)
+	}
+	fmt.Fprintf(&b, "Prepared: %s\nCreated: %s\nUpdated: %s", r.PreparedAt, r.CreatedAt, r.UpdatedAt)
+	return b.String()
+}
+
+func contributionListHuman(r *ContributionListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d contributions (limit %d)", len(r.Contributions), r.Limit)
+	for _, c := range r.Contributions {
+		fmt.Fprintf(&b, "\n- %s [%s] %s (opportunity %s)", c.ID, c.Kind, c.Title, c.OpportunityID)
+	}
+	return b.String()
+}
+
+func contributionOutcomeHuman(r *ContributionOutcomeResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Contribution outcome: %s (%s)\n", r.ID, r.Outcome)
+	fmt.Fprintf(&b, "Contribution: %s\n", r.ContributionID)
+	if r.Reason != "" {
+		fmt.Fprintf(&b, "Reason: %s\n", r.Reason)
+	}
+	fmt.Fprintf(&b, "Created: %s", r.CreatedAt)
+	return b.String()
+}
+
+func contributionOutcomeListHuman(r *ContributionOutcomeListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d outcomes for contribution %s", len(r.Outcomes), r.ContributionID)
+	for _, o := range r.Outcomes {
+		fmt.Fprintf(&b, "\n- %s [%s]", o.Outcome, o.CreatedAt)
+		if o.Reason != "" {
+			fmt.Fprintf(&b, ": %s", o.Reason)
+		}
+	}
+	return b.String()
+}
+
+func metadataImportHuman(r *MetadataImportResult) string {
+	return fmt.Sprintf("Imported %d triage events, %d contributions, %d contribution outcomes",
+		r.TriageEvents, r.Contributions, r.ContributionOutcomes)
 }

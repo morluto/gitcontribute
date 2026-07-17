@@ -55,6 +55,7 @@ type Config struct {
 	Limiter           Limiter
 	RequestsPerSecond float64
 	Burst             int
+	Retry             *RetryConfig
 }
 
 // NewClient creates a GitHub read client.
@@ -86,7 +87,19 @@ func NewClient(cfg Config) (*Client, error) {
 		}
 		limiter = NewRateLimiter(rps, burst)
 	}
-	cfg.HTTPClient.Transport = &RateLimitedTransport{Base: baseTransport, Limiter: limiter}
+
+	retryCfg := cfg.Retry
+	if retryCfg == nil {
+		retryCfg = DefaultRetryConfig()
+	}
+	retryCfg = retryCfg.withDefaults()
+
+	retrier := &retryTransport{
+		Base:   &RateLimitedTransport{Base: baseTransport, Limiter: limiter},
+		Config: retryCfg,
+	}
+
+	cfg.HTTPClient.Transport = retrier
 
 	opts := []gh.ClientOptionsFunc{
 		gh.WithHTTPClient(cfg.HTTPClient),
@@ -110,6 +123,7 @@ func NewClient(cfg Config) (*Client, error) {
 	return &Client{gh: ghc}, nil
 }
 
+// GetRepository reads repository metadata and the response rate-limit state.
 func (c *Client) GetRepository(ctx context.Context, owner, name string) (Repository, RateInfo, error) {
 	repo, resp, err := c.gh.Repositories.Get(ctx, owner, name)
 	if err != nil {
@@ -138,6 +152,7 @@ func (c *Client) SearchRepositories(ctx context.Context, opts RepositorySearchOp
 	}, nil
 }
 
+// ListIssues reads one page of issues and pull-request markers for a repository.
 func (c *Client) ListIssues(ctx context.Context, owner, name string, opts ListIssueOptions) (ListResult[Issue], error) {
 	gopts := &gh.IssueListByRepoOptions{
 		State:     opts.State,
@@ -173,6 +188,7 @@ func (c *Client) GetIssue(ctx context.Context, owner, name string, number int) (
 	return convertIssue(issue), rateInfo(resp.Rate), nil
 }
 
+// ListIssueComments reads one page of issue comments for a thread.
 func (c *Client) ListIssueComments(ctx context.Context, owner, name string, issueNumber int, opts PageOptions) (ListResult[IssueComment], error) {
 	gopts := &gh.IssueListCommentsOptions{}
 	gopts.ListOptions = gh.ListOptions{Page: opts.Page, PerPage: opts.PerPage}
@@ -193,6 +209,7 @@ func (c *Client) ListIssueComments(ctx context.Context, owner, name string, issu
 	}, nil
 }
 
+// GetPullRequestDetails reads pull-request metadata not present on issue list rows.
 func (c *Client) GetPullRequestDetails(ctx context.Context, owner, name string, number int) (PullRequestDetails, RateInfo, error) {
 	pr, resp, err := c.gh.PullRequests.Get(ctx, owner, name, number)
 	if err != nil {
@@ -201,6 +218,7 @@ func (c *Client) GetPullRequestDetails(ctx context.Context, owner, name string, 
 	return convertPullRequestDetails(pr), rateInfo(resp.Rate), nil
 }
 
+// ListPullRequestReviews reads one page of pull-request reviews.
 func (c *Client) ListPullRequestReviews(ctx context.Context, owner, name string, number int, opts PageOptions) (ListResult[Review], error) {
 	reviews, resp, err := c.gh.PullRequests.ListReviews(ctx, owner, name, number, &gh.ListOptions{
 		Page:    opts.Page,
@@ -221,6 +239,7 @@ func (c *Client) ListPullRequestReviews(ctx context.Context, owner, name string,
 	}, nil
 }
 
+// ListPullRequestComments reads one page of pull-request review comments.
 func (c *Client) ListPullRequestComments(ctx context.Context, owner, name string, number int, opts PageOptions) (ListResult[ReviewComment], error) {
 	gopts := &gh.PullRequestListCommentsOptions{}
 	gopts.ListOptions = gh.ListOptions{Page: opts.Page, PerPage: opts.PerPage}

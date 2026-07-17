@@ -25,6 +25,17 @@ func (c *Corpus) AdvanceFacet(ctx context.Context, repoID int64, threadID *int64
 		return err
 	}
 
+	if err := c.advanceFacetTx(ctx, tx, repoID, threadID, facet, sourceUpdatedAt, complete, runID, seq, now); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit advance facet: %w", err)
+	}
+	return nil
+}
+
+func (c *Corpus) advanceFacetTx(ctx context.Context, tx *sql.Tx, repoID int64, threadID *int64, facet string, sourceUpdatedAt time.Time, complete bool, runID int64, seq int64, now int64) error {
 	tid := sql.NullInt64{}
 	if threadID != nil {
 		tid.Int64 = *threadID
@@ -41,7 +52,7 @@ func (c *Corpus) AdvanceFacet(ctx context.Context, repoID int64, threadID *int64
 		src int64
 		seq int64
 	}
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 		SELECT id, source_updated_at, observation_sequence
 		FROM facet_coverage
 		WHERE repository_id = ? AND COALESCE(thread_id, -1) = COALESCE(?, -1) AND facet = ?
@@ -76,10 +87,6 @@ func (c *Corpus) AdvanceFacet(ctx context.Context, repoID int64, threadID *int64
 				return fmt.Errorf("update facet coverage: %w", err)
 			}
 		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit advance facet: %w", err)
 	}
 	return nil
 }

@@ -332,6 +332,9 @@ func TestManager_PathMethodsRejectSymlinkEscape(t *testing.T) {
 	if _, err := mgr.DiffByPath(context.Background(), link, "HEAD"); !errors.Is(err, ErrNotManaged) {
 		t.Fatalf("DiffByPath symlink escape = %v, want ErrNotManaged", err)
 	}
+	if _, err := mgr.ChangedFilesByPath(context.Background(), link, "HEAD"); !errors.Is(err, ErrNotManaged) {
+		t.Fatalf("ChangedFilesByPath symlink escape = %v, want ErrNotManaged", err)
+	}
 	if _, err := mgr.HasUntrackedByPath(context.Background(), link); !errors.Is(err, ErrNotManaged) {
 		t.Fatalf("HasUntrackedByPath symlink escape = %v, want ErrNotManaged", err)
 	}

@@ -46,7 +46,7 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) (string,
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_NO_PAGER=1",
 		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
 		"GIT_OPTIONAL_LOCKS=0",
 	)
 	stdout := &cappedBuffer{remaining: maxGitOutputBytes}
@@ -194,7 +194,7 @@ func (m *Manager) git(ctx context.Context, dir string, args ...string) (string, 
 	all := []string{
 		"--no-pager",
 		"--no-optional-locks",
-		"-c", "core.hooksPath=/dev/null",
+		"-c", "core.hooksPath=" + os.DevNull,
 		"-c", "core.fsmonitor=false",
 		"-c", "core.untrackedCache=false",
 		"-c", "init.templateDir=",
@@ -549,6 +549,33 @@ func (m *Manager) DiffByPath(ctx context.Context, path, baseSHA string) (string,
 		return "", fmt.Errorf("diff: %w", err)
 	}
 	return out, nil
+}
+
+// ChangedFilesByPath returns raw Git paths changed from the supplied base.
+// Git owns rename, deletion, and quoted-path handling; NUL delimiters preserve
+// paths containing whitespace or other special characters.
+func (m *Manager) ChangedFilesByPath(ctx context.Context, path, baseSHA string) ([]string, error) {
+	managed, err := m.managedPath(path)
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"diff", "--name-only", "--find-renames", "-z"}
+	if baseSHA != "" {
+		args = append(args, baseSHA)
+	}
+	args = append(args, "--")
+	out, err := m.git(ctx, managed, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list changed files: %w", err)
+	}
+	parts := strings.Split(out, "\x00")
+	files := make([]string, 0, len(parts))
+	for _, path := range parts {
+		if path != "" {
+			files = append(files, path)
+		}
+	}
+	return files, nil
 }
 
 // HasUntrackedByPath reports whether a managed workspace contains untracked,

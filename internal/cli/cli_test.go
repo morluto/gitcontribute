@@ -5,11 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/health"
 )
 
 type fakeService struct {
@@ -19,12 +22,15 @@ type fakeService struct {
 	searchCalled             bool
 	dossierCalled            bool
 	indexCalled              bool
+	acquireCalled            bool
+	healthCalled             bool
 	addSourceCalled          bool
 	addRepoSourceCalled      bool
 	addGHArchiveSourceCalled bool
 	showSourceCalled         bool
 	listSourcesCalled        bool
 	crawlCalled              bool
+	tailCalled               bool
 	startInvCalled           bool
 	showInvCalled            bool
 	listInvCalled            bool
@@ -34,6 +40,15 @@ type fakeService struct {
 	showOppCalled            bool
 	listOppCalled            bool
 	setStatusOppCalled       bool
+	recordTriageCalled       bool
+	listTriageCalled         bool
+	recordContributionCalled bool
+	getContributionCalled    bool
+	listContributionsCalled  bool
+	recordOutcomeCalled      bool
+	listOutcomesCalled       bool
+	exportMetadataCalled     bool
+	importMetadataCalled     bool
 
 	initResult         *cli.InitResult
 	statusResult       *cli.StatusResult
@@ -41,6 +56,8 @@ type fakeService struct {
 	searchResult       *cli.SearchResult
 	dossierResult      *cli.DossierResult
 	indexResult        *cli.IndexResult
+	acquisitionResult  *cli.AcquisitionResult
+	healthResult       *health.Report
 	sourceResult       *cli.SourceResult
 	sourceListResult   *cli.SourceListResult
 	crawlResult        *cli.CrawlResult
@@ -54,6 +71,15 @@ type fakeService struct {
 	listOppResult      *cli.OpportunityListResult
 	setStatusOppResult *cli.OpportunityResult
 
+	triageEventResult             *cli.TriageEventResult
+	triageEventListResult         *cli.TriageEventListResult
+	contributionResult            *cli.ContributionResult
+	contributionListResult        *cli.ContributionListResult
+	contributionOutcomeResult     *cli.ContributionOutcomeResult
+	contributionOutcomeListResult *cli.ContributionOutcomeListResult
+	metadataExportResult          *cli.MetadataExportResult
+	metadataImportResult          *cli.MetadataImportResult
+
 	lastSyncArg    cli.RepoRef
 	lastSearchArgs struct {
 		Query string
@@ -62,6 +88,8 @@ type fakeService struct {
 	lastDossierArg     cli.RepoRef
 	lastIndexRepo      cli.RepoRef
 	lastIndexPath      string
+	lastAcquireRemote  string
+	lastHealthOpts     health.Options
 	lastSourceName     string
 	lastSourceQuery    string
 	lastSourceRefs     []cli.RepoRef
@@ -69,6 +97,7 @@ type fakeService struct {
 	lastShowSourceName string
 	lastCrawlName      string
 	lastCrawlOpts      cli.CrawlOptions
+	lastTailOpts       cli.TailOptions
 	lastStartInvArgs   startInvArgs
 	lastShowInvArg     string
 	lastAddHypArgs     addHypArgs
@@ -77,6 +106,16 @@ type fakeService struct {
 	lastShowOppArg     string
 	lastListOppFilter  string
 	lastSetStatusArgs  setStatusArgs
+
+	lastRecordTriageArgs       cli.RecordTriageEventOptions
+	lastListTriageArgs         cli.ListTriageEventsOptions
+	lastRecordContributionArgs cli.RecordContributionOptions
+	lastShowContributionArg    string
+	lastListContributionsArgs  cli.ListContributionsOptions
+	lastRecordOutcomeArgs      cli.RecordContributionOutcomeOptions
+	lastListOutcomesArg        string
+	lastExportMetadataArgs     cli.MetadataExportOptions
+	lastImportMetadataArgs     cli.MetadataImportOptions
 
 	err error
 }
@@ -145,6 +184,20 @@ func (f *fakeService) Index(ctx context.Context, repo cli.RepoRef, path string) 
 	return f.indexResult, f.err
 }
 
+func (f *fakeService) Acquire(ctx context.Context, repo cli.RepoRef, remote string) (*cli.AcquisitionResult, error) {
+	f.acquireCalled = true
+	f.lastIndexRepo = repo
+	f.lastAcquireRemote = remote
+	return f.acquisitionResult, f.err
+}
+
+func (f *fakeService) RepositoryHealthWithOptions(ctx context.Context, repo cli.RepoRef, opts health.Options) (*health.Report, error) {
+	f.healthCalled = true
+	f.lastIndexRepo = repo
+	f.lastHealthOpts = opts
+	return f.healthResult, f.err
+}
+
 func (f *fakeService) AddSearchSource(ctx context.Context, name, query string) (*cli.SourceResult, error) {
 	f.addSourceCalled = true
 	f.lastSourceName = name
@@ -182,6 +235,13 @@ func (f *fakeService) Crawl(ctx context.Context, name string, opts cli.CrawlOpti
 	f.lastCrawlName = name
 	f.lastCrawlOpts = opts
 	return f.crawlResult, f.err
+}
+
+func (f *fakeService) TailSource(ctx context.Context, name string, opts cli.TailOptions) (*cli.TailResult, error) {
+	f.tailCalled = true
+	f.lastCrawlName = name
+	f.lastTailOpts = opts
+	return &cli.TailResult{Source: name, Iterations: 1}, f.err
 }
 
 func (f *fakeService) StartInvestigation(ctx context.Context, repo cli.RepoRef, commit, lens string) (*cli.InvestigationResult, error) {
@@ -237,6 +297,60 @@ func (f *fakeService) SetOpportunityStatus(ctx context.Context, id, status, rati
 	return f.setStatusOppResult, f.err
 }
 
+func (f *fakeService) RecordTriageEvent(ctx context.Context, opts cli.RecordTriageEventOptions) (*cli.TriageEventResult, error) {
+	f.recordTriageCalled = true
+	f.lastRecordTriageArgs = opts
+	return f.triageEventResult, f.err
+}
+
+func (f *fakeService) ListTriageEvents(ctx context.Context, opts cli.ListTriageEventsOptions) (*cli.TriageEventListResult, error) {
+	f.listTriageCalled = true
+	f.lastListTriageArgs = opts
+	return f.triageEventListResult, f.err
+}
+
+func (f *fakeService) RecordContribution(ctx context.Context, opts cli.RecordContributionOptions) (*cli.ContributionResult, error) {
+	f.recordContributionCalled = true
+	f.lastRecordContributionArgs = opts
+	return f.contributionResult, f.err
+}
+
+func (f *fakeService) GetContribution(ctx context.Context, id string) (*cli.ContributionResult, error) {
+	f.getContributionCalled = true
+	f.lastShowContributionArg = id
+	return f.contributionResult, f.err
+}
+
+func (f *fakeService) ListContributions(ctx context.Context, opts cli.ListContributionsOptions) (*cli.ContributionListResult, error) {
+	f.listContributionsCalled = true
+	f.lastListContributionsArgs = opts
+	return f.contributionListResult, f.err
+}
+
+func (f *fakeService) RecordContributionOutcome(ctx context.Context, opts cli.RecordContributionOutcomeOptions) (*cli.ContributionOutcomeResult, error) {
+	f.recordOutcomeCalled = true
+	f.lastRecordOutcomeArgs = opts
+	return f.contributionOutcomeResult, f.err
+}
+
+func (f *fakeService) ListContributionOutcomes(ctx context.Context, contributionID string) (*cli.ContributionOutcomeListResult, error) {
+	f.listOutcomesCalled = true
+	f.lastListOutcomesArg = contributionID
+	return f.contributionOutcomeListResult, f.err
+}
+
+func (f *fakeService) ExportLocalMetadata(ctx context.Context, opts cli.MetadataExportOptions) (*cli.MetadataExportResult, error) {
+	f.exportMetadataCalled = true
+	f.lastExportMetadataArgs = opts
+	return f.metadataExportResult, f.err
+}
+
+func (f *fakeService) ImportLocalMetadata(ctx context.Context, opts cli.MetadataImportOptions) (*cli.MetadataImportResult, error) {
+	f.importMetadataCalled = true
+	f.lastImportMetadataArgs = opts
+	return f.metadataImportResult, f.err
+}
+
 func TestIndex(t *testing.T) {
 	svc := &fakeService{indexResult: &cli.IndexResult{Repo: cli.RepoRef{Owner: "o", Repo: "r"}, Commit: "abc", Files: 2}}
 	c, stdout, stderr := newTestCLI(svc, nil)
@@ -246,6 +360,32 @@ func TestIndex(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "abc") || !strings.Contains(stderr.String(), "indexing") {
 		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestAcquire(t *testing.T) {
+	svc := &fakeService{acquisitionResult: &cli.AcquisitionResult{
+		Repo: cli.RepoRef{Owner: "o", Repo: "r"}, CommitSHA: "abc", Indexed: true,
+	}}
+	c, stdout, stderr := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"acquire", "o/r", "--remote", "https://example.test/o/r.git", "--json"}))
+	if !svc.acquireCalled || svc.lastIndexRepo.String() != "o/r" || svc.lastAcquireRemote != "https://example.test/o/r.git" {
+		t.Fatalf("acquire args: called=%v repo=%v remote=%q", svc.acquireCalled, svc.lastIndexRepo, svc.lastAcquireRemote)
+	}
+	if !strings.Contains(stdout.String(), `"commit_sha": "abc"`) || !strings.Contains(stderr.String(), "acquiring and indexing o/r") {
+		t.Fatalf("stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
+func TestHealth(t *testing.T) {
+	svc := &fakeService{healthResult: &health.Report{Repo: health.RepoRef{Owner: "o", Repo: "r"}}}
+	c, stdout, _ := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"health", "o/r", "--start", "2026-07-01T00:00:00Z", "--end", "2026-07-17T00:00:00Z", "--stale-after", "240h", "--json"}))
+	if !svc.healthCalled || svc.lastIndexRepo.String() != "o/r" || svc.lastHealthOpts.StaleThreshold != 240*time.Hour || svc.lastHealthOpts.Start.IsZero() {
+		t.Fatalf("health args: called=%v repo=%v opts=%+v", svc.healthCalled, svc.lastIndexRepo, svc.lastHealthOpts)
+	}
+	if !strings.Contains(stdout.String(), `"repo": {`) {
+		t.Fatalf("stdout=%q", stdout)
 	}
 }
 
@@ -289,6 +429,29 @@ func TestSourceAddReposAcceptsURL(t *testing.T) {
 	c, _, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "https://github.com/X/Y"}))
 	if len(svc.lastSourceRefs) != 1 || svc.lastSourceRefs[0].String() != "X/Y" {
+		t.Fatalf("refs = %+v", svc.lastSourceRefs)
+	}
+}
+
+func TestSourceAddReposImportsStructuredStdin(t *testing.T) {
+	svc := &fakeService{sourceResult: &cli.SourceResult{Name: "imported", Kind: "repos", Enabled: true}}
+	c, _, _ := newTestCLI(svc, nil)
+	c.SetInput(strings.NewReader(`{"repositories":["one/first",{"owner":"two","repo":"second"},{"full_name":"three/third"}]}`))
+	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "--name", "imported", "--file", "-"}))
+	if len(svc.lastSourceRefs) != 3 || svc.lastSourceRefs[1].String() != "two/second" {
+		t.Fatalf("refs = %+v", svc.lastSourceRefs)
+	}
+}
+
+func TestSourceAddReposImportsLineFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "repositories.txt")
+	if err := os.WriteFile(path, []byte("# favorites\none/first\nhttps://github.com/two/second\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc := &fakeService{sourceResult: &cli.SourceResult{Name: "imported", Kind: "repos", Enabled: true}}
+	c, _, _ := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "--name", "imported", "--file", path}))
+	if len(svc.lastSourceRefs) != 2 || svc.lastSourceRefs[1].String() != "two/second" {
 		t.Fatalf("refs = %+v", svc.lastSourceRefs)
 	}
 }
@@ -360,6 +523,18 @@ func TestCrawlRejectsInvalidBudgetBeforeDispatch(t *testing.T) {
 	requireCLIError(t, err, cli.ExitUsage)
 	if svc.crawlCalled {
 		t.Fatal("crawl should not be called with an invalid budget")
+	}
+}
+
+func TestTailDispatchesBoundedOptions(t *testing.T) {
+	svc := &fakeService{}
+	c, _, _ := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"tail", "events", "--since", "3h", "--interval", "10m", "--budget", "25", "--once"}))
+	if !svc.tailCalled || svc.lastCrawlName != "events" {
+		t.Fatalf("tail not called: %+v", svc)
+	}
+	if svc.lastTailOpts.Since != 3*time.Hour || svc.lastTailOpts.Interval != 10*time.Minute || svc.lastTailOpts.Budget != 25 || !svc.lastTailOpts.Once {
+		t.Fatalf("tail options = %+v", svc.lastTailOpts)
 	}
 }
 
@@ -531,7 +706,7 @@ func TestSearchJSONWithFlags(t *testing.T) {
 	}}
 	c, stdout, _ := newTestCLI(svc, nil)
 
-	err := c.Run(context.Background(), []string{"search", "good first issue", "--kind", "issues", "--repo", "o/r", "--limit", "5", "--json"})
+	err := c.Run(context.Background(), []string{"search", "issues", "good first issue", "--repo", "o/r", "--state", "open", "--author", "alice", "--label", "bug", "--updated-after", "2026-07-01T00:00:00Z", "--limit", "5", "--cursor", "next-page", "--json"})
 	requireNoErr(t, err)
 
 	if !svc.searchCalled {
@@ -541,7 +716,7 @@ func TestSearchJSONWithFlags(t *testing.T) {
 		t.Fatalf("query=%q", svc.lastSearchArgs.Query)
 	}
 	opts := svc.lastSearchArgs.Opts
-	if opts.Kind != "issues" || opts.Repo != "o/r" || opts.Limit != 5 {
+	if opts.Kind != "issues" || opts.Repo != "o/r" || opts.State != "open" || opts.Author != "alice" || len(opts.Labels) != 1 || opts.Labels[0] != "bug" || opts.UpdatedAfter.Format(time.RFC3339) != "2026-07-01T00:00:00Z" || opts.Limit != 5 || opts.Cursor != "next-page" {
 		t.Fatalf("unexpected options: %+v", opts)
 	}
 
@@ -581,6 +756,82 @@ func TestSearchInvalidRepoFilter(t *testing.T) {
 
 	err := c.Run(context.Background(), []string{"search", "x", "--repo", "bad"})
 	requireCLIError(t, err, cli.ExitUsage)
+}
+
+func TestSearchRejectsUnsupportedFilterCombinations(t *testing.T) {
+	svc := &fakeService{}
+	c, _, _ := newTestCLI(svc, nil)
+	for _, args := range [][]string{
+		{"search", "all", "x", "--cursor", "cursor"},
+		{"search", "code", "x", "--state", "open"},
+		{"search", "repos", "x", "--association", "OWNER"},
+		{"search", "code", "x", "--assignee", "alice"},
+	} {
+		requireCLIError(t, c.Run(context.Background(), args), cli.ExitUsage)
+	}
+	if svc.searchCalled {
+		t.Fatal("search should not be called for unsupported filter combinations")
+	}
+}
+
+func TestSearchThreadMetadataFlags(t *testing.T) {
+	svc := &fakeService{searchResult: &cli.SearchResult{
+		Query:   "term",
+		Kind:    "issues",
+		Limit:   10,
+		Total:   0,
+		Matches: []cli.SearchMatch{},
+	}}
+	c, _, _ := newTestCLI(svc, nil)
+
+	err := c.Run(context.Background(), []string{"search", "issues", "term", "--association", "OWNER", "--assignee", "alice"})
+	requireNoErr(t, err)
+
+	if !svc.searchCalled {
+		t.Fatal("Search was not called")
+	}
+	opts := svc.lastSearchArgs.Opts
+	if opts.Association != "OWNER" {
+		t.Fatalf("association = %q, want OWNER", opts.Association)
+	}
+	if opts.Assignee != "alice" {
+		t.Fatalf("assignee = %q, want alice", opts.Assignee)
+	}
+}
+
+func TestSearchWithLensFlag(t *testing.T) {
+	svc := &fakeService{searchResult: &cli.SearchResult{
+		Query:   "test",
+		Kind:    "issues",
+		Limit:   10,
+		Total:   1,
+		Matches: []cli.SearchMatch{},
+	}}
+	c, _, _ := newTestCLI(svc, nil)
+
+	err := c.Run(context.Background(), []string{"search", "issues", "test", "--lens", "active-go", "--limit", "10"})
+	requireNoErr(t, err)
+
+	if !svc.searchCalled {
+		t.Fatal("Search was not called")
+	}
+	opts := svc.lastSearchArgs.Opts
+	if opts.Lens != "active-go" {
+		t.Fatalf("lens = %q, want active-go", opts.Lens)
+	}
+	if opts.Kind != "issues" || opts.Limit != 10 {
+		t.Fatalf("unexpected options: %+v", opts)
+	}
+}
+
+func TestSearchRejectsLensWithCursor(t *testing.T) {
+	svc := &fakeService{}
+	c, _, _ := newTestCLI(svc, nil)
+	err := c.Run(context.Background(), []string{"search", "issues", "test", "--lens", "active-go", "--cursor", "abc"})
+	requireCLIError(t, err, cli.ExitUsage)
+	if svc.searchCalled {
+		t.Fatal("search should not be called when lens and cursor are combined")
+	}
 }
 
 func TestDossier(t *testing.T) {

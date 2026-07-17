@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -29,6 +30,7 @@ type Service struct {
 	cfg            *config.Config
 	paths          *config.Paths
 	corpus         *corpus.Corpus
+	jobs           *JobExecutor
 	ghReader       github.Reader
 	archiveFetcher discovery.ArchiveFetcher
 	clock          func() time.Time
@@ -89,12 +91,17 @@ func (s *Service) getArchiveFetcher() discovery.ArchiveFetcher {
 	return s.archiveFetcher
 }
 
-// Close closes the corpus database connection.
+// Close cancels and waits for active jobs, then closes the corpus database connection.
 func (s *Service) Close() error {
 	s.mu.Lock()
+	jobs := s.jobs
 	c := s.corpus
+	s.jobs = nil
 	s.corpus = nil
 	s.mu.Unlock()
+	if jobs != nil {
+		_ = jobs.Close()
+	}
 	if c != nil {
 		return c.Close()
 	}
@@ -177,6 +184,25 @@ func (s *Service) openCorpus(ctx context.Context) (*corpus.Corpus, error) {
 	return c, nil
 }
 
+// Jobs returns the durable job executor, opening the corpus if needed.
+func (s *Service) Jobs(ctx context.Context) (*JobExecutor, error) {
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.jobs != nil {
+		return s.jobs, nil
+	}
+	jobs, err := newJobExecutor(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	s.jobs = jobs
+	return jobs, nil
+}
+
 func ensurePrivateDir(path string) error {
 	if err := os.MkdirAll(path, 0700); err != nil {
 		return err
@@ -199,7 +225,34 @@ func (s *Service) newGitHubReader() (github.Reader, error) {
 		return nil, errors.New("configuration is not loaded")
 	}
 	tokenSrc := tokenSource(cfg)
-	client, err := github.NewClient(github.Config{TokenSource: tokenSrc})
+	retry := github.DefaultRetryConfig()
+	retry.MaxAttempts = cfg.Crawl.RetryLimit + 1
+	retry.OnAttempt = func(observation github.RetryObservation) {
+		s.mu.Lock()
+		c := s.corpus
+		s.mu.Unlock()
+		if c == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = c.RecordRateLimitObservation(ctx, corpus.RateLimitObservation{
+			Attempt: observation.Attempt, StatusCode: observation.StatusCode,
+			Resource: observation.RateLimit.Resource, Limit: observation.RateLimit.Limit,
+			Remaining: observation.RateLimit.Remaining, Used: observation.RateLimit.Used,
+			ResetAt: observation.RateLimit.Reset, Delay: observation.Delay,
+			APIVersion: observation.APIVersion, SourceURL: observation.SourceURL, ObservedAt: s.now(),
+		})
+	}
+	timeout, err := time.ParseDuration(cfg.Crawl.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("parse GitHub request timeout: %w", err)
+	}
+	client, err := github.NewClient(github.Config{
+		TokenSource: tokenSrc,
+		Retry:       retry,
+		HTTPClient:  &http.Client{Timeout: timeout},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create github reader: %w", err)
 	}
@@ -501,15 +554,21 @@ func normalizeSyncOptions(opts SyncOptions) (SyncOptions, error) {
 
 func (s *Service) threadFromIssue(ctx context.Context, reader github.Reader, ref domain.RepoRef, issue github.Issue) (corpus.Thread, string, error) {
 	thread := corpus.Thread{
-		Kind:            string(issue.Kind),
-		Number:          issue.Number,
-		State:           issue.State,
-		Title:           issue.Title,
-		Body:            issue.Body,
-		Author:          issue.Author,
-		Labels:          issue.Labels,
-		SourceCreatedAt: issue.CreatedAt,
-		SourceUpdatedAt: issue.UpdatedAt,
+		Kind:              string(issue.Kind),
+		Number:            issue.Number,
+		State:             issue.State,
+		StateReason:       issue.StateReason,
+		Title:             issue.Title,
+		Body:              issue.Body,
+		Author:            issue.Author,
+		AuthorAssociation: issue.AuthorAssociation,
+		Labels:            issue.Labels,
+		Assignees:         issue.Assignees,
+		Draft:             issue.Draft,
+		Locked:            issue.Locked,
+		Milestone:         issue.Milestone,
+		SourceCreatedAt:   issue.CreatedAt,
+		SourceUpdatedAt:   issue.UpdatedAt,
 	}
 	if issue.ClosedAt != nil {
 		thread.ClosedAt = *issue.ClosedAt
@@ -536,6 +595,11 @@ func (s *Service) threadFromIssue(ctx context.Context, reader github.Reader, ref
 		if !pr.UpdatedAt.IsZero() {
 			thread.SourceUpdatedAt = pr.UpdatedAt
 		}
+		thread.AuthorAssociation = pr.AuthorAssociation
+		thread.Assignees = pr.Assignees
+		thread.Draft = pr.Draft
+		thread.Locked = pr.Locked
+		thread.Milestone = pr.Milestone
 		payload, err = json.Marshal(pr)
 		if err != nil {
 			return corpus.Thread{}, "", fmt.Errorf("marshal pull request details: %w", err)
@@ -564,39 +628,6 @@ func corpusRepoFromGitHub(r github.Repository) corpus.Repository {
 		SourceCreatedAt: r.CreatedAt,
 		SourceUpdatedAt: r.UpdatedAt,
 	}
-}
-
-// Search performs a local-only corpus search and supports repo and kind filters.
-func (s *Service) Search(ctx context.Context, query string, opts cli.SearchOptions) (*cli.SearchResult, error) {
-	if opts.Limit <= 0 {
-		opts.Limit = 20
-	}
-	if opts.Limit > 1000 {
-		return nil, errors.New("search limit cannot exceed 1000")
-	}
-	res, err := s.searchCorpus(ctx, query, opts)
-	if err != nil {
-		return nil, err
-	}
-	matches := make([]cli.SearchMatch, len(res.Matches))
-	for i, m := range res.Matches {
-		matches[i] = cli.SearchMatch{
-			Kind:   m.Kind,
-			Repo:   cli.RepoRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo},
-			Title:  m.Title,
-			Number: m.Number,
-			URL:    m.URL,
-			Score:  m.Score,
-		}
-	}
-	return &cli.SearchResult{
-		Query:   query,
-		Kind:    opts.Kind,
-		Repo:    opts.Repo,
-		Limit:   opts.Limit,
-		Total:   res.Total,
-		Matches: matches,
-	}, nil
 }
 
 // Dossier builds a deterministic, local-corpus-backed repository dossier.

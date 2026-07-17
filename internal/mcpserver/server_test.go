@@ -155,6 +155,80 @@ func (*fakeReader) HydrateThread(_ context.Context, in HydrateThreadInput) (Hydr
 	}, nil
 }
 
+func (*fakeReader) SearchRepositories(_ context.Context, in SearchRepositoriesInput) (SearchRepositoriesOutput, error) {
+	return SearchRepositoriesOutput{Query: in.Query, Total: 1, Matches: []RepositoryOutput{{Owner: in.Owner, Repo: in.Repo}}}, nil
+}
+
+func (*fakeReader) ExplainMatch(_ context.Context, in ExplainMatchInput) (ExplainMatchOutput, error) {
+	return ExplainMatchOutput{Query: in.Query, Owner: in.Owner, Repo: in.Repo, Kind: in.Kind, Number: in.Number, Title: "match"}, nil
+}
+
+func (*fakeReader) GetJob(_ context.Context, in GetJobInput) (GetJobOutput, error) {
+	if in.ID == "missing" {
+		return GetJobOutput{}, ErrNotFound
+	}
+	return GetJobOutput{ID: in.ID, Kind: "crawl", Status: "queued"}, nil
+}
+
+func (*fakeReader) ThreadByNumber(_ context.Context, in ThreadByNumberInput) (ThreadOutput, error) {
+	if in.Number == 404 {
+		return ThreadOutput{}, ErrNotFound
+	}
+	return ThreadOutput{Owner: in.Owner, Repo: in.Repo, Kind: "issue", Number: in.Number, Title: "issue"}, nil
+}
+
+func (*fakeReader) HydrateRepository(_ context.Context, in HydrateRepositoryInput) (JobReference, error) {
+	return JobReference{ID: "job-" + in.Owner + "-" + in.Repo, Kind: "hydrate_repository", Status: "queued"}, nil
+}
+
+func (*fakeReader) BuildRepositoryDossier(_ context.Context, in BuildRepositoryDossierInput) (JobReference, error) {
+	return JobReference{ID: "job-dossier-" + in.Owner + "-" + in.Repo, Kind: "build_repository_dossier", Status: "queued"}, nil
+}
+
+func (*fakeReader) StartCrawl(_ context.Context, in StartCrawlInput) (JobReference, error) {
+	return JobReference{ID: "job-crawl-" + in.Source, Kind: "start_crawl", Status: "queued"}, nil
+}
+
+func (*fakeReader) StartInvestigation(_ context.Context, in StartInvestigationInput) (InvestigationOutput, error) {
+	return InvestigationOutput{ID: "inv-1", Owner: in.Owner, Repo: in.Repo, Status: "open"}, nil
+}
+
+func (*fakeReader) RecordHypothesis(_ context.Context, in RecordHypothesisInput) (HypothesisOutput, error) {
+	return HypothesisOutput{ID: "hyp-1", InvestigationID: in.InvestigationID, Title: in.Title, Status: "proposed"}, nil
+}
+
+func (*fakeReader) CheckDuplicates(_ context.Context, in CheckDuplicatesInput) (CheckOutput, error) {
+	return CheckOutput{Target: in.Target, ID: in.ID, Total: 1, Findings: []EvidenceItem{{ID: "ev-1", Type: "github_source", Relation: "inconclusive", Description: "similar"}}}, nil
+}
+
+func (*fakeReader) CheckCollisions(_ context.Context, in CheckCollisionsInput) (CheckOutput, error) {
+	return CheckOutput{Target: in.Target, ID: in.ID, Total: 1, Findings: []EvidenceItem{{ID: "ev-1", Type: "github_source", Relation: "contradicting", Description: "collision"}}}, nil
+}
+
+func (*fakeReader) PromoteOpportunity(_ context.Context, in PromoteOpportunityInput) (OpportunityOutput, error) {
+	return OpportunityOutput{ID: "opp-1", HypothesisID: in.HypothesisID, Title: in.ProblemStatement, ProblemStatement: in.ProblemStatement, CollisionStatus: "unknown"}, nil
+}
+
+func (*fakeReader) CreateWorkspace(_ context.Context, in CreateWorkspaceInput) (JobReference, error) {
+	return JobReference{ID: "job-workspace-" + in.Name, Kind: "create_workspace", Status: "queued"}, nil
+}
+
+func (*fakeReader) DefineValidation(_ context.Context, in DefineValidationInput) (ValidationOutput, error) {
+	return ValidationOutput{ID: "val-1", InvestigationID: in.InvestigationID, Kind: in.Kind, Command: []string{"echo"}, WorkingDir: in.WorkingDir}, nil
+}
+
+func (*fakeReader) RunValidation(_ context.Context, in RunValidationInput) (JobReference, error) {
+	return JobReference{ID: "job-run-" + in.ID, Kind: "run_validation", Status: "queued"}, nil
+}
+
+func (*fakeReader) PrepareContribution(_ context.Context, in PrepareContributionInput) (DraftOutput, error) {
+	return DraftOutput{OpportunityID: in.OpportunityID, Kind: in.Kind, Title: "draft", Body: "body"}, nil
+}
+
+func (*fakeReader) CancelJob(_ context.Context, in CancelJobInput) (GetJobOutput, error) {
+	return GetJobOutput{ID: in.ID, Kind: "crawl", Status: "cancelled"}, nil
+}
+
 func connect(t *testing.T, reader Reader) (*mcp.ClientSession, func()) {
 	t.Helper()
 	server := New(reader, "test")
@@ -463,5 +537,102 @@ func TestToolCancellationReachesReader(t *testing.T) {
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("call error = %v, want context canceled", err)
+	}
+}
+
+func TestV1ParityToolsAndResources(t *testing.T) {
+	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	defer closeSessions()
+
+	tools := map[string]*mcp.Tool{}
+	for tool, err := range client.Tools(context.Background(), nil) {
+		if err != nil {
+			t.Fatalf("list tools: %v", err)
+		}
+		tools[tool.Name] = tool
+	}
+
+	for _, name := range []string{
+		"search_repositories", "search_threads", "get_repository_dossier", "explain_match", "get_job",
+		"start_crawl", "hydrate_repository", "build_repository_dossier", "create_workspace", "run_validation",
+		"start_investigation", "record_hypothesis", "check_duplicates", "check_collisions",
+		"promote_opportunity", "define_validation", "prepare_contribution", "cancel_job",
+	} {
+		if tools[name] == nil {
+			t.Fatalf("missing v1 tool %q", name)
+		}
+	}
+
+	readTests := []struct {
+		name string
+		args map[string]any
+	}{
+		{"search_repositories", map[string]any{"query": "rocket"}},
+		{"search_threads", map[string]any{"query": "stall"}},
+		{"get_repository_dossier", map[string]any{"owner": "acme", "repo": "rocket"}},
+		{"explain_match", map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 7}},
+		{"get_job", map[string]any{"id": "job-1"}},
+	}
+	for _, tt := range readTests {
+		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})
+		if err != nil || result.IsError {
+			t.Fatalf("call %s: err=%v result=%+v", tt.name, err, result)
+		}
+		if result.StructuredContent == nil {
+			t.Fatalf("%s returned nil structured content", tt.name)
+		}
+	}
+
+	writeTests := []struct {
+		name string
+		args map[string]any
+	}{
+		{"start_crawl", map[string]any{"source": "go", "since": "720h", "budget": 10}},
+		{"hydrate_repository", map[string]any{"owner": "acme", "repo": "rocket"}},
+		{"build_repository_dossier", map[string]any{"owner": "acme", "repo": "rocket"}},
+		{"create_workspace", map[string]any{"investigation_id": "inv-1", "remote": "https://github.com/acme/rocket.git", "base_ref": "main", "candidate_ref": "feature", "name": "ws-1"}},
+		{"run_validation", map[string]any{"id": "val-1", "kind": "base", "execute": true}},
+		{"start_investigation", map[string]any{"owner": "acme", "repo": "rocket"}},
+		{"record_hypothesis", map[string]any{"investigation_id": "inv-1", "title": "leak", "description": "memory leak", "category": "bug"}},
+		{"check_duplicates", map[string]any{"target": "hypothesis", "id": "hyp-1"}},
+		{"check_collisions", map[string]any{"target": "opportunity", "id": "opp-1"}},
+		{"promote_opportunity", map[string]any{"hypothesis_id": "hyp-1", "problem_statement": "leak", "scope": "small", "impact": "high", "expected_effort": "1h", "confidence": 0.8}},
+		{"define_validation", map[string]any{"investigation_id": "inv-1", "kind": "test", "command": "go test ./...", "working_dir": "."}},
+		{"prepare_contribution", map[string]any{"opportunity_id": "opp-1", "kind": "issue"}},
+		{"cancel_job", map[string]any{"id": "job-1"}},
+	}
+	for _, tt := range writeTests {
+		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})
+		if err != nil || result.IsError {
+			t.Fatalf("call %s: err=%v result=%+v", tt.name, err, result)
+		}
+		if result.StructuredContent == nil {
+			t.Fatalf("%s returned nil structured content", tt.name)
+		}
+	}
+
+	resourceTests := []string{
+		"github-index://repositories/acme/rocket",
+		"github-index://threads/acme/rocket/7",
+		"github-index://dossiers/acme/rocket",
+		"github-index://investigations/inv-1",
+		"github-index://opportunities/opp-1",
+		"github-index://evidence/inv-1",
+		"github-index://lenses/active-go",
+		"github-index://jobs/job-1",
+	}
+	for _, uri := range resourceTests {
+		result, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: uri})
+		if err != nil {
+			t.Fatalf("read %s: %v", uri, err)
+		}
+		if len(result.Contents) != 1 || result.Contents[0].Text == "" {
+			t.Fatalf("resource %s result = %+v", uri, result)
+		}
+	}
+
+	_, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: "github-index://jobs/missing"})
+	if err == nil {
+		t.Fatal("expected resource-not-found error for missing job")
 	}
 }

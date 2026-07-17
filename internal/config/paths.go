@@ -212,6 +212,15 @@ func (p *Paths) DataDir() (string, error) {
 	}
 }
 
+// AcquisitionCacheDir returns the managed code-acquisition cache directory.
+func (p *Paths) AcquisitionCacheDir() (string, error) {
+	root, err := p.CacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "acquisitions"), nil
+}
+
 // CacheDir returns the platform-native cache directory for the app.
 func (p *Paths) CacheDir() (string, error) {
 	root, err := p.cacheRoot()

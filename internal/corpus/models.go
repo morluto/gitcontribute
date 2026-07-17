@@ -43,10 +43,16 @@ type Thread struct {
 	Kind                string
 	Number              int
 	State               string
+	StateReason         string
 	Title               string
 	Body                string
 	Author              string
+	AuthorAssociation   string
 	Labels              []string
+	Assignees           []string
+	Draft               bool
+	Locked              bool
+	Milestone           string
 	ClosedAt            time.Time
 	MergedAt            time.Time
 	Merged              bool
@@ -55,6 +61,8 @@ type Thread struct {
 	ObservationSequence int64
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	// Rank is the query-specific FTS rank populated only by search results.
+	Rank float64
 }
 
 // ThreadKind names the thread types stored by the corpus.
@@ -128,3 +136,63 @@ const (
 	RunStatusPartial   = "partial"
 	RunStatusFailed    = "failed"
 )
+
+// JobStatus values for the durable job lifecycle.
+const (
+	JobStatusQueued    = "queued"
+	JobStatusRunning   = "running"
+	JobStatusSucceeded = "succeeded"
+	JobStatusFailed    = "failed"
+	JobStatusCancelled = "cancelled"
+)
+
+// Job is a durable, cancellable unit of work.
+type Job struct {
+	ID          string
+	Kind        string
+	Status      string
+	Request     string
+	Result      string
+	Error       string
+	Progress    string
+	Statistics  string
+	CreatedAt   time.Time
+	StartedAt   *time.Time
+	CompletedAt *time.Time
+	UpdatedAt   time.Time
+	CancelledAt *time.Time
+}
+
+// JobEvent is a durable log line emitted during a job.
+type JobEvent struct {
+	ID         int64
+	JobID      string
+	Level      string
+	Message    string
+	RecordedAt time.Time
+}
+
+// DossierRecord is a persisted deterministic dossier snapshot.
+type DossierRecord struct {
+	ID              int64
+	RepositoryID    int64
+	RepoOwner       string
+	RepoName        string
+	CommitSHA       string
+	AsOf            time.Time
+	SectionMetadata string
+	Snapshot        string
+	GeneratedAt     time.Time
+	CreatedAt       time.Time
+}
+
+// DossierSource is one exact source recorded for a dossier.
+type DossierSource struct {
+	ID         int64
+	DossierID  int64
+	Source     string
+	URL        string
+	CommitSHA  string
+	ObservedAt time.Time
+	AsOf       time.Time
+}

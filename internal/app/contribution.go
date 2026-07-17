@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -160,6 +161,200 @@ func (s *Service) workspaceDiff(ctx context.Context, workspaceID string, inv *in
 		return "", errors.New("workspace has untracked files; stage them or provide an explicit --changes summary")
 	}
 	return mgr.DiffByPath(ctx, ws.Path, ws.BaseSHA)
+}
+
+// PrepareReviewReportInput scopes a review report to an opportunity and/or workspace.
+type PrepareReviewReportInput struct {
+	OpportunityID string
+	WorkspaceID   string
+}
+
+// EvidenceSummary counts evidence by relation.
+type EvidenceSummary struct {
+	Supporting    int `json:"supporting"`
+	Contradicting int `json:"contradicting"`
+	Inconclusive  int `json:"inconclusive"`
+	Stale         int `json:"stale"`
+	Invalid       int `json:"invalid"`
+	Total         int `json:"total"`
+}
+
+// ReviewReport is a read-only preparation artifact with collision findings,
+// complete diff metadata, and a suggested review order.
+type ReviewReport struct {
+	OpportunityID        string               `json:"opportunity_id,omitempty"`
+	WorkspaceID          string               `json:"workspace_id,omitempty"`
+	Repo                 cli.RepoRef          `json:"repo"`
+	OpportunityStatus    string               `json:"opportunity_status,omitempty"`
+	CollisionStatus      string               `json:"collision_status,omitempty"`
+	CollisionFindings    []evidence.Evidence  `json:"collision_findings"`
+	DiffMetadata         *WorkspaceDiffResult `json:"diff_metadata,omitempty"`
+	EvidenceSummary      EvidenceSummary      `json:"evidence_summary"`
+	SuggestedReviewOrder []ReviewStep         `json:"suggested_review_order"`
+	RenderedAt           time.Time            `json:"rendered_at"`
+}
+
+// PrepareReviewReport assembles a review report for an opportunity and/or workspace.
+func (s *Service) PrepareReviewReport(ctx context.Context, input PrepareReviewReportInput) (*ReviewReport, error) {
+	if input.OpportunityID == "" && input.WorkspaceID == "" {
+		return nil, errors.New("opportunity or workspace is required")
+	}
+
+	report := &ReviewReport{
+		OpportunityID: input.OpportunityID,
+		WorkspaceID:   input.WorkspaceID,
+		RenderedAt:    time.Now().UTC(),
+	}
+
+	var inv *investigation.Investigation
+	var opp *investigation.Opportunity
+	if input.OpportunityID != "" {
+		var err error
+		opp, inv, err = s.loadOpportunityAndInvestigation(ctx, input.OpportunityID)
+		if err != nil {
+			return nil, err
+		}
+		report.OpportunityStatus = string(opp.Status)
+		report.CollisionStatus = string(opp.CollisionStatus)
+		report.Repo = cli.RepoRef{Owner: inv.Repo.Owner, Repo: inv.Repo.Repo}
+
+		evItems, err := s.evidenceForOpportunity(ctx, input.OpportunityID)
+		if err != nil {
+			return nil, err
+		}
+		report.EvidenceSummary = summarizeEvidence(evItems)
+
+		collisions, err := s.CheckOpportunityCollisions(ctx, input.OpportunityID, defaultCollisionLimit)
+		if err != nil {
+			return nil, err
+		}
+		report.CollisionFindings = collisions.Findings
+	}
+
+	if input.WorkspaceID != "" {
+		c, err := s.openCorpus(ctx)
+		if err != nil {
+			return nil, err
+		}
+		ws, err := c.GetWorkspace(ctx, input.WorkspaceID)
+		if err != nil {
+			return nil, mapWorkspaceError(err)
+		}
+		if inv != nil && (ws.InvestigationID != inv.ID ||
+			!strings.EqualFold(ws.RepoOwner, inv.Repo.Owner) ||
+			!strings.EqualFold(ws.RepoName, inv.Repo.Repo)) {
+			return nil, errors.New("workspace does not belong to the opportunity investigation and repository")
+		}
+		diff, err := s.WorkspaceDiff(ctx, input.WorkspaceID)
+		if err != nil {
+			return nil, err
+		}
+		report.Repo = diff.Repo
+		report.DiffMetadata = diff
+	}
+
+	if report.DiffMetadata != nil && len(report.DiffMetadata.ReviewOrder) > 0 {
+		report.SuggestedReviewOrder = report.DiffMetadata.ReviewOrder
+	} else if opp != nil {
+		evItems, _ := s.evidenceForOpportunity(ctx, opp.ID)
+		report.SuggestedReviewOrder = reviewOrderFromEvidence(evItems)
+	}
+
+	return report, nil
+}
+
+func (s *Service) loadOpportunityAndInvestigation(ctx context.Context, opportunityID string) (*investigation.Opportunity, *investigation.Investigation, error) {
+	invSvc, err := s.investigationSvc(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	opp, err := invSvc.GetOpportunity(ctx, opportunityID)
+	if err != nil {
+		return nil, nil, mapInvestigationError(err)
+	}
+	inv, err := invSvc.GetInvestigation(ctx, opp.InvestigationID)
+	if err != nil {
+		return nil, nil, mapInvestigationError(err)
+	}
+	return opp, inv, nil
+}
+
+func (s *Service) evidenceForOpportunity(ctx context.Context, opportunityID string) ([]*evidence.Evidence, error) {
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	evSvc := evidence.NewService(c, evidence.NewExecRunner())
+	return evSvc.ListEvidence(ctx, evidence.EvidenceFilter{OpportunityID: opportunityID})
+}
+
+func summarizeEvidence(items []*evidence.Evidence) EvidenceSummary {
+	var s EvidenceSummary
+	for _, e := range items {
+		if e == nil {
+			continue
+		}
+		s.Total++
+		switch e.Relation {
+		case evidence.RelationSupporting:
+			s.Supporting++
+		case evidence.RelationContradicting:
+			s.Contradicting++
+		case evidence.RelationInconclusive:
+			s.Inconclusive++
+		case evidence.RelationStale:
+			s.Stale++
+		case evidence.RelationInvalid:
+			s.Invalid++
+		}
+	}
+	return s
+}
+
+func reviewOrderFromEvidence(items []*evidence.Evidence) []ReviewStep {
+	steps := make([]ReviewStep, 0, len(items))
+	for _, e := range items {
+		if e == nil {
+			continue
+		}
+		priority, rationale := evidenceReviewPriority(e)
+		steps = append(steps, ReviewStep{
+			Path:      e.Description,
+			Priority:  priority,
+			Rationale: rationale,
+		})
+	}
+	sort.Slice(steps, func(i, j int) bool {
+		if steps[i].Priority != steps[j].Priority {
+			return steps[i].Priority < steps[j].Priority
+		}
+		return steps[i].Path < steps[j].Path
+	})
+	return steps
+}
+
+func evidenceReviewPriority(e *evidence.Evidence) (int, string) {
+	switch e.Relation {
+	case evidence.RelationSupporting:
+		return 0, "supporting evidence first"
+	case evidence.RelationContradicting:
+		return 2, "contradicting evidence before approval"
+	case evidence.RelationInconclusive:
+		return 3, "inconclusive evidence to resolve"
+	case evidence.RelationStale:
+		return 4, "stale evidence to refresh"
+	case evidence.RelationInvalid:
+		return 5, "invalid evidence to remove"
+	default:
+		return 6, "other evidence"
+	}
+}
+
+func diffMatchesOpportunity(diff *WorkspaceDiffResult, inv *investigation.Investigation, opp *investigation.Opportunity) bool {
+	if diff == nil || inv == nil || opp == nil {
+		return false
+	}
+	return diff.Repo.Owner == inv.Repo.Owner && diff.Repo.Repo == inv.Repo.Repo
 }
 
 func draftResult(kind, opportunityID, title, body string, renderedAt time.Time) *cli.DraftResult {

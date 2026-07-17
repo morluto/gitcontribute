@@ -40,6 +40,8 @@ func validateSourceName(name string) error {
 	return nil
 }
 
+// AddSearchSource stores a named GitHub repository-search source without
+// executing it.
 func (s *Service) AddSearchSource(ctx context.Context, name, query string) (*cli.SourceResult, error) {
 	name = strings.TrimSpace(name)
 	query = strings.TrimSpace(query)
@@ -66,6 +68,7 @@ func (s *Service) AddSearchSource(ctx context.Context, name, query string) (*cli
 	return sourceResult(stored), nil
 }
 
+// AddRepoSource stores a named, explicit set of repositories without fetching them.
 func (s *Service) AddRepoSource(ctx context.Context, name string, refs []cli.RepoRef) (*cli.SourceResult, error) {
 	name = strings.TrimSpace(name)
 	if err := validateSourceName(name); err != nil {
@@ -99,6 +102,7 @@ func (s *Service) AddRepoSource(ctx context.Context, name string, refs []cli.Rep
 	return sourceResult(stored), nil
 }
 
+// AddGHArchiveSource stores a named GH Archive event filter without fetching data.
 func (s *Service) AddGHArchiveSource(ctx context.Context, name string, events []string) (*cli.SourceResult, error) {
 	name = strings.TrimSpace(name)
 	if err := validateSourceName(name); err != nil {
@@ -126,6 +130,7 @@ func (s *Service) AddGHArchiveSource(ctx context.Context, name string, events []
 	return sourceResult(stored), nil
 }
 
+// ShowSource returns one saved discovery source from the local corpus.
 func (s *Service) ShowSource(ctx context.Context, name string) (*cli.SourceResult, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
@@ -141,6 +146,7 @@ func (s *Service) ShowSource(ctx context.Context, name string) (*cli.SourceResul
 	return sourceResult(source), nil
 }
 
+// ListSources returns all saved discovery sources from the local corpus.
 func (s *Service) ListSources(ctx context.Context) (*cli.SourceListResult, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
@@ -163,6 +169,8 @@ func sourceResult(source *corpus.DiscoverySource) *cli.SourceResult {
 	}
 }
 
+// Crawl performs one explicit, bounded read for a saved discovery source and
+// persists its checkpoint only after the bounded operation succeeds.
 func (s *Service) Crawl(ctx context.Context, name string, opts cli.CrawlOptions) (*cli.CrawlResult, error) {
 	if opts.Since <= 0 || opts.Budget <= 0 || opts.Budget > 5000 {
 		return nil, errors.New("invalid crawl since or budget")
@@ -187,6 +195,36 @@ func (s *Service) Crawl(ctx context.Context, name string, opts cli.CrawlOptions)
 		return s.crawlGHArchiveSource(ctx, c, source, opts)
 	default:
 		return nil, fmt.Errorf("source %q has unsupported kind %q", name, source.Kind)
+	}
+}
+
+// TailSource repeatedly advances a named source until cancellation. Each
+// iteration is an ordinary idempotent crawl and therefore retains its own run
+// record, checkpoint, request budget, and failure state.
+func (s *Service) TailSource(ctx context.Context, name string, opts cli.TailOptions) (*cli.TailResult, error) {
+	if opts.Since <= 0 || opts.Budget <= 0 || opts.Budget > 5000 || opts.Interval <= 0 {
+		return nil, errors.New("invalid tail since, budget, or interval")
+	}
+	result := &cli.TailResult{Source: name}
+	for {
+		last, err := s.Crawl(ctx, name, cli.CrawlOptions{Since: opts.Since, Budget: opts.Budget})
+		if err != nil {
+			return nil, err
+		}
+		result.Iterations++
+		result.Last = last
+		if opts.Once {
+			return result, nil
+		}
+		timer := time.NewTimer(opts.Interval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
 }
 
@@ -236,10 +274,11 @@ func (s *Service) crawlSearchSource(ctx context.Context, c *corpus.Corpus, sourc
 	discovered := 0
 	seen := make(map[string]struct{})
 	for _, window := range windows {
+		pages := (window.Total + 99) / 100
 		partition := corpus.SourcePartition{
 			SourceID: source.ID, Key: fmt.Sprintf("%s:%d:%d", qualifier, window.Start.Unix(), window.End.Unix()),
 			Query: window.Query, Qualifier: string(qualifier), Start: window.Start, End: window.End,
-			Total: window.Total, Incomplete: window.Incomplete, Unsplittable: window.Unsplittable, ObservedAt: now,
+			Total: window.Total, Pages: pages, Incomplete: window.Incomplete, Unsplittable: window.Unsplittable, ObservedAt: now,
 		}
 		if err := c.RecordSourcePartition(ctx, partition); err != nil {
 			return nil, err
@@ -247,7 +286,6 @@ func (s *Service) crawlSearchSource(ctx context.Context, c *corpus.Corpus, sourc
 		if window.Unsplittable || window.Incomplete {
 			return nil, fmt.Errorf("search window %s is incomplete or exceeds GitHub's result ceiling", partition.Key)
 		}
-		pages := (window.Total + 99) / 100
 		for page := 1; page <= pages; page++ {
 			response, err := budgeted.page(ctx, window.Query, page, 100)
 			if err != nil {

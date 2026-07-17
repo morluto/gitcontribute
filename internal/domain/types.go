@@ -247,3 +247,55 @@ type Dossier struct {
 	RecentClosedUnmergedPullRequests []DossierThread
 	RecentIssues                     []DossierThread
 }
+
+// DossierSectionMetadata records the bounded sections used to create a dossier.
+type DossierSectionMetadata struct {
+	RecentLimit           int      `json:"recent_limit"`
+	MergedPRCount         int      `json:"merged_pr_count"`
+	OpenPRCount           int      `json:"open_pr_count"`
+	ClosedUnmergedPRCount int      `json:"closed_unmerged_pr_count"`
+	IssueCount            int      `json:"issue_count"`
+	SourceClasses         []string `json:"source_classes"`
+}
+
+// SeedSourceClass identifies the stored thread class a seed was extracted from.
+type SeedSourceClass string
+
+const (
+	SeedSourceClassMergedPR         SeedSourceClass = "merged_pr"
+	SeedSourceClassClosedUnmergedPR SeedSourceClass = "closed_unmerged_pr"
+	SeedSourceClassIssue            SeedSourceClass = "issue"
+)
+
+// Seed is an evidence-backed record derived from stored merged PRs,
+// closed unmerged PRs, or issues.
+type Seed struct {
+	SourceClass SeedSourceClass
+	Number      int
+	Title       string
+	Author      string
+	State       string
+	Labels      []string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	ClosedAt    time.Time
+	MergedAt    time.Time
+	Evidence    SeedEvidence
+}
+
+// SeedEvidence carries the observed patterns and extracted signals for a seed.
+type SeedEvidence struct {
+	TitleConvention         string
+	IssueLinkages           []string
+	ValidationIndicators    []string
+	ApproximateScope        string
+	ScopeEvidence           string
+	RejectionOrSupersession string
+	ProblemAreas            []string
+}
+
+// ExtractSeedsOptions selects the source classes and bounds the result set.
+type ExtractSeedsOptions struct {
+	Classes []SeedSourceClass
+	Limit   int
+}
