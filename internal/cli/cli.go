@@ -54,8 +54,13 @@ type rootCmd struct {
 	Validation    validationCmd    `cmd:"" help:"Manage validation definitions and runs"`
 	Evidence      evidenceCmd      `cmd:"" help:"Show evidence packets"`
 	Prepare       prepareCmd       `cmd:"" help:"Prepare contribution drafts"`
+	Archive       archiveCmd       `cmd:"" help:"Synchronize and hydrate the local archive"`
+	Coverage      coverageCmd      `cmd:"" help:"Show local repository facet coverage"`
+	Runs          runsCmd          `cmd:"" help:"List durable operation runs"`
+	Neighbors     neighborsCmd     `cmd:"" help:"Find similar local threads"`
+	Export        exportCmd        `cmd:"" help:"Export redacted local bundles"`
 	Clusters      clustersCmd      `cmd:"" help:"Compute and list duplicate-candidate clusters for a repository"`
-	Cluster       clusterCmd       `cmd:"" help:"Show a cluster by stable id"`
+	Cluster       clusterCmd       `cmd:"" help:"Inspect duplicate-candidate clusters"`
 	Lens          lensCmd          `cmd:"" help:"Manage saved lenses"`
 	Collection    collectionCmd    `cmd:"" help:"Manage named collections"`
 	MCP           mcpCmd           `cmd:"" name:"mcp" help:"Run the MCP server"`
@@ -304,9 +309,68 @@ type clustersCmd struct {
 }
 
 type clusterCmd struct {
+	Show clusterShowCmd `cmd:"" help:"Show a cluster by stable id"`
+}
+
+type clusterShowCmd struct {
 	ID    string `arg:"" help:"Cluster stable id"`
 	Limit int    `name:"limit" default:"100" help:"Maximum members to show"`
 	JSON  bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type archiveCmd struct {
+	Sync    archiveSyncCmd    `cmd:"" help:"Synchronize repository threads"`
+	Hydrate archiveHydrateCmd `cmd:"" help:"Hydrate one issue or pull request"`
+}
+
+type archiveSyncCmd struct {
+	OwnerRepo string        `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	State     string        `name:"state" default:"all" enum:"open,closed,all" help:"Thread state"`
+	Since     time.Duration `name:"since" help:"Only threads updated within this duration"`
+	Numbers   string        `name:"numbers" help:"Comma-separated exact thread numbers"`
+	MaxPages  int           `name:"max-pages" default:"1000" help:"Maximum issue-list pages"`
+	JSON      bool          `name:"json" help:"Print the result as JSON"`
+}
+
+type archiveHydrateCmd struct {
+	Thread   string `arg:"" name:"owner/repo#number" help:"Thread as OWNER/REPO#NUMBER"`
+	With     string `name:"with" help:"Comma-separated facets (defaults to all applicable facets)"`
+	MaxPages int    `name:"max-pages" default:"50" help:"Maximum pages per facet"`
+	JSON     bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type coverageCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type runsCmd struct {
+	Limit int  `name:"limit" default:"50" help:"Maximum runs to return"`
+	JSON  bool `name:"json" help:"Print the result as JSON"`
+}
+
+type neighborsCmd struct {
+	Thread string `arg:"" name:"owner/repo#number" help:"Thread as OWNER/REPO#NUMBER"`
+	Kind   string `name:"kind" required:"" enum:"issue,pull_request" help:"Thread kind"`
+	Limit  int    `name:"limit" default:"10" help:"Maximum neighbors to return"`
+	JSON   bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type exportCmd struct {
+	Dossier  exportDossierCmd  `cmd:"" help:"Export a repository dossier"`
+	Evidence exportEvidenceCmd `cmd:"" help:"Export investigation evidence"`
+}
+
+type exportDossierCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	Format    string `name:"format" default:"markdown" enum:"json,markdown,md" help:"Export format"`
+	Output    string `name:"output" help:"Write to a file instead of stdout"`
+}
+
+type exportEvidenceCmd struct {
+	InvestigationID string `arg:"" help:"Investigation ID"`
+	Format          string `name:"format" default:"markdown" enum:"json,markdown,md" help:"Export format"`
+	Output          string `name:"output" help:"Write to a file instead of stdout"`
 }
 
 type lensCmd struct {
@@ -414,10 +478,20 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runEvidence(ctx, command, &cli.Evidence)
 	case "prepare":
 		return c.runPrepare(ctx, command, &cli.Prepare)
+	case "archive":
+		return c.runArchive(ctx, command, &cli.Archive)
+	case "coverage":
+		return c.runCoverage(ctx, &cli.Coverage)
+	case "runs":
+		return c.runRuns(ctx, &cli.Runs)
+	case "neighbors":
+		return c.runNeighbors(ctx, &cli.Neighbors)
+	case "export":
+		return c.runExport(ctx, command, &cli.Export)
 	case "clusters":
 		return c.runClusters(ctx, &cli.Clusters)
 	case "cluster":
-		return c.runCluster(ctx, &cli.Cluster)
+		return c.runCluster(ctx, command, &cli.Cluster)
 	case "lens":
 		return c.runLens(ctx, command, &cli.Lens)
 	case "collection":
@@ -495,6 +569,30 @@ func (c *CLI) lensService() (LensService, error) {
 
 func (c *CLI) collectionService() (CollectionService, error) {
 	service, ok := c.svc.(CollectionService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) archiveService() (ArchiveService, error) {
+	service, ok := c.svc.(ArchiveService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) localQueryService() (LocalQueryService, error) {
+	service, ok := c.svc.(LocalQueryService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) exportService() (ExportService, error) {
+	service, ok := c.svc.(ExportService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -997,22 +1095,203 @@ func (c *CLI) runClusters(ctx context.Context, cmd *clustersCmd) error {
 	return c.render(cmd.JSON, res)
 }
 
-func (c *CLI) runCluster(ctx context.Context, cmd *clusterCmd) error {
-	if strings.TrimSpace(cmd.ID) == "" {
+func (c *CLI) runCluster(ctx context.Context, command string, cmd *clusterCmd) error {
+	if command != "cluster show" {
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown cluster command: %s", command))
+	}
+	show := &cmd.Show
+	if strings.TrimSpace(show.ID) == "" {
 		return NewCLIError(ExitUsage, errors.New("cluster id is required"))
 	}
-	if cmd.Limit <= 0 || cmd.Limit > 1000 {
+	if show.Limit <= 0 || show.Limit > 1000 {
 		return NewCLIError(ExitUsage, fmt.Errorf("limit must be between 1 and 1000"))
 	}
 	service, err := c.clusteringService()
 	if err != nil {
 		return err
 	}
-	res, err := service.Cluster(ctx, cmd.ID, cmd.Limit)
+	res, err := service.Cluster(ctx, show.ID, show.Limit)
 	if err != nil {
 		return c.mapError(err)
 	}
-	return c.render(cmd.JSON, res)
+	return c.render(show.JSON, res)
+}
+
+func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) error {
+	service, err := c.archiveService()
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "archive sync":
+		repo, err := parseRepo(cmd.Sync.OwnerRepo)
+		if err != nil {
+			return err
+		}
+		numbers, err := parseNumberList(cmd.Sync.Numbers)
+		if err != nil {
+			return NewCLIError(ExitUsage, err)
+		}
+		if cmd.Sync.Since < 0 {
+			return NewCLIError(ExitUsage, errors.New("since duration cannot be negative"))
+		}
+		if len(numbers) > 0 && (cmd.Sync.State != "all" || cmd.Sync.Since != 0) {
+			return NewCLIError(ExitUsage, errors.New("state and since filters cannot be combined with exact thread numbers"))
+		}
+		fmt.Fprintf(c.stderr, "syncing archive for %s...\n", repo)
+		result, err := service.ArchiveSync(ctx, repo, ArchiveSyncOptions{
+			State: cmd.Sync.State, Since: cmd.Sync.Since, Numbers: numbers, MaxPages: cmd.Sync.MaxPages,
+		})
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Sync.JSON, result)
+	case "archive hydrate":
+		repo, number, err := parseThreadRef(cmd.Hydrate.Thread)
+		if err != nil {
+			return NewCLIError(ExitUsage, err)
+		}
+		fmt.Fprintf(c.stderr, "hydrating %s#%d...\n", repo, number)
+		result, err := service.Hydrate(ctx, repo, number, HydrateOptions{
+			Facets: splitCSV(cmd.Hydrate.With), MaxPages: cmd.Hydrate.MaxPages,
+		})
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Hydrate.JSON, result)
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown archive command: %s", command))
+	}
+}
+
+func (c *CLI) runCoverage(ctx context.Context, cmd *coverageCmd) error {
+	repo, err := parseRepo(cmd.OwnerRepo)
+	if err != nil {
+		return err
+	}
+	service, err := c.localQueryService()
+	if err != nil {
+		return err
+	}
+	result, err := service.Coverage(ctx, repo)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runRuns(ctx context.Context, cmd *runsCmd) error {
+	if cmd.Limit <= 0 || cmd.Limit > 1000 {
+		return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 1000"))
+	}
+	service, err := c.localQueryService()
+	if err != nil {
+		return err
+	}
+	result, err := service.RunHistory(ctx, cmd.Limit)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runNeighbors(ctx context.Context, cmd *neighborsCmd) error {
+	repo, number, err := parseThreadRef(cmd.Thread)
+	if err != nil {
+		return NewCLIError(ExitUsage, err)
+	}
+	if cmd.Limit <= 0 || cmd.Limit > 1000 {
+		return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 1000"))
+	}
+	service, err := c.localQueryService()
+	if err != nil {
+		return err
+	}
+	result, err := service.NeighborQuery(ctx, repo, cmd.Kind, number, cmd.Limit)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runExport(ctx context.Context, command string, cmd *exportCmd) error {
+	service, err := c.exportService()
+	if err != nil {
+		return err
+	}
+	var result *ExportResult
+	var output string
+	switch command {
+	case "export dossier":
+		repo, err := parseRepo(cmd.Dossier.OwnerRepo)
+		if err != nil {
+			return err
+		}
+		result, err = service.ExportDossier(ctx, repo, cmd.Dossier.Format)
+		output = cmd.Dossier.Output
+	case "export evidence":
+		result, err = service.ExportEvidence(ctx, cmd.Evidence.InvestigationID, cmd.Evidence.Format)
+		output = cmd.Evidence.Output
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown export command: %s", command))
+	}
+	if err != nil {
+		return c.mapError(err)
+	}
+	if output != "" {
+		if err := os.WriteFile(output, []byte(result.Content), 0600); err != nil {
+			return c.mapError(fmt.Errorf("write export: %w", err))
+		}
+		fmt.Fprintf(c.stderr, "wrote %s %s export to %s\n", result.Kind, result.Format, output)
+		return nil
+	}
+	_, err = io.WriteString(c.stdout, result.Content)
+	if err == nil && !strings.HasSuffix(result.Content, "\n") {
+		_, err = io.WriteString(c.stdout, "\n")
+	}
+	return c.mapError(err)
+}
+
+func parseThreadRef(raw string) (RepoRef, int, error) {
+	idx := strings.LastIndexByte(raw, '#')
+	if idx <= 0 || idx == len(raw)-1 {
+		return RepoRef{}, 0, fmt.Errorf("invalid thread reference %q: expected OWNER/REPO#NUMBER", raw)
+	}
+	repo, err := parseRepo(raw[:idx])
+	if err != nil {
+		return RepoRef{}, 0, err
+	}
+	number, err := strconv.Atoi(raw[idx+1:])
+	if err != nil || number <= 0 {
+		return RepoRef{}, 0, fmt.Errorf("invalid thread reference %q: expected positive number", raw)
+	}
+	return repo, number, nil
+}
+
+func parseNumberList(raw string) ([]int, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	parts := splitCSV(raw)
+	numbers := make([]int, len(parts))
+	for i, part := range parts {
+		number, err := strconv.Atoi(part)
+		if err != nil || number <= 0 {
+			return nil, fmt.Errorf("invalid thread number %q", part)
+		}
+		numbers[i] = number
+	}
+	return numbers, nil
+}
+
+func splitCSV(raw string) []string {
+	var values []string
+	for _, value := range strings.Split(raw, ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func (c *CLI) runLens(ctx context.Context, command string, cmd *lensCmd) error {

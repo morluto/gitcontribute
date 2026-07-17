@@ -82,9 +82,75 @@ func humanOutput(v any) (string, error) {
 		return collectionHuman(r), nil
 	case *CollectionListResult:
 		return collectionListHuman(r), nil
+	case *HydrateResult:
+		return hydrateHuman(r), nil
+	case *CoverageResult:
+		return coverageHuman(r), nil
+	case *RunListResult:
+		return runsHuman(r), nil
+	case *NeighborListResult:
+		return neighborsHuman(r), nil
 	default:
 		return "", fmt.Errorf("unsupported result type %T", v)
 	}
+}
+
+func hydrateHuman(r *HydrateResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Hydrated %s#%d (%s): %d requests", r.Repo, r.Number, r.Kind, r.Requests)
+	for _, facet := range r.Facets {
+		status := "partial"
+		if facet.Complete {
+			status = "complete"
+		}
+		fmt.Fprintf(&b, "\n- %s: %d records across %d pages (%s)", facet.Facet, facet.Count, facet.Pages, status)
+	}
+	return b.String()
+}
+
+func coverageHuman(r *CoverageResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Coverage for %s:", r.Repo)
+	if len(r.Facets) == 0 {
+		b.WriteString(" none")
+		return b.String()
+	}
+	for _, facet := range r.Facets {
+		status := "partial"
+		if facet.Complete {
+			status = "complete"
+		}
+		fmt.Fprintf(&b, "\n- %s: %s", facet.Facet, status)
+		if facet.UpdatedAt != "" {
+			fmt.Fprintf(&b, " (updated %s)", facet.UpdatedAt)
+		}
+	}
+	return b.String()
+}
+
+func runsHuman(r *RunListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d runs", len(r.Runs))
+	for _, run := range r.Runs {
+		fmt.Fprintf(&b, "\n- %d %s [%s] started %s", run.ID, run.Kind, run.Status, run.StartedAt)
+		if run.Error != "" {
+			fmt.Fprintf(&b, ": %s", run.Error)
+		}
+	}
+	return b.String()
+}
+
+func neighborsHuman(r *NeighborListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Neighbors for %s:%s#%d (revision %s)", r.Repo, r.Kind, r.Number, r.SourceRevision)
+	if len(r.Neighbors) == 0 {
+		b.WriteString("\nNo neighbors found.")
+		return b.String()
+	}
+	for _, neighbor := range r.Neighbors {
+		fmt.Fprintf(&b, "\n- %s:%s#%d %.2f: %s — %s", neighbor.Repo, neighbor.Kind, neighbor.Number, neighbor.Score, neighbor.Title, neighbor.Reason)
+	}
+	return b.String()
 }
 
 func initHuman(r *InitResult) string {

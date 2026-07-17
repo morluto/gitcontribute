@@ -33,6 +33,17 @@ type Reader interface {
 	Lens(context.Context, LensInput) (LensOutput, error)
 }
 
+// NeighborReader is the optional local nearest-thread query capability.
+type NeighborReader interface {
+	FindNeighbors(context.Context, FindNeighborsInput) (FindNeighborsOutput, error)
+}
+
+// Operator is the optional explicit network-read/local-write capability.
+type Operator interface {
+	SyncRepository(context.Context, SyncRepositoryInput) (SyncRepositoryOutput, error)
+	HydrateThread(context.Context, HydrateThreadInput) (HydrateThreadOutput, error)
+}
+
 type RepoInput struct {
 	Owner string `json:"owner" jsonschema:"GitHub repository owner"`
 	Repo  string `json:"repo" jsonschema:"GitHub repository name"`
@@ -221,6 +232,75 @@ type FindClustersInput struct {
 	Limit int    `json:"limit,omitempty" jsonschema:"Maximum clusters from 1 to 100"`
 }
 
+type FindNeighborsInput struct {
+	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
+	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
+	Kind   string `json:"kind" jsonschema:"Thread kind: issue or pull_request"`
+	Number int    `json:"number" jsonschema:"GitHub issue or pull request number"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum neighbors from 1 to 100"`
+}
+
+type NeighborOutput struct {
+	Kind   string  `json:"kind"`
+	Owner  string  `json:"owner"`
+	Repo   string  `json:"repo"`
+	Number int     `json:"number"`
+	Title  string  `json:"title"`
+	State  string  `json:"state"`
+	Score  float64 `json:"score"`
+	Reason string  `json:"reason"`
+}
+
+type FindNeighborsOutput struct {
+	Owner          string           `json:"owner"`
+	Repo           string           `json:"repo"`
+	Kind           string           `json:"kind"`
+	Number         int              `json:"number"`
+	SourceRevision string           `json:"source_revision"`
+	Neighbors      []NeighborOutput `json:"neighbors"`
+}
+
+type SyncRepositoryInput struct {
+	Owner    string `json:"owner" jsonschema:"GitHub repository owner"`
+	Repo     string `json:"repo" jsonschema:"GitHub repository name"`
+	State    string `json:"state,omitempty" jsonschema:"Thread state: open, closed, or all"`
+	Since    string `json:"since,omitempty" jsonschema:"Optional Go duration such as 720h"`
+	Numbers  []int  `json:"numbers,omitempty" jsonschema:"Optional exact issue or pull request numbers"`
+	MaxPages int    `json:"max_pages,omitempty" jsonschema:"Maximum issue-list pages from 1 to 1000"`
+}
+
+type SyncRepositoryOutput struct {
+	Owner   string `json:"owner"`
+	Repo    string `json:"repo"`
+	Updated int    `json:"updated"`
+	Message string `json:"message"`
+}
+
+type HydrateThreadInput struct {
+	Owner    string   `json:"owner" jsonschema:"GitHub repository owner"`
+	Repo     string   `json:"repo" jsonschema:"GitHub repository name"`
+	Number   int      `json:"number" jsonschema:"GitHub issue or pull request number"`
+	Facets   []string `json:"facets,omitempty" jsonschema:"Facets to hydrate; empty selects all applicable facets"`
+	MaxPages int      `json:"max_pages,omitempty" jsonschema:"Maximum pages per facet from 1 to 100"`
+}
+
+type HydratedFacetOutput struct {
+	Facet    string `json:"facet"`
+	Count    int    `json:"count"`
+	Pages    int    `json:"pages"`
+	Complete bool   `json:"complete"`
+}
+
+type HydrateThreadOutput struct {
+	Owner    string                `json:"owner"`
+	Repo     string                `json:"repo"`
+	Number   int                   `json:"number"`
+	Kind     string                `json:"kind"`
+	Requests int                   `json:"requests"`
+	Facets   []HydratedFacetOutput `json:"facets"`
+	Message  string                `json:"message"`
+}
+
 type ClusterMemberOutput struct {
 	Kind     string  `json:"kind"`
 	Owner    string  `json:"owner"`
@@ -313,6 +393,13 @@ func (s *Server) register() {
 		OpenWorldHint:   boolPtr(false),
 		DestructiveHint: boolPtr(false),
 	}
+	operationAnnotations := &mcp.ToolAnnotations{
+		Title:           "Read GitHub and update the local GitContribute corpus",
+		ReadOnlyHint:    false,
+		IdempotentHint:  false,
+		OpenWorldHint:   boolPtr(true),
+		DestructiveHint: boolPtr(false),
+	}
 	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "search",
 		Description: "Search the local GitContribute corpus without network access",
@@ -364,6 +451,11 @@ func (s *Server) register() {
 		Annotations: annotations,
 	}, s.findClusters)
 	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "find_neighbors",
+		Description: "Rank similar threads from the local corpus with transparent scoring and no network access",
+		Annotations: annotations,
+	}, s.findNeighbors)
+	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "get_coverage",
 		Description: "Read facet coverage and freshness for a repository in the local corpus without network access",
 		Annotations: annotations,
@@ -373,6 +465,16 @@ func (s *Server) register() {
 		Description: "Read a saved lens definition from the local corpus",
 		Annotations: annotations,
 	}, s.getLens)
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "sync_repository",
+		Description: "Explicitly read repository threads from GitHub and update the local corpus",
+		Annotations: operationAnnotations,
+	}, s.syncRepository)
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "hydrate_thread",
+		Description: "Explicitly read selected issue or pull request facets from GitHub and update the local corpus",
+		Annotations: operationAnnotations,
+	}, s.hydrateThread)
 
 	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
 		URITemplate: "gitcontribute://repository/{owner}/{repo}",
@@ -572,6 +674,30 @@ func (s *Server) findClusters(ctx context.Context, _ *mcp.CallToolRequest, in Fi
 	return nil, out, err
 }
 
+func (s *Server) findNeighbors(ctx context.Context, _ *mcp.CallToolRequest, in FindNeighborsInput) (*mcp.CallToolResult, FindNeighborsOutput, error) {
+	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
+		return nil, FindNeighborsOutput{}, err
+	}
+	if in.Kind != "issue" && in.Kind != "pull_request" {
+		return nil, FindNeighborsOutput{}, errors.New("kind must be issue or pull_request")
+	}
+	if in.Number <= 0 {
+		return nil, FindNeighborsOutput{}, errors.New("number must be positive")
+	}
+	if in.Limit == 0 {
+		in.Limit = 10
+	}
+	if in.Limit < 1 || in.Limit > 100 {
+		return nil, FindNeighborsOutput{}, errors.New("limit must be between 1 and 100")
+	}
+	reader, ok := s.reader.(NeighborReader)
+	if !ok {
+		return nil, FindNeighborsOutput{}, errors.New("neighbor queries are not available")
+	}
+	out, err := reader.FindNeighbors(ctx, in)
+	return nil, out, err
+}
+
 func (s *Server) getCoverage(ctx context.Context, _ *mcp.CallToolRequest, in GetCoverageInput) (*mcp.CallToolResult, GetCoverageOutput, error) {
 	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
 		return nil, GetCoverageOutput{}, err
@@ -586,6 +712,51 @@ func (s *Server) getLens(ctx context.Context, _ *mcp.CallToolRequest, in LensInp
 		return nil, LensOutput{}, errors.New("name is required")
 	}
 	out, err := s.reader.Lens(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) syncRepository(ctx context.Context, _ *mcp.CallToolRequest, in SyncRepositoryInput) (*mcp.CallToolResult, SyncRepositoryOutput, error) {
+	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
+		return nil, SyncRepositoryOutput{}, err
+	}
+	if in.State == "" {
+		in.State = "all"
+	}
+	if in.State != "open" && in.State != "closed" && in.State != "all" {
+		return nil, SyncRepositoryOutput{}, errors.New("state must be open, closed, or all")
+	}
+	if in.MaxPages == 0 {
+		in.MaxPages = 1000
+	}
+	if in.MaxPages < 1 || in.MaxPages > 1000 {
+		return nil, SyncRepositoryOutput{}, errors.New("max_pages must be between 1 and 1000")
+	}
+	operator, ok := s.reader.(Operator)
+	if !ok {
+		return nil, SyncRepositoryOutput{}, errors.New("repository sync is not available")
+	}
+	out, err := operator.SyncRepository(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) hydrateThread(ctx context.Context, _ *mcp.CallToolRequest, in HydrateThreadInput) (*mcp.CallToolResult, HydrateThreadOutput, error) {
+	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
+		return nil, HydrateThreadOutput{}, err
+	}
+	if in.Number <= 0 {
+		return nil, HydrateThreadOutput{}, errors.New("number must be positive")
+	}
+	if in.MaxPages == 0 {
+		in.MaxPages = 50
+	}
+	if in.MaxPages < 1 || in.MaxPages > 100 {
+		return nil, HydrateThreadOutput{}, errors.New("max_pages must be between 1 and 100")
+	}
+	operator, ok := s.reader.(Operator)
+	if !ok {
+		return nil, HydrateThreadOutput{}, errors.New("thread hydration is not available")
+	}
+	out, err := operator.HydrateThread(ctx, in)
 	return nil, out, err
 }
 

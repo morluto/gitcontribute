@@ -448,3 +448,101 @@ type CollectionResult struct {
 type CollectionListResult struct {
 	Collections []CollectionResult `json:"collections"`
 }
+
+// ArchiveService exposes explicit network-reading archive operations.
+type ArchiveService interface {
+	ArchiveSync(ctx context.Context, repo RepoRef, opts ArchiveSyncOptions) (*SyncResult, error)
+	Hydrate(ctx context.Context, repo RepoRef, number int, opts HydrateOptions) (*HydrateResult, error)
+}
+
+type ArchiveSyncOptions struct {
+	State    string
+	Since    time.Duration
+	Numbers  []int
+	MaxPages int
+}
+
+type HydrateOptions struct {
+	Facets   []string
+	MaxPages int
+}
+
+type HydrateResult struct {
+	Repo     RepoRef         `json:"repo"`
+	Number   int             `json:"number"`
+	Kind     string          `json:"kind"`
+	Facets   []HydratedFacet `json:"facets"`
+	Pages    int             `json:"pages"`
+	Requests int             `json:"requests"`
+	Message  string          `json:"message"`
+}
+
+type HydratedFacet struct {
+	Facet    string `json:"facet"`
+	Count    int    `json:"count"`
+	Pages    int    `json:"pages"`
+	Complete bool   `json:"complete"`
+}
+
+// LocalQueryService exposes bounded offline corpus queries.
+type LocalQueryService interface {
+	Coverage(ctx context.Context, repo RepoRef) (*CoverageResult, error)
+	RunHistory(ctx context.Context, limit int) (*RunListResult, error)
+	NeighborQuery(ctx context.Context, repo RepoRef, kind string, number, limit int) (*NeighborListResult, error)
+}
+
+type CoverageResult struct {
+	Repo   RepoRef         `json:"repo"`
+	Facets []CoverageFacet `json:"facets"`
+}
+
+type CoverageFacet struct {
+	Facet     string `json:"facet"`
+	Present   bool   `json:"present"`
+	Complete  bool   `json:"complete"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
+type RunListResult struct {
+	Runs []RunResult `json:"runs"`
+}
+
+type RunResult struct {
+	ID          int64  `json:"id"`
+	Kind        string `json:"kind"`
+	Status      string `json:"status"`
+	StartedAt   string `json:"started_at"`
+	CompletedAt string `json:"completed_at,omitempty"`
+	Stats       string `json:"stats,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+type NeighborListResult struct {
+	Repo           RepoRef          `json:"repo"`
+	Kind           string           `json:"kind"`
+	Number         int              `json:"number"`
+	SourceRevision string           `json:"source_revision"`
+	Neighbors      []NeighborResult `json:"neighbors"`
+}
+
+type NeighborResult struct {
+	Kind   string  `json:"kind"`
+	Repo   RepoRef `json:"repo"`
+	Number int     `json:"number"`
+	Title  string  `json:"title"`
+	State  string  `json:"state"`
+	Score  float64 `json:"score"`
+	Reason string  `json:"reason"`
+}
+
+// ExportService renders redacted, deterministic local bundles.
+type ExportService interface {
+	ExportDossier(ctx context.Context, repo RepoRef, format string) (*ExportResult, error)
+	ExportEvidence(ctx context.Context, investigationID, format string) (*ExportResult, error)
+}
+
+type ExportResult struct {
+	Kind    string `json:"kind"`
+	Format  string `json:"format"`
+	Content string `json:"content"`
+}

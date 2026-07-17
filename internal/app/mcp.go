@@ -20,7 +20,8 @@ import (
 // wrapper because Go does not allow two methods named Search on one type.
 type MCPReader struct{ *Service }
 
-// MCPReader returns a local, read-only MCP reader backed by this service.
+// MCPReader returns an MCP adapter backed by this service. Read methods remain
+// offline; methods named sync or hydrate are explicit network-read operations.
 func (s *Service) MCPReader() mcpserver.Reader { return &MCPReader{s} }
 
 // Search performs a local-only corpus search through the MCP interface.
@@ -521,7 +522,7 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpserver.FindClustersI
 	if err != nil {
 		return mcpserver.FindClustersOutput{}, err
 	}
-	clusters, err := c.Clustering().ListClusters(ctx, ref, "", in.Limit)
+	clusters, err := c.Clustering().ListClusters(ctx, ref, clustering.ClusterOpen, in.Limit)
 	if err != nil {
 		return mcpserver.FindClustersOutput{}, fmt.Errorf("list clusters: %w", err)
 	}
@@ -533,6 +534,64 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpserver.FindClustersI
 	}
 	for i, cl := range clusters {
 		out.Clusters[i] = clusterToMCP(cl, 20)
+	}
+	return out, nil
+}
+
+// FindNeighbors ranks similar local threads without network access.
+func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpserver.FindNeighborsInput) (mcpserver.FindNeighborsOutput, error) {
+	result, err := r.Service.Neighbors(ctx, cli.RepoRef{Owner: in.Owner, Repo: in.Repo}, in.Kind, in.Number, in.Limit)
+	if err != nil {
+		return mcpserver.FindNeighborsOutput{}, err
+	}
+	out := mcpserver.FindNeighborsOutput{
+		Owner: in.Owner, Repo: in.Repo, Kind: result.Kind, Number: result.Number, SourceRevision: result.SourceRevision,
+		Neighbors: make([]mcpserver.NeighborOutput, len(result.Neighbors)),
+	}
+	for i, neighbor := range result.Neighbors {
+		out.Neighbors[i] = mcpserver.NeighborOutput{
+			Kind: neighbor.Kind, Owner: neighbor.Owner, Repo: neighbor.Repo, Number: neighbor.Number,
+			Title: neighbor.Title, State: neighbor.State, Score: neighbor.Score, Reason: neighbor.Reason,
+		}
+	}
+	return out, nil
+}
+
+// SyncRepository explicitly reads GitHub and updates the local corpus.
+func (r *MCPReader) SyncRepository(ctx context.Context, in mcpserver.SyncRepositoryInput) (mcpserver.SyncRepositoryOutput, error) {
+	var since time.Duration
+	var err error
+	if strings.TrimSpace(in.Since) != "" {
+		since, err = time.ParseDuration(in.Since)
+		if err != nil || since <= 0 {
+			return mcpserver.SyncRepositoryOutput{}, errors.New("since must be a positive Go duration")
+		}
+	}
+	result, err := r.Service.ArchiveSync(ctx, cli.RepoRef{Owner: in.Owner, Repo: in.Repo}, cli.ArchiveSyncOptions{
+		State: in.State, Since: since, Numbers: in.Numbers, MaxPages: in.MaxPages,
+	})
+	if err != nil {
+		return mcpserver.SyncRepositoryOutput{}, err
+	}
+	return mcpserver.SyncRepositoryOutput{
+		Owner: result.Repo.Owner, Repo: result.Repo.Repo, Updated: result.Updated, Message: result.Message,
+	}, nil
+}
+
+// HydrateThread explicitly reads selected GitHub facets into the local corpus.
+func (r *MCPReader) HydrateThread(ctx context.Context, in mcpserver.HydrateThreadInput) (mcpserver.HydrateThreadOutput, error) {
+	result, err := r.Service.Hydrate(ctx, cli.RepoRef{Owner: in.Owner, Repo: in.Repo}, in.Number, cli.HydrateOptions{
+		Facets: in.Facets, MaxPages: in.MaxPages,
+	})
+	if err != nil {
+		return mcpserver.HydrateThreadOutput{}, err
+	}
+	out := mcpserver.HydrateThreadOutput{
+		Owner: result.Repo.Owner, Repo: result.Repo.Repo, Number: result.Number, Kind: result.Kind,
+		Requests: result.Requests, Message: result.Message, Facets: make([]mcpserver.HydratedFacetOutput, len(result.Facets)),
+	}
+	for i, facet := range result.Facets {
+		out.Facets[i] = mcpserver.HydratedFacetOutput{Facet: facet.Facet, Count: facet.Count, Pages: facet.Pages, Complete: facet.Complete}
 	}
 	return out, nil
 }

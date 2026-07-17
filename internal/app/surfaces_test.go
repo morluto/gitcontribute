@@ -185,6 +185,36 @@ func TestServiceLensAndCollections(t *testing.T) {
 	}
 }
 
+func TestCollectionServiceRejectsMalformedMembers(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestServiceNoNetwork(t)
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.CreateCollection(ctx, "favorites"); err != nil {
+		t.Fatal(err)
+	}
+
+	invalid := []cli.CollectionMember{
+		{Kind: "unknown", Ref: "o/r"},
+		{Kind: "repository", Ref: "not-a-repo"},
+		{Kind: "issue", Ref: "o/r#0"},
+		{Kind: "pull_request", Ref: "o/r#abc"},
+	}
+	for _, member := range invalid {
+		if _, err := svc.AddCollectionMembers(ctx, "favorites", []cli.CollectionMember{member}); err == nil {
+			t.Fatalf("accepted malformed member %+v", member)
+		}
+	}
+}
+
+func TestArchiveSyncRejectsNegativeSince(t *testing.T) {
+	svc := newTestServiceNoNetwork(t)
+	defer func() { _ = svc.Close() }()
+	_, err := svc.ArchiveSync(context.Background(), cli.RepoRef{Owner: "o", Repo: "r"}, cli.ArchiveSyncOptions{Since: -time.Hour})
+	if err == nil || err.Error() != "since duration cannot be negative" {
+		t.Fatalf("expected negative duration error, got %v", err)
+	}
+}
+
 func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
 	ctx := context.Background()
 	srv := newTestServer("owner", "repo")

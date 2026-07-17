@@ -23,6 +23,12 @@ type fakeSurfacesService struct {
 	createColCalled bool
 	addColCalled    bool
 	listColCalled   bool
+	archiveCalled   bool
+	hydrateCalled   bool
+	coverageCalled  bool
+	runsCalled      bool
+	neighborsCalled bool
+	exportCalled    bool
 
 	lastClustersArg   cli.RepoRef
 	lastClusterID     string
@@ -32,6 +38,8 @@ type fakeSurfacesService struct {
 	lastCreateColName string
 	lastAddColName    string
 	lastAddColMembers []cli.CollectionMember
+	lastArchiveOpts   cli.ArchiveSyncOptions
+	lastHydrateOpts   cli.HydrateOptions
 }
 
 func (f *fakeSurfacesService) Clusters(ctx context.Context, repo cli.RepoRef, limit int) (*cli.ClusterListResult, error) {
@@ -117,6 +125,43 @@ func (f *fakeSurfacesService) ListCollections(ctx context.Context) (*cli.Collect
 	return &cli.CollectionListResult{Collections: []cli.CollectionResult{{Name: "favorites", MemberCount: 2}}}, f.err
 }
 
+func (f *fakeSurfacesService) ArchiveSync(ctx context.Context, repo cli.RepoRef, opts cli.ArchiveSyncOptions) (*cli.SyncResult, error) {
+	f.archiveCalled = true
+	f.lastArchiveOpts = opts
+	return &cli.SyncResult{Repo: repo, Updated: len(opts.Numbers), Message: "synced"}, f.err
+}
+
+func (f *fakeSurfacesService) Hydrate(ctx context.Context, repo cli.RepoRef, number int, opts cli.HydrateOptions) (*cli.HydrateResult, error) {
+	f.hydrateCalled = true
+	f.lastHydrateOpts = opts
+	return &cli.HydrateResult{Repo: repo, Number: number, Kind: "issue", Requests: 1, Facets: []cli.HydratedFacet{{Facet: "issue_comments", Complete: true}}}, f.err
+}
+
+func (f *fakeSurfacesService) Coverage(ctx context.Context, repo cli.RepoRef) (*cli.CoverageResult, error) {
+	f.coverageCalled = true
+	return &cli.CoverageResult{Repo: repo, Facets: []cli.CoverageFacet{{Facet: "threads", Present: true, Complete: true}}}, f.err
+}
+
+func (f *fakeSurfacesService) RunHistory(ctx context.Context, limit int) (*cli.RunListResult, error) {
+	f.runsCalled = true
+	return &cli.RunListResult{Runs: []cli.RunResult{{ID: 1, Kind: "sync", Status: "completed"}}}, f.err
+}
+
+func (f *fakeSurfacesService) NeighborQuery(ctx context.Context, repo cli.RepoRef, kind string, number, limit int) (*cli.NeighborListResult, error) {
+	f.neighborsCalled = true
+	return &cli.NeighborListResult{Repo: repo, Kind: kind, Number: number, SourceRevision: "rev", Neighbors: []cli.NeighborResult{{Kind: "issue", Repo: repo, Number: 2, Score: .8, Reason: "similar title"}}}, f.err
+}
+
+func (f *fakeSurfacesService) ExportDossier(ctx context.Context, repo cli.RepoRef, format string) (*cli.ExportResult, error) {
+	f.exportCalled = true
+	return &cli.ExportResult{Kind: "dossier", Format: format, Content: "# dossier\n"}, f.err
+}
+
+func (f *fakeSurfacesService) ExportEvidence(ctx context.Context, investigationID, format string) (*cli.ExportResult, error) {
+	f.exportCalled = true
+	return &cli.ExportResult{Kind: "evidence", Format: format, Content: "# evidence\n"}, f.err
+}
+
 func newSurfacesCLI(svc *fakeSurfacesService) (*cli.CLI, *strings.Builder, *strings.Builder) {
 	var stdout, stderr strings.Builder
 	return cli.New(svc, nil, &stdout, &stderr), &stdout, &stderr
@@ -147,7 +192,7 @@ func TestClustersCommand(t *testing.T) {
 func TestClusterShowCommand(t *testing.T) {
 	svc := &fakeSurfacesService{fakeService: &fakeService{}}
 	c, stdout, _ := newSurfacesCLI(svc)
-	requireNoErr(t, c.Run(context.Background(), []string{"cluster", "abc12345"}))
+	requireNoErr(t, c.Run(context.Background(), []string{"cluster", "show", "abc12345"}))
 	if !svc.clusterCalled || svc.lastClusterID != "abc12345" || svc.lastClusterLimit != 100 {
 		t.Fatalf("cluster show not called: called=%v id=%q limit=%d", svc.clusterCalled, svc.lastClusterID, svc.lastClusterLimit)
 	}
@@ -232,5 +277,49 @@ func TestCollectionAddRejectsInvalidMember(t *testing.T) {
 	requireCLIError(t, err, cli.ExitUsage)
 	if svc.addColCalled {
 		t.Fatal("add collection should not be called for invalid member")
+	}
+}
+
+func TestArchiveAndLocalQueryCommands(t *testing.T) {
+	svc := &fakeSurfacesService{fakeService: &fakeService{}}
+	c, stdout, _ := newSurfacesCLI(svc)
+
+	requireNoErr(t, c.Run(context.Background(), []string{"archive", "sync", "o/r", "--numbers", "2,1", "--max-pages", "5", "--json"}))
+	if !svc.archiveCalled || len(svc.lastArchiveOpts.Numbers) != 2 || svc.lastArchiveOpts.MaxPages != 5 {
+		t.Fatalf("archive options = %+v", svc.lastArchiveOpts)
+	}
+	stdout.Reset()
+	requireNoErr(t, c.Run(context.Background(), []string{"archive", "hydrate", "o/r#1", "--with", "issue_comments", "--json"}))
+	if !svc.hydrateCalled || len(svc.lastHydrateOpts.Facets) != 1 {
+		t.Fatalf("hydrate options = %+v", svc.lastHydrateOpts)
+	}
+	stdout.Reset()
+	requireNoErr(t, c.Run(context.Background(), []string{"coverage", "o/r", "--json"}))
+	requireNoErr(t, c.Run(context.Background(), []string{"runs", "--limit", "5", "--json"}))
+	requireNoErr(t, c.Run(context.Background(), []string{"neighbors", "o/r#1", "--kind", "issue", "--json"}))
+	if !svc.coverageCalled || !svc.runsCalled || !svc.neighborsCalled {
+		t.Fatal("one or more local query commands were not dispatched")
+	}
+}
+
+func TestArchiveSyncRejectsConflictingFiltersBeforeDispatch(t *testing.T) {
+	svc := &fakeSurfacesService{fakeService: &fakeService{}}
+	c, _, stderr := newSurfacesCLI(svc)
+	err := c.Run(context.Background(), []string{"archive", "sync", "o/r", "--numbers", "1", "--since", "1h"})
+	requireCLIError(t, err, cli.ExitUsage)
+	if svc.archiveCalled {
+		t.Fatal("archive service was called for invalid input")
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("progress was printed before validation: %q", stderr.String())
+	}
+}
+
+func TestExportCommandWritesContent(t *testing.T) {
+	svc := &fakeSurfacesService{fakeService: &fakeService{}}
+	c, stdout, _ := newSurfacesCLI(svc)
+	requireNoErr(t, c.Run(context.Background(), []string{"export", "dossier", "o/r"}))
+	if !svc.exportCalled || stdout.String() != "# dossier\n" {
+		t.Fatalf("export output = %q", stdout.String())
 	}
 }

@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 // CreateCollection creates a named collection.
@@ -43,6 +45,9 @@ func (s *Service) AddCollectionMembers(ctx context.Context, name string, members
 	}
 	cm := make([]corpus.CollectionMember, len(members))
 	for i, m := range members {
+		if err := validateCollectionMember(m); err != nil {
+			return nil, fmt.Errorf("member %d: %w", i+1, err)
+		}
 		cm[i] = corpus.CollectionMember{Kind: m.Kind, Ref: m.Ref}
 	}
 	if err := c.AddCollectionMembers(ctx, name, cm); err != nil {
@@ -57,6 +62,40 @@ func (s *Service) AddCollectionMembers(ctx context.Context, name string, members
 		return nil, fmt.Errorf("collection %q not found after update", name)
 	}
 	return collectionResult(col), nil
+}
+
+func validateCollectionMember(member cli.CollectionMember) error {
+	kind := strings.TrimSpace(member.Kind)
+	ref := strings.TrimSpace(member.Ref)
+	if ref == "" {
+		return errors.New("collection member reference is required")
+	}
+	if kind == "repository" {
+		return validateCollectionRepoRef(ref)
+	}
+	if kind != "issue" && kind != "pull_request" {
+		return fmt.Errorf("unsupported collection member kind %q", kind)
+	}
+	if strings.Count(ref, "#") != 1 {
+		return fmt.Errorf("invalid thread reference %q: expected OWNER/REPO#NUMBER", ref)
+	}
+	repoRef, numberText, _ := strings.Cut(ref, "#")
+	if err := validateCollectionRepoRef(repoRef); err != nil {
+		return fmt.Errorf("invalid thread reference %q: %w", ref, err)
+	}
+	number, err := strconv.Atoi(strings.TrimSpace(numberText))
+	if err != nil || number <= 0 {
+		return fmt.Errorf("invalid thread reference %q: expected positive number", ref)
+	}
+	return nil
+}
+
+func validateCollectionRepoRef(ref string) error {
+	if strings.Count(ref, "/") != 1 {
+		return fmt.Errorf("invalid repository reference %q", ref)
+	}
+	owner, repo, _ := strings.Cut(ref, "/")
+	return (domain.RepoRef{Owner: strings.TrimSpace(owner), Repo: strings.TrimSpace(repo)}).Validate()
 }
 
 // ListCollections returns all named collections.

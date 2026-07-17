@@ -144,6 +144,17 @@ func (*fakeReader) Lens(_ context.Context, in LensInput) (LensOutput, error) {
 	}, nil
 }
 
+func (*fakeReader) SyncRepository(_ context.Context, in SyncRepositoryInput) (SyncRepositoryOutput, error) {
+	return SyncRepositoryOutput{Owner: in.Owner, Repo: in.Repo, Updated: len(in.Numbers), Message: "synced"}, nil
+}
+
+func (*fakeReader) HydrateThread(_ context.Context, in HydrateThreadInput) (HydrateThreadOutput, error) {
+	return HydrateThreadOutput{
+		Owner: in.Owner, Repo: in.Repo, Number: in.Number, Kind: "issue", Requests: 1,
+		Facets: []HydratedFacetOutput{{Facet: "issue_comments", Count: 2, Pages: 1, Complete: true}},
+	}, nil
+}
+
 func connect(t *testing.T, reader Reader) (*mcp.ClientSession, func()) {
 	t.Helper()
 	server := New(reader, "test")
@@ -186,6 +197,15 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 		}
 		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint || !tool.Annotations.IdempotentHint {
 			t.Fatalf("tool %q annotations = %+v", name, tool.Annotations)
+		}
+	}
+	for _, name := range []string{"sync_repository", "hydrate_thread"} {
+		tool := tools[name]
+		if tool == nil {
+			t.Fatalf("missing tool %q", name)
+		}
+		if tool.Annotations == nil || tool.Annotations.ReadOnlyHint || tool.Annotations.IdempotentHint || tool.Annotations.OpenWorldHint == nil || !*tool.Annotations.OpenWorldHint {
+			t.Fatalf("operation tool %q annotations = %+v", name, tool.Annotations)
 		}
 	}
 
@@ -312,6 +332,24 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
 		}
+	}
+}
+
+func TestExplicitOperationToolsReturnStructuredOutput(t *testing.T) {
+	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	defer closeSessions()
+
+	syncResult, err := client.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "sync_repository", Arguments: map[string]any{"owner": "acme", "repo": "rocket", "numbers": []int{1, 2}},
+	})
+	if err != nil || syncResult.IsError {
+		t.Fatalf("sync_repository: result=%+v err=%v", syncResult, err)
+	}
+	hydrateResult, err := client.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "hydrate_thread", Arguments: map[string]any{"owner": "acme", "repo": "rocket", "number": 7, "facets": []string{"issue_comments"}},
+	})
+	if err != nil || hydrateResult.IsError {
+		t.Fatalf("hydrate_thread: result=%+v err=%v", hydrateResult, err)
 	}
 }
 
