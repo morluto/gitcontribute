@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -419,8 +420,17 @@ func validateRemote(remote string) error {
 	if strings.Contains(remote, "::") {
 		return ErrInvalidRemote
 	}
-	if filepath.IsAbs(remote) || strings.HasPrefix(remote, "file://") ||
-		strings.HasPrefix(remote, "https://") || strings.HasPrefix(remote, "ssh://") {
+	if filepath.IsAbs(remote) || strings.HasPrefix(remote, "file://") {
+		return nil
+	}
+	if strings.HasPrefix(remote, "https://") {
+		u, err := url.Parse(remote)
+		if err != nil || u.User != nil {
+			return ErrInvalidRemote
+		}
+		return nil
+	}
+	if strings.HasPrefix(remote, "ssh://") {
 		return nil
 	}
 	if at := strings.IndexByte(remote, '@'); at > 0 {

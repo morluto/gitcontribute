@@ -19,6 +19,37 @@ func TestKeyedLocksReleaseUnusedEntries(t *testing.T) {
 	}
 }
 
+func TestValidateRemoteRejectsCredentialsAndPreservesSSH(t *testing.T) {
+	valid := []string{
+		"https://github.com/owner/repo.git",
+		"https://github.com:443/owner/repo.git",
+		"ssh://git@github.com/owner/repo.git",
+		"git@github.com:owner/repo.git",
+		"/absolute/path",
+		"file:///local/path",
+	}
+	for _, remote := range valid {
+		if err := validateRemote(remote); err != nil {
+			t.Errorf("validateRemote(%q) = %v, want nil", remote, err)
+		}
+	}
+
+	invalid := []string{
+		"https://user@github.com/owner/repo.git",
+		"https://user:pass@github.com/owner/repo.git",
+		"https://token@github.com/owner/repo.git",
+		"https://:pass@github.com/owner/repo.git",
+		"--unsafe",
+		"",
+		"path with\x00null",
+	}
+	for _, remote := range invalid {
+		if err := validateRemote(remote); err == nil {
+			t.Errorf("validateRemote(%q) = nil, want error", remote)
+		}
+	}
+}
+
 func TestWriteMetadataAtomicallyWithPrivatePermissions(t *testing.T) {
 	cachePath := t.TempDir()
 	manager := &Manager{}
