@@ -8,10 +8,9 @@ investigate, validate, and prepare focused open-source contributions.
 Network access is explicit and read-only: the CLI and MCP surface fetch data only
 when you ask them to. Search and inspection commands read from the local corpus.
 
-See [SPEC.md](SPEC.md) for the product contract and delivery plan. The
-[architecture guide](docs/architecture.md) explains package boundaries,
-persistence invariants, and side-effect rules. See [CONTRIBUTING.md](CONTRIBUTING.md)
-for development and testing guidance.
+The [architecture guide](docs/architecture.md) explains package boundaries,
+persistence invariants, and side-effect rules. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for development and testing guidance.
 
 ## Install
 

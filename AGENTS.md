@@ -2,7 +2,8 @@
 
 ## Product boundaries
 
-- Implement the behavior in `SPEC.md`; do not preserve Gitcrawl compatibility.
+- Follow the contracts in `docs/architecture.md`; do not preserve Gitcrawl
+  compatibility.
 - Do not import Gitcrawl or Crawlkit modules.
 - Prefer the standard library or mature maintained packages over custom
   protocol, migration, authentication, concurrency, and terminal machinery.
