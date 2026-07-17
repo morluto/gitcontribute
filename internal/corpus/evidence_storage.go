@@ -73,7 +73,7 @@ func (c *Corpus) CreateEvidence(ctx context.Context, item *evidence.Evidence) er
 }
 
 // ListEvidence returns evidence matching the supplied local filter.
-func (c *Corpus) ListEvidence(ctx context.Context, filter evidence.EvidenceFilter) ([]*evidence.Evidence, error) {
+func (c *Corpus) ListEvidence(ctx context.Context, filter evidence.EvidenceFilter) (out []*evidence.Evidence, err error) {
 	query := `SELECT e.payload, e.source_provenance FROM evidence e WHERE 1=1`
 	var args []any
 	if filter.InvestigationID != "" {
@@ -101,8 +101,11 @@ func (c *Corpus) ListEvidence(ctx context.Context, filter evidence.EvidenceFilte
 	if err != nil {
 		return nil, fmt.Errorf("list evidence: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
-	var out []*evidence.Evidence
+	defer func() {
+		if closeErr := rows.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 	for rows.Next() {
 		var payload, provenance string
 		if err := rows.Scan(&payload, &provenance); err != nil {
@@ -121,5 +124,8 @@ func (c *Corpus) ListEvidence(ctx context.Context, filter evidence.EvidenceFilte
 		}
 		out = append(out, &item)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
