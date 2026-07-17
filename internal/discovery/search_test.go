@@ -16,7 +16,7 @@ func (f *fakeSearcher) Search(ctx context.Context, query string) (SearchResponse
 }
 
 func parseWindow(query string) (start, end time.Time, qual Qualifier) {
-	for _, q := range []string{"created:", "updated:"} {
+	for _, q := range []string{"created:", "updated:", "pushed:"} {
 		idx := strings.Index(query, q)
 		if idx == -1 {
 			continue
