@@ -14,6 +14,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
+	"github.com/morluto/gitcontribute/internal/github"
 )
 
 // Metadata reports deterministic application and local capability metadata.
@@ -209,7 +210,7 @@ func (s *Service) Doctor(ctx context.Context) (*cli.DoctorResult, error) {
 	if cfg == nil {
 		authErr = errors.New("authentication source unavailable because configuration is invalid")
 	} else {
-		authErr = checkAuthSource(ctx, cfg)
+		authErr = checkAuthSource(ctx, cfg, tokenSource(cfg))
 	}
 	add("github_auth", false, authErr, "GitHub authentication source is available")
 
@@ -314,22 +315,17 @@ func lookPathError(name string) error {
 	return nil
 }
 
-func checkAuthSource(ctx context.Context, cfg *config.Config) error {
-	switch cfg.TokenSource.Method {
-	case "none":
+func checkAuthSource(ctx context.Context, cfg *config.Config, source github.TokenSource) error {
+	if cfg.TokenSource.Method == "none" {
 		return errors.New("no GitHub authentication source configured; public reads remain available")
-	case "env":
-		if value, ok := os.LookupEnv(cfg.TokenSource.Key); !ok || strings.TrimSpace(value) == "" {
-			return fmt.Errorf("configured token environment variable %s is unset", cfg.TokenSource.Key)
-		}
-		return nil
-	case "gh-cli":
-		return commandAvailable(ctx, "gh", "auth", "status")
-	case "keyring":
-		return nil
-	default:
-		return errors.New("unsupported GitHub authentication source")
 	}
+	if source == nil {
+		return errors.New("GitHub authentication source is unavailable")
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	_, err := source.Token(checkCtx)
+	return err
 }
 
 func redactDiagnostic(message string) string {

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -11,7 +12,12 @@ import (
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/github"
 )
+
+type failingAuthSource struct{ err error }
+
+func (s failingAuthSource) Token(context.Context) (string, error) { return "", s.err }
 
 func TestMetadataIsLocalAndDoesNotCreateCorpus(t *testing.T) {
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
@@ -149,5 +155,21 @@ func TestDoctorDoesNotExposeEnvironmentToken(t *testing.T) {
 	}
 	if string(payload) == "" || strings.Contains(string(payload), secret) {
 		t.Fatalf("doctor output exposed a token: %s", payload)
+	}
+}
+
+func TestCheckAuthSourceProbesConfiguredKeyring(t *testing.T) {
+	want := errors.New("keyring backend unavailable")
+	cfg := config.Default()
+	cfg.TokenSource.Method = "keyring"
+	cfg.TokenSource.Key = "account"
+
+	err := checkAuthSource(context.Background(), cfg, failingAuthSource{err: want})
+	if !errors.Is(err, want) {
+		t.Fatalf("checkAuthSource error = %v, want %v", err, want)
+	}
+
+	if err := checkAuthSource(context.Background(), cfg, github.StaticTokenSource("present")); err != nil {
+		t.Fatalf("available keyring source rejected: %v", err)
 	}
 }
