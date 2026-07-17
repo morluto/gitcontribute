@@ -15,6 +15,10 @@ import (
 // cancellation has already been requested for the job.
 var ErrJobCancelled = errors.New("job cancellation requested")
 
+// ErrJobOwnerNotFound is returned when a heartbeat targets an owner row that
+// no longer exists.
+var ErrJobOwnerNotFound = errors.New("job owner not found")
+
 // CreateJob creates a new job in the queued state with an opaque stable ID.
 func (c *Corpus) CreateJob(ctx context.Context, kind, request string) (*Job, error) {
 	if strings.TrimSpace(kind) == "" {
@@ -81,14 +85,20 @@ func (c *Corpus) ListJobs(ctx context.Context, status string, limit int) ([]Job,
 	return out, rows.Err()
 }
 
-// StartJob atomically transitions a queued job to running.
+// StartJob atomically transitions a queued job to running without an owner.
 func (c *Corpus) StartJob(ctx context.Context, id string) error {
+	return c.StartJobAs(ctx, id, "")
+}
+
+// StartJobAs atomically transitions a queued job to running and claims it for
+// the given owner. An empty ownerID leaves owner_id NULL.
+func (c *Corpus) StartJobAs(ctx context.Context, id, ownerID string) error {
 	now := time.Now().UTC()
 	res, err := c.db.ExecContext(ctx, `
 		UPDATE jobs
-		SET status = ?, started_at = ?, updated_at = ?
+		SET status = ?, started_at = ?, updated_at = ?, owner_id = NULLIF(?, '')
 		WHERE id = ? AND status = ? AND COALESCE(cancelled_at, 0) = 0
-	`, JobStatusRunning, encodeTime(now), encodeTime(now), id, JobStatusQueued)
+	`, JobStatusRunning, encodeTime(now), encodeTime(now), ownerID, id, JobStatusQueued)
 	if err != nil {
 		return fmt.Errorf("start job: %w", err)
 	}
@@ -110,7 +120,7 @@ func (c *Corpus) StartJob(ctx context.Context, id string) error {
 
 // TransitionJob performs a safe atomic terminal transition for a job. The
 // current status must match from, and cancellation requests block transitions
-// to non-cancelled terminal states.
+// to non-cancelled terminal states. Terminal transitions clear the owner.
 func (c *Corpus) TransitionJob(ctx context.Context, id, from, to, result, errStr string) error {
 	if !isValidJobTransition(from, to) {
 		return fmt.Errorf("invalid job transition from %s to %s", from, to)
@@ -121,9 +131,16 @@ func (c *Corpus) TransitionJob(ctx context.Context, id, from, to, result, errStr
 	now := time.Now().UTC()
 	res, dbErr := c.db.ExecContext(ctx, `
 		UPDATE jobs
-		SET status = ?, result = ?, error = ?, completed_at = ?, updated_at = ?
+		SET status = ?, result = ?, error = ?, completed_at = ?, updated_at = ?,
+		    owner_id = CASE
+		        WHEN ? = ? OR ? = ? OR ? = ?
+		        THEN NULL
+		        ELSE owner_id
+		    END
 		WHERE id = ? AND status = ? AND (COALESCE(cancelled_at, 0) = 0 OR ? = ?)
-	`, to, result, errStr, encodeTime(now), encodeTime(now), id, from, to, JobStatusCancelled)
+	`, to, result, errStr, encodeTime(now), encodeTime(now),
+		to, JobStatusSucceeded, to, JobStatusFailed, to, JobStatusCancelled,
+		id, from, to, JobStatusCancelled)
 	if dbErr != nil {
 		return fmt.Errorf("transition job: %w", dbErr)
 	}
@@ -258,17 +275,39 @@ func (c *Corpus) ListJobEvents(ctx context.Context, jobID string) ([]JobEvent, e
 	return out, rows.Err()
 }
 
-// ReconcileInterruptedJobs marks any running jobs as failed or cancelled at
-// startup. Jobs with a pending cancellation are finished as cancelled.
-func (c *Corpus) ReconcileInterruptedJobs(ctx context.Context) error {
-	tx, err := c.db.BeginTx(ctx, nil)
+// ReconcileInterruptedJobs marks running jobs as failed or cancelled when
+// their owning process has not heartbeated within leaseTimeout. Live owners
+// are left untouched, and stale owner records are removed.
+//
+// It uses BEGIN IMMEDIATE so the write lock is acquired before any reads,
+// avoiding a lock-upgrade race with concurrent heartbeats.
+func (c *Corpus) ReconcileInterruptedJobs(ctx context.Context, leaseTimeout time.Duration) error {
+	// Reserve a single connection and take the write lock immediately so that
+	// heartbeats cannot interleave between our read and our writes.
+	conn, err := c.db.Conn(ctx)
 	if err != nil {
+		return fmt.Errorf("reserve reconcile connection: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return fmt.Errorf("begin reconcile jobs: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK")
+		}
+	}()
 
-	rows, err := tx.QueryContext(ctx, `
-		SELECT id, cancelled_at FROM jobs WHERE status = ?
+	now := time.Now().UTC()
+	threshold := encodeTime(now.Add(-leaseTimeout))
+
+	rows, err := conn.QueryContext(ctx, `
+		SELECT j.id, j.cancelled_at, j.owner_id, COALESCE(o.heartbeat_at, 0)
+		FROM jobs j
+		LEFT JOIN job_owners o ON j.owner_id = o.owner_id
+		WHERE j.status = ?
 	`, JobStatusRunning)
 	if err != nil {
 		return fmt.Errorf("select interrupted jobs: %w", err)
@@ -280,10 +319,16 @@ func (c *Corpus) ReconcileInterruptedJobs(ctx context.Context) error {
 	var jobs []interrupted
 	for rows.Next() {
 		var id string
+		var ownerID sql.NullString
 		var cancelled sql.NullInt64
-		if err := rows.Scan(&id, &cancelled); err != nil {
+		var heartbeat int64
+		if err := rows.Scan(&id, &cancelled, &ownerID, &heartbeat); err != nil {
 			_ = rows.Close()
 			return fmt.Errorf("scan interrupted job: %w", err)
+		}
+		alive := ownerID.Valid && ownerID.String != "" && heartbeat >= threshold
+		if alive {
+			continue
 		}
 		jobs = append(jobs, interrupted{id: id, cancelled: cancelled.Valid && cancelled.Int64 != 0})
 	}
@@ -294,30 +339,39 @@ func (c *Corpus) ReconcileInterruptedJobs(ctx context.Context) error {
 		return err
 	}
 
-	now := encodeTime(time.Now())
+	nowEncoded := encodeTime(now)
 	for _, j := range jobs {
 		status := JobStatusFailed
+		msg := "interrupted by restart"
 		if j.cancelled {
 			status = JobStatusCancelled
+			msg = "interrupted by restart (cancellation requested)"
 		}
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := conn.ExecContext(ctx, `
 			UPDATE jobs
-			SET status = ?, completed_at = ?, error = ?, updated_at = ?
+			SET status = ?, completed_at = ?, error = ?, updated_at = ?, owner_id = NULL
 			WHERE id = ? AND status = ?
-		`, status, now, "interrupted by restart", now, j.id, JobStatusRunning); err != nil {
+		`, status, nowEncoded, msg, nowEncoded, j.id, JobStatusRunning); err != nil {
 			return fmt.Errorf("reconcile interrupted job %s: %w", j.id, err)
 		}
-		if _, err := tx.ExecContext(ctx, `
+		if _, err := conn.ExecContext(ctx, `
 			INSERT INTO job_events (job_id, level, message, recorded_at)
 			VALUES (?, ?, ?, ?)
-		`, j.id, "warn", "interrupted by restart", now); err != nil {
+		`, j.id, "warn", msg, nowEncoded); err != nil {
 			return fmt.Errorf("record interrupted job event %s: %w", j.id, err)
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if _, err := conn.ExecContext(ctx, `
+		DELETE FROM job_owners WHERE heartbeat_at < ?
+	`, threshold); err != nil {
+		return fmt.Errorf("delete stale job owners: %w", err)
+	}
+
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return fmt.Errorf("commit reconcile jobs: %w", err)
 	}
+	committed = true
 	return nil
 }
 
@@ -372,4 +426,42 @@ func isValidJobTransition(from, to string) bool {
 		return to == JobStatusSucceeded || to == JobStatusFailed || to == JobStatusCancelled
 	}
 	return false
+}
+
+// RegisterJobOwner records a process owner with an explicit heartbeat time.
+// Calling it again for an existing owner updates its process_id and heartbeat.
+func (c *Corpus) RegisterJobOwner(ctx context.Context, ownerID string, processID int, t time.Time) error {
+	enc := encodeTime(t)
+	if _, err := c.db.ExecContext(ctx, `
+		INSERT INTO job_owners (owner_id, process_id, started_at, heartbeat_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT (owner_id) DO UPDATE
+		SET process_id = excluded.process_id, heartbeat_at = excluded.heartbeat_at
+	`, ownerID, processID, enc, enc); err != nil {
+		return fmt.Errorf("register job owner: %w", err)
+	}
+	return nil
+}
+
+// HeartbeatJobOwner refreshes the lease heartbeat for an owner.
+func (c *Corpus) HeartbeatJobOwner(ctx context.Context, ownerID string, t time.Time) error {
+	enc := encodeTime(t)
+	res, err := c.db.ExecContext(ctx, `
+		UPDATE job_owners SET heartbeat_at = ? WHERE owner_id = ?
+	`, enc, ownerID)
+	if err != nil {
+		return fmt.Errorf("heartbeat job owner: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("heartbeat job owner: %w", ErrJobOwnerNotFound)
+	}
+	return nil
+}
+
+// DeleteJobOwner removes a process owner record.
+func (c *Corpus) DeleteJobOwner(ctx context.Context, ownerID string) error {
+	if _, err := c.db.ExecContext(ctx, `DELETE FROM job_owners WHERE owner_id = ?`, ownerID); err != nil {
+		return fmt.Errorf("delete job owner: %w", err)
+	}
+	return nil
 }

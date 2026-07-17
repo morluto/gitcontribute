@@ -179,13 +179,6 @@ func (s *Service) openCorpus(ctx context.Context) (*corpus.Corpus, error) {
 		_ = c.Close()
 		return existing, nil
 	}
-	var jobsErr error
-	s.jobs, jobsErr = newJobExecutor(ctx, c)
-	if jobsErr != nil {
-		s.mu.Unlock()
-		_ = c.Close()
-		return nil, jobsErr
-	}
 	s.corpus = c
 	s.mu.Unlock()
 	return c, nil
@@ -193,15 +186,20 @@ func (s *Service) openCorpus(ctx context.Context) (*corpus.Corpus, error) {
 
 // Jobs returns the durable job executor, opening the corpus if needed.
 func (s *Service) Jobs(ctx context.Context) (*JobExecutor, error) {
-	if _, err := s.openCorpus(ctx); err != nil {
+	c, err := s.openCorpus(ctx)
+	if err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
-	jobs := s.jobs
-	s.mu.Unlock()
-	if jobs == nil {
-		return nil, errors.New("job executor not initialized")
+	defer s.mu.Unlock()
+	if s.jobs != nil {
+		return s.jobs, nil
 	}
+	jobs, err := newJobExecutor(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	s.jobs = jobs
 	return jobs, nil
 }
 

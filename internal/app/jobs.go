@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/corpus"
 )
@@ -21,30 +24,86 @@ type activeJob struct {
 	cancel context.CancelFunc
 }
 
+// jobExecutorConfig tunes the owner/lease/heartbeat protocol. Use
+// defaultJobExecutorConfig for production values.
+type jobExecutorConfig struct {
+	leaseTimeout      time.Duration
+	heartbeatInterval time.Duration
+	pollInterval      time.Duration
+}
+
+func defaultJobExecutorConfig() jobExecutorConfig {
+	return jobExecutorConfig{
+		leaseTimeout:      10 * time.Second,
+		heartbeatInterval: 2 * time.Second,
+		pollInterval:      200 * time.Millisecond,
+	}
+}
+
 // JobExecutor submits durable jobs, runs them asynchronously, and supports
 // cancellation, progress recording, and safe shutdown.
+//
+// Each executor registers a unique owner in the corpus and heartbeats while it
+// is open. Startup only reconciles jobs whose owner is missing or has a stale
+// heartbeat; live owners from other processes are never failed. Workers poll
+// the corpus for cancellation requests so a job cancelled by another process
+// stops promptly.
 type JobExecutor struct {
 	corpus  *corpus.Corpus
+	ownerID string
 	rootCtx context.Context
 	cancel  context.CancelFunc
+	cfg     jobExecutorConfig
 
 	mu          sync.Mutex
 	cond        *sync.Cond
 	closed      bool
 	active      map[string]*activeJob
 	activeCount int
+	heartbeatWG sync.WaitGroup
 }
 
 func newJobExecutor(ctx context.Context, c *corpus.Corpus) (*JobExecutor, error) {
-	if err := c.ReconcileInterruptedJobs(ctx); err != nil {
-		return nil, fmt.Errorf("reconcile interrupted jobs: %w", err)
+	return newJobExecutorWithConfig(ctx, c, defaultJobExecutorConfig())
+}
+
+func newJobExecutorWithConfig(ctx context.Context, c *corpus.Corpus, cfg jobExecutorConfig) (*JobExecutor, error) {
+	if cfg.leaseTimeout <= 0 {
+		cfg.leaseTimeout = defaultJobExecutorConfig().leaseTimeout
 	}
+	if cfg.heartbeatInterval <= 0 {
+		cfg.heartbeatInterval = defaultJobExecutorConfig().heartbeatInterval
+	}
+	if cfg.pollInterval <= 0 {
+		cfg.pollInterval = defaultJobExecutorConfig().pollInterval
+	}
+
+	ownerID := uuid.NewString()
 	e := &JobExecutor{
-		corpus: c,
-		active: make(map[string]*activeJob),
+		corpus:  c,
+		ownerID: ownerID,
+		cfg:     cfg,
+		active:  make(map[string]*activeJob),
 	}
 	e.rootCtx, e.cancel = context.WithCancel(context.Background())
 	e.cond = sync.NewCond(&e.mu)
+
+	now := time.Now().UTC()
+	if err := c.RegisterJobOwner(ctx, ownerID, os.Getpid(), now); err != nil {
+		e.cancel()
+		return nil, fmt.Errorf("register job owner: %w", err)
+	}
+
+	e.heartbeatWG.Add(1)
+	go e.heartbeat()
+
+	if err := c.ReconcileInterruptedJobs(ctx, cfg.leaseTimeout); err != nil {
+		e.cancel()
+		e.heartbeatWG.Wait()
+		_ = c.DeleteJobOwner(context.WithoutCancel(ctx), ownerID)
+		return nil, fmt.Errorf("reconcile interrupted jobs: %w", err)
+	}
+
 	return e, nil
 }
 
@@ -104,6 +163,10 @@ func (e *JobExecutor) Cancel(ctx context.Context, id string) error {
 // before returning.
 func (e *JobExecutor) Close() error {
 	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return nil
+	}
 	e.closed = true
 	active := make([]*activeJob, 0, len(e.active))
 	for _, aj := range e.active {
@@ -121,6 +184,9 @@ func (e *JobExecutor) Close() error {
 		e.cond.Wait()
 	}
 	e.mu.Unlock()
+
+	e.heartbeatWG.Wait()
+	_ = e.corpus.DeleteJobOwner(context.Background(), e.ownerID)
 	return nil
 }
 
@@ -131,6 +197,59 @@ func (e *JobExecutor) decrement() {
 		e.cond.Broadcast()
 	}
 	e.mu.Unlock()
+}
+
+func (e *JobExecutor) heartbeat() {
+	defer e.heartbeatWG.Done()
+	ticker := time.NewTicker(e.cfg.heartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-e.rootCtx.Done():
+			return
+		case <-ticker.C:
+			err := e.corpus.HeartbeatJobOwner(e.rootCtx, e.ownerID, time.Now().UTC())
+			if err == nil {
+				continue
+			}
+			if errors.Is(err, corpus.ErrJobOwnerNotFound) || errors.Is(err, context.Canceled) {
+				// The owner row was removed (abandoned) or the executor is shutting
+				// down; stop heartbeating.
+				return
+			}
+			// Transient errors (database locked, network, etc.) are retried on
+			// the next tick so a temporary stall does not kill a live owner.
+		}
+	}
+}
+
+func (e *JobExecutor) pollCancellation(ctx context.Context, id string, cancel context.CancelFunc) {
+	ticker := time.NewTicker(e.cfg.pollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			job, err := e.corpus.GetJob(ctx, id)
+			if err != nil {
+				if errors.Is(err, context.Canceled) {
+					return
+				}
+				// Transient DB errors (e.g. SQLITE_BUSY) are retried; only a
+				// definitive absence or a persisted cancellation stops the job.
+				continue
+			}
+			if job == nil {
+				cancel()
+				return
+			}
+			if job.CancelledAt != nil && !job.CancelledAt.IsZero() {
+				cancel()
+				return
+			}
+		}
+	}
 }
 
 func (e *JobExecutor) run(id string, fn JobFunc) {
@@ -155,13 +274,15 @@ func (e *JobExecutor) run(id string, fn JobFunc) {
 		cancel()
 	}()
 
-	if err := e.corpus.StartJob(jobCtx, id); err != nil {
+	if err := e.corpus.StartJobAs(jobCtx, id, e.ownerID); err != nil {
 		job, _ := e.corpus.GetJob(context.WithoutCancel(jobCtx), id)
 		if job != nil && !isTerminalJobStatus(job.Status) {
 			_ = e.corpus.TransitionJob(context.WithoutCancel(jobCtx), id, job.Status, corpus.JobStatusFailed, "", err.Error())
 		}
 		return
 	}
+
+	go e.pollCancellation(jobCtx, id, cancel)
 
 	_ = e.corpus.RecordJobEvent(context.WithoutCancel(jobCtx), id, "info", "job started")
 

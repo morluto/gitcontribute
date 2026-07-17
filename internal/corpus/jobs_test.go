@@ -2,6 +2,7 @@ package corpus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -231,7 +232,7 @@ func TestReconcileInterruptedJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := c.ReconcileInterruptedJobs(ctx); err != nil {
+	if err := c.ReconcileInterruptedJobs(ctx, time.Second); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 
@@ -298,6 +299,25 @@ func TestConcurrentReadWhileJobRunning(t *testing.T) {
 	}
 }
 
+func TestHeartbeatAndDeleteJobOwner(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+
+	ownerID := "owner-1"
+	if err := c.RegisterJobOwner(ctx, ownerID, 1, time.Now().UTC()); err != nil {
+		t.Fatalf("register owner: %v", err)
+	}
+	if err := c.HeartbeatJobOwner(ctx, ownerID, time.Now().UTC()); err != nil {
+		t.Fatalf("heartbeat owner: %v", err)
+	}
+	if err := c.DeleteJobOwner(ctx, ownerID); err != nil {
+		t.Fatalf("delete owner: %v", err)
+	}
+	if err := c.HeartbeatJobOwner(ctx, ownerID, time.Now().UTC()); !errors.Is(err, ErrJobOwnerNotFound) {
+		t.Fatalf("expected ErrJobOwnerNotFound, got %v", err)
+	}
+}
+
 func TestJobListOrderingAndBounds(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
@@ -321,5 +341,83 @@ func TestJobListOrderingAndBounds(t *testing.T) {
 		if jobs[i-1].CreatedAt.Before(jobs[i].CreatedAt) {
 			t.Fatalf("jobs not newest first at %d", i)
 		}
+	}
+}
+
+func TestStartJobAsClaimsOwner(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+
+	owner := "owner-1"
+	if err := c.RegisterJobOwner(ctx, owner, 1, time.Now().UTC()); err != nil {
+		t.Fatalf("register owner: %v", err)
+	}
+	job, err := c.CreateJob(ctx, "sync", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.StartJobAs(ctx, job.ID, owner); err != nil {
+		t.Fatalf("start job as owner: %v", err)
+	}
+
+	var got string
+	if err := c.db.QueryRowContext(ctx, `SELECT owner_id FROM jobs WHERE id = ?`, job.ID).Scan(&got); err != nil {
+		t.Fatalf("select owner: %v", err)
+	}
+	if got != owner {
+		t.Fatalf("owner_id = %q, want %q", got, owner)
+	}
+
+	if err := c.StartJobAs(ctx, job.ID, "owner-2"); err == nil {
+		t.Fatal("expected error claiming already-running job")
+	}
+}
+
+func TestReconcileRespectsLiveOwners(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+
+	liveOwner := "live-owner"
+	if err := c.RegisterJobOwner(ctx, liveOwner, 1, time.Now().UTC()); err != nil {
+		t.Fatalf("register live owner: %v", err)
+	}
+	liveJob, err := c.CreateJob(ctx, "sync", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.StartJobAs(ctx, liveJob.ID, liveOwner); err != nil {
+		t.Fatalf("start live job: %v", err)
+	}
+
+	staleOwner := "stale-owner"
+	if err := c.RegisterJobOwner(ctx, staleOwner, 2, time.Now().UTC().Add(-time.Hour)); err != nil {
+		t.Fatalf("register stale owner: %v", err)
+	}
+	staleJob, err := c.CreateJob(ctx, "sync", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.StartJobAs(ctx, staleJob.ID, staleOwner); err != nil {
+		t.Fatalf("start stale job: %v", err)
+	}
+	if err := c.RequestJobCancellation(ctx, staleJob.ID); err != nil {
+		t.Fatalf("request cancellation: %v", err)
+	}
+
+	if err := c.ReconcileInterruptedJobs(ctx, 30*time.Second); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	liveJob, _ = c.GetJob(ctx, liveJob.ID)
+	if liveJob.Status != JobStatusRunning {
+		t.Fatalf("live job reconciled: status=%q", liveJob.Status)
+	}
+
+	staleJob, _ = c.GetJob(ctx, staleJob.ID)
+	if staleJob.Status != JobStatusCancelled {
+		t.Fatalf("stale job status = %q, want cancelled", staleJob.Status)
+	}
+	if staleJob.Error != "interrupted by restart (cancellation requested)" {
+		t.Fatalf("stale job error = %q", staleJob.Error)
 	}
 }

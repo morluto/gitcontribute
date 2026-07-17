@@ -27,6 +27,16 @@ func newJobTestService(t *testing.T) *Service {
 	return svc
 }
 
+func newJobExecutorOnService(t *testing.T, svc *Service, cfg jobExecutorConfig) *JobExecutor {
+	t.Helper()
+	jobs, err := newJobExecutorWithConfig(context.Background(), svc.corpus, cfg)
+	if err != nil {
+		t.Fatalf("new job executor: %v", err)
+	}
+	svc.jobs = jobs
+	return jobs
+}
+
 func waitForJobStatus(t *testing.T, jobs *JobExecutor, id, want string, timeout time.Duration) {
 	t.Helper()
 	ctx := context.Background()
@@ -298,4 +308,228 @@ func TestConcurrentReadWhileJobRunning(t *testing.T) {
 		t.Fatalf("cancel: %v", err)
 	}
 	waitForJobStatus(t, jobs, id, corpus.JobStatusCancelled, 2*time.Second)
+}
+
+func TestRemoteCancellationAcrossExecutors(t *testing.T) {
+	ctx := context.Background()
+	svc := newJobTestService(t)
+	jobs := newJobExecutorOnService(t, svc, jobExecutorConfig{
+		pollInterval: 50 * time.Millisecond,
+	})
+
+	blocked := make(chan struct{})
+	id, err := jobs.Submit(ctx, "block", nil, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
+		close(blocked)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	<-blocked
+
+	// Simulate a second process by opening a separate connection to the same
+	// database and requesting cancellation there.
+	c2, err := corpus.Open(ctx, svc.databasePath())
+	if err != nil {
+		t.Fatalf("open second corpus: %v", err)
+	}
+	defer func() { _ = c2.Close() }()
+
+	if err := c2.RequestJobCancellation(ctx, id); err != nil {
+		t.Fatalf("remote cancel: %v", err)
+	}
+
+	waitForJobStatus(t, jobs, id, corpus.JobStatusCancelled, 2*time.Second)
+}
+
+func TestLiveOwnerNotReconciledByAnotherExecutor(t *testing.T) {
+	ctx := context.Background()
+	svc := newJobTestService(t)
+	jobsA := newJobExecutorOnService(t, svc, jobExecutorConfig{
+		heartbeatInterval: 50 * time.Millisecond,
+		pollInterval:      50 * time.Millisecond,
+	})
+
+	blocked := make(chan struct{})
+	id, err := jobsA.Submit(ctx, "block", nil, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
+		close(blocked)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	<-blocked
+	waitForJobStatus(t, jobsA, id, corpus.JobStatusRunning, 1*time.Second)
+
+	// A second process opens the database and reconciles with a 200ms lease.
+	// Because A heartbeats every 50ms, its job must remain running.
+	cB, err := corpus.Open(ctx, svc.databasePath())
+	if err != nil {
+		t.Fatalf("open second corpus: %v", err)
+	}
+	defer func() { _ = cB.Close() }()
+
+	time.Sleep(100 * time.Millisecond)
+	if err := cB.ReconcileInterruptedJobs(ctx, 200*time.Millisecond); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	job, err := jobsA.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if job.Status != corpus.JobStatusRunning {
+		t.Fatalf("live job was reconciled: status=%q", job.Status)
+	}
+}
+
+func TestAbandonedOwnerReconciledByNewExecutor(t *testing.T) {
+	ctx := context.Background()
+	svc := newJobTestService(t)
+	// A never heartbeats after its initial registration, so it will be
+	// considered abandoned by a second process with a short lease.
+	jobsA := newJobExecutorOnService(t, svc, jobExecutorConfig{
+		leaseTimeout:      1 * time.Hour,
+		heartbeatInterval: 1 * time.Hour,
+		pollInterval:      50 * time.Millisecond,
+	})
+
+	blocked := make(chan struct{})
+	id, err := jobsA.Submit(ctx, "block", nil, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
+		close(blocked)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	<-blocked
+	waitForJobStatus(t, jobsA, id, corpus.JobStatusRunning, 1*time.Second)
+
+	// After the short lease expires, a second process opens the database and
+	// reconciles abandoned owners.
+	time.Sleep(300 * time.Millisecond)
+
+	cB, err := corpus.Open(ctx, svc.databasePath())
+	if err != nil {
+		t.Fatalf("open second corpus: %v", err)
+	}
+	defer func() { _ = cB.Close() }()
+
+	if err := cB.ReconcileInterruptedJobs(ctx, 200*time.Millisecond); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	job, err := cB.GetJob(ctx, id)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if job.Status != corpus.JobStatusFailed {
+		t.Fatalf("abandoned job status = %q, want %q", job.Status, corpus.JobStatusFailed)
+	}
+	if job.Error != "interrupted by restart" {
+		t.Fatalf("abandoned job error = %q", job.Error)
+	}
+}
+
+func TestReadOnlyCorpusOpenDoesNotReconcileJobs(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: dir})
+	dbPath, err := paths.DatabasePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureDatabaseDir(dbPath); err != nil {
+		t.Fatalf("ensure db dir: %v", err)
+	}
+
+	c, err := corpus.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("open corpus: %v", err)
+	}
+	job, err := c.CreateJob(ctx, "sync", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerID := "stale-owner"
+	if err := c.RegisterJobOwner(ctx, ownerID, 1, time.Now().UTC().Add(-time.Hour)); err != nil {
+		t.Fatalf("register owner: %v", err)
+	}
+	if err := c.StartJobAs(ctx, job.ID, ownerID); err != nil {
+		t.Fatalf("start job: %v", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("close corpus: %v", err)
+	}
+
+	// A read-only service operation must open the corpus without creating a
+	// job executor and without reconciling running jobs.
+	svc, err := New(paths, "test")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	defer func() { _ = svc.Close() }()
+
+	if _, err := svc.Status(ctx); err != nil {
+		t.Fatalf("status: %v", err)
+	}
+
+	c2, err := corpus.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("reopen corpus: %v", err)
+	}
+	defer func() { _ = c2.Close() }()
+
+	j, err := c2.GetJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if j.Status != corpus.JobStatusRunning {
+		t.Fatalf("read-only open reconciled job: status=%q", j.Status)
+	}
+}
+
+func TestReconcileConcurrentWithHeartbeat(t *testing.T) {
+	ctx := context.Background()
+	svc := newJobTestService(t)
+	jobsA := newJobExecutorOnService(t, svc, jobExecutorConfig{
+		heartbeatInterval: 20 * time.Millisecond,
+		pollInterval:      50 * time.Millisecond,
+	})
+
+	blocked := make(chan struct{})
+	id, err := jobsA.Submit(ctx, "block", nil, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
+		close(blocked)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	<-blocked
+	waitForJobStatus(t, jobsA, id, corpus.JobStatusRunning, 1*time.Second)
+
+	cB, err := corpus.Open(ctx, svc.databasePath())
+	if err != nil {
+		t.Fatalf("open second corpus: %v", err)
+	}
+	defer func() { _ = cB.Close() }()
+
+	for i := range 20 {
+		if err := cB.ReconcileInterruptedJobs(ctx, 100*time.Millisecond); err != nil {
+			t.Fatalf("reconcile iteration %d: %v", i, err)
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	job, err := jobsA.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if job.Status != corpus.JobStatusRunning {
+		t.Fatalf("live job was reconciled during concurrent heartbeat: status=%q", job.Status)
+	}
 }
