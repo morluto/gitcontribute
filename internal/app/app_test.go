@@ -15,12 +15,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
+	"github.com/morluto/gitcontribute/internal/workspace"
 )
 
 type noopLimiter struct{}
@@ -671,6 +674,28 @@ func TestPrepareContributionDrafts(t *testing.T) {
 	if !strings.Contains(pr.Body, "Serialize access with a mutex") || !strings.Contains(pr.Body, "Lock around parser state") {
 		t.Fatalf("pr body missing expected sections: %s", pr.Body)
 	}
+
+	c, err := svc.openCorpus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SaveWorkspace(ctx, &workspace.Workspace{
+		Name:            "unrelated-workspace",
+		InvestigationID: "another-investigation",
+		RepoOwner:       "other",
+		RepoName:        "repo",
+		Path:            t.TempDir(),
+		CreatedAt:       time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.PreparePullRequest(ctx, opp.ID, cli.PreparePROptions{
+		WorkspaceID: "unrelated-workspace",
+		Approach:    "Serialize access with a mutex",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("cross-investigation workspace error = %v", err)
+	}
 }
 
 func TestValidationDefineRunAndCompare(t *testing.T) {
@@ -705,7 +730,11 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 		t.Fatalf("unexpected validation: %+v", def)
 	}
 
-	baseRun, err := svc.RunValidation(ctx, def.ID, "base")
+	if _, err := svc.RunValidation(ctx, def.ID, cli.RunValidationOptions{Kind: "base"}); !errors.Is(err, evidence.ErrExecutionNotAuthorized) {
+		t.Fatalf("unauthorized run error = %v, want ErrExecutionNotAuthorized", err)
+	}
+
+	baseRun, err := svc.RunValidation(ctx, def.ID, cli.RunValidationOptions{Kind: "base", Execute: true})
 	if err != nil {
 		t.Fatalf("run base: %v", err)
 	}
@@ -713,7 +742,7 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 		t.Fatalf("unexpected base run: %+v", baseRun)
 	}
 
-	candidateRun, err := svc.RunValidation(ctx, def.ID, "candidate")
+	candidateRun, err := svc.RunValidation(ctx, def.ID, cli.RunValidationOptions{Kind: "candidate", Execute: true})
 	if err != nil {
 		t.Fatalf("run candidate: %v", err)
 	}
@@ -735,6 +764,36 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 	}
 	if evidence.InvestigationID != inv.ID {
 		t.Fatalf("unexpected evidence result: %+v", evidence)
+	}
+}
+
+func TestDefineValidationParsesQuotedArguments(t *testing.T) {
+	ctx := context.Background()
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc123", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	def, err := svc.DefineValidation(ctx, inv.ID, cli.DefineValidationOptions{
+		Kind:       "test",
+		Command:    `printf '%s value' ok`,
+		WorkingDir: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"printf", "%s value", "ok"}
+	if diff := cmp.Diff(want, def.Command); diff != "" {
+		t.Fatalf("command argv mismatch (-want +got):\n%s", diff)
 	}
 }
 
@@ -782,6 +841,18 @@ func TestWorkspaceCreateAndShow(t *testing.T) {
 	}
 	if shown.ID != ws.ID || shown.BaseSHA != baseSHA {
 		t.Fatalf("workspace roundtrip failed: %+v", shown)
+	}
+}
+
+func TestMirrorNamesAreUnambiguous(t *testing.T) {
+	a := mirrorNameFor("a", "b-c", "https://github.com/a/b-c.git")
+	b := mirrorNameFor("a-b", "c", "https://github.com/a-b/c.git")
+	c := mirrorNameFor("a", "b-c", "https://github.com/fork/b-c.git")
+	if a == b || a == c || b == c {
+		t.Fatalf("mirror names collided: %q %q %q", a, b, c)
+	}
+	if len(mirrorNameFor(strings.Repeat("a", 100), strings.Repeat("b", 100), "https://github.com/a/b.git")) > 128 {
+		t.Fatal("mirror name exceeds workspace manager limit")
 	}
 }
 

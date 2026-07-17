@@ -6,6 +6,7 @@ require (
 	github.com/alecthomas/kong v1.16.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v89 v89.0.0
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/google/uuid v1.6.0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/pelletier/go-toml/v2 v2.4.3

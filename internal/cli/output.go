@@ -235,6 +235,9 @@ func validationHuman(r *ValidationResult) string {
 	if r.MaxOutputBytes > 0 {
 		fmt.Fprintf(&b, "Max output bytes: %d\n", r.MaxOutputBytes)
 	}
+	if len(r.Env) > 0 {
+		fmt.Fprintf(&b, "Environment allowlist: %s\n", strings.Join(r.Env, ", "))
+	}
 	fmt.Fprintf(&b, "Created: %s", r.CreatedAt)
 	return b.String()
 }

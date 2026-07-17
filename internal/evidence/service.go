@@ -3,10 +3,20 @@ package evidence
 import (
 	"context"
 	"fmt"
+	"os"
+	"regexp"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+const (
+	maxEnvironmentVariables  = 64
+	defaultValidationTimeout = 30 * time.Minute
+	maxValidationTimeout     = 24 * time.Hour
+)
+
+var environmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // Service manages validation definitions, runs, evidence, and base-vs-candidate comparisons.
 type Service struct {
@@ -30,6 +40,20 @@ func (s *Service) DefineValidation(ctx context.Context, d *ValidationDefinition)
 	if d.WorkingDir == "" && (d.BaseWorkingDir == "" || d.CandidateDir == "") {
 		return ErrMissingWorkspace
 	}
+	if d.Timeout < 0 || d.Timeout > maxValidationTimeout {
+		return ErrInvalidTimeout
+	}
+	if d.Timeout == 0 {
+		d.Timeout = defaultValidationTimeout
+	}
+	if d.MaxOutputBytes < 0 || d.MaxOutputBytes > maxOutputBytes {
+		return ErrInvalidOutputLimit
+	}
+	env, err := normalizeEnvironmentAllowlist(d.Env)
+	if err != nil {
+		return err
+	}
+	d.Env = env
 	if d.ID == "" {
 		d.ID = uuid.NewString()
 	}
@@ -59,12 +83,15 @@ func (s *Service) RunValidation(ctx context.Context, defID string, kind RunKind)
 		return nil, ErrMissingWorkspace
 	}
 
-	runCtx := ctx
-	if def.Timeout > 0 {
-		var cancel context.CancelFunc
-		runCtx, cancel = context.WithTimeout(ctx, def.Timeout)
-		defer cancel()
+	timeout := def.Timeout
+	if timeout < 0 || timeout > maxValidationTimeout {
+		return nil, ErrInvalidTimeout
 	}
+	if timeout == 0 {
+		timeout = defaultValidationTimeout
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	var maxOutput int64 = defaultMaxOutputBytes
 	if def.MaxOutputBytes > 0 {
@@ -74,7 +101,7 @@ func (s *Service) RunValidation(ctx context.Context, defID string, kind RunKind)
 	result, err := s.runner.Run(runCtx, RunRequest{
 		Args:           def.Command,
 		Dir:            workingDir,
-		Env:            def.Env,
+		Env:            resolveEnvironment(def.Env),
 		MaxOutputBytes: maxOutput,
 	})
 	if err != nil {
@@ -97,10 +124,45 @@ func (s *Service) RunValidation(ctx context.Context, defID string, kind RunKind)
 		Error:           result.Error,
 		Classification:  result.Classification,
 	}
-	if err := s.repo.SaveValidationRun(ctx, run); err != nil {
+	saveCtx := ctx
+	saveCancel := func() {}
+	if ctx.Err() != nil {
+		saveCtx, saveCancel = context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	}
+	defer saveCancel()
+	if err := s.repo.SaveValidationRun(saveCtx, run); err != nil {
 		return nil, err
 	}
 	return run, nil
+}
+
+func normalizeEnvironmentAllowlist(names []string) ([]string, error) {
+	if len(names) > maxEnvironmentVariables {
+		return nil, fmt.Errorf("%w: at most %d variable names are allowed", ErrInvalidEnvironment, maxEnvironmentVariables)
+	}
+	seen := make(map[string]struct{}, len(names))
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if !environmentNamePattern.MatchString(name) {
+			return nil, fmt.Errorf("%w: %q is not a variable name", ErrInvalidEnvironment, name)
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out, nil
+}
+
+func resolveEnvironment(names []string) []string {
+	env := make([]string, 0, len(names))
+	for _, name := range names {
+		if value, exists := os.LookupEnv(name); exists {
+			env = append(env, name+"="+value)
+		}
+	}
+	return env
 }
 
 // CompareValidation loads two runs and classifies their relationship.

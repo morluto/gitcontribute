@@ -35,6 +35,7 @@ type fakeExtendedService struct {
 	lastDefineValidationOpts    cli.DefineValidationOptions
 	lastRunValidationID         string
 	lastRunKind                 string
+	lastRunExecute              bool
 	lastCompareBase             string
 	lastCompareCandidate        string
 	lastEvidenceInvestigation   string
@@ -64,10 +65,15 @@ func (f *fakeExtendedService) DefineValidation(ctx context.Context, investigatio
 	return f.validationResult, f.err
 }
 
-func (f *fakeExtendedService) RunValidation(ctx context.Context, id string, kind string) (*cli.ValidationRunResult, error) {
+func (f *fakeExtendedService) ShowValidation(ctx context.Context, id string) (*cli.ValidationResult, error) {
+	return f.validationResult, f.err
+}
+
+func (f *fakeExtendedService) RunValidation(ctx context.Context, id string, opts cli.RunValidationOptions) (*cli.ValidationRunResult, error) {
 	f.runValidationCalled = true
 	f.lastRunValidationID = id
-	f.lastRunKind = kind
+	f.lastRunKind = opts.Kind
+	f.lastRunExecute = opts.Execute
 	return f.validationRunResult, f.err
 }
 
@@ -186,9 +192,17 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 
 	stdout.Reset()
 	err = c.Run(context.Background(), []string{"validation", "run", "val-1", "--kind", "base"})
+	if err == nil || !strings.Contains(err.Error(), "--execute") || svc.runValidationCalled {
+		t.Fatalf("unauthorized run err=%v called=%v", err, svc.runValidationCalled)
+	}
+
+	err = c.Run(context.Background(), []string{"validation", "run", "val-1", "--kind", "base", "--execute"})
 	requireNoErr(t, err)
-	if !svc.runValidationCalled || svc.lastRunValidationID != "val-1" || svc.lastRunKind != "base" {
-		t.Fatalf("run validation args = id:%q kind:%q", svc.lastRunValidationID, svc.lastRunKind)
+	if !svc.runValidationCalled || svc.lastRunValidationID != "val-1" || svc.lastRunKind != "base" || !svc.lastRunExecute {
+		t.Fatalf("run validation args = id:%q kind:%q execute:%v", svc.lastRunValidationID, svc.lastRunKind, svc.lastRunExecute)
+	}
+	if !strings.Contains(stderr.String(), `"go" "test"`) {
+		t.Fatalf("visible command missing from stderr: %q", stderr.String())
 	}
 
 	stdout.Reset()

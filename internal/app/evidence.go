@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
+	"github.com/google/shlex"
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/evidence"
 )
@@ -21,7 +21,10 @@ func (s *Service) DefineValidation(ctx context.Context, investigationID string, 
 		return nil, mapInvestigationError(err)
 	}
 
-	command := strings.Fields(opts.Command)
+	command, err := shlex.Split(opts.Command)
+	if err != nil {
+		return nil, fmt.Errorf("parse validation command: %w", err)
+	}
 	if len(command) == 0 {
 		return nil, errors.New("validation command is required")
 	}
@@ -55,11 +58,27 @@ func (s *Service) DefineValidation(ctx context.Context, investigationID string, 
 	return validationResult(def), nil
 }
 
+// ShowValidation returns a stored validation definition without executing it.
+func (s *Service) ShowValidation(ctx context.Context, id string) (*cli.ValidationResult, error) {
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	def, err := c.GetValidationDefinition(ctx, id)
+	if err != nil {
+		return nil, mapEvidenceError(err)
+	}
+	return validationResult(def), nil
+}
+
 // RunValidation executes a stored validation definition against the base or candidate workspace.
-func (s *Service) RunValidation(ctx context.Context, id string, kind string) (*cli.ValidationRunResult, error) {
-	runKind := evidence.RunKind(kind)
+func (s *Service) RunValidation(ctx context.Context, id string, opts cli.RunValidationOptions) (*cli.ValidationRunResult, error) {
+	if !opts.Execute {
+		return nil, evidence.ErrExecutionNotAuthorized
+	}
+	runKind := evidence.RunKind(opts.Kind)
 	if runKind != evidence.RunKindBase && runKind != evidence.RunKindCandidate {
-		return nil, fmt.Errorf("invalid run kind %q: must be base or candidate", kind)
+		return nil, fmt.Errorf("invalid run kind %q: must be base or candidate", opts.Kind)
 	}
 
 	c, err := s.openCorpus(ctx)
@@ -145,6 +164,7 @@ func validationResult(def *evidence.ValidationDefinition) *cli.ValidationResult 
 		WorkingDir:      def.WorkingDir,
 		BaseWorkingDir:  def.BaseWorkingDir,
 		CandidateDir:    def.CandidateDir,
+		Env:             append([]string(nil), def.Env...),
 		Timeout:         timeout,
 		MaxOutputBytes:  def.MaxOutputBytes,
 		CreatedAt:       formatTime(def.CreatedAt),

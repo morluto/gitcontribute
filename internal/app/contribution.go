@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
@@ -11,6 +13,8 @@ import (
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
 )
+
+const maxPreparedDiffBytes = 1 << 20
 
 // PrepareIssue renders and stores an issue draft for an opportunity.
 func (s *Service) PrepareIssue(ctx context.Context, opportunityID string, opts cli.PrepareIssueOptions) (*cli.DraftResult, error) {
@@ -31,7 +35,10 @@ func (s *Service) PrepareIssue(ctx context.Context, opportunityID string, opts c
 
 	guidance := opts.Guidance
 	if guidance == "" {
-		guidance, _, _ = (&corpusReader{s: s}).ReadContributionGuidance(ctx, inv.Repo)
+		guidance, _, err = (&corpusReader{s: s}).ReadContributionGuidance(ctx, inv.Repo)
+		if err != nil && !errors.Is(err, errRepositoryNotFound) {
+			return nil, fmt.Errorf("read contribution guidance: %w", err)
+		}
 	}
 
 	svc := contribution.NewService(c)
@@ -67,14 +74,22 @@ func (s *Service) PreparePullRequest(ctx context.Context, opportunityID string, 
 
 	changes := opts.Changes
 	if changes == "" && opts.WorkspaceID != "" {
-		if diff, err := s.workspaceDiff(ctx, opts.WorkspaceID); err == nil && diff != "" {
-			changes = diff
+		diff, err := s.workspaceDiff(ctx, opts.WorkspaceID, inv)
+		if err != nil {
+			return nil, fmt.Errorf("read workspace diff: %w", err)
 		}
+		if len(diff) > maxPreparedDiffBytes {
+			return nil, fmt.Errorf("workspace diff exceeds %d bytes; provide a bounded --changes summary", maxPreparedDiffBytes)
+		}
+		changes = strings.TrimSpace(diff)
 	}
 
 	guidance := opts.Guidance
 	if guidance == "" {
-		guidance, _, _ = (&corpusReader{s: s}).ReadContributionGuidance(ctx, inv.Repo)
+		guidance, _, err = (&corpusReader{s: s}).ReadContributionGuidance(ctx, inv.Repo)
+		if err != nil && !errors.Is(err, errRepositoryNotFound) {
+			return nil, fmt.Errorf("read contribution guidance: %w", err)
+		}
 	}
 
 	allEvidence, err := s.loadOpportunityEvidence(ctx, c, opportunityID)
@@ -119,7 +134,7 @@ func (s *Service) loadOpportunityEvidence(ctx context.Context, c *corpus.Corpus,
 	return evSvc.ListEvidence(ctx, evidence.EvidenceFilter{OpportunityID: opportunityID})
 }
 
-func (s *Service) workspaceDiff(ctx context.Context, workspaceID string) (string, error) {
+func (s *Service) workspaceDiff(ctx context.Context, workspaceID string, inv *investigation.Investigation) (string, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return "", err
@@ -128,9 +143,21 @@ func (s *Service) workspaceDiff(ctx context.Context, workspaceID string) (string
 	if err != nil {
 		return "", err
 	}
+	if inv == nil || ws.InvestigationID != inv.ID ||
+		!strings.EqualFold(ws.RepoOwner, inv.Repo.Owner) ||
+		!strings.EqualFold(ws.RepoName, inv.Repo.Repo) {
+		return "", errors.New("workspace does not belong to the opportunity investigation and repository")
+	}
 	mgr, err := s.workspaceManager(ctx)
 	if err != nil {
 		return "", err
+	}
+	hasUntracked, err := mgr.HasUntrackedByPath(ctx, ws.Path)
+	if err != nil {
+		return "", err
+	}
+	if hasUntracked {
+		return "", errors.New("workspace has untracked files; stage them or provide an explicit --changes summary")
 	}
 	return mgr.DiffByPath(ctx, ws.Path, ws.BaseSHA)
 }

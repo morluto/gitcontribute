@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -215,16 +216,17 @@ type defineValidationCmd struct {
 	WorkingDir      string        `name:"working-dir" help:"Working directory for both runs"`
 	BaseWorkingDir  string        `name:"base-working-dir" help:"Base workspace directory"`
 	CandidateDir    string        `name:"candidate-dir" help:"Candidate workspace directory"`
-	Env             []string      `name:"env" help:"Environment variables (KEY=VALUE)"`
+	Env             []string      `name:"env" help:"Host environment variable names to pass through"`
 	Timeout         time.Duration `name:"timeout" help:"Maximum execution time"`
 	MaxOutput       int64         `name:"max-output" help:"Maximum captured output bytes per stream"`
 	JSON            bool          `name:"json" help:"Print the result as JSON"`
 }
 
 type runValidationCmd struct {
-	ID   string `arg:"" help:"Validation definition ID"`
-	Kind string `name:"kind" required:"" enum:"base,candidate" help:"Run kind"`
-	JSON bool   `name:"json" help:"Print the result as JSON"`
+	ID      string `arg:"" help:"Validation definition ID"`
+	Kind    string `name:"kind" required:"" enum:"base,candidate" help:"Run kind"`
+	Execute bool   `name:"execute" help:"Authorize execution of the displayed command on the host"`
+	JSON    bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type compareValidationCmd struct {
@@ -569,8 +571,23 @@ func (c *CLI) runValidation(ctx context.Context, command string, cmd *validation
 		}
 		return c.render(cmd.Define.JSON, result)
 	case "validation run":
-		fmt.Fprintf(c.stderr, "running validation %s...\n", cmd.Run.ID)
-		result, err := service.RunValidation(ctx, cmd.Run.ID, cmd.Run.Kind)
+		definition, err := service.ShowValidation(ctx, cmd.Run.ID)
+		if err != nil {
+			return c.mapError(err)
+		}
+		dir := definition.WorkingDir
+		if cmd.Run.Kind == "base" && definition.BaseWorkingDir != "" {
+			dir = definition.BaseWorkingDir
+		}
+		if cmd.Run.Kind == "candidate" && definition.CandidateDir != "" {
+			dir = definition.CandidateDir
+		}
+		visible := formatCommand(definition.Command)
+		if !cmd.Run.Execute {
+			return NewCLIError(ExitUsage, fmt.Errorf("host execution requires --execute; command: %s (directory: %s)", visible, dir))
+		}
+		fmt.Fprintf(c.stderr, "executing in %s: %s\n", dir, visible)
+		result, err := service.RunValidation(ctx, cmd.Run.ID, RunValidationOptions{Kind: cmd.Run.Kind, Execute: true})
 		if err != nil {
 			return c.mapError(err)
 		}
@@ -584,6 +601,14 @@ func (c *CLI) runValidation(ctx context.Context, command string, cmd *validation
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown validation command: %s", command))
 	}
+}
+
+func formatCommand(args []string) string {
+	quoted := make([]string, len(args))
+	for i, arg := range args {
+		quoted[i] = strconv.Quote(arg)
+	}
+	return strings.Join(quoted, " ")
 }
 
 func (c *CLI) runEvidence(ctx context.Context, command string, cmd *evidenceCmd) error {

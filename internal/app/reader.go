@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,6 +10,8 @@ import (
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/dossier"
 )
+
+var errRepositoryNotFound = errors.New("repository not found")
 
 type corpusReader struct {
 	s *Service
@@ -26,7 +29,7 @@ func (r *corpusReader) ReadRepository(ctx context.Context, ref domain.RepoRef) (
 		return domain.Repository{}, nil, fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil {
-		return domain.Repository{}, nil, fmt.Errorf("repository not found: %s", ref)
+		return domain.Repository{}, nil, fmt.Errorf("%w: %s", errRepositoryNotFound, ref)
 	}
 
 	threads, err := c.ListThreads(ctx, repo.ID, "", 0)
@@ -61,7 +64,7 @@ func (r *corpusReader) ReadThreads(ctx context.Context, ref domain.RepoRef, q do
 		return nil, nil, fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil {
-		return nil, nil, fmt.Errorf("repository not found: %s", ref)
+		return nil, nil, fmt.Errorf("%w: %s", errRepositoryNotFound, ref)
 	}
 
 	kind := string(q.Kind)
@@ -111,7 +114,7 @@ func (r *corpusReader) ReadCoverage(ctx context.Context, ref domain.RepoRef) (do
 		return domain.Coverage{}, fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil {
-		return domain.Coverage{}, fmt.Errorf("repository not found: %s", ref)
+		return domain.Coverage{}, fmt.Errorf("%w: %s", errRepositoryNotFound, ref)
 	}
 
 	covs, err := c.ListCoverage(ctx, repo.ID, nil)
@@ -153,7 +156,7 @@ func (r *corpusReader) ReadContributionGuidance(ctx context.Context, ref domain.
 		return "", nil, fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil {
-		return "", nil, fmt.Errorf("repository not found: %s", ref)
+		return "", nil, fmt.Errorf("%w: %s", errRepositoryNotFound, ref)
 	}
 	// Contribution guidance files are not fetched in the first vertical slice,
 	// so no source reference is claimed here.

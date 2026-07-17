@@ -57,6 +57,15 @@ func (r *ExecRunner) Run(ctx context.Context, req RunRequest) (*RunResult, error
 
 	started := time.Now()
 	if err := cmd.Start(); err != nil {
+		if ctx.Err() != nil {
+			return &RunResult{
+				ExitCode:       -1,
+				StartedAt:      started,
+				CompletedAt:    time.Now(),
+				Error:          ctx.Err().Error(),
+				Classification: RunClassificationCancelled,
+			}, nil
+		}
 		return nil, fmt.Errorf("runner: start: %w", err)
 	}
 

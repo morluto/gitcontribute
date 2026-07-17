@@ -240,8 +240,15 @@ type WorkspaceResult struct {
 // ValidationService is the optional validation management capability used by the CLI.
 type ValidationService interface {
 	DefineValidation(ctx context.Context, investigationID string, opts DefineValidationOptions) (*ValidationResult, error)
-	RunValidation(ctx context.Context, id string, kind string) (*ValidationRunResult, error)
+	ShowValidation(ctx context.Context, id string) (*ValidationResult, error)
+	RunValidation(ctx context.Context, id string, opts RunValidationOptions) (*ValidationRunResult, error)
 	CompareValidation(ctx context.Context, baseRunID, candidateRunID string) (*ValidationComparisonResult, error)
+}
+
+// RunValidationOptions carries the run target and explicit host-execution authorization.
+type RunValidationOptions struct {
+	Kind    string
+	Execute bool
 }
 
 // DefineValidationOptions carries an explicit validation definition.
@@ -265,6 +272,7 @@ type ValidationResult struct {
 	WorkingDir      string   `json:"working_dir"`
 	BaseWorkingDir  string   `json:"base_working_dir,omitempty"`
 	CandidateDir    string   `json:"candidate_dir,omitempty"`
+	Env             []string `json:"environment_allowlist,omitempty"`
 	Timeout         string   `json:"timeout,omitempty"`
 	MaxOutputBytes  int64    `json:"max_output_bytes,omitempty"`
 	CreatedAt       string   `json:"created_at"`

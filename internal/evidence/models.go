@@ -89,7 +89,7 @@ type ValidationDefinition struct {
 	WorkingDir      string
 	BaseWorkingDir  string
 	CandidateDir    string
-	Env             []string
+	Env             []string // variable names allowed through from the host environment
 	Timeout         time.Duration
 	MaxOutputBytes  int64
 	CreatedAt       time.Time

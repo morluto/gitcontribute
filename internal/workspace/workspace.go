@@ -24,6 +24,7 @@ var (
 	ErrMirrorNotFound = errors.New("mirror not found")
 	ErrInvalidName    = errors.New("invalid name")
 	ErrInvalidRemote  = errors.New("invalid remote")
+	ErrRemoteMismatch = errors.New("existing mirror remote does not match requested remote")
 	ErrOutputLimit    = errors.New("git output exceeds limit")
 )
 
@@ -209,6 +210,7 @@ func (m *Manager) git(ctx context.Context, dir string, args ...string) (string, 
 
 // Clone clones remote into a bare mirror under the managed root.
 func (m *Manager) Clone(ctx context.Context, remote, name string) error {
+	remote = strings.TrimSpace(remote)
 	if err := validateName(name); err != nil {
 		return err
 	}
@@ -226,14 +228,21 @@ func (m *Manager) Clone(ctx context.Context, remote, name string) error {
 	}
 	path := filepath.Join(mirrorsDir, name)
 	if _, err := os.Stat(path); err == nil {
-		// If an existing mirror is already present, record it and treat the
-		// operation as idempotent so durable workspace metadata can outlive the
-		// in-memory manager.
-		if _, err := m.git(ctx, path, "rev-parse", "--is-bare-repository"); err == nil {
-			m.mirrors[name] = &mirror{name: name, remote: remote, path: path}
-			return nil
+		if _, err := m.git(ctx, path, "rev-parse", "--is-bare-repository"); err != nil {
+			return ErrMirrorExists
 		}
-		return ErrMirrorExists
+		origin, err := m.git(ctx, path, "remote", "get-url", "origin")
+		if err != nil {
+			return fmt.Errorf("read existing mirror remote: %w", err)
+		}
+		if strings.TrimSpace(origin) != remote {
+			return fmt.Errorf("%w: existing %q, requested %q", ErrRemoteMismatch, strings.TrimSpace(origin), remote)
+		}
+		if _, err := m.git(ctx, path, "fetch", "--prune", "origin"); err != nil {
+			return fmt.Errorf("refresh existing mirror: %w", err)
+		}
+		m.mirrors[name] = &mirror{name: name, remote: remote, path: path}
+		return nil
 	}
 	if _, err := m.git(ctx, mirrorsDir, "clone", "--mirror", "--no-hardlinks", "--template=", "--", remote, name); err != nil {
 		return fmt.Errorf("clone mirror: %w", err)
@@ -516,38 +525,60 @@ func (m *Manager) Remove(ctx context.Context, path string, force bool) error {
 // StatusByPath reports the dirty state of any workspace path inside the
 // managed root without requiring the workspace to be loaded in memory.
 func (m *Manager) StatusByPath(ctx context.Context, path string) (Status, error) {
-	abs, err := filepath.Abs(path)
+	managed, err := m.managedPath(path)
 	if err != nil {
-		return Status{}, fmt.Errorf("resolve path: %w", err)
+		return Status{}, err
 	}
-	abs = filepath.Clean(abs)
-	if !m.contains(abs) {
-		return Status{}, ErrNotManaged
-	}
-	return m.status(ctx, abs)
+	return m.status(ctx, managed)
 }
 
 // DiffByPath returns the diff for a workspace path against the supplied base
 // SHA, including staged and unstaged changes.
 func (m *Manager) DiffByPath(ctx context.Context, path, baseSHA string) (string, error) {
-	abs, err := filepath.Abs(path)
+	managed, err := m.managedPath(path)
 	if err != nil {
-		return "", fmt.Errorf("resolve path: %w", err)
-	}
-	abs = filepath.Clean(abs)
-	if !m.contains(abs) {
-		return "", ErrNotManaged
+		return "", err
 	}
 	args := []string{"diff", "--no-ext-diff", "--no-textconv"}
 	if baseSHA != "" {
 		args = append(args, baseSHA)
 	}
 	args = append(args, "--")
-	out, err := m.git(ctx, abs, args...)
+	out, err := m.git(ctx, managed, args...)
 	if err != nil {
 		return "", fmt.Errorf("diff: %w", err)
 	}
 	return out, nil
+}
+
+// HasUntrackedByPath reports whether a managed workspace contains untracked,
+// non-ignored files. Callers preparing a complete diff must handle these
+// explicitly because git diff does not include them.
+func (m *Manager) HasUntrackedByPath(ctx context.Context, path string) (bool, error) {
+	managed, err := m.managedPath(path)
+	if err != nil {
+		return false, err
+	}
+	out, err := m.git(ctx, managed, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return false, fmt.Errorf("list untracked files: %w", err)
+	}
+	return len(out) > 0, nil
+}
+
+func (m *Manager) managedPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Clean(abs))
+	if err != nil {
+		return "", fmt.Errorf("resolve managed path symlinks: %w", err)
+	}
+	if !m.contains(resolved) {
+		return "", ErrNotManaged
+	}
+	return resolved, nil
 }
 
 func (m *Manager) contains(path string) bool {
@@ -558,5 +589,5 @@ func (m *Manager) contains(path string) bool {
 	if filepath.IsAbs(rel) {
 		return false
 	}
-	return !strings.HasPrefix(rel, "..")
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

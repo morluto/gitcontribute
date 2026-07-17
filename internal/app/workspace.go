@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/morluto/gitcontribute/internal/cli"
@@ -63,7 +65,7 @@ func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, o
 		return nil, err
 	}
 
-	mirrorName := safeMirrorName(inv.Repo.Owner + "-" + inv.Repo.Repo)
+	mirrorName := mirrorNameFor(inv.Repo.Owner, inv.Repo.Repo, remote)
 	if err := mgr.Clone(ctx, remote, mirrorName); err != nil {
 		return nil, fmt.Errorf("clone repository: %w", err)
 	}
@@ -72,6 +74,15 @@ func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, o
 	if err != nil {
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
+	persisted := false
+	defer func() {
+		if persisted {
+			return
+		}
+		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_ = mgr.Remove(cleanup, ws.Path, true)
+	}()
 
 	ws.InvestigationID = inv.ID
 	ws.RepoOwner = inv.Repo.Owner
@@ -84,6 +95,7 @@ func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, o
 	if err := c.SaveWorkspace(ctx, ws); err != nil {
 		return nil, fmt.Errorf("save workspace metadata: %w", err)
 	}
+	persisted = true
 
 	return workspaceResult(ws), nil
 }
@@ -117,6 +129,17 @@ func safeMirrorName(s string) string {
 		s = s[:128]
 	}
 	return s
+}
+
+func mirrorNameFor(owner, repo, remote string) string {
+	const hashBytes = 8
+	prefix := safeMirrorName(owner + "-" + repo)
+	maxPrefix := 128 - 1 - hashBytes*2
+	if len(prefix) > maxPrefix {
+		prefix = prefix[:maxPrefix]
+	}
+	sum := sha256.Sum256([]byte(strings.ToLower(owner) + "\x00" + strings.ToLower(repo) + "\x00" + remote))
+	return fmt.Sprintf("%s-%x", prefix, sum[:hashBytes])
 }
 
 func workspaceResult(ws *workspace.Workspace) *cli.WorkspaceResult {

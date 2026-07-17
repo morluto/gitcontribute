@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/morluto/gitcontribute/internal/domain"
 )
 
@@ -218,6 +219,37 @@ func (r *capturingRunner) Run(_ context.Context, request RunRequest) (*RunResult
 	return r.result, nil
 }
 
+type deadlineRunner struct {
+	hadDeadline bool
+	remaining   time.Duration
+}
+
+func (r *deadlineRunner) Run(ctx context.Context, _ RunRequest) (*RunResult, error) {
+	deadline, ok := ctx.Deadline()
+	r.hadDeadline = ok
+	if ok {
+		r.remaining = time.Until(deadline)
+	}
+	now := time.Now()
+	return &RunResult{StartedAt: now, CompletedAt: now, Classification: RunClassificationPassing}, nil
+}
+
+func TestRunValidationAppliesTimeoutToLegacyDefinition(t *testing.T) {
+	repo := newFakeRepo()
+	repo.defs["legacy"] = &ValidationDefinition{
+		ID:         "legacy",
+		Command:    []string{"test"},
+		WorkingDir: "/tmp",
+	}
+	runner := &deadlineRunner{}
+	if _, err := NewService(repo, runner).RunValidation(context.Background(), "legacy", RunKindBase); err != nil {
+		t.Fatal(err)
+	}
+	if !runner.hadDeadline || runner.remaining <= defaultValidationTimeout-time.Minute || runner.remaining > defaultValidationTimeout {
+		t.Fatalf("legacy run deadline = %v, want approximately %v", runner.remaining, defaultValidationTimeout)
+	}
+}
+
 func TestDefineValidationStoresKindAndBounds(t *testing.T) {
 	repo := newFakeRepo()
 	svc := NewService(repo, &fakeRunner{})
@@ -243,6 +275,85 @@ func TestDefineValidationStoresKindAndBounds(t *testing.T) {
 	}
 	if stored.MaxOutputBytes != 8192 {
 		t.Fatalf("max output = %d, want 8192", stored.MaxOutputBytes)
+	}
+}
+
+func TestDefineValidationRejectsEnvironmentValues(t *testing.T) {
+	svc := NewService(newFakeRepo(), &fakeRunner{})
+	err := svc.DefineValidation(context.Background(), &ValidationDefinition{
+		Command:    []string{"go", "test"},
+		WorkingDir: "/tmp/ws",
+		Env:        []string{"GITHUB_TOKEN=secret"},
+	})
+	if !errors.Is(err, ErrInvalidEnvironment) {
+		t.Fatalf("DefineValidation error = %v, want ErrInvalidEnvironment", err)
+	}
+}
+
+func TestDefineValidationRejectsInvalidBounds(t *testing.T) {
+	tests := []struct {
+		name    string
+		def     *ValidationDefinition
+		wantErr error
+	}{
+		{
+			name:    "negative timeout",
+			def:     &ValidationDefinition{Command: []string{"test"}, WorkingDir: "/tmp", Timeout: -time.Second},
+			wantErr: ErrInvalidTimeout,
+		},
+		{
+			name:    "excessive timeout",
+			def:     &ValidationDefinition{Command: []string{"test"}, WorkingDir: "/tmp", Timeout: maxValidationTimeout + time.Second},
+			wantErr: ErrInvalidTimeout,
+		},
+		{
+			name:    "oversized output",
+			def:     &ValidationDefinition{Command: []string{"test"}, WorkingDir: "/tmp", MaxOutputBytes: maxOutputBytes + 1},
+			wantErr: ErrInvalidOutputLimit,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := NewService(newFakeRepo(), &fakeRunner{}).DefineValidation(context.Background(), tt.def)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("DefineValidation error = %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestDefineValidationAppliesSafeTimeoutDefault(t *testing.T) {
+	def := &ValidationDefinition{Command: []string{"test"}, WorkingDir: "/tmp"}
+	if err := NewService(newFakeRepo(), &fakeRunner{}).DefineValidation(context.Background(), def); err != nil {
+		t.Fatal(err)
+	}
+	if def.Timeout != defaultValidationTimeout {
+		t.Fatalf("default timeout = %v, want %v", def.Timeout, defaultValidationTimeout)
+	}
+}
+
+func TestRunValidationResolvesEnvironmentAllowlistAtExecution(t *testing.T) {
+	t.Setenv("GITCONTRIBUTE_ALLOWED_TEST", "current-value")
+	repo := newFakeRepo()
+	runner := &capturingRunner{result: &RunResult{Classification: RunClassificationPassing}}
+	svc := NewService(repo, runner)
+	def := &ValidationDefinition{
+		ID:         "def",
+		Command:    []string{"test"},
+		WorkingDir: "/tmp/ws",
+		Env:        []string{"GITCONTRIBUTE_ALLOWED_TEST", "GITCONTRIBUTE_MISSING_TEST", "GITCONTRIBUTE_ALLOWED_TEST"},
+	}
+	if err := svc.DefineValidation(context.Background(), def); err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff([]string{"GITCONTRIBUTE_ALLOWED_TEST", "GITCONTRIBUTE_MISSING_TEST"}, def.Env); diff != "" {
+		t.Fatalf("stored allowlist mismatch (-want +got):\n%s", diff)
+	}
+	if _, err := svc.RunValidation(context.Background(), def.ID, RunKindBase); err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff([]string{"GITCONTRIBUTE_ALLOWED_TEST=current-value"}, runner.request.Env); diff != "" {
+		t.Fatalf("execution environment mismatch (-want +got):\n%s", diff)
 	}
 }
 

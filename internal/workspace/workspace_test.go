@@ -180,6 +180,60 @@ func TestManager_Fetch(t *testing.T) {
 	}
 }
 
+func TestManager_ReopensAndRefreshesExistingMirror(t *testing.T) {
+	ctx := context.Background()
+	remote, _, _ := setupRemote(t)
+	root := t.TempDir()
+	first, err := NewManager(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Clone(ctx, remote, "origin"); err != nil {
+		t.Fatal(err)
+	}
+
+	pushdir := filepath.Join(t.TempDir(), "push")
+	runGit(t, "", "clone", remote, pushdir)
+	runGit(t, pushdir, "checkout", "-b", "after-restart")
+	writeFile(t, filepath.Join(pushdir, "new.txt"), "new")
+	runGit(t, pushdir, "add", ".")
+	runGit(t, pushdir, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "new")
+	runGit(t, pushdir, "push", "origin", "after-restart")
+
+	reopened, err := NewManager(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.Clone(ctx, remote, "origin"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reopened.Resolve(ctx, "origin", "after-restart"); err != nil {
+		t.Fatalf("existing mirror was not refreshed: %v", err)
+	}
+}
+
+func TestManager_RejectsExistingMirrorForDifferentRemote(t *testing.T) {
+	ctx := context.Background()
+	firstRemote, _, _ := setupRemote(t)
+	secondRemote, _, _ := setupRemote(t)
+	root := t.TempDir()
+	first, err := NewManager(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Clone(ctx, firstRemote, "origin"); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := NewManager(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.Clone(ctx, secondRemote, "origin"); !errors.Is(err, ErrRemoteMismatch) {
+		t.Fatalf("Clone with different existing remote = %v, want ErrRemoteMismatch", err)
+	}
+}
+
 func TestManager_DirtyState(t *testing.T) {
 	ctx := context.Background()
 	remote, _, _ := setupRemote(t)
@@ -259,6 +313,47 @@ func TestManager_PathContainment(t *testing.T) {
 
 	if err := mgr.Remove(ctx, ws.Path, false); err != nil {
 		t.Fatalf("Remove recorded path = %v", err)
+	}
+}
+
+func TestManager_PathMethodsRejectSymlinkEscape(t *testing.T) {
+	mgr := newManager(t)
+	outside := t.TempDir()
+	link := filepath.Join(mgr.root, "workspaces", "escape")
+	if err := os.MkdirAll(filepath.Dir(link), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mgr.StatusByPath(context.Background(), link); !errors.Is(err, ErrNotManaged) {
+		t.Fatalf("StatusByPath symlink escape = %v, want ErrNotManaged", err)
+	}
+	if _, err := mgr.DiffByPath(context.Background(), link, "HEAD"); !errors.Is(err, ErrNotManaged) {
+		t.Fatalf("DiffByPath symlink escape = %v, want ErrNotManaged", err)
+	}
+	if _, err := mgr.HasUntrackedByPath(context.Background(), link); !errors.Is(err, ErrNotManaged) {
+		t.Fatalf("HasUntrackedByPath symlink escape = %v, want ErrNotManaged", err)
+	}
+}
+
+func TestManager_HasUntrackedByPath(t *testing.T) {
+	ctx := context.Background()
+	remote, _, _ := setupRemote(t)
+	mgr := newManager(t)
+	if err := mgr.Clone(ctx, remote, "origin"); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := mgr.Create(ctx, "origin", "master", "feature", "ws1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := mgr.HasUntrackedByPath(ctx, ws.Path); err != nil || got {
+		t.Fatalf("clean HasUntrackedByPath = %v, %v", got, err)
+	}
+	writeFile(t, filepath.Join(ws.Path, "new-untracked.txt"), "new")
+	if got, err := mgr.HasUntrackedByPath(ctx, ws.Path); err != nil || !got {
+		t.Fatalf("dirty HasUntrackedByPath = %v, %v", got, err)
 	}
 }
 
