@@ -101,6 +101,43 @@ func TestSearchThreadsPageHonorsHardMax(t *testing.T) {
 	}
 }
 
+func TestSearchThreadsPageAppliesMetadataFiltersAndBindsCursor(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, thread := range []Thread{
+		{Kind: ThreadKindIssue, Number: 1, State: "open", Title: "shared term", Author: "Alice", Labels: []string{"bug", "help wanted"}, SourceUpdatedAt: time.Unix(100, 0).UTC()},
+		{Kind: ThreadKindIssue, Number: 2, State: "closed", Title: "shared term", Author: "alice", Labels: []string{"bug"}, SourceUpdatedAt: time.Unix(200, 0).UTC()},
+		{Kind: ThreadKindIssue, Number: 3, State: "open", Title: "shared term", Author: "bob", Labels: []string{"bug"}, SourceUpdatedAt: time.Unix(300, 0).UTC()},
+	} {
+		thread.RepositoryID = repo.ID
+		thread.SourceCreatedAt = thread.SourceUpdatedAt
+		if _, err := c.UpsertThread(ctx, thread, `{}`); err != nil {
+			t.Fatalf("seed thread %d: %v", i, err)
+		}
+	}
+	filter := SearchFilter{State: "open", Labels: []string{"bug"}, UpdatedAfter: time.Unix(50, 0).UTC(), Limit: 1}
+	page, err := c.SearchThreadsPage(ctx, "term", filter)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(page.Threads) != 1 || page.Threads[0].Number != 1 || page.Total != 2 || page.NextCursor == "" {
+		t.Fatalf("page = %+v", page)
+	}
+	filter.Cursor = page.NextCursor
+	filter.Author = "bob"
+	if _, err := c.SearchThreadsPage(ctx, "term", filter); err == nil {
+		t.Fatal("cursor should be rejected when metadata filters change")
+	}
+	authorPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Author: "ALICE", Limit: 10})
+	if err != nil || len(authorPage.Threads) != 2 {
+		t.Fatalf("case-insensitive author filter = %+v, err=%v", authorPage, err)
+	}
+}
+
 func TestListRepositoriesPageReturnsNextCursorAndTotal(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)

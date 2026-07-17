@@ -126,11 +126,15 @@ type searchCmd struct {
 }
 
 type searchKindCmd struct {
-	Query  string `arg:"" name:"query" help:"Search query"`
-	Repo   string `name:"repo" help:"Restrict to repository OWNER/REPO"`
-	Limit  int    `name:"limit" default:"20" help:"Maximum number of results"`
-	Cursor string `name:"cursor" help:"Opaque cursor returned by the previous page"`
-	JSON   bool   `name:"json" help:"Print the result as JSON"`
+	Query        string   `arg:"" name:"query" help:"Search query"`
+	Repo         string   `name:"repo" help:"Restrict to repository OWNER/REPO"`
+	State        string   `name:"state" default:"all" enum:"open,closed,all" help:"Restrict thread state"`
+	Author       string   `name:"author" help:"Restrict thread author"`
+	Labels       []string `name:"label" help:"Require a label (repeatable)"`
+	UpdatedAfter string   `name:"updated-after" help:"Restrict source updates to RFC3339 timestamp or later"`
+	Limit        int      `name:"limit" default:"20" help:"Maximum number of results"`
+	Cursor       string   `name:"cursor" help:"Opaque cursor returned by the previous page"`
+	JSON         bool     `name:"json" help:"Print the result as JSON"`
 }
 
 type dossierCmd struct {
@@ -1500,7 +1504,10 @@ func (c *CLI) runSearch(ctx context.Context, command string, cmd *searchCmd) err
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown search kind: %s", kind))
 	}
-	opts := SearchOptions{Kind: kind, Repo: selected.Repo, Limit: selected.Limit, Cursor: selected.Cursor}
+	opts := SearchOptions{
+		Kind: kind, Repo: selected.Repo, State: selected.State, Author: selected.Author,
+		Labels: selected.Labels, Limit: selected.Limit, Cursor: selected.Cursor,
+	}
 	if opts.Limit <= 0 || opts.Limit > maxSearchLimit {
 		return NewCLIError(ExitUsage, fmt.Errorf("limit must be between 1 and %d", maxSearchLimit))
 	}
@@ -1508,6 +1515,13 @@ func (c *CLI) runSearch(ctx context.Context, command string, cmd *searchCmd) err
 		if _, err := parseRepo(opts.Repo); err != nil {
 			return NewCLIError(ExitUsage, fmt.Errorf("invalid --repo value: %w", err))
 		}
+	}
+	if selected.UpdatedAfter != "" {
+		updatedAfter, err := time.Parse(time.RFC3339, selected.UpdatedAfter)
+		if err != nil {
+			return NewCLIError(ExitUsage, fmt.Errorf("invalid --updated-after value: %w", err))
+		}
+		opts.UpdatedAfter = updatedAfter
 	}
 	res, err := c.svc.Search(ctx, selected.Query, opts)
 	if err != nil {

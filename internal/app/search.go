@@ -95,7 +95,7 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts cli.Searc
 		if query == "" {
 			return searchResult{Query: query, Total: 0, Matches: nil}, nil
 		}
-		return s.searchThreads(ctx, c, query, repoID, repoRef, kind, opts.Limit, opts.Cursor, now)
+		return s.searchThreads(ctx, c, query, repoID, repoRef, kind, opts, now)
 	}
 }
 
@@ -136,13 +136,10 @@ func (s *Service) resolveRepoFilter(ctx context.Context, c *corpus.Corpus, opts 
 	return repo.ID, ref, nil
 }
 
-func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query string, repoID int64, ref domain.RepoRef, kind string, limit int, cursor string, now time.Time) (searchResult, error) {
+func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query string, repoID int64, ref domain.RepoRef, kind string, opts cli.SearchOptions, now time.Time) (searchResult, error) {
 	filter := corpus.SearchFilter{
-		RepoID: repoID,
-		Repo:   ref.String(),
-		Kind:   kind,
-		Limit:  limit,
-		Cursor: cursor,
+		RepoID: repoID, Repo: ref.String(), Kind: kind, State: opts.State, Author: opts.Author,
+		Labels: opts.Labels, UpdatedAfter: opts.UpdatedAfter, Limit: opts.Limit, Cursor: opts.Cursor,
 	}
 	page, err := c.SearchThreadsPage(ctx, query, filter)
 	if err != nil {
@@ -339,6 +336,9 @@ func (s *Service) Search(ctx context.Context, query string, opts cli.SearchOptio
 			Repo:      cli.RepoRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo},
 			Title:     m.Title,
 			Number:    m.Number,
+			State:     m.State,
+			Author:    m.Author,
+			Labels:    m.Labels,
 			URL:       m.URL,
 			Score:     roundScore(m.Score),
 			Body:      m.Body,

@@ -7,16 +7,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 )
 
 // SearchFilter scopes a thread keyword search.
 type SearchFilter struct {
-	RepoID int64
-	Repo   string
-	Kind   string
-	Limit  int
-	Cursor string
+	RepoID       int64
+	Repo         string
+	Kind         string
+	State        string
+	Author       string
+	Labels       []string
+	UpdatedAfter time.Time
+	Limit        int
+	Cursor       string
 }
 
 // ThreadSearchPage is a paginated result of a thread keyword search.
@@ -64,7 +70,8 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 		return ThreadSearchPage{}, nil
 	}
 
-	cursor, err := c.decodeThreadCursor(filter.Cursor, query, filter.Repo, filter.Kind)
+	filterKey := threadFilterKey(filter)
+	cursor, err := c.decodeThreadCursor(filter.Cursor, query, filter.Repo, filter.Kind, filterKey)
 	if err != nil {
 		return ThreadSearchPage{}, err
 	}
@@ -84,6 +91,7 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 		sql += ` AND t.kind = ?`
 		args = append(args, filter.Kind)
 	}
+	sql, args = appendThreadMetadataFilters(sql, args, filter)
 	if cursor != nil {
 		sql += ` AND (threads_fts.rank > ? OR (threads_fts.rank = ? AND t.id > ?))`
 		args = append(args, cursor.Rank, cursor.Rank, cursor.ID)
@@ -107,12 +115,13 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 		page.Threads = threads[:filter.Limit]
 		last := page.Threads[len(page.Threads)-1]
 		page.NextCursor = encodeCursor(searchCursor{
-			Scope: "threads",
-			Query: query,
-			Repo:  filter.Repo,
-			Kind:  filter.Kind,
-			Rank:  last.Rank,
-			ID:    last.ID,
+			Scope:  "threads",
+			Query:  query,
+			Repo:   filter.Repo,
+			Kind:   filter.Kind,
+			Filter: filterKey,
+			Rank:   last.Rank,
+			ID:     last.ID,
 		})
 	}
 	if len(threads) > filter.Limit || filter.Cursor != "" {
@@ -138,6 +147,7 @@ func (c *Corpus) countThreadMatches(ctx context.Context, ftsQuery string, filter
 		sql += ` AND t.kind = ?`
 		args = append(args, filter.Kind)
 	}
+	sql, args = appendThreadMetadataFilters(sql, args, filter)
 	var total int
 	if err := c.db.QueryRowContext(ctx, sql, args...).Scan(&total); err != nil {
 		return 0, fmt.Errorf("count threads: %w", err)
@@ -145,7 +155,7 @@ func (c *Corpus) countThreadMatches(ctx context.Context, ftsQuery string, filter
 	return total, nil
 }
 
-func (c *Corpus) decodeThreadCursor(cursor, query, repo, kind string) (*searchCursor, error) {
+func (c *Corpus) decodeThreadCursor(cursor, query, repo, kind, filter string) (*searchCursor, error) {
 	if cursor == "" {
 		return nil, nil
 	}
@@ -153,10 +163,43 @@ func (c *Corpus) decodeThreadCursor(cursor, query, repo, kind string) (*searchCu
 	if err != nil {
 		return nil, err
 	}
-	if sc.Scope != "threads" || sc.Query != query || sc.Repo != repo || sc.Kind != kind {
+	if sc.Scope != "threads" || sc.Query != query || sc.Repo != repo || sc.Kind != kind || sc.Filter != filter {
 		return nil, errors.New("invalid search cursor")
 	}
 	return &sc, nil
+}
+
+func appendThreadMetadataFilters(query string, args []any, filter SearchFilter) (string, []any) {
+	if filter.State != "" && filter.State != "all" {
+		query += ` AND t.state = ?`
+		args = append(args, filter.State)
+	}
+	if filter.Author != "" {
+		query += ` AND lower(t.author) = lower(?)`
+		args = append(args, filter.Author)
+	}
+	for _, label := range filter.Labels {
+		encoded, _ := json.Marshal(label)
+		query += ` AND instr(lower(t.labels), lower(?)) > 0`
+		args = append(args, string(encoded))
+	}
+	if !filter.UpdatedAfter.IsZero() {
+		query += ` AND t.source_updated_at >= ?`
+		args = append(args, filter.UpdatedAfter.UTC().Unix())
+	}
+	return query, args
+}
+
+func threadFilterKey(filter SearchFilter) string {
+	labels := append([]string(nil), filter.Labels...)
+	for i := range labels {
+		labels[i] = strings.ToLower(strings.TrimSpace(labels[i]))
+	}
+	slices.Sort(labels)
+	return strings.Join([]string{
+		strings.ToLower(filter.State), strings.ToLower(filter.Author), strings.Join(labels, ","),
+		fmt.Sprint(filter.UpdatedAfter.UTC().Unix()),
+	}, "|")
 }
 
 // scanThreadsWithRank reads threads and the FTS5 rank value used for cursor
@@ -209,6 +252,7 @@ type searchCursor struct {
 	Query     string  `json:"q"`
 	Repo      string  `json:"r,omitempty"`
 	Kind      string  `json:"k,omitempty"`
+	Filter    string  `json:"f,omitempty"`
 	Rank      float64 `json:"rank,omitempty"`
 	UpdatedAt int64   `json:"u,omitempty"`
 	ID        int64   `json:"id"`

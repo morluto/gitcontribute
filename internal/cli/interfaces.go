@@ -334,10 +334,14 @@ type OpportunityListResult struct {
 
 // SearchOptions carries parameters for a local corpus search.
 type SearchOptions struct {
-	Kind   string
-	Repo   string
-	Limit  int
-	Cursor string
+	Kind         string
+	Repo         string
+	State        string
+	Author       string
+	Labels       []string
+	UpdatedAfter time.Time
+	Limit        int
+	Cursor       string
 }
 
 // InitResult is the result of initializing a local corpus.
@@ -367,6 +371,9 @@ type SearchMatch struct {
 	Repo      RepoRef  `json:"repo"`
 	Title     string   `json:"title"`
 	Number    int      `json:"number,omitempty"`
+	State     string   `json:"state,omitempty"`
+	Author    string   `json:"author,omitempty"`
+	Labels    []string `json:"labels,omitempty"`
 	URL       string   `json:"url,omitempty"`
 	Score     float64  `json:"score"`
 	Body      string   `json:"-"`
