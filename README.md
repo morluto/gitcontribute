@@ -207,10 +207,20 @@ MCP capabilities are deliberately separate:
 
 | Capability | Examples |
 | --- | --- |
-| **Offline reads** | Search, inspect repositories and threads, build research briefs, read dossiers, explain matches, inspect evidence, opportunities, and readiness checks. |
+| **Offline reads** | Search, inspect repositories and threads, build research briefs, read dossiers, explain matches, inspect evidence, opportunities, readiness checks, and workflow resources. |
 | **Network reads** | Sync repositories, hydrate threads, start crawls, and acquire workspaces. |
 | **Local writes** | Start investigations, record hypotheses, promote opportunities, define validations, and prepare drafts. |
 | **Execution** | Run a validation only when the request includes `execute: true`. |
+
+Contribution workflow resources and prompts are available for agents:
+
+- `get_readiness` and `gitcontribute://readiness/<opportunity-id>` expose the
+  same offline readiness report as the CLI.
+- `gitcontribute://workflow/contribution/<opportunity-id>` links the local
+  opportunity, evidence, readiness report, and safe workflow prompts.
+- Prompts such as `review_contribution_readiness` instruct agents to treat
+  repository and GitHub-sourced text as untrusted data and to ask before any
+  network read, local write, or validation execution.
 
 Resources are published under `gitcontribute://` and `github-index://` URI
 schemes. See [the architecture guide](docs/architecture.md) for the complete

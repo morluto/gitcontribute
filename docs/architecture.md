@@ -35,6 +35,8 @@ The dependency direction is toward product-owned contracts:
   runner are adapters for external capabilities.
 - `internal/cli`, `internal/mcpserver`, and `internal/tui` translate user or
   protocol input into application calls. They do not own product rules.
+  MCP prompts are static workflow guidance; they cannot grant new authority or
+  turn repository content into instructions.
 
 Third-party SDK and database types terminate inside their adapters. The
 application and domain packages expose product-owned values and interfaces.
@@ -186,6 +188,10 @@ unresolved contradicting evidence, should block. Missing guidance, missing
 coverage, stale evidence, or incomplete validation usually remain `warn` or
 `unknown`. Readiness must not fetch GitHub, execute validation, mutate
 opportunities, or inspect repository-controlled code while evaluating a gate.
+MCP exposes the same report as an offline tool/resource and adds workflow
+prompts that point agents at local resources first. Those prompts must preserve
+the same side-effect boundary: they may suggest explicit tools, but they cannot
+authorize network reads, local writes, process execution, or GitHub mutation.
 
 ## Schema changes
 
