@@ -43,7 +43,7 @@ func applyFacet(t *testing.T, ctx context.Context, c *corpus.Corpus, repoID, thr
 	if err != nil {
 		t.Fatalf("marshal facet payload: %v", err)
 	}
-	if _, err := c.ApplyFacetObservation(ctx, repoID, &threadID, facet, sourceUpdated, string(payloadJSON)); err != nil {
+	if err := c.ApplyFacetObservationSet(ctx, repoID, &threadID, facet, []corpus.FacetObservationInput{{SourceUpdatedAt: sourceUpdated, Payload: string(payloadJSON)}}, true, 0); err != nil {
 		t.Fatalf("apply facet %s: %v", facet, err)
 	}
 }
@@ -84,6 +84,11 @@ func TestComputeHealthMetrics(t *testing.T) {
 		SourceCreatedAt: now.Add(-20 * 24 * time.Hour),
 		SourceUpdatedAt: now.Add(-5 * 24 * time.Hour),
 		ClosedAt:        now.Add(-5 * 24 * time.Hour),
+	}, "CONTRIBUTOR")
+
+	_ = upsertThread(t, ctx, c, repo.ID, corpus.Thread{
+		Kind: corpus.ThreadKindIssue, Number: 3, State: "closed", Title: "outside window",
+		Author: "old", SourceCreatedAt: now.Add(-60 * 24 * time.Hour), SourceUpdatedAt: now.Add(-50 * 24 * time.Hour),
 	}, "CONTRIBUTOR")
 
 	openPR := upsertThread(t, ctx, c, repo.ID, corpus.Thread{

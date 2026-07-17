@@ -55,7 +55,7 @@ func TestRepositoryHealth(t *testing.T) {
 	payload, _ := json.Marshal([]github.Review{
 		{ID: 1, Author: "maintainer", AuthorAssociation: "MEMBER", SubmittedAt: now.Add(-24 * time.Hour), State: "COMMENTED"},
 	})
-	if _, err := svc.corpus.ApplyFacetObservation(ctx, repo.ID, &openPR.ID, "pr_reviews", now.Add(-24*time.Hour), string(payload)); err != nil {
+	if err := svc.corpus.ApplyFacetObservationSet(ctx, repo.ID, &openPR.ID, "pr_reviews", []corpus.FacetObservationInput{{SourceUpdatedAt: now.Add(-24 * time.Hour), Payload: string(payload)}}, true, 0); err != nil {
 		t.Fatalf("apply pr reviews: %v", err)
 	}
 

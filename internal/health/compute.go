@@ -111,7 +111,7 @@ func Compute(ctx context.Context, c *corpus.Corpus, repoID int64, opts Options) 
 
 func resolveWindowStart(startOpt time.Time, threads []corpus.Thread, repo *corpus.Repository) (time.Time, string) {
 	if !startOpt.IsZero() {
-		return startOpt, fmt.Sprintf("%s to %s", startOpt.Format(time.RFC3339), repo.SourceUpdatedAt.Format(time.RFC3339))
+		return startOpt, fmt.Sprintf("since %s", startOpt.Format(time.RFC3339))
 	}
 	earliest := repo.SourceCreatedAt
 	for _, t := range threads {
@@ -128,7 +128,15 @@ func resolveWindowStart(startOpt time.Time, threads []corpus.Thread, repo *corpu
 func countThreads(threads []corpus.Thread, window Window, truncated bool) (IssueMetrics, PullRequestMetrics) {
 	issueMetrics := IssueMetrics{Window: window}
 	prMetrics := PullRequestMetrics{Window: window}
+	missingCreated := false
 	for _, t := range threads {
+		if t.SourceCreatedAt.IsZero() {
+			missingCreated = true
+			continue
+		}
+		if !withinWindow(t.SourceCreatedAt, window.Start, window.End) {
+			continue
+		}
 		switch t.Kind {
 		case corpus.ThreadKindIssue:
 			issueMetrics.SampleSize++
@@ -151,6 +159,8 @@ func countThreads(threads []corpus.Thread, window Window, truncated bool) (Issue
 	coverage := "complete"
 	if truncated {
 		coverage = "partial (thread list may be truncated)"
+	} else if missingCreated {
+		coverage = "partial (some threads lack a created timestamp)"
 	}
 	issueMetrics.Coverage = coverage
 	prMetrics.Coverage = coverage
@@ -498,7 +508,7 @@ func parseFacetEvents(payload, facet string) ([]facetEvent, error) {
 }
 
 func buildResponseMetric(samples []float64, window Window, coverage, source string) ResponseTimeMetric {
-	m := ResponseTimeMetric{Window: window, Coverage: coverage, SampleSize: len(samples)}
+	m := ResponseTimeMetric{Window: window, Coverage: coverage, SampleSize: len(samples), Source: source}
 	if len(samples) == 0 {
 		return m
 	}
