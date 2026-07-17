@@ -6,9 +6,11 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
+	"github.com/morluto/gitcontribute/internal/corpus"
 )
 
 func TestMetadataIsLocalAndDoesNotCreateCorpus(t *testing.T) {
@@ -97,6 +99,16 @@ func TestControlStatusUsesLocalCorpus(t *testing.T) {
 	if _, err := svc.Init(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	c, err := svc.openCorpus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RecordRateLimitObservation(context.Background(), corpus.RateLimitObservation{
+		Attempt: 1, StatusCode: 200, Resource: "core", Limit: 5000, Remaining: 4999,
+		ObservedAt: time.Unix(100, 0).UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := svc.ControlStatus(context.Background())
 	if err != nil {
@@ -107,6 +119,9 @@ func TestControlStatusUsesLocalCorpus(t *testing.T) {
 	}
 	if result.Counts.Repositories != 0 || len(result.Warnings) == 0 {
 		t.Fatalf("unexpected empty-corpus status: %+v", result)
+	}
+	if len(result.RateLimits) != 1 || result.RateLimits[0].Resource != "core" || result.RateLimits[0].Remaining != 4999 {
+		t.Fatalf("unexpected rate-limit status: %+v", result.RateLimits)
 	}
 }
 

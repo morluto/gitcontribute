@@ -44,3 +44,32 @@ func TestRecordRateLimitObservationStoresMissingResetAsZero(t *testing.T) {
 		t.Fatalf("reset_at = %d, want 0", resetAt)
 	}
 }
+
+func TestLatestRateLimitObservationsReturnsNewestPerResource(t *testing.T) {
+	c, _ := openTestCorpus(t)
+	ctx := context.Background()
+	base := time.Unix(100, 0).UTC()
+	for _, observation := range []RateLimitObservation{
+		{Attempt: 1, Resource: "core", Remaining: 10, ObservedAt: base},
+		{Attempt: 1, Resource: "search", Remaining: 20, ObservedAt: base.Add(time.Second)},
+		{Attempt: 1, Resource: "core", Remaining: 9, ResetAt: base.Add(time.Hour), ObservedAt: base.Add(2 * time.Second)},
+	} {
+		if err := c.RecordRateLimitObservation(ctx, observation); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := c.LatestRateLimitObservations(ctx, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("observations = %d, want 2", len(got))
+	}
+	if got[0].Resource != "core" || got[0].Remaining != 9 || got[0].ResetAt.IsZero() {
+		t.Fatalf("newest core observation = %+v", got[0])
+	}
+	if got[1].Resource != "search" || got[1].Remaining != 20 {
+		t.Fatalf("search observation = %+v", got[1])
+	}
+}

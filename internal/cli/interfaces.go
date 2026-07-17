@@ -98,13 +98,24 @@ type ControlCounts struct {
 }
 
 type ControlStatusResult struct {
-	Healthy        bool          `json:"healthy"`
-	Corpus         string        `json:"corpus"`
-	Version        string        `json:"version"`
-	SchemaVersion  int64         `json:"schema_version"`
-	Counts         ControlCounts `json:"counts"`
-	FreshestSource string        `json:"freshest_source,omitempty"`
-	Warnings       []string      `json:"warnings"`
+	Healthy        bool             `json:"healthy"`
+	Corpus         string           `json:"corpus"`
+	Version        string           `json:"version"`
+	SchemaVersion  int64            `json:"schema_version"`
+	Counts         ControlCounts    `json:"counts"`
+	FreshestSource string           `json:"freshest_source,omitempty"`
+	RateLimits     []RateLimitState `json:"rate_limits,omitempty"`
+	Warnings       []string         `json:"warnings"`
+}
+
+type RateLimitState struct {
+	Resource   string `json:"resource"`
+	Limit      int    `json:"limit"`
+	Remaining  int    `json:"remaining"`
+	Used       int    `json:"used"`
+	ResetAt    string `json:"reset_at,omitempty"`
+	StatusCode int    `json:"status_code"`
+	ObservedAt string `json:"observed_at"`
 }
 
 type DoctorCheck struct {

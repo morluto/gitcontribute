@@ -156,6 +156,13 @@ func controlStatusHuman(r *ControlStatusResult) string {
 	if r.FreshestSource != "" {
 		fmt.Fprintf(&b, "\nFreshest source: %s", r.FreshestSource)
 	}
+	for _, rate := range r.RateLimits {
+		fmt.Fprintf(&b, "\nGitHub rate limit %s: %d/%d remaining (observed %s)",
+			rate.Resource, rate.Remaining, rate.Limit, rate.ObservedAt)
+		if rate.ResetAt != "" {
+			fmt.Fprintf(&b, ", resets %s", rate.ResetAt)
+		}
+	}
 	for _, warning := range r.Warnings {
 		fmt.Fprintf(&b, "\nWarning: %s", warning)
 	}

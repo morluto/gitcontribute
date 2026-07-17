@@ -118,6 +118,25 @@ func (s *Service) ControlStatus(ctx context.Context) (*cli.ControlStatusResult, 
 		return nil, err
 	}
 	warnings := make([]string, 0, 4)
+	rateObservations, err := c.LatestRateLimitObservations(ctx, 4)
+	if err != nil {
+		return nil, err
+	}
+	rateLimits := make([]cli.RateLimitState, len(rateObservations))
+	for i, observation := range rateObservations {
+		resource := observation.Resource
+		if resource == "" {
+			resource = "unknown"
+		}
+		rateLimits[i] = cli.RateLimitState{
+			Resource: resource, Limit: observation.Limit, Remaining: observation.Remaining,
+			Used: observation.Used, ResetAt: formatTime(observation.ResetAt),
+			StatusCode: observation.StatusCode, ObservedAt: formatTime(observation.ObservedAt),
+		}
+		if observation.Limit > 0 && observation.Remaining == 0 && observation.ResetAt.After(s.now()) {
+			warnings = append(warnings, fmt.Sprintf("GitHub %s rate limit resets at %s", resource, formatTime(observation.ResetAt)))
+		}
+	}
 	if stats.Repositories == 0 {
 		warnings = append(warnings, "corpus has no repositories")
 	}
@@ -144,6 +163,7 @@ func (s *Service) ControlStatus(ctx context.Context) (*cli.ControlStatusResult, 
 			ActiveJobs:    stats.ActiveJobs,
 		},
 		FreshestSource: formatTime(stats.Freshest),
+		RateLimits:     rateLimits,
 		Warnings:       warnings,
 	}, nil
 }
