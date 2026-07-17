@@ -304,7 +304,7 @@ func computeStaleSignals(ctx context.Context, c *corpus.Corpus, threads []corpus
 			continue
 		}
 		out.SampleSize++
-		latest, eventCount, hasSourceUpdate, err := latestActivity(ctx, c, t)
+		latest, eventCount, err := latestActivity(ctx, c, t)
 		if err != nil {
 			return out, err
 		}
@@ -320,7 +320,6 @@ func computeStaleSignals(ctx context.Context, c *corpus.Corpus, threads []corpus
 		} else {
 			out.ActiveCount++
 		}
-		_ = hasSourceUpdate
 	}
 	switch {
 	case out.SampleSize == 0:
@@ -333,7 +332,7 @@ func computeStaleSignals(ctx context.Context, c *corpus.Corpus, threads []corpus
 	return out, nil
 }
 
-func latestActivity(ctx context.Context, c *corpus.Corpus, t corpus.Thread) (time.Time, int, bool, error) {
+func latestActivity(ctx context.Context, c *corpus.Corpus, t corpus.Thread) (time.Time, int, error) {
 	var latest time.Time
 	if !t.SourceUpdatedAt.IsZero() {
 		latest = t.SourceUpdatedAt
@@ -343,12 +342,12 @@ func latestActivity(ctx context.Context, c *corpus.Corpus, t corpus.Thread) (tim
 	for _, facet := range facets {
 		obs, err := c.ListFacetObservations(ctx, t.RepositoryID, &t.ID, facet)
 		if err != nil {
-			return time.Time{}, 0, false, fmt.Errorf("list %s: %w", facet, err)
+			return time.Time{}, 0, fmt.Errorf("list %s: %w", facet, err)
 		}
 		for _, o := range obs {
 			events, err := parseFacetEvents(o.Payload, facet)
 			if err != nil {
-				return time.Time{}, 0, false, err
+				return time.Time{}, 0, err
 			}
 			for _, e := range events {
 				eventCount++
@@ -358,7 +357,7 @@ func latestActivity(ctx context.Context, c *corpus.Corpus, t corpus.Thread) (tim
 			}
 		}
 	}
-	return latest, eventCount, !t.SourceUpdatedAt.IsZero(), nil
+	return latest, eventCount, nil
 }
 
 func computeResponseTimes(ctx context.Context, c *corpus.Corpus, threads []corpus.Thread, start, end time.Time, window Window) (ResponseTimeDistributions, error) {
