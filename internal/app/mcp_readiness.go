@@ -9,7 +9,7 @@ import (
 
 // Readiness reads a local contribution readiness report through MCP.
 func (r *MCPReader) Readiness(ctx context.Context, in mcpserver.ReadinessInput) (mcpserver.ReadinessOutput, error) {
-	report, err := r.Service.OpportunityReadiness(ctx, in.OpportunityID)
+	report, err := r.OpportunityReadiness(ctx, in.OpportunityID)
 	if err != nil {
 		return mcpserver.ReadinessOutput{}, err
 	}
