@@ -1,99 +1,250 @@
+<div align="center">
+
 # GitContribute
 
-GitContribute is a local-first GitHub contribution research workbench. It keeps a
-durable SQLite corpus of repositories, issues, pull requests, reviews, code
-snapshots, and your own research artifacts so you and your agents can discover,
-investigate, validate, and prepare focused open-source contributions.
+### Find better open-source contributions—with evidence, not guesswork.
 
-Network access is explicit and read-only: the CLI and MCP surface fetch data only
-when you ask them to. Search and inspection commands read from the local corpus.
+GitContribute is a local-first research workbench for discovering, investigating,
+validating, and preparing focused GitHub contributions.
 
-The [architecture guide](docs/architecture.md) explains package boundaries,
-persistence invariants, and side-effect rules. See
-[CONTRIBUTING.md](CONTRIBUTING.md) for development and testing guidance.
+[![CI](https://github.com/morluto/gitcontribute/actions/workflows/ci.yml/badge.svg)](https://github.com/morluto/gitcontribute/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/gitcontribute?logo=npm&color=CB3837)](https://www.npmjs.com/package/gitcontribute)
+[![Go](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![License](https://img.shields.io/github/license/morluto/gitcontribute)](LICENSE)
+[![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-5C6AC4)](#-platform-support)
 
-## Install
+[Quick start](#-quick-start) · [How it works](#-how-it-works) · [CLI guide](#-cli-guide) · [MCP](#-use-with-ai-agents) · [Safety](#-safety-by-design) · [Contributing](CONTRIBUTING.md)
 
-The recommended installation and onboarding command requires Node.js 18 or
-newer. It runs the native GitContribute binary bundled in the npm package; Go
-and a C toolchain are not required.
+</div>
+
+---
+
+> [!IMPORTANT]
+> GitContribute never writes to GitHub. It syncs public or authenticated read-only
+> data, keeps research on your machine, and prepares local drafts for you to review.
+
+## Why GitContribute?
+
+Finding an issue is easy. Finding a contribution that is useful, unclaimed,
+appropriately scoped, and backed by evidence is the hard part.
+
+GitContribute gives developers and coding agents a durable SQLite corpus of
+repositories, issues, pull requests, reviews, code snapshots, and research
+artifacts. Network access is always explicit. Once data is synced, search,
+inspection, health analysis, dossiers, and investigations run entirely offline.
+
+| | Capability | What it gives you |
+| :---: | --- | --- |
+| 🔎 | **Typed offline search** | Search repositories, issues, PRs, threads, and indexed code with transparent ranking. |
+| 🗂️ | **Durable research corpus** | Keep observations, coverage, investigations, evidence, and outcomes in local SQLite. |
+| 🧭 | **Contribution workflow** | Move from hypothesis to opportunity, workspace, validation, and a prepared issue, PR, or review. |
+| 🤖 | **Agent-ready MCP server** | Give Codex or Claude Code structured tools and resources with explicit capability boundaries. |
+| 🛡️ | **Safe by default** | Separate network reads, local writes, process execution, and GitHub mutation. |
+
+## ⚡ Quick start
+
+Run the guided setup with Node.js 18 or newer:
 
 ```sh
 npx gitcontribute@latest setup
 ```
 
-Install a persistent shell command instead:
+Then sync a repository and search the local corpus:
+
+```sh
+npx gitcontribute@latest sync owner/repo
+npx gitcontribute@latest search threads "connection timeout" \
+  --repo owner/repo --json
+npx gitcontribute@latest dossier build owner/repo --json
+```
+
+`setup` initializes the corpus, helps select a GitHub authentication source,
+and can register the MCP server with Codex and Claude Code. Adding a repository
+during setup does **not** contact GitHub or begin a sync.
+
+<details>
+<summary><strong>Other installation options</strong></summary>
+
+### Install a persistent command
 
 ```sh
 npm install --global gitcontribute@latest
 gitcontribute setup
 ```
 
-Projects that want to pin the CLI version can install it as a development
-dependency and invoke it through `npx` or package scripts:
+### Pin a project version
 
 ```sh
 npm install --save-dev gitcontribute
 npx gitcontribute setup --codex --yes
 ```
 
-The npm package has no install lifecycle and does not download an executable at
-install time. It contains native binaries for macOS ARM64/x64, Linux
-ARM64/x64, and Windows x64.
+The npm package has no install lifecycle and performs no download during
+installation. Native binaries are included for macOS ARM64/x64, Linux ARM64/x64,
+and Windows x64.
 
-Developers with Go 1.26 or newer can install from source or build a checkout:
+### Build from source
+
+Developers with Go 1.26 or newer can install or build the CLI directly:
 
 ```sh
 go install github.com/morluto/gitcontribute/cmd/gitcontribute@latest
 go build -o gitcontribute ./cmd/gitcontribute
 ```
 
-You also need a `git` executable. Optional helpers that the CLI can use:
+</details>
 
-- `gh` for the `gh auth token` authentication source.
-- `ripgrep` (`rg`) for an extra `doctor` check.
+You need `git`. The `gh` CLI is optional and can provide authentication through
+`gh auth token`; `ripgrep` is optional and adds an extra `doctor` check.
 
-## Quick start
+## 🧩 How it works
 
-```sh
-npx gitcontribute@latest setup
-npx gitcontribute@latest sync owner/repo
-npx gitcontribute@latest search threads "connection timeout" --repo owner/repo --json
-npx gitcontribute@latest dossier build owner/repo --json
+```text
+ GitHub read APIs                  Local checkout
+       │                                │
+       │ explicit sync / hydrate        │ explicit index / acquire
+       ▼                                ▼
+  ┌──────────────────────────────────────────┐
+  │          Local SQLite corpus             │
+  │ observations · projections · coverage   │
+  │ investigations · evidence · outcomes    │
+  └────────────────────┬─────────────────────┘
+                       │ offline reads
+          ┌────────────┼─────────────┐
+          ▼            ▼             ▼
+       CLI / TUI    MCP agents    JSON exports
 ```
 
-Run `gitcontribute --help` and `gitcontribute <command> --help` for full flag
-reference.
+### 1. Discover
 
-## Initialization, configuration, and authentication
+Track explicit repositories, GitHub search results, or GH Archive event streams.
+Sync only when you ask, then search locally as often as you like.
 
-`gitcontribute setup` is the normal entry point. It initializes the local
-corpus, selects a GitHub authentication source, and registers the MCP server
-with Codex and/or Claude Code. It remains local-only: adding `--repo owner/repo`
-creates a discovery source but does not contact GitHub or start a sync.
+```sh
+gitcontribute source add repos --name my-go "golang/go" "cli/cli" --json
+gitcontribute crawl my-go --since 720h --budget 500 --json
+gitcontribute search issues "data race" --repo golang/go --state open --json
+gitcontribute search code "context.WithTimeout" --repo golang/go
+```
+
+### 2. Investigate
+
+Build a dossier, inspect repository health, record a hypothesis, and check for
+duplicate or competing work before committing time.
+
+```sh
+gitcontribute dossier build owner/repo
+gitcontribute health owner/repo --json
+gitcontribute investigation start owner/repo --json
+gitcontribute hypothesis add --title="Fix retry timeout" \
+  --description="Reproduce and isolate the timeout." \
+  --category=bug <investigation-id>
+gitcontribute duplicates check <hypothesis-id>
+gitcontribute collisions check <hypothesis-id>
+```
+
+### 3. Validate
+
+Promote promising research into an opportunity, create an isolated worktree,
+record evidence, and compare a baseline with your candidate change.
+
+```sh
+gitcontribute opportunity promote --problem="Retry can hang indefinitely" \
+  --scope=small --impact="reduces flakes" --effort=1h \
+  --confidence=0.8 <hypothesis-id>
+gitcontribute workspace create <investigation-id>
+gitcontribute validation define --kind=test --command="go test ./..." \
+  --working-dir=/path/to/workspace <investigation-id>
+gitcontribute validation run <validation-id> --kind=base --execute
+gitcontribute validation run <validation-id> --kind=candidate --execute
+gitcontribute validation compare <base-run-id> <candidate-run-id>
+```
+
+### 4. Prepare
+
+Create a local contribution draft from the evidence and workspace diff:
+
+```sh
+gitcontribute prepare issue <opportunity-id>
+gitcontribute prepare pr --approach="Bound retries with context" \
+  --workspace <workspace-id> <opportunity-id>
+gitcontribute prepare review <opportunity-id>
+```
+
+Nothing is posted. You decide what leaves your machine.
+
+## 🤖 Use with AI agents
+
+The MCP server gives agents structured access to the same corpus and workflow:
+
+```sh
+gitcontribute setup --codex --yes
+gitcontribute setup --all-clients --yes
+```
+
+Or start the stdio server directly:
+
+```sh
+gitcontribute mcp serve --transport=stdio
+```
+
+MCP capabilities are deliberately separate:
+
+| Capability | Examples |
+| --- | --- |
+| **Offline reads** | Search, inspect repositories and threads, read dossiers, explain matches, inspect evidence and opportunities. |
+| **Network reads** | Sync repositories, hydrate threads, start crawls, and acquire workspaces. |
+| **Local writes** | Start investigations, record hypotheses, promote opportunities, define validations, and prepare drafts. |
+| **Execution** | Run a validation only when the request includes `execute: true`. |
+
+Resources are published under `gitcontribute://` and `github-index://` URI
+schemes. See [the architecture guide](docs/architecture.md) for the complete
+application and adapter boundaries.
+
+## 🛡️ Safety by design
+
+| Operation | Network | Local write | Runs a process | GitHub write |
+| --- | :---: | :---: | :---: | :---: |
+| Search, health, dossier inspection | — | — | — | — |
+| Investigations, evidence, lenses | — | ✓ | — | — |
+| Sync, crawl, hydrate | ✓ | ✓ | — | — |
+| Acquire or create a workspace | remote-dependent | ✓ | `git` only | — |
+| Validation with explicit execution | — by default | ✓ | ✓ | — |
+
+- **No GitHub writes.** GitContribute does not open issues, create pull requests,
+  push commits, or mutate GitHub.
+- **No hidden network access.** Corpus reads never fetch data.
+- **No hosted service or telemetry.** Your corpus and research remain local.
+- **No automatic repository execution.** Crawling and indexing never execute
+  repository-controlled code.
+- **No implied sandbox.** Explicit validation commands run on your host with the
+  permissions of your user and only the environment variables you allowlist.
+- **No opaque semantic ranking.** Search uses SQLite FTS5 and reports signals
+  such as text matches, freshness, and coverage.
+
+## 📚 CLI guide
+
+The sections below are a task-oriented reference. Run `gitcontribute --help` or
+`gitcontribute <command> --help` for every flag.
+
+<details>
+<summary><strong>Setup, configuration, and authentication</strong></summary>
 
 ```sh
 gitcontribute setup                              # interactive
 gitcontribute setup --codex --yes               # configure Codex
-gitcontribute setup --all-clients --yes          # configure every supported client
+gitcontribute setup --all-clients --yes          # configure supported clients
 gitcontribute setup --codex --mcp-version latest --yes
 gitcontribute setup --token-source env \
   --token-source-key GITHUB_TOKEN --yes
 gitcontribute setup --codex --dry-run --json     # inspect without writing
-gitcontribute remove --all-clients --yes         # remove only MCP registrations
-gitcontribute upgrade --check                    # compare with the latest npm release
-gitcontribute upgrade --yes                      # update a global npm installation
+gitcontribute remove --all-clients --yes         # remove MCP registrations only
+gitcontribute upgrade --check
+gitcontribute upgrade --yes
 ```
 
-When setup runs through `npx`, client configuration launches a released npm
-version rather than recording an ephemeral npm-cache path. `remove` never
-deletes the corpus or GitContribute application configuration. See
-[the onboarding design](docs/onboarding.md) for the complete contract.
-
-`gitcontribute init` creates the default corpus database and directories if they
-do not exist. It does not fetch anything from GitHub.
-
-`gitcontribute configure` edits `config.toml` atomically. Useful options include:
+`gitcontribute init` creates the default database and directories without
+contacting GitHub. `gitcontribute configure` updates `config.toml` atomically:
 
 ```sh
 gitcontribute configure --database /path/to/corpus.db
@@ -102,473 +253,190 @@ gitcontribute configure --token-source gh-cli
 gitcontribute configure --output-format json
 ```
 
-Supported `token-source` methods:
+Authentication sources are `none`, `env`, `gh-cli`, and `keyring`. Tokens are
+resolved at runtime and are never stored in the corpus or logs. Use
+`gitcontribute status`, `metadata`, and `doctor` to inspect the local setup.
 
-- `none` — no token (public reads, lower rate limits).
-- `env` — read from the environment variable named by `token-source-key`
-  (defaults to `GITHUB_TOKEN`).
-- `gh-cli` — run `gh auth token`.
-- `keyring` — read from the OS credential store; `token-source-key` is the
-  keyring account name.
+See [the onboarding design](docs/onboarding.md) for the full contract and
+environment-variable reference.
 
-Tokens are resolved at runtime and are never written into the corpus or logs.
-Runtime environment variables override config without persisting it:
-`GITCONTRIBUTE_DATABASE`, `GITCONTRIBUTE_TOKEN_SOURCE_METHOD`,
-`GITCONTRIBUTE_TOKEN_SOURCE_KEY`, `GITCONTRIBUTE_CRAWL_BUDGET`,
-`GITCONTRIBUTE_CRAWL_CONCURRENCY`, `GITCONTRIBUTE_CRAWL_RETRY_LIMIT`,
-`GITCONTRIBUTE_CRAWL_TIMEOUT`, `GITCONTRIBUTE_OUTPUT_FORMAT`, and
-`GITCONTRIBUTE_OUTPUT_MAX_RESULTS`.
+</details>
 
-Use `gitcontribute status`, `gitcontribute metadata`, and `gitcontribute doctor`
-to inspect the corpus and local environment. Status includes the latest observed
-GitHub rate-limit state; `doctor` redacts credential details in its output.
+<details>
+<summary><strong>Sources, crawling, sync, and hydration</strong></summary>
 
-## Discovery sources
+Add a source:
 
-Sources determine what you track. You can add three kinds of discovery sources
-and then `crawl` or `tail` them.
+```sh
+gitcontribute source add repos --name my-go "golang/go" "cli/cli" --json
+gitcontribute source add search --name go-network \
+  --query "language:go stars:>100" --json
+gitcontribute source add gharchive --name golang-events \
+  --events "IssuesEvent,PullRequestEvent" --json
+```
 
-- Explicit repos:
-  ```sh
-  gitcontribute source add repos --name my-go "golang/go" "cli/cli" --json
-  ```
-  A source can also be read from a file or stdin (`--file -`).
-
-- GitHub repository search:
-  ```sh
-  gitcontribute source add search --name go-network \
-      --query "language:go stars:>100" --json
-  ```
-
-- GH Archive:
-  ```sh
-  gitcontribute source add gharchive --name golang-events \
-      --events "IssuesEvent,PullRequestEvent" --json
-  ```
-  `gharchive` supports `--events all` to allow all known event types. Each crawl
-  or tail run is idempotent and skips hours that have already been imported.
-
-Run a source once or continuously:
+Run it once or continuously:
 
 ```sh
 gitcontribute crawl golang-events --since 720h --budget 500 --json
 gitcontribute tail golang-events --since 2h --budget 500 --interval 1h
 ```
 
-`crawl` and `tail` respect the configured request budget. `tail` loops until you
-interrupt it; use `--once` for a single iteration.
-
-## Repository archive sync and hydration
-
-### Sync
+Sync and selectively hydrate repository archives:
 
 ```sh
-gitcontribute sync owner/repo                  # fetch all issues and PRs
+gitcontribute sync owner/repo
 gitcontribute archive sync owner/repo --since 168h --state open
 gitcontribute archive sync owner/repo --numbers 42,108
-gitcontribute archive refresh owner/repo        # full all-state archive refresh
-```
-
-`sync` fetches repository metadata and lists issues and pull requests using the
-GitHub API. `archive sync` offers bounded incremental refreshes; `archive
-refresh` performs a full all-state list refresh. Synced data is written as
-immutable observations behind a durable SQLite corpus. Facet coverage is recorded
-so later commands can tell how fresh the data is.
-
-### Hydrate
-
-```sh
+gitcontribute archive refresh owner/repo
 gitcontribute archive hydrate owner/repo#42 --with issue_comments
-gitcontribute archive hydrate owner/repo#108 --with pr_reviews,pr_review_comments
-```
-
-Available facets:
-
-- `issue_comments`
-- `pr_details`
-- `pr_reviews`
-- `pr_review_comments`
-
-Hydration is explicit, paginated, and cancellation-aware. It stores each facet
-as an immutable observation.
-
-### Archive inspection
-
-```sh
-gitcontribute archive threads owner/repo --state open --limit 50
+gitcontribute archive hydrate owner/repo#108 \
+  --with pr_reviews,pr_review_comments
 gitcontribute archive coverage owner/repo
-gitcontribute coverage owner/repo
 ```
 
-## Code indexing
+Hydration supports `issue_comments`, `pr_details`, `pr_reviews`, and
+`pr_review_comments`. Fetches are paginated and cancellation-aware; a complete
+facet replaces its previous snapshot atomically.
 
-`gitcontribute index` indexes a clean local checkout at its current commit:
+</details>
+
+<details>
+<summary><strong>Code indexing and acquisition</strong></summary>
+
+Index a clean local checkout at its current commit:
 
 ```sh
 gitcontribute index owner/repo /path/to/checkout --json
 ```
 
-`gitcontribute acquire` clones or fetches a repository into a managed bare
-mirror, creates a clean worktree at the default branch, indexes the tracked text
-files, then removes the worktree:
+Or acquire a repository into a managed mirror, index a clean temporary
+worktree, and remove that worktree afterward:
 
 ```sh
-gitcontribute acquire owner/repo --remote https://github.com/owner/repo.git --json
+gitcontribute acquire owner/repo \
+  --remote https://github.com/owner/repo.git --json
 ```
 
 The indexer reads blobs directly from Git, skips binaries and non-UTF-8 content,
-enforces size limits, and rejects dirty worktrees. Indexed code snapshots are
-stored in the corpus and are searched with SQLite FTS5.
+enforces size limits, and rejects dirty worktrees.
 
-## Typed offline search
+</details>
+
+<details>
+<summary><strong>Search, dossiers, health, seeds, and lenses</strong></summary>
 
 ```sh
 gitcontribute search repos "cli" --limit 20 --json
 gitcontribute search issues "data race" --repo owner/repo --state open --json
-gitcontribute search prs "flaky" --repo owner/repo --label "bug" --json
+gitcontribute search prs "flaky" --repo owner/repo --label bug --json
 gitcontribute search threads "memory leak" --repo owner/repo
 gitcontribute search code "context.WithTimeout" --repo owner/repo
 gitcontribute search all "retry" --repo owner/repo
-gitcontribute search issues "retry" --lens my-lens
-```
 
-Search is local-only SQLite FTS5 keyword search over the corpus. Thread searches
-support `--repo`, `--state`, `--author`, `--association`, `--assignee`,
-`--label`, `--updated-after`, `--limit`, and `--cursor`. Repository and code
-searches ignore the thread metadata filters. `search all` combines threads,
-repositories, and code but does not support cursor pagination.
-
-Results include a transparent score with reasons: title/body term matches,
-freshness, and coverage. Use `gitcontribute search ... --json` to consume results
-programmatically.
-
-Add `--lens NAME` to apply a saved filter and weighted ranking to a bounded
-candidate population. Lens-ranked searches do not support `--cursor` because
-normalization depends on the complete candidate population used for that run.
-
-## Dossiers, health, and seeds
-
-Build a repository dossier from the local corpus:
-
-```sh
 gitcontribute dossier build owner/repo
-gitcontribute dossier show owner/repo
-gitcontribute dossier export owner/repo --format markdown --output owner-repo-dossier.md
-```
-
-Compute offline health and community metrics:
-
-```sh
+gitcontribute dossier export owner/repo --format markdown \
+  --output owner-repo-dossier.md
 gitcontribute health owner/repo --stale-after 336h --json
-```
-
-`health` returns repository, issue, PR, external contributor, congestion,
-stale, response-time, and coverage metrics without network access.
-
-Extract contribution seeds from merged PRs, closed-unmerged PRs, and issues:
-
-```sh
 gitcontribute seeds owner/repo --json
 ```
 
-Seeds are derived from stored thread and PR metadata; they include signals such as
-conventional-commit prefixes, issue linkages, validation keywords, approximate
-scope, and problem labels.
-
-## Investigations, opportunities, validation, and evidence
-
-### Workflow
-
-1. Start an investigation scoped to a repository:
-   ```sh
-   gitcontribute investigation start owner/repo --lens my-lens --json
-   ```
-2. Record a hypothesis:
-   ```sh
-   gitcontribute hypothesis add --title="Fix retry timeout" \
-       --description="..." --category=bug <investigation-id>
-   ```
-3. Check for duplicates and collisions:
-   ```sh
-   gitcontribute duplicates check <hypothesis-id>
-   gitcontribute collisions check <hypothesis-id>
-   ```
-4. Promote the hypothesis to an opportunity:
-   ```sh
-   gitcontribute opportunity promote --problem="..." --scope="small" \
-       --impact="reduces flakes" --effort="1h" --confidence=0.8 <hypothesis-id>
-   ```
-5. Create a workspace (managed Git worktree):
-   ```sh
-   gitcontribute workspace create <investigation-id>
-   ```
-6. Record evidence:
-   ```sh
-   gitcontribute evidence add --type=note --relation=supporting \
-       --description="..." --opportunity <opportunity-id>
-   ```
-7. Define and run a validation:
-   ```sh
-   gitcontribute validation define --kind=test --command="go test ./..." \
-       --working-dir=/path/to/ws <investigation-id>
-   gitcontribute validation run <validation-id> --kind=base --execute
-   gitcontribute validation run <validation-id> --kind=candidate --execute
-   gitcontribute validation compare <base-run-id> <candidate-run-id>
-   ```
-8. Prepare contribution drafts:
-   ```sh
-   gitcontribute prepare issue <opportunity-id>
-   gitcontribute prepare pr --approach="..." --workspace <workspace-id> <opportunity-id>
-   gitcontribute prepare review <opportunity-id>
-   ```
-
-Statuses are stored with a required rationale. Hypothesis statuses:
-`proposed`, `promoted`, `rejected`, `deferred`, `superseded`. Opportunity
-statuses include `hypothesis`, `reproduced`, `validated`, `maintainer_aligned`,
-`implemented`, `submitted`, `merged`, `rejected`, `deferred`, `superseded`.
-Collision statuses: `unknown`, `none`, `possible`, `confirmed`, `blocked`.
-
-### Validation safety
-
-`validation run` requires `--execute`. Without it, the command prints the parsed
-command and working directory but does not run anything. Validation commands run
-on the host in the directory you specify; only environment variables listed in
-`--env` are passed through.
-
-## Workspaces
-
-A workspace clones the upstream repository into a managed bare mirror and adds a
-transient worktree at the candidate commit. You can inspect it with:
-
-```sh
-gitcontribute workspace show <workspace-id>
-gitcontribute diff <workspace-id>
-```
-
-`diff` returns the patch, changed files, and a suggested review order. `prepare
-pr` can include a workspace diff automatically; untracked files must be staged or
-replaced by an explicit `--changes` summary.
-
-## Lenses and collections
-
-Lenses are JSON-defined filters and weight sets stored in the corpus:
+Use a lens to apply saved filters and weighted ranking to a bounded population:
 
 ```sh
 gitcontribute lens add my-lens --file lens.json
-gitcontribute lens list
-gitcontribute lens show my-lens
+gitcontribute search issues "retry" --lens my-lens
 gitcontribute lens explain my-lens issue:owner/repo#42 --query "retry"
 ```
 
-`lens explain` reports the candidate facts, population scope, normalized
-signals, weighted contributions, final score, and missing signals. Pass the
-same query, scope, and thread filters used for search so normalization uses the
-identical candidate population.
+Search results explain their scores. Most typed searches support opaque cursor
+pagination; `search all` and lens-ranked searches do not.
 
-Collections are named groups of typed references:
+</details>
+
+<details>
+<summary><strong>Investigations, evidence, tracking, and collections</strong></summary>
+
+Record supporting or contradicting evidence:
+
+```sh
+gitcontribute evidence add --type=note --relation=supporting \
+  --description="Reproduced on the current default branch." \
+  --opportunity <opportunity-id>
+```
+
+Group typed references and record local decisions:
 
 ```sh
 gitcontribute collection create interesting
-gitcontribute collection add interesting repo:owner/repo issue:owner/repo#42
-gitcontribute collection list
-```
-
-## Tracking
-
-Record triage decisions and contribution outcomes locally:
-
-```sh
+gitcontribute collection add interesting \
+  repo:owner/repo issue:owner/repo#42
 gitcontribute triage record issue:owner/repo#42 viewed --reason "..."
-gitcontribute triage list --outcome viewed
-gitcontribute contribution record <opportunity-id> issue "Draft title" --body "..."
+gitcontribute contribution record <opportunity-id> issue \
+  "Draft title" --body "..."
 gitcontribute contribution outcome <contribution-id> submitted
 ```
 
-Export and re-import local tracking metadata:
+Export and restore tracking metadata:
 
 ```sh
 gitcontribute tracking export --output tracking.json
 gitcontribute tracking import --file tracking.json
 ```
 
-The export is redacted: it never includes tokens, credentials, or absolute local
-paths.
+Exports are redacted: they exclude credentials, tokens, and absolute local paths.
 
-## Jobs and runs
+</details>
 
-Durable operation runs are recorded for sync, crawl, hydrate, and other
-network-touching work:
+<details>
+<summary><strong>Workspaces, jobs, runs, and TUI</strong></summary>
 
 ```sh
+gitcontribute workspace show <workspace-id>
+gitcontribute diff <workspace-id>
 gitcontribute runs --limit 20
-```
-
-Background durable jobs (mostly used from the MCP surface) can be inspected and
-cancelled:
-
-```sh
 gitcontribute jobs
 gitcontribute job show <id>
 gitcontribute job cancel <id>
-```
-
-## TUI
-
-Browse the corpus interactively:
-
-```sh
-gitcontribute tui
 gitcontribute tui owner/repo
 ```
 
-The TUI loads the local corpus only. Add `--json` to emit a snapshot of
-repositories, threads, clusters, investigations, and opportunities to stdout
-instead of starting the interactive terminal.
+`diff` returns the patch, changed files, and suggested review order. The TUI is
+local-only; add `--json` to emit a non-interactive snapshot.
 
-## MCP server
+</details>
 
-Start the MCP server over stdio:
+<details>
+<summary><strong>JSON and output behavior</strong></summary>
 
-```sh
-gitcontribute mcp serve --transport=stdio
-```
-
-`stdio` is the only supported transport in this release.
-
-The server exposes:
-
-- Read-only tools: `search`, `search_repositories`, `search_threads`,
-  `search_code`, `get_repository`, `get_thread`, `get_dossier`,
-  `get_repository_dossier`, `get_investigation`, `list_opportunities`,
-  `get_opportunity`, `get_evidence`, `find_clusters`, `find_neighbors`,
-  `get_coverage`, `get_lens`, `get_job`, and `explain_match`.
-- Network-read tools: `sync_repository`, `hydrate_thread`, `start_crawl`,
-  `hydrate_repository`, `create_workspace`.
-- Local-write tools: `start_investigation`, `record_hypothesis`,
-  `promote_opportunity`, `define_validation`, `prepare_contribution`,
-  `cancel_job`.
-- Execution tool: `run_validation` requires `execute: true`.
-
-Resources are published under `gitcontribute://` and `github-index://` URI
-schemes, including repository, thread, dossier, investigation, opportunity,
-evidence, lens, and job resources. All return JSON.
-
-## JSON, cursor, and output behavior
-
-Most non-interactive commands support `--json`. JSON is written to stdout;
-progress and status messages go to stderr. Search commands return an opaque
-`next_cursor` for pagination, except `search all`. List commands accept
-`--limit` and return a `total` count when the corpus can determine it.
+Most non-interactive commands accept `--json`. Machine-readable output goes to
+stdout; progress and status messages go to stderr. List commands accept
+`--limit`, and paginated searches return an opaque `next_cursor` where supported.
 
 `dossier export`, `export dossier`, `export evidence`, and `tracking export`
-support `--output <file>` to write to a file instead of stdout.
+accept `--output <file>`.
 
-## Storage and paths
+</details>
 
-GitContribute uses platform-native directories.
+## 💾 Storage locations
 
-### Linux / other Unix
+| Platform | Config | Data | Cache | Logs |
+| --- | --- | --- | --- | --- |
+| **Linux / Unix** | `$XDG_CONFIG_HOME/gitcontribute` or `~/.config/gitcontribute` | `$XDG_DATA_HOME/gitcontribute` or `~/.local/share/gitcontribute` | `$XDG_CACHE_HOME/gitcontribute` or `~/.cache/gitcontribute` | `$XDG_STATE_HOME/gitcontribute` or `~/.local/state/gitcontribute/logs` |
+| **macOS** | `~/Library/Application Support/gitcontribute` | `~/Library/Application Support/gitcontribute/Data` | `~/Library/Caches/gitcontribute` | `~/Library/Logs/gitcontribute` |
+| **Windows** | `%APPDATA%\gitcontribute` | `%LOCALAPPDATA%\gitcontribute\Data` | `%LOCALAPPDATA%\gitcontribute\Cache` | `%LOCALAPPDATA%\gitcontribute\Logs` |
 
-- Config: `$XDG_CONFIG_HOME/gitcontribute` or `~/.config/gitcontribute`
-- Data (including the default corpus): `$XDG_DATA_HOME/gitcontribute` or
-  `~/.local/share/gitcontribute`
-- Cache (including code acquisition mirrors): `$XDG_CACHE_HOME/gitcontribute` or
-  `~/.cache/gitcontribute`
-- Logs/state: `$XDG_STATE_HOME/gitcontribute` or
-  `~/.local/state/gitcontribute/logs`
+The default database is `gitcontribute.db` in the data directory. The
+configuration file is `config.toml` in the config directory.
 
-### macOS
+## 🖥️ Platform support
 
-- Config/Data: `~/Library/Application Support/gitcontribute` (Data subfolder
-  `Data`)
-- Cache: `~/Library/Caches/gitcontribute`
-- Logs: `~/Library/Logs/gitcontribute`
+Linux and macOS are the primary development and test targets. Windows builds
+are expected to work with Git for Windows and standard `%APPDATA%` and
+`%LOCALAPPDATA%` paths. For platform-specific problems, open a bug report with
+the output of `gitcontribute doctor --json`.
 
-### Windows
-
-- Config: `%APPDATA%\gitcontribute`
-- Data: `%LOCALAPPDATA%\gitcontribute\Data`
-- Cache: `%LOCALAPPDATA%\gitcontribute\Cache`
-- Logs: `%LOCALAPPDATA%\gitcontribute\Logs`
-
-The default corpus database is `gitcontribute.db` inside the data directory. The
-config file is `config.toml` inside the config directory.
-
-## End-to-end example
-
-```sh
-# 1. Initialize the corpus and authenticate
-gitcontribute init
-gitcontribute configure --token-source env --token-source-key GITHUB_TOKEN
-
-# 2. Sync a small repository
-gitcontribute sync golang/go
-
-# 3. Search for open issues about a topic
-gitcontribute search issues "data race" --repo golang/go --state open --json
-
-# 4. Hydrate a specific issue
-gitcontribute archive hydrate golang/go#12345 --with issue_comments --json
-
-# 5. Build a dossier and run health metrics
-gitcontribute dossier build golang/go
-gitcontribute health golang/go --json
-
-# 6. Extract seeds
-gitcontribute seeds golang/go --json
-
-# 7. Start an investigation
-gitcontribute investigation start golang/go --json
-
-# 8. Add a hypothesis
-gitcontribute hypothesis add --title "Fix data race in net/http" \
-    --description "Investigate the reported race." \
-    --category bug <investigation-id>
-
-# 9. Check for duplicates and collisions
-gitcontribute duplicates check <hypothesis-id>
-gitcontribute collisions check <hypothesis-id>
-
-# 10. Promote to opportunity
-gitcontribute opportunity promote --problem "data race in net/http" \
-    --scope small --impact "improves reliability" --effort 2h \
-    --confidence 0.7 <hypothesis-id>
-
-# 11. Create a workspace and inspect it
-gitcontribute workspace create <investigation-id>
-gitcontribute diff <workspace-id>
-
-# 12. Record supporting evidence
-gitcontribute evidence add --type note --relation supporting \
-    --description "Reproduced with -race on go1.26" \
-    --opportunity <opportunity-id>
-
-# 13. Prepare a draft PR (uses the workspace diff)
-gitcontribute prepare pr --approach "Add mutex around shared counter" \
-    --workspace <workspace-id> <opportunity-id>
-```
-
-Replace `golang/go` with a smaller repository for faster initial sync.
-
-## Safety boundaries and non-goals
-
-- **No GitHub writes.** GitContribute does not open issues, create pull requests,
-  push commits, or otherwise mutate GitHub. `prepare` and `validation` run on
-  your local machine and only emit drafts and local reports.
-- **No remote service.** There is no hosted backend or telemetry. Everything
-  runs on your machine and stores data in your local corpus.
-- **No semantic search.** Search is keyword-based SQLite FTS5 over the local
-  corpus. Ranking uses transparent signals such as title/body term matches,
-  freshness, and coverage, not vector embeddings.
-- **No container isolation.** Validation commands and code indexing run on the
-  host with the privileges of the user. You choose the working directory and
-  the commands; no repository-controlled code is executed automatically during
-  crawling or indexing.
-- **Explicit capabilities.** Network reads, local writes, code execution, and
-  GitHub mutations are deliberately separated. `validation run` needs `--execute`;
-  network sync is a distinct command from offline search.
-
-## Development
+## 🛠️ Development
 
 ```sh
 go test ./...
@@ -576,10 +444,16 @@ go build -o gitcontribute ./cmd/gitcontribute
 ./gitcontribute --help
 ```
 
-## Platform support
+Before changing package boundaries or side effects, read
+[docs/architecture.md](docs/architecture.md). See [CONTRIBUTING.md](CONTRIBUTING.md)
+for the complete development and testing workflow.
 
-Linux and macOS are the primary development and test targets. Windows builds
-are expected to work where Go, Git for Windows, and SQLite support are available,
-and paths resolve to the standard Windows `%APPDATA%` and `%LOCALAPPDATA%`
-locations. If you hit a Windows-specific issue, please report it with the
-output of `gitcontribute doctor --json`.
+---
+
+<div align="center">
+
+Built for contributors who want to understand the problem before writing the patch.
+
+[Architecture](docs/architecture.md) · [Onboarding](docs/onboarding.md) · [Runbooks](docs/runbooks.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE)
+
+</div>
