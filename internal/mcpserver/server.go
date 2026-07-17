@@ -20,10 +20,14 @@ var ErrNotFound = errors.New("not found")
 // Implementations must not perform network access.
 type Reader interface {
 	Search(context.Context, SearchInput) (SearchOutput, error)
+	SearchRepositories(context.Context, SearchRepositoriesInput) (SearchRepositoriesOutput, error)
 	Repository(context.Context, RepoInput) (RepositoryOutput, error)
 	Thread(context.Context, ThreadInput) (ThreadOutput, error)
+	ThreadByNumber(context.Context, ThreadByNumberInput) (ThreadOutput, error)
 	Dossier(context.Context, RepoInput) (DossierOutput, error)
 	SearchCode(context.Context, SearchCodeInput) (SearchCodeOutput, error)
+	ExplainMatch(context.Context, ExplainMatchInput) (ExplainMatchOutput, error)
+	GetJob(context.Context, GetJobInput) (GetJobOutput, error)
 	Investigation(context.Context, InvestigationInput) (InvestigationOutput, error)
 	ListOpportunities(context.Context, ListOpportunitiesInput) (ListOpportunitiesOutput, error)
 	Opportunity(context.Context, OpportunityInput) (OpportunityOutput, error)
@@ -42,6 +46,19 @@ type NeighborReader interface {
 type Operator interface {
 	SyncRepository(context.Context, SyncRepositoryInput) (SyncRepositoryOutput, error)
 	HydrateThread(context.Context, HydrateThreadInput) (HydrateThreadOutput, error)
+	HydrateRepository(context.Context, HydrateRepositoryInput) (JobReference, error)
+	BuildRepositoryDossier(context.Context, BuildRepositoryDossierInput) (JobReference, error)
+	StartCrawl(context.Context, StartCrawlInput) (JobReference, error)
+	StartInvestigation(context.Context, StartInvestigationInput) (InvestigationOutput, error)
+	RecordHypothesis(context.Context, RecordHypothesisInput) (HypothesisOutput, error)
+	CheckDuplicates(context.Context, CheckDuplicatesInput) (CheckOutput, error)
+	CheckCollisions(context.Context, CheckCollisionsInput) (CheckOutput, error)
+	PromoteOpportunity(context.Context, PromoteOpportunityInput) (OpportunityOutput, error)
+	CreateWorkspace(context.Context, CreateWorkspaceInput) (JobReference, error)
+	DefineValidation(context.Context, DefineValidationInput) (ValidationOutput, error)
+	RunValidation(context.Context, RunValidationInput) (JobReference, error)
+	PrepareContribution(context.Context, PrepareContributionInput) (DraftOutput, error)
+	CancelJob(context.Context, CancelJobInput) (GetJobOutput, error)
 }
 
 type RepoInput struct {
@@ -524,6 +541,8 @@ func (s *Server) register() {
 		Description: "Saved lens definition",
 		MIMEType:    "application/json",
 	}, s.readResource)
+
+	s.registerV1()
 }
 
 func boolPtr(v bool) *bool { return &v }
@@ -785,18 +804,21 @@ func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest)
 		return nil, mcp.ResourceNotFoundError(uri)
 	}
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	scheme := u.Scheme
 	var value any
 	switch u.Host {
-	case "repository", "dossier":
+	case "repository", "repositories":
 		if len(parts) != 2 {
 			return nil, mcp.ResourceNotFoundError(uri)
 		}
 		input := RepoInput{Owner: parts[0], Repo: parts[1]}
-		if u.Host == "repository" {
-			value, err = s.reader.Repository(ctx, input)
-		} else {
-			value, err = s.reader.Dossier(ctx, input)
+		value, err = s.reader.Repository(ctx, input)
+	case "dossier", "dossiers":
+		if len(parts) != 2 {
+			return nil, mcp.ResourceNotFoundError(uri)
 		}
+		input := RepoInput{Owner: parts[0], Repo: parts[1]}
+		value, err = s.reader.Dossier(ctx, input)
 	case "thread":
 		if len(parts) != 4 {
 			return nil, mcp.ResourceNotFoundError(uri)
@@ -808,7 +830,18 @@ func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest)
 		value, err = s.reader.Thread(ctx, ThreadInput{
 			Owner: parts[0], Repo: parts[1], Kind: parts[2], Number: number,
 		})
-	case "investigation":
+	case "threads":
+		if len(parts) != 3 {
+			return nil, mcp.ResourceNotFoundError(uri)
+		}
+		number, parseErr := strconv.Atoi(parts[2])
+		if parseErr != nil || number < 1 {
+			return nil, mcp.ResourceNotFoundError(uri)
+		}
+		value, err = s.reader.ThreadByNumber(ctx, ThreadByNumberInput{
+			Owner: parts[0], Repo: parts[1], Number: number,
+		})
+	case "investigation", "investigations":
 		if len(parts) != 1 {
 			return nil, mcp.ResourceNotFoundError(uri)
 		}
@@ -817,32 +850,48 @@ func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest)
 		if len(parts) != 1 {
 			return nil, mcp.ResourceNotFoundError(uri)
 		}
-		value, err = s.reader.ListOpportunities(ctx, ListOpportunitiesInput{InvestigationID: parts[0], Limit: 100})
+		if scheme == "github-index" {
+			value, err = s.reader.Opportunity(ctx, OpportunityInput{ID: parts[0], EvidenceLimit: 100})
+		} else {
+			value, err = s.reader.ListOpportunities(ctx, ListOpportunitiesInput{InvestigationID: parts[0], Limit: 100})
+		}
 	case "opportunity":
 		if len(parts) != 1 {
 			return nil, mcp.ResourceNotFoundError(uri)
 		}
 		value, err = s.reader.Opportunity(ctx, OpportunityInput{ID: parts[0], EvidenceLimit: 100})
 	case "evidence":
-		if len(parts) != 2 {
-			return nil, mcp.ResourceNotFoundError(uri)
-		}
 		var in EvidenceInput
-		switch parts[0] {
-		case "investigation":
-			in.InvestigationID = parts[1]
-		case "opportunity":
-			in.OpportunityID = parts[1]
-		default:
-			return nil, mcp.ResourceNotFoundError(uri)
+		if scheme == "github-index" {
+			if len(parts) != 1 {
+				return nil, mcp.ResourceNotFoundError(uri)
+			}
+			in.InvestigationID = parts[0]
+		} else {
+			if len(parts) != 2 {
+				return nil, mcp.ResourceNotFoundError(uri)
+			}
+			switch parts[0] {
+			case "investigation":
+				in.InvestigationID = parts[1]
+			case "opportunity":
+				in.OpportunityID = parts[1]
+			default:
+				return nil, mcp.ResourceNotFoundError(uri)
+			}
 		}
 		in.Limit = 100
 		value, err = s.reader.Evidence(ctx, in)
-	case "lens":
+	case "lens", "lenses":
 		if len(parts) != 1 {
 			return nil, mcp.ResourceNotFoundError(uri)
 		}
 		value, err = s.reader.Lens(ctx, LensInput{Name: parts[0]})
+	case "job", "jobs":
+		if len(parts) != 1 {
+			return nil, mcp.ResourceNotFoundError(uri)
+		}
+		value, err = s.reader.GetJob(ctx, GetJobInput{ID: parts[0]})
 	default:
 		return nil, mcp.ResourceNotFoundError(uri)
 	}

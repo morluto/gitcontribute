@@ -250,6 +250,15 @@ func (s *Service) GetJob(ctx context.Context, id string) (*cli.JobResult, error)
 	return &result, nil
 }
 
+// submitJob persists a durable job and runs fn asynchronously.
+func (s *Service) submitJob(ctx context.Context, kind string, request any, fn JobFunc) (string, error) {
+	jobs, err := s.Jobs(ctx)
+	if err != nil {
+		return "", err
+	}
+	return jobs.Submit(ctx, kind, request, fn)
+}
+
 // CancelJob records and applies a cancellation request, then returns current state.
 func (s *Service) CancelJob(ctx context.Context, id string) (*cli.JobResult, error) {
 	jobs, err := s.Jobs(ctx)

@@ -27,6 +27,7 @@ type searchMatch struct {
 	Score     float64
 	Freshness time.Time
 	Coverage  []string
+	Fields    map[string]any
 }
 
 type searchResult struct {
@@ -224,8 +225,15 @@ func (s *Service) searchRepositories(ctx context.Context, c *corpus.Corpus, quer
 			Title:     ref.String(),
 			Body:      r.Description,
 			URL:       fmt.Sprintf("https://github.com/%s", ref),
+			UpdatedAt: r.SourceUpdatedAt,
 			Freshness: r.SourceUpdatedAt,
 			Coverage:  coverage,
+			Fields: map[string]any{
+				"description": r.Description, "default_branch": r.DefaultBranch,
+				"language": r.Language, "license": r.License, "topics": r.Topics,
+				"stars": r.Stars, "watchers": r.Watchers, "forks": r.Forks,
+				"open_issues": r.OpenIssues, "archived": r.Archived, "fork": r.Fork,
+			},
 		}
 		m.Score, _ = scoreMatch(query, m, m.Freshness, coverage, now)
 		matches = append(matches, m)
