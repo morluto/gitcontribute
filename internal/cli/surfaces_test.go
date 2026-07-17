@@ -15,32 +15,34 @@ import (
 type fakeSurfacesService struct {
 	*fakeService
 
-	clustersCalled  bool
-	clusterCalled   bool
-	addLensCalled   bool
-	listLensCalled  bool
-	showLensCalled  bool
-	createColCalled bool
-	addColCalled    bool
-	listColCalled   bool
-	archiveCalled   bool
-	hydrateCalled   bool
-	threadsCalled   bool
-	coverageCalled  bool
-	runsCalled      bool
-	neighborsCalled bool
-	exportCalled    bool
+	clustersCalled    bool
+	clusterCalled     bool
+	addLensCalled     bool
+	listLensCalled    bool
+	showLensCalled    bool
+	explainLensCalled bool
+	createColCalled   bool
+	addColCalled      bool
+	listColCalled     bool
+	archiveCalled     bool
+	hydrateCalled     bool
+	threadsCalled     bool
+	coverageCalled    bool
+	runsCalled        bool
+	neighborsCalled   bool
+	exportCalled      bool
 
-	lastClustersArg   cli.RepoRef
-	lastClusterID     string
-	lastClusterLimit  int
-	lastLensName      string
-	lastLensDef       lens.Definition
-	lastCreateColName string
-	lastAddColName    string
-	lastAddColMembers []cli.CollectionMember
-	lastArchiveOpts   cli.ArchiveSyncOptions
-	lastHydrateOpts   cli.HydrateOptions
+	lastClustersArg    cli.RepoRef
+	lastClusterID      string
+	lastClusterLimit   int
+	lastLensName       string
+	lastLensExplainRef string
+	lastLensDef        lens.Definition
+	lastCreateColName  string
+	lastAddColName     string
+	lastAddColMembers  []cli.CollectionMember
+	lastArchiveOpts    cli.ArchiveSyncOptions
+	lastHydrateOpts    cli.HydrateOptions
 }
 
 func (f *fakeSurfacesService) Clusters(ctx context.Context, repo cli.RepoRef, limit int) (*cli.ClusterListResult, error) {
@@ -105,6 +107,31 @@ func (f *fakeSurfacesService) ShowLens(ctx context.Context, name string) (*cli.L
 		},
 		CreatedAt: "2026-07-17T00:00:00Z",
 		UpdatedAt: "2026-07-17T00:00:00Z",
+	}, f.err
+}
+
+func (f *fakeSurfacesService) ExplainLens(ctx context.Context, name, ref string) (*cli.LensExplainResult, error) {
+	f.explainLensCalled = true
+	f.lastLensName = name
+	f.lastLensExplainRef = ref
+	return &cli.LensExplainResult{
+		Lens: cli.LensResult{
+			Name: name,
+			Definition: lens.Definition{
+				Name:    name,
+				Filter:  lens.Filter{Kinds: []string{"issue"}},
+				Weights: map[string]float64{"relevance": 1},
+			},
+		},
+		Candidate: cli.LensExplainCandidate{
+			Kind:  "issue",
+			Repo:  cli.RepoRef{Owner: "o", Repo: "r"},
+			Title: "fix it",
+		},
+		Score: 0.75,
+		Signals: []cli.LensExplainSignal{
+			{Name: "relevance", Value: 0.8, Weight: 1, Contribution: 0.75},
+		},
 	}, f.err
 }
 
@@ -243,6 +270,22 @@ func TestLensAddListShow(t *testing.T) {
 	if !strings.Contains(stdout.String(), "active-go") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
+
+	c4, stdout, _ := newSurfacesCLI(svc)
+	requireNoErr(t, c4.Run(context.Background(), []string{"lens", "explain", "active-go", "o/r#1"}))
+	if !svc.explainLensCalled || svc.lastLensName != "active-go" || svc.lastLensExplainRef != "o/r#1" {
+		t.Fatalf("explain lens not called: called=%v name=%q ref=%q", svc.explainLensCalled, svc.lastLensName, svc.lastLensExplainRef)
+	}
+	if !strings.Contains(stdout.String(), "Lens: active-go") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestLensExplainRequiresRef(t *testing.T) {
+	svc := &fakeSurfacesService{fakeService: &fakeService{}}
+	c, _, _ := newSurfacesCLI(svc)
+	err := c.Run(context.Background(), []string{"lens", "explain", "active-go"})
+	requireCLIError(t, err, cli.ExitUsage)
 }
 
 func TestCollectionCreateAddList(t *testing.T) {

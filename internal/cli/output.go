@@ -86,6 +86,8 @@ func humanOutput(v any) (string, error) {
 		return lensHuman(r), nil
 	case *LensListResult:
 		return lensListHuman(r), nil
+	case *LensExplainResult:
+		return lensExplainHuman(r), nil
 	case *CollectionResult:
 		return collectionHuman(r), nil
 	case *CollectionListResult:
@@ -579,6 +581,42 @@ func lensListHuman(r *LensListResult) string {
 		fmt.Fprintf(&b, "\n- %s", l.Name)
 	}
 	return b.String()
+}
+
+func lensExplainHuman(r *LensExplainResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Lens: %s\n", r.Lens.Name)
+	c := r.Candidate
+	fmt.Fprintf(&b, "Candidate: %s %s", c.Kind, c.Repo)
+	if c.Number > 0 {
+		fmt.Fprintf(&b, "#%d", c.Number)
+	}
+	fmt.Fprintf(&b, ": %s\n", c.Title)
+	if c.State != "" {
+		fmt.Fprintf(&b, "State: %s\n", c.State)
+	}
+	if c.URL != "" {
+		fmt.Fprintf(&b, "URL: %s\n", c.URL)
+	}
+	if c.UpdatedAt != "" {
+		fmt.Fprintf(&b, "Updated: %s\n", c.UpdatedAt)
+	}
+	fmt.Fprintf(&b, "Population: %d (%s), evaluated at %s\n", r.PopulationSize, r.PopulationScope, r.EvaluatedAt)
+	fmt.Fprintf(&b, "Final score: %.2f\n", r.Score)
+	if len(r.Signals) > 0 {
+		b.WriteString("Signals:\n")
+		for _, sig := range r.Signals {
+			status := ""
+			if sig.Missing {
+				status = " [missing]"
+			}
+			fmt.Fprintf(&b, "- %s: value=%.3f normalized=%.3f weight=%.3f contribution=%.3f%s\n", sig.Name, sig.Value, sig.Normalized, sig.Weight, sig.Contribution, status)
+		}
+	}
+	if len(r.MissingSignals) > 0 {
+		fmt.Fprintf(&b, "Missing signals: %s", strings.Join(r.MissingSignals, ", "))
+	}
+	return strings.TrimSpace(b.String())
 }
 
 func collectionHuman(r *CollectionResult) string {

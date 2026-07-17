@@ -160,6 +160,7 @@ type searchKindCmd struct {
 	UpdatedAfter string   `name:"updated-after" help:"Restrict source updates to RFC3339 timestamp or later"`
 	Limit        int      `name:"limit" default:"20" help:"Maximum number of results"`
 	Cursor       string   `name:"cursor" help:"Opaque cursor returned by the previous page"`
+	Lens         string   `name:"lens" help:"Rank and filter with a saved lens"`
 	JSON         bool     `name:"json" help:"Print the result as JSON"`
 }
 
@@ -594,9 +595,10 @@ type exportEvidenceCmd struct {
 }
 
 type lensCmd struct {
-	Add  lensAddCmd  `cmd:"" help:"Add or replace a saved lens from a JSON file"`
-	List lensListCmd `cmd:"" help:"List saved lenses"`
-	Show lensShowCmd `cmd:"" help:"Show a saved lens"`
+	Add     lensAddCmd     `cmd:"" help:"Add or replace a saved lens from a JSON file"`
+	List    lensListCmd    `cmd:"" help:"List saved lenses"`
+	Show    lensShowCmd    `cmd:"" help:"Show a saved lens"`
+	Explain lensExplainCmd `cmd:"" help:"Explain a saved lens score for a result"`
 }
 
 type lensAddCmd struct {
@@ -611,6 +613,12 @@ type lensListCmd struct {
 
 type lensShowCmd struct {
 	Name string `arg:"" help:"Lens name"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type lensExplainCmd struct {
+	Name string `arg:"" help:"Lens name"`
+	Ref  string `arg:"" help:"Result reference (e.g. owner/repo, owner/repo#number, issue:owner/repo#number, code:owner/repo/path)"`
 	JSON bool   `name:"json" help:"Print the result as JSON"`
 }
 
@@ -1737,9 +1745,13 @@ func (c *CLI) runSearch(ctx context.Context, command string, cmd *searchCmd) err
 		Kind: kind, Repo: selected.Repo, State: selected.State, Author: selected.Author,
 		Association: selected.Association, Assignee: selected.Assignee,
 		Labels: selected.Labels, Limit: selected.Limit, Cursor: selected.Cursor,
+		Lens: selected.Lens,
 	}
 	if kind == "all" && opts.Cursor != "" {
 		return NewCLIError(ExitUsage, errors.New("combined search does not support cursor pagination; choose a result kind"))
+	}
+	if opts.Lens != "" && opts.Cursor != "" {
+		return NewCLIError(ExitUsage, errors.New("cursor pagination cannot be combined with --lens because lens ranking is not cursor-stable"))
 	}
 	if kind == "repos" || kind == "code" {
 		if opts.State != "all" || opts.Author != "" || opts.Association != "" || opts.Assignee != "" || len(opts.Labels) > 0 || selected.UpdatedAfter != "" {
@@ -2226,6 +2238,18 @@ func (c *CLI) runLens(ctx context.Context, command string, cmd *lensCmd) error {
 			return c.mapError(err)
 		}
 		return c.render(cmd.Show.JSON, res)
+	case "lens explain":
+		if strings.TrimSpace(cmd.Explain.Name) == "" {
+			return NewCLIError(ExitUsage, errors.New("lens name is required"))
+		}
+		if strings.TrimSpace(cmd.Explain.Ref) == "" {
+			return NewCLIError(ExitUsage, errors.New("result reference is required"))
+		}
+		res, err := service.ExplainLens(ctx, cmd.Explain.Name, cmd.Explain.Ref)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Explain.JSON, res)
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown lens command: %s", command))
 	}

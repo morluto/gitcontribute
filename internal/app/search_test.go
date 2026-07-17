@@ -10,6 +10,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/lens"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
 )
 
@@ -230,5 +231,148 @@ func TestSearchDefaultLimitAndMax(t *testing.T) {
 	}
 	if result.Limit != 20 {
 		t.Fatalf("limit = %d, want 20", result.Limit)
+	}
+}
+
+func seedLensCorpus(t *testing.T, svc *Service) {
+	t.Helper()
+	ctx := context.Background()
+	c := svc.corpus
+
+	repo, err := c.UpsertRepository(ctx, corpus.Repository{
+		Owner:           "owner",
+		Name:            "repo",
+		ExternalID:      "id",
+		Language:        "Go",
+		Stars:           50,
+		Watchers:        2,
+		Forks:           1,
+		SourceUpdatedAt: time.Unix(1000, 0).UTC(),
+	}, `{}`)
+	if err != nil {
+		t.Fatalf("seed repository: %v", err)
+	}
+
+	base := time.Unix(1000, 0).UTC()
+	threads := []struct {
+		number int
+		title  string
+		body   string
+		labels []string
+		state  string
+	}{
+		{1, "fix login crash", "login crashes on startup", []string{"bug"}, "open"},
+		{2, "login crash on startup", "the login page crashes", nil, "open"},
+		{3, "unrelated feature", "add dark mode", nil, "closed"},
+		{4, "fix login crash", "duplicate of #1", nil, "closed"},
+	}
+	for _, th := range threads {
+		updated := base.Add(time.Duration(5-th.number) * time.Hour)
+		if _, err := c.UpsertThread(ctx, corpus.Thread{
+			RepositoryID:    repo.ID,
+			Kind:            corpus.ThreadKindIssue,
+			Number:          th.number,
+			State:           th.state,
+			Title:           th.title,
+			Body:            th.body,
+			Author:          "alice",
+			Labels:          th.labels,
+			SourceCreatedAt: updated,
+			SourceUpdatedAt: updated,
+		}, `{}`); err != nil {
+			t.Fatalf("seed thread %d: %v", th.number, err)
+		}
+	}
+}
+
+func TestSearchWithLensRanksAndFiltersThreads(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	seedLensCorpus(t, svc)
+
+	def := lens.Definition{
+		Name: "active-go",
+		Filter: lens.Filter{
+			Kinds:           []string{"issue"},
+			States:          []string{"open"},
+			Languages:       []string{"Go"},
+			ExcludeArchived: true,
+			MinStars:        10,
+		},
+		Weights: map[string]float64{"text_relevance": 2, "freshness": 1},
+	}
+	if _, err := svc.corpus.SaveLens(ctx, def); err != nil {
+		t.Fatalf("save lens: %v", err)
+	}
+
+	svc.SetClock(func() time.Time { return time.Unix(100000, 0).UTC() })
+
+	result, err := svc.Search(ctx, "login", cli.SearchOptions{Kind: "issues", Lens: "active-go", Limit: 2})
+	if err != nil {
+		t.Fatalf("search with lens: %v", err)
+	}
+	if result.Total != 2 {
+		t.Fatalf("total = %d, want 2", result.Total)
+	}
+	if len(result.Matches) != 2 {
+		t.Fatalf("matches = %d, want 2", len(result.Matches))
+	}
+	if result.Matches[0].Number != 1 || result.Matches[1].Number != 2 {
+		t.Fatalf("expected issue 1 then issue 2, got %d then %d", result.Matches[0].Number, result.Matches[1].Number)
+	}
+	if result.Matches[0].Score <= result.Matches[1].Score {
+		t.Fatalf("expected first score > second score, got %v and %v", result.Matches[0].Score, result.Matches[1].Score)
+	}
+}
+
+func TestExplainLens(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	seedLensCorpus(t, svc)
+
+	def := lens.Definition{
+		Name: "active-go",
+		Filter: lens.Filter{
+			Kinds:           []string{"issue"},
+			States:          []string{"open"},
+			Languages:       []string{"Go"},
+			ExcludeArchived: true,
+			MinStars:        10,
+		},
+		Weights: map[string]float64{"text_relevance": 2, "freshness": 1, "novel_signal": 0.5},
+	}
+	if _, err := svc.corpus.SaveLens(ctx, def); err != nil {
+		t.Fatalf("save lens: %v", err)
+	}
+
+	svc.SetClock(func() time.Time { return time.Unix(100000, 0).UTC() })
+
+	ex, err := svc.ExplainLens(ctx, "active-go", "owner/repo#1")
+	if err != nil {
+		t.Fatalf("explain lens: %v", err)
+	}
+	if ex.Lens.Name != "active-go" {
+		t.Fatalf("lens name = %q", ex.Lens.Name)
+	}
+	if ex.Candidate.Number != 1 {
+		t.Fatalf("candidate number = %d, want 1", ex.Candidate.Number)
+	}
+	if ex.Score <= 0 {
+		t.Fatalf("expected positive score, got %v", ex.Score)
+	}
+	if ex.PopulationSize != 2 {
+		t.Fatalf("population size = %d, want 2", ex.PopulationSize)
+	}
+	if len(ex.Signals) != 3 {
+		t.Fatalf("signals = %d, want 3", len(ex.Signals))
+	}
+	var foundMissing bool
+	for _, sig := range ex.Signals {
+		if sig.Missing && sig.Name == "novel_signal" {
+			foundMissing = true
+		}
+	}
+	if !foundMissing {
+		t.Fatalf("expected missing signal to be reported: %+v", ex.Signals)
 	}
 }

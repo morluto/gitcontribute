@@ -357,6 +357,7 @@ type SearchOptions struct {
 	UpdatedAfter time.Time
 	Limit        int
 	Cursor       string
+	Lens         string
 }
 
 // InitResult is the result of initializing a local corpus.
@@ -640,6 +641,7 @@ type LensService interface {
 	AddLens(ctx context.Context, name string, def lens.Definition) (*LensResult, error)
 	ListLenses(ctx context.Context) (*LensListResult, error)
 	ShowLens(ctx context.Context, name string) (*LensResult, error)
+	ExplainLens(ctx context.Context, name, ref string) (*LensExplainResult, error)
 }
 
 // LensResult is a saved lens definition.
@@ -653,6 +655,39 @@ type LensResult struct {
 // LensListResult is a list of saved lenses.
 type LensListResult struct {
 	Lenses []LensResult `json:"lenses"`
+}
+
+// LensExplainResult explains a saved lens score for one candidate.
+type LensExplainResult struct {
+	Lens            LensResult           `json:"lens"`
+	Candidate       LensExplainCandidate `json:"candidate"`
+	PopulationSize  int                  `json:"population_size"`
+	PopulationScope string               `json:"population_scope"`
+	EvaluatedAt     string               `json:"evaluated_at"`
+	Score           float64              `json:"score"`
+	Signals         []LensExplainSignal  `json:"signals"`
+	MissingSignals  []string             `json:"missing_signals,omitempty"`
+}
+
+// LensExplainCandidate identifies the explained result.
+type LensExplainCandidate struct {
+	Kind      string  `json:"kind"`
+	Repo      RepoRef `json:"repo"`
+	Number    int     `json:"number,omitempty"`
+	Title     string  `json:"title"`
+	State     string  `json:"state,omitempty"`
+	URL       string  `json:"url,omitempty"`
+	UpdatedAt string  `json:"updated_at,omitempty"`
+}
+
+// LensExplainSignal exposes one signal value, normalization, and contribution.
+type LensExplainSignal struct {
+	Name         string  `json:"name"`
+	Value        float64 `json:"value,omitempty"`
+	Normalized   float64 `json:"normalized,omitempty"`
+	Weight       float64 `json:"weight"`
+	Contribution float64 `json:"contribution"`
+	Missing      bool    `json:"missing"`
 }
 
 // CollectionService is the optional collection management capability used by

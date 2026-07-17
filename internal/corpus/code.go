@@ -222,6 +222,91 @@ func (c *Corpus) SearchCodeWithOptions(ctx context.Context, query string, opts C
 	return page, nil
 }
 
+const codeListLimit = 10000
+
+func (c *Corpus) latestCodeSnapshotID(ctx context.Context, ref domain.RepoRef) (int64, error) {
+	var id int64
+	err := c.db.QueryRowContext(ctx, `
+		SELECT id FROM code_snapshots
+		WHERE repo_owner = ? AND repo_name = ?
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`, ref.Owner, ref.Repo).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("latest code snapshot: %w", err)
+	}
+	return id, nil
+}
+
+// GetCodeDocument returns a single code document from the latest snapshot of a
+// repository, or nil when no snapshot or document exists.
+func (c *Corpus) GetCodeDocument(ctx context.Context, ref domain.RepoRef, path string) (*CodeMatch, error) {
+	snapshotID, err := c.latestCodeSnapshotID(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	if snapshotID == 0 {
+		return nil, nil
+	}
+	var match CodeMatch
+	var createdAt int64
+	err = c.db.QueryRowContext(ctx, `
+		SELECT d.id, s.repo_owner, s.repo_name, s.commit_sha, d.path, d.content, d.bytes, d.language, s.id, s.created_at
+		FROM code_documents d
+		JOIN code_snapshots s ON s.id = d.snapshot_id
+		WHERE d.snapshot_id = ? AND d.path = ?
+	`, snapshotID, path).Scan(&match.DocID, &match.Repo.Owner, &match.Repo.Repo, &match.Commit,
+		&match.Path, &match.Content, &match.Bytes, &match.Language, &match.SnapshotID, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get code document: %w", err)
+	}
+	match.SnapshotCreatedAt = scanTime(createdAt)
+	return &match, nil
+}
+
+// ListCodeDocuments returns all documents from the latest snapshot of a
+// repository. Results are bounded to avoid unbounded offline work.
+func (c *Corpus) ListCodeDocuments(ctx context.Context, ref domain.RepoRef) ([]CodeMatch, error) {
+	snapshotID, err := c.latestCodeSnapshotID(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	if snapshotID == 0 {
+		return nil, nil
+	}
+	rows, err := c.db.QueryContext(ctx, `
+		SELECT d.id, s.repo_owner, s.repo_name, s.commit_sha, d.path, d.content, d.bytes, d.language, s.id, s.created_at
+		FROM code_documents d
+		JOIN code_snapshots s ON s.id = d.snapshot_id
+		WHERE d.snapshot_id = ?
+		ORDER BY d.path
+		LIMIT ?
+	`, snapshotID, codeListLimit)
+	if err != nil {
+		return nil, fmt.Errorf("list code documents: %w", err)
+	}
+	defer rows.Close()
+
+	var out []CodeMatch
+	for rows.Next() {
+		var match CodeMatch
+		var createdAt int64
+		if err := rows.Scan(&match.DocID, &match.Repo.Owner, &match.Repo.Repo, &match.Commit,
+			&match.Path, &match.Content, &match.Bytes, &match.Language, &match.SnapshotID, &createdAt); err != nil {
+			return nil, err
+		}
+		match.SnapshotCreatedAt = scanTime(createdAt)
+		out = append(out, match)
+	}
+	return out, rows.Err()
+}
+
 func (c *Corpus) countCodeMatches(ctx context.Context, ftsQuery string, ref domain.RepoRef) (int, error) {
 	statement := `
 		SELECT COUNT(*)

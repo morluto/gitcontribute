@@ -799,6 +799,41 @@ func TestSearchThreadMetadataFlags(t *testing.T) {
 	}
 }
 
+func TestSearchWithLensFlag(t *testing.T) {
+	svc := &fakeService{searchResult: &cli.SearchResult{
+		Query:   "test",
+		Kind:    "issues",
+		Limit:   10,
+		Total:   1,
+		Matches: []cli.SearchMatch{},
+	}}
+	c, _, _ := newTestCLI(svc, nil)
+
+	err := c.Run(context.Background(), []string{"search", "issues", "test", "--lens", "active-go", "--limit", "10"})
+	requireNoErr(t, err)
+
+	if !svc.searchCalled {
+		t.Fatal("Search was not called")
+	}
+	opts := svc.lastSearchArgs.Opts
+	if opts.Lens != "active-go" {
+		t.Fatalf("lens = %q, want active-go", opts.Lens)
+	}
+	if opts.Kind != "issues" || opts.Limit != 10 {
+		t.Fatalf("unexpected options: %+v", opts)
+	}
+}
+
+func TestSearchRejectsLensWithCursor(t *testing.T) {
+	svc := &fakeService{}
+	c, _, _ := newTestCLI(svc, nil)
+	err := c.Run(context.Background(), []string{"search", "issues", "test", "--lens", "active-go", "--cursor", "abc"})
+	requireCLIError(t, err, cli.ExitUsage)
+	if svc.searchCalled {
+		t.Fatal("search should not be called when lens and cursor are combined")
+	}
+}
+
 func TestDossier(t *testing.T) {
 	svc := &fakeService{dossierResult: &cli.DossierResult{
 		Repo:       cli.RepoRef{Owner: "o", Repo: "r"},
