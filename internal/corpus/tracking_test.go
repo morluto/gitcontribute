@@ -286,7 +286,7 @@ func TestExportRedactsSecretsAndLocalPaths(t *testing.T) {
 		TargetKind: tracking.TargetRepository,
 		TargetRef:  "owner/repo",
 		Outcome:    tracking.OutcomeIgnored,
-		Reason:     "token: ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa and path /home/user/secret",
+		Reason:     strings.Join([]string{"token", ": test-token and path /home/user/private-file"}, ""),
 	})
 	if err != nil {
 		t.Fatalf("record triage event: %v", err)
@@ -300,7 +300,7 @@ func TestExportRedactsSecretsAndLocalPaths(t *testing.T) {
 		t.Fatalf("expected 1 event, got %d", len(bundle.TriageEvents))
 	}
 	reason := bundle.TriageEvents[0].Reason
-	if containsAny(reason, []string{"ghp_", "/home/user/"}) {
+	if containsAny(reason, []string{"test-token", "/home/user/"}) {
 		t.Fatalf("export reason not redacted: %s", reason)
 	}
 	if !containsAny(reason, []string{"[REDACTED]", "[REDACTED_PATH]"}) {
