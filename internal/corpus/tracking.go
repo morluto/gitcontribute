@@ -500,11 +500,7 @@ func (c *Corpus) ExportLocalMetadata(ctx context.Context, opts tracking.ExportOp
 	}
 	bundle.Contributions = contributions
 
-	contributionIDs := make([]string, len(contributions))
-	for i, item := range contributions {
-		contributionIDs[i] = item.ID
-	}
-	if err := c.exportContributionOutcomes(ctx, bundle, contributionIDs, limit); err != nil {
+	if err := c.exportContributionOutcomes(ctx, bundle, limit); err != nil {
 		return nil, err
 	}
 
@@ -512,25 +508,16 @@ func (c *Corpus) ExportLocalMetadata(ctx context.Context, opts tracking.ExportOp
 	return tracking.SanitizeBundle(bundle), nil
 }
 
-func (c *Corpus) exportContributionOutcomes(ctx context.Context, bundle *tracking.Bundle, contributionIDs []string, limit int) error {
-	if len(contributionIDs) == 0 {
-		return nil
-	}
-	placeholders := make([]string, len(contributionIDs))
-	args := make([]any, 0, len(contributionIDs)+1)
-	for i, id := range contributionIDs {
-		placeholders[i] = "?"
-		args = append(args, id)
-	}
-	args = append(args, limit)
-	query := fmt.Sprintf(`
-		SELECT id, contribution_id, outcome, reason, source_event_at, created_at
-		FROM contribution_outcomes
-		WHERE contribution_id IN (%s)
-		ORDER BY source_event_at, id
+func (c *Corpus) exportContributionOutcomes(ctx context.Context, bundle *tracking.Bundle, limit int) error {
+	rows, err := c.db.QueryContext(ctx, `
+		SELECT o.id, o.contribution_id, o.outcome, o.reason, o.source_event_at, o.created_at
+		FROM contribution_outcomes AS o
+		JOIN (
+			SELECT id FROM contributions ORDER BY prepared_at, id LIMIT ?
+		) AS selected ON selected.id = o.contribution_id
+		ORDER BY o.source_event_at, o.id
 		LIMIT ?
-	`, strings.Join(placeholders, ","))
-	rows, err := c.db.QueryContext(ctx, query, args...)
+	`, limit, limit)
 	if err != nil {
 		return fmt.Errorf("export contribution outcomes: %w", err)
 	}
@@ -553,6 +540,21 @@ func (c *Corpus) exportContributionOutcomes(ctx context.Context, bundle *trackin
 func (c *Corpus) ImportLocalMetadata(ctx context.Context, bundle *tracking.Bundle) error {
 	if bundle == nil {
 		return errors.New("bundle is required")
+	}
+	for i, e := range bundle.TriageEvents {
+		if e == nil {
+			return fmt.Errorf("triage event %d is null", i)
+		}
+	}
+	for i, item := range bundle.Contributions {
+		if item == nil {
+			return fmt.Errorf("contribution %d is null", i)
+		}
+	}
+	for i, o := range bundle.ContributionOutcomes {
+		if o == nil {
+			return fmt.Errorf("contribution outcome %d is null", i)
+		}
 	}
 	for _, e := range bundle.TriageEvents {
 		if err := c.RecordTriageEvent(ctx, e); err != nil {

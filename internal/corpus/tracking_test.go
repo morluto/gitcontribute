@@ -256,6 +256,27 @@ func TestExportImportLocalMetadataIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestImportLocalMetadataRejectsInvalidBundleBeforeWriting(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	svc := tracking.NewService(c)
+	bundle := &tracking.Bundle{TriageEvents: []*tracking.TriageEvent{
+		{ID: "valid", TargetKind: tracking.TargetRepository, TargetRef: "owner/repo", Outcome: tracking.OutcomeSaved},
+		nil,
+	}}
+
+	if err := svc.ImportLocalMetadata(ctx, bundle); err == nil {
+		t.Fatal("expected invalid bundle error")
+	}
+	events, err := svc.ListTriageEvents(ctx, tracking.TriageEventFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("import wrote %d events before rejecting the bundle", len(events))
+	}
+}
+
 func TestExportRedactsSecretsAndLocalPaths(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)

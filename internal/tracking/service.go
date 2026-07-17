@@ -32,6 +32,8 @@ type Service struct {
 	clock func() time.Time
 }
 
+const maxImportRecords = 100_000
+
 // NewService returns a tracking service backed by repo.
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo, clock: time.Now}
@@ -79,17 +81,8 @@ func (s *Service) RecordContribution(ctx context.Context, c *Contribution) (*Con
 	if c == nil {
 		return nil, errors.New("contribution is required")
 	}
-	c.OpportunityID = strings.TrimSpace(c.OpportunityID)
-	if c.OpportunityID == "" {
-		return nil, errors.New("contribution opportunity id is required")
-	}
-	c.Kind = strings.TrimSpace(c.Kind)
-	if c.Kind != "issue" && c.Kind != "pull_request" {
-		return nil, fmt.Errorf("unsupported contribution kind %q", c.Kind)
-	}
-	c.Title = strings.TrimSpace(c.Title)
-	if c.Title == "" {
-		return nil, errors.New("contribution title is required")
+	if err := validateContribution(c); err != nil {
+		return nil, err
 	}
 	now := s.now()
 	if c.ID == "" {
@@ -125,12 +118,8 @@ func (s *Service) RecordContributionOutcome(ctx context.Context, o *Contribution
 	if o == nil {
 		return nil, errors.New("contribution outcome is required")
 	}
-	o.ContributionID = strings.TrimSpace(o.ContributionID)
-	if o.ContributionID == "" {
-		return nil, errors.New("contribution id is required")
-	}
-	if !isContributionOutcome(o.Outcome) {
-		return nil, fmt.Errorf("invalid contribution outcome %q", o.Outcome)
+	if err := validateContributionOutcome(o); err != nil {
+		return nil, err
 	}
 	now := s.now()
 	if o.ID == "" {
@@ -163,7 +152,70 @@ func (s *Service) ImportLocalMetadata(ctx context.Context, bundle *Bundle) error
 	if bundle == nil {
 		return errors.New("bundle is required")
 	}
+	if len(bundle.TriageEvents) > maxImportRecords || len(bundle.Contributions) > maxImportRecords || len(bundle.ContributionOutcomes) > maxImportRecords {
+		return fmt.Errorf("bundle record class cannot exceed %d items", maxImportRecords)
+	}
+	for i, event := range bundle.TriageEvents {
+		if event == nil {
+			return fmt.Errorf("triage event %d is null", i)
+		}
+		if event.ID == "" {
+			return fmt.Errorf("triage event %d id is required", i)
+		}
+		if err := validateTriageEvent(event); err != nil {
+			return fmt.Errorf("triage event %q: %w", event.ID, err)
+		}
+	}
+	for i, contribution := range bundle.Contributions {
+		if contribution == nil {
+			return fmt.Errorf("contribution %d is null", i)
+		}
+		if contribution.ID == "" {
+			return fmt.Errorf("contribution %d id is required", i)
+		}
+		if err := validateContribution(contribution); err != nil {
+			return fmt.Errorf("contribution %q: %w", contribution.ID, err)
+		}
+	}
+	for i, outcome := range bundle.ContributionOutcomes {
+		if outcome == nil {
+			return fmt.Errorf("contribution outcome %d is null", i)
+		}
+		if outcome.ID == "" {
+			return fmt.Errorf("contribution outcome %d id is required", i)
+		}
+		if err := validateContributionOutcome(outcome); err != nil {
+			return fmt.Errorf("contribution outcome %q: %w", outcome.ID, err)
+		}
+	}
 	return s.repo.ImportLocalMetadata(ctx, bundle)
+}
+
+func validateContribution(c *Contribution) error {
+	c.OpportunityID = strings.TrimSpace(c.OpportunityID)
+	if c.OpportunityID == "" {
+		return errors.New("contribution opportunity id is required")
+	}
+	c.Kind = strings.TrimSpace(c.Kind)
+	if c.Kind != "issue" && c.Kind != "pull_request" {
+		return fmt.Errorf("unsupported contribution kind %q", c.Kind)
+	}
+	c.Title = strings.TrimSpace(c.Title)
+	if c.Title == "" {
+		return errors.New("contribution title is required")
+	}
+	return nil
+}
+
+func validateContributionOutcome(o *ContributionOutcome) error {
+	o.ContributionID = strings.TrimSpace(o.ContributionID)
+	if o.ContributionID == "" {
+		return errors.New("contribution id is required")
+	}
+	if !isContributionOutcome(o.Outcome) {
+		return fmt.Errorf("invalid contribution outcome %q", o.Outcome)
+	}
+	return nil
 }
 
 func (s *Service) now() time.Time {
