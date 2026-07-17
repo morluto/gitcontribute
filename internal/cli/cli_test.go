@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/health"
 )
 
 type fakeService struct {
@@ -22,6 +23,7 @@ type fakeService struct {
 	dossierCalled            bool
 	indexCalled              bool
 	acquireCalled            bool
+	healthCalled             bool
 	addSourceCalled          bool
 	addRepoSourceCalled      bool
 	addGHArchiveSourceCalled bool
@@ -46,6 +48,7 @@ type fakeService struct {
 	dossierResult      *cli.DossierResult
 	indexResult        *cli.IndexResult
 	acquisitionResult  *cli.AcquisitionResult
+	healthResult       *health.Report
 	sourceResult       *cli.SourceResult
 	sourceListResult   *cli.SourceListResult
 	crawlResult        *cli.CrawlResult
@@ -68,6 +71,7 @@ type fakeService struct {
 	lastIndexRepo      cli.RepoRef
 	lastIndexPath      string
 	lastAcquireRemote  string
+	lastHealthOpts     health.Options
 	lastSourceName     string
 	lastSourceQuery    string
 	lastSourceRefs     []cli.RepoRef
@@ -157,6 +161,13 @@ func (f *fakeService) Acquire(ctx context.Context, repo cli.RepoRef, remote stri
 	f.lastIndexRepo = repo
 	f.lastAcquireRemote = remote
 	return f.acquisitionResult, f.err
+}
+
+func (f *fakeService) RepositoryHealthWithOptions(ctx context.Context, repo cli.RepoRef, opts health.Options) (*health.Report, error) {
+	f.healthCalled = true
+	f.lastIndexRepo = repo
+	f.lastHealthOpts = opts
+	return f.healthResult, f.err
 }
 
 func (f *fakeService) AddSearchSource(ctx context.Context, name, query string) (*cli.SourceResult, error) {
@@ -281,6 +292,18 @@ func TestAcquire(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"commit_sha": "abc"`) || !strings.Contains(stderr.String(), "acquiring and indexing o/r") {
 		t.Fatalf("stdout=%q stderr=%q", stdout, stderr)
+	}
+}
+
+func TestHealth(t *testing.T) {
+	svc := &fakeService{healthResult: &health.Report{Repo: health.RepoRef{Owner: "o", Repo: "r"}}}
+	c, stdout, _ := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"health", "o/r", "--start", "2026-07-01T00:00:00Z", "--end", "2026-07-17T00:00:00Z", "--stale-after", "240h", "--json"}))
+	if !svc.healthCalled || svc.lastIndexRepo.String() != "o/r" || svc.lastHealthOpts.StaleThreshold != 240*time.Hour || svc.lastHealthOpts.Start.IsZero() {
+		t.Fatalf("health args: called=%v repo=%v opts=%+v", svc.healthCalled, svc.lastIndexRepo, svc.lastHealthOpts)
+	}
+	if !strings.Contains(stdout.String(), `"repo": {`) {
+		t.Fatalf("stdout=%q", stdout)
 	}
 }
 

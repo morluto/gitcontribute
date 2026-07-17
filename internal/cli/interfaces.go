@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/morluto/gitcontribute/internal/health"
 	"github.com/morluto/gitcontribute/internal/lens"
 )
 
@@ -430,6 +431,11 @@ type AcquisitionResult struct {
 	Inserted      bool    `json:"inserted"`
 	AcquiredAt    string  `json:"acquired_at"`
 	Message       string  `json:"message"`
+}
+
+// HealthService exposes deterministic offline repository health metrics.
+type HealthService interface {
+	RepositoryHealthWithOptions(ctx context.Context, repo RepoRef, opts health.Options) (*health.Report, error)
 }
 
 // WorkspaceService is the optional workspace management capability used by the CLI.
