@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 )
 
@@ -69,6 +70,18 @@ func humanOutput(v any) (string, error) {
 		return evidenceHuman(r), nil
 	case *DraftResult:
 		return draftHuman(r), nil
+	case *ClusterListResult:
+		return clusterListHuman(r), nil
+	case *ClusterResult:
+		return clusterHuman(r), nil
+	case *LensResult:
+		return lensHuman(r), nil
+	case *LensListResult:
+		return lensListHuman(r), nil
+	case *CollectionResult:
+		return collectionHuman(r), nil
+	case *CollectionListResult:
+		return collectionListHuman(r), nil
 	default:
 		return "", fmt.Errorf("unsupported result type %T", v)
 	}
@@ -320,5 +333,94 @@ func draftHuman(r *DraftResult) string {
 	fmt.Fprintf(&b, "Title: %s\n", r.Title)
 	fmt.Fprintf(&b, "--- Body ---\n%s\n--- End ---\n", r.Body)
 	fmt.Fprintf(&b, "Rendered: %s", r.RenderedAt)
+	return b.String()
+}
+
+func clusterListHuman(r *ClusterListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Clusters for %s: %d found", r.Repo, r.Total)
+	for _, cl := range r.Clusters {
+		fmt.Fprintf(&b, "\n- %s [%s] %s/%s:%s#%d (%d members)", cl.StableID, cl.State, cl.Canonical.Owner, cl.Canonical.Repo, cl.Canonical.Kind, cl.Canonical.Number, cl.MemberCount)
+	}
+	return b.String()
+}
+
+func clusterHuman(r *ClusterResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Cluster: %s (%s)\n", r.StableID, r.State)
+	fmt.Fprintf(&b, "Canonical: %s/%s:%s#%d\n", r.Canonical.Owner, r.Canonical.Repo, r.Canonical.Kind, r.Canonical.Number)
+	fmt.Fprintf(&b, "Members: %d\n", r.MemberCount)
+	for _, m := range r.Members {
+		included := ""
+		if !m.Included {
+			included = " [excluded]"
+		}
+		fmt.Fprintf(&b, "- %s/%s:%s#%d: %s (%.2f) %s%s\n", m.Owner, m.Repo, m.Kind, m.Number, m.Title, m.Score, m.Reason, included)
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func lensHuman(r *LensResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Lens: %s\n", r.Name)
+	f := r.Definition.Filter
+	if len(f.Kinds) > 0 {
+		fmt.Fprintf(&b, "Kinds: %s\n", strings.Join(f.Kinds, ", "))
+	}
+	if len(f.States) > 0 {
+		fmt.Fprintf(&b, "States: %s\n", strings.Join(f.States, ", "))
+	}
+	if len(f.Languages) > 0 {
+		fmt.Fprintf(&b, "Languages: %s\n", strings.Join(f.Languages, ", "))
+	}
+	if f.ExcludeArchived {
+		fmt.Fprintln(&b, "Exclude archived: true")
+	}
+	if f.Unassigned {
+		fmt.Fprintln(&b, "Unassigned: true")
+	}
+	if f.UpdatedWithin > 0 {
+		fmt.Fprintf(&b, "Updated within: %s\n", f.UpdatedWithin)
+	}
+	if f.MinStars > 0 {
+		fmt.Fprintf(&b, "Minimum stars: %d\n", f.MinStars)
+	}
+	if r.Definition.MaxResultsPerRepo > 0 {
+		fmt.Fprintf(&b, "Max results per repo: %d\n", r.Definition.MaxResultsPerRepo)
+	}
+	if len(r.Definition.Weights) > 0 {
+		var names []string
+		for name := range r.Definition.Weights {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		fmt.Fprintf(&b, "Weights: %s", strings.Join(names, ", "))
+	}
+	return b.String()
+}
+
+func lensListHuman(r *LensListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d lenses", len(r.Lenses))
+	for _, l := range r.Lenses {
+		fmt.Fprintf(&b, "\n- %s", l.Name)
+	}
+	return b.String()
+}
+
+func collectionHuman(r *CollectionResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Collection: %s\n", r.Name)
+	fmt.Fprintf(&b, "Members: %d\n", r.MemberCount)
+	fmt.Fprintf(&b, "Created: %s\nUpdated: %s", r.CreatedAt, r.UpdatedAt)
+	return b.String()
+}
+
+func collectionListHuman(r *CollectionListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d collections", len(r.Collections))
+	for _, col := range r.Collections {
+		fmt.Fprintf(&b, "\n- %s (%d members)", col.Name, col.MemberCount)
+	}
 	return b.String()
 }

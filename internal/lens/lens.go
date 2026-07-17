@@ -3,6 +3,7 @@
 package lens
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -14,21 +15,107 @@ import (
 // Definition is a reusable ranking policy. Negative weights express costs or
 // risks; positive weights express desirable signals.
 type Definition struct {
-	Name              string
-	Filter            Filter
-	Weights           map[string]float64
-	MaxResultsPerRepo int
+	Name              string             `json:"name"`
+	Filter            Filter             `json:"filter"`
+	Weights           map[string]float64 `json:"weights"`
+	MaxResultsPerRepo int                `json:"max_results_per_repo"`
 }
 
 // Filter contains hard eligibility rules evaluated before normalization.
 type Filter struct {
-	Kinds           []string
-	States          []string
-	Languages       []string
-	ExcludeArchived bool
-	Unassigned      bool
-	UpdatedWithin   time.Duration
-	MinStars        int
+	Kinds           []string      `json:"kinds,omitempty"`
+	States          []string      `json:"states,omitempty"`
+	Languages       []string      `json:"languages,omitempty"`
+	ExcludeArchived bool          `json:"exclude_archived,omitempty"`
+	Unassigned      bool          `json:"unassigned,omitempty"`
+	UpdatedWithin   time.Duration `json:"updated_within,omitempty"`
+	MinStars        int           `json:"min_stars,omitempty"`
+}
+
+// UnmarshalJSON supports JSON lens definitions where updated_within may be
+// expressed as a Go duration string (e.g. "720h") or as nanoseconds.
+func (d *Definition) UnmarshalJSON(data []byte) error {
+	type alias Definition
+	var raw struct {
+		*alias
+	}
+	raw.alias = (*alias)(d)
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if d.Weights == nil {
+		d.Weights = map[string]float64{}
+	}
+	return nil
+}
+
+// MarshalJSON emits updated_within as a Go duration string so JSON lens
+// definitions round-trip with the same format used for input.
+func (f Filter) MarshalJSON() ([]byte, error) {
+	m := map[string]any{}
+	if len(f.Kinds) > 0 {
+		m["kinds"] = f.Kinds
+	}
+	if len(f.States) > 0 {
+		m["states"] = f.States
+	}
+	if len(f.Languages) > 0 {
+		m["languages"] = f.Languages
+	}
+	if f.ExcludeArchived {
+		m["exclude_archived"] = true
+	}
+	if f.Unassigned {
+		m["unassigned"] = true
+	}
+	if f.UpdatedWithin > 0 {
+		m["updated_within"] = f.UpdatedWithin.String()
+	}
+	if f.MinStars > 0 {
+		m["min_stars"] = f.MinStars
+	}
+	return json.Marshal(m)
+}
+
+// UnmarshalJSON supports duration strings for updated_within.
+func (f *Filter) UnmarshalJSON(data []byte) error {
+	type rawFilter struct {
+		Kinds           []string        `json:"kinds"`
+		States          []string        `json:"states"`
+		Languages       []string        `json:"languages"`
+		ExcludeArchived bool            `json:"exclude_archived"`
+		Unassigned      bool            `json:"unassigned"`
+		UpdatedWithin   json.RawMessage `json:"updated_within"`
+		MinStars        int             `json:"min_stars"`
+	}
+	var raw rawFilter
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	f.Kinds = raw.Kinds
+	f.States = raw.States
+	f.Languages = raw.Languages
+	f.ExcludeArchived = raw.ExcludeArchived
+	f.Unassigned = raw.Unassigned
+	f.MinStars = raw.MinStars
+
+	if len(raw.UpdatedWithin) > 0 {
+		var s string
+		if err := json.Unmarshal(raw.UpdatedWithin, &s); err == nil {
+			d, err := time.ParseDuration(s)
+			if err != nil {
+				return fmt.Errorf("parse updated_within duration: %w", err)
+			}
+			f.UpdatedWithin = d
+		} else {
+			var n int64
+			if err := json.Unmarshal(raw.UpdatedWithin, &n); err != nil {
+				return fmt.Errorf("updated_within must be a duration string or nanoseconds: %w", err)
+			}
+			f.UpdatedWithin = time.Duration(n)
+		}
+	}
+	return nil
 }
 
 // Candidate is a locally derived item and its named, unnormalized signals.

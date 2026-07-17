@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/lens"
 )
 
 // ErrNotFound lets readers distinguish absent corpus objects from failures.
@@ -27,6 +28,9 @@ type Reader interface {
 	ListOpportunities(context.Context, ListOpportunitiesInput) (ListOpportunitiesOutput, error)
 	Opportunity(context.Context, OpportunityInput) (OpportunityOutput, error)
 	Evidence(context.Context, EvidenceInput) (EvidenceOutput, error)
+	FindClusters(context.Context, FindClustersInput) (FindClustersOutput, error)
+	GetCoverage(context.Context, GetCoverageInput) (GetCoverageOutput, error)
+	Lens(context.Context, LensInput) (LensOutput, error)
 }
 
 type RepoInput struct {
@@ -211,6 +215,69 @@ type EvidenceOutput struct {
 	Evidence        []EvidenceItem `json:"evidence"`
 }
 
+type FindClustersInput struct {
+	Owner string `json:"owner" jsonschema:"GitHub repository owner"`
+	Repo  string `json:"repo" jsonschema:"GitHub repository name"`
+	Limit int    `json:"limit,omitempty" jsonschema:"Maximum clusters from 1 to 100"`
+}
+
+type ClusterMemberOutput struct {
+	Kind     string  `json:"kind"`
+	Owner    string  `json:"owner"`
+	Repo     string  `json:"repo"`
+	Number   int     `json:"number"`
+	Title    string  `json:"title,omitempty"`
+	State    string  `json:"state,omitempty"`
+	Score    float64 `json:"score"`
+	Reason   string  `json:"reason"`
+	Included bool    `json:"included"`
+}
+
+type ClusterOutput struct {
+	StableID    string                `json:"stable_id"`
+	State       string                `json:"state"`
+	Canonical   ClusterMemberOutput   `json:"canonical"`
+	MemberCount int                   `json:"member_count"`
+	Members     []ClusterMemberOutput `json:"members,omitempty"`
+}
+
+type FindClustersOutput struct {
+	Owner    string          `json:"owner"`
+	Repo     string          `json:"repo"`
+	Total    int             `json:"total"`
+	Clusters []ClusterOutput `json:"clusters"`
+}
+
+type GetCoverageInput struct {
+	Owner string `json:"owner" jsonschema:"GitHub repository owner"`
+	Repo  string `json:"repo" jsonschema:"GitHub repository name"`
+}
+
+type FacetCoverageOutput struct {
+	Facet     string `json:"facet"`
+	Complete  bool   `json:"complete"`
+	Status    string `json:"status"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+type GetCoverageOutput struct {
+	Owner  string                `json:"owner"`
+	Repo   string                `json:"repo"`
+	AsOf   string                `json:"as_of"`
+	Facets []FacetCoverageOutput `json:"facets"`
+}
+
+type LensInput struct {
+	Name string `json:"name" jsonschema:"Lens name"`
+}
+
+type LensOutput struct {
+	Name       string          `json:"name"`
+	Definition lens.Definition `json:"definition"`
+	CreatedAt  string          `json:"created_at"`
+	UpdatedAt  string          `json:"updated_at"`
+}
+
 // Server owns the MCP protocol adapter around a local Reader.
 type Server struct {
 	reader Reader
@@ -291,6 +358,21 @@ func (s *Server) register() {
 		Description: "Read evidence for a local investigation or opportunity",
 		Annotations: annotations,
 	}, s.evidence)
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "find_clusters",
+		Description: "List duplicate-candidate clusters for a repository in the local corpus without network access",
+		Annotations: annotations,
+	}, s.findClusters)
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "get_coverage",
+		Description: "Read facet coverage and freshness for a repository in the local corpus without network access",
+		Annotations: annotations,
+	}, s.getCoverage)
+	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "get_lens",
+		Description: "Read a saved lens definition from the local corpus",
+		Annotations: annotations,
+	}, s.getLens)
 
 	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
 		URITemplate: "gitcontribute://repository/{owner}/{repo}",
@@ -332,6 +414,12 @@ func (s *Server) register() {
 		URITemplate: "gitcontribute://evidence/{scope}/{id}",
 		Name:        "Evidence",
 		Description: "Local evidence for an investigation or opportunity",
+		MIMEType:    "application/json",
+	}, s.readResource)
+	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
+		URITemplate: "gitcontribute://lens/{name}",
+		Name:        "Lens",
+		Description: "Saved lens definition",
 		MIMEType:    "application/json",
 	}, s.readResource)
 }
@@ -470,6 +558,37 @@ func (s *Server) evidence(ctx context.Context, _ *mcp.CallToolRequest, in Eviden
 	return nil, out, err
 }
 
+func (s *Server) findClusters(ctx context.Context, _ *mcp.CallToolRequest, in FindClustersInput) (*mcp.CallToolResult, FindClustersOutput, error) {
+	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
+		return nil, FindClustersOutput{}, err
+	}
+	if in.Limit == 0 {
+		in.Limit = 20
+	}
+	if in.Limit < 1 || in.Limit > 100 {
+		return nil, FindClustersOutput{}, errors.New("limit must be between 1 and 100")
+	}
+	out, err := s.reader.FindClusters(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) getCoverage(ctx context.Context, _ *mcp.CallToolRequest, in GetCoverageInput) (*mcp.CallToolResult, GetCoverageOutput, error) {
+	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
+		return nil, GetCoverageOutput{}, err
+	}
+	out, err := s.reader.GetCoverage(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) getLens(ctx context.Context, _ *mcp.CallToolRequest, in LensInput) (*mcp.CallToolResult, LensOutput, error) {
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" {
+		return nil, LensOutput{}, errors.New("name is required")
+	}
+	out, err := s.reader.Lens(ctx, in)
+	return nil, out, err
+}
+
 func validateRepo(in RepoInput) error {
 	if strings.TrimSpace(in.Owner) == "" || strings.TrimSpace(in.Repo) == "" {
 		return errors.New("owner and repo are required")
@@ -548,6 +667,11 @@ func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest)
 		}
 		in.Limit = 100
 		value, err = s.reader.Evidence(ctx, in)
+	case "lens":
+		if len(parts) != 1 {
+			return nil, mcp.ResourceNotFoundError(uri)
+		}
+		value, err = s.reader.Lens(ctx, LensInput{Name: parts[0]})
 	default:
 		return nil, mcp.ResourceNotFoundError(uri)
 	}

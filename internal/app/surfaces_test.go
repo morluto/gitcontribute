@@ -1,0 +1,293 @@
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/lens"
+	"github.com/morluto/gitcontribute/internal/mcpserver"
+)
+
+func seedRepoAndThreads(t *testing.T, c *corpus.Corpus) {
+	t.Helper()
+	ctx := context.Background()
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "123", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatalf("seed repository: %v", err)
+	}
+
+	threads := []struct {
+		kind   string
+		number int
+		title  string
+		body   string
+		author string
+		labels []string
+	}{
+		{corpus.ThreadKindIssue, 1, "fix login crash", "login crashes on startup", "alice", []string{"bug"}},
+		{corpus.ThreadKindIssue, 2, "login crash on startup", "the login page crashes", "alice", []string{"bug"}},
+		{corpus.ThreadKindIssue, 3, "unrelated feature", "add dark mode", "bob", nil},
+		{corpus.ThreadKindIssue, 4, "fix login crash", "duplicate of #1", "alice", []string{"bug"}},
+		{corpus.ThreadKindIssue, 5, "api network timeout", "requests time out", "carol", []string{"bug"}},
+		{corpus.ThreadKindIssue, 6, "timeout in api requests", "network timeout", "carol", []string{"bug"}},
+	}
+
+	base := time.Unix(1000, 0).UTC()
+	for i, th := range threads {
+		updated := base.Add(time.Duration(i) * time.Second)
+		if _, err := c.UpsertThread(ctx, corpus.Thread{
+			RepositoryID:    repo.ID,
+			Kind:            th.kind,
+			Number:          th.number,
+			State:           "open",
+			Title:           th.title,
+			Body:            th.body,
+			Author:          th.author,
+			Labels:          th.labels,
+			SourceCreatedAt: updated,
+			SourceUpdatedAt: updated,
+		}, `{}`); err != nil {
+			t.Fatalf("seed thread %d: %v", th.number, err)
+		}
+	}
+}
+
+func TestServiceClustersAndCluster(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestServer("owner", "repo")
+	defer srv.Close()
+
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+
+	seedRepoAndThreads(t, svc.corpus)
+
+	repo := cli.RepoRef{Owner: "owner", Repo: "repo"}
+	list, err := svc.Clusters(ctx, repo, 10)
+	if err != nil {
+		t.Fatalf("clusters: %v", err)
+	}
+	if list.Total == 0 {
+		t.Fatal("expected clusters")
+	}
+
+	var found bool
+	for _, cl := range list.Clusters {
+		if cl.Canonical.Number == 1 {
+			found = true
+			if cl.MemberCount < 2 {
+				t.Fatalf("expected at least 2 members in login cluster, got %d", cl.MemberCount)
+			}
+			if len(cl.Members) != 0 {
+				t.Fatalf("list result should not include member details, got %d", len(cl.Members))
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected canonical cluster with issue 1, got %+v", list.Clusters)
+	}
+
+	stableID := list.Clusters[0].StableID
+	detail, err := svc.Cluster(ctx, stableID, 100)
+	if err != nil {
+		t.Fatalf("cluster show: %v", err)
+	}
+	if detail.StableID != stableID {
+		t.Fatalf("stable id mismatch: %s vs %s", detail.StableID, stableID)
+	}
+	if len(detail.Members) == 0 {
+		t.Fatal("expected cluster members in detail view")
+	}
+
+	if _, err := svc.Cluster(ctx, "nosuchcluster", 100); err == nil {
+		t.Fatal("expected error for missing cluster")
+	}
+}
+
+func TestServiceLensAndCollections(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestServer("owner", "repo")
+	defer srv.Close()
+
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+
+	def := lens.Definition{
+		Name: "active-go",
+		Filter: lens.Filter{
+			Kinds:           []string{"issue"},
+			States:          []string{"open"},
+			Languages:       []string{"Go"},
+			ExcludeArchived: true,
+			Unassigned:      true,
+			UpdatedWithin:   30 * 24 * time.Hour,
+			MinStars:        20,
+		},
+		Weights:           map[string]float64{"relevance": 1},
+		MaxResultsPerRepo: 3,
+	}
+
+	added, err := svc.AddLens(ctx, "active-go", def)
+	if err != nil {
+		t.Fatalf("add lens: %v", err)
+	}
+	if added.Name != "active-go" {
+		t.Fatalf("lens name = %q", added.Name)
+	}
+
+	show, err := svc.ShowLens(ctx, "active-go")
+	if err != nil {
+		t.Fatalf("show lens: %v", err)
+	}
+	if show.Name != "active-go" || show.Definition.Filter.MinStars != 20 {
+		t.Fatalf("unexpected lens: %+v", show)
+	}
+
+	list, err := svc.ListLenses(ctx)
+	if err != nil {
+		t.Fatalf("list lenses: %v", err)
+	}
+	if len(list.Lenses) != 1 || list.Lenses[0].Name != "active-go" {
+		t.Fatalf("unexpected lenses: %+v", list)
+	}
+
+	col, err := svc.CreateCollection(ctx, "favorites")
+	if err != nil {
+		t.Fatalf("create collection: %v", err)
+	}
+	if col.Name != "favorites" {
+		t.Fatalf("collection name = %q", col.Name)
+	}
+
+	updated, err := svc.AddCollectionMembers(ctx, "favorites", []cli.CollectionMember{
+		{Kind: "repository", Ref: "owner/repo"},
+		{Kind: "issue", Ref: "owner/repo#1"},
+	})
+	if err != nil {
+		t.Fatalf("add collection members: %v", err)
+	}
+	if updated.MemberCount != 2 {
+		t.Fatalf("member count = %d", updated.MemberCount)
+	}
+
+	cols, err := svc.ListCollections(ctx)
+	if err != nil {
+		t.Fatalf("list collections: %v", err)
+	}
+	if len(cols.Collections) != 1 || cols.Collections[0].MemberCount != 2 {
+		t.Fatalf("unexpected collections: %+v", cols)
+	}
+}
+
+func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestServer("owner", "repo")
+	defer srv.Close()
+
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+
+	seedRepoAndThreads(t, svc.corpus)
+
+	// Clusters must be computed before the MCP read tool can list them.
+	if _, err := svc.Clusters(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, 10); err != nil {
+		t.Fatalf("compute clusters: %v", err)
+	}
+
+	reader := svc.MCPReader()
+	clusters, err := reader.FindClusters(ctx, mcpserver.FindClustersInput{Owner: "owner", Repo: "repo", Limit: 10})
+	if err != nil {
+		t.Fatalf("find clusters: %v", err)
+	}
+	if clusters.Total == 0 {
+		t.Fatal("expected clusters from MCP")
+	}
+
+	cov, err := reader.GetCoverage(ctx, mcpserver.GetCoverageInput{Owner: "owner", Repo: "repo"})
+	if err != nil {
+		t.Fatalf("get coverage: %v", err)
+	}
+	if cov.Owner != "owner" || cov.Repo != "repo" {
+		t.Fatalf("unexpected coverage owner/repo: %s/%s", cov.Owner, cov.Repo)
+	}
+}
+
+func TestServiceReadsLensFromJSONFile(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestServer("owner", "repo")
+	defer srv.Close()
+
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+
+	path := filepath.Join(t.TempDir(), "lens.json")
+	data := []byte(`{
+		"filter": {
+			"kinds": ["issue"],
+			"updated_within": "720h",
+			"min_stars": 10
+		},
+		"weights": {"relevance": 1}
+	}`)
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("write lens file: %v", err)
+	}
+
+	fileData, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read lens file: %v", err)
+	}
+
+	var def lens.Definition
+	if err := json.Unmarshal(fileData, &def); err != nil {
+		t.Fatalf("parse lens file: %v", err)
+	}
+
+	added, err := svc.AddLens(ctx, "from-file", def)
+	if err != nil {
+		t.Fatalf("add lens from file: %v", err)
+	}
+	if added.Definition.Filter.UpdatedWithin != 720*time.Hour {
+		t.Fatalf("updated_within not parsed: %v", added.Definition.Filter.UpdatedWithin)
+	}
+	if added.Definition.Filter.MinStars != 10 {
+		t.Fatalf("min_stars = %d", added.Definition.Filter.MinStars)
+	}
+}
+
+func TestMCPReaderLensResource(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestServer("owner", "repo")
+	defer srv.Close()
+
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+
+	def := lens.Definition{
+		Name:    "mcp-lens",
+		Filter:  lens.Filter{Kinds: []string{"issue"}},
+		Weights: map[string]float64{"freshness": 0.5},
+	}
+	if _, err := svc.AddLens(ctx, "mcp-lens", def); err != nil {
+		t.Fatalf("add lens: %v", err)
+	}
+
+	reader := svc.MCPReader()
+	out, err := reader.Lens(ctx, mcpserver.LensInput{Name: "mcp-lens"})
+	if err != nil {
+		t.Fatalf("get lens: %v", err)
+	}
+	if out.Name != "mcp-lens" {
+		t.Fatalf("unexpected lens name: %q", out.Name)
+	}
+
+	if _, err := reader.Lens(ctx, mcpserver.LensInput{Name: "missing"}); err == nil {
+		t.Fatal("expected error for missing lens")
+	}
+}

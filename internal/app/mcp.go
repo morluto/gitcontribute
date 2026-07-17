@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
@@ -504,6 +505,137 @@ func normalizeMCPID(field, value string) (string, error) {
 		return "", fmt.Errorf("%s exceeds 128 bytes", field)
 	}
 	return value, nil
+}
+
+// FindClusters lists duplicate-candidate clusters for a repository from the
+// local corpus without recomputing them.
+func (r *MCPReader) FindClusters(ctx context.Context, in mcpserver.FindClustersInput) (mcpserver.FindClustersOutput, error) {
+	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
+	if err := ref.Validate(); err != nil {
+		return mcpserver.FindClustersOutput{}, err
+	}
+	if in.Limit <= 0 || in.Limit > 100 {
+		return mcpserver.FindClustersOutput{}, errors.New("limit must be between 1 and 100")
+	}
+	c, err := r.Service.openCorpus(ctx)
+	if err != nil {
+		return mcpserver.FindClustersOutput{}, err
+	}
+	clusters, err := c.Clustering().ListClusters(ctx, ref, "", in.Limit)
+	if err != nil {
+		return mcpserver.FindClustersOutput{}, fmt.Errorf("list clusters: %w", err)
+	}
+	out := mcpserver.FindClustersOutput{
+		Owner:    in.Owner,
+		Repo:     in.Repo,
+		Total:    len(clusters),
+		Clusters: make([]mcpserver.ClusterOutput, len(clusters)),
+	}
+	for i, cl := range clusters {
+		out.Clusters[i] = clusterToMCP(cl, 20)
+	}
+	return out, nil
+}
+
+// GetCoverage returns facet coverage and freshness for a repository.
+func (r *MCPReader) GetCoverage(ctx context.Context, in mcpserver.GetCoverageInput) (mcpserver.GetCoverageOutput, error) {
+	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
+	if err := ref.Validate(); err != nil {
+		return mcpserver.GetCoverageOutput{}, err
+	}
+	c, err := r.Service.openCorpus(ctx)
+	if err != nil {
+		return mcpserver.GetCoverageOutput{}, err
+	}
+	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	if err != nil {
+		return mcpserver.GetCoverageOutput{}, fmt.Errorf("get repository: %w", err)
+	}
+	if repo == nil {
+		return mcpserver.GetCoverageOutput{}, mcpserver.ErrNotFound
+	}
+	covs, err := c.ListCoverage(ctx, repo.ID, nil)
+	if err != nil {
+		return mcpserver.GetCoverageOutput{}, fmt.Errorf("list coverage: %w", err)
+	}
+	asOf := repo.SourceUpdatedAt
+	out := mcpserver.GetCoverageOutput{
+		Owner:  in.Owner,
+		Repo:   in.Repo,
+		AsOf:   formatTime(asOf),
+		Facets: make([]mcpserver.FacetCoverageOutput, 0, len(covs)),
+	}
+	for _, cov := range covs {
+		if cov.SourceUpdatedAt.After(asOf) {
+			asOf = cov.SourceUpdatedAt
+			out.AsOf = formatTime(asOf)
+		}
+		status := "fresh"
+		if !cov.Complete {
+			status = "stale"
+		}
+		out.Facets = append(out.Facets, mcpserver.FacetCoverageOutput{
+			Facet:     cov.Facet,
+			Complete:  cov.Complete,
+			Status:    status,
+			UpdatedAt: formatTime(cov.SourceUpdatedAt),
+		})
+	}
+	return out, nil
+}
+
+// Lens reads a saved lens definition from the local corpus.
+func (r *MCPReader) Lens(ctx context.Context, in mcpserver.LensInput) (mcpserver.LensOutput, error) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return mcpserver.LensOutput{}, errors.New("name is required")
+	}
+	c, err := r.Service.openCorpus(ctx)
+	if err != nil {
+		return mcpserver.LensOutput{}, err
+	}
+	record, err := c.GetLens(ctx, name)
+	if err != nil {
+		return mcpserver.LensOutput{}, fmt.Errorf("get lens: %w", err)
+	}
+	if record == nil {
+		return mcpserver.LensOutput{}, mcpserver.ErrNotFound
+	}
+	return mcpserver.LensOutput{
+		Name:       record.Definition.Name,
+		Definition: record.Definition,
+		CreatedAt:  formatTime(record.CreatedAt),
+		UpdatedAt:  formatTime(record.UpdatedAt),
+	}, nil
+}
+
+func clusterToMCP(cl clustering.Cluster, memberLimit int) mcpserver.ClusterOutput {
+	members := make([]mcpserver.ClusterMemberOutput, 0, len(cl.Members))
+	count := 0
+	for _, m := range cl.Members {
+		if memberLimit > 0 && count >= memberLimit {
+			break
+		}
+		members = append(members, mcpserver.ClusterMemberOutput{
+			Kind:     m.Ref.Kind,
+			Owner:    m.Ref.Owner,
+			Repo:     m.Ref.Repo,
+			Number:   m.Ref.Number,
+			Title:    m.Title,
+			State:    m.State,
+			Score:    m.Score,
+			Reason:   m.Reason,
+			Included: m.Included,
+		})
+		count++
+	}
+	return mcpserver.ClusterOutput{
+		StableID:    cl.StableID,
+		State:       string(cl.State),
+		Canonical:   mcpserver.ClusterMemberOutput{Kind: cl.Canonical.Kind, Owner: cl.Canonical.Owner, Repo: cl.Canonical.Repo, Number: cl.Canonical.Number},
+		MemberCount: len(cl.Members),
+		Members:     members,
+	}
 }
 
 // MCPRunner implements cli.MCPRunner by starting an MCP server over stdio.

@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"time"
+
+	"github.com/morluto/gitcontribute/internal/lens"
 )
 
 // Service is the product-owned application interface used by the CLI and MCP
@@ -362,4 +364,87 @@ type DraftResult struct {
 	Title         string `json:"title"`
 	Body          string `json:"body"`
 	RenderedAt    string `json:"rendered_at"`
+}
+
+// ClusteringService is the optional duplicate-candidate clustering capability
+// used by the CLI.
+type ClusteringService interface {
+	Clusters(ctx context.Context, repo RepoRef, limit int) (*ClusterListResult, error)
+	Cluster(ctx context.Context, id string, limit int) (*ClusterResult, error)
+}
+
+// ClusterResult is a single duplicate-candidate cluster.
+type ClusterResult struct {
+	StableID    string          `json:"stable_id"`
+	State       string          `json:"state"`
+	Canonical   ClusterMember   `json:"canonical"`
+	MemberCount int             `json:"member_count"`
+	Members     []ClusterMember `json:"members,omitempty"`
+}
+
+// ClusterMember is one thread inside a cluster.
+type ClusterMember struct {
+	Kind     string  `json:"kind"`
+	Owner    string  `json:"owner"`
+	Repo     string  `json:"repo"`
+	Number   int     `json:"number"`
+	Title    string  `json:"title,omitempty"`
+	State    string  `json:"state,omitempty"`
+	Score    float64 `json:"score"`
+	Reason   string  `json:"reason"`
+	Included bool    `json:"included"`
+}
+
+// ClusterListResult is the result of listing clusters for a repository.
+type ClusterListResult struct {
+	Repo     RepoRef         `json:"repo"`
+	Total    int             `json:"total"`
+	Clusters []ClusterResult `json:"clusters"`
+}
+
+// LensService is the optional saved-lens management capability used by the CLI.
+type LensService interface {
+	AddLens(ctx context.Context, name string, def lens.Definition) (*LensResult, error)
+	ListLenses(ctx context.Context) (*LensListResult, error)
+	ShowLens(ctx context.Context, name string) (*LensResult, error)
+}
+
+// LensResult is a saved lens definition.
+type LensResult struct {
+	Name       string          `json:"name"`
+	Definition lens.Definition `json:"definition"`
+	CreatedAt  string          `json:"created_at"`
+	UpdatedAt  string          `json:"updated_at"`
+}
+
+// LensListResult is a list of saved lenses.
+type LensListResult struct {
+	Lenses []LensResult `json:"lenses"`
+}
+
+// CollectionService is the optional collection management capability used by
+// the CLI.
+type CollectionService interface {
+	CreateCollection(ctx context.Context, name string) (*CollectionResult, error)
+	AddCollectionMembers(ctx context.Context, name string, members []CollectionMember) (*CollectionResult, error)
+	ListCollections(ctx context.Context) (*CollectionListResult, error)
+}
+
+// CollectionMember is one typed reference added to a collection.
+type CollectionMember struct {
+	Kind string `json:"kind"`
+	Ref  string `json:"ref"`
+}
+
+// CollectionResult is a single named collection.
+type CollectionResult struct {
+	Name        string `json:"name"`
+	MemberCount int    `json:"member_count"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+// CollectionListResult is a list of collections.
+type CollectionListResult struct {
+	Collections []CollectionResult `json:"collections"`
 }

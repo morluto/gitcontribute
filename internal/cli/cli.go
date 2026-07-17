@@ -2,15 +2,18 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/alecthomas/kong"
 	"github.com/morluto/gitcontribute/internal/discovery"
+	"github.com/morluto/gitcontribute/internal/lens"
 )
 
 const maxSearchLimit = 100
@@ -51,6 +54,10 @@ type rootCmd struct {
 	Validation    validationCmd    `cmd:"" help:"Manage validation definitions and runs"`
 	Evidence      evidenceCmd      `cmd:"" help:"Show evidence packets"`
 	Prepare       prepareCmd       `cmd:"" help:"Prepare contribution drafts"`
+	Clusters      clustersCmd      `cmd:"" help:"Compute and list duplicate-candidate clusters for a repository"`
+	Cluster       clusterCmd       `cmd:"" help:"Show a cluster by stable id"`
+	Lens          lensCmd          `cmd:"" help:"Manage saved lenses"`
+	Collection    collectionCmd    `cmd:"" help:"Manage named collections"`
 	MCP           mcpCmd           `cmd:"" name:"mcp" help:"Run the MCP server"`
 }
 
@@ -290,6 +297,60 @@ type prCmd struct {
 	JSON          bool   `name:"json" help:"Print the result as JSON"`
 }
 
+type clustersCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	Limit     int    `name:"limit" default:"50" help:"Maximum clusters to return"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type clusterCmd struct {
+	ID    string `arg:"" help:"Cluster stable id"`
+	Limit int    `name:"limit" default:"100" help:"Maximum members to show"`
+	JSON  bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type lensCmd struct {
+	Add  lensAddCmd  `cmd:"" help:"Add or replace a saved lens from a JSON file"`
+	List lensListCmd `cmd:"" help:"List saved lenses"`
+	Show lensShowCmd `cmd:"" help:"Show a saved lens"`
+}
+
+type lensAddCmd struct {
+	Name string `arg:"" help:"Lens name"`
+	File string `name:"file" required:"" help:"Path to JSON lens definition"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type lensListCmd struct {
+	JSON bool `name:"json" help:"Print the result as JSON"`
+}
+
+type lensShowCmd struct {
+	Name string `arg:"" help:"Lens name"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type collectionCmd struct {
+	Create collectionCreateCmd `cmd:"" help:"Create a named collection"`
+	Add    collectionAddCmd    `cmd:"" help:"Add typed references to a collection"`
+	List   collectionListCmd   `cmd:"" help:"List collections"`
+}
+
+type collectionCreateCmd struct {
+	Name string `arg:"" help:"Collection name"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type collectionAddCmd struct {
+	Name    string   `arg:"" help:"Collection name"`
+	Members []string `arg:"" help:"Members as kind:ref (e.g. repo:owner/repo, issue:owner/repo#12, pr:owner/repo#12)"`
+	JSON    bool     `name:"json" help:"Print the result as JSON"`
+}
+
+type collectionListCmd struct {
+	JSON bool `name:"json" help:"Print the result as JSON"`
+}
+
 type mcpCmd struct {
 	Transport string `name:"transport" default:"stdio" enum:"stdio" help:"MCP transport protocol"`
 }
@@ -353,6 +414,14 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runEvidence(ctx, command, &cli.Evidence)
 	case "prepare":
 		return c.runPrepare(ctx, command, &cli.Prepare)
+	case "clusters":
+		return c.runClusters(ctx, &cli.Clusters)
+	case "cluster":
+		return c.runCluster(ctx, &cli.Cluster)
+	case "lens":
+		return c.runLens(ctx, command, &cli.Lens)
+	case "collection":
+		return c.runCollection(ctx, command, &cli.Collection)
 	case "mcp":
 		return c.runMCP(ctx, &cli.MCP)
 	default:
@@ -402,6 +471,30 @@ func (c *CLI) evidenceService() (EvidenceService, error) {
 
 func (c *CLI) contributionService() (ContributionService, error) {
 	service, ok := c.svc.(ContributionService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) clusteringService() (ClusteringService, error) {
+	service, ok := c.svc.(ClusteringService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) lensService() (LensService, error) {
+	service, ok := c.svc.(LensService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) collectionService() (CollectionService, error) {
+	service, ok := c.svc.(CollectionService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -882,4 +975,177 @@ func parseRepo(s string) (RepoRef, error) {
 		return RepoRef{}, NewCLIError(ExitUsage, fmt.Errorf("invalid repository %q: expected OWNER/REPO", s))
 	}
 	return RepoRef{Owner: parts[0], Repo: parts[1]}, nil
+}
+
+func (c *CLI) runClusters(ctx context.Context, cmd *clustersCmd) error {
+	repo, err := parseRepo(cmd.OwnerRepo)
+	if err != nil {
+		return err
+	}
+	if cmd.Limit <= 0 || cmd.Limit > 1000 {
+		return NewCLIError(ExitUsage, fmt.Errorf("limit must be between 1 and 1000"))
+	}
+	service, err := c.clusteringService()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(c.stderr, "computing clusters for %s...\n", repo)
+	res, err := service.Clusters(ctx, repo, cmd.Limit)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, res)
+}
+
+func (c *CLI) runCluster(ctx context.Context, cmd *clusterCmd) error {
+	if strings.TrimSpace(cmd.ID) == "" {
+		return NewCLIError(ExitUsage, errors.New("cluster id is required"))
+	}
+	if cmd.Limit <= 0 || cmd.Limit > 1000 {
+		return NewCLIError(ExitUsage, fmt.Errorf("limit must be between 1 and 1000"))
+	}
+	service, err := c.clusteringService()
+	if err != nil {
+		return err
+	}
+	res, err := service.Cluster(ctx, cmd.ID, cmd.Limit)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, res)
+}
+
+func (c *CLI) runLens(ctx context.Context, command string, cmd *lensCmd) error {
+	service, err := c.lensService()
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "lens add":
+		data, err := os.ReadFile(cmd.Add.File)
+		if err != nil {
+			return NewCLIError(ExitUsage, fmt.Errorf("read lens file: %w", err))
+		}
+		var def lens.Definition
+		if err := json.Unmarshal(data, &def); err != nil {
+			return NewCLIError(ExitUsage, fmt.Errorf("parse lens file: %w", err))
+		}
+		if strings.TrimSpace(cmd.Add.Name) == "" {
+			return NewCLIError(ExitUsage, errors.New("lens name is required"))
+		}
+		fmt.Fprintf(c.stderr, "saving lens %s...\n", cmd.Add.Name)
+		res, err := service.AddLens(ctx, cmd.Add.Name, def)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Add.JSON, res)
+	case "lens list":
+		res, err := service.ListLenses(ctx)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.List.JSON, res)
+	case "lens show":
+		res, err := service.ShowLens(ctx, cmd.Show.Name)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Show.JSON, res)
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown lens command: %s", command))
+	}
+}
+
+func (c *CLI) runCollection(ctx context.Context, command string, cmd *collectionCmd) error {
+	service, err := c.collectionService()
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "collection create":
+		fmt.Fprintf(c.stderr, "creating collection %s...\n", cmd.Create.Name)
+		res, err := service.CreateCollection(ctx, cmd.Create.Name)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Create.JSON, res)
+	case "collection add":
+		if len(cmd.Add.Members) == 0 {
+			return NewCLIError(ExitUsage, errors.New("at least one member is required"))
+		}
+		members := make([]CollectionMember, len(cmd.Add.Members))
+		for i, raw := range cmd.Add.Members {
+			member, err := parseCollectionMember(raw)
+			if err != nil {
+				return NewCLIError(ExitUsage, err)
+			}
+			members[i] = member
+		}
+		fmt.Fprintf(c.stderr, "adding %d member(s) to collection %s...\n", len(members), cmd.Add.Name)
+		res, err := service.AddCollectionMembers(ctx, cmd.Add.Name, members)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Add.JSON, res)
+	case "collection list":
+		res, err := service.ListCollections(ctx)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.List.JSON, res)
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown collection command: %s", command))
+	}
+}
+
+func parseCollectionMember(raw string) (CollectionMember, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return CollectionMember{}, errors.New("collection member cannot be empty")
+	}
+
+	var kind, ref string
+	if idx := strings.IndexByte(raw, ':'); idx >= 0 {
+		kind = strings.ToLower(strings.TrimSpace(raw[:idx]))
+		ref = strings.TrimSpace(raw[idx+1:])
+	} else {
+		ref = raw
+	}
+
+	switch kind {
+	case "", "repo", "repository":
+		kind = "repository"
+	case "issue", "issues":
+		kind = "issue"
+	case "pr", "pull_request", "pullrequest":
+		kind = "pull_request"
+	default:
+		return CollectionMember{}, fmt.Errorf("unknown collection member kind %q", kind)
+	}
+
+	if kind == "repository" {
+		if _, err := parseRepo(ref); err != nil {
+			return CollectionMember{}, fmt.Errorf("invalid repository reference %q", ref)
+		}
+	} else {
+		if err := parseCollectionThreadRef(ref); err != nil {
+			return CollectionMember{}, err
+		}
+	}
+
+	return CollectionMember{Kind: kind, Ref: ref}, nil
+}
+
+func parseCollectionThreadRef(ref string) error {
+	parts := strings.Split(ref, "#")
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid thread reference %q: expected OWNER/REPO#NUMBER", ref)
+	}
+	if _, err := parseRepo(parts[0]); err != nil {
+		return fmt.Errorf("invalid thread reference %q: expected OWNER/REPO#NUMBER", ref)
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(parts[1])); err != nil || n <= 0 {
+		return fmt.Errorf("invalid thread reference %q: expected positive number", ref)
+	}
+	return nil
 }

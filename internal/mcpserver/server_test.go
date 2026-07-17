@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/lens"
 )
 
 type fakeReader struct {
@@ -98,6 +99,51 @@ func (*fakeReader) Evidence(_ context.Context, in EvidenceInput) (EvidenceOutput
 	}, nil
 }
 
+func (*fakeReader) FindClusters(_ context.Context, in FindClustersInput) (FindClustersOutput, error) {
+	return FindClustersOutput{
+		Owner: in.Owner,
+		Repo:  in.Repo,
+		Total: 1,
+		Clusters: []ClusterOutput{{
+			StableID: "abc12345",
+			State:    "open",
+			Canonical: ClusterMemberOutput{
+				Kind: "issue", Owner: in.Owner, Repo: in.Repo, Number: 1,
+			},
+			MemberCount: 2,
+			Members: []ClusterMemberOutput{
+				{Kind: "issue", Owner: in.Owner, Repo: in.Repo, Number: 1, Title: "first", Score: 1.0, Reason: "canonical member", Included: true},
+				{Kind: "issue", Owner: in.Owner, Repo: in.Repo, Number: 2, Title: "second", Score: 0.9, Reason: "similar title", Included: true},
+			},
+		}},
+	}, nil
+}
+
+func (*fakeReader) GetCoverage(_ context.Context, in GetCoverageInput) (GetCoverageOutput, error) {
+	return GetCoverageOutput{
+		Owner:  in.Owner,
+		Repo:   in.Repo,
+		AsOf:   "2026-07-17T00:00:00Z",
+		Facets: []FacetCoverageOutput{{Facet: "metadata", Complete: true, Status: "fresh", UpdatedAt: "2026-07-17T00:00:00Z"}},
+	}, nil
+}
+
+func (*fakeReader) Lens(_ context.Context, in LensInput) (LensOutput, error) {
+	if in.Name == "missing" {
+		return LensOutput{}, ErrNotFound
+	}
+	return LensOutput{
+		Name: in.Name,
+		Definition: lens.Definition{
+			Name:    in.Name,
+			Filter:  lens.Filter{Kinds: []string{"issue"}},
+			Weights: map[string]float64{"relevance": 1},
+		},
+		CreatedAt: "2026-07-17T00:00:00Z",
+		UpdatedAt: "2026-07-17T00:00:00Z",
+	}, nil
+}
+
 func connect(t *testing.T, reader Reader) (*mcp.ClientSession, func()) {
 	t.Helper()
 	server := New(reader, "test")
@@ -132,6 +178,7 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 	for _, name := range []string{
 		"search", "get_repository", "get_thread", "get_dossier",
 		"search_code", "get_investigation", "list_opportunities", "get_opportunity", "get_evidence",
+		"find_clusters", "get_coverage", "get_lens",
 	} {
 		tool := tools[name]
 		if tool == nil {
@@ -178,6 +225,9 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 		{"list_opportunities", map[string]any{"investigation_id": "inv-1"}, 1},
 		{"get_opportunity", map[string]any{"id": "opp-1"}, -1},
 		{"get_evidence", map[string]any{"investigation_id": "inv-1"}, 1},
+		{"find_clusters", map[string]any{"owner": "acme", "repo": "rocket"}, 1},
+		{"get_coverage", map[string]any{"owner": "acme", "repo": "rocket"}, -1},
+		{"get_lens", map[string]any{"name": "active-go"}, -1},
 	}
 	for _, tt := range tests {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
@@ -235,6 +285,30 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 				t.Fatalf("decode %s: %v", tt.name, err)
 			}
 			if out.Total != tt.wantTotal || len(out.Evidence) != tt.wantTotal {
+				t.Fatalf("%s output = %+v", tt.name, out)
+			}
+		case "find_clusters":
+			var out FindClustersOutput
+			if err := json.Unmarshal(payload, &out); err != nil {
+				t.Fatalf("decode %s: %v", tt.name, err)
+			}
+			if out.Total != tt.wantTotal || len(out.Clusters) != tt.wantTotal {
+				t.Fatalf("%s output = %+v", tt.name, out)
+			}
+		case "get_coverage":
+			var out GetCoverageOutput
+			if err := json.Unmarshal(payload, &out); err != nil {
+				t.Fatalf("decode %s: %v", tt.name, err)
+			}
+			if out.Owner != "acme" || out.Repo != "rocket" || len(out.Facets) == 0 {
+				t.Fatalf("%s output = %+v", tt.name, out)
+			}
+		case "get_lens":
+			var out LensOutput
+			if err := json.Unmarshal(payload, &out); err != nil {
+				t.Fatalf("decode %s: %v", tt.name, err)
+			}
+			if out.Name != "active-go" {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
 		}
@@ -306,6 +380,28 @@ func TestInvestigationOpportunityEvidenceResources(t *testing.T) {
 
 	_, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{
 		URI: "gitcontribute://opportunity/404",
+	})
+	if err == nil {
+		t.Fatal("expected resource-not-found error")
+	}
+}
+
+func TestLensResource(t *testing.T) {
+	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	defer closeSessions()
+
+	result, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{
+		URI: "gitcontribute://lens/active-go",
+	})
+	if err != nil {
+		t.Fatalf("read lens: %v", err)
+	}
+	if len(result.Contents) != 1 || result.Contents[0].Text == "" {
+		t.Fatalf("resource result = %+v", result)
+	}
+
+	_, err = client.ReadResource(context.Background(), &mcp.ReadResourceParams{
+		URI: "gitcontribute://lens/missing",
 	})
 	if err == nil {
 		t.Fatal("expected resource-not-found error")
