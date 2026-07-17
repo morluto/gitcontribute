@@ -208,3 +208,142 @@ type IndexResult struct {
 	Inserted bool    `json:"inserted"`
 	Message  string  `json:"message"`
 }
+
+// WorkspaceService is the optional workspace management capability used by the CLI.
+type WorkspaceService interface {
+	CreateWorkspace(ctx context.Context, investigationID string, opts WorkspaceCreateOptions) (*WorkspaceResult, error)
+	ShowWorkspace(ctx context.Context, id string) (*WorkspaceResult, error)
+}
+
+// WorkspaceCreateOptions carries explicit local-write intent for workspace creation.
+type WorkspaceCreateOptions struct {
+	Remote       string
+	BaseRef      string
+	CandidateRef string
+	Name         string
+}
+
+// WorkspaceResult is a durable view of a managed Git worktree.
+type WorkspaceResult struct {
+	ID              string  `json:"id"`
+	InvestigationID string  `json:"investigation_id"`
+	Repo            RepoRef `json:"repo"`
+	Path            string  `json:"path"`
+	Remote          string  `json:"remote"`
+	BaseSHA         string  `json:"base_sha"`
+	CandidateSHA    string  `json:"candidate_sha"`
+	MergeBase       string  `json:"merge_base"`
+	Dirty           bool    `json:"dirty"`
+	CreatedAt       string  `json:"created_at"`
+}
+
+// ValidationService is the optional validation management capability used by the CLI.
+type ValidationService interface {
+	DefineValidation(ctx context.Context, investigationID string, opts DefineValidationOptions) (*ValidationResult, error)
+	RunValidation(ctx context.Context, id string, kind string) (*ValidationRunResult, error)
+	CompareValidation(ctx context.Context, baseRunID, candidateRunID string) (*ValidationComparisonResult, error)
+}
+
+// DefineValidationOptions carries an explicit validation definition.
+type DefineValidationOptions struct {
+	Kind           string
+	Command        string
+	WorkingDir     string
+	BaseWorkingDir string
+	CandidateDir   string
+	Env            []string
+	Timeout        time.Duration
+	MaxOutputBytes int64
+}
+
+// ValidationResult is a stored validation definition view.
+type ValidationResult struct {
+	ID              string   `json:"id"`
+	InvestigationID string   `json:"investigation_id"`
+	Kind            string   `json:"kind"`
+	Command         []string `json:"command"`
+	WorkingDir      string   `json:"working_dir"`
+	BaseWorkingDir  string   `json:"base_working_dir,omitempty"`
+	CandidateDir    string   `json:"candidate_dir,omitempty"`
+	Timeout         string   `json:"timeout,omitempty"`
+	MaxOutputBytes  int64    `json:"max_output_bytes,omitempty"`
+	CreatedAt       string   `json:"created_at"`
+}
+
+// ValidationRunResult is the captured outcome of one validation run.
+type ValidationRunResult struct {
+	ID              string `json:"id"`
+	DefinitionID    string `json:"definition_id"`
+	InvestigationID string `json:"investigation_id"`
+	Kind            string `json:"kind"`
+	ExitCode        int    `json:"exit_code"`
+	Stdout          string `json:"stdout"`
+	Stderr          string `json:"stderr"`
+	Truncated       bool   `json:"truncated"`
+	Error           string `json:"error,omitempty"`
+	Classification  string `json:"classification"`
+	StartedAt       string `json:"started_at"`
+	CompletedAt     string `json:"completed_at"`
+}
+
+// ValidationComparisonResult classifies a base run against a candidate run.
+type ValidationComparisonResult struct {
+	Base           *ValidationRunResult `json:"base"`
+	Candidate      *ValidationRunResult `json:"candidate"`
+	Classification string               `json:"classification"`
+	Explanation    string               `json:"explanation"`
+}
+
+// EvidenceService is the optional evidence reading capability used by the CLI.
+type EvidenceService interface {
+	ShowEvidence(ctx context.Context, investigationID string) (*EvidenceResult, error)
+}
+
+// EvidenceResult is the evidence packet for an investigation.
+type EvidenceResult struct {
+	InvestigationID string         `json:"investigation_id"`
+	Evidence        []EvidenceItem `json:"evidence"`
+}
+
+// EvidenceItem is a single piece of evidence.
+type EvidenceItem struct {
+	ID              string `json:"id"`
+	Type            string `json:"type"`
+	Relation        string `json:"relation"`
+	Description     string `json:"description"`
+	ValidationRunID string `json:"validation_run_id,omitempty"`
+	OpportunityID   string `json:"opportunity_id,omitempty"`
+	CreatedAt       string `json:"created_at"`
+}
+
+// ContributionService is the optional contribution drafting capability used by the CLI.
+type ContributionService interface {
+	PrepareIssue(ctx context.Context, opportunityID string, opts PrepareIssueOptions) (*DraftResult, error)
+	PreparePullRequest(ctx context.Context, opportunityID string, opts PreparePROptions) (*DraftResult, error)
+}
+
+// PrepareIssueOptions carries optional fields for issue preparation.
+type PrepareIssueOptions struct {
+	Guidance string
+	Success  string
+}
+
+// PreparePROptions carries explicit and optional fields for PR preparation.
+type PreparePROptions struct {
+	WorkspaceID   string
+	Approach      string
+	Changes       string
+	Compatibility string
+	Limitations   string
+	LinkedIssue   string
+	Guidance      string
+}
+
+// DraftResult is a rendered, locally-stored contribution draft.
+type DraftResult struct {
+	OpportunityID string `json:"opportunity_id"`
+	Kind          string `json:"kind"`
+	Title         string `json:"title"`
+	Body          string `json:"body"`
+	RenderedAt    string `json:"rendered_at"`
+}

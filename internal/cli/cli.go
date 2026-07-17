@@ -45,6 +45,10 @@ type rootCmd struct {
 	Investigation investigationCmd `cmd:"" help:"Manage investigations"`
 	Hypothesis    hypothesisCmd    `cmd:"" help:"Manage hypotheses"`
 	Opportunity   opportunityCmd   `cmd:"" help:"Manage opportunities"`
+	Workspace     workspaceCmd     `cmd:"" help:"Manage workspaces"`
+	Validation    validationCmd    `cmd:"" help:"Manage validation definitions and runs"`
+	Evidence      evidenceCmd      `cmd:"" help:"Show evidence packets"`
+	Prepare       prepareCmd       `cmd:"" help:"Prepare contribution drafts"`
 	MCP           mcpCmd           `cmd:"" name:"mcp" help:"Run the MCP server"`
 }
 
@@ -179,6 +183,89 @@ type setStatusOpportunityCmd struct {
 	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
 
+type workspaceCmd struct {
+	Create createWorkspaceCmd `cmd:"" help:"Create a workspace for an investigation"`
+	Show   showWorkspaceCmd   `cmd:"" help:"Show a workspace"`
+}
+
+type createWorkspaceCmd struct {
+	InvestigationID string `arg:"" help:"Investigation ID"`
+	Remote          string `name:"remote" help:"Git remote URL (defaults to https://github.com/OWNER/REPO.git)"`
+	Base            string `name:"base" default:"main" help:"Base ref"`
+	Candidate       string `name:"candidate" help:"Candidate ref (defaults to investigation commit)"`
+	Name            string `name:"name" help:"Workspace name (defaults to generated ID)"`
+	JSON            bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type showWorkspaceCmd struct {
+	ID   string `arg:"" help:"Workspace ID"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type validationCmd struct {
+	Define  defineValidationCmd  `cmd:"" help:"Define a validation"`
+	Run     runValidationCmd     `cmd:"" help:"Run a validation definition"`
+	Compare compareValidationCmd `cmd:"" help:"Compare two validation runs"`
+}
+
+type defineValidationCmd struct {
+	InvestigationID string        `arg:"" help:"Investigation ID"`
+	Kind            string        `name:"kind" required:"" help:"Validation kind"`
+	Command         string        `name:"command" required:"" help:"Command argv as a single string"`
+	WorkingDir      string        `name:"working-dir" help:"Working directory for both runs"`
+	BaseWorkingDir  string        `name:"base-working-dir" help:"Base workspace directory"`
+	CandidateDir    string        `name:"candidate-dir" help:"Candidate workspace directory"`
+	Env             []string      `name:"env" help:"Environment variables (KEY=VALUE)"`
+	Timeout         time.Duration `name:"timeout" help:"Maximum execution time"`
+	MaxOutput       int64         `name:"max-output" help:"Maximum captured output bytes per stream"`
+	JSON            bool          `name:"json" help:"Print the result as JSON"`
+}
+
+type runValidationCmd struct {
+	ID   string `arg:"" help:"Validation definition ID"`
+	Kind string `name:"kind" required:"" enum:"base,candidate" help:"Run kind"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type compareValidationCmd struct {
+	BaseRunID      string `arg:"" help:"Base run ID"`
+	CandidateRunID string `arg:"" help:"Candidate run ID"`
+	JSON           bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type evidenceCmd struct {
+	Show showEvidenceCmd `cmd:"" help:"Show evidence for an investigation"`
+}
+
+type showEvidenceCmd struct {
+	InvestigationID string `arg:"" help:"Investigation ID"`
+	JSON            bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type prepareCmd struct {
+	Issue issueCmd `cmd:"" help:"Prepare an issue draft"`
+	PR    prCmd    `cmd:"" name:"pr" help:"Prepare a pull request draft"`
+}
+
+type issueCmd struct {
+	OpportunityID string `arg:"" help:"Opportunity ID"`
+	Guidance      string `name:"guidance" help:"Repository contribution guidance"`
+	Success       string `name:"success" help:"Success criteria"`
+	JSON          bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type prCmd struct {
+	OpportunityID string `arg:"" help:"Opportunity ID"`
+	WorkspaceID   string `name:"workspace" help:"Workspace ID to include diff as changes"`
+	Approach      string `name:"approach" required:"" help:"Approach description"`
+	Changes       string `name:"changes" help:"Focused changes description"`
+	Compatibility string `name:"compatibility" help:"Compatibility notes"`
+	Limitations   string `name:"limitations" help:"Limitations"`
+	LinkedIssue   string `name:"linked-issue" help:"Linked issue"`
+	Guidance      string `name:"guidance" help:"Repository contribution guidance"`
+	JSON          bool   `name:"json" help:"Print the result as JSON"`
+}
+
 type mcpCmd struct {
 	Transport string `name:"transport" default:"stdio" enum:"stdio" help:"MCP transport protocol"`
 }
@@ -234,6 +321,14 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runHypothesis(ctx, command, &cli.Hypothesis)
 	case "opportunity":
 		return c.runOpportunity(ctx, command, &cli.Opportunity)
+	case "workspace":
+		return c.runWorkspace(ctx, command, &cli.Workspace)
+	case "validation":
+		return c.runValidation(ctx, command, &cli.Validation)
+	case "evidence":
+		return c.runEvidence(ctx, command, &cli.Evidence)
+	case "prepare":
+		return c.runPrepare(ctx, command, &cli.Prepare)
 	case "mcp":
 		return c.runMCP(ctx, &cli.MCP)
 	default:
@@ -251,6 +346,38 @@ func (c *CLI) discoveryService() (DiscoveryService, error) {
 
 func (c *CLI) investigationService() (InvestigationService, error) {
 	service, ok := c.svc.(InvestigationService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) workspaceService() (WorkspaceService, error) {
+	service, ok := c.svc.(WorkspaceService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) validationService() (ValidationService, error) {
+	service, ok := c.svc.(ValidationService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) evidenceService() (EvidenceService, error) {
+	service, ok := c.svc.(EvidenceService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) contributionService() (ContributionService, error) {
+	service, ok := c.svc.(ContributionService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -387,6 +514,128 @@ func (c *CLI) runOpportunity(ctx context.Context, command string, cmd *opportuni
 		return c.render(cmd.SetStatus.JSON, result)
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown opportunity command: %s", command))
+	}
+}
+
+func (c *CLI) runWorkspace(ctx context.Context, command string, cmd *workspaceCmd) error {
+	service, err := c.workspaceService()
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "workspace create":
+		fmt.Fprintf(c.stderr, "creating workspace for investigation %s...\n", cmd.Create.InvestigationID)
+		result, err := service.CreateWorkspace(ctx, cmd.Create.InvestigationID, WorkspaceCreateOptions{
+			Remote:       cmd.Create.Remote,
+			BaseRef:      cmd.Create.Base,
+			CandidateRef: cmd.Create.Candidate,
+			Name:         cmd.Create.Name,
+		})
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Create.JSON, result)
+	case "workspace show":
+		result, err := service.ShowWorkspace(ctx, cmd.Show.ID)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Show.JSON, result)
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown workspace command: %s", command))
+	}
+}
+
+func (c *CLI) runValidation(ctx context.Context, command string, cmd *validationCmd) error {
+	service, err := c.validationService()
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "validation define":
+		fmt.Fprintf(c.stderr, "defining validation for investigation %s...\n", cmd.Define.InvestigationID)
+		result, err := service.DefineValidation(ctx, cmd.Define.InvestigationID, DefineValidationOptions{
+			Kind:           cmd.Define.Kind,
+			Command:        cmd.Define.Command,
+			WorkingDir:     cmd.Define.WorkingDir,
+			BaseWorkingDir: cmd.Define.BaseWorkingDir,
+			CandidateDir:   cmd.Define.CandidateDir,
+			Env:            cmd.Define.Env,
+			Timeout:        cmd.Define.Timeout,
+			MaxOutputBytes: cmd.Define.MaxOutput,
+		})
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Define.JSON, result)
+	case "validation run":
+		fmt.Fprintf(c.stderr, "running validation %s...\n", cmd.Run.ID)
+		result, err := service.RunValidation(ctx, cmd.Run.ID, cmd.Run.Kind)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Run.JSON, result)
+	case "validation compare":
+		result, err := service.CompareValidation(ctx, cmd.Compare.BaseRunID, cmd.Compare.CandidateRunID)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Compare.JSON, result)
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown validation command: %s", command))
+	}
+}
+
+func (c *CLI) runEvidence(ctx context.Context, command string, cmd *evidenceCmd) error {
+	service, err := c.evidenceService()
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "evidence show":
+		result, err := service.ShowEvidence(ctx, cmd.Show.InvestigationID)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Show.JSON, result)
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown evidence command: %s", command))
+	}
+}
+
+func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) error {
+	service, err := c.contributionService()
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "prepare issue":
+		fmt.Fprintf(c.stderr, "preparing issue draft for opportunity %s...\n", cmd.Issue.OpportunityID)
+		result, err := service.PrepareIssue(ctx, cmd.Issue.OpportunityID, PrepareIssueOptions{
+			Guidance: cmd.Issue.Guidance,
+			Success:  cmd.Issue.Success,
+		})
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Issue.JSON, result)
+	case "prepare pr":
+		fmt.Fprintf(c.stderr, "preparing pull request draft for opportunity %s...\n", cmd.PR.OpportunityID)
+		result, err := service.PreparePullRequest(ctx, cmd.PR.OpportunityID, PreparePROptions{
+			WorkspaceID:   cmd.PR.WorkspaceID,
+			Approach:      cmd.PR.Approach,
+			Changes:       cmd.PR.Changes,
+			Compatibility: cmd.PR.Compatibility,
+			Limitations:   cmd.PR.Limitations,
+			LinkedIssue:   cmd.PR.LinkedIssue,
+			Guidance:      cmd.PR.Guidance,
+		})
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.PR.JSON, result)
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown prepare command: %s", command))
 	}
 }
 

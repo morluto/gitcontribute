@@ -12,6 +12,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
+	"github.com/morluto/gitcontribute/internal/workspace"
 )
 
 var (
@@ -34,6 +35,44 @@ func unmarshalWorkflow(payload string, value any) error {
 		return fmt.Errorf("decode workflow record: %w", err)
 	}
 	return nil
+}
+
+func (c *Corpus) SaveWorkspace(ctx context.Context, item *workspace.Workspace) error {
+	if item == nil || item.Name == "" {
+		return errors.New("workspace name is required")
+	}
+	payload, err := marshalWorkflow(item)
+	if err != nil {
+		return err
+	}
+	_, err = c.db.ExecContext(ctx, `
+		INSERT INTO workspaces (id, investigation_id, payload, created_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT (id) DO UPDATE SET investigation_id=excluded.investigation_id,
+			payload=excluded.payload, created_at=excluded.created_at
+	`, item.Name, item.InvestigationID, payload, encodeTime(item.CreatedAt))
+	if err != nil {
+		return fmt.Errorf("save workspace: %w", err)
+	}
+	return nil
+}
+
+func (c *Corpus) GetWorkspace(ctx context.Context, id string) (*workspace.Workspace, error) {
+	var payload string
+	var createdAt int64
+	err := c.db.QueryRowContext(ctx, `SELECT payload, created_at FROM workspaces WHERE id=?`, id).Scan(&payload, &createdAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, workspace.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get workspace: %w", err)
+	}
+	var item workspace.Workspace
+	if err := unmarshalWorkflow(payload, &item); err != nil {
+		return nil, err
+	}
+	item.CreatedAt = scanTime(createdAt)
+	return &item, nil
 }
 
 func (c *Corpus) SaveInvestigation(ctx context.Context, item *investigation.Investigation) error {

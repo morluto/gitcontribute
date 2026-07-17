@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -613,5 +616,222 @@ func TestInvestigationAndOpportunityFlow(t *testing.T) {
 	}
 	if len(investigations.Investigations) != 1 {
 		t.Fatalf("expected 1 investigation, got %+v", investigations)
+	}
+}
+
+func TestPrepareContributionDrafts(t *testing.T) {
+	ctx := context.Background()
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "", "")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+	h, err := svc.AddHypothesis(ctx, inv.ID, "race in parser", "data race under load", "bug")
+	if err != nil {
+		t.Fatalf("add hypothesis: %v", err)
+	}
+	opp, err := svc.PromoteOpportunity(ctx, h.ID, "parser panics on valid input", "pkg/parser", "crash", "small", 0.8)
+	if err != nil {
+		t.Fatalf("promote opportunity: %v", err)
+	}
+
+	issue, err := svc.PrepareIssue(ctx, opp.ID, cli.PrepareIssueOptions{Success: "Pass tests without panic"})
+	if err != nil {
+		t.Fatalf("prepare issue: %v", err)
+	}
+	if issue.Kind != "issue" || issue.OpportunityID != opp.ID || issue.Title != h.Title {
+		t.Fatalf("unexpected issue draft: %+v", issue)
+	}
+	if !strings.Contains(issue.Body, "Problem") || !strings.Contains(issue.Body, "Pass tests without panic") {
+		t.Fatalf("issue body missing expected sections: %s", issue.Body)
+	}
+
+	pr, err := svc.PreparePullRequest(ctx, opp.ID, cli.PreparePROptions{
+		Approach:      "Serialize access with a mutex",
+		Changes:       "Lock around parser state",
+		Compatibility: "No breaking changes",
+		Limitations:   "None",
+		LinkedIssue:   "#42",
+	})
+	if err != nil {
+		t.Fatalf("prepare pull request: %v", err)
+	}
+	if pr.Kind != "pull_request" || pr.OpportunityID != opp.ID {
+		t.Fatalf("unexpected pr draft: %+v", pr)
+	}
+	if !strings.Contains(pr.Body, "Serialize access with a mutex") || !strings.Contains(pr.Body, "Lock around parser state") {
+		t.Fatalf("pr body missing expected sections: %s", pr.Body)
+	}
+}
+
+func TestValidationDefineRunAndCompare(t *testing.T) {
+	ctx := context.Background()
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc123", "")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+
+	dir := t.TempDir()
+	def, err := svc.DefineValidation(ctx, inv.ID, cli.DefineValidationOptions{
+		Kind:           "test",
+		Command:        "echo ok",
+		WorkingDir:     dir,
+		Timeout:        30 * time.Second,
+		MaxOutputBytes: 64,
+	})
+	if err != nil {
+		t.Fatalf("define validation: %v", err)
+	}
+	if def.ID == "" || def.Kind != "test" || def.WorkingDir != dir || def.MaxOutputBytes != 64 {
+		t.Fatalf("unexpected validation: %+v", def)
+	}
+
+	baseRun, err := svc.RunValidation(ctx, def.ID, "base")
+	if err != nil {
+		t.Fatalf("run base: %v", err)
+	}
+	if baseRun.Kind != "base" || baseRun.Classification != "passing" || baseRun.ExitCode != 0 {
+		t.Fatalf("unexpected base run: %+v", baseRun)
+	}
+
+	candidateRun, err := svc.RunValidation(ctx, def.ID, "candidate")
+	if err != nil {
+		t.Fatalf("run candidate: %v", err)
+	}
+	if candidateRun.Kind != "candidate" {
+		t.Fatalf("unexpected candidate run: %+v", candidateRun)
+	}
+
+	cmp, err := svc.CompareValidation(ctx, baseRun.ID, candidateRun.ID)
+	if err != nil {
+		t.Fatalf("compare: %v", err)
+	}
+	if cmp.Classification != "no_difference" {
+		t.Fatalf("expected no_difference, got %s", cmp.Classification)
+	}
+
+	evidence, err := svc.ShowEvidence(ctx, inv.ID)
+	if err != nil {
+		t.Fatalf("show evidence: %v", err)
+	}
+	if evidence.InvestigationID != inv.ID {
+		t.Fatalf("unexpected evidence result: %+v", evidence)
+	}
+}
+
+func TestWorkspaceCreateAndShow(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	remote, baseSHA, candidateSHA := setupAppGitRemote(t)
+
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+
+	ws, err := svc.CreateWorkspace(ctx, inv.ID, cli.WorkspaceCreateOptions{
+		Remote:       remote,
+		BaseRef:      "master",
+		CandidateRef: "feature",
+		Name:         "ws-test",
+	})
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if ws.ID != "ws-test" || ws.InvestigationID != inv.ID || ws.BaseSHA != baseSHA || ws.CandidateSHA != candidateSHA {
+		t.Fatalf("unexpected workspace: %+v", ws)
+	}
+	if _, err := os.Stat(ws.Path); err != nil {
+		t.Fatalf("workspace path missing: %v", err)
+	}
+
+	shown, err := svc.ShowWorkspace(ctx, ws.ID)
+	if err != nil {
+		t.Fatalf("show workspace: %v", err)
+	}
+	if shown.ID != ws.ID || shown.BaseSHA != baseSHA {
+		t.Fatalf("workspace roundtrip failed: %+v", shown)
+	}
+}
+
+func setupAppGitRemote(t *testing.T) (remoteURL, baseSHA, candidateSHA string) {
+	t.Helper()
+	dir := t.TempDir()
+	remote := filepath.Join(dir, "remote.git")
+	runGitApp(t, "", "init", "--bare", remote)
+
+	src := filepath.Join(dir, "src")
+	runGitApp(t, "", "clone", remote, src)
+	runGitApp(t, src, "config", "user.email", "test@example.com")
+	runGitApp(t, src, "config", "user.name", "Test")
+
+	writeAppFile(t, filepath.Join(src, "base.txt"), "base")
+	runGitApp(t, src, "add", ".")
+	runGitApp(t, src, "commit", "-m", "base")
+	runGitApp(t, src, "push", "origin", "master")
+
+	runGitApp(t, src, "checkout", "-b", "feature")
+	writeAppFile(t, filepath.Join(src, "feature.txt"), "feature")
+	runGitApp(t, src, "add", ".")
+	runGitApp(t, src, "commit", "-m", "feature")
+	runGitApp(t, src, "push", "origin", "feature")
+
+	baseSHA = strings.TrimSpace(runGitApp(t, src, "rev-parse", "master"))
+	candidateSHA = strings.TrimSpace(runGitApp(t, src, "rev-parse", "feature"))
+	return remote, baseSHA, candidateSHA
+}
+
+func runGitApp(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"--no-pager"}, args...)...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_NO_PAGER=1",
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_SSH_COMMAND=/bin/false",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v in %q: %v\n%s", args, dir, err, out)
+	}
+	return string(out)
+}
+
+func writeAppFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
 	}
 }

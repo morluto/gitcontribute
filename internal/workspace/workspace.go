@@ -91,14 +91,17 @@ func DefaultRunner() Runner { return execRunner{} }
 
 // Workspace is a product-owned record for a managed Git worktree.
 type Workspace struct {
-	Name         string
-	Path         string
-	Remote       string
-	BaseSHA      string
-	CandidateSHA string
-	MergeBase    string
-	Dirty        bool
-	CreatedAt    time.Time
+	Name            string
+	InvestigationID string
+	RepoOwner       string
+	RepoName        string
+	Path            string
+	Remote          string
+	BaseSHA         string
+	CandidateSHA    string
+	MergeBase       string
+	Dirty           bool
+	CreatedAt       time.Time
 
 	mirror string
 }
@@ -223,6 +226,13 @@ func (m *Manager) Clone(ctx context.Context, remote, name string) error {
 	}
 	path := filepath.Join(mirrorsDir, name)
 	if _, err := os.Stat(path); err == nil {
+		// If an existing mirror is already present, record it and treat the
+		// operation as idempotent so durable workspace metadata can outlive the
+		// in-memory manager.
+		if _, err := m.git(ctx, path, "rev-parse", "--is-bare-repository"); err == nil {
+			m.mirrors[name] = &mirror{name: name, remote: remote, path: path}
+			return nil
+		}
 		return ErrMirrorExists
 	}
 	if _, err := m.git(ctx, mirrorsDir, "clone", "--mirror", "--no-hardlinks", "--template=", "--", remote, name); err != nil {
@@ -501,6 +511,43 @@ func (m *Manager) Remove(ctx context.Context, path string, force bool) error {
 	delete(m.workspaces, ws.Name)
 	m.mu.Unlock()
 	return nil
+}
+
+// StatusByPath reports the dirty state of any workspace path inside the
+// managed root without requiring the workspace to be loaded in memory.
+func (m *Manager) StatusByPath(ctx context.Context, path string) (Status, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return Status{}, fmt.Errorf("resolve path: %w", err)
+	}
+	abs = filepath.Clean(abs)
+	if !m.contains(abs) {
+		return Status{}, ErrNotManaged
+	}
+	return m.status(ctx, abs)
+}
+
+// DiffByPath returns the diff for a workspace path against the supplied base
+// SHA, including staged and unstaged changes.
+func (m *Manager) DiffByPath(ctx context.Context, path, baseSHA string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve path: %w", err)
+	}
+	abs = filepath.Clean(abs)
+	if !m.contains(abs) {
+		return "", ErrNotManaged
+	}
+	args := []string{"diff", "--no-ext-diff", "--no-textconv"}
+	if baseSHA != "" {
+		args = append(args, baseSHA)
+	}
+	args = append(args, "--")
+	out, err := m.git(ctx, abs, args...)
+	if err != nil {
+		return "", fmt.Errorf("diff: %w", err)
+	}
+	return out, nil
 }
 
 func (m *Manager) contains(path string) bool {

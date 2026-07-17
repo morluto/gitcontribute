@@ -84,11 +84,14 @@ type ValidationDefinition struct {
 	HypothesisID    string
 	OpportunityID   string
 	Name            string
+	Kind            string
 	Command         []string
 	WorkingDir      string
 	BaseWorkingDir  string
 	CandidateDir    string
 	Env             []string
+	Timeout         time.Duration
+	MaxOutputBytes  int64
 	CreatedAt       time.Time
 }
 

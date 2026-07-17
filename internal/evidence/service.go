@@ -59,11 +59,23 @@ func (s *Service) RunValidation(ctx context.Context, defID string, kind RunKind)
 		return nil, ErrMissingWorkspace
 	}
 
-	result, err := s.runner.Run(ctx, RunRequest{
+	runCtx := ctx
+	if def.Timeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, def.Timeout)
+		defer cancel()
+	}
+
+	var maxOutput int64 = defaultMaxOutputBytes
+	if def.MaxOutputBytes > 0 {
+		maxOutput = def.MaxOutputBytes
+	}
+
+	result, err := s.runner.Run(runCtx, RunRequest{
 		Args:           def.Command,
 		Dir:            workingDir,
 		Env:            def.Env,
-		MaxOutputBytes: defaultMaxOutputBytes,
+		MaxOutputBytes: maxOutput,
 	})
 	if err != nil {
 		return nil, err

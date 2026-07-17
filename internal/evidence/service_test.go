@@ -218,6 +218,50 @@ func (r *capturingRunner) Run(_ context.Context, request RunRequest) (*RunResult
 	return r.result, nil
 }
 
+func TestDefineValidationStoresKindAndBounds(t *testing.T) {
+	repo := newFakeRepo()
+	svc := NewService(repo, &fakeRunner{})
+	def := &ValidationDefinition{
+		Command:        []string{"go", "test"},
+		WorkingDir:     "/tmp/ws",
+		Kind:           "test",
+		Timeout:        2 * time.Minute,
+		MaxOutputBytes: 8192,
+	}
+	if err := svc.DefineValidation(context.Background(), def); err != nil {
+		t.Fatal(err)
+	}
+	stored, ok := repo.defs[def.ID]
+	if !ok {
+		t.Fatal("definition was not stored")
+	}
+	if stored.Kind != "test" {
+		t.Fatalf("kind = %q, want test", stored.Kind)
+	}
+	if stored.Timeout != 2*time.Minute {
+		t.Fatalf("timeout = %v, want 2m", stored.Timeout)
+	}
+	if stored.MaxOutputBytes != 8192 {
+		t.Fatalf("max output = %d, want 8192", stored.MaxOutputBytes)
+	}
+}
+
+func TestRunValidationPassesOutputBound(t *testing.T) {
+	repo := newFakeRepo()
+	runner := &capturingRunner{result: &RunResult{Classification: RunClassificationPassing}}
+	svc := NewService(repo, runner)
+	def := &ValidationDefinition{ID: "def", Command: []string{"go", "test"}, WorkingDir: "/tmp/ws", MaxOutputBytes: 1024}
+	if err := svc.DefineValidation(context.Background(), def); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RunValidation(context.Background(), def.ID, RunKindBase); err != nil {
+		t.Fatal(err)
+	}
+	if runner.request.MaxOutputBytes != 1024 {
+		t.Fatalf("max output bytes = %d, want 1024", runner.request.MaxOutputBytes)
+	}
+}
+
 func TestEvidenceWithSourceRef(t *testing.T) {
 	repo := newFakeRepo()
 	svc := NewService(repo, &fakeRunner{})

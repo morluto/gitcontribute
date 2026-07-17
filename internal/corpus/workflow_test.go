@@ -11,6 +11,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
+	"github.com/morluto/gitcontribute/internal/workspace"
 )
 
 func TestContributionWorkflowPersistsAcrossReopen(t *testing.T) {
@@ -210,5 +211,50 @@ func TestInvestigationAndOpportunityListQueries(t *testing.T) {
 	}
 	if len(filtered) != 1 || filtered[0].ID != opA.ID {
 		t.Fatalf("expected 1 opportunity for invA, got %+v", filtered)
+	}
+}
+
+func TestWorkspacePersistsAcrossReopen(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "workspace.db")
+	c, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ws := &workspace.Workspace{
+		Name:            "ws-1",
+		InvestigationID: "inv-1",
+		Path:            "/tmp/ws",
+		Remote:          "https://github.com/o/r.git",
+		BaseSHA:         "base-sha",
+		CandidateSHA:    "candidate-sha",
+		MergeBase:       "merge-base",
+		CreatedAt:       time.Now().UTC(),
+	}
+	if err := c.SaveWorkspace(ctx, ws); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+
+	got, err := c.GetWorkspace(ctx, "ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "ws-1" || got.InvestigationID != "inv-1" || got.Remote != ws.Remote {
+		t.Fatalf("workspace roundtrip failed: %+v", got)
+	}
+
+	_, err = c.GetWorkspace(ctx, "missing")
+	if !errors.Is(err, workspace.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }

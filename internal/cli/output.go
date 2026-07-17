@@ -57,6 +57,18 @@ func humanOutput(v any) (string, error) {
 		return opportunityHuman(r), nil
 	case *OpportunityListResult:
 		return opportunityListHuman(r), nil
+	case *WorkspaceResult:
+		return workspaceHuman(r), nil
+	case *ValidationResult:
+		return validationHuman(r), nil
+	case *ValidationRunResult:
+		return validationRunHuman(r), nil
+	case *ValidationComparisonResult:
+		return validationComparisonHuman(r), nil
+	case *EvidenceResult:
+		return evidenceHuman(r), nil
+	case *DraftResult:
+		return draftHuman(r), nil
 	default:
 		return "", fmt.Errorf("unsupported result type %T", v)
 	}
@@ -192,4 +204,99 @@ func pluralize(n int, singular, plural string) string {
 		return singular
 	}
 	return plural
+}
+
+func workspaceHuman(r *WorkspaceResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Workspace: %s (investigation=%s, repo=%s, dirty=%v)\n", r.ID, r.InvestigationID, r.Repo, r.Dirty)
+	fmt.Fprintf(&b, "Path: %s\n", r.Path)
+	fmt.Fprintf(&b, "Remote: %s\n", r.Remote)
+	fmt.Fprintf(&b, "Base SHA: %s\n", r.BaseSHA)
+	fmt.Fprintf(&b, "Candidate SHA: %s\n", r.CandidateSHA)
+	fmt.Fprintf(&b, "Merge base: %s\n", r.MergeBase)
+	fmt.Fprintf(&b, "Created: %s", r.CreatedAt)
+	return b.String()
+}
+
+func validationHuman(r *ValidationResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Validation: %s (kind=%s, investigation=%s)\n", r.ID, r.Kind, r.InvestigationID)
+	fmt.Fprintf(&b, "Command: %s\n", strings.Join(r.Command, " "))
+	fmt.Fprintf(&b, "Working directory: %s\n", r.WorkingDir)
+	if r.BaseWorkingDir != "" {
+		fmt.Fprintf(&b, "Base working directory: %s\n", r.BaseWorkingDir)
+	}
+	if r.CandidateDir != "" {
+		fmt.Fprintf(&b, "Candidate directory: %s\n", r.CandidateDir)
+	}
+	if r.Timeout != "" {
+		fmt.Fprintf(&b, "Timeout: %s\n", r.Timeout)
+	}
+	if r.MaxOutputBytes > 0 {
+		fmt.Fprintf(&b, "Max output bytes: %d\n", r.MaxOutputBytes)
+	}
+	fmt.Fprintf(&b, "Created: %s", r.CreatedAt)
+	return b.String()
+}
+
+func validationRunHuman(r *ValidationRunResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Validation run: %s (kind=%s, classification=%s, exit=%d)\n", r.ID, r.Kind, r.Classification, r.ExitCode)
+	if r.Truncated {
+		b.WriteString("Output truncated\n")
+	}
+	if r.Stdout != "" {
+		fmt.Fprintf(&b, "--- stdout ---\n%s\n", r.Stdout)
+	}
+	if r.Stderr != "" {
+		fmt.Fprintf(&b, "--- stderr ---\n%s\n", r.Stderr)
+	}
+	if r.Error != "" {
+		fmt.Fprintf(&b, "Error: %s\n", r.Error)
+	}
+	fmt.Fprintf(&b, "Started: %s\n", r.StartedAt)
+	fmt.Fprintf(&b, "Completed: %s", r.CompletedAt)
+	return b.String()
+}
+
+func validationComparisonHuman(r *ValidationComparisonResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Comparison: %s\n", r.Classification)
+	fmt.Fprintf(&b, "Explanation: %s\n", r.Explanation)
+	if r.Base != nil {
+		fmt.Fprintf(&b, "Base run: %s (exit=%d, %s)\n", r.Base.ID, r.Base.ExitCode, r.Base.Classification)
+	}
+	if r.Candidate != nil {
+		fmt.Fprintf(&b, "Candidate run: %s (exit=%d, %s)\n", r.Candidate.ID, r.Candidate.ExitCode, r.Candidate.Classification)
+	}
+	return b.String()
+}
+
+func evidenceHuman(r *EvidenceResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Evidence for investigation %s:\n", r.InvestigationID)
+	if len(r.Evidence) == 0 {
+		b.WriteString("No evidence recorded.")
+		return b.String()
+	}
+	for _, e := range r.Evidence {
+		fmt.Fprintf(&b, "- %s [%s / %s] %s", e.ID, e.Type, e.Relation, e.Description)
+		if e.ValidationRunID != "" {
+			fmt.Fprintf(&b, " [run: %s]", e.ValidationRunID)
+		}
+		if e.OpportunityID != "" {
+			fmt.Fprintf(&b, " [opportunity: %s]", e.OpportunityID)
+		}
+		b.WriteString("\n")
+	}
+	return strings.TrimSpace(b.String())
+}
+
+func draftHuman(r *DraftResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s draft for opportunity %s\n", r.Kind, r.OpportunityID)
+	fmt.Fprintf(&b, "Title: %s\n", r.Title)
+	fmt.Fprintf(&b, "--- Body ---\n%s\n--- End ---\n", r.Body)
+	fmt.Fprintf(&b, "Rendered: %s", r.RenderedAt)
+	return b.String()
 }
