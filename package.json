@@ -23,6 +23,7 @@
   ],
   "scripts": {
     "test:npm": "node --test npm/*.test.mjs",
+    "test:e2e": "node --test npm/*.e2e.mjs",
     "build:npm": "node scripts/build-npm-package.mjs"
   },
   "keywords": [

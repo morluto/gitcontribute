@@ -45,6 +45,7 @@ application and domain packages expose product-owned values and interfaces.
 | --- | --- | ---: | ---: | ---: | ---: |
 | Corpus read | search, health, dossier show, MCP resources | no | no | no | no |
 | Corpus write | investigations, evidence, lenses, tracking | no | yes | no | no |
+| Terminal installation | explicit setup `--install-cli` | npm registry dependent | yes | `npm` only | no |
 | GitHub read | sync, crawl, hydrate | yes | yes | no | no |
 | Git acquisition | acquire, workspace create | remote-dependent | yes | `git` only | no |
 | Validation | validation run with explicit execution | no by default | yes | yes | no |

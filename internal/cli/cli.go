@@ -112,6 +112,8 @@ type setupCmd struct {
 	Codex          bool   `name:"codex" help:"Configure Codex"`
 	Claude         bool   `name:"claude" help:"Configure Claude Code"`
 	AllClients     bool   `name:"all-clients" help:"Configure every supported client"`
+	InstallCLI     bool   `name:"install-cli" help:"Install a persistent gitcontribute command for the CLI and TUI"`
+	NoMCP          bool   `name:"no-mcp" help:"Skip coding-agent MCP configuration"`
 	TokenSource    string `name:"token-source" help:"GitHub token source (none, env, gh-cli, or keyring)"`
 	TokenSourceKey string `name:"token-source-key" help:"Environment variable or keyring entry name"`
 	Repository     string `name:"repo" help:"Add an initial OWNER/REPO source without syncing it"`
@@ -889,18 +891,34 @@ func (c *CLI) setupService() (SetupService, error) {
 func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
 	clients := selectedSetupClients(cmd.Codex, cmd.Claude)
 	all := cmd.AllClients
-	needsPrompt := !cmd.Yes && ((len(clients) == 0 && !all) || cmd.TokenSource == "" || !cmd.DryRun)
+	if cmd.NoMCP && (len(clients) > 0 || all) {
+		return NewCLIError(ExitUsage, errors.New("--no-mcp cannot be combined with client flags"))
+	}
+	needsPrompt := !cmd.Yes && ((!cmd.NoMCP && len(clients) == 0 && !all) || cmd.TokenSource == "" || !cmd.DryRun)
 	if needsPrompt && !c.interactiveInput() {
 		return NewCLIError(ExitUsage, errors.New("interactive setup requires a terminal; pass client flags and --yes"))
 	}
-	if len(clients) == 0 && !all {
+	if !cmd.Yes && !cmd.InstallCLI && runningThroughNpx() && c.interactiveInput() {
+		// Only an ephemeral bootstrap needs this offer. A globally installed or
+		// source-built executable is already a persistent terminal command.
+		install, err := c.confirmSetup("Install the terminal app for CLI and TUI")
+		if err != nil {
+			return NewCLIError(ExitUsage, err)
+		}
+		cmd.InstallCLI = install
+	}
+	if !cmd.NoMCP && len(clients) == 0 && !all {
 		if !cmd.Yes {
-			selected, err := c.promptClients("Set up")
+			selected, err := c.promptClients("Set up", true)
 			if err != nil {
 				return NewCLIError(ExitUsage, err)
 			}
 			clients = selected
+			cmd.NoMCP = len(selected) == 0
 		}
+	}
+	if cmd.NoMCP && !cmd.InstallCLI {
+		return NewCLIError(ExitUsage, errors.New("setup has no selected capability"))
 	}
 	if cmd.TokenSource == "" && !cmd.Yes {
 		value, err := c.promptTokenSource()
@@ -912,7 +930,32 @@ func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
 			cmd.TokenSourceKey = "GITHUB_TOKEN"
 		}
 	}
+	opts := SetupOptions{
+		Clients: clients, AllClients: all, InstallCLI: cmd.InstallCLI, SkipMCP: cmd.NoMCP,
+		TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey, Repository: cmd.Repository,
+		DryRun: cmd.DryRun, Version: cmd.MCPVersion,
+	}
 	if !cmd.Yes && !cmd.DryRun {
+		// Show the real application plan before consent. JSON callers keep stdout
+		// machine-readable, so their human preview is written to stderr.
+		service, err := c.setupService()
+		if err != nil {
+			return err
+		}
+		planOptions := opts
+		planOptions.DryRun = true
+		plan, err := service.Setup(ctx, planOptions)
+		if err != nil {
+			return NewCLIError(ExitGeneral, err)
+		}
+		planOutput := c.stdout
+		if cmd.JSON {
+			planOutput = c.stderr
+		}
+		_, _ = fmt.Fprintln(planOutput, setupHuman(plan))
+		if plan.HasFailures() {
+			return NewCLIError(ExitGeneral, errors.New("setup plan contains one or more failed steps"))
+		}
 		ok, err := c.confirmSetup("Apply setup changes")
 		if err != nil {
 			return NewCLIError(ExitUsage, err)
@@ -922,7 +965,14 @@ func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
 			return nil
 		}
 	}
-	return c.executeSetup(ctx, SetupOptions{Clients: clients, AllClients: all, TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey, Repository: cmd.Repository, DryRun: cmd.DryRun, Version: cmd.MCPVersion}, cmd.JSON)
+	return c.executeSetup(ctx, opts, cmd.JSON)
+}
+
+// runningThroughNpx is used only to decide whether the interactive adapter
+// should offer persistent installation. The application layer independently
+// evaluates the same evidence when selecting and reporting MCP launchers.
+func runningThroughNpx() bool {
+	return os.Getenv("npm_execpath") != "" || os.Getenv("npm_lifecycle_event") == "npx" || os.Getenv("npm_command") == "exec"
 }
 
 func (c *CLI) runRemoveCommand(ctx context.Context, cmd *removeCmd) error {
@@ -934,7 +984,7 @@ func (c *CLI) runRemoveCommand(ctx context.Context, cmd *removeCmd) error {
 	}
 	if len(clients) == 0 && !all {
 		if !cmd.Yes {
-			selected, err := c.promptClients("Remove")
+			selected, err := c.promptClients("Remove", false)
 			if err != nil {
 				return NewCLIError(ExitUsage, err)
 			}
@@ -974,8 +1024,12 @@ func selectedSetupClients(codex, claude bool) []string {
 	return clients
 }
 
-func (c *CLI) promptClients(action string) ([]string, error) {
-	_, _ = fmt.Fprintf(c.stderr, "%s which clients? [codex,claude]: ", action)
+func (c *CLI) promptClients(action string, allowNone bool) ([]string, error) {
+	choices := "codex,claude"
+	if allowNone {
+		choices += ",none"
+	}
+	_, _ = fmt.Fprintf(c.stderr, "%s which MCP clients? [%s]: ", action, choices)
 	line, err := c.promptLine()
 	if err != nil {
 		return nil, err
@@ -983,6 +1037,9 @@ func (c *CLI) promptClients(action string) ([]string, error) {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		line = "codex,claude"
+	}
+	if allowNone && strings.EqualFold(line, "none") {
+		return nil, nil
 	}
 	var clients []string
 	for _, value := range strings.Split(line, ",") {

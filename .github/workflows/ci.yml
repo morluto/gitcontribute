@@ -303,5 +303,10 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 22
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
       - run: npm run test:npm
+      - run: npm run test:e2e
       - run: npm pack --dry-run
