@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -287,11 +288,30 @@ func (s *Service) Status(ctx context.Context) (*cli.StatusResult, error) {
 	}, nil
 }
 
-// Sync fetches a repository and all issue-list pages from GitHub and writes
-// ordered observations to the local corpus.
+// SyncOptions bounds and filters an explicit repository synchronization.
+type SyncOptions struct {
+	State    string
+	Since    time.Time
+	Numbers  []int
+	MaxPages int
+}
+
+// Sync fetches all repository threads. It preserves the original archive API
+// while SyncWithOptions provides bounded incremental and exact refreshes.
 func (s *Service) Sync(ctx context.Context, repo cli.RepoRef) (*cli.SyncResult, error) {
+	return s.SyncWithOptions(ctx, repo, SyncOptions{})
+}
+
+// SyncWithOptions fetches a repository and a bounded thread selection from
+// GitHub, then writes ordered observations to the local corpus.
+func (s *Service) SyncWithOptions(ctx context.Context, repo cli.RepoRef, syncOpts SyncOptions) (*cli.SyncResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
+		return nil, err
+	}
+	var err error
+	syncOpts, err = normalizeSyncOptions(syncOpts)
+	if err != nil {
 		return nil, err
 	}
 	c, err := s.openCorpus(ctx)
@@ -343,10 +363,11 @@ func (s *Service) Sync(ctx context.Context, repo cli.RepoRef) (*cli.SyncResult, 
 		return nil, syncErr
 	}
 
-	opts := github.ListIssueOptions{
-		State:     "all",
+	listOpts := github.ListIssueOptions{
+		State:     syncOpts.State,
 		Sort:      "updated",
 		Direction: "desc",
+		Since:     syncOpts.Since,
 		PageOptions: github.PageOptions{
 			Page:    1,
 			PerPage: 100,
@@ -356,43 +377,80 @@ func (s *Service) Sync(ctx context.Context, repo cli.RepoRef) (*cli.SyncResult, 
 	updated := 0
 	pages := 0
 	lastSourceUpdated := ghRepo.UpdatedAt
-	for {
-		res, err := reader.ListIssues(ctx, ref.Owner, ref.Repo, opts)
+	storeIssue := func(issue github.Issue) error {
+		thread, payload, err := s.threadFromIssue(ctx, reader, ref, issue)
 		if err != nil {
-			syncErr = fmt.Errorf("list issues page %d: %w", opts.Page, err)
+			return err
+		}
+		thread.RepositoryID = repoProjection.ID
+		if _, err := c.UpsertThread(ctx, thread, payload); err != nil {
+			return fmt.Errorf("upsert thread: %w", err)
+		}
+		updated++
+		if thread.SourceUpdatedAt.After(lastSourceUpdated) {
+			lastSourceUpdated = thread.SourceUpdatedAt
+		}
+		return nil
+	}
+
+	complete := false
+	if len(syncOpts.Numbers) > 0 {
+		getter, ok := reader.(github.IssueGetter)
+		if !ok {
+			syncErr = errors.New("GitHub reader does not support exact thread refresh")
 			return nil, syncErr
 		}
-		pages++
-
-		for _, issue := range res.Items {
-			thread, payload, err := s.threadFromIssue(ctx, reader, ref, issue)
-			if err != nil {
+		for _, number := range syncOpts.Numbers {
+			if err := ctx.Err(); err != nil {
 				syncErr = err
 				return nil, syncErr
 			}
-			thread.RepositoryID = repoProjection.ID
-			if _, err := c.UpsertThread(ctx, thread, payload); err != nil {
-				syncErr = fmt.Errorf("upsert thread: %w", err)
+			issue, _, err := getter.GetIssue(ctx, ref.Owner, ref.Repo, number)
+			if err != nil {
+				syncErr = fmt.Errorf("get thread %d: %w", number, err)
 				return nil, syncErr
 			}
-			updated++
-			if thread.SourceUpdatedAt.After(lastSourceUpdated) {
-				lastSourceUpdated = thread.SourceUpdatedAt
+			if err := storeIssue(issue); err != nil {
+				syncErr = err
+				return nil, syncErr
 			}
+			pages++
 		}
+	} else {
+		truncated := false
+		for {
+			res, err := reader.ListIssues(ctx, ref.Owner, ref.Repo, listOpts)
+			if err != nil {
+				syncErr = fmt.Errorf("list issues page %d: %w", listOpts.Page, err)
+				return nil, syncErr
+			}
+			pages++
 
-		if !res.Page.HasNext {
-			break
+			for _, issue := range res.Items {
+				if err := storeIssue(issue); err != nil {
+					syncErr = err
+					return nil, syncErr
+				}
+			}
+
+			if !res.Page.HasNext {
+				break
+			}
+			if pages >= syncOpts.MaxPages {
+				truncated = true
+				break
+			}
+			listOpts.Page = res.Page.NextPage
 		}
-		opts.Page = res.Page.NextPage
+		complete = syncOpts.State == "all" && syncOpts.Since.IsZero() && !truncated
 	}
 
-	if err := c.AdvanceFacet(ctx, repoProjection.ID, nil, "threads", lastSourceUpdated, true, run.ID); err != nil {
+	if err := c.AdvanceFacet(ctx, repoProjection.ID, nil, "threads", lastSourceUpdated, complete, run.ID); err != nil {
 		syncErr = fmt.Errorf("advance threads facet: %w", err)
 		return nil, syncErr
 	}
 
-	stats := fmt.Sprintf(`{"pages":%d,"threads":%d}`, pages, updated)
+	stats := fmt.Sprintf(`{"pages":%d,"threads":%d,"complete":%t}`, pages, updated, complete)
 	if err := c.FinishRun(ctx, run.ID, stats); err != nil {
 		syncErr = err
 		return nil, syncErr
@@ -403,6 +461,42 @@ func (s *Service) Sync(ctx context.Context, repo cli.RepoRef) (*cli.SyncResult, 
 		Updated: updated,
 		Message: fmt.Sprintf("fetched %d threads across %d pages", updated, pages),
 	}, nil
+}
+
+func normalizeSyncOptions(opts SyncOptions) (SyncOptions, error) {
+	if opts.State == "" {
+		opts.State = "all"
+	}
+	if opts.State != "open" && opts.State != "closed" && opts.State != "all" {
+		return SyncOptions{}, fmt.Errorf("state must be open, closed, or all")
+	}
+	if opts.MaxPages <= 0 {
+		opts.MaxPages = 1000
+	}
+	if opts.MaxPages > 1000 {
+		return SyncOptions{}, errors.New("max pages cannot exceed 1000")
+	}
+	if len(opts.Numbers) > 100 {
+		return SyncOptions{}, errors.New("exact thread selection cannot exceed 100 numbers")
+	}
+	if len(opts.Numbers) > 0 && (opts.State != "all" || !opts.Since.IsZero()) {
+		return SyncOptions{}, errors.New("state and since filters cannot be combined with exact thread numbers")
+	}
+	seen := make(map[int]struct{}, len(opts.Numbers))
+	numbers := make([]int, 0, len(opts.Numbers))
+	for _, number := range opts.Numbers {
+		if number <= 0 {
+			return SyncOptions{}, errors.New("thread numbers must be positive")
+		}
+		if _, ok := seen[number]; ok {
+			continue
+		}
+		seen[number] = struct{}{}
+		numbers = append(numbers, number)
+	}
+	sort.Ints(numbers)
+	opts.Numbers = numbers
+	return opts, nil
 }
 
 func (s *Service) threadFromIssue(ctx context.Context, reader github.Reader, ref domain.RepoRef, issue github.Issue) (corpus.Thread, string, error) {

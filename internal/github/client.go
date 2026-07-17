@@ -28,6 +28,13 @@ type Reader interface {
 	ListPullRequestComments(ctx context.Context, owner, name string, number int, opts PageOptions) (ListResult[ReviewComment], error)
 }
 
+// IssueGetter is the optional exact-thread capability used by bounded archive
+// refreshes. Keeping it separate avoids forcing broad discovery readers to
+// implement an operation they do not need.
+type IssueGetter interface {
+	GetIssue(ctx context.Context, owner, name string, number int) (Issue, RateInfo, error)
+}
+
 // RepositorySearcher is the optional GitHub Search capability used by broad
 // discovery. Keeping it separate lets archive-only readers stay small.
 type RepositorySearcher interface {
@@ -155,6 +162,15 @@ func (c *Client) ListIssues(ctx context.Context, owner, name string, opts ListIs
 		Page:  pageInfo(resp),
 		Rate:  rateInfo(resp.Rate),
 	}, nil
+}
+
+// GetIssue reads one issue or pull-request marker by number.
+func (c *Client) GetIssue(ctx context.Context, owner, name string, number int) (Issue, RateInfo, error) {
+	issue, resp, err := c.gh.Issues.Get(ctx, owner, name, number)
+	if err != nil {
+		return Issue{}, RateInfo{}, classifyError(err)
+	}
+	return convertIssue(issue), rateInfo(resp.Rate), nil
 }
 
 func (c *Client) ListIssueComments(ctx context.Context, owner, name string, issueNumber int, opts PageOptions) (ListResult[IssueComment], error) {
