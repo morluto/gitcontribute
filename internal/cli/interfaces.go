@@ -202,6 +202,46 @@ type JobListResult struct {
 	Jobs []JobResult `json:"jobs"`
 }
 
+// WorkflowExtensionService exposes the evidence-first workflow capabilities
+// that sit beyond the original compact CLI service contract.
+type WorkflowExtensionService interface {
+	UpdateHypothesisForCLI(ctx context.Context, id string, opts HypothesisUpdateOptions) (any, error)
+	TransitionHypothesisForCLI(ctx context.Context, id, status, rationale string) (any, error)
+	CheckDuplicatesForCLI(ctx context.Context, target, id string, limit int) (any, error)
+	CheckCollisionsForCLI(ctx context.Context, target, id string, limit int) (any, error)
+	SetCollisionForCLI(ctx context.Context, id, status, rationale string) (any, error)
+	RecordEvidenceForCLI(ctx context.Context, opts RecordEvidenceOptions) (any, error)
+	WorkspaceDiffForCLI(ctx context.Context, id string) (any, error)
+	PrepareReviewForCLI(ctx context.Context, opportunityID, workspaceID string) (any, error)
+}
+
+type HypothesisUpdateOptions struct {
+	Title              *string
+	Description        *string
+	Category           *string
+	ExpectedBehavior   *string
+	ObservedBehavior   *string
+	PotentialImpact    *string
+	OpenQuestions      []string
+	AffectedComponents []string
+	Rationale          string
+}
+
+type RecordEvidenceOptions struct {
+	InvestigationID string
+	HypothesisID    string
+	OpportunityID   string
+	Type            string
+	Relation        string
+	Description     string
+}
+
+type DossierExtensionService interface {
+	BuildDossierForCLI(ctx context.Context, repo RepoRef) (any, error)
+	GetDossierForCLI(ctx context.Context, repo RepoRef) (any, error)
+	ExtractSeedsForCLI(ctx context.Context, repo RepoRef, classes []string, limit int) (any, error)
+}
+
 // InvestigationService is the optional investigation and opportunity
 // management capability used by the CLI.
 type InvestigationService interface {

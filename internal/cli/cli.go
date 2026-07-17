@@ -51,13 +51,17 @@ type rootCmd struct {
 	Sync          syncCmd          `cmd:"" help:"Sync a repository into the corpus"`
 	Search        searchCmd        `cmd:"" help:"Search the local corpus"`
 	Dossier       dossierCmd       `cmd:"" help:"Show repository dossier"`
+	Seeds         seedsCmd         `cmd:"" help:"Extract evidence-backed contribution seeds"`
 	Index         indexCmd         `cmd:"" help:"Index a clean local checkout at its current commit"`
 	Source        sourceCmd        `cmd:"" help:"Manage repository discovery sources"`
 	Crawl         crawlCmd         `cmd:"" help:"Run a named discovery source"`
 	Investigation investigationCmd `cmd:"" help:"Manage investigations"`
 	Hypothesis    hypothesisCmd    `cmd:"" help:"Manage hypotheses"`
+	Duplicates    checkCmd         `cmd:"" help:"Check local duplicate candidates"`
+	Collisions    checkCmd         `cmd:"" help:"Check competing open pull requests"`
 	Opportunity   opportunityCmd   `cmd:"" help:"Manage opportunities"`
 	Workspace     workspaceCmd     `cmd:"" help:"Manage workspaces"`
+	Diff          diffCmd          `cmd:"" help:"Show a workspace diff against its recorded base"`
 	Validation    validationCmd    `cmd:"" help:"Manage validation definitions and runs"`
 	Evidence      evidenceCmd      `cmd:"" help:"Show evidence packets"`
 	Prepare       prepareCmd       `cmd:"" help:"Prepare contribution drafts"`
@@ -120,7 +124,31 @@ type searchCmd struct {
 }
 
 type dossierCmd struct {
+	Build  dossierBuildCmd  `cmd:"" help:"Build and persist a repository dossier"`
+	Show   dossierShowCmd   `cmd:"" help:"Show the latest persisted dossier"`
+	Export dossierExportCmd `cmd:"" help:"Export a repository dossier"`
+}
+
+type dossierBuildCmd struct {
 	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type dossierShowCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type dossierExportCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	Format    string `name:"format" default:"markdown" enum:"json,markdown,md" help:"Export format"`
+	Output    string `name:"output" help:"Write to a file instead of stdout"`
+}
+
+type seedsCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	From      string `name:"from" default:"merged-prs,closed-prs,issues" help:"Comma-separated seed source classes"`
+	Limit     int    `name:"limit" default:"20" help:"Maximum seeds to return"`
 	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
 
@@ -199,8 +227,42 @@ type listInvestigationCmd struct {
 }
 
 type hypothesisCmd struct {
-	Add  addHypothesisCmd  `cmd:"" help:"Add a hypothesis"`
-	List listHypothesisCmd `cmd:"" help:"List hypotheses"`
+	Add       addHypothesisCmd       `cmd:"" help:"Add a hypothesis"`
+	Update    updateHypothesisCmd    `cmd:"" help:"Update structured hypothesis fields"`
+	SetStatus setHypothesisStatusCmd `cmd:"" name:"set-status" help:"Transition hypothesis status"`
+	List      listHypothesisCmd      `cmd:"" help:"List hypotheses"`
+}
+
+type updateHypothesisCmd struct {
+	ID                 string   `arg:"" help:"Hypothesis ID"`
+	Title              *string  `name:"title" help:"Replacement title"`
+	Description        *string  `name:"description" help:"Replacement description"`
+	Category           *string  `name:"category" help:"Replacement category"`
+	ExpectedBehavior   *string  `name:"expected" help:"Expected behavior"`
+	ObservedBehavior   *string  `name:"observed" help:"Observed behavior"`
+	PotentialImpact    *string  `name:"impact" help:"Potential impact"`
+	OpenQuestions      []string `name:"question" help:"Open question (repeatable)"`
+	AffectedComponents []string `name:"component" help:"Affected component (repeatable)"`
+	Rationale          string   `name:"rationale" required:"" help:"Reason for the update"`
+	JSON               bool     `name:"json" help:"Print the result as JSON"`
+}
+
+type setHypothesisStatusCmd struct {
+	ID        string `arg:"" help:"Hypothesis ID"`
+	Status    string `arg:"" enum:"proposed,promoted,rejected,deferred,superseded" help:"Target status"`
+	Rationale string `name:"rationale" required:"" help:"Reason for transition"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type checkCmd struct {
+	Check checkTargetCmd `cmd:"" help:"Run the local check"`
+}
+
+type checkTargetCmd struct {
+	ID     string `arg:"" help:"Hypothesis or opportunity ID"`
+	Target string `name:"target" default:"hypothesis" enum:"hypothesis,opportunity" help:"Target kind"`
+	Limit  int    `name:"limit" default:"20" help:"Maximum findings"`
+	JSON   bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type addHypothesisCmd struct {
@@ -217,10 +279,18 @@ type listHypothesisCmd struct {
 }
 
 type opportunityCmd struct {
-	Promote   promoteOpportunityCmd   `cmd:"" help:"Promote a hypothesis to an opportunity"`
-	Show      showOpportunityCmd      `cmd:"" help:"Show an opportunity"`
-	List      listOpportunityCmd      `cmd:"" help:"List opportunities"`
-	SetStatus setStatusOpportunityCmd `cmd:"" name:"set-status" help:"Set opportunity status"`
+	Promote      promoteOpportunityCmd      `cmd:"" help:"Promote a hypothesis to an opportunity"`
+	Show         showOpportunityCmd         `cmd:"" help:"Show an opportunity"`
+	List         listOpportunityCmd         `cmd:"" help:"List opportunities"`
+	SetStatus    setStatusOpportunityCmd    `cmd:"" name:"set-status" help:"Set opportunity status"`
+	SetCollision setCollisionOpportunityCmd `cmd:"" name:"set-collision" help:"Set collision status"`
+}
+
+type setCollisionOpportunityCmd struct {
+	ID        string `arg:"" help:"Opportunity ID"`
+	Status    string `arg:"" enum:"unknown,none,possible,confirmed,blocked" help:"Collision status"`
+	Rationale string `name:"rationale" required:"" help:"Reason for the status"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type promoteOpportunityCmd struct {
@@ -269,6 +339,11 @@ type showWorkspaceCmd struct {
 	JSON bool   `name:"json" help:"Print the result as JSON"`
 }
 
+type diffCmd struct {
+	WorkspaceID string `arg:"" help:"Workspace ID"`
+	JSON        bool   `name:"json" help:"Print the result as JSON"`
+}
+
 type validationCmd struct {
 	Define  defineValidationCmd  `cmd:"" help:"Define a validation"`
 	Run     runValidationCmd     `cmd:"" help:"Run a validation definition"`
@@ -302,7 +377,19 @@ type compareValidationCmd struct {
 }
 
 type evidenceCmd struct {
-	Show showEvidenceCmd `cmd:"" help:"Show evidence for an investigation"`
+	Add    addEvidenceCmd    `cmd:"" help:"Record evidence"`
+	Show   showEvidenceCmd   `cmd:"" help:"Show evidence for an investigation"`
+	Export exportEvidenceCmd `cmd:"" help:"Export an evidence packet"`
+}
+
+type addEvidenceCmd struct {
+	Investigation string `name:"investigation" help:"Investigation ID"`
+	Hypothesis    string `name:"hypothesis" help:"Hypothesis ID"`
+	Opportunity   string `name:"opportunity" help:"Opportunity ID"`
+	Type          string `name:"type" required:"" help:"Evidence type"`
+	Relation      string `name:"relation" required:"" enum:"supporting,contradicting,inconclusive,stale,invalid" help:"Evidence relation"`
+	Description   string `name:"description" required:"" help:"Evidence description"`
+	JSON          bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type showEvidenceCmd struct {
@@ -311,8 +398,15 @@ type showEvidenceCmd struct {
 }
 
 type prepareCmd struct {
-	Issue issueCmd `cmd:"" help:"Prepare an issue draft"`
-	PR    prCmd    `cmd:"" name:"pr" help:"Prepare a pull request draft"`
+	Issue  issueCmd  `cmd:"" help:"Prepare an issue draft"`
+	PR     prCmd     `cmd:"" name:"pr" help:"Prepare a pull request draft"`
+	Review reviewCmd `cmd:"" help:"Prepare a read-only review report"`
+}
+
+type reviewCmd struct {
+	OpportunityID string `arg:"" optional:"" help:"Opportunity ID"`
+	WorkspaceID   string `name:"workspace" help:"Workspace ID"`
+	JSON          bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type issueCmd struct {
@@ -526,7 +620,9 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	case "search":
 		return c.runSearch(ctx, &cli.Search)
 	case "dossier":
-		return c.runDossier(ctx, &cli.Dossier)
+		return c.runDossier(ctx, command, &cli.Dossier)
+	case "seeds":
+		return c.runSeeds(ctx, &cli.Seeds)
 	case "index":
 		return c.runIndex(ctx, &cli.Index)
 	case "source":
@@ -537,10 +633,16 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runInvestigation(ctx, command, &cli.Investigation)
 	case "hypothesis":
 		return c.runHypothesis(ctx, command, &cli.Hypothesis)
+	case "duplicates":
+		return c.runCheck(ctx, command, "duplicates", &cli.Duplicates)
+	case "collisions":
+		return c.runCheck(ctx, command, "collisions", &cli.Collisions)
 	case "opportunity":
 		return c.runOpportunity(ctx, command, &cli.Opportunity)
 	case "workspace":
 		return c.runWorkspace(ctx, command, &cli.Workspace)
+	case "diff":
+		return c.runDiff(ctx, &cli.Diff)
 	case "validation":
 		return c.runValidation(ctx, command, &cli.Validation)
 	case "evidence":
@@ -579,16 +681,27 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 }
 
 func normalizeCompatibilityArgs(args []string) []string {
-	if len(args) == 0 || args[0] != "mcp" {
+	if len(args) == 0 {
 		return args
 	}
-	if len(args) > 1 && args[1] == "serve" {
+	switch args[0] {
+	case "mcp":
+		if len(args) > 1 && args[1] == "serve" {
+			return args
+		}
+		out := make([]string, 0, len(args)+1)
+		out = append(out, "mcp", "serve")
+		return append(out, args[1:]...)
+	case "dossier":
+		if len(args) > 1 && (args[1] == "build" || args[1] == "show" || args[1] == "export") {
+			return args
+		}
+		out := make([]string, 0, len(args)+1)
+		out = append(out, "dossier", "show")
+		return append(out, args[1:]...)
+	default:
 		return args
 	}
-	out := make([]string, 0, len(args)+1)
-	out = append(out, "mcp", "serve")
-	out = append(out, args[1:]...)
-	return out
 }
 
 func (c *CLI) discoveryService() (DiscoveryService, error) {
@@ -609,6 +722,22 @@ func (c *CLI) controlService() (ControlService, error) {
 
 func (c *CLI) jobService() (JobService, error) {
 	service, ok := c.svc.(JobService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) workflowExtensionService() (WorkflowExtensionService, error) {
+	service, ok := c.svc.(WorkflowExtensionService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) dossierExtensionService() (DossierExtensionService, error) {
+	service, ok := c.svc.(DossierExtensionService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -876,6 +1005,31 @@ func (c *CLI) runHypothesis(ctx context.Context, command string, cmd *hypothesis
 			return c.mapError(err)
 		}
 		return c.render(cmd.Add.JSON, result)
+	case "hypothesis update":
+		extended, err := c.workflowExtensionService()
+		if err != nil {
+			return err
+		}
+		result, err := extended.UpdateHypothesisForCLI(ctx, cmd.Update.ID, HypothesisUpdateOptions{
+			Title: cmd.Update.Title, Description: cmd.Update.Description, Category: cmd.Update.Category,
+			ExpectedBehavior: cmd.Update.ExpectedBehavior, ObservedBehavior: cmd.Update.ObservedBehavior,
+			PotentialImpact: cmd.Update.PotentialImpact, OpenQuestions: cmd.Update.OpenQuestions,
+			AffectedComponents: cmd.Update.AffectedComponents, Rationale: cmd.Update.Rationale,
+		})
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Update.JSON, result)
+	case "hypothesis set-status":
+		extended, err := c.workflowExtensionService()
+		if err != nil {
+			return err
+		}
+		result, err := extended.TransitionHypothesisForCLI(ctx, cmd.SetStatus.ID, cmd.SetStatus.Status, cmd.SetStatus.Rationale)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.SetStatus.JSON, result)
 	case "hypothesis list":
 		result, err := service.ListHypotheses(ctx, cmd.List.InvestigationID)
 		if err != nil {
@@ -918,9 +1072,42 @@ func (c *CLI) runOpportunity(ctx context.Context, command string, cmd *opportuni
 			return c.mapError(err)
 		}
 		return c.render(cmd.SetStatus.JSON, result)
+	case "opportunity set-collision":
+		extended, err := c.workflowExtensionService()
+		if err != nil {
+			return err
+		}
+		result, err := extended.SetCollisionForCLI(ctx, cmd.SetCollision.ID, cmd.SetCollision.Status, cmd.SetCollision.Rationale)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.SetCollision.JSON, result)
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown opportunity command: %s", command))
 	}
+}
+
+func (c *CLI) runCheck(ctx context.Context, command, kind string, cmd *checkCmd) error {
+	if command != kind+" check" {
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown %s command: %s", kind, command))
+	}
+	if cmd.Check.Limit <= 0 || cmd.Check.Limit > 100 {
+		return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 100"))
+	}
+	service, err := c.workflowExtensionService()
+	if err != nil {
+		return err
+	}
+	var result any
+	if kind == "duplicates" {
+		result, err = service.CheckDuplicatesForCLI(ctx, cmd.Check.Target, cmd.Check.ID, cmd.Check.Limit)
+	} else {
+		result, err = service.CheckCollisionsForCLI(ctx, cmd.Check.Target, cmd.Check.ID, cmd.Check.Limit)
+	}
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.Check.JSON, result)
 }
 
 func (c *CLI) runWorkspace(ctx context.Context, command string, cmd *workspaceCmd) error {
@@ -950,6 +1137,18 @@ func (c *CLI) runWorkspace(ctx context.Context, command string, cmd *workspaceCm
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown workspace command: %s", command))
 	}
+}
+
+func (c *CLI) runDiff(ctx context.Context, cmd *diffCmd) error {
+	service, err := c.workflowExtensionService()
+	if err != nil {
+		return err
+	}
+	result, err := service.WorkspaceDiffForCLI(ctx, cmd.WorkspaceID)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
 }
 
 func (c *CLI) runValidation(ctx context.Context, command string, cmd *validationCmd) error {
@@ -1021,12 +1220,28 @@ func (c *CLI) runEvidence(ctx context.Context, command string, cmd *evidenceCmd)
 		return err
 	}
 	switch command {
+	case "evidence add":
+		extended, err := c.workflowExtensionService()
+		if err != nil {
+			return err
+		}
+		result, err := extended.RecordEvidenceForCLI(ctx, RecordEvidenceOptions{
+			InvestigationID: cmd.Add.Investigation, HypothesisID: cmd.Add.Hypothesis,
+			OpportunityID: cmd.Add.Opportunity, Type: cmd.Add.Type,
+			Relation: cmd.Add.Relation, Description: cmd.Add.Description,
+		})
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Add.JSON, result)
 	case "evidence show":
 		result, err := service.ShowEvidence(ctx, cmd.Show.InvestigationID)
 		if err != nil {
 			return c.mapError(err)
 		}
 		return c.render(cmd.Show.JSON, result)
+	case "evidence export":
+		return c.runExport(ctx, "export evidence", &exportCmd{Evidence: cmd.Export})
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown evidence command: %s", command))
 	}
@@ -1063,6 +1278,16 @@ func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) e
 			return c.mapError(err)
 		}
 		return c.render(cmd.PR.JSON, result)
+	case "prepare review":
+		extended, err := c.workflowExtensionService()
+		if err != nil {
+			return err
+		}
+		result, err := extended.PrepareReviewForCLI(ctx, cmd.Review.OpportunityID, cmd.Review.WorkspaceID)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Review.JSON, result)
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown prepare command: %s", command))
 	}
@@ -1176,16 +1401,70 @@ func (c *CLI) runSearch(ctx context.Context, cmd *searchCmd) error {
 	return c.render(cmd.JSON, res)
 }
 
-func (c *CLI) runDossier(ctx context.Context, cmd *dossierCmd) error {
+func (c *CLI) runDossier(ctx context.Context, command string, cmd *dossierCmd) error {
+	service, err := c.dossierExtensionService()
+	if err != nil {
+		// Preserve the original dossier command for lightweight implementations.
+		if command == "dossier show" {
+			repo, parseErr := parseRepo(cmd.Show.OwnerRepo)
+			if parseErr != nil {
+				return parseErr
+			}
+			res, callErr := c.svc.Dossier(ctx, repo)
+			if callErr != nil {
+				return c.mapError(callErr)
+			}
+			return c.render(cmd.Show.JSON, res)
+		}
+		return err
+	}
+	var result any
+	var jsonOutput bool
+	switch command {
+	case "dossier build":
+		repo, err := parseRepo(cmd.Build.OwnerRepo)
+		if err != nil {
+			return err
+		}
+		result, err = service.BuildDossierForCLI(ctx, repo)
+		jsonOutput = cmd.Build.JSON
+	case "dossier show":
+		repo, err := parseRepo(cmd.Show.OwnerRepo)
+		if err != nil {
+			return err
+		}
+		result, err = service.GetDossierForCLI(ctx, repo)
+		jsonOutput = cmd.Show.JSON
+	case "dossier export":
+		return c.runExport(ctx, "export dossier", &exportCmd{Dossier: exportDossierCmd{
+			OwnerRepo: cmd.Export.OwnerRepo, Format: cmd.Export.Format, Output: cmd.Export.Output,
+		}})
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown dossier command: %s", command))
+	}
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(jsonOutput, result)
+}
+
+func (c *CLI) runSeeds(ctx context.Context, cmd *seedsCmd) error {
+	if cmd.Limit <= 0 || cmd.Limit > 100 {
+		return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 100"))
+	}
 	repo, err := parseRepo(cmd.OwnerRepo)
 	if err != nil {
 		return err
 	}
-	res, err := c.svc.Dossier(ctx, repo)
+	service, err := c.dossierExtensionService()
+	if err != nil {
+		return err
+	}
+	result, err := service.ExtractSeedsForCLI(ctx, repo, splitCSV(cmd.From), cmd.Limit)
 	if err != nil {
 		return c.mapError(err)
 	}
-	return c.render(cmd.JSON, res)
+	return c.render(cmd.JSON, result)
 }
 
 func (c *CLI) runMCP(ctx context.Context, cmd *mcpCmd) error {

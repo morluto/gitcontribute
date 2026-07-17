@@ -103,7 +103,11 @@ func humanOutput(v any) (string, error) {
 	case *NeighborListResult:
 		return neighborsHuman(r), nil
 	default:
-		return "", fmt.Errorf("unsupported result type %T", v)
+		payload, err := json.MarshalIndent(v, "", "  ")
+		if err != nil {
+			return "", fmt.Errorf("render %T: %w", v, err)
+		}
+		return string(payload), nil
 	}
 }
 
