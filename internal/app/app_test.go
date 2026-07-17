@@ -497,3 +497,88 @@ func TestSearchCodeUsesStoredSnapshotWithoutNetwork(t *testing.T) {
 		t.Fatalf("code search = %+v", result)
 	}
 }
+
+func TestInvestigationAndOpportunityFlow(t *testing.T) {
+	ctx := context.Background()
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "go")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+	if inv.ID == "" || inv.Repo.String() != "owner/repo" || inv.CommitSHA != "abc" || inv.Lens != "go" || inv.Status != "open" {
+		t.Fatalf("unexpected investigation: %+v", inv)
+	}
+
+	h, err := svc.AddHypothesis(ctx, inv.ID, "race in parser", "data race under load", "bug")
+	if err != nil {
+		t.Fatalf("add hypothesis: %v", err)
+	}
+	if h.ID == "" || h.InvestigationID != inv.ID || h.Status != "proposed" {
+		t.Fatalf("unexpected hypothesis: %+v", h)
+	}
+
+	hypotheses, err := svc.ListHypotheses(ctx, inv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hypotheses.Hypotheses) != 1 {
+		t.Fatalf("expected 1 hypothesis, got %+v", hypotheses)
+	}
+
+	opp, err := svc.PromoteOpportunity(ctx, h.ID, "parser panics on valid input", "pkg/parser", "crash", "small", 0.8)
+	if err != nil {
+		t.Fatalf("promote opportunity: %v", err)
+	}
+	if opp.ID == "" || opp.HypothesisID != h.ID || opp.Status != "hypothesis" || opp.Confidence != 0.8 {
+		t.Fatalf("unexpected opportunity: %+v", opp)
+	}
+
+	opps, err := svc.ListOpportunities(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opps.Opportunities) != 1 {
+		t.Fatalf("expected 1 opportunity, got %+v", opps)
+	}
+
+	filtered, err := svc.ListOpportunities(ctx, inv.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered.Opportunities) != 1 || filtered.Opportunities[0].ID != opp.ID {
+		t.Fatalf("expected filtered opportunity, got %+v", filtered)
+	}
+
+	updated, err := svc.SetOpportunityStatus(ctx, opp.ID, "reproduced", "base branch fails")
+	if err != nil {
+		t.Fatalf("set opportunity status: %v", err)
+	}
+	if updated.Status != "reproduced" {
+		t.Fatalf("expected status reproduced, got %s", updated.Status)
+	}
+
+	shown, err := svc.ShowOpportunity(ctx, opp.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shown.Status != "reproduced" {
+		t.Fatalf("unexpected shown opportunity status: %s", shown.Status)
+	}
+
+	investigations, err := svc.ListInvestigations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(investigations.Investigations) != 1 {
+		t.Fatalf("expected 1 investigation, got %+v", investigations)
+	}
+}

@@ -87,6 +87,31 @@ func (s *Service) TransitionHypothesis(ctx context.Context, id string, to Hypoth
 	return h, nil
 }
 
+// GetInvestigation returns an investigation by ID.
+func (s *Service) GetInvestigation(ctx context.Context, id string) (*Investigation, error) {
+	return s.repo.GetInvestigation(ctx, id)
+}
+
+// ListInvestigations returns all investigations ordered by creation time.
+func (s *Service) ListInvestigations(ctx context.Context) ([]*Investigation, error) {
+	return s.repo.ListInvestigations(ctx)
+}
+
+// ListHypotheses returns hypotheses for an investigation.
+func (s *Service) ListHypotheses(ctx context.Context, investigationID string) ([]*Hypothesis, error) {
+	return s.repo.ListHypotheses(ctx, investigationID)
+}
+
+// GetOpportunity returns an opportunity by ID.
+func (s *Service) GetOpportunity(ctx context.Context, id string) (*Opportunity, error) {
+	return s.repo.GetOpportunity(ctx, id)
+}
+
+// ListOpportunities returns opportunities, optionally filtered to one investigation.
+func (s *Service) ListOpportunities(ctx context.Context, investigationID string) ([]*Opportunity, error) {
+	return s.repo.ListOpportunities(ctx, investigationID)
+}
+
 // PromoteOpportunity converts a confirmed hypothesis into an opportunity.
 func (s *Service) PromoteOpportunity(ctx context.Context, hypothesisID, problem, scope, impact, effort string, confidence float64) (*Opportunity, error) {
 	if confidence < 0 || confidence > 1 {

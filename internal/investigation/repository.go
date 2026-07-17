@@ -12,6 +12,7 @@ import (
 type Repository interface {
 	SaveInvestigation(ctx context.Context, i *Investigation) error
 	GetInvestigation(ctx context.Context, id string) (*Investigation, error)
+	ListInvestigations(ctx context.Context) ([]*Investigation, error)
 	SaveHypothesis(ctx context.Context, h *Hypothesis) error
 	GetHypothesis(ctx context.Context, id string) (*Hypothesis, error)
 	ListHypotheses(ctx context.Context, investigationID string) ([]*Hypothesis, error)

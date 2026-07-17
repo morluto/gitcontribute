@@ -38,6 +38,14 @@ func (r *fakeRepo) GetInvestigation(_ context.Context, id string) (*Investigatio
 	return i, nil
 }
 
+func (r *fakeRepo) ListInvestigations(_ context.Context) ([]*Investigation, error) {
+	var out []*Investigation
+	for _, i := range r.investigations {
+		out = append(out, i)
+	}
+	return out, nil
+}
+
 func (r *fakeRepo) SaveHypothesis(_ context.Context, h *Hypothesis) error {
 	r.hypotheses[h.ID] = h
 	return nil
@@ -77,7 +85,7 @@ func (r *fakeRepo) GetOpportunity(_ context.Context, id string) (*Opportunity, e
 func (r *fakeRepo) ListOpportunities(_ context.Context, investigationID string) ([]*Opportunity, error) {
 	var out []*Opportunity
 	for _, o := range r.opportunities {
-		if o.InvestigationID == investigationID {
+		if investigationID == "" || o.InvestigationID == investigationID {
 			out = append(out, o)
 		}
 	}

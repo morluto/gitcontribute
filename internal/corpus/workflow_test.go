@@ -81,3 +81,60 @@ func TestFindRelatedUsesRepositoryAndCategory(t *testing.T) {
 		t.Fatalf("other FindRelated = (%+v, %v)", other, err)
 	}
 }
+
+func TestInvestigationAndOpportunityListQueries(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	svc := investigation.NewService(c, c)
+
+	invA, err := svc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "a"}, "sha-a", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	invB, err := svc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "b"}, "sha-b", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	invA2, err := svc.ListInvestigations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(invA2) != 2 {
+		t.Fatalf("expected 2 investigations, got %d", len(invA2))
+	}
+
+	hA, err := svc.RecordHypothesis(ctx, invA.ID, "bug in a", "desc", investigation.CategoryBug, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hB, err := svc.RecordHypothesis(ctx, invB.ID, "bug in b", "desc", investigation.CategoryBug, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opA, err := svc.PromoteOpportunity(ctx, hA.ID, "problem a", "pkg/a", "crash", "small", 0.7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.PromoteOpportunity(ctx, hB.ID, "problem b", "pkg/b", "crash", "small", 0.6)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := svc.ListOpportunities(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected 2 opportunities, got %d", len(all))
+	}
+
+	filtered, err := svc.ListOpportunities(ctx, invA.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 1 || filtered[0].ID != opA.ID {
+		t.Fatalf("expected 1 opportunity for invA, got %+v", filtered)
+	}
+}

@@ -13,40 +13,94 @@ import (
 )
 
 type fakeService struct {
-	initCalled        bool
-	statusCalled      bool
-	syncCalled        bool
-	searchCalled      bool
-	dossierCalled     bool
-	indexCalled       bool
-	addSourceCalled   bool
-	listSourcesCalled bool
-	crawlCalled       bool
+	initCalled         bool
+	statusCalled       bool
+	syncCalled         bool
+	searchCalled       bool
+	dossierCalled      bool
+	indexCalled        bool
+	addSourceCalled    bool
+	listSourcesCalled  bool
+	crawlCalled        bool
+	startInvCalled     bool
+	showInvCalled      bool
+	listInvCalled      bool
+	addHypCalled       bool
+	listHypCalled      bool
+	promoteOppCalled   bool
+	showOppCalled      bool
+	listOppCalled      bool
+	setStatusOppCalled bool
 
-	initResult       *cli.InitResult
-	statusResult     *cli.StatusResult
-	syncResult       *cli.SyncResult
-	searchResult     *cli.SearchResult
-	dossierResult    *cli.DossierResult
-	indexResult      *cli.IndexResult
-	sourceResult     *cli.SourceResult
-	sourceListResult *cli.SourceListResult
-	crawlResult      *cli.CrawlResult
+	initResult         *cli.InitResult
+	statusResult       *cli.StatusResult
+	syncResult         *cli.SyncResult
+	searchResult       *cli.SearchResult
+	dossierResult      *cli.DossierResult
+	indexResult        *cli.IndexResult
+	sourceResult       *cli.SourceResult
+	sourceListResult   *cli.SourceListResult
+	crawlResult        *cli.CrawlResult
+	startInvResult     *cli.InvestigationResult
+	showInvResult      *cli.InvestigationResult
+	listInvResult      *cli.InvestigationListResult
+	addHypResult       *cli.HypothesisResult
+	listHypResult      *cli.HypothesisListResult
+	promoteOppResult   *cli.OpportunityResult
+	showOppResult      *cli.OpportunityResult
+	listOppResult      *cli.OpportunityListResult
+	setStatusOppResult *cli.OpportunityResult
 
 	lastSyncArg    cli.RepoRef
 	lastSearchArgs struct {
 		Query string
 		Opts  cli.SearchOptions
 	}
-	lastDossierArg  cli.RepoRef
-	lastIndexRepo   cli.RepoRef
-	lastIndexPath   string
-	lastSourceName  string
-	lastSourceQuery string
-	lastCrawlName   string
-	lastCrawlOpts   cli.CrawlOptions
+	lastDossierArg    cli.RepoRef
+	lastIndexRepo     cli.RepoRef
+	lastIndexPath     string
+	lastSourceName    string
+	lastSourceQuery   string
+	lastCrawlName     string
+	lastCrawlOpts     cli.CrawlOptions
+	lastStartInvArgs  startInvArgs
+	lastShowInvArg    string
+	lastAddHypArgs    addHypArgs
+	lastListHypArg    string
+	lastPromoteArgs   promoteArgs
+	lastShowOppArg    string
+	lastListOppFilter string
+	lastSetStatusArgs setStatusArgs
 
 	err error
+}
+
+type startInvArgs struct {
+	Repo   cli.RepoRef
+	Commit string
+	Lens   string
+}
+
+type addHypArgs struct {
+	InvestigationID string
+	Title           string
+	Description     string
+	Category        string
+}
+
+type promoteArgs struct {
+	HypothesisID string
+	Problem      string
+	Scope        string
+	Impact       string
+	Effort       string
+	Confidence   float64
+}
+
+type setStatusArgs struct {
+	ID        string
+	Status    string
+	Rationale string
 }
 
 func (f *fakeService) Init(ctx context.Context) (*cli.InitResult, error) {
@@ -102,6 +156,59 @@ func (f *fakeService) Crawl(ctx context.Context, name string, opts cli.CrawlOpti
 	f.lastCrawlName = name
 	f.lastCrawlOpts = opts
 	return f.crawlResult, f.err
+}
+
+func (f *fakeService) StartInvestigation(ctx context.Context, repo cli.RepoRef, commit, lens string) (*cli.InvestigationResult, error) {
+	f.startInvCalled = true
+	f.lastStartInvArgs = startInvArgs{Repo: repo, Commit: commit, Lens: lens}
+	return f.startInvResult, f.err
+}
+
+func (f *fakeService) ShowInvestigation(ctx context.Context, id string) (*cli.InvestigationResult, error) {
+	f.showInvCalled = true
+	f.lastShowInvArg = id
+	return f.showInvResult, f.err
+}
+
+func (f *fakeService) ListInvestigations(ctx context.Context) (*cli.InvestigationListResult, error) {
+	f.listInvCalled = true
+	return f.listInvResult, f.err
+}
+
+func (f *fakeService) AddHypothesis(ctx context.Context, investigationID, title, description, category string) (*cli.HypothesisResult, error) {
+	f.addHypCalled = true
+	f.lastAddHypArgs = addHypArgs{InvestigationID: investigationID, Title: title, Description: description, Category: category}
+	return f.addHypResult, f.err
+}
+
+func (f *fakeService) ListHypotheses(ctx context.Context, investigationID string) (*cli.HypothesisListResult, error) {
+	f.listHypCalled = true
+	f.lastListHypArg = investigationID
+	return f.listHypResult, f.err
+}
+
+func (f *fakeService) PromoteOpportunity(ctx context.Context, hypothesisID, problem, scope, impact, effort string, confidence float64) (*cli.OpportunityResult, error) {
+	f.promoteOppCalled = true
+	f.lastPromoteArgs = promoteArgs{HypothesisID: hypothesisID, Problem: problem, Scope: scope, Impact: impact, Effort: effort, Confidence: confidence}
+	return f.promoteOppResult, f.err
+}
+
+func (f *fakeService) ShowOpportunity(ctx context.Context, id string) (*cli.OpportunityResult, error) {
+	f.showOppCalled = true
+	f.lastShowOppArg = id
+	return f.showOppResult, f.err
+}
+
+func (f *fakeService) ListOpportunities(ctx context.Context, investigationID string) (*cli.OpportunityListResult, error) {
+	f.listOppCalled = true
+	f.lastListOppFilter = investigationID
+	return f.listOppResult, f.err
+}
+
+func (f *fakeService) SetOpportunityStatus(ctx context.Context, id, status, rationale string) (*cli.OpportunityResult, error) {
+	f.setStatusOppCalled = true
+	f.lastSetStatusArgs = setStatusArgs{ID: id, Status: status, Rationale: rationale}
+	return f.setStatusOppResult, f.err
 }
 
 func TestIndex(t *testing.T) {
@@ -468,4 +575,165 @@ func TestUnknownCommand(t *testing.T) {
 	c, _, _ := newTestCLI(&fakeService{}, nil)
 	err := c.Run(context.Background(), []string{"nope"})
 	requireCLIError(t, err, cli.ExitUsage)
+}
+
+func TestInvestigationStartShowAndList(t *testing.T) {
+	svc := &fakeService{
+		startInvResult: &cli.InvestigationResult{
+			ID: "inv-1", Repo: cli.RepoRef{Owner: "o", Repo: "r"},
+			CommitSHA: "abc", Lens: "go", Status: "open",
+			CreatedAt: "2026-07-17T00:00:00Z", UpdatedAt: "2026-07-17T00:00:00Z",
+		},
+		showInvResult: &cli.InvestigationResult{
+			ID: "inv-1", Repo: cli.RepoRef{Owner: "o", Repo: "r"},
+			Status: "open", CreatedAt: "2026-07-17T00:00:00Z", UpdatedAt: "2026-07-17T00:00:00Z",
+		},
+		listInvResult: &cli.InvestigationListResult{
+			Investigations: []cli.InvestigationResult{
+				{ID: "inv-1", Repo: cli.RepoRef{Owner: "o", Repo: "r"}, Status: "open", CreatedAt: "2026-07-17T00:00:00Z", UpdatedAt: "2026-07-17T00:00:00Z"},
+			},
+		},
+	}
+	c, stdout, stderr := newTestCLI(svc, nil)
+
+	err := c.Run(context.Background(), []string{"investigation", "start", "o/r", "--commit", "abc", "--lens", "go"})
+	requireNoErr(t, err)
+	if !svc.startInvCalled || svc.lastStartInvArgs.Repo.String() != "o/r" || svc.lastStartInvArgs.Commit != "abc" || svc.lastStartInvArgs.Lens != "go" {
+		t.Fatalf("start investigation args = %+v", svc.lastStartInvArgs)
+	}
+	if !strings.Contains(stdout.String(), "inv-1") || !strings.Contains(stderr.String(), "starting investigation") {
+		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	err = c.Run(context.Background(), []string{"investigation", "show", "inv-1"})
+	requireNoErr(t, err)
+	if !svc.showInvCalled || svc.lastShowInvArg != "inv-1" {
+		t.Fatalf("show investigation not called correctly: called=%v arg=%q", svc.showInvCalled, svc.lastShowInvArg)
+	}
+	if !strings.Contains(stdout.String(), "inv-1") {
+		t.Fatalf("stdout=%q", stdout.String())
+	}
+
+	stdout.Reset()
+	err = c.Run(context.Background(), []string{"investigation", "list"})
+	requireNoErr(t, err)
+	if !svc.listInvCalled {
+		t.Fatal("list investigations not called")
+	}
+	if !strings.Contains(stdout.String(), "1 investigation") {
+		t.Fatalf("stdout=%q", stdout.String())
+	}
+}
+
+func TestInvestigationStartRejectsInvalidRepo(t *testing.T) {
+	svc := &fakeService{}
+	c, _, _ := newTestCLI(svc, nil)
+	err := c.Run(context.Background(), []string{"investigation", "start", "bad"})
+	requireCLIError(t, err, cli.ExitUsage)
+	if svc.startInvCalled {
+		t.Fatal("start investigation should not be called with invalid repo")
+	}
+}
+
+func TestHypothesisAddAndList(t *testing.T) {
+	svc := &fakeService{
+		addHypResult: &cli.HypothesisResult{
+			ID: "hyp-1", InvestigationID: "inv-1", Title: "race", Description: "race desc", Category: "bug", Status: "proposed",
+			CreatedAt: "2026-07-17T00:00:00Z", UpdatedAt: "2026-07-17T00:00:00Z",
+		},
+		listHypResult: &cli.HypothesisListResult{
+			Hypotheses: []cli.HypothesisResult{
+				{ID: "hyp-1", InvestigationID: "inv-1", Title: "race", Category: "bug", Status: "proposed"},
+			},
+		},
+	}
+	c, stdout, stderr := newTestCLI(svc, nil)
+
+	err := c.Run(context.Background(), []string{"hypothesis", "add", "inv-1", "--title", "race", "--description", "race desc", "--category", "bug"})
+	requireNoErr(t, err)
+	if !svc.addHypCalled || svc.lastAddHypArgs.InvestigationID != "inv-1" || svc.lastAddHypArgs.Title != "race" || svc.lastAddHypArgs.Category != "bug" {
+		t.Fatalf("add hypothesis args = %+v", svc.lastAddHypArgs)
+	}
+	if !strings.Contains(stdout.String(), "hyp-1") || !strings.Contains(stderr.String(), "recording hypothesis") {
+		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	err = c.Run(context.Background(), []string{"hypothesis", "list", "inv-1"})
+	requireNoErr(t, err)
+	if !svc.listHypCalled || svc.lastListHypArg != "inv-1" {
+		t.Fatalf("list hypotheses not called correctly: called=%v arg=%q", svc.listHypCalled, svc.lastListHypArg)
+	}
+	if !strings.Contains(stdout.String(), "1 hypothesis") {
+		t.Fatalf("stdout=%q", stdout.String())
+	}
+}
+
+func TestOpportunityPromoteShowListAndSetStatus(t *testing.T) {
+	svc := &fakeService{
+		promoteOppResult: &cli.OpportunityResult{
+			ID: "opp-1", InvestigationID: "inv-1", HypothesisID: "hyp-1", Title: "race",
+			ProblemStatement: "data race", Scope: "pkg/foo", Impact: "crash", ExpectedEffort: "small",
+			Confidence: 0.8, Category: "bug", CollisionStatus: "unknown", Status: "hypothesis",
+			CreatedAt: "2026-07-17T00:00:00Z", UpdatedAt: "2026-07-17T00:00:00Z",
+		},
+		showOppResult: &cli.OpportunityResult{
+			ID: "opp-1", Title: "race", Status: "reproduced", Confidence: 0.8,
+			CreatedAt: "2026-07-17T00:00:00Z", UpdatedAt: "2026-07-17T00:01:00Z",
+		},
+		listOppResult: &cli.OpportunityListResult{
+			Filter: "inv-1",
+			Opportunities: []cli.OpportunityResult{
+				{ID: "opp-1", Title: "race", Status: "reproduced", Confidence: 0.8, Category: "bug"},
+			},
+		},
+		setStatusOppResult: &cli.OpportunityResult{
+			ID: "opp-1", Title: "race", Status: "reproduced",
+		},
+	}
+	c, stdout, stderr := newTestCLI(svc, nil)
+
+	err := c.Run(context.Background(), []string{
+		"opportunity", "promote", "hyp-1",
+		"--problem", "data race", "--scope", "pkg/foo", "--impact", "crash",
+		"--effort", "small", "--confidence", "0.8",
+	})
+	requireNoErr(t, err)
+	if !svc.promoteOppCalled || svc.lastPromoteArgs.HypothesisID != "hyp-1" || svc.lastPromoteArgs.Confidence != 0.8 {
+		t.Fatalf("promote opportunity args = %+v", svc.lastPromoteArgs)
+	}
+	if !strings.Contains(stdout.String(), "opp-1") || !strings.Contains(stderr.String(), "promoting hypothesis") {
+		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	err = c.Run(context.Background(), []string{"opportunity", "show", "opp-1"})
+	requireNoErr(t, err)
+	if !svc.showOppCalled || svc.lastShowOppArg != "opp-1" {
+		t.Fatalf("show opportunity not called correctly: called=%v arg=%q", svc.showOppCalled, svc.lastShowOppArg)
+	}
+
+	stdout.Reset()
+	err = c.Run(context.Background(), []string{"opportunity", "list", "--investigation", "inv-1"})
+	requireNoErr(t, err)
+	if !svc.listOppCalled || svc.lastListOppFilter != "inv-1" {
+		t.Fatalf("list opportunities filter = %q", svc.lastListOppFilter)
+	}
+	if !strings.Contains(stdout.String(), "1 opportunity") || !strings.Contains(stdout.String(), "(filter: inv-1)") {
+		t.Fatalf("stdout=%q", stdout.String())
+	}
+
+	stdout.Reset()
+	err = c.Run(context.Background(), []string{"opportunity", "set-status", "opp-1", "reproduced", "--rationale", "base branch fails"})
+	requireNoErr(t, err)
+	if !svc.setStatusOppCalled || svc.lastSetStatusArgs.ID != "opp-1" || svc.lastSetStatusArgs.Status != "reproduced" || svc.lastSetStatusArgs.Rationale != "base branch fails" {
+		t.Fatalf("set-status args = %+v", svc.lastSetStatusArgs)
+	}
+}
+
+func TestInvestigationCommandRequiresService(t *testing.T) {
+	c, _, _ := newTestCLI(cli.NewBootstrapService(), nil)
+	err := c.Run(context.Background(), []string{"investigation", "list"})
+	requireCLIError(t, err, cli.ExitNotWired)
 }

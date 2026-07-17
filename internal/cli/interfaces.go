@@ -68,6 +68,77 @@ type MCPOptions struct {
 	Transport string
 }
 
+// InvestigationService is the optional investigation and opportunity
+// management capability used by the CLI.
+type InvestigationService interface {
+	StartInvestigation(ctx context.Context, repo RepoRef, commit, lens string) (*InvestigationResult, error)
+	ShowInvestigation(ctx context.Context, id string) (*InvestigationResult, error)
+	ListInvestigations(ctx context.Context) (*InvestigationListResult, error)
+	AddHypothesis(ctx context.Context, investigationID, title, description, category string) (*HypothesisResult, error)
+	ListHypotheses(ctx context.Context, investigationID string) (*HypothesisListResult, error)
+	PromoteOpportunity(ctx context.Context, hypothesisID, problem, scope, impact, effort string, confidence float64) (*OpportunityResult, error)
+	ShowOpportunity(ctx context.Context, id string) (*OpportunityResult, error)
+	ListOpportunities(ctx context.Context, investigationID string) (*OpportunityListResult, error)
+	SetOpportunityStatus(ctx context.Context, id, status, rationale string) (*OpportunityResult, error)
+}
+
+// InvestigationResult is a single investigation view.
+type InvestigationResult struct {
+	ID        string  `json:"id"`
+	Repo      RepoRef `json:"repo"`
+	CommitSHA string  `json:"commit_sha,omitempty"`
+	Lens      string  `json:"lens,omitempty"`
+	Status    string  `json:"status"`
+	CreatedAt string  `json:"created_at"`
+	UpdatedAt string  `json:"updated_at"`
+}
+
+// InvestigationListResult is a collection of investigations.
+type InvestigationListResult struct {
+	Investigations []InvestigationResult `json:"investigations"`
+}
+
+// HypothesisResult is a single hypothesis view.
+type HypothesisResult struct {
+	ID              string `json:"id"`
+	InvestigationID string `json:"investigation_id"`
+	Title           string `json:"title"`
+	Description     string `json:"description"`
+	Category        string `json:"category"`
+	Status          string `json:"status"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
+}
+
+// HypothesisListResult is a collection of hypotheses.
+type HypothesisListResult struct {
+	Hypotheses []HypothesisResult `json:"hypotheses"`
+}
+
+// OpportunityResult is a single opportunity view.
+type OpportunityResult struct {
+	ID               string  `json:"id"`
+	InvestigationID  string  `json:"investigation_id"`
+	HypothesisID     string  `json:"hypothesis_id"`
+	Title            string  `json:"title"`
+	ProblemStatement string  `json:"problem_statement"`
+	Category         string  `json:"category"`
+	Scope            string  `json:"scope"`
+	Impact           string  `json:"impact"`
+	ExpectedEffort   string  `json:"expected_effort"`
+	Confidence       float64 `json:"confidence"`
+	CollisionStatus  string  `json:"collision_status"`
+	Status           string  `json:"status"`
+	CreatedAt        string  `json:"created_at"`
+	UpdatedAt        string  `json:"updated_at"`
+}
+
+// OpportunityListResult is a collection of opportunities.
+type OpportunityListResult struct {
+	Opportunities []OpportunityResult `json:"opportunities"`
+	Filter        string              `json:"filter,omitempty"`
+}
+
 // SearchOptions carries parameters for a local corpus search.
 type SearchOptions struct {
 	Kind  string

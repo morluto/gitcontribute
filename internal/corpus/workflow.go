@@ -72,6 +72,27 @@ func (c *Corpus) GetInvestigation(ctx context.Context, id string) (*investigatio
 	return &item, nil
 }
 
+func (c *Corpus) ListInvestigations(ctx context.Context) ([]*investigation.Investigation, error) {
+	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM investigations ORDER BY created_at, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list investigations: %w", err)
+	}
+	defer rows.Close()
+	var out []*investigation.Investigation
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var item investigation.Investigation
+		if err := unmarshalWorkflow(payload, &item); err != nil {
+			return nil, err
+		}
+		out = append(out, &item)
+	}
+	return out, rows.Err()
+}
+
 func (c *Corpus) SaveHypothesis(ctx context.Context, item *investigation.Hypothesis) error {
 	if item == nil || item.ID == "" {
 		return errors.New("hypothesis id is required")
@@ -167,7 +188,14 @@ func (c *Corpus) GetOpportunity(ctx context.Context, id string) (*investigation.
 }
 
 func (c *Corpus) ListOpportunities(ctx context.Context, investigationID string) ([]*investigation.Opportunity, error) {
-	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM opportunities WHERE investigation_id=? ORDER BY created_at, id`, investigationID)
+	query := `SELECT payload FROM opportunities`
+	var args []any
+	if investigationID != "" {
+		query += ` WHERE investigation_id=?`
+		args = append(args, investigationID)
+	}
+	query += ` ORDER BY created_at, id`
+	rows, err := c.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list opportunities: %w", err)
 	}

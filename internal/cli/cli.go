@@ -34,15 +34,18 @@ func New(service Service, runner MCPRunner, stdout, stderr io.Writer) *CLI {
 }
 
 type rootCmd struct {
-	Init    initCmd    `cmd:"" help:"Initialize the local corpus"`
-	Status  statusCmd  `cmd:"" help:"Show corpus status"`
-	Sync    syncCmd    `cmd:"" help:"Sync a repository into the corpus"`
-	Search  searchCmd  `cmd:"" help:"Search the local corpus"`
-	Dossier dossierCmd `cmd:"" help:"Show repository dossier"`
-	Index   indexCmd   `cmd:"" help:"Index a clean local checkout at its current commit"`
-	Source  sourceCmd  `cmd:"" help:"Manage repository discovery sources"`
-	Crawl   crawlCmd   `cmd:"" help:"Run a named discovery source"`
-	MCP     mcpCmd     `cmd:"" name:"mcp" help:"Run the MCP server"`
+	Init          initCmd          `cmd:"" help:"Initialize the local corpus"`
+	Status        statusCmd        `cmd:"" help:"Show corpus status"`
+	Sync          syncCmd          `cmd:"" help:"Sync a repository into the corpus"`
+	Search        searchCmd        `cmd:"" help:"Search the local corpus"`
+	Dossier       dossierCmd       `cmd:"" help:"Show repository dossier"`
+	Index         indexCmd         `cmd:"" help:"Index a clean local checkout at its current commit"`
+	Source        sourceCmd        `cmd:"" help:"Manage repository discovery sources"`
+	Crawl         crawlCmd         `cmd:"" help:"Run a named discovery source"`
+	Investigation investigationCmd `cmd:"" help:"Manage investigations"`
+	Hypothesis    hypothesisCmd    `cmd:"" help:"Manage hypotheses"`
+	Opportunity   opportunityCmd   `cmd:"" help:"Manage opportunities"`
+	MCP           mcpCmd           `cmd:"" name:"mcp" help:"Run the MCP server"`
 }
 
 type initCmd struct {
@@ -102,6 +105,80 @@ type crawlCmd struct {
 	JSON   bool          `name:"json" help:"Print the result as JSON"`
 }
 
+type investigationCmd struct {
+	Start startInvestigationCmd `cmd:"" help:"Start an investigation"`
+	Show  showInvestigationCmd  `cmd:"" help:"Show an investigation"`
+	List  listInvestigationCmd  `cmd:"" help:"List investigations"`
+}
+
+type startInvestigationCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	Commit    string `name:"commit" help:"Optional base commit SHA"`
+	Lens      string `name:"lens" help:"Optional lens name"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type showInvestigationCmd struct {
+	ID   string `arg:"" help:"Investigation ID"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type listInvestigationCmd struct {
+	JSON bool `name:"json" help:"Print the result as JSON"`
+}
+
+type hypothesisCmd struct {
+	Add  addHypothesisCmd  `cmd:"" help:"Add a hypothesis"`
+	List listHypothesisCmd `cmd:"" help:"List hypotheses"`
+}
+
+type addHypothesisCmd struct {
+	InvestigationID string `arg:"" help:"Investigation ID"`
+	Title           string `name:"title" required:"" help:"Hypothesis title"`
+	Description     string `name:"description" required:"" help:"Hypothesis description"`
+	Category        string `name:"category" required:"" help:"Hypothesis category"`
+	JSON            bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type listHypothesisCmd struct {
+	InvestigationID string `arg:"" help:"Investigation ID"`
+	JSON            bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type opportunityCmd struct {
+	Promote   promoteOpportunityCmd   `cmd:"" help:"Promote a hypothesis to an opportunity"`
+	Show      showOpportunityCmd      `cmd:"" help:"Show an opportunity"`
+	List      listOpportunityCmd      `cmd:"" help:"List opportunities"`
+	SetStatus setStatusOpportunityCmd `cmd:"" name:"set-status" help:"Set opportunity status"`
+}
+
+type promoteOpportunityCmd struct {
+	HypothesisID string  `arg:"" help:"Hypothesis ID"`
+	Problem      string  `name:"problem" required:"" help:"Problem statement"`
+	Scope        string  `name:"scope" required:"" help:"Scope of the opportunity"`
+	Impact       string  `name:"impact" required:"" help:"Impact description"`
+	Effort       string  `name:"effort" required:"" help:"Expected effort"`
+	Confidence   float64 `name:"confidence" required:"" help:"Confidence (0-1)"`
+	JSON         bool    `name:"json" help:"Print the result as JSON"`
+}
+
+type showOpportunityCmd struct {
+	ID   string `arg:"" help:"Opportunity ID"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type listOpportunityCmd struct {
+	Investigation string `name:"investigation" help:"Filter by investigation ID"`
+	JSON          bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type setStatusOpportunityCmd struct {
+	ID        string `arg:"" help:"Opportunity ID"`
+	Status    string `arg:"" help:"Target status"`
+	Rationale string `name:"rationale" required:"" help:"Rationale for the transition"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
 type mcpCmd struct {
 	Transport string `name:"transport" default:"stdio" enum:"stdio" help:"MCP transport protocol"`
 }
@@ -123,8 +200,17 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return NewCLIError(ExitUsage, err)
 	}
 
-	command := kctx.Command()
-	cmd := strings.Fields(command)[0]
+	var commandParts []string
+	for _, trace := range kctx.Path {
+		if trace.Command != nil {
+			commandParts = append(commandParts, trace.Command.Name)
+		}
+	}
+	command := strings.Join(commandParts, " ")
+	cmd := command
+	if idx := strings.IndexByte(command, ' '); idx >= 0 {
+		cmd = command[:idx]
+	}
 	switch cmd {
 	case "init":
 		return c.runInit(ctx, &cli.Init)
@@ -142,6 +228,12 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runSource(ctx, command, &cli.Source)
 	case "crawl":
 		return c.runCrawl(ctx, &cli.Crawl)
+	case "investigation":
+		return c.runInvestigation(ctx, command, &cli.Investigation)
+	case "hypothesis":
+		return c.runHypothesis(ctx, command, &cli.Hypothesis)
+	case "opportunity":
+		return c.runOpportunity(ctx, command, &cli.Opportunity)
 	case "mcp":
 		return c.runMCP(ctx, &cli.MCP)
 	default:
@@ -151,6 +243,14 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 
 func (c *CLI) discoveryService() (DiscoveryService, error) {
 	service, ok := c.svc.(DiscoveryService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) investigationService() (InvestigationService, error) {
+	service, ok := c.svc.(InvestigationService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -194,6 +294,100 @@ func (c *CLI) runCrawl(ctx context.Context, cmd *crawlCmd) error {
 		return c.mapError(err)
 	}
 	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runInvestigation(ctx context.Context, command string, cmd *investigationCmd) error {
+	service, err := c.investigationService()
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "investigation start":
+		repo, err := parseRepo(cmd.Start.OwnerRepo)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(c.stderr, "starting investigation for %s...\n", repo)
+		result, err := service.StartInvestigation(ctx, repo, cmd.Start.Commit, cmd.Start.Lens)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Start.JSON, result)
+	case "investigation show":
+		result, err := service.ShowInvestigation(ctx, cmd.Show.ID)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Show.JSON, result)
+	case "investigation list":
+		result, err := service.ListInvestigations(ctx)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.List.JSON, result)
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown investigation command: %s", command))
+	}
+}
+
+func (c *CLI) runHypothesis(ctx context.Context, command string, cmd *hypothesisCmd) error {
+	service, err := c.investigationService()
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "hypothesis add":
+		fmt.Fprintf(c.stderr, "recording hypothesis for investigation %s...\n", cmd.Add.InvestigationID)
+		result, err := service.AddHypothesis(ctx, cmd.Add.InvestigationID, cmd.Add.Title, cmd.Add.Description, cmd.Add.Category)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Add.JSON, result)
+	case "hypothesis list":
+		result, err := service.ListHypotheses(ctx, cmd.List.InvestigationID)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.List.JSON, result)
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown hypothesis command: %s", command))
+	}
+}
+
+func (c *CLI) runOpportunity(ctx context.Context, command string, cmd *opportunityCmd) error {
+	service, err := c.investigationService()
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "opportunity promote":
+		fmt.Fprintf(c.stderr, "promoting hypothesis %s to opportunity...\n", cmd.Promote.HypothesisID)
+		result, err := service.PromoteOpportunity(ctx, cmd.Promote.HypothesisID, cmd.Promote.Problem, cmd.Promote.Scope, cmd.Promote.Impact, cmd.Promote.Effort, cmd.Promote.Confidence)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Promote.JSON, result)
+	case "opportunity show":
+		result, err := service.ShowOpportunity(ctx, cmd.Show.ID)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Show.JSON, result)
+	case "opportunity list":
+		result, err := service.ListOpportunities(ctx, cmd.List.Investigation)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.List.JSON, result)
+	case "opportunity set-status":
+		result, err := service.SetOpportunityStatus(ctx, cmd.SetStatus.ID, cmd.SetStatus.Status, cmd.SetStatus.Rationale)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.SetStatus.JSON, result)
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown opportunity command: %s", command))
+	}
 }
 
 func (c *CLI) runIndex(ctx context.Context, cmd *indexCmd) error {

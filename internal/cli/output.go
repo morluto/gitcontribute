@@ -45,6 +45,18 @@ func humanOutput(v any) (string, error) {
 		return b.String(), nil
 	case *CrawlResult:
 		return fmt.Sprintf("Crawled %s: %d repositories across %d windows using %d requests.\ncheckpoint: %s", r.Source, r.Repositories, r.Windows, r.Requests, r.Checkpoint), nil
+	case *InvestigationResult:
+		return investigationHuman(r), nil
+	case *InvestigationListResult:
+		return investigationListHuman(r), nil
+	case *HypothesisResult:
+		return hypothesisHuman(r), nil
+	case *HypothesisListResult:
+		return hypothesisListHuman(r), nil
+	case *OpportunityResult:
+		return opportunityHuman(r), nil
+	case *OpportunityListResult:
+		return opportunityListHuman(r), nil
 	default:
 		return "", fmt.Errorf("unsupported result type %T", v)
 	}
@@ -100,4 +112,84 @@ func dossierHuman(r *DossierResult) string {
 	fmt.Fprintf(&b, "Coverage: %s\n", strings.Join(r.Coverage, ", "))
 	fmt.Fprintf(&b, "Freshness: %s", r.Freshness)
 	return b.String()
+}
+
+func investigationHuman(r *InvestigationResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Investigation: %s (%s)\n", r.ID, r.Status)
+	fmt.Fprintf(&b, "Repository: %s", r.Repo)
+	if r.CommitSHA != "" {
+		fmt.Fprintf(&b, " @ %s", r.CommitSHA)
+	}
+	if r.Lens != "" {
+		fmt.Fprintf(&b, " lens=%s", r.Lens)
+	}
+	b.WriteString("\n")
+	fmt.Fprintf(&b, "Created: %s\nUpdated: %s", r.CreatedAt, r.UpdatedAt)
+	return b.String()
+}
+
+func investigationListHuman(r *InvestigationListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d %s", len(r.Investigations), pluralize(len(r.Investigations), "investigation", "investigations"))
+	for _, inv := range r.Investigations {
+		fmt.Fprintf(&b, "\n- %s %s (%s)", inv.ID, inv.Repo, inv.Status)
+	}
+	return b.String()
+}
+
+func hypothesisHuman(r *HypothesisResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Hypothesis: %s (%s)\n", r.ID, r.Status)
+	fmt.Fprintf(&b, "Investigation: %s\n", r.InvestigationID)
+	fmt.Fprintf(&b, "Category: %s\n", r.Category)
+	fmt.Fprintf(&b, "Title: %s\n", r.Title)
+	fmt.Fprintf(&b, "Description: %s\n", r.Description)
+	fmt.Fprintf(&b, "Created: %s\nUpdated: %s", r.CreatedAt, r.UpdatedAt)
+	return b.String()
+}
+
+func hypothesisListHuman(r *HypothesisListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d %s", len(r.Hypotheses), pluralize(len(r.Hypotheses), "hypothesis", "hypotheses"))
+	for _, h := range r.Hypotheses {
+		fmt.Fprintf(&b, "\n- %s [%s] %s (%s)", h.ID, h.Category, h.Title, h.Status)
+	}
+	return b.String()
+}
+
+func opportunityHuman(r *OpportunityResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Opportunity: %s (%s)\n", r.ID, r.Status)
+	fmt.Fprintf(&b, "Investigation: %s\n", r.InvestigationID)
+	fmt.Fprintf(&b, "Hypothesis: %s\n", r.HypothesisID)
+	fmt.Fprintf(&b, "Title: %s\n", r.Title)
+	fmt.Fprintf(&b, "Problem: %s\n", r.ProblemStatement)
+	fmt.Fprintf(&b, "Scope: %s\n", r.Scope)
+	fmt.Fprintf(&b, "Impact: %s\n", r.Impact)
+	fmt.Fprintf(&b, "Effort: %s\n", r.ExpectedEffort)
+	fmt.Fprintf(&b, "Confidence: %.2f\n", r.Confidence)
+	fmt.Fprintf(&b, "Category: %s\n", r.Category)
+	fmt.Fprintf(&b, "Collisions: %s\n", r.CollisionStatus)
+	fmt.Fprintf(&b, "Created: %s\nUpdated: %s", r.CreatedAt, r.UpdatedAt)
+	return b.String()
+}
+
+func opportunityListHuman(r *OpportunityListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d %s", len(r.Opportunities), pluralize(len(r.Opportunities), "opportunity", "opportunities"))
+	if r.Filter != "" {
+		fmt.Fprintf(&b, " (filter: %s)", r.Filter)
+	}
+	for _, o := range r.Opportunities {
+		fmt.Fprintf(&b, "\n- %s [%s] %s (confidence %.2f, %s)", o.ID, o.Category, o.Title, o.Confidence, o.Status)
+	}
+	return b.String()
+}
+
+func pluralize(n int, singular, plural string) string {
+	if n == 1 {
+		return singular
+	}
+	return plural
 }
