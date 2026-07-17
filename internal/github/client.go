@@ -95,11 +95,11 @@ func NewClient(cfg Config) (*Client, error) {
 	retryCfg = retryCfg.withDefaults()
 
 	retrier := &retryTransport{
-		Base:   baseTransport,
+		Base:   &RateLimitedTransport{Base: baseTransport, Limiter: limiter},
 		Config: retryCfg,
 	}
 
-	cfg.HTTPClient.Transport = &RateLimitedTransport{Base: retrier, Limiter: limiter}
+	cfg.HTTPClient.Transport = retrier
 
 	opts := []gh.ClientOptionsFunc{
 		gh.WithHTTPClient(cfg.HTTPClient),

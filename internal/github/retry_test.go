@@ -881,8 +881,8 @@ func TestRetryClientPreservesRateLimiterBehavior(t *testing.T) {
 	if attempts != 2 {
 		t.Fatalf("server attempts = %d, want 2", attempts)
 	}
-	if lim.calls != 1 {
-		t.Fatalf("Limiter.WaitN called %d times, want 1", lim.calls)
+	if lim.calls != 2 {
+		t.Fatalf("Limiter.WaitN called %d times, want 2", lim.calls)
 	}
 }
 
@@ -912,5 +912,43 @@ func TestRetryClientContextCancel(t *testing.T) {
 	_, _, err = client.GetRepository(ctx, testOwner, testRepo)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("got %v, want context.Canceled", err)
+	}
+}
+
+func TestRetryTransportAppliesLimiterPerAttempt(t *testing.T) {
+	ft := &fakeTransport{
+		results: []fakeResult{
+			{status: http.StatusInternalServerError, body: "boom"},
+			{status: http.StatusOK, body: "ok"},
+		},
+	}
+	lim := &countingLimiter{}
+	sleeper := &fakeSleeper{}
+	rt := &retryTransport{
+		Base: &RateLimitedTransport{Base: ft, Limiter: lim},
+		Config: &RetryConfig{
+			MaxAttempts: 3,
+			BaseDelay:   time.Nanosecond,
+			MaxDelay:    time.Nanosecond,
+			Sleeper:     sleeper.Sleep,
+		},
+	}
+
+	req := newGetRequest(t, "http://example.com/repos/o/r")
+	resp, err := rt.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("RoundTrip: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ft.index != 2 {
+		t.Fatalf("attempts = %d, want 2", ft.index)
+	}
+	if lim.calls != 2 {
+		t.Fatalf("Limiter.WaitN called %d times, want 2", lim.calls)
+	}
+	if calls := sleeper.Calls(); len(calls) != 1 {
+		t.Fatalf("sleeps = %d, want 1", len(calls))
 	}
 }

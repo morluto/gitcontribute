@@ -504,6 +504,9 @@ func TestRateLimiterTransport(t *testing.T) {
 		UploadURL:   srv.URL,
 		TokenSource: nil,
 		Limiter:     lim,
+		Retry: &RetryConfig{
+			MaxAttempts: 1,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
