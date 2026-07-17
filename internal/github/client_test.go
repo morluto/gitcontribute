@@ -40,6 +40,7 @@ func newTestClient(t *testing.T, srv *httptest.Server, ts TokenSource) *Client {
 		UploadURL:   srv.URL,
 		TokenSource: ts,
 		Limiter:     noopLimiter{},
+		Retry:       &RetryConfig{MaxAttempts: 1},
 	})
 	if err != nil {
 		t.Fatalf("new client: %v", err)

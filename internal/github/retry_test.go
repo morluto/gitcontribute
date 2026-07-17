@@ -297,6 +297,52 @@ func TestRetryTransportHonorsRetryAfter(t *testing.T) {
 	}
 }
 
+func TestRetryTransportRetriesSecondaryRateLimit(t *testing.T) {
+	ft := &fakeTransport{
+		results: []fakeResult{
+			{status: http.StatusForbidden, header: http.Header{"Retry-After": []string{"2"}}},
+			{status: http.StatusOK, body: "ok"},
+		},
+	}
+	sleeper := &fakeSleeper{}
+	rt := &retryTransport{
+		Base: ft,
+		Config: &RetryConfig{
+			MaxAttempts: 2,
+			BaseDelay:   time.Millisecond,
+			MaxDelay:    time.Hour,
+			Sleeper:     sleeper.Sleep,
+		},
+	}
+
+	resp, err := rt.RoundTrip(newGetRequest(t, "http://example.com/repos/o/r"))
+	if err != nil {
+		t.Fatalf("RoundTrip: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if calls := sleeper.Calls(); len(calls) != 1 || calls[0] != 2*time.Second {
+		t.Fatalf("sleeps = %v, want [2s]", calls)
+	}
+}
+
+func TestRetryTransportDoesNotRetryOrdinaryForbidden(t *testing.T) {
+	ft := &fakeTransport{results: []fakeResult{{status: http.StatusForbidden}}}
+	rt := &retryTransport{Base: ft, Config: (&RetryConfig{MaxAttempts: 2}).withDefaults()}
+
+	resp, err := rt.RoundTrip(newGetRequest(t, "http://example.com/repos/o/r"))
+	if err != nil {
+		t.Fatalf("RoundTrip: %v", err)
+	}
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	if len(ft.requests) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(ft.requests))
+	}
+}
+
 func TestRetryTransportHonorsPrimaryReset(t *testing.T) {
 	now := time.Date(2026, 7, 17, 0, 0, 0, 0, time.UTC)
 	clock := &fakeClock{now: now}

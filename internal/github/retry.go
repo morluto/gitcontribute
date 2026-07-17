@@ -200,6 +200,10 @@ func shouldRetry(resp *http.Response) bool {
 	switch resp.StatusCode {
 	case http.StatusTooManyRequests:
 		return true
+	case http.StatusForbidden:
+		// GitHub uses 403 plus Retry-After for secondary rate limits. Do not
+		// retry ordinary authorization failures or long primary-limit resets.
+		return strings.TrimSpace(resp.Header.Get("Retry-After")) != ""
 	}
 	return resp.StatusCode >= 500
 }
