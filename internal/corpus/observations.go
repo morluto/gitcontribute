@@ -199,7 +199,7 @@ func (c *Corpus) ListRepositoriesWithOptions(ctx context.Context, query string, 
 	args := []any{}
 	where := ""
 	if query != "" {
-		where = `WHERE owner || '/' || name LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\'`
+		where = `WHERE (owner || '/' || name LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\')`
 		esc := escapeLike(query)
 		args = append(args, "%"+esc+"%", "%"+esc+"%")
 	}
@@ -276,7 +276,7 @@ func (c *Corpus) countRepositories(ctx context.Context, query string) (int, erro
 	args := []any{}
 	where := ""
 	if query != "" {
-		where = `WHERE owner || '/' || name LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\'`
+		where = `WHERE (owner || '/' || name LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\')`
 		esc := escapeLike(query)
 		args = append(args, "%"+esc+"%", "%"+esc+"%")
 	}

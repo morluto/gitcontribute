@@ -223,6 +223,51 @@ func TestListRepositoriesPageReturnsNextCursorAndTotal(t *testing.T) {
 	}
 }
 
+func TestListRepositoriesQueryWithCursorParenthesizesOR(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+
+	if _, err := c.UpsertRepository(ctx, Repository{
+		Owner: "alpha", Name: "owner-match", Description: "x",
+		SourceUpdatedAt: time.Unix(300, 0).UTC(),
+	}, `{}`); err != nil {
+		t.Fatalf("seed owner match: %v", err)
+	}
+	if _, err := c.UpsertRepository(ctx, Repository{
+		Owner: "beta", Name: "repo2", Description: "query-match",
+		SourceUpdatedAt: time.Unix(200, 0).UTC(),
+	}, `{}`); err != nil {
+		t.Fatalf("seed description match 1: %v", err)
+	}
+	if _, err := c.UpsertRepository(ctx, Repository{
+		Owner: "gamma", Name: "repo3", Description: "query-match",
+		SourceUpdatedAt: time.Unix(100, 0).UTC(),
+	}, `{}`); err != nil {
+		t.Fatalf("seed description match 2: %v", err)
+	}
+
+	first, err := c.ListRepositoriesWithOptions(ctx, "match", RepositorySearchOptions{Limit: 1})
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if len(first.Repositories) != 1 || first.Repositories[0].Name != "owner-match" {
+		t.Fatalf("first page = %+v", first.Repositories)
+	}
+
+	second, err := c.ListRepositoriesWithOptions(ctx, "match", RepositorySearchOptions{Limit: 2, Cursor: first.NextCursor})
+	if err != nil {
+		t.Fatalf("second page: %v", err)
+	}
+	if len(second.Repositories) != 2 {
+		t.Fatalf("second page repositories = %d, want 2", len(second.Repositories))
+	}
+	names := []string{second.Repositories[0].Name, second.Repositories[1].Name}
+	want := []string{"repo2", "repo3"}
+	if diff := cmp.Diff(want, names); diff != "" {
+		t.Fatalf("second page mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestListRepositoriesPageMalformedCursorRejected(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
