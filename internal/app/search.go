@@ -136,13 +136,9 @@ func (s *Service) resolveRepoFilter(ctx context.Context, c *corpus.Corpus, opts 
 	if opts.Repo == "" || opts.Kind == "code" || opts.Kind == "all" || opts.Kind == "repos" {
 		return 0, domain.RepoRef{}, nil
 	}
-	parts := strings.Split(opts.Repo, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return 0, domain.RepoRef{}, fmt.Errorf("invalid repository filter %q", opts.Repo)
-	}
-	ref := domain.RepoRef{Owner: parts[0], Repo: parts[1]}
-	if err := ref.Validate(); err != nil {
-		return 0, domain.RepoRef{}, fmt.Errorf("invalid repository filter %q: %w", opts.Repo, err)
+	ref, err := s.parseRepoRef(opts.Repo)
+	if err != nil {
+		return 0, domain.RepoRef{}, err
 	}
 	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
 	if err != nil {

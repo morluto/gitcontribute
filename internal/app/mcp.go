@@ -95,7 +95,7 @@ func (r *MCPReader) Repository(ctx context.Context, in mcpserver.RepoInput) (mcp
 	return mcpserver.RepositoryOutput{
 		Owner:     repo.Owner,
 		Repo:      repo.Name,
-		UpdatedAt: repo.SourceUpdatedAt.Format(time.RFC3339),
+		UpdatedAt: formatTime(repo.SourceUpdatedAt),
 		Fields: map[string]any{
 			"description":    repo.Description,
 			"default_branch": repo.DefaultBranch,
@@ -149,10 +149,6 @@ func (r *MCPReader) Thread(ctx context.Context, in mcpserver.ThreadInput) (mcpse
 }
 
 func corpusThreadToMCPOutput(t *corpus.Thread) mcpserver.ThreadOutput {
-	updatedAt := ""
-	if !t.UpdatedAt.IsZero() {
-		updatedAt = t.UpdatedAt.Format(time.RFC3339)
-	}
 	return mcpserver.ThreadOutput{
 		Owner:     "", // filled by caller
 		Repo:      "",
@@ -163,7 +159,7 @@ func corpusThreadToMCPOutput(t *corpus.Thread) mcpserver.ThreadOutput {
 		Body:      t.Body,
 		Author:    t.Author,
 		Labels:    t.Labels,
-		UpdatedAt: updatedAt,
+		UpdatedAt: formatTime(t.SourceUpdatedAt),
 	}
 }
 

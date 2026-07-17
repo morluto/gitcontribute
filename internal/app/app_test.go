@@ -485,7 +485,7 @@ func TestMCPReaderLocalReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mcp repository: %v", err)
 	}
-	if repo.Owner != "acme" || repo.Repo != "rocket" || repo.Fields["stars"] != 42 {
+	if repo.Owner != "acme" || repo.Repo != "rocket" || repo.Fields["stars"] != 42 || repo.UpdatedAt != "2024-01-01T00:00:00Z" {
 		t.Fatalf("unexpected repository output: %+v", repo)
 	}
 
@@ -493,7 +493,7 @@ func TestMCPReaderLocalReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mcp thread: %v", err)
 	}
-	if thread.Number != 1 || thread.State != "open" {
+	if thread.Number != 1 || thread.State != "open" || thread.UpdatedAt != "2024-02-01T00:00:00Z" {
 		t.Fatalf("unexpected thread output: %+v", thread)
 	}
 

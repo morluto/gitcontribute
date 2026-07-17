@@ -44,6 +44,7 @@ func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpserver.SearchR
 				},
 			}, nil
 		}
+		return mcpserver.SearchRepositoriesOutput{Query: in.Query, Matches: []mcpserver.RepositoryOutput{}}, nil
 	}
 
 	res, err := r.Service.searchCorpus(ctx, in.Query, cli.SearchOptions{
@@ -159,6 +160,9 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		if thread == nil {
 			return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
 		}
+		if in.Kind != "" && thread.Kind != in.Kind {
+			return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+		}
 		out.Kind = thread.Kind
 		out.Number = thread.Number
 		out.Title = thread.Title
@@ -191,7 +195,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 				break
 			}
 		}
-		if match == nil && len(matches) > 0 {
+		if match == nil && in.Path == "" && in.Commit == "" && len(matches) > 0 {
 			match = &matches[0]
 		}
 		if match == nil {

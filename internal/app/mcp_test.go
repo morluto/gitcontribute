@@ -2,10 +2,12 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/codeindex"
+	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
@@ -41,6 +43,70 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	}
 	if match.Snippet != "func searchableParser() {}" {
 		t.Fatalf("unexpected snippet: %q", match.Snippet)
+	}
+}
+
+func TestMCPReaderRepositorySearchDoesNotFallBackFromMissingExactRepository(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
+		Owner: "owner", Name: "present", Description: "searchable repository",
+	}, `{}`); err != nil {
+		t.Fatalf("store repository: %v", err)
+	}
+
+	out, err := svc.MCPReader().SearchRepositories(ctx, mcpserver.SearchRepositoriesInput{
+		Owner: "owner", Repo: "missing", Query: "searchable", Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("search repositories: %v", err)
+	}
+	if out.Total != 0 || len(out.Matches) != 0 {
+		t.Fatalf("missing exact repository returned global matches: %+v", out)
+	}
+}
+
+func TestMCPReaderExplainCodeRejectsDifferentRequestedPath(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner, Name: ref.Repo}, `{}`); err != nil {
+		t.Fatalf("store repository: %v", err)
+	}
+	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, ref, codeindex.Snapshot{
+		RepoPath: "/repo", Commit: "abc123", CreatedAt: time.Now().UTC(), TotalBytes: 25,
+		Documents: []codeindex.Document{{Path: "parser.go", Content: "func searchableParser() {}", Bytes: 25, LanguageHint: "go"}},
+	}); err != nil {
+		t.Fatalf("store code snapshot: %v", err)
+	}
+
+	_, err := svc.MCPReader().ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Query: "searchableParser", Path: "missing.go", Limit: 10,
+	})
+	if !errors.Is(err, mcpserver.ErrNotFound) {
+		t.Fatalf("explain different path error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestMCPReaderExplainThreadRejectsDifferentRequestedKind(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "owner", Name: "repo"}, `{}`)
+	if err != nil {
+		t.Fatalf("store repository: %v", err)
+	}
+	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
+		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 1,
+		State: "open", Title: "searchable change", SourceUpdatedAt: time.Now().UTC(),
+	}, `{}`); err != nil {
+		t.Fatalf("store pull request: %v", err)
+	}
+
+	_, err = svc.MCPReader().ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+		Owner: "owner", Repo: "repo", Kind: "issue", Number: 1, Query: "searchable", Limit: 10,
+	})
+	if !errors.Is(err, mcpserver.ErrNotFound) {
+		t.Fatalf("explain different kind error = %v, want ErrNotFound", err)
 	}
 }
 
