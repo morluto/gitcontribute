@@ -44,7 +44,7 @@ func humanOutput(v any) (string, error) {
 		}
 		return b.String(), nil
 	case *CrawlResult:
-		return fmt.Sprintf("Crawled %s: %d repositories across %d windows using %d requests.\ncheckpoint: %s", r.Source, r.Repositories, r.Windows, r.Requests, r.Checkpoint), nil
+		return crawlHuman(r), nil
 	case *InvestigationResult:
 		return investigationHuman(r), nil
 	case *InvestigationListResult:
@@ -195,6 +195,25 @@ func opportunityListHuman(r *OpportunityListResult) string {
 	}
 	for _, o := range r.Opportunities {
 		fmt.Fprintf(&b, "\n- %s [%s] %s (confidence %.2f, %s)", o.ID, o.Category, o.Title, o.Confidence, o.Status)
+	}
+	return b.String()
+}
+
+func crawlHuman(r *CrawlResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Crawled %s: %d repositories", r.Source, r.Repositories)
+	if r.Threads > 0 {
+		fmt.Fprintf(&b, ", %d threads", r.Threads)
+	}
+	if r.Events > 0 {
+		fmt.Fprintf(&b, ", %d events", r.Events)
+	}
+	fmt.Fprintf(&b, " across %d windows using %d requests", r.Windows, r.Requests)
+	if r.Imported > 0 || r.Skipped > 0 || r.Failures > 0 {
+		fmt.Fprintf(&b, " (imported %d, skipped %d, failed %d)", r.Imported, r.Skipped, r.Failures)
+	}
+	if r.Checkpoint != "" {
+		fmt.Fprintf(&b, ".\ncheckpoint: %s", r.Checkpoint)
 	}
 	return b.String()
 }

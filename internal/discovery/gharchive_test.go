@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -214,5 +215,74 @@ func TestMemoryCheckpointStoreRespectsCancellation(t *testing.T) {
 	store := NewMemoryCheckpointStore()
 	if err := store.MarkImported(ctx, "hour"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("MarkImported error = %v, want context.Canceled", err)
+	}
+}
+
+func TestArchiveReaderRejectsDecompressionBomb(t *testing.T) {
+	// Build a gzip stream with many small lines that decompresses to more
+	// than the MaxTotalBytes limit.
+	var uncompressed bytes.Buffer
+	for i := 0; i < 1000; i++ {
+		uncompressed.WriteString(`{"id":"` + fmt.Sprintf("%d", i) + `","type":"PushEvent","actor":{"id":1,"login":"a"},"repo":{"id":1,"name":"owner/repo"},"payload":{"ref":"refs/heads/main","head":"abc","size":1},"created_at":"2023-01-01T00:00:00Z"}` + "\n")
+	}
+	var gz bytes.Buffer
+	gw := gzip.NewWriter(&gz)
+	gw.Write(uncompressed.Bytes())
+	gw.Close()
+
+	reader := NewArchiveReader(nil, nil)
+	reader.MaxTotalBytes = 256
+	var count int
+	err := reader.Read(context.Background(), time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC), bytes.NewReader(gz.Bytes()), func(Signal) error {
+		count++
+		return nil
+	})
+	if !errors.Is(err, ErrDecompressedTooLarge) {
+		t.Fatalf("expected ErrDecompressedTooLarge, got %v", err)
+	}
+}
+
+func TestArchiveReaderSkipsMalformedAndUnknownEvents(t *testing.T) {
+	hour := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+	valid := eventLine("IssuesEvent", map[string]any{
+		"action": "opened",
+		"issue":  map[string]any{"number": 1, "title": "bug", "state": "open", "user": map[string]any{"login": "u"}},
+	})
+	unknown := []byte(`{"id":"2","type":"UnknownEvent","actor":{"id":1,"login":"a"},"repo":{"id":1,"name":"owner/repo"},"payload":{},"created_at":"2023-01-01T00:00:00Z"}`)
+	malformed := []byte(`this is not json`)
+	incomplete := []byte(`{"type":"IssuesEvent",`)
+
+	reader := NewArchiveReader(nil, nil)
+	var got []Signal
+	err := reader.Read(context.Background(), hour, bytes.NewReader(gzipLines(valid, unknown, malformed, incomplete)), func(s Signal) error {
+		got = append(got, s)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if len(got) != 1 || got[0].EventType != IssuesEvent {
+		t.Fatalf("expected 1 IssuesEvent, got %+v", got)
+	}
+}
+
+func TestArchiveHourRange(t *testing.T) {
+	now := time.Date(2023, 1, 3, 5, 15, 0, 0, time.UTC)
+	start, end := ArchiveHourRange(2*time.Hour, now)
+	wantStart := time.Date(2023, 1, 3, 3, 0, 0, 0, time.UTC)
+	wantEnd := time.Date(2023, 1, 3, 4, 0, 0, 0, time.UTC)
+	if !start.Equal(wantStart) {
+		t.Fatalf("start = %v, want %v", start, wantStart)
+	}
+	if !end.Equal(wantEnd) {
+		t.Fatalf("end = %v, want %v", end, wantEnd)
+	}
+
+	hour := time.Date(2023, 1, 3, 5, 0, 0, 0, time.UTC)
+	start, end = ArchiveHourRange(time.Hour, hour)
+	wantEnd = time.Date(2023, 1, 3, 4, 0, 0, 0, time.UTC)
+	wantStart = wantEnd
+	if !start.Equal(wantStart) || !end.Equal(wantEnd) {
+		t.Fatalf("on-the-hour bounds = %v to %v, want %v to %v", start, end, wantStart, wantEnd)
 	}
 }

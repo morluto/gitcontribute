@@ -112,5 +112,6 @@ type RunEvent struct {
 const (
 	RunStatusRunning   = "running"
 	RunStatusCompleted = "completed"
+	RunStatusPartial   = "partial"
 	RunStatusFailed    = "failed"
 )

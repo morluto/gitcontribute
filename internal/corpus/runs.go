@@ -69,6 +69,24 @@ func (c *Corpus) FinishRun(ctx context.Context, id int64, stats string) error {
 	return nil
 }
 
+// FinishRunPartial records a completed run that made progress but encountered
+// retryable gaps.
+func (c *Corpus) FinishRunPartial(ctx context.Context, id int64, stats, message string) error {
+	now := encodeTime(time.Now())
+	res, err := c.db.ExecContext(ctx, `
+		UPDATE runs
+		SET status = ?, completed_at = ?, stats = ?, error = ?
+		WHERE id = ?
+	`, RunStatusPartial, now, stats, message, id)
+	if err != nil {
+		return fmt.Errorf("finish partial run: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("run %d not found", id)
+	}
+	return nil
+}
+
 // FailRun marks a run as failed and stores an error message.
 func (c *Corpus) FailRun(ctx context.Context, id int64, message string) error {
 	now := encodeTime(time.Now())

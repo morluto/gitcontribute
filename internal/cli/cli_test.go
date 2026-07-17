@@ -13,24 +13,27 @@ import (
 )
 
 type fakeService struct {
-	initCalled         bool
-	statusCalled       bool
-	syncCalled         bool
-	searchCalled       bool
-	dossierCalled      bool
-	indexCalled        bool
-	addSourceCalled    bool
-	listSourcesCalled  bool
-	crawlCalled        bool
-	startInvCalled     bool
-	showInvCalled      bool
-	listInvCalled      bool
-	addHypCalled       bool
-	listHypCalled      bool
-	promoteOppCalled   bool
-	showOppCalled      bool
-	listOppCalled      bool
-	setStatusOppCalled bool
+	initCalled               bool
+	statusCalled             bool
+	syncCalled               bool
+	searchCalled             bool
+	dossierCalled            bool
+	indexCalled              bool
+	addSourceCalled          bool
+	addRepoSourceCalled      bool
+	addGHArchiveSourceCalled bool
+	showSourceCalled         bool
+	listSourcesCalled        bool
+	crawlCalled              bool
+	startInvCalled           bool
+	showInvCalled            bool
+	listInvCalled            bool
+	addHypCalled             bool
+	listHypCalled            bool
+	promoteOppCalled         bool
+	showOppCalled            bool
+	listOppCalled            bool
+	setStatusOppCalled       bool
 
 	initResult         *cli.InitResult
 	statusResult       *cli.StatusResult
@@ -56,21 +59,24 @@ type fakeService struct {
 		Query string
 		Opts  cli.SearchOptions
 	}
-	lastDossierArg    cli.RepoRef
-	lastIndexRepo     cli.RepoRef
-	lastIndexPath     string
-	lastSourceName    string
-	lastSourceQuery   string
-	lastCrawlName     string
-	lastCrawlOpts     cli.CrawlOptions
-	lastStartInvArgs  startInvArgs
-	lastShowInvArg    string
-	lastAddHypArgs    addHypArgs
-	lastListHypArg    string
-	lastPromoteArgs   promoteArgs
-	lastShowOppArg    string
-	lastListOppFilter string
-	lastSetStatusArgs setStatusArgs
+	lastDossierArg     cli.RepoRef
+	lastIndexRepo      cli.RepoRef
+	lastIndexPath      string
+	lastSourceName     string
+	lastSourceQuery    string
+	lastSourceRefs     []cli.RepoRef
+	lastSourceEvents   []string
+	lastShowSourceName string
+	lastCrawlName      string
+	lastCrawlOpts      cli.CrawlOptions
+	lastStartInvArgs   startInvArgs
+	lastShowInvArg     string
+	lastAddHypArgs     addHypArgs
+	lastListHypArg     string
+	lastPromoteArgs    promoteArgs
+	lastShowOppArg     string
+	lastListOppFilter  string
+	lastSetStatusArgs  setStatusArgs
 
 	err error
 }
@@ -143,6 +149,26 @@ func (f *fakeService) AddSearchSource(ctx context.Context, name, query string) (
 	f.addSourceCalled = true
 	f.lastSourceName = name
 	f.lastSourceQuery = query
+	return f.sourceResult, f.err
+}
+
+func (f *fakeService) AddRepoSource(ctx context.Context, name string, refs []cli.RepoRef) (*cli.SourceResult, error) {
+	f.addRepoSourceCalled = true
+	f.lastSourceName = name
+	f.lastSourceRefs = refs
+	return f.sourceResult, f.err
+}
+
+func (f *fakeService) AddGHArchiveSource(ctx context.Context, name string, events []string) (*cli.SourceResult, error) {
+	f.addGHArchiveSourceCalled = true
+	f.lastSourceName = name
+	f.lastSourceEvents = events
+	return f.sourceResult, f.err
+}
+
+func (f *fakeService) ShowSource(ctx context.Context, name string) (*cli.SourceResult, error) {
+	f.showSourceCalled = true
+	f.lastShowSourceName = name
 	return f.sourceResult, f.err
 }
 
@@ -241,6 +267,75 @@ func TestSourceAddSearchAndList(t *testing.T) {
 	requireNoErr(t, c.Run(context.Background(), []string{"source", "list"}))
 	if !svc.listSourcesCalled || !strings.Contains(stdout.String(), "active-go") {
 		t.Fatalf("listed=%v stdout=%q", svc.listSourcesCalled, stdout.String())
+	}
+}
+
+func TestSourceAddRepos(t *testing.T) {
+	svc := &fakeService{
+		sourceResult: &cli.SourceResult{Name: "golang-go", Kind: "repos", Definition: `{"repositories":[{"owner":"golang","repo":"go"}]}`, Enabled: true},
+	}
+	c, stdout, _ := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "golang/go"}))
+	if !svc.addRepoSourceCalled || svc.lastSourceName != "golang-go" || len(svc.lastSourceRefs) != 1 || svc.lastSourceRefs[0].String() != "golang/go" {
+		t.Fatalf("add repo source call = called:%v name:%q refs:%+v", svc.addRepoSourceCalled, svc.lastSourceName, svc.lastSourceRefs)
+	}
+	if !strings.Contains(stdout.String(), "Source golang-go") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestSourceAddReposAcceptsURL(t *testing.T) {
+	svc := &fakeService{sourceResult: &cli.SourceResult{Name: "x-y", Kind: "repos"}}
+	c, _, _ := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "https://github.com/X/Y"}))
+	if len(svc.lastSourceRefs) != 1 || svc.lastSourceRefs[0].String() != "X/Y" {
+		t.Fatalf("refs = %+v", svc.lastSourceRefs)
+	}
+}
+
+func TestSourceAddReposRejectsInvalidURL(t *testing.T) {
+	svc := &fakeService{}
+	c, _, _ := newTestCLI(svc, nil)
+	err := c.Run(context.Background(), []string{"source", "add", "repos", "https://gitlab.com/X/Y"})
+	requireCLIError(t, err, cli.ExitUsage)
+	if svc.addRepoSourceCalled {
+		t.Fatal("add repo source should not be called for invalid URL")
+	}
+}
+
+func TestSourceAddGHArchive(t *testing.T) {
+	svc := &fakeService{
+		sourceResult: &cli.SourceResult{Name: "gharchive", Kind: "gharchive", Definition: `{"events":["PushEvent","IssuesEvent"]}`, Enabled: true},
+	}
+	c, stdout, _ := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "gharchive", "--events", "PushEvent,IssuesEvent"}))
+	if !svc.addGHArchiveSourceCalled || svc.lastSourceName != "gharchive" || len(svc.lastSourceEvents) != 2 {
+		t.Fatalf("add gharchive call = called:%v name:%q events:%+v", svc.addGHArchiveSourceCalled, svc.lastSourceName, svc.lastSourceEvents)
+	}
+	if !strings.Contains(stdout.String(), "Source gharchive") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+}
+
+func TestSourceAddGHArchiveRejectsUnknownEvent(t *testing.T) {
+	svc := &fakeService{}
+	c, _, _ := newTestCLI(svc, nil)
+	err := c.Run(context.Background(), []string{"source", "add", "gharchive", "--events", "PushEvent,UnknownEvent"})
+	requireCLIError(t, err, cli.ExitUsage)
+	if svc.addGHArchiveSourceCalled {
+		t.Fatal("add gharchive source should not be called for invalid event")
+	}
+}
+
+func TestSourceShow(t *testing.T) {
+	svc := &fakeService{sourceResult: &cli.SourceResult{Name: "gharchive", Kind: "gharchive", Definition: `{}`, Enabled: true}}
+	c, stdout, _ := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"source", "show", "gharchive"}))
+	if !svc.showSourceCalled || svc.lastShowSourceName != "gharchive" {
+		t.Fatalf("show source not called correctly: called=%v arg=%q", svc.showSourceCalled, svc.lastShowSourceName)
+	}
+	if !strings.Contains(stdout.String(), "gharchive") {
+		t.Fatalf("stdout = %q", stdout.String())
 	}
 }
 

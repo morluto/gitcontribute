@@ -15,6 +15,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/discovery"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/dossier"
 	"github.com/morluto/gitcontribute/internal/github"
@@ -23,12 +24,14 @@ import (
 // Service is the product-owned application layer that satisfies cli.Service.
 // MCP reads are exposed through MCPReader.
 type Service struct {
-	mu       sync.Mutex
-	cfg      *config.Config
-	paths    *config.Paths
-	corpus   *corpus.Corpus
-	ghReader github.Reader
-	version  string
+	mu             sync.Mutex
+	cfg            *config.Config
+	paths          *config.Paths
+	corpus         *corpus.Corpus
+	ghReader       github.Reader
+	archiveFetcher discovery.ArchiveFetcher
+	clock          func() time.Time
+	version        string
 }
 
 // New creates a Service and resolves local configuration. GitHub credentials
@@ -37,11 +40,28 @@ func New(paths *config.Paths, version string) (*Service, error) {
 	if paths == nil {
 		paths = config.NewPaths(nil)
 	}
-	s := &Service{paths: paths, version: version}
+	s := &Service{paths: paths, version: version, clock: time.Now}
 	if _, err := s.loadConfig(false); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+func (s *Service) now() time.Time {
+	s.mu.Lock()
+	clock := s.clock
+	s.mu.Unlock()
+	if clock == nil {
+		return time.Now()
+	}
+	return clock()
+}
+
+// SetClock overrides the time source. It is intended for tests.
+func (s *Service) SetClock(clock func() time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clock = clock
 }
 
 // SetGitHubReader overrides the GitHub reader. It is intended for tests.
@@ -49,6 +69,23 @@ func (s *Service) SetGitHubReader(r github.Reader) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ghReader = r
+}
+
+// SetArchiveFetcher overrides the GH Archive fetcher. It is intended for tests.
+func (s *Service) SetArchiveFetcher(f discovery.ArchiveFetcher) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.archiveFetcher = f
+}
+
+func (s *Service) getArchiveFetcher() discovery.ArchiveFetcher {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.archiveFetcher != nil {
+		return s.archiveFetcher
+	}
+	s.archiveFetcher = discovery.NewArchiveClient()
+	return s.archiveFetcher
 }
 
 // Close closes the corpus database connection.

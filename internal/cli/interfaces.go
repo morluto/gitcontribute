@@ -27,6 +27,9 @@ type MCPRunner interface {
 // CLI without enlarging the core local archive contract.
 type DiscoveryService interface {
 	AddSearchSource(ctx context.Context, name, query string) (*SourceResult, error)
+	AddRepoSource(ctx context.Context, name string, refs []RepoRef) (*SourceResult, error)
+	AddGHArchiveSource(ctx context.Context, name string, events []string) (*SourceResult, error)
+	ShowSource(ctx context.Context, name string) (*SourceResult, error)
 	ListSources(ctx context.Context) (*SourceListResult, error)
 	Crawl(ctx context.Context, name string, opts CrawlOptions) (*CrawlResult, error)
 }
@@ -51,7 +54,12 @@ type CrawlResult struct {
 	Source       string `json:"source"`
 	Windows      int    `json:"windows"`
 	Repositories int    `json:"repositories"`
+	Threads      int    `json:"threads,omitempty"`
+	Events       int    `json:"events,omitempty"`
 	Requests     int    `json:"requests"`
+	Imported     int    `json:"imported,omitempty"`
+	Skipped      int    `json:"skipped,omitempty"`
+	Failures     int    `json:"failures,omitempty"`
 	Checkpoint   string `json:"checkpoint"`
 }
 

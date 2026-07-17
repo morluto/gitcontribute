@@ -20,6 +20,42 @@ var ErrAlreadyImported = errors.New("hour already imported")
 
 const defaultMaxEventBytes = 4 << 20
 
+// ErrDecompressedTooLarge is returned when an hour's decompressed payload
+// exceeds ArchiveReader.MaxTotalBytes.
+var ErrDecompressedTooLarge = errors.New("decompressed archive exceeds size limit")
+
+var knownEventTypes = map[string]bool{
+	string(PushEvent):                     true,
+	string(IssuesEvent):                   true,
+	string(PullRequestEvent):              true,
+	string(IssueCommentEvent):             true,
+	string(PullRequestReviewEvent):        true,
+	string(PullRequestReviewCommentEvent): true,
+	string(ReleaseEvent):                  true,
+	string(WatchEvent):                    true,
+	string(ForkEvent):                     true,
+	string(DiscussionEvent):               true,
+	string(DiscussionCommentEvent):        true,
+}
+
+// IsKnownEventType reports whether t is a recognized GH Archive event type.
+func IsKnownEventType(t string) bool {
+	return knownEventTypes[t]
+}
+
+// ArchiveHourRange returns the inclusive hourly bounds for a --since crawl.
+// The latest complete hour is the hour before the current hour, because the
+// current hour's file may not yet be published.
+func ArchiveHourRange(since time.Duration, now time.Time) (start, end time.Time) {
+	now = now.UTC()
+	end = now.Truncate(time.Hour).Add(-time.Hour)
+	start = now.Add(-since).Truncate(time.Hour)
+	if start.After(end) {
+		start = end
+	}
+	return start, end
+}
+
 // EventType identifies a GH Archive event type.
 type EventType string
 
@@ -67,6 +103,9 @@ type ArchiveReader struct {
 	Include       map[string]bool
 	Store         CheckpointStore
 	MaxEventBytes int
+	// MaxTotalBytes bounds the total decompressed bytes for an hour. Zero
+	// disables the limit.
+	MaxTotalBytes int
 }
 
 // NewArchiveReader creates a reader that retains the given event types. An
@@ -105,13 +144,20 @@ func (r *ArchiveReader) Read(ctx context.Context, hour time.Time, in io.Reader, 
 	if err != nil {
 		return fmt.Errorf("open gzip: %w", err)
 	}
-	defer gzr.Close()
+	stream := io.Reader(gzr)
+	closeFn := func() error { return gzr.Close() }
+	if r.MaxTotalBytes > 0 {
+		lr := NewLimitedReader(gzr, int64(r.MaxTotalBytes), gzr.Close, ErrDecompressedTooLarge)
+		stream = lr
+		closeFn = lr.Close
+	}
+	defer closeFn()
 
 	maxEventBytes := r.MaxEventBytes
 	if maxEventBytes <= 0 {
 		maxEventBytes = defaultMaxEventBytes
 	}
-	scanner := bufio.NewScanner(gzr)
+	scanner := bufio.NewScanner(stream)
 	scanner.Buffer(make([]byte, min(64<<10, maxEventBytes)), maxEventBytes)
 	for scanner.Scan() {
 		if err := ctx.Err(); err != nil {

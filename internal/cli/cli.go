@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	"github.com/morluto/gitcontribute/internal/discovery"
 )
 
 const maxSearchLimit = 100
@@ -88,10 +89,13 @@ type indexCmd struct {
 type sourceCmd struct {
 	Add  sourceAddCmd  `cmd:"" help:"Add or update a source"`
 	List sourceListCmd `cmd:"" help:"List sources"`
+	Show sourceShowCmd `cmd:"" help:"Show a source"`
 }
 
 type sourceAddCmd struct {
-	Search sourceAddSearchCmd `cmd:"" help:"Add a GitHub repository Search source"`
+	Search    sourceAddSearchCmd    `cmd:"" help:"Add a GitHub repository Search source"`
+	Repos     sourceAddReposCmd     `cmd:"" help:"Add explicit repositories as a source"`
+	GHArchive sourceAddGHArchiveCmd `cmd:"" name:"gharchive" help:"Add a GH Archive source"`
 }
 
 type sourceAddSearchCmd struct {
@@ -99,6 +103,24 @@ type sourceAddSearchCmd struct {
 	Query string `name:"query" required:"" help:"GitHub repository search query"`
 	JSON  bool   `name:"json" help:"Print the result as JSON"`
 }
+
+type sourceAddReposCmd struct {
+	Name  string   `name:"name" help:"Stable source name (defaults to the first repo)"`
+	Repos []string `arg:"" optional:"" help:"Repositories as OWNER/REPO or GitHub URLs"`
+	JSON  bool     `name:"json" help:"Print the result as JSON"`
+}
+
+type sourceAddGHArchiveCmd struct {
+	Name   string `name:"name" optional:"" default:"gharchive" help:"Stable source name"`
+	Events string `name:"events" required:"" help:"Comma-separated event allowlist (or 'all')"`
+	JSON   bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type sourceShowCmd struct {
+	Name string `arg:"" help:"Source name"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
 type sourceListCmd struct {
 	JSON bool `name:"json" help:"Print the result as JSON"`
 }
@@ -398,15 +420,102 @@ func (c *CLI) runSource(ctx context.Context, command string, cmd *sourceCmd) err
 			return c.mapError(err)
 		}
 		return c.render(cmd.Add.Search.JSON, result)
+	case "source add repos":
+		refs, name, err := parseRepoSourceArgs(cmd.Add.Repos)
+		if err != nil {
+			return NewCLIError(ExitUsage, err)
+		}
+		result, err := service.AddRepoSource(ctx, name, refs)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Add.Repos.JSON, result)
+	case "source add gharchive":
+		events, err := parseGHArchiveEvents(cmd.Add.GHArchive.Events)
+		if err != nil {
+			return NewCLIError(ExitUsage, err)
+		}
+		result, err := service.AddGHArchiveSource(ctx, cmd.Add.GHArchive.Name, events)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Add.GHArchive.JSON, result)
 	case "source list":
 		result, err := service.ListSources(ctx)
 		if err != nil {
 			return c.mapError(err)
 		}
 		return c.render(cmd.List.JSON, result)
+	case "source show":
+		result, err := service.ShowSource(ctx, cmd.Show.Name)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Show.JSON, result)
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown source command: %s", command))
 	}
+}
+
+func parseRepoSourceArgs(cmd sourceAddReposCmd) ([]RepoRef, string, error) {
+	if len(cmd.Repos) == 0 {
+		return nil, "", errors.New("at least one repository is required")
+	}
+	refs := make([]RepoRef, 0, len(cmd.Repos))
+	for _, raw := range cmd.Repos {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			continue
+		}
+		dr, err := discovery.ParseRepoRef(raw)
+		if err != nil {
+			return nil, "", err
+		}
+		refs = append(refs, RepoRef{Owner: dr.Owner, Repo: dr.Repo})
+	}
+	if len(refs) == 0 {
+		return nil, "", errors.New("at least one valid repository is required")
+	}
+	name := strings.TrimSpace(cmd.Name)
+	if name == "" {
+		if len(refs) > 1 {
+			return nil, "", errors.New("--name is required when adding multiple repositories")
+		}
+		name = fmt.Sprintf("%s-%s", refs[0].Owner, refs[0].Repo)
+		name = strings.ToLower(name)
+	}
+	return refs, name, nil
+}
+
+func parseGHArchiveEvents(events string) ([]string, error) {
+	events = strings.TrimSpace(events)
+	if events == "" {
+		return nil, errors.New("event allowlist is required")
+	}
+	if strings.ToLower(events) == "all" {
+		return nil, nil
+	}
+	parts := strings.Split(events, ",")
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]struct{})
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if !discovery.IsKnownEventType(p) {
+			return nil, fmt.Errorf("unknown GH Archive event type %q", p)
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return nil, errors.New("event allowlist is required")
+	}
+	return out, nil
 }
 
 func (c *CLI) runCrawl(ctx context.Context, cmd *crawlCmd) error {
