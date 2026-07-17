@@ -454,6 +454,6 @@ for the complete development and testing workflow.
 
 Built for contributors who want to understand the problem before writing the patch.
 
-[Architecture](docs/architecture.md) · [Onboarding](docs/onboarding.md) · [Runbooks](docs/runbooks.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE)
+[Architecture](docs/architecture.md) · [Onboarding](docs/onboarding.md) · [Runbooks](docs/runbooks.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [License](LICENSE)
 
 </div>
