@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -32,18 +33,18 @@ type fakeSurfacesService struct {
 	neighborsCalled   bool
 	exportCalled      bool
 
-	lastClustersArg    cli.RepoRef
-	lastClusterID      string
-	lastClusterLimit   int
-	lastLensName       string
-	lastLensExplainRef string
-	lastLensQuery      string
-	lastLensDef        lens.Definition
-	lastCreateColName  string
-	lastAddColName     string
-	lastAddColMembers  []cli.CollectionMember
-	lastArchiveOpts    cli.ArchiveSyncOptions
-	lastHydrateOpts    cli.HydrateOptions
+	lastClustersArg     cli.RepoRef
+	lastClusterID       string
+	lastClusterLimit    int
+	lastLensName        string
+	lastLensExplainRef  string
+	lastLensExplainOpts cli.LensExplainOptions
+	lastLensDef         lens.Definition
+	lastCreateColName   string
+	lastAddColName      string
+	lastAddColMembers   []cli.CollectionMember
+	lastArchiveOpts     cli.ArchiveSyncOptions
+	lastHydrateOpts     cli.HydrateOptions
 }
 
 func (f *fakeSurfacesService) Clusters(ctx context.Context, repo cli.RepoRef, limit int) (*cli.ClusterListResult, error) {
@@ -111,11 +112,11 @@ func (f *fakeSurfacesService) ShowLens(ctx context.Context, name string) (*cli.L
 	}, f.err
 }
 
-func (f *fakeSurfacesService) ExplainLens(ctx context.Context, name, ref, query string) (*cli.LensExplainResult, error) {
+func (f *fakeSurfacesService) ExplainLens(ctx context.Context, name, ref string, opts cli.LensExplainOptions) (*cli.LensExplainResult, error) {
 	f.explainLensCalled = true
 	f.lastLensName = name
 	f.lastLensExplainRef = ref
-	f.lastLensQuery = query
+	f.lastLensExplainOpts = opts
 	return &cli.LensExplainResult{
 		Lens: cli.LensResult{
 			Name: name,
@@ -274,8 +275,18 @@ func TestLensAddListShow(t *testing.T) {
 	}
 
 	c4, stdout, _ := newSurfacesCLI(svc)
-	requireNoErr(t, c4.Run(context.Background(), []string{"lens", "explain", "active-go", "o/r#1", "--query", "fix"}))
-	if !svc.explainLensCalled || svc.lastLensName != "active-go" || svc.lastLensExplainRef != "o/r#1" || svc.lastLensQuery != "fix" {
+	requireNoErr(t, c4.Run(context.Background(), []string{
+		"lens", "explain", "active-go", "o/r#1", "--query", "fix", "--repo", "o/r",
+		"--kind", "all", "--state", "open", "--author", "octo", "--association", "member",
+		"--assignee", "hubot", "--label", "bug", "--updated-after", "2026-07-01T00:00:00Z",
+	}))
+	wantUpdatedAfter := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	if !svc.explainLensCalled || svc.lastLensName != "active-go" || svc.lastLensExplainRef != "o/r#1" ||
+		svc.lastLensExplainOpts.Query != "fix" || svc.lastLensExplainOpts.Repo != "o/r" ||
+		svc.lastLensExplainOpts.Kind != "all" || svc.lastLensExplainOpts.State != "open" ||
+		svc.lastLensExplainOpts.Author != "octo" || svc.lastLensExplainOpts.Association != "member" ||
+		svc.lastLensExplainOpts.Assignee != "hubot" || !slices.Equal(svc.lastLensExplainOpts.Labels, []string{"bug"}) ||
+		!svc.lastLensExplainOpts.UpdatedAfter.Equal(wantUpdatedAfter) {
 		t.Fatalf("explain lens not called: called=%v name=%q ref=%q", svc.explainLensCalled, svc.lastLensName, svc.lastLensExplainRef)
 	}
 	if !strings.Contains(stdout.String(), "Lens: active-go") {

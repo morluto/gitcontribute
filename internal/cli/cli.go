@@ -617,10 +617,18 @@ type lensShowCmd struct {
 }
 
 type lensExplainCmd struct {
-	Name  string `arg:"" help:"Lens name"`
-	Ref   string `arg:"" help:"Result reference (e.g. owner/repo, owner/repo#number, issue:owner/repo#number, code:owner/repo/path)"`
-	Query string `name:"query" help:"Search query whose text-relevance signal should be explained"`
-	JSON  bool   `name:"json" help:"Print the result as JSON"`
+	Name         string   `arg:"" help:"Lens name"`
+	Ref          string   `arg:"" help:"Result reference (e.g. owner/repo, owner/repo#number, issue:owner/repo#number, code:owner/repo/path)"`
+	Query        string   `name:"query" required:"" help:"Original search query"`
+	Repo         string   `name:"repo" help:"Original repository scope (OWNER/REPO)"`
+	Kind         string   `name:"kind" help:"Original search kind; defaults to the result kind"`
+	State        string   `name:"state" default:"all" enum:"open,closed,all" help:"Original thread state filter"`
+	Author       string   `name:"author" help:"Original thread author filter"`
+	Association  string   `name:"association" help:"Original author association filter"`
+	Assignee     string   `name:"assignee" help:"Original assignee filter"`
+	Labels       []string `name:"label" help:"Original required label (repeatable)"`
+	UpdatedAfter string   `name:"updated-after" help:"Original RFC3339 source update cutoff"`
+	JSON         bool     `name:"json" help:"Print the result as JSON"`
 }
 
 type collectionCmd struct {
@@ -2246,7 +2254,18 @@ func (c *CLI) runLens(ctx context.Context, command string, cmd *lensCmd) error {
 		if strings.TrimSpace(cmd.Explain.Ref) == "" {
 			return NewCLIError(ExitUsage, errors.New("result reference is required"))
 		}
-		res, err := service.ExplainLens(ctx, cmd.Explain.Name, cmd.Explain.Ref, cmd.Explain.Query)
+		var updatedAfter time.Time
+		if cmd.Explain.UpdatedAfter != "" {
+			updatedAfter, err = time.Parse(time.RFC3339, cmd.Explain.UpdatedAfter)
+			if err != nil {
+				return NewCLIError(ExitUsage, fmt.Errorf("invalid --updated-after: %w", err))
+			}
+		}
+		res, err := service.ExplainLens(ctx, cmd.Explain.Name, cmd.Explain.Ref, LensExplainOptions{
+			Query: cmd.Explain.Query, Repo: cmd.Explain.Repo, Kind: cmd.Explain.Kind,
+			State: cmd.Explain.State, Author: cmd.Explain.Author, Association: cmd.Explain.Association,
+			Assignee: cmd.Explain.Assignee, Labels: cmd.Explain.Labels, UpdatedAfter: updatedAfter,
+		})
 		if err != nil {
 			return c.mapError(err)
 		}

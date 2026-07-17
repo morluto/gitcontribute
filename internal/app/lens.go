@@ -15,8 +15,6 @@ import (
 	"github.com/morluto/gitcontribute/internal/lens"
 )
 
-const maxLensExplanationItems = 10000
-
 // AddLens validates and stores a lens definition.
 func (s *Service) AddLens(ctx context.Context, name string, def lens.Definition) (*cli.LensResult, error) {
 	name = strings.TrimSpace(name)
@@ -88,7 +86,7 @@ func lensResult(r *corpus.LensRecord) *cli.LensResult {
 // ExplainLens returns the saved definition, candidate facts, normalized signals,
 // weighted contributions, final score, population context, and missing signals
 // for a candidate under a saved lens. It performs no network access.
-func (s *Service) ExplainLens(ctx context.Context, name, ref, query string) (*cli.LensExplainResult, error) {
+func (s *Service) ExplainLens(ctx context.Context, name, ref string, opts cli.LensExplainOptions) (*cli.LensExplainResult, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, errors.New("lens name is required")
@@ -96,6 +94,10 @@ func (s *Service) ExplainLens(ctx context.Context, name, ref, query string) (*cl
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
 		return nil, errors.New("result reference is required")
+	}
+	query := strings.TrimSpace(opts.Query)
+	if query == "" {
+		return nil, errors.New("original search query is required")
 	}
 
 	c, err := s.openCorpus(ctx)
@@ -110,13 +112,24 @@ func (s *Service) ExplainLens(ctx context.Context, name, ref, query string) (*cl
 	if lensRecord == nil {
 		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("lens %q not found", name))
 	}
-	def := lensRecord.Definition
-
 	now := s.now()
-	candidate, matches, scope, err := s.resolveLensExplainCandidate(ctx, c, ref, def, query, now)
+	target, inferredKind, err := s.resolveLensExplainTarget(ctx, c, ref)
 	if err != nil {
 		return nil, err
 	}
+	kind := strings.TrimSpace(opts.Kind)
+	if kind == "" {
+		kind = inferredKind
+	}
+	matches, err := s.collectLensMatches(ctx, c, query, cli.SearchOptions{
+		Kind: kind, Repo: opts.Repo, State: opts.State, Author: opts.Author,
+		Association: opts.Association, Assignee: opts.Assignee,
+		Labels: opts.Labels, UpdatedAfter: opts.UpdatedAfter,
+	}, now)
+	if err != nil {
+		return nil, err
+	}
+	targetID := candidateFromMatch(target, query, now).ID
 
 	candidates := make([]lens.Candidate, 0, len(matches))
 	byID := make(map[string]searchMatch, len(matches))
@@ -126,14 +139,14 @@ func (s *Service) ExplainLens(ctx context.Context, name, ref, query string) (*cl
 		byID[cand.ID] = m
 	}
 
-	results, err := lens.Rank(def, candidates, now)
+	results, err := lens.Rank(lensRecord.Definition, candidates, now)
 	if err != nil {
 		return nil, fmt.Errorf("rank with lens: %w", err)
 	}
 
 	var found *lens.Result
 	for i := range results {
-		if results[i].Candidate.ID == candidate.ID {
+		if results[i].Candidate.ID == targetID {
 			found = &results[i]
 			break
 		}
@@ -146,27 +159,31 @@ func (s *Service) ExplainLens(ctx context.Context, name, ref, query string) (*cl
 		return nil, fmt.Errorf("result %q is missing from its explanation population", ref)
 	}
 
-	return buildLensExplainResult(lensRecord, *found, match, len(results), scope, query, now), nil
+	scope := "query matches across the local corpus"
+	if opts.Repo != "" {
+		scope = "query matches in " + opts.Repo
+	}
+	return buildLensExplainResult(lensRecord, *found, match, len(results), scope+" ("+kind+")", query, now), nil
 }
 
-func (s *Service) resolveLensExplainCandidate(ctx context.Context, c *corpus.Corpus, ref string, def lens.Definition, query string, now time.Time) (lens.Candidate, []searchMatch, string, error) {
+func (s *Service) resolveLensExplainTarget(ctx context.Context, c *corpus.Corpus, ref string) (searchMatch, string, error) {
 	prefix, rest := splitLensRef(ref)
 	switch prefix {
 	case "repo":
-		return s.explainRepoCandidate(ctx, c, rest, query, now)
+		return s.resolveRepoLensTarget(ctx, c, rest)
 	case "issue":
-		return s.explainThreadCandidate(ctx, c, rest, corpus.ThreadKindIssue, def, query, now)
+		return s.resolveThreadLensTarget(ctx, c, rest, corpus.ThreadKindIssue)
 	case "pr", "pull_request":
-		return s.explainThreadCandidate(ctx, c, rest, corpus.ThreadKindPullRequest, def, query, now)
+		return s.resolveThreadLensTarget(ctx, c, rest, corpus.ThreadKindPullRequest)
 	case "code":
-		return s.explainCodeCandidate(ctx, c, rest, query, now)
+		return s.resolveCodeLensTarget(ctx, c, rest)
 	case "":
 		if strings.Contains(ref, "#") {
-			return s.explainThreadCandidate(ctx, c, ref, "", def, query, now)
+			return s.resolveThreadLensTarget(ctx, c, ref, "")
 		}
-		return s.explainRepoCandidate(ctx, c, ref, query, now)
+		return s.resolveRepoLensTarget(ctx, c, ref)
 	default:
-		return lens.Candidate{}, nil, "", fmt.Errorf("unsupported result reference %q", ref)
+		return searchMatch{}, "", fmt.Errorf("unsupported result reference %q", ref)
 	}
 }
 
@@ -178,20 +195,19 @@ func splitLensRef(ref string) (string, string) {
 	return ref[:idx], ref[idx+1:]
 }
 
-func (s *Service) explainRepoCandidate(ctx context.Context, c *corpus.Corpus, ref, query string, now time.Time) (lens.Candidate, []searchMatch, string, error) {
+func (s *Service) resolveRepoLensTarget(ctx context.Context, c *corpus.Corpus, ref string) (searchMatch, string, error) {
 	repoRef, err := parseRepoRef(ref)
 	if err != nil {
-		return lens.Candidate{}, nil, "", err
+		return searchMatch{}, "", err
 	}
 	repo, err := c.GetRepository(ctx, repoRef.Owner, repoRef.Repo)
 	if err != nil {
-		return lens.Candidate{}, nil, "", err
+		return searchMatch{}, "", err
 	}
 	if repo == nil {
-		return lens.Candidate{}, nil, "", cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %q not found", repoRef))
+		return searchMatch{}, "", cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %q not found", repoRef))
 	}
-
-	m := searchMatch{
+	return searchMatch{
 		Repo:      domain.RepoRef{Owner: repo.Owner, Repo: repo.Name},
 		Kind:      "repo",
 		Title:     repoRef.String(),
@@ -204,56 +220,31 @@ func (s *Service) explainRepoCandidate(ctx context.Context, c *corpus.Corpus, re
 		Forks:     repo.Forks,
 		UpdatedAt: repo.SourceUpdatedAt,
 		Freshness: repo.SourceUpdatedAt,
-	}
-	candidate := candidateFromMatch(m, query, now)
-
-	all, err := c.ListRepositoriesWithOptions(ctx, "", corpus.RepositorySearchOptions{Limit: maxLensCandidates})
-	if err != nil {
-		return lens.Candidate{}, nil, "", err
-	}
-	var matches []searchMatch
-	for _, r := range all.Repositories {
-		matches = append(matches, searchMatch{
-			Repo:      domain.RepoRef{Owner: r.Owner, Repo: r.Name},
-			Kind:      "repo",
-			Title:     domain.RepoRef{Owner: r.Owner, Repo: r.Name}.String(),
-			Body:      r.Description,
-			URL:       fmt.Sprintf("https://github.com/%s/%s", r.Owner, r.Name),
-			Language:  r.Language,
-			Archived:  r.Archived,
-			Stars:     r.Stars,
-			Watchers:  r.Watchers,
-			Forks:     r.Forks,
-			UpdatedAt: r.SourceUpdatedAt,
-			Freshness: r.SourceUpdatedAt,
-		})
-	}
-	matches = ensureExplanationMatch(matches, m, candidate.ID, query, now, maxLensCandidates)
-	return candidate, matches, "all repositories", nil
+	}, "repos", nil
 }
 
-func (s *Service) explainThreadCandidate(ctx context.Context, c *corpus.Corpus, ref, kind string, def lens.Definition, query string, now time.Time) (lens.Candidate, []searchMatch, string, error) {
+func (s *Service) resolveThreadLensTarget(ctx context.Context, c *corpus.Corpus, ref, kind string) (searchMatch, string, error) {
 	repoRef, number, err := parseThreadRef(ref)
 	if err != nil {
-		return lens.Candidate{}, nil, "", err
+		return searchMatch{}, "", err
 	}
 	repo, err := c.GetRepository(ctx, repoRef.Owner, repoRef.Repo)
 	if err != nil {
-		return lens.Candidate{}, nil, "", err
+		return searchMatch{}, "", err
 	}
 	if repo == nil {
-		return lens.Candidate{}, nil, "", cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %q not found", repoRef))
+		return searchMatch{}, "", cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %q not found", repoRef))
 	}
 
 	thread, err := c.GetThreadByNumber(ctx, repo.ID, number)
 	if err != nil {
-		return lens.Candidate{}, nil, "", err
+		return searchMatch{}, "", err
 	}
 	if thread == nil {
-		return lens.Candidate{}, nil, "", cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("thread %q not found", ref))
+		return searchMatch{}, "", cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("thread %q not found", ref))
 	}
 	if kind != "" && thread.Kind != kind {
-		return lens.Candidate{}, nil, "", fmt.Errorf("thread %q is a %s, not a %s", ref, thread.Kind, kind)
+		return searchMatch{}, "", fmt.Errorf("thread %q is a %s, not a %s", ref, thread.Kind, kind)
 	}
 
 	m := searchMatch{
@@ -275,66 +266,36 @@ func (s *Service) explainThreadCandidate(ctx context.Context, c *corpus.Corpus, 
 		Freshness: thread.SourceUpdatedAt,
 		URL:       threadURL(domain.RepoRef{Owner: repo.Owner, Repo: repo.Name}, thread.Kind, thread.Number),
 	}
-	candidate := candidateFromMatch(m, query, now)
-
-	kindFilter := ""
-	if len(def.Filter.Kinds) == 1 {
-		kindFilter = def.Filter.Kinds[0]
+	if thread.Kind == corpus.ThreadKindPullRequest {
+		return m, "prs", nil
 	}
-	threads, err := c.ListThreads(ctx, repo.ID, kindFilter, 10000)
-	if err != nil {
-		return lens.Candidate{}, nil, "", err
-	}
-	var matches []searchMatch
-	for _, t := range threads {
-		matches = append(matches, searchMatch{
-			Repo:      domain.RepoRef{Owner: repo.Owner, Repo: repo.Name},
-			Kind:      t.Kind,
-			Number:    t.Number,
-			State:     t.State,
-			Title:     t.Title,
-			Body:      t.Body,
-			Author:    t.Author,
-			Labels:    t.Labels,
-			Assignees: t.Assignees,
-			Language:  repo.Language,
-			Archived:  repo.Archived,
-			Stars:     repo.Stars,
-			Watchers:  repo.Watchers,
-			Forks:     repo.Forks,
-			UpdatedAt: t.SourceUpdatedAt,
-			Freshness: t.SourceUpdatedAt,
-			URL:       threadURL(domain.RepoRef{Owner: repo.Owner, Repo: repo.Name}, t.Kind, t.Number),
-		})
-	}
-	matches = ensureExplanationMatch(matches, m, candidate.ID, query, now, maxLensExplanationItems)
-	return candidate, matches, fmt.Sprintf("threads in %s", repoRef), nil
+	return m, "issues", nil
 }
 
-func (s *Service) explainCodeCandidate(ctx context.Context, c *corpus.Corpus, ref, query string, now time.Time) (lens.Candidate, []searchMatch, string, error) {
+func (s *Service) resolveCodeLensTarget(ctx context.Context, c *corpus.Corpus, ref string) (searchMatch, string, error) {
 	parts := strings.SplitN(ref, "/", 3)
 	if len(parts) < 3 {
-		return lens.Candidate{}, nil, "", fmt.Errorf("invalid code reference %q: expected owner/repo/path", ref)
+		return searchMatch{}, "", fmt.Errorf("invalid code reference %q: expected owner/repo/path", ref)
 	}
 	repoRef := domain.RepoRef{Owner: parts[0], Repo: parts[1]}
 	path := parts[2]
 	repo, err := c.GetRepository(ctx, repoRef.Owner, repoRef.Repo)
 	if err != nil {
-		return lens.Candidate{}, nil, "", err
+		return searchMatch{}, "", err
 	}
 	if repo == nil {
-		return lens.Candidate{}, nil, "", cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %q not found", repoRef))
+		return searchMatch{}, "", cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %q not found", repoRef))
 	}
 
 	doc, err := c.GetCodeDocument(ctx, repoRef, path)
 	if err != nil {
-		return lens.Candidate{}, nil, "", err
+		return searchMatch{}, "", err
 	}
 	if doc == nil {
-		return lens.Candidate{}, nil, "", cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("code document %q not found", ref))
+		return searchMatch{}, "", cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("code document %q not found", ref))
 	}
 
-	m := searchMatch{
+	return searchMatch{
 		Repo:      repoRef,
 		Kind:      "code",
 		Title:     doc.Path,
@@ -347,45 +308,7 @@ func (s *Service) explainCodeCandidate(ctx context.Context, c *corpus.Corpus, re
 		Forks:     repo.Forks,
 		UpdatedAt: doc.SnapshotCreatedAt,
 		Freshness: doc.SnapshotCreatedAt,
-	}
-	candidate := candidateFromMatch(m, query, now)
-
-	docs, err := c.ListCodeDocuments(ctx, repoRef)
-	if err != nil {
-		return lens.Candidate{}, nil, "", err
-	}
-	var matches []searchMatch
-	for _, d := range docs {
-		matches = append(matches, searchMatch{
-			Repo:      repoRef,
-			Kind:      "code",
-			Title:     d.Path,
-			Body:      d.Content,
-			URL:       fmt.Sprintf("https://github.com/%s/blob/%s/%s", repoRef, d.Commit, d.Path),
-			Language:  d.Language,
-			Archived:  repo.Archived,
-			Stars:     repo.Stars,
-			Watchers:  repo.Watchers,
-			Forks:     repo.Forks,
-			UpdatedAt: d.SnapshotCreatedAt,
-			Freshness: d.SnapshotCreatedAt,
-		})
-	}
-	matches = ensureExplanationMatch(matches, m, candidate.ID, query, now, maxLensExplanationItems)
-	return candidate, matches, fmt.Sprintf("code documents in %s", repoRef), nil
-}
-
-func ensureExplanationMatch(matches []searchMatch, target searchMatch, targetID, query string, now time.Time, limit int) []searchMatch {
-	for _, match := range matches {
-		if candidateFromMatch(match, query, now).ID == targetID {
-			return matches
-		}
-	}
-	if limit > 0 && len(matches) >= limit {
-		matches[len(matches)-1] = target
-		return matches
-	}
-	return append(matches, target)
+	}, "code", nil
 }
 
 func parseRepoRef(ref string) (domain.RepoRef, error) {

@@ -641,7 +641,19 @@ type LensService interface {
 	AddLens(ctx context.Context, name string, def lens.Definition) (*LensResult, error)
 	ListLenses(ctx context.Context) (*LensListResult, error)
 	ShowLens(ctx context.Context, name string) (*LensResult, error)
-	ExplainLens(ctx context.Context, name, ref, query string) (*LensExplainResult, error)
+	ExplainLens(ctx context.Context, name, ref string, opts LensExplainOptions) (*LensExplainResult, error)
+}
+
+type LensExplainOptions struct {
+	Query        string
+	Repo         string
+	Kind         string
+	State        string
+	Author       string
+	Association  string
+	Assignee     string
+	Labels       []string
+	UpdatedAfter time.Time
 }
 
 // LensResult is a saved lens definition.

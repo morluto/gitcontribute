@@ -8,8 +8,10 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/lens"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
 )
@@ -265,6 +267,7 @@ func seedLensCorpus(t *testing.T, svc *Service) {
 		{2, "login crash on startup", "the login page crashes", nil, "open"},
 		{3, "unrelated feature", "add dark mode", nil, "closed"},
 		{4, "fix login crash", "duplicate of #1", nil, "closed"},
+		{5, "unrelated open issue", "add keyboard shortcuts", nil, "open"},
 	}
 	for _, th := range threads {
 		updated := base.Add(time.Duration(5-th.number) * time.Hour)
@@ -370,7 +373,7 @@ func TestExplainLens(t *testing.T) {
 
 	svc.SetClock(func() time.Time { return time.Unix(100000, 0).UTC() })
 
-	ex, err := svc.ExplainLens(ctx, "active-go", "owner/repo#1", "login")
+	ex, err := svc.ExplainLens(ctx, "active-go", "owner/repo#1", cli.LensExplainOptions{Query: "login"})
 	if err != nil {
 		t.Fatalf("explain lens: %v", err)
 	}
@@ -400,5 +403,74 @@ func TestExplainLens(t *testing.T) {
 	}
 	if !foundMissing {
 		t.Fatalf("expected missing signal to be reported: %+v", ex.Signals)
+	}
+	search, err := svc.Search(ctx, "login", cli.SearchOptions{Kind: "issues", Lens: "active-go", Limit: 10})
+	if err != nil {
+		t.Fatalf("search with lens: %v", err)
+	}
+	if len(search.Matches) == 0 || ex.Score != search.Matches[0].Score {
+		t.Fatalf("explanation score %v does not match search result %+v", ex.Score, search.Matches)
+	}
+}
+
+func TestSearchAllHonorsRepositoryScopeForEveryKind(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	for _, name := range []string{"one", "two"} {
+		repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
+			Owner: "owner", Name: name, Description: "shared term",
+		}, `{}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
+			RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1,
+			State: "open", Title: "shared term", SourceUpdatedAt: time.Now().UTC(),
+		}, `{}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := svc.Search(ctx, "shared term", cli.SearchOptions{Kind: "all", Repo: "owner/one", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 2 || len(result.Matches) != 2 {
+		t.Fatalf("scoped combined result = %+v", result)
+	}
+	for _, match := range result.Matches {
+		if match.Repo.String() != "owner/one" {
+			t.Fatalf("repository scope leaked match: %+v", match)
+		}
+	}
+}
+
+func TestCodeLensUsesSnapshotTimeForFreshnessFilter(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner, Name: ref.Repo}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, ref, codeindex.Snapshot{
+		RepoPath: "/repo", Commit: "abc", CreatedAt: now,
+		Documents: []codeindex.Document{{Path: "fresh.go", Content: "freshSearchTerm", Bytes: 15, LanguageHint: "go"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.corpus.SaveLens(ctx, lens.Definition{
+		Name: "fresh", Filter: lens.Filter{UpdatedWithin: time.Hour}, Weights: map[string]float64{"freshness": 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetClock(func() time.Time { return now.Add(time.Minute) })
+
+	result, err := svc.Search(ctx, "freshSearchTerm", cli.SearchOptions{Kind: "code", Repo: ref.String(), Lens: "fresh", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 1 || len(result.Matches) != 1 {
+		t.Fatalf("fresh code was filtered out: %+v", result)
 	}
 }

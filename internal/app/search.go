@@ -83,6 +83,16 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts cli.Searc
 
 	switch opts.Kind {
 	case "repos":
+		if opts.Repo != "" {
+			if opts.Cursor != "" {
+				return searchResult{}, errors.New("cursor pagination is not supported for exact repository search")
+			}
+			ref, err := s.parseRepoRef(opts.Repo)
+			if err != nil {
+				return searchResult{}, err
+			}
+			return s.searchRepositoryExact(ctx, c, query, ref, now)
+		}
 		return s.searchRepositories(ctx, c, query, opts.Limit, opts.Cursor)
 	case "code":
 		ref, err := s.parseRepoRef(opts.Repo)
@@ -238,29 +248,7 @@ func (s *Service) searchRepositories(ctx context.Context, c *corpus.Corpus, quer
 			}
 			coverageCache[r.ID] = coverage
 		}
-		ref := domain.RepoRef{Owner: r.Owner, Repo: r.Name}
-		m := searchMatch{
-			Repo:      ref,
-			Kind:      "repo",
-			Title:     ref.String(),
-			Body:      r.Description,
-			URL:       fmt.Sprintf("https://github.com/%s", ref),
-			Language:  r.Language,
-			Archived:  r.Archived,
-			Stars:     r.Stars,
-			Watchers:  r.Watchers,
-			Forks:     r.Forks,
-			UpdatedAt: r.SourceUpdatedAt,
-			Freshness: r.SourceUpdatedAt,
-			Coverage:  coverage,
-			Fields: map[string]any{
-				"description": r.Description, "default_branch": r.DefaultBranch,
-				"language": r.Language, "license": r.License, "topics": r.Topics,
-				"stars": r.Stars, "watchers": r.Watchers, "forks": r.Forks,
-				"open_issues": r.OpenIssues, "archived": r.Archived, "fork": r.Fork,
-			},
-		}
-		m.Score, _ = scoreMatch(query, m, m.Freshness, coverage, now)
+		m := repositorySearchMatch(r, query, coverage, now)
 		matches = append(matches, m)
 	}
 
@@ -270,6 +258,45 @@ func (s *Service) searchRepositories(ctx context.Context, c *corpus.Corpus, quer
 		Matches:    matches,
 		NextCursor: page.NextCursor,
 	}, nil
+}
+
+func (s *Service) searchRepositoryExact(ctx context.Context, c *corpus.Corpus, query string, ref domain.RepoRef, now time.Time) (searchResult, error) {
+	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	if err != nil {
+		return searchResult{}, err
+	}
+	if repo == nil || !repositoryMatchesQuery(repo, query) {
+		return searchResult{Query: query, Matches: []searchMatch{}}, nil
+	}
+	coverage, err := s.coverageNames(ctx, c, repo.ID, nil)
+	if err != nil {
+		return searchResult{}, err
+	}
+	return searchResult{Query: query, Total: 1, Matches: []searchMatch{repositorySearchMatch(*repo, query, coverage, now)}}, nil
+}
+
+func repositoryMatchesQuery(repo *corpus.Repository, query string) bool {
+	query = strings.ToLower(strings.TrimSpace(query))
+	return query == "" || strings.Contains(strings.ToLower(repo.Owner+"/"+repo.Name), query) ||
+		strings.Contains(strings.ToLower(repo.Description), query)
+}
+
+func repositorySearchMatch(r corpus.Repository, query string, coverage []string, now time.Time) searchMatch {
+	ref := domain.RepoRef{Owner: r.Owner, Repo: r.Name}
+	m := searchMatch{
+		Repo: ref, Kind: "repo", Title: ref.String(), Body: r.Description,
+		URL: fmt.Sprintf("https://github.com/%s", ref), Language: r.Language,
+		Archived: r.Archived, Stars: r.Stars, Watchers: r.Watchers, Forks: r.Forks,
+		UpdatedAt: r.SourceUpdatedAt, Freshness: r.SourceUpdatedAt, Coverage: coverage,
+		Fields: map[string]any{
+			"description": r.Description, "default_branch": r.DefaultBranch,
+			"language": r.Language, "license": r.License, "topics": r.Topics,
+			"stars": r.Stars, "watchers": r.Watchers, "forks": r.Forks,
+			"open_issues": r.OpenIssues, "archived": r.Archived, "fork": r.Fork,
+		},
+	}
+	m.Score, _ = scoreMatch(query, m, m.Freshness, coverage, now)
+	return m
 }
 
 func (s *Service) searchCode(ctx context.Context, c *corpus.Corpus, query string, ref domain.RepoRef, limit int, cursor string) (searchResult, error) {
@@ -289,6 +316,7 @@ func (s *Service) searchCode(ctx context.Context, c *corpus.Corpus, query string
 			Title:     match.Path,
 			Body:      match.Content,
 			URL:       fmt.Sprintf("https://github.com/%s/blob/%s/%s", match.Repo, match.Commit, match.Path),
+			UpdatedAt: match.SnapshotCreatedAt,
 			Freshness: match.SnapshotCreatedAt,
 			Coverage:  coverage,
 			Language:  match.Language,
@@ -366,64 +394,9 @@ func (s *Service) searchWithLens(ctx context.Context, c *corpus.Corpus, query st
 		return searchResult{}, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("lens %q not found", opts.Lens))
 	}
 	def := lensRecord.Definition
-
-	var repoRef domain.RepoRef
-	var repoID int64
-	if opts.Repo != "" {
-		ref, err := s.parseRepoRef(opts.Repo)
-		if err != nil {
-			return searchResult{}, err
-		}
-		repoRef = ref
-		repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
-		if err != nil {
-			return searchResult{}, err
-		}
-		if repo == nil {
-			return searchResult{Query: query, Matches: []searchMatch{}}, nil
-		}
-		repoID = repo.ID
-	}
-
-	var matches []searchMatch
-	switch opts.Kind {
-	case "repos":
-		matches, err = s.collectRepositoryMatches(ctx, c, query, opts)
-	case "code":
-		matches, err = s.collectCodeMatches(ctx, c, query, repoRef, opts)
-	case "all":
-		threadMatches, err := s.collectThreadMatches(ctx, c, query, repoID, repoRef, "", opts, now)
-		if err != nil {
-			return searchResult{}, err
-		}
-		repoMatches, err := s.collectRepositoryMatches(ctx, c, query, opts)
-		if err != nil {
-			return searchResult{}, err
-		}
-		codeMatches, err := s.collectCodeMatches(ctx, c, query, repoRef, opts)
-		if err != nil {
-			return searchResult{}, err
-		}
-		matches = append(threadMatches, repoMatches...)
-		matches = append(matches, codeMatches...)
-	default:
-		kind := threadKindFromSearchKind(opts.Kind)
-		if kind == "" && opts.Kind != "" && opts.Kind != "threads" {
-			return searchResult{}, fmt.Errorf("unsupported search kind %q", opts.Kind)
-		}
-		matches, err = s.collectThreadMatches(ctx, c, query, repoID, repoRef, kind, opts, now)
-	}
+	matches, err := s.collectLensMatches(ctx, c, query, opts, now)
 	if err != nil {
 		return searchResult{}, err
-	}
-	if repoRef != (domain.RepoRef{}) {
-		filtered := matches[:0]
-		for _, match := range matches {
-			if match.Repo == repoRef {
-				filtered = append(filtered, match)
-			}
-		}
-		matches = filtered
 	}
 
 	candidates := make([]lens.Candidate, 0, len(matches))
@@ -459,6 +432,83 @@ func (s *Service) searchWithLens(ctx context.Context, c *corpus.Corpus, query st
 		out = append(out, m)
 	}
 	return searchResult{Query: query, Total: totalEligible, Matches: out, NextCursor: ""}, nil
+}
+
+func (s *Service) collectLensMatches(ctx context.Context, c *corpus.Corpus, query string, opts cli.SearchOptions, now time.Time) ([]searchMatch, error) {
+	var err error
+	var repoRef domain.RepoRef
+	var repoID int64
+	if opts.Repo != "" {
+		ref, err := s.parseRepoRef(opts.Repo)
+		if err != nil {
+			return nil, err
+		}
+		repoRef = ref
+		repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+		if err != nil {
+			return nil, err
+		}
+		if repo == nil {
+			return []searchMatch{}, nil
+		}
+		repoID = repo.ID
+	}
+
+	var matches []searchMatch
+	switch opts.Kind {
+	case "repos":
+		if repoRef == (domain.RepoRef{}) {
+			matches, err = s.collectRepositoryMatches(ctx, c, query, opts)
+		} else {
+			var result searchResult
+			result, err = s.searchRepositoryExact(ctx, c, query, repoRef, now)
+			matches = result.Matches
+		}
+	case "code":
+		matches, err = s.collectCodeMatches(ctx, c, query, repoRef, opts)
+	case "all":
+		threadMatches, err := s.collectThreadMatches(ctx, c, query, repoID, repoRef, "", opts, now)
+		if err != nil {
+			return nil, err
+		}
+		var repoMatches []searchMatch
+		if repoRef == (domain.RepoRef{}) {
+			repoMatches, err = s.collectRepositoryMatches(ctx, c, query, opts)
+		} else {
+			var result searchResult
+			result, err = s.searchRepositoryExact(ctx, c, query, repoRef, now)
+			repoMatches = result.Matches
+		}
+		if err != nil {
+			return nil, err
+		}
+		codeMatches, err := s.collectCodeMatches(ctx, c, query, repoRef, opts)
+		if err != nil {
+			return nil, err
+		}
+		matches = append(threadMatches, repoMatches...)
+		matches = append(matches, codeMatches...)
+	default:
+		kind := threadKindFromSearchKind(opts.Kind)
+		if kind == "" && opts.Kind != "" && opts.Kind != "threads" {
+			return nil, fmt.Errorf("unsupported search kind %q", opts.Kind)
+		}
+		matches, err = s.collectThreadMatches(ctx, c, query, repoID, repoRef, kind, opts, now)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if repoRef != (domain.RepoRef{}) {
+		filtered := matches[:0]
+		for _, match := range matches {
+			if match.Repo == repoRef {
+				filtered = append(filtered, match)
+			}
+		}
+		matches = filtered
+	}
+
+	return matches, nil
 }
 
 func threadKindFromSearchKind(kind string) string {

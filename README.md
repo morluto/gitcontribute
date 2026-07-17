@@ -317,7 +317,8 @@ gitcontribute lens explain my-lens issue:owner/repo#42 --query "retry"
 
 `lens explain` reports the candidate facts, population scope, normalized
 signals, weighted contributions, final score, and missing signals. Pass the
-same query used for search when explaining a text-relevance score.
+same query, scope, and thread filters used for search so normalization uses the
+identical candidate population.
 
 Collections are named groups of typed references:
 
