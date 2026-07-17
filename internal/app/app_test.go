@@ -19,9 +19,11 @@ import (
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/config"
+	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/github"
+	"github.com/morluto/gitcontribute/internal/investigation"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
 	"github.com/morluto/gitcontribute/internal/workspace"
 )
@@ -904,5 +906,321 @@ func writeAppFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func newLocalService(t *testing.T) *Service {
+	t.Helper()
+	ctx := context.Background()
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	return svc
+}
+
+func TestCreateAndUpdateHypothesis(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	defer func() { _ = svc.Close() }()
+
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+	h, err := svc.CreateHypothesis(ctx, inv.ID, investigation.CreateHypothesisInput{
+		Title:              "race in parser",
+		Description:        "data race under load",
+		Category:           investigation.CategoryBug,
+		ExpectedBehavior:   "parser should not panic",
+		ObservedBehavior:   "parser panics",
+		PotentialImpact:    "crash",
+		OpenQuestions:      []string{"reproducible?"},
+		AffectedComponents: []string{"pkg/parser"},
+		SourceRefs: []domain.SourceRef{
+			{Source: "github", URL: "https://github.com/owner/repo/issues/1"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create hypothesis: %v", err)
+	}
+	if h.Status != investigation.HypothesisProposed {
+		t.Fatalf("unexpected status: %q", h.Status)
+	}
+	if len(h.SourceRefs) != 1 || h.ExpectedBehavior == "" {
+		t.Fatalf("structured fields missing: %+v", h)
+	}
+
+	updated, err := svc.UpdateHypothesis(ctx, h.ID, investigation.UpdateHypothesisInput{
+		Title:       "race in parser (confirmed)",
+		Description: "data race under load",
+		Category:    investigation.CategoryBug,
+		Rationale:   "confirmed by stress test",
+	})
+	if err != nil {
+		t.Fatalf("update hypothesis: %v", err)
+	}
+	if updated.Title != "race in parser (confirmed)" || len(updated.AuditTrail) != 1 {
+		t.Fatalf("update failed: %+v", updated)
+	}
+
+	trans, err := svc.TransitionHypothesis(ctx, h.ID, "rejected", "not reproducible")
+	if err != nil {
+		t.Fatalf("transition hypothesis: %v", err)
+	}
+	if trans.Status != investigation.HypothesisRejected {
+		t.Fatalf("unexpected status after transition: %q", trans.Status)
+	}
+}
+
+func TestRecordEvidence(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	defer func() { _ = svc.Close() }()
+
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+	h, err := svc.CreateHypothesis(ctx, inv.ID, investigation.CreateHypothesisInput{
+		Title: "race", Description: "desc", Category: investigation.CategoryBug,
+	})
+	if err != nil {
+		t.Fatalf("create hypothesis: %v", err)
+	}
+	e, err := svc.RecordEvidence(ctx, RecordEvidenceInput{
+		HypothesisID: h.ID,
+		Type:         string(evidence.EvidenceTypeManualObservation),
+		Relation:     string(evidence.RelationSupporting),
+		Description:  "stress test reproduces panic",
+	})
+	if err != nil {
+		t.Fatalf("record evidence: %v", err)
+	}
+	if e.InvestigationID != inv.ID || e.HypothesisID != h.ID || e.OpportunityID != "" {
+		t.Fatalf("evidence scope wrong: %+v", e)
+	}
+	if e.Type != evidence.EvidenceTypeManualObservation || e.Relation != evidence.RelationSupporting {
+		t.Fatalf("evidence fields wrong: %+v", e)
+	}
+}
+
+func TestPromoteOpportunityWithDependencies(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	defer func() { _ = svc.Close() }()
+
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+	h, err := svc.CreateHypothesis(ctx, inv.ID, investigation.CreateHypothesisInput{
+		Title: "race", Description: "desc", Category: investigation.CategoryBug,
+	})
+	if err != nil {
+		t.Fatalf("create hypothesis: %v", err)
+	}
+	o, err := svc.PromoteOpportunityWithInput(ctx, h.ID, investigation.PromoteOpportunityInput{
+		ProblemStatement:    "parser panics",
+		Scope:               "pkg/parser",
+		Impact:              "crash",
+		ExpectedEffort:      "small",
+		Confidence:          0.8,
+		Dependencies:        []string{"go1.22"},
+		MaintainerAlignment: "maintainer confirmed scope",
+	})
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if o.Status != investigation.OpportunityHypothesis {
+		t.Fatalf("unexpected status: %q", o.Status)
+	}
+	if len(o.Dependencies) != 1 || o.MaintainerAlignment == "" {
+		t.Fatalf("missing opportunity fields: %+v", o)
+	}
+	if len(o.EvidenceIDs) != 1 {
+		t.Fatalf("expected maintainer-alignment evidence, got %+v", o.EvidenceIDs)
+	}
+}
+
+func TestDuplicateAndCollisionChecks(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	defer func() { _ = svc.Close() }()
+
+	c, err := svc.openCorpus(ctx)
+	if err != nil {
+		t.Fatalf("open corpus: %v", err)
+	}
+	repo, err := c.UpsertRepository(ctx, corpus.Repository{
+		Owner:           "owner",
+		Name:            "repo",
+		ExternalID:      "R_1",
+		Description:     "test repo",
+		DefaultBranch:   "main",
+		SourceCreatedAt: time.Now().UTC(),
+		SourceUpdatedAt: time.Now().UTC(),
+	}, "{}")
+	if err != nil {
+		t.Fatalf("upsert repository: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := c.UpsertThread(ctx, corpus.Thread{
+		RepositoryID:    repo.ID,
+		Kind:            corpus.ThreadKindIssue,
+		Number:          1,
+		State:           "open",
+		Title:           "race in parser",
+		Body:            "data race under load",
+		Author:          "alice",
+		SourceCreatedAt: now,
+		SourceUpdatedAt: now,
+	}, "{}"); err != nil {
+		t.Fatalf("upsert issue: %v", err)
+	}
+	if _, err := c.UpsertThread(ctx, corpus.Thread{
+		RepositoryID:    repo.ID,
+		Kind:            corpus.ThreadKindPullRequest,
+		Number:          2,
+		State:           "open",
+		Title:           "fix race in parser",
+		Body:            "addresses the panic",
+		Author:          "bob",
+		SourceCreatedAt: now,
+		SourceUpdatedAt: now,
+	}, "{}"); err != nil {
+		t.Fatalf("upsert pr: %v", err)
+	}
+
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+	h, err := svc.CreateHypothesis(ctx, inv.ID, investigation.CreateHypothesisInput{
+		Title:       "race in parser",
+		Description: "data race under load",
+		Category:    investigation.CategoryBug,
+	})
+	if err != nil {
+		t.Fatalf("create hypothesis: %v", err)
+	}
+
+	dup, err := svc.CheckHypothesisDuplicates(ctx, h.ID, 10)
+	if err != nil {
+		t.Fatalf("check duplicates: %v", err)
+	}
+	if dup.Total == 0 {
+		t.Fatalf("expected duplicate candidates, got 0")
+	}
+
+	coll, err := svc.CheckHypothesisCollisions(ctx, h.ID, 10)
+	if err != nil {
+		t.Fatalf("check collisions: %v", err)
+	}
+	if coll.Total == 0 {
+		t.Fatalf("expected open PR collisions, got 0")
+	}
+	for _, f := range coll.Findings {
+		if f.Relation != evidence.RelationContradicting {
+			t.Fatalf("collision finding should be contradicting, got %q", f.Relation)
+		}
+	}
+}
+
+func TestWorkspaceDiffAndReviewReport(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	svc := newLocalService(t)
+	defer func() { _ = svc.Close() }()
+
+	remote, baseSHA, candidateSHA := setupAppGitRemote(t)
+
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+	ws, err := svc.CreateWorkspace(ctx, inv.ID, cli.WorkspaceCreateOptions{
+		Remote:       remote,
+		BaseRef:      "master",
+		CandidateRef: "feature",
+		Name:         "ws-review",
+	})
+	if err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	diff, err := svc.WorkspaceDiff(ctx, ws.ID)
+	if err != nil {
+		t.Fatalf("workspace diff: %v", err)
+	}
+	if diff.BaseSHA != baseSHA || diff.CandidateSHA != candidateSHA {
+		t.Fatalf("unexpected diff metadata: %+v", diff)
+	}
+	if len(diff.ChangedFiles) == 0 {
+		t.Fatalf("expected changed files")
+	}
+	if len(diff.ReviewOrder) == 0 {
+		t.Fatalf("expected review order")
+	}
+
+	c, err := svc.openCorpus(ctx)
+	if err != nil {
+		t.Fatalf("open corpus: %v", err)
+	}
+
+	h, err := svc.CreateHypothesis(ctx, inv.ID, investigation.CreateHypothesisInput{
+		Title: "race", Description: "desc", Category: investigation.CategoryBug,
+	})
+	if err != nil {
+		t.Fatalf("create hypothesis: %v", err)
+	}
+	o, err := svc.PromoteOpportunityWithInput(ctx, h.ID, investigation.PromoteOpportunityInput{
+		ProblemStatement: "missing feature",
+		Scope:            "pkg/feature",
+		Impact:           "improvement",
+		ExpectedEffort:   "small",
+		Confidence:       0.7,
+	})
+	if err != nil {
+		t.Fatalf("promote opportunity: %v", err)
+	}
+
+	report, err := svc.PrepareReviewReport(ctx, PrepareReviewReportInput{
+		OpportunityID: o.ID,
+		WorkspaceID:   ws.ID,
+	})
+	if err != nil {
+		t.Fatalf("prepare review report: %v", err)
+	}
+	if report.DiffMetadata == nil || len(report.DiffMetadata.ChangedFiles) == 0 {
+		t.Fatalf("review report missing diff metadata: %+v", report)
+	}
+	if len(report.SuggestedReviewOrder) == 0 {
+		t.Fatalf("review report missing suggested review order")
+	}
+
+	// Wrong-workspace rejection: an unrelated workspace cannot be attached to the opportunity.
+	if err := c.SaveWorkspace(ctx, &workspace.Workspace{
+		Name:            "unrelated-workspace",
+		InvestigationID: "another-investigation",
+		RepoOwner:       "other",
+		RepoName:        "repo",
+		Path:            t.TempDir(),
+		CreatedAt:       time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.PrepareReviewReport(ctx, PrepareReviewReportInput{
+		OpportunityID: o.ID,
+		WorkspaceID:   "unrelated-workspace",
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("expected wrong-workspace rejection, got %v", err)
 	}
 }

@@ -352,3 +352,107 @@ func TestSummarizeEvidence(t *testing.T) {
 		t.Fatalf("expected 1 supporting and 1 contradicting, got %d/%d", len(supporting), len(contradicting))
 	}
 }
+
+func TestCreateHypothesisWithStructuredFields(t *testing.T) {
+	svc := NewService(newFakeRepo(), &fakeEvidenceStore{})
+	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	h, err := svc.CreateHypothesis(context.Background(), inv.ID, CreateHypothesisInput{
+		Title:              "race in parser",
+		Description:        "data race under load",
+		Category:           CategoryBug,
+		ExpectedBehavior:   "parser should not panic",
+		ObservedBehavior:   "parser panics",
+		PotentialImpact:    "crash",
+		OpenQuestions:      []string{"reproducible?"},
+		AffectedComponents: []string{"pkg/parser"},
+		SourceRefs: []domain.SourceRef{
+			{Source: "github", URL: "https://github.com/owner/repo/issues/1", ObservedAt: time.Now().UTC()},
+		},
+		Links: []Link{{Kind: "issue", Ref: "owner/repo#1"}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if h.Status != HypothesisProposed {
+		t.Fatalf("status: got %q", h.Status)
+	}
+	if h.ExpectedBehavior == "" || len(h.OpenQuestions) != 1 || len(h.Links) != 1 {
+		t.Fatalf("structured fields missing: %+v", h)
+	}
+	if len(h.SourceRefs) != 1 {
+		t.Fatalf("expected 1 source ref, got %d", len(h.SourceRefs))
+	}
+}
+
+func TestUpdateHypothesisRecordsRationale(t *testing.T) {
+	svc := NewService(newFakeRepo(), &fakeEvidenceStore{})
+	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	h, _ := svc.CreateHypothesis(context.Background(), inv.ID, CreateHypothesisInput{
+		Title:       "race",
+		Description: "desc",
+		Category:    CategoryBug,
+	})
+	updated, err := svc.UpdateHypothesis(context.Background(), h.ID, UpdateHypothesisInput{
+		Title:       "race in parser",
+		Description: "data race under load",
+		Category:    CategoryBug,
+		Rationale:   "refined after reproducing",
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Title != "race in parser" {
+		t.Fatalf("title not updated: %q", updated.Title)
+	}
+	if len(updated.AuditTrail) != 1 || updated.AuditTrail[0].Rationale != "refined after reproducing" {
+		t.Fatalf("expected rationale audit, got %+v", updated.AuditTrail)
+	}
+}
+
+func TestTransitionHypothesisWithRationale(t *testing.T) {
+	svc := NewService(newFakeRepo(), &fakeEvidenceStore{})
+	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	h, _ := svc.CreateHypothesis(context.Background(), inv.ID, CreateHypothesisInput{Title: "race", Description: "desc", Category: CategoryBug})
+	updated, err := svc.TransitionHypothesis(context.Background(), h.ID, HypothesisRejected, "not reproducible")
+	if err != nil {
+		t.Fatalf("transition: %v", err)
+	}
+	if updated.Status != HypothesisRejected {
+		t.Fatalf("status: got %q", updated.Status)
+	}
+	if len(updated.AuditTrail) != 1 || updated.AuditTrail[0].From != string(HypothesisProposed) || updated.AuditTrail[0].To != string(HypothesisRejected) {
+		t.Fatalf("expected transition audit, got %+v", updated.AuditTrail)
+	}
+}
+
+func TestPromoteOpportunityWithInput(t *testing.T) {
+	repo := newFakeRepo()
+	store := &fakeEvidenceStore{}
+	svc := NewService(repo, store)
+	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	h, _ := svc.CreateHypothesis(context.Background(), inv.ID, CreateHypothesisInput{Title: "race", Description: "desc", Category: CategoryBug})
+	o, err := svc.PromoteOpportunityWithInput(context.Background(), h.ID, PromoteOpportunityInput{
+		ProblemStatement:    "parser panics",
+		Scope:               "pkg/parser",
+		Impact:              "crash",
+		ExpectedEffort:      "small",
+		Confidence:          0.8,
+		Dependencies:        []string{"go1.22"},
+		MaintainerAlignment: "maintainer confirmed scope",
+	})
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if o.Status != OpportunityHypothesis {
+		t.Fatalf("status: got %q", o.Status)
+	}
+	if len(o.Dependencies) != 1 || o.MaintainerAlignment == "" {
+		t.Fatalf("missing promotion fields: %+v", o)
+	}
+	if len(o.EvidenceIDs) != 1 {
+		t.Fatalf("expected maintainer-alignment evidence id, got %+v", o.EvidenceIDs)
+	}
+	if len(store.evidence) != 1 || store.evidence[0].Relation != evidence.RelationSupporting {
+		t.Fatalf("expected supporting evidence, got %+v", store.evidence)
+	}
+}

@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/shlex"
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 )
 
@@ -149,6 +151,77 @@ func (s *Service) ShowEvidence(ctx context.Context, investigationID string) (*cl
 		InvestigationID: investigationID,
 		Evidence:        out,
 	}, nil
+}
+
+// RecordEvidenceInput carries a new evidence item for an investigation,
+// hypothesis, or opportunity.
+type RecordEvidenceInput struct {
+	InvestigationID string
+	HypothesisID    string
+	OpportunityID   string
+	Type            string
+	Relation        string
+	Description     string
+	SourceRefs      []domain.SourceRef
+}
+
+// RecordEvidence stores an evidence item scoped to its parent workflow.
+func (s *Service) RecordEvidence(ctx context.Context, input RecordEvidenceInput) (*evidence.Evidence, error) {
+	if strings.TrimSpace(input.Description) == "" {
+		return nil, errors.New("evidence description is required")
+	}
+
+	invSvc, err := s.investigationSvc(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	var investigationID, hypothesisID, opportunityID string
+	switch {
+	case input.OpportunityID != "":
+		o, err := invSvc.GetOpportunity(ctx, input.OpportunityID)
+		if err != nil {
+			return nil, mapInvestigationError(err)
+		}
+		opportunityID = o.ID
+		hypothesisID = o.HypothesisID
+		investigationID = o.InvestigationID
+	case input.HypothesisID != "":
+		h, err := invSvc.GetHypothesis(ctx, input.HypothesisID)
+		if err != nil {
+			return nil, mapInvestigationError(err)
+		}
+		hypothesisID = h.ID
+		investigationID = h.InvestigationID
+	case input.InvestigationID != "":
+		_, err := invSvc.GetInvestigation(ctx, input.InvestigationID)
+		if err != nil {
+			return nil, mapInvestigationError(err)
+		}
+		investigationID = input.InvestigationID
+	default:
+		return nil, errors.New("an investigation, hypothesis, or opportunity scope is required")
+	}
+
+	e := &evidence.Evidence{
+		InvestigationID: investigationID,
+		HypothesisID:    hypothesisID,
+		OpportunityID:   opportunityID,
+		Type:            evidence.EvidenceType(input.Type),
+		Relation:        evidence.Relation(input.Relation),
+		Description:     strings.TrimSpace(input.Description),
+		SourceRefs:      append([]domain.SourceRef(nil), input.SourceRefs...),
+	}
+
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	evSvc := evidence.NewService(c, evidence.NewExecRunner())
+	if err := evSvc.CreateEvidence(ctx, e); err != nil {
+		return nil, err
+	}
+	return e, nil
 }
 
 func validationResult(def *evidence.ValidationDefinition) *cli.ValidationResult {

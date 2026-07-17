@@ -7,11 +7,15 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/evidence"
+	"github.com/morluto/gitcontribute/internal/investigation"
 )
 
 // Neighbor is one ranked thread near a query.
@@ -539,4 +543,260 @@ func sortPRCollisions(c []PullRequestCollision) {
 		}
 		return c[i].Number < c[j].Number
 	})
+}
+
+// DuplicateCheckResult is the set of possible duplicate threads for a workflow item.
+type DuplicateCheckResult struct {
+	HypothesisID   string              `json:"hypothesis_id,omitempty"`
+	OpportunityID  string              `json:"opportunity_id,omitempty"`
+	Repo           domain.RepoRef      `json:"repo"`
+	Query          string              `json:"query"`
+	Findings       []evidence.Evidence `json:"findings"`
+	SourceRevision string              `json:"source_revision"`
+	Limit          int                 `json:"limit"`
+	Total          int                 `json:"total"`
+}
+
+// CollisionCheckResult is the set of open pull requests that may collide with
+// a workflow item.
+type CollisionCheckResult struct {
+	HypothesisID   string              `json:"hypothesis_id,omitempty"`
+	OpportunityID  string              `json:"opportunity_id,omitempty"`
+	Repo           domain.RepoRef      `json:"repo"`
+	Query          string              `json:"query"`
+	Findings       []evidence.Evidence `json:"findings"`
+	SourceRevision string              `json:"source_revision"`
+	Limit          int                 `json:"limit"`
+	Total          int                 `json:"total"`
+}
+
+// CheckHypothesisDuplicates searches the local corpus for threads similar to
+// a hypothesis, returning each finding as evidence.
+func (s *Service) CheckHypothesisDuplicates(ctx context.Context, hypothesisID string, limit int) (*DuplicateCheckResult, error) {
+	invSvc, err := s.investigationSvc(ctx)
+	if err != nil {
+		return nil, err
+	}
+	h, err := invSvc.GetHypothesis(ctx, hypothesisID)
+	if err != nil {
+		return nil, mapInvestigationError(err)
+	}
+	inv, err := invSvc.GetInvestigation(ctx, h.InvestigationID)
+	if err != nil {
+		return nil, mapInvestigationError(err)
+	}
+	query := candidateFromHypothesis(h, inv.Repo)
+	neighbors, revision, err := s.findSimilarThreads(ctx, inv.Repo, query, "", false, limit)
+	if err != nil {
+		return nil, err
+	}
+	findings := make([]evidence.Evidence, 0, len(neighbors))
+	for _, n := range neighbors {
+		findings = append(findings, evidenceFromNeighbor(n, inv.Repo, inv.ID, h.ID, "", evidence.RelationInconclusive))
+	}
+	return &DuplicateCheckResult{
+		HypothesisID:   h.ID,
+		Repo:           inv.Repo,
+		Query:          query.Title,
+		Findings:       findings,
+		SourceRevision: revision,
+		Limit:          limit,
+		Total:          len(findings),
+	}, nil
+}
+
+// CheckOpportunityDuplicates searches the local corpus for threads similar to
+// an opportunity.
+func (s *Service) CheckOpportunityDuplicates(ctx context.Context, opportunityID string, limit int) (*DuplicateCheckResult, error) {
+	invSvc, err := s.investigationSvc(ctx)
+	if err != nil {
+		return nil, err
+	}
+	o, err := invSvc.GetOpportunity(ctx, opportunityID)
+	if err != nil {
+		return nil, mapInvestigationError(err)
+	}
+	inv, err := invSvc.GetInvestigation(ctx, o.InvestigationID)
+	if err != nil {
+		return nil, mapInvestigationError(err)
+	}
+	query := candidateFromOpportunity(o, inv.Repo)
+	neighbors, revision, err := s.findSimilarThreads(ctx, inv.Repo, query, "", false, limit)
+	if err != nil {
+		return nil, err
+	}
+	findings := make([]evidence.Evidence, 0, len(neighbors))
+	for _, n := range neighbors {
+		findings = append(findings, evidenceFromNeighbor(n, inv.Repo, inv.ID, o.HypothesisID, o.ID, evidence.RelationInconclusive))
+	}
+	return &DuplicateCheckResult{
+		OpportunityID:  o.ID,
+		Repo:           inv.Repo,
+		Query:          query.Title,
+		Findings:       findings,
+		SourceRevision: revision,
+		Limit:          limit,
+		Total:          len(findings),
+	}, nil
+}
+
+// CheckHypothesisCollisions searches the local corpus for open pull requests
+// that may collide with a hypothesis.
+func (s *Service) CheckHypothesisCollisions(ctx context.Context, hypothesisID string, limit int) (*CollisionCheckResult, error) {
+	invSvc, err := s.investigationSvc(ctx)
+	if err != nil {
+		return nil, err
+	}
+	h, err := invSvc.GetHypothesis(ctx, hypothesisID)
+	if err != nil {
+		return nil, mapInvestigationError(err)
+	}
+	inv, err := invSvc.GetInvestigation(ctx, h.InvestigationID)
+	if err != nil {
+		return nil, mapInvestigationError(err)
+	}
+	query := candidateFromHypothesis(h, inv.Repo)
+	return s.collisionsForQuery(ctx, inv, h.ID, "", query, limit)
+}
+
+// CheckOpportunityCollisions searches the local corpus for open pull requests
+// that may collide with an opportunity.
+func (s *Service) CheckOpportunityCollisions(ctx context.Context, opportunityID string, limit int) (*CollisionCheckResult, error) {
+	invSvc, err := s.investigationSvc(ctx)
+	if err != nil {
+		return nil, err
+	}
+	o, err := invSvc.GetOpportunity(ctx, opportunityID)
+	if err != nil {
+		return nil, mapInvestigationError(err)
+	}
+	inv, err := invSvc.GetInvestigation(ctx, o.InvestigationID)
+	if err != nil {
+		return nil, mapInvestigationError(err)
+	}
+	query := candidateFromOpportunity(o, inv.Repo)
+	return s.collisionsForQuery(ctx, inv, o.HypothesisID, o.ID, query, limit)
+}
+
+func (s *Service) collisionsForQuery(ctx context.Context, inv *investigation.Investigation, hypothesisID, opportunityID string, query clustering.Candidate, limit int) (*CollisionCheckResult, error) {
+	neighbors, revision, err := s.findSimilarThreads(ctx, inv.Repo, query, corpus.ThreadKindPullRequest, true, limit)
+	if err != nil {
+		return nil, err
+	}
+	findings := make([]evidence.Evidence, 0, len(neighbors))
+	for _, n := range neighbors {
+		findings = append(findings, evidenceFromNeighbor(n, inv.Repo, inv.ID, hypothesisID, opportunityID, evidence.RelationContradicting))
+	}
+	return &CollisionCheckResult{
+		HypothesisID:   hypothesisID,
+		OpportunityID:  opportunityID,
+		Repo:           inv.Repo,
+		Query:          query.Title,
+		Findings:       findings,
+		SourceRevision: revision,
+		Limit:          limit,
+		Total:          len(findings),
+	}, nil
+}
+
+func (s *Service) findSimilarThreads(ctx context.Context, repo domain.RepoRef, query clustering.Candidate, kind string, onlyOpen bool, limit int) ([]clustering.Neighbor, string, error) {
+	if err := repo.Validate(); err != nil {
+		return nil, "", err
+	}
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	repository, err := c.GetRepository(ctx, repo.Owner, repo.Repo)
+	if err != nil {
+		return nil, "", err
+	}
+	if repository == nil {
+		// No local corpus data for this repository; return an empty result without
+		// performing network access.
+		return nil, "", nil
+	}
+	threads, err := c.ListThreads(ctx, repository.ID, kind, maxCandidateLimit)
+	if err != nil {
+		return nil, "", err
+	}
+	candidates := make([]clustering.Candidate, 0, len(threads))
+	for _, t := range threads {
+		if onlyOpen && t.State != "open" {
+			continue
+		}
+		if kind != "" && t.Kind != kind {
+			continue
+		}
+		candidates = append(candidates, candidateFromThread(*repository, t))
+	}
+	if limit <= 0 {
+		limit = defaultNeighborsLimit
+	}
+	all := append([]clustering.Candidate{query}, candidates...)
+	neighbors, err := clustering.Neighbors(query, candidates, clustering.DefaultConfig(), limit)
+	if err != nil {
+		return nil, "", err
+	}
+	return neighbors, clustering.SourceRevision(all), nil
+}
+
+func candidateFromHypothesis(h *investigation.Hypothesis, repo domain.RepoRef) clustering.Candidate {
+	body := h.Description
+	if h.ExpectedBehavior != "" {
+		body += "\n" + h.ExpectedBehavior
+	}
+	if h.ObservedBehavior != "" {
+		body += "\n" + h.ObservedBehavior
+	}
+	if h.PotentialImpact != "" {
+		body += "\n" + h.PotentialImpact
+	}
+	for _, ref := range h.SourceRefs {
+		if ref.URL != "" {
+			body += "\n" + ref.URL
+		}
+	}
+	for _, link := range h.Links {
+		if link.Ref != "" {
+			body += "\n" + link.Ref
+		}
+	}
+	return clustering.Candidate{Repo: repo, Title: h.Title, Body: body}
+}
+
+func candidateFromOpportunity(o *investigation.Opportunity, repo domain.RepoRef) clustering.Candidate {
+	body := o.ProblemStatement
+	if o.Scope != "" {
+		body += "\n" + o.Scope
+	}
+	if o.Impact != "" {
+		body += "\n" + o.Impact
+	}
+	for _, ref := range o.SourceRefs {
+		if ref.URL != "" {
+			body += "\n" + ref.URL
+		}
+	}
+	return clustering.Candidate{Repo: repo, Title: o.Title, Body: body}
+}
+
+func evidenceFromNeighbor(n clustering.Neighbor, repo domain.RepoRef, investigationID, hypothesisID, opportunityID string, relation evidence.Relation) evidence.Evidence {
+	path := "issues"
+	if strings.EqualFold(n.Ref.Kind, corpus.ThreadKindPullRequest) {
+		path = "pull"
+	}
+	url := fmt.Sprintf("https://github.com/%s/%s/%s/%d", n.Ref.Owner, n.Ref.Repo, path, n.Ref.Number)
+	now := time.Now().UTC()
+	return evidence.Evidence{
+		ID:              uuid.NewString(),
+		InvestigationID: investigationID,
+		HypothesisID:    hypothesisID,
+		OpportunityID:   opportunityID,
+		Type:            evidence.EvidenceTypeGitHubSource,
+		Relation:        relation,
+		Description:     fmt.Sprintf("possible related %s #%d: %s (score %.2f): %s", n.Ref.Kind, n.Ref.Number, n.Title, n.Score, n.Reason),
+		SourceRefs:      []domain.SourceRef{{Source: "local-corpus", URL: url, ObservedAt: now}},
+		CreatedAt:       now,
+	}
 }

@@ -155,6 +155,66 @@ func (s *Service) SetOpportunityStatus(ctx context.Context, id, status, rational
 	return opportunityResult(o), nil
 }
 
+// CreateHypothesis records a fully structured hypothesis under an investigation.
+func (s *Service) CreateHypothesis(ctx context.Context, investigationID string, input investigation.CreateHypothesisInput) (*investigation.Hypothesis, error) {
+	invSvc, err := s.investigationSvc(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return invSvc.CreateHypothesis(ctx, investigationID, input)
+}
+
+// UpdateHypothesis deliberately overwrites a hypothesis with rationale.
+func (s *Service) UpdateHypothesis(ctx context.Context, hypothesisID string, input investigation.UpdateHypothesisInput) (*investigation.Hypothesis, error) {
+	invSvc, err := s.investigationSvc(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return invSvc.UpdateHypothesis(ctx, hypothesisID, input)
+}
+
+// TransitionHypothesis advances a hypothesis through its lifecycle with rationale.
+func (s *Service) TransitionHypothesis(ctx context.Context, hypothesisID, status, rationale string) (*investigation.Hypothesis, error) {
+	hStatus, err := parseHypothesisStatus(status)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(rationale) == "" {
+		return nil, errors.New("rationale is required")
+	}
+	invSvc, err := s.investigationSvc(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return invSvc.TransitionHypothesis(ctx, hypothesisID, hStatus, rationale)
+}
+
+// PromoteOpportunityWithInput promotes a hypothesis with dependencies and
+// maintainer-alignment evidence.
+func (s *Service) PromoteOpportunityWithInput(ctx context.Context, hypothesisID string, input investigation.PromoteOpportunityInput) (*investigation.Opportunity, error) {
+	invSvc, err := s.investigationSvc(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return invSvc.PromoteOpportunityWithInput(ctx, hypothesisID, input)
+}
+
+// UpdateOpportunityCollisionStatus explicitly sets the collision status with rationale.
+func (s *Service) UpdateOpportunityCollisionStatus(ctx context.Context, opportunityID, status, rationale string) (*investigation.Opportunity, error) {
+	cStatus, err := parseCollisionStatus(status)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(rationale) == "" {
+		return nil, errors.New("rationale is required")
+	}
+	invSvc, err := s.investigationSvc(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return invSvc.UpdateCollisionStatus(ctx, opportunityID, cStatus, rationale)
+}
+
 func (s *Service) investigationSvc(ctx context.Context) (*investigation.Service, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
@@ -236,4 +296,28 @@ func parseOpportunityStatus(status string) (investigation.OpportunityStatus, err
 		return investigation.OpportunityStatus(status), nil
 	}
 	return "", fmt.Errorf("invalid opportunity status %q", status)
+}
+
+func parseHypothesisStatus(status string) (investigation.HypothesisStatus, error) {
+	switch investigation.HypothesisStatus(status) {
+	case investigation.HypothesisProposed,
+		investigation.HypothesisPromoted,
+		investigation.HypothesisRejected,
+		investigation.HypothesisDeferred,
+		investigation.HypothesisSuperseded:
+		return investigation.HypothesisStatus(status), nil
+	}
+	return "", fmt.Errorf("invalid hypothesis status %q", status)
+}
+
+func parseCollisionStatus(status string) (investigation.CollisionStatus, error) {
+	switch investigation.CollisionStatus(status) {
+	case investigation.CollisionUnknown,
+		investigation.CollisionNone,
+		investigation.CollisionPossible,
+		investigation.CollisionConfirmed,
+		investigation.CollisionBlocked:
+		return investigation.CollisionStatus(status), nil
+	}
+	return "", fmt.Errorf("invalid collision status %q", status)
 }

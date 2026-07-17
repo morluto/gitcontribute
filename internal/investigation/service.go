@@ -45,30 +45,127 @@ func (s *Service) StartInvestigation(ctx context.Context, repo domain.RepoRef, c
 	return inv, nil
 }
 
+// CreateHypothesisInput carries all structured fields for a new hypothesis.
+type CreateHypothesisInput struct {
+	Title              string
+	Description        string
+	Category           Category
+	ExpectedBehavior   string
+	ObservedBehavior   string
+	PotentialImpact    string
+	OpenQuestions      []string
+	AffectedComponents []string
+	SourceRefs         []domain.SourceRef
+	Links              []Link
+}
+
+// UpdateHypothesisInput carries all structured fields for a deliberate update.
+type UpdateHypothesisInput struct {
+	Title              string
+	Description        string
+	Category           Category
+	ExpectedBehavior   string
+	ObservedBehavior   string
+	PotentialImpact    string
+	OpenQuestions      []string
+	AffectedComponents []string
+	SourceRefs         []domain.SourceRef
+	Links              []Link
+	Rationale          string
+}
+
+// PromoteOpportunityInput carries the full context for promoting a hypothesis.
+type PromoteOpportunityInput struct {
+	ProblemStatement    string
+	Scope               string
+	Impact              string
+	ExpectedEffort      string
+	Confidence          float64
+	Dependencies        []string
+	MaintainerAlignment string
+	EvidenceIDs         []string
+	SourceRefs          []domain.SourceRef
+}
+
 // RecordHypothesis stores a new hypothesis under an investigation.
 func (s *Service) RecordHypothesis(ctx context.Context, investigationID, title, description string, category Category, refs []domain.SourceRef) (*Hypothesis, error) {
-	title = strings.TrimSpace(title)
+	return s.CreateHypothesis(ctx, investigationID, CreateHypothesisInput{
+		Title:       title,
+		Description: description,
+		Category:    category,
+		SourceRefs:  refs,
+	})
+}
+
+// CreateHypothesis stores a fully structured hypothesis under an investigation.
+func (s *Service) CreateHypothesis(ctx context.Context, investigationID string, in CreateHypothesisInput) (*Hypothesis, error) {
+	title := strings.TrimSpace(in.Title)
 	if title == "" {
 		return nil, ErrMissingTitle
 	}
-	if !isValidCategory(category) {
-		return nil, fmt.Errorf("%w: %q", ErrInvalidCategory, category)
+	if !isValidCategory(in.Category) {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidCategory, in.Category)
 	}
 	if _, err := s.repo.GetInvestigation(ctx, investigationID); err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
 	h := &Hypothesis{
-		ID:              uuid.NewString(),
-		InvestigationID: investigationID,
-		Title:           title,
-		Description:     description,
-		Category:        category,
-		SourceRefs:      append([]domain.SourceRef(nil), refs...),
-		Status:          HypothesisProposed,
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:                 uuid.NewString(),
+		InvestigationID:    investigationID,
+		Title:              title,
+		Description:        in.Description,
+		Category:           in.Category,
+		ExpectedBehavior:   in.ExpectedBehavior,
+		ObservedBehavior:   in.ObservedBehavior,
+		PotentialImpact:    in.PotentialImpact,
+		OpenQuestions:      append([]string(nil), in.OpenQuestions...),
+		AffectedComponents: append([]string(nil), in.AffectedComponents...),
+		SourceRefs:         append([]domain.SourceRef(nil), in.SourceRefs...),
+		Links:              append([]Link(nil), in.Links...),
+		Status:             HypothesisProposed,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	}
+	if err := s.repo.SaveHypothesis(ctx, h); err != nil {
+		return nil, err
+	}
+	return h, nil
+}
+
+// UpdateHypothesis deliberately overwrites the structured fields of a hypothesis.
+// A non-empty rationale is recorded in the audit trail.
+func (s *Service) UpdateHypothesis(ctx context.Context, id string, in UpdateHypothesisInput) (*Hypothesis, error) {
+	title := strings.TrimSpace(in.Title)
+	if title == "" {
+		return nil, ErrMissingTitle
+	}
+	if !isValidCategory(in.Category) {
+		return nil, fmt.Errorf("%w: %q", ErrInvalidCategory, in.Category)
+	}
+	h, err := s.repo.GetHypothesis(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	h.Title = title
+	h.Description = in.Description
+	h.Category = in.Category
+	h.ExpectedBehavior = in.ExpectedBehavior
+	h.ObservedBehavior = in.ObservedBehavior
+	h.PotentialImpact = in.PotentialImpact
+	h.OpenQuestions = append([]string(nil), in.OpenQuestions...)
+	h.AffectedComponents = append([]string(nil), in.AffectedComponents...)
+	h.SourceRefs = append([]domain.SourceRef(nil), in.SourceRefs...)
+	h.Links = append([]Link(nil), in.Links...)
+	if in.Rationale != "" {
+		h.AuditTrail = append(h.AuditTrail, StatusChange{
+			From:      string(h.Status),
+			To:        string(h.Status),
+			Rationale: in.Rationale,
+			At:        time.Now().UTC(),
+		})
+	}
+	h.UpdatedAt = time.Now().UTC()
 	if err := s.repo.SaveHypothesis(ctx, h); err != nil {
 		return nil, err
 	}
@@ -100,6 +197,11 @@ func (s *Service) ListInvestigations(ctx context.Context) ([]*Investigation, err
 	return s.repo.ListInvestigations(ctx)
 }
 
+// GetHypothesis returns a hypothesis by ID.
+func (s *Service) GetHypothesis(ctx context.Context, id string) (*Hypothesis, error) {
+	return s.repo.GetHypothesis(ctx, id)
+}
+
 // ListHypotheses returns hypotheses for an investigation.
 func (s *Service) ListHypotheses(ctx context.Context, investigationID string) ([]*Hypothesis, error) {
 	return s.repo.ListHypotheses(ctx, investigationID)
@@ -117,11 +219,23 @@ func (s *Service) ListOpportunities(ctx context.Context, investigationID string)
 
 // PromoteOpportunity converts a confirmed hypothesis into an opportunity.
 func (s *Service) PromoteOpportunity(ctx context.Context, hypothesisID, problem, scope, impact, effort string, confidence float64) (*Opportunity, error) {
-	problem = strings.TrimSpace(problem)
+	return s.PromoteOpportunityWithInput(ctx, hypothesisID, PromoteOpportunityInput{
+		ProblemStatement: problem,
+		Scope:            scope,
+		Impact:           impact,
+		ExpectedEffort:   effort,
+		Confidence:       confidence,
+	})
+}
+
+// PromoteOpportunityWithInput converts a confirmed hypothesis into an opportunity
+// using the full promotion context, including dependencies and maintainer alignment.
+func (s *Service) PromoteOpportunityWithInput(ctx context.Context, hypothesisID string, in PromoteOpportunityInput) (*Opportunity, error) {
+	problem := strings.TrimSpace(in.ProblemStatement)
 	if problem == "" {
 		return nil, ErrMissingProblem
 	}
-	if math.IsNaN(confidence) || math.IsInf(confidence, 0) || confidence < 0 || confidence > 1 {
+	if math.IsNaN(in.Confidence) || math.IsInf(in.Confidence, 0) || in.Confidence < 0 || in.Confidence > 1 {
 		return nil, fmt.Errorf("confidence must be between 0 and 1")
 	}
 	storedHypothesis, err := s.repo.GetHypothesis(ctx, hypothesisID)
@@ -137,24 +251,51 @@ func (s *Service) PromoteOpportunity(ctx context.Context, hypothesisID, problem,
 	if err := h.Transition(HypothesisPromoted, "promoted to opportunity"); err != nil {
 		return nil, err
 	}
+
+	sourceRefs := h.SourceRefs
+	if in.SourceRefs != nil {
+		sourceRefs = append([]domain.SourceRef(nil), in.SourceRefs...)
+	}
+
 	now := time.Now().UTC()
 	o := &Opportunity{
-		ID:               uuid.NewString(),
-		InvestigationID:  h.InvestigationID,
-		HypothesisID:     h.ID,
-		Title:            h.Title,
-		ProblemStatement: problem,
-		Category:         h.Category,
-		Scope:            scope,
-		Impact:           impact,
-		Confidence:       confidence,
-		ExpectedEffort:   effort,
-		CollisionStatus:  CollisionUnknown,
-		SourceRefs:       append([]domain.SourceRef(nil), h.SourceRefs...),
-		Status:           OpportunityHypothesis,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+		ID:                  uuid.NewString(),
+		InvestigationID:     h.InvestigationID,
+		HypothesisID:        h.ID,
+		Title:               h.Title,
+		ProblemStatement:    problem,
+		Category:            h.Category,
+		Scope:               in.Scope,
+		Impact:              in.Impact,
+		Confidence:          in.Confidence,
+		ExpectedEffort:      in.ExpectedEffort,
+		Dependencies:        append([]string(nil), in.Dependencies...),
+		MaintainerAlignment: in.MaintainerAlignment,
+		EvidenceIDs:         append([]string(nil), in.EvidenceIDs...),
+		CollisionStatus:     CollisionUnknown,
+		SourceRefs:          sourceRefs,
+		Status:              OpportunityHypothesis,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
+
+	if in.MaintainerAlignment != "" && s.evidence != nil {
+		e := &evidence.Evidence{
+			ID:              uuid.NewString(),
+			InvestigationID: h.InvestigationID,
+			HypothesisID:    h.ID,
+			OpportunityID:   o.ID,
+			Type:            evidence.EvidenceTypeManualObservation,
+			Relation:        evidence.RelationSupporting,
+			Description:     "maintainer alignment: " + in.MaintainerAlignment,
+			SourceRefs:      append([]domain.SourceRef(nil), in.SourceRefs...),
+			CreatedAt:       now,
+		}
+		if err := s.evidence.CreateEvidence(ctx, e); err == nil {
+			o.EvidenceIDs = append(o.EvidenceIDs, e.ID)
+		}
+	}
+
 	if err := s.repo.PromoteHypothesis(ctx, &h, o); err != nil {
 		return nil, err
 	}
