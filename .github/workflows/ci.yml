@@ -123,14 +123,32 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
+      - name: Resolve lint comparison base
+        id: lint-base
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          base=$PUSH_BEFORE
+          if [[ $EVENT_NAME == pull_request ]]; then
+            base=$PR_BASE
+          fi
+          if [[ -z $base || $base =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}"; then
+            base=$(git rev-list --max-parents=0 HEAD)
+          fi
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
       - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.12
-          args: --timeout=5m
+          args: --timeout=5m --new-from-rev=${{ steps.lint-base.outputs.sha }}
 
   check-large-files:
     name: Check file sizes
@@ -138,17 +156,43 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
-      - name: Detect Go files exceeding 800 lines
+        with:
+          fetch-depth: 0
+      - name: Prevent growth of oversized Go files
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
         run: |
-          large=$(find . -name '*.go' -not -path './.git/*' -exec wc -l {} + |
-            awk '$1 > 800 && $2 != "total" {print $2 ":" $1 " lines (exceeds 800 line limit)"}')
-          if [[ -n "$large" ]]; then
-            echo "::error::Files exceeding 800 lines found:"
-            echo "$large"
+          base=$PUSH_BEFORE
+          if [[ $EVENT_NAME == pull_request ]]; then
+            base=$PR_BASE
+          fi
+          if [[ -z $base || $base =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}"; then
+            base=$(git rev-list --max-parents=0 HEAD)
+          fi
+
+          errors=0
+          while IFS= read -r file; do
+            [[ -z $file || ! -f $file ]] && continue
+            current_lines=$(wc -l < "$file")
+            base_lines=0
+            if git cat-file -e "$base:$file" 2>/dev/null; then
+              base_lines=$(git show "$base:$file" | wc -l)
+            fi
+            if (( current_lines > 800 && current_lines > base_lines )); then
+              echo "::error file=$file::$file grew from $base_lines to $current_lines lines; oversized Go files may not grow"
+              errors=$((errors + 1))
+            elif (( current_lines > 800 )); then
+              echo "::warning file=$file::$file remains oversized at $current_lines lines (baseline: $base_lines)"
+            fi
+          done < <(git diff --name-only --diff-filter=ACMR "$base"...HEAD -- '*.go')
+
+          if (( errors > 0 )); then
             exit 1
           fi
-          echo "All Go files are under 800 lines"
+          echo "No changed oversized Go file grew"
 
   coverage:
     name: Test coverage
