@@ -47,6 +47,9 @@ func (s *Store) Compute(ctx context.Context, repo domain.RepoRef, candidates []C
 }
 
 func (s *Store) compute(ctx context.Context, repo domain.RepoRef, candidates []Candidate, cfg Config) (*ClusterRun, []Cluster, error) {
+	if err := validateCandidates(repo, candidates); err != nil {
+		return nil, nil, err
+	}
 	revision := SourceRevision(candidates)
 	windowStart, windowEnd := SourceWindow(candidates)
 
@@ -136,7 +139,7 @@ func (s *Store) compute(ctx context.Context, repo domain.RepoRef, candidates []C
 		SourceRevision: revision,
 		WindowStart:    windowStart,
 		WindowEnd:      windowEnd,
-		ParamsHash:     cfg.ParamsHash(),
+		ParamsHash:     cl.Config.ParamsHash(),
 		Status:         "running",
 		StartedAt:      now,
 	}
@@ -257,7 +260,7 @@ func (s *Store) listClustersForRepo(ctx context.Context, repo domain.RepoRef, st
 		query += ` AND state = ?`
 		args = append(args, string(state))
 	}
-	query += ` ORDER BY canonical_number`
+	query += ` ORDER BY canonical_kind, canonical_owner, canonical_repo, canonical_number, stable_id`
 	if limit > 0 {
 		query += ` LIMIT ?`
 		args = append(args, limit)
@@ -467,7 +470,7 @@ func (s *Store) replaceMembersTx(ctx context.Context, tx *sql.Tx, c *Cluster) er
 		_, err := tx.ExecContext(ctx, `
 			INSERT INTO cluster_members (cluster_id, thread_id, kind, owner, repo, number, title, state, score, reason, included, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, c.ID, m.ThreadID, m.Ref.Kind, m.Ref.Owner, m.Ref.Repo, m.Ref.Number, m.Title, m.State, m.Score, m.Reason, boolToInt(m.Included), now, now)
+		`, c.ID, nullableThreadID(m.ThreadID), m.Ref.Kind, m.Ref.Owner, m.Ref.Repo, m.Ref.Number, m.Title, m.State, m.Score, m.Reason, boolToInt(m.Included), now, now)
 		if err != nil {
 			return fmt.Errorf("insert member: %w", err)
 		}
@@ -535,7 +538,7 @@ func (s *Store) listMembersForCluster(ctx context.Context, clusterID int64, limi
 	query := `SELECT thread_id, kind, owner, repo, number, title, state, score, reason, included
 	        FROM cluster_members
 	        WHERE cluster_id = ?
-	        ORDER BY score DESC, number`
+	        ORDER BY score DESC, kind, owner, repo, number`
 	args := []any{clusterID}
 	if limit > 0 {
 		query += ` LIMIT ?`
@@ -578,17 +581,32 @@ func (s *Store) AddOverride(ctx context.Context, clusterID int64, ref MemberRef,
 	if clusterID == 0 {
 		return errors.New("cluster id is required")
 	}
-	if action == "" {
-		return errors.New("action is required")
+	if err := validateMemberRef(ref); err != nil {
+		return err
 	}
-	if reason == "" {
+	switch action {
+	case OverrideInclude, OverrideExclude, OverrideSetCanonical:
+	default:
+		return fmt.Errorf("unsupported override action %q", action)
+	}
+	if strings.TrimSpace(reason) == "" {
 		return errors.New("reason is required")
+	}
+	cluster, err := s.getClusterByID(ctx, clusterID)
+	if err != nil {
+		return err
+	}
+	if cluster == nil {
+		return fmt.Errorf("cluster %d not found", clusterID)
+	}
+	if action == OverrideExclude && sameMemberRef(ref, cluster.Canonical) {
+		return errors.New("cannot exclude the canonical member")
 	}
 	now := encodeTime(time.Now())
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT INTO cluster_overrides (cluster_id, kind, owner, repo, number, action, reason, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, clusterID, ref.Kind, ref.Owner, ref.Repo, ref.Number, string(action), reason, now); err != nil {
+	`, clusterID, ref.Kind, ref.Owner, ref.Repo, ref.Number, string(action), strings.TrimSpace(reason), now); err != nil {
 		return fmt.Errorf("insert override: %w", err)
 	}
 	return s.reapplyOverrides(ctx, clusterID)
@@ -677,7 +695,7 @@ func (s *Store) MergeClusters(ctx context.Context, fromID, toID int64, reason st
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO cluster_members (cluster_id, thread_id, kind, owner, repo, number, title, state, score, reason, included, created_at, updated_at)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, toID, m.ThreadID, m.Ref.Kind, m.Ref.Owner, m.Ref.Repo, m.Ref.Number, m.Title, m.State, m.Score, m.Reason+" (merged)", boolToInt(m.Included), now, now)
+		`, toID, nullableThreadID(m.ThreadID), m.Ref.Kind, m.Ref.Owner, m.Ref.Repo, m.Ref.Number, m.Title, m.State, m.Score, m.Reason+" (merged)", boolToInt(m.Included), now, now)
 		if err != nil {
 			return fmt.Errorf("insert merged member: %w", err)
 		}
@@ -772,7 +790,7 @@ func (s *Store) SplitCluster(ctx context.Context, clusterID int64, ref MemberRef
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO cluster_members (cluster_id, thread_id, kind, owner, repo, number, title, state, score, reason, included, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, newID, member.ThreadID, ref.Kind, ref.Owner, ref.Repo, ref.Number, member.Title, member.State, 1.0, "split canonical: "+reason, 1, now, now)
+	`, newID, nullableThreadID(member.ThreadID), ref.Kind, ref.Owner, ref.Repo, ref.Number, member.Title, member.State, 1.0, "split canonical: "+reason, 1, now, now)
 	if err != nil {
 		return fmt.Errorf("insert split member: %w", err)
 	}
@@ -886,4 +904,47 @@ func boolToInt(v bool) int {
 		return 1
 	}
 	return 0
+}
+
+func nullableThreadID(id int64) any {
+	if id <= 0 {
+		return nil
+	}
+	return id
+}
+
+func validateCandidates(repo domain.RepoRef, candidates []Candidate) error {
+	seen := make(map[string]struct{}, len(candidates))
+	for i, candidate := range candidates {
+		if !strings.EqualFold(candidate.Repo.Owner, repo.Owner) || !strings.EqualFold(candidate.Repo.Repo, repo.Repo) {
+			return fmt.Errorf("candidate %d belongs to %s, not %s", i, candidate.Repo.String(), repo.String())
+		}
+		if err := validateMemberRef(candidate.Ref()); err != nil {
+			return fmt.Errorf("candidate %d: %w", i, err)
+		}
+		key := strings.ToLower(candidate.Ref().String())
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("duplicate candidate %s", candidate.Ref().String())
+		}
+		seen[key] = struct{}{}
+	}
+	return nil
+}
+
+func validateMemberRef(ref MemberRef) error {
+	if strings.TrimSpace(ref.Owner) == "" || strings.TrimSpace(ref.Repo) == "" {
+		return errors.New("member owner and repo are required")
+	}
+	if ref.Kind != "issue" && ref.Kind != "pull_request" {
+		return fmt.Errorf("unsupported member kind %q", ref.Kind)
+	}
+	if ref.Number <= 0 {
+		return errors.New("member number must be positive")
+	}
+	return nil
+}
+
+func sameMemberRef(a, b MemberRef) bool {
+	return a.Number == b.Number && strings.EqualFold(a.Kind, b.Kind) &&
+		strings.EqualFold(a.Owner, b.Owner) && strings.EqualFold(a.Repo, b.Repo)
 }

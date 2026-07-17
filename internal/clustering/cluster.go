@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ func DefaultConfig() Config {
 
 // ParamsHash returns a stable hash of the configuration used for attribution.
 func (c Config) ParamsHash() string {
+	c = normalizeConfig(c)
 	s := fmt.Sprintf("threshold=%.4f|candidates=%d|pairs=%d|body=%d", c.Threshold, c.MaxCandidates, c.MaxPairs, c.MaxBodyTokens)
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:8])
@@ -42,19 +44,24 @@ type Clusterer struct {
 // NewClusterer creates a clusterer with the supplied config, falling back to
 // defaults for zero or out-of-range values.
 func NewClusterer(cfg Config) *Clusterer {
-	if cfg.Threshold <= 0 || cfg.Threshold > 1 {
-		cfg.Threshold = DefaultConfig().Threshold
+	return &Clusterer{Config: normalizeConfig(cfg)}
+}
+
+func normalizeConfig(cfg Config) Config {
+	defaults := DefaultConfig()
+	if cfg.Threshold <= 0 || cfg.Threshold > 1 || math.IsNaN(cfg.Threshold) || math.IsInf(cfg.Threshold, 0) {
+		cfg.Threshold = defaults.Threshold
 	}
 	if cfg.MaxCandidates <= 0 {
-		cfg.MaxCandidates = DefaultConfig().MaxCandidates
+		cfg.MaxCandidates = defaults.MaxCandidates
 	}
 	if cfg.MaxPairs <= 0 {
-		cfg.MaxPairs = DefaultConfig().MaxPairs
+		cfg.MaxPairs = defaults.MaxPairs
 	}
 	if cfg.MaxBodyTokens <= 0 {
-		cfg.MaxBodyTokens = DefaultConfig().MaxBodyTokens
+		cfg.MaxBodyTokens = defaults.MaxBodyTokens
 	}
-	return &Clusterer{Config: cfg}
+	return cfg
 }
 
 // Cluster groups candidates into duplicate-candidate clusters and applies
@@ -287,6 +294,7 @@ func applyOverrides(clusters []Cluster, overrides []MembershipOverride, candidat
 				for j := range cluster.Members {
 					if cluster.Members[j].Ref == o.Ref {
 						cluster.Canonical = o.Ref
+						cluster.Members[j].Included = true
 						cluster.Members[j].Score = 1.0
 						cluster.Members[j].Reason = "canonical override: " + o.Reason
 						found = true
@@ -341,7 +349,17 @@ func sortClusters(clusters []Cluster) {
 func SourceRevision(candidates []Candidate) string {
 	lines := make([]string, len(candidates))
 	for i, c := range candidates {
-		lines[i] = fmt.Sprintf("%s/%s:%s#%d %d %d", c.Repo.Owner, c.Repo.Repo, c.Kind, c.Number, c.UpdatedAt.UnixNano(), c.ThreadID)
+		labels := make([]string, 0, len(c.Labels))
+		for _, label := range c.Labels {
+			label = strings.ToLower(strings.TrimSpace(label))
+			if label != "" {
+				labels = append(labels, label)
+			}
+		}
+		sort.Strings(labels)
+		lines[i] = fmt.Sprintf("%q/%q:%q#%d thread=%d created=%d updated=%d state=%q title=%q body=%q author=%q labels=%q",
+			strings.ToLower(c.Repo.Owner), strings.ToLower(c.Repo.Repo), strings.ToLower(c.Kind), c.Number,
+			c.ThreadID, c.CreatedAt.UnixNano(), c.UpdatedAt.UnixNano(), c.State, c.Title, c.Body, c.Author, labels)
 	}
 	sort.Strings(lines)
 	h := sha256.Sum256([]byte(strings.Join(lines, "\n")))

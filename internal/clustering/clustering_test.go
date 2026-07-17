@@ -2,6 +2,7 @@ package clustering_test
 
 import (
 	"context"
+	"math"
 	"path/filepath"
 	"testing"
 	"time"
@@ -239,6 +240,76 @@ func TestClustererRespectsHardLimits(t *testing.T) {
 	_, err = cl.Cluster(candidates, nil)
 	if err == nil {
 		t.Fatal("expected error for exceeding pair limit")
+	}
+}
+
+func TestConfigHashDescribesEffectiveConfig(t *testing.T) {
+	defaults := clustering.DefaultConfig()
+	if got, want := (clustering.Config{}).ParamsHash(), defaults.ParamsHash(); got != want {
+		t.Fatalf("zero config hash = %q, want default hash %q", got, want)
+	}
+	invalid := defaults
+	invalid.Threshold = math.NaN()
+	if got, want := invalid.ParamsHash(), defaults.ParamsHash(); got != want {
+		t.Fatalf("invalid threshold hash = %q, want default hash %q", got, want)
+	}
+}
+
+func TestSourceRevisionIncludesContentButIgnoresLabelOrder(t *testing.T) {
+	base := clustering.Candidate{
+		Repo:   domain.RepoRef{Owner: "owner", Repo: "repo"},
+		Kind:   "issue",
+		Number: 1,
+		Title:  "title",
+		Body:   "original",
+		Labels: []string{"bug", "help wanted"},
+	}
+	reordered := base
+	reordered.Labels = []string{"help wanted", "bug"}
+	if clustering.SourceRevision([]clustering.Candidate{base}) != clustering.SourceRevision([]clustering.Candidate{reordered}) {
+		t.Fatal("label order changed source revision")
+	}
+	changed := base
+	changed.Body = "corrected"
+	if clustering.SourceRevision([]clustering.Candidate{base}) == clustering.SourceRevision([]clustering.Candidate{changed}) {
+		t.Fatal("content change did not change source revision")
+	}
+}
+
+func TestDuplicateLabelsDoNotInflateSimilarity(t *testing.T) {
+	candidates := []clustering.Candidate{
+		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 1, Labels: []string{"bug"}},
+		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 2, Labels: []string{"bug", "bug"}},
+	}
+	cfg := clustering.Config{Threshold: 0.075, MaxCandidates: 10, MaxPairs: 10, MaxBodyTokens: 10}
+	clusters, err := clustering.NewClusterer(cfg).Cluster(candidates, nil)
+	if err != nil {
+		t.Fatalf("cluster: %v", err)
+	}
+	if len(clusters) != 0 {
+		t.Fatalf("duplicate labels inflated similarity into %d cluster(s)", len(clusters))
+	}
+}
+
+func TestStoreComputeValidatesCandidatesAndAllowsMissingThreadID(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	store := c.Clustering()
+	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	candidates := []clustering.Candidate{
+		{Repo: repo, Kind: "issue", Number: 1, Title: "same title"},
+		{Repo: repo, Kind: "issue", Number: 2, Title: "same title"},
+	}
+	if _, clusters, err := store.Compute(ctx, repo, candidates, clustering.DefaultConfig()); err != nil {
+		t.Fatalf("compute candidates without thread ids: %v", err)
+	} else if len(clusters) != 1 {
+		t.Fatalf("clusters = %d, want 1", len(clusters))
+	}
+
+	invalid := append([]clustering.Candidate(nil), candidates...)
+	invalid[1].Repo = domain.RepoRef{Owner: "other", Repo: "repo"}
+	if _, _, err := store.Compute(ctx, repo, invalid, clustering.DefaultConfig()); err == nil {
+		t.Fatal("expected repository mismatch error")
 	}
 }
 

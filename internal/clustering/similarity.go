@@ -94,17 +94,28 @@ func labelJaccard(a, b []string) float64 {
 	if len(a) == 0 || len(b) == 0 {
 		return 0.0
 	}
-	seen := make(map[string]struct{}, len(a))
+	aSet := make(map[string]struct{}, len(a))
 	for _, l := range a {
-		seen[strings.ToLower(l)] = struct{}{}
+		if l = strings.ToLower(strings.TrimSpace(l)); l != "" {
+			aSet[l] = struct{}{}
+		}
+	}
+	bSet := make(map[string]struct{}, len(b))
+	for _, l := range b {
+		if l = strings.ToLower(strings.TrimSpace(l)); l != "" {
+			bSet[l] = struct{}{}
+		}
+	}
+	if len(aSet) == 0 || len(bSet) == 0 {
+		return 0.0
 	}
 	inter := 0
-	for _, l := range b {
-		if _, ok := seen[strings.ToLower(l)]; ok {
+	for l := range bSet {
+		if _, ok := aSet[l]; ok {
 			inter++
 		}
 	}
-	union := len(a) + len(b) - inter
+	union := len(aSet) + len(bSet) - inter
 	if union == 0 {
 		return 0.0
 	}
