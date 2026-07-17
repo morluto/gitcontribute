@@ -155,6 +155,53 @@ func TestDossierSaveGetListAndRefresh(t *testing.T) {
 	}
 }
 
+func TestDossierSaveAndRefreshAllowSameGeneratedAt(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+
+	repo, err := c.UpsertRepository(ctx, Repository{
+		Owner:           "owner",
+		Name:            "repo",
+		SourceUpdatedAt: time.Unix(1000, 0).UTC(),
+	}, `{}`)
+	if err != nil {
+		t.Fatalf("upsert repository: %v", err)
+	}
+
+	generated := time.Unix(3000, 0).UTC()
+
+	id1, err := c.SaveDossier(ctx, repo.ID, repo.Owner, repo.Name, "sha", time.Unix(2000, 0).UTC(), `{}`, `{"i":1}`, generated, nil)
+	if err != nil {
+		t.Fatalf("save first dossier: %v", err)
+	}
+	id2, err := c.SaveDossier(ctx, repo.ID, repo.Owner, repo.Name, "sha", time.Unix(3000, 0).UTC(), `{}`, `{"i":2}`, generated, nil)
+	if err != nil {
+		t.Fatalf("save second dossier with same generated_at: %v", err)
+	}
+	if id1 == id2 {
+		t.Fatal("expected two distinct dossier rows")
+	}
+
+	latest, _, err := c.GetDossier(ctx, repo.Owner, repo.Name)
+	if err != nil {
+		t.Fatalf("get dossier: %v", err)
+	}
+	if latest == nil || latest.Snapshot != `{"i":2}` {
+		t.Fatalf("expected latest dossier snapshot, got %+v", latest)
+	}
+
+	id3, inserted, err := c.RefreshDossier(ctx, repo.ID, repo.Owner, repo.Name, "sha", time.Unix(4000, 0).UTC(), `{}`, `{"i":3}`, generated, nil)
+	if err != nil {
+		t.Fatalf("refresh with same generated_at: %v", err)
+	}
+	if !inserted {
+		t.Fatal("expected refresh with newer as_of to insert even when generated_at is unchanged")
+	}
+	if id3 == id2 {
+		t.Fatal("expected a new dossier row on refresh")
+	}
+}
+
 func TestDossierListReturnsLatestPerRepository(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)

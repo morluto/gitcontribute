@@ -12,8 +12,7 @@ CREATE TABLE dossiers (
     snapshot TEXT NOT NULL,
     generated_at INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
-    FOREIGN KEY (repository_id) REFERENCES repositories (id) ON DELETE CASCADE,
-    UNIQUE (repository_id, generated_at)
+    FOREIGN KEY (repository_id) REFERENCES repositories (id) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_dossiers_repository ON dossiers (repository_id, generated_at DESC);
