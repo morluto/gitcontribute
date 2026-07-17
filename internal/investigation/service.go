@@ -279,8 +279,9 @@ func (s *Service) PromoteOpportunityWithInput(ctx context.Context, hypothesisID 
 		UpdatedAt:           now,
 	}
 
-	if in.MaintainerAlignment != "" && s.evidence != nil {
-		e := &evidence.Evidence{
+	var alignmentEvidence *evidence.Evidence
+	if in.MaintainerAlignment != "" {
+		alignmentEvidence = &evidence.Evidence{
 			ID:              uuid.NewString(),
 			InvestigationID: h.InvestigationID,
 			HypothesisID:    h.ID,
@@ -291,12 +292,10 @@ func (s *Service) PromoteOpportunityWithInput(ctx context.Context, hypothesisID 
 			SourceRefs:      append([]domain.SourceRef(nil), in.SourceRefs...),
 			CreatedAt:       now,
 		}
-		if err := s.evidence.CreateEvidence(ctx, e); err == nil {
-			o.EvidenceIDs = append(o.EvidenceIDs, e.ID)
-		}
+		o.EvidenceIDs = append(o.EvidenceIDs, alignmentEvidence.ID)
 	}
 
-	if err := s.repo.PromoteHypothesis(ctx, &h, o); err != nil {
+	if err := s.repo.PromoteHypothesisWithEvidence(ctx, &h, o, alignmentEvidence); err != nil {
 		return nil, err
 	}
 	return o, nil

@@ -12,10 +12,11 @@ import (
 )
 
 type fakeRepo struct {
-	investigations map[string]*Investigation
-	hypotheses     map[string]*Hypothesis
-	opportunities  map[string]*Opportunity
-	related        []domain.SourceRef
+	investigations    map[string]*Investigation
+	hypotheses        map[string]*Hypothesis
+	opportunities     map[string]*Opportunity
+	related           []domain.SourceRef
+	promotionEvidence []*evidence.Evidence
 }
 
 func newFakeRepo() *fakeRepo {
@@ -81,9 +82,22 @@ func (r *fakeRepo) PromoteHypothesis(_ context.Context, h *Hypothesis, o *Opport
 	return nil
 }
 
+func (r *fakeRepo) PromoteHypothesisWithEvidence(_ context.Context, h *Hypothesis, o *Opportunity, e *evidence.Evidence) error {
+	r.hypotheses[h.ID] = h
+	r.opportunities[o.ID] = o
+	if e != nil {
+		r.promotionEvidence = append(r.promotionEvidence, e)
+	}
+	return nil
+}
+
 type failingPromotionRepo struct{ *fakeRepo }
 
 func (r *failingPromotionRepo) PromoteHypothesis(context.Context, *Hypothesis, *Opportunity) error {
+	return errors.New("promotion write failed")
+}
+
+func (r *failingPromotionRepo) PromoteHypothesisWithEvidence(context.Context, *Hypothesis, *Opportunity, *evidence.Evidence) error {
 	return errors.New("promotion write failed")
 }
 
@@ -452,7 +466,7 @@ func TestPromoteOpportunityWithInput(t *testing.T) {
 	if len(o.EvidenceIDs) != 1 {
 		t.Fatalf("expected maintainer-alignment evidence id, got %+v", o.EvidenceIDs)
 	}
-	if len(store.evidence) != 1 || store.evidence[0].Relation != evidence.RelationSupporting {
-		t.Fatalf("expected supporting evidence, got %+v", store.evidence)
+	if len(repo.promotionEvidence) != 1 || repo.promotionEvidence[0].Relation != evidence.RelationSupporting {
+		t.Fatalf("expected supporting evidence, got %+v", repo.promotionEvidence)
 	}
 }

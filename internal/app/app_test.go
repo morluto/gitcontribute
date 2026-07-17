@@ -1067,6 +1067,17 @@ func TestPromoteOpportunityWithDependencies(t *testing.T) {
 	if len(o.EvidenceIDs) != 1 {
 		t.Fatalf("expected maintainer-alignment evidence, got %+v", o.EvidenceIDs)
 	}
+	c, err := svc.openCorpus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := c.ListEvidence(ctx, evidence.EvidenceFilter{OpportunityID: o.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != o.EvidenceIDs[0] {
+		t.Fatalf("promotion evidence was not stored atomically: %+v", items)
+	}
 }
 
 func TestDuplicateAndCollisionChecks(t *testing.T) {

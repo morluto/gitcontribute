@@ -213,6 +213,22 @@ func (c *Corpus) SaveOpportunity(ctx context.Context, item *investigation.Opport
 // PromoteHypothesis atomically stores the promoted hypothesis and its new
 // opportunity so a partial write cannot strand the hypothesis.
 func (c *Corpus) PromoteHypothesis(ctx context.Context, hypothesis *investigation.Hypothesis, opportunity *investigation.Opportunity) error {
+	return c.promoteHypothesis(ctx, hypothesis, opportunity, nil)
+}
+
+// PromoteHypothesisWithEvidence stores an optional promotion evidence record
+// in the same transaction as the promoted hypothesis and opportunity.
+func (c *Corpus) PromoteHypothesisWithEvidence(ctx context.Context, hypothesis *investigation.Hypothesis, opportunity *investigation.Opportunity, item *evidence.Evidence) error {
+	if opportunity == nil || opportunity.ID == "" {
+		return errors.New("promoted opportunity identity is required")
+	}
+	if item != nil && (item.ID == "" || item.OpportunityID != opportunity.ID) {
+		return errors.New("promotion evidence must identify the promoted opportunity")
+	}
+	return c.promoteHypothesis(ctx, hypothesis, opportunity, item)
+}
+
+func (c *Corpus) promoteHypothesis(ctx context.Context, hypothesis *investigation.Hypothesis, opportunity *investigation.Opportunity, item *evidence.Evidence) error {
 	if hypothesis == nil || hypothesis.ID == "" || opportunity == nil || opportunity.ID == "" {
 		return errors.New("promoted hypothesis and opportunity identities are required")
 	}
@@ -223,6 +239,13 @@ func (c *Corpus) PromoteHypothesis(ctx context.Context, hypothesis *investigatio
 	opportunityPayload, err := marshalWorkflow(opportunity)
 	if err != nil {
 		return err
+	}
+	var evidencePayload string
+	if item != nil {
+		evidencePayload, err = marshalWorkflow(item)
+		if err != nil {
+			return err
+		}
 	}
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -252,6 +275,15 @@ func (c *Corpus) PromoteHypothesis(ctx context.Context, hypothesis *investigatio
 		opportunity.Category, opportunity.Status, opportunityPayload,
 		encodeTime(opportunity.CreatedAt), encodeTime(opportunity.UpdatedAt)); err != nil {
 		return fmt.Errorf("save promoted opportunity: %w", err)
+	}
+	if item != nil {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO evidence (id, investigation_id, hypothesis_id, opportunity_id, relation, evidence_type, payload, created_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`, item.ID, item.InvestigationID, item.HypothesisID, item.OpportunityID,
+			item.Relation, item.Type, evidencePayload, encodeTime(item.CreatedAt)); err != nil {
+			return fmt.Errorf("save promotion evidence: %w", err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit hypothesis promotion: %w", err)
