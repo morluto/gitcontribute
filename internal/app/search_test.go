@@ -114,6 +114,36 @@ func TestSearchReturnsNextCursorAndCoverage(t *testing.T) {
 	}
 }
 
+func TestThreadSearchMergesRepositoryAndThreadCoverage(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	repo, err := svc.corpus.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := svc.corpus.ApplyThreadObservation(ctx, repo.ID, corpus.ThreadKindIssue, 1, "open", "search term", "body", "author", time.Unix(2, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.AdvanceFacet(ctx, repo.ID, nil, "threads", time.Unix(2, 0).UTC(), true, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.AdvanceFacet(ctx, repo.ID, &thread.ID, FacetIssueComments, time.Unix(2, 0).UTC(), true, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.Search(ctx, "search", cli.SearchOptions{Kind: "issues", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Matches) != 1 {
+		t.Fatalf("matches = %d, want 1", len(result.Matches))
+	}
+	if diff := cmp.Diff([]string{FacetIssueComments, "threads"}, result.Matches[0].Coverage); diff != "" {
+		t.Fatalf("coverage mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestSearchRejectsMalformedCursor(t *testing.T) {
 	ctx := context.Background()
 	svc := newSearchTestService(t)

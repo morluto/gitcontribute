@@ -172,7 +172,7 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 	}
 
 	repoCache := make(map[int64]*corpus.Repository)
-	coverageCache := make(map[int64][]string)
+	repositoryCoverageCache := make(map[int64][]string)
 
 	matches := make([]searchMatch, 0, len(page.Threads))
 	for _, t := range page.Threads {
@@ -187,14 +187,19 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 		if repo == nil {
 			continue
 		}
-		coverage, ok := coverageCache[t.RepositoryID]
+		repositoryCoverage, ok := repositoryCoverageCache[t.RepositoryID]
 		if !ok {
-			coverage, err = s.coverageNames(ctx, c, repo.ID, nil)
+			repositoryCoverage, err = s.coverageNames(ctx, c, repo.ID, nil)
 			if err != nil {
 				return searchResult{}, err
 			}
-			coverageCache[t.RepositoryID] = coverage
+			repositoryCoverageCache[t.RepositoryID] = repositoryCoverage
 		}
+		threadCoverage, err := s.coverageNames(ctx, c, repo.ID, &t.ID)
+		if err != nil {
+			return searchResult{}, err
+		}
+		coverage := mergeCoverageNames(repositoryCoverage, threadCoverage)
 
 		ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Name}
 		m := searchMatch{
@@ -684,6 +689,21 @@ func (s *Service) coverageNames(ctx context.Context, c *corpus.Corpus, repoID in
 		}
 	}
 	return names, nil
+}
+
+func mergeCoverageNames(groups ...[]string) []string {
+	seen := make(map[string]struct{})
+	for _, group := range groups {
+		for _, name := range group {
+			seen[name] = struct{}{}
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 func boundedText(value string, maxRunes int) string {

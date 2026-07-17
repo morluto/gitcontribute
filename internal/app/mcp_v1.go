@@ -261,8 +261,12 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		return mcpserver.ExplainMatchOutput{}, fmt.Errorf("unsupported match kind %q", in.Kind)
 	}
 
-	out.Reason = fmt.Sprintf("matched %d/%d terms in %s", int(out.Score*float64(len(queryTerms(in.Query)))), len(queryTerms(in.Query)), strings.Join(out.MatchedFields, ", "))
-	if in.Query == "" {
+	terms := queryTerms(in.Query)
+	if len(terms) > 0 && out.Score == 0 {
+		return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+	}
+	out.Reason = fmt.Sprintf("matched %d/%d terms in %s", int(out.Score*float64(len(terms))), len(terms), strings.Join(out.MatchedFields, ", "))
+	if len(terms) == 0 {
 		out.Score = 1.0
 		out.Reason = "repository present in local corpus"
 	}

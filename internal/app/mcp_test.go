@@ -67,6 +67,33 @@ func TestMCPReaderRepositorySearchDoesNotFallBackFromMissingExactRepository(t *t
 	}
 }
 
+func TestMCPReaderExplainRejectsNonMatchingThreadAndRepository(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
+		Owner: "owner", Name: "repo", Description: "parser utilities",
+	}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
+		RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1,
+		State: "open", Title: "parser panic", Body: "reproduction",
+		SourceUpdatedAt: time.Now().UTC(),
+	}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	reader := svc.MCPReader()
+	for _, input := range []mcpserver.ExplainMatchInput{
+		{Owner: "owner", Repo: "repo", Kind: "issue", Number: 1, Query: "unrelated"},
+		{Owner: "owner", Repo: "repo", Kind: "repo", Query: "unrelated"},
+	} {
+		if _, err := reader.ExplainMatch(ctx, input); !errors.Is(err, mcpserver.ErrNotFound) {
+			t.Fatalf("ExplainMatch(%+v) error = %v, want ErrNotFound", input, err)
+		}
+	}
+}
+
 func TestMCPReaderExplainCodeRejectsDifferentRequestedPath(t *testing.T) {
 	ctx := context.Background()
 	svc := newSearchTestService(t)
