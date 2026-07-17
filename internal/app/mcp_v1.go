@@ -183,6 +183,38 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		out.Facets = cov.Facets
 		out.AsOf = cov.AsOf
 	case "code":
+		if in.Path != "" || in.Commit != "" {
+			if in.Path == "" {
+				return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+			}
+			match, err := c.GetCodeDocument(ctx, ref, in.Path)
+			if err != nil {
+				return mcpserver.ExplainMatchOutput{}, fmt.Errorf("get code document: %w", err)
+			}
+			if match == nil {
+				return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+			}
+			if in.Commit != "" && match.Commit != in.Commit {
+				return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+			}
+			out.Kind = "code"
+			out.Path = match.Path
+			out.Commit = match.Commit
+			out.Title = match.Path
+			out.Snippet = boundedText(match.Content, 2000)
+			out.SourceRevision = match.Commit
+			out.AsOf = formatTime(match.SnapshotCreatedAt)
+			if in.Query != "" {
+				out.MatchedFields, out.Score = matchTerms(in.Query, map[string]string{"code": match.Content, "path": match.Path})
+				if out.Score == 0 {
+					return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+				}
+			} else {
+				out.Score = 1.0
+			}
+			break
+		}
+
 		matches, err := c.SearchCode(ctx, in.Query, ref, in.Limit)
 		if err != nil {
 			return mcpserver.ExplainMatchOutput{}, fmt.Errorf("search code: %w", err)
@@ -195,7 +227,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 				break
 			}
 		}
-		if match == nil && in.Path == "" && in.Commit == "" && len(matches) > 0 {
+		if match == nil && len(matches) > 0 {
 			match = &matches[0]
 		}
 		if match == nil {
@@ -206,7 +238,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		out.Commit = match.Commit
 		out.Title = match.Path
 		out.Snippet = boundedText(match.Content, 2000)
-		out.MatchedFields, out.Score = matchTerms(in.Query, map[string]string{"code": match.Content})
+		out.MatchedFields, out.Score = matchTerms(in.Query, map[string]string{"code": match.Content, "path": match.Path})
 		out.SourceRevision = match.Commit
 		out.AsOf = formatTime(match.SnapshotCreatedAt)
 	case "repo":

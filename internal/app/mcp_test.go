@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -85,6 +86,112 @@ func TestMCPReaderExplainCodeRejectsDifferentRequestedPath(t *testing.T) {
 	})
 	if !errors.Is(err, mcpserver.ErrNotFound) {
 		t.Fatalf("explain different path error = %v, want ErrNotFound", err)
+	}
+}
+
+func TestMCPReaderExplainCodeExactPathNotOnFirstSearchPage(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner, Name: ref.Repo}, `{}`); err != nil {
+		t.Fatalf("store repository: %v", err)
+	}
+
+	docs := make([]codeindex.Document, 0, 26)
+	for i := range 25 {
+		docs = append(docs, codeindex.Document{
+			Path:    fmt.Sprintf("file%02d.go", i),
+			Content: "func searchableParser() {}",
+			Bytes:   25,
+		})
+	}
+	docs = append(docs, codeindex.Document{
+		Path:    "target.go",
+		Content: "func searchableParser() {}",
+		Bytes:   25,
+	})
+	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, ref, codeindex.Snapshot{
+		RepoPath: "/repo", Commit: "abc123", CreatedAt: time.Now().UTC(), TotalBytes: 650,
+		Documents: docs,
+	}); err != nil {
+		t.Fatalf("store code snapshot: %v", err)
+	}
+
+	// Confirm the target is not on the first search page.
+	searchOut, err := svc.MCPReader().SearchCode(ctx, mcpserver.SearchCodeInput{
+		Owner: ref.Owner, Repo: ref.Repo, Query: "searchableParser", Limit: 20,
+	})
+	if err != nil {
+		t.Fatalf("search code: %v", err)
+	}
+	for _, m := range searchOut.Matches {
+		if m.Path == "target.go" {
+			t.Fatal("target.go unexpectedly on first search page")
+		}
+	}
+
+	out, err := svc.MCPReader().ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Query: "searchableParser", Path: "target.go",
+	})
+	if err != nil {
+		t.Fatalf("explain match: %v", err)
+	}
+	if out.Path != "target.go" || out.Commit != "abc123" || out.Score <= 0 {
+		t.Fatalf("unexpected explain output: %+v", out)
+	}
+}
+
+func TestMCPReaderExplainCodeRejectsNonMatchingQuery(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner, Name: ref.Repo}, `{}`); err != nil {
+		t.Fatalf("store repository: %v", err)
+	}
+	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, ref, codeindex.Snapshot{
+		RepoPath: "/repo", Commit: "abc123", CreatedAt: time.Now().UTC(), TotalBytes: 20,
+		Documents: []codeindex.Document{{Path: "parser.go", Content: "func unrelated() {}", Bytes: 20}},
+	}); err != nil {
+		t.Fatalf("store code snapshot: %v", err)
+	}
+
+	_, err := svc.MCPReader().ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Query: "searchableParser", Path: "parser.go",
+	})
+	if !errors.Is(err, mcpserver.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for non-matching query, got %v", err)
+	}
+}
+
+func TestMCPReaderExplainCodeRejectsWrongCommit(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner, Name: ref.Repo}, `{}`); err != nil {
+		t.Fatalf("store repository: %v", err)
+	}
+	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, ref, codeindex.Snapshot{
+		RepoPath: "/repo", Commit: "abc123", CreatedAt: time.Now().UTC(), TotalBytes: 25,
+		Documents: []codeindex.Document{{Path: "parser.go", Content: "func searchableParser() {}", Bytes: 25}},
+	}); err != nil {
+		t.Fatalf("store code snapshot: %v", err)
+	}
+
+	_, err := svc.MCPReader().ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Path: "parser.go", Commit: "deadbeef",
+	})
+	if !errors.Is(err, mcpserver.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for wrong commit, got %v", err)
+	}
+
+	out, err := svc.MCPReader().ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Path: "parser.go", Commit: "abc123",
+	})
+	if err != nil {
+		t.Fatalf("explain match: %v", err)
+	}
+	if out.Commit != "abc123" {
+		t.Fatalf("unexpected commit: %s", out.Commit)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -510,5 +511,82 @@ func TestHydrateIssueCommentsSuccessfulReplacement(t *testing.T) {
 	wantLatest := newTime.Add(24 * time.Hour)
 	if !cov.SourceUpdatedAt.Equal(wantLatest) {
 		t.Fatalf("coverage source updated at = %v, want %v", cov.SourceUpdatedAt, wantLatest)
+	}
+}
+
+func TestHydrateRepositoryExactNumbersAreNotLimitedByList(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestServiceNoNetwork(t)
+	defer func() { _ = svc.Close() }()
+	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 2)
+	svc.SetGitHubReader(&fakeHydrationReader{issueCommentsPages: [][]github.IssueComment{
+		{{ID: 1, UpdatedAt: time.Now()}},
+	}})
+
+	result, err := svc.HydrateRepository(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, HydrateRepositoryOptions{Numbers: []int{2}})
+	if err != nil {
+		t.Fatalf("hydrate repository: %v", err)
+	}
+	if len(result.Facets) != 1 || result.Facets[0].Facet != FacetIssueComments {
+		t.Fatalf("expected one issue_comments facet, got %+v", result.Facets)
+	}
+}
+
+func TestHydrateRepositoryExactNumberMissingReturnsError(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestServiceNoNetwork(t)
+	defer func() { _ = svc.Close() }()
+	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	svc.SetGitHubReader(&fakeHydrationReader{})
+
+	_, err := svc.HydrateRepository(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, HydrateRepositoryOptions{Numbers: []int{99}})
+	if err == nil || !strings.Contains(err.Error(), "has not been synced") {
+		t.Fatalf("expected missing thread error, got %v", err)
+	}
+}
+
+func TestHydrateRepositoryUnknownFacetErrors(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestServiceNoNetwork(t)
+	defer func() { _ = svc.Close() }()
+	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	svc.SetGitHubReader(&fakeHydrationReader{})
+
+	_, err := svc.HydrateRepository(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, HydrateRepositoryOptions{Facets: []string{"unknown"}})
+	if err == nil || !strings.Contains(err.Error(), `unknown facet "unknown"`) {
+		t.Fatalf("expected unknown facet error, got %v", err)
+	}
+}
+
+func TestHydrateRepositorySkipsKnownInapplicableFacets(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestServiceNoNetwork(t)
+	defer func() { _ = svc.Close() }()
+	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	seedRepoAndThread(t, svc, corpus.ThreadKindPullRequest, 2)
+	svc.SetGitHubReader(&fakeHydrationReader{
+		prDetails: github.PullRequestDetails{Number: 2, Title: "Add feature", UpdatedAt: time.Now()},
+	})
+
+	result, err := svc.HydrateRepository(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, HydrateRepositoryOptions{Facets: []string{FacetPRDetails}})
+	if err != nil {
+		t.Fatalf("hydrate repository: %v", err)
+	}
+	if len(result.Facets) != 1 || result.Facets[0].Facet != FacetPRDetails {
+		t.Fatalf("expected one pr_details facet, got %+v", result.Facets)
+	}
+}
+
+func TestHydrateRepositoryRejectsInvalidExactNumber(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestServiceNoNetwork(t)
+	defer func() { _ = svc.Close() }()
+	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	svc.SetGitHubReader(&fakeHydrationReader{})
+
+	_, err := svc.HydrateRepository(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, HydrateRepositoryOptions{Numbers: []int{0}})
+	if err == nil || !strings.Contains(err.Error(), "must be positive") {
+		t.Fatalf("expected invalid thread number error, got %v", err)
 	}
 }

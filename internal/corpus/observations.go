@@ -552,6 +552,64 @@ func (c *Corpus) ListThreads(ctx context.Context, repoID int64, kind string, lim
 	return scanThreads(rows)
 }
 
+// ListThreadsFiltered returns threads for a repository, optionally filtered by
+// kind and state, ordered by source update time descending and then number
+// descending. Filtering happens at the corpus boundary before any limit is
+// applied, so bounded callers do not silently drop matching rows.
+func (c *Corpus) ListThreadsFiltered(ctx context.Context, repoID int64, kind, state string, limit int) ([]Thread, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	if limit > 10_000 {
+		return nil, fmt.Errorf("thread list limit cannot exceed 10000")
+	}
+	sql := `
+		SELECT id, repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone,
+		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged
+		FROM threads
+		WHERE repository_id = ?`
+	args := []any{repoID}
+	if kind != "" {
+		sql += ` AND kind = ?`
+		args = append(args, kind)
+	}
+	if state != "" && state != "all" {
+		sql += ` AND state = ?`
+		args = append(args, state)
+	}
+	sql += ` ORDER BY source_updated_at DESC, number DESC`
+	sql += ` LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := c.db.QueryContext(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list threads: %w", err)
+	}
+	defer rows.Close()
+
+	return scanThreads(rows)
+}
+
+// CountThreadsFiltered counts threads after applying the same kind and state
+// predicates as ListThreadsFiltered.
+func (c *Corpus) CountThreadsFiltered(ctx context.Context, repoID int64, kind, state string) (int, error) {
+	query := `SELECT COUNT(*) FROM threads WHERE repository_id = ?`
+	args := []any{repoID}
+	if kind != "" {
+		query += ` AND kind = ?`
+		args = append(args, kind)
+	}
+	if state != "" && state != "all" {
+		query += ` AND state = ?`
+		args = append(args, state)
+	}
+	var total int
+	if err := c.db.QueryRowContext(ctx, query, args...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("count threads: %w", err)
+	}
+	return total, nil
+}
+
 // LatestThreadObservation returns the most recent observation for a thread
 // by source time and observation sequence.
 func (c *Corpus) LatestThreadObservation(ctx context.Context, threadID int64) (*ThreadObservation, error) {

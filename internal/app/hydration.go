@@ -34,6 +34,7 @@ type HydrateResult struct {
 	Facets   []HydratedFacet
 	Pages    int
 	Requests int
+	Capped   bool
 	Message  string
 }
 

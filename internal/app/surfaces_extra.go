@@ -104,26 +104,21 @@ func (s *Service) ArchiveThreads(ctx context.Context, repo cli.RepoRef, kind, st
 	if stored == nil {
 		return nil, fmt.Errorf("%w: %s", errRepositoryNotFound, ref)
 	}
-	// Fetch enough rows to apply the state filter while keeping the read bounded.
-	threads, err := c.ListThreads(ctx, stored.ID, kind, 1000)
+	// Apply both kind and state filters at the corpus boundary so the bounded
+	// limit is applied to already-matching rows.
+	threads, err := c.ListThreadsFiltered(ctx, stored.ID, kind, state, limit)
 	if err != nil {
 		return nil, err
 	}
-	out := &cli.ThreadListResult{Repo: repo, Threads: make([]cli.ThreadListItem, 0, min(limit, len(threads)))}
+	out := &cli.ThreadListResult{Repo: repo, Threads: make([]cli.ThreadListItem, 0, len(threads))}
 	var freshest time.Time
 	for _, thread := range threads {
-		if state != "" && state != "all" && thread.State != state {
-			continue
-		}
 		out.Threads = append(out.Threads, cli.ThreadListItem{
 			Kind: thread.Kind, Number: thread.Number, State: thread.State, Title: thread.Title,
 			Author: thread.Author, Labels: thread.Labels, UpdatedAt: formatTime(thread.SourceUpdatedAt),
 		})
 		if thread.SourceUpdatedAt.After(freshest) {
 			freshest = thread.SourceUpdatedAt
-		}
-		if len(out.Threads) == limit {
-			break
 		}
 	}
 	if !freshest.IsZero() {
