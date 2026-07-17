@@ -132,11 +132,12 @@ gitcontribute search code "context.WithTimeout" --repo golang/go
 
 ### 2. Investigate
 
-Build a dossier, inspect repository health, record a hypothesis, and check for
-duplicate or competing work before committing time.
+Build a dossier or per-thread research brief, inspect repository health, record
+a hypothesis, and check for duplicate or competing work before committing time.
 
 ```sh
 gitcontribute dossier build owner/repo
+gitcontribute research brief issue:owner/repo#42 --format markdown
 gitcontribute health owner/repo --json
 gitcontribute investigation start owner/repo --json
 gitcontribute hypothesis add --title="Fix retry timeout" \
@@ -195,7 +196,7 @@ MCP capabilities are deliberately separate:
 
 | Capability | Examples |
 | --- | --- |
-| **Offline reads** | Search, inspect repositories and threads, read dossiers, explain matches, inspect evidence and opportunities. |
+| **Offline reads** | Search, inspect repositories and threads, build research briefs, read dossiers, explain matches, inspect evidence and opportunities. |
 | **Network reads** | Sync repositories, hydrate threads, start crawls, and acquire workspaces. |
 | **Local writes** | Start investigations, record hypotheses, promote opportunities, define validations, and prepare drafts. |
 | **Execution** | Run a validation only when the request includes `execute: true`. |
@@ -208,7 +209,7 @@ application and adapter boundaries.
 
 | Operation | Network | Local write | Runs a process | GitHub write |
 | --- | :---: | :---: | :---: | :---: |
-| Search, health, dossier inspection | — | — | — | — |
+| Search, health, dossier and research-brief inspection | — | — | — | — |
 | Investigations, evidence, lenses | — | ✓ | — | — |
 | Sync, crawl, hydrate | ✓ | ✓ | — | — |
 | Acquire or create a workspace | remote-dependent | ✓ | `git` only | — |
@@ -327,7 +328,7 @@ enforces size limits, and rejects dirty worktrees.
 </details>
 
 <details>
-<summary><strong>Radar, search, dossiers, health, seeds, and lenses</strong></summary>
+<summary><strong>Radar, research briefs, search, dossiers, health, seeds, and lenses</strong></summary>
 
 ```sh
 gitcontribute radar owner/repo --limit 20
@@ -341,6 +342,8 @@ gitcontribute search all "retry" --repo owner/repo
 gitcontribute dossier build owner/repo
 gitcontribute dossier export owner/repo --format markdown \
   --output owner-repo-dossier.md
+gitcontribute research brief owner/repo#42
+gitcontribute research brief pr:owner/repo#108 --json
 gitcontribute health owner/repo --stale-after 336h --json
 gitcontribute seeds owner/repo --json
 ```
@@ -360,6 +363,23 @@ gitcontribute radar owner/repo --json
 Radar scores carry a version (`radar.v1`) so saved JSON remains auditable when
 ranking semantics evolve. It never syncs, hydrates, executes repository code,
 or writes to GitHub.
+
+`research brief` is also a strict offline read. Its versioned
+`research-brief.v1` output has fixed sections for state, stored problem fields,
+acceptance hints, participants, timeline, explicit/duplicate references,
+linked PRs, indexed code, contribution guidance, health, coverage gaps, and
+next commands. Every section carries source references or an explicit unknown
+reason. Checkboxes and maintainer phrases remain source extracts—not fabricated
+or complete acceptance criteria. Markdown output redacts common credentials and
+quotes untrusted source text; JSON ordering is deterministic.
+
+Missing child facets and code stay visible instead of triggering hidden work:
+
+```sh
+gitcontribute archive hydrate owner/repo#42 --with issue_comments
+gitcontribute index owner/repo /path/to/clean-checkout
+gitcontribute research brief issue:owner/repo#42 --json
+```
 
 Use a lens to apply saved filters and weighted ranking to a bounded population:
 

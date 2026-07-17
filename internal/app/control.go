@@ -44,7 +44,7 @@ func (s *Service) Metadata(ctx context.Context) (*cli.MetadataResult, error) {
 	capabilities := []string{
 		"archive", "clustering", "collections", "contribution-radar", "dossiers", "evidence",
 		"github-read", "investigations", "local-search", "mcp-stdio",
-		"validation", "workspaces",
+		"thread-research-brief", "validation", "workspaces",
 	}
 	sort.Strings(capabilities)
 	return &cli.MetadataResult{
@@ -62,6 +62,7 @@ func (s *Service) Metadata(ctx context.Context) (*cli.MetadataResult, error) {
 			"github_mutations":   false,
 			"mcp_stdio":          true,
 			"semantic_search":    false,
+			"thread_research":    true,
 			"validation_exec":    true,
 		},
 	}, nil

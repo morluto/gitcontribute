@@ -99,3 +99,42 @@ func TestApplyFacetObservationSetIgnoresStaleEmptySet(t *testing.T) {
 		t.Fatalf("expected coverage to remain at newer %v, got %+v", newer, cov)
 	}
 }
+
+func TestListFacetObservationsBoundedPreservesOrderAndReportsMore(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "title", "body", "a", time.Unix(2, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages := []FacetObservationInput{
+		{SourceUpdatedAt: time.Unix(3, 0).UTC(), Payload: `{"page":1}`},
+		{SourceUpdatedAt: time.Unix(4, 0).UTC(), Payload: `{"page":2}`},
+		{SourceUpdatedAt: time.Unix(5, 0).UTC(), Payload: `{"page":3}`},
+	}
+	if err := c.ApplyFacetObservationSet(ctx, repo.ID, &thread.ID, "comments", time.Unix(5, 0).UTC(), pages, true, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	observations, hasMore, err := c.ListFacetObservationsBounded(ctx, repo.ID, &thread.ID, "comments", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasMore || len(observations) != 2 || observations[0].Payload != `{"page":1}` || observations[1].Payload != `{"page":2}` {
+		t.Fatalf("bounded observations = %+v, has_more=%t", observations, hasMore)
+	}
+	observations, hasMore, err = c.ListFacetObservationsBounded(ctx, repo.ID, &thread.ID, "comments", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasMore || len(observations) != 3 {
+		t.Fatalf("exact-bound observations = %d, has_more=%t", len(observations), hasMore)
+	}
+	if _, _, err := c.ListFacetObservationsBounded(ctx, repo.ID, &thread.ID, "comments", 0); err == nil {
+		t.Fatal("expected invalid limit error")
+	}
+}

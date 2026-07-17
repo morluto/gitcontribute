@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/repository"
 )
 
 // ThreadQuery is a narrow, deterministic read request for threads.
@@ -18,8 +19,6 @@ type ThreadQuery struct {
 // Reader is a narrow source interface for building dossiers.
 // Implementations must return deterministic, source-backed data with references.
 type Reader interface {
-	ReadRepository(ctx context.Context, ref domain.RepoRef) (domain.Repository, []domain.SourceRef, error)
+	repository.Reader
 	ReadThreads(ctx context.Context, ref domain.RepoRef, q ThreadQuery) ([]domain.Thread, []domain.SourceRef, error)
-	ReadCoverage(ctx context.Context, ref domain.RepoRef) (domain.Coverage, error)
-	ReadContributionGuidance(ctx context.Context, ref domain.RepoRef) (string, []domain.SourceRef, error)
 }
