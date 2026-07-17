@@ -7,6 +7,7 @@ require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/gofrs/flock v0.13.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v89 v89.0.0
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510

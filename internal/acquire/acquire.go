@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gofrs/flock"
 	"github.com/google/uuid"
 	"github.com/morluto/gitcontribute/internal/domain"
 )
@@ -199,7 +200,10 @@ func (m *Manager) Acquire(ctx context.Context, owner, repo, remote string) (*Acq
 	name := cacheNameFor(owner, repo, remote)
 	mirrorPath := filepath.Join(m.root, "mirrors", name)
 
-	unlock := repoLocks.lock(mirrorPath)
+	unlock, err := m.lockMirror(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("lock mirror: %w", err)
+	}
 	defer unlock()
 
 	acquiredAt := time.Now().UTC()
@@ -255,11 +259,11 @@ func (m *Manager) Acquire(ctx context.Context, owner, repo, remote string) (*Acq
 	}
 
 	if err := m.verifyClean(ctx, acq.Path); err != nil {
-		_ = m.Cleanup(context.Background(), acq)
+		_ = m.cleanupWorktree(context.Background(), acq)
 		return nil, err
 	}
 	if err := m.writeMetadata(acq); err != nil {
-		_ = m.Cleanup(context.Background(), acq)
+		_ = m.cleanupWorktree(context.Background(), acq)
 		return nil, err
 	}
 
@@ -271,11 +275,54 @@ func (m *Manager) Cleanup(ctx context.Context, acq *Acquisition) error {
 	if acq == nil || acq.Path == "" {
 		return nil
 	}
+	name := filepath.Base(acq.CachePath)
+	unlock, err := m.lockMirror(ctx, name)
+	if err != nil {
+		return fmt.Errorf("lock mirror for cleanup: %w", err)
+	}
+	defer unlock()
+	return m.cleanupWorktree(ctx, acq)
+}
+
+func (m *Manager) cleanupWorktree(ctx context.Context, acq *Acquisition) error {
+	if acq == nil || acq.Path == "" {
+		return nil
+	}
 	// Ignore worktree remove errors; the directory may already be gone.
 	_, _ = m.git(ctx, acq.CachePath, "worktree", "remove", "--force", acq.Path)
 	_ = os.RemoveAll(acq.Path)
 	acq.Path = ""
 	return nil
+}
+
+func (m *Manager) lockMirror(ctx context.Context, name string) (func(), error) {
+	lockDir := filepath.Join(m.root, "locks")
+	if err := os.MkdirAll(lockDir, 0755); err != nil {
+		return nil, fmt.Errorf("create lock directory: %w", err)
+	}
+
+	lockPath := filepath.Join(lockDir, name+".lock")
+	fl := flock.New(lockPath)
+	locked, err := fl.TryLockContext(ctx, 100*time.Millisecond)
+	if err != nil {
+		_ = fl.Close()
+		return nil, fmt.Errorf("acquire mirror lock: %w", err)
+	}
+	if !locked {
+		_ = fl.Close()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, errors.New("acquire mirror lock: already locked")
+	}
+
+	mirrorPath := filepath.Join(m.root, "mirrors", name)
+	ipUnlock := repoLocks.lock(mirrorPath)
+
+	return func() {
+		ipUnlock()
+		_ = fl.Close()
+	}, nil
 }
 
 func (m *Manager) git(ctx context.Context, dir string, args ...string) (string, error) {
@@ -425,15 +472,30 @@ func validateRemote(remote string) error {
 	}
 	if strings.HasPrefix(remote, "https://") {
 		u, err := url.Parse(remote)
-		if err != nil || u.User != nil {
+		if err != nil || u.User != nil || u.Host == "" {
 			return ErrInvalidRemote
 		}
 		return nil
 	}
 	if strings.HasPrefix(remote, "ssh://") {
+		u, err := url.Parse(remote)
+		if err != nil || u.Host == "" {
+			return ErrInvalidRemote
+		}
+		if u.User != nil {
+			if _, ok := u.User.Password(); ok {
+				return ErrInvalidRemote
+			}
+		}
+		if u.Path == "" || u.Path == "/" {
+			return ErrInvalidRemote
+		}
 		return nil
 	}
 	if at := strings.IndexByte(remote, '@'); at > 0 {
+		if strings.Contains(remote[:at], ":") {
+			return ErrInvalidRemote
+		}
 		hostPath := remote[at+1:]
 		if colon := strings.IndexByte(hostPath, ':'); colon > 0 && colon < len(hostPath)-1 {
 			return nil
