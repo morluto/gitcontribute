@@ -69,6 +69,11 @@ func TestDecodeJobJSONPreservesStructuredValues(t *testing.T) {
 	if _, err := decodeJobJSON("result", `{broken`); err == nil {
 		t.Fatal("invalid persisted job JSON was accepted")
 	}
+
+	empty, err := decodeJobJSON("result", "")
+	if err != nil || empty != nil {
+		t.Fatalf("decoded empty result = %#v, %v", empty, err)
+	}
 }
 
 func TestMCPReaderRepositorySearchDoesNotFallBackFromMissingExactRepository(t *testing.T) {

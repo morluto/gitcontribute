@@ -361,12 +361,11 @@ func jobResultToMCP(job *cli.JobResult) (mcpserver.GetJobOutput, error) {
 }
 
 func decodeJobJSON(field, value string) (any, error) {
-	if strings.TrimSpace(value) == "" {
-		return nil, nil
-	}
 	var decoded any
-	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
-		return nil, fmt.Errorf("decode job %s: %w", field, err)
+	if strings.TrimSpace(value) != "" {
+		if err := json.Unmarshal([]byte(value), &decoded); err != nil {
+			return nil, fmt.Errorf("decode job %s: %w", field, err)
+		}
 	}
 	return decoded, nil
 }
