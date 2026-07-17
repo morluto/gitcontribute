@@ -59,10 +59,11 @@ func (*fakeReader) Investigation(_ context.Context, in InvestigationInput) (Inve
 		return InvestigationOutput{}, ErrNotFound
 	}
 	return InvestigationOutput{
-		ID:     in.ID,
-		Owner:  "acme",
-		Repo:   "rocket",
-		Status: "open",
+		ID:              in.ID,
+		Owner:           "acme",
+		Repo:            "rocket",
+		Status:          "open",
+		HypothesisTotal: 1,
 		Hypotheses: []HypothesisSummary{{
 			ID: "hyp-1", Title: "leak", Category: "bug", Status: "proposed",
 		}},
@@ -81,7 +82,8 @@ func (*fakeReader) Opportunity(_ context.Context, in OpportunityInput) (Opportun
 		return OpportunityOutput{}, ErrNotFound
 	}
 	return OpportunityOutput{
-		ID: in.ID, InvestigationID: "inv-1", Title: "fix leak", Confidence: 0.8, CollisionStatus: "unknown",
+		ID: in.ID, InvestigationID: "inv-1", Title: "fix leak", Confidence: 0.8,
+		CollisionStatus: "unknown", EvidenceTotal: 1, EvidenceIDs: []string{"ev-1"},
 	}, nil
 }
 
@@ -235,6 +237,26 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 			if out.Total != tt.wantTotal || len(out.Evidence) != tt.wantTotal {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
+		}
+	}
+}
+
+func TestReadOnlyToolsRejectAmbiguousOrUnboundedInputs(t *testing.T) {
+	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	defer closeSessions()
+	tests := []struct {
+		name string
+		args map[string]any
+	}{
+		{"get_investigation", map[string]any{"id": "inv-1", "hypothesis_limit": 101}},
+		{"get_opportunity", map[string]any{"id": "opp-1", "evidence_limit": 101}},
+		{"get_evidence", map[string]any{"investigation_id": "inv-1", "opportunity_id": "opp-1"}},
+		{"get_evidence", map[string]any{}},
+	}
+	for _, tt := range tests {
+		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})
+		if err == nil && (result == nil || !result.IsError) {
+			t.Fatalf("%s accepted %+v: result=%+v", tt.name, tt.args, result)
 		}
 	}
 }

@@ -227,8 +227,16 @@ func (r *MCPReader) SearchCode(ctx context.Context, in mcpserver.SearchCodeInput
 
 // Investigation reads a local investigation workspace from the corpus.
 func (r *MCPReader) Investigation(ctx context.Context, in mcpserver.InvestigationInput) (mcpserver.InvestigationOutput, error) {
-	if strings.TrimSpace(in.ID) == "" {
-		return mcpserver.InvestigationOutput{}, errors.New("id is required")
+	id, err := normalizeMCPID("id", in.ID)
+	if err != nil {
+		return mcpserver.InvestigationOutput{}, err
+	}
+	in.ID = id
+	if in.HypothesisLimit == 0 {
+		in.HypothesisLimit = 20
+	}
+	if in.HypothesisLimit < 1 || in.HypothesisLimit > 100 {
+		return mcpserver.InvestigationOutput{}, errors.New("hypothesis_limit must be between 1 and 100")
 	}
 	c, err := r.Service.openCorpus(ctx)
 	if err != nil {
@@ -248,6 +256,10 @@ func (r *MCPReader) Investigation(ctx context.Context, in mcpserver.Investigatio
 	if err != nil {
 		return mcpserver.InvestigationOutput{}, fmt.Errorf("list hypotheses: %w", err)
 	}
+	hypothesisTotal := len(hypotheses)
+	if len(hypotheses) > in.HypothesisLimit {
+		hypotheses = hypotheses[:in.HypothesisLimit]
+	}
 	hyps := make([]mcpserver.HypothesisSummary, len(hypotheses))
 	for i, h := range hypotheses {
 		hyps[i] = mcpserver.HypothesisSummary{
@@ -259,23 +271,26 @@ func (r *MCPReader) Investigation(ctx context.Context, in mcpserver.Investigatio
 		}
 	}
 	return mcpserver.InvestigationOutput{
-		ID:         inv.ID,
-		Owner:      inv.Repo.Owner,
-		Repo:       inv.Repo.Repo,
-		CommitSHA:  inv.CommitSHA,
-		Lens:       inv.Lens,
-		Status:     string(inv.Status),
-		CreatedAt:  formatTime(inv.CreatedAt),
-		UpdatedAt:  formatTime(inv.UpdatedAt),
-		Hypotheses: hyps,
+		ID:              inv.ID,
+		Owner:           inv.Repo.Owner,
+		Repo:            inv.Repo.Repo,
+		CommitSHA:       inv.CommitSHA,
+		Lens:            inv.Lens,
+		Status:          string(inv.Status),
+		CreatedAt:       formatTime(inv.CreatedAt),
+		UpdatedAt:       formatTime(inv.UpdatedAt),
+		HypothesisTotal: hypothesisTotal,
+		Hypotheses:      hyps,
 	}, nil
 }
 
 // ListOpportunities lists opportunities for a local investigation.
 func (r *MCPReader) ListOpportunities(ctx context.Context, in mcpserver.ListOpportunitiesInput) (mcpserver.ListOpportunitiesOutput, error) {
-	if strings.TrimSpace(in.InvestigationID) == "" {
-		return mcpserver.ListOpportunitiesOutput{}, errors.New("investigation_id is required")
+	id, err := normalizeMCPID("investigation_id", in.InvestigationID)
+	if err != nil {
+		return mcpserver.ListOpportunitiesOutput{}, err
 	}
+	in.InvestigationID = id
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
@@ -313,8 +328,16 @@ func (r *MCPReader) ListOpportunities(ctx context.Context, in mcpserver.ListOppo
 
 // Opportunity reads a local contribution opportunity.
 func (r *MCPReader) Opportunity(ctx context.Context, in mcpserver.OpportunityInput) (mcpserver.OpportunityOutput, error) {
-	if strings.TrimSpace(in.ID) == "" {
-		return mcpserver.OpportunityOutput{}, errors.New("id is required")
+	id, err := normalizeMCPID("id", in.ID)
+	if err != nil {
+		return mcpserver.OpportunityOutput{}, err
+	}
+	in.ID = id
+	if in.EvidenceLimit == 0 {
+		in.EvidenceLimit = 20
+	}
+	if in.EvidenceLimit < 1 || in.EvidenceLimit > 100 {
+		return mcpserver.OpportunityOutput{}, errors.New("evidence_limit must be between 1 and 100")
 	}
 	c, err := r.Service.openCorpus(ctx)
 	if err != nil {
@@ -333,6 +356,10 @@ func (r *MCPReader) Opportunity(ctx context.Context, in mcpserver.OpportunityInp
 	evs, err := c.ListEvidence(ctx, evidence.EvidenceFilter{OpportunityID: opp.ID})
 	if err != nil {
 		return mcpserver.OpportunityOutput{}, fmt.Errorf("list evidence: %w", err)
+	}
+	evidenceTotal := len(evs)
+	if len(evs) > in.EvidenceLimit {
+		evs = evs[:in.EvidenceLimit]
 	}
 	evidenceIDs := make([]string, len(evs))
 	for i, e := range evs {
@@ -353,6 +380,7 @@ func (r *MCPReader) Opportunity(ctx context.Context, in mcpserver.OpportunityInp
 		CollisionStatus:     string(opp.CollisionStatus),
 		MaintainerAlignment: opp.MaintainerAlignment,
 		SourceRefs:          sourceRefsToMCP(opp.SourceRefs),
+		EvidenceTotal:       evidenceTotal,
 		EvidenceIDs:         evidenceIDs,
 		Status:              string(opp.Status),
 		CreatedAt:           formatTime(opp.CreatedAt),
@@ -362,8 +390,17 @@ func (r *MCPReader) Opportunity(ctx context.Context, in mcpserver.OpportunityInp
 
 // Evidence reads evidence for a local investigation or opportunity.
 func (r *MCPReader) Evidence(ctx context.Context, in mcpserver.EvidenceInput) (mcpserver.EvidenceOutput, error) {
-	if in.InvestigationID == "" && in.OpportunityID == "" {
-		return mcpserver.EvidenceOutput{}, errors.New("investigation_id or opportunity_id is required")
+	in.InvestigationID = strings.TrimSpace(in.InvestigationID)
+	in.OpportunityID = strings.TrimSpace(in.OpportunityID)
+	if (in.InvestigationID == "") == (in.OpportunityID == "") {
+		return mcpserver.EvidenceOutput{}, errors.New("exactly one of investigation_id or opportunity_id is required")
+	}
+	if in.InvestigationID != "" {
+		if _, err := normalizeMCPID("investigation_id", in.InvestigationID); err != nil {
+			return mcpserver.EvidenceOutput{}, err
+		}
+	} else if _, err := normalizeMCPID("opportunity_id", in.OpportunityID); err != nil {
+		return mcpserver.EvidenceOutput{}, err
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
@@ -450,19 +487,23 @@ func sourceRefsToMCP(refs []domain.SourceRef) []mcpserver.SourceRef {
 	return out
 }
 
-func formatTime(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.UTC().Format(time.RFC3339)
-}
-
 func isValidEvidenceRelation(s string) bool {
 	switch evidence.Relation(s) {
 	case evidence.RelationSupporting, evidence.RelationContradicting, evidence.RelationInconclusive, evidence.RelationStale, evidence.RelationInvalid:
 		return true
 	}
 	return false
+}
+
+func normalizeMCPID(field, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("%s is required", field)
+	}
+	if len(value) > 128 {
+		return "", fmt.Errorf("%s exceeds 128 bytes", field)
+	}
+	return value, nil
 }
 
 // MCPRunner implements cli.MCPRunner by starting an MCP server over stdio.

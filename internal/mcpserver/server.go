@@ -114,7 +114,8 @@ type SearchCodeOutput struct {
 }
 
 type InvestigationInput struct {
-	ID string `json:"id" jsonschema:"Investigation ID"`
+	ID              string `json:"id" jsonschema:"Investigation ID"`
+	HypothesisLimit int    `json:"hypothesis_limit,omitempty" jsonschema:"Maximum hypotheses from 1 to 100"`
 }
 
 type HypothesisSummary struct {
@@ -126,16 +127,16 @@ type HypothesisSummary struct {
 }
 
 type InvestigationOutput struct {
-	ID         string              `json:"id"`
-	Owner      string              `json:"owner"`
-	Repo       string              `json:"repo"`
-	CommitSHA  string              `json:"commit_sha,omitempty"`
-	Lens       string              `json:"lens,omitempty"`
-	Status     string              `json:"status"`
-	CreatedAt  string              `json:"created_at"`
-	UpdatedAt  string              `json:"updated_at"`
-	SourceRefs []SourceRef         `json:"source_refs,omitempty"`
-	Hypotheses []HypothesisSummary `json:"hypotheses,omitempty"`
+	ID              string              `json:"id"`
+	Owner           string              `json:"owner"`
+	Repo            string              `json:"repo"`
+	CommitSHA       string              `json:"commit_sha,omitempty"`
+	Lens            string              `json:"lens,omitempty"`
+	Status          string              `json:"status"`
+	CreatedAt       string              `json:"created_at"`
+	UpdatedAt       string              `json:"updated_at"`
+	HypothesisTotal int                 `json:"hypothesis_total"`
+	Hypotheses      []HypothesisSummary `json:"hypotheses,omitempty"`
 }
 
 type ListOpportunitiesInput struct {
@@ -161,7 +162,8 @@ type ListOpportunitiesOutput struct {
 }
 
 type OpportunityInput struct {
-	ID string `json:"id" jsonschema:"Opportunity ID"`
+	ID            string `json:"id" jsonschema:"Opportunity ID"`
+	EvidenceLimit int    `json:"evidence_limit,omitempty" jsonschema:"Maximum evidence IDs from 1 to 100"`
 }
 
 type OpportunityOutput struct {
@@ -179,6 +181,7 @@ type OpportunityOutput struct {
 	CollisionStatus     string      `json:"collision_status"`
 	MaintainerAlignment string      `json:"maintainer_alignment,omitempty"`
 	SourceRefs          []SourceRef `json:"source_refs,omitempty"`
+	EvidenceTotal       int         `json:"evidence_total"`
 	EvidenceIDs         []string    `json:"evidence_ids,omitempty"`
 	Status              string      `json:"status"`
 	CreatedAt           string      `json:"created_at"`
@@ -397,17 +400,27 @@ func (s *Server) searchCode(ctx context.Context, _ *mcp.CallToolRequest, in Sear
 }
 
 func (s *Server) investigation(ctx context.Context, _ *mcp.CallToolRequest, in InvestigationInput) (*mcp.CallToolResult, InvestigationOutput, error) {
-	if strings.TrimSpace(in.ID) == "" {
-		return nil, InvestigationOutput{}, errors.New("id is required")
+	id, err := normalizeID("id", in.ID)
+	if err != nil {
+		return nil, InvestigationOutput{}, err
+	}
+	in.ID = id
+	if in.HypothesisLimit == 0 {
+		in.HypothesisLimit = 20
+	}
+	if in.HypothesisLimit < 1 || in.HypothesisLimit > 100 {
+		return nil, InvestigationOutput{}, errors.New("hypothesis_limit must be between 1 and 100")
 	}
 	out, err := s.reader.Investigation(ctx, in)
 	return nil, out, err
 }
 
 func (s *Server) listOpportunities(ctx context.Context, _ *mcp.CallToolRequest, in ListOpportunitiesInput) (*mcp.CallToolResult, ListOpportunitiesOutput, error) {
-	if strings.TrimSpace(in.InvestigationID) == "" {
-		return nil, ListOpportunitiesOutput{}, errors.New("investigation_id is required")
+	id, err := normalizeID("investigation_id", in.InvestigationID)
+	if err != nil {
+		return nil, ListOpportunitiesOutput{}, err
 	}
+	in.InvestigationID = id
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
@@ -419,16 +432,33 @@ func (s *Server) listOpportunities(ctx context.Context, _ *mcp.CallToolRequest, 
 }
 
 func (s *Server) opportunity(ctx context.Context, _ *mcp.CallToolRequest, in OpportunityInput) (*mcp.CallToolResult, OpportunityOutput, error) {
-	if strings.TrimSpace(in.ID) == "" {
-		return nil, OpportunityOutput{}, errors.New("id is required")
+	id, err := normalizeID("id", in.ID)
+	if err != nil {
+		return nil, OpportunityOutput{}, err
+	}
+	in.ID = id
+	if in.EvidenceLimit == 0 {
+		in.EvidenceLimit = 20
+	}
+	if in.EvidenceLimit < 1 || in.EvidenceLimit > 100 {
+		return nil, OpportunityOutput{}, errors.New("evidence_limit must be between 1 and 100")
 	}
 	out, err := s.reader.Opportunity(ctx, in)
 	return nil, out, err
 }
 
 func (s *Server) evidence(ctx context.Context, _ *mcp.CallToolRequest, in EvidenceInput) (*mcp.CallToolResult, EvidenceOutput, error) {
-	if in.InvestigationID == "" && in.OpportunityID == "" {
-		return nil, EvidenceOutput{}, errors.New("investigation_id or opportunity_id is required")
+	in.InvestigationID = strings.TrimSpace(in.InvestigationID)
+	in.OpportunityID = strings.TrimSpace(in.OpportunityID)
+	if (in.InvestigationID == "") == (in.OpportunityID == "") {
+		return nil, EvidenceOutput{}, errors.New("exactly one of investigation_id or opportunity_id is required")
+	}
+	if in.InvestigationID != "" {
+		if _, err := normalizeID("investigation_id", in.InvestigationID); err != nil {
+			return nil, EvidenceOutput{}, err
+		}
+	} else if _, err := normalizeID("opportunity_id", in.OpportunityID); err != nil {
+		return nil, EvidenceOutput{}, err
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
@@ -445,6 +475,17 @@ func validateRepo(in RepoInput) error {
 		return errors.New("owner and repo are required")
 	}
 	return nil
+}
+
+func normalizeID(field, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("%s is required", field)
+	}
+	if len(value) > 128 {
+		return "", fmt.Errorf("%s exceeds 128 bytes", field)
+	}
+	return value, nil
 }
 
 func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
@@ -481,7 +522,7 @@ func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest)
 		if len(parts) != 1 {
 			return nil, mcp.ResourceNotFoundError(uri)
 		}
-		value, err = s.reader.Investigation(ctx, InvestigationInput{ID: parts[0]})
+		value, err = s.reader.Investigation(ctx, InvestigationInput{ID: parts[0], HypothesisLimit: 100})
 	case "opportunities":
 		if len(parts) != 1 {
 			return nil, mcp.ResourceNotFoundError(uri)
@@ -491,7 +532,7 @@ func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest)
 		if len(parts) != 1 {
 			return nil, mcp.ResourceNotFoundError(uri)
 		}
-		value, err = s.reader.Opportunity(ctx, OpportunityInput{ID: parts[0]})
+		value, err = s.reader.Opportunity(ctx, OpportunityInput{ID: parts[0], EvidenceLimit: 100})
 	case "evidence":
 		if len(parts) != 2 {
 			return nil, mcp.ResourceNotFoundError(uri)

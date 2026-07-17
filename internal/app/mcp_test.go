@@ -79,17 +79,29 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create evidence: %v", err)
 	}
+	if err := evSvc.CreateEvidence(ctx, &evidence.Evidence{
+		InvestigationID: inv.ID, OpportunityID: opp.ID,
+		Type: evidence.EvidenceTypeManualObservation, Relation: evidence.RelationSupporting,
+		Description: "maintainer confirmed the expected behavior",
+	}); err != nil {
+		t.Fatalf("create second evidence: %v", err)
+	}
+	for _, title := range []string{"second hypothesis", "third hypothesis"} {
+		if _, err := invSvc.RecordHypothesis(ctx, inv.ID, title, "additional context", investigation.CategoryOther, nil); err != nil {
+			t.Fatalf("record %s: %v", title, err)
+		}
+	}
 
 	reader := svc.MCPReader()
 
-	invOut, err := reader.Investigation(ctx, mcpserver.InvestigationInput{ID: inv.ID})
+	invOut, err := reader.Investigation(ctx, mcpserver.InvestigationInput{ID: inv.ID, HypothesisLimit: 1})
 	if err != nil {
 		t.Fatalf("get investigation: %v", err)
 	}
 	if invOut.ID != inv.ID || invOut.Owner != "owner" || invOut.Repo != "repo" || invOut.Status != "open" {
 		t.Fatalf("unexpected investigation output: %+v", invOut)
 	}
-	if len(invOut.Hypotheses) != 1 || invOut.Hypotheses[0].ID != hyp.ID {
+	if invOut.HypothesisTotal != 3 || len(invOut.Hypotheses) != 1 || invOut.Hypotheses[0].ID != hyp.ID {
 		t.Fatalf("unexpected hypotheses: %+v", invOut.Hypotheses)
 	}
 
@@ -101,7 +113,7 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 		t.Fatalf("unexpected opportunities: %+v", listOut)
 	}
 
-	oppOut, err := reader.Opportunity(ctx, mcpserver.OpportunityInput{ID: opp.ID})
+	oppOut, err := reader.Opportunity(ctx, mcpserver.OpportunityInput{ID: opp.ID, EvidenceLimit: 1})
 	if err != nil {
 		t.Fatalf("get opportunity: %v", err)
 	}
@@ -111,7 +123,7 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 	if len(oppOut.SourceRefs) != 1 || oppOut.SourceRefs[0].URL != "https://github.com/owner/repo/issues/1" {
 		t.Fatalf("unexpected opportunity source refs: %+v", oppOut.SourceRefs)
 	}
-	if len(oppOut.EvidenceIDs) != 1 {
+	if oppOut.EvidenceTotal != 2 || len(oppOut.EvidenceIDs) != 1 {
 		t.Fatalf("unexpected evidence ids: %+v", oppOut.EvidenceIDs)
 	}
 
@@ -119,7 +131,7 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get evidence: %v", err)
 	}
-	if evOut.Total != 1 || len(evOut.Evidence) != 1 || evOut.Evidence[0].Relation != "supporting" {
+	if evOut.Total != 2 || len(evOut.Evidence) != 2 || evOut.Evidence[0].Relation != "supporting" {
 		t.Fatalf("unexpected evidence: %+v", evOut)
 	}
 
@@ -127,7 +139,7 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get evidence by investigation: %v", err)
 	}
-	if evByInv.Total != 1 {
+	if evByInv.Total != 2 {
 		t.Fatalf("unexpected evidence by investigation: %+v", evByInv)
 	}
 }
