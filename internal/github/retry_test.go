@@ -343,6 +343,111 @@ func TestRetryTransportDoesNotRetryOrdinaryForbidden(t *testing.T) {
 	}
 }
 
+func TestRetryTransportDoesNotRetryForbiddenWithStaleReset(t *testing.T) {
+	now := time.Date(2026, 7, 17, 0, 0, 0, 0, time.UTC)
+	clock := &fakeClock{now: now}
+	reset := now.Add(-5 * time.Second).Unix()
+
+	ft := &fakeTransport{
+		results: []fakeResult{
+			{
+				status: http.StatusForbidden,
+				header: http.Header{
+					"X-Ratelimit-Remaining": []string{"0"},
+					"X-Ratelimit-Reset":     []string{strconv.FormatInt(reset, 10)},
+				},
+			},
+		},
+	}
+	rt := &retryTransport{
+		Base: ft,
+		Config: &RetryConfig{
+			MaxAttempts: 2,
+			BaseDelay:   time.Nanosecond,
+			MaxDelay:    time.Nanosecond,
+			Clock:       clock.Now,
+		},
+	}
+
+	resp, err := rt.RoundTrip(newGetRequest(t, "http://example.com/repos/o/r"))
+	if err != nil {
+		t.Fatalf("RoundTrip: %v", err)
+	}
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	if len(ft.requests) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(ft.requests))
+	}
+}
+
+func TestRetryTransportDoesNotInferPrimaryLimitWithoutRemainingHeader(t *testing.T) {
+	now := time.Date(2026, 7, 17, 0, 0, 0, 0, time.UTC)
+	reset := now.Add(5 * time.Second).Unix()
+	ft := &fakeTransport{results: []fakeResult{{
+		status: http.StatusForbidden,
+		header: http.Header{"X-Ratelimit-Reset": []string{strconv.FormatInt(reset, 10)}},
+	}}}
+	rt := &retryTransport{Base: ft, Config: &RetryConfig{
+		MaxAttempts: 2,
+		Clock:       func() time.Time { return now },
+	}}
+
+	resp, err := rt.RoundTrip(newGetRequest(t, "http://example.com/repos/o/r"))
+	if err != nil {
+		t.Fatalf("RoundTrip: %v", err)
+	}
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	if len(ft.requests) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(ft.requests))
+	}
+}
+
+func TestRetryTransportHonorsPrimary403Reset(t *testing.T) {
+	now := time.Date(2026, 7, 17, 0, 0, 0, 0, time.UTC)
+	clock := &fakeClock{now: now}
+	reset := now.Add(7 * time.Second).Unix()
+
+	ft := &fakeTransport{
+		results: []fakeResult{
+			{
+				status: http.StatusForbidden,
+				header: http.Header{
+					"X-Ratelimit-Remaining": []string{"0"},
+					"X-Ratelimit-Reset":     []string{strconv.FormatInt(reset, 10)},
+				},
+			},
+			{status: http.StatusOK, body: "ok"},
+		},
+	}
+	sleeper := &fakeSleeper{}
+	rt := &retryTransport{
+		Base: ft,
+		Config: &RetryConfig{
+			MaxAttempts: 2,
+			BaseDelay:   time.Millisecond,
+			MaxDelay:    time.Hour,
+			Clock:       clock.Now,
+			Sleeper:     sleeper.Sleep,
+		},
+	}
+
+	req := newGetRequest(t, "http://example.com/repos/o/r")
+	resp, err := rt.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("RoundTrip: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	calls := sleeper.Calls()
+	if len(calls) != 1 || calls[0] != 7*time.Second {
+		t.Fatalf("sleeps = %v, want [7s]", calls)
+	}
+}
+
 func TestRetryTransportHonorsPrimaryReset(t *testing.T) {
 	now := time.Date(2026, 7, 17, 0, 0, 0, 0, time.UTC)
 	clock := &fakeClock{now: now}
@@ -598,8 +703,11 @@ func TestRetryTransportRedactsURLSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse source URL: %v", err)
 	}
-	if pass, _ := u.User.Password(); pass != "" && pass != "[REDACTED]" {
-		t.Fatalf("password not redacted: %q", pass)
+	if u.User != nil {
+		t.Fatalf("userinfo not removed from source URL: %v", got.SourceURL)
+	}
+	if strings.Contains(got.SourceURL, "user") || strings.Contains(got.SourceURL, "password") {
+		t.Fatalf("credential leaked in source URL: %s", got.SourceURL)
 	}
 	if u.Query().Get("token") != "[REDACTED]" {
 		t.Fatalf("token not redacted: %q", u.Query().Get("token"))

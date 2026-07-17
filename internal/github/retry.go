@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -126,7 +125,7 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 
 		resp, err := t.base().RoundTrip(clone)
-		if err == nil && !shouldRetry(resp) {
+		if err == nil && !shouldRetry(resp, cfg.now()) {
 			if cfg.OnAttempt != nil {
 				cfg.OnAttempt(observation(req, resp, attempt, 0, cfg.now()))
 			}
@@ -193,7 +192,7 @@ func cloneRequest(req *http.Request) (*http.Request, error) {
 	return clone, nil
 }
 
-func shouldRetry(resp *http.Response) bool {
+func shouldRetry(resp *http.Response, now time.Time) bool {
 	if resp == nil {
 		return false
 	}
@@ -201,11 +200,26 @@ func shouldRetry(resp *http.Response) bool {
 	case http.StatusTooManyRequests:
 		return true
 	case http.StatusForbidden:
-		// GitHub uses 403 plus Retry-After for secondary rate limits. Do not
-		// retry ordinary authorization failures or long primary-limit resets.
+		// GitHub returns 403 for primary rate limits when X-Ratelimit-Remaining
+		// is 0 and for secondary rate limits with Retry-After. Do not retry
+		// ordinary authorization failures.
+		if isPrimaryRateLimitResponse(resp, now) {
+			return true
+		}
 		return strings.TrimSpace(resp.Header.Get("Retry-After")) != ""
 	}
 	return resp.StatusCode >= 500
+}
+
+func isPrimaryRateLimitResponse(resp *http.Response, now time.Time) bool {
+	if resp == nil {
+		return false
+	}
+	rem, err := strconv.Atoi(strings.TrimSpace(resp.Header.Get("X-Ratelimit-Remaining")))
+	if err != nil || rem != 0 {
+		return false
+	}
+	return parseResetDelay(resp.Header.Get("X-Ratelimit-Reset"), now) > 0
 }
 
 func isContextError(err error) bool {
@@ -252,7 +266,7 @@ func (r *RetryConfig) delay(attempt int, resp *http.Response) time.Duration {
 		serverDelay = ra
 	}
 
-	if resp.StatusCode == http.StatusTooManyRequests {
+	if resp.StatusCode == http.StatusTooManyRequests || (resp.StatusCode == http.StatusForbidden && isPrimaryRateLimitResponse(resp, now)) {
 		rem, _ := strconv.Atoi(resp.Header.Get("X-Ratelimit-Remaining"))
 		if rem == 0 {
 			if rd := parseResetDelay(resp.Header.Get("X-Ratelimit-Reset"), now); rd > 0 {
@@ -345,11 +359,9 @@ func redactSourceURL(req *http.Request) string {
 		return ""
 	}
 	u := *req.URL
-	if u.User != nil {
-		if _, hasPass := u.User.Password(); hasPass {
-			u.User = url.UserPassword(u.User.Username(), "[REDACTED]")
-		}
-	}
+	// Remove embedded userinfo so credential-like usernames (e.g. tokens) are
+	// not retained in observability output.
+	u.User = nil
 	q := u.Query()
 	for k := range q {
 		lk := strings.ToLower(k)
