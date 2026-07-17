@@ -23,6 +23,7 @@ const maxSearchLimit = 100
 type CLI struct {
 	svc    Service
 	runner MCPRunner
+	tui    TUIRunner
 	stdout io.Writer
 	stderr io.Writer
 }
@@ -38,9 +39,15 @@ func New(service Service, runner MCPRunner, stdout, stderr io.Writer) *CLI {
 	return &CLI{svc: service, runner: runner, stdout: stdout, stderr: stderr}
 }
 
+// SetTUIRunner wires the optional terminal UI adapter.
+func (c *CLI) SetTUIRunner(runner TUIRunner) { c.tui = runner }
+
 type rootCmd struct {
 	Init          initCmd          `cmd:"" help:"Initialize the local corpus"`
+	Configure     configureCmd     `cmd:"" help:"Inspect or update typed configuration"`
+	Metadata      metadataCmd      `cmd:"" help:"Show application metadata and capabilities"`
 	Status        statusCmd        `cmd:"" help:"Show corpus status"`
+	Doctor        doctorCmd        `cmd:"" help:"Diagnose local configuration and dependencies"`
 	Sync          syncCmd          `cmd:"" help:"Sync a repository into the corpus"`
 	Search        searchCmd        `cmd:"" help:"Search the local corpus"`
 	Dossier       dossierCmd       `cmd:"" help:"Show repository dossier"`
@@ -57,6 +64,8 @@ type rootCmd struct {
 	Archive       archiveCmd       `cmd:"" help:"Synchronize and hydrate the local archive"`
 	Coverage      coverageCmd      `cmd:"" help:"Show local repository facet coverage"`
 	Runs          runsCmd          `cmd:"" help:"List durable operation runs"`
+	Jobs          jobsCmd          `cmd:"" help:"List durable background jobs"`
+	Job           jobCmd           `cmd:"" help:"Inspect or cancel a durable job"`
 	Neighbors     neighborsCmd     `cmd:"" help:"Find similar local threads"`
 	Export        exportCmd        `cmd:"" help:"Export redacted local bundles"`
 	Clusters      clustersCmd      `cmd:"" help:"Compute and list duplicate-candidate clusters for a repository"`
@@ -64,9 +73,32 @@ type rootCmd struct {
 	Lens          lensCmd          `cmd:"" help:"Manage saved lenses"`
 	Collection    collectionCmd    `cmd:"" help:"Manage named collections"`
 	MCP           mcpCmd           `cmd:"" name:"mcp" help:"Run the MCP server"`
+	TUI           tuiCmd           `cmd:"" name:"tui" help:"Browse the local corpus interactively"`
 }
 
 type initCmd struct {
+	JSON bool `name:"json" help:"Print the result as JSON"`
+}
+
+type configureCmd struct {
+	Database         *string `name:"database" help:"Corpus database path"`
+	TokenSource      *string `name:"token-source" help:"GitHub token source (none, env, gh-cli, or keyring)"`
+	TokenSourceKey   *string `name:"token-source-key" help:"Environment variable or keyring entry name"`
+	CrawlBudget      *int    `name:"crawl-budget" help:"Default request budget"`
+	CrawlConcurrency *int    `name:"crawl-concurrency" help:"Default crawl concurrency"`
+	CrawlRetryLimit  *int    `name:"crawl-retry-limit" help:"Default retry limit"`
+	CrawlTimeout     *string `name:"crawl-timeout" help:"Default request timeout"`
+	OutputFormat     *string `name:"output-format" help:"Default output format (text or json)"`
+	OutputMaxResults *int    `name:"output-max-results" help:"Default maximum result count"`
+	DryRun           bool    `name:"dry-run" help:"Validate and show without saving"`
+	JSON             bool    `name:"json" help:"Print the result as JSON"`
+}
+
+type metadataCmd struct {
+	JSON bool `name:"json" help:"Print the result as JSON"`
+}
+
+type doctorCmd struct {
 	JSON bool `name:"json" help:"Print the result as JSON"`
 }
 
@@ -349,6 +381,27 @@ type runsCmd struct {
 	JSON  bool `name:"json" help:"Print the result as JSON"`
 }
 
+type jobsCmd struct {
+	Status string `name:"status" help:"Filter by status (queued, running, succeeded, failed, or cancelled)"`
+	Limit  int    `name:"limit" default:"50" help:"Maximum jobs to return"`
+	JSON   bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type jobCmd struct {
+	Show   jobShowCmd   `cmd:"" help:"Show one durable job"`
+	Cancel jobCancelCmd `cmd:"" help:"Request cancellation"`
+}
+
+type jobShowCmd struct {
+	ID   string `arg:"" help:"Opaque job ID"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type jobCancelCmd struct {
+	ID   string `arg:"" help:"Opaque job ID"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
 type neighborsCmd struct {
 	Thread string `arg:"" name:"owner/repo#number" help:"Thread as OWNER/REPO#NUMBER"`
 	Kind   string `name:"kind" required:"" enum:"issue,pull_request" help:"Thread kind"`
@@ -416,12 +469,22 @@ type collectionListCmd struct {
 }
 
 type mcpCmd struct {
+	Serve mcpServeCmd `cmd:"" help:"Serve MCP over the selected transport"`
+}
+
+type mcpServeCmd struct {
 	Transport string `name:"transport" default:"stdio" enum:"stdio" help:"MCP transport protocol"`
+}
+
+type tuiCmd struct {
+	OwnerRepo string `arg:"" optional:"" name:"owner/repo" help:"Optional repository scope"`
+	JSON      bool   `name:"json" help:"Print an offline snapshot instead of starting an interactive terminal"`
 }
 
 // Run parses arguments and dispatches to the appropriate Service or MCPRunner
 // method. It respects context cancellation.
 func (c *CLI) Run(ctx context.Context, args []string) error {
+	args = normalizeCompatibilityArgs(args)
 	var cli rootCmd
 	parser, err := kong.New(&cli,
 		kong.Name("gitcontribute"),
@@ -450,8 +513,14 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	switch cmd {
 	case "init":
 		return c.runInit(ctx, &cli.Init)
+	case "configure":
+		return c.runConfigure(ctx, &cli.Configure)
+	case "metadata":
+		return c.runMetadata(ctx, &cli.Metadata)
 	case "status":
 		return c.runStatus(ctx, &cli.Status)
+	case "doctor":
+		return c.runDoctor(ctx, &cli.Doctor)
 	case "sync":
 		return c.runSync(ctx, &cli.Sync)
 	case "search":
@@ -484,6 +553,10 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runCoverage(ctx, &cli.Coverage)
 	case "runs":
 		return c.runRuns(ctx, &cli.Runs)
+	case "jobs":
+		return c.runJobs(ctx, &cli.Jobs)
+	case "job":
+		return c.runJob(ctx, command, &cli.Job)
 	case "neighbors":
 		return c.runNeighbors(ctx, &cli.Neighbors)
 	case "export":
@@ -498,13 +571,44 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runCollection(ctx, command, &cli.Collection)
 	case "mcp":
 		return c.runMCP(ctx, &cli.MCP)
+	case "tui":
+		return c.runTUI(ctx, &cli.TUI)
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown command: %s", cmd))
 	}
 }
 
+func normalizeCompatibilityArgs(args []string) []string {
+	if len(args) == 0 || args[0] != "mcp" {
+		return args
+	}
+	if len(args) > 1 && args[1] == "serve" {
+		return args
+	}
+	out := make([]string, 0, len(args)+1)
+	out = append(out, "mcp", "serve")
+	out = append(out, args[1:]...)
+	return out
+}
+
 func (c *CLI) discoveryService() (DiscoveryService, error) {
 	service, ok := c.svc.(DiscoveryService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) controlService() (ControlService, error) {
+	service, ok := c.svc.(ControlService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) jobService() (JobService, error) {
+	service, ok := c.svc.(JobService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -986,7 +1090,55 @@ func (c *CLI) runInit(ctx context.Context, cmd *initCmd) error {
 	return c.render(cmd.JSON, res)
 }
 
+func (c *CLI) runConfigure(ctx context.Context, cmd *configureCmd) error {
+	service, err := c.controlService()
+	if err != nil {
+		return err
+	}
+	result, err := service.Configure(ctx, ConfigureOptions{
+		Database: cmd.Database, TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey,
+		CrawlBudget: cmd.CrawlBudget, CrawlConcurrency: cmd.CrawlConcurrency,
+		CrawlRetryLimit: cmd.CrawlRetryLimit, CrawlTimeout: cmd.CrawlTimeout,
+		OutputFormat: cmd.OutputFormat, OutputMaxResults: cmd.OutputMaxResults, DryRun: cmd.DryRun,
+	})
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runMetadata(ctx context.Context, cmd *metadataCmd) error {
+	service, err := c.controlService()
+	if err != nil {
+		return err
+	}
+	result, err := service.Metadata(ctx)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runDoctor(ctx context.Context, cmd *doctorCmd) error {
+	service, err := c.controlService()
+	if err != nil {
+		return err
+	}
+	result, err := service.Doctor(ctx)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
 func (c *CLI) runStatus(ctx context.Context, cmd *statusCmd) error {
+	if service, ok := c.svc.(ControlService); ok {
+		res, err := service.ControlStatus(ctx)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.JSON, res)
+	}
 	res, err := c.svc.Status(ctx)
 	if err != nil {
 		return c.mapError(err)
@@ -1037,8 +1189,23 @@ func (c *CLI) runDossier(ctx context.Context, cmd *dossierCmd) error {
 }
 
 func (c *CLI) runMCP(ctx context.Context, cmd *mcpCmd) error {
-	fmt.Fprintf(c.stderr, "starting mcp server (transport=%s)...\n", cmd.Transport)
-	return c.mapError(c.runner.Run(ctx, MCPOptions{Transport: cmd.Transport}))
+	fmt.Fprintf(c.stderr, "starting mcp server (transport=%s)...\n", cmd.Serve.Transport)
+	return c.mapError(c.runner.Run(ctx, MCPOptions{Transport: cmd.Serve.Transport}))
+}
+
+func (c *CLI) runTUI(ctx context.Context, cmd *tuiCmd) error {
+	if c.tui == nil {
+		return NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	var repo RepoRef
+	var err error
+	if cmd.OwnerRepo != "" {
+		repo, err = parseRepo(cmd.OwnerRepo)
+		if err != nil {
+			return err
+		}
+	}
+	return c.mapError(c.tui.Run(ctx, TUIOptions{Repo: repo, JSON: cmd.JSON}))
 }
 
 func (c *CLI) render(json bool, v any) error {
@@ -1193,6 +1360,51 @@ func (c *CLI) runRuns(ctx context.Context, cmd *runsCmd) error {
 		return c.mapError(err)
 	}
 	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runJobs(ctx context.Context, cmd *jobsCmd) error {
+	if cmd.Limit <= 0 || cmd.Limit > 1000 {
+		return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 1000"))
+	}
+	if cmd.Status != "" {
+		switch cmd.Status {
+		case "queued", "running", "succeeded", "failed", "cancelled":
+		default:
+			return NewCLIError(ExitUsage, fmt.Errorf("invalid job status %q", cmd.Status))
+		}
+	}
+	service, err := c.jobService()
+	if err != nil {
+		return err
+	}
+	result, err := service.ListJobs(ctx, cmd.Status, cmd.Limit)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runJob(ctx context.Context, command string, cmd *jobCmd) error {
+	service, err := c.jobService()
+	if err != nil {
+		return err
+	}
+	var result *JobResult
+	var jsonOutput bool
+	switch command {
+	case "job show":
+		result, err = service.GetJob(ctx, cmd.Show.ID)
+		jsonOutput = cmd.Show.JSON
+	case "job cancel":
+		result, err = service.CancelJob(ctx, cmd.Cancel.ID)
+		jsonOutput = cmd.Cancel.JSON
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown job command: %s", command))
+	}
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(jsonOutput, result)
 }
 
 func (c *CLI) runNeighbors(ctx context.Context, cmd *neighborsCmd) error {

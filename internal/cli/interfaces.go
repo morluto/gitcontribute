@@ -25,6 +25,11 @@ type MCPRunner interface {
 	Run(ctx context.Context, opts MCPOptions) error
 }
 
+// TUIRunner is the terminal UI adapter boundary.
+type TUIRunner interface {
+	Run(ctx context.Context, opts TUIOptions) error
+}
+
 // ControlService exposes local configuration and diagnostic capabilities.
 // Implementations must not perform network access for Metadata or ControlStatus.
 type ControlService interface {
@@ -163,6 +168,38 @@ func (r RepoRef) String() string { return r.Owner + "/" + r.Repo }
 // MCPOptions carries MCP server startup options.
 type MCPOptions struct {
 	Transport string
+}
+
+type TUIOptions struct {
+	Repo RepoRef
+	JSON bool
+}
+
+// JobService exposes durable background job state and cancellation.
+type JobService interface {
+	ListJobs(ctx context.Context, status string, limit int) (*JobListResult, error)
+	GetJob(ctx context.Context, id string) (*JobResult, error)
+	CancelJob(ctx context.Context, id string) (*JobResult, error)
+}
+
+type JobResult struct {
+	ID           string `json:"id"`
+	Kind         string `json:"kind"`
+	Status       string `json:"status"`
+	Request      string `json:"request,omitempty"`
+	Result       string `json:"result,omitempty"`
+	Error        string `json:"error,omitempty"`
+	Progress     string `json:"progress,omitempty"`
+	Statistics   string `json:"statistics,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	StartedAt    string `json:"started_at,omitempty"`
+	CompletedAt  string `json:"completed_at,omitempty"`
+	CancelledAt  string `json:"cancelled_at,omitempty"`
+	Cancellation bool   `json:"cancellation_requested"`
+}
+
+type JobListResult struct {
+	Jobs []JobResult `json:"jobs"`
 }
 
 // InvestigationService is the optional investigation and opportunity

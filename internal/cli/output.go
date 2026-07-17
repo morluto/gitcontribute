@@ -27,6 +27,14 @@ func humanOutput(v any) (string, error) {
 		return initHuman(r), nil
 	case *StatusResult:
 		return statusHuman(r), nil
+	case *MetadataResult:
+		return metadataHuman(r), nil
+	case *ConfigureResult:
+		return configureHuman(r), nil
+	case *ControlStatusResult:
+		return controlStatusHuman(r), nil
+	case *DoctorResult:
+		return doctorHuman(r), nil
 	case *SyncResult:
 		return syncHuman(r), nil
 	case *SearchResult:
@@ -88,11 +96,85 @@ func humanOutput(v any) (string, error) {
 		return coverageHuman(r), nil
 	case *RunListResult:
 		return runsHuman(r), nil
+	case *JobListResult:
+		return jobsHuman(r), nil
+	case *JobResult:
+		return jobHuman(r), nil
 	case *NeighborListResult:
 		return neighborsHuman(r), nil
 	default:
 		return "", fmt.Errorf("unsupported result type %T", v)
 	}
+}
+
+func metadataHuman(r *MetadataResult) string {
+	return fmt.Sprintf("%s %s (%s/%s, %s)\nSchema: %d\nCorpus: %s\nCapabilities: %s",
+		r.Name, r.Version, r.OS, r.Architecture, r.GoVersion, r.SchemaVersion, r.CorpusPath, strings.Join(r.Capabilities, ", "))
+}
+
+func configureHuman(r *ConfigureResult) string {
+	action := "Configuration unchanged"
+	if r.Changed {
+		action = "Configuration updated"
+	}
+	if r.DryRun {
+		action = "Configuration dry run"
+	}
+	return fmt.Sprintf("%s: %s\nDatabase: %s\nToken source: %s\nCrawl: budget=%d concurrency=%d retries=%d timeout=%s\nOutput: %s, max=%d",
+		action, r.Path, r.Config.Database, r.Config.TokenSource, r.Config.CrawlBudget,
+		r.Config.CrawlConcurrency, r.Config.CrawlRetryLimit, r.Config.CrawlTimeout,
+		r.Config.OutputFormat, r.Config.OutputMaxResults)
+}
+
+func controlStatusHuman(r *ControlStatusResult) string {
+	state := "healthy"
+	if !r.Healthy {
+		state = "not healthy"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Status: %s (corpus=%s version=%s schema=%d)", state, r.Corpus, r.Version, r.SchemaVersion)
+	fmt.Fprintf(&b, "\n%d repositories, %d threads, %d sources; %d ready frontier items, %d active runs, %d active jobs",
+		r.Counts.Repositories, r.Counts.Threads, r.Counts.Sources, r.Counts.FrontierReady, r.Counts.ActiveRuns, r.Counts.ActiveJobs)
+	if r.FreshestSource != "" {
+		fmt.Fprintf(&b, "\nFreshest source: %s", r.FreshestSource)
+	}
+	for _, warning := range r.Warnings {
+		fmt.Fprintf(&b, "\nWarning: %s", warning)
+	}
+	return b.String()
+}
+
+func doctorHuman(r *DoctorResult) string {
+	state := "healthy"
+	if !r.Healthy {
+		state = "unhealthy"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Doctor: %s", state)
+	for _, check := range r.Checks {
+		fmt.Fprintf(&b, "\n- %s [%s]: %s", check.Name, check.Status, check.Message)
+	}
+	return b.String()
+}
+
+func jobsHuman(r *JobListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d jobs", len(r.Jobs))
+	for i := range r.Jobs {
+		fmt.Fprintf(&b, "\n- %s", jobHuman(&r.Jobs[i]))
+	}
+	return b.String()
+}
+
+func jobHuman(r *JobResult) string {
+	line := fmt.Sprintf("%s %s [%s] created %s", r.ID, r.Kind, r.Status, r.CreatedAt)
+	if r.Progress != "" {
+		line += ": " + r.Progress
+	}
+	if r.Error != "" {
+		line += ": " + r.Error
+	}
+	return line
 }
 
 func hydrateHuman(r *HydrateResult) string {

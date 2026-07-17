@@ -11,6 +11,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/app"
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
+	"github.com/morluto/gitcontribute/internal/tui"
 )
 
 const version = "dev"
@@ -28,6 +29,7 @@ func main() {
 	defer func() { _ = svc.Close() }()
 
 	c := cli.New(svc, svc.NewMCPRunner(), os.Stdout, os.Stderr)
+	c.SetTUIRunner(tui.NewRunner(svc, os.Stdin, os.Stdout))
 	if err := c.Run(ctx, os.Args[1:]); err != nil {
 		var ce *cli.CLIError
 		if errors.As(err, &ce) {

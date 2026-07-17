@@ -17,32 +17,32 @@ type Reader interface {
 
 // Data is the offline dataset loaded by the reader.
 type Data struct {
-	Repositories   []Item
-	Threads        []Item
-	Clusters       []Item
-	Investigations []Item
-	Opportunities  []Item
+	Repositories   []Item `json:"repositories"`
+	Threads        []Item `json:"threads"`
+	Clusters       []Item `json:"clusters"`
+	Investigations []Item `json:"investigations"`
+	Opportunities  []Item `json:"opportunities"`
 }
 
 // Item is one browsable record.
 type Item struct {
-	Kind     string
-	ID       string
-	Ref      string
-	Title    string
-	Subtitle string
-	Detail   string
-	Source   string
-	AsOf     string
-	Coverage []Facet
+	Kind     string  `json:"kind"`
+	ID       string  `json:"id"`
+	Ref      string  `json:"ref"`
+	Title    string  `json:"title"`
+	Subtitle string  `json:"subtitle,omitempty"`
+	Detail   string  `json:"detail,omitempty"`
+	Source   string  `json:"source,omitempty"`
+	AsOf     string  `json:"as_of,omitempty"`
+	Coverage []Facet `json:"coverage,omitempty"`
 }
 
 // Facet describes coverage for one data facet.
 type Facet struct {
-	Name     string
-	Present  bool
-	Complete bool
-	AsOf     string
+	Name     string `json:"name"`
+	Present  bool   `json:"present"`
+	Complete bool   `json:"complete"`
+	AsOf     string `json:"as_of,omitempty"`
 }
 
 // view is the current browse category.

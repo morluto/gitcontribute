@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/corpus"
 )
 
@@ -213,4 +214,69 @@ func (e *JobExecutor) finishJob(ctx context.Context, id, status, result, errStr 
 
 func isTerminalJobStatus(status string) bool {
 	return status == corpus.JobStatusSucceeded || status == corpus.JobStatusFailed || status == corpus.JobStatusCancelled
+}
+
+// ListJobs returns bounded durable jobs for CLI and MCP adapters.
+func (s *Service) ListJobs(ctx context.Context, status string, limit int) (*cli.JobListResult, error) {
+	jobs, err := s.Jobs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items, err := jobs.List(ctx, status, limit)
+	if err != nil {
+		return nil, err
+	}
+	result := &cli.JobListResult{Jobs: make([]cli.JobResult, len(items))}
+	for i := range items {
+		result.Jobs[i] = jobResult(&items[i])
+	}
+	return result, nil
+}
+
+// GetJob returns one durable job by opaque ID.
+func (s *Service) GetJob(ctx context.Context, id string) (*cli.JobResult, error) {
+	jobs, err := s.Jobs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	job, err := jobs.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if job == nil {
+		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("job %s not found", id))
+	}
+	result := jobResult(job)
+	return &result, nil
+}
+
+// CancelJob records and applies a cancellation request, then returns current state.
+func (s *Service) CancelJob(ctx context.Context, id string) (*cli.JobResult, error) {
+	jobs, err := s.Jobs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := jobs.Cancel(ctx, id); err != nil {
+		return nil, err
+	}
+	return s.GetJob(ctx, id)
+}
+
+func jobResult(job *corpus.Job) cli.JobResult {
+	result := cli.JobResult{
+		ID: job.ID, Kind: job.Kind, Status: job.Status, Request: job.Request,
+		Result: job.Result, Error: job.Error, Progress: job.Progress,
+		Statistics: job.Statistics, CreatedAt: formatTime(job.CreatedAt),
+		Cancellation: job.CancelledAt != nil,
+	}
+	if job.StartedAt != nil {
+		result.StartedAt = formatTime(*job.StartedAt)
+	}
+	if job.CompletedAt != nil {
+		result.CompletedAt = formatTime(*job.CompletedAt)
+	}
+	if job.CancelledAt != nil {
+		result.CancelledAt = formatTime(*job.CancelledAt)
+	}
+	return result
 }
