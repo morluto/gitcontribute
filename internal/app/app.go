@@ -29,6 +29,7 @@ type Service struct {
 	cfg            *config.Config
 	paths          *config.Paths
 	corpus         *corpus.Corpus
+	jobs           *JobExecutor
 	ghReader       github.Reader
 	archiveFetcher discovery.ArchiveFetcher
 	clock          func() time.Time
@@ -89,12 +90,17 @@ func (s *Service) getArchiveFetcher() discovery.ArchiveFetcher {
 	return s.archiveFetcher
 }
 
-// Close closes the corpus database connection.
+// Close cancels and waits for active jobs, then closes the corpus database connection.
 func (s *Service) Close() error {
 	s.mu.Lock()
+	jobs := s.jobs
 	c := s.corpus
+	s.jobs = nil
 	s.corpus = nil
 	s.mu.Unlock()
+	if jobs != nil {
+		_ = jobs.Close()
+	}
 	if c != nil {
 		return c.Close()
 	}
@@ -172,9 +178,30 @@ func (s *Service) openCorpus(ctx context.Context) (*corpus.Corpus, error) {
 		_ = c.Close()
 		return existing, nil
 	}
+	var jobsErr error
+	s.jobs, jobsErr = newJobExecutor(ctx, c)
+	if jobsErr != nil {
+		s.mu.Unlock()
+		_ = c.Close()
+		return nil, jobsErr
+	}
 	s.corpus = c
 	s.mu.Unlock()
 	return c, nil
+}
+
+// Jobs returns the durable job executor, opening the corpus if needed.
+func (s *Service) Jobs(ctx context.Context) (*JobExecutor, error) {
+	if _, err := s.openCorpus(ctx); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	jobs := s.jobs
+	s.mu.Unlock()
+	if jobs == nil {
+		return nil, errors.New("job executor not initialized")
+	}
+	return jobs, nil
 }
 
 func ensurePrivateDir(path string) error {

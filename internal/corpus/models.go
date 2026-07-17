@@ -128,3 +128,38 @@ const (
 	RunStatusPartial   = "partial"
 	RunStatusFailed    = "failed"
 )
+
+// JobStatus values for the durable job lifecycle.
+const (
+	JobStatusQueued    = "queued"
+	JobStatusRunning   = "running"
+	JobStatusSucceeded = "succeeded"
+	JobStatusFailed    = "failed"
+	JobStatusCancelled = "cancelled"
+)
+
+// Job is a durable, cancellable unit of work.
+type Job struct {
+	ID          string
+	Kind        string
+	Status      string
+	Request     string
+	Result      string
+	Error       string
+	Progress    string
+	Statistics  string
+	CreatedAt   time.Time
+	StartedAt   *time.Time
+	CompletedAt *time.Time
+	UpdatedAt   time.Time
+	CancelledAt *time.Time
+}
+
+// JobEvent is a durable log line emitted during a job.
+type JobEvent struct {
+	ID         int64
+	JobID      string
+	Level      string
+	Message    string
+	RecordedAt time.Time
+}
