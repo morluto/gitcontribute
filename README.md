@@ -184,6 +184,7 @@ gitcontribute search prs "flaky" --repo owner/repo --label "bug" --json
 gitcontribute search threads "memory leak" --repo owner/repo
 gitcontribute search code "context.WithTimeout" --repo owner/repo
 gitcontribute search all "retry" --repo owner/repo
+gitcontribute search issues "retry" --lens my-lens
 ```
 
 Search is local-only SQLite FTS5 keyword search over the corpus. Thread searches
@@ -195,6 +196,10 @@ repositories, and code but does not support cursor pagination.
 Results include a transparent score with reasons: title/body term matches,
 freshness, and coverage. Use `gitcontribute search ... --json` to consume results
 programmatically.
+
+Add `--lens NAME` to apply a saved filter and weighted ranking to a bounded
+candidate population. Lens-ranked searches do not support `--cursor` because
+normalization depends on the complete candidate population used for that run.
 
 ## Dossiers, health, and seeds
 
@@ -307,7 +312,12 @@ Lenses are JSON-defined filters and weight sets stored in the corpus:
 gitcontribute lens add my-lens --file lens.json
 gitcontribute lens list
 gitcontribute lens show my-lens
+gitcontribute lens explain my-lens issue:owner/repo#42 --query "retry"
 ```
+
+`lens explain` reports the candidate facts, population scope, normalized
+signals, weighted contributions, final score, and missing signals. Pass the
+same query used for search when explaining a text-relevance score.
 
 Collections are named groups of typed references:
 
