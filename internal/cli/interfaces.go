@@ -25,6 +25,93 @@ type MCPRunner interface {
 	Run(ctx context.Context, opts MCPOptions) error
 }
 
+// ControlService exposes local configuration and diagnostic capabilities.
+// Implementations must not perform network access for Metadata or ControlStatus.
+type ControlService interface {
+	Metadata(ctx context.Context) (*MetadataResult, error)
+	Configure(ctx context.Context, opts ConfigureOptions) (*ConfigureResult, error)
+	ControlStatus(ctx context.Context) (*ControlStatusResult, error)
+	Doctor(ctx context.Context) (*DoctorResult, error)
+}
+
+type MetadataResult struct {
+	Name          string          `json:"name"`
+	Version       string          `json:"version"`
+	GoVersion     string          `json:"go_version"`
+	OS            string          `json:"os"`
+	Architecture  string          `json:"architecture"`
+	SchemaVersion int64           `json:"schema_version"`
+	ConfigPath    string          `json:"config_path"`
+	CorpusPath    string          `json:"corpus_path"`
+	Capabilities  []string        `json:"capabilities"`
+	Features      map[string]bool `json:"features"`
+}
+
+// ConfigureOptions uses pointers so callers can distinguish an omitted value
+// from a deliberate zero value. Tokens themselves are never accepted here.
+type ConfigureOptions struct {
+	Database         *string
+	TokenSource      *string
+	TokenSourceKey   *string
+	CrawlBudget      *int
+	CrawlConcurrency *int
+	CrawlRetryLimit  *int
+	CrawlTimeout     *string
+	OutputFormat     *string
+	OutputMaxResults *int
+	DryRun           bool
+}
+
+type ConfigResult struct {
+	Database         string `json:"database"`
+	TokenSource      string `json:"token_source"`
+	TokenSourceKey   string `json:"token_source_key,omitempty"`
+	CrawlBudget      int    `json:"crawl_budget"`
+	CrawlConcurrency int    `json:"crawl_concurrency"`
+	CrawlRetryLimit  int    `json:"crawl_retry_limit"`
+	CrawlTimeout     string `json:"crawl_timeout"`
+	OutputFormat     string `json:"output_format"`
+	OutputMaxResults int    `json:"output_max_results"`
+}
+
+type ConfigureResult struct {
+	Path    string       `json:"path"`
+	DryRun  bool         `json:"dry_run"`
+	Changed bool         `json:"changed"`
+	Config  ConfigResult `json:"config"`
+}
+
+type ControlCounts struct {
+	Repositories  int `json:"repositories"`
+	Threads       int `json:"threads"`
+	Sources       int `json:"sources"`
+	FrontierReady int `json:"frontier_ready"`
+	ActiveRuns    int `json:"active_runs"`
+	ActiveJobs    int `json:"active_jobs"`
+}
+
+type ControlStatusResult struct {
+	Healthy        bool          `json:"healthy"`
+	Corpus         string        `json:"corpus"`
+	Version        string        `json:"version"`
+	SchemaVersion  int64         `json:"schema_version"`
+	Counts         ControlCounts `json:"counts"`
+	FreshestSource string        `json:"freshest_source,omitempty"`
+	Warnings       []string      `json:"warnings"`
+}
+
+type DoctorCheck struct {
+	Name     string `json:"name"`
+	Status   string `json:"status"`
+	Required bool   `json:"required"`
+	Message  string `json:"message"`
+}
+
+type DoctorResult struct {
+	Healthy bool          `json:"healthy"`
+	Checks  []DoctorCheck `json:"checks"`
+}
+
 // DiscoveryService is the optional source and crawl capability used by the
 // CLI without enlarging the core local archive contract.
 type DiscoveryService interface {
