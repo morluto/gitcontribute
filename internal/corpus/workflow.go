@@ -87,11 +87,11 @@ func (c *Corpus) SaveInvestigation(ctx context.Context, item *investigation.Inve
 		return err
 	}
 	_, err = c.db.ExecContext(ctx, `
-		INSERT INTO investigations (id, repo_owner, repo_name, status, payload, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO investigations (id, repo_owner, repo_name, status, origin_key, payload, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET repo_owner=excluded.repo_owner, repo_name=excluded.repo_name,
-			status=excluded.status, payload=excluded.payload, updated_at=excluded.updated_at
-	`, item.ID, item.Repo.Owner, item.Repo.Repo, item.Status, payload, encodeTime(item.CreatedAt), encodeTime(item.UpdatedAt))
+			status=excluded.status, origin_key=excluded.origin_key, payload=excluded.payload, updated_at=excluded.updated_at
+	`, item.ID, item.Repo.Owner, item.Repo.Repo, item.Status, investigationOriginKey(item), payload, encodeTime(item.CreatedAt), encodeTime(item.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("save investigation: %w", err)
 	}

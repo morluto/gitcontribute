@@ -44,7 +44,7 @@ application and domain packages expose product-owned values and interfaces.
 | Capability | Examples | Network | Local write | Process execution | GitHub mutation |
 | --- | --- | ---: | ---: | ---: | ---: |
 | Corpus read | search, health, dossier show, research brief, MCP resources | no | no | no | no |
-| Corpus write | investigations, evidence, lenses, tracking | no | yes | no | no |
+| Corpus write | investigations, start-thread, evidence, lenses, tracking | no | yes | no | no |
 | GitHub read | sync, crawl, hydrate | yes | yes | no | no |
 | Git acquisition | acquire, workspace create | remote-dependent | yes | `git` only | no |
 | Validation | validation run with explicit execution | no by default | yes | yes | no |
@@ -158,6 +158,14 @@ operate only on stored facts and report partial or missing coverage when
 required facets are incomplete. A research-brief section must carry a source
 reference or an explicit unknown reason; untrusted thread text remains data and
 cannot grant an adapter additional authority.
+
+Starting an investigation from a thread is an explicit corpus-write capability.
+The investigation and seed hypothesis are committed in one transaction and
+carry the exact thread observation ID, source timestamp, and observation
+sequence used as their baseline. A partial unique origin key returns the
+existing open pair on repeated or concurrent requests; later thread projections
+do not rewrite that baseline, and a closed investigation releases the origin
+for a deliberate new start.
 
 ## Schema changes
 

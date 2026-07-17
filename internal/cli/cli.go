@@ -271,12 +271,6 @@ type tailCmd struct {
 	JSON     bool          `name:"json" help:"Print the final result as JSON"`
 }
 
-type investigationCmd struct {
-	Start startInvestigationCmd `cmd:"" help:"Start an investigation"`
-	Show  showInvestigationCmd  `cmd:"" help:"Show an investigation"`
-	List  listInvestigationCmd  `cmd:"" help:"List investigations"`
-}
-
 type startInvestigationCmd struct {
 	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
 	Commit    string `name:"commit" help:"Optional base commit SHA"`
@@ -1524,6 +1518,9 @@ func (c *CLI) runTail(ctx context.Context, cmd *tailCmd) error {
 }
 
 func (c *CLI) runInvestigation(ctx context.Context, command string, cmd *investigationCmd) error {
+	if command == "investigation start-thread" {
+		return c.runStartThreadInvestigation(ctx, &cmd.StartThread)
+	}
 	service, err := c.investigationService()
 	if err != nil {
 		return err
