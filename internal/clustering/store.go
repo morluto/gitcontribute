@@ -534,6 +534,51 @@ func (s *Store) GetCluster(ctx context.Context, stableID string) (*Cluster, erro
 	return &c, nil
 }
 
+// GetClusterForMember returns the cluster that currently includes the given
+// member reference, or nil if the member is not an included member of any
+// cluster. The match is case-insensitive on owner and repo.
+func (s *Store) GetClusterForMember(ctx context.Context, ref MemberRef) (*Cluster, error) {
+	if err := validateMemberRef(ref); err != nil {
+		return nil, err
+	}
+	row := s.db.QueryRowContext(ctx, `
+		SELECT c.id, c.stable_id, c.state, c.canonical_kind, c.canonical_owner, c.canonical_repo, c.canonical_number,
+		       c.source_revision, c.source_window_start, c.source_window_end, c.created_at, c.updated_at,
+		       c.repo_owner, c.repo_name
+		FROM clusters c
+		JOIN cluster_members m ON m.cluster_id = c.id
+		WHERE m.kind = ?
+		  AND LOWER(m.owner) = LOWER(?)
+		  AND LOWER(m.repo) = LOWER(?)
+		  AND m.number = ?
+		  AND m.included = 1
+		ORDER BY c.id DESC
+		LIMIT 1
+	`, ref.Kind, ref.Owner, ref.Repo, ref.Number)
+	var c Cluster
+	var created, updated, winStart, winEnd int64
+	var state string
+	err := row.Scan(&c.ID, &c.StableID, &state, &c.Canonical.Kind, &c.Canonical.Owner, &c.Canonical.Repo, &c.Canonical.Number,
+		&c.Revision, &winStart, &winEnd, &created, &updated, &c.Repo.Owner, &c.Repo.Repo)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get cluster for member: %w", err)
+	}
+	c.State = ClusterState(state)
+	c.WindowStart = scanTime(winStart)
+	c.WindowEnd = scanTime(winEnd)
+	c.CreatedAt = scanTime(created)
+	c.UpdatedAt = scanTime(updated)
+	members, err := s.listMembersForCluster(ctx, c.ID, 0)
+	if err != nil {
+		return nil, err
+	}
+	c.Members = members
+	return &c, nil
+}
+
 func (s *Store) listMembersForCluster(ctx context.Context, clusterID int64, limit int) ([]Member, error) {
 	query := `SELECT thread_id, kind, owner, repo, number, title, state, score, reason, included
 	        FROM cluster_members
