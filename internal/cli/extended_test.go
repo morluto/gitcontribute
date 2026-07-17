@@ -222,7 +222,11 @@ func TestEvidenceShow(t *testing.T) {
 		evidenceResult: &cli.EvidenceResult{
 			InvestigationID: "inv-1",
 			Evidence: []cli.EvidenceItem{
-				{ID: "ev-1", Type: "manual_observation", Relation: "supporting", Description: "observed panic", CreatedAt: "2026-07-17T00:00:00Z"},
+				{
+					ID: "ev-1", Type: "github_source", Relation: "supporting", Description: "observed panic",
+					Freshness: "stale", FreshnessReason: "thread issue:owner/repo#1 advanced from source_updated_at=2026-07-16T00:00:00Z",
+					CreatedAt: "2026-07-17T00:00:00Z",
+				},
 			},
 		},
 	}
@@ -233,7 +237,8 @@ func TestEvidenceShow(t *testing.T) {
 	if !svc.showEvidenceCalled || svc.lastEvidenceInvestigation != "inv-1" {
 		t.Fatalf("show evidence not called correctly: called=%v arg=%q", svc.showEvidenceCalled, svc.lastEvidenceInvestigation)
 	}
-	if !strings.Contains(stdout.String(), "ev-1") {
+	if !strings.Contains(stdout.String(), "ev-1") || !strings.Contains(stdout.String(), "freshness: stale") ||
+		!strings.Contains(stdout.String(), "advanced from") {
 		t.Fatalf("stdout=%q", stdout.String())
 	}
 }

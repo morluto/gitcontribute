@@ -43,7 +43,7 @@ func (s *Service) Metadata(ctx context.Context) (*cli.MetadataResult, error) {
 
 	capabilities := []string{
 		"archive", "clustering", "collections", "contribution-radar", "dossiers", "evidence",
-		"github-read", "investigations", "local-search", "mcp-stdio",
+		"evidence-freshness", "github-read", "investigations", "local-search", "mcp-stdio",
 		"thread-investigation-start", "thread-research-brief", "validation", "workspaces",
 	}
 	sort.Strings(capabilities)
@@ -59,6 +59,7 @@ func (s *Service) Metadata(ctx context.Context) (*cli.MetadataResult, error) {
 		Capabilities:  capabilities,
 		Features: map[string]bool{
 			"contribution_radar":   true,
+			"evidence_freshness":   true,
 			"github_mutations":     false,
 			"mcp_stdio":            true,
 			"semantic_search":      false,

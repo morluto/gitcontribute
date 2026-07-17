@@ -546,26 +546,6 @@ func validationComparisonHuman(r *ValidationComparisonResult) string {
 	return b.String()
 }
 
-func evidenceHuman(r *EvidenceResult) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Evidence for investigation %s:\n", r.InvestigationID)
-	if len(r.Evidence) == 0 {
-		b.WriteString("No evidence recorded.")
-		return b.String()
-	}
-	for _, e := range r.Evidence {
-		fmt.Fprintf(&b, "- %s [%s / %s] %s", e.ID, e.Type, e.Relation, e.Description)
-		if e.ValidationRunID != "" {
-			fmt.Fprintf(&b, " [run: %s]", e.ValidationRunID)
-		}
-		if e.OpportunityID != "" {
-			fmt.Fprintf(&b, " [opportunity: %s]", e.OpportunityID)
-		}
-		b.WriteString("\n")
-	}
-	return strings.TrimSpace(b.String())
-}
-
 func draftHuman(r *DraftResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s draft for opportunity %s\n", r.Kind, r.OpportunityID)
@@ -780,6 +760,6 @@ func contributionOutcomeListHuman(r *ContributionOutcomeListResult) string {
 }
 
 func metadataImportHuman(r *MetadataImportResult) string {
-	return fmt.Sprintf("Imported %d triage events, %d contributions, %d contribution outcomes",
-		r.TriageEvents, r.Contributions, r.ContributionOutcomes)
+	return fmt.Sprintf("Imported tracking bundle v%d: %d triage events, %d contributions, %d contribution outcomes, %d evidence records",
+		r.SchemaVersion, r.TriageEvents, r.Contributions, r.ContributionOutcomes, r.Evidence)
 }

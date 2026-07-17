@@ -4,6 +4,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/evidence"
 )
 
 var (
@@ -48,6 +51,13 @@ func OrderBundle(bundle *Bundle) {
 		}
 		return a.ID < b.ID
 	})
+	sort.SliceStable(bundle.Evidence, func(i, j int) bool {
+		a, b := bundle.Evidence[i], bundle.Evidence[j]
+		if !a.CreatedAt.Equal(b.CreatedAt) {
+			return a.CreatedAt.Before(b.CreatedAt)
+		}
+		return a.ID < b.ID
+	})
 }
 
 // SanitizeBundle returns a deep copy of bundle with secrets, credentials, and
@@ -57,9 +67,11 @@ func SanitizeBundle(bundle *Bundle) *Bundle {
 		return nil
 	}
 	out := &Bundle{
+		SchemaVersion:        bundle.SchemaVersion,
 		TriageEvents:         make([]*TriageEvent, len(bundle.TriageEvents)),
 		Contributions:        make([]*Contribution, len(bundle.Contributions)),
 		ContributionOutcomes: make([]*ContributionOutcome, len(bundle.ContributionOutcomes)),
+		Evidence:             make([]*evidence.Evidence, len(bundle.Evidence)),
 	}
 	for i, e := range bundle.TriageEvents {
 		copy := *e
@@ -81,6 +93,18 @@ func SanitizeBundle(bundle *Bundle) *Bundle {
 		copy := *o
 		copy.Reason = sanitizeString(copy.Reason)
 		out.ContributionOutcomes[i] = &copy
+	}
+	for i, item := range bundle.Evidence {
+		itemCopy := *item
+		itemCopy.Description = sanitizeString(itemCopy.Description)
+		itemCopy.SourceRefs = append([]domain.SourceRef(nil), itemCopy.SourceRefs...)
+		for j := range itemCopy.SourceRefs {
+			itemCopy.SourceRefs[j].Source = sanitizeString(itemCopy.SourceRefs[j].Source)
+			itemCopy.SourceRefs[j].URL = sanitizeString(itemCopy.SourceRefs[j].URL)
+			itemCopy.SourceRefs[j].CommitSHA = sanitizeString(itemCopy.SourceRefs[j].CommitSHA)
+		}
+		itemCopy.SourceProvenance = append([]evidence.SourceRevision(nil), itemCopy.SourceProvenance...)
+		out.Evidence[i] = &itemCopy
 	}
 	return out
 }

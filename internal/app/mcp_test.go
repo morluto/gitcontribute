@@ -333,6 +333,11 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 	if evOut.Total != 2 || len(evOut.Evidence) != 2 || evOut.Evidence[0].Relation != "supporting" {
 		t.Fatalf("unexpected evidence: %+v", evOut)
 	}
+	for _, item := range evOut.Evidence {
+		if item.Freshness != string(evidence.FreshnessNotApplicable) || item.FreshnessReason == "" {
+			t.Fatalf("evidence freshness missing from MCP output: %+v", item)
+		}
+	}
 
 	evByInv, err := reader.Evidence(ctx, mcpserver.EvidenceInput{InvestigationID: inv.ID, Relation: "supporting", Limit: 10})
 	if err != nil {

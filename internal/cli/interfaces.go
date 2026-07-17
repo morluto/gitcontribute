@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/health"
@@ -591,23 +590,6 @@ type EvidenceService interface {
 	ShowEvidence(ctx context.Context, investigationID string) (*EvidenceResult, error)
 }
 
-// EvidenceResult is the evidence packet for an investigation.
-type EvidenceResult struct {
-	InvestigationID string         `json:"investigation_id"`
-	Evidence        []EvidenceItem `json:"evidence"`
-}
-
-// EvidenceItem is a single piece of evidence.
-type EvidenceItem struct {
-	ID              string `json:"id"`
-	Type            string `json:"type"`
-	Relation        string `json:"relation"`
-	Description     string `json:"description"`
-	ValidationRunID string `json:"validation_run_id,omitempty"`
-	OpportunityID   string `json:"opportunity_id,omitempty"`
-	CreatedAt       string `json:"created_at"`
-}
-
 // ContributionService is the optional contribution drafting capability used by the CLI.
 type ContributionService interface {
 	PrepareIssue(ctx context.Context, opportunityID string, opts PrepareIssueOptions) (*DraftResult, error)
@@ -993,25 +975,4 @@ type ContributionOutcomeResult struct {
 type ContributionOutcomeListResult struct {
 	ContributionID string                      `json:"contribution_id"`
 	Outcomes       []ContributionOutcomeResult `json:"outcomes"`
-}
-
-type MetadataExportOptions struct {
-	Limit int
-}
-
-type MetadataExportResult struct {
-	Data                 json.RawMessage `json:"data"`
-	TriageEvents         int             `json:"triage_events"`
-	Contributions        int             `json:"contributions"`
-	ContributionOutcomes int             `json:"contribution_outcomes"`
-}
-
-type MetadataImportOptions struct {
-	Data []byte
-}
-
-type MetadataImportResult struct {
-	TriageEvents         int `json:"triage_events"`
-	Contributions        int `json:"contributions"`
-	ContributionOutcomes int `json:"contribution_outcomes"`
 }

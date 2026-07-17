@@ -250,13 +250,6 @@ func (c *Corpus) promoteHypothesis(ctx context.Context, hypothesis *investigatio
 	if err != nil {
 		return err
 	}
-	var evidencePayload string
-	if item != nil {
-		evidencePayload, err = marshalWorkflow(item)
-		if err != nil {
-			return err
-		}
-	}
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin hypothesis promotion: %w", err)
@@ -287,11 +280,7 @@ func (c *Corpus) promoteHypothesis(ctx context.Context, hypothesis *investigatio
 		return fmt.Errorf("save promoted opportunity: %w", err)
 	}
 	if item != nil {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO evidence (id, investigation_id, hypothesis_id, opportunity_id, relation, evidence_type, payload, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		`, item.ID, item.InvestigationID, item.HypothesisID, item.OpportunityID,
-			item.Relation, item.Type, evidencePayload, encodeTime(item.CreatedAt)); err != nil {
+		if err := c.insertEvidenceTx(ctx, tx, item); err != nil {
 			return fmt.Errorf("save promotion evidence: %w", err)
 		}
 	}
@@ -448,78 +437,6 @@ func (c *Corpus) GetValidationRun(ctx context.Context, id string) (*evidence.Val
 		return nil, err
 	}
 	return &item, nil
-}
-
-// SaveEvidence inserts or updates an evidence record and its provenance.
-func (c *Corpus) SaveEvidence(ctx context.Context, item *evidence.Evidence) error {
-	if item == nil || item.ID == "" {
-		return errors.New("evidence id is required")
-	}
-	payload, err := marshalWorkflow(item)
-	if err != nil {
-		return err
-	}
-	_, err = c.db.ExecContext(ctx, `
-		INSERT INTO evidence (id, investigation_id, hypothesis_id, opportunity_id, relation, evidence_type, payload, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (id) DO UPDATE SET investigation_id=excluded.investigation_id,
-			hypothesis_id=excluded.hypothesis_id, opportunity_id=excluded.opportunity_id,
-			relation=excluded.relation, evidence_type=excluded.evidence_type, payload=excluded.payload
-	`, item.ID, item.InvestigationID, item.HypothesisID, item.OpportunityID, item.Relation, item.Type, payload, encodeTime(item.CreatedAt))
-	if err != nil {
-		return fmt.Errorf("save evidence: %w", err)
-	}
-	return nil
-}
-
-// CreateEvidence inserts evidence and rejects an existing ID.
-func (c *Corpus) CreateEvidence(ctx context.Context, item *evidence.Evidence) error {
-	return c.SaveEvidence(ctx, item)
-}
-
-// ListEvidence returns evidence matching the supplied local filter.
-func (c *Corpus) ListEvidence(ctx context.Context, filter evidence.EvidenceFilter) ([]*evidence.Evidence, error) {
-	query := `SELECT e.payload FROM evidence e WHERE 1=1`
-	var args []any
-	if filter.InvestigationID != "" {
-		query += ` AND (
-			e.investigation_id=?
-			OR e.opportunity_id IN (SELECT id FROM opportunities WHERE investigation_id=?)
-			OR e.hypothesis_id IN (SELECT id FROM hypotheses WHERE investigation_id=?)
-		)`
-		args = append(args, filter.InvestigationID, filter.InvestigationID, filter.InvestigationID)
-	}
-	if filter.HypothesisID != "" {
-		query += ` AND e.hypothesis_id=?`
-		args = append(args, filter.HypothesisID)
-	}
-	if filter.OpportunityID != "" {
-		query += ` AND e.opportunity_id=?`
-		args = append(args, filter.OpportunityID)
-	}
-	if filter.Relation != "" {
-		query += ` AND e.relation=?`
-		args = append(args, filter.Relation)
-	}
-	query += ` ORDER BY e.created_at, e.id LIMIT 10000`
-	rows, err := c.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list evidence: %w", err)
-	}
-	defer rows.Close()
-	var out []*evidence.Evidence
-	for rows.Next() {
-		var payload string
-		if err := rows.Scan(&payload); err != nil {
-			return nil, err
-		}
-		var item evidence.Evidence
-		if err := unmarshalWorkflow(payload, &item); err != nil {
-			return nil, err
-		}
-		out = append(out, &item)
-	}
-	return out, rows.Err()
 }
 
 // SaveIssueDraft persists the latest rendered issue draft for an opportunity.
