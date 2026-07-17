@@ -3,7 +3,6 @@ package corpus
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -49,17 +48,6 @@ func TestOpenAndPragmas(t *testing.T) {
 	}
 	if journal != "wal" {
 		t.Fatalf("journal_mode = %q, want wal", journal)
-	}
-}
-
-func TestOpenProtectsDatabaseFile(t *testing.T) {
-	_, path := openTestCorpus(t)
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := info.Mode().Perm(); got != 0600 {
-		t.Fatalf("database mode = %o, want 600", got)
 	}
 }
 

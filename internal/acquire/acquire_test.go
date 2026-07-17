@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -66,6 +67,9 @@ func TestValidateRemoteRejectsCredentialsAndPreservesSSH(t *testing.T) {
 }
 
 func TestWriteMetadataAtomicallyWithPrivatePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not expose Unix permission bits")
+	}
 	cachePath := t.TempDir()
 	manager := &Manager{}
 	want := &Acquisition{Owner: "owner", Repo: "repo", CachePath: cachePath, CommitSHA: "abc123"}

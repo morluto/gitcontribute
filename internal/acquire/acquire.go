@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -467,7 +468,7 @@ func validateRemote(remote string) error {
 	if strings.Contains(remote, "::") {
 		return ErrInvalidRemote
 	}
-	if filepath.IsAbs(remote) || strings.HasPrefix(remote, "file://") {
+	if filepath.IsAbs(remote) || path.IsAbs(remote) || strings.HasPrefix(remote, "file://") {
 		return nil
 	}
 	if strings.HasPrefix(remote, "https://") {

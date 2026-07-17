@@ -101,8 +101,12 @@ func TestPathsDirs(t *testing.T) {
 			if tt.wantErr {
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("dir mismatch\ngot:  %#v\nwant: %#v", got, tt.want)
+			want := make(map[string]string, len(tt.want))
+			for name, dir := range tt.want {
+				want[name] = filepath.FromSlash(dir)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("dir mismatch\ngot:  %#v\nwant: %#v", got, want)
 			}
 		})
 	}
