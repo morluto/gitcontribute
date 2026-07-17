@@ -74,11 +74,12 @@ type ThreadInput struct {
 }
 
 type SearchInput struct {
-	Query string `json:"query" jsonschema:"Full-text query"`
-	Owner string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo  string `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Kind  string `json:"kind,omitempty" jsonschema:"Optional thread kind"`
-	Limit int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Query  string `json:"query" jsonschema:"Full-text query"`
+	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
+	Repo   string `json:"repo,omitempty" jsonschema:"Optional repository name"`
+	Kind   string `json:"kind,omitempty" jsonschema:"Optional thread kind"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
 }
 
 type RepositoryOutput struct {
@@ -102,9 +103,10 @@ type ThreadOutput struct {
 }
 
 type SearchOutput struct {
-	Query   string         `json:"query"`
-	Matches []ThreadOutput `json:"matches"`
-	Total   int            `json:"total"`
+	Query      string         `json:"query"`
+	Matches    []ThreadOutput `json:"matches"`
+	Total      int            `json:"total"`
+	NextCursor string         `json:"next_cursor,omitempty"`
 }
 
 type DossierOutput struct {
@@ -123,10 +125,11 @@ type SourceRef struct {
 }
 
 type SearchCodeInput struct {
-	Query string `json:"query" jsonschema:"Code search query"`
-	Owner string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo  string `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Limit int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Query  string `json:"query" jsonschema:"Code search query"`
+	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
+	Repo   string `json:"repo,omitempty" jsonschema:"Optional repository name"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
 }
 
 type CodeMatchOutput struct {
@@ -140,9 +143,10 @@ type CodeMatchOutput struct {
 }
 
 type SearchCodeOutput struct {
-	Query   string            `json:"query"`
-	Total   int               `json:"total"`
-	Matches []CodeMatchOutput `json:"matches"`
+	Query      string            `json:"query"`
+	Total      int               `json:"total"`
+	Matches    []CodeMatchOutput `json:"matches"`
+	NextCursor string            `json:"next_cursor,omitempty"`
 }
 
 type InvestigationInput struct {

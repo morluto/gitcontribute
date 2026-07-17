@@ -47,8 +47,9 @@ func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpserver.SearchR
 	}
 
 	res, err := r.Service.searchCorpus(ctx, in.Query, cli.SearchOptions{
-		Kind:  "repos",
-		Limit: in.Limit,
+		Kind:   "repos",
+		Limit:  in.Limit,
+		Cursor: in.Cursor,
 	})
 	if err != nil {
 		return mcpserver.SearchRepositoriesOutput{}, err
@@ -63,7 +64,7 @@ func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpserver.SearchR
 			Fields:    m.Fields,
 		}
 	}
-	return mcpserver.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: matches}, nil
+	return mcpserver.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: matches, NextCursor: res.NextCursor}, nil
 }
 
 func repositoryToMCPOutput(repo *corpus.Repository) mcpserver.RepositoryOutput {
@@ -202,8 +203,8 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		out.Title = match.Path
 		out.Snippet = boundedText(match.Content, 2000)
 		out.MatchedFields, out.Score = matchTerms(in.Query, map[string]string{"code": match.Content})
-		out.SourceRevision = formatTime(repo.SourceUpdatedAt)
-		out.AsOf = formatTime(time.Now().UTC())
+		out.SourceRevision = match.Commit
+		out.AsOf = formatTime(match.SnapshotCreatedAt)
 	case "repo":
 		out.Kind = "repo"
 		out.Title = ref.String()

@@ -10,6 +10,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/mcpserver"
 )
 
 func newSearchTestService(t *testing.T) *Service {
@@ -98,6 +99,15 @@ func TestSearchReturnsNextCursorAndCoverage(t *testing.T) {
 		if diff := cmp.Diff([]string{"metadata", "threads"}, match.Coverage); diff != "" {
 			t.Fatalf("match coverage mismatch (-want +got):\n%s", diff)
 		}
+	}
+
+	mcpFirst, err := (&MCPReader{Service: svc}).Search(ctx, mcpserver.SearchInput{Query: "term", Kind: "issues", Limit: 2})
+	if err != nil || mcpFirst.NextCursor == "" || len(mcpFirst.Matches) != 2 {
+		t.Fatalf("MCP first page = %+v, err=%v", mcpFirst, err)
+	}
+	mcpSecond, err := (&MCPReader{Service: svc}).Search(ctx, mcpserver.SearchInput{Query: "term", Kind: "issues", Limit: 2, Cursor: mcpFirst.NextCursor})
+	if err != nil || len(mcpSecond.Matches) != 2 {
+		t.Fatalf("MCP second page = %+v, err=%v", mcpSecond, err)
 	}
 }
 

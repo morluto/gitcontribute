@@ -14,23 +14,26 @@ import (
 // V1 read-only tool inputs and outputs.
 
 type SearchRepositoriesInput struct {
-	Query string `json:"query,omitempty" jsonschema:"Full-text query over repository owner, name, and description"`
-	Owner string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo  string `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Limit int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Query  string `json:"query,omitempty" jsonschema:"Full-text query over repository owner, name, and description"`
+	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
+	Repo   string `json:"repo,omitempty" jsonschema:"Optional repository name"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
 }
 
 type SearchRepositoriesOutput struct {
-	Query   string             `json:"query"`
-	Total   int                `json:"total"`
-	Matches []RepositoryOutput `json:"matches"`
+	Query      string             `json:"query"`
+	Total      int                `json:"total"`
+	Matches    []RepositoryOutput `json:"matches"`
+	NextCursor string             `json:"next_cursor,omitempty"`
 }
 
 type SearchThreadsInput struct {
-	Query string `json:"query" jsonschema:"Full-text query over thread titles and bodies"`
-	Owner string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo  string `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Limit int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Query  string `json:"query" jsonschema:"Full-text query over thread titles and bodies"`
+	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
+	Repo   string `json:"repo,omitempty" jsonschema:"Optional repository name"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
 }
 
 type GetRepositoryDossierInput RepoInput
@@ -439,10 +442,11 @@ func (s *Server) searchThreads(ctx context.Context, _ *mcp.CallToolRequest, in S
 		return nil, SearchOutput{}, errors.New("owner and repo must be provided together")
 	}
 	searchIn := SearchInput{
-		Query: in.Query,
-		Owner: in.Owner,
-		Repo:  in.Repo,
-		Limit: in.Limit,
+		Query:  in.Query,
+		Owner:  in.Owner,
+		Repo:   in.Repo,
+		Limit:  in.Limit,
+		Cursor: in.Cursor,
 	}
 	out, err := s.reader.Search(ctx, searchIn)
 	return nil, out, err
