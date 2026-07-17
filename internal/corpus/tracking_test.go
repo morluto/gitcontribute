@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
 	"github.com/morluto/gitcontribute/internal/tracking"
 )
@@ -205,6 +206,10 @@ func TestExportImportLocalMetadataIsIdempotent(t *testing.T) {
 	svc := tracking.NewService(c)
 	repo, _ := c.ApplyRepositoryObservation(ctx, "owner", "repo", "123", time.Unix(1, 0).UTC(), `{}`)
 	c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "bug", "body", "alice", time.Unix(2, 0).UTC(), `{}`)
+	source, err := c.CurrentSourceRevision(ctx, evidence.SourceSubject{Kind: evidence.SourceSubjectRepository, Owner: "owner", Repo: "repo"})
+	if err != nil || source == nil {
+		t.Fatalf("current repository source = (%+v, %v)", source, err)
+	}
 
 	event, _ := svc.RecordTriageEvent(ctx, &tracking.TriageEvent{
 		TargetKind: tracking.TargetIssue,
@@ -221,13 +226,33 @@ func TestExportImportLocalMetadataIsIdempotent(t *testing.T) {
 		ContributionID: contribution.ID,
 		Outcome:        tracking.OutcomeSubmitted,
 	})
+	evSvc := evidence.NewService(c, evidence.NewExecRunner())
+	if err := evSvc.CreateEvidence(ctx, &evidence.Evidence{
+		ID:              "ev-1",
+		InvestigationID: inv.ID,
+		HypothesisID:    h.ID,
+		OpportunityID:   opp.ID,
+		Type:            evidence.EvidenceTypeGitHubSource,
+		Relation:        evidence.RelationSupporting,
+		Description:     "repository metadata supported the opportunity",
+		SourceProvenance: []evidence.SourceRevision{
+			*source,
+		},
+		CreatedAt: time.Unix(3, 0).UTC(),
+	}); err != nil {
+		t.Fatalf("create evidence: %v", err)
+	}
 
 	bundle, err := svc.ExportLocalMetadata(ctx, tracking.ExportOptions{})
 	if err != nil {
 		t.Fatalf("export local metadata: %v", err)
 	}
-	if len(bundle.TriageEvents) != 1 || len(bundle.Contributions) != 1 || len(bundle.ContributionOutcomes) != 1 {
+	if bundle.SchemaVersion != tracking.CurrentBundleSchemaVersion ||
+		len(bundle.TriageEvents) != 1 || len(bundle.Contributions) != 1 || len(bundle.ContributionOutcomes) != 1 || len(bundle.Evidence) != 1 {
 		t.Fatalf("unexpected bundle: %+v", bundle)
+	}
+	if len(bundle.Evidence[0].SourceProvenance) != 1 {
+		t.Fatalf("evidence provenance missing from bundle: %+v", bundle.Evidence[0])
 	}
 
 	if err := svc.ImportLocalMetadata(ctx, bundle); err != nil {
@@ -253,6 +278,44 @@ func TestExportImportLocalMetadataIsIdempotent(t *testing.T) {
 	// The imported contribution should still be linked to the original opportunity.
 	if contribs[0].OpportunityID != opp.ID {
 		t.Fatalf("expected contribution opportunity %q, got %q", opp.ID, contribs[0].OpportunityID)
+	}
+
+	items, err := c.ListEvidence(ctx, evidence.EvidenceFilter{OpportunityID: opp.ID})
+	if err != nil {
+		t.Fatalf("list evidence: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "ev-1" || len(items[0].SourceProvenance) != 1 {
+		t.Fatalf("unexpected imported evidence: %+v", items)
+	}
+}
+
+func TestImportLocalMetadataBundleVersionCompatibility(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	svc := tracking.NewService(c)
+
+	legacy := &tracking.Bundle{TriageEvents: []*tracking.TriageEvent{
+		{ID: "legacy", TargetKind: tracking.TargetRepository, TargetRef: "owner/repo", Outcome: tracking.OutcomeSaved},
+	}}
+	if err := svc.ImportLocalMetadata(ctx, legacy); err != nil {
+		t.Fatalf("legacy import: %v", err)
+	}
+
+	future := &tracking.Bundle{
+		SchemaVersion: tracking.CurrentBundleSchemaVersion + 1,
+		TriageEvents: []*tracking.TriageEvent{
+			{ID: "future", TargetKind: tracking.TargetRepository, TargetRef: "owner/repo", Outcome: tracking.OutcomeIgnored},
+		},
+	}
+	if err := svc.ImportLocalMetadata(ctx, future); err == nil {
+		t.Fatal("expected future schema version error")
+	}
+	events, err := svc.ListTriageEvents(ctx, tracking.TriageEventFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].ID != "legacy" {
+		t.Fatalf("future import wrote before rejecting: %+v", events)
 	}
 }
 
@@ -349,13 +412,25 @@ func TestExportRedactsSecretsAndLocalPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("record triage event: %v", err)
 	}
+	evSvc := evidence.NewService(c, evidence.NewExecRunner())
+	if err := evSvc.CreateEvidence(ctx, &evidence.Evidence{
+		ID:          "ev-secret",
+		Type:        evidence.EvidenceTypeManualObservation,
+		Relation:    evidence.RelationSupporting,
+		Description: strings.Join([]string{"api_key", "=supersecret from /home/user/private-file"}, ""),
+		SourceRefs: []domain.SourceRef{
+			{Source: "local", URL: "/home/user/private-file"},
+		},
+	}); err != nil {
+		t.Fatalf("record evidence: %v", err)
+	}
 
 	bundle, err := svc.ExportLocalMetadata(ctx, tracking.ExportOptions{})
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}
-	if len(bundle.TriageEvents) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(bundle.TriageEvents))
+	if len(bundle.TriageEvents) != 1 || len(bundle.Evidence) != 1 {
+		t.Fatalf("unexpected export counts: %+v", bundle)
 	}
 	reason := bundle.TriageEvents[0].Reason
 	if containsAny(reason, []string{"test-token", "/home/user/"}) {
@@ -363,6 +438,13 @@ func TestExportRedactsSecretsAndLocalPaths(t *testing.T) {
 	}
 	if !containsAny(reason, []string{"[REDACTED]", "[REDACTED_PATH]"}) {
 		t.Fatalf("expected redaction markers in reason: %s", reason)
+	}
+	evidenceItem := bundle.Evidence[0]
+	if containsAny(evidenceItem.Description, []string{"supersecret", "/home/user/"}) {
+		t.Fatalf("export evidence description not redacted: %s", evidenceItem.Description)
+	}
+	if len(evidenceItem.SourceRefs) != 1 || containsAny(evidenceItem.SourceRefs[0].URL, []string{"/home/user/"}) {
+		t.Fatalf("export evidence source ref not redacted: %+v", evidenceItem.SourceRefs)
 	}
 }
 

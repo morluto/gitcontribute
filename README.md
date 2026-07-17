@@ -421,10 +421,18 @@ gitcontribute hypothesis add --title="Fix retry timeout" \
 Record supporting or contradicting evidence:
 
 ```sh
-gitcontribute evidence add --type=note --relation=supporting \
+gitcontribute evidence add --type=manual_observation --relation=supporting \
   --description="Reproduced on the current default branch." \
   --opportunity <opportunity-id>
 ```
+
+Evidence shown through the CLI, exports, and MCP includes a derived freshness
+status. `github_source` evidence recorded from a started thread carries the
+exact corpus source revision it used, so later issue, pull request, facet, or
+guidance updates can mark it `stale`. Missing source projections are
+`unknown`; local/manual evidence is `not_applicable`. Freshness is evaluated
+from local corpus reads only, and stale evidence is a prompt to re-check, not a
+claim that the evidence is invalid.
 
 Group typed references and record local decisions:
 
@@ -445,7 +453,9 @@ gitcontribute tracking export --output tracking.json
 gitcontribute tracking import --file tracking.json
 ```
 
-Exports are redacted: they exclude credentials, tokens, and absolute local paths.
+Tracking exports use schema version 2 for portable evidence provenance and
+remain backward compatible with older unversioned tracking bundles. Exports are
+redacted: they exclude credentials, tokens, and absolute local paths.
 
 </details>
 

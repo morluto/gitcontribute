@@ -136,14 +136,9 @@ func (s *Service) ShowEvidence(ctx context.Context, investigationID string) (*cl
 
 	out := make([]cli.EvidenceItem, len(items))
 	for i, e := range items {
-		out[i] = cli.EvidenceItem{
-			ID:              e.ID,
-			Type:            string(e.Type),
-			Relation:        string(e.Relation),
-			Description:     e.Description,
-			ValidationRunID: e.ValidationRunID,
-			OpportunityID:   e.OpportunityID,
-			CreatedAt:       formatTime(e.CreatedAt),
+		out[i], err = evidenceItemResult(ctx, c, e)
+		if err != nil {
+			return nil, fmt.Errorf("evaluate evidence %q: %w", e.ID, err)
 		}
 	}
 
@@ -156,13 +151,14 @@ func (s *Service) ShowEvidence(ctx context.Context, investigationID string) (*cl
 // RecordEvidenceInput carries a new evidence item for an investigation,
 // hypothesis, or opportunity.
 type RecordEvidenceInput struct {
-	InvestigationID string
-	HypothesisID    string
-	OpportunityID   string
-	Type            string
-	Relation        string
-	Description     string
-	SourceRefs      []domain.SourceRef
+	InvestigationID  string
+	HypothesisID     string
+	OpportunityID    string
+	Type             string
+	Relation         string
+	Description      string
+	SourceRefs       []domain.SourceRef
+	SourceProvenance []evidence.SourceRevision
 }
 
 // RecordEvidence stores an evidence item scoped to its parent workflow.
@@ -194,23 +190,33 @@ func (s *Service) RecordEvidence(ctx context.Context, input RecordEvidenceInput)
 		hypothesisID = h.ID
 		investigationID = h.InvestigationID
 	case input.InvestigationID != "":
-		_, err := invSvc.GetInvestigation(ctx, input.InvestigationID)
-		if err != nil {
-			return nil, mapInvestigationError(err)
-		}
 		investigationID = input.InvestigationID
 	default:
 		return nil, errors.New("an investigation, hypothesis, or opportunity scope is required")
 	}
+	inv, err := invSvc.GetInvestigation(ctx, investigationID)
+	if err != nil {
+		return nil, mapInvestigationError(err)
+	}
+
+	sourceRefs := append([]domain.SourceRef(nil), input.SourceRefs...)
+	provenance := append([]evidence.SourceRevision(nil), input.SourceProvenance...)
+	if len(provenance) == 0 && evidence.EvidenceType(input.Type) == evidence.EvidenceTypeGitHubSource && inv.ThreadBaseline != nil {
+		provenance = []evidence.SourceRevision{sourceRevisionFromThreadBaseline(*inv.ThreadBaseline)}
+		if len(sourceRefs) == 0 {
+			sourceRefs = []domain.SourceRef{inv.ThreadBaseline.Source}
+		}
+	}
 
 	e := &evidence.Evidence{
-		InvestigationID: investigationID,
-		HypothesisID:    hypothesisID,
-		OpportunityID:   opportunityID,
-		Type:            evidence.EvidenceType(input.Type),
-		Relation:        evidence.Relation(input.Relation),
-		Description:     strings.TrimSpace(input.Description),
-		SourceRefs:      append([]domain.SourceRef(nil), input.SourceRefs...),
+		InvestigationID:  investigationID,
+		HypothesisID:     hypothesisID,
+		OpportunityID:    opportunityID,
+		Type:             evidence.EvidenceType(input.Type),
+		Relation:         evidence.Relation(input.Relation),
+		Description:      strings.TrimSpace(input.Description),
+		SourceRefs:       sourceRefs,
+		SourceProvenance: provenance,
 	}
 
 	c, err := s.openCorpus(ctx)

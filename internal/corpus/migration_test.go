@@ -100,6 +100,49 @@ func TestMigration019DownAndUp(t *testing.T) {
 	}
 }
 
+func TestMigration020DownAndUp(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "corpus.db")
+	dsn := path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	sub, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
+		t.Fatalf("open migration filesystem: %v", err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, sub, goose.WithLogger(noopLogger{}))
+	if err != nil {
+		t.Fatalf("create migration provider: %v", err)
+	}
+	if _, err := provider.UpTo(ctx, 19); err != nil {
+		t.Fatalf("migrate up to 019: %v", err)
+	}
+	if evidenceHasSourceProvenance(ctx, t, db) {
+		t.Fatal("source_provenance exists before migration 020")
+	}
+	if _, err := provider.UpTo(ctx, 20); err != nil {
+		t.Fatalf("migrate up to 020: %v", err)
+	}
+	if !evidenceHasSourceProvenance(ctx, t, db) {
+		t.Fatal("source_provenance missing after migration 020")
+	}
+	if _, err := provider.DownTo(ctx, 19); err != nil {
+		t.Fatalf("migrate down from 020: %v", err)
+	}
+	if evidenceHasSourceProvenance(ctx, t, db) {
+		t.Fatal("source_provenance remains after migration 020 down")
+	}
+	if _, err := provider.UpTo(ctx, 20); err != nil {
+		t.Fatalf("migrate up to 020 again: %v", err)
+	}
+	if !evidenceHasSourceProvenance(ctx, t, db) {
+		t.Fatal("source_provenance missing after second migration 020 up")
+	}
+}
+
 func threadsHaveColumns(t *testing.T, ctx context.Context, db *sql.DB, cols []string) bool {
 	t.Helper()
 	for _, col := range cols {
@@ -120,6 +163,15 @@ func investigationsHaveOriginKey(ctx context.Context, t *testing.T, db *sql.DB) 
 	var found int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('investigations') WHERE name='origin_key'`).Scan(&found); err != nil {
 		t.Fatalf("query investigation columns: %v", err)
+	}
+	return found == 1
+}
+
+func evidenceHasSourceProvenance(ctx context.Context, t *testing.T, db *sql.DB) bool {
+	t.Helper()
+	var found int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('evidence') WHERE name='source_provenance'`).Scan(&found); err != nil {
+		t.Fatalf("query evidence columns: %v", err)
 	}
 	return found == 1
 }

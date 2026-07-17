@@ -233,8 +233,8 @@ func (c *CLI) runTrackingExport(ctx context.Context, cmd *trackingExportCmd, ser
 		if err := os.WriteFile(cmd.Output, result.Data, 0600); err != nil {
 			return c.mapError(fmt.Errorf("write export: %w", err))
 		}
-		fmt.Fprintf(c.stderr, "wrote tracking metadata export to %s (%d triage, %d contributions, %d outcomes)\n",
-			cmd.Output, result.TriageEvents, result.Contributions, result.ContributionOutcomes)
+		fmt.Fprintf(c.stderr, "wrote tracking metadata export v%d to %s (%d triage, %d contributions, %d outcomes, %d evidence)\n",
+			result.SchemaVersion, cmd.Output, result.TriageEvents, result.Contributions, result.ContributionOutcomes, result.Evidence)
 		return nil
 	}
 	if _, err := c.stdout.Write(result.Data); err != nil {

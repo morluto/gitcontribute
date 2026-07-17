@@ -243,32 +243,6 @@ type OpportunityOutput struct {
 	UpdatedAt           string      `json:"updated_at"`
 }
 
-// EvidenceInput filters and bounds stored evidence.
-type EvidenceInput struct {
-	InvestigationID string `json:"investigation_id,omitempty" jsonschema:"Filter by investigation ID"`
-	OpportunityID   string `json:"opportunity_id,omitempty" jsonschema:"Filter by opportunity ID"`
-	Relation        string `json:"relation,omitempty" jsonschema:"Optional relation filter: supporting, contradicting, inconclusive, stale, invalid"`
-	Limit           int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-}
-
-// EvidenceItem is the stable MCP representation of one evidence record.
-type EvidenceItem struct {
-	ID          string      `json:"id"`
-	Type        string      `json:"type"`
-	Relation    string      `json:"relation"`
-	Description string      `json:"description"`
-	SourceRefs  []SourceRef `json:"source_refs,omitempty"`
-	CreatedAt   string      `json:"created_at"`
-}
-
-// EvidenceOutput contains bounded evidence matching a filter.
-type EvidenceOutput struct {
-	InvestigationID string         `json:"investigation_id,omitempty"`
-	OpportunityID   string         `json:"opportunity_id,omitempty"`
-	Total           int            `json:"total"`
-	Evidence        []EvidenceItem `json:"evidence"`
-}
-
 // FindClustersInput selects a repository and bounds duplicate clusters.
 type FindClustersInput struct {
 	Owner string `json:"owner" jsonschema:"GitHub repository owner"`

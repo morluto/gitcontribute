@@ -164,10 +164,12 @@ func (s *Service) ExportLocalMetadata(ctx context.Context, opts cli.MetadataExpo
 		return nil, fmt.Errorf("marshal local metadata: %w", err)
 	}
 	return &cli.MetadataExportResult{
+		SchemaVersion:        bundle.SchemaVersion,
 		Data:                 json.RawMessage(data),
 		TriageEvents:         len(bundle.TriageEvents),
 		Contributions:        len(bundle.Contributions),
 		ContributionOutcomes: len(bundle.ContributionOutcomes),
+		Evidence:             len(bundle.Evidence),
 	}, nil
 }
 
@@ -185,10 +187,16 @@ func (s *Service) ImportLocalMetadata(ctx context.Context, opts cli.MetadataImpo
 	if err := tracking.NewService(c).ImportLocalMetadata(ctx, &bundle); err != nil {
 		return nil, err
 	}
+	version, err := tracking.ResolveBundleVersion(&bundle)
+	if err != nil {
+		return nil, err
+	}
 	return &cli.MetadataImportResult{
+		SchemaVersion:        version,
 		TriageEvents:         len(bundle.TriageEvents),
 		Contributions:        len(bundle.Contributions),
 		ContributionOutcomes: len(bundle.ContributionOutcomes),
+		Evidence:             len(bundle.Evidence),
 	}, nil
 }
 

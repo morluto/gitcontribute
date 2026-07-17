@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
 	"github.com/morluto/gitcontribute/internal/tracking"
 )
@@ -505,7 +506,7 @@ func (c *Corpus) ExportLocalMetadata(ctx context.Context, opts tracking.ExportOp
 		return nil, fmt.Errorf("export limit cannot exceed 100000")
 	}
 
-	bundle := &tracking.Bundle{}
+	bundle := &tracking.Bundle{SchemaVersion: tracking.CurrentBundleSchemaVersion}
 
 	triageEvents, err := c.ListTriageEvents(ctx, tracking.TriageEventFilter{Limit: limit})
 	if err != nil {
@@ -522,6 +523,14 @@ func (c *Corpus) ExportLocalMetadata(ctx context.Context, opts tracking.ExportOp
 	if err := c.exportContributionOutcomes(ctx, bundle, limit); err != nil {
 		return nil, err
 	}
+	evidenceItems, err := c.ListEvidence(ctx, evidence.EvidenceFilter{})
+	if err != nil {
+		return nil, err
+	}
+	if len(evidenceItems) > limit {
+		evidenceItems = evidenceItems[:limit]
+	}
+	bundle.Evidence = evidenceItems
 
 	tracking.OrderBundle(bundle)
 	return tracking.SanitizeBundle(bundle), nil
@@ -577,6 +586,14 @@ func (c *Corpus) ImportLocalMetadata(ctx context.Context, bundle *tracking.Bundl
 			return fmt.Errorf("contribution outcome %d is null", i)
 		}
 	}
+	for i, item := range bundle.Evidence {
+		if item == nil {
+			return fmt.Errorf("evidence %d is null", i)
+		}
+		if err := c.validateImportedEvidenceScope(ctx, item); err != nil {
+			return fmt.Errorf("resolve evidence %q scope: %w", item.ID, err)
+		}
+	}
 
 	// Resolve triage links and validate contribution/outcome references outside
 	// the write transaction so the transaction contains only upserts and can be
@@ -615,7 +632,6 @@ func (c *Corpus) ImportLocalMetadata(ctx context.Context, bundle *tracking.Bundl
 			return fmt.Errorf("contribution %q not found for outcome %q", o.ContributionID, o.ID)
 		}
 	}
-
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin import local metadata: %w", err)
@@ -637,9 +653,44 @@ func (c *Corpus) ImportLocalMetadata(ctx context.Context, bundle *tracking.Bundl
 			return fmt.Errorf("import contribution outcome %q: %w", o.ID, err)
 		}
 	}
+	for _, item := range bundle.Evidence {
+		if err := c.saveEvidenceTx(ctx, tx, item); err != nil {
+			return fmt.Errorf("import evidence %q: %w", item.ID, err)
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit import local metadata: %w", err)
+	}
+	return nil
+}
+
+func (c *Corpus) validateImportedEvidenceScope(ctx context.Context, item *evidence.Evidence) error {
+	if item.InvestigationID != "" {
+		if _, err := c.GetInvestigation(ctx, item.InvestigationID); err != nil {
+			return err
+		}
+	}
+	if item.HypothesisID != "" {
+		hypothesis, err := c.GetHypothesis(ctx, item.HypothesisID)
+		if err != nil {
+			return err
+		}
+		if item.InvestigationID != "" && hypothesis.InvestigationID != item.InvestigationID {
+			return errors.New("hypothesis belongs to another investigation")
+		}
+	}
+	if item.OpportunityID != "" {
+		opportunity, err := c.GetOpportunity(ctx, item.OpportunityID)
+		if err != nil {
+			return err
+		}
+		if item.InvestigationID != "" && opportunity.InvestigationID != item.InvestigationID {
+			return errors.New("opportunity belongs to another investigation")
+		}
+		if item.HypothesisID != "" && opportunity.HypothesisID != item.HypothesisID {
+			return errors.New("opportunity belongs to another hypothesis")
+		}
 	}
 	return nil
 }
