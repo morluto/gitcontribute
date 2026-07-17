@@ -139,19 +139,40 @@ func (c *Corpus) applyFacetObservationTx(ctx context.Context, tx *sql.Tx, repoID
 // ListFacetObservations returns immutable observations for a facet, ordered by
 // observation sequence.
 func (c *Corpus) ListFacetObservations(ctx context.Context, repoID int64, threadID *int64, facet string) ([]FacetObservation, error) {
+	observations, _, err := c.listFacetObservations(ctx, repoID, threadID, facet, 0)
+	return observations, err
+}
+
+// ListFacetObservationsBounded returns at most limit immutable observations
+// and reports whether additional stored pages exist. Ordering matches
+// ListFacetObservations. It lets offline readers enforce a memory bound before
+// payload decoding.
+func (c *Corpus) ListFacetObservationsBounded(ctx context.Context, repoID int64, threadID *int64, facet string, limit int) ([]FacetObservation, bool, error) {
+	if limit <= 0 || limit > 1000 {
+		return nil, false, errors.New("facet observation limit must be between 1 and 1000")
+	}
+	return c.listFacetObservations(ctx, repoID, threadID, facet, limit)
+}
+
+func (c *Corpus) listFacetObservations(ctx context.Context, repoID int64, threadID *int64, facet string, limit int) ([]FacetObservation, bool, error) {
 	tid := sql.NullInt64{}
 	if threadID != nil {
 		tid.Int64 = *threadID
 		tid.Valid = true
 	}
-	rows, err := c.db.QueryContext(ctx, `
+	statement := `
 		SELECT id, repository_id, thread_id, facet, source_updated_at, observation_sequence, payload, observed_at
 		FROM facet_observations
 		WHERE repository_id = ? AND COALESCE(thread_id, -1) = COALESCE(?, -1) AND facet = ?
-		ORDER BY observation_sequence
-	`, repoID, tid, facet)
+		ORDER BY observation_sequence`
+	args := []any{repoID, tid, facet}
+	if limit > 0 {
+		statement += ` LIMIT ?`
+		args = append(args, limit+1)
+	}
+	rows, err := c.db.QueryContext(ctx, statement, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list facet observations: %w", err)
+		return nil, false, fmt.Errorf("list facet observations: %w", err)
 	}
 	defer rows.Close()
 
@@ -161,7 +182,7 @@ func (c *Corpus) ListFacetObservations(ctx context.Context, repoID int64, thread
 		var body sql.NullInt64
 		var src, observed int64
 		if err := rows.Scan(&o.ID, &o.RepositoryID, &body, &o.Facet, &src, &o.ObservationSequence, &o.Payload, &observed); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if body.Valid {
 			o.ThreadID = &body.Int64
@@ -170,5 +191,12 @@ func (c *Corpus) ListFacetObservations(ctx context.Context, repoID int64, thread
 		o.ObservedAt = scanTime(observed)
 		out = append(out, o)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	hasMore := limit > 0 && len(out) > limit
+	if hasMore {
+		out = out[:limit]
+	}
+	return out, hasMore, nil
 }

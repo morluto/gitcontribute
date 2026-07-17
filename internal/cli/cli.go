@@ -74,6 +74,7 @@ type rootCmd struct {
 	Sync          syncCmd          `cmd:"" help:"Sync a repository into the corpus"`
 	Search        searchCmd        `cmd:"" help:"Search the local corpus"`
 	Dossier       dossierCmd       `cmd:"" help:"Show repository dossier"`
+	Research      researchCmd      `cmd:"" help:"Build source-backed local research briefs"`
 	Seeds         seedsCmd         `cmd:"" help:"Extract evidence-backed contribution seeds"`
 	Index         indexCmd         `cmd:"" help:"Index a clean local checkout at its current commit"`
 	Acquire       acquireCmd       `cmd:"" help:"Clone or fetch a repository into the managed cache and index it"`
@@ -193,28 +194,6 @@ type searchKindCmd struct {
 	Cursor       string   `name:"cursor" help:"Opaque cursor returned by the previous page"`
 	Lens         string   `name:"lens" help:"Rank and filter with a saved lens"`
 	JSON         bool     `name:"json" help:"Print the result as JSON"`
-}
-
-type dossierCmd struct {
-	Build  dossierBuildCmd  `cmd:"" help:"Build and persist a repository dossier"`
-	Show   dossierShowCmd   `cmd:"" help:"Show the latest persisted dossier"`
-	Export dossierExportCmd `cmd:"" help:"Export a repository dossier"`
-}
-
-type dossierBuildCmd struct {
-	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
-	JSON      bool   `name:"json" help:"Print the result as JSON"`
-}
-
-type dossierShowCmd struct {
-	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
-	JSON      bool   `name:"json" help:"Print the result as JSON"`
-}
-
-type dossierExportCmd struct {
-	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
-	Format    string `name:"format" default:"markdown" enum:"json,markdown,md" help:"Export format"`
-	Output    string `name:"output" help:"Write to a file instead of stdout"`
 }
 
 type seedsCmd struct {
@@ -764,6 +743,8 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runSearch(ctx, command, &cli.Search)
 	case "dossier":
 		return c.runDossier(ctx, command, &cli.Dossier)
+	case "research":
+		return c.runResearch(ctx, command, &cli.Research)
 	case "seeds":
 		return c.runSeeds(ctx, &cli.Seeds)
 	case "index":
@@ -2041,53 +2022,6 @@ func (c *CLI) runSearch(ctx context.Context, command string, cmd *searchCmd) err
 		return c.mapError(err)
 	}
 	return c.render(selected.JSON, res)
-}
-
-func (c *CLI) runDossier(ctx context.Context, command string, cmd *dossierCmd) error {
-	service, err := c.dossierExtensionService()
-	if err != nil {
-		// Preserve the original dossier command for lightweight implementations.
-		if command == "dossier show" {
-			repo, parseErr := parseRepo(cmd.Show.OwnerRepo)
-			if parseErr != nil {
-				return parseErr
-			}
-			res, callErr := c.svc.Dossier(ctx, repo)
-			if callErr != nil {
-				return c.mapError(callErr)
-			}
-			return c.render(cmd.Show.JSON, res)
-		}
-		return err
-	}
-	var result any
-	var jsonOutput bool
-	switch command {
-	case "dossier build":
-		repo, err := parseRepo(cmd.Build.OwnerRepo)
-		if err != nil {
-			return err
-		}
-		result, err = service.BuildDossierForCLI(ctx, repo)
-		jsonOutput = cmd.Build.JSON
-	case "dossier show":
-		repo, err := parseRepo(cmd.Show.OwnerRepo)
-		if err != nil {
-			return err
-		}
-		result, err = service.GetDossierForCLI(ctx, repo)
-		jsonOutput = cmd.Show.JSON
-	case "dossier export":
-		return c.runExport(ctx, "export dossier", &exportCmd{Dossier: exportDossierCmd{
-			OwnerRepo: cmd.Export.OwnerRepo, Format: cmd.Export.Format, Output: cmd.Export.Output,
-		}})
-	default:
-		return NewCLIError(ExitUsage, fmt.Errorf("unknown dossier command: %s", command))
-	}
-	if err != nil {
-		return c.mapError(err)
-	}
-	return c.render(jsonOutput, result)
 }
 
 func (c *CLI) runSeeds(ctx context.Context, cmd *seedsCmd) error {

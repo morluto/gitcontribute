@@ -22,7 +22,7 @@ TUI ---------+              |
                   observations + projections
                             |
                             v
-              offline search, radar, health, dossiers,
+              offline search, radar, health, dossiers, thread briefs,
              investigations, evidence, and drafts
 ```
 
@@ -43,7 +43,7 @@ application and domain packages expose product-owned values and interfaces.
 
 | Capability | Examples | Network | Local write | Process execution | GitHub mutation |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Corpus read | search, health, dossier show, MCP resources | no | no | no | no |
+| Corpus read | search, health, dossier show, research brief, MCP resources | no | no | no | no |
 | Corpus write | investigations, evidence, lenses, tracking | no | yes | no | no |
 | GitHub read | sync, crawl, hydrate | yes | yes | no | no |
 | Git acquisition | acquire, workspace create | remote-dependent | yes | `git` only | no |
@@ -153,8 +153,11 @@ uses a bounded population and therefore does not support cursor pagination.
 Contribution Radar similarly ranks a bounded open-issue population, separates
 eligibility from score, and reports positive signals, risks, blockers, and
 unknown evidence. Missing coverage is never silently converted into a negative
-signal. Health metrics and dossier generation also operate only on stored facts
-and report partial or missing coverage when required facets are incomplete.
+signal. Health metrics, dossier generation, and thread research briefs also
+operate only on stored facts and report partial or missing coverage when
+required facets are incomplete. A research-brief section must carry a source
+reference or an explicit unknown reason; untrusted thread text remains data and
+cannot grant an adapter additional authority.
 
 ## Schema changes
 
