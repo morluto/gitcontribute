@@ -6,6 +6,7 @@ import (
 )
 
 func TestSanitizeMetadataRedactsSensitiveKeysRecursively(t *testing.T) {
+	fixtureToken := strings.Join([]string{"fixture", "token"}, "-")
 	in := map[string]any{
 		"title":       "ok",
 		"token":       "fixture-token",
@@ -24,7 +25,11 @@ func TestSanitizeMetadataRedactsSensitiveKeysRecursively(t *testing.T) {
 			map[string]any{"secret": "fixture-secret"},
 			"plain string",
 		},
-		"public": "visible",
+		"public":                "visible",
+		"env.GITHUB_TOKEN":      fixtureToken,
+		"headers.authorization": fixtureToken,
+		"github.token":          fixtureToken,
+		"parser.tokenizer":      "visible",
 	}
 
 	out := sanitizeMetadata(in)
@@ -34,6 +39,14 @@ func TestSanitizeMetadataRedactsSensitiveKeysRecursively(t *testing.T) {
 	}
 	if out["public"] != "visible" {
 		t.Fatalf("public = %v, want visible", out["public"])
+	}
+	for _, key := range []string{"env.GITHUB_TOKEN", "headers.authorization", "github.token"} {
+		if out[key] != "[REDACTED]" {
+			t.Fatalf("%s = %v, want [REDACTED]", key, out[key])
+		}
+	}
+	if out["parser.tokenizer"] != "visible" {
+		t.Fatalf("benign dotted key was redacted: %v", out["parser.tokenizer"])
 	}
 
 	sensitiveKeys := []string{"token", "api_key", "authToken", "client_id", "private_key"}
@@ -62,6 +75,29 @@ func TestSanitizeMetadataRedactsSensitiveKeysRecursively(t *testing.T) {
 	}
 	if list[1] != "plain string" {
 		t.Fatalf("list[1] = %v, want plain string", list[1])
+	}
+}
+
+func TestSanitizeStringRedactsCompletePathsContainingSpaces(t *testing.T) {
+	posixPath := strings.Join([]string{"", "home", "fixture-user", "Private Project", "credentials.txt"}, "/")
+	windowsPath := strings.Join([]string{`C:`, "Users", "fixture-user", "Private Project", "credentials.txt"}, `\`)
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "posix value", input: posixPath, want: "[REDACTED_PATH]"},
+		{name: "windows value", input: windowsPath, want: "[REDACTED_PATH]"},
+		{name: "quoted posix", input: `open "` + posixPath + `" now`, want: `open "[REDACTED_PATH]" now`},
+		{name: "quoted windows", input: `open '` + windowsPath + `' now`, want: `open '[REDACTED_PATH]' now`},
+		{name: "URL unchanged", input: "https://github.com/owner/repo", want: "https://github.com/owner/repo"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeString(tt.input); got != tt.want {
+				t.Fatalf("sanitizeString(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 

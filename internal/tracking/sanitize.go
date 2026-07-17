@@ -11,9 +11,16 @@ var (
 	authHeaderPattern   = regexp.MustCompile(`(?i)(Authorization\s*:\s*(?:Bearer|token|Token|Basic)\s+)(\S+)`)
 	legacyGitHubPat     = regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{36}`)
 	fineGrainedPat      = regexp.MustCompile(`github_pat_[A-Za-z0-9_]{22,}`)
-	absPathPattern      = regexp.MustCompile(`(?i)(^|[\s"'=])(/[A-Za-z0-9_.\-/]+|[A-Za-z]:\\[A-Za-z0-9_.\-\\]+)`)
-	sensitiveKeyPattern = regexp.MustCompile(`(?i)^[a-z_-]*(?:token|secret|password|api[-_]?key|auth[-_]?token|client[-_]?secret|client[-_]?id|access[-_]?token|credential|signature|private[-_]?key|authorization|github_pat)[a-z_-]*$`)
+	absPathPattern      = regexp.MustCompile(`(?i)(^|[\s"'=(])(/[A-Za-z0-9_.-][^"'\r\n,;}\]]*|[A-Za-z]:\\[^"'\r\n,;}\]]*)`)
+	keyComponentPattern = regexp.MustCompile(`[A-Za-z0-9]+`)
 )
+
+var sensitiveKeyComponents = map[string]struct{}{
+	"token": {}, "secret": {}, "password": {}, "authorization": {},
+	"credential": {}, "signature": {}, "apikey": {}, "authtoken": {},
+	"accesstoken": {}, "clientsecret": {}, "clientid": {},
+	"privatekey": {}, "githubpat": {},
+}
 
 // OrderBundle sorts each slice so the same records produce the same JSON.
 func OrderBundle(bundle *Bundle) {
@@ -123,7 +130,15 @@ func sanitizeMetadata(m map[string]any) map[string]any {
 }
 
 func isSensitiveKey(k string) bool {
-	return sensitiveKeyPattern.MatchString(k)
+	components := keyComponentPattern.FindAllString(k, -1)
+	for _, component := range components {
+		if _, ok := sensitiveKeyComponents[strings.ToLower(component)]; ok {
+			return true
+		}
+	}
+	compact := strings.ToLower(strings.Join(components, ""))
+	_, ok := sensitiveKeyComponents[compact]
+	return ok
 }
 
 func sanitizeValue(v any) any {
