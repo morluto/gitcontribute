@@ -15,6 +15,7 @@ import (
 // revision an evidence record used.
 type SourceSubjectKind string
 
+// Source subject kinds supported by evidence provenance.
 const (
 	SourceSubjectRepository SourceSubjectKind = "repository"
 	SourceSubjectThread     SourceSubjectKind = "thread"
@@ -29,12 +30,17 @@ const GuidanceFacet = "contribution_guidance"
 // winning local corpus projections.
 type FreshnessStatus string
 
+// Freshness statuses returned by read-time evidence evaluation.
 const (
 	FreshnessFresh         FreshnessStatus = "fresh"
 	FreshnessStale         FreshnessStatus = "stale"
 	FreshnessUnknown       FreshnessStatus = "unknown"
 	FreshnessNotApplicable FreshnessStatus = "not_applicable"
 )
+
+// ErrSourceRevisionUnavailable means a reader cannot find the current local
+// projection for a recorded source subject.
+var ErrSourceRevisionUnavailable = errors.New("evidence: source revision unavailable")
 
 // SourceSubject is a vendor-neutral identity for a repository, thread, or
 // independently refreshed facet.
@@ -62,8 +68,8 @@ type Freshness struct {
 	Reason string
 }
 
-// RevisionReader returns the current winning revision for one stored subject.
-// A nil revision means the subject or its current projection is unavailable.
+// RevisionReader returns the current winning revision for one stored subject,
+// or ErrSourceRevisionUnavailable when the current projection is unavailable.
 type RevisionReader interface {
 	CurrentSourceRevision(ctx context.Context, subject SourceSubject) (*SourceRevision, error)
 }
@@ -104,6 +110,10 @@ func (e *FreshnessEvaluator) Evaluate(ctx context.Context, item *Evidence) (Fres
 	var staleReasons, unknownReasons []string
 	for _, recorded := range revisions {
 		current, err := e.reader.CurrentSourceRevision(ctx, recorded.Subject)
+		if errors.Is(err, ErrSourceRevisionUnavailable) {
+			unknownReasons = append(unknownReasons, fmt.Sprintf("current revision for %s is unavailable", recorded.Subject))
+			continue
+		}
 		if err != nil {
 			return Freshness{}, fmt.Errorf("read current %s revision: %w", recorded.Subject, err)
 		}

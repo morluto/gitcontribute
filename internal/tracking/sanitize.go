@@ -95,16 +95,16 @@ func SanitizeBundle(bundle *Bundle) *Bundle {
 		out.ContributionOutcomes[i] = &copy
 	}
 	for i, item := range bundle.Evidence {
-		copy := *item
-		copy.Description = sanitizeString(copy.Description)
-		copy.SourceRefs = append([]domain.SourceRef(nil), copy.SourceRefs...)
-		for j := range copy.SourceRefs {
-			copy.SourceRefs[j].Source = sanitizeString(copy.SourceRefs[j].Source)
-			copy.SourceRefs[j].URL = sanitizeString(copy.SourceRefs[j].URL)
-			copy.SourceRefs[j].CommitSHA = sanitizeString(copy.SourceRefs[j].CommitSHA)
+		itemCopy := *item
+		itemCopy.Description = sanitizeString(itemCopy.Description)
+		itemCopy.SourceRefs = append([]domain.SourceRef(nil), itemCopy.SourceRefs...)
+		for j := range itemCopy.SourceRefs {
+			itemCopy.SourceRefs[j].Source = sanitizeString(itemCopy.SourceRefs[j].Source)
+			itemCopy.SourceRefs[j].URL = sanitizeString(itemCopy.SourceRefs[j].URL)
+			itemCopy.SourceRefs[j].CommitSHA = sanitizeString(itemCopy.SourceRefs[j].CommitSHA)
 		}
-		copy.SourceProvenance = append([]evidence.SourceRevision(nil), copy.SourceProvenance...)
-		out.Evidence[i] = &copy
+		itemCopy.SourceProvenance = append([]evidence.SourceRevision(nil), itemCopy.SourceProvenance...)
+		out.Evidence[i] = &itemCopy
 	}
 	return out
 }

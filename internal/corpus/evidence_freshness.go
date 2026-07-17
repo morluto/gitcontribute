@@ -63,7 +63,7 @@ func (c *Corpus) currentFacetSourceRevision(ctx context.Context, subject evidenc
 		SELECT id FROM repositories WHERE owner=? COLLATE NOCASE AND name=? COLLATE NOCASE
 	`, subject.Owner, subject.Repo).Scan(&repoID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, evidence.ErrSourceRevisionUnavailable
 	}
 	if err != nil {
 		return nil, fmt.Errorf("resolve source repository: %w", err)
@@ -76,7 +76,7 @@ func (c *Corpus) currentFacetSourceRevision(ctx context.Context, subject evidenc
 			SELECT id FROM threads WHERE repository_id=? AND kind=? AND number=?
 		`, repoID, subject.ThreadKind, subject.Number).Scan(&threadID.Int64)
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
+			return nil, evidence.ErrSourceRevisionUnavailable
 		}
 		if err != nil {
 			return nil, fmt.Errorf("resolve source thread: %w", err)
@@ -97,7 +97,7 @@ func (c *Corpus) currentFacetSourceRevision(ctx context.Context, subject evidenc
 
 func scannedSourceRevision(subject evidence.SourceSubject, sourceUpdatedAt, sequence, observedAt int64, err error) (*evidence.SourceRevision, error) {
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, evidence.ErrSourceRevisionUnavailable
 	}
 	if err != nil {
 		return nil, err

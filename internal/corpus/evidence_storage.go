@@ -54,9 +54,9 @@ func evidenceStorage(item *evidence.Evidence) (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("normalize source provenance: %w", err)
 	}
-	copy := *item
-	copy.SourceProvenance = provenance
-	payload, err := marshalWorkflow(&copy)
+	stored := *item
+	stored.SourceProvenance = provenance
+	payload, err := marshalWorkflow(&stored)
 	if err != nil {
 		return "", "", err
 	}
@@ -101,7 +101,7 @@ func (c *Corpus) ListEvidence(ctx context.Context, filter evidence.EvidenceFilte
 	if err != nil {
 		return nil, fmt.Errorf("list evidence: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*evidence.Evidence
 	for rows.Next() {
 		var payload, provenance string
