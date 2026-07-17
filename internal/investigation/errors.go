@@ -9,5 +9,6 @@ var (
 	ErrMissingTitle          = errors.New("investigation: title is required")
 	ErrMissingProblem        = errors.New("investigation: problem statement is required")
 	ErrInvalidCategory       = errors.New("investigation: invalid category")
+	ErrInvalidThreadBaseline = errors.New("investigation: invalid thread baseline")
 	ErrContradictingEvidence = errors.New("investigation: contradicting evidence blocks this transition")
 )

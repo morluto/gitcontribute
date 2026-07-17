@@ -1,6 +1,18 @@
 package tracking
 
-import "time"
+import (
+	"time"
+
+	"github.com/morluto/gitcontribute/internal/evidence"
+)
+
+const (
+	// LegacyBundleSchemaVersion is the implicit version used before bundles
+	// carried an explicit schema_version field.
+	LegacyBundleSchemaVersion = 1
+	// CurrentBundleSchemaVersion includes portable evidence provenance.
+	CurrentBundleSchemaVersion = 2
+)
 
 // Outcome records a local triage or lifecycle decision.
 type Outcome string
@@ -96,7 +108,9 @@ type ExportOptions struct {
 
 // Bundle is a portable, deterministic snapshot of local tracking metadata.
 type Bundle struct {
+	SchemaVersion        int                    `json:"schema_version,omitempty"`
 	TriageEvents         []*TriageEvent         `json:"triage_events"`
 	Contributions        []*Contribution        `json:"contributions"`
 	ContributionOutcomes []*ContributionOutcome `json:"contribution_outcomes"`
+	Evidence             []*evidence.Evidence   `json:"evidence,omitempty"`
 }

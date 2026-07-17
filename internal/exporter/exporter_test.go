@@ -65,8 +65,27 @@ func sampleEvidence() *cli.EvidenceResult {
 	return &cli.EvidenceResult{
 		InvestigationID: "inv-1",
 		Evidence: []cli.EvidenceItem{
-			{ID: "ev-2", Type: "manual_observation", Relation: "supporting", Description: " observed with Authorization: token ghp_000000000000000000000000000000000000", ValidationRunID: "run-1", OpportunityID: "opp-1", CreatedAt: now.Format(time.RFC3339)},
-			{ID: "ev-1", Type: "github_source", Relation: "supporting", Description: "Linked issue. api_key=supersecret", CreatedAt: now.Add(-time.Hour).Format(time.RFC3339)},
+			{
+				ID: "ev-2", Type: "manual_observation", Relation: "supporting",
+				Description:     " observed with Authorization: token ghp_000000000000000000000000000000000000",
+				ValidationRunID: "run-1", OpportunityID: "opp-1", Freshness: "not_applicable",
+				FreshnessReason: "local evidence has no corpus source revision", CreatedAt: now.Format(time.RFC3339),
+			},
+			{
+				ID: "ev-1", Type: "github_source", Relation: "supporting",
+				Description:     "Linked issue. api_key=supersecret",
+				Freshness:       "stale",
+				FreshnessReason: "thread issue:owner/repo#1 advanced from source_updated_at=2026-07-16T10:00:00Z",
+				SourceProvenance: []cli.EvidenceSourceRevisionResult{{
+					Subject: cli.EvidenceSourceSubjectResult{
+						Kind: "thread", Owner: "owner", Repo: "repo", ThreadKind: "issue", Number: 1,
+					},
+					SourceUpdatedAt:     now.Add(-2 * time.Hour).Format(time.RFC3339),
+					ObservationSequence: 7,
+					ObservedAt:          now.Add(-90 * time.Minute).Format(time.RFC3339),
+				}},
+				CreatedAt: now.Add(-time.Hour).Format(time.RFC3339),
+			},
 		},
 	}
 }
@@ -128,6 +147,25 @@ func TestEvidenceMarkdownDeterministic(t *testing.T) {
 	}
 	if !bytes.Equal(a.Bytes(), b.Bytes()) {
 		t.Fatalf("evidence markdown export is not deterministic:\n%s\n---\n%s", a.String(), b.String())
+	}
+}
+
+func TestEvidenceMarkdownIncludesFreshnessAndSourceRevisions(t *testing.T) {
+	t.Parallel()
+	e := sampleEvidence()
+	var buf bytes.Buffer
+	if err := ExportEvidenceMarkdown(&buf, e); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"freshness `stale`",
+		"Freshness reason: thread issue:owner/repo#1 advanced",
+		"Source revision: thread:owner/repo:issue:1:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("markdown missing %q:\n%s", want, out)
+		}
 	}
 }
 

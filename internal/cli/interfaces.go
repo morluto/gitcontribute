@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/health"
@@ -376,32 +375,9 @@ type InvestigationService interface {
 	SetOpportunityStatus(ctx context.Context, id, status, rationale string) (*OpportunityResult, error)
 }
 
-// InvestigationResult is a single investigation view.
-type InvestigationResult struct {
-	ID        string  `json:"id"`
-	Repo      RepoRef `json:"repo"`
-	CommitSHA string  `json:"commit_sha,omitempty"`
-	Lens      string  `json:"lens,omitempty"`
-	Status    string  `json:"status"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
-}
-
 // InvestigationListResult is a collection of investigations.
 type InvestigationListResult struct {
 	Investigations []InvestigationResult `json:"investigations"`
-}
-
-// HypothesisResult is a single hypothesis view.
-type HypothesisResult struct {
-	ID              string `json:"id"`
-	InvestigationID string `json:"investigation_id"`
-	Title           string `json:"title"`
-	Description     string `json:"description"`
-	Category        string `json:"category"`
-	Status          string `json:"status"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
 }
 
 // HypothesisListResult is a collection of hypotheses.
@@ -637,23 +613,6 @@ type ValidationComparisonResult struct {
 // EvidenceService is the optional evidence reading capability used by the CLI.
 type EvidenceService interface {
 	ShowEvidence(ctx context.Context, investigationID string) (*EvidenceResult, error)
-}
-
-// EvidenceResult is the evidence packet for an investigation.
-type EvidenceResult struct {
-	InvestigationID string         `json:"investigation_id"`
-	Evidence        []EvidenceItem `json:"evidence"`
-}
-
-// EvidenceItem is a single piece of evidence.
-type EvidenceItem struct {
-	ID              string `json:"id"`
-	Type            string `json:"type"`
-	Relation        string `json:"relation"`
-	Description     string `json:"description"`
-	ValidationRunID string `json:"validation_run_id,omitempty"`
-	OpportunityID   string `json:"opportunity_id,omitempty"`
-	CreatedAt       string `json:"created_at"`
 }
 
 // ContributionService is the optional contribution drafting capability used by the CLI.
@@ -1041,25 +1000,4 @@ type ContributionOutcomeResult struct {
 type ContributionOutcomeListResult struct {
 	ContributionID string                      `json:"contribution_id"`
 	Outcomes       []ContributionOutcomeResult `json:"outcomes"`
-}
-
-type MetadataExportOptions struct {
-	Limit int
-}
-
-type MetadataExportResult struct {
-	Data                 json.RawMessage `json:"data"`
-	TriageEvents         int             `json:"triage_events"`
-	Contributions        int             `json:"contributions"`
-	ContributionOutcomes int             `json:"contribution_outcomes"`
-}
-
-type MetadataImportOptions struct {
-	Data []byte
-}
-
-type MetadataImportResult struct {
-	TriageEvents         int `json:"triage_events"`
-	Contributions        int `json:"contributions"`
-	ContributionOutcomes int `json:"contribution_outcomes"`
 }

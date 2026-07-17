@@ -113,6 +113,12 @@ func orderEvidence(e *cli.EvidenceResult) {
 	sort.SliceStable(e.Evidence, func(i, j int) bool {
 		return e.Evidence[i].ID < e.Evidence[j].ID
 	})
+	for i := range e.Evidence {
+		sort.SliceStable(e.Evidence[i].SourceProvenance, func(a, b int) bool {
+			left, right := e.Evidence[i].SourceProvenance[a].Subject, e.Evidence[i].SourceProvenance[b].Subject
+			return evidenceSubjectKey(left) < evidenceSubjectKey(right)
+		})
+	}
 }
 
 func writeDossierMarkdown(w io.Writer, d *domain.Dossier) error {
@@ -228,7 +234,7 @@ func writeEvidenceMarkdown(w io.Writer, e *cli.EvidenceResult) error {
 	}
 
 	for _, item := range e.Evidence {
-		fmt.Fprintf(&b, "- **%s** (`%s`, relation `%s`)", item.ID, item.Type, item.Relation)
+		fmt.Fprintf(&b, "- **%s** (`%s`, relation `%s`, freshness `%s`)", item.ID, item.Type, item.Relation, item.Freshness)
 		if item.Description != "" {
 			fmt.Fprintf(&b, ": %s", item.Description)
 		}
@@ -242,10 +248,21 @@ func writeEvidenceMarkdown(w io.Writer, e *cli.EvidenceResult) error {
 			fmt.Fprintf(&b, " — %s", item.CreatedAt)
 		}
 		fmt.Fprintln(&b)
+		if item.FreshnessReason != "" {
+			fmt.Fprintf(&b, "  - Freshness reason: %s\n", item.FreshnessReason)
+		}
+		for _, revision := range item.SourceProvenance {
+			fmt.Fprintf(&b, "  - Source revision: %s at %s (sequence %d, observed %s)\n",
+				evidenceSubjectKey(revision.Subject), revision.SourceUpdatedAt, revision.ObservationSequence, revision.ObservedAt)
+		}
 	}
 
 	_, err := w.Write([]byte(b.String()))
 	return err
+}
+
+func evidenceSubjectKey(subject cli.EvidenceSourceSubjectResult) string {
+	return fmt.Sprintf("%s:%s/%s:%s:%d:%s", subject.Kind, subject.Owner, subject.Repo, subject.ThreadKind, subject.Number, subject.Facet)
 }
 
 func formatTime(t time.Time) string {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/morluto/gitcontribute/internal/evidence"
 )
 
 // Repository is the persistence boundary for local tracking and feedback.
@@ -152,7 +153,14 @@ func (s *Service) ImportLocalMetadata(ctx context.Context, bundle *Bundle) error
 	if bundle == nil {
 		return errors.New("bundle is required")
 	}
-	if len(bundle.TriageEvents) > maxImportRecords || len(bundle.Contributions) > maxImportRecords || len(bundle.ContributionOutcomes) > maxImportRecords {
+	version, err := ResolveBundleVersion(bundle)
+	if err != nil {
+		return err
+	}
+	if version < CurrentBundleSchemaVersion && len(bundle.Evidence) > 0 {
+		return errors.New("evidence records require tracking bundle schema version 2")
+	}
+	if len(bundle.TriageEvents) > maxImportRecords || len(bundle.Contributions) > maxImportRecords || len(bundle.ContributionOutcomes) > maxImportRecords || len(bundle.Evidence) > maxImportRecords {
 		return fmt.Errorf("bundle record class cannot exceed %d items", maxImportRecords)
 	}
 	for i, event := range bundle.TriageEvents {
@@ -188,7 +196,34 @@ func (s *Service) ImportLocalMetadata(ctx context.Context, bundle *Bundle) error
 			return fmt.Errorf("contribution outcome %q: %w", outcome.ID, err)
 		}
 	}
+	for i, item := range bundle.Evidence {
+		if item == nil {
+			return fmt.Errorf("evidence %d is null", i)
+		}
+		if item.ID == "" {
+			return fmt.Errorf("evidence %d id is required", i)
+		}
+		if err := evidence.ValidateEvidence(item); err != nil {
+			return fmt.Errorf("evidence %q: %w", item.ID, err)
+		}
+	}
 	return s.repo.ImportLocalMetadata(ctx, bundle)
+}
+
+// ResolveBundleVersion accepts legacy unversioned bundles as v1 and rejects
+// unknown schemas before any import writes occur.
+func ResolveBundleVersion(bundle *Bundle) (int, error) {
+	if bundle == nil {
+		return 0, errors.New("bundle is required")
+	}
+	version := bundle.SchemaVersion
+	if version == 0 {
+		version = LegacyBundleSchemaVersion
+	}
+	if version < LegacyBundleSchemaVersion || version > CurrentBundleSchemaVersion {
+		return 0, fmt.Errorf("unsupported tracking bundle schema version %d", version)
+	}
+	return version, nil
 }
 
 func validateContribution(c *Contribution) error {

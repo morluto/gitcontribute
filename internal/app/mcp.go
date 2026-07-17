@@ -431,14 +431,16 @@ func (r *MCPReader) Evidence(ctx context.Context, in mcpserver.EvidenceInput) (m
 		items = items[:in.Limit]
 	}
 	out := make([]mcpserver.EvidenceItem, len(items))
+	evaluator := evidence.NewFreshnessEvaluator(c)
 	for i, e := range items {
+		freshness, err := evaluator.Evaluate(ctx, e)
+		if err != nil {
+			return mcpserver.EvidenceOutput{}, fmt.Errorf("evaluate evidence %q: %w", e.ID, err)
+		}
 		out[i] = mcpserver.EvidenceItem{
-			ID:          e.ID,
-			Type:        string(e.Type),
-			Relation:    string(e.Relation),
-			Description: e.Description,
-			SourceRefs:  sourceRefsToMCP(e.SourceRefs),
-			CreatedAt:   formatTime(e.CreatedAt),
+			ID: e.ID, Type: string(e.Type), Relation: string(e.Relation), Description: e.Description,
+			SourceRefs: sourceRefsToMCP(e.SourceRefs), SourceProvenance: evidenceSourceRevisionsToMCP(e.SourceProvenance),
+			Freshness: string(freshness.Status), FreshnessReason: freshness.Reason, CreatedAt: formatTime(e.CreatedAt),
 		}
 	}
 	return mcpserver.EvidenceOutput{
@@ -447,6 +449,24 @@ func (r *MCPReader) Evidence(ctx context.Context, in mcpserver.EvidenceInput) (m
 		Total:           total,
 		Evidence:        out,
 	}, nil
+}
+
+func evidenceSourceRevisionsToMCP(values []evidence.SourceRevision) []mcpserver.EvidenceSourceRevision {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]mcpserver.EvidenceSourceRevision, len(values))
+	for i, value := range values {
+		out[i] = mcpserver.EvidenceSourceRevision{
+			Subject: mcpserver.EvidenceSourceSubject{
+				Kind: string(value.Subject.Kind), Owner: value.Subject.Owner, Repo: value.Subject.Repo,
+				ThreadKind: value.Subject.ThreadKind, Number: value.Subject.Number, Facet: value.Subject.Facet,
+			},
+			SourceUpdatedAt: formatTime(value.SourceUpdatedAt), ObservationSequence: value.ObservationSequence,
+			ObservedAt: formatTime(value.ObservedAt),
+		}
+	}
+	return out
 }
 
 func dossierToMCPOutput(d *domain.Dossier) mcpserver.DossierOutput {

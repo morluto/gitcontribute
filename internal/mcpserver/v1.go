@@ -427,6 +427,8 @@ func (s *Server) registerV1ResourceTemplates() {
 		{"github-index://investigations/{id}", "Investigation", "Local investigation workspace"},
 		{"github-index://opportunities/{id}", "Opportunity", "Local contribution opportunity"},
 		{"github-index://evidence/{investigation_id}", "Evidence", "Evidence for an investigation"},
+		{"github-index://readiness/{opportunity_id}", "Readiness", "Local contribution readiness report"},
+		{"github-index://workflows/contribution/{opportunity_id}", "Contribution workflow", "Safe contribution workflow links and prompts"},
 		{"github-index://lenses/{name}", "Lens", "Saved lens definition"},
 		{"github-index://jobs/{id}", "Job", "Durable job state"},
 	}

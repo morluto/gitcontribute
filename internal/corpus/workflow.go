@@ -37,6 +37,33 @@ func unmarshalWorkflow(payload string, value any) error {
 	return nil
 }
 
+func listWorkflowPayloads[T any](ctx context.Context, db *sql.DB, operation, query string, args ...any) (out []*T, err error) {
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", operation, err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var item T
+		if err := unmarshalWorkflow(payload, &item); err != nil {
+			return nil, err
+		}
+		out = append(out, &item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SaveWorkspace inserts or replaces a managed workspace record.
 func (c *Corpus) SaveWorkspace(ctx context.Context, item *workspace.Workspace) error {
 	if item == nil || item.Name == "" {
@@ -87,11 +114,11 @@ func (c *Corpus) SaveInvestigation(ctx context.Context, item *investigation.Inve
 		return err
 	}
 	_, err = c.db.ExecContext(ctx, `
-		INSERT INTO investigations (id, repo_owner, repo_name, status, payload, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO investigations (id, repo_owner, repo_name, status, origin_key, payload, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET repo_owner=excluded.repo_owner, repo_name=excluded.repo_name,
-			status=excluded.status, payload=excluded.payload, updated_at=excluded.updated_at
-	`, item.ID, item.Repo.Owner, item.Repo.Repo, item.Status, payload, encodeTime(item.CreatedAt), encodeTime(item.UpdatedAt))
+			status=excluded.status, origin_key=excluded.origin_key, payload=excluded.payload, updated_at=excluded.updated_at
+	`, item.ID, item.Repo.Owner, item.Repo.Repo, item.Status, investigationOriginKey(item), payload, encodeTime(item.CreatedAt), encodeTime(item.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("save investigation: %w", err)
 	}
@@ -250,13 +277,6 @@ func (c *Corpus) promoteHypothesis(ctx context.Context, hypothesis *investigatio
 	if err != nil {
 		return err
 	}
-	var evidencePayload string
-	if item != nil {
-		evidencePayload, err = marshalWorkflow(item)
-		if err != nil {
-			return err
-		}
-	}
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin hypothesis promotion: %w", err)
@@ -287,11 +307,7 @@ func (c *Corpus) promoteHypothesis(ctx context.Context, hypothesis *investigatio
 		return fmt.Errorf("save promoted opportunity: %w", err)
 	}
 	if item != nil {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO evidence (id, investigation_id, hypothesis_id, opportunity_id, relation, evidence_type, payload, created_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		`, item.ID, item.InvestigationID, item.HypothesisID, item.OpportunityID,
-			item.Relation, item.Type, evidencePayload, encodeTime(item.CreatedAt)); err != nil {
+		if err := c.insertEvidenceTx(ctx, tx, item); err != nil {
 			return fmt.Errorf("save promotion evidence: %w", err)
 		}
 	}
@@ -410,6 +426,15 @@ func (c *Corpus) GetValidationDefinition(ctx context.Context, id string) (*evide
 	return &item, nil
 }
 
+// ListValidationDefinitions returns validation plans scoped to an opportunity.
+func (c *Corpus) ListValidationDefinitions(ctx context.Context, opportunityID string) ([]*evidence.ValidationDefinition, error) {
+	return listWorkflowPayloads[evidence.ValidationDefinition](
+		ctx, c.db, "list validation definitions",
+		`SELECT payload FROM validation_definitions WHERE opportunity_id=? ORDER BY created_at, id LIMIT 10000`,
+		opportunityID,
+	)
+}
+
 // SaveValidationRun persists the bounded result of an authorized validation execution.
 func (c *Corpus) SaveValidationRun(ctx context.Context, item *evidence.ValidationRun) error {
 	if item == nil || item.ID == "" {
@@ -450,76 +475,13 @@ func (c *Corpus) GetValidationRun(ctx context.Context, id string) (*evidence.Val
 	return &item, nil
 }
 
-// SaveEvidence inserts or updates an evidence record and its provenance.
-func (c *Corpus) SaveEvidence(ctx context.Context, item *evidence.Evidence) error {
-	if item == nil || item.ID == "" {
-		return errors.New("evidence id is required")
-	}
-	payload, err := marshalWorkflow(item)
-	if err != nil {
-		return err
-	}
-	_, err = c.db.ExecContext(ctx, `
-		INSERT INTO evidence (id, investigation_id, hypothesis_id, opportunity_id, relation, evidence_type, payload, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (id) DO UPDATE SET investigation_id=excluded.investigation_id,
-			hypothesis_id=excluded.hypothesis_id, opportunity_id=excluded.opportunity_id,
-			relation=excluded.relation, evidence_type=excluded.evidence_type, payload=excluded.payload
-	`, item.ID, item.InvestigationID, item.HypothesisID, item.OpportunityID, item.Relation, item.Type, payload, encodeTime(item.CreatedAt))
-	if err != nil {
-		return fmt.Errorf("save evidence: %w", err)
-	}
-	return nil
-}
-
-// CreateEvidence inserts evidence and rejects an existing ID.
-func (c *Corpus) CreateEvidence(ctx context.Context, item *evidence.Evidence) error {
-	return c.SaveEvidence(ctx, item)
-}
-
-// ListEvidence returns evidence matching the supplied local filter.
-func (c *Corpus) ListEvidence(ctx context.Context, filter evidence.EvidenceFilter) ([]*evidence.Evidence, error) {
-	query := `SELECT e.payload FROM evidence e WHERE 1=1`
-	var args []any
-	if filter.InvestigationID != "" {
-		query += ` AND (
-			e.investigation_id=?
-			OR e.opportunity_id IN (SELECT id FROM opportunities WHERE investigation_id=?)
-			OR e.hypothesis_id IN (SELECT id FROM hypotheses WHERE investigation_id=?)
-		)`
-		args = append(args, filter.InvestigationID, filter.InvestigationID, filter.InvestigationID)
-	}
-	if filter.HypothesisID != "" {
-		query += ` AND e.hypothesis_id=?`
-		args = append(args, filter.HypothesisID)
-	}
-	if filter.OpportunityID != "" {
-		query += ` AND e.opportunity_id=?`
-		args = append(args, filter.OpportunityID)
-	}
-	if filter.Relation != "" {
-		query += ` AND e.relation=?`
-		args = append(args, filter.Relation)
-	}
-	query += ` ORDER BY e.created_at, e.id LIMIT 10000`
-	rows, err := c.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list evidence: %w", err)
-	}
-	defer rows.Close()
-	var out []*evidence.Evidence
-	for rows.Next() {
-		var payload string
-		if err := rows.Scan(&payload); err != nil {
-			return nil, err
-		}
-		var item evidence.Evidence
-		if err := unmarshalWorkflow(payload, &item); err != nil {
-			return nil, err
-		}
-		out = append(out, &item)
-	}
-	return out, rows.Err()
+// ListValidationRuns returns validation runs scoped to an opportunity.
+func (c *Corpus) ListValidationRuns(ctx context.Context, opportunityID string) ([]*evidence.ValidationRun, error) {
+	return listWorkflowPayloads[evidence.ValidationRun](
+		ctx, c.db, "list validation runs",
+		`SELECT payload FROM validation_runs WHERE opportunity_id=? ORDER BY completed_at, id LIMIT 10000`,
+		opportunityID,
+	)
 }
 
 // SaveIssueDraft persists the latest rendered issue draft for an opportunity.

@@ -18,6 +18,8 @@ type fakeExtendedService struct {
 	runValidationCalled     bool
 	compareValidationCalled bool
 	showEvidenceCalled      bool
+	readinessCalled         bool
+	explainReadinessCalled  bool
 	prepareIssueCalled      bool
 	preparePRCalled         bool
 
@@ -26,6 +28,8 @@ type fakeExtendedService struct {
 	validationRunResult *cli.ValidationRunResult
 	comparisonResult    *cli.ValidationComparisonResult
 	evidenceResult      *cli.EvidenceResult
+	readinessResult     *cli.ReadinessResult
+	readinessCheck      *cli.ReadinessCheck
 	draftResult         *cli.DraftResult
 
 	lastWorkspaceInvestigation  string
@@ -39,6 +43,8 @@ type fakeExtendedService struct {
 	lastCompareBase             string
 	lastCompareCandidate        string
 	lastEvidenceInvestigation   string
+	lastReadinessOpportunity    string
+	lastReadinessCheck          string
 	lastPrepareIssueID          string
 	lastPrepareIssueOpts        cli.PrepareIssueOptions
 	lastPreparePRID             string
@@ -88,6 +94,18 @@ func (f *fakeExtendedService) ShowEvidence(ctx context.Context, investigationID 
 	f.showEvidenceCalled = true
 	f.lastEvidenceInvestigation = investigationID
 	return f.evidenceResult, f.err
+}
+
+func (f *fakeExtendedService) OpportunityReadiness(_ context.Context, opportunityID string) (*cli.ReadinessResult, error) {
+	f.readinessCalled = true
+	f.lastReadinessOpportunity = opportunityID
+	return f.readinessResult, f.err
+}
+
+func (f *fakeExtendedService) ExplainReadiness(_ context.Context, checkID string) (*cli.ReadinessCheck, error) {
+	f.explainReadinessCalled = true
+	f.lastReadinessCheck = checkID
+	return f.readinessCheck, f.err
 }
 
 func (f *fakeExtendedService) PrepareIssue(ctx context.Context, opportunityID string, opts cli.PrepareIssueOptions) (*cli.DraftResult, error) {
@@ -222,7 +240,11 @@ func TestEvidenceShow(t *testing.T) {
 		evidenceResult: &cli.EvidenceResult{
 			InvestigationID: "inv-1",
 			Evidence: []cli.EvidenceItem{
-				{ID: "ev-1", Type: "manual_observation", Relation: "supporting", Description: "observed panic", CreatedAt: "2026-07-17T00:00:00Z"},
+				{
+					ID: "ev-1", Type: "github_source", Relation: "supporting", Description: "observed panic",
+					Freshness: "stale", FreshnessReason: "thread issue:owner/repo#1 advanced from source_updated_at=2026-07-16T00:00:00Z",
+					CreatedAt: "2026-07-17T00:00:00Z",
+				},
 			},
 		},
 	}
@@ -233,7 +255,62 @@ func TestEvidenceShow(t *testing.T) {
 	if !svc.showEvidenceCalled || svc.lastEvidenceInvestigation != "inv-1" {
 		t.Fatalf("show evidence not called correctly: called=%v arg=%q", svc.showEvidenceCalled, svc.lastEvidenceInvestigation)
 	}
-	if !strings.Contains(stdout.String(), "ev-1") {
+	if !strings.Contains(stdout.String(), "ev-1") || !strings.Contains(stdout.String(), "freshness: stale") ||
+		!strings.Contains(stdout.String(), "advanced from") {
+		t.Fatalf("stdout=%q", stdout.String())
+	}
+}
+
+func TestReadinessOpportunityAndExplain(t *testing.T) {
+	svc := &fakeExtendedService{
+		fakeService: &fakeService{},
+		readinessResult: &cli.ReadinessResult{
+			OpportunityID:  "opp-1",
+			RuleSetVersion: "readiness.v1",
+			Status:         "block",
+			EvaluatedAt:    "2026-07-17T00:00:00Z",
+			Checks: []cli.ReadinessCheck{{
+				CheckID:      "opp-1:candidate_improves_baseline",
+				RuleID:       "candidate_improves_baseline",
+				RuleVersion:  "v1",
+				Status:       "block",
+				Summary:      "Candidate validation is failing.",
+				EvidenceRefs: []string{"validation_run:run-1"},
+				Remediation:  "Fix the candidate or record newer passing validation.",
+				EvaluatedAt:  "2026-07-17T00:00:00Z",
+			}},
+		},
+		readinessCheck: &cli.ReadinessCheck{
+			CheckID:      "opp-1:evidence_freshness",
+			RuleID:       "evidence_freshness",
+			RuleVersion:  "v1",
+			Status:       "warn",
+			Summary:      "Some evidence is stale.",
+			EvidenceRefs: []string{"evidence:ev-1"},
+			EvaluatedAt:  "2026-07-17T00:00:00Z",
+		},
+	}
+	c, stdout, _ := newTestCLI(svc, nil)
+
+	err := c.Run(context.Background(), []string{"readiness", "opportunity", "opp-1"})
+	requireNoErr(t, err)
+	if !svc.readinessCalled || svc.lastReadinessOpportunity != "opp-1" {
+		t.Fatalf("readiness opportunity not called correctly: called=%v arg=%q", svc.readinessCalled, svc.lastReadinessOpportunity)
+	}
+	if !strings.Contains(stdout.String(), "Readiness for opportunity opp-1: block") ||
+		!strings.Contains(stdout.String(), "candidate_improves_baseline") ||
+		!strings.Contains(stdout.String(), "validation_run:run-1") {
+		t.Fatalf("stdout=%q", stdout.String())
+	}
+
+	stdout.Reset()
+	err = c.Run(context.Background(), []string{"readiness", "explain", "opp-1:evidence_freshness", "--json"})
+	requireNoErr(t, err)
+	if !svc.explainReadinessCalled || svc.lastReadinessCheck != "opp-1:evidence_freshness" {
+		t.Fatalf("readiness explain not called correctly: called=%v arg=%q", svc.explainReadinessCalled, svc.lastReadinessCheck)
+	}
+	if !strings.Contains(stdout.String(), `"rule_id": "evidence_freshness"`) ||
+		!strings.Contains(stdout.String(), `"status": "warn"`) {
 		t.Fatalf("stdout=%q", stdout.String())
 	}
 }

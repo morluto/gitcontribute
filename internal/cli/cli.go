@@ -15,7 +15,6 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/morluto/gitcontribute/internal/discovery"
-	"github.com/morluto/gitcontribute/internal/health"
 	"github.com/morluto/gitcontribute/internal/lens"
 	gitlog "github.com/morluto/gitcontribute/internal/log"
 )
@@ -71,9 +70,11 @@ type rootCmd struct {
 	Status        statusCmd        `cmd:"" help:"Show corpus status"`
 	Doctor        doctorCmd        `cmd:"" help:"Diagnose local configuration and dependencies"`
 	Health        healthCmd        `cmd:"" help:"Compute offline repository health and community metrics"`
+	Radar         radarCmd         `cmd:"" help:"Rank explainable contribution candidates from the local corpus"`
 	Sync          syncCmd          `cmd:"" help:"Sync a repository into the corpus"`
 	Search        searchCmd        `cmd:"" help:"Search the local corpus"`
 	Dossier       dossierCmd       `cmd:"" help:"Show repository dossier"`
+	Research      researchCmd      `cmd:"" help:"Build source-backed local research briefs"`
 	Seeds         seedsCmd         `cmd:"" help:"Extract evidence-backed contribution seeds"`
 	Index         indexCmd         `cmd:"" help:"Index a clean local checkout at its current commit"`
 	Acquire       acquireCmd       `cmd:"" help:"Clone or fetch a repository into the managed cache and index it"`
@@ -89,6 +90,7 @@ type rootCmd struct {
 	Diff          diffCmd          `cmd:"" help:"Show a workspace diff against its recorded base"`
 	Validation    validationCmd    `cmd:"" help:"Manage validation definitions and runs"`
 	Evidence      evidenceCmd      `cmd:"" help:"Show evidence packets"`
+	Readiness     readinessCmd     `cmd:"" help:"Check contribution readiness"`
 	Prepare       prepareCmd       `cmd:"" help:"Prepare contribution drafts"`
 	Archive       archiveCmd       `cmd:"" help:"Synchronize and hydrate the local archive"`
 	Coverage      coverageCmd      `cmd:"" help:"Show local repository facet coverage"`
@@ -164,14 +166,6 @@ type doctorCmd struct {
 	JSON bool `name:"json" help:"Print the result as JSON"`
 }
 
-type healthCmd struct {
-	OwnerRepo  string        `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
-	Start      string        `name:"start" help:"Window start as RFC3339"`
-	End        string        `name:"end" help:"Window end as RFC3339"`
-	StaleAfter time.Duration `name:"stale-after" default:"336h" help:"Open PR inactivity threshold"`
-	JSON       bool          `name:"json" help:"Print the result as JSON"`
-}
-
 type statusCmd struct {
 	JSON bool `name:"json" help:"Print the result as JSON"`
 }
@@ -203,28 +197,6 @@ type searchKindCmd struct {
 	Cursor       string   `name:"cursor" help:"Opaque cursor returned by the previous page"`
 	Lens         string   `name:"lens" help:"Rank and filter with a saved lens"`
 	JSON         bool     `name:"json" help:"Print the result as JSON"`
-}
-
-type dossierCmd struct {
-	Build  dossierBuildCmd  `cmd:"" help:"Build and persist a repository dossier"`
-	Show   dossierShowCmd   `cmd:"" help:"Show the latest persisted dossier"`
-	Export dossierExportCmd `cmd:"" help:"Export a repository dossier"`
-}
-
-type dossierBuildCmd struct {
-	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
-	JSON      bool   `name:"json" help:"Print the result as JSON"`
-}
-
-type dossierShowCmd struct {
-	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
-	JSON      bool   `name:"json" help:"Print the result as JSON"`
-}
-
-type dossierExportCmd struct {
-	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
-	Format    string `name:"format" default:"markdown" enum:"json,markdown,md" help:"Export format"`
-	Output    string `name:"output" help:"Write to a file instead of stdout"`
 }
 
 type seedsCmd struct {
@@ -300,12 +272,6 @@ type tailCmd struct {
 	Interval time.Duration `name:"interval" default:"1h" help:"Delay between iterations"`
 	Once     bool          `name:"once" help:"Run one iteration and exit"`
 	JSON     bool          `name:"json" help:"Print the final result as JSON"`
-}
-
-type investigationCmd struct {
-	Start startInvestigationCmd `cmd:"" help:"Start an investigation"`
-	Show  showInvestigationCmd  `cmd:"" help:"Show an investigation"`
-	List  listInvestigationCmd  `cmd:"" help:"List investigations"`
 }
 
 type startInvestigationCmd struct {
@@ -472,27 +438,6 @@ type compareValidationCmd struct {
 	BaseRunID      string `arg:"" help:"Base run ID"`
 	CandidateRunID string `arg:"" help:"Candidate run ID"`
 	JSON           bool   `name:"json" help:"Print the result as JSON"`
-}
-
-type evidenceCmd struct {
-	Add    addEvidenceCmd    `cmd:"" help:"Record evidence"`
-	Show   showEvidenceCmd   `cmd:"" help:"Show evidence for an investigation"`
-	Export exportEvidenceCmd `cmd:"" help:"Export an evidence packet"`
-}
-
-type addEvidenceCmd struct {
-	Investigation string `name:"investigation" help:"Investigation ID"`
-	Hypothesis    string `name:"hypothesis" help:"Hypothesis ID"`
-	Opportunity   string `name:"opportunity" help:"Opportunity ID"`
-	Type          string `name:"type" required:"" help:"Evidence type"`
-	Relation      string `name:"relation" required:"" enum:"supporting,contradicting,inconclusive,stale,invalid" help:"Evidence relation"`
-	Description   string `name:"description" required:"" help:"Evidence description"`
-	JSON          bool   `name:"json" help:"Print the result as JSON"`
-}
-
-type showEvidenceCmd struct {
-	InvestigationID string `arg:"" help:"Investigation ID"`
-	JSON            bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type prepareCmd struct {
@@ -766,12 +711,16 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runDoctor(ctx, &cli.Doctor)
 	case "health":
 		return c.runHealth(ctx, &cli.Health)
+	case "radar":
+		return c.runRadar(ctx, &cli.Radar)
 	case "sync":
 		return c.runSync(ctx, &cli.Sync)
 	case "search":
 		return c.runSearch(ctx, command, &cli.Search)
 	case "dossier":
 		return c.runDossier(ctx, command, &cli.Dossier)
+	case "research":
+		return c.runResearch(ctx, command, &cli.Research)
 	case "seeds":
 		return c.runSeeds(ctx, &cli.Seeds)
 	case "index":
@@ -802,6 +751,8 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runValidation(ctx, command, &cli.Validation)
 	case "evidence":
 		return c.runEvidence(ctx, command, &cli.Evidence)
+	case "readiness":
+		return c.runReadiness(ctx, command, &cli.Readiness)
 	case "prepare":
 		return c.runPrepare(ctx, command, &cli.Prepare)
 	case "archive":
@@ -1268,14 +1219,6 @@ func (c *CLI) validationService() (ValidationService, error) {
 	return service, nil
 }
 
-func (c *CLI) evidenceService() (EvidenceService, error) {
-	service, ok := c.svc.(EvidenceService)
-	if !ok {
-		return nil, NewCLIError(ExitNotWired, ErrNotWired)
-	}
-	return service, nil
-}
-
 func (c *CLI) contributionService() (ContributionService, error) {
 	service, ok := c.svc.(ContributionService)
 	if !ok {
@@ -1334,14 +1277,6 @@ func (c *CLI) archiveThreadService() (ArchiveThreadService, error) {
 
 func (c *CLI) acquisitionService() (AcquisitionService, error) {
 	service, ok := c.svc.(AcquisitionService)
-	if !ok {
-		return nil, NewCLIError(ExitNotWired, ErrNotWired)
-	}
-	return service, nil
-}
-
-func (c *CLI) healthService() (HealthService, error) {
-	service, ok := c.svc.(HealthService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -1614,6 +1549,9 @@ func (c *CLI) runTail(ctx context.Context, cmd *tailCmd) error {
 }
 
 func (c *CLI) runInvestigation(ctx context.Context, command string, cmd *investigationCmd) error {
+	if command == "investigation start-thread" {
+		return c.runStartThreadInvestigation(ctx, &cmd.StartThread)
+	}
 	service, err := c.investigationService()
 	if err != nil {
 		return err
@@ -1869,39 +1807,6 @@ func formatCommand(args []string) string {
 	return strings.Join(quoted, " ")
 }
 
-func (c *CLI) runEvidence(ctx context.Context, command string, cmd *evidenceCmd) error {
-	service, err := c.evidenceService()
-	if err != nil {
-		return err
-	}
-	switch command {
-	case "evidence add":
-		extended, err := c.workflowExtensionService()
-		if err != nil {
-			return err
-		}
-		result, err := extended.RecordEvidenceForCLI(ctx, RecordEvidenceOptions{
-			InvestigationID: cmd.Add.Investigation, HypothesisID: cmd.Add.Hypothesis,
-			OpportunityID: cmd.Add.Opportunity, Type: cmd.Add.Type,
-			Relation: cmd.Add.Relation, Description: cmd.Add.Description,
-		})
-		if err != nil {
-			return c.mapError(err)
-		}
-		return c.render(cmd.Add.JSON, result)
-	case "evidence show":
-		result, err := service.ShowEvidence(ctx, cmd.Show.InvestigationID)
-		if err != nil {
-			return c.mapError(err)
-		}
-		return c.render(cmd.Show.JSON, result)
-	case "evidence export":
-		return c.runExport(ctx, "export evidence", &exportCmd{Evidence: cmd.Export})
-	default:
-		return NewCLIError(ExitUsage, fmt.Errorf("unknown evidence command: %s", command))
-	}
-}
-
 func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) error {
 	service, err := c.contributionService()
 	if err != nil {
@@ -2028,46 +1933,6 @@ func (c *CLI) runDoctor(ctx context.Context, cmd *doctorCmd) error {
 	return c.render(cmd.JSON, result)
 }
 
-func (c *CLI) runHealth(ctx context.Context, cmd *healthCmd) error {
-	repo, err := parseRepo(cmd.OwnerRepo)
-	if err != nil {
-		return err
-	}
-	if cmd.StaleAfter <= 0 {
-		return NewCLIError(ExitUsage, errors.New("stale-after must be positive"))
-	}
-	parseBound := func(name, value string) (time.Time, error) {
-		if value == "" {
-			return time.Time{}, nil
-		}
-		parsed, err := time.Parse(time.RFC3339, value)
-		if err != nil {
-			return time.Time{}, NewCLIError(ExitUsage, fmt.Errorf("invalid --%s value: %w", name, err))
-		}
-		return parsed, nil
-	}
-	start, err := parseBound("start", cmd.Start)
-	if err != nil {
-		return err
-	}
-	end, err := parseBound("end", cmd.End)
-	if err != nil {
-		return err
-	}
-	if !start.IsZero() && !end.IsZero() && end.Before(start) {
-		return NewCLIError(ExitUsage, errors.New("end cannot be before start"))
-	}
-	service, err := c.healthService()
-	if err != nil {
-		return err
-	}
-	result, err := service.RepositoryHealthWithOptions(ctx, repo, health.Options{Start: start, End: end, StaleThreshold: cmd.StaleAfter})
-	if err != nil {
-		return c.mapError(err)
-	}
-	return c.render(cmd.JSON, result)
-}
-
 func (c *CLI) runStatus(ctx context.Context, cmd *statusCmd) error {
 	if service, ok := c.svc.(ControlService); ok {
 		res, err := service.ControlStatus(ctx)
@@ -2152,53 +2017,6 @@ func (c *CLI) runSearch(ctx context.Context, command string, cmd *searchCmd) err
 		return c.mapError(err)
 	}
 	return c.render(selected.JSON, res)
-}
-
-func (c *CLI) runDossier(ctx context.Context, command string, cmd *dossierCmd) error {
-	service, err := c.dossierExtensionService()
-	if err != nil {
-		// Preserve the original dossier command for lightweight implementations.
-		if command == "dossier show" {
-			repo, parseErr := parseRepo(cmd.Show.OwnerRepo)
-			if parseErr != nil {
-				return parseErr
-			}
-			res, callErr := c.svc.Dossier(ctx, repo)
-			if callErr != nil {
-				return c.mapError(callErr)
-			}
-			return c.render(cmd.Show.JSON, res)
-		}
-		return err
-	}
-	var result any
-	var jsonOutput bool
-	switch command {
-	case "dossier build":
-		repo, err := parseRepo(cmd.Build.OwnerRepo)
-		if err != nil {
-			return err
-		}
-		result, err = service.BuildDossierForCLI(ctx, repo)
-		jsonOutput = cmd.Build.JSON
-	case "dossier show":
-		repo, err := parseRepo(cmd.Show.OwnerRepo)
-		if err != nil {
-			return err
-		}
-		result, err = service.GetDossierForCLI(ctx, repo)
-		jsonOutput = cmd.Show.JSON
-	case "dossier export":
-		return c.runExport(ctx, "export dossier", &exportCmd{Dossier: exportDossierCmd{
-			OwnerRepo: cmd.Export.OwnerRepo, Format: cmd.Export.Format, Output: cmd.Export.Output,
-		}})
-	default:
-		return NewCLIError(ExitUsage, fmt.Errorf("unknown dossier command: %s", command))
-	}
-	if err != nil {
-		return c.mapError(err)
-	}
-	return c.render(jsonOutput, result)
 }
 
 func (c *CLI) runSeeds(ctx context.Context, cmd *seedsCmd) error {

@@ -147,17 +147,19 @@ func TestContributionOutcomeAndOutcomes(t *testing.T) {
 
 func TestTrackingExportWritesBundleToStdout(t *testing.T) {
 	svc := &fakeService{metadataExportResult: &cli.MetadataExportResult{
-		Data:                 []byte(`{"triage_events":[]}`),
+		SchemaVersion:        2,
+		Data:                 []byte(`{"schema_version":2,"triage_events":[],"evidence":[]}`),
 		TriageEvents:         0,
 		Contributions:        0,
 		ContributionOutcomes: 0,
+		Evidence:             0,
 	}}
 	c, stdout, stderr := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"tracking", "export", "--limit", "100"}))
 	if !svc.exportMetadataCalled || svc.lastExportMetadataArgs.Limit != 100 {
 		t.Fatalf("unexpected export args: %+v", svc.lastExportMetadataArgs)
 	}
-	if !strings.Contains(stdout.String(), "triage_events") {
+	if !strings.Contains(stdout.String(), `"schema_version":2`) || !strings.Contains(stdout.String(), "evidence") {
 		t.Fatalf("stdout=%q", stdout.String())
 	}
 	if !strings.Contains(stderr.String(), "exporting local tracking metadata") {
@@ -167,10 +169,12 @@ func TestTrackingExportWritesBundleToStdout(t *testing.T) {
 
 func TestTrackingExportWritesBundleToFile(t *testing.T) {
 	svc := &fakeService{metadataExportResult: &cli.MetadataExportResult{
-		Data:                 []byte(`{"triage_events":[]}`),
+		SchemaVersion:        2,
+		Data:                 []byte(`{"schema_version":2,"triage_events":[],"evidence":[{}]}`),
 		TriageEvents:         0,
 		Contributions:        0,
 		ContributionOutcomes: 0,
+		Evidence:             1,
 	}}
 	path := filepath.Join(t.TempDir(), "metadata.json")
 	c, _, stderr := newTestCLI(svc, nil)
@@ -178,14 +182,14 @@ func TestTrackingExportWritesBundleToFile(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("export file not written: %v", err)
 	}
-	if !strings.Contains(stderr.String(), path) {
+	if !strings.Contains(stderr.String(), path) || !strings.Contains(stderr.String(), "v2") || !strings.Contains(stderr.String(), "1 evidence") {
 		t.Fatalf("stderr=%q", stderr.String())
 	}
 }
 
 func TestTrackingImportReadsStdin(t *testing.T) {
-	svc := &fakeService{metadataImportResult: &cli.MetadataImportResult{}}
-	c, _, _ := newTestCLI(svc, nil)
+	svc := &fakeService{metadataImportResult: &cli.MetadataImportResult{SchemaVersion: 2, Evidence: 1}}
+	c, stdout, _ := newTestCLI(svc, nil)
 	c.SetInput(strings.NewReader(`{"triage_events":[]}`))
 	requireNoErr(t, c.Run(context.Background(), []string{"tracking", "import"}))
 	if !svc.importMetadataCalled {
@@ -193,6 +197,9 @@ func TestTrackingImportReadsStdin(t *testing.T) {
 	}
 	if !bytes.Equal(svc.lastImportMetadataArgs.Data, []byte(`{"triage_events":[]}`)) {
 		t.Fatalf("unexpected import data: %q", svc.lastImportMetadataArgs.Data)
+	}
+	if !strings.Contains(stdout.String(), "bundle v2") || !strings.Contains(stdout.String(), "1 evidence records") {
+		t.Fatalf("stdout=%q", stdout.String())
 	}
 }
 

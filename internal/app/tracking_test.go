@@ -131,16 +131,20 @@ func TestServiceExportImportLocalMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}
-	if result.TriageEvents != 1 || result.Contributions != 1 || result.ContributionOutcomes != 1 {
+	if result.SchemaVersion != tracking.CurrentBundleSchemaVersion ||
+		result.TriageEvents != 1 || result.Contributions != 1 || result.ContributionOutcomes != 1 || result.Evidence != 0 {
 		t.Fatalf("unexpected export counts: %+v", result)
 	}
-	if !strings.Contains(string(result.Data), "triage_events") {
+	if !strings.Contains(string(result.Data), `"schema_version": 2`) || !strings.Contains(string(result.Data), "triage_events") {
 		t.Fatalf("expected triage_events in JSON export")
 	}
 
-	_, err = svc.ImportLocalMetadata(ctx, cli.MetadataImportOptions{Data: result.Data})
+	imported, err := svc.ImportLocalMetadata(ctx, cli.MetadataImportOptions{Data: result.Data})
 	if err != nil {
 		t.Fatalf("import: %v", err)
+	}
+	if imported.SchemaVersion != tracking.CurrentBundleSchemaVersion {
+		t.Fatalf("unexpected import version: %+v", imported)
 	}
 
 	contribs, _ := svc.ListContributions(ctx, cli.ListContributionsOptions{})

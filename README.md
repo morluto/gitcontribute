@@ -36,8 +36,9 @@ inspection, health analysis, dossiers, and investigations run entirely offline.
 | | Capability | What it gives you |
 | :---: | --- | --- |
 | 🔎 | **Typed offline search** | Search repositories, issues, PRs, threads, and indexed code with transparent ranking. |
+| 📡 | **Contribution Radar** | Rank promising open issues with explicit positives, risks, blockers, confidence, and missing-evidence warnings. |
 | 🗂️ | **Durable research corpus** | Keep observations, coverage, investigations, evidence, and outcomes in local SQLite. |
-| 🧭 | **Contribution workflow** | Move from hypothesis to opportunity, workspace, validation, and a prepared issue, PR, or review. |
+| 🧭 | **Contribution workflow** | Move from hypothesis to opportunity, workspace, validation, readiness checks, and a prepared issue, PR, or review. |
 | 🤖 | **Agent-ready MCP server** | Give Codex or Claude Code structured tools and resources with explicit capability boundaries. |
 | 🛡️ | **Safe by default** | Separate network reads, local writes, process execution, and GitHub mutation. |
 
@@ -58,11 +59,13 @@ Installing the terminal app is the recommended default. The wizard shows the
 exact global npm command before applying changes. MCP-only setup remains
 available and does not require a persistent CLI installation.
 
-Then launch the TUI, sync a repository, and search the local corpus:
+Then launch the TUI, sync a repository, rank contribution candidates, and
+search the local corpus:
 
 ```sh
 gitcontribute tui
 gitcontribute sync owner/repo
+gitcontribute radar owner/repo --limit 10
 gitcontribute search threads "connection timeout" \
   --repo owner/repo --json
 gitcontribute dossier build owner/repo --json
@@ -154,22 +157,21 @@ Sync only when you ask, then search locally as often as you like.
 ```sh
 gitcontribute source add repos --name my-go "golang/go" "cli/cli" --json
 gitcontribute crawl my-go --since 720h --budget 500 --json
+gitcontribute radar golang/go --limit 20 --json
 gitcontribute search issues "data race" --repo golang/go --state open --json
 gitcontribute search code "context.WithTimeout" --repo golang/go
 ```
 
 ### 2. Investigate
 
-Build a dossier, inspect repository health, record a hypothesis, and check for
-duplicate or competing work before committing time.
+Build a dossier or per-thread research brief, inspect repository health, record
+a hypothesis, and check for duplicate or competing work before committing time.
 
 ```sh
 gitcontribute dossier build owner/repo
+gitcontribute research brief issue:owner/repo#42 --format markdown
 gitcontribute health owner/repo --json
-gitcontribute investigation start owner/repo --json
-gitcontribute hypothesis add --title="Fix retry timeout" \
-  --description="Reproduce and isolate the timeout." \
-  --category=bug <investigation-id>
+gitcontribute investigation start-thread issue:owner/repo#42 --json
 gitcontribute duplicates check <hypothesis-id>
 gitcontribute collisions check <hypothesis-id>
 ```
@@ -191,7 +193,21 @@ gitcontribute validation run <validation-id> --kind=candidate --execute
 gitcontribute validation compare <base-run-id> <candidate-run-id>
 ```
 
-### 4. Prepare
+### 4. Check readiness
+
+Run a deterministic local readiness gate before turning a candidate into a
+public submission:
+
+```sh
+gitcontribute readiness opportunity <opportunity-id>
+gitcontribute readiness explain <opportunity-id>:evidence_freshness
+```
+
+Readiness reports `pass`, `warn`, `block`, or `unknown` per rule. It only reads
+stored corpus and draft metadata: it does not fetch GitHub, execute validation,
+write state, or infer that missing coverage is a hard blocker.
+
+### 5. Prepare
 
 Create a local contribution draft from the evidence and workspace diff:
 
@@ -223,10 +239,20 @@ MCP capabilities are deliberately separate:
 
 | Capability | Examples |
 | --- | --- |
-| **Offline reads** | Search, inspect repositories and threads, read dossiers, explain matches, inspect evidence and opportunities. |
+| **Offline reads** | Search, inspect repositories and threads, build research briefs, read dossiers, explain matches, inspect evidence, opportunities, readiness checks, and workflow resources. |
 | **Network reads** | Sync repositories, hydrate threads, start crawls, and acquire workspaces. |
 | **Local writes** | Start investigations, record hypotheses, promote opportunities, define validations, and prepare drafts. |
 | **Execution** | Run a validation only when the request includes `execute: true`. |
+
+Contribution workflow resources and prompts are available for agents:
+
+- `get_readiness` and `gitcontribute://readiness/<opportunity-id>` expose the
+  same offline readiness report as the CLI.
+- `gitcontribute://workflow/contribution/<opportunity-id>` links the local
+  opportunity, evidence, readiness report, and safe workflow prompts.
+- Prompts such as `review_contribution_readiness` instruct agents to treat
+  repository and GitHub-sourced text as untrusted data and to ask before any
+  network read, local write, or validation execution.
 
 Resources are published under `gitcontribute://` and `github-index://` URI
 schemes. See [the architecture guide](docs/architecture.md) for the complete
@@ -236,7 +262,7 @@ application and adapter boundaries.
 
 | Operation | Network | Local write | Runs a process | GitHub write |
 | --- | :---: | :---: | :---: | :---: |
-| Search, health, dossier inspection | — | — | — | — |
+| Search, health, dossier, research-brief, and readiness inspection | — | — | — | — |
 | Investigations, evidence, lenses | — | ✓ | — | — |
 | Sync, crawl, hydrate | ✓ | ✓ | — | — |
 | Acquire or create a workspace | remote-dependent | ✓ | `git` only | — |
@@ -355,9 +381,10 @@ enforces size limits, and rejects dirty worktrees.
 </details>
 
 <details>
-<summary><strong>Search, dossiers, health, seeds, and lenses</strong></summary>
+<summary><strong>Radar, research briefs, search, dossiers, health, seeds, and lenses</strong></summary>
 
 ```sh
+gitcontribute radar owner/repo --limit 20
 gitcontribute search repos "cli" --limit 20 --json
 gitcontribute search issues "data race" --repo owner/repo --state open --json
 gitcontribute search prs "flaky" --repo owner/repo --label bug --json
@@ -368,8 +395,43 @@ gitcontribute search all "retry" --repo owner/repo
 gitcontribute dossier build owner/repo
 gitcontribute dossier export owner/repo --format markdown \
   --output owner-repo-dossier.md
+gitcontribute research brief owner/repo#42
+gitcontribute research brief pr:owner/repo#108 --json
 gitcontribute health owner/repo --stale-after 336h --json
 gitcontribute seeds owner/repo --json
+```
+
+`radar` is a strict offline corpus read. It ranks a bounded population of the
+newest stored open issues and separates objective eligibility from the numeric
+score. Every candidate reports positive signals, risks, blockers, confidence,
+linked open PRs, evidence coverage, and unknowns. Missing comment coverage is
+reported as unknown and does not lower the score; hydrate comments explicitly
+when you want that evidence:
+
+```sh
+gitcontribute archive hydrate owner/repo#42 --with issue_comments
+gitcontribute radar owner/repo --json
+```
+
+Radar scores carry a version (`radar.v1`) so saved JSON remains auditable when
+ranking semantics evolve. It never syncs, hydrates, executes repository code,
+or writes to GitHub.
+
+`research brief` is also a strict offline read. Its versioned
+`research-brief.v1` output has fixed sections for state, stored problem fields,
+acceptance hints, participants, timeline, explicit/duplicate references,
+linked PRs, indexed code, contribution guidance, health, coverage gaps, and
+next commands. Every section carries source references or an explicit unknown
+reason. Checkboxes and maintainer phrases remain source extracts—not fabricated
+or complete acceptance criteria. Markdown output redacts common credentials and
+quotes untrusted source text; JSON ordering is deterministic.
+
+Missing child facets and code stay visible instead of triggering hidden work:
+
+```sh
+gitcontribute archive hydrate owner/repo#42 --with issue_comments
+gitcontribute index owner/repo /path/to/clean-checkout
+gitcontribute research brief issue:owner/repo#42 --json
 ```
 
 Use a lens to apply saved filters and weighted ranking to a bounded population:
@@ -388,13 +450,45 @@ pagination; `search all` and lens-ranked searches do not.
 <details>
 <summary><strong>Investigations, evidence, tracking, and collections</strong></summary>
 
+Start an investigation and its initial hypothesis from one exact stored thread
+revision:
+
+```sh
+gitcontribute investigation start-thread issue:owner/repo#42 --json
+```
+
+This is a local-write operation with no network or process execution. The
+investigation saves the immutable observation ID, source update time, sequence,
+and source reference used for its title and bounded description. Repeating the
+command returns the existing open pair with `"created": false`; it never updates
+that baseline silently. The seed category is `other` because the command does
+not infer scope or defect type from untrusted issue text.
+
+The manual two-command path remains available when no stored thread should be
+the baseline:
+
+```sh
+gitcontribute investigation start owner/repo --json
+gitcontribute hypothesis add --title="Fix retry timeout" \
+  --description="Reproduce and isolate the timeout." \
+  --category=bug <investigation-id>
+```
+
 Record supporting or contradicting evidence:
 
 ```sh
-gitcontribute evidence add --type=note --relation=supporting \
+gitcontribute evidence add --type=manual_observation --relation=supporting \
   --description="Reproduced on the current default branch." \
   --opportunity <opportunity-id>
 ```
+
+Evidence shown through the CLI, exports, and MCP includes a derived freshness
+status. `github_source` evidence recorded from a started thread carries the
+exact corpus source revision it used, so later issue, pull request, facet, or
+guidance updates can mark it `stale`. Missing source projections are
+`unknown`; local/manual evidence is `not_applicable`. Freshness is evaluated
+from local corpus reads only, and stale evidence is a prompt to re-check, not a
+claim that the evidence is invalid.
 
 Group typed references and record local decisions:
 
@@ -415,7 +509,9 @@ gitcontribute tracking export --output tracking.json
 gitcontribute tracking import --file tracking.json
 ```
 
-Exports are redacted: they exclude credentials, tokens, and absolute local paths.
+Tracking exports use schema version 2 for portable evidence provenance and
+remain backward compatible with older unversioned tracking bundles. Exports are
+redacted: they exclude credentials, tokens, and absolute local paths.
 
 </details>
 

@@ -2,11 +2,8 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -32,6 +29,7 @@ type Reader interface {
 	ListOpportunities(context.Context, ListOpportunitiesInput) (ListOpportunitiesOutput, error)
 	Opportunity(context.Context, OpportunityInput) (OpportunityOutput, error)
 	Evidence(context.Context, EvidenceInput) (EvidenceOutput, error)
+	Readiness(context.Context, ReadinessInput) (ReadinessOutput, error)
 	FindClusters(context.Context, FindClustersInput) (FindClustersOutput, error)
 	GetCoverage(context.Context, GetCoverageInput) (GetCoverageOutput, error)
 	Lens(context.Context, LensInput) (LensOutput, error)
@@ -241,32 +239,6 @@ type OpportunityOutput struct {
 	Status              string      `json:"status"`
 	CreatedAt           string      `json:"created_at"`
 	UpdatedAt           string      `json:"updated_at"`
-}
-
-// EvidenceInput filters and bounds stored evidence.
-type EvidenceInput struct {
-	InvestigationID string `json:"investigation_id,omitempty" jsonschema:"Filter by investigation ID"`
-	OpportunityID   string `json:"opportunity_id,omitempty" jsonschema:"Filter by opportunity ID"`
-	Relation        string `json:"relation,omitempty" jsonschema:"Optional relation filter: supporting, contradicting, inconclusive, stale, invalid"`
-	Limit           int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-}
-
-// EvidenceItem is the stable MCP representation of one evidence record.
-type EvidenceItem struct {
-	ID          string      `json:"id"`
-	Type        string      `json:"type"`
-	Relation    string      `json:"relation"`
-	Description string      `json:"description"`
-	SourceRefs  []SourceRef `json:"source_refs,omitempty"`
-	CreatedAt   string      `json:"created_at"`
-}
-
-// EvidenceOutput contains bounded evidence matching a filter.
-type EvidenceOutput struct {
-	InvestigationID string         `json:"investigation_id,omitempty"`
-	OpportunityID   string         `json:"opportunity_id,omitempty"`
-	Total           int            `json:"total"`
-	Evidence        []EvidenceItem `json:"evidence"`
 }
 
 // FindClustersInput selects a repository and bounds duplicate clusters.
@@ -511,6 +483,11 @@ func (s *Server) register() {
 		Annotations: annotations,
 	}, s.evidence)
 	mcp.AddTool(s.server, &mcp.Tool{
+		Name:        "get_readiness",
+		Description: "Read deterministic contribution readiness checks for an opportunity without network access",
+		Annotations: annotations,
+	}, s.readiness)
+	mcp.AddTool(s.server, &mcp.Tool{
 		Name:        "find_clusters",
 		Description: "List duplicate-candidate clusters for a repository in the local corpus without network access",
 		Annotations: annotations,
@@ -584,12 +561,25 @@ func (s *Server) register() {
 		MIMEType:    "application/json",
 	}, s.readResource)
 	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
+		URITemplate: "gitcontribute://readiness/{opportunity_id}",
+		Name:        "Readiness",
+		Description: "Local contribution readiness report",
+		MIMEType:    "application/json",
+	}, s.readResource)
+	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
+		URITemplate: "gitcontribute://workflow/contribution/{opportunity_id}",
+		Name:        "Contribution workflow",
+		Description: "Safe contribution workflow resource links and prompts",
+		MIMEType:    "application/json",
+	}, s.readResource)
+	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
 		URITemplate: "gitcontribute://lens/{name}",
 		Name:        "Lens",
 		Description: "Saved lens definition",
 		MIMEType:    "application/json",
 	}, s.readResource)
 
+	s.registerContributionPrompts()
 	s.registerV1()
 }
 
@@ -727,6 +717,16 @@ func (s *Server) evidence(ctx context.Context, _ *mcp.CallToolRequest, in Eviden
 	return nil, out, err
 }
 
+func (s *Server) readiness(ctx context.Context, _ *mcp.CallToolRequest, in ReadinessInput) (*mcp.CallToolResult, ReadinessOutput, error) {
+	id, err := normalizeID("opportunity_id", in.OpportunityID)
+	if err != nil {
+		return nil, ReadinessOutput{}, err
+	}
+	in.OpportunityID = id
+	out, err := s.reader.Readiness(ctx, in)
+	return nil, out, err
+}
+
 func (s *Server) findClusters(ctx context.Context, _ *mcp.CallToolRequest, in FindClustersInput) (*mcp.CallToolResult, FindClustersOutput, error) {
 	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
 		return nil, FindClustersOutput{}, err
@@ -843,117 +843,4 @@ func normalizeID(field, value string) (string, error) {
 		return "", fmt.Errorf("%s exceeds 128 bytes", field)
 	}
 	return value, nil
-}
-
-func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
-	uri := req.Params.URI
-	u, err := url.Parse(uri)
-	if err != nil {
-		return nil, mcp.ResourceNotFoundError(uri)
-	}
-	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
-	scheme := u.Scheme
-	var value any
-	switch u.Host {
-	case "repository", "repositories":
-		if len(parts) != 2 {
-			return nil, mcp.ResourceNotFoundError(uri)
-		}
-		input := RepoInput{Owner: parts[0], Repo: parts[1]}
-		value, err = s.reader.Repository(ctx, input)
-	case "dossier", "dossiers":
-		if len(parts) != 2 {
-			return nil, mcp.ResourceNotFoundError(uri)
-		}
-		input := RepoInput{Owner: parts[0], Repo: parts[1]}
-		value, err = s.reader.Dossier(ctx, input)
-	case "thread":
-		if len(parts) != 4 {
-			return nil, mcp.ResourceNotFoundError(uri)
-		}
-		number, parseErr := strconv.Atoi(parts[3])
-		if parseErr != nil || number < 1 {
-			return nil, mcp.ResourceNotFoundError(uri)
-		}
-		value, err = s.reader.Thread(ctx, ThreadInput{
-			Owner: parts[0], Repo: parts[1], Kind: parts[2], Number: number,
-		})
-	case "threads":
-		if len(parts) != 3 {
-			return nil, mcp.ResourceNotFoundError(uri)
-		}
-		number, parseErr := strconv.Atoi(parts[2])
-		if parseErr != nil || number < 1 {
-			return nil, mcp.ResourceNotFoundError(uri)
-		}
-		value, err = s.reader.ThreadByNumber(ctx, ThreadByNumberInput{
-			Owner: parts[0], Repo: parts[1], Number: number,
-		})
-	case "investigation", "investigations":
-		if len(parts) != 1 {
-			return nil, mcp.ResourceNotFoundError(uri)
-		}
-		value, err = s.reader.Investigation(ctx, InvestigationInput{ID: parts[0], HypothesisLimit: 100})
-	case "opportunities":
-		if len(parts) != 1 {
-			return nil, mcp.ResourceNotFoundError(uri)
-		}
-		if scheme == "github-index" {
-			value, err = s.reader.Opportunity(ctx, OpportunityInput{ID: parts[0], EvidenceLimit: 100})
-		} else {
-			value, err = s.reader.ListOpportunities(ctx, ListOpportunitiesInput{InvestigationID: parts[0], Limit: 100})
-		}
-	case "opportunity":
-		if len(parts) != 1 {
-			return nil, mcp.ResourceNotFoundError(uri)
-		}
-		value, err = s.reader.Opportunity(ctx, OpportunityInput{ID: parts[0], EvidenceLimit: 100})
-	case "evidence":
-		var in EvidenceInput
-		if scheme == "github-index" {
-			if len(parts) != 1 {
-				return nil, mcp.ResourceNotFoundError(uri)
-			}
-			in.InvestigationID = parts[0]
-		} else {
-			if len(parts) != 2 {
-				return nil, mcp.ResourceNotFoundError(uri)
-			}
-			switch parts[0] {
-			case "investigation":
-				in.InvestigationID = parts[1]
-			case "opportunity":
-				in.OpportunityID = parts[1]
-			default:
-				return nil, mcp.ResourceNotFoundError(uri)
-			}
-		}
-		in.Limit = 100
-		value, err = s.reader.Evidence(ctx, in)
-	case "lens", "lenses":
-		if len(parts) != 1 {
-			return nil, mcp.ResourceNotFoundError(uri)
-		}
-		value, err = s.reader.Lens(ctx, LensInput{Name: parts[0]})
-	case "job", "jobs":
-		if len(parts) != 1 {
-			return nil, mcp.ResourceNotFoundError(uri)
-		}
-		value, err = s.reader.GetJob(ctx, GetJobInput{ID: parts[0]})
-	default:
-		return nil, mcp.ResourceNotFoundError(uri)
-	}
-	if errors.Is(err, ErrNotFound) {
-		return nil, mcp.ResourceNotFoundError(uri)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", uri, err)
-	}
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return nil, fmt.Errorf("encode %s: %w", uri, err)
-	}
-	return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{
-		URI: uri, MIMEType: "application/json", Text: string(payload),
-	}}}, nil
 }

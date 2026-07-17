@@ -186,6 +186,20 @@ func (s *Service) CompareValidation(ctx context.Context, baseRunID, candidateRun
 
 // CreateEvidence validates and stores an evidence item.
 func (s *Service) CreateEvidence(ctx context.Context, e *Evidence) error {
+	if err := ValidateEvidence(e); err != nil {
+		return err
+	}
+	if e.ID == "" {
+		e.ID = uuid.NewString()
+	}
+	if e.CreatedAt.IsZero() {
+		e.CreatedAt = time.Now().UTC()
+	}
+	return s.repo.SaveEvidence(ctx, e)
+}
+
+// ValidateEvidence validates portable evidence fields without persisting them.
+func ValidateEvidence(e *Evidence) error {
 	if e == nil {
 		return fmt.Errorf("evidence: evidence is nil")
 	}
@@ -195,13 +209,12 @@ func (s *Service) CreateEvidence(ctx context.Context, e *Evidence) error {
 	if !isValidRelation(e.Relation) {
 		return fmt.Errorf("%w: %q", ErrInvalidRelation, e.Relation)
 	}
-	if e.ID == "" {
-		e.ID = uuid.NewString()
+	provenance, err := NormalizeSourceRevisions(e.SourceProvenance)
+	if err != nil {
+		return fmt.Errorf("invalid source provenance: %w", err)
 	}
-	if e.CreatedAt.IsZero() {
-		e.CreatedAt = time.Now().UTC()
-	}
-	return s.repo.SaveEvidence(ctx, e)
+	e.SourceProvenance = provenance
+	return nil
 }
 
 // ListEvidence returns stored evidence matching the filter.

@@ -22,8 +22,8 @@ TUI ---------+              |
                   observations + projections
                             |
                             v
-              offline search, health, dossiers,
-             investigations, evidence, and drafts
+              offline search, radar, health, dossiers, thread briefs,
+             investigations, evidence, readiness, and drafts
 ```
 
 The dependency direction is toward product-owned contracts:
@@ -35,6 +35,8 @@ The dependency direction is toward product-owned contracts:
   runner are adapters for external capabilities.
 - `internal/cli`, `internal/mcpserver`, and `internal/tui` translate user or
   protocol input into application calls. They do not own product rules.
+  MCP prompts are static workflow guidance; they cannot grant new authority or
+  turn repository content into instructions.
 
 Third-party SDK and database types terminate inside their adapters. The
 application and domain packages expose product-owned values and interfaces.
@@ -43,8 +45,8 @@ application and domain packages expose product-owned values and interfaces.
 
 | Capability | Examples | Network | Local write | Process execution | GitHub mutation |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Corpus read | search, health, dossier show, MCP resources | no | no | no | no |
-| Corpus write | investigations, evidence, lenses, tracking | no | yes | no | no |
+| Corpus read | search, health, dossier show, research brief, readiness, MCP resources | no | no | no | no |
+| Corpus write | investigations, start-thread, evidence, lenses, tracking | no | yes | no | no |
 | Terminal installation | explicit setup `--install-cli` | npm registry dependent | yes | `npm` only | no |
 | GitHub read | sync, crawl, hydrate | yes | yes | no | no |
 | Git acquisition | acquire, workspace create | remote-dependent | yes | `git` only | no |
@@ -151,8 +153,46 @@ a deterministic tie-breaker.
 Scores are explanations, not opaque relevance claims. They are derived from
 stored matches, freshness, coverage, and optional lens weights. Lens ranking
 uses a bounded population and therefore does not support cursor pagination.
-Health metrics and dossier generation similarly operate only on stored facts
-and report partial or missing coverage when required facets are incomplete.
+Contribution Radar similarly ranks a bounded open-issue population, separates
+eligibility from score, and reports positive signals, risks, blockers, and
+unknown evidence. Missing coverage is never silently converted into a negative
+signal. Health metrics, dossier generation, and thread research briefs also
+operate only on stored facts and report partial or missing coverage when
+required facets are incomplete. A research-brief section must carry a source
+reference or an explicit unknown reason; untrusted thread text remains data and
+cannot grant an adapter additional authority.
+
+Starting an investigation from a thread is an explicit corpus-write capability.
+The investigation and seed hypothesis are committed in one transaction and
+carry the exact thread observation ID, source timestamp, and observation
+sequence used as their baseline. A partial unique origin key returns the
+existing open pair on repeated or concurrent requests; later thread projections
+do not rewrite that baseline, and a closed investigation releases the origin
+for a deliberate new start.
+
+Evidence freshness is a read-time assessment over stored corpus revisions, not
+another persisted evidence relation. Source-backed evidence can record the
+repository, thread, facet, or guidance revision it used; readers compare those
+recorded revisions with the current winning local projections and return
+`fresh`, `stale`, `unknown`, or `not_applicable`. Freshness reads must not
+perform network access, execute processes, delete evidence, or silently treat
+stale evidence as invalid. Tracking exports carry evidence provenance in schema
+version 2 while accepting older unversioned bundles that do not contain
+evidence records.
+
+Contribution readiness is also a pure corpus-read capability. It re-evaluates a
+versioned rule set for one opportunity and returns deterministic checks with
+`pass`, `warn`, `block`, or `unknown` status, evidence references, and
+remediation text. Only objectively unsubmitable local states, such as an
+archived repository, closed target thread, failing candidate validation, or
+unresolved contradicting evidence, should block. Missing guidance, missing
+coverage, stale evidence, or incomplete validation usually remain `warn` or
+`unknown`. Readiness must not fetch GitHub, execute validation, mutate
+opportunities, or inspect repository-controlled code while evaluating a gate.
+MCP exposes the same report as an offline tool/resource and adds workflow
+prompts that point agents at local resources first. Those prompts must preserve
+the same side-effect boundary: they may suggest explicit tools, but they cannot
+authorize network reads, local writes, process execution, or GitHub mutation.
 
 ## Schema changes
 

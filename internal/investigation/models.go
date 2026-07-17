@@ -70,13 +70,16 @@ type StatusChange struct {
 
 // Investigation is a durable workspace scoped to a repository and commit.
 type Investigation struct {
-	ID        string
-	Repo      domain.RepoRef
-	CommitSHA string
-	Lens      string
-	Status    InvestigationStatus
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID               string
+	Repo             domain.RepoRef
+	CommitSHA        string
+	Lens             string
+	Status           InvestigationStatus
+	ThreadBaseline   *ThreadBaseline
+	SeedHypothesisID string
+	AuditTrail       []StatusChange
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // InvestigationStatus is the high-level state of the workspace.

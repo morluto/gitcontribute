@@ -32,6 +32,18 @@ func (r *fakeRepo) SaveInvestigation(_ context.Context, i *Investigation) error 
 	return nil
 }
 
+func (r *fakeRepo) StartThreadInvestigation(_ context.Context, i *Investigation, h *Hypothesis) (*Investigation, *Hypothesis, bool, error) {
+	for _, existing := range r.investigations {
+		if existing.Status == InvestigationOpen && existing.ThreadBaseline != nil &&
+			existing.ThreadBaseline.OriginKey() == i.ThreadBaseline.OriginKey() {
+			return existing, r.hypotheses[existing.SeedHypothesisID], false, nil
+		}
+	}
+	r.investigations[i.ID] = i
+	r.hypotheses[h.ID] = h
+	return i, h, true, nil
+}
+
 func (r *fakeRepo) GetInvestigation(_ context.Context, id string) (*Investigation, error) {
 	i, ok := r.investigations[id]
 	if !ok {

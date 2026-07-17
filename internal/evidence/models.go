@@ -115,16 +115,17 @@ type ValidationRun struct {
 
 // Evidence is a piece of supporting, contradicting, or inconclusive proof.
 type Evidence struct {
-	ID              string
-	InvestigationID string
-	HypothesisID    string
-	OpportunityID   string
-	ValidationRunID string
-	Type            EvidenceType
-	Relation        Relation
-	Description     string
-	SourceRefs      []domain.SourceRef
-	CreatedAt       time.Time
+	ID               string
+	InvestigationID  string
+	HypothesisID     string
+	OpportunityID    string
+	ValidationRunID  string
+	Type             EvidenceType
+	Relation         Relation
+	Description      string
+	SourceRefs       []domain.SourceRef
+	SourceProvenance []SourceRevision
+	CreatedAt        time.Time
 }
 
 // ComparisonClassification is the result of comparing a base run to a candidate run.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -95,6 +96,28 @@ func (*fakeReader) Evidence(_ context.Context, in EvidenceInput) (EvidenceOutput
 		Total:           1,
 		Evidence: []EvidenceItem{{
 			ID: "ev-1", Type: "manual_observation", Relation: "supporting", Description: "observed",
+		}},
+	}, nil
+}
+
+func (*fakeReader) Readiness(_ context.Context, in ReadinessInput) (ReadinessOutput, error) {
+	if in.OpportunityID == "404" {
+		return ReadinessOutput{}, ErrNotFound
+	}
+	return ReadinessOutput{
+		OpportunityID:  in.OpportunityID,
+		RuleSetVersion: "readiness.v1",
+		Status:         "warn",
+		EvaluatedAt:    "2026-07-17T00:00:00Z",
+		Checks: []ReadinessCheck{{
+			CheckID:      in.OpportunityID + ":evidence_freshness",
+			RuleID:       "evidence_freshness",
+			RuleVersion:  "v1",
+			Status:       "warn",
+			Summary:      "Some evidence is stale.",
+			EvidenceRefs: []string{"evidence:ev-1"},
+			Remediation:  "Re-check stale evidence before preparing the contribution.",
+			EvaluatedAt:  "2026-07-17T00:00:00Z",
 		}},
 	}, nil
 }
@@ -263,7 +286,7 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 	for _, name := range []string{
 		"search", "get_repository", "get_thread", "get_dossier",
 		"search_code", "get_investigation", "list_opportunities", "get_opportunity", "get_evidence",
-		"find_clusters", "get_coverage", "get_lens",
+		"get_readiness", "find_clusters", "get_coverage", "get_lens",
 	} {
 		tool := tools[name]
 		if tool == nil {
@@ -319,6 +342,7 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 		{"list_opportunities", map[string]any{"investigation_id": "inv-1"}, 1},
 		{"get_opportunity", map[string]any{"id": "opp-1"}, -1},
 		{"get_evidence", map[string]any{"investigation_id": "inv-1"}, 1},
+		{"get_readiness", map[string]any{"opportunity_id": "opp-1"}, -1},
 		{"find_clusters", map[string]any{"owner": "acme", "repo": "rocket"}, 1},
 		{"get_coverage", map[string]any{"owner": "acme", "repo": "rocket"}, -1},
 		{"get_lens", map[string]any{"name": "active-go"}, -1},
@@ -379,6 +403,14 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 				t.Fatalf("decode %s: %v", tt.name, err)
 			}
 			if out.Total != tt.wantTotal || len(out.Evidence) != tt.wantTotal {
+				t.Fatalf("%s output = %+v", tt.name, out)
+			}
+		case "get_readiness":
+			var out ReadinessOutput
+			if err := json.Unmarshal(payload, &out); err != nil {
+				t.Fatalf("decode %s: %v", tt.name, err)
+			}
+			if out.OpportunityID != "opp-1" || out.Status != "warn" || len(out.Checks) != 1 {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
 		case "find_clusters":
@@ -479,6 +511,8 @@ func TestInvestigationOpportunityEvidenceResources(t *testing.T) {
 		"gitcontribute://opportunity/opp-1",
 		"gitcontribute://evidence/investigation/inv-1",
 		"gitcontribute://evidence/opportunity/opp-1",
+		"gitcontribute://readiness/opp-1",
+		"gitcontribute://workflow/contribution/opp-1",
 	}
 	for _, uri := range cases {
 		result, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: uri})
@@ -495,6 +529,51 @@ func TestInvestigationOpportunityEvidenceResources(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected resource-not-found error")
+	}
+}
+
+func TestContributionWorkflowPrompts(t *testing.T) {
+	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	defer closeSessions()
+
+	prompts, err := client.ListPrompts(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("list prompts: %v", err)
+	}
+	names := map[string]bool{}
+	for _, prompt := range prompts.Prompts {
+		names[prompt.Name] = true
+	}
+	for _, name := range []string{
+		"investigate_contribution_candidate",
+		"review_contribution_readiness",
+		"prepare_local_contribution_draft",
+	} {
+		if !names[name] {
+			t.Fatalf("missing prompt %q in %+v", name, prompts.Prompts)
+		}
+	}
+
+	got, err := client.GetPrompt(context.Background(), &mcp.GetPromptParams{
+		Name:      "review_contribution_readiness",
+		Arguments: map[string]string{"opportunity_id": "opp-1"},
+	})
+	if err != nil {
+		t.Fatalf("get prompt: %v", err)
+	}
+	text, ok := got.Messages[0].Content.(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("prompt content = %#v", got.Messages[0].Content)
+	}
+	if !strings.Contains(text.Text, "gitcontribute://readiness/opp-1") ||
+		!strings.Contains(text.Text, "untrusted data") ||
+		!strings.Contains(text.Text, "Do not refresh GitHub") {
+		t.Fatalf("prompt text missing safety/resource guidance:\n%s", text.Text)
+	}
+
+	_, err = client.GetPrompt(context.Background(), &mcp.GetPromptParams{Name: "review_contribution_readiness"})
+	if err == nil {
+		t.Fatal("expected missing argument error")
 	}
 }
 
@@ -554,6 +633,7 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 
 	for _, name := range []string{
 		"search_repositories", "search_threads", "get_repository_dossier", "explain_match", "get_job",
+		"get_readiness",
 		"start_crawl", "hydrate_repository", "build_repository_dossier", "create_workspace", "run_validation",
 		"start_investigation", "record_hypothesis", "check_duplicates", "check_collisions",
 		"promote_opportunity", "define_validation", "prepare_contribution", "cancel_job",
@@ -572,6 +652,7 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		{"get_repository_dossier", map[string]any{"owner": "acme", "repo": "rocket"}},
 		{"explain_match", map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 7}},
 		{"get_job", map[string]any{"id": "job-1"}},
+		{"get_readiness", map[string]any{"opportunity_id": "opp-1"}},
 	}
 	for _, tt := range readTests {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})
@@ -618,6 +699,8 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		"github-index://investigations/inv-1",
 		"github-index://opportunities/opp-1",
 		"github-index://evidence/inv-1",
+		"github-index://readiness/opp-1",
+		"github-index://workflows/contribution/opp-1",
 		"github-index://lenses/active-go",
 		"github-index://jobs/job-1",
 	}

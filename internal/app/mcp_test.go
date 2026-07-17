@@ -333,6 +333,11 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 	if evOut.Total != 2 || len(evOut.Evidence) != 2 || evOut.Evidence[0].Relation != "supporting" {
 		t.Fatalf("unexpected evidence: %+v", evOut)
 	}
+	for _, item := range evOut.Evidence {
+		if item.Freshness != string(evidence.FreshnessNotApplicable) || item.FreshnessReason == "" {
+			t.Fatalf("evidence freshness missing from MCP output: %+v", item)
+		}
+	}
 
 	evByInv, err := reader.Evidence(ctx, mcpserver.EvidenceInput{InvestigationID: inv.ID, Relation: "supporting", Limit: 10})
 	if err != nil {
@@ -340,5 +345,18 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 	}
 	if evByInv.Total != 2 {
 		t.Fatalf("unexpected evidence by investigation: %+v", evByInv)
+	}
+	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
+		Owner: "owner", Name: "repo", DefaultBranch: "main",
+	}, `{}`); err != nil {
+		t.Fatalf("seed repository projection: %v", err)
+	}
+
+	readinessOut, err := reader.Readiness(ctx, mcpserver.ReadinessInput{OpportunityID: opp.ID})
+	if err != nil {
+		t.Fatalf("get readiness: %v", err)
+	}
+	if readinessOut.OpportunityID != opp.ID || readinessOut.RuleSetVersion == "" || len(readinessOut.Checks) == 0 {
+		t.Fatalf("unexpected readiness output: %+v", readinessOut)
 	}
 }
