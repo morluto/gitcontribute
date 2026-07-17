@@ -641,7 +641,7 @@ type LensService interface {
 	AddLens(ctx context.Context, name string, def lens.Definition) (*LensResult, error)
 	ListLenses(ctx context.Context) (*LensListResult, error)
 	ShowLens(ctx context.Context, name string) (*LensResult, error)
-	ExplainLens(ctx context.Context, name, ref string) (*LensExplainResult, error)
+	ExplainLens(ctx context.Context, name, ref, query string) (*LensExplainResult, error)
 }
 
 // LensResult is a saved lens definition.
@@ -661,6 +661,7 @@ type LensListResult struct {
 type LensExplainResult struct {
 	Lens            LensResult           `json:"lens"`
 	Candidate       LensExplainCandidate `json:"candidate"`
+	Query           string               `json:"query,omitempty"`
 	PopulationSize  int                  `json:"population_size"`
 	PopulationScope string               `json:"population_scope"`
 	EvaluatedAt     string               `json:"evaluated_at"`

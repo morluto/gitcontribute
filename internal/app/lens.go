@@ -15,6 +15,8 @@ import (
 	"github.com/morluto/gitcontribute/internal/lens"
 )
 
+const maxLensExplanationItems = 10000
+
 // AddLens validates and stores a lens definition.
 func (s *Service) AddLens(ctx context.Context, name string, def lens.Definition) (*cli.LensResult, error) {
 	name = strings.TrimSpace(name)
@@ -86,7 +88,7 @@ func lensResult(r *corpus.LensRecord) *cli.LensResult {
 // ExplainLens returns the saved definition, candidate facts, normalized signals,
 // weighted contributions, final score, population context, and missing signals
 // for a candidate under a saved lens. It performs no network access.
-func (s *Service) ExplainLens(ctx context.Context, name, ref string) (*cli.LensExplainResult, error) {
+func (s *Service) ExplainLens(ctx context.Context, name, ref, query string) (*cli.LensExplainResult, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, errors.New("lens name is required")
@@ -111,7 +113,7 @@ func (s *Service) ExplainLens(ctx context.Context, name, ref string) (*cli.LensE
 	def := lensRecord.Definition
 
 	now := s.now()
-	candidate, matches, scope, err := s.resolveLensExplainCandidate(ctx, c, ref, def, now)
+	candidate, matches, scope, err := s.resolveLensExplainCandidate(ctx, c, ref, def, query, now)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +121,7 @@ func (s *Service) ExplainLens(ctx context.Context, name, ref string) (*cli.LensE
 	candidates := make([]lens.Candidate, 0, len(matches))
 	byID := make(map[string]searchMatch, len(matches))
 	for _, m := range matches {
-		cand := candidateFromMatch(m, "", now)
+		cand := candidateFromMatch(m, query, now)
 		candidates = append(candidates, cand)
 		byID[cand.ID] = m
 	}
@@ -139,26 +141,30 @@ func (s *Service) ExplainLens(ctx context.Context, name, ref string) (*cli.LensE
 	if found == nil {
 		return nil, fmt.Errorf("result %q does not match lens %q filters", ref, name)
 	}
+	match, ok := byID[found.Candidate.ID]
+	if !ok {
+		return nil, fmt.Errorf("result %q is missing from its explanation population", ref)
+	}
 
-	return buildLensExplainResult(lensRecord, *found, len(results), scope, now), nil
+	return buildLensExplainResult(lensRecord, *found, match, len(results), scope, query, now), nil
 }
 
-func (s *Service) resolveLensExplainCandidate(ctx context.Context, c *corpus.Corpus, ref string, def lens.Definition, now time.Time) (lens.Candidate, []searchMatch, string, error) {
+func (s *Service) resolveLensExplainCandidate(ctx context.Context, c *corpus.Corpus, ref string, def lens.Definition, query string, now time.Time) (lens.Candidate, []searchMatch, string, error) {
 	prefix, rest := splitLensRef(ref)
 	switch prefix {
 	case "repo":
-		return s.explainRepoCandidate(ctx, c, rest, def, now)
+		return s.explainRepoCandidate(ctx, c, rest, query, now)
 	case "issue":
-		return s.explainThreadCandidate(ctx, c, rest, corpus.ThreadKindIssue, def, now)
+		return s.explainThreadCandidate(ctx, c, rest, corpus.ThreadKindIssue, def, query, now)
 	case "pr", "pull_request":
-		return s.explainThreadCandidate(ctx, c, rest, corpus.ThreadKindPullRequest, def, now)
+		return s.explainThreadCandidate(ctx, c, rest, corpus.ThreadKindPullRequest, def, query, now)
 	case "code":
-		return s.explainCodeCandidate(ctx, c, rest, def, now)
+		return s.explainCodeCandidate(ctx, c, rest, query, now)
 	case "":
 		if strings.Contains(ref, "#") {
-			return s.explainThreadCandidate(ctx, c, ref, "", def, now)
+			return s.explainThreadCandidate(ctx, c, ref, "", def, query, now)
 		}
-		return s.explainRepoCandidate(ctx, c, ref, def, now)
+		return s.explainRepoCandidate(ctx, c, ref, query, now)
 	default:
 		return lens.Candidate{}, nil, "", fmt.Errorf("unsupported result reference %q", ref)
 	}
@@ -172,7 +178,7 @@ func splitLensRef(ref string) (string, string) {
 	return ref[:idx], ref[idx+1:]
 }
 
-func (s *Service) explainRepoCandidate(ctx context.Context, c *corpus.Corpus, ref string, def lens.Definition, now time.Time) (lens.Candidate, []searchMatch, string, error) {
+func (s *Service) explainRepoCandidate(ctx context.Context, c *corpus.Corpus, ref, query string, now time.Time) (lens.Candidate, []searchMatch, string, error) {
 	repoRef, err := parseRepoRef(ref)
 	if err != nil {
 		return lens.Candidate{}, nil, "", err
@@ -199,7 +205,7 @@ func (s *Service) explainRepoCandidate(ctx context.Context, c *corpus.Corpus, re
 		UpdatedAt: repo.SourceUpdatedAt,
 		Freshness: repo.SourceUpdatedAt,
 	}
-	candidate := candidateFromMatch(m, "", now)
+	candidate := candidateFromMatch(m, query, now)
 
 	all, err := c.ListRepositoriesWithOptions(ctx, "", corpus.RepositorySearchOptions{Limit: maxLensCandidates})
 	if err != nil {
@@ -222,10 +228,11 @@ func (s *Service) explainRepoCandidate(ctx context.Context, c *corpus.Corpus, re
 			Freshness: r.SourceUpdatedAt,
 		})
 	}
+	matches = ensureExplanationMatch(matches, m, candidate.ID, query, now, maxLensCandidates)
 	return candidate, matches, "all repositories", nil
 }
 
-func (s *Service) explainThreadCandidate(ctx context.Context, c *corpus.Corpus, ref, kind string, def lens.Definition, now time.Time) (lens.Candidate, []searchMatch, string, error) {
+func (s *Service) explainThreadCandidate(ctx context.Context, c *corpus.Corpus, ref, kind string, def lens.Definition, query string, now time.Time) (lens.Candidate, []searchMatch, string, error) {
 	repoRef, number, err := parseThreadRef(ref)
 	if err != nil {
 		return lens.Candidate{}, nil, "", err
@@ -268,7 +275,7 @@ func (s *Service) explainThreadCandidate(ctx context.Context, c *corpus.Corpus, 
 		Freshness: thread.SourceUpdatedAt,
 		URL:       threadURL(domain.RepoRef{Owner: repo.Owner, Repo: repo.Name}, thread.Kind, thread.Number),
 	}
-	candidate := candidateFromMatch(m, "", now)
+	candidate := candidateFromMatch(m, query, now)
 
 	kindFilter := ""
 	if len(def.Filter.Kinds) == 1 {
@@ -300,10 +307,11 @@ func (s *Service) explainThreadCandidate(ctx context.Context, c *corpus.Corpus, 
 			URL:       threadURL(domain.RepoRef{Owner: repo.Owner, Repo: repo.Name}, t.Kind, t.Number),
 		})
 	}
+	matches = ensureExplanationMatch(matches, m, candidate.ID, query, now, maxLensExplanationItems)
 	return candidate, matches, fmt.Sprintf("threads in %s", repoRef), nil
 }
 
-func (s *Service) explainCodeCandidate(ctx context.Context, c *corpus.Corpus, ref string, def lens.Definition, now time.Time) (lens.Candidate, []searchMatch, string, error) {
+func (s *Service) explainCodeCandidate(ctx context.Context, c *corpus.Corpus, ref, query string, now time.Time) (lens.Candidate, []searchMatch, string, error) {
 	parts := strings.SplitN(ref, "/", 3)
 	if len(parts) < 3 {
 		return lens.Candidate{}, nil, "", fmt.Errorf("invalid code reference %q: expected owner/repo/path", ref)
@@ -340,7 +348,7 @@ func (s *Service) explainCodeCandidate(ctx context.Context, c *corpus.Corpus, re
 		UpdatedAt: doc.SnapshotCreatedAt,
 		Freshness: doc.SnapshotCreatedAt,
 	}
-	candidate := candidateFromMatch(m, "", now)
+	candidate := candidateFromMatch(m, query, now)
 
 	docs, err := c.ListCodeDocuments(ctx, repoRef)
 	if err != nil {
@@ -363,7 +371,21 @@ func (s *Service) explainCodeCandidate(ctx context.Context, c *corpus.Corpus, re
 			Freshness: d.SnapshotCreatedAt,
 		})
 	}
+	matches = ensureExplanationMatch(matches, m, candidate.ID, query, now, maxLensExplanationItems)
 	return candidate, matches, fmt.Sprintf("code documents in %s", repoRef), nil
+}
+
+func ensureExplanationMatch(matches []searchMatch, target searchMatch, targetID, query string, now time.Time, limit int) []searchMatch {
+	for _, match := range matches {
+		if candidateFromMatch(match, query, now).ID == targetID {
+			return matches
+		}
+	}
+	if limit > 0 && len(matches) >= limit {
+		matches[len(matches)-1] = target
+		return matches
+	}
+	return append(matches, target)
 }
 
 func parseRepoRef(ref string) (domain.RepoRef, error) {
@@ -394,26 +416,10 @@ func parseThreadRef(ref string) (domain.RepoRef, int, error) {
 	return repoRef, number, nil
 }
 
-func buildLensExplainResult(record *corpus.LensRecord, found lens.Result, populationSize int, scope string, now time.Time) *cli.LensExplainResult {
-	m := searchMatch{
-		Repo:      domain.RepoRef{Owner: strings.Split(found.Candidate.Repository, "/")[0], Repo: strings.Split(found.Candidate.Repository, "/")[1]},
-		Kind:      found.Candidate.Kind,
-		Number:    0,
-		State:     found.Candidate.State,
-		Title:     "",
-		Body:      "",
-		UpdatedAt: found.Candidate.UpdatedAt,
-	}
-	if idx := strings.IndexByte(found.Candidate.ID, '#'); idx >= 0 {
-		if n, err := strconv.Atoi(found.Candidate.ID[idx+1:]); err == nil {
-			m.Number = n
-		}
-	} else if idx := strings.LastIndexByte(found.Candidate.ID, '/'); idx >= 0 {
-		m.Title = found.Candidate.ID[idx+1:]
-	}
-
+func buildLensExplainResult(record *corpus.LensRecord, found lens.Result, match searchMatch, populationSize int, scope, query string, now time.Time) *cli.LensExplainResult {
 	result := &cli.LensExplainResult{
 		Lens:            *lensResult(record),
+		Query:           query,
 		PopulationSize:  populationSize,
 		PopulationScope: scope,
 		EvaluatedAt:     now.Format(time.RFC3339),
@@ -423,24 +429,13 @@ func buildLensExplainResult(record *corpus.LensRecord, found lens.Result, popula
 	}
 
 	result.Candidate = cli.LensExplainCandidate{
-		Kind:      found.Candidate.Kind,
-		Repo:      cli.RepoRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo},
-		Number:    m.Number,
-		Title:     m.Title,
-		State:     found.Candidate.State,
-		UpdatedAt: formatSearchTime(found.Candidate.UpdatedAt),
-	}
-	if found.Candidate.Kind == corpus.ThreadKindIssue || found.Candidate.Kind == corpus.ThreadKindPullRequest {
-		result.Candidate.URL = threadURL(m.Repo, found.Candidate.Kind, m.Number)
-		result.Candidate.Title = found.Candidate.ID
-	}
-	if found.Candidate.Kind == "code" {
-		result.Candidate.URL = fmt.Sprintf("https://github.com/%s/blob/HEAD/%s", m.Repo, m.Title)
-		result.Candidate.Title = m.Title
-	}
-	if found.Candidate.Kind == "repo" {
-		result.Candidate.URL = fmt.Sprintf("https://github.com/%s", m.Repo)
-		result.Candidate.Title = found.Candidate.Repository
+		Kind:      match.Kind,
+		Repo:      cli.RepoRef{Owner: match.Repo.Owner, Repo: match.Repo.Repo},
+		Number:    match.Number,
+		Title:     match.Title,
+		State:     match.State,
+		URL:       match.URL,
+		UpdatedAt: formatSearchTime(match.UpdatedAt),
 	}
 
 	var names []string

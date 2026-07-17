@@ -617,9 +617,10 @@ type lensShowCmd struct {
 }
 
 type lensExplainCmd struct {
-	Name string `arg:"" help:"Lens name"`
-	Ref  string `arg:"" help:"Result reference (e.g. owner/repo, owner/repo#number, issue:owner/repo#number, code:owner/repo/path)"`
-	JSON bool   `name:"json" help:"Print the result as JSON"`
+	Name  string `arg:"" help:"Lens name"`
+	Ref   string `arg:"" help:"Result reference (e.g. owner/repo, owner/repo#number, issue:owner/repo#number, code:owner/repo/path)"`
+	Query string `name:"query" help:"Search query whose text-relevance signal should be explained"`
+	JSON  bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type collectionCmd struct {
@@ -2245,7 +2246,7 @@ func (c *CLI) runLens(ctx context.Context, command string, cmd *lensCmd) error {
 		if strings.TrimSpace(cmd.Explain.Ref) == "" {
 			return NewCLIError(ExitUsage, errors.New("result reference is required"))
 		}
-		res, err := service.ExplainLens(ctx, cmd.Explain.Name, cmd.Explain.Ref)
+		res, err := service.ExplainLens(ctx, cmd.Explain.Name, cmd.Explain.Ref, cmd.Explain.Query)
 		if err != nil {
 			return c.mapError(err)
 		}

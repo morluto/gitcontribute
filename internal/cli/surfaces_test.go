@@ -37,6 +37,7 @@ type fakeSurfacesService struct {
 	lastClusterLimit   int
 	lastLensName       string
 	lastLensExplainRef string
+	lastLensQuery      string
 	lastLensDef        lens.Definition
 	lastCreateColName  string
 	lastAddColName     string
@@ -110,10 +111,11 @@ func (f *fakeSurfacesService) ShowLens(ctx context.Context, name string) (*cli.L
 	}, f.err
 }
 
-func (f *fakeSurfacesService) ExplainLens(ctx context.Context, name, ref string) (*cli.LensExplainResult, error) {
+func (f *fakeSurfacesService) ExplainLens(ctx context.Context, name, ref, query string) (*cli.LensExplainResult, error) {
 	f.explainLensCalled = true
 	f.lastLensName = name
 	f.lastLensExplainRef = ref
+	f.lastLensQuery = query
 	return &cli.LensExplainResult{
 		Lens: cli.LensResult{
 			Name: name,
@@ -272,8 +274,8 @@ func TestLensAddListShow(t *testing.T) {
 	}
 
 	c4, stdout, _ := newSurfacesCLI(svc)
-	requireNoErr(t, c4.Run(context.Background(), []string{"lens", "explain", "active-go", "o/r#1"}))
-	if !svc.explainLensCalled || svc.lastLensName != "active-go" || svc.lastLensExplainRef != "o/r#1" {
+	requireNoErr(t, c4.Run(context.Background(), []string{"lens", "explain", "active-go", "o/r#1", "--query", "fix"}))
+	if !svc.explainLensCalled || svc.lastLensName != "active-go" || svc.lastLensExplainRef != "o/r#1" || svc.lastLensQuery != "fix" {
 		t.Fatalf("explain lens not called: called=%v name=%q ref=%q", svc.explainLensCalled, svc.lastLensName, svc.lastLensExplainRef)
 	}
 	if !strings.Contains(stdout.String(), "Lens: active-go") {

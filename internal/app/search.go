@@ -367,7 +367,7 @@ func (s *Service) searchWithLens(ctx context.Context, c *corpus.Corpus, query st
 		return searchResult{}, fmt.Errorf("load lens: %w", err)
 	}
 	if lensRecord == nil {
-		return searchResult{}, fmt.Errorf("lens %q not found", opts.Lens)
+		return searchResult{}, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("lens %q not found", opts.Lens))
 	}
 	def := lensRecord.Definition
 
@@ -383,9 +383,10 @@ func (s *Service) searchWithLens(ctx context.Context, c *corpus.Corpus, query st
 		if err != nil {
 			return searchResult{}, err
 		}
-		if repo != nil {
-			repoID = repo.ID
+		if repo == nil {
+			return searchResult{Query: query, Matches: []searchMatch{}}, nil
 		}
+		repoID = repo.ID
 	}
 
 	var matches []searchMatch
@@ -418,6 +419,15 @@ func (s *Service) searchWithLens(ctx context.Context, c *corpus.Corpus, query st
 	}
 	if err != nil {
 		return searchResult{}, err
+	}
+	if repoRef != (domain.RepoRef{}) {
+		filtered := matches[:0]
+		for _, match := range matches {
+			if match.Repo == repoRef {
+				filtered = append(filtered, match)
+			}
+		}
+		matches = filtered
 	}
 
 	candidates := make([]lens.Candidate, 0, len(matches))

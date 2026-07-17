@@ -602,6 +602,9 @@ func lensExplainHuman(r *LensExplainResult) string {
 		fmt.Fprintf(&b, "Updated: %s\n", c.UpdatedAt)
 	}
 	fmt.Fprintf(&b, "Population: %d (%s), evaluated at %s\n", r.PopulationSize, r.PopulationScope, r.EvaluatedAt)
+	if r.Query != "" {
+		fmt.Fprintf(&b, "Query: %s\n", r.Query)
+	}
 	fmt.Fprintf(&b, "Final score: %.2f\n", r.Score)
 	if len(r.Signals) > 0 {
 		b.WriteString("Signals:\n")

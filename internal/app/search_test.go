@@ -325,6 +325,29 @@ func TestSearchWithLensRanksAndFiltersThreads(t *testing.T) {
 	}
 }
 
+func TestSearchWithLensDoesNotLeakMatchesForMissingRepository(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	seedLensCorpus(t, svc)
+
+	if _, err := svc.corpus.SaveLens(ctx, lens.Definition{
+		Name:    "active-go",
+		Weights: map[string]float64{"text_relevance": 1},
+	}); err != nil {
+		t.Fatalf("save lens: %v", err)
+	}
+
+	result, err := svc.Search(ctx, "login", cli.SearchOptions{
+		Kind: "issues", Repo: "missing/repo", Lens: "active-go", Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("search with lens: %v", err)
+	}
+	if result.Total != 0 || len(result.Matches) != 0 {
+		t.Fatalf("missing repository returned matches: %+v", result)
+	}
+}
+
 func TestExplainLens(t *testing.T) {
 	ctx := context.Background()
 	svc := newSearchTestService(t)
@@ -347,7 +370,7 @@ func TestExplainLens(t *testing.T) {
 
 	svc.SetClock(func() time.Time { return time.Unix(100000, 0).UTC() })
 
-	ex, err := svc.ExplainLens(ctx, "active-go", "owner/repo#1")
+	ex, err := svc.ExplainLens(ctx, "active-go", "owner/repo#1", "login")
 	if err != nil {
 		t.Fatalf("explain lens: %v", err)
 	}
@@ -356,6 +379,9 @@ func TestExplainLens(t *testing.T) {
 	}
 	if ex.Candidate.Number != 1 {
 		t.Fatalf("candidate number = %d, want 1", ex.Candidate.Number)
+	}
+	if ex.Candidate.Title != "fix login crash" || ex.Candidate.URL != "https://github.com/owner/repo/issues/1" || ex.Query != "login" {
+		t.Fatalf("unexpected candidate facts or query: candidate=%+v query=%q", ex.Candidate, ex.Query)
 	}
 	if ex.Score <= 0 {
 		t.Fatalf("expected positive score, got %v", ex.Score)
