@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -24,6 +25,7 @@ type CLI struct {
 	svc    Service
 	runner MCPRunner
 	tui    TUIRunner
+	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
 }
@@ -36,11 +38,19 @@ func New(service Service, runner MCPRunner, stdout, stderr io.Writer) *CLI {
 	if stderr == nil {
 		stderr = io.Discard
 	}
-	return &CLI{svc: service, runner: runner, stdout: stdout, stderr: stderr}
+	return &CLI{svc: service, runner: runner, stdin: os.Stdin, stdout: stdout, stderr: stderr}
 }
 
 // SetTUIRunner wires the optional terminal UI adapter.
 func (c *CLI) SetTUIRunner(runner TUIRunner) { c.tui = runner }
+
+// SetInput replaces stdin for commands that explicitly import from "-".
+func (c *CLI) SetInput(input io.Reader) {
+	if input == nil {
+		input = strings.NewReader("")
+	}
+	c.stdin = input
+}
 
 type rootCmd struct {
 	Init          initCmd          `cmd:"" help:"Initialize the local corpus"`
@@ -192,6 +202,7 @@ type sourceAddSearchCmd struct {
 
 type sourceAddReposCmd struct {
 	Name  string   `name:"name" help:"Stable source name (defaults to the first repo)"`
+	File  string   `name:"file" help:"Read repository refs or structured JSON from a file ('-' for stdin)"`
 	Repos []string `arg:"" optional:"" help:"Repositories as OWNER/REPO or GitHub URLs"`
 	JSON  bool     `name:"json" help:"Print the result as JSON"`
 }
@@ -928,7 +939,7 @@ func (c *CLI) runSource(ctx context.Context, command string, cmd *sourceCmd) err
 		}
 		return c.render(cmd.Add.Search.JSON, result)
 	case "source add repos":
-		refs, name, err := parseRepoSourceArgs(cmd.Add.Repos)
+		refs, name, err := c.parseRepoSourceArgs(cmd.Add.Repos)
 		if err != nil {
 			return NewCLIError(ExitUsage, err)
 		}
@@ -964,12 +975,40 @@ func (c *CLI) runSource(ctx context.Context, command string, cmd *sourceCmd) err
 	}
 }
 
-func parseRepoSourceArgs(cmd sourceAddReposCmd) ([]RepoRef, string, error) {
-	if len(cmd.Repos) == 0 {
+func (c *CLI) parseRepoSourceArgs(cmd sourceAddReposCmd) ([]RepoRef, string, error) {
+	rawRepos := append([]string(nil), cmd.Repos...)
+	file := strings.TrimSpace(cmd.File)
+	if len(rawRepos) == 1 && rawRepos[0] == "-" && file == "" {
+		file = "-"
+		rawRepos = nil
+	}
+	if file != "" && len(rawRepos) > 0 {
+		return nil, "", errors.New("repository arguments cannot be combined with --file")
+	}
+	if file != "" {
+		var reader io.Reader
+		if file == "-" {
+			reader = c.stdin
+		} else {
+			opened, err := os.Open(file)
+			if err != nil {
+				return nil, "", fmt.Errorf("open repository file: %w", err)
+			}
+			defer opened.Close()
+			reader = opened
+		}
+		var err error
+		rawRepos, err = readRepositoryImport(reader)
+		if err != nil {
+			return nil, "", err
+		}
+	}
+	if len(rawRepos) == 0 {
 		return nil, "", errors.New("at least one repository is required")
 	}
-	refs := make([]RepoRef, 0, len(cmd.Repos))
-	for _, raw := range cmd.Repos {
+	refs := make([]RepoRef, 0, len(rawRepos))
+	seen := make(map[string]struct{}, len(rawRepos))
+	for _, raw := range rawRepos {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
 			continue
@@ -978,7 +1017,13 @@ func parseRepoSourceArgs(cmd sourceAddReposCmd) ([]RepoRef, string, error) {
 		if err != nil {
 			return nil, "", err
 		}
-		refs = append(refs, RepoRef{Owner: dr.Owner, Repo: dr.Repo})
+		ref := RepoRef{Owner: dr.Owner, Repo: dr.Repo}
+		key := strings.ToLower(ref.String())
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		refs = append(refs, ref)
 	}
 	if len(refs) == 0 {
 		return nil, "", errors.New("at least one valid repository is required")
@@ -992,6 +1037,85 @@ func parseRepoSourceArgs(cmd sourceAddReposCmd) ([]RepoRef, string, error) {
 		name = strings.ToLower(name)
 	}
 	return refs, name, nil
+}
+
+const maxRepositoryImportBytes = 4 << 20
+
+func readRepositoryImport(reader io.Reader) ([]string, error) {
+	data, err := io.ReadAll(io.LimitReader(reader, maxRepositoryImportBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read repository import: %w", err)
+	}
+	if len(data) > maxRepositoryImportBytes {
+		return nil, fmt.Errorf("repository import exceeds %d bytes", maxRepositoryImportBytes)
+	}
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" {
+		return nil, errors.New("repository import is empty")
+	}
+	if strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "{") {
+		return parseRepositoryImportJSON([]byte(trimmed))
+	}
+	var refs []string
+	scanner := bufio.NewScanner(strings.NewReader(trimmed))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line != "" && !strings.HasPrefix(line, "#") {
+			refs = append(refs, line)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan repository import: %w", err)
+	}
+	return refs, nil
+}
+
+func parseRepositoryImportJSON(data []byte) ([]string, error) {
+	var items []json.RawMessage
+	if data[0] == '[' {
+		if err := json.Unmarshal(data, &items); err != nil {
+			return nil, fmt.Errorf("parse repository import: %w", err)
+		}
+	} else {
+		var wrapper struct {
+			Repositories []json.RawMessage `json:"repositories"`
+		}
+		if err := json.Unmarshal(data, &wrapper); err != nil {
+			return nil, fmt.Errorf("parse repository import: %w", err)
+		}
+		items = wrapper.Repositories
+	}
+	refs := make([]string, 0, len(items))
+	for _, item := range items {
+		var text string
+		if json.Unmarshal(item, &text) == nil {
+			refs = append(refs, text)
+			continue
+		}
+		var object struct {
+			Owner    string `json:"owner"`
+			Repo     string `json:"repo"`
+			FullName string `json:"full_name"`
+			URL      string `json:"url"`
+		}
+		if err := json.Unmarshal(item, &object); err != nil {
+			return nil, fmt.Errorf("parse repository import item: %w", err)
+		}
+		switch {
+		case object.Owner != "" && object.Repo != "":
+			refs = append(refs, object.Owner+"/"+object.Repo)
+		case object.FullName != "":
+			refs = append(refs, object.FullName)
+		case object.URL != "":
+			refs = append(refs, object.URL)
+		default:
+			return nil, errors.New("repository import item requires owner/repo, full_name, or url")
+		}
+	}
+	if len(refs) == 0 {
+		return nil, errors.New("repository import contains no repositories")
+	}
+	return refs, nil
 }
 
 func parseGHArchiveEvents(events string) ([]string, error) {

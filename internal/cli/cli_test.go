@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -298,6 +300,29 @@ func TestSourceAddReposAcceptsURL(t *testing.T) {
 	c, _, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "https://github.com/X/Y"}))
 	if len(svc.lastSourceRefs) != 1 || svc.lastSourceRefs[0].String() != "X/Y" {
+		t.Fatalf("refs = %+v", svc.lastSourceRefs)
+	}
+}
+
+func TestSourceAddReposImportsStructuredStdin(t *testing.T) {
+	svc := &fakeService{sourceResult: &cli.SourceResult{Name: "imported", Kind: "repos", Enabled: true}}
+	c, _, _ := newTestCLI(svc, nil)
+	c.SetInput(strings.NewReader(`{"repositories":["one/first",{"owner":"two","repo":"second"},{"full_name":"three/third"}]}`))
+	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "--name", "imported", "--file", "-"}))
+	if len(svc.lastSourceRefs) != 3 || svc.lastSourceRefs[1].String() != "two/second" {
+		t.Fatalf("refs = %+v", svc.lastSourceRefs)
+	}
+}
+
+func TestSourceAddReposImportsLineFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "repositories.txt")
+	if err := os.WriteFile(path, []byte("# favorites\none/first\nhttps://github.com/two/second\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc := &fakeService{sourceResult: &cli.SourceResult{Name: "imported", Kind: "repos", Enabled: true}}
+	c, _, _ := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "--name", "imported", "--file", path}))
+	if len(svc.lastSourceRefs) != 2 || svc.lastSourceRefs[1].String() != "two/second" {
 		t.Fatalf("refs = %+v", svc.lastSourceRefs)
 	}
 }
