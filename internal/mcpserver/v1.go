@@ -13,6 +13,7 @@ import (
 
 // V1 read-only tool inputs and outputs.
 
+// SearchRepositoriesInput describes an offline repository search page.
 type SearchRepositoriesInput struct {
 	Query  string `json:"query,omitempty" jsonschema:"Full-text query over repository owner, name, and description"`
 	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
@@ -21,6 +22,7 @@ type SearchRepositoriesInput struct {
 	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
 }
 
+// SearchRepositoriesOutput contains one page of repository matches.
 type SearchRepositoriesOutput struct {
 	Query      string             `json:"query"`
 	Total      int                `json:"total"`
@@ -28,6 +30,7 @@ type SearchRepositoriesOutput struct {
 	NextCursor string             `json:"next_cursor,omitempty"`
 }
 
+// SearchThreadsInput describes an offline issue and pull-request search page.
 type SearchThreadsInput struct {
 	Query  string `json:"query" jsonschema:"Full-text query over thread titles and bodies"`
 	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
@@ -36,8 +39,10 @@ type SearchThreadsInput struct {
 	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
 }
 
+// GetRepositoryDossierInput selects a persisted repository dossier.
 type GetRepositoryDossierInput RepoInput
 
+// ExplainMatchInput identifies an exact stored result and its original query.
 type ExplainMatchInput struct {
 	Query  string `json:"query,omitempty" jsonschema:"Original search query"`
 	Owner  string `json:"owner" jsonschema:"Repository owner"`
@@ -49,6 +54,7 @@ type ExplainMatchInput struct {
 	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum explanation facets from 1 to 100"`
 }
 
+// ExplainMatchOutput reports the stored facts that contributed to a match score.
 type ExplainMatchOutput struct {
 	Query          string                `json:"query"`
 	Kind           string                `json:"kind"`
@@ -68,10 +74,12 @@ type ExplainMatchOutput struct {
 	AsOf           string                `json:"as_of,omitempty"`
 }
 
+// GetJobInput selects a durable job by opaque ID.
 type GetJobInput struct {
 	ID string `json:"id" jsonschema:"Durable job ID"`
 }
 
+// GetJobOutput reports durable state, progress, and result fields for a job.
 type GetJobOutput struct {
 	ID                    string `json:"id"`
 	Kind                  string `json:"kind"`
@@ -88,6 +96,7 @@ type GetJobOutput struct {
 	CancellationRequested bool   `json:"cancellation_requested"`
 }
 
+// ThreadByNumberInput identifies a stored issue or pull request by number.
 type ThreadByNumberInput struct {
 	Owner  string `json:"owner"`
 	Repo   string `json:"repo"`
@@ -104,6 +113,7 @@ type JobReference struct {
 
 // V1 operation inputs and outputs.
 
+// HydrateRepositoryInput configures a durable repository-wide hydration job.
 type HydrateRepositoryInput struct {
 	Owner    string   `json:"owner" jsonschema:"GitHub repository owner"`
 	Repo     string   `json:"repo" jsonschema:"GitHub repository name"`
@@ -113,14 +123,17 @@ type HydrateRepositoryInput struct {
 	Numbers  []int    `json:"numbers,omitempty" jsonschema:"Optional exact thread numbers to hydrate"`
 }
 
+// BuildRepositoryDossierInput selects a repository for durable dossier generation.
 type BuildRepositoryDossierInput RepoInput
 
+// StartCrawlInput configures a durable crawl job for a saved discovery source.
 type StartCrawlInput struct {
 	Source string `json:"source" jsonschema:"Crawl source name"`
 	Since  string `json:"since,omitempty" jsonschema:"Optional Go duration such as 720h"`
 	Budget int    `json:"budget,omitempty" jsonschema:"Maximum number of repository windows to crawl"`
 }
 
+// CreateWorkspaceInput configures a durable managed-workspace creation job.
 type CreateWorkspaceInput struct {
 	InvestigationID string `json:"investigation_id" jsonschema:"Investigation ID"`
 	Remote          string `json:"remote" jsonschema:"Git remote URL to clone"`
@@ -129,12 +142,14 @@ type CreateWorkspaceInput struct {
 	Name            string `json:"name" jsonschema:"Workspace name"`
 }
 
+// RunValidationInput selects a validation definition and explicitly authorizes execution.
 type RunValidationInput struct {
 	ID      string `json:"id" jsonschema:"Validation definition ID"`
 	Kind    string `json:"kind" jsonschema:"Run kind: base or candidate"`
 	Execute bool   `json:"execute" jsonschema:"Must be true to authorize host execution"`
 }
 
+// StartInvestigationInput creates a local investigation for a repository revision.
 type StartInvestigationInput struct {
 	Owner     string `json:"owner" jsonschema:"GitHub repository owner"`
 	Repo      string `json:"repo" jsonschema:"GitHub repository name"`
@@ -142,6 +157,7 @@ type StartInvestigationInput struct {
 	Lens      string `json:"lens,omitempty" jsonschema:"Optional lens name"`
 }
 
+// RecordHypothesisInput records a structured hypothesis and its provenance.
 type RecordHypothesisInput struct {
 	InvestigationID    string      `json:"investigation_id" jsonschema:"Investigation ID"`
 	Title              string      `json:"title" jsonschema:"Hypothesis title"`
@@ -155,6 +171,7 @@ type RecordHypothesisInput struct {
 	SourceRefs         []SourceRef `json:"source_refs,omitempty" jsonschema:"Source references"`
 }
 
+// HypothesisOutput is the stable MCP representation of a hypothesis.
 type HypothesisOutput struct {
 	ID                 string      `json:"id"`
 	InvestigationID    string      `json:"investigation_id"`
@@ -172,14 +189,17 @@ type HypothesisOutput struct {
 	UpdatedAt          string      `json:"updated_at"`
 }
 
+// CheckDuplicatesInput selects a hypothesis or opportunity for duplicate analysis.
 type CheckDuplicatesInput struct {
 	Target string `json:"target" jsonschema:"Target scope: hypothesis or opportunity"`
 	ID     string `json:"id" jsonschema:"Hypothesis or opportunity ID"`
 	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum findings from 1 to 100"`
 }
 
+// CheckCollisionsInput selects a hypothesis or opportunity for collision analysis.
 type CheckCollisionsInput CheckDuplicatesInput
 
+// CheckOutput contains evidence-backed duplicate or collision findings.
 type CheckOutput struct {
 	Target         string         `json:"target"`
 	ID             string         `json:"id"`
@@ -191,6 +211,7 @@ type CheckOutput struct {
 	Limit          int            `json:"limit"`
 }
 
+// PromoteOpportunityInput converts a hypothesis into a scoped opportunity.
 type PromoteOpportunityInput struct {
 	HypothesisID        string      `json:"hypothesis_id" jsonschema:"Hypothesis ID to promote"`
 	ProblemStatement    string      `json:"problem_statement" jsonschema:"Problem statement"`
@@ -203,6 +224,7 @@ type PromoteOpportunityInput struct {
 	SourceRefs          []SourceRef `json:"source_refs,omitempty" jsonschema:"Source references"`
 }
 
+// DefineValidationInput records a bounded validation command without executing it.
 type DefineValidationInput struct {
 	InvestigationID string   `json:"investigation_id" jsonschema:"Investigation ID"`
 	Kind            string   `json:"kind" jsonschema:"Validation kind"`
@@ -215,6 +237,7 @@ type DefineValidationInput struct {
 	MaxOutputBytes  int64    `json:"max_output_bytes,omitempty" jsonschema:"Maximum captured output bytes"`
 }
 
+// ValidationOutput is the stable MCP representation of a validation definition.
 type ValidationOutput struct {
 	ID              string   `json:"id"`
 	InvestigationID string   `json:"investigation_id"`
@@ -229,6 +252,7 @@ type ValidationOutput struct {
 	CreatedAt       string   `json:"created_at"`
 }
 
+// PrepareContributionInput renders a local issue or pull-request draft.
 type PrepareContributionInput struct {
 	OpportunityID string `json:"opportunity_id" jsonschema:"Opportunity ID"`
 	Kind          string `json:"kind" jsonschema:"Contribution kind: issue or pull_request"`
@@ -242,6 +266,7 @@ type PrepareContributionInput struct {
 	Success       string `json:"success,omitempty" jsonschema:"Success criteria for issue drafts"`
 }
 
+// DraftOutput contains a rendered contribution draft.
 type DraftOutput struct {
 	OpportunityID string `json:"opportunity_id"`
 	Kind          string `json:"kind"`
@@ -250,6 +275,7 @@ type DraftOutput struct {
 	RenderedAt    string `json:"rendered_at"`
 }
 
+// CancelJobInput selects a durable job for persisted cancellation.
 type CancelJobInput GetJobInput
 
 func (s *Server) registerV1() {

@@ -9,6 +9,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/investigation"
 )
 
+// UpdateHypothesisForCLI maps CLI update options to the structured application input.
 func (s *Service) UpdateHypothesisForCLI(ctx context.Context, id string, opts cli.HypothesisUpdateOptions) (any, error) {
 	invSvc, err := s.investigationSvc(ctx)
 	if err != nil {
@@ -53,10 +54,12 @@ func (s *Service) UpdateHypothesisForCLI(ctx context.Context, id string, opts cl
 	return s.UpdateHypothesis(ctx, id, in)
 }
 
+// TransitionHypothesisForCLI validates and records a rationale-bearing status change.
 func (s *Service) TransitionHypothesisForCLI(ctx context.Context, id, status, rationale string) (any, error) {
 	return s.TransitionHypothesis(ctx, id, status, rationale)
 }
 
+// CheckDuplicatesForCLI runs local duplicate analysis for a hypothesis or opportunity.
 func (s *Service) CheckDuplicatesForCLI(ctx context.Context, target, id string, limit int) (any, error) {
 	switch target {
 	case "hypothesis":
@@ -68,6 +71,7 @@ func (s *Service) CheckDuplicatesForCLI(ctx context.Context, target, id string, 
 	}
 }
 
+// CheckCollisionsForCLI runs local open-work collision analysis for a target.
 func (s *Service) CheckCollisionsForCLI(ctx context.Context, target, id string, limit int) (any, error) {
 	switch target {
 	case "hypothesis":
@@ -79,10 +83,12 @@ func (s *Service) CheckCollisionsForCLI(ctx context.Context, target, id string, 
 	}
 }
 
+// SetCollisionForCLI records a reviewed collision status and rationale.
 func (s *Service) SetCollisionForCLI(ctx context.Context, id, status, rationale string) (any, error) {
 	return s.UpdateOpportunityCollisionStatus(ctx, id, status, rationale)
 }
 
+// RecordEvidenceForCLI maps CLI evidence fields to the application evidence model.
 func (s *Service) RecordEvidenceForCLI(ctx context.Context, opts cli.RecordEvidenceOptions) (any, error) {
 	return s.RecordEvidence(ctx, RecordEvidenceInput{
 		InvestigationID: opts.InvestigationID, HypothesisID: opts.HypothesisID, OpportunityID: opts.OpportunityID,
@@ -90,22 +96,27 @@ func (s *Service) RecordEvidenceForCLI(ctx context.Context, opts cli.RecordEvide
 	})
 }
 
+// WorkspaceDiffForCLI returns bounded diff metadata for a managed workspace.
 func (s *Service) WorkspaceDiffForCLI(ctx context.Context, id string) (any, error) {
 	return s.WorkspaceDiff(ctx, id)
 }
 
+// PrepareReviewForCLI creates a local review report from an opportunity and workspace.
 func (s *Service) PrepareReviewForCLI(ctx context.Context, opportunityID, workspaceID string) (any, error) {
 	return s.PrepareReviewReport(ctx, PrepareReviewReportInput{OpportunityID: opportunityID, WorkspaceID: workspaceID})
 }
 
+// BuildDossierForCLI builds and persists a dossier from local corpus data.
 func (s *Service) BuildDossierForCLI(ctx context.Context, repo cli.RepoRef) (any, error) {
 	return s.BuildRepositoryDossier(ctx, repo)
 }
 
+// GetDossierForCLI returns the latest persisted dossier without network access.
 func (s *Service) GetDossierForCLI(ctx context.Context, repo cli.RepoRef) (any, error) {
 	return s.GetRepositoryDossier(ctx, repo)
 }
 
+// ExtractSeedsForCLI derives bounded contribution seeds from stored threads.
 func (s *Service) ExtractSeedsForCLI(ctx context.Context, repo cli.RepoRef, classes []string, limit int) (any, error) {
 	parsed := make([]domain.SeedSourceClass, len(classes))
 	for i, class := range classes {

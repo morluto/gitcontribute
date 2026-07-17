@@ -61,11 +61,13 @@ type Operator interface {
 	CancelJob(context.Context, CancelJobInput) (GetJobOutput, error)
 }
 
+// RepoInput identifies a repository for an MCP operation.
 type RepoInput struct {
 	Owner string `json:"owner" jsonschema:"GitHub repository owner"`
 	Repo  string `json:"repo" jsonschema:"GitHub repository name"`
 }
 
+// ThreadInput identifies an issue or pull request for an MCP operation.
 type ThreadInput struct {
 	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
 	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
@@ -73,6 +75,7 @@ type ThreadInput struct {
 	Number int    `json:"number" jsonschema:"GitHub issue or pull request number"`
 }
 
+// SearchInput describes an offline thread search page.
 type SearchInput struct {
 	Query  string `json:"query" jsonschema:"Full-text query"`
 	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
@@ -82,6 +85,7 @@ type SearchInput struct {
 	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
 }
 
+// RepositoryOutput is the stable MCP representation of a repository.
 type RepositoryOutput struct {
 	Owner     string         `json:"owner"`
 	Repo      string         `json:"repo"`
@@ -89,6 +93,7 @@ type RepositoryOutput struct {
 	Fields    map[string]any `json:"fields,omitempty"`
 }
 
+// ThreadOutput is the stable MCP representation of an issue or pull request.
 type ThreadOutput struct {
 	Owner     string   `json:"owner"`
 	Repo      string   `json:"repo"`
@@ -102,6 +107,7 @@ type ThreadOutput struct {
 	UpdatedAt string   `json:"updated_at,omitempty"`
 }
 
+// SearchOutput contains one page of offline thread matches.
 type SearchOutput struct {
 	Query      string         `json:"query"`
 	Matches    []ThreadOutput `json:"matches"`
@@ -109,6 +115,7 @@ type SearchOutput struct {
 	NextCursor string         `json:"next_cursor,omitempty"`
 }
 
+// DossierOutput contains a persisted repository dossier snapshot.
 type DossierOutput struct {
 	Owner    string         `json:"owner"`
 	Repo     string         `json:"repo"`
@@ -116,6 +123,7 @@ type DossierOutput struct {
 	Sections map[string]any `json:"sections"`
 }
 
+// SourceRef records provenance for an MCP result or workflow artifact.
 type SourceRef struct {
 	Source     string `json:"source" jsonschema:"Source identifier"`
 	URL        string `json:"url,omitempty" jsonschema:"Source URL"`
@@ -124,6 +132,7 @@ type SourceRef struct {
 	AsOf       string `json:"as_of,omitempty" jsonschema:"As-of timestamp"`
 }
 
+// SearchCodeInput describes an offline code search page.
 type SearchCodeInput struct {
 	Query  string `json:"query" jsonschema:"Code search query"`
 	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
@@ -132,6 +141,7 @@ type SearchCodeInput struct {
 	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
 }
 
+// CodeMatchOutput identifies one stored code match.
 type CodeMatchOutput struct {
 	ID       string `json:"id"`
 	Repo     string `json:"repo"`
@@ -142,6 +152,7 @@ type CodeMatchOutput struct {
 	Bytes    int    `json:"bytes"`
 }
 
+// SearchCodeOutput contains one page of offline code matches.
 type SearchCodeOutput struct {
 	Query      string            `json:"query"`
 	Total      int               `json:"total"`
@@ -149,11 +160,13 @@ type SearchCodeOutput struct {
 	NextCursor string            `json:"next_cursor,omitempty"`
 }
 
+// InvestigationInput selects an investigation and bounds nested hypotheses.
 type InvestigationInput struct {
 	ID              string `json:"id" jsonschema:"Investigation ID"`
 	HypothesisLimit int    `json:"hypothesis_limit,omitempty" jsonschema:"Maximum hypotheses from 1 to 100"`
 }
 
+// HypothesisSummary is the compact hypothesis representation nested in an investigation.
 type HypothesisSummary struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
@@ -162,6 +175,7 @@ type HypothesisSummary struct {
 	Description string `json:"description,omitempty"`
 }
 
+// InvestigationOutput is the stable MCP representation of an investigation.
 type InvestigationOutput struct {
 	ID              string              `json:"id"`
 	Owner           string              `json:"owner"`
@@ -175,11 +189,13 @@ type InvestigationOutput struct {
 	Hypotheses      []HypothesisSummary `json:"hypotheses,omitempty"`
 }
 
+// ListOpportunitiesInput selects and bounds opportunities for an investigation.
 type ListOpportunitiesInput struct {
 	InvestigationID string `json:"investigation_id" jsonschema:"Investigation ID"`
 	Limit           int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
 }
 
+// OpportunitySummary is the compact opportunity representation used in lists.
 type OpportunitySummary struct {
 	ID              string  `json:"id"`
 	InvestigationID string  `json:"investigation_id"`
@@ -192,16 +208,19 @@ type OpportunitySummary struct {
 	UpdatedAt       string  `json:"updated_at"`
 }
 
+// ListOpportunitiesOutput contains bounded opportunities for an investigation.
 type ListOpportunitiesOutput struct {
 	Opportunities []OpportunitySummary `json:"opportunities"`
 	Total         int                  `json:"total"`
 }
 
+// OpportunityInput selects an opportunity and bounds nested evidence.
 type OpportunityInput struct {
 	ID            string `json:"id" jsonschema:"Opportunity ID"`
 	EvidenceLimit int    `json:"evidence_limit,omitempty" jsonschema:"Maximum evidence IDs from 1 to 100"`
 }
 
+// OpportunityOutput is the stable MCP representation of a contribution opportunity.
 type OpportunityOutput struct {
 	ID                  string      `json:"id"`
 	InvestigationID     string      `json:"investigation_id"`
@@ -224,6 +243,7 @@ type OpportunityOutput struct {
 	UpdatedAt           string      `json:"updated_at"`
 }
 
+// EvidenceInput filters and bounds stored evidence.
 type EvidenceInput struct {
 	InvestigationID string `json:"investigation_id,omitempty" jsonschema:"Filter by investigation ID"`
 	OpportunityID   string `json:"opportunity_id,omitempty" jsonschema:"Filter by opportunity ID"`
@@ -231,6 +251,7 @@ type EvidenceInput struct {
 	Limit           int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
 }
 
+// EvidenceItem is the stable MCP representation of one evidence record.
 type EvidenceItem struct {
 	ID          string      `json:"id"`
 	Type        string      `json:"type"`
@@ -240,6 +261,7 @@ type EvidenceItem struct {
 	CreatedAt   string      `json:"created_at"`
 }
 
+// EvidenceOutput contains bounded evidence matching a filter.
 type EvidenceOutput struct {
 	InvestigationID string         `json:"investigation_id,omitempty"`
 	OpportunityID   string         `json:"opportunity_id,omitempty"`
@@ -247,12 +269,14 @@ type EvidenceOutput struct {
 	Evidence        []EvidenceItem `json:"evidence"`
 }
 
+// FindClustersInput selects a repository and bounds duplicate clusters.
 type FindClustersInput struct {
 	Owner string `json:"owner" jsonschema:"GitHub repository owner"`
 	Repo  string `json:"repo" jsonschema:"GitHub repository name"`
 	Limit int    `json:"limit,omitempty" jsonschema:"Maximum clusters from 1 to 100"`
 }
 
+// FindNeighborsInput selects a thread and bounds similar-thread results.
 type FindNeighborsInput struct {
 	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
 	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
@@ -261,6 +285,7 @@ type FindNeighborsInput struct {
 	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum neighbors from 1 to 100"`
 }
 
+// NeighborOutput describes one similar stored thread and its score.
 type NeighborOutput struct {
 	Kind   string  `json:"kind"`
 	Owner  string  `json:"owner"`
@@ -272,6 +297,7 @@ type NeighborOutput struct {
 	Reason string  `json:"reason"`
 }
 
+// FindNeighborsOutput contains deterministic neighbors for a stored thread.
 type FindNeighborsOutput struct {
 	Owner          string           `json:"owner"`
 	Repo           string           `json:"repo"`
@@ -281,6 +307,7 @@ type FindNeighborsOutput struct {
 	Neighbors      []NeighborOutput `json:"neighbors"`
 }
 
+// SyncRepositoryInput configures an explicit GitHub repository read.
 type SyncRepositoryInput struct {
 	Owner    string `json:"owner" jsonschema:"GitHub repository owner"`
 	Repo     string `json:"repo" jsonschema:"GitHub repository name"`
@@ -290,6 +317,7 @@ type SyncRepositoryInput struct {
 	MaxPages int    `json:"max_pages,omitempty" jsonschema:"Maximum issue-list pages from 1 to 1000"`
 }
 
+// SyncRepositoryOutput summarizes a completed repository synchronization.
 type SyncRepositoryOutput struct {
 	Owner   string `json:"owner"`
 	Repo    string `json:"repo"`
@@ -297,6 +325,7 @@ type SyncRepositoryOutput struct {
 	Message string `json:"message"`
 }
 
+// HydrateThreadInput configures explicit child-facet retrieval for one thread.
 type HydrateThreadInput struct {
 	Owner    string   `json:"owner" jsonschema:"GitHub repository owner"`
 	Repo     string   `json:"repo" jsonschema:"GitHub repository name"`
@@ -305,6 +334,7 @@ type HydrateThreadInput struct {
 	MaxPages int      `json:"max_pages,omitempty" jsonschema:"Maximum pages per facet from 1 to 100"`
 }
 
+// HydratedFacetOutput summarizes one persisted hydration facet.
 type HydratedFacetOutput struct {
 	Facet    string `json:"facet"`
 	Count    int    `json:"count"`
@@ -312,6 +342,7 @@ type HydratedFacetOutput struct {
 	Complete bool   `json:"complete"`
 }
 
+// HydrateThreadOutput summarizes a completed thread hydration.
 type HydrateThreadOutput struct {
 	Owner    string                `json:"owner"`
 	Repo     string                `json:"repo"`
@@ -322,6 +353,7 @@ type HydrateThreadOutput struct {
 	Message  string                `json:"message"`
 }
 
+// ClusterMemberOutput describes one member of a duplicate cluster.
 type ClusterMemberOutput struct {
 	Kind     string  `json:"kind"`
 	Owner    string  `json:"owner"`
@@ -334,6 +366,7 @@ type ClusterMemberOutput struct {
 	Included bool    `json:"included"`
 }
 
+// ClusterOutput contains a stable duplicate cluster and its canonical member.
 type ClusterOutput struct {
 	StableID    string                `json:"stable_id"`
 	State       string                `json:"state"`
@@ -342,6 +375,7 @@ type ClusterOutput struct {
 	Members     []ClusterMemberOutput `json:"members,omitempty"`
 }
 
+// FindClustersOutput contains duplicate clusters for a repository.
 type FindClustersOutput struct {
 	Owner    string          `json:"owner"`
 	Repo     string          `json:"repo"`
@@ -349,11 +383,13 @@ type FindClustersOutput struct {
 	Clusters []ClusterOutput `json:"clusters"`
 }
 
+// GetCoverageInput selects repository facet coverage.
 type GetCoverageInput struct {
 	Owner string `json:"owner" jsonschema:"GitHub repository owner"`
 	Repo  string `json:"repo" jsonschema:"GitHub repository name"`
 }
 
+// FacetCoverageOutput reports completeness and freshness for one facet.
 type FacetCoverageOutput struct {
 	Facet     string `json:"facet"`
 	Complete  bool   `json:"complete"`
@@ -361,6 +397,7 @@ type FacetCoverageOutput struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// GetCoverageOutput reports all known coverage for a repository.
 type GetCoverageOutput struct {
 	Owner  string                `json:"owner"`
 	Repo   string                `json:"repo"`
@@ -368,10 +405,12 @@ type GetCoverageOutput struct {
 	Facets []FacetCoverageOutput `json:"facets"`
 }
 
+// LensInput selects a saved lens by name.
 type LensInput struct {
 	Name string `json:"name" jsonschema:"Lens name"`
 }
 
+// LensOutput contains a saved lens definition and timestamps.
 type LensOutput struct {
 	Name       string          `json:"name"`
 	Definition lens.Definition `json:"definition"`
@@ -385,6 +424,8 @@ type Server struct {
 	server *mcp.Server
 }
 
+// New constructs an MCP server over reader and registers all supported tools
+// and resources. A blank version is reported as "dev".
 func New(reader Reader, version string) *Server {
 	if version == "" {
 		version = "dev"
@@ -400,8 +441,11 @@ func New(reader Reader, version string) *Server {
 	return s
 }
 
+// MCP returns the underlying SDK server for embedding in another transport.
 func (s *Server) MCP() *mcp.Server { return s.server }
 
+// ServeStdio serves MCP messages over standard input and output until the
+// context is cancelled or the transport stops.
 func (s *Server) ServeStdio(ctx context.Context) error {
 	return s.server.Run(ctx, &mcp.StdioTransport{})
 }

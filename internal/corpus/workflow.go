@@ -37,6 +37,7 @@ func unmarshalWorkflow(payload string, value any) error {
 	return nil
 }
 
+// SaveWorkspace inserts or replaces a managed workspace record.
 func (c *Corpus) SaveWorkspace(ctx context.Context, item *workspace.Workspace) error {
 	if item == nil || item.Name == "" {
 		return errors.New("workspace name is required")
@@ -57,6 +58,7 @@ func (c *Corpus) SaveWorkspace(ctx context.Context, item *workspace.Workspace) e
 	return nil
 }
 
+// GetWorkspace returns a managed workspace by ID, or nil when absent.
 func (c *Corpus) GetWorkspace(ctx context.Context, id string) (*workspace.Workspace, error) {
 	var payload string
 	var createdAt int64
@@ -75,6 +77,7 @@ func (c *Corpus) GetWorkspace(ctx context.Context, id string) (*workspace.Worksp
 	return &item, nil
 }
 
+// SaveInvestigation inserts or updates an investigation record.
 func (c *Corpus) SaveInvestigation(ctx context.Context, item *investigation.Investigation) error {
 	if item == nil || item.ID == "" {
 		return errors.New("investigation id is required")
@@ -95,6 +98,7 @@ func (c *Corpus) SaveInvestigation(ctx context.Context, item *investigation.Inve
 	return nil
 }
 
+// GetInvestigation returns an investigation by ID, or nil when absent.
 func (c *Corpus) GetInvestigation(ctx context.Context, id string) (*investigation.Investigation, error) {
 	var payload string
 	err := c.db.QueryRowContext(ctx, `SELECT payload FROM investigations WHERE id=?`, id).Scan(&payload)
@@ -111,6 +115,7 @@ func (c *Corpus) GetInvestigation(ctx context.Context, id string) (*investigatio
 	return &item, nil
 }
 
+// ListInvestigations returns investigations in deterministic creation order.
 func (c *Corpus) ListInvestigations(ctx context.Context) ([]*investigation.Investigation, error) {
 	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM investigations ORDER BY created_at, id LIMIT 10000`)
 	if err != nil {
@@ -132,6 +137,7 @@ func (c *Corpus) ListInvestigations(ctx context.Context) ([]*investigation.Inves
 	return out, rows.Err()
 }
 
+// SaveHypothesis inserts or updates a hypothesis and its structured fields.
 func (c *Corpus) SaveHypothesis(ctx context.Context, item *investigation.Hypothesis) error {
 	if item == nil || item.ID == "" {
 		return errors.New("hypothesis id is required")
@@ -152,6 +158,7 @@ func (c *Corpus) SaveHypothesis(ctx context.Context, item *investigation.Hypothe
 	return nil
 }
 
+// GetHypothesis returns a hypothesis by ID, or nil when absent.
 func (c *Corpus) GetHypothesis(ctx context.Context, id string) (*investigation.Hypothesis, error) {
 	var payload string
 	err := c.db.QueryRowContext(ctx, `SELECT payload FROM hypotheses WHERE id=?`, id).Scan(&payload)
@@ -168,6 +175,7 @@ func (c *Corpus) GetHypothesis(ctx context.Context, id string) (*investigation.H
 	return &item, nil
 }
 
+// ListHypotheses returns hypotheses belonging to an investigation.
 func (c *Corpus) ListHypotheses(ctx context.Context, investigationID string) ([]*investigation.Hypothesis, error) {
 	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM hypotheses WHERE investigation_id=? ORDER BY created_at, id LIMIT 10000`, investigationID)
 	if err != nil {
@@ -189,6 +197,8 @@ func (c *Corpus) ListHypotheses(ctx context.Context, investigationID string) ([]
 	return out, rows.Err()
 }
 
+// SaveOpportunity atomically persists an opportunity and its dependencies and
+// source references.
 func (c *Corpus) SaveOpportunity(ctx context.Context, item *investigation.Opportunity) error {
 	if item == nil || item.ID == "" {
 		return errors.New("opportunity id is required")
@@ -291,6 +301,7 @@ func (c *Corpus) promoteHypothesis(ctx context.Context, hypothesis *investigatio
 	return nil
 }
 
+// GetOpportunity returns an opportunity with its dependencies and provenance.
 func (c *Corpus) GetOpportunity(ctx context.Context, id string) (*investigation.Opportunity, error) {
 	var payload string
 	err := c.db.QueryRowContext(ctx, `SELECT payload FROM opportunities WHERE id=?`, id).Scan(&payload)
@@ -307,6 +318,7 @@ func (c *Corpus) GetOpportunity(ctx context.Context, id string) (*investigation.
 	return &item, nil
 }
 
+// ListOpportunities returns opportunities belonging to an investigation.
 func (c *Corpus) ListOpportunities(ctx context.Context, investigationID string) ([]*investigation.Opportunity, error) {
 	query := `SELECT payload FROM opportunities`
 	var args []any
@@ -335,6 +347,7 @@ func (c *Corpus) ListOpportunities(ctx context.Context, investigationID string) 
 	return out, rows.Err()
 }
 
+// FindRelated returns stored source references related to a repository and category.
 func (c *Corpus) FindRelated(ctx context.Context, ref domain.RepoRef, category investigation.Category) ([]domain.SourceRef, error) {
 	rows, err := c.db.QueryContext(ctx, `
 		SELECT h.payload FROM hypotheses h JOIN investigations i ON i.id=h.investigation_id
@@ -359,6 +372,7 @@ func (c *Corpus) FindRelated(ctx context.Context, ref domain.RepoRef, category i
 	return out, rows.Err()
 }
 
+// SaveValidationDefinition persists a validation plan without executing it.
 func (c *Corpus) SaveValidationDefinition(ctx context.Context, item *evidence.ValidationDefinition) error {
 	if item == nil || item.ID == "" {
 		return errors.New("validation definition id is required")
@@ -379,6 +393,7 @@ func (c *Corpus) SaveValidationDefinition(ctx context.Context, item *evidence.Va
 	return nil
 }
 
+// GetValidationDefinition returns a validation plan by ID, or nil when absent.
 func (c *Corpus) GetValidationDefinition(ctx context.Context, id string) (*evidence.ValidationDefinition, error) {
 	var payload string
 	err := c.db.QueryRowContext(ctx, `SELECT payload FROM validation_definitions WHERE id=?`, id).Scan(&payload)
@@ -395,6 +410,7 @@ func (c *Corpus) GetValidationDefinition(ctx context.Context, id string) (*evide
 	return &item, nil
 }
 
+// SaveValidationRun persists the bounded result of an authorized validation execution.
 func (c *Corpus) SaveValidationRun(ctx context.Context, item *evidence.ValidationRun) error {
 	if item == nil || item.ID == "" {
 		return errors.New("validation run id is required")
@@ -417,6 +433,7 @@ func (c *Corpus) SaveValidationRun(ctx context.Context, item *evidence.Validatio
 	return nil
 }
 
+// GetValidationRun returns a validation result by ID, or nil when absent.
 func (c *Corpus) GetValidationRun(ctx context.Context, id string) (*evidence.ValidationRun, error) {
 	var payload string
 	err := c.db.QueryRowContext(ctx, `SELECT payload FROM validation_runs WHERE id=?`, id).Scan(&payload)
@@ -433,6 +450,7 @@ func (c *Corpus) GetValidationRun(ctx context.Context, id string) (*evidence.Val
 	return &item, nil
 }
 
+// SaveEvidence inserts or updates an evidence record and its provenance.
 func (c *Corpus) SaveEvidence(ctx context.Context, item *evidence.Evidence) error {
 	if item == nil || item.ID == "" {
 		return errors.New("evidence id is required")
@@ -454,10 +472,12 @@ func (c *Corpus) SaveEvidence(ctx context.Context, item *evidence.Evidence) erro
 	return nil
 }
 
+// CreateEvidence inserts evidence and rejects an existing ID.
 func (c *Corpus) CreateEvidence(ctx context.Context, item *evidence.Evidence) error {
 	return c.SaveEvidence(ctx, item)
 }
 
+// ListEvidence returns evidence matching the supplied local filter.
 func (c *Corpus) ListEvidence(ctx context.Context, filter evidence.EvidenceFilter) ([]*evidence.Evidence, error) {
 	query := `SELECT e.payload FROM evidence e WHERE 1=1`
 	var args []any
@@ -502,12 +522,15 @@ func (c *Corpus) ListEvidence(ctx context.Context, filter evidence.EvidenceFilte
 	return out, rows.Err()
 }
 
+// SaveIssueDraft persists the latest rendered issue draft for an opportunity.
 func (c *Corpus) SaveIssueDraft(ctx context.Context, item *contribution.IssueDraft) error {
 	if item == nil {
 		return errors.New("issue draft is required")
 	}
 	return c.saveDraft(ctx, item.OpportunityID, "issue", item, item.RenderedAt)
 }
+
+// GetIssueDraft returns the issue draft for an opportunity, or nil when absent.
 func (c *Corpus) GetIssueDraft(ctx context.Context, opportunityID string) (*contribution.IssueDraft, error) {
 	var item contribution.IssueDraft
 	if err := c.getDraft(ctx, opportunityID, "issue", &item); err != nil {
@@ -515,12 +538,16 @@ func (c *Corpus) GetIssueDraft(ctx context.Context, opportunityID string) (*cont
 	}
 	return &item, nil
 }
+
+// SavePullRequestDraft persists the latest pull-request draft for an opportunity.
 func (c *Corpus) SavePullRequestDraft(ctx context.Context, item *contribution.PullRequestDraft) error {
 	if item == nil {
 		return errors.New("pull request draft is required")
 	}
 	return c.saveDraft(ctx, item.OpportunityID, "pull_request", item, item.RenderedAt)
 }
+
+// GetPullRequestDraft returns the pull-request draft for an opportunity, or nil when absent.
 func (c *Corpus) GetPullRequestDraft(ctx context.Context, opportunityID string) (*contribution.PullRequestDraft, error) {
 	var item contribution.PullRequestDraft
 	if err := c.getDraft(ctx, opportunityID, "pull_request", &item); err != nil {
