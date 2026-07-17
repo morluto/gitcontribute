@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,8 +25,22 @@ type noopLimiter struct{}
 func (noopLimiter) WaitN(context.Context, int) error { return nil }
 
 type testServer struct {
-	owner string
-	repo  string
+	owner         string
+	repo          string
+	mu            sync.Mutex
+	searchQueries []string
+}
+
+func (ts *testServer) recordSearch(query string) {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	ts.searchQueries = append(ts.searchQueries, query)
+}
+
+func (ts *testServer) searches() []string {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	return append([]string(nil), ts.searchQueries...)
 }
 
 func (ts *testServer) repoPayload() map[string]any {
@@ -118,6 +133,13 @@ func (ts *testServer) handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Ratelimit-Reset", fmt.Sprintf("%d", time.Now().Add(time.Hour).Unix()))
 
 	switch r.URL.Path {
+	case "/api/v3/search/repositories":
+		ts.recordSearch(r.URL.Query().Get("q"))
+		json.NewEncoder(w).Encode(map[string]any{
+			"total_count":        1,
+			"incomplete_results": false,
+			"items":              []map[string]any{ts.repoPayload()},
+		})
 	case fmt.Sprintf("/api/v3/repos/%s/%s", ts.owner, ts.repo):
 		json.NewEncoder(w).Encode(ts.repoPayload())
 	case fmt.Sprintf("/api/v3/repos/%s/%s/issues", ts.owner, ts.repo):
@@ -137,6 +159,11 @@ func (ts *testServer) handler(w http.ResponseWriter, r *http.Request) {
 func newTestServer(owner, repo string) *httptest.Server {
 	ts := &testServer{owner: owner, repo: repo}
 	return httptest.NewServer(http.HandlerFunc(ts.handler))
+}
+
+func newTrackedTestServer(owner, repo string) (*httptest.Server, *testServer) {
+	ts := &testServer{owner: owner, repo: repo}
+	return httptest.NewServer(http.HandlerFunc(ts.handler)), ts
 }
 
 func newTestService(t *testing.T, srv *httptest.Server) *Service {
@@ -204,6 +231,113 @@ func TestEndToEndSyncSearchDossier(t *testing.T) {
 	}
 	if dossierRes.Summary != "A test repository" {
 		t.Fatalf("summary = %q", dossierRes.Summary)
+	}
+}
+
+func TestDiscoveryCrawlPersistsRepositoryFrontierAndCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	srv, tracked := newTrackedTestServer("octocat", "discovered")
+	defer srv.Close()
+
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+
+	source, err := svc.AddSearchSource(ctx, "active-go", "language:go stars:>50")
+	if err != nil {
+		t.Fatalf("add source: %v", err)
+	}
+	if source.Name != "active-go" || source.Kind != "search" {
+		t.Fatalf("source = %+v", source)
+	}
+
+	listed, err := svc.ListSources(ctx)
+	if err != nil {
+		t.Fatalf("list sources: %v", err)
+	}
+	if len(listed.Sources) != 1 || listed.Sources[0].Name != "active-go" {
+		t.Fatalf("sources = %+v", listed.Sources)
+	}
+
+	result, err := svc.Crawl(ctx, "active-go", cli.CrawlOptions{Since: 24 * time.Hour, Budget: 10})
+	if err != nil {
+		t.Fatalf("crawl: %v", err)
+	}
+	if result.Repositories != 1 || result.Windows != 1 || result.Requests != 2 || result.Checkpoint == "" {
+		t.Fatalf("crawl result = %+v", result)
+	}
+
+	c, err := svc.openCorpus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo, err := c.GetRepository(ctx, "octocat", "discovered")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo == nil || repo.ExternalID != "R_123" {
+		t.Fatalf("repository = %+v", repo)
+	}
+	frontier, err := c.GetFrontierItem(ctx, "repository:octocat/discovered:threads")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frontier == nil || frontier.Source != "active-go" {
+		t.Fatalf("frontier = %+v", frontier)
+	}
+	checkpoint, exists, err := c.GetTime(ctx, "source:active-go")
+	if err != nil || !exists || checkpoint.IsZero() {
+		t.Fatalf("checkpoint = %v exists=%v err=%v", checkpoint, exists, err)
+	}
+
+	second, err := svc.Crawl(ctx, "active-go", cli.CrawlOptions{Since: 24 * time.Hour, Budget: 10})
+	if err != nil {
+		t.Fatalf("incremental crawl: %v", err)
+	}
+	if second.Repositories != 1 {
+		t.Fatalf("incremental crawl result = %+v", second)
+	}
+	queries := tracked.searches()
+	if len(queries) != 4 || !strings.Contains(queries[0], "created:") || !strings.Contains(queries[2], "updated:") {
+		t.Fatalf("search queries = %q", queries)
+	}
+	status, err := c.Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Repositories != 1 {
+		t.Fatalf("repositories = %d, want canonical deduplication", status.Repositories)
+	}
+}
+
+func TestDiscoveryCrawlDoesNotAdvanceCheckpointWhenBudgetExhausted(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestServer("octocat", "discovered")
+	defer srv.Close()
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.AddSearchSource(ctx, "bounded", "language:go"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Crawl(ctx, "bounded", cli.CrawlOptions{Since: time.Hour, Budget: 1}); err == nil || !strings.Contains(err.Error(), "budget") {
+		t.Fatalf("crawl error = %v, want budget exhaustion", err)
+	}
+	c, err := svc.openCorpus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if checkpoint, exists, err := c.GetTime(ctx, "source:bounded"); err != nil || exists {
+		t.Fatalf("checkpoint = %v exists=%v err=%v", checkpoint, exists, err)
+	}
+}
+
+func TestAddSearchSourceRejectsUnstableName(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestServer("octocat", "test")
+	defer srv.Close()
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.AddSearchSource(ctx, "contains spaces", "language:go"); err == nil {
+		t.Fatal("expected invalid source name error")
 	}
 }
 

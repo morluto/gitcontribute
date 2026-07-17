@@ -34,6 +34,17 @@ func humanOutput(v any) (string, error) {
 		return dossierHuman(r), nil
 	case *IndexResult:
 		return fmt.Sprintf("Indexed %s at %s: %d files, %d bytes.\n%s", r.Repo, r.Commit, r.Files, r.Bytes, r.Message), nil
+	case *SourceResult:
+		return fmt.Sprintf("Source %s (%s): %s", r.Name, r.Kind, r.Definition), nil
+	case *SourceListResult:
+		var b strings.Builder
+		fmt.Fprintf(&b, "%d sources", len(r.Sources))
+		for _, source := range r.Sources {
+			fmt.Fprintf(&b, "\n- %s (%s)", source.Name, source.Kind)
+		}
+		return b.String(), nil
+	case *CrawlResult:
+		return fmt.Sprintf("Crawled %s: %d repositories across %d windows using %d requests.\ncheckpoint: %s", r.Source, r.Repositories, r.Windows, r.Requests, r.Checkpoint), nil
 	default:
 		return "", fmt.Errorf("unsupported result type %T", v)
 	}

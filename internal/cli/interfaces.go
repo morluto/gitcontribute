@@ -1,6 +1,9 @@
 package cli
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Service is the product-owned application interface used by the CLI and MCP
 // adapters. Implementations live outside the CLI package and must not leak
@@ -18,6 +21,38 @@ type Service interface {
 // adapter dispatches to it and does not own MCP protocol details.
 type MCPRunner interface {
 	Run(ctx context.Context, opts MCPOptions) error
+}
+
+// DiscoveryService is the optional source and crawl capability used by the
+// CLI without enlarging the core local archive contract.
+type DiscoveryService interface {
+	AddSearchSource(ctx context.Context, name, query string) (*SourceResult, error)
+	ListSources(ctx context.Context) (*SourceListResult, error)
+	Crawl(ctx context.Context, name string, opts CrawlOptions) (*CrawlResult, error)
+}
+
+type SourceResult struct {
+	Name       string `json:"name"`
+	Kind       string `json:"kind"`
+	Definition string `json:"definition"`
+	Enabled    bool   `json:"enabled"`
+}
+
+type SourceListResult struct {
+	Sources []SourceResult `json:"sources"`
+}
+
+type CrawlOptions struct {
+	Since  time.Duration
+	Budget int
+}
+
+type CrawlResult struct {
+	Source       string `json:"source"`
+	Windows      int    `json:"windows"`
+	Repositories int    `json:"repositories"`
+	Requests     int    `json:"requests"`
+	Checkpoint   string `json:"checkpoint"`
 }
 
 // RepoRef identifies a GitHub repository.

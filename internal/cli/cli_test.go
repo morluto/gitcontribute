@@ -7,33 +7,44 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
 )
 
 type fakeService struct {
-	initCalled    bool
-	statusCalled  bool
-	syncCalled    bool
-	searchCalled  bool
-	dossierCalled bool
-	indexCalled   bool
+	initCalled        bool
+	statusCalled      bool
+	syncCalled        bool
+	searchCalled      bool
+	dossierCalled     bool
+	indexCalled       bool
+	addSourceCalled   bool
+	listSourcesCalled bool
+	crawlCalled       bool
 
-	initResult    *cli.InitResult
-	statusResult  *cli.StatusResult
-	syncResult    *cli.SyncResult
-	searchResult  *cli.SearchResult
-	dossierResult *cli.DossierResult
-	indexResult   *cli.IndexResult
+	initResult       *cli.InitResult
+	statusResult     *cli.StatusResult
+	syncResult       *cli.SyncResult
+	searchResult     *cli.SearchResult
+	dossierResult    *cli.DossierResult
+	indexResult      *cli.IndexResult
+	sourceResult     *cli.SourceResult
+	sourceListResult *cli.SourceListResult
+	crawlResult      *cli.CrawlResult
 
 	lastSyncArg    cli.RepoRef
 	lastSearchArgs struct {
 		Query string
 		Opts  cli.SearchOptions
 	}
-	lastDossierArg cli.RepoRef
-	lastIndexRepo  cli.RepoRef
-	lastIndexPath  string
+	lastDossierArg  cli.RepoRef
+	lastIndexRepo   cli.RepoRef
+	lastIndexPath   string
+	lastSourceName  string
+	lastSourceQuery string
+	lastCrawlName   string
+	lastCrawlOpts   cli.CrawlOptions
 
 	err error
 }
@@ -74,6 +85,25 @@ func (f *fakeService) Index(ctx context.Context, repo cli.RepoRef, path string) 
 	return f.indexResult, f.err
 }
 
+func (f *fakeService) AddSearchSource(ctx context.Context, name, query string) (*cli.SourceResult, error) {
+	f.addSourceCalled = true
+	f.lastSourceName = name
+	f.lastSourceQuery = query
+	return f.sourceResult, f.err
+}
+
+func (f *fakeService) ListSources(ctx context.Context) (*cli.SourceListResult, error) {
+	f.listSourcesCalled = true
+	return f.sourceListResult, f.err
+}
+
+func (f *fakeService) Crawl(ctx context.Context, name string, opts cli.CrawlOptions) (*cli.CrawlResult, error) {
+	f.crawlCalled = true
+	f.lastCrawlName = name
+	f.lastCrawlOpts = opts
+	return f.crawlResult, f.err
+}
+
 func TestIndex(t *testing.T) {
 	svc := &fakeService{indexResult: &cli.IndexResult{Repo: cli.RepoRef{Owner: "o", Repo: "r"}, Commit: "abc", Files: 2}}
 	c, stdout, stderr := newTestCLI(svc, nil)
@@ -83,6 +113,51 @@ func TestIndex(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "abc") || !strings.Contains(stderr.String(), "indexing") {
 		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestSourceAddSearchAndList(t *testing.T) {
+	svc := &fakeService{
+		sourceResult:     &cli.SourceResult{Name: "active-go", Kind: "search", Definition: `{"query":"language:go"}`, Enabled: true},
+		sourceListResult: &cli.SourceListResult{Sources: []cli.SourceResult{{Name: "active-go", Kind: "search", Enabled: true}}},
+	}
+	c, stdout, _ := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "search", "--name", "active-go", "--query", "language:go"}))
+	if !svc.addSourceCalled || svc.lastSourceName != "active-go" || svc.lastSourceQuery != "language:go" {
+		t.Fatalf("add source call = called:%v name:%q query:%q", svc.addSourceCalled, svc.lastSourceName, svc.lastSourceQuery)
+	}
+	if !strings.Contains(stdout.String(), "Source active-go") {
+		t.Fatalf("stdout = %q", stdout.String())
+	}
+
+	stdout.Reset()
+	requireNoErr(t, c.Run(context.Background(), []string{"source", "list"}))
+	if !svc.listSourcesCalled || !strings.Contains(stdout.String(), "active-go") {
+		t.Fatalf("listed=%v stdout=%q", svc.listSourcesCalled, stdout.String())
+	}
+}
+
+func TestCrawlDispatchesBoundedOptions(t *testing.T) {
+	svc := &fakeService{crawlResult: &cli.CrawlResult{
+		Source: "active-go", Windows: 2, Repositories: 7, Requests: 4, Checkpoint: "2026-07-16T00:00:00Z",
+	}}
+	c, stdout, stderr := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"crawl", "active-go", "--since", "48h", "--budget", "25"}))
+	if !svc.crawlCalled || svc.lastCrawlName != "active-go" || svc.lastCrawlOpts.Since != 48*time.Hour || svc.lastCrawlOpts.Budget != 25 {
+		t.Fatalf("crawl call = called:%v name:%q opts:%+v", svc.crawlCalled, svc.lastCrawlName, svc.lastCrawlOpts)
+	}
+	if !strings.Contains(stdout.String(), "7 repositories") || !strings.Contains(stderr.String(), "crawling active-go") {
+		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestCrawlRejectsInvalidBudgetBeforeDispatch(t *testing.T) {
+	svc := &fakeService{}
+	c, _, _ := newTestCLI(svc, nil)
+	err := c.Run(context.Background(), []string{"crawl", "active-go", "--budget", "5001"})
+	requireCLIError(t, err, cli.ExitUsage)
+	if svc.crawlCalled {
+		t.Fatal("crawl should not be called with an invalid budget")
 	}
 }
 

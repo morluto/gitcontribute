@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/alecthomas/kong"
 )
@@ -39,6 +40,8 @@ type rootCmd struct {
 	Search  searchCmd  `cmd:"" help:"Search the local corpus"`
 	Dossier dossierCmd `cmd:"" help:"Show repository dossier"`
 	Index   indexCmd   `cmd:"" help:"Index a clean local checkout at its current commit"`
+	Source  sourceCmd  `cmd:"" help:"Manage repository discovery sources"`
+	Crawl   crawlCmd   `cmd:"" help:"Run a named discovery source"`
 	MCP     mcpCmd     `cmd:"" name:"mcp" help:"Run the MCP server"`
 }
 
@@ -74,6 +77,31 @@ type indexCmd struct {
 	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
 
+type sourceCmd struct {
+	Add  sourceAddCmd  `cmd:"" help:"Add or update a source"`
+	List sourceListCmd `cmd:"" help:"List sources"`
+}
+
+type sourceAddCmd struct {
+	Search sourceAddSearchCmd `cmd:"" help:"Add a GitHub repository Search source"`
+}
+
+type sourceAddSearchCmd struct {
+	Name  string `name:"name" required:"" help:"Stable source name"`
+	Query string `name:"query" required:"" help:"GitHub repository search query"`
+	JSON  bool   `name:"json" help:"Print the result as JSON"`
+}
+type sourceListCmd struct {
+	JSON bool `name:"json" help:"Print the result as JSON"`
+}
+
+type crawlCmd struct {
+	Name   string        `arg:"" help:"Source name"`
+	Since  time.Duration `name:"since" default:"720h" help:"Initial historical window"`
+	Budget int           `name:"budget" default:"500" help:"Maximum GitHub API requests"`
+	JSON   bool          `name:"json" help:"Print the result as JSON"`
+}
+
 type mcpCmd struct {
 	Transport string `name:"transport" default:"stdio" enum:"stdio" help:"MCP transport protocol"`
 }
@@ -95,7 +123,8 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return NewCLIError(ExitUsage, err)
 	}
 
-	cmd := strings.Fields(kctx.Command())[0]
+	command := kctx.Command()
+	cmd := strings.Fields(command)[0]
 	switch cmd {
 	case "init":
 		return c.runInit(ctx, &cli.Init)
@@ -109,11 +138,62 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runDossier(ctx, &cli.Dossier)
 	case "index":
 		return c.runIndex(ctx, &cli.Index)
+	case "source":
+		return c.runSource(ctx, command, &cli.Source)
+	case "crawl":
+		return c.runCrawl(ctx, &cli.Crawl)
 	case "mcp":
 		return c.runMCP(ctx, &cli.MCP)
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown command: %s", cmd))
 	}
+}
+
+func (c *CLI) discoveryService() (DiscoveryService, error) {
+	service, ok := c.svc.(DiscoveryService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) runSource(ctx context.Context, command string, cmd *sourceCmd) error {
+	service, err := c.discoveryService()
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "source add search":
+		result, err := service.AddSearchSource(ctx, cmd.Add.Search.Name, cmd.Add.Search.Query)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Add.Search.JSON, result)
+	case "source list":
+		result, err := service.ListSources(ctx)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.List.JSON, result)
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown source command: %s", command))
+	}
+}
+
+func (c *CLI) runCrawl(ctx context.Context, cmd *crawlCmd) error {
+	if cmd.Since <= 0 || cmd.Budget <= 0 || cmd.Budget > 5000 {
+		return NewCLIError(ExitUsage, errors.New("--since must be positive and --budget must be between 1 and 5000"))
+	}
+	service, err := c.discoveryService()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(c.stderr, "crawling %s...\n", cmd.Name)
+	result, err := service.Crawl(ctx, cmd.Name, CrawlOptions{Since: cmd.Since, Budget: cmd.Budget})
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
 }
 
 func (c *CLI) runIndex(ctx context.Context, cmd *indexCmd) error {
