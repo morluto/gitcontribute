@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -227,6 +228,7 @@ func (s *Service) newGitHubReader() (github.Reader, error) {
 	}
 	tokenSrc := tokenSource(cfg)
 	retry := github.DefaultRetryConfig()
+	retry.MaxAttempts = cfg.Crawl.RetryLimit + 1
 	retry.OnAttempt = func(observation github.RetryObservation) {
 		s.mu.Lock()
 		c := s.corpus
@@ -244,7 +246,15 @@ func (s *Service) newGitHubReader() (github.Reader, error) {
 			APIVersion: observation.APIVersion, SourceURL: observation.SourceURL, ObservedAt: s.now(),
 		})
 	}
-	client, err := github.NewClient(github.Config{TokenSource: tokenSrc, Retry: retry})
+	timeout, err := time.ParseDuration(cfg.Crawl.Timeout)
+	if err != nil {
+		return nil, fmt.Errorf("parse GitHub request timeout: %w", err)
+	}
+	client, err := github.NewClient(github.Config{
+		TokenSource: tokenSrc,
+		Retry:       retry,
+		HTTPClient:  &http.Client{Timeout: timeout},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("create github reader: %w", err)
 	}
