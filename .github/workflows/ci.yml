@@ -249,3 +249,15 @@ jobs:
           cache: true
       - name: Run integration tests
         run: go test -v -race -count=1 -tags=integration -timeout 300s ./...
+
+  npm:
+    name: npm launcher and package metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: npm run test:npm
+      - run: npm pack --dry-run

@@ -15,6 +15,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/github"
+	clientsetup "github.com/morluto/gitcontribute/internal/setup"
 )
 
 // Metadata reports deterministic application and local capability metadata.
@@ -172,7 +173,7 @@ func (s *Service) ControlStatus(ctx context.Context) (*cli.ControlStatusResult, 
 // Doctor performs bounded local diagnostics. It reports authentication source
 // availability but never returns credential values or command output.
 func (s *Service) Doctor(ctx context.Context) (*cli.DoctorResult, error) {
-	checks := make([]cli.DoctorCheck, 0, 7)
+	checks := make([]cli.DoctorCheck, 0, 9)
 	add := func(name string, required bool, err error, success string) {
 		check := cli.DoctorCheck{Name: name, Required: required, Status: "ok", Message: success}
 		if err != nil {
@@ -215,6 +216,16 @@ func (s *Service) Doctor(ctx context.Context) (*cli.DoctorResult, error) {
 	add("github_auth", false, authErr, "GitHub authentication source is available")
 
 	add("rg", false, lookPathError("rg"), "ripgrep is available")
+
+	if home := s.paths.HomeDir(); home != "" {
+		for _, client := range clientsetup.Detect(home) {
+			registered, _, checkErr := clientsetup.CheckRegistration(client, home)
+			if checkErr == nil && !registered {
+				checkErr = errors.New("client detected but GitContribute MCP registration is absent")
+			}
+			add("mcp_"+string(client), false, checkErr, "GitContribute MCP registration is present")
+		}
+	}
 
 	healthy := true
 	for _, check := range checks {

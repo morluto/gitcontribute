@@ -1,0 +1,22 @@
+{
+  "darwin-arm64": {
+    "target": "darwin-arm64",
+    "binary": "gitcontribute"
+  },
+  "darwin-x64": {
+    "target": "darwin-x64",
+    "binary": "gitcontribute"
+  },
+  "linux-arm64": {
+    "target": "linux-arm64",
+    "binary": "gitcontribute"
+  },
+  "linux-x64": {
+    "target": "linux-x64",
+    "binary": "gitcontribute"
+  },
+  "win32-x64": {
+    "target": "win32-x64",
+    "binary": "gitcontribute.exe"
+  }
+}

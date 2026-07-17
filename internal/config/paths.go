@@ -68,6 +68,10 @@ func (p *Paths) homeDir() string {
 	return ""
 }
 
+// HomeDir returns the configured user home used for coding-client discovery.
+// It honors the injected environment used by tests.
+func (p *Paths) HomeDir() string { return p.homeDir() }
+
 func (p *Paths) windowsProfile() string {
 	if v := p.getenv("USERPROFILE"); v != "" {
 		return v

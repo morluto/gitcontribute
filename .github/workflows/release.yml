@@ -6,24 +6,80 @@ on:
       - "v*"
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 jobs:
-  goreleaser:
-    name: Build and release
+  validate:
+    name: Validate release commit
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - run: go test ./...
+      - run: go vet ./...
+      - run: test -z "$(gofmt -l .)"
+      - run: npm run test:npm
 
+  build-npm-binaries:
+    name: Build npm binary ${{ matrix.target }}
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: darwin-arm64, goos: darwin, goarch: arm64, binary: gitcontribute }
+          - { target: darwin-x64, goos: darwin, goarch: amd64, binary: gitcontribute }
+          - { target: linux-arm64, goos: linux, goarch: arm64, binary: gitcontribute }
+          - { target: linux-x64, goos: linux, goarch: amd64, binary: gitcontribute }
+          - { target: win32-x64, goos: windows, goarch: amd64, binary: gitcontribute.exe }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build native binary
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          TARGET: ${{ matrix.target }}
+          BINARY: ${{ matrix.binary }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p "dist/$TARGET"
+          go build -trimpath -ldflags "-s -w -X main.version=${VERSION#v}" -o "dist/$TARGET/$BINARY" ./cmd/gitcontribute
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.target }}
+          path: dist/${{ matrix.target }}/${{ matrix.binary }}
+          if-no-files-found: error
+
+  goreleaser:
+    name: Build and release
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
@@ -33,16 +89,72 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  publish-npm:
+    name: Publish npm package
+    needs: [validate, build-npm-binaries, goreleaser]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          path: dist
+      - name: Normalize downloaded artifact layout
+        shell: bash
+        run: |
+          for directory in dist/native-*; do
+            target=${directory##*/native-}
+            mkdir -p "dist/$target"
+            cp "$directory"/* "dist/$target/"
+            if [[ $target != win32-* ]]; then chmod +x "dist/$target/gitcontribute"; fi
+          done
+      - name: Verify release version
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: node scripts/verify-release-version.mjs "${VERSION#v}"
+      - run: npm run test:npm
+      - run: npm run build:npm
+      - name: Build and inspect npm tarball
+        shell: bash
+        run: |
+          npm pack --pack-destination dist
+          tarball=$(find dist -maxdepth 1 -name 'gitcontribute-*.tgz' -print -quit)
+          test -n "$tarball"
+          test "$(stat -c %s "$tarball")" -le 100000000
+          sha256sum "$tarball" | sed 's#  dist/#  #' > dist/npm-SHA256SUMS
+          npm install --prefix "$RUNNER_TEMP/npm-smoke" --ignore-scripts --no-audit --no-fund "$tarball"
+          "$RUNNER_TEMP/npm-smoke/node_modules/.bin/gitcontribute" metadata --json
+      - name: Publish npm package
+        run: npm publish --provenance --access public
+      - name: Attach npm package to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tarball=$(find dist -maxdepth 1 -name 'gitcontribute-*.tgz' -print -quit)
+          gh release upload "${{ github.ref_name }}" "$tarball" dist/npm-SHA256SUMS --clobber
+
   release-notes:
     name: Generate release notes
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: goreleaser
+    needs: [goreleaser, publish-npm]
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-
       - name: Generate changelog
         uses: orhun/git-cliff-action@v4
         with:
@@ -50,7 +162,6 @@ jobs:
           args: --latest --strip all
         env:
           OUTPUT: CHANGELOG.md
-
       - name: Upload release notes
         uses: softprops/action-gh-release@v2
         with:
