@@ -44,8 +44,44 @@ var (
 
 const maxGitOutputBytes = 64 << 20
 
-// repoLocks serializes clone/fetch operations for the same cache path.
-var repoLocks sync.Map
+// repoLocks serializes clone/fetch operations for the same cache path without
+// retaining an entry after the last caller releases it.
+var repoLocks keyedLocks
+
+type keyedLocks struct {
+	mu      sync.Mutex
+	entries map[string]*keyedLock
+}
+
+type keyedLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+func (l *keyedLocks) lock(key string) func() {
+	l.mu.Lock()
+	if l.entries == nil {
+		l.entries = make(map[string]*keyedLock)
+	}
+	entry := l.entries[key]
+	if entry == nil {
+		entry = &keyedLock{}
+		l.entries[key] = entry
+	}
+	entry.refs++
+	l.mu.Unlock()
+
+	entry.mu.Lock()
+	return func() {
+		entry.mu.Unlock()
+		l.mu.Lock()
+		entry.refs--
+		if entry.refs == 0 {
+			delete(l.entries, key)
+		}
+		l.mu.Unlock()
+	}
+}
 
 type runner interface {
 	Run(ctx context.Context, name string, args ...string) (string, error)
@@ -162,10 +198,8 @@ func (m *Manager) Acquire(ctx context.Context, owner, repo, remote string) (*Acq
 	name := cacheNameFor(owner, repo, remote)
 	mirrorPath := filepath.Join(m.root, "mirrors", name)
 
-	v, _ := repoLocks.LoadOrStore(mirrorPath, &sync.Mutex{})
-	repoMu := v.(*sync.Mutex)
-	repoMu.Lock()
-	defer repoMu.Unlock()
+	unlock := repoLocks.lock(mirrorPath)
+	defer unlock()
 
 	acquiredAt := time.Now().UTC()
 
@@ -348,15 +382,31 @@ func (m *Manager) verifyClean(ctx context.Context, worktreePath string) error {
 
 func (m *Manager) writeMetadata(acq *Acquisition) error {
 	path := filepath.Join(acq.CachePath, "acquire.json")
-	f, err := os.Create(path)
+	f, err := os.CreateTemp(acq.CachePath, ".acquire-*.json")
 	if err != nil {
 		return fmt.Errorf("create metadata: %w", err)
 	}
-	defer f.Close()
+	tmpPath := f.Name()
+	defer os.Remove(tmpPath)
+	if err := f.Chmod(0600); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("secure metadata: %w", err)
+	}
 	enc := json.NewEncoder(f)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(acq); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("write metadata: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("sync metadata: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close metadata: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replace metadata: %w", err)
 	}
 	return nil
 }
