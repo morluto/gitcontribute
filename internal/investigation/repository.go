@@ -11,6 +11,7 @@ import (
 // and opportunities. Concrete stores live outside this package.
 type Repository interface {
 	SaveInvestigation(ctx context.Context, i *Investigation) error
+	StartThreadInvestigation(ctx context.Context, i *Investigation, h *Hypothesis) (*Investigation, *Hypothesis, bool, error)
 	GetInvestigation(ctx context.Context, id string) (*Investigation, error)
 	ListInvestigations(ctx context.Context) ([]*Investigation, error)
 	SaveHypothesis(ctx context.Context, h *Hypothesis) error

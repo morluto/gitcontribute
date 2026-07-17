@@ -225,13 +225,11 @@ func (s *Service) investigationSvc(ctx context.Context) (*investigation.Service,
 
 func investigationResult(inv *investigation.Investigation) *cli.InvestigationResult {
 	return &cli.InvestigationResult{
-		ID:        inv.ID,
-		Repo:      cli.RepoRef{Owner: inv.Repo.Owner, Repo: inv.Repo.Repo},
-		CommitSHA: inv.CommitSHA,
-		Lens:      inv.Lens,
-		Status:    string(inv.Status),
-		CreatedAt: formatTime(inv.CreatedAt),
-		UpdatedAt: formatTime(inv.UpdatedAt),
+		ID: inv.ID, Repo: cli.RepoRef{Owner: inv.Repo.Owner, Repo: inv.Repo.Repo},
+		CommitSHA: inv.CommitSHA, Lens: inv.Lens, Status: string(inv.Status),
+		ThreadBaseline: threadBaselineResult(inv.ThreadBaseline), SeedHypothesisID: inv.SeedHypothesisID,
+		AuditTrail: workflowAuditResults(inv.AuditTrail),
+		CreatedAt:  formatTime(inv.CreatedAt), UpdatedAt: formatTime(inv.UpdatedAt),
 	}
 }
 
@@ -243,6 +241,9 @@ func hypothesisResult(h *investigation.Hypothesis) *cli.HypothesisResult {
 		Description:     h.Description,
 		Category:        string(h.Category),
 		Status:          string(h.Status),
+		SourceRefs:      workflowSourceRefResults(h.SourceRefs),
+		Links:           workflowLinkResults(h.Links),
+		AuditTrail:      workflowAuditResults(h.AuditTrail),
 		CreatedAt:       formatTime(h.CreatedAt),
 		UpdatedAt:       formatTime(h.UpdatedAt),
 	}

@@ -272,9 +272,10 @@ type tailCmd struct {
 }
 
 type investigationCmd struct {
-	Start startInvestigationCmd `cmd:"" help:"Start an investigation"`
-	Show  showInvestigationCmd  `cmd:"" help:"Show an investigation"`
-	List  listInvestigationCmd  `cmd:"" help:"List investigations"`
+	Start       startInvestigationCmd       `cmd:"" help:"Start an investigation"`
+	StartThread startThreadInvestigationCmd `cmd:"" name:"start-thread" help:"Atomically start from one stored issue or pull request"`
+	Show        showInvestigationCmd        `cmd:"" help:"Show an investigation"`
+	List        listInvestigationCmd        `cmd:"" help:"List investigations"`
 }
 
 type startInvestigationCmd struct {
@@ -1524,6 +1525,9 @@ func (c *CLI) runTail(ctx context.Context, cmd *tailCmd) error {
 }
 
 func (c *CLI) runInvestigation(ctx context.Context, command string, cmd *investigationCmd) error {
+	if command == "investigation start-thread" {
+		return c.runStartThreadInvestigation(ctx, &cmd.StartThread)
+	}
 	service, err := c.investigationService()
 	if err != nil {
 		return err

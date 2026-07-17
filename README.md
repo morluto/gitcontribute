@@ -139,10 +139,7 @@ a hypothesis, and check for duplicate or competing work before committing time.
 gitcontribute dossier build owner/repo
 gitcontribute research brief issue:owner/repo#42 --format markdown
 gitcontribute health owner/repo --json
-gitcontribute investigation start owner/repo --json
-gitcontribute hypothesis add --title="Fix retry timeout" \
-  --description="Reproduce and isolate the timeout." \
-  --category=bug <investigation-id>
+gitcontribute investigation start-thread issue:owner/repo#42 --json
 gitcontribute duplicates check <hypothesis-id>
 gitcontribute collisions check <hypothesis-id>
 ```
@@ -396,6 +393,30 @@ pagination; `search all` and lens-ranked searches do not.
 
 <details>
 <summary><strong>Investigations, evidence, tracking, and collections</strong></summary>
+
+Start an investigation and its initial hypothesis from one exact stored thread
+revision:
+
+```sh
+gitcontribute investigation start-thread issue:owner/repo#42 --json
+```
+
+This is a local-write operation with no network or process execution. The
+investigation saves the immutable observation ID, source update time, sequence,
+and source reference used for its title and bounded description. Repeating the
+command returns the existing open pair with `"created": false`; it never updates
+that baseline silently. The seed category is `other` because the command does
+not infer scope or defect type from untrusted issue text.
+
+The manual two-command path remains available when no stored thread should be
+the baseline:
+
+```sh
+gitcontribute investigation start owner/repo --json
+gitcontribute hypothesis add --title="Fix retry timeout" \
+  --description="Reproduce and isolate the timeout." \
+  --category=bug <investigation-id>
+```
 
 Record supporting or contradicting evidence:
 

@@ -60,6 +60,8 @@ func humanOutput(v any) (string, error) {
 		return crawlHuman(r), nil
 	case *InvestigationResult:
 		return investigationHuman(r), nil
+	case *ThreadInvestigationResult:
+		return threadInvestigationHuman(r), nil
 	case *InvestigationListResult:
 		return investigationListHuman(r), nil
 	case *HypothesisResult:

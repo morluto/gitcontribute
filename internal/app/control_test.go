@@ -44,6 +44,9 @@ func TestMetadataIsLocalAndDoesNotCreateCorpus(t *testing.T) {
 	if !result.Features["thread_research"] || !containsString(result.Capabilities, "thread-research-brief") {
 		t.Fatalf("thread research capability missing from metadata: %+v", result)
 	}
+	if !result.Features["thread_investigation"] || !containsString(result.Capabilities, "thread-investigation-start") {
+		t.Fatalf("thread investigation capability missing from metadata: %+v", result)
+	}
 	if _, err := os.Stat(result.CorpusPath); !os.IsNotExist(err) {
 		t.Fatalf("metadata created corpus %q: %v", result.CorpusPath, err)
 	}

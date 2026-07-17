@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+// ErrThreadObservationRevisionNotFound reports a projection revision whose
+// immutable source observation is unavailable.
+var ErrThreadObservationRevisionNotFound = errors.New("thread observation revision not found")
+
 // ApplyRepositoryObservation records an immutable repository observation and
 // updates the current projection only when the new observation wins the
 // ordering (source_updated_at, then observation_sequence).
@@ -627,6 +631,31 @@ func (c *Corpus) LatestThreadObservation(ctx context.Context, threadID int64) (*
 	}
 	if err != nil {
 		return nil, fmt.Errorf("latest thread observation: %w", err)
+	}
+	o.SourceUpdatedAt = scanTime(src)
+	o.ObservedAt = scanTime(observed)
+	return &o, nil
+}
+
+// GetThreadObservationRevision returns the immutable observation matching a
+// projection revision. It lets callers bind copied projection fields to the
+// exact observation even if a newer projection is written concurrently.
+func (c *Corpus) GetThreadObservationRevision(ctx context.Context, threadID int64, sourceUpdatedAt time.Time, observationSequence int64) (*ThreadObservation, error) {
+	var o ThreadObservation
+	var src, observed int64
+	err := c.db.QueryRowContext(ctx, `
+		SELECT id, thread_id, source_updated_at, observation_sequence, payload, observed_at
+		FROM thread_observations
+		WHERE thread_id=? AND source_updated_at=? AND observation_sequence=?
+		LIMIT 1
+	`, threadID, encodeTime(sourceUpdatedAt), observationSequence).Scan(
+		&o.ID, &o.ThreadID, &src, &o.ObservationSequence, &o.Payload, &observed,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrThreadObservationRevisionNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get thread observation revision: %w", err)
 	}
 	o.SourceUpdatedAt = scanTime(src)
 	o.ObservedAt = scanTime(observed)
