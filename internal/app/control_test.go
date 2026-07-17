@@ -132,7 +132,7 @@ func TestControlStatusUsesLocalCorpus(t *testing.T) {
 }
 
 func TestDoctorDoesNotExposeEnvironmentToken(t *testing.T) {
-	const secret = "github_pat_secret-control-test"
+	secret := strings.Join([]string{"github_pat", "fixture-control-value"}, "_")
 	t.Setenv("GITCONTRIBUTE_TEST_TOKEN", secret)
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test")

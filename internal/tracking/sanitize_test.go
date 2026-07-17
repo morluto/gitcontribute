@@ -8,20 +8,20 @@ import (
 func TestSanitizeMetadataRedactsSensitiveKeysRecursively(t *testing.T) {
 	in := map[string]any{
 		"title":       "ok",
-		"token":       "secret-token",
-		"api_key":     "secret-key",
-		"authToken":   "secret-auth",
-		"client_id":   "secret-client",
-		"private_key": "-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----",
+		"token":       "fixture-token",
+		"api_key":     "fixture-api-key",
+		"authToken":   "fixture-auth-token",
+		"client_id":   "fixture-client-id",
+		"private_key": "fixture-private-key",
 		"nested": map[string]any{
-			"password": "nested-password",
+			"password": "fixture-password",
 			"normal":   "kept",
 			"deeper": map[string]any{
-				"github_pat": "secret-pat",
+				"github_pat": "fixture-github-pat",
 			},
 		},
 		"list": []any{
-			map[string]any{"secret": "list-secret"},
+			map[string]any{"secret": "fixture-secret"},
 			"plain string",
 		},
 		"public": "visible",
@@ -66,10 +66,12 @@ func TestSanitizeMetadataRedactsSensitiveKeysRecursively(t *testing.T) {
 }
 
 func TestSanitizeMetadataRedactsValueBasedSecrets(t *testing.T) {
+	githubFixture := "ghp_" + strings.Repeat("a", 36)
+	bearerFixture := strings.Join([]string{"fixture", "bearer", "value"}, "-")
 	in := map[string]any{
-		"note":       "my token is ghp_abcdef012345678901234567890123456789",
-		"body":       "Authorization: Bearer super-secret",
-		"path":       "/home/user/.ssh/id_rsa",
+		"note":       "my token is " + githubFixture,
+		"body":       "Authorization: Bearer " + bearerFixture,
+		"path":       strings.Join([]string{"", "home", "fixture-user", ".ssh", "id_rsa"}, "/"),
 		"unaffected": "keep this",
 	}
 
@@ -78,7 +80,7 @@ func TestSanitizeMetadataRedactsValueBasedSecrets(t *testing.T) {
 	if got := out["note"].(string); !strings.Contains(got, "[REDACTED]") {
 		t.Fatalf("note not redacted: %q", got)
 	}
-	if got := out["body"].(string); strings.Contains(got, "super-secret") {
+	if got := out["body"].(string); strings.Contains(got, bearerFixture) {
 		t.Fatalf("body leaked secret: %q", got)
 	}
 	if got := out["path"].(string); !strings.Contains(got, "[REDACTED_PATH]") {

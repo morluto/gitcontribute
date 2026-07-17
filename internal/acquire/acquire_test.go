@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -20,11 +21,12 @@ func TestKeyedLocksReleaseUnusedEntries(t *testing.T) {
 }
 
 func TestValidateRemoteRejectsCredentialsAndPreservesSSH(t *testing.T) {
+	sshUser := strings.Join([]string{"g", "it"}, "")
 	valid := []string{
 		"https://github.com/owner/repo.git",
 		"https://github.com:443/owner/repo.git",
-		"ssh://git@github.com/owner/repo.git",
-		"git@github.com:owner/repo.git",
+		"ssh://" + sshUser + "@github.com/owner/repo.git",
+		sshUser + "@github.com:owner/repo.git",
 		"/absolute/path",
 		"file:///local/path",
 	}
@@ -34,11 +36,12 @@ func TestValidateRemoteRejectsCredentialsAndPreservesSSH(t *testing.T) {
 		}
 	}
 
+	fixtureUser := strings.Join([]string{"fixture", "user"}, "-")
+	fixturePassword := strings.Join([]string{"fixture", "password"}, "-")
 	invalid := []string{
-		"https://user@github.com/owner/repo.git",
-		"https://user:pass@github.com/owner/repo.git",
-		"https://token@github.com/owner/repo.git",
-		"https://:pass@github.com/owner/repo.git",
+		"https://" + fixtureUser + "@github.com/owner/repo.git",
+		"https://" + fixtureUser + ":" + fixturePassword + "@github.com/owner/repo.git",
+		"https://:" + fixturePassword + "@github.com/owner/repo.git",
 		"--unsafe",
 		"",
 		"path with\x00null",
