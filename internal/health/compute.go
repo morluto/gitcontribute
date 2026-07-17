@@ -416,20 +416,29 @@ func responseSamples(ctx context.Context, c *corpus.Corpus, threads []corpus.Thr
 	return samples, coverage, nil
 }
 
-func firstResponse(ctx context.Context, c *corpus.Corpus, t corpus.Thread) (time.Time, bool, error) {
-	var earliest time.Time
-	hasFacet := false
-	facets := []string{facetIssueComments}
-	if t.Kind == corpus.ThreadKindPullRequest {
-		facets = append(facets, facetPRReviews, facetPRReviewComments)
+func responseFacets(kind string) []string {
+	if kind == corpus.ThreadKindPullRequest {
+		return []string{facetIssueComments, facetPRReviews, facetPRReviewComments}
 	}
+	return []string{facetIssueComments}
+}
+
+func firstResponse(ctx context.Context, c *corpus.Corpus, t corpus.Thread) (time.Time, bool, error) {
+	facets := responseFacets(t.Kind)
+	var earliest time.Time
+	completeCount := 0
 	for _, facet := range facets {
+		cov, err := c.GetCoverage(ctx, t.RepositoryID, &t.ID, facet)
+		if err != nil {
+			return time.Time{}, false, fmt.Errorf("get coverage %s: %w", facet, err)
+		}
+		if cov == nil || !cov.Complete {
+			continue
+		}
+		completeCount++
 		obs, err := c.ListFacetObservations(ctx, t.RepositoryID, &t.ID, facet)
 		if err != nil {
 			return time.Time{}, false, fmt.Errorf("list %s: %w", facet, err)
-		}
-		if len(obs) > 0 {
-			hasFacet = true
 		}
 		for _, o := range obs {
 			events, err := parseFacetEvents(o.Payload, facet)
@@ -437,7 +446,7 @@ func firstResponse(ctx context.Context, c *corpus.Corpus, t corpus.Thread) (time
 				return time.Time{}, false, err
 			}
 			for _, e := range events {
-				if e.Author == "" || e.Author == t.Author {
+				if e.Author == "" || strings.EqualFold(e.Author, t.Author) {
 					continue
 				}
 				if !e.Time.IsZero() && (earliest.IsZero() || e.Time.Before(earliest)) {
@@ -446,7 +455,10 @@ func firstResponse(ctx context.Context, c *corpus.Corpus, t corpus.Thread) (time
 			}
 		}
 	}
-	return earliest, hasFacet, nil
+	if completeCount != len(facets) {
+		return time.Time{}, false, nil
+	}
+	return earliest, true, nil
 }
 
 type facetEvent struct {

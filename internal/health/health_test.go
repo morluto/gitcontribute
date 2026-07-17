@@ -38,13 +38,17 @@ func upsertThread(t *testing.T, ctx context.Context, c *corpus.Corpus, repoID in
 	return out
 }
 
-func applyFacet(t *testing.T, ctx context.Context, c *corpus.Corpus, repoID, threadID int64, facet string, sourceUpdated time.Time, payload any) {
+func applyFacet(t *testing.T, ctx context.Context, c *corpus.Corpus, repoID, threadID int64, facet string, sourceUpdated time.Time, payload any, complete bool) {
 	t.Helper()
-	payloadJSON, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("marshal facet payload: %v", err)
+	var pages []corpus.FacetObservationInput
+	if payload != nil {
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatalf("marshal facet payload: %v", err)
+		}
+		pages = []corpus.FacetObservationInput{{SourceUpdatedAt: sourceUpdated, Payload: string(payloadJSON)}}
 	}
-	if err := c.ApplyFacetObservationSet(ctx, repoID, &threadID, facet, sourceUpdated, []corpus.FacetObservationInput{{SourceUpdatedAt: sourceUpdated, Payload: string(payloadJSON)}}, true, 0); err != nil {
+	if err := c.ApplyFacetObservationSet(ctx, repoID, &threadID, facet, sourceUpdated, pages, complete, 0); err != nil {
 		t.Fatalf("apply facet %s: %v", facet, err)
 	}
 }
@@ -138,13 +142,16 @@ func TestComputeHealthMetrics(t *testing.T) {
 	// Facets for response times and staleness.
 	applyFacet(t, ctx, c, repo.ID, openIssue.ID, facetIssueComments, now.Add(-6*24*time.Hour).Add(time.Hour), []github.IssueComment{
 		{ID: 1, Author: "maintainer", AuthorAssociation: "MEMBER", CreatedAt: now.Add(-6 * 24 * time.Hour).Add(time.Hour), UpdatedAt: now.Add(-6 * 24 * time.Hour).Add(time.Hour)},
-	})
+	}, true)
 	applyFacet(t, ctx, c, repo.ID, closedIssue.ID, facetIssueComments, now.Add(-20*24*time.Hour).Add(2*time.Hour), []github.IssueComment{
 		{ID: 2, Author: "reviewer", AuthorAssociation: "COLLABORATOR", CreatedAt: now.Add(-20 * 24 * time.Hour).Add(2 * time.Hour), UpdatedAt: now.Add(-20 * 24 * time.Hour).Add(2 * time.Hour)},
-	})
+	}, true)
 	applyFacet(t, ctx, c, repo.ID, openPR.ID, facetPRReviews, now.Add(-2*24*time.Hour).Add(30*time.Minute), []github.Review{
 		{ID: 3, Author: "reviewer", AuthorAssociation: "COLLABORATOR", SubmittedAt: now.Add(-2 * 24 * time.Hour).Add(30 * time.Minute), State: "COMMENTED"},
-	})
+	}, true)
+	// Empty complete response facets let the open PR count as fully covered.
+	applyFacet(t, ctx, c, repo.ID, openPR.ID, facetIssueComments, now.Add(-2*24*time.Hour).Add(time.Hour), nil, true)
+	applyFacet(t, ctx, c, repo.ID, openPR.ID, facetPRReviewComments, now.Add(-2*24*time.Hour).Add(time.Hour), nil, true)
 
 	opts := Options{
 		Now:            now,
@@ -194,5 +201,241 @@ func TestComputeHealthMetrics(t *testing.T) {
 	}
 	if report.Response.PullRequests.Median != 0.5 {
 		t.Fatalf("pr response median = %v, want 0.5", report.Response.PullRequests.Median)
+	}
+}
+
+func TestResponseRequiredFacetCoverage(t *testing.T) {
+	ctx := context.Background()
+	c := openTestCorpus(t)
+
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	start := now.Add(-30 * 24 * time.Hour)
+
+	repo, err := c.UpsertRepository(ctx, corpus.Repository{
+		Owner:           "owner",
+		Name:            "repo",
+		SourceCreatedAt: now.Add(-365 * 24 * time.Hour),
+		SourceUpdatedAt: now,
+	}, "{}")
+	if err != nil {
+		t.Fatalf("upsert repository: %v", err)
+	}
+
+	issue := upsertThread(t, ctx, c, repo.ID, corpus.Thread{
+		Kind:            corpus.ThreadKindIssue,
+		Number:          1,
+		State:           "open",
+		Title:           "issue",
+		Author:          "alice",
+		SourceCreatedAt: now.Add(-7 * 24 * time.Hour),
+		SourceUpdatedAt: now,
+	}, "NONE")
+
+	opts := Options{
+		Now:            now,
+		Start:          start,
+		End:            now,
+		StaleThreshold: 14 * 24 * time.Hour,
+	}
+
+	// A complete empty facet counts as covered and contributes no response.
+	applyFacet(t, ctx, c, repo.ID, issue.ID, facetIssueComments, now.Add(-6*24*time.Hour), nil, true)
+	report, err := Compute(ctx, c, repo.ID, opts)
+	if err != nil {
+		t.Fatalf("compute health: %v", err)
+	}
+	if report.Response.Issues.SampleSize != 0 {
+		t.Fatalf("empty complete: sample size = %d, want 0", report.Response.Issues.SampleSize)
+	}
+	if report.Response.Issues.Coverage != "complete" {
+		t.Fatalf("empty complete: coverage = %q, want complete", report.Response.Issues.Coverage)
+	}
+
+	// An incomplete facet with observations does not count; observations are ignored.
+	created := issue.SourceCreatedAt
+	applyFacet(t, ctx, c, repo.ID, issue.ID, facetIssueComments, now.Add(-5*24*time.Hour), []github.IssueComment{
+		{ID: 1, Author: "bob", CreatedAt: created.Add(time.Hour), UpdatedAt: created.Add(time.Hour)},
+	}, false)
+	report, err = Compute(ctx, c, repo.ID, opts)
+	if err != nil {
+		t.Fatalf("compute health: %v", err)
+	}
+	if report.Response.Issues.SampleSize != 0 {
+		t.Fatalf("nonempty incomplete: sample size = %d, want 0", report.Response.Issues.SampleSize)
+	}
+	if report.Response.Issues.Coverage != "partial" {
+		t.Fatalf("nonempty incomplete: coverage = %q, want partial", report.Response.Issues.Coverage)
+	}
+
+	// A complete nonempty facet yields a response sample and complete coverage.
+	applyFacet(t, ctx, c, repo.ID, issue.ID, facetIssueComments, now.Add(-4*24*time.Hour), []github.IssueComment{
+		{ID: 2, Author: "bob", CreatedAt: created.Add(2 * time.Hour), UpdatedAt: created.Add(2 * time.Hour)},
+	}, true)
+	report, err = Compute(ctx, c, repo.ID, opts)
+	if err != nil {
+		t.Fatalf("compute health: %v", err)
+	}
+	if report.Response.Issues.SampleSize != 1 {
+		t.Fatalf("complete nonempty: sample size = %d, want 1", report.Response.Issues.SampleSize)
+	}
+	if report.Response.Issues.Median != 2.0 {
+		t.Fatalf("complete nonempty: median = %v, want 2.0", report.Response.Issues.Median)
+	}
+	if report.Response.Issues.Coverage != "complete" {
+		t.Fatalf("complete nonempty: coverage = %q, want complete", report.Response.Issues.Coverage)
+	}
+}
+
+func TestResponsePullRequestPartialFacetCoverage(t *testing.T) {
+	ctx := context.Background()
+	c := openTestCorpus(t)
+
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	start := now.Add(-30 * 24 * time.Hour)
+
+	repo, err := c.UpsertRepository(ctx, corpus.Repository{
+		Owner:           "owner",
+		Name:            "repo",
+		SourceCreatedAt: now.Add(-365 * 24 * time.Hour),
+		SourceUpdatedAt: now,
+	}, "{}")
+	if err != nil {
+		t.Fatalf("upsert repository: %v", err)
+	}
+
+	pr := upsertThread(t, ctx, c, repo.ID, corpus.Thread{
+		Kind:            corpus.ThreadKindPullRequest,
+		Number:          1,
+		State:           "open",
+		Title:           "pr",
+		Author:          "alice",
+		SourceCreatedAt: now.Add(-7 * 24 * time.Hour),
+		SourceUpdatedAt: now,
+	}, "NONE")
+
+	opts := Options{
+		Now:            now,
+		Start:          start,
+		End:            now,
+		StaleThreshold: 14 * 24 * time.Hour,
+	}
+
+	prCreated := pr.SourceCreatedAt
+	applyFacet(t, ctx, c, repo.ID, pr.ID, facetPRReviews, now.Add(-6*24*time.Hour), []github.Review{
+		{ID: 1, Author: "reviewer", SubmittedAt: prCreated.Add(time.Hour), State: "COMMENTED"},
+	}, true)
+
+	// Only pr_reviews is complete; the PR should not contribute a response sample.
+	report, err := Compute(ctx, c, repo.ID, opts)
+	if err != nil {
+		t.Fatalf("compute health: %v", err)
+	}
+	if report.Response.PullRequests.SampleSize != 0 {
+		t.Fatalf("partial coverage: sample size = %d, want 0", report.Response.PullRequests.SampleSize)
+	}
+	if report.Response.PullRequests.Coverage != "partial" {
+		t.Fatalf("partial coverage: coverage = %q, want partial", report.Response.PullRequests.Coverage)
+	}
+
+	// Completing the remaining empty facets makes the PR fully covered.
+	applyFacet(t, ctx, c, repo.ID, pr.ID, facetIssueComments, now.Add(-5*24*time.Hour), nil, true)
+	applyFacet(t, ctx, c, repo.ID, pr.ID, facetPRReviewComments, now.Add(-5*24*time.Hour), nil, true)
+
+	report, err = Compute(ctx, c, repo.ID, opts)
+	if err != nil {
+		t.Fatalf("compute health: %v", err)
+	}
+	if report.Response.PullRequests.SampleSize != 1 {
+		t.Fatalf("complete coverage: sample size = %d, want 1", report.Response.PullRequests.SampleSize)
+	}
+	if report.Response.PullRequests.Median != 1.0 {
+		t.Fatalf("complete coverage: median = %v, want 1.0", report.Response.PullRequests.Median)
+	}
+	if report.Response.PullRequests.Coverage != "complete" {
+		t.Fatalf("complete coverage: coverage = %q, want complete", report.Response.PullRequests.Coverage)
+	}
+}
+
+func TestResponseSelfCommentCaseInsensitive(t *testing.T) {
+	ctx := context.Background()
+	c := openTestCorpus(t)
+
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	start := now.Add(-30 * 24 * time.Hour)
+
+	repo, err := c.UpsertRepository(ctx, corpus.Repository{
+		Owner:           "owner",
+		Name:            "repo",
+		SourceCreatedAt: now.Add(-365 * 24 * time.Hour),
+		SourceUpdatedAt: now,
+	}, "{}")
+	if err != nil {
+		t.Fatalf("upsert repository: %v", err)
+	}
+
+	issue := upsertThread(t, ctx, c, repo.ID, corpus.Thread{
+		Kind:            corpus.ThreadKindIssue,
+		Number:          1,
+		State:           "open",
+		Title:           "issue",
+		Author:          "alice",
+		SourceCreatedAt: now.Add(-7 * 24 * time.Hour),
+		SourceUpdatedAt: now,
+	}, "NONE")
+
+	created := issue.SourceCreatedAt
+	applyFacet(t, ctx, c, repo.ID, issue.ID, facetIssueComments, now.Add(-6*24*time.Hour), []github.IssueComment{
+		{ID: 1, Author: "ALICE", CreatedAt: created.Add(30 * time.Minute), UpdatedAt: created.Add(30 * time.Minute)},
+		{ID: 2, Author: "Bob", CreatedAt: created.Add(time.Hour), UpdatedAt: created.Add(time.Hour)},
+		{ID: 3, Author: "alice", CreatedAt: created.Add(2 * time.Hour), UpdatedAt: created.Add(2 * time.Hour)},
+	}, true)
+
+	opts := Options{
+		Now:            now,
+		Start:          start,
+		End:            now,
+		StaleThreshold: 14 * 24 * time.Hour,
+	}
+
+	report, err := Compute(ctx, c, repo.ID, opts)
+	if err != nil {
+		t.Fatalf("compute health: %v", err)
+	}
+	if report.Response.Issues.SampleSize != 1 {
+		t.Fatalf("issue response samples = %d, want 1", report.Response.Issues.SampleSize)
+	}
+	if report.Response.Issues.Median != 1.0 {
+		t.Fatalf("issue response median = %v, want 1.0", report.Response.Issues.Median)
+	}
+
+	// PR reviews should also ignore same-login self-comments with different case.
+	pr := upsertThread(t, ctx, c, repo.ID, corpus.Thread{
+		Kind:            corpus.ThreadKindPullRequest,
+		Number:          2,
+		State:           "open",
+		Title:           "pr",
+		Author:          "bob",
+		SourceCreatedAt: now.Add(-7 * 24 * time.Hour),
+		SourceUpdatedAt: now,
+	}, "NONE")
+
+	prCreated := pr.SourceCreatedAt
+	applyFacet(t, ctx, c, repo.ID, pr.ID, facetPRReviews, now.Add(-6*24*time.Hour), []github.Review{
+		{ID: 10, Author: "BOB", SubmittedAt: prCreated.Add(30 * time.Minute), State: "COMMENTED"},
+		{ID: 11, Author: "charlie", SubmittedAt: prCreated.Add(90 * time.Minute), State: "COMMENTED"},
+		{ID: 12, Author: "Bob", SubmittedAt: prCreated.Add(2 * time.Hour), State: "COMMENTED"},
+	}, true)
+	applyFacet(t, ctx, c, repo.ID, pr.ID, facetIssueComments, now.Add(-6*24*time.Hour), nil, true)
+	applyFacet(t, ctx, c, repo.ID, pr.ID, facetPRReviewComments, now.Add(-6*24*time.Hour), nil, true)
+
+	report, err = Compute(ctx, c, repo.ID, opts)
+	if err != nil {
+		t.Fatalf("compute health: %v", err)
+	}
+	if report.Response.PullRequests.SampleSize != 1 {
+		t.Fatalf("pr response samples = %d, want 1", report.Response.PullRequests.SampleSize)
+	}
+	if report.Response.PullRequests.Median != 1.5 {
+		t.Fatalf("pr response median = %v, want 1.5", report.Response.PullRequests.Median)
 	}
 }

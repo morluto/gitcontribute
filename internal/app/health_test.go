@@ -59,6 +59,13 @@ func TestRepositoryHealth(t *testing.T) {
 	if err := svc.corpus.ApplyFacetObservationSet(ctx, repo.ID, &openPR.ID, "pr_reviews", now.Add(-24*time.Hour), []corpus.FacetObservationInput{{SourceUpdatedAt: now.Add(-24 * time.Hour), Payload: string(payload)}}, true, 0); err != nil {
 		t.Fatalf("apply pr reviews: %v", err)
 	}
+	// Complete the remaining response facets so the PR is fully covered.
+	if err := svc.corpus.ApplyFacetObservationSet(ctx, repo.ID, &openPR.ID, "issue_comments", now.Add(-24*time.Hour), nil, true, 0); err != nil {
+		t.Fatalf("apply issue comments: %v", err)
+	}
+	if err := svc.corpus.ApplyFacetObservationSet(ctx, repo.ID, &openPR.ID, "pr_review_comments", now.Add(-24*time.Hour), nil, true, 0); err != nil {
+		t.Fatalf("apply pr review comments: %v", err)
+	}
 
 	// Owner merged PR.
 	_, err = upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
