@@ -1,0 +1,43 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ["--maxkb=500"]
+
+  - repo: local
+    hooks:
+      - id: gofmt
+        name: gofmt
+        entry: gofmt -l
+        language: system
+        types: [go]
+        pass_filenames: false
+        args: ["."]
+        require_serial: true
+
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        types: [go]
+        pass_filenames: false
+        require_serial: true
+
+      - id: golangci-lint
+        name: golangci-lint
+        entry: golangci-lint run
+        language: system
+        types: [go]
+        pass_filenames: false
+        require_serial: true
+
+      - id: go-file-size
+        name: check Go file size
+        entry: bash -c 'find . -name "*.go" -not -path "./.git/*" -exec wc -l {} + | awk '"'"'{if ($1 > 800 && $2 != "total") print $2 ":" $1 " lines (exceeds 800 line limit)"}'"'"' | tee /dev/stderr | grep -q . && exit 1 || exit 0'
+        language: system
+        pass_filenames: false
+        require_serial: true

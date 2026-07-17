@@ -7,6 +7,7 @@ import (
 )
 
 func TestPathsDirs(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		os      string
@@ -127,6 +128,7 @@ func dirsMap(p *Paths) (map[string]string, error) {
 }
 
 func TestPathsConfigFileAndDatabasePath(t *testing.T) {
+	t.Parallel()
 	p := &Paths{OS: "linux", Name: "gitcontribute", Env: &Env{
 		Home: "/home/u",
 		Vars: map[string]string{"XDG_CONFIG_HOME": "/home/u/.cfg", "XDG_DATA_HOME": "/home/u/.data"},
@@ -152,6 +154,7 @@ func TestPathsConfigFileAndDatabasePath(t *testing.T) {
 }
 
 func TestPathsDefaultName(t *testing.T) {
+	t.Parallel()
 	p := &Paths{OS: "linux", Env: &Env{Home: "/home/u", Vars: map[string]string{}}}
 	got, err := p.ConfigDir()
 	if err != nil {

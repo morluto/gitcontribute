@@ -72,6 +72,7 @@ func sampleEvidence() *cli.EvidenceResult {
 }
 
 func TestDossierJSONDeterministic(t *testing.T) {
+	t.Parallel()
 	d := sampleDossier()
 	var a, b bytes.Buffer
 	if err := ExportDossierJSON(&a, d); err != nil {
@@ -86,6 +87,7 @@ func TestDossierJSONDeterministic(t *testing.T) {
 }
 
 func TestDossierMarkdownDeterministic(t *testing.T) {
+	t.Parallel()
 	d := sampleDossier()
 	var a, b bytes.Buffer
 	if err := ExportDossierMarkdown(&a, d); err != nil {
@@ -100,6 +102,7 @@ func TestDossierMarkdownDeterministic(t *testing.T) {
 }
 
 func TestEvidenceJSONDeterministic(t *testing.T) {
+	t.Parallel()
 	e := sampleEvidence()
 	var a, b bytes.Buffer
 	if err := ExportEvidenceJSON(&a, e); err != nil {
@@ -114,6 +117,7 @@ func TestEvidenceJSONDeterministic(t *testing.T) {
 }
 
 func TestEvidenceMarkdownDeterministic(t *testing.T) {
+	t.Parallel()
 	e := sampleEvidence()
 	var a, b bytes.Buffer
 	if err := ExportEvidenceMarkdown(&a, e); err != nil {
@@ -128,6 +132,7 @@ func TestEvidenceMarkdownDeterministic(t *testing.T) {
 }
 
 func TestDossierRedaction(t *testing.T) {
+	t.Parallel()
 	d := sampleDossier()
 	var buf bytes.Buffer
 	if err := ExportDossierJSON(&buf, d); err != nil {
@@ -161,6 +166,7 @@ func TestDossierRedaction(t *testing.T) {
 }
 
 func TestEvidenceRedaction(t *testing.T) {
+	t.Parallel()
 	e := sampleEvidence()
 	var buf bytes.Buffer
 	if err := ExportEvidenceJSON(&buf, e); err != nil {
@@ -179,6 +185,7 @@ func TestEvidenceRedaction(t *testing.T) {
 }
 
 func TestRedactStringCoversQuotedAndMultiTokenValues(t *testing.T) {
+	t.Parallel()
 	tests := []string{
 		`{"api_key":"supersecret"}`,
 		`auth_token: Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature`,
@@ -198,6 +205,7 @@ func TestRedactStringCoversQuotedAndMultiTokenValues(t *testing.T) {
 }
 
 func TestEvidenceOrderByID(t *testing.T) {
+	t.Parallel()
 	e := sampleEvidence()
 	var buf bytes.Buffer
 	if err := ExportEvidenceMarkdown(&buf, e); err != nil {
@@ -222,6 +230,7 @@ func TestEvidenceOrderByID(t *testing.T) {
 }
 
 func TestNilInputs(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	if err := ExportDossierJSON(&buf, nil); err == nil {
 		t.Fatal("expected error for nil dossier JSON")

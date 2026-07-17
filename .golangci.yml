@@ -1,0 +1,105 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - contextcheck
+    - cyclop
+    - dupl
+    - errcheck
+    - errname
+    - errorlint
+    - funlen
+    - gocognit
+    - godox
+    - gosec
+    - govet
+    - ineffassign
+    - misspell
+    - nilerr
+    - nilnil
+    - noctx
+    - perfsprint
+    - prealloc
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - staticcheck
+    - unconvert
+    - unused
+    - whitespace
+  settings:
+    cyclop:
+      max-complexity: 25
+    dupl:
+      threshold: 150
+    funlen:
+      lines: 250
+      statements: 80
+    gocognit:
+      min-complexity: 25
+    godox:
+      keywords:
+        - TODO
+        - FIXME
+        - BUG
+        - HACK
+    gosec:
+      excludes:
+        - G201
+        - G202
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: increment-decrement
+        - name: var-naming
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+        - name: unreachable-code
+        - name: redefines-builtin-id
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+  exclusions:
+    generated: lax
+    paths:
+      - vendor
+      - LICENSES
+      - third_party$
+    rules:
+      - path: _test\.go$
+        linters:
+          - funlen
+          - gocognit
+          - dupl
+          - errcheck
+          - noctx
+          - contextcheck
+          - gosec
+          - errname
+          - errorlint

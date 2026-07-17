@@ -6,6 +6,7 @@ import (
 )
 
 func TestRepoRefValidate(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		ref     RepoRef

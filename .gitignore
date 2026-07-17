@@ -1,12 +1,51 @@
+# === Binaries ===
 /bin/
 /dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# === Go build/test artifacts ===
+*.test
+*.out
+coverage.out
+*.prof
+*.cpuprof
+*.memprof
+
+# === Go workspace (single-module project) ===
+go.work
+go.work.sum
+
+# === Dependency directories ===
+/vendor/
+
+# === IDE ===
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# === Linting ===
+.golangci-lint-cache/
+
+# === Environment / secrets ===
+.env
+.env.*
+!.env.example
+*.token
+
+# === Project-specific ===
 /.cache/
 /.gitcontribute/
 *.db
 *.db-shm
 *.db-wal
-*.test
-coverage.out
 
 # Local research snapshot; not part of the product source.
 codedb.snapshot

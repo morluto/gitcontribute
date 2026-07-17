@@ -6,6 +6,7 @@ import (
 )
 
 func TestSanitizeMetadataRedactsSensitiveKeysRecursively(t *testing.T) {
+	t.Parallel()
 	fixtureToken := strings.Join([]string{"fixture", "token"}, "-")
 	in := map[string]any{
 		"title":       "ok",
@@ -79,6 +80,7 @@ func TestSanitizeMetadataRedactsSensitiveKeysRecursively(t *testing.T) {
 }
 
 func TestSanitizeStringRedactsCompletePathsContainingSpaces(t *testing.T) {
+	t.Parallel()
 	posixPath := strings.Join([]string{"", "home", "fixture-user", "Private Project", "credentials.txt"}, "/")
 	windowsPath := strings.Join([]string{`C:`, "Users", "fixture-user", "Private Project", "credentials.txt"}, `\`)
 	tests := []struct {
@@ -102,6 +104,7 @@ func TestSanitizeStringRedactsCompletePathsContainingSpaces(t *testing.T) {
 }
 
 func TestSanitizeMetadataRedactsValueBasedSecrets(t *testing.T) {
+	t.Parallel()
 	githubFixture := "ghp_" + strings.Repeat("a", 36)
 	bearerFixture := strings.Join([]string{"fixture", "bearer", "value"}, "-")
 	in := map[string]any{
@@ -128,6 +131,7 @@ func TestSanitizeMetadataRedactsValueBasedSecrets(t *testing.T) {
 }
 
 func TestSanitizeMetadataHandlesNilAndScalars(t *testing.T) {
+	t.Parallel()
 	if out := sanitizeMetadata(nil); out != nil {
 		t.Fatalf("sanitizeMetadata(nil) = %v, want nil", out)
 	}

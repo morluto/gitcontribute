@@ -29,6 +29,7 @@ func testPaths(t *testing.T) *Paths {
 }
 
 func TestConfigRoundtrip(t *testing.T) {
+	t.Parallel()
 	paths := testPaths(t)
 	cfg := &Config{
 		TokenSource: TokenSource{Method: "env", Key: "GITHUB_TOKEN"},
@@ -55,6 +56,7 @@ func TestConfigRoundtrip(t *testing.T) {
 }
 
 func TestConfigDefaultRoundtrip(t *testing.T) {
+	t.Parallel()
 	paths := testPaths(t)
 	cfg := Default()
 	if err := ApplyDefaults(cfg, paths); err != nil {
@@ -100,6 +102,7 @@ func TestConfigSavePermissions(t *testing.T) {
 }
 
 func TestConfigUnknownFieldsRejected(t *testing.T) {
+	t.Parallel()
 	input := `
 database = "/tmp/test.db"
 unknown_key = "should fail"
@@ -115,6 +118,7 @@ unknown_key = "should fail"
 }
 
 func TestConfigNestedUnknownFieldsRejected(t *testing.T) {
+	t.Parallel()
 	input := `
 [crawl]
 budget = 100
@@ -166,6 +170,7 @@ func TestConfigEnvOverrides(t *testing.T) {
 }
 
 func TestConfigValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		cfg     *Config

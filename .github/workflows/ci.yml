@@ -23,7 +23,84 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: go test ./...
+      - run: go test -parallel=4 ./...
+
+  validate-agents-md:
+    name: Validate AGENTS.md
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate AGENTS.md references
+        shell: bash
+        run: |
+          set -euo pipefail
+          errors=0
+
+          report_ok()  { echo "  OK: $1"; }
+          report_err() { echo "::error file=AGENTS.md::$1"; errors=$((errors + 1)); }
+
+          echo "::group::Checking markdown links in AGENTS.md"
+          while IFS= read -r link; do
+            [[ -z "$link" ]] && continue
+            if [[ ! -e "$link" ]]; then
+              report_err "Markdown link target missing: $link"
+            else
+              report_ok "$link"
+            fi
+          done < <(sed -n 's/.*\[[^]]*\](\([^)]*\)).*/\1/p' AGENTS.md | sort -u)
+          echo "::endgroup::"
+
+          echo "::group::Checking backtick-quoted file paths in AGENTS.md"
+          while IFS= read -r path; do
+            [[ -z "$path" ]] && continue
+            [[ "$path" =~ ^https?:// ]] && continue
+            [[ "$path" =~ ^(gofmt|go\ test|go\ vet|git\ ) ]] && continue
+            if [[ ! -e "$path" ]]; then
+              report_err "Backtick-quoted path missing: $path"
+            else
+              report_ok "$path"
+            fi
+          done < <(sed -n 's/.*`\([^`]*\)`.*/\1/p' AGENTS.md | grep -E '^(docs/|LICENSES|internal/|cmd/)' | sort -u)
+          echo "::endgroup::"
+
+          echo "::group::Checking directory references in AGENTS.md"
+          while IFS= read -r dir; do
+            [[ -z "$dir" ]] && continue
+            if [[ ! -d "$dir" ]]; then
+              report_err "Referenced directory missing: $dir"
+            else
+              report_ok "$dir"
+            fi
+          done < <(grep -oE '\b(internal/[a-zA-Z0-9_/]+|cmd/[a-zA-Z0-9_/]+)\b' AGENTS.md | sort -u)
+          echo "::endgroup::"
+
+          if [[ $errors -gt 0 ]]; then
+            echo "::error::AGENTS.md validation failed with $errors error(s)"
+            exit 1
+          fi
+
+          echo "AGENTS.md validation passed"
+      - name: Check AGENTS.md structure
+        shell: bash
+        run: |
+          errors=0
+
+          if [[ ! -s AGENTS.md ]]; then
+            echo "::error::AGENTS.md is missing or empty"
+            exit 1
+          fi
+
+          echo "AGENTS.md exists ($(wc -l < AGENTS.md) lines, $(wc -c < AGENTS.md) bytes)"
+
+          if ! grep -q '^#' AGENTS.md; then
+            echo "::error file=AGENTS.md::AGENTS.md has no section headers"
+            errors=$((errors + 1))
+          fi
+
+          if [[ $errors -gt 0 ]]; then
+            exit 1
+          fi
 
   vet:
     name: Static checks
@@ -39,3 +116,136 @@ jobs:
         shell: bash
         run: test -z "$(gofmt -l .)"
       - run: go vet ./...
+
+  golangci-lint:
+    name: Go linters
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.12
+          args: --timeout=5m
+
+  check-large-files:
+    name: Check file sizes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Detect Go files exceeding 800 lines
+        shell: bash
+        run: |
+          large=$(find . -name '*.go' -not -path './.git/*' -exec wc -l {} + |
+            awk '$1 > 800 && $2 != "total" {print $2 ":" $1 " lines (exceeds 800 line limit)"}')
+          if [[ -n "$large" ]]; then
+            echo "::error::Files exceeding 800 lines found:"
+            echo "$large"
+            exit 1
+          fi
+          echo "All Go files are under 800 lines"
+
+  coverage:
+    name: Test coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run tests with coverage and timing
+        run: go test -v -race -count=1 -coverprofile=coverage.out -covermode=atomic -coverpkg=./internal/... -timeout 300s ./...
+      - name: Check coverage threshold
+        shell: bash
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | tail -n1 | awk '{print $NF}' | tr -d '%')
+          echo "Total coverage: ${COVERAGE}%"
+          if (( $(echo "$COVERAGE < 70" | bc -l) )); then
+            echo "::error::Coverage ${COVERAGE}% is below 70% threshold"
+            exit 1
+          fi
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: coverage
+          path: coverage.out
+
+  tidy:
+    name: Module tidy check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check go.mod is tidy
+        shell: bash
+        run: |
+          go mod tidy
+          if [ -n "$(git status --porcelain go.mod go.sum)" ]; then
+            echo "::error::go.mod or go.sum not tidy; run 'go mod tidy'"
+            exit 1
+          fi
+
+  tech-debt:
+    name: Tech debt scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Scan for TODO/FIXME/HACK markers
+        shell: bash
+        run: |
+          MARKERS=$(grep -rn -E '\b(TODO|FIXME|HACK|XXX|OPTIMIZE|BUG)\b' --include='*.go' . || true)
+          if [ -n "$MARKERS" ]; then
+            echo "== Tech debt markers found =="
+            echo "$MARKERS"
+            echo "::warning::Tech debt markers found in codebase. Review and link to issues."
+          else
+            echo "No tech debt markers found."
+          fi
+
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: go
+      - name: Build
+        run: go build ./...
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run integration tests
+        run: go test -v -race -count=1 -tags=integration -timeout 300s ./...
