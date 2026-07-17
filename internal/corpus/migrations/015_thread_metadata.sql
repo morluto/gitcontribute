@@ -7,4 +7,11 @@ ALTER TABLE threads ADD COLUMN state_reason TEXT;
 ALTER TABLE threads ADD COLUMN milestone TEXT;
 
 -- +goose Down
--- SQLite column removal is intentionally omitted for this additive migration.
+-- +goose StatementBegin
+ALTER TABLE threads DROP COLUMN milestone;
+ALTER TABLE threads DROP COLUMN state_reason;
+ALTER TABLE threads DROP COLUMN locked;
+ALTER TABLE threads DROP COLUMN draft;
+ALTER TABLE threads DROP COLUMN assignees;
+ALTER TABLE threads DROP COLUMN author_association;
+-- +goose StatementEnd
