@@ -116,11 +116,20 @@ type syncCmd struct {
 }
 
 type searchCmd struct {
-	Query string `arg:"" name:"query" help:"Search query"`
-	Kind  string `name:"kind" short:"k" default:"all" enum:"repos,issues,prs,threads,code,all" help:"Search kind"`
-	Repo  string `name:"repo" help:"Restrict to repository OWNER/REPO"`
-	Limit int    `name:"limit" default:"20" help:"Maximum number of results"`
-	JSON  bool   `name:"json" help:"Print the result as JSON"`
+	Repos   searchKindCmd `cmd:"" help:"Search repositories"`
+	Issues  searchKindCmd `cmd:"" help:"Search issues"`
+	PRs     searchKindCmd `cmd:"" name:"prs" help:"Search pull requests"`
+	Threads searchKindCmd `cmd:"" help:"Search issues and pull requests"`
+	Code    searchKindCmd `cmd:"" help:"Search indexed code documents"`
+	All     searchKindCmd `cmd:"" help:"Search repositories, threads, and code"`
+}
+
+type searchKindCmd struct {
+	Query  string `arg:"" name:"query" help:"Search query"`
+	Repo   string `name:"repo" help:"Restrict to repository OWNER/REPO"`
+	Limit  int    `name:"limit" default:"20" help:"Maximum number of results"`
+	Cursor string `name:"cursor" help:"Opaque cursor returned by the previous page"`
+	JSON   bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type dossierCmd struct {
@@ -618,7 +627,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	case "sync":
 		return c.runSync(ctx, &cli.Sync)
 	case "search":
-		return c.runSearch(ctx, &cli.Search)
+		return c.runSearch(ctx, command, &cli.Search)
 	case "dossier":
 		return c.runDossier(ctx, command, &cli.Dossier)
 	case "seeds":
@@ -699,6 +708,31 @@ func normalizeCompatibilityArgs(args []string) []string {
 		out := make([]string, 0, len(args)+1)
 		out = append(out, "dossier", "show")
 		return append(out, args[1:]...)
+	case "search":
+		if len(args) > 1 {
+			switch args[1] {
+			case "repos", "issues", "prs", "threads", "code", "all":
+				return args
+			}
+		}
+		kind := "all"
+		out := make([]string, 0, len(args)+1)
+		out = append(out, "search")
+		for i := 1; i < len(args); i++ {
+			arg := args[i]
+			switch {
+			case strings.HasPrefix(arg, "--kind="):
+				kind = strings.TrimPrefix(arg, "--kind=")
+			case arg == "--kind" || arg == "-k":
+				if i+1 < len(args) {
+					kind = args[i+1]
+					i++
+				}
+			default:
+				out = append(out, arg)
+			}
+		}
+		return append([]string{"search", kind}, out[1:]...)
 	default:
 		return args
 	}
@@ -1384,8 +1418,26 @@ func (c *CLI) runSync(ctx context.Context, cmd *syncCmd) error {
 	return c.render(cmd.JSON, res)
 }
 
-func (c *CLI) runSearch(ctx context.Context, cmd *searchCmd) error {
-	opts := SearchOptions{Kind: cmd.Kind, Repo: cmd.Repo, Limit: cmd.Limit}
+func (c *CLI) runSearch(ctx context.Context, command string, cmd *searchCmd) error {
+	kind := strings.TrimPrefix(command, "search ")
+	var selected *searchKindCmd
+	switch kind {
+	case "repos":
+		selected = &cmd.Repos
+	case "issues":
+		selected = &cmd.Issues
+	case "prs":
+		selected = &cmd.PRs
+	case "threads":
+		selected = &cmd.Threads
+	case "code":
+		selected = &cmd.Code
+	case "all":
+		selected = &cmd.All
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown search kind: %s", kind))
+	}
+	opts := SearchOptions{Kind: kind, Repo: selected.Repo, Limit: selected.Limit, Cursor: selected.Cursor}
 	if opts.Limit <= 0 || opts.Limit > maxSearchLimit {
 		return NewCLIError(ExitUsage, fmt.Errorf("limit must be between 1 and %d", maxSearchLimit))
 	}
@@ -1394,11 +1446,11 @@ func (c *CLI) runSearch(ctx context.Context, cmd *searchCmd) error {
 			return NewCLIError(ExitUsage, fmt.Errorf("invalid --repo value: %w", err))
 		}
 	}
-	res, err := c.svc.Search(ctx, cmd.Query, opts)
+	res, err := c.svc.Search(ctx, selected.Query, opts)
 	if err != nil {
 		return c.mapError(err)
 	}
-	return c.render(cmd.JSON, res)
+	return c.render(selected.JSON, res)
 }
 
 func (c *CLI) runDossier(ctx context.Context, command string, cmd *dossierCmd) error {

@@ -531,7 +531,7 @@ func TestSearchJSONWithFlags(t *testing.T) {
 	}}
 	c, stdout, _ := newTestCLI(svc, nil)
 
-	err := c.Run(context.Background(), []string{"search", "good first issue", "--kind", "issues", "--repo", "o/r", "--limit", "5", "--json"})
+	err := c.Run(context.Background(), []string{"search", "issues", "good first issue", "--repo", "o/r", "--limit", "5", "--cursor", "next-page", "--json"})
 	requireNoErr(t, err)
 
 	if !svc.searchCalled {
@@ -541,7 +541,7 @@ func TestSearchJSONWithFlags(t *testing.T) {
 		t.Fatalf("query=%q", svc.lastSearchArgs.Query)
 	}
 	opts := svc.lastSearchArgs.Opts
-	if opts.Kind != "issues" || opts.Repo != "o/r" || opts.Limit != 5 {
+	if opts.Kind != "issues" || opts.Repo != "o/r" || opts.Limit != 5 || opts.Cursor != "next-page" {
 		t.Fatalf("unexpected options: %+v", opts)
 	}
 
