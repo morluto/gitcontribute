@@ -56,6 +56,7 @@ func SanitizeBundle(bundle *Bundle) *Bundle {
 	for i, e := range bundle.TriageEvents {
 		copy := *e
 		copy.Reason = sanitizeString(copy.Reason)
+		copy.Lens = sanitizeString(copy.Lens)
 		copy.TargetRef = sanitizeString(copy.TargetRef)
 		out.TriageEvents[i] = &copy
 	}

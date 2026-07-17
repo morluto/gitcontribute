@@ -36,13 +36,14 @@ func (c *Corpus) RecordTriageEvent(ctx context.Context, e *tracking.TriageEvent)
 		sourceEventAt = now
 	}
 	_, err := c.db.ExecContext(ctx, `
-		INSERT INTO triage_events (id, target_kind, target_ref, outcome, reason, source_event_at, created_at, updated_at, repository_id, thread_id, investigation_id, opportunity_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO triage_events (id, target_kind, target_ref, outcome, reason, lens, source_event_at, created_at, updated_at, repository_id, thread_id, investigation_id, opportunity_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
 			target_kind=excluded.target_kind,
 			target_ref=excluded.target_ref,
 			outcome=excluded.outcome,
 			reason=excluded.reason,
+			lens=excluded.lens,
 			source_event_at=excluded.source_event_at,
 			created_at=excluded.created_at,
 			updated_at=excluded.updated_at,
@@ -50,7 +51,7 @@ func (c *Corpus) RecordTriageEvent(ctx context.Context, e *tracking.TriageEvent)
 			thread_id=excluded.thread_id,
 			investigation_id=excluded.investigation_id,
 			opportunity_id=excluded.opportunity_id
-	`, e.ID, string(e.TargetKind), e.TargetRef, string(e.Outcome), e.Reason, sourceEventAt, createdAt, updatedAt,
+	`, e.ID, string(e.TargetKind), e.TargetRef, string(e.Outcome), e.Reason, e.Lens, sourceEventAt, createdAt, updatedAt,
 		nullInt64(e.RepositoryID), nullInt64(e.ThreadID), nullString(e.InvestigationID), nullString(e.OpportunityID))
 	if err != nil {
 		return fmt.Errorf("record triage event: %w", err)
@@ -198,7 +199,7 @@ func (c *Corpus) ListTriageEvents(ctx context.Context, filter tracking.TriageEve
 	if limit > 10000 {
 		return nil, fmt.Errorf("triage event limit cannot exceed 10000")
 	}
-	query := `SELECT id, target_kind, target_ref, outcome, reason, source_event_at, created_at, updated_at, repository_id, thread_id, investigation_id, opportunity_id FROM triage_events WHERE 1=1`
+	query := `SELECT id, target_kind, target_ref, outcome, reason, lens, source_event_at, created_at, updated_at, repository_id, thread_id, investigation_id, opportunity_id FROM triage_events WHERE 1=1`
 	var args []any
 	if filter.TargetKind != "" {
 		query += ` AND target_kind=?`
@@ -211,6 +212,10 @@ func (c *Corpus) ListTriageEvents(ctx context.Context, filter tracking.TriageEve
 	if filter.Outcome != "" {
 		query += ` AND outcome=?`
 		args = append(args, string(filter.Outcome))
+	}
+	if filter.Lens != "" {
+		query += ` AND lens=?`
+		args = append(args, filter.Lens)
 	}
 	query += ` ORDER BY source_event_at, id LIMIT ?`
 	args = append(args, limit)
@@ -239,7 +244,7 @@ func scanTriageEvent(rows interface {
 	var sourceEventAt, createdAt, updatedAt int64
 	var repositoryID, threadID sql.NullInt64
 	var investigationID, opportunityID sql.NullString
-	err := rows.Scan(&e.ID, &e.TargetKind, &e.TargetRef, &e.Outcome, &e.Reason, &sourceEventAt, &createdAt, &updatedAt, &repositoryID, &threadID, &investigationID, &opportunityID)
+	err := rows.Scan(&e.ID, &e.TargetKind, &e.TargetRef, &e.Outcome, &e.Reason, &e.Lens, &sourceEventAt, &createdAt, &updatedAt, &repositoryID, &threadID, &investigationID, &opportunityID)
 	if err != nil {
 		return nil, err
 	}

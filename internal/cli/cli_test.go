@@ -40,6 +40,15 @@ type fakeService struct {
 	showOppCalled            bool
 	listOppCalled            bool
 	setStatusOppCalled       bool
+	recordTriageCalled       bool
+	listTriageCalled         bool
+	recordContributionCalled bool
+	getContributionCalled    bool
+	listContributionsCalled  bool
+	recordOutcomeCalled      bool
+	listOutcomesCalled       bool
+	exportMetadataCalled     bool
+	importMetadataCalled     bool
 
 	initResult         *cli.InitResult
 	statusResult       *cli.StatusResult
@@ -61,6 +70,15 @@ type fakeService struct {
 	showOppResult      *cli.OpportunityResult
 	listOppResult      *cli.OpportunityListResult
 	setStatusOppResult *cli.OpportunityResult
+
+	triageEventResult             *cli.TriageEventResult
+	triageEventListResult         *cli.TriageEventListResult
+	contributionResult            *cli.ContributionResult
+	contributionListResult        *cli.ContributionListResult
+	contributionOutcomeResult     *cli.ContributionOutcomeResult
+	contributionOutcomeListResult *cli.ContributionOutcomeListResult
+	metadataExportResult          *cli.MetadataExportResult
+	metadataImportResult          *cli.MetadataImportResult
 
 	lastSyncArg    cli.RepoRef
 	lastSearchArgs struct {
@@ -88,6 +106,16 @@ type fakeService struct {
 	lastShowOppArg     string
 	lastListOppFilter  string
 	lastSetStatusArgs  setStatusArgs
+
+	lastRecordTriageArgs       cli.RecordTriageEventOptions
+	lastListTriageArgs         cli.ListTriageEventsOptions
+	lastRecordContributionArgs cli.RecordContributionOptions
+	lastShowContributionArg    string
+	lastListContributionsArgs  cli.ListContributionsOptions
+	lastRecordOutcomeArgs      cli.RecordContributionOutcomeOptions
+	lastListOutcomesArg        string
+	lastExportMetadataArgs     cli.MetadataExportOptions
+	lastImportMetadataArgs     cli.MetadataImportOptions
 
 	err error
 }
@@ -267,6 +295,60 @@ func (f *fakeService) SetOpportunityStatus(ctx context.Context, id, status, rati
 	f.setStatusOppCalled = true
 	f.lastSetStatusArgs = setStatusArgs{ID: id, Status: status, Rationale: rationale}
 	return f.setStatusOppResult, f.err
+}
+
+func (f *fakeService) RecordTriageEvent(ctx context.Context, opts cli.RecordTriageEventOptions) (*cli.TriageEventResult, error) {
+	f.recordTriageCalled = true
+	f.lastRecordTriageArgs = opts
+	return f.triageEventResult, f.err
+}
+
+func (f *fakeService) ListTriageEvents(ctx context.Context, opts cli.ListTriageEventsOptions) (*cli.TriageEventListResult, error) {
+	f.listTriageCalled = true
+	f.lastListTriageArgs = opts
+	return f.triageEventListResult, f.err
+}
+
+func (f *fakeService) RecordContribution(ctx context.Context, opts cli.RecordContributionOptions) (*cli.ContributionResult, error) {
+	f.recordContributionCalled = true
+	f.lastRecordContributionArgs = opts
+	return f.contributionResult, f.err
+}
+
+func (f *fakeService) GetContribution(ctx context.Context, id string) (*cli.ContributionResult, error) {
+	f.getContributionCalled = true
+	f.lastShowContributionArg = id
+	return f.contributionResult, f.err
+}
+
+func (f *fakeService) ListContributions(ctx context.Context, opts cli.ListContributionsOptions) (*cli.ContributionListResult, error) {
+	f.listContributionsCalled = true
+	f.lastListContributionsArgs = opts
+	return f.contributionListResult, f.err
+}
+
+func (f *fakeService) RecordContributionOutcome(ctx context.Context, opts cli.RecordContributionOutcomeOptions) (*cli.ContributionOutcomeResult, error) {
+	f.recordOutcomeCalled = true
+	f.lastRecordOutcomeArgs = opts
+	return f.contributionOutcomeResult, f.err
+}
+
+func (f *fakeService) ListContributionOutcomes(ctx context.Context, contributionID string) (*cli.ContributionOutcomeListResult, error) {
+	f.listOutcomesCalled = true
+	f.lastListOutcomesArg = contributionID
+	return f.contributionOutcomeListResult, f.err
+}
+
+func (f *fakeService) ExportLocalMetadata(ctx context.Context, opts cli.MetadataExportOptions) (*cli.MetadataExportResult, error) {
+	f.exportMetadataCalled = true
+	f.lastExportMetadataArgs = opts
+	return f.metadataExportResult, f.err
+}
+
+func (f *fakeService) ImportLocalMetadata(ctx context.Context, opts cli.MetadataImportOptions) (*cli.MetadataImportResult, error) {
+	f.importMetadataCalled = true
+	f.lastImportMetadataArgs = opts
+	return f.metadataImportResult, f.err
 }
 
 func TestIndex(t *testing.T) {

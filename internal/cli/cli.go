@@ -90,6 +90,9 @@ type rootCmd struct {
 	Cluster       clusterCmd       `cmd:"" help:"Inspect duplicate-candidate clusters"`
 	Lens          lensCmd          `cmd:"" help:"Manage saved lenses"`
 	Collection    collectionCmd    `cmd:"" help:"Manage named collections"`
+	Triage        triageCmd        `cmd:"" help:"Manage triage outcomes"`
+	Contribution  contributionCmd  `cmd:"" help:"Manage contributions"`
+	Tracking      trackingCmd      `cmd:"" help:"Export or import local tracking metadata"`
 	MCP           mcpCmd           `cmd:"" name:"mcp" help:"Run the MCP server"`
 	TUI           tuiCmd           `cmd:"" name:"tui" help:"Browse the local corpus interactively"`
 }
@@ -747,6 +750,12 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runLens(ctx, command, &cli.Lens)
 	case "collection":
 		return c.runCollection(ctx, command, &cli.Collection)
+	case "triage":
+		return c.runTriage(ctx, command, &cli.Triage)
+	case "contribution":
+		return c.runContribution(ctx, command, &cli.Contribution)
+	case "tracking":
+		return c.runTracking(ctx, command, &cli.Tracking)
 	case "mcp":
 		return c.runMCP(ctx, &cli.MCP)
 	case "tui":

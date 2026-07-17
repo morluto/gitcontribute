@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/health"
@@ -789,4 +790,129 @@ type ExportResult struct {
 	Kind    string `json:"kind"`
 	Format  string `json:"format"`
 	Content string `json:"content"`
+}
+
+// TrackingService exposes local triage, contribution, and metadata portability
+// operations. Implementations must keep local state separate from GitHub state
+// and must not perform network access.
+type TrackingService interface {
+	RecordTriageEvent(ctx context.Context, opts RecordTriageEventOptions) (*TriageEventResult, error)
+	ListTriageEvents(ctx context.Context, opts ListTriageEventsOptions) (*TriageEventListResult, error)
+	RecordContribution(ctx context.Context, opts RecordContributionOptions) (*ContributionResult, error)
+	GetContribution(ctx context.Context, id string) (*ContributionResult, error)
+	ListContributions(ctx context.Context, opts ListContributionsOptions) (*ContributionListResult, error)
+	RecordContributionOutcome(ctx context.Context, opts RecordContributionOutcomeOptions) (*ContributionOutcomeResult, error)
+	ListContributionOutcomes(ctx context.Context, contributionID string) (*ContributionOutcomeListResult, error)
+	ExportLocalMetadata(ctx context.Context, opts MetadataExportOptions) (*MetadataExportResult, error)
+	ImportLocalMetadata(ctx context.Context, opts MetadataImportOptions) (*MetadataImportResult, error)
+}
+
+type RecordTriageEventOptions struct {
+	Target  string
+	Outcome string
+	Reason  string
+	Lens    string
+}
+
+type TriageEventResult struct {
+	ID            string `json:"id"`
+	TargetKind    string `json:"target_kind"`
+	TargetRef     string `json:"target_ref"`
+	Outcome       string `json:"outcome"`
+	Reason        string `json:"reason,omitempty"`
+	Lens          string `json:"lens,omitempty"`
+	SourceEventAt string `json:"source_event_at,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
+}
+
+type ListTriageEventsOptions struct {
+	TargetKind string
+	TargetRef  string
+	Outcome    string
+	Lens       string
+	Limit      int
+}
+
+type TriageEventListResult struct {
+	Events []TriageEventResult `json:"events"`
+	Limit  int                 `json:"limit"`
+	Total  int                 `json:"total"`
+}
+
+type RecordContributionOptions struct {
+	OpportunityID string
+	Kind          string
+	Title         string
+	Body          string
+	Reference     string
+	ReferenceURL  string
+}
+
+type ContributionResult struct {
+	ID            string         `json:"id"`
+	OpportunityID string         `json:"opportunity_id"`
+	Kind          string         `json:"kind"`
+	Title         string         `json:"title"`
+	Body          string         `json:"body,omitempty"`
+	Reference     string         `json:"reference,omitempty"`
+	ReferenceURL  string         `json:"reference_url,omitempty"`
+	PreparedAt    string         `json:"prepared_at"`
+	SubmittedAt   string         `json:"submitted_at,omitempty"`
+	CreatedAt     string         `json:"created_at"`
+	UpdatedAt     string         `json:"updated_at"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
+}
+
+type ListContributionsOptions struct {
+	OpportunityID string
+	Kind          string
+	Limit         int
+}
+
+type ContributionListResult struct {
+	Contributions []ContributionResult `json:"contributions"`
+	Limit         int                  `json:"limit"`
+	Total         int                  `json:"total"`
+}
+
+type RecordContributionOutcomeOptions struct {
+	ContributionID string
+	Outcome        string
+	Reason         string
+}
+
+type ContributionOutcomeResult struct {
+	ID             string `json:"id"`
+	ContributionID string `json:"contribution_id"`
+	Outcome        string `json:"outcome"`
+	Reason         string `json:"reason,omitempty"`
+	SourceEventAt  string `json:"source_event_at,omitempty"`
+	CreatedAt      string `json:"created_at"`
+}
+
+type ContributionOutcomeListResult struct {
+	ContributionID string                      `json:"contribution_id"`
+	Outcomes       []ContributionOutcomeResult `json:"outcomes"`
+}
+
+type MetadataExportOptions struct {
+	Limit int
+}
+
+type MetadataExportResult struct {
+	Data                 json.RawMessage `json:"data"`
+	TriageEvents         int             `json:"triage_events"`
+	Contributions        int             `json:"contributions"`
+	ContributionOutcomes int             `json:"contribution_outcomes"`
+}
+
+type MetadataImportOptions struct {
+	Data []byte
+}
+
+type MetadataImportResult struct {
+	TriageEvents         int `json:"triage_events"`
+	Contributions        int `json:"contributions"`
+	ContributionOutcomes int `json:"contribution_outcomes"`
 }

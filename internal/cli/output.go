@@ -102,6 +102,20 @@ func humanOutput(v any) (string, error) {
 		return jobHuman(r), nil
 	case *NeighborListResult:
 		return neighborsHuman(r), nil
+	case *TriageEventResult:
+		return triageEventHuman(r), nil
+	case *TriageEventListResult:
+		return triageEventListHuman(r), nil
+	case *ContributionResult:
+		return contributionHuman(r), nil
+	case *ContributionListResult:
+		return contributionListHuman(r), nil
+	case *ContributionOutcomeResult:
+		return contributionOutcomeHuman(r), nil
+	case *ContributionOutcomeListResult:
+		return contributionOutcomeListHuman(r), nil
+	case *MetadataImportResult:
+		return metadataImportHuman(r), nil
 	default:
 		payload, err := json.MarshalIndent(v, "", "  ")
 		if err != nil {
@@ -575,4 +589,85 @@ func collectionListHuman(r *CollectionListResult) string {
 		fmt.Fprintf(&b, "\n- %s (%d members)", col.Name, col.MemberCount)
 	}
 	return b.String()
+}
+
+func triageEventHuman(r *TriageEventResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Triage event: %s (%s)\n", r.ID, r.Outcome)
+	fmt.Fprintf(&b, "Target: %s %s\n", r.TargetKind, r.TargetRef)
+	if r.Lens != "" {
+		fmt.Fprintf(&b, "Lens: %s\n", r.Lens)
+	}
+	if r.Reason != "" {
+		fmt.Fprintf(&b, "Reason: %s\n", r.Reason)
+	}
+	fmt.Fprintf(&b, "Created: %s\nUpdated: %s", r.CreatedAt, r.UpdatedAt)
+	return b.String()
+}
+
+func triageEventListHuman(r *TriageEventListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d triage events (limit %d)", len(r.Events), r.Limit)
+	for _, e := range r.Events {
+		fmt.Fprintf(&b, "\n- %s %s=%s [%s]", e.ID, e.TargetKind, e.TargetRef, e.Outcome)
+		if e.Lens != "" {
+			fmt.Fprintf(&b, " (lens: %s)", e.Lens)
+		}
+		if e.Reason != "" {
+			fmt.Fprintf(&b, ": %s", e.Reason)
+		}
+	}
+	return b.String()
+}
+
+func contributionHuman(r *ContributionResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Contribution: %s (%s)\n", r.ID, r.Kind)
+	fmt.Fprintf(&b, "Opportunity: %s\n", r.OpportunityID)
+	fmt.Fprintf(&b, "Title: %s\n", r.Title)
+	if r.Reference != "" {
+		fmt.Fprintf(&b, "Reference: %s\n", r.Reference)
+	}
+	if r.ReferenceURL != "" {
+		fmt.Fprintf(&b, "Reference URL: %s\n", r.ReferenceURL)
+	}
+	fmt.Fprintf(&b, "Prepared: %s\nCreated: %s\nUpdated: %s", r.PreparedAt, r.CreatedAt, r.UpdatedAt)
+	return b.String()
+}
+
+func contributionListHuman(r *ContributionListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d contributions (limit %d)", len(r.Contributions), r.Limit)
+	for _, c := range r.Contributions {
+		fmt.Fprintf(&b, "\n- %s [%s] %s (opportunity %s)", c.ID, c.Kind, c.Title, c.OpportunityID)
+	}
+	return b.String()
+}
+
+func contributionOutcomeHuman(r *ContributionOutcomeResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Contribution outcome: %s (%s)\n", r.ID, r.Outcome)
+	fmt.Fprintf(&b, "Contribution: %s\n", r.ContributionID)
+	if r.Reason != "" {
+		fmt.Fprintf(&b, "Reason: %s\n", r.Reason)
+	}
+	fmt.Fprintf(&b, "Created: %s", r.CreatedAt)
+	return b.String()
+}
+
+func contributionOutcomeListHuman(r *ContributionOutcomeListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d outcomes for contribution %s", len(r.Outcomes), r.ContributionID)
+	for _, o := range r.Outcomes {
+		fmt.Fprintf(&b, "\n- %s [%s]", o.Outcome, o.CreatedAt)
+		if o.Reason != "" {
+			fmt.Fprintf(&b, ": %s", o.Reason)
+		}
+	}
+	return b.String()
+}
+
+func metadataImportHuman(r *MetadataImportResult) string {
+	return fmt.Sprintf("Imported %d triage events, %d contributions, %d contribution outcomes",
+		r.TriageEvents, r.Contributions, r.ContributionOutcomes)
 }

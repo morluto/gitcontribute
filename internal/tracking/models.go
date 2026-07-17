@@ -36,6 +36,7 @@ type TriageEvent struct {
 	TargetRef       string
 	Outcome         Outcome
 	Reason          string
+	Lens            string
 	SourceEventAt   time.Time
 	RepositoryID    *int64
 	ThreadID        *int64
@@ -77,6 +78,7 @@ type TriageEventFilter struct {
 	TargetKind TargetKind
 	TargetRef  string
 	Outcome    Outcome
+	Lens       string
 	Limit      int
 }
 

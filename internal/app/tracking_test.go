@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/tracking"
@@ -28,34 +27,35 @@ func TestServiceTrackingFlow(t *testing.T) {
 		t.Fatalf("promote opportunity: %v", err)
 	}
 
-	event, err := svc.RecordOutcome(ctx, &tracking.TriageEvent{
-		TargetKind: tracking.TargetOpportunity,
-		TargetRef:  opp.ID,
-		Outcome:    tracking.OutcomeInvestigated,
-		Reason:     "looks promising",
+	event, err := svc.RecordTriageEvent(ctx, cli.RecordTriageEventOptions{
+		Target:  "opportunity:" + opp.ID,
+		Outcome: string(tracking.OutcomeInvestigated),
+		Reason:  "looks promising",
+		Lens:    "active-go",
 	})
 	if err != nil {
-		t.Fatalf("record outcome: %v", err)
+		t.Fatalf("record triage event: %v", err)
 	}
 	if event.ID == "" {
 		t.Fatal("expected durable event id")
 	}
+	if event.Lens != "active-go" {
+		t.Fatalf("expected lens active-go, got %q", event.Lens)
+	}
 
-	events, err := svc.ListOutcomes(ctx, tracking.TriageEventFilter{})
+	list, err := svc.ListTriageEvents(ctx, cli.ListTriageEventsOptions{Lens: "active-go"})
 	if err != nil {
-		t.Fatalf("list outcomes: %v", err)
+		t.Fatalf("list triage events: %v", err)
 	}
-	if len(events) != 1 || events[0].Outcome != tracking.OutcomeInvestigated {
-		t.Fatalf("unexpected outcomes: %+v", events)
+	if len(list.Events) != 1 || list.Events[0].Outcome != string(tracking.OutcomeInvestigated) {
+		t.Fatalf("unexpected triage events: %+v", list.Events)
 	}
 
-	preparedAt := time.Unix(5000, 0).UTC()
-	contribution, err := svc.RecordContribution(ctx, &tracking.Contribution{
+	contribution, err := svc.RecordContribution(ctx, cli.RecordContributionOptions{
 		OpportunityID: opp.ID,
 		Kind:          "issue",
 		Title:         "parser panics",
 		Body:          "description",
-		PreparedAt:    preparedAt,
 	})
 	if err != nil {
 		t.Fatalf("record contribution: %v", err)
@@ -64,9 +64,9 @@ func TestServiceTrackingFlow(t *testing.T) {
 		t.Fatal("expected durable contribution id")
 	}
 
-	submitted, err := svc.RecordContributionOutcome(ctx, &tracking.ContributionOutcome{
+	submitted, err := svc.RecordContributionOutcome(ctx, cli.RecordContributionOutcomeOptions{
 		ContributionID: contribution.ID,
-		Outcome:        tracking.OutcomeSubmitted,
+		Outcome:        string(tracking.OutcomeSubmitted),
 		Reason:         "opened on GitHub",
 	})
 	if err != nil {
@@ -88,7 +88,7 @@ func TestServiceTrackingFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list contribution outcomes: %v", err)
 	}
-	if len(outcomes) != 1 || outcomes[0].Outcome != tracking.OutcomeSubmitted {
+	if len(outcomes.Outcomes) != 1 || outcomes.Outcomes[0].Outcome != string(tracking.OutcomeSubmitted) {
 		t.Fatalf("unexpected contribution outcomes: %+v", outcomes)
 	}
 }
@@ -102,16 +102,15 @@ func TestServiceExportImportLocalMetadata(t *testing.T) {
 	h, _ := svc.AddHypothesis(ctx, inv.ID, "panic", "desc", "bug")
 	opp, _ := svc.PromoteOpportunity(ctx, h.ID, "panic", "parser", "crash", "small", 0.8)
 
-	_, err := svc.RecordOutcome(ctx, &tracking.TriageEvent{
-		TargetKind: tracking.TargetOpportunity,
-		TargetRef:  opp.ID,
-		Outcome:    tracking.OutcomeSaved,
+	_, err := svc.RecordTriageEvent(ctx, cli.RecordTriageEventOptions{
+		Target:  "opportunity:" + opp.ID,
+		Outcome: string(tracking.OutcomeSaved),
 	})
 	if err != nil {
-		t.Fatalf("record outcome: %v", err)
+		t.Fatalf("record triage event: %v", err)
 	}
 
-	contribution, err := svc.RecordContribution(ctx, &tracking.Contribution{
+	contribution, err := svc.RecordContribution(ctx, cli.RecordContributionOptions{
 		OpportunityID: opp.ID,
 		Kind:          "issue",
 		Title:         "parser panics",
@@ -120,40 +119,42 @@ func TestServiceExportImportLocalMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("record contribution: %v", err)
 	}
-	_, err = svc.RecordContributionOutcome(ctx, &tracking.ContributionOutcome{
+	_, err = svc.RecordContributionOutcome(ctx, cli.RecordContributionOutcomeOptions{
 		ContributionID: contribution.ID,
-		Outcome:        tracking.OutcomeMerged,
+		Outcome:        string(tracking.OutcomeMerged),
 	})
 	if err != nil {
 		t.Fatalf("record outcome: %v", err)
 	}
 
-	data, bundle, err := svc.ExportLocalMetadata(ctx, tracking.ExportOptions{})
+	result, err := svc.ExportLocalMetadata(ctx, cli.MetadataExportOptions{})
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}
-	if len(bundle.TriageEvents) != 1 || len(bundle.Contributions) != 1 || len(bundle.ContributionOutcomes) != 1 {
-		t.Fatalf("unexpected bundle: triage=%d contributions=%d outcomes=%d", len(bundle.TriageEvents), len(bundle.Contributions), len(bundle.ContributionOutcomes))
+	if result.TriageEvents != 1 || result.Contributions != 1 || result.ContributionOutcomes != 1 {
+		t.Fatalf("unexpected export counts: %+v", result)
 	}
-	if !strings.Contains(string(data), "triage_events") {
+	if !strings.Contains(string(result.Data), "triage_events") {
 		t.Fatalf("expected triage_events in JSON export")
 	}
 
-	if err := svc.ImportLocalMetadata(ctx, data); err != nil {
+	_, err = svc.ImportLocalMetadata(ctx, cli.MetadataImportOptions{Data: result.Data})
+	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
 
-	contribs, _ := svc.ListContributions(ctx, tracking.ContributionFilter{})
-	if len(contribs) != 1 || contribs[0].OpportunityID != opp.ID {
+	contribs, _ := svc.ListContributions(ctx, cli.ListContributionsOptions{})
+	if len(contribs.Contributions) != 1 || contribs.Contributions[0].OpportunityID != opp.ID {
 		t.Fatalf("unexpected imported contribution: %+v", contribs)
 	}
 
-	if err := svc.ImportLocalMetadata(ctx, data); err != nil {
+	_, err = svc.ImportLocalMetadata(ctx, cli.MetadataImportOptions{Data: result.Data})
+	if err != nil {
 		t.Fatalf("second import should be idempotent: %v", err)
 	}
-	contribs2, _ := svc.ListContributions(ctx, tracking.ContributionFilter{})
-	if len(contribs2) != 1 {
-		t.Fatalf("expected 1 contribution after re-import, got %d", len(contribs2))
+	contribs2, _ := svc.ListContributions(ctx, cli.ListContributionsOptions{})
+	if len(contribs2.Contributions) != 1 {
+		t.Fatalf("expected 1 contribution after re-import, got %d", len(contribs2.Contributions))
 	}
 }
 
