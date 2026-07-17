@@ -84,10 +84,7 @@ func Compute(ctx context.Context, c *corpus.Corpus, repoID int64, opts Options) 
 	report.Issues = issueMetrics
 	report.PullRequests = prMetrics
 
-	external, err := computeExternalMetrics(ctx, c, threads, opts.Start, end)
-	if err != nil {
-		return nil, fmt.Errorf("external contributor metrics: %w", err)
-	}
+	external := computeExternalMetrics(threads, opts.Start, end)
 	report.External = external
 	report.External.Window = window
 
@@ -177,7 +174,7 @@ func withinWindow(t time.Time, start, end time.Time) bool {
 	return true
 }
 
-func computeExternalMetrics(ctx context.Context, c *corpus.Corpus, threads []corpus.Thread, start, end time.Time) (ExternalContributorMetrics, error) {
+func computeExternalMetrics(threads []corpus.Thread, start, end time.Time) ExternalContributorMetrics {
 	out := ExternalContributorMetrics{}
 	var unknown, known int
 	for _, t := range threads {
@@ -191,10 +188,7 @@ func computeExternalMetrics(ctx context.Context, c *corpus.Corpus, threads []cor
 			continue
 		}
 		out.SampleSize++
-		assoc, err := threadAuthorAssociation(ctx, c, t.ID)
-		if err != nil {
-			return out, err
-		}
+		assoc := t.AuthorAssociation
 		if assoc == "" {
 			unknown++
 			continue
@@ -227,7 +221,7 @@ func computeExternalMetrics(ctx context.Context, c *corpus.Corpus, threads []cor
 	if out.Merged+out.ClosedUnmerged > 0 {
 		out.MergeRate = float64(out.Merged) / float64(out.Merged+out.ClosedUnmerged)
 	}
-	return out, nil
+	return out
 }
 
 func isExternalAssociation(assoc string) bool {
@@ -239,21 +233,6 @@ func isExternalAssociation(assoc string) bool {
 		return false
 	}
 	return true
-}
-
-func threadAuthorAssociation(ctx context.Context, c *corpus.Corpus, threadID int64) (string, error) {
-	obs, err := c.LatestThreadObservation(ctx, threadID)
-	if err != nil {
-		return "", fmt.Errorf("latest thread observation: %w", err)
-	}
-	if obs == nil || obs.Payload == "" {
-		return "", nil
-	}
-	var payload github.Issue
-	if err := json.Unmarshal([]byte(obs.Payload), &payload); err != nil {
-		return "", fmt.Errorf("parse thread payload: %w", err)
-	}
-	return payload.AuthorAssociation, nil
 }
 
 func computeCongestion(threads []corpus.Thread, now time.Time, window Window) CongestionMetrics {

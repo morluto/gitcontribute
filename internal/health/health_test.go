@@ -30,6 +30,7 @@ func upsertThread(t *testing.T, ctx context.Context, c *corpus.Corpus, repoID in
 		t.Fatalf("marshal thread payload: %v", err)
 	}
 	thread.RepositoryID = repoID
+	thread.AuthorAssociation = authorAssoc
 	out, err := c.UpsertThread(ctx, thread, string(payload))
 	if err != nil {
 		t.Fatalf("upsert thread: %v", err)

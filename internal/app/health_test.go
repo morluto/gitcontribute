@@ -41,13 +41,14 @@ func TestRepositoryHealth(t *testing.T) {
 
 	// External open PR with a recent review.
 	openPR, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
-		Kind:            corpus.ThreadKindPullRequest,
-		Number:          1,
-		State:           "open",
-		Title:           "open pr",
-		Author:          "alice",
-		SourceCreatedAt: now.Add(-2 * 24 * time.Hour),
-		SourceUpdatedAt: now.Add(-24 * time.Hour),
+		Kind:              corpus.ThreadKindPullRequest,
+		Number:            1,
+		State:             "open",
+		Title:             "open pr",
+		Author:            "alice",
+		AuthorAssociation: "NONE",
+		SourceCreatedAt:   now.Add(-2 * 24 * time.Hour),
+		SourceUpdatedAt:   now.Add(-24 * time.Hour),
 	}, map[string]string{"Author": "alice", "AuthorAssociation": "NONE"})
 	if err != nil {
 		t.Fatalf("upsert open pr: %v", err)
@@ -61,15 +62,16 @@ func TestRepositoryHealth(t *testing.T) {
 
 	// Owner merged PR.
 	_, err = upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
-		Kind:            corpus.ThreadKindPullRequest,
-		Number:          2,
-		State:           "closed",
-		Title:           "merged pr",
-		Author:          "owner1",
-		SourceCreatedAt: now.Add(-12 * 24 * time.Hour),
-		SourceUpdatedAt: now.Add(-3 * 24 * time.Hour),
-		MergedAt:        now.Add(-3 * 24 * time.Hour),
-		Merged:          true,
+		Kind:              corpus.ThreadKindPullRequest,
+		Number:            2,
+		State:             "closed",
+		Title:             "merged pr",
+		Author:            "owner1",
+		AuthorAssociation: "OWNER",
+		SourceCreatedAt:   now.Add(-12 * 24 * time.Hour),
+		SourceUpdatedAt:   now.Add(-3 * 24 * time.Hour),
+		MergedAt:          now.Add(-3 * 24 * time.Hour),
+		Merged:            true,
 	}, map[string]string{"Author": "owner1", "AuthorAssociation": "OWNER"})
 	if err != nil {
 		t.Fatalf("upsert merged pr: %v", err)
