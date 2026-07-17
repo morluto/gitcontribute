@@ -3,9 +3,12 @@ package github
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/zalando/go-keyring"
 )
 
 // TokenSource resolves a GitHub authentication token.
@@ -15,6 +18,14 @@ type TokenSource interface {
 
 // ErrNoToken indicates that a token source could not provide a token.
 var ErrNoToken = errors.New("no GitHub token available")
+
+// ErrRequiredToken indicates that an explicitly configured authentication
+// source did not provide a token.
+var ErrRequiredToken = errors.New("configured GitHub token unavailable")
+
+// KeyringService is the service name used for credentials owned by
+// gitcontribute.
+const KeyringService = "gitcontribute"
 
 // CommandRunner abstracts process execution so that tests can inject behavior.
 type CommandRunner interface {
@@ -65,6 +76,39 @@ func (s *envTokenSource) Token(ctx context.Context) (string, error) {
 	return v, nil
 }
 
+// KeyringTokenSource resolves a token from the operating system credential
+// store. account identifies the credential within the gitcontribute service.
+func KeyringTokenSource(account string) TokenSource {
+	return &keyringTokenSource{account: account, get: keyring.Get}
+}
+
+type keyringTokenSource struct {
+	account string
+	get     func(service, user string) (string, error)
+}
+
+func (s *keyringTokenSource) Token(ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(s.account) == "" {
+		return "", ErrNoToken
+	}
+
+	token, err := s.get(KeyringService, s.account)
+	if errors.Is(err, keyring.ErrNotFound) {
+		return "", ErrNoToken
+	}
+	if err != nil {
+		return "", fmt.Errorf("read GitHub token from keyring: %w", err)
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "", ErrNoToken
+	}
+	return token, nil
+}
+
 // GhCLITokenSource resolves a token by running `gh auth token`.
 // Optional args are passed through to `gh` (for example a `--hostname` flag).
 func GhCLITokenSource(runner CommandRunner, args ...string) TokenSource {
@@ -113,6 +157,27 @@ func (c chainTokenSource) Token(ctx context.Context) (string, error) {
 		}
 	}
 	return "", ErrNoToken
+}
+
+// RequireToken prevents an explicitly configured source from silently falling
+// back to anonymous GitHub access.
+func RequireToken(source TokenSource) TokenSource {
+	return requiredTokenSource{source: source}
+}
+
+type requiredTokenSource struct {
+	source TokenSource
+}
+
+func (s requiredTokenSource) Token(ctx context.Context) (string, error) {
+	if s.source == nil {
+		return "", ErrRequiredToken
+	}
+	token, err := s.source.Token(ctx)
+	if errors.Is(err, ErrNoToken) || (err == nil && token == "") {
+		return "", ErrRequiredToken
+	}
+	return token, err
 }
 
 // DefaultEnvToken is the conventional environment variable name for a

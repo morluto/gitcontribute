@@ -191,6 +191,16 @@ func TestConfigValidation(t *testing.T) {
 			wantErr: "token_source key is required when method is env",
 		},
 		{
+			name:    "token keyring missing account",
+			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "keyring"}, Crawl: Crawl{Budget: 1, Concurrency: 1}, Output: Output{Format: "text"}},
+			wantErr: "token_source key is required when method is keyring",
+		},
+		{
+			name:    "token keyring blank account",
+			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "keyring", Key: "  \t"}, Crawl: Crawl{Budget: 1, Concurrency: 1}, Output: Output{Format: "text"}},
+			wantErr: "token_source key is required when method is keyring",
+		},
+		{
 			name:    "invalid token method",
 			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "magic"}, Crawl: Crawl{Budget: 1, Concurrency: 1}, Output: Output{Format: "text"}},
 			wantErr: "invalid token_source method",

@@ -87,6 +87,9 @@ func (s *Service) loadConfig(save bool) (*config.Config, error) {
 	if err := config.ApplyEnv(cfg, os.Getenv); err != nil {
 		return nil, err
 	}
+	if err := config.Validate(cfg); err != nil {
+		return nil, fmt.Errorf("validate config: %w", err)
+	}
 	if save && !exists {
 		dir := filepath.Dir(cfgFile)
 		if err := os.MkdirAll(dir, 0755); err != nil {
@@ -157,9 +160,6 @@ func (s *Service) newGitHubReader() (github.Reader, error) {
 	if cfg == nil {
 		return nil, errors.New("configuration is not loaded")
 	}
-	if strings.EqualFold(cfg.TokenSource.Method, "keyring") {
-		return nil, errors.New("keyring token source is not supported")
-	}
 	tokenSrc := tokenSource(cfg)
 	client, err := github.NewClient(github.Config{TokenSource: tokenSrc})
 	if err != nil {
@@ -176,9 +176,11 @@ func tokenSource(cfg *config.Config) github.TokenSource {
 		if name == "" {
 			name = github.DefaultEnvToken
 		}
-		return github.EnvTokenSource(name)
+		return github.RequireToken(github.EnvTokenSource(name))
 	case "gh-cli":
-		return github.GhCLITokenSource(nil)
+		return github.RequireToken(github.GhCLITokenSource(nil))
+	case "keyring":
+		return github.RequireToken(github.KeyringTokenSource(cfg.TokenSource.Key))
 	}
 	return github.StaticTokenSource("")
 }

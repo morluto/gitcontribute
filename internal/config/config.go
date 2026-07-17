@@ -237,10 +237,10 @@ func Validate(cfg *Config) error {
 	}
 
 	switch cfg.TokenSource.Method {
-	case "none", "keyring", "gh-cli":
-	case "env":
-		if cfg.TokenSource.Key == "" {
-			return errors.New("token_source key is required when method is env")
+	case "none", "gh-cli":
+	case "env", "keyring":
+		if strings.TrimSpace(cfg.TokenSource.Key) == "" {
+			return fmt.Errorf("token_source key is required when method is %s", cfg.TokenSource.Method)
 		}
 	default:
 		return fmt.Errorf("invalid token_source method %q", cfg.TokenSource.Method)

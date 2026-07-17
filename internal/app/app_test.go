@@ -359,7 +359,7 @@ func TestSearchReportsDefaultLimit(t *testing.T) {
 	}
 }
 
-func TestLocalInitializationDoesNotResolveUnsupportedAuth(t *testing.T) {
+func TestLocalInitializationDoesNotResolveKeyringAuth(t *testing.T) {
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	configPath, err := paths.ConfigFile()
@@ -368,6 +368,7 @@ func TestLocalInitializationDoesNotResolveUnsupportedAuth(t *testing.T) {
 	}
 	cfg := config.Default()
 	cfg.TokenSource.Method = "keyring"
+	cfg.TokenSource.Key = "test-account"
 	if err := config.ApplyDefaults(cfg, paths); err != nil {
 		t.Fatal(err)
 	}
@@ -382,8 +383,40 @@ func TestLocalInitializationDoesNotResolveUnsupportedAuth(t *testing.T) {
 	if _, err := svc.Init(ctx); err != nil {
 		t.Fatalf("local init resolved GitHub auth: %v", err)
 	}
-	if _, err := svc.Sync(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}); err == nil || !strings.Contains(err.Error(), "keyring") {
-		t.Fatalf("network sync error = %v, want explicit unsupported auth", err)
+}
+
+func TestConfiguredAuthenticationIsRequired(t *testing.T) {
+	t.Setenv("GITCONTRIBUTE_TEST_MISSING_TOKEN", "")
+	cfg := config.Default()
+	cfg.TokenSource = config.TokenSource{
+		Method: "env",
+		Key:    "GITCONTRIBUTE_TEST_MISSING_TOKEN",
+	}
+
+	_, err := tokenSource(cfg).Token(context.Background())
+	if !errors.Is(err, github.ErrRequiredToken) {
+		t.Fatalf("configured auth error = %v, want ErrRequiredToken", err)
+	}
+}
+
+func TestNewRejectsInvalidConfiguredTokenSource(t *testing.T) {
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	configPath, err := paths.ConfigFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.TokenSource.Method = "keyrign"
+	if err := config.ApplyDefaults(cfg, paths); err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = New(paths, "test")
+	if err == nil || !strings.Contains(err.Error(), "invalid token_source method") {
+		t.Fatalf("New error = %v, want invalid token source", err)
 	}
 }
 

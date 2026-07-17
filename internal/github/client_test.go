@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/zalando/go-keyring"
 )
 
 const testOwner = "octocat"
@@ -554,6 +555,80 @@ func TestTokenResolution(t *testing.T) {
 		tok, err := src.Token(context.Background())
 		if !errors.Is(err, ErrNoToken) || tok != "" {
 			t.Fatalf("got %q, %v", tok, err)
+		}
+	})
+
+	t.Run("required missing", func(t *testing.T) {
+		src := RequireToken(StaticTokenSource(""))
+		tok, err := src.Token(context.Background())
+		if !errors.Is(err, ErrRequiredToken) || errors.Is(err, ErrNoToken) || tok != "" {
+			t.Fatalf("got %q, %v", tok, err)
+		}
+	})
+
+	t.Run("required present", func(t *testing.T) {
+		src := RequireToken(StaticTokenSource("required-token"))
+		tok, err := src.Token(context.Background())
+		if err != nil || tok != "required-token" {
+			t.Fatalf("got %q, %v", tok, err)
+		}
+	})
+
+	t.Run("keyring", func(t *testing.T) {
+		var service, account string
+		src := &keyringTokenSource{
+			account: "github.com",
+			get: func(gotService, gotAccount string) (string, error) {
+				service, account = gotService, gotAccount
+				return " keyring-token\n", nil
+			},
+		}
+		tok, err := src.Token(context.Background())
+		if err != nil || tok != "keyring-token" {
+			t.Fatalf("got %q, %v", tok, err)
+		}
+		if service != KeyringService || account != "github.com" {
+			t.Fatalf("lookup = %q/%q, want %q/github.com", service, account, KeyringService)
+		}
+	})
+
+	t.Run("keyring missing", func(t *testing.T) {
+		src := &keyringTokenSource{
+			account: "missing",
+			get:     func(string, string) (string, error) { return "", keyring.ErrNotFound },
+		}
+		tok, err := src.Token(context.Background())
+		if !errors.Is(err, ErrNoToken) || tok != "" {
+			t.Fatalf("got %q, %v", tok, err)
+		}
+	})
+
+	t.Run("keyring backend failure", func(t *testing.T) {
+		backendErr := errors.New("backend unavailable")
+		src := &keyringTokenSource{
+			account: "github.com",
+			get:     func(string, string) (string, error) { return "", backendErr },
+		}
+		_, err := src.Token(context.Background())
+		if !errors.Is(err, backendErr) || !strings.Contains(err.Error(), "keyring") {
+			t.Fatalf("got %v, want wrapped keyring backend error", err)
+		}
+	})
+
+	t.Run("keyring canceled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		called := false
+		src := &keyringTokenSource{
+			account: "github.com",
+			get: func(string, string) (string, error) {
+				called = true
+				return "token", nil
+			},
+		}
+		_, err := src.Token(ctx)
+		if !errors.Is(err, context.Canceled) || called {
+			t.Fatalf("got err=%v called=%t, want canceled without lookup", err, called)
 		}
 	})
 }
