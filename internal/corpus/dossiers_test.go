@@ -202,6 +202,89 @@ func TestDossierSaveAndRefreshAllowSameGeneratedAt(t *testing.T) {
 	}
 }
 
+func TestRefreshDossierEqualAsOfProvenance(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+
+	repo, err := c.UpsertRepository(ctx, Repository{
+		Owner:           "owner",
+		Name:            "repo",
+		SourceUpdatedAt: time.Unix(1000, 0).UTC(),
+	}, `{}`)
+	if err != nil {
+		t.Fatalf("upsert repository: %v", err)
+	}
+
+	asOf := time.Unix(2000, 0).UTC()
+	gen := time.Unix(3000, 0).UTC()
+
+	baseSources := []domain.SourceRef{
+		{Source: "github:rest", URL: "https://api.github.com/repos/owner/repo", CommitSHA: "sha1", ObservedAt: time.Unix(1000, 0).UTC(), AsOf: asOf},
+		{Source: "github:graphql", URL: "https://api.github.com/graphql", CommitSHA: "sha1", ObservedAt: time.Unix(1000, 0).UTC(), AsOf: asOf},
+	}
+
+	id1, err := c.SaveDossier(ctx, repo.ID, repo.Owner, repo.Name, "sha1", asOf, `{"i":1}`, `{"i":1}`, gen, baseSources)
+	if err != nil {
+		t.Fatalf("save base dossier: %v", err)
+	}
+
+	refresh := func(commitSHA, section, snapshot string, sources []domain.SourceRef) (int64, bool) {
+		gen = gen.Add(time.Second)
+		id, inserted, err := c.RefreshDossier(ctx, repo.ID, repo.Owner, repo.Name, commitSHA, asOf, section, snapshot, gen, sources)
+		if err != nil {
+			t.Fatalf("refresh dossier: %v", err)
+		}
+		return id, inserted
+	}
+
+	if _, inserted := refresh("sha1", `{"i":1}`, `{"i":1}`, baseSources); inserted {
+		t.Fatal("identical dossier at equal as_of should not insert")
+	}
+
+	reordered := []domain.SourceRef{baseSources[1], baseSources[0]}
+	if _, inserted := refresh("sha1", `{"i":1}`, `{"i":1}`, reordered); inserted {
+		t.Fatal("reordered sources at equal as_of should not insert")
+	}
+
+	id2, inserted := refresh("sha2", `{"i":1}`, `{"i":1}`, baseSources)
+	if !inserted {
+		t.Fatal("commit sha change at equal as_of should insert")
+	}
+	if id2 == id1 {
+		t.Fatal("expected a new dossier row for commit sha change")
+	}
+
+	if _, inserted := refresh("sha2", `{"i":1}`, `{"i":1}`, baseSources); inserted {
+		t.Fatal("identical to latest dossier should not insert")
+	}
+
+	id3, inserted := refresh("sha2", `{"i":2}`, `{"i":1}`, baseSources)
+	if !inserted {
+		t.Fatal("section metadata change at equal as_of should insert")
+	}
+	if id3 == id2 {
+		t.Fatal("expected a new dossier row for section metadata change")
+	}
+
+	id4, inserted := refresh("sha2", `{"i":2}`, `{"i":2}`, baseSources)
+	if !inserted {
+		t.Fatal("snapshot change at equal as_of should insert")
+	}
+	if id4 == id3 {
+		t.Fatal("expected a new dossier row for snapshot change")
+	}
+
+	changedSources := append([]domain.SourceRef(nil), baseSources...)
+	changedSources[0].CommitSHA = "sha2"
+	id5, inserted := refresh("sha2", `{"i":2}`, `{"i":2}`, changedSources)
+	if !inserted {
+		t.Fatal("source provenance change at equal as_of should insert")
+	}
+	if id5 == id4 {
+		t.Fatal("expected a new dossier row for source provenance change")
+	}
+}
+
 func TestDossierListReturnsLatestPerRepository(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)

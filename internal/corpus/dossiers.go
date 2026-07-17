@@ -2,9 +2,12 @@ package corpus
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -44,25 +47,51 @@ func (c *Corpus) RefreshDossier(ctx context.Context, repoID int64, owner, name, 
 
 	var existingID int64
 	var existingAsOf int64
+	var existingCommitSHA string
+	var existingSectionMetadata string
 	var existingSnapshot string
 	err = tx.QueryRowContext(ctx, `
-		SELECT id, as_of, snapshot
+		SELECT id, as_of, commit_sha, section_metadata, snapshot
 		FROM dossiers
 		WHERE repo_owner = ? AND repo_name = ?
 		ORDER BY generated_at DESC, id DESC
 		LIMIT 1
-	`, owner, name).Scan(&existingID, &existingAsOf, &existingSnapshot)
+	`, owner, name).Scan(&existingID, &existingAsOf, &existingCommitSHA, &existingSectionMetadata, &existingSnapshot)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return 0, false, fmt.Errorf("select existing dossier: %w", err)
 	}
 
 	if err == nil {
 		newAsOf := encodeTime(asOf)
-		if existingAsOf > newAsOf || (existingAsOf == newAsOf && existingSnapshot == snapshot) {
+		if existingAsOf > newAsOf {
 			if rbErr := tx.Rollback(); rbErr != nil {
 				return 0, false, fmt.Errorf("rollback dossier refresh: %w", rbErr)
 			}
 			return existingID, false, nil
+		}
+		if existingAsOf == newAsOf {
+			existingSources, err := getDossierSourcesQuery(ctx, tx, existingID)
+			if err != nil {
+				return 0, false, err
+			}
+			existingRefs := make([]domain.SourceRef, len(existingSources))
+			for i, s := range existingSources {
+				existingRefs[i] = domain.SourceRef{
+					Source:     s.Source,
+					URL:        s.URL,
+					CommitSHA:  s.CommitSHA,
+					ObservedAt: s.ObservedAt,
+					AsOf:       s.AsOf,
+				}
+			}
+			existingDigest := dossierContentDigest(existingCommitSHA, existingSectionMetadata, existingSnapshot, existingRefs)
+			newDigest := dossierContentDigest(commitSHA, sectionMetadata, snapshot, sources)
+			if existingDigest == newDigest {
+				if rbErr := tx.Rollback(); rbErr != nil {
+					return 0, false, fmt.Errorf("rollback dossier refresh: %w", rbErr)
+				}
+				return existingID, false, nil
+			}
 		}
 	}
 
@@ -157,7 +186,15 @@ func (c *Corpus) getLatestDossierRecord(ctx context.Context, owner, name string)
 }
 
 func (c *Corpus) getDossierSources(ctx context.Context, dossierID int64) ([]DossierSource, error) {
-	rows, err := c.db.QueryContext(ctx, `
+	return getDossierSourcesQuery(ctx, c.db, dossierID)
+}
+
+type queryer interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func getDossierSourcesQuery(ctx context.Context, q queryer, dossierID int64) ([]DossierSource, error) {
+	rows, err := q.QueryContext(ctx, `
 		SELECT id, dossier_id, source, url, commit_sha, observed_at, as_of
 		FROM dossier_sources
 		WHERE dossier_id = ?
@@ -180,6 +217,36 @@ func (c *Corpus) getDossierSources(ctx context.Context, dossierID int64) ([]Doss
 		out = append(out, s)
 	}
 	return out, rows.Err()
+}
+
+func dossierContentDigest(commitSHA, sectionMetadata, snapshot string, sources []domain.SourceRef) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "commit_sha:%s\nsection_metadata:%s\nsnapshot:%s\n", commitSHA, sectionMetadata, snapshot)
+
+	sorted := make([]domain.SourceRef, len(sources))
+	copy(sorted, sources)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Source != sorted[j].Source {
+			return sorted[i].Source < sorted[j].Source
+		}
+		if sorted[i].URL != sorted[j].URL {
+			return sorted[i].URL < sorted[j].URL
+		}
+		if sorted[i].CommitSHA != sorted[j].CommitSHA {
+			return sorted[i].CommitSHA < sorted[j].CommitSHA
+		}
+		oi := encodeTime(sorted[i].ObservedAt)
+		oj := encodeTime(sorted[j].ObservedAt)
+		if oi != oj {
+			return oi < oj
+		}
+		return encodeTime(sorted[i].AsOf) < encodeTime(sorted[j].AsOf)
+	})
+
+	for _, s := range sorted {
+		fmt.Fprintf(h, "source:%s\nurl:%s\ncommit_sha:%s\nobserved_at:%d\nas_of:%d\n", s.Source, s.URL, s.CommitSHA, encodeTime(s.ObservedAt), encodeTime(s.AsOf))
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // ListDossiers returns the most recent dossier for each repository up to limit.
