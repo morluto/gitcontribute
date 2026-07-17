@@ -245,6 +245,7 @@ func (f *facetRunner) hydrateIssueComments() (HydratedFacet, error) {
 	var total, pages int
 	var complete bool
 	var pageObservations []corpus.FacetObservationInput
+	sourceUpdatedAt := f.thread.SourceUpdatedAt
 
 	for {
 		if pages >= f.maxPages {
@@ -263,6 +264,9 @@ func (f *facetRunner) hydrateIssueComments() (HydratedFacet, error) {
 		pageUpdated := latestFromIssueComments(res.Items)
 		if pageUpdated.IsZero() {
 			pageUpdated = f.thread.SourceUpdatedAt
+		}
+		if pageUpdated.After(sourceUpdatedAt) {
+			sourceUpdatedAt = pageUpdated
 		}
 		payload, err := json.Marshal(res.Items)
 		if err != nil {
@@ -284,7 +288,7 @@ func (f *facetRunner) hydrateIssueComments() (HydratedFacet, error) {
 	if err := f.ctx.Err(); err != nil {
 		return HydratedFacet{}, err
 	}
-	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetIssueComments, pageObservations, complete, f.runID); err != nil {
+	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetIssueComments, sourceUpdatedAt, pageObservations, complete, f.runID); err != nil {
 		return HydratedFacet{}, err
 	}
 
@@ -307,7 +311,7 @@ func (f *facetRunner) hydratePullRequestDetails() (HydratedFacet, error) {
 	}
 
 	pages := []corpus.FacetObservationInput{{SourceUpdatedAt: updatedAt, Payload: string(payload)}}
-	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetPRDetails, pages, true, f.runID); err != nil {
+	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetPRDetails, updatedAt, pages, true, f.runID); err != nil {
 		return HydratedFacet{}, err
 	}
 
@@ -319,6 +323,7 @@ func (f *facetRunner) hydratePullRequestReviews() (HydratedFacet, error) {
 	var total, pages int
 	var complete bool
 	var pageObservations []corpus.FacetObservationInput
+	sourceUpdatedAt := f.thread.SourceUpdatedAt
 
 	for {
 		if pages >= f.maxPages {
@@ -337,6 +342,9 @@ func (f *facetRunner) hydratePullRequestReviews() (HydratedFacet, error) {
 		pageUpdated := latestFromReviews(res.Items)
 		if pageUpdated.IsZero() {
 			pageUpdated = f.thread.SourceUpdatedAt
+		}
+		if pageUpdated.After(sourceUpdatedAt) {
+			sourceUpdatedAt = pageUpdated
 		}
 		payload, err := json.Marshal(res.Items)
 		if err != nil {
@@ -358,7 +366,7 @@ func (f *facetRunner) hydratePullRequestReviews() (HydratedFacet, error) {
 	if err := f.ctx.Err(); err != nil {
 		return HydratedFacet{}, err
 	}
-	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetPRReviews, pageObservations, complete, f.runID); err != nil {
+	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetPRReviews, sourceUpdatedAt, pageObservations, complete, f.runID); err != nil {
 		return HydratedFacet{}, err
 	}
 
@@ -370,6 +378,7 @@ func (f *facetRunner) hydratePullRequestReviewComments() (HydratedFacet, error) 
 	var total, pages int
 	var complete bool
 	var pageObservations []corpus.FacetObservationInput
+	sourceUpdatedAt := f.thread.SourceUpdatedAt
 
 	for {
 		if pages >= f.maxPages {
@@ -388,6 +397,9 @@ func (f *facetRunner) hydratePullRequestReviewComments() (HydratedFacet, error) 
 		pageUpdated := latestFromReviewComments(res.Items)
 		if pageUpdated.IsZero() {
 			pageUpdated = f.thread.SourceUpdatedAt
+		}
+		if pageUpdated.After(sourceUpdatedAt) {
+			sourceUpdatedAt = pageUpdated
 		}
 		payload, err := json.Marshal(res.Items)
 		if err != nil {
@@ -409,7 +421,7 @@ func (f *facetRunner) hydratePullRequestReviewComments() (HydratedFacet, error) 
 	if err := f.ctx.Err(); err != nil {
 		return HydratedFacet{}, err
 	}
-	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetPRReviewComments, pageObservations, complete, f.runID); err != nil {
+	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetPRReviewComments, sourceUpdatedAt, pageObservations, complete, f.runID); err != nil {
 		return HydratedFacet{}, err
 	}
 

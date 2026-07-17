@@ -19,18 +19,23 @@ type FacetObservationInput struct {
 // facet observations are replaced only when the new set wins the
 // (source_updated_at, observation_sequence) ordering, so an interrupted or
 // stale fetch leaves previous complete data in place.
-func (c *Corpus) ApplyFacetObservationSet(ctx context.Context, repoID int64, threadID *int64, facet string, pages []FacetObservationInput, complete bool, runID int64) error {
-	if len(pages) == 0 {
-		return nil
-	}
-
-	var latest time.Time
+//
+// sourceUpdatedAt is the authoritative source timestamp for the set as a whole.
+// It is used when the set is empty and also combined with the per-page timestamps
+// so the latest source timestamp always controls the ordering. Callers should
+// pass the most recent source timestamp available for the facet (for example,
+// the latest item update time, falling back to the thread's source_updated_at).
+func (c *Corpus) ApplyFacetObservationSet(ctx context.Context, repoID int64, threadID *int64, facet string, sourceUpdatedAt time.Time, pages []FacetObservationInput, complete bool, runID int64) error {
+	latest := sourceUpdatedAt
 	for _, p := range pages {
 		if p.SourceUpdatedAt.After(latest) {
 			latest = p.SourceUpdatedAt
 		}
 	}
 	srcSec := encodeTime(latest)
+	if srcSec == 0 {
+		return nil
+	}
 
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {

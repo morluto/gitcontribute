@@ -44,7 +44,7 @@ func applyFacet(t *testing.T, ctx context.Context, c *corpus.Corpus, repoID, thr
 	if err != nil {
 		t.Fatalf("marshal facet payload: %v", err)
 	}
-	if err := c.ApplyFacetObservationSet(ctx, repoID, &threadID, facet, []corpus.FacetObservationInput{{SourceUpdatedAt: sourceUpdated, Payload: string(payloadJSON)}}, true, 0); err != nil {
+	if err := c.ApplyFacetObservationSet(ctx, repoID, &threadID, facet, sourceUpdated, []corpus.FacetObservationInput{{SourceUpdatedAt: sourceUpdated, Payload: string(payloadJSON)}}, true, 0); err != nil {
 		t.Fatalf("apply facet %s: %v", facet, err)
 	}
 }
