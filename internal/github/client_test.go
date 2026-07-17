@@ -455,6 +455,41 @@ func TestSecondaryRateLimitError(t *testing.T) {
 	}
 }
 
+func TestPermanentAccessErrorsAreTyped(t *testing.T) {
+	tests := []struct {
+		name   string
+		status int
+		check  func(error) bool
+	}{
+		{
+			name: "unauthorized", status: http.StatusUnauthorized,
+			check: func(err error) bool { var target *AccessDeniedError; return errors.As(err, &target) },
+		},
+		{
+			name: "forbidden", status: http.StatusForbidden,
+			check: func(err error) bool { var target *AccessDeniedError; return errors.As(err, &target) },
+		},
+		{
+			name: "gone", status: http.StatusGone,
+			check: func(err error) bool { var target *GoneError; return errors.As(err, &target) },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+				writeJSON(w, map[string]any{"message": tt.name})
+			}))
+			defer srv.Close()
+			client := newTestClient(t, srv, nil)
+			_, _, err := client.GetRepository(context.Background(), testOwner, testRepo)
+			if err == nil || !tt.check(err) {
+				t.Fatalf("error = %T %v", err, err)
+			}
+		})
+	}
+}
+
 func TestRateLimiterTransport(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, repoPayload(1, testRepo, testOwner))

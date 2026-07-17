@@ -259,6 +259,10 @@ func classifyError(err error) error {
 		switch {
 		case er.Response.StatusCode == http.StatusNotFound:
 			return &NotFoundError{Resource: er.Message}
+		case er.Response.StatusCode == http.StatusUnauthorized || er.Response.StatusCode == http.StatusForbidden:
+			return &AccessDeniedError{StatusCode: er.Response.StatusCode, Message: er.Message}
+		case er.Response.StatusCode == http.StatusGone:
+			return &GoneError{Resource: er.Message}
 		case er.Response.StatusCode >= 500:
 			return &TransientError{Cause: err}
 		}

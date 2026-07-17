@@ -11,6 +11,32 @@ type NotFoundError struct {
 	Resource string
 }
 
+// AccessDeniedError indicates that the current GitHub credentials cannot read
+// a resource. It covers authenticated and unauthenticated denial responses.
+type AccessDeniedError struct {
+	StatusCode int
+	Message    string
+}
+
+func (e *AccessDeniedError) Error() string {
+	if e.Message == "" {
+		return "github access denied"
+	}
+	return fmt.Sprintf("github access denied: %s", e.Message)
+}
+
+// GoneError indicates that GitHub reports a resource as permanently removed.
+type GoneError struct {
+	Resource string
+}
+
+func (e *GoneError) Error() string {
+	if e.Resource == "" {
+		return "github resource deleted"
+	}
+	return fmt.Sprintf("github resource deleted: %s", e.Resource)
+}
+
 func (e *NotFoundError) Error() string {
 	if e.Resource == "" {
 		return "github resource not found"

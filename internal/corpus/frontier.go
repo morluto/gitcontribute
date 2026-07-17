@@ -198,6 +198,30 @@ func (c *Corpus) CompleteFrontierItem(ctx context.Context, id int64, worker stri
 	return c.finishFrontierLease(ctx, id, worker, FrontierCompleted, "", "", time.Time{}, now)
 }
 
+// ReleaseFrontierItem returns leased but unstarted work to the queue. Because
+// leasing increments attempts, releasing unstarted work refunds that attempt.
+// Only the current lease owner can release the item.
+func (c *Corpus) ReleaseFrontierItem(ctx context.Context, id int64, worker string, now time.Time) error {
+	res, err := c.db.ExecContext(ctx, `
+		UPDATE frontier_items
+		SET state = ?, attempts = MAX(attempts - 1, 0), lease_owner = NULL,
+		    lease_expires_at = NULL, failure_kind = NULL, last_error = NULL,
+		    updated_at = ?
+		WHERE id = ? AND state = ? AND lease_owner = ?
+	`, FrontierQueued, encodeTime(now), id, FrontierLeased, worker)
+	if err != nil {
+		return fmt.Errorf("release frontier item %d: %w", id, err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read frontier release result: %w", err)
+	}
+	if changed == 0 {
+		return fmt.Errorf("frontier item %d is not leased by %q", id, worker)
+	}
+	return nil
+}
+
 // RetryFrontierItem releases leased work after a transient failure. Once the
 // attempt limit is reached, the item becomes terminally failed.
 func (c *Corpus) RetryFrontierItem(ctx context.Context, id int64, worker, message string, earliestRunAt, now time.Time) error {

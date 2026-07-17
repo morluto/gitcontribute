@@ -77,6 +77,38 @@ func TestFrontierExpiredLeaseCanBeReclaimed(t *testing.T) {
 	}
 }
 
+func TestFrontierReleaseRefundsUnstartedAttempt(t *testing.T) {
+	c, _ := openTestCorpus(t)
+	ctx := context.Background()
+	now := time.Unix(1_700_000_000, 0).UTC()
+	if _, _, err := c.EnqueueFrontierItem(ctx, FrontierItem{
+		WorkKey: "unstarted", SubjectKind: "repository", MaxAttempts: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	leased, err := c.LeaseFrontierItems(ctx, "worker-a", now, time.Minute, 1, 1)
+	if err != nil || len(leased) != 1 || leased[0].Attempts != 1 {
+		t.Fatalf("lease = (%+v, %v)", leased, err)
+	}
+	if err := c.ReleaseFrontierItem(ctx, leased[0].ID, "worker-b", now); err == nil {
+		t.Fatal("non-owner released frontier item")
+	}
+	if err := c.ReleaseFrontierItem(ctx, leased[0].ID, "worker-a", now); err != nil {
+		t.Fatal(err)
+	}
+	item, err := c.GetFrontierItem(ctx, "unstarted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.State != FrontierQueued || item.Attempts != 0 {
+		t.Fatalf("released item = %+v", item)
+	}
+	again, err := c.LeaseFrontierItems(ctx, "worker-b", now, time.Minute, 1, 1)
+	if err != nil || len(again) != 1 || again[0].Attempts != 1 {
+		t.Fatalf("second lease = (%+v, %v)", again, err)
+	}
+}
+
 func TestFrontierRetryIsBounded(t *testing.T) {
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
