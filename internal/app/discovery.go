@@ -255,7 +255,7 @@ func (s *Service) crawlSearchSource(ctx context.Context, c *corpus.Corpus, sourc
 		return nil, err
 	} else if exists {
 		start = checkpoint.Add(-6 * time.Hour)
-		qualifier = discovery.Pushed
+		qualifier = discovery.Updated
 	}
 	budgeted := &budgetedRepositorySearch{searcher: searcher, budget: opts.Budget}
 	partitioner := discovery.SearchPartitioner{Searcher: budgeted}

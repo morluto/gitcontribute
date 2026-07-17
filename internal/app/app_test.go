@@ -306,7 +306,7 @@ func TestDiscoveryCrawlPersistsRepositoryFrontierAndCheckpoint(t *testing.T) {
 		t.Fatalf("incremental crawl result = %+v", second)
 	}
 	queries := tracked.searches()
-	if len(queries) != 4 || !strings.Contains(queries[0], "created:") || !strings.Contains(queries[2], "pushed:") || strings.Contains(queries[2], "updated:") {
+	if len(queries) != 4 || !strings.Contains(queries[0], "created:") || !strings.Contains(queries[2], "updated:") || strings.Contains(queries[2], "pushed:") {
 		t.Fatalf("search queries = %q", queries)
 	}
 	status, err := c.Status(ctx)
