@@ -46,7 +46,7 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) (string,
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_NO_PAGER=1",
 		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
 		"GIT_OPTIONAL_LOCKS=0",
 	)
 	stdout := &cappedBuffer{remaining: maxGitOutputBytes}
@@ -194,7 +194,7 @@ func (m *Manager) git(ctx context.Context, dir string, args ...string) (string, 
 	all := []string{
 		"--no-pager",
 		"--no-optional-locks",
-		"-c", "core.hooksPath=/dev/null",
+		"-c", "core.hooksPath=" + os.DevNull,
 		"-c", "core.fsmonitor=false",
 		"-c", "core.untrackedCache=false",
 		"-c", "init.templateDir=",

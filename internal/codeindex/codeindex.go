@@ -347,13 +347,13 @@ func runGitLimited(ctx context.Context, repoPath string, limit int, args ...stri
 		"--no-optional-locks",
 		"-c", "core.fsmonitor=false",
 		"-c", "core.untrackedCache=false",
-		"-c", "core.hooksPath=/dev/null",
+		"-c", "core.hooksPath=" + os.DevNull,
 		"-C", repoPath,
 	}
 	cmd := exec.CommandContext(ctx, "git", append(gitArgs, args...)...)
 	cmd.Env = append(os.Environ(),
 		"GIT_CONFIG_NOSYSTEM=1",
-		"GIT_CONFIG_GLOBAL=/dev/null",
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
 		"GIT_OPTIONAL_LOCKS=0",
 		"GIT_TERMINAL_PROMPT=0",
 	)
