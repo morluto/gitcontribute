@@ -434,6 +434,29 @@ func (c *Corpus) ListThreads(ctx context.Context, repoID int64, kind string, lim
 	return scanThreads(rows)
 }
 
+// LatestThreadObservation returns the most recent observation for a thread
+// by source time and observation sequence.
+func (c *Corpus) LatestThreadObservation(ctx context.Context, threadID int64) (*ThreadObservation, error) {
+	var o ThreadObservation
+	var src, observed int64
+	err := c.db.QueryRowContext(ctx, `
+		SELECT id, thread_id, source_updated_at, observation_sequence, payload, observed_at
+		FROM thread_observations
+		WHERE thread_id = ?
+		ORDER BY source_updated_at DESC, observation_sequence DESC
+		LIMIT 1
+	`, threadID).Scan(&o.ID, &o.ThreadID, &src, &o.ObservationSequence, &o.Payload, &observed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("latest thread observation: %w", err)
+	}
+	o.SourceUpdatedAt = scanTime(src)
+	o.ObservedAt = scanTime(observed)
+	return &o, nil
+}
+
 // ListThreadObservations returns immutable observations for a thread in
 // insertion order.
 func (c *Corpus) ListThreadObservations(ctx context.Context, threadID int64) ([]ThreadObservation, error) {

@@ -163,3 +163,28 @@ type JobEvent struct {
 	Message    string
 	RecordedAt time.Time
 }
+
+// DossierRecord is a persisted deterministic dossier snapshot.
+type DossierRecord struct {
+	ID              int64
+	RepositoryID    int64
+	RepoOwner       string
+	RepoName        string
+	CommitSHA       string
+	AsOf            time.Time
+	SectionMetadata string
+	Snapshot        string
+	GeneratedAt     time.Time
+	CreatedAt       time.Time
+}
+
+// DossierSource is one exact source recorded for a dossier.
+type DossierSource struct {
+	ID         int64
+	DossierID  int64
+	Source     string
+	URL        string
+	CommitSHA  string
+	ObservedAt time.Time
+	AsOf       time.Time
+}

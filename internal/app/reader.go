@@ -45,6 +45,12 @@ func (r *corpusReader) ReadRepository(ctx context.Context, ref domain.RepoRef) (
 	domainRepo.MergedPullRequestCount = counts.mergedPRs
 	domainRepo.ClosedUnmergedPullRequestCount = counts.closedUnmergedPRs
 
+	if snap, err := c.LatestCodeSnapshot(ctx, ref); err != nil {
+		return domain.Repository{}, nil, fmt.Errorf("latest code snapshot: %w", err)
+	} else if snap != nil {
+		domainRepo.CommitSHA = snap.CommitSHA
+	}
+
 	sourceRef := domain.SourceRef{
 		Source:     "github:rest",
 		URL:        fmt.Sprintf("https://api.github.com/repos/%s", ref),

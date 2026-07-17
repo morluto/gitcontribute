@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -68,6 +69,36 @@ func (c *Corpus) StoreCodeSnapshot(ctx context.Context, ref domain.RepoRef, snap
 		return 0, false, fmt.Errorf("commit code snapshot: %w", err)
 	}
 	return snapshotID, true, nil
+}
+
+// LatestCodeSnapshot returns the most recently stored code snapshot for a
+// repository, or nil if none exists.
+func (c *Corpus) LatestCodeSnapshot(ctx context.Context, ref domain.RepoRef) (*struct {
+	RepoPath  string
+	CommitSHA string
+	CreatedAt time.Time
+}, error) {
+	var snap struct {
+		RepoPath  string
+		CommitSHA string
+		CreatedAt time.Time
+	}
+	var created int64
+	err := c.db.QueryRowContext(ctx, `
+		SELECT repo_path, commit_sha, created_at
+		FROM code_snapshots
+		WHERE repo_owner = ? AND repo_name = ?
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`, ref.Owner, ref.Repo).Scan(&snap.RepoPath, &snap.CommitSHA, &created)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("latest code snapshot: %w", err)
+	}
+	snap.CreatedAt = scanTime(created)
+	return &snap, nil
 }
 
 // SearchCode searches only the latest indexed snapshot of each repository.
