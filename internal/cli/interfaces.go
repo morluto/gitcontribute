@@ -414,6 +414,24 @@ type IndexResult struct {
 	Message  string  `json:"message"`
 }
 
+// AcquisitionService exposes explicit managed clone/fetch and indexing.
+type AcquisitionService interface {
+	Acquire(ctx context.Context, repo RepoRef, remote string) (*AcquisitionResult, error)
+}
+
+type AcquisitionResult struct {
+	Repo          RepoRef `json:"repo"`
+	Remote        string  `json:"remote"`
+	DefaultBranch string  `json:"default_branch"`
+	CommitSHA     string  `json:"commit_sha"`
+	Files         int     `json:"files"`
+	Bytes         int     `json:"bytes"`
+	Indexed       bool    `json:"indexed"`
+	Inserted      bool    `json:"inserted"`
+	AcquiredAt    string  `json:"acquired_at"`
+	Message       string  `json:"message"`
+}
+
 // WorkspaceService is the optional workspace management capability used by the CLI.
 type WorkspaceService interface {
 	CreateWorkspace(ctx context.Context, investigationID string, opts WorkspaceCreateOptions) (*WorkspaceResult, error)

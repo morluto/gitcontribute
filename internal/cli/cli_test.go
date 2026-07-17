@@ -21,6 +21,7 @@ type fakeService struct {
 	searchCalled             bool
 	dossierCalled            bool
 	indexCalled              bool
+	acquireCalled            bool
 	addSourceCalled          bool
 	addRepoSourceCalled      bool
 	addGHArchiveSourceCalled bool
@@ -44,6 +45,7 @@ type fakeService struct {
 	searchResult       *cli.SearchResult
 	dossierResult      *cli.DossierResult
 	indexResult        *cli.IndexResult
+	acquisitionResult  *cli.AcquisitionResult
 	sourceResult       *cli.SourceResult
 	sourceListResult   *cli.SourceListResult
 	crawlResult        *cli.CrawlResult
@@ -65,6 +67,7 @@ type fakeService struct {
 	lastDossierArg     cli.RepoRef
 	lastIndexRepo      cli.RepoRef
 	lastIndexPath      string
+	lastAcquireRemote  string
 	lastSourceName     string
 	lastSourceQuery    string
 	lastSourceRefs     []cli.RepoRef
@@ -147,6 +150,13 @@ func (f *fakeService) Index(ctx context.Context, repo cli.RepoRef, path string) 
 	f.lastIndexRepo = repo
 	f.lastIndexPath = path
 	return f.indexResult, f.err
+}
+
+func (f *fakeService) Acquire(ctx context.Context, repo cli.RepoRef, remote string) (*cli.AcquisitionResult, error) {
+	f.acquireCalled = true
+	f.lastIndexRepo = repo
+	f.lastAcquireRemote = remote
+	return f.acquisitionResult, f.err
 }
 
 func (f *fakeService) AddSearchSource(ctx context.Context, name, query string) (*cli.SourceResult, error) {
@@ -257,6 +267,20 @@ func TestIndex(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "abc") || !strings.Contains(stderr.String(), "indexing") {
 		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestAcquire(t *testing.T) {
+	svc := &fakeService{acquisitionResult: &cli.AcquisitionResult{
+		Repo: cli.RepoRef{Owner: "o", Repo: "r"}, CommitSHA: "abc", Indexed: true,
+	}}
+	c, stdout, stderr := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"acquire", "o/r", "--remote", "https://example.test/o/r.git", "--json"}))
+	if !svc.acquireCalled || svc.lastIndexRepo.String() != "o/r" || svc.lastAcquireRemote != "https://example.test/o/r.git" {
+		t.Fatalf("acquire args: called=%v repo=%v remote=%q", svc.acquireCalled, svc.lastIndexRepo, svc.lastAcquireRemote)
+	}
+	if !strings.Contains(stdout.String(), `"commit_sha": "abc"`) || !strings.Contains(stderr.String(), "acquiring and indexing o/r") {
+		t.Fatalf("stdout=%q stderr=%q", stdout, stderr)
 	}
 }
 

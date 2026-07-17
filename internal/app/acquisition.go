@@ -11,25 +11,10 @@ import (
 	"github.com/morluto/gitcontribute/internal/domain"
 )
 
-// AcquisitionResult reports the outcome of an explicit managed code
-// acquisition and indexing operation.
-type AcquisitionResult struct {
-	Repo          cli.RepoRef `json:"repo"`
-	Remote        string      `json:"remote"`
-	DefaultBranch string      `json:"default_branch"`
-	CommitSHA     string      `json:"commit_sha"`
-	Files         int         `json:"files"`
-	Bytes         int         `json:"bytes"`
-	Indexed       bool        `json:"indexed"`
-	Inserted      bool        `json:"inserted"`
-	AcquiredAt    string      `json:"acquired_at"`
-	Message       string      `json:"message"`
-}
-
 // Acquire clones or fetches a repository into the managed cache, records the
 // resolved remote URL/default branch/commit SHA/acquired time, and indexes the
 // clean checkout into the corpus. It does not execute repository code.
-func (s *Service) Acquire(ctx context.Context, repo cli.RepoRef, remote string) (*AcquisitionResult, error) {
+func (s *Service) Acquire(ctx context.Context, repo cli.RepoRef, remote string) (*cli.AcquisitionResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
@@ -53,7 +38,7 @@ func (s *Service) Acquire(ctx context.Context, repo cli.RepoRef, remote string) 
 	if err != nil {
 		return nil, fmt.Errorf("acquire %s: %w", ref, err)
 	}
-	defer func() { _ = mgr.Cleanup(ctx, acq) }()
+	defer func() { _ = mgr.Cleanup(context.WithoutCancel(ctx), acq) }()
 
 	snapshot, err := codeindex.Index(ctx, acq.Path, codeindex.Options{})
 	if err != nil {
@@ -74,7 +59,7 @@ func (s *Service) Acquire(ctx context.Context, repo cli.RepoRef, remote string) 
 		message = "acquired; snapshot already indexed"
 	}
 
-	return &AcquisitionResult{
+	return &cli.AcquisitionResult{
 		Repo:          repo,
 		Remote:        acq.Remote,
 		DefaultBranch: acq.DefaultBranch,

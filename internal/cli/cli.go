@@ -63,6 +63,7 @@ type rootCmd struct {
 	Dossier       dossierCmd       `cmd:"" help:"Show repository dossier"`
 	Seeds         seedsCmd         `cmd:"" help:"Extract evidence-backed contribution seeds"`
 	Index         indexCmd         `cmd:"" help:"Index a clean local checkout at its current commit"`
+	Acquire       acquireCmd       `cmd:"" help:"Clone or fetch a repository into the managed cache and index it"`
 	Source        sourceCmd        `cmd:"" help:"Manage repository discovery sources"`
 	Crawl         crawlCmd         `cmd:"" help:"Run a named discovery source"`
 	Tail          tailCmd          `cmd:"" help:"Continuously run a named discovery source"`
@@ -179,6 +180,12 @@ type seedsCmd struct {
 type indexCmd struct {
 	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
 	Path      string `arg:"" optional:"" default:"." help:"Path to a clean repository checkout"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type acquireCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	Remote    string `name:"remote" help:"Git remote URL (defaults to GitHub HTTPS)"`
 	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
 
@@ -676,6 +683,8 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runSeeds(ctx, &cli.Seeds)
 	case "index":
 		return c.runIndex(ctx, &cli.Index)
+	case "acquire":
+		return c.runAcquire(ctx, &cli.Acquire)
 	case "source":
 		return c.runSource(ctx, command, &cli.Source)
 	case "crawl":
@@ -912,6 +921,14 @@ func (c *CLI) localQueryService() (LocalQueryService, error) {
 
 func (c *CLI) archiveThreadService() (ArchiveThreadService, error) {
 	service, ok := c.svc.(ArchiveThreadService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) acquisitionService() (AcquisitionService, error) {
+	service, ok := c.svc.(AcquisitionService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -1525,6 +1542,23 @@ func (c *CLI) runIndex(ctx context.Context, cmd *indexCmd) error {
 	}
 	fmt.Fprintf(c.stderr, "indexing %s from %s...\n", repo, cmd.Path)
 	result, err := c.svc.Index(ctx, repo, cmd.Path)
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runAcquire(ctx context.Context, cmd *acquireCmd) error {
+	repo, err := parseRepo(cmd.OwnerRepo)
+	if err != nil {
+		return err
+	}
+	service, err := c.acquisitionService()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(c.stderr, "acquiring and indexing %s...\n", repo)
+	result, err := service.Acquire(ctx, repo, cmd.Remote)
 	if err != nil {
 		return c.mapError(err)
 	}
