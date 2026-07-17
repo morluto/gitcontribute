@@ -55,6 +55,7 @@ type Config struct {
 	Limiter           Limiter
 	RequestsPerSecond float64
 	Burst             int
+	Retry             *RetryConfig
 }
 
 // NewClient creates a GitHub read client.
@@ -86,7 +87,19 @@ func NewClient(cfg Config) (*Client, error) {
 		}
 		limiter = NewRateLimiter(rps, burst)
 	}
-	cfg.HTTPClient.Transport = &RateLimitedTransport{Base: baseTransport, Limiter: limiter}
+
+	retryCfg := cfg.Retry
+	if retryCfg == nil {
+		retryCfg = DefaultRetryConfig()
+	}
+	retryCfg = retryCfg.withDefaults()
+
+	retrier := &retryTransport{
+		Base:   baseTransport,
+		Config: retryCfg,
+	}
+
+	cfg.HTTPClient.Transport = &RateLimitedTransport{Base: retrier, Limiter: limiter}
 
 	opts := []gh.ClientOptionsFunc{
 		gh.WithHTTPClient(cfg.HTTPClient),
