@@ -185,10 +185,10 @@ func (s *Service) Doctor(ctx context.Context) (*cli.DoctorResult, error) {
 		checks = append(checks, check)
 	}
 
-	path, pathErr := s.paths.ConfigFile()
+	_, pathErr := s.paths.ConfigFile()
 	var cfg *config.Config
 	if pathErr == nil {
-		cfg, pathErr = s.persistedConfig(path)
+		cfg, pathErr = s.loadConfig(false)
 	}
 	add("config", true, pathErr, "configuration is readable and valid")
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -155,6 +156,70 @@ func TestDoctorDoesNotExposeEnvironmentToken(t *testing.T) {
 	}
 	if string(payload) == "" || strings.Contains(string(payload), secret) {
 		t.Fatalf("doctor output exposed a token: %s", payload)
+	}
+}
+
+func TestDoctorInspectsEffectiveRuntimeConfig(t *testing.T) {
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+
+	envDB := filepath.Join(t.TempDir(), "env.db")
+	t.Setenv("GITCONTRIBUTE_DATABASE", envDB)
+
+	result, err := svc.Doctor(context.Background())
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	if !result.Healthy {
+		t.Fatalf("doctor reported unhealthy: %+v", result)
+	}
+	if svc.databasePath() != envDB {
+		t.Fatalf("doctor did not apply env override: got %q, want %q", svc.databasePath(), envDB)
+	}
+}
+
+func TestConfigureDoesNotPersistEnvOverrides(t *testing.T) {
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	defaultDB, err := paths.DatabasePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	svc, err := New(paths, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+
+	envDB := filepath.Join(t.TempDir(), "env.db")
+	t.Setenv("GITCONTRIBUTE_DATABASE", envDB)
+
+	budget := 25
+	result, err := svc.Configure(context.Background(), cli.ConfigureOptions{CrawlBudget: &budget})
+	if err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	if result.Config.Database == envDB {
+		t.Fatalf("configure persisted env override: %q", result.Config.Database)
+	}
+	if result.Config.Database != defaultDB {
+		t.Fatalf("configure changed database to %q, want %q", result.Config.Database, defaultDB)
+	}
+
+	path, err := paths.ConfigFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), envDB) {
+		t.Fatalf("config file contains env-override database path")
 	}
 }
 
