@@ -336,6 +336,39 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 	return c.GetThread(ctx, thread.RepositoryID, thread.Kind, thread.Number)
 }
 
+// GetThreadByNumber returns the current projection of a thread by repository
+// and number, regardless of kind, or nil if it has not been observed.
+func (c *Corpus) GetThreadByNumber(ctx context.Context, repoID int64, number int) (*Thread, error) {
+	var t Thread
+	var body, author, labels sql.NullString
+	var sourceCreated, src, created, updated int64
+	var closed, mergedAt sql.NullInt64
+	var merged int
+	err := c.db.QueryRowContext(ctx, `
+		SELECT id, repository_id, kind, number, state, title, body, author, labels,
+		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged
+		FROM threads
+		WHERE repository_id = ? AND number = ?
+	`, repoID, number).Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &t.Title, &body, &author, &labels, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get thread by number: %w", err)
+	}
+	t.Body = body.String
+	t.Author = author.String
+	t.Labels = splitLabels(labels.String)
+	t.SourceCreatedAt = scanTime(sourceCreated)
+	t.SourceUpdatedAt = scanTime(src)
+	t.CreatedAt = scanTime(created)
+	t.UpdatedAt = scanTime(updated)
+	t.ClosedAt = scanTime(closed.Int64)
+	t.MergedAt = scanTime(mergedAt.Int64)
+	t.Merged = merged != 0
+	return &t, nil
+}
+
 // GetThread returns the current projection of a thread, or nil if it has not
 // been observed.
 func (c *Corpus) GetThread(ctx context.Context, repoID int64, kind string, number int) (*Thread, error) {

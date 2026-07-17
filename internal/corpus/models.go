@@ -73,6 +73,19 @@ type ThreadObservation struct {
 	ObservedAt          time.Time
 }
 
+// FacetObservation is an immutable snapshot of a thread facet (comments,
+// reviews, review comments, or PR details) received from a source.
+type FacetObservation struct {
+	ID                  int64
+	RepositoryID        int64
+	ThreadID            *int64
+	Facet               string
+	SourceUpdatedAt     time.Time
+	ObservationSequence int64
+	Payload             string
+	ObservedAt          time.Time
+}
+
 // Coverage records which hydration facet has been fetched for a repository or
 // thread and whether it is complete. Each facet advances independently under
 // the same source_updated_at/observation_sequence ordering as projections.
