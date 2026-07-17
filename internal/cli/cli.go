@@ -755,7 +755,7 @@ func normalizeCompatibilityArgs(args []string) []string {
 	case "search":
 		if len(args) > 1 {
 			switch args[1] {
-			case "repos", "issues", "prs", "threads", "code", "all":
+			case "repos", "issues", "prs", "threads", "code", "all", "--help", "-h":
 				return args
 			}
 		}
@@ -1631,6 +1631,14 @@ func (c *CLI) runSearch(ctx context.Context, command string, cmd *searchCmd) err
 	opts := SearchOptions{
 		Kind: kind, Repo: selected.Repo, State: selected.State, Author: selected.Author,
 		Labels: selected.Labels, Limit: selected.Limit, Cursor: selected.Cursor,
+	}
+	if kind == "all" && opts.Cursor != "" {
+		return NewCLIError(ExitUsage, errors.New("combined search does not support cursor pagination; choose a result kind"))
+	}
+	if kind == "repos" || kind == "code" {
+		if opts.State != "all" || opts.Author != "" || len(opts.Labels) > 0 || selected.UpdatedAfter != "" {
+			return NewCLIError(ExitUsage, fmt.Errorf("thread metadata filters are not supported for %s search", kind))
+		}
 	}
 	if opts.Limit <= 0 || opts.Limit > maxSearchLimit {
 		return NewCLIError(ExitUsage, fmt.Errorf("limit must be between 1 and %d", maxSearchLimit))

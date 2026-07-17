@@ -629,6 +629,20 @@ func TestSearchInvalidRepoFilter(t *testing.T) {
 	requireCLIError(t, err, cli.ExitUsage)
 }
 
+func TestSearchRejectsUnsupportedFilterCombinations(t *testing.T) {
+	svc := &fakeService{}
+	c, _, _ := newTestCLI(svc, nil)
+	for _, args := range [][]string{
+		{"search", "all", "x", "--cursor", "cursor"},
+		{"search", "code", "x", "--state", "open"},
+	} {
+		requireCLIError(t, c.Run(context.Background(), args), cli.ExitUsage)
+	}
+	if svc.searchCalled {
+		t.Fatal("search should not be called for unsupported filter combinations")
+	}
+}
+
 func TestDossier(t *testing.T) {
 	svc := &fakeService{dossierResult: &cli.DossierResult{
 		Repo:       cli.RepoRef{Owner: "o", Repo: "r"},
