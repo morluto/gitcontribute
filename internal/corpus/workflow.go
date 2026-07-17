@@ -37,6 +37,33 @@ func unmarshalWorkflow(payload string, value any) error {
 	return nil
 }
 
+func listWorkflowPayloads[T any](ctx context.Context, db *sql.DB, operation, query string, args ...any) (out []*T, err error) {
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", operation, err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var item T
+		if err := unmarshalWorkflow(payload, &item); err != nil {
+			return nil, err
+		}
+		out = append(out, &item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SaveWorkspace inserts or replaces a managed workspace record.
 func (c *Corpus) SaveWorkspace(ctx context.Context, item *workspace.Workspace) error {
 	if item == nil || item.Name == "" {
@@ -399,6 +426,15 @@ func (c *Corpus) GetValidationDefinition(ctx context.Context, id string) (*evide
 	return &item, nil
 }
 
+// ListValidationDefinitions returns validation plans scoped to an opportunity.
+func (c *Corpus) ListValidationDefinitions(ctx context.Context, opportunityID string) ([]*evidence.ValidationDefinition, error) {
+	return listWorkflowPayloads[evidence.ValidationDefinition](
+		ctx, c.db, "list validation definitions",
+		`SELECT payload FROM validation_definitions WHERE opportunity_id=? ORDER BY created_at, id LIMIT 10000`,
+		opportunityID,
+	)
+}
+
 // SaveValidationRun persists the bounded result of an authorized validation execution.
 func (c *Corpus) SaveValidationRun(ctx context.Context, item *evidence.ValidationRun) error {
 	if item == nil || item.ID == "" {
@@ -437,6 +473,15 @@ func (c *Corpus) GetValidationRun(ctx context.Context, id string) (*evidence.Val
 		return nil, err
 	}
 	return &item, nil
+}
+
+// ListValidationRuns returns validation runs scoped to an opportunity.
+func (c *Corpus) ListValidationRuns(ctx context.Context, opportunityID string) ([]*evidence.ValidationRun, error) {
+	return listWorkflowPayloads[evidence.ValidationRun](
+		ctx, c.db, "list validation runs",
+		`SELECT payload FROM validation_runs WHERE opportunity_id=? ORDER BY completed_at, id LIMIT 10000`,
+		opportunityID,
+	)
 }
 
 // SaveIssueDraft persists the latest rendered issue draft for an opportunity.

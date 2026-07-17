@@ -38,7 +38,7 @@ inspection, health analysis, dossiers, and investigations run entirely offline.
 | 🔎 | **Typed offline search** | Search repositories, issues, PRs, threads, and indexed code with transparent ranking. |
 | 📡 | **Contribution Radar** | Rank promising open issues with explicit positives, risks, blockers, confidence, and missing-evidence warnings. |
 | 🗂️ | **Durable research corpus** | Keep observations, coverage, investigations, evidence, and outcomes in local SQLite. |
-| 🧭 | **Contribution workflow** | Move from hypothesis to opportunity, workspace, validation, and a prepared issue, PR, or review. |
+| 🧭 | **Contribution workflow** | Move from hypothesis to opportunity, workspace, validation, readiness checks, and a prepared issue, PR, or review. |
 | 🤖 | **Agent-ready MCP server** | Give Codex or Claude Code structured tools and resources with explicit capability boundaries. |
 | 🛡️ | **Safe by default** | Separate network reads, local writes, process execution, and GitHub mutation. |
 
@@ -161,7 +161,21 @@ gitcontribute validation run <validation-id> --kind=candidate --execute
 gitcontribute validation compare <base-run-id> <candidate-run-id>
 ```
 
-### 4. Prepare
+### 4. Check readiness
+
+Run a deterministic local readiness gate before turning a candidate into a
+public submission:
+
+```sh
+gitcontribute readiness opportunity <opportunity-id>
+gitcontribute readiness explain <opportunity-id>:evidence_freshness
+```
+
+Readiness reports `pass`, `warn`, `block`, or `unknown` per rule. It only reads
+stored corpus and draft metadata: it does not fetch GitHub, execute validation,
+write state, or infer that missing coverage is a hard blocker.
+
+### 5. Prepare
 
 Create a local contribution draft from the evidence and workspace diff:
 
@@ -193,7 +207,7 @@ MCP capabilities are deliberately separate:
 
 | Capability | Examples |
 | --- | --- |
-| **Offline reads** | Search, inspect repositories and threads, build research briefs, read dossiers, explain matches, inspect evidence and opportunities. |
+| **Offline reads** | Search, inspect repositories and threads, build research briefs, read dossiers, explain matches, inspect evidence, opportunities, and readiness checks. |
 | **Network reads** | Sync repositories, hydrate threads, start crawls, and acquire workspaces. |
 | **Local writes** | Start investigations, record hypotheses, promote opportunities, define validations, and prepare drafts. |
 | **Execution** | Run a validation only when the request includes `execute: true`. |
@@ -206,7 +220,7 @@ application and adapter boundaries.
 
 | Operation | Network | Local write | Runs a process | GitHub write |
 | --- | :---: | :---: | :---: | :---: |
-| Search, health, dossier and research-brief inspection | — | — | — | — |
+| Search, health, dossier, research-brief, and readiness inspection | — | — | — | — |
 | Investigations, evidence, lenses | — | ✓ | — | — |
 | Sync, crawl, hydrate | ✓ | ✓ | — | — |
 | Acquire or create a workspace | remote-dependent | ✓ | `git` only | — |

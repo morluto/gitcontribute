@@ -23,7 +23,7 @@ TUI ---------+              |
                             |
                             v
               offline search, radar, health, dossiers, thread briefs,
-             investigations, evidence, and drafts
+             investigations, evidence, readiness, and drafts
 ```
 
 The dependency direction is toward product-owned contracts:
@@ -43,7 +43,7 @@ application and domain packages expose product-owned values and interfaces.
 
 | Capability | Examples | Network | Local write | Process execution | GitHub mutation |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Corpus read | search, health, dossier show, research brief, MCP resources | no | no | no | no |
+| Corpus read | search, health, dossier show, research brief, readiness, MCP resources | no | no | no | no |
 | Corpus write | investigations, start-thread, evidence, lenses, tracking | no | yes | no | no |
 | GitHub read | sync, crawl, hydrate | yes | yes | no | no |
 | Git acquisition | acquire, workspace create | remote-dependent | yes | `git` only | no |
@@ -176,6 +176,16 @@ perform network access, execute processes, delete evidence, or silently treat
 stale evidence as invalid. Tracking exports carry evidence provenance in schema
 version 2 while accepting older unversioned bundles that do not contain
 evidence records.
+
+Contribution readiness is also a pure corpus-read capability. It re-evaluates a
+versioned rule set for one opportunity and returns deterministic checks with
+`pass`, `warn`, `block`, or `unknown` status, evidence references, and
+remediation text. Only objectively unsubmitable local states, such as an
+archived repository, closed target thread, failing candidate validation, or
+unresolved contradicting evidence, should block. Missing guidance, missing
+coverage, stale evidence, or incomplete validation usually remain `warn` or
+`unknown`. Readiness must not fetch GitHub, execute validation, mutate
+opportunities, or inspect repository-controlled code while evaluating a gate.
 
 ## Schema changes
 
