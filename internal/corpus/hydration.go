@@ -3,21 +3,98 @@ package corpus
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
 
-// ApplyFacetObservation records an immutable facet observation and returns
-// the stored observation. The facet is identified by repository, optional
-// thread, and a facet name such as "issue_comments" or "pr_reviews".
-func (c *Corpus) ApplyFacetObservation(ctx context.Context, repoID int64, threadID *int64, facet string, sourceUpdatedAt time.Time, payload string) (*FacetObservation, error) {
+// FacetObservationInput is an unpersisted facet observation page.
+type FacetObservationInput struct {
+	SourceUpdatedAt time.Time
+	Payload         string
+}
+
+// ApplyFacetObservationSet records a complete ordered set of facet observations
+// and advances coverage for the facet in a single transaction. The existing
+// facet observations are replaced only when the new set wins the
+// (source_updated_at, observation_sequence) ordering, so an interrupted or
+// stale fetch leaves previous complete data in place.
+func (c *Corpus) ApplyFacetObservationSet(ctx context.Context, repoID int64, threadID *int64, facet string, pages []FacetObservationInput, complete bool, runID int64) error {
+	if len(pages) == 0 {
+		return nil
+	}
+
+	var latest time.Time
+	for _, p := range pages {
+		if p.SourceUpdatedAt.After(latest) {
+			latest = p.SourceUpdatedAt
+		}
+	}
+	srcSec := encodeTime(latest)
+
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("begin facet observation: %w", err)
+		return fmt.Errorf("begin facet observation set: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	tid := sql.NullInt64{}
+	if threadID != nil {
+		tid.Int64 = *threadID
+		tid.Valid = true
+	}
+
+	var replace bool
+	var existingSrc, existingSeq int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT source_updated_at, observation_sequence
+		FROM facet_coverage
+		WHERE repository_id = ? AND COALESCE(thread_id, -1) = COALESCE(?, -1) AND facet = ?
+	`, repoID, tid, facet).Scan(&existingSrc, &existingSeq)
+	if errors.Is(err, sql.ErrNoRows) {
+		replace = true
+	} else if err != nil {
+		return fmt.Errorf("select facet coverage: %w", err)
+	} else if srcSec > existingSrc {
+		replace = true
+	} else if srcSec == existingSrc && complete {
+		replace = true
+	}
+
+	if !replace {
+		return nil
+	}
+
 	now := encodeTime(time.Now())
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM facet_observations
+		WHERE repository_id = ? AND COALESCE(thread_id, -1) = COALESCE(?, -1) AND facet = ?
+	`, repoID, tid, facet); err != nil {
+		return fmt.Errorf("delete facet observations: %w", err)
+	}
+
+	for _, p := range pages {
+		if _, err := c.applyFacetObservationTx(ctx, tx, repoID, threadID, facet, p.SourceUpdatedAt, p.Payload, now); err != nil {
+			return err
+		}
+	}
+
+	seq, err := c.nextSequence(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if err := c.advanceFacetTx(ctx, tx, repoID, threadID, facet, latest, complete, runID, seq, now); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit facet observation set: %w", err)
+	}
+	return nil
+}
+
+func (c *Corpus) applyFacetObservationTx(ctx context.Context, tx *sql.Tx, repoID int64, threadID *int64, facet string, sourceUpdatedAt time.Time, payload string, observedAt int64) (*FacetObservation, error) {
 	seq, err := c.nextSequence(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -33,17 +110,13 @@ func (c *Corpus) ApplyFacetObservation(ctx context.Context, repoID int64, thread
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO facet_observations (repository_id, thread_id, facet, source_updated_at, observation_sequence, payload, observed_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, repoID, tid, facet, srcSec, seq, payload, now)
+	`, repoID, tid, facet, srcSec, seq, payload, observedAt)
 	if err != nil {
 		return nil, fmt.Errorf("insert facet observation: %w", err)
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
 		return nil, fmt.Errorf("last facet observation id: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit facet observation: %w", err)
 	}
 
 	return &FacetObservation{
@@ -54,7 +127,7 @@ func (c *Corpus) ApplyFacetObservation(ctx context.Context, repoID int64, thread
 		SourceUpdatedAt:     sourceUpdatedAt,
 		ObservationSequence: seq,
 		Payload:             payload,
-		ObservedAt:          scanTime(now),
+		ObservedAt:          scanTime(observedAt),
 	}, nil
 }
 
