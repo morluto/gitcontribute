@@ -22,6 +22,10 @@ import (
 // never records an assumed or missing path. It does not modify shell startup
 // files or the parent process's PATH.
 func GlobalNPM(ctx context.Context, packageSpec string) (string, error) {
+	// CommandContext passes arguments directly to npm without a shell. The
+	// application caller supplies an exact package name plus a validated release
+	// version, so packageSpec cannot introduce npm flags or another package.
+	// #nosec G204 -- no shell is involved and packageSpec is validated upstream.
 	output, err := exec.CommandContext(ctx, "npm", "install", "--global", packageSpec).CombinedOutput()
 	if err != nil {
 		return "", commandFailure("install persistent CLI", output, err)

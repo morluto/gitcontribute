@@ -61,6 +61,8 @@ type SetupReport struct {
 	Steps     []SetupStep `json:"steps"`
 }
 
+// HasFailures reports whether setup could not produce a usable result. A nil
+// report is a failure because callers cannot verify any planned or applied step.
 func (r *SetupReport) HasFailures() bool {
 	if r == nil {
 		return true

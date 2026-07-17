@@ -893,7 +893,9 @@ func (c *CLI) promptClients(action string, allowNone bool) ([]string, error) {
 	if allowNone {
 		choices += ",none"
 	}
-	_, _ = fmt.Fprintf(c.stderr, "%s which MCP clients? [%s]: ", action, choices)
+	if _, err := fmt.Fprintf(c.stderr, "%s which MCP clients? [%s]: ", action, choices); err != nil {
+		return nil, fmt.Errorf("write MCP client prompt: %w", err)
+	}
 	line, err := c.promptLine()
 	if err != nil {
 		return nil, err

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -35,10 +36,10 @@ func (s *Service) Setup(ctx context.Context, opts cli.SetupOptions) (*cli.SetupR
 		operation = clientsetup.Remove
 	}
 	if opts.Remove && (opts.InstallCLI || opts.SkipMCP) {
-		return nil, fmt.Errorf("terminal installation options are not supported by remove")
+		return nil, errors.New("terminal installation options are not supported by remove")
 	}
 	if operation == clientsetup.Configure && opts.SkipMCP && !opts.InstallCLI {
-		return nil, fmt.Errorf("setup has no selected capability")
+		return nil, errors.New("setup has no selected capability")
 	}
 	clients := make([]clientsetup.Client, 0, len(opts.Clients))
 	if !opts.SkipMCP {
@@ -48,7 +49,7 @@ func (s *Service) Setup(ctx context.Context, opts cli.SetupOptions) (*cli.SetupR
 		if len(clients) == 0 && !opts.AllClients {
 			clients = clientsetup.Detect(s.paths.HomeDir())
 			if len(clients) == 0 {
-				return nil, fmt.Errorf("no supported clients detected; pass --codex, --claude, or --all-clients")
+				return nil, errors.New("no supported clients detected; pass --codex, --claude, or --all-clients")
 			}
 		}
 	}
