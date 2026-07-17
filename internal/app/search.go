@@ -141,6 +141,7 @@ func (s *Service) resolveRepoFilter(ctx context.Context, c *corpus.Corpus, opts 
 func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query string, repoID int64, ref domain.RepoRef, kind string, opts cli.SearchOptions, now time.Time) (searchResult, error) {
 	filter := corpus.SearchFilter{
 		RepoID: repoID, Repo: ref.String(), Kind: kind, State: opts.State, Author: opts.Author,
+		Association: opts.Association, Assignee: opts.Assignee,
 		Labels: opts.Labels, UpdatedAfter: opts.UpdatedAfter, Limit: opts.Limit, Cursor: opts.Cursor,
 	}
 	page, err := c.SearchThreadsPage(ctx, query, filter)

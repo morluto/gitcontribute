@@ -19,6 +19,8 @@ type SearchFilter struct {
 	Kind         string
 	State        string
 	Author       string
+	Association  string
+	Assignee     string
 	Labels       []string
 	UpdatedAfter time.Time
 	Limit        int
@@ -77,7 +79,7 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 	}
 
 	sql := `
-		SELECT rank, t.id, t.repository_id, t.kind, t.number, t.state, t.title, t.body, t.author, t.labels,
+		SELECT rank, t.id, t.repository_id, t.kind, t.number, t.state, t.state_reason, t.title, t.body, t.author, t.author_association, t.labels, t.assignees, t.draft, t.locked, t.milestone,
 		       t.source_created_at, t.source_updated_at, t.observation_sequence, t.created_at, t.updated_at, t.closed_at, t.merged_at, t.merged
 		FROM threads_fts
 		JOIN threads t ON t.id = threads_fts.rowid
@@ -178,6 +180,15 @@ func appendThreadMetadataFilters(query string, args []any, filter SearchFilter) 
 		query += ` AND lower(t.author) = lower(?)`
 		args = append(args, filter.Author)
 	}
+	if filter.Association != "" {
+		query += ` AND lower(t.author_association) = lower(?)`
+		args = append(args, filter.Association)
+	}
+	if filter.Assignee != "" {
+		encoded, _ := json.Marshal(filter.Assignee)
+		query += ` AND instr(lower(t.assignees), lower(?)) > 0`
+		args = append(args, string(encoded))
+	}
 	for _, label := range filter.Labels {
 		encoded, _ := json.Marshal(label)
 		query += ` AND instr(lower(t.labels), lower(?)) > 0`
@@ -197,7 +208,7 @@ func threadFilterKey(filter SearchFilter) string {
 	}
 	slices.Sort(labels)
 	return strings.Join([]string{
-		strings.ToLower(filter.State), strings.ToLower(filter.Author), strings.Join(labels, ","),
+		strings.ToLower(filter.State), strings.ToLower(filter.Author), strings.ToLower(filter.Association), strings.ToLower(filter.Assignee), strings.Join(labels, ","),
 		fmt.Sprint(filter.UpdatedAfter.UTC().Unix()),
 	}, "|")
 }
@@ -209,16 +220,22 @@ func scanThreadsWithRank(rows *sql.Rows) ([]Thread, error) {
 	for rows.Next() {
 		var t Thread
 		var rank float64
-		var body, author, labels sql.NullString
+		var body, author, labels, assignees, stateReason, authorAssociation, milestone sql.NullString
 		var sourceCreated, src, created, updated int64
 		var closed, mergedAt sql.NullInt64
-		var merged int
-		if err := rows.Scan(&rank, &t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &t.Title, &body, &author, &labels, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged); err != nil {
+		var merged, draft, locked int
+		if err := rows.Scan(&rank, &t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &stateReason, &t.Title, &body, &author, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged); err != nil {
 			return nil, err
 		}
 		t.Body = body.String
+		t.StateReason = stateReason.String
 		t.Author = author.String
+		t.AuthorAssociation = authorAssociation.String
 		t.Labels = splitLabels(labels.String)
+		t.Assignees = splitLabels(assignees.String)
+		t.Draft = draft != 0
+		t.Locked = locked != 0
+		t.Milestone = milestone.String
 		t.SourceCreatedAt = scanTime(sourceCreated)
 		t.SourceUpdatedAt = scanTime(src)
 		t.CreatedAt = scanTime(created)

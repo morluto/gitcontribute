@@ -528,15 +528,21 @@ func normalizeSyncOptions(opts SyncOptions) (SyncOptions, error) {
 
 func (s *Service) threadFromIssue(ctx context.Context, reader github.Reader, ref domain.RepoRef, issue github.Issue) (corpus.Thread, string, error) {
 	thread := corpus.Thread{
-		Kind:            string(issue.Kind),
-		Number:          issue.Number,
-		State:           issue.State,
-		Title:           issue.Title,
-		Body:            issue.Body,
-		Author:          issue.Author,
-		Labels:          issue.Labels,
-		SourceCreatedAt: issue.CreatedAt,
-		SourceUpdatedAt: issue.UpdatedAt,
+		Kind:              string(issue.Kind),
+		Number:            issue.Number,
+		State:             issue.State,
+		StateReason:       issue.StateReason,
+		Title:             issue.Title,
+		Body:              issue.Body,
+		Author:            issue.Author,
+		AuthorAssociation: issue.AuthorAssociation,
+		Labels:            issue.Labels,
+		Assignees:         issue.Assignees,
+		Draft:             issue.Draft,
+		Locked:            issue.Locked,
+		Milestone:         issue.Milestone,
+		SourceCreatedAt:   issue.CreatedAt,
+		SourceUpdatedAt:   issue.UpdatedAt,
 	}
 	if issue.ClosedAt != nil {
 		thread.ClosedAt = *issue.ClosedAt
@@ -563,6 +569,11 @@ func (s *Service) threadFromIssue(ctx context.Context, reader github.Reader, ref
 		if !pr.UpdatedAt.IsZero() {
 			thread.SourceUpdatedAt = pr.UpdatedAt
 		}
+		thread.AuthorAssociation = pr.AuthorAssociation
+		thread.Assignees = pr.Assignees
+		thread.Draft = pr.Draft
+		thread.Locked = pr.Locked
+		thread.Milestone = pr.Milestone
 		payload, err = json.Marshal(pr)
 		if err != nil {
 			return corpus.Thread{}, "", fmt.Errorf("marshal pull request details: %w", err)

@@ -138,6 +138,46 @@ func TestSearchThreadsPageAppliesMetadataFiltersAndBindsCursor(t *testing.T) {
 	}
 }
 
+func TestSearchThreadsPageFiltersByAssociationAndAssignee(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, thread := range []Thread{
+		{Kind: ThreadKindIssue, Number: 1, State: "open", Title: "shared term", Author: "Alice", AuthorAssociation: "OWNER", Assignees: []string{"alice"}, SourceUpdatedAt: time.Unix(100, 0).UTC()},
+		{Kind: ThreadKindIssue, Number: 2, State: "open", Title: "shared term", Author: "bob", AuthorAssociation: "CONTRIBUTOR", Assignees: []string{"alice", "bob"}, SourceUpdatedAt: time.Unix(200, 0).UTC()},
+		{Kind: ThreadKindIssue, Number: 3, State: "open", Title: "shared term", Author: "charlie", AuthorAssociation: "NONE", Assignees: []string{"bob"}, SourceUpdatedAt: time.Unix(300, 0).UTC()},
+	} {
+		thread.RepositoryID = repo.ID
+		thread.SourceCreatedAt = thread.SourceUpdatedAt
+		if _, err := c.UpsertThread(ctx, thread, `{}`); err != nil {
+			t.Fatalf("seed thread %d: %v", i, err)
+		}
+	}
+
+	assocPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Association: "owner", Limit: 10})
+	if err != nil || len(assocPage.Threads) != 1 || assocPage.Threads[0].Number != 1 {
+		t.Fatalf("association filter = %+v, err=%v", assocPage, err)
+	}
+
+	assigneePage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Assignee: "ALICE", Limit: 10})
+	if err != nil || len(assigneePage.Threads) != 2 {
+		t.Fatalf("assignee filter = %+v, err=%v", assigneePage, err)
+	}
+	for _, th := range assigneePage.Threads {
+		if th.Number != 1 && th.Number != 2 {
+			t.Fatalf("unexpected assignee match: %d", th.Number)
+		}
+	}
+
+	combined, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Association: "contributor", Assignee: "bob", Limit: 10})
+	if err != nil || len(combined.Threads) != 1 || combined.Threads[0].Number != 2 {
+		t.Fatalf("combined filter = %+v, err=%v", combined, err)
+	}
+}
+
 func TestListRepositoriesPageReturnsNextCursorAndTotal(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)

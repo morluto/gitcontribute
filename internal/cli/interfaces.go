@@ -339,6 +339,8 @@ type SearchOptions struct {
 	Repo         string
 	State        string
 	Author       string
+	Association  string
+	Assignee     string
 	Labels       []string
 	UpdatedAfter time.Time
 	Limit        int

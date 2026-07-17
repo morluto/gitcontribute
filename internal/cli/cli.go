@@ -151,6 +151,8 @@ type searchKindCmd struct {
 	Repo         string   `name:"repo" help:"Restrict to repository OWNER/REPO"`
 	State        string   `name:"state" default:"all" enum:"open,closed,all" help:"Restrict thread state"`
 	Author       string   `name:"author" help:"Restrict thread author"`
+	Association  string   `name:"association" help:"Restrict author association (e.g. OWNER, MEMBER, CONTRIBUTOR, NONE)"`
+	Assignee     string   `name:"assignee" help:"Restrict to threads assigned to a user"`
 	Labels       []string `name:"label" help:"Require a label (repeatable)"`
 	UpdatedAfter string   `name:"updated-after" help:"Restrict source updates to RFC3339 timestamp or later"`
 	Limit        int      `name:"limit" default:"20" help:"Maximum number of results"`
@@ -1724,13 +1726,14 @@ func (c *CLI) runSearch(ctx context.Context, command string, cmd *searchCmd) err
 	}
 	opts := SearchOptions{
 		Kind: kind, Repo: selected.Repo, State: selected.State, Author: selected.Author,
+		Association: selected.Association, Assignee: selected.Assignee,
 		Labels: selected.Labels, Limit: selected.Limit, Cursor: selected.Cursor,
 	}
 	if kind == "all" && opts.Cursor != "" {
 		return NewCLIError(ExitUsage, errors.New("combined search does not support cursor pagination; choose a result kind"))
 	}
 	if kind == "repos" || kind == "code" {
-		if opts.State != "all" || opts.Author != "" || len(opts.Labels) > 0 || selected.UpdatedAfter != "" {
+		if opts.State != "all" || opts.Author != "" || opts.Association != "" || opts.Assignee != "" || len(opts.Labels) > 0 || selected.UpdatedAfter != "" {
 			return NewCLIError(ExitUsage, fmt.Errorf("thread metadata filters are not supported for %s search", kind))
 		}
 	}

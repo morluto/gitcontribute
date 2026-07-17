@@ -682,11 +682,38 @@ func TestSearchRejectsUnsupportedFilterCombinations(t *testing.T) {
 	for _, args := range [][]string{
 		{"search", "all", "x", "--cursor", "cursor"},
 		{"search", "code", "x", "--state", "open"},
+		{"search", "repos", "x", "--association", "OWNER"},
+		{"search", "code", "x", "--assignee", "alice"},
 	} {
 		requireCLIError(t, c.Run(context.Background(), args), cli.ExitUsage)
 	}
 	if svc.searchCalled {
 		t.Fatal("search should not be called for unsupported filter combinations")
+	}
+}
+
+func TestSearchThreadMetadataFlags(t *testing.T) {
+	svc := &fakeService{searchResult: &cli.SearchResult{
+		Query:   "term",
+		Kind:    "issues",
+		Limit:   10,
+		Total:   0,
+		Matches: []cli.SearchMatch{},
+	}}
+	c, _, _ := newTestCLI(svc, nil)
+
+	err := c.Run(context.Background(), []string{"search", "issues", "term", "--association", "OWNER", "--assignee", "alice"})
+	requireNoErr(t, err)
+
+	if !svc.searchCalled {
+		t.Fatal("Search was not called")
+	}
+	opts := svc.lastSearchArgs.Opts
+	if opts.Association != "OWNER" {
+		t.Fatalf("association = %q, want OWNER", opts.Association)
+	}
+	if opts.Assignee != "alice" {
+		t.Fatalf("assignee = %q, want alice", opts.Assignee)
 	}
 }
 

@@ -43,10 +43,16 @@ type Thread struct {
 	Kind                string
 	Number              int
 	State               string
+	StateReason         string
 	Title               string
 	Body                string
 	Author              string
+	AuthorAssociation   string
 	Labels              []string
+	Assignees           []string
+	Draft               bool
+	Locked              bool
+	Milestone           string
 	ClosedAt            time.Time
 	MergedAt            time.Time
 	Merged              bool

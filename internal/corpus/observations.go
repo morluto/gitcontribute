@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -380,6 +381,7 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 		merged.Int64 = encodeTime(thread.MergedAt)
 		merged.Valid = true
 	}
+	assignees := deterministicAssignees(thread.Assignees)
 
 	var threadID int64
 	err = tx.QueryRowContext(ctx, `
@@ -387,9 +389,9 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 	`, thread.RepositoryID, thread.Kind, thread.Number).Scan(&threadID)
 	if errors.Is(err, sql.ErrNoRows) {
 		res, err := tx.ExecContext(ctx, `
-			INSERT INTO threads (repository_id, kind, number, state, title, body, author, labels, source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, thread.RepositoryID, thread.Kind, thread.Number, thread.State, thread.Title, thread.Body, thread.Author, joinLabels(thread.Labels), sourceCreated, srcSec, seq, now, now, closed, merged, boolToInt(thread.Merged))
+			INSERT INTO threads (repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone, source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, thread.RepositoryID, thread.Kind, thread.Number, thread.State, thread.StateReason, thread.Title, thread.Body, thread.Author, thread.AuthorAssociation, joinLabels(thread.Labels), joinLabels(assignees), boolToInt(thread.Draft), boolToInt(thread.Locked), thread.Milestone, sourceCreated, srcSec, seq, now, now, closed, merged, boolToInt(thread.Merged))
 		if err != nil {
 			return nil, fmt.Errorf("insert thread: %w", err)
 		}
@@ -403,10 +405,16 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE threads
 			SET state = ?,
+			    state_reason = ?,
 			    title = ?,
 			    body = ?,
 			    author = ?,
+			    author_association = ?,
 			    labels = ?,
+			    assignees = ?,
+			    draft = ?,
+			    locked = ?,
+			    milestone = ?,
 			    source_created_at = ?,
 			    source_updated_at = ?,
 			    observation_sequence = ?,
@@ -416,7 +424,7 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 			    merged = ?
 			WHERE id = ?
 			  AND (source_updated_at < ? OR (source_updated_at = ? AND observation_sequence < ?))
-		`, thread.State, thread.Title, thread.Body, thread.Author, joinLabels(thread.Labels), sourceCreated, srcSec, seq, now, closed, merged, boolToInt(thread.Merged), threadID, srcSec, srcSec, seq); err != nil {
+		`, thread.State, thread.StateReason, thread.Title, thread.Body, thread.Author, thread.AuthorAssociation, joinLabels(thread.Labels), joinLabels(assignees), boolToInt(thread.Draft), boolToInt(thread.Locked), thread.Milestone, sourceCreated, srcSec, seq, now, closed, merged, boolToInt(thread.Merged), threadID, srcSec, srcSec, seq); err != nil {
 			return nil, fmt.Errorf("update thread projection: %w", err)
 		}
 	}
@@ -438,16 +446,16 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 // and number, regardless of kind, or nil if it has not been observed.
 func (c *Corpus) GetThreadByNumber(ctx context.Context, repoID int64, number int) (*Thread, error) {
 	var t Thread
-	var body, author, labels sql.NullString
+	var body, author, labels, assignees, stateReason, authorAssociation, milestone sql.NullString
 	var sourceCreated, src, created, updated int64
 	var closed, mergedAt sql.NullInt64
-	var merged int
+	var merged, draft, locked int
 	err := c.db.QueryRowContext(ctx, `
-		SELECT id, repository_id, kind, number, state, title, body, author, labels,
+		SELECT id, repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone,
 		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged
 		FROM threads
 		WHERE repository_id = ? AND number = ?
-	`, repoID, number).Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &t.Title, &body, &author, &labels, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged)
+	`, repoID, number).Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &stateReason, &t.Title, &body, &author, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -455,8 +463,14 @@ func (c *Corpus) GetThreadByNumber(ctx context.Context, repoID int64, number int
 		return nil, fmt.Errorf("get thread by number: %w", err)
 	}
 	t.Body = body.String
+	t.StateReason = stateReason.String
 	t.Author = author.String
+	t.AuthorAssociation = authorAssociation.String
 	t.Labels = splitLabels(labels.String)
+	t.Assignees = splitLabels(assignees.String)
+	t.Draft = draft != 0
+	t.Locked = locked != 0
+	t.Milestone = milestone.String
 	t.SourceCreatedAt = scanTime(sourceCreated)
 	t.SourceUpdatedAt = scanTime(src)
 	t.CreatedAt = scanTime(created)
@@ -471,16 +485,16 @@ func (c *Corpus) GetThreadByNumber(ctx context.Context, repoID int64, number int
 // been observed.
 func (c *Corpus) GetThread(ctx context.Context, repoID int64, kind string, number int) (*Thread, error) {
 	var t Thread
-	var body, author, labels sql.NullString
+	var body, author, labels, assignees, stateReason, authorAssociation, milestone sql.NullString
 	var sourceCreated, src, created, updated int64
 	var closed, mergedAt sql.NullInt64
-	var merged int
+	var merged, draft, locked int
 	err := c.db.QueryRowContext(ctx, `
-		SELECT id, repository_id, kind, number, state, title, body, author, labels,
+		SELECT id, repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone,
 		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged
 		FROM threads
 		WHERE repository_id = ? AND kind = ? AND number = ?
-	`, repoID, kind, number).Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &t.Title, &body, &author, &labels, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged)
+	`, repoID, kind, number).Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &stateReason, &t.Title, &body, &author, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -488,8 +502,14 @@ func (c *Corpus) GetThread(ctx context.Context, repoID int64, kind string, numbe
 		return nil, fmt.Errorf("get thread: %w", err)
 	}
 	t.Body = body.String
+	t.StateReason = stateReason.String
 	t.Author = author.String
+	t.AuthorAssociation = authorAssociation.String
 	t.Labels = splitLabels(labels.String)
+	t.Assignees = splitLabels(assignees.String)
+	t.Draft = draft != 0
+	t.Locked = locked != 0
+	t.Milestone = milestone.String
 	t.SourceCreatedAt = scanTime(sourceCreated)
 	t.SourceUpdatedAt = scanTime(src)
 	t.CreatedAt = scanTime(created)
@@ -510,7 +530,7 @@ func (c *Corpus) ListThreads(ctx context.Context, repoID int64, kind string, lim
 		return nil, fmt.Errorf("thread list limit cannot exceed 10000")
 	}
 	sql := `
-		SELECT id, repository_id, kind, number, state, title, body, author, labels,
+		SELECT id, repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone,
 		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged
 		FROM threads
 		WHERE repository_id = ?`
@@ -587,16 +607,22 @@ func scanThreads(rows *sql.Rows) ([]Thread, error) {
 	var out []Thread
 	for rows.Next() {
 		var t Thread
-		var body, author, labels sql.NullString
+		var body, author, labels, assignees, stateReason, authorAssociation, milestone sql.NullString
 		var sourceCreated, src, created, updated int64
 		var closed, mergedAt sql.NullInt64
-		var merged int
-		if err := rows.Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &t.Title, &body, &author, &labels, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged); err != nil {
+		var merged, draft, locked int
+		if err := rows.Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &stateReason, &t.Title, &body, &author, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged); err != nil {
 			return nil, err
 		}
 		t.Body = body.String
+		t.StateReason = stateReason.String
 		t.Author = author.String
+		t.AuthorAssociation = authorAssociation.String
 		t.Labels = splitLabels(labels.String)
+		t.Assignees = splitLabels(assignees.String)
+		t.Draft = draft != 0
+		t.Locked = locked != 0
+		t.Milestone = milestone.String
 		t.SourceCreatedAt = scanTime(sourceCreated)
 		t.SourceUpdatedAt = scanTime(src)
 		t.CreatedAt = scanTime(created)
@@ -625,6 +651,15 @@ func joinLabels(v []string) string {
 	}
 	encoded, _ := json.Marshal(v)
 	return string(encoded)
+}
+
+func deterministicAssignees(v []string) []string {
+	if len(v) == 0 {
+		return nil
+	}
+	out := append([]string(nil), v...)
+	sort.Strings(out)
+	return out
 }
 
 func splitLabels(s string) []string {
