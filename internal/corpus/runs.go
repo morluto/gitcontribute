@@ -52,43 +52,6 @@ func (c *Corpus) GetRun(ctx context.Context, id int64) (*Run, error) {
 	return &r, nil
 }
 
-// ListRuns returns the most recent runs, limited to the requested count.
-func (c *Corpus) ListRuns(ctx context.Context, limit int) ([]Run, error) {
-	if limit <= 0 {
-		limit = 100
-	}
-	rows, err := c.db.QueryContext(ctx, `
-		SELECT id, kind, status, started_at, completed_at, stats, error
-		FROM runs
-		ORDER BY id DESC
-		LIMIT ?
-	`, limit)
-	if err != nil {
-		return nil, fmt.Errorf("list runs: %w", err)
-	}
-	defer rows.Close()
-
-	var out []Run
-	for rows.Next() {
-		var r Run
-		var completed sql.NullInt64
-		var started int64
-		var stats, errStr sql.NullString
-		if err := rows.Scan(&r.ID, &r.Kind, &r.Status, &started, &completed, &stats, &errStr); err != nil {
-			return nil, err
-		}
-		r.StartedAt = scanTime(started)
-		if completed.Valid {
-			t := scanTime(completed.Int64)
-			r.CompletedAt = &t
-		}
-		r.Stats = stats.String
-		r.Error = errStr.String
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
 // FinishRun marks a run as completed with optional statistics.
 func (c *Corpus) FinishRun(ctx context.Context, id int64, stats string) error {
 	now := encodeTime(time.Now())
@@ -151,6 +114,46 @@ func (c *Corpus) RecordRunEvent(ctx context.Context, runID int64, level, message
 		return fmt.Errorf("record run event: %w", err)
 	}
 	return nil
+}
+
+// ListRuns returns the most recent run records bounded by limit.
+func (c *Corpus) ListRuns(ctx context.Context, limit int) ([]Run, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	rows, err := c.db.QueryContext(ctx, `
+		SELECT id, kind, status, started_at, completed_at, stats, error
+		FROM runs
+		ORDER BY started_at DESC, id DESC
+		LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list runs: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Run
+	for rows.Next() {
+		var r Run
+		var completed sql.NullInt64
+		var started int64
+		var stats, errStr sql.NullString
+		if err := rows.Scan(&r.ID, &r.Kind, &r.Status, &started, &completed, &stats, &errStr); err != nil {
+			return nil, err
+		}
+		r.StartedAt = scanTime(started)
+		if completed.Valid {
+			t := scanTime(completed.Int64)
+			r.CompletedAt = &t
+		}
+		r.Stats = stats.String
+		r.Error = errStr.String
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // ListRunEvents returns events for a run in chronological order.
