@@ -226,7 +226,25 @@ func (s *Service) newGitHubReader() (github.Reader, error) {
 		return nil, errors.New("configuration is not loaded")
 	}
 	tokenSrc := tokenSource(cfg)
-	client, err := github.NewClient(github.Config{TokenSource: tokenSrc})
+	retry := github.DefaultRetryConfig()
+	retry.OnAttempt = func(observation github.RetryObservation) {
+		s.mu.Lock()
+		c := s.corpus
+		s.mu.Unlock()
+		if c == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = c.RecordRateLimitObservation(ctx, corpus.RateLimitObservation{
+			Attempt: observation.Attempt, StatusCode: observation.StatusCode,
+			Resource: observation.RateLimit.Resource, Limit: observation.RateLimit.Limit,
+			Remaining: observation.RateLimit.Remaining, Used: observation.RateLimit.Used,
+			ResetAt: observation.RateLimit.Reset, Delay: observation.Delay,
+			APIVersion: observation.APIVersion, SourceURL: observation.SourceURL, ObservedAt: s.now(),
+		})
+	}
+	client, err := github.NewClient(github.Config{TokenSource: tokenSrc, Retry: retry})
 	if err != nil {
 		return nil, fmt.Errorf("create github reader: %w", err)
 	}
