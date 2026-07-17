@@ -15,6 +15,13 @@ import (
 	"github.com/morluto/gitcontribute/internal/tracking"
 )
 
+// dbExecer matches the ExecContext methods used by *sql.DB and *sql.Tx so
+// upsert helpers can run inside or outside a transaction.
+type dbExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 var _ tracking.Repository = (*Corpus)(nil)
 
 // RecordTriageEvent stores a triage event with optional foreign-key-safe links.
@@ -22,6 +29,10 @@ func (c *Corpus) RecordTriageEvent(ctx context.Context, e *tracking.TriageEvent)
 	if err := resolveTriageLinks(ctx, c, e); err != nil {
 		return err
 	}
+	return c.recordTriageEventTx(ctx, c.db, e)
+}
+
+func (c *Corpus) recordTriageEventTx(ctx context.Context, db dbExecer, e *tracking.TriageEvent) error {
 	now := encodeTime(time.Now())
 	createdAt := encodeTime(e.CreatedAt)
 	updatedAt := encodeTime(e.UpdatedAt)
@@ -35,7 +46,7 @@ func (c *Corpus) RecordTriageEvent(ctx context.Context, e *tracking.TriageEvent)
 	if sourceEventAt == 0 {
 		sourceEventAt = now
 	}
-	_, err := c.db.ExecContext(ctx, `
+	_, err := db.ExecContext(ctx, `
 		INSERT INTO triage_events (id, target_kind, target_ref, outcome, reason, lens, source_event_at, created_at, updated_at, repository_id, thread_id, investigation_id, opportunity_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
@@ -270,6 +281,10 @@ func (c *Corpus) SaveContribution(ctx context.Context, item *tracking.Contributi
 		}
 		return fmt.Errorf("resolve contribution opportunity: %w", err)
 	}
+	return c.saveContributionTx(ctx, c.db, item)
+}
+
+func (c *Corpus) saveContributionTx(ctx context.Context, db dbExecer, item *tracking.Contribution) error {
 	payload, err := marshalContributionPayload(item.Metadata)
 	if err != nil {
 		return err
@@ -288,7 +303,7 @@ func (c *Corpus) SaveContribution(ctx context.Context, item *tracking.Contributi
 	if preparedAt == 0 {
 		preparedAt = now
 	}
-	_, err = c.db.ExecContext(ctx, `
+	_, err = db.ExecContext(ctx, `
 		INSERT INTO contributions (id, opportunity_id, kind, title, body, reference, reference_url, prepared_at, submitted_at, created_at, updated_at, payload)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
@@ -424,6 +439,10 @@ func (c *Corpus) RecordContributionOutcome(ctx context.Context, o *tracking.Cont
 		}
 		return fmt.Errorf("resolve contribution outcome: %w", err)
 	}
+	return c.recordContributionOutcomeTx(ctx, c.db, o)
+}
+
+func (c *Corpus) recordContributionOutcomeTx(ctx context.Context, db dbExecer, o *tracking.ContributionOutcome) error {
 	createdAt := encodeTime(o.CreatedAt)
 	if createdAt == 0 {
 		createdAt = encodeTime(time.Now())
@@ -432,7 +451,7 @@ func (c *Corpus) RecordContributionOutcome(ctx context.Context, o *tracking.Cont
 	if sourceEventAt == 0 {
 		sourceEventAt = createdAt
 	}
-	_, err = c.db.ExecContext(ctx, `
+	_, err := db.ExecContext(ctx, `
 		INSERT INTO contribution_outcomes (id, contribution_id, outcome, reason, source_event_at, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET
@@ -536,7 +555,9 @@ func (c *Corpus) exportContributionOutcomes(ctx context.Context, bundle *trackin
 	return rows.Err()
 }
 
-// ImportLocalMetadata imports a bounded bundle idempotently.
+// ImportLocalMetadata imports a bounded bundle idempotently. All writes happen
+// in a single transaction; any referential or database failure leaves the
+// corpus unchanged.
 func (c *Corpus) ImportLocalMetadata(ctx context.Context, bundle *tracking.Bundle) error {
 	if bundle == nil {
 		return errors.New("bundle is required")
@@ -556,20 +577,69 @@ func (c *Corpus) ImportLocalMetadata(ctx context.Context, bundle *tracking.Bundl
 			return fmt.Errorf("contribution outcome %d is null", i)
 		}
 	}
-	for _, e := range bundle.TriageEvents {
-		if err := c.RecordTriageEvent(ctx, e); err != nil {
+
+	// Resolve triage links and validate contribution/outcome references outside
+	// the write transaction so the transaction contains only upserts and can be
+	// rolled back atomically on any failure.
+	resolvedEvents := make([]*tracking.TriageEvent, len(bundle.TriageEvents))
+	for i, e := range bundle.TriageEvents {
+		cp := *e
+		if err := resolveTriageLinks(ctx, c, &cp); err != nil {
+			return fmt.Errorf("resolve triage event %q: %w", cp.ID, err)
+		}
+		resolvedEvents[i] = &cp
+	}
+
+	for _, item := range bundle.Contributions {
+		if _, err := c.GetOpportunity(ctx, item.OpportunityID); err != nil {
+			if errors.Is(err, investigation.ErrNotFound) {
+				return fmt.Errorf("opportunity %q not found for contribution %q", item.OpportunityID, item.ID)
+			}
+			return fmt.Errorf("resolve contribution %q opportunity: %w", item.ID, err)
+		}
+	}
+
+	contributionIDs := make(map[string]struct{}, len(bundle.Contributions))
+	for _, item := range bundle.Contributions {
+		contributionIDs[item.ID] = struct{}{}
+	}
+	for _, o := range bundle.ContributionOutcomes {
+		if _, ok := contributionIDs[o.ContributionID]; ok {
+			continue
+		}
+		contrib, err := c.GetContribution(ctx, o.ContributionID)
+		if err != nil {
+			return fmt.Errorf("resolve outcome %q contribution: %w", o.ID, err)
+		}
+		if contrib == nil {
+			return fmt.Errorf("contribution %q not found for outcome %q", o.ContributionID, o.ID)
+		}
+	}
+
+	tx, err := c.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin import local metadata: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, e := range resolvedEvents {
+		if err := c.recordTriageEventTx(ctx, tx, e); err != nil {
 			return fmt.Errorf("import triage event %q: %w", e.ID, err)
 		}
 	}
 	for _, item := range bundle.Contributions {
-		if err := c.SaveContribution(ctx, item); err != nil {
+		if err := c.saveContributionTx(ctx, tx, item); err != nil {
 			return fmt.Errorf("import contribution %q: %w", item.ID, err)
 		}
 	}
 	for _, o := range bundle.ContributionOutcomes {
-		if err := c.RecordContributionOutcome(ctx, o); err != nil {
+		if err := c.recordContributionOutcomeTx(ctx, tx, o); err != nil {
 			return fmt.Errorf("import contribution outcome %q: %w", o.ID, err)
 		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit import local metadata: %w", err)
 	}
 	return nil
 }

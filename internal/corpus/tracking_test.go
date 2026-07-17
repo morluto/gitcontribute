@@ -277,6 +277,64 @@ func TestImportLocalMetadataRejectsInvalidBundleBeforeWriting(t *testing.T) {
 	}
 }
 
+func TestImportLocalMetadataIsAtomicOnReferentialFailure(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	svc := tracking.NewService(c)
+	invSvc := investigation.NewService(c, c)
+
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatalf("apply repository: %v", err)
+	}
+	_ = repo
+
+	inv, err := invSvc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, "sha", "")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+	h, err := invSvc.RecordHypothesis(ctx, inv.ID, "panic", "desc", investigation.CategoryBug, nil)
+	if err != nil {
+		t.Fatalf("record hypothesis: %v", err)
+	}
+	opp, err := invSvc.PromoteOpportunity(ctx, h.ID, "panic", "parser", "crash", "small", 0.8)
+	if err != nil {
+		t.Fatalf("promote opportunity: %v", err)
+	}
+
+	bundle := &tracking.Bundle{
+		TriageEvents: []*tracking.TriageEvent{
+			{ID: "t1", TargetKind: tracking.TargetRepository, TargetRef: "owner/repo", Outcome: tracking.OutcomeSaved},
+		},
+		Contributions: []*tracking.Contribution{
+			{ID: "c1", OpportunityID: opp.ID, Kind: "issue", Title: "t"},
+		},
+		ContributionOutcomes: []*tracking.ContributionOutcome{
+			{ID: "o1", ContributionID: "missing", Outcome: tracking.OutcomeSubmitted},
+		},
+	}
+
+	if err := svc.ImportLocalMetadata(ctx, bundle); err == nil {
+		t.Fatal("expected error for missing contribution reference")
+	}
+
+	events, err := svc.ListTriageEvents(ctx, tracking.TriageEventFilter{})
+	if err != nil {
+		t.Fatalf("list triage events: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("triage events written before rollback: %d", len(events))
+	}
+
+	contribs, err := svc.ListContributions(ctx, tracking.ContributionFilter{})
+	if err != nil {
+		t.Fatalf("list contributions: %v", err)
+	}
+	if len(contribs) != 0 {
+		t.Fatalf("contributions written before rollback: %d", len(contribs))
+	}
+}
+
 func TestExportRedactsSecretsAndLocalPaths(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
