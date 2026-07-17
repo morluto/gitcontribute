@@ -7,7 +7,6 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/health"
 	"github.com/morluto/gitcontribute/internal/lens"
-	"github.com/morluto/gitcontribute/internal/radar"
 )
 
 // Service is the product-owned application interface used by the CLI and MCP
@@ -20,18 +19,6 @@ type Service interface {
 	Search(ctx context.Context, query string, opts SearchOptions) (*SearchResult, error)
 	Dossier(ctx context.Context, repo RepoRef) (*DossierResult, error)
 	Index(ctx context.Context, repo RepoRef, path string) (*IndexResult, error)
-}
-
-// RadarService exposes explainable contribution ranking as a separate,
-// optional offline-read capability.
-type RadarService interface {
-	ContributionRadar(ctx context.Context, opts RadarOptions) (*radar.Report, error)
-}
-
-// RadarOptions scopes one bounded, offline contribution ranking.
-type RadarOptions struct {
-	Repo  RepoRef
-	Limit int
 }
 
 // MCPRunner is the product-owned boundary for running an MCP server. The CLI
