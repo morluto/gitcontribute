@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,6 +88,8 @@ type fakeService struct {
 	}
 	lastDossierArg     cli.RepoRef
 	lastIndexRepo      cli.RepoRef
+	setupResult        *cli.SetupReport
+	lastSetup          cli.SetupOptions
 	lastIndexPath      string
 	lastAcquireRemote  string
 	lastHealthOpts     health.Options
@@ -118,6 +121,14 @@ type fakeService struct {
 	lastImportMetadataArgs     cli.MetadataImportOptions
 
 	err error
+}
+
+func (f *fakeService) Setup(_ context.Context, opts cli.SetupOptions) (*cli.SetupReport, error) {
+	f.lastSetup = opts
+	if f.setupResult != nil {
+		return f.setupResult, nil
+	}
+	return &cli.SetupReport{Operation: "setup", DryRun: opts.DryRun, Steps: []cli.SetupStep{{Name: "codex", Status: "configured"}}}, nil
 }
 
 type startInvArgs struct {
@@ -921,6 +932,32 @@ func TestUnknownCommand(t *testing.T) {
 	c, _, _ := newTestCLI(&fakeService{}, nil)
 	err := c.Run(context.Background(), []string{"nope"})
 	requireCLIError(t, err, cli.ExitUsage)
+}
+
+func TestSetupNonInteractiveJSON(t *testing.T) {
+	svc := &fakeService{setupResult: &cli.SetupReport{Operation: "setup", DryRun: true, Launcher: "npx ...", Steps: []cli.SetupStep{{Name: "codex", Status: "would configure"}}}}
+	var out bytes.Buffer
+	c := cli.New(svc, &fakeMCPRunner{}, &out, io.Discard)
+	if err := c.Run(context.Background(), []string{"setup", "--codex", "--token-source", "none", "--dry-run", "--json"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(svc.lastSetup.Clients) != 1 || svc.lastSetup.Clients[0] != "codex" || !svc.lastSetup.DryRun {
+		t.Fatalf("options = %+v", svc.lastSetup)
+	}
+	if !strings.Contains(out.String(), `"would configure"`) {
+		t.Fatalf("output = %s", out.String())
+	}
+}
+
+func TestRemoveAllNonInteractive(t *testing.T) {
+	svc := &fakeService{setupResult: &cli.SetupReport{Operation: "remove", Steps: []cli.SetupStep{{Name: "codex", Status: "removed"}}}}
+	c := cli.New(svc, &fakeMCPRunner{}, io.Discard, io.Discard)
+	if err := c.Run(context.Background(), []string{"remove", "--all-clients", "--yes"}); err != nil {
+		t.Fatal(err)
+	}
+	if !svc.lastSetup.Remove || !svc.lastSetup.AllClients {
+		t.Fatalf("options = %+v", svc.lastSetup)
+	}
 }
 
 func TestInvestigationStartShowAndList(t *testing.T) {

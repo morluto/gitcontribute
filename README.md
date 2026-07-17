@@ -14,16 +14,37 @@ persistence invariants, and side-effect rules. See
 
 ## Install
 
-GitContribute requires Go 1.26 or newer. A C toolchain is not required because
-the SQLite driver is pure Go.
+The recommended installation and onboarding command requires Node.js 18 or
+newer. It runs the native GitContribute binary bundled in the npm package; Go
+and a C toolchain are not required.
+
+```sh
+npx gitcontribute@latest setup
+```
+
+Install a persistent shell command instead:
+
+```sh
+npm install --global gitcontribute@latest
+gitcontribute setup
+```
+
+Projects that want to pin the CLI version can install it as a development
+dependency and invoke it through `npx` or package scripts:
+
+```sh
+npm install --save-dev gitcontribute
+npx gitcontribute setup --codex --yes
+```
+
+The npm package has no install lifecycle and does not download an executable at
+install time. It contains native binaries for macOS ARM64/x64, Linux
+ARM64/x64, and Windows x64.
+
+Developers with Go 1.26 or newer can install from source or build a checkout:
 
 ```sh
 go install github.com/morluto/gitcontribute/cmd/gitcontribute@latest
-```
-
-Or build a checkout:
-
-```sh
 go build -o gitcontribute ./cmd/gitcontribute
 ```
 
@@ -35,17 +56,39 @@ You also need a `git` executable. Optional helpers that the CLI can use:
 ## Quick start
 
 ```sh
-gitcontribute init
-gitcontribute configure --token-source=env --token-source-key=GITHUB_TOKEN
-gitcontribute sync owner/repo
-gitcontribute search threads "connection timeout" --repo owner/repo --json
-gitcontribute dossier build owner/repo --json
+npx gitcontribute@latest setup
+npx gitcontribute@latest sync owner/repo
+npx gitcontribute@latest search threads "connection timeout" --repo owner/repo --json
+npx gitcontribute@latest dossier build owner/repo --json
 ```
 
 Run `gitcontribute --help` and `gitcontribute <command> --help` for full flag
 reference.
 
 ## Initialization, configuration, and authentication
+
+`gitcontribute setup` is the normal entry point. It initializes the local
+corpus, selects a GitHub authentication source, and registers the MCP server
+with Codex and/or Claude Code. It remains local-only: adding `--repo owner/repo`
+creates a discovery source but does not contact GitHub or start a sync.
+
+```sh
+gitcontribute setup                              # interactive
+gitcontribute setup --codex --yes               # configure Codex
+gitcontribute setup --all-clients --yes          # configure every supported client
+gitcontribute setup --codex --mcp-version latest --yes
+gitcontribute setup --token-source env \
+  --token-source-key GITHUB_TOKEN --yes
+gitcontribute setup --codex --dry-run --json     # inspect without writing
+gitcontribute remove --all-clients --yes         # remove only MCP registrations
+gitcontribute upgrade --check                    # compare with the latest npm release
+gitcontribute upgrade --yes                      # update a global npm installation
+```
+
+When setup runs through `npx`, client configuration launches a released npm
+version rather than recording an ephemeral npm-cache path. `remove` never
+deletes the corpus or GitContribute application configuration. See
+[the onboarding design](docs/onboarding.md) for the complete contract.
 
 `gitcontribute init` creates the default corpus database and directories if they
 do not exist. It does not fetch anything from GitHub.

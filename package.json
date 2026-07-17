@@ -1,0 +1,35 @@
+{
+  "name": "gitcontribute",
+  "version": "0.1.0",
+  "description": "Local-first GitHub contribution research workbench",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/morluto/gitcontribute.git"
+  },
+  "homepage": "https://github.com/morluto/gitcontribute#readme",
+  "bugs": "https://github.com/morluto/gitcontribute/issues",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "gitcontribute": "npm/bin/gitcontribute.cjs"
+  },
+  "files": [
+    "npm/bin",
+    "npm/platforms.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test:npm": "node --test npm/*.test.mjs",
+    "build:npm": "node scripts/build-npm-package.mjs"
+  },
+  "keywords": [
+    "github",
+    "mcp",
+    "cli",
+    "open-source",
+    "contributions"
+  ]
+}

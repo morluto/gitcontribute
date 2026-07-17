@@ -16,7 +16,8 @@ import (
 	"github.com/morluto/gitcontribute/internal/tui"
 )
 
-const version = "dev"
+// version is replaced from the release tag with -ldflags.
+var version = "dev"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

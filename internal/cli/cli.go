@@ -62,6 +62,9 @@ func (c *CLI) SetInput(input io.Reader) {
 }
 
 type rootCmd struct {
+	Setup         setupCmd         `cmd:"" help:"Set up GitContribute and coding-agent integrations"`
+	Remove        removeCmd        `cmd:"" help:"Remove GitContribute coding-agent integrations"`
+	Upgrade       upgradeCmd       `cmd:"" help:"Check for or install the latest release"`
 	Init          initCmd          `cmd:"" help:"Initialize the local corpus"`
 	Configure     configureCmd     `cmd:"" help:"Inspect or update typed configuration"`
 	Metadata      metadataCmd      `cmd:"" help:"Show application metadata and capabilities"`
@@ -103,6 +106,34 @@ type rootCmd struct {
 	Tracking      trackingCmd      `cmd:"" help:"Export or import local tracking metadata"`
 	MCP           mcpCmd           `cmd:"" name:"mcp" help:"Run the MCP server"`
 	TUI           tuiCmd           `cmd:"" name:"tui" help:"Browse the local corpus interactively"`
+}
+
+type setupCmd struct {
+	Codex          bool   `name:"codex" help:"Configure Codex"`
+	Claude         bool   `name:"claude" help:"Configure Claude Code"`
+	AllClients     bool   `name:"all-clients" help:"Configure every supported client"`
+	TokenSource    string `name:"token-source" help:"GitHub token source (none, env, gh-cli, or keyring)"`
+	TokenSourceKey string `name:"token-source-key" help:"Environment variable or keyring entry name"`
+	Repository     string `name:"repo" help:"Add an initial OWNER/REPO source without syncing it"`
+	MCPVersion     string `name:"mcp-version" help:"npm version used by MCP clients (defaults to this release)"`
+	Yes            bool   `name:"yes" short:"y" help:"Accept the plan without prompting"`
+	DryRun         bool   `name:"dry-run" help:"Show planned changes without writing"`
+	JSON           bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type removeCmd struct {
+	Codex      bool `name:"codex" help:"Remove the Codex registration"`
+	Claude     bool `name:"claude" help:"Remove the Claude Code registration"`
+	AllClients bool `name:"all-clients" help:"Remove every supported registration"`
+	Yes        bool `name:"yes" short:"y" help:"Accept the plan without prompting"`
+	DryRun     bool `name:"dry-run" help:"Show planned changes without writing"`
+	JSON       bool `name:"json" help:"Print the result as JSON"`
+}
+
+type upgradeCmd struct {
+	Check bool `name:"check" help:"Check the latest npm release without installing"`
+	Yes   bool `name:"yes" short:"y" help:"Install the latest release without prompting"`
+	JSON  bool `name:"json" help:"Print the result as JSON"`
 }
 
 type initCmd struct {
@@ -715,6 +746,12 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	}
 
 	switch cmd {
+	case "setup":
+		return c.runSetupCommand(ctx, &cli.Setup)
+	case "remove":
+		return c.runRemoveCommand(ctx, &cli.Remove)
+	case "upgrade":
+		return c.runUpgrade(ctx, &cli.Upgrade)
 	case "init":
 		return c.runInit(ctx, &cli.Init)
 	case "configure":
@@ -800,6 +837,257 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown command: %s", cmd))
 	}
+}
+
+func (c *CLI) runUpgrade(ctx context.Context, cmd *upgradeCmd) error {
+	service, ok := c.svc.(UpgradeService)
+	if !ok {
+		return NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	if !cmd.Check && !cmd.Yes {
+		if !c.interactiveInput() {
+			return NewCLIError(ExitUsage, errors.New("interactive upgrade requires a terminal; pass --check or --yes"))
+		}
+		confirmed, err := c.confirmSetup("Install the latest global npm release")
+		if err != nil {
+			return NewCLIError(ExitUsage, err)
+		}
+		if !confirmed {
+			_, _ = fmt.Fprintln(c.stderr, "Upgrade cancelled.")
+			return nil
+		}
+		cmd.Yes = true
+	}
+	report, err := service.Upgrade(ctx, UpgradeOptions{Check: cmd.Check, Yes: cmd.Yes})
+	if err != nil {
+		return NewCLIError(ExitGeneral, err)
+	}
+	if cmd.JSON {
+		return writeJSON(c.stdout, report)
+	}
+	_, err = fmt.Fprintf(c.stdout, "Upgrade [%s]: %s", report.Context, report.Status)
+	if report.Latest != "" {
+		_, err = fmt.Fprintf(c.stdout, " (current %s, latest %s)", report.Current, report.Latest)
+	}
+	if report.Command != "" {
+		_, err = fmt.Fprintf(c.stdout, "\n%s", report.Command)
+	}
+	if err == nil {
+		_, err = fmt.Fprintln(c.stdout)
+	}
+	return err
+}
+
+func (c *CLI) setupService() (SetupService, error) {
+	service, ok := c.svc.(SetupService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
+	clients := selectedSetupClients(cmd.Codex, cmd.Claude)
+	all := cmd.AllClients
+	needsPrompt := !cmd.Yes && ((len(clients) == 0 && !all) || cmd.TokenSource == "" || !cmd.DryRun)
+	if needsPrompt && !c.interactiveInput() {
+		return NewCLIError(ExitUsage, errors.New("interactive setup requires a terminal; pass client flags and --yes"))
+	}
+	if len(clients) == 0 && !all {
+		if !cmd.Yes {
+			selected, err := c.promptClients("Set up")
+			if err != nil {
+				return NewCLIError(ExitUsage, err)
+			}
+			clients = selected
+		}
+	}
+	if cmd.TokenSource == "" && !cmd.Yes {
+		value, err := c.promptTokenSource()
+		if err != nil {
+			return NewCLIError(ExitUsage, err)
+		}
+		cmd.TokenSource = value
+		if value == "env" && cmd.TokenSourceKey == "" {
+			cmd.TokenSourceKey = "GITHUB_TOKEN"
+		}
+	}
+	if !cmd.Yes && !cmd.DryRun {
+		ok, err := c.confirmSetup("Apply setup changes")
+		if err != nil {
+			return NewCLIError(ExitUsage, err)
+		}
+		if !ok {
+			_, _ = fmt.Fprintln(c.stderr, "Setup cancelled; no changes were made.")
+			return nil
+		}
+	}
+	return c.executeSetup(ctx, SetupOptions{Clients: clients, AllClients: all, TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey, Repository: cmd.Repository, DryRun: cmd.DryRun, Version: cmd.MCPVersion}, cmd.JSON)
+}
+
+func (c *CLI) runRemoveCommand(ctx context.Context, cmd *removeCmd) error {
+	clients := selectedSetupClients(cmd.Codex, cmd.Claude)
+	all := cmd.AllClients
+	needsPrompt := !cmd.Yes && ((len(clients) == 0 && !all) || !cmd.DryRun)
+	if needsPrompt && !c.interactiveInput() {
+		return NewCLIError(ExitUsage, errors.New("interactive removal requires a terminal; pass client flags and --yes"))
+	}
+	if len(clients) == 0 && !all {
+		if !cmd.Yes {
+			selected, err := c.promptClients("Remove")
+			if err != nil {
+				return NewCLIError(ExitUsage, err)
+			}
+			clients = selected
+		}
+	}
+	if !cmd.Yes && !cmd.DryRun {
+		ok, err := c.confirmSetup("Remove selected registrations")
+		if err != nil {
+			return NewCLIError(ExitUsage, err)
+		}
+		if !ok {
+			_, _ = fmt.Fprintln(c.stderr, "Removal cancelled; no changes were made.")
+			return nil
+		}
+	}
+	return c.executeSetup(ctx, SetupOptions{Remove: true, Clients: clients, AllClients: all, DryRun: cmd.DryRun}, cmd.JSON)
+}
+
+func (c *CLI) interactiveInput() bool {
+	file, ok := c.stdin.(*os.File)
+	if !ok {
+		return true
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+func selectedSetupClients(codex, claude bool) []string {
+	var clients []string
+	if codex {
+		clients = append(clients, "codex")
+	}
+	if claude {
+		clients = append(clients, "claude")
+	}
+	return clients
+}
+
+func (c *CLI) promptClients(action string) ([]string, error) {
+	_, _ = fmt.Fprintf(c.stderr, "%s which clients? [codex,claude]: ", action)
+	line, err := c.promptLine()
+	if err != nil {
+		return nil, err
+	}
+	line = strings.TrimSpace(line)
+	if line == "" {
+		line = "codex,claude"
+	}
+	var clients []string
+	for _, value := range strings.Split(line, ",") {
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value != "codex" && value != "claude" {
+			return nil, fmt.Errorf("unsupported client %q; choose codex and/or claude", value)
+		}
+		clients = append(clients, value)
+	}
+	return clients, nil
+}
+
+func (c *CLI) promptTokenSource() (string, error) {
+	_, _ = fmt.Fprint(c.stderr, "GitHub authentication [gh-cli/env/none] (auto): ")
+	line, err := c.promptLine()
+	if err != nil {
+		return "", err
+	}
+	value := strings.ToLower(strings.TrimSpace(line))
+	if value == "" {
+		return "", nil
+	}
+	if value != "gh-cli" && value != "env" && value != "none" && value != "keyring" {
+		return "", fmt.Errorf("unsupported token source %q", value)
+	}
+	return value, nil
+}
+
+func (c *CLI) confirmSetup(prompt string) (bool, error) {
+	_, _ = fmt.Fprintf(c.stderr, "%s? [Y/n]: ", prompt)
+	line, err := c.promptLine()
+	if err != nil {
+		return false, err
+	}
+	line = strings.ToLower(strings.TrimSpace(line))
+	return line == "" || line == "y" || line == "yes", nil
+}
+
+func (c *CLI) promptLine() (string, error) {
+	var b strings.Builder
+	buffer := []byte{0}
+	for {
+		n, err := c.stdin.Read(buffer)
+		if n > 0 {
+			if buffer[0] == '\n' {
+				return strings.TrimSuffix(b.String(), "\r"), nil
+			}
+			b.WriteByte(buffer[0])
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return b.String(), nil
+			}
+			return "", err
+		}
+	}
+}
+
+func (c *CLI) executeSetup(ctx context.Context, opts SetupOptions, jsonOutput bool) error {
+	service, err := c.setupService()
+	if err != nil {
+		return err
+	}
+	report, err := service.Setup(ctx, opts)
+	if err != nil {
+		return NewCLIError(ExitGeneral, err)
+	}
+	if jsonOutput {
+		enc := json.NewEncoder(c.stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			return NewCLIError(ExitGeneral, err)
+		}
+	} else {
+		_, _ = fmt.Fprintln(c.stdout, setupHuman(report))
+	}
+	if report.HasFailures() {
+		return NewCLIError(ExitGeneral, errors.New("one or more setup steps failed"))
+	}
+	return nil
+}
+
+func setupHuman(report *SetupReport) string {
+	var b strings.Builder
+	operation := report.Operation
+	if operation == "" {
+		operation = "setup"
+	}
+	fmt.Fprintf(&b, "%s%s", strings.ToUpper(operation[:1]), operation[1:])
+	if report.DryRun {
+		b.WriteString(" plan")
+	}
+	for _, step := range report.Steps {
+		fmt.Fprintf(&b, "\n- %s [%s]", step.Name, step.Status)
+		if step.Path != "" {
+			fmt.Fprintf(&b, ": %s", step.Path)
+		}
+		if step.Message != "" {
+			fmt.Fprintf(&b, " — %s", step.Message)
+		}
+	}
+	if report.Launcher != "" {
+		fmt.Fprintf(&b, "\nMCP launcher: %s", report.Launcher)
+	}
+	return b.String()
 }
 
 func normalizeCompatibilityArgs(args []string) []string {
