@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/cli"
@@ -68,6 +69,45 @@ func TestSetupDryRunWritesNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".codex", "config.toml")); !os.IsNotExist(err) {
 		t.Fatalf("dry run wrote client config: %v", err)
+	}
+}
+
+func TestSetupTerminalOnlyDryRunNeedsNoDetectedClientOrNPMProcess(t *testing.T) {
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"),
+		"XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	t.Setenv("PATH", "")
+
+	report, err := svc.Setup(context.Background(), cli.SetupOptions{
+		InstallCLI:  true,
+		SkipMCP:     true,
+		TokenSource: "none",
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Launcher != "" {
+		t.Fatalf("launcher = %q", report.Launcher)
+	}
+	foundTerminal := false
+	for _, step := range report.Steps {
+		if step.Name == "terminal" {
+			foundTerminal = step.Status == "would install" && strings.Contains(step.Message, "gitcontribute@1.2.3")
+		}
+	}
+	if !foundTerminal {
+		t.Fatalf("report = %+v", report)
+	}
+	if _, err := os.Stat(filepath.Join(home, "config")); !os.IsNotExist(err) {
+		t.Fatalf("dry run wrote configuration: %v", err)
 	}
 }
 

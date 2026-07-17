@@ -90,6 +90,7 @@ type fakeService struct {
 	lastIndexRepo      cli.RepoRef
 	setupResult        *cli.SetupReport
 	lastSetup          cli.SetupOptions
+	setupCalls         []cli.SetupOptions
 	lastIndexPath      string
 	lastAcquireRemote  string
 	lastHealthOpts     health.Options
@@ -125,6 +126,7 @@ type fakeService struct {
 
 func (f *fakeService) Setup(_ context.Context, opts cli.SetupOptions) (*cli.SetupReport, error) {
 	f.lastSetup = opts
+	f.setupCalls = append(f.setupCalls, opts)
 	if f.setupResult != nil {
 		return f.setupResult, nil
 	}
@@ -946,17 +948,6 @@ func TestSetupNonInteractiveJSON(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"would configure"`) {
 		t.Fatalf("output = %s", out.String())
-	}
-}
-
-func TestRemoveAllNonInteractive(t *testing.T) {
-	svc := &fakeService{setupResult: &cli.SetupReport{Operation: "remove", Steps: []cli.SetupStep{{Name: "codex", Status: "removed"}}}}
-	c := cli.New(svc, &fakeMCPRunner{}, io.Discard, io.Discard)
-	if err := c.Run(context.Background(), []string{"remove", "--all-clients", "--yes"}); err != nil {
-		t.Fatal(err)
-	}
-	if !svc.lastSetup.Remove || !svc.lastSetup.AllClients {
-		t.Fatalf("options = %+v", svc.lastSetup)
 	}
 }
 

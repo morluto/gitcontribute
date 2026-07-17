@@ -50,19 +50,47 @@ Run the guided setup with Node.js 18 or newer:
 npx gitcontribute@latest setup
 ```
 
-Then sync a repository, rank contribution candidates, and search the local corpus:
+The interactive wizard offers two independent capabilities:
+
+- a persistent `gitcontribute` command for the CLI and TUI;
+- MCP registration for Codex and/or Claude Code.
+
+Installing the terminal app is the recommended default. The wizard shows the
+exact global npm command before applying changes. MCP-only setup remains
+available and does not require a persistent CLI installation.
+
+Then launch the TUI, sync a repository, rank contribution candidates, and
+search the local corpus:
 
 ```sh
-npx gitcontribute@latest sync owner/repo
-npx gitcontribute@latest radar owner/repo --limit 10
-npx gitcontribute@latest search threads "connection timeout" \
+gitcontribute tui
+gitcontribute sync owner/repo
+gitcontribute radar owner/repo --limit 10
+gitcontribute search threads "connection timeout" \
   --repo owner/repo --json
-npx gitcontribute@latest dossier build owner/repo --json
+gitcontribute dossier build owner/repo --json
 ```
 
 `setup` initializes the corpus, helps select a GitHub authentication source,
-and can register the MCP server with Codex and Claude Code. Adding a repository
-during setup does **not** contact GitHub or begin a sync.
+can install the terminal app, and can register the MCP server with Codex and
+Claude Code. Adding a repository during setup does **not** contact GitHub or
+begin a sync.
+
+For non-interactive setup, terminal installation must be explicitly selected:
+
+```sh
+# Recommended: terminal app plus Codex MCP
+npx gitcontribute@latest setup --install-cli --codex --yes
+
+# Terminal app only
+npx gitcontribute@latest setup --install-cli --no-mcp --yes
+
+# MCP only; leaves the terminal command uninstalled
+npx gitcontribute@latest setup --codex --yes
+```
+
+When terminal installation is skipped, continue to prefix direct commands with
+`npx gitcontribute@latest`.
 
 <details>
 <summary><strong>Other installation options</strong></summary>
@@ -73,6 +101,10 @@ during setup does **not** contact GitHub or begin a sync.
 npm install --global gitcontribute@latest
 gitcontribute setup
 ```
+
+To remove a global npm installation later, run
+`npm uninstall --global gitcontribute`. The `gitcontribute remove` command only
+removes MCP registrations; it does not uninstall the terminal app.
 
 ### Pin a project version
 

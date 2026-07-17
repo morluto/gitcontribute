@@ -17,6 +17,8 @@ import (
 
 const serverName = "gitcontribute"
 
+// Operation identifies whether client-owned MCP entries are configured or
+// removed.
 type Operation string
 
 const (
@@ -24,6 +26,7 @@ const (
 	Remove    Operation = "remove"
 )
 
+// Client identifies a supported coding-agent configuration adapter.
 type Client string
 
 const (
@@ -31,13 +34,19 @@ const (
 	Claude Client = "claude"
 )
 
+// AllClients lists supported adapters in deterministic application order.
 var AllClients = []Client{Codex, Claude}
 
+// Launcher is the exact process command stored in a coding client's MCP
+// configuration.
 type Launcher struct {
 	Command string   `json:"command"`
 	Args    []string `json:"args"`
 }
 
+// Options controls coding-client MCP registration. Env is authoritative when
+// non-nil, allowing callers to distinguish ephemeral npx execution from a
+// persistent executable without retaining a cache path.
 type Options struct {
 	Operation  Operation
 	Clients    []Client
@@ -49,6 +58,7 @@ type Options struct {
 	Executable string
 }
 
+// Result describes the registration effect for one coding client.
 type Result struct {
 	Client Client `json:"client"`
 	Path   string `json:"path"`
@@ -56,6 +66,7 @@ type Result struct {
 	Error  string `json:"error,omitempty"`
 }
 
+// Report contains the resolved launcher and ordered per-client effects.
 type Report struct {
 	Operation Operation `json:"operation"`
 	DryRun    bool      `json:"dry_run"`
@@ -63,6 +74,8 @@ type Report struct {
 	Results   []Result  `json:"results"`
 }
 
+// Detect returns supported coding clients whose configuration directories are
+// present under home. Detection performs no writes.
 func Detect(home string) []Client {
 	var out []Client
 	if exists(filepath.Join(home, ".codex")) {
@@ -110,6 +123,10 @@ func CheckRegistration(client Client, home string) (bool, string, error) {
 	}
 }
 
+// Run validates every selected client, resolves one shared launcher, and then
+// applies or plans each client-owned registration. Dry-run mode performs no
+// writes. Per-client parse/write failures are returned in Report.Results so
+// independent clients can be reported together.
 func Run(opts Options) (Report, error) {
 	if opts.Operation == "" {
 		opts.Operation = Configure
@@ -164,20 +181,15 @@ func selectedClients(opts Options) ([]Client, error) {
 	return out, nil
 }
 
+// ResolveLauncher returns a durable MCP command for the current installation
+// context. Ephemeral npm execution uses a registry-safe, versioned npx command;
+// persistent/source execution uses an absolute executable path. It never saves
+// os.Executable when that path points into npx's disposable cache.
 func ResolveLauncher(opts Options) (Launcher, error) {
-	getenv := func(key string) string {
-		if opts.Env != nil {
-			return opts.Env[key]
-		}
-		return os.Getenv(key)
-	}
-	if getenv("npm_execpath") != "" || getenv("npm_lifecycle_event") == "npx" || getenv("npm_command") == "exec" {
-		version := strings.TrimPrefix(strings.TrimSpace(opts.Version), "v")
-		if version == "" || version == "dev" {
-			version = "latest"
-		}
-		if !npmVersion.MatchString(version) {
-			return Launcher{}, fmt.Errorf("invalid MCP npm version %q", version)
+	if IsNpxEnvironment(opts.Env) {
+		version, err := ResolveNPMVersion(opts.Version)
+		if err != nil {
+			return Launcher{}, err
 		}
 		return Launcher{Command: npmCommand(), Args: []string{"--yes", "--package=gitcontribute@" + version, "--", "gitcontribute", "mcp"}}, nil
 	}
@@ -194,6 +206,33 @@ func ResolveLauncher(opts Options) (Launcher, error) {
 		return Launcher{}, fmt.Errorf("resolve executable path: %w", err)
 	}
 	return Launcher{Command: executable, Args: []string{"mcp"}}, nil
+}
+
+// IsNpxEnvironment reports whether npm is providing an ephemeral execution
+// context rather than a persistent package installation. A non-nil env map is
+// authoritative, including when a key is deliberately absent.
+func IsNpxEnvironment(env map[string]string) bool {
+	getenv := func(key string) string {
+		if env != nil {
+			return env[key]
+		}
+		return os.Getenv(key)
+	}
+	return getenv("npm_execpath") != "" || getenv("npm_lifecycle_event") == "npx" || getenv("npm_command") == "exec"
+}
+
+// ResolveNPMVersion returns a registry-safe package version for setup launchers
+// and persistent installation commands. It removes one release-tag "v" prefix
+// and maps empty or development versions to the explicit "latest" tag.
+func ResolveNPMVersion(version string) (string, error) {
+	version = strings.TrimPrefix(strings.TrimSpace(version), "v")
+	if version == "" || version == "dev" {
+		version = "latest"
+	}
+	if !npmVersion.MatchString(version) {
+		return "", fmt.Errorf("invalid npm version %q", version)
+	}
+	return version, nil
 }
 
 func npmCommand() string {

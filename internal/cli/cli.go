@@ -114,6 +114,8 @@ type setupCmd struct {
 	Codex          bool   `name:"codex" help:"Configure Codex"`
 	Claude         bool   `name:"claude" help:"Configure Claude Code"`
 	AllClients     bool   `name:"all-clients" help:"Configure every supported client"`
+	InstallCLI     bool   `name:"install-cli" help:"Install a persistent gitcontribute command for the CLI and TUI"`
+	NoMCP          bool   `name:"no-mcp" help:"Skip coding-agent MCP configuration"`
 	TokenSource    string `name:"token-source" help:"GitHub token source (none, env, gh-cli, or keyring)"`
 	TokenSourceKey string `name:"token-source-key" help:"Environment variable or keyring entry name"`
 	Repository     string `name:"repo" help:"Add an initial OWNER/REPO source without syncing it"`
@@ -837,45 +839,6 @@ func (c *CLI) setupService() (SetupService, error) {
 	return service, nil
 }
 
-func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
-	clients := selectedSetupClients(cmd.Codex, cmd.Claude)
-	all := cmd.AllClients
-	needsPrompt := !cmd.Yes && ((len(clients) == 0 && !all) || cmd.TokenSource == "" || !cmd.DryRun)
-	if needsPrompt && !c.interactiveInput() {
-		return NewCLIError(ExitUsage, errors.New("interactive setup requires a terminal; pass client flags and --yes"))
-	}
-	if len(clients) == 0 && !all {
-		if !cmd.Yes {
-			selected, err := c.promptClients("Set up")
-			if err != nil {
-				return NewCLIError(ExitUsage, err)
-			}
-			clients = selected
-		}
-	}
-	if cmd.TokenSource == "" && !cmd.Yes {
-		value, err := c.promptTokenSource()
-		if err != nil {
-			return NewCLIError(ExitUsage, err)
-		}
-		cmd.TokenSource = value
-		if value == "env" && cmd.TokenSourceKey == "" {
-			cmd.TokenSourceKey = "GITHUB_TOKEN"
-		}
-	}
-	if !cmd.Yes && !cmd.DryRun {
-		ok, err := c.confirmSetup("Apply setup changes")
-		if err != nil {
-			return NewCLIError(ExitUsage, err)
-		}
-		if !ok {
-			_, _ = fmt.Fprintln(c.stderr, "Setup cancelled; no changes were made.")
-			return nil
-		}
-	}
-	return c.executeSetup(ctx, SetupOptions{Clients: clients, AllClients: all, TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey, Repository: cmd.Repository, DryRun: cmd.DryRun, Version: cmd.MCPVersion}, cmd.JSON)
-}
-
 func (c *CLI) runRemoveCommand(ctx context.Context, cmd *removeCmd) error {
 	clients := selectedSetupClients(cmd.Codex, cmd.Claude)
 	all := cmd.AllClients
@@ -885,7 +848,7 @@ func (c *CLI) runRemoveCommand(ctx context.Context, cmd *removeCmd) error {
 	}
 	if len(clients) == 0 && !all {
 		if !cmd.Yes {
-			selected, err := c.promptClients("Remove")
+			selected, err := c.promptClients("Remove", false)
 			if err != nil {
 				return NewCLIError(ExitUsage, err)
 			}
@@ -925,8 +888,14 @@ func selectedSetupClients(codex, claude bool) []string {
 	return clients
 }
 
-func (c *CLI) promptClients(action string) ([]string, error) {
-	_, _ = fmt.Fprintf(c.stderr, "%s which clients? [codex,claude]: ", action)
+func (c *CLI) promptClients(action string, allowNone bool) ([]string, error) {
+	choices := "codex,claude"
+	if allowNone {
+		choices += ",none"
+	}
+	if _, err := fmt.Fprintf(c.stderr, "%s which MCP clients? [%s]: ", action, choices); err != nil {
+		return nil, fmt.Errorf("write MCP client prompt: %w", err)
+	}
 	line, err := c.promptLine()
 	if err != nil {
 		return nil, err
@@ -934,6 +903,9 @@ func (c *CLI) promptClients(action string) ([]string, error) {
 	line = strings.TrimSpace(line)
 	if line == "" {
 		line = "codex,claude"
+	}
+	if allowNone && strings.EqualFold(line, "none") {
+		return nil, nil
 	}
 	var clients []string
 	for _, value := range strings.Split(line, ",") {

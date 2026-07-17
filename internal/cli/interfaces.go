@@ -40,40 +40,6 @@ type ControlService interface {
 	Doctor(ctx context.Context) (*DoctorResult, error)
 }
 
-// SetupService exposes local onboarding and client-registration capabilities.
-// Setup may write local configuration and initialize the corpus, but it must not
-// perform GitHub network access or execute repository-controlled code.
-type SetupService interface {
-	Setup(ctx context.Context, opts SetupOptions) (*SetupReport, error)
-}
-
-type SetupOptions struct {
-	Remove         bool
-	Clients        []string
-	AllClients     bool
-	TokenSource    string
-	TokenSourceKey string
-	Repository     string
-	DryRun         bool
-	Version        string
-	Executable     string
-	Environment    map[string]string
-}
-
-type SetupStep struct {
-	Name    string `json:"name"`
-	Path    string `json:"path,omitempty"`
-	Status  string `json:"status"`
-	Message string `json:"message,omitempty"`
-}
-
-type SetupReport struct {
-	Operation string      `json:"operation"`
-	DryRun    bool        `json:"dry_run"`
-	Launcher  string      `json:"launcher,omitempty"`
-	Steps     []SetupStep `json:"steps"`
-}
-
 type UpgradeService interface {
 	Upgrade(ctx context.Context, opts UpgradeOptions) (*UpgradeReport, error)
 }
@@ -89,18 +55,6 @@ type UpgradeReport struct {
 	Latest  string `json:"latest,omitempty"`
 	Status  string `json:"status"`
 	Command string `json:"command,omitempty"`
-}
-
-func (r *SetupReport) HasFailures() bool {
-	if r == nil {
-		return true
-	}
-	for _, step := range r.Steps {
-		if step.Status == "failed" {
-			return true
-		}
-	}
-	return false
 }
 
 type MetadataResult struct {
