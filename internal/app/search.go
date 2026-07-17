@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -280,19 +281,40 @@ func (s *Service) searchCode(ctx context.Context, c *corpus.Corpus, query string
 
 func (s *Service) searchAll(ctx context.Context, c *corpus.Corpus, query string, opts cli.SearchOptions, now time.Time) (searchResult, error) {
 	var combined []searchMatch
+	total := 0
 	for _, kind := range []string{"threads", "repos", "code"} {
 		part := opts
 		part.Kind = kind
+		// Pull a bounded candidate pool per kind before applying the shared
+		// cross-kind score. Each underlying search still enforces the hard 100
+		// result limit and remains entirely local.
+		part.Limit = 100
 		result, err := s.searchCorpus(ctx, query, part)
 		if err != nil {
 			return searchResult{}, err
 		}
+		total += result.Total
 		combined = append(combined, result.Matches...)
 	}
+	slices.SortStableFunc(combined, func(a, b searchMatch) int {
+		if a.Score > b.Score {
+			return -1
+		}
+		if a.Score < b.Score {
+			return 1
+		}
+		if byRepo := strings.Compare(a.Repo.String(), b.Repo.String()); byRepo != 0 {
+			return byRepo
+		}
+		if byKind := strings.Compare(a.Kind, b.Kind); byKind != 0 {
+			return byKind
+		}
+		return strings.Compare(a.Title, b.Title)
+	})
 	if len(combined) > opts.Limit {
 		combined = combined[:opts.Limit]
 	}
-	return searchResult{Query: query, Total: len(combined), Matches: combined}, nil
+	return searchResult{Query: query, Total: total, Matches: combined}, nil
 }
 
 func (s *Service) coverageNames(ctx context.Context, c *corpus.Corpus, repoID int64, threadID *int64) ([]string, error) {

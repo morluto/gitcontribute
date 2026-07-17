@@ -129,6 +129,28 @@ func TestSearchRejectsCursorForAll(t *testing.T) {
 	}
 }
 
+func TestSearchAllRanksAcrossKindsAndPreservesTotal(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
+		Owner: "owner", Name: "repo", Description: "term in description", SourceUpdatedAt: time.Unix(90, 0).UTC(),
+	}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.corpus.ApplyThreadObservation(ctx, repo.ID, corpus.ThreadKindIssue, 1, "open", "term", "body", "alice", time.Unix(95, 0).UTC(), `{}`); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetClock(func() time.Time { return time.Unix(100, 0).UTC() })
+	result, err := svc.Search(ctx, "term", cli.SearchOptions{Kind: "all", Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Total != 2 || len(result.Matches) != 1 || result.Matches[0].Kind != corpus.ThreadKindIssue {
+		t.Fatalf("combined result = %+v", result)
+	}
+}
+
 func TestSearchHardMaxLimit(t *testing.T) {
 	ctx := context.Background()
 	svc := newSearchTestService(t)
