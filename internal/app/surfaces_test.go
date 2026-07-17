@@ -110,6 +110,26 @@ func TestServiceClustersAndCluster(t *testing.T) {
 	}
 }
 
+func TestArchiveThreadsIsBoundedAndOffline(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestServer("owner", "repo")
+	defer srv.Close()
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+	seedRepoAndThreads(t, svc.corpus)
+
+	result, err := svc.ArchiveThreads(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "issue", "open", 2)
+	if err != nil {
+		t.Fatalf("archive threads: %v", err)
+	}
+	if len(result.Threads) != 2 || result.Threads[0].Number != 6 || result.Freshness == "" {
+		t.Fatalf("result = %+v", result)
+	}
+	if _, err := svc.ArchiveThreads(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "", "", 1001); err == nil {
+		t.Fatal("expected hard-limit error")
+	}
+}
+
 func TestServiceLensAndCollections(t *testing.T) {
 	ctx := context.Background()
 	srv := newTestServer("owner", "repo")

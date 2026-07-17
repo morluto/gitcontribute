@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -67,6 +68,74 @@ func (s *Service) Coverage(ctx context.Context, repo cli.RepoRef) (*cli.Coverage
 		out.Facets[i] = cli.CoverageFacet{
 			Facet: facet.Facet, Present: true, Complete: facet.Complete, UpdatedAt: formatTime(facet.UpdatedAt),
 		}
+	}
+	return out, nil
+}
+
+// ArchiveThreads returns bounded current thread projections without network access.
+func (s *Service) ArchiveThreads(ctx context.Context, repo cli.RepoRef, kind, state string, limit int) (*cli.ThreadListResult, error) {
+	if limit <= 0 || limit > 1000 {
+		return nil, errors.New("thread limit must be between 1 and 1000")
+	}
+	if kind == "pr" {
+		kind = "pull_request"
+	}
+	if kind == "all" {
+		kind = ""
+	}
+	if kind != "" && kind != "issue" && kind != "pull_request" {
+		return nil, fmt.Errorf("unsupported thread kind %q", kind)
+	}
+	if state != "" && state != "all" && state != "open" && state != "closed" {
+		return nil, fmt.Errorf("unsupported thread state %q", state)
+	}
+	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
+	if err := ref.Validate(); err != nil {
+		return nil, err
+	}
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	stored, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	if err != nil {
+		return nil, err
+	}
+	if stored == nil {
+		return nil, fmt.Errorf("%w: %s", errRepositoryNotFound, ref)
+	}
+	// Fetch enough rows to apply the state filter while keeping the read bounded.
+	threads, err := c.ListThreads(ctx, stored.ID, kind, 1000)
+	if err != nil {
+		return nil, err
+	}
+	out := &cli.ThreadListResult{Repo: repo, Threads: make([]cli.ThreadListItem, 0, min(limit, len(threads)))}
+	var freshest time.Time
+	for _, thread := range threads {
+		if state != "" && state != "all" && thread.State != state {
+			continue
+		}
+		out.Threads = append(out.Threads, cli.ThreadListItem{
+			Kind: thread.Kind, Number: thread.Number, State: thread.State, Title: thread.Title,
+			Author: thread.Author, Labels: thread.Labels, UpdatedAt: formatTime(thread.SourceUpdatedAt),
+		})
+		if thread.SourceUpdatedAt.After(freshest) {
+			freshest = thread.SourceUpdatedAt
+		}
+		if len(out.Threads) == limit {
+			break
+		}
+	}
+	if !freshest.IsZero() {
+		out.Freshness = formatTime(freshest)
+	}
+	coverage, err := c.ListCoverage(ctx, stored.ID, nil)
+	if err != nil {
+		return nil, err
+	}
+	out.Coverage = make([]cli.CoverageFacet, len(coverage))
+	for i, facet := range coverage {
+		out.Coverage[i] = cli.CoverageFacet{Facet: facet.Facet, Present: true, Complete: facet.Complete, UpdatedAt: formatTime(facet.UpdatedAt)}
 	}
 	return out, nil
 }

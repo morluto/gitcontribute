@@ -55,6 +55,7 @@ type rootCmd struct {
 	Index         indexCmd         `cmd:"" help:"Index a clean local checkout at its current commit"`
 	Source        sourceCmd        `cmd:"" help:"Manage repository discovery sources"`
 	Crawl         crawlCmd         `cmd:"" help:"Run a named discovery source"`
+	Tail          tailCmd          `cmd:"" help:"Continuously run a named discovery source"`
 	Investigation investigationCmd `cmd:"" help:"Manage investigations"`
 	Hypothesis    hypothesisCmd    `cmd:"" help:"Manage hypotheses"`
 	Duplicates    checkCmd         `cmd:"" help:"Check local duplicate candidates"`
@@ -211,6 +212,15 @@ type crawlCmd struct {
 	Since  time.Duration `name:"since" default:"720h" help:"Initial historical window"`
 	Budget int           `name:"budget" default:"500" help:"Maximum GitHub API requests"`
 	JSON   bool          `name:"json" help:"Print the result as JSON"`
+}
+
+type tailCmd struct {
+	Name     string        `arg:"" help:"Source name"`
+	Since    time.Duration `name:"since" default:"2h" help:"Overlapping source window per iteration"`
+	Budget   int           `name:"budget" default:"500" help:"Maximum requests per iteration"`
+	Interval time.Duration `name:"interval" default:"1h" help:"Delay between iterations"`
+	Once     bool          `name:"once" help:"Run one iteration and exit"`
+	JSON     bool          `name:"json" help:"Print the final result as JSON"`
 }
 
 type investigationCmd struct {
@@ -454,8 +464,11 @@ type clusterShowCmd struct {
 }
 
 type archiveCmd struct {
-	Sync    archiveSyncCmd    `cmd:"" help:"Synchronize repository threads"`
-	Hydrate archiveHydrateCmd `cmd:"" help:"Hydrate one issue or pull request"`
+	Sync     archiveSyncCmd    `cmd:"" help:"Synchronize repository threads"`
+	Hydrate  archiveHydrateCmd `cmd:"" help:"Hydrate one issue or pull request"`
+	Refresh  archiveRefreshCmd `cmd:"" help:"Refresh all repository threads"`
+	Threads  archiveThreadsCmd `cmd:"" help:"List archived repository threads"`
+	Coverage coverageCmd       `cmd:"" help:"Show repository facet coverage"`
 }
 
 type archiveSyncCmd struct {
@@ -472,6 +485,20 @@ type archiveHydrateCmd struct {
 	With     string `name:"with" help:"Comma-separated facets (defaults to all applicable facets)"`
 	MaxPages int    `name:"max-pages" default:"50" help:"Maximum pages per facet"`
 	JSON     bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type archiveRefreshCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	MaxPages  int    `name:"max-pages" default:"1000" help:"Maximum issue-list pages"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type archiveThreadsCmd struct {
+	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	Kind      string `name:"kind" default:"all" enum:"all,issue,pr,pull_request" help:"Restrict by thread kind"`
+	State     string `name:"state" default:"all" enum:"open,closed,all" help:"Restrict by state"`
+	Limit     int    `name:"limit" default:"100" help:"Maximum threads to return"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type coverageCmd struct {
@@ -638,6 +665,8 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runSource(ctx, command, &cli.Source)
 	case "crawl":
 		return c.runCrawl(ctx, &cli.Crawl)
+	case "tail":
+		return c.runTail(ctx, &cli.Tail)
 	case "investigation":
 		return c.runInvestigation(ctx, command, &cli.Investigation)
 	case "hypothesis":
@@ -740,6 +769,14 @@ func normalizeCompatibilityArgs(args []string) []string {
 
 func (c *CLI) discoveryService() (DiscoveryService, error) {
 	service, ok := c.svc.(DiscoveryService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) tailService() (TailService, error) {
+	service, ok := c.svc.(TailService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -852,6 +889,14 @@ func (c *CLI) archiveService() (ArchiveService, error) {
 
 func (c *CLI) localQueryService() (LocalQueryService, error) {
 	service, ok := c.svc.(LocalQueryService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) archiveThreadService() (ArchiveThreadService, error) {
+	service, ok := c.svc.(ArchiveThreadService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -986,6 +1031,24 @@ func (c *CLI) runCrawl(ctx context.Context, cmd *crawlCmd) error {
 	}
 	fmt.Fprintf(c.stderr, "crawling %s...\n", cmd.Name)
 	result, err := service.Crawl(ctx, cmd.Name, CrawlOptions{Since: cmd.Since, Budget: cmd.Budget})
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runTail(ctx context.Context, cmd *tailCmd) error {
+	if cmd.Since <= 0 || cmd.Budget <= 0 || cmd.Budget > 5000 || cmd.Interval <= 0 {
+		return NewCLIError(ExitUsage, errors.New("since, budget, and interval must be positive; budget cannot exceed 5000"))
+	}
+	service, err := c.tailService()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(c.stderr, "tailing source %s every %s...\n", cmd.Name, cmd.Interval)
+	result, err := service.TailSource(ctx, cmd.Name, TailOptions{
+		Since: cmd.Since, Budget: cmd.Budget, Interval: cmd.Interval, Once: cmd.Once,
+	})
 	if err != nil {
 		return c.mapError(err)
 	}
@@ -1616,12 +1679,12 @@ func (c *CLI) runCluster(ctx context.Context, command string, cmd *clusterCmd) e
 }
 
 func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) error {
-	service, err := c.archiveService()
-	if err != nil {
-		return err
-	}
 	switch command {
 	case "archive sync":
+		service, err := c.archiveService()
+		if err != nil {
+			return err
+		}
 		repo, err := parseRepo(cmd.Sync.OwnerRepo)
 		if err != nil {
 			return err
@@ -1645,6 +1708,10 @@ func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) e
 		}
 		return c.render(cmd.Sync.JSON, result)
 	case "archive hydrate":
+		service, err := c.archiveService()
+		if err != nil {
+			return err
+		}
 		repo, number, err := parseThreadRef(cmd.Hydrate.Thread)
 		if err != nil {
 			return NewCLIError(ExitUsage, err)
@@ -1657,6 +1724,40 @@ func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) e
 			return c.mapError(err)
 		}
 		return c.render(cmd.Hydrate.JSON, result)
+	case "archive refresh":
+		service, err := c.archiveService()
+		if err != nil {
+			return err
+		}
+		repo, err := parseRepo(cmd.Refresh.OwnerRepo)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(c.stderr, "refreshing archive for %s...\n", repo)
+		result, err := service.ArchiveSync(ctx, repo, ArchiveSyncOptions{State: "all", MaxPages: cmd.Refresh.MaxPages})
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Refresh.JSON, result)
+	case "archive threads":
+		repo, err := parseRepo(cmd.Threads.OwnerRepo)
+		if err != nil {
+			return err
+		}
+		if cmd.Threads.Limit <= 0 || cmd.Threads.Limit > 1000 {
+			return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 1000"))
+		}
+		service, err := c.archiveThreadService()
+		if err != nil {
+			return err
+		}
+		result, err := service.ArchiveThreads(ctx, repo, cmd.Threads.Kind, cmd.Threads.State, cmd.Threads.Limit)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Threads.JSON, result)
+	case "archive coverage":
+		return c.runCoverage(ctx, &cmd.Coverage)
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown archive command: %s", command))
 	}

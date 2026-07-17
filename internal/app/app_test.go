@@ -317,6 +317,27 @@ func TestDiscoveryCrawlPersistsRepositoryFrontierAndCheckpoint(t *testing.T) {
 	}
 }
 
+func TestTailSourceRunsOneIdempotentIteration(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestServer("octocat", "tail")
+	defer srv.Close()
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+
+	if _, err := svc.AddRepoSource(ctx, "explicit", []cli.RepoRef{{Owner: "octocat", Repo: "tail"}}); err != nil {
+		t.Fatalf("add source: %v", err)
+	}
+	result, err := svc.TailSource(ctx, "explicit", cli.TailOptions{
+		Since: time.Hour, Budget: 1, Interval: time.Minute, Once: true,
+	})
+	if err != nil {
+		t.Fatalf("tail source: %v", err)
+	}
+	if result.Iterations != 1 || result.Last == nil || result.Last.Repositories != 1 {
+		t.Fatalf("tail result = %+v", result)
+	}
+}
+
 func TestDiscoveryCrawlDoesNotAdvanceCheckpointWhenBudgetExhausted(t *testing.T) {
 	ctx := context.Background()
 	srv := newTestServer("octocat", "discovered")

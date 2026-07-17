@@ -25,6 +25,7 @@ type fakeSurfacesService struct {
 	listColCalled   bool
 	archiveCalled   bool
 	hydrateCalled   bool
+	threadsCalled   bool
 	coverageCalled  bool
 	runsCalled      bool
 	neighborsCalled bool
@@ -140,6 +141,11 @@ func (f *fakeSurfacesService) Hydrate(ctx context.Context, repo cli.RepoRef, num
 func (f *fakeSurfacesService) Coverage(ctx context.Context, repo cli.RepoRef) (*cli.CoverageResult, error) {
 	f.coverageCalled = true
 	return &cli.CoverageResult{Repo: repo, Facets: []cli.CoverageFacet{{Facet: "threads", Present: true, Complete: true}}}, f.err
+}
+
+func (f *fakeSurfacesService) ArchiveThreads(ctx context.Context, repo cli.RepoRef, kind, state string, limit int) (*cli.ThreadListResult, error) {
+	f.threadsCalled = true
+	return &cli.ThreadListResult{Repo: repo, Threads: []cli.ThreadListItem{{Kind: "issue", Number: 1, State: "open", Title: "one"}}}, f.err
 }
 
 func (f *fakeSurfacesService) RunHistory(ctx context.Context, limit int) (*cli.RunListResult, error) {
@@ -292,6 +298,13 @@ func TestArchiveAndLocalQueryCommands(t *testing.T) {
 	requireNoErr(t, c.Run(context.Background(), []string{"archive", "hydrate", "o/r#1", "--with", "issue_comments", "--json"}))
 	if !svc.hydrateCalled || len(svc.lastHydrateOpts.Facets) != 1 {
 		t.Fatalf("hydrate options = %+v", svc.lastHydrateOpts)
+	}
+	stdout.Reset()
+	requireNoErr(t, c.Run(context.Background(), []string{"archive", "refresh", "o/r", "--json"}))
+	requireNoErr(t, c.Run(context.Background(), []string{"archive", "threads", "o/r", "--kind", "issue", "--json"}))
+	requireNoErr(t, c.Run(context.Background(), []string{"archive", "coverage", "o/r", "--json"}))
+	if !svc.threadsCalled {
+		t.Fatal("archive threads was not dispatched")
 	}
 	stdout.Reset()
 	requireNoErr(t, c.Run(context.Background(), []string{"coverage", "o/r", "--json"}))

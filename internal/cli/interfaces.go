@@ -157,6 +157,25 @@ type CrawlResult struct {
 	Checkpoint   string `json:"checkpoint"`
 }
 
+// TailService exposes continuous source execution separately from the stable
+// discovery interface so lightweight clients can opt in explicitly.
+type TailService interface {
+	TailSource(ctx context.Context, name string, opts TailOptions) (*TailResult, error)
+}
+
+type TailOptions struct {
+	Since    time.Duration
+	Budget   int
+	Interval time.Duration
+	Once     bool
+}
+
+type TailResult struct {
+	Source     string       `json:"source"`
+	Iterations int          `json:"iterations"`
+	Last       *CrawlResult `json:"last,omitempty"`
+}
+
 // RepoRef identifies a GitHub repository.
 type RepoRef struct {
 	Owner string `json:"owner"`
@@ -658,6 +677,29 @@ type LocalQueryService interface {
 	Coverage(ctx context.Context, repo RepoRef) (*CoverageResult, error)
 	RunHistory(ctx context.Context, limit int) (*RunListResult, error)
 	NeighborQuery(ctx context.Context, repo RepoRef, kind string, number, limit int) (*NeighborListResult, error)
+}
+
+// ArchiveThreadService exposes the bounded offline archive listing separately
+// from the stable local-query interface.
+type ArchiveThreadService interface {
+	ArchiveThreads(ctx context.Context, repo RepoRef, kind, state string, limit int) (*ThreadListResult, error)
+}
+
+type ThreadListResult struct {
+	Repo      RepoRef          `json:"repo"`
+	Threads   []ThreadListItem `json:"threads"`
+	Freshness string           `json:"freshness,omitempty"`
+	Coverage  []CoverageFacet  `json:"coverage,omitempty"`
+}
+
+type ThreadListItem struct {
+	Kind      string   `json:"kind"`
+	Number    int      `json:"number"`
+	State     string   `json:"state"`
+	Title     string   `json:"title"`
+	Author    string   `json:"author,omitempty"`
+	Labels    []string `json:"labels,omitempty"`
+	UpdatedAt string   `json:"updated_at"`
 }
 
 type CoverageResult struct {

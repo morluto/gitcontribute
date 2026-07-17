@@ -25,6 +25,7 @@ type fakeService struct {
 	showSourceCalled         bool
 	listSourcesCalled        bool
 	crawlCalled              bool
+	tailCalled               bool
 	startInvCalled           bool
 	showInvCalled            bool
 	listInvCalled            bool
@@ -69,6 +70,7 @@ type fakeService struct {
 	lastShowSourceName string
 	lastCrawlName      string
 	lastCrawlOpts      cli.CrawlOptions
+	lastTailOpts       cli.TailOptions
 	lastStartInvArgs   startInvArgs
 	lastShowInvArg     string
 	lastAddHypArgs     addHypArgs
@@ -182,6 +184,13 @@ func (f *fakeService) Crawl(ctx context.Context, name string, opts cli.CrawlOpti
 	f.lastCrawlName = name
 	f.lastCrawlOpts = opts
 	return f.crawlResult, f.err
+}
+
+func (f *fakeService) TailSource(ctx context.Context, name string, opts cli.TailOptions) (*cli.TailResult, error) {
+	f.tailCalled = true
+	f.lastCrawlName = name
+	f.lastTailOpts = opts
+	return &cli.TailResult{Source: name, Iterations: 1}, f.err
 }
 
 func (f *fakeService) StartInvestigation(ctx context.Context, repo cli.RepoRef, commit, lens string) (*cli.InvestigationResult, error) {
@@ -360,6 +369,18 @@ func TestCrawlRejectsInvalidBudgetBeforeDispatch(t *testing.T) {
 	requireCLIError(t, err, cli.ExitUsage)
 	if svc.crawlCalled {
 		t.Fatal("crawl should not be called with an invalid budget")
+	}
+}
+
+func TestTailDispatchesBoundedOptions(t *testing.T) {
+	svc := &fakeService{}
+	c, _, _ := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"tail", "events", "--since", "3h", "--interval", "10m", "--budget", "25", "--once"}))
+	if !svc.tailCalled || svc.lastCrawlName != "events" {
+		t.Fatalf("tail not called: %+v", svc)
+	}
+	if svc.lastTailOpts.Since != 3*time.Hour || svc.lastTailOpts.Interval != 10*time.Minute || svc.lastTailOpts.Budget != 25 || !svc.lastTailOpts.Once {
+		t.Fatalf("tail options = %+v", svc.lastTailOpts)
 	}
 }
 

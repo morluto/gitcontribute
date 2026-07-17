@@ -190,6 +190,36 @@ func (s *Service) Crawl(ctx context.Context, name string, opts cli.CrawlOptions)
 	}
 }
 
+// TailSource repeatedly advances a named source until cancellation. Each
+// iteration is an ordinary idempotent crawl and therefore retains its own run
+// record, checkpoint, request budget, and failure state.
+func (s *Service) TailSource(ctx context.Context, name string, opts cli.TailOptions) (*cli.TailResult, error) {
+	if opts.Since <= 0 || opts.Budget <= 0 || opts.Budget > 5000 || opts.Interval <= 0 {
+		return nil, errors.New("invalid tail since, budget, or interval")
+	}
+	result := &cli.TailResult{Source: name}
+	for {
+		last, err := s.Crawl(ctx, name, cli.CrawlOptions{Since: opts.Since, Budget: opts.Budget})
+		if err != nil {
+			return nil, err
+		}
+		result.Iterations++
+		result.Last = last
+		if opts.Once {
+			return result, nil
+		}
+		timer := time.NewTimer(opts.Interval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
 func (s *Service) crawlSearchSource(ctx context.Context, c *corpus.Corpus, source *corpus.DiscoverySource, opts cli.CrawlOptions) (_ *cli.CrawlResult, resultErr error) {
 	var definition searchSourceDefinition
 	if err := json.Unmarshal([]byte(source.Definition), &definition); err != nil {
