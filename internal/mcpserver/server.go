@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/morluto/gitcontribute/internal/lens"
 )
@@ -284,7 +285,7 @@ type SyncRepositoryInput struct {
 	Owner    string `json:"owner" jsonschema:"GitHub repository owner"`
 	Repo     string `json:"repo" jsonschema:"GitHub repository name"`
 	State    string `json:"state,omitempty" jsonschema:"Thread state: open, closed, or all"`
-	Since    string `json:"since,omitempty" jsonschema:"Optional Go duration such as 720h"`
+	Since    string `json:"since,omitempty" jsonschema:"Positive Go duration limiting thread history, such as 720h; omit for all matching history"`
 	Numbers  []int  `json:"numbers,omitempty" jsonschema:"Optional exact issue or pull request numbers"`
 	MaxPages int    `json:"max_pages,omitempty" jsonschema:"Maximum issue-list pages from 1 to 1000"`
 }
@@ -423,100 +424,132 @@ func (s *Server) ServeStdio(ctx context.Context) error {
 }
 
 func (s *Server) register() {
-	annotations := &mcp.ToolAnnotations{
-		Title:           "Read local GitContribute corpus",
-		ReadOnlyHint:    true,
-		IdempotentHint:  true,
-		OpenWorldHint:   boolPtr(false),
-		DestructiveHint: boolPtr(false),
-	}
-	operationAnnotations := &mcp.ToolAnnotations{
-		Title:           "Read GitHub and update the local GitContribute corpus",
-		ReadOnlyHint:    false,
-		IdempotentHint:  false,
-		OpenWorldHint:   boolPtr(true),
-		DestructiveHint: boolPtr(false),
-	}
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "search",
-		Description: "Search the local GitContribute corpus without network access",
-		Annotations: annotations,
-	}, s.search)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "get_repository",
-		Description: "Read one repository from the local corpus",
-		Annotations: annotations,
-	}, s.repository)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "get_thread",
-		Description: "Read one issue or pull request from the local corpus",
-		Annotations: annotations,
-	}, s.thread)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "get_dossier",
-		Description: "Read a source-backed repository dossier from the local corpus",
-		Annotations: annotations,
-	}, s.dossier)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "search_code",
-		Description: "Search indexed code snapshots in the local corpus without network access",
-		Annotations: annotations,
-	}, s.searchCode)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "get_investigation",
-		Description: "Read a local investigation workspace from the corpus",
-		Annotations: annotations,
-	}, s.investigation)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "list_opportunities",
-		Description: "List opportunities for a local investigation",
-		Annotations: annotations,
-	}, s.listOpportunities)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "get_opportunity",
-		Description: "Read a local contribution opportunity",
-		Annotations: annotations,
-	}, s.opportunity)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "get_evidence",
-		Description: "Read evidence for a local investigation or opportunity",
-		Annotations: annotations,
-	}, s.evidence)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "get_readiness",
-		Description: "Read deterministic contribution readiness checks for an opportunity without network access",
-		Annotations: annotations,
-	}, s.readiness)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "find_clusters",
-		Description: "List duplicate-candidate clusters for a repository in the local corpus without network access",
-		Annotations: annotations,
-	}, s.findClusters)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "find_neighbors",
-		Description: "Rank similar threads from the local corpus with transparent scoring and no network access",
-		Annotations: annotations,
-	}, s.findNeighbors)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "get_coverage",
-		Description: "Read facet coverage and freshness for a repository in the local corpus without network access",
-		Annotations: annotations,
-	}, s.getCoverage)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "get_lens",
-		Description: "Read a saved lens definition from the local corpus",
-		Annotations: annotations,
-	}, s.getLens)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "sync_repository",
-		Description: "Explicitly read repository threads from GitHub and update the local corpus",
-		Annotations: operationAnnotations,
-	}, s.syncRepository)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "hydrate_thread",
-		Description: "Explicitly read selected issue or pull request facets from GitHub and update the local corpus",
-		Annotations: operationAnnotations,
-	}, s.hydrateThread)
+	readOnly := readOnlyAnnotations()
+	addCatalogTool(s.server, catalogTool[RepoInput, RepositoryOutput]{
+		name: ToolGetRepository, title: "Get stored repository",
+		description: "Read the winning local projection for one GitHub repository. Use this after a local search when you need repository metadata; it never contacts GitHub.",
+		annotations: readOnly, input: inputSchema[RepoInput](noSchemaCustomization),
+		output: outputSchema[RepositoryOutput]("Stored repository projection."), handler: s.repository,
+	})
+	addCatalogTool(s.server, catalogTool[ThreadInput, ThreadOutput]{
+		name: ToolGetThread, title: "Get stored thread",
+		description: "Read one stored GitHub issue or pull request by repository, kind, and number. Use it for the complete locally stored thread body; it never refreshes GitHub.",
+		annotations: readOnly, input: inputSchema[ThreadInput](func(schema *jsonschema.Schema) {
+			setEnum(schema, "kind", "issue", "pull_request")
+			setMinimum(schema, "number", 1)
+		}), output: outputSchema[ThreadOutput]("Stored issue or pull request projection."), handler: s.thread,
+	})
+	addCatalogTool(s.server, catalogTool[SearchCodeInput, SearchCodeOutput]{
+		name: ToolSearchCode, title: "Search stored code",
+		description: "Search indexed code snapshots in the local corpus and return bounded snippets with repository, commit, and path context. Provide owner and repo together to restrict the search; this tool is offline.",
+		annotations: readOnly, input: inputSchema[SearchCodeInput](func(schema *jsonschema.Schema) {
+			setRange(schema, "limit", 1, 100)
+			setDefault(schema, "limit", 20)
+			requireTogether(schema, "owner", "repo")
+		}), output: outputSchema[SearchCodeOutput]("One page of stored code matches."), handler: s.searchCode,
+	})
+	addCatalogTool(s.server, catalogTool[InvestigationInput, InvestigationOutput]{
+		name: ToolGetInvestigation, title: "Get investigation",
+		description: "Read one local investigation and a bounded set of its hypotheses. Use " + ToolListOpportunities + " separately for promoted contribution opportunities; this tool is offline.",
+		annotations: readOnly, input: inputSchema[InvestigationInput](func(schema *jsonschema.Schema) {
+			setRange(schema, "hypothesis_limit", 1, 100)
+			setDefault(schema, "hypothesis_limit", 20)
+		}), output: outputSchema[InvestigationOutput]("Local investigation with bounded hypothesis summaries."), handler: s.investigation,
+	})
+	addCatalogTool(s.server, catalogTool[ListOpportunitiesInput, ListOpportunitiesOutput]{
+		name: ToolListOpportunities, title: "List investigation opportunities",
+		description: "List a bounded set of promoted contribution opportunities for one local investigation. Use " + ToolGetOpportunity + " for full details and evidence identifiers; this tool is offline.",
+		annotations: readOnly, input: inputSchema[ListOpportunitiesInput](func(schema *jsonschema.Schema) {
+			setRange(schema, "limit", 1, 100)
+			setDefault(schema, "limit", 20)
+		}), output: outputSchema[ListOpportunitiesOutput]("Bounded contribution opportunity summaries."), handler: s.listOpportunities,
+	})
+	addCatalogTool(s.server, catalogTool[OpportunityInput, OpportunityOutput]{
+		name: ToolGetOpportunity, title: "Get contribution opportunity",
+		description: "Read one local contribution opportunity with a bounded set of evidence identifiers. Use " + ToolGetEvidence + " to inspect the evidence records themselves; this tool is offline.",
+		annotations: readOnly, input: inputSchema[OpportunityInput](func(schema *jsonschema.Schema) {
+			setRange(schema, "evidence_limit", 1, 100)
+			setDefault(schema, "evidence_limit", 20)
+		}), output: outputSchema[OpportunityOutput]("Local contribution opportunity and evidence references."), handler: s.opportunity,
+	})
+	addCatalogTool(s.server, catalogTool[EvidenceInput, EvidenceOutput]{
+		name: ToolGetEvidence, title: "Get stored evidence",
+		description: "Read bounded evidence for exactly one investigation or opportunity, optionally filtered by relation. Freshness is derived from local corpus revisions; this tool never refreshes GitHub.",
+		annotations: readOnly, input: inputSchema[EvidenceInput](func(schema *jsonschema.Schema) {
+			setEnum(schema, "relation", "supporting", "contradicting", "inconclusive", "stale", "invalid")
+			setRange(schema, "limit", 1, 100)
+			setDefault(schema, "limit", 20)
+			requireExactlyOne(schema, "investigation_id", "opportunity_id")
+		}), output: outputSchema[EvidenceOutput]("Bounded stored evidence with provenance and derived freshness."), handler: s.evidence,
+	})
+	addCatalogTool(s.server, catalogTool[ReadinessInput, ReadinessOutput]{
+		name: ToolGetReadiness, title: "Get contribution readiness",
+		description: "Evaluate deterministic local readiness rules for one opportunity and return pass, warn, block, or unknown checks with evidence and remediation. This is advisory, offline, and does not claim maintainer approval.",
+		annotations: readOnly, input: inputSchema[ReadinessInput](noSchemaCustomization),
+		output: outputSchema[ReadinessOutput]("Deterministic contribution readiness report."), handler: s.readiness,
+	})
+	addCatalogTool(s.server, catalogTool[FindClustersInput, FindClustersOutput]{
+		name: ToolFindClusters, title: "Find duplicate clusters",
+		description: "List bounded duplicate-candidate clusters already computed for one repository. Use this for repository-wide duplicate structure; use " + ToolFindNeighbors + " for one specific thread.",
+		annotations: readOnly, input: inputSchema[FindClustersInput](func(schema *jsonschema.Schema) {
+			setRange(schema, "limit", 1, 100)
+			setDefault(schema, "limit", 20)
+		}), output: outputSchema[FindClustersOutput]("Duplicate-candidate clusters for a stored repository."), handler: s.findClusters,
+	})
+	addCatalogTool(s.server, catalogTool[FindNeighborsInput, FindNeighborsOutput]{
+		name: ToolFindNeighbors, title: "Find similar threads",
+		description: "Rank stored threads similar to one issue or pull request using transparent deterministic scoring. Use this for a specific source thread; it never contacts GitHub.",
+		annotations: readOnly, input: inputSchema[FindNeighborsInput](func(schema *jsonschema.Schema) {
+			setEnum(schema, "kind", "issue", "pull_request")
+			setMinimum(schema, "number", 1)
+			setRange(schema, "limit", 1, 100)
+			setDefault(schema, "limit", 10)
+		}), output: outputSchema[FindNeighborsOutput]("Similar stored threads with transparent scores."), handler: s.findNeighbors,
+	})
+	addCatalogTool(s.server, catalogTool[GetCoverageInput, GetCoverageOutput]{
+		name: ToolGetCoverage, title: "Get repository coverage",
+		description: "Read local facet completeness and freshness for one repository. Use this before relying on missing comments or reviews; it reports local coverage without refreshing GitHub.",
+		annotations: readOnly, input: inputSchema[GetCoverageInput](noSchemaCustomization),
+		output: outputSchema[GetCoverageOutput]("Local repository facet coverage and freshness."), handler: s.getCoverage,
+	})
+	addCatalogTool(s.server, catalogTool[LensInput, LensOutput]{
+		name: ToolGetLens, title: "Get saved lens",
+		description: "Read one saved local ranking lens by name. Use it to explain or reproduce lens-based ranking; this tool is offline and does not modify the lens.",
+		annotations: readOnly, input: inputSchema[LensInput](noSchemaCustomization),
+		output: outputSchema[LensOutput]("Saved lens definition and timestamps."), handler: s.getLens,
+	})
+	addCatalogTool(s.server, catalogTool[SyncRepositoryInput, SyncRepositoryOutput]{
+		name: ToolSyncRepository, title: "Sync repository threads from GitHub",
+		description: "Explicitly read repository and thread projections from GitHub and update the local corpus. This performs bounded network reads and local writes; use " + ToolHydrateThread + " afterward for comments, reviews, or PR details.",
+		annotations: networkReadAnnotations(), input: inputSchema[SyncRepositoryInput](func(schema *jsonschema.Schema) {
+			setEnum(schema, "state", "open", "closed", "all")
+			setDefault(schema, "state", "all")
+			setRange(schema, "max_pages", 1, 1000)
+			setDefault(schema, "max_pages", 1000)
+			setPositiveItems(schema, "numbers")
+			all := any("all")
+			schema.AllOf = append(schema.AllOf, &jsonschema.Schema{
+				If: &jsonschema.Schema{
+					Properties: map[string]*jsonschema.Schema{"numbers": {MinItems: jsonschema.Ptr(1)}},
+					Required:   []string{"numbers"},
+				},
+				Then: &jsonschema.Schema{
+					Properties: map[string]*jsonschema.Schema{"state": {Const: &all}},
+					Not:        &jsonschema.Schema{Required: []string{"since"}},
+				},
+			})
+		}), output: outputSchema[SyncRepositoryOutput]("Completed repository synchronization summary."), handler: s.syncRepository,
+	})
+	addCatalogTool(s.server, catalogTool[HydrateThreadInput, HydrateThreadOutput]{
+		name: ToolHydrateThread, title: "Hydrate one thread from GitHub",
+		description: "Explicitly fetch selected comments, PR details, reviews, or review comments for one stored thread and atomically update local facet snapshots. An empty facets list selects every facet applicable to the thread.",
+		annotations: networkReadAnnotations(), input: inputSchema[HydrateThreadInput](func(schema *jsonschema.Schema) {
+			setMinimum(schema, "number", 1)
+			setArrayEnum(schema, "facets", "issue_comments", "pr_details", "pr_reviews", "pr_review_comments")
+			setRange(schema, "max_pages", 1, 100)
+			setDefault(schema, "max_pages", 50)
+		}), output: outputSchema[HydrateThreadOutput]("Completed thread-facet hydration summary."), handler: s.hydrateThread,
+	})
 
 	s.server.AddResourceTemplate(&mcp.ResourceTemplate{
 		URITemplate: "gitcontribute://repository/{owner}/{repo}",
@@ -585,20 +618,6 @@ func (s *Server) register() {
 
 func boolPtr(v bool) *bool { return &v }
 
-func (s *Server) search(ctx context.Context, _ *mcp.CallToolRequest, in SearchInput) (*mcp.CallToolResult, SearchOutput, error) {
-	if in.Query == "" {
-		return nil, SearchOutput{}, errors.New("query is required")
-	}
-	if in.Limit == 0 {
-		in.Limit = 20
-	}
-	if in.Limit < 1 || in.Limit > 100 {
-		return nil, SearchOutput{}, errors.New("limit must be between 1 and 100")
-	}
-	out, err := s.reader.Search(ctx, in)
-	return nil, out, err
-}
-
 func (s *Server) repository(ctx context.Context, _ *mcp.CallToolRequest, in RepoInput) (*mcp.CallToolResult, RepositoryOutput, error) {
 	if err := validateRepo(in); err != nil {
 		return nil, RepositoryOutput{}, err
@@ -618,14 +637,6 @@ func (s *Server) thread(ctx context.Context, _ *mcp.CallToolRequest, in ThreadIn
 		return nil, ThreadOutput{}, errors.New("number must be positive")
 	}
 	out, err := s.reader.Thread(ctx, in)
-	return nil, out, err
-}
-
-func (s *Server) dossier(ctx context.Context, _ *mcp.CallToolRequest, in RepoInput) (*mcp.CallToolResult, DossierOutput, error) {
-	if err := validateRepo(in); err != nil {
-		return nil, DossierOutput{}, err
-	}
-	out, err := s.reader.Dossier(ctx, in)
 	return nil, out, err
 }
 

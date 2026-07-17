@@ -205,6 +205,10 @@ gitcontribute mcp serve --transport=stdio
 
 MCP capabilities are deliberately separate:
 
+Tool names use the `gitcontribute.<capability>.<action>` namespace. The server
+advertises one canonical name per operation; unnamespaced compatibility aliases
+are not registered.
+
 | Capability | Examples |
 | --- | --- |
 | **Offline reads** | Search, inspect repositories and threads, build research briefs, read dossiers, explain matches, inspect evidence, opportunities, readiness checks, and workflow resources. |
@@ -214,7 +218,7 @@ MCP capabilities are deliberately separate:
 
 Contribution workflow resources and prompts are available for agents:
 
-- `get_readiness` and `gitcontribute://readiness/<opportunity-id>` expose the
+- `gitcontribute.corpus.get_readiness` and `gitcontribute://readiness/<opportunity-id>` expose the
   same offline readiness report as the CLI.
 - `gitcontribute://workflow/contribution/<opportunity-id>` links the local
   opportunity, evidence, readiness report, and safe workflow prompts.

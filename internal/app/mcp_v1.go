@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -321,7 +322,7 @@ func (r *MCPReader) GetJob(ctx context.Context, in mcpserver.GetJobInput) (mcpse
 	if err != nil {
 		return mcpserver.GetJobOutput{}, err
 	}
-	return jobResultToMCP(job), nil
+	return jobResultToMCP(job)
 }
 
 // CancelJob cancels a durable job and returns its updated state.
@@ -330,16 +331,24 @@ func (r *MCPReader) CancelJob(ctx context.Context, in mcpserver.CancelJobInput) 
 	if err != nil {
 		return mcpserver.GetJobOutput{}, err
 	}
-	return jobResultToMCP(job), nil
+	return jobResultToMCP(job)
 }
 
-func jobResultToMCP(job *cli.JobResult) mcpserver.GetJobOutput {
+func jobResultToMCP(job *cli.JobResult) (mcpserver.GetJobOutput, error) {
+	request, err := decodeJobJSON("request", job.Request)
+	if err != nil {
+		return mcpserver.GetJobOutput{}, err
+	}
+	result, err := decodeJobJSON("result", job.Result)
+	if err != nil {
+		return mcpserver.GetJobOutput{}, err
+	}
 	return mcpserver.GetJobOutput{
 		ID:                    job.ID,
 		Kind:                  job.Kind,
 		Status:                job.Status,
-		Request:               job.Request,
-		Result:                job.Result,
+		Request:               request,
+		Result:                result,
 		Error:                 job.Error,
 		Progress:              job.Progress,
 		Statistics:            job.Statistics,
@@ -348,7 +357,18 @@ func jobResultToMCP(job *cli.JobResult) mcpserver.GetJobOutput {
 		CompletedAt:           job.CompletedAt,
 		CancelledAt:           job.CancelledAt,
 		CancellationRequested: job.Cancellation,
+	}, nil
+}
+
+func decodeJobJSON(field, value string) (any, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
 	}
+	var decoded any
+	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
+		return nil, fmt.Errorf("decode job %s: %w", field, err)
+	}
+	return decoded, nil
 }
 
 // StartCrawl submits a durable crawl job.
