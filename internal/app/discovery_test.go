@@ -641,7 +641,7 @@ func newTestServiceNoNetwork(t *testing.T) *Service {
 	t.Helper()
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}

@@ -18,7 +18,7 @@ import (
 func TestBuildAndGetRepositoryDossier(t *testing.T) {
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 func TestExtractSeeds(t *testing.T) {
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestExtractSeeds(t *testing.T) {
 func TestExtractSeedsRequiresNoNetwork(t *testing.T) {
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -97,6 +97,7 @@ func NewClient(cfg Config) (*Client, error) {
 	retrier := &retryTransport{
 		Base:   &RateLimitedTransport{Base: baseTransport, Limiter: limiter},
 		Config: retryCfg,
+		cb:     newCircuitBreaker(defaultCBMaxFailures, defaultCBHalfOpenWait, defaultCBProbeTimeout),
 	}
 
 	cfg.HTTPClient.Transport = retrier

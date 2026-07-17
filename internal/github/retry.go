@@ -41,9 +41,12 @@ type RetryObservation struct {
 // idempotent reads. It honors Retry-After and primary rate-limit reset headers,
 // supports injected clocks/sleepers for deterministic tests, and exposes an
 // observation callback with redacted source URLs.
+// A circuit breaker prevents cascading failures by opening the circuit after
+// consecutive failures and probing with a single request after a cooldown.
 type retryTransport struct {
 	Base   http.RoundTripper
 	Config *RetryConfig
+	cb     *circuitBreaker
 }
 
 // DefaultRetryConfig returns a production retry policy.
@@ -111,6 +114,11 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		return t.base().RoundTrip(req)
 	}
 
+	// Check circuit breaker. If open, fail fast without making the request.
+	if t.cb != nil && !t.cb.allow() {
+		return nil, ErrCircuitOpen
+	}
+
 	cfg := t.Config
 	ctx := req.Context()
 
@@ -129,6 +137,10 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 			if cfg.OnAttempt != nil {
 				cfg.OnAttempt(observation(req, resp, attempt, 0, cfg.now()))
 			}
+			// Successful request: reset circuit breaker.
+			if t.cb != nil {
+				t.cb.recordSuccess()
+			}
 			return resp, nil
 		}
 
@@ -140,6 +152,10 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if attempt == cfg.MaxAttempts {
 			if cfg.OnAttempt != nil {
 				cfg.OnAttempt(observation(req, resp, attempt, 0, cfg.now()))
+			}
+			// All retries exhausted: record failure in circuit breaker.
+			if t.cb != nil {
+				t.cb.recordFailure()
 			}
 			if err != nil {
 				drainAndClose(resp)

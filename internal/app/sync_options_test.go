@@ -102,7 +102,7 @@ func TestSyncWithOptionsRefreshesExactNumbersDeterministically(t *testing.T) {
 
 func TestSyncWithOptionsRejectsUnboundedPageLimit(t *testing.T) {
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestSyncWithOptionsRejectsUnboundedPageLimit(t *testing.T) {
 
 func TestSyncWithOptionsRejectsConflictingExactFilters(t *testing.T) {
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

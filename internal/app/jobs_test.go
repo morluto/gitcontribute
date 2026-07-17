@@ -16,7 +16,7 @@ func newJobTestService(t *testing.T) *Service {
 	t.Helper()
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestStartupReconciliation(t *testing.T) {
 
 	// Opening the same database through the service must reconcile the
 	// interrupted job.
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestReadOnlyCorpusOpenDoesNotReconcileJobs(t *testing.T) {
 
 	// A read-only service operation must open the corpus without creating a
 	// job executor and without reconciling running jobs.
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}

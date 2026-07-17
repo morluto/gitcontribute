@@ -22,7 +22,7 @@ func (s failingAuthSource) Token(context.Context) (string, error) { return "", s
 
 func TestMetadataIsLocalAndDoesNotCreateCorpus(t *testing.T) {
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "v1.2.3")
+	svc, err := New(paths, "v1.2.3", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestMetadataIsLocalAndDoesNotCreateCorpus(t *testing.T) {
 
 func TestConfigureInvalidInputDoesNotReplaceFile(t *testing.T) {
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestConfigureInvalidInputDoesNotReplaceFile(t *testing.T) {
 
 func TestConfigureDryRunDoesNotSave(t *testing.T) {
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestConfigureDryRunDoesNotSave(t *testing.T) {
 
 func TestControlStatusUsesLocalCorpus(t *testing.T) {
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestDoctorDoesNotExposeEnvironmentToken(t *testing.T) {
 	secret := strings.Join([]string{"github_pat", "fixture-control-value"}, "_")
 	t.Setenv("GITCONTRIBUTE_TEST_TOKEN", secret)
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestDoctorDoesNotExposeEnvironmentToken(t *testing.T) {
 
 func TestDoctorInspectsEffectiveRuntimeConfig(t *testing.T) {
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestConfigureDoesNotPersistEnvOverrides(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

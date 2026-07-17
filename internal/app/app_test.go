@@ -179,7 +179,7 @@ func newTestService(t *testing.T, srv *httptest.Server) *Service {
 	t.Helper()
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestLocalInitializationDoesNotResolveKeyringAuth(t *testing.T) {
 	if err := config.Save(configPath, cfg); err != nil {
 		t.Fatal(err)
 	}
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatalf("local service construction resolved GitHub auth: %v", err)
 	}
@@ -444,7 +444,7 @@ func TestNewRejectsInvalidConfiguredTokenSource(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = New(paths, "test")
+	_, err = New(paths, "test", nil)
 	if err == nil || !strings.Contains(err.Error(), "invalid token_source method") {
 		t.Fatalf("New error = %v, want invalid token source", err)
 	}
@@ -537,7 +537,7 @@ func TestMCPSearchRequiresCompleteRepositoryFilter(t *testing.T) {
 func TestSearchCodeUsesStoredSnapshotWithoutNetwork(t *testing.T) {
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +564,7 @@ func TestSearchCodeUsesStoredSnapshotWithoutNetwork(t *testing.T) {
 func TestInvestigationAndOpportunityFlow(t *testing.T) {
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +649,7 @@ func TestInvestigationAndOpportunityFlow(t *testing.T) {
 func TestPrepareContributionDrafts(t *testing.T) {
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
@@ -725,7 +725,7 @@ func TestPrepareContributionDrafts(t *testing.T) {
 func TestValidationDefineRunAndCompare(t *testing.T) {
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
@@ -794,7 +794,7 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 func TestDefineValidationParsesQuotedArguments(t *testing.T) {
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -829,7 +829,7 @@ func TestWorkspaceCreateAndShow(t *testing.T) {
 	remote, baseSHA, candidateSHA := setupAppGitRemote(t)
 
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
@@ -935,7 +935,7 @@ func newLocalService(t *testing.T) *Service {
 	t.Helper()
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test")
+	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}

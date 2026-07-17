@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,15 +36,16 @@ type Service struct {
 	archiveFetcher discovery.ArchiveFetcher
 	clock          func() time.Time
 	version        string
+	logger         *slog.Logger
 }
 
 // New creates a Service and resolves local configuration. GitHub credentials
 // are resolved lazily only when a network-reading operation is requested.
-func New(paths *config.Paths, version string) (*Service, error) {
+func New(paths *config.Paths, version string, logger *slog.Logger) (*Service, error) {
 	if paths == nil {
 		paths = config.NewPaths(nil)
 	}
-	s := &Service{paths: paths, version: version, clock: time.Now}
+	s := &Service{paths: paths, version: version, clock: time.Now, logger: logger}
 	if _, err := s.loadConfig(false); err != nil {
 		return nil, err
 	}

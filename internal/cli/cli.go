@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/discovery"
 	"github.com/morluto/gitcontribute/internal/health"
 	"github.com/morluto/gitcontribute/internal/lens"
+	gitlog "github.com/morluto/gitcontribute/internal/log"
 )
 
 const maxSearchLimit = 100
@@ -29,6 +31,7 @@ type CLI struct {
 	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
+	logger *slog.Logger
 }
 
 // New constructs a CLI that writes results to stdout and progress to stderr.
@@ -40,6 +43,11 @@ func New(service Service, runner MCPRunner, stdout, stderr io.Writer) *CLI {
 		stderr = io.Discard
 	}
 	return &CLI{svc: service, runner: runner, stdin: os.Stdin, stdout: stdout, stderr: stderr}
+}
+
+// SetLogger configures a structured logger for the CLI adapter.
+func (c *CLI) SetLogger(logger *slog.Logger) {
+	c.logger = logger
 }
 
 // SetTUIRunner wires the optional terminal UI adapter.
@@ -694,6 +702,18 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	if idx := strings.IndexByte(command, ' '); idx >= 0 {
 		cmd = command[:idx]
 	}
+
+	if c.logger != nil {
+		traceID := gitlog.TraceFromContext(ctx)
+		if traceID == "" {
+			traceID = "unknown"
+		}
+		c.logger.InfoContext(ctx, "dispatching command",
+			"command", command,
+			"trace_id", traceID,
+		)
+	}
+
 	switch cmd {
 	case "init":
 		return c.runInit(ctx, &cli.Init)
