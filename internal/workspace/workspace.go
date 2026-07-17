@@ -551,6 +551,33 @@ func (m *Manager) DiffByPath(ctx context.Context, path, baseSHA string) (string,
 	return out, nil
 }
 
+// ChangedFilesByPath returns raw Git paths changed from the supplied base.
+// Git owns rename, deletion, and quoted-path handling; NUL delimiters preserve
+// paths containing whitespace or other special characters.
+func (m *Manager) ChangedFilesByPath(ctx context.Context, path, baseSHA string) ([]string, error) {
+	managed, err := m.managedPath(path)
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"diff", "--name-only", "--find-renames", "-z"}
+	if baseSHA != "" {
+		args = append(args, baseSHA)
+	}
+	args = append(args, "--")
+	out, err := m.git(ctx, managed, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list changed files: %w", err)
+	}
+	parts := strings.Split(out, "\x00")
+	files := make([]string, 0, len(parts))
+	for _, path := range parts {
+		if path != "" {
+			files = append(files, path)
+		}
+	}
+	return files, nil
+}
+
 // HasUntrackedByPath reports whether a managed workspace contains untracked,
 // non-ignored files. Callers preparing a complete diff must handle these
 // explicitly because git diff does not include them.

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1175,6 +1176,9 @@ func TestWorkspaceDiffAndReviewReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
+	if err := os.Remove(filepath.Join(ws.Path, "base.txt")); err != nil {
+		t.Fatalf("delete tracked workspace file: %v", err)
+	}
 
 	diff, err := svc.WorkspaceDiff(ctx, ws.ID)
 	if err != nil {
@@ -1185,6 +1189,9 @@ func TestWorkspaceDiffAndReviewReport(t *testing.T) {
 	}
 	if len(diff.ChangedFiles) == 0 {
 		t.Fatalf("expected changed files")
+	}
+	if !slices.Contains(diff.ChangedFiles, "base.txt") {
+		t.Fatalf("deleted file missing from changed files: %v", diff.ChangedFiles)
 	}
 	if len(diff.ReviewOrder) == 0 {
 		t.Fatalf("expected review order")

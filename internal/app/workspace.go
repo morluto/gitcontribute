@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -178,7 +177,10 @@ func (s *Service) WorkspaceDiff(ctx context.Context, id string) (*WorkspaceDiffR
 		return nil, err
 	}
 
-	files := changedFilesFromDiff(diff)
+	files, err := mgr.ChangedFilesByPath(ctx, ws.Path, ws.BaseSHA)
+	if err != nil {
+		return nil, err
+	}
 	result := &WorkspaceDiffResult{
 		ID:               ws.Name,
 		Repo:             cli.RepoRef{Owner: ws.RepoOwner, Repo: ws.RepoName},
@@ -194,25 +196,6 @@ func (s *Service) WorkspaceDiff(ctx context.Context, id string) (*WorkspaceDiffR
 		ReviewOrder:      reviewOrderFromFiles(files),
 	}
 	return result, nil
-}
-
-var diffPathRe = regexp.MustCompile(`\n\+\+\+ b/([^\t\n]+)`)
-
-func changedFilesFromDiff(diff string) []string {
-	seen := make(map[string]struct{})
-	var files []string
-	for _, m := range diffPathRe.FindAllStringSubmatch(diff, -1) {
-		path := m[1]
-		if path == "" || path == "dev/null" {
-			continue
-		}
-		if _, ok := seen[path]; ok {
-			continue
-		}
-		seen[path] = struct{}{}
-		files = append(files, path)
-	}
-	return files
 }
 
 func reviewOrderFromFiles(files []string) []ReviewStep {
