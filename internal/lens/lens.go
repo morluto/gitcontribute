@@ -58,24 +58,9 @@ type Result struct {
 // with no population variance contributes zero. Missing values also contribute
 // zero and remain absent from Normalized, making incomplete evidence visible.
 func Rank(def Definition, candidates []Candidate, now time.Time) ([]Result, error) {
-	if strings.TrimSpace(def.Name) == "" {
-		return nil, errors.New("lens name is required")
-	}
-	if len(def.Weights) == 0 {
-		return nil, errors.New("lens requires at least one signal weight")
-	}
-	weightTotal := 0.0
-	for name, weight := range def.Weights {
-		if strings.TrimSpace(name) == "" {
-			return nil, errors.New("lens signal name is required")
-		}
-		if math.IsNaN(weight) || math.IsInf(weight, 0) {
-			return nil, fmt.Errorf("lens signal %q has non-finite weight", name)
-		}
-		weightTotal += math.Abs(weight)
-	}
-	if weightTotal == 0 {
-		return nil, errors.New("lens weights cannot all be zero")
+	weightTotal, err := validate(def)
+	if err != nil {
+		return nil, err
 	}
 
 	eligible := make([]Candidate, 0, len(candidates))
@@ -133,6 +118,44 @@ func Rank(def Definition, candidates []Candidate, now time.Time) ([]Result, erro
 		results = capPerRepository(results, def.MaxResultsPerRepo)
 	}
 	return results, nil
+}
+
+// Validate checks whether a lens definition can be stored and applied.
+func Validate(def Definition) error {
+	_, err := validate(def)
+	return err
+}
+
+func validate(def Definition) (float64, error) {
+	if strings.TrimSpace(def.Name) == "" {
+		return 0, errors.New("lens name is required")
+	}
+	if len(def.Weights) == 0 {
+		return 0, errors.New("lens requires at least one signal weight")
+	}
+	weightTotal := 0.0
+	for name, weight := range def.Weights {
+		if strings.TrimSpace(name) == "" {
+			return 0, errors.New("lens signal name is required")
+		}
+		if math.IsNaN(weight) || math.IsInf(weight, 0) {
+			return 0, fmt.Errorf("lens signal %q has non-finite weight", name)
+		}
+		weightTotal += math.Abs(weight)
+	}
+	if weightTotal == 0 {
+		return 0, errors.New("lens weights cannot all be zero")
+	}
+	if def.MaxResultsPerRepo < 0 {
+		return 0, errors.New("lens per-repository result limit cannot be negative")
+	}
+	if def.Filter.UpdatedWithin < 0 {
+		return 0, errors.New("lens updated-within duration cannot be negative")
+	}
+	if def.Filter.MinStars < 0 {
+		return 0, errors.New("lens minimum stars cannot be negative")
+	}
+	return weightTotal, nil
 }
 
 func matches(filter Filter, candidate Candidate, now time.Time) bool {

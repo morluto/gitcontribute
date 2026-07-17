@@ -76,3 +76,16 @@ func TestRankRejectsNonFiniteInputs(t *testing.T) {
 		t.Fatal("Rank accepted a non-finite signal")
 	}
 }
+
+func TestValidateRejectsImpossibleFiltersAndCaps(t *testing.T) {
+	tests := []Definition{
+		{Name: "bad", Weights: map[string]float64{"value": 1}, MaxResultsPerRepo: -1},
+		{Name: "bad", Weights: map[string]float64{"value": 1}, Filter: Filter{UpdatedWithin: -time.Second}},
+		{Name: "bad", Weights: map[string]float64{"value": 1}, Filter: Filter{MinStars: -1}},
+	}
+	for _, def := range tests {
+		if err := Validate(def); err == nil {
+			t.Fatalf("Validate accepted %+v", def)
+		}
+	}
+}
