@@ -42,7 +42,7 @@ func (s *Service) Metadata(ctx context.Context) (*cli.MetadataResult, error) {
 	}
 
 	capabilities := []string{
-		"archive", "clustering", "collections", "dossiers", "evidence",
+		"archive", "clustering", "collections", "contribution-radar", "dossiers", "evidence",
 		"github-read", "investigations", "local-search", "mcp-stdio",
 		"validation", "workspaces",
 	}
@@ -58,10 +58,11 @@ func (s *Service) Metadata(ctx context.Context) (*cli.MetadataResult, error) {
 		CorpusPath:    cfg.Database,
 		Capabilities:  capabilities,
 		Features: map[string]bool{
-			"github_mutations": false,
-			"mcp_stdio":        true,
-			"semantic_search":  false,
-			"validation_exec":  true,
+			"contribution_radar": true,
+			"github_mutations":   false,
+			"mcp_stdio":          true,
+			"semantic_search":    false,
+			"validation_exec":    true,
 		},
 	}, nil
 }

@@ -7,6 +7,8 @@ import (
 	"io"
 	"sort"
 	"strings"
+
+	"github.com/morluto/gitcontribute/internal/radar"
 )
 
 func writeJSON(w io.Writer, v any) error {
@@ -37,6 +39,8 @@ func humanOutput(v any) (string, error) {
 		return doctorHuman(r), nil
 	case *SyncResult:
 		return syncHuman(r), nil
+	case *radar.Report:
+		return radarHuman(r), nil
 	case *SearchResult:
 		return searchHuman(r), nil
 	case *DossierResult:
@@ -125,6 +129,64 @@ func humanOutput(v any) (string, error) {
 		}
 		return string(payload), nil
 	}
+}
+
+func radarHuman(r *radar.Report) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Contribution radar: %s (%s)", r.Repo, r.ScoreVersion)
+	fmt.Fprintf(&b, "\nRanked %d of %d open issues from a %d-issue population", len(r.Candidates), r.TotalOpenIssues, r.CandidatePopulation)
+	if r.PopulationCapped {
+		b.WriteString(" (bounded)")
+	}
+	if !r.SourceAsOf.IsZero() {
+		fmt.Fprintf(&b, "\nSource evidence as of %s", r.SourceAsOf.UTC().Format("2006-01-02T15:04:05Z"))
+	}
+	for _, candidate := range r.Candidates {
+		fmt.Fprintf(&b, "\n\n%d. [%s] #%d %s — %d/100, base %d (%s confidence)",
+			candidate.Rank, candidate.Eligibility, candidate.Number, oneLine(candidate.Title), candidate.Score, candidate.BaseScore, candidate.Confidence)
+		writeRadarSignals(&b, "why", candidate.PositiveSignals)
+		writeRadarSignals(&b, "risks", candidate.Risks)
+		writeRadarSignals(&b, "blockers", candidate.Blockers)
+		if len(candidate.Unknowns) > 0 {
+			fmt.Fprintf(&b, "\n   unknown: %s", joinRadarUnknowns(candidate.Unknowns))
+		}
+		if candidate.URL != "" {
+			fmt.Fprintf(&b, "\n   %s", candidate.URL)
+		}
+	}
+	if len(r.Unknowns) > 0 {
+		fmt.Fprintf(&b, "\n\nRepository unknowns: %s", joinRadarUnknowns(r.Unknowns))
+	}
+	return b.String()
+}
+
+func writeRadarSignals(b *strings.Builder, label string, signals []radar.Signal) {
+	if len(signals) == 0 {
+		return
+	}
+	parts := make([]string, 0, len(signals))
+	for _, signal := range signals {
+		part := signal.Summary
+		if signal.Weight > 0 {
+			part += fmt.Sprintf(" (+%d)", signal.Weight)
+		} else if signal.Weight < 0 {
+			part += fmt.Sprintf(" (%d)", signal.Weight)
+		}
+		parts = append(parts, part)
+	}
+	fmt.Fprintf(b, "\n   %s: %s", label, strings.Join(parts, "; "))
+}
+
+func joinRadarUnknowns(unknowns []radar.Unknown) string {
+	parts := make([]string, 0, len(unknowns))
+	for _, unknown := range unknowns {
+		parts = append(parts, unknown.Summary)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func oneLine(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func metadataHuman(r *MetadataResult) string {

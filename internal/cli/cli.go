@@ -15,7 +15,6 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/morluto/gitcontribute/internal/discovery"
-	"github.com/morluto/gitcontribute/internal/health"
 	"github.com/morluto/gitcontribute/internal/lens"
 	gitlog "github.com/morluto/gitcontribute/internal/log"
 )
@@ -71,6 +70,7 @@ type rootCmd struct {
 	Status        statusCmd        `cmd:"" help:"Show corpus status"`
 	Doctor        doctorCmd        `cmd:"" help:"Diagnose local configuration and dependencies"`
 	Health        healthCmd        `cmd:"" help:"Compute offline repository health and community metrics"`
+	Radar         radarCmd         `cmd:"" help:"Rank explainable contribution candidates from the local corpus"`
 	Sync          syncCmd          `cmd:"" help:"Sync a repository into the corpus"`
 	Search        searchCmd        `cmd:"" help:"Search the local corpus"`
 	Dossier       dossierCmd       `cmd:"" help:"Show repository dossier"`
@@ -160,14 +160,6 @@ type metadataCmd struct {
 
 type doctorCmd struct {
 	JSON bool `name:"json" help:"Print the result as JSON"`
-}
-
-type healthCmd struct {
-	OwnerRepo  string        `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
-	Start      string        `name:"start" help:"Window start as RFC3339"`
-	End        string        `name:"end" help:"Window end as RFC3339"`
-	StaleAfter time.Duration `name:"stale-after" default:"336h" help:"Open PR inactivity threshold"`
-	JSON       bool          `name:"json" help:"Print the result as JSON"`
 }
 
 type statusCmd struct {
@@ -764,6 +756,8 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runDoctor(ctx, &cli.Doctor)
 	case "health":
 		return c.runHealth(ctx, &cli.Health)
+	case "radar":
+		return c.runRadar(ctx, &cli.Radar)
 	case "sync":
 		return c.runSync(ctx, &cli.Sync)
 	case "search":
@@ -1277,14 +1271,6 @@ func (c *CLI) archiveThreadService() (ArchiveThreadService, error) {
 
 func (c *CLI) acquisitionService() (AcquisitionService, error) {
 	service, ok := c.svc.(AcquisitionService)
-	if !ok {
-		return nil, NewCLIError(ExitNotWired, ErrNotWired)
-	}
-	return service, nil
-}
-
-func (c *CLI) healthService() (HealthService, error) {
-	service, ok := c.svc.(HealthService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -1965,46 +1951,6 @@ func (c *CLI) runDoctor(ctx context.Context, cmd *doctorCmd) error {
 		return err
 	}
 	result, err := service.Doctor(ctx)
-	if err != nil {
-		return c.mapError(err)
-	}
-	return c.render(cmd.JSON, result)
-}
-
-func (c *CLI) runHealth(ctx context.Context, cmd *healthCmd) error {
-	repo, err := parseRepo(cmd.OwnerRepo)
-	if err != nil {
-		return err
-	}
-	if cmd.StaleAfter <= 0 {
-		return NewCLIError(ExitUsage, errors.New("stale-after must be positive"))
-	}
-	parseBound := func(name, value string) (time.Time, error) {
-		if value == "" {
-			return time.Time{}, nil
-		}
-		parsed, err := time.Parse(time.RFC3339, value)
-		if err != nil {
-			return time.Time{}, NewCLIError(ExitUsage, fmt.Errorf("invalid --%s value: %w", name, err))
-		}
-		return parsed, nil
-	}
-	start, err := parseBound("start", cmd.Start)
-	if err != nil {
-		return err
-	}
-	end, err := parseBound("end", cmd.End)
-	if err != nil {
-		return err
-	}
-	if !start.IsZero() && !end.IsZero() && end.Before(start) {
-		return NewCLIError(ExitUsage, errors.New("end cannot be before start"))
-	}
-	service, err := c.healthService()
-	if err != nil {
-		return err
-	}
-	result, err := service.RepositoryHealthWithOptions(ctx, repo, health.Options{Start: start, End: end, StaleThreshold: cmd.StaleAfter})
 	if err != nil {
 		return c.mapError(err)
 	}
