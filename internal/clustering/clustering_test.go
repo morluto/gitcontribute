@@ -112,6 +112,8 @@ func TestExtractRefs(t *testing.T) {
 		{"see #42 for context", 1},
 		{"fix owner/repo#7", 1},
 		{"https://github.com/owner/repo/issues/3", 1},
+		{"see github.com/owner/repo/pull/4", 1},
+		{"https://notgithub.com/owner/repo/issues/3", 0},
 		{"nothing here", 0},
 	}
 

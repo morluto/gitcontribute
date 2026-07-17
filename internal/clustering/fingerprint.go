@@ -78,7 +78,7 @@ var (
 	// Matches owner/repo#123 or owner/repo #123 (issue or pull-request number).
 	repoIssueRefPattern = regexp.MustCompile(`(?i)([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)/([a-z0-9_.-]+)\s*#\s*(\d+)`)
 	// Matches github.com/owner/repo/issues/123 or pull/123.
-	urlRefPattern = regexp.MustCompile(`(?i)github\.com/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)/([a-z0-9_.-]+)/(?:issues|pull)/(\d+)`)
+	urlRefPattern = regexp.MustCompile(`(?i)(?:^|[^a-z0-9.-])(?:https?://)?(?:www\.)?github\.com/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)/([a-z0-9_.-]+)/(?:issues|pull)/(\d+)`)
 	// Matches bare #123 in body or title, constrained to word boundaries.
 	bareRefPattern = regexp.MustCompile(`(?:^|\s|\W)#\s*(\d+)(?:\b|$)`)
 )
