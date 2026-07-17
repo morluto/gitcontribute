@@ -22,7 +22,7 @@ TUI ---------+              |
                   observations + projections
                             |
                             v
-              offline search, health, dossiers,
+              offline search, radar, health, dossiers,
              investigations, evidence, and drafts
 ```
 
@@ -150,7 +150,10 @@ a deterministic tie-breaker.
 Scores are explanations, not opaque relevance claims. They are derived from
 stored matches, freshness, coverage, and optional lens weights. Lens ranking
 uses a bounded population and therefore does not support cursor pagination.
-Health metrics and dossier generation similarly operate only on stored facts
+Contribution Radar similarly ranks a bounded open-issue population, separates
+eligibility from score, and reports positive signals, risks, blockers, and
+unknown evidence. Missing coverage is never silently converted into a negative
+signal. Health metrics and dossier generation also operate only on stored facts
 and report partial or missing coverage when required facets are incomplete.
 
 ## Schema changes

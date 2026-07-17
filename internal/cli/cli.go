@@ -18,6 +18,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/health"
 	"github.com/morluto/gitcontribute/internal/lens"
 	gitlog "github.com/morluto/gitcontribute/internal/log"
+	"github.com/morluto/gitcontribute/internal/radar"
 )
 
 const maxSearchLimit = 100
@@ -71,6 +72,7 @@ type rootCmd struct {
 	Status        statusCmd        `cmd:"" help:"Show corpus status"`
 	Doctor        doctorCmd        `cmd:"" help:"Diagnose local configuration and dependencies"`
 	Health        healthCmd        `cmd:"" help:"Compute offline repository health and community metrics"`
+	Radar         radarCmd         `cmd:"" help:"Rank explainable contribution candidates from the local corpus"`
 	Sync          syncCmd          `cmd:"" help:"Sync a repository into the corpus"`
 	Search        searchCmd        `cmd:"" help:"Search the local corpus"`
 	Dossier       dossierCmd       `cmd:"" help:"Show repository dossier"`
@@ -168,6 +170,13 @@ type healthCmd struct {
 	End        string        `name:"end" help:"Window end as RFC3339"`
 	StaleAfter time.Duration `name:"stale-after" default:"336h" help:"Open PR inactivity threshold"`
 	JSON       bool          `name:"json" help:"Print the result as JSON"`
+}
+
+type radarCmd struct {
+	OwnerRepo string `arg:"" optional:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	Repo      string `name:"repo" help:"Repository as OWNER/REPO (alternative to the positional argument)"`
+	Limit     int    `name:"limit" default:"20" help:"Maximum number of ranked candidates"`
+	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type statusCmd struct {
@@ -764,6 +773,8 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runDoctor(ctx, &cli.Doctor)
 	case "health":
 		return c.runHealth(ctx, &cli.Health)
+	case "radar":
+		return c.runRadar(ctx, &cli.Radar)
 	case "sync":
 		return c.runSync(ctx, &cli.Sync)
 	case "search":
@@ -1285,6 +1296,14 @@ func (c *CLI) acquisitionService() (AcquisitionService, error) {
 
 func (c *CLI) healthService() (HealthService, error) {
 	service, ok := c.svc.(HealthService)
+	if !ok {
+		return nil, NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	return service, nil
+}
+
+func (c *CLI) radarService() (RadarService, error) {
+	service, ok := c.svc.(RadarService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -2005,6 +2024,34 @@ func (c *CLI) runHealth(ctx context.Context, cmd *healthCmd) error {
 		return err
 	}
 	result, err := service.RepositoryHealthWithOptions(ctx, repo, health.Options{Start: start, End: end, StaleThreshold: cmd.StaleAfter})
+	if err != nil {
+		return c.mapError(err)
+	}
+	return c.render(cmd.JSON, result)
+}
+
+func (c *CLI) runRadar(ctx context.Context, cmd *radarCmd) error {
+	repository := cmd.OwnerRepo
+	if repository == "" {
+		repository = cmd.Repo
+	} else if cmd.Repo != "" && cmd.Repo != cmd.OwnerRepo {
+		return NewCLIError(ExitUsage, errors.New("repository arguments disagree"))
+	}
+	if repository == "" {
+		return NewCLIError(ExitUsage, errors.New("repository is required"))
+	}
+	repo, err := parseRepo(repository)
+	if err != nil {
+		return err
+	}
+	if cmd.Limit < 1 || cmd.Limit > radar.MaxLimit {
+		return NewCLIError(ExitUsage, fmt.Errorf("limit must be between 1 and %d", radar.MaxLimit))
+	}
+	service, err := c.radarService()
+	if err != nil {
+		return err
+	}
+	result, err := service.ContributionRadar(ctx, RadarOptions{Repo: repo, Limit: cmd.Limit})
 	if err != nil {
 		return c.mapError(err)
 	}

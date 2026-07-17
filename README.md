@@ -36,6 +36,7 @@ inspection, health analysis, dossiers, and investigations run entirely offline.
 | | Capability | What it gives you |
 | :---: | --- | --- |
 | 🔎 | **Typed offline search** | Search repositories, issues, PRs, threads, and indexed code with transparent ranking. |
+| 📡 | **Contribution Radar** | Rank promising open issues with explicit positives, risks, blockers, confidence, and missing-evidence warnings. |
 | 🗂️ | **Durable research corpus** | Keep observations, coverage, investigations, evidence, and outcomes in local SQLite. |
 | 🧭 | **Contribution workflow** | Move from hypothesis to opportunity, workspace, validation, and a prepared issue, PR, or review. |
 | 🤖 | **Agent-ready MCP server** | Give Codex or Claude Code structured tools and resources with explicit capability boundaries. |
@@ -49,10 +50,11 @@ Run the guided setup with Node.js 18 or newer:
 npx gitcontribute@latest setup
 ```
 
-Then sync a repository and search the local corpus:
+Then sync a repository, rank contribution candidates, and search the local corpus:
 
 ```sh
 npx gitcontribute@latest sync owner/repo
+npx gitcontribute@latest radar owner/repo --limit 10
 npx gitcontribute@latest search threads "connection timeout" \
   --repo owner/repo --json
 npx gitcontribute@latest dossier build owner/repo --json
@@ -123,6 +125,7 @@ Sync only when you ask, then search locally as often as you like.
 ```sh
 gitcontribute source add repos --name my-go "golang/go" "cli/cli" --json
 gitcontribute crawl my-go --since 720h --budget 500 --json
+gitcontribute radar golang/go --limit 20 --json
 gitcontribute search issues "data race" --repo golang/go --state open --json
 gitcontribute search code "context.WithTimeout" --repo golang/go
 ```
@@ -324,9 +327,10 @@ enforces size limits, and rejects dirty worktrees.
 </details>
 
 <details>
-<summary><strong>Search, dossiers, health, seeds, and lenses</strong></summary>
+<summary><strong>Radar, search, dossiers, health, seeds, and lenses</strong></summary>
 
 ```sh
+gitcontribute radar owner/repo --limit 20
 gitcontribute search repos "cli" --limit 20 --json
 gitcontribute search issues "data race" --repo owner/repo --state open --json
 gitcontribute search prs "flaky" --repo owner/repo --label bug --json
@@ -340,6 +344,22 @@ gitcontribute dossier export owner/repo --format markdown \
 gitcontribute health owner/repo --stale-after 336h --json
 gitcontribute seeds owner/repo --json
 ```
+
+`radar` is a strict offline corpus read. It ranks a bounded population of the
+newest stored open issues and separates objective eligibility from the numeric
+score. Every candidate reports positive signals, risks, blockers, confidence,
+linked open PRs, evidence coverage, and unknowns. Missing comment coverage is
+reported as unknown and does not lower the score; hydrate comments explicitly
+when you want that evidence:
+
+```sh
+gitcontribute archive hydrate owner/repo#42 --with issue_comments
+gitcontribute radar owner/repo --json
+```
+
+Radar scores carry a version (`radar.v1`) so saved JSON remains auditable when
+ranking semantics evolve. It never syncs, hydrates, executes repository code,
+or writes to GitHub.
 
 Use a lens to apply saved filters and weighted ranking to a bounded population:
 

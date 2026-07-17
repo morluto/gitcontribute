@@ -38,9 +38,21 @@ func TestMetadataIsLocalAndDoesNotCreateCorpus(t *testing.T) {
 	if result.SchemaVersion != 0 {
 		t.Fatalf("schema version = %d, want 0 before corpus open", result.SchemaVersion)
 	}
+	if !result.Features["contribution_radar"] || !containsString(result.Capabilities, "contribution-radar") {
+		t.Fatalf("radar capability missing from metadata: %+v", result)
+	}
 	if _, err := os.Stat(result.CorpusPath); !os.IsNotExist(err) {
 		t.Fatalf("metadata created corpus %q: %v", result.CorpusPath, err)
 	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func TestConfigureInvalidInputDoesNotReplaceFile(t *testing.T) {
