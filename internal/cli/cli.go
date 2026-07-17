@@ -136,7 +136,7 @@ type addHypothesisCmd struct {
 	InvestigationID string `arg:"" help:"Investigation ID"`
 	Title           string `name:"title" required:"" help:"Hypothesis title"`
 	Description     string `name:"description" required:"" help:"Hypothesis description"`
-	Category        string `name:"category" required:"" help:"Hypothesis category"`
+	Category        string `name:"category" required:"" enum:"bug,performance,architecture,testing,documentation,maintenance,compatibility,security,other" help:"Hypothesis category"`
 	JSON            bool   `name:"json" help:"Print the result as JSON"`
 }
 
@@ -174,7 +174,7 @@ type listOpportunityCmd struct {
 
 type setStatusOpportunityCmd struct {
 	ID        string `arg:"" help:"Opportunity ID"`
-	Status    string `arg:"" help:"Target status"`
+	Status    string `arg:"" enum:"hypothesis,reproduced,validated,maintainer_aligned,implemented,submitted,merged,rejected,deferred,superseded" help:"Target status"`
 	Rationale string `name:"rationale" required:"" help:"Rationale for the transition"`
 	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }

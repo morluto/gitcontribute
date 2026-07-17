@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
@@ -138,9 +139,9 @@ func (s *Service) ListOpportunities(ctx context.Context, investigationID string)
 func (s *Service) SetOpportunityStatus(ctx context.Context, id, status, rationale string) (*cli.OpportunityResult, error) {
 	opStatus, err := parseOpportunityStatus(status)
 	if err != nil {
-		return nil, cli.NewCLIError(cli.ExitUsage, err)
+		return nil, err
 	}
-	if rationale == "" {
+	if strings.TrimSpace(rationale) == "" {
 		return nil, errors.New("rationale is required")
 	}
 	invSvc, err := s.investigationSvc(ctx)

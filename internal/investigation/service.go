@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,6 +47,7 @@ func (s *Service) StartInvestigation(ctx context.Context, repo domain.RepoRef, c
 
 // RecordHypothesis stores a new hypothesis under an investigation.
 func (s *Service) RecordHypothesis(ctx context.Context, investigationID, title, description string, category Category, refs []domain.SourceRef) (*Hypothesis, error) {
+	title = strings.TrimSpace(title)
 	if title == "" {
 		return nil, ErrMissingTitle
 	}
@@ -114,16 +117,23 @@ func (s *Service) ListOpportunities(ctx context.Context, investigationID string)
 
 // PromoteOpportunity converts a confirmed hypothesis into an opportunity.
 func (s *Service) PromoteOpportunity(ctx context.Context, hypothesisID, problem, scope, impact, effort string, confidence float64) (*Opportunity, error) {
-	if confidence < 0 || confidence > 1 {
+	problem = strings.TrimSpace(problem)
+	if problem == "" {
+		return nil, ErrMissingProblem
+	}
+	if math.IsNaN(confidence) || math.IsInf(confidence, 0) || confidence < 0 || confidence > 1 {
 		return nil, fmt.Errorf("confidence must be between 0 and 1")
 	}
-	h, err := s.repo.GetHypothesis(ctx, hypothesisID)
+	storedHypothesis, err := s.repo.GetHypothesis(ctx, hypothesisID)
 	if err != nil {
 		return nil, err
 	}
-	if h.Status != HypothesisProposed {
-		return nil, fmt.Errorf("%w: hypothesis must be proposed to promote, got %s", ErrInvalidTransition, h.Status)
+	if storedHypothesis.Status != HypothesisProposed {
+		return nil, fmt.Errorf("%w: hypothesis must be proposed to promote, got %s", ErrInvalidTransition, storedHypothesis.Status)
 	}
+	h := *storedHypothesis
+	h.SourceRefs = append([]domain.SourceRef(nil), storedHypothesis.SourceRefs...)
+	h.AuditTrail = append([]StatusChange(nil), storedHypothesis.AuditTrail...)
 	if err := h.Transition(HypothesisPromoted, "promoted to opportunity"); err != nil {
 		return nil, err
 	}
@@ -145,10 +155,7 @@ func (s *Service) PromoteOpportunity(ctx context.Context, hypothesisID, problem,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	if err := s.repo.SaveHypothesis(ctx, h); err != nil {
-		return nil, err
-	}
-	if err := s.repo.SaveOpportunity(ctx, o); err != nil {
+	if err := s.repo.PromoteHypothesis(ctx, &h, o); err != nil {
 		return nil, err
 	}
 	return o, nil

@@ -73,7 +73,7 @@ func (c *Corpus) GetInvestigation(ctx context.Context, id string) (*investigatio
 }
 
 func (c *Corpus) ListInvestigations(ctx context.Context) ([]*investigation.Investigation, error) {
-	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM investigations ORDER BY created_at, id`)
+	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM investigations ORDER BY created_at, id LIMIT 10000`)
 	if err != nil {
 		return nil, fmt.Errorf("list investigations: %w", err)
 	}
@@ -130,7 +130,7 @@ func (c *Corpus) GetHypothesis(ctx context.Context, id string) (*investigation.H
 }
 
 func (c *Corpus) ListHypotheses(ctx context.Context, investigationID string) ([]*investigation.Hypothesis, error) {
-	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM hypotheses WHERE investigation_id=? ORDER BY created_at, id`, investigationID)
+	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM hypotheses WHERE investigation_id=? ORDER BY created_at, id LIMIT 10000`, investigationID)
 	if err != nil {
 		return nil, fmt.Errorf("list hypotheses: %w", err)
 	}
@@ -171,6 +171,55 @@ func (c *Corpus) SaveOpportunity(ctx context.Context, item *investigation.Opport
 	return nil
 }
 
+// PromoteHypothesis atomically stores the promoted hypothesis and its new
+// opportunity so a partial write cannot strand the hypothesis.
+func (c *Corpus) PromoteHypothesis(ctx context.Context, hypothesis *investigation.Hypothesis, opportunity *investigation.Opportunity) error {
+	if hypothesis == nil || hypothesis.ID == "" || opportunity == nil || opportunity.ID == "" {
+		return errors.New("promoted hypothesis and opportunity identities are required")
+	}
+	hypothesisPayload, err := marshalWorkflow(hypothesis)
+	if err != nil {
+		return err
+	}
+	opportunityPayload, err := marshalWorkflow(opportunity)
+	if err != nil {
+		return err
+	}
+	tx, err := c.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin hypothesis promotion: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, `
+		UPDATE hypotheses SET investigation_id=?, category=?, status=?, payload=?, updated_at=?
+		WHERE id=? AND status=?
+	`, hypothesis.InvestigationID, hypothesis.Category, hypothesis.Status,
+		hypothesisPayload, encodeTime(hypothesis.UpdatedAt), hypothesis.ID,
+		investigation.HypothesisProposed)
+	if err != nil {
+		return fmt.Errorf("save promoted hypothesis: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read promoted hypothesis result: %w", err)
+	}
+	if changed != 1 {
+		return fmt.Errorf("%w: hypothesis is no longer proposed", investigation.ErrInvalidTransition)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO opportunities (id, investigation_id, hypothesis_id, category, status, payload, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, opportunity.ID, opportunity.InvestigationID, opportunity.HypothesisID,
+		opportunity.Category, opportunity.Status, opportunityPayload,
+		encodeTime(opportunity.CreatedAt), encodeTime(opportunity.UpdatedAt)); err != nil {
+		return fmt.Errorf("save promoted opportunity: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit hypothesis promotion: %w", err)
+	}
+	return nil
+}
+
 func (c *Corpus) GetOpportunity(ctx context.Context, id string) (*investigation.Opportunity, error) {
 	var payload string
 	err := c.db.QueryRowContext(ctx, `SELECT payload FROM opportunities WHERE id=?`, id).Scan(&payload)
@@ -194,7 +243,7 @@ func (c *Corpus) ListOpportunities(ctx context.Context, investigationID string) 
 		query += ` WHERE investigation_id=?`
 		args = append(args, investigationID)
 	}
-	query += ` ORDER BY created_at, id`
+	query += ` ORDER BY created_at, id LIMIT 10000`
 	rows, err := c.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list opportunities: %w", err)

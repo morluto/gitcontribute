@@ -7,6 +7,7 @@ var (
 	ErrInvalidRepo           = errors.New("investigation: invalid repository reference")
 	ErrInvalidTransition     = errors.New("investigation: invalid status transition")
 	ErrMissingTitle          = errors.New("investigation: title is required")
+	ErrMissingProblem        = errors.New("investigation: problem statement is required")
 	ErrInvalidCategory       = errors.New("investigation: invalid category")
 	ErrContradictingEvidence = errors.New("investigation: contradicting evidence blocks this transition")
 )

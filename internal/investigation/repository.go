@@ -17,6 +17,7 @@ type Repository interface {
 	GetHypothesis(ctx context.Context, id string) (*Hypothesis, error)
 	ListHypotheses(ctx context.Context, investigationID string) ([]*Hypothesis, error)
 	SaveOpportunity(ctx context.Context, o *Opportunity) error
+	PromoteHypothesis(ctx context.Context, h *Hypothesis, o *Opportunity) error
 	GetOpportunity(ctx context.Context, id string) (*Opportunity, error)
 	ListOpportunities(ctx context.Context, investigationID string) ([]*Opportunity, error)
 	FindRelated(ctx context.Context, ref domain.RepoRef, category Category) ([]domain.SourceRef, error)

@@ -3,6 +3,7 @@ package investigation
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -72,6 +73,18 @@ func (r *fakeRepo) ListHypotheses(_ context.Context, investigationID string) ([]
 func (r *fakeRepo) SaveOpportunity(_ context.Context, o *Opportunity) error {
 	r.opportunities[o.ID] = o
 	return nil
+}
+
+func (r *fakeRepo) PromoteHypothesis(_ context.Context, h *Hypothesis, o *Opportunity) error {
+	r.hypotheses[h.ID] = h
+	r.opportunities[o.ID] = o
+	return nil
+}
+
+type failingPromotionRepo struct{ *fakeRepo }
+
+func (r *failingPromotionRepo) PromoteHypothesis(context.Context, *Hypothesis, *Opportunity) error {
+	return errors.New("promotion write failed")
 }
 
 func (r *fakeRepo) GetOpportunity(_ context.Context, id string) (*Opportunity, error) {
@@ -170,6 +183,33 @@ func TestPromoteOpportunity(t *testing.T) {
 	}
 	if o.CollisionStatus != CollisionUnknown {
 		t.Fatalf("collision status: got %q", o.CollisionStatus)
+	}
+}
+
+func TestPromoteOpportunityFailureDoesNotMutateStoredHypothesis(t *testing.T) {
+	repo := &failingPromotionRepo{fakeRepo: newFakeRepo()}
+	svc := NewService(repo, &fakeEvidenceStore{})
+	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	h, _ := svc.RecordHypothesis(context.Background(), inv.ID, "race", "race desc", CategoryBug, nil)
+	if _, err := svc.PromoteOpportunity(context.Background(), h.ID, "problem", "scope", "impact", "small", 0.8); err == nil {
+		t.Fatal("expected promotion failure")
+	}
+	stored, err := repo.GetHypothesis(context.Background(), h.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != HypothesisProposed {
+		t.Fatalf("failed promotion mutated hypothesis: %+v", stored)
+	}
+}
+
+func TestPromoteOpportunityRejectsInvalidInputs(t *testing.T) {
+	svc := NewService(newFakeRepo(), &fakeEvidenceStore{})
+	if _, err := svc.PromoteOpportunity(context.Background(), "missing", " ", "scope", "impact", "small", 0.5); !errors.Is(err, ErrMissingProblem) {
+		t.Fatalf("blank problem error = %v", err)
+	}
+	if _, err := svc.PromoteOpportunity(context.Background(), "missing", "problem", "scope", "impact", "small", math.NaN()); err == nil {
+		t.Fatal("expected NaN confidence error")
 	}
 }
 

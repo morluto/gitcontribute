@@ -2,8 +2,10 @@ package corpus
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/morluto/gitcontribute/internal/contribution"
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -79,6 +81,74 @@ func TestFindRelatedUsesRepositoryAndCategory(t *testing.T) {
 	other, err := c.FindRelated(ctx, domain.RepoRef{Owner: "other", Repo: "repo"}, investigation.CategoryBug)
 	if err != nil || len(other) != 0 {
 		t.Fatalf("other FindRelated = (%+v, %v)", other, err)
+	}
+}
+
+func TestPromoteHypothesisRollsBackOnOpportunityConflict(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	svc := investigation.NewService(c, c)
+	inv, err := svc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, "sha", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.RecordHypothesis(ctx, inv.ID, "first", "description", investigation.CategoryBug, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing, err := svc.PromoteOpportunity(ctx, first.ID, "first problem", "scope", "impact", "small", 0.8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.RecordHypothesis(ctx, inv.ID, "second", "description", investigation.CategoryBug, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promoted := *second
+	if err := promoted.Transition(investigation.HypothesisPromoted, "promotion test"); err != nil {
+		t.Fatal(err)
+	}
+	conflict := &investigation.Opportunity{
+		ID: existing.ID, InvestigationID: inv.ID, HypothesisID: second.ID,
+		Title: second.Title, ProblemStatement: "second problem", Category: second.Category,
+		Status: investigation.OpportunityHypothesis, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	if err := c.PromoteHypothesis(ctx, &promoted, conflict); err == nil {
+		t.Fatal("expected duplicate opportunity failure")
+	}
+	stored, err := c.GetHypothesis(ctx, second.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != investigation.HypothesisProposed {
+		t.Fatalf("promotion rollback left hypothesis in %s", stored.Status)
+	}
+}
+
+func TestPromoteHypothesisRejectsStaleConcurrentPromotion(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	svc := investigation.NewService(c, c)
+	inv, _ := svc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, "sha", "")
+	hypothesis, _ := svc.RecordHypothesis(ctx, inv.ID, "race", "description", investigation.CategoryBug, nil)
+	stale := *hypothesis
+	if _, err := svc.PromoteOpportunity(ctx, hypothesis.ID, "first problem", "scope", "impact", "small", 0.8); err != nil {
+		t.Fatal(err)
+	}
+	if err := stale.Transition(investigation.HypothesisPromoted, "stale promotion"); err != nil {
+		t.Fatal(err)
+	}
+	staleOpportunity := &investigation.Opportunity{
+		ID: "stale-opportunity", InvestigationID: inv.ID, HypothesisID: hypothesis.ID,
+		Title: hypothesis.Title, ProblemStatement: "second problem", Category: hypothesis.Category,
+		Status: investigation.OpportunityHypothesis, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	err := c.PromoteHypothesis(ctx, &stale, staleOpportunity)
+	if !errors.Is(err, investigation.ErrInvalidTransition) {
+		t.Fatalf("stale promotion error = %v", err)
+	}
+	if opportunity, err := c.GetOpportunity(ctx, staleOpportunity.ID); !errors.Is(err, investigation.ErrNotFound) || opportunity != nil {
+		t.Fatalf("stale opportunity = (%+v, %v)", opportunity, err)
 	}
 }
 
