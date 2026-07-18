@@ -51,14 +51,14 @@ func Install(source, destination string) (bool, error) {
 	dir := filepath.Dir(destination)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		if closeErr := in.Close(); closeErr != nil {
-			err = fmt.Errorf("%w; close packaged executable: %v", err, closeErr)
+			err = fmt.Errorf("%w; close packaged executable: %w", err, closeErr)
 		}
 		return false, fmt.Errorf("create managed binary directory: %w", err)
 	}
 	tmp, err := os.CreateTemp(dir, ".gitcontribute-runtime-*")
 	if err != nil {
 		if closeErr := in.Close(); closeErr != nil {
-			err = fmt.Errorf("%w; close packaged executable: %v", err, closeErr)
+			err = fmt.Errorf("%w; close packaged executable: %w", err, closeErr)
 		}
 		return false, fmt.Errorf("create managed binary: %w", err)
 	}
