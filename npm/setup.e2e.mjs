@@ -25,7 +25,7 @@ function runScriptPTY(command, input, env) {
   return new Promise((resolve, reject) => {
     const child = spawn(
       "script",
-      ["-qefc", `${shellQuote(command)} setup`, "/dev/null"],
+      ["-qefc", `stty rows 40 columns 120; exec ${shellQuote(command)} setup`, "/dev/null"],
       { env, stdio: ["pipe", "pipe", "pipe"] }
     );
     let stdout = "";
