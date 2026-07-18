@@ -17,7 +17,6 @@ const maxSerializedCatalogBytes = 112 * 1024
 
 var selectionSynonyms = map[string]string{
 	"execute": "run",
-	"fetch":   "hydrate",
 	"read":    "get",
 	"rebuild": "build",
 	"refresh": "sync",

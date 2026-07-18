@@ -342,7 +342,7 @@ func (s *Server) registerScalable() {
 		forbidWhen(sc, "selection", "repositories", "threads")
 		forbidWhen(sc, "selection", "threads", "repositories", "kind", "state", "updated_after", "limit_per_repository")
 	}), output: outputSchema[JobReference]("Reference to a bounded thread-header synchronization job."), handler: s.syncThreads})
-	addCatalogTool(s.server, catalogTool[HydrateThreadsInput, JobReference]{name: ToolHydrateThreads, title: "Hydrate selected GitHub thread facets in one batch", description: "Start one durable read for explicit child facets on up to 100 exact threads across repositories. An empty facet list is rejected; hydrate only finalists after ranking.", annotations: networkReadAnnotations(), input: inputSchema[HydrateThreadsInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s.server, catalogTool[HydrateThreadsInput, JobReference]{name: ToolHydrateThreads, title: "Fetch GitHub comments and reviews for selected threads", description: "Fetch explicit comments, pull-request details, reviews, or review comments for up to 100 exact threads across repositories. An empty facet list is rejected; hydrate only finalists after ranking.", annotations: networkReadAnnotations(), input: inputSchema[HydrateThreadsInput](func(sc *jsonschema.Schema) {
 		setArrayBounds(sc, "threads", 1, 100)
 		setArrayBounds(sc, "facets", 1, 8)
 		setArrayEnum(sc, "facets", "issue_comments", "pr_details", "pr_reviews", "pr_review_comments")
@@ -350,12 +350,12 @@ func (s *Server) registerScalable() {
 		setDefault(sc, "max_pages", 3)
 	}), output: outputSchema[JobReference]("Reference to a bounded exact-thread hydration job."), handler: s.hydrateThreads})
 	addCatalogTool(s.server, catalogTool[struct{}, AuthenticatedIdentityOutput]{name: ToolGetAuthenticatedIdentity, title: "Get authenticated GitHub identity", description: "Resolve the current read credential's GitHub login and stable ID. Use before authored pull-request discovery; this performs one external read and never mutates GitHub.", annotations: networkReadAnnotations(), input: inputSchema[struct{}](noSchemaCustomization), output: outputSchema[AuthenticatedIdentityOutput]("Authenticated GitHub identity."), handler: s.getAuthenticatedIdentity})
-	addCatalogTool(s.server, catalogTool[SyncAuthoredPullRequestsInput, JobReference]{name: ToolSyncAuthoredPullRequests, title: "Sync authored pull requests across GitHub", description: "Discover and persist up to 500 pull requests authored by the authenticated GitHub user across repositories. This reads core thread state; refresh detailed status separately for selected open pull requests.", annotations: networkReadAnnotations(), input: inputSchema[SyncAuthoredPullRequestsInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s.server, catalogTool[SyncAuthoredPullRequestsInput, JobReference]{name: ToolSyncAuthoredPullRequests, title: "Sync authored pull requests across GitHub", description: "Discover and persist up to 500 pull requests authored by the authenticated GitHub user across repositories. This reads only core thread state; use the dedicated exact-PR health tool afterward.", annotations: networkReadAnnotations(), input: inputSchema[SyncAuthoredPullRequestsInput](func(sc *jsonschema.Schema) {
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit", 1, 500)
 		setDefault(sc, "limit", 500)
 	}), output: outputSchema[JobReference]("Reference to an authored pull-request synchronization job."), handler: s.syncAuthoredPullRequests})
-	addCatalogTool(s.server, catalogTool[SyncPullRequestStatusInput, JobReference]{name: ToolSyncPullRequestStatus, title: "Refresh PR health snapshots", description: "Refresh core mergeability, head/base revisions, and reviews for up to 50 exact pull requests. Checks and unresolved review-thread coverage remain explicitly unknown until their adapters are available.", annotations: networkReadAnnotations(), input: inputSchema[SyncPullRequestStatusInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s.server, catalogTool[SyncPullRequestStatusInput, JobReference]{name: ToolSyncPullRequestStatus, title: "Sync exact PR status", description: "Refresh mergeability, head/base revisions, and reviews for up to 50 exact selected pull requests. Checks and unresolved review-thread coverage remain explicitly unknown until their adapters are available.", annotations: networkReadAnnotations(), input: inputSchema[SyncPullRequestStatusInput](func(sc *jsonschema.Schema) {
 		setArrayBounds(sc, "pull_requests", 1, 50)
 		setRange(sc, "max_pages", 1, 20)
 		setDefault(sc, "max_pages", 3)
