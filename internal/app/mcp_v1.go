@@ -370,67 +370,6 @@ func decodeJobJSON(field, value string) (any, error) {
 	return decoded, nil
 }
 
-// StartCrawl submits a durable crawl job.
-func (r *MCPReader) StartCrawl(ctx context.Context, in mcpserver.StartCrawlInput) (mcpserver.JobReference, error) {
-	since := 30 * 24 * time.Hour
-	if in.Since != "" {
-		d, err := time.ParseDuration(in.Since)
-		if err != nil {
-			return mcpserver.JobReference{}, fmt.Errorf("invalid since duration: %w", err)
-		}
-		since = d
-	}
-	budget := in.Budget
-	if budget <= 0 {
-		budget = 100
-	}
-	if budget > 5000 {
-		return mcpserver.JobReference{}, errors.New("budget cannot exceed 5000")
-	}
-
-	id, err := r.Service.submitJob(ctx, "start_crawl", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
-		if err := report("0%", ""); err != nil {
-			return nil, err
-		}
-		res, err := r.Service.Crawl(ctx, in.Source, cli.CrawlOptions{Since: since, Budget: budget})
-		if err != nil {
-			return nil, err
-		}
-		_ = report("100%", fmt.Sprintf("repositories=%d", res.Repositories))
-		return res, nil
-	})
-	if err != nil {
-		return mcpserver.JobReference{}, err
-	}
-	return mcpserver.JobReference{ID: id, Kind: "start_crawl", Status: "queued", Message: "crawl job started"}, nil
-}
-
-// HydrateRepository submits a durable job that hydrates repository threads.
-func (r *MCPReader) HydrateRepository(ctx context.Context, in mcpserver.HydrateRepositoryInput) (mcpserver.JobReference, error) {
-	repo := cli.RepoRef{Owner: in.Owner, Repo: in.Repo}
-	opts := HydrateRepositoryOptions{
-		Facets:   in.Facets,
-		MaxPages: in.MaxPages,
-		State:    in.State,
-		Numbers:  in.Numbers,
-	}
-	id, err := r.Service.submitJob(ctx, "hydrate_repository", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
-		if err := report("0%", ""); err != nil {
-			return nil, err
-		}
-		res, err := r.Service.HydrateRepository(ctx, repo, opts)
-		if err != nil {
-			return nil, err
-		}
-		_ = report("100%", fmt.Sprintf("pages=%d", res.Pages))
-		return res, nil
-	})
-	if err != nil {
-		return mcpserver.JobReference{}, err
-	}
-	return mcpserver.JobReference{ID: id, Kind: "hydrate_repository", Status: "queued", Message: "hydrate repository job started"}, nil
-}
-
 // BuildRepositoryDossier submits a durable job that builds a repository dossier.
 func (r *MCPReader) BuildRepositoryDossier(ctx context.Context, in mcpserver.BuildRepositoryDossierInput) (mcpserver.JobReference, error) {
 	repo := cli.RepoRef{Owner: in.Owner, Repo: in.Repo}

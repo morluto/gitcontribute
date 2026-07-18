@@ -35,6 +35,14 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 	if in.Limit < 1 || in.Limit > 100 {
 		return mcpserver.SearchOutput{}, errors.New("limit must be between 1 and 100")
 	}
+	var updatedAfter time.Time
+	if strings.TrimSpace(in.UpdatedAfter) != "" {
+		var err error
+		updatedAfter, err = time.Parse(time.RFC3339, in.UpdatedAfter)
+		if err != nil {
+			return mcpserver.SearchOutput{}, errors.New("updated_after must be RFC 3339")
+		}
+	}
 
 	repo := ""
 	if (in.Owner == "") != (in.Repo == "") {
@@ -44,8 +52,10 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 		repo = in.Owner + "/" + in.Repo
 	}
 	res, err := r.Service.searchCorpus(ctx, in.Query, cli.SearchOptions{
-		Kind:   in.Kind,
-		Repo:   repo,
+		Kind:  in.Kind,
+		Repo:  repo,
+		State: in.State, StateReason: in.StateReason, Merged: in.Merged, Author: in.Author,
+		Association: in.Association, Assignee: in.Assignee, Labels: in.Labels, UpdatedAfter: updatedAfter,
 		Limit:  in.Limit,
 		Cursor: in.Cursor,
 	})
@@ -60,15 +70,19 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 			updatedAt = m.UpdatedAt.Format(time.RFC3339)
 		}
 		matches[i] = mcpserver.ThreadOutput{
-			Owner:     m.Repo.Owner,
-			Repo:      m.Repo.Repo,
-			Kind:      m.Kind,
-			Number:    m.Number,
-			State:     m.State,
-			Title:     m.Title,
-			Body:      m.Body,
-			Author:    m.Author,
-			Labels:    m.Labels,
+			Owner:             m.Repo.Owner,
+			Repo:              m.Repo.Repo,
+			Kind:              m.Kind,
+			Number:            m.Number,
+			State:             m.State,
+			StateReason:       m.StateReason,
+			Title:             m.Title,
+			Body:              m.Body,
+			Author:            m.Author,
+			AuthorAssociation: m.AuthorAssociation,
+			Labels:            m.Labels,
+			Assignees:         m.Assignees,
+			Draft:             m.Draft, ClosedAt: formatTime(m.ClosedAt), MergedAt: formatTime(m.MergedAt), Merged: m.Merged,
 			UpdatedAt: updatedAt,
 		}
 	}
@@ -150,15 +164,19 @@ func (r *MCPReader) Thread(ctx context.Context, in mcpserver.ThreadInput) (mcpse
 
 func corpusThreadToMCPOutput(t *corpus.Thread) mcpserver.ThreadOutput {
 	return mcpserver.ThreadOutput{
-		Owner:     "", // filled by caller
-		Repo:      "",
-		Kind:      t.Kind,
-		Number:    t.Number,
-		State:     t.State,
-		Title:     t.Title,
-		Body:      t.Body,
-		Author:    t.Author,
-		Labels:    t.Labels,
+		Owner:             "", // filled by caller
+		Repo:              "",
+		Kind:              t.Kind,
+		Number:            t.Number,
+		State:             t.State,
+		StateReason:       t.StateReason,
+		Title:             t.Title,
+		Body:              t.Body,
+		Author:            t.Author,
+		AuthorAssociation: t.AuthorAssociation,
+		Labels:            t.Labels,
+		Assignees:         t.Assignees,
+		Draft:             t.Draft, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.MergedAt), Merged: t.Merged,
 		UpdatedAt: formatTime(t.SourceUpdatedAt),
 	}
 }
@@ -571,45 +589,6 @@ func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpserver.FindNeighbor
 			Kind: neighbor.Kind, Owner: neighbor.Owner, Repo: neighbor.Repo, Number: neighbor.Number,
 			Title: neighbor.Title, State: neighbor.State, Score: neighbor.Score, Reason: neighbor.Reason,
 		}
-	}
-	return out, nil
-}
-
-// SyncRepository explicitly reads GitHub and updates the local corpus.
-func (r *MCPReader) SyncRepository(ctx context.Context, in mcpserver.SyncRepositoryInput) (mcpserver.SyncRepositoryOutput, error) {
-	var since time.Duration
-	var err error
-	if strings.TrimSpace(in.Since) != "" {
-		since, err = time.ParseDuration(in.Since)
-		if err != nil || since <= 0 {
-			return mcpserver.SyncRepositoryOutput{}, errors.New("since must be a positive Go duration")
-		}
-	}
-	result, err := r.Service.ArchiveSync(ctx, cli.RepoRef{Owner: in.Owner, Repo: in.Repo}, cli.ArchiveSyncOptions{
-		State: in.State, Since: since, Numbers: in.Numbers, MaxPages: in.MaxPages,
-	})
-	if err != nil {
-		return mcpserver.SyncRepositoryOutput{}, err
-	}
-	return mcpserver.SyncRepositoryOutput{
-		Owner: result.Repo.Owner, Repo: result.Repo.Repo, Updated: result.Updated, Message: result.Message,
-	}, nil
-}
-
-// HydrateThread explicitly reads selected GitHub facets into the local corpus.
-func (r *MCPReader) HydrateThread(ctx context.Context, in mcpserver.HydrateThreadInput) (mcpserver.HydrateThreadOutput, error) {
-	result, err := r.Service.Hydrate(ctx, cli.RepoRef{Owner: in.Owner, Repo: in.Repo}, in.Number, cli.HydrateOptions{
-		Facets: in.Facets, MaxPages: in.MaxPages,
-	})
-	if err != nil {
-		return mcpserver.HydrateThreadOutput{}, err
-	}
-	out := mcpserver.HydrateThreadOutput{
-		Owner: result.Repo.Owner, Repo: result.Repo.Repo, Number: result.Number, Kind: result.Kind,
-		Requests: result.Requests, Message: result.Message, Facets: make([]mcpserver.HydratedFacetOutput, len(result.Facets)),
-	}
-	for i, facet := range result.Facets {
-		out.Facets[i] = mcpserver.HydratedFacetOutput{Facet: facet.Facet, Count: facet.Count, Pages: facet.Pages, Complete: facet.Complete}
 	}
 	return out, nil
 }

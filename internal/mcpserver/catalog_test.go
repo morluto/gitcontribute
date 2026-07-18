@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -9,6 +10,10 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// Keep a little headroom above the measured scalable-catalog baseline. This is
+// a regression guard, not a claim that the current catalog needs no compaction.
+const maxSerializedCatalogBytes = 112 * 1024
 
 var selectionSynonyms = map[string]string{
 	"execute": "run",
@@ -73,10 +78,29 @@ func TestCanonicalToolCatalogIsNamespacedAndUnambiguous(t *testing.T) {
 			t.Errorf("tool %q description lacks selection context: %q", name, tool.Description)
 		}
 	}
-	for _, legacy := range []string{"search", "get_dossier", "get_thread", "prepare_contribution", "cancel_job"} {
+	for _, legacy := range []string{
+		"search", "get_dossier", "get_thread", "prepare_contribution", "cancel_job",
+		"corpus.get_repository", "corpus.get_thread", "github.sync_repository",
+		"github.hydrate_thread", "github.hydrate_repository", "github.start_crawl",
+		"workflow.check_collisions",
+	} {
 		if tools[legacy] != nil {
 			t.Errorf("legacy unnamespaced tool %q is still advertised", legacy)
 		}
+	}
+}
+
+func TestSerializedToolCatalogStaysWithinBudget(t *testing.T) {
+	tools, closeSessions := listedTools(t)
+	defer closeSessions()
+
+	payload, err := json.Marshal(tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("serialized MCP catalog: %d tools, %d bytes", len(tools), len(payload))
+	if len(payload) > maxSerializedCatalogBytes {
+		t.Fatalf("serialized MCP catalog is %d bytes, budget is %d", len(payload), maxSerializedCatalogBytes)
 	}
 }
 
@@ -87,8 +111,7 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 	assertSchemaValue(t, tools[ToolSearchThreads].InputSchema, []string{"properties", "kind", "enum"}, []any{"issue", "pull_request"})
 	assertSchemaValue(t, tools[ToolSearchThreads].InputSchema, []string{"properties", "limit", "default"}, float64(20))
 	assertSchemaValue(t, tools[ToolSearchThreads].InputSchema, []string{"properties", "limit", "maximum"}, float64(100))
-	assertSchemaValue(t, tools[ToolHydrateThread].InputSchema, []string{"properties", "max_pages", "default"}, float64(50))
-	assertSchemaValue(t, tools[ToolStartCrawl].InputSchema, []string{"properties", "budget", "maximum"}, float64(5000))
+	assertSchemaValue(t, tools[ToolHydrateThreads].InputSchema, []string{"properties", "max_pages", "default"}, float64(3))
 	assertSchemaValue(t, tools[ToolRunValidation].InputSchema, []string{"properties", "execute", "const"}, true)
 	assertSchemaValue(t, tools[ToolPromoteOpportunity].InputSchema, []string{"properties", "confidence", "maximum"}, float64(1))
 
@@ -114,9 +137,18 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 		want   string
 	}{
 		{"Search locally stored issue titles for a retry deadlock", ToolSearchThreads},
-		{"Read the complete stored body of pull request 42", ToolGetThread},
-		{"Refresh repository issues and pull requests from GitHub", ToolSyncRepository},
-		{"Fetch comments and reviews for one stored pull request from GitHub", ToolHydrateThread},
+		{"Read metadata for twelve repositories already stored in the corpus", ToolGetRepositories},
+		{"Fetch current GitHub stars and metadata for twelve repositories", ToolSyncRepositoryMetadata},
+		{"Read the complete stored body of pull request 42", ToolGetThreads},
+		{"Refresh issue and pull request thread headers for selected repositories from GitHub", ToolSyncThreads},
+		{"Fetch comments and reviews for one stored pull request from GitHub", ToolHydrateThreads},
+		{"Rank stored open issues for contribution across selected repositories", ToolRankOpportunities},
+		{"Find similar completed and rejected historical work for this issue", ToolFindPrecedents},
+		{"Ask DeepWiki to compare the architecture of three public repositories", ToolDeepWiki},
+		{"Refresh mergeability and reviews for my selected pull requests", ToolSyncPullRequestStatus},
+		{"List my stored pull requests that need contributor attention", ToolListPullRequestPortfolio},
+		{"Acquire and index code for several repositories", ToolIndexRepositories},
+		{"Check actual Git merge conflicts between fetched revisions", ToolCheckMergeConflicts},
 		{"Create a local investigation without cloning a worktree", ToolStartInvestigation},
 		{"Clone the remote and create a managed Git worktree", ToolCreateWorkspace},
 		{"Render and persist a pull request draft from supplied changes", ToolPrepareContribution},
@@ -125,7 +157,7 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 		{"Review readiness blockers and warnings for an opportunity", ToolGetReadiness},
 		{"Rebuild and persist the repository dossier from the local corpus", ToolBuildRepositoryDossier},
 		{"Read the existing persisted repository dossier without rebuilding it", ToolGetRepositoryDossier},
-		{"Find open pull requests that might conflict with this opportunity", ToolCheckCollisions},
+		{"Find open pull requests that might conflict with this opportunity", ToolFindCompetingWork},
 		{"Find issues that may duplicate this hypothesis", ToolCheckDuplicates},
 	}
 
@@ -154,11 +186,11 @@ func TestInvalidToolCallEvaluation(t *testing.T) {
 		{ToolSearchThreads, map[string]any{"query": "race", "kind": "discussion"}},
 		{ToolSearchThreads, map[string]any{"query": "race", "limit": 101}},
 		{ToolSearchCode, map[string]any{"query": "race", "owner": "acme"}},
-		{ToolGetThread, map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 0}},
+		{ToolGetThreads, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 0}}}},
 		{ToolGetEvidence, map[string]any{}},
 		{ToolGetEvidence, map[string]any{"investigation_id": "inv-1", "opportunity_id": "opp-1"}},
-		{ToolHydrateThread, map[string]any{"owner": "acme", "repo": "rocket", "number": 1, "facets": []string{"unknown"}}},
-		{ToolSyncRepository, map[string]any{"owner": "acme", "repo": "rocket", "numbers": []int{1}, "state": "open"}},
+		{ToolHydrateThreads, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "rocket", "number": 1}}, "facets": []string{"unknown"}}},
+		{ToolSyncThreads, map[string]any{"selection": "threads", "threads": []any{map[string]any{"owner": "acme", "repo": "rocket", "number": 1}}, "state": "open"}},
 		{ToolRunValidation, map[string]any{"id": "val-1", "kind": "candidate", "execute": false}},
 		{ToolPromoteOpportunity, map[string]any{"hypothesis_id": "hyp-1", "problem_statement": "p", "scope": "s", "impact": "i", "expected_effort": "e", "confidence": 1.1}},
 		{ToolPrepareContribution, map[string]any{"opportunity_id": "opp-1", "kind": "pull_request", "workspace_id": "ws-1", "approach": "focused"}},

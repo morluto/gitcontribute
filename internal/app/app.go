@@ -18,6 +18,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/deepwiki"
 	"github.com/morluto/gitcontribute/internal/discovery"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/dossier"
@@ -34,6 +35,7 @@ type Service struct {
 	jobs           *JobExecutor
 	ghReader       github.Reader
 	archiveFetcher discovery.ArchiveFetcher
+	deepWikiReader deepwiki.Reader
 	clock          func() time.Time
 	version        string
 	logger         *slog.Logger
@@ -74,6 +76,23 @@ func (s *Service) SetGitHubReader(r github.Reader) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ghReader = r
+}
+
+// SetDeepWikiReader overrides the derived external knowledge reader. It is
+// intended for tests and embedding.
+func (s *Service) SetDeepWikiReader(r deepwiki.Reader) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deepWikiReader = r
+}
+
+func (s *Service) deepWiki() deepwiki.Reader {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.deepWikiReader == nil {
+		s.deepWikiReader = &deepwiki.Client{}
+	}
+	return s.deepWikiReader
 }
 
 // SetArchiveFetcher overrides the GH Archive fetcher. It is intended for tests.
@@ -345,6 +364,7 @@ func (s *Service) Status(ctx context.Context) (*cli.StatusResult, error) {
 
 // SyncOptions bounds and filters an explicit repository synchronization.
 type SyncOptions struct {
+	Kind     string
 	State    string
 	Since    time.Time
 	Numbers  []int
@@ -433,6 +453,9 @@ func (s *Service) SyncWithOptions(ctx context.Context, repo cli.RepoRef, syncOpt
 	pages := 0
 	lastSourceUpdated := ghRepo.UpdatedAt
 	storeIssue := func(issue github.Issue) error {
+		if syncOpts.Kind != "both" && string(issue.Kind) != syncOpts.Kind {
+			return nil
+		}
 		thread, payload, err := s.threadFromIssue(ctx, reader, ref, issue)
 		if err != nil {
 			return err
@@ -497,7 +520,7 @@ func (s *Service) SyncWithOptions(ctx context.Context, repo cli.RepoRef, syncOpt
 			}
 			listOpts.Page = res.Page.NextPage
 		}
-		complete = syncOpts.State == "all" && syncOpts.Since.IsZero() && !truncated
+		complete = syncOpts.Kind == "both" && syncOpts.State == "all" && syncOpts.Since.IsZero() && !truncated
 	}
 
 	if err := c.AdvanceFacet(ctx, repoProjection.ID, nil, "threads", lastSourceUpdated, complete, run.ID); err != nil {
@@ -519,6 +542,12 @@ func (s *Service) SyncWithOptions(ctx context.Context, repo cli.RepoRef, syncOpt
 }
 
 func normalizeSyncOptions(opts SyncOptions) (SyncOptions, error) {
+	if opts.Kind == "" {
+		opts.Kind = "both"
+	}
+	if opts.Kind != "issue" && opts.Kind != "pull_request" && opts.Kind != "both" {
+		return SyncOptions{}, errors.New("kind must be issue, pull_request, or both")
+	}
 	if opts.State == "" {
 		opts.State = "all"
 	}

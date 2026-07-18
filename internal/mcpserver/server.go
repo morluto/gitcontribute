@@ -41,13 +41,34 @@ type NeighborReader interface {
 	FindNeighbors(context.Context, FindNeighborsInput) (FindNeighborsOutput, error)
 }
 
+// ScalableReader exposes bounded vectorized corpus reads. Implementations must
+// remain offline and preserve input order for non-ranked results.
+type ScalableReader interface {
+	GetRepositories(context.Context, GetRepositoriesInput) (GetRepositoriesOutput, error)
+	GetThreads(context.Context, GetThreadsInput) (GetThreadsOutput, error)
+	RankOpportunities(context.Context, RankOpportunitiesInput) (RankOpportunitiesOutput, error)
+	FindPrecedents(context.Context, FindPrecedentsInput) (FindPrecedentsOutput, error)
+	GetJobs(context.Context, GetJobsInput) (GetJobsOutput, error)
+	ListPullRequestPortfolio(context.Context, ListPullRequestPortfolioInput) (ListPullRequestPortfolioOutput, error)
+}
+
+// ScalableOperator exposes bounded external reads without combining unrelated
+// facets or workflow mutations.
+type ScalableOperator interface {
+	SyncRepositoryMetadata(context.Context, SyncRepositoryMetadataInput) (JobReference, error)
+	SyncThreads(context.Context, SyncThreadsInput) (JobReference, error)
+	HydrateThreads(context.Context, HydrateThreadsInput) (JobReference, error)
+	GetAuthenticatedIdentity(context.Context) (AuthenticatedIdentityOutput, error)
+	SyncAuthoredPullRequests(context.Context, SyncAuthoredPullRequestsInput) (JobReference, error)
+	SyncPullRequestStatus(context.Context, SyncPullRequestStatusInput) (JobReference, error)
+	IndexRepositories(context.Context, IndexRepositoriesInput) (JobReference, error)
+	CheckMergeConflicts(context.Context, CheckMergeConflictsInput) (CheckMergeConflictsOutput, error)
+	DeepWiki(context.Context, DeepWikiInput) (DeepWikiOutput, error)
+}
+
 // Operator is the optional explicit network-read/local-write capability.
 type Operator interface {
-	SyncRepository(context.Context, SyncRepositoryInput) (SyncRepositoryOutput, error)
-	HydrateThread(context.Context, HydrateThreadInput) (HydrateThreadOutput, error)
-	HydrateRepository(context.Context, HydrateRepositoryInput) (JobReference, error)
 	BuildRepositoryDossier(context.Context, BuildRepositoryDossierInput) (JobReference, error)
-	StartCrawl(context.Context, StartCrawlInput) (JobReference, error)
 	StartInvestigation(context.Context, StartInvestigationInput) (InvestigationOutput, error)
 	RecordHypothesis(context.Context, RecordHypothesisInput) (HypothesisOutput, error)
 	CheckDuplicates(context.Context, CheckDuplicatesInput) (CheckOutput, error)
@@ -76,12 +97,20 @@ type ThreadInput struct {
 
 // SearchInput describes an offline thread search page.
 type SearchInput struct {
-	Query  string `json:"query" jsonschema:"Full-text query"`
-	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo   string `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Kind   string `json:"kind,omitempty" jsonschema:"Optional thread kind"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
+	Query        string   `json:"query" jsonschema:"Full-text query"`
+	Owner        string   `json:"owner,omitempty" jsonschema:"Optional repository owner"`
+	Repo         string   `json:"repo,omitempty" jsonschema:"Optional repository name"`
+	Kind         string   `json:"kind,omitempty" jsonschema:"Optional thread kind"`
+	State        string   `json:"state,omitempty"`
+	StateReason  string   `json:"state_reason,omitempty"`
+	Merged       *bool    `json:"merged,omitempty"`
+	Author       string   `json:"author,omitempty"`
+	Association  string   `json:"author_association,omitempty"`
+	Assignee     string   `json:"assignee,omitempty"`
+	Labels       []string `json:"labels,omitempty"`
+	UpdatedAfter string   `json:"updated_after,omitempty"`
+	Limit        int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Cursor       string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
 }
 
 // RepositoryOutput is the stable MCP representation of a repository.
@@ -94,16 +123,23 @@ type RepositoryOutput struct {
 
 // ThreadOutput is the stable MCP representation of an issue or pull request.
 type ThreadOutput struct {
-	Owner     string   `json:"owner"`
-	Repo      string   `json:"repo"`
-	Kind      string   `json:"kind"`
-	Number    int      `json:"number"`
-	State     string   `json:"state"`
-	Title     string   `json:"title"`
-	Body      string   `json:"body,omitempty"`
-	Author    string   `json:"author,omitempty"`
-	Labels    []string `json:"labels,omitempty"`
-	UpdatedAt string   `json:"updated_at,omitempty"`
+	Owner             string   `json:"owner"`
+	Repo              string   `json:"repo"`
+	Kind              string   `json:"kind"`
+	Number            int      `json:"number"`
+	State             string   `json:"state"`
+	StateReason       string   `json:"state_reason,omitempty"`
+	Title             string   `json:"title"`
+	Body              string   `json:"body,omitempty"`
+	Author            string   `json:"author,omitempty"`
+	AuthorAssociation string   `json:"author_association,omitempty"`
+	Labels            []string `json:"labels,omitempty"`
+	Assignees         []string `json:"assignees,omitempty"`
+	Draft             bool     `json:"draft,omitempty"`
+	ClosedAt          string   `json:"closed_at,omitempty"`
+	MergedAt          string   `json:"merged_at,omitempty"`
+	Merged            bool     `json:"merged,omitempty"`
+	UpdatedAt         string   `json:"updated_at,omitempty"`
 }
 
 // SearchOutput contains one page of offline thread matches.
@@ -280,52 +316,6 @@ type FindNeighborsOutput struct {
 	Neighbors      []NeighborOutput `json:"neighbors"`
 }
 
-// SyncRepositoryInput configures an explicit GitHub repository read.
-type SyncRepositoryInput struct {
-	Owner    string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo     string `json:"repo" jsonschema:"GitHub repository name"`
-	State    string `json:"state,omitempty" jsonschema:"Thread state: open, closed, or all"`
-	Since    string `json:"since,omitempty" jsonschema:"Positive Go duration limiting thread history, such as 720h; omit for all matching history"`
-	Numbers  []int  `json:"numbers,omitempty" jsonschema:"Optional exact issue or pull request numbers"`
-	MaxPages int    `json:"max_pages,omitempty" jsonschema:"Maximum issue-list pages from 1 to 1000"`
-}
-
-// SyncRepositoryOutput summarizes a completed repository synchronization.
-type SyncRepositoryOutput struct {
-	Owner   string `json:"owner"`
-	Repo    string `json:"repo"`
-	Updated int    `json:"updated"`
-	Message string `json:"message"`
-}
-
-// HydrateThreadInput configures explicit child-facet retrieval for one thread.
-type HydrateThreadInput struct {
-	Owner    string   `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo     string   `json:"repo" jsonschema:"GitHub repository name"`
-	Number   int      `json:"number" jsonschema:"GitHub issue or pull request number"`
-	Facets   []string `json:"facets,omitempty" jsonschema:"Facets to hydrate; empty selects all applicable facets"`
-	MaxPages int      `json:"max_pages,omitempty" jsonschema:"Maximum pages per facet from 1 to 100"`
-}
-
-// HydratedFacetOutput summarizes one persisted hydration facet.
-type HydratedFacetOutput struct {
-	Facet    string `json:"facet"`
-	Count    int    `json:"count"`
-	Pages    int    `json:"pages"`
-	Complete bool   `json:"complete"`
-}
-
-// HydrateThreadOutput summarizes a completed thread hydration.
-type HydrateThreadOutput struct {
-	Owner    string                `json:"owner"`
-	Repo     string                `json:"repo"`
-	Number   int                   `json:"number"`
-	Kind     string                `json:"kind"`
-	Requests int                   `json:"requests"`
-	Facets   []HydratedFacetOutput `json:"facets"`
-	Message  string                `json:"message"`
-}
-
 // ClusterMemberOutput describes one member of a duplicate cluster.
 type ClusterMemberOutput struct {
 	Kind     string  `json:"kind"`
@@ -408,7 +398,7 @@ func New(reader Reader, version string) *Server {
 		server: mcp.NewServer(&mcp.Implementation{
 			Name:    "gitcontribute",
 			Version: version,
-		}, nil),
+		}, &mcp.ServerOptions{Instructions: serverInstructions}),
 	}
 	s.register()
 	return s
@@ -425,20 +415,6 @@ func (s *Server) ServeStdio(ctx context.Context) error {
 
 func (s *Server) register() {
 	readOnly := readOnlyAnnotations()
-	addCatalogTool(s.server, catalogTool[RepoInput, RepositoryOutput]{
-		name: ToolGetRepository, title: "Get stored repository",
-		description: "Read the winning local projection for one GitHub repository. Use this after a local search when you need repository metadata; it never contacts GitHub.",
-		annotations: readOnly, input: inputSchema[RepoInput](noSchemaCustomization),
-		output: outputSchema[RepositoryOutput]("Stored repository projection."), handler: s.repository,
-	})
-	addCatalogTool(s.server, catalogTool[ThreadInput, ThreadOutput]{
-		name: ToolGetThread, title: "Get stored thread",
-		description: "Read one stored GitHub issue or pull request by repository, kind, and number. Use it for the complete locally stored thread body; it never refreshes GitHub.",
-		annotations: readOnly, input: inputSchema[ThreadInput](func(schema *jsonschema.Schema) {
-			setEnum(schema, "kind", "issue", "pull_request")
-			setMinimum(schema, "number", 1)
-		}), output: outputSchema[ThreadOutput]("Stored issue or pull request projection."), handler: s.thread,
-	})
 	addCatalogTool(s.server, catalogTool[SearchCodeInput, SearchCodeOutput]{
 		name: ToolSearchCode, title: "Search stored code",
 		description: "Search indexed code snapshots in the local corpus and return bounded snippets with repository, commit, and path context. Provide owner and repo together to restrict the search; this tool is offline.",
@@ -518,42 +494,10 @@ func (s *Server) register() {
 		annotations: readOnly, input: inputSchema[LensInput](noSchemaCustomization),
 		output: outputSchema[LensOutput]("Saved lens definition and timestamps."), handler: s.getLens,
 	})
-	addCatalogTool(s.server, catalogTool[SyncRepositoryInput, SyncRepositoryOutput]{
-		name: ToolSyncRepository, title: "Sync repository threads from GitHub",
-		description: "Explicitly read repository and thread projections from GitHub and update the local corpus. This performs bounded network reads and local writes; use " + ToolHydrateThread + " afterward for comments, reviews, or PR details.",
-		annotations: networkReadAnnotations(), input: inputSchema[SyncRepositoryInput](func(schema *jsonschema.Schema) {
-			setEnum(schema, "state", "open", "closed", "all")
-			setDefault(schema, "state", "all")
-			setRange(schema, "max_pages", 1, 1000)
-			setDefault(schema, "max_pages", 1000)
-			setPositiveItems(schema, "numbers")
-			all := any("all")
-			schema.AllOf = append(schema.AllOf, &jsonschema.Schema{
-				If: &jsonschema.Schema{
-					Properties: map[string]*jsonschema.Schema{"numbers": {MinItems: jsonschema.Ptr(1)}},
-					Required:   []string{"numbers"},
-				},
-				Then: &jsonschema.Schema{
-					Properties: map[string]*jsonschema.Schema{"state": {Const: &all}},
-					Not:        &jsonschema.Schema{Required: []string{"since"}},
-				},
-			})
-		}), output: outputSchema[SyncRepositoryOutput]("Completed repository synchronization summary."), handler: s.syncRepository,
-	})
-	addCatalogTool(s.server, catalogTool[HydrateThreadInput, HydrateThreadOutput]{
-		name: ToolHydrateThread, title: "Hydrate one thread from GitHub",
-		description: "Explicitly fetch selected comments, PR details, reviews, or review comments for one stored thread and atomically update local facet snapshots. An empty facets list selects every facet applicable to the thread.",
-		annotations: networkReadAnnotations(), input: inputSchema[HydrateThreadInput](func(schema *jsonschema.Schema) {
-			setMinimum(schema, "number", 1)
-			setArrayEnum(schema, "facets", "issue_comments", "pr_details", "pr_reviews", "pr_review_comments")
-			setRange(schema, "max_pages", 1, 100)
-			setDefault(schema, "max_pages", 50)
-		}), output: outputSchema[HydrateThreadOutput]("Completed thread-facet hydration summary."), handler: s.hydrateThread,
-	})
-
 	s.registerResourceTemplates()
 	s.registerContributionPrompts()
 	s.registerV1()
+	s.registerScalable()
 }
 
 func boolPtr(v bool) *bool { return &v }
@@ -730,51 +674,6 @@ func (s *Server) getLens(ctx context.Context, _ *mcp.CallToolRequest, in LensInp
 		return nil, LensOutput{}, errors.New("name is required")
 	}
 	out, err := s.reader.Lens(ctx, in)
-	return nil, out, err
-}
-
-func (s *Server) syncRepository(ctx context.Context, _ *mcp.CallToolRequest, in SyncRepositoryInput) (*mcp.CallToolResult, SyncRepositoryOutput, error) {
-	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
-		return nil, SyncRepositoryOutput{}, err
-	}
-	if in.State == "" {
-		in.State = "all"
-	}
-	if in.State != "open" && in.State != "closed" && in.State != "all" {
-		return nil, SyncRepositoryOutput{}, errors.New("state must be open, closed, or all")
-	}
-	if in.MaxPages == 0 {
-		in.MaxPages = 1000
-	}
-	if in.MaxPages < 1 || in.MaxPages > 1000 {
-		return nil, SyncRepositoryOutput{}, errors.New("max_pages must be between 1 and 1000")
-	}
-	operator, ok := s.reader.(Operator)
-	if !ok {
-		return nil, SyncRepositoryOutput{}, errors.New("repository sync is not available")
-	}
-	out, err := operator.SyncRepository(ctx, in)
-	return nil, out, err
-}
-
-func (s *Server) hydrateThread(ctx context.Context, _ *mcp.CallToolRequest, in HydrateThreadInput) (*mcp.CallToolResult, HydrateThreadOutput, error) {
-	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
-		return nil, HydrateThreadOutput{}, err
-	}
-	if in.Number <= 0 {
-		return nil, HydrateThreadOutput{}, errors.New("number must be positive")
-	}
-	if in.MaxPages == 0 {
-		in.MaxPages = 50
-	}
-	if in.MaxPages < 1 || in.MaxPages > 100 {
-		return nil, HydrateThreadOutput{}, errors.New("max_pages must be between 1 and 100")
-	}
-	operator, ok := s.reader.(Operator)
-	if !ok {
-		return nil, HydrateThreadOutput{}, errors.New("thread hydration is not available")
-	}
-	out, err := operator.HydrateThread(ctx, in)
 	return nil, out, err
 }
 

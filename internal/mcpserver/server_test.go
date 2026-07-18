@@ -167,17 +167,6 @@ func (*fakeReader) Lens(_ context.Context, in LensInput) (LensOutput, error) {
 	}, nil
 }
 
-func (*fakeReader) SyncRepository(_ context.Context, in SyncRepositoryInput) (SyncRepositoryOutput, error) {
-	return SyncRepositoryOutput{Owner: in.Owner, Repo: in.Repo, Updated: len(in.Numbers), Message: "synced"}, nil
-}
-
-func (*fakeReader) HydrateThread(_ context.Context, in HydrateThreadInput) (HydrateThreadOutput, error) {
-	return HydrateThreadOutput{
-		Owner: in.Owner, Repo: in.Repo, Number: in.Number, Kind: "issue", Requests: 1,
-		Facets: []HydratedFacetOutput{{Facet: "issue_comments", Count: 2, Pages: 1, Complete: true}},
-	}, nil
-}
-
 func (*fakeReader) SearchRepositories(_ context.Context, in SearchRepositoriesInput) (SearchRepositoriesOutput, error) {
 	return SearchRepositoriesOutput{Query: in.Query, Total: 1, Matches: []RepositoryOutput{{Owner: in.Owner, Repo: in.Repo}}}, nil
 }
@@ -200,16 +189,8 @@ func (*fakeReader) ThreadByNumber(_ context.Context, in ThreadByNumberInput) (Th
 	return ThreadOutput{Owner: in.Owner, Repo: in.Repo, Kind: "issue", Number: in.Number, Title: "issue"}, nil
 }
 
-func (*fakeReader) HydrateRepository(_ context.Context, in HydrateRepositoryInput) (JobReference, error) {
-	return JobReference{ID: "job-" + in.Owner + "-" + in.Repo, Kind: "hydrate_repository", Status: "queued"}, nil
-}
-
 func (*fakeReader) BuildRepositoryDossier(_ context.Context, in BuildRepositoryDossierInput) (JobReference, error) {
 	return JobReference{ID: "job-dossier-" + in.Owner + "-" + in.Repo, Kind: "build_repository_dossier", Status: "queued"}, nil
-}
-
-func (*fakeReader) StartCrawl(_ context.Context, in StartCrawlInput) (JobReference, error) {
-	return JobReference{ID: "job-crawl-" + in.Source, Kind: "start_crawl", Status: "queued"}, nil
 }
 
 func (*fakeReader) StartInvestigation(_ context.Context, in StartInvestigationInput) (InvestigationOutput, error) {
@@ -284,7 +265,7 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 		tools[tool.Name] = tool
 	}
 	for _, name := range []string{
-		ToolGetRepository, ToolGetThread, ToolSearchCode, ToolGetInvestigation,
+		ToolGetRepositories, ToolGetThreads, ToolSearchCode, ToolGetInvestigation,
 		ToolListOpportunities, ToolGetOpportunity, ToolGetEvidence, ToolGetReadiness,
 		ToolFindClusters, ToolFindNeighbors, ToolGetCoverage, ToolGetLens,
 	} {
@@ -296,7 +277,7 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 			t.Fatalf("tool %q annotations = %+v", name, tool.Annotations)
 		}
 	}
-	for _, name := range []string{ToolSyncRepository, ToolHydrateThread} {
+	for _, name := range []string{ToolSyncRepositoryMetadata, ToolSyncThreads, ToolHydrateThreads} {
 		tool := tools[name]
 		if tool == nil {
 			t.Fatalf("missing tool %q", name)
@@ -438,24 +419,6 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
 		}
-	}
-}
-
-func TestExplicitOperationToolsReturnStructuredOutput(t *testing.T) {
-	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
-	defer closeSessions()
-
-	syncResult, err := client.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: ToolSyncRepository, Arguments: map[string]any{"owner": "acme", "repo": "rocket", "numbers": []int{1, 2}},
-	})
-	if err != nil || syncResult.IsError {
-		t.Fatalf("sync_repository: result=%+v err=%v", syncResult, err)
-	}
-	hydrateResult, err := client.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: ToolHydrateThread, Arguments: map[string]any{"owner": "acme", "repo": "rocket", "number": 7, "facets": []string{"issue_comments"}},
-	})
-	if err != nil || hydrateResult.IsError {
-		t.Fatalf("hydrate_thread: result=%+v err=%v", hydrateResult, err)
 	}
 }
 
@@ -633,9 +596,9 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 
 	for _, name := range []string{
 		ToolSearchRepositories, ToolSearchThreads, ToolGetRepositoryDossier, ToolExplainMatch, ToolGetJob,
-		ToolGetReadiness, ToolStartCrawl, ToolHydrateRepository, ToolBuildRepositoryDossier,
+		ToolGetReadiness, ToolBuildRepositoryDossier,
 		ToolCreateWorkspace, ToolRunValidation, ToolStartInvestigation, ToolRecordHypothesis,
-		ToolCheckDuplicates, ToolCheckCollisions, ToolPromoteOpportunity, ToolDefineValidation,
+		ToolCheckDuplicates, ToolFindCompetingWork, ToolPromoteOpportunity, ToolDefineValidation,
 		ToolPrepareContribution, ToolCancelJob,
 	} {
 		if tools[name] == nil {
@@ -651,7 +614,7 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		{ToolSearchThreads, map[string]any{"query": "stall"}},
 		{ToolGetRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"}},
 		{ToolExplainMatch, map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 7}},
-		{ToolGetJob, map[string]any{"id": "job-1"}},
+		{ToolGetJob, map[string]any{"ids": []string{"job-1"}}},
 		{ToolGetReadiness, map[string]any{"opportunity_id": "opp-1"}},
 	}
 	for _, tt := range readTests {
@@ -668,15 +631,13 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		name string
 		args map[string]any
 	}{
-		{ToolStartCrawl, map[string]any{"source": "go", "since": "720h", "budget": 10}},
-		{ToolHydrateRepository, map[string]any{"owner": "acme", "repo": "rocket"}},
 		{ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"}},
 		{ToolCreateWorkspace, map[string]any{"investigation_id": "inv-1", "remote": "https://github.com/acme/rocket.git", "base_ref": "main", "candidate_ref": "feature", "name": "ws-1"}},
 		{ToolRunValidation, map[string]any{"id": "val-1", "kind": "base", "execute": true}},
 		{ToolStartInvestigation, map[string]any{"owner": "acme", "repo": "rocket"}},
 		{ToolRecordHypothesis, map[string]any{"investigation_id": "inv-1", "title": "leak", "description": "memory leak", "category": "bug"}},
 		{ToolCheckDuplicates, map[string]any{"target": "hypothesis", "id": "hyp-1"}},
-		{ToolCheckCollisions, map[string]any{"target": "opportunity", "id": "opp-1"}},
+		{ToolFindCompetingWork, map[string]any{"target": "opportunity", "id": "opp-1"}},
 		{ToolPromoteOpportunity, map[string]any{"hypothesis_id": "hyp-1", "problem_statement": "leak", "scope": "small", "impact": "high", "expected_effort": "1h", "confidence": 0.8}},
 		{ToolDefineValidation, map[string]any{"investigation_id": "inv-1", "kind": "test", "command": "go test ./...", "working_dir": "."}},
 		{ToolPrepareContribution, map[string]any{"opportunity_id": "opp-1", "kind": "issue"}},
