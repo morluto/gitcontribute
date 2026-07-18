@@ -191,7 +191,7 @@ func ResolveLauncher(opts Options) (Launcher, error) {
 		if err != nil {
 			return Launcher{}, err
 		}
-		return Launcher{Command: npmCommand(), Args: []string{"--yes", "--package=gitcontribute@" + version, "--", "gitcontribute", "mcp"}}, nil
+		return Launcher{Command: npmCommand(), Args: []string{"--yes", "gitcontribute@" + version, "mcp"}}, nil
 	}
 	executable := opts.Executable
 	if executable == "" {

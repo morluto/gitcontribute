@@ -3,8 +3,12 @@
 The primary installation and onboarding entry point is:
 
 ```sh
-npx gitcontribute@latest setup
+npx gitcontribute setup
 ```
+
+On a clean machine, npx resolves npm's current `latest` release. Use
+`npx gitcontribute@latest setup` to force the current registry release when an
+older local or global command may already exist.
 
 The interactive wizard treats terminal and agent access as independent
 capabilities. It offers to install a persistent `gitcontribute` command for the
@@ -14,13 +18,13 @@ non-interactive callers must pass `--install-cli`.
 
 ```sh
 # Terminal app and Codex MCP
-npx gitcontribute@latest setup --install-cli --codex --yes
+npx gitcontribute setup --install-cli --codex --yes
 
 # Terminal app without MCP
-npx gitcontribute@latest setup --install-cli --no-mcp --yes
+npx gitcontribute setup --install-cli --no-mcp --yes
 
 # MCP without a persistent terminal command
-npx gitcontribute@latest setup --codex --yes
+npx gitcontribute setup --codex --yes
 ```
 
 GitContribute remains a native Go application. The `gitcontribute` npm package
@@ -86,7 +90,7 @@ lists each result separately before exiting unsuccessfully.
 | Terminal capability | MCP capability | Registered MCP launcher |
 | --- | --- | --- |
 | Installed and verified | Selected | Absolute global `gitcontribute` command |
-| Skipped under npx | Selected | Exact-version `npx --package=gitcontribute@VERSION` command |
+| Skipped under npx | Selected | Exact-version `npx gitcontribute@VERSION` command |
 | Selected | Skipped | No MCP launcher or client-file mutation |
 
 If a requested terminal installation fails during combined setup, MCP can still
@@ -101,10 +105,11 @@ global executable:
 /absolute/npm/prefix/bin/gitcontribute mcp
 ```
 
-When terminal installation is skipped, setup records an npm launcher such as:
+When terminal installation is skipped, setup records a direct npm package
+specifier so an existing command on `PATH` cannot shadow the selected release:
 
 ```text
-npx --yes --package=gitcontribute@VERSION -- gitcontribute mcp
+npx --yes gitcontribute@VERSION mcp
 ```
 
 It never records a temporary executable from the npm cache. Development builds

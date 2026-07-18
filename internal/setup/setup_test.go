@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -88,8 +89,8 @@ func TestNpxLauncherDoesNotCaptureCacheExecutable(t *testing.T) {
 	if report.Launcher.Command != npmCommand() {
 		t.Fatalf("launcher = %+v", report.Launcher)
 	}
-	joined := strings.Join(report.Launcher.Args, " ")
-	if !strings.Contains(joined, "gitcontribute@1.2.3") || strings.Contains(joined, "npm-cache") {
+	wantArgs := []string{"--yes", "gitcontribute@1.2.3", "mcp"}
+	if !slices.Equal(report.Launcher.Args, wantArgs) {
 		t.Fatalf("launcher = %+v", report.Launcher)
 	}
 }

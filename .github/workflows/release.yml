@@ -127,6 +127,8 @@ jobs:
       - run: npm run build:npm
       - name: Build and inspect npm tarball
         shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
           npm pack --pack-destination dist
           tarball=$(find dist -maxdepth 1 -name 'gitcontribute-*.tgz' -print -quit)
@@ -134,7 +136,19 @@ jobs:
           test "$(stat -c %s "$tarball")" -le 100000000
           sha256sum "$tarball" | sed 's#  dist/#  #' > dist/npm-SHA256SUMS
           npm install --prefix "$RUNNER_TEMP/npm-smoke" --ignore-scripts --no-audit --no-fund "$(realpath "$tarball")"
-          "$RUNNER_TEMP/npm-smoke/node_modules/.bin/gitcontribute" metadata --json
+          metadata=$("$RUNNER_TEMP/npm-smoke/node_modules/.bin/gitcontribute" metadata --json)
+          EXPECTED_VERSION="${VERSION#v}" node -e '
+            const expected = process.env.EXPECTED_VERSION;
+            let input = "";
+            process.stdin.setEncoding("utf8");
+            process.stdin.on("data", chunk => { input += chunk; });
+            process.stdin.on("end", () => {
+              const actual = JSON.parse(input).version;
+              if (actual !== expected) {
+                throw new Error(`packed binary version ${actual} does not match release ${expected}`);
+              }
+            });
+          ' <<<"$metadata"
       - name: Publish npm package
         run: npm publish --provenance --access public
       - name: Attach npm package to GitHub release

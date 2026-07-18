@@ -113,7 +113,7 @@ test("packaged setup can install the terminal app without configuring MCP", { sk
   }
 });
 
-test("packaged setup can configure MCP without installing the terminal app", { skip: process.platform === "win32" }, async () => {
+test("bare npx setup launches the packaged wizard and configures MCP", { skip: process.platform === "win32" }, async () => {
   const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-setup-e2e-"));
   try {
     const tarball = await packCurrentPlatform(workspace);
@@ -122,11 +122,11 @@ test("packaged setup can configure MCP without installing the terminal app", { s
 
     const home = join(workspace, "home");
     await mkdir(join(home, ".codex"), { recursive: true });
-    const command = join(runner, "node_modules", ".bin", "gitcontribute");
     const result = run(
-      command,
-      ["setup", "--codex", "--token-source", "none", "--yes", "--json"],
+      "npx",
+      ["--yes", "gitcontribute", "setup", "--codex", "--token-source", "none", "--yes", "--json"],
       {
+        cwd: runner,
         env: {
           ...process.env,
           HOME: home,
@@ -134,16 +134,14 @@ test("packaged setup can configure MCP without installing the terminal app", { s
           XDG_DATA_HOME: join(home, ".local", "share"),
           XDG_CACHE_HOME: join(home, ".cache"),
           XDG_STATE_HOME: join(home, ".local", "state"),
+          npm_config_offline: "true",
           npm_command: "exec",
         },
       }
     );
 
     const report = JSON.parse(result.stdout);
-    assert.equal(
-      report.launcher,
-      `npx --yes --package=gitcontribute@${packageVersion} -- gitcontribute mcp`
-    );
+    assert.equal(report.launcher, `npx --yes gitcontribute@${packageVersion} mcp`);
     assert.ok(report.steps.some((step) => step.name === "codex" && step.status === "configured"));
     assert.ok(
       report.steps.some(
@@ -155,11 +153,64 @@ test("packaged setup can configure MCP without installing the terminal app", { s
     );
     const codex = await readFile(join(home, ".codex", "config.toml"), "utf8");
     assert.match(codex, /command = "npx"/);
-    assert.ok(codex.includes(`--package=gitcontribute@${packageVersion}`));
+    assert.ok(codex.includes(`"gitcontribute@${packageVersion}"`));
+    assert.doesNotMatch(codex, /--package=/);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test(
+  "direct npx package runner ignores a stale executable on PATH",
+  { skip: process.platform === "win32" },
+  async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-npx-e2e-"));
+    try {
+      const tarball = await packCurrentPlatform(workspace);
+      const npmCache = join(workspace, "npm-cache");
+      const runner = join(workspace, "runner");
+      run(
+        "npm",
+        ["install", "--prefix", runner, "--ignore-scripts", "--no-audit", "--no-fund", tarball]
+      );
+
+      const staleBin = join(workspace, "stale-bin");
+      await mkdir(staleBin);
+      const staleCommand = join(staleBin, "gitcontribute");
+      await writeFile(
+        staleCommand,
+        `#!/bin/sh
+printf '%s\\n' '{"name":"gitcontribute","version":"0.0.0-stale"}'
+`
+      );
+      await chmod(staleCommand, 0o755);
+
+      const home = join(workspace, "home");
+      await mkdir(home);
+      const result = run(
+        "npx",
+        ["--yes", `gitcontribute@${packageVersion}`, "metadata", "--json"],
+        {
+          cwd: runner,
+          env: {
+            ...process.env,
+            HOME: home,
+            PATH: `${staleBin}:${process.env.PATH}`,
+            npm_config_cache: npmCache,
+            npm_config_offline: "true",
+            npm_config_audit: "false",
+            npm_config_fund: "false",
+            npm_config_update_notifier: "false",
+          },
+        }
+      );
+
+      assert.equal(JSON.parse(result.stdout).version, packageVersion);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }
+);
 
 test("packaged setup uses the installed terminal app for MCP", { skip: process.platform === "win32" }, async () => {
   const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-setup-e2e-"));

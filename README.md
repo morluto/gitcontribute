@@ -47,8 +47,12 @@ inspection, health analysis, dossiers, and investigations run entirely offline.
 Run the guided setup with Node.js 18 or newer:
 
 ```sh
-npx gitcontribute@latest setup
+npx gitcontribute setup
 ```
+
+On a clean machine, npx resolves npm's current `latest` release. If an older
+local or global command might already exist, force a refresh with
+`npx gitcontribute@latest setup`.
 
 The interactive wizard offers two independent capabilities:
 
@@ -85,13 +89,13 @@ For non-interactive setup, terminal installation must be explicitly selected:
 
 ```sh
 # Recommended: terminal app plus Codex MCP
-npx gitcontribute@latest setup --install-cli --codex --yes
+npx gitcontribute setup --install-cli --codex --yes
 
 # Terminal app only
-npx gitcontribute@latest setup --install-cli --no-mcp --yes
+npx gitcontribute setup --install-cli --no-mcp --yes
 
 # MCP only; leaves the terminal command uninstalled
-npx gitcontribute@latest setup --codex --yes
+npx gitcontribute setup --codex --yes
 ```
 
 When terminal installation is skipped, continue to prefix direct commands with
