@@ -16,26 +16,32 @@ import (
 )
 
 type searchMatch struct {
-	Repo      domain.RepoRef
-	Kind      string
-	Number    int
-	State     string
-	Title     string
-	Body      string
-	Author    string
-	Labels    []string
-	Assignees []string
-	Language  string
-	Archived  bool
-	Stars     int
-	Watchers  int
-	Forks     int
-	UpdatedAt time.Time
-	URL       string
-	Score     float64
-	Freshness time.Time
-	Coverage  []string
-	Fields    map[string]any
+	Repo              domain.RepoRef
+	Kind              string
+	Number            int
+	State             string
+	StateReason       string
+	Title             string
+	Body              string
+	Author            string
+	AuthorAssociation string
+	Labels            []string
+	Assignees         []string
+	Draft             bool
+	ClosedAt          time.Time
+	MergedAt          time.Time
+	Merged            bool
+	Language          string
+	Archived          bool
+	Stars             int
+	Watchers          int
+	Forks             int
+	UpdatedAt         time.Time
+	URL               string
+	Score             float64
+	Freshness         time.Time
+	Coverage          []string
+	Fields            map[string]any
 }
 
 type searchResult struct {
@@ -162,7 +168,7 @@ func (s *Service) resolveRepoFilter(ctx context.Context, c *corpus.Corpus, opts 
 
 func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query string, repoID int64, ref domain.RepoRef, kind string, opts cli.SearchOptions, now time.Time) (searchResult, error) {
 	filter := corpus.SearchFilter{
-		RepoID: repoID, Repo: ref.String(), Kind: kind, State: opts.State, Author: opts.Author,
+		RepoID: repoID, Repo: ref.String(), Kind: kind, State: opts.State, StateReason: opts.StateReason, Merged: opts.Merged, Author: opts.Author,
 		Association: opts.Association, Assignee: opts.Assignee,
 		Labels: opts.Labels, UpdatedAfter: opts.UpdatedAfter, Limit: opts.Limit, Cursor: opts.Cursor,
 	}
@@ -203,15 +209,18 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 
 		ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Name}
 		m := searchMatch{
-			Repo:      ref,
-			Kind:      t.Kind,
-			Number:    t.Number,
-			State:     t.State,
-			Title:     t.Title,
-			Body:      t.Body,
-			Author:    t.Author,
-			Labels:    t.Labels,
-			Assignees: t.Assignees,
+			Repo:              ref,
+			Kind:              t.Kind,
+			Number:            t.Number,
+			State:             t.State,
+			StateReason:       t.StateReason,
+			Title:             t.Title,
+			Body:              t.Body,
+			Author:            t.Author,
+			AuthorAssociation: t.AuthorAssociation,
+			Labels:            t.Labels,
+			Assignees:         t.Assignees,
+			Draft:             t.Draft, ClosedAt: t.ClosedAt, MergedAt: t.MergedAt, Merged: t.Merged,
 			Language:  repo.Language,
 			Archived:  repo.Archived,
 			Stars:     repo.Stars,

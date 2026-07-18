@@ -343,6 +343,8 @@ type SearchOptions struct {
 	Kind         string
 	Repo         string
 	State        string
+	StateReason  string
+	Merged       *bool
 	Author       string
 	Association  string
 	Assignee     string
