@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -136,5 +137,90 @@ func TestSetupRejectsRepositoryBeforeWriting(t *testing.T) {
 	}
 	if _, statErr := os.Stat(filepath.Join(home, ".codex", "config.toml")); !os.IsNotExist(statErr) {
 		t.Fatalf("setup wrote client config before validating repository: %v", statErr)
+	}
+}
+
+func TestDiscoverSetupReportsDetectedClientsRegistrationAndPaths(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".codex", "config.toml"), []byte("[mcp_servers.gitcontribute]\ncommand = '/bin/gitcontribute'\nargs = ['mcp']\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"),
+		"XDG_DATA_HOME": filepath.Join(home, "data"), "GITHUB_TOKEN": "not-read-by-discovery",
+	}})
+	svc, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+
+	discovery, err := svc.DiscoverSetup(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !discovery.EnvironmentKeyPresent || len(discovery.Clients) != 2 {
+		t.Fatalf("discovery = %+v", discovery)
+	}
+	if discovery.Clients[0].Name != "codex" || !discovery.Clients[0].Detected || !discovery.Clients[0].Registered || discovery.Clients[0].Path != filepath.Join(home, ".codex", "config.toml") {
+		t.Fatalf("codex discovery = %+v", discovery.Clients[0])
+	}
+	if discovery.Clients[1].Name != "claude" || !discovery.Clients[1].Detected || discovery.Clients[1].Registered || discovery.Clients[1].Path != filepath.Join(home, ".claude.json") {
+		t.Fatalf("claude discovery = %+v", discovery.Clients[1])
+	}
+}
+
+type recordingSetupObserver struct {
+	started   []cli.SetupPhase
+	completed []cli.SetupStep
+}
+
+func (o *recordingSetupObserver) SetupStarted(phase cli.SetupPhase) {
+	o.started = append(o.started, phase)
+}
+
+func (o *recordingSetupObserver) SetupCompleted(step cli.SetupStep) {
+	o.completed = append(o.completed, step)
+}
+
+func TestSetupWithProgressReportsRealApplicationPhases(t *testing.T) {
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"), "XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	observer := &recordingSetupObserver{}
+	report, err := svc.SetupWithProgress(context.Background(), cli.SetupOptions{
+		Clients: []string{"codex"}, TokenSource: "none", Executable: filepath.Join(home, "bin", "gitcontribute"),
+	}, observer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.HasFailures() {
+		t.Fatalf("report = %+v", report)
+	}
+	for _, want := range []cli.SetupPhase{cli.SetupPhaseConfiguration, cli.SetupPhaseCorpus, cli.SetupPhaseClients, cli.SetupPhaseVerification} {
+		if !slices.Contains(observer.started, want) {
+			t.Fatalf("started = %v, missing %q", observer.started, want)
+		}
+	}
+	for _, want := range []string{"configuration", "corpus", "codex", "verification"} {
+		found := false
+		for _, step := range observer.completed {
+			found = found || step.Name == want
+		}
+		if !found {
+			t.Fatalf("completed = %+v, missing %q", observer.completed, want)
+		}
 	}
 }

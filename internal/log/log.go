@@ -20,13 +20,18 @@ func New(component string) *slog.Logger {
 
 func handlerForEnv() slog.Handler {
 	opts := &slog.HandlerOptions{
-		Level: slog.LevelInfo,
+		// Normal CLI output is rendered by the command adapters. Operational
+		// INFO events are opt-in so interactive prompts are not preceded by
+		// timestamped implementation logs.
+		Level: slog.LevelWarn,
 	}
 
 	if level := os.Getenv("GITCONTRIBUTE_LOG_LEVEL"); level != "" {
 		switch level {
 		case "debug":
 			opts.Level = slog.LevelDebug
+		case "info":
+			opts.Level = slog.LevelInfo
 		case "warn":
 			opts.Level = slog.LevelWarn
 		case "error":

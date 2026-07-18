@@ -2,14 +2,19 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 )
 
 func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
-	clients, err := c.prepareSetupCommand(cmd)
+	clients, err := c.prepareSetupCommand(ctx, cmd)
 	if err != nil {
+		if errors.Is(err, ErrSetupCancelled) {
+			return c.writeSetupCancellation()
+		}
 		return err
 	}
 	opts := SetupOptions{
@@ -20,6 +25,9 @@ func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
 	if !cmd.Yes && !cmd.DryRun {
 		apply, err := c.confirmSetupPlan(ctx, opts, cmd.JSON)
 		if err != nil {
+			if errors.Is(err, ErrSetupCancelled) {
+				return c.writeSetupCancellation()
+			}
 			return err
 		}
 		if !apply {
@@ -29,68 +37,87 @@ func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
 	return c.executeSetup(ctx, opts, cmd.JSON)
 }
 
-func (c *CLI) prepareSetupCommand(cmd *setupCmd) ([]string, error) {
+func (c *CLI) prepareSetupCommand(ctx context.Context, cmd *setupCmd) ([]string, error) {
 	clients := selectedSetupClients(cmd.Codex, cmd.Claude)
-	if cmd.NoMCP && (len(clients) > 0 || cmd.AllClients) {
-		return nil, NewCLIError(ExitUsage, errors.New("--no-mcp cannot be combined with client flags"))
+	if err := validateSetupSelection(cmd, clients); err != nil {
+		return nil, err
 	}
 	needsPrompt := !cmd.Yes && ((!cmd.NoMCP && len(clients) == 0 && !cmd.AllClients) || cmd.TokenSource == "" || !cmd.DryRun)
 	if needsPrompt && !c.interactiveInput() {
 		return nil, NewCLIError(ExitUsage, errors.New("interactive setup requires a terminal; pass client flags and --yes"))
 	}
-	if err := c.offerTerminalInstall(cmd); err != nil {
-		return nil, err
-	}
-	selected, err := c.selectSetupClients(cmd, clients)
-	if err != nil {
-		return nil, err
+	questions := setupQuestions(cmd, clients)
+	if len(questions) > 0 {
+		selection, err := c.promptSetupSelection(ctx, cmd, clients, questions)
+		if err != nil {
+			return nil, err
+		}
+		cmd.InstallCLI = selection.InstallCLI
+		clients = selection.Clients
+		if containsSetupQuestion(questions, SetupQuestionClients) {
+			cmd.NoMCP = len(clients) == 0
+		}
+		cmd.TokenSource = selection.TokenSource
+		cmd.TokenSourceKey = selection.TokenSourceKey
 	}
 	if cmd.NoMCP && !cmd.InstallCLI {
 		return nil, NewCLIError(ExitUsage, errors.New("setup has no selected capability"))
 	}
-	if err := c.selectSetupTokenSource(cmd); err != nil {
-		return nil, err
-	}
-	return selected, nil
+	return clients, nil
 }
 
-func (c *CLI) offerTerminalInstall(cmd *setupCmd) error {
-	if cmd.Yes || cmd.InstallCLI || !runningThroughNpx() || !c.interactiveInput() {
-		return nil
+func validateSetupSelection(cmd *setupCmd, clients []string) error {
+	if cmd.NoMCP && (len(clients) > 0 || cmd.AllClients) {
+		return NewCLIError(ExitUsage, errors.New("--no-mcp cannot be combined with client flags"))
 	}
-	// Only an ephemeral bootstrap needs this offer. A globally installed or
-	// source-built executable is already a persistent terminal command.
-	install, err := c.confirmSetup("Install the terminal app for CLI and TUI")
-	if err != nil {
-		return NewCLIError(ExitUsage, err)
-	}
-	cmd.InstallCLI = install
 	return nil
 }
 
-func (c *CLI) selectSetupClients(cmd *setupCmd, clients []string) ([]string, error) {
-	if cmd.NoMCP || len(clients) > 0 || cmd.AllClients || cmd.Yes {
-		return clients, nil
+func setupQuestions(cmd *setupCmd, clients []string) []SetupPromptQuestion {
+	questions := make([]SetupPromptQuestion, 0, 3)
+	if !cmd.Yes && !cmd.InstallCLI && runningThroughNpx() {
+		questions = append(questions, SetupQuestionInstall)
 	}
-	selected, err := c.promptClients("Set up", true)
-	if err != nil {
-		return nil, NewCLIError(ExitUsage, err)
+	if !cmd.Yes && !cmd.NoMCP && len(clients) == 0 && !cmd.AllClients {
+		questions = append(questions, SetupQuestionClients)
 	}
-	cmd.NoMCP = len(selected) == 0
-	return selected, nil
+	if !cmd.Yes && cmd.TokenSource == "" {
+		questions = append(questions, SetupQuestionAuth)
+	}
+	return questions
 }
 
-func (c *CLI) selectSetupTokenSource(cmd *setupCmd) error {
-	if cmd.TokenSource != "" || cmd.Yes {
-		return nil
+func containsSetupQuestion(questions []SetupPromptQuestion, want SetupPromptQuestion) bool {
+	for _, question := range questions {
+		if question == want {
+			return true
+		}
 	}
-	value, err := c.promptTokenSource()
+	return false
+}
+
+func (c *CLI) promptSetupSelection(ctx context.Context, cmd *setupCmd, clients []string, questions []SetupPromptQuestion) (SetupSelection, error) {
+	service, err := c.setupService()
 	if err != nil {
-		return NewCLIError(ExitUsage, err)
+		return SetupSelection{}, err
 	}
-	cmd.TokenSource = value
-	if value == "env" && cmd.TokenSourceKey == "" {
-		cmd.TokenSourceKey = "GITHUB_TOKEN"
+	discovery, err := service.DiscoverSetup(ctx)
+	if err != nil {
+		return SetupSelection{}, NewCLIError(ExitGeneral, fmt.Errorf("inspect setup state: %w", err))
+	}
+	prompter := c.setupPrompter
+	if prompter == nil {
+		prompter = newSetupPrompter(c.stdin, c.stderr)
+	}
+	return prompter.Select(ctx, SetupPromptRequest{
+		Discovery: *discovery, Questions: questions,
+		InstallCLI: cmd.InstallCLI, Clients: clients, TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey,
+	})
+}
+
+func (c *CLI) writeSetupCancellation() error {
+	if _, err := fmt.Fprintln(c.stderr, "Setup cancelled; no changes were made."); err != nil {
+		return NewCLIError(ExitGeneral, fmt.Errorf("write setup cancellation: %w", err))
 	}
 	return nil
 }
@@ -112,13 +139,17 @@ func (c *CLI) confirmSetupPlan(ctx context.Context, opts SetupOptions, jsonOutpu
 	if jsonOutput {
 		planOutput = c.stderr
 	}
-	if _, err := fmt.Fprintln(planOutput, setupHuman(plan)); err != nil {
+	if _, err := fmt.Fprintln(planOutput, renderSetupPlan(plan)); err != nil {
 		return false, NewCLIError(ExitGeneral, fmt.Errorf("write setup plan: %w", err))
 	}
 	if plan.HasFailures() {
 		return false, NewCLIError(ExitGeneral, errors.New("setup plan contains one or more failed steps"))
 	}
-	apply, err := c.confirmSetup("Apply setup changes")
+	prompter := c.setupPrompter
+	if prompter == nil {
+		prompter = newSetupPrompter(c.stdin, c.stderr)
+	}
+	apply, err := prompter.Confirm(ctx, "Apply these changes?")
 	if err != nil {
 		return false, NewCLIError(ExitUsage, err)
 	}
@@ -128,6 +159,75 @@ func (c *CLI) confirmSetupPlan(ctx context.Context, opts SetupOptions, jsonOutpu
 		}
 	}
 	return apply, nil
+}
+
+func (c *CLI) executeSetup(ctx context.Context, opts SetupOptions, jsonOutput bool) error {
+	service, err := c.setupService()
+	if err != nil {
+		return err
+	}
+	var report *SetupReport
+	if !jsonOutput && interactiveWriter(c.stderr) {
+		progress := startSetupProgress(c.stderr)
+		report, err = service.SetupWithProgress(ctx, opts, progress)
+		progressErr := progress.Close()
+		if err == nil && progressErr != nil {
+			err = progressErr
+		}
+	} else {
+		report, err = service.Setup(ctx, opts)
+	}
+	if err != nil {
+		return NewCLIError(ExitGeneral, err)
+	}
+	if jsonOutput {
+		enc := json.NewEncoder(c.stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			return NewCLIError(ExitGeneral, err)
+		}
+	} else {
+		var output string
+		if opts.Remove {
+			output = setupHuman(report)
+		} else if report.DryRun {
+			output = renderSetupPlan(report)
+		} else {
+			output = renderSetupResult(report, opts, opts.InstallCLI || !runningThroughNpx())
+		}
+		if _, err := fmt.Fprintln(c.stdout, output); err != nil {
+			return NewCLIError(ExitGeneral, fmt.Errorf("write setup result: %w", err))
+		}
+	}
+	if report.HasFailures() {
+		return NewCLIError(ExitGeneral, errors.New("one or more setup steps failed"))
+	}
+	return nil
+}
+
+func setupHuman(report *SetupReport) string {
+	var b strings.Builder
+	operation := report.Operation
+	if operation == "" {
+		operation = "setup"
+	}
+	fmt.Fprintf(&b, "%s%s", strings.ToUpper(operation[:1]), operation[1:])
+	if report.DryRun {
+		b.WriteString(" plan")
+	}
+	for _, step := range report.Steps {
+		fmt.Fprintf(&b, "\n- %s [%s]", step.Name, step.Status)
+		if step.Path != "" {
+			fmt.Fprintf(&b, ": %s", step.Path)
+		}
+		if step.Message != "" {
+			fmt.Fprintf(&b, " — %s", step.Message)
+		}
+	}
+	if report.Launcher != "" {
+		fmt.Fprintf(&b, "\nMCP launcher: %s", report.Launcher)
+	}
+	return b.String()
 }
 
 // runningThroughNpx is used only to decide whether the interactive adapter

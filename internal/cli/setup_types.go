@@ -7,7 +7,55 @@ import "context"
 // invoke npm to install the terminal app. It must not perform GitHub network
 // access or execute repository-controlled code.
 type SetupService interface {
+	DiscoverSetup(ctx context.Context) (*SetupDiscovery, error)
 	Setup(ctx context.Context, opts SetupOptions) (*SetupReport, error)
+	SetupWithProgress(ctx context.Context, opts SetupOptions, observer SetupObserver) (*SetupReport, error)
+}
+
+// SetupObserver receives repository-owned progress events. Implementations must
+// return promptly and must not alter setup behavior.
+type SetupObserver interface {
+	SetupStarted(phase SetupPhase)
+	SetupCompleted(step SetupStep)
+}
+
+// SetupPhase identifies a long-running application operation.
+type SetupPhase string
+
+const (
+	// SetupPhaseTerminal installs and verifies the persistent terminal command.
+	SetupPhaseTerminal SetupPhase = "terminal"
+	// SetupPhaseConfiguration writes shared local configuration.
+	SetupPhaseConfiguration SetupPhase = "configuration"
+	// SetupPhaseCorpus initializes the local corpus.
+	SetupPhaseCorpus SetupPhase = "corpus"
+	// SetupPhaseClients registers the MCP server with selected clients.
+	SetupPhaseClients SetupPhase = "clients"
+	// SetupPhaseRepository adds the optional initial repository source.
+	SetupPhaseRepository SetupPhase = "repository"
+	// SetupPhaseVerification checks the completed local installation.
+	SetupPhaseVerification SetupPhase = "verification"
+)
+
+// SetupDiscovery is a read-only snapshot used to choose sensible onboarding
+// defaults. Discovery never authenticates, performs network access, or writes
+// configuration.
+type SetupDiscovery struct {
+	Clients               []SetupClientDiscovery
+	ConfiguredTokenSource string
+	ConfiguredTokenKey    string
+	GitHubCLIAvailable    bool
+	EnvironmentKeyPresent bool
+}
+
+// SetupClientDiscovery describes one supported coding client and the exact
+// configuration file GitContribute would update.
+type SetupClientDiscovery struct {
+	Name       string
+	Path       string
+	Detected   bool
+	Registered bool
+	Error      string
 }
 
 // SetupOptions selects independent onboarding capabilities. InstallCLI controls
