@@ -18,8 +18,9 @@ var ErrSetupCancelled = errors.New("setup cancelled")
 // require interactive consent.
 type SetupPromptRequest struct {
 	Discovery      SetupDiscovery
+	PackageRunner  bool
 	Questions      []SetupPromptQuestion
-	InstallCLI     bool
+	Mode           SetupMode
 	Clients        []string
 	TokenSource    string
 	TokenSourceKey string
@@ -29,8 +30,8 @@ type SetupPromptRequest struct {
 type SetupPromptQuestion string
 
 const (
-	// SetupQuestionInstall asks whether to install the persistent terminal app.
-	SetupQuestionInstall SetupPromptQuestion = "install"
+	// SetupQuestionAccess asks where GitContribute should be available.
+	SetupQuestionAccess SetupPromptQuestion = "access"
 	// SetupQuestionClients asks which detected clients to configure.
 	SetupQuestionClients SetupPromptQuestion = "clients"
 	// SetupQuestionAuth asks how later sync commands should authenticate.
@@ -48,7 +49,7 @@ func (r SetupPromptRequest) asks(question SetupPromptQuestion) bool {
 
 // SetupSelection is the typed result of the interactive setup form.
 type SetupSelection struct {
-	InstallCLI     bool
+	Mode           SetupMode
 	Clients        []string
 	TokenSource    string
 	TokenSourceKey string
@@ -72,24 +73,72 @@ func newSetupPrompter(input io.Reader, output io.Writer) SetupPrompter {
 
 func (p *huhSetupPrompter) Select(ctx context.Context, request SetupPromptRequest) (SetupSelection, error) {
 	selection := SetupSelection{
-		InstallCLI:     request.InstallCLI,
+		Mode:           request.Mode,
 		Clients:        append([]string(nil), request.Clients...),
 		TokenSource:    request.TokenSource,
 		TokenSourceKey: request.TokenSourceKey,
 	}
-	fields := setupPromptFields(request, &selection)
-	if len(fields) > 0 {
-		if _, err := fmt.Fprintln(p.output, renderSetupDiscovery(request.Discovery)); err != nil {
-			return SetupSelection{}, fmt.Errorf("write setup heading: %w", err)
+	headingWritten := false
+	writeHeading := func() error {
+		if headingWritten {
+			return nil
 		}
-		if request.asks(SetupQuestionInstall) {
-			if _, err := fmt.Fprintln(p.output, "npm allowed this one-time run. This choice controls future runs."); err != nil {
-				return SetupSelection{}, fmt.Errorf("write npx explanation: %w", err)
+		headingWritten = true
+		if _, err := fmt.Fprintln(p.output, renderSetupDiscovery(request.Discovery, request.PackageRunner)); err != nil {
+			return fmt.Errorf("write setup heading: %w", err)
+		}
+		return nil
+	}
+	runQuestions := func(promptRequest SetupPromptRequest) error {
+		fields := setupPromptFields(promptRequest, &selection)
+		if len(fields) == 0 {
+			return nil
+		}
+		if err := writeHeading(); err != nil {
+			return err
+		}
+		return runSetupForm(ctx, p.form(fields...))
+	}
+	if request.asks(SetupQuestionAccess) && !setupPromptAccessible() {
+		fields := setupPromptFields(request, &selection)
+		groups := setupPromptGroups(fields)
+		for index, question := range request.Questions {
+			if question == SetupQuestionClients {
+				groups[index].WithHideFunc(func() bool { return selection.Mode == SetupModeCLI })
 			}
 		}
-		form := p.form(fields...)
-		if err := runSetupForm(ctx, form); err != nil {
+		if err := writeHeading(); err != nil {
 			return SetupSelection{}, err
+		}
+		if err := runSetupForm(ctx, p.formGroups(groups...)); err != nil {
+			return SetupSelection{}, err
+		}
+	} else if request.asks(SetupQuestionAccess) {
+		remaining := append([]SetupPromptQuestion(nil), request.Questions...)
+		accessRequest := request
+		accessRequest.Questions = []SetupPromptQuestion{SetupQuestionAccess}
+		if err := runQuestions(accessRequest); err != nil {
+			return SetupSelection{}, err
+		}
+		remaining = setupQuestionsWithout(remaining, SetupQuestionAccess)
+		if selection.Mode == SetupModeCLI {
+			remaining = setupQuestionsWithout(remaining, SetupQuestionClients)
+		}
+		remainingRequest := request
+		remainingRequest.Questions = remaining
+		if err := runQuestions(remainingRequest); err != nil {
+			return SetupSelection{}, err
+		}
+	} else if err := runQuestions(request); err != nil {
+		return SetupSelection{}, err
+	}
+	if request.asks(SetupQuestionClients) && len(selection.Clients) == 0 {
+		requiresTarget := request.Mode.ConfiguresMCP()
+		if request.asks(SetupQuestionAccess) {
+			requiresTarget = selection.Mode.ConfiguresMCP()
+		}
+		if requiresTarget {
+			return SetupSelection{}, errors.New("select at least one coding agent for MCP access")
 		}
 	}
 	if request.asks(SetupQuestionAuth) {
@@ -103,23 +152,33 @@ func (p *huhSetupPrompter) Select(ctx context.Context, request SetupPromptReques
 	return selection, nil
 }
 
+func setupQuestionsWithout(questions []SetupPromptQuestion, excluded SetupPromptQuestion) []SetupPromptQuestion {
+	filtered := make([]SetupPromptQuestion, 0, len(questions))
+	for _, question := range questions {
+		if question != excluded {
+			filtered = append(filtered, question)
+		}
+	}
+	return filtered
+}
+
 func setupPromptFields(request SetupPromptRequest, selection *SetupSelection) []huh.Field {
 	fields := make([]huh.Field, 0, 3)
-	total := len(request.Questions)
-	for index, question := range request.Questions {
-		title := func(value string) string { return setupStageTitle(index+1, total, value) }
+	for _, question := range request.Questions {
+		title := func(value string) string { return value }
 		switch question {
-		case SetupQuestionInstall:
-			selection.InstallCLI = true
-			fields = append(fields, huh.NewSelect[bool]().
-				Title(title("How do you want to run GitContribute?")).
+		case SetupQuestionAccess:
+			selection.Mode = SetupModeMCP
+			fields = append(fields, huh.NewSelect[SetupMode]().
+				Title(title("How do you want to use GitContribute?")).
 				Options(
-					huh.NewOption("Install the gitcontribute command  · recommended\n    Run it directly from any terminal.", true),
-					huh.NewOption("Keep using npx\n    Nothing is installed globally; commands keep the npx prefix.", false),
+					huh.NewOption("MCP\n    Install a private runtime and configure coding agents; no global command.", SetupModeMCP),
+					huh.NewOption("CLI\n    Install the global gitcontribute command and TUI; no agent configuration.", SetupModeCLI),
+					huh.NewOption("Both\n    Install the global CLI and configure coding agents to use it for MCP.", SetupModeBoth),
 				).
-				Value(&selection.InstallCLI))
+				Value(&selection.Mode))
 		case SetupQuestionClients:
-			fields = append(fields, setupClientsField(title("Use GitContribute from coding agents"), request.Discovery, &selection.Clients))
+			fields = append(fields, setupClientsField(title("Which coding agents should GitContribute configure?"), request.Discovery, &selection.Clients))
 		case SetupQuestionAuth:
 			selection.TokenSource = defaultSetupTokenSource(request.Discovery)
 			fields = append(fields, huh.NewSelect[string]().
@@ -135,7 +194,7 @@ func setupPromptFields(request SetupPromptRequest, selection *SetupSelection) []
 func setupClientsField(title string, discovery SetupDiscovery, clients *[]string) huh.Field {
 	if len(*clients) == 0 {
 		for _, client := range discovery.Clients {
-			if client.Detected {
+			if client.Registered {
 				*clients = append(*clients, client.Name)
 			}
 		}
@@ -150,21 +209,14 @@ func setupClientsField(title string, discovery SetupDiscovery, clients *[]string
 	}
 	return huh.NewMultiSelect[string]().
 		Title(title).
-		Description("Select clients for MCP access. Leave all unchecked for terminal-only setup.").
+		Description("Select every coding agent that should receive MCP access.").
 		Options(options...).
 		Limit(len(options)).
 		Height(len(options)*2 + 2).
 		Value(clients)
 }
 
-func setupStageTitle(current, total int, title string) string {
-	if total < 2 {
-		return title
-	}
-	return fmt.Sprintf("%d of %d · %s", current, total, title)
-}
-
-func renderSetupDiscovery(discovery SetupDiscovery) string {
+func renderSetupDiscovery(discovery SetupDiscovery, packageRunner bool) string {
 	detected := make([]string, 0, len(discovery.Clients)+1)
 	for _, client := range discovery.Clients {
 		if client.Detected {
@@ -178,7 +230,14 @@ func renderSetupDiscovery(discovery SetupDiscovery) string {
 	if len(detected) > 0 {
 		summary = "Detected " + strings.Join(detected, ", ")
 	}
-	return "┌ GitContribute setup\n│ " + summary + "\n└ Local inspection only · no changes made"
+	heading := "GitContribute setup"
+	if version := strings.TrimPrefix(strings.TrimSpace(discovery.Version), "v"); version != "" {
+		heading += " · v" + version
+	}
+	if packageRunner {
+		heading += " · running with npx"
+	}
+	return "┌ " + heading + "\n│ " + summary + "\n└ Local inspection only · no changes made"
 }
 
 func (p *huhSetupPrompter) promptTokenSourceKey(ctx context.Context, selection *SetupSelection) error {
@@ -215,13 +274,13 @@ func runSetupForm(ctx context.Context, form *huh.Form) error {
 }
 
 func (p *huhSetupPrompter) Confirm(ctx context.Context, title string) (bool, error) {
-	confirmed := true
+	confirmed := false
 	field := huh.NewSelect[bool]().
 		Title(title).
 		Description("Review the exact paths and commands above before continuing.").
 		Options(
-			huh.NewOption("Apply changes", true),
 			huh.NewOption("Cancel  · no changes will be made", false),
+			huh.NewOption("Apply changes", true),
 		).
 		Value(&confirmed)
 	form := p.form(field)
@@ -235,7 +294,10 @@ func (p *huhSetupPrompter) Confirm(ctx context.Context, title string) (bool, err
 }
 
 func (p *huhSetupPrompter) form(fields ...huh.Field) *huh.Form {
-	groups := setupPromptGroups(fields)
+	return p.formGroups(setupPromptGroups(fields)...)
+}
+
+func (p *huhSetupPrompter) formGroups(groups ...*huh.Group) *huh.Form {
 	plain := os.Getenv("GITCONTRIBUTE_ACCESSIBLE") != "" || os.Getenv("TERM") == "dumb" || os.Getenv("NO_COLOR") != ""
 	theme := huh.ThemeFunc(huh.ThemeBase16)
 	if plain {
@@ -252,6 +314,10 @@ func (p *huhSetupPrompter) form(fields ...huh.Field) *huh.Form {
 		form.WithAccessible(true)
 	}
 	return form
+}
+
+func setupPromptAccessible() bool {
+	return os.Getenv("GITCONTRIBUTE_ACCESSIBLE") != "" || os.Getenv("TERM") == "dumb"
 }
 
 func setupPromptGroups(fields []huh.Field) []*huh.Group {

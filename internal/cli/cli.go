@@ -66,7 +66,7 @@ func (c *CLI) SetInput(input io.Reader) {
 func (c *CLI) SetSetupPrompter(prompter SetupPrompter) { c.setupPrompter = prompter }
 
 type rootCmd struct {
-	Setup         setupCmd         `cmd:"" help:"Set up GitContribute and coding-agent integrations"`
+	Setup         setupCmd         `cmd:"" help:"Set up GitContribute for MCP, CLI, or both"`
 	Remove        removeCmd        `cmd:"" help:"Remove GitContribute coding-agent integrations"`
 	Upgrade       upgradeCmd       `cmd:"" help:"Check for or install the latest release"`
 	Init          initCmd          `cmd:"" help:"Initialize the local corpus"`
@@ -116,18 +116,16 @@ type rootCmd struct {
 }
 
 type setupCmd struct {
-	Codex          bool   `name:"codex" help:"Configure Codex"`
-	Claude         bool   `name:"claude" help:"Configure Claude Code"`
-	AllClients     bool   `name:"all-clients" help:"Configure every supported client"`
-	InstallCLI     bool   `name:"install-cli" help:"Install a persistent gitcontribute command for the CLI and TUI"`
-	NoMCP          bool   `name:"no-mcp" help:"Skip coding-agent MCP configuration"`
-	TokenSource    string `name:"token-source" help:"GitHub token source (none, env, gh-cli, or keyring)"`
-	TokenSourceKey string `name:"token-source-key" help:"Environment variable or keyring entry name"`
-	Repository     string `name:"repo" help:"Add an initial OWNER/REPO source without syncing it"`
-	MCPVersion     string `name:"mcp-version" help:"npm version used by MCP clients (defaults to this release)"`
-	Yes            bool   `name:"yes" short:"y" help:"Accept the plan without prompting"`
-	DryRun         bool   `name:"dry-run" help:"Show planned changes without writing"`
-	JSON           bool   `name:"json" help:"Print the result as JSON"`
+	Codex          bool       `name:"codex" help:"Configure Codex"`
+	Claude         bool       `name:"claude" help:"Configure Claude Code"`
+	AllClients     bool       `name:"all-clients" help:"Configure every supported client"`
+	Mode           *SetupMode `name:"mode" enum:"mcp,cli,both" help:"Access mode (mcp, cli, or both)"`
+	TokenSource    string     `name:"token-source" help:"GitHub token source (none, env, gh-cli, or keyring)"`
+	TokenSourceKey string     `name:"token-source-key" help:"Environment variable or keyring entry name"`
+	Repository     string     `name:"repo" help:"Add an initial OWNER/REPO source without syncing it"`
+	Yes            bool       `name:"yes" short:"y" help:"Accept the plan without prompting"`
+	DryRun         bool       `name:"dry-run" help:"Show planned changes without writing"`
+	JSON           bool       `name:"json" help:"Print the result as JSON"`
 }
 
 type removeCmd struct {

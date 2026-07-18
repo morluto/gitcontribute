@@ -75,7 +75,7 @@ process.exit(2);
   return { fakeBin, globalPrefix, npmLog };
 }
 
-test("packaged setup can install the terminal app without configuring MCP", { skip: process.platform === "win32" }, async () => {
+test("packaged setup can install the CLI without configuring MCP", { skip: process.platform === "win32" }, async () => {
   const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-setup-e2e-"));
   try {
     const tarball = await packCurrentPlatform(workspace);
@@ -89,7 +89,7 @@ test("packaged setup can install the terminal app without configuring MCP", { sk
     const command = join(runner, "node_modules", ".bin", "gitcontribute");
     const result = run(
       command,
-      ["setup", "--install-cli", "--no-mcp", "--token-source", "none", "--yes", "--json"],
+      ["setup", "--mode", "cli", "--token-source", "none", "--yes", "--json"],
       {
         env: {
           ...process.env,
@@ -107,8 +107,8 @@ test("packaged setup can install the terminal app without configuring MCP", { sk
     );
 
     const report = JSON.parse(result.stdout);
-    assert.ok(report.steps.some((step) => step.name === "terminal" && step.status === "installed"));
-    assert.equal(report.launcher, undefined);
+    assert.ok(report.steps.some((step) => step.name === "cli" && step.status === "installed"));
+    assert.equal(report.mcp_command, undefined);
     assert.ok((await readFile(npmLog, "utf8")).includes(`install --global gitcontribute@${packageVersion}`));
     await readFile(join(globalPrefix, "bin", "gitcontribute"), "utf8");
     await assert.rejects(readFile(join(home, ".codex", "config.toml"), "utf8"));
@@ -117,7 +117,7 @@ test("packaged setup can install the terminal app without configuring MCP", { sk
   }
 });
 
-test("project-local npx setup launches the packaged CLI and configures MCP", { skip: process.platform === "win32" }, async () => {
+test("npx setup installs a private native MCP runtime and registers its absolute path", { skip: process.platform === "win32" }, async () => {
   const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-setup-e2e-"));
   try {
     const tarball = await packCurrentPlatform(workspace);
@@ -128,7 +128,7 @@ test("project-local npx setup launches the packaged CLI and configures MCP", { s
     await mkdir(join(home, ".codex"), { recursive: true });
     const result = run(
       "npx",
-      ["--yes", "gitcontribute", "setup", "--codex", "--token-source", "none", "--yes", "--json"],
+      ["--yes", "gitcontribute", "setup", "--mode", "mcp", "--codex", "--token-source", "none", "--yes", "--json"],
       {
         cwd: runner,
         env: {
@@ -145,27 +145,33 @@ test("project-local npx setup launches the packaged CLI and configures MCP", { s
     );
 
     const report = JSON.parse(result.stdout);
-    assert.equal(report.launcher, `npx --yes gitcontribute@${packageVersion} mcp`);
-    assert.ok(report.steps.some((step) => step.name === "codex" && step.status === "configured"));
+    const dataDir = process.platform === "darwin"
+      ? join(home, "Library", "Application Support", "gitcontribute", "Data")
+      : join(home, ".local", "share", "gitcontribute");
+    const managed = join(dataDir, "bin", packageVersion, "gitcontribute");
+    assert.deepEqual(report.mcp_command, {
+      command: managed,
+      args: ["mcp", "serve", "--transport=stdio"],
+    });
     assert.ok(
       report.steps.some(
-        (step) =>
-          step.name === "terminal" &&
-          step.status === "not installed" &&
-          step.message.includes(`npm install --global gitcontribute@${packageVersion}`)
+        (step) => step.name === "mcp-runtime" && step.status === "installed" && step.path === managed
       )
     );
+    assert.ok(report.steps.some((step) => step.name === "codex" && step.status === "configured"));
     const codex = await readFile(join(home, ".codex", "config.toml"), "utf8");
-    assert.match(codex, /command = "npx"/);
-    assert.ok(codex.includes(`"gitcontribute@${packageVersion}"`));
-    assert.doesNotMatch(codex, /--package=/);
+    assert.ok(codex.includes(`command = ${JSON.stringify(managed)}`));
+    assert.match(codex, /args = \["mcp", "serve", "--transport=stdio"\]/);
+    assert.doesNotMatch(codex, /npx|npm-cache/);
+    const metadata = run(managed, ["metadata", "--json"], { env: process.env });
+    assert.equal(JSON.parse(metadata.stdout).version, packageVersion);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
 });
 
 test(
-  "packaged interactive setup advances after keeping npx",
+  "packaged interactive setup advances from MCP access to explicit agent targets",
   { skip: process.platform === "win32" },
   async () => {
     const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-setup-pty-e2e-"));
@@ -177,7 +183,7 @@ test(
       const home = join(workspace, "home");
       await mkdir(join(home, ".codex"), { recursive: true });
       const command = join(runner, "node_modules", ".bin", "gitcontribute");
-      const input = "\x1b]11;rgb:0000/0000/0000\x07\x1b[1;1R\x1b[B\r\x03";
+      const input = "\x1b]11;rgb:0000/0000/0000\x07\x1b[1;1R\r\x1b[Z\x1b[B\r\x03";
       const env = {
         ...process.env,
         HOME: home,
@@ -205,14 +211,24 @@ expect {
   eof { exit 7 }
 }
 expect {
-  -re {How do you want to run GitContribute\?} { send "\033\[B\r" }
+  -re {How do you want to use GitContribute\?} { send "\r" }
   timeout { exit 2 }
   eof { exit 3 }
 }
 expect {
-  -re {Use GitContribute from coding agents} { send "\003" }
+  -re {Which coding agents should GitContribute configure\?} { send "\033\[Z" }
   timeout { exit 4 }
   eof { exit 5 }
+}
+expect {
+  -re {How do you want to use GitContribute\?} { send "\033\[B\r" }
+  timeout { exit 8 }
+  eof { exit 9 }
+}
+expect {
+  -re {future GitHub syncs authenticate\?} { send "\003" }
+  timeout { exit 10 }
+  eof { exit 11 }
 }
 expect eof
 catch wait result
@@ -228,8 +244,9 @@ exit [lindex $result 3]`,
 
       assert.equal(result.status, 0, result.stderr || result.stdout);
       const transcript = `${result.stdout}\n${result.stderr}`;
-      assert.match(transcript, /How do you want to run GitContribute\?/);
-      assert.match(transcript, /Use GitContribute from coding agents/);
+      assert.match(transcript, /How do you want to use GitContribute\?/);
+      assert.match(transcript, /Which coding agents should GitContribute configure\?/);
+      assert.match(transcript, /future GitHub syncs authenticate\?/);
       assert.match(transcript, /Setup cancelled; no changes were made\./);
       await assert.rejects(readFile(join(home, ".codex", "config.toml"), "utf8"));
     } finally {
@@ -290,7 +307,7 @@ printf '%s\\n' '{"name":"gitcontribute","version":"0.0.0-stale"}'
   }
 );
 
-test("packaged setup uses the installed terminal app for MCP", { skip: process.platform === "win32" }, async () => {
+test("Both uses the installed CLI for MCP without a private runtime", { skip: process.platform === "win32" }, async () => {
   const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-setup-e2e-"));
   try {
     const tarball = await packCurrentPlatform(workspace);
@@ -303,7 +320,7 @@ test("packaged setup uses the installed terminal app for MCP", { skip: process.p
     const command = join(runner, "node_modules", ".bin", "gitcontribute");
     const result = run(
       command,
-      ["setup", "--install-cli", "--codex", "--token-source", "none", "--yes", "--json"],
+      ["setup", "--mode", "both", "--codex", "--token-source", "none", "--yes", "--json"],
       {
         env: {
           ...process.env,
@@ -322,10 +339,13 @@ test("packaged setup uses the installed terminal app for MCP", { skip: process.p
 
     const installedCommand = join(globalPrefix, "bin", "gitcontribute");
     const report = JSON.parse(result.stdout);
-    assert.equal(report.launcher, `${installedCommand} mcp`);
+    assert.deepEqual(report.mcp_command, {
+      command: installedCommand,
+      args: ["mcp", "serve", "--transport=stdio"],
+    });
     assert.ok(
       report.steps.some(
-        (step) => step.name === "terminal" && step.status === "installed" && step.path === installedCommand
+        (step) => step.name === "cli" && step.status === "installed" && step.path === installedCommand
       )
     );
     assert.ok(report.steps.some((step) => step.name === "codex" && step.status === "configured"));

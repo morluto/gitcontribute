@@ -47,29 +47,31 @@ inspection, health analysis, dossiers, and investigations run entirely offline.
 Run the guided setup with Node.js 18 or newer:
 
 ```sh
-npx gitcontribute@latest setup
+npx gitcontribute setup
 ```
 
-On a clean machine, the shorter `npx gitcontribute setup` also resolves npm's
-current `latest` release. The explicit tag is the safe copy-paste form because
-npm can otherwise reuse an older local or global `gitcontribute` command.
+The wizard shows the resolved GitContribute version before any choice.
 
-The interactive wizard offers two independent capabilities:
+The interactive wizard offers three access modes:
 
-- a persistent `gitcontribute` command for the CLI and TUI;
-- MCP registration for Codex and/or Claude Code.
+- **MCP** — installs a private native runtime and configures selected coding agents;
+- **CLI** — installs the persistent `gitcontribute` command and TUI;
+- **Both** — installs the CLI and uses that verified executable for MCP.
 
-The wizard detects installed coding agents, preselects them in a visual
-multi-select, and shows the exact configuration paths it will update. GitHub
-authentication is chosen from described options rather than typed internal
-identifiers. A dry-run plan still shows every effect before final confirmation.
+The wizard displays detected coding agents without treating detection as
+permission to modify them. Existing GitContribute registrations may be
+preselected; new targets require an explicit selection. GitHub authentication
+is chosen from described options rather than typed internal identifiers. A
+dry-run plan shows every effect before final confirmation, which defaults to
+cancel.
 
-Installing the terminal app is the recommended default. The wizard shows the
-exact global npm command before applying changes. MCP-only setup remains
-available and does not require a persistent CLI installation.
+`npx` only bootstraps the wizard. MCP configuration never records `npx`, an npm
+cache path, or `@latest`: it points to an absolute native executable managed by
+GitContribute.
 
-Then launch the TUI, sync a repository, rank contribution candidates, and
-search the local corpus:
+If you chose MCP, restart the selected coding agent and use GitContribute
+there. If you chose CLI or Both, launch the TUI, sync a repository, rank
+contribution candidates, and search the local corpus:
 
 ```sh
 gitcontribute tui
@@ -81,25 +83,25 @@ gitcontribute dossier build owner/repo --json
 ```
 
 `setup` initializes the corpus, helps select a GitHub authentication source,
-can install the terminal app, and can register the MCP server with Codex and
-Claude Code. Adding a repository during setup does **not** contact GitHub or
-begin a sync.
+can install the CLI or a private MCP runtime, and can register the MCP server
+with Codex and Claude Code. Adding a repository during setup does **not**
+contact GitHub or begin a sync.
 
-For non-interactive setup, terminal installation must be explicitly selected:
+For non-interactive setup, select the access mode explicitly:
 
 ```sh
-# Recommended: terminal app plus Codex MCP
-npx gitcontribute setup --install-cli --codex --yes
+# Both: CLI and Codex MCP
+npx gitcontribute setup --mode both --codex --token-source none --yes
 
-# Terminal app only
-npx gitcontribute setup --install-cli --no-mcp --yes
+# CLI only
+npx gitcontribute setup --mode cli --token-source none --yes
 
-# MCP only; leaves the terminal command uninstalled
-npx gitcontribute setup --codex --yes
+# MCP only; installs a private runtime without a global command
+npx gitcontribute setup --mode mcp --codex --token-source none --yes
 ```
 
-When terminal installation is skipped, continue to prefix direct commands with
-`npx gitcontribute@latest`.
+MCP-only setup is used through the configured coding agent. Run setup again and
+choose CLI or Both if you also want the `gitcontribute` terminal command.
 
 <details>
 <summary><strong>Other installation options</strong></summary>
@@ -113,13 +115,14 @@ gitcontribute setup
 
 To remove a global npm installation later, run
 `npm uninstall --global gitcontribute`. The `gitcontribute remove` command only
-removes MCP registrations; it does not uninstall the terminal app.
+removes selected MCP registrations. It does not delete versioned private
+runtimes, uninstall the CLI, or remove application configuration or corpus data.
 
 ### Pin a project version
 
 ```sh
 npm install --save-dev gitcontribute
-npx gitcontribute setup --codex --yes
+npx gitcontribute setup --mode mcp --codex --token-source none --yes
 ```
 
 The npm package has no install lifecycle and performs no download during
@@ -234,8 +237,8 @@ Nothing is posted. You decide what leaves your machine.
 The MCP server gives agents structured access to the same corpus and workflow:
 
 ```sh
-gitcontribute setup --codex --yes
-gitcontribute setup --all-clients --yes
+gitcontribute setup --mode mcp --codex --token-source none --yes
+gitcontribute setup --mode mcp --all-clients --token-source none --yes
 ```
 
 Or start the stdio server directly:
@@ -302,12 +305,11 @@ The sections below are a task-oriented reference. Run `gitcontribute --help` or
 
 ```sh
 gitcontribute setup                              # interactive
-gitcontribute setup --codex --yes               # configure Codex
-gitcontribute setup --all-clients --yes          # configure supported clients
-gitcontribute setup --codex --mcp-version latest --yes
-gitcontribute setup --token-source env \
+gitcontribute setup --mode mcp --codex --token-source none --yes
+gitcontribute setup --mode mcp --all-clients --token-source none --yes
+gitcontribute setup --mode mcp --codex --token-source env \
   --token-source-key GITHUB_TOKEN --yes
-gitcontribute setup --codex --dry-run --json     # inspect without writing
+gitcontribute setup --mode mcp --codex --token-source none --dry-run --json
 gitcontribute remove --all-clients --yes         # remove MCP registrations only
 gitcontribute upgrade --check
 gitcontribute upgrade --yes

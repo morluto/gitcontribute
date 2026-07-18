@@ -37,7 +37,7 @@ func TestAccessibleModeAppliesToSetupKeyAndConfirmationForms(t *testing.T) {
 	}
 
 	output.Reset()
-	prompter = &huhSetupPrompter{input: strings.NewReader("2\n"), output: &output}
+	prompter = &huhSetupPrompter{input: strings.NewReader("1\n"), output: &output}
 	confirmed, err := prompter.Confirm(context.Background(), "Apply these changes?")
 	if err != nil {
 		t.Fatal(err)
@@ -47,10 +47,23 @@ func TestAccessibleModeAppliesToSetupKeyAndConfirmationForms(t *testing.T) {
 	}
 }
 
+func TestSetupFinalConsentDefaultsToCancel(t *testing.T) {
+	t.Setenv("GITCONTRIBUTE_ACCESSIBLE", "1")
+	var output bytes.Buffer
+	prompter := &huhSetupPrompter{input: strings.NewReader("1\n"), output: &output}
+	confirmed, err := prompter.Confirm(context.Background(), "Apply these changes?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if confirmed {
+		t.Fatalf("default confirmation applied changes: %q", output.String())
+	}
+}
+
 func TestSetupFieldsRenderAsSeparatePages(t *testing.T) {
 	selection := SetupSelection{}
 	request := SetupPromptRequest{
-		Questions: []SetupPromptQuestion{SetupQuestionInstall, SetupQuestionClients, SetupQuestionAuth},
+		Questions: []SetupPromptQuestion{SetupQuestionAccess, SetupQuestionClients, SetupQuestionAuth},
 		Discovery: SetupDiscovery{Clients: []SetupClientDiscovery{
 			{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true},
 		}},
@@ -67,32 +80,129 @@ func TestSetupFieldsRenderAsSeparatePages(t *testing.T) {
 	}
 }
 
-func TestSetupCopyDistinguishesNpxRunFromPersistentCommand(t *testing.T) {
+func TestSetupQuestionsSkipAccessModeWhenAnMCPClientWasExplicitlySelected(t *testing.T) {
+	t.Setenv("npm_command", "exec")
+	questions := setupQuestions(&setupCmd{}, []string{"codex"})
+	if containsSetupQuestion(questions, SetupQuestionAccess) {
+		t.Fatalf("questions = %v", questions)
+	}
+}
+
+func TestSetupQuestionsRespectExplicitAccessMode(t *testing.T) {
+	for _, test := range []struct {
+		mode        SetupMode
+		wantClients bool
+	}{
+		{mode: SetupModeMCP, wantClients: true},
+		{mode: SetupModeCLI, wantClients: false},
+		{mode: SetupModeBoth, wantClients: true},
+	} {
+		t.Run(string(test.mode), func(t *testing.T) {
+			mode := test.mode
+			questions := setupQuestions(&setupCmd{Mode: &mode}, nil)
+			if containsSetupQuestion(questions, SetupQuestionAccess) {
+				t.Fatalf("explicit mode prompted for access: %v", questions)
+			}
+			if got := containsSetupQuestion(questions, SetupQuestionClients); got != test.wantClients {
+				t.Fatalf("client question = %v, want %v; questions = %v", got, test.wantClients, questions)
+			}
+			if !containsSetupQuestion(questions, SetupQuestionAuth) {
+				t.Fatalf("questions = %v", questions)
+			}
+		})
+	}
+}
+
+func TestSetupOffersAccessModesInsteadOfPackageRunnerMechanics(t *testing.T) {
 	var output bytes.Buffer
 	t.Setenv("GITCONTRIBUTE_ACCESSIBLE", "1")
 	prompter := &huhSetupPrompter{input: strings.NewReader("2\n"), output: &output}
 	selection, err := prompter.Select(context.Background(), SetupPromptRequest{
-		Questions: []SetupPromptQuestion{SetupQuestionInstall},
+		Questions: []SetupPromptQuestion{SetupQuestionAccess},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"How do you want to run GitContribute?", "one-time run", "Install the gitcontribute command", "Keep using npx"} {
+	for _, want := range []string{"How do you want to use GitContribute?", "MCP", "CLI", "Both"} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("output %q does not contain %q", output.String(), want)
 		}
 	}
-	if selection.InstallCLI {
-		t.Fatal("Keep using npx did not clear InstallCLI")
+	if strings.Contains(output.String(), "Keep using npx") {
+		t.Fatalf("output exposes package-runner mechanics: %q", output.String())
+	}
+	if strings.Contains(output.String(), "Coding agents · MCP") || strings.Contains(output.String(), "Terminal app") {
+		t.Fatalf("output does not use the simple MCP / CLI / Both labels: %q", output.String())
+	}
+	if selection.Mode != SetupModeCLI {
+		t.Fatal("CLI did not select persistent installation")
+	}
+}
+
+func TestCLIAccessModeSkipsCodingAgentTargets(t *testing.T) {
+	var output bytes.Buffer
+	t.Setenv("GITCONTRIBUTE_ACCESSIBLE", "1")
+	prompter := &huhSetupPrompter{input: strings.NewReader("2\n4\n"), output: &output}
+	selection, err := prompter.Select(context.Background(), SetupPromptRequest{
+		Questions: []SetupPromptQuestion{SetupQuestionAccess, SetupQuestionClients, SetupQuestionAuth},
+		Discovery: SetupDiscovery{
+			ConfiguredTokenSource: "none",
+			Clients:               []SetupClientDiscovery{{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.Mode != SetupModeCLI || len(selection.Clients) != 0 || selection.TokenSource != "none" {
+		t.Fatalf("selection = %+v", selection)
+	}
+	if strings.Contains(output.String(), "/home/test/.codex/config.toml") {
+		t.Fatalf("CLI-only flow displayed MCP targets: %q", output.String())
+	}
+}
+
+func TestMCPAccessModeRequiresExplicitCodingAgentTarget(t *testing.T) {
+	var output bytes.Buffer
+	t.Setenv("GITCONTRIBUTE_ACCESSIBLE", "1")
+	prompter := &huhSetupPrompter{input: strings.NewReader("1\n0\n4\n"), output: &output}
+	_, err := prompter.Select(context.Background(), SetupPromptRequest{
+		Questions: []SetupPromptQuestion{SetupQuestionAccess, SetupQuestionClients, SetupQuestionAuth},
+		Discovery: SetupDiscovery{
+			ConfiguredTokenSource: "none",
+			Clients:               []SetupClientDiscovery{{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true}},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "select at least one coding agent") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestBothAccessModeSelectsCLIAndExplicitMCPClient(t *testing.T) {
+	var output bytes.Buffer
+	t.Setenv("GITCONTRIBUTE_ACCESSIBLE", "1")
+	prompter := &huhSetupPrompter{input: &oneByteReader{reader: strings.NewReader("3\n1\n0\n4\n")}, output: &output}
+	selection, err := prompter.Select(context.Background(), SetupPromptRequest{
+		Questions: []SetupPromptQuestion{SetupQuestionAccess, SetupQuestionClients, SetupQuestionAuth},
+		Discovery: SetupDiscovery{
+			ConfiguredTokenSource: "none",
+			Clients:               []SetupClientDiscovery{{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.Mode != SetupModeBoth || len(selection.Clients) != 1 || selection.Clients[0] != "codex" {
+		t.Fatalf("selection = %+v", selection)
 	}
 }
 
 func TestRenderSetupDiscoveryUsesEvidenceLanguage(t *testing.T) {
 	got := renderSetupDiscovery(SetupDiscovery{
+		Version:            "0.3.2",
 		GitHubCLIAvailable: true,
 		Clients:            []SetupClientDiscovery{{Name: "codex", Detected: true}},
-	})
-	for _, want := range []string{"Detected Codex, GitHub CLI", "Local inspection only", "no changes made"} {
+	}, true)
+	for _, want := range []string{"GitContribute setup · v0.3.2 · running with npx", "Detected Codex, GitHub CLI", "Local inspection only", "no changes made"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("summary %q does not contain %q", got, want)
 		}
@@ -107,6 +217,27 @@ func TestSetupClientLabelSurfacesDetectionRegistrationAndPath(t *testing.T) {
 		if !strings.Contains(label, want) {
 			t.Fatalf("label %q does not contain %q", label, want)
 		}
+	}
+}
+
+func TestSetupDetectionDoesNotSelectClientWithoutPriorIntent(t *testing.T) {
+	clients := []string{}
+	setupClientsField("Coding agents", SetupDiscovery{Clients: []SetupClientDiscovery{
+		{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true},
+	}}, &clients)
+	if len(clients) != 0 {
+		t.Fatalf("detected clients were selected without consent: %v", clients)
+	}
+}
+
+func TestExistingRegistrationEstablishesClientSelectionIntent(t *testing.T) {
+	clients := []string{}
+	setupClientsField("Coding agents", SetupDiscovery{Clients: []SetupClientDiscovery{
+		{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true, Registered: true},
+		{Name: "claude", Path: "/home/test/.claude.json", Detected: true},
+	}}, &clients)
+	if len(clients) != 1 || clients[0] != "codex" {
+		t.Fatalf("existing registration selection = %v", clients)
 	}
 }
 
@@ -221,69 +352,55 @@ func TestSetupProgressModelSettlesActiveWorkIntoResult(t *testing.T) {
 }
 
 func TestRenderSetupPlanIncludesEffectsAndSafetyBoundary(t *testing.T) {
-	report := &SetupReport{DryRun: true, Launcher: "npx gitcontribute@latest mcp", Authentication: &SetupAuthentication{Method: "gh-cli"}, Steps: []SetupStep{
-		{Name: "terminal", Status: "would install", Message: "npm install --global gitcontribute@0.2.2"},
+	report := &SetupReport{DryRun: true, MCPCommandPending: true, Authentication: &SetupAuthentication{Method: "gh-cli"}, Steps: []SetupStep{
+		{Name: "cli", Status: "would install", Message: "npm install --global gitcontribute@0.2.2"},
 		{Name: "codex", Status: "would configure", Path: "/home/test/.codex/config.toml"},
 	}}
 	got := renderSetupPlan(report)
 	for _, want := range []string{
-		"Setup plan", "Review these changes", "Terminal app", "Action: Install",
+		"Setup plan", "Review these changes", "CLI", "Action: Install",
 		"Command: npm install --global gitcontribute@0.2.2",
 		"Path: /home/test/.codex/config.toml",
-		"MCP launcher", "Fallback: npx gitcontribute@latest mcp",
-		"If installation succeeds, setup registers the verified global executable instead.",
+		"MCP command", "Resolved after the CLI installation succeeds",
 		"GitHub credentials", "Record: GitHub CLI credential helper", "will not be read or validated",
-		"Safety", "global npm install shown above", "will not contact GitHub",
+		"Process execution", "npm prefix --global", "git --version · local verification",
+		"Safety", "will not contact GitHub",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("plan %q does not contain %q", got, want)
 		}
 	}
-	if strings.Contains(got, "Command: npx gitcontribute@latest mcp") {
-		t.Fatalf("plan presents conditional npx fallback as the final launcher: %q", got)
+	if strings.Contains(got, "npx") {
+		t.Fatalf("plan presents npx as a persistent runtime: %q", got)
 	}
 }
 
-func TestRenderSetupPlanPresentsNpxAsLauncherWhenTerminalInstallIsNotSelected(t *testing.T) {
-	got := renderSetupPlan(&SetupReport{DryRun: true, Launcher: "npx gitcontribute@latest mcp", Steps: []SetupStep{
-		{Name: "terminal", Status: "not installed"},
+func TestRenderSetupPlanPresentsManagedRuntimeForMCPOnly(t *testing.T) {
+	got := renderSetupPlan(&SetupReport{DryRun: true, MCPCommand: &SetupMCPCommand{Command: "/home/test/.local/share/gitcontribute/bin/1.2.3/gitcontribute", Args: []string{"mcp", "serve", "--transport=stdio"}}, Steps: []SetupStep{
+		{Name: "mcp-runtime", Status: "would install", Path: "/home/test/.local/share/gitcontribute/bin/1.2.3/gitcontribute"},
 		{Name: "codex", Status: "would configure", Path: "/home/test/.codex/config.toml"},
 	}})
-	if !strings.Contains(got, "MCP launcher\n  Command: npx gitcontribute@latest mcp") {
-		t.Fatalf("npx launcher plan = %q", got)
+	if !strings.Contains(got, "Private MCP runtime") || !strings.Contains(got, "MCP command\n  Executable: /home/test/.local/share/gitcontribute/bin/1.2.3/gitcontribute\n  Arguments: mcp serve --transport=stdio") {
+		t.Fatalf("managed MCP plan = %q", got)
 	}
-	if strings.Contains(got, "Fallback:") || strings.Contains(got, "verified global executable") {
-		t.Fatalf("npx-only plan contains conditional install language: %q", got)
-	}
-}
-
-func TestRenderSetupPlanLabelsSkippedTerminalAsDetails(t *testing.T) {
-	got := renderSetupPlan(&SetupReport{DryRun: true, Steps: []SetupStep{{
-		Name: "terminal", Status: "not installed", Message: "MCP works through npx",
-	}}})
-	for _, want := range []string{"Action: Skip", "Details: MCP works through npx", "only makes the local changes"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("plan %q does not contain %q", got, want)
-		}
-	}
-	if strings.Contains(got, "Command: MCP works") {
-		t.Fatalf("plan labels explanatory text as a command: %q", got)
+	if strings.Contains(got, "npx") || strings.Contains(got, "Fallback:") {
+		t.Fatalf("managed MCP plan contains package-runner runtime language: %q", got)
 	}
 }
 
 func TestRenderSetupResultTailorsNextCommand(t *testing.T) {
 	report := &SetupReport{Authentication: &SetupAuthentication{Method: "gh-cli"}, Steps: []SetupStep{{Name: "codex", Status: "configured"}, {Name: "verification", Status: "verified"}}}
-	if got := renderSetupResult(report, SetupOptions{InstallCLI: true}, true); !strings.Contains(got, "Next\n  gitcontribute\n") || !strings.Contains(got, "Restart Codex") || !strings.Contains(got, "not read or validated") {
+	if got := renderSetupResult(report, SetupOptions{Mode: SetupModeBoth}); !strings.Contains(got, "Next\n  gitcontribute\n") || !strings.Contains(got, "Restart Codex") || !strings.Contains(got, "not read or validated") {
 		t.Fatalf("installed result = %q", got)
 	}
-	if got := renderSetupResult(report, SetupOptions{TokenSource: "none"}, false); !strings.Contains(got, "Next\n  npx gitcontribute@latest\n") {
-		t.Fatalf("npx result = %q", got)
+	if got := renderSetupResult(report, SetupOptions{TokenSource: "none"}); !strings.Contains(got, "Next\n  Use GitContribute from your coding agent.") || strings.Contains(got, "npx") {
+		t.Fatalf("MCP-only result = %q", got)
 	}
 }
 
 func TestRenderSetupResultOmitsAuthenticationWhenSelectionIsUnavailable(t *testing.T) {
 	report := &SetupReport{Steps: []SetupStep{{Name: "verification", Status: "verified"}}}
-	got := renderSetupResult(report, SetupOptions{SkipMCP: true}, true)
+	got := renderSetupResult(report, SetupOptions{Mode: SetupModeCLI})
 	if strings.Contains(got, "GitHub credentials") || strings.Contains(got, "Configure later") {
 		t.Fatalf("result makes an authentication claim without a selected source: %q", got)
 	}
@@ -298,11 +415,11 @@ func TestRenderSetupPlanNamesEnvironmentAuthenticationWithoutSecret(t *testing.T
 }
 
 func TestRenderSetupResultReportsPartialFailureTruthfully(t *testing.T) {
-	report := &SetupReport{Launcher: "npx gitcontribute@latest mcp", Steps: []SetupStep{
+	report := &SetupReport{MCPCommand: &SetupMCPCommand{Command: "/home/test/.local/share/gitcontribute/bin/1.2.3/gitcontribute", Args: []string{"mcp", "serve", "--transport=stdio"}}, Steps: []SetupStep{
 		{Name: "configuration", Status: "configured", Path: "/home/test/.config/gitcontribute/config.json"},
 		{Name: "codex", Status: "failed", Path: "/home/test/.codex/config.toml", Message: "invalid TOML"},
 	}}
-	got := renderSetupResult(report, SetupOptions{}, false)
+	got := renderSetupResult(report, SetupOptions{})
 	for _, want := range []string{
 		"Setup needs attention", "✓ Configuration — configured", "✗ Codex — failed",
 		"Path: /home/test/.codex/config.toml", "Details: invalid TOML", "Fix the failed steps",

@@ -96,8 +96,10 @@ func setupProgressSymbol(status string) string {
 
 func setupProgressAction(phase string) string {
 	switch phase {
-	case "terminal":
-		return "Installing terminal command"
+	case "cli":
+		return "Installing CLI"
+	case "mcp-runtime":
+		return "Installing private MCP runtime"
 	case "configuration":
 		return "Writing configuration"
 	case "corpus":

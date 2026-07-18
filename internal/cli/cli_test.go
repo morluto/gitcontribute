@@ -937,10 +937,10 @@ func TestUnknownCommand(t *testing.T) {
 }
 
 func TestSetupNonInteractiveJSON(t *testing.T) {
-	svc := &fakeService{setupResult: &cli.SetupReport{Operation: "setup", DryRun: true, Launcher: "npx ...", Steps: []cli.SetupStep{{Name: "codex", Status: "would configure"}}}}
+	svc := &fakeService{setupResult: &cli.SetupReport{Operation: "setup", DryRun: true, MCPCommand: &cli.SetupMCPCommand{Command: "/managed/gitcontribute", Args: []string{"mcp", "serve", "--transport=stdio"}}, Steps: []cli.SetupStep{{Name: "codex", Status: "would configure"}}}}
 	var out bytes.Buffer
 	c := cli.New(svc, &fakeMCPRunner{}, &out, io.Discard)
-	if err := c.Run(context.Background(), []string{"setup", "--codex", "--token-source", "none", "--dry-run", "--json"}); err != nil {
+	if err := c.Run(context.Background(), []string{"setup", "--mode", "mcp", "--codex", "--token-source", "none", "--dry-run", "--json"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(svc.lastSetup.Clients) != 1 || svc.lastSetup.Clients[0] != "codex" || !svc.lastSetup.DryRun {

@@ -4,9 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
@@ -24,8 +26,9 @@ func TestSetupInitializesAndRegistersWithoutNetwork(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer svc.Close()
+	packagedExecutable := writeTestExecutable(t, filepath.Join(home, "bin"))
 	report, err := svc.Setup(context.Background(), cli.SetupOptions{
-		Clients: []string{"codex", "claude"}, TokenSource: "none", Repository: "morluto/gitcontribute", Executable: filepath.Join(home, "bin", "gitcontribute"),
+		Mode: cli.SetupModeMCP, Clients: []string{"codex", "claude"}, TokenSource: "none", Repository: "morluto/gitcontribute", Executable: packagedExecutable,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +45,7 @@ func TestSetupInitializesAndRegistersWithoutNetwork(t *testing.T) {
 	if err != nil || len(sources.Sources) != 1 || sources.Sources[0].Name != "morluto-gitcontribute" {
 		t.Fatalf("sources=%+v err=%v", sources, err)
 	}
-	second, err := svc.Setup(context.Background(), cli.SetupOptions{Clients: []string{"codex", "claude"}, TokenSource: "none", Executable: filepath.Join(home, "bin", "gitcontribute")})
+	second, err := svc.Setup(context.Background(), cli.SetupOptions{Mode: cli.SetupModeMCP, Clients: []string{"codex", "claude"}, TokenSource: "none", Executable: packagedExecutable})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,6 +53,322 @@ func TestSetupInitializesAndRegistersWithoutNetwork(t *testing.T) {
 		if (step.Name == "codex" || step.Name == "claude") && step.Status != "already configured" {
 			t.Fatalf("step = %+v", step)
 		}
+	}
+}
+
+func TestSetupRemoveStillUnregistersSelectedMCPClientsWithoutAnAccessMode(t *testing.T) {
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"),
+		"XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	if _, err := svc.Setup(context.Background(), cli.SetupOptions{
+		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
+		Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := svc.Setup(context.Background(), cli.SetupOptions{Remove: true, Clients: []string{"codex"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.HasFailures() {
+		t.Fatalf("report = %+v", report)
+	}
+	configText, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(configText), "gitcontribute") {
+		t.Fatalf("MCP registration remains after remove: %s", configText)
+	}
+}
+
+func TestSetupMCPOnlyInstallsManagedBinaryAndRegistersItsAbsolutePath(t *testing.T) {
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"),
+		"XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+
+	source := filepath.Join(home, "npm-cache", "gitcontribute")
+	if runtime.GOOS == "windows" {
+		source += ".exe"
+	}
+	if err := os.MkdirAll(filepath.Dir(source), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("packaged-native-binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := svc.Setup(context.Background(), cli.SetupOptions{
+		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataDir, err := paths.DataDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binaryName := "gitcontribute"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	managed := filepath.Join(dataDir, "bin", "1.2.3", binaryName)
+	if report.MCPCommand == nil || report.MCPCommand.Command != managed || !slices.Equal(report.MCPCommand.Args, []string{"mcp", "serve", "--transport=stdio"}) {
+		t.Fatalf("MCP command = %+v", report.MCPCommand)
+	}
+	installed, err := os.ReadFile(managed)
+	if err != nil {
+		t.Fatalf("read managed binary: %v", err)
+	}
+	if string(installed) != "packaged-native-binary" {
+		t.Fatalf("managed binary = %q", installed)
+	}
+	foundRuntime := false
+	for _, step := range report.Steps {
+		if step.Name == "mcp-runtime" {
+			foundRuntime = step.Status == "installed" && step.Path == managed
+		}
+	}
+	if !foundRuntime {
+		t.Fatalf("report = %+v", report)
+	}
+}
+
+func TestSetupMCPOnlyKeepsDevelopmentRuntimeDistinctFromLatestRelease(t *testing.T) {
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"), "XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "dev", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+
+	report, err := svc.Setup(context.Background(), cli.SetupOptions{
+		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", DryRun: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSegment := string(filepath.Separator) + "bin" + string(filepath.Separator) + "dev" + string(filepath.Separator)
+	if report.MCPCommand == nil || !strings.Contains(report.MCPCommand.Command, wantSegment) || strings.Contains(report.MCPCommand.Command, string(filepath.Separator)+"latest"+string(filepath.Separator)) {
+		t.Fatalf("development MCP command = %+v", report.MCPCommand)
+	}
+}
+
+func TestSetupMCPOnlyReusesMatchingManagedBinary(t *testing.T) {
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"),
+		"XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+
+	source := filepath.Join(home, "npm-cache", "gitcontribute")
+	if runtime.GOOS == "windows" {
+		source += ".exe"
+	}
+	if err := os.MkdirAll(filepath.Dir(source), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("packaged-native-binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	opts := cli.SetupOptions{
+		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: source,
+	}
+	if _, err := svc.Setup(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	dataDir, err := paths.DataDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	binaryName := "gitcontribute"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	managed := filepath.Join(dataDir, "bin", "1.2.3", binaryName)
+	stableTime := time.Unix(1_700_000_000, 0)
+	if err := os.Chtimes(managed, stableTime, stableTime); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := svc.Setup(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(managed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(stableTime) {
+		t.Fatalf("matching managed binary was rewritten at %s", info.ModTime())
+	}
+	for _, step := range report.Steps {
+		if step.Name == "mcp-runtime" {
+			if step.Status != "already installed" {
+				t.Fatalf("runtime step = %+v", step)
+			}
+			return
+		}
+	}
+	t.Fatalf("runtime step missing: %+v", report)
+}
+
+func TestSetupBothRegistersTheInstalledCLIWithoutASecondRuntime(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test npm fixture uses a POSIX shell")
+	}
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"),
+		"XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+
+	prefix := filepath.Join(home, "npm-global")
+	installedCLI := filepath.Join(prefix, "bin", "gitcontribute")
+	if err := os.MkdirAll(filepath.Dir(installedCLI), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installedCLI, []byte("installed-cli"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fixtureBin := filepath.Join(home, "fixture-bin")
+	if err := os.MkdirAll(fixtureBin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	npm := filepath.Join(fixtureBin, "npm")
+	script := "#!/bin/sh\nif [ \"$1\" = install ]; then exit 0; fi\nif [ \"$1\" = prefix ]; then printf '%s\\n' \"$GITCONTRIBUTE_TEST_NPM_PREFIX\"; exit 0; fi\nexit 1\n"
+	if err := os.WriteFile(npm, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", fixtureBin)
+	t.Setenv("GITCONTRIBUTE_TEST_NPM_PREFIX", prefix)
+
+	report, err := svc.Setup(context.Background(), cli.SetupOptions{
+		Mode: cli.SetupModeBoth, Clients: []string{"codex"}, TokenSource: "none",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.MCPCommand == nil || report.MCPCommand.Command != installedCLI || !slices.Equal(report.MCPCommand.Args, []string{"mcp", "serve", "--transport=stdio"}) {
+		t.Fatalf("MCP command = %+v", report.MCPCommand)
+	}
+	for _, step := range report.Steps {
+		if step.Name == "mcp-runtime" {
+			t.Fatalf("Both installed a second MCP runtime: %+v", step)
+		}
+	}
+}
+
+func TestSetupBothDryRunDoesNotPresentTheBootstrapExecutableAsFinalMCPCommand(t *testing.T) {
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"),
+		"XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	t.Setenv("PATH", "")
+
+	report, err := svc.Setup(context.Background(), cli.SetupOptions{
+		Mode: cli.SetupModeBoth, Clients: []string{"codex"}, TokenSource: "none", DryRun: true,
+		Executable: "/temporary/npm-cache/gitcontribute",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.MCPCommand != nil || !report.MCPCommandPending {
+		t.Fatalf("dry-run MCP command = %+v pending=%v", report.MCPCommand, report.MCPCommandPending)
+	}
+}
+
+func TestSetupBothInstallationFailureLeavesNoPendingMCPCommandOrConfigWrites(t *testing.T) {
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"), "XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	t.Setenv("PATH", "")
+
+	report, err := svc.Setup(context.Background(), cli.SetupOptions{
+		Mode: cli.SetupModeBoth, Clients: []string{"codex"}, TokenSource: "none",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.HasFailures() || report.MCPCommandPending || report.MCPCommand != nil {
+		t.Fatalf("report = %+v", report)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "config.toml")); !os.IsNotExist(err) {
+		t.Fatalf("setup wrote agent configuration after CLI installation failure: %v", err)
+	}
+}
+
+func TestSetupStopsBeforeConfigurationWhenManagedRuntimeCannotBeInstalled(t *testing.T) {
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"),
+		"XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+
+	report, err := svc.Setup(context.Background(), cli.SetupOptions{
+		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
+		Executable: filepath.Join(home, "missing", "gitcontribute"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.HasFailures() {
+		t.Fatalf("report = %+v", report)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "config.toml")); !os.IsNotExist(err) {
+		t.Fatalf("setup wrote agent configuration after runtime failure: %v", err)
+	}
+	configPath, err := paths.ConfigFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		t.Fatalf("setup wrote application configuration after runtime failure: %v", err)
 	}
 }
 
@@ -61,7 +380,7 @@ func TestSetupDryRunWritesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer svc.Close()
-	report, err := svc.Setup(context.Background(), cli.SetupOptions{Clients: []string{"codex"}, TokenSource: "none", DryRun: true, Executable: "/bin/gitcontribute"})
+	report, err := svc.Setup(context.Background(), cli.SetupOptions{Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", DryRun: true, Executable: "/bin/gitcontribute"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,6 +389,29 @@ func TestSetupDryRunWritesNothing(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, ".codex", "config.toml")); !os.IsNotExist(err) {
 		t.Fatalf("dry run wrote client config: %v", err)
+	}
+}
+
+func TestSetupDoesNotInferClientMutationFromDetection(t *testing.T) {
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"), "XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+
+	_, err = svc.Setup(context.Background(), cli.SetupOptions{Mode: cli.SetupModeMCP, TokenSource: "none", Executable: "/bin/gitcontribute"})
+	if err == nil || !strings.Contains(err.Error(), "no coding-agent targets selected") {
+		t.Fatalf("error = %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(home, ".codex", "config.toml")); !os.IsNotExist(statErr) {
+		t.Fatalf("setup wrote detected client configuration: %v", statErr)
 	}
 }
 
@@ -87,8 +429,8 @@ func TestSetupVerificationDoesNotResolveCredentials(t *testing.T) {
 	defer svc.Close()
 
 	report, err := svc.Setup(context.Background(), cli.SetupOptions{
-		Clients: []string{"codex"}, TokenSource: "env", TokenSourceKey: "GITCONTRIBUTE_TEST_MISSING_TOKEN",
-		Executable: filepath.Join(home, "bin", "gitcontribute"),
+		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "env", TokenSourceKey: "GITCONTRIBUTE_TEST_MISSING_TOKEN",
+		Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +449,7 @@ func TestSetupVerificationDoesNotResolveCredentials(t *testing.T) {
 	t.Fatalf("verification step missing: %+v", report)
 }
 
-func TestSetupTerminalOnlyDryRunNeedsNoDetectedClientOrNPMProcess(t *testing.T) {
+func TestSetupCLIOnlyDryRunNeedsNoDetectedClientOrNPMProcess(t *testing.T) {
 	home := t.TempDir()
 	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
 		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"),
@@ -121,20 +463,19 @@ func TestSetupTerminalOnlyDryRunNeedsNoDetectedClientOrNPMProcess(t *testing.T) 
 	t.Setenv("PATH", "")
 
 	report, err := svc.Setup(context.Background(), cli.SetupOptions{
-		InstallCLI:  true,
-		SkipMCP:     true,
+		Mode:        cli.SetupModeCLI,
 		TokenSource: "none",
 		DryRun:      true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Launcher != "" {
-		t.Fatalf("launcher = %q", report.Launcher)
+	if report.MCPCommand != nil {
+		t.Fatalf("MCP command = %+v", report.MCPCommand)
 	}
 	foundTerminal := false
 	for _, step := range report.Steps {
-		if step.Name == "terminal" {
+		if step.Name == "cli" {
 			foundTerminal = step.Status == "would install" && strings.Contains(step.Message, "gitcontribute@1.2.3")
 		}
 	}
@@ -143,6 +484,24 @@ func TestSetupTerminalOnlyDryRunNeedsNoDetectedClientOrNPMProcess(t *testing.T) 
 	}
 	if _, err := os.Stat(filepath.Join(home, "config")); !os.IsNotExist(err) {
 		t.Fatalf("dry run wrote configuration: %v", err)
+	}
+}
+
+func TestSetupCLIRejectsMCPClientTargets(t *testing.T) {
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"), "XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	_, err = svc.Setup(context.Background(), cli.SetupOptions{
+		Mode: cli.SetupModeCLI, Clients: []string{"codex"}, TokenSource: "none", DryRun: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "CLI mode cannot configure MCP clients") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -165,7 +524,7 @@ func TestSetupRejectsRepositoryBeforeWriting(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer svc.Close()
-	_, err = svc.Setup(context.Background(), cli.SetupOptions{Clients: []string{"codex"}, TokenSource: "none", Repository: "not a repository", Executable: "/bin/gitcontribute"})
+	_, err = svc.Setup(context.Background(), cli.SetupOptions{Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Repository: "not a repository", Executable: "/bin/gitcontribute"})
 	if err == nil {
 		t.Fatal("setup accepted invalid repository")
 	}
@@ -235,7 +594,7 @@ func TestSetupWithProgressReportsRealApplicationPhases(t *testing.T) {
 	defer svc.Close()
 	observer := &recordingSetupObserver{}
 	report, err := svc.SetupWithProgress(context.Background(), cli.SetupOptions{
-		Clients: []string{"codex"}, TokenSource: "none", Executable: filepath.Join(home, "bin", "gitcontribute"),
+		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
 	}, observer)
 	if err != nil {
 		t.Fatal(err)
@@ -243,12 +602,12 @@ func TestSetupWithProgressReportsRealApplicationPhases(t *testing.T) {
 	if report.HasFailures() {
 		t.Fatalf("report = %+v", report)
 	}
-	for _, want := range []cli.SetupPhase{cli.SetupPhaseConfiguration, cli.SetupPhaseCorpus, cli.SetupPhaseClients, cli.SetupPhaseVerification} {
+	for _, want := range []cli.SetupPhase{cli.SetupPhaseMCPRuntime, cli.SetupPhaseConfiguration, cli.SetupPhaseCorpus, cli.SetupPhaseClients, cli.SetupPhaseVerification} {
 		if !slices.Contains(observer.started, want) {
 			t.Fatalf("started = %v, missing %q", observer.started, want)
 		}
 	}
-	for _, want := range []string{"configuration", "corpus", "codex", "verification"} {
+	for _, want := range []string{"mcp-runtime", "configuration", "corpus", "codex", "verification"} {
 		found := false
 		for _, step := range observer.completed {
 			found = found || step.Name == want
@@ -257,4 +616,20 @@ func TestSetupWithProgressReportsRealApplicationPhases(t *testing.T) {
 			t.Fatalf("completed = %+v, missing %q", observer.completed, want)
 		}
 	}
+}
+
+func writeTestExecutable(t *testing.T, dir string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	name := "gitcontribute"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("test-packaged-executable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
