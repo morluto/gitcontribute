@@ -47,6 +47,35 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	}
 }
 
+func TestDecodeJobJSONPreservesStructuredValues(t *testing.T) {
+	object, err := decodeJobJSON("request", `{"owner":"acme","limit":20}`)
+	if err != nil {
+		t.Fatalf("decode object: %v", err)
+	}
+	fields, ok := object.(map[string]any)
+	if !ok || fields["owner"] != "acme" || fields["limit"] != float64(20) {
+		t.Fatalf("decoded object = %#v", object)
+	}
+
+	array, err := decodeJobJSON("result", `["one","two"]`)
+	if err != nil {
+		t.Fatalf("decode array: %v", err)
+	}
+	items, ok := array.([]any)
+	if !ok || len(items) != 2 {
+		t.Fatalf("decoded array = %#v", array)
+	}
+
+	if _, err := decodeJobJSON("result", `{broken`); err == nil {
+		t.Fatal("invalid persisted job JSON was accepted")
+	}
+
+	empty, err := decodeJobJSON("result", "")
+	if err != nil || empty != nil {
+		t.Fatalf("decoded empty result = %#v, %v", empty, err)
+	}
+}
+
 func TestMCPReaderRepositorySearchDoesNotFallBackFromMissingExactRepository(t *testing.T) {
 	ctx := context.Background()
 	svc := newSearchTestService(t)

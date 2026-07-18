@@ -284,9 +284,9 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 		tools[tool.Name] = tool
 	}
 	for _, name := range []string{
-		"search", "get_repository", "get_thread", "get_dossier",
-		"search_code", "get_investigation", "list_opportunities", "get_opportunity", "get_evidence",
-		"get_readiness", "find_clusters", "get_coverage", "get_lens",
+		ToolGetRepository, ToolGetThread, ToolSearchCode, ToolGetInvestigation,
+		ToolListOpportunities, ToolGetOpportunity, ToolGetEvidence, ToolGetReadiness,
+		ToolFindClusters, ToolFindNeighbors, ToolGetCoverage, ToolGetLens,
 	} {
 		tool := tools[name]
 		if tool == nil {
@@ -296,7 +296,7 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 			t.Fatalf("tool %q annotations = %+v", name, tool.Annotations)
 		}
 	}
-	for _, name := range []string{"sync_repository", "hydrate_thread"} {
+	for _, name := range []string{ToolSyncRepository, ToolHydrateThread} {
 		tool := tools[name]
 		if tool == nil {
 			t.Fatalf("missing tool %q", name)
@@ -307,7 +307,7 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 	}
 
 	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "search", Arguments: map[string]any{"query": "stall"},
+		Name: ToolSearchThreads, Arguments: map[string]any{"query": "stall"},
 	})
 	if err != nil {
 		t.Fatalf("call search: %v", err)
@@ -337,15 +337,15 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 		args      map[string]any
 		wantTotal int
 	}{
-		{"search_code", map[string]any{"query": "main"}, 1},
-		{"get_investigation", map[string]any{"id": "inv-1"}, -1},
-		{"list_opportunities", map[string]any{"investigation_id": "inv-1"}, 1},
-		{"get_opportunity", map[string]any{"id": "opp-1"}, -1},
-		{"get_evidence", map[string]any{"investigation_id": "inv-1"}, 1},
-		{"get_readiness", map[string]any{"opportunity_id": "opp-1"}, -1},
-		{"find_clusters", map[string]any{"owner": "acme", "repo": "rocket"}, 1},
-		{"get_coverage", map[string]any{"owner": "acme", "repo": "rocket"}, -1},
-		{"get_lens", map[string]any{"name": "active-go"}, -1},
+		{ToolSearchCode, map[string]any{"query": "main"}, 1},
+		{ToolGetInvestigation, map[string]any{"id": "inv-1"}, -1},
+		{ToolListOpportunities, map[string]any{"investigation_id": "inv-1"}, 1},
+		{ToolGetOpportunity, map[string]any{"id": "opp-1"}, -1},
+		{ToolGetEvidence, map[string]any{"investigation_id": "inv-1"}, 1},
+		{ToolGetReadiness, map[string]any{"opportunity_id": "opp-1"}, -1},
+		{ToolFindClusters, map[string]any{"owner": "acme", "repo": "rocket"}, 1},
+		{ToolGetCoverage, map[string]any{"owner": "acme", "repo": "rocket"}, -1},
+		{ToolGetLens, map[string]any{"name": "active-go"}, -1},
 	}
 	for _, tt := range tests {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
@@ -365,7 +365,7 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 			t.Fatalf("marshal %s: %v", tt.name, err)
 		}
 		switch tt.name {
-		case "search_code":
+		case ToolSearchCode:
 			var out SearchCodeOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
@@ -373,7 +373,7 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 			if out.Total != tt.wantTotal || len(out.Matches) != tt.wantTotal {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case "get_investigation":
+		case ToolGetInvestigation:
 			var out InvestigationOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
@@ -381,7 +381,7 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 			if out.ID != "inv-1" {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case "list_opportunities":
+		case ToolListOpportunities:
 			var out ListOpportunitiesOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
@@ -389,7 +389,7 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 			if out.Total != tt.wantTotal || len(out.Opportunities) != tt.wantTotal {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case "get_opportunity":
+		case ToolGetOpportunity:
 			var out OpportunityOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
@@ -397,7 +397,7 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 			if out.ID != "opp-1" {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case "get_evidence":
+		case ToolGetEvidence:
 			var out EvidenceOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
@@ -405,7 +405,7 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 			if out.Total != tt.wantTotal || len(out.Evidence) != tt.wantTotal {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case "get_readiness":
+		case ToolGetReadiness:
 			var out ReadinessOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
@@ -413,7 +413,7 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 			if out.OpportunityID != "opp-1" || out.Status != "warn" || len(out.Checks) != 1 {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case "find_clusters":
+		case ToolFindClusters:
 			var out FindClustersOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
@@ -421,7 +421,7 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 			if out.Total != tt.wantTotal || len(out.Clusters) != tt.wantTotal {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case "get_coverage":
+		case ToolGetCoverage:
 			var out GetCoverageOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
@@ -429,7 +429,7 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 			if out.Owner != "acme" || out.Repo != "rocket" || len(out.Facets) == 0 {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case "get_lens":
+		case ToolGetLens:
 			var out LensOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
@@ -446,13 +446,13 @@ func TestExplicitOperationToolsReturnStructuredOutput(t *testing.T) {
 	defer closeSessions()
 
 	syncResult, err := client.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "sync_repository", Arguments: map[string]any{"owner": "acme", "repo": "rocket", "numbers": []int{1, 2}},
+		Name: ToolSyncRepository, Arguments: map[string]any{"owner": "acme", "repo": "rocket", "numbers": []int{1, 2}},
 	})
 	if err != nil || syncResult.IsError {
 		t.Fatalf("sync_repository: result=%+v err=%v", syncResult, err)
 	}
 	hydrateResult, err := client.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "hydrate_thread", Arguments: map[string]any{"owner": "acme", "repo": "rocket", "number": 7, "facets": []string{"issue_comments"}},
+		Name: ToolHydrateThread, Arguments: map[string]any{"owner": "acme", "repo": "rocket", "number": 7, "facets": []string{"issue_comments"}},
 	})
 	if err != nil || hydrateResult.IsError {
 		t.Fatalf("hydrate_thread: result=%+v err=%v", hydrateResult, err)
@@ -466,10 +466,10 @@ func TestReadOnlyToolsRejectAmbiguousOrUnboundedInputs(t *testing.T) {
 		name string
 		args map[string]any
 	}{
-		{"get_investigation", map[string]any{"id": "inv-1", "hypothesis_limit": 101}},
-		{"get_opportunity", map[string]any{"id": "opp-1", "evidence_limit": 101}},
-		{"get_evidence", map[string]any{"investigation_id": "inv-1", "opportunity_id": "opp-1"}},
-		{"get_evidence", map[string]any{}},
+		{ToolGetInvestigation, map[string]any{"id": "inv-1", "hypothesis_limit": 101}},
+		{ToolGetOpportunity, map[string]any{"id": "opp-1", "evidence_limit": 101}},
+		{ToolGetEvidence, map[string]any{"investigation_id": "inv-1", "opportunity_id": "opp-1"}},
+		{ToolGetEvidence, map[string]any{}},
 	}
 	for _, tt := range tests {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})
@@ -608,7 +608,7 @@ func TestToolCancellationReachesReader(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		_, err := client.CallTool(ctx, &mcp.CallToolParams{
-			Name: "search", Arguments: map[string]any{"query": "block"},
+			Name: ToolSearchThreads, Arguments: map[string]any{"query": "block"},
 		})
 		done <- err
 	}()
@@ -632,11 +632,11 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		"search_repositories", "search_threads", "get_repository_dossier", "explain_match", "get_job",
-		"get_readiness",
-		"start_crawl", "hydrate_repository", "build_repository_dossier", "create_workspace", "run_validation",
-		"start_investigation", "record_hypothesis", "check_duplicates", "check_collisions",
-		"promote_opportunity", "define_validation", "prepare_contribution", "cancel_job",
+		ToolSearchRepositories, ToolSearchThreads, ToolGetRepositoryDossier, ToolExplainMatch, ToolGetJob,
+		ToolGetReadiness, ToolStartCrawl, ToolHydrateRepository, ToolBuildRepositoryDossier,
+		ToolCreateWorkspace, ToolRunValidation, ToolStartInvestigation, ToolRecordHypothesis,
+		ToolCheckDuplicates, ToolCheckCollisions, ToolPromoteOpportunity, ToolDefineValidation,
+		ToolPrepareContribution, ToolCancelJob,
 	} {
 		if tools[name] == nil {
 			t.Fatalf("missing v1 tool %q", name)
@@ -647,12 +647,12 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		name string
 		args map[string]any
 	}{
-		{"search_repositories", map[string]any{"query": "rocket"}},
-		{"search_threads", map[string]any{"query": "stall"}},
-		{"get_repository_dossier", map[string]any{"owner": "acme", "repo": "rocket"}},
-		{"explain_match", map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 7}},
-		{"get_job", map[string]any{"id": "job-1"}},
-		{"get_readiness", map[string]any{"opportunity_id": "opp-1"}},
+		{ToolSearchRepositories, map[string]any{"query": "rocket"}},
+		{ToolSearchThreads, map[string]any{"query": "stall"}},
+		{ToolGetRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"}},
+		{ToolExplainMatch, map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 7}},
+		{ToolGetJob, map[string]any{"id": "job-1"}},
+		{ToolGetReadiness, map[string]any{"opportunity_id": "opp-1"}},
 	}
 	for _, tt := range readTests {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})
@@ -668,19 +668,19 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		name string
 		args map[string]any
 	}{
-		{"start_crawl", map[string]any{"source": "go", "since": "720h", "budget": 10}},
-		{"hydrate_repository", map[string]any{"owner": "acme", "repo": "rocket"}},
-		{"build_repository_dossier", map[string]any{"owner": "acme", "repo": "rocket"}},
-		{"create_workspace", map[string]any{"investigation_id": "inv-1", "remote": "https://github.com/acme/rocket.git", "base_ref": "main", "candidate_ref": "feature", "name": "ws-1"}},
-		{"run_validation", map[string]any{"id": "val-1", "kind": "base", "execute": true}},
-		{"start_investigation", map[string]any{"owner": "acme", "repo": "rocket"}},
-		{"record_hypothesis", map[string]any{"investigation_id": "inv-1", "title": "leak", "description": "memory leak", "category": "bug"}},
-		{"check_duplicates", map[string]any{"target": "hypothesis", "id": "hyp-1"}},
-		{"check_collisions", map[string]any{"target": "opportunity", "id": "opp-1"}},
-		{"promote_opportunity", map[string]any{"hypothesis_id": "hyp-1", "problem_statement": "leak", "scope": "small", "impact": "high", "expected_effort": "1h", "confidence": 0.8}},
-		{"define_validation", map[string]any{"investigation_id": "inv-1", "kind": "test", "command": "go test ./...", "working_dir": "."}},
-		{"prepare_contribution", map[string]any{"opportunity_id": "opp-1", "kind": "issue"}},
-		{"cancel_job", map[string]any{"id": "job-1"}},
+		{ToolStartCrawl, map[string]any{"source": "go", "since": "720h", "budget": 10}},
+		{ToolHydrateRepository, map[string]any{"owner": "acme", "repo": "rocket"}},
+		{ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"}},
+		{ToolCreateWorkspace, map[string]any{"investigation_id": "inv-1", "remote": "https://github.com/acme/rocket.git", "base_ref": "main", "candidate_ref": "feature", "name": "ws-1"}},
+		{ToolRunValidation, map[string]any{"id": "val-1", "kind": "base", "execute": true}},
+		{ToolStartInvestigation, map[string]any{"owner": "acme", "repo": "rocket"}},
+		{ToolRecordHypothesis, map[string]any{"investigation_id": "inv-1", "title": "leak", "description": "memory leak", "category": "bug"}},
+		{ToolCheckDuplicates, map[string]any{"target": "hypothesis", "id": "hyp-1"}},
+		{ToolCheckCollisions, map[string]any{"target": "opportunity", "id": "opp-1"}},
+		{ToolPromoteOpportunity, map[string]any{"hypothesis_id": "hyp-1", "problem_statement": "leak", "scope": "small", "impact": "high", "expected_effort": "1h", "confidence": 0.8}},
+		{ToolDefineValidation, map[string]any{"investigation_id": "inv-1", "kind": "test", "command": "go test ./...", "working_dir": "."}},
+		{ToolPrepareContribution, map[string]any{"opportunity_id": "opp-1", "kind": "issue"}},
+		{ToolCancelJob, map[string]any{"id": "job-1"}},
 	}
 	for _, tt := range writeTests {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})

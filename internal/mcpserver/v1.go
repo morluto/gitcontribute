@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -35,6 +36,7 @@ type SearchThreadsInput struct {
 	Query  string `json:"query" jsonschema:"Full-text query over thread titles and bodies"`
 	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
 	Repo   string `json:"repo,omitempty" jsonschema:"Optional repository name"`
+	Kind   string `json:"kind,omitempty" jsonschema:"Optional thread kind: issue or pull_request"`
 	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
 	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
 }
@@ -84,8 +86,8 @@ type GetJobOutput struct {
 	ID                    string `json:"id"`
 	Kind                  string `json:"kind"`
 	Status                string `json:"status"`
-	Request               string `json:"request,omitempty"`
-	Result                string `json:"result,omitempty"`
+	Request               any    `json:"request,omitempty"`
+	Result                any    `json:"result,omitempty"`
 	Error                 string `json:"error,omitempty"`
 	Progress              string `json:"progress,omitempty"`
 	Statistics            string `json:"statistics,omitempty"`
@@ -233,8 +235,8 @@ type DefineValidationInput struct {
 	BaseWorkingDir  string   `json:"base_working_dir,omitempty" jsonschema:"Base workspace directory"`
 	CandidateDir    string   `json:"candidate_dir,omitempty" jsonschema:"Candidate workspace directory"`
 	Env             []string `json:"env,omitempty" jsonschema:"Allowed environment variable names"`
-	Timeout         string   `json:"timeout,omitempty" jsonschema:"Go duration such as 30s"`
-	MaxOutputBytes  int64    `json:"max_output_bytes,omitempty" jsonschema:"Maximum captured output bytes"`
+	Timeout         string   `json:"timeout,omitempty" jsonschema:"Positive Go duration; defaults to 30m"`
+	MaxOutputBytes  int64    `json:"max_output_bytes,omitempty" jsonschema:"Maximum captured bytes per output stream; defaults to 65536"`
 }
 
 // ValidationOutput is the stable MCP representation of a validation definition.
@@ -279,167 +281,162 @@ type DraftOutput struct {
 type CancelJobInput GetJobInput
 
 func (s *Server) registerV1() {
-	readOnly := &mcp.ToolAnnotations{
-		Title:           "Read local GitContribute corpus",
-		ReadOnlyHint:    true,
-		IdempotentHint:  true,
-		OpenWorldHint:   boolPtr(false),
-		DestructiveHint: boolPtr(false),
-	}
-	networkWrite := &mcp.ToolAnnotations{
-		Title:           "Read GitHub and update the local corpus",
-		ReadOnlyHint:    false,
-		IdempotentHint:  false,
-		OpenWorldHint:   boolPtr(true),
-		DestructiveHint: boolPtr(false),
-	}
-	localWrite := &mcp.ToolAnnotations{
-		Title:           "Write to the local corpus",
-		ReadOnlyHint:    false,
-		IdempotentHint:  false,
-		OpenWorldHint:   boolPtr(false),
-		DestructiveHint: boolPtr(false),
-	}
-	validationOp := &mcp.ToolAnnotations{
-		Title:           "Execute a validation command in a workspace",
-		ReadOnlyHint:    false,
-		IdempotentHint:  false,
-		OpenWorldHint:   boolPtr(false),
-		DestructiveHint: boolPtr(true),
-	}
-	cancelOp := &mcp.ToolAnnotations{
-		Title:           "Cancel a durable job",
-		ReadOnlyHint:    false,
-		IdempotentHint:  true,
-		OpenWorldHint:   boolPtr(false),
-		DestructiveHint: boolPtr(false),
-	}
-
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "search_repositories",
-		Description: "Search the local repository index without network access",
-		Annotations: readOnly,
-	}, s.searchRepositories)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "search_threads",
-		Description: "Search the local issue and pull request index without network access",
-		Annotations: readOnly,
-	}, s.searchThreads)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "get_repository_dossier",
-		Description: "Read a source-backed repository dossier from the local corpus",
-		Annotations: readOnly,
-	}, s.getRepositoryDossier)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "explain_match",
-		Description: "Explain why a search result matched, including score signals, source revision, and coverage",
-		Annotations: readOnly,
-	}, s.explainMatch)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "get_job",
-		Description: "Read a durable job by ID",
-		Annotations: readOnly,
-	}, s.getJob)
-
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "start_crawl",
-		Description: "Start a durable crawl job that discovers repositories from a configured source",
-		Annotations: networkWrite,
-	}, s.startCrawl)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "hydrate_repository",
-		Description: "Start a durable job that hydrates selected facets for repository threads from GitHub",
-		Annotations: networkWrite,
-	}, s.hydrateRepository)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "build_repository_dossier",
-		Description: "Start a durable job that builds a source-backed repository dossier from the local corpus",
-		Annotations: &mcp.ToolAnnotations{
-			Title:           "Build a repository dossier",
-			ReadOnlyHint:    false,
-			IdempotentHint:  true,
-			OpenWorldHint:   boolPtr(false),
-			DestructiveHint: boolPtr(false),
-		},
-	}, s.buildRepositoryDossier)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "create_workspace",
-		Description: "Start a durable job that clones a remote and creates a managed worktree",
-		Annotations: networkWrite,
-	}, s.createWorkspace)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "run_validation",
-		Description: "Start a durable validation run that executes a stored command in a workspace",
-		Annotations: validationOp,
-	}, s.runValidation)
-
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "start_investigation",
-		Description: "Create a local investigation workspace",
-		Annotations: localWrite,
-	}, s.startInvestigation)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "record_hypothesis",
-		Description: "Record a hypothesis in an investigation",
-		Annotations: localWrite,
-	}, s.recordHypothesis)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "check_duplicates",
-		Description: "Find corpus threads that may duplicate a hypothesis or opportunity without network access",
-		Annotations: readOnly,
-	}, s.checkDuplicates)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "check_collisions",
-		Description: "Find open pull requests that may collide with a hypothesis or opportunity without network access",
-		Annotations: readOnly,
-	}, s.checkCollisions)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "promote_opportunity",
-		Description: "Promote a hypothesis to an opportunity",
-		Annotations: localWrite,
-	}, s.promoteOpportunity)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "define_validation",
-		Description: "Define a validation command for an investigation",
-		Annotations: localWrite,
-	}, s.defineValidation)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "prepare_contribution",
-		Description: "Render a contribution draft for an opportunity",
-		Annotations: localWrite,
-	}, s.prepareContribution)
-	mcp.AddTool(s.server, &mcp.Tool{
-		Name:        "cancel_job",
-		Description: "Cancel a durable job",
-		Annotations: cancelOp,
-	}, s.cancelJob)
+	readOnly := readOnlyAnnotations()
+	localWrite := localWriteAnnotations(false)
+	addCatalogTool(s.server, catalogTool[SearchRepositoriesInput, SearchRepositoriesOutput]{
+		name: ToolSearchRepositories, title: "Search stored repositories",
+		description: "Search local repository owner, name, and description fields, or list a specific repository when owner and repo are supplied together. Results are paginated and this tool never contacts GitHub.",
+		annotations: readOnly, input: inputSchema[SearchRepositoriesInput](func(schema *jsonschema.Schema) {
+			setRange(schema, "limit", 1, 100)
+			setDefault(schema, "limit", 20)
+			requireTogether(schema, "owner", "repo")
+		}), output: outputSchema[SearchRepositoriesOutput]("One page of stored repository matches."), handler: s.searchRepositories,
+	})
+	addCatalogTool(s.server, catalogTool[SearchThreadsInput, SearchOutput]{
+		name: ToolSearchThreads, title: "Search stored issues and pull requests",
+		description: "Search locally stored issue and pull-request titles and bodies, optionally restricted to one repository and thread kind. Use the returned cursor for the next page; this tool never contacts GitHub.",
+		annotations: readOnly, input: inputSchema[SearchThreadsInput](func(schema *jsonschema.Schema) {
+			setEnum(schema, "kind", "issue", "pull_request")
+			setRange(schema, "limit", 1, 100)
+			setDefault(schema, "limit", 20)
+			requireTogether(schema, "owner", "repo")
+		}), output: outputSchema[SearchOutput]("One page of stored issue and pull-request matches."), handler: s.searchThreads,
+	})
+	addCatalogTool(s.server, catalogTool[GetRepositoryDossierInput, DossierOutput]{
+		name: ToolGetRepositoryDossier, title: "Get repository dossier",
+		description: "Read the latest persisted source-backed dossier for one repository. Use " + ToolBuildRepositoryDossier + " only when the local dossier must be regenerated; this read never performs that write.",
+		annotations: readOnly, input: inputSchema[GetRepositoryDossierInput](noSchemaCustomization),
+		output: outputSchema[DossierOutput]("Persisted source-backed repository dossier."), handler: s.getRepositoryDossier,
+	})
+	addCatalogTool(s.server, catalogTool[ExplainMatchInput, ExplainMatchOutput]{
+		name: ToolExplainMatch, title: "Explain a stored search match",
+		description: "Explain why one repository, thread, or code result matched a prior local query, including score signals, source revision, and facet coverage. Supply the identity fields for the selected match; this tool is offline.",
+		annotations: readOnly, input: inputSchema[ExplainMatchInput](func(schema *jsonschema.Schema) {
+			setEnum(schema, "kind", "repo", "issue", "pull_request", "code")
+			setMinimum(schema, "number", 1)
+			setRange(schema, "limit", 1, 100)
+			setDefault(schema, "limit", 20)
+			requireWhen(schema, "kind", "issue", "number")
+			requireWhen(schema, "kind", "pull_request", "number")
+			requireWhen(schema, "kind", "code", "path", "commit")
+			forbidWhen(schema, "kind", "repo", "number", "path", "commit")
+			forbidWhen(schema, "kind", "issue", "path", "commit")
+			forbidWhen(schema, "kind", "pull_request", "path", "commit")
+			forbidWhen(schema, "kind", "code", "number")
+		}), output: outputSchema[ExplainMatchOutput]("Stored facts and score signals explaining one search match."), handler: s.explainMatch,
+	})
+	addCatalogTool(s.server, catalogTool[GetJobInput, GetJobOutput]{
+		name: ToolGetJob, title: "Get durable job",
+		description: "Read durable status, progress, request, result, and error information for one asynchronous GitContribute job. Poll this after a tool returns a job ID; reading the job has no side effects.",
+		annotations: readOnly, input: inputSchema[GetJobInput](noSchemaCustomization),
+		output: outputSchema[GetJobOutput]("Durable asynchronous job state and result."), handler: s.getJob,
+	})
+	addCatalogTool(s.server, catalogTool[StartCrawlInput, JobReference]{
+		name: ToolStartCrawl, title: "Start GitHub repository crawl",
+		description: "Start an asynchronous, bounded repository-discovery crawl from a configured source. This reads GitHub and writes observations to the local corpus; use " + ToolGetJob + " with the returned ID to monitor it.",
+		annotations: networkReadAnnotations(), input: inputSchema[StartCrawlInput](func(schema *jsonschema.Schema) {
+			setDefault(schema, "since", "720h")
+			setRange(schema, "budget", 1, 5000)
+			setDefault(schema, "budget", 100)
+		}), output: outputSchema[JobReference]("Reference to a newly queued durable crawl job."), handler: s.startCrawl,
+	})
+	addCatalogTool(s.server, catalogTool[HydrateRepositoryInput, JobReference]{
+		name: ToolHydrateRepository, title: "Hydrate repository threads from GitHub",
+		description: "Start an asynchronous GitHub read that hydrates selected facets across stored repository threads and atomically updates local snapshots. Restrict state or thread numbers when possible; an empty facets list selects all applicable facets.",
+		annotations: networkReadAnnotations(), input: inputSchema[HydrateRepositoryInput](func(schema *jsonschema.Schema) {
+			setArrayEnum(schema, "facets", "issue_comments", "pr_details", "pr_reviews", "pr_review_comments")
+			setRange(schema, "max_pages", 1, 100)
+			setDefault(schema, "max_pages", 50)
+			setEnum(schema, "state", "open", "closed", "all")
+			setDefault(schema, "state", "all")
+			setPositiveItems(schema, "numbers")
+		}), output: outputSchema[JobReference]("Reference to a newly queued repository hydration job."), handler: s.hydrateRepository,
+	})
+	addCatalogTool(s.server, catalogTool[BuildRepositoryDossierInput, JobReference]{
+		name: ToolBuildRepositoryDossier, title: "Build repository dossier",
+		description: "Start an asynchronous local job that rebuilds and persists a source-backed dossier from the existing corpus. It performs no network access; use " + ToolGetRepositoryDossier + " after the job succeeds.",
+		annotations: localWriteAnnotations(true), input: inputSchema[BuildRepositoryDossierInput](noSchemaCustomization),
+		output: outputSchema[JobReference]("Reference to a newly queued dossier build job."), handler: s.buildRepositoryDossier,
+	})
+	addCatalogTool(s.server, catalogTool[CreateWorkspaceInput, JobReference]{
+		name: ToolCreateWorkspace, title: "Create managed Git workspace",
+		description: "Start an asynchronous job that clones the specified remote and creates a managed worktree for an investigation. This performs network reads, Git process execution, filesystem writes, and local metadata writes, but never mutates GitHub.",
+		annotations: networkReadAnnotations(), input: inputSchema[CreateWorkspaceInput](noSchemaCustomization),
+		output: outputSchema[JobReference]("Reference to a newly queued workspace creation job."), handler: s.createWorkspace,
+	})
+	addCatalogTool(s.server, catalogTool[RunValidationInput, JobReference]{
+		name: ToolRunValidation, title: "Run stored validation command",
+		description: "Execute one stored shell-free validation command against its base or candidate workspace and persist the run asynchronously. This can modify the workspace or host through the authorized command and requires execute=true.",
+		annotations: executionAnnotations(), input: inputSchema[RunValidationInput](func(schema *jsonschema.Schema) {
+			setEnum(schema, "kind", "base", "candidate")
+			setConst(schema, "execute", true)
+		}), output: outputSchema[JobReference]("Reference to a newly queued validation execution job."), handler: s.runValidation,
+	})
+	addCatalogTool(s.server, catalogTool[StartInvestigationInput, InvestigationOutput]{
+		name: ToolStartInvestigation, title: "Start local investigation",
+		description: "Create and persist a local investigation for one stored repository revision. This does not create a Git worktree or contact GitHub; use " + ToolCreateWorkspace + " separately when filesystem work is authorized.",
+		annotations: localWrite, input: inputSchema[StartInvestigationInput](noSchemaCustomization),
+		output: outputSchema[InvestigationOutput]("Newly created local investigation."), handler: s.startInvestigation,
+	})
+	addCatalogTool(s.server, catalogTool[RecordHypothesisInput, HypothesisOutput]{
+		name: ToolRecordHypothesis, title: "Record investigation hypothesis",
+		description: "Persist a structured hypothesis and source references in an existing local investigation. Use this only after the problem is concrete enough to state expected or observed behavior; it performs no network access.",
+		annotations: localWrite, input: inputSchema[RecordHypothesisInput](func(schema *jsonschema.Schema) {
+			setEnum(schema, "category", "bug", "performance", "architecture", "testing", "documentation", "maintenance", "compatibility", "security", "other")
+		}), output: outputSchema[HypothesisOutput]("Newly recorded structured hypothesis."), handler: s.recordHypothesis,
+	})
+	addCatalogTool(s.server, catalogTool[CheckDuplicatesInput, CheckOutput]{
+		name: ToolCheckDuplicates, title: "Find issue and PR duplicates",
+		description: "Search the local thread corpus for issues or pull requests that may duplicate one hypothesis or opportunity. This records no evidence and performs no network access; refresh the corpus explicitly if coverage is stale.",
+		annotations: readOnly, input: inputSchema[CheckDuplicatesInput](func(schema *jsonschema.Schema) {
+			setEnum(schema, "target", "hypothesis", "opportunity")
+			setRange(schema, "limit", 1, 100)
+			setDefault(schema, "limit", 20)
+		}), output: outputSchema[CheckOutput]("Evidence-backed duplicate candidates from the local corpus."), handler: s.checkDuplicates,
+	})
+	addCatalogTool(s.server, catalogTool[CheckCollisionsInput, CheckOutput]{
+		name: ToolCheckCollisions, title: "Check open pull-request collisions",
+		description: "Search locally stored open pull requests for work that may collide with one hypothesis or opportunity. This is an offline advisory check and does not update collision status automatically.",
+		annotations: readOnly, input: inputSchema[CheckCollisionsInput](func(schema *jsonschema.Schema) {
+			setEnum(schema, "target", "hypothesis", "opportunity")
+			setRange(schema, "limit", 1, 100)
+			setDefault(schema, "limit", 20)
+		}), output: outputSchema[CheckOutput]("Evidence-backed open pull-request collision candidates."), handler: s.checkCollisions,
+	})
+	addCatalogTool(s.server, catalogTool[PromoteOpportunityInput, OpportunityOutput]{
+		name: ToolPromoteOpportunity, title: "Promote hypothesis to opportunity",
+		description: "Persist a scoped contribution opportunity from an existing hypothesis, including impact, effort, confidence, dependencies, and source references. This changes local workflow state but never contacts or mutates GitHub.",
+		annotations: localWrite, input: inputSchema[PromoteOpportunityInput](func(schema *jsonschema.Schema) {
+			setRange(schema, "confidence", 0, 1)
+		}), output: outputSchema[OpportunityOutput]("Newly promoted local contribution opportunity."), handler: s.promoteOpportunity,
+	})
+	addCatalogTool(s.server, catalogTool[DefineValidationInput, ValidationOutput]{
+		name: ToolDefineValidation, title: "Define validation command",
+		description: "Parse and persist a shell-free validation command, working directory, environment allowlist, timeout, and output bound for an investigation. This does not execute the command; use " + ToolRunValidation + " separately with explicit authorization.",
+		annotations: localWrite, input: inputSchema[DefineValidationInput](func(schema *jsonschema.Schema) {
+			setDefault(schema, "timeout", "30m")
+			setRange(schema, "max_output_bytes", 1, 64*1024*1024)
+			setDefault(schema, "max_output_bytes", 64*1024)
+		}), output: outputSchema[ValidationOutput]("Persisted validation definition."), handler: s.defineValidation,
+	})
+	addCatalogTool(s.server, catalogTool[PrepareContributionInput, DraftOutput]{
+		name: ToolPrepareContribution, title: "Prepare local contribution draft",
+		description: "Render and persist a local issue or pull-request draft from an opportunity and supplied evidence summaries. Pull-request drafts require explicit workspace_id, approach, and changes; this tool never inspects a workspace, runs Git, posts, or mutates GitHub.",
+		annotations: localWrite, input: inputSchema[PrepareContributionInput](func(schema *jsonschema.Schema) {
+			setEnum(schema, "kind", "issue", "pull_request")
+			requireWhen(schema, "kind", "pull_request", "workspace_id", "approach", "changes")
+			forbidWhen(schema, "kind", "issue", "workspace_id", "approach", "changes", "compatibility", "limitations", "linked_issue")
+			forbidWhen(schema, "kind", "pull_request", "success")
+		}), output: outputSchema[DraftOutput]("Newly rendered and persisted local contribution draft."), handler: s.prepareContribution,
+	})
+	addCatalogTool(s.server, catalogTool[CancelJobInput, GetJobOutput]{
+		name: ToolCancelJob, title: "Cancel durable job",
+		description: "Irreversibly request cancellation of one durable job and return its updated state. Queued jobs become cancelled immediately; running jobs are interrupted cooperatively. Repeating the same request has no additional effect.",
+		annotations: cancellationAnnotations(), input: inputSchema[CancelJobInput](noSchemaCustomization),
+		output: outputSchema[GetJobOutput]("Updated durable job state after cancellation."), handler: s.cancelJob,
+	})
 
 	s.registerV1ResourceTemplates()
-}
-
-func (s *Server) registerV1ResourceTemplates() {
-	templates := []struct {
-		template, name, description string
-	}{
-		{"github-index://repositories/{owner}/{repo}", "Repository", "Local repository record"},
-		{"github-index://threads/{owner}/{repo}/{number}", "Thread", "Local issue or pull request by number"},
-		{"github-index://dossiers/{owner}/{repo}", "Dossier", "Local source-backed repository dossier"},
-		{"github-index://investigations/{id}", "Investigation", "Local investigation workspace"},
-		{"github-index://opportunities/{id}", "Opportunity", "Local contribution opportunity"},
-		{"github-index://evidence/{investigation_id}", "Evidence", "Evidence for an investigation"},
-		{"github-index://readiness/{opportunity_id}", "Readiness", "Local contribution readiness report"},
-		{"github-index://workflows/contribution/{opportunity_id}", "Contribution workflow", "Safe contribution workflow links and prompts"},
-		{"github-index://lenses/{name}", "Lens", "Saved lens definition"},
-		{"github-index://jobs/{id}", "Job", "Durable job state"},
-	}
-	for _, t := range templates {
-		s.server.AddResourceTemplate(&mcp.ResourceTemplate{
-			URITemplate: t.template,
-			Name:        t.name,
-			Description: t.description,
-			MIMEType:    "application/json",
-		}, s.readResource)
-	}
 }
 
 func (s *Server) searchRepositories(ctx context.Context, _ *mcp.CallToolRequest, in SearchRepositoriesInput) (*mcp.CallToolResult, SearchRepositoriesOutput, error) {
@@ -469,10 +466,14 @@ func (s *Server) searchThreads(ctx context.Context, _ *mcp.CallToolRequest, in S
 	if (in.Owner == "") != (in.Repo == "") {
 		return nil, SearchOutput{}, errors.New("owner and repo must be provided together")
 	}
+	if in.Kind != "" && in.Kind != "issue" && in.Kind != "pull_request" {
+		return nil, SearchOutput{}, errors.New("kind must be issue or pull_request")
+	}
 	searchIn := SearchInput{
 		Query:  in.Query,
 		Owner:  in.Owner,
 		Repo:   in.Repo,
+		Kind:   in.Kind,
 		Limit:  in.Limit,
 		Cursor: in.Cursor,
 	}
@@ -742,6 +743,12 @@ func (s *Server) prepareContribution(ctx context.Context, _ *mcp.CallToolRequest
 	}
 	if in.Kind == "pull_request" && strings.TrimSpace(in.WorkspaceID) == "" {
 		return nil, DraftOutput{}, errors.New("workspace_id is required for pull_request drafts")
+	}
+	if in.Kind == "pull_request" && strings.TrimSpace(in.Approach) == "" {
+		return nil, DraftOutput{}, errors.New("approach is required for pull_request drafts")
+	}
+	if in.Kind == "pull_request" && strings.TrimSpace(in.Changes) == "" {
+		return nil, DraftOutput{}, errors.New("changes is required for pull_request drafts; inspect the workspace explicitly before preparing the draft")
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {
