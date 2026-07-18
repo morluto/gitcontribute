@@ -73,6 +73,40 @@ func TestSetupDryRunWritesNothing(t *testing.T) {
 	}
 }
 
+func TestSetupVerificationDoesNotResolveCredentials(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("GITCONTRIBUTE_TEST_MISSING_TOKEN", "")
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"),
+		"XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+
+	report, err := svc.Setup(context.Background(), cli.SetupOptions{
+		Clients: []string{"codex"}, TokenSource: "env", TokenSourceKey: "GITCONTRIBUTE_TEST_MISSING_TOKEN",
+		Executable: filepath.Join(home, "bin", "gitcontribute"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Authentication == nil || report.Authentication.Method != "env" || report.Authentication.Key != "GITCONTRIBUTE_TEST_MISSING_TOKEN" {
+		t.Fatalf("authentication report = %+v", report.Authentication)
+	}
+	for _, step := range report.Steps {
+		if step.Name == "verification" {
+			if step.Status != "verified" || strings.Contains(step.Message, "optional warning") {
+				t.Fatalf("verification resolved the missing credential: %+v", step)
+			}
+			return
+		}
+	}
+	t.Fatalf("verification step missing: %+v", report)
+}
+
 func TestSetupTerminalOnlyDryRunNeedsNoDetectedClientOrNPMProcess(t *testing.T) {
 	home := t.TempDir()
 	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{

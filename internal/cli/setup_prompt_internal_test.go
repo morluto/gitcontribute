@@ -27,20 +27,75 @@ func TestAccessibleModeAppliesToSetupKeyAndConfirmationForms(t *testing.T) {
 	if selection.TokenSource != "env" || selection.TokenSourceKey != "GH_CUSTOM" {
 		t.Fatalf("selection = %+v", selection)
 	}
-	for _, want := range []string{"GitHub authentication", "Environment variable name"} {
+	for _, want := range []string{"How should future GitHub syncs authenticate?", "Environment variable name"} {
 		if !strings.Contains(output.String(), want) {
 			t.Fatalf("accessible output %q does not contain %q", output.String(), want)
 		}
 	}
+	if strings.Contains(output.String(), "\x1b[") {
+		t.Fatalf("accessible output contains ANSI escapes: %q", output.String())
+	}
 
 	output.Reset()
-	prompter = &huhSetupPrompter{input: strings.NewReader("n\n"), output: &output}
+	prompter = &huhSetupPrompter{input: strings.NewReader("2\n"), output: &output}
 	confirmed, err := prompter.Confirm(context.Background(), "Apply these changes?")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if confirmed || !strings.Contains(output.String(), "Apply these changes?") {
 		t.Fatalf("confirmed=%v output=%q", confirmed, output.String())
+	}
+}
+
+func TestSetupFieldsRenderAsSeparatePages(t *testing.T) {
+	selection := SetupSelection{}
+	request := SetupPromptRequest{
+		Questions: []SetupPromptQuestion{SetupQuestionInstall, SetupQuestionClients, SetupQuestionAuth},
+		Discovery: SetupDiscovery{Clients: []SetupClientDiscovery{
+			{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true},
+		}},
+	}
+	fields := setupPromptFields(request, &selection)
+	groups := setupPromptGroups(fields)
+	if len(fields) != 3 || len(groups) != 3 {
+		t.Fatalf("fields=%d groups=%d, want one group for each of 3 stages", len(fields), len(groups))
+	}
+	for index, group := range groups {
+		if group == nil {
+			t.Fatalf("group %d is nil", index)
+		}
+	}
+}
+
+func TestSetupCopyDistinguishesNpxRunFromPersistentCommand(t *testing.T) {
+	var output bytes.Buffer
+	t.Setenv("GITCONTRIBUTE_ACCESSIBLE", "1")
+	prompter := &huhSetupPrompter{input: strings.NewReader("2\n"), output: &output}
+	selection, err := prompter.Select(context.Background(), SetupPromptRequest{
+		Questions: []SetupPromptQuestion{SetupQuestionInstall},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"How do you want to run GitContribute?", "one-time run", "Install the gitcontribute command", "Keep using npx"} {
+		if !strings.Contains(output.String(), want) {
+			t.Fatalf("output %q does not contain %q", output.String(), want)
+		}
+	}
+	if selection.InstallCLI {
+		t.Fatal("Keep using npx did not clear InstallCLI")
+	}
+}
+
+func TestRenderSetupDiscoveryUsesEvidenceLanguage(t *testing.T) {
+	got := renderSetupDiscovery(SetupDiscovery{
+		GitHubCLIAvailable: true,
+		Clients:            []SetupClientDiscovery{{Name: "codex", Detected: true}},
+	})
+	for _, want := range []string{"Detected Codex, GitHub CLI", "Local inspection only", "no changes made"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("summary %q does not contain %q", got, want)
+		}
 	}
 }
 
@@ -125,7 +180,7 @@ func TestSetupProgressModelKeepsCompletedLinesInOrder(t *testing.T) {
 		model = updated.(setupProgressModel)
 	}
 	view := model.View()
-	wants := []string{"Configuration  configured", "Local corpus  initialized", "Verification  verified"}
+	wants := []string{"✓ Configuration — configured", "✓ Local corpus — initialized", "✓ Verification — verified"}
 	last := -1
 	for _, want := range wants {
 		index := strings.Index(view, want)
@@ -139,25 +194,126 @@ func TestSetupProgressModelKeepsCompletedLinesInOrder(t *testing.T) {
 	}
 }
 
+func TestSetupProgressIsDisabledForDryRunAndAccessibleMode(t *testing.T) {
+	if setupProgressAnimationAllowed(SetupOptions{DryRun: true}) {
+		t.Fatal("dry-run unexpectedly enabled animated progress")
+	}
+	t.Setenv("GITCONTRIBUTE_ACCESSIBLE", "1")
+	if setupProgressAnimationAllowed(SetupOptions{}) {
+		t.Fatal("accessible mode unexpectedly enabled animated progress")
+	}
+}
+
+func TestSetupProgressModelSettlesActiveWorkIntoResult(t *testing.T) {
+	model := newSetupProgressModel()
+	updated, _ := model.Update(setupStartedMsg(SetupPhaseClients))
+	model = updated.(setupProgressModel)
+	if got := model.View(); !strings.Contains(got, "Configuring coding agents…") {
+		t.Fatalf("active progress = %q", got)
+	}
+
+	updated, _ = model.Update(setupCompletedMsg(SetupStep{Name: "codex", Status: "configured"}))
+	model = updated.(setupProgressModel)
+	got := model.View()
+	if got != "✓ Codex — configured" || strings.Contains(got, "Configuring coding agents") {
+		t.Fatalf("settled progress = %q", got)
+	}
+}
+
 func TestRenderSetupPlanIncludesEffectsAndSafetyBoundary(t *testing.T) {
-	report := &SetupReport{DryRun: true, Steps: []SetupStep{
+	report := &SetupReport{DryRun: true, Launcher: "npx gitcontribute@latest mcp", Authentication: &SetupAuthentication{Method: "gh-cli"}, Steps: []SetupStep{
 		{Name: "terminal", Status: "would install", Message: "npm install --global gitcontribute@0.2.2"},
 		{Name: "codex", Status: "would configure", Path: "/home/test/.codex/config.toml"},
 	}}
 	got := renderSetupPlan(report)
-	for _, want := range []string{"Setup plan", "Terminal app", "gitcontribute@0.2.2", "/home/test/.codex/config.toml", "will not contact GitHub"} {
+	for _, want := range []string{
+		"Setup plan", "Review these changes", "Terminal app", "Action: Install",
+		"Command: npm install --global gitcontribute@0.2.2",
+		"Path: /home/test/.codex/config.toml",
+		"MCP launcher", "Fallback: npx gitcontribute@latest mcp",
+		"If installation succeeds, setup registers the verified global executable instead.",
+		"GitHub credentials", "Record: GitHub CLI credential helper", "will not be read or validated",
+		"Safety", "global npm install shown above", "will not contact GitHub",
+	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("plan %q does not contain %q", got, want)
 		}
 	}
+	if strings.Contains(got, "Command: npx gitcontribute@latest mcp") {
+		t.Fatalf("plan presents conditional npx fallback as the final launcher: %q", got)
+	}
+}
+
+func TestRenderSetupPlanPresentsNpxAsLauncherWhenTerminalInstallIsNotSelected(t *testing.T) {
+	got := renderSetupPlan(&SetupReport{DryRun: true, Launcher: "npx gitcontribute@latest mcp", Steps: []SetupStep{
+		{Name: "terminal", Status: "not installed"},
+		{Name: "codex", Status: "would configure", Path: "/home/test/.codex/config.toml"},
+	}})
+	if !strings.Contains(got, "MCP launcher\n  Command: npx gitcontribute@latest mcp") {
+		t.Fatalf("npx launcher plan = %q", got)
+	}
+	if strings.Contains(got, "Fallback:") || strings.Contains(got, "verified global executable") {
+		t.Fatalf("npx-only plan contains conditional install language: %q", got)
+	}
+}
+
+func TestRenderSetupPlanLabelsSkippedTerminalAsDetails(t *testing.T) {
+	got := renderSetupPlan(&SetupReport{DryRun: true, Steps: []SetupStep{{
+		Name: "terminal", Status: "not installed", Message: "MCP works through npx",
+	}}})
+	for _, want := range []string{"Action: Skip", "Details: MCP works through npx", "only makes the local changes"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("plan %q does not contain %q", got, want)
+		}
+	}
+	if strings.Contains(got, "Command: MCP works") {
+		t.Fatalf("plan labels explanatory text as a command: %q", got)
+	}
 }
 
 func TestRenderSetupResultTailorsNextCommand(t *testing.T) {
-	report := &SetupReport{Steps: []SetupStep{{Name: "verification", Status: "verified"}}}
-	if got := renderSetupResult(report, SetupOptions{InstallCLI: true, SkipMCP: true}, true); !strings.Contains(got, "gitcontribute tui") {
+	report := &SetupReport{Authentication: &SetupAuthentication{Method: "gh-cli"}, Steps: []SetupStep{{Name: "codex", Status: "configured"}, {Name: "verification", Status: "verified"}}}
+	if got := renderSetupResult(report, SetupOptions{InstallCLI: true}, true); !strings.Contains(got, "Next\n  gitcontribute\n") || !strings.Contains(got, "Restart Codex") || !strings.Contains(got, "not read or validated") {
 		t.Fatalf("installed result = %q", got)
 	}
-	if got := renderSetupResult(report, SetupOptions{SkipMCP: true}, false); !strings.Contains(got, "npx gitcontribute@latest tui") {
+	if got := renderSetupResult(report, SetupOptions{TokenSource: "none"}, false); !strings.Contains(got, "Next\n  npx gitcontribute@latest\n") {
 		t.Fatalf("npx result = %q", got)
+	}
+}
+
+func TestRenderSetupResultOmitsAuthenticationWhenSelectionIsUnavailable(t *testing.T) {
+	report := &SetupReport{Steps: []SetupStep{{Name: "verification", Status: "verified"}}}
+	got := renderSetupResult(report, SetupOptions{SkipMCP: true}, true)
+	if strings.Contains(got, "GitHub credentials") || strings.Contains(got, "Configure later") {
+		t.Fatalf("result makes an authentication claim without a selected source: %q", got)
+	}
+}
+
+func TestRenderSetupPlanNamesEnvironmentAuthenticationWithoutSecret(t *testing.T) {
+	report := &SetupReport{DryRun: true, Authentication: &SetupAuthentication{Method: "env", Key: "GH_CUSTOM"}}
+	got := renderSetupPlan(report)
+	if !strings.Contains(got, "Record: Environment variable GH_CUSTOM") || !strings.Contains(got, "will not be read or validated") {
+		t.Fatalf("environment authentication plan = %q", got)
+	}
+}
+
+func TestRenderSetupResultReportsPartialFailureTruthfully(t *testing.T) {
+	report := &SetupReport{Launcher: "npx gitcontribute@latest mcp", Steps: []SetupStep{
+		{Name: "configuration", Status: "configured", Path: "/home/test/.config/gitcontribute/config.json"},
+		{Name: "codex", Status: "failed", Path: "/home/test/.codex/config.toml", Message: "invalid TOML"},
+	}}
+	got := renderSetupResult(report, SetupOptions{}, false)
+	for _, want := range []string{
+		"Setup needs attention", "✓ Configuration — configured", "✗ Codex — failed",
+		"Path: /home/test/.codex/config.toml", "Details: invalid TOML", "Fix the failed steps",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("partial result %q does not contain %q", got, want)
+		}
+	}
+	for _, unwanted := range []string{"GitContribute is ready", "\nNext\n", "Restart configured"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("partial result %q contains misleading %q", got, unwanted)
+		}
 	}
 }

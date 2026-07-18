@@ -178,6 +178,14 @@ func (s *Service) ControlStatus(ctx context.Context) (*cli.ControlStatusResult, 
 // Doctor performs bounded local diagnostics. It reports authentication source
 // availability but never returns credential values or command output.
 func (s *Service) Doctor(ctx context.Context) (*cli.DoctorResult, error) {
+	return s.doctor(ctx, true)
+}
+
+// doctor optionally verifies credentials. Setup uses the local-only mode so
+// its post-apply checks cannot read environment secrets, invoke gh auth token,
+// or trigger a keyring access prompt. The explicit doctor command retains the
+// credential check.
+func (s *Service) doctor(ctx context.Context, verifyCredentials bool) (*cli.DoctorResult, error) {
 	checks := make([]cli.DoctorCheck, 0, 9)
 	add := func(name string, required bool, err error, success string) {
 		check := cli.DoctorCheck{Name: name, Required: required, Status: "ok", Message: success}
@@ -213,12 +221,16 @@ func (s *Service) Doctor(ctx context.Context) (*cli.DoctorResult, error) {
 	add("git", true, gitErr, "Git is available")
 
 	var authErr error
+	authSuccess := "GitHub authentication source is configured; credentials were not read"
 	if cfg == nil {
 		authErr = errors.New("authentication source unavailable because configuration is invalid")
-	} else {
+	} else if cfg.TokenSource.Method == "none" && verifyCredentials {
+		authErr = errors.New("no GitHub authentication source configured; public reads remain available")
+	} else if verifyCredentials {
 		authErr = checkAuthSource(ctx, cfg, tokenSource(cfg))
+		authSuccess = "GitHub authentication source is available"
 	}
-	add("github_auth", false, authErr, "GitHub authentication source is available")
+	add("github_auth", false, authErr, authSuccess)
 
 	add("rg", false, lookPathError("rg"), "ripgrep is available")
 

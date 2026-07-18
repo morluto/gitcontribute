@@ -2,6 +2,10 @@ package cli_test
 
 import (
 	"context"
+	"errors"
+	"io"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/cli"
@@ -131,6 +135,71 @@ func TestTUICommandDispatch(t *testing.T) {
 	requireNoErr(t, c.Run(context.Background(), []string{"tui", "owner/repo", "--json"}))
 	if !runner.called || runner.opts.Repo.String() != "owner/repo" || !runner.opts.JSON {
 		t.Fatalf("runner state: called=%v opts=%+v", runner.called, runner.opts)
+	}
+}
+
+func TestBareInvocationDispatchesTUI(t *testing.T) {
+	runner := &fakeTUIRunner{}
+	c, _, _ := newTestCLI(&fakeService{}, nil)
+	c.SetInput(strings.NewReader(""))
+	c.SetTUIRunner(runner)
+
+	requireNoErr(t, c.Run(context.Background(), nil))
+	if !runner.called || runner.opts.Repo.Owner != "" || runner.opts.Repo.Repo != "" || runner.opts.JSON {
+		t.Fatalf("runner state: called=%v opts=%+v", runner.called, runner.opts)
+	}
+}
+
+func TestBareInvocationWithoutTerminalReturnsConciseUsageError(t *testing.T) {
+	input, output, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create input pipe: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = input.Close()
+		_ = output.Close()
+	})
+
+	runner := &fakeTUIRunner{}
+	c, _, _ := newTestCLI(&fakeService{}, nil)
+	c.SetInput(input)
+	c.SetTUIRunner(runner)
+
+	err = c.Run(context.Background(), nil)
+	var cliErr *cli.CLIError
+	if !errors.As(err, &cliErr) || cliErr.Code != cli.ExitUsage {
+		t.Fatalf("expected usage error, got %T: %v", err, err)
+	}
+	if got := cliErr.Error(); got != "interactive interface requires a terminal; run gitcontribute --help for commands" {
+		t.Fatalf("error = %q", got)
+	}
+	if runner.called {
+		t.Fatal("TUI runner called without an interactive terminal")
+	}
+}
+
+func TestBareInvocationRequiresInteractiveOutput(t *testing.T) {
+	outputReader, outputWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create output pipe: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = outputReader.Close()
+		_ = outputWriter.Close()
+	})
+
+	runner := &fakeTUIRunner{}
+	c := cli.New(&fakeService{}, nil, outputWriter, io.Discard)
+	c.SetInput(strings.NewReader(""))
+	c.SetTUIRunner(runner)
+
+	err = c.Run(context.Background(), nil)
+	var cliErr *cli.CLIError
+	if !errors.As(err, &cliErr) || cliErr.Code != cli.ExitUsage {
+		t.Fatalf("expected usage error, got %T: %v", err, err)
+	}
+	if runner.called {
+		t.Fatal("TUI runner called with non-interactive output")
 	}
 }
 

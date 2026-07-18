@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -167,7 +168,7 @@ func (c *CLI) executeSetup(ctx context.Context, opts SetupOptions, jsonOutput bo
 		return err
 	}
 	var report *SetupReport
-	if !jsonOutput && interactiveWriter(c.stderr) {
+	if !jsonOutput && setupProgressEnabled(opts, c.stderr) {
 		progress := startSetupProgress(c.stderr)
 		report, err = service.SetupWithProgress(ctx, opts, progress)
 		progressErr := progress.Close()
@@ -203,6 +204,17 @@ func (c *CLI) executeSetup(ctx context.Context, opts SetupOptions, jsonOutput bo
 		return NewCLIError(ExitGeneral, errors.New("one or more setup steps failed"))
 	}
 	return nil
+}
+
+func setupProgressEnabled(opts SetupOptions, output io.Writer) bool {
+	return setupProgressAnimationAllowed(opts) && interactiveWriter(output)
+}
+
+func setupProgressAnimationAllowed(opts SetupOptions) bool {
+	if opts.DryRun || os.Getenv("GITCONTRIBUTE_ACCESSIBLE") != "" || os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	return true
 }
 
 func setupHuman(report *SetupReport) string {

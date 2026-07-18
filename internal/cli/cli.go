@@ -660,6 +660,9 @@ type tuiCmd struct {
 // method. It respects context cancellation.
 func (c *CLI) Run(ctx context.Context, args []string) error {
 	args = normalizeCompatibilityArgs(args)
+	if len(args) == 0 {
+		return c.runDefault(ctx)
+	}
 	var cli rootCmd
 	parser, err := kong.New(&cli,
 		kong.Name("gitcontribute"),
@@ -871,15 +874,6 @@ func (c *CLI) runRemoveCommand(ctx context.Context, cmd *removeCmd) error {
 		}
 	}
 	return c.executeSetup(ctx, SetupOptions{Remove: true, Clients: clients, AllClients: all, DryRun: cmd.DryRun}, cmd.JSON)
-}
-
-func (c *CLI) interactiveInput() bool {
-	file, ok := c.stdin.(*os.File)
-	if !ok {
-		return true
-	}
-	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func selectedSetupClients(codex, claude bool) []string {
