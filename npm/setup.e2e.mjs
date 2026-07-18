@@ -30,30 +30,46 @@ function runScriptPTY(command, input, env) {
     );
     let stdout = "";
     let stderr = "";
-    let interruptScheduled = false;
-    let interrupt;
-    const scheduleInterrupt = () => {
-      if (interruptScheduled || !`${stdout}\n${stderr}`.includes("future GitHub syncs authenticate?")) return;
-      interruptScheduled = true;
-      interrupt = setTimeout(() => {
-        if (child.exitCode === null) child.stdin.write("\x03");
+    let stageOutput = "";
+    let stage = 0;
+    let keyScheduled = false;
+    let keyTimer;
+    const interactions = [
+      ["How do you want to use GitContribute?", "\r"],
+      ["Which coding agents should GitContribute configure?", "\x1b[Z"],
+      ["How do you want to use GitContribute?", "\x1b[B\r"],
+      ["future GitHub syncs authenticate?", "\x03"],
+    ];
+    const advance = () => {
+      if (keyScheduled || stage >= interactions.length) return;
+      const [prompt, keys] = interactions[stage];
+      if (!stageOutput.includes(prompt)) return;
+      keyScheduled = true;
+      stageOutput = "";
+      keyTimer = setTimeout(() => {
+        if (child.exitCode === null) child.stdin.write(keys);
+        stage += 1;
+        keyScheduled = false;
+        advance();
       }, 100);
     };
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
       stdout += chunk;
-      scheduleInterrupt();
+      stageOutput += chunk;
+      advance();
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
-      scheduleInterrupt();
+      stageOutput += chunk;
+      advance();
     });
     child.on("error", reject);
     const timeout = setTimeout(() => child.kill("SIGKILL"), 20_000);
     child.on("close", (status) => {
       clearTimeout(timeout);
-      clearTimeout(interrupt);
+      clearTimeout(keyTimer);
       resolve({ status, stdout, stderr });
     });
     child.stdin.write(input);
@@ -222,7 +238,7 @@ test(
       const home = join(workspace, "home");
       await mkdir(join(home, ".codex"), { recursive: true });
       const command = join(runner, "node_modules", ".bin", "gitcontribute");
-      const input = "\x1b]11;rgb:0000/0000/0000\x07\x1b[1;1R\r\x1b[Z\x1b[B\r";
+      const input = "\x1b]11;rgb:0000/0000/0000\x07\x1b[1;1R";
       const env = {
         ...process.env,
         HOME: home,
