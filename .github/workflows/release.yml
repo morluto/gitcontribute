@@ -132,7 +132,7 @@ jobs:
           test -n "$tarball"
           test "$(stat -c %s "$tarball")" -le 100000000
           sha256sum "$tarball" | sed 's#  dist/#  #' > dist/npm-SHA256SUMS
-          npm install --prefix "$RUNNER_TEMP/npm-smoke" --ignore-scripts --no-audit --no-fund "$tarball"
+          npm install --prefix "$RUNNER_TEMP/npm-smoke" --ignore-scripts --no-audit --no-fund "$(realpath "$tarball")"
           "$RUNNER_TEMP/npm-smoke/node_modules/.bin/gitcontribute" metadata --json
       - name: Publish npm package
         run: npm publish --provenance --access public
