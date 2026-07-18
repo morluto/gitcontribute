@@ -6,25 +6,20 @@ The primary installation and onboarding entry point is:
 npx gitcontribute setup
 ```
 
-On a clean machine, npx resolves npm's current `latest` release. Use
-`npx gitcontribute@latest setup` to force the current registry release when an
-older local or global command may already exist.
+The wizard identifies the resolved GitContribute version before any choice.
 
-The interactive wizard treats terminal and agent access as independent
-capabilities. It offers to install a persistent `gitcontribute` command for the
-CLI and TUI, then separately asks which MCP clients to configure. Terminal
-installation is explicit: interactive users approve it in the setup plan, and
-non-interactive callers must pass `--install-cli`.
+The interactive wizard presents three access modes: MCP, CLI, or Both.
+Non-interactive callers select the same product choice with `--mode`.
 
 ```sh
-# Terminal app and Codex MCP
-npx gitcontribute setup --install-cli --codex --yes
+# Both: CLI and Codex MCP
+npx gitcontribute setup --mode both --codex --token-source none --yes
 
-# Terminal app without MCP
-npx gitcontribute setup --install-cli --no-mcp --yes
+# CLI only
+npx gitcontribute setup --mode cli --token-source none --yes
 
-# MCP without a persistent terminal command
-npx gitcontribute setup --codex --yes
+# MCP only; private runtime without a global command
+npx gitcontribute setup --mode mcp --codex --token-source none --yes
 ```
 
 GitContribute remains a native Go application. The `gitcontribute` npm package
@@ -35,13 +30,14 @@ time and forwards standard streams, arguments, signals, and its exit status.
 
 ## Setup contract
 
-Setup is a local capability. It may create the GitContribute configuration and
+Setup is a local operation. It may create the GitContribute configuration and
 corpus, register the MCP server with selected coding clients, and add an
 explicit repository source. It does not synchronize a repository, access
 GitHub, execute repository-controlled code, or mutate GitHub.
 
-Terminal installation is a separate, explicitly selected package-manager
-capability. The client-registration engine plans and applies only
+Global CLI installation is an explicitly selected package-manager effect in
+CLI and Both modes. MCP mode instead installs a versioned private runtime
+through a local file copy. The client-registration engine plans and applies only
 GitContribute-owned entries:
 
 - `[mcp_servers.gitcontribute]` in Codex TOML configuration;
@@ -56,18 +52,17 @@ and `--json` exposes per-step results for automation.
 
 Interactive setup follows an explicit sequence:
 
-1. When bootstrapped through npx, visually select whether to install the
-   terminal app. Installation is selected by default but still requires final
-   confirmation.
-2. Show supported MCP clients in a multi-select. Detected clients are
-   preselected, existing registration state and exact configuration paths are
-   visible, and selecting zero clients means terminal-only setup.
+1. Select MCP, CLI, or Both. The package runner
+   is not presented as a product choice.
+2. For MCP or combined setup, show supported clients in a multi-select.
+   Detection is visible but does not select a new target. Existing
+   GitContribute registrations may be preselected as prior intent.
 3. Select GitHub authentication from described choices. Existing configuration,
    GitHub CLI availability, and environment-variable presence inform the
    default without resolving credentials or contacting GitHub.
 4. Produce a dry-run plan. Planning never invokes npm or writes configuration,
    corpus, client, or repository-source state.
-5. Ask for confirmation, then apply the selected effects.
+5. Ask for confirmation, defaulting to cancel, then apply the selected effects.
 6. Verify the resulting local installation with `doctor`.
 
 Interactive setup uses inline terminal forms rather than an alternate-screen
@@ -76,52 +71,48 @@ status line. `NO_COLOR` and `GITCONTRIBUTE_ACCESSIBLE=1` provide plain and
 screen-reader-friendly operation respectively. Operational INFO logs are quiet
 by default; set `GITCONTRIBUTE_LOG_LEVEL=info` or `debug` when diagnosing setup.
 
-Non-interactive setup never infers permission to install globally. It requires
-`--install-cli`; `--yes` only accepts the explicitly selected plan.
+Non-interactive setup never infers access modes, client targets, authentication,
+or permission to install globally. `--yes` requires `--mode` and
+`--token-source`; MCP and Both also require explicit client targets. It accepts
+only that resolved plan.
 
-Setup is not one cross-system transaction. The global npm prefix, application
-configuration, corpus, and coding-client files are separate effects. Known
-client-configuration errors are preflighted before npm runs. A later runtime
-failure can still leave an earlier successful effect in place, and the report
-lists each result separately before exiting unsuccessfully.
+Setup is not one cross-system transaction. The private runtime or global npm
+prefix, application configuration, corpus, and coding-client files are separate
+effects. Known client-configuration errors are preflighted before installation.
+If runtime or CLI installation fails, setup stops before writing application or
+coding-client configuration.
 
-### MCP launcher policy
+### MCP runtime policy
 
-| Terminal capability | MCP capability | Registered MCP launcher |
+| Mode | Installed artifact | Coding-agent MCP command |
 | --- | --- | --- |
-| Installed and verified | Selected | Absolute global `gitcontribute` command |
-| Skipped under npx | Selected | Exact-version `npx gitcontribute@VERSION` command |
-| Selected | Skipped | No MCP launcher or client-file mutation |
+| MCP | Versioned private native binary | Absolute private path plus `mcp serve --transport=stdio` |
+| CLI | Global `gitcontribute` command | None |
+| Both | Global `gitcontribute` command | Absolute verified global path plus `mcp serve --transport=stdio` |
 
-If a requested terminal installation fails during combined setup, MCP can still
-be configured with the pinned npx fallback. The terminal step remains failed,
-so the overall setup command exits unsuccessfully even if MCP configuration
-succeeds.
-
-When setup installs the persistent terminal app, MCP clients use the verified
-global executable:
+MCP-only setup copies the currently running native GitContribute executable
+into GitContribute's platform data directory. It does not run a package
+install or create a command on `PATH`. Typical destinations are:
 
 ```text
-/absolute/npm/prefix/bin/gitcontribute mcp
+macOS:   ~/Library/Application Support/gitcontribute/Data/bin/VERSION/gitcontribute
+Linux:   ~/.local/share/gitcontribute/bin/VERSION/gitcontribute
+Windows: %LOCALAPPDATA%\gitcontribute\Data\bin\VERSION\gitcontribute.exe
 ```
 
-When terminal installation is skipped, setup records a direct npm package
-specifier so an existing command on `PATH` cannot shadow the selected release:
+Both uses the verified global CLI executable:
 
 ```text
-npx --yes gitcontribute@VERSION mcp
+/absolute/npm/prefix/bin/gitcontribute mcp serve --transport=stdio
 ```
 
-It never records a temporary executable from the npm cache. Development builds
-use `gitcontribute@latest`; released builds use their exact version so a client
-configuration is reproducible. Re-running setup with a newer release updates
-the registration. `--mcp-version latest` opts into following the latest npm
-release instead.
-
-MCP-only setup reports that the terminal command was not installed and prints
-the exact global npm installation command. MCP remains usable through its
-pinned launcher. Removing MCP registration does not uninstall a persistent CLI;
-use `npm uninstall --global gitcontribute` for that separate capability.
+No mode stores `npx`, `@latest`, or an npm-cache executable in coding-agent
+configuration. Re-running MCP setup with a newer release installs that release
+under its own versioned path and updates the selected registrations.
+`gitcontribute remove` deletes only selected coding-agent registrations. It
+does not delete versioned private runtimes, uninstall the global CLI, or remove
+application configuration or corpus data. Use
+`npm uninstall --global gitcontribute` to remove the global installation.
 
 ## Release contract
 

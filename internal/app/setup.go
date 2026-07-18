@@ -11,17 +11,18 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/managedbinary"
 	clientsetup "github.com/morluto/gitcontribute/internal/setup"
 	"github.com/morluto/gitcontribute/internal/terminalinstall"
 )
 
-// Setup initializes local state, optionally installs the published CLI through
-// npm, and registers the MCP server with selected coding clients. Terminal and
-// MCP setup are independent capabilities: either can be selected alone, and a
-// terminal-install failure does not prevent MCP from using its pinned npx
-// fallback. Any failed step still makes the overall CLI command unsuccessful.
+// Setup initializes local state for one of three access modes. MCP-only setup
+// copies the running native executable into a private product-owned directory;
+// CLI-only setup installs the published command globally through npm; Both
+// registers that verified global executable with selected coding clients.
+// Installation failures stop before later configuration writes.
 //
-// Dry-run setup validates and reports the same capability plan without invoking
+// Dry-run setup validates and reports the same access-mode plan without invoking
 // npm or writing local state. Setup performs no GitHub access and never executes
 // repository-controlled code.
 func (s *Service) Setup(ctx context.Context, opts cli.SetupOptions) (*cli.SetupReport, error) {
@@ -42,8 +43,11 @@ func (s *Service) setup(ctx context.Context, opts cli.SetupOptions, observer cli
 	if stop, err := run.preflightClients(); err != nil || stop {
 		return run.report, err
 	}
-	if err := run.setupTerminal(); err != nil {
+	if err := run.setupRuntime(); err != nil {
 		return nil, err
+	}
+	if run.report.HasFailures() {
+		return run.report, nil
 	}
 	if run.operation == clientsetup.Configure {
 		run.configure()
@@ -57,15 +61,17 @@ func (s *Service) setup(ctx context.Context, opts cli.SetupOptions, observer cli
 }
 
 type setupRun struct {
-	service         *Service
-	ctx             context.Context
-	opts            cli.SetupOptions
-	observer        cli.SetupObserver
-	operation       clientsetup.Operation
-	report          *cli.SetupReport
-	clientOptions   clientsetup.Options
-	clientReport    clientsetup.Report
-	configurationOK bool
+	service           *Service
+	ctx               context.Context
+	opts              cli.SetupOptions
+	observer          cli.SetupObserver
+	operation         clientsetup.Operation
+	report            *cli.SetupReport
+	clientOptions     clientsetup.Options
+	clientReport      clientsetup.Report
+	managedRuntime    string
+	mcpCommandPending bool
+	configurationOK   bool
 }
 
 func (s *Service) newSetupRun(ctx context.Context, opts cli.SetupOptions, observer cli.SetupObserver) (*setupRun, error) {
@@ -79,11 +85,14 @@ func (s *Service) newSetupRun(ctx context.Context, opts cli.SetupOptions, observ
 	if opts.Remove {
 		operation = clientsetup.Remove
 	}
-	if opts.Remove && (opts.InstallCLI || opts.SkipMCP) {
-		return nil, errors.New("terminal installation options are not supported by remove")
+	if opts.Remove && opts.Mode != "" {
+		return nil, errors.New("an access mode is not supported by remove")
 	}
-	if operation == clientsetup.Configure && opts.SkipMCP && !opts.InstallCLI {
-		return nil, errors.New("setup has no selected capability")
+	if operation == clientsetup.Configure && opts.Mode != cli.SetupModeMCP && opts.Mode != cli.SetupModeCLI && opts.Mode != cli.SetupModeBoth {
+		return nil, errors.New("setup has no selected access mode")
+	}
+	if operation == clientsetup.Configure && opts.Mode == cli.SetupModeCLI && (len(opts.Clients) > 0 || opts.AllClients) {
+		return nil, errors.New("CLI mode cannot configure MCP clients")
 	}
 	clients, err := s.setupClients(opts)
 	if err != nil {
@@ -94,19 +103,33 @@ func (s *Service) newSetupRun(ctx context.Context, opts cli.SetupOptions, observ
 			return nil, err
 		}
 	}
-	return &setupRun{
+	run := &setupRun{
 		service: s, ctx: ctx, opts: opts, observer: observer, operation: operation,
 		report: &cli.SetupReport{Operation: string(operation), DryRun: opts.DryRun},
 		clientOptions: clientsetup.Options{
 			Operation: operation, Clients: clients, All: opts.AllClients, DryRun: opts.DryRun,
-			Home: s.paths.HomeDir(), Version: opts.Version, Executable: opts.Executable, Env: opts.Environment,
+			Home: s.paths.HomeDir(), Executable: opts.Executable,
 		},
 		configurationOK: true,
-	}, nil
+	}
+	if operation == clientsetup.Configure && opts.Mode == cli.SetupModeMCP {
+		dataDir, err := s.paths.DataDir()
+		if err != nil {
+			return nil, err
+		}
+		run.managedRuntime, err = managedbinary.Destination(dataDir, opts.Version)
+		if err != nil {
+			return nil, err
+		}
+		run.clientOptions.Executable = run.managedRuntime
+	} else if operation == clientsetup.Configure && opts.Mode == cli.SetupModeBoth {
+		run.mcpCommandPending = true
+	}
+	return run, nil
 }
 
 func (s *Service) setupClients(opts cli.SetupOptions) ([]clientsetup.Client, error) {
-	if opts.SkipMCP {
+	if !opts.Remove && !opts.Mode.ConfiguresMCP() {
 		return nil, nil
 	}
 	clients := make([]clientsetup.Client, 0, len(opts.Clients))
@@ -114,16 +137,13 @@ func (s *Service) setupClients(opts cli.SetupOptions) ([]clientsetup.Client, err
 		clients = append(clients, clientsetup.Client(strings.ToLower(strings.TrimSpace(value))))
 	}
 	if len(clients) == 0 && !opts.AllClients {
-		clients = clientsetup.Detect(s.paths.HomeDir())
-		if len(clients) == 0 {
-			return nil, errors.New("no supported clients detected; pass --codex, --claude, or --all-clients")
-		}
+		return nil, errors.New("no coding-agent targets selected; pass --codex, --claude, or --all-clients")
 	}
 	return clients, nil
 }
 
 func (r *setupRun) preflightClients() (bool, error) {
-	if r.opts.SkipMCP {
+	if !r.configuresClients() {
 		return false, nil
 	}
 	planOptions := r.clientOptions
@@ -142,22 +162,29 @@ func (r *setupRun) preflightClients() (bool, error) {
 	return false, nil
 }
 
-func (r *setupRun) setupTerminal() error {
+func (r *setupRun) setupRuntime() error {
 	if r.operation != clientsetup.Configure {
 		return nil
 	}
-	if !r.opts.InstallCLI {
-		return r.reportMissingTerminal()
+	if !r.opts.Mode.InstallsCLI() {
+		return r.installManagedRuntime()
 	}
-	setupStarted(r.observer, cli.SetupPhaseTerminal)
-	step, executable := installTerminal(r.ctx, r.opts.Version, r.opts.DryRun)
+	setupStarted(r.observer, cli.SetupPhaseCLI)
+	step, executable := installCLI(r.ctx, r.opts.Version, r.opts.DryRun)
 	r.report.Steps = append(r.report.Steps, step)
 	setupCompleted(r.observer, step)
-	if executable == "" || r.opts.SkipMCP {
+	if executable == "" {
+		if !r.opts.DryRun {
+			r.mcpCommandPending = false
+			r.report.MCPCommandPending = false
+		}
 		return nil
 	}
+	if !r.opts.Mode.ConfiguresMCP() {
+		return nil
+	}
+	r.mcpCommandPending = false
 	r.clientOptions.Executable = executable
-	r.clientOptions.Env = map[string]string{}
 	planOptions := r.clientOptions
 	planOptions.DryRun = true
 	report, err := clientsetup.Run(planOptions)
@@ -168,18 +195,31 @@ func (r *setupRun) setupTerminal() error {
 	return nil
 }
 
-func (r *setupRun) reportMissingTerminal() error {
-	if !clientsetup.IsNpxEnvironment(r.opts.Environment) {
+func (r *setupRun) installManagedRuntime() error {
+	step := cli.SetupStep{Name: "mcp-runtime", Path: r.managedRuntime, Status: "installed"}
+	if r.opts.DryRun {
+		step.Status = "would install"
+		r.report.Steps = append(r.report.Steps, step)
 		return nil
 	}
-	version, err := clientsetup.ResolveNPMVersion(r.opts.Version)
-	if err != nil {
-		return err
+	setupStarted(r.observer, cli.SetupPhaseMCPRuntime)
+	source := r.opts.Executable
+	if source == "" {
+		var err error
+		source, err = os.Executable()
+		if err != nil {
+			return fmt.Errorf("resolve packaged executable: %w", err)
+		}
 	}
-	r.report.Steps = append(r.report.Steps, cli.SetupStep{
-		Name: "terminal", Status: "not installed",
-		Message: "MCP works without it; run npm install --global gitcontribute@" + version + " for the CLI and TUI",
-	})
+	installed, err := managedbinary.Install(source, r.managedRuntime)
+	if err != nil {
+		step.Status = "failed"
+		step.Message = err.Error()
+	} else if !installed {
+		step.Status = "already installed"
+	}
+	r.report.Steps = append(r.report.Steps, step)
+	setupCompleted(r.observer, step)
 	return nil
 }
 
@@ -255,7 +295,7 @@ func (r *setupRun) initializeCorpus(configured bool) {
 }
 
 func (r *setupRun) registerClients() error {
-	if r.opts.SkipMCP {
+	if !r.configuresClients() {
 		return nil
 	}
 	if !r.opts.DryRun && r.configurationOK {
@@ -271,9 +311,22 @@ func (r *setupRun) registerClients() error {
 	return nil
 }
 
+func (r *setupRun) configuresClients() bool {
+	return r.operation == clientsetup.Remove || r.opts.Mode.ConfiguresMCP()
+}
+
 func (r *setupRun) setClientReport(report clientsetup.Report) {
 	r.clientReport = report
-	r.report.Launcher = strings.Join(append([]string{report.Launcher.Command}, report.Launcher.Args...), " ")
+	if r.mcpCommandPending {
+		r.report.MCPCommand = nil
+		r.report.MCPCommandPending = true
+		return
+	}
+	r.report.MCPCommand = &cli.SetupMCPCommand{
+		Command: report.Launcher.Command,
+		Args:    append([]string(nil), report.Launcher.Args...),
+	}
+	r.report.MCPCommandPending = false
 }
 
 func (r *setupRun) appendClientResults() {
@@ -347,7 +400,7 @@ func (s *Service) DiscoverSetup(ctx context.Context) (*cli.SetupDiscovery, error
 		detected[client] = true
 	}
 
-	result := &cli.SetupDiscovery{}
+	result := &cli.SetupDiscovery{Version: s.version}
 	for _, client := range clientsetup.AllClients {
 		registered, path, err := clientsetup.CheckRegistration(client, home)
 		item := cli.SetupClientDiscovery{
@@ -386,12 +439,12 @@ func (s *Service) DiscoverSetup(ctx context.Context) (*cli.SetupDiscovery, error
 	return result, nil
 }
 
-// installTerminal converts the requested release into a safe npm package
+// installCLI converts the requested release into a safe npm package
 // specifier and reports installation as an independent setup step. The returned
 // path is non-empty only after npm succeeded and the command shim was verified.
-func installTerminal(ctx context.Context, version string, dryRun bool) (cli.SetupStep, string) {
+func installCLI(ctx context.Context, version string, dryRun bool) (cli.SetupStep, string) {
 	resolvedVersion, err := clientsetup.ResolveNPMVersion(version)
-	step := cli.SetupStep{Name: "terminal", Status: "installed", Message: "npm install --global gitcontribute@" + resolvedVersion}
+	step := cli.SetupStep{Name: "cli", Status: "installed", Message: "npm install --global gitcontribute@" + resolvedVersion}
 	if err != nil {
 		step.Status = "failed"
 		step.Message = err.Error()

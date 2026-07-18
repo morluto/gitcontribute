@@ -11,28 +11,38 @@ func renderSetupPlan(report *SetupReport) string {
 	for _, step := range report.Steps {
 		writeSetupStep(&b, step, true)
 	}
-	if report.Launcher != "" {
-		b.WriteString("\nMCP launcher\n")
-		if setupPlanInstallsTerminal(report) {
-			fmt.Fprintf(&b, "  Fallback: %s\n", report.Launcher)
-			b.WriteString("  If installation succeeds, setup registers the verified global executable instead.\n")
-		} else {
-			fmt.Fprintf(&b, "  Command: %s\n", report.Launcher)
-		}
+	if report.MCPCommandPending {
+		b.WriteString("\nMCP command\n  Resolved after the CLI installation succeeds.\n")
+	} else if report.MCPCommand != nil {
+		writeSetupMCPCommand(&b, report.MCPCommand)
 	}
 	writeSetupAuthentication(&b, report.Authentication, true)
-	b.WriteString("\nSafety\n")
-	if setupPlanInstallsTerminal(report) {
-		b.WriteString("  Setup changes local configuration and runs only the global npm install shown above.\n")
+	b.WriteString("\nProcess execution\n")
+	if setupPlanInstallsCLI(report) {
+		fmt.Fprintf(&b, "  %s\n", setupCLIInstallCommand(report))
+		b.WriteString("  npm prefix --global\n")
+	} else if setupPlanInstallsManagedRuntime(report) {
+		b.WriteString("  No package-manager process; setup copies the running executable locally.\n")
 	} else {
-		b.WriteString("  Setup only makes the local changes shown above.\n")
+		b.WriteString("  No package-manager process.\n")
 	}
+	b.WriteString("  git --version · local verification\n")
+	b.WriteString("\nSafety\n")
 	b.WriteString("  It will not contact GitHub, synchronize repositories, execute repository code,\n")
 	b.WriteString("  or mutate GitHub.")
 	return b.String()
 }
 
-func renderSetupResult(report *SetupReport, _ SetupOptions, persistentCommand bool) string {
+func setupCLIInstallCommand(report *SetupReport) string {
+	for _, step := range report.Steps {
+		if step.Name == "cli" && step.Message != "" {
+			return step.Message
+		}
+	}
+	return "npm install --global gitcontribute"
+}
+
+func renderSetupResult(report *SetupReport, opts SetupOptions) string {
 	var b strings.Builder
 	if report.HasFailures() {
 		b.WriteString("✗ Setup needs attention\n\n")
@@ -43,8 +53,8 @@ func renderSetupResult(report *SetupReport, _ SetupOptions, persistentCommand bo
 	for _, step := range report.Steps {
 		writeSetupStep(&b, step, false)
 	}
-	if report.Launcher != "" {
-		fmt.Fprintf(&b, "\nMCP launcher\n  %s\n", report.Launcher)
+	if report.MCPCommand != nil {
+		writeSetupMCPCommand(&b, report.MCPCommand)
 	}
 	if !report.HasFailures() {
 		writeSetupAuthentication(&b, report.Authentication, false)
@@ -54,15 +64,25 @@ func renderSetupResult(report *SetupReport, _ SetupOptions, persistentCommand bo
 	}
 	if !report.HasFailures() {
 		b.WriteString("\nNext\n")
-		if persistentCommand {
+		if opts.Mode.InstallsCLI() {
 			b.WriteString("  gitcontribute\n  gitcontribute sync owner/repo")
 		} else {
-			b.WriteString("  npx gitcontribute@latest\n  npx gitcontribute@latest sync owner/repo")
+			b.WriteString("  Use GitContribute from your coding agent.")
 		}
 	} else {
 		b.WriteString("\nFix the failed steps, then run setup again.")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func writeSetupMCPCommand(b *strings.Builder, command *SetupMCPCommand) {
+	if command == nil {
+		return
+	}
+	fmt.Fprintf(b, "\nMCP command\n  Executable: %s\n", command.Command)
+	if len(command.Args) > 0 {
+		fmt.Fprintf(b, "  Arguments: %s\n", strings.Join(command.Args, " "))
+	}
 }
 
 func writeSetupStep(b *strings.Builder, step SetupStep, plan bool) {
@@ -84,7 +104,7 @@ func writeSetupStep(b *strings.Builder, step SetupStep, plan bool) {
 	}
 	if step.Message != "" {
 		label := "Details"
-		if plan && step.Name == "terminal" && step.Status == "would install" {
+		if plan && step.Name == "cli" && step.Status == "would install" {
 			label = "Command"
 		}
 		fmt.Fprintf(b, "    %s: %s\n", label, step.Message)
@@ -110,9 +130,18 @@ func setupPlanAction(status string) string {
 	}
 }
 
-func setupPlanInstallsTerminal(report *SetupReport) bool {
+func setupPlanInstallsCLI(report *SetupReport) bool {
 	for _, step := range report.Steps {
-		if step.Name == "terminal" && step.Status == "would install" {
+		if step.Name == "cli" && step.Status == "would install" {
+			return true
+		}
+	}
+	return false
+}
+
+func setupPlanInstallsManagedRuntime(report *SetupReport) bool {
+	for _, step := range report.Steps {
+		if step.Name == "mcp-runtime" && step.Status == "would install" {
 			return true
 		}
 	}
@@ -162,8 +191,10 @@ func writeSetupAuthentication(b *strings.Builder, auth *SetupAuthentication, pla
 
 func setupStepLabel(name string) string {
 	switch name {
-	case "terminal":
-		return "Terminal app"
+	case "cli":
+		return "CLI"
+	case "mcp-runtime":
+		return "Private MCP runtime"
 	case "configuration":
 		return "Configuration"
 	case "corpus":

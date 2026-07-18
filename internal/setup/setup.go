@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
@@ -44,17 +43,13 @@ type Launcher struct {
 	Args    []string `json:"args"`
 }
 
-// Options controls coding-client MCP registration. Env is authoritative when
-// non-nil, allowing callers to distinguish ephemeral npx execution from a
-// persistent executable without retaining a cache path.
+// Options controls coding-client MCP registration.
 type Options struct {
 	Operation  Operation
 	Clients    []Client
 	All        bool
 	DryRun     bool
 	Home       string
-	Version    string
-	Env        map[string]string
 	Executable string
 }
 
@@ -181,18 +176,10 @@ func selectedClients(opts Options) ([]Client, error) {
 	return out, nil
 }
 
-// ResolveLauncher returns a durable MCP command for the current installation
-// context. Ephemeral npm execution uses a registry-safe, versioned npx command;
-// persistent/source execution uses an absolute executable path. It never saves
-// os.Executable when that path points into npx's disposable cache.
+// ResolveLauncher returns a durable absolute MCP command. The setup application
+// must first install an ephemeral package-runner executable into a stable
+// product-owned location and pass that path explicitly.
 func ResolveLauncher(opts Options) (Launcher, error) {
-	if IsNpxEnvironment(opts.Env) {
-		version, err := ResolveNPMVersion(opts.Version)
-		if err != nil {
-			return Launcher{}, err
-		}
-		return Launcher{Command: npmCommand(), Args: []string{"--yes", "gitcontribute@" + version, "mcp"}}, nil
-	}
 	executable := opts.Executable
 	if executable == "" {
 		var err error
@@ -205,24 +192,11 @@ func ResolveLauncher(opts Options) (Launcher, error) {
 	if err != nil {
 		return Launcher{}, fmt.Errorf("resolve executable path: %w", err)
 	}
-	return Launcher{Command: executable, Args: []string{"mcp"}}, nil
+	return Launcher{Command: executable, Args: []string{"mcp", "serve", "--transport=stdio"}}, nil
 }
 
-// IsNpxEnvironment reports whether npm is providing an ephemeral execution
-// context rather than a persistent package installation. A non-nil env map is
-// authoritative, including when a key is deliberately absent.
-func IsNpxEnvironment(env map[string]string) bool {
-	getenv := func(key string) string {
-		if env != nil {
-			return env[key]
-		}
-		return os.Getenv(key)
-	}
-	return getenv("npm_execpath") != "" || getenv("npm_lifecycle_event") == "npx" || getenv("npm_command") == "exec"
-}
-
-// ResolveNPMVersion returns a registry-safe package version for setup launchers
-// and persistent installation commands. It removes one release-tag "v" prefix
+// ResolveNPMVersion returns a registry-safe package version for CLI installation
+// and private runtime directory names. It removes one release-tag "v" prefix
 // and maps empty or development versions to the explicit "latest" tag.
 func ResolveNPMVersion(version string) (string, error) {
 	version = strings.TrimPrefix(strings.TrimSpace(version), "v")
@@ -233,13 +207,6 @@ func ResolveNPMVersion(version string) (string, error) {
 		return "", fmt.Errorf("invalid npm version %q", version)
 	}
 	return version, nil
-}
-
-func npmCommand() string {
-	if runtime.GOOS == "windows" {
-		return "npx.cmd"
-	}
-	return "npx"
 }
 
 func configureClient(operation Operation, client Client, home string, launcher Launcher, dryRun bool) Result {

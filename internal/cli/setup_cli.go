@@ -19,9 +19,9 @@ func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
 		return err
 	}
 	opts := SetupOptions{
-		Clients: clients, AllClients: cmd.AllClients, InstallCLI: cmd.InstallCLI, SkipMCP: cmd.NoMCP,
+		Mode: setupCommandMode(cmd, clients), Clients: clients, AllClients: cmd.AllClients,
 		TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey, Repository: cmd.Repository,
-		DryRun: cmd.DryRun, Version: cmd.MCPVersion,
+		DryRun: cmd.DryRun,
 	}
 	if !cmd.Yes && !cmd.DryRun {
 		apply, err := c.confirmSetupPlan(ctx, opts, cmd.JSON)
@@ -43,43 +43,66 @@ func (c *CLI) prepareSetupCommand(ctx context.Context, cmd *setupCmd) ([]string,
 	if err := validateSetupSelection(cmd, clients); err != nil {
 		return nil, err
 	}
-	needsPrompt := !cmd.Yes && ((!cmd.NoMCP && len(clients) == 0 && !cmd.AllClients) || cmd.TokenSource == "" || !cmd.DryRun)
-	if needsPrompt && !c.interactiveInput() {
-		return nil, NewCLIError(ExitUsage, errors.New("interactive setup requires a terminal; pass client flags and --yes"))
+	interactive := c.setupPrompter != nil || (c.interactiveInput() && c.interactiveOutput() && c.interactivePromptOutput())
+	if cmd.Mode == nil && (cmd.JSON || (!interactive && (len(clients) > 0 || cmd.AllClients))) {
+		return nil, NewCLIError(ExitUsage, errors.New("non-interactive setup requires --mode mcp, --mode cli, or --mode both"))
 	}
 	questions := setupQuestions(cmd, clients)
+	needsPrompt := !cmd.Yes && (len(questions) > 0 || !cmd.DryRun)
+	if needsPrompt && !interactive {
+		return nil, NewCLIError(ExitUsage, errors.New("interactive setup requires terminal input and visible output; pass explicit setup flags and --yes"))
+	}
 	if len(questions) > 0 {
 		selection, err := c.promptSetupSelection(ctx, cmd, clients, questions)
 		if err != nil {
 			return nil, err
 		}
-		cmd.InstallCLI = selection.InstallCLI
+		cmd.Mode = &selection.Mode
 		clients = selection.Clients
-		if containsSetupQuestion(questions, SetupQuestionClients) {
-			cmd.NoMCP = len(clients) == 0
-		}
 		cmd.TokenSource = selection.TokenSource
 		cmd.TokenSourceKey = selection.TokenSourceKey
 	}
-	if cmd.NoMCP && !cmd.InstallCLI {
-		return nil, NewCLIError(ExitUsage, errors.New("setup has no selected capability"))
+	if setupCommandMode(cmd, clients) == "" {
+		return nil, NewCLIError(ExitUsage, errors.New("setup has no selected access mode"))
 	}
 	return clients, nil
 }
 
+func setupCommandMode(cmd *setupCmd, clients []string) SetupMode {
+	if cmd.Mode != nil {
+		return *cmd.Mode
+	}
+	if len(clients) > 0 || cmd.AllClients {
+		return SetupModeMCP
+	}
+	return ""
+}
+
 func validateSetupSelection(cmd *setupCmd, clients []string) error {
-	if cmd.NoMCP && (len(clients) > 0 || cmd.AllClients) {
-		return NewCLIError(ExitUsage, errors.New("--no-mcp cannot be combined with client flags"))
+	if cmd.Mode != nil && *cmd.Mode == SetupModeCLI && (len(clients) > 0 || cmd.AllClients) {
+		return NewCLIError(ExitUsage, errors.New("--mode cli cannot be combined with MCP client flags"))
+	}
+	if cmd.Yes {
+		if cmd.Mode == nil {
+			return NewCLIError(ExitUsage, errors.New("--yes requires an explicit setup mode; pass --mode mcp, --mode cli, or --mode both"))
+		}
+		if cmd.Mode.ConfiguresMCP() && len(clients) == 0 && !cmd.AllClients {
+			return NewCLIError(ExitUsage, fmt.Errorf("--mode %s with --yes requires --codex, --claude, or --all-clients", *cmd.Mode))
+		}
+		if strings.TrimSpace(cmd.TokenSource) == "" {
+			return NewCLIError(ExitUsage, errors.New("--yes requires --token-source so authentication configuration is explicit"))
+		}
 	}
 	return nil
 }
 
 func setupQuestions(cmd *setupCmd, clients []string) []SetupPromptQuestion {
 	questions := make([]SetupPromptQuestion, 0, 3)
-	if !cmd.Yes && !cmd.InstallCLI && runningThroughNpx() {
-		questions = append(questions, SetupQuestionInstall)
+	mode := setupCommandMode(cmd, clients)
+	if !cmd.Yes && mode == "" {
+		questions = append(questions, SetupQuestionAccess)
 	}
-	if !cmd.Yes && !cmd.NoMCP && len(clients) == 0 && !cmd.AllClients {
+	if !cmd.Yes && mode != SetupModeCLI && len(clients) == 0 && !cmd.AllClients {
 		questions = append(questions, SetupQuestionClients)
 	}
 	if !cmd.Yes && cmd.TokenSource == "" {
@@ -111,8 +134,8 @@ func (c *CLI) promptSetupSelection(ctx context.Context, cmd *setupCmd, clients [
 		prompter = newSetupPrompter(c.stdin, c.stderr)
 	}
 	return prompter.Select(ctx, SetupPromptRequest{
-		Discovery: *discovery, Questions: questions,
-		InstallCLI: cmd.InstallCLI, Clients: clients, TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey,
+		Discovery: *discovery, PackageRunner: runningThroughNpx(), Questions: questions,
+		Mode: setupCommandMode(cmd, clients), Clients: clients, TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey,
 	})
 }
 
@@ -194,7 +217,7 @@ func (c *CLI) executeSetup(ctx context.Context, opts SetupOptions, jsonOutput bo
 		} else if report.DryRun {
 			output = renderSetupPlan(report)
 		} else {
-			output = renderSetupResult(report, opts, opts.InstallCLI || !runningThroughNpx())
+			output = renderSetupResult(report, opts)
 		}
 		if _, err := fmt.Fprintln(c.stdout, output); err != nil {
 			return NewCLIError(ExitGeneral, fmt.Errorf("write setup result: %w", err))
@@ -236,15 +259,18 @@ func setupHuman(report *SetupReport) string {
 			fmt.Fprintf(&b, " — %s", step.Message)
 		}
 	}
-	if report.Launcher != "" {
-		fmt.Fprintf(&b, "\nMCP launcher: %s", report.Launcher)
+	if report.MCPCommand != nil {
+		fmt.Fprintf(&b, "\nMCP executable: %s", report.MCPCommand.Command)
+		if len(report.MCPCommand.Args) > 0 {
+			fmt.Fprintf(&b, "\nMCP arguments: %s", strings.Join(report.MCPCommand.Args, " "))
+		}
 	}
 	return b.String()
 }
 
-// runningThroughNpx is used only to decide whether the interactive adapter
-// should offer persistent installation. The application layer independently
-// evaluates the same evidence when selecting and reporting MCP launchers.
+// runningThroughNpx lets the interactive heading disclose the bootstrap
+// mechanism. Package-runner state is never stored in coding-agent MCP
+// configuration.
 func runningThroughNpx() bool {
 	return os.Getenv("npm_execpath") != "" || os.Getenv("npm_lifecycle_event") == "npx" || os.Getenv("npm_command") == "exec"
 }

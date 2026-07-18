@@ -47,7 +47,9 @@ application and domain packages expose product-owned values and interfaces.
 | --- | --- | ---: | ---: | ---: | ---: |
 | Corpus read | search, health, dossier show, research brief, readiness, MCP resources | no | no | no | no |
 | Corpus write | investigations, start-thread, evidence, lenses, tracking | no | yes | no | no |
-| Terminal installation | explicit setup `--install-cli` | npm registry dependent | yes | `npm` only | no |
+| Private MCP runtime installation | explicit setup `--mode mcp` | no | yes | no | no |
+| Global CLI installation | explicit setup `--mode cli` or `--mode both` | npm registry dependent | yes | `npm` only | no |
+| Setup verification | all applied setup modes | no | no | `git --version` | no |
 | GitHub read | sync, crawl, hydrate | yes | yes | no | no |
 | Git acquisition | acquire, workspace create | remote-dependent | yes | `git` only | no |
 | Validation | validation run with explicit execution | no by default | yes | yes | no |

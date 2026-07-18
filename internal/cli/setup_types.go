@@ -2,10 +2,10 @@ package cli
 
 import "context"
 
-// SetupService exposes local onboarding and client-registration capabilities.
-// Setup may write local configuration, initialize the corpus, and explicitly
-// invoke npm to install the terminal app. It must not perform GitHub network
-// access or execute repository-controlled code.
+// SetupService exposes local onboarding and client-registration operations.
+// Setup may install a private MCP runtime, invoke npm for the global CLI, write
+// local configuration, and initialize the corpus. It must not perform GitHub
+// network access or execute repository-controlled code.
 type SetupService interface {
 	DiscoverSetup(ctx context.Context) (*SetupDiscovery, error)
 	Setup(ctx context.Context, opts SetupOptions) (*SetupReport, error)
@@ -23,8 +23,10 @@ type SetupObserver interface {
 type SetupPhase string
 
 const (
-	// SetupPhaseTerminal installs and verifies the persistent terminal command.
-	SetupPhaseTerminal SetupPhase = "terminal"
+	// SetupPhaseCLI installs and verifies the persistent terminal command.
+	SetupPhaseCLI SetupPhase = "cli"
+	// SetupPhaseMCPRuntime installs the private native runtime used by MCP-only setup.
+	SetupPhaseMCPRuntime SetupPhase = "mcp-runtime"
 	// SetupPhaseConfiguration writes shared local configuration.
 	SetupPhaseConfiguration SetupPhase = "configuration"
 	// SetupPhaseCorpus initializes the local corpus.
@@ -41,6 +43,7 @@ const (
 // defaults. Discovery never authenticates, performs network access, or writes
 // configuration.
 type SetupDiscovery struct {
+	Version               string
 	Clients               []SetupClientDiscovery
 	ConfiguredTokenSource string
 	ConfiguredTokenKey    string
@@ -58,35 +61,43 @@ type SetupClientDiscovery struct {
 	Error      string
 }
 
-// SetupOptions selects independent onboarding capabilities. InstallCLI controls
-// the package-manager mutation; Clients and AllClients control MCP registration.
-// SkipMCP permits terminal-only setup and is mutually exclusive with client
-// selections. DryRun plans every selected capability without invoking npm or
-// writing local state.
+// SetupMode selects one complete onboarding strategy.
+type SetupMode string
+
+const (
+	// SetupModeMCP installs private MCP access without a global CLI command.
+	SetupModeMCP SetupMode = "mcp"
+	// SetupModeCLI installs the global CLI without coding-agent configuration.
+	SetupModeCLI SetupMode = "cli"
+	// SetupModeBoth installs the global CLI and configures coding-agent MCP access.
+	SetupModeBoth SetupMode = "both"
+)
+
+// InstallsCLI reports whether setup should install the global command.
+func (m SetupMode) InstallsCLI() bool { return m == SetupModeCLI || m == SetupModeBoth }
+
+// ConfiguresMCP reports whether setup should register coding-agent access.
+func (m SetupMode) ConfiguresMCP() bool { return m == SetupModeMCP || m == SetupModeBoth }
+
+// SetupOptions selects one access mode and its explicit targets. DryRun plans
+// the selected mode without invoking npm or writing local state.
 type SetupOptions struct {
 	Remove     bool
+	Mode       SetupMode
 	Clients    []string
 	AllClients bool
-
-	// InstallCLI explicitly authorizes a global npm installation of the running
-	// GitContribute version. It is never inferred in non-interactive operation.
-	InstallCLI bool
-	// SkipMCP selects terminal-only setup. An empty Clients slice without
-	// SkipMCP means detect installed clients rather than disable MCP.
-	SkipMCP bool
 
 	TokenSource    string
 	TokenSourceKey string
 	Repository     string
 	DryRun         bool
-	// Version is the release used for both persistent installation and an npx
-	// MCP launcher. Empty values inherit the running service version.
+	// Version is the release used for persistent CLI or private MCP runtime
+	// installation. Empty values inherit the running service version.
 	Version string
-	// Executable and Environment are runtime evidence used to choose a stable
-	// MCP launcher. They are injectable so setup behavior is testable without
-	// capturing a temporary npm-cache executable.
-	Executable  string
-	Environment map[string]string
+	// Executable is the packaged native program copied for MCP-only setup. It is
+	// injectable so installation behavior can be tested without copying the test
+	// process itself.
+	Executable string
 }
 
 // SetupStep describes one independently observable setup effect. Status is a
@@ -107,15 +118,23 @@ type SetupAuthentication struct {
 	Key    string `json:"key,omitempty"`
 }
 
-// SetupReport records the effects attempted by setup. Launcher is populated
-// only when MCP was selected and contains the exact command registered with
-// clients. A report may contain both successful and failed independent steps.
+// SetupMCPCommand preserves the executable and argument boundaries registered
+// with coding clients.
+type SetupMCPCommand struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args"`
+}
+
+// SetupReport records the effects attempted by setup. MCPCommand is populated
+// only when MCP was selected. A report may contain both successful and failed
+// independent steps.
 type SetupReport struct {
-	Operation      string               `json:"operation"`
-	DryRun         bool                 `json:"dry_run"`
-	Launcher       string               `json:"launcher,omitempty"`
-	Authentication *SetupAuthentication `json:"authentication,omitempty"`
-	Steps          []SetupStep          `json:"steps"`
+	Operation         string               `json:"operation"`
+	DryRun            bool                 `json:"dry_run"`
+	MCPCommand        *SetupMCPCommand     `json:"mcp_command,omitempty"`
+	MCPCommandPending bool                 `json:"mcp_command_pending,omitempty"`
+	Authentication    *SetupAuthentication `json:"authentication,omitempty"`
+	Steps             []SetupStep          `json:"steps"`
 }
 
 // HasFailures reports whether setup could not produce a usable result. A nil

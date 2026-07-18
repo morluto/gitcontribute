@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -40,7 +39,9 @@ func TestRunConfiguresAndRemovesClientsIdempotently(t *testing.T) {
 		}
 	}
 	codex, _ := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
-	if !strings.Contains(string(codex), "model = \"test\"") || strings.Count(string(codex), "[mcp_servers.gitcontribute]") != 1 {
+	if !strings.Contains(string(codex), "model = \"test\"") ||
+		strings.Count(string(codex), "[mcp_servers.gitcontribute]") != 1 ||
+		!strings.Contains(string(codex), `args = ["mcp", "serve", "--transport=stdio"]`) {
 		t.Fatalf("codex config:\n%s", codex)
 	}
 	claude, _ := os.ReadFile(filepath.Join(home, ".claude.json"))
@@ -81,24 +82,18 @@ func TestDryRunDoesNotWrite(t *testing.T) {
 	}
 }
 
-func TestNpxLauncherDoesNotCaptureCacheExecutable(t *testing.T) {
-	report, err := Run(Options{Operation: Configure, Clients: []Client{Codex}, Home: t.TempDir(), Version: "v1.2.3", Env: map[string]string{"npm_command": "exec"}, Executable: "/tmp/npm-cache/gitcontribute", DryRun: true})
+func TestLauncherUsesTheExplicitManagedExecutable(t *testing.T) {
+	managed := filepath.Join(t.TempDir(), "managed", "gitcontribute")
+	report, err := Run(Options{Operation: Configure, Clients: []Client{Codex}, Home: t.TempDir(), Executable: managed, DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Launcher.Command != npmCommand() {
+	if report.Launcher.Command != managed {
 		t.Fatalf("launcher = %+v", report.Launcher)
 	}
-	wantArgs := []string{"--yes", "gitcontribute@1.2.3", "mcp"}
-	if !slices.Equal(report.Launcher.Args, wantArgs) {
+	wantArgs := []string{"mcp", "serve", "--transport=stdio"}
+	if strings.Join(report.Launcher.Args, "\x00") != strings.Join(wantArgs, "\x00") {
 		t.Fatalf("launcher = %+v", report.Launcher)
-	}
-}
-
-func TestNpxLauncherRejectsInvalidPackageVersion(t *testing.T) {
-	_, err := Run(Options{Operation: Configure, Clients: []Client{Codex}, Home: t.TempDir(), Version: "../../local", Env: map[string]string{"npm_command": "exec"}, DryRun: true})
-	if err == nil {
-		t.Fatal("setup accepted an invalid npm version")
 	}
 }
 
