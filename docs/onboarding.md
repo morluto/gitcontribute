@@ -104,7 +104,7 @@ global executable:
 When terminal installation is skipped, setup records an npm launcher such as:
 
 ```text
-npx --yes --package=gitcontribute@0.1.0 -- gitcontribute mcp
+npx --yes --package=gitcontribute@VERSION -- gitcontribute mcp
 ```
 
 It never records a temporary executable from the npm cache. Development builds
