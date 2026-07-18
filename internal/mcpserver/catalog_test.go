@@ -55,8 +55,12 @@ func TestCanonicalToolCatalogIsNamespacedAndUnambiguous(t *testing.T) {
 			t.Errorf("canonical tool %q is not registered", name)
 			continue
 		}
-		if !strings.HasPrefix(name, "gitcontribute.") {
-			t.Errorf("tool %q is not namespaced", name)
+		capability, action, namespaced := strings.Cut(name, ".")
+		if !namespaced || capability == "" || action == "" {
+			t.Errorf("tool %q is not capability-namespaced", name)
+		}
+		if strings.HasPrefix(name, "gitcontribute.") {
+			t.Errorf("tool %q redundantly includes the server name", name)
 		}
 		if strings.TrimSpace(tool.Title) == "" {
 			t.Errorf("tool %q has no display title", name)
