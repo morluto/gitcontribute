@@ -198,6 +198,7 @@ func (r *setupRun) configure() {
 	if tokenSource == "env" && strings.TrimSpace(r.opts.TokenSourceKey) == "" {
 		r.opts.TokenSourceKey = "GITHUB_TOKEN"
 	}
+	r.report.Authentication = &cli.SetupAuthentication{Method: tokenSource, Key: r.opts.TokenSourceKey}
 	options := cli.ConfigureOptions{DryRun: r.opts.DryRun, TokenSource: &tokenSource}
 	if r.opts.TokenSourceKey != "" {
 		options.TokenSourceKey = &r.opts.TokenSourceKey
@@ -308,7 +309,7 @@ func (r *setupRun) verify() {
 		return
 	}
 	setupStarted(r.observer, cli.SetupPhaseVerification)
-	diagnostics, err := r.service.Doctor(r.ctx)
+	diagnostics, err := r.service.doctor(r.ctx, false)
 	step := cli.SetupStep{Name: "verification", Status: "verified"}
 	if err != nil || diagnostics == nil || !diagnostics.Healthy {
 		step.Status = "failed"

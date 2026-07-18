@@ -36,7 +36,7 @@ func (m setupProgressModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case setupCompletedMsg:
 		step := SetupStep(message)
 		m.active = ""
-		m.completed = append(m.completed, fmt.Sprintf("%s %s  %s", setupProgressSymbol(step.Status), setupStepLabel(step.Name), step.Status))
+		m.completed = append(m.completed, fmt.Sprintf("%s %s — %s", setupProgressSymbol(step.Status), setupStepLabel(step.Name), step.Status))
 		return m, nil
 	case setupFinishedMsg:
 		return m, tea.Quit
@@ -51,7 +51,7 @@ func (m setupProgressModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 func (m setupProgressModel) View() string {
 	lines := append([]string(nil), m.completed...)
 	if m.active != "" {
-		lines = append(lines, fmt.Sprintf("%s %s…", m.spinner.View(), setupStepLabel(m.active)))
+		lines = append(lines, fmt.Sprintf("%s %s…", m.spinner.View(), setupProgressAction(m.active)))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -91,7 +91,26 @@ func setupProgressSymbol(status string) string {
 	if status == "not installed" || strings.HasPrefix(status, "skipped") {
 		return "○"
 	}
-	return "◆"
+	return "✓"
+}
+
+func setupProgressAction(phase string) string {
+	switch phase {
+	case "terminal":
+		return "Installing terminal command"
+	case "configuration":
+		return "Writing configuration"
+	case "corpus":
+		return "Initializing local corpus"
+	case "clients":
+		return "Configuring coding agents"
+	case "repository":
+		return "Adding repository source"
+	case "verification":
+		return "Verifying setup"
+	default:
+		return setupStepLabel(phase)
+	}
 }
 
 func interactiveWriter(writer io.Writer) bool {

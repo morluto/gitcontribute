@@ -99,14 +99,23 @@ type SetupStep struct {
 	Message string `json:"message,omitempty"`
 }
 
+// SetupAuthentication describes the credential source recorded by setup. It
+// never contains a credential value and does not imply that credentials were
+// read or validated.
+type SetupAuthentication struct {
+	Method string `json:"method"`
+	Key    string `json:"key,omitempty"`
+}
+
 // SetupReport records the effects attempted by setup. Launcher is populated
 // only when MCP was selected and contains the exact command registered with
 // clients. A report may contain both successful and failed independent steps.
 type SetupReport struct {
-	Operation string      `json:"operation"`
-	DryRun    bool        `json:"dry_run"`
-	Launcher  string      `json:"launcher,omitempty"`
-	Steps     []SetupStep `json:"steps"`
+	Operation      string               `json:"operation"`
+	DryRun         bool                 `json:"dry_run"`
+	Launcher       string               `json:"launcher,omitempty"`
+	Authentication *SetupAuthentication `json:"authentication,omitempty"`
+	Steps          []SetupStep          `json:"steps"`
 }
 
 // HasFailures reports whether setup could not produce a usable result. A nil

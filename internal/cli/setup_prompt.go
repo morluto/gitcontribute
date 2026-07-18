@@ -79,8 +79,13 @@ func (p *huhSetupPrompter) Select(ctx context.Context, request SetupPromptReques
 	}
 	fields := setupPromptFields(request, &selection)
 	if len(fields) > 0 {
-		if _, err := fmt.Fprintln(p.output, "┌ GitContribute setup"); err != nil {
+		if _, err := fmt.Fprintln(p.output, renderSetupDiscovery(request.Discovery)); err != nil {
 			return SetupSelection{}, fmt.Errorf("write setup heading: %w", err)
+		}
+		if request.asks(SetupQuestionInstall) {
+			if _, err := fmt.Fprintln(p.output, "npm allowed this one-time run. This choice controls future runs."); err != nil {
+				return SetupSelection{}, fmt.Errorf("write npx explanation: %w", err)
+			}
 		}
 		form := p.form(fields...)
 		if err := runSetupForm(ctx, form); err != nil {
@@ -100,30 +105,34 @@ func (p *huhSetupPrompter) Select(ctx context.Context, request SetupPromptReques
 
 func setupPromptFields(request SetupPromptRequest, selection *SetupSelection) []huh.Field {
 	fields := make([]huh.Field, 0, 3)
-	if request.asks(SetupQuestionInstall) {
-		selection.InstallCLI = true
-		fields = append(fields, huh.NewConfirm().
-			Title("Install the terminal app?").
-			Description("Run gitcontribute directly, including the interactive TUI.").
-			Affirmative("Yes, install it").
-			Negative("No, use npx").
-			Value(&selection.InstallCLI))
-	}
-	if request.asks(SetupQuestionClients) {
-		fields = append(fields, setupClientsField(request.Discovery, &selection.Clients))
-	}
-	if request.asks(SetupQuestionAuth) {
-		selection.TokenSource = defaultSetupTokenSource(request.Discovery)
-		fields = append(fields, huh.NewSelect[string]().
-			Title("GitHub authentication").
-			Description("Setup stays local; this only records how later sync commands obtain credentials.").
-			Options(setupAuthOptions(request.Discovery)...).
-			Value(&selection.TokenSource))
+	total := len(request.Questions)
+	for index, question := range request.Questions {
+		title := func(value string) string { return setupStageTitle(index+1, total, value) }
+		switch question {
+		case SetupQuestionInstall:
+			selection.InstallCLI = true
+			fields = append(fields, huh.NewSelect[bool]().
+				Title(title("How do you want to run GitContribute?")).
+				Options(
+					huh.NewOption("Install the gitcontribute command  · recommended\n    Run it directly from any terminal.", true),
+					huh.NewOption("Keep using npx\n    Nothing is installed globally; commands keep the npx prefix.", false),
+				).
+				Value(&selection.InstallCLI))
+		case SetupQuestionClients:
+			fields = append(fields, setupClientsField(title("Use GitContribute from coding agents"), request.Discovery, &selection.Clients))
+		case SetupQuestionAuth:
+			selection.TokenSource = defaultSetupTokenSource(request.Discovery)
+			fields = append(fields, huh.NewSelect[string]().
+				Title(title("How should future GitHub syncs authenticate?")).
+				Description("Setup stays local and does not contact GitHub or validate credentials.").
+				Options(setupAuthOptions(request.Discovery)...).
+				Value(&selection.TokenSource))
+		}
 	}
 	return fields
 }
 
-func setupClientsField(discovery SetupDiscovery, clients *[]string) huh.Field {
+func setupClientsField(title string, discovery SetupDiscovery, clients *[]string) huh.Field {
 	if len(*clients) == 0 {
 		for _, client := range discovery.Clients {
 			if client.Detected {
@@ -140,10 +149,36 @@ func setupClientsField(discovery SetupDiscovery, clients *[]string) huh.Field {
 		options = append(options, huh.NewOption(setupClientLabel(client), client.Name).Selected(selected[client.Name]))
 	}
 	return huh.NewMultiSelect[string]().
-		Title("Configure agent access").
-		Description("Space toggles a client. Leave all unchecked for terminal-only setup.").
+		Title(title).
+		Description("Select clients for MCP access. Leave all unchecked for terminal-only setup.").
 		Options(options...).
+		Limit(len(options)).
+		Height(len(options)*2 + 2).
 		Value(clients)
+}
+
+func setupStageTitle(current, total int, title string) string {
+	if total < 2 {
+		return title
+	}
+	return fmt.Sprintf("%d of %d · %s", current, total, title)
+}
+
+func renderSetupDiscovery(discovery SetupDiscovery) string {
+	detected := make([]string, 0, len(discovery.Clients)+1)
+	for _, client := range discovery.Clients {
+		if client.Detected {
+			detected = append(detected, setupClientName(client.Name))
+		}
+	}
+	if discovery.GitHubCLIAvailable {
+		detected = append(detected, "GitHub CLI")
+	}
+	summary := "No supported coding agents detected"
+	if len(detected) > 0 {
+		summary = "Detected " + strings.Join(detected, ", ")
+	}
+	return "┌ GitContribute setup\n│ " + summary + "\n└ Local inspection only · no changes made"
 }
 
 func (p *huhSetupPrompter) promptTokenSourceKey(ctx context.Context, selection *SetupSelection) error {
@@ -181,10 +216,13 @@ func runSetupForm(ctx context.Context, form *huh.Form) error {
 
 func (p *huhSetupPrompter) Confirm(ctx context.Context, title string) (bool, error) {
 	confirmed := true
-	field := huh.NewConfirm().
+	field := huh.NewSelect[bool]().
 		Title(title).
-		Affirmative("Apply changes").
-		Negative("Cancel").
+		Description("Review the exact paths and commands above before continuing.").
+		Options(
+			huh.NewOption("Apply changes", true),
+			huh.NewOption("Cancel  · no changes will be made", false),
+		).
 		Value(&confirmed)
 	form := p.form(field)
 	if err := form.RunWithContext(ctx); err != nil {
@@ -197,18 +235,38 @@ func (p *huhSetupPrompter) Confirm(ctx context.Context, title string) (bool, err
 }
 
 func (p *huhSetupPrompter) form(fields ...huh.Field) *huh.Form {
-	form := huh.NewForm(huh.NewGroup(fields...)).WithInput(p.input).WithOutput(p.output).WithShowHelp(true)
+	groups := setupPromptGroups(fields)
+	plain := os.Getenv("GITCONTRIBUTE_ACCESSIBLE") != "" || os.Getenv("TERM") == "dumb" || os.Getenv("NO_COLOR") != ""
+	theme := huh.ThemeFunc(huh.ThemeBase16)
+	if plain {
+		theme = huh.ThemeFunc(huh.ThemeBase)
+	}
+	keymap := huh.NewDefaultKeyMap()
+	keymap.Select.Filter.SetEnabled(false)
+	keymap.MultiSelect.Filter.SetEnabled(false)
+	keymap.MultiSelect.SelectAll.SetEnabled(false)
+	keymap.MultiSelect.SelectNone.SetEnabled(false)
+	keymap.MultiSelect.Toggle.SetHelp("space", "toggle")
+	form := huh.NewForm(groups...).WithInput(p.input).WithOutput(p.output).WithShowHelp(true).WithTheme(theme).WithKeyMap(keymap)
 	if os.Getenv("GITCONTRIBUTE_ACCESSIBLE") != "" || os.Getenv("TERM") == "dumb" {
 		form.WithAccessible(true)
 	}
 	return form
 }
 
-func setupClientLabel(client SetupClientDiscovery) string {
-	name := map[string]string{"codex": "Codex", "claude": "Claude Code"}[client.Name]
-	if name == "" {
-		name = client.Name
+func setupPromptGroups(fields []huh.Field) []*huh.Group {
+	groups := make([]*huh.Group, 0, len(fields))
+	for _, field := range fields {
+		// Groups are pages in Huh's default layout. Keeping one field in each
+		// group guarantees that completed controls and their key bindings do
+		// not compete with the active setup decision.
+		groups = append(groups, huh.NewGroup(field))
 	}
+	return groups
+}
+
+func setupClientLabel(client SetupClientDiscovery) string {
+	name := setupClientName(client.Name)
 	state := "not detected"
 	if client.Detected {
 		state = "detected"
@@ -219,7 +277,14 @@ func setupClientLabel(client SetupClientDiscovery) string {
 	if client.Error != "" {
 		state += " · config needs attention"
 	}
-	return fmt.Sprintf("%-12s %s  %s", name, state, client.Path)
+	return fmt.Sprintf("%-12s %s\n    %s", name, state, client.Path)
+}
+
+func setupClientName(name string) string {
+	if display := map[string]string{"codex": "Codex", "claude": "Claude Code"}[name]; display != "" {
+		return display
+	}
+	return name
 }
 
 func defaultSetupTokenSource(discovery SetupDiscovery) string {
@@ -250,26 +315,29 @@ func setupTokenSourceKey(request SetupPromptRequest, selectedSource string) stri
 }
 
 func setupAuthOptions(discovery SetupDiscovery) []huh.Option[string] {
-	gh := "GitHub CLI      use the local gh credential helper"
+	gh := "GitHub CLI"
 	if discovery.GitHubCLIAvailable {
 		gh += " · available"
 	}
+	gh += "\n    Use the local gh credential helper; store no token."
 	envKey := discovery.ConfiguredTokenKey
 	if envKey == "" || discovery.ConfiguredTokenSource != "env" {
 		envKey = "GITHUB_TOKEN"
 	}
-	env := "Environment     read " + envKey + " when a sync runs"
+	env := "Environment variable"
 	if discovery.EnvironmentKeyPresent {
-		env += " · variable present"
+		env += " · present"
 	}
-	keyring := "System keyring  retrieve a named local entry"
+	env += "\n    Read " + envKey + " when a sync runs; store only its name."
+	keyring := "System keyring"
 	if discovery.ConfiguredTokenSource == "keyring" {
 		keyring += " · configured"
 	}
+	keyring += "\n    Retrieve a named local entry; store only the entry name."
 	return []huh.Option[string]{
 		huh.NewOption(gh, "gh-cli"),
 		huh.NewOption(env, "env"),
 		huh.NewOption(keyring, "keyring"),
-		huh.NewOption("Configure later use offline features now", "none"),
+		huh.NewOption("Configure later\n    Use offline features now and choose before the first sync.", "none"),
 	}
 }
