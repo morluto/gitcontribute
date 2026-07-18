@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -19,6 +19,45 @@ function run(command, args, options = {}) {
 
 function shellQuote(value) {
   return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+function runScriptPTY(command, input, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "script",
+      ["-qefc", `${shellQuote(command)} setup`, "/dev/null"],
+      { env, stdio: ["pipe", "pipe", "pipe"] }
+    );
+    let stdout = "";
+    let stderr = "";
+    let interruptScheduled = false;
+    let interrupt;
+    const scheduleInterrupt = () => {
+      if (interruptScheduled || !`${stdout}\n${stderr}`.includes("future GitHub syncs authenticate?")) return;
+      interruptScheduled = true;
+      interrupt = setTimeout(() => {
+        if (child.exitCode === null) child.stdin.write("\x03");
+      }, 100);
+    };
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      scheduleInterrupt();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+      scheduleInterrupt();
+    });
+    child.on("error", reject);
+    const timeout = setTimeout(() => child.kill("SIGKILL"), 20_000);
+    child.on("close", (status) => {
+      clearTimeout(timeout);
+      clearTimeout(interrupt);
+      resolve({ status, stdout, stderr });
+    });
+    child.stdin.write(input);
+  });
 }
 
 async function packCurrentPlatform(workspace) {
@@ -183,7 +222,7 @@ test(
       const home = join(workspace, "home");
       await mkdir(join(home, ".codex"), { recursive: true });
       const command = join(runner, "node_modules", ".bin", "gitcontribute");
-      const input = "\x1b]11;rgb:0000/0000/0000\x07\x1b[1;1R\r\x1b[Z\x1b[B\r\x03";
+      const input = "\x1b]11;rgb:0000/0000/0000\x07\x1b[1;1R\r\x1b[Z\x1b[B\r";
       const env = {
         ...process.env,
         HOME: home,
@@ -236,11 +275,7 @@ exit [lindex $result 3]`,
               ],
               { encoding: "utf8", env }
             )
-          : spawnSync("script", ["-qefc", `${shellQuote(command)} setup`, "/dev/null"], {
-              encoding: "utf8",
-              env,
-              input,
-            });
+          : await runScriptPTY(command, input, env);
 
       assert.ok(
         result.status === 0 || (process.platform !== "darwin" && result.status === 130),
