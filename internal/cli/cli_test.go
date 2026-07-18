@@ -133,20 +133,6 @@ func (f *fakeService) Setup(_ context.Context, opts cli.SetupOptions) (*cli.Setu
 	return &cli.SetupReport{Operation: "setup", DryRun: opts.DryRun, Steps: []cli.SetupStep{{Name: "codex", Status: "configured"}}}, nil
 }
 
-func (f *fakeService) SetupWithProgress(ctx context.Context, opts cli.SetupOptions, _ cli.SetupObserver) (*cli.SetupReport, error) {
-	return f.Setup(ctx, opts)
-}
-
-func (f *fakeService) DiscoverSetup(context.Context) (*cli.SetupDiscovery, error) {
-	return &cli.SetupDiscovery{
-		Clients: []cli.SetupClientDiscovery{
-			{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true},
-			{Name: "claude", Path: "/home/test/.claude.json", Detected: true},
-		},
-		ConfiguredTokenSource: "none",
-	}, nil
-}
-
 type startInvArgs struct {
 	Repo   cli.RepoRef
 	Commit string
@@ -962,26 +948,6 @@ func TestSetupNonInteractiveJSON(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"would configure"`) {
 		t.Fatalf("output = %s", out.String())
-	}
-}
-
-func TestSetupDryRunHumanOutputRemainsAPlan(t *testing.T) {
-	svc := &fakeService{setupResult: &cli.SetupReport{
-		Operation: "setup",
-		DryRun:    true,
-		Launcher:  "npx gitcontribute@latest mcp",
-		Steps:     []cli.SetupStep{{Name: "codex", Status: "would configure"}},
-	}}
-	var out bytes.Buffer
-	c := cli.New(svc, &fakeMCPRunner{}, &out, io.Discard)
-	if err := c.Run(context.Background(), []string{"setup", "--codex", "--token-source", "none", "--dry-run", "--yes"}); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(out.String(), "Setup plan") {
-		t.Fatalf("output does not identify a plan: %s", out.String())
-	}
-	if strings.Contains(out.String(), "GitContribute is ready") || strings.Contains(out.String(), "Next:") {
-		t.Fatalf("dry-run output implies setup was applied: %s", out.String())
 	}
 }
 

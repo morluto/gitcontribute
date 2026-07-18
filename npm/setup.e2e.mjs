@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import platforms from "./platforms.json" with { type: "json" };
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const packageVersion = JSON.parse(await readFile(join(root, "package.json"), "utf8")).version;
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: "utf8", ...options });
@@ -17,7 +18,6 @@ function run(command, args, options = {}) {
 }
 
 async function packCurrentPlatform(workspace) {
-  const packageJSON = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
   const platform = platforms[`${process.platform}-${process.arch}`];
   assert.ok(platform, `unsupported test platform ${process.platform}-${process.arch}`);
 
@@ -31,13 +31,13 @@ async function packCurrentPlatform(workspace) {
   }
 
   const executable = join(nativeDir, platform.binary);
-  run("go", ["build", "-ldflags", `-X main.version=${packageJSON.version}`, "-o", executable, "./cmd/gitcontribute"], { cwd: root });
+  run("go", ["build", "-ldflags", `-X main.version=${packageVersion}`, "-o", executable, "./cmd/gitcontribute"], { cwd: root });
   if (process.platform !== "win32") await chmod(executable, 0o755);
 
   const packs = join(workspace, "packs");
   await mkdir(packs);
   run("npm", ["pack", "--silent", "--pack-destination", packs], { cwd: staging });
-  return join(packs, `gitcontribute-${packageJSON.version}.tgz`);
+  return join(packs, `gitcontribute-${packageVersion}.tgz`);
 }
 
 async function createFakeGlobalNPM(workspace) {
@@ -105,7 +105,7 @@ test("packaged setup can install the terminal app without configuring MCP", { sk
     const report = JSON.parse(result.stdout);
     assert.ok(report.steps.some((step) => step.name === "terminal" && step.status === "installed"));
     assert.equal(report.launcher, undefined);
-    assert.match(await readFile(npmLog, "utf8"), /install --global gitcontribute@0\.1\.1/);
+    assert.ok((await readFile(npmLog, "utf8")).includes(`install --global gitcontribute@${packageVersion}`));
     await readFile(join(globalPrefix, "bin", "gitcontribute"), "utf8");
     await assert.rejects(readFile(join(home, ".codex", "config.toml"), "utf8"));
   } finally {
@@ -142,7 +142,7 @@ test("packaged setup can configure MCP without installing the terminal app", { s
     const report = JSON.parse(result.stdout);
     assert.equal(
       report.launcher,
-      "npx --yes --package=gitcontribute@0.1.1 -- gitcontribute mcp"
+      `npx --yes --package=gitcontribute@${packageVersion} -- gitcontribute mcp`
     );
     assert.ok(report.steps.some((step) => step.name === "codex" && step.status === "configured"));
     assert.ok(
@@ -150,12 +150,12 @@ test("packaged setup can configure MCP without installing the terminal app", { s
         (step) =>
           step.name === "terminal" &&
           step.status === "not installed" &&
-          step.message.includes("npm install --global gitcontribute@0.1.1")
+          step.message.includes(`npm install --global gitcontribute@${packageVersion}`)
       )
     );
     const codex = await readFile(join(home, ".codex", "config.toml"), "utf8");
     assert.match(codex, /command = "npx"/);
-    assert.match(codex, /--package=gitcontribute@0\.1\.1/);
+    assert.ok(codex.includes(`--package=gitcontribute@${packageVersion}`));
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

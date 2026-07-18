@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"strings"
@@ -13,6 +14,20 @@ type fakeSetupPrompter struct {
 	selection cli.SetupSelection
 	confirmed bool
 	request   cli.SetupPromptRequest
+}
+
+func (f *fakeService) SetupWithProgress(ctx context.Context, opts cli.SetupOptions, _ cli.SetupObserver) (*cli.SetupReport, error) {
+	return f.Setup(ctx, opts)
+}
+
+func (f *fakeService) DiscoverSetup(context.Context) (*cli.SetupDiscovery, error) {
+	return &cli.SetupDiscovery{
+		Clients: []cli.SetupClientDiscovery{
+			{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true},
+			{Name: "claude", Path: "/home/test/.claude.json", Detected: true},
+		},
+		ConfiguredTokenSource: "none",
+	}, nil
 }
 
 func (p *fakeSetupPrompter) Select(_ context.Context, request cli.SetupPromptRequest) (cli.SetupSelection, error) {
@@ -81,6 +96,26 @@ func TestSetupWizardPreviewsPlanBeforeConfirmation(t *testing.T) {
 	}
 	if !containsAll(stderr.String(), "Setup cancelled; no changes were made.") {
 		t.Fatalf("stderr = %q", stderr.String())
+	}
+}
+
+func TestSetupDryRunHumanOutputRemainsAPlan(t *testing.T) {
+	svc := &fakeService{setupResult: &cli.SetupReport{
+		Operation: "setup",
+		DryRun:    true,
+		Launcher:  "npx gitcontribute@latest mcp",
+		Steps:     []cli.SetupStep{{Name: "codex", Status: "would configure"}},
+	}}
+	var out bytes.Buffer
+	c := cli.New(svc, &fakeMCPRunner{}, &out, io.Discard)
+	if err := c.Run(context.Background(), []string{"setup", "--codex", "--token-source", "none", "--dry-run", "--yes"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Setup plan") {
+		t.Fatalf("output does not identify a plan: %s", out.String())
+	}
+	if strings.Contains(out.String(), "GitContribute is ready") || strings.Contains(out.String(), "Next:") {
+		t.Fatalf("dry-run output implies setup was applied: %s", out.String())
 	}
 }
 

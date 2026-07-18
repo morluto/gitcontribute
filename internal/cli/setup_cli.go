@@ -2,9 +2,11 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 )
 
 func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
@@ -157,6 +159,75 @@ func (c *CLI) confirmSetupPlan(ctx context.Context, opts SetupOptions, jsonOutpu
 		}
 	}
 	return apply, nil
+}
+
+func (c *CLI) executeSetup(ctx context.Context, opts SetupOptions, jsonOutput bool) error {
+	service, err := c.setupService()
+	if err != nil {
+		return err
+	}
+	var report *SetupReport
+	if !jsonOutput && interactiveWriter(c.stderr) {
+		progress := startSetupProgress(c.stderr)
+		report, err = service.SetupWithProgress(ctx, opts, progress)
+		progressErr := progress.Close()
+		if err == nil && progressErr != nil {
+			err = progressErr
+		}
+	} else {
+		report, err = service.Setup(ctx, opts)
+	}
+	if err != nil {
+		return NewCLIError(ExitGeneral, err)
+	}
+	if jsonOutput {
+		enc := json.NewEncoder(c.stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(report); err != nil {
+			return NewCLIError(ExitGeneral, err)
+		}
+	} else {
+		var output string
+		if opts.Remove {
+			output = setupHuman(report)
+		} else if report.DryRun {
+			output = renderSetupPlan(report)
+		} else {
+			output = renderSetupResult(report, opts, opts.InstallCLI || !runningThroughNpx())
+		}
+		if _, err := fmt.Fprintln(c.stdout, output); err != nil {
+			return NewCLIError(ExitGeneral, fmt.Errorf("write setup result: %w", err))
+		}
+	}
+	if report.HasFailures() {
+		return NewCLIError(ExitGeneral, errors.New("one or more setup steps failed"))
+	}
+	return nil
+}
+
+func setupHuman(report *SetupReport) string {
+	var b strings.Builder
+	operation := report.Operation
+	if operation == "" {
+		operation = "setup"
+	}
+	fmt.Fprintf(&b, "%s%s", strings.ToUpper(operation[:1]), operation[1:])
+	if report.DryRun {
+		b.WriteString(" plan")
+	}
+	for _, step := range report.Steps {
+		fmt.Fprintf(&b, "\n- %s [%s]", step.Name, step.Status)
+		if step.Path != "" {
+			fmt.Fprintf(&b, ": %s", step.Path)
+		}
+		if step.Message != "" {
+			fmt.Fprintf(&b, " — %s", step.Message)
+		}
+	}
+	if report.Launcher != "" {
+		fmt.Fprintf(&b, "\nMCP launcher: %s", report.Launcher)
+	}
+	return b.String()
 }
 
 // runningThroughNpx is used only to decide whether the interactive adapter
