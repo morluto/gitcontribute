@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -52,25 +54,34 @@ func main() {
 	c.SetLogger(logger.With("component", "cli"))
 	c.SetTUIRunner(tui.NewRunner(svc, os.Stdin, os.Stdout))
 	if err := c.Run(ctx, os.Args[1:]); err != nil {
-		var ce *cli.CLIError
-		if errors.As(err, &ce) {
-			logger.ErrorContext(ctx, "command failed",
-				"error", ce.Error(),
-				"code", ce.Code,
-				"trace_id", traceID,
-			)
-			fmt.Fprintln(os.Stderr, ce.Error())
-			os.Exit(ce.Code)
-		}
-		logger.ErrorContext(ctx, "command failed",
-			"error", err,
-			"trace_id", traceID,
-		)
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(ExitGeneral)
+		os.Exit(reportCommandError(ctx, logger, os.Stderr, traceID, err))
 	}
 
 	logger.InfoContext(ctx, "command completed", "trace_id", traceID)
 }
 
 const ExitGeneral = 1
+
+func reportCommandError(ctx context.Context, logger *slog.Logger, stderr io.Writer, traceID string, err error) int {
+	var cliErr *cli.CLIError
+	if errors.As(err, &cliErr) {
+		logger.DebugContext(ctx, "command failed",
+			"error", cliErr.Error(),
+			"code", cliErr.Code,
+			"trace_id", traceID,
+		)
+		if _, writeErr := fmt.Fprintln(stderr, cliErr.Error()); writeErr != nil {
+			logger.ErrorContext(ctx, "failed to write command error", "error", writeErr, "trace_id", traceID)
+		}
+		return cliErr.Code
+	}
+
+	logger.ErrorContext(ctx, "command failed",
+		"error", err,
+		"trace_id", traceID,
+	)
+	if _, writeErr := fmt.Fprintln(stderr, err); writeErr != nil {
+		logger.ErrorContext(ctx, "failed to write command error", "error", writeErr, "trace_id", traceID)
+	}
+	return ExitGeneral
+}

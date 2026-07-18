@@ -660,6 +660,12 @@ type tuiCmd struct {
 // method. It respects context cancellation.
 func (c *CLI) Run(ctx context.Context, args []string) error {
 	args = normalizeCompatibilityArgs(args)
+	if len(args) == 0 {
+		if !c.interactiveInput() || !c.interactiveOutput() {
+			return NewCLIError(ExitUsage, errors.New("interactive interface requires a terminal; run gitcontribute --help for commands"))
+		}
+		return c.runTUI(ctx, &tuiCmd{})
+	}
 	var cli rootCmd
 	parser, err := kong.New(&cli,
 		kong.Name("gitcontribute"),
@@ -875,6 +881,15 @@ func (c *CLI) runRemoveCommand(ctx context.Context, cmd *removeCmd) error {
 
 func (c *CLI) interactiveInput() bool {
 	file, ok := c.stdin.(*os.File)
+	if !ok {
+		return true
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+func (c *CLI) interactiveOutput() bool {
+	file, ok := c.stdout.(*os.File)
 	if !ok {
 		return true
 	}
