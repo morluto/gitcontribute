@@ -249,9 +249,10 @@ gitcontribute mcp serve --transport=stdio
 
 MCP capabilities are deliberately separate:
 
-Tool names use the `gitcontribute.<capability>.<action>` namespace. The server
-advertises one canonical name per operation; unnamespaced compatibility aliases
-are not registered.
+Tool names use the `<capability>.<action>` namespace. MCP clients qualify them
+with the configured `gitcontribute` server name, producing names such as
+`gitcontribute.corpus.search_repositories`. The server advertises one canonical
+name per operation; unnamespaced compatibility aliases are not registered.
 
 | Capability | Examples |
 | --- | --- |
@@ -262,7 +263,7 @@ are not registered.
 
 Contribution workflow resources and prompts are available for agents:
 
-- `gitcontribute.corpus.get_readiness` and `gitcontribute://readiness/<opportunity-id>` expose the
+- `corpus.get_readiness` and `gitcontribute://readiness/<opportunity-id>` expose the
   same offline readiness report as the CLI.
 - `gitcontribute://workflow/contribution/<opportunity-id>` links the local
   opportunity, evidence, readiness report, and safe workflow prompts.
