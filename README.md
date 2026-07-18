@@ -256,10 +256,28 @@ name per operation; unnamespaced compatibility aliases are not registered.
 
 | Capability | Examples |
 | --- | --- |
-| **Offline reads** | Search, inspect repositories and threads, build research briefs, read dossiers, explain matches, inspect evidence, opportunities, readiness checks, and workflow resources. |
-| **Network reads** | Sync repositories, hydrate threads, start crawls, and acquire workspaces. |
+| **Offline reads** | Batch-inspect repositories, threads, and jobs; filter open or closed work; rank opportunities across repositories; find historical precedents; and review the authored pull-request portfolio. |
+| **Network reads** | Batch-sync repository metadata or thread headers, hydrate selected finalists, discover authored pull requests, refresh PR status, and query derived public-repository context through DeepWiki. |
 | **Local writes** | Start investigations, record hypotheses, promote opportunities, define validations, and prepare drafts. |
-| **Execution** | Run a validation only when the request includes `execute: true`. |
+| **Execution** | Safely acquire and index repository code with Git only, or run a validation only when the request includes `execute: true`. |
+
+A scalable discovery flow is:
+
+```text
+github.sync_repository_metadata -> corpus.get_repositories
+-> research.deepwiki -> github.sync_threads
+-> corpus.rank_opportunities -> github.hydrate_threads
+-> corpus.find_precedents
+```
+
+For contribution follow-up, use `github.sync_authored_pull_requests`, then
+`github.sync_pull_request_status` and `corpus.list_pull_request_portfolio`.
+Missing coverage is returned as unknown rather than as a false zero or negative.
+PR status currently includes lifecycle, mergeability, head/base revisions, and
+stored reviews. Checks, unresolved review threads, detailed merge state, merge
+queue, and portfolio overlap are deliberately reported as unavailable. See the
+[scalable MCP workflow guide](docs/mcp-scalable-workflows.md) for recovery and
+coverage details.
 
 Contribution workflow resources and prompts are available for agents:
 
@@ -282,6 +300,8 @@ application and adapter boundaries.
 | Search, health, dossier, research-brief, and readiness inspection | — | — | — | — |
 | Investigations, evidence, lenses | — | ✓ | — | — |
 | Sync, crawl, hydrate | ✓ | ✓ | — | — |
+| DeepWiki repository context | ✓ | — | — | — |
+| Acquire and batch-index code | ✓ | ✓ | `git` only | — |
 | Acquire or create a workspace | remote-dependent | ✓ | `git` only | — |
 | Validation with explicit execution | — by default | ✓ | ✓ | — |
 
