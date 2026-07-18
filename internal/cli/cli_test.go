@@ -965,6 +965,26 @@ func TestSetupNonInteractiveJSON(t *testing.T) {
 	}
 }
 
+func TestSetupDryRunHumanOutputRemainsAPlan(t *testing.T) {
+	svc := &fakeService{setupResult: &cli.SetupReport{
+		Operation: "setup",
+		DryRun:    true,
+		Launcher:  "npx gitcontribute@latest mcp",
+		Steps:     []cli.SetupStep{{Name: "codex", Status: "would configure"}},
+	}}
+	var out bytes.Buffer
+	c := cli.New(svc, &fakeMCPRunner{}, &out, io.Discard)
+	if err := c.Run(context.Background(), []string{"setup", "--codex", "--token-source", "none", "--dry-run", "--yes"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Setup plan") {
+		t.Fatalf("output does not identify a plan: %s", out.String())
+	}
+	if strings.Contains(out.String(), "GitContribute is ready") || strings.Contains(out.String(), "Next:") {
+		t.Fatalf("dry-run output implies setup was applied: %s", out.String())
+	}
+}
+
 func TestInvestigationStartShowAndList(t *testing.T) {
 	svc := &fakeService{
 		startInvResult: &cli.InvestigationResult{

@@ -23,12 +23,18 @@ type SetupObserver interface {
 type SetupPhase string
 
 const (
-	SetupPhaseTerminal      SetupPhase = "terminal"
+	// SetupPhaseTerminal installs and verifies the persistent terminal command.
+	SetupPhaseTerminal SetupPhase = "terminal"
+	// SetupPhaseConfiguration writes shared local configuration.
 	SetupPhaseConfiguration SetupPhase = "configuration"
-	SetupPhaseCorpus        SetupPhase = "corpus"
-	SetupPhaseClients       SetupPhase = "clients"
-	SetupPhaseRepository    SetupPhase = "repository"
-	SetupPhaseVerification  SetupPhase = "verification"
+	// SetupPhaseCorpus initializes the local corpus.
+	SetupPhaseCorpus SetupPhase = "corpus"
+	// SetupPhaseClients registers the MCP server with selected clients.
+	SetupPhaseClients SetupPhase = "clients"
+	// SetupPhaseRepository adds the optional initial repository source.
+	SetupPhaseRepository SetupPhase = "repository"
+	// SetupPhaseVerification checks the completed local installation.
+	SetupPhaseVerification SetupPhase = "verification"
 )
 
 // SetupDiscovery is a read-only snapshot used to choose sensible onboarding

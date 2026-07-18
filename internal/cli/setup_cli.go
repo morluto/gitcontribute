@@ -11,8 +11,7 @@ func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
 	clients, err := c.prepareSetupCommand(ctx, cmd)
 	if err != nil {
 		if errors.Is(err, ErrSetupCancelled) {
-			_, _ = fmt.Fprintln(c.stderr, "Setup cancelled; no changes were made.")
-			return nil
+			return c.writeSetupCancellation()
 		}
 		return err
 	}
@@ -25,8 +24,7 @@ func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
 		apply, err := c.confirmSetupPlan(ctx, opts, cmd.JSON)
 		if err != nil {
 			if errors.Is(err, ErrSetupCancelled) {
-				_, _ = fmt.Fprintln(c.stderr, "Setup cancelled; no changes were made.")
-				return nil
+				return c.writeSetupCancellation()
 			}
 			return err
 		}
@@ -39,49 +37,22 @@ func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
 
 func (c *CLI) prepareSetupCommand(ctx context.Context, cmd *setupCmd) ([]string, error) {
 	clients := selectedSetupClients(cmd.Codex, cmd.Claude)
-	if cmd.NoMCP && (len(clients) > 0 || cmd.AllClients) {
-		return nil, NewCLIError(ExitUsage, errors.New("--no-mcp cannot be combined with client flags"))
+	if err := validateSetupSelection(cmd, clients); err != nil {
+		return nil, err
 	}
 	needsPrompt := !cmd.Yes && ((!cmd.NoMCP && len(clients) == 0 && !cmd.AllClients) || cmd.TokenSource == "" || !cmd.DryRun)
 	if needsPrompt && !c.interactiveInput() {
 		return nil, NewCLIError(ExitUsage, errors.New("interactive setup requires a terminal; pass client flags and --yes"))
 	}
-	askInstall := !cmd.Yes && !cmd.InstallCLI && runningThroughNpx()
-	askClients := !cmd.Yes && !cmd.NoMCP && len(clients) == 0 && !cmd.AllClients
-	askAuth := !cmd.Yes && cmd.TokenSource == ""
-	questions := make([]SetupPromptQuestion, 0, 3)
-	if askInstall {
-		questions = append(questions, SetupQuestionInstall)
-	}
-	if askClients {
-		questions = append(questions, SetupQuestionClients)
-	}
-	if askAuth {
-		questions = append(questions, SetupQuestionAuth)
-	}
+	questions := setupQuestions(cmd, clients)
 	if len(questions) > 0 {
-		service, err := c.setupService()
-		if err != nil {
-			return nil, err
-		}
-		discovery, err := service.DiscoverSetup(ctx)
-		if err != nil {
-			return nil, NewCLIError(ExitGeneral, fmt.Errorf("inspect setup state: %w", err))
-		}
-		prompter := c.setupPrompter
-		if prompter == nil {
-			prompter = newSetupPrompter(c.stdin, c.stderr)
-		}
-		selection, err := prompter.Select(ctx, SetupPromptRequest{
-			Discovery: *discovery, Questions: questions,
-			InstallCLI: cmd.InstallCLI, Clients: clients, TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey,
-		})
+		selection, err := c.promptSetupSelection(ctx, cmd, clients, questions)
 		if err != nil {
 			return nil, err
 		}
 		cmd.InstallCLI = selection.InstallCLI
 		clients = selection.Clients
-		if askClients {
+		if containsSetupQuestion(questions, SetupQuestionClients) {
 			cmd.NoMCP = len(clients) == 0
 		}
 		cmd.TokenSource = selection.TokenSource
@@ -91,6 +62,62 @@ func (c *CLI) prepareSetupCommand(ctx context.Context, cmd *setupCmd) ([]string,
 		return nil, NewCLIError(ExitUsage, errors.New("setup has no selected capability"))
 	}
 	return clients, nil
+}
+
+func validateSetupSelection(cmd *setupCmd, clients []string) error {
+	if cmd.NoMCP && (len(clients) > 0 || cmd.AllClients) {
+		return NewCLIError(ExitUsage, errors.New("--no-mcp cannot be combined with client flags"))
+	}
+	return nil
+}
+
+func setupQuestions(cmd *setupCmd, clients []string) []SetupPromptQuestion {
+	questions := make([]SetupPromptQuestion, 0, 3)
+	if !cmd.Yes && !cmd.InstallCLI && runningThroughNpx() {
+		questions = append(questions, SetupQuestionInstall)
+	}
+	if !cmd.Yes && !cmd.NoMCP && len(clients) == 0 && !cmd.AllClients {
+		questions = append(questions, SetupQuestionClients)
+	}
+	if !cmd.Yes && cmd.TokenSource == "" {
+		questions = append(questions, SetupQuestionAuth)
+	}
+	return questions
+}
+
+func containsSetupQuestion(questions []SetupPromptQuestion, want SetupPromptQuestion) bool {
+	for _, question := range questions {
+		if question == want {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *CLI) promptSetupSelection(ctx context.Context, cmd *setupCmd, clients []string, questions []SetupPromptQuestion) (SetupSelection, error) {
+	service, err := c.setupService()
+	if err != nil {
+		return SetupSelection{}, err
+	}
+	discovery, err := service.DiscoverSetup(ctx)
+	if err != nil {
+		return SetupSelection{}, NewCLIError(ExitGeneral, fmt.Errorf("inspect setup state: %w", err))
+	}
+	prompter := c.setupPrompter
+	if prompter == nil {
+		prompter = newSetupPrompter(c.stdin, c.stderr)
+	}
+	return prompter.Select(ctx, SetupPromptRequest{
+		Discovery: *discovery, Questions: questions,
+		InstallCLI: cmd.InstallCLI, Clients: clients, TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey,
+	})
+}
+
+func (c *CLI) writeSetupCancellation() error {
+	if _, err := fmt.Fprintln(c.stderr, "Setup cancelled; no changes were made."); err != nil {
+		return NewCLIError(ExitGeneral, fmt.Errorf("write setup cancellation: %w", err))
+	}
+	return nil
 }
 
 func (c *CLI) confirmSetupPlan(ctx context.Context, opts SetupOptions, jsonOutput bool) (bool, error) {

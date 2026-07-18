@@ -979,10 +979,16 @@ func (c *CLI) executeSetup(ctx context.Context, opts SetupOptions, jsonOutput bo
 			return NewCLIError(ExitGeneral, err)
 		}
 	} else {
+		var output string
 		if opts.Remove {
-			_, _ = fmt.Fprintln(c.stdout, setupHuman(report))
+			output = setupHuman(report)
+		} else if report.DryRun {
+			output = renderSetupPlan(report)
 		} else {
-			_, _ = fmt.Fprintln(c.stdout, renderSetupResult(report, opts, opts.InstallCLI || !runningThroughNpx()))
+			output = renderSetupResult(report, opts, opts.InstallCLI || !runningThroughNpx())
+		}
+		if _, err := fmt.Fprintln(c.stdout, output); err != nil {
+			return NewCLIError(ExitGeneral, fmt.Errorf("write setup result: %w", err))
 		}
 	}
 	if report.HasFailures() {

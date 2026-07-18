@@ -29,9 +29,12 @@ type SetupPromptRequest struct {
 type SetupPromptQuestion string
 
 const (
+	// SetupQuestionInstall asks whether to install the persistent terminal app.
 	SetupQuestionInstall SetupPromptQuestion = "install"
+	// SetupQuestionClients asks which detected clients to configure.
 	SetupQuestionClients SetupPromptQuestion = "clients"
-	SetupQuestionAuth    SetupPromptQuestion = "auth"
+	// SetupQuestionAuth asks how later sync commands should authenticate.
+	SetupQuestionAuth SetupPromptQuestion = "auth"
 )
 
 func (r SetupPromptRequest) asks(question SetupPromptQuestion) bool {
@@ -74,6 +77,28 @@ func (p *huhSetupPrompter) Select(ctx context.Context, request SetupPromptReques
 		TokenSource:    request.TokenSource,
 		TokenSourceKey: request.TokenSourceKey,
 	}
+	fields := setupPromptFields(request, &selection)
+	if len(fields) > 0 {
+		if _, err := fmt.Fprintln(p.output, "┌ GitContribute setup"); err != nil {
+			return SetupSelection{}, fmt.Errorf("write setup heading: %w", err)
+		}
+		form := p.form(fields...)
+		if err := runSetupForm(ctx, form); err != nil {
+			return SetupSelection{}, err
+		}
+	}
+	if request.asks(SetupQuestionAuth) {
+		selection.TokenSourceKey = setupTokenSourceKey(request, selection.TokenSource)
+	}
+	if request.asks(SetupQuestionAuth) {
+		if err := p.promptTokenSourceKey(ctx, &selection); err != nil {
+			return SetupSelection{}, err
+		}
+	}
+	return selection, nil
+}
+
+func setupPromptFields(request SetupPromptRequest, selection *SetupSelection) []huh.Field {
 	fields := make([]huh.Field, 0, 3)
 	if request.asks(SetupQuestionInstall) {
 		selection.InstallCLI = true
@@ -85,27 +110,7 @@ func (p *huhSetupPrompter) Select(ctx context.Context, request SetupPromptReques
 			Value(&selection.InstallCLI))
 	}
 	if request.asks(SetupQuestionClients) {
-		if len(selection.Clients) == 0 {
-			for _, client := range request.Discovery.Clients {
-				if client.Detected {
-					selection.Clients = append(selection.Clients, client.Name)
-				}
-			}
-		}
-		options := make([]huh.Option[string], 0, len(request.Discovery.Clients))
-		selected := make(map[string]bool, len(selection.Clients))
-		for _, client := range selection.Clients {
-			selected[client] = true
-		}
-		for _, client := range request.Discovery.Clients {
-			label := setupClientLabel(client)
-			options = append(options, huh.NewOption(label, client.Name).Selected(selected[client.Name]))
-		}
-		fields = append(fields, huh.NewMultiSelect[string]().
-			Title("Configure agent access").
-			Description("Space toggles a client. Leave all unchecked for terminal-only setup.").
-			Options(options...).
-			Value(&selection.Clients))
+		fields = append(fields, setupClientsField(request.Discovery, &selection.Clients))
 	}
 	if request.asks(SetupQuestionAuth) {
 		selection.TokenSource = defaultSetupTokenSource(request.Discovery)
@@ -115,45 +120,63 @@ func (p *huhSetupPrompter) Select(ctx context.Context, request SetupPromptReques
 			Options(setupAuthOptions(request.Discovery)...).
 			Value(&selection.TokenSource))
 	}
-	if len(fields) > 0 {
-		_, _ = fmt.Fprintln(p.output, "┌ GitContribute setup")
-		form := p.form(fields...)
-		if err := form.RunWithContext(ctx); err != nil {
-			if errors.Is(err, huh.ErrUserAborted) || errors.Is(err, context.Canceled) {
-				return SetupSelection{}, ErrSetupCancelled
+	return fields
+}
+
+func setupClientsField(discovery SetupDiscovery, clients *[]string) huh.Field {
+	if len(*clients) == 0 {
+		for _, client := range discovery.Clients {
+			if client.Detected {
+				*clients = append(*clients, client.Name)
 			}
-			return SetupSelection{}, err
 		}
 	}
-	if request.asks(SetupQuestionAuth) {
-		selection.TokenSourceKey = setupTokenSourceKey(request, selection.TokenSource)
+	selected := make(map[string]bool, len(*clients))
+	for _, client := range *clients {
+		selected[client] = true
 	}
-	if request.asks(SetupQuestionAuth) && (selection.TokenSource == "env" || selection.TokenSource == "keyring") {
-		if selection.TokenSource == "env" && selection.TokenSourceKey == "" {
-			selection.TokenSourceKey = "GITHUB_TOKEN"
-		}
-		title := "Environment variable name"
-		description := "Only the variable name is stored; its value is never written to configuration."
-		if selection.TokenSource == "keyring" {
-			title = "System keyring entry"
-			description = "Store the entry name, not a token."
-		}
-		field := huh.NewInput().Title(title).Description(description).Value(&selection.TokenSourceKey).
-			Validate(func(value string) error {
-				if strings.TrimSpace(value) == "" {
-					return errors.New("a name is required")
-				}
-				return nil
-			})
-		form := p.form(field)
-		if err := form.RunWithContext(ctx); err != nil {
-			if errors.Is(err, huh.ErrUserAborted) || errors.Is(err, context.Canceled) {
-				return SetupSelection{}, ErrSetupCancelled
+	options := make([]huh.Option[string], 0, len(discovery.Clients))
+	for _, client := range discovery.Clients {
+		options = append(options, huh.NewOption(setupClientLabel(client), client.Name).Selected(selected[client.Name]))
+	}
+	return huh.NewMultiSelect[string]().
+		Title("Configure agent access").
+		Description("Space toggles a client. Leave all unchecked for terminal-only setup.").
+		Options(options...).
+		Value(clients)
+}
+
+func (p *huhSetupPrompter) promptTokenSourceKey(ctx context.Context, selection *SetupSelection) error {
+	if selection.TokenSource != "env" && selection.TokenSource != "keyring" {
+		return nil
+	}
+	if selection.TokenSource == "env" && selection.TokenSourceKey == "" {
+		selection.TokenSourceKey = "GITHUB_TOKEN"
+	}
+	title := "Environment variable name"
+	description := "Only the variable name is stored; its value is never written to configuration."
+	if selection.TokenSource == "keyring" {
+		title = "System keyring entry"
+		description = "Store the entry name, not a token."
+	}
+	field := huh.NewInput().Title(title).Description(description).Value(&selection.TokenSourceKey).
+		Validate(func(value string) error {
+			if strings.TrimSpace(value) == "" {
+				return errors.New("a name is required")
 			}
-			return SetupSelection{}, err
+			return nil
+		})
+	return runSetupForm(ctx, p.form(field))
+}
+
+func runSetupForm(ctx context.Context, form *huh.Form) error {
+	if err := form.RunWithContext(ctx); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) || errors.Is(err, context.Canceled) {
+			return ErrSetupCancelled
 		}
+		return err
 	}
-	return selection, nil
+	return nil
 }
 
 func (p *huhSetupPrompter) Confirm(ctx context.Context, title string) (bool, error) {
