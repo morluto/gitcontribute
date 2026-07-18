@@ -9,6 +9,21 @@ import (
 	"github.com/morluto/gitcontribute/internal/cli"
 )
 
+type fakeSetupPrompter struct {
+	selection cli.SetupSelection
+	confirmed bool
+	request   cli.SetupPromptRequest
+}
+
+func (p *fakeSetupPrompter) Select(_ context.Context, request cli.SetupPromptRequest) (cli.SetupSelection, error) {
+	p.request = request
+	return p.selection, nil
+}
+
+func (p *fakeSetupPrompter) Confirm(context.Context, string) (bool, error) {
+	return p.confirmed, nil
+}
+
 func TestRemoveAllNonInteractive(t *testing.T) {
 	svc := &fakeService{setupResult: &cli.SetupReport{Operation: "remove", Steps: []cli.SetupStep{{Name: "codex", Status: "removed"}}}}
 	c := cli.New(svc, &fakeMCPRunner{}, io.Discard, io.Discard)
@@ -23,8 +38,9 @@ func TestRemoveAllNonInteractive(t *testing.T) {
 func TestSetupWizardCanInstallTerminalWithoutMCP(t *testing.T) {
 	t.Setenv("npm_command", "exec")
 	svc := &fakeService{setupResult: &cli.SetupReport{Operation: "setup", Steps: []cli.SetupStep{{Name: "terminal", Status: "installed"}}}}
-	c, _, stderr := newTestCLI(svc, nil)
-	c.SetInput(strings.NewReader("\nnone\nnone\n\n"))
+	c, _, _ := newTestCLI(svc, nil)
+	prompter := &fakeSetupPrompter{selection: cli.SetupSelection{InstallCLI: true, TokenSource: "none"}, confirmed: true}
+	c.SetSetupPrompter(prompter)
 
 	if err := c.Run(context.Background(), []string{"setup"}); err != nil {
 		t.Fatal(err)
@@ -32,13 +48,8 @@ func TestSetupWizardCanInstallTerminalWithoutMCP(t *testing.T) {
 	if !svc.lastSetup.InstallCLI || !svc.lastSetup.SkipMCP || len(svc.lastSetup.Clients) != 0 {
 		t.Fatalf("options = %+v", svc.lastSetup)
 	}
-	for _, prompt := range []string{
-		"Install the terminal app for CLI and TUI? [Y/n]:",
-		"Set up which MCP clients? [codex,claude,none]:",
-	} {
-		if !strings.Contains(stderr.String(), prompt) {
-			t.Fatalf("missing prompt %q in %q", prompt, stderr.String())
-		}
+	if len(prompter.request.Questions) != 3 {
+		t.Fatalf("prompt request = %+v", prompter.request)
 	}
 }
 
@@ -53,7 +64,11 @@ func TestSetupWizardPreviewsPlanBeforeConfirmation(t *testing.T) {
 		}},
 	}}
 	c, stdout, stderr := newTestCLI(svc, nil)
-	c.SetInput(strings.NewReader("\ncodex\nnone\nn\n"))
+	prompter := &fakeSetupPrompter{
+		selection: cli.SetupSelection{InstallCLI: true, Clients: []string{"codex"}, TokenSource: "none"},
+		confirmed: false,
+	}
+	c.SetSetupPrompter(prompter)
 
 	if err := c.Run(context.Background(), []string{"setup"}); err != nil {
 		t.Fatal(err)
@@ -61,10 +76,19 @@ func TestSetupWizardPreviewsPlanBeforeConfirmation(t *testing.T) {
 	if len(svc.setupCalls) != 1 || !svc.setupCalls[0].DryRun || !svc.setupCalls[0].InstallCLI {
 		t.Fatalf("setup calls = %+v", svc.setupCalls)
 	}
-	if !strings.Contains(stdout.String(), "Setup plan") || !strings.Contains(stdout.String(), "npm install --global gitcontribute@0.1.1") {
+	if !containsAll(stdout.String(), "Setup plan", "npm install --global gitcontribute@0.1.1", "will not contact GitHub") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "Setup cancelled; no changes were made.") {
+	if !containsAll(stderr.String(), "Setup cancelled; no changes were made.") {
 		t.Fatalf("stderr = %q", stderr.String())
 	}
+}
+
+func containsAll(value string, parts ...string) bool {
+	for _, part := range parts {
+		if !strings.Contains(value, part) {
+			return false
+		}
+	}
+	return true
 }

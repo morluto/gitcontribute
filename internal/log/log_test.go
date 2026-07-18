@@ -36,6 +36,23 @@ func TestNew(t *testing.T) {
 	})
 }
 
+func TestDefaultHandlerSuppressesInfo(t *testing.T) {
+	t.Setenv("GITCONTRIBUTE_LOG_LEVEL", "")
+	if handlerForEnv().Enabled(context.Background(), slog.LevelInfo) {
+		t.Fatal("default handler unexpectedly enables INFO logs")
+	}
+	if !handlerForEnv().Enabled(context.Background(), slog.LevelWarn) {
+		t.Fatal("default handler should preserve warning logs")
+	}
+}
+
+func TestInfoLoggingIsOptIn(t *testing.T) {
+	t.Setenv("GITCONTRIBUTE_LOG_LEVEL", "info")
+	if !handlerForEnv().Enabled(context.Background(), slog.LevelInfo) {
+		t.Fatal("info level did not enable INFO logs")
+	}
+}
+
 func TestRedactedString(t *testing.T) {
 	t.Parallel()
 	t.Run("short strings fully redacted", func(t *testing.T) {

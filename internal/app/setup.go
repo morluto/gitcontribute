@@ -25,6 +25,16 @@ import (
 // npm or writing local state. Setup performs no GitHub access and never executes
 // repository-controlled code.
 func (s *Service) Setup(ctx context.Context, opts cli.SetupOptions) (*cli.SetupReport, error) {
+	return s.setup(ctx, opts, nil)
+}
+
+// SetupWithProgress applies setup while reporting phase changes to an optional
+// observer owned by the interactive CLI adapter.
+func (s *Service) SetupWithProgress(ctx context.Context, opts cli.SetupOptions, observer cli.SetupObserver) (*cli.SetupReport, error) {
+	return s.setup(ctx, opts, observer)
+}
+
+func (s *Service) setup(ctx context.Context, opts cli.SetupOptions, observer cli.SetupObserver) (*cli.SetupReport, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -89,8 +99,10 @@ func (s *Service) Setup(ctx context.Context, opts cli.SetupOptions) (*cli.SetupR
 		}
 	}
 	if operation == clientsetup.Configure && opts.InstallCLI {
+		setupStarted(observer, cli.SetupPhaseTerminal)
 		step, installedExecutable := installTerminal(ctx, opts.Version, opts.DryRun)
 		report.Steps = append(report.Steps, step)
+		setupCompleted(observer, step)
 		if installedExecutable != "" && !opts.SkipMCP {
 			// The process still carries npm_exec/npx environment markers from the
 			// bootstrap invocation. Clear that evidence and re-plan so MCP uses the
@@ -121,6 +133,7 @@ func (s *Service) Setup(ctx context.Context, opts cli.SetupOptions) (*cli.SetupR
 	}
 	configurationOK := true
 	if operation == clientsetup.Configure {
+		setupStarted(observer, cli.SetupPhaseConfiguration)
 		configPath, pathErr := s.paths.ConfigFile()
 		configExisted := pathErr == nil
 		if configExisted {
@@ -159,7 +172,9 @@ func (s *Service) Setup(ctx context.Context, opts cli.SetupOptions) (*cli.SetupR
 			configurationOK = false
 		}
 		report.Steps = append(report.Steps, step)
+		setupCompleted(observer, step)
 		if configureErr == nil && !opts.DryRun {
+			setupStarted(observer, cli.SetupPhaseCorpus)
 			initialized, initErr := s.Init(ctx)
 			step = cli.SetupStep{Name: "corpus", Status: "initialized"}
 			if initialized != nil {
@@ -172,6 +187,7 @@ func (s *Service) Setup(ctx context.Context, opts cli.SetupOptions) (*cli.SetupR
 				configurationOK = false
 			}
 			report.Steps = append(report.Steps, step)
+			setupCompleted(observer, step)
 		} else if opts.DryRun {
 			report.Steps = append(report.Steps, cli.SetupStep{Name: "corpus", Status: "would initialize"})
 		}
@@ -180,6 +196,7 @@ func (s *Service) Setup(ctx context.Context, opts cli.SetupOptions) (*cli.SetupR
 		// Client registration happens only after shared configuration and corpus
 		// initialization succeed. This prevents a client from pointing at setup
 		// state that could not be initialized.
+		setupStarted(observer, cli.SetupPhaseClients)
 		clientOptions.DryRun = false
 		clientReport, err = clientsetup.Run(clientOptions)
 		if err != nil {
@@ -188,10 +205,13 @@ func (s *Service) Setup(ctx context.Context, opts cli.SetupOptions) (*cli.SetupR
 	}
 	if !opts.SkipMCP {
 		for _, result := range clientReport.Results {
-			report.Steps = append(report.Steps, cli.SetupStep{Name: string(result.Client), Path: result.Path, Status: result.Status, Message: result.Error})
+			step := cli.SetupStep{Name: string(result.Client), Path: result.Path, Status: result.Status, Message: result.Error}
+			report.Steps = append(report.Steps, step)
+			setupCompleted(observer, step)
 		}
 	}
 	if operation == clientsetup.Configure && strings.TrimSpace(opts.Repository) != "" {
+		setupStarted(observer, cli.SetupPhaseRepository)
 		ref, parseErr := setupRepoRef(opts.Repository)
 		step := cli.SetupStep{Name: "repository", Status: "added", Message: opts.Repository}
 		if parseErr != nil {
@@ -208,8 +228,10 @@ func (s *Service) Setup(ctx context.Context, opts cli.SetupOptions) (*cli.SetupR
 			}
 		}
 		report.Steps = append(report.Steps, step)
+		setupCompleted(observer, step)
 	}
 	if operation == clientsetup.Configure && !opts.DryRun {
+		setupStarted(observer, cli.SetupPhaseVerification)
 		diagnostics, doctorErr := s.Doctor(ctx)
 		step := cli.SetupStep{Name: "verification", Status: "verified"}
 		if doctorErr != nil || diagnostics == nil || !diagnostics.Healthy {
@@ -231,8 +253,72 @@ func (s *Service) Setup(ctx context.Context, opts cli.SetupOptions) (*cli.SetupR
 			}
 		}
 		report.Steps = append(report.Steps, step)
+		setupCompleted(observer, step)
 	}
 	return report, nil
+}
+
+func setupStarted(observer cli.SetupObserver, phase cli.SetupPhase) {
+	if observer != nil {
+		observer.SetupStarted(phase)
+	}
+}
+
+func setupCompleted(observer cli.SetupObserver, step cli.SetupStep) {
+	if observer != nil {
+		observer.SetupCompleted(step)
+	}
+}
+
+// DiscoverSetup inspects local onboarding state without writes, network access,
+// credential resolution, or process execution.
+func (s *Service) DiscoverSetup(ctx context.Context) (*cli.SetupDiscovery, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	home := s.paths.HomeDir()
+	detected := make(map[clientsetup.Client]bool)
+	for _, client := range clientsetup.Detect(home) {
+		detected[client] = true
+	}
+
+	result := &cli.SetupDiscovery{}
+	for _, client := range clientsetup.AllClients {
+		registered, path, err := clientsetup.CheckRegistration(client, home)
+		item := cli.SetupClientDiscovery{
+			Name:       string(client),
+			Path:       path,
+			Detected:   detected[client],
+			Registered: registered,
+		}
+		if err != nil {
+			item.Error = err.Error()
+		}
+		result.Clients = append(result.Clients, item)
+	}
+
+	configPath, err := s.paths.ConfigFile()
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := s.persistedConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
+	result.ConfiguredTokenSource = cfg.TokenSource.Method
+	result.ConfiguredTokenKey = cfg.TokenSource.Key
+	_, ghErr := exec.LookPath("gh")
+	result.GitHubCLIAvailable = ghErr == nil
+	envKey := cfg.TokenSource.Key
+	if envKey == "" {
+		envKey = "GITHUB_TOKEN"
+	}
+	if s.paths.Env != nil {
+		_, result.EnvironmentKeyPresent = s.paths.Env.Vars[envKey]
+	} else {
+		_, result.EnvironmentKeyPresent = os.LookupEnv(envKey)
+	}
+	return result, nil
 }
 
 // installTerminal converts the requested release into a safe npm package

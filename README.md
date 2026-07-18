@@ -55,6 +55,11 @@ The interactive wizard offers two independent capabilities:
 - a persistent `gitcontribute` command for the CLI and TUI;
 - MCP registration for Codex and/or Claude Code.
 
+The wizard detects installed coding agents, preselects them in a visual
+multi-select, and shows the exact configuration paths it will update. GitHub
+authentication is chosen from described options rather than typed internal
+identifiers. A dry-run plan still shows every effect before final confirmation.
+
 Installing the terminal app is the recommended default. The wizard shows the
 exact global npm command before applying changes. MCP-only setup remains
 available and does not require a persistent CLI installation.

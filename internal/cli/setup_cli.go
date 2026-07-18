@@ -8,8 +8,12 @@ import (
 )
 
 func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
-	clients, err := c.prepareSetupCommand(cmd)
+	clients, err := c.prepareSetupCommand(ctx, cmd)
 	if err != nil {
+		if errors.Is(err, ErrSetupCancelled) {
+			_, _ = fmt.Fprintln(c.stderr, "Setup cancelled; no changes were made.")
+			return nil
+		}
 		return err
 	}
 	opts := SetupOptions{
@@ -20,6 +24,10 @@ func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
 	if !cmd.Yes && !cmd.DryRun {
 		apply, err := c.confirmSetupPlan(ctx, opts, cmd.JSON)
 		if err != nil {
+			if errors.Is(err, ErrSetupCancelled) {
+				_, _ = fmt.Fprintln(c.stderr, "Setup cancelled; no changes were made.")
+				return nil
+			}
 			return err
 		}
 		if !apply {
@@ -29,7 +37,7 @@ func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
 	return c.executeSetup(ctx, opts, cmd.JSON)
 }
 
-func (c *CLI) prepareSetupCommand(cmd *setupCmd) ([]string, error) {
+func (c *CLI) prepareSetupCommand(ctx context.Context, cmd *setupCmd) ([]string, error) {
 	clients := selectedSetupClients(cmd.Codex, cmd.Claude)
 	if cmd.NoMCP && (len(clients) > 0 || cmd.AllClients) {
 		return nil, NewCLIError(ExitUsage, errors.New("--no-mcp cannot be combined with client flags"))
@@ -38,61 +46,51 @@ func (c *CLI) prepareSetupCommand(cmd *setupCmd) ([]string, error) {
 	if needsPrompt && !c.interactiveInput() {
 		return nil, NewCLIError(ExitUsage, errors.New("interactive setup requires a terminal; pass client flags and --yes"))
 	}
-	if err := c.offerTerminalInstall(cmd); err != nil {
-		return nil, err
+	askInstall := !cmd.Yes && !cmd.InstallCLI && runningThroughNpx()
+	askClients := !cmd.Yes && !cmd.NoMCP && len(clients) == 0 && !cmd.AllClients
+	askAuth := !cmd.Yes && cmd.TokenSource == ""
+	questions := make([]SetupPromptQuestion, 0, 3)
+	if askInstall {
+		questions = append(questions, SetupQuestionInstall)
 	}
-	selected, err := c.selectSetupClients(cmd, clients)
-	if err != nil {
-		return nil, err
+	if askClients {
+		questions = append(questions, SetupQuestionClients)
+	}
+	if askAuth {
+		questions = append(questions, SetupQuestionAuth)
+	}
+	if len(questions) > 0 {
+		service, err := c.setupService()
+		if err != nil {
+			return nil, err
+		}
+		discovery, err := service.DiscoverSetup(ctx)
+		if err != nil {
+			return nil, NewCLIError(ExitGeneral, fmt.Errorf("inspect setup state: %w", err))
+		}
+		prompter := c.setupPrompter
+		if prompter == nil {
+			prompter = newSetupPrompter(c.stdin, c.stderr)
+		}
+		selection, err := prompter.Select(ctx, SetupPromptRequest{
+			Discovery: *discovery, Questions: questions,
+			InstallCLI: cmd.InstallCLI, Clients: clients, TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey,
+		})
+		if err != nil {
+			return nil, err
+		}
+		cmd.InstallCLI = selection.InstallCLI
+		clients = selection.Clients
+		if askClients {
+			cmd.NoMCP = len(clients) == 0
+		}
+		cmd.TokenSource = selection.TokenSource
+		cmd.TokenSourceKey = selection.TokenSourceKey
 	}
 	if cmd.NoMCP && !cmd.InstallCLI {
 		return nil, NewCLIError(ExitUsage, errors.New("setup has no selected capability"))
 	}
-	if err := c.selectSetupTokenSource(cmd); err != nil {
-		return nil, err
-	}
-	return selected, nil
-}
-
-func (c *CLI) offerTerminalInstall(cmd *setupCmd) error {
-	if cmd.Yes || cmd.InstallCLI || !runningThroughNpx() || !c.interactiveInput() {
-		return nil
-	}
-	// Only an ephemeral bootstrap needs this offer. A globally installed or
-	// source-built executable is already a persistent terminal command.
-	install, err := c.confirmSetup("Install the terminal app for CLI and TUI")
-	if err != nil {
-		return NewCLIError(ExitUsage, err)
-	}
-	cmd.InstallCLI = install
-	return nil
-}
-
-func (c *CLI) selectSetupClients(cmd *setupCmd, clients []string) ([]string, error) {
-	if cmd.NoMCP || len(clients) > 0 || cmd.AllClients || cmd.Yes {
-		return clients, nil
-	}
-	selected, err := c.promptClients("Set up", true)
-	if err != nil {
-		return nil, NewCLIError(ExitUsage, err)
-	}
-	cmd.NoMCP = len(selected) == 0
-	return selected, nil
-}
-
-func (c *CLI) selectSetupTokenSource(cmd *setupCmd) error {
-	if cmd.TokenSource != "" || cmd.Yes {
-		return nil
-	}
-	value, err := c.promptTokenSource()
-	if err != nil {
-		return NewCLIError(ExitUsage, err)
-	}
-	cmd.TokenSource = value
-	if value == "env" && cmd.TokenSourceKey == "" {
-		cmd.TokenSourceKey = "GITHUB_TOKEN"
-	}
-	return nil
+	return clients, nil
 }
 
 func (c *CLI) confirmSetupPlan(ctx context.Context, opts SetupOptions, jsonOutput bool) (bool, error) {
@@ -112,13 +110,17 @@ func (c *CLI) confirmSetupPlan(ctx context.Context, opts SetupOptions, jsonOutpu
 	if jsonOutput {
 		planOutput = c.stderr
 	}
-	if _, err := fmt.Fprintln(planOutput, setupHuman(plan)); err != nil {
+	if _, err := fmt.Fprintln(planOutput, renderSetupPlan(plan)); err != nil {
 		return false, NewCLIError(ExitGeneral, fmt.Errorf("write setup plan: %w", err))
 	}
 	if plan.HasFailures() {
 		return false, NewCLIError(ExitGeneral, errors.New("setup plan contains one or more failed steps"))
 	}
-	apply, err := c.confirmSetup("Apply setup changes")
+	prompter := c.setupPrompter
+	if prompter == nil {
+		prompter = newSetupPrompter(c.stdin, c.stderr)
+	}
+	apply, err := prompter.Confirm(ctx, "Apply these changes?")
 	if err != nil {
 		return false, NewCLIError(ExitUsage, err)
 	}

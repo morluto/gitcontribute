@@ -52,14 +52,25 @@ and `--json` exposes per-step results for automation.
 
 Interactive setup follows an explicit sequence:
 
-1. When bootstrapped through npx, ask whether to install the terminal app.
-2. Select MCP clients independently; `none` is valid when installing only the
-   terminal app.
-3. Resolve GitHub authentication configuration without contacting GitHub.
+1. When bootstrapped through npx, visually select whether to install the
+   terminal app. Installation is selected by default but still requires final
+   confirmation.
+2. Show supported MCP clients in a multi-select. Detected clients are
+   preselected, existing registration state and exact configuration paths are
+   visible, and selecting zero clients means terminal-only setup.
+3. Select GitHub authentication from described choices. Existing configuration,
+   GitHub CLI availability, and environment-variable presence inform the
+   default without resolving credentials or contacting GitHub.
 4. Produce a dry-run plan. Planning never invokes npm or writes configuration,
    corpus, client, or repository-source state.
 5. Ask for confirmation, then apply the selected effects.
 6. Verify the resulting local installation with `doctor`.
+
+Interactive setup uses inline terminal forms rather than an alternate-screen
+application. Active operations may show a spinner that settles into a durable
+status line. `NO_COLOR` and `GITCONTRIBUTE_ACCESSIBLE=1` provide plain and
+screen-reader-friendly operation respectively. Operational INFO logs are quiet
+by default; set `GITCONTRIBUTE_LOG_LEVEL=info` or `debug` when diagnosing setup.
 
 Non-interactive setup never infers permission to install globally. It requires
 `--install-cli`; `--yes` only accepts the explicitly selected plan.

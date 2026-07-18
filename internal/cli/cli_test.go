@@ -133,6 +133,20 @@ func (f *fakeService) Setup(_ context.Context, opts cli.SetupOptions) (*cli.Setu
 	return &cli.SetupReport{Operation: "setup", DryRun: opts.DryRun, Steps: []cli.SetupStep{{Name: "codex", Status: "configured"}}}, nil
 }
 
+func (f *fakeService) SetupWithProgress(ctx context.Context, opts cli.SetupOptions, _ cli.SetupObserver) (*cli.SetupReport, error) {
+	return f.Setup(ctx, opts)
+}
+
+func (f *fakeService) DiscoverSetup(context.Context) (*cli.SetupDiscovery, error) {
+	return &cli.SetupDiscovery{
+		Clients: []cli.SetupClientDiscovery{
+			{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true},
+			{Name: "claude", Path: "/home/test/.claude.json", Detected: true},
+		},
+		ConfiguredTokenSource: "none",
+	}, nil
+}
+
 type startInvArgs struct {
 	Repo   cli.RepoRef
 	Commit string

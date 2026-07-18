@@ -24,13 +24,14 @@ const maxSearchLimit = 100
 // CLI is a Kong-based adapter that parses arguments and dispatches to product-
 // owned application services. It owns no domain logic.
 type CLI struct {
-	svc    Service
-	runner MCPRunner
-	tui    TUIRunner
-	stdin  io.Reader
-	stdout io.Writer
-	stderr io.Writer
-	logger *slog.Logger
+	svc           Service
+	runner        MCPRunner
+	tui           TUIRunner
+	stdin         io.Reader
+	stdout        io.Writer
+	stderr        io.Writer
+	logger        *slog.Logger
+	setupPrompter SetupPrompter
 }
 
 // New constructs a CLI that writes results to stdout and progress to stderr.
@@ -59,6 +60,10 @@ func (c *CLI) SetInput(input io.Reader) {
 	}
 	c.stdin = input
 }
+
+// SetSetupPrompter replaces the interactive setup adapter. It is intended for
+// tests and alternate accessible frontends.
+func (c *CLI) SetSetupPrompter(prompter SetupPrompter) { c.setupPrompter = prompter }
 
 type rootCmd struct {
 	Setup         setupCmd         `cmd:"" help:"Set up GitContribute and coding-agent integrations"`
@@ -918,22 +923,6 @@ func (c *CLI) promptClients(action string, allowNone bool) ([]string, error) {
 	return clients, nil
 }
 
-func (c *CLI) promptTokenSource() (string, error) {
-	_, _ = fmt.Fprint(c.stderr, "GitHub authentication [gh-cli/env/none] (auto): ")
-	line, err := c.promptLine()
-	if err != nil {
-		return "", err
-	}
-	value := strings.ToLower(strings.TrimSpace(line))
-	if value == "" {
-		return "", nil
-	}
-	if value != "gh-cli" && value != "env" && value != "none" && value != "keyring" {
-		return "", fmt.Errorf("unsupported token source %q", value)
-	}
-	return value, nil
-}
-
 func (c *CLI) confirmSetup(prompt string) (bool, error) {
 	_, _ = fmt.Fprintf(c.stderr, "%s? [Y/n]: ", prompt)
 	line, err := c.promptLine()
@@ -969,7 +958,17 @@ func (c *CLI) executeSetup(ctx context.Context, opts SetupOptions, jsonOutput bo
 	if err != nil {
 		return err
 	}
-	report, err := service.Setup(ctx, opts)
+	var report *SetupReport
+	if !jsonOutput && interactiveWriter(c.stderr) {
+		progress := startSetupProgress(c.stderr)
+		report, err = service.SetupWithProgress(ctx, opts, progress)
+		progressErr := progress.Close()
+		if err == nil && progressErr != nil {
+			err = progressErr
+		}
+	} else {
+		report, err = service.Setup(ctx, opts)
+	}
 	if err != nil {
 		return NewCLIError(ExitGeneral, err)
 	}
@@ -980,7 +979,11 @@ func (c *CLI) executeSetup(ctx context.Context, opts SetupOptions, jsonOutput bo
 			return NewCLIError(ExitGeneral, err)
 		}
 	} else {
-		_, _ = fmt.Fprintln(c.stdout, setupHuman(report))
+		if opts.Remove {
+			_, _ = fmt.Fprintln(c.stdout, setupHuman(report))
+		} else {
+			_, _ = fmt.Fprintln(c.stdout, renderSetupResult(report, opts, opts.InstallCLI || !runningThroughNpx()))
+		}
 	}
 	if report.HasFailures() {
 		return NewCLIError(ExitGeneral, errors.New("one or more setup steps failed"))
