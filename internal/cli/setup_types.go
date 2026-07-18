@@ -65,8 +65,11 @@ type SetupClientDiscovery struct {
 type SetupMode string
 
 const (
-	SetupModeMCP  SetupMode = "mcp"
-	SetupModeCLI  SetupMode = "cli"
+	// SetupModeMCP installs private MCP access without a global CLI command.
+	SetupModeMCP SetupMode = "mcp"
+	// SetupModeCLI installs the global CLI without coding-agent configuration.
+	SetupModeCLI SetupMode = "cli"
+	// SetupModeBoth installs the global CLI and configures coding-agent MCP access.
 	SetupModeBoth SetupMode = "both"
 )
 

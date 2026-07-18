@@ -3,6 +3,7 @@ package managedbinary
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -35,50 +36,63 @@ func Install(source, destination string) (bool, error) {
 		return false, err
 	}
 	if matching {
+		// #nosec G302 -- the managed native program must remain executable.
 		if err := os.Chmod(destination, 0o755); err != nil {
 			return false, fmt.Errorf("make managed binary executable: %w", err)
 		}
 		return false, nil
 	}
+	// #nosec G304 -- source is the running executable selected by the application.
 	in, err := os.Open(source)
 	if err != nil {
 		return false, fmt.Errorf("open packaged executable: %w", err)
 	}
-	defer in.Close()
 
 	dir := filepath.Dir(destination)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
+		if closeErr := in.Close(); closeErr != nil {
+			err = fmt.Errorf("%w; close packaged executable: %v", err, closeErr)
+		}
 		return false, fmt.Errorf("create managed binary directory: %w", err)
 	}
 	tmp, err := os.CreateTemp(dir, ".gitcontribute-runtime-*")
 	if err != nil {
+		if closeErr := in.Close(); closeErr != nil {
+			err = fmt.Errorf("%w; close packaged executable: %v", err, closeErr)
+		}
 		return false, fmt.Errorf("create managed binary: %w", err)
 	}
 	tmpPath := tmp.Name()
-	cleanup := true
-	defer func() {
-		_ = tmp.Close()
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-	if _, err := io.Copy(tmp, in); err != nil {
-		return false, fmt.Errorf("copy managed binary: %w", err)
+	_, copyErr := io.Copy(tmp, in)
+	closeSourceErr := in.Close()
+	if copyErr != nil || closeSourceErr != nil {
+		return false, discardTempFile(tmp, tmpPath, fmt.Errorf("copy managed binary: %w", errors.Join(copyErr, closeSourceErr)))
 	}
 	if err := tmp.Chmod(0o755); err != nil {
-		return false, fmt.Errorf("make managed binary executable: %w", err)
+		return false, discardTempFile(tmp, tmpPath, fmt.Errorf("make managed binary executable: %w", err))
 	}
 	if err := tmp.Sync(); err != nil {
-		return false, fmt.Errorf("sync managed binary: %w", err)
+		return false, discardTempFile(tmp, tmpPath, fmt.Errorf("sync managed binary: %w", err))
 	}
 	if err := tmp.Close(); err != nil {
-		return false, fmt.Errorf("close managed binary: %w", err)
+		return false, errors.Join(fmt.Errorf("close managed binary: %w", err), removeTempFile(tmpPath))
 	}
 	if err := replaceFile(tmpPath, destination); err != nil {
-		return false, fmt.Errorf("activate managed binary: %w", err)
+		return false, errors.Join(fmt.Errorf("activate managed binary: %w", err), removeTempFile(tmpPath))
 	}
-	cleanup = false
 	return true, nil
+}
+
+func discardTempFile(file *os.File, path string, cause error) error {
+	return errors.Join(cause, file.Close(), removeTempFile(path))
+}
+
+func removeTempFile(path string) error {
+	err := os.Remove(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 func sameContents(source, destination string) (bool, error) {
@@ -111,14 +125,16 @@ func sameContents(source, destination string) (bool, error) {
 }
 
 func fileHash(path string) ([sha256.Size]byte, error) {
+	// #nosec G304 -- callers provide only resolved source and managed destinations.
 	file, err := os.Open(path)
 	if err != nil {
 		return [sha256.Size]byte{}, fmt.Errorf("open executable for comparison: %w", err)
 	}
-	defer file.Close()
 	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return [sha256.Size]byte{}, fmt.Errorf("hash executable: %w", err)
+	_, copyErr := io.Copy(hash, file)
+	closeErr := file.Close()
+	if copyErr != nil || closeErr != nil {
+		return [sha256.Size]byte{}, fmt.Errorf("hash executable: %w", errors.Join(copyErr, closeErr))
 	}
 	var result [sha256.Size]byte
 	copy(result[:], hash.Sum(nil))
