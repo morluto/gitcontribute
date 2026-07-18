@@ -47,12 +47,12 @@ inspection, health analysis, dossiers, and investigations run entirely offline.
 Run the guided setup with Node.js 18 or newer:
 
 ```sh
-npx gitcontribute setup
+npx gitcontribute@latest setup
 ```
 
-On a clean machine, npx resolves npm's current `latest` release. If an older
-local or global command might already exist, force a refresh with
-`npx gitcontribute@latest setup`.
+On a clean machine, the shorter `npx gitcontribute setup` also resolves npm's
+current `latest` release. The explicit tag is the safe copy-paste form because
+npm can otherwise reuse an older local or global `gitcontribute` command.
 
 The interactive wizard offers two independent capabilities:
 

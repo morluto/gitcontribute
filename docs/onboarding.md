@@ -3,12 +3,12 @@
 The primary installation and onboarding entry point is:
 
 ```sh
-npx gitcontribute setup
+npx gitcontribute@latest setup
 ```
 
-On a clean machine, npx resolves npm's current `latest` release. Use
-`npx gitcontribute@latest setup` to force the current registry release when an
-older local or global command may already exist.
+On a clean machine, the shorter `npx gitcontribute setup` also resolves npm's
+current `latest` release. The explicit tag prevents npm from reusing an older
+local or global `gitcontribute` command.
 
 The interactive wizard treats terminal and agent access as independent
 capabilities. It offers to install a persistent `gitcontribute` command for the

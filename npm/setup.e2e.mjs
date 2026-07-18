@@ -17,6 +17,10 @@ function run(command, args, options = {}) {
   return result;
 }
 
+function shellQuote(value) {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
 async function packCurrentPlatform(workspace) {
   const platform = platforms[`${process.platform}-${process.arch}`];
   assert.ok(platform, `unsupported test platform ${process.platform}-${process.arch}`);
@@ -113,7 +117,7 @@ test("packaged setup can install the terminal app without configuring MCP", { sk
   }
 });
 
-test("bare npx setup launches the packaged wizard and configures MCP", { skip: process.platform === "win32" }, async () => {
+test("project-local npx setup launches the packaged CLI and configures MCP", { skip: process.platform === "win32" }, async () => {
   const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-setup-e2e-"));
   try {
     const tarball = await packCurrentPlatform(workspace);
@@ -159,6 +163,80 @@ test("bare npx setup launches the packaged wizard and configures MCP", { skip: p
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test(
+  "packaged interactive setup advances after keeping npx",
+  { skip: process.platform === "win32" },
+  async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-setup-pty-e2e-"));
+    try {
+      const tarball = await packCurrentPlatform(workspace);
+      const runner = join(workspace, "runner");
+      run("npm", ["install", "--prefix", runner, "--ignore-scripts", "--no-audit", "--no-fund", tarball]);
+
+      const home = join(workspace, "home");
+      await mkdir(join(home, ".codex"), { recursive: true });
+      const command = join(runner, "node_modules", ".bin", "gitcontribute");
+      const input = "\x1b]11;rgb:0000/0000/0000\x07\x1b[1;1R\x1b[B\r\x03";
+      const env = {
+        ...process.env,
+        HOME: home,
+        XDG_CONFIG_HOME: join(home, ".config"),
+        XDG_DATA_HOME: join(home, ".local", "share"),
+        XDG_CACHE_HOME: join(home, ".cache"),
+        XDG_STATE_HOME: join(home, ".local", "state"),
+        npm_command: "exec",
+        TERM: "xterm-256color",
+        GITCONTRIBUTE_E2E_COMMAND: command,
+      };
+      const result =
+        process.platform === "darwin"
+          ? spawnSync(
+              "expect",
+              [
+                "-c",
+                String.raw`set timeout 20
+stty rows 40 columns 120
+spawn -noecho $env(GITCONTRIBUTE_E2E_COMMAND) setup
+exec stty rows 40 columns 120 < $spawn_out(slave,name)
+expect {
+  -exact "\033\[6n" { send "\033]11;rgb:0000/0000/0000\007\033\[1;1R" }
+  timeout { exit 6 }
+  eof { exit 7 }
+}
+expect {
+  -re {How do you want to run GitContribute\?} { send "\033\[B\r" }
+  timeout { exit 2 }
+  eof { exit 3 }
+}
+expect {
+  -re {Use GitContribute from coding agents} { send "\003" }
+  timeout { exit 4 }
+  eof { exit 5 }
+}
+expect eof
+catch wait result
+exit [lindex $result 3]`,
+              ],
+              { encoding: "utf8", env }
+            )
+          : spawnSync("script", ["-qefc", `${shellQuote(command)} setup`, "/dev/null"], {
+              encoding: "utf8",
+              env,
+              input,
+            });
+
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      const transcript = `${result.stdout}\n${result.stderr}`;
+      assert.match(transcript, /How do you want to run GitContribute\?/);
+      assert.match(transcript, /Use GitContribute from coding agents/);
+      assert.match(transcript, /Setup cancelled; no changes were made\./);
+      await assert.rejects(readFile(join(home, ".codex", "config.toml"), "utf8"));
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  }
+);
 
 test(
   "direct npx package runner ignores a stale executable on PATH",
