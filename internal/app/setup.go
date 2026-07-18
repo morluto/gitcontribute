@@ -318,21 +318,9 @@ func (r *setupRun) verify() {
 		} else {
 			step.Message = "required installation checks failed"
 		}
-	} else if warnings := diagnosticWarningCount(diagnostics); warnings > 0 {
-		step.Message = fmt.Sprintf("verified with %d optional warning(s); run gitcontribute doctor for details", warnings)
 	}
 	r.report.Steps = append(r.report.Steps, step)
 	setupCompleted(r.observer, step)
-}
-
-func diagnosticWarningCount(diagnostics *cli.DoctorResult) int {
-	warnings := 0
-	for _, check := range diagnostics.Checks {
-		if check.Status == "warning" {
-			warnings++
-		}
-	}
-	return warnings
 }
 
 func setupStarted(observer cli.SetupObserver, phase cli.SetupPhase) {

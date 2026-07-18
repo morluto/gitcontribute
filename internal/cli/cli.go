@@ -661,10 +661,7 @@ type tuiCmd struct {
 func (c *CLI) Run(ctx context.Context, args []string) error {
 	args = normalizeCompatibilityArgs(args)
 	if len(args) == 0 {
-		if !c.interactiveInput() || !c.interactiveOutput() {
-			return NewCLIError(ExitUsage, errors.New("interactive interface requires a terminal; run gitcontribute --help for commands"))
-		}
-		return c.runTUI(ctx, &tuiCmd{})
+		return c.runDefault(ctx)
 	}
 	var cli rootCmd
 	parser, err := kong.New(&cli,
@@ -877,24 +874,6 @@ func (c *CLI) runRemoveCommand(ctx context.Context, cmd *removeCmd) error {
 		}
 	}
 	return c.executeSetup(ctx, SetupOptions{Remove: true, Clients: clients, AllClients: all, DryRun: cmd.DryRun}, cmd.JSON)
-}
-
-func (c *CLI) interactiveInput() bool {
-	file, ok := c.stdin.(*os.File)
-	if !ok {
-		return true
-	}
-	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
-}
-
-func (c *CLI) interactiveOutput() bool {
-	file, ok := c.stdout.(*os.File)
-	if !ok {
-		return true
-	}
-	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func selectedSetupClients(codex, claude bool) []string {
