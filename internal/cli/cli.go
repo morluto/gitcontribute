@@ -1769,24 +1769,6 @@ func (c *CLI) runMetadata(ctx context.Context, cmd *metadataCmd) error {
 	return c.render(cmd.JSON, result)
 }
 
-func (c *CLI) runDoctor(ctx context.Context, cmd *doctorCmd) error {
-	service, err := c.controlService()
-	if err != nil {
-		return err
-	}
-	result, err := service.Doctor(ctx)
-	if err != nil {
-		return c.mapError(err)
-	}
-	if err := c.render(cmd.JSON, result); err != nil {
-		return err
-	}
-	if cmd.Strict && !result.Healthy {
-		return NewCLIError(ExitGeneral, errors.New("required diagnostic checks failed"))
-	}
-	return nil
-}
-
 func (c *CLI) runStatus(ctx context.Context, cmd *statusCmd) error {
 	if service, ok := c.svc.(ControlService); ok {
 		res, err := service.ControlStatus(ctx)
