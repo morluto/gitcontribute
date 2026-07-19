@@ -647,7 +647,7 @@ var errInvalidCoverageTarget = errors.New("invalid coverage target")
 func readCoverageTarget(ctx context.Context, c *corpus.Corpus, target mcpserver.CoverageTarget) (mcpserver.CoverageOutput, string, error) {
 	ref := domain.RepoRef{Owner: target.Owner, Repo: target.Repo}
 	if err := ref.Validate(); err != nil {
-		return mcpserver.CoverageOutput{}, "invalid_reference", fmt.Errorf("%w: %v", errInvalidCoverageTarget, err)
+		return mcpserver.CoverageOutput{}, "invalid_reference", fmt.Errorf("%w: %w", errInvalidCoverageTarget, err)
 	}
 	isThread := target.Kind != "" || target.Number != 0
 	if isThread && ((target.Kind != "issue" && target.Kind != "pull_request") || target.Number < 1) {

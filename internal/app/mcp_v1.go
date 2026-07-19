@@ -332,7 +332,9 @@ func (r *MCPReader) BuildRepositoryDossier(ctx context.Context, in mcpserver.Bui
 		if err != nil {
 			return nil, err
 		}
-		_ = report("repository_dossier", jobProgressCounts(1, 1))
+		if err := report("repository_dossier", jobProgressCounts(1, 1)); err != nil {
+			return nil, err
+		}
 		return res, nil
 	})
 	if err != nil {
@@ -357,7 +359,9 @@ func (r *MCPReader) CreateWorkspace(ctx context.Context, in mcpserver.CreateWork
 		if err != nil {
 			return nil, err
 		}
-		_ = report("workspace_creation", jobProgressCounts(1, 1))
+		if err := report("workspace_creation", jobProgressCounts(1, 1)); err != nil {
+			return nil, err
+		}
 		return res, nil
 	})
 	if err != nil {
@@ -384,7 +388,9 @@ func (r *MCPReader) RunValidation(ctx context.Context, in mcpserver.RunValidatio
 		if err != nil {
 			return nil, err
 		}
-		_ = report("validation", jobProgressCounts(1, 1))
+		if err := report("validation", jobProgressCounts(1, 1)); err != nil {
+			return nil, err
+		}
 		return res, nil
 	})
 	if err != nil {
