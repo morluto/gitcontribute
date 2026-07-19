@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/lens"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
@@ -69,7 +70,28 @@ func TestServiceClustersAndCluster(t *testing.T) {
 	seedRepoAndThreads(t, svc.corpus)
 
 	repo := cli.RepoRef{Owner: "owner", Repo: "repo"}
-	list, err := svc.Clusters(ctx, repo, 10)
+	before, err := svc.ListClusters(ctx, repo, 10)
+	if err != nil {
+		t.Fatalf("list clusters before refresh: %v", err)
+	}
+	if before.Total != 0 {
+		t.Fatalf("unrefreshed list = %+v, want empty", before)
+	}
+	firstRefresh, err := svc.RefreshClusters(ctx, repo)
+	if err != nil {
+		t.Fatalf("refresh clusters: %v", err)
+	}
+	if firstRefresh.Disposition != "committed" || firstRefresh.Stats.ComparedPairs == 0 {
+		t.Fatalf("first refresh = %+v", firstRefresh)
+	}
+	secondRefresh, err := svc.RefreshClusters(ctx, repo)
+	if err != nil {
+		t.Fatalf("unchanged refresh: %v", err)
+	}
+	if secondRefresh.Disposition != "unchanged" || secondRefresh.Stats.ComparedPairs != 0 {
+		t.Fatalf("second refresh = %+v, want unchanged with zero comparisons", secondRefresh)
+	}
+	list, err := svc.ListClusters(ctx, repo, 10)
 	if err != nil {
 		t.Fatalf("clusters: %v", err)
 	}
@@ -103,6 +125,33 @@ func TestServiceClustersAndCluster(t *testing.T) {
 	}
 	if len(detail.Members) == 0 {
 		t.Fatal("expected cluster members in detail view")
+	}
+	stored, err := svc.corpus.GetClusterProjection(ctx, stableID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var governed clustering.MemberRef
+	for _, member := range stored.Members {
+		if member.Ref != stored.Canonical {
+			governed = member.Ref
+			break
+		}
+	}
+	if governed.Number == 0 {
+		t.Fatal("expected a non-canonical member for governance test")
+	}
+	if err := svc.corpus.AddClusterOverride(ctx, stored.ID, stored.Canonical, clustering.OverrideExclude, "remove canonical"); err == nil || err.Error() != "cannot exclude the canonical member" {
+		t.Fatalf("canonical exclusion error = %v", err)
+	}
+	if err := svc.corpus.AddClusterOverride(ctx, stored.ID, governed, clustering.OverrideExclude, "not the same root cause"); err != nil {
+		t.Fatal(err)
+	}
+	governedRefresh, err := svc.RefreshClusters(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if governedRefresh.Disposition != "committed" || governedRefresh.Projection.GovernanceRevision != 1 {
+		t.Fatalf("governed refresh = %+v", governedRefresh)
 	}
 
 	if _, err := svc.Cluster(ctx, "nosuchcluster", 100); err == nil {
@@ -246,7 +295,7 @@ func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
 	seedRepoAndThreads(t, svc.corpus)
 
 	// Clusters must be computed before the MCP read tool can list them.
-	if _, err := svc.Clusters(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, 10); err != nil {
+	if _, err := svc.RefreshClusters(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}); err != nil {
 		t.Fatalf("compute clusters: %v", err)
 	}
 
@@ -257,6 +306,9 @@ func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
 	}
 	if clusters.Total == 0 {
 		t.Fatal("expected clusters from MCP")
+	}
+	if clusters.RuleVersion != "duplicate-v1" {
+		t.Fatalf("cluster rule version = %q", clusters.RuleVersion)
 	}
 
 	cov, err := reader.GetCoverage(ctx, mcpserver.GetCoverageInput{Targets: []mcpserver.CoverageTarget{{Owner: "owner", Repo: "repo"}}})

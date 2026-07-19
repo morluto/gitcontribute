@@ -142,7 +142,7 @@ func appendExplicitResearchRelations(ctx context.Context, c *corpus.Corpus, expl
 }
 
 func appendClusterResearchRelations(ctx context.Context, c *corpus.Corpus, ref research.ThreadRef, result *research.RelationshipEvidence) error {
-	cluster, err := c.Clustering().GetClusterForMember(ctx, clustering.MemberRef{
+	cluster, err := c.GetClusterProjectionForMember(ctx, clustering.MemberRef{
 		Owner: ref.Repo.Owner, Repo: ref.Repo.Repo, Kind: string(ref.Kind), Number: ref.Number,
 	})
 	if err != nil {
@@ -525,7 +525,7 @@ func researchReferenceURL(ref research.ThreadRef) string {
 }
 
 func researchTextReferences(text string, target research.ThreadRef) bool {
-	for _, ref := range clustering.ExtractRefs(text, target.Repo) {
+	for _, ref := range clustering.ExtractMemberRefs(text, target.Repo) {
 		if strings.EqualFold(ref.Owner, target.Repo.Owner) && strings.EqualFold(ref.Repo, target.Repo.Repo) && ref.Number == target.Number {
 			return true
 		}

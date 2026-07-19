@@ -520,7 +520,7 @@ func extractReferences(e ThreadEvidence) []Reference {
 	seen := map[string]struct{}{}
 	out := []Reference{}
 	for _, input := range inputs {
-		for _, ref := range clustering.ExtractRefs(input.text, e.Thread.Ref.Repo) {
+		for _, ref := range clustering.ExtractMemberRefs(input.text, e.Thread.Ref.Repo) {
 			if strings.EqualFold(ref.Owner, e.Thread.Ref.Repo.Owner) && strings.EqualFold(ref.Repo, e.Thread.Ref.Repo.Repo) && ref.Number == e.Thread.Ref.Number {
 				continue
 			}

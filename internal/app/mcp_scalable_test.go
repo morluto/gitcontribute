@@ -288,6 +288,9 @@ func TestFindPrecedentsUsesClosedAndMergedHistory(t *testing.T) {
 	if reasons := (*out.Items[0].Value)[0].Reasons; len(reasons) < 2 || reasons[1] != "pull request merged" {
 		t.Fatalf("missing merged evidence: %v", reasons)
 	}
+	if got := (*out.Items[0].Value)[0].RuleVersion; got != "precedent-v1" {
+		t.Fatalf("rule version = %q, want precedent-v1", got)
+	}
 }
 
 type fakeDeepWikiReader struct {

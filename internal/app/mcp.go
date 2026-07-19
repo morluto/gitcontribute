@@ -558,17 +558,20 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpserver.FindClustersI
 	if err != nil {
 		return mcpserver.FindClustersOutput{}, err
 	}
-	clusters, err := c.Clustering().ListClusters(ctx, ref, clustering.ClusterOpen, in.Limit)
+	projection, err := c.ListClusterProjection(ctx, ref, clustering.ClusterOpen, in.Limit)
 	if err != nil {
 		return mcpserver.FindClustersOutput{}, fmt.Errorf("list clusters: %w", err)
 	}
 	out := mcpserver.FindClustersOutput{
 		Owner:    in.Owner,
 		Repo:     in.Repo,
-		Total:    len(clusters),
-		Clusters: make([]mcpserver.ClusterOutput, len(clusters)),
+		Total:    len(projection.Clusters),
+		Clusters: make([]mcpserver.ClusterOutput, len(projection.Clusters)),
 	}
-	for i, cl := range clusters {
+	if projection.Projection != nil {
+		out.RuleVersion = projection.Projection.RuleVersion
+	}
+	for i, cl := range projection.Clusters {
 		out.Clusters[i] = clusterToMCP(cl, 20)
 	}
 	return out, nil

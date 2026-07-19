@@ -90,6 +90,8 @@ func humanOutput(v any) (string, error) {
 		return draftHuman(r), nil
 	case *ClusterListResult:
 		return clusterListHuman(r), nil
+	case *ClusterRefreshResult:
+		return fmt.Sprintf("cluster projection %s for %s (%d candidates, %d comparisons, rule %s)", r.Disposition, r.Repo, r.Stats.CandidateCount, r.Stats.ComparedPairs, r.Projection.RuleVersion), nil
 	case *ClusterResult:
 		return clusterHuman(r), nil
 	case *LensResult:

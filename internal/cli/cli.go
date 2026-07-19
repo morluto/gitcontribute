@@ -104,7 +104,7 @@ type rootCmd struct {
 	Job           jobCmd           `cmd:"" help:"Inspect or cancel a durable job"`
 	Neighbors     neighborsCmd     `cmd:"" help:"Find similar local threads"`
 	Export        exportCmd        `cmd:"" help:"Export redacted local bundles"`
-	Clusters      clustersCmd      `cmd:"" help:"Compute and list duplicate-candidate clusters for a repository"`
+	Clusters      clustersCmd      `cmd:"" help:"List or explicitly refresh duplicate-candidate clusters"`
 	Cluster       clusterCmd       `cmd:"" help:"Inspect duplicate-candidate clusters"`
 	Lens          lensCmd          `cmd:"" help:"Manage saved lenses"`
 	Collection    collectionCmd    `cmd:"" help:"Manage named collections"`
@@ -475,22 +475,6 @@ type prCmd struct {
 	JSON          bool   `name:"json" help:"Print the result as JSON"`
 }
 
-type clustersCmd struct {
-	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
-	Limit     int    `name:"limit" default:"50" help:"Maximum clusters to return"`
-	JSON      bool   `name:"json" help:"Print the result as JSON"`
-}
-
-type clusterCmd struct {
-	Show clusterShowCmd `cmd:"" help:"Show a cluster by stable id"`
-}
-
-type clusterShowCmd struct {
-	ID    string `arg:"" help:"Cluster stable id"`
-	Limit int    `name:"limit" default:"100" help:"Maximum members to show"`
-	JSON  bool   `name:"json" help:"Print the result as JSON"`
-}
-
 type archiveCmd struct {
 	Sync     archiveSyncCmd    `cmd:"" help:"Synchronize repository threads"`
 	Hydrate  archiveHydrateCmd `cmd:"" help:"Hydrate one issue or pull request"`
@@ -777,7 +761,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	case "export":
 		return c.runExport(ctx, command, &cli.Export)
 	case "clusters":
-		return c.runClusters(ctx, &cli.Clusters)
+		return c.runClusters(ctx, command, &cli.Clusters)
 	case "cluster":
 		return c.runCluster(ctx, command, &cli.Cluster)
 	case "lens":
@@ -990,6 +974,13 @@ func normalizeCompatibilityArgs(args []string) []string {
 			}
 		}
 		return append([]string{"search", kind}, out[1:]...)
+	case "clusters":
+		if len(args) > 1 && (args[1] == "list" || args[1] == "refresh" || args[1] == "--help" || args[1] == "-h") {
+			return args
+		}
+		out := make([]string, 0, len(args)+1)
+		out = append(out, "clusters", "list")
+		return append(out, args[1:]...)
 	default:
 		return args
 	}
@@ -1926,48 +1917,6 @@ func parseRepo(s string) (RepoRef, error) {
 		return RepoRef{}, NewCLIError(ExitUsage, fmt.Errorf("invalid repository %q: expected OWNER/REPO", s))
 	}
 	return RepoRef{Owner: parts[0], Repo: parts[1]}, nil
-}
-
-func (c *CLI) runClusters(ctx context.Context, cmd *clustersCmd) error {
-	repo, err := parseRepo(cmd.OwnerRepo)
-	if err != nil {
-		return err
-	}
-	if cmd.Limit <= 0 || cmd.Limit > 1000 {
-		return NewCLIError(ExitUsage, fmt.Errorf("limit must be between 1 and 1000"))
-	}
-	service, err := c.clusteringService()
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(c.stderr, "computing clusters for %s...\n", repo)
-	res, err := service.Clusters(ctx, repo, cmd.Limit)
-	if err != nil {
-		return c.mapError(err)
-	}
-	return c.render(cmd.JSON, res)
-}
-
-func (c *CLI) runCluster(ctx context.Context, command string, cmd *clusterCmd) error {
-	if command != "cluster show" {
-		return NewCLIError(ExitUsage, fmt.Errorf("unknown cluster command: %s", command))
-	}
-	show := &cmd.Show
-	if strings.TrimSpace(show.ID) == "" {
-		return NewCLIError(ExitUsage, errors.New("cluster id is required"))
-	}
-	if show.Limit <= 0 || show.Limit > 1000 {
-		return NewCLIError(ExitUsage, fmt.Errorf("limit must be between 1 and 1000"))
-	}
-	service, err := c.clusteringService()
-	if err != nil {
-		return err
-	}
-	res, err := service.Cluster(ctx, show.ID, show.Limit)
-	if err != nil {
-		return c.mapError(err)
-	}
-	return c.render(show.JSON, res)
 }
 
 func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) error {

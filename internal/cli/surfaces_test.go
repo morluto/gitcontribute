@@ -17,6 +17,7 @@ type fakeSurfacesService struct {
 	*fakeService
 
 	clustersCalled    bool
+	refreshCalled     bool
 	clusterCalled     bool
 	addLensCalled     bool
 	listLensCalled    bool
@@ -47,7 +48,7 @@ type fakeSurfacesService struct {
 	lastHydrateOpts     cli.HydrateOptions
 }
 
-func (f *fakeSurfacesService) Clusters(ctx context.Context, repo cli.RepoRef, limit int) (*cli.ClusterListResult, error) {
+func (f *fakeSurfacesService) ListClusters(_ context.Context, repo cli.RepoRef, _ int) (*cli.ClusterListResult, error) {
 	f.clustersCalled = true
 	f.lastClustersArg = repo
 	return &cli.ClusterListResult{
@@ -62,6 +63,12 @@ func (f *fakeSurfacesService) Clusters(ctx context.Context, repo cli.RepoRef, li
 			},
 		},
 	}, f.err
+}
+
+func (f *fakeSurfacesService) RefreshClusters(_ context.Context, repo cli.RepoRef) (*cli.ClusterRefreshResult, error) {
+	f.refreshCalled = true
+	f.lastClustersArg = repo
+	return &cli.ClusterRefreshResult{Repo: repo, Disposition: "committed", Projection: cli.ClusterProjectionIdentity{RuleVersion: "duplicate-v1"}}, f.err
 }
 
 func (f *fakeSurfacesService) Cluster(ctx context.Context, id string, limit int) (*cli.ClusterResult, error) {
@@ -222,6 +229,12 @@ func TestClustersCommand(t *testing.T) {
 	}
 	if got.Total != 2 {
 		t.Fatalf("unexpected JSON: %+v", got)
+	}
+
+	c3, _, _ := newSurfacesCLI(svc)
+	requireNoErr(t, c3.Run(context.Background(), []string{"clusters", "refresh", "o/r"}))
+	if !svc.refreshCalled || svc.lastClustersArg.String() != "o/r" {
+		t.Fatalf("cluster refresh not called: called=%v repo=%+v", svc.refreshCalled, svc.lastClustersArg)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/morluto/gitcontribute/internal/lens"
+	"github.com/morluto/gitcontribute/internal/similarity"
 )
 
 // ErrNotFound lets readers distinguish absent corpus objects from failures.
@@ -347,10 +348,11 @@ type ClusterOutput struct {
 
 // FindClustersOutput contains duplicate clusters for a repository.
 type FindClustersOutput struct {
-	Owner    string          `json:"owner"`
-	Repo     string          `json:"repo"`
-	Total    int             `json:"total"`
-	Clusters []ClusterOutput `json:"clusters"`
+	Owner       string                 `json:"owner"`
+	Repo        string                 `json:"repo"`
+	RuleVersion similarity.RuleVersion `json:"rule_version,omitempty"`
+	Total       int                    `json:"total"`
+	Clusters    []ClusterOutput        `json:"clusters"`
 }
 
 // CoverageTarget selects repository-level coverage or, when kind and number
@@ -490,11 +492,11 @@ func (s *Server) register() {
 	})
 	addCatalogTool(s.server, catalogTool[FindClustersInput, FindClustersOutput]{
 		name: ToolFindClusters, title: "Find duplicate clusters",
-		description: "List bounded duplicate-candidate clusters already computed for one repository. Use this for repository-wide duplicate structure; use " + ToolFindNeighbors + " for one specific thread.",
+		description: "List stored duplicate clusters for a repository. For one thread, use " + ToolFindNeighbors + ".",
 		annotations: readOnly, input: inputSchema[FindClustersInput](func(schema *jsonschema.Schema) {
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
-		}), output: outputSchema[FindClustersOutput]("Duplicate-candidate clusters for a stored repository."), handler: s.findClusters,
+		}), output: outputSchema[FindClustersOutput]("Stored duplicate clusters."), handler: s.findClusters,
 	})
 	addCatalogTool(s.server, catalogTool[FindNeighborsInput, FindNeighborsOutput]{
 		name: ToolFindNeighbors, title: "Find similar threads",

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
-	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -184,16 +183,22 @@ func TestContributionRadarDistinguishesMissingRepositoryAndEmptyResult(t *testin
 
 func TestContributionRadarReadsStoredDuplicateCluster(t *testing.T) {
 	fixture := newRadarTestFixture(t)
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
-	_, clusters, err := fixture.svc.corpus.Clustering().Compute(fixture.ctx, ref, []clustering.Candidate{
-		{ThreadID: fixture.issueID, Repo: ref, Kind: corpus.ThreadKindIssue, Number: 1, State: "open", Title: "starter bug", Body: "first report", UpdatedAt: fixture.now.Add(-24 * time.Hour)},
-		{ThreadID: fixture.issue2ID, Repo: ref, Kind: corpus.ThreadKindIssue, Number: 2, State: "open", Title: "same bug", Body: "duplicate of #1", UpdatedAt: fixture.now.Add(-12 * time.Hour)},
-	}, clustering.DefaultConfig())
+	repo, err := fixture.svc.corpus.GetRepository(fixture.ctx, "owner", "repo")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(clusters) != 1 {
-		t.Fatalf("clusters = %+v", clusters)
+	if _, err := fixture.svc.corpus.UpsertThread(fixture.ctx, corpus.Thread{
+		RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 2, State: "open",
+		Title: "same starter bug", Body: "duplicate of #1", Assignees: []string{"alice"}, SourceUpdatedAt: fixture.now,
+	}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	refresh, err := fixture.svc.RefreshClusters(fixture.ctx, cli.RepoRef{Owner: "owner", Repo: "repo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refresh.Stats.ClusterCount != 1 {
+		t.Fatalf("refresh = %+v", refresh)
 	}
 
 	report, err := fixture.svc.ContributionRadar(fixture.ctx, cli.RadarOptions{Repo: cli.RepoRef{Owner: "owner", Repo: "repo"}})
@@ -204,7 +209,7 @@ func TestContributionRadarReadsStoredDuplicateCluster(t *testing.T) {
 	if candidate == nil || candidate.DuplicateCluster == nil {
 		t.Fatalf("candidate duplicate evidence = %+v", candidate)
 	}
-	if candidate.DuplicateCluster.CanonicalRef != "issue:owner/repo#1" || candidate.DuplicateCluster.CandidateCount != 1 {
+	if candidate.DuplicateCluster.CanonicalRef != "issue:owner/repo#1" || candidate.DuplicateCluster.CandidateCount != 2 {
 		t.Fatalf("duplicate fact = %+v", candidate.DuplicateCluster)
 	}
 	if !radarSignal(candidate.Risks, "duplicate_candidates") {

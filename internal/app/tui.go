@@ -57,11 +57,11 @@ func (s *Service) Load(ctx context.Context) (tui.Data, error) {
 
 		remaining = maxTUIItems - len(data.Clusters)
 		if remaining > 0 {
-			clusters, err := c.Clustering().ListClusters(ctx, ref, clustering.ClusterState(""), remaining)
+			projection, err := c.ListClusterProjection(ctx, ref, clustering.ClusterState(""), remaining)
 			if err != nil {
 				return tui.Data{}, err
 			}
-			for _, cluster := range clusters {
+			for _, cluster := range projection.Clusters {
 				data.Clusters = append(data.Clusters, tui.Item{
 					Kind: "cluster", ID: cluster.StableID, Ref: ref.String() + ":cluster:" + cluster.StableID,
 					Title: cluster.StableID, Subtitle: fmt.Sprintf("%s · %d members", cluster.State, len(cluster.Members)),
