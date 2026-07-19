@@ -124,10 +124,15 @@ func TestCancelJobsPreservesOrderAndIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertCancelJobsOutput(t, out, queued.ID)
+}
+
+func assertCancelJobsOutput(t *testing.T, out mcpserver.GetJobsOutput, queuedID string) {
+	t.Helper()
 	if out.Status != "partial" || len(out.Items) != 6 {
 		t.Fatalf("cancellation batch = %+v", out)
 	}
-	if out.Items[0].Key != queued.ID || out.Items[0].Value == nil || out.Items[0].Value.Status != "cancelled" {
+	if out.Items[0].Key != queuedID || out.Items[0].Value == nil || out.Items[0].Value.Status != "cancelled" {
 		t.Fatalf("queued cancellation = %+v", out.Items[0])
 	}
 	if out.Items[1].Status != "unavailable" || out.Items[1].Reason != "not_found" {

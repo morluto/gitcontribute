@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -86,7 +87,7 @@ func (c *Client) GetPullRequestStatus(ctx context.Context, owner, name string, n
 			result = pageResult
 		} else {
 			if pageResult.NodeID != result.NodeID || pageResult.HeadSHA != result.HeadSHA || !pageResult.SourceUpdatedAt.Equal(result.SourceUpdatedAt) {
-				return PullRequestStatus{}, &TransientError{Cause: fmt.Errorf("pull request changed while status facets were being paged")}
+				return PullRequestStatus{}, &TransientError{Cause: errors.New("pull request changed while status facets were being paged")}
 			}
 			mergePullRequestStatusPage(&result, pageResult, active)
 		}

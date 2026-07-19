@@ -31,67 +31,68 @@ func (r *MCPReader) CancelJobs(ctx context.Context, in mcpserver.CancelJobInput)
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
-		id := strings.TrimSpace(inputID)
-		item := mcpserver.BatchItem[mcpserver.GetJobOutput]{Key: id, Status: "complete"}
-		if id == "" {
-			item.Status, item.Reason, item.Message = "failed", "invalid_id", "job ID must not be empty"
-			out.Status = "partial"
-			out.Items[i] = item
-			continue
-		}
-		current, err := r.Service.GetJob(ctx, id)
-		if err != nil {
-			var cliErr *cli.CLIError
-			if errors.As(err, &cliErr) && cliErr.Code == cli.ExitNotFound {
-				item.Status, item.Reason = "unavailable", "not_found"
-			} else {
-				item.Status, item.Reason = "failed", "read_failed"
-			}
-			item.Message = err.Error()
-			out.Status = "partial"
-			out.Items[i] = item
-			continue
-		}
-		if current.Status == "cancelled" {
-			value, err := jobResultToMCP(current)
-			if err != nil {
-				return mcpserver.GetJobsOutput{}, err
-			}
-			item.Value = &value
-			out.Items[i] = item
-			continue
-		}
-		if current.Status == "succeeded" || current.Status == "failed" {
-			item.Status, item.Reason, item.Message = "unavailable", "terminal", "job is already "+current.Status
-			out.Status = "partial"
-			out.Items[i] = item
-			continue
-		}
-		job, err := r.Service.CancelJob(ctx, id)
-		if err != nil {
-			// A terminal transition can race the request; report its latest durable
-			// state as unavailable rather than failing unrelated cancellations.
-			latest, getErr := r.Service.GetJob(ctx, id)
-			if getErr == nil && (latest.Status == "succeeded" || latest.Status == "failed") {
-				item.Status, item.Reason, item.Message = "unavailable", "terminal", "job is already "+latest.Status
-			} else {
-				item.Status, item.Reason, item.Message = "failed", "cancellation_failed", err.Error()
-			}
-			out.Status = "partial"
-			out.Items[i] = item
-			continue
-		}
-		value, err := jobResultToMCP(job)
+		item, err := r.cancelJobItem(ctx, inputID)
 		if err != nil {
 			return mcpserver.GetJobsOutput{}, err
 		}
-		item.Value = &value
-		if value.Status == "running" {
-			item.NextAction = "Poll jobs.get until this job reaches a terminal state."
+		if item.Status != "complete" {
+			out.Status = "partial"
 		}
 		out.Items[i] = item
 	}
 	return out, nil
+}
+
+func (r *MCPReader) cancelJobItem(ctx context.Context, inputID string) (mcpserver.BatchItem[mcpserver.GetJobOutput], error) {
+	id := strings.TrimSpace(inputID)
+	item := mcpserver.BatchItem[mcpserver.GetJobOutput]{Key: id, Status: "complete"}
+	if id == "" {
+		item.Status, item.Reason, item.Message = "failed", "invalid_id", "job ID must not be empty"
+		return item, nil
+	}
+	current, err := r.Service.GetJob(ctx, id)
+	if err != nil {
+		var cliErr *cli.CLIError
+		if errors.As(err, &cliErr) && cliErr.Code == cli.ExitNotFound {
+			item.Status, item.Reason = "unavailable", "not_found"
+		} else {
+			item.Status, item.Reason = "failed", "read_failed"
+		}
+		item.Message = err.Error()
+		return item, nil
+	}
+	if current.Status == "cancelled" {
+		return jobResultItem(item, current)
+	}
+	if current.Status == "succeeded" || current.Status == "failed" {
+		item.Status, item.Reason, item.Message = "unavailable", "terminal", "job is already "+current.Status
+		return item, nil
+	}
+	job, err := r.CancelJob(ctx, id)
+	if err != nil {
+		// A terminal transition can race the request; report its latest durable
+		// state as unavailable rather than failing unrelated cancellations.
+		latest, getErr := r.Service.GetJob(ctx, id)
+		if getErr == nil && (latest.Status == "succeeded" || latest.Status == "failed") {
+			item.Status, item.Reason, item.Message = "unavailable", "terminal", "job is already "+latest.Status
+		} else {
+			item.Status, item.Reason, item.Message = "failed", "cancellation_failed", err.Error()
+		}
+		return item, nil
+	}
+	return jobResultItem(item, job)
+}
+
+func jobResultItem(item mcpserver.BatchItem[mcpserver.GetJobOutput], job *cli.JobResult) (mcpserver.BatchItem[mcpserver.GetJobOutput], error) {
+	value, err := jobResultToMCP(job)
+	if err != nil {
+		return item, err
+	}
+	item.Value = &value
+	if value.Status == "running" {
+		item.NextAction = "Poll jobs.get until this job reaches a terminal state."
+	}
+	return item, nil
 }
 
 func jobResultToMCP(job *cli.JobResult) (mcpserver.GetJobOutput, error) {

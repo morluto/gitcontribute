@@ -222,7 +222,7 @@ func convertClosingIssueFacet(in graphQLConnection[pullRequestClosingIssueDTO]) 
 func convertFileFacet(in graphQLConnection[pullRequestFileDTO]) FacetResult[PullRequestFile] {
 	out := FacetResult[PullRequestFile]{Items: make([]PullRequestFile, 0, len(in.Nodes)), Coverage: coverage(in)}
 	for _, item := range in.Nodes {
-		out.Items = append(out.Items, PullRequestFile{Path: item.Path, ChangeType: item.ChangeType, Additions: item.Additions, Deletions: item.Deletions})
+		out.Items = append(out.Items, PullRequestFile(item))
 	}
 	return out
 }

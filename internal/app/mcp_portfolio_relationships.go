@@ -26,38 +26,10 @@ func (r *MCPReader) FindPortfolioOverlaps(ctx context.Context, in mcpserver.Find
 		return mcpserver.FindPortfolioOverlapsOutput{}, err
 	}
 	out := mcpserver.FindPortfolioOverlapsOutput{Status: "complete", Items: make([]mcpserver.BatchItem[mcpserver.PortfolioOverlapOutput], len(in.Candidates))}
-	var candidates []corpus.PortfolioSubject
-	var candidateIndexes []int
-	for i, candidate := range in.Candidates {
-		item := mcpserver.BatchItem[mcpserver.PortfolioOverlapOutput]{Key: candidate.Kind + ":" + candidate.Ref}
-		if !validPortfolioSubjectInput(candidate) {
-			item.Status, item.Reason, item.Message = "failed", "invalid_candidate", "kind must be opportunity, workspace, or pull_request and ref must be a valid local ID"
-			out.Status, out.Items[i] = "partial", item
-			continue
-		}
-		candidates = append(candidates, corpus.PortfolioSubject{Kind: candidate.Kind, Ref: strings.TrimSpace(candidate.Ref)})
-		candidateIndexes = append(candidateIndexes, i)
-	}
-	var prIDs []int64
-	missingPullRequests := false
-	for _, ref := range in.PullRequests {
-		repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
-		if err != nil {
-			return mcpserver.FindPortfolioOverlapsOutput{}, err
-		}
-		if repo == nil {
-			missingPullRequests = true
-			continue
-		}
-		thread, err := c.GetThreadByNumber(ctx, repo.ID, ref.Number)
-		if err != nil {
-			return mcpserver.FindPortfolioOverlapsOutput{}, err
-		}
-		if thread == nil || thread.Kind != corpus.ThreadKindPullRequest {
-			missingPullRequests = true
-			continue
-		}
-		prIDs = append(prIDs, thread.ID)
+	candidates, candidateIndexes := collectPortfolioCandidates(in.Candidates, &out)
+	prIDs, missingPullRequests, err := resolvePortfolioPullRequests(ctx, c, in.PullRequests)
+	if err != nil {
+		return mcpserver.FindPortfolioOverlapsOutput{}, err
 	}
 	if len(candidates) == 0 {
 		return out, nil
@@ -75,18 +47,7 @@ func (r *MCPReader) FindPortfolioOverlaps(ctx context.Context, in mcpserver.Find
 	}
 	for resultIndex, result := range results {
 		i := candidateIndexes[resultIndex]
-		value := mcpserver.PortfolioOverlapOutput{Candidate: mcpserver.PortfolioSubjectInput{Kind: result.Candidate.Kind, Ref: result.Candidate.Ref}, Status: result.Status, Coverage: result.Coverage}
-		for _, match := range result.Matches {
-			converted := mcpserver.PortfolioOverlapMatchOutput{PullRequestThreadID: match.PullRequestThreadID}
-			for _, evidence := range match.Evidence {
-				item := mcpserver.PortfolioOverlapEvidenceOutput{Kind: evidence.Kind, Value: evidence.Value, Score: evidence.Score}
-				for _, ref := range evidence.SourceObservationRefs {
-					item.SourceRefs = append(item.SourceRefs, ref.Kind+":"+strconv.FormatInt(ref.ID, 10))
-				}
-				converted.Evidence = append(converted.Evidence, item)
-			}
-			value.Matches = append(value.Matches, converted)
-		}
+		value := portfolioOverlapOutput(result)
 		batch := mcpserver.BatchItem[mcpserver.PortfolioOverlapOutput]{Key: result.Candidate.Kind + ":" + result.Candidate.Ref, Status: "complete", Value: &value}
 		if missingPullRequests {
 			out.Status = "partial"
@@ -98,6 +59,63 @@ func (r *MCPReader) FindPortfolioOverlaps(ctx context.Context, in mcpserver.Find
 		out.Items[i] = batch
 	}
 	return out, nil
+}
+
+func collectPortfolioCandidates(inputs []mcpserver.PortfolioSubjectInput, out *mcpserver.FindPortfolioOverlapsOutput) ([]corpus.PortfolioSubject, []int) {
+	var candidates []corpus.PortfolioSubject
+	var indexes []int
+	for i, candidate := range inputs {
+		item := mcpserver.BatchItem[mcpserver.PortfolioOverlapOutput]{Key: candidate.Kind + ":" + candidate.Ref}
+		if !validPortfolioSubjectInput(candidate) {
+			item.Status, item.Reason, item.Message = "failed", "invalid_candidate", "kind must be opportunity, workspace, or pull_request and ref must be a valid local ID"
+			out.Status, out.Items[i] = "partial", item
+			continue
+		}
+		candidates = append(candidates, corpus.PortfolioSubject{Kind: candidate.Kind, Ref: strings.TrimSpace(candidate.Ref)})
+		indexes = append(indexes, i)
+	}
+	return candidates, indexes
+}
+
+func resolvePortfolioPullRequests(ctx context.Context, c *corpus.Corpus, refs []mcpserver.ThreadRef) ([]int64, bool, error) {
+	var ids []int64
+	missing := false
+	for _, ref := range refs {
+		repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+		if err != nil {
+			return nil, false, err
+		}
+		if repo == nil {
+			missing = true
+			continue
+		}
+		thread, err := c.GetThreadByNumber(ctx, repo.ID, ref.Number)
+		if err != nil {
+			return nil, false, err
+		}
+		if thread == nil || thread.Kind != corpus.ThreadKindPullRequest {
+			missing = true
+			continue
+		}
+		ids = append(ids, thread.ID)
+	}
+	return ids, missing, nil
+}
+
+func portfolioOverlapOutput(result corpus.PortfolioOverlapResult) mcpserver.PortfolioOverlapOutput {
+	value := mcpserver.PortfolioOverlapOutput{Candidate: mcpserver.PortfolioSubjectInput{Kind: result.Candidate.Kind, Ref: result.Candidate.Ref}, Status: result.Status, Coverage: result.Coverage}
+	for _, match := range result.Matches {
+		converted := mcpserver.PortfolioOverlapMatchOutput{PullRequestThreadID: match.PullRequestThreadID}
+		for _, evidence := range match.Evidence {
+			item := mcpserver.PortfolioOverlapEvidenceOutput{Kind: evidence.Kind, Value: evidence.Value, Score: evidence.Score}
+			for _, ref := range evidence.SourceObservationRefs {
+				item.SourceRefs = append(item.SourceRefs, ref.Kind+":"+strconv.FormatInt(ref.ID, 10))
+			}
+			converted.Evidence = append(converted.Evidence, item)
+		}
+		value.Matches = append(value.Matches, converted)
+	}
+	return value
 }
 
 func validPortfolioSubjectInput(candidate mcpserver.PortfolioSubjectInput) bool {

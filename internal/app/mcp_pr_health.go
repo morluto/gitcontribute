@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -138,43 +139,54 @@ func (s *Service) persistPullRequestHealth(ctx context.Context, ref mcpserver.Th
 		{name: FacetPRClosingIssues, value: remote.ClosingIssues.Items, coverage: remote.ClosingIssues.Coverage},
 		{name: FacetPRFiles, value: remote.Files.Items, coverage: remote.Files.Coverage},
 	}
-	results := make([]map[string]any, 0, len(targets)+len(hydrated))
-	for _, facet := range hydrated {
-		status := "complete"
-		result := map[string]any{"facet": facet.Facet, "status": status, "complete": facet.Complete, "fetched": facet.Count, "pages": facet.Pages}
+	results := hydratedHealthResults(hydrated)
+	for _, target := range targets {
+		result, err := persistOneHealthFacet(ctx, c, *repo, *thread, sourceUpdatedAt, target, baselines[target.name], remote)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+func hydratedHealthResults(facets []HydratedFacet) []map[string]any {
+	results := make([]map[string]any, 0, len(facets))
+	for _, facet := range facets {
+		result := map[string]any{"facet": facet.Facet, "status": "complete", "complete": facet.Complete, "fetched": facet.Count, "pages": facet.Pages}
 		if !facet.Complete {
 			result["status"] = "retryable"
 			result["next_action"] = "Retry this pull request with a larger max_pages bound."
 		}
 		results = append(results, result)
 	}
-	for _, target := range targets {
-		applied, err := persistHealthFacet(ctx, c, repo.ID, thread.ID, sourceUpdatedAt, target, baselines[target.name])
-		if err != nil {
+	return results
+}
+
+func persistOneHealthFacet(ctx context.Context, c *corpus.Corpus, repo corpus.Repository, thread corpus.Thread, sourceUpdatedAt time.Time, target healthFacet, baseline int64, remote github.PullRequestStatus) (map[string]any, error) {
+	applied, err := persistHealthFacet(ctx, c, repo.ID, thread.ID, sourceUpdatedAt, target, baseline)
+	if err != nil {
+		return nil, err
+	}
+	if applied && target.coverage.Complete {
+		if err := persistPortfolioSignals(ctx, c, thread, sourceUpdatedAt, target); err != nil {
 			return nil, err
 		}
-		if applied && target.coverage.Complete {
-			if err := persistPortfolioSignals(ctx, c, *thread, sourceUpdatedAt, target); err != nil {
-				return nil, err
-			}
-		}
-		result := map[string]any{"facet": target.name, "complete": target.coverage.Complete, "fetched": target.coverage.Fetched, "total": target.coverage.Total, "status": "complete"}
-		if !applied {
-			result["status"] = "retryable"
-			result["complete"] = false
-			result["next_action"] = "A concurrent refresh advanced this facet; retry for a coherent snapshot."
-		}
-		if target.name == FacetPRMergeState && !remote.MergeState.MergeableKnown {
-			result["status"] = "retryable"
-			result["next_action"] = "Retry after GitHub finishes computing mergeability."
-		}
-		if !target.coverage.Complete {
-			result["status"] = "retryable"
-			result["next_action"] = "Retry this pull request to complete the facet after the current cursor."
-		}
-		results = append(results, result)
 	}
-	return results, nil
+	result := map[string]any{"facet": target.name, "complete": target.coverage.Complete, "fetched": target.coverage.Fetched, "total": target.coverage.Total, "status": "complete"}
+	if !applied {
+		result["status"], result["complete"] = "retryable", false
+		result["next_action"] = "A concurrent refresh advanced this facet; retry for a coherent snapshot."
+	}
+	if target.name == FacetPRMergeState && !remote.MergeState.MergeableKnown {
+		result["status"] = "retryable"
+		result["next_action"] = "Retry after GitHub finishes computing mergeability."
+	}
+	if !target.coverage.Complete {
+		result["status"] = "retryable"
+		result["next_action"] = "Retry this pull request to complete the facet after the current cursor."
+	}
+	return result, nil
 }
 
 func persistPortfolioSignals(ctx context.Context, c *corpus.Corpus, thread corpus.Thread, sourceUpdatedAt time.Time, facet healthFacet) error {
@@ -183,13 +195,19 @@ func persistPortfolioSignals(ctx context.Context, c *corpus.Corpus, thread corpu
 	switch facet.name {
 	case FacetPRFiles:
 		portfolioFacet = corpus.PortfolioFacetChangedFiles
-		files, _ := facet.value.([]github.PullRequestFile)
+		files, ok := facet.value.([]github.PullRequestFile)
+		if !ok {
+			return fmt.Errorf("%s facet has unexpected value type %T", facet.name, facet.value)
+		}
 		for _, file := range files {
 			signals = append(signals, corpus.PortfolioSignal{Kind: corpus.PortfolioSignalFilePath, Value: file.Path})
 		}
 	case FacetPRClosingIssues:
 		portfolioFacet = corpus.PortfolioFacetLinkedIssues
-		issues, _ := facet.value.([]github.PullRequestClosingIssue)
+		issues, ok := facet.value.([]github.PullRequestClosingIssue)
+		if !ok {
+			return fmt.Errorf("%s facet has unexpected value type %T", facet.name, facet.value)
+		}
 		for _, issue := range issues {
 			signals = append(signals, corpus.PortfolioSignal{Kind: corpus.PortfolioSignalLinkedIssue, Value: fmt.Sprintf("%s#%d", issue.RepositoryFullName, issue.Number)})
 		}
@@ -204,7 +222,7 @@ func persistPortfolioSignals(ctx context.Context, c *corpus.Corpus, thread corpu
 		return fmt.Errorf("complete %s facet has no source observation", facet.name)
 	}
 	_, err = c.ReplacePortfolioSignals(ctx, corpus.PortfolioSignalSnapshot{
-		Subject:               corpus.PortfolioSubject{Kind: corpus.PortfolioSubjectPullRequest, Ref: fmt.Sprint(thread.ID)},
+		Subject:               corpus.PortfolioSubject{Kind: corpus.PortfolioSubjectPullRequest, Ref: strconv.FormatInt(thread.ID, 10)},
 		Facet:                 portfolioFacet,
 		Signals:               signals,
 		SourceUpdatedAt:       sourceUpdatedAt,

@@ -610,7 +610,11 @@ func (r *MCPReader) GetCoverage(ctx context.Context, in mcpserver.GetCoverageInp
 		key := coverageTargetKey(target)
 		item := mcpserver.BatchItem[mcpserver.CoverageOutput]{Key: key, Status: "complete"}
 		value, reason, err := readCoverageTarget(ctx, c, target)
-		if err != nil {
+		if errors.Is(err, errInvalidCoverageTarget) {
+			item.Status, item.Reason = "unavailable", "invalid_reference"
+			item.Message = "owner/repo and optional kind/number must identify a repository or exact thread"
+			out.Status = "partial"
+		} else if err != nil {
 			item.Status, item.Reason, item.Message = "failed", "read_failed", err.Error()
 			out.Status = "partial"
 		} else if reason != "" {
@@ -638,14 +642,16 @@ func coverageTargetKey(target mcpserver.CoverageTarget) string {
 	return key
 }
 
+var errInvalidCoverageTarget = errors.New("invalid coverage target")
+
 func readCoverageTarget(ctx context.Context, c *corpus.Corpus, target mcpserver.CoverageTarget) (mcpserver.CoverageOutput, string, error) {
 	ref := domain.RepoRef{Owner: target.Owner, Repo: target.Repo}
 	if err := ref.Validate(); err != nil {
-		return mcpserver.CoverageOutput{}, "invalid_reference", nil
+		return mcpserver.CoverageOutput{}, "invalid_reference", fmt.Errorf("%w: %v", errInvalidCoverageTarget, err)
 	}
 	isThread := target.Kind != "" || target.Number != 0
 	if isThread && ((target.Kind != "issue" && target.Kind != "pull_request") || target.Number < 1) {
-		return mcpserver.CoverageOutput{}, "invalid_reference", nil
+		return mcpserver.CoverageOutput{}, "invalid_reference", errInvalidCoverageTarget
 	}
 	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
 	if err != nil {

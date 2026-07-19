@@ -14,17 +14,31 @@ import (
 )
 
 const (
+	// PortfolioSubjectPullRequest identifies a corpus pull-request thread.
 	PortfolioSubjectPullRequest = "pull_request"
+	// PortfolioSubjectOpportunity identifies a local contribution opportunity.
 	PortfolioSubjectOpportunity = "opportunity"
-	PortfolioSubjectWorkspace   = "workspace"
+	// PortfolioSubjectWorkspace identifies a local contribution workspace.
+	PortfolioSubjectWorkspace = "workspace"
 
-	PortfolioFacetChangedFiles          = "changed_files"
-	PortfolioFacetLinkedIssues          = "linked_issues"
+	// PortfolioFacetChangedFiles contains normalized changed paths.
+	PortfolioFacetChangedFiles = "changed_files"
+	// PortfolioFacetLinkedIssues contains normalized issue references.
+	PortfolioFacetLinkedIssues = "linked_issues"
+	// PortfolioFacetOpportunitySimilarity contains scored PR relationships.
 	PortfolioFacetOpportunitySimilarity = "opportunity_similarity"
 
-	PortfolioSignalFilePath              = "file_path"
-	PortfolioSignalLinkedIssue           = "linked_issue"
+	// PortfolioSignalFilePath is a normalized changed-path signal.
+	PortfolioSignalFilePath = "file_path"
+	// PortfolioSignalLinkedIssue is a normalized linked-issue signal.
+	PortfolioSignalLinkedIssue = "linked_issue"
+	// PortfolioSignalOpportunitySimilarity is a scored subject relationship.
 	PortfolioSignalOpportunitySimilarity = "opportunity_similarity"
+)
+
+var (
+	errPortfolioLinkNotApplicable = errors.New("portfolio link is not applicable to this subject")
+	errPortfolioLinkNotFound      = errors.New("portfolio link not found")
 )
 
 var portfolioFacets = []string{
@@ -140,7 +154,7 @@ func (c *Corpus) SavePortfolioLink(ctx context.Context, link PortfolioLink) (*Po
 }
 
 // ListPortfolioLinks returns explicit links in stable PR/opportunity/workspace order.
-func (c *Corpus) ListPortfolioLinks(ctx context.Context) ([]PortfolioLink, error) {
+func (c *Corpus) ListPortfolioLinks(ctx context.Context) (out []PortfolioLink, err error) {
 	rows, err := c.db.QueryContext(ctx, `
 		SELECT id, pull_request_thread_id, COALESCE(opportunity_id, ''), COALESCE(workspace_id, ''), created_at
 		FROM portfolio_links ORDER BY pull_request_thread_id, opportunity_id, workspace_id, id LIMIT 10000
@@ -148,8 +162,11 @@ func (c *Corpus) ListPortfolioLinks(ctx context.Context) ([]PortfolioLink, error
 	if err != nil {
 		return nil, fmt.Errorf("list portfolio links: %w", err)
 	}
-	defer rows.Close()
-	var out []PortfolioLink
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close portfolio link rows: %w", closeErr)
+		}
+	}()
 	for rows.Next() {
 		var link PortfolioLink
 		var created int64
@@ -159,12 +176,15 @@ func (c *Corpus) ListPortfolioLinks(ctx context.Context) ([]PortfolioLink, error
 		link.CreatedAt = scanTime(created)
 		out = append(out, link)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate portfolio links: %w", err)
+	}
+	return out, nil
 }
 
 // ReplacePortfolioSignals stores a complete child snapshot and atomically
 // advances its projection only if its source clock is newer.
-func (c *Corpus) ReplacePortfolioSignals(ctx context.Context, snapshot PortfolioSignalSnapshot) (*PortfolioSignalSnapshot, error) {
+func (c *Corpus) ReplacePortfolioSignals(ctx context.Context, snapshot PortfolioSignalSnapshot) (saved *PortfolioSignalSnapshot, err error) {
 	if err := validatePortfolioSnapshot(snapshot); err != nil {
 		return nil, err
 	}
@@ -172,7 +192,12 @@ func (c *Corpus) ReplacePortfolioSignals(ctx context.Context, snapshot Portfolio
 	if err != nil {
 		return nil, fmt.Errorf("begin portfolio signal replacement: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) && err == nil {
+			err = fmt.Errorf("rollback portfolio signal replacement: %w", rollbackErr)
+			saved = nil
+		}
+	}()
 	if snapshot.ObservationSequence == 0 {
 		snapshot.ObservationSequence, err = c.nextSequence(ctx, tx)
 		if err != nil {
@@ -335,10 +360,9 @@ type projectedPortfolioSignals struct {
 	refs    []ObservationRef
 }
 
-func (c *Corpus) projectedSignals(ctx context.Context, subject PortfolioSubject, facet string) (projectedPortfolioSignals, error) {
-	out := projectedPortfolioSignals{}
+func (c *Corpus) projectedSignals(ctx context.Context, subject PortfolioSubject, facet string) (out projectedPortfolioSignals, err error) {
 	var refs string
-	err := c.db.QueryRowContext(ctx, `
+	err = c.db.QueryRowContext(ctx, `
 		SELECT s.source_observation_refs
 		FROM portfolio_signal_projections p
 		JOIN portfolio_signal_snapshots s ON s.id=p.snapshot_id
@@ -364,7 +388,12 @@ func (c *Corpus) projectedSignals(ctx context.Context, subject PortfolioSubject,
 	if err != nil {
 		return projectedPortfolioSignals{}, err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close projected portfolio signal rows: %w", closeErr)
+			out = projectedPortfolioSignals{}
+		}
+	}()
 	for rows.Next() {
 		var signal PortfolioSignal
 		if err := rows.Scan(&signal.Kind, &signal.Value, &signal.TargetKind, &signal.TargetRef, &signal.Score); err != nil {
@@ -391,68 +420,89 @@ func (c *Corpus) FindPortfolioOverlaps(ctx context.Context, candidates []Portfol
 	sort.Slice(prs, func(i, j int) bool { return prs[i] < prs[j] })
 	results := make([]PortfolioOverlapResult, len(candidates))
 	for i, candidate := range candidates {
-		if err := validatePortfolioSubject(candidate); err != nil {
+		result, err := c.findCandidateOverlaps(ctx, candidate, prs)
+		if err != nil {
 			return nil, err
-		}
-		result := PortfolioOverlapResult{Candidate: candidate, Status: "unknown", Coverage: make(map[string]string)}
-		candidateFacets := make(map[string]projectedPortfolioSignals)
-		allCovered := true
-		for _, facet := range requiredPortfolioFacets(candidate) {
-			projected, err := c.projectedSignals(ctx, candidate, facet)
-			if err != nil {
-				return nil, err
-			}
-			candidateFacets[facet] = projected
-			if projected.covered {
-				result.Coverage["candidate."+facet] = "complete"
-			} else {
-				result.Coverage["candidate."+facet] = "missing"
-				allCovered = false
-			}
-		}
-		for _, prID := range prs {
-			pr := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(prID, 10)}
-			var evidence []PortfolioOverlapEvidence
-			explicit, err := c.explicitPortfolioLink(ctx, candidate, prID)
-			if err != nil {
-				return nil, err
-			}
-			if explicit != nil {
-				evidence = append(evidence, *explicit)
-			}
-			for _, facet := range []string{PortfolioFacetChangedFiles, PortfolioFacetLinkedIssues} {
-				projected, err := c.projectedSignals(ctx, pr, facet)
-				if err != nil {
-					return nil, err
-				}
-				key := "pull_request." + pr.Ref + "." + facet
-				if projected.covered {
-					result.Coverage[key] = "complete"
-				} else {
-					result.Coverage[key] = "missing"
-					allCovered = false
-				}
-				evidence = append(evidence, overlapEvidence(candidate, pr, candidateFacets[facet], projected)...)
-			}
-			evidence = append(evidence, overlapEvidence(candidate, pr, candidateFacets[PortfolioFacetOpportunitySimilarity], projectedPortfolioSignals{})...)
-			if len(evidence) > 0 {
-				sort.SliceStable(evidence, func(i, j int) bool {
-					if evidence[i].Kind != evidence[j].Kind {
-						return evidence[i].Kind < evidence[j].Kind
-					}
-					return evidence[i].Value < evidence[j].Value
-				})
-				result.Matches = append(result.Matches, PortfolioOverlapMatch{PullRequestThreadID: prID, Evidence: evidence})
-			}
-		}
-		if len(result.Matches) > 0 {
-			result.Status = "overlap"
-		} else if allCovered {
-			result.Status = "no_overlap"
 		}
 		results[i] = result
 	}
 	return results, nil
+}
+
+func (c *Corpus) findCandidateOverlaps(ctx context.Context, candidate PortfolioSubject, prs []int64) (PortfolioOverlapResult, error) {
+	if err := validatePortfolioSubject(candidate); err != nil {
+		return PortfolioOverlapResult{}, err
+	}
+	result := PortfolioOverlapResult{Candidate: candidate, Status: "unknown", Coverage: make(map[string]string)}
+	candidateFacets, allCovered, err := c.loadCandidateFacets(ctx, candidate, result.Coverage)
+	if err != nil {
+		return PortfolioOverlapResult{}, err
+	}
+	for _, prID := range prs {
+		covered, err := c.comparePortfolioPullRequest(ctx, candidate, candidateFacets, prID, &result)
+		if err != nil {
+			return PortfolioOverlapResult{}, err
+		}
+		allCovered = allCovered && covered
+	}
+	if len(result.Matches) > 0 {
+		result.Status = "overlap"
+	} else if allCovered {
+		result.Status = "no_overlap"
+	}
+	return result, nil
+}
+
+func (c *Corpus) loadCandidateFacets(ctx context.Context, candidate PortfolioSubject, coverage map[string]string) (map[string]projectedPortfolioSignals, bool, error) {
+	facets := make(map[string]projectedPortfolioSignals)
+	allCovered := true
+	for _, facet := range requiredPortfolioFacets(candidate) {
+		projected, err := c.projectedSignals(ctx, candidate, facet)
+		if err != nil {
+			return nil, false, err
+		}
+		facets[facet] = projected
+		coverage["candidate."+facet] = coverageStatus(projected.covered)
+		allCovered = allCovered && projected.covered
+	}
+	return facets, allCovered, nil
+}
+
+func (c *Corpus) comparePortfolioPullRequest(ctx context.Context, candidate PortfolioSubject, candidateFacets map[string]projectedPortfolioSignals, prID int64, result *PortfolioOverlapResult) (bool, error) {
+	pr := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(prID, 10)}
+	evidence, err := c.explicitPortfolioEvidence(ctx, candidate, prID)
+	if err != nil {
+		return false, err
+	}
+	allCovered := true
+	for _, facet := range []string{PortfolioFacetChangedFiles, PortfolioFacetLinkedIssues} {
+		projected, err := c.projectedSignals(ctx, pr, facet)
+		if err != nil {
+			return false, err
+		}
+		result.Coverage["pull_request."+pr.Ref+"."+facet] = coverageStatus(projected.covered)
+		allCovered = allCovered && projected.covered
+		evidence = append(evidence, overlapEvidence(candidate, pr, candidateFacets[facet], projected)...)
+	}
+	evidence = append(evidence, overlapEvidence(candidate, pr, candidateFacets[PortfolioFacetOpportunitySimilarity], projectedPortfolioSignals{})...)
+	if len(evidence) == 0 {
+		return allCovered, nil
+	}
+	sort.SliceStable(evidence, func(i, j int) bool {
+		if evidence[i].Kind != evidence[j].Kind {
+			return evidence[i].Kind < evidence[j].Kind
+		}
+		return evidence[i].Value < evidence[j].Value
+	})
+	result.Matches = append(result.Matches, PortfolioOverlapMatch{PullRequestThreadID: prID, Evidence: evidence})
+	return allCovered, nil
+}
+
+func coverageStatus(covered bool) string {
+	if covered {
+		return "complete"
+	}
+	return "missing"
 }
 
 func requiredPortfolioFacets(subject PortfolioSubject) []string {
@@ -470,17 +520,28 @@ func (c *Corpus) explicitPortfolioLink(ctx context.Context, candidate PortfolioS
 	case PortfolioSubjectWorkspace:
 		column = "workspace_id"
 	default:
-		return nil, nil
+		return nil, errPortfolioLinkNotApplicable
 	}
 	var linkID int64
 	err := c.db.QueryRowContext(ctx, `SELECT id FROM portfolio_links WHERE pull_request_thread_id=? AND `+column+`=? ORDER BY id LIMIT 1`, pullRequestThreadID, candidate.Ref).Scan(&linkID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, errPortfolioLinkNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read explicit portfolio link: %w", err)
 	}
 	return &PortfolioOverlapEvidence{Kind: "explicit_link", Value: candidate.Ref + "->" + strconv.FormatInt(pullRequestThreadID, 10), SourceObservationRefs: []ObservationRef{{Kind: "portfolio_link", ID: linkID}}}, nil
+}
+
+func (c *Corpus) explicitPortfolioEvidence(ctx context.Context, candidate PortfolioSubject, pullRequestThreadID int64) ([]PortfolioOverlapEvidence, error) {
+	evidence, err := c.explicitPortfolioLink(ctx, candidate, pullRequestThreadID)
+	if errors.Is(err, errPortfolioLinkNotApplicable) || errors.Is(err, errPortfolioLinkNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return []PortfolioOverlapEvidence{*evidence}, nil
 }
 
 func overlapEvidence(candidate, pr PortfolioSubject, candidateSignals, prSignals projectedPortfolioSignals) []PortfolioOverlapEvidence {

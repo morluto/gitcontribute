@@ -28,7 +28,7 @@ type fakeHydrationReader struct {
 	failWith              error
 }
 
-func (f *fakeHydrationReader) ListIssueTimeline(ctx context.Context, owner, name string, number int, opts github.PageOptions) (github.ListResult[github.IssueTimelineEvent], error) {
+func (f *fakeHydrationReader) ListIssueTimeline(_ context.Context, _, _ string, _ int, opts github.PageOptions) (github.ListResult[github.IssueTimelineEvent], error) {
 	idx := f.issueTimelineCalls
 	if idx >= len(f.issueTimelinePages) {
 		return github.ListResult[github.IssueTimelineEvent]{Page: github.PageInfo{Page: opts.Page, PerPage: opts.PerPage}}, nil

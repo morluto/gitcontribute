@@ -10,6 +10,9 @@ import (
 	"time"
 )
 
+// ErrResolutionNotFound indicates that no current resolution projection exists.
+var ErrResolutionNotFound = errors.New("resolution record not found")
+
 // ResolutionRecord is a deterministic local derivation over immutable source
 // observations. It is not a root-cause claim and must identify its rule set.
 type ResolutionRecord struct {
@@ -26,7 +29,7 @@ type ResolutionRecord struct {
 
 // SaveResolutionRecord appends a derivation and advances the current
 // projection only when its source clock is newer.
-func (c *Corpus) SaveResolutionRecord(ctx context.Context, record ResolutionRecord) (*ResolutionRecord, error) {
+func (c *Corpus) SaveResolutionRecord(ctx context.Context, record ResolutionRecord) (saved *ResolutionRecord, err error) {
 	if record.ThreadID <= 0 || strings.TrimSpace(record.Kind) == "" || strings.TrimSpace(record.RuleVersion) == "" || record.SourceUpdatedAt.IsZero() || len(record.SourceObservationRefs) == 0 {
 		return nil, errors.New("resolution thread, kind, rule version, source time, and observation refs are required")
 	}
@@ -39,7 +42,12 @@ func (c *Corpus) SaveResolutionRecord(ctx context.Context, record ResolutionReco
 	if err != nil {
 		return nil, fmt.Errorf("begin resolution record: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) && err == nil {
+			err = fmt.Errorf("rollback resolution record: %w", rollbackErr)
+			saved = nil
+		}
+	}()
 	if record.ObservationSequence == 0 {
 		record.ObservationSequence, err = c.nextSequence(ctx, tx)
 		if err != nil {
@@ -100,7 +108,7 @@ func (c *Corpus) GetResolutionRecord(ctx context.Context, threadID int64) (*Reso
 	`, threadID).Scan(&record.ID, &record.ThreadID, &record.Kind, &record.Summary, &record.RuleVersion, &sourceUpdated, &record.ObservationSequence, &refs, &derived)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
+			return nil, ErrResolutionNotFound
 		}
 		return nil, fmt.Errorf("get resolution record: %w", err)
 	}

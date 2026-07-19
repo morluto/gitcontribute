@@ -179,7 +179,10 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		}
 		out.MatchedFields, out.Score = matchTerms(in.Query, fields)
 		out.SourceRevision = formatTime(thread.SourceUpdatedAt)
-		cov, _, _ := readCoverageTarget(ctx, c, mcpserver.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
+		cov, _, err := readCoverageTarget(ctx, c, mcpserver.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
+		if err != nil {
+			return mcpserver.ExplainMatchOutput{}, fmt.Errorf("read repository coverage: %w", err)
+		}
 		out.Facets = cov.Facets
 		out.AsOf = cov.AsOf
 	case "code":
@@ -254,7 +257,10 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		}
 		out.MatchedFields, out.Score = matchTerms(in.Query, fields)
 		out.SourceRevision = formatTime(repo.SourceUpdatedAt)
-		cov, _, _ := readCoverageTarget(ctx, c, mcpserver.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
+		cov, _, err := readCoverageTarget(ctx, c, mcpserver.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
+		if err != nil {
+			return mcpserver.ExplainMatchOutput{}, fmt.Errorf("read repository coverage: %w", err)
+		}
 		out.Facets = cov.Facets
 		out.AsOf = cov.AsOf
 	default:

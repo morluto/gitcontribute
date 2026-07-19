@@ -2,7 +2,7 @@ package corpus
 
 import (
 	"context"
-	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -51,7 +51,7 @@ func TestPortfolioSignalsRejectMissingSourceObservation(t *testing.T) {
 	c, _ := openTestCorpus(t)
 	prID := insertPortfolioFixture(t, ctx, c)
 	_, err := c.ReplacePortfolioSignals(ctx, PortfolioSignalSnapshot{
-		Subject: PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: fmt.Sprint(prID)}, Facet: PortfolioFacetChangedFiles,
+		Subject: PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(prID, 10)}, Facet: PortfolioFacetChangedFiles,
 		Signals: []PortfolioSignal{{Kind: PortfolioSignalFilePath, Value: "main.go"}}, SourceUpdatedAt: time.Unix(300, 0).UTC(),
 		SourceObservationRefs: []ObservationRef{{Kind: "facet", ID: 999999}},
 	})
@@ -64,7 +64,7 @@ func TestFindPortfolioOverlapsUsesOnlyCoveredObservedSignals(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	prID := insertPortfolioFixture(t, ctx, c)
-	pr := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: fmt.Sprint(prID)}
+	pr := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(prID, 10)}
 	candidate := PortfolioSubject{Kind: PortfolioSubjectOpportunity, Ref: "opp-1"}
 	unknown := PortfolioSubject{Kind: PortfolioSubjectOpportunity, Ref: "opp-missing"}
 	newer := time.Unix(300, 0).UTC()
@@ -115,7 +115,7 @@ func TestFindPortfolioOverlapsRequiresCompleteNegativeCoverage(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	prID := insertPortfolioFixture(t, ctx, c)
-	pr := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: fmt.Sprint(prID)}
+	pr := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(prID, 10)}
 	candidate := PortfolioSubject{Kind: PortfolioSubjectOpportunity, Ref: "opp-1"}
 	at := time.Unix(300, 0).UTC()
 	for _, facet := range portfolioFacets {
@@ -145,8 +145,8 @@ func TestFindPortfolioOverlapsPullRequestNegativeDoesNotRequireSimilarityFacet(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: fmt.Sprint(firstID)}
-	secondSubject := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: fmt.Sprint(second.ID)}
+	first := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(firstID, 10)}
+	secondSubject := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(second.ID, 10)}
 	for _, subject := range []PortfolioSubject{first, secondSubject} {
 		replacePortfolioFixture(t, ctx, c, subject, PortfolioFacetChangedFiles, time.Unix(300, 0).UTC())
 		replacePortfolioFixture(t, ctx, c, subject, PortfolioFacetLinkedIssues, time.Unix(300, 0).UTC())
@@ -160,6 +160,7 @@ func TestFindPortfolioOverlapsPullRequestNegativeDoesNotRequireSimilarityFacet(t
 	}
 }
 
+//nolint:revive // Test helpers conventionally put *testing.T first.
 func replacePortfolioFixture(t *testing.T, ctx context.Context, c *Corpus, subject PortfolioSubject, facet string, at time.Time, signals ...PortfolioSignal) {
 	t.Helper()
 	var observationID int64
@@ -174,6 +175,7 @@ func replacePortfolioFixture(t *testing.T, ctx context.Context, c *Corpus, subje
 	}
 }
 
+//nolint:revive // Test helpers conventionally put *testing.T first.
 func insertPortfolioFixture(t *testing.T, ctx context.Context, c *Corpus) int64 {
 	t.Helper()
 	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "1", time.Unix(100, 0).UTC(), `{}`)
