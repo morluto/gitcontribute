@@ -274,7 +274,7 @@ func runSetupForm(ctx context.Context, form *huh.Form) error {
 }
 
 func (p *huhSetupPrompter) Confirm(ctx context.Context, title string) (bool, error) {
-	confirmed := false
+	confirmed := true
 	field := huh.NewSelect[bool]().
 		Title(title).
 		Description("Review the exact paths and commands above before continuing.").

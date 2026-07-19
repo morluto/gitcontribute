@@ -47,16 +47,16 @@ func TestAccessibleModeAppliesToSetupKeyAndConfirmationForms(t *testing.T) {
 	}
 }
 
-func TestSetupFinalConsentDefaultsToCancel(t *testing.T) {
+func TestSetupFinalConsentDefaultsToApply(t *testing.T) {
 	t.Setenv("GITCONTRIBUTE_ACCESSIBLE", "1")
 	var output bytes.Buffer
-	prompter := &huhSetupPrompter{input: strings.NewReader("1\n"), output: &output}
+	prompter := &huhSetupPrompter{input: strings.NewReader("\n"), output: &output}
 	confirmed, err := prompter.Confirm(context.Background(), "Apply these changes?")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if confirmed {
-		t.Fatalf("default confirmation applied changes: %q", output.String())
+	if !confirmed {
+		t.Fatalf("default confirmation cancelled setup: %q", output.String())
 	}
 }
 

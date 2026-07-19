@@ -62,7 +62,7 @@ Interactive setup follows an explicit sequence:
    default without resolving credentials or contacting GitHub.
 4. Produce a dry-run plan. Planning never invokes npm or writes configuration,
    corpus, client, or repository-source state.
-5. Ask for confirmation, defaulting to cancel, then apply the selected effects.
+5. Ask for confirmation, defaulting to apply, then apply the selected effects.
 6. Verify the resulting local installation with `doctor`.
 
 Interactive setup uses inline terminal forms rather than an alternate-screen

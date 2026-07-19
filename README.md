@@ -63,7 +63,7 @@ permission to modify them. Existing GitContribute registrations may be
 preselected; new targets require an explicit selection. GitHub authentication
 is chosen from described options rather than typed internal identifiers. A
 dry-run plan shows every effect before final confirmation, which defaults to
-cancel.
+apply.
 
 `npx` only bootstraps the wizard. MCP configuration never records `npx`, an npm
 cache path, or `@latest`: it points to an absolute native executable managed by
