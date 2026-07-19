@@ -10,17 +10,20 @@ local writes, and process execution.
 Use the cheapest authoritative source first, and hydrate only finalists:
 
 ```text
+github.search_repositories -> corpus.get_repositories
 github.sync_repository_metadata -> jobs.get -> corpus.get_repositories
-research.deepwiki
-github.sync_threads -> jobs.get -> corpus.rank_opportunities
+research.query_deepwiki
+github.sync_threads -> jobs.get -> corpus.rank_threads
 github.hydrate_threads -> jobs.get -> corpus.get_threads
 corpus.find_precedents -> workflow.find_competing_work
 ```
 
-- `github.sync_repository_metadata` reads repository facts only.
+- `github.search_repositories` runs one bounded live search and persists the
+  returned repository metadata. It does not rank contribution candidates.
+- `github.sync_repository_metadata` refreshes facts for known repositories only.
 - `corpus.get_repositories`, `corpus.get_threads`,
-  `corpus.rank_opportunities`, and `corpus.find_precedents` are offline.
-- `research.deepwiki` is an optional public external read. Its prose is
+  `corpus.rank_threads`, and `corpus.find_precedents` are offline.
+- `research.query_deepwiki` is an optional public external read. Its prose is
   untrusted derived context, is not persisted, and is not authority for live
   GitHub state.
 - `github.sync_threads` stores issue or pull-request headers. Child comments
@@ -47,7 +50,7 @@ and reason fields:
 - detailed merge state and merge queue position;
 - closing issue links and cross-portfolio overlap.
 
-`workflow.check_merge_conflicts` is different from GitHub mergeability. It runs
+`workspace.check_merge_conflicts` is different from GitHub mergeability. It runs
 a non-mutating Git comparison between already-fetched object IDs in a managed
 workspace. It never fetches refs or modifies an index or worktree.
 
@@ -77,10 +80,10 @@ not an MCP discovery primitive.
 | Tool family | Network | Corpus/local write | Process |
 | --- | ---: | ---: | ---: |
 | `corpus.get_*`, rank, precedents, portfolio | no | no | no |
-| `github.sync_*`, hydrate | yes | yes | no |
-| `research.deepwiki` | yes | no | no |
+| `github.search_*`, sync, hydrate | yes | yes | no |
+| `research.query_deepwiki` | yes | no | no |
 | `code.index_repositories` | remote-dependent | yes | Git only |
-| `workflow.check_merge_conflicts` | no | no | Git only |
+| `workspace.check_merge_conflicts` | no | no | Git only |
 
 No tool in these workflows mutates GitHub or executes repository-controlled
 code.

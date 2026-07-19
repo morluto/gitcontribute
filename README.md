@@ -264,9 +264,10 @@ name per operation; unnamespaced compatibility aliases are not registered.
 A scalable discovery flow is:
 
 ```text
+github.search_repositories -> corpus.get_repositories
 github.sync_repository_metadata -> corpus.get_repositories
--> research.deepwiki -> github.sync_threads
--> corpus.rank_opportunities -> github.hydrate_threads
+-> research.query_deepwiki -> github.sync_threads
+-> corpus.rank_threads -> github.hydrate_threads
 -> corpus.find_precedents
 ```
 

@@ -216,7 +216,7 @@ several scalar or ambiguous tools instead of adding aliases indefinitely.
 | `corpus.get_coverage` | Read facet coverage for repositories or threads | 100 targets | None |
 | `corpus.find_clusters` | Read duplicate clusters for repositories | 20 repositories | None |
 | `corpus.find_neighbors` | Find similar stored threads | 20 source threads | None |
-| `corpus.rank_opportunities` | Rank open contribution candidates across repositories | 50 repositories, 100 results | None |
+| `corpus.rank_threads` | Rank open threads as transient contribution candidates across repositories | 50 repositories, 100 results | None |
 | `corpus.find_precedents` | Find completed, fixed, duplicate, rejected, and superseded historical work | 20 source threads, 100 results | None |
 | `corpus.list_pull_request_portfolio` | List authored pull requests with locally derived attention state | 100 results | None |
 | `corpus.find_portfolio_overlaps` | Compare candidate work with authored pull requests and local opportunities | 50 candidates | None |
@@ -238,7 +238,7 @@ several scalar or ambiguous tools instead of adding aliases indefinitely.
 - merged state for pull requests;
 - derived resolution kinds when present.
 
-`corpus.rank_opportunities` is the MCP form of Contribution Radar. It accepts
+`corpus.rank_threads` is the MCP form of Contribution Radar. It accepts
 multiple repositories and enforces `max_results_per_repository` so one large
 project cannot consume the entire result.
 
@@ -247,7 +247,7 @@ project cannot consume the entire result.
 | Tool | Purpose | Input bound | Execution |
 | --- | --- | ---: | --- |
 | `github.get_authenticated_identity` | Resolve the authenticated GitHub login and stable ID | 1 identity | Synchronous |
-| `github.discover_repositories` | Run one bounded GitHub repository search and persist metadata observations | 100 repositories | Synchronous or short job |
+| `github.search_repositories` | Run one bounded GitHub repository search and persist metadata observations | 100 repositories | Synchronous |
 | `github.sync_repository_metadata` | Fetch metadata only for explicit repositories | 100 repositories | Job |
 | `github.sync_threads` | Fetch compact thread projections by repository filters or exact references | 50 repositories or 100 threads | Job |
 | `github.hydrate_threads` | Fetch selected child facets for exact cross-repository thread references | 100 threads | Job |
@@ -319,7 +319,7 @@ Expose exactly one model-visible tool:
 
 | Tool | Purpose | Input bound | Side effects |
 | --- | --- | ---: | --- |
-| `research.deepwiki` | Use DeepWiki's public MCP reads for repository structure, documentation, or cross-repository questions | 10 repositories | External read only |
+| `research.query_deepwiki` | Use DeepWiki's public MCP reads for repository structure, documentation, or cross-repository questions | 10 repositories | External read only |
 
 The input is a discriminated union matching the three public DeepWiki tools:
 
@@ -755,7 +755,7 @@ Recompute rather than silently mutate when source observations change.
 
 ### 10.5 DeepWiki provenance
 
-The first version of `research.deepwiki` is pass-through and does not persist.
+The first version of `research.query_deepwiki` is pass-through and does not persist.
 If caching is later added, store the repository list, action, question, response
 hash, provider URL, retrieval time, truncation, and raw result as a provider
 observation. Never insert DeepWiki assertions into GitHub projections.
@@ -770,7 +770,7 @@ issues, pull requests, code snapshots, contribution opportunities, and the
 user's pull-request portfolio. Prefer corpus tools for offline reads. Use
 github.sync_repository_metadata for stars and repository facts,
 github.sync_threads for current issue/PR headers, and hydrate only selected
-facets after ranking. Use research.deepwiki for architecture, contribution,
+facets after ranking. Use research.query_deepwiki for architecture, contribution,
 testing, and subsystem context across public repositories; do not treat it as
 authoritative for live GitHub state. Typical discovery flow: metadata ->
 DeepWiki context -> open-thread sync -> rank opportunities -> hydrate finalists
@@ -787,8 +787,8 @@ mutates GitHub.
 | User intent | Preferred tool | Nearest alternative | Why GitContribute wins | Do not use when | Next step |
 | --- | --- | --- | --- | --- | --- |
 | Get stars and basic facts for many repositories | `github.sync_repository_metadata` | `gh api`, web search | Bounded batch plus durable coverage | A one-off fact should not be persisted | `corpus.get_repositories` |
-| Understand architecture across candidate repositories | `research.deepwiki` | Clone and inspect, generic web | Existing indexed repository knowledge, up to 10 repos | Live issue/PR state is required | Rank repository fit or inspect GitHub |
-| Find open contribution candidates | `corpus.rank_opportunities` | Generic GitHub label search | Explainable ranking with stored coverage and collision evidence | Corpus is missing or stale | `github.sync_threads` then retry |
+| Understand architecture across candidate repositories | `research.query_deepwiki` | Clone and inspect, generic web | Existing indexed repository knowledge, up to 10 repos | Live issue/PR state is required | Rank repository fit or inspect GitHub |
+| Find open contribution candidates | `corpus.rank_threads` | Generic GitHub label search | Explainable ranking with stored coverage and collision evidence | Corpus is missing or stale | `github.sync_threads` then retry |
 | Find how similar work was fixed before | `corpus.find_precedents` | Generic text search | Resolution-aware historical retrieval | The source issue is not yet stored | Sync the source and relevant history |
 | Check whether another PR implements an issue | `workflow.find_competing_work` | `gh search prs` | Local deterministic similarity and explicit references | Corpus open-PR coverage is stale | Sync open PRs and retry |
 | Check actual Git merge conflicts | `workspace.check_merge_conflicts` | `git merge-tree` manually | Managed revisions, durable evidence, bounded batch | Current base/head OIDs have not been fetched | Refresh PR status first |
@@ -813,7 +813,7 @@ removed rather than retained as aliases.
 | `github.start_crawl` | CLI/TUI recurring-source operation or a repaired internal source runner; remove from normal MCP discovery |
 | scalar `jobs.get` | vectorized `jobs.get` |
 | `workflow.check_collisions` | `workflow.find_competing_work` |
-| CLI-only Radar | `corpus.rank_opportunities` |
+| CLI-only Radar | `corpus.rank_threads` |
 | manual-only tracking | GitHub portfolio sync plus explicit local linking |
 | single-repository acquire/index | `code.index_repositories` |
 
@@ -866,7 +866,7 @@ shell fallback or twelve scalar reads.
 
 ### Phase 3: Opportunity and precedent intelligence
 
-- Expose Contribution Radar as `corpus.rank_opportunities`.
+- Expose Contribution Radar as `corpus.rank_threads`.
 - Add structured state/resolution filters.
 - Add issue timeline and closing-PR facets.
 - Implement derived thread resolution records.
@@ -893,7 +893,7 @@ attention without repository-by-repository searches.
 
 - Add a narrow `internal/deepwiki` interface and Streamable HTTP MCP adapter.
 - Implement only the three public read tools.
-- Expose the single discriminated `research.deepwiki` MCP tool.
+- Expose the single discriminated `research.query_deepwiki` MCP tool.
 - Bound repositories, question length, response bytes, and request duration.
 - Treat missing indexes and timeouts as structured per-request states.
 - Preserve provider provenance and mark all content untrusted.
@@ -1047,8 +1047,8 @@ flow:
 1. `github.sync_repository_metadata` for up to 100 repositories.
 2. `corpus.get_repositories` with typed nullable metadata and coverage.
 3. Vectorized `jobs.get` with per-item progress.
-4. `research.deepwiki` with the three public read actions.
-5. `corpus.rank_opportunities` exposing existing Radar across repositories.
+4. `research.query_deepwiki` with the three public read actions.
+5. `corpus.rank_threads` exposing existing Radar across repositories.
 6. Behavioral evaluation using the prestige-repository transcript.
 
 This slice fixes the false-zero failure, removes the twelve-call metadata
