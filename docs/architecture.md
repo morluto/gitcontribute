@@ -50,7 +50,8 @@ application and domain packages expose product-owned values and interfaces.
 | Capability | Examples | Network | Local write | Process execution | GitHub mutation |
 | --- | --- | ---: | ---: | ---: | ---: |
 | Corpus read | search, health, dossier show, research brief, readiness, MCP resources | no | no | no | no |
-| Corpus write | investigations, start-thread, evidence, lenses, tracking | no | yes | no | no |
+| Corpus write | investigations, start-thread, evidence, lenses, tracking, cluster governance | no | yes | no | no |
+| Derived projection refresh | explicit `clusters refresh OWNER/REPO` | no | yes | no | no |
 | Private MCP runtime installation | explicit setup `--mode mcp` | no | yes | no | no |
 | Global CLI installation | explicit setup `--mode cli` or `--mode both` | npm registry dependent | yes | `npm` only | no |
 | Setup verification | all applied setup modes | no | no | `git --version` | no |
@@ -101,6 +102,47 @@ Repository and thread projections use this ordering:
 A newer source timestamp wins. If timestamps are equal or unavailable, the
 local observation sequence breaks the tie. This prevents late or retried work
 from replacing a newer projection.
+
+### Duplicate-cluster projection
+
+Duplicate clusters are a versioned derived projection over stored repository
+threads. Listing a repository's clusters, inspecting one cluster, finding a
+member's cluster, and MCP `corpus.find_clusters` are pure corpus reads: they do
+not score candidates, write SQLite, fetch GitHub, or execute a process.
+
+Refresh is a separate, explicit local-write capability:
+
+```text
+read one repository snapshot
+  -> identify source + governance + rule versions
+  -> close the read transaction
+  -> perform bounded, cancellable exact comparisons
+  -> reconcile durable governance
+  -> begin write transaction and recheck revisions
+  -> atomically replace the visible projection
+```
+
+A projection identity consists of the repository, a full SHA-256 source
+revision, a monotonic governance revision, and a similarity rule version. The
+source revision covers every candidate field consumed by scoring or persisted
+output. An empty completed projection has an identity too, so unchanged empty
+repositories do not recompute on every refresh. If source or governance changes
+during computation, commit returns a stale-input error and leaves the previous
+complete projection visible.
+
+`duplicate-v1` is exact all-pairs work under one 10,000,000-comparison budget;
+the maximum candidate population is derived from that budget rather than
+configured independently. Cancellation is checked during preparation and pair
+evaluation. Similarity preparation and scoring live in `internal/similarity`;
+`internal/clustering` remains storage-free, while `internal/corpus` owns
+snapshots, governance transactions, and atomic projection replacement.
+
+Membership overrides are durable governance, not direct projection edits.
+Adding an override and advancing its repository governance revision happen in
+one transaction. The next explicit refresh applies the decision. A governed
+canonical choice may change the displayed canonical member, but the stable
+cluster identity remains anchored to the engine-selected canonical member so
+the next refresh can recover its history.
 
 ### Complete facet replacement
 
@@ -248,3 +290,4 @@ query ordering.
 - [ADR 0001: Independent implementation](adr/0001-independent-implementation.md)
 - [ADR 0002: Application and corpus boundaries](adr/0002-application-and-corpus-boundaries.md)
 - [ADR 0003: Explicit execution boundaries](adr/0003-execution-safety.md)
+- [ADR 0004: Duplicate clusters are explicit derived projections](adr/0004-derived-cluster-projections.md)
