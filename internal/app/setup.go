@@ -369,11 +369,27 @@ func (r *setupRun) verify() {
 		if err != nil {
 			step.Message = err.Error()
 		} else {
-			step.Message = "required installation checks failed"
+			step.Message = setupVerificationFailure(diagnostics)
 		}
 	}
 	r.report.Steps = append(r.report.Steps, step)
 	setupCompleted(r.observer, step)
+}
+
+func setupVerificationFailure(diagnostics *cli.DoctorResult) string {
+	if diagnostics == nil {
+		return "required installation checks failed"
+	}
+	failures := make([]string, 0, len(diagnostics.Checks))
+	for _, check := range diagnostics.Checks {
+		if check.Required && check.Status == "error" {
+			failures = append(failures, check.Name+": "+check.Message)
+		}
+	}
+	if len(failures) == 0 {
+		return "required installation checks failed"
+	}
+	return strings.Join(failures, "; ")
 }
 
 func setupStarted(observer cli.SetupObserver, phase cli.SetupPhase) {

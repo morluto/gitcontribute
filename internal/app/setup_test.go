@@ -449,6 +449,40 @@ func TestSetupVerificationDoesNotResolveCredentials(t *testing.T) {
 	t.Fatalf("verification step missing: %+v", report)
 }
 
+func TestSetupVerificationReportsFailedRequiredChecks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("PATH", "")
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"),
+		"XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+
+	report, err := svc.Setup(context.Background(), cli.SetupOptions{
+		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
+		Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range report.Steps {
+		if step.Name == "verification" {
+			if step.Status != "failed" {
+				t.Fatalf("verification step = %+v", step)
+			}
+			if !strings.HasPrefix(step.Message, "git: ") || strings.Contains(step.Message, "required installation checks failed") {
+				t.Fatalf("verification message = %q", step.Message)
+			}
+			return
+		}
+	}
+	t.Fatalf("verification step missing: %+v", report)
+}
+
 func TestSetupCLIOnlyDryRunNeedsNoDetectedClientOrNPMProcess(t *testing.T) {
 	home := t.TempDir()
 	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
