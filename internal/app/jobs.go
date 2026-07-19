@@ -19,6 +19,10 @@ import (
 // callback that records progress and statistics in the corpus.
 type JobFunc func(ctx context.Context, report func(progress, statistics string) error) (any, error)
 
+func jobProgressCounts(completed, total int) string {
+	return fmt.Sprintf(`{"completed_items":%d,"total_items":%d}`, completed, total)
+}
+
 type activeJob struct {
 	id     string
 	cancel context.CancelFunc

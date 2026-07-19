@@ -140,6 +140,34 @@ func TestRepositoryLookup(t *testing.T) {
 	}
 }
 
+func TestListIssueTimelineConvertsExplicitSourceAndPagination(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v3/repos/octocat/hello-world/issues/7/timeline" || r.URL.Query().Get("page") != "1" {
+			http.NotFound(w, r)
+			return
+		}
+		setRateHeaders(w.Header())
+		w.Header().Set("Link", `<https://api.github.com/repositories/1/issues/7/timeline?page=2>; rel="next"`)
+		writeJSON(w, []any{map[string]any{
+			"id": 42, "event": "cross-referenced", "actor": map[string]any{"login": "alice"}, "created_at": "2024-06-01T00:00:00Z",
+			"source": map[string]any{"issue": map[string]any{"number": 9, "pull_request": map[string]any{"url": "https://api.github.test/pulls/9"}, "repository": map[string]any{"name": "other", "owner": map[string]any{"login": "acme"}}}},
+		}})
+	}))
+	defer srv.Close()
+	client := newTestClient(t, srv, StaticTokenSource(""))
+	result, err := client.ListIssueTimeline(context.Background(), testOwner, testRepo, 7, PageOptions{Page: 1, PerPage: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 || !result.Page.HasNext {
+		t.Fatalf("result = %+v", result)
+	}
+	event := result.Items[0]
+	if event.ID != 42 || event.Actor != "alice" || event.SourceOwner != "acme" || event.SourceRepository != "other" || event.SourceNumber != 9 || !event.SourceIsPullRequest {
+		t.Fatalf("event = %+v", event)
+	}
+}
+
 func TestRepositorySearchPreservesCountIncompleteAndPagination(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v3/search/repositories" || r.URL.Query().Get("q") != "language:go" {

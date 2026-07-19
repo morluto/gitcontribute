@@ -593,42 +593,93 @@ func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpserver.FindNeighbor
 	return out, nil
 }
 
-// GetCoverage returns facet coverage and freshness for a repository.
+// GetCoverage returns bounded, input-ordered facet coverage without network access.
 func (r *MCPReader) GetCoverage(ctx context.Context, in mcpserver.GetCoverageInput) (mcpserver.GetCoverageOutput, error) {
-	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
-	if err := ref.Validate(); err != nil {
-		return mcpserver.GetCoverageOutput{}, err
+	if len(in.Targets) < 1 || len(in.Targets) > 100 {
+		return mcpserver.GetCoverageOutput{}, errors.New("targets must contain 1 to 100 items")
 	}
 	c, err := r.Service.openCorpus(ctx)
 	if err != nil {
 		return mcpserver.GetCoverageOutput{}, err
 	}
+	out := mcpserver.GetCoverageOutput{Status: "complete", Items: make([]mcpserver.BatchItem[mcpserver.CoverageOutput], len(in.Targets))}
+	for i, target := range in.Targets {
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
+		key := coverageTargetKey(target)
+		item := mcpserver.BatchItem[mcpserver.CoverageOutput]{Key: key, Status: "complete"}
+		value, reason, err := readCoverageTarget(ctx, c, target)
+		if err != nil {
+			item.Status, item.Reason, item.Message = "failed", "read_failed", err.Error()
+			out.Status = "partial"
+		} else if reason != "" {
+			item.Status, item.Reason = "unavailable", reason
+			if reason == "not_indexed" {
+				item.Message = "target is not present in the local corpus"
+				item.NextAction = "Synchronize the repository or thread explicitly, then retry this item."
+			} else {
+				item.Message = "owner/repo and optional kind/number must identify a repository or exact thread"
+			}
+			out.Status = "partial"
+		} else {
+			item.Value = &value
+		}
+		out.Items[i] = item
+	}
+	return out, nil
+}
+
+func coverageTargetKey(target mcpserver.CoverageTarget) string {
+	key := target.Owner + "/" + target.Repo
+	if target.Kind != "" || target.Number != 0 {
+		key += fmt.Sprintf("/%s#%d", target.Kind, target.Number)
+	}
+	return key
+}
+
+func readCoverageTarget(ctx context.Context, c *corpus.Corpus, target mcpserver.CoverageTarget) (mcpserver.CoverageOutput, string, error) {
+	ref := domain.RepoRef{Owner: target.Owner, Repo: target.Repo}
+	if err := ref.Validate(); err != nil {
+		return mcpserver.CoverageOutput{}, "invalid_reference", nil
+	}
+	isThread := target.Kind != "" || target.Number != 0
+	if isThread && ((target.Kind != "issue" && target.Kind != "pull_request") || target.Number < 1) {
+		return mcpserver.CoverageOutput{}, "invalid_reference", nil
+	}
 	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
 	if err != nil {
-		return mcpserver.GetCoverageOutput{}, fmt.Errorf("get repository: %w", err)
+		return mcpserver.CoverageOutput{}, "", fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil {
-		return mcpserver.GetCoverageOutput{}, mcpserver.ErrNotFound
+		return mcpserver.CoverageOutput{}, "not_indexed", nil
 	}
-	covs, err := c.ListCoverage(ctx, repo.ID, nil)
-	if err != nil {
-		return mcpserver.GetCoverageOutput{}, fmt.Errorf("list coverage: %w", err)
-	}
+	var threadID *int64
 	asOf := repo.SourceUpdatedAt
-	out := mcpserver.GetCoverageOutput{
-		Owner:  in.Owner,
-		Repo:   in.Repo,
-		AsOf:   formatTime(asOf),
-		Facets: make([]mcpserver.FacetCoverageOutput, 0, len(covs)),
+	if isThread {
+		thread, err := c.GetThread(ctx, repo.ID, target.Kind, target.Number)
+		if err != nil {
+			return mcpserver.CoverageOutput{}, "", fmt.Errorf("get thread: %w", err)
+		}
+		if thread == nil {
+			return mcpserver.CoverageOutput{}, "not_indexed", nil
+		}
+		threadID = &thread.ID
+		asOf = thread.SourceUpdatedAt
 	}
+	covs, err := c.ListCoverage(ctx, repo.ID, threadID)
+	if err != nil {
+		return mcpserver.CoverageOutput{}, "", fmt.Errorf("list coverage: %w", err)
+	}
+	out := mcpserver.CoverageOutput{Owner: target.Owner, Repo: target.Repo, Kind: target.Kind, Number: target.Number, AsOf: formatTime(asOf), Facets: make([]mcpserver.FacetCoverageOutput, 0, len(covs))}
 	for _, cov := range covs {
 		if cov.SourceUpdatedAt.After(asOf) {
 			asOf = cov.SourceUpdatedAt
 			out.AsOf = formatTime(asOf)
 		}
-		status := "fresh"
+		status := "complete"
 		if !cov.Complete {
-			status = "stale"
+			status = "incomplete"
 		}
 		out.Facets = append(out.Facets, mcpserver.FacetCoverageOutput{
 			Facet:     cov.Facet,
@@ -637,7 +688,7 @@ func (r *MCPReader) GetCoverage(ctx context.Context, in mcpserver.GetCoverageInp
 			UpdatedAt: formatTime(cov.SourceUpdatedAt),
 		})
 	}
-	return out, nil
+	return out, "", nil
 }
 
 // Lens reads a saved lens definition from the local corpus.

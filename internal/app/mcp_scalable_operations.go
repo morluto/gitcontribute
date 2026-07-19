@@ -147,6 +147,9 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 			tasks[index].numbers = append(tasks[index].numbers, thread.Number)
 		}
 	}
+	if err := report("thread_headers", jobProgressCounts(0, len(tasks))); err != nil {
+		return nil, err
+	}
 	state := in.State
 	if state == "" {
 		state = "open"
@@ -215,7 +218,7 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 			status = "partial"
 		}
 	}
-	if err := report("100%", fmt.Sprintf("completed=%d total=%d", completed, len(tasks))); err != nil {
+	if err := report("thread_headers", jobProgressCounts(len(tasks), len(tasks))); err != nil {
 		return nil, err
 	}
 	return map[string]any{"status": status, "items": results, "completed": completed, "total": len(tasks)}, nil
@@ -288,6 +291,9 @@ func (r *MCPReader) SyncAuthoredPullRequests(ctx context.Context, in mcpserver.S
 //
 //nolint:gocognit,cyclop,funlen
 func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpserver.SyncAuthoredPullRequestsInput, report func(string, string) error) (map[string]any, error) {
+	if err := report("authored_pull_request_discovery", jobProgressCounts(0, in.Limit)); err != nil {
+		return nil, err
+	}
 	reader, err := s.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
 	if err != nil {
 		return nil, err
@@ -402,14 +408,15 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpserver.Syn
 			status = "partial"
 		}
 	}
-	if err := report("100%", fmt.Sprintf("repositories=%d pull_requests=%d", completed, discovered)); err != nil {
+	if err := report("authored_pull_request_headers", jobProgressCounts(len(tasks), len(tasks))); err != nil {
 		return nil, err
 	}
 	return map[string]any{"status": status, "login": identity.Login, "pull_requests": discovered, "repositories": results, "search_incomplete": incomplete}, nil
 }
 
-// SyncPullRequestStatus submits REST hydration for PR details and reviews.
-// Checks, unresolved review threads, and merge-queue state are not fetched.
+// SyncPullRequestStatus submits a bounded source-backed refresh of PR details,
+// reviews, checks, review conversations, merge state, queue state, closing
+// issues, and changed paths. Each facet retains independent coverage.
 func (r *MCPReader) SyncPullRequestStatus(ctx context.Context, in mcpserver.SyncPullRequestStatusInput) (mcpserver.JobReference, error) {
 	if len(in.PullRequests) < 1 || len(in.PullRequests) > 50 {
 		return mcpserver.JobReference{}, errors.New("pull_requests must contain 1 to 50 items")
@@ -417,12 +424,8 @@ func (r *MCPReader) SyncPullRequestStatus(ctx context.Context, in mcpserver.Sync
 	if in.MaxPages == 0 {
 		in.MaxPages = 3
 	}
-	hydrate := mcpserver.HydrateThreadsInput{Threads: append([]mcpserver.ThreadRef(nil), in.PullRequests...), Facets: []string{"pr_details", "pr_reviews"}, MaxPages: in.MaxPages}
-	for i := range hydrate.Threads {
-		hydrate.Threads[i].Kind = "pull_request"
-	}
 	id, err := r.submitJob(ctx, "sync_pull_request_status", in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.hydrateThreadsBatch(ctx, hydrate, report)
+		return r.syncPullRequestStatusBatch(ctx, in, report)
 	})
 	if err != nil {
 		return mcpserver.JobReference{}, err
@@ -518,6 +521,9 @@ func (r *MCPReader) CheckMergeConflicts(ctx context.Context, in mcpserver.CheckM
 }
 
 func (s *Service) indexRepositoriesBatch(ctx context.Context, in mcpserver.IndexRepositoriesInput, report func(string, string) error) (map[string]any, error) {
+	if err := report("repository_indexing", jobProgressCounts(0, len(in.Repositories))); err != nil {
+		return nil, err
+	}
 	results := make([]map[string]any, len(in.Repositories))
 	jobs := make(chan int)
 	var wg sync.WaitGroup
@@ -561,13 +567,16 @@ func (s *Service) indexRepositoriesBatch(ctx context.Context, in mcpserver.Index
 			status = "partial"
 		}
 	}
-	if err := report("100%", fmt.Sprintf("completed=%d total=%d", completed, len(in.Repositories))); err != nil {
+	if err := report("repository_indexing", jobProgressCounts(len(in.Repositories), len(in.Repositories))); err != nil {
 		return nil, err
 	}
 	return map[string]any{"status": status, "items": results, "completed": completed, "total": len(in.Repositories)}, nil
 }
 
 func (s *Service) hydrateThreadsBatch(ctx context.Context, in mcpserver.HydrateThreadsInput, report func(string, string) error) (map[string]any, error) {
+	if err := report("thread_hydration", jobProgressCounts(0, len(in.Threads))); err != nil {
+		return nil, err
+	}
 	results := make([]map[string]any, len(in.Threads))
 	jobs := make(chan int)
 	var wg sync.WaitGroup
@@ -612,7 +621,7 @@ func (s *Service) hydrateThreadsBatch(ctx context.Context, in mcpserver.HydrateT
 			status = "partial"
 		}
 	}
-	if err := report("100%", fmt.Sprintf("completed=%d total=%d", completed, len(in.Threads))); err != nil {
+	if err := report("thread_hydration", jobProgressCounts(len(in.Threads), len(in.Threads))); err != nil {
 		return nil, err
 	}
 	return map[string]any{"status": status, "items": results, "completed": completed, "total": len(in.Threads)}, nil
@@ -623,6 +632,9 @@ func (s *Service) hydrateThreadsBatch(ctx context.Context, in mcpserver.HydrateT
 //
 //nolint:gocognit
 func (s *Service) syncRepositoryMetadata(ctx context.Context, refs []mcpserver.RepositoryRef, report func(string, string) error) (mcpserver.GetRepositoriesOutput, error) {
+	if err := report("repository_metadata", jobProgressCounts(0, len(refs))); err != nil {
+		return mcpserver.GetRepositoriesOutput{}, err
+	}
 	reader, err := s.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
 	if err != nil {
 		return mcpserver.GetRepositoriesOutput{}, err
@@ -699,7 +711,7 @@ func (s *Service) syncRepositoryMetadata(ctx context.Context, refs []mcpserver.R
 			out.Status = "partial"
 		}
 	}
-	if err := report("100%", fmt.Sprintf("completed=%d total=%d", completed, len(refs))); err != nil {
+	if err := report("repository_metadata", jobProgressCounts(len(refs), len(refs))); err != nil {
 		return out, err
 	}
 	return out, nil

@@ -36,6 +36,7 @@ const (
 	ToolSyncAuthoredPullRequests = "github.sync_authored_pull_requests"
 	ToolSyncPullRequestStatus    = "github.sync_pull_request_status"
 	ToolListPullRequestPortfolio = "corpus.list_pull_request_portfolio"
+	ToolFindPortfolioOverlaps    = "corpus.find_portfolio_overlaps"
 	ToolIndexRepositories        = "code.index_repositories"
 	ToolCheckMergeConflicts      = "workspace.check_merge_conflicts"
 	ToolQueryDeepWiki            = "research.query_deepwiki"
@@ -48,6 +49,7 @@ const (
 	ToolFindCompetingWork        = "workflow.find_competing_work"
 	ToolPromoteOpportunity       = "workflow.promote_opportunity"
 	ToolPrepareContribution      = "workflow.prepare_contribution"
+	ToolLinkPullRequest          = "workflow.link_pull_request"
 )
 
 var canonicalToolNames = []string{
@@ -80,6 +82,7 @@ var canonicalToolNames = []string{
 	ToolSyncAuthoredPullRequests,
 	ToolSyncPullRequestStatus,
 	ToolListPullRequestPortfolio,
+	ToolFindPortfolioOverlaps,
 	ToolIndexRepositories,
 	ToolCheckMergeConflicts,
 	ToolQueryDeepWiki,
@@ -92,6 +95,7 @@ var canonicalToolNames = []string{
 	ToolFindCompetingWork,
 	ToolPromoteOpportunity,
 	ToolPrepareContribution,
+	ToolLinkPullRequest,
 }
 
 type catalogTool[In, Out any] struct {

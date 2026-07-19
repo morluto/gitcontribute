@@ -180,7 +180,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		}
 		out.MatchedFields, out.Score = matchTerms(in.Query, fields)
 		out.SourceRevision = formatTime(thread.SourceUpdatedAt)
-		cov, _ := r.GetCoverage(ctx, mcpserver.GetCoverageInput{Owner: in.Owner, Repo: in.Repo})
+		cov, _, _ := readCoverageTarget(ctx, c, mcpserver.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
 		out.Facets = cov.Facets
 		out.AsOf = cov.AsOf
 	case "code":
@@ -255,7 +255,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		}
 		out.MatchedFields, out.Score = matchTerms(in.Query, fields)
 		out.SourceRevision = formatTime(repo.SourceUpdatedAt)
-		cov, _ := r.GetCoverage(ctx, mcpserver.GetCoverageInput{Owner: in.Owner, Repo: in.Repo})
+		cov, _, _ := readCoverageTarget(ctx, c, mcpserver.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
 		out.Facets = cov.Facets
 		out.AsOf = cov.AsOf
 	default:
@@ -325,13 +325,78 @@ func (r *MCPReader) GetJob(ctx context.Context, in mcpserver.GetJobInput) (mcpse
 	return jobResultToMCP(job)
 }
 
-// CancelJob cancels a durable job and returns its updated state.
-func (r *MCPReader) CancelJob(ctx context.Context, in mcpserver.CancelJobInput) (mcpserver.GetJobOutput, error) {
-	job, err := r.Service.CancelJob(ctx, in.ID)
-	if err != nil {
-		return mcpserver.GetJobOutput{}, err
+// CancelJobs requests bounded cancellation in input order. Missing and terminal
+// jobs remain item-level outcomes so one bad ID does not hide successful writes.
+func (r *MCPReader) CancelJobs(ctx context.Context, in mcpserver.CancelJobInput) (mcpserver.GetJobsOutput, error) {
+	if len(in.IDs) < 1 || len(in.IDs) > 100 {
+		return mcpserver.GetJobsOutput{}, errors.New("ids must contain 1 to 100 items")
 	}
-	return jobResultToMCP(job)
+	out := mcpserver.GetJobsOutput{Status: "complete", Items: make([]mcpserver.BatchItem[mcpserver.GetJobOutput], len(in.IDs))}
+	for i, inputID := range in.IDs {
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
+		id := strings.TrimSpace(inputID)
+		item := mcpserver.BatchItem[mcpserver.GetJobOutput]{Key: id, Status: "complete"}
+		if id == "" {
+			item.Status, item.Reason, item.Message = "failed", "invalid_id", "job ID must not be empty"
+			out.Status = "partial"
+			out.Items[i] = item
+			continue
+		}
+		current, err := r.Service.GetJob(ctx, id)
+		if err != nil {
+			var cliErr *cli.CLIError
+			if errors.As(err, &cliErr) && cliErr.Code == cli.ExitNotFound {
+				item.Status, item.Reason = "unavailable", "not_found"
+			} else {
+				item.Status, item.Reason = "failed", "read_failed"
+			}
+			item.Message = err.Error()
+			out.Status = "partial"
+			out.Items[i] = item
+			continue
+		}
+		if current.Status == "cancelled" {
+			value, err := jobResultToMCP(current)
+			if err != nil {
+				return mcpserver.GetJobsOutput{}, err
+			}
+			item.Value = &value
+			out.Items[i] = item
+			continue
+		}
+		if current.Status == "succeeded" || current.Status == "failed" {
+			item.Status, item.Reason, item.Message = "unavailable", "terminal", "job is already "+current.Status
+			out.Status = "partial"
+			out.Items[i] = item
+			continue
+		}
+		job, err := r.Service.CancelJob(ctx, id)
+		if err != nil {
+			// A terminal transition can race the request; report its latest durable
+			// state as unavailable rather than failing unrelated cancellations.
+			latest, getErr := r.Service.GetJob(ctx, id)
+			if getErr == nil && (latest.Status == "succeeded" || latest.Status == "failed") {
+				item.Status, item.Reason, item.Message = "unavailable", "terminal", "job is already "+latest.Status
+			} else {
+				item.Status, item.Reason, item.Message = "failed", "cancellation_failed", err.Error()
+			}
+			out.Status = "partial"
+			out.Items[i] = item
+			continue
+		}
+		value, err := jobResultToMCP(job)
+		if err != nil {
+			return mcpserver.GetJobsOutput{}, err
+		}
+		item.Value = &value
+		if value.Status == "running" {
+			item.NextAction = "Poll jobs.get until this job reaches a terminal state."
+		}
+		out.Items[i] = item
+	}
+	return out, nil
 }
 
 func jobResultToMCP(job *cli.JobResult) (mcpserver.GetJobOutput, error) {
@@ -343,6 +408,18 @@ func jobResultToMCP(job *cli.JobResult) (mcpserver.GetJobOutput, error) {
 	if err != nil {
 		return mcpserver.GetJobOutput{}, err
 	}
+	phase, completed, total := decodeJobProgress(job)
+	percent := 0
+	if total > 0 {
+		percent = completed * 100 / total
+		if percent > 100 {
+			percent = 100
+		}
+	}
+	retryAfter := 0
+	if job.Status == "queued" || job.Status == "running" {
+		retryAfter = 1000
+	}
 	return mcpserver.GetJobOutput{
 		ID:                    job.ID,
 		Kind:                  job.Kind,
@@ -350,14 +427,43 @@ func jobResultToMCP(job *cli.JobResult) (mcpserver.GetJobOutput, error) {
 		Request:               request,
 		Result:                result,
 		Error:                 job.Error,
-		Progress:              job.Progress,
-		Statistics:            job.Statistics,
+		Phase:                 phase,
+		CompletedItems:        completed,
+		TotalItems:            total,
+		ProgressPercent:       percent,
+		RetryAfterMS:          retryAfter,
 		CreatedAt:             job.CreatedAt,
 		StartedAt:             job.StartedAt,
 		CompletedAt:           job.CompletedAt,
 		CancelledAt:           job.CancelledAt,
 		CancellationRequested: job.Cancellation,
 	}, nil
+}
+
+func decodeJobProgress(job *cli.JobResult) (string, int, int) {
+	phase := strings.TrimSpace(job.Progress)
+	var counts struct {
+		CompletedItems int `json:"completed_items"`
+		TotalItems     int `json:"total_items"`
+	}
+	if json.Unmarshal([]byte(job.Statistics), &counts) == nil && counts.TotalItems >= 0 && counts.CompletedItems >= 0 {
+		return phase, counts.CompletedItems, counts.TotalItems
+	}
+	// Older durable rows used percentages and key=value statistics. Keep them
+	// readable while exposing only the structured MCP contract.
+	if strings.HasSuffix(phase, "%") {
+		phase = job.Kind
+	}
+	for _, field := range strings.Fields(job.Statistics) {
+		var n int
+		if _, err := fmt.Sscanf(field, "completed=%d", &n); err == nil {
+			counts.CompletedItems = n
+		}
+		if _, err := fmt.Sscanf(field, "total=%d", &n); err == nil {
+			counts.TotalItems = n
+		}
+	}
+	return phase, counts.CompletedItems, counts.TotalItems
 }
 
 func decodeJobJSON(field, value string) (any, error) {
@@ -374,14 +480,14 @@ func decodeJobJSON(field, value string) (any, error) {
 func (r *MCPReader) BuildRepositoryDossier(ctx context.Context, in mcpserver.BuildRepositoryDossierInput) (mcpserver.JobReference, error) {
 	repo := cli.RepoRef{Owner: in.Owner, Repo: in.Repo}
 	id, err := r.Service.submitJob(ctx, "build_repository_dossier", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
-		if err := report("0%", ""); err != nil {
+		if err := report("repository_dossier", jobProgressCounts(0, 1)); err != nil {
 			return nil, err
 		}
 		res, err := r.Service.BuildRepositoryDossier(ctx, repo)
 		if err != nil {
 			return nil, err
 		}
-		_ = report("100%", "")
+		_ = report("repository_dossier", jobProgressCounts(1, 1))
 		return res, nil
 	})
 	if err != nil {
@@ -399,14 +505,14 @@ func (r *MCPReader) CreateWorkspace(ctx context.Context, in mcpserver.CreateWork
 		Name:         in.Name,
 	}
 	id, err := r.Service.submitJob(ctx, "create_workspace", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
-		if err := report("0%", ""); err != nil {
+		if err := report("workspace_creation", jobProgressCounts(0, 1)); err != nil {
 			return nil, err
 		}
 		res, err := r.Service.CreateWorkspace(ctx, in.InvestigationID, opts)
 		if err != nil {
 			return nil, err
 		}
-		_ = report("100%", fmt.Sprintf("workspace=%s", res.ID))
+		_ = report("workspace_creation", jobProgressCounts(1, 1))
 		return res, nil
 	})
 	if err != nil {
@@ -426,14 +532,14 @@ func (r *MCPReader) RunValidation(ctx context.Context, in mcpserver.RunValidatio
 	}
 	opts := cli.RunValidationOptions{Kind: in.Kind, Execute: true}
 	id, err := r.Service.submitJob(ctx, "run_validation", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
-		if err := report("0%", ""); err != nil {
+		if err := report("validation", jobProgressCounts(0, 1)); err != nil {
 			return nil, err
 		}
 		res, err := r.Service.RunValidation(ctx, in.ID, opts)
 		if err != nil {
 			return nil, err
 		}
-		_ = report("100%", fmt.Sprintf("exit_code=%d", res.ExitCode))
+		_ = report("validation", jobProgressCounts(1, 1))
 		return res, nil
 	})
 	if err != nil {

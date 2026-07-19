@@ -89,7 +89,7 @@ type GetJobInput struct {
 	ID string `json:"id" jsonschema:"Durable job ID"`
 }
 
-// GetJobOutput reports durable state, progress, and result fields for a job.
+// GetJobOutput reports durable state and structured progress for a job.
 type GetJobOutput struct {
 	ID                    string `json:"id"`
 	Kind                  string `json:"kind"`
@@ -97,8 +97,11 @@ type GetJobOutput struct {
 	Request               any    `json:"request,omitempty"`
 	Result                any    `json:"result,omitempty"`
 	Error                 string `json:"error,omitempty"`
-	Progress              string `json:"progress,omitempty"`
-	Statistics            string `json:"statistics,omitempty"`
+	Phase                 string `json:"phase,omitempty"`
+	CompletedItems        int    `json:"completed_items"`
+	TotalItems            int    `json:"total_items"`
+	ProgressPercent       int    `json:"progress_percent"`
+	RetryAfterMS          int    `json:"retry_after_ms,omitempty"`
 	CreatedAt             string `json:"created_at"`
 	StartedAt             string `json:"started_at,omitempty"`
 	CompletedAt           string `json:"completed_at,omitempty"`
@@ -268,8 +271,10 @@ type DraftOutput struct {
 	RenderedAt    string `json:"rendered_at"`
 }
 
-// CancelJobInput selects a durable job for persisted cancellation.
-type CancelJobInput GetJobInput
+// CancelJobInput selects durable jobs for bounded, persisted cancellation.
+type CancelJobInput struct {
+	IDs []string `json:"ids" jsonschema:"One to 100 durable job IDs"`
+}
 
 func (s *Server) registerV1() {
 	readOnly := readOnlyAnnotations()
@@ -395,11 +400,11 @@ func (s *Server) registerV1() {
 			forbidWhen(schema, "kind", "pull_request", "success")
 		}), output: outputSchema[DraftOutput]("Newly rendered and persisted local contribution draft."), handler: s.prepareContribution,
 	})
-	addCatalogTool(s.server, catalogTool[CancelJobInput, GetJobOutput]{
-		name: ToolCancelJob, title: "Cancel durable job",
-		description: "Irreversibly request cancellation of one durable job and return its updated state. Queued jobs become cancelled immediately; running jobs are interrupted cooperatively. Repeating the same request has no additional effect.",
-		annotations: cancellationAnnotations(), input: inputSchema[CancelJobInput](noSchemaCustomization),
-		output: outputSchema[GetJobOutput]("Updated durable job state after cancellation."), handler: s.cancelJob,
+	addCatalogTool(s.server, catalogTool[CancelJobInput, GetJobsOutput]{
+		name: ToolCancelJob, title: "Cancel durable jobs in one batch",
+		description: "Cancel up to 100 durable jobs in order with isolated item outcomes; repeated cancellation is safe.",
+		annotations: cancellationAnnotations(), input: inputSchema[CancelJobInput](func(sc *jsonschema.Schema) { setArrayBounds(sc, "ids", 1, 100) }),
+		output: outputSchema[GetJobsOutput]("Ordered durable job states after cancellation requests."), handler: s.cancelJob,
 	})
 
 	s.registerV1ResourceTemplates()
@@ -685,17 +690,15 @@ func (s *Server) prepareContribution(ctx context.Context, _ *mcp.CallToolRequest
 	return nil, out, err
 }
 
-func (s *Server) cancelJob(ctx context.Context, _ *mcp.CallToolRequest, in CancelJobInput) (*mcp.CallToolResult, GetJobOutput, error) {
-	id, err := normalizeID("id", in.ID)
-	if err != nil {
-		return nil, GetJobOutput{}, err
+func (s *Server) cancelJob(ctx context.Context, _ *mcp.CallToolRequest, in CancelJobInput) (*mcp.CallToolResult, GetJobsOutput, error) {
+	if len(in.IDs) < 1 || len(in.IDs) > 100 {
+		return nil, GetJobsOutput{}, errors.New("ids must contain 1 to 100 items")
 	}
-	in.ID = id
 	operator, ok := s.reader.(Operator)
 	if !ok {
-		return nil, GetJobOutput{}, errors.New("job cancellation is not available")
+		return nil, GetJobsOutput{}, errors.New("job cancellation is not available")
 	}
-	out, err := operator.CancelJob(ctx, in)
+	out, err := operator.CancelJobs(ctx, in)
 	return nil, out, err
 }
 

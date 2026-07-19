@@ -13,7 +13,10 @@ import (
 
 // Keep a little headroom above the measured scalable-catalog baseline. This is
 // a regression guard, not a claim that the current catalog needs no compaction.
-const maxSerializedCatalogBytes = 112 * 1024
+// The scalable surface currently serializes below 128 KiB. Keep a fixed budget
+// so contract growth remains deliberate while allowing the issue-20 batch and
+// portfolio primitives to ship together.
+const maxSerializedCatalogBytes = 128 * 1024
 
 var selectionSynonyms = map[string]string{
 	"execute": "run",
@@ -154,6 +157,10 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 		{"Render and persist a pull request draft from supplied changes", ToolPrepareContribution},
 		{"Execute the stored validation command against the candidate workspace", ToolRunValidation},
 		{"Stop a running durable job", ToolCancelJob},
+		{"Poll several durable jobs together with structured progress", ToolGetJob},
+		{"Read stored facet coverage for several exact threads", ToolGetCoverage},
+		{"Compare contribution candidates with my authored pull requests for overlap", ToolFindPortfolioOverlaps},
+		{"Link an authored pull request to a local opportunity", ToolLinkPullRequest},
 		{"Review readiness blockers and warnings for an opportunity", ToolGetReadiness},
 		{"Rebuild and persist the repository dossier from the local corpus", ToolBuildRepositoryDossier},
 		{"Read the existing persisted repository dossier without rebuilding it", ToolGetRepositoryDossier},
@@ -188,6 +195,10 @@ func TestInvalidToolCallEvaluation(t *testing.T) {
 		{ToolSearchGitHubRepositories, map[string]any{"limit": 20}},
 		{ToolSearchCode, map[string]any{"query": "race", "owner": "acme"}},
 		{ToolGetThreads, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 0}}}},
+		{ToolGetCoverage, map[string]any{"targets": []any{}}},
+		{ToolCancelJob, map[string]any{"ids": []any{}}},
+		{ToolFindPortfolioOverlaps, map[string]any{"candidates": []any{map[string]any{"kind": "thread", "ref": "1"}}, "pull_requests": []any{map[string]any{"owner": "acme", "repo": "rocket", "number": 1}}}},
+		{ToolLinkPullRequest, map[string]any{"pull_request": map[string]any{"owner": "acme", "repo": "rocket", "number": 1}}},
 		{ToolGetEvidence, map[string]any{}},
 		{ToolGetEvidence, map[string]any{"investigation_id": "inv-1", "opportunity_id": "opp-1"}},
 		{ToolHydrateThreads, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "rocket", "number": 1}}, "facets": []string{"unknown"}}},

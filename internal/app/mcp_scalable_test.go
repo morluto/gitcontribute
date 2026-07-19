@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/deepwiki"
 	"github.com/morluto/gitcontribute/internal/github"
@@ -43,6 +44,123 @@ func TestGetRepositoriesPreservesUnknownMetadataAndInputOrder(t *testing.T) {
 	}
 	if out.Items[2].Key != "acme/missing" || out.Items[2].Status != "unavailable" {
 		t.Fatalf("missing item = %+v", out.Items[2])
+	}
+}
+
+func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket", SourceUpdatedAt: time.Unix(10, 0).UTC()}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 7, State: "open", Title: "bounded coverage", SourceUpdatedAt: time.Unix(20, 0).UTC()}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.AdvanceFacet(ctx, repo.ID, nil, "metadata", time.Unix(11, 0).UTC(), true, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.AdvanceFacet(ctx, repo.ID, &thread.ID, "comments", time.Unix(21, 0).UTC(), false, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := (&MCPReader{svc}).GetCoverage(ctx, mcpserver.GetCoverageInput{Targets: []mcpserver.CoverageTarget{
+		{Owner: "acme", Repo: "rocket"},
+		{Owner: "acme", Repo: "missing"},
+		{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 7},
+		{Owner: "acme", Repo: "rocket", Kind: "issue"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "partial" || len(out.Items) != 4 {
+		t.Fatalf("coverage batch = %+v", out)
+	}
+	if out.Items[0].Key != "acme/rocket" || out.Items[0].Value == nil || out.Items[0].Value.Facets[0].Facet != "metadata" {
+		t.Fatalf("repository coverage = %+v", out.Items[0])
+	}
+	if out.Items[1].Key != "acme/missing" || out.Items[1].Status != "unavailable" || out.Items[1].Reason != "not_indexed" {
+		t.Fatalf("missing coverage = %+v", out.Items[1])
+	}
+	if out.Items[2].Value == nil || out.Items[2].Value.Kind != "issue" || out.Items[2].Value.Number != 7 || out.Items[2].Value.Facets[0].Status != "incomplete" {
+		t.Fatalf("thread coverage = %+v", out.Items[2])
+	}
+	if out.Items[3].Status != "unavailable" || out.Items[3].Reason != "invalid_reference" {
+		t.Fatalf("invalid coverage target = %+v", out.Items[3])
+	}
+}
+
+func TestCancelJobsPreservesOrderAndIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	if _, err := svc.Jobs(ctx); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := svc.corpus.CreateJob(ctx, "sync", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	terminal, err := svc.corpus.CreateJob(ctx, "sync", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.StartJob(ctx, terminal.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.TransitionJob(ctx, terminal.ID, corpus.JobStatusRunning, corpus.JobStatusSucceeded, `{}`, ""); err != nil {
+		t.Fatal(err)
+	}
+	running, err := svc.corpus.CreateJob(ctx, "sync", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.StartJob(ctx, running.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	reader := &MCPReader{svc}
+	out, err := reader.CancelJobs(ctx, mcpserver.CancelJobInput{IDs: []string{queued.ID, "missing-job", running.ID, terminal.ID, queued.ID, " "}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "partial" || len(out.Items) != 6 {
+		t.Fatalf("cancellation batch = %+v", out)
+	}
+	if out.Items[0].Key != queued.ID || out.Items[0].Value == nil || out.Items[0].Value.Status != "cancelled" {
+		t.Fatalf("queued cancellation = %+v", out.Items[0])
+	}
+	if out.Items[1].Status != "unavailable" || out.Items[1].Reason != "not_found" {
+		t.Fatalf("missing cancellation = %+v", out.Items[1])
+	}
+	if out.Items[2].Value == nil || out.Items[2].Value.Status != "running" || !out.Items[2].Value.CancellationRequested || out.Items[2].Value.RetryAfterMS != 1000 || out.Items[2].NextAction == "" {
+		t.Fatalf("running cancellation = %+v", out.Items[2])
+	}
+	if out.Items[3].Status != "unavailable" || out.Items[3].Reason != "terminal" {
+		t.Fatalf("terminal cancellation = %+v", out.Items[3])
+	}
+	if out.Items[4].Value == nil || out.Items[4].Value.Status != "cancelled" {
+		t.Fatalf("repeated cancellation = %+v", out.Items[4])
+	}
+	if out.Items[5].Status != "failed" || out.Items[5].Reason != "invalid_id" {
+		t.Fatalf("invalid cancellation = %+v", out.Items[5])
+	}
+}
+
+func TestJobResultToMCPExposesStructuredDurableProgress(t *testing.T) {
+	out, err := jobResultToMCP(&cli.JobResult{ID: "job-1", Kind: "sync_threads", Status: "running", Request: `{}`, Progress: "thread_headers", Statistics: `{"completed_items":2,"total_items":5}`, CreatedAt: "2026-07-19T00:00:00Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Phase != "thread_headers" || out.CompletedItems != 2 || out.TotalItems != 5 || out.ProgressPercent != 40 || out.RetryAfterMS != 1000 {
+		t.Fatalf("structured progress = %+v", out)
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"progress":`) || strings.Contains(string(encoded), `"statistics":`) {
+		t.Fatalf("legacy free-form progress leaked into MCP output: %s", encoded)
 	}
 }
 
@@ -219,5 +337,43 @@ func TestPullRequestPortfolioClassifiesClosedUnmerged(t *testing.T) {
 	}
 	if len(out.PullRequests) != 1 || out.PullRequests[0].Number != thread.Number || out.PullRequests[0].Attention != "closed_unmerged" {
 		t.Fatalf("closed pull request classification = %+v", out.PullRequests)
+	}
+}
+
+func TestPullRequestPortfolioKeepsComputingMergeabilityUnknown(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	now := time.Unix(1000, 0).UTC()
+	svc.SetClock(func() time.Time { return now })
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket"}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 10, State: "open", Title: "computing", Author: "alice", SourceUpdatedAt: now}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := map[string]any{
+		FacetPRDetails:       github.PullRequestDetails{Number: 10, UpdatedAt: now},
+		FacetPRReviews:       []github.Review{},
+		FacetPRMergeState:    github.PullRequestMergeState{MergeStateStatus: "UNKNOWN", Mergeable: "UNKNOWN", MergeableKnown: false},
+		FacetPRMergeQueue:    (*github.PullRequestMergeQueueEntry)(nil),
+		FacetPRChecks:        []github.PullRequestCheck{},
+		FacetPRReviewThreads: []github.PullRequestReviewThread{},
+		FacetPRClosingIssues: []github.PullRequestClosingIssue{},
+		FacetPRFiles:         []github.PullRequestFile{},
+	}
+	for facet, value := range values {
+		payload, _ := json.Marshal(value)
+		if err := svc.corpus.ApplyFacetObservationSet(ctx, repo.ID, &thread.ID, facet, now, []corpus.FacetObservationInput{{SourceUpdatedAt: now, Payload: string(payload)}}, true, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpserver.ListPullRequestPortfolioInput{Author: "alice", State: "open", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.PullRequests) != 1 || out.PullRequests[0].Attention != "unknown" || !strings.Contains(strings.Join(out.PullRequests[0].Reasons, " "), "mergeability is still computing") {
+		t.Fatalf("portfolio = %+v", out)
 	}
 }

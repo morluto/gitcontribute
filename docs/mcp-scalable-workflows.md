@@ -36,19 +36,27 @@ github.get_authenticated_identity
 -> github.sync_authored_pull_requests -> jobs.get
 -> github.sync_pull_request_status -> jobs.get
 -> corpus.list_pull_request_portfolio
+-> corpus.find_portfolio_overlaps
 ```
 
-The current status adapter stores REST pull-request details and reviews. The
-portfolio can classify merged, closed-unmerged, conflicted, changes-requested,
-approved, stale, awaiting-review, and unknown states from those facts.
+The status adapter stores REST pull-request details and reviews plus typed,
+independently covered GraphQL snapshots for checks, unresolved review threads,
+detailed merge state, merge queue, closing issues, and changed files. The
+offline portfolio derives deterministic attention states only from complete
+facets. A null or still-computing mergeability value remains unknown.
 
-The following facts are not currently fetched and remain explicit in coverage
-and reason fields:
+`corpus.find_portfolio_overlaps` compares up to 50 stored candidates with
+authored pull requests using complete normalized changed-path, linked-issue,
+and stored opportunity-similarity evidence. It returns `unknown` unless every
+required facet is complete; it never performs network access. Use
+`workflow.link_pull_request` to record an explicit local PR association with an
+opportunity or workspace. That local write does not mutate GitHub.
 
-- check rollups and failing checks;
-- unresolved review conversations;
-- detailed merge state and merge queue position;
-- closing issue links and cross-portfolio overlap.
+Issue timeline hydration is an explicit, opt-in `issue_timeline` facet. Complete
+timeline observations may create versioned resolution records with exact source
+observation references. Closing-issue observations remain relationship evidence
+until completion is independently observed. Similar prose is not resolution
+evidence.
 
 `workspace.check_merge_conflicts` is different from GitHub mergeability. It runs
 a non-mutating Git comparison between already-fetched object IDs in a managed
@@ -69,6 +77,11 @@ jobs together with vectorized `jobs.get`, then retry only retryable items. Never
 interpret absent coverage as a zero, a passing check, or a lack of competing
 work.
 
+`corpus.get_coverage` accepts up to 100 ordered repository or exact-thread
+targets. `jobs.cancel` accepts up to 100 IDs and returns isolated item outcomes;
+repeating cancellation is safe. `jobs.get` exposes structured phase and item
+counts rather than requiring clients to parse event prose.
+
 The MCP catalog does not advertise scalar compatibility aliases. Use one-item
 arrays with `corpus.get_repositories`, `corpus.get_threads`,
 `github.sync_threads`, `github.hydrate_threads`, and `jobs.get` when only one
@@ -80,6 +93,7 @@ not an MCP discovery primitive.
 | Tool family | Network | Corpus/local write | Process |
 | --- | ---: | ---: | ---: |
 | `corpus.get_*`, rank, precedents, portfolio | no | no | no |
+| `workflow.link_pull_request` | no | yes | no |
 | `github.search_*`, sync, hydrate | yes | yes | no |
 | `research.query_deepwiki` | yes | no | no |
 | `code.index_repositories` | remote-dependent | yes | Git only |

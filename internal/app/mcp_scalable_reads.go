@@ -162,10 +162,19 @@ func (r *MCPReader) GetJobs(ctx context.Context, in mcpserver.GetJobsInput) (mcp
 	}
 	out := mcpserver.GetJobsOutput{Status: "complete", Items: make([]mcpserver.BatchItem[mcpserver.GetJobOutput], len(ids))}
 	for i, id := range ids {
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
 		item := mcpserver.BatchItem[mcpserver.GetJobOutput]{Key: id, Status: "complete"}
 		job, err := r.GetJob(ctx, mcpserver.GetJobInput{ID: id})
 		if err != nil {
-			item.Status, item.Reason, item.Message = "unavailable", "not_found", err.Error()
+			var cliErr *cli.CLIError
+			if errors.As(err, &cliErr) && cliErr.Code == cli.ExitNotFound {
+				item.Status, item.Reason = "unavailable", "not_found"
+			} else {
+				item.Status, item.Reason = "failed", "read_failed"
+			}
+			item.Message = err.Error()
 			out.Status = "partial"
 		} else {
 			item.Value = &job
@@ -198,7 +207,7 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpserver.L
 	if err != nil {
 		return mcpserver.ListPullRequestPortfolioOutput{}, err
 	}
-	out := mcpserver.ListPullRequestPortfolioOutput{Status: "complete", RuleVersion: "portfolio.v1", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpserver.PullRequestPortfolioItem, 0, len(stored)), Total: len(stored)}
+	out := mcpserver.ListPullRequestPortfolioOutput{Status: "complete", RuleVersion: "portfolio.v2", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpserver.PullRequestPortfolioItem, 0, len(stored)), Total: len(stored)}
 	for _, storedPR := range stored {
 		item, err := portfolioItem(ctx, c, storedPR, r.now())
 		if err != nil {
@@ -213,36 +222,55 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpserver.L
 }
 
 // The projection deliberately keeps coverage, observation decoding, and the
-// portfolio.v1 classification together so unknown facets cannot become facts.
+// portfolio.v2 classification together so unknown facets cannot become facts.
 //
 //nolint:gocognit,cyclop
 func portfolioItem(ctx context.Context, c *corpus.Corpus, stored corpus.PortfolioPullRequest, now time.Time) (mcpserver.PullRequestPortfolioItem, error) {
 	t := stored.Thread
 	out := mcpserver.PullRequestPortfolioItem{Ref: fmt.Sprintf("%s/%s#%d", stored.Owner, stored.Repo, t.Number), Owner: stored.Owner, Repo: stored.Repo, Number: t.Number, Title: t.Title, State: t.State, Author: t.Author, Draft: t.Draft, SourceUpdatedAt: formatTime(t.SourceUpdatedAt), StatusCoverage: "missing"}
-	detailCoverage, err := c.GetCoverage(ctx, t.RepositoryID, &t.ID, FacetPRDetails)
-	if err != nil {
-		return out, err
-	}
-	reviewCoverage, err := c.GetCoverage(ctx, t.RepositoryID, &t.ID, FacetPRReviews)
-	if err != nil {
-		return out, err
-	}
-	var details github.PullRequestDetails
-	if detailCoverage != nil {
-		observations, _, err := c.ListFacetObservationsBounded(ctx, t.RepositoryID, &t.ID, FacetPRDetails, 1)
+	facets := []string{FacetPRDetails, FacetPRReviews, FacetPRChecks, FacetPRReviewThreads, FacetPRMergeState, FacetPRMergeQueue, FacetPRClosingIssues, FacetPRFiles}
+	coverage := make(map[string]*corpus.Coverage, len(facets))
+	complete, observed := true, 0
+	for _, facet := range facets {
+		cov, err := c.GetCoverage(ctx, t.RepositoryID, &t.ID, facet)
 		if err != nil {
 			return out, err
 		}
-		if len(observations) > 0 {
-			if err := json.Unmarshal([]byte(observations[0].Payload), &details); err != nil {
-				return out, fmt.Errorf("decode pull-request details for %s: %w", out.Ref, err)
+		coverage[facet] = cov
+		status := "missing"
+		if cov != nil {
+			observed++
+			status = "incomplete"
+			if cov.Complete {
+				status = "complete"
 			}
-			out.Mergeable, out.HeadRef, out.HeadSHA, out.BaseRef, out.BaseSHA = details.Mergeable, details.HeadRef, details.HeadSHA, details.BaseRef, details.BaseSHA
-			out.StatusObservedAt = formatTime(observations[0].ObservedAt)
-			out.StatusCoverage = "partial"
 		}
+		if cov == nil || !cov.Complete {
+			complete = false
+		}
+		entry := mcpserver.FacetCoverageOutput{Facet: facet, Status: status}
+		if cov != nil {
+			entry.Complete, entry.UpdatedAt = cov.Complete, formatTime(cov.UpdatedAt)
+		}
+		out.Facets = append(out.Facets, entry)
 	}
-	if reviewCoverage != nil {
+	if observed > 0 {
+		out.StatusCoverage = "partial"
+	}
+	if complete {
+		out.StatusCoverage = "complete"
+	}
+	detailCoverage, reviewCoverage := coverage[FacetPRDetails], coverage[FacetPRReviews]
+	var details github.PullRequestDetails
+	if detailCoverage != nil && detailCoverage.Complete {
+		observedAt, err := decodeLatestFacet(ctx, c, t, FacetPRDetails, &details)
+		if err != nil {
+			return out, fmt.Errorf("decode pull-request details for %s: %w", out.Ref, err)
+		}
+		out.Mergeable, out.HeadRef, out.HeadSHA, out.BaseRef, out.BaseSHA = details.Mergeable, details.HeadRef, details.HeadSHA, details.BaseRef, details.BaseSHA
+		out.StatusObservedAt = observedAt
+	}
+	if reviewCoverage != nil && reviewCoverage.Complete {
 		observations, _, err := c.ListFacetObservationsBounded(ctx, t.RepositoryID, &t.ID, FacetPRReviews, 100)
 		if err != nil {
 			return out, err
@@ -274,11 +302,77 @@ func portfolioItem(ctx context.Context, c *corpus.Corpus, stored corpus.Portfoli
 		} else if approved {
 			out.ReviewDecision = "approved"
 		}
-		if detailCoverage != nil && detailCoverage.Complete && reviewCoverage.Complete {
-			out.StatusCoverage = "partial"
+	}
+	mergeabilityKnown := false
+	if cov := coverage[FacetPRMergeState]; cov != nil && cov.Complete {
+		var value github.PullRequestMergeState
+		if _, err := decodeLatestFacet(ctx, c, t, FacetPRMergeState, &value); err != nil {
+			return out, err
+		}
+		out.MergeStateStatus = strings.ToLower(value.MergeStateStatus)
+		if value.MergeableKnown {
+			mergeabilityKnown = true
+			mergeable := strings.EqualFold(value.Mergeable, "MERGEABLE")
+			out.Mergeable = &mergeable
 		}
 	}
-	out.Reasons = append(out.Reasons, "check rollup and unresolved review-thread coverage are unavailable")
+	if cov := coverage[FacetPRChecks]; cov != nil && cov.Complete {
+		var checks []github.PullRequestCheck
+		if _, err := decodeLatestFacet(ctx, c, t, FacetPRChecks, &checks); err != nil {
+			return out, err
+		}
+		out.ChecksTotal = len(checks)
+		out.ChecksStatus = classifyChecks(checks)
+	}
+	if cov := coverage[FacetPRReviewThreads]; cov != nil && cov.Complete {
+		var threads []github.PullRequestReviewThread
+		if _, err := decodeLatestFacet(ctx, c, t, FacetPRReviewThreads, &threads); err != nil {
+			return out, err
+		}
+		unresolved := 0
+		for _, thread := range threads {
+			if !thread.IsResolved && !thread.IsOutdated {
+				unresolved++
+			}
+		}
+		out.UnresolvedReviewThreads = &unresolved
+	}
+	if cov := coverage[FacetPRMergeQueue]; cov != nil && cov.Complete {
+		var queue *github.PullRequestMergeQueueEntry
+		if _, err := decodeLatestFacet(ctx, c, t, FacetPRMergeQueue, &queue); err != nil {
+			return out, err
+		}
+		if queue != nil {
+			out.MergeQueueState, out.MergeQueuePosition = strings.ToLower(queue.State), queue.Position
+		}
+	}
+	if cov := coverage[FacetPRClosingIssues]; cov != nil && cov.Complete {
+		var issues []github.PullRequestClosingIssue
+		if _, err := decodeLatestFacet(ctx, c, t, FacetPRClosingIssues, &issues); err != nil {
+			return out, err
+		}
+		for _, issue := range issues {
+			out.ClosingIssues = append(out.ClosingIssues, fmt.Sprintf("%s#%d", issue.RepositoryFullName, issue.Number))
+		}
+	}
+	if cov := coverage[FacetPRFiles]; cov != nil && cov.Complete {
+		var files []github.PullRequestFile
+		if _, err := decodeLatestFacet(ctx, c, t, FacetPRFiles, &files); err != nil {
+			return out, err
+		}
+		for _, file := range files {
+			out.ChangedFiles = append(out.ChangedFiles, file.Path)
+		}
+	}
+	for _, facet := range []string{FacetPRChecks, FacetPRReviewThreads, FacetPRMergeState, FacetPRMergeQueue} {
+		if coverage[facet] == nil || !coverage[facet].Complete {
+			out.Reasons = append(out.Reasons, facet+" coverage is incomplete")
+		}
+	}
+	if coverage[FacetPRMergeState] != nil && coverage[FacetPRMergeState].Complete && !mergeabilityKnown {
+		out.Reasons = append(out.Reasons, "GitHub mergeability is still computing")
+	}
+	healthComplete := coverage[FacetPRChecks] != nil && coverage[FacetPRChecks].Complete && coverage[FacetPRReviewThreads] != nil && coverage[FacetPRReviewThreads].Complete && coverage[FacetPRMergeState] != nil && coverage[FacetPRMergeState].Complete && mergeabilityKnown && coverage[FacetPRMergeQueue] != nil && coverage[FacetPRMergeQueue].Complete
 	switch {
 	case t.Merged:
 		out.Attention = "merged"
@@ -295,17 +389,73 @@ func portfolioItem(ctx context.Context, c *corpus.Corpus, stored corpus.Portfoli
 	case out.ReviewDecision == "changes_requested":
 		out.Attention = "changes_requested"
 		out.Reasons = append([]string{"latest reviewer decisions request changes"}, out.Reasons...)
-	case out.ReviewDecision == "approved":
-		out.Attention = "approved"
-		out.Reasons = append([]string{"latest stored reviewer decisions include approval"}, out.Reasons...)
+	case out.ChecksStatus == "failing":
+		out.Attention = "checks_failing"
+		out.Reasons = append([]string{"one or more observed checks are failing"}, out.Reasons...)
+	case out.ChecksStatus == "pending":
+		out.Attention = "checks_pending"
+		out.Reasons = append([]string{"one or more observed checks are pending"}, out.Reasons...)
+	case strings.EqualFold(out.MergeStateStatus, "behind"):
+		out.Attention = "behind_base"
+		out.Reasons = append([]string{"GitHub reports the head is behind the base branch"}, out.Reasons...)
+	case out.UnresolvedReviewThreads != nil && *out.UnresolvedReviewThreads > 0:
+		out.Attention = "review_threads_unresolved"
+		out.Reasons = append([]string{"review conversations remain unresolved"}, out.Reasons...)
+	case out.MergeQueueState != "":
+		out.Attention = "merge_queue"
+		out.Reasons = append([]string{"pull request is in the merge queue"}, out.Reasons...)
+	case !healthComplete:
+		out.Attention = "unknown"
+		out.Reasons = append([]string{"required pull-request health coverage is incomplete"}, out.Reasons...)
 	case now.Sub(t.SourceUpdatedAt) > 14*24*time.Hour:
 		out.Attention = "stale"
 		out.Reasons = append([]string{"pull request has not been updated for more than 14 days"}, out.Reasons...)
+	case out.ReviewDecision == "approved":
+		out.Attention = "approved"
+		out.Reasons = append([]string{"latest stored reviewer decisions include approval"}, out.Reasons...)
 	default:
 		out.Attention = "awaiting_review"
 		out.Reasons = append([]string{"no approval or change request is stored"}, out.Reasons...)
 	}
 	return out, nil
+}
+
+func decodeLatestFacet(ctx context.Context, c *corpus.Corpus, thread corpus.Thread, facet string, target any) (string, error) {
+	observations, _, err := c.ListFacetObservationsBounded(ctx, thread.RepositoryID, &thread.ID, facet, 1)
+	if err != nil {
+		return "", err
+	}
+	if len(observations) == 0 {
+		return "", fmt.Errorf("complete %s coverage has no observation", facet)
+	}
+	if err := json.Unmarshal([]byte(observations[0].Payload), target); err != nil {
+		return "", err
+	}
+	return formatTime(observations[0].ObservedAt), nil
+}
+
+func classifyChecks(checks []github.PullRequestCheck) string {
+	status := "passing"
+	for _, check := range checks {
+		value := strings.ToUpper(check.Status)
+		conclusion := strings.ToUpper(check.Conclusion)
+		if value != "" && value != "COMPLETED" && value != "SUCCESS" {
+			status = "pending"
+		}
+		switch conclusion {
+		case "FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "STALE":
+			return "failing"
+		}
+		if check.Kind == "StatusContext" {
+			switch value {
+			case "ERROR", "FAILURE":
+				return "failing"
+			case "EXPECTED", "PENDING":
+				status = "pending"
+			}
+		}
+	}
+	return status
 }
 
 // RankOpportunities performs deterministic offline Radar ranking across stored repositories.

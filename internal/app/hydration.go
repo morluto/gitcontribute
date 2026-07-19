@@ -19,6 +19,13 @@ const (
 	FacetPRDetails        = "pr_details"
 	FacetPRReviews        = "pr_reviews"
 	FacetPRReviewComments = "pr_review_comments"
+	FacetPRChecks         = "pr_checks"
+	FacetPRReviewThreads  = "pr_review_threads"
+	FacetPRMergeState     = "pr_merge_state"
+	FacetPRMergeQueue     = "pr_merge_queue"
+	FacetPRClosingIssues  = "pr_closing_issues"
+	FacetPRFiles          = "pr_files"
+	FacetIssueTimeline    = "issue_timeline"
 )
 
 var issueFacets = []string{FacetIssueComments}
@@ -166,6 +173,8 @@ func (s *Service) HydrateThread(ctx context.Context, repo cli.RepoRef, number in
 			facetResult, err = f.hydratePullRequestReviews()
 		case FacetPRReviewComments:
 			facetResult, err = f.hydratePullRequestReviewComments()
+		case FacetIssueTimeline:
+			facetResult, err = f.hydrateIssueTimeline()
 		default:
 			hydrateErr = fmt.Errorf("unknown facet %q", facet)
 			return nil, hydrateErr
@@ -208,6 +217,9 @@ func selectFacets(kind string, requested []string) ([]string, error) {
 	if len(requested) == 0 {
 		return allowed, nil
 	}
+	// Timeline history is intentionally opt-in because it can be much larger
+	// than the default hydration set.
+	allowed = append(append([]string(nil), allowed...), FacetIssueTimeline)
 
 	allowedSet := make(map[string]struct{}, len(allowed))
 	for _, f := range allowed {
@@ -227,6 +239,119 @@ func selectFacets(kind string, requested []string) ([]string, error) {
 		out = append(out, f)
 	}
 	return out, nil
+}
+
+func (f *facetRunner) hydrateIssueTimeline() (HydratedFacet, error) {
+	reader, ok := f.reader.(github.IssueTimelineReader)
+	if !ok {
+		return HydratedFacet{}, errors.New("GitHub reader does not support issue timelines")
+	}
+	opts := github.PageOptions{Page: 1, PerPage: 100}
+	var total, pages int
+	var complete bool
+	var pageObservations []corpus.FacetObservationInput
+	sourceUpdatedAt := f.thread.SourceUpdatedAt
+	var events []github.IssueTimelineEvent
+	for pages < f.maxPages {
+		if err := f.ctx.Err(); err != nil {
+			return HydratedFacet{}, err
+		}
+		res, err := reader.ListIssueTimeline(f.ctx, f.ref.Owner, f.ref.Repo, f.thread.Number, opts)
+		if err != nil {
+			return HydratedFacet{}, err
+		}
+		pages++
+		pageUpdatedAt := sourceUpdatedAt
+		for _, event := range res.Items {
+			if event.CreatedAt.After(pageUpdatedAt) {
+				pageUpdatedAt = event.CreatedAt
+			}
+		}
+		payload, err := json.Marshal(res.Items)
+		if err != nil {
+			return HydratedFacet{}, fmt.Errorf("marshal issue timeline: %w", err)
+		}
+		pageObservations = append(pageObservations, corpus.FacetObservationInput{SourceUpdatedAt: pageUpdatedAt, Payload: string(payload)})
+		events = append(events, res.Items...)
+		total += len(res.Items)
+		if pageUpdatedAt.After(sourceUpdatedAt) {
+			sourceUpdatedAt = pageUpdatedAt
+		}
+		if !res.Page.HasNext {
+			complete = true
+			break
+		}
+		opts.Page = res.Page.NextPage
+	}
+	if !complete {
+		if err := f.c.AdvanceFacet(f.ctx, f.repoID, &f.threadID, FacetIssueTimeline, sourceUpdatedAt, false, f.runID); err != nil {
+			return HydratedFacet{}, err
+		}
+		return HydratedFacet{Facet: FacetIssueTimeline, Count: total, Pages: pages, Complete: false}, nil
+	}
+	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetIssueTimeline, sourceUpdatedAt, pageObservations, true, f.runID); err != nil {
+		return HydratedFacet{}, err
+	}
+	coverage, err := f.c.GetCoverage(f.ctx, f.repoID, &f.threadID, FacetIssueTimeline)
+	if err != nil {
+		return HydratedFacet{}, err
+	}
+	if coverage == nil || !coverage.Complete || !coverage.SourceUpdatedAt.Equal(sourceUpdatedAt.Truncate(time.Second)) {
+		// A newer stored snapshot won the stale-write comparison. Do not attach
+		// this older derivation to that snapshot's observation identities.
+		return HydratedFacet{Facet: FacetIssueTimeline, Count: total, Pages: pages, Complete: true}, nil
+	}
+	if err := f.persistTimelineResolution(events, sourceUpdatedAt); err != nil {
+		return HydratedFacet{}, err
+	}
+	return HydratedFacet{Facet: FacetIssueTimeline, Count: total, Pages: pages, Complete: true}, nil
+}
+
+func (f *facetRunner) persistTimelineResolution(events []github.IssueTimelineEvent, sourceUpdatedAt time.Time) error {
+	kind, summary := "", ""
+	selectedCommit := ""
+	if f.thread.StateReason == "not_planned" {
+		kind, summary = "not_planned", "GitHub records this issue as closed without planned work."
+	}
+	for _, event := range events {
+		if event.Event == "closed" && event.CommitID != "" {
+			kind, summary = "fixed_by_commit", "GitHub records an explicit closing commit: "+event.CommitID
+			selectedCommit = event.CommitID
+		}
+	}
+	if kind == "" {
+		return nil
+	}
+	var refs []corpus.ObservationRef
+	if selectedCommit == "" {
+		observation, err := f.c.GetThreadObservationRevision(f.ctx, f.threadID, f.thread.SourceUpdatedAt, f.thread.ObservationSequence)
+		if err != nil {
+			return err
+		}
+		refs = []corpus.ObservationRef{{Kind: "thread", ID: observation.ID}}
+	} else {
+		observations, _, err := f.c.ListFacetObservationsBounded(f.ctx, f.repoID, &f.threadID, FacetIssueTimeline, 100)
+		if err != nil {
+			return err
+		}
+		for _, observation := range observations {
+			var page []github.IssueTimelineEvent
+			if err := json.Unmarshal([]byte(observation.Payload), &page); err != nil {
+				return fmt.Errorf("decode issue timeline provenance: %w", err)
+			}
+			for _, event := range page {
+				if event.Event == "closed" && event.CommitID == selectedCommit {
+					refs = append(refs, corpus.ObservationRef{Kind: "facet", ID: observation.ID})
+					break
+				}
+			}
+		}
+		if len(refs) == 0 {
+			return errors.New("closing commit timeline observation is unavailable")
+		}
+	}
+	_, err := f.c.SaveResolutionRecord(f.ctx, corpus.ResolutionRecord{ThreadID: f.threadID, Kind: kind, Summary: summary, RuleVersion: "resolution.v1", SourceUpdatedAt: sourceUpdatedAt, SourceObservationRefs: refs})
+	return err
 }
 
 type facetRunner struct {
@@ -289,7 +414,13 @@ func (f *facetRunner) hydrateIssueComments() (HydratedFacet, error) {
 	if err := f.ctx.Err(); err != nil {
 		return HydratedFacet{}, err
 	}
-	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetIssueComments, sourceUpdatedAt, pageObservations, complete, f.runID); err != nil {
+	if !complete {
+		if err := f.c.AdvanceFacet(f.ctx, f.repoID, &f.threadID, FacetIssueComments, sourceUpdatedAt, false, f.runID); err != nil {
+			return HydratedFacet{}, err
+		}
+		return HydratedFacet{Facet: FacetIssueComments, Count: total, Pages: pages, Complete: false}, nil
+	}
+	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetIssueComments, sourceUpdatedAt, pageObservations, true, f.runID); err != nil {
 		return HydratedFacet{}, err
 	}
 
@@ -367,7 +498,13 @@ func (f *facetRunner) hydratePullRequestReviews() (HydratedFacet, error) {
 	if err := f.ctx.Err(); err != nil {
 		return HydratedFacet{}, err
 	}
-	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetPRReviews, sourceUpdatedAt, pageObservations, complete, f.runID); err != nil {
+	if !complete {
+		if err := f.c.AdvanceFacet(f.ctx, f.repoID, &f.threadID, FacetPRReviews, sourceUpdatedAt, false, f.runID); err != nil {
+			return HydratedFacet{}, err
+		}
+		return HydratedFacet{Facet: FacetPRReviews, Count: total, Pages: pages, Complete: false}, nil
+	}
+	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetPRReviews, sourceUpdatedAt, pageObservations, true, f.runID); err != nil {
 		return HydratedFacet{}, err
 	}
 
@@ -422,7 +559,13 @@ func (f *facetRunner) hydratePullRequestReviewComments() (HydratedFacet, error) 
 	if err := f.ctx.Err(); err != nil {
 		return HydratedFacet{}, err
 	}
-	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetPRReviewComments, sourceUpdatedAt, pageObservations, complete, f.runID); err != nil {
+	if !complete {
+		if err := f.c.AdvanceFacet(f.ctx, f.repoID, &f.threadID, FacetPRReviewComments, sourceUpdatedAt, false, f.runID); err != nil {
+			return HydratedFacet{}, err
+		}
+		return HydratedFacet{Facet: FacetPRReviewComments, Count: total, Pages: pages, Complete: false}, nil
+	}
+	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetPRReviewComments, sourceUpdatedAt, pageObservations, true, f.runID); err != nil {
 		return HydratedFacet{}, err
 	}
 

@@ -77,10 +77,20 @@ The corpus separates source history from convenient current state:
   revision it represents.
 
 Authored pull requests use the ordinary repository and thread projections.
-REST `pr_details` and `pr_reviews` facets add mergeability, revision, and review
-facts for the portfolio view. Checks, unresolved review threads, detailed merge
-state, and merge-queue state are not currently acquired and therefore remain
-explicitly unavailable rather than inferred.
+REST `pr_details` and `pr_reviews` facets are combined with typed GraphQL
+facets for checks, unresolved review threads, detailed merge state, merge queue,
+closing issues, and changed files. Each facet has independent coverage; an
+incomplete refresh preserves the previous complete child snapshot but marks
+the newer coverage incomplete. Offline portfolio reads therefore return
+`unknown` instead of treating missing checks as passing or missing overlap
+signals as no overlap.
+
+Portfolio relationships and derived resolution records are local product
+contracts. Their normalized snapshots carry rule versions and exact source
+observation references. Explicit timeline events may produce a resolution;
+closing-issue relationships remain relationship evidence until completion is
+independently observed. Lexical similarity alone never becomes a root-cause
+claim. Corpus portfolio and resolution reads perform no network access.
 
 Repository and thread projections use this ordering:
 
@@ -128,6 +138,10 @@ Terminal states do not transition again. Cancellation is first persisted, then
 delivered to an in-process worker directly or observed by its polling loop from
 another process. Reconciliation uses an immediate SQLite transaction so a
 heartbeat cannot interleave between the liveness read and stale-owner update.
+MCP job reads expose structured phase, completed-item, total-item, percentage,
+and retry-delay fields. Batch reads and cancellation preserve input order and
+isolate per-item failures; free-form durable event text is not an MCP progress
+contract.
 
 ### Bounded batch operations
 

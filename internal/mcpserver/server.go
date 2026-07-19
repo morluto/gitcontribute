@@ -50,6 +50,13 @@ type ScalableReader interface {
 	FindPrecedents(context.Context, FindPrecedentsInput) (FindPrecedentsOutput, error)
 	GetJobs(context.Context, GetJobsInput) (GetJobsOutput, error)
 	ListPullRequestPortfolio(context.Context, ListPullRequestPortfolioInput) (ListPullRequestPortfolioOutput, error)
+	FindPortfolioOverlaps(context.Context, FindPortfolioOverlapsInput) (FindPortfolioOverlapsOutput, error)
+}
+
+// PortfolioOperator owns explicit local links between observed pull requests
+// and contribution workflow state. It never mutates GitHub.
+type PortfolioOperator interface {
+	LinkPullRequest(context.Context, LinkPullRequestInput) (LinkPullRequestOutput, error)
 }
 
 // ScalableOperator exposes bounded external reads without combining unrelated
@@ -79,7 +86,7 @@ type Operator interface {
 	DefineValidation(context.Context, DefineValidationInput) (ValidationOutput, error)
 	RunValidation(context.Context, RunValidationInput) (JobReference, error)
 	PrepareContribution(context.Context, PrepareContributionInput) (DraftOutput, error)
-	CancelJob(context.Context, CancelJobInput) (GetJobOutput, error)
+	CancelJobs(context.Context, CancelJobInput) (GetJobsOutput, error)
 }
 
 // RepoInput identifies a repository for an MCP operation.
@@ -347,10 +354,18 @@ type FindClustersOutput struct {
 	Clusters []ClusterOutput `json:"clusters"`
 }
 
-// GetCoverageInput selects repository facet coverage.
+// CoverageTarget selects repository-level coverage or, when kind and number
+// are both present, coverage for one exact stored thread.
+type CoverageTarget struct {
+	Owner  string `json:"owner"`
+	Repo   string `json:"repo"`
+	Kind   string `json:"kind,omitempty"`
+	Number int    `json:"number,omitempty"`
+}
+
+// GetCoverageInput selects bounded repository or thread facet coverage reads.
 type GetCoverageInput struct {
-	Owner string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo  string `json:"repo" jsonschema:"GitHub repository name"`
+	Targets []CoverageTarget `json:"targets"`
 }
 
 // FacetCoverageOutput reports completeness and freshness for one facet.
@@ -361,12 +376,21 @@ type FacetCoverageOutput struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
-// GetCoverageOutput reports all known coverage for a repository.
-type GetCoverageOutput struct {
+// CoverageOutput reports all known coverage for one repository or thread.
+type CoverageOutput struct {
 	Owner  string                `json:"owner"`
 	Repo   string                `json:"repo"`
+	Kind   string                `json:"kind,omitempty"`
+	Number int                   `json:"number,omitempty"`
 	AsOf   string                `json:"as_of"`
 	Facets []FacetCoverageOutput `json:"facets"`
+}
+
+// GetCoverageOutput preserves target order and isolates missing or invalid
+// targets without failing unrelated coverage reads.
+type GetCoverageOutput struct {
+	Status string                      `json:"status"`
+	Items  []BatchItem[CoverageOutput] `json:"items"`
 }
 
 // LensInput selects a saved lens by name.
@@ -484,10 +508,10 @@ func (s *Server) register() {
 		}), output: outputSchema[FindNeighborsOutput]("Similar stored threads with transparent scores."), handler: s.findNeighbors,
 	})
 	addCatalogTool(s.server, catalogTool[GetCoverageInput, GetCoverageOutput]{
-		name: ToolGetCoverage, title: "Get repository coverage",
-		description: "Read local facet completeness and freshness for one repository. Use this before relying on missing comments or reviews; it reports local coverage without refreshing GitHub.",
-		annotations: readOnly, input: inputSchema[GetCoverageInput](noSchemaCustomization),
-		output: outputSchema[GetCoverageOutput]("Local repository facet coverage and freshness."), handler: s.getCoverage,
+		name: ToolGetCoverage, title: "Get stored facet coverage in one batch",
+		description: "Read offline facet coverage for up to 100 repository or exact-thread targets with ordered item-level outcomes.",
+		annotations: readOnly, input: inputSchema[GetCoverageInput](func(sc *jsonschema.Schema) { setArrayBounds(sc, "targets", 1, 100) }),
+		output: outputSchema[GetCoverageOutput]("Ordered local repository or thread facet coverage."), handler: s.getCoverage,
 	})
 	addCatalogTool(s.server, catalogTool[LensInput, LensOutput]{
 		name: ToolGetLens, title: "Get saved lens",
@@ -662,8 +686,8 @@ func (s *Server) findNeighbors(ctx context.Context, _ *mcp.CallToolRequest, in F
 }
 
 func (s *Server) getCoverage(ctx context.Context, _ *mcp.CallToolRequest, in GetCoverageInput) (*mcp.CallToolResult, GetCoverageOutput, error) {
-	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
-		return nil, GetCoverageOutput{}, err
+	if len(in.Targets) < 1 || len(in.Targets) > 100 {
+		return nil, GetCoverageOutput{}, errors.New("targets must contain 1 to 100 items")
 	}
 	out, err := s.reader.GetCoverage(ctx, in)
 	return nil, out, err
