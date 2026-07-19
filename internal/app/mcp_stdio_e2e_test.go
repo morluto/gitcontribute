@@ -171,8 +171,11 @@ func TestMCPStdioPullRequestPortfolioFlow(t *testing.T) {
 	if pr.Ref != "lab/project#7" || pr.Attention != "approved" || pr.ReviewDecision != "approved" || pr.Mergeable == nil || !*pr.Mergeable {
 		t.Fatalf("portfolio PR = %+v", pr)
 	}
-	if pr.HeadSHA != "head123" || pr.BaseSHA != "base123" || pr.StatusCoverage != "partial" {
+	if pr.HeadSHA != "head123" || pr.BaseSHA != "base123" || pr.StatusCoverage != "complete" {
 		t.Fatalf("portfolio status coverage = %+v", pr)
+	}
+	if pr.ChecksStatus != "passing" || pr.ChecksTotal != 1 || pr.UnresolvedReviewThreads == nil || *pr.UnresolvedReviewThreads != 0 || len(pr.ChangedFiles) != 1 {
+		t.Fatalf("portfolio health = %+v", pr)
 	}
 }
 
@@ -224,6 +227,18 @@ func seedMCPStdioEmptyCorpus(ctx context.Context, t *testing.T, home string) {
 func newMCPGitHubServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/graphql") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequest":{
+				"id":"PR_7","updatedAt":"2026-07-18T22:00:00Z","headRefOid":"head123",
+				"mergeStateStatus":"CLEAN","mergeable":"MERGEABLE","mergeQueueEntry":null,
+				"closingIssuesReferences":{"totalCount":1,"nodes":[{"id":"I_9","number":9,"url":"https://github.com/lab/project/issues/9","repository":{"nameWithOwner":"lab/project"}}],"pageInfo":{"hasNextPage":false,"endCursor":""}},
+				"files":{"totalCount":1,"nodes":[{"path":"internal/cache.go","changeType":"MODIFIED","additions":4,"deletions":2}],"pageInfo":{"hasNextPage":false,"endCursor":""}},
+				"reviewThreads":{"totalCount":1,"nodes":[{"id":"RT_1","isResolved":true,"isOutdated":false,"path":"internal/cache.go","line":12,"startLine":12}],"pageInfo":{"hasNextPage":false,"endCursor":""}},
+				"commits":{"nodes":[{"commit":{"statusCheckRollup":{"contexts":{"totalCount":1,"nodes":[{"__typename":"CheckRun","name":"test","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://github.com/lab/project/actions","startedAt":"2026-07-18T21:00:00Z","completedAt":"2026-07-18T21:05:00Z"}],"pageInfo":{"hasNextPage":false,"endCursor":""}}}}}]}
+			}}}}`))
+			return
+		}
 		if r.Method != http.MethodGet {
 			http.NotFound(w, r)
 			return

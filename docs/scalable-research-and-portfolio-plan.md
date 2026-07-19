@@ -2,10 +2,10 @@
 
 Status: partially implemented
 
-The bounded metadata, thread, Radar, precedent, authored-PR, REST status,
-DeepWiki, code-indexing, local conflict, and vectorized job-read tools are
-implemented. This document also retains target contracts that are not yet
-implemented; the table below is authoritative for current coverage.
+The bounded metadata, thread, Radar, precedent, authored-PR, PR-health,
+portfolio-relationship, DeepWiki, code-indexing, local conflict, and vectorized
+job tools are implemented. This document also retains longer-term target
+contracts; the table below is authoritative for current coverage.
 
 | Area | Status | Current coverage |
 | --- | --- | --- |
@@ -13,11 +13,11 @@ implemented; the table below is authoritative for current coverage.
 | Metadata, thread, and selected-facet synchronization | Implemented | Durable bounded jobs with server-side concurrency |
 | Cross-repository Radar and historical precedents | Implemented | Offline ranking and direct similarity over stored resolved threads |
 | DeepWiki | Implemented | One bounded non-persisting external-read primitive |
-| Authored PR discovery and portfolio | Partial | Identity, authored search, REST details/reviews, deterministic attention |
-| PR health | Deferred | Checks, unresolved review threads, detailed merge state, merge queue, closing issues |
-| Portfolio relationships | Deferred | Cross-PR overlap and explicit opportunity/workspace links |
-| Remaining vectorization | Deferred | Batch coverage reads and batch job cancellation |
-| Rich derived resolutions | Deferred | Timeline/file/closing-PR facets and persisted resolution projections |
+| Authored PR discovery and portfolio | Implemented | Identity, authored search, REST details/reviews, typed health facets, deterministic attention |
+| PR health | Implemented | Checks, unresolved review threads, detailed merge state, merge queue, closing issues, changed files |
+| Portfolio relationships | Implemented | Offline normalized overlap and explicit opportunity/workspace links |
+| Remaining vectorization | Implemented | Batch coverage reads, job reads, and idempotent batch cancellation |
+| Rich derived resolutions | Implemented | Opt-in timeline-derived projections plus changed-file/closing-issue relationship facets |
 
 See [Scalable MCP workflows](mcp-scalable-workflows.md) for the current tool
 sequence, recovery rules, test boundary, and limitations.
@@ -295,8 +295,8 @@ filters. Repository mode does not accept exact thread references.
 
 An empty facet list must be rejected. "Everything" is not a safe default.
 
-`github.sync_pull_request_status` should prefer one bounded GraphQL query per
-batch and project at least:
+`github.sync_pull_request_status` uses bounded typed GraphQL reads per pull
+request and projects:
 
 - state and draft state;
 - author and repository identity;
@@ -309,9 +309,9 @@ batch and project at least:
 - closing issue references;
 - updated, closed, and merged times.
 
-REST adapters remain useful for paginated child facets and fallback behavior.
-GitHub `mergeable: null` is returned as a retryable item with a suggested delay,
-not as a terminal error or a persisted `false`.
+REST adapters remain responsible for details, reviews, and issue timelines.
+GraphQL collection pagination is bounded by the job input. GitHub
+`mergeable: null` remains unknown rather than becoming persisted `false`.
 
 ### 4.3 DeepWiki adapter
 
@@ -620,16 +620,11 @@ against:
 - linked issues from authored pull requests;
 - explicit cross-references;
 - changed-file paths when that facet is present;
-- local hypothesis and opportunity text;
-- deterministic thread similarity;
-- currently competing upstream pull requests.
+- stored opportunity-similarity signals.
 
-The output distinguishes:
-
-- Git merge conflict;
-- competing upstream implementation;
-- overlap with the user's own portfolio;
-- weak textual similarity.
+The output distinguishes exact observed overlap, complete no-overlap, and
+unknown coverage. Local merge conflicts and competing upstream work remain
+separate primitives rather than being inferred by this tool.
 
 Opportunity ranking should exclude or clearly mark candidates already covered
 by the user's work.

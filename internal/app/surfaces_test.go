@@ -259,12 +259,12 @@ func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
 		t.Fatal("expected clusters from MCP")
 	}
 
-	cov, err := reader.GetCoverage(ctx, mcpserver.GetCoverageInput{Owner: "owner", Repo: "repo"})
+	cov, err := reader.GetCoverage(ctx, mcpserver.GetCoverageInput{Targets: []mcpserver.CoverageTarget{{Owner: "owner", Repo: "repo"}}})
 	if err != nil {
 		t.Fatalf("get coverage: %v", err)
 	}
-	if cov.Owner != "owner" || cov.Repo != "repo" {
-		t.Fatalf("unexpected coverage owner/repo: %s/%s", cov.Owner, cov.Repo)
+	if len(cov.Items) != 1 || cov.Items[0].Value == nil || cov.Items[0].Value.Owner != "owner" || cov.Items[0].Value.Repo != "repo" {
+		t.Fatalf("unexpected coverage: %+v", cov)
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const serverInstructions = "Use GitContribute for durable, source-backed repository research and contribution tracking. Prefer corpus tools for offline reads. Use github.search_repositories for one bounded live repository search, github.sync_repository_metadata for known repository facts, then github.sync_threads for issue or pull-request headers. Rank stored open issues before hydrating finalists with github.hydrate_threads. Use research.query_deepwiki for derived architecture, contribution, testing, and subsystem context; never treat it as authoritative for live GitHub state. When a tool returns a job ID, poll jobs.get until it reaches a terminal state before reading the resulting corpus projection. Missing facets are unknown, not negative evidence. Batch tools preserve item-level failures so retry only retryable items. GitContribute never mutates GitHub; use native GitHub or Git tooling for actions it does not expose."
+const serverInstructions = "Use GitContribute for durable, source-backed repository research and contribution tracking. Prefer corpus tools for offline reads. Research flow: github.search_repositories or github.sync_repository_metadata -> github.sync_threads -> corpus.rank_threads -> hydrate finalists. Portfolio flow: github.sync_authored_pull_requests -> github.sync_pull_request_status -> corpus.list_pull_request_portfolio -> corpus.find_portfolio_overlaps. Use research.query_deepwiki only for derived architecture context, never live GitHub state. When jobs are returned, poll jobs.get together. Missing facets are unknown, not negative evidence; retry only retryable batch items. GitContribute never mutates GitHub; use native GitHub or Git for unsupported actions."
 
 // RepositoryRef identifies one GitHub repository without implying that it has
 // been fetched or indexed locally.
@@ -246,25 +246,34 @@ type ListPullRequestPortfolioInput struct {
 // portfolio.v1 attention classification. Missing status facets remain explicit
 // in StatusCoverage and Reasons.
 type PullRequestPortfolioItem struct {
-	Ref              string   `json:"ref"`
-	Owner            string   `json:"owner"`
-	Repo             string   `json:"repo"`
-	Number           int      `json:"number"`
-	Title            string   `json:"title"`
-	State            string   `json:"state"`
-	Author           string   `json:"author"`
-	Draft            bool     `json:"draft"`
-	Attention        string   `json:"attention"`
-	Reasons          []string `json:"reasons"`
-	Mergeable        *bool    `json:"mergeable,omitempty"`
-	HeadRef          string   `json:"head_ref,omitempty"`
-	HeadSHA          string   `json:"head_sha,omitempty"`
-	BaseRef          string   `json:"base_ref,omitempty"`
-	BaseSHA          string   `json:"base_sha,omitempty"`
-	ReviewDecision   string   `json:"review_decision,omitempty"`
-	StatusCoverage   string   `json:"status_coverage"`
-	SourceUpdatedAt  string   `json:"source_updated_at"`
-	StatusObservedAt string   `json:"status_observed_at,omitempty"`
+	Ref                     string                `json:"ref"`
+	Owner                   string                `json:"owner"`
+	Repo                    string                `json:"repo"`
+	Number                  int                   `json:"number"`
+	Title                   string                `json:"title"`
+	State                   string                `json:"state"`
+	Author                  string                `json:"author"`
+	Draft                   bool                  `json:"draft"`
+	Attention               string                `json:"attention"`
+	Reasons                 []string              `json:"reasons"`
+	Mergeable               *bool                 `json:"mergeable,omitempty"`
+	MergeStateStatus        string                `json:"merge_state_status,omitempty"`
+	HeadRef                 string                `json:"head_ref,omitempty"`
+	HeadSHA                 string                `json:"head_sha,omitempty"`
+	BaseRef                 string                `json:"base_ref,omitempty"`
+	BaseSHA                 string                `json:"base_sha,omitempty"`
+	ReviewDecision          string                `json:"review_decision,omitempty"`
+	ChecksStatus            string                `json:"checks_status,omitempty"`
+	ChecksTotal             int                   `json:"checks_total,omitempty"`
+	UnresolvedReviewThreads *int                  `json:"unresolved_review_threads,omitempty"`
+	MergeQueueState         string                `json:"merge_queue_state,omitempty"`
+	MergeQueuePosition      int                   `json:"merge_queue_position,omitempty"`
+	ClosingIssues           []string              `json:"closing_issues,omitempty"`
+	ChangedFiles            []string              `json:"changed_files,omitempty"`
+	StatusCoverage          string                `json:"status_coverage"`
+	Facets                  []FacetCoverageOutput `json:"facets"`
+	SourceUpdatedAt         string                `json:"source_updated_at"`
+	StatusObservedAt        string                `json:"status_observed_at,omitempty"`
 }
 
 // ListPullRequestPortfolioOutput contains a deterministic portfolio projection.
@@ -274,6 +283,62 @@ type ListPullRequestPortfolioOutput struct {
 	GeneratedAt  string                     `json:"generated_at"`
 	PullRequests []PullRequestPortfolioItem `json:"pull_requests"`
 	Total        int                        `json:"total"`
+}
+
+// PortfolioSubjectInput identifies local candidate state for offline overlap analysis.
+type PortfolioSubjectInput struct {
+	Kind string `json:"kind" jsonschema:"Candidate kind: opportunity, workspace, or pull_request"`
+	Ref  string `json:"ref" jsonschema:"Local candidate ID or corpus pull-request thread ID"`
+}
+
+// FindPortfolioOverlapsInput compares candidates with exact stored authored PRs.
+type FindPortfolioOverlapsInput struct {
+	Candidates   []PortfolioSubjectInput `json:"candidates" jsonschema:"One to 50 local candidate subjects"`
+	PullRequests []ThreadRef             `json:"pull_requests" jsonschema:"One to 100 exact authored pull requests"`
+}
+
+// PortfolioOverlapEvidenceOutput is one exact observed overlap reason.
+type PortfolioOverlapEvidenceOutput struct {
+	Kind       string   `json:"kind"`
+	Value      string   `json:"value"`
+	Score      float64  `json:"score,omitempty"`
+	SourceRefs []string `json:"source_refs"`
+}
+
+// PortfolioOverlapMatchOutput associates overlap evidence with one authored PR.
+type PortfolioOverlapMatchOutput struct {
+	PullRequestThreadID int64                            `json:"pull_request_thread_id"`
+	Evidence            []PortfolioOverlapEvidenceOutput `json:"evidence"`
+}
+
+// PortfolioOverlapOutput preserves explicit coverage and never infers no overlap.
+type PortfolioOverlapOutput struct {
+	Candidate PortfolioSubjectInput         `json:"candidate"`
+	Status    string                        `json:"status"`
+	Coverage  map[string]string             `json:"coverage"`
+	Matches   []PortfolioOverlapMatchOutput `json:"matches"`
+}
+
+// FindPortfolioOverlapsOutput preserves candidate input order.
+type FindPortfolioOverlapsOutput struct {
+	Status string                              `json:"status"`
+	Items  []BatchItem[PortfolioOverlapOutput] `json:"items"`
+}
+
+// LinkPullRequestInput explicitly associates a stored PR with local workflow state.
+type LinkPullRequestInput struct {
+	PullRequest   ThreadRef `json:"pull_request"`
+	OpportunityID string    `json:"opportunity_id,omitempty"`
+	WorkspaceID   string    `json:"workspace_id,omitempty"`
+}
+
+// LinkPullRequestOutput reports the idempotently stored local relationship.
+type LinkPullRequestOutput struct {
+	ID                  int64  `json:"id"`
+	PullRequestThreadID int64  `json:"pull_request_thread_id"`
+	OpportunityID       string `json:"opportunity_id,omitempty"`
+	WorkspaceID         string `json:"workspace_id,omitempty"`
+	CreatedAt           string `json:"created_at"`
 }
 
 // IndexRepositoryInput identifies one repository to acquire and index.
@@ -364,7 +429,7 @@ func (s *Server) registerScalable() {
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 20)
 	}), output: outputSchema[FindPrecedentsOutput]("Historical precedents grouped by source thread."), handler: s.findPrecedents})
-	addCatalogTool(s.server, catalogTool[GetJobsInput, GetJobsOutput]{name: ToolGetJob, title: "Get durable jobs in one batch", description: "Read status, progress, result, and errors for one to 100 durable jobs in input order. Poll all related jobs together and retry only item-level retryable results.", annotations: readOnly, input: inputSchema[GetJobsInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s.server, catalogTool[GetJobsInput, GetJobsOutput]{name: ToolGetJob, title: "Get durable jobs in one batch", description: "Read up to 100 durable jobs in order with structured progress and item-level outcomes.", annotations: readOnly, input: inputSchema[GetJobsInput](func(sc *jsonschema.Schema) {
 		setArrayBounds(sc, "ids", 1, 100)
 	}), output: outputSchema[GetJobsOutput]("Ordered durable-job states."), handler: s.getJobs})
 	addCatalogTool(s.server, catalogTool[SearchGitHubRepositoriesInput, SearchGitHubRepositoriesOutput]{name: ToolSearchGitHubRepositories, title: "Search live GitHub repositories", description: "Run one bounded GitHub repository query and persist metadata for its matches. Use this when repository identities are not yet known; it does not fetch threads, code, or derived recommendations.", annotations: networkReadAnnotations(), input: inputSchema[SearchGitHubRepositoriesInput](func(sc *jsonschema.Schema) {
@@ -387,10 +452,10 @@ func (s *Server) registerScalable() {
 		forbidWhen(sc, "selection", "repositories", "threads")
 		forbidWhen(sc, "selection", "threads", "repositories", "kind", "state", "updated_after", "limit_per_repository")
 	}), output: outputSchema[JobReference]("Reference to a bounded thread-header synchronization job."), handler: s.syncThreads})
-	addCatalogTool(s.server, catalogTool[HydrateThreadsInput, JobReference]{name: ToolHydrateThreads, title: "Fetch GitHub comments and reviews for selected threads", description: "Fetch explicit comments, pull-request details, reviews, or review comments for up to 100 exact threads across repositories. An empty facet list is rejected; hydrate only finalists after ranking.", annotations: networkReadAnnotations(), input: inputSchema[HydrateThreadsInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s.server, catalogTool[HydrateThreadsInput, JobReference]{name: ToolHydrateThreads, title: "Fetch selected GitHub thread facets", description: "Fetch explicit comments, issue timelines, pull-request details, reviews, or review comments for up to 100 exact threads. Timeline history is opt-in; hydrate only finalists after ranking.", annotations: networkReadAnnotations(), input: inputSchema[HydrateThreadsInput](func(sc *jsonschema.Schema) {
 		setArrayBounds(sc, "threads", 1, 100)
-		setArrayBounds(sc, "facets", 1, 8)
-		setArrayEnum(sc, "facets", "issue_comments", "pr_details", "pr_reviews", "pr_review_comments")
+		setArrayBounds(sc, "facets", 1, 5)
+		setArrayEnum(sc, "facets", "issue_comments", "issue_timeline", "pr_details", "pr_reviews", "pr_review_comments")
 		setRange(sc, "max_pages", 1, 100)
 		setDefault(sc, "max_pages", 3)
 	}), output: outputSchema[JobReference]("Reference to a bounded exact-thread hydration job."), handler: s.hydrateThreads})
@@ -400,16 +465,28 @@ func (s *Server) registerScalable() {
 		setRange(sc, "limit", 1, 500)
 		setDefault(sc, "limit", 500)
 	}), output: outputSchema[JobReference]("Reference to an authored pull-request synchronization job."), handler: s.syncAuthoredPullRequests})
-	addCatalogTool(s.server, catalogTool[SyncPullRequestStatusInput, JobReference]{name: ToolSyncPullRequestStatus, title: "Sync exact PR status", description: "Refresh mergeability, head/base revisions, and reviews for up to 50 exact selected pull requests. Checks and unresolved review-thread coverage remain explicitly unknown until their adapters are available.", annotations: networkReadAnnotations(), input: inputSchema[SyncPullRequestStatusInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s.server, catalogTool[SyncPullRequestStatusInput, JobReference]{name: ToolSyncPullRequestStatus, title: "Sync exact PR health", description: "Refresh mergeability, reviews, checks, unresolved conversations, merge state, merge queue, closing issues, and changed files for up to 50 exact pull requests. Returns independent facet completeness; retry only incomplete items.", annotations: networkReadAnnotations(), input: inputSchema[SyncPullRequestStatusInput](func(sc *jsonschema.Schema) {
 		setArrayBounds(sc, "pull_requests", 1, 50)
 		setRange(sc, "max_pages", 1, 20)
 		setDefault(sc, "max_pages", 3)
 	}), output: outputSchema[JobReference]("Reference to a pull-request status synchronization job."), handler: s.syncPullRequestStatus})
-	addCatalogTool(s.server, catalogTool[ListPullRequestPortfolioInput, ListPullRequestPortfolioOutput]{name: ToolListPullRequestPortfolio, title: "List pull requests that need contributor attention", description: "List stored authored pull requests with deterministic attention states from mergeability, reviews, lifecycle, and freshness. This offline read reports missing status facets as unknown; sync authored PRs and status explicitly when stale.", annotations: readOnly, input: inputSchema[ListPullRequestPortfolioInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s.server, catalogTool[ListPullRequestPortfolioInput, ListPullRequestPortfolioOutput]{name: ToolListPullRequestPortfolio, title: "List pull requests that need contributor attention", description: "List stored authored pull requests with deterministic attention from lifecycle, checks, review conversations, merge state, queue, and freshness. This offline read reports incomplete facets as unknown; sync authored PRs and health when stale.", annotations: readOnly, input: inputSchema[ListPullRequestPortfolioInput](func(sc *jsonschema.Schema) {
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 100)
 	}), output: outputSchema[ListPullRequestPortfolioOutput]("Offline pull-request portfolio with explainable attention states."), handler: s.listPullRequestPortfolio})
+	addCatalogTool(s.server, catalogTool[FindPortfolioOverlapsInput, FindPortfolioOverlapsOutput]{name: ToolFindPortfolioOverlaps, title: "Find overlaps with authored pull requests", description: "Compare up to 50 local candidates with 100 stored authored pull requests using complete changed-path, linked-issue, and opportunity-similarity observations. This offline read returns unknown instead of claiming no overlap when coverage is missing.", annotations: readOnly, input: inputSchema[FindPortfolioOverlapsInput](func(sc *jsonschema.Schema) {
+		setArrayBounds(sc, "candidates", 1, 50)
+		setArrayBounds(sc, "pull_requests", 1, 100)
+		if candidate := sc.Defs["PortfolioSubjectInput"]; candidate != nil {
+			setEnum(candidate, "kind", "opportunity", "workspace", "pull_request")
+		}
+	}), output: outputSchema[FindPortfolioOverlapsOutput]("Ordered source-backed portfolio overlap results."), handler: s.findPortfolioOverlaps})
+	addCatalogTool(s.server, catalogTool[LinkPullRequestInput, LinkPullRequestOutput]{name: ToolLinkPullRequest, title: "Link a pull request to local contribution work", description: "Idempotently link one stored authored pull request to an existing local opportunity, managed workspace, or both. This writes only local workflow state and never changes GitHub.", annotations: localWriteAnnotations(true), input: inputSchema[LinkPullRequestInput](func(sc *jsonschema.Schema) {
+		sc.AnyOf = []*jsonschema.Schema{{Required: []string{"opportunity_id"}}, {Required: []string{"workspace_id"}}}
+		property(sc, "opportunity_id").MinLength = jsonschema.Ptr(1)
+		property(sc, "workspace_id").MinLength = jsonschema.Ptr(1)
+	}), output: outputSchema[LinkPullRequestOutput]("Stored local pull-request relationship."), handler: s.linkPullRequest})
 	addCatalogTool(s.server, catalogTool[IndexRepositoriesInput, JobReference]{name: ToolIndexRepositories, title: "Acquire and index repository code in one batch", description: "Start a durable low-concurrency Git acquisition and safe code indexing job for up to 10 repositories. This performs network reads, Git processes, and local writes, but disables hooks and never executes repository-controlled code.", annotations: networkReadAnnotations(), input: inputSchema[IndexRepositoriesInput](func(sc *jsonschema.Schema) { setArrayBounds(sc, "repositories", 1, 10) }), output: outputSchema[JobReference]("Reference to a bounded repository acquisition and indexing job."), handler: s.indexRepositories})
 	addCatalogTool(s.server, catalogTool[CheckMergeConflictsInput, CheckMergeConflictsOutput]{name: ToolCheckMergeConflicts, title: "Check local Git merge conflicts in one batch", description: "Compare up to 50 already-fetched base/head OID pairs in managed workspaces using non-mutating Git reads. This never fetches remotes or changes refs, indexes, or worktrees; use it for actual merge conflicts, not competing upstream work.", annotations: processReadAnnotations(), input: inputSchema[CheckMergeConflictsInput](func(sc *jsonschema.Schema) { setArrayBounds(sc, "comparisons", 1, 50) }), output: outputSchema[CheckMergeConflictsOutput]("Ordered local merge-conflict checks."), handler: s.checkMergeConflicts})
 	addCatalogTool(s.server, catalogTool[DeepWikiInput, DeepWikiOutput]{name: ToolQueryDeepWiki, title: "Query derived repository knowledge from DeepWiki", description: "Query DeepWiki for public repository architecture, contribution rules, testing, and subsystem context. Actions map to its public structure, contents, and question reads. Do not use this for live stars, thread state, checks, reviews, or mergeability.", annotations: networkReadAnnotations(), input: inputSchema[DeepWikiInput](func(sc *jsonschema.Schema) {
@@ -478,10 +555,18 @@ func (s *Server) getJobs(ctx context.Context, _ *mcp.CallToolRequest, in GetJobs
 	if _, ok := s.reader.(ScalableReader); !ok {
 		out := GetJobsOutput{Status: "complete", Items: make([]BatchItem[GetJobOutput], len(in.IDs))}
 		for i, id := range in.IDs {
+			if err := ctx.Err(); err != nil {
+				return nil, out, err
+			}
 			item := BatchItem[GetJobOutput]{Key: id, Status: "complete"}
 			job, err := s.reader.GetJob(ctx, GetJobInput{ID: id})
 			if err != nil {
-				item.Status, item.Reason, item.Message = "unavailable", "not_found", err.Error()
+				if errors.Is(err, ErrNotFound) {
+					item.Status, item.Reason = "unavailable", "not_found"
+				} else {
+					item.Status, item.Reason = "failed", "read_failed"
+				}
+				item.Message = err.Error()
 				out.Status = "partial"
 			} else {
 				item.Value = &job
@@ -593,6 +678,24 @@ func (s *Server) listPullRequestPortfolio(ctx context.Context, _ *mcp.CallToolRe
 		return nil, ListPullRequestPortfolioOutput{}, err
 	}
 	out, err := r.ListPullRequestPortfolio(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) findPortfolioOverlaps(ctx context.Context, _ *mcp.CallToolRequest, in FindPortfolioOverlapsInput) (*mcp.CallToolResult, FindPortfolioOverlapsOutput, error) {
+	r, err := s.scalableReader()
+	if err != nil {
+		return nil, FindPortfolioOverlapsOutput{}, err
+	}
+	out, err := r.FindPortfolioOverlaps(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) linkPullRequest(ctx context.Context, _ *mcp.CallToolRequest, in LinkPullRequestInput) (*mcp.CallToolResult, LinkPullRequestOutput, error) {
+	operator, ok := s.reader.(PortfolioOperator)
+	if !ok {
+		return nil, LinkPullRequestOutput{}, errors.New("portfolio linking is not available")
+	}
+	out, err := operator.LinkPullRequest(ctx, in)
 	return nil, out, err
 }
 func (s *Server) indexRepositories(ctx context.Context, _ *mcp.CallToolRequest, in IndexRepositoriesInput) (*mcp.CallToolResult, JobReference, error) {

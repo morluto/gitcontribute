@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -180,7 +179,10 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		}
 		out.MatchedFields, out.Score = matchTerms(in.Query, fields)
 		out.SourceRevision = formatTime(thread.SourceUpdatedAt)
-		cov, _ := r.GetCoverage(ctx, mcpserver.GetCoverageInput{Owner: in.Owner, Repo: in.Repo})
+		cov, _, err := readCoverageTarget(ctx, c, mcpserver.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
+		if err != nil {
+			return mcpserver.ExplainMatchOutput{}, fmt.Errorf("read repository coverage: %w", err)
+		}
 		out.Facets = cov.Facets
 		out.AsOf = cov.AsOf
 	case "code":
@@ -255,7 +257,10 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		}
 		out.MatchedFields, out.Score = matchTerms(in.Query, fields)
 		out.SourceRevision = formatTime(repo.SourceUpdatedAt)
-		cov, _ := r.GetCoverage(ctx, mcpserver.GetCoverageInput{Owner: in.Owner, Repo: in.Repo})
+		cov, _, err := readCoverageTarget(ctx, c, mcpserver.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
+		if err != nil {
+			return mcpserver.ExplainMatchOutput{}, fmt.Errorf("read repository coverage: %w", err)
+		}
 		out.Facets = cov.Facets
 		out.AsOf = cov.AsOf
 	default:
@@ -316,72 +321,20 @@ func matchTerms(query string, fields map[string]string) ([]string, float64) {
 	return matchedFields, score
 }
 
-// GetJob reads a durable job by ID.
-func (r *MCPReader) GetJob(ctx context.Context, in mcpserver.GetJobInput) (mcpserver.GetJobOutput, error) {
-	job, err := r.Service.GetJob(ctx, in.ID)
-	if err != nil {
-		return mcpserver.GetJobOutput{}, err
-	}
-	return jobResultToMCP(job)
-}
-
-// CancelJob cancels a durable job and returns its updated state.
-func (r *MCPReader) CancelJob(ctx context.Context, in mcpserver.CancelJobInput) (mcpserver.GetJobOutput, error) {
-	job, err := r.Service.CancelJob(ctx, in.ID)
-	if err != nil {
-		return mcpserver.GetJobOutput{}, err
-	}
-	return jobResultToMCP(job)
-}
-
-func jobResultToMCP(job *cli.JobResult) (mcpserver.GetJobOutput, error) {
-	request, err := decodeJobJSON("request", job.Request)
-	if err != nil {
-		return mcpserver.GetJobOutput{}, err
-	}
-	result, err := decodeJobJSON("result", job.Result)
-	if err != nil {
-		return mcpserver.GetJobOutput{}, err
-	}
-	return mcpserver.GetJobOutput{
-		ID:                    job.ID,
-		Kind:                  job.Kind,
-		Status:                job.Status,
-		Request:               request,
-		Result:                result,
-		Error:                 job.Error,
-		Progress:              job.Progress,
-		Statistics:            job.Statistics,
-		CreatedAt:             job.CreatedAt,
-		StartedAt:             job.StartedAt,
-		CompletedAt:           job.CompletedAt,
-		CancelledAt:           job.CancelledAt,
-		CancellationRequested: job.Cancellation,
-	}, nil
-}
-
-func decodeJobJSON(field, value string) (any, error) {
-	var decoded any
-	if strings.TrimSpace(value) != "" {
-		if err := json.Unmarshal([]byte(value), &decoded); err != nil {
-			return nil, fmt.Errorf("decode job %s: %w", field, err)
-		}
-	}
-	return decoded, nil
-}
-
 // BuildRepositoryDossier submits a durable job that builds a repository dossier.
 func (r *MCPReader) BuildRepositoryDossier(ctx context.Context, in mcpserver.BuildRepositoryDossierInput) (mcpserver.JobReference, error) {
 	repo := cli.RepoRef{Owner: in.Owner, Repo: in.Repo}
 	id, err := r.Service.submitJob(ctx, "build_repository_dossier", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
-		if err := report("0%", ""); err != nil {
+		if err := report("repository_dossier", jobProgressCounts(0, 1)); err != nil {
 			return nil, err
 		}
 		res, err := r.Service.BuildRepositoryDossier(ctx, repo)
 		if err != nil {
 			return nil, err
 		}
-		_ = report("100%", "")
+		if err := report("repository_dossier", jobProgressCounts(1, 1)); err != nil {
+			return nil, err
+		}
 		return res, nil
 	})
 	if err != nil {
@@ -399,14 +352,16 @@ func (r *MCPReader) CreateWorkspace(ctx context.Context, in mcpserver.CreateWork
 		Name:         in.Name,
 	}
 	id, err := r.Service.submitJob(ctx, "create_workspace", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
-		if err := report("0%", ""); err != nil {
+		if err := report("workspace_creation", jobProgressCounts(0, 1)); err != nil {
 			return nil, err
 		}
 		res, err := r.Service.CreateWorkspace(ctx, in.InvestigationID, opts)
 		if err != nil {
 			return nil, err
 		}
-		_ = report("100%", fmt.Sprintf("workspace=%s", res.ID))
+		if err := report("workspace_creation", jobProgressCounts(1, 1)); err != nil {
+			return nil, err
+		}
 		return res, nil
 	})
 	if err != nil {
@@ -426,14 +381,16 @@ func (r *MCPReader) RunValidation(ctx context.Context, in mcpserver.RunValidatio
 	}
 	opts := cli.RunValidationOptions{Kind: in.Kind, Execute: true}
 	id, err := r.Service.submitJob(ctx, "run_validation", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
-		if err := report("0%", ""); err != nil {
+		if err := report("validation", jobProgressCounts(0, 1)); err != nil {
 			return nil, err
 		}
 		res, err := r.Service.RunValidation(ctx, in.ID, opts)
 		if err != nil {
 			return nil, err
 		}
-		_ = report("100%", fmt.Sprintf("exit_code=%d", res.ExitCode))
+		if err := report("validation", jobProgressCounts(1, 1)); err != nil {
+			return nil, err
+		}
 		return res, nil
 	})
 	if err != nil {

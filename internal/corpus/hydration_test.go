@@ -138,3 +138,36 @@ func TestListFacetObservationsBoundedPreservesOrderAndReportsMore(t *testing.T) 
 		t.Fatal("expected invalid limit error")
 	}
 }
+
+func TestApplyFacetObservationSetCASRejectsConcurrentEqualClockReplacement(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "1", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindPullRequest, 1, "open", "title", "body", "a", time.Unix(2, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Unix(3, 0).UTC()
+	if err := c.ApplyFacetObservationSet(ctx, repo.ID, &thread.ID, "checks", at, []FacetObservationInput{{SourceUpdatedAt: at, Payload: `[{"name":"initial"}]`}}, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := c.GetCoverage(ctx, repo.ID, &thread.ID, "checks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, err := c.ApplyFacetObservationSetCAS(ctx, repo.ID, &thread.ID, "checks", at, []FacetObservationInput{{SourceUpdatedAt: at, Payload: `[{"name":"newer"}]`}}, true, 0, baseline.ObservationSequence)
+	if err != nil || !applied {
+		t.Fatalf("first CAS applied=%v err=%v", applied, err)
+	}
+	applied, err = c.ApplyFacetObservationSetCAS(ctx, repo.ID, &thread.ID, "checks", at, []FacetObservationInput{{SourceUpdatedAt: at, Payload: `[{"name":"late-stale"}]`}}, true, 0, baseline.ObservationSequence)
+	if err != nil || applied {
+		t.Fatalf("stale CAS applied=%v err=%v", applied, err)
+	}
+	observations, err := c.ListFacetObservations(ctx, repo.ID, &thread.ID, "checks")
+	if err != nil || len(observations) != 1 || observations[0].Payload != `[{"name":"newer"}]` {
+		t.Fatalf("observations=%+v err=%v", observations, err)
+	}
+}

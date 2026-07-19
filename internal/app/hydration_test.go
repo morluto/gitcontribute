@@ -22,8 +22,23 @@ type fakeHydrationReader struct {
 	prReviewsCalls        int
 	prReviewCommentsPages [][]github.ReviewComment
 	prReviewCommentsCalls int
+	issueTimelinePages    [][]github.IssueTimelineEvent
+	issueTimelineCalls    int
 	failAfterIssueCalls   int
 	failWith              error
+}
+
+func (f *fakeHydrationReader) ListIssueTimeline(_ context.Context, _, _ string, _ int, opts github.PageOptions) (github.ListResult[github.IssueTimelineEvent], error) {
+	idx := f.issueTimelineCalls
+	if idx >= len(f.issueTimelinePages) {
+		return github.ListResult[github.IssueTimelineEvent]{Page: github.PageInfo{Page: opts.Page, PerPage: opts.PerPage}}, nil
+	}
+	f.issueTimelineCalls++
+	page := github.PageInfo{Page: opts.Page, PerPage: opts.PerPage}
+	if f.issueTimelineCalls < len(f.issueTimelinePages) {
+		page.HasNext, page.NextPage = true, opts.Page+1
+	}
+	return github.ListResult[github.IssueTimelineEvent]{Items: f.issueTimelinePages[idx], Page: page}, nil
 }
 
 func (f *fakeHydrationReader) GetRepository(ctx context.Context, owner, name string) (github.Repository, github.RateInfo, error) {
@@ -235,6 +250,35 @@ func TestHydratePullRequestFacets(t *testing.T) {
 	}
 }
 
+func TestHydratePullRequestReviewsAtPageCapPreservesCompleteSnapshot(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestServiceNoNetwork(t)
+	defer func() { _ = svc.Close() }()
+	repo, thread := seedRepoAndThread(t, svc, corpus.ThreadKindPullRequest, 2)
+	at := thread.SourceUpdatedAt
+	oldPayload, _ := json.Marshal([]github.Review{{ID: 1, State: "APPROVED", SubmittedAt: at}})
+	if err := svc.corpus.ApplyFacetObservationSet(ctx, repo.ID, &thread.ID, FacetPRReviews, at, []corpus.FacetObservationInput{{SourceUpdatedAt: at, Payload: string(oldPayload)}}, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	reader := &fakeHydrationReader{prReviewsPages: [][]github.Review{{{ID: 2, State: "COMMENTED", SubmittedAt: at.Add(time.Minute)}}, {{ID: 3, State: "APPROVED", SubmittedAt: at.Add(2 * time.Minute)}}}}
+	svc.SetGitHubReader(reader)
+	result, err := svc.HydrateThread(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, 2, HydrateOptions{Facets: []string{FacetPRReviews}, MaxPages: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Facets) != 1 || result.Facets[0].Complete {
+		t.Fatalf("result = %+v", result)
+	}
+	observations, err := svc.corpus.ListFacetObservations(ctx, repo.ID, &thread.ID, FacetPRReviews)
+	if err != nil || len(observations) != 1 || observations[0].Payload != string(oldPayload) {
+		t.Fatalf("preserved observations = %+v err=%v", observations, err)
+	}
+	coverage, err := svc.corpus.GetCoverage(ctx, repo.ID, &thread.ID, FacetPRReviews)
+	if err != nil || coverage == nil || coverage.Complete {
+		t.Fatalf("coverage = %+v err=%v", coverage, err)
+	}
+}
+
 func TestHydrateBoundsPagination(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
@@ -290,6 +334,38 @@ func TestSelectFacetsDeduplicatesRequestedFacets(t *testing.T) {
 	want := []string{FacetPRDetails, FacetPRReviews}
 	if !slices.Equal(got, want) {
 		t.Fatalf("facets = %v, want %v", got, want)
+	}
+}
+
+func TestHydrateIssueTimelinePersistsExplicitClosingCommitResolution(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestServiceNoNetwork(t)
+	defer func() { _ = svc.Close() }()
+	repo, thread := seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	now := thread.SourceUpdatedAt.Add(time.Hour)
+	reader := &fakeHydrationReader{issueTimelinePages: [][]github.IssueTimelineEvent{
+		{{ID: 1, Event: "cross-referenced", CreatedAt: now.Add(-time.Minute), SourceNumber: 9, SourceIsPullRequest: true}},
+		{{ID: 2, Event: "closed", CommitID: "abc123", CreatedAt: now}},
+	}}
+	svc.SetGitHubReader(reader)
+
+	result, err := svc.HydrateThread(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, 1, HydrateOptions{Facets: []string{FacetIssueTimeline}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Facets) != 1 || !result.Facets[0].Complete || result.Facets[0].Count != 2 || result.Facets[0].Pages != 2 {
+		t.Fatalf("timeline result = %+v", result)
+	}
+	resolution, err := svc.corpus.GetResolutionRecord(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolution == nil || resolution.Kind != "fixed_by_commit" || resolution.RuleVersion != "resolution.v1" || len(resolution.SourceObservationRefs) != 1 {
+		t.Fatalf("resolution = %+v", resolution)
+	}
+	coverage, err := svc.corpus.GetCoverage(ctx, repo.ID, &thread.ID, FacetIssueTimeline)
+	if err != nil || coverage == nil || !coverage.Complete {
+		t.Fatalf("coverage = %+v, err = %v", coverage, err)
 	}
 }
 

@@ -104,6 +104,21 @@ type IssueComment struct {
 	IssueURL          string
 }
 
+// IssueTimelineEvent is a product-owned view of one issue timeline event.
+// Source fields are populated only for explicit cross-reference events; callers
+// must not infer relationships from URLs or prose.
+type IssueTimelineEvent struct {
+	ID                  int64
+	Event               string
+	Actor               string
+	CommitID            string
+	CreatedAt           time.Time
+	SourceOwner         string
+	SourceRepository    string
+	SourceNumber        int
+	SourceIsPullRequest bool
+}
+
 // PullRequestDetails is the PR-specific metadata beyond the issue marker.
 type PullRequestDetails struct {
 	ID                int64
@@ -136,6 +151,104 @@ type PullRequestDetails struct {
 	Deletions         int
 	ChangedFiles      int
 	HTMLURL           string
+}
+
+// PullRequestStatusOptions bounds each collection returned by a single
+// source-backed pull-request status read. GitHub currently caps these
+// connections at 100 items per request.
+type PullRequestStatusOptions struct {
+	PageSize int
+	MaxPages int
+}
+
+// FacetCoverage describes exactly how much of a GitHub collection was
+// returned. Callers must not replace a complete child snapshot when Complete
+// is false.
+type FacetCoverage struct {
+	Complete    bool
+	Fetched     int
+	Total       int
+	HasNextPage bool
+	EndCursor   string
+}
+
+// FacetResult pairs product-owned GitHub values with their source coverage.
+type FacetResult[T any] struct {
+	Items    []T
+	Coverage FacetCoverage
+}
+
+// PullRequestStatus is a bounded, source-backed health snapshot. Scalar
+// coverage is separate from values so an observed absence (for example, not
+// queued) is distinguishable from unavailable data.
+type PullRequestStatus struct {
+	NodeID             string
+	HeadSHA            string
+	SourceUpdatedAt    time.Time
+	MergeState         PullRequestMergeState
+	MergeStateCoverage FacetCoverage
+	MergeQueue         *PullRequestMergeQueueEntry
+	MergeQueueCoverage FacetCoverage
+	Checks             FacetResult[PullRequestCheck]
+	ReviewThreads      FacetResult[PullRequestReviewThread]
+	ClosingIssues      FacetResult[PullRequestClosingIssue]
+	Files              FacetResult[PullRequestFile]
+}
+
+// PullRequestMergeState preserves GitHub's detailed merge state while making
+// null and UNKNOWN mergeability explicitly unknown rather than negative.
+type PullRequestMergeState struct {
+	MergeStateStatus string
+	Mergeable        string
+	MergeableKnown   bool
+}
+
+// PullRequestMergeQueueEntry describes the PR's current queue entry.
+type PullRequestMergeQueueEntry struct {
+	NodeID                      string
+	State                       string
+	Position                    int
+	EnqueuedAt                  time.Time
+	EstimatedTimeToMergeSeconds *int
+}
+
+// PullRequestCheck is one check-run or commit status in the head commit's
+// status-check rollup.
+type PullRequestCheck struct {
+	Kind        string
+	Name        string
+	Status      string
+	Conclusion  string
+	DetailsURL  string
+	StartedAt   *time.Time
+	CompletedAt *time.Time
+}
+
+// PullRequestReviewThread is one source review conversation. IsResolved is
+// retained so callers can derive unresolved-thread counts without inference.
+type PullRequestReviewThread struct {
+	NodeID     string
+	IsResolved bool
+	IsOutdated bool
+	Path       string
+	Line       *int
+	StartLine  *int
+}
+
+// PullRequestClosingIssue is an issue GitHub reports this PR will close.
+type PullRequestClosingIssue struct {
+	NodeID             string
+	RepositoryFullName string
+	Number             int
+	HTMLURL            string
+}
+
+// PullRequestFile is a changed path in the PR snapshot.
+type PullRequestFile struct {
+	Path       string
+	ChangeType string
+	Additions  int
+	Deletions  int
 }
 
 // Review is a domain-neutral view of a pull request review.

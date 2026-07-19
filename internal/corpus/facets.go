@@ -13,26 +13,53 @@ import (
 // ordering is greater, so facets advance independently from one another and
 // from the parent projection.
 func (c *Corpus) AdvanceFacet(ctx context.Context, repoID int64, threadID *int64, facet string, sourceUpdatedAt time.Time, complete bool, runID int64) error {
+	_, err := c.advanceFacet(ctx, repoID, threadID, facet, sourceUpdatedAt, complete, runID, nil)
+	return err
+}
+
+// AdvanceFacetCAS advances coverage only when the facet sequence captured
+// before retrieval is still current.
+func (c *Corpus) AdvanceFacetCAS(ctx context.Context, repoID int64, threadID *int64, facet string, sourceUpdatedAt time.Time, complete bool, runID, expectedSequence int64) (bool, error) {
+	return c.advanceFacet(ctx, repoID, threadID, facet, sourceUpdatedAt, complete, runID, &expectedSequence)
+}
+
+func (c *Corpus) advanceFacet(ctx context.Context, repoID int64, threadID *int64, facet string, sourceUpdatedAt time.Time, complete bool, runID int64, expectedSequence *int64) (bool, error) {
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin advance facet: %w", err)
+		return false, fmt.Errorf("begin advance facet: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if expectedSequence != nil {
+		tid := sql.NullInt64{}
+		if threadID != nil {
+			tid.Int64, tid.Valid = *threadID, true
+		}
+		var currentSequence int64
+		err := tx.QueryRowContext(ctx, `SELECT observation_sequence FROM facet_coverage WHERE repository_id=? AND COALESCE(thread_id, -1)=COALESCE(?, -1) AND facet=?`, repoID, tid, facet).Scan(&currentSequence)
+		if errors.Is(err, sql.ErrNoRows) {
+			currentSequence = 0
+		} else if err != nil {
+			return false, fmt.Errorf("read facet CAS sequence: %w", err)
+		}
+		if currentSequence != *expectedSequence {
+			return false, nil
+		}
+	}
 
 	now := encodeTime(time.Now())
 	seq, err := c.nextSequence(ctx, tx)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if err := c.advanceFacetTx(ctx, tx, repoID, threadID, facet, sourceUpdatedAt, complete, runID, seq, now); err != nil {
-		return err
+		return false, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit advance facet: %w", err)
+		return false, fmt.Errorf("commit advance facet: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 func (c *Corpus) advanceFacetTx(ctx context.Context, tx *sql.Tx, repoID int64, threadID *int64, facet string, sourceUpdatedAt time.Time, complete bool, runID int64, seq int64, now int64) error {

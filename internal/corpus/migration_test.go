@@ -143,6 +143,51 @@ func TestMigration020DownAndUp(t *testing.T) {
 	}
 }
 
+func TestMigration021DownAndUp(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "corpus.db")
+	dsn := path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	sub, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
+		t.Fatalf("open migration filesystem: %v", err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, sub, goose.WithLogger(noopLogger{}))
+	if err != nil {
+		t.Fatalf("create migration provider: %v", err)
+	}
+	if _, err := provider.UpTo(ctx, 20); err != nil {
+		t.Fatalf("migrate up to 020: %v", err)
+	}
+	if migrationTableExists(ctx, t, db, "portfolio_links") {
+		t.Fatal("portfolio tables exist before migration 021")
+	}
+	if _, err := provider.UpTo(ctx, 21); err != nil {
+		t.Fatalf("migrate up to 021: %v", err)
+	}
+	for _, table := range []string{"portfolio_links", "portfolio_signal_snapshots", "portfolio_signals", "portfolio_signal_projections", "resolution_records", "resolution_projections"} {
+		if !migrationTableExists(ctx, t, db, table) {
+			t.Fatalf("%s missing after migration 021", table)
+		}
+	}
+	if _, err := provider.DownTo(ctx, 20); err != nil {
+		t.Fatalf("migrate down from 021: %v", err)
+	}
+	if migrationTableExists(ctx, t, db, "portfolio_links") || migrationTableExists(ctx, t, db, "resolution_records") {
+		t.Fatal("migration 021 tables remain after down")
+	}
+	if _, err := provider.UpTo(ctx, 21); err != nil {
+		t.Fatalf("migrate up to 021 again: %v", err)
+	}
+	if !migrationTableExists(ctx, t, db, "portfolio_links") || !migrationTableExists(ctx, t, db, "resolution_records") {
+		t.Fatal("migration 021 tables missing after second up")
+	}
+}
+
 func threadsHaveColumns(t *testing.T, ctx context.Context, db *sql.DB, cols []string) bool {
 	t.Helper()
 	for _, col := range cols {
@@ -172,6 +217,15 @@ func evidenceHasSourceProvenance(ctx context.Context, t *testing.T, db *sql.DB) 
 	var found int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('evidence') WHERE name='source_provenance'`).Scan(&found); err != nil {
 		t.Fatalf("query evidence columns: %v", err)
+	}
+	return found == 1
+}
+
+func migrationTableExists(ctx context.Context, t *testing.T, db *sql.DB, table string) bool {
+	t.Helper()
+	var found int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&found); err != nil {
+		t.Fatalf("query migration table %s: %v", table, err)
 	}
 	return found == 1
 }

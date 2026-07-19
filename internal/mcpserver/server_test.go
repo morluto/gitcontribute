@@ -143,12 +143,12 @@ func (*fakeReader) FindClusters(_ context.Context, in FindClustersInput) (FindCl
 }
 
 func (*fakeReader) GetCoverage(_ context.Context, in GetCoverageInput) (GetCoverageOutput, error) {
-	return GetCoverageOutput{
-		Owner:  in.Owner,
-		Repo:   in.Repo,
-		AsOf:   "2026-07-17T00:00:00Z",
-		Facets: []FacetCoverageOutput{{Facet: "metadata", Complete: true, Status: "fresh", UpdatedAt: "2026-07-17T00:00:00Z"}},
-	}, nil
+	items := make([]BatchItem[CoverageOutput], len(in.Targets))
+	for i, target := range in.Targets {
+		value := CoverageOutput{Owner: target.Owner, Repo: target.Repo, Kind: target.Kind, Number: target.Number, AsOf: "2026-07-17T00:00:00Z", Facets: []FacetCoverageOutput{{Facet: "metadata", Complete: true, Status: "fresh", UpdatedAt: "2026-07-17T00:00:00Z"}}}
+		items[i] = BatchItem[CoverageOutput]{Key: target.Owner + "/" + target.Repo, Status: "complete", Value: &value}
+	}
+	return GetCoverageOutput{Status: "complete", Items: items}, nil
 }
 
 func (*fakeReader) Lens(_ context.Context, in LensInput) (LensOutput, error) {
@@ -234,8 +234,13 @@ func (*fakeReader) PrepareContribution(_ context.Context, in PrepareContribution
 	return DraftOutput{OpportunityID: in.OpportunityID, Kind: in.Kind, Title: "draft", Body: "body"}, nil
 }
 
-func (*fakeReader) CancelJob(_ context.Context, in CancelJobInput) (GetJobOutput, error) {
-	return GetJobOutput{ID: in.ID, Kind: "crawl", Status: "cancelled"}, nil
+func (*fakeReader) CancelJobs(_ context.Context, in CancelJobInput) (GetJobsOutput, error) {
+	items := make([]BatchItem[GetJobOutput], len(in.IDs))
+	for i, id := range in.IDs {
+		value := GetJobOutput{ID: id, Kind: "crawl", Status: "cancelled"}
+		items[i] = BatchItem[GetJobOutput]{Key: id, Status: "complete", Value: &value}
+	}
+	return GetJobsOutput{Status: "complete", Items: items}, nil
 }
 
 func connect(t *testing.T, reader Reader) (*mcp.ClientSession, func()) {
@@ -330,7 +335,7 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 		{ToolGetEvidence, map[string]any{"investigation_id": "inv-1"}, 1},
 		{ToolGetReadiness, map[string]any{"opportunity_id": "opp-1"}, -1},
 		{ToolFindClusters, map[string]any{"owner": "acme", "repo": "rocket"}, 1},
-		{ToolGetCoverage, map[string]any{"owner": "acme", "repo": "rocket"}, -1},
+		{ToolGetCoverage, map[string]any{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket"}}}, -1},
 		{ToolGetLens, map[string]any{"name": "active-go"}, -1},
 	}
 	for _, tt := range tests {
@@ -412,7 +417,7 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
 			}
-			if out.Owner != "acme" || out.Repo != "rocket" || len(out.Facets) == 0 {
+			if len(out.Items) != 1 || out.Items[0].Value == nil || out.Items[0].Value.Owner != "acme" || out.Items[0].Value.Repo != "rocket" || len(out.Items[0].Value.Facets) == 0 {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
 		case ToolGetLens:
@@ -646,7 +651,7 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		{ToolPromoteOpportunity, map[string]any{"hypothesis_id": "hyp-1", "problem_statement": "leak", "scope": "small", "impact": "high", "expected_effort": "1h", "confidence": 0.8}},
 		{ToolDefineValidation, map[string]any{"investigation_id": "inv-1", "kind": "test", "command": "go test ./...", "working_dir": "."}},
 		{ToolPrepareContribution, map[string]any{"opportunity_id": "opp-1", "kind": "issue"}},
-		{ToolCancelJob, map[string]any{"id": "job-1"}},
+		{ToolCancelJob, map[string]any{"ids": []string{"job-1"}}},
 	}
 	for _, tt := range writeTests {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})

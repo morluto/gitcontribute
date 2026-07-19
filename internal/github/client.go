@@ -36,6 +36,12 @@ type IssueGetter interface {
 	GetIssue(ctx context.Context, owner, name string, number int) (Issue, RateInfo, error)
 }
 
+// IssueTimelineReader is the optional, paginated issue-history capability.
+// It stays separate from Reader so archive-only and test readers remain narrow.
+type IssueTimelineReader interface {
+	ListIssueTimeline(context.Context, string, string, int, PageOptions) (ListResult[IssueTimelineEvent], error)
+}
+
 // RepositorySearcher is the optional GitHub Search capability used by broad
 // discovery. Keeping it separate lets archive-only readers stay small.
 type RepositorySearcher interface {
@@ -51,6 +57,11 @@ type IdentityReader interface {
 // AuthoredPullRequestSearcher discovers pull requests authored by one login.
 type AuthoredPullRequestSearcher interface {
 	SearchAuthoredPullRequests(context.Context, AuthoredPullRequestSearchOptions) (AuthoredPullRequestSearchResult, error)
+}
+
+// PullRequestStatusReader reads bounded, source-backed PR health facets.
+type PullRequestStatusReader interface {
+	GetPullRequestStatus(context.Context, string, string, int, PullRequestStatusOptions) (PullRequestStatus, error)
 }
 
 // Client wraps go-github behind a narrow, domain-neutral interface.
@@ -143,6 +154,39 @@ func (c *Client) GetRepository(ctx context.Context, owner, name string) (Reposit
 		return Repository{}, RateInfo{}, classifyError(err)
 	}
 	return convertRepository(repo), rateInfo(resp.Rate), nil
+}
+
+// ListIssueTimeline reads one REST timeline page without exposing go-github
+// models beyond the adapter boundary.
+func (c *Client) ListIssueTimeline(ctx context.Context, owner, name string, number int, opts PageOptions) (ListResult[IssueTimelineEvent], error) {
+	items, resp, err := c.gh.Issues.ListIssueTimeline(ctx, owner, name, number, &gh.ListOptions{Page: opts.Page, PerPage: opts.PerPage})
+	if err != nil {
+		return ListResult[IssueTimelineEvent]{}, classifyError(err)
+	}
+	converted := make([]IssueTimelineEvent, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		event := IssueTimelineEvent{ID: item.GetID(), Event: item.GetEvent(), CommitID: item.GetCommitID(), CreatedAt: item.GetCreatedAt().Time}
+		if actor := item.GetActor(); actor != nil {
+			event.Actor = actor.GetLogin()
+		}
+		if source := item.GetSource(); source != nil {
+			if issue := source.GetIssue(); issue != nil {
+				event.SourceNumber = issue.GetNumber()
+				event.SourceIsPullRequest = issue.IsPullRequest()
+				if repository := issue.GetRepository(); repository != nil {
+					event.SourceRepository = repository.GetName()
+					if repository.Owner != nil {
+						event.SourceOwner = repository.Owner.GetLogin()
+					}
+				}
+			}
+		}
+		converted = append(converted, event)
+	}
+	return ListResult[IssueTimelineEvent]{Items: converted, Page: pageInfo(resp), Rate: rateInfo(resp.Rate)}, nil
 }
 
 // GetAuthenticatedIdentity resolves the user associated with the configured
