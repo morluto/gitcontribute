@@ -118,10 +118,13 @@ type ThreadByNumberInput struct {
 
 // JobReference is returned by long-running tools that submit durable jobs.
 type JobReference struct {
-	ID      string `json:"id"`
-	Kind    string `json:"kind"`
-	Status  string `json:"status"`
-	Message string `json:"message"`
+	ID               string            `json:"id"`
+	Ref              string            `json:"ref"`
+	Kind             string            `json:"kind"`
+	Status           string            `json:"status"`
+	Message          string            `json:"message"`
+	PollAfterMS      int               `json:"poll_after_ms,omitempty"`
+	SuggestedActions []SuggestedAction `json:"suggested_actions,omitempty"`
 }
 
 // V1 operation inputs and outputs.
@@ -285,7 +288,6 @@ func (s *Server) registerV1() {
 		annotations: readOnly, input: inputSchema[SearchRepositoriesInput](func(schema *jsonschema.Schema) {
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
-			requireTogether(schema, "owner", "repo")
 		}), output: outputSchema[SearchRepositoriesOutput]("One page of stored repository matches."), handler: s.searchRepositories,
 	})
 	addCatalogTool(s.server, catalogTool[SearchThreadsInput, SearchOutput]{
@@ -297,7 +299,6 @@ func (s *Server) registerV1() {
 			setEnum(schema, "state_reason", "completed", "not_planned")
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
-			requireTogether(schema, "owner", "repo")
 		}), output: outputSchema[SearchOutput]("One page of stored issue and pull-request matches."), handler: s.searchThreads,
 	})
 	addCatalogTool(s.server, catalogTool[GetRepositoryDossierInput, DossierOutput]{
@@ -314,13 +315,6 @@ func (s *Server) registerV1() {
 			setMinimum(schema, "number", 1)
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
-			requireWhen(schema, "kind", "issue", "number")
-			requireWhen(schema, "kind", "pull_request", "number")
-			requireWhen(schema, "kind", "code", "path", "commit")
-			forbidWhen(schema, "kind", "repo", "number", "path", "commit")
-			forbidWhen(schema, "kind", "issue", "path", "commit")
-			forbidWhen(schema, "kind", "pull_request", "path", "commit")
-			forbidWhen(schema, "kind", "code", "number")
 		}), output: outputSchema[ExplainMatchOutput]("Stored facts and score signals explaining one search match."), handler: s.explainMatch,
 	})
 	addCatalogTool(s.server, catalogTool[BuildRepositoryDossierInput, JobReference]{
@@ -395,9 +389,6 @@ func (s *Server) registerV1() {
 		description: "Render and persist a local issue or pull-request draft from an opportunity and supplied evidence summaries. Pull-request drafts require explicit workspace_id, approach, and changes; this tool never inspects a workspace, runs Git, posts, or mutates GitHub.",
 		annotations: localWrite, input: inputSchema[PrepareContributionInput](func(schema *jsonschema.Schema) {
 			setEnum(schema, "kind", "issue", "pull_request")
-			requireWhen(schema, "kind", "pull_request", "workspace_id", "approach", "changes")
-			forbidWhen(schema, "kind", "issue", "workspace_id", "approach", "changes", "compatibility", "limitations", "linked_issue")
-			forbidWhen(schema, "kind", "pull_request", "success")
 		}), output: outputSchema[DraftOutput]("Newly rendered and persisted local contribution draft."), handler: s.prepareContribution,
 	})
 	addCatalogTool(s.server, catalogTool[CancelJobInput, GetJobsOutput]{
@@ -418,7 +409,7 @@ func (s *Server) searchRepositories(ctx context.Context, _ *mcp.CallToolRequest,
 		return nil, SearchRepositoriesOutput{}, errors.New("limit must be between 1 and 100")
 	}
 	if (in.Owner == "") != (in.Repo == "") {
-		return nil, SearchRepositoriesOutput{}, errors.New("owner and repo must be provided together")
+		return nil, SearchRepositoriesOutput{}, InvalidArgument("owner", "owner and repo must be provided together", map[string]any{"owner": "acme", "repo": "rocket"})
 	}
 	out, err := s.reader.SearchRepositories(ctx, in)
 	return nil, out, err
@@ -435,7 +426,7 @@ func (s *Server) searchThreads(ctx context.Context, _ *mcp.CallToolRequest, in S
 		return nil, SearchOutput{}, errors.New("limit must be between 1 and 100")
 	}
 	if (in.Owner == "") != (in.Repo == "") {
-		return nil, SearchOutput{}, errors.New("owner and repo must be provided together")
+		return nil, SearchOutput{}, InvalidArgument("owner", "owner and repo must be provided together", map[string]any{"owner": "acme", "repo": "rocket"})
 	}
 	if in.Kind != "" && in.Kind != "issue" && in.Kind != "pull_request" {
 		return nil, SearchOutput{}, errors.New("kind must be issue or pull_request")
@@ -475,6 +466,15 @@ func (s *Server) explainMatch(ctx context.Context, _ *mcp.CallToolRequest, in Ex
 	}
 	if in.Kind != "" && in.Kind != "repo" && in.Kind != "issue" && in.Kind != "pull_request" && in.Kind != "code" {
 		return nil, ExplainMatchOutput{}, errors.New("kind must be repo, issue, pull_request, or code")
+	}
+	if (in.Kind == "issue" || in.Kind == "pull_request") && in.Number < 1 {
+		return nil, ExplainMatchOutput{}, errors.New("number is required for issue and pull_request matches")
+	}
+	if in.Kind == "code" && (strings.TrimSpace(in.Path) == "" || strings.TrimSpace(in.Commit) == "") {
+		return nil, ExplainMatchOutput{}, errors.New("path and commit are required for code matches")
+	}
+	if in.Kind == "repo" && (in.Number != 0 || in.Path != "" || in.Commit != "") || (in.Kind == "issue" || in.Kind == "pull_request") && (in.Path != "" || in.Commit != "") || in.Kind == "code" && in.Number != 0 {
+		return nil, ExplainMatchOutput{}, errors.New("identity fields do not match kind; use number for threads, path and commit for code, and neither for repositories")
 	}
 	out, err := s.reader.ExplainMatch(ctx, in)
 	return nil, out, err
@@ -681,6 +681,12 @@ func (s *Server) prepareContribution(ctx context.Context, _ *mcp.CallToolRequest
 	}
 	if in.Kind == "pull_request" && strings.TrimSpace(in.Changes) == "" {
 		return nil, DraftOutput{}, errors.New("changes is required for pull_request drafts; inspect the workspace explicitly before preparing the draft")
+	}
+	if in.Kind == "issue" && (in.WorkspaceID != "" || in.Approach != "" || in.Changes != "" || in.Compatibility != "" || in.Limitations != "" || in.LinkedIssue != "") {
+		return nil, DraftOutput{}, errors.New("pull-request-only fields are not accepted for issue drafts")
+	}
+	if in.Kind == "pull_request" && in.Success != "" {
+		return nil, DraftOutput{}, errors.New("success is only accepted for issue drafts")
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {

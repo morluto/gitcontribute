@@ -1,0 +1,32 @@
+{
+  "version": "agent-tool-eval.v1",
+  "captured_from": "origin/main@de8a484f599dd2111a7f194605facb8263f82810 before agent-tool ergonomics changes",
+  "measurement_note": "Response bytes are a deterministic context-pressure proxy, not a token count. Scripted calls test contracts, not model tool selection.",
+  "scenarios": [
+    {
+      "name": "known_repository_search",
+      "split": "public",
+      "transcript": [
+        {"tool": "corpus.search_repositories", "arguments": {"owner": "acme", "repo": "rocket", "limit": 5}, "status": "complete"}
+      ],
+      "metrics": {"completed": true, "tool_calls": 1, "tool_errors": 0, "invalid_argument_errors": 0, "response_bytes": 79, "poll_calls": 0}
+    },
+    {
+      "name": "partial_repository_identity",
+      "split": "public",
+      "transcript": [
+        {"tool": "corpus.search_repositories", "arguments": {"owner": "acme"}, "status": "error", "error": "owner and repo must be provided together"}
+      ],
+      "metrics": {"completed": true, "tool_calls": 1, "tool_errors": 1, "invalid_argument_errors": 1, "response_bytes": 40, "poll_calls": 0}
+    },
+    {
+      "name": "dossier_then_poll",
+      "split": "public",
+      "transcript": [
+        {"tool": "corpus.build_repository_dossier", "arguments": {"owner": "acme", "repo": "rocket"}, "status": "queued"},
+        {"tool": "jobs.get", "arguments": {"ids": ["job-dossier-acme-rocket"]}, "status": "complete"}
+      ],
+      "metrics": {"completed": true, "tool_calls": 2, "tool_errors": 0, "invalid_argument_errors": 0, "response_bytes": 127, "poll_calls": 1}
+    }
+  ]
+}

@@ -173,7 +173,11 @@ func (*fakeReader) SearchRepositories(_ context.Context, in SearchRepositoriesIn
 
 func (*fakeReader) SearchGitHubRepositories(_ context.Context, in SearchGitHubRepositoriesInput) (SearchGitHubRepositoriesOutput, error) {
 	stars := 42
-	return SearchGitHubRepositoriesOutput{Status: "complete", Query: in.Query, Total: 1, Items: []BatchItem[TypedRepositoryOutput]{{Key: "acme/rocket", Status: "complete", Value: &TypedRepositoryOutput{Owner: "acme", Repo: "rocket", Stars: &stars}}}}, nil
+	applied := in.Query
+	if applied == "" {
+		applied = in.Text
+	}
+	return SearchGitHubRepositoriesOutput{Status: "complete", Query: applied, Interpretation: "Search using structured repository filters.", ResponseFormat: "concise", Page: 1, Total: 1, Items: []BatchItem[RepositorySearchMatch]{{Key: "acme/rocket", Status: "complete", Value: &RepositorySearchMatch{Ref: "repository:acme/rocket", Owner: "acme", Repo: "rocket", Stars: &stars}}}}, nil
 }
 
 func (*fakeReader) ExplainMatch(_ context.Context, in ExplainMatchInput) (ExplainMatchOutput, error) {
@@ -195,7 +199,11 @@ func (*fakeReader) ThreadByNumber(_ context.Context, in ThreadByNumberInput) (Th
 }
 
 func (*fakeReader) BuildRepositoryDossier(_ context.Context, in BuildRepositoryDossierInput) (JobReference, error) {
-	return JobReference{ID: "job-dossier-" + in.Owner + "-" + in.Repo, Kind: "build_repository_dossier", Status: "queued"}, nil
+	id := "job-dossier-" + in.Owner + "-" + in.Repo
+	return JobReference{
+		ID: id, Ref: "job:" + id, Kind: "build_repository_dossier", Status: "queued", PollAfterMS: 1000,
+		SuggestedActions: []SuggestedAction{{Tool: ToolGetJob, Reason: "Poll this durable job.", Arguments: map[string]any{"ids": []string{id}}}},
+	}, nil
 }
 
 func (*fakeReader) StartInvestigation(_ context.Context, in StartInvestigationInput) (InvestigationOutput, error) {

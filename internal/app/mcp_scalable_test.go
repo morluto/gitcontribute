@@ -185,15 +185,21 @@ func TestSearchGitHubRepositoriesPersistsObservedMetadata(t *testing.T) {
 	svc := newSearchTestService(t)
 	now := time.Unix(1000, 0).UTC()
 	remote := github.Repository{Owner: "acme", Name: "rocket", Description: "fast inference", Stars: 9001, Language: "Go", UpdatedAt: now}
-	reader := &fakeRepositorySearchReader{result: github.RepositorySearchResult{Total: 321, Items: []github.Repository{remote}}}
+	reader := &fakeRepositorySearchReader{result: github.RepositorySearchResult{Total: 321, Items: []github.Repository{remote}, Page: github.PageInfo{Page: 2, NextPage: 3, HasNext: true}}}
 	svc.SetGitHubReader(reader)
 
-	out, err := (&MCPReader{svc}).SearchGitHubRepositories(ctx, mcpserver.SearchGitHubRepositoriesInput{Query: "inference language:go", Sort: "stars", Order: "desc", Limit: 12})
+	out, err := (&MCPReader{svc}).SearchGitHubRepositories(ctx, mcpserver.SearchGitHubRepositoriesInput{Text: "fast inference", MatchFields: []string{"name", "description"}, Topics: []string{"llm-inference"}, Language: "Go", StarsMin: 200, PushedAfter: "2026-06-15", Archived: ptr(false), Fork: ptr(false), Sort: "stars", Order: "desc", Limit: 12, Page: 2, ResponseFormat: "concise"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reader.options.PerPage != 12 || reader.options.Sort != "stars" || len(out.Items) != 1 || out.Items[0].Value == nil || *out.Items[0].Value.Stars != 9001 {
+	if reader.options.PerPage != 12 || reader.options.Page != 2 || reader.options.Sort != "stars" || reader.options.Query != `"fast inference" in:name,description topic:llm-inference language:Go stars:>=200 pushed:>=2026-06-15 archived:false fork:false` {
+		t.Fatalf("compiled options = %+v", reader.options)
+	}
+	if out.NextPage != 3 || out.ResponseFormat != "concise" || len(out.Items) != 1 || out.Items[0].Value == nil || out.Items[0].Value.Ref != "repository:acme/rocket" || *out.Items[0].Value.Stars != 9001 {
 		t.Fatalf("live search result = %+v, options = %+v", out, reader.options)
+	}
+	if out.Items[0].Value.Watchers != nil || len(out.SuggestedActions) != 1 || out.SuggestedActions[0].Tool != mcpserver.ToolSyncThreads {
+		t.Fatalf("concise search context = %+v", out)
 	}
 	stored, err := (&MCPReader{svc}).GetRepositories(ctx, mcpserver.GetRepositoriesInput{Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: "rocket"}}})
 	if err != nil {
@@ -201,6 +207,57 @@ func TestSearchGitHubRepositoriesPersistsObservedMetadata(t *testing.T) {
 	}
 	if stored.Items[0].Value == nil || stored.Items[0].Value.Metadata.Status != "complete" || *stored.Items[0].Value.Stars != 9001 {
 		t.Fatalf("search metadata was not persisted: %+v", stored)
+	}
+}
+
+func TestCompileRepositorySearchRejectsAmbiguousAndInvalidInputs(t *testing.T) {
+	cases := []struct {
+		name string
+		in   mcpserver.SearchGitHubRepositoriesInput
+	}{
+		{name: "empty", in: mcpserver.SearchGitHubRepositoriesInput{}},
+		{name: "two raw fields", in: mcpserver.SearchGitHubRepositoriesInput{Query: "cuda", RawQuery: "triton"}},
+		{name: "raw and structured", in: mcpserver.SearchGitHubRepositoriesInput{RawQuery: "cuda", Language: "Go"}},
+		{name: "unknown match field", in: mcpserver.SearchGitHubRepositoriesInput{Text: "cuda", MatchFields: []string{"topics"}}},
+		{name: "reversed stars", in: mcpserver.SearchGitHubRepositoriesInput{Text: "cuda", StarsMin: 20, StarsMax: 10}},
+		{name: "invalid date", in: mcpserver.SearchGitHubRepositoriesInput{PushedAfter: "yesterday"}},
+		{name: "reversed dates", in: mcpserver.SearchGitHubRepositoriesInput{CreatedAfter: "2026-07-01", CreatedBefore: "2026-06-01"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, _, err := compileRepositorySearch(tc.in); err == nil {
+				t.Fatal("invalid search was accepted")
+			}
+		})
+	}
+}
+
+func TestCompileRepositorySearchWarnsAboutLegacyAndReadmeQueries(t *testing.T) {
+	query, interpretation, warnings, err := compileRepositorySearch(mcpserver.SearchGitHubRepositoriesInput{Query: "attention in:readme"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query != "attention in:readme" || !strings.Contains(interpretation, "legacy") || len(warnings) != 2 || warnings[0].Code != "deprecated_query" || warnings[1].Code != "broad_readme_match" {
+		t.Fatalf("legacy query context = %q %q %+v", query, interpretation, warnings)
+	}
+}
+
+func TestCompileRepositorySearchWarnsAboutStructuredReadmeMatching(t *testing.T) {
+	query, _, warnings, err := compileRepositorySearch(mcpserver.SearchGitHubRepositoriesInput{Text: "attention", MatchFields: []string{"name", "readme"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query != "attention in:name,readme" || len(warnings) != 1 || warnings[0].Code != "broad_readme_match" {
+		t.Fatalf("structured README warning = %q %+v", query, warnings)
+	}
+}
+
+func TestRepositorySearchDetailedFormatPreservesSecondaryFacts(t *testing.T) {
+	archived := true
+	remote := github.Repository{Owner: "acme", Name: "rocket", Description: "fast", Stars: 42, Watchers: 9, Forks: 3, OpenIssues: 7, Archived: archived, Topics: []string{"cuda"}}
+	match := liveRepositorySearchMatch(remote, mcpserver.RepositoryMetadataOutput{Status: "complete"}, "detailed")
+	if match.Ref != "repository:acme/rocket" || match.Watchers == nil || *match.Watchers != 9 || match.Archived == nil || !*match.Archived || len(match.Topics) != 1 {
+		t.Fatalf("detailed match = %+v", match)
 	}
 }
 
