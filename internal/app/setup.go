@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/morluto/gitcontribute/internal/cli"
@@ -61,17 +62,18 @@ func (s *Service) setup(ctx context.Context, opts cli.SetupOptions, observer cli
 }
 
 type setupRun struct {
-	service           *Service
-	ctx               context.Context
-	opts              cli.SetupOptions
-	observer          cli.SetupObserver
-	operation         clientsetup.Operation
-	report            *cli.SetupReport
-	clientOptions     clientsetup.Options
-	clientReport      clientsetup.Report
-	managedRuntime    string
-	mcpCommandPending bool
-	configurationOK   bool
+	service             *Service
+	ctx                 context.Context
+	opts                cli.SetupOptions
+	observer            cli.SetupObserver
+	operation           clientsetup.Operation
+	report              *cli.SetupReport
+	clientOptions       clientsetup.Options
+	clientReport        clientsetup.Report
+	managedRuntime      string
+	installedExecutable string
+	mcpCommandPending   bool
+	configurationOK     bool
 }
 
 func (s *Service) newSetupRun(ctx context.Context, opts cli.SetupOptions, observer cli.SetupObserver) (*setupRun, error) {
@@ -173,6 +175,7 @@ func (r *setupRun) setupRuntime() error {
 	step, executable := installCLI(r.ctx, r.opts.Version, r.opts.DryRun)
 	r.report.Steps = append(r.report.Steps, step)
 	setupCompleted(r.observer, step)
+	r.installedExecutable = executable
 	if executable == "" {
 		if !r.opts.DryRun {
 			r.mcpCommandPending = false
@@ -203,6 +206,7 @@ func (r *setupRun) installManagedRuntime() error {
 		return nil
 	}
 	setupStarted(r.observer, cli.SetupPhaseMCPRuntime)
+	r.installedExecutable = r.managedRuntime
 	source := r.opts.Executable
 	if source == "" {
 		var err error
@@ -333,6 +337,9 @@ func (r *setupRun) appendClientResults() {
 	for _, result := range r.clientReport.Results {
 		step := cli.SetupStep{Name: string(result.Client), Path: result.Path, Status: result.Status, Message: result.Error}
 		r.report.Steps = append(r.report.Steps, step)
+		if !r.opts.DryRun && r.operation == clientsetup.Configure && (result.Status == "configured" || result.Status == "updated") {
+			r.report.RestartClients = append(r.report.RestartClients, string(result.Client))
+		}
 		setupCompleted(r.observer, step)
 	}
 }
@@ -362,18 +369,77 @@ func (r *setupRun) verify() {
 		return
 	}
 	setupStarted(r.observer, cli.SetupPhaseVerification)
-	diagnostics, err := r.service.doctor(r.ctx, false)
 	step := cli.SetupStep{Name: "verification", Status: "verified"}
-	if err != nil || diagnostics == nil || !diagnostics.Healthy {
+	if err := r.verifyAppliedSetup(); err != nil {
 		step.Status = "failed"
-		if err != nil {
-			step.Message = err.Error()
-		} else {
-			step.Message = "required installation checks failed"
-		}
+		step.Message = err.Error()
 	}
 	r.report.Steps = append(r.report.Steps, step)
 	setupCompleted(r.observer, step)
+}
+
+func (r *setupRun) verifyAppliedSetup() error {
+	failures := make([]string, 0, 5)
+	if executableErr := verifySetupExecutable(r.installedExecutable); executableErr != nil {
+		failures = append(failures, "executable: "+executableErr.Error())
+	}
+	c, err := r.service.openCorpus(r.ctx)
+	if err != nil {
+		failures = append(failures, "database: "+err.Error())
+	} else {
+		current, target, schemaErr := c.SchemaVersions(r.ctx)
+		if schemaErr != nil {
+			failures = append(failures, "schema: "+schemaErr.Error())
+		} else if current != target {
+			failures = append(failures, fmt.Sprintf("schema: database version %d does not match expected version %d", current, target))
+		}
+		integrityCtx, cancel := context.WithTimeout(r.ctx, databaseIntegrityTimeout)
+		integrityErr := c.CheckIntegrity(integrityCtx)
+		cancel()
+		if integrityErr != nil {
+			failures = append(failures, "database_integrity: "+integrityErr.Error())
+		}
+	}
+	if gitErr := commandAvailable(r.ctx, "git", "--version"); gitErr != nil {
+		failures = append(failures, "git: "+redactDiagnostic(gitErr.Error()))
+	}
+	if r.configuresClients() {
+		opts := r.clientOptions
+		opts.DryRun = true
+		report, clientErr := clientsetup.Run(opts)
+		if clientErr != nil {
+			failures = append(failures, "mcp registration: "+clientErr.Error())
+		} else {
+			for _, result := range report.Results {
+				if result.Error != "" {
+					failures = append(failures, string(result.Client)+": "+result.Error)
+				} else if result.Status != "already configured" {
+					failures = append(failures, fmt.Sprintf("%s: registration does not match the configured MCP command", result.Client))
+				}
+			}
+		}
+	}
+	if len(failures) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(failures, "; "))
+}
+
+func verifySetupExecutable(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("installed command path is unavailable")
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("inspect installed command: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("installed command is not a regular file: %s", path)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+		return fmt.Errorf("installed command is not executable: %s", path)
+	}
+	return nil
 }
 
 func setupStarted(observer cli.SetupObserver, phase cli.SetupPhase) {

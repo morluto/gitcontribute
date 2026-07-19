@@ -389,7 +389,7 @@ func TestRenderSetupPlanPresentsManagedRuntimeForMCPOnly(t *testing.T) {
 }
 
 func TestRenderSetupResultTailorsNextCommand(t *testing.T) {
-	report := &SetupReport{Authentication: &SetupAuthentication{Method: "gh-cli"}, Steps: []SetupStep{{Name: "codex", Status: "configured"}, {Name: "verification", Status: "verified"}}}
+	report := &SetupReport{Authentication: &SetupAuthentication{Method: "gh-cli"}, RestartClients: []string{"codex"}, Steps: []SetupStep{{Name: "codex", Status: "configured"}, {Name: "verification", Status: "verified"}}}
 	if got := renderSetupResult(report, SetupOptions{Mode: SetupModeBoth}); !strings.Contains(got, "Next\n  gitcontribute\n") || !strings.Contains(got, "Restart Codex") || !strings.Contains(got, "not read or validated") {
 		t.Fatalf("installed result = %q", got)
 	}

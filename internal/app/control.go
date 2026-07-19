@@ -18,6 +18,8 @@ import (
 	clientsetup "github.com/morluto/gitcontribute/internal/setup"
 )
 
+const databaseIntegrityTimeout = 2 * time.Second
+
 // Metadata reports deterministic application and local capability metadata.
 // It neither opens the corpus nor performs network access.
 func (s *Service) Metadata(ctx context.Context) (*cli.MetadataResult, error) {
@@ -178,15 +180,11 @@ func (s *Service) ControlStatus(ctx context.Context) (*cli.ControlStatusResult, 
 // Doctor performs bounded local diagnostics. It reports authentication source
 // availability but never returns credential values or command output.
 func (s *Service) Doctor(ctx context.Context) (*cli.DoctorResult, error) {
-	return s.doctor(ctx, true)
+	return s.doctor(ctx)
 }
 
-// doctor optionally verifies credentials. Setup uses the local-only mode so
-// its post-apply checks cannot read environment secrets, invoke gh auth token,
-// or trigger a keyring access prompt. The explicit doctor command retains the
-// credential check.
-func (s *Service) doctor(ctx context.Context, verifyCredentials bool) (*cli.DoctorResult, error) {
-	checks := make([]cli.DoctorCheck, 0, 9)
+func (s *Service) doctor(ctx context.Context) (*cli.DoctorResult, error) {
+	checks := make([]cli.DoctorCheck, 0, 10)
 	add := func(name string, required bool, err error, success string) {
 		check := cli.DoctorCheck{Name: name, Required: required, Status: "ok", Message: success}
 		if err != nil {
@@ -209,12 +207,17 @@ func (s *Service) doctor(ctx context.Context, verifyCredentials bool) (*cli.Doct
 	c, dbErr := s.openCorpus(ctx)
 	add("database", true, dbErr, "corpus is readable")
 	if dbErr == nil {
-		_, schemaErr := c.SchemaVersion(ctx)
-		add("schema", true, schemaErr, "schema is current")
-		lockCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		lockErr := c.CheckIntegrity(lockCtx)
+		current, target, schemaErr := c.SchemaVersions(ctx)
+		if schemaErr == nil && current != target {
+			schemaErr = fmt.Errorf("database schema version %d does not match expected version %d", current, target)
+		}
+		add("schema", true, schemaErr, fmt.Sprintf("schema is current at version %d", current))
+		integrityCtx, cancel := context.WithTimeout(ctx, databaseIntegrityTimeout)
+		integrityErr := c.CheckIntegrity(integrityCtx)
 		cancel()
-		add("database_lock", true, lockErr, "integrity and write lock checks passed")
+		add("database_integrity", true, integrityErr, "database quick check passed")
+		writeErr := c.CheckWriteAccess(ctx)
+		add("database_write", false, writeErr, "database is ready for writes")
 	}
 
 	gitErr := commandAvailable(ctx, "git", "--version")
@@ -224,9 +227,9 @@ func (s *Service) doctor(ctx context.Context, verifyCredentials bool) (*cli.Doct
 	authSuccess := "GitHub authentication source is configured; credentials were not read"
 	if cfg == nil {
 		authErr = errors.New("authentication source unavailable because configuration is invalid")
-	} else if cfg.TokenSource.Method == "none" && verifyCredentials {
+	} else if cfg.TokenSource.Method == "none" {
 		authErr = errors.New("no GitHub authentication source configured; public reads remain available")
-	} else if verifyCredentials {
+	} else {
 		authErr = checkAuthSource(ctx, cfg, tokenSource(cfg))
 		authSuccess = "GitHub authentication source is available"
 	}

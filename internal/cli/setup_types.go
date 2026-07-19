@@ -133,6 +133,7 @@ type SetupReport struct {
 	DryRun            bool                 `json:"dry_run"`
 	MCPCommand        *SetupMCPCommand     `json:"mcp_command,omitempty"`
 	MCPCommandPending bool                 `json:"mcp_command_pending,omitempty"`
+	RestartClients    []string             `json:"restart_clients,omitempty"`
 	Authentication    *SetupAuthentication `json:"authentication,omitempty"`
 	Steps             []SetupStep          `json:"steps"`
 }

@@ -166,7 +166,8 @@ type metadataCmd struct {
 }
 
 type doctorCmd struct {
-	JSON bool `name:"json" help:"Print the result as JSON"`
+	JSON   bool `name:"json" help:"Print the result as JSON"`
+	Strict bool `name:"strict" help:"Exit unsuccessfully when required checks fail"`
 }
 
 type statusCmd struct {
@@ -1762,18 +1763,6 @@ func (c *CLI) runMetadata(ctx context.Context, cmd *metadataCmd) error {
 		return err
 	}
 	result, err := service.Metadata(ctx)
-	if err != nil {
-		return c.mapError(err)
-	}
-	return c.render(cmd.JSON, result)
-}
-
-func (c *CLI) runDoctor(ctx context.Context, cmd *doctorCmd) error {
-	service, err := c.controlService()
-	if err != nil {
-		return err
-	}
-	result, err := service.Doctor(ctx)
 	if err != nil {
 		return c.mapError(err)
 	}

@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
-
-	"github.com/pressly/goose/v3"
 )
 
 // ControlStats is a bounded local snapshot used by status and diagnostics.
@@ -22,11 +20,25 @@ type ControlStats struct {
 
 // SchemaVersion returns the applied Goose schema version.
 func (c *Corpus) SchemaVersion(ctx context.Context) (int64, error) {
-	version, err := goose.GetDBVersionContext(ctx, c.db)
+	current, _, err := c.SchemaVersions(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("read schema version: %w", err)
+		return 0, err
 	}
-	return version, nil
+	return current, nil
+}
+
+// SchemaVersions returns the current database version and the latest version
+// supported by this binary.
+func (c *Corpus) SchemaVersions(ctx context.Context) (current, target int64, err error) {
+	provider, err := c.migrationProvider()
+	if err != nil {
+		return 0, 0, err
+	}
+	current, target, err = provider.GetVersions(ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("read schema versions: %w", err)
+	}
+	return current, target, nil
 }
 
 // ControlStats returns local counts without triggering refresh or hydration.
@@ -75,8 +87,7 @@ func (c *Corpus) ControlStats(ctx context.Context, now time.Time) (ControlStats,
 	return out, nil
 }
 
-// CheckIntegrity performs bounded, local database health checks and verifies
-// that an immediate write lock can be acquired. It does not mutate user data.
+// CheckIntegrity performs a bounded, local database integrity check.
 func (c *Corpus) CheckIntegrity(ctx context.Context) error {
 	var result string
 	if err := c.db.QueryRowContext(ctx, `PRAGMA quick_check(1)`).Scan(&result); err != nil {
@@ -86,13 +97,32 @@ func (c *Corpus) CheckIntegrity(ctx context.Context) error {
 		return fmt.Errorf("database quick check: %s", result)
 	}
 
+	return nil
+}
+
+// CheckWriteAccess reports whether a write transaction can begin immediately.
+// Contention is an availability signal, not evidence of database corruption.
+func (c *Corpus) CheckWriteAccess(ctx context.Context) (err error) {
 	conn, err := c.db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire database connection: %w", err)
 	}
 	defer conn.Close()
+	var busyTimeout int
+	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&busyTimeout); err != nil {
+		return fmt.Errorf("read database busy timeout: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `PRAGMA busy_timeout = 0`); err != nil {
+		return fmt.Errorf("disable database busy timeout: %w", err)
+	}
+	defer func() {
+		_, restoreErr := conn.ExecContext(context.WithoutCancel(ctx), fmt.Sprintf("PRAGMA busy_timeout = %d", busyTimeout))
+		if err == nil && restoreErr != nil {
+			err = fmt.Errorf("restore database busy timeout: %w", restoreErr)
+		}
+	}()
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return fmt.Errorf("acquire database write lock: %w", err)
+		return fmt.Errorf("begin immediate database transaction: %w", err)
 	}
 	if _, err := conn.ExecContext(context.WithoutCancel(ctx), `ROLLBACK`); err != nil {
 		return fmt.Errorf("release database write lock: %w", err)

@@ -73,6 +73,24 @@ func TestControlCommands(t *testing.T) {
 	}
 }
 
+func TestDoctorStrictReturnsFailureAfterRenderingDiagnostics(t *testing.T) {
+	svc := &fakeControlService{
+		fakeService: &fakeService{},
+		doctor: &cli.DoctorResult{Healthy: false, Checks: []cli.DoctorCheck{{
+			Name: "database", Status: "error", Required: true, Message: "unavailable",
+		}}},
+	}
+	c, stdout, _ := newTestCLI(svc, nil)
+	err := c.Run(context.Background(), []string{"doctor", "--json", "--strict"})
+	if !containsText(stdout.String(), `"healthy": false`) {
+		t.Fatalf("doctor output=%q", stdout.String())
+	}
+	var cliErr *cli.CLIError
+	if !errors.As(err, &cliErr) || cliErr.Code != cli.ExitGeneral || !strings.Contains(cliErr.Error(), "required diagnostic checks failed") {
+		t.Fatalf("doctor error = %v", err)
+	}
+}
+
 type fakeJobService struct {
 	*fakeService
 	listedStatus string

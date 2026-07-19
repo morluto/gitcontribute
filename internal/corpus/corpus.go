@@ -94,18 +94,40 @@ func buildDSN(path string) string {
 }
 
 func (c *Corpus) applyMigrations(ctx context.Context) error {
-	migrations, err := fs.Sub(migrationsFS, "migrations")
+	provider, err := c.migrationProvider()
 	if err != nil {
-		return fmt.Errorf("open migration filesystem: %w", err)
+		return err
 	}
-	provider, err := goose.NewProvider(goose.DialectSQLite3, c.db, migrations, goose.WithLogger(noopLogger{}))
+	current, target, err := provider.GetVersions(ctx)
 	if err != nil {
-		return fmt.Errorf("create migration provider: %w", err)
+		return fmt.Errorf("read migration versions: %w", err)
+	}
+	if current > target {
+		return fmt.Errorf("database schema version %d is newer than this binary supports (%d)", current, target)
 	}
 	if _, err := provider.Up(ctx); err != nil {
 		return fmt.Errorf("apply migrations: %w", err)
 	}
+	current, target, err = provider.GetVersions(ctx)
+	if err != nil {
+		return fmt.Errorf("verify migration versions: %w", err)
+	}
+	if current != target {
+		return fmt.Errorf("database schema version %d does not match expected version %d", current, target)
+	}
 	return nil
+}
+
+func (c *Corpus) migrationProvider() (*goose.Provider, error) {
+	migrations, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
+		return nil, fmt.Errorf("open migration filesystem: %w", err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, c.db, migrations, goose.WithLogger(noopLogger{}))
+	if err != nil {
+		return nil, fmt.Errorf("create migration provider: %w", err)
+	}
+	return provider, nil
 }
 
 type noopLogger struct{}
