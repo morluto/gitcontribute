@@ -40,10 +40,12 @@ type BatchItem[T any] struct {
 	NextAction   string `json:"next_action,omitempty"`
 }
 
+// GetRepositoriesInput selects repositories for a bounded corpus read.
 type GetRepositoriesInput struct {
 	Repositories []RepositoryRef `json:"repositories" jsonschema:"One to 100 repository identities"`
 }
 
+// RepositoryMetadataOutput describes the coverage of repository metadata.
 type RepositoryMetadataOutput struct {
 	Status          string `json:"status"`
 	ObservedAt      string `json:"observed_at,omitempty"`
@@ -51,6 +53,7 @@ type RepositoryMetadataOutput struct {
 	NextAction      string `json:"next_action,omitempty"`
 }
 
+// TypedRepositoryOutput contains repository facts with explicit metadata coverage.
 type TypedRepositoryOutput struct {
 	Owner         string                   `json:"owner"`
 	Repo          string                   `json:"repo"`
@@ -75,6 +78,7 @@ type GetRepositoriesOutput struct {
 	Items  []BatchItem[TypedRepositoryOutput] `json:"items"`
 }
 
+// GetThreadsInput selects exact threads and the desired response view.
 type GetThreadsInput struct {
 	Threads []ThreadRef `json:"threads" jsonschema:"One to 100 exact thread identities"`
 	View    string      `json:"view,omitempty" jsonschema:"compact or full; compact omits bodies"`
@@ -86,12 +90,14 @@ type GetThreadsOutput struct {
 	Items  []BatchItem[ThreadOutput] `json:"items"`
 }
 
+// RankOpportunitiesInput bounds ranking across stored repositories.
 type RankOpportunitiesInput struct {
 	Repositories            []RepositoryRef `json:"repositories" jsonschema:"One to 50 stored repositories"`
 	Limit                   int             `json:"limit,omitempty" jsonschema:"Maximum total candidates from 1 to 100"`
 	MaxResultsPerRepository int             `json:"max_results_per_repository,omitempty" jsonschema:"Maximum candidates per repository from 1 to 100"`
 }
 
+// OpportunityCandidateOutput describes one ranked contribution candidate.
 type OpportunityCandidateOutput struct {
 	Rank               int      `json:"rank"`
 	Ref                string   `json:"ref"`
@@ -110,6 +116,7 @@ type OpportunityCandidateOutput struct {
 	SourceUpdatedAt    string   `json:"source_updated_at,omitempty"`
 }
 
+// RepositoryOpportunitySummaryOutput reports ranking coverage for one repository.
 type RepositoryOpportunitySummaryOutput struct {
 	Repo            string `json:"repo"`
 	TotalOpenIssues int    `json:"total_open_issues"`
@@ -125,11 +132,13 @@ type RankOpportunitiesOutput struct {
 	GeneratedAt  string                                          `json:"generated_at"`
 }
 
+// FindPrecedentsInput selects source threads for offline analogue discovery.
 type FindPrecedentsInput struct {
 	Threads []ThreadRef `json:"threads" jsonschema:"One to 20 source threads"`
 	Limit   int         `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
 }
 
+// PrecedentOutput describes one stored thread analogous to a source thread.
 type PrecedentOutput struct {
 	Source      string   `json:"source"`
 	Ref         string   `json:"ref"`
@@ -151,6 +160,7 @@ type FindPrecedentsOutput struct {
 	Total  int                            `json:"total"`
 }
 
+// GetJobsInput selects durable jobs for a bounded status read.
 type GetJobsInput struct {
 	IDs []string `json:"ids" jsonschema:"One to 100 durable job IDs"`
 }
@@ -162,6 +172,7 @@ type GetJobsOutput struct {
 	Items  []BatchItem[GetJobOutput] `json:"items"`
 }
 
+// SearchGitHubRepositoriesInput defines one bounded live GitHub search.
 type SearchGitHubRepositoriesInput struct {
 	Query string `json:"query" jsonschema:"GitHub repository search query, including supported qualifiers"`
 	Sort  string `json:"sort,omitempty" jsonschema:"Optional GitHub sort: stars, forks, help-wanted-issues, or updated"`
@@ -169,6 +180,7 @@ type SearchGitHubRepositoriesInput struct {
 	Limit int    `json:"limit,omitempty" jsonschema:"Maximum repositories from 1 to 100"`
 }
 
+// SearchGitHubRepositoriesOutput contains search results and completeness metadata.
 type SearchGitHubRepositoriesOutput struct {
 	Status     string                             `json:"status"`
 	Query      string                             `json:"query"`
@@ -177,6 +189,7 @@ type SearchGitHubRepositoriesOutput struct {
 	Items      []BatchItem[TypedRepositoryOutput] `json:"items"`
 }
 
+// SyncRepositoryMetadataInput selects repositories for asynchronous metadata refresh.
 type SyncRepositoryMetadataInput struct {
 	Repositories []RepositoryRef `json:"repositories" jsonschema:"One to 100 explicit repositories"`
 }
@@ -201,6 +214,7 @@ type HydrateThreadsInput struct {
 	MaxPages int         `json:"max_pages,omitempty" jsonschema:"Maximum pages per facet from 1 to 100"`
 }
 
+// AuthenticatedIdentityOutput identifies the account associated with active credentials.
 type AuthenticatedIdentityOutput struct {
 	Login      string `json:"login"`
 	ID         int64  `json:"id"`
@@ -208,17 +222,20 @@ type AuthenticatedIdentityOutput struct {
 	ObservedAt string `json:"observed_at"`
 }
 
+// SyncAuthoredPullRequestsInput bounds authored pull-request discovery and refresh.
 type SyncAuthoredPullRequestsInput struct {
 	State        string `json:"state,omitempty" jsonschema:"open, closed, or all"`
 	UpdatedAfter string `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound"`
 	Limit        int    `json:"limit,omitempty" jsonschema:"Maximum authored pull requests from 1 to 500"`
 }
 
+// SyncPullRequestStatusInput selects pull requests and bounds review hydration.
 type SyncPullRequestStatusInput struct {
 	PullRequests []ThreadRef `json:"pull_requests" jsonschema:"One to 50 exact pull requests"`
 	MaxPages     int         `json:"max_pages,omitempty" jsonschema:"Maximum review pages from 1 to 20"`
 }
 
+// ListPullRequestPortfolioInput filters and bounds the stored pull-request portfolio.
 type ListPullRequestPortfolioInput struct {
 	Author string `json:"author,omitempty" jsonschema:"Optional authored GitHub login"`
 	State  string `json:"state,omitempty" jsonschema:"open, closed, or all"`
@@ -250,6 +267,7 @@ type PullRequestPortfolioItem struct {
 	StatusObservedAt string   `json:"status_observed_at,omitempty"`
 }
 
+// ListPullRequestPortfolioOutput contains a deterministic portfolio projection.
 type ListPullRequestPortfolioOutput struct {
 	Status       string                     `json:"status"`
 	RuleVersion  string                     `json:"rule_version"`
@@ -258,12 +276,14 @@ type ListPullRequestPortfolioOutput struct {
 	Total        int                        `json:"total"`
 }
 
+// IndexRepositoryInput identifies one repository to acquire and index.
 type IndexRepositoryInput struct {
 	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
 	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
 	Remote string `json:"remote,omitempty" jsonschema:"Optional explicit credential-free Git remote"`
 }
 
+// IndexRepositoriesInput selects repositories for bounded asynchronous indexing.
 type IndexRepositoriesInput struct {
 	Repositories []IndexRepositoryInput `json:"repositories" jsonschema:"One to 10 repositories to acquire and index"`
 }
@@ -274,9 +294,13 @@ type MergeConflictInput struct {
 	BaseOID     string `json:"base_oid"`
 	HeadOID     string `json:"head_oid"`
 }
+
+// CheckMergeConflictsInput selects local revision comparisons.
 type CheckMergeConflictsInput struct {
 	Comparisons []MergeConflictInput `json:"comparisons" jsonschema:"One to 50 already-fetched revision comparisons"`
 }
+
+// MergeConflictOutput reports the result of one local revision comparison.
 type MergeConflictOutput struct {
 	WorkspaceID string `json:"workspace_id"`
 	BaseOID     string `json:"base_oid"`
@@ -615,10 +639,10 @@ func (s *Server) deepWiki(ctx context.Context, _ *mcp.CallToolRequest, in DeepWi
 	return nil, out, err
 }
 
-func setArrayBounds(schema *jsonschema.Schema, name string, min, max int) {
+func setArrayBounds(schema *jsonschema.Schema, name string, minimum, maximum int) {
 	p := property(schema, name)
-	p.MinItems = jsonschema.Ptr(min)
-	p.MaxItems = jsonschema.Ptr(max)
+	p.MinItems = jsonschema.Ptr(minimum)
+	p.MaxItems = jsonschema.Ptr(maximum)
 }
 
 func rankOpportunitiesOutputSchema() *jsonschema.Schema {

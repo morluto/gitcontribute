@@ -3,6 +3,7 @@ package corpus
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -12,12 +13,12 @@ import (
 // state "all" is equivalent to no state filter. The read is bounded and
 // deterministic so callers can build portfolio views without repository-level
 // N+1 queries.
-func (c *Corpus) ListPullRequestPortfolio(ctx context.Context, author, state string, limit int) ([]PortfolioPullRequest, error) {
+func (c *Corpus) ListPullRequestPortfolio(ctx context.Context, author, state string, limit int) (_ []PortfolioPullRequest, err error) {
 	if limit <= 0 {
 		limit = 1000
 	}
 	if limit > 1000 {
-		return nil, fmt.Errorf("pull request portfolio limit cannot exceed 1000")
+		return nil, errors.New("pull request portfolio limit cannot exceed 1000")
 	}
 
 	query := `
@@ -43,7 +44,11 @@ func (c *Corpus) ListPullRequestPortfolio(ctx context.Context, author, state str
 	if err != nil {
 		return nil, fmt.Errorf("list pull request portfolio: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close pull request portfolio rows: %w", closeErr)
+		}
+	}()
 
 	var out []PortfolioPullRequest
 	for rows.Next() {

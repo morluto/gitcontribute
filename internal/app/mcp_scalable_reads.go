@@ -24,7 +24,7 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpserver.GetReposit
 	if len(in.Repositories) < 1 || len(in.Repositories) > 100 {
 		return mcpserver.GetRepositoriesOutput{}, errors.New("repositories must contain 1 to 100 items")
 	}
-	c, err := r.Service.openCorpus(ctx)
+	c, err := r.openCorpus(ctx)
 	if err != nil {
 		return mcpserver.GetRepositoriesOutput{}, err
 	}
@@ -102,7 +102,7 @@ func (r *MCPReader) GetThreads(ctx context.Context, in mcpserver.GetThreadsInput
 	if in.View != "compact" && in.View != "full" {
 		return mcpserver.GetThreadsOutput{}, errors.New("view must be compact or full")
 	}
-	c, err := r.Service.openCorpus(ctx)
+	c, err := r.openCorpus(ctx)
 	if err != nil {
 		return mcpserver.GetThreadsOutput{}, err
 	}
@@ -190,7 +190,7 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpserver.L
 	if in.Limit < 1 || in.Limit > 100 {
 		return mcpserver.ListPullRequestPortfolioOutput{}, errors.New("limit must be between 1 and 100")
 	}
-	c, err := r.Service.openCorpus(ctx)
+	c, err := r.openCorpus(ctx)
 	if err != nil {
 		return mcpserver.ListPullRequestPortfolioOutput{}, err
 	}
@@ -198,9 +198,9 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpserver.L
 	if err != nil {
 		return mcpserver.ListPullRequestPortfolioOutput{}, err
 	}
-	out := mcpserver.ListPullRequestPortfolioOutput{Status: "complete", RuleVersion: "portfolio.v1", GeneratedAt: formatTime(r.Service.now()), PullRequests: make([]mcpserver.PullRequestPortfolioItem, 0, len(stored)), Total: len(stored)}
+	out := mcpserver.ListPullRequestPortfolioOutput{Status: "complete", RuleVersion: "portfolio.v1", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpserver.PullRequestPortfolioItem, 0, len(stored)), Total: len(stored)}
 	for _, storedPR := range stored {
-		item, err := portfolioItem(ctx, c, storedPR, r.Service.now())
+		item, err := portfolioItem(ctx, c, storedPR, r.now())
 		if err != nil {
 			return mcpserver.ListPullRequestPortfolioOutput{}, err
 		}
@@ -212,6 +212,10 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpserver.L
 	return out, nil
 }
 
+// The projection deliberately keeps coverage, observation decoding, and the
+// portfolio.v1 classification together so unknown facets cannot become facts.
+//
+//nolint:gocognit,cyclop
 func portfolioItem(ctx context.Context, c *corpus.Corpus, stored corpus.PortfolioPullRequest, now time.Time) (mcpserver.PullRequestPortfolioItem, error) {
 	t := stored.Thread
 	out := mcpserver.PullRequestPortfolioItem{Ref: fmt.Sprintf("%s/%s#%d", stored.Owner, stored.Repo, t.Number), Owner: stored.Owner, Repo: stored.Repo, Number: t.Number, Title: t.Title, State: t.State, Author: t.Author, Draft: t.Draft, SourceUpdatedAt: formatTime(t.SourceUpdatedAt), StatusCoverage: "missing"}
@@ -321,12 +325,12 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpserver.RankOppo
 	if in.MaxResultsPerRepository < 1 || in.MaxResultsPerRepository > 100 {
 		return mcpserver.RankOpportunitiesOutput{}, errors.New("max_results_per_repository must be between 1 and 100")
 	}
-	out := mcpserver.RankOpportunitiesOutput{Status: "complete", GeneratedAt: formatTime(r.Service.now()), Repositories: make([]mcpserver.BatchItem[mcpserver.RepositoryOpportunitySummaryOutput], len(in.Repositories))}
+	out := mcpserver.RankOpportunitiesOutput{Status: "complete", GeneratedAt: formatTime(r.now()), Repositories: make([]mcpserver.BatchItem[mcpserver.RepositoryOpportunitySummaryOutput], len(in.Repositories))}
 	var candidates []mcpserver.OpportunityCandidateOutput
 	for i, input := range in.Repositories {
 		key := input.Owner + "/" + input.Repo
 		item := mcpserver.BatchItem[mcpserver.RepositoryOpportunitySummaryOutput]{Key: key, Status: "complete"}
-		report, err := r.Service.ContributionRadar(ctx, cli.RadarOptions{Repo: cli.RepoRef{Owner: input.Owner, Repo: input.Repo}, Limit: in.MaxResultsPerRepository})
+		report, err := r.ContributionRadar(ctx, cli.RadarOptions{Repo: cli.RepoRef{Owner: input.Owner, Repo: input.Repo}, Limit: in.MaxResultsPerRepository})
 		if err != nil {
 			item.Status, item.Reason, item.Message = "unavailable", "not_indexed", err.Error()
 			item.NextAction = "Sync repository metadata and open issue headers before ranking."
@@ -390,6 +394,10 @@ func eligibilityRank(v string) int {
 }
 
 // FindPrecedents performs an offline similarity search over stored resolved threads.
+// Each source thread is resolved and ranked independently while preserving
+// input order and item-level recovery guidance in the bounded batch response.
+//
+//nolint:gocognit
 func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpserver.FindPrecedentsInput) (mcpserver.FindPrecedentsOutput, error) {
 	if len(in.Threads) < 1 || len(in.Threads) > 20 {
 		return mcpserver.FindPrecedentsOutput{}, errors.New("threads must contain 1 to 20 items")
@@ -400,7 +408,7 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpserver.FindPrecede
 	if in.Limit < 1 || in.Limit > 100 {
 		return mcpserver.FindPrecedentsOutput{}, errors.New("limit must be between 1 and 100")
 	}
-	c, err := r.Service.openCorpus(ctx)
+	c, err := r.openCorpus(ctx)
 	if err != nil {
 		return mcpserver.FindPrecedentsOutput{}, err
 	}

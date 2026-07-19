@@ -28,8 +28,8 @@ func (r *MCPReader) SyncRepositoryMetadata(ctx context.Context, in mcpserver.Syn
 			return mcpserver.JobReference{}, err
 		}
 	}
-	id, err := r.Service.submitJob(ctx, "sync_repository_metadata", in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.Service.syncRepositoryMetadata(ctx, in.Repositories, report)
+	id, err := r.submitJob(ctx, "sync_repository_metadata", in, func(ctx context.Context, report func(string, string) error) (any, error) {
+		return r.syncRepositoryMetadata(ctx, in.Repositories, report)
 	})
 	if err != nil {
 		return mcpserver.JobReference{}, err
@@ -56,7 +56,7 @@ func (r *MCPReader) SearchGitHubRepositories(ctx context.Context, in mcpserver.S
 	if in.Order != "" && in.Order != "asc" && in.Order != "desc" {
 		return mcpserver.SearchGitHubRepositoriesOutput{}, errors.New("order must be asc or desc")
 	}
-	reader, err := r.Service.githubReader()
+	reader, err := r.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
 	if err != nil {
 		return mcpserver.SearchGitHubRepositoriesOutput{}, err
 	}
@@ -68,7 +68,7 @@ func (r *MCPReader) SearchGitHubRepositories(ctx context.Context, in mcpserver.S
 	if err != nil {
 		return mcpserver.SearchGitHubRepositoriesOutput{}, err
 	}
-	c, err := r.Service.openCorpus(ctx)
+	c, err := r.openCorpus(ctx)
 	if err != nil {
 		return mcpserver.SearchGitHubRepositoriesOutput{}, err
 	}
@@ -76,7 +76,7 @@ func (r *MCPReader) SearchGitHubRepositories(ctx context.Context, in mcpserver.S
 	if result.Incomplete {
 		out.Status = "partial"
 	}
-	observedAt := r.Service.now()
+	observedAt := r.now()
 	for i, remote := range result.Items {
 		key := remote.Owner + "/" + remote.Name
 		item := mcpserver.BatchItem[mcpserver.TypedRepositoryOutput]{Key: key, Status: "complete"}
@@ -110,8 +110,8 @@ func (r *MCPReader) SyncThreads(ctx context.Context, in mcpserver.SyncThreadsInp
 	if in.Selection == "threads" && (len(in.Threads) < 1 || len(in.Threads) > 100) {
 		return mcpserver.JobReference{}, errors.New("threads must contain 1 to 100 items")
 	}
-	id, err := r.Service.submitJob(ctx, "sync_threads", in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.Service.syncThreadsBatch(ctx, in, report)
+	id, err := r.submitJob(ctx, "sync_threads", in, func(ctx context.Context, report func(string, string) error) (any, error) {
+		return r.syncThreadsBatch(ctx, in, report)
 	})
 	if err != nil {
 		return mcpserver.JobReference{}, err
@@ -119,6 +119,10 @@ func (r *MCPReader) SyncThreads(ctx context.Context, in mcpserver.SyncThreadsInp
 	return mcpserver.JobReference{ID: id, Kind: "sync_threads", Status: "queued", Message: "thread synchronization job started"}, nil
 }
 
+// This function keeps bounded worker orchestration and ordered result assembly
+// together so cancellation and per-item failures remain consistent.
+//
+//nolint:gocognit
 func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreadsInput, report func(string, string) error) (map[string]any, error) {
 	type task struct {
 		key     string
@@ -211,7 +215,9 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 			status = "partial"
 		}
 	}
-	_ = report("100%", fmt.Sprintf("completed=%d total=%d", completed, len(tasks)))
+	if err := report("100%", fmt.Sprintf("completed=%d total=%d", completed, len(tasks))); err != nil {
+		return nil, err
+	}
 	return map[string]any{"status": status, "items": results, "completed": completed, "total": len(tasks)}, nil
 }
 
@@ -227,8 +233,8 @@ func (r *MCPReader) HydrateThreads(ctx context.Context, in mcpserver.HydrateThre
 	if in.MaxPages == 0 {
 		in.MaxPages = 3
 	}
-	id, err := r.Service.submitJob(ctx, "hydrate_threads", in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.Service.hydrateThreadsBatch(ctx, in, report)
+	id, err := r.submitJob(ctx, "hydrate_threads", in, func(ctx context.Context, report func(string, string) error) (any, error) {
+		return r.hydrateThreadsBatch(ctx, in, report)
 	})
 	if err != nil {
 		return mcpserver.JobReference{}, err
@@ -238,7 +244,7 @@ func (r *MCPReader) HydrateThreads(ctx context.Context, in mcpserver.HydrateThre
 
 // GetAuthenticatedIdentity reads the GitHub account associated with the active credential.
 func (r *MCPReader) GetAuthenticatedIdentity(ctx context.Context) (mcpserver.AuthenticatedIdentityOutput, error) {
-	reader, err := r.Service.githubReader()
+	reader, err := r.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
 	if err != nil {
 		return mcpserver.AuthenticatedIdentityOutput{}, err
 	}
@@ -250,7 +256,7 @@ func (r *MCPReader) GetAuthenticatedIdentity(ctx context.Context) (mcpserver.Aut
 	if err != nil {
 		return mcpserver.AuthenticatedIdentityOutput{}, err
 	}
-	return mcpserver.AuthenticatedIdentityOutput{Login: identity.Login, ID: identity.ID, NodeID: identity.NodeID, ObservedAt: formatTime(r.Service.now())}, nil
+	return mcpserver.AuthenticatedIdentityOutput{Login: identity.Login, ID: identity.ID, NodeID: identity.NodeID, ObservedAt: formatTime(r.now())}, nil
 }
 
 // SyncAuthoredPullRequests submits a durable GitHub search and exact-header
@@ -268,8 +274,8 @@ func (r *MCPReader) SyncAuthoredPullRequests(ctx context.Context, in mcpserver.S
 	if in.Limit < 1 || in.Limit > 500 {
 		return mcpserver.JobReference{}, errors.New("limit must be between 1 and 500")
 	}
-	id, err := r.Service.submitJob(ctx, "sync_authored_pull_requests", in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.Service.syncAuthoredPullRequests(ctx, in, report)
+	id, err := r.submitJob(ctx, "sync_authored_pull_requests", in, func(ctx context.Context, report func(string, string) error) (any, error) {
+		return r.syncAuthoredPullRequests(ctx, in, report)
 	})
 	if err != nil {
 		return mcpserver.JobReference{}, err
@@ -277,8 +283,12 @@ func (r *MCPReader) SyncAuthoredPullRequests(ctx context.Context, in mcpserver.S
 	return mcpserver.JobReference{ID: id, Kind: "sync_authored_pull_requests", Status: "queued", Message: "authored pull-request synchronization job started"}, nil
 }
 
+// This bounded job combines pagination, repository grouping, and ordered worker
+// results because those phases share a single discovery limit and status result.
+//
+//nolint:gocognit,cyclop,funlen
 func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpserver.SyncAuthoredPullRequestsInput, report func(string, string) error) (map[string]any, error) {
-	reader, err := s.githubReader()
+	reader, err := s.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +402,9 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpserver.Syn
 			status = "partial"
 		}
 	}
-	_ = report("100%", fmt.Sprintf("repositories=%d pull_requests=%d", completed, discovered))
+	if err := report("100%", fmt.Sprintf("repositories=%d pull_requests=%d", completed, discovered)); err != nil {
+		return nil, err
+	}
 	return map[string]any{"status": status, "login": identity.Login, "pull_requests": discovered, "repositories": results, "search_incomplete": incomplete}, nil
 }
 
@@ -409,8 +421,8 @@ func (r *MCPReader) SyncPullRequestStatus(ctx context.Context, in mcpserver.Sync
 	for i := range hydrate.Threads {
 		hydrate.Threads[i].Kind = "pull_request"
 	}
-	id, err := r.Service.submitJob(ctx, "sync_pull_request_status", in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.Service.hydrateThreadsBatch(ctx, hydrate, report)
+	id, err := r.submitJob(ctx, "sync_pull_request_status", in, func(ctx context.Context, report func(string, string) error) (any, error) {
+		return r.hydrateThreadsBatch(ctx, hydrate, report)
 	})
 	if err != nil {
 		return mcpserver.JobReference{}, err
@@ -429,8 +441,8 @@ func (r *MCPReader) IndexRepositories(ctx context.Context, in mcpserver.IndexRep
 			return mcpserver.JobReference{}, err
 		}
 	}
-	id, err := r.Service.submitJob(ctx, "index_repositories", in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.Service.indexRepositoriesBatch(ctx, in, report)
+	id, err := r.submitJob(ctx, "index_repositories", in, func(ctx context.Context, report func(string, string) error) (any, error) {
+		return r.indexRepositoriesBatch(ctx, in, report)
 	})
 	if err != nil {
 		return mcpserver.JobReference{}, err
@@ -444,11 +456,11 @@ func (r *MCPReader) CheckMergeConflicts(ctx context.Context, in mcpserver.CheckM
 	if len(in.Comparisons) < 1 || len(in.Comparisons) > 50 {
 		return mcpserver.CheckMergeConflictsOutput{}, errors.New("comparisons must contain 1 to 50 items")
 	}
-	c, err := r.Service.openCorpus(ctx)
+	c, err := r.openCorpus(ctx)
 	if err != nil {
 		return mcpserver.CheckMergeConflictsOutput{}, err
 	}
-	manager, err := r.Service.workspaceManager(ctx)
+	manager, err := r.workspaceManager(ctx)
 	if err != nil {
 		return mcpserver.CheckMergeConflictsOutput{}, err
 	}
@@ -549,7 +561,9 @@ func (s *Service) indexRepositoriesBatch(ctx context.Context, in mcpserver.Index
 			status = "partial"
 		}
 	}
-	_ = report("100%", fmt.Sprintf("completed=%d total=%d", completed, len(in.Repositories)))
+	if err := report("100%", fmt.Sprintf("completed=%d total=%d", completed, len(in.Repositories))); err != nil {
+		return nil, err
+	}
 	return map[string]any{"status": status, "items": results, "completed": completed, "total": len(in.Repositories)}, nil
 }
 
@@ -598,12 +612,18 @@ func (s *Service) hydrateThreadsBatch(ctx context.Context, in mcpserver.HydrateT
 			status = "partial"
 		}
 	}
-	_ = report("100%", fmt.Sprintf("completed=%d total=%d", completed, len(in.Threads)))
+	if err := report("100%", fmt.Sprintf("completed=%d total=%d", completed, len(in.Threads))); err != nil {
+		return nil, err
+	}
 	return map[string]any{"status": status, "items": results, "completed": completed, "total": len(in.Threads)}, nil
 }
 
+// This bounded worker loop keeps each repository's fetch, persistence, and
+// ordered result mapping in one place to preserve item-level failure semantics.
+//
+//nolint:gocognit
 func (s *Service) syncRepositoryMetadata(ctx context.Context, refs []mcpserver.RepositoryRef, report func(string, string) error) (mcpserver.GetRepositoriesOutput, error) {
-	reader, err := s.githubReader()
+	reader, err := s.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
 	if err != nil {
 		return mcpserver.GetRepositoriesOutput{}, err
 	}
@@ -679,7 +699,9 @@ func (s *Service) syncRepositoryMetadata(ctx context.Context, refs []mcpserver.R
 			out.Status = "partial"
 		}
 	}
-	_ = report("100%", fmt.Sprintf("completed=%d total=%d", completed, len(refs)))
+	if err := report("100%", fmt.Sprintf("completed=%d total=%d", completed, len(refs))); err != nil {
+		return out, err
+	}
 	return out, nil
 }
 
@@ -724,11 +746,11 @@ func (r *MCPReader) DeepWiki(ctx context.Context, in mcpserver.DeepWikiInput) (m
 	if len(repositories) > 10 {
 		return mcpserver.DeepWikiOutput{}, errors.New("DeepWiki supports at most 10 repositories")
 	}
-	res, err := r.Service.deepWiki().Read(ctx, deepwiki.Request{Action: in.Action, Repository: in.Repository, Repositories: in.Repositories, Question: in.Question})
+	res, err := r.deepWiki().Read(ctx, deepwiki.Request{Action: in.Action, Repository: in.Repository, Repositories: in.Repositories, Question: in.Question})
 	if err != nil {
 		return mcpserver.DeepWikiOutput{}, err
 	}
-	out := mcpserver.DeepWikiOutput{Status: "complete", Provider: "deepwiki", Action: in.Action, Repositories: repositories, Question: in.Question, Result: res.Text, SourceURL: res.SourceURL, RetrievedAt: formatTime(r.Service.now()), Provenance: "derived_external"}
+	out := mcpserver.DeepWikiOutput{Status: "complete", Provider: "deepwiki", Action: in.Action, Repositories: repositories, Question: in.Question, Result: res.Text, SourceURL: res.SourceURL, RetrievedAt: formatTime(r.now()), Provenance: "derived_external"}
 	if !res.Available {
 		out.Status, out.Reason, out.NextAction = "unavailable", "not_indexed_or_unavailable", "Use GitHub metadata, stored corpus data, or explicit code acquisition instead."
 		return out, nil

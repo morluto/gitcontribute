@@ -44,7 +44,7 @@ var sourceURLPattern = regexp.MustCompile(`https://deepwiki\.com/[^\s)\]}>]+`)
 
 // Read performs one public DeepWiki tool call and returns text content only. It
 // neither persists the response nor treats it as GitHub authority.
-func (c *Client) Read(ctx context.Context, req Request) (Response, error) {
+func (c *Client) Read(ctx context.Context, req Request) (_ Response, err error) {
 	endpoint := strings.TrimSpace(c.Endpoint)
 	if endpoint == "" {
 		endpoint = DefaultEndpoint
@@ -58,7 +58,11 @@ func (c *Client) Read(ctx context.Context, req Request) (Response, error) {
 	if err != nil {
 		return Response{}, fmt.Errorf("connect DeepWiki: %w", err)
 	}
-	defer session.Close()
+	defer func() {
+		if closeErr := session.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close DeepWiki session: %w", closeErr)
+		}
+	}()
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: arguments})
 	if err != nil {
 		return Response{}, fmt.Errorf("call DeepWiki %s: %w", name, err)

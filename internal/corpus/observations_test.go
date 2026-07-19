@@ -152,7 +152,7 @@ func TestListPullRequestPortfolioUsesDeterministicGlobalOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list pull request portfolio: %v", err)
 	}
-	var keys []string
+	keys := make([]string, 0, len(got))
 	for _, item := range got {
 		keys = append(keys, fmt.Sprintf("%s/%s#%d", item.Owner, item.Repo, item.Thread.Number))
 	}

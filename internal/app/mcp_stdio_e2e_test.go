@@ -52,11 +52,15 @@ func TestMCPStdioHelper(t *testing.T) {
 	}
 }
 
+// The end-to-end flow intentionally verifies catalog discovery and the complete
+// research sequence through a single real stdio session.
+//
+//nolint:cyclop
 func TestMCPStdioScalableResearchFlow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	home := t.TempDir()
-	seedMCPStdioCorpus(t, ctx, home)
+	seedMCPStdioCorpus(ctx, t, home)
 	githubServer := newMCPGitHubServer(t)
 	defer githubServer.Close()
 	command := exec.Command(os.Args[0], "-test.run=^TestMCPStdioHelper$")
@@ -91,10 +95,10 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		}
 	}
 
-	metadataJob := callMCPTool[mcpserver.JobReference](t, ctx, session, mcpserver.ToolSyncRepositoryMetadata, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}}})
-	metadataResult := waitMCPJob(t, ctx, session, metadataJob.ID)
+	metadataJob := callMCPTool[mcpserver.JobReference](ctx, t, session, mcpserver.ToolSyncRepositoryMetadata, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}}})
+	metadataResult := waitMCPJob(ctx, t, session, metadataJob.ID)
 
-	repositories := callMCPTool[mcpserver.GetRepositoriesOutput](t, ctx, session, mcpserver.ToolGetRepositories, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}, map[string]any{"owner": "acme", "repo": "placeholder"}}})
+	repositories := callMCPTool[mcpserver.GetRepositoriesOutput](ctx, t, session, mcpserver.ToolGetRepositories, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}, map[string]any{"owner": "acme", "repo": "placeholder"}}})
 	if len(repositories.Items) != 2 || repositories.Items[0].Value == nil || repositories.Items[0].Value.Stars == nil || *repositories.Items[0].Value.Stars != 9001 {
 		t.Fatalf("observed repository batch = %+v, value = %+v, metadata job = %+v", repositories, repositories.Items[0].Value, metadataResult)
 	}
@@ -102,28 +106,28 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		t.Fatalf("placeholder exposed false metadata: %+v", repositories.Items[1])
 	}
 
-	threads := callMCPTool[mcpserver.GetThreadsOutput](t, ctx, session, mcpserver.ToolGetThreads, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "observed", "number": 1}, map[string]any{"owner": "acme", "repo": "observed", "number": 2}}, "view": "compact"})
+	threads := callMCPTool[mcpserver.GetThreadsOutput](ctx, t, session, mcpserver.ToolGetThreads, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "observed", "number": 1}, map[string]any{"owner": "acme", "repo": "observed", "number": 2}}, "view": "compact"})
 	if len(threads.Items) != 2 || threads.Items[0].Value == nil || threads.Items[0].Value.Body != "" {
 		t.Fatalf("compact thread batch = %+v", threads)
 	}
 
-	ranked := callMCPTool[mcpserver.RankOpportunitiesOutput](t, ctx, session, mcpserver.ToolRankThreads, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}}, "limit": 10, "max_results_per_repository": 10})
+	ranked := callMCPTool[mcpserver.RankOpportunitiesOutput](ctx, t, session, mcpserver.ToolRankThreads, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}}, "limit": 10, "max_results_per_repository": 10})
 	if len(ranked.Candidates) == 0 || ranked.Candidates[0].Number != 1 {
 		t.Fatalf("ranked opportunities = %+v", ranked)
 	}
 
-	precedents := callMCPTool[mcpserver.FindPrecedentsOutput](t, ctx, session, mcpserver.ToolFindPrecedents, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "observed", "number": 1}}, "limit": 10})
+	precedents := callMCPTool[mcpserver.FindPrecedentsOutput](ctx, t, session, mcpserver.ToolFindPrecedents, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "observed", "number": 1}}, "limit": 10})
 	if precedents.Total == 0 || precedents.Items[0].Value == nil || (*precedents.Items[0].Value)[0].Ref != "acme/observed#2" {
 		t.Fatalf("precedents = %+v", precedents)
 	}
 
-	portfolio := callMCPTool[mcpserver.ListPullRequestPortfolioOutput](t, ctx, session, mcpserver.ToolListPullRequestPortfolio, map[string]any{"author": "morluto", "state": "open", "limit": 10})
+	portfolio := callMCPTool[mcpserver.ListPullRequestPortfolioOutput](ctx, t, session, mcpserver.ToolListPullRequestPortfolio, map[string]any{"author": "morluto", "state": "open", "limit": 10})
 	if len(portfolio.PullRequests) != 1 || portfolio.PullRequests[0].Attention != "unknown" {
 		t.Fatalf("portfolio = %+v", portfolio)
 	}
 
-	job := callMCPTool[mcpserver.JobReference](t, ctx, session, mcpserver.ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "observed"})
-	waitMCPJob(t, ctx, session, job.ID)
+	job := callMCPTool[mcpserver.JobReference](ctx, t, session, mcpserver.ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "observed"})
+	waitMCPJob(ctx, t, session, job.ID)
 
 	invalid, err := session.CallTool(ctx, &mcp.CallToolParams{Name: mcpserver.ToolHydrateThreads, Arguments: map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "observed", "number": 1}}, "facets": []any{}}})
 	if err != nil {
@@ -138,7 +142,7 @@ func TestMCPStdioPullRequestPortfolioFlow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	home := t.TempDir()
-	seedMCPStdioEmptyCorpus(t, ctx, home)
+	seedMCPStdioEmptyCorpus(ctx, t, home)
 	githubServer := newMCPGitHubServer(t)
 	defer githubServer.Close()
 	command := exec.Command(os.Args[0], "-test.run=^TestMCPStdioHelper$")
@@ -150,16 +154,16 @@ func TestMCPStdioPullRequestPortfolioFlow(t *testing.T) {
 	}
 	defer session.Close()
 
-	identity := callMCPTool[mcpserver.AuthenticatedIdentityOutput](t, ctx, session, mcpserver.ToolGetAuthenticatedIdentity, map[string]any{})
+	identity := callMCPTool[mcpserver.AuthenticatedIdentityOutput](ctx, t, session, mcpserver.ToolGetAuthenticatedIdentity, map[string]any{})
 	if identity.Login != "morluto" || identity.ID != 99 {
 		t.Fatalf("authenticated identity = %+v", identity)
 	}
-	authored := callMCPTool[mcpserver.JobReference](t, ctx, session, mcpserver.ToolSyncAuthoredPullRequests, map[string]any{"state": "open", "limit": 10})
-	authoredResult := waitMCPJob(t, ctx, session, authored.ID)
-	status := callMCPTool[mcpserver.JobReference](t, ctx, session, mcpserver.ToolSyncPullRequestStatus, map[string]any{"pull_requests": []any{map[string]any{"owner": "lab", "repo": "project", "number": 7}}})
-	waitMCPJob(t, ctx, session, status.ID)
+	authored := callMCPTool[mcpserver.JobReference](ctx, t, session, mcpserver.ToolSyncAuthoredPullRequests, map[string]any{"state": "open", "limit": 10})
+	authoredResult := waitMCPJob(ctx, t, session, authored.ID)
+	status := callMCPTool[mcpserver.JobReference](ctx, t, session, mcpserver.ToolSyncPullRequestStatus, map[string]any{"pull_requests": []any{map[string]any{"owner": "lab", "repo": "project", "number": 7}}})
+	waitMCPJob(ctx, t, session, status.ID)
 
-	portfolio := callMCPTool[mcpserver.ListPullRequestPortfolioOutput](t, ctx, session, mcpserver.ToolListPullRequestPortfolio, map[string]any{"author": "morluto", "state": "open", "limit": 10})
+	portfolio := callMCPTool[mcpserver.ListPullRequestPortfolioOutput](ctx, t, session, mcpserver.ToolListPullRequestPortfolio, map[string]any{"author": "morluto", "state": "open", "limit": 10})
 	if len(portfolio.PullRequests) != 1 {
 		t.Fatalf("portfolio = %+v, authored job = %+v", portfolio, authoredResult)
 	}
@@ -172,7 +176,7 @@ func TestMCPStdioPullRequestPortfolioFlow(t *testing.T) {
 	}
 }
 
-func seedMCPStdioCorpus(t *testing.T, ctx context.Context, home string) {
+func seedMCPStdioCorpus(ctx context.Context, t *testing.T, home string) {
 	t.Helper()
 	svc, err := New(config.NewPaths(&config.Env{Home: home}), "e2e", nil)
 	if err != nil {
@@ -205,7 +209,7 @@ func seedMCPStdioCorpus(t *testing.T, ctx context.Context, home string) {
 	}
 }
 
-func seedMCPStdioEmptyCorpus(t *testing.T, ctx context.Context, home string) {
+func seedMCPStdioEmptyCorpus(ctx context.Context, t *testing.T, home string) {
 	t.Helper()
 	svc, err := New(config.NewPaths(&config.Env{Home: home}), "e2e", nil)
 	if err != nil {
@@ -286,12 +290,12 @@ func newMCPGitHubServer(t *testing.T) *httptest.Server {
 	}))
 }
 
-func waitMCPJob(t *testing.T, ctx context.Context, session *mcp.ClientSession, id string) mcpserver.GetJobOutput {
+func waitMCPJob(ctx context.Context, t *testing.T, session *mcp.ClientSession, id string) mcpserver.GetJobOutput {
 	t.Helper()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		jobs := callMCPTool[mcpserver.GetJobsOutput](t, ctx, session, mcpserver.ToolGetJob, map[string]any{"ids": []string{id}})
+		jobs := callMCPTool[mcpserver.GetJobsOutput](ctx, t, session, mcpserver.ToolGetJob, map[string]any{"ids": []string{id}})
 		if len(jobs.Items) != 1 || jobs.Items[0].Value == nil {
 			t.Fatalf("job %s missing from batch response: %+v", id, jobs)
 		}
@@ -309,7 +313,7 @@ func waitMCPJob(t *testing.T, ctx context.Context, session *mcp.ClientSession, i
 	}
 }
 
-func callMCPTool[T any](t *testing.T, ctx context.Context, session *mcp.ClientSession, name string, arguments map[string]any) T {
+func callMCPTool[T any](ctx context.Context, t *testing.T, session *mcp.ClientSession, name string, arguments map[string]any) T {
 	t.Helper()
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: arguments})
 	if err != nil {
