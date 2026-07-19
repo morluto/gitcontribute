@@ -16,7 +16,7 @@ import (
 // then advances the repository governance revision in the same transaction.
 // It does not recompute clusters; the next explicit refresh applies the
 // decision. The canonical member cannot be excluded.
-func (c *Corpus) AddClusterOverride(ctx context.Context, clusterID int64, ref clustering.MemberRef, action clustering.OverrideAction, reason string) error {
+func (c *Corpus) AddClusterOverride(ctx context.Context, clusterID int64, ref clustering.MemberRef, action clustering.OverrideAction, reason string) (err error) {
 	if clusterID < 1 {
 		return errors.New("cluster id is required")
 	}
@@ -37,7 +37,7 @@ func (c *Corpus) AddClusterOverride(ctx context.Context, clusterID int64, ref cl
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackSQLOnReturn(tx, &err)
 	var repo domain.RepoRef
 	var canonical clustering.MemberRef
 	err = tx.QueryRowContext(ctx, `SELECT repo_owner, repo_name, canonical_kind, canonical_owner, canonical_repo, canonical_number

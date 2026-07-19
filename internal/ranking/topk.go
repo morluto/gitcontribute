@@ -52,7 +52,11 @@ func (h worstFirstHeap[T]) Swap(i, j int) {
 }
 
 func (h *worstFirstHeap[T]) Push(value any) {
-	h.values = append(h.values, value.(T))
+	typed, ok := value.(T)
+	if !ok {
+		panic("ranking heap received a value of the wrong type")
+	}
+	h.values = append(h.values, typed)
 }
 
 func (h *worstFirstHeap[T]) Pop() any {

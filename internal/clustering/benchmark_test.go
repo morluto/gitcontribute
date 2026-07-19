@@ -3,6 +3,7 @@ package clustering_test
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/clustering"
@@ -16,7 +17,7 @@ func BenchmarkClusterEngine(b *testing.B) {
 		b.Fatal(err)
 	}
 	for _, size := range []int{100, 1000, 4472} {
-		b.Run(fmt.Sprintf("%d", size), func(b *testing.B) {
+		b.Run(strconv.Itoa(size), func(b *testing.B) {
 			candidates := benchmarkCandidates(size)
 			required, err := clustering.DefaultExactPairBudget().Required(size)
 			if err != nil {

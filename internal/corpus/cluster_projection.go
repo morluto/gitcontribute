@@ -17,7 +17,7 @@ import (
 
 // ListClusterProjection reads cluster headers and all returned children from a
 // single read-only SQLite snapshot using two statements.
-func (c *Corpus) ListClusterProjection(ctx context.Context, repo domain.RepoRef, state clustering.ClusterState, limit int) (clusterprojection.List, error) {
+func (c *Corpus) ListClusterProjection(ctx context.Context, repo domain.RepoRef, state clustering.ClusterState, limit int) (result clusterprojection.List, err error) {
 	if err := repo.Validate(); err != nil {
 		return clusterprojection.List{}, err
 	}
@@ -28,7 +28,7 @@ func (c *Corpus) ListClusterProjection(ctx context.Context, repo domain.RepoRef,
 	if err != nil {
 		return clusterprojection.List{}, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackSQLOnReturn(tx, &err)
 	identity, _, err := loadProjectionStateTx(ctx, tx, repo)
 	if err != nil {
 		return clusterprojection.List{}, err
@@ -50,8 +50,13 @@ func (c *Corpus) ListClusterProjection(ctx context.Context, repo domain.RepoRef,
 	if err != nil {
 		return clusterprojection.List{}, err
 	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 	clusters, err := scanProjectionClusters(rows, repo)
-	if closeErr := rows.Close(); err == nil {
+	if closeErr := rows.Close(); closeErr != nil && err == nil {
 		err = closeErr
 	}
 	if err != nil {
@@ -80,18 +85,18 @@ func (c *Corpus) GetClusterProjectionForMember(ctx context.Context, ref clusteri
 		ORDER BY clusters.id DESC LIMIT 1`, []any{ref.Kind, ref.Owner, ref.Repo, ref.Number})
 }
 
-func (c *Corpus) getClusterProjection(ctx context.Context, predicate string, args []any) (*clustering.Cluster, error) {
+func (c *Corpus) getClusterProjection(ctx context.Context, predicate string, args []any) (result *clustering.Cluster, err error) {
 	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackSQLOnReturn(tx, &err)
 	query := `SELECT clusters.id, clusters.stable_id, clusters.state, clusters.canonical_kind, clusters.canonical_owner, clusters.canonical_repo, clusters.canonical_number,
 		clusters.source_revision, clusters.source_window_start, clusters.source_window_end, clusters.created_at, clusters.updated_at,
 		clusters.repo_owner, clusters.repo_name FROM clusters ` + predicate
 	var cluster clustering.Cluster
 	if err := scanProjectionCluster(tx.QueryRowContext(ctx, query, args...), &cluster, true); errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, nil //nolint:nilnil // Corpus getters use a nil result to represent an ordinary miss.
 	} else if err != nil {
 		return nil, err
 	}
@@ -107,7 +112,7 @@ func (c *Corpus) getClusterProjection(ctx context.Context, predicate string, arg
 
 // LoadClusterRefreshSnapshot reads every input needed by a refresh from one
 // SQLite snapshot and closes the transaction before CPU-heavy pair evaluation.
-func (c *Corpus) LoadClusterRefreshSnapshot(ctx context.Context, repo domain.RepoRef, maxCandidates int) (clusterprojection.RefreshSnapshot, error) {
+func (c *Corpus) LoadClusterRefreshSnapshot(ctx context.Context, repo domain.RepoRef, maxCandidates int) (result clusterprojection.RefreshSnapshot, err error) {
 	if err := repo.Validate(); err != nil {
 		return clusterprojection.RefreshSnapshot{}, err
 	}
@@ -118,7 +123,7 @@ func (c *Corpus) LoadClusterRefreshSnapshot(ctx context.Context, repo domain.Rep
 	if err != nil {
 		return clusterprojection.RefreshSnapshot{}, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackSQLOnReturn(tx, &err)
 
 	snapshot := clusterprojection.RefreshSnapshot{Repo: repo, OverridesByCluster: make(map[string][]clustering.MembershipOverride)}
 	snapshot.Candidates, err = loadClusterCandidatesTx(ctx, tx, repo, maxCandidates)
@@ -157,7 +162,7 @@ func (c *Corpus) LoadClusterRefreshSnapshot(ctx context.Context, repo domain.Rep
 	return snapshot, nil
 }
 
-func loadClusterCandidatesTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRef, maxCandidates int) ([]clustering.Candidate, error) {
+func loadClusterCandidatesTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRef, maxCandidates int) (result []clustering.Candidate, err error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT t.id, t.kind, t.number, t.state, t.title, t.body, t.author, t.labels,
 		       t.source_created_at, t.source_updated_at
@@ -170,7 +175,11 @@ func loadClusterCandidatesTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRe
 	if err != nil {
 		return nil, fmt.Errorf("load cluster candidates: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 	out := make([]clustering.Candidate, 0, maxCandidates)
 	for rows.Next() {
 		var candidate clustering.Candidate
@@ -189,8 +198,16 @@ func loadClusterCandidatesTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRe
 		return nil, err
 	}
 	if len(out) > maxCandidates {
-		required, _ := clustering.DefaultExactPairBudget().Required(len(out))
-		return nil, &clustering.CapacityError{CandidateCount: len(out), RequiredPairs: required, AllowedPairs: uint64(clustering.DefaultExactPairBudget())}
+		budget := clustering.DefaultExactPairBudget()
+		required, capacityErr := budget.Required(len(out))
+		if capacityErr != nil {
+			var capacity *clustering.CapacityError
+			if !errors.As(capacityErr, &capacity) {
+				return nil, capacityErr
+			}
+			required = capacity.RequiredPairs
+		}
+		return nil, &clustering.CapacityError{CandidateCount: len(out), RequiredPairs: required, AllowedPairs: uint64(budget)}
 	}
 	return out, nil
 }
@@ -223,7 +240,7 @@ func loadProjectionStateTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRef)
 	return &identity, currentGovernance, nil
 }
 
-func loadProjectionClustersTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRef) ([]clustering.Cluster, error) {
+func loadProjectionClustersTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRef) (result []clustering.Cluster, err error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, stable_id, state, canonical_kind, canonical_owner, canonical_repo, canonical_number,
 		       source_revision, source_window_start, source_window_end, created_at, updated_at
@@ -233,7 +250,11 @@ func loadProjectionClustersTx(ctx context.Context, tx *sql.Tx, repo domain.RepoR
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 	return scanProjectionClusters(rows, repo)
 }
 
@@ -268,7 +289,7 @@ func scanProjectionCluster(scanner projectionScanner, cluster *clustering.Cluste
 	return nil
 }
 
-func loadProjectionMembersTx(ctx context.Context, tx *sql.Tx, clusters []clustering.Cluster) error {
+func loadProjectionMembersTx(ctx context.Context, tx *sql.Tx, clusters []clustering.Cluster) (err error) {
 	byID := make(map[int64]*clustering.Cluster, len(clusters))
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(clusters)), ",")
 	args := make([]any, 0, len(clusters))
@@ -282,7 +303,11 @@ func loadProjectionMembersTx(ctx context.Context, tx *sql.Tx, clusters []cluster
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 	for rows.Next() {
 		var clusterID int64
 		var member clustering.Member
@@ -297,14 +322,18 @@ func loadProjectionMembersTx(ctx context.Context, tx *sql.Tx, clusters []cluster
 	return rows.Err()
 }
 
-func loadProjectionOverridesTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRef, byStable map[string][]clustering.MembershipOverride) error {
+func loadProjectionOverridesTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRef, byStable map[string][]clustering.MembershipOverride) (err error) {
 	rows, err := tx.QueryContext(ctx, `SELECT c.stable_id, o.id, o.cluster_id, o.kind, o.owner, o.repo, o.number, o.action, o.reason, o.created_at
 		FROM cluster_overrides o JOIN clusters c ON c.id=o.cluster_id
 		WHERE c.repo_owner=? AND c.repo_name=? ORDER BY o.id`, strings.ToLower(repo.Owner), strings.ToLower(repo.Repo))
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 	for rows.Next() {
 		var stableID, action string
 		var override clustering.MembershipOverride
@@ -323,38 +352,49 @@ func loadProjectionOverridesTx(ctx context.Context, tx *sql.Tx, repo domain.Repo
 // SQLite writer, rechecks source and governance revisions, and atomically
 // advances the current projection. Exact computation must already be complete;
 // this method never performs pair evaluation while holding the transaction.
-func (c *Corpus) CommitClusterProjection(ctx context.Context, commit clusterprojection.Commit) (clusterprojection.CommitResult, error) {
+func (c *Corpus) CommitClusterProjection(ctx context.Context, commit clusterprojection.Commit) (result clusterprojection.CommitResult, err error) {
 	if err := ctx.Err(); err != nil {
 		return clusterprojection.CommitResult{}, err
 	}
-	if err := commit.Repo.Validate(); err != nil {
+	if err := validateClusterProjectionCommit(commit); err != nil {
 		return clusterprojection.CommitResult{}, err
-	}
-	if commit.RuleVersion == "" {
-		return clusterprojection.CommitResult{}, errors.New("cluster rule version is required")
-	}
-	if strings.TrimSpace(commit.ExpectedSource) == "" {
-		return clusterprojection.CommitResult{}, errors.New("cluster source revision is required")
-	}
-	if commit.MaxCandidates < 1 {
-		return clusterprojection.CommitResult{}, errors.New("max candidates must be positive")
-	}
-	for _, cluster := range commit.Clusters {
-		if strings.TrimSpace(cluster.StableID) == "" {
-			return clusterprojection.CommitResult{}, errors.New("cluster stable id is required")
-		}
-		if !strings.EqualFold(cluster.Repo.Owner, commit.Repo.Owner) || !strings.EqualFold(cluster.Repo.Repo, commit.Repo.Repo) {
-			return clusterprojection.CommitResult{}, fmt.Errorf("cluster %q repository does not match commit", cluster.StableID)
-		}
-		if cluster.Revision != commit.ExpectedSource {
-			return clusterprojection.CommitResult{}, fmt.Errorf("cluster %q source revision does not match commit", cluster.StableID)
-		}
 	}
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
 		return clusterprojection.CommitResult{}, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackSQLOnReturn(tx, &err)
+	return commitClusterProjectionTx(ctx, tx, commit)
+}
+
+func validateClusterProjectionCommit(commit clusterprojection.Commit) error {
+	if err := commit.Repo.Validate(); err != nil {
+		return err
+	}
+	if commit.RuleVersion == "" {
+		return errors.New("cluster rule version is required")
+	}
+	if strings.TrimSpace(commit.ExpectedSource) == "" {
+		return errors.New("cluster source revision is required")
+	}
+	if commit.MaxCandidates < 1 {
+		return errors.New("max candidates must be positive")
+	}
+	for _, cluster := range commit.Clusters {
+		if strings.TrimSpace(cluster.StableID) == "" {
+			return errors.New("cluster stable id is required")
+		}
+		if !strings.EqualFold(cluster.Repo.Owner, commit.Repo.Owner) || !strings.EqualFold(cluster.Repo.Repo, commit.Repo.Repo) {
+			return fmt.Errorf("cluster %q repository does not match commit", cluster.StableID)
+		}
+		if cluster.Revision != commit.ExpectedSource {
+			return fmt.Errorf("cluster %q source revision does not match commit", cluster.StableID)
+		}
+	}
+	return nil
+}
+
+func commitClusterProjectionTx(ctx context.Context, tx *sql.Tx, commit clusterprojection.Commit) (clusterprojection.CommitResult, error) {
 	owner, name := strings.ToLower(commit.Repo.Owner), strings.ToLower(commit.Repo.Repo)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cluster_projection_state (repo_owner, repo_name, governance_revision)
 		VALUES (?, ?, 0) ON CONFLICT(repo_owner, repo_name) DO NOTHING`, owner, name); err != nil {
@@ -414,89 +454,128 @@ func (c *Corpus) CommitClusterProjection(ctx context.Context, commit clusterproj
 	return clusterprojection.CommitResult{Disposition: clusterprojection.Committed, Projection: clusterprojection.Identity{SourceRevision: actualSource, GovernanceRevision: actualGovernance, RuleVersion: commit.RuleVersion, RunID: runID}, WriteStatements: commitStatements}, nil
 }
 
-func persistProjectionClustersTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRef, clusters []clustering.Cluster, now time.Time) (int, error) {
-	lookup, err := tx.PrepareContext(ctx, `SELECT id FROM clusters WHERE stable_id=?`)
+func persistProjectionClustersTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRef, clusters []clustering.Cluster, now time.Time) (writes int, err error) {
+	statements, err := prepareProjectionStatements(ctx, tx)
 	if err != nil {
 		return 0, err
 	}
-	defer lookup.Close()
-	insertCluster, err := tx.PrepareContext(ctx, `INSERT INTO clusters (stable_id, repo_owner, repo_name, state, canonical_kind, canonical_owner, canonical_repo, canonical_number, source_revision, source_window_start, source_window_end, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return 0, err
-	}
-	defer insertCluster.Close()
-	updateCluster, err := tx.PrepareContext(ctx, `UPDATE clusters SET state=?, canonical_kind=?, canonical_owner=?, canonical_repo=?, canonical_number=?, source_revision=?, source_window_start=?, source_window_end=?, updated_at=? WHERE id=?`)
-	if err != nil {
-		return 0, err
-	}
-	defer updateCluster.Close()
-	deleteMembers, err := tx.PrepareContext(ctx, `DELETE FROM cluster_members WHERE cluster_id=?`)
-	if err != nil {
-		return 0, err
-	}
-	defer deleteMembers.Close()
-	insertMember, err := tx.PrepareContext(ctx, `INSERT INTO cluster_members (cluster_id, thread_id, kind, owner, repo, number, title, state, score, reason, included, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-	if err != nil {
-		return 0, err
-	}
-	defer insertMember.Close()
-
-	writes := 0
+	defer closeSQLOnReturn(statements, &err)
 	active := make(map[string]struct{}, len(clusters))
 	for i := range clusters {
 		cluster := &clusters[i]
 		active[cluster.StableID] = struct{}{}
-		if cluster.ID == 0 {
-			err := lookup.QueryRowContext(ctx, cluster.StableID).Scan(&cluster.ID)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return 0, err
-			}
+		clusterWrites, err := statements.persistCluster(ctx, repo, cluster, now)
+		if err != nil {
+			return 0, err
 		}
-		if cluster.ID == 0 {
-			result, err := insertCluster.ExecContext(ctx, cluster.StableID, strings.ToLower(repo.Owner), strings.ToLower(repo.Repo), string(cluster.State), cluster.Canonical.Kind, cluster.Canonical.Owner, cluster.Canonical.Repo, cluster.Canonical.Number, cluster.Revision, encodeTime(cluster.WindowStart), encodeTime(cluster.WindowEnd), encodeTime(cluster.CreatedAt), encodeTime(now))
-			if err != nil {
-				return 0, err
-			}
-			cluster.ID, err = result.LastInsertId()
-			if err != nil {
-				return 0, err
-			}
-		} else {
-			if _, err := updateCluster.ExecContext(ctx, string(cluster.State), cluster.Canonical.Kind, cluster.Canonical.Owner, cluster.Canonical.Repo, cluster.Canonical.Number, cluster.Revision, encodeTime(cluster.WindowStart), encodeTime(cluster.WindowEnd), encodeTime(now), cluster.ID); err != nil {
-				return 0, err
-			}
+		writes += clusterWrites
+	}
+	retireWrites, err := retireMissingProjectionClusters(ctx, tx, statements.deleteMembers, repo, active, now)
+	return writes + retireWrites, err
+}
+
+type projectionStatements struct {
+	lookup        *sql.Stmt
+	insertCluster *sql.Stmt
+	updateCluster *sql.Stmt
+	deleteMembers *sql.Stmt
+	insertMember  *sql.Stmt
+}
+
+func prepareProjectionStatements(ctx context.Context, tx *sql.Tx) (_ *projectionStatements, err error) {
+	statements := &projectionStatements{}
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, statements.Close())
 		}
-		writes++
-		if _, err := deleteMembers.ExecContext(ctx, cluster.ID); err != nil {
+	}()
+	if statements.lookup, err = tx.PrepareContext(ctx, `SELECT id FROM clusters WHERE stable_id=?`); err != nil {
+		return nil, err
+	}
+	if statements.insertCluster, err = tx.PrepareContext(ctx, `INSERT INTO clusters (stable_id, repo_owner, repo_name, state, canonical_kind, canonical_owner, canonical_repo, canonical_number, source_revision, source_window_start, source_window_end, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`); err != nil {
+		return nil, err
+	}
+	if statements.updateCluster, err = tx.PrepareContext(ctx, `UPDATE clusters SET state=?, canonical_kind=?, canonical_owner=?, canonical_repo=?, canonical_number=?, source_revision=?, source_window_start=?, source_window_end=?, updated_at=? WHERE id=?`); err != nil {
+		return nil, err
+	}
+	if statements.deleteMembers, err = tx.PrepareContext(ctx, `DELETE FROM cluster_members WHERE cluster_id=?`); err != nil {
+		return nil, err
+	}
+	if statements.insertMember, err = tx.PrepareContext(ctx, `INSERT INTO cluster_members (cluster_id, thread_id, kind, owner, repo, number, title, state, score, reason, included, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`); err != nil {
+		return nil, err
+	}
+	return statements, nil
+}
+
+func (s *projectionStatements) Close() error {
+	var closeErrors []error
+	for _, statement := range []*sql.Stmt{s.insertMember, s.deleteMembers, s.updateCluster, s.insertCluster, s.lookup} {
+		if statement != nil {
+			closeErrors = append(closeErrors, statement.Close())
+		}
+	}
+	return errors.Join(closeErrors...)
+}
+
+func (s *projectionStatements) persistCluster(ctx context.Context, repo domain.RepoRef, cluster *clustering.Cluster, now time.Time) (int, error) {
+	if cluster.ID == 0 {
+		err := s.lookup.QueryRowContext(ctx, cluster.StableID).Scan(&cluster.ID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return 0, err
+		}
+	}
+	if cluster.ID == 0 {
+		result, err := s.insertCluster.ExecContext(ctx, cluster.StableID, strings.ToLower(repo.Owner), strings.ToLower(repo.Repo), string(cluster.State), cluster.Canonical.Kind, cluster.Canonical.Owner, cluster.Canonical.Repo, cluster.Canonical.Number, cluster.Revision, encodeTime(cluster.WindowStart), encodeTime(cluster.WindowEnd), encodeTime(cluster.CreatedAt), encodeTime(now))
+		if err != nil {
+			return 0, err
+		}
+		cluster.ID, err = result.LastInsertId()
+		if err != nil {
+			return 0, err
+		}
+	} else if _, err := s.updateCluster.ExecContext(ctx, string(cluster.State), cluster.Canonical.Kind, cluster.Canonical.Owner, cluster.Canonical.Repo, cluster.Canonical.Number, cluster.Revision, encodeTime(cluster.WindowStart), encodeTime(cluster.WindowEnd), encodeTime(now), cluster.ID); err != nil {
+		return 0, err
+	}
+	if _, err := s.deleteMembers.ExecContext(ctx, cluster.ID); err != nil {
+		return 0, err
+	}
+	writes := 2
+	for _, member := range cluster.Members {
+		var threadID any
+		if member.ThreadID > 0 {
+			threadID = member.ThreadID
+		}
+		if _, err := s.insertMember.ExecContext(ctx, cluster.ID, threadID, member.Ref.Kind, member.Ref.Owner, member.Ref.Repo, member.Ref.Number, member.Title, member.State, member.Score, member.Reason, boolInt(member.Included), encodeTime(now), encodeTime(now)); err != nil {
 			return 0, err
 		}
 		writes++
-		for _, member := range cluster.Members {
-			var threadID any
-			if member.ThreadID > 0 {
-				threadID = member.ThreadID
-			}
-			if _, err := insertMember.ExecContext(ctx, cluster.ID, threadID, member.Ref.Kind, member.Ref.Owner, member.Ref.Repo, member.Ref.Number, member.Title, member.State, member.Score, member.Reason, boolInt(member.Included), encodeTime(now), encodeTime(now)); err != nil {
-				return 0, err
-			}
-			writes++
-		}
 	}
+	return writes, nil
+}
+
+func retireMissingProjectionClusters(ctx context.Context, tx *sql.Tx, deleteMembers *sql.Stmt, repo domain.RepoRef, active map[string]struct{}, now time.Time) (writes int, err error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id, stable_id FROM clusters WHERE repo_owner=? AND repo_name=? AND state != ?`, strings.ToLower(repo.Owner), strings.ToLower(repo.Repo), string(clustering.ClusterRetired))
 	if err != nil {
 		return 0, err
 	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 	var retired []int64
 	for rows.Next() {
 		var id int64
 		var stableID string
 		if err := rows.Scan(&id, &stableID); err != nil {
-			_ = rows.Close()
 			return 0, err
 		}
 		if _, ok := active[stableID]; !ok {
 			retired = append(retired, id)
 		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
 	}
 	if err := rows.Close(); err != nil {
 		return 0, err

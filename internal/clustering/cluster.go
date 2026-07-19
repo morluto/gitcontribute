@@ -12,7 +12,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/similarity"
 )
 
-func computeClusters(ctx context.Context, candidates []Candidate, overrides []MembershipOverride, rule similarity.DuplicateRule, budget ExactPairBudget, threshold float64) (Computation, error) {
+func computeClusters(ctx context.Context, candidates []Candidate, rule similarity.DuplicateRule, budget ExactPairBudget, threshold float64) (Computation, error) {
 	if err := ctx.Err(); err != nil {
 		return Computation{}, err
 	}
@@ -20,72 +20,15 @@ func computeClusters(ctx context.Context, candidates []Candidate, overrides []Me
 	if err != nil {
 		return Computation{}, err
 	}
-
-	prepared := make([]similarity.PreparedDuplicate, len(candidates))
-	for i, c := range candidates {
-		if err := ctx.Err(); err != nil {
-			return Computation{}, err
-		}
-		prepared[i] = rule.Prepare(duplicateThread(c))
-	}
-
-	// Union-find over candidate indices. Edges are added when the duplicate
-	// score meets or exceeds the threshold.
-	parent := make([]int, len(candidates))
-	for i := range parent {
-		parent[i] = i
-	}
-	var find func(int) int
-	find = func(x int) int {
-		if parent[x] != x {
-			parent[x] = find(parent[x])
-		}
-		return parent[x]
-	}
-	union := func(a, b int) {
-		ra, rb := find(a), find(b)
-		if ra != rb {
-			if ra < rb {
-				parent[rb] = ra
-			} else {
-				parent[ra] = rb
-			}
-		}
-	}
-
-	var pairs uint64
-	for i := range candidates {
-		for j := i + 1; j < len(candidates); j++ {
-			if pairs%1024 == 0 {
-				if err := ctx.Err(); err != nil {
-					return Computation{}, err
-				}
-			}
-			score := rule.Compare(prepared[i], prepared[j])
-			pairs++
-			if score.Value >= threshold {
-				union(i, j)
-			}
-		}
-	}
-
-	groups := make(map[int][]int)
-	for i := range candidates {
-		groups[find(i)] = append(groups[find(i)], i)
-	}
-
-	var clusters []Cluster
-	if err := ctx.Err(); err != nil {
+	prepared, err := prepareCandidates(ctx, candidates, rule)
+	if err != nil {
 		return Computation{}, err
 	}
-	for _, members := range groups {
-		if len(members) < 2 {
-			continue
-		}
-		clusters = append(clusters, buildCluster(candidates, prepared, members, rule))
+	groups, pairs, err := compareCandidates(ctx, prepared, rule, threshold)
+	if err != nil {
+		return Computation{}, err
 	}
-
-	clusters = applyOverrides(clusters, overrides, candidates)
+	clusters := buildClusters(candidates, prepared, groups, rule)
 	sortClusters(clusters)
 	return Computation{
 		Clusters:       clusters,
@@ -94,6 +37,80 @@ func computeClusters(ctx context.Context, candidates []Candidate, overrides []Me
 		ComparedPairs:  pairs,
 		RuleVersion:    rule.Version(),
 	}, nil
+}
+
+func prepareCandidates(ctx context.Context, candidates []Candidate, rule similarity.DuplicateRule) ([]similarity.PreparedDuplicate, error) {
+	prepared := make([]similarity.PreparedDuplicate, len(candidates))
+	for i, candidate := range candidates {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		prepared[i] = rule.Prepare(duplicateThread(candidate))
+	}
+	return prepared, nil
+}
+
+func compareCandidates(ctx context.Context, prepared []similarity.PreparedDuplicate, rule similarity.DuplicateRule, threshold float64) (map[int][]int, uint64, error) {
+	sets := newCandidateSets(len(prepared))
+	var pairs uint64
+	for i := range prepared {
+		for j := i + 1; j < len(prepared); j++ {
+			if pairs%1024 == 0 {
+				if err := ctx.Err(); err != nil {
+					return nil, pairs, err
+				}
+			}
+			if rule.Compare(prepared[i], prepared[j]).Value >= threshold {
+				sets.join(i, j)
+			}
+			pairs++
+		}
+	}
+	groups := make(map[int][]int)
+	for i := range prepared {
+		root := sets.root(i)
+		groups[root] = append(groups[root], i)
+	}
+	return groups, pairs, nil
+}
+
+func buildClusters(candidates []Candidate, prepared []similarity.PreparedDuplicate, groups map[int][]int, rule similarity.DuplicateRule) []Cluster {
+	clusters := make([]Cluster, 0, len(groups))
+	for _, members := range groups {
+		if len(members) >= 2 {
+			clusters = append(clusters, buildCluster(candidates, prepared, members, rule))
+		}
+	}
+	return clusters
+}
+
+type candidateSets []int
+
+func newCandidateSets(count int) candidateSets {
+	sets := make(candidateSets, count)
+	for i := range sets {
+		sets[i] = i
+	}
+	return sets
+}
+
+func (s candidateSets) root(index int) int {
+	if s[index] != index {
+		s[index] = s.root(s[index])
+	}
+	return s[index]
+}
+
+func (s candidateSets) join(a, b int) {
+	rootA, rootB := s.root(a), s.root(b)
+	if rootA == rootB {
+		return
+	}
+	if rootA < rootB {
+		s[rootB] = rootA
+		return
+	}
+	s[rootA] = rootB
 }
 
 func buildCluster(candidates []Candidate, prepared []similarity.PreparedDuplicate, indices []int, rule similarity.DuplicateRule) Cluster {

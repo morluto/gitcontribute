@@ -84,11 +84,17 @@ func ExtractRefs(text string, defaultRepo domain.RepoRef) []ThreadRef {
 		seen[ThreadRef{Repo: domain.RepoRef{Owner: owner, Repo: repo}, Kind: kind, Number: number}] = struct{}{}
 	}
 	for _, match := range repoIssueRefPattern.FindAllStringSubmatch(text, -1) {
-		number, _ := strconv.Atoi(match[3])
+		number, err := strconv.Atoi(match[3])
+		if err != nil {
+			continue
+		}
 		add(strings.ToLower(match[1]), strings.ToLower(match[2]), "", number)
 	}
 	for _, match := range urlRefPattern.FindAllStringSubmatch(text, -1) {
-		number, _ := strconv.Atoi(match[3])
+		number, err := strconv.Atoi(match[3])
+		if err != nil {
+			continue
+		}
 		kind := domain.IssueKind
 		if strings.Contains(strings.ToLower(match[0]), "/pull/") {
 			kind = domain.PullRequestKind
@@ -96,7 +102,10 @@ func ExtractRefs(text string, defaultRepo domain.RepoRef) []ThreadRef {
 		add(strings.ToLower(match[1]), strings.ToLower(match[2]), kind, number)
 	}
 	for _, match := range bareRefPattern.FindAllStringSubmatch(text, -1) {
-		number, _ := strconv.Atoi(match[1])
+		number, err := strconv.Atoi(match[1])
+		if err != nil {
+			continue
+		}
 		add(strings.ToLower(defaultRepo.Owner), strings.ToLower(defaultRepo.Repo), "", number)
 	}
 	out := make([]ThreadRef, 0, len(seen))

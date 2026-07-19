@@ -43,5 +43,5 @@ func (e Engine) RuleVersion() similarity.RuleVersion { return e.rule.Version() }
 
 // Cluster computes exact duplicate clusters without storage side effects.
 func (e Engine) Cluster(ctx context.Context, candidates []Candidate) (Computation, error) {
-	return computeClusters(ctx, candidates, nil, e.rule, e.budget, defaultDuplicateThreshold)
+	return computeClusters(ctx, candidates, e.rule, e.budget, defaultDuplicateThreshold)
 }

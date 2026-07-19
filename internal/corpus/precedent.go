@@ -17,9 +17,9 @@ const threadProjectionColumns = `id, repository_id, kind, number, state, state_r
 // LoadPrecedentRepositories loads each unique repository once, batches all
 // requested source numbers for it, and loads its bounded closed history once.
 // The returned snapshots follow first repository appearance in refs.
-func (c *Corpus) LoadPrecedentRepositories(ctx context.Context, refs []precedent.SourceRef, closedLimit int) ([]precedent.RepositorySnapshot, error) {
+func (c *Corpus) LoadPrecedentRepositories(ctx context.Context, refs []precedent.SourceRef, closedLimit int) (result []precedent.RepositorySnapshot, err error) {
 	if closedLimit < 1 || closedLimit > 10_000 {
-		return nil, fmt.Errorf("closed thread limit must be between 1 and 10000")
+		return nil, errors.New("closed thread limit must be between 1 and 10000")
 	}
 	type request struct {
 		ref     domain.RepoRef
@@ -48,7 +48,7 @@ func (c *Corpus) LoadPrecedentRepositories(ctx context.Context, refs []precedent
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackSQLOnReturn(tx, &err)
 	for _, request := range requests {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -86,7 +86,7 @@ func (c *Corpus) LoadPrecedentRepositories(ctx context.Context, refs []precedent
 	return out, nil
 }
 
-func loadThreadsByNumbersTx(ctx context.Context, tx *sql.Tx, repositoryID int64, numbers []int) ([]Thread, error) {
+func loadThreadsByNumbersTx(ctx context.Context, tx *sql.Tx, repositoryID int64, numbers []int) (result []Thread, err error) {
 	if len(numbers) == 0 {
 		return nil, nil
 	}
@@ -101,18 +101,26 @@ func loadThreadsByNumbersTx(ctx context.Context, tx *sql.Tx, repositoryID int64,
 	if err != nil {
 		return nil, fmt.Errorf("load precedent sources: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 	return scanThreads(rows)
 }
 
-func loadClosedPrecedentsTx(ctx context.Context, tx *sql.Tx, repositoryID int64, limit int) ([]Thread, error) {
+func loadClosedPrecedentsTx(ctx context.Context, tx *sql.Tx, repositoryID int64, limit int) (result []Thread, err error) {
 	rows, err := tx.QueryContext(ctx, `SELECT `+threadProjectionColumns+`
 		FROM threads WHERE repository_id=? AND state='closed'
 		ORDER BY source_updated_at DESC, number DESC LIMIT ?`, repositoryID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("load closed precedents: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
 	return scanThreads(rows)
 }
 

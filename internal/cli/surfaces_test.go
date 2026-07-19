@@ -48,7 +48,7 @@ type fakeSurfacesService struct {
 	lastHydrateOpts     cli.HydrateOptions
 }
 
-func (f *fakeSurfacesService) ListClusters(ctx context.Context, repo cli.RepoRef, limit int) (*cli.ClusterListResult, error) {
+func (f *fakeSurfacesService) ListClusters(_ context.Context, repo cli.RepoRef, _ int) (*cli.ClusterListResult, error) {
 	f.clustersCalled = true
 	f.lastClustersArg = repo
 	return &cli.ClusterListResult{
@@ -65,7 +65,7 @@ func (f *fakeSurfacesService) ListClusters(ctx context.Context, repo cli.RepoRef
 	}, f.err
 }
 
-func (f *fakeSurfacesService) RefreshClusters(ctx context.Context, repo cli.RepoRef) (*cli.ClusterRefreshResult, error) {
+func (f *fakeSurfacesService) RefreshClusters(_ context.Context, repo cli.RepoRef) (*cli.ClusterRefreshResult, error) {
 	f.refreshCalled = true
 	f.lastClustersArg = repo
 	return &cli.ClusterRefreshResult{Repo: repo, Disposition: "committed", Projection: cli.ClusterProjectionIdentity{RuleVersion: "duplicate-v1"}}, f.err
