@@ -1,79 +1,32 @@
 package clustering
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/morluto/gitcontribute/internal/similarity"
 )
 
-// Config tunes clustering limits and thresholds.
-type Config struct {
-	Threshold     float64
-	MaxCandidates int
-	MaxPairs      int
-	MaxBodyTokens int
-}
-
-// DefaultConfig returns hard, deterministic defaults.
-func DefaultConfig() Config {
-	return Config{
-		Threshold:     0.30,
-		MaxCandidates: 5000,
-		MaxPairs:      10_000_000,
-		MaxBodyTokens: 1000,
+func computeClusters(ctx context.Context, candidates []Candidate, overrides []MembershipOverride, rule similarity.DuplicateRule, budget ExactPairBudget, threshold float64) (Computation, error) {
+	if err := ctx.Err(); err != nil {
+		return Computation{}, err
 	}
-}
-
-// ParamsHash returns a stable hash of the configuration used for attribution.
-func (c Config) ParamsHash() string {
-	c = normalizeConfig(c)
-	s := fmt.Sprintf("threshold=%.4f|candidates=%d|pairs=%d|body=%d", c.Threshold, c.MaxCandidates, c.MaxPairs, c.MaxBodyTokens)
-	h := sha256.Sum256([]byte(s))
-	return hex.EncodeToString(h[:8])
-}
-
-// Clusterer groups candidates into duplicate-candidate clusters.
-type Clusterer struct {
-	Config Config
-}
-
-// NewClusterer creates a clusterer with the supplied config, falling back to
-// defaults for zero or out-of-range values.
-func NewClusterer(cfg Config) *Clusterer {
-	return &Clusterer{Config: normalizeConfig(cfg)}
-}
-
-func normalizeConfig(cfg Config) Config {
-	defaults := DefaultConfig()
-	if cfg.Threshold <= 0 || cfg.Threshold > 1 || math.IsNaN(cfg.Threshold) || math.IsInf(cfg.Threshold, 0) {
-		cfg.Threshold = defaults.Threshold
-	}
-	if cfg.MaxCandidates <= 0 {
-		cfg.MaxCandidates = defaults.MaxCandidates
-	}
-	if cfg.MaxPairs <= 0 {
-		cfg.MaxPairs = defaults.MaxPairs
-	}
-	if cfg.MaxBodyTokens <= 0 {
-		cfg.MaxBodyTokens = defaults.MaxBodyTokens
-	}
-	return cfg
-}
-
-// Cluster groups candidates into duplicate-candidate clusters and applies
-// membership overrides deterministically.
-func (cl *Clusterer) Cluster(candidates []Candidate, overrides []MembershipOverride) ([]Cluster, error) {
-	if len(candidates) > cl.Config.MaxCandidates {
-		return nil, fmt.Errorf("too many candidates: %d > %d", len(candidates), cl.Config.MaxCandidates)
+	required, err := budget.Required(len(candidates))
+	if err != nil {
+		return Computation{}, err
 	}
 
-	refs := make([][]MemberRef, len(candidates))
+	prepared := make([]similarity.PreparedDuplicate, len(candidates))
 	for i, c := range candidates {
-		refs[i] = ExtractRefs(c.Title+"\n"+c.Body, c.Repo)
+		if err := ctx.Err(); err != nil {
+			return Computation{}, err
+		}
+		prepared[i] = rule.Prepare(duplicateThread(c))
 	}
 
 	// Union-find over candidate indices. Edges are added when the duplicate
@@ -100,15 +53,17 @@ func (cl *Clusterer) Cluster(candidates []Candidate, overrides []MembershipOverr
 		}
 	}
 
-	pairs := 0
+	var pairs uint64
 	for i := range candidates {
 		for j := i + 1; j < len(candidates); j++ {
-			pairs++
-			if pairs > cl.Config.MaxPairs {
-				return nil, fmt.Errorf("pair budget exceeded: %d", cl.Config.MaxPairs)
+			if pairs%1024 == 0 {
+				if err := ctx.Err(); err != nil {
+					return Computation{}, err
+				}
 			}
-			sig := signalsBetween(candidates[i], candidates[j], refs[i], refs[j], cl.Config.MaxBodyTokens)
-			if sig.Score() >= cl.Config.Threshold {
+			score := rule.Compare(prepared[i], prepared[j])
+			pairs++
+			if score.Value >= threshold {
 				union(i, j)
 			}
 		}
@@ -120,66 +75,28 @@ func (cl *Clusterer) Cluster(candidates []Candidate, overrides []MembershipOverr
 	}
 
 	var clusters []Cluster
+	if err := ctx.Err(); err != nil {
+		return Computation{}, err
+	}
 	for _, members := range groups {
 		if len(members) < 2 {
 			continue
 		}
-		clusters = append(clusters, cl.buildCluster(candidates, refs, members))
+		clusters = append(clusters, buildCluster(candidates, prepared, members, rule))
 	}
 
 	clusters = applyOverrides(clusters, overrides, candidates)
 	sortClusters(clusters)
-	return clusters, nil
+	return Computation{
+		Clusters:       clusters,
+		CandidateCount: len(candidates),
+		RequiredPairs:  required,
+		ComparedPairs:  pairs,
+		RuleVersion:    rule.Version(),
+	}, nil
 }
 
-func signalsBetween(a, b Candidate, refsA, refsB []MemberRef, maxBodyTokens int) Signals {
-	sig := Signals{}
-
-	bRef := b.Ref()
-	for _, r := range refsA {
-		if refMatches(r, bRef) {
-			sig.ExplicitRef = true
-			break
-		}
-	}
-	if !sig.ExplicitRef {
-		aRef := a.Ref()
-		for _, r := range refsB {
-			if refMatches(r, aRef) {
-				sig.ExplicitRef = true
-				break
-			}
-		}
-	}
-
-	sig.TitleJaccard = jaccard(Tokens(a.Title, true), Tokens(b.Title, true))
-	sig.BodyJaccard = jaccard(TokensLimited(a.Body, true, maxBodyTokens), TokensLimited(b.Body, true, maxBodyTokens))
-	sig.LabelJaccard = labelJaccard(a.Labels, b.Labels)
-	sig.SameAuthor = a.Author != "" && a.Author == b.Author
-
-	return sig
-}
-
-// refMatches reports whether a reference (which may have an empty kind) matches
-// a candidate member. Empty kind in the reference acts as a wildcard because a
-// bare #123 may refer to either an issue or a pull request in the same repo.
-func refMatches(ref, candidate MemberRef) bool {
-	if ref.Number != candidate.Number {
-		return false
-	}
-	if !strings.EqualFold(ref.Owner, candidate.Owner) {
-		return false
-	}
-	if !strings.EqualFold(ref.Repo, candidate.Repo) {
-		return false
-	}
-	if ref.Kind == "" {
-		return true
-	}
-	return strings.EqualFold(ref.Kind, candidate.Kind)
-}
-
-func (cl *Clusterer) buildCluster(candidates []Candidate, refs [][]MemberRef, indices []int) Cluster {
+func buildCluster(candidates []Candidate, prepared []similarity.PreparedDuplicate, indices []int, rule similarity.DuplicateRule) Cluster {
 	c := Cluster{
 		Repo:    candidates[indices[0]].Repo,
 		Members: make([]Member, 0, len(indices)),
@@ -195,7 +112,7 @@ func (cl *Clusterer) buildCluster(candidates []Candidate, refs [][]MemberRef, in
 		})
 	}
 	c.Canonical = chooseCanonical(c.Members)
-	c.StableID = StableID(c.Canonical)
+	c.StableID = stableID(c.Canonical)
 
 	canonicalIdx := 0
 	for i, m := range c.Members {
@@ -204,23 +121,15 @@ func (cl *Clusterer) buildCluster(candidates []Candidate, refs [][]MemberRef, in
 			break
 		}
 	}
-	canonicalCandidate := candidates[indices[canonicalIdx]]
-
 	for i := range c.Members {
 		if i == canonicalIdx {
 			c.Members[i].Score = 1.0
 			c.Members[i].Reason = "canonical member"
 			continue
 		}
-		sig := signalsBetween(
-			canonicalCandidate,
-			candidates[indices[i]],
-			refs[indices[canonicalIdx]],
-			refs[indices[i]],
-			cl.Config.MaxBodyTokens,
-		)
-		c.Members[i].Score = sig.Score()
-		c.Members[i].Reason = sig.Reason()
+		score := rule.Compare(prepared[indices[canonicalIdx]], prepared[indices[i]])
+		c.Members[i].Score = score.Value
+		c.Members[i].Reason = score.Reason
 	}
 	return c
 }
@@ -238,9 +147,7 @@ func chooseCanonical(members []Member) MemberRef {
 	return canonical
 }
 
-// StableID returns the deterministic stable cluster id derived from a member
-// identity. The same canonical member always produces the same stable id.
-func StableID(ref MemberRef) string {
+func stableID(ref MemberRef) string {
 	s := strings.ToLower(fmt.Sprintf("%s/%s:%s#%d", ref.Owner, ref.Repo, ref.Kind, ref.Number))
 	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:8])
@@ -345,7 +252,9 @@ func sortClusters(clusters []Cluster) {
 	})
 }
 
-// SourceRevision computes a stable hash from the candidate source state.
+// SourceRevision returns a full SHA-256 digest of every candidate field that
+// can affect duplicate scoring or the stored projection. Candidate and label
+// ordering do not affect the digest.
 func SourceRevision(candidates []Candidate) string {
 	lines := make([]string, len(candidates))
 	for i, c := range candidates {
@@ -363,7 +272,7 @@ func SourceRevision(candidates []Candidate) string {
 	}
 	sort.Strings(lines)
 	h := sha256.Sum256([]byte(strings.Join(lines, "\n")))
-	return hex.EncodeToString(h[:8])
+	return hex.EncodeToString(h[:])
 }
 
 // SourceWindow returns the minimum and maximum UpdatedAt of the candidates.

@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/pressly/goose/v3"
 	_ "modernc.org/sqlite"
 )
@@ -208,11 +207,4 @@ func scanTime(nsec int64) time.Time {
 		return time.Time{}
 	}
 	return time.Unix(0, nsec).UTC()
-}
-
-// Clustering returns the duplicate-candidate clustering store backed by this
-// corpus. The corpus schema includes the clustering tables, so this store is
-// ready for use after Open.
-func (c *Corpus) Clustering() *clustering.Store {
-	return clustering.NewStore(c.db)
 }

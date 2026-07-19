@@ -153,7 +153,7 @@ func radarPullRequestLinks(ref domain.RepoRef, pullRequests []corpus.Thread) map
 		text := pullRequest.Title + "\n" + pullRequest.Body
 		closing := radarClosingIssueNumbers(text, ref)
 		seen := make(map[int]struct{})
-		for _, linked := range clustering.ExtractRefs(text, ref) {
+		for _, linked := range clustering.ExtractMemberRefs(text, ref) {
 			if !strings.EqualFold(linked.Owner, ref.Owner) || !strings.EqualFold(linked.Repo, ref.Repo) || linked.Kind == corpus.ThreadKindPullRequest {
 				continue
 			}
@@ -180,7 +180,7 @@ func radarPullRequestLinks(ref domain.RepoRef, pullRequests []corpus.Thread) map
 func radarClosingIssueNumbers(text string, ref domain.RepoRef) map[int]struct{} {
 	out := make(map[int]struct{})
 	for _, match := range closingReferencePattern.FindAllStringSubmatch(text, -1) {
-		for _, linked := range clustering.ExtractRefs(match[1], ref) {
+		for _, linked := range clustering.ExtractMemberRefs(match[1], ref) {
 			if strings.EqualFold(linked.Owner, ref.Owner) && strings.EqualFold(linked.Repo, ref.Repo) && linked.Kind != corpus.ThreadKindPullRequest {
 				out[linked.Number] = struct{}{}
 			}
@@ -190,11 +190,12 @@ func radarClosingIssueNumbers(text string, ref domain.RepoRef) map[int]struct{} 
 }
 
 func radarDuplicateClusters(ctx context.Context, c *corpus.Corpus, ref domain.RepoRef) (map[int]*radar.DuplicateCluster, bool, error) {
-	clusters, err := c.Clustering().ListClusters(ctx, ref, clustering.ClusterOpen, 1000)
+	projection, err := c.ListClusterProjection(ctx, ref, clustering.ClusterOpen, 1000)
 	if err != nil {
 		return nil, false, fmt.Errorf("list duplicate clusters: %w", err)
 	}
 	out := make(map[int]*radar.DuplicateCluster)
+	clusters := projection.Clusters
 	for _, cluster := range clusters {
 		included := 0
 		for _, member := range cluster.Members {

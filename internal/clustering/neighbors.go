@@ -1,8 +1,11 @@
 package clustering
 
 import (
+	"context"
 	"fmt"
-	"sort"
+
+	"github.com/morluto/gitcontribute/internal/ranking"
+	"github.com/morluto/gitcontribute/internal/similarity"
 )
 
 // Neighbor is a scored thread near a query candidate.
@@ -25,9 +28,11 @@ const (
 // signals and returns the top limit results with stable tie ordering.
 //
 // The query itself is excluded from the returned set. Scores and reasons are
-// produced by the same Signals used for duplicate-candidate clustering.
-func Neighbors(query Candidate, candidates []Candidate, cfg Config, limit int) ([]Neighbor, error) {
-	cfg = normalizeConfig(cfg)
+// produced by the same versioned duplicate rule used for clustering.
+func Neighbors(ctx context.Context, query Candidate, candidates []Candidate, limit int) ([]Neighbor, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if limit <= 0 {
 		limit = DefaultNeighborsLimit
 	}
@@ -35,40 +40,36 @@ func Neighbors(query Candidate, candidates []Candidate, cfg Config, limit int) (
 		return nil, fmt.Errorf("neighbors limit %d exceeds maximum %d", limit, MaxNeighborsLimit)
 	}
 
-	queryRefs := ExtractRefs(query.Title+"\n"+query.Body, query.Repo)
+	rule := similarity.DefaultDuplicateRule()
+	preparedQuery := rule.Prepare(duplicateThread(query))
 
 	out := make([]Neighbor, 0, len(candidates))
-	for _, c := range candidates {
+	for i, c := range candidates {
+		if i%1024 == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		if sameMemberRef(c.Ref(), query.Ref()) {
 			continue
 		}
-		otherRefs := ExtractRefs(c.Title+"\n"+c.Body, c.Repo)
-		sig := signalsBetween(query, c, queryRefs, otherRefs, cfg.MaxBodyTokens)
+		score := rule.Compare(preparedQuery, rule.Prepare(duplicateThread(c)))
 		out = append(out, Neighbor{
 			ThreadID: c.ThreadID,
 			Ref:      c.Ref(),
 			Title:    c.Title,
 			State:    c.State,
-			Score:    sig.Score(),
-			Reason:   sig.Reason(),
+			Score:    score.Value,
+			Reason:   score.Reason,
 		})
 	}
 
-	sortNeighbors(out)
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out, nil
+	return ranking.TopK(out, limit, betterNeighbor), nil
 }
 
-func sortNeighbors(n []Neighbor) {
-	sort.Slice(n, func(i, j int) bool {
-		if n[i].Score > n[j].Score {
-			return true
-		}
-		if n[i].Score < n[j].Score {
-			return false
-		}
-		return n[i].Ref.Less(n[j].Ref)
-	})
+func betterNeighbor(a, b Neighbor) bool {
+	if a.Score != b.Score {
+		return a.Score > b.Score
+	}
+	return a.Ref.Less(b.Ref)
 }

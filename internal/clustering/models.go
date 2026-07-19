@@ -95,18 +95,6 @@ type Cluster struct {
 	UpdatedAt   time.Time
 }
 
-// MemberRefs returns the included member refs in deterministic order.
-func (c Cluster) MemberRefs() []MemberRef {
-	refs := make([]MemberRef, 0, len(c.Members))
-	for _, m := range c.Members {
-		if m.Included {
-			refs = append(refs, m.Ref)
-		}
-	}
-	sortMemberRefs(refs)
-	return refs
-}
-
 // OverrideAction is a local governance instruction for a cluster member.
 type OverrideAction string
 
@@ -124,28 +112,4 @@ type MembershipOverride struct {
 	Action    OverrideAction
 	Reason    string
 	CreatedAt time.Time
-}
-
-// ClusterRun records one clustering computation for a repository and source window.
-type ClusterRun struct {
-	ID             int64
-	Repo           domain.RepoRef
-	SourceRevision string
-	WindowStart    time.Time
-	WindowEnd      time.Time
-	ParamsHash     string
-	Status         string
-	StartedAt      time.Time
-	CompletedAt    *time.Time
-	Stats          string
-}
-
-func sortMemberRefs(refs []MemberRef) {
-	for i := 0; i < len(refs); i++ {
-		for j := i + 1; j < len(refs); j++ {
-			if refs[j].Less(refs[i]) {
-				refs[i], refs[j] = refs[j], refs[i]
-			}
-		}
-	}
 }

@@ -9,10 +9,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/morluto/gitcontribute/internal/cli"
-	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
-	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 func newNeighborService(t *testing.T) *Service {
@@ -106,6 +104,9 @@ func TestNeighborsRankedWithScoreAndReason(t *testing.T) {
 	}
 	if res.SourceRevision == "" {
 		t.Fatal("source revision is empty")
+	}
+	if res.RuleVersion != "duplicate-v1" {
+		t.Fatalf("rule version = %q, want duplicate-v1", res.RuleVersion)
 	}
 	if res.Limit != 10 {
 		t.Fatalf("limit = %d, want 10", res.Limit)
@@ -210,8 +211,7 @@ func TestDuplicateCandidatesReturnsClusterMembers(t *testing.T) {
 	seedIssueForNeighbors(t, c, repo.ID, 1, "fix login crash", "login crashes on startup", "alice", []string{"bug"})
 	seedIssueForNeighbors(t, c, repo.ID, 2, "fix login crash", "the login page crashes", "alice", []string{"bug"})
 
-	store := c.Clustering()
-	if _, _, err := store.ComputeForRepo(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, clustering.DefaultConfig()); err != nil {
+	if _, err := svc.RefreshClusters(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}); err != nil {
 		t.Fatalf("compute clusters: %v", err)
 	}
 
@@ -255,8 +255,7 @@ func TestDuplicateCandidatesEmptyWhenNoCluster(t *testing.T) {
 	seedIssueForNeighbors(t, c, repo.ID, 1, "unrelated one", "body", "alice", nil)
 	seedIssueForNeighbors(t, c, repo.ID, 2, "unrelated two", "body", "bob", nil)
 
-	store := c.Clustering()
-	if _, _, err := store.ComputeForRepo(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, clustering.DefaultConfig()); err != nil {
+	if _, err := svc.RefreshClusters(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}); err != nil {
 		t.Fatalf("compute clusters: %v", err)
 	}
 

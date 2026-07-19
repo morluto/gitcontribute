@@ -8,14 +8,16 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
+	"github.com/morluto/gitcontribute/internal/precedent"
 	"github.com/morluto/gitcontribute/internal/radar"
+	"github.com/morluto/gitcontribute/internal/ranking"
+	"github.com/morluto/gitcontribute/internal/similarity"
 )
 
 // GetRepositories performs an offline, input-ordered corpus read and clears
@@ -562,55 +564,68 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpserver.FindPrecede
 	if err != nil {
 		return mcpserver.FindPrecedentsOutput{}, err
 	}
+	refs := make([]precedent.SourceRef, len(in.Threads))
+	for i, input := range in.Threads {
+		refs[i] = precedent.SourceRef{Repository: domain.RepoRef{Owner: input.Owner, Repo: input.Repo}, Number: input.Number}
+	}
+	snapshots, err := c.LoadPrecedentRepositories(ctx, refs, 2000)
+	if err != nil {
+		return mcpserver.FindPrecedentsOutput{}, err
+	}
+	snapshotsByRepo := make(map[string]precedent.RepositorySnapshot, len(snapshots))
+	for _, snapshot := range snapshots {
+		snapshotsByRepo[precedent.RepositoryKey(snapshot.Repository)] = snapshot
+	}
+	rule := similarity.DefaultPrecedentRule()
+	preparedByRepo := make(map[string][]preparedPrecedent, len(snapshots))
+	for _, snapshot := range snapshots {
+		prepared := make([]preparedPrecedent, len(snapshot.Closed))
+		for i, candidate := range snapshot.Closed {
+			prepared[i] = preparedPrecedent{thread: candidate, text: rule.Prepare(candidate.Title + " " + candidate.Body)}
+		}
+		preparedByRepo[precedent.RepositoryKey(snapshot.Repository)] = prepared
+	}
 	out := mcpserver.FindPrecedentsOutput{Status: "complete", Items: make([]mcpserver.BatchItem[[]mcpserver.PrecedentOutput], len(in.Threads))}
 	for i, input := range in.Threads {
-		key := fmt.Sprintf("%s/%s#%d", input.Owner, input.Repo, input.Number)
-		item := mcpserver.BatchItem[[]mcpserver.PrecedentOutput]{Key: key, Status: "complete"}
-		repo, err := c.GetRepository(ctx, input.Owner, input.Repo)
-		if err != nil {
+		if err := ctx.Err(); err != nil {
 			return mcpserver.FindPrecedentsOutput{}, err
 		}
-		if repo == nil {
+		key := fmt.Sprintf("%s/%s#%d", input.Owner, input.Repo, input.Number)
+		item := mcpserver.BatchItem[[]mcpserver.PrecedentOutput]{Key: key, Status: "complete"}
+		repoKey := precedent.RepositoryKey(refs[i].Repository)
+		snapshot := snapshotsByRepo[repoKey]
+		if !snapshot.Available {
 			item.Status, item.Reason = "unavailable", "repository_not_indexed"
 			out.Items[i] = item
 			out.Status = "partial"
 			continue
 		}
-		source, err := c.GetThreadByNumber(ctx, repo.ID, input.Number)
-		if err != nil {
-			return mcpserver.FindPrecedentsOutput{}, err
-		}
-		if source == nil {
+		source, ok := snapshot.Sources[input.Number]
+		if !ok {
 			item.Status, item.Reason = "unavailable", "thread_not_indexed"
 			out.Items[i] = item
 			out.Status = "partial"
 			continue
 		}
-		closed, err := c.ListThreadsFiltered(ctx, repo.ID, "", "closed", 2000)
-		if err != nil {
-			return mcpserver.FindPrecedentsOutput{}, err
-		}
 		precedents := make([]mcpserver.PrecedentOutput, 0, in.Limit)
-		sourceTokens := wordSet(source.Title + " " + source.Body)
-		for _, candidate := range closed {
+		preparedSource := rule.Prepare(source.Title + " " + source.Body)
+		for candidateIndex, prepared := range preparedByRepo[repoKey] {
+			if candidateIndex%1024 == 0 {
+				if err := ctx.Err(); err != nil {
+					return mcpserver.FindPrecedentsOutput{}, err
+				}
+			}
+			candidate := prepared.thread
 			if candidate.ID == source.ID {
 				continue
 			}
-			score := jaccard(sourceTokens, wordSet(candidate.Title+" "+candidate.Body))
+			score := rule.Compare(preparedSource, prepared.text)
 			if score < 0.08 {
 				continue
 			}
 			precedents = append(precedents, precedentToMCP(key, input.Owner, input.Repo, candidate, score))
 		}
-		sort.SliceStable(precedents, func(i, j int) bool {
-			if precedents[i].Score != precedents[j].Score {
-				return precedents[i].Score > precedents[j].Score
-			}
-			return precedents[i].Ref < precedents[j].Ref
-		})
-		if len(precedents) > in.Limit {
-			precedents = precedents[:in.Limit]
-		}
+		precedents = ranking.TopK(precedents, in.Limit, betterPrecedent)
 		item.Value = &precedents
 		out.Total += len(precedents)
 		out.Items[i] = item
@@ -618,7 +633,19 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpserver.FindPrecede
 	return out, nil
 }
 
-func precedentToMCP(source, owner, repo string, t corpus.Thread, score float64) mcpserver.PrecedentOutput {
+type preparedPrecedent struct {
+	thread precedent.Thread
+	text   similarity.PreparedLexical
+}
+
+func betterPrecedent(a, b mcpserver.PrecedentOutput) bool {
+	if a.Score != b.Score {
+		return a.Score > b.Score
+	}
+	return a.Ref < b.Ref
+}
+
+func precedentToMCP(source, owner, repo string, t precedent.Thread, score float64) mcpserver.PrecedentOutput {
 	reasons := []string{"similar stored title or body"}
 	if t.Merged {
 		reasons = append(reasons, "pull request merged")
@@ -632,33 +659,5 @@ func precedentToMCP(source, owner, repo string, t corpus.Thread, score float64) 
 			reasons = append(reasons, "label: "+label)
 		}
 	}
-	return mcpserver.PrecedentOutput{Source: source, Ref: fmt.Sprintf("%s/%s#%d", owner, repo, t.Number), Kind: t.Kind, State: t.State, StateReason: t.StateReason, Title: t.Title, Score: score, Reasons: reasons, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.MergedAt)}
-}
-
-func wordSet(text string) map[string]struct{} {
-	fields := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
-	out := make(map[string]struct{})
-	for _, field := range fields {
-		if len(field) >= 3 {
-			out[field] = struct{}{}
-		}
-	}
-	return out
-}
-func jaccard(a, b map[string]struct{}) float64 {
-	if len(a) == 0 || len(b) == 0 {
-		return 0
-	}
-	intersection := 0
-	union := make(map[string]struct{}, len(a)+len(b))
-	for k := range a {
-		union[k] = struct{}{}
-		if _, ok := b[k]; ok {
-			intersection++
-		}
-	}
-	for k := range b {
-		union[k] = struct{}{}
-	}
-	return float64(intersection) / float64(len(union))
+	return mcpserver.PrecedentOutput{Source: source, Ref: fmt.Sprintf("%s/%s#%d", owner, repo, t.Number), Kind: t.Kind, State: t.State, StateReason: t.StateReason, Title: t.Title, Score: score, RuleVersion: similarity.PrecedentV1, Reasons: reasons, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.MergedAt)}
 }

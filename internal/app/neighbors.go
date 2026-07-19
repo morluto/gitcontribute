@@ -16,6 +16,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
+	"github.com/morluto/gitcontribute/internal/similarity"
 )
 
 // Neighbor is one ranked thread near a query.
@@ -32,13 +33,14 @@ type Neighbor struct {
 
 // NeighborsResult is the response for a local nearest-thread query.
 type NeighborsResult struct {
-	Repo           string     `json:"repo"`
-	Kind           string     `json:"kind"`
-	Number         int        `json:"number"`
-	Limit          int        `json:"limit"`
-	Total          int        `json:"total"`
-	SourceRevision string     `json:"source_revision"`
-	Neighbors      []Neighbor `json:"neighbors"`
+	Repo           string                 `json:"repo"`
+	Kind           string                 `json:"kind"`
+	Number         int                    `json:"number"`
+	Limit          int                    `json:"limit"`
+	Total          int                    `json:"total"`
+	SourceRevision string                 `json:"source_revision"`
+	RuleVersion    similarity.RuleVersion `json:"rule_version"`
+	Neighbors      []Neighbor             `json:"neighbors"`
 }
 
 // DuplicateCandidatesResult is the response for a duplicate-candidate query.
@@ -122,7 +124,7 @@ func (s *Service) Neighbors(ctx context.Context, repo cli.RepoRef, kind string, 
 		return nil, fmt.Errorf("neighbors limit cannot exceed %d", maxResultLimit)
 	}
 
-	scored, err := clustering.Neighbors(queryCand, candidates, clustering.DefaultConfig(), limit)
+	scored, err := clustering.Neighbors(ctx, queryCand, candidates, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -143,6 +145,7 @@ func (s *Service) Neighbors(ctx context.Context, repo cli.RepoRef, kind string, 
 		Limit:          limit,
 		Total:          len(neighbors),
 		SourceRevision: clustering.SourceRevision(all),
+		RuleVersion:    similarity.DuplicateV1,
 		Neighbors:      neighbors,
 	}, nil
 }
@@ -179,8 +182,7 @@ func (s *Service) DuplicateCandidates(ctx context.Context, repo cli.RepoRef, kin
 		return nil, fmt.Errorf("thread not found: %s", ref.String())
 	}
 
-	store := c.Clustering()
-	cluster, err := store.GetClusterForMember(ctx, ref)
+	cluster, err := c.GetClusterProjectionForMember(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +391,7 @@ func (s *Service) PullRequestCollisions(ctx context.Context, repo cli.RepoRef, n
 		return nil, err
 	}
 	queryBase := parsePRBaseRef(queryPayload)
-	queryRefs := clustering.ExtractRefs(query.Title+"\n"+query.Body, dref)
+	queryRefs := clustering.ExtractMemberRefs(query.Title+"\n"+query.Body, dref)
 
 	prs, err := c.ListThreads(ctx, repository.ID, corpus.ThreadKindPullRequest, maxCandidateLimit)
 	if err != nil {
@@ -464,7 +466,7 @@ func collisionScore(repo domain.RepoRef, queryBase string, queryRefs []clusterin
 		reasons = append(reasons, fmt.Sprintf("same base branch %s", queryBase))
 	}
 
-	otherRefs := clustering.ExtractRefs(other.Title+"\n"+other.Body, repo)
+	otherRefs := clustering.ExtractMemberRefs(other.Title+"\n"+other.Body, repo)
 	queryRef := clustering.MemberRef{Owner: repo.Owner, Repo: repo.Repo, Kind: query.Kind, Number: query.Number}
 	otherRef := clustering.MemberRef{Owner: repo.Owner, Repo: repo.Repo, Kind: other.Kind, Number: other.Number}
 
@@ -734,7 +736,7 @@ func (s *Service) findSimilarThreads(ctx context.Context, repo domain.RepoRef, q
 		limit = defaultNeighborsLimit
 	}
 	all := append([]clustering.Candidate{query}, candidates...)
-	neighbors, err := clustering.Neighbors(query, candidates, clustering.DefaultConfig(), limit)
+	neighbors, err := clustering.Neighbors(ctx, query, candidates, limit)
 	if err != nil {
 		return nil, "", err
 	}

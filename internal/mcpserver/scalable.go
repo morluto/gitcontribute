@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/similarity"
 )
 
 const serverInstructions = "Use GitContribute for durable, source-backed repository research and contribution tracking. Prefer corpus tools for offline reads. Research flow: github.search_repositories or github.sync_repository_metadata -> github.sync_threads -> corpus.rank_threads -> hydrate finalists. Portfolio flow: github.sync_authored_pull_requests -> github.sync_pull_request_status -> corpus.list_pull_request_portfolio -> corpus.find_portfolio_overlaps. Use research.query_deepwiki only for derived architecture context, never live GitHub state. When jobs are returned, poll jobs.get together. Missing facets are unknown, not negative evidence; retry only retryable batch items. GitContribute never mutates GitHub; use native GitHub or Git for unsupported actions."
@@ -141,16 +142,17 @@ type FindPrecedentsInput struct {
 
 // PrecedentOutput describes one stored thread analogous to a source thread.
 type PrecedentOutput struct {
-	Source      string   `json:"source"`
-	Ref         string   `json:"ref"`
-	Kind        string   `json:"kind"`
-	State       string   `json:"state"`
-	StateReason string   `json:"state_reason,omitempty"`
-	Title       string   `json:"title"`
-	Score       float64  `json:"score"`
-	Reasons     []string `json:"reasons"`
-	ClosedAt    string   `json:"closed_at,omitempty"`
-	MergedAt    string   `json:"merged_at,omitempty"`
+	Source      string                 `json:"source"`
+	Ref         string                 `json:"ref"`
+	Kind        string                 `json:"kind"`
+	State       string                 `json:"state"`
+	StateReason string                 `json:"state_reason,omitempty"`
+	Title       string                 `json:"title"`
+	Score       float64                `json:"score"`
+	RuleVersion similarity.RuleVersion `json:"rule_version"`
+	Reasons     []string               `json:"reasons"`
+	ClosedAt    string                 `json:"closed_at,omitempty"`
+	MergedAt    string                 `json:"merged_at,omitempty"`
 }
 
 // FindPrecedentsOutput returns stored closed or merged analogues for each
