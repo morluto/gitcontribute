@@ -166,7 +166,8 @@ type metadataCmd struct {
 }
 
 type doctorCmd struct {
-	JSON bool `name:"json" help:"Print the result as JSON"`
+	JSON   bool `name:"json" help:"Print the result as JSON"`
+	Strict bool `name:"strict" help:"Exit unsuccessfully when required checks fail"`
 }
 
 type statusCmd struct {
@@ -1777,7 +1778,13 @@ func (c *CLI) runDoctor(ctx context.Context, cmd *doctorCmd) error {
 	if err != nil {
 		return c.mapError(err)
 	}
-	return c.render(cmd.JSON, result)
+	if err := c.render(cmd.JSON, result); err != nil {
+		return err
+	}
+	if cmd.Strict && !result.Healthy {
+		return NewCLIError(ExitGeneral, errors.New("required diagnostic checks failed"))
+	}
+	return nil
 }
 
 func (c *CLI) runStatus(ctx context.Context, cmd *statusCmd) error {

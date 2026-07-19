@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -107,6 +108,62 @@ func TestIdempotentReopenAndMigration(t *testing.T) {
 	}
 	if !repo.SourceUpdatedAt.Equal(want) {
 		t.Fatalf("source_updated_at = %v, want %v", repo.SourceUpdatedAt, want)
+	}
+}
+
+func TestOpenRejectsSchemaNewerThanBinary(t *testing.T) {
+	ctx := context.Background()
+	c, path := openTestCorpus(t)
+	_, target, err := c.SchemaVersions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.db.ExecContext(ctx, `INSERT INTO goose_db_version (version_id, is_applied, tstamp) VALUES (?, 1, CURRENT_TIMESTAMP)`, target+1); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Open(ctx, path)
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("schema version %d is newer", target+1)) {
+		t.Fatalf("Open error = %v", err)
+	}
+}
+
+func TestCheckWriteAccessReportsContentionImmediatelyAndRestoresTimeout(t *testing.T) {
+	ctx := context.Background()
+	c, path := openTestCorpus(t)
+	other, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Close() }()
+
+	conn, err := c.db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = conn.ExecContext(context.Background(), `ROLLBACK`) }()
+
+	started := time.Now()
+	err = other.CheckWriteAccess(ctx)
+	if err == nil || !strings.Contains(err.Error(), "database is locked") {
+		t.Fatalf("CheckWriteAccess error = %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("CheckWriteAccess waited %v under contention", elapsed)
+	}
+	var busyTimeout int
+	if err := other.db.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&busyTimeout); err != nil {
+		t.Fatal(err)
+	}
+	if busyTimeout != 5000 {
+		t.Fatalf("busy_timeout = %d, want 5000", busyTimeout)
 	}
 }
 

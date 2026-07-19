@@ -59,8 +59,12 @@ func renderSetupResult(report *SetupReport, opts SetupOptions) string {
 	if !report.HasFailures() {
 		writeSetupAuthentication(&b, report.Authentication, false)
 	}
-	if clients := configuredSetupClients(report); len(clients) > 0 && !report.HasFailures() {
-		fmt.Fprintf(&b, "\nRestart %s to load the MCP server.\n", strings.Join(clients, " and "))
+	if len(report.RestartClients) > 0 && !report.HasFailures() {
+		clients := make([]string, len(report.RestartClients))
+		for i, client := range report.RestartClients {
+			clients[i] = setupStepLabel(client)
+		}
+		fmt.Fprintf(&b, "\nRestart %s to replace active MCP processes with the configured runtime.\n", strings.Join(clients, " and "))
 	}
 	if !report.HasFailures() {
 		b.WriteString("\nNext\n")
@@ -146,16 +150,6 @@ func setupPlanInstallsManagedRuntime(report *SetupReport) bool {
 		}
 	}
 	return false
-}
-
-func configuredSetupClients(report *SetupReport) []string {
-	clients := make([]string, 0, 2)
-	for _, step := range report.Steps {
-		if (step.Name == "codex" || step.Name == "claude") && step.Status != "failed" && !strings.HasPrefix(step.Status, "skipped") && !strings.HasPrefix(step.Status, "would ") {
-			clients = append(clients, setupStepLabel(step.Name))
-		}
-	}
-	return clients
 }
 
 func writeSetupAuthentication(b *strings.Builder, auth *SetupAuthentication, plan bool) {

@@ -63,7 +63,10 @@ Interactive setup follows an explicit sequence:
 4. Produce a dry-run plan. Planning never invokes npm or writes configuration,
    corpus, client, or repository-source state.
 5. Ask for confirmation, defaulting to apply, then apply the selected effects.
-6. Verify the resulting local installation with `doctor`.
+6. Verify the applied plan: the corpus is readable and current, its integrity
+   check passes, Git is available, and selected MCP registrations exactly match
+   the installed command. Normal contention from another corpus writer does not
+   make setup fail.
 
 Interactive setup uses inline terminal forms rather than an alternate-screen
 application. Active operations may show a spinner that settles into a durable
@@ -108,7 +111,10 @@ Both uses the verified global CLI executable:
 
 No mode stores `npx`, `@latest`, or an npm-cache executable in coding-agent
 configuration. Re-running MCP setup with a newer release installs that release
-under its own versioned path and updates the selected registrations.
+under its own versioned path and updates the selected registrations. When a
+registration changes, setup reports the affected clients in
+`restart_clients`; their active sessions must restart to replace older MCP
+processes with the configured runtime.
 `gitcontribute remove` deletes only selected coding-agent registrations. It
 does not delete versioned private runtimes, uninstall the global CLI, or remove
 application configuration or corpus data. Use
