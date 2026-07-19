@@ -12,7 +12,7 @@ const (
 	ToolSearchCode               = "corpus.search_code"
 	ToolGetRepositories          = "corpus.get_repositories"
 	ToolGetThreads               = "corpus.get_threads"
-	ToolRankOpportunities        = "corpus.rank_opportunities"
+	ToolRankThreads              = "corpus.rank_threads"
 	ToolFindPrecedents           = "corpus.find_precedents"
 	ToolGetRepositoryDossier     = "corpus.get_repository_dossier"
 	ToolExplainMatch             = "corpus.explain_match"
@@ -28,6 +28,7 @@ const (
 	ToolBuildRepositoryDossier   = "corpus.build_repository_dossier"
 	ToolGetJob                   = "jobs.get"
 	ToolCancelJob                = "jobs.cancel"
+	ToolSearchGitHubRepositories = "github.search_repositories"
 	ToolSyncRepositoryMetadata   = "github.sync_repository_metadata"
 	ToolSyncThreads              = "github.sync_threads"
 	ToolHydrateThreads           = "github.hydrate_threads"
@@ -37,7 +38,7 @@ const (
 	ToolListPullRequestPortfolio = "corpus.list_pull_request_portfolio"
 	ToolIndexRepositories        = "code.index_repositories"
 	ToolCheckMergeConflicts      = "workspace.check_merge_conflicts"
-	ToolDeepWiki                 = "research.deepwiki"
+	ToolQueryDeepWiki            = "research.query_deepwiki"
 	ToolCreateWorkspace          = "workspace.create"
 	ToolDefineValidation         = "validation.define"
 	ToolRunValidation            = "validation.run"
@@ -55,7 +56,7 @@ var canonicalToolNames = []string{
 	ToolSearchCode,
 	ToolGetRepositories,
 	ToolGetThreads,
-	ToolRankOpportunities,
+	ToolRankThreads,
 	ToolFindPrecedents,
 	ToolGetRepositoryDossier,
 	ToolExplainMatch,
@@ -71,6 +72,7 @@ var canonicalToolNames = []string{
 	ToolBuildRepositoryDossier,
 	ToolGetJob,
 	ToolCancelJob,
+	ToolSearchGitHubRepositories,
 	ToolSyncRepositoryMetadata,
 	ToolSyncThreads,
 	ToolHydrateThreads,
@@ -80,7 +82,7 @@ var canonicalToolNames = []string{
 	ToolListPullRequestPortfolio,
 	ToolIndexRepositories,
 	ToolCheckMergeConflicts,
-	ToolDeepWiki,
+	ToolQueryDeepWiki,
 	ToolCreateWorkspace,
 	ToolDefineValidation,
 	ToolRunValidation,

@@ -46,6 +46,41 @@ func TestGetRepositoriesPreservesUnknownMetadataAndInputOrder(t *testing.T) {
 	}
 }
 
+type fakeRepositorySearchReader struct {
+	github.Reader
+	result  github.RepositorySearchResult
+	options github.RepositorySearchOptions
+}
+
+func (f *fakeRepositorySearchReader) SearchRepositories(_ context.Context, options github.RepositorySearchOptions) (github.RepositorySearchResult, error) {
+	f.options = options
+	return f.result, nil
+}
+
+func TestSearchGitHubRepositoriesPersistsObservedMetadata(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	now := time.Unix(1000, 0).UTC()
+	remote := github.Repository{Owner: "acme", Name: "rocket", Description: "fast inference", Stars: 9001, Language: "Go", UpdatedAt: now}
+	reader := &fakeRepositorySearchReader{result: github.RepositorySearchResult{Total: 321, Items: []github.Repository{remote}}}
+	svc.SetGitHubReader(reader)
+
+	out, err := (&MCPReader{svc}).SearchGitHubRepositories(ctx, mcpserver.SearchGitHubRepositoriesInput{Query: "inference language:go", Sort: "stars", Order: "desc", Limit: 12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reader.options.PerPage != 12 || reader.options.Sort != "stars" || len(out.Items) != 1 || out.Items[0].Value == nil || *out.Items[0].Value.Stars != 9001 {
+		t.Fatalf("live search result = %+v, options = %+v", out, reader.options)
+	}
+	stored, err := (&MCPReader{svc}).GetRepositories(ctx, mcpserver.GetRepositoriesInput{Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: "rocket"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Items[0].Value == nil || stored.Items[0].Value.Metadata.Status != "complete" || *stored.Items[0].Value.Stars != 9001 {
+		t.Fatalf("search metadata was not persisted: %+v", stored)
+	}
+}
+
 func TestFindPrecedentsUsesClosedAndMergedHistory(t *testing.T) {
 	ctx := context.Background()
 	svc := newSearchTestService(t)

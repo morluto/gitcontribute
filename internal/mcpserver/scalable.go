@@ -9,7 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const serverInstructions = "Use GitContribute for durable, source-backed repository research and contribution tracking. Prefer corpus tools for offline reads. Use github.sync_repository_metadata for stars and repository facts, then github.sync_threads for issue or pull-request headers. Rank stored open issues before hydrating finalists with github.hydrate_threads. Use research.deepwiki for derived architecture, contribution, testing, and subsystem context; never treat it as authoritative for live GitHub state. Missing facets are unknown, not negative evidence. Batch tools preserve item-level failures so retry only retryable items. GitContribute never mutates GitHub."
+const serverInstructions = "Use GitContribute for durable, source-backed repository research and contribution tracking. Prefer corpus tools for offline reads. Use github.search_repositories for one bounded live repository search, github.sync_repository_metadata for known repository facts, then github.sync_threads for issue or pull-request headers. Rank stored open issues before hydrating finalists with github.hydrate_threads. Use research.query_deepwiki for derived architecture, contribution, testing, and subsystem context; never treat it as authoritative for live GitHub state. When a tool returns a job ID, poll jobs.get until it reaches a terminal state before reading the resulting corpus projection. Missing facets are unknown, not negative evidence. Batch tools preserve item-level failures so retry only retryable items. GitContribute never mutates GitHub; use native GitHub or Git tooling for actions it does not expose."
 
 // RepositoryRef identifies one GitHub repository without implying that it has
 // been fetched or indexed locally.
@@ -160,6 +160,21 @@ type GetJobsInput struct {
 type GetJobsOutput struct {
 	Status string                    `json:"status"`
 	Items  []BatchItem[GetJobOutput] `json:"items"`
+}
+
+type SearchGitHubRepositoriesInput struct {
+	Query string `json:"query" jsonschema:"GitHub repository search query, including supported qualifiers"`
+	Sort  string `json:"sort,omitempty" jsonschema:"Optional GitHub sort: stars, forks, help-wanted-issues, or updated"`
+	Order string `json:"order,omitempty" jsonschema:"Sort order: asc or desc"`
+	Limit int    `json:"limit,omitempty" jsonschema:"Maximum repositories from 1 to 100"`
+}
+
+type SearchGitHubRepositoriesOutput struct {
+	Status     string                             `json:"status"`
+	Query      string                             `json:"query"`
+	Total      int                                `json:"total"`
+	Incomplete bool                               `json:"incomplete"`
+	Items      []BatchItem[TypedRepositoryOutput] `json:"items"`
 }
 
 type SyncRepositoryMetadataInput struct {
@@ -313,7 +328,7 @@ func (s *Server) registerScalable() {
 		setEnum(sc, "view", "compact", "full")
 		setDefault(sc, "view", "compact")
 	}), output: outputSchema[GetThreadsOutput]("Ordered stored-thread batch with item-level status."), handler: s.getThreads})
-	addCatalogTool(s.server, catalogTool[RankOpportunitiesInput, RankOpportunitiesOutput]{name: ToolRankOpportunities, title: "Rank contribution opportunities across repositories", description: "Run Contribution Radar over up to 50 stored repositories and return one compact cross-repository ranking. Use after syncing open issue headers; missing coverage remains explicit unknown evidence.", annotations: readOnly, input: inputSchema[RankOpportunitiesInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s.server, catalogTool[RankOpportunitiesInput, RankOpportunitiesOutput]{name: ToolRankThreads, title: "Rank stored threads for contribution", description: "Run Contribution Radar over up to 50 stored repositories and return one compact ranking of candidate threads. Use after syncing open issue headers; ranking does not persist opportunities and missing coverage remains explicit unknown evidence.", annotations: readOnly, input: inputSchema[RankOpportunitiesInput](func(sc *jsonschema.Schema) {
 		setArrayBounds(sc, "repositories", 1, 50)
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 20)
@@ -328,6 +343,12 @@ func (s *Server) registerScalable() {
 	addCatalogTool(s.server, catalogTool[GetJobsInput, GetJobsOutput]{name: ToolGetJob, title: "Get durable jobs in one batch", description: "Read status, progress, result, and errors for one to 100 durable jobs in input order. Poll all related jobs together and retry only item-level retryable results.", annotations: readOnly, input: inputSchema[GetJobsInput](func(sc *jsonschema.Schema) {
 		setArrayBounds(sc, "ids", 1, 100)
 	}), output: outputSchema[GetJobsOutput]("Ordered durable-job states."), handler: s.getJobs})
+	addCatalogTool(s.server, catalogTool[SearchGitHubRepositoriesInput, SearchGitHubRepositoriesOutput]{name: ToolSearchGitHubRepositories, title: "Search live GitHub repositories", description: "Run one bounded GitHub repository query and persist metadata for its matches. Use this when repository identities are not yet known; it does not fetch threads, code, or derived recommendations.", annotations: networkReadAnnotations(), input: inputSchema[SearchGitHubRepositoriesInput](func(sc *jsonschema.Schema) {
+		setEnum(sc, "sort", "stars", "forks", "help-wanted-issues", "updated")
+		setEnum(sc, "order", "asc", "desc")
+		setRange(sc, "limit", 1, 100)
+		setDefault(sc, "limit", 20)
+	}), output: outputSchema[SearchGitHubRepositoriesOutput]("Bounded live GitHub repository search with persisted metadata observations."), handler: s.searchGitHubRepositories})
 	addCatalogTool(s.server, catalogTool[SyncRepositoryMetadataInput, JobReference]{name: ToolSyncRepositoryMetadata, title: "Sync repository metadata in one batch", description: "Start one durable GitHub read for metadata only for up to 100 explicit repositories. Use it for stars, language, archive state, and issue counts; it does not fetch threads or code.", annotations: networkReadAnnotations(), input: inputSchema[SyncRepositoryMetadataInput](func(sc *jsonschema.Schema) { setArrayBounds(sc, "repositories", 1, 100) }), output: outputSchema[JobReference]("Reference to a metadata synchronization job."), handler: s.syncRepositoryMetadata})
 	addCatalogTool(s.server, catalogTool[SyncThreadsInput, JobReference]{name: ToolSyncThreads, title: "Sync GitHub thread headers in one batch", description: "Start one durable bounded read of issue or pull-request headers across up to 50 repositories or 100 exact threads. Choose exactly one selection mode; this does not fetch comments, reviews, checks, or code.", annotations: networkReadAnnotations(), input: inputSchema[SyncThreadsInput](func(sc *jsonschema.Schema) {
 		setEnum(sc, "selection", "repositories", "threads")
@@ -367,7 +388,7 @@ func (s *Server) registerScalable() {
 	}), output: outputSchema[ListPullRequestPortfolioOutput]("Offline pull-request portfolio with explainable attention states."), handler: s.listPullRequestPortfolio})
 	addCatalogTool(s.server, catalogTool[IndexRepositoriesInput, JobReference]{name: ToolIndexRepositories, title: "Acquire and index repository code in one batch", description: "Start a durable low-concurrency Git acquisition and safe code indexing job for up to 10 repositories. This performs network reads, Git processes, and local writes, but disables hooks and never executes repository-controlled code.", annotations: networkReadAnnotations(), input: inputSchema[IndexRepositoriesInput](func(sc *jsonschema.Schema) { setArrayBounds(sc, "repositories", 1, 10) }), output: outputSchema[JobReference]("Reference to a bounded repository acquisition and indexing job."), handler: s.indexRepositories})
 	addCatalogTool(s.server, catalogTool[CheckMergeConflictsInput, CheckMergeConflictsOutput]{name: ToolCheckMergeConflicts, title: "Check local Git merge conflicts in one batch", description: "Compare up to 50 already-fetched base/head OID pairs in managed workspaces using non-mutating Git reads. This never fetches remotes or changes refs, indexes, or worktrees; use it for actual merge conflicts, not competing upstream work.", annotations: processReadAnnotations(), input: inputSchema[CheckMergeConflictsInput](func(sc *jsonschema.Schema) { setArrayBounds(sc, "comparisons", 1, 50) }), output: outputSchema[CheckMergeConflictsOutput]("Ordered local merge-conflict checks."), handler: s.checkMergeConflicts})
-	addCatalogTool(s.server, catalogTool[DeepWikiInput, DeepWikiOutput]{name: ToolDeepWiki, title: "Read derived repository knowledge from DeepWiki", description: "Use DeepWiki for public repository architecture, contribution rules, testing, and subsystem context. Actions map to its public structure, contents, and question tools. Do not use this for live stars, thread state, checks, reviews, or mergeability.", annotations: networkReadAnnotations(), input: inputSchema[DeepWikiInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s.server, catalogTool[DeepWikiInput, DeepWikiOutput]{name: ToolQueryDeepWiki, title: "Query derived repository knowledge from DeepWiki", description: "Query DeepWiki for public repository architecture, contribution rules, testing, and subsystem context. Actions map to its public structure, contents, and question reads. Do not use this for live stars, thread state, checks, reviews, or mergeability.", annotations: networkReadAnnotations(), input: inputSchema[DeepWikiInput](func(sc *jsonschema.Schema) {
 		setEnum(sc, "action", "structure", "contents", "question")
 		setArrayBounds(sc, "repositories", 1, 10)
 		setRange(sc, "max_output_bytes", 1024, 1048576)
@@ -458,6 +479,18 @@ func (s *Server) syncRepositoryMetadata(ctx context.Context, _ *mcp.CallToolRequ
 		return nil, JobReference{}, errors.New("repository metadata sync is not available")
 	}
 	out, err := op.SyncRepositoryMetadata(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) searchGitHubRepositories(ctx context.Context, _ *mcp.CallToolRequest, in SearchGitHubRepositoriesInput) (*mcp.CallToolResult, SearchGitHubRepositoriesOutput, error) {
+	if in.Limit == 0 {
+		in.Limit = 20
+	}
+	op, ok := s.reader.(ScalableOperator)
+	if !ok {
+		return nil, SearchGitHubRepositoriesOutput{}, errors.New("live GitHub repository search is not available")
+	}
+	out, err := op.SearchGitHubRepositories(ctx, in)
 	return nil, out, err
 }
 func (s *Server) syncThreads(ctx context.Context, _ *mcp.CallToolRequest, in SyncThreadsInput) (*mcp.CallToolResult, JobReference, error) {

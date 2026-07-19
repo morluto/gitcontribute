@@ -528,6 +528,68 @@ func (r *MCPReader) SyncRepositoryMetadata(ctx context.Context, in mcpserver.Syn
 	return mcpserver.JobReference{ID: id, Kind: "sync_repository_metadata", Status: "queued", Message: "repository metadata sync job started"}, nil
 }
 
+// SearchGitHubRepositories performs one bounded live repository search and
+// persists the returned metadata observations without fetching thread data.
+func (r *MCPReader) SearchGitHubRepositories(ctx context.Context, in mcpserver.SearchGitHubRepositoriesInput) (mcpserver.SearchGitHubRepositoriesOutput, error) {
+	in.Query = strings.TrimSpace(in.Query)
+	if in.Query == "" {
+		return mcpserver.SearchGitHubRepositoriesOutput{}, errors.New("query is required")
+	}
+	if in.Limit == 0 {
+		in.Limit = 20
+	}
+	if in.Limit < 1 || in.Limit > 100 {
+		return mcpserver.SearchGitHubRepositoriesOutput{}, errors.New("limit must be between 1 and 100")
+	}
+	if in.Sort != "" && in.Sort != "stars" && in.Sort != "forks" && in.Sort != "help-wanted-issues" && in.Sort != "updated" {
+		return mcpserver.SearchGitHubRepositoriesOutput{}, errors.New("sort must be stars, forks, help-wanted-issues, or updated")
+	}
+	if in.Order != "" && in.Order != "asc" && in.Order != "desc" {
+		return mcpserver.SearchGitHubRepositoriesOutput{}, errors.New("order must be asc or desc")
+	}
+	reader, err := r.Service.githubReader()
+	if err != nil {
+		return mcpserver.SearchGitHubRepositoriesOutput{}, err
+	}
+	searcher, ok := reader.(github.RepositorySearcher)
+	if !ok {
+		return mcpserver.SearchGitHubRepositoriesOutput{}, errors.New("configured GitHub reader does not support repository search")
+	}
+	result, err := searcher.SearchRepositories(ctx, github.RepositorySearchOptions{Query: in.Query, Sort: in.Sort, Order: in.Order, PageOptions: github.PageOptions{Page: 1, PerPage: in.Limit}})
+	if err != nil {
+		return mcpserver.SearchGitHubRepositoriesOutput{}, err
+	}
+	c, err := r.Service.openCorpus(ctx)
+	if err != nil {
+		return mcpserver.SearchGitHubRepositoriesOutput{}, err
+	}
+	out := mcpserver.SearchGitHubRepositoriesOutput{Status: "complete", Query: in.Query, Total: result.Total, Incomplete: result.Incomplete, Items: make([]mcpserver.BatchItem[mcpserver.TypedRepositoryOutput], len(result.Items))}
+	if result.Incomplete {
+		out.Status = "partial"
+	}
+	observedAt := r.Service.now()
+	for i, remote := range result.Items {
+		key := remote.Owner + "/" + remote.Name
+		item := mcpserver.BatchItem[mcpserver.TypedRepositoryOutput]{Key: key, Status: "complete"}
+		payload, err := json.Marshal(remote)
+		if err != nil {
+			return mcpserver.SearchGitHubRepositoriesOutput{}, err
+		}
+		stored, err := c.UpsertRepository(ctx, corpusRepoFromGitHub(remote), string(payload))
+		if err == nil {
+			err = c.AdvanceFacet(ctx, stored.ID, nil, "metadata", remote.UpdatedAt, true, 0)
+		}
+		if err != nil {
+			return mcpserver.SearchGitHubRepositoriesOutput{}, err
+		}
+		value := typedRepository(stored)
+		value.Metadata = mcpserver.RepositoryMetadataOutput{Status: "complete", ObservedAt: formatTime(observedAt), SourceUpdatedAt: formatTime(remote.UpdatedAt)}
+		item.Value = &value
+		out.Items[i] = item
+	}
+	return out, nil
+}
+
 // SyncThreads submits a durable bounded GitHub read for thread headers only.
 func (r *MCPReader) SyncThreads(ctx context.Context, in mcpserver.SyncThreadsInput) (mcpserver.JobReference, error) {
 	if in.Selection != "repositories" && in.Selection != "threads" {

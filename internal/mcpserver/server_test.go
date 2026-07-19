@@ -171,6 +171,11 @@ func (*fakeReader) SearchRepositories(_ context.Context, in SearchRepositoriesIn
 	return SearchRepositoriesOutput{Query: in.Query, Total: 1, Matches: []RepositoryOutput{{Owner: in.Owner, Repo: in.Repo}}}, nil
 }
 
+func (*fakeReader) SearchGitHubRepositories(_ context.Context, in SearchGitHubRepositoriesInput) (SearchGitHubRepositoriesOutput, error) {
+	stars := 42
+	return SearchGitHubRepositoriesOutput{Status: "complete", Query: in.Query, Total: 1, Items: []BatchItem[TypedRepositoryOutput]{{Key: "acme/rocket", Status: "complete", Value: &TypedRepositoryOutput{Owner: "acme", Repo: "rocket", Stars: &stars}}}}, nil
+}
+
 func (*fakeReader) ExplainMatch(_ context.Context, in ExplainMatchInput) (ExplainMatchOutput, error) {
 	return ExplainMatchOutput{Query: in.Query, Owner: in.Owner, Repo: in.Repo, Kind: in.Kind, Number: in.Number, Title: "match"}, nil
 }

@@ -55,6 +55,7 @@ type ScalableReader interface {
 // ScalableOperator exposes bounded external reads without combining unrelated
 // facets or workflow mutations.
 type ScalableOperator interface {
+	SearchGitHubRepositories(context.Context, SearchGitHubRepositoriesInput) (SearchGitHubRepositoriesOutput, error)
 	SyncRepositoryMetadata(context.Context, SyncRepositoryMetadataInput) (JobReference, error)
 	SyncThreads(context.Context, SyncThreadsInput) (JobReference, error)
 	HydrateThreads(context.Context, HydrateThreadsInput) (JobReference, error)

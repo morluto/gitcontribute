@@ -72,7 +72,7 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 	if initialized == nil || initialized.ServerInfo == nil || initialized.ServerInfo.Name != "gitcontribute" {
 		t.Fatalf("initialize result = %+v", initialized)
 	}
-	for _, phrase := range []string{"sync_repository_metadata", "research.deepwiki", "Missing facets are unknown"} {
+	for _, phrase := range []string{"search_repositories", "sync_repository_metadata", "research.query_deepwiki", "poll jobs.get", "Missing facets are unknown", "native GitHub or Git"} {
 		if !strings.Contains(initialized.Instructions, phrase) {
 			t.Errorf("instructions missing %q: %s", phrase, initialized.Instructions)
 		}
@@ -85,7 +85,7 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		}
 		tools[tool.Name] = tool
 	}
-	for _, name := range []string{mcpserver.ToolGetRepositories, mcpserver.ToolGetThreads, mcpserver.ToolRankOpportunities, mcpserver.ToolFindPrecedents, mcpserver.ToolListPullRequestPortfolio, mcpserver.ToolSyncRepositoryMetadata, mcpserver.ToolSyncThreads, mcpserver.ToolHydrateThreads, mcpserver.ToolDeepWiki, mcpserver.ToolIndexRepositories, mcpserver.ToolCheckMergeConflicts} {
+	for _, name := range []string{mcpserver.ToolGetRepositories, mcpserver.ToolGetThreads, mcpserver.ToolRankThreads, mcpserver.ToolFindPrecedents, mcpserver.ToolListPullRequestPortfolio, mcpserver.ToolSearchGitHubRepositories, mcpserver.ToolSyncRepositoryMetadata, mcpserver.ToolSyncThreads, mcpserver.ToolHydrateThreads, mcpserver.ToolQueryDeepWiki, mcpserver.ToolIndexRepositories, mcpserver.ToolCheckMergeConflicts} {
 		if tools[name] == nil {
 			t.Errorf("tools/list missing %s", name)
 		}
@@ -107,7 +107,7 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		t.Fatalf("compact thread batch = %+v", threads)
 	}
 
-	ranked := callMCPTool[mcpserver.RankOpportunitiesOutput](t, ctx, session, mcpserver.ToolRankOpportunities, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}}, "limit": 10, "max_results_per_repository": 10})
+	ranked := callMCPTool[mcpserver.RankOpportunitiesOutput](t, ctx, session, mcpserver.ToolRankThreads, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}}, "limit": 10, "max_results_per_repository": 10})
 	if len(ranked.Candidates) == 0 || ranked.Candidates[0].Number != 1 {
 		t.Fatalf("ranked opportunities = %+v", ranked)
 	}

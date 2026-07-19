@@ -193,6 +193,7 @@ var outputPropertyDescriptions = map[string]string{
 	"reasons":                "Evidence-backed explanations for the result.",
 	"closed_at":              "RFC 3339 timestamp when GitHub reports the thread closed.",
 	"merged_at":              "RFC 3339 timestamp when GitHub reports the pull request merged.",
+	"incomplete":             "Whether GitHub reported that the bounded search result may be incomplete.",
 }
 
 func inferredSchema[T any]() *jsonschema.Schema {

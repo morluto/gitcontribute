@@ -136,14 +136,15 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 		want   string
 	}{
 		{"Search locally stored issue titles for a retry deadlock", ToolSearchThreads},
+		{"Search live GitHub for highly starred inference repositories", ToolSearchGitHubRepositories},
 		{"Read metadata for twelve repositories already stored in the corpus", ToolGetRepositories},
 		{"Fetch current GitHub stars and metadata for twelve repositories", ToolSyncRepositoryMetadata},
 		{"Read the complete stored body of pull request 42", ToolGetThreads},
 		{"Refresh issue and pull request thread headers for selected repositories from GitHub", ToolSyncThreads},
 		{"Fetch comments and reviews for one stored pull request from GitHub", ToolHydrateThreads},
-		{"Rank stored open issues for contribution across selected repositories", ToolRankOpportunities},
+		{"Rank stored open issues for contribution across selected repositories", ToolRankThreads},
 		{"Find similar completed and rejected historical work for this issue", ToolFindPrecedents},
-		{"Ask DeepWiki to compare the architecture of three public repositories", ToolDeepWiki},
+		{"Ask DeepWiki to compare the architecture of three public repositories", ToolQueryDeepWiki},
 		{"Refresh mergeability and reviews for my selected pull requests", ToolSyncPullRequestStatus},
 		{"List my stored pull requests that need contributor attention", ToolListPullRequestPortfolio},
 		{"Acquire and index code for several repositories", ToolIndexRepositories},
@@ -184,6 +185,7 @@ func TestInvalidToolCallEvaluation(t *testing.T) {
 	}{
 		{ToolSearchThreads, map[string]any{"query": "race", "kind": "discussion"}},
 		{ToolSearchThreads, map[string]any{"query": "race", "limit": 101}},
+		{ToolSearchGitHubRepositories, map[string]any{"limit": 20}},
 		{ToolSearchCode, map[string]any{"query": "race", "owner": "acme"}},
 		{ToolGetThreads, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 0}}}},
 		{ToolGetEvidence, map[string]any{}},
