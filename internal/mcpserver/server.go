@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -357,15 +356,15 @@ type FindClustersOutput struct {
 // CoverageTarget selects repository-level coverage or, when kind and number
 // are both present, coverage for one exact stored thread.
 type CoverageTarget struct {
-	Owner  string `json:"owner"`
-	Repo   string `json:"repo"`
-	Kind   string `json:"kind,omitempty"`
-	Number int    `json:"number,omitempty"`
+	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
+	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
+	Kind   string `json:"kind,omitempty" jsonschema:"Optional thread kind: issue or pull_request"`
+	Number int    `json:"number,omitempty" jsonschema:"Optional positive issue or pull request number"`
 }
 
 // GetCoverageInput selects bounded repository or thread facet coverage reads.
 type GetCoverageInput struct {
-	Targets []CoverageTarget `json:"targets"`
+	Targets []CoverageTarget `json:"targets" jsonschema:"One to 100 repository or exact-thread targets"`
 }
 
 // FacetCoverageOutput reports completeness and freshness for one facet.
@@ -704,7 +703,7 @@ func (s *Server) getLens(ctx context.Context, _ *mcp.CallToolRequest, in LensInp
 
 func validateRepo(in RepoInput) error {
 	if strings.TrimSpace(in.Owner) == "" || strings.TrimSpace(in.Repo) == "" {
-		return errors.New("owner and repo are required")
+		return InvalidArgument("owner", "owner and repo are required together", map[string]any{"owner": "acme", "repo": "rocket"})
 	}
 	return nil
 }
@@ -712,10 +711,10 @@ func validateRepo(in RepoInput) error {
 func normalizeID(field, value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", fmt.Errorf("%s is required", field)
+		return "", InvalidArgument(field, "is required", map[string]any{field: "<id>"})
 	}
 	if len(value) > 128 {
-		return "", fmt.Errorf("%s exceeds 128 bytes", field)
+		return "", InvalidArgument(field, "must not exceed 128 bytes", map[string]any{field: "<id>"})
 	}
 	return value, nil
 }

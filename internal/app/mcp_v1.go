@@ -340,7 +340,7 @@ func (r *MCPReader) BuildRepositoryDossier(ctx context.Context, in mcpserver.Bui
 	if err != nil {
 		return mcpserver.JobReference{}, err
 	}
-	return mcpserver.JobReference{ID: id, Kind: "build_repository_dossier", Status: "queued", Message: "dossier build job started"}, nil
+	return queuedJobReference(id, "build_repository_dossier", "dossier build job started"), nil
 }
 
 // CreateWorkspace submits a durable job that clones a remote and creates a worktree.
@@ -367,7 +367,7 @@ func (r *MCPReader) CreateWorkspace(ctx context.Context, in mcpserver.CreateWork
 	if err != nil {
 		return mcpserver.JobReference{}, err
 	}
-	return mcpserver.JobReference{ID: id, Kind: "create_workspace", Status: "queued", Message: "workspace creation job started"}, nil
+	return queuedJobReference(id, "create_workspace", "workspace creation job started"), nil
 }
 
 // RunValidation submits a durable validation run.
@@ -396,7 +396,7 @@ func (r *MCPReader) RunValidation(ctx context.Context, in mcpserver.RunValidatio
 	if err != nil {
 		return mcpserver.JobReference{}, err
 	}
-	return mcpserver.JobReference{ID: id, Kind: "run_validation", Status: "queued", Message: "validation run started"}, nil
+	return queuedJobReference(id, "run_validation", "validation run started"), nil
 }
 
 // StartInvestigation creates a new investigation workspace.

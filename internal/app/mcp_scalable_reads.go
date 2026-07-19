@@ -72,7 +72,7 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpserver.GetReposit
 }
 
 func typedRepository(repo *corpus.Repository) mcpserver.TypedRepositoryOutput {
-	return mcpserver.TypedRepositoryOutput{Owner: repo.Owner, Repo: repo.Name, Description: ptr(repo.Description), DefaultBranch: ptr(repo.DefaultBranch), Language: ptr(repo.Language), License: ptr(repo.License), Topics: append([]string(nil), repo.Topics...), Stars: ptr(repo.Stars), Watchers: ptr(repo.Watchers), Forks: ptr(repo.Forks), OpenIssues: ptr(repo.OpenIssues), Archived: ptr(repo.Archived), Fork: ptr(repo.Fork)}
+	return mcpserver.TypedRepositoryOutput{Ref: "repository:" + repo.Owner + "/" + repo.Name, Owner: repo.Owner, Repo: repo.Name, Description: ptr(repo.Description), DefaultBranch: ptr(repo.DefaultBranch), Language: ptr(repo.Language), License: ptr(repo.License), Topics: append([]string(nil), repo.Topics...), Stars: ptr(repo.Stars), Watchers: ptr(repo.Watchers), Forks: ptr(repo.Forks), OpenIssues: ptr(repo.OpenIssues), Archived: ptr(repo.Archived), Fork: ptr(repo.Fork)}
 }
 
 func clearRepositoryFacts(v *mcpserver.TypedRepositoryOutput) {

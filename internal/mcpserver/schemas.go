@@ -10,6 +10,7 @@ import (
 
 var outputPropertyDescriptions = map[string]string{
 	"id":                        "Stable identifier used by related GitContribute tools and resources.",
+	"code":                      "Stable machine-readable warning or error code.",
 	"name":                      "Human-readable stable name.",
 	"owner":                     "GitHub repository owner.",
 	"repo":                      "GitHub repository name.",
@@ -22,6 +23,15 @@ var outputPropertyDescriptions = map[string]string{
 	"author":                    "GitHub login of the author.",
 	"labels":                    "Stored GitHub labels.",
 	"query":                     "Search query used to produce this result.",
+	"interpretation":            "Concise explanation of how the request was interpreted.",
+	"response_format":           "Response detail level used for this result.",
+	"page":                      "One-based provider result page.",
+	"next_page":                 "Next provider result page; absent when no next page is available.",
+	"warnings":                  "Request-specific limitations that affect interpretation.",
+	"suggestion":                "Actionable adjustment that addresses the warning.",
+	"suggested_actions":         "Non-mandatory follow-up tool calls with reusable arguments.",
+	"tool":                      "Canonical GitContribute tool name for a suggested action.",
+	"arguments":                 "Arguments for the suggested tool call.",
 	"total":                     "Total number of matching records represented by this response.",
 	"limit":                     "Maximum number of records requested.",
 	"matches":                   "Ordered matches for the current page.",
@@ -145,6 +155,7 @@ var outputPropertyDescriptions = map[string]string{
 	"key":                       "Stable input-derived identity for this batch item.",
 	"value":                     "Successful value for this batch item.",
 	"retry_after_ms":            "Suggested milliseconds to wait before retrying this item.",
+	"poll_after_ms":             "Suggested milliseconds to wait before polling the durable job.",
 	"next_action":               "Suggested next tool or recovery action.",
 	"metadata":                  "Repository metadata facet coverage and provenance.",
 	"default_branch":            "Repository default branch reported by GitHub.",
@@ -207,6 +218,7 @@ var outputPropertyDescriptions = map[string]string{
 	"closed_at":                 "RFC 3339 timestamp when GitHub reports the thread closed.",
 	"merged_at":                 "RFC 3339 timestamp when GitHub reports the pull request merged.",
 	"incomplete":                "Whether GitHub reported that the bounded search result may be incomplete.",
+	"pushed_at":                 "RFC 3339 timestamp of the latest repository push reported by GitHub.",
 }
 
 func inferredSchema[T any]() *jsonschema.Schema {
@@ -335,30 +347,6 @@ func requireExactlyOne(schema *jsonschema.Schema, first, second string) {
 		{Required: []string{first}, Not: &jsonschema.Schema{Required: []string{second}}},
 		{Required: []string{second}, Not: &jsonschema.Schema{Required: []string{first}}},
 	}
-}
-
-func requireWhen(schema *jsonschema.Schema, discriminator string, value any, required ...string) {
-	schema.AllOf = append(schema.AllOf, &jsonschema.Schema{
-		If: &jsonschema.Schema{
-			Properties: map[string]*jsonschema.Schema{discriminator: {Const: &value}},
-			Required:   []string{discriminator},
-		},
-		Then: &jsonschema.Schema{Required: required},
-	})
-}
-
-func forbidWhen(schema *jsonschema.Schema, discriminator string, value any, forbidden ...string) {
-	anyForbidden := make([]*jsonschema.Schema, 0, len(forbidden))
-	for _, name := range forbidden {
-		anyForbidden = append(anyForbidden, &jsonschema.Schema{Required: []string{name}})
-	}
-	schema.AllOf = append(schema.AllOf, &jsonschema.Schema{
-		If: &jsonschema.Schema{
-			Properties: map[string]*jsonschema.Schema{discriminator: {Const: &value}},
-			Required:   []string{discriminator},
-		},
-		Then: &jsonschema.Schema{Not: &jsonschema.Schema{AnyOf: anyForbidden}},
-	})
 }
 
 func setPositiveItems(schema *jsonschema.Schema, name string) {

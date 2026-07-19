@@ -34,69 +34,7 @@ func (r *MCPReader) SyncRepositoryMetadata(ctx context.Context, in mcpserver.Syn
 	if err != nil {
 		return mcpserver.JobReference{}, err
 	}
-	return mcpserver.JobReference{ID: id, Kind: "sync_repository_metadata", Status: "queued", Message: "repository metadata sync job started"}, nil
-}
-
-// SearchGitHubRepositories performs one bounded live repository search and
-// persists the returned metadata observations without fetching thread data.
-func (r *MCPReader) SearchGitHubRepositories(ctx context.Context, in mcpserver.SearchGitHubRepositoriesInput) (mcpserver.SearchGitHubRepositoriesOutput, error) {
-	in.Query = strings.TrimSpace(in.Query)
-	if in.Query == "" {
-		return mcpserver.SearchGitHubRepositoriesOutput{}, errors.New("query is required")
-	}
-	if in.Limit == 0 {
-		in.Limit = 20
-	}
-	if in.Limit < 1 || in.Limit > 100 {
-		return mcpserver.SearchGitHubRepositoriesOutput{}, errors.New("limit must be between 1 and 100")
-	}
-	if in.Sort != "" && in.Sort != "stars" && in.Sort != "forks" && in.Sort != "help-wanted-issues" && in.Sort != "updated" {
-		return mcpserver.SearchGitHubRepositoriesOutput{}, errors.New("sort must be stars, forks, help-wanted-issues, or updated")
-	}
-	if in.Order != "" && in.Order != "asc" && in.Order != "desc" {
-		return mcpserver.SearchGitHubRepositoriesOutput{}, errors.New("order must be asc or desc")
-	}
-	reader, err := r.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
-	if err != nil {
-		return mcpserver.SearchGitHubRepositoriesOutput{}, err
-	}
-	searcher, ok := reader.(github.RepositorySearcher)
-	if !ok {
-		return mcpserver.SearchGitHubRepositoriesOutput{}, errors.New("configured GitHub reader does not support repository search")
-	}
-	result, err := searcher.SearchRepositories(ctx, github.RepositorySearchOptions{Query: in.Query, Sort: in.Sort, Order: in.Order, PageOptions: github.PageOptions{Page: 1, PerPage: in.Limit}})
-	if err != nil {
-		return mcpserver.SearchGitHubRepositoriesOutput{}, err
-	}
-	c, err := r.openCorpus(ctx)
-	if err != nil {
-		return mcpserver.SearchGitHubRepositoriesOutput{}, err
-	}
-	out := mcpserver.SearchGitHubRepositoriesOutput{Status: "complete", Query: in.Query, Total: result.Total, Incomplete: result.Incomplete, Items: make([]mcpserver.BatchItem[mcpserver.TypedRepositoryOutput], len(result.Items))}
-	if result.Incomplete {
-		out.Status = "partial"
-	}
-	observedAt := r.now()
-	for i, remote := range result.Items {
-		key := remote.Owner + "/" + remote.Name
-		item := mcpserver.BatchItem[mcpserver.TypedRepositoryOutput]{Key: key, Status: "complete"}
-		payload, err := json.Marshal(remote)
-		if err != nil {
-			return mcpserver.SearchGitHubRepositoriesOutput{}, err
-		}
-		stored, err := c.UpsertRepository(ctx, corpusRepoFromGitHub(remote), string(payload))
-		if err == nil {
-			err = c.AdvanceFacet(ctx, stored.ID, nil, "metadata", remote.UpdatedAt, true, 0)
-		}
-		if err != nil {
-			return mcpserver.SearchGitHubRepositoriesOutput{}, err
-		}
-		value := typedRepository(stored)
-		value.Metadata = mcpserver.RepositoryMetadataOutput{Status: "complete", ObservedAt: formatTime(observedAt), SourceUpdatedAt: formatTime(remote.UpdatedAt)}
-		item.Value = &value
-		out.Items[i] = item
-	}
-	return out, nil
+	return queuedJobReference(id, "sync_repository_metadata", "repository metadata sync job started"), nil
 }
 
 // SyncThreads submits a durable bounded GitHub read for thread headers only.
@@ -116,7 +54,7 @@ func (r *MCPReader) SyncThreads(ctx context.Context, in mcpserver.SyncThreadsInp
 	if err != nil {
 		return mcpserver.JobReference{}, err
 	}
-	return mcpserver.JobReference{ID: id, Kind: "sync_threads", Status: "queued", Message: "thread synchronization job started"}, nil
+	return queuedJobReference(id, "sync_threads", "thread synchronization job started"), nil
 }
 
 // This function keeps bounded worker orchestration and ordered result assembly
@@ -242,7 +180,7 @@ func (r *MCPReader) HydrateThreads(ctx context.Context, in mcpserver.HydrateThre
 	if err != nil {
 		return mcpserver.JobReference{}, err
 	}
-	return mcpserver.JobReference{ID: id, Kind: "hydrate_threads", Status: "queued", Message: "thread hydration job started"}, nil
+	return queuedJobReference(id, "hydrate_threads", "thread hydration job started"), nil
 }
 
 // GetAuthenticatedIdentity reads the GitHub account associated with the active credential.
@@ -283,7 +221,7 @@ func (r *MCPReader) SyncAuthoredPullRequests(ctx context.Context, in mcpserver.S
 	if err != nil {
 		return mcpserver.JobReference{}, err
 	}
-	return mcpserver.JobReference{ID: id, Kind: "sync_authored_pull_requests", Status: "queued", Message: "authored pull-request synchronization job started"}, nil
+	return queuedJobReference(id, "sync_authored_pull_requests", "authored pull-request synchronization job started"), nil
 }
 
 // This bounded job combines pagination, repository grouping, and ordered worker
@@ -430,7 +368,7 @@ func (r *MCPReader) SyncPullRequestStatus(ctx context.Context, in mcpserver.Sync
 	if err != nil {
 		return mcpserver.JobReference{}, err
 	}
-	return mcpserver.JobReference{ID: id, Kind: "sync_pull_request_status", Status: "queued", Message: "pull-request status synchronization job started"}, nil
+	return queuedJobReference(id, "sync_pull_request_status", "pull-request status synchronization job started"), nil
 }
 
 // IndexRepositories submits a durable Git acquisition and safe indexing job
@@ -450,7 +388,16 @@ func (r *MCPReader) IndexRepositories(ctx context.Context, in mcpserver.IndexRep
 	if err != nil {
 		return mcpserver.JobReference{}, err
 	}
-	return mcpserver.JobReference{ID: id, Kind: "index_repositories", Status: "queued", Message: "repository indexing job started"}, nil
+	return queuedJobReference(id, "index_repositories", "repository indexing job started"), nil
+}
+
+func queuedJobReference(id, kind, message string) mcpserver.JobReference {
+	return mcpserver.JobReference{
+		ID: id, Ref: "job:" + id, Kind: kind, Status: "queued", Message: message, PollAfterMS: 1000,
+		SuggestedActions: []mcpserver.SuggestedAction{{
+			Tool: mcpserver.ToolGetJob, Reason: "Poll this durable job after the suggested delay.", Arguments: map[string]any{"ids": []string{id}},
+		}},
+	}
 }
 
 // CheckMergeConflicts compares already-fetched OIDs in managed workspaces

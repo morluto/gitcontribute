@@ -19,7 +19,30 @@ corpus.find_precedents -> workflow.find_competing_work
 ```
 
 - `github.search_repositories` runs one bounded live search and persists the
-  returned repository metadata. It does not rank contribution candidates.
+  returned repository metadata. Prefer structured filters so GitContribute can
+  validate and explain the query; reserve `raw_query` for unsupported GitHub
+  qualifiers. `response_format: concise` keeps broad discovery bounded, while
+  `detailed` preserves secondary metadata for finalists. Live pagination uses
+  `page` and `next_page` because GitHub search pages are not stable cursors.
+
+```json
+{
+  "text": "inference",
+  "match_fields": ["name", "description"],
+  "topics": ["cuda"],
+  "language": "Python",
+  "stars_min": 200,
+  "pushed_after": "2026-06-15",
+  "archived": false,
+  "fork": false,
+  "response_format": "concise"
+}
+```
+
+Search responses return the compiled provider `query`, a short interpretation,
+request-specific warnings, semantic `repository:owner/name` references, and a
+non-mandatory suggested thread-sync call. The deprecated `query` field remains
+accepted for compatibility and emits a migration warning.
 - `github.sync_repository_metadata` refreshes facts for known repositories only.
 - `corpus.get_repositories`, `corpus.get_threads`,
   `corpus.rank_threads`, and `corpus.find_precedents` are offline.
@@ -75,7 +98,8 @@ A durable job can succeed while its result is `partial`: job success means the
 bounded operation completed and recorded every item outcome. Poll concurrent
 jobs together with vectorized `jobs.get`, then retry only retryable items. Never
 interpret absent coverage as a zero, a passing check, or a lack of competing
-work.
+work. New job references carry a semantic `job:<id>` reference,
+`poll_after_ms`, and a machine-readable suggested `jobs.get` call.
 
 `corpus.get_coverage` accepts up to 100 ordered repository or exact-thread
 targets. `jobs.cancel` accepts up to 100 IDs and returns isolated item outcomes;

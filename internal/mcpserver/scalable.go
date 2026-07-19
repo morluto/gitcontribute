@@ -55,6 +55,7 @@ type RepositoryMetadataOutput struct {
 
 // TypedRepositoryOutput contains repository facts with explicit metadata coverage.
 type TypedRepositoryOutput struct {
+	Ref           string                   `json:"ref"`
 	Owner         string                   `json:"owner"`
 	Repo          string                   `json:"repo"`
 	Metadata      RepositoryMetadataOutput `json:"metadata"`
@@ -170,23 +171,6 @@ type GetJobsInput struct {
 type GetJobsOutput struct {
 	Status string                    `json:"status"`
 	Items  []BatchItem[GetJobOutput] `json:"items"`
-}
-
-// SearchGitHubRepositoriesInput defines one bounded live GitHub search.
-type SearchGitHubRepositoriesInput struct {
-	Query string `json:"query" jsonschema:"GitHub repository search query, including supported qualifiers"`
-	Sort  string `json:"sort,omitempty" jsonschema:"Optional GitHub sort: stars, forks, help-wanted-issues, or updated"`
-	Order string `json:"order,omitempty" jsonschema:"Sort order: asc or desc"`
-	Limit int    `json:"limit,omitempty" jsonschema:"Maximum repositories from 1 to 100"`
-}
-
-// SearchGitHubRepositoriesOutput contains search results and completeness metadata.
-type SearchGitHubRepositoriesOutput struct {
-	Status     string                             `json:"status"`
-	Query      string                             `json:"query"`
-	Total      int                                `json:"total"`
-	Incomplete bool                               `json:"incomplete"`
-	Items      []BatchItem[TypedRepositoryOutput] `json:"items"`
 }
 
 // SyncRepositoryMetadataInput selects repositories for asynchronous metadata refresh.
@@ -327,9 +311,9 @@ type FindPortfolioOverlapsOutput struct {
 
 // LinkPullRequestInput explicitly associates a stored PR with local workflow state.
 type LinkPullRequestInput struct {
-	PullRequest   ThreadRef `json:"pull_request"`
-	OpportunityID string    `json:"opportunity_id,omitempty"`
-	WorkspaceID   string    `json:"workspace_id,omitempty"`
+	PullRequest   ThreadRef `json:"pull_request" jsonschema:"Exact stored pull request to link"`
+	OpportunityID string    `json:"opportunity_id,omitempty" jsonschema:"Optional local opportunity ID"`
+	WorkspaceID   string    `json:"workspace_id,omitempty" jsonschema:"Optional managed workspace ID"`
 }
 
 // LinkPullRequestOutput reports the idempotently stored local relationship.
@@ -432,12 +416,21 @@ func (s *Server) registerScalable() {
 	addCatalogTool(s.server, catalogTool[GetJobsInput, GetJobsOutput]{name: ToolGetJob, title: "Get durable jobs in one batch", description: "Read up to 100 durable jobs in order with structured progress and item-level outcomes.", annotations: readOnly, input: inputSchema[GetJobsInput](func(sc *jsonschema.Schema) {
 		setArrayBounds(sc, "ids", 1, 100)
 	}), output: outputSchema[GetJobsOutput]("Ordered durable-job states."), handler: s.getJobs})
-	addCatalogTool(s.server, catalogTool[SearchGitHubRepositoriesInput, SearchGitHubRepositoriesOutput]{name: ToolSearchGitHubRepositories, title: "Search live GitHub repositories", description: "Run one bounded GitHub repository query and persist metadata for its matches. Use this when repository identities are not yet known; it does not fetch threads, code, or derived recommendations.", annotations: networkReadAnnotations(), input: inputSchema[SearchGitHubRepositoriesInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s.server, catalogTool[SearchGitHubRepositoriesInput, SearchGitHubRepositoriesOutput]{name: ToolSearchGitHubRepositories, title: "Search live GitHub repositories", description: "Find repositories with structured filters and persist metadata. Use raw_query for unsupported GitHub qualifiers. Does not fetch threads or code.", annotations: networkReadAnnotations(), input: inputSchema[SearchGitHubRepositoriesInput](func(sc *jsonschema.Schema) {
+		setArrayBounds(sc, "match_fields", 1, 3)
+		setArrayEnum(sc, "match_fields", "name", "description", "readme")
+		setArrayBounds(sc, "topics", 1, 10)
+		setMinimum(sc, "stars_min", 0)
+		setMinimum(sc, "stars_max", 0)
 		setEnum(sc, "sort", "stars", "forks", "help-wanted-issues", "updated")
 		setEnum(sc, "order", "asc", "desc")
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 20)
-	}), output: outputSchema[SearchGitHubRepositoriesOutput]("Bounded live GitHub repository search with persisted metadata observations."), handler: s.searchGitHubRepositories})
+		setRange(sc, "page", 1, 1000)
+		setDefault(sc, "page", 1)
+		setEnum(sc, "response_format", "concise", "detailed")
+		setDefault(sc, "response_format", "detailed")
+	}), output: outputSchema[SearchGitHubRepositoriesOutput]("Live repository search with persisted metadata."), handler: s.searchGitHubRepositories})
 	addCatalogTool(s.server, catalogTool[SyncRepositoryMetadataInput, JobReference]{name: ToolSyncRepositoryMetadata, title: "Sync repository metadata in one batch", description: "Start one durable GitHub read for metadata only for up to 100 explicit repositories. Use it for stars, language, archive state, and issue counts; it does not fetch threads or code.", annotations: networkReadAnnotations(), input: inputSchema[SyncRepositoryMetadataInput](func(sc *jsonschema.Schema) { setArrayBounds(sc, "repositories", 1, 100) }), output: outputSchema[JobReference]("Reference to a metadata synchronization job."), handler: s.syncRepositoryMetadata})
 	addCatalogTool(s.server, catalogTool[SyncThreadsInput, JobReference]{name: ToolSyncThreads, title: "Sync GitHub thread headers in one batch", description: "Start one durable bounded read of issue or pull-request headers across up to 50 repositories or 100 exact threads. Choose exactly one selection mode; this does not fetch comments, reviews, checks, or code.", annotations: networkReadAnnotations(), input: inputSchema[SyncThreadsInput](func(sc *jsonschema.Schema) {
 		setEnum(sc, "selection", "repositories", "threads")
@@ -447,10 +440,6 @@ func (s *Server) registerScalable() {
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit_per_repository", 1, 1000)
 		setDefault(sc, "limit_per_repository", 100)
-		requireWhen(sc, "selection", "repositories", "repositories")
-		requireWhen(sc, "selection", "threads", "threads")
-		forbidWhen(sc, "selection", "repositories", "threads")
-		forbidWhen(sc, "selection", "threads", "repositories", "kind", "state", "updated_after", "limit_per_repository")
 	}), output: outputSchema[JobReference]("Reference to a bounded thread-header synchronization job."), handler: s.syncThreads})
 	addCatalogTool(s.server, catalogTool[HydrateThreadsInput, JobReference]{name: ToolHydrateThreads, title: "Fetch selected GitHub thread facets", description: "Fetch explicit comments, issue timelines, pull-request details, reviews, or review comments for up to 100 exact threads. Timeline history is opt-in; hydrate only finalists after ranking.", annotations: networkReadAnnotations(), input: inputSchema[HydrateThreadsInput](func(sc *jsonschema.Schema) {
 		setArrayBounds(sc, "threads", 1, 100)
@@ -494,9 +483,6 @@ func (s *Server) registerScalable() {
 		setArrayBounds(sc, "repositories", 1, 10)
 		setRange(sc, "max_output_bytes", 1024, 1048576)
 		setDefault(sc, "max_output_bytes", 131072)
-		requireWhen(sc, "action", "structure", "repository")
-		requireWhen(sc, "action", "contents", "repository")
-		requireWhen(sc, "action", "question", "repositories", "question")
 	}), output: outputSchema[DeepWikiOutput]("Derived DeepWiki response with provenance."), handler: s.deepWiki})
 }
 
@@ -592,6 +578,9 @@ func (s *Server) syncRepositoryMetadata(ctx context.Context, _ *mcp.CallToolRequ
 }
 
 func (s *Server) searchGitHubRepositories(ctx context.Context, _ *mcp.CallToolRequest, in SearchGitHubRepositoriesInput) (*mcp.CallToolResult, SearchGitHubRepositoriesOutput, error) {
+	if err := validateRepositorySearchInput(in); err != nil {
+		return nil, SearchGitHubRepositoriesOutput{}, err
+	}
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
@@ -602,12 +591,40 @@ func (s *Server) searchGitHubRepositories(ctx context.Context, _ *mcp.CallToolRe
 	out, err := op.SearchGitHubRepositories(ctx, in)
 	return nil, out, err
 }
+
+func validateRepositorySearchInput(in SearchGitHubRepositoriesInput) error {
+	legacy := strings.TrimSpace(in.Query)
+	raw := strings.TrimSpace(in.RawQuery)
+	structured := strings.TrimSpace(in.Text) != "" || len(in.MatchFields) > 0 || len(in.Topics) > 0 || strings.TrimSpace(in.Language) != "" || in.StarsMin != 0 || in.StarsMax != 0 || in.CreatedAfter != "" || in.CreatedBefore != "" || in.PushedAfter != "" || in.PushedBefore != "" || in.Archived != nil || in.Fork != nil
+	if legacy != "" && raw != "" {
+		return InvalidArgument("raw_query", "query and raw_query are mutually exclusive", map[string]any{"raw_query": "topic:cuda stars:>500"})
+	}
+	if (legacy != "" || raw != "") && structured {
+		return InvalidArgument("raw_query", "cannot be combined with structured filters; choose one input mode", map[string]any{"text": "inference", "topics": []string{"cuda"}})
+	}
+	if legacy == "" && raw == "" && !structured {
+		return InvalidArgument("text", "provide raw_query or at least one structured filter", map[string]any{"text": "inference", "match_fields": []string{"name", "description"}})
+	}
+	if len(in.MatchFields) > 0 && strings.TrimSpace(in.Text) == "" {
+		return InvalidArgument("match_fields", "requires text", map[string]any{"text": "inference", "match_fields": []string{"name", "description"}})
+	}
+	return nil
+}
 func (s *Server) syncThreads(ctx context.Context, _ *mcp.CallToolRequest, in SyncThreadsInput) (*mcp.CallToolResult, JobReference, error) {
+	if in.Selection != "repositories" && in.Selection != "threads" {
+		return nil, JobReference{}, errors.New("selection must be repositories or threads")
+	}
 	if in.Selection == "repositories" && len(in.Repositories) == 0 {
 		return nil, JobReference{}, errors.New("repositories are required in repository selection mode")
 	}
 	if in.Selection == "threads" && len(in.Threads) == 0 {
 		return nil, JobReference{}, errors.New("threads are required in thread selection mode")
+	}
+	if in.Selection == "repositories" && len(in.Threads) > 0 {
+		return nil, JobReference{}, errors.New("threads are not accepted in repository selection mode")
+	}
+	if in.Selection == "threads" && (len(in.Repositories) > 0 || in.Kind != "" || in.State != "" || in.UpdatedAfter != "" || in.LimitPerRepository != 0) {
+		return nil, JobReference{}, errors.New("repository filters are not accepted in thread selection mode")
 	}
 	op, ok := s.reader.(ScalableOperator)
 	if !ok {
