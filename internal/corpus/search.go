@@ -18,6 +18,8 @@ type SearchFilter struct {
 	Repo         string
 	Kind         string
 	State        string
+	StateReason  string
+	Merged       *bool
 	Author       string
 	Association  string
 	Assignee     string
@@ -176,6 +178,18 @@ func appendThreadMetadataFilters(query string, args []any, filter SearchFilter) 
 		query += ` AND t.state = ?`
 		args = append(args, filter.State)
 	}
+	if filter.StateReason != "" {
+		query += ` AND t.state_reason = ?`
+		args = append(args, filter.StateReason)
+	}
+	if filter.Merged != nil {
+		merged := 0
+		if *filter.Merged {
+			merged = 1
+		}
+		query += ` AND t.merged = ?`
+		args = append(args, merged)
+	}
 	if filter.Author != "" {
 		query += ` AND lower(t.author) = lower(?)`
 		args = append(args, filter.Author)
@@ -208,7 +222,7 @@ func threadFilterKey(filter SearchFilter) string {
 	}
 	slices.Sort(labels)
 	return strings.Join([]string{
-		strings.ToLower(filter.State), strings.ToLower(filter.Author), strings.ToLower(filter.Association), strings.ToLower(filter.Assignee), strings.Join(labels, ","),
+		strings.ToLower(filter.State), strings.ToLower(filter.StateReason), fmt.Sprint(filter.Merged), strings.ToLower(filter.Author), strings.ToLower(filter.Association), strings.ToLower(filter.Assignee), strings.Join(labels, ","),
 		fmt.Sprint(filter.UpdatedAfter.UTC().Unix()),
 	}, "|")
 }

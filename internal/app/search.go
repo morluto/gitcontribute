@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"slices"
 	"strings"
 	"time"
@@ -16,26 +15,32 @@ import (
 )
 
 type searchMatch struct {
-	Repo      domain.RepoRef
-	Kind      string
-	Number    int
-	State     string
-	Title     string
-	Body      string
-	Author    string
-	Labels    []string
-	Assignees []string
-	Language  string
-	Archived  bool
-	Stars     int
-	Watchers  int
-	Forks     int
-	UpdatedAt time.Time
-	URL       string
-	Score     float64
-	Freshness time.Time
-	Coverage  []string
-	Fields    map[string]any
+	Repo              domain.RepoRef
+	Kind              string
+	Number            int
+	State             string
+	StateReason       string
+	Title             string
+	Body              string
+	Author            string
+	AuthorAssociation string
+	Labels            []string
+	Assignees         []string
+	Draft             bool
+	ClosedAt          time.Time
+	MergedAt          time.Time
+	Merged            bool
+	Language          string
+	Archived          bool
+	Stars             int
+	Watchers          int
+	Forks             int
+	UpdatedAt         time.Time
+	URL               string
+	Score             float64
+	Freshness         time.Time
+	Coverage          []string
+	Fields            map[string]any
 }
 
 type searchResult struct {
@@ -162,7 +167,7 @@ func (s *Service) resolveRepoFilter(ctx context.Context, c *corpus.Corpus, opts 
 
 func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query string, repoID int64, ref domain.RepoRef, kind string, opts cli.SearchOptions, now time.Time) (searchResult, error) {
 	filter := corpus.SearchFilter{
-		RepoID: repoID, Repo: ref.String(), Kind: kind, State: opts.State, Author: opts.Author,
+		RepoID: repoID, Repo: ref.String(), Kind: kind, State: opts.State, StateReason: opts.StateReason, Merged: opts.Merged, Author: opts.Author,
 		Association: opts.Association, Assignee: opts.Assignee,
 		Labels: opts.Labels, UpdatedAfter: opts.UpdatedAfter, Limit: opts.Limit, Cursor: opts.Cursor,
 	}
@@ -203,15 +208,18 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 
 		ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Name}
 		m := searchMatch{
-			Repo:      ref,
-			Kind:      t.Kind,
-			Number:    t.Number,
-			State:     t.State,
-			Title:     t.Title,
-			Body:      t.Body,
-			Author:    t.Author,
-			Labels:    t.Labels,
-			Assignees: t.Assignees,
+			Repo:              ref,
+			Kind:              t.Kind,
+			Number:            t.Number,
+			State:             t.State,
+			StateReason:       t.StateReason,
+			Title:             t.Title,
+			Body:              t.Body,
+			Author:            t.Author,
+			AuthorAssociation: t.AuthorAssociation,
+			Labels:            t.Labels,
+			Assignees:         t.Assignees,
+			Draft:             t.Draft, ClosedAt: t.ClosedAt, MergedAt: t.MergedAt, Merged: t.Merged,
 			Language:  repo.Language,
 			Archived:  repo.Archived,
 			Stars:     repo.Stars,
@@ -839,49 +847,4 @@ func scoreMatch(query string, m searchMatch, freshness time.Time, coverage []str
 		score = 1
 	}
 	return roundScore(score), reasons
-}
-
-func uniqueTerms(query string) []string {
-	fields := strings.Fields(query)
-	seen := make(map[string]struct{}, len(fields))
-	terms := make([]string, 0, len(fields))
-	for _, t := range fields {
-		if _, ok := seen[t]; ok {
-			continue
-		}
-		seen[t] = struct{}{}
-		terms = append(terms, t)
-	}
-	return terms
-}
-
-func humanDuration(d time.Duration) string {
-	if d < time.Hour*24 {
-		return "less than a day"
-	}
-	days := int(d.Hours() / 24)
-	if days < 30 {
-		return fmt.Sprintf("%d days", days)
-	}
-	months := days / 30
-	if months < 12 {
-		return fmt.Sprintf("%d months", months)
-	}
-	years := months / 12
-	months = months % 12
-	if months == 0 {
-		return fmt.Sprintf("%d years", years)
-	}
-	return fmt.Sprintf("%d years, %d months", years, months)
-}
-
-func roundScore(score float64) float64 {
-	return math.Round(score*100) / 100
-}
-
-func formatSearchTime(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format(time.RFC3339)
 }

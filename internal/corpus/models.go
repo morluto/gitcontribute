@@ -65,6 +65,14 @@ type Thread struct {
 	Rank float64
 }
 
+// PortfolioPullRequest identifies a pull request together with the repository
+// that owns it. It is returned by global, offline portfolio reads.
+type PortfolioPullRequest struct {
+	Owner  string
+	Repo   string
+	Thread Thread
+}
+
 // ThreadKind names the thread types stored by the corpus.
 const (
 	ThreadKindIssue       = "issue"

@@ -39,6 +39,8 @@ type Repository struct {
 // Issue is a domain-neutral view of an issue or pull-request marker from
 // the issues list endpoint.
 type Issue struct {
+	RepositoryOwner   string
+	RepositoryName    string
 	ID                int64
 	NodeID            string
 	Number            int
@@ -60,6 +62,33 @@ type Issue struct {
 	ClosedAt          *time.Time
 	HTMLURL           string
 	PullRequestURL    string
+}
+
+// Identity is the stable login and identifiers associated with the active
+// GitHub read credential.
+type Identity struct {
+	Login  string
+	ID     int64
+	NodeID string
+}
+
+// AuthoredPullRequestSearchOptions selects one bounded authored-PR search page.
+// UpdatedAfter is translated to GitHub Search's UTC date-granularity qualifier.
+type AuthoredPullRequestSearchOptions struct {
+	Login        string
+	State        string
+	UpdatedAfter time.Time
+	PageOptions
+}
+
+// AuthoredPullRequestSearchResult preserves GitHub's pagination, rate, and
+// incomplete-results signals alongside the converted pull-request markers.
+type AuthoredPullRequestSearchResult struct {
+	Total      int
+	Incomplete bool
+	Items      []Issue
+	Page       PageInfo
+	Rate       RateInfo
 }
 
 // IssueComment is a domain-neutral view of an issue comment.

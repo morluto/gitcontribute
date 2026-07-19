@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	gh "github.com/google/go-github/v89/github"
@@ -39,6 +40,17 @@ type IssueGetter interface {
 // discovery. Keeping it separate lets archive-only readers stay small.
 type RepositorySearcher interface {
 	SearchRepositories(ctx context.Context, opts RepositorySearchOptions) (RepositorySearchResult, error)
+}
+
+// IdentityReader resolves the authenticated GitHub account without granting
+// any mutation capability.
+type IdentityReader interface {
+	GetAuthenticatedIdentity(context.Context) (Identity, RateInfo, error)
+}
+
+// AuthoredPullRequestSearcher discovers pull requests authored by one login.
+type AuthoredPullRequestSearcher interface {
+	SearchAuthoredPullRequests(context.Context, AuthoredPullRequestSearchOptions) (AuthoredPullRequestSearchResult, error)
 }
 
 // Client wraps go-github behind a narrow, domain-neutral interface.
@@ -131,6 +143,37 @@ func (c *Client) GetRepository(ctx context.Context, owner, name string) (Reposit
 		return Repository{}, RateInfo{}, classifyError(err)
 	}
 	return convertRepository(repo), rateInfo(resp.Rate), nil
+}
+
+// GetAuthenticatedIdentity resolves the user associated with the configured
+// read credential.
+func (c *Client) GetAuthenticatedIdentity(ctx context.Context) (Identity, RateInfo, error) {
+	user, resp, err := c.gh.Users.Get(ctx, "")
+	if err != nil {
+		return Identity{}, RateInfo{}, classifyError(err)
+	}
+	return Identity{Login: user.GetLogin(), ID: user.GetID(), NodeID: user.GetNodeID()}, rateInfo(resp.Rate), nil
+}
+
+// SearchAuthoredPullRequests searches one bounded page of PRs authored by a
+// login and preserves GitHub's incomplete-results signal.
+func (c *Client) SearchAuthoredPullRequests(ctx context.Context, opts AuthoredPullRequestSearchOptions) (AuthoredPullRequestSearchResult, error) {
+	query := "is:pr author:" + opts.Login
+	if opts.State != "" && opts.State != "all" {
+		query += " is:" + opts.State
+	}
+	if !opts.UpdatedAfter.IsZero() {
+		query += " updated:>=" + opts.UpdatedAfter.UTC().Format("2006-01-02")
+	}
+	result, resp, err := c.gh.Search.Issues(ctx, query, &gh.SearchOptions{Sort: "updated", Order: "desc", ListOptions: gh.ListOptions{Page: opts.Page, PerPage: opts.PerPage}})
+	if err != nil {
+		return AuthoredPullRequestSearchResult{}, classifyError(err)
+	}
+	items := make([]Issue, 0, len(result.Issues))
+	for _, issue := range result.Issues {
+		items = append(items, convertIssue(issue))
+	}
+	return AuthoredPullRequestSearchResult{Total: result.GetTotal(), Incomplete: result.GetIncompleteResults(), Items: items, Page: pageInfo(resp), Rate: rateInfo(resp.Rate)}, nil
 }
 
 // SearchRepositories reads one page from GitHub's repository Search API.
@@ -463,7 +506,10 @@ func convertIssue(i *gh.Issue) Issue {
 		kind = ThreadKindPullRequest
 		prURL = i.PullRequestLinks.GetHTMLURL()
 	}
+	owner, repo := repositoryFromAPIURL(i.GetRepositoryURL())
 	return Issue{
+		RepositoryOwner:   owner,
+		RepositoryName:    repo,
 		ID:                i.GetID(),
 		NodeID:            i.GetNodeID(),
 		Number:            i.GetNumber(),
@@ -486,6 +532,14 @@ func convertIssue(i *gh.Issue) Issue {
 		HTMLURL:           i.GetHTMLURL(),
 		PullRequestURL:    prURL,
 	}
+}
+
+func repositoryFromAPIURL(raw string) (string, string) {
+	parts := strings.Split(strings.Trim(strings.TrimSpace(raw), "/"), "/")
+	if len(parts) < 2 {
+		return "", ""
+	}
+	return parts[len(parts)-2], parts[len(parts)-1]
 }
 
 func convertIssueComment(c *gh.IssueComment) IssueComment {

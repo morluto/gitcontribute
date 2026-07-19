@@ -33,12 +33,20 @@ type SearchRepositoriesOutput struct {
 
 // SearchThreadsInput describes an offline issue and pull-request search page.
 type SearchThreadsInput struct {
-	Query  string `json:"query" jsonschema:"Full-text query over thread titles and bodies"`
-	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo   string `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Kind   string `json:"kind,omitempty" jsonschema:"Optional thread kind: issue or pull_request"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
+	Query        string   `json:"query" jsonschema:"Full-text query over thread titles and bodies"`
+	Owner        string   `json:"owner,omitempty" jsonschema:"Optional repository owner"`
+	Repo         string   `json:"repo,omitempty" jsonschema:"Optional repository name"`
+	Kind         string   `json:"kind,omitempty" jsonschema:"Optional thread kind: issue or pull_request"`
+	State        string   `json:"state,omitempty" jsonschema:"Optional open or closed state"`
+	StateReason  string   `json:"state_reason,omitempty" jsonschema:"Optional GitHub completed or not_planned state reason"`
+	Merged       *bool    `json:"merged,omitempty" jsonschema:"Optional pull request merged state"`
+	Author       string   `json:"author,omitempty" jsonschema:"Optional author login"`
+	Association  string   `json:"author_association,omitempty" jsonschema:"Optional GitHub author association"`
+	Assignee     string   `json:"assignee,omitempty" jsonschema:"Optional assignee login"`
+	Labels       []string `json:"labels,omitempty" jsonschema:"Labels that must all be present"`
+	UpdatedAfter string   `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound"`
+	Limit        int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Cursor       string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
 }
 
 // GetRepositoryDossierInput selects a persisted repository dossier.
@@ -115,25 +123,8 @@ type JobReference struct {
 
 // V1 operation inputs and outputs.
 
-// HydrateRepositoryInput configures a durable repository-wide hydration job.
-type HydrateRepositoryInput struct {
-	Owner    string   `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo     string   `json:"repo" jsonschema:"GitHub repository name"`
-	Facets   []string `json:"facets,omitempty" jsonschema:"Facets to hydrate; empty selects all applicable facets"`
-	MaxPages int      `json:"max_pages,omitempty" jsonschema:"Maximum pages per facet from 1 to 100"`
-	State    string   `json:"state,omitempty" jsonschema:"Optional thread state filter: open, closed, or all"`
-	Numbers  []int    `json:"numbers,omitempty" jsonschema:"Optional exact thread numbers to hydrate"`
-}
-
 // BuildRepositoryDossierInput selects a repository for durable dossier generation.
 type BuildRepositoryDossierInput RepoInput
-
-// StartCrawlInput configures a durable crawl job for a saved discovery source.
-type StartCrawlInput struct {
-	Source string `json:"source" jsonschema:"Crawl source name"`
-	Since  string `json:"since,omitempty" jsonschema:"Optional Go duration such as 720h"`
-	Budget int    `json:"budget,omitempty" jsonschema:"Maximum number of repository windows to crawl"`
-}
 
 // CreateWorkspaceInput configures a durable managed-workspace creation job.
 type CreateWorkspaceInput struct {
@@ -297,6 +288,8 @@ func (s *Server) registerV1() {
 		description: "Search locally stored issue and pull-request titles and bodies, optionally restricted to one repository and thread kind. Use the returned cursor for the next page; this tool never contacts GitHub.",
 		annotations: readOnly, input: inputSchema[SearchThreadsInput](func(schema *jsonschema.Schema) {
 			setEnum(schema, "kind", "issue", "pull_request")
+			setEnum(schema, "state", "open", "closed")
+			setEnum(schema, "state_reason", "completed", "not_planned")
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 			requireTogether(schema, "owner", "repo")
@@ -324,33 +317,6 @@ func (s *Server) registerV1() {
 			forbidWhen(schema, "kind", "pull_request", "path", "commit")
 			forbidWhen(schema, "kind", "code", "number")
 		}), output: outputSchema[ExplainMatchOutput]("Stored facts and score signals explaining one search match."), handler: s.explainMatch,
-	})
-	addCatalogTool(s.server, catalogTool[GetJobInput, GetJobOutput]{
-		name: ToolGetJob, title: "Get durable job",
-		description: "Read durable status, progress, request, result, and error information for one asynchronous GitContribute job. Poll this after a tool returns a job ID; reading the job has no side effects.",
-		annotations: readOnly, input: inputSchema[GetJobInput](noSchemaCustomization),
-		output: outputSchema[GetJobOutput]("Durable asynchronous job state and result."), handler: s.getJob,
-	})
-	addCatalogTool(s.server, catalogTool[StartCrawlInput, JobReference]{
-		name: ToolStartCrawl, title: "Start GitHub repository crawl",
-		description: "Start an asynchronous, bounded repository-discovery crawl from a configured source. This reads GitHub and writes observations to the local corpus; use " + ToolGetJob + " with the returned ID to monitor it.",
-		annotations: networkReadAnnotations(), input: inputSchema[StartCrawlInput](func(schema *jsonschema.Schema) {
-			setDefault(schema, "since", "720h")
-			setRange(schema, "budget", 1, 5000)
-			setDefault(schema, "budget", 100)
-		}), output: outputSchema[JobReference]("Reference to a newly queued durable crawl job."), handler: s.startCrawl,
-	})
-	addCatalogTool(s.server, catalogTool[HydrateRepositoryInput, JobReference]{
-		name: ToolHydrateRepository, title: "Hydrate repository threads from GitHub",
-		description: "Start an asynchronous GitHub read that hydrates selected facets across stored repository threads and atomically updates local snapshots. Restrict state or thread numbers when possible; an empty facets list selects all applicable facets.",
-		annotations: networkReadAnnotations(), input: inputSchema[HydrateRepositoryInput](func(schema *jsonschema.Schema) {
-			setArrayEnum(schema, "facets", "issue_comments", "pr_details", "pr_reviews", "pr_review_comments")
-			setRange(schema, "max_pages", 1, 100)
-			setDefault(schema, "max_pages", 50)
-			setEnum(schema, "state", "open", "closed", "all")
-			setDefault(schema, "state", "all")
-			setPositiveItems(schema, "numbers")
-		}), output: outputSchema[JobReference]("Reference to a newly queued repository hydration job."), handler: s.hydrateRepository,
 	})
 	addCatalogTool(s.server, catalogTool[BuildRepositoryDossierInput, JobReference]{
 		name: ToolBuildRepositoryDossier, title: "Build repository dossier",
@@ -395,13 +361,13 @@ func (s *Server) registerV1() {
 		}), output: outputSchema[CheckOutput]("Evidence-backed duplicate candidates from the local corpus."), handler: s.checkDuplicates,
 	})
 	addCatalogTool(s.server, catalogTool[CheckCollisionsInput, CheckOutput]{
-		name: ToolCheckCollisions, title: "Check open pull-request collisions",
-		description: "Search locally stored open pull requests for work that may collide with one hypothesis or opportunity. This is an offline advisory check and does not update collision status automatically.",
+		name: ToolFindCompetingWork, title: "Find competing open pull requests",
+		description: "Search locally stored open pull requests for semantically or explicitly overlapping work for one hypothesis or opportunity. This does not test Git merge conflicts and performs no network access.",
 		annotations: readOnly, input: inputSchema[CheckCollisionsInput](func(schema *jsonschema.Schema) {
 			setEnum(schema, "target", "hypothesis", "opportunity")
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
-		}), output: outputSchema[CheckOutput]("Evidence-backed open pull-request collision candidates."), handler: s.checkCollisions,
+		}), output: outputSchema[CheckOutput]("Evidence-backed competing open pull requests."), handler: s.checkCollisions,
 	})
 	addCatalogTool(s.server, catalogTool[PromoteOpportunityInput, OpportunityOutput]{
 		name: ToolPromoteOpportunity, title: "Promote hypothesis to opportunity",
@@ -469,13 +435,16 @@ func (s *Server) searchThreads(ctx context.Context, _ *mcp.CallToolRequest, in S
 	if in.Kind != "" && in.Kind != "issue" && in.Kind != "pull_request" {
 		return nil, SearchOutput{}, errors.New("kind must be issue or pull_request")
 	}
+	if in.State != "" && in.State != "open" && in.State != "closed" {
+		return nil, SearchOutput{}, errors.New("state must be open or closed")
+	}
+	if in.StateReason != "" && in.StateReason != "completed" && in.StateReason != "not_planned" {
+		return nil, SearchOutput{}, errors.New("state_reason must be completed or not_planned")
+	}
 	searchIn := SearchInput{
-		Query:  in.Query,
-		Owner:  in.Owner,
-		Repo:   in.Repo,
-		Kind:   in.Kind,
-		Limit:  in.Limit,
-		Cursor: in.Cursor,
+		Query: in.Query, Owner: in.Owner, Repo: in.Repo, Kind: in.Kind, State: in.State,
+		StateReason: in.StateReason, Merged: in.Merged, Author: in.Author, Association: in.Association,
+		Assignee: in.Assignee, Labels: in.Labels, UpdatedAfter: in.UpdatedAfter, Limit: in.Limit, Cursor: in.Cursor,
 	}
 	out, err := s.reader.Search(ctx, searchIn)
 	return nil, out, err
@@ -513,48 +482,6 @@ func (s *Server) getJob(ctx context.Context, _ *mcp.CallToolRequest, in GetJobIn
 	}
 	in.ID = id
 	out, err := s.reader.GetJob(ctx, in)
-	return nil, out, err
-}
-
-func (s *Server) startCrawl(ctx context.Context, _ *mcp.CallToolRequest, in StartCrawlInput) (*mcp.CallToolResult, JobReference, error) {
-	in.Source = strings.TrimSpace(in.Source)
-	if in.Source == "" {
-		return nil, JobReference{}, errors.New("source is required")
-	}
-	if in.Since != "" {
-		if _, err := time.ParseDuration(in.Since); err != nil {
-			return nil, JobReference{}, fmt.Errorf("invalid since duration: %w", err)
-		}
-	}
-	if in.Budget < 0 {
-		return nil, JobReference{}, errors.New("budget cannot be negative")
-	}
-	operator, ok := s.reader.(Operator)
-	if !ok {
-		return nil, JobReference{}, errors.New("crawl is not available")
-	}
-	out, err := operator.StartCrawl(ctx, in)
-	return nil, out, err
-}
-
-func (s *Server) hydrateRepository(ctx context.Context, _ *mcp.CallToolRequest, in HydrateRepositoryInput) (*mcp.CallToolResult, JobReference, error) {
-	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
-		return nil, JobReference{}, err
-	}
-	if in.MaxPages == 0 {
-		in.MaxPages = 50
-	}
-	if in.MaxPages < 1 || in.MaxPages > 100 {
-		return nil, JobReference{}, errors.New("max_pages must be between 1 and 100")
-	}
-	if in.State != "" && in.State != "open" && in.State != "closed" && in.State != "all" {
-		return nil, JobReference{}, errors.New("state must be open, closed, or all")
-	}
-	operator, ok := s.reader.(Operator)
-	if !ok {
-		return nil, JobReference{}, errors.New("hydration is not available")
-	}
-	out, err := operator.HydrateRepository(ctx, in)
 	return nil, out, err
 }
 

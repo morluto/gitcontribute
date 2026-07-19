@@ -13,6 +13,8 @@ corpus must not silently fetch data, execute repository code, or mutate GitHub.
 CLI ---------+         GitHub adapter ------ GitHub API
 MCP ---------+----> application service
 TUI ---------+              |
+                            +----> DeepWiki adapter -----> public DeepWiki MCP
+                            |
                             +----> acquisition/workspace adapters ----> git
                             |
                             +----> validation runner -----------------> process
@@ -31,8 +33,10 @@ The dependency direction is toward product-owned contracts:
 - `internal/app` owns use cases and side-effect decisions.
 - `internal/corpus` owns persistence, transactions, migrations, and local
   query behavior.
-- `internal/github`, `internal/acquire`, `internal/workspace`, and the evidence
-  runner are adapters for external capabilities.
+- `internal/github`, `internal/deepwiki`, `internal/acquire`,
+  `internal/workspace`, and the evidence runner are adapters for external
+  capabilities. DeepWiki prose is untrusted derived context, is not persisted,
+  and never updates GitHub projections.
 - `internal/cli`, `internal/mcpserver`, and `internal/tui` translate user or
   protocol input into application calls. They do not own product rules.
   MCP prompts are static workflow guidance; they cannot grant new authority or
@@ -51,7 +55,9 @@ application and domain packages expose product-owned values and interfaces.
 | Global CLI installation | explicit setup `--mode cli` or `--mode both` | npm registry dependent | yes | `npm` only | no |
 | Setup verification | all applied setup modes | no | no | `git --version` | no |
 | GitHub read | sync, crawl, hydrate | yes | yes | no | no |
+| DeepWiki external read | public repository structure, contents, questions | yes | no | no | no |
 | Git acquisition | acquire, workspace create | remote-dependent | yes | `git` only | no |
+| Local merge check | compare already-fetched revisions | no | no | `git` only | no |
 | Validation | validation run with explicit execution | no by default | yes | yes | no |
 
 Version 1 has no GitHub mutation path. Adding one requires a separate
@@ -69,6 +75,12 @@ The corpus separates source history from convenient current state:
   reviews, and review comments.
 - **Facet coverage** records whether a facet fetch completed and the source
   revision it represents.
+
+Authored pull requests use the ordinary repository and thread projections.
+REST `pr_details` and `pr_reviews` facets add mergeability, revision, and review
+facts for the portfolio view. Checks, unresolved review threads, detailed merge
+state, and merge-queue state are not currently acquired and therefore remain
+explicitly unavailable rather than inferred.
 
 Repository and thread projections use this ordering:
 
@@ -116,6 +128,15 @@ Terminal states do not transition again. Cancellation is first persisted, then
 delivered to an in-process worker directly or observed by its polling loop from
 another process. Reconciliation uses an immediate SQLite transaction so a
 heartbeat cannot interleave between the liveness read and stale-owner update.
+
+### Bounded batch operations
+
+Batch MCP operations preserve input order and return an outcome per input key.
+Independent GitHub reads use fixed server-side concurrency ceilings; code
+acquisition uses a lower ceiling because it performs Git processes and local
+writes. A single unavailable or retryable item does not erase successful
+siblings. Callers should retry only items marked retryable and use the provided
+recovery hint for unavailable inputs.
 
 ## GitHub transport
 

@@ -98,6 +98,28 @@ func TestManager_CloneAndResolve(t *testing.T) {
 	})
 }
 
+func TestManagerCheckMergeUsesAlreadyFetchedRevisionsWithoutMutation(t *testing.T) {
+	ctx := context.Background()
+	remote, baseSHA, candidateSHA := setupRemote(t)
+	mgr := newManager(t)
+	if err := mgr.Clone(ctx, remote, "origin"); err != nil {
+		t.Fatal(err)
+	}
+	path := mgr.mirrors["origin"].path
+	before := strings.TrimSpace(runGit(t, path, "show-ref"))
+	result, err := mgr.CheckMerge(ctx, path, baseSHA, candidateSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Conflicted || result.MergeBase != baseSHA {
+		t.Fatalf("unexpected merge result: %+v", result)
+	}
+	after := strings.TrimSpace(runGit(t, path, "show-ref"))
+	if before != after {
+		t.Fatalf("merge check changed refs\nbefore: %s\nafter: %s", before, after)
+	}
+}
+
 func TestManager_CreateAndInspect(t *testing.T) {
 	ctx := context.Background()
 	remote, baseSHA, candidateSHA := setupRemote(t)

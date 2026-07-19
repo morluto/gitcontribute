@@ -2,6 +2,7 @@ package corpus
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -69,6 +70,102 @@ func TestListThreadsFilteredAppliesStateBeforeLimit(t *testing.T) {
 	}
 	if total != 1 {
 		t.Fatalf("open thread count = %d, want 1", total)
+	}
+}
+
+func TestListPullRequestPortfolioFiltersByAuthorAndState(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatalf("apply repository: %v", err)
+	}
+	when := time.Unix(1000, 0).UTC()
+	threads := []Thread{
+		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 1, State: "open", Author: "Alice", Title: "alice open", SourceUpdatedAt: when},
+		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 2, State: "closed", Author: "alice", Title: "alice closed", SourceUpdatedAt: when.Add(time.Second)},
+		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 3, State: "open", Author: "bob", Title: "bob open", SourceUpdatedAt: when.Add(2 * time.Second)},
+		{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 4, State: "open", Author: "alice", Title: "not a pull request", SourceUpdatedAt: when.Add(3 * time.Second)},
+	}
+	for _, thread := range threads {
+		if _, err := c.UpsertThread(ctx, thread, `{}`); err != nil {
+			t.Fatalf("upsert thread %d: %v", thread.Number, err)
+		}
+	}
+
+	got, err := c.ListPullRequestPortfolio(ctx, "ALICE", "OPEN", 10)
+	if err != nil {
+		t.Fatalf("list pull request portfolio: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("portfolio length = %d, want 1: %+v", len(got), got)
+	}
+	if got[0].Owner != "owner" || got[0].Repo != "repo" || got[0].Thread.Number != 1 {
+		t.Fatalf("portfolio item = %+v, want owner/repo#1", got[0])
+	}
+
+	got, err = c.ListPullRequestPortfolio(ctx, "alice", "all", 10)
+	if err != nil {
+		t.Fatalf("list pull request portfolio for all states: %v", err)
+	}
+	if len(got) != 2 || got[0].Thread.Number != 2 || got[1].Thread.Number != 1 {
+		t.Fatalf("all-state portfolio = %+v, want #2 then #1", got)
+	}
+}
+
+func TestListPullRequestPortfolioUsesDeterministicGlobalOrder(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+
+	type repoSpec struct {
+		owner string
+		name  string
+	}
+	repos := []repoSpec{{owner: "beta", name: "zeta"}, {owner: "alpha", name: "zeta"}, {owner: "alpha", name: "aardvark"}}
+	when := time.Unix(2000, 0).UTC()
+	for i, spec := range repos {
+		repo, err := c.ApplyRepositoryObservation(ctx, spec.owner, spec.name, spec.owner+"/"+spec.name, time.Unix(1, 0).UTC(), `{}`)
+		if err != nil {
+			t.Fatalf("apply repository %s/%s: %v", spec.owner, spec.name, err)
+		}
+		for _, number := range []int{2, 1} {
+			updated := when
+			if i == 0 && number == 2 {
+				updated = when.Add(time.Second)
+			}
+			if _, err := c.UpsertThread(ctx, Thread{
+				RepositoryID:    repo.ID,
+				Kind:            ThreadKindPullRequest,
+				Number:          number,
+				State:           "open",
+				Author:          "alice",
+				Title:           "pull request",
+				SourceUpdatedAt: updated,
+			}, `{}`); err != nil {
+				t.Fatalf("upsert %s/%s#%d: %v", spec.owner, spec.name, number, err)
+			}
+		}
+	}
+
+	got, err := c.ListPullRequestPortfolio(ctx, "", "", 100)
+	if err != nil {
+		t.Fatalf("list pull request portfolio: %v", err)
+	}
+	keys := make([]string, 0, len(got))
+	for _, item := range got {
+		keys = append(keys, fmt.Sprintf("%s/%s#%d", item.Owner, item.Repo, item.Thread.Number))
+	}
+	want := []string{
+		"beta/zeta#2",
+		"alpha/aardvark#1",
+		"alpha/aardvark#2",
+		"alpha/zeta#1",
+		"alpha/zeta#2",
+		"beta/zeta#1",
+	}
+	if diff := cmp.Diff(want, keys); diff != "" {
+		t.Fatalf("portfolio order mismatch (-want +got):\n%s", diff)
 	}
 }
 
