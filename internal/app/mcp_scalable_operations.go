@@ -49,6 +49,11 @@ func (r *MCPReader) SyncThreads(ctx context.Context, in mcpserver.SyncThreadsInp
 	if in.Selection == "threads" && (len(in.Threads) < 1 || len(in.Threads) > 100) {
 		return mcpserver.JobReference{}, errors.New("threads must contain 1 to 100 items")
 	}
+	var err error
+	in.MaxRequests, err = normalizeSyncBatchMaxRequests(in.MaxRequests)
+	if err != nil {
+		return mcpserver.JobReference{}, err
+	}
 	id, err := r.submitJob(ctx, "sync_threads", in, func(ctx context.Context, report func(string, string) error) (any, error) {
 		return r.syncThreadsBatch(ctx, in, report)
 	})
@@ -64,9 +69,10 @@ func (r *MCPReader) SyncThreads(ctx context.Context, in mcpserver.SyncThreadsInp
 //nolint:gocognit
 func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreadsInput, report func(string, string) error) (map[string]any, error) {
 	type task struct {
-		key     string
-		ref     cli.RepoRef
-		numbers []int
+		key         string
+		ref         cli.RepoRef
+		numbers     []int
+		maxRequests int
 	}
 	var tasks []task
 	if in.Selection == "repositories" {
@@ -110,6 +116,24 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 		since = parsed
 	}
 	results := make([]map[string]any, len(tasks))
+	remainingRequests := in.MaxRequests
+	plannedRequests := 0
+	runnable := make([]int, 0, len(tasks))
+	for index := range tasks {
+		threadRequests := maxPages
+		if len(tasks[index].numbers) > 0 {
+			threadRequests = len(tasks[index].numbers)
+		}
+		required := syncFixedRequestCost() + threadRequests
+		if required > remainingRequests {
+			results[index] = syncRequestBudgetUnavailable(tasks[index].key, required, remainingRequests)
+			continue
+		}
+		tasks[index].maxRequests = required
+		remainingRequests -= required
+		plannedRequests += required
+		runnable = append(runnable, index)
+	}
 	jobs := make(chan int)
 	var wg sync.WaitGroup
 	workers := 4
@@ -122,7 +146,7 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 			defer wg.Done()
 			for index := range jobs {
 				current := tasks[index]
-				opts := SyncOptions{Kind: kind, State: state, Since: since, Numbers: current.numbers, MaxPages: maxPages}
+				opts := SyncOptions{Kind: kind, State: state, Since: since, Numbers: current.numbers, MaxPages: maxPages, MaxRequests: current.maxRequests}
 				if len(current.numbers) > 0 {
 					opts.State = "all"
 					opts.Since = time.Time{}
@@ -133,11 +157,15 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 					results[index] = map[string]any{"key": current.key, "status": status, "reason": reason, "message": message, "retry_after_ms": retry}
 					continue
 				}
-				results[index] = map[string]any{"key": current.key, "status": "complete", "updated": res.Updated, "message": res.Message}
+				status := "complete"
+				if res.Capped {
+					status = "partial"
+				}
+				results[index] = map[string]any{"key": current.key, "status": status, "updated": res.Updated, "requests": res.Requests, "request_capped": res.Capped, "message": res.Message}
 			}
 		}()
 	}
-	for i := range tasks {
+	for _, i := range runnable {
 		select {
 		case jobs <- i:
 		case <-ctx.Done():
@@ -150,7 +178,11 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 	wg.Wait()
 	status := "complete"
 	completed := 0
+	requests := 0
 	for _, result := range results {
+		if count, ok := result["requests"].(int); ok {
+			requests += count
+		}
 		if result["status"] == "complete" {
 			completed++
 		} else {
@@ -160,7 +192,10 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 	if err := report("thread_headers", jobProgressCounts(len(tasks), len(tasks))); err != nil {
 		return nil, err
 	}
-	return map[string]any{"status": status, "items": results, "completed": completed, "total": len(tasks)}, nil
+	return map[string]any{
+		"status": status, "items": results, "completed": completed, "total": len(tasks),
+		"requests": requests, "request_budget": in.MaxRequests, "planned_requests": plannedRequests,
+	}, nil
 }
 
 // HydrateThreads submits a durable GitHub read for explicit child facets on
@@ -216,6 +251,11 @@ func (r *MCPReader) SyncAuthoredPullRequests(ctx context.Context, in mcpserver.S
 	if in.Limit < 1 || in.Limit > 500 {
 		return mcpserver.JobReference{}, errors.New("limit must be between 1 and 500")
 	}
+	var err error
+	in.MaxRequests, err = normalizeSyncBatchMaxRequests(in.MaxRequests)
+	if err != nil {
+		return mcpserver.JobReference{}, err
+	}
 	id, err := r.submitJob(ctx, "sync_authored_pull_requests", in, func(ctx context.Context, report func(string, string) error) (any, error) {
 		return r.syncAuthoredPullRequests(ctx, in, report)
 	})
@@ -223,134 +263,6 @@ func (r *MCPReader) SyncAuthoredPullRequests(ctx context.Context, in mcpserver.S
 		return mcpserver.JobReference{}, err
 	}
 	return queuedJobReference(id, "sync_authored_pull_requests", "authored pull-request synchronization job started"), nil
-}
-
-// This bounded job combines pagination, repository grouping, and ordered worker
-// results because those phases share a single discovery limit and status result.
-//
-//nolint:gocognit,cyclop,funlen
-func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpserver.SyncAuthoredPullRequestsInput, report func(string, string) error) (map[string]any, error) {
-	if err := report("authored_pull_request_discovery", jobProgressCounts(0, in.Limit)); err != nil {
-		return nil, err
-	}
-	reader, err := s.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
-	if err != nil {
-		return nil, err
-	}
-	identityReader, ok := reader.(github.IdentityReader)
-	if !ok {
-		return nil, errors.New("GitHub reader does not support authenticated identity lookup")
-	}
-	searcher, ok := reader.(github.AuthoredPullRequestSearcher)
-	if !ok {
-		return nil, errors.New("GitHub reader does not support authored pull-request search")
-	}
-	identity, _, err := identityReader.GetAuthenticatedIdentity(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var updatedAfter time.Time
-	if in.UpdatedAfter != "" {
-		updatedAfter, err = time.Parse(time.RFC3339, in.UpdatedAfter)
-		if err != nil {
-			return nil, errors.New("updated_after must be RFC 3339")
-		}
-	}
-	page := 1
-	byRepo := make(map[string][]int)
-	order := make([]string, 0)
-	discovered := 0
-	incomplete := false
-	for discovered < in.Limit {
-		perPage := 100
-		if remaining := in.Limit - discovered; remaining < perPage {
-			perPage = remaining
-		}
-		result, err := searcher.SearchAuthoredPullRequests(ctx, github.AuthoredPullRequestSearchOptions{Login: identity.Login, State: in.State, UpdatedAfter: updatedAfter, PageOptions: github.PageOptions{Page: page, PerPage: perPage}})
-		if err != nil {
-			return nil, err
-		}
-		incomplete = incomplete || result.Incomplete
-		for _, pr := range result.Items {
-			if pr.RepositoryOwner == "" || pr.RepositoryName == "" {
-				continue
-			}
-			key := pr.RepositoryOwner + "/" + pr.RepositoryName
-			if _, exists := byRepo[key]; !exists {
-				order = append(order, key)
-			}
-			byRepo[key] = append(byRepo[key], pr.Number)
-			discovered++
-			if discovered >= in.Limit {
-				break
-			}
-		}
-		if !result.Page.HasNext || discovered >= in.Limit {
-			break
-		}
-		page = result.Page.NextPage
-	}
-	type authoredTask struct {
-		key, owner, repo string
-		numbers          []int
-	}
-	var tasks []authoredTask
-	for _, key := range order {
-		owner, repo, _ := strings.Cut(key, "/")
-		numbers := byRepo[key]
-		for len(numbers) > 0 {
-			size := min(100, len(numbers))
-			tasks = append(tasks, authoredTask{key: key, owner: owner, repo: repo, numbers: append([]int(nil), numbers[:size]...)})
-			numbers = numbers[size:]
-		}
-	}
-	results := make([]map[string]any, len(tasks))
-	jobs := make(chan int)
-	var wg sync.WaitGroup
-	workers := 4
-	if len(tasks) < workers {
-		workers = len(tasks)
-	}
-	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for index := range jobs {
-				current := tasks[index]
-				res, err := s.SyncWithOptions(ctx, cli.RepoRef{Owner: current.owner, Repo: current.repo}, SyncOptions{Kind: "pull_request", State: "all", Numbers: current.numbers, MaxPages: 1})
-				if err != nil {
-					status, reason, message, retry := githubBatchError(err)
-					results[index] = map[string]any{"key": current.key, "status": status, "reason": reason, "message": message, "retry_after_ms": retry}
-					continue
-				}
-				results[index] = map[string]any{"key": current.key, "status": "complete", "updated": res.Updated}
-			}
-		}()
-	}
-	for i := range tasks {
-		select {
-		case jobs <- i:
-		case <-ctx.Done():
-			close(jobs)
-			wg.Wait()
-			return nil, ctx.Err()
-		}
-	}
-	close(jobs)
-	wg.Wait()
-	status := "complete"
-	completed := 0
-	for _, result := range results {
-		if result["status"] == "complete" {
-			completed++
-		} else {
-			status = "partial"
-		}
-	}
-	if err := report("authored_pull_request_headers", jobProgressCounts(len(tasks), len(tasks))); err != nil {
-		return nil, err
-	}
-	return map[string]any{"status": status, "login": identity.Login, "pull_requests": discovered, "repositories": results, "search_incomplete": incomplete}, nil
 }
 
 // SyncPullRequestStatus submits a bounded source-backed refresh of PR details,

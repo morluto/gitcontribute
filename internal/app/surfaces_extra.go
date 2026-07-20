@@ -18,7 +18,7 @@ func (s *Service) ArchiveSync(ctx context.Context, repo cli.RepoRef, opts cli.Ar
 	if opts.Since < 0 {
 		return nil, errors.New("since duration cannot be negative")
 	}
-	syncOpts := SyncOptions{State: opts.State, Numbers: opts.Numbers, MaxPages: opts.MaxPages}
+	syncOpts := SyncOptions{State: opts.State, Numbers: opts.Numbers, MaxPages: opts.MaxPages, MaxRequests: opts.MaxRequests}
 	if opts.Since > 0 {
 		syncOpts.Since = s.now().Add(-opts.Since)
 	}

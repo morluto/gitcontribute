@@ -484,14 +484,14 @@ type archiveCmd struct {
 }
 
 type archiveSyncCmd struct {
-	OwnerRepo string        `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
-	State     string        `name:"state" default:"all" enum:"open,closed,all" help:"Thread state"`
-	Since     time.Duration `name:"since" help:"Only threads updated within this duration"`
-	Numbers   string        `name:"numbers" help:"Comma-separated exact thread numbers"`
-	MaxPages  int           `name:"max-pages" default:"1000" help:"Maximum issue-list pages"`
-	JSON      bool          `name:"json" help:"Print the result as JSON"`
+	OwnerRepo   string        `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	State       string        `name:"state" default:"all" enum:"open,closed,all" help:"Thread state"`
+	Since       time.Duration `name:"since" help:"Only threads updated within this duration"`
+	Numbers     string        `name:"numbers" help:"Comma-separated exact thread numbers"`
+	MaxPages    int           `name:"max-pages" default:"1000" help:"Maximum issue-list pages"`
+	MaxRequests int           `name:"max-requests" default:"100" help:"Maximum total GitHub requests"`
+	JSON        bool          `name:"json" help:"Print the result as JSON"`
 }
-
 type archiveHydrateCmd struct {
 	Thread   string `arg:"" name:"owner/repo#number" help:"Thread as OWNER/REPO#NUMBER"`
 	With     string `name:"with" help:"Comma-separated facets (defaults to all applicable facets)"`
@@ -1942,7 +1942,7 @@ func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) e
 		}
 		fmt.Fprintf(c.stderr, "syncing archive for %s...\n", repo)
 		result, err := service.ArchiveSync(ctx, repo, ArchiveSyncOptions{
-			State: cmd.Sync.State, Since: cmd.Sync.Since, Numbers: numbers, MaxPages: cmd.Sync.MaxPages,
+			State: cmd.Sync.State, Since: cmd.Sync.Since, Numbers: numbers, MaxPages: cmd.Sync.MaxPages, MaxRequests: cmd.Sync.MaxRequests,
 		})
 		if err != nil {
 			return c.mapError(err)

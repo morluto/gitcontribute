@@ -148,7 +148,7 @@ func TestGuidanceRetrievalReplacesSnapshotOnlyAfterAllPathsComplete(t *testing.T
 		t.Fatal(err)
 	}
 
-	err = syncRepositoryGuidance(fixture.ctx, fixture.svc.corpus, interruptedGuidanceReader{}, *repo, domain.RepoRef{Owner: "owner", Repo: "repo"}, fixture.now, 0)
+	err = syncRepositoryGuidance(fixture.ctx, fixture.svc.corpus, interruptedGuidanceReader{}, *repo, domain.RepoRef{Owner: "owner", Repo: "repo"}, fixture.now, 0, newSyncRequestBudget(maxSyncRequests))
 	if err == nil || !strings.Contains(err.Error(), "interrupted guidance retrieval") {
 		t.Fatalf("sync error = %v", err)
 	}

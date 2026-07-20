@@ -116,7 +116,7 @@ func TestBuilderMakesCoverageAndUnknownsExplicit(t *testing.T) {
 	if brief.Sections.Code.Status != StatusUnknown || brief.Sections.Guidance.Status != StatusUnknown {
 		t.Fatalf("missing code/guidance not explicit: code=%+v guidance=%+v", brief.Sections.Code, brief.Sections.Guidance)
 	}
-	if !containsCommand(brief.Sections.Next.Commands, "archive hydrate") || !containsCommand(brief.Sections.Next.Commands, "gitcontribute index") {
+	if !containsCommand(brief.Sections.Next.Commands, "archive hydrate") || !containsCommand(brief.Sections.Next.Commands, "--max-pages 3") || !containsCommand(brief.Sections.Next.Commands, "gitcontribute index") {
 		t.Fatalf("missing remediation commands: %+v", brief.Sections.Next.Commands)
 	}
 

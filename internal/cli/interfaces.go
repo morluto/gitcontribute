@@ -369,13 +369,6 @@ type StatusResult struct {
 	Message string `json:"message"`
 }
 
-// SyncResult reports the outcome of syncing a repository.
-type SyncResult struct {
-	Repo    RepoRef `json:"repo"`
-	Updated int     `json:"updated"`
-	Message string  `json:"message"`
-}
-
 // SearchMatch is one local search result.
 type SearchMatch struct {
 	Kind      string   `json:"kind"`
@@ -679,12 +672,12 @@ type ArchiveService interface {
 }
 
 type ArchiveSyncOptions struct {
-	State    string
-	Since    time.Duration
-	Numbers  []int
-	MaxPages int
+	State       string
+	Since       time.Duration
+	Numbers     []int
+	MaxPages    int
+	MaxRequests int
 }
-
 type HydrateOptions struct {
 	Facets   []string
 	MaxPages int

@@ -191,6 +191,7 @@ type SyncThreadsInput struct {
 	State              string          `json:"state,omitempty" jsonschema:"open, closed, or all in repository mode"`
 	UpdatedAfter       string          `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound in repository mode"`
 	LimitPerRepository int             `json:"limit_per_repository,omitempty" jsonschema:"Maximum headers per repository from 1 to 1000"`
+	MaxRequests        int             `json:"max_requests,omitempty" jsonschema:"Maximum total GitHub requests from 9 to 1000"`
 }
 
 // HydrateThreadsInput requests explicit child facets for already selected
@@ -214,6 +215,7 @@ type SyncAuthoredPullRequestsInput struct {
 	State        string `json:"state,omitempty" jsonschema:"open, closed, or all"`
 	UpdatedAfter string `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound"`
 	Limit        int    `json:"limit,omitempty" jsonschema:"Maximum authored pull requests from 1 to 500"`
+	MaxRequests  int    `json:"max_requests,omitempty" jsonschema:"Maximum total GitHub requests from 9 to 1000"`
 }
 
 // SyncPullRequestStatusInput selects pull requests and bounds review hydration.
@@ -443,6 +445,8 @@ func (s *Server) registerScalable() {
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit_per_repository", 1, 1000)
 		setDefault(sc, "limit_per_repository", 100)
+		setRange(sc, "max_requests", 9, 1000)
+		setDefault(sc, "max_requests", 1000)
 	}), output: outputSchema[JobReference]("Reference to a bounded thread-header synchronization job."), handler: s.syncThreads})
 	addCatalogTool(s.server, catalogTool[HydrateThreadsInput, JobReference]{name: ToolHydrateThreads, title: "Fetch selected GitHub thread facets", description: "Fetch explicit comments, issue timelines, pull-request details, reviews, or review comments for up to 100 exact threads. Timeline history is opt-in; hydrate only finalists after ranking.", annotations: networkReadAnnotations(), input: inputSchema[HydrateThreadsInput](func(sc *jsonschema.Schema) {
 		setArrayBounds(sc, "threads", 1, 100)
@@ -456,6 +460,8 @@ func (s *Server) registerScalable() {
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit", 1, 500)
 		setDefault(sc, "limit", 500)
+		setRange(sc, "max_requests", 9, 1000)
+		setDefault(sc, "max_requests", 1000)
 	}), output: outputSchema[JobReference]("Reference to an authored pull-request synchronization job."), handler: s.syncAuthoredPullRequests})
 	addCatalogTool(s.server, catalogTool[SyncPullRequestStatusInput, JobReference]{name: ToolSyncPullRequestStatus, title: "Sync exact PR health", description: "Refresh mergeability, reviews, checks, unresolved conversations, merge state, merge queue, closing issues, and changed files for up to 50 exact pull requests. Returns independent facet completeness; retry only incomplete items.", annotations: networkReadAnnotations(), input: inputSchema[SyncPullRequestStatusInput](func(sc *jsonschema.Schema) {
 		setArrayBounds(sc, "pull_requests", 1, 50)
