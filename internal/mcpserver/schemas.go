@@ -9,13 +9,13 @@ import (
 )
 
 var outputPropertyDescriptions = map[string]string{
-	"id":                        "Stable identifier used by related GitContribute tools and resources.",
+	"id":                        "Stable GitContribute identifier.",
 	"code":                      "Stable machine-readable warning or error code.",
 	"name":                      "Human-readable stable name.",
 	"owner":                     "GitHub repository owner.",
 	"repo":                      "GitHub repository name.",
-	"kind":                      "Domain-specific record or operation kind.",
-	"status":                    "Current domain-specific status.",
+	"kind":                      "Record or operation kind.",
+	"status":                    "Current status.",
 	"state":                     "Current GitHub or local workflow state.",
 	"number":                    "GitHub issue or pull request number.",
 	"title":                     "Human-readable title.",
@@ -98,6 +98,8 @@ var outputPropertyDescriptions = map[string]string{
 	"open_questions":            "Questions that remain unresolved.",
 	"affected_components":       "Repository components believed to be affected.",
 	"relation":                  "How this evidence relates to the hypothesis or opportunity.",
+	"direction":                 "Whether related work points into or out from the candidate.",
+	"related_work":              "Stored issue, pull-request, dependency, cross-reference, and duplicate-cluster relationships.",
 	"freshness":                 "Derived evidence freshness classification.",
 	"freshness_reason":          "Explanation for the freshness classification.",
 	"rule_set_version":          "Version of the deterministic readiness rule set.",

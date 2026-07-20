@@ -94,6 +94,18 @@ type PortfolioSignalSnapshot struct {
 	ObservedAt            time.Time         `json:"observed_at"`
 }
 
+// PullRequestIssueLinks is the latest complete linked-issue projection for one
+// stored pull request. Covered distinguishes an observed empty relationship
+// set from a facet that has never completed.
+type PullRequestIssueLinks struct {
+	ThreadID              int64
+	Number                int
+	Covered               bool
+	LinkedIssues          []string
+	SourceUpdatedAt       time.Time
+	SourceObservationRefs []ObservationRef
+}
+
 // PortfolioOverlapEvidence is an exact observed reason for an overlap.
 type PortfolioOverlapEvidence struct {
 	Kind                  string           `json:"kind"`
@@ -405,6 +417,87 @@ func (c *Corpus) projectedSignals(ctx context.Context, subject PortfolioSubject,
 		return out, err
 	}
 	return out, nil
+}
+
+// ListPullRequestIssueLinks returns a bounded, deterministic offline view of
+// authoritative closing-issue relationships for stored pull requests. It
+// performs one corpus query and preserves selected-thread ordering.
+func (c *Corpus) ListPullRequestIssueLinks(ctx context.Context, repoID int64, state string, limit int) (out []PullRequestIssueLinks, capped bool, err error) {
+	if repoID <= 0 {
+		return nil, false, errors.New("repository id must be positive")
+	}
+	if limit <= 0 || limit > 10_000 {
+		return nil, false, errors.New("pull request issue-link limit must be between 1 and 10000")
+	}
+	stateFilter := ""
+	args := []any{repoID, ThreadKindPullRequest}
+	if state != "" && state != "all" {
+		stateFilter = " AND state = ?"
+		args = append(args, state)
+	}
+	args = append(args, limit+1, PortfolioSubjectPullRequest, PortfolioFacetLinkedIssues)
+	rows, err := c.db.QueryContext(ctx, `
+		WITH selected AS (
+			SELECT id, number, source_updated_at
+			FROM threads
+			WHERE repository_id = ? AND kind = ?`+stateFilter+`
+			ORDER BY source_updated_at DESC, number DESC
+			LIMIT ?
+		)
+		SELECT selected.id, selected.number, projection.snapshot_id,
+		       snapshot.source_updated_at, snapshot.source_observation_refs,
+		       signal.value
+		FROM selected
+		LEFT JOIN portfolio_signal_projections projection
+		  ON projection.subject_kind = ?
+		 AND projection.subject_ref = CAST(selected.id AS TEXT)
+		 AND projection.facet = ?
+		LEFT JOIN portfolio_signal_snapshots snapshot ON snapshot.id = projection.snapshot_id
+		LEFT JOIN portfolio_signals signal ON signal.snapshot_id = projection.snapshot_id
+		ORDER BY selected.source_updated_at DESC, selected.number DESC, signal.position
+	`, args...)
+	if err != nil {
+		return nil, false, fmt.Errorf("list pull request issue links: %w", err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = fmt.Errorf("close pull request issue links: %w", closeErr)
+			out = nil
+		}
+	}()
+	indexes := map[int64]int{}
+	for rows.Next() {
+		var threadID int64
+		var number int
+		var snapshotID, sourceUpdated sql.NullInt64
+		var encodedRefs, value sql.NullString
+		if err := rows.Scan(&threadID, &number, &snapshotID, &sourceUpdated, &encodedRefs, &value); err != nil {
+			return nil, false, err
+		}
+		index, ok := indexes[threadID]
+		if !ok {
+			index = len(out)
+			indexes[threadID] = index
+			out = append(out, PullRequestIssueLinks{ThreadID: threadID, Number: number, Covered: snapshotID.Valid})
+			if snapshotID.Valid {
+				out[index].SourceUpdatedAt = scanTime(sourceUpdated.Int64)
+				if err := json.Unmarshal([]byte(encodedRefs.String), &out[index].SourceObservationRefs); err != nil {
+					return nil, false, fmt.Errorf("decode pull request issue-link observation refs: %w", err)
+				}
+			}
+		}
+		if value.Valid {
+			out[index].LinkedIssues = append(out[index].LinkedIssues, value.String)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("iterate pull request issue links: %w", err)
+	}
+	if len(out) > limit {
+		out = out[:limit]
+		capped = true
+	}
+	return out, capped, nil
 }
 
 // FindPortfolioOverlaps compares candidates with exact authored PR corpus IDs.

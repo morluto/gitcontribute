@@ -10,8 +10,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/relatedwork"
 )
 
 const (
@@ -520,17 +520,17 @@ func extractReferences(e ThreadEvidence) []Reference {
 	seen := map[string]struct{}{}
 	out := []Reference{}
 	for _, input := range inputs {
-		for _, ref := range clustering.ExtractMemberRefs(input.text, e.Thread.Ref.Repo) {
-			if strings.EqualFold(ref.Owner, e.Thread.Ref.Repo.Owner) && strings.EqualFold(ref.Repo, e.Thread.Ref.Repo.Repo) && ref.Number == e.Thread.Ref.Number {
+		for _, ref := range relatedwork.Extract(input.text, e.Thread.Ref.Repo) {
+			if strings.EqualFold(ref.Repo.Owner, e.Thread.Ref.Repo.Owner) && strings.EqualFold(ref.Repo.Repo, e.Thread.Ref.Repo.Repo) && ref.Number == e.Thread.Ref.Number {
 				continue
 			}
-			key := strings.ToLower(fmt.Sprintf("%s/%s:%s#%d", ref.Owner, ref.Repo, ref.Kind, ref.Number))
+			key := strings.ToLower(fmt.Sprintf("%s/%s:%s#%d", ref.Repo.Owner, ref.Repo.Repo, ref.Kind, ref.Number))
 			if _, ok := seen[key]; ok {
 				continue
 			}
 			seen[key] = struct{}{}
 			out = append(out, Reference{
-				Repo: domain.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, Kind: domain.ThreadKind(ref.Kind),
+				Repo: ref.Repo, Kind: ref.Kind,
 				Number: ref.Number, Source: input.source,
 			})
 			if len(out) == maxExplicitRefs {

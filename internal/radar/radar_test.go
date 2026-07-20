@@ -117,7 +117,7 @@ func TestMissingCoverageIsUnknownNotPenalty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"labels":[]`, `"risks":[]`, `"blockers":[]`, `"linked_pull_requests":[]`} {
+	for _, want := range []string{`"labels":[]`, `"risks":[]`, `"blockers":[]`, `"linked_pull_requests":[]`, `"related_work":[]`} {
 		if !strings.Contains(string(payload), want) {
 			t.Fatalf("candidate JSON missing stable empty array %s: %s", want, payload)
 		}
@@ -141,6 +141,97 @@ func TestClosingPullRequestBlocksCandidate(t *testing.T) {
 	got := report.Candidates[0]
 	if got.Eligibility != EligibilityBlocked || !hasSignal(got.Blockers, "active_implementation") || !hasSignal(got.Risks, "active_closing_pr") {
 		t.Fatalf("candidate = %+v", got)
+	}
+}
+
+func TestOpenDependencyRequiresCoordinationWithoutBecomingBlocker(t *testing.T) {
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	report, err := Rank(
+		RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, GuidanceStatus: "available", Coverage: []Coverage{
+			{Facet: "metadata", Present: true, Complete: true}, {Facet: "threads", Present: true, Complete: true},
+		}},
+		[]IssueSnapshot{{
+			Number: 7, State: "open", Title: "Bug", Body: "Description", SourceUpdated: now,
+			URL:      "https://github.com/owner/repo/issues/7",
+			Coverage: []Coverage{{Facet: "issue_comments", Present: true, Complete: true}},
+			RelatedWork: []RelatedWork{{
+				Ref: "pull_request:owner/repo#9", Kind: "pull_request", Number: 9, State: "open",
+				Relation: "depends_on", Direction: "outbound", URL: "https://github.com/owner/repo/pull/9", Evidence: []RelatedWorkEvidence{},
+			}},
+		}},
+		Options{Now: now},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := report.Candidates[0]
+	if got.Eligibility != EligibilityNeedsCoordination || !hasSignal(got.Risks, "open_dependency") || len(got.Blockers) != 0 {
+		t.Fatalf("candidate = %+v", got)
+	}
+}
+
+func TestCappedRelatedWorkPreventsReadyToCodeClaim(t *testing.T) {
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	report, err := Rank(
+		RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, GuidanceStatus: "available", Coverage: []Coverage{
+			{Facet: "metadata", Present: true, Complete: true}, {Facet: "threads", Present: true, Complete: true},
+		}},
+		[]IssueSnapshot{{Number: 7, State: "open", Title: "Bug", Body: "Description", SourceUpdated: now,
+			Coverage: []Coverage{{Facet: "issue_comments", Present: true, Complete: true}}, RelatedWorkCapped: true}},
+		Options{Now: now},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := report.Candidates[0]
+	if got.Eligibility != EligibilityNeedsCoordination || got.Confidence != "medium" || got.Unknowns[len(got.Unknowns)-1].Code != "related_work_scan_capped" {
+		t.Fatalf("candidate = %+v", got)
+	}
+}
+
+func TestUnknownRelatedPullRequestStatePreventsReadyToCodeClaim(t *testing.T) {
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	report, err := Rank(
+		RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, GuidanceStatus: "available", Coverage: []Coverage{
+			{Facet: "metadata", Present: true, Complete: true}, {Facet: "threads", Present: true, Complete: true},
+		}},
+		[]IssueSnapshot{{Number: 7, State: "open", Title: "Bug", Body: "Description", SourceUpdated: now,
+			Coverage: []Coverage{{Facet: "issue_comments", Present: true, Complete: true}}, RelatedWork: []RelatedWork{{
+				Ref: "pull_request:owner/repo#9", Kind: "pull_request", Number: 9, Relation: "explicit_reference", Direction: "outbound", Evidence: []RelatedWorkEvidence{},
+			}}}},
+		Options{Now: now},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := report.Candidates[0]
+	if got.Eligibility != EligibilityNeedsCoordination || got.Confidence != "medium" || got.Unknowns[len(got.Unknowns)-1].Code != "related_pull_request_state_unknown" {
+		t.Fatalf("candidate = %+v", got)
+	}
+	if len(got.Risks) != 0 || len(got.Blockers) != 0 {
+		t.Fatalf("unknown state became negative evidence: risks=%+v blockers=%+v", got.Risks, got.Blockers)
+	}
+}
+
+func TestClosedRelatedPullRequestIsBackgroundOnly(t *testing.T) {
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	report, err := Rank(
+		RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, GuidanceStatus: "available", Coverage: []Coverage{
+			{Facet: "metadata", Present: true, Complete: true}, {Facet: "threads", Present: true, Complete: true},
+		}},
+		[]IssueSnapshot{{Number: 7, State: "open", Title: "Bug", Body: "Description", SourceUpdated: now,
+			Coverage: []Coverage{{Facet: "issue_comments", Present: true, Complete: true}}, RelatedWork: []RelatedWork{{
+				Ref: "pull_request:owner/repo#9", Kind: "pull_request", Number: 9, State: "closed",
+				Relation: "claims_to_close", Direction: "inbound", Evidence: []RelatedWorkEvidence{},
+			}}}},
+		Options{Now: now},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := report.Candidates[0]
+	if got.Eligibility != EligibilityReadyToCode || len(got.Risks) != 0 || len(got.Blockers) != 0 || len(got.Unknowns) != 0 {
+		t.Fatalf("closed related work affected eligibility: %+v", got)
 	}
 }
 

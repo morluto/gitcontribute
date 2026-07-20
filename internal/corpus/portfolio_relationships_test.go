@@ -160,6 +160,40 @@ func TestFindPortfolioOverlapsPullRequestNegativeDoesNotRequireSimilarityFacet(t
 	}
 }
 
+func TestListPullRequestIssueLinksDistinguishesCoveredEmptyAndBoundsPopulation(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	firstID := insertPortfolioFixture(t, ctx, c)
+	var repoID int64
+	if err := c.db.QueryRowContext(ctx, `SELECT repository_id FROM threads WHERE id=?`, firstID).Scan(&repoID); err != nil {
+		t.Fatal(err)
+	}
+	second, err := c.ApplyThreadObservation(ctx, repoID, ThreadKindPullRequest, 4, "open", "newer", "body", "author", time.Unix(201, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(firstID, 10)}
+	secondSubject := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(second.ID, 10)}
+	replacePortfolioFixture(t, ctx, c, first, PortfolioFacetLinkedIssues, time.Unix(300, 0).UTC(),
+		PortfolioSignal{Kind: PortfolioSignalLinkedIssue, Value: "owner/repo#7"})
+	replacePortfolioFixture(t, ctx, c, secondSubject, PortfolioFacetLinkedIssues, time.Unix(301, 0).UTC())
+
+	links, capped, err := c.ListPullRequestIssueLinks(ctx, repoID, "open", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capped || len(links) != 2 || links[0].Number != 4 || !links[0].Covered || len(links[0].LinkedIssues) != 0 {
+		t.Fatalf("links = %+v, capped=%v", links, capped)
+	}
+	if links[1].Number != 3 || !links[1].Covered || len(links[1].LinkedIssues) != 1 || links[1].LinkedIssues[0] != "owner/repo#7" {
+		t.Fatalf("linked projection = %+v", links[1])
+	}
+	bounded, capped, err := c.ListPullRequestIssueLinks(ctx, repoID, "open", 1)
+	if err != nil || !capped || len(bounded) != 1 || bounded[0].Number != 4 {
+		t.Fatalf("bounded = %+v, capped=%v, err=%v", bounded, capped, err)
+	}
+}
+
 //nolint:revive // Test helpers conventionally put *testing.T first.
 func replacePortfolioFixture(t *testing.T, ctx context.Context, c *Corpus, subject PortfolioSubject, facet string, at time.Time, signals ...PortfolioSignal) {
 	t.Helper()

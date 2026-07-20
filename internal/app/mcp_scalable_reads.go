@@ -533,6 +533,11 @@ func radarCandidateToMCP(c radar.Candidate) mcpserver.OpportunityCandidateOutput
 	for _, linked := range c.LinkedPullRequests {
 		out.LinkedPullRequests = append(out.LinkedPullRequests, linked.Number)
 	}
+	for _, work := range c.RelatedWork {
+		out.RelatedWork = append(out.RelatedWork, mcpserver.OpportunityRelatedWorkOutput{
+			Ref: work.Ref, Relation: work.Relation, Direction: work.Direction, State: work.State,
+		})
+	}
 	return out
 }
 func eligibilityRank(v string) int {

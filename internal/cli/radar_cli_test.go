@@ -33,6 +33,9 @@ func TestRadarRendersExplanations(t *testing.T) {
 			Eligibility: radar.EligibilityReadyToCode, Score: 82, Confidence: "high",
 			PositiveSignals: []radar.Signal{{Code: "help_wanted", Summary: "maintainers marked this as open to outside help", Weight: 12}},
 			Risks:           []radar.Signal{{Code: "aging_issue", Summary: "issue has aged", Weight: -5}},
+			RelatedWork: []radar.RelatedWork{{
+				Ref: "pull_request:o/r#9", Relation: "depends_on", Direction: "outbound", State: "open", Evidence: []radar.RelatedWorkEvidence{},
+			}},
 		}},
 		Unknowns: []radar.Unknown{{Code: "contribution_guidance_unknown", Summary: "contribution guidance is unknown"}},
 	}}
@@ -42,7 +45,7 @@ func TestRadarRendersExplanations(t *testing.T) {
 	if !svc.called || svc.opts.Repo.String() != "o/r" || svc.opts.Limit != 20 {
 		t.Fatalf("radar call = called:%v opts:%+v", svc.called, svc.opts)
 	}
-	for _, want := range []string{"Contribution radar: o/r (radar.v2)", "[ready_to_code] #42", "why:", "risks:", "Repository unknowns:"} {
+	for _, want := range []string{"Contribution radar: o/r (radar.v3)", "[ready_to_code] #42", "why:", "risks:", "related: depends_on pull_request:o/r#9 [open]", "Repository unknowns:"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q: %s", want, stdout.String())
 		}

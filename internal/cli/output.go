@@ -155,6 +155,7 @@ func radarHuman(r *radar.Report) string {
 		writeRadarSignals(&b, "why", candidate.PositiveSignals)
 		writeRadarSignals(&b, "risks", candidate.Risks)
 		writeRadarSignals(&b, "blockers", candidate.Blockers)
+		writeRadarRelatedWork(&b, candidate.RelatedWork)
 		if len(candidate.Unknowns) > 0 {
 			fmt.Fprintf(&b, "\n   unknown: %s", joinRadarUnknowns(candidate.Unknowns))
 		}
@@ -166,6 +167,26 @@ func radarHuman(r *radar.Report) string {
 		fmt.Fprintf(&b, "\n\nRepository unknowns: %s", joinRadarUnknowns(r.Unknowns))
 	}
 	return b.String()
+}
+
+func writeRadarRelatedWork(b *strings.Builder, values []radar.RelatedWork) {
+	if len(values) == 0 {
+		return
+	}
+	const displayLimit = 5
+	limit := min(len(values), displayLimit)
+	parts := make([]string, 0, limit+1)
+	for _, value := range values[:limit] {
+		part := value.Relation + " " + value.Ref
+		if value.State != "" {
+			part += " [" + value.State + "]"
+		}
+		parts = append(parts, part)
+	}
+	if len(values) > limit {
+		parts = append(parts, fmt.Sprintf("+%d more", len(values)-limit))
+	}
+	fmt.Fprintf(b, "\n   related: %s", strings.Join(parts, "; "))
 }
 
 func writeRadarSignals(b *strings.Builder, label string, signals []radar.Signal) {

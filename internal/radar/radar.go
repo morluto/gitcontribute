@@ -14,7 +14,7 @@ import (
 
 const (
 	// ScoreVersion changes whenever ranking semantics change.
-	ScoreVersion = "radar.v2"
+	ScoreVersion = "radar.v3"
 	// DefaultLimit is the default number of returned candidates.
 	DefaultLimit = 20
 	// MaxLimit bounds one radar response.
@@ -71,6 +71,29 @@ type LinkedPullRequest struct {
 	URL             string    `json:"url"`
 	Closing         bool      `json:"closing"`
 	SourceUpdatedAt time.Time `json:"source_updated_at,omitempty"`
+}
+
+// RelatedWorkEvidence identifies one stored source supporting a relationship.
+type RelatedWorkEvidence struct {
+	Kind       string    `json:"kind"`
+	SourceURL  string    `json:"source_url"`
+	SourceAsOf time.Time `json:"source_as_of,omitempty"`
+}
+
+// RelatedWork is one normalized issue, pull request, or local cluster related
+// to a candidate. Relation is the strongest stored relationship; Evidence
+// preserves every distinct source that contributed to that conclusion.
+type RelatedWork struct {
+	Ref             string                `json:"ref"`
+	Kind            string                `json:"kind"`
+	Number          int                   `json:"number,omitempty"`
+	Title           string                `json:"title,omitempty"`
+	State           string                `json:"state,omitempty"`
+	Relation        string                `json:"relation"`
+	Direction       string                `json:"direction,omitempty"`
+	URL             string                `json:"url,omitempty"`
+	Evidence        []RelatedWorkEvidence `json:"evidence"`
+	SourceUpdatedAt time.Time             `json:"source_updated_at,omitempty"`
 }
 
 // DuplicateCluster is a stored, explainable duplicate-candidate fact.
@@ -132,6 +155,8 @@ type IssueSnapshot struct {
 	Coverage           []Coverage
 	Discussion         DiscussionSummary
 	LinkedPullRequests []LinkedPullRequest
+	RelatedWork        []RelatedWork
+	RelatedWorkCapped  bool
 	DuplicateCluster   *DuplicateCluster
 }
 
@@ -165,6 +190,7 @@ type Candidate struct {
 	Unknowns           []Unknown           `json:"unknowns"`
 	Coverage           []Coverage          `json:"coverage"`
 	LinkedPullRequests []LinkedPullRequest `json:"linked_pull_requests"`
+	RelatedWork        []RelatedWork       `json:"related_work"`
 	DuplicateCluster   *DuplicateCluster   `json:"duplicate_cluster,omitempty"`
 	SourceUpdatedAt    time.Time           `json:"source_updated_at,omitempty"`
 	SourceAsOf         time.Time           `json:"source_as_of,omitempty"`
@@ -328,6 +354,7 @@ func newCandidateAssessment(repo RepositorySnapshot, issue IssueSnapshot, now ti
 		linked[i].SourceUpdatedAt = linked[i].SourceUpdatedAt.UTC()
 	}
 	sort.Slice(linked, func(i, j int) bool { return linked[i].Number < linked[j].Number })
+	related := cloneRelatedWork(issue.RelatedWork)
 	var duplicate *DuplicateCluster
 	if issue.DuplicateCluster != nil {
 		cluster := *issue.DuplicateCluster
@@ -357,6 +384,7 @@ func newCandidateAssessment(repo RepositorySnapshot, issue IssueSnapshot, now ti
 		Unknowns:           []Unknown{},
 		Coverage:           coverage,
 		LinkedPullRequests: linked,
+		RelatedWork:        related,
 		DuplicateCluster:   duplicate,
 		SourceUpdatedAt:    issueSourceUpdated,
 		SourceAsOf:         sourceAsOf,
@@ -371,7 +399,30 @@ func newCandidateAssessment(repo RepositorySnapshot, issue IssueSnapshot, now ti
 			candidate.SourceAsOf = pullRequest.SourceUpdatedAt
 		}
 	}
+	for _, work := range related {
+		if work.SourceUpdatedAt.After(candidate.SourceAsOf) {
+			candidate.SourceAsOf = work.SourceUpdatedAt
+		}
+		for _, item := range work.Evidence {
+			if item.SourceAsOf.After(candidate.SourceAsOf) {
+				candidate.SourceAsOf = item.SourceAsOf
+			}
+		}
+	}
 	return &candidateAssessment{repo: repo, issue: issue, now: now, candidate: candidate}
+}
+
+func cloneRelatedWork(values []RelatedWork) []RelatedWork {
+	out := make([]RelatedWork, len(values))
+	for i, value := range values {
+		out[i] = value
+		out[i].SourceUpdatedAt = value.SourceUpdatedAt.UTC()
+		out[i].Evidence = append([]RelatedWorkEvidence{}, value.Evidence...)
+		for j := range out[i].Evidence {
+			out[i].Evidence[j].SourceAsOf = out[i].Evidence[j].SourceAsOf.UTC()
+		}
+	}
+	return out
 }
 
 func (a *candidateAssessment) positive(code, summary string, weight int, source string) {
@@ -475,18 +526,60 @@ func (a *candidateAssessment) addCollisionSignals() {
 		}
 	}
 
-	for _, pullRequest := range a.candidate.LinkedPullRequests {
-		if pullRequest.Closing {
-			a.risk("active_closing_pr", fmt.Sprintf("open PR #%d declares that it closes this issue", pullRequest.Number), -30, pullRequest.URL)
-			a.blocker("active_implementation", fmt.Sprintf("open PR #%d already declares an implementation", pullRequest.Number), pullRequest.URL)
-			return
+	closing, inbound, dependencies, outboundPRs := relatedWorkCollisions(a.candidate.RelatedWork)
+	// Preserve the pre-v3 product input contract for direct Rank callers while
+	// all application-produced candidates use RelatedWork as the source.
+	if len(a.candidate.RelatedWork) == 0 {
+		for _, pullRequest := range a.candidate.LinkedPullRequests {
+			if pullRequest.Closing {
+				closing = append(closing, RelatedWork{Kind: "pull_request", Number: pullRequest.Number, URL: pullRequest.URL})
+			} else {
+				inbound = append(inbound, RelatedWork{Kind: "pull_request", Number: pullRequest.Number, URL: pullRequest.URL})
+			}
 		}
 	}
-	if len(a.candidate.LinkedPullRequests) > 0 {
-		pullRequest := a.candidate.LinkedPullRequests[0]
-		a.risk("linked_open_pr", fmt.Sprintf("%d open PR(s) explicitly reference this issue", len(a.candidate.LinkedPullRequests)), -20, pullRequest.URL)
+	if len(closing) > 0 {
+		work := closing[0]
+		a.risk("active_closing_pr", fmt.Sprintf("open PR #%d declares that it closes this issue", work.Number), -30, work.URL)
+		a.blocker("active_implementation", fmt.Sprintf("open PR #%d already declares an implementation", work.Number), work.URL)
+		return
+	}
+	if len(inbound) > 0 {
+		a.risk("linked_open_pr", fmt.Sprintf("%d open PR(s) explicitly reference this issue", len(inbound)), -20, inbound[0].URL)
 		a.escalate(EligibilityNeedsCoordination)
 	}
+	if len(dependencies) > 0 {
+		a.risk("open_dependency", fmt.Sprintf("candidate explicitly depends on %d open related thread(s)", len(dependencies)), -15, dependencies[0].URL)
+		a.escalate(EligibilityNeedsCoordination)
+	}
+	if len(outboundPRs) > 0 {
+		a.risk("related_open_pr", fmt.Sprintf("candidate discussion explicitly references %d open related PR(s)", len(outboundPRs)), -12, outboundPRs[0].URL)
+		a.escalate(EligibilityNeedsCoordination)
+	}
+}
+
+func relatedWorkCollisions(values []RelatedWork) (closing, inbound, dependencies, outboundPRs []RelatedWork) {
+	for _, work := range values {
+		if !strings.EqualFold(work.State, "open") {
+			continue
+		}
+		if work.Relation == "depends_on" && work.Direction == "outbound" {
+			dependencies = append(dependencies, work)
+			continue
+		}
+		if work.Kind != "pull_request" {
+			continue
+		}
+		switch {
+		case work.Direction == "inbound" && work.Relation == "claims_to_close":
+			closing = append(closing, work)
+		case work.Direction == "inbound":
+			inbound = append(inbound, work)
+		case work.Direction == "outbound":
+			outboundPRs = append(outboundPRs, work)
+		}
+	}
+	return closing, inbound, dependencies, outboundPRs
 }
 
 func (a *candidateAssessment) addCoverageUnknowns() {
@@ -540,6 +633,33 @@ func (a *candidateAssessment) addCoverageUnknowns() {
 		a.escalate(EligibilityNeedsCoordination)
 	}
 	a.candidate.Confidence = confidence(metadataComplete, threadsComplete, commentsComplete, a.repo.GuidanceStatus == "available")
+	unknownRelatedPullRequests := 0
+	for _, work := range a.candidate.RelatedWork {
+		if work.Kind == "pull_request" && strings.TrimSpace(work.State) == "" {
+			unknownRelatedPullRequests++
+		}
+	}
+	if unknownRelatedPullRequests > 0 {
+		a.candidate.Unknowns = append(a.candidate.Unknowns, Unknown{
+			Code:        "related_pull_request_state_unknown",
+			Summary:     fmt.Sprintf("%d related pull request(s) lack stored open or closed state", unknownRelatedPullRequests),
+			Remediation: "sync the referenced pull-request headers before treating them as inactive",
+		})
+		a.escalate(EligibilityNeedsCoordination)
+		if a.candidate.Confidence == "high" {
+			a.candidate.Confidence = "medium"
+		}
+	}
+	if a.issue.RelatedWorkCapped {
+		a.candidate.Unknowns = append(a.candidate.Unknowns, Unknown{
+			Code: "related_work_scan_capped", Summary: "related-work evidence exceeded the per-candidate bound",
+			Remediation: "inspect the thread research brief and stored relationships before starting work",
+		})
+		a.escalate(EligibilityNeedsCoordination)
+		if a.candidate.Confidence == "high" {
+			a.candidate.Confidence = "medium"
+		}
+	}
 }
 
 func (a *candidateAssessment) finish() Candidate {

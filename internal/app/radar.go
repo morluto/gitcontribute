@@ -2,28 +2,22 @@ package app
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"regexp"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
-	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/radar"
+	"github.com/morluto/gitcontribute/internal/relatedwork"
 )
 
 const (
 	radarCandidatePopulation   = 500
 	radarPullRequestPopulation = 500
 )
-
-var closingReferencePattern = regexp.MustCompile(`(?i)\b(?:close(?:s|d)?|fix(?:es|ed)?|resolve(?:s|d)?)\s*:?\s*((?:(?:https?://)?(?:www\.)?github\.com/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?/[a-z0-9_.-]+/(?:issues|pull)/\d+)|(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?/[a-z0-9_.-]+#\s*\d+)|(?:#\s*\d+))`)
 
 // ContributionRadar ranks a bounded set of locally stored open issues. It is
 // a strict corpus read: it neither resolves a GitHub reader nor writes state.
@@ -61,7 +55,10 @@ func (s *Service) ContributionRadar(ctx context.Context, opts cli.RadarOptions) 
 	if err != nil {
 		return nil, fmt.Errorf("list open pull requests: %w", err)
 	}
-	linkedByIssue := radarPullRequestLinks(ref, openPullRequests)
+	relatedByIssue, relationshipScanCapped, err := radarPullRequestRelatedWork(ctx, c, stored, ref, issues, openPullRequests)
+	if err != nil {
+		return nil, err
+	}
 
 	duplicateByIssue, duplicateScanCapped, err := radarDuplicateClusters(ctx, c, ref)
 	if err != nil {
@@ -92,10 +89,21 @@ func (s *Service) ContributionRadar(ctx context.Context, opts cli.RadarOptions) 
 		if err != nil {
 			return nil, fmt.Errorf("list coverage for issue #%d: %w", issue.Number, err)
 		}
-		discussion, err := radarDiscussionSummary(ctx, c, stored.ID, issue.ID, evaluationTime)
+		discussion, issueRelated, relatedCapped, err := radarIssueDiscussionAndRelatedWork(ctx, c, stored, issue, ref, evaluationTime)
 		if err != nil {
-			return nil, fmt.Errorf("read comments for issue #%d: %w", issue.Number, err)
+			return nil, fmt.Errorf("read discussion relationships for issue #%d: %w", issue.Number, err)
 		}
+		related := append(relatedByIssue[issue.Number], issueRelated...)
+		if cluster := duplicateByIssue[issue.Number]; cluster != nil {
+			related = append(related, radar.RelatedWork{
+				Ref: "duplicate_cluster:" + cluster.StableID, Kind: "duplicate_cluster", Title: cluster.CanonicalRef,
+				Relation: relatedwork.RelationClusterCandidate, Direction: "local", URL: "local://clusters/" + cluster.StableID,
+				Evidence:        []radar.RelatedWorkEvidence{{Kind: "duplicate_cluster", SourceURL: "local://clusters/" + cluster.StableID, SourceAsOf: cluster.SourceAsOf}},
+				SourceUpdatedAt: cluster.SourceAsOf,
+			})
+		}
+		related, mergedCapped := normalizeRadarRelatedWork(related, maxRadarRelatedWork)
+		linked := radarLinkedPullRequests(related)
 		snapshots = append(snapshots, radar.IssueSnapshot{
 			Number:             issue.Number,
 			State:              issue.State,
@@ -108,7 +116,9 @@ func (s *Service) ContributionRadar(ctx context.Context, opts cli.RadarOptions) 
 			URL:                fmt.Sprintf("https://github.com/%s/issues/%d", ref, issue.Number),
 			Coverage:           radarCoverage(coverage, "thread"),
 			Discussion:         discussion,
-			LinkedPullRequests: linkedByIssue[issue.Number],
+			LinkedPullRequests: linked,
+			RelatedWork:        related,
+			RelatedWorkCapped:  relatedCapped || mergedCapped,
 			DuplicateCluster:   duplicateByIssue[issue.Number],
 		})
 	}
@@ -125,7 +135,7 @@ func (s *Service) ContributionRadar(ctx context.Context, opts cli.RadarOptions) 
 		Now:                         evaluationTime,
 		TotalOpenIssues:             totalOpenIssues,
 		PopulationCapped:            totalOpenIssues > len(issues),
-		LinkedPullRequestScanCapped: totalOpenPullRequests > len(openPullRequests),
+		LinkedPullRequestScanCapped: totalOpenPullRequests > len(openPullRequests) || relationshipScanCapped,
 		DuplicateClusterScanCapped:  duplicateScanCapped,
 	})
 }
@@ -138,30 +148,6 @@ func radarCoverage(items []corpus.Coverage, scope string) []radar.Coverage {
 		})
 	}
 	return out
-}
-
-func radarDiscussionSummary(ctx context.Context, c *corpus.Corpus, repoID, threadID int64, now time.Time) (radar.DiscussionSummary, error) {
-	observations, capped, err := c.ListFacetObservationsBounded(ctx, repoID, &threadID, FacetIssueComments, maxHydrationPages)
-	if err != nil {
-		return radar.DiscussionSummary{}, err
-	}
-	if capped {
-		return radar.DiscussionSummary{}, errors.New("stored issue comments exceed the hydration page bound")
-	}
-	out := []radar.DiscussionComment{}
-	for _, observation := range observations {
-		var comments []github.IssueComment
-		if err := json.Unmarshal([]byte(observation.Payload), &comments); err != nil {
-			return radar.DiscussionSummary{}, fmt.Errorf("decode observation %d: %w", observation.ID, err)
-		}
-		for _, comment := range comments {
-			out = append(out, radar.DiscussionComment{
-				Author: comment.Author, AuthorAssociation: comment.AuthorAssociation, Body: comment.Body,
-				URL: comment.HTMLURL, CreatedAt: comment.CreatedAt,
-			})
-		}
-	}
-	return radar.SummarizeDiscussion(out, now), nil
 }
 
 func radarGuidanceStatus(coverage []corpus.Coverage, documentCount int) string {
@@ -177,45 +163,18 @@ func radarGuidanceStatus(coverage []corpus.Coverage, documentCount int) string {
 	return "unknown"
 }
 
-func radarPullRequestLinks(ref domain.RepoRef, pullRequests []corpus.Thread) map[int][]radar.LinkedPullRequest {
-	out := make(map[int][]radar.LinkedPullRequest)
-	for _, pullRequest := range pullRequests {
-		text := pullRequest.Title + "\n" + pullRequest.Body
-		closing := radarClosingIssueNumbers(text, ref)
-		seen := make(map[int]struct{})
-		for _, linked := range clustering.ExtractMemberRefs(text, ref) {
-			if !strings.EqualFold(linked.Owner, ref.Owner) || !strings.EqualFold(linked.Repo, ref.Repo) || linked.Kind == corpus.ThreadKindPullRequest {
-				continue
-			}
-			if _, ok := seen[linked.Number]; ok {
-				continue
-			}
-			seen[linked.Number] = struct{}{}
-			_, closes := closing[linked.Number]
-			out[linked.Number] = append(out[linked.Number], radar.LinkedPullRequest{
-				Number:          pullRequest.Number,
-				Title:           pullRequest.Title,
-				URL:             fmt.Sprintf("https://github.com/%s/pull/%d", ref, pullRequest.Number),
-				Closing:         closes,
-				SourceUpdatedAt: pullRequest.SourceUpdatedAt,
-			})
+func radarLinkedPullRequests(values []radar.RelatedWork) []radar.LinkedPullRequest {
+	out := []radar.LinkedPullRequest{}
+	for _, value := range values {
+		if value.Kind != string(domain.PullRequestKind) || value.Direction != "inbound" || !strings.EqualFold(value.State, "open") {
+			continue
 		}
+		out = append(out, radar.LinkedPullRequest{
+			Number: value.Number, Title: value.Title, URL: value.URL,
+			Closing: value.Relation == "claims_to_close", SourceUpdatedAt: value.SourceUpdatedAt,
+		})
 	}
-	for number := range out {
-		sort.Slice(out[number], func(i, j int) bool { return out[number][i].Number < out[number][j].Number })
-	}
-	return out
-}
-
-func radarClosingIssueNumbers(text string, ref domain.RepoRef) map[int]struct{} {
-	out := make(map[int]struct{})
-	for _, match := range closingReferencePattern.FindAllStringSubmatch(text, -1) {
-		for _, linked := range clustering.ExtractMemberRefs(match[1], ref) {
-			if strings.EqualFold(linked.Owner, ref.Owner) && strings.EqualFold(linked.Repo, ref.Repo) && linked.Kind != corpus.ThreadKindPullRequest {
-				out[linked.Number] = struct{}{}
-			}
-		}
-	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Number < out[j].Number })
 	return out
 }
 
