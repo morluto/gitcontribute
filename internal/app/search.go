@@ -72,7 +72,6 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts cli.Searc
 	if err != nil {
 		return searchResult{}, err
 	}
-
 	now := s.now()
 
 	if opts.Lens != "" {
