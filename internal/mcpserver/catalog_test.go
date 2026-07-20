@@ -114,6 +114,9 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 	assertSchemaValue(t, tools[ToolSearchThreads].InputSchema, []string{"properties", "limit", "default"}, float64(20))
 	assertSchemaValue(t, tools[ToolSearchThreads].InputSchema, []string{"properties", "limit", "maximum"}, float64(100))
 	assertSchemaValue(t, tools[ToolHydrateThreads].InputSchema, []string{"properties", "max_pages", "default"}, float64(3))
+	assertSchemaValue(t, tools[ToolRankThreads].InputSchema, []string{"required"}, []any{"repositories"})
+	assertSchemaValue(t, tools[ToolRankThreads].OutputSchema, []string{"properties", "total", "type"}, "integer")
+	assertSchemaValue(t, tools[ToolRankThreads].OutputSchema, []string{"properties", "truncated", "type"}, "boolean")
 	assertSchemaValue(t, tools[ToolRunValidation].InputSchema, []string{"properties", "execute", "const"}, true)
 	assertSchemaValue(t, tools[ToolPromoteOpportunity].InputSchema, []string{"properties", "confidence", "maximum"}, float64(1))
 

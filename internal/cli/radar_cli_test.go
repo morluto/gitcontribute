@@ -76,6 +76,7 @@ func TestRadarJSONAndLimitValidation(t *testing.T) {
 	for _, args := range [][]string{
 		{"radar"},
 		{"radar", "o/r", "--repo", "x/y"},
+		{"radar", "o/r", "--repo", "o/r"},
 	} {
 		if err := c.Run(context.Background(), args); err == nil {
 			t.Fatalf("expected usage error for %v", args)

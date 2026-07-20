@@ -40,7 +40,10 @@ func (s *Service) Metadata(ctx context.Context) (*cli.MetadataResult, error) {
 	c := s.corpus
 	s.mu.Unlock()
 	if c != nil {
-		schemaVersion, _ = c.SchemaVersion(ctx)
+		schemaVersion, err = c.SchemaVersion(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("read corpus schema version: %w", err)
+		}
 	}
 
 	capabilities := []string{

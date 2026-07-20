@@ -241,7 +241,11 @@ several scalar or ambiguous tools instead of adding aliases indefinitely.
 
 `corpus.rank_threads` is the MCP form of Contribution Radar. It accepts
 multiple repositories and enforces `max_results_per_repository` so one large
-project cannot consume the entire result.
+project cannot consume the entire result. The repository list is required.
+Because Radar recomputes a bounded ranking rather than reading a persisted
+result set, its output reports `total` and `truncated` instead of a
+pagination cursor; per-repository summaries expose considered, returned, and
+population-capped counts. Callers raise the limit or narrow the repository set.
 
 ### 4.2 Explicit GitHub network reads with local observation writes
 
