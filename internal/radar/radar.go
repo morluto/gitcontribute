@@ -14,7 +14,7 @@ import (
 
 const (
 	// ScoreVersion changes whenever ranking semantics change.
-	ScoreVersion = "radar.v1"
+	ScoreVersion = "radar.v2"
 	// DefaultLimit is the default number of returned candidates.
 	DefaultLimit = 20
 	// MaxLimit bounds one radar response.
@@ -26,11 +26,15 @@ const (
 type Eligibility string
 
 const (
-	// EligibilityEligible means no stored objective blocker or material
-	// eligibility unknown was found.
-	EligibilityEligible Eligibility = "eligible"
-	// EligibilityUnknown means stored evidence cannot establish eligibility.
-	EligibilityUnknown Eligibility = "unknown"
+	// EligibilityReadyToCode means source-backed policy, ownership, discussion,
+	// and issue evidence contain no reason to delay implementation.
+	EligibilityReadyToCode Eligibility = "ready_to_code"
+	// EligibilityNeedsDiagnosis means the problem or requested behavior still
+	// needs reproduction, triage, or acceptance clarification.
+	EligibilityNeedsDiagnosis Eligibility = "needs_diagnosis"
+	// EligibilityNeedsCoordination means a contributor should coordinate with
+	// maintainers or another participant before starting implementation.
+	EligibilityNeedsCoordination Eligibility = "needs_coordination"
 	// EligibilityBlocked means stored evidence contains an objective blocker.
 	EligibilityBlocked Eligibility = "blocked"
 )
@@ -84,6 +88,34 @@ type RepositorySnapshot struct {
 	SourceUpdated  time.Time
 	Coverage       []Coverage
 	GuidanceStatus string
+	Guidance       []GuidanceDocument
+}
+
+// GuidanceDocument is one source-backed repository policy document.
+type GuidanceDocument struct {
+	Path    string
+	Content string
+	URL     string
+}
+
+// DiscussionComment is the product-owned discussion evidence consumed by the
+// pure eligibility classifier.
+type DiscussionComment struct {
+	Author            string
+	AuthorAssociation string
+	Body              string
+	URL               string
+	CreatedAt         time.Time
+}
+
+// DiscussionSummary is the bounded, source-backed eligibility evidence
+// extracted from a complete stored comment snapshot.
+type DiscussionSummary struct {
+	MaintainerResponseURL  string
+	MaintainerDirection    string
+	MaintainerDirectionURL string
+	ActiveClaimAuthors     []string
+	ActiveClaimURL         string
 }
 
 // IssueSnapshot contains one locally stored issue and its derived local facts.
@@ -98,8 +130,7 @@ type IssueSnapshot struct {
 	SourceUpdated      time.Time
 	URL                string
 	Coverage           []Coverage
-	MaintainerResponse bool
-	MaintainerReplyURL string
+	Discussion         DiscussionSummary
 	LinkedPullRequests []LinkedPullRequest
 	DuplicateCluster   *DuplicateCluster
 }
@@ -261,9 +292,11 @@ type candidateAssessment struct {
 func assess(repo RepositorySnapshot, issue IssueSnapshot, now time.Time) Candidate {
 	assessment := newCandidateAssessment(repo, issue, now)
 	assessment.addRepositoryAndLabelSignals()
+	assessment.addPolicySignals()
 	assessment.addContentSignals()
 	assessment.addFreshnessSignal()
 	assessment.addOwnershipSignals()
+	assessment.addDiscussionSignals()
 	assessment.addCollisionSignals()
 	assessment.addCoverageUnknowns()
 	return assessment.finish()
@@ -314,7 +347,7 @@ func newCandidateAssessment(repo RepositorySnapshot, issue IssueSnapshot, now ti
 		Title:              issue.Title,
 		URL:                issue.URL,
 		Labels:             labels,
-		Eligibility:        EligibilityEligible,
+		Eligibility:        EligibilityReadyToCode,
 		BaseScore:          baseScore,
 		Score:              baseScore,
 		ScoreVersion:       ScoreVersion,
@@ -423,14 +456,11 @@ func (a *candidateAssessment) addOwnershipSignals() {
 		a.positive("unassigned", "issue has no stored assignee", 5, a.issue.URL)
 	} else {
 		a.risk("assigned", "issue is assigned to "+strings.Join(assignees, ", "), -15, a.issue.URL)
-		a.candidate.Eligibility = EligibilityUnknown
+		a.escalate(EligibilityNeedsCoordination)
 	}
 	if a.issue.Locked {
 		a.risk("locked_conversation", "issue conversation is locked", -10, a.issue.URL)
-		a.candidate.Eligibility = EligibilityUnknown
-	}
-	if a.issue.MaintainerResponse {
-		a.positive("maintainer_response", "stored comments include a maintainer response", 10, a.issue.MaintainerReplyURL)
+		a.blocker("locked_conversation", "issue discussion is locked, so contribution coordination is unavailable", a.issue.URL)
 	}
 }
 
@@ -439,7 +469,7 @@ func (a *candidateAssessment) addCollisionSignals() {
 		cluster := a.candidate.DuplicateCluster
 		summary := fmt.Sprintf("stored duplicate cluster %s has %d other candidate(s)", cluster.StableID, cluster.CandidateCount)
 		a.risk("duplicate_candidates", summary, -18, "")
-		a.candidate.Eligibility = EligibilityUnknown
+		a.escalate(EligibilityNeedsCoordination)
 		if cluster.SourceAsOf.After(a.candidate.SourceAsOf) {
 			a.candidate.SourceAsOf = cluster.SourceAsOf.UTC()
 		}
@@ -455,7 +485,7 @@ func (a *candidateAssessment) addCollisionSignals() {
 	if len(a.candidate.LinkedPullRequests) > 0 {
 		pullRequest := a.candidate.LinkedPullRequests[0]
 		a.risk("linked_open_pr", fmt.Sprintf("%d open PR(s) explicitly reference this issue", len(a.candidate.LinkedPullRequests)), -20, pullRequest.URL)
-		a.candidate.Eligibility = EligibilityUnknown
+		a.escalate(EligibilityNeedsCoordination)
 	}
 }
 
@@ -469,7 +499,7 @@ func (a *candidateAssessment) addCoverageUnknowns() {
 			Summary:     "repository metadata coverage is missing or incomplete, so archived state may be unknown",
 			Remediation: "run an explicit sync before treating repository state as complete",
 		})
-		a.candidate.Eligibility = EligibilityUnknown
+		a.escalate(EligibilityNeedsDiagnosis)
 	}
 	if !threadsComplete {
 		a.candidate.Unknowns = append(a.candidate.Unknowns, Unknown{
@@ -477,7 +507,7 @@ func (a *candidateAssessment) addCoverageUnknowns() {
 			Summary:     "repository thread coverage is missing or incomplete",
 			Remediation: "run an explicit archive sync before relying on this ranking",
 		})
-		a.candidate.Eligibility = EligibilityUnknown
+		a.escalate(EligibilityNeedsDiagnosis)
 	}
 	if !commentsPresent {
 		a.candidate.Unknowns = append(a.candidate.Unknowns, Unknown{
@@ -485,14 +515,31 @@ func (a *candidateAssessment) addCoverageUnknowns() {
 			Summary:     "issue comments have not been hydrated",
 			Remediation: fmt.Sprintf("run gitcontribute archive hydrate %s#%d --with issue_comments", a.repo.Repo, a.issue.Number),
 		})
+		a.escalate(EligibilityNeedsDiagnosis)
 	} else if !commentsComplete {
 		a.candidate.Unknowns = append(a.candidate.Unknowns, Unknown{
 			Code:        "comments_coverage_incomplete",
 			Summary:     "issue comment coverage is incomplete",
 			Remediation: fmt.Sprintf("rerun gitcontribute archive hydrate %s#%d --with issue_comments", a.repo.Repo, a.issue.Number),
 		})
+		a.escalate(EligibilityNeedsDiagnosis)
 	}
-	a.candidate.Confidence = confidence(metadataComplete, threadsComplete, commentsComplete)
+	switch a.repo.GuidanceStatus {
+	case "available":
+	case "missing":
+		a.candidate.Unknowns = append(a.candidate.Unknowns, Unknown{
+			Code: "contribution_guidance_missing", Summary: "repository contribution guidance was checked but not found",
+			Remediation: "confirm contribution policy with maintainers before starting implementation",
+		})
+		a.escalate(EligibilityNeedsCoordination)
+	default:
+		a.candidate.Unknowns = append(a.candidate.Unknowns, Unknown{
+			Code: "contribution_guidance_unknown", Summary: "contribution and AI policy has not been completely ingested",
+			Remediation: "run an explicit repository sync before starting implementation",
+		})
+		a.escalate(EligibilityNeedsCoordination)
+	}
+	a.candidate.Confidence = confidence(metadataComplete, threadsComplete, commentsComplete, a.repo.GuidanceStatus == "available")
 }
 
 func (a *candidateAssessment) finish() Candidate {
@@ -505,8 +552,8 @@ func (a *candidateAssessment) finish() Candidate {
 
 func addCandidateScanUnknown(candidate *Candidate, unknown Unknown) {
 	candidate.Unknowns = append(candidate.Unknowns, unknown)
-	if candidate.Eligibility == EligibilityEligible {
-		candidate.Eligibility = EligibilityUnknown
+	if eligibilitySeverity(candidate.Eligibility) < eligibilitySeverity(EligibilityNeedsCoordination) {
+		candidate.Eligibility = EligibilityNeedsCoordination
 	}
 	if candidate.Confidence == "high" {
 		candidate.Confidence = "medium"
@@ -607,17 +654,17 @@ func coverageComplete(coverage []Coverage, facet string) bool {
 	return present && complete
 }
 
-func confidence(metadataComplete, threadsComplete, commentsComplete bool) string {
+func confidence(metadataComplete, threadsComplete, commentsComplete, guidanceAvailable bool) string {
 	complete := 0
-	for _, value := range []bool{metadataComplete, threadsComplete, commentsComplete} {
+	for _, value := range []bool{metadataComplete, threadsComplete, commentsComplete, guidanceAvailable} {
 		if value {
 			complete++
 		}
 	}
 	switch complete {
-	case 3:
+	case 4:
 		return "high"
-	case 1, 2:
+	case 2, 3:
 		return "medium"
 	default:
 		return "low"
@@ -626,11 +673,13 @@ func confidence(metadataComplete, threadsComplete, commentsComplete bool) string
 
 func eligibilityOrder(value Eligibility) int {
 	switch value {
-	case EligibilityEligible:
+	case EligibilityReadyToCode:
 		return 0
-	case EligibilityUnknown:
+	case EligibilityNeedsDiagnosis:
 		return 1
-	default:
+	case EligibilityNeedsCoordination:
 		return 2
+	default:
+		return 3
 	}
 }

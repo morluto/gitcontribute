@@ -536,13 +536,16 @@ func radarCandidateToMCP(c radar.Candidate) mcpserver.OpportunityCandidateOutput
 	return out
 }
 func eligibilityRank(v string) int {
-	if v == "eligible" {
+	switch radar.Eligibility(v) {
+	case radar.EligibilityReadyToCode:
 		return 0
-	}
-	if v == "unknown" {
+	case radar.EligibilityNeedsDiagnosis:
 		return 1
+	case radar.EligibilityNeedsCoordination:
+		return 2
+	default:
+		return 3
 	}
-	return 2
 }
 
 // FindPrecedents performs an offline similarity search over stored resolved threads.

@@ -13,8 +13,9 @@ import (
 func TestRankOrdersEligibilityAndExplainsScore(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	repo := RepositorySnapshot{
-		Repo:          domain.RepoRef{Owner: "owner", Repo: "repo"},
-		SourceUpdated: now.Add(-time.Hour),
+		Repo:           domain.RepoRef{Owner: "owner", Repo: "repo"},
+		SourceUpdated:  now.Add(-time.Hour),
+		GuidanceStatus: "available",
 		Coverage: []Coverage{
 			{Facet: "metadata", Present: true, Complete: true, AsOf: now.Add(-time.Hour)},
 			{Facet: "threads", Present: true, Complete: true, AsOf: now.Add(-time.Hour)},
@@ -34,10 +35,13 @@ func TestRankOrdersEligibilityAndExplainsScore(t *testing.T) {
 		{
 			Number: 1, State: "open", Title: "Focused bug", Labels: []string{"good first issue", "help wanted"},
 			Body:          strings.Repeat("Detailed reproduction and expected behavior. ", 8) + "\n- [ ] add regression test",
-			SourceUpdated: now.Add(-24 * time.Hour), MaintainerResponse: true,
-			MaintainerReplyURL: "https://github.com/owner/repo/issues/1#issuecomment-1",
-			Coverage:           []Coverage{{Facet: "issue_comments", Present: true, Complete: true, AsOf: now.Add(-time.Hour)}},
-			URL:                "https://github.com/owner/repo/issues/1",
+			SourceUpdated: now.Add(-24 * time.Hour),
+			Discussion: SummarizeDiscussion([]DiscussionComment{{
+				Author: "maintainer", AuthorAssociation: "MEMBER", Body: "Thanks for the detailed report.",
+				URL: "https://github.com/owner/repo/issues/1#issuecomment-1", CreatedAt: now.Add(-time.Hour),
+			}}, now),
+			Coverage: []Coverage{{Facet: "issue_comments", Present: true, Complete: true, AsOf: now.Add(-time.Hour)}},
+			URL:      "https://github.com/owner/repo/issues/1",
 		},
 	}, Options{Limit: 10, Now: now, TotalOpenIssues: 3})
 	if err != nil {
@@ -47,7 +51,7 @@ func TestRankOrdersEligibilityAndExplainsScore(t *testing.T) {
 	if got := []int{report.Candidates[0].Number, report.Candidates[1].Number, report.Candidates[2].Number}; !cmp.Equal(got, []int{1, 2, 3}) {
 		t.Fatalf("candidate order = %v", got)
 	}
-	if report.Candidates[0].Eligibility != EligibilityEligible || report.Candidates[1].Eligibility != EligibilityUnknown || report.Candidates[2].Eligibility != EligibilityBlocked {
+	if report.Candidates[0].Eligibility != EligibilityReadyToCode || report.Candidates[1].Eligibility != EligibilityNeedsCoordination || report.Candidates[2].Eligibility != EligibilityBlocked {
 		t.Fatalf("eligibility order = %v, %v, %v", report.Candidates[0].Eligibility, report.Candidates[1].Eligibility, report.Candidates[2].Eligibility)
 	}
 	if report.Candidates[0].ScoreVersion != ScoreVersion || report.ScoreVersion != ScoreVersion {
@@ -72,7 +76,7 @@ func TestMissingCoverageIsUnknownNotPenalty(t *testing.T) {
 		Number: 1, State: "open", Title: "Issue", Body: "Description",
 		SourceUpdated: now.Add(-24 * time.Hour), URL: "https://github.com/owner/repo/issues/1",
 	}
-	repo := RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}}
+	repo := RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, GuidanceStatus: "available"}
 	missing, err := Rank(repo, []IssueSnapshot{base}, Options{Now: now})
 	if err != nil {
 		t.Fatal(err)
@@ -80,6 +84,7 @@ func TestMissingCoverageIsUnknownNotPenalty(t *testing.T) {
 	completeIssue := base
 	completeIssue.Coverage = []Coverage{{Facet: "issue_comments", Present: true, Complete: true}}
 	completeRepo := repo
+	completeRepo.GuidanceStatus = "available"
 	completeRepo.Coverage = []Coverage{
 		{Facet: "metadata", Present: true, Complete: true},
 		{Facet: "threads", Present: true, Complete: true},
@@ -94,7 +99,7 @@ func TestMissingCoverageIsUnknownNotPenalty(t *testing.T) {
 	if len(missing.Candidates[0].Unknowns) != 3 {
 		t.Fatalf("candidate unknowns = %+v", missing.Candidates[0].Unknowns)
 	}
-	if missing.Candidates[0].Eligibility != EligibilityUnknown || complete.Candidates[0].Eligibility != EligibilityEligible {
+	if missing.Candidates[0].Eligibility != EligibilityNeedsDiagnosis || complete.Candidates[0].Eligibility != EligibilityReadyToCode {
 		t.Fatalf("coverage eligibility: missing=%s complete=%s", missing.Candidates[0].Eligibility, complete.Candidates[0].Eligibility)
 	}
 	if len(complete.Candidates[0].Unknowns) != 0 {
@@ -232,7 +237,7 @@ func TestCappedCollisionEvidenceCannotClaimEligibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	candidate := report.Candidates[0]
-	if candidate.Eligibility != EligibilityUnknown || candidate.Confidence != "medium" {
+	if candidate.Eligibility != EligibilityNeedsCoordination || candidate.Confidence != "medium" {
 		t.Fatalf("capped candidate = %+v", candidate)
 	}
 	if candidate.Unknowns[len(candidate.Unknowns)-1].Code != "linked_pull_request_scan_capped" {

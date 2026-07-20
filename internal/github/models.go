@@ -36,6 +36,15 @@ type Repository struct {
 	PushedAt      *time.Time
 }
 
+// RepositoryFile is a bounded text file read from a repository at its default
+// branch. Content API types terminate in the GitHub adapter.
+type RepositoryFile struct {
+	Path    string
+	SHA     string
+	HTMLURL string
+	Content string
+}
+
 // Issue is a domain-neutral view of an issue or pull-request marker from
 // the issues list endpoint.
 type Issue struct {

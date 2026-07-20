@@ -437,6 +437,10 @@ func (s *Service) SyncWithOptions(ctx context.Context, repo cli.RepoRef, syncOpt
 		syncErr = fmt.Errorf("advance metadata facet: %w", err)
 		return nil, syncErr
 	}
+	if err := syncRepositoryGuidance(ctx, c, reader, repoProjection, ref, ghRepo.UpdatedAt, run.ID); err != nil {
+		syncErr = err
+		return nil, syncErr
+	}
 
 	listOpts := github.ListIssueOptions{
 		State:     syncOpts.State,
