@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	radarCandidatePopulation   = 500
+	radarCandidatePopulation   = radar.MaxLimit
 	radarPullRequestPopulation = 500
 )
 

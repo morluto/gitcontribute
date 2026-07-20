@@ -272,8 +272,10 @@ uses a bounded population and therefore does not support cursor pagination.
 Contribution Radar similarly ranks a bounded open-issue population, separates
 score from the explicit `ready_to_code`, `needs_diagnosis`,
 `needs_coordination`, and `blocked` eligibility states, and reports positive
-signals, risks, blockers, and unknown evidence. Eligibility derives only from
-stored policy, labels, discussion, ownership, collision, and coverage facts.
+signals, risks, blockers, and unknown evidence. One repository run accepts and
+can return up to the same 500-issue population that it evaluates. Eligibility
+derives only from stored policy, labels, discussion, ownership, collision, and
+coverage facts.
 The cross-repository MCP form requires an explicit non-empty repository set
 and reports the evaluated `total` and `truncated`. Per-repo
 summaries distinguish considered, returned, per-repo truncation, and an
