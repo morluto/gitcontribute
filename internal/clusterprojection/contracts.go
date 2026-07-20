@@ -45,7 +45,9 @@ type RefreshSnapshot struct {
 	ReadStatements     int
 }
 
-// RefreshStats records stable work counts for one successful refresh.
+// RefreshStats records output cardinalities and work counts for one successful
+// refresh. ClusterCount is the current non-retired projection count even when
+// an unchanged refresh skips pair evaluation and commit work.
 type RefreshStats struct {
 	CandidateCount  int    `json:"candidate_count"`
 	RequiredPairs   uint64 `json:"required_pairs"`

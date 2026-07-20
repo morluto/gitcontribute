@@ -26,7 +26,8 @@ type ClusterProjectionIdentity struct {
 	RunID              int64  `json:"run_id"`
 }
 
-// ClusterRefreshStats describes bounded work performed by an explicit refresh.
+// ClusterRefreshStats describes current projection cardinalities and bounded
+// work performed by an explicit refresh.
 type ClusterRefreshStats struct {
 	CandidateCount  int    `json:"candidate_count"`
 	RequiredPairs   uint64 `json:"required_pairs"`
