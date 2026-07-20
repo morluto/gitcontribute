@@ -51,6 +51,9 @@ accepted for compatibility and emits a migration warning.
   GitHub state.
 - `github.sync_threads` stores issue or pull-request headers. Child comments
   and reviews require explicit `github.hydrate_threads` facets.
+- Pull-request headers do not contain merge outcomes. Until `pr_details` is
+  hydrated, a closed PR's `merged` value is omitted and outcome-sensitive
+  offline reads report it as unknown rather than closed-unmerged.
 
 ## Pull-request portfolio
 

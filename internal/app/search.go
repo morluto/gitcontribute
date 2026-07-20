@@ -30,6 +30,7 @@ type searchMatch struct {
 	ClosedAt          time.Time
 	MergedAt          time.Time
 	Merged            bool
+	MergedKnown       bool
 	Language          string
 	Archived          bool
 	Stars             int
@@ -219,7 +220,7 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 			AuthorAssociation: t.AuthorAssociation,
 			Labels:            t.Labels,
 			Assignees:         t.Assignees,
-			Draft:             t.Draft, ClosedAt: t.ClosedAt, MergedAt: t.MergedAt, Merged: t.Merged,
+			Draft:             t.Draft, ClosedAt: t.ClosedAt, MergedAt: t.MergedAt, Merged: t.Merged, MergedKnown: t.MergedKnown,
 			Language:  repo.Language,
 			Archived:  repo.Archived,
 			Stars:     repo.Stars,

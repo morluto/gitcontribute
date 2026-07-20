@@ -90,6 +90,7 @@ func TestBuilderBuild(t *testing.T) {
 		OpenPullRequestCount:           2,
 		MergedPullRequestCount:         5,
 		ClosedUnmergedPullRequestCount: 1,
+		ClosedPullRequestUnknownCount:  1,
 	}
 	coverage := domain.Coverage{
 		AsOf: now,
@@ -105,15 +106,19 @@ func TestBuilderBuild(t *testing.T) {
 
 	// Return threads unsorted to exercise stable ordering in the builder.
 	mergedPRs := []domain.Thread{
-		{Repo: ref, Kind: domain.PullRequestKind, Number: 9, Title: "Second merged", State: domain.ClosedState, UpdatedAt: now.Add(-2 * time.Hour), CreatedAt: now.Add(-10 * time.Hour), PullRequest: &domain.PullRequestDetails{Merged: true, MergedAt: now.Add(-3 * time.Hour)}},
-		{Repo: ref, Kind: domain.PullRequestKind, Number: 5, Title: "First merged", State: domain.ClosedState, UpdatedAt: now.Add(-time.Hour), CreatedAt: now.Add(-12 * time.Hour), PullRequest: &domain.PullRequestDetails{Merged: true, MergedAt: now.Add(-2 * time.Hour)}},
+		{Repo: ref, Kind: domain.PullRequestKind, Number: 9, Title: "Second merged", State: domain.ClosedState, UpdatedAt: now.Add(-2 * time.Hour), CreatedAt: now.Add(-10 * time.Hour), PullRequest: &domain.PullRequestDetails{Merged: true, MergedKnown: true, MergedAt: now.Add(-3 * time.Hour)}},
+		{Repo: ref, Kind: domain.PullRequestKind, Number: 5, Title: "First merged", State: domain.ClosedState, UpdatedAt: now.Add(-time.Hour), CreatedAt: now.Add(-12 * time.Hour), PullRequest: &domain.PullRequestDetails{Merged: true, MergedKnown: true, MergedAt: now.Add(-2 * time.Hour)}},
 	}
 	openPRs := []domain.Thread{
 		{Repo: ref, Kind: domain.PullRequestKind, Number: 11, Title: "Open PR", State: domain.OpenState, UpdatedAt: now, CreatedAt: now.Add(-time.Hour)},
 	}
 	closedUnmergedPRs := []domain.Thread{
-		{Repo: ref, Kind: domain.PullRequestKind, Number: 3, Title: "Closed unmerged", State: domain.ClosedState, UpdatedAt: now.Add(-3 * time.Hour), CreatedAt: now.Add(-20 * time.Hour), PullRequest: &domain.PullRequestDetails{Merged: false}},
+		{Repo: ref, Kind: domain.PullRequestKind, Number: 3, Title: "Closed unmerged", State: domain.ClosedState, UpdatedAt: now.Add(-3 * time.Hour), CreatedAt: now.Add(-20 * time.Hour), PullRequest: &domain.PullRequestDetails{MergedKnown: true}},
 	}
+	unknownMergePRs := []domain.Thread{
+		{Repo: ref, Kind: domain.PullRequestKind, Number: 4, Title: "Closed with unknown merge state", State: domain.ClosedState, UpdatedAt: now.Add(-4 * time.Hour), CreatedAt: now.Add(-21 * time.Hour), PullRequest: &domain.PullRequestDetails{}},
+	}
+	closedPRs := append(append(append([]domain.Thread{}, mergedPRs...), closedUnmergedPRs...), unknownMergePRs...)
 	issues := []domain.Thread{
 		{Repo: ref, Kind: domain.IssueKind, Number: 42, Title: "Recent issue", State: domain.OpenState, UpdatedAt: now.Add(-30 * time.Minute), CreatedAt: now.Add(-2 * time.Hour)},
 		{Repo: ref, Kind: domain.IssueKind, Number: 7, Title: "Old issue", State: domain.ClosedState, UpdatedAt: now.Add(-4 * time.Hour), CreatedAt: now.Add(-24 * time.Hour)},
@@ -126,16 +131,14 @@ func TestBuilderBuild(t *testing.T) {
 		guidance:     guidance,
 		guidanceRefs: []domain.SourceRef{guideRef},
 		threads: map[threadKey][]domain.Thread{
-			{kind: "pull_request", state: "closed", merged: "true"}:  mergedPRs,
-			{kind: "pull_request", state: "open", merged: "*"}:       openPRs,
-			{kind: "pull_request", state: "closed", merged: "false"}: closedUnmergedPRs,
-			{kind: "issue", state: "", merged: "*"}:                  issues,
+			{kind: "pull_request", state: "closed", merged: "*"}: closedPRs,
+			{kind: "pull_request", state: "open", merged: "*"}:   openPRs,
+			{kind: "issue", state: "", merged: "*"}:              issues,
 		},
 		threadRefs: map[threadKey][]domain.SourceRef{
-			{kind: "pull_request", state: "closed", merged: "true"}:  {threadRef},
-			{kind: "pull_request", state: "open", merged: "*"}:       {threadRef},
-			{kind: "pull_request", state: "closed", merged: "false"}: {threadRef},
-			{kind: "issue", state: "", merged: "*"}:                  {threadRef},
+			{kind: "pull_request", state: "closed", merged: "*"}: {threadRef},
+			{kind: "pull_request", state: "open", merged: "*"}:   {threadRef},
+			{kind: "issue", state: "", merged: "*"}:              {threadRef},
 		},
 	}
 
@@ -164,6 +167,7 @@ func TestBuilderBuild(t *testing.T) {
 		"open PRs":            2,
 		"merged PRs":          5,
 		"closed unmerged PRs": 1,
+		"unknown merge PRs":   1,
 	}
 	gotCounts := map[string]int{
 		"open issues":         dossier.OpenIssueCount,
@@ -171,6 +175,7 @@ func TestBuilderBuild(t *testing.T) {
 		"open PRs":            dossier.OpenPullRequestCount,
 		"merged PRs":          dossier.MergedPullRequestCount,
 		"closed unmerged PRs": dossier.ClosedUnmergedPullRequestCount,
+		"unknown merge PRs":   dossier.ClosedPullRequestUnknownCount,
 	}
 	if !reflect.DeepEqual(gotCounts, wantCounts) {
 		t.Fatalf("counts mismatch: got %+v, want %+v", gotCounts, wantCounts)
@@ -193,6 +198,9 @@ func TestBuilderBuild(t *testing.T) {
 
 	if len(dossier.RecentClosedUnmergedPullRequests) != 1 || dossier.RecentClosedUnmergedPullRequests[0].Number != 3 {
 		t.Fatalf("unexpected closed unmerged PRs: %+v", dossier.RecentClosedUnmergedPullRequests)
+	}
+	if len(dossier.RecentClosedUnknownPullRequests) != 1 || dossier.RecentClosedUnknownPullRequests[0].Number != 4 {
+		t.Fatalf("unexpected unknown-merge PRs: %+v", dossier.RecentClosedUnknownPullRequests)
 	}
 
 	if len(dossier.RecentIssues) != 2 || dossier.RecentIssues[0].Number != 42 {

@@ -125,10 +125,17 @@ func resolveWindowStart(startOpt time.Time, threads []corpus.Thread, repo *corpu
 func countThreads(threads []corpus.Thread, window Window, truncated bool) (IssueMetrics, PullRequestMetrics) {
 	issueMetrics := IssueMetrics{Window: window}
 	prMetrics := PullRequestMetrics{Window: window}
-	missingCreated := false
+	missingIssueCreated := false
+	missingPRCreated := false
+	missingMergeState := false
 	for _, t := range threads {
 		if t.SourceCreatedAt.IsZero() {
-			missingCreated = true
+			switch t.Kind {
+			case corpus.ThreadKindIssue:
+				missingIssueCreated = true
+			case corpus.ThreadKindPullRequest:
+				missingPRCreated = true
+			}
 			continue
 		}
 		if !withinWindow(t.SourceCreatedAt, window.Start, window.End) {
@@ -146,6 +153,9 @@ func countThreads(threads []corpus.Thread, window Window, truncated bool) (Issue
 			prMetrics.SampleSize++
 			if t.State == "open" {
 				prMetrics.Open++
+			} else if !t.MergedKnown {
+				prMetrics.ClosedUnknownMerge++
+				missingMergeState = true
 			} else if t.Merged {
 				prMetrics.Merged++
 			} else {
@@ -153,14 +163,26 @@ func countThreads(threads []corpus.Thread, window Window, truncated bool) (Issue
 			}
 		}
 	}
-	coverage := "complete"
+	issueCoverage := "complete"
+	prCoverage := "complete"
 	if truncated {
-		coverage = "partial (thread list may be truncated)"
-	} else if missingCreated {
-		coverage = "partial (some threads lack a created timestamp)"
+		issueCoverage = "partial (thread list may be truncated)"
+		prCoverage = issueCoverage
+	} else {
+		if missingIssueCreated {
+			issueCoverage = "partial (some issues lack a created timestamp)"
+		}
+		switch {
+		case missingPRCreated && missingMergeState:
+			prCoverage = "partial (some pull requests lack a created timestamp and some closed pull requests lack an observed merge state)"
+		case missingPRCreated:
+			prCoverage = "partial (some pull requests lack a created timestamp)"
+		case missingMergeState:
+			prCoverage = "partial (some closed pull requests lack an observed merge state)"
+		}
 	}
-	issueMetrics.Coverage = coverage
-	prMetrics.Coverage = coverage
+	issueMetrics.Coverage = issueCoverage
+	prMetrics.Coverage = prCoverage
 	return issueMetrics, prMetrics
 }
 
@@ -201,6 +223,8 @@ func computeExternalMetrics(threads []corpus.Thread, start, end time.Time) Exter
 		switch {
 		case t.State == "open":
 			out.Open++
+		case !t.MergedKnown:
+			out.ClosedUnknownMerge++
 		case t.Merged:
 			out.Merged++
 		default:
@@ -213,8 +237,12 @@ func computeExternalMetrics(threads []corpus.Thread, start, end time.Time) Exter
 		out.Coverage = "missing (no PRs in window)"
 	case known == 0:
 		out.Coverage = "missing (no author association)"
+	case unknown > 0 && out.ClosedUnknownMerge > 0:
+		out.Coverage = "partial (some PRs lack author association and some closed PRs lack an observed merge state)"
 	case unknown > 0:
 		out.Coverage = "partial (some PRs lack author association)"
+	case out.ClosedUnknownMerge > 0:
+		out.Coverage = "partial (some closed PRs lack an observed merge state)"
 	default:
 		out.Coverage = "complete"
 	}

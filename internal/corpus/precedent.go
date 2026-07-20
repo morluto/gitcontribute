@@ -12,7 +12,7 @@ import (
 )
 
 const threadProjectionColumns = `id, repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone,
-       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged`
+       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged, merged_known`
 
 // LoadPrecedentRepositories loads each unique repository once, batches all
 // requested source numbers for it, and loads its bounded closed history once.

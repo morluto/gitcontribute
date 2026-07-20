@@ -248,6 +248,53 @@ func TestHydratePullRequestFacets(t *testing.T) {
 			t.Fatalf("expected complete coverage for %s", facet)
 		}
 	}
+	projected, err := c.GetThread(ctx, repo.ID, corpus.ThreadKindPullRequest, thread.Number)
+	if err != nil || projected == nil || !projected.MergedKnown || projected.Merged {
+		t.Fatalf("projected PR merge state = %+v, %v", projected, err)
+	}
+}
+
+func TestHydratePullRequestDetailsDoesNotProjectStaleSnapshot(t *testing.T) {
+	ctx := context.Background()
+	svc := newTestServiceNoNetwork(t)
+	defer func() { _ = svc.Close() }()
+
+	repo, thread := seedRepoAndThread(t, svc, corpus.ThreadKindPullRequest, 2)
+	thread.Merged = true
+	thread.MergedKnown = true
+	thread.MergedAt = thread.SourceUpdatedAt
+	stored, err := svc.corpus.UpsertThread(ctx, *thread, `{"Merged":true}`)
+	if err != nil {
+		t.Fatalf("store known projection: %v", err)
+	}
+	newerAt := stored.SourceUpdatedAt.Add(2 * time.Hour)
+	newerPayload, err := json.Marshal(github.PullRequestDetails{Number: 2, Merged: true, UpdatedAt: newerAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.ApplyFacetObservationSet(ctx, repo.ID, &stored.ID, FacetPRDetails, newerAt, []corpus.FacetObservationInput{{SourceUpdatedAt: newerAt, Payload: string(newerPayload)}}, true, 0); err != nil {
+		t.Fatalf("store newer detail facet: %v", err)
+	}
+
+	reader := &fakeHydrationReader{prDetails: github.PullRequestDetails{
+		Number: 2, Merged: false, UpdatedAt: stored.SourceUpdatedAt.Add(time.Hour),
+	}}
+	svc.SetGitHubReader(reader)
+	if _, err := svc.HydrateThread(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, 2, HydrateOptions{Facets: []string{FacetPRDetails}}); err != nil {
+		t.Fatalf("hydrate stale details: %v", err)
+	}
+
+	projected, err := svc.corpus.GetThread(ctx, repo.ID, corpus.ThreadKindPullRequest, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projected == nil || !projected.MergedKnown || !projected.Merged || !projected.MergedAt.Equal(stored.MergedAt) {
+		t.Fatalf("stale detail response replaced known projection: %+v", projected)
+	}
+	observations, err := svc.corpus.ListFacetObservations(ctx, repo.ID, &stored.ID, FacetPRDetails)
+	if err != nil || len(observations) != 1 || observations[0].Payload != string(newerPayload) {
+		t.Fatalf("newer detail facet was replaced: observations=%+v err=%v", observations, err)
+	}
 }
 
 func TestHydratePullRequestReviewsAtPageCapPreservesCompleteSnapshot(t *testing.T) {

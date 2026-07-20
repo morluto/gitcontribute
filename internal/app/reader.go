@@ -44,6 +44,7 @@ func (r *corpusReader) ReadRepository(ctx context.Context, ref domain.RepoRef) (
 	domainRepo.OpenPullRequestCount = counts.openPRs
 	domainRepo.MergedPullRequestCount = counts.mergedPRs
 	domainRepo.ClosedUnmergedPullRequestCount = counts.closedUnmergedPRs
+	domainRepo.ClosedPullRequestUnknownCount = counts.unknownMergePRs
 
 	if snap, err := c.LatestCodeSnapshot(ctx, ref); err != nil {
 		return domain.Repository{}, nil, fmt.Errorf("latest code snapshot: %w", err)
@@ -86,7 +87,7 @@ func (r *corpusReader) ReadThreads(ctx context.Context, ref domain.RepoRef, q do
 			continue
 		}
 		if q.Merged != nil && t.Kind == corpus.ThreadKindPullRequest {
-			if t.Merged != *q.Merged {
+			if !t.MergedKnown || t.Merged != *q.Merged {
 				continue
 			}
 		}
@@ -178,6 +179,7 @@ type threadCounts struct {
 	openPRs           int
 	mergedPRs         int
 	closedUnmergedPRs int
+	unknownMergePRs   int
 }
 
 func countThreads(threads []corpus.Thread) threadCounts {
@@ -193,6 +195,8 @@ func countThreads(threads []corpus.Thread) threadCounts {
 		case corpus.ThreadKindPullRequest:
 			if t.State == "open" {
 				c.openPRs++
+			} else if !t.MergedKnown {
+				c.unknownMergePRs++
 			} else if t.Merged {
 				c.mergedPRs++
 			} else {
@@ -242,8 +246,9 @@ func corpusThreadToDomain(ref domain.RepoRef, t corpus.Thread) domain.Thread {
 	}
 	if t.Kind == corpus.ThreadKindPullRequest {
 		dt.PullRequest = &domain.PullRequestDetails{
-			Merged:   t.Merged,
-			MergedAt: t.MergedAt,
+			Merged:      t.Merged,
+			MergedKnown: t.MergedKnown,
+			MergedAt:    t.MergedAt,
 		}
 	}
 	return dt

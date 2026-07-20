@@ -271,6 +271,91 @@ func TestMigration023RemovesLegacyClusterRunColumns(t *testing.T) {
 	}
 }
 
+func TestMigration024BackfillsOnlyObservedMergeState(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "corpus.db")
+	dsn := path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	sub, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, sub, goose.WithLogger(noopLogger{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 23); err != nil {
+		t.Fatal(err)
+	}
+	mustExec := func(query string, args ...any) sql.Result {
+		t.Helper()
+		result, execErr := db.ExecContext(ctx, query, args...)
+		if execErr != nil {
+			t.Fatal(execErr)
+		}
+		return result
+	}
+	result := mustExec(`INSERT INTO repositories (owner, name, source_updated_at, observation_sequence, created_at, updated_at) VALUES ('owner', 'repo', 1, 1, 1, 1)`)
+	repoID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	threadIDs := make([]int64, 5)
+	for index := range threadIDs {
+		result = mustExec(`INSERT INTO threads (repository_id, kind, number, state, title, source_updated_at, observation_sequence, created_at, updated_at) VALUES (?, 'pull_request', ?, 'closed', 'pr', 1, ?, 1, 1)`, repoID, index+1, index+1)
+		threadIDs[index], err = result.LastInsertId()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustExec(`INSERT INTO thread_observations (thread_id, source_updated_at, observation_sequence, payload, observed_at) VALUES (?, 1, 4, '{"Merged":false}', 1)`, threadIDs[1])
+	mustExec(`INSERT INTO facet_coverage (repository_id, thread_id, facet, source_updated_at, observation_sequence, complete, updated_at) VALUES (?, ?, 'pr_details', 1, 5, 1, 1)`, repoID, threadIDs[2])
+	mustExec(`INSERT INTO facet_observations (repository_id, thread_id, facet, source_updated_at, observation_sequence, payload, observed_at) VALUES (?, ?, 'pr_details', 1, 5, '{"Merged":true}', 1)`, repoID, threadIDs[2])
+	mustExec(`UPDATE threads SET merged = 1 WHERE id = ?`, threadIDs[3])
+	mustExec(`INSERT INTO facet_coverage (repository_id, thread_id, facet, source_updated_at, observation_sequence, complete, updated_at) VALUES (?, ?, 'pr_details', 1, 6, 0, 1)`, repoID, threadIDs[4])
+	mustExec(`INSERT INTO facet_observations (repository_id, thread_id, facet, source_updated_at, observation_sequence, payload, observed_at) VALUES (?, ?, 'pr_details', 1, 6, '{"Merged":false}', 1)`, repoID, threadIDs[4])
+
+	if _, err := provider.UpTo(ctx, 24); err != nil {
+		t.Fatalf("migrate up to 024: %v", err)
+	}
+	rows, err := db.QueryContext(ctx, `SELECT merged, merged_known FROM threads ORDER BY number`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	want := [][2]int{{0, 0}, {0, 1}, {1, 1}, {1, 1}, {0, 0}}
+	index := 0
+	for rows.Next() {
+		var got [2]int
+		if err := rows.Scan(&got[0], &got[1]); err != nil {
+			t.Fatal(err)
+		}
+		if index >= len(want) || got != want[index] {
+			t.Fatalf("row %d merge state = %v, want %v", index, got, want[index])
+		}
+		index++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if index != len(want) {
+		t.Fatalf("merge-state rows = %d, want %d", index, len(want))
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.DownTo(ctx, 23); err != nil {
+		t.Fatalf("migrate down from 024: %v", err)
+	}
+	if migrationColumnExists(ctx, t, db, "threads", "merged_known") {
+		t.Fatal("merged_known remains after migration 024 down")
+	}
+}
+
 func threadsHaveColumns(t *testing.T, ctx context.Context, db *sql.DB, cols []string) bool {
 	t.Helper()
 	for _, col := range cols {

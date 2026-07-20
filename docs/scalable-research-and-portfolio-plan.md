@@ -119,9 +119,10 @@ individual threads.
 ### 2.6 Historical evidence is stored but not queryable enough
 
 The corpus preserves thread state, GitHub `state_reason`, closed time, merged
-time, and merged state. MCP `ThreadOutput` omits most of those fields, and MCP
-thread search cannot filter by state, state reason, close time, labels, or
-resolution.
+time, merged state, and whether merge state was explicitly observed. Header-only
+pull requests keep a nullable merge outcome until PR details are hydrated. MCP
+thread output and filters preserve that distinction so unknown is not reported
+as closed-unmerged.
 
 Open issues should form the opportunity pool. Completed issues and merged pull
 requests should form a precedent corpus. Duplicates, not-planned work, rejected

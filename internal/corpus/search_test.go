@@ -138,6 +138,34 @@ func TestSearchThreadsPageAppliesMetadataFiltersAndBindsCursor(t *testing.T) {
 	}
 }
 
+func TestSearchThreadsPageDoesNotTreatUnknownMergeStateAsFalse(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, thread := range []Thread{
+		{Kind: ThreadKindPullRequest, Number: 1, State: "closed", Title: "shared term", Merged: true, SourceUpdatedAt: time.Unix(10, 0).UTC()},
+		{Kind: ThreadKindPullRequest, Number: 2, State: "closed", Title: "shared term", MergedKnown: true, SourceUpdatedAt: time.Unix(20, 0).UTC()},
+		{Kind: ThreadKindPullRequest, Number: 3, State: "closed", Title: "shared term", SourceUpdatedAt: time.Unix(30, 0).UTC()},
+	} {
+		thread.RepositoryID = repo.ID
+		if _, err := c.UpsertThread(ctx, thread, `{}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	merged, unmerged := true, false
+	mergedPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Merged: &merged, Limit: 10})
+	if err != nil || len(mergedPage.Threads) != 1 || mergedPage.Threads[0].Number != 1 {
+		t.Fatalf("merged page = %+v, %v", mergedPage, err)
+	}
+	unmergedPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Merged: &unmerged, Limit: 10})
+	if err != nil || len(unmergedPage.Threads) != 1 || unmergedPage.Threads[0].Number != 2 {
+		t.Fatalf("unmerged page = %+v, %v", unmergedPage, err)
+	}
+}
+
 func TestSearchThreadsPageFiltersByAssociationAndAssignee(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)

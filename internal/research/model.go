@@ -133,7 +133,7 @@ type CurrentStateSection struct {
 	StateReason string    `json:"state_reason,omitempty"`
 	Draft       bool      `json:"draft"`
 	Locked      bool      `json:"locked"`
-	Merged      bool      `json:"merged"`
+	Merged      *bool     `json:"merged,omitempty"`
 	Labels      []string  `json:"labels"`
 	Milestone   string    `json:"milestone,omitempty"`
 	CreatedAt   time.Time `json:"created_at,omitempty"`

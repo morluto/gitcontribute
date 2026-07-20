@@ -146,7 +146,7 @@ type ThreadOutput struct {
 	Draft             bool     `json:"draft,omitempty"`
 	ClosedAt          string   `json:"closed_at,omitempty"`
 	MergedAt          string   `json:"merged_at,omitempty"`
-	Merged            bool     `json:"merged,omitempty"`
+	Merged            *bool    `json:"merged,omitempty"`
 	UpdatedAt         string   `json:"updated_at,omitempty"`
 }
 

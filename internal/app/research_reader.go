@@ -54,7 +54,7 @@ func (r *corpusReader) ReadResearchThread(ctx context.Context, requested researc
 		Ref: resolved, Title: thread.Title, Body: thread.Body, Author: thread.Author,
 		AuthorAssociation: thread.AuthorAssociation, State: thread.State, StateReason: thread.StateReason,
 		Labels: append([]string{}, thread.Labels...), Assignees: append([]string{}, thread.Assignees...),
-		Draft: thread.Draft, Locked: thread.Locked, Milestone: thread.Milestone, Merged: thread.Merged,
+		Draft: thread.Draft, Locked: thread.Locked, Milestone: thread.Milestone, Merged: thread.Merged, MergedKnown: thread.MergedKnown,
 		CreatedAt: thread.SourceCreatedAt, UpdatedAt: thread.SourceUpdatedAt, ClosedAt: thread.ClosedAt,
 		MergedAt: thread.MergedAt, Source: source,
 	}}

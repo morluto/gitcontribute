@@ -30,6 +30,13 @@ func (c *Corpus) ApplyFacetObservationSet(ctx context.Context, repoID int64, thr
 	return err
 }
 
+// ApplyFacetObservationSetIfNewer records a facet snapshot and reports whether
+// it won the stored source ordering. Callers that maintain a derived projection
+// must update it only when applied is true.
+func (c *Corpus) ApplyFacetObservationSetIfNewer(ctx context.Context, repoID int64, threadID *int64, facet string, sourceUpdatedAt time.Time, pages []FacetObservationInput, complete bool, runID int64) (applied bool, err error) {
+	return c.applyFacetObservationSet(ctx, repoID, threadID, facet, sourceUpdatedAt, pages, complete, runID, nil)
+}
+
 // ApplyFacetObservationSetCAS atomically replaces a facet only when its current
 // coverage sequence still matches the sequence captured before retrieval.
 func (c *Corpus) ApplyFacetObservationSetCAS(ctx context.Context, repoID int64, threadID *int64, facet string, sourceUpdatedAt time.Time, pages []FacetObservationInput, complete bool, runID, expectedSequence int64) (bool, error) {

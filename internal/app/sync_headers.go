@@ -90,19 +90,6 @@ func (w *syncThreadWriter) store(issue github.Issue) error {
 		return err
 	}
 	thread.RepositoryID = w.repositoryID
-	if issue.Kind == github.ThreadKindPullRequest {
-		current, err := w.corpus.GetThread(w.ctx, w.repositoryID, string(issue.Kind), issue.Number)
-		if err != nil {
-			return fmt.Errorf("read current pull-request header: %w", err)
-		}
-		if current != nil {
-			// The issues endpoint does not expose merge state. Keep previously
-			// observed detail fields until an explicit PR-detail refresh replaces
-			// them instead of erasing them during a header-only sync.
-			thread.Merged = current.Merged
-			thread.MergedAt = current.MergedAt
-		}
-	}
 	if _, err := w.corpus.UpsertThread(w.ctx, thread, payload); err != nil {
 		return fmt.Errorf("upsert thread: %w", err)
 	}

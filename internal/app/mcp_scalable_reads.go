@@ -379,9 +379,12 @@ func portfolioItem(ctx context.Context, c *corpus.Corpus, stored corpus.Portfoli
 	case t.Merged:
 		out.Attention = "merged"
 		out.Reasons = append([]string{"pull request is merged"}, out.Reasons...)
-	case t.State == "closed":
+	case t.State == "closed" && t.MergedKnown:
 		out.Attention = "closed_unmerged"
-		out.Reasons = append([]string{"pull request is closed without a stored merge"}, out.Reasons...)
+		out.Reasons = append([]string{"pull request is closed and GitHub reports it was not merged"}, out.Reasons...)
+	case t.State == "closed":
+		out.Attention = "unknown"
+		out.Reasons = append([]string{"pull request is closed but merge state has not been observed"}, out.Reasons...)
 	case detailCoverage == nil:
 		out.Attention = "unknown"
 		out.Reasons = append([]string{"pull-request status has not been synchronized"}, out.Reasons...)

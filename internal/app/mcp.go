@@ -82,7 +82,7 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 			AuthorAssociation: m.AuthorAssociation,
 			Labels:            m.Labels,
 			Assignees:         m.Assignees,
-			Draft:             m.Draft, ClosedAt: formatTime(m.ClosedAt), MergedAt: formatTime(m.MergedAt), Merged: m.Merged,
+			Draft:             m.Draft, ClosedAt: formatTime(m.ClosedAt), MergedAt: formatTime(m.MergedAt), Merged: knownMergePointer(m.Merged, m.MergedKnown),
 			UpdatedAt: updatedAt,
 		}
 	}
@@ -176,9 +176,16 @@ func corpusThreadToMCPOutput(t *corpus.Thread) mcpserver.ThreadOutput {
 		AuthorAssociation: t.AuthorAssociation,
 		Labels:            t.Labels,
 		Assignees:         t.Assignees,
-		Draft:             t.Draft, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.MergedAt), Merged: t.Merged,
+		Draft:             t.Draft, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.MergedAt), Merged: knownMergePointer(t.Merged, t.MergedKnown),
 		UpdatedAt: formatTime(t.SourceUpdatedAt),
 	}
+}
+
+func knownMergePointer(merged, known bool) *bool {
+	if !known {
+		return nil
+	}
+	return &merged
 }
 
 // Dossier builds a source-backed repository dossier from local corpus data.
@@ -493,20 +500,22 @@ func dossierToMCPOutput(d *domain.Dossier) mcpserver.DossierOutput {
 		Repo:  d.Repo.Repo,
 		AsOf:  d.AsOf.Format(time.RFC3339),
 		Sections: map[string]any{
-			"description":                d.Repository.Description,
-			"language":                   firstLanguage(d.Repository.Languages),
-			"stars":                      d.Repository.Stars,
-			"open_issues":                d.OpenIssueCount,
-			"closed_issues":              d.ClosedIssueCount,
-			"open_prs":                   d.OpenPullRequestCount,
-			"merged_prs":                 d.MergedPullRequestCount,
-			"closed_unmerged_prs":        d.ClosedUnmergedPullRequestCount,
-			"recent_merged_prs":          d.RecentMergedPullRequests,
-			"recent_open_prs":            d.RecentOpenPullRequests,
-			"recent_closed_unmerged_prs": d.RecentClosedUnmergedPullRequests,
-			"recent_issues":              d.RecentIssues,
-			"guidance":                   d.ContributionGuidance,
-			"coverage":                   coverageNames(d.Coverage),
+			"description":                     d.Repository.Description,
+			"language":                        firstLanguage(d.Repository.Languages),
+			"stars":                           d.Repository.Stars,
+			"open_issues":                     d.OpenIssueCount,
+			"closed_issues":                   d.ClosedIssueCount,
+			"open_prs":                        d.OpenPullRequestCount,
+			"merged_prs":                      d.MergedPullRequestCount,
+			"closed_unmerged_prs":             d.ClosedUnmergedPullRequestCount,
+			"closed_unknown_merge_prs":        d.ClosedPullRequestUnknownCount,
+			"recent_merged_prs":               d.RecentMergedPullRequests,
+			"recent_open_prs":                 d.RecentOpenPullRequests,
+			"recent_closed_unmerged_prs":      d.RecentClosedUnmergedPullRequests,
+			"recent_closed_unknown_merge_prs": d.RecentClosedUnknownPullRequests,
+			"recent_issues":                   d.RecentIssues,
+			"guidance":                        d.ContributionGuidance,
+			"coverage":                        coverageNames(d.Coverage),
 		},
 	}
 }

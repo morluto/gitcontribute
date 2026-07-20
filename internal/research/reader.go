@@ -50,6 +50,7 @@ type ThreadSnapshot struct {
 	Locked            bool
 	Milestone         string
 	Merged            bool
+	MergedKnown       bool
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	ClosedAt          time.Time

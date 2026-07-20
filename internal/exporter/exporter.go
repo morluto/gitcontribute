@@ -149,6 +149,7 @@ func writeDossierMarkdown(w io.Writer, d *domain.Dossier) error {
 	fmt.Fprintf(&b, "- **Open pull requests:** %d\n", d.OpenPullRequestCount)
 	fmt.Fprintf(&b, "- **Merged pull requests:** %d\n", d.MergedPullRequestCount)
 	fmt.Fprintf(&b, "- **Closed unmerged pull requests:** %d\n", d.ClosedUnmergedPullRequestCount)
+	fmt.Fprintf(&b, "- **Closed pull requests with unknown merge state:** %d\n", d.ClosedPullRequestUnknownCount)
 
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, "## Source references")
@@ -188,6 +189,7 @@ func writeDossierMarkdown(w io.Writer, d *domain.Dossier) error {
 	writeThreadSection(&b, "Recent merged pull requests", d.RecentMergedPullRequests)
 	writeThreadSection(&b, "Recent open pull requests", d.RecentOpenPullRequests)
 	writeThreadSection(&b, "Recent closed unmerged pull requests", d.RecentClosedUnmergedPullRequests)
+	writeThreadSection(&b, "Recent closed pull requests with unknown merge state", d.RecentClosedUnknownPullRequests)
 	writeThreadSection(&b, "Recent issues", d.RecentIssues)
 
 	_, err := w.Write([]byte(b.String()))
