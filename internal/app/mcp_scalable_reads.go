@@ -480,12 +480,17 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpserver.RankOppo
 	if in.MaxResultsPerRepository < 1 || in.MaxResultsPerRepository > 100 {
 		return mcpserver.RankOpportunitiesOutput{}, errors.New("max_results_per_repository must be between 1 and 100")
 	}
-	out := mcpserver.RankOpportunitiesOutput{Status: "complete", GeneratedAt: formatTime(r.now()), Repositories: make([]mcpserver.BatchItem[mcpserver.RepositoryOpportunitySummaryOutput], len(in.Repositories))}
+	evaluationTime := r.now().UTC()
+	out := mcpserver.RankOpportunitiesOutput{
+		Status: "complete", GeneratedAt: formatTime(evaluationTime),
+		Candidates:   make([]mcpserver.OpportunityCandidateOutput, 0, in.Limit),
+		Repositories: make([]mcpserver.BatchItem[mcpserver.RepositoryOpportunitySummaryOutput], len(in.Repositories)),
+	}
 	var candidates []mcpserver.OpportunityCandidateOutput
 	for i, input := range in.Repositories {
 		key := input.Owner + "/" + input.Repo
 		item := mcpserver.BatchItem[mcpserver.RepositoryOpportunitySummaryOutput]{Key: key, Status: "complete"}
-		report, err := r.ContributionRadar(ctx, cli.RadarOptions{Repo: cli.RepoRef{Owner: input.Owner, Repo: input.Repo}, Limit: in.MaxResultsPerRepository})
+		report, err := r.contributionRadarAt(ctx, cli.RadarOptions{Repo: cli.RepoRef{Owner: input.Owner, Repo: input.Repo}, Limit: in.MaxResultsPerRepository}, evaluationTime)
 		if err != nil {
 			item.Status, item.Reason, item.Message = "unavailable", "not_indexed", err.Error()
 			item.NextAction = "Sync repository metadata and open issue headers before ranking."
@@ -493,7 +498,13 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpserver.RankOppo
 			out.Status = "partial"
 			continue
 		}
-		summary := mcpserver.RepositoryOpportunitySummaryOutput{Repo: report.Repo, TotalOpenIssues: report.TotalOpenIssues, Considered: report.CandidatePopulation}
+		summary := mcpserver.RepositoryOpportunitySummaryOutput{
+			Repo: report.Repo, TotalOpenIssues: report.TotalOpenIssues, Considered: report.CandidatePopulation,
+			Returned: len(report.Candidates), Truncated: len(report.Candidates) < report.CandidatePopulation,
+			PopulationCapped: report.PopulationCapped,
+		}
+		out.Total += report.CandidatePopulation
+		out.Truncated = out.Truncated || summary.Truncated || summary.PopulationCapped
 		item.Value = &summary
 		out.Repositories[i] = item
 		for _, candidate := range report.Candidates {
@@ -509,13 +520,12 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpserver.RankOppo
 		}
 		return candidates[i].Ref < candidates[j].Ref
 	})
-	if len(candidates) > in.Limit {
-		candidates = candidates[:in.Limit]
+	out.Truncated = out.Truncated || len(candidates) > in.Limit
+	end := min(in.Limit, len(candidates))
+	out.Candidates = append(out.Candidates, candidates[:end]...)
+	for i := range out.Candidates {
+		out.Candidates[i].Rank = i + 1
 	}
-	for i := range candidates {
-		candidates[i].Rank = i + 1
-	}
-	out.Candidates = candidates
 	return out, nil
 }
 

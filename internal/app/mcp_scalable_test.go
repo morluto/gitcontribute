@@ -25,6 +25,106 @@ func TestRadarCandidateToMCPPreservesRelatedWorkSemantics(t *testing.T) {
 	}
 }
 
+func TestRankOpportunitiesReportsBoundedNonPaginatedTruncation(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	svc.SetClock(func() time.Time { return now })
+	svc.SetGitHubReader(panicRadarReader{})
+	seedRadarRepository(ctx, t, svc, "rocket", 5, now)
+
+	reader := &MCPReader{svc}
+	bounded, err := reader.RankOpportunities(ctx, mcpserver.RankOpportunitiesInput{
+		Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: "rocket"}},
+		Limit:        2, MaxResultsPerRepository: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bounded.Total != 5 || len(bounded.Candidates) != 2 || !bounded.Truncated {
+		t.Fatalf("bounded radar result = %+v", bounded)
+	}
+	if summary := bounded.Repositories[0].Value; summary == nil || summary.Considered != 5 || summary.Returned != 5 || summary.Truncated || summary.PopulationCapped {
+		t.Fatalf("bounded repository summary = %+v", summary)
+	}
+	perRepositoryBound, err := reader.RankOpportunities(ctx, mcpserver.RankOpportunitiesInput{
+		Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, Limit: 100, MaxResultsPerRepository: 3,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perRepositoryBound.Total != 5 || len(perRepositoryBound.Candidates) != 3 || !perRepositoryBound.Truncated {
+		t.Fatalf("per-repository bounded result = %+v", perRepositoryBound)
+	}
+	if summary := perRepositoryBound.Repositories[0].Value; summary == nil || summary.Considered != 5 || summary.Returned != 3 || !summary.Truncated {
+		t.Fatalf("per-repository bounded summary = %+v", summary)
+	}
+	full, err := reader.RankOpportunities(ctx, mcpserver.RankOpportunitiesInput{
+		Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, Limit: 100, MaxResultsPerRepository: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full.Total != 5 || len(full.Candidates) != 5 || full.Truncated {
+		t.Fatalf("full radar result = %+v", full)
+	}
+	assertRadarCandidateRanks(t, full.Candidates)
+	for i := range bounded.Candidates {
+		if bounded.Candidates[i].Ref != full.Candidates[i].Ref {
+			t.Fatalf("bounded order = %+v, full order = %+v", bounded.Candidates, full.Candidates)
+		}
+	}
+}
+
+func seedRadarRepository(ctx context.Context, t *testing.T, svc *Service, name string, candidates int, now time.Time) {
+	t.Helper()
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: name, SourceUpdatedAt: now}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for number := 1; number <= candidates; number++ {
+		if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
+			RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: number, State: "open",
+			Title: "same-score candidate", SourceUpdatedAt: now.Add(-time.Hour),
+		}, `{}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func assertRadarCandidateRanks(t *testing.T, candidates []mcpserver.OpportunityCandidateOutput) {
+	t.Helper()
+	for index, candidate := range candidates {
+		if candidate.Rank != index+1 {
+			t.Fatalf("candidate %s rank = %d, want %d", candidate.Ref, candidate.Rank, index+1)
+		}
+	}
+}
+
+func TestRankOpportunitiesUsesOneEvaluationTimeAcrossRepositories(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	clockCalls := 0
+	svc.SetClock(func() time.Time {
+		clockCalls++
+		return now.Add(time.Duration(clockCalls) * time.Hour)
+	})
+	for _, name := range []string{"one", "two"} {
+		seedRadarRepository(ctx, t, svc, name, 1, now)
+	}
+	out, err := (&MCPReader{svc}).RankOpportunities(ctx, mcpserver.RankOpportunitiesInput{
+		Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: "one"}, {Owner: "acme", Repo: "two"}},
+		Limit:        2, MaxResultsPerRepository: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clockCalls != 1 || out.GeneratedAt != now.Add(time.Hour).Format(time.RFC3339) || len(out.Candidates) != 2 {
+		t.Fatalf("cross-repository evaluation = calls:%d output:%+v", clockCalls, out)
+	}
+}
+
 func TestGetRepositoriesPreservesUnknownMetadataAndInputOrder(t *testing.T) {
 	ctx := context.Background()
 	svc := newSearchTestService(t)

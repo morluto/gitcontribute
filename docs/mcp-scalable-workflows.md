@@ -46,6 +46,11 @@ accepted for compatibility and emits a migration warning.
 - `github.sync_repository_metadata` refreshes facts for known repositories only.
 - `corpus.get_repositories`, `corpus.get_threads`,
   `corpus.rank_threads`, and `corpus.find_precedents` are offline.
+- `corpus.rank_threads` requires one to 50 repositories. Its derived ranking is
+  intentionally non-paginated; inspect `total` and `truncated`, then raise the
+  limit or narrow the repository set when more candidates are needed. Per-repo
+  summaries distinguish the evaluated population, returned candidates, and an
+  internal population cap.
 - `research.query_deepwiki` is an optional public external read. Its prose is
   untrusted derived context, is not persisted, and is not authority for live
   GitHub state.

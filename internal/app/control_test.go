@@ -58,6 +58,25 @@ func TestMetadataIsLocalAndDoesNotCreateCorpus(t *testing.T) {
 	}
 }
 
+func TestMetadataPropagatesOpenCorpusSchemaErrors(t *testing.T) {
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Init(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.Close(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { svc.corpus = nil }()
+
+	if _, err := svc.Metadata(context.Background()); err == nil || !strings.Contains(err.Error(), "read corpus schema version") {
+		t.Fatalf("metadata schema error = %v", err)
+	}
+}
+
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {

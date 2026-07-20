@@ -265,6 +265,12 @@ score from the explicit `ready_to_code`, `needs_diagnosis`,
 `needs_coordination`, and `blocked` eligibility states, and reports positive
 signals, risks, blockers, and unknown evidence. Eligibility derives only from
 stored policy, labels, discussion, ownership, collision, and coverage facts.
+The cross-repository MCP form requires an explicit non-empty repository set
+and reports the evaluated `total` and `truncated`. Per-repo
+summaries distinguish considered, returned, per-repo truncation, and an
+internally capped population. It deliberately does not expose a cursor: callers
+raise the bounded limit or narrow the repository set instead of treating a
+newly derived ranking as a stable result snapshot.
 Radar normalizes PR text, authoritative closing-issue facets, issue/comment
 references, opt-in timeline cross-references, and duplicate projections into
 bounded `related_work` facts with exact source evidence. Quoted and code-fenced

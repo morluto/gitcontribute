@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/clustering"
@@ -22,6 +23,12 @@ const (
 // ContributionRadar ranks a bounded set of locally stored open issues. It is
 // a strict corpus read: it neither resolves a GitHub reader nor writes state.
 func (s *Service) ContributionRadar(ctx context.Context, opts cli.RadarOptions) (*radar.Report, error) {
+	return s.contributionRadarAt(ctx, opts, s.now())
+}
+
+// contributionRadarAt lets one cross-repository ranking use a single scoring
+// instant while keeping the public CLI service contract small.
+func (s *Service) contributionRadarAt(ctx context.Context, opts cli.RadarOptions, evaluationTime time.Time) (*radar.Report, error) {
 	ref := domain.RepoRef{Owner: opts.Repo.Owner, Repo: opts.Repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
@@ -78,7 +85,7 @@ func (s *Service) ContributionRadar(ctx context.Context, opts cli.RadarOptions) 
 			Path: document.File.Path, Content: document.File.Content, URL: document.File.HTMLURL,
 		})
 	}
-	evaluationTime := s.now()
+	evaluationTime = evaluationTime.UTC()
 
 	snapshots := make([]radar.IssueSnapshot, 0, len(issues))
 	for _, issue := range issues {

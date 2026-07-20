@@ -481,6 +481,12 @@ Radar scores carry a version (`radar.v3`) so saved JSON remains auditable when
 ranking semantics evolve. It never syncs, hydrates, executes repository code,
 or writes to GitHub.
 
+The cross-repository MCP Radar requires an explicit repository list and is a
+bounded, non-paginated derived ranking. Its `total` and `truncated`
+fields make omitted candidates visible; increase the limit or narrow the
+repository set rather than reusing a search cursor. Per-repository summaries
+separate considered, returned, and internally capped populations.
+
 Radar's `related_work` facts unify stored PR mentions and closing relationships,
 issue/comment dependencies, timeline cross-references, and duplicate clusters.
 Every relationship keeps its source kind and URL. An open PR that GitHub says

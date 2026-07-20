@@ -92,49 +92,6 @@ type GetThreadsOutput struct {
 	Items  []BatchItem[ThreadOutput] `json:"items"`
 }
 
-// RankOpportunitiesInput bounds ranking across stored repositories.
-type RankOpportunitiesInput struct {
-	Repositories            []RepositoryRef `json:"repositories" jsonschema:"One to 50 stored repositories"`
-	Limit                   int             `json:"limit,omitempty" jsonschema:"Maximum total candidates from 1 to 100"`
-	MaxResultsPerRepository int             `json:"max_results_per_repository,omitempty" jsonschema:"Maximum candidates per repository from 1 to 100"`
-}
-
-// OpportunityCandidateOutput describes one ranked contribution candidate.
-type OpportunityCandidateOutput struct {
-	Rank               int                            `json:"rank"`
-	Ref                string                         `json:"ref"`
-	Repo               string                         `json:"repo"`
-	Number             int                            `json:"number"`
-	Title              string                         `json:"title"`
-	URL                string                         `json:"url"`
-	Score              int                            `json:"score"`
-	Eligibility        string                         `json:"eligibility"`
-	Confidence         string                         `json:"confidence"`
-	PositiveSignals    []string                       `json:"positive_signals,omitempty"`
-	Risks              []string                       `json:"risks,omitempty"`
-	Blockers           []string                       `json:"blockers,omitempty"`
-	Unknowns           []string                       `json:"unknowns,omitempty"`
-	LinkedPullRequests []int                          `json:"linked_pull_requests,omitempty"`
-	RelatedWork        []OpportunityRelatedWorkOutput `json:"related_work,omitempty"`
-	SourceUpdatedAt    string                         `json:"source_updated_at,omitempty"`
-}
-
-// RepositoryOpportunitySummaryOutput reports ranking coverage for one repository.
-type RepositoryOpportunitySummaryOutput struct {
-	Repo            string `json:"repo"`
-	TotalOpenIssues int    `json:"total_open_issues"`
-	Considered      int    `json:"considered"`
-}
-
-// RankOpportunitiesOutput combines deterministic cross-repository ranking with
-// per-repository coverage or availability results.
-type RankOpportunitiesOutput struct {
-	Status       string                                          `json:"status"`
-	Candidates   []OpportunityCandidateOutput                    `json:"candidates"`
-	Repositories []BatchItem[RepositoryOpportunitySummaryOutput] `json:"repositories"`
-	GeneratedAt  string                                          `json:"generated_at"`
-}
-
 // FindPrecedentsInput selects source threads for offline analogue discovery.
 type FindPrecedentsInput struct {
 	Threads []ThreadRef `json:"threads" jsonschema:"One to 20 source threads"`
@@ -406,7 +363,7 @@ func (s *Server) registerScalable() {
 		setEnum(sc, "view", "compact", "full")
 		setDefault(sc, "view", "compact")
 	}), output: outputSchema[GetThreadsOutput]("Ordered stored-thread batch with item-level status."), handler: s.getThreads})
-	addCatalogTool(s.server, catalogTool[RankOpportunitiesInput, RankOpportunitiesOutput]{name: ToolRankThreads, title: "Rank stored threads for contribution", description: "Run Contribution Radar over up to 50 stored repositories and return one compact ranking of candidate threads. Use after syncing open issue headers; ranking does not persist opportunities and missing coverage remains explicit unknown evidence.", annotations: readOnly, input: inputSchema[RankOpportunitiesInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s.server, catalogTool[RankOpportunitiesInput, RankOpportunitiesOutput]{name: ToolRankThreads, title: "Rank stored threads for contribution", description: "Rank open issues across 1-50 required stored repositories. This bounded offline result reports truncation and never persists opportunities.", annotations: readOnly, input: inputSchema[RankOpportunitiesInput](func(sc *jsonschema.Schema) {
 		setArrayBounds(sc, "repositories", 1, 50)
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 20)
@@ -775,7 +732,7 @@ func setArrayBounds(schema *jsonschema.Schema, name string, minimum, maximum int
 }
 
 func rankOpportunitiesOutputSchema() *jsonschema.Schema {
-	schema := outputSchema[RankOpportunitiesOutput]("Cross-repository opportunity ranking.")
+	schema := outputSchema[RankOpportunitiesOutput]("Bounded cross-repository Radar ranking.")
 	setOutputPropertyRange(schema, "score", 0, 100)
 	return schema
 }
