@@ -184,7 +184,11 @@ func writeHealth(b *strings.Builder, section HealthSection) {
 	sectionHeading(b, "10. Repository health and responsiveness", section.SectionMeta)
 	fmt.Fprintf(b, "- **Archived:** %t\n", section.Archived)
 	fmt.Fprintf(b, "- **Open issues / PRs:** %d / %d\n", section.OpenIssues, section.OpenPullRequests)
-	fmt.Fprintf(b, "- **External PR merge rate:** %.2f (sample=%d)\n", section.ExternalPRMergeRate, section.ExternalPRSampleSize)
+	if section.ExternalPRMergeRate == nil {
+		fmt.Fprintf(b, "- **External PR merge rate:** unknown (sample=%d)\n", section.ExternalPRSampleSize)
+	} else {
+		fmt.Fprintf(b, "- **External PR merge rate:** %.2f (sample=%d)\n", *section.ExternalPRMergeRate, section.ExternalPRSampleSize)
+	}
 	fmt.Fprintf(b, "- **Median first response, issue / PR:** %.2fh / %.2fh (samples=%d / %d)\n", section.IssueResponseMedianHours, section.PullRequestResponseMedianHours, section.IssueResponseSampleSize, section.PullRequestResponseSampleSize)
 	fmt.Fprintf(b, "- **Thread sample:** %d (truncated=%t)\n", section.ThreadSampleSize, section.ThreadsTruncated)
 }
