@@ -287,7 +287,7 @@ type RecordEvidenceOptions struct {
 type DossierExtensionService interface {
 	BuildDossierForCLI(ctx context.Context, repo RepoRef) (any, error)
 	GetDossierForCLI(ctx context.Context, repo RepoRef) (any, error)
-	ExtractSeedsForCLI(ctx context.Context, repo RepoRef, classes []string, limit int) (any, error)
+	ExtractSeedsForCLI(ctx context.Context, repo RepoRef, classes, polarities []string, limit int) (any, error)
 }
 
 // InvestigationService is the optional investigation and opportunity

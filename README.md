@@ -441,6 +441,18 @@ gitcontribute health owner/repo --stale-after 336h --json
 gitcontribute seeds owner/repo --json
 ```
 
+`seeds` defaults to accepted (`positive`) and constraining (`negative`)
+outcome evidence so recent open issues cannot crowd historical examples out of
+the result limit. Merged PRs are positive; observed closed-unmerged PRs are
+negative. Issues remain `context` unless GitHub records `not_planned` or a
+predefined rejection/supersession label (`duplicate`, `wontfix`, `not planned`,
+`superseded`, `invalid`, or `rejected`). Select context explicitly when you want
+problem statements rather than implementation outcomes:
+
+```sh
+gitcontribute seeds owner/repo --polarity=context --from=issues --json
+```
+
 `radar` is a strict offline corpus read. It ranks a bounded population of the
 newest stored open issues and separates the numeric score from four explicit
 eligibility states: `ready_to_code`, `needs_diagnosis`, `needs_coordination`,

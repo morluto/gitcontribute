@@ -274,20 +274,33 @@ const (
 	SeedSourceClassIssue            SeedSourceClass = "issue"
 )
 
+// SeedPolarity distinguishes accepted implementation examples from
+// constraining evidence and issue-only context.
+type SeedPolarity string
+
+// Seed polarity values describe how stored evidence may be used.
+const (
+	SeedPolarityPositive SeedPolarity = "positive"
+	SeedPolarityNegative SeedPolarity = "negative"
+	SeedPolarityContext  SeedPolarity = "context"
+)
+
 // Seed is an evidence-backed record derived from stored merged PRs,
 // closed unmerged PRs, or issues.
 type Seed struct {
-	SourceClass SeedSourceClass
-	Number      int
-	Title       string
-	Author      string
-	State       string
-	Labels      []string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	ClosedAt    time.Time
-	MergedAt    time.Time
-	Evidence    SeedEvidence
+	SourceClass    SeedSourceClass
+	Polarity       SeedPolarity
+	PolarityReason string
+	Number         int
+	Title          string
+	Author         string
+	State          string
+	Labels         []string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	ClosedAt       time.Time
+	MergedAt       time.Time
+	Evidence       SeedEvidence
 }
 
 // SeedEvidence carries the observed patterns and extracted signals for a seed.
@@ -301,8 +314,10 @@ type SeedEvidence struct {
 	ProblemAreas            []string
 }
 
-// ExtractSeedsOptions selects the source classes and bounds the result set.
+// ExtractSeedsOptions selects source classes, evidence polarities, and the
+// result bound. Empty Polarities defaults to positive and negative outcomes.
 type ExtractSeedsOptions struct {
-	Classes []SeedSourceClass
-	Limit   int
+	Classes    []SeedSourceClass
+	Polarities []SeedPolarity
+	Limit      int
 }

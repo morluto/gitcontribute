@@ -236,22 +236,41 @@ func TestExtractSeeds(t *testing.T) {
 	}, `{}`); err != nil {
 		t.Fatalf("upsert issue: %v", err)
 	}
+	if _, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
+		RepositoryID:    repo.ID,
+		Kind:            corpus.ThreadKindIssue,
+		Number:          2,
+		State:           "closed",
+		StateReason:     "not_planned",
+		Title:           "replace the parser",
+		Body:            "This direction is outside the project scope.",
+		Author:          "dana",
+		SourceCreatedAt: base,
+		SourceUpdatedAt: base.Add(6 * time.Hour),
+		ClosedAt:        base.Add(6 * time.Hour),
+	}, `{}`); err != nil {
+		t.Fatalf("upsert not-planned issue: %v", err)
+	}
 
 	seeds, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{})
 	if err != nil {
 		t.Fatalf("extract seeds: %v", err)
 	}
 	if len(seeds) != 3 {
-		t.Fatalf("expected 3 seeds, got %d: %+v", len(seeds), seeds)
+		t.Fatalf("expected 3 positive/negative seeds, got %d: %+v", len(seeds), seeds)
 	}
-
-	if seeds[0].SourceClass != domain.SeedSourceClassIssue || seeds[0].Number != 1 {
-		t.Fatalf("expected issue #1 first, got %+v", seeds[0])
+	for _, seed := range seeds {
+		if seed.Polarity == domain.SeedPolarityContext {
+			t.Fatalf("default extraction included contextual issue: %+v", seed)
+		}
 	}
 
 	merged := findSeed(seeds, domain.SeedSourceClassMergedPR, 5)
 	if merged == nil {
 		t.Fatal("missing merged PR seed")
+	}
+	if merged.Polarity != domain.SeedPolarityPositive || !strings.Contains(merged.PolarityReason, "was merged") {
+		t.Fatalf("merged PR polarity = %+v", merged)
 	}
 	if merged.Evidence.ApproximateScope != "small" {
 		t.Fatalf("merged scope = %q, want small", merged.Evidence.ApproximateScope)
@@ -270,19 +289,50 @@ func TestExtractSeeds(t *testing.T) {
 	if closed == nil {
 		t.Fatal("missing closed unmerged PR seed")
 	}
+	if closed.Polarity != domain.SeedPolarityNegative || !strings.Contains(closed.PolarityReason, "without merging") {
+		t.Fatalf("closed PR polarity = %+v", closed)
+	}
 	if closed.Evidence.RejectionOrSupersession == "" {
 		t.Fatalf("expected rejection/supersession context, got empty")
 	}
+	notPlanned := findSeed(seeds, domain.SeedSourceClassIssue, 2)
+	if notPlanned == nil || notPlanned.Polarity != domain.SeedPolarityNegative || notPlanned.Evidence.RejectionOrSupersession != "GitHub state reason: not_planned" {
+		t.Fatalf("not-planned issue polarity/evidence = %+v", notPlanned)
+	}
 
-	issueOnly, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{
-		Classes: []domain.SeedSourceClass{domain.SeedSourceClassIssue},
-		Limit:   10,
+	contextOnly, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{
+		Classes:    []domain.SeedSourceClass{domain.SeedSourceClassIssue},
+		Polarities: []domain.SeedPolarity{domain.SeedPolarityContext},
+		Limit:      10,
 	})
 	if err != nil {
-		t.Fatalf("extract issue seeds: %v", err)
+		t.Fatalf("extract context seeds: %v", err)
 	}
-	if len(issueOnly) != 1 || issueOnly[0].SourceClass != domain.SeedSourceClassIssue {
-		t.Fatalf("expected 1 issue seed, got %+v", issueOnly)
+	if len(contextOnly) != 1 || contextOnly[0].Number != 1 || contextOnly[0].Polarity != domain.SeedPolarityContext {
+		t.Fatalf("expected open issue context, got %+v", contextOnly)
+	}
+
+	negativeIssues, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{
+		Classes:    []domain.SeedSourceClass{domain.SeedSourceClassIssue},
+		Polarities: []domain.SeedPolarity{domain.SeedPolarityNegative},
+		Limit:      10,
+	})
+	if err != nil {
+		t.Fatalf("extract negative issue seeds: %v", err)
+	}
+	if len(negativeIssues) != 1 || negativeIssues[0].Number != 2 {
+		t.Fatalf("expected not-planned issue only, got %+v", negativeIssues)
+	}
+	empty, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{
+		Classes:    []domain.SeedSourceClass{domain.SeedSourceClassMergedPR},
+		Polarities: []domain.SeedPolarity{domain.SeedPolarityContext},
+		Limit:      10,
+	})
+	if err != nil {
+		t.Fatalf("extract empty seed selection: %v", err)
+	}
+	if empty == nil || len(empty) != 0 {
+		t.Fatalf("empty seed selection = %#v, want non-nil empty list", empty)
 	}
 
 	bounded, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Limit: 1})
@@ -291,6 +341,86 @@ func TestExtractSeeds(t *testing.T) {
 	}
 	if len(bounded) != 1 {
 		t.Fatalf("expected 1 seed with limit 1, got %d", len(bounded))
+	}
+
+	if _, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Polarities: []domain.SeedPolarity{"invented"}}); err == nil || !strings.Contains(err.Error(), "unknown seed polarity") {
+		t.Fatalf("invalid polarity error = %v", err)
+	}
+	if _, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Classes: []domain.SeedSourceClass{"invented"}}); err == nil || !strings.Contains(err.Error(), "unknown seed source class") {
+		t.Fatalf("invalid source class error = %v", err)
+	}
+	cliSeeds, err := svc.ExtractSeedsForCLI(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, []string{"issues"}, []string{"context"}, 10)
+	if err != nil {
+		t.Fatalf("extract CLI context seeds: %v", err)
+	}
+	typedCLISeeds, ok := cliSeeds.([]domain.Seed)
+	if !ok || len(typedCLISeeds) != 1 || typedCLISeeds[0].Number != 1 {
+		t.Fatalf("CLI context seeds = %#v", cliSeeds)
+	}
+	if _, err := svc.ExtractSeedsForCLI(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, nil, []string{"invented"}, 10); err == nil || !strings.Contains(err.Error(), "unknown seed polarity") {
+		t.Fatalf("invalid CLI polarity error = %v", err)
+	}
+}
+
+func TestSeedPolarityUsesOnlyStructuredOutcomeEvidence(t *testing.T) {
+	tests := []struct {
+		name       string
+		thread     corpus.Thread
+		class      domain.SeedSourceClass
+		want       domain.SeedPolarity
+		wantReason string
+	}{
+		{
+			name:       "merged PR remains positive despite rejection text",
+			thread:     corpus.Thread{Kind: corpus.ThreadKindPullRequest, State: "closed", Merged: true, Title: "rejected experiment"},
+			class:      domain.SeedSourceClassMergedPR,
+			want:       domain.SeedPolarityPositive,
+			wantReason: "GitHub reports this pull request was merged",
+		},
+		{
+			name:       "closed unmerged PR is negative",
+			thread:     corpus.Thread{Kind: corpus.ThreadKindPullRequest, State: "closed", MergedKnown: true},
+			class:      domain.SeedSourceClassClosedUnmergedPR,
+			want:       domain.SeedPolarityNegative,
+			wantReason: "GitHub reports this pull request was closed without merging",
+		},
+		{
+			name:       "issue text cannot imply rejection",
+			thread:     corpus.Thread{Kind: corpus.ThreadKindIssue, State: "closed", StateReason: "completed", Title: "rejected idea", Body: "superseded elsewhere"},
+			class:      domain.SeedSourceClassIssue,
+			want:       domain.SeedPolarityContext,
+			wantReason: "issue evidence provides problem context, not an implementation outcome",
+		},
+		{
+			name:       "open issue rejection label remains context",
+			thread:     corpus.Thread{Kind: corpus.ThreadKindIssue, State: "open", Labels: []string{"duplicate"}},
+			class:      domain.SeedSourceClassIssue,
+			want:       domain.SeedPolarityContext,
+			wantReason: "issue evidence provides problem context, not an implementation outcome",
+		},
+		{
+			name:       "not planned issue is negative",
+			thread:     corpus.Thread{Kind: corpus.ThreadKindIssue, State: "closed", StateReason: "not_planned"},
+			class:      domain.SeedSourceClassIssue,
+			want:       domain.SeedPolarityNegative,
+			wantReason: "GitHub reports this issue was closed as not planned",
+		},
+		{
+			name:       "closed duplicate issue is negative",
+			thread:     corpus.Thread{Kind: corpus.ThreadKindIssue, State: "closed", StateReason: "completed", Labels: []string{"Duplicate"}},
+			class:      domain.SeedSourceClassIssue,
+			want:       domain.SeedPolarityNegative,
+			wantReason: "closed issue has rejection or supersession label: Duplicate",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, reason := polarityForThread(tt.thread, tt.class)
+			if got != tt.want || reason != tt.wantReason {
+				t.Fatalf("polarity = %q (%q), want %q (%q)", got, reason, tt.want, tt.wantReason)
+			}
+		})
 	}
 }
 
@@ -330,9 +460,12 @@ func TestExtractSeedsRequiresNoNetwork(t *testing.T) {
 		t.Fatalf("upsert thread: %v", err)
 	}
 
-	_, err = svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{})
+	seeds, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Polarities: []domain.SeedPolarity{domain.SeedPolarityContext}})
 	if err != nil {
 		t.Fatalf("extract seeds without network reader: %v", err)
+	}
+	if len(seeds) != 1 || seeds[0].Polarity != domain.SeedPolarityContext {
+		t.Fatalf("offline context seeds = %+v", seeds)
 	}
 }
 
