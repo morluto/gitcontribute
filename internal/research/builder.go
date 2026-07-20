@@ -469,7 +469,7 @@ func buildNext(in assemblyInput, discussionGap string) NextSection {
 	if len(missingFacets) > 0 {
 		commands = append(commands, NextCommand{
 			Reason:  "hydrate missing or partial thread facets",
-			Command: fmt.Sprintf("gitcontribute archive hydrate %s#%d --with %s", ref.Repo, ref.Number, strings.Join(cleanSorted(missingFacets), ",")),
+			Command: fmt.Sprintf("gitcontribute archive hydrate %s#%d --with %s --max-pages 3", ref.Repo, ref.Number, strings.Join(cleanSorted(missingFacets), ",")),
 		})
 	}
 	for _, required := range []string{"metadata", "threads"} {
@@ -483,7 +483,7 @@ func buildNext(in assemblyInput, discussionGap string) NextSection {
 		if !covered {
 			commands = append(commands, NextCommand{
 				Reason:  "refresh missing repository " + required + " coverage",
-				Command: "gitcontribute archive sync " + ref.Repo.String() + " --state all",
+				Command: "gitcontribute archive sync " + ref.Repo.String() + " --state all --max-pages 10 --max-requests 20",
 			})
 			break
 		}

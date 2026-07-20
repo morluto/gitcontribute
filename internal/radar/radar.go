@@ -546,14 +546,14 @@ func (a *candidateAssessment) addCoverageUnknowns() {
 		a.candidate.Unknowns = append(a.candidate.Unknowns, Unknown{
 			Code:        "comments_not_hydrated",
 			Summary:     "issue comments have not been hydrated",
-			Remediation: fmt.Sprintf("run gitcontribute archive hydrate %s#%d --with issue_comments", a.repo.Repo, a.issue.Number),
+			Remediation: fmt.Sprintf("run gitcontribute archive hydrate %s#%d --with issue_comments --max-pages 3", a.repo.Repo, a.issue.Number),
 		})
 		a.escalate(EligibilityNeedsDiagnosis)
 	} else if !commentsComplete {
 		a.candidate.Unknowns = append(a.candidate.Unknowns, Unknown{
 			Code:        "comments_coverage_incomplete",
 			Summary:     "issue comment coverage is incomplete",
-			Remediation: fmt.Sprintf("rerun gitcontribute archive hydrate %s#%d --with issue_comments", a.repo.Repo, a.issue.Number),
+			Remediation: fmt.Sprintf("rerun gitcontribute archive hydrate %s#%d --with issue_comments --max-pages 3", a.repo.Repo, a.issue.Number),
 		})
 		a.escalate(EligibilityNeedsDiagnosis)
 	}

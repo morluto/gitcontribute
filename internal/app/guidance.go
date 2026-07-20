@@ -47,6 +47,7 @@ func syncRepositoryGuidance(
 	ref domain.RepoRef,
 	sourceUpdatedAt time.Time,
 	runID int64,
+	budget *syncRequestBudget,
 ) error {
 	fileReader, ok := reader.(github.RepositoryFileReader)
 	if !ok {
@@ -56,6 +57,9 @@ func syncRepositoryGuidance(
 	pages := make([]corpus.FacetObservationInput, 0, len(contributionGuidancePaths))
 	for _, path := range contributionGuidancePaths {
 		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := budget.take(); err != nil {
 			return err
 		}
 		file, _, err := fileReader.GetRepositoryFile(ctx, ref.Owner, ref.Repo, path)

@@ -359,8 +359,8 @@ func TestArchiveAndLocalQueryCommands(t *testing.T) {
 	svc := &fakeSurfacesService{fakeService: &fakeService{}}
 	c, stdout, _ := newSurfacesCLI(svc)
 
-	requireNoErr(t, c.Run(context.Background(), []string{"archive", "sync", "o/r", "--numbers", "2,1", "--max-pages", "5", "--json"}))
-	if !svc.archiveCalled || len(svc.lastArchiveOpts.Numbers) != 2 || svc.lastArchiveOpts.MaxPages != 5 {
+	requireNoErr(t, c.Run(context.Background(), []string{"archive", "sync", "o/r", "--numbers", "2,1", "--max-pages", "5", "--max-requests", "12", "--json"}))
+	if !svc.archiveCalled || len(svc.lastArchiveOpts.Numbers) != 2 || svc.lastArchiveOpts.MaxPages != 5 || svc.lastArchiveOpts.MaxRequests != 12 {
 		t.Fatalf("archive options = %+v", svc.lastArchiveOpts)
 	}
 	stdout.Reset()

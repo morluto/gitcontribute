@@ -99,6 +99,9 @@ func TestMissingCoverageIsUnknownNotPenalty(t *testing.T) {
 	if len(missing.Candidates[0].Unknowns) != 3 {
 		t.Fatalf("candidate unknowns = %+v", missing.Candidates[0].Unknowns)
 	}
+	if !strings.Contains(missing.Candidates[0].Unknowns[2].Remediation, "--max-pages 3") {
+		t.Fatalf("comments remediation is not explicitly bounded: %+v", missing.Candidates[0].Unknowns)
+	}
 	if missing.Candidates[0].Eligibility != EligibilityNeedsDiagnosis || complete.Candidates[0].Eligibility != EligibilityReadyToCode {
 		t.Fatalf("coverage eligibility: missing=%s complete=%s", missing.Candidates[0].Eligibility, complete.Candidates[0].Eligibility)
 	}

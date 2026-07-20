@@ -383,7 +383,7 @@ Sync and selectively hydrate repository archives:
 
 ```sh
 gitcontribute sync owner/repo
-gitcontribute archive sync owner/repo --since 168h --state open
+gitcontribute archive sync owner/repo --since 168h --state open --max-requests 100
 gitcontribute archive sync owner/repo --numbers 42,108
 gitcontribute archive refresh owner/repo
 gitcontribute archive hydrate owner/repo#42 --with issue_comments
@@ -463,6 +463,12 @@ issue/comment dependencies, timeline cross-references, and duplicate clusters.
 Every relationship keeps its source kind and URL. An open PR that GitHub says
 closes the issue is an implementation blocker; other open dependencies and
 related PRs require coordination instead of being mislabeled as completed work.
+
+Thread sync stores issue and pull-request headers without implicitly hydrating
+each pull request. A sync has a total GitHub request budget (100 by default),
+reported in JSON and run statistics; page bounds and the request budget both
+prevent broad repository or batch inputs from producing hidden N+1 traffic.
+Generated network remediation commands include explicit request/page bounds.
 
 `research brief` is also a strict offline read. Its versioned
 `research-brief.v1` output has fixed sections for state, stored problem fields,

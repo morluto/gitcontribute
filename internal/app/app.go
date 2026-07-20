@@ -364,12 +364,18 @@ func (s *Service) Status(ctx context.Context) (*cli.StatusResult, error) {
 
 // SyncOptions bounds and filters an explicit repository synchronization.
 type SyncOptions struct {
-	Kind     string
-	State    string
-	Since    time.Time
-	Numbers  []int
-	MaxPages int
+	Kind        string
+	State       string
+	Since       time.Time
+	Numbers     []int
+	MaxPages    int
+	MaxRequests int
 }
+
+const (
+	defaultSyncMaxRequests = 100
+	maxSyncRequests        = 1000
+)
 
 // Sync fetches all repository threads. It preserves the original archive API
 // while SyncWithOptions provides bounded incremental and exact refreshes.
@@ -380,6 +386,14 @@ func (s *Service) Sync(ctx context.Context, repo cli.RepoRef) (*cli.SyncResult, 
 // SyncWithOptions fetches a repository and a bounded thread selection from
 // GitHub, then writes ordered observations to the local corpus.
 func (s *Service) SyncWithOptions(ctx context.Context, repo cli.RepoRef, syncOpts SyncOptions) (*cli.SyncResult, error) {
+	return s.syncWithOptions(ctx, repo, syncOpts, nil)
+}
+
+func (s *Service) syncProvidedThreadHeaders(ctx context.Context, repo cli.RepoRef, issues []github.Issue, maxRequests int) (*cli.SyncResult, error) {
+	return s.syncWithOptions(ctx, repo, SyncOptions{Kind: "pull_request", State: "all", MaxPages: 1, MaxRequests: maxRequests}, issues)
+}
+
+func (s *Service) syncWithOptions(ctx context.Context, repo cli.RepoRef, syncOpts SyncOptions, provided []github.Issue) (*cli.SyncResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
@@ -389,10 +403,14 @@ func (s *Service) SyncWithOptions(ctx context.Context, repo cli.RepoRef, syncOpt
 	if err != nil {
 		return nil, err
 	}
+	if provided == nil && len(syncOpts.Numbers) > 0 && syncFixedRequestCost()+len(syncOpts.Numbers) > syncOpts.MaxRequests {
+		return nil, fmt.Errorf("exact thread selection requires at least %d requests; max requests is %d", syncFixedRequestCost()+len(syncOpts.Numbers), syncOpts.MaxRequests)
+	}
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
+	budget := newSyncRequestBudget(syncOpts.MaxRequests)
 	reader, err := s.githubReader()
 	if err != nil {
 		return nil, err
@@ -416,133 +434,70 @@ func (s *Service) SyncWithOptions(ctx context.Context, repo cli.RepoRef, syncOpt
 		return nil, syncErr
 	}
 
-	ghRepo, _, err := reader.GetRepository(ctx, ref.Owner, ref.Repo)
+	repoProjection, lastSourceUpdated, err := syncRepositoryHeader(ctx, c, reader, ref, run.ID, budget)
 	if err != nil {
-		syncErr = fmt.Errorf("get repository: %w", err)
-		return nil, syncErr
-	}
-	repoProjection := corpusRepoFromGitHub(ghRepo)
-	repoPayload, err := json.Marshal(ghRepo)
-	if err != nil {
-		syncErr = fmt.Errorf("marshal repository: %w", err)
-		return nil, syncErr
-	}
-	upsertedRepo, err := c.UpsertRepository(ctx, repoProjection, string(repoPayload))
-	if err != nil {
-		syncErr = fmt.Errorf("upsert repository: %w", err)
-		return nil, syncErr
-	}
-	repoProjection = *upsertedRepo
-	if err := c.AdvanceFacet(ctx, repoProjection.ID, nil, "metadata", ghRepo.UpdatedAt, true, run.ID); err != nil {
-		syncErr = fmt.Errorf("advance metadata facet: %w", err)
-		return nil, syncErr
-	}
-	if err := syncRepositoryGuidance(ctx, c, reader, repoProjection, ref, ghRepo.UpdatedAt, run.ID); err != nil {
 		syncErr = err
 		return nil, syncErr
 	}
 
-	listOpts := github.ListIssueOptions{
-		State:     syncOpts.State,
-		Sort:      "updated",
-		Direction: "desc",
-		Since:     syncOpts.Since,
-		PageOptions: github.PageOptions{
-			Page:    1,
-			PerPage: 100,
-		},
+	selection, err := syncThreadHeaderSelection(ctx, c, reader, ref, repoProjection.ID, lastSourceUpdated, syncOpts, provided, budget)
+	if err != nil {
+		syncErr = err
+		return nil, syncErr
 	}
-
-	updated := 0
-	pages := 0
-	lastSourceUpdated := ghRepo.UpdatedAt
-	storeIssue := func(issue github.Issue) error {
-		if syncOpts.Kind != "both" && string(issue.Kind) != syncOpts.Kind {
-			return nil
-		}
-		thread, payload, err := s.threadFromIssue(ctx, reader, ref, issue)
-		if err != nil {
-			return err
-		}
-		thread.RepositoryID = repoProjection.ID
-		if _, err := c.UpsertThread(ctx, thread, payload); err != nil {
-			return fmt.Errorf("upsert thread: %w", err)
-		}
-		updated++
-		if thread.SourceUpdatedAt.After(lastSourceUpdated) {
-			lastSourceUpdated = thread.SourceUpdatedAt
-		}
-		return nil
-	}
-
-	complete := false
-	if len(syncOpts.Numbers) > 0 {
-		getter, ok := reader.(github.IssueGetter)
-		if !ok {
-			syncErr = errors.New("GitHub reader does not support exact thread refresh")
-			return nil, syncErr
-		}
-		for _, number := range syncOpts.Numbers {
-			if err := ctx.Err(); err != nil {
-				syncErr = err
-				return nil, syncErr
-			}
-			issue, _, err := getter.GetIssue(ctx, ref.Owner, ref.Repo, number)
-			if err != nil {
-				syncErr = fmt.Errorf("get thread %d: %w", number, err)
-				return nil, syncErr
-			}
-			if err := storeIssue(issue); err != nil {
-				syncErr = err
-				return nil, syncErr
-			}
-			pages++
-		}
-	} else {
-		truncated := false
-		for {
-			res, err := reader.ListIssues(ctx, ref.Owner, ref.Repo, listOpts)
-			if err != nil {
-				syncErr = fmt.Errorf("list issues page %d: %w", listOpts.Page, err)
-				return nil, syncErr
-			}
-			pages++
-
-			for _, issue := range res.Items {
-				if err := storeIssue(issue); err != nil {
-					syncErr = err
-					return nil, syncErr
-				}
-			}
-
-			if !res.Page.HasNext {
-				break
-			}
-			if pages >= syncOpts.MaxPages {
-				truncated = true
-				break
-			}
-			listOpts.Page = res.Page.NextPage
-		}
-		complete = syncOpts.Kind == "both" && syncOpts.State == "all" && syncOpts.Since.IsZero() && !truncated
-	}
+	updated, pages := selection.updated, selection.requests
+	lastSourceUpdated, complete, requestCapped := selection.sourceUpdatedAt, selection.complete, selection.requestCapped
 
 	if err := c.AdvanceFacet(ctx, repoProjection.ID, nil, "threads", lastSourceUpdated, complete, run.ID); err != nil {
 		syncErr = fmt.Errorf("advance threads facet: %w", err)
 		return nil, syncErr
 	}
 
-	stats := fmt.Sprintf(`{"pages":%d,"threads":%d,"complete":%t}`, pages, updated, complete)
-	if err := c.FinishRun(ctx, run.ID, stats); err != nil {
+	stats, err := json.Marshal(map[string]any{
+		"pages": pages, "threads": updated, "complete": complete, "requests": budget.used,
+		"request_budget": budget.limit, "request_capped": requestCapped,
+	})
+	if err != nil {
+		syncErr = fmt.Errorf("marshal sync statistics: %w", err)
+		return nil, syncErr
+	}
+	if err := c.FinishRun(ctx, run.ID, string(stats)); err != nil {
 		syncErr = err
 		return nil, syncErr
 	}
 
 	return &cli.SyncResult{
-		Repo:    repo,
-		Updated: updated,
-		Message: fmt.Sprintf("fetched %d threads across %d pages", updated, pages),
+		Repo: repo, Updated: updated, Requests: budget.used, Capped: requestCapped,
+		Message: fmt.Sprintf("fetched %d thread headers across %d thread requests", updated, pages),
 	}, nil
+}
+
+type syncRequestBudget struct {
+	limit int
+	used  int
+}
+
+func newSyncRequestBudget(limit int) *syncRequestBudget {
+	return &syncRequestBudget{limit: limit}
+}
+
+func (b *syncRequestBudget) available() bool {
+	return b != nil && b.used < b.limit
+}
+
+func (b *syncRequestBudget) take() error {
+	if b == nil {
+		return errors.New("GitHub request budget is required")
+	}
+	if !b.available() {
+		return fmt.Errorf("GitHub request budget of %d exhausted", b.limit)
+	}
+	b.used++
+	return nil
+}
+
+func syncFixedRequestCost() int {
+	return 1 + len(contributionGuidancePaths)
 }
 
 func normalizeSyncOptions(opts SyncOptions) (SyncOptions, error) {
@@ -563,6 +518,12 @@ func normalizeSyncOptions(opts SyncOptions) (SyncOptions, error) {
 	}
 	if opts.MaxPages > 1000 {
 		return SyncOptions{}, errors.New("max pages cannot exceed 1000")
+	}
+	if opts.MaxRequests == 0 {
+		opts.MaxRequests = defaultSyncMaxRequests
+	}
+	if opts.MaxRequests < syncFixedRequestCost() || opts.MaxRequests > maxSyncRequests {
+		return SyncOptions{}, fmt.Errorf("max requests must be between %d and %d", syncFixedRequestCost(), maxSyncRequests)
 	}
 	if len(opts.Numbers) > 100 {
 		return SyncOptions{}, errors.New("exact thread selection cannot exceed 100 numbers")
@@ -587,7 +548,7 @@ func normalizeSyncOptions(opts SyncOptions) (SyncOptions, error) {
 	return opts, nil
 }
 
-func (s *Service) threadFromIssue(ctx context.Context, reader github.Reader, ref domain.RepoRef, issue github.Issue) (corpus.Thread, string, error) {
+func threadFromIssue(issue github.Issue) (corpus.Thread, string, error) {
 	thread := corpus.Thread{
 		Kind:              string(issue.Kind),
 		Number:            issue.Number,
@@ -612,33 +573,6 @@ func (s *Service) threadFromIssue(ctx context.Context, reader github.Reader, ref
 	payload, err := json.Marshal(issue)
 	if err != nil {
 		return corpus.Thread{}, "", fmt.Errorf("marshal issue: %w", err)
-	}
-
-	if issue.Kind == github.ThreadKindPullRequest {
-		pr, _, err := reader.GetPullRequestDetails(ctx, ref.Owner, ref.Repo, issue.Number)
-		if err != nil {
-			return corpus.Thread{}, "", fmt.Errorf("get pull request %d details: %w", issue.Number, err)
-		}
-		thread.State = pr.State
-		thread.Merged = pr.Merged
-		if pr.MergedAt != nil {
-			thread.MergedAt = *pr.MergedAt
-		}
-		if pr.ClosedAt != nil {
-			thread.ClosedAt = *pr.ClosedAt
-		}
-		if !pr.UpdatedAt.IsZero() {
-			thread.SourceUpdatedAt = pr.UpdatedAt
-		}
-		thread.AuthorAssociation = pr.AuthorAssociation
-		thread.Assignees = pr.Assignees
-		thread.Draft = pr.Draft
-		thread.Locked = pr.Locked
-		thread.Milestone = pr.Milestone
-		payload, err = json.Marshal(pr)
-		if err != nil {
-			return corpus.Thread{}, "", fmt.Errorf("marshal pull request details: %w", err)
-		}
 	}
 
 	return thread, string(payload), nil

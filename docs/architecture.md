@@ -83,6 +83,12 @@ repository-level `contribution_guidance` facet with exact file provenance.
 Offline readers may classify only predefined policy statements; repository
 text cannot introduce instructions or grant capabilities.
 
+Thread-header sync never fetches pull-request detail facets per listed item.
+Metadata, fixed policy paths, exact reads, and list pages share one explicit
+request budget; batch sync plans conservative per-repository allocations in
+stable input order before starting workers. Generated network remediation
+commands always carry the applicable explicit page or request bounds.
+
 Authored pull requests use the ordinary repository and thread projections.
 REST `pr_details` and `pr_reviews` facets are combined with typed GraphQL
 facets for checks, unresolved review threads, detailed merge state, merge queue,
