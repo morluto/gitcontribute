@@ -3,6 +3,7 @@ package corpus
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -164,6 +165,92 @@ func TestSearchThreadsPageDoesNotTreatUnknownMergeStateAsFalse(t *testing.T) {
 	if err != nil || len(unmergedPage.Threads) != 1 || unmergedPage.Threads[0].Number != 2 {
 		t.Fatalf("unmerged page = %+v, %v", unmergedPage, err)
 	}
+}
+
+func TestSearchThreadsPageIncludesAtomicFacetEvidence(t *testing.T) {
+	ctx, c, thread, newer := seedFacetSearch(t)
+
+	page, err := c.SearchThreadsPage(ctx, "transport invariant", SearchFilter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || len(page.Threads) != 1 || page.Threads[0].ID != thread.ID {
+		t.Fatalf("facet search page = %+v", page)
+	}
+	if page.Threads[0].MatchSource != "issue_comments" || !strings.Contains(page.Threads[0].MatchExcerpt, "transport") {
+		t.Fatalf("facet match evidence = %+v", page.Threads[0])
+	}
+	duplicatePage, err := c.SearchThreadsPage(ctx, "plain", SearchFilter{Limit: 10})
+	if err != nil || duplicatePage.Total != 1 || len(duplicatePage.Threads) != 1 {
+		t.Fatalf("thread/facet duplicate search = %+v, err=%v", duplicatePage, err)
+	}
+	evidence, found, err := c.FindThreadSearchEvidence(ctx, thread.ID, "transport invariant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || evidence.Source != "issue_comments" || !strings.Contains(evidence.Text, "boundary invariant") || !evidence.SourceUpdatedAt.Equal(newer) {
+		t.Fatalf("exact facet evidence = %+v", evidence)
+	}
+}
+
+func TestSearchableFacetReplacementHonorsSourceOrdering(t *testing.T) {
+	ctx, c, thread, _ := seedFacetSearch(t)
+	older := time.Unix(10, 0).UTC()
+	if err := c.ApplyFacetObservationSet(ctx, thread.RepositoryID, &thread.ID, "issue_comments", older, []FacetObservationInput{{SourceUpdatedAt: older, Payload: `[]`, SearchText: "stale replacement"}}, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	page, err := c.SearchThreadsPage(ctx, "transport invariant", SearchFilter{Limit: 10})
+	if err != nil || len(page.Threads) != 1 {
+		t.Fatalf("stale replacement changed search projection: page=%+v err=%v", page, err)
+	}
+
+	latest := time.Unix(30, 0).UTC()
+	if err := c.ApplyFacetObservationSet(ctx, thread.RepositoryID, &thread.ID, "issue_comments", latest, []FacetObservationInput{{SourceUpdatedAt: latest, Payload: `[]`, SearchText: "replacement evidence"}}, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	oldPage, err := c.SearchThreadsPage(ctx, "transport", SearchFilter{Limit: 10})
+	if err != nil || len(oldPage.Threads) != 0 {
+		t.Fatalf("old facet term remains searchable: page=%+v err=%v", oldPage, err)
+	}
+	newPage, err := c.SearchThreadsPage(ctx, "replacement", SearchFilter{Limit: 10})
+	if err != nil || len(newPage.Threads) != 1 {
+		t.Fatalf("replacement facet term missing: page=%+v err=%v", newPage, err)
+	}
+
+	if err := c.ApplyFacetObservationSet(ctx, thread.RepositoryID, &thread.ID, "issue_comments", time.Unix(40, 0).UTC(), nil, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	emptyPage, err := c.SearchThreadsPage(ctx, "replacement", SearchFilter{Limit: 10})
+	if err != nil || len(emptyPage.Threads) != 0 {
+		t.Fatalf("empty facet replacement remains searchable: page=%+v err=%v", emptyPage, err)
+	}
+}
+
+func seedFacetSearch(t *testing.T) (context.Context, *Corpus, *Thread, time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "plain title", "plain body", "a", time.Unix(2, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer := time.Unix(20, 0).UTC()
+	pages := []FacetObservationInput{
+		{SourceUpdatedAt: newer.Add(-time.Second), Payload: `[{"Body":"transport"}]`, SearchText: "alice transport"},
+		{SourceUpdatedAt: newer, Payload: `[{"Body":"boundary"}]`, SearchText: "boundary invariant"},
+	}
+	// One facet snapshot is one search document even though its source payload
+	// remains paginated.
+	pages[0].SearchText += "\n" + pages[1].SearchText + "\nplain"
+	pages[1].SearchText = ""
+	if err := c.ApplyFacetObservationSet(ctx, repo.ID, &thread.ID, "issue_comments", newer, pages, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	return ctx, c, thread, newer
 }
 
 func TestSearchThreadsPageFiltersByAssociationAndAssignee(t *testing.T) {

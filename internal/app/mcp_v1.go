@@ -177,8 +177,20 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		if len(thread.Labels) > 0 {
 			fields["labels"] = strings.Join(thread.Labels, " ")
 		}
+		sourceRevision := thread.SourceUpdatedAt
+		if in.Query != "" {
+			evidence, found, err := c.FindThreadSearchEvidence(ctx, thread.ID, in.Query)
+			if err != nil {
+				return mcpserver.ExplainMatchOutput{}, err
+			}
+			if found && evidence.Source != "thread" {
+				fields[evidence.Source] = evidence.Text
+				out.Snippet = boundedText(evidence.Excerpt, 2000)
+				sourceRevision = evidence.SourceUpdatedAt
+			}
+		}
 		out.MatchedFields, out.Score = matchTerms(in.Query, fields)
-		out.SourceRevision = formatTime(thread.SourceUpdatedAt)
+		out.SourceRevision = formatTime(sourceRevision)
 		cov, _, err := readCoverageTarget(ctx, c, mcpserver.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
 		if err != nil {
 			return mcpserver.ExplainMatchOutput{}, fmt.Errorf("read repository coverage: %w", err)

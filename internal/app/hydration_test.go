@@ -194,6 +194,26 @@ func TestHydrateIssueCommentsPaginatesAndRecordsCoverage(t *testing.T) {
 	if cov == nil || !cov.Complete {
 		t.Fatal("expected complete coverage")
 	}
+	search, err := svc.Search(ctx, "first third", cli.SearchOptions{Kind: "issues", Limit: 10})
+	if err != nil {
+		t.Fatalf("search hydrated comments: %v", err)
+	}
+	if len(search.Matches) != 1 || search.Matches[0].Number != 1 || search.Matches[0].MatchSource != FacetIssueComments || !strings.Contains(search.Matches[0].MatchExcerpt, "first") {
+		t.Fatalf("hydrated comment search = %+v", search)
+	}
+	if search.Matches[0].Freshness != "2024-01-04T00:00:00Z" {
+		t.Fatalf("hydrated comment freshness = %q", search.Matches[0].Freshness)
+	}
+	if reader.issueCommentsCalls != 2 {
+		t.Fatalf("offline search made GitHub reads: calls=%d", reader.issueCommentsCalls)
+	}
+	explanation, err := svc.ExplainMatch(ctx, "first third", search.Matches[0])
+	if err != nil {
+		t.Fatalf("explain hydrated comment match: %v", err)
+	}
+	if !slices.ContainsFunc(explanation.Reasons, func(reason string) bool { return strings.Contains(reason, "stored issue_comments") }) {
+		t.Fatalf("hydrated comment explanation = %+v", explanation)
+	}
 }
 
 func TestHydratePullRequestFacets(t *testing.T) {
@@ -212,7 +232,7 @@ func TestHydratePullRequestFacets(t *testing.T) {
 			UpdatedAt: time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC),
 		},
 		prReviewsPages: [][]github.Review{
-			{{ID: 10, State: "APPROVED", SubmittedAt: time.Date(2024, 2, 2, 0, 0, 0, 0, time.UTC)}},
+			{{ID: 10, State: "APPROVED", Body: "architectural approval", SubmittedAt: time.Date(2024, 2, 2, 0, 0, 0, 0, time.UTC)}},
 		},
 		prReviewCommentsPages: [][]github.ReviewComment{
 			{{ID: 20, Body: "nit", UpdatedAt: time.Date(2024, 2, 3, 0, 0, 0, 0, time.UTC)}},
@@ -251,6 +271,12 @@ func TestHydratePullRequestFacets(t *testing.T) {
 	projected, err := c.GetThread(ctx, repo.ID, corpus.ThreadKindPullRequest, thread.Number)
 	if err != nil || projected == nil || !projected.MergedKnown || projected.Merged {
 		t.Fatalf("projected PR merge state = %+v, %v", projected, err)
+	}
+	for query, source := range map[string]string{"architectural approval": FacetPRReviews, "nit": FacetPRReviewComments} {
+		search, err := svc.Search(ctx, query, cli.SearchOptions{Kind: "prs", Limit: 10})
+		if err != nil || len(search.Matches) != 1 || search.Matches[0].MatchSource != source {
+			t.Fatalf("search %q = %+v, err=%v", query, search, err)
+		}
 	}
 }
 
@@ -414,6 +440,10 @@ func TestHydrateIssueTimelinePersistsExplicitClosingCommitResolution(t *testing.
 	if err != nil || coverage == nil || !coverage.Complete {
 		t.Fatalf("coverage = %+v, err = %v", coverage, err)
 	}
+	search, err := svc.Search(ctx, "cross-referenced abc123", cli.SearchOptions{Kind: "issues", Limit: 10})
+	if err != nil || len(search.Matches) != 1 || search.Matches[0].MatchSource != FacetIssueTimeline {
+		t.Fatalf("timeline search = %+v, err=%v", search, err)
+	}
 }
 
 func TestHydrateCancellation(t *testing.T) {
@@ -564,6 +594,14 @@ func TestHydrateIssueCommentsInterruptPage2RetainsOldData(t *testing.T) {
 	}
 	if !cov.SourceUpdatedAt.Equal(oldTime) {
 		t.Fatalf("coverage source updated at = %v, want %v", cov.SourceUpdatedAt, oldTime)
+	}
+	oldSearch, err := svc.Search(ctx, "old comment", cli.SearchOptions{Kind: "issues", Limit: 10})
+	if err != nil || len(oldSearch.Matches) != 1 {
+		t.Fatalf("preserved comment search = %+v, err=%v", oldSearch, err)
+	}
+	partialSearch, err := svc.Search(ctx, "new page one", cli.SearchOptions{Kind: "issues", Limit: 10})
+	if err != nil || len(partialSearch.Matches) != 0 {
+		t.Fatalf("partial comment page became searchable: %+v, err=%v", partialSearch, err)
 	}
 }
 

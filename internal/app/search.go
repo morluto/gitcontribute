@@ -41,6 +41,8 @@ type searchMatch struct {
 	Score             float64
 	Freshness         time.Time
 	Coverage          []string
+	MatchSource       string
+	MatchExcerpt      string
 	Fields            map[string]any
 }
 
@@ -49,13 +51,6 @@ type searchResult struct {
 	Total      int
 	Matches    []searchMatch
 	NextCursor string
-}
-
-// ExplainMatchResult exposes the factual signals that contribute to a match
-// score. It performs no network access.
-type ExplainMatchResult struct {
-	Score   float64  `json:"score"`
-	Reasons []string `json:"reasons"`
 }
 
 const maxLensCandidates = 1000
@@ -229,6 +224,11 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 			URL:       threadURL(ref, t.Kind, t.Number),
 			Freshness: t.SourceUpdatedAt,
 			Coverage:  coverage,
+		}
+		if t.MatchSource != "thread" {
+			m.MatchSource = t.MatchSource
+			m.MatchExcerpt = t.MatchExcerpt
+			m.Freshness = t.MatchUpdatedAt
 		}
 		m.Score, _ = scoreMatch(query, m, m.Freshness, coverage, now)
 		matches = append(matches, m)
@@ -745,18 +745,20 @@ func (s *Service) Search(ctx context.Context, query string, opts cli.SearchOptio
 	matches := make([]cli.SearchMatch, len(res.Matches))
 	for i, m := range res.Matches {
 		matches[i] = cli.SearchMatch{
-			Kind:      m.Kind,
-			Repo:      cli.RepoRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo},
-			Title:     m.Title,
-			Number:    m.Number,
-			State:     m.State,
-			Author:    m.Author,
-			Labels:    m.Labels,
-			URL:       m.URL,
-			Score:     roundScore(m.Score),
-			Body:      m.Body,
-			Freshness: formatSearchTime(m.Freshness),
-			Coverage:  m.Coverage,
+			Kind:         m.Kind,
+			Repo:         cli.RepoRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo},
+			Title:        m.Title,
+			Number:       m.Number,
+			State:        m.State,
+			Author:       m.Author,
+			Labels:       m.Labels,
+			URL:          m.URL,
+			Score:        roundScore(m.Score),
+			Body:         m.Body,
+			Freshness:    formatSearchTime(m.Freshness),
+			Coverage:     m.Coverage,
+			MatchSource:  m.MatchSource,
+			MatchExcerpt: m.MatchExcerpt,
 		}
 	}
 	return &cli.SearchResult{
@@ -768,83 +770,4 @@ func (s *Service) Search(ctx context.Context, query string, opts cli.SearchOptio
 		Matches:    matches,
 		NextCursor: res.NextCursor,
 	}, nil
-}
-
-// ExplainMatch returns factual score reasons for a search match without network
-// access. The returned reasons describe title/body term matches, source
-// freshness, and coverage signals.
-func (s *Service) ExplainMatch(ctx context.Context, query string, match cli.SearchMatch) (*ExplainMatchResult, error) {
-	var freshness time.Time
-	if match.Freshness != "" {
-		var err error
-		freshness, err = time.Parse(time.RFC3339, match.Freshness)
-		if err != nil {
-			return nil, fmt.Errorf("parse freshness: %w", err)
-		}
-	}
-	m := searchMatch{
-		Title: match.Title,
-		Body:  match.Body,
-		Kind:  match.Kind,
-	}
-	score, reasons := scoreMatch(query, m, freshness, match.Coverage, s.now())
-	return &ExplainMatchResult{Score: roundScore(score), Reasons: reasons}, nil
-}
-
-func scoreMatch(query string, m searchMatch, freshness time.Time, coverage []string, now time.Time) (float64, []string) {
-	terms := uniqueTerms(strings.ToLower(query))
-	title := strings.ToLower(m.Title)
-	body := strings.ToLower(m.Body)
-
-	var score float64
-	var reasons []string
-	matched := 0
-	for _, term := range terms {
-		if term == "" {
-			continue
-		}
-		if strings.Contains(title, term) {
-			score += 0.25
-			reasons = append(reasons, fmt.Sprintf("query term %q matched in title", term))
-			matched++
-		} else if strings.Contains(body, term) {
-			score += 0.10
-			reasons = append(reasons, fmt.Sprintf("query term %q matched in body", term))
-			matched++
-		}
-	}
-	if matched == len(terms) && len(terms) > 0 {
-		score += 0.15
-		reasons = append(reasons, "all query terms matched")
-	}
-
-	if !freshness.IsZero() && !now.IsZero() {
-		age := now.Sub(freshness)
-		if age < 0 {
-			age = 0
-		}
-		days := age.Hours() / 24
-		freshnessScore := 1.0 / (1.0 + days/30.0)
-		if freshnessScore > 1 {
-			freshnessScore = 1
-		}
-		score += freshnessScore * 0.20
-		reasons = append(reasons, fmt.Sprintf("source updated %s ago at %s", humanDuration(age), freshness.Format(time.RFC3339)))
-	}
-
-	if len(coverage) > 0 {
-		covScore := float64(len(coverage)) * 0.05
-		if covScore > 0.2 {
-			covScore = 0.2
-		}
-		score += covScore
-		reasons = append(reasons, fmt.Sprintf("coverage includes %s", strings.Join(coverage, ", ")))
-	} else {
-		reasons = append(reasons, "no coverage recorded")
-	}
-
-	if score > 1 {
-		score = 1
-	}
-	return roundScore(score), reasons
 }
