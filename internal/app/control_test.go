@@ -77,6 +77,40 @@ func TestMetadataPropagatesOpenCorpusSchemaErrors(t *testing.T) {
 	}
 }
 
+func TestMetadataReadsExistingCorpusSchemaWithoutOpeningItForWrites(t *testing.T) {
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	creator, err := New(paths, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := creator.Init(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want, err := creator.corpus.SchemaVersion(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := creator.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	svc, err := New(paths, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	result, err := svc.Metadata(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SchemaVersion != want {
+		t.Fatalf("metadata schema version = %d, want %d", result.SchemaVersion, want)
+	}
+	if svc.corpus != nil {
+		t.Fatal("metadata retained a writable corpus connection")
+	}
+}
+
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
