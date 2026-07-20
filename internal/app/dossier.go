@@ -147,7 +147,9 @@ func dossierFromRecord(record *corpus.DossierRecord, sources []corpus.DossierSou
 }
 
 // ExtractSeeds derives evidence-backed contribution seeds from locally stored
-// merged PRs, closed-unmerged PRs, and issues. It performs no network access.
+// merged PRs, closed-unmerged PRs, and issues. By default it returns only
+// positive and negative outcome evidence; issue-only context is opt-in. It
+// performs no network access.
 func (s *Service) ExtractSeeds(ctx context.Context, repo cli.RepoRef, opts domain.ExtractSeedsOptions) ([]domain.Seed, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
@@ -179,27 +181,29 @@ func (s *Service) ExtractSeeds(ctx context.Context, repo cli.RepoRef, opts domai
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
 
-	selected := make(map[domain.SeedSourceClass]struct{})
-	if len(opts.Classes) == 0 {
-		selected[domain.SeedSourceClassMergedPR] = struct{}{}
-		selected[domain.SeedSourceClassClosedUnmergedPR] = struct{}{}
-		selected[domain.SeedSourceClassIssue] = struct{}{}
-	} else {
-		for _, class := range opts.Classes {
-			selected[class] = struct{}{}
-		}
+	selectedClasses, err := selectedSeedClasses(opts.Classes)
+	if err != nil {
+		return nil, err
+	}
+	selectedPolarities, err := selectedSeedPolarities(opts.Polarities)
+	if err != nil {
+		return nil, err
 	}
 
-	var seeds []domain.Seed
+	seeds := make([]domain.Seed, 0)
 	for _, t := range threads {
 		class, ok := classForThread(t)
 		if !ok {
 			continue
 		}
-		if _, ok := selected[class]; !ok {
+		if _, ok := selectedClasses[class]; !ok {
 			continue
 		}
-		seed, err := buildSeed(ctx, c, t, class)
+		polarity, polarityReason := polarityForThread(t, class)
+		if _, ok := selectedPolarities[polarity]; !ok {
+			continue
+		}
+		seed, err := buildSeed(ctx, c, t, class, polarity, polarityReason)
 		if err != nil {
 			return nil, err
 		}
@@ -211,6 +215,38 @@ func (s *Service) ExtractSeeds(ctx context.Context, repo cli.RepoRef, opts domai
 		seeds = seeds[:opts.Limit]
 	}
 	return seeds, nil
+}
+
+func selectedSeedClasses(classes []domain.SeedSourceClass) (map[domain.SeedSourceClass]struct{}, error) {
+	if len(classes) == 0 {
+		classes = []domain.SeedSourceClass{domain.SeedSourceClassMergedPR, domain.SeedSourceClassClosedUnmergedPR, domain.SeedSourceClassIssue}
+	}
+	selected := make(map[domain.SeedSourceClass]struct{}, len(classes))
+	for _, class := range classes {
+		switch class {
+		case domain.SeedSourceClassMergedPR, domain.SeedSourceClassClosedUnmergedPR, domain.SeedSourceClassIssue:
+			selected[class] = struct{}{}
+		default:
+			return nil, fmt.Errorf("unknown seed source class %q", class)
+		}
+	}
+	return selected, nil
+}
+
+func selectedSeedPolarities(polarities []domain.SeedPolarity) (map[domain.SeedPolarity]struct{}, error) {
+	if len(polarities) == 0 {
+		polarities = []domain.SeedPolarity{domain.SeedPolarityPositive, domain.SeedPolarityNegative}
+	}
+	selected := make(map[domain.SeedPolarity]struct{}, len(polarities))
+	for _, polarity := range polarities {
+		switch polarity {
+		case domain.SeedPolarityPositive, domain.SeedPolarityNegative, domain.SeedPolarityContext:
+			selected[polarity] = struct{}{}
+		default:
+			return nil, fmt.Errorf("unknown seed polarity %q", polarity)
+		}
+	}
+	return selected, nil
 }
 
 func classForThread(t corpus.Thread) (domain.SeedSourceClass, bool) {
@@ -230,18 +266,41 @@ func classForThread(t corpus.Thread) (domain.SeedSourceClass, bool) {
 	}
 }
 
-func buildSeed(ctx context.Context, c *corpus.Corpus, t corpus.Thread, class domain.SeedSourceClass) (domain.Seed, error) {
+func polarityForThread(t corpus.Thread, class domain.SeedSourceClass) (domain.SeedPolarity, string) {
+	switch class {
+	case domain.SeedSourceClassMergedPR:
+		return domain.SeedPolarityPositive, "GitHub reports this pull request was merged"
+	case domain.SeedSourceClassClosedUnmergedPR:
+		return domain.SeedPolarityNegative, "GitHub reports this pull request was closed without merging"
+	case domain.SeedSourceClassIssue:
+		if t.State == "closed" && t.StateReason == "not_planned" {
+			return domain.SeedPolarityNegative, "GitHub reports this issue was closed as not planned"
+		}
+		if t.State == "closed" {
+			for _, label := range t.Labels {
+				if _, ok := rejectionLabels[strings.ToLower(label)]; ok {
+					return domain.SeedPolarityNegative, "closed issue has rejection or supersession label: " + label
+				}
+			}
+		}
+	}
+	return domain.SeedPolarityContext, "issue evidence provides problem context, not an implementation outcome"
+}
+
+func buildSeed(ctx context.Context, c *corpus.Corpus, t corpus.Thread, class domain.SeedSourceClass, polarity domain.SeedPolarity, polarityReason string) (domain.Seed, error) {
 	seed := domain.Seed{
-		SourceClass: class,
-		Number:      t.Number,
-		Title:       t.Title,
-		Author:      t.Author,
-		State:       t.State,
-		Labels:      sortedCopy(t.Labels),
-		CreatedAt:   t.SourceCreatedAt,
-		UpdatedAt:   t.SourceUpdatedAt,
-		ClosedAt:    t.ClosedAt,
-		MergedAt:    t.MergedAt,
+		SourceClass:    class,
+		Polarity:       polarity,
+		PolarityReason: polarityReason,
+		Number:         t.Number,
+		Title:          t.Title,
+		Author:         t.Author,
+		State:          t.State,
+		Labels:         sortedCopy(t.Labels),
+		CreatedAt:      t.SourceCreatedAt,
+		UpdatedAt:      t.SourceUpdatedAt,
+		ClosedAt:       t.ClosedAt,
+		MergedAt:       t.MergedAt,
 	}
 
 	prPayload, err := latestPRPayload(ctx, c, t)
@@ -288,7 +347,7 @@ func extractEvidence(t corpus.Thread, class domain.SeedSourceClass, pr prPayload
 		ValidationIndicators:    sortedUnique(extractValidationIndicators(text, t.Labels)),
 		ApproximateScope:        extractApproximateScope(pr),
 		ScopeEvidence:           scopeEvidence(pr),
-		RejectionOrSupersession: extractRejectionContext(class, t.State, t.Title, t.Body, t.Labels),
+		RejectionOrSupersession: extractRejectionContext(class, t.State, t.StateReason, t.Title, t.Body, t.Labels),
 		ProblemAreas:            sortedUnique(extractProblemAreas(t.Title, t.Body, t.Labels)),
 	}
 	return ev
@@ -352,7 +411,7 @@ func scopeEvidence(pr prPayloadFields) string {
 	return fmt.Sprintf("observed changed_files=%d additions=%d deletions=%d", pr.ChangedFiles, pr.Additions, pr.Deletions)
 }
 
-func extractRejectionContext(class domain.SeedSourceClass, state, title, body string, labels []string) string {
+func extractRejectionContext(class domain.SeedSourceClass, state, stateReason, title, body string, labels []string) string {
 	text := title
 	if body != "" {
 		text += " " + body
@@ -362,6 +421,9 @@ func extractRejectionContext(class domain.SeedSourceClass, state, title, body st
 		if _, ok := rejectionLabels[strings.ToLower(label)]; ok {
 			return fmt.Sprintf("observed rejection/supersession label: %s", label)
 		}
+	}
+	if class == domain.SeedSourceClassIssue && state == "closed" && stateReason == "not_planned" {
+		return "GitHub state reason: not_planned"
 	}
 
 	if class == domain.SeedSourceClassClosedUnmergedPR || (class == domain.SeedSourceClassIssue && state == "closed") {

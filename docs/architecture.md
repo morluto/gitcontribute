@@ -272,6 +272,15 @@ carry a source reference or an explicit unknown reason; untrusted thread text
 remains data and
 cannot grant an adapter additional authority.
 
+Seed extraction is also a strict offline read. It labels explicitly merged pull
+requests as positive examples and explicitly closed-unmerged pull requests as
+negative constraints. A closed issue is negative only when GitHub records
+`not_planned` or it carries a predefined rejection/supersession label; all
+other issues are context, not outcome evidence. The default seed view includes
+positive and negative evidence, while contextual issues require an explicit
+polarity selection. Repository-controlled titles and bodies may add excerpts
+to evidence but cannot determine polarity.
+
 Starting an investigation from a thread is an explicit corpus-write capability.
 The investigation and seed hypothesis are committed in one transaction and
 carry the exact thread observation ID, source timestamp, and observation

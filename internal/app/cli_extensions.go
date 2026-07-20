@@ -117,7 +117,7 @@ func (s *Service) GetDossierForCLI(ctx context.Context, repo cli.RepoRef) (any, 
 }
 
 // ExtractSeedsForCLI derives bounded contribution seeds from stored threads.
-func (s *Service) ExtractSeedsForCLI(ctx context.Context, repo cli.RepoRef, classes []string, limit int) (any, error) {
+func (s *Service) ExtractSeedsForCLI(ctx context.Context, repo cli.RepoRef, classes, polarities []string, limit int) (any, error) {
 	parsed := make([]domain.SeedSourceClass, len(classes))
 	for i, class := range classes {
 		switch class {
@@ -131,5 +131,20 @@ func (s *Service) ExtractSeedsForCLI(ctx context.Context, repo cli.RepoRef, clas
 			return nil, fmt.Errorf("unknown seed source class %q", class)
 		}
 	}
-	return s.ExtractSeeds(ctx, repo, domain.ExtractSeedsOptions{Classes: parsed, Limit: limit})
+	parsedPolarities := make([]domain.SeedPolarity, 0, len(polarities))
+	for _, polarity := range polarities {
+		switch polarity {
+		case "positive":
+			parsedPolarities = append(parsedPolarities, domain.SeedPolarityPositive)
+		case "negative":
+			parsedPolarities = append(parsedPolarities, domain.SeedPolarityNegative)
+		case "context":
+			parsedPolarities = append(parsedPolarities, domain.SeedPolarityContext)
+		case "all":
+			parsedPolarities = append(parsedPolarities, domain.SeedPolarityPositive, domain.SeedPolarityNegative, domain.SeedPolarityContext)
+		default:
+			return nil, fmt.Errorf("unknown seed polarity %q", polarity)
+		}
+	}
+	return s.ExtractSeeds(ctx, repo, domain.ExtractSeedsOptions{Classes: parsed, Polarities: parsedPolarities, Limit: limit})
 }

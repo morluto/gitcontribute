@@ -206,10 +206,10 @@ type searchKindCmd struct {
 type seedsCmd struct {
 	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
 	From      string `name:"from" default:"merged-prs,closed-prs,issues" help:"Comma-separated seed source classes"`
+	Polarity  string `name:"polarity" default:"positive,negative" help:"Comma-separated seed roles: positive, negative, context"`
 	Limit     int    `name:"limit" default:"20" help:"Maximum seeds to return"`
 	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
-
 type indexCmd struct {
 	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
 	Path      string `arg:"" optional:"" default:"." help:"Path to a clean repository checkout"`
@@ -1858,7 +1858,7 @@ func (c *CLI) runSeeds(ctx context.Context, cmd *seedsCmd) error {
 	if err != nil {
 		return err
 	}
-	result, err := service.ExtractSeedsForCLI(ctx, repo, splitCSV(cmd.From), cmd.Limit)
+	result, err := service.ExtractSeedsForCLI(ctx, repo, splitCSV(cmd.From), splitCSV(cmd.Polarity), cmd.Limit)
 	if err != nil {
 		return c.mapError(err)
 	}
