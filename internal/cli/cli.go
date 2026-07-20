@@ -1775,19 +1775,6 @@ func (c *CLI) runStatus(ctx context.Context, cmd *statusCmd) error {
 	return c.render(cmd.JSON, res)
 }
 
-func (c *CLI) runSync(ctx context.Context, cmd *syncCmd) error {
-	repo, err := parseRepo(cmd.OwnerRepo)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(c.stderr, "syncing %s...\n", repo)
-	res, err := c.svc.Sync(ctx, repo)
-	if err != nil {
-		return c.mapError(err)
-	}
-	return c.render(cmd.JSON, res)
-}
-
 func (c *CLI) runSearch(ctx context.Context, command string, cmd *searchCmd) error {
 	kind := strings.TrimPrefix(command, "search ")
 	var selected *searchKindCmd
@@ -1922,32 +1909,7 @@ func parseRepo(s string) (RepoRef, error) {
 func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) error {
 	switch command {
 	case "archive sync":
-		service, err := c.archiveService()
-		if err != nil {
-			return err
-		}
-		repo, err := parseRepo(cmd.Sync.OwnerRepo)
-		if err != nil {
-			return err
-		}
-		numbers, err := parseNumberList(cmd.Sync.Numbers)
-		if err != nil {
-			return NewCLIError(ExitUsage, err)
-		}
-		if cmd.Sync.Since < 0 {
-			return NewCLIError(ExitUsage, errors.New("since duration cannot be negative"))
-		}
-		if len(numbers) > 0 && (cmd.Sync.State != "all" || cmd.Sync.Since != 0) {
-			return NewCLIError(ExitUsage, errors.New("state and since filters cannot be combined with exact thread numbers"))
-		}
-		fmt.Fprintf(c.stderr, "syncing archive for %s...\n", repo)
-		result, err := service.ArchiveSync(ctx, repo, ArchiveSyncOptions{
-			State: cmd.Sync.State, Since: cmd.Sync.Since, Numbers: numbers, MaxPages: cmd.Sync.MaxPages, MaxRequests: cmd.Sync.MaxRequests,
-		})
-		if err != nil {
-			return c.mapError(err)
-		}
-		return c.render(cmd.Sync.JSON, result)
+		return c.runArchiveSync(ctx, &cmd.Sync)
 	case "archive hydrate":
 		service, err := c.archiveService()
 		if err != nil {
@@ -1966,20 +1928,7 @@ func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) e
 		}
 		return c.render(cmd.Hydrate.JSON, result)
 	case "archive refresh":
-		service, err := c.archiveService()
-		if err != nil {
-			return err
-		}
-		repo, err := parseRepo(cmd.Refresh.OwnerRepo)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(c.stderr, "refreshing archive for %s...\n", repo)
-		result, err := service.ArchiveSync(ctx, repo, ArchiveSyncOptions{State: "all", MaxPages: cmd.Refresh.MaxPages})
-		if err != nil {
-			return c.mapError(err)
-		}
-		return c.render(cmd.Refresh.JSON, result)
+		return c.runArchiveRefresh(ctx, &cmd.Refresh)
 	case "archive threads":
 		repo, err := parseRepo(cmd.Threads.OwnerRepo)
 		if err != nil {

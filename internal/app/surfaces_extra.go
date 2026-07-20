@@ -25,6 +25,31 @@ func (s *Service) ArchiveSync(ctx context.Context, repo cli.RepoRef, opts cli.Ar
 	return s.SyncWithOptions(ctx, repo, syncOpts)
 }
 
+// PlanArchiveSync computes the conservative request ceiling before resolving a
+// GitHub reader or opening the corpus.
+func (s *Service) PlanArchiveSync(_ context.Context, repo cli.RepoRef, opts cli.ArchiveSyncOptions) (*cli.SyncPlanResult, error) {
+	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
+	if err := ref.Validate(); err != nil {
+		return nil, err
+	}
+	if opts.Since < 0 {
+		return nil, errors.New("since duration cannot be negative")
+	}
+	syncOpts := SyncOptions{State: opts.State, Numbers: opts.Numbers, MaxPages: opts.MaxPages, MaxRequests: opts.MaxRequests}
+	if opts.Since > 0 {
+		syncOpts.Since = s.now().Add(-opts.Since)
+	}
+	normalized, plan, err := planSyncOptions(syncOpts)
+	if err != nil {
+		return nil, err
+	}
+	return &cli.SyncPlanResult{
+		Repo: repo, FixedRequests: plan.fixedRequests, ThreadRequestCeiling: plan.threadRequestCeiling,
+		PlannedRequests: plan.plannedRequests, RequestBudget: normalized.MaxRequests,
+		MaxPages: normalized.MaxPages, ExactThreads: len(normalized.Numbers),
+	}, nil
+}
+
 // Hydrate adapts the explicit CLI hydration contract to selective hydration.
 func (s *Service) Hydrate(ctx context.Context, repo cli.RepoRef, number int, opts cli.HydrateOptions) (*cli.HydrateResult, error) {
 	result, err := s.HydrateThread(ctx, repo, number, HydrateOptions{Facets: opts.Facets, MaxPages: opts.MaxPages})

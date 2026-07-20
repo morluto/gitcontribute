@@ -27,6 +27,7 @@ type fakeSurfacesService struct {
 	addColCalled      bool
 	listColCalled     bool
 	archiveCalled     bool
+	planCalled        bool
 	hydrateCalled     bool
 	threadsCalled     bool
 	coverageCalled    bool
@@ -41,6 +42,7 @@ type fakeSurfacesService struct {
 	lastLensExplainRef  string
 	lastLensExplainOpts cli.LensExplainOptions
 	lastLensDef         lens.Definition
+	syncEvents          []string
 	lastCreateColName   string
 	lastAddColName      string
 	lastAddColMembers   []cli.CollectionMember
@@ -165,8 +167,18 @@ func (f *fakeSurfacesService) ListCollections(ctx context.Context) (*cli.Collect
 
 func (f *fakeSurfacesService) ArchiveSync(ctx context.Context, repo cli.RepoRef, opts cli.ArchiveSyncOptions) (*cli.SyncResult, error) {
 	f.archiveCalled = true
+	f.syncEvents = append(f.syncEvents, "sync")
 	f.lastArchiveOpts = opts
-	return &cli.SyncResult{Repo: repo, Updated: len(opts.Numbers), Message: "synced"}, f.err
+	return &cli.SyncResult{Repo: repo, Updated: len(opts.Numbers), PlannedRequests: 11, RequestBudget: opts.MaxRequests, Message: "synced"}, f.err
+}
+
+func (f *fakeSurfacesService) PlanArchiveSync(_ context.Context, repo cli.RepoRef, opts cli.ArchiveSyncOptions) (*cli.SyncPlanResult, error) {
+	f.planCalled = true
+	f.syncEvents = append(f.syncEvents, "plan")
+	return &cli.SyncPlanResult{
+		Repo: repo, FixedRequests: 9, ThreadRequestCeiling: len(opts.Numbers), PlannedRequests: 9 + len(opts.Numbers),
+		RequestBudget: opts.MaxRequests, MaxPages: opts.MaxPages, ExactThreads: len(opts.Numbers),
+	}, f.err
 }
 
 func (f *fakeSurfacesService) Hydrate(ctx context.Context, repo cli.RepoRef, number int, opts cli.HydrateOptions) (*cli.HydrateResult, error) {
@@ -357,11 +369,14 @@ func TestCollectionAddRejectsInvalidMember(t *testing.T) {
 
 func TestArchiveAndLocalQueryCommands(t *testing.T) {
 	svc := &fakeSurfacesService{fakeService: &fakeService{}}
-	c, stdout, _ := newSurfacesCLI(svc)
+	c, stdout, stderr := newSurfacesCLI(svc)
 
 	requireNoErr(t, c.Run(context.Background(), []string{"archive", "sync", "o/r", "--numbers", "2,1", "--max-pages", "5", "--max-requests", "12", "--json"}))
-	if !svc.archiveCalled || len(svc.lastArchiveOpts.Numbers) != 2 || svc.lastArchiveOpts.MaxPages != 5 || svc.lastArchiveOpts.MaxRequests != 12 {
+	if !svc.archiveCalled || !svc.planCalled || len(svc.lastArchiveOpts.Numbers) != 2 || svc.lastArchiveOpts.MaxPages != 5 || svc.lastArchiveOpts.MaxRequests != 12 {
 		t.Fatalf("archive options = %+v", svc.lastArchiveOpts)
+	}
+	if !slices.Equal(svc.syncEvents, []string{"plan", "sync"}) || !strings.Contains(stderr.String(), "planned sync for o/r: up to 11 requests (9 fixed + up to 2 thread requests; budget 12)") {
+		t.Fatalf("sync was not planned before execution: events=%v stderr=%q", svc.syncEvents, stderr.String())
 	}
 	stdout.Reset()
 	requireNoErr(t, c.Run(context.Background(), []string{"archive", "hydrate", "o/r#1", "--with", "issue_comments", "--json"}))
