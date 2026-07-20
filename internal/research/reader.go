@@ -117,7 +117,7 @@ type HealthEvidence struct {
 	Archived                       bool
 	OpenIssues                     int
 	OpenPullRequests               int
-	ExternalPRMergeRate            float64
+	ExternalPRMergeRate            *float64
 	ExternalPRSampleSize           int
 	IssueResponseMedianHours       float64
 	PullRequestResponseMedianHours float64

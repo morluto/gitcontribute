@@ -97,6 +97,11 @@ later header refreshes cannot erase that observation. Offline filters for
 classification, portfolio attention, and health merge rates include only
 explicitly observed outcomes. Unknown closed outcomes are surfaced separately;
 MCP thread output omits the nullable `merged` field until it is known.
+Health also consumes the repository-level `threads` coverage fact instead of
+inferring completeness from the number of rows returned. External merge rates
+are nullable: when no explicitly observed closed external outcome exists, JSON
+reports `null` and the health coverage explains why the rate is unavailable. A
+known zero merge rate remains distinct from an unknown rate.
 
 Authored pull requests use the ordinary repository and thread projections.
 REST `pr_details` and `pr_reviews` facets are combined with typed GraphQL

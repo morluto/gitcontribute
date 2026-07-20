@@ -21,6 +21,7 @@ const (
 	facetIssueComments    = "issue_comments"
 	facetPRReviews        = "pr_reviews"
 	facetPRReviewComments = "pr_review_comments"
+	facetThreads          = "threads"
 )
 
 // Compute builds a deterministic health report from the stored corpus facts for
@@ -38,7 +39,12 @@ func Compute(ctx context.Context, c *corpus.Corpus, repoID int64, opts Options) 
 	if err != nil {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
-	truncated := len(threads) == threadListLimit
+	threadCoverage, err := c.GetCoverage(ctx, repoID, nil, facetThreads)
+	if err != nil {
+		return nil, fmt.Errorf("get thread coverage: %w", err)
+	}
+	threadsComplete := threadCoverage != nil && threadCoverage.Complete && len(threads) < threadListLimit
+	threadsIncomplete := !threadsComplete
 
 	now := opts.Now
 	if now.IsZero() {
@@ -74,13 +80,14 @@ func Compute(ctx context.Context, c *corpus.Corpus, repoID int64, opts Options) 
 		},
 		Coverage: CoverageSummary{
 			ThreadsLimit:         threadListLimit,
-			ThreadsTruncated:     truncated,
+			ThreadsComplete:      threadsComplete,
+			ThreadsTruncated:     threadsIncomplete,
 			ThreadsSampleSize:    len(threads),
 			RepositoryProjection: true,
 		},
 	}
 
-	issueMetrics, prMetrics := countThreads(threads, window, truncated)
+	issueMetrics, prMetrics := countThreads(threads, window, threadsIncomplete)
 	report.Issues = issueMetrics
 	report.PullRequests = prMetrics
 
@@ -122,7 +129,7 @@ func resolveWindowStart(startOpt time.Time, threads []corpus.Thread, repo *corpu
 	return earliest, fmt.Sprintf("all observed history since %s", earliest.Format(time.RFC3339))
 }
 
-func countThreads(threads []corpus.Thread, window Window, truncated bool) (IssueMetrics, PullRequestMetrics) {
+func countThreads(threads []corpus.Thread, window Window, incomplete bool) (IssueMetrics, PullRequestMetrics) {
 	issueMetrics := IssueMetrics{Window: window}
 	prMetrics := PullRequestMetrics{Window: window}
 	missingIssueCreated := false
@@ -165,8 +172,8 @@ func countThreads(threads []corpus.Thread, window Window, truncated bool) (Issue
 	}
 	issueCoverage := "complete"
 	prCoverage := "complete"
-	if truncated {
-		issueCoverage = "partial (thread list may be truncated)"
+	if incomplete {
+		issueCoverage = "partial (repository thread coverage is incomplete)"
 		prCoverage = issueCoverage
 	} else {
 		if missingIssueCreated {
@@ -232,6 +239,7 @@ func computeExternalMetrics(threads []corpus.Thread, start, end time.Time) Exter
 		}
 	}
 	out.Known = known
+	outcomes := out.Merged + out.ClosedUnmerged
 	switch {
 	case out.SampleSize == 0:
 		out.Coverage = "missing (no PRs in window)"
@@ -243,11 +251,16 @@ func computeExternalMetrics(threads []corpus.Thread, start, end time.Time) Exter
 		out.Coverage = "partial (some PRs lack author association)"
 	case out.ClosedUnknownMerge > 0:
 		out.Coverage = "partial (some closed PRs lack an observed merge state)"
+	case out.External == 0:
+		out.Coverage = "missing (no external PRs in window)"
+	case outcomes == 0:
+		out.Coverage = "partial (no observed closed external PR outcomes)"
 	default:
 		out.Coverage = "complete"
 	}
-	if out.Merged+out.ClosedUnmerged > 0 {
-		out.MergeRate = float64(out.Merged) / float64(out.Merged+out.ClosedUnmerged)
+	if outcomes > 0 {
+		rate := float64(out.Merged) / float64(outcomes)
+		out.MergeRate = &rate
 	}
 	return out
 }

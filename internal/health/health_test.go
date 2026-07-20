@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,6 +54,13 @@ func applyFacet(t *testing.T, ctx context.Context, c *corpus.Corpus, repoID, thr
 	}
 }
 
+func applyRepositoryFacet(ctx context.Context, t *testing.T, c *corpus.Corpus, repoID int64, facet string, sourceUpdated time.Time, complete bool) {
+	t.Helper()
+	if err := c.ApplyFacetObservationSet(ctx, repoID, nil, facet, sourceUpdated, nil, complete, 0); err != nil {
+		t.Fatalf("apply repository facet %s: %v", facet, err)
+	}
+}
+
 func TestComputeHealthMetrics(t *testing.T) {
 	ctx := context.Background()
 	c := openTestCorpus(t)
@@ -69,6 +77,7 @@ func TestComputeHealthMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert repository: %v", err)
 	}
+	applyRepositoryFacet(ctx, t, c, repo.ID, facetThreads, now, true)
 
 	openIssue := upsertThread(t, ctx, c, repo.ID, corpus.Thread{
 		Kind:            corpus.ThreadKindIssue,
@@ -187,8 +196,8 @@ func TestComputeHealthMetrics(t *testing.T) {
 	if report.External.External != 4 || report.External.Known != 5 || report.External.Open != 2 || report.External.ClosedUnmerged != 1 || report.External.ClosedUnknownMerge != 1 || report.External.Merged != 0 {
 		t.Fatalf("external metrics = %+v", report.External)
 	}
-	if report.External.MergeRate != 0 {
-		t.Fatalf("external merge rate = %v, want 0", report.External.MergeRate)
+	if report.External.MergeRate == nil || *report.External.MergeRate != 0 {
+		t.Fatalf("external merge rate = %v, want known 0", report.External.MergeRate)
 	}
 	if report.PullRequests.Coverage != "partial (some closed pull requests lack an observed merge state)" || report.External.Coverage != "partial (some closed PRs lack an observed merge state)" {
 		t.Fatalf("merge-state coverage not surfaced: pull_requests=%q external=%q", report.PullRequests.Coverage, report.External.Coverage)
@@ -220,6 +229,115 @@ func TestComputeHealthMetrics(t *testing.T) {
 	if report.Response.PullRequests.Median != 0.5 {
 		t.Fatalf("pr response median = %v, want 0.5", report.Response.PullRequests.Median)
 	}
+}
+
+func TestExternalMergeRateRequiresObservedOutcome(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name         string
+		threads      []corpus.Thread
+		wantRate     *float64
+		wantCoverage string
+	}{
+		{
+			name: "open only is unknown",
+			threads: []corpus.Thread{{
+				Kind: corpus.ThreadKindPullRequest, State: "open", AuthorAssociation: "NONE", SourceCreatedAt: now,
+			}},
+			wantCoverage: "partial (no observed closed external PR outcomes)",
+		},
+		{
+			name: "no external pull requests is missing",
+			threads: []corpus.Thread{{
+				Kind: corpus.ThreadKindPullRequest, State: "open", AuthorAssociation: "MEMBER", SourceCreatedAt: now,
+			}},
+			wantCoverage: "missing (no external PRs in window)",
+		},
+		{
+			name: "unknown closed outcome stays unknown",
+			threads: []corpus.Thread{{
+				Kind: corpus.ThreadKindPullRequest, State: "closed", AuthorAssociation: "NONE", SourceCreatedAt: now,
+			}},
+			wantCoverage: "partial (some closed PRs lack an observed merge state)",
+		},
+		{
+			name: "known zero is preserved",
+			threads: []corpus.Thread{{
+				Kind: corpus.ThreadKindPullRequest, State: "closed", AuthorAssociation: "NONE", SourceCreatedAt: now, MergedKnown: true,
+			}},
+			wantRate:     float64Pointer(0),
+			wantCoverage: "complete",
+		},
+		{
+			name: "known one is preserved",
+			threads: []corpus.Thread{{
+				Kind: corpus.ThreadKindPullRequest, State: "closed", AuthorAssociation: "NONE", SourceCreatedAt: now, MergedKnown: true, Merged: true,
+			}},
+			wantRate:     float64Pointer(1),
+			wantCoverage: "complete",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := computeExternalMetrics(test.threads, time.Time{}, now.Add(time.Hour))
+			if (got.MergeRate == nil) != (test.wantRate == nil) || got.MergeRate != nil && *got.MergeRate != *test.wantRate {
+				t.Fatalf("merge rate = %v, want %v", got.MergeRate, test.wantRate)
+			}
+			if got.Coverage != test.wantCoverage {
+				t.Fatalf("coverage = %q, want %q", got.Coverage, test.wantCoverage)
+			}
+		})
+	}
+}
+
+func TestComputeHonorsRepositoryThreadCoverage(t *testing.T) {
+	ctx := context.Background()
+	c := openTestCorpus(t)
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	repo, err := c.UpsertRepository(ctx, corpus.Repository{Owner: "owner", Name: "repo", SourceUpdatedAt: now}, "{}")
+	if err != nil {
+		t.Fatalf("upsert repository: %v", err)
+	}
+	upsertThread(t, ctx, c, repo.ID, corpus.Thread{
+		Kind: corpus.ThreadKindIssue, Number: 1, State: "open", SourceCreatedAt: now.Add(-time.Hour), SourceUpdatedAt: now,
+	}, "NONE")
+	upsertThread(t, ctx, c, repo.ID, corpus.Thread{
+		Kind: corpus.ThreadKindPullRequest, Number: 2, State: "open", SourceCreatedAt: now.Add(-time.Hour), SourceUpdatedAt: now,
+	}, "NONE")
+	applyRepositoryFacet(ctx, t, c, repo.ID, facetThreads, now, false)
+
+	partial, err := Compute(ctx, c, repo.ID, Options{Now: now})
+	if err != nil {
+		t.Fatalf("compute partial health: %v", err)
+	}
+	const wantPartial = "partial (repository thread coverage is incomplete)"
+	if partial.Issues.Coverage != wantPartial || partial.PullRequests.Coverage != wantPartial || partial.Coverage.ThreadsComplete || !partial.Coverage.ThreadsTruncated {
+		t.Fatalf("incomplete repository coverage not propagated: %+v", partial)
+	}
+
+	applyRepositoryFacet(ctx, t, c, repo.ID, facetThreads, now.Add(time.Second), true)
+	complete, err := Compute(ctx, c, repo.ID, Options{Now: now})
+	if err != nil {
+		t.Fatalf("compute complete health: %v", err)
+	}
+	if complete.Issues.Coverage != "complete" || complete.PullRequests.Coverage != "complete" || !complete.Coverage.ThreadsComplete || complete.Coverage.ThreadsTruncated {
+		t.Fatalf("complete repository coverage not propagated: %+v", complete)
+	}
+	if complete.External.MergeRate != nil || complete.External.Coverage != "partial (no observed closed external PR outcomes)" {
+		t.Fatalf("open-only external outcome was not unknown: %+v", complete.External)
+	}
+	payload, err := json.Marshal(complete)
+	if err != nil {
+		t.Fatalf("marshal health report: %v", err)
+	}
+	if !strings.Contains(string(payload), `"merge_rate":null`) || !strings.Contains(string(payload), `"threads_complete":true`) {
+		t.Fatalf("health JSON does not preserve coverage semantics: %s", payload)
+	}
+}
+
+func float64Pointer(value float64) *float64 {
+	return &value
 }
 
 func TestResponseRequiredFacetCoverage(t *testing.T) {

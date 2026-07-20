@@ -260,17 +260,17 @@ type GuidanceSection struct {
 // HealthSection is a compact projection of existing offline metrics.
 type HealthSection struct {
 	SectionMeta
-	Archived                       bool    `json:"archived"`
-	OpenIssues                     int     `json:"open_issues"`
-	OpenPullRequests               int     `json:"open_pull_requests"`
-	ExternalPRMergeRate            float64 `json:"external_pr_merge_rate"`
-	ExternalPRSampleSize           int     `json:"external_pr_sample_size"`
-	IssueResponseMedianHours       float64 `json:"issue_response_median_hours"`
-	PullRequestResponseMedianHours float64 `json:"pull_request_response_median_hours"`
-	IssueResponseSampleSize        int     `json:"issue_response_sample_size"`
-	PullRequestResponseSampleSize  int     `json:"pull_request_response_sample_size"`
-	ThreadSampleSize               int     `json:"thread_sample_size"`
-	ThreadsTruncated               bool    `json:"threads_truncated"`
+	Archived                       bool     `json:"archived"`
+	OpenIssues                     int      `json:"open_issues"`
+	OpenPullRequests               int      `json:"open_pull_requests"`
+	ExternalPRMergeRate            *float64 `json:"external_pr_merge_rate"`
+	ExternalPRSampleSize           int      `json:"external_pr_sample_size"`
+	IssueResponseMedianHours       float64  `json:"issue_response_median_hours"`
+	PullRequestResponseMedianHours float64  `json:"pull_request_response_median_hours"`
+	IssueResponseSampleSize        int      `json:"issue_response_sample_size"`
+	PullRequestResponseSampleSize  int      `json:"pull_request_response_sample_size"`
+	ThreadSampleSize               int      `json:"thread_sample_size"`
+	ThreadsTruncated               bool     `json:"threads_truncated"`
 }
 
 // CoverageFact records one repository, thread, or local-index coverage fact.

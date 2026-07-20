@@ -84,16 +84,16 @@ type PullRequestMetrics struct {
 // ExternalContributorMetrics reports PR outcomes for authors whose public
 // author association is not owner/member/collaborator/mannequin.
 type ExternalContributorMetrics struct {
-	Window             Window  `json:"window"`
-	SampleSize         int     `json:"sample_size"`       // PRs considered within the window
-	Known              int     `json:"known_association"` // PRs with a non-empty author association
-	External           int     `json:"external"`          // PRs classified as external contributors
-	Open               int     `json:"open"`
-	Merged             int     `json:"merged"`
-	ClosedUnmerged     int     `json:"closed_unmerged"`
-	ClosedUnknownMerge int     `json:"closed_unknown_merge"`
-	MergeRate          float64 `json:"merge_rate"`
-	Coverage           string  `json:"coverage"`
+	Window             Window   `json:"window"`
+	SampleSize         int      `json:"sample_size"`       // PRs considered within the window
+	Known              int      `json:"known_association"` // PRs with a non-empty author association
+	External           int      `json:"external"`          // PRs classified as external contributors
+	Open               int      `json:"open"`
+	Merged             int      `json:"merged"`
+	ClosedUnmerged     int      `json:"closed_unmerged"`
+	ClosedUnknownMerge int      `json:"closed_unknown_merge"`
+	MergeRate          *float64 `json:"merge_rate"`
+	Coverage           string   `json:"coverage"`
 }
 
 // CongestionMetrics describes the current open PR backlog and age distribution.
@@ -148,6 +148,7 @@ type ResponseTimeMetric struct {
 // CoverageSummary reports top-level data-availability notes.
 type CoverageSummary struct {
 	ThreadsLimit         int  `json:"threads_limit"`
+	ThreadsComplete      bool `json:"threads_complete"`
 	ThreadsTruncated     bool `json:"threads_truncated"`
 	ThreadsSampleSize    int  `json:"threads_sample_size"`
 	RepositoryProjection bool `json:"repository_projection"`

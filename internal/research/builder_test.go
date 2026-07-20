@@ -146,8 +146,11 @@ func TestBuilderMakesCoverageAndUnknownsExplicit(t *testing.T) {
 		t.Fatal(err)
 	}
 	jsonB, _ := json.Marshal(brief)
-	if !bytes.Equal(jsonA, jsonB) || !strings.Contains(string(jsonA), `"schema_version":"research-brief.v1"`) {
+	if !bytes.Equal(jsonA, jsonB) || !strings.Contains(string(jsonA), `"schema_version":"research-brief.v1"`) || !strings.Contains(string(jsonA), `"external_pr_merge_rate":null`) {
 		t.Fatalf("JSON contract is not deterministic: %s", jsonA)
+	}
+	if !strings.Contains(first.String(), "External PR merge rate:** unknown") {
+		t.Fatalf("markdown did not surface unknown merge rate:\n%s", first.String())
 	}
 }
 
