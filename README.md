@@ -454,9 +454,15 @@ gitcontribute archive hydrate owner/repo#42 --with issue_comments
 gitcontribute radar owner/repo --json
 ```
 
-Radar scores carry a version (`radar.v2`) so saved JSON remains auditable when
+Radar scores carry a version (`radar.v3`) so saved JSON remains auditable when
 ranking semantics evolve. It never syncs, hydrates, executes repository code,
 or writes to GitHub.
+
+Radar's `related_work` facts unify stored PR mentions and closing relationships,
+issue/comment dependencies, timeline cross-references, and duplicate clusters.
+Every relationship keeps its source kind and URL. An open PR that GitHub says
+closes the issue is an implementation blocker; other open dependencies and
+related PRs require coordination instead of being mislabeled as completed work.
 
 `research brief` is also a strict offline read. Its versioned
 `research-brief.v1` output has fixed sections for state, stored problem fields,

@@ -13,7 +13,17 @@ import (
 	"github.com/morluto/gitcontribute/internal/deepwiki"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
+	"github.com/morluto/gitcontribute/internal/radar"
 )
+
+func TestRadarCandidateToMCPPreservesRelatedWorkSemantics(t *testing.T) {
+	out := radarCandidateToMCP(radar.Candidate{RelatedWork: []radar.RelatedWork{{
+		Ref: "pull_request:owner/repo#9", Relation: "depends_on", Direction: "outbound", State: "open",
+	}}})
+	if len(out.RelatedWork) != 1 || out.RelatedWork[0].Ref != "pull_request:owner/repo#9" || out.RelatedWork[0].Relation != "depends_on" || out.RelatedWork[0].Direction != "outbound" || out.RelatedWork[0].State != "open" {
+		t.Fatalf("related work = %+v", out.RelatedWork)
+	}
+}
 
 func TestGetRepositoriesPreservesUnknownMetadataAndInputOrder(t *testing.T) {
 	ctx := context.Background()

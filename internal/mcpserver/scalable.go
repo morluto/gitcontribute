@@ -101,21 +101,22 @@ type RankOpportunitiesInput struct {
 
 // OpportunityCandidateOutput describes one ranked contribution candidate.
 type OpportunityCandidateOutput struct {
-	Rank               int      `json:"rank"`
-	Ref                string   `json:"ref"`
-	Repo               string   `json:"repo"`
-	Number             int      `json:"number"`
-	Title              string   `json:"title"`
-	URL                string   `json:"url"`
-	Score              int      `json:"score"`
-	Eligibility        string   `json:"eligibility"`
-	Confidence         string   `json:"confidence"`
-	PositiveSignals    []string `json:"positive_signals,omitempty"`
-	Risks              []string `json:"risks,omitempty"`
-	Blockers           []string `json:"blockers,omitempty"`
-	Unknowns           []string `json:"unknowns,omitempty"`
-	LinkedPullRequests []int    `json:"linked_pull_requests,omitempty"`
-	SourceUpdatedAt    string   `json:"source_updated_at,omitempty"`
+	Rank               int                            `json:"rank"`
+	Ref                string                         `json:"ref"`
+	Repo               string                         `json:"repo"`
+	Number             int                            `json:"number"`
+	Title              string                         `json:"title"`
+	URL                string                         `json:"url"`
+	Score              int                            `json:"score"`
+	Eligibility        string                         `json:"eligibility"`
+	Confidence         string                         `json:"confidence"`
+	PositiveSignals    []string                       `json:"positive_signals,omitempty"`
+	Risks              []string                       `json:"risks,omitempty"`
+	Blockers           []string                       `json:"blockers,omitempty"`
+	Unknowns           []string                       `json:"unknowns,omitempty"`
+	LinkedPullRequests []int                          `json:"linked_pull_requests,omitempty"`
+	RelatedWork        []OpportunityRelatedWorkOutput `json:"related_work,omitempty"`
+	SourceUpdatedAt    string                         `json:"source_updated_at,omitempty"`
 }
 
 // RepositoryOpportunitySummaryOutput reports ranking coverage for one repository.

@@ -243,6 +243,12 @@ score from the explicit `ready_to_code`, `needs_diagnosis`,
 `needs_coordination`, and `blocked` eligibility states, and reports positive
 signals, risks, blockers, and unknown evidence. Eligibility derives only from
 stored policy, labels, discussion, ownership, collision, and coverage facts.
+Radar normalizes PR text, authoritative closing-issue facets, issue/comment
+references, opt-in timeline cross-references, and duplicate projections into
+bounded `related_work` facts with exact source evidence. Quoted and code-fenced
+text is excluded from lexical relationship classification. Only an open PR
+with a closing relationship is an implementation blocker; open dependencies
+and non-closing PR relationships require coordination.
 Missing coverage is never silently converted into a negative score, but it
 prevents a ready-to-code claim. Health metrics, dossier generation, and thread
 research briefs also operate only on stored facts and report partial or missing
