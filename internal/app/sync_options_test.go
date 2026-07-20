@@ -43,7 +43,7 @@ func TestSyncWithOptionsPassesStateAndSinceAndMarksPartialCoverage(t *testing.T)
 	if result.Updated != 1 {
 		t.Fatalf("updated = %d, want 1", result.Updated)
 	}
-	if result.Requests != syncFixedRequestCost()+1 || result.Capped {
+	if result.Requests != syncFixedRequestCost()+1 || result.PlannedRequests != syncFixedRequestCost()+2 || result.RequestBudget != defaultSyncMaxRequests || result.Capped {
 		t.Fatalf("request accounting = %+v", result)
 	}
 	if gotState != "open" || gotSince != since.Format(time.RFC3339) {
@@ -64,6 +64,47 @@ func TestSyncWithOptionsPassesStateAndSinceAndMarksPartialCoverage(t *testing.T)
 	}
 	if coverage == nil || coverage.Complete {
 		t.Fatalf("partial sync coverage = %+v, want incomplete", coverage)
+	}
+}
+
+func TestPlanArchiveSyncReportsConservativeRequestCeiling(t *testing.T) {
+	svc := newTestServiceNoNetwork(t)
+	defer func() { _ = svc.Close() }()
+	ctx := context.Background()
+	repo := cli.RepoRef{Owner: "owner", Repo: "repo"}
+	fixed := syncFixedRequestCost()
+
+	tests := []struct {
+		name              string
+		opts              cli.ArchiveSyncOptions
+		wantThreads       int
+		wantPlanned       int
+		wantBudget        int
+		wantExact         int
+		wantErrorContains string
+	}{
+		{name: "defaults use request budget", opts: cli.ArchiveSyncOptions{}, wantThreads: defaultSyncMaxRequests - fixed, wantPlanned: defaultSyncMaxRequests, wantBudget: defaultSyncMaxRequests},
+		{name: "page ceiling", opts: cli.ArchiveSyncOptions{MaxPages: 3, MaxRequests: 20}, wantThreads: 3, wantPlanned: fixed + 3, wantBudget: 20},
+		{name: "exact threads", opts: cli.ArchiveSyncOptions{Numbers: []int{2, 1}, MaxPages: 5, MaxRequests: 12}, wantThreads: 2, wantPlanned: fixed + 2, wantBudget: 12, wantExact: 2},
+		{name: "exact selection exceeds budget", opts: cli.ArchiveSyncOptions{Numbers: []int{1, 2}, MaxRequests: fixed + 1}, wantErrorContains: "exact thread selection requires at least"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := svc.PlanArchiveSync(ctx, repo, test.opts)
+			if test.wantErrorContains != "" {
+				if err == nil || !strings.Contains(err.Error(), test.wantErrorContains) {
+					t.Fatalf("plan error = %v, want containing %q", err, test.wantErrorContains)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("plan archive sync: %v", err)
+			}
+			if got.FixedRequests != fixed || got.ThreadRequestCeiling != test.wantThreads || got.PlannedRequests != test.wantPlanned || got.RequestBudget != test.wantBudget || got.ExactThreads != test.wantExact {
+				t.Fatalf("plan = %+v", got)
+			}
+		})
 	}
 }
 

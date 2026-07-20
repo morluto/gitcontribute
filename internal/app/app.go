@@ -398,13 +398,11 @@ func (s *Service) syncWithOptions(ctx context.Context, repo cli.RepoRef, syncOpt
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
+	var plan syncRequestPlan
 	var err error
-	syncOpts, err = normalizeSyncOptions(syncOpts)
+	syncOpts, plan, err = planSyncOptions(syncOpts)
 	if err != nil {
 		return nil, err
-	}
-	if provided == nil && len(syncOpts.Numbers) > 0 && syncFixedRequestCost()+len(syncOpts.Numbers) > syncOpts.MaxRequests {
-		return nil, fmt.Errorf("exact thread selection requires at least %d requests; max requests is %d", syncFixedRequestCost()+len(syncOpts.Numbers), syncOpts.MaxRequests)
 	}
 	c, err := s.openCorpus(ctx)
 	if err != nil {
@@ -467,7 +465,7 @@ func (s *Service) syncWithOptions(ctx context.Context, repo cli.RepoRef, syncOpt
 	}
 
 	return &cli.SyncResult{
-		Repo: repo, Updated: updated, Requests: budget.used, Capped: requestCapped,
+		Repo: repo, Updated: updated, Requests: budget.used, PlannedRequests: plan.plannedRequests, RequestBudget: syncOpts.MaxRequests, Capped: requestCapped,
 		Message: fmt.Sprintf("fetched %d thread headers across %d thread requests", updated, pages),
 	}, nil
 }
@@ -498,6 +496,34 @@ func (b *syncRequestBudget) take() error {
 
 func syncFixedRequestCost() int {
 	return 1 + len(contributionGuidancePaths)
+}
+
+type syncRequestPlan struct {
+	fixedRequests        int
+	threadRequestCeiling int
+	plannedRequests      int
+}
+
+func planSyncOptions(opts SyncOptions) (SyncOptions, syncRequestPlan, error) {
+	normalized, err := normalizeSyncOptions(opts)
+	if err != nil {
+		return SyncOptions{}, syncRequestPlan{}, err
+	}
+	fixed := syncFixedRequestCost()
+	remaining := normalized.MaxRequests - fixed
+	threadCeiling := normalized.MaxPages
+	if len(normalized.Numbers) > 0 {
+		threadCeiling = len(normalized.Numbers)
+		if threadCeiling > remaining {
+			required := fixed + threadCeiling
+			return SyncOptions{}, syncRequestPlan{}, fmt.Errorf("exact thread selection requires at least %d requests; max requests is %d", required, normalized.MaxRequests)
+		}
+	} else if threadCeiling > remaining {
+		threadCeiling = remaining
+	}
+	return normalized, syncRequestPlan{
+		fixedRequests: fixed, threadRequestCeiling: threadCeiling, plannedRequests: fixed + threadCeiling,
+	}, nil
 }
 
 func normalizeSyncOptions(opts SyncOptions) (SyncOptions, error) {

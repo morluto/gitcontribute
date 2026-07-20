@@ -88,6 +88,10 @@ Metadata, fixed policy paths, exact reads, and list pages share one explicit
 request budget; batch sync plans conservative per-repository allocations in
 stable input order before starting workers. Generated network remediation
 commands always carry the applicable explicit page or request bounds.
+CLI sync and archive-refresh commands compute and print a conservative request
+ceiling before resolving the GitHub reader. The same normalized plan supplies
+the post-run `planned_requests` and `request_budget` fields, so preflight and
+execution cannot silently use different bounds.
 
 The issue-list endpoint used by thread-header sync does not expose pull-request
 merge state. A header-only closed pull request therefore stores merge state as

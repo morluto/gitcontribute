@@ -366,7 +366,11 @@ func statusHuman(r *StatusResult) string {
 }
 
 func syncHuman(r *SyncResult) string {
-	return fmt.Sprintf("Synced %s: %d updated.\n%s", r.Repo, r.Updated, r.Message)
+	planning := ""
+	if r.PlannedRequests > 0 {
+		planning = fmt.Sprintf(" Requests: %d actual, up to %d planned (budget %d).", r.Requests, r.PlannedRequests, r.RequestBudget)
+	}
+	return fmt.Sprintf("Synced %s: %d updated.%s\n%s", r.Repo, r.Updated, planning, r.Message)
 }
 
 func searchHuman(r *SearchResult) string {

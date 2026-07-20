@@ -638,41 +638,6 @@ type CollectionListResult struct {
 	Collections []CollectionResult `json:"collections"`
 }
 
-// ArchiveService exposes explicit network-reading archive operations.
-type ArchiveService interface {
-	ArchiveSync(ctx context.Context, repo RepoRef, opts ArchiveSyncOptions) (*SyncResult, error)
-	Hydrate(ctx context.Context, repo RepoRef, number int, opts HydrateOptions) (*HydrateResult, error)
-}
-
-type ArchiveSyncOptions struct {
-	State       string
-	Since       time.Duration
-	Numbers     []int
-	MaxPages    int
-	MaxRequests int
-}
-type HydrateOptions struct {
-	Facets   []string
-	MaxPages int
-}
-
-type HydrateResult struct {
-	Repo     RepoRef         `json:"repo"`
-	Number   int             `json:"number"`
-	Kind     string          `json:"kind"`
-	Facets   []HydratedFacet `json:"facets"`
-	Pages    int             `json:"pages"`
-	Requests int             `json:"requests"`
-	Message  string          `json:"message"`
-}
-
-type HydratedFacet struct {
-	Facet    string `json:"facet"`
-	Count    int    `json:"count"`
-	Pages    int    `json:"pages"`
-	Complete bool   `json:"complete"`
-}
-
 // LocalQueryService exposes bounded offline corpus queries.
 type LocalQueryService interface {
 	Coverage(ctx context.Context, repo RepoRef) (*CoverageResult, error)

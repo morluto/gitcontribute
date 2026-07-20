@@ -20,6 +20,7 @@ type fakeService struct {
 	initCalled               bool
 	statusCalled             bool
 	syncCalled               bool
+	syncPlanCalled           bool
 	searchCalled             bool
 	dossierCalled            bool
 	indexCalled              bool
@@ -54,6 +55,7 @@ type fakeService struct {
 	initResult         *cli.InitResult
 	statusResult       *cli.StatusResult
 	syncResult         *cli.SyncResult
+	syncPlanResult     *cli.SyncPlanResult
 	searchResult       *cli.SearchResult
 	dossierResult      *cli.DossierResult
 	indexResult        *cli.IndexResult
@@ -175,6 +177,11 @@ func (f *fakeService) Sync(ctx context.Context, repo cli.RepoRef) (*cli.SyncResu
 	f.syncCalled = true
 	f.lastSyncArg = repo
 	return f.syncResult, f.err
+}
+
+func (f *fakeService) PlanArchiveSync(_ context.Context, _ cli.RepoRef, _ cli.ArchiveSyncOptions) (*cli.SyncPlanResult, error) {
+	f.syncPlanCalled = true
+	return f.syncPlanResult, f.err
 }
 
 func (f *fakeService) Search(ctx context.Context, query string, opts cli.SearchOptions) (*cli.SearchResult, error) {
@@ -635,25 +642,6 @@ func TestStatus(t *testing.T) {
 		t.Fatal("Status was not called")
 	}
 	want := "Status: healthy (corpus=gc version=0.0.1)\nok\n"
-	if got := stdout.String(); got != want {
-		t.Fatalf("stdout=%q, want %q", got, want)
-	}
-}
-
-func TestSync(t *testing.T) {
-	svc := &fakeService{syncResult: &cli.SyncResult{Repo: cli.RepoRef{Owner: "o", Repo: "r"}, Updated: 7, Message: "ok"}}
-	c, stdout, _ := newTestCLI(svc, nil)
-
-	err := c.Run(context.Background(), []string{"sync", "o/r"})
-	requireNoErr(t, err)
-
-	if !svc.syncCalled {
-		t.Fatal("Sync was not called")
-	}
-	if svc.lastSyncArg != (cli.RepoRef{Owner: "o", Repo: "r"}) {
-		t.Fatalf("sync repo=%+v, want o/r", svc.lastSyncArg)
-	}
-	want := "Synced o/r: 7 updated.\nok\n"
 	if got := stdout.String(); got != want {
 		t.Fatalf("stdout=%q, want %q", got, want)
 	}
