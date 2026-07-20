@@ -88,8 +88,11 @@ func TestServiceClustersAndCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unchanged refresh: %v", err)
 	}
-	if secondRefresh.Disposition != "unchanged" || secondRefresh.Stats.ComparedPairs != 0 {
-		t.Fatalf("second refresh = %+v, want unchanged with zero comparisons", secondRefresh)
+	if secondRefresh.Disposition != "unchanged" || secondRefresh.Stats.ComparedPairs != 0 || secondRefresh.Stats.RequiredPairs != 0 || secondRefresh.Stats.CommitQueries != 0 {
+		t.Fatalf("second refresh = %+v, want unchanged with no pair or commit work", secondRefresh)
+	}
+	if secondRefresh.Stats.CandidateCount != firstRefresh.Stats.CandidateCount || secondRefresh.Stats.ClusterCount != firstRefresh.Stats.ClusterCount || secondRefresh.Stats.ClusterCount == 0 {
+		t.Fatalf("second refresh = %+v, want current projection counts from %+v", secondRefresh, firstRefresh)
 	}
 	list, err := svc.ListClusters(ctx, repo, 10)
 	if err != nil {
@@ -156,6 +159,40 @@ func TestServiceClustersAndCluster(t *testing.T) {
 
 	if _, err := svc.Cluster(ctx, "nosuchcluster", 100); err == nil {
 		t.Fatal("expected error for missing cluster")
+	}
+}
+
+func TestUnchangedEmptyClusterProjectionReportsZeroCurrentCounts(t *testing.T) {
+	ctx := context.Background()
+	srv := newTestServer("owner", "empty")
+	defer srv.Close()
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.corpus.ApplyRepositoryObservation(ctx, "owner", "empty", "123", time.Unix(1, 0).UTC(), `{}`); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := cli.RepoRef{Owner: "owner", Repo: "empty"}
+	first, err := svc.RefreshClusters(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.RefreshClusters(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Disposition != "committed" || second.Disposition != "unchanged" || first.Projection.RunID != second.Projection.RunID {
+		t.Fatalf("empty refreshes: first=%+v second=%+v", first, second)
+	}
+	if second.Stats.CandidateCount != 0 || second.Stats.ClusterCount != 0 || second.Stats.RequiredPairs != 0 || second.Stats.ComparedPairs != 0 || second.Stats.CommitQueries != 0 || second.Stats.SnapshotQueries == 0 {
+		t.Fatalf("unchanged empty stats = %+v", second.Stats)
+	}
+}
+
+func TestCurrentProjectionClusterCountExcludesRetiredHistory(t *testing.T) {
+	clusters := []clustering.Cluster{{State: clustering.ClusterOpen}, {State: clustering.ClusterClosed}, {State: clustering.ClusterRetired}}
+	if got := currentProjectionClusterCount(clusters); got != 2 {
+		t.Fatalf("current cluster count = %d, want 2", got)
 	}
 }
 

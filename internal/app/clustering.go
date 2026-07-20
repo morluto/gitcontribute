@@ -52,7 +52,9 @@ func (s *Service) RefreshClusters(ctx context.Context, repo cli.RepoRef) (*cli.C
 		return nil, fmt.Errorf("load cluster refresh snapshot: %w", err)
 	}
 	if snapshot.CurrentProjection != nil && snapshot.CurrentProjection.Matches(snapshot.SourceRevision, snapshot.GovernanceRevision, engine.RuleVersion()) {
-		return clusterRefreshToCLI(repo, "unchanged", *snapshot.CurrentProjection, clusterprojection.RefreshStats{CandidateCount: len(snapshot.Candidates), SnapshotQueries: snapshot.ReadStatements}), nil
+		return clusterRefreshToCLI(repo, "unchanged", *snapshot.CurrentProjection, clusterprojection.RefreshStats{
+			CandidateCount: len(snapshot.Candidates), ClusterCount: currentProjectionClusterCount(snapshot.ExistingClusters), SnapshotQueries: snapshot.ReadStatements,
+		}), nil
 	}
 	computation, err := engine.Cluster(ctx, snapshot.Candidates)
 	if err != nil {
@@ -73,6 +75,16 @@ func (s *Service) RefreshClusters(ctx context.Context, repo cli.RepoRef) (*cli.C
 	}
 	stats.CommitQueries = committed.WriteStatements
 	return clusterRefreshToCLI(repo, disposition, committed.Projection, stats), nil
+}
+
+func currentProjectionClusterCount(clusters []clustering.Cluster) int {
+	count := 0
+	for _, cluster := range clusters {
+		if cluster.State != clustering.ClusterRetired {
+			count++
+		}
+	}
+	return count
 }
 
 func clusterRefreshToCLI(repo cli.RepoRef, disposition string, identity clusterprojection.Identity, stats clusterprojection.RefreshStats) *cli.ClusterRefreshResult {
