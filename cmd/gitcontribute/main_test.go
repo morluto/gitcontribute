@@ -53,3 +53,20 @@ func TestReportCommandErrorLogsUnexpectedError(t *testing.T) {
 		t.Fatalf("unexpected error log = %q", logOutput)
 	}
 }
+
+func TestLogInvocationStartDoesNotLogArguments(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	fixturePassword := strings.Join([]string{"fixture", "password"}, "-")
+	remote := "https://fixture-user:" + fixturePassword + "@github.com/owner/repo.git"
+
+	logInvocationStart(context.Background(), logger, "trace-test", []string{"workspace", "create", "--remote", remote})
+
+	got := logs.String()
+	if strings.Contains(got, fixturePassword) || strings.Contains(got, remote) || strings.Contains(got, "--remote") {
+		t.Fatalf("invocation log exposed argument values: %q", got)
+	}
+	if !strings.Contains(got, "arg_count=4") {
+		t.Fatalf("invocation log omitted safe argument count: %q", got)
+	}
+}

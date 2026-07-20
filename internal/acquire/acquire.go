@@ -10,10 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -22,6 +20,7 @@ import (
 	"github.com/gofrs/flock"
 	"github.com/google/uuid"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/gitremote"
 )
 
 var (
@@ -461,48 +460,10 @@ func (m *Manager) writeMetadata(acq *Acquisition) error {
 }
 
 func validateRemote(remote string) error {
-	remote = strings.TrimSpace(remote)
-	if remote == "" || strings.HasPrefix(remote, "-") || strings.ContainsAny(remote, "\x00\r\n") {
+	if err := gitremote.Validate(remote); err != nil {
 		return ErrInvalidRemote
 	}
-	if strings.Contains(remote, "::") {
-		return ErrInvalidRemote
-	}
-	if filepath.IsAbs(remote) || path.IsAbs(remote) || strings.HasPrefix(remote, "file://") {
-		return nil
-	}
-	if strings.HasPrefix(remote, "https://") {
-		u, err := url.Parse(remote)
-		if err != nil || u.User != nil || u.Host == "" {
-			return ErrInvalidRemote
-		}
-		return nil
-	}
-	if strings.HasPrefix(remote, "ssh://") {
-		u, err := url.Parse(remote)
-		if err != nil || u.Host == "" {
-			return ErrInvalidRemote
-		}
-		if u.User != nil {
-			if _, ok := u.User.Password(); ok {
-				return ErrInvalidRemote
-			}
-		}
-		if u.Path == "" || u.Path == "/" {
-			return ErrInvalidRemote
-		}
-		return nil
-	}
-	if at := strings.IndexByte(remote, '@'); at > 0 {
-		if strings.Contains(remote[:at], ":") {
-			return ErrInvalidRemote
-		}
-		hostPath := remote[at+1:]
-		if colon := strings.IndexByte(hostPath, ':'); colon > 0 && colon < len(hostPath)-1 {
-			return nil
-		}
-	}
-	return ErrInvalidRemote
+	return nil
 }
 
 func cacheNameFor(owner, repo, remote string) string {

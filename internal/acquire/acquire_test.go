@@ -66,6 +66,45 @@ func TestValidateRemoteRejectsCredentialsAndPreservesSSH(t *testing.T) {
 	}
 }
 
+type countingRunner struct {
+	calls int
+}
+
+func (r *countingRunner) Run(context.Context, string, ...string) (string, error) {
+	r.calls++
+	return "", errors.New("unexpected Git invocation")
+}
+
+func TestAcquireRejectsCredentialRemoteBeforeSideEffects(t *testing.T) {
+	fixtureUser := strings.Join([]string{"fixture", "user"}, "-")
+	fixturePassword := strings.Join([]string{"fixture", "password"}, "-")
+	remote := "https://" + fixtureUser + ":" + fixturePassword + "@github.com/owner/repo.git"
+	root := t.TempDir()
+	runner := &countingRunner{}
+	mgr, err := NewManager(root, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = mgr.Acquire(context.Background(), "owner", "repo", remote)
+	if !errors.Is(err, ErrInvalidRemote) {
+		t.Fatalf("Acquire credential remote error = %v, want ErrInvalidRemote", err)
+	}
+	if strings.Contains(err.Error(), fixturePassword) {
+		t.Fatalf("Acquire error exposed credential: %v", err)
+	}
+	if runner.calls != 0 {
+		t.Fatalf("Git runner calls = %d, want 0", runner.calls)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("acquisition files written before remote validation: %v", entries)
+	}
+}
+
 func TestWriteMetadataAtomicallyWithPrivatePermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows does not expose Unix permission bits")

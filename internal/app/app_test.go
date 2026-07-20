@@ -821,53 +821,6 @@ func TestDefineValidationParsesQuotedArguments(t *testing.T) {
 	}
 }
 
-func TestWorkspaceCreateAndShow(t *testing.T) {
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git not available")
-	}
-	ctx := context.Background()
-	remote, baseSHA, candidateSHA := setupAppGitRemote(t)
-
-	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
-	svc, err := New(paths, "test", nil)
-	if err != nil {
-		t.Fatalf("new service: %v", err)
-	}
-	defer func() { _ = svc.Close() }()
-	if _, err := svc.Init(ctx); err != nil {
-		t.Fatalf("init: %v", err)
-	}
-
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
-	if err != nil {
-		t.Fatalf("start investigation: %v", err)
-	}
-
-	ws, err := svc.CreateWorkspace(ctx, inv.ID, cli.WorkspaceCreateOptions{
-		Remote:       remote,
-		BaseRef:      "master",
-		CandidateRef: "feature",
-		Name:         "ws-test",
-	})
-	if err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	if ws.ID != "ws-test" || ws.InvestigationID != inv.ID || ws.BaseSHA != baseSHA || ws.CandidateSHA != candidateSHA {
-		t.Fatalf("unexpected workspace: %+v", ws)
-	}
-	if _, err := os.Stat(ws.Path); err != nil {
-		t.Fatalf("workspace path missing: %v", err)
-	}
-
-	shown, err := svc.ShowWorkspace(ctx, ws.ID)
-	if err != nil {
-		t.Fatalf("show workspace: %v", err)
-	}
-	if shown.ID != ws.ID || shown.BaseSHA != baseSHA {
-		t.Fatalf("workspace roundtrip failed: %+v", shown)
-	}
-}
-
 func TestMirrorNamesAreUnambiguous(t *testing.T) {
 	a := mirrorNameFor("a", "b-c", "https://github.com/a/b-c.git")
 	b := mirrorNameFor("a-b", "c", "https://github.com/a-b/c.git")

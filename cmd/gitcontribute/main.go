@@ -30,11 +30,7 @@ func main() {
 	// Generate a trace ID for this invocation so all log lines from the
 	// same command run can be correlated.
 	traceID := uuid.NewString()
-	logger.InfoContext(ctx, "starting",
-		"version", version,
-		"trace_id", traceID,
-		"args", os.Args[1:],
-	)
+	logInvocationStart(ctx, logger, traceID, os.Args[1:])
 	ctx = gitlog.WithTrace(ctx, traceID)
 
 	paths := config.NewPaths(nil)
@@ -61,6 +57,14 @@ func main() {
 }
 
 const ExitGeneral = 1
+
+func logInvocationStart(ctx context.Context, logger *slog.Logger, traceID string, args []string) {
+	logger.InfoContext(ctx, "starting",
+		"version", version,
+		"trace_id", traceID,
+		"arg_count", len(args),
+	)
+}
 
 func reportCommandError(ctx context.Context, logger *slog.Logger, stderr io.Writer, traceID string, err error) int {
 	var cliErr *cli.CLIError

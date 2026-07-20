@@ -444,6 +444,41 @@ func TestManager_RejectsExecutableRemoteTransport(t *testing.T) {
 	}
 }
 
+type countingRunner struct {
+	calls int
+}
+
+func (r *countingRunner) Run(context.Context, string, ...string) (string, error) {
+	r.calls++
+	return "", errors.New("unexpected Git invocation")
+}
+
+func TestManager_RejectsCredentialRemoteBeforeGitOrMirrorWrite(t *testing.T) {
+	fixtureUser := strings.Join([]string{"fixture", "user"}, "-")
+	fixturePassword := strings.Join([]string{"fixture", "password"}, "-")
+	remote := "https://" + fixtureUser + ":" + fixturePassword + "@github.com/owner/repo.git"
+	root := t.TempDir()
+	runner := &countingRunner{}
+	mgr, err := NewManager(root, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = mgr.Clone(context.Background(), remote, "origin")
+	if !errors.Is(err, ErrInvalidRemote) {
+		t.Fatalf("Clone credential remote error = %v, want ErrInvalidRemote", err)
+	}
+	if strings.Contains(err.Error(), fixturePassword) {
+		t.Fatalf("Clone error exposed credential: %v", err)
+	}
+	if runner.calls != 0 {
+		t.Fatalf("Git runner calls = %d, want 0", runner.calls)
+	}
+	if _, err := os.Stat(filepath.Join(root, "mirrors")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("mirror directory was written before remote validation: %v", err)
+	}
+}
+
 func TestManager_StatusDisablesRepositoryFSMonitor(t *testing.T) {
 	ctx := context.Background()
 	remote, _, _ := setupRemote(t)
