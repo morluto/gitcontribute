@@ -393,8 +393,15 @@ gitcontribute archive coverage owner/repo
 ```
 
 Hydration supports `issue_comments`, `pr_details`, `pr_reviews`, and
-`pr_review_comments`. Fetches are paginated and cancellation-aware; a complete
-facet replaces its previous snapshot atomically.
+`pr_review_comments`; `issue_timeline` is available only when explicitly
+requested. Fetches are paginated and cancellation-aware; a complete facet
+replaces its previous snapshot atomically.
+
+Complete comment, review, review-comment, and explicitly requested timeline
+snapshots also enrich offline thread search. Results identify the stored facet
+in `match_source` and include a bounded `match_excerpt`; API page boundaries do
+not change matching semantics. Repository-controlled discussion remains
+untrusted evidence and is never executed.
 
 </details>
 
@@ -440,6 +447,10 @@ gitcontribute research brief pr:owner/repo#108 --json
 gitcontribute health owner/repo --stale-after 336h --json
 gitcontribute seeds owner/repo --json
 ```
+
+Thread search covers stored titles and bodies plus searchable evidence from
+complete hydrated discussion and timeline snapshots. Facet-backed matches
+report where the term was found instead of returning an unexplained thread.
 
 `seeds` defaults to accepted (`positive`) and constraining (`negative`)
 outcome evidence so recent open issues cannot crowd historical examples out of

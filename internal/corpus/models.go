@@ -62,8 +62,19 @@ type Thread struct {
 	ObservationSequence int64
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
-	// Rank is the query-specific FTS rank populated only by search results.
-	Rank float64
+	// Rank and match fields are query-specific and populated only by search results.
+	Rank           float64
+	MatchSource    string
+	MatchExcerpt   string
+	MatchUpdatedAt time.Time
+}
+
+// ThreadSearchEvidence is the stored document that made an exact thread match.
+type ThreadSearchEvidence struct {
+	Source          string
+	Text            string
+	Excerpt         string
+	SourceUpdatedAt time.Time
 }
 
 // PortfolioPullRequest identifies a pull request together with the repository

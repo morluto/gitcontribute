@@ -36,7 +36,44 @@ type ThreadSearchPage struct {
 	Total      int
 }
 
-// SearchThreads performs an FTS5 keyword search over thread titles and bodies.
+const threadSearchMatchesSQL = `
+	WITH search_matches AS (
+		SELECT threads_fts.rowid AS thread_id,
+		       threads_fts.rank AS rank,
+		       'thread' AS source,
+		       snippet(threads_fts, -1, '', '', ' … ', 32) AS excerpt,
+		       t.title || char(10) || COALESCE(t.body, '') AS search_text,
+		       t.source_updated_at AS source_updated_at,
+		       0 AS observation_id
+		FROM threads_fts
+		JOIN threads t ON t.id = threads_fts.rowid
+		WHERE threads_fts MATCH ?
+		UNION ALL
+		SELECT fo.thread_id,
+		       facet_observations_fts.rank,
+		       fo.facet,
+		       snippet(facet_observations_fts, 0, '', '', ' … ', 32),
+		       fo.search_text,
+		       (SELECT MAX(snapshot.source_updated_at)
+		        FROM facet_observations snapshot
+		        WHERE snapshot.repository_id = fo.repository_id
+		          AND COALESCE(snapshot.thread_id, -1) = COALESCE(fo.thread_id, -1)
+		          AND snapshot.facet = fo.facet),
+		       fo.id
+		FROM facet_observations_fts
+		JOIN facet_observations fo ON fo.id = facet_observations_fts.rowid
+		WHERE facet_observations_fts MATCH ? AND fo.thread_id IS NOT NULL
+	),
+	ranked_matches AS (
+		SELECT *, ROW_NUMBER() OVER (
+			PARTITION BY thread_id
+			ORDER BY rank, source, observation_id
+		) AS source_position
+		FROM search_matches
+	)`
+
+// SearchThreads performs an FTS5 keyword search over thread title, body, and
+// searchable hydrated facet evidence.
 // It returns matching threads ordered by FTS5 rank and limited to at most limit
 // results. No network access occurs.
 func (c *Corpus) SearchThreads(ctx context.Context, query string, limit int) ([]Thread, error) {
@@ -80,13 +117,14 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 		return ThreadSearchPage{}, err
 	}
 
-	sql := `
-		SELECT rank, t.id, t.repository_id, t.kind, t.number, t.state, t.state_reason, t.title, t.body, t.author, t.author_association, t.labels, t.assignees, t.draft, t.locked, t.milestone,
-		       t.source_created_at, t.source_updated_at, t.observation_sequence, t.created_at, t.updated_at, t.closed_at, t.merged_at, t.merged, t.merged_known
-		FROM threads_fts
-		JOIN threads t ON t.id = threads_fts.rowid
-		WHERE threads_fts MATCH ?`
-	args := []any{ftsQuery}
+	sql := threadSearchMatchesSQL + `
+		SELECT m.rank, t.id, t.repository_id, t.kind, t.number, t.state, t.state_reason, t.title, t.body, t.author, t.author_association, t.labels, t.assignees, t.draft, t.locked, t.milestone,
+		       t.source_created_at, t.source_updated_at, t.observation_sequence, t.created_at, t.updated_at, t.closed_at, t.merged_at, t.merged, t.merged_known,
+		       m.source, m.excerpt, m.source_updated_at
+		FROM ranked_matches m
+		JOIN threads t ON t.id = m.thread_id
+		WHERE m.source_position = 1`
+	args := []any{ftsQuery, ftsQuery}
 	if filter.RepoID != 0 {
 		sql += ` AND t.repository_id = ?`
 		args = append(args, filter.RepoID)
@@ -97,10 +135,10 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 	}
 	sql, args = appendThreadMetadataFilters(sql, args, filter)
 	if cursor != nil {
-		sql += ` AND (threads_fts.rank > ? OR (threads_fts.rank = ? AND t.id > ?))`
+		sql += ` AND (m.rank > ? OR (m.rank = ? AND t.id > ?))`
 		args = append(args, cursor.Rank, cursor.Rank, cursor.ID)
 	}
-	sql += ` ORDER BY threads_fts.rank, t.id LIMIT ?`
+	sql += ` ORDER BY m.rank, t.id LIMIT ?`
 	args = append(args, filter.Limit+1)
 
 	rows, err := c.db.QueryContext(ctx, sql, args...)
@@ -141,8 +179,12 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 }
 
 func (c *Corpus) countThreadMatches(ctx context.Context, ftsQuery string, filter SearchFilter) (int, error) {
-	sql := `SELECT COUNT(*) FROM threads_fts JOIN threads t ON t.id = threads_fts.rowid WHERE threads_fts MATCH ?`
-	args := []any{ftsQuery}
+	sql := threadSearchMatchesSQL + `
+		SELECT COUNT(*)
+		FROM ranked_matches m
+		JOIN threads t ON t.id = m.thread_id
+		WHERE m.source_position = 1`
+	args := []any{ftsQuery, ftsQuery}
 	if filter.RepoID != 0 {
 		sql += ` AND t.repository_id = ?`
 		args = append(args, filter.RepoID)
@@ -157,6 +199,32 @@ func (c *Corpus) countThreadMatches(ctx context.Context, ftsQuery string, filter
 		return 0, fmt.Errorf("count threads: %w", err)
 	}
 	return total, nil
+}
+
+// FindThreadSearchEvidence returns the best stored document matching query for
+// one thread. It reads only the local FTS projections.
+func (c *Corpus) FindThreadSearchEvidence(ctx context.Context, threadID int64, query string) (ThreadSearchEvidence, bool, error) {
+	ftsQuery := literalFTSQuery(query)
+	if ftsQuery == "" {
+		return ThreadSearchEvidence{}, false, nil
+	}
+	statement := threadSearchMatchesSQL + `
+		SELECT source, search_text, excerpt, source_updated_at
+		FROM ranked_matches
+		WHERE thread_id = ? AND source_position = 1`
+	var evidence ThreadSearchEvidence
+	var sourceUpdatedAt int64
+	err := c.db.QueryRowContext(ctx, statement, ftsQuery, ftsQuery, threadID).Scan(
+		&evidence.Source, &evidence.Text, &evidence.Excerpt, &sourceUpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ThreadSearchEvidence{}, false, nil
+	}
+	if err != nil {
+		return ThreadSearchEvidence{}, false, fmt.Errorf("find thread search evidence: %w", err)
+	}
+	evidence.SourceUpdatedAt = scanTime(sourceUpdatedAt)
+	return evidence, true, nil
 }
 
 func (c *Corpus) decodeThreadCursor(cursor, query, repo, kind, filter string) (*searchCursor, error) {
@@ -235,10 +303,10 @@ func scanThreadsWithRank(rows *sql.Rows) ([]Thread, error) {
 		var t Thread
 		var rank float64
 		var body, author, labels, assignees, stateReason, authorAssociation, milestone sql.NullString
-		var sourceCreated, src, created, updated int64
+		var sourceCreated, src, created, updated, matchUpdated int64
 		var closed, mergedAt sql.NullInt64
 		var merged, mergedKnown, draft, locked int
-		if err := rows.Scan(&rank, &t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &stateReason, &t.Title, &body, &author, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged, &mergedKnown); err != nil {
+		if err := rows.Scan(&rank, &t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &stateReason, &t.Title, &body, &author, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged, &mergedKnown, &t.MatchSource, &t.MatchExcerpt, &matchUpdated); err != nil {
 			return nil, err
 		}
 		t.Body = body.String
@@ -254,6 +322,7 @@ func scanThreadsWithRank(rows *sql.Rows) ([]Thread, error) {
 		t.SourceUpdatedAt = scanTime(src)
 		t.CreatedAt = scanTime(created)
 		t.UpdatedAt = scanTime(updated)
+		t.MatchUpdatedAt = scanTime(matchUpdated)
 		t.ClosedAt = scanTime(closed.Int64)
 		t.MergedAt = scanTime(mergedAt.Int64)
 		t.Merged = merged != 0

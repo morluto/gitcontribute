@@ -83,7 +83,12 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 			Labels:            m.Labels,
 			Assignees:         m.Assignees,
 			Draft:             m.Draft, ClosedAt: formatTime(m.ClosedAt), MergedAt: formatTime(m.MergedAt), Merged: knownMergePointer(m.Merged, m.MergedKnown),
-			UpdatedAt: updatedAt,
+			UpdatedAt:    updatedAt,
+			MatchSource:  m.MatchSource,
+			MatchExcerpt: m.MatchExcerpt,
+		}
+		if m.MatchSource != "" {
+			matches[i].MatchUpdatedAt = formatTime(m.Freshness)
 		}
 	}
 	return mcpserver.SearchOutput{Query: in.Query, Total: res.Total, Matches: matches, NextCursor: res.NextCursor}, nil

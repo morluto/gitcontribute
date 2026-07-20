@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -120,6 +121,57 @@ func TestMCPReaderExplainRejectsNonMatchingThreadAndRepository(t *testing.T) {
 		if _, err := reader.ExplainMatch(ctx, input); !errors.Is(err, mcpserver.ErrNotFound) {
 			t.Fatalf("ExplainMatch(%+v) error = %v, want ErrNotFound", input, err)
 		}
+	}
+}
+
+func TestMCPReaderSearchAndExplainUseFacetEvidence(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "owner", Name: "repo"}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
+		RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1,
+		State: "open", Title: "plain title", Body: "plain body", SourceUpdatedAt: time.Unix(1, 0).UTC(),
+	}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commentsAt := time.Unix(2, 0).UTC()
+	if err := svc.corpus.ApplyFacetObservationSet(ctx, repo.ID, &thread.ID, FacetIssueComments, commentsAt, []corpus.FacetObservationInput{{
+		SourceUpdatedAt: commentsAt,
+		Payload:         `[{"Body":"rare discussion evidence"}]`,
+		SearchText:      "alice rare discussion evidence",
+	}}, true, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	reader := svc.MCPReader()
+	search, err := reader.Search(ctx, mcpserver.SearchInput{Owner: "owner", Repo: "repo", Kind: "issue", Query: "rare evidence", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(search.Matches) != 1 || search.Matches[0].MatchSource != FacetIssueComments || !strings.Contains(search.Matches[0].MatchExcerpt, "rare") || search.Matches[0].MatchUpdatedAt != commentsAt.Format(time.RFC3339) {
+		t.Fatalf("MCP facet search = %+v", search)
+	}
+	explanation, err := reader.ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+		Owner: "owner", Repo: "repo", Kind: "issue", Number: 1, Query: "rare evidence", Limit: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explanation.Score != 1 || !strings.Contains(explanation.Snippet, "rare") || explanation.SourceRevision != commentsAt.Format(time.RFC3339) {
+		t.Fatalf("MCP facet explanation = %+v", explanation)
+	}
+	found := false
+	for _, field := range explanation.MatchedFields {
+		if field == FacetIssueComments {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("MCP facet matched fields = %v", explanation.MatchedFields)
 	}
 }
 

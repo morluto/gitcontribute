@@ -12,6 +12,9 @@ import (
 type FacetObservationInput struct {
 	SourceUpdatedAt time.Time
 	Payload         string
+	// SearchText is optional product-selected untrusted text. Callers collapse
+	// transport pages into one semantic search document.
+	SearchText string
 }
 
 // ApplyFacetObservationSet records a complete ordered set of facet observations
@@ -102,7 +105,7 @@ func (c *Corpus) applyFacetObservationSet(ctx context.Context, repoID int64, thr
 	}
 
 	for _, p := range pages {
-		if _, err := c.applyFacetObservationTx(ctx, tx, repoID, threadID, facet, p.SourceUpdatedAt, p.Payload, now); err != nil {
+		if _, err := c.applyFacetObservationTx(ctx, tx, repoID, threadID, facet, p.SourceUpdatedAt, p.Payload, p.SearchText, now); err != nil {
 			return false, err
 		}
 	}
@@ -121,7 +124,7 @@ func (c *Corpus) applyFacetObservationSet(ctx context.Context, repoID int64, thr
 	return true, nil
 }
 
-func (c *Corpus) applyFacetObservationTx(ctx context.Context, tx *sql.Tx, repoID int64, threadID *int64, facet string, sourceUpdatedAt time.Time, payload string, observedAt int64) (*FacetObservation, error) {
+func (c *Corpus) applyFacetObservationTx(ctx context.Context, tx *sql.Tx, repoID int64, threadID *int64, facet string, sourceUpdatedAt time.Time, payload, searchText string, observedAt int64) (*FacetObservation, error) {
 	seq, err := c.nextSequence(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -135,9 +138,9 @@ func (c *Corpus) applyFacetObservationTx(ctx context.Context, tx *sql.Tx, repoID
 	srcSec := encodeTime(sourceUpdatedAt)
 
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO facet_observations (repository_id, thread_id, facet, source_updated_at, observation_sequence, payload, observed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, repoID, tid, facet, srcSec, seq, payload, observedAt)
+		INSERT INTO facet_observations (repository_id, thread_id, facet, source_updated_at, observation_sequence, payload, search_text, observed_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`, repoID, tid, facet, srcSec, seq, payload, searchText, observedAt)
 	if err != nil {
 		return nil, fmt.Errorf("insert facet observation: %w", err)
 	}

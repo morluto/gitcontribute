@@ -148,6 +148,9 @@ type ThreadOutput struct {
 	MergedAt          string   `json:"merged_at,omitempty"`
 	Merged            *bool    `json:"merged,omitempty"`
 	UpdatedAt         string   `json:"updated_at,omitempty"`
+	MatchSource       string   `json:"match_source,omitempty"`
+	MatchExcerpt      string   `json:"match_excerpt,omitempty"`
+	MatchUpdatedAt    string   `json:"match_updated_at,omitempty"`
 }
 
 // SearchOutput contains one page of offline thread matches.

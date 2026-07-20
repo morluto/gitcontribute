@@ -246,9 +246,16 @@ environment allowlist, timeout, output bound, and result.
 
 ## Search and analysis
 
-Search uses the local SQLite corpus and FTS indexes. Cursors encode their query
-and scope so they cannot be reused for a different search. Ordering always has
-a deterministic tie-breaker.
+Search uses the local SQLite corpus and FTS indexes. Thread search indexes
+titles and bodies plus product-selected fields from complete hydrated issue
+comments, pull-request reviews, review comments, and opt-in timeline events.
+The searchable facet projection is replaced in the same transaction as its
+observations; a failed, cancelled, incomplete, or stale refresh cannot expose a
+partial search document. Transport pages are collapsed into one semantic facet
+document, and matches report the source facet plus a bounded excerpt. Untrusted
+discussion remains searchable data and cannot grant capabilities. Cursors
+encode their query and scope so they cannot be reused for a different search.
+Ordering always has a deterministic tie-breaker.
 
 Scores are explanations, not opaque relevance claims. They are derived from
 stored matches, freshness, coverage, and optional lens weights. Lens ranking

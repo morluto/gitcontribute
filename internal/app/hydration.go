@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
@@ -271,7 +273,11 @@ func (f *facetRunner) hydrateIssueTimeline() (HydratedFacet, error) {
 		if err != nil {
 			return HydratedFacet{}, fmt.Errorf("marshal issue timeline: %w", err)
 		}
-		pageObservations = append(pageObservations, corpus.FacetObservationInput{SourceUpdatedAt: pageUpdatedAt, Payload: string(payload)})
+		pageObservations = append(pageObservations, corpus.FacetObservationInput{
+			SourceUpdatedAt: pageUpdatedAt,
+			Payload:         string(payload),
+			SearchText:      issueTimelineSearchText(res.Items),
+		})
 		events = append(events, res.Items...)
 		total += len(res.Items)
 		if pageUpdatedAt.After(sourceUpdatedAt) {
@@ -289,6 +295,7 @@ func (f *facetRunner) hydrateIssueTimeline() (HydratedFacet, error) {
 		}
 		return HydratedFacet{Facet: FacetIssueTimeline, Count: total, Pages: pages, Complete: false}, nil
 	}
+	collapseFacetSearchText(pageObservations)
 	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetIssueTimeline, sourceUpdatedAt, pageObservations, true, f.runID); err != nil {
 		return HydratedFacet{}, err
 	}
@@ -401,6 +408,7 @@ func (f *facetRunner) hydrateIssueComments() (HydratedFacet, error) {
 		pageObservations = append(pageObservations, corpus.FacetObservationInput{
 			SourceUpdatedAt: pageUpdated,
 			Payload:         string(payload),
+			SearchText:      issueCommentsSearchText(res.Items),
 		})
 		total += len(res.Items)
 
@@ -420,6 +428,7 @@ func (f *facetRunner) hydrateIssueComments() (HydratedFacet, error) {
 		}
 		return HydratedFacet{Facet: FacetIssueComments, Count: total, Pages: pages, Complete: false}, nil
 	}
+	collapseFacetSearchText(pageObservations)
 	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetIssueComments, sourceUpdatedAt, pageObservations, true, f.runID); err != nil {
 		return HydratedFacet{}, err
 	}
@@ -521,6 +530,7 @@ func (f *facetRunner) hydratePullRequestReviews() (HydratedFacet, error) {
 		pageObservations = append(pageObservations, corpus.FacetObservationInput{
 			SourceUpdatedAt: pageUpdated,
 			Payload:         string(payload),
+			SearchText:      pullRequestReviewsSearchText(res.Items),
 		})
 		total += len(res.Items)
 
@@ -540,6 +550,7 @@ func (f *facetRunner) hydratePullRequestReviews() (HydratedFacet, error) {
 		}
 		return HydratedFacet{Facet: FacetPRReviews, Count: total, Pages: pages, Complete: false}, nil
 	}
+	collapseFacetSearchText(pageObservations)
 	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetPRReviews, sourceUpdatedAt, pageObservations, true, f.runID); err != nil {
 		return HydratedFacet{}, err
 	}
@@ -582,6 +593,7 @@ func (f *facetRunner) hydratePullRequestReviewComments() (HydratedFacet, error) 
 		pageObservations = append(pageObservations, corpus.FacetObservationInput{
 			SourceUpdatedAt: pageUpdated,
 			Payload:         string(payload),
+			SearchText:      reviewCommentsSearchText(res.Items),
 		})
 		total += len(res.Items)
 
@@ -601,6 +613,7 @@ func (f *facetRunner) hydratePullRequestReviewComments() (HydratedFacet, error) 
 		}
 		return HydratedFacet{Facet: FacetPRReviewComments, Count: total, Pages: pages, Complete: false}, nil
 	}
+	collapseFacetSearchText(pageObservations)
 	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetPRReviewComments, sourceUpdatedAt, pageObservations, true, f.runID); err != nil {
 		return HydratedFacet{}, err
 	}
@@ -616,6 +629,69 @@ func latestFromIssueComments(items []github.IssueComment) time.Time {
 		}
 	}
 	return latest
+}
+
+func issueCommentsSearchText(items []github.IssueComment) string {
+	lines := make([]string, 0, len(items))
+	for _, item := range items {
+		lines = appendSearchLine(lines, item.Author, item.Body)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func pullRequestReviewsSearchText(items []github.Review) string {
+	lines := make([]string, 0, len(items))
+	for _, item := range items {
+		lines = appendSearchLine(lines, item.Author, item.State, item.Body)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func reviewCommentsSearchText(items []github.ReviewComment) string {
+	lines := make([]string, 0, len(items))
+	for _, item := range items {
+		lines = appendSearchLine(lines, item.Author, item.Path, item.Body)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func issueTimelineSearchText(items []github.IssueTimelineEvent) string {
+	lines := make([]string, 0, len(items))
+	for _, item := range items {
+		fields := []string{item.Event, item.Actor, item.CommitID, item.SourceOwner, item.SourceRepository}
+		if item.SourceNumber > 0 {
+			fields = append(fields, strconv.Itoa(item.SourceNumber))
+			if item.SourceIsPullRequest {
+				fields = append(fields, "pull request")
+			} else {
+				fields = append(fields, "issue")
+			}
+		}
+		lines = appendSearchLine(lines, fields...)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func appendSearchLine(lines []string, fields ...string) []string {
+	line := strings.TrimSpace(strings.Join(fields, " "))
+	if line == "" {
+		return lines
+	}
+	return append(lines, line)
+}
+
+func collapseFacetSearchText(pages []corpus.FacetObservationInput) {
+	if len(pages) == 0 {
+		return
+	}
+	texts := make([]string, 0, len(pages))
+	for i := range pages {
+		if pages[i].SearchText != "" {
+			texts = append(texts, pages[i].SearchText)
+		}
+		pages[i].SearchText = ""
+	}
+	pages[0].SearchText = strings.Join(texts, "\n")
 }
 
 func latestFromReviews(items []github.Review) time.Time {

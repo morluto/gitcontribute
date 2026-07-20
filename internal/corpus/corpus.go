@@ -19,7 +19,7 @@ var migrationsFS embed.FS
 
 // Corpus is a durable, product-owned SQLite archive for GitHub repositories
 // and threads. It stores immutable observations and separately maintained
-// current projections, runs, coverage facts, and an FTS5 thread index.
+// current projections, runs, coverage facts, and FTS5 search indexes.
 type Corpus struct {
 	db *sql.DB
 }
