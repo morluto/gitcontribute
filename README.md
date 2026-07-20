@@ -442,18 +442,19 @@ gitcontribute seeds owner/repo --json
 ```
 
 `radar` is a strict offline corpus read. It ranks a bounded population of the
-newest stored open issues and separates objective eligibility from the numeric
-score. Every candidate reports positive signals, risks, blockers, confidence,
-linked open PRs, evidence coverage, and unknowns. Missing comment coverage is
-reported as unknown and does not lower the score; hydrate comments explicitly
-when you want that evidence:
+newest stored open issues and separates the numeric score from four explicit
+eligibility states: `ready_to_code`, `needs_diagnosis`, `needs_coordination`,
+and `blocked`. Every candidate reports positive signals, risks, blockers,
+confidence, linked open PRs, evidence coverage, and unknowns. An explicit sync
+ingests a fixed, bounded set of conventional CONTRIBUTING and AI-policy files;
+hydrate comments when you want maintainer-direction and recent-claim evidence:
 
 ```sh
 gitcontribute archive hydrate owner/repo#42 --with issue_comments
 gitcontribute radar owner/repo --json
 ```
 
-Radar scores carry a version (`radar.v1`) so saved JSON remains auditable when
+Radar scores carry a version (`radar.v2`) so saved JSON remains auditable when
 ranking semantics evolve. It never syncs, hydrates, executes repository code,
 or writes to GitHub.
 

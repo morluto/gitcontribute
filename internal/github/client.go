@@ -42,6 +42,12 @@ type IssueTimelineReader interface {
 	ListIssueTimeline(context.Context, string, string, int, PageOptions) (ListResult[IssueTimelineEvent], error)
 }
 
+// RepositoryFileReader is the optional exact-file capability used to ingest a
+// small, fixed set of contribution-policy documents during explicit syncs.
+type RepositoryFileReader interface {
+	GetRepositoryFile(ctx context.Context, owner, name, path string) (RepositoryFile, RateInfo, error)
+}
+
 // RepositorySearcher is the optional GitHub Search capability used by broad
 // discovery. Keeping it separate lets archive-only readers stay small.
 type RepositorySearcher interface {
@@ -154,6 +160,24 @@ func (c *Client) GetRepository(ctx context.Context, owner, name string) (Reposit
 		return Repository{}, RateInfo{}, classifyError(err)
 	}
 	return convertRepository(repo), rateInfo(resp.Rate), nil
+}
+
+// GetRepositoryFile reads one text file from the repository's default branch.
+func (c *Client) GetRepositoryFile(ctx context.Context, owner, name, path string) (RepositoryFile, RateInfo, error) {
+	file, _, resp, err := c.gh.Repositories.GetContents(ctx, owner, name, path, nil)
+	if err != nil {
+		return RepositoryFile{}, responseRateInfo(resp), classifyError(err)
+	}
+	if file == nil {
+		return RepositoryFile{}, responseRateInfo(resp), &NotFoundError{Resource: path}
+	}
+	content, err := file.GetContent()
+	if err != nil {
+		return RepositoryFile{}, responseRateInfo(resp), fmt.Errorf("decode repository file %q: %w", path, err)
+	}
+	return RepositoryFile{
+		Path: file.GetPath(), SHA: file.GetSHA(), HTMLURL: file.GetHTMLURL(), Content: content,
+	}, responseRateInfo(resp), nil
 }
 
 // ListIssueTimeline reads one REST timeline page without exposing go-github
@@ -402,6 +426,13 @@ func rateInfo(r gh.Rate) RateInfo {
 		Reset:     r.Reset.Time,
 		Resource:  r.Resource,
 	}
+}
+
+func responseRateInfo(resp *gh.Response) RateInfo {
+	if resp == nil {
+		return RateInfo{}
+	}
+	return rateInfo(resp.Rate)
 }
 
 func pageInfo(resp *gh.Response) PageInfo {

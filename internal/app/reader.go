@@ -164,9 +164,12 @@ func (r *corpusReader) ReadContributionGuidance(ctx context.Context, ref domain.
 	if repo == nil {
 		return "", nil, fmt.Errorf("%w: %s", errRepositoryNotFound, ref)
 	}
-	// Contribution guidance files are not fetched in the first vertical slice,
-	// so no source reference is claimed here.
-	return "", nil, nil
+	documents, err := readContributionGuidanceDocuments(ctx, c, repo.ID)
+	if err != nil {
+		return "", nil, err
+	}
+	guidance, refs := renderContributionGuidance(documents)
+	return guidance, refs, nil
 }
 
 type threadCounts struct {

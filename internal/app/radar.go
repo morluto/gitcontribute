@@ -3,10 +3,12 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/clustering"
@@ -69,6 +71,17 @@ func (s *Service) ContributionRadar(ctx context.Context, opts cli.RadarOptions) 
 	if err != nil {
 		return nil, fmt.Errorf("list repository coverage: %w", err)
 	}
+	storedGuidance, err := readContributionGuidanceDocuments(ctx, c, stored.ID)
+	if err != nil {
+		return nil, fmt.Errorf("read contribution guidance: %w", err)
+	}
+	guidance := make([]radar.GuidanceDocument, 0, len(storedGuidance))
+	for _, document := range storedGuidance {
+		guidance = append(guidance, radar.GuidanceDocument{
+			Path: document.File.Path, Content: document.File.Content, URL: document.File.HTMLURL,
+		})
+	}
+	evaluationTime := s.now()
 
 	snapshots := make([]radar.IssueSnapshot, 0, len(issues))
 	for _, issue := range issues {
@@ -79,7 +92,7 @@ func (s *Service) ContributionRadar(ctx context.Context, opts cli.RadarOptions) 
 		if err != nil {
 			return nil, fmt.Errorf("list coverage for issue #%d: %w", issue.Number, err)
 		}
-		maintainerResponse, replyURL, err := radarMaintainerResponse(ctx, c, stored.ID, issue.ID)
+		discussion, err := radarDiscussionSummary(ctx, c, stored.ID, issue.ID, evaluationTime)
 		if err != nil {
 			return nil, fmt.Errorf("read comments for issue #%d: %w", issue.Number, err)
 		}
@@ -94,8 +107,7 @@ func (s *Service) ContributionRadar(ctx context.Context, opts cli.RadarOptions) 
 			SourceUpdated:      issue.SourceUpdatedAt,
 			URL:                fmt.Sprintf("https://github.com/%s/issues/%d", ref, issue.Number),
 			Coverage:           radarCoverage(coverage, "thread"),
-			MaintainerResponse: maintainerResponse,
-			MaintainerReplyURL: replyURL,
+			Discussion:         discussion,
 			LinkedPullRequests: linkedByIssue[issue.Number],
 			DuplicateCluster:   duplicateByIssue[issue.Number],
 		})
@@ -106,10 +118,11 @@ func (s *Service) ContributionRadar(ctx context.Context, opts cli.RadarOptions) 
 		Archived:       stored.Archived,
 		SourceUpdated:  stored.SourceUpdatedAt,
 		Coverage:       radarCoverage(repositoryCoverage, "repository"),
-		GuidanceStatus: "unknown",
+		GuidanceStatus: radarGuidanceStatus(repositoryCoverage, len(guidance)),
+		Guidance:       guidance,
 	}, snapshots, radar.Options{
 		Limit:                       opts.Limit,
-		Now:                         s.now(),
+		Now:                         evaluationTime,
 		TotalOpenIssues:             totalOpenIssues,
 		PopulationCapped:            totalOpenIssues > len(issues),
 		LinkedPullRequestScanCapped: totalOpenPullRequests > len(openPullRequests),
@@ -127,24 +140,41 @@ func radarCoverage(items []corpus.Coverage, scope string) []radar.Coverage {
 	return out
 }
 
-func radarMaintainerResponse(ctx context.Context, c *corpus.Corpus, repoID, threadID int64) (bool, string, error) {
-	observations, err := c.ListFacetObservations(ctx, repoID, &threadID, FacetIssueComments)
+func radarDiscussionSummary(ctx context.Context, c *corpus.Corpus, repoID, threadID int64, now time.Time) (radar.DiscussionSummary, error) {
+	observations, capped, err := c.ListFacetObservationsBounded(ctx, repoID, &threadID, FacetIssueComments, maxHydrationPages)
 	if err != nil {
-		return false, "", err
+		return radar.DiscussionSummary{}, err
 	}
+	if capped {
+		return radar.DiscussionSummary{}, errors.New("stored issue comments exceed the hydration page bound")
+	}
+	out := []radar.DiscussionComment{}
 	for _, observation := range observations {
 		var comments []github.IssueComment
 		if err := json.Unmarshal([]byte(observation.Payload), &comments); err != nil {
-			return false, "", fmt.Errorf("decode observation %d: %w", observation.ID, err)
+			return radar.DiscussionSummary{}, fmt.Errorf("decode observation %d: %w", observation.ID, err)
 		}
 		for _, comment := range comments {
-			switch strings.ToUpper(comment.AuthorAssociation) {
-			case "OWNER", "MEMBER", "COLLABORATOR":
-				return true, comment.HTMLURL, nil
-			}
+			out = append(out, radar.DiscussionComment{
+				Author: comment.Author, AuthorAssociation: comment.AuthorAssociation, Body: comment.Body,
+				URL: comment.HTMLURL, CreatedAt: comment.CreatedAt,
+			})
 		}
 	}
-	return false, "", nil
+	return radar.SummarizeDiscussion(out, now), nil
+}
+
+func radarGuidanceStatus(coverage []corpus.Coverage, documentCount int) string {
+	for _, item := range coverage {
+		if item.Facet != FacetContributionGuidance || !item.Complete {
+			continue
+		}
+		if documentCount == 0 {
+			return "missing"
+		}
+		return "available"
+	}
+	return "unknown"
 }
 
 func radarPullRequestLinks(ref domain.RepoRef, pullRequests []corpus.Thread) map[int][]radar.LinkedPullRequest {

@@ -37,7 +37,8 @@ func (r *MCPReader) SyncRepositoryMetadata(ctx context.Context, in mcpserver.Syn
 	return queuedJobReference(id, "sync_repository_metadata", "repository metadata sync job started"), nil
 }
 
-// SyncThreads submits a durable bounded GitHub read for thread headers only.
+// SyncThreads submits a durable bounded GitHub read for repository metadata,
+// fixed contribution-policy paths, and thread headers.
 func (r *MCPReader) SyncThreads(ctx context.Context, in mcpserver.SyncThreadsInput) (mcpserver.JobReference, error) {
 	if in.Selection != "repositories" && in.Selection != "threads" {
 		return mcpserver.JobReference{}, errors.New("selection must be repositories or threads")

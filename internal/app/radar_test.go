@@ -126,7 +126,7 @@ func assertContributionRadarEvidence(t *testing.T, report *radar.Report, now tim
 	if starter.Eligibility != radar.EligibilityBlocked || !radarSignal(starter.Blockers, "active_implementation") {
 		t.Fatalf("starter blocker = %+v", starter)
 	}
-	if !radarSignal(starter.PositiveSignals, "maintainer_response") || starter.Confidence != "high" {
+	if !radarSignal(starter.PositiveSignals, "maintainer_response") || starter.Confidence != "medium" {
 		t.Fatalf("starter evidence = %+v", starter)
 	}
 	if len(starter.LinkedPullRequests) != 1 || !starter.LinkedPullRequests[0].Closing {
@@ -140,10 +140,10 @@ func assertContributionRadarEvidence(t *testing.T, report *radar.Report, now tim
 	}
 
 	assigned := radarCandidate(report, 2)
-	if assigned == nil || assigned.Eligibility != radar.EligibilityUnknown || !radarSignal(assigned.Risks, "assigned") {
+	if assigned == nil || assigned.Eligibility != radar.EligibilityNeedsCoordination || !radarSignal(assigned.Risks, "assigned") {
 		t.Fatalf("assigned candidate = %+v", assigned)
 	}
-	if len(assigned.Unknowns) != 1 || assigned.Unknowns[0].Code != "comments_not_hydrated" {
+	if len(assigned.Unknowns) != 2 || assigned.Unknowns[0].Code != "comments_not_hydrated" || assigned.Unknowns[1].Code != "contribution_guidance_unknown" {
 		t.Fatalf("assigned unknowns = %+v", assigned.Unknowns)
 	}
 }

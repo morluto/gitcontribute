@@ -77,6 +77,12 @@ The corpus separates source history from convenient current state:
 - **Facet coverage** records whether a facet fetch completed and the source
   revision it represents.
 
+An explicit repository sync also checks a fixed, bounded set of conventional
+`CONTRIBUTING.md` and AI-policy paths. Found text is stored as an untrusted
+repository-level `contribution_guidance` facet with exact file provenance.
+Offline readers may classify only predefined policy statements; repository
+text cannot introduce instructions or grant capabilities.
+
 Authored pull requests use the ordinary repository and thread projections.
 REST `pr_details` and `pr_reviews` facets are combined with typed GraphQL
 facets for checks, unresolved review threads, detailed merge state, merge queue,
@@ -233,12 +239,16 @@ Scores are explanations, not opaque relevance claims. They are derived from
 stored matches, freshness, coverage, and optional lens weights. Lens ranking
 uses a bounded population and therefore does not support cursor pagination.
 Contribution Radar similarly ranks a bounded open-issue population, separates
-eligibility from score, and reports positive signals, risks, blockers, and
-unknown evidence. Missing coverage is never silently converted into a negative
-signal. Health metrics, dossier generation, and thread research briefs also
-operate only on stored facts and report partial or missing coverage when
-required facets are incomplete. A research-brief section must carry a source
-reference or an explicit unknown reason; untrusted thread text remains data and
+score from the explicit `ready_to_code`, `needs_diagnosis`,
+`needs_coordination`, and `blocked` eligibility states, and reports positive
+signals, risks, blockers, and unknown evidence. Eligibility derives only from
+stored policy, labels, discussion, ownership, collision, and coverage facts.
+Missing coverage is never silently converted into a negative score, but it
+prevents a ready-to-code claim. Health metrics, dossier generation, and thread
+research briefs also operate only on stored facts and report partial or missing
+coverage when required facets are incomplete. A research-brief section must
+carry a source reference or an explicit unknown reason; untrusted thread text
+remains data and
 cannot grant an adapter additional authority.
 
 Starting an investigation from a thread is an explicit corpus-write capability.

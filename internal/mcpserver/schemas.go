@@ -175,7 +175,7 @@ var outputPropertyDescriptions = map[string]string{
 	"rank":                      "One-based position in the returned ranking.",
 	"ref":                       "Stable repository or thread reference.",
 	"url":                       "Canonical source URL for the record.",
-	"eligibility":               "Objective candidate eligibility: eligible, unknown, or blocked.",
+	"eligibility":               "Candidate action state: ready_to_code, needs_diagnosis, needs_coordination, or blocked.",
 	"positive_signals":          "Stored facts that increased the candidate score.",
 	"risks":                     "Stored facts that indicate contribution risk.",
 	"blockers":                  "Stored facts that objectively block the contribution.",
