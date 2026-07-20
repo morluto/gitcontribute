@@ -350,6 +350,8 @@ gitcontribute configure --output-format json
 Authentication sources are `none`, `env`, `gh-cli`, and `keyring`. Tokens are
 resolved at runtime and are never stored in the corpus or logs. Use
 `gitcontribute status`, `metadata`, and `doctor` to inspect the local setup.
+`metadata` reports the schema of an existing corpus through a read-only check;
+it does not create the database or apply migrations when invoked by itself.
 Use `gitcontribute doctor --strict` in automation when unhealthy required
 checks should produce a non-zero exit status. Write contention is reported as
 an optional availability warning rather than database corruption.

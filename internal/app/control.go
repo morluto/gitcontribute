@@ -14,6 +14,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
+	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/github"
 	clientsetup "github.com/morluto/gitcontribute/internal/setup"
 )
@@ -21,7 +22,7 @@ import (
 const databaseIntegrityTimeout = 2 * time.Second
 
 // Metadata reports deterministic application and local capability metadata.
-// It neither opens the corpus nor performs network access.
+// It performs no network access and never creates or migrates the corpus.
 func (s *Service) Metadata(ctx context.Context) (*cli.MetadataResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -43,6 +44,15 @@ func (s *Service) Metadata(ctx context.Context) (*cli.MetadataResult, error) {
 		schemaVersion, err = c.SchemaVersion(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("read corpus schema version: %w", err)
+		}
+	} else {
+		var exists bool
+		schemaVersion, exists, err = corpus.InspectSchemaVersion(ctx, cfg.Database)
+		if err != nil {
+			return nil, fmt.Errorf("read corpus schema version: %w", err)
+		}
+		if !exists {
+			schemaVersion = 0
 		}
 	}
 
