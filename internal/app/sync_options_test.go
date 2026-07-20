@@ -139,6 +139,9 @@ func TestSyncWithOptionsDoesNotHydratePullRequestDetails(t *testing.T) {
 	if err != nil || pr == nil {
 		t.Fatalf("stored PR = %+v, %v", pr, err)
 	}
+	if pr.MergedKnown {
+		t.Fatalf("header-only PR unexpectedly has known merge state: %+v", pr)
+	}
 	coverage, err := c.GetCoverage(context.Background(), repo.ID, &pr.ID, FacetPRDetails)
 	if err != nil || coverage != nil {
 		t.Fatalf("implicit PR details coverage = %+v, %v", coverage, err)
@@ -178,7 +181,7 @@ func TestSyncWithOptionsPreservesPreviouslyObservedPullRequestMergeState(t *test
 		t.Fatal(err)
 	}
 	pr, err = c.GetThread(ctx, repo.ID, "pull_request", 2)
-	if err != nil || pr == nil || !pr.Merged || pr.MergedAt.IsZero() {
+	if err != nil || pr == nil || !pr.MergedKnown || !pr.Merged || pr.MergedAt.IsZero() {
 		t.Fatalf("merge state after header sync = %+v, %v", pr, err)
 	}
 }

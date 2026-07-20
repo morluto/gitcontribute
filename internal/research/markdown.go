@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -55,7 +56,11 @@ func writeCurrentState(b *strings.Builder, section CurrentStateSection) {
 	if section.StateReason != "" {
 		fmt.Fprintf(b, "- **State reason:** %s\n", inline(section.StateReason))
 	}
-	fmt.Fprintf(b, "- **Draft / locked / merged:** %t / %t / %t\n", section.Draft, section.Locked, section.Merged)
+	merged := "unknown"
+	if section.Merged != nil {
+		merged = strconv.FormatBool(*section.Merged)
+	}
+	fmt.Fprintf(b, "- **Draft / locked / merged:** %t / %t / %s\n", section.Draft, section.Locked, merged)
 	writeStringList(b, "Labels", section.Labels)
 	if section.Milestone != "" {
 		fmt.Fprintf(b, "- **Milestone:** %s\n", inline(section.Milestone))

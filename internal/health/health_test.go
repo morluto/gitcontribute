@@ -137,6 +137,18 @@ func TestComputeHealthMetrics(t *testing.T) {
 		SourceCreatedAt: now.Add(-8 * 24 * time.Hour),
 		SourceUpdatedAt: now.Add(-2 * 24 * time.Hour),
 		ClosedAt:        now.Add(-2 * 24 * time.Hour),
+		MergedKnown:     true,
+	}, "NONE")
+
+	_ = upsertThread(t, ctx, c, repo.ID, corpus.Thread{
+		Kind:            corpus.ThreadKindPullRequest,
+		Number:          14,
+		State:           "closed",
+		Title:           "header-only closed pr",
+		Author:          "grace",
+		SourceCreatedAt: now.Add(-7 * 24 * time.Hour),
+		SourceUpdatedAt: now.Add(-time.Hour),
+		ClosedAt:        now.Add(-time.Hour),
 	}, "NONE")
 
 	// Facets for response times and staleness.
@@ -168,15 +180,21 @@ func TestComputeHealthMetrics(t *testing.T) {
 	if report.Issues.Open != 1 || report.Issues.Closed != 1 || report.Issues.SampleSize != 2 {
 		t.Fatalf("issue metrics = %+v, want open=1 closed=1", report.Issues)
 	}
-	if report.PullRequests.Open != 2 || report.PullRequests.Merged != 1 || report.PullRequests.ClosedUnmerged != 1 || report.PullRequests.SampleSize != 4 {
+	if report.PullRequests.Open != 2 || report.PullRequests.Merged != 1 || report.PullRequests.ClosedUnmerged != 1 || report.PullRequests.ClosedUnknownMerge != 1 || report.PullRequests.SampleSize != 5 {
 		t.Fatalf("pr metrics = %+v", report.PullRequests)
 	}
 
-	if report.External.External != 3 || report.External.Known != 4 || report.External.Open != 2 || report.External.ClosedUnmerged != 1 || report.External.Merged != 0 {
+	if report.External.External != 4 || report.External.Known != 5 || report.External.Open != 2 || report.External.ClosedUnmerged != 1 || report.External.ClosedUnknownMerge != 1 || report.External.Merged != 0 {
 		t.Fatalf("external metrics = %+v", report.External)
 	}
 	if report.External.MergeRate != 0 {
 		t.Fatalf("external merge rate = %v, want 0", report.External.MergeRate)
+	}
+	if report.PullRequests.Coverage != "partial (some closed pull requests lack an observed merge state)" || report.External.Coverage != "partial (some closed PRs lack an observed merge state)" {
+		t.Fatalf("merge-state coverage not surfaced: pull_requests=%q external=%q", report.PullRequests.Coverage, report.External.Coverage)
+	}
+	if report.Issues.Coverage != "complete" {
+		t.Fatalf("PR merge-state gap leaked into issue coverage: %q", report.Issues.Coverage)
 	}
 
 	if report.Congestion.OpenPRs != 2 || report.Congestion.SampleSize != 2 {

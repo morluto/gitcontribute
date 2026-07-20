@@ -89,6 +89,15 @@ request budget; batch sync plans conservative per-repository allocations in
 stable input order before starting workers. Generated network remediation
 commands always carry the applicable explicit page or request bounds.
 
+The issue-list endpoint used by thread-header sync does not expose pull-request
+merge state. A header-only closed pull request therefore stores merge state as
+unknown, not false. Explicit `pr_details` hydration makes the value known, and
+later header refreshes cannot erase that observation. Offline filters for
+`merged=true` or `merged=false`, dossier outcome groups, precedent/seed
+classification, portfolio attention, and health merge rates include only
+explicitly observed outcomes. Unknown closed outcomes are surfaced separately;
+MCP thread output omits the nullable `merged` field until it is known.
+
 Authored pull requests use the ordinary repository and thread projections.
 REST `pr_details` and `pr_reviews` facets are combined with typed GraphQL
 facets for checks, unresolved review threads, detailed merge state, merge queue,

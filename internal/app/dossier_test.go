@@ -84,8 +84,22 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 		SourceUpdatedAt: base.Add(3 * time.Hour),
 		ClosedAt:        base.Add(1 * time.Hour),
 		Merged:          false,
+		MergedKnown:     true,
 	}, prPayload(0, 0, 0)); err != nil {
 		t.Fatalf("upsert closed pr: %v", err)
+	}
+
+	if _, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
+		RepositoryID:    repo.ID,
+		Kind:            corpus.ThreadKindPullRequest,
+		Number:          8,
+		State:           "closed",
+		Title:           "header-only closed pull request",
+		SourceCreatedAt: base,
+		SourceUpdatedAt: base.Add(2 * time.Hour),
+		ClosedAt:        base.Add(time.Hour),
+	}, `{}`); err != nil {
+		t.Fatalf("upsert unknown-merge pr: %v", err)
 	}
 
 	if _, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
@@ -115,6 +129,9 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 	}
 	if len(d.RecentMergedPullRequests) != 1 || d.RecentMergedPullRequests[0].Number != 10 {
 		t.Fatalf("unexpected merged PRs: %+v", d.RecentMergedPullRequests)
+	}
+	if d.ClosedPullRequestUnknownCount != 1 || len(d.RecentClosedUnknownPullRequests) != 1 || d.RecentClosedUnknownPullRequests[0].Number != 8 {
+		t.Fatalf("unexpected unknown-merge PRs: count=%d recent=%+v", d.ClosedPullRequestUnknownCount, d.RecentClosedUnknownPullRequests)
 	}
 
 	got, err := svc.GetRepositoryDossier(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
@@ -194,8 +211,15 @@ func TestExtractSeeds(t *testing.T) {
 		SourceUpdatedAt: base.Add(3 * time.Hour),
 		ClosedAt:        base.Add(1 * time.Hour),
 		Merged:          false,
+		MergedKnown:     true,
 	}, prPayload(0, 0, 0)); err != nil {
 		t.Fatalf("upsert closed pr: %v", err)
+	}
+	if _, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
+		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 3,
+		State: "closed", Title: "header-only closed PR", SourceCreatedAt: base, SourceUpdatedAt: base.Add(2 * time.Hour),
+	}, `{}`); err != nil {
+		t.Fatalf("upsert unknown-merge pr: %v", err)
 	}
 
 	if _, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{

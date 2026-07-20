@@ -56,6 +56,7 @@ type Thread struct {
 	ClosedAt            time.Time
 	MergedAt            time.Time
 	Merged              bool
+	MergedKnown         bool
 	SourceCreatedAt     time.Time
 	SourceUpdatedAt     time.Time
 	ObservationSequence int64

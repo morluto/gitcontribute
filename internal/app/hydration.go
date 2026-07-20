@@ -443,9 +443,45 @@ func (f *facetRunner) hydratePullRequestDetails() (HydratedFacet, error) {
 	}
 
 	pages := []corpus.FacetObservationInput{{SourceUpdatedAt: updatedAt, Payload: string(payload)}}
-	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetPRDetails, updatedAt, pages, true, f.runID); err != nil {
+	applied, err := f.c.ApplyFacetObservationSetIfNewer(f.ctx, f.repoID, &f.threadID, FacetPRDetails, updatedAt, pages, true, f.runID)
+	if err != nil {
 		return HydratedFacet{}, err
 	}
+	if !applied {
+		return HydratedFacet{Facet: FacetPRDetails, Count: 1, Pages: 1, Complete: true}, nil
+	}
+	projection := *f.thread
+	projection.State = pr.State
+	projection.Title = pr.Title
+	projection.Body = pr.Body
+	projection.Draft = pr.Draft
+	projection.Locked = pr.Locked
+	projection.Author = pr.Author
+	projection.AuthorAssociation = pr.AuthorAssociation
+	projection.Labels = append([]string(nil), pr.Labels...)
+	projection.Assignees = append([]string(nil), pr.Assignees...)
+	projection.Milestone = pr.Milestone
+	projection.Merged = pr.Merged
+	projection.MergedKnown = true
+	projection.SourceUpdatedAt = updatedAt
+	if !pr.CreatedAt.IsZero() {
+		projection.SourceCreatedAt = pr.CreatedAt
+	}
+	if pr.ClosedAt != nil {
+		projection.ClosedAt = *pr.ClosedAt
+	} else {
+		projection.ClosedAt = time.Time{}
+	}
+	if pr.MergedAt != nil {
+		projection.MergedAt = *pr.MergedAt
+	} else {
+		projection.MergedAt = time.Time{}
+	}
+	stored, err := f.c.UpsertThread(f.ctx, projection, string(payload))
+	if err != nil {
+		return HydratedFacet{}, fmt.Errorf("project pr details: %w", err)
+	}
+	*f.thread = *stored
 
 	return HydratedFacet{Facet: FacetPRDetails, Count: 1, Pages: 1, Complete: true}, nil
 }

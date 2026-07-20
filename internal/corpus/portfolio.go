@@ -24,7 +24,7 @@ func (c *Corpus) ListPullRequestPortfolio(ctx context.Context, author, state str
 	query := `
 		SELECT r.owner, r.name,
 		       t.id, t.repository_id, t.kind, t.number, t.state, t.state_reason, t.title, t.body, t.author, t.author_association, t.labels, t.assignees, t.draft, t.locked, t.milestone,
-		       t.source_created_at, t.source_updated_at, t.observation_sequence, t.created_at, t.updated_at, t.closed_at, t.merged_at, t.merged
+		       t.source_created_at, t.source_updated_at, t.observation_sequence, t.created_at, t.updated_at, t.closed_at, t.merged_at, t.merged, t.merged_known
 		FROM threads t
 		JOIN repositories r ON r.id = t.repository_id
 		WHERE t.kind = ?`
@@ -56,12 +56,12 @@ func (c *Corpus) ListPullRequestPortfolio(ctx context.Context, author, state str
 		var body, authorValue, labels, assignees, stateReason, authorAssociation, milestone sql.NullString
 		var sourceCreated, sourceUpdated, created, updated int64
 		var closed, mergedAt sql.NullInt64
-		var merged, draft, locked int
+		var merged, mergedKnown, draft, locked int
 		if err := rows.Scan(
 			&item.Owner, &item.Repo,
 			&item.Thread.ID, &item.Thread.RepositoryID, &item.Thread.Kind, &item.Thread.Number, &item.Thread.State, &stateReason,
 			&item.Thread.Title, &body, &authorValue, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone,
-			&sourceCreated, &sourceUpdated, &item.Thread.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged,
+			&sourceCreated, &sourceUpdated, &item.Thread.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged, &mergedKnown,
 		); err != nil {
 			return nil, fmt.Errorf("scan pull request portfolio: %w", err)
 		}
@@ -81,6 +81,7 @@ func (c *Corpus) ListPullRequestPortfolio(ctx context.Context, author, state str
 		item.Thread.ClosedAt = scanTime(closed.Int64)
 		item.Thread.MergedAt = scanTime(mergedAt.Int64)
 		item.Thread.Merged = merged != 0
+		item.Thread.MergedKnown = mergedKnown != 0
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {

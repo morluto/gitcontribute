@@ -82,7 +82,7 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 
 	sql := `
 		SELECT rank, t.id, t.repository_id, t.kind, t.number, t.state, t.state_reason, t.title, t.body, t.author, t.author_association, t.labels, t.assignees, t.draft, t.locked, t.milestone,
-		       t.source_created_at, t.source_updated_at, t.observation_sequence, t.created_at, t.updated_at, t.closed_at, t.merged_at, t.merged
+		       t.source_created_at, t.source_updated_at, t.observation_sequence, t.created_at, t.updated_at, t.closed_at, t.merged_at, t.merged, t.merged_known
 		FROM threads_fts
 		JOIN threads t ON t.id = threads_fts.rowid
 		WHERE threads_fts MATCH ?`
@@ -187,7 +187,7 @@ func appendThreadMetadataFilters(query string, args []any, filter SearchFilter) 
 		if *filter.Merged {
 			merged = 1
 		}
-		query += ` AND t.merged = ?`
+		query += ` AND t.merged = ? AND t.merged_known = 1`
 		args = append(args, merged)
 	}
 	if filter.Author != "" {
@@ -237,8 +237,8 @@ func scanThreadsWithRank(rows *sql.Rows) ([]Thread, error) {
 		var body, author, labels, assignees, stateReason, authorAssociation, milestone sql.NullString
 		var sourceCreated, src, created, updated int64
 		var closed, mergedAt sql.NullInt64
-		var merged, draft, locked int
-		if err := rows.Scan(&rank, &t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &stateReason, &t.Title, &body, &author, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged); err != nil {
+		var merged, mergedKnown, draft, locked int
+		if err := rows.Scan(&rank, &t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &stateReason, &t.Title, &body, &author, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged, &mergedKnown); err != nil {
 			return nil, err
 		}
 		t.Body = body.String
@@ -257,6 +257,7 @@ func scanThreadsWithRank(rows *sql.Rows) ([]Thread, error) {
 		t.ClosedAt = scanTime(closed.Int64)
 		t.MergedAt = scanTime(mergedAt.Int64)
 		t.Merged = merged != 0
+		t.MergedKnown = mergedKnown != 0
 		t.Rank = rank
 		out = append(out, t)
 	}

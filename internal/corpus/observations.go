@@ -361,6 +361,9 @@ func (c *Corpus) ApplyThreadObservation(ctx context.Context, repoID int64, kind 
 // UpsertThread records a thread observation and updates the projection with
 // all fields when the source ordering is newer.
 func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string) (*Thread, error) {
+	if thread.Kind == ThreadKindPullRequest && (thread.Merged || !thread.MergedAt.IsZero()) {
+		thread.MergedKnown = true
+	}
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin thread upsert: %w", err)
@@ -393,9 +396,9 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 	`, thread.RepositoryID, thread.Kind, thread.Number).Scan(&threadID)
 	if errors.Is(err, sql.ErrNoRows) {
 		res, err := tx.ExecContext(ctx, `
-			INSERT INTO threads (repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone, source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, thread.RepositoryID, thread.Kind, thread.Number, thread.State, thread.StateReason, thread.Title, thread.Body, thread.Author, thread.AuthorAssociation, joinLabels(thread.Labels), joinLabels(assignees), boolToInt(thread.Draft), boolToInt(thread.Locked), thread.Milestone, sourceCreated, srcSec, seq, now, now, closed, merged, boolToInt(thread.Merged))
+			INSERT INTO threads (repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone, source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged, merged_known)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, thread.RepositoryID, thread.Kind, thread.Number, thread.State, thread.StateReason, thread.Title, thread.Body, thread.Author, thread.AuthorAssociation, joinLabels(thread.Labels), joinLabels(assignees), boolToInt(thread.Draft), boolToInt(thread.Locked), thread.Milestone, sourceCreated, srcSec, seq, now, now, closed, merged, boolToInt(thread.Merged), boolToInt(thread.MergedKnown))
 		if err != nil {
 			return nil, fmt.Errorf("insert thread: %w", err)
 		}
@@ -424,11 +427,12 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 			    observation_sequence = ?,
 			    updated_at = ?,
 			    closed_at = ?,
-			    merged_at = ?,
-			    merged = ?
+			    merged_at = CASE WHEN ? = 1 THEN ? ELSE merged_at END,
+			    merged = CASE WHEN ? = 1 THEN ? ELSE merged END,
+			    merged_known = CASE WHEN ? = 1 THEN 1 ELSE merged_known END
 			WHERE id = ?
 			  AND (source_updated_at < ? OR (source_updated_at = ? AND observation_sequence < ?))
-		`, thread.State, thread.StateReason, thread.Title, thread.Body, thread.Author, thread.AuthorAssociation, joinLabels(thread.Labels), joinLabels(assignees), boolToInt(thread.Draft), boolToInt(thread.Locked), thread.Milestone, sourceCreated, srcSec, seq, now, closed, merged, boolToInt(thread.Merged), threadID, srcSec, srcSec, seq); err != nil {
+		`, thread.State, thread.StateReason, thread.Title, thread.Body, thread.Author, thread.AuthorAssociation, joinLabels(thread.Labels), joinLabels(assignees), boolToInt(thread.Draft), boolToInt(thread.Locked), thread.Milestone, sourceCreated, srcSec, seq, now, closed, boolToInt(thread.MergedKnown), merged, boolToInt(thread.MergedKnown), boolToInt(thread.Merged), boolToInt(thread.MergedKnown), threadID, srcSec, srcSec, seq); err != nil {
 			return nil, fmt.Errorf("update thread projection: %w", err)
 		}
 	}
@@ -453,13 +457,13 @@ func (c *Corpus) GetThreadByNumber(ctx context.Context, repoID int64, number int
 	var body, author, labels, assignees, stateReason, authorAssociation, milestone sql.NullString
 	var sourceCreated, src, created, updated int64
 	var closed, mergedAt sql.NullInt64
-	var merged, draft, locked int
+	var merged, mergedKnown, draft, locked int
 	err := c.db.QueryRowContext(ctx, `
 		SELECT id, repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone,
-		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged
+		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged, merged_known
 		FROM threads
 		WHERE repository_id = ? AND number = ?
-	`, repoID, number).Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &stateReason, &t.Title, &body, &author, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged)
+	`, repoID, number).Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &stateReason, &t.Title, &body, &author, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged, &mergedKnown)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -482,6 +486,7 @@ func (c *Corpus) GetThreadByNumber(ctx context.Context, repoID int64, number int
 	t.ClosedAt = scanTime(closed.Int64)
 	t.MergedAt = scanTime(mergedAt.Int64)
 	t.Merged = merged != 0
+	t.MergedKnown = mergedKnown != 0
 	return &t, nil
 }
 
@@ -492,13 +497,13 @@ func (c *Corpus) GetThread(ctx context.Context, repoID int64, kind string, numbe
 	var body, author, labels, assignees, stateReason, authorAssociation, milestone sql.NullString
 	var sourceCreated, src, created, updated int64
 	var closed, mergedAt sql.NullInt64
-	var merged, draft, locked int
+	var merged, mergedKnown, draft, locked int
 	err := c.db.QueryRowContext(ctx, `
 		SELECT id, repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone,
-		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged
+		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged, merged_known
 		FROM threads
 		WHERE repository_id = ? AND kind = ? AND number = ?
-	`, repoID, kind, number).Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &stateReason, &t.Title, &body, &author, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged)
+	`, repoID, kind, number).Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &stateReason, &t.Title, &body, &author, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged, &mergedKnown)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -521,6 +526,7 @@ func (c *Corpus) GetThread(ctx context.Context, repoID int64, kind string, numbe
 	t.ClosedAt = scanTime(closed.Int64)
 	t.MergedAt = scanTime(mergedAt.Int64)
 	t.Merged = merged != 0
+	t.MergedKnown = mergedKnown != 0
 	return &t, nil
 }
 
@@ -535,7 +541,7 @@ func (c *Corpus) ListThreads(ctx context.Context, repoID int64, kind string, lim
 	}
 	sql := `
 		SELECT id, repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone,
-		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged
+		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged, merged_known
 		FROM threads
 		WHERE repository_id = ?`
 	args := []any{repoID}
@@ -569,7 +575,7 @@ func (c *Corpus) ListThreadsFiltered(ctx context.Context, repoID int64, kind, st
 	}
 	sql := `
 		SELECT id, repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone,
-		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged
+		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged, merged_known
 		FROM threads
 		WHERE repository_id = ?`
 	args := []any{repoID}
@@ -697,8 +703,8 @@ func scanThreads(rows *sql.Rows) ([]Thread, error) {
 		var body, author, labels, assignees, stateReason, authorAssociation, milestone sql.NullString
 		var sourceCreated, src, created, updated int64
 		var closed, mergedAt sql.NullInt64
-		var merged, draft, locked int
-		if err := rows.Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &stateReason, &t.Title, &body, &author, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged); err != nil {
+		var merged, mergedKnown, draft, locked int
+		if err := rows.Scan(&t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &stateReason, &t.Title, &body, &author, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged, &mergedKnown); err != nil {
 			return nil, err
 		}
 		t.Body = body.String
@@ -717,6 +723,7 @@ func scanThreads(rows *sql.Rows) ([]Thread, error) {
 		t.ClosedAt = scanTime(closed.Int64)
 		t.MergedAt = scanTime(mergedAt.Int64)
 		t.Merged = merged != 0
+		t.MergedKnown = mergedKnown != 0
 		out = append(out, t)
 	}
 	if err := rows.Err(); err != nil {

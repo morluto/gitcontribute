@@ -96,11 +96,14 @@ type Comment struct {
 
 // PullRequestDetails contains PR-specific facets.
 type PullRequestDetails struct {
-	HeadRef        string
-	BaseRef        string
-	HeadSHA        string
-	BaseSHA        string
-	Merged         bool
+	HeadRef string
+	BaseRef string
+	HeadSHA string
+	BaseSHA string
+	Merged  bool
+	// MergedKnown distinguishes an observed false value from an unavailable
+	// merge state, such as a pull request stored from header-only sync.
+	MergedKnown    bool
 	MergedAt       time.Time
 	MergeCommitSHA string
 	Additions      int
@@ -129,6 +132,7 @@ type Repository struct {
 	OpenPullRequestCount           int
 	MergedPullRequestCount         int
 	ClosedUnmergedPullRequestCount int
+	ClosedPullRequestUnknownCount  int
 	CreatedAt                      time.Time
 	UpdatedAt                      time.Time
 }
@@ -242,9 +246,11 @@ type Dossier struct {
 	OpenPullRequestCount             int
 	MergedPullRequestCount           int
 	ClosedUnmergedPullRequestCount   int
+	ClosedPullRequestUnknownCount    int
 	RecentMergedPullRequests         []DossierThread
 	RecentOpenPullRequests           []DossierThread
 	RecentClosedUnmergedPullRequests []DossierThread
+	RecentClosedUnknownPullRequests  []DossierThread
 	RecentIssues                     []DossierThread
 }
 
@@ -254,6 +260,7 @@ type DossierSectionMetadata struct {
 	MergedPRCount         int      `json:"merged_pr_count"`
 	OpenPRCount           int      `json:"open_pr_count"`
 	ClosedUnmergedPRCount int      `json:"closed_unmerged_pr_count"`
+	ClosedUnknownPRCount  int      `json:"closed_unknown_pr_count"`
 	IssueCount            int      `json:"issue_count"`
 	SourceClasses         []string `json:"source_classes"`
 }

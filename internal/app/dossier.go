@@ -76,8 +76,9 @@ func (s *Service) BuildRepositoryDossier(ctx context.Context, repo cli.RepoRef) 
 		MergedPRCount:         len(d.RecentMergedPullRequests),
 		OpenPRCount:           len(d.RecentOpenPullRequests),
 		ClosedUnmergedPRCount: len(d.RecentClosedUnmergedPullRequests),
+		ClosedUnknownPRCount:  len(d.RecentClosedUnknownPullRequests),
 		IssueCount:            len(d.RecentIssues),
-		SourceClasses:         []string{"merged_pr", "open_pr", "closed_unmerged_pr", "issue"},
+		SourceClasses:         []string{"merged_pr", "open_pr", "closed_unmerged_pr", "closed_unknown_merge_pr", "issue"},
 	}
 	sectionMetaJSON, err := json.Marshal(sectionMeta)
 	if err != nil {
@@ -218,7 +219,7 @@ func classForThread(t corpus.Thread) (domain.SeedSourceClass, bool) {
 		if t.Merged {
 			return domain.SeedSourceClassMergedPR, true
 		}
-		if t.State == "closed" {
+		if t.State == "closed" && t.MergedKnown {
 			return domain.SeedSourceClassClosedUnmergedPR, true
 		}
 		return "", false

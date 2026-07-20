@@ -235,3 +235,49 @@ func TestUpsertThreadPersistsMetadataAndDeterministicAssignees(t *testing.T) {
 		t.Fatalf("get thread by number mismatch (-want +got):\n%s", diff)
 	}
 }
+
+func TestUpsertThreadUnknownMergeStateDoesNotEraseKnownState(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatalf("apply repository: %v", err)
+	}
+
+	at := time.Unix(100, 0).UTC()
+	mergedAt := at.Add(-time.Hour)
+	known, err := c.UpsertThread(ctx, Thread{
+		RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 1,
+		State: "closed", Title: "details", Merged: true, MergedKnown: true,
+		MergedAt: mergedAt, SourceUpdatedAt: at,
+	}, `{"Merged":true}`)
+	if err != nil {
+		t.Fatalf("upsert known details: %v", err)
+	}
+	if !known.MergedKnown || !known.Merged {
+		t.Fatalf("known projection = %+v", known)
+	}
+
+	got, err := c.UpsertThread(ctx, Thread{
+		RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 1,
+		State: "closed", Title: "newer header", SourceUpdatedAt: at.Add(time.Second),
+	}, `{"Kind":"pull_request"}`)
+	if err != nil {
+		t.Fatalf("upsert header-only observation: %v", err)
+	}
+	if got.Title != "newer header" || !got.MergedKnown || !got.Merged || !got.MergedAt.Equal(mergedAt) {
+		t.Fatalf("header sync erased explicit merge state: %+v", got)
+	}
+
+	got, err = c.UpsertThread(ctx, Thread{
+		RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 1,
+		State: "closed", Title: "observed false", MergedKnown: true,
+		SourceUpdatedAt: at.Add(2 * time.Second),
+	}, `{"Merged":false}`)
+	if err != nil {
+		t.Fatalf("upsert observed false details: %v", err)
+	}
+	if !got.MergedKnown || got.Merged || !got.MergedAt.IsZero() {
+		t.Fatalf("explicit false did not replace projection: %+v", got)
+	}
+}

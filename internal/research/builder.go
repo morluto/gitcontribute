@@ -168,10 +168,14 @@ func assembleBrief(in assemblyInput) *Brief {
 }
 
 func buildCurrentState(t ThreadSnapshot) CurrentStateSection {
+	var merged *bool
+	if t.MergedKnown {
+		merged = &t.Merged
+	}
 	return CurrentStateSection{
 		SectionMeta: sourceMeta([]SourceRef{t.Source}, ""),
 		State:       t.State, StateReason: t.StateReason, Draft: t.Draft, Locked: t.Locked,
-		Merged: t.Merged, Labels: cleanSorted(t.Labels), Milestone: t.Milestone,
+		Merged: merged, Labels: cleanSorted(t.Labels), Milestone: t.Milestone,
 		CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt, ClosedAt: t.ClosedAt, MergedAt: t.MergedAt,
 	}
 }

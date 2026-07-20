@@ -51,15 +51,12 @@ func (b *Builder) Build(ctx context.Context, ref domain.RepoRef) (*domain.Dossie
 		return nil, fmt.Errorf("read contribution guidance: %w", err)
 	}
 
-	merged, mergedRefs, err := b.readPullRequests(ctx, ref, domain.ClosedState, boolPtr(true))
+	closed, closedRefs, err := b.readPullRequests(ctx, ref, domain.ClosedState, nil)
 	if err != nil {
 		return nil, err
 	}
+	merged, closedUnmerged, unknownMerge := partitionClosedPullRequests(closed)
 	open, openRefs, err := b.readPullRequests(ctx, ref, domain.OpenState, nil)
-	if err != nil {
-		return nil, err
-	}
-	closedUnmerged, closedRefs, err := b.readPullRequests(ctx, ref, domain.ClosedState, boolPtr(false))
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +65,7 @@ func (b *Builder) Build(ctx context.Context, ref domain.RepoRef) (*domain.Dossie
 		return nil, err
 	}
 
-	refs := collectRefs(repoRefs, guideRefs, mergedRefs, openRefs, closedRefs, issueRefs)
+	refs := collectRefs(repoRefs, guideRefs, closedRefs, openRefs, issueRefs)
 
 	d := &domain.Dossier{
 		Repo:                             ref,
@@ -83,9 +80,11 @@ func (b *Builder) Build(ctx context.Context, ref domain.RepoRef) (*domain.Dossie
 		OpenPullRequestCount:             repo.OpenPullRequestCount,
 		MergedPullRequestCount:           repo.MergedPullRequestCount,
 		ClosedUnmergedPullRequestCount:   repo.ClosedUnmergedPullRequestCount,
+		ClosedPullRequestUnknownCount:    repo.ClosedPullRequestUnknownCount,
 		RecentMergedPullRequests:         toDossierThreads(merged, b.recentLimit),
 		RecentOpenPullRequests:           toDossierThreads(open, b.recentLimit),
 		RecentClosedUnmergedPullRequests: toDossierThreads(closedUnmerged, b.recentLimit),
+		RecentClosedUnknownPullRequests:  toDossierThreads(unknownMerge, b.recentLimit),
 		RecentIssues:                     toDossierThreads(issues, b.recentLimit),
 	}
 	return d, nil
@@ -123,7 +122,18 @@ func (b *Builder) readIssues(ctx context.Context, ref domain.RepoRef) ([]domain.
 	return threads, refs, nil
 }
 
-func boolPtr(v bool) *bool { return &v }
+func partitionClosedPullRequests(threads []domain.Thread) (merged, unmerged, unknown []domain.Thread) {
+	for _, thread := range threads {
+		if thread.PullRequest == nil || !thread.PullRequest.MergedKnown {
+			unknown = append(unknown, thread)
+		} else if thread.PullRequest.Merged {
+			merged = append(merged, thread)
+		} else {
+			unmerged = append(unmerged, thread)
+		}
+	}
+	return merged, unmerged, unknown
+}
 
 // toDossierThreads sorts threads deterministically and returns the first limit.
 // It copies the input so the Reader's returned slices are not mutated.

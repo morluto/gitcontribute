@@ -101,6 +101,36 @@ func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
 	}
 }
 
+func TestGetThreadsPreservesUnknownAndObservedFalseMergeState(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket"}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, thread := range []corpus.Thread{
+		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 1, State: "closed", Title: "unknown", SourceUpdatedAt: time.Unix(1, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "observed false", MergedKnown: true, SourceUpdatedAt: time.Unix(2, 0).UTC()},
+	} {
+		if _, err := svc.corpus.UpsertThread(ctx, thread, `{}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := (&MCPReader{svc}).GetThreads(ctx, mcpserver.GetThreadsInput{View: "compact", Threads: []mcpserver.ThreadRef{
+		{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 1},
+		{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 2},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Items[0].Value == nil || out.Items[0].Value.Merged != nil {
+		t.Fatalf("unknown merge output = %+v", out.Items[0])
+	}
+	if out.Items[1].Value == nil || out.Items[1].Value.Merged == nil || *out.Items[1].Value.Merged {
+		t.Fatalf("observed false merge output = %+v", out.Items[1])
+	}
+}
+
 func TestCancelJobsPreservesOrderAndIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	svc := newSearchTestService(t)
@@ -402,7 +432,11 @@ func TestPullRequestPortfolioClassifiesClosedUnmerged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 9, State: "closed", Title: "abandoned change", Author: "alice", SourceUpdatedAt: now}, `{}`)
+	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 9, State: "closed", Title: "abandoned change", Author: "alice", MergedKnown: true, SourceUpdatedAt: now}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknown, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 10, State: "closed", Title: "header only", Author: "alice", SourceUpdatedAt: now}, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,7 +444,14 @@ func TestPullRequestPortfolioClassifiesClosedUnmerged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.PullRequests) != 1 || out.PullRequests[0].Number != thread.Number || out.PullRequests[0].Attention != "closed_unmerged" {
+	if len(out.PullRequests) != 2 {
+		t.Fatalf("closed pull request classification = %+v", out.PullRequests)
+	}
+	byNumber := map[int]mcpserver.PullRequestPortfolioItem{}
+	for _, item := range out.PullRequests {
+		byNumber[item.Number] = item
+	}
+	if byNumber[thread.Number].Attention != "closed_unmerged" || byNumber[unknown.Number].Attention != "unknown" || !strings.Contains(byNumber[unknown.Number].Reasons[0], "merge state has not been observed") {
 		t.Fatalf("closed pull request classification = %+v", out.PullRequests)
 	}
 }
