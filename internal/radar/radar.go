@@ -18,7 +18,7 @@ const (
 	// DefaultLimit is the default number of returned candidates.
 	DefaultLimit = 20
 	// MaxLimit bounds one radar response.
-	MaxLimit  = 100
+	MaxLimit  = 500
 	baseScore = 40
 )
 

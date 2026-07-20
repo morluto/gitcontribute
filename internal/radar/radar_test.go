@@ -2,6 +2,7 @@ package radar
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -265,6 +266,27 @@ func TestRankRejectsUnsafeLimit(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatal("expected limit error")
+	}
+}
+
+func TestRankReturnsMaximumBoundedPopulation(t *testing.T) {
+	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
+	issues := make([]IssueSnapshot, MaxLimit)
+	for i := range issues {
+		issues[i] = IssueSnapshot{
+			Number: i + 1, State: "open", Title: fmt.Sprintf("Issue %d", i+1), SourceUpdated: now,
+		}
+	}
+	report, err := Rank(
+		RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}},
+		issues,
+		Options{Limit: MaxLimit, Now: now, TotalOpenIssues: MaxLimit},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Limit != MaxLimit || report.CandidatePopulation != MaxLimit || len(report.Candidates) != MaxLimit {
+		t.Fatalf("maximum report bounds = limit:%d population:%d returned:%d", report.Limit, report.CandidatePopulation, len(report.Candidates))
 	}
 }
 

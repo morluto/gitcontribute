@@ -55,12 +55,12 @@ func TestRadarRendersExplanations(t *testing.T) {
 func TestRadarJSONAndLimitValidation(t *testing.T) {
 	svc := &radarFakeService{fakeService: &fakeService{}, result: &radar.Report{Repo: "o/r", ScoreVersion: radar.ScoreVersion, Candidates: []radar.Candidate{}}}
 	c, stdout, _ := newTestCLI(svc, nil)
-	requireNoErr(t, c.Run(context.Background(), []string{"radar", "--repo", "o/r", "--limit", "5", "--json"}))
+	requireNoErr(t, c.Run(context.Background(), []string{"radar", "o/r", "--limit", "500", "--json"}))
 	var got radar.Report
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("invalid radar JSON: %v\n%s", err, stdout.String())
 	}
-	if got.Repo != "o/r" || svc.opts.Limit != 5 {
+	if got.Repo != "o/r" || svc.opts.Limit != radar.MaxLimit {
 		t.Fatalf("result=%+v opts=%+v", got, svc.opts)
 	}
 
@@ -75,8 +75,8 @@ func TestRadarJSONAndLimitValidation(t *testing.T) {
 	}
 	for _, args := range [][]string{
 		{"radar"},
-		{"radar", "o/r", "--repo", "x/y"},
-		{"radar", "o/r", "--repo", "o/r"},
+		{"radar", "--repo", "o/r"},
+		{"radar", "o/r", "--limit", "501"},
 	} {
 		if err := c.Run(context.Background(), args); err == nil {
 			t.Fatalf("expected usage error for %v", args)
