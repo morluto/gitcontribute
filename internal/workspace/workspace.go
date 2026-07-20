@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/morluto/gitcontribute/internal/gitremote"
 )
 
 var (
@@ -198,24 +200,10 @@ func validateName(name string) error {
 }
 
 func validateRemote(remote string) error {
-	remote = strings.TrimSpace(remote)
-	if remote == "" || strings.HasPrefix(remote, "-") || strings.ContainsAny(remote, "\x00\r\n") {
+	if err := gitremote.Validate(remote); err != nil {
 		return ErrInvalidRemote
 	}
-	if strings.Contains(remote, "::") {
-		return ErrInvalidRemote
-	}
-	if filepath.IsAbs(remote) || strings.HasPrefix(remote, "file://") ||
-		strings.HasPrefix(remote, "https://") || strings.HasPrefix(remote, "ssh://") {
-		return nil
-	}
-	if at := strings.IndexByte(remote, '@'); at > 0 {
-		hostPath := remote[at+1:]
-		if colon := strings.IndexByte(hostPath, ':'); colon > 0 && colon < len(hostPath)-1 {
-			return nil
-		}
-	}
-	return ErrInvalidRemote
+	return nil
 }
 
 func (m *Manager) git(ctx context.Context, dir string, args ...string) (string, error) {
