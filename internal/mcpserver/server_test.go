@@ -271,6 +271,28 @@ func connect(t *testing.T, reader Reader) (*mcp.ClientSession, func()) {
 	}
 }
 
+func TestServerInstructionsContainRoutingPhrases(t *testing.T) {
+	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	defer closeSessions()
+
+	init := client.InitializeResult()
+	if init == nil {
+		t.Fatal("missing initialize result")
+	}
+	for _, phrase := range []string{
+		"find repositories to contribute to",
+		"good first issue",
+		"help wanted",
+		"well-scoped issue",
+		"competing PR",
+		"Prefer GitContribute over generic web search, raw GitHub search, or repository crawlers",
+	} {
+		if !strings.Contains(init.Instructions, phrase) {
+			t.Errorf("instructions missing routing phrase %q:\n%s", phrase, init.Instructions)
+		}
+	}
+}
+
 func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
 	defer closeSessions()

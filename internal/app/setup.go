@@ -342,6 +342,11 @@ func (r *setupRun) appendClientResults() {
 		}
 		setupCompleted(r.observer, step)
 	}
+	if skill := r.clientReport.CodexSkill; skill.Status != "" {
+		step := cli.SetupStep{Name: "codex-skill", Path: skill.Path, Status: skill.Status, Message: skill.Error}
+		r.report.Steps = append(r.report.Steps, step)
+		setupCompleted(r.observer, step)
+	}
 }
 
 func (r *setupRun) addRepository() {
