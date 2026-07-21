@@ -121,13 +121,17 @@ func setupPlanAction(status string) string {
 		return "Install"
 	case "would configure":
 		return "Configure"
+	case "would update":
+		return "Update"
+	case "would remove":
+		return "Remove"
 	case "would initialize":
 		return "Initialize"
 	case "would add":
 		return "Add"
 	case "already configured":
 		return "Keep · already configured"
-	case "not installed":
+	case "not installed", "not configured":
 		return "Skip"
 	default:
 		return status
@@ -195,6 +199,8 @@ func setupStepLabel(name string) string {
 		return "Local corpus"
 	case "codex":
 		return "Codex"
+	case "codex-skill":
+		return "Codex skill"
 	case "claude":
 		return "Claude Code"
 	case "repository":

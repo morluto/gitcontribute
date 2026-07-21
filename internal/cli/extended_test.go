@@ -157,6 +157,23 @@ func TestWorkspaceCreateAndShow(t *testing.T) {
 	}
 }
 
+func TestWorkspaceCreateDefersDefaultsToService(t *testing.T) {
+	svc := &fakeExtendedService{
+		fakeService:     &fakeService{},
+		workspaceResult: &cli.WorkspaceResult{ID: "ws-1"},
+	}
+	c, _, _ := newTestCLI(svc, nil)
+
+	err := c.Run(context.Background(), []string{"workspace", "create", "inv-1"})
+	requireNoErr(t, err)
+	if !svc.createWorkspaceCalled || svc.lastWorkspaceInvestigation != "inv-1" {
+		t.Fatalf("workspace creation was not delegated: %+v", svc.lastCreateWorkspaceOpts)
+	}
+	if svc.lastCreateWorkspaceOpts != (cli.WorkspaceCreateOptions{}) {
+		t.Fatalf("CLI supplied application defaults: %+v", svc.lastCreateWorkspaceOpts)
+	}
+}
+
 func TestValidationDefineRunAndCompare(t *testing.T) {
 	svc := &fakeExtendedService{
 		fakeService: &fakeService{},

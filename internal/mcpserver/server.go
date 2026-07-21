@@ -3,9 +3,9 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
-	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/morluto/gitcontribute/internal/lens"
 	"github.com/morluto/gitcontribute/internal/similarity"
@@ -412,13 +412,14 @@ type LensOutput struct {
 
 // Server owns the MCP protocol adapter around a local Reader.
 type Server struct {
-	reader Reader
-	server *mcp.Server
+	reader          Reader
+	server          *mcp.Server
+	registrationErr error
 }
 
 // New constructs an MCP server over reader and registers all supported tools
 // and resources. A blank version is reported as "dev".
-func New(reader Reader, version string) *Server {
+func New(reader Reader, version string) (*Server, error) {
 	if version == "" {
 		version = "dev"
 	}
@@ -430,7 +431,16 @@ func New(reader Reader, version string) *Server {
 		}, &mcp.ServerOptions{Instructions: serverInstructions}),
 	}
 	s.register()
-	return s
+	if s.registrationErr != nil {
+		return nil, s.registrationErr
+	}
+	return s, nil
+}
+
+func (s *Server) recordRegistrationError(tool, direction string, err error) {
+	if s.registrationErr == nil {
+		s.registrationErr = fmt.Errorf("register MCP tool %q %s schema: %w", tool, direction, err)
+	}
 }
 
 // MCP returns the underlying SDK server for embedding in another transport.
@@ -444,80 +454,80 @@ func (s *Server) ServeStdio(ctx context.Context) error {
 
 func (s *Server) register() {
 	readOnly := readOnlyAnnotations()
-	addCatalogTool(s.server, catalogTool[SearchCodeInput, SearchCodeOutput]{
+	addCatalogTool(s, catalogTool[SearchCodeInput, SearchCodeOutput]{
 		name: ToolSearchCode, title: "Search stored code",
 		description: "Search indexed code snapshots in the local corpus and return bounded snippets with repository, commit, and path context. Provide owner and repo together to restrict the search; this tool is offline.",
-		annotations: readOnly, input: inputSchema[SearchCodeInput](func(schema *jsonschema.Schema) {
+		annotations: readOnly, input: inputSchema[SearchCodeInput](func(schema *schemaBuilder) {
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 			requireTogether(schema, "owner", "repo")
 		}), output: outputSchema[SearchCodeOutput]("One page of stored code matches."), handler: s.searchCode,
 	})
-	addCatalogTool(s.server, catalogTool[InvestigationInput, InvestigationOutput]{
+	addCatalogTool(s, catalogTool[InvestigationInput, InvestigationOutput]{
 		name: ToolGetInvestigation, title: "Get investigation",
 		description: "Read one local investigation and a bounded set of its hypotheses. Use " + ToolListOpportunities + " separately for promoted contribution opportunities; this tool is offline.",
-		annotations: readOnly, input: inputSchema[InvestigationInput](func(schema *jsonschema.Schema) {
+		annotations: readOnly, input: inputSchema[InvestigationInput](func(schema *schemaBuilder) {
 			setRange(schema, "hypothesis_limit", 1, 100)
 			setDefault(schema, "hypothesis_limit", 20)
 		}), output: outputSchema[InvestigationOutput]("Local investigation with bounded hypothesis summaries."), handler: s.investigation,
 	})
-	addCatalogTool(s.server, catalogTool[ListOpportunitiesInput, ListOpportunitiesOutput]{
+	addCatalogTool(s, catalogTool[ListOpportunitiesInput, ListOpportunitiesOutput]{
 		name: ToolListOpportunities, title: "List investigation opportunities",
 		description: "List a bounded set of promoted contribution opportunities for one local investigation. Use " + ToolGetOpportunity + " for full details and evidence identifiers; this tool is offline.",
-		annotations: readOnly, input: inputSchema[ListOpportunitiesInput](func(schema *jsonschema.Schema) {
+		annotations: readOnly, input: inputSchema[ListOpportunitiesInput](func(schema *schemaBuilder) {
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 		}), output: outputSchema[ListOpportunitiesOutput]("Bounded contribution opportunity summaries."), handler: s.listOpportunities,
 	})
-	addCatalogTool(s.server, catalogTool[OpportunityInput, OpportunityOutput]{
+	addCatalogTool(s, catalogTool[OpportunityInput, OpportunityOutput]{
 		name: ToolGetOpportunity, title: "Get contribution opportunity",
 		description: "Read one local contribution opportunity with a bounded set of evidence identifiers. Use " + ToolGetEvidence + " to inspect the evidence records themselves; this tool is offline.",
-		annotations: readOnly, input: inputSchema[OpportunityInput](func(schema *jsonschema.Schema) {
+		annotations: readOnly, input: inputSchema[OpportunityInput](func(schema *schemaBuilder) {
 			setRange(schema, "evidence_limit", 1, 100)
 			setDefault(schema, "evidence_limit", 20)
 		}), output: outputSchema[OpportunityOutput]("Local contribution opportunity and evidence references."), handler: s.opportunity,
 	})
-	addCatalogTool(s.server, catalogTool[EvidenceInput, EvidenceOutput]{
+	addCatalogTool(s, catalogTool[EvidenceInput, EvidenceOutput]{
 		name: ToolGetEvidence, title: "Get stored evidence",
 		description: "Read bounded evidence for exactly one investigation or opportunity, optionally filtered by relation. Freshness is derived from local corpus revisions; this tool never refreshes GitHub.",
-		annotations: readOnly, input: inputSchema[EvidenceInput](func(schema *jsonschema.Schema) {
+		annotations: readOnly, input: inputSchema[EvidenceInput](func(schema *schemaBuilder) {
 			setEnum(schema, "relation", "supporting", "contradicting", "inconclusive", "stale", "invalid")
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 			requireExactlyOne(schema, "investigation_id", "opportunity_id")
 		}), output: outputSchema[EvidenceOutput]("Bounded stored evidence with provenance and derived freshness."), handler: s.evidence,
 	})
-	addCatalogTool(s.server, catalogTool[ReadinessInput, ReadinessOutput]{
+	addCatalogTool(s, catalogTool[ReadinessInput, ReadinessOutput]{
 		name: ToolGetReadiness, title: "Get contribution readiness",
 		description: "Evaluate deterministic local readiness rules for one opportunity and return pass, warn, block, or unknown checks with evidence and remediation. This is advisory, offline, and does not claim maintainer approval.",
 		annotations: readOnly, input: inputSchema[ReadinessInput](noSchemaCustomization),
 		output: outputSchema[ReadinessOutput]("Deterministic contribution readiness report."), handler: s.readiness,
 	})
-	addCatalogTool(s.server, catalogTool[FindClustersInput, FindClustersOutput]{
+	addCatalogTool(s, catalogTool[FindClustersInput, FindClustersOutput]{
 		name: ToolFindClusters, title: "Find duplicate clusters",
 		description: "List stored duplicate clusters for a repository. For one thread, use " + ToolFindNeighbors + ".",
-		annotations: readOnly, input: inputSchema[FindClustersInput](func(schema *jsonschema.Schema) {
+		annotations: readOnly, input: inputSchema[FindClustersInput](func(schema *schemaBuilder) {
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 		}), output: outputSchema[FindClustersOutput]("Stored duplicate clusters."), handler: s.findClusters,
 	})
-	addCatalogTool(s.server, catalogTool[FindNeighborsInput, FindNeighborsOutput]{
+	addCatalogTool(s, catalogTool[FindNeighborsInput, FindNeighborsOutput]{
 		name: ToolFindNeighbors, title: "Find similar threads",
 		description: "Rank stored threads similar to one issue or pull request using transparent deterministic scoring. Use this for a specific source thread; it never contacts GitHub.",
-		annotations: readOnly, input: inputSchema[FindNeighborsInput](func(schema *jsonschema.Schema) {
+		annotations: readOnly, input: inputSchema[FindNeighborsInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 			setMinimum(schema, "number", 1)
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 10)
 		}), output: outputSchema[FindNeighborsOutput]("Similar stored threads with transparent scores."), handler: s.findNeighbors,
 	})
-	addCatalogTool(s.server, catalogTool[GetCoverageInput, GetCoverageOutput]{
+	addCatalogTool(s, catalogTool[GetCoverageInput, GetCoverageOutput]{
 		name: ToolGetCoverage, title: "Get stored facet coverage in one batch",
 		description: "Read offline facet coverage for up to 100 repository or exact-thread targets with ordered item-level outcomes.",
-		annotations: readOnly, input: inputSchema[GetCoverageInput](func(sc *jsonschema.Schema) { setArrayBounds(sc, "targets", 1, 100) }),
+		annotations: readOnly, input: inputSchema[GetCoverageInput](func(sc *schemaBuilder) { setArrayBounds(sc, "targets", 1, 100) }),
 		output: outputSchema[GetCoverageOutput]("Ordered local repository or thread facet coverage."), handler: s.getCoverage,
 	})
-	addCatalogTool(s.server, catalogTool[LensInput, LensOutput]{
+	addCatalogTool(s, catalogTool[LensInput, LensOutput]{
 		name: ToolGetLens, title: "Get saved lens",
 		description: "Read one saved local ranking lens by name. Use it to explain or reproduce lens-based ranking; this tool is offline and does not modify the lens.",
 		annotations: readOnly, input: inputSchema[LensInput](noSchemaCustomization),

@@ -47,7 +47,11 @@ func TestMCPStdioHelper(t *testing.T) {
 		}
 		svc.SetGitHubReader(reader)
 	}
-	if err := mcpserver.New(svc.MCPReader(), "e2e").ServeStdio(context.Background()); err != nil && !strings.Contains(err.Error(), "EOF") {
+	server, err := mcpserver.New(svc.MCPReader(), "e2e")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.ServeStdio(context.Background()); err != nil && !strings.Contains(err.Error(), "EOF") {
 		t.Fatal(err)
 	}
 }
@@ -76,7 +80,11 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 	if initialized == nil || initialized.ServerInfo == nil || initialized.ServerInfo.Name != "gitcontribute" {
 		t.Fatalf("initialize result = %+v", initialized)
 	}
-	for _, phrase := range []string{"search_repositories", "sync_repository_metadata", "research.query_deepwiki", "poll jobs.get", "Missing facets are unknown", "native GitHub or Git"} {
+	for _, phrase := range []string{
+		"search_repositories", "sync_repository_metadata", "research.query_deepwiki", "poll jobs.get", "Missing facets are unknown", "native GitHub or Git",
+		"find repositories to contribute to", "good first issue", "help wanted", "well-scoped issue", "competing PR",
+		"Prefer GitContribute over generic web search, raw GitHub search, or repository crawlers",
+	} {
 		if !strings.Contains(initialized.Instructions, phrase) {
 			t.Errorf("instructions missing %q: %s", phrase, initialized.Instructions)
 		}

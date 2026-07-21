@@ -208,6 +208,7 @@ func (s *Service) PrepareReviewReport(ctx context.Context, input PrepareReviewRe
 
 	var inv *investigation.Investigation
 	var opp *investigation.Opportunity
+	var opportunityEvidence []*evidence.Evidence
 	if input.OpportunityID != "" {
 		var err error
 		opp, inv, err = s.loadOpportunityAndInvestigation(ctx, input.OpportunityID)
@@ -218,11 +219,11 @@ func (s *Service) PrepareReviewReport(ctx context.Context, input PrepareReviewRe
 		report.CollisionStatus = string(opp.CollisionStatus)
 		report.Repo = cli.RepoRef{Owner: inv.Repo.Owner, Repo: inv.Repo.Repo}
 
-		evItems, err := s.evidenceForOpportunity(ctx, input.OpportunityID)
+		opportunityEvidence, err = s.evidenceForOpportunity(ctx, input.OpportunityID)
 		if err != nil {
 			return nil, err
 		}
-		report.EvidenceSummary = summarizeEvidence(evItems)
+		report.EvidenceSummary = summarizeEvidence(opportunityEvidence)
 
 		collisions, err := s.CheckOpportunityCollisions(ctx, input.OpportunityID, defaultCollisionLimit)
 		if err != nil {
@@ -256,8 +257,7 @@ func (s *Service) PrepareReviewReport(ctx context.Context, input PrepareReviewRe
 	if report.DiffMetadata != nil && len(report.DiffMetadata.ReviewOrder) > 0 {
 		report.SuggestedReviewOrder = report.DiffMetadata.ReviewOrder
 	} else if opp != nil {
-		evItems, _ := s.evidenceForOpportunity(ctx, opp.ID)
-		report.SuggestedReviewOrder = reviewOrderFromEvidence(evItems)
+		report.SuggestedReviewOrder = reviewOrderFromEvidence(opportunityEvidence)
 	}
 
 	return report, nil

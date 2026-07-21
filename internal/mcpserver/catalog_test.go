@@ -115,6 +115,7 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 	assertSchemaValue(t, tools[ToolSearchThreads].InputSchema, []string{"properties", "limit", "maximum"}, float64(100))
 	assertSchemaValue(t, tools[ToolHydrateThreads].InputSchema, []string{"properties", "max_pages", "default"}, float64(3))
 	assertSchemaValue(t, tools[ToolRankThreads].InputSchema, []string{"required"}, []any{"repositories"})
+	assertSchemaValue(t, tools[ToolCreateWorkspace].InputSchema, []string{"required"}, []any{"investigation_id"})
 	assertSchemaValue(t, tools[ToolRankThreads].OutputSchema, []string{"properties", "total", "type"}, "integer")
 	assertSchemaValue(t, tools[ToolRankThreads].OutputSchema, []string{"properties", "truncated", "type"}, "boolean")
 	assertSchemaValue(t, tools[ToolRunValidation].InputSchema, []string{"properties", "execute", "const"}, true)
@@ -130,6 +131,40 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 			t.Errorf("tool %q output schema has no root description", name)
 		}
 		assertPropertiesDescribed(t, name, output)
+	}
+}
+
+func TestSchemaCustomizationErrorsAreReturned(t *testing.T) {
+	tests := []struct {
+		name      string
+		customize func(*schemaBuilder)
+		want      string
+	}{
+		{name: "missing property", customize: func(schema *schemaBuilder) { setEnum(schema, "missing", "x") }, want: `property "missing" not found`},
+		{name: "non-array enum", customize: func(schema *schemaBuilder) { setArrayEnum(schema, "owner", "x") }, want: `array property "owner" has no items schema`},
+		{name: "invalid default", customize: func(schema *schemaBuilder) { setDefault(schema, "owner", func() {}) }, want: `marshal MCP schema default for "owner"`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			definition := inputSchema[RepoInput](tc.customize)
+			if definition.err == nil || !strings.Contains(definition.err.Error(), tc.want) {
+				t.Fatalf("schema error = %v, want %q", definition.err, tc.want)
+			}
+		})
+	}
+}
+
+func TestCatalogRegistrationReportsToolSchemaError(t *testing.T) {
+	server := &Server{}
+	addCatalogTool(server, catalogTool[RepoInput, RepositoryOutput]{
+		name: "broken.tool",
+		input: inputSchema[RepoInput](func(schema *schemaBuilder) {
+			setEnum(schema, "missing", "x")
+		}),
+		output: outputSchema[RepositoryOutput]("Repository."),
+	})
+	if server.registrationErr == nil || !strings.Contains(server.registrationErr.Error(), `register MCP tool "broken.tool" input schema`) {
+		t.Fatalf("registration error = %v", server.registrationErr)
 	}
 }
 

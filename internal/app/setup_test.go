@@ -12,6 +12,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
+	clientsetup "github.com/morluto/gitcontribute/internal/setup"
 )
 
 func TestSetupInitializesAndRegistersWithoutNetwork(t *testing.T) {
@@ -581,6 +582,46 @@ func TestSetupWithProgressReportsRealApplicationPhases(t *testing.T) {
 		if !found {
 			t.Fatalf("completed = %+v, missing %q", observer.completed, want)
 		}
+	}
+}
+
+func TestSetupInstallsAndReportsCodexSkill(t *testing.T) {
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"),
+		"XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+
+	report, err := svc.Setup(context.Background(), cli.SetupOptions{
+		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
+		Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.HasFailures() {
+		t.Fatalf("report = %+v", report)
+	}
+
+	skillPath := clientsetup.CodexSkillPath(home)
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Fatalf("codex skill not installed: %v", err)
+	}
+
+	found := false
+	for _, step := range report.Steps {
+		if step.Name == "codex-skill" && step.Status == "configured" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("codex-skill step missing from report: %+v", report.Steps)
 	}
 }
 
