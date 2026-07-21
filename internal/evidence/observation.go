@@ -2,6 +2,7 @@ package evidence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -40,35 +41,42 @@ func validateExpectedObservations(kind string, observations []ExpectedObservatio
 	}
 	for i := range observations {
 		observation := &observations[i]
-		if strings.TrimSpace(observation.Name) == "" || len(observation.Name) > maxObservationNameBytes {
-			return fmt.Errorf("%w: %s[%d] name is required and must be at most %d bytes", ErrInvalidObservation, kind, i, maxObservationNameBytes)
+		if err := validateExpectedObservation(observation); err != nil {
+			return fmt.Errorf("%w: %s[%d]: %w", ErrInvalidObservation, kind, i, err)
 		}
-		if observation.Source != ObservationStdout && observation.Source != ObservationStderr && observation.Source != ObservationArtifact {
-			return fmt.Errorf("%w: %s[%d] source must be stdout, stderr, or artifact", ErrInvalidObservation, kind, i)
+	}
+	return nil
+}
+
+func validateExpectedObservation(observation *ExpectedObservation) error {
+	if strings.TrimSpace(observation.Name) == "" || len(observation.Name) > maxObservationNameBytes {
+		return fmt.Errorf("name is required and must be at most %d bytes", maxObservationNameBytes)
+	}
+	if observation.Source != ObservationStdout && observation.Source != ObservationStderr && observation.Source != ObservationArtifact {
+		return errors.New("source must be stdout, stderr, or artifact")
+	}
+	if observation.Source == ObservationArtifact {
+		if err := validateArtifactPath(observation.Path); err != nil {
+			return fmt.Errorf("artifact path: %w", err)
 		}
-		if observation.Source == ObservationArtifact {
-			if err := validateArtifactPath(observation.Path); err != nil {
-				return fmt.Errorf("%w: %s[%d] artifact path: %v", ErrInvalidObservation, kind, i, err)
-			}
-		} else if observation.Path != "" {
-			return fmt.Errorf("%w: %s[%d] path is only valid for artifact observations", ErrInvalidObservation, kind, i)
-		}
-		if observation.Matcher != ObservationExact && observation.Matcher != ObservationRegexp {
-			return fmt.Errorf("%w: %s[%d] matcher must be exact or regexp", ErrInvalidObservation, kind, i)
-		}
-		if observation.Pattern == "" || len(observation.Pattern) > maxObservationPatternBytes {
-			return fmt.Errorf("%w: %s[%d] pattern is required and must be at most %d bytes", ErrInvalidObservation, kind, i, maxObservationPatternBytes)
-		}
-		if observation.Occurrence == "" {
-			observation.Occurrence = ObservationPresent
-		}
-		if observation.Occurrence != ObservationPresent && observation.Occurrence != ObservationAbsent {
-			return fmt.Errorf("%w: %s[%d] occurrence must be present or absent", ErrInvalidObservation, kind, i)
-		}
-		if observation.Matcher == ObservationRegexp {
-			if _, err := regexp.Compile(observation.Pattern); err != nil {
-				return fmt.Errorf("%w: %s[%d] regexp: %v", ErrInvalidObservation, kind, i, err)
-			}
+	} else if observation.Path != "" {
+		return errors.New("path is only valid for artifact observations")
+	}
+	if observation.Matcher != ObservationExact && observation.Matcher != ObservationRegexp {
+		return errors.New("matcher must be exact or regexp")
+	}
+	if observation.Pattern == "" || len(observation.Pattern) > maxObservationPatternBytes {
+		return fmt.Errorf("pattern is required and must be at most %d bytes", maxObservationPatternBytes)
+	}
+	if observation.Occurrence == "" {
+		observation.Occurrence = ObservationPresent
+	}
+	if observation.Occurrence != ObservationPresent && observation.Occurrence != ObservationAbsent {
+		return errors.New("occurrence must be present or absent")
+	}
+	if observation.Matcher == ObservationRegexp {
+		if _, err := regexp.Compile(observation.Pattern); err != nil {
+			return fmt.Errorf("regexp: %w", err)
 		}
 	}
 	return nil
@@ -125,14 +133,14 @@ func evaluateObservations(ctx context.Context, contract *ObservationContract, ki
 
 func validateArtifactPath(path string) error {
 	if path == "" {
-		return fmt.Errorf("path is required")
+		return errors.New("path is required")
 	}
 	if filepath.IsAbs(path) {
-		return fmt.Errorf("path must be relative")
+		return errors.New("path must be relative")
 	}
 	clean := filepath.Clean(path)
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("path must stay within the validation workspace")
+		return errors.New("path must stay within the validation workspace")
 	}
 	return nil
 }
@@ -167,19 +175,22 @@ func readObservationArtifact(workingDir, path string, maxBytes int64) (string, e
 	}
 	rel, err := filepath.Rel(root, target)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", fmt.Errorf("artifact path escapes validation workspace")
+		return "", errors.New("artifact path escapes validation workspace")
 	}
 	f, err := os.Open(target)
 	if err != nil {
 		return "", fmt.Errorf("open artifact: %w", err)
 	}
-	defer f.Close()
 	if maxBytes <= 0 {
 		maxBytes = defaultMaxOutputBytes
 	}
 	data, err := io.ReadAll(io.LimitReader(f, maxBytes+1))
+	closeErr := f.Close()
 	if err != nil {
 		return "", fmt.Errorf("read artifact: %w", err)
+	}
+	if closeErr != nil {
+		return "", fmt.Errorf("close artifact: %w", closeErr)
 	}
 	if int64(len(data)) > maxBytes {
 		return "", fmt.Errorf("artifact exceeds %d-byte observation bound", maxBytes)

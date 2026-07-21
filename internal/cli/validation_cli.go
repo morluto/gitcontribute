@@ -14,7 +14,9 @@ func (c *CLI) runValidation(ctx context.Context, command string, cmd *validation
 	}
 	switch command {
 	case "validation define":
-		fmt.Fprintf(c.stderr, "defining validation for investigation %s...\n", cmd.Define.InvestigationID)
+		if _, err := fmt.Fprintf(c.stderr, "defining validation for investigation %s...\n", cmd.Define.InvestigationID); err != nil {
+			return err
+		}
 		var observation *ValidationObservationContract
 		if strings.TrimSpace(cmd.Define.Observation) != "" {
 			observation = &ValidationObservationContract{}
@@ -48,7 +50,9 @@ func (c *CLI) runValidation(ctx context.Context, command string, cmd *validation
 		if !cmd.Run.Execute {
 			return NewCLIError(ExitUsage, fmt.Errorf("host execution requires --execute; command: %s (directory: %s)", visible, dir))
 		}
-		fmt.Fprintf(c.stderr, "executing in %s: %s\n", dir, visible)
+		if _, err := fmt.Fprintf(c.stderr, "executing in %s: %s\n", dir, visible); err != nil {
+			return err
+		}
 		result, err := service.RunValidation(ctx, cmd.Run.ID, RunValidationOptions{Kind: cmd.Run.Kind, Execute: true})
 		if err != nil {
 			return c.mapError(err)

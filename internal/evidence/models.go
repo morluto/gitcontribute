@@ -81,8 +81,11 @@ type Runner interface {
 type ObservationSource string
 
 const (
-	ObservationStdout   ObservationSource = "stdout"
-	ObservationStderr   ObservationSource = "stderr"
+	// ObservationStdout inspects captured standard output.
+	ObservationStdout ObservationSource = "stdout"
+	// ObservationStderr inspects captured standard error.
+	ObservationStderr ObservationSource = "stderr"
+	// ObservationArtifact inspects a declared workspace artifact.
 	ObservationArtifact ObservationSource = "artifact"
 )
 
@@ -90,7 +93,9 @@ const (
 type ObservationMatcher string
 
 const (
-	ObservationExact  ObservationMatcher = "exact"
+	// ObservationExact performs literal substring matching.
+	ObservationExact ObservationMatcher = "exact"
+	// ObservationRegexp performs regular-expression matching.
 	ObservationRegexp ObservationMatcher = "regexp"
 )
 
@@ -98,8 +103,10 @@ const (
 type ObservationOccurrence string
 
 const (
+	// ObservationPresent requires a match.
 	ObservationPresent ObservationOccurrence = "present"
-	ObservationAbsent  ObservationOccurrence = "absent"
+	// ObservationAbsent requires no match.
+	ObservationAbsent ObservationOccurrence = "absent"
 )
 
 // ExpectedObservation is one bounded assertion over captured output.
@@ -123,9 +130,12 @@ type ObservationContract struct {
 type ObservationStatus string
 
 const (
+	// ObservationNotEvaluated means no observation contract applied.
 	ObservationNotEvaluated ObservationStatus = "not_evaluated"
-	ObservationMatched      ObservationStatus = "matched"
-	ObservationMismatched   ObservationStatus = "mismatched"
+	// ObservationMatched means every expected observation matched.
+	ObservationMatched ObservationStatus = "matched"
+	// ObservationMismatched means at least one observation did not match.
+	ObservationMismatched ObservationStatus = "mismatched"
 )
 
 // ObservationResult records one assertion and a bounded matching excerpt.
