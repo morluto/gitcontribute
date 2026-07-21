@@ -1,3 +1,4 @@
+// Package buflimit provides bounded in-memory command output capture.
 package buflimit
 
 import (
@@ -43,8 +44,11 @@ func (b *Buffer) Write(p []byte) (int, error) {
 
 func (b *Buffer) String() string { return b.buf.String() }
 
+// Bytes returns the retained bytes.
 func (b *Buffer) Bytes() []byte { return b.buf.Bytes() }
 
+// Exceeded reports whether a write exceeded the configured limit.
 func (b *Buffer) Exceeded() bool { return b.exceeded }
 
+// Err returns the output-limit error recorded by Write, if any.
 func (b *Buffer) Err() error { return b.err }
