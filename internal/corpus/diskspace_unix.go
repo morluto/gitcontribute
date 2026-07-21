@@ -29,6 +29,6 @@ func freeDiskBytes(path string) (uint64, error) {
 	return blocks * blockSize, nil
 }
 
-func parseNonNegativeDiskValue[T ~int64 | ~uint64](value T) (uint64, error) {
+func parseNonNegativeDiskValue[T ~int | ~int32 | ~int64 | ~uint | ~uint32 | ~uint64](value T) (uint64, error) {
 	return strconv.ParseUint(fmt.Sprint(value), 10, 64)
 }
