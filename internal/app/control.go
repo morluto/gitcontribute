@@ -260,7 +260,7 @@ func (s *Service) doctor(ctx context.Context) (*cli.DoctorResult, error) {
 			if client == clientsetup.Codex {
 				present, _, skillErr := clientsetup.CodexSkillInstalled(home)
 				if skillErr == nil && !present {
-					skillErr = errors.New("Codex detected but GitContribute discovery skill is absent")
+					skillErr = errors.New("codex is detected but the GitContribute discovery skill is absent")
 				}
 				add("codex_skill", false, skillErr, "GitContribute Codex discovery skill is present")
 			}

@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -86,6 +85,7 @@ type Result struct {
 	Error  string `json:"error,omitempty"`
 }
 
+// CodexSkillResult reports the managed discovery-skill effect.
 type CodexSkillResult struct {
 	Path   string `json:"path,omitempty"`
 	Status string `json:"status"`
@@ -272,10 +272,12 @@ func configureClient(operation Operation, client Client, home string, launcher L
 	return result
 }
 
+// CodexSkillPath returns the managed discovery skill path for a home directory.
 func CodexSkillPath(home string) string {
 	return filepath.Join(home, ".codex", "skills", codexSkillDir, "SKILL.md")
 }
 
+// CodexSkillInstalled reports whether the managed discovery skill is current.
 func CodexSkillInstalled(home string) (bool, string, error) {
 	path := CodexSkillPath(home)
 	state, err := inspectCodexSkill(path)
@@ -298,8 +300,11 @@ func configureCodexSkill(home string, operation Operation, dryRun bool) CodexSki
 		if err := os.Remove(path); err != nil {
 			return CodexSkillResult{Path: path, Status: "failed", Error: err.Error()}
 		}
-		if err := os.Remove(filepath.Dir(path)); err != nil && !errors.Is(err, os.ErrNotExist) && !isDirectoryNotEmpty(err) {
-			return CodexSkillResult{Path: path, Status: "failed", Error: err.Error()}
+		if err := os.Remove(filepath.Dir(path)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			entries, readErr := os.ReadDir(filepath.Dir(path))
+			if readErr != nil || len(entries) == 0 {
+				return CodexSkillResult{Path: path, Status: "failed", Error: err.Error()}
+			}
 		}
 		return CodexSkillResult{Path: path, Status: "removed"}
 	}
@@ -328,6 +333,7 @@ func configureCodexSkill(home string, operation Operation, dryRun bool) CodexSki
 }
 
 func inspectCodexSkill(path string) (codexSkillState, error) {
+	// #nosec G304 -- path is the fixed managed skill path derived from the selected home.
 	content, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return codexSkillAbsent, nil
@@ -342,10 +348,6 @@ func inspectCodexSkill(path string) (codexSkillState, error) {
 		return codexSkillManagedStale, nil
 	}
 	return codexSkillUnmanaged, nil
-}
-
-func isDirectoryNotEmpty(err error) bool {
-	return errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST)
 }
 
 func editClaude(path string, operation Operation, launcher Launcher, dryRun bool) (string, error) {
