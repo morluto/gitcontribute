@@ -336,7 +336,7 @@ func restoreRegistrationSnapshots(snapshots []registrationSnapshot, activated La
 			restoreErrs = append(restoreErrs, fmt.Errorf("inspect activated registration permissions %s: %w", snapshot.path, err))
 			continue
 		}
-		if currentInfo.Mode().Perm() != 0o600 {
+		if !registrationModeMatchesActivation(currentInfo.Mode()) {
 			restoreErrs = append(restoreErrs, fmt.Errorf("preserve concurrently changed registration %s", snapshot.path))
 			continue
 		}
@@ -351,7 +351,7 @@ func restoreRegistrationSnapshots(snapshots []registrationSnapshot, activated La
 			restoreErrs = append(restoreErrs, fmt.Errorf("restore %s: %w", snapshot.path, restoreErr))
 			continue
 		}
-		if err := os.Chmod(snapshot.path, snapshot.mode); err != nil {
+		if err := restoreRegistrationMode(snapshot.path, snapshot.mode); err != nil {
 			restoreErrs = append(restoreErrs, fmt.Errorf("restore permissions for %s: %w", snapshot.path, err))
 		}
 	}
