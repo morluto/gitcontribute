@@ -266,7 +266,17 @@ func (r *readinessEvaluator) candidateImprovesBaseline() (cli.ReadinessCheck, er
 				errorRefs = append(errorRefs, "validation_run:"+run.ID)
 			case evidence.RunClassificationPassing:
 				if base := baseFailing[run.DefinitionID]; base != nil {
-					return r.check("candidate_improves_baseline", readinessPass, "Candidate validation fixes a failing base run.", []string{"validation_run:" + base.ID, "validation_run:" + run.ID}, ""), nil
+					comparison, err := evidence.Compare(base, run)
+					if err != nil {
+						return cli.ReadinessCheck{}, fmt.Errorf("compare readiness validation runs: %w", err)
+					}
+					refs := []string{"validation_run:" + base.ID, "validation_run:" + run.ID}
+					if comparison.Classification == evidence.ComparisonFixed {
+						return r.check("candidate_improves_baseline", readinessPass, "Candidate validation fixes a failing base run.", refs, ""), nil
+					}
+					if comparison.Classification == evidence.ComparisonInconclusive {
+						return r.check("candidate_improves_baseline", readinessWarn, "Validation outcomes improved, but the expected observation contract did not match.", refs, "Rerun validation against the intended symptom or revise the observation contract."), nil
+					}
 				}
 			}
 		}

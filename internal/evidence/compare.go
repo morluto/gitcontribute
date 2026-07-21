@@ -22,6 +22,15 @@ func Compare(base, candidate *ValidationRun) (*ComparisonResult, error) {
 }
 
 func classify(base, candidate *ValidationRun) (ComparisonClassification, string) {
+	baseObserved := base.ObservationStatus == ObservationMatched || base.ObservationStatus == ObservationMismatched || len(base.Observations) > 0
+	candidateObserved := candidate.ObservationStatus == ObservationMatched || candidate.ObservationStatus == ObservationMismatched || len(candidate.Observations) > 0
+	if base.ObservationStatus == ObservationMismatched || candidate.ObservationStatus == ObservationMismatched ||
+		(baseObserved != candidateObserved) {
+		return ComparisonInconclusive, fmt.Sprintf(
+			"base observation=%s candidate observation=%s; expected validation symptom was not observed",
+			base.ObservationStatus, candidate.ObservationStatus,
+		)
+	}
 	if base.Classification == RunClassificationCancelled ||
 		candidate.Classification == RunClassificationCancelled {
 		return ComparisonInconclusive, fmt.Sprintf(

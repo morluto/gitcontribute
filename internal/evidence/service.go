@@ -54,6 +54,9 @@ func (s *Service) DefineValidation(ctx context.Context, d *ValidationDefinition)
 		return err
 	}
 	d.Env = env
+	if err := validateObservationContract(d.Observation); err != nil {
+		return err
+	}
 	if d.ID == "" {
 		d.ID = uuid.NewString()
 	}
@@ -124,6 +127,7 @@ func (s *Service) RunValidation(ctx context.Context, defID string, kind RunKind)
 		Error:           result.Error,
 		Classification:  result.Classification,
 	}
+	run.ObservationStatus, run.Observations = evaluateObservations(ctx, def.Observation, kind, workingDir, result.Stdout, result.Stderr, maxOutput)
 	saveCtx := ctx
 	saveCancel := func() {}
 	if ctx.Err() != nil {

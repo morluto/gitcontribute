@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode"
@@ -119,6 +120,25 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 	assertSchemaValue(t, tools[ToolRankThreads].OutputSchema, []string{"properties", "truncated", "type"}, "boolean")
 	assertSchemaValue(t, tools[ToolRunValidation].InputSchema, []string{"properties", "execute", "const"}, true)
 	assertSchemaValue(t, tools[ToolPromoteOpportunity].InputSchema, []string{"properties", "confidence", "maximum"}, float64(1))
+	validationSchema, err := json.Marshal(tools[ToolDefineValidation].InputSchema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"observation"`, `"intent"`, `"observations"`, `"run"`, `"occurrence"`, `artifact`, `"path"`} {
+		if !strings.Contains(string(validationSchema), field) {
+			t.Errorf("validation schema missing %s: %s", field, validationSchema)
+		}
+	}
+	observationPath := []string{"properties", "observation", "properties", "observations"}
+	assertSchemaValue(t, tools[ToolDefineValidation].InputSchema, append(observationPath, "minItems"), float64(2))
+	assertSchemaValue(t, tools[ToolDefineValidation].InputSchema, append(observationPath, "maxItems"), float64(16))
+	assertSchemaValue(t, tools[ToolDefineValidation].InputSchema, append(observationPath, "items", "properties", "run", "enum"), []any{"base", "candidate"})
+	assertSchemaValue(t, tools[ToolDefineValidation].InputSchema, append(observationPath, "items", "properties", "source", "enum"), []any{"stdout", "stderr", "artifact"})
+	assertSchemaValue(t, tools[ToolDefineValidation].InputSchema, append(observationPath, "items", "properties", "matcher", "enum"), []any{"exact", "regexp"})
+	assertSchemaValue(t, tools[ToolDefineValidation].InputSchema, append(observationPath, "items", "properties", "occurrence", "enum"), []any{"present", "absent"})
+	assertSchemaValue(t, tools[ToolDefineValidation].InputSchema, append(observationPath, "items", "properties", "occurrence", "default"), "present")
+	assertSchemaValue(t, tools[ToolDefineValidation].InputSchema, append(observationPath, "allOf", "0", "contains", "properties", "run", "const"), "base")
+	assertSchemaValue(t, tools[ToolDefineValidation].InputSchema, append(observationPath, "allOf", "1", "contains", "properties", "run", "const"), "candidate")
 
 	for name, tool := range tools {
 		output, ok := tool.OutputSchema.(map[string]any)
@@ -285,11 +305,18 @@ func assertSchemaValue(t *testing.T, raw any, path []string, want any) {
 	t.Helper()
 	current := raw
 	for _, key := range path {
-		object, ok := current.(map[string]any)
-		if !ok {
-			t.Fatalf("schema path %v: %T is not an object", path, current)
+		switch value := current.(type) {
+		case map[string]any:
+			current = value[key]
+		case []any:
+			index, err := strconv.Atoi(key)
+			if err != nil || index < 0 || index >= len(value) {
+				t.Fatalf("schema path %v: invalid array index %q", path, key)
+			}
+			current = value[index]
+		default:
+			t.Fatalf("schema path %v: %T is not traversable", path, current)
 		}
-		current = object[key]
 	}
 	if fmt.Sprint(current) != fmt.Sprint(want) {
 		t.Errorf("schema path %v = %#v, want %#v", path, current, want)

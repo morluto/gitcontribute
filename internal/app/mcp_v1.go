@@ -636,6 +636,7 @@ func (r *MCPReader) DefineValidation(ctx context.Context, in mcpserver.DefineVal
 		Env:            append([]string(nil), in.Env...),
 		Timeout:        timeout,
 		MaxOutputBytes: in.MaxOutputBytes,
+		Observation:    observationContractMCPToCLI(in.Observation),
 	}
 	res, err := r.Service.DefineValidation(ctx, in.InvestigationID, opts)
 	if err != nil {
@@ -656,8 +657,55 @@ func validationResultToMCP(res *cli.ValidationResult) mcpserver.ValidationOutput
 		Env:             res.Env,
 		Timeout:         res.Timeout,
 		MaxOutputBytes:  res.MaxOutputBytes,
+		Observation:     observationContractCLIToMCP(res.Observation),
 		CreatedAt:       res.CreatedAt,
 	}
+}
+
+func observationContractMCPToCLI(contract *mcpserver.ValidationObservationContract) *cli.ValidationObservationContract {
+	if contract == nil {
+		return nil
+	}
+	return &cli.ValidationObservationContract{
+		Intent:    contract.Intent,
+		Base:      expectedObservationsMCPToCLI(contract.Observations, "base"),
+		Candidate: expectedObservationsMCPToCLI(contract.Observations, "candidate"),
+	}
+}
+
+func expectedObservationsMCPToCLI(items []mcpserver.ValidationExpectedObservation, run string) []cli.ValidationExpectedObservation {
+	out := make([]cli.ValidationExpectedObservation, 0, len(items))
+	for _, item := range items {
+		if item.Run != run {
+			continue
+		}
+		out = append(out, cli.ValidationExpectedObservation{
+			Name: item.Name, Source: item.Source, Matcher: item.Matcher,
+			Pattern: item.Pattern, Occurrence: item.Occurrence, Path: item.Path,
+		})
+	}
+	return out
+}
+
+func observationContractCLIToMCP(contract *cli.ValidationObservationContract) *mcpserver.ValidationObservationContract {
+	if contract == nil {
+		return nil
+	}
+	return &mcpserver.ValidationObservationContract{
+		Intent:       contract.Intent,
+		Observations: append(expectedObservationsCLIToMCP(contract.Base, "base"), expectedObservationsCLIToMCP(contract.Candidate, "candidate")...),
+	}
+}
+
+func expectedObservationsCLIToMCP(items []cli.ValidationExpectedObservation, run string) []mcpserver.ValidationExpectedObservation {
+	out := make([]mcpserver.ValidationExpectedObservation, len(items))
+	for i, item := range items {
+		out[i] = mcpserver.ValidationExpectedObservation{
+			Run: run, Name: item.Name, Source: item.Source, Matcher: item.Matcher,
+			Pattern: item.Pattern, Occurrence: item.Occurrence, Path: item.Path,
+		}
+	}
+	return out
 }
 
 // PrepareContribution renders a contribution draft for an opportunity.
