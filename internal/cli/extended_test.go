@@ -188,13 +188,18 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 			CreatedAt:       "2026-07-17T00:00:00Z",
 		},
 		validationRunResult: &cli.ValidationRunResult{
-			ID:             "run-1",
-			DefinitionID:   "val-1",
-			Kind:           "base",
-			ExitCode:       0,
-			Classification: "passing",
-			StartedAt:      "2026-07-17T00:00:00Z",
-			CompletedAt:    "2026-07-17T00:00:01Z",
+			ID:                "run-1",
+			DefinitionID:      "val-1",
+			Kind:              "base",
+			ExitCode:          0,
+			Classification:    "passing",
+			StartedAt:         "2026-07-17T00:00:00Z",
+			CompletedAt:       "2026-07-17T00:00:01Z",
+			ObservationStatus: "matched",
+			Observations: []cli.ValidationObservationResult{{
+				ValidationExpectedObservation: cli.ValidationExpectedObservation{Name: "symptom", Source: "stderr", Matcher: "exact", Occurrence: "present"},
+				Status:                        "matched", Excerpt: "expected failure",
+			}},
 		},
 		comparisonResult: &cli.ValidationComparisonResult{
 			Classification: "fixed",
@@ -210,6 +215,7 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 		"--working-dir", "/tmp/ws",
 		"--timeout", "1m",
 		"--max-output", "1024",
+		"--observation-contract", `{"intent":"prove symptom","base":[{"name":"symptom","source":"stderr","matcher":"exact","pattern":"expected failure","occurrence":"present"}],"candidate":[{"name":"symptom removed","source":"stderr","matcher":"exact","pattern":"expected failure","occurrence":"absent"}]}`,
 	})
 	requireNoErr(t, err)
 	if !svc.defineValidationCalled || svc.lastValidationInvestigation != "inv-1" {
@@ -220,6 +226,9 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 	}
 	if svc.lastDefineValidationOpts.Timeout != time.Minute || svc.lastDefineValidationOpts.MaxOutputBytes != 1024 {
 		t.Fatalf("timeout/output opts = %+v", svc.lastDefineValidationOpts)
+	}
+	if observation := svc.lastDefineValidationOpts.Observation; observation == nil || observation.Intent != "prove symptom" || len(observation.Base) != 1 || len(observation.Candidate) != 1 {
+		t.Fatalf("observation opts = %+v", observation)
 	}
 	if !strings.Contains(stdout.String(), "val-1") || !strings.Contains(stderr.String(), "defining validation") {
 		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
@@ -238,6 +247,9 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), `"go" "test"`) {
 		t.Fatalf("visible command missing from stderr: %q", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Observation status: matched") || !strings.Contains(stdout.String(), "expected failure") {
+		t.Fatalf("observation output missing: %q", stdout.String())
 	}
 
 	stdout.Reset()

@@ -520,63 +520,6 @@ func workspaceHuman(r *WorkspaceResult) string {
 	return b.String()
 }
 
-func validationHuman(r *ValidationResult) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Validation: %s (kind=%s, investigation=%s)\n", r.ID, r.Kind, r.InvestigationID)
-	fmt.Fprintf(&b, "Command: %s\n", strings.Join(r.Command, " "))
-	fmt.Fprintf(&b, "Working directory: %s\n", r.WorkingDir)
-	if r.BaseWorkingDir != "" {
-		fmt.Fprintf(&b, "Base working directory: %s\n", r.BaseWorkingDir)
-	}
-	if r.CandidateDir != "" {
-		fmt.Fprintf(&b, "Candidate directory: %s\n", r.CandidateDir)
-	}
-	if r.Timeout != "" {
-		fmt.Fprintf(&b, "Timeout: %s\n", r.Timeout)
-	}
-	if r.MaxOutputBytes > 0 {
-		fmt.Fprintf(&b, "Max output bytes: %d\n", r.MaxOutputBytes)
-	}
-	if len(r.Env) > 0 {
-		fmt.Fprintf(&b, "Environment allowlist: %s\n", strings.Join(r.Env, ", "))
-	}
-	fmt.Fprintf(&b, "Created: %s", r.CreatedAt)
-	return b.String()
-}
-
-func validationRunHuman(r *ValidationRunResult) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Validation run: %s (kind=%s, classification=%s, exit=%d)\n", r.ID, r.Kind, r.Classification, r.ExitCode)
-	if r.Truncated {
-		b.WriteString("Output truncated\n")
-	}
-	if r.Stdout != "" {
-		fmt.Fprintf(&b, "--- stdout ---\n%s\n", r.Stdout)
-	}
-	if r.Stderr != "" {
-		fmt.Fprintf(&b, "--- stderr ---\n%s\n", r.Stderr)
-	}
-	if r.Error != "" {
-		fmt.Fprintf(&b, "Error: %s\n", r.Error)
-	}
-	fmt.Fprintf(&b, "Started: %s\n", r.StartedAt)
-	fmt.Fprintf(&b, "Completed: %s", r.CompletedAt)
-	return b.String()
-}
-
-func validationComparisonHuman(r *ValidationComparisonResult) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Comparison: %s\n", r.Classification)
-	fmt.Fprintf(&b, "Explanation: %s\n", r.Explanation)
-	if r.Base != nil {
-		fmt.Fprintf(&b, "Base run: %s (exit=%d, %s)\n", r.Base.ID, r.Base.ExitCode, r.Base.Classification)
-	}
-	if r.Candidate != nil {
-		fmt.Fprintf(&b, "Candidate run: %s (exit=%d, %s)\n", r.Candidate.ID, r.Candidate.ExitCode, r.Candidate.Classification)
-	}
-	return b.String()
-}
-
 func draftHuman(r *DraftResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s draft for opportunity %s\n", r.Kind, r.OpportunityID)

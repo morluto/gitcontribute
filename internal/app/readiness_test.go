@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,31 @@ import (
 	"github.com/morluto/gitcontribute/internal/investigation"
 	"github.com/morluto/gitcontribute/internal/research"
 )
+
+func TestCandidateImprovesBaselineRequiresMatchedObservations(t *testing.T) {
+	evaluator := &readinessEvaluator{
+		ctx: context.Background(), opportunity: &investigation.Opportunity{ID: "opp"},
+		runs: []*evidence.ValidationRun{
+			{
+				ID: "base", DefinitionID: "def", Kind: evidence.RunKindBase,
+				Classification:    evidence.RunClassificationFailing,
+				ObservationStatus: evidence.ObservationMismatched,
+			},
+			{
+				ID: "candidate", DefinitionID: "def", Kind: evidence.RunKindCandidate,
+				Classification:    evidence.RunClassificationPassing,
+				ObservationStatus: evidence.ObservationMatched,
+			},
+		},
+	}
+	check, err := evaluator.candidateImprovesBaseline()
+	if err != nil {
+		t.Fatalf("candidate check: %v", err)
+	}
+	if check.Status != readinessWarn || !strings.Contains(check.Summary, "observation contract") {
+		t.Fatalf("check = %+v, want observation warning", check)
+	}
+}
 
 func TestOpportunityReadinessReportsPassWarnBlockUnknown(t *testing.T) {
 	fixture := newResearchFixture(t)

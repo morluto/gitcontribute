@@ -50,6 +50,7 @@ func (s *Service) DefineValidation(ctx context.Context, investigationID string, 
 		Env:             opts.Env,
 		Timeout:         opts.Timeout,
 		MaxOutputBytes:  opts.MaxOutputBytes,
+		Observation:     observationContractToEvidence(opts.Observation),
 	}
 
 	evSvc := evidence.NewService(c, evidence.NewExecRunner())
@@ -246,25 +247,85 @@ func validationResult(def *evidence.ValidationDefinition) *cli.ValidationResult 
 		Env:             append([]string(nil), def.Env...),
 		Timeout:         timeout,
 		MaxOutputBytes:  def.MaxOutputBytes,
+		Observation:     observationContractToCLI(def.Observation),
 		CreatedAt:       formatTime(def.CreatedAt),
 	}
 }
 
 func validationRunResult(run *evidence.ValidationRun) *cli.ValidationRunResult {
 	return &cli.ValidationRunResult{
-		ID:              run.ID,
-		DefinitionID:    run.DefinitionID,
-		InvestigationID: run.InvestigationID,
-		Kind:            string(run.Kind),
-		ExitCode:        run.ExitCode,
-		Stdout:          run.Stdout,
-		Stderr:          run.Stderr,
-		Truncated:       run.Truncated,
-		Error:           run.Error,
-		Classification:  string(run.Classification),
-		StartedAt:       formatTime(run.StartedAt),
-		CompletedAt:     formatTime(run.CompletedAt),
+		ID:                run.ID,
+		DefinitionID:      run.DefinitionID,
+		InvestigationID:   run.InvestigationID,
+		Kind:              string(run.Kind),
+		ExitCode:          run.ExitCode,
+		Stdout:            run.Stdout,
+		Stderr:            run.Stderr,
+		Truncated:         run.Truncated,
+		Error:             run.Error,
+		Classification:    string(run.Classification),
+		ObservationStatus: string(run.ObservationStatus),
+		Observations:      observationResultsToCLI(run.Observations),
+		StartedAt:         formatTime(run.StartedAt),
+		CompletedAt:       formatTime(run.CompletedAt),
 	}
+}
+
+func observationContractToEvidence(contract *cli.ValidationObservationContract) *evidence.ObservationContract {
+	if contract == nil {
+		return nil
+	}
+	return &evidence.ObservationContract{
+		Intent:    contract.Intent,
+		Base:      expectedObservationsToEvidence(contract.Base),
+		Candidate: expectedObservationsToEvidence(contract.Candidate),
+	}
+}
+
+func expectedObservationsToEvidence(items []cli.ValidationExpectedObservation) []evidence.ExpectedObservation {
+	out := make([]evidence.ExpectedObservation, len(items))
+	for i, item := range items {
+		out[i] = evidence.ExpectedObservation{
+			Name: item.Name, Source: evidence.ObservationSource(item.Source),
+			Matcher: evidence.ObservationMatcher(item.Matcher), Pattern: item.Pattern,
+			Occurrence: evidence.ObservationOccurrence(item.Occurrence),
+			Path:       item.Path,
+		}
+	}
+	return out
+}
+
+func observationContractToCLI(contract *evidence.ObservationContract) *cli.ValidationObservationContract {
+	if contract == nil {
+		return nil
+	}
+	return &cli.ValidationObservationContract{
+		Intent:    contract.Intent,
+		Base:      expectedObservationsToCLI(contract.Base),
+		Candidate: expectedObservationsToCLI(contract.Candidate),
+	}
+}
+
+func expectedObservationsToCLI(items []evidence.ExpectedObservation) []cli.ValidationExpectedObservation {
+	out := make([]cli.ValidationExpectedObservation, len(items))
+	for i, item := range items {
+		out[i] = cli.ValidationExpectedObservation{
+			Name: item.Name, Source: string(item.Source), Matcher: string(item.Matcher),
+			Pattern: item.Pattern, Occurrence: string(item.Occurrence), Path: item.Path,
+		}
+	}
+	return out
+}
+
+func observationResultsToCLI(items []evidence.ObservationResult) []cli.ValidationObservationResult {
+	out := make([]cli.ValidationObservationResult, len(items))
+	for i, item := range items {
+		out[i] = cli.ValidationObservationResult{
+			ValidationExpectedObservation: expectedObservationsToCLI([]evidence.ExpectedObservation{item.ExpectedObservation})[0],
+			Status:                        string(item.Status), Excerpt: item.Excerpt, Error: item.Error,
+		}
+	}
+	return out
 }
 
 func mapEvidenceError(err error) error {
