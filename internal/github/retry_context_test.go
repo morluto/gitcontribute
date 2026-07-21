@@ -28,6 +28,11 @@ func TestRetryObservationCarriesRequestContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	}()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -65,7 +70,14 @@ func TestRetryObservationContextRespectsCancellation(t *testing.T) {
 		cancel()
 	}()
 
-	_, err := rt.RoundTrip(newGetRequest(t, "http://example.com/repos/o/r").WithContext(ctx))
+	resp, err := rt.RoundTrip(newGetRequest(t, "http://example.com/repos/o/r").WithContext(ctx))
+	if resp != nil {
+		defer func() {
+			if err := resp.Body.Close(); err != nil {
+				t.Errorf("close response body: %v", err)
+			}
+		}()
+	}
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}

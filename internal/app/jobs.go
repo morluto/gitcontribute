@@ -123,8 +123,11 @@ func newJobExecutorWithConfig(ctx context.Context, c jobStore, cfg jobExecutorCo
 		e.heartbeatWG.Wait()
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), jobCleanupTimeout)
 		defer cleanupCancel()
-		_ = c.DeleteJobOwner(cleanupCtx, ownerID)
-		return nil, fmt.Errorf("reconcile interrupted jobs: %w", err)
+		cleanupErr := c.DeleteJobOwner(cleanupCtx, ownerID)
+		if cleanupErr != nil {
+			cleanupErr = fmt.Errorf("delete job owner after reconciliation failure: %w", cleanupErr)
+		}
+		return nil, errors.Join(fmt.Errorf("reconcile interrupted jobs: %w", err), cleanupErr)
 	}
 
 	return e, nil

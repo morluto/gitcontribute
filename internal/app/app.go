@@ -234,6 +234,8 @@ func (s *Service) Jobs(ctx context.Context) (*JobExecutor, error) {
 	if s.jobs != nil {
 		return s.jobs, nil
 	}
+	// Jobs outlive this request and remain bounded by the service lifecycle.
+	//nolint:contextcheck
 	jobs, err := newJobExecutor(s.lifecycleCtx, c)
 	if err != nil {
 		return nil, err
