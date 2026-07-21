@@ -402,15 +402,3 @@ func requireExactlyOne(builder *schemaBuilder, first, second string) {
 		{Required: []string{second}, Not: &jsonschema.Schema{Required: []string{first}}},
 	}
 }
-
-func setPositiveItems(schema *schemaBuilder, name string) {
-	p := property(schema, name)
-	if p == nil {
-		return
-	}
-	if p.Items == nil {
-		*schema.err = fmt.Errorf("MCP schema array property %q has no items schema", name)
-		return
-	}
-	p.Items.Minimum = jsonschema.Ptr(1.0)
-}
