@@ -47,7 +47,11 @@ func TestMCPStdioHelper(t *testing.T) {
 		}
 		svc.SetGitHubReader(reader)
 	}
-	if err := mcpserver.New(svc.MCPReader(), "e2e").ServeStdio(context.Background()); err != nil && !strings.Contains(err.Error(), "EOF") {
+	server, err := mcpserver.New(svc.MCPReader(), "e2e")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.ServeStdio(context.Background()); err != nil && !strings.Contains(err.Error(), "EOF") {
 		t.Fatal(err)
 	}
 }

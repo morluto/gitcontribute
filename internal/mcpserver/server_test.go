@@ -253,7 +253,10 @@ func (*fakeReader) CancelJobs(_ context.Context, in CancelJobInput) (GetJobsOutp
 
 func connect(t *testing.T, reader Reader) (*mcp.ClientSession, func()) {
 	t.Helper()
-	server := New(reader, "test")
+	server, err := New(reader, "test")
+	if err != nil {
+		t.Fatalf("create server: %v", err)
+	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "test"}, nil)
 	t1, t2 := mcp.NewInMemoryTransports()
 	serverSession, err := server.MCP().Connect(context.Background(), t1, nil)

@@ -228,42 +228,64 @@ var outputPropertyDescriptions = map[string]string{
 	"pushed_at":                 "RFC 3339 timestamp of the latest repository push reported by GitHub.",
 }
 
-func inferredSchema[T any]() *jsonschema.Schema {
+type schemaDefinition struct {
+	schema *jsonschema.Schema
+	err    error
+}
+
+type schemaBuilder struct {
+	schema *jsonschema.Schema
+	err    *error
+}
+
+func inferredSchema[T any]() schemaDefinition {
 	schema, err := jsonschema.For[T](nil)
 	if err != nil {
-		panic(fmt.Sprintf("infer MCP schema: %v", err))
+		return schemaDefinition{err: fmt.Errorf("infer MCP schema: %w", err)}
 	}
-	return schema
+	return schemaDefinition{schema: schema}
 }
 
-func inputSchema[T any](customize func(*jsonschema.Schema)) *jsonschema.Schema {
-	schema := inferredSchema[T]()
+func inputSchema[T any](customize func(*schemaBuilder)) schemaDefinition {
+	definition := inferredSchema[T]()
+	if definition.err != nil {
+		return definition
+	}
+	var buildErr error
+	builder := &schemaBuilder{schema: definition.schema, err: &buildErr}
 	if customize != nil {
-		customize(schema)
+		customize(builder)
 	}
-	return schema
+	definition.err = buildErr
+	return definition
 }
 
-func outputSchema[T any](description string) *jsonschema.Schema {
-	schema := inferredSchema[T]()
-	schema.Description = description
-	describeOutputProperties(schema)
-	return schema
+func outputSchema[T any](description string) schemaDefinition {
+	definition := inferredSchema[T]()
+	if definition.err != nil {
+		return definition
+	}
+	definition.schema.Description = description
+	var buildErr error
+	describeOutputProperties(&schemaBuilder{schema: definition.schema, err: &buildErr})
+	definition.err = buildErr
+	return definition
 }
 
-func describeOutputProperties(schema *jsonschema.Schema) {
-	if schema == nil {
+func describeOutputProperties(builder *schemaBuilder) {
+	if builder.schema == nil || *builder.err != nil {
 		return
 	}
+	schema := builder.schema
 	if schema.Properties["key"] != nil && schema.Properties["value"] != nil && schema.Properties["reason"] != nil {
-		setEnum(schema, "status", "complete", "retryable", "unavailable", "failed")
+		setEnum(builder, "status", "complete", "retryable", "unavailable", "failed")
 	}
 	if schema.Properties["progress_percent"] != nil {
-		setEnum(schema, "status", "queued", "running", "succeeded", "failed", "cancelled")
-		setRange(schema, "progress_percent", 0, 100)
-		setMinimum(schema, "completed_items", 0)
-		setMinimum(schema, "total_items", 0)
-		setMinimum(schema, "retry_after_ms", 0)
+		setEnum(builder, "status", "queued", "running", "succeeded", "failed", "cancelled")
+		setRange(builder, "progress_percent", 0, 100)
+		setMinimum(builder, "completed_items", 0)
+		setMinimum(builder, "total_items", 0)
+		setMinimum(builder, "retry_after_ms", 0)
 	}
 	for name, property := range schema.Properties {
 		if property.Description == "" {
@@ -276,35 +298,46 @@ func describeOutputProperties(schema *jsonschema.Schema) {
 			property.Minimum = jsonschema.Ptr(0.0)
 			property.Maximum = jsonschema.Ptr(1.0)
 		}
-		describeOutputProperties(property)
-		describeOutputProperties(property.Items)
-		describeOutputProperties(property.AdditionalProperties)
+		describeOutputProperties(&schemaBuilder{schema: property, err: builder.err})
+		describeOutputProperties(&schemaBuilder{schema: property.Items, err: builder.err})
+		describeOutputProperties(&schemaBuilder{schema: property.AdditionalProperties, err: builder.err})
 	}
 	for _, definition := range schema.Defs {
-		describeOutputProperties(definition)
+		describeOutputProperties(&schemaBuilder{schema: definition, err: builder.err})
 	}
 }
 
-func property(schema *jsonschema.Schema, name string) *jsonschema.Schema {
-	p := schema.Properties[name]
+func property(builder *schemaBuilder, name string) *jsonschema.Schema {
+	if *builder.err != nil {
+		return nil
+	}
+	p := builder.schema.Properties[name]
 	if p == nil {
-		panic(fmt.Sprintf("MCP schema property %q not found", name))
+		*builder.err = fmt.Errorf("MCP schema property %q not found", name)
+		return nil
 	}
 	return p
 }
 
-func setEnum(schema *jsonschema.Schema, name string, values ...string) {
+func setEnum(schema *schemaBuilder, name string, values ...string) {
 	p := property(schema, name)
+	if p == nil {
+		return
+	}
 	p.Enum = make([]any, len(values))
 	for i, value := range values {
 		p.Enum[i] = value
 	}
 }
 
-func setArrayEnum(schema *jsonschema.Schema, name string, values ...string) {
+func setArrayEnum(schema *schemaBuilder, name string, values ...string) {
 	p := property(schema, name)
+	if p == nil {
+		return
+	}
 	if p.Items == nil {
-		panic(fmt.Sprintf("MCP schema array property %q has no items schema", name))
+		*schema.err = fmt.Errorf("MCP schema array property %q has no items schema", name)
+		return
 	}
 	p.Items.Enum = make([]any, len(values))
 	for i, value := range values {
@@ -312,29 +345,43 @@ func setArrayEnum(schema *jsonschema.Schema, name string, values ...string) {
 	}
 }
 
-func setRange(schema *jsonschema.Schema, name string, minimum, maximum float64) {
+func setRange(schema *schemaBuilder, name string, minimum, maximum float64) {
 	p := property(schema, name)
+	if p == nil {
+		return
+	}
 	p.Minimum = jsonschema.Ptr(minimum)
 	p.Maximum = jsonschema.Ptr(maximum)
 }
 
-func setMinimum(schema *jsonschema.Schema, name string, minimum float64) {
-	property(schema, name).Minimum = jsonschema.Ptr(minimum)
+func setMinimum(schema *schemaBuilder, name string, minimum float64) {
+	p := property(schema, name)
+	if p != nil {
+		p.Minimum = jsonschema.Ptr(minimum)
+	}
 }
 
-func setDefault(schema *jsonschema.Schema, name string, value any) {
+func setDefault(schema *schemaBuilder, name string, value any) {
 	b, err := json.Marshal(value)
 	if err != nil {
-		panic(fmt.Sprintf("marshal MCP schema default for %q: %v", name, err))
+		*schema.err = fmt.Errorf("marshal MCP schema default for %q: %w", name, err)
+		return
 	}
-	property(schema, name).Default = b
+	p := property(schema, name)
+	if p != nil {
+		p.Default = b
+	}
 }
 
-func setConst(schema *jsonschema.Schema, name string, value any) {
-	property(schema, name).Const = &value
+func setConst(schema *schemaBuilder, name string, value any) {
+	p := property(schema, name)
+	if p != nil {
+		p.Const = &value
+	}
 }
 
-func requireTogether(schema *jsonschema.Schema, names ...string) {
+func requireTogether(builder *schemaBuilder, names ...string) {
+	schema := builder.schema
 	if schema.DependentRequired == nil {
 		schema.DependentRequired = make(map[string][]string)
 	}
@@ -349,17 +396,9 @@ func requireTogether(schema *jsonschema.Schema, names ...string) {
 	}
 }
 
-func requireExactlyOne(schema *jsonschema.Schema, first, second string) {
-	schema.OneOf = []*jsonschema.Schema{
+func requireExactlyOne(builder *schemaBuilder, first, second string) {
+	builder.schema.OneOf = []*jsonschema.Schema{
 		{Required: []string{first}, Not: &jsonschema.Schema{Required: []string{second}}},
 		{Required: []string{second}, Not: &jsonschema.Schema{Required: []string{first}}},
 	}
-}
-
-func setPositiveItems(schema *jsonschema.Schema, name string) {
-	p := property(schema, name)
-	if p.Items == nil {
-		panic(fmt.Sprintf("MCP schema array property %q has no items schema", name))
-	}
-	p.Items.Minimum = jsonschema.Ptr(1.0)
 }
