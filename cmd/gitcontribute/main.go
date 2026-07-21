@@ -34,7 +34,7 @@ func main() {
 	ctx = gitlog.WithTrace(ctx, traceID)
 
 	paths := config.NewPaths(nil)
-	svc, err := app.New(paths, version, logger.With("component", "app"))
+	svc, err := app.NewWithContext(ctx, paths, version, logger.With("component", "app"))
 	if err != nil {
 		logger.ErrorContext(ctx, "failed to initialize application", "error", err)
 		fmt.Fprintln(os.Stderr, err)

@@ -952,3 +952,90 @@ func TestRetryTransportAppliesLimiterPerAttempt(t *testing.T) {
 		t.Fatalf("sleeps = %d, want 1", len(calls))
 	}
 }
+
+func TestRetryObservationCarriesRequestContext(t *testing.T) {
+	type ctxKey string
+	const key ctxKey = "retry-observation-context"
+
+	ft := &fakeTransport{
+		results: []fakeResult{
+			{status: http.StatusInternalServerError, body: "boom"},
+			{status: http.StatusOK, body: "ok"},
+		},
+	}
+	var observations []RetryObservation
+	rt := &retryTransport{
+		Base: ft,
+		Config: &RetryConfig{
+			MaxAttempts: 2,
+			BaseDelay:   time.Nanosecond,
+			MaxDelay:    time.Nanosecond,
+			Sleeper:     func(context.Context, time.Duration) error { return nil },
+			OnAttempt:   func(o RetryObservation) { observations = append(observations, o) },
+		},
+	}
+
+	ctx := context.WithValue(context.Background(), key, "present")
+	req := newGetRequest(t, "http://example.com/repos/o/r").WithContext(ctx)
+	resp, err := rt.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("RoundTrip: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if len(observations) != 2 {
+		t.Fatalf("observations = %d, want 2", len(observations))
+	}
+	for i, obs := range observations {
+		if obs.Context == nil {
+			t.Fatalf("observation[%d].Context is nil", i)
+		}
+		if obs.Context.Value(key) != "present" {
+			t.Fatalf("observation[%d].Context missing expected value", i)
+		}
+	}
+}
+
+func TestRetryObservationContextRespectsCancellation(t *testing.T) {
+	ft := &fakeTransport{
+		results: []fakeResult{
+			{status: http.StatusInternalServerError, body: "boom"},
+			{status: http.StatusOK, body: "ok"},
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	signaled := make(chan struct{})
+
+	var obs RetryObservation
+	rt := &retryTransport{
+		Base: ft,
+		Config: &RetryConfig{
+			MaxAttempts: 2,
+			BaseDelay:   time.Hour,
+			MaxDelay:    time.Hour,
+			Sleeper: func(ctx context.Context, d time.Duration) error {
+				close(signaled)
+				<-ctx.Done()
+				return ctx.Err()
+			},
+			OnAttempt: func(o RetryObservation) { obs = o },
+		},
+	}
+
+	go func() {
+		<-signaled
+		cancel()
+	}()
+
+	_, err := rt.RoundTrip(newGetRequest(t, "http://example.com/repos/o/r").WithContext(ctx))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	if obs.Context == nil {
+		t.Fatal("RetryObservation.Context is nil")
+	}
+	if !errors.Is(obs.Context.Err(), context.Canceled) {
+		t.Fatalf("observation context err = %v, want context.Canceled", obs.Context.Err())
+	}
+}

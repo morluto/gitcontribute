@@ -28,27 +28,41 @@ import (
 // Service is the product-owned application layer that satisfies cli.Service.
 // MCP reads are exposed through MCPReader.
 type Service struct {
-	mu             sync.Mutex
-	cfg            *config.Config
-	paths          *config.Paths
-	corpus         *corpus.Corpus
-	jobs           *JobExecutor
-	ghReader       github.Reader
-	archiveFetcher discovery.ArchiveFetcher
-	deepWikiReader deepwiki.Reader
-	clock          func() time.Time
-	version        string
-	logger         *slog.Logger
+	mu              sync.Mutex
+	cfg             *config.Config
+	paths           *config.Paths
+	corpus          *corpus.Corpus
+	jobs            *JobExecutor
+	ghReader        github.Reader
+	archiveFetcher  discovery.ArchiveFetcher
+	deepWikiReader  deepwiki.Reader
+	clock           func() time.Time
+	version         string
+	logger          *slog.Logger
+	lifecycleCtx    context.Context
+	cancelLifecycle context.CancelFunc
 }
 
 // New creates a Service and resolves local configuration. GitHub credentials
 // are resolved lazily only when a network-reading operation is requested.
 func New(paths *config.Paths, version string, logger *slog.Logger) (*Service, error) {
+	// Library callers that do not provide a process lifecycle still receive an
+	// explicit service lifetime bounded by Close.
+	return NewWithContext(context.Background(), paths, version, logger)
+}
+
+// NewWithContext creates a Service bounded by ctx and Close.
+func NewWithContext(ctx context.Context, paths *config.Paths, version string, logger *slog.Logger) (*Service, error) {
 	if paths == nil {
 		paths = config.NewPaths(nil)
 	}
-	s := &Service{paths: paths, version: version, clock: time.Now, logger: logger}
+	lifecycleCtx, cancelLifecycle := context.WithCancel(ctx)
+	s := &Service{
+		paths: paths, version: version, clock: time.Now, logger: logger,
+		lifecycleCtx: lifecycleCtx, cancelLifecycle: cancelLifecycle,
+	}
 	if _, err := s.loadConfig(false); err != nil {
+		cancelLifecycle()
 		return nil, err
 	}
 	return s, nil
@@ -120,13 +134,17 @@ func (s *Service) Close() error {
 	s.jobs = nil
 	s.corpus = nil
 	s.mu.Unlock()
+	if s.cancelLifecycle != nil {
+		s.cancelLifecycle()
+	}
+	var closeErr error
 	if jobs != nil {
-		_ = jobs.Close()
+		closeErr = jobs.Close()
 	}
 	if c != nil {
-		return c.Close()
+		closeErr = errors.Join(closeErr, c.Close())
 	}
-	return nil
+	return closeErr
 }
 
 func (s *Service) loadConfig(save bool) (*config.Config, error) {
@@ -216,7 +234,7 @@ func (s *Service) Jobs(ctx context.Context) (*JobExecutor, error) {
 	if s.jobs != nil {
 		return s.jobs, nil
 	}
-	jobs, err := newJobExecutor(ctx, c)
+	jobs, err := newJobExecutor(s.lifecycleCtx, c)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +273,11 @@ func (s *Service) newGitHubReader() (github.Reader, error) {
 		if c == nil {
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		obsCtx := observation.Context
+		if obsCtx == nil {
+			obsCtx = s.lifecycleCtx
+		}
+		ctx, cancel := context.WithTimeout(obsCtx, 2*time.Second)
 		defer cancel()
 		_ = c.RecordRateLimitObservation(ctx, corpus.RateLimitObservation{
 			Attempt: observation.Attempt, StatusCode: observation.StatusCode,
