@@ -54,7 +54,7 @@ func sampleData() Data {
 
 func loadModel(t *testing.T, r Reader) Model {
 	t.Helper()
-	m := New(r)
+	m := New(context.Background(), r)
 
 	cmd := m.Init()
 	if cmd == nil {

@@ -76,8 +76,7 @@ func filterData(data Data, repo string) Data {
 // Reader, and input/output streams. The TUI loads local data on start and
 // never performs network I/O on its own.
 func Run(ctx context.Context, reader Reader, input io.Reader, output io.Writer) (Model, error) {
-	m := New(reader)
-	m.ctx = ctx
+	m := New(ctx, reader)
 
 	p := tea.NewProgram(
 		m,

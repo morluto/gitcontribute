@@ -35,6 +35,7 @@ type RetryObservation struct {
 	Delay      time.Duration
 	APIVersion string
 	SourceURL  string
+	Context    context.Context
 }
 
 // retryTransport wraps an http.RoundTripper with bounded retries for safe,
@@ -342,6 +343,7 @@ func observation(req *http.Request, resp *http.Response, attempt int, delay time
 		Attempt:   attempt,
 		Delay:     delay,
 		SourceURL: redactSourceURL(req),
+		Context:   req.Context(),
 	}
 	if resp != nil {
 		obs.StatusCode = resp.StatusCode

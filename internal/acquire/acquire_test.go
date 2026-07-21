@@ -75,6 +75,32 @@ func (r *countingRunner) Run(context.Context, string, ...string) (string, error)
 	return "", errors.New("unexpected Git invocation")
 }
 
+type scriptedRunner func(context.Context, string, ...string) (string, error)
+
+func (r scriptedRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+	return r(ctx, name, args...)
+}
+
+func TestCleanupWorktreeReturnsGitRemovalFailure(t *testing.T) {
+	path := t.TempDir()
+	runner := scriptedRunner(func(context.Context, string, ...string) (string, error) {
+		return "", errors.New("git removal failed")
+	})
+	m := &Manager{runner: runner}
+	acq := &Acquisition{CachePath: "/mirror", Path: path}
+
+	err := m.cleanupWorktree(context.Background(), acq)
+	if err == nil || !strings.Contains(err.Error(), "git removal failed") {
+		t.Fatalf("cleanup error = %v", err)
+	}
+	if acq.Path != "" {
+		t.Fatalf("acquisition path retained after directory removal: %q", acq.Path)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("worktree directory still exists: %v", err)
+	}
+}
+
 func TestAcquireRejectsCredentialRemoteBeforeSideEffects(t *testing.T) {
 	fixtureUser := strings.Join([]string{"fixture", "user"}, "-")
 	fixturePassword := strings.Join([]string{"fixture", "password"}, "-")

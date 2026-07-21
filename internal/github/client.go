@@ -129,21 +129,14 @@ func NewClient(cfg Config) (*Client, error) {
 		cb:     newCircuitBreaker(defaultCBMaxFailures, defaultCBHalfOpenWait, defaultCBProbeTimeout),
 	}
 
-	cfg.HTTPClient.Transport = retrier
+	cfg.HTTPClient.Transport = &authTransport{
+		Base:   retrier,
+		Source: cfg.TokenSource,
+	}
 
 	opts := []gh.ClientOptionsFunc{
 		gh.WithHTTPClient(cfg.HTTPClient),
 		gh.WithEnterpriseURLs(cfg.BaseURL, cfg.UploadURL),
-	}
-
-	if cfg.TokenSource != nil {
-		token, err := cfg.TokenSource.Token(context.Background())
-		if err != nil && !errors.Is(err, ErrNoToken) {
-			return nil, fmt.Errorf("resolve token: %w", err)
-		}
-		if token != "" {
-			opts = append(opts, gh.WithAuthToken(token))
-		}
 	}
 
 	ghc, err := gh.NewClient(opts...)

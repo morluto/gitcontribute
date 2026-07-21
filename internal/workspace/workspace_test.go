@@ -453,6 +453,23 @@ func (r *countingRunner) Run(context.Context, string, ...string) (string, error)
 	return "", errors.New("unexpected Git invocation")
 }
 
+func TestManager_CleanupWorktreeReturnsGitRemovalFailure(t *testing.T) {
+	path := t.TempDir()
+	runner := &countingRunner{}
+	m := &Manager{runner: runner}
+
+	err := m.cleanupWorktree(context.Background(), "/mirror", path)
+	if err == nil || !strings.Contains(err.Error(), "unexpected Git invocation") {
+		t.Fatalf("cleanup error = %v", err)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("git calls = %d, want 1", runner.calls)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("worktree directory still exists: %v", err)
+	}
+}
+
 func TestManager_RejectsCredentialRemoteBeforeGitOrMirrorWrite(t *testing.T) {
 	fixtureUser := strings.Join([]string{"fixture", "user"}, "-")
 	fixturePassword := strings.Join([]string{"fixture", "password"}, "-")

@@ -19,6 +19,8 @@ import (
 // callback that records progress and statistics in the corpus.
 type JobFunc func(ctx context.Context, report func(progress, statistics string) error) (any, error)
 
+const jobCleanupTimeout = 5 * time.Second
+
 func jobProgressCounts(completed, total int) string {
 	return fmt.Sprintf(`{"completed_items":%d,"total_items":%d}`, completed, total)
 }
@@ -104,7 +106,7 @@ func newJobExecutorWithConfig(ctx context.Context, c jobStore, cfg jobExecutorCo
 		cfg:     cfg,
 		active:  make(map[string]*activeJob),
 	}
-	e.rootCtx, e.cancel = context.WithCancel(context.Background())
+	e.rootCtx, e.cancel = context.WithCancel(ctx)
 	e.cond = sync.NewCond(&e.mu)
 
 	now := time.Now().UTC()
@@ -119,8 +121,13 @@ func newJobExecutorWithConfig(ctx context.Context, c jobStore, cfg jobExecutorCo
 	if err := c.ReconcileInterruptedJobs(ctx, cfg.leaseTimeout); err != nil {
 		e.cancel()
 		e.heartbeatWG.Wait()
-		_ = c.DeleteJobOwner(context.WithoutCancel(ctx), ownerID)
-		return nil, fmt.Errorf("reconcile interrupted jobs: %w", err)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), jobCleanupTimeout)
+		defer cleanupCancel()
+		cleanupErr := c.DeleteJobOwner(cleanupCtx, ownerID)
+		if cleanupErr != nil {
+			cleanupErr = fmt.Errorf("delete job owner after reconciliation failure: %w", cleanupErr)
+		}
+		return nil, errors.Join(fmt.Errorf("reconcile interrupted jobs: %w", err), cleanupErr)
 	}
 
 	return e, nil
@@ -205,8 +212,9 @@ func (e *JobExecutor) Close() error {
 	e.mu.Unlock()
 
 	e.heartbeatWG.Wait()
-	_ = e.corpus.DeleteJobOwner(context.Background(), e.ownerID)
-	return nil
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(e.rootCtx), jobCleanupTimeout)
+	defer cleanupCancel()
+	return e.corpus.DeleteJobOwner(cleanupCtx, e.ownerID)
 }
 
 func (e *JobExecutor) decrement() {
