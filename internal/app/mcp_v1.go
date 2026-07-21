@@ -436,6 +436,10 @@ func investigationResultToMCP(res *cli.InvestigationResult) mcpserver.Investigat
 
 // RecordHypothesis records a fully structured hypothesis.
 func (r *MCPReader) RecordHypothesis(ctx context.Context, in mcpserver.RecordHypothesisInput) (mcpserver.HypothesisOutput, error) {
+	sourceRefs, err := mcpSourceRefsToDomain(in.SourceRefs)
+	if err != nil {
+		return mcpserver.HypothesisOutput{}, err
+	}
 	input := investigation.CreateHypothesisInput{
 		Title:              in.Title,
 		Description:        in.Description,
@@ -445,7 +449,7 @@ func (r *MCPReader) RecordHypothesis(ctx context.Context, in mcpserver.RecordHyp
 		PotentialImpact:    in.PotentialImpact,
 		OpenQuestions:      append([]string(nil), in.OpenQuestions...),
 		AffectedComponents: append([]string(nil), in.AffectedComponents...),
-		SourceRefs:         mcpSourceRefsToDomain(in.SourceRefs),
+		SourceRefs:         sourceRefs,
 	}
 	h, err := r.Service.CreateHypothesis(ctx, in.InvestigationID, input)
 	if err != nil {
@@ -473,23 +477,34 @@ func hypothesisToMCP(h *investigation.Hypothesis) mcpserver.HypothesisOutput {
 	}
 }
 
-func mcpSourceRefsToDomain(refs []mcpserver.SourceRef) []domain.SourceRef {
+func mcpSourceRefsToDomain(refs []mcpserver.SourceRef) ([]domain.SourceRef, error) {
 	out := make([]domain.SourceRef, len(refs))
 	for i, r := range refs {
+		observedAt, err := parseTime(r.ObservedAt)
+		if err != nil {
+			return nil, fmt.Errorf("source_refs[%d].observed_at: %w", i, err)
+		}
+		asOf, err := parseTime(r.AsOf)
+		if err != nil {
+			return nil, fmt.Errorf("source_refs[%d].as_of: %w", i, err)
+		}
 		out[i] = domain.SourceRef{
 			Source:     r.Source,
 			URL:        r.URL,
 			CommitSHA:  r.CommitSHA,
-			ObservedAt: parseTime(r.ObservedAt),
-			AsOf:       parseTime(r.AsOf),
+			ObservedAt: observedAt,
+			AsOf:       asOf,
 		}
 	}
-	return out
+	return out, nil
 }
 
-func parseTime(s string) time.Time {
-	t, _ := time.Parse(time.RFC3339, s)
-	return t
+func parseTime(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339, s)
 }
 
 // CheckDuplicates finds duplicate-candidate threads for a hypothesis or opportunity.
@@ -575,6 +590,10 @@ func evidenceToMCPItems(items []evidence.Evidence) []mcpserver.EvidenceItem {
 
 // PromoteOpportunity promotes a hypothesis to an opportunity.
 func (r *MCPReader) PromoteOpportunity(ctx context.Context, in mcpserver.PromoteOpportunityInput) (mcpserver.OpportunityOutput, error) {
+	sourceRefs, err := mcpSourceRefsToDomain(in.SourceRefs)
+	if err != nil {
+		return mcpserver.OpportunityOutput{}, err
+	}
 	input := investigation.PromoteOpportunityInput{
 		ProblemStatement:    in.ProblemStatement,
 		Scope:               in.Scope,
@@ -583,7 +602,7 @@ func (r *MCPReader) PromoteOpportunity(ctx context.Context, in mcpserver.Promote
 		Confidence:          in.Confidence,
 		Dependencies:        append([]string(nil), in.Dependencies...),
 		MaintainerAlignment: in.MaintainerAlignment,
-		SourceRefs:          mcpSourceRefsToDomain(in.SourceRefs),
+		SourceRefs:          sourceRefs,
 	}
 	o, err := r.Service.PromoteOpportunityWithInput(ctx, in.HypothesisID, input)
 	if err != nil {
