@@ -448,6 +448,46 @@ func TestExportRedactsSecretsAndLocalPaths(t *testing.T) {
 	}
 }
 
+func TestMalformedContributionMetadataIsPropagated(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+
+	invSvc := investigation.NewService(c, c)
+	inv, err := invSvc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, "sha", "")
+	if err != nil {
+		t.Fatalf("start investigation: %v", err)
+	}
+	h, err := invSvc.RecordHypothesis(ctx, inv.ID, "panic", "desc", investigation.CategoryBug, nil)
+	if err != nil {
+		t.Fatalf("record hypothesis: %v", err)
+	}
+	opp, err := invSvc.PromoteOpportunity(ctx, h.ID, "panic", "parser", "crash", "small", 0.8)
+	if err != nil {
+		t.Fatalf("promote opportunity: %v", err)
+	}
+
+	svc := tracking.NewService(c)
+	contribution, err := svc.RecordContribution(ctx, &tracking.Contribution{
+		OpportunityID: opp.ID,
+		Kind:          "issue",
+		Title:         "title",
+	})
+	if err != nil {
+		t.Fatalf("record contribution: %v", err)
+	}
+
+	if _, err := c.db.ExecContext(ctx, `UPDATE contributions SET payload = ? WHERE id = ?`, "not-json", contribution.ID); err != nil {
+		t.Fatalf("corrupt contribution payload: %v", err)
+	}
+
+	if _, err := svc.GetContribution(ctx, contribution.ID); err == nil {
+		t.Fatal("expected error getting contribution with malformed metadata")
+	}
+	if _, err := svc.ListContributions(ctx, tracking.ContributionFilter{}); err == nil {
+		t.Fatal("expected error listing contributions with malformed metadata")
+	}
+}
+
 func containsAny(s string, subs []string) bool {
 	for _, sub := range subs {
 		if contains(s, sub) {

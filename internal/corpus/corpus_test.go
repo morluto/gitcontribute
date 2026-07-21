@@ -26,6 +26,16 @@ func openTestCorpus(t *testing.T) (*Corpus, string) {
 	return c, path
 }
 
+func TestMigrationLoggerFatalfRecordsError(t *testing.T) {
+	logger := &migrationLogger{}
+	logger.Fatalf("migration %d failed", 7)
+	logger.Fatalf("later failure")
+
+	if err := logger.Err(); err == nil || err.Error() != "migration 7 failed" {
+		t.Fatalf("migration logger error = %v", err)
+	}
+}
+
 func TestOpenAndPragmas(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
