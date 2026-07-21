@@ -43,6 +43,10 @@ GitContribute-owned entries:
 - `[mcp_servers.gitcontribute]` in Codex TOML configuration;
 - `mcpServers.gitcontribute` in Claude JSON configuration.
 
+Codex setup also installs a `gitcontribute` discovery skill under
+`~/.codex/skills/gitcontribute` so deferred MCP tools can be matched
+implicitly for GitHub contribution workflows.
+
 Unrelated configuration is preserved. Repeated setup is idempotent. `remove`
 deletes only those entries; it never removes the GitContribute corpus or its
 application configuration. `--dry-run` performs validation without writes,

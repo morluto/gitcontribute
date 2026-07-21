@@ -257,6 +257,13 @@ func (s *Service) doctor(ctx context.Context) (*cli.DoctorResult, error) {
 				checkErr = errors.New("client detected but GitContribute MCP registration is absent")
 			}
 			add("mcp_"+string(client), false, checkErr, "GitContribute MCP registration is present")
+			if client == clientsetup.Codex {
+				present, _, skillErr := clientsetup.CodexSkillInstalled(home)
+				if skillErr == nil && !present {
+					skillErr = errors.New("codex is detected but the GitContribute discovery skill is absent")
+				}
+				add("codex_skill", false, skillErr, "GitContribute Codex discovery skill is present")
+			}
 		}
 	}
 

@@ -16,6 +16,30 @@ import (
 
 const serverName = "gitcontribute"
 
+const codexSkillDir = "gitcontribute"
+
+const codexSkillOwnershipMarker = "<!-- Managed by gitcontribute setup. Manual edits may be replaced. -->"
+
+var codexSkillContent = []byte(`---
+name: gitcontribute
+description: >
+  Use for source-backed GitHub contribution workflows: repository and code research, issue triage, pull request review, contributor portfolio analysis, contribution preparation, duplicate and competing-work detection, investigations, workspaces, and validation evidence. Do not use for simple one-off GitHub lookups, ordinary local git commands, or GitHub mutations.
+---
+
+<!-- Managed by gitcontribute setup. Manual edits may be replaced. -->
+
+When the user's request matches the description above, prefer the GitContribute MCP server. Discover its tools (names prefixed with mcp__gitcontribute__) and choose the narrowest tool for the task, such as portfolio research, repository search, investigation management, or workspace creation. Let the tool schemas and contracts guide arguments; do not invent unsupported fields. If no GitContribute tool fits, fall back to ordinary tools.
+`)
+
+type codexSkillState string
+
+const (
+	codexSkillAbsent       codexSkillState = "absent"
+	codexSkillCurrent      codexSkillState = "current"
+	codexSkillManagedStale codexSkillState = "managed_stale"
+	codexSkillUnmanaged    codexSkillState = "unmanaged"
+)
+
 // Operation identifies whether client-owned MCP entries are configured or
 // removed.
 type Operation string
@@ -61,12 +85,19 @@ type Result struct {
 	Error  string `json:"error,omitempty"`
 }
 
-// Report contains the resolved launcher and ordered per-client effects.
+// CodexSkillResult reports the managed discovery-skill effect.
+type CodexSkillResult struct {
+	Path   string `json:"path,omitempty"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
 type Report struct {
-	Operation Operation `json:"operation"`
-	DryRun    bool      `json:"dry_run"`
-	Launcher  Launcher  `json:"launcher"`
-	Results   []Result  `json:"results"`
+	Operation  Operation        `json:"operation"`
+	DryRun     bool             `json:"dry_run"`
+	Launcher   Launcher         `json:"launcher"`
+	Results    []Result         `json:"results"`
+	CodexSkill CodexSkillResult `json:"codex_skill,omitempty"`
 }
 
 // Detect returns supported coding clients whose configuration directories are
@@ -149,7 +180,19 @@ func Run(opts Options) (Report, error) {
 		result := configureClient(opts.Operation, client, opts.Home, launcher, opts.DryRun)
 		report.Results = append(report.Results, result)
 	}
+	if containsClient(clients, Codex) {
+		report.CodexSkill = configureCodexSkill(opts.Home, opts.Operation, opts.DryRun)
+	}
 	return report, nil
+}
+
+func containsClient(clients []Client, want Client) bool {
+	for _, c := range clients {
+		if c == want {
+			return true
+		}
+	}
+	return false
 }
 
 func selectedClients(opts Options) ([]Client, error) {
@@ -227,6 +270,84 @@ func configureClient(operation Operation, client Client, home string, launcher L
 		result.Error = err.Error()
 	}
 	return result
+}
+
+// CodexSkillPath returns the managed discovery skill path for a home directory.
+func CodexSkillPath(home string) string {
+	return filepath.Join(home, ".codex", "skills", codexSkillDir, "SKILL.md")
+}
+
+// CodexSkillInstalled reports whether the managed discovery skill is current.
+func CodexSkillInstalled(home string) (bool, string, error) {
+	path := CodexSkillPath(home)
+	state, err := inspectCodexSkill(path)
+	return state == codexSkillCurrent, path, err
+}
+
+func configureCodexSkill(home string, operation Operation, dryRun bool) CodexSkillResult {
+	path := CodexSkillPath(home)
+	state, err := inspectCodexSkill(path)
+	if err != nil {
+		return CodexSkillResult{Path: path, Status: "failed", Error: err.Error()}
+	}
+	if operation == Remove {
+		if state == codexSkillAbsent || state == codexSkillUnmanaged {
+			return CodexSkillResult{Path: path, Status: "not configured"}
+		}
+		if dryRun {
+			return CodexSkillResult{Path: path, Status: "would remove"}
+		}
+		if err := os.Remove(path); err != nil {
+			return CodexSkillResult{Path: path, Status: "failed", Error: err.Error()}
+		}
+		if err := os.Remove(filepath.Dir(path)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			entries, readErr := os.ReadDir(filepath.Dir(path))
+			if readErr != nil || len(entries) == 0 {
+				return CodexSkillResult{Path: path, Status: "failed", Error: err.Error()}
+			}
+		}
+		return CodexSkillResult{Path: path, Status: "removed"}
+	}
+	if state == codexSkillCurrent {
+		return CodexSkillResult{Path: path, Status: "already configured"}
+	}
+	if state == codexSkillUnmanaged {
+		return CodexSkillResult{Path: path, Status: "failed", Error: "discovery skill path exists but is not managed by GitContribute"}
+	}
+	if state == codexSkillManagedStale {
+		if dryRun {
+			return CodexSkillResult{Path: path, Status: "would update"}
+		}
+		if err := writeAtomic(path, codexSkillContent); err != nil {
+			return CodexSkillResult{Path: path, Status: "failed", Error: err.Error()}
+		}
+		return CodexSkillResult{Path: path, Status: "updated"}
+	}
+	if dryRun {
+		return CodexSkillResult{Path: path, Status: "would configure"}
+	}
+	if err := writeAtomic(path, codexSkillContent); err != nil {
+		return CodexSkillResult{Path: path, Status: "failed", Error: err.Error()}
+	}
+	return CodexSkillResult{Path: path, Status: "configured"}
+}
+
+func inspectCodexSkill(path string) (codexSkillState, error) {
+	// #nosec G304 -- path is the fixed managed skill path derived from the selected home.
+	content, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return codexSkillAbsent, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if bytes.Equal(content, codexSkillContent) {
+		return codexSkillCurrent, nil
+	}
+	if bytes.Contains(content, []byte(codexSkillOwnershipMarker)) {
+		return codexSkillManagedStale, nil
+	}
+	return codexSkillUnmanaged, nil
 }
 
 func editClaude(path string, operation Operation, launcher Launcher, dryRun bool) (string, error) {
