@@ -335,6 +335,16 @@ gitcontribute setup --mode mcp --codex --token-source none --dry-run --json
 gitcontribute remove --all-clients --yes         # remove MCP registrations only
 gitcontribute upgrade --check
 gitcontribute upgrade --yes
+gitcontribute corpus inspect                     # no writes or migrations
+gitcontribute corpus backup /safe/path/corpus.db
+gitcontribute corpus migrate --yes               # verified backup by default
+gitcontribute corpus restore /safe/path/corpus.db --yes
+gitcontribute corpus list                     # all repository scopes, bounded summaries
+gitcontribute corpus inventory OWNER/REPO
+gitcontribute corpus prune-code OWNER/REPO --keep-latest 1   # dry-run plan
+gitcontribute corpus prune-code OWNER/REPO --keep-latest 1 --yes
+gitcontribute corpus projections
+gitcontribute corpus rebuild-projection threads_fts --yes
 ```
 
 `gitcontribute init` creates the default database and directories without
@@ -352,6 +362,11 @@ resolved at runtime and are never stored in the corpus or logs. Use
 `gitcontribute status`, `metadata`, and `doctor` to inspect the local setup.
 `metadata` reports the schema of an existing corpus through a read-only check;
 it does not create the database or apply migrations when invoked by itself.
+Setup and ordinary corpus reads also never migrate an existing database or
+rebuild derived indexes. When versions differ, `corpus inspect` shows pending
+steps and `corpus migrate` performs the separately authorized upgrade. Stop or
+restart running MCP processes first; cross-process leases reject unsafe overlap
+without waiting on SQLite timeouts.
 Use `gitcontribute doctor --strict` in automation when unhealthy required
 checks should produce a non-zero exit status. Write contention is reported as
 an optional availability warning rather than database corruption.
@@ -595,9 +610,9 @@ gitcontribute tracking export --output tracking.json
 gitcontribute tracking import --file tracking.json
 ```
 
-Tracking exports use schema version 2 for portable evidence provenance and
-remain backward compatible with older unversioned tracking bundles. Exports are
-redacted: they exclude credentials, tokens, and absolute local paths.
+Tracking exports require schema version 2 for portable evidence provenance.
+Imports reject missing or different schema versions before writing. Exports
+are redacted: they exclude credentials, tokens, and absolute local paths.
 
 </details>
 

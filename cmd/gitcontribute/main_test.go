@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -10,6 +11,34 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/cli"
 )
+
+func TestRunRuntimeContractEmitsOnlyImmutableCompatibilityFields(t *testing.T) {
+	var output bytes.Buffer
+	if err := runRuntimeContract(nil, &output); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	dec := json.NewDecoder(&output)
+	if err := dec.Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got["name"] != "gitcontribute" || got["version"] != version {
+		t.Fatalf("runtime contract = %#v", got)
+	}
+	if got["supported_schema_version"].(float64) <= 0 {
+		t.Fatalf("runtime contract schema = %#v", got)
+	}
+}
+
+func TestRunRuntimeContractRejectsArguments(t *testing.T) {
+	var output bytes.Buffer
+	if err := runRuntimeContract([]string{"--json"}, &output); err == nil {
+		t.Fatal("runtime-contract accepted an argument")
+	}
+	if output.Len() != 0 {
+		t.Fatalf("output = %q", output.String())
+	}
+}
 
 func TestReportCommandErrorPrintsHandledErrorWithoutErrorLog(t *testing.T) {
 	var logs bytes.Buffer

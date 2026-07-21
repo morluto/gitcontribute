@@ -11,7 +11,7 @@ import (
 
 // UpdateHypothesisForCLI maps CLI update options to the structured application input.
 func (s *Service) UpdateHypothesisForCLI(ctx context.Context, id string, opts cli.HypothesisUpdateOptions) (any, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}

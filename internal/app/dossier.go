@@ -111,7 +111,7 @@ func (s *Service) GetRepositoryDossier(ctx context.Context, repo cli.RepoRef) (*
 		return nil, err
 	}
 
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +163,7 @@ func (s *Service) ExtractSeeds(ctx context.Context, repo cli.RepoRef, opts domai
 		return nil, fmt.Errorf("seed limit cannot exceed %d", maxSeedLimit)
 	}
 
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -87,11 +87,8 @@ func (s *Service) RunValidation(ctx context.Context, defID string, kind RunKind)
 	}
 
 	timeout := def.Timeout
-	if timeout < 0 || timeout > maxValidationTimeout {
+	if timeout <= 0 || timeout > maxValidationTimeout {
 		return nil, ErrInvalidTimeout
-	}
-	if timeout == 0 {
-		timeout = defaultValidationTimeout
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

@@ -67,10 +67,11 @@ Interactive setup follows an explicit sequence:
 4. Produce a dry-run plan. Planning never invokes npm or writes configuration,
    corpus, client, or repository-source state.
 5. Ask for confirmation, defaulting to apply, then apply the selected effects.
-6. Verify the applied plan: the corpus is readable and current, its integrity
-   check passes, Git is available, and selected MCP registrations exactly match
-   the installed command. Normal contention from another corpus writer does not
-   make setup fail.
+6. Verify the applied plan: the corpus is readable and schema-compatible, Git
+   is available, and selected MCP registrations exactly match the installed
+   command. Setup does not run a full-corpus integrity scan. `doctor` performs a
+   bounded quick check and reports a diagnostic deadline as a warning, not
+   corruption.
 
 Interactive setup uses inline terminal forms rather than an alternate-screen
 application. Active operations may show a spinner that settles into a durable
@@ -88,6 +89,33 @@ prefix, application configuration, corpus, and coding-client files are separate
 effects. Known client-configuration errors are preflighted before installation.
 If runtime or CLI installation fails, setup stops before writing application or
 coding-client configuration.
+
+If an existing corpus needs migration, setup leaves it unchanged and reports
+the exact current and target versions. Inspect and migrate separately:
+
+```sh
+gitcontribute corpus inspect
+gitcontribute corpus backup /safe/path/corpus.db
+gitcontribute corpus migrate --yes
+```
+
+Migration creates its own verified backup unless `--no-backup` is explicitly
+selected. Running MCP processes hold shared corpus process leases, so migration
+fails fast until those processes are restarted or stopped.
+
+Setup never chooses repository or code-index scope. Repository data enters the
+corpus only through explicit sync/hydration commands; code enters only through
+explicit index/acquire commands. List every stored repository scope with
+`corpus list`; it reports bounded per-repository counts, latest observation
+times, schema and projection status, and pending migration or rebuild work.
+SQLite database and WAL pages are shared, so the report separates whole-file
+sizes from measurable logical observation-payload and code-content bytes
+instead of claiming exact per-repository page usage. Inspect one repository's
+footprint with `corpus inventory OWNER/REPO`. `corpus prune-code` removes only derived code
+snapshots, shows a dry-run plan by default, and never deletes GitHub
+observations. Derived search projection versions are visible through
+`corpus projections`; rebuilds require an explicit named projection and
+`--yes`.
 
 ### MCP runtime policy
 
@@ -119,6 +147,18 @@ under its own versioned path and updates the selected registrations. When a
 registration changes, setup reports the affected clients in
 `restart_clients`; their active sessions must restart to replace older MCP
 processes with the configured runtime.
+
+`upgrade --check` reports the npm launcher, versioned private runtime,
+configured client paths, corpus compatibility, activation, restart, and
+rollback limits as separate stages. `upgrade --yes` may replace a managed
+global npm launcher. When target-release bytes are available from the running
+release or a just-verified global npm installation, it also stages the
+versioned private runtime and updates existing client registrations as one
+rollback-safe activation. It never creates new registrations or migrates
+SQLite. The report lists clients that must restart before their running MCP
+processes use the activated release. An older unmanaged binary that cannot
+obtain target-release bytes leaves registrations unchanged and tells the user
+to rerun upgrade from the installed target release.
 `gitcontribute remove` deletes only selected coding-agent registrations. It
 does not delete versioned private runtimes, uninstall the global CLI, or remove
 application configuration or corpus data. Use

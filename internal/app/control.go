@@ -56,6 +56,11 @@ func (s *Service) Metadata(ctx context.Context) (*cli.MetadataResult, error) {
 		}
 	}
 
+	supported, err := corpus.SupportedSchemaVersion()
+	if err != nil {
+		return nil, fmt.Errorf("read supported schema version: %w", err)
+	}
+
 	capabilities := []string{
 		"archive", "clustering", "collections", "contribution-radar", "contribution-readiness", "dossiers", "evidence",
 		"evidence-freshness", "github-read", "investigations", "local-search", "mcp-stdio",
@@ -63,15 +68,16 @@ func (s *Service) Metadata(ctx context.Context) (*cli.MetadataResult, error) {
 	}
 	sort.Strings(capabilities)
 	return &cli.MetadataResult{
-		Name:          "gitcontribute",
-		Version:       s.version,
-		GoVersion:     runtime.Version(),
-		OS:            runtime.GOOS,
-		Architecture:  runtime.GOARCH,
-		SchemaVersion: schemaVersion,
-		ConfigPath:    configPath,
-		CorpusPath:    cfg.Database,
-		Capabilities:  capabilities,
+		Name:                   "gitcontribute",
+		Version:                s.version,
+		GoVersion:              runtime.Version(),
+		OS:                     runtime.GOOS,
+		Architecture:           runtime.GOARCH,
+		SchemaVersion:          schemaVersion,
+		SupportedSchemaVersion: supported,
+		ConfigPath:             configPath,
+		CorpusPath:             cfg.Database,
+		Capabilities:           capabilities,
 		Features: map[string]bool{
 			"contribution_radar":     true,
 			"contribution_readiness": true,
@@ -109,7 +115,7 @@ func (s *Service) Configure(ctx context.Context, opts cli.ConfigureOptions) (*cl
 
 	if changed && !opts.DryRun {
 		s.mu.Lock()
-		corpusOpen := s.corpus != nil
+		corpusOpen := s.corpus != nil || s.readCorpus != nil
 		s.mu.Unlock()
 		if corpusOpen && before.Database != cfg.Database {
 			return nil, errors.New("cannot change database path while the corpus is open")
@@ -127,7 +133,7 @@ func (s *Service) Configure(ctx context.Context, opts cli.ConfigureOptions) (*cl
 // ControlStatus returns local corpus counts and freshness without network
 // access or implicit hydration.
 func (s *Service) ControlStatus(ctx context.Context) (*cli.ControlStatusResult, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +223,7 @@ func (s *Service) doctor(ctx context.Context) (*cli.DoctorResult, error) {
 	}
 	add("config", true, pathErr, "configuration is readable and valid")
 
-	c, dbErr := s.openCorpus(ctx)
+	c, dbErr := s.openReadOnlyCorpus(ctx)
 	add("database", true, dbErr, "corpus is readable")
 	if dbErr == nil {
 		current, target, schemaErr := c.SchemaVersions(ctx)
@@ -228,8 +234,12 @@ func (s *Service) doctor(ctx context.Context) (*cli.DoctorResult, error) {
 		integrityCtx, cancel := context.WithTimeout(ctx, databaseIntegrityTimeout)
 		integrityErr := c.CheckIntegrity(integrityCtx)
 		cancel()
-		add("database_integrity", true, integrityErr, "database quick check passed")
-		writeErr := c.CheckWriteAccess(ctx)
+		if errors.Is(integrityErr, context.DeadlineExceeded) {
+			add("database_integrity", false, errors.New("database quick check did not finish within the diagnostic deadline"), "")
+		} else {
+			add("database_integrity", true, integrityErr, "database quick check passed")
+		}
+		writeErr := corpus.CheckWriteAccessAtPath(ctx, cfg.Database)
 		add("database_write", false, writeErr, "database is ready for writes")
 	}
 

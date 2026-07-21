@@ -44,30 +44,65 @@ type UpgradeService interface {
 	Upgrade(ctx context.Context, opts UpgradeOptions) (*UpgradeReport, error)
 }
 
+// RuntimeContractService reports only immutable executable compatibility
+// metadata. Implementations must not inspect configuration or the corpus.
+type RuntimeContractService interface {
+	RuntimeContract(ctx context.Context) (*RuntimeContractResult, error)
+}
+
+type RuntimeContractResult struct {
+	Name                   string `json:"name"`
+	Version                string `json:"version"`
+	SupportedSchemaVersion int64  `json:"supported_schema_version"`
+}
+
 type UpgradeOptions struct {
 	Check bool
 	Yes   bool
 }
 
-type UpgradeReport struct {
-	Context string `json:"context"`
-	Current string `json:"current"`
-	Latest  string `json:"latest,omitempty"`
+type UpgradeStage struct {
+	Name    string `json:"name"`
 	Status  string `json:"status"`
-	Command string `json:"command,omitempty"`
+	Path    string `json:"path,omitempty"`
+	Version string `json:"version,omitempty"`
+	Target  string `json:"target,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+type UpgradeConfiguredClient struct {
+	Name    string `json:"name"`
+	Path    string `json:"path,omitempty"`
+	Version string `json:"version,omitempty"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+type UpgradeReport struct {
+	Context           string                    `json:"context"`
+	Current           string                    `json:"current"`
+	Latest            string                    `json:"latest,omitempty"`
+	Status            string                    `json:"status"`
+	Command           string                    `json:"command,omitempty"`
+	Action            string                    `json:"action,omitempty"`
+	Rollback          string                    `json:"rollback,omitempty"`
+	RestartClients    []string                  `json:"restart_clients,omitempty"`
+	Stages            []UpgradeStage            `json:"stages"`
+	ConfiguredClients []UpgradeConfiguredClient `json:"configured_clients,omitempty"`
 }
 
 type MetadataResult struct {
-	Name          string          `json:"name"`
-	Version       string          `json:"version"`
-	GoVersion     string          `json:"go_version"`
-	OS            string          `json:"os"`
-	Architecture  string          `json:"architecture"`
-	SchemaVersion int64           `json:"schema_version"`
-	ConfigPath    string          `json:"config_path"`
-	CorpusPath    string          `json:"corpus_path"`
-	Capabilities  []string        `json:"capabilities"`
-	Features      map[string]bool `json:"features"`
+	Name                   string          `json:"name"`
+	Version                string          `json:"version"`
+	GoVersion              string          `json:"go_version"`
+	OS                     string          `json:"os"`
+	Architecture           string          `json:"architecture"`
+	SchemaVersion          int64           `json:"schema_version"`
+	SupportedSchemaVersion int64           `json:"supported_schema_version"`
+	ConfigPath             string          `json:"config_path"`
+	CorpusPath             string          `json:"corpus_path"`
+	Capabilities           []string        `json:"capabilities"`
+	Features               map[string]bool `json:"features"`
 }
 
 // ConfigureOptions uses pointers so callers can distinguish an omitted value

@@ -44,6 +44,9 @@ func (s *Service) setup(ctx context.Context, opts cli.SetupOptions, observer cli
 	if stop, err := run.preflightClients(); err != nil || stop {
 		return run.report, err
 	}
+	if stop, err := run.preflightCorpus(); err != nil || stop {
+		return run.report, err
+	}
 	if err := run.setupRuntime(); err != nil {
 		return nil, err
 	}
@@ -164,6 +167,33 @@ func (r *setupRun) preflightClients() (bool, error) {
 	return false, nil
 }
 
+func (r *setupRun) preflightCorpus() (bool, error) {
+	if r.operation != clientsetup.Configure || r.opts.DryRun {
+		return false, nil
+	}
+	inspection, err := r.service.InspectCorpus(r.ctx)
+	if err != nil {
+		return false, err
+	}
+	if inspection.State == "missing" || inspection.State == "current" {
+		return false, nil
+	}
+	r.report.Corpus = inspection
+	step := cli.SetupStep{Name: "corpus", Path: inspection.Path, Status: "failed"}
+	switch inspection.State {
+	case "migration_required":
+		step.Message = "setup will not migrate an existing corpus; run corpus migrate explicitly"
+	case "newer":
+		step.Message = "the corpus schema is newer than this executable"
+	case "damaged":
+		step.Message = inspection.Problem
+	default:
+		step.Message = "the corpus cannot be initialized in its current state"
+	}
+	r.report.Steps = append(r.report.Steps, step)
+	return true, nil
+}
+
 func (r *setupRun) setupRuntime() error {
 	if r.operation != clientsetup.Configure {
 		return nil
@@ -276,7 +306,32 @@ func configurationStep(configured *cli.ConfigureResult, err error, existed, dryR
 
 func (r *setupRun) initializeCorpus(configured bool) {
 	if r.opts.DryRun {
-		r.report.Steps = append(r.report.Steps, cli.SetupStep{Name: "corpus", Status: "would initialize"})
+		step := cli.SetupStep{Name: "corpus", Status: "would initialize"}
+		inspection, err := r.service.InspectCorpus(r.ctx)
+		if err != nil {
+			step.Status = "failed"
+			step.Message = err.Error()
+			r.report.Steps = append(r.report.Steps, step)
+			return
+		}
+		r.report.Corpus = inspection
+		step.Path = inspection.Path
+		switch inspection.State {
+		case "missing":
+			step.Status = "would initialize"
+		case "current":
+			step.Status = "already initialized"
+		case "migration_required":
+			step.Status = "failed"
+			step.Message = "setup will not migrate an existing corpus; run corpus migrate explicitly"
+		case "newer":
+			step.Status = "failed"
+			step.Message = "the corpus schema is newer than this executable"
+		case "damaged":
+			step.Status = "failed"
+			step.Message = inspection.Problem
+		}
+		r.report.Steps = append(r.report.Steps, step)
 		return
 	}
 	if !configured {
@@ -388,7 +443,7 @@ func (r *setupRun) verifyAppliedSetup() error {
 	if executableErr := verifySetupExecutable(r.installedExecutable); executableErr != nil {
 		failures = append(failures, "executable: "+executableErr.Error())
 	}
-	c, err := r.service.openCorpus(r.ctx)
+	c, err := r.service.openReadOnlyCorpus(r.ctx)
 	if err != nil {
 		failures = append(failures, "database: "+err.Error())
 	} else {
@@ -397,12 +452,6 @@ func (r *setupRun) verifyAppliedSetup() error {
 			failures = append(failures, "schema: "+schemaErr.Error())
 		} else if current != target {
 			failures = append(failures, fmt.Sprintf("schema: database version %d does not match expected version %d", current, target))
-		}
-		integrityCtx, cancel := context.WithTimeout(r.ctx, databaseIntegrityTimeout)
-		integrityErr := c.CheckIntegrity(integrityCtx)
-		cancel()
-		if integrityErr != nil {
-			failures = append(failures, "database_integrity: "+integrityErr.Error())
 		}
 	}
 	if gitErr := commandAvailable(r.ctx, "git", "--version"); gitErr != nil {

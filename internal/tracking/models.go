@@ -7,9 +7,6 @@ import (
 )
 
 const (
-	// LegacyBundleSchemaVersion is the implicit version used before bundles
-	// carried an explicit schema_version field.
-	LegacyBundleSchemaVersion = 1
 	// CurrentBundleSchemaVersion includes portable evidence provenance.
 	CurrentBundleSchemaVersion = 2
 )
@@ -108,7 +105,7 @@ type ExportOptions struct {
 
 // Bundle is a portable, deterministic snapshot of local tracking metadata.
 type Bundle struct {
-	SchemaVersion        int                    `json:"schema_version,omitempty"`
+	SchemaVersion        int                    `json:"schema_version"`
 	TriageEvents         []*TriageEvent         `json:"triage_events"`
 	Contributions        []*Contribution        `json:"contributions"`
 	ContributionOutcomes []*ContributionOutcome `json:"contribution_outcomes"`

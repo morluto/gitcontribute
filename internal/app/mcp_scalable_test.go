@@ -418,7 +418,6 @@ func TestCompileRepositorySearchRejectsAmbiguousAndInvalidInputs(t *testing.T) {
 		in   mcpserver.SearchGitHubRepositoriesInput
 	}{
 		{name: "empty", in: mcpserver.SearchGitHubRepositoriesInput{}},
-		{name: "two raw fields", in: mcpserver.SearchGitHubRepositoriesInput{Query: "cuda", RawQuery: "triton"}},
 		{name: "raw and structured", in: mcpserver.SearchGitHubRepositoriesInput{RawQuery: "cuda", Language: "Go"}},
 		{name: "unknown match field", in: mcpserver.SearchGitHubRepositoriesInput{Text: "cuda", MatchFields: []string{"topics"}}},
 		{name: "reversed stars", in: mcpserver.SearchGitHubRepositoriesInput{Text: "cuda", StarsMin: 20, StarsMax: 10}},
@@ -434,13 +433,13 @@ func TestCompileRepositorySearchRejectsAmbiguousAndInvalidInputs(t *testing.T) {
 	}
 }
 
-func TestCompileRepositorySearchWarnsAboutLegacyAndReadmeQueries(t *testing.T) {
-	query, interpretation, warnings, err := compileRepositorySearch(mcpserver.SearchGitHubRepositoriesInput{Query: "attention in:readme"})
+func TestCompileRepositorySearchWarnsAboutRawReadmeQueries(t *testing.T) {
+	query, interpretation, warnings, err := compileRepositorySearch(mcpserver.SearchGitHubRepositoriesInput{RawQuery: "attention in:readme"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if query != "attention in:readme" || !strings.Contains(interpretation, "legacy") || len(warnings) != 2 || warnings[0].Code != "deprecated_query" || warnings[1].Code != "broad_readme_match" {
-		t.Fatalf("legacy query context = %q %q %+v", query, interpretation, warnings)
+	if query != "attention in:readme" || !strings.Contains(interpretation, "advanced raw query") || len(warnings) != 1 || warnings[0].Code != "broad_readme_match" {
+		t.Fatalf("raw query context = %q %q %+v", query, interpretation, warnings)
 	}
 }
 

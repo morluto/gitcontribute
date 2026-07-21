@@ -21,7 +21,7 @@ func (s *Service) ListClusters(ctx context.Context, repo cli.RepoRef, limit int)
 	if err := validateClusterList(ref, limit); err != nil {
 		return nil, err
 	}
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +132,7 @@ func (s *Service) Cluster(ctx context.Context, id string, limit int) (*cli.Clust
 		return nil, errors.New("cluster member limit cannot exceed 1000")
 	}
 
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}

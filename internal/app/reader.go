@@ -20,7 +20,7 @@ type corpusReader struct {
 var _ dossier.Reader = (*corpusReader)(nil)
 
 func (r *corpusReader) ReadRepository(ctx context.Context, ref domain.RepoRef) (domain.Repository, []domain.SourceRef, error) {
-	c, err := r.s.openCorpus(ctx)
+	c, err := r.s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return domain.Repository{}, nil, err
 	}
@@ -62,7 +62,7 @@ func (r *corpusReader) ReadRepository(ctx context.Context, ref domain.RepoRef) (
 }
 
 func (r *corpusReader) ReadThreads(ctx context.Context, ref domain.RepoRef, q dossier.ThreadQuery) ([]domain.Thread, []domain.SourceRef, error) {
-	c, err := r.s.openCorpus(ctx)
+	c, err := r.s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -112,7 +112,7 @@ func (r *corpusReader) ReadThreads(ctx context.Context, ref domain.RepoRef, q do
 }
 
 func (r *corpusReader) ReadCoverage(ctx context.Context, ref domain.RepoRef) (domain.Coverage, error) {
-	c, err := r.s.openCorpus(ctx)
+	c, err := r.s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return domain.Coverage{}, err
 	}
@@ -154,7 +154,7 @@ func (r *corpusReader) ReadCoverage(ctx context.Context, ref domain.RepoRef) (do
 }
 
 func (r *corpusReader) ReadContributionGuidance(ctx context.Context, ref domain.RepoRef) (string, []domain.SourceRef, error) {
-	c, err := r.s.openCorpus(ctx)
+	c, err := r.s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return "", nil, err
 	}

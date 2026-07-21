@@ -30,7 +30,7 @@ func (s *Service) OpportunityReadiness(ctx context.Context, opportunityID string
 	if strings.TrimSpace(opportunityID) == "" {
 		return nil, errors.New("opportunity id is required")
 	}
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}

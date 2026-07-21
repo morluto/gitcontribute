@@ -24,10 +24,17 @@ with cross-platform binaries and checksums.
 
 If SQLite corruption is detected:
 
-1. Stop all running gitcontribute processes
-2. Run integrity check: `sqlite3 ~/.gitcontribute/corpus.db "PRAGMA integrity_check;"`
-3. If corruption confirmed, restore from latest backup: `cp ~/.gitcontribute/corpus.db.bak ~/.gitcontribute/corpus.db`
-4. Re-run health check
+1. Stop all running GitContribute and MCP processes.
+2. Run `gitcontribute doctor --strict`. A timeout warning is not proof of
+   corruption; an actual SQLite quick-check error is.
+3. Inspect the candidate backup independently.
+4. Restore through the supported command, which first creates a safety backup:
+
+   ```sh
+   gitcontribute corpus restore /safe/path/corpus.db --yes
+   ```
+
+5. Run `gitcontribute corpus inspect` and `gitcontribute doctor --strict`.
 
 ## Rate Limiting
 
@@ -59,9 +66,14 @@ If jobs appear stuck:
 
 ## Migration Failures
 
-If a Goose migration fails:
+Do not run Goose directly against a user corpus. Use the product-owned lifecycle:
 
-1. Check the migration version: `gitcontribute db version`
-2. Rollback the failed migration: `goose -dir internal/corpus/migrations down`
-3. Fix the migration SQL
-4. Re-apply: `goose -dir internal/corpus/migrations up`
+1. Stop running MCP processes and inspect without mutation:
+   `gitcontribute corpus inspect --json`.
+2. Preserve the backup path and checksum printed by the failed migration.
+3. Fix the migration in a newer binary; never edit an already released
+   migration in place.
+4. Retry with `gitcontribute corpus migrate --yes`.
+5. If recovery requires returning to the pre-migration database, use
+   `gitcontribute corpus restore BACKUP --yes`. Reinstalling an older binary
+   alone cannot roll back an advanced schema.

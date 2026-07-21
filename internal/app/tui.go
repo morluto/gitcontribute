@@ -15,7 +15,7 @@ const maxTUIItems = 100
 
 // Load implements tui.Reader using bounded local corpus reads only.
 func (s *Service) Load(ctx context.Context) (tui.Data, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return tui.Data{}, err
 	}

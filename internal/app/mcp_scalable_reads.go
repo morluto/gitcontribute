@@ -26,7 +26,7 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpserver.GetReposit
 	if len(in.Repositories) < 1 || len(in.Repositories) > 100 {
 		return mcpserver.GetRepositoriesOutput{}, errors.New("repositories must contain 1 to 100 items")
 	}
-	c, err := r.openCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.GetRepositoriesOutput{}, err
 	}
@@ -104,7 +104,7 @@ func (r *MCPReader) GetThreads(ctx context.Context, in mcpserver.GetThreadsInput
 	if in.View != "compact" && in.View != "full" {
 		return mcpserver.GetThreadsOutput{}, errors.New("view must be compact or full")
 	}
-	c, err := r.openCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.GetThreadsOutput{}, err
 	}
@@ -201,7 +201,7 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpserver.L
 	if in.Limit < 1 || in.Limit > 100 {
 		return mcpserver.ListPullRequestPortfolioOutput{}, errors.New("limit must be between 1 and 100")
 	}
-	c, err := r.openCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.ListPullRequestPortfolioOutput{}, err
 	}
@@ -581,7 +581,7 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpserver.FindPrecede
 	if in.Limit < 1 || in.Limit > 100 {
 		return mcpserver.FindPrecedentsOutput{}, errors.New("limit must be between 1 and 100")
 	}
-	c, err := r.openCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.FindPrecedentsOutput{}, err
 	}

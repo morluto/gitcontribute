@@ -319,9 +319,9 @@ repository, thread, facet, or guidance revision it used; readers compare those
 recorded revisions with the current winning local projections and return
 `fresh`, `stale`, `unknown`, or `not_applicable`. Freshness reads must not
 perform network access, execute processes, delete evidence, or silently treat
-stale evidence as invalid. Tracking exports carry evidence provenance in schema
-version 2 while accepting older unversioned bundles that do not contain
-evidence records.
+stale evidence as invalid. Tracking exports require schema version 2 so
+evidence provenance is always explicit; unversioned and other schema versions
+are rejected before import writes begin.
 
 Contribution readiness is also a pure corpus-read capability. It re-evaluates a
 versioned rule set for one opportunity and returns deterministic checks with
@@ -339,11 +339,42 @@ authorize network reads, local writes, process execution, or GitHub mutation.
 
 ## Schema changes
 
-Migrations are embedded from `internal/corpus/migrations` and applied by Goose
-when the corpus opens. Add migrations in numeric order; never edit an applied
-migration to change an existing database. Every migration needs a working Down
-section unless SQLite cannot represent the reversal safely, in which case the
-reason belongs in the migration and an ADR.
+Migrations are embedded from `internal/corpus/migrations` and applied by Goose,
+but an ordinary corpus read never applies them. Read-only opens inspect the
+schema and return a typed migration-required or newer-schema error. Existing
+corpora advance only through the explicit `corpus migrate` capability, which
+plans pending versions, creates a verified online backup by default, reports
+step boundaries, and holds an exclusive cross-process corpus lease. Normal
+readers hold shared leases; incompatible work fails fast instead of waiting on
+SQLite until an opaque deadline.
+
+Schema history starts from the canonical `001_initial.sql` baseline. The
+project does not carry compatibility migrations for pre-release corpus layouts;
+future schema changes append migrations from this baseline. A corpus created by
+an older development build must be recreated rather than upgraded in place.
+
+`setup` may create a missing empty corpus. It must not migrate an existing
+corpus or rebuild derived indexes as a side effect of installing a launcher or
+coding-agent integration. Versioned private runtimes are staged independently;
+client registration is activated only after the configured corpus is usable.
+
+Add migrations in numeric order; never edit an applied migration to change an
+existing database. Every migration needs a working Down section unless SQLite
+cannot represent the reversal safely, in which case the reason belongs in the
+migration and an ADR. Large data migrations need prerequisite indexes and a
+regression plan based on representative row counts.
+
+Durable observations and derived projections have separate lifecycles. Search
+and clustering indexes carry product-owned rule versions and status. A read may
+report a stale or unavailable projection; rebuilding is an explicit local-write
+operation and never triggers GitHub access.
+
+Corpus inventory is also read-only. The corpus-wide view performs grouped
+aggregation and returns at most one summary per repository or code-index scope;
+it does not load observation payloads or code documents into the application.
+Database and WAL bytes remain whole-file measurements because SQLite pages are
+shared. Logical observation-payload and code-content bytes are reported
+separately rather than attributed to individual database pages.
 
 Storage changes should include tests for upgrade behavior, rollback when
 supported, stale-write rejection, transaction atomicity, and deterministic

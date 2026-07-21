@@ -18,7 +18,7 @@ func (s *Service) StartInvestigation(ctx context.Context, repo cli.RepoRef, comm
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +31,7 @@ func (s *Service) StartInvestigation(ctx context.Context, repo cli.RepoRef, comm
 
 // ShowInvestigation returns an investigation by ID.
 func (s *Service) ShowInvestigation(ctx context.Context, id string) (*cli.InvestigationResult, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +44,7 @@ func (s *Service) ShowInvestigation(ctx context.Context, id string) (*cli.Invest
 
 // ListInvestigations returns all investigations.
 func (s *Service) ListInvestigations(ctx context.Context) (*cli.InvestigationListResult, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func (s *Service) ListInvestigations(ctx context.Context) (*cli.InvestigationLis
 
 // AddHypothesis records a hypothesis under an investigation.
 func (s *Service) AddHypothesis(ctx context.Context, investigationID, title, description, category string) (*cli.HypothesisResult, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (s *Service) AddHypothesis(ctx context.Context, investigationID, title, des
 
 // ListHypotheses returns hypotheses for an investigation.
 func (s *Service) ListHypotheses(ctx context.Context, investigationID string) (*cli.HypothesisListResult, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func (s *Service) ListHypotheses(ctx context.Context, investigationID string) (*
 
 // PromoteOpportunity converts a proposed hypothesis into an opportunity.
 func (s *Service) PromoteOpportunity(ctx context.Context, hypothesisID, problem, scope, impact, effort string, confidence float64) (*cli.OpportunityResult, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +104,7 @@ func (s *Service) PromoteOpportunity(ctx context.Context, hypothesisID, problem,
 
 // ShowOpportunity returns an opportunity by ID.
 func (s *Service) ShowOpportunity(ctx context.Context, id string) (*cli.OpportunityResult, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (s *Service) ShowOpportunity(ctx context.Context, id string) (*cli.Opportun
 
 // ListOpportunities returns opportunities, optionally filtered to one investigation.
 func (s *Service) ListOpportunities(ctx context.Context, investigationID string) (*cli.OpportunityListResult, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +144,7 @@ func (s *Service) SetOpportunityStatus(ctx context.Context, id, status, rational
 	if strings.TrimSpace(rationale) == "" {
 		return nil, errors.New("rationale is required")
 	}
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +157,7 @@ func (s *Service) SetOpportunityStatus(ctx context.Context, id, status, rational
 
 // CreateHypothesis records a fully structured hypothesis under an investigation.
 func (s *Service) CreateHypothesis(ctx context.Context, investigationID string, input investigation.CreateHypothesisInput) (*investigation.Hypothesis, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +166,7 @@ func (s *Service) CreateHypothesis(ctx context.Context, investigationID string, 
 
 // UpdateHypothesis deliberately overwrites a hypothesis with rationale.
 func (s *Service) UpdateHypothesis(ctx context.Context, hypothesisID string, input investigation.UpdateHypothesisInput) (*investigation.Hypothesis, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +182,7 @@ func (s *Service) TransitionHypothesis(ctx context.Context, hypothesisID, status
 	if strings.TrimSpace(rationale) == "" {
 		return nil, errors.New("rationale is required")
 	}
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ func (s *Service) TransitionHypothesis(ctx context.Context, hypothesisID, status
 // PromoteOpportunityWithInput promotes a hypothesis with dependencies and
 // maintainer-alignment evidence.
 func (s *Service) PromoteOpportunityWithInput(ctx context.Context, hypothesisID string, input investigation.PromoteOpportunityInput) (*investigation.Opportunity, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -208,15 +208,23 @@ func (s *Service) UpdateOpportunityCollisionStatus(ctx context.Context, opportun
 	if strings.TrimSpace(rationale) == "" {
 		return nil, errors.New("rationale is required")
 	}
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return invSvc.UpdateCollisionStatus(ctx, opportunityID, cStatus, rationale)
 }
 
-func (s *Service) investigationSvc(ctx context.Context) (*investigation.Service, error) {
+func (s *Service) writeInvestigationSvc(ctx context.Context) (*investigation.Service, error) {
 	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return investigation.NewService(c, c), nil
+}
+
+func (s *Service) readInvestigationSvc(ctx context.Context) (*investigation.Service, error) {
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}

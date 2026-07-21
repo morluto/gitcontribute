@@ -24,7 +24,7 @@ func (s *Service) RepositoryHealthWithOptions(ctx context.Context, repo cli.Repo
 		return nil, err
 	}
 
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}

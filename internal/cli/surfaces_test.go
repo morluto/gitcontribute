@@ -225,7 +225,7 @@ func newSurfacesCLI(svc *fakeSurfacesService) (*cli.CLI, *strings.Builder, *stri
 func TestClustersCommand(t *testing.T) {
 	svc := &fakeSurfacesService{fakeService: &fakeService{}}
 	c, stdout, _ := newSurfacesCLI(svc)
-	requireNoErr(t, c.Run(context.Background(), []string{"clusters", "o/r"}))
+	requireNoErr(t, c.Run(context.Background(), []string{"clusters", "list", "o/r"}))
 	if !svc.clustersCalled || svc.lastClustersArg.String() != "o/r" {
 		t.Fatalf("clusters not called: called=%v repo=%+v", svc.clustersCalled, svc.lastClustersArg)
 	}
@@ -234,7 +234,7 @@ func TestClustersCommand(t *testing.T) {
 	}
 
 	c2, stdout, _ := newSurfacesCLI(svc)
-	requireNoErr(t, c2.Run(context.Background(), []string{"clusters", "o/r", "--json"}))
+	requireNoErr(t, c2.Run(context.Background(), []string{"clusters", "list", "o/r", "--json"}))
 	var got cli.ClusterListResult
 	if err := json.Unmarshal([]byte(stdout.String()), &got); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, stdout.String())

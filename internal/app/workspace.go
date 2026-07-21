@@ -29,7 +29,7 @@ func (s *Service) workspaceManager(ctx context.Context) (*workspace.Manager, err
 
 // CreateWorkspace creates a managed worktree for an investigation.
 func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, opts cli.WorkspaceCreateOptions) (*cli.WorkspaceResult, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, o
 
 // ShowWorkspace returns a workspace by ID with its current dirty state.
 func (s *Service) ShowWorkspace(ctx context.Context, id string) (*cli.WorkspaceResult, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +148,7 @@ type WorkspaceDiffResult struct {
 // WorkspaceDiff returns the current diff of a workspace against its recorded
 // base, including changed files and a suggested review order.
 func (s *Service) WorkspaceDiff(ctx context.Context, id string) (*WorkspaceDiffResult, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}

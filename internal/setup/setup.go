@@ -3,6 +3,7 @@ package setup
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -182,6 +183,106 @@ func Run(opts Options) (Report, error) {
 	}
 	if containsClient(clients, Codex) {
 		report.CodexSkill = configureCodexSkill(opts.Home, opts.Operation, opts.DryRun)
+	}
+	return report, nil
+}
+
+// ActivateExisting updates a set of existing GitContribute registrations as
+// one rollback-safe operation. It never creates a new client registration or
+// changes the optional Codex discovery skill. If activation or verification is
+// interrupted, every selected client configuration is restored.
+func ActivateExisting(ctx context.Context, opts Options) (Report, error) {
+	return ActivateExistingAndVerify(ctx, opts, nil)
+}
+
+// ActivateExistingAndVerify keeps the registration snapshots until verify
+// succeeds, allowing callers to include executable and schema checks in the
+// same rollback boundary.
+func ActivateExistingAndVerify(ctx context.Context, opts Options, verify func() error) (Report, error) {
+	return activateExisting(ctx, opts, func(ctx context.Context, _ int) error { return ctx.Err() }, verify)
+}
+
+type registrationSnapshot struct {
+	path string
+	data []byte
+	mode os.FileMode
+}
+
+func activateExisting(ctx context.Context, opts Options, checkpoint func(context.Context, int) error, verify func() error) (Report, error) {
+	if err := ctx.Err(); err != nil {
+		return Report{}, err
+	}
+	opts.Operation = Configure
+	opts.DryRun = false
+	clients, err := selectedClients(opts)
+	if err != nil {
+		return Report{}, err
+	}
+	launcher, err := ResolveLauncher(opts)
+	if err != nil {
+		return Report{}, err
+	}
+
+	snapshots := make([]registrationSnapshot, 0, len(clients))
+	for _, client := range clients {
+		registered, path, err := CheckRegistration(client, opts.Home)
+		if err != nil {
+			return Report{}, fmt.Errorf("inspect %s registration: %w", client, err)
+		}
+		if !registered {
+			return Report{}, fmt.Errorf("%s registration changed before activation", client)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return Report{}, fmt.Errorf("snapshot %s registration: %w", client, err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return Report{}, fmt.Errorf("inspect %s registration permissions: %w", client, err)
+		}
+		snapshots = append(snapshots, registrationSnapshot{path: path, data: data, mode: info.Mode().Perm()})
+	}
+
+	report := Report{Operation: Configure, Launcher: launcher}
+	rollback := func(cause error) (Report, error) {
+		var restoreErrs []error
+		for i := len(snapshots) - 1; i >= 0; i-- {
+			snapshot := snapshots[i]
+			if err := writeAtomic(snapshot.path, snapshot.data); err != nil {
+				restoreErrs = append(restoreErrs, fmt.Errorf("restore %s: %w", snapshot.path, err))
+				continue
+			}
+			if err := os.Chmod(snapshot.path, snapshot.mode); err != nil {
+				restoreErrs = append(restoreErrs, fmt.Errorf("restore permissions for %s: %w", snapshot.path, err))
+			}
+		}
+		return report, errors.Join(cause, errors.Join(restoreErrs...))
+	}
+
+	for i, client := range clients {
+		if err := ctx.Err(); err != nil {
+			return rollback(err)
+		}
+		result := configureClient(Configure, client, opts.Home, launcher, false)
+		report.Results = append(report.Results, result)
+		if result.Error != "" {
+			return rollback(fmt.Errorf("activate %s registration: %s", client, result.Error))
+		}
+		if err := checkpoint(ctx, i); err != nil {
+			return rollback(err)
+		}
+	}
+
+	for _, client := range clients {
+		result := configureClient(Configure, client, opts.Home, launcher, true)
+		if result.Error != "" || result.Status != "already configured" {
+			return rollback(fmt.Errorf("verify %s registration: status %q: %s", client, result.Status, result.Error))
+		}
+	}
+	if verify != nil {
+		if err := verify(); err != nil {
+			return rollback(err)
+		}
 	}
 	return report, nil
 }

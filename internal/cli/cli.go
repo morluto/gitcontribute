@@ -69,7 +69,9 @@ type rootCmd struct {
 	Setup         setupCmd         `cmd:"" help:"Set up GitContribute for MCP, CLI, or both"`
 	Remove        removeCmd        `cmd:"" help:"Remove GitContribute coding-agent integrations"`
 	Upgrade       upgradeCmd       `cmd:"" help:"Check for or install the latest release"`
+	Contract      contractCmd      `cmd:"" name:"runtime-contract" help:"Print the executable runtime compatibility contract"`
 	Init          initCmd          `cmd:"" help:"Initialize the local corpus"`
+	Corpus        corpusCmd        `cmd:"" help:"Inspect, back up, or migrate the local corpus"`
 	Configure     configureCmd     `cmd:"" help:"Inspect or update typed configuration"`
 	Metadata      metadataCmd      `cmd:"" help:"Show application metadata and capabilities"`
 	Status        statusCmd        `cmd:"" help:"Show corpus status"`
@@ -143,8 +145,78 @@ type upgradeCmd struct {
 	JSON  bool `name:"json" help:"Print the result as JSON"`
 }
 
+type contractCmd struct{}
+
 type initCmd struct {
 	JSON bool `name:"json" help:"Print the result as JSON"`
+}
+
+type corpusCmd struct {
+	Inspect           corpusInspectCmd           `cmd:"" help:"Inspect schema compatibility without mutation"`
+	Migrate           corpusMigrateCmd           `cmd:"" help:"Back up and explicitly migrate the corpus"`
+	Backup            corpusBackupCmd            `cmd:"" help:"Create a verified online SQLite backup"`
+	Restore           corpusRestoreCmd           `cmd:"" help:"Restore the corpus with an automatic safety backup"`
+	Inventory         corpusInventoryCmd         `cmd:"" help:"Show stored and derived data for one repository"`
+	List              corpusListCmd              `cmd:"" help:"List bounded storage and freshness summaries for all repositories"`
+	PruneCode         corpusPruneCodeCmd         `cmd:"" name:"prune-code" help:"Plan or prune derived code snapshots for one repository"`
+	RemoveRepository  corpusRemoveRepositoryCmd  `cmd:"" name:"remove-repository" help:"Preview or remove one repository from the corpus"`
+	Projections       corpusProjectionsCmd       `cmd:"" help:"List derived projection versions and status"`
+	RebuildProjection corpusRebuildProjectionCmd `cmd:"" name:"rebuild-projection" help:"Explicitly rebuild one derived search projection"`
+}
+
+type corpusProjectionsCmd struct {
+	JSON bool `name:"json" help:"Print the result as JSON"`
+}
+
+type corpusRebuildProjectionCmd struct {
+	Name string `arg:"" name:"name" enum:"threads_fts,facet_observations_fts,code_documents_fts" help:"Projection name"`
+	Yes  bool   `name:"yes" short:"y" help:"Confirm the local derived-index rebuild"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type corpusInventoryCmd struct {
+	Repo string `arg:"" name:"repository" help:"Repository as OWNER/REPO"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type corpusListCmd struct {
+	JSON bool `name:"json" help:"Print the result as JSON"`
+}
+
+type corpusPruneCodeCmd struct {
+	Repo       string `arg:"" name:"repository" help:"Repository as OWNER/REPO"`
+	KeepLatest int    `name:"keep-latest" default:"1" help:"Number of newest code snapshots to retain"`
+	Yes        bool   `name:"yes" short:"y" help:"Apply the displayed derived-data prune plan"`
+	JSON       bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type corpusRemoveRepositoryCmd struct {
+	Repo string `arg:"" name:"repository" help:"Repository as OWNER/REPO"`
+	Yes  bool   `name:"yes" short:"y" help:"Apply the exact displayed repository-removal plan"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type corpusInspectCmd struct {
+	JSON bool `name:"json" help:"Print the result as JSON"`
+}
+
+type corpusMigrateCmd struct {
+	BackupPath string `name:"backup" help:"Backup destination (defaults beside the corpus)"`
+	NoBackup   bool   `name:"no-backup" help:"Migrate without creating a backup"`
+	Yes        bool   `name:"yes" short:"y" help:"Apply the migration without prompting"`
+	JSON       bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type corpusBackupCmd struct {
+	Destination string `arg:"" name:"destination" help:"New backup file path"`
+	JSON        bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type corpusRestoreCmd struct {
+	Source       string `arg:"" name:"source" help:"Verified SQLite backup to restore"`
+	SafetyBackup string `name:"safety-backup" help:"Safety-backup destination (defaults beside the corpus)"`
+	Yes          bool   `name:"yes" short:"y" help:"Confirm replacement of the configured corpus"`
+	JSON         bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type configureCmd struct {
@@ -600,7 +672,6 @@ type tuiCmd struct {
 // Run parses arguments and dispatches to the appropriate Service or MCPRunner
 // method. It respects context cancellation.
 func (c *CLI) Run(ctx context.Context, args []string) error {
-	args = normalizeCompatibilityArgs(args)
 	if len(args) == 0 {
 		return c.runDefault(ctx)
 	}
@@ -648,8 +719,12 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runRemoveCommand(ctx, &cli.Remove)
 	case "upgrade":
 		return c.runUpgrade(ctx, &cli.Upgrade)
+	case "runtime-contract":
+		return c.runRuntimeContract(ctx)
 	case "init":
 		return c.runInit(ctx, &cli.Init)
+	case "corpus":
+		return c.runCorpus(ctx, command, &cli.Corpus)
 	case "configure":
 		return c.runConfigure(ctx, &cli.Configure)
 	case "metadata":
@@ -774,6 +849,18 @@ func (c *CLI) runUpgrade(ctx context.Context, cmd *upgradeCmd) error {
 	if report.Command != "" {
 		_, err = fmt.Fprintf(c.stdout, "\n%s", report.Command)
 	}
+	for _, stage := range report.Stages {
+		_, err = fmt.Fprintf(c.stdout, "\n- %s: %s", stage.Name, stage.Status)
+		if stage.Message != "" {
+			_, err = fmt.Fprintf(c.stdout, " — %s", stage.Message)
+		}
+	}
+	if report.Action != "" {
+		_, err = fmt.Fprintf(c.stdout, "\nNext: %s", report.Action)
+	}
+	if report.Rollback != "" {
+		_, err = fmt.Fprintf(c.stdout, "\nRollback: %s", report.Rollback)
+	}
 	if err == nil {
 		_, err = fmt.Fprintln(c.stdout)
 	}
@@ -885,62 +972,6 @@ func (c *CLI) promptLine() (string, error) {
 			}
 			return "", err
 		}
-	}
-}
-
-func normalizeCompatibilityArgs(args []string) []string {
-	if len(args) == 0 {
-		return args
-	}
-	switch args[0] {
-	case "mcp":
-		if len(args) > 1 && args[1] == "serve" {
-			return args
-		}
-		out := make([]string, 0, len(args)+1)
-		out = append(out, "mcp", "serve")
-		return append(out, args[1:]...)
-	case "dossier":
-		if len(args) > 1 && (args[1] == "build" || args[1] == "show" || args[1] == "export") {
-			return args
-		}
-		out := make([]string, 0, len(args)+1)
-		out = append(out, "dossier", "show")
-		return append(out, args[1:]...)
-	case "search":
-		if len(args) > 1 {
-			switch args[1] {
-			case "repos", "issues", "prs", "threads", "code", "all", "--help", "-h":
-				return args
-			}
-		}
-		kind := "all"
-		out := make([]string, 0, len(args)+1)
-		out = append(out, "search")
-		for i := 1; i < len(args); i++ {
-			arg := args[i]
-			switch {
-			case strings.HasPrefix(arg, "--kind="):
-				kind = strings.TrimPrefix(arg, "--kind=")
-			case arg == "--kind" || arg == "-k":
-				if i+1 < len(args) {
-					kind = args[i+1]
-					i++
-				}
-			default:
-				out = append(out, arg)
-			}
-		}
-		return append([]string{"search", kind}, out[1:]...)
-	case "clusters":
-		if len(args) > 1 && (args[1] == "list" || args[1] == "refresh" || args[1] == "--help" || args[1] == "-h") {
-			return args
-		}
-		out := make([]string, 0, len(args)+1)
-		out = append(out, "clusters", "list")
-		return append(out, args[1:]...)
-	default:
-		return args
 	}
 }
 
@@ -1632,6 +1663,124 @@ func (c *CLI) runInit(ctx context.Context, cmd *initCmd) error {
 		return c.mapError(err)
 	}
 	return c.render(cmd.JSON, res)
+}
+
+func (c *CLI) runCorpus(ctx context.Context, command string, cmd *corpusCmd) error {
+	service, ok := c.svc.(CorpusLifecycleService)
+	if !ok {
+		return NewCLIError(ExitNotWired, ErrNotWired)
+	}
+	switch command {
+	case "corpus inspect":
+		result, err := service.InspectCorpus(ctx)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Inspect.JSON, result)
+	case "corpus backup":
+		result, err := service.BackupCorpus(ctx, cmd.Backup.Destination)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Backup.JSON, result)
+	case "corpus migrate":
+		if !cmd.Migrate.Yes {
+			if !c.interactiveInput() {
+				return NewCLIError(ExitUsage, errors.New("corpus migration requires --yes in non-interactive use"))
+			}
+			confirmed, err := c.confirmSetup("Back up and migrate the configured corpus")
+			if err != nil {
+				return NewCLIError(ExitUsage, err)
+			}
+			if !confirmed {
+				_, _ = fmt.Fprintln(c.stderr, "Corpus migration cancelled.")
+				return nil
+			}
+		}
+		result, err := service.MigrateCorpus(ctx, CorpusMigrateOptions{BackupPath: cmd.Migrate.BackupPath, NoBackup: cmd.Migrate.NoBackup})
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Migrate.JSON, result)
+	case "corpus restore":
+		if !cmd.Restore.Yes {
+			if !c.interactiveInput() {
+				return NewCLIError(ExitUsage, errors.New("corpus restore requires --yes in non-interactive use"))
+			}
+			confirmed, err := c.confirmSetup("Replace the configured corpus after creating a safety backup")
+			if err != nil {
+				return NewCLIError(ExitUsage, err)
+			}
+			if !confirmed {
+				_, _ = fmt.Fprintln(c.stderr, "Corpus restore cancelled.")
+				return nil
+			}
+		}
+		result, err := service.RestoreCorpus(ctx, cmd.Restore.Source, cmd.Restore.SafetyBackup)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Restore.JSON, result)
+	case "corpus inventory":
+		result, err := service.InventoryCorpus(ctx, cmd.Inventory.Repo)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Inventory.JSON, result)
+	case "corpus list":
+		result, err := service.ListCorpusInventory(ctx)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.List.JSON, result)
+	case "corpus prune-code":
+		plan, err := service.PlanCodePrune(ctx, cmd.PruneCode.Repo, cmd.PruneCode.KeepLatest)
+		if err != nil {
+			return c.mapError(err)
+		}
+		if !cmd.PruneCode.Yes {
+			return c.render(cmd.PruneCode.JSON, plan)
+		}
+		expected := make([]string, len(plan.Delete))
+		for i := range plan.Delete {
+			expected[i] = plan.Delete[i].CommitSHA
+		}
+		result, err := service.ApplyCodePrune(ctx, cmd.PruneCode.Repo, cmd.PruneCode.KeepLatest, expected)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.PruneCode.JSON, result)
+	case "corpus remove-repository":
+		plan, err := service.PlanRepositoryRemoval(ctx, cmd.RemoveRepository.Repo)
+		if err != nil {
+			return err
+		}
+		if !cmd.RemoveRepository.Yes {
+			return c.render(cmd.RemoveRepository.JSON, plan)
+		}
+		result, err := service.ApplyRepositoryRemoval(ctx, cmd.RemoveRepository.Repo, plan.Revision)
+		if err != nil {
+			return err
+		}
+		return c.render(cmd.RemoveRepository.JSON, result)
+	case "corpus projections":
+		result, err := service.ListCorpusProjections(ctx)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Projections.JSON, result)
+	case "corpus rebuild-projection":
+		if !cmd.RebuildProjection.Yes {
+			return NewCLIError(ExitUsage, errors.New("projection rebuild requires --yes"))
+		}
+		result, err := service.RebuildCorpusProjection(ctx, cmd.RebuildProjection.Name)
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.RebuildProjection.JSON, result)
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown corpus command: %s", command))
+	}
 }
 
 func (c *CLI) runConfigure(ctx context.Context, cmd *configureCmd) error {

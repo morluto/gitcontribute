@@ -41,8 +41,8 @@ corpus.find_precedents -> workflow.find_competing_work
 
 Search responses return the compiled provider `query`, a short interpretation,
 request-specific warnings, semantic `repository:owner/name` references, and a
-non-mandatory suggested thread-sync call. The deprecated `query` field remains
-accepted for compatibility and emits a migration warning.
+non-mandatory suggested thread-sync call. Advanced provider syntax uses the
+explicit `raw_query` field; there is no deprecated alias.
 - `github.sync_repository_metadata` refreshes facts for known repositories only.
 - `corpus.get_repositories`, `corpus.get_threads`,
   `corpus.rank_threads`, and `corpus.find_precedents` are offline.

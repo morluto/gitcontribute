@@ -159,7 +159,7 @@ func (s *Service) loadOpportunityEvidence(ctx context.Context, c *corpus.Corpus,
 }
 
 func (s *Service) workspaceDiff(ctx context.Context, workspaceID string, inv *investigation.Investigation) (string, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -256,7 +256,7 @@ func (s *Service) PrepareReviewReport(ctx context.Context, input PrepareReviewRe
 	}
 
 	if input.WorkspaceID != "" {
-		c, err := s.openCorpus(ctx)
+		c, err := s.openReadOnlyCorpus(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -287,7 +287,7 @@ func (s *Service) PrepareReviewReport(ctx context.Context, input PrepareReviewRe
 }
 
 func (s *Service) loadOpportunityAndInvestigation(ctx context.Context, opportunityID string) (*investigation.Opportunity, *investigation.Investigation, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -303,7 +303,7 @@ func (s *Service) loadOpportunityAndInvestigation(ctx context.Context, opportuni
 }
 
 func (s *Service) evidenceForOpportunity(ctx context.Context, opportunityID string) ([]*evidence.Evidence, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}

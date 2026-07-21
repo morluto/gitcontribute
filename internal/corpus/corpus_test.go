@@ -62,6 +62,46 @@ func TestOpenAndPragmas(t *testing.T) {
 	}
 }
 
+func TestOpenReopensPathAfterInitializationLeaseHandoff(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.db")
+	replacement := filepath.Join(dir, "replacement.db")
+
+	replacementCorpus, err := Open(ctx, replacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := replacementCorpus.ApplyRepositoryObservation(ctx, "owner", "replacement", "external", time.Unix(1, 0), `{}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := replacementCorpus.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	originalHandoff := openLeaseHandoff
+	t.Cleanup(func() { openLeaseHandoff = originalHandoff })
+	openLeaseHandoff = func(path string) error {
+		if path != target {
+			return fmt.Errorf("handoff path = %q, want %q", path, target)
+		}
+		return replaceDatabaseFile(replacement, target)
+	}
+
+	c, err := Open(ctx, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	repo, err := c.GetRepository(ctx, "owner", "replacement")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo == nil {
+		t.Fatal("opened corpus retained the initialized inode instead of reopening the replacement path")
+	}
+}
+
 func TestConcurrentOpenUsesIndependentMigrationProviders(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()

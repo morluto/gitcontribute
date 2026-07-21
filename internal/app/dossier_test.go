@@ -150,10 +150,10 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 
 	res, err := svc.Dossier(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
 	if err != nil {
-		t.Fatalf("legacy Dossier: %v", err)
+		t.Fatalf("dossier summary: %v", err)
 	}
 	if res.Stars != 10 || res.OpenIssues != 1 || res.Summary != "A test repo" {
-		t.Fatalf("unexpected legacy dossier result: %+v", res)
+		t.Fatalf("unexpected dossier summary: %+v", res)
 	}
 }
 

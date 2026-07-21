@@ -21,7 +21,7 @@ func (r *MCPReader) FindPortfolioOverlaps(ctx context.Context, in mcpserver.Find
 	if len(in.PullRequests) < 1 || len(in.PullRequests) > 100 {
 		return mcpserver.FindPortfolioOverlapsOutput{}, errors.New("pull_requests must contain 1 to 100 items")
 	}
-	c, err := r.openCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.FindPortfolioOverlapsOutput{}, err
 	}

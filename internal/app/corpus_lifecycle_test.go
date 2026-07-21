@@ -1,0 +1,169 @@
+package app
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/config"
+	"github.com/morluto/gitcontribute/internal/corpus"
+	_ "modernc.org/sqlite"
+)
+
+func TestApplicationWriteOpenDoesNotMigrateExistingCorpus(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home})
+	first, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	dbPath := first.databasePath()
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM goose_db_version WHERE version_id > 0`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := New(paths, "1.2.3", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	_, err = second.openCorpus(ctx)
+	var migrationRequired *corpus.MigrationRequiredError
+	if !errors.As(err, &migrationRequired) {
+		t.Fatalf("openCorpus error = %v, want MigrationRequiredError", err)
+	}
+	version, exists, err := corpus.InspectSchemaVersion(ctx, dbPath)
+	if err != nil || !exists || version != 0 {
+		t.Fatalf("schema after rejected write open = %d, exists=%v, err=%v", version, exists, err)
+	}
+	report, err := second.Setup(ctx, cli.SetupOptions{
+		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
+		Executable: filepath.Join(home, "missing-runtime"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.HasFailures() || report.Corpus == nil || report.Corpus.State != "migration_required" {
+		t.Fatalf("setup corpus preflight = %+v", report)
+	}
+	for _, step := range report.Steps {
+		if step.Name == "mcp-runtime" {
+			t.Fatalf("setup attempted runtime installation before corpus preflight: %+v", report)
+		}
+	}
+}
+
+func TestRestoreCorpusCreatesSafetyBackupAndReplacesState(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	svc, err := New(config.NewPaths(&config.Env{Home: home}), "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c, err := svc.openCorpus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ApplyRepositoryObservation(ctx, "owner", "kept", "external", time.Unix(1, 0), `{}`); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(home, "restore-source.db")
+	if _, err := corpus.Backup(ctx, svc.databasePath(), source, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ApplyRepositoryObservation(ctx, "owner", "removed", "external", time.Unix(2, 0), `{}`); err != nil {
+		t.Fatal(err)
+	}
+	safety := filepath.Join(home, "safety.db")
+	report, err := svc.RestoreCorpus(ctx, source, safety)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.SafetyBackup == nil || report.SafetyBackup.Path != safety {
+		t.Fatalf("restore report = %+v", report)
+	}
+	if _, err := os.Stat(safety); err != nil {
+		t.Fatalf("safety backup: %v", err)
+	}
+	read, err := svc.openReadOnlyCorpus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repos, err := read.ListRepositories(ctx, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repos) != 1 || repos[0].Name != "kept" {
+		t.Fatalf("repositories = %+v", repos)
+	}
+}
+
+func TestProjectionResultExposesSourceAndAttemptState(t *testing.T) {
+	started := time.Unix(100, 0).UTC()
+	finished := time.Unix(200, 0).UTC()
+	result := projectionResult(corpus.ProjectionState{
+		Name: "threads_fts", Version: "threads-fts-v1", Status: corpus.ProjectionStatusFailed,
+		RowCount: 42, SourceRevision: "source-revision", ContentHash: "sha256",
+		AttemptStatus: corpus.ProjectionAttemptFailed, AttemptStartedAt: started,
+		AttemptFinishedAt: finished, AttemptError: "canceled",
+	})
+	if result.SourceRevision != "source-revision" || result.ContentHash != "sha256" ||
+		result.AttemptStatus != "failed" || result.AttemptError != "canceled" ||
+		result.AttemptStartedAt == "" || result.AttemptFinishedAt == "" {
+		t.Fatalf("projection result = %+v", result)
+	}
+}
+
+func TestListCorpusInventoryCombinesSchemaRepositoriesAndProjections(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	svc, err := New(config.NewPaths(&config.Env{Home: home}), "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c, err := svc.openCorpus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "1", time.Unix(1, 0), `{"stored":true}`); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.ListCorpusInventory(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Schema == nil || result.Schema.State != "current" || len(result.Repositories) != 1 || result.Repositories[0].Repo != "owner/repo" {
+		t.Fatalf("inventory = %+v", result)
+	}
+	if len(result.Projections) != 3 || result.DatabaseBytes == 0 || result.SizeAttribution == "" {
+		t.Fatalf("inventory metadata = %+v", result)
+	}
+}
