@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/morluto/gitcontribute/internal/buflimit"
 	"github.com/morluto/gitcontribute/internal/gitremote"
 )
 
@@ -27,7 +27,6 @@ var (
 	ErrInvalidName    = errors.New("invalid name")
 	ErrInvalidRemote  = errors.New("invalid remote")
 	ErrRemoteMismatch = errors.New("existing mirror remote does not match requested remote")
-	ErrOutputLimit    = errors.New("git output exceeds limit")
 )
 
 const maxGitOutputBytes = 64 << 20
@@ -51,42 +50,21 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) (string,
 		"GIT_CONFIG_GLOBAL="+os.DevNull,
 		"GIT_OPTIONAL_LOCKS=0",
 	)
-	stdout := &cappedBuffer{remaining: maxGitOutputBytes}
-	stderr := &cappedBuffer{remaining: 64 << 10}
+	stdout := buflimit.NewBuffer(maxGitOutputBytes)
+	stderr := buflimit.NewBuffer(64 << 10)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	err := cmd.Run()
 	if ctx.Err() != nil {
 		return "", ctx.Err()
 	}
-	if stdout.exceeded || stderr.exceeded {
-		return stdout.buf.String(), ErrOutputLimit
+	if stdout.Exceeded() || stderr.Exceeded() {
+		return stdout.String(), buflimit.ErrOutputLimit
 	}
 	if err != nil {
-		return "", fmt.Errorf("exec %s: %w (stderr: %s)", name, err, strings.TrimSpace(stderr.buf.String()))
+		return "", fmt.Errorf("exec %s: %w (stderr: %s)", name, err, strings.TrimSpace(stderr.String()))
 	}
-	return stdout.buf.String(), nil
-}
-
-type cappedBuffer struct {
-	buf       bytes.Buffer
-	remaining int
-	exceeded  bool
-}
-
-func (b *cappedBuffer) Write(p []byte) (int, error) {
-	if len(p) <= b.remaining {
-		n, err := b.buf.Write(p)
-		b.remaining -= n
-		return n, err
-	}
-	written := b.remaining
-	if written > 0 {
-		_, _ = b.buf.Write(p[:written])
-		b.remaining = 0
-	}
-	b.exceeded = true
-	return written, ErrOutputLimit
+	return stdout.String(), nil
 }
 
 // DefaultRunner returns a Runner backed by the local git executable.
@@ -436,7 +414,7 @@ func (m *Manager) Status(ctx context.Context, name string) (Status, error) {
 
 func (m *Manager) status(ctx context.Context, path string) (Status, error) {
 	out, err := m.git(ctx, path, "status", "--porcelain")
-	if errors.Is(err, ErrOutputLimit) {
+	if errors.Is(err, buflimit.ErrOutputLimit) {
 		return Status{Dirty: true}, nil
 	}
 	if err != nil {

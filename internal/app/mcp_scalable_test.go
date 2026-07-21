@@ -267,6 +267,32 @@ func TestCancelJobsPreservesOrderAndIsIdempotent(t *testing.T) {
 	assertCancelJobsOutput(t, out, queued.ID)
 }
 
+func TestMCPSourceRefsToDomainRejectsInvalidTimestamps(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ref  mcpserver.SourceRef
+		want string
+	}{
+		{name: "observed at", ref: mcpserver.SourceRef{ObservedAt: "not-a-date"}, want: "source_refs[0].observed_at"},
+		{name: "as of", ref: mcpserver.SourceRef{AsOf: "not-a-date"}, want: "source_refs[0].as_of"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := mcpSourceRefsToDomain([]mcpserver.SourceRef{tc.ref})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want field path %q", err, tc.want)
+			}
+		})
+	}
+
+	refs, err := mcpSourceRefsToDomain([]mcpserver.SourceRef{{ObservedAt: "2026-07-21T00:00:00Z"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(refs) != 1 || refs[0].ObservedAt.IsZero() || !refs[0].AsOf.IsZero() {
+		t.Fatalf("source refs = %+v", refs)
+	}
+}
+
 func assertCancelJobsOutput(t *testing.T, out mcpserver.GetJobsOutput, queuedID string) {
 	t.Helper()
 	if out.Status != "partial" || len(out.Items) != 6 {

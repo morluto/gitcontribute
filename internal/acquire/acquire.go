@@ -4,7 +4,6 @@
 package acquire
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -19,6 +18,7 @@ import (
 
 	"github.com/gofrs/flock"
 	"github.com/google/uuid"
+	"github.com/morluto/gitcontribute/internal/buflimit"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/gitremote"
 )
@@ -38,10 +38,6 @@ var (
 
 	// ErrNotBare indicates a cache path exists but is not a bare repository.
 	ErrNotBare = errors.New("cache is not a bare repository")
-
-	// ErrOutputLimit indicates a git command produced more output than the
-	// bounded runner retained.
-	ErrOutputLimit = errors.New("git output exceeds limit")
 )
 
 const maxGitOutputBytes = 64 << 20
@@ -126,8 +122,8 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) (string,
 		"GIT_OPTIONAL_LOCKS=0",
 	)
 
-	stdout := &cappedBuffer{remaining: maxGitOutputBytes}
-	stderr := &cappedBuffer{remaining: 64 << 10}
+	stdout := buflimit.NewBuffer(maxGitOutputBytes)
+	stderr := buflimit.NewBuffer(64 << 10)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
@@ -135,34 +131,13 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) (string,
 	if ctx.Err() != nil {
 		return "", ctx.Err()
 	}
-	if stdout.exceeded || stderr.exceeded {
-		return stdout.buf.String(), ErrOutputLimit
+	if stdout.Exceeded() || stderr.Exceeded() {
+		return stdout.String(), buflimit.ErrOutputLimit
 	}
 	if err != nil {
-		return "", fmt.Errorf("exec %s: %w (stderr: %s)", name, err, strings.TrimSpace(stderr.buf.String()))
+		return "", fmt.Errorf("exec %s: %w (stderr: %s)", name, err, strings.TrimSpace(stderr.String()))
 	}
-	return stdout.buf.String(), nil
-}
-
-type cappedBuffer struct {
-	buf       bytes.Buffer
-	remaining int
-	exceeded  bool
-}
-
-func (b *cappedBuffer) Write(p []byte) (int, error) {
-	if len(p) <= b.remaining {
-		n, err := b.buf.Write(p)
-		b.remaining -= n
-		return n, err
-	}
-	written := b.remaining
-	if written > 0 {
-		_, _ = b.buf.Write(p[:written])
-		b.remaining = 0
-	}
-	b.exceeded = true
-	return written, ErrOutputLimit
+	return stdout.String(), nil
 }
 
 // NewManager creates a manager rooted at root. A nil runner uses the local git
@@ -401,8 +376,10 @@ func (m *Manager) resolveDefaultBranch(ctx context.Context, mirrorPath string) (
 			}
 		}
 	}
-	for _, branch := range []string{"main", "master"} {
-		if _, err := m.git(ctx, mirrorPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch+"^{commit}"); err == nil {
+	out, err = m.git(ctx, mirrorPath, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err == nil {
+		branch := strings.TrimSpace(out)
+		if branch != "" && branch != "HEAD" {
 			return branch, nil
 		}
 	}

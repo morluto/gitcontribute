@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -131,5 +132,121 @@ func TestMalformedClientConfigFailsWithoutOverwrite(t *testing.T) {
 	}
 	if string(after) != string(original) {
 		t.Fatalf("malformed config was overwritten: %q", after)
+	}
+}
+
+func TestRunInstallsAndRemovesCodexSkillIdempotently(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("model = \"test\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := Run(Options{Operation: Configure, Clients: []Client{Codex}, Home: home, Executable: "/bin/gitcontribute"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.CodexSkill.Status != "configured" {
+		t.Fatalf("codex skill status = %q, want configured", report.CodexSkill.Status)
+	}
+	skillPath := CodexSkillPath(home)
+	if _, err := os.Stat(skillPath); err != nil {
+		t.Fatalf("skill missing: %v", err)
+	}
+	written, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(written, codexSkillContent) {
+		t.Fatalf("skill content mismatch")
+	}
+
+	report, err = Run(Options{Operation: Configure, Clients: []Client{Codex}, Home: home, Executable: "/bin/gitcontribute"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.CodexSkill.Status != "already configured" {
+		t.Fatalf("codex skill status = %q, want already configured", report.CodexSkill.Status)
+	}
+
+	report, err = Run(Options{Operation: Remove, Clients: []Client{Codex}, Home: home})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.CodexSkill.Status != "removed" {
+		t.Fatalf("codex skill status = %q, want removed", report.CodexSkill.Status)
+	}
+	if _, err := os.Stat(skillPath); !os.IsNotExist(err) {
+		t.Fatalf("skill still present after remove: %v", err)
+	}
+
+	report, err = Run(Options{Operation: Remove, Clients: []Client{Codex}, Home: home})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.CodexSkill.Status != "not configured" {
+		t.Fatalf("codex skill status = %q, want not configured", report.CodexSkill.Status)
+	}
+}
+
+func TestRunDoesNotInstallCodexSkillForClaudeOnly(t *testing.T) {
+	home := t.TempDir()
+	report, err := Run(Options{Operation: Configure, Clients: []Client{Claude}, Home: home, Executable: "/bin/gitcontribute"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.CodexSkill.Status != "" {
+		t.Fatalf("unexpected codex skill result: %+v", report.CodexSkill)
+	}
+	if _, err := os.Stat(CodexSkillPath(home)); !os.IsNotExist(err) {
+		t.Fatalf("codex skill installed for claude-only")
+	}
+}
+
+func TestCodexSkillPreservesUnmanagedContent(t *testing.T) {
+	home := t.TempDir()
+	path := CodexSkillPath(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte("---\nname: gitcontribute\ndescription: user-authored\n---\n")
+	if err := os.WriteFile(path, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	configured := configureCodexSkill(home, Configure, false)
+	if configured.Status != "failed" {
+		t.Fatalf("configure status = %q, want failed conflict", configured.Status)
+	}
+	removed := configureCodexSkill(home, Remove, false)
+	if removed.Status != "not configured" {
+		t.Fatalf("remove status = %q, want not configured", removed.Status)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("unmanaged skill changed: %q", got)
+	}
+}
+
+func TestCodexSkillRemovalPreservesSiblingFiles(t *testing.T) {
+	home := t.TempDir()
+	if result := configureCodexSkill(home, Configure, false); result.Status != "configured" {
+		t.Fatalf("configure = %+v", result)
+	}
+	sibling := filepath.Join(filepath.Dir(CodexSkillPath(home)), "notes.txt")
+	if err := os.WriteFile(sibling, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if result := configureCodexSkill(home, Remove, false); result.Status != "removed" {
+		t.Fatalf("remove = %+v", result)
+	}
+	if got, err := os.ReadFile(sibling); err != nil || string(got) != "keep" {
+		t.Fatalf("sibling file = %q, %v", got, err)
 	}
 }

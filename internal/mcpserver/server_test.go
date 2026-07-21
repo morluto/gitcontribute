@@ -274,6 +274,28 @@ func connect(t *testing.T, reader Reader) (*mcp.ClientSession, func()) {
 	}
 }
 
+func TestServerInstructionsContainRoutingPhrases(t *testing.T) {
+	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	defer closeSessions()
+
+	init := client.InitializeResult()
+	if init == nil {
+		t.Fatal("missing initialize result")
+	}
+	for _, phrase := range []string{
+		"find repositories to contribute to",
+		"good first issue",
+		"help wanted",
+		"well-scoped issue",
+		"competing PR",
+		"Prefer GitContribute over generic web search, raw GitHub search, or repository crawlers",
+	} {
+		if !strings.Contains(init.Instructions, phrase) {
+			t.Errorf("instructions missing routing phrase %q:\n%s", phrase, init.Instructions)
+		}
+	}
+}
+
 func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
 	defer closeSessions()
@@ -653,7 +675,7 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		args map[string]any
 	}{
 		{ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"}},
-		{ToolCreateWorkspace, map[string]any{"investigation_id": "inv-1", "remote": "https://github.com/acme/rocket.git", "base_ref": "main", "candidate_ref": "feature", "name": "ws-1"}},
+		{ToolCreateWorkspace, map[string]any{"investigation_id": "inv-1"}},
 		{ToolRunValidation, map[string]any{"id": "val-1", "kind": "base", "execute": true}},
 		{ToolStartInvestigation, map[string]any{"owner": "acme", "repo": "rocket"}},
 		{ToolRecordHypothesis, map[string]any{"investigation_id": "inv-1", "title": "leak", "description": "memory leak", "category": "bug"}},

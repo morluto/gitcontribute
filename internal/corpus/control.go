@@ -30,11 +30,14 @@ func (c *Corpus) SchemaVersion(ctx context.Context) (int64, error) {
 // SchemaVersions returns the current database version and the latest version
 // supported by this binary.
 func (c *Corpus) SchemaVersions(ctx context.Context) (current, target int64, err error) {
-	provider, err := c.migrationProvider()
+	provider, logger, err := c.migrationProvider()
 	if err != nil {
 		return 0, 0, err
 	}
 	current, target, err = provider.GetVersions(ctx)
+	if fatalErr := logger.Err(); fatalErr != nil {
+		return 0, 0, fmt.Errorf("read schema versions: %w", fatalErr)
+	}
 	if err != nil {
 		return 0, 0, fmt.Errorf("read schema versions: %w", err)
 	}
