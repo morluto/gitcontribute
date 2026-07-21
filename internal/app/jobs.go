@@ -28,6 +28,21 @@ type activeJob struct {
 	cancel context.CancelFunc
 }
 
+type jobStore interface {
+	CreateJob(context.Context, string, string) (*corpus.Job, error)
+	DeleteJobOwner(context.Context, string) error
+	GetJob(context.Context, string) (*corpus.Job, error)
+	HeartbeatJobOwner(context.Context, string, time.Time) error
+	ListJobs(context.Context, string, int) ([]corpus.Job, error)
+	RecordJobEvent(context.Context, string, string, string) error
+	RegisterJobOwner(context.Context, string, int, time.Time) error
+	ReconcileInterruptedJobs(context.Context, time.Duration) error
+	RequestJobCancellation(context.Context, string) error
+	StartJobAs(context.Context, string, string) error
+	TransitionJob(context.Context, string, string, string, string, string) error
+	UpdateJobProgress(context.Context, string, string, string) error
+}
+
 // jobExecutorConfig tunes the owner/lease/heartbeat protocol. Use
 // defaultJobExecutorConfig for production values.
 type jobExecutorConfig struct {
@@ -53,7 +68,7 @@ func defaultJobExecutorConfig() jobExecutorConfig {
 // the corpus for cancellation requests so a job cancelled by another process
 // stops promptly.
 type JobExecutor struct {
-	corpus  *corpus.Corpus
+	corpus  jobStore
 	ownerID string
 	rootCtx context.Context
 	cancel  context.CancelFunc
@@ -71,7 +86,7 @@ func newJobExecutor(ctx context.Context, c *corpus.Corpus) (*JobExecutor, error)
 	return newJobExecutorWithConfig(ctx, c, defaultJobExecutorConfig())
 }
 
-func newJobExecutorWithConfig(ctx context.Context, c *corpus.Corpus, cfg jobExecutorConfig) (*JobExecutor, error) {
+func newJobExecutorWithConfig(ctx context.Context, c jobStore, cfg jobExecutorConfig) (*JobExecutor, error) {
 	if cfg.leaseTimeout <= 0 {
 		cfg.leaseTimeout = defaultJobExecutorConfig().leaseTimeout
 	}
@@ -279,9 +294,15 @@ func (e *JobExecutor) run(id string, fn JobFunc) {
 	}()
 
 	if err := e.corpus.StartJobAs(jobCtx, id, e.ownerID); err != nil {
-		job, _ := e.corpus.GetJob(context.WithoutCancel(jobCtx), id)
+		writeCtx := context.WithoutCancel(jobCtx)
+		job, getErr := e.corpus.GetJob(writeCtx, id)
+		if getErr != nil {
+			message := errors.Join(err, fmt.Errorf("get job after start failure: %w", getErr)).Error()
+			_ = e.corpus.TransitionJob(writeCtx, id, corpus.JobStatusQueued, corpus.JobStatusFailed, "", message)
+			return
+		}
 		if job != nil && !isTerminalJobStatus(job.Status) {
-			_ = e.corpus.TransitionJob(context.WithoutCancel(jobCtx), id, job.Status, corpus.JobStatusFailed, "", err.Error())
+			_ = e.corpus.TransitionJob(writeCtx, id, job.Status, corpus.JobStatusFailed, "", err.Error())
 		}
 		return
 	}
@@ -296,7 +317,11 @@ func (e *JobExecutor) run(id string, fn JobFunc) {
 
 	writeCtx := context.WithoutCancel(jobCtx)
 
-	job, _ := e.corpus.GetJob(writeCtx, id)
+	job, err := e.corpus.GetJob(writeCtx, id)
+	if err != nil {
+		_ = e.finishJob(writeCtx, id, corpus.JobStatusFailed, "", fmt.Errorf("get job after execution: %w", err).Error())
+		return
+	}
 	if job != nil && job.CancelledAt != nil && !job.CancelledAt.IsZero() {
 		_ = e.finishJob(writeCtx, id, corpus.JobStatusCancelled, "", "cancelled by request")
 		return
