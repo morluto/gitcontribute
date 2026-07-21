@@ -37,7 +37,7 @@ func (s *Service) RecordTriageEvent(ctx context.Context, opts cli.RecordTriageEv
 
 // ListTriageEvents returns local triage outcomes in source-event order.
 func (s *Service) ListTriageEvents(ctx context.Context, opts cli.ListTriageEventsOptions) (*cli.TriageEventListResult, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +81,7 @@ func (s *Service) RecordContribution(ctx context.Context, opts cli.RecordContrib
 
 // GetContribution returns contribution metadata by durable id.
 func (s *Service) GetContribution(ctx context.Context, id string) (*cli.ContributionResult, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func (s *Service) GetContribution(ctx context.Context, id string) (*cli.Contribu
 
 // ListContributions returns contribution metadata in prepared-at order.
 func (s *Service) ListContributions(ctx context.Context, opts cli.ListContributionsOptions) (*cli.ContributionListResult, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +132,7 @@ func (s *Service) RecordContributionOutcome(ctx context.Context, opts cli.Record
 
 // ListContributionOutcomes returns lifecycle outcomes for a contribution.
 func (s *Service) ListContributionOutcomes(ctx context.Context, contributionID string) (*cli.ContributionOutcomeListResult, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +151,7 @@ func (s *Service) ListContributionOutcomes(ctx context.Context, contributionID s
 // local tracking metadata. It does not include tokens, credentials, or absolute
 // local paths.
 func (s *Service) ExportLocalMetadata(ctx context.Context, opts cli.MetadataExportOptions) (*cli.MetadataExportResult, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}

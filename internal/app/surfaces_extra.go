@@ -73,7 +73,7 @@ func (s *Service) Coverage(ctx context.Context, repo cli.RepoRef) (*cli.Coverage
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +118,7 @@ func (s *Service) ArchiveThreads(ctx context.Context, repo cli.RepoRef, kind, st
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +165,7 @@ func (s *Service) RunHistory(ctx context.Context, limit int) (*cli.RunListResult
 	if limit <= 0 || limit > 1000 {
 		return nil, errors.New("run limit must be between 1 and 1000")
 	}
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +210,7 @@ func (s *Service) ExportDossier(ctx context.Context, repo cli.RepoRef, format st
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
-	if _, err := s.openCorpus(ctx); err != nil {
+	if _, err := s.openReadOnlyCorpus(ctx); err != nil {
 		return nil, err
 	}
 	d, err := s.buildDossier(ctx, ref)

@@ -111,6 +111,28 @@ func TestMetadataReadsExistingCorpusSchemaWithoutOpeningItForWrites(t *testing.T
 	}
 }
 
+func TestMetadataReportsSupportedSchemaVersion(t *testing.T) {
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+
+	want, err := corpus.InspectSchema(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.Metadata(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SupportedSchemaVersion != want.Target {
+		t.Fatalf("supported schema version = %d, want %d", result.SupportedSchemaVersion, want.Target)
+	}
+}
+
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
@@ -246,6 +268,13 @@ func TestDoctorInspectsEffectiveRuntimeConfig(t *testing.T) {
 
 	envDB := filepath.Join(t.TempDir(), "env.db")
 	t.Setenv("GITCONTRIBUTE_DATABASE", envDB)
+	initialized, err := corpus.Open(context.Background(), envDB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := initialized.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := svc.Doctor(context.Background())
 	if err != nil {

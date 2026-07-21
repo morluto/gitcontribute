@@ -33,7 +33,7 @@ func (s *Service) contributionRadarAt(ctx context.Context, opts cli.RadarOptions
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}

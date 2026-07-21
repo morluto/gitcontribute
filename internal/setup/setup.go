@@ -3,14 +3,17 @@ package setup
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/gofrs/flock"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -153,7 +156,7 @@ func CheckRegistration(client Client, home string) (bool, string, error) {
 // applies or plans each client-owned registration. Dry-run mode performs no
 // writes. Per-client parse/write failures are returned in Report.Results so
 // independent clients can be reported together.
-func Run(opts Options) (Report, error) {
+func Run(opts Options) (_ Report, returnErr error) {
 	if opts.Operation == "" {
 		opts.Operation = Configure
 	}
@@ -175,6 +178,13 @@ func Run(opts Options) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
+	if !opts.DryRun {
+		lease, err := acquireSetupLease(opts.Home)
+		if err != nil {
+			return Report{}, err
+		}
+		defer func() { returnErr = errors.Join(returnErr, lease.Unlock()) }()
+	}
 	report := Report{Operation: opts.Operation, DryRun: opts.DryRun, Launcher: launcher}
 	for _, client := range clients {
 		result := configureClient(opts.Operation, client, opts.Home, launcher, opts.DryRun)
@@ -184,6 +194,244 @@ func Run(opts Options) (Report, error) {
 		report.CodexSkill = configureCodexSkill(opts.Home, opts.Operation, opts.DryRun)
 	}
 	return report, nil
+}
+
+// ActivateExisting updates a set of existing GitContribute registrations as
+// one rollback-safe operation. It never creates a new client registration or
+// changes the optional Codex discovery skill. If activation or verification is
+// interrupted, every selected client configuration is restored.
+func ActivateExisting(ctx context.Context, opts Options) (Report, error) {
+	return ActivateExistingAndVerify(ctx, opts, nil)
+}
+
+// ActivateExistingAndVerify keeps the registration snapshots until verify
+// succeeds, allowing callers to include executable and schema checks in the
+// same rollback boundary.
+func ActivateExistingAndVerify(ctx context.Context, opts Options, verify func() error) (_ Report, returnErr error) {
+	if opts.Home == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return Report{}, fmt.Errorf("resolve home directory: %w", err)
+		}
+		opts.Home = home
+	}
+	lease, err := acquireSetupLease(opts.Home)
+	if err != nil {
+		return Report{}, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, lease.Unlock()) }()
+	return activateExisting(ctx, opts, func(ctx context.Context, _ int) error { return ctx.Err() }, verify)
+}
+
+func acquireSetupLease(home string) (*flock.Flock, error) {
+	lease := flock.New(filepath.Join(home, ".gitcontribute-setup.lock"))
+	acquired, err := lease.TryLock()
+	if err != nil {
+		return nil, fmt.Errorf("acquire setup lock: %w", err)
+	}
+	if !acquired {
+		return nil, errors.New("another GitContribute setup or activation is in progress")
+	}
+	return lease, nil
+}
+
+type registrationSnapshot struct {
+	client      Client
+	path        string
+	mode        os.FileMode
+	codexBlock  string
+	claudeEntry any
+	changed     bool
+}
+
+func activateExisting(ctx context.Context, opts Options, checkpoint func(context.Context, int) error, verify func() error) (Report, error) {
+	if err := ctx.Err(); err != nil {
+		return Report{}, err
+	}
+	opts.Operation = Configure
+	opts.DryRun = false
+	clients, err := selectedClients(opts)
+	if err != nil {
+		return Report{}, err
+	}
+	launcher, err := ResolveLauncher(opts)
+	if err != nil {
+		return Report{}, err
+	}
+
+	snapshots, err := snapshotRegistrations(clients, opts.Home)
+	if err != nil {
+		return Report{}, err
+	}
+
+	report := Report{Operation: Configure, Launcher: launcher}
+	rollback := func(cause error) (Report, error) {
+		rollbackErr := restoreRegistrationSnapshots(snapshots, launcher)
+		if rollbackErr != nil {
+			return report, &ActivationRollbackError{Cause: cause, Rollback: rollbackErr}
+		}
+		return report, cause
+	}
+
+	if err := activateRegistrations(ctx, opts.Home, clients, launcher, checkpoint, &report, snapshots); err != nil {
+		return rollback(err)
+	}
+	if err := verifyRegistrations(opts.Home, clients, launcher, verify); err != nil {
+		return rollback(err)
+	}
+	return report, nil
+}
+
+func snapshotRegistrations(clients []Client, home string) ([]registrationSnapshot, error) {
+	snapshots := make([]registrationSnapshot, 0, len(clients))
+	for _, client := range clients {
+		registered, path, err := CheckRegistration(client, home)
+		if err != nil {
+			return nil, fmt.Errorf("inspect %s registration: %w", client, err)
+		}
+		if !registered {
+			return nil, fmt.Errorf("%s registration changed before activation", client)
+		}
+		data, err := readFileWithinParent(path)
+		if err != nil {
+			return nil, fmt.Errorf("snapshot %s registration: %w", client, err)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("inspect %s registration permissions: %w", client, err)
+		}
+		snapshot := registrationSnapshot{client: client, path: path, mode: info.Mode().Perm()}
+		switch client {
+		case Codex:
+			start, end, present := findCodexBlock(string(data))
+			if !present {
+				return nil, errors.New("codex registration disappeared before activation")
+			}
+			snapshot.codexBlock = string(data[start:end])
+		case Claude:
+			var root map[string]any
+			if err := json.Unmarshal(data, &root); err != nil {
+				return nil, fmt.Errorf("parse Claude registration snapshot: %w", err)
+			}
+			servers, ok := root["mcpServers"].(map[string]any)
+			if !ok {
+				return nil, errors.New("claude mcpServers disappeared before activation")
+			}
+			snapshot.claudeEntry = servers[serverName]
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	return snapshots, nil
+}
+
+func restoreRegistrationSnapshots(snapshots []registrationSnapshot, activated Launcher) error {
+	var restoreErrs []error
+	for i := len(snapshots) - 1; i >= 0; i-- {
+		snapshot := snapshots[i]
+		if !snapshot.changed {
+			continue
+		}
+		currentInfo, err := os.Stat(snapshot.path)
+		if err != nil {
+			restoreErrs = append(restoreErrs, fmt.Errorf("inspect activated registration permissions %s: %w", snapshot.path, err))
+			continue
+		}
+		if !registrationModeMatchesActivation(currentInfo.Mode()) {
+			restoreErrs = append(restoreErrs, fmt.Errorf("preserve concurrently changed registration %s", snapshot.path))
+			continue
+		}
+		var restoreErr error
+		switch snapshot.client {
+		case Codex:
+			restoreErr = restoreCodexRegistration(snapshot, activated)
+		case Claude:
+			restoreErr = restoreClaudeRegistration(snapshot, activated)
+		}
+		if restoreErr != nil {
+			restoreErrs = append(restoreErrs, fmt.Errorf("restore %s: %w", snapshot.path, restoreErr))
+			continue
+		}
+		if err := restoreRegistrationMode(snapshot.path, snapshot.mode); err != nil {
+			restoreErrs = append(restoreErrs, fmt.Errorf("restore permissions for %s: %w", snapshot.path, err))
+		}
+	}
+	return errors.Join(restoreErrs...)
+}
+
+func restoreCodexRegistration(snapshot registrationSnapshot, activated Launcher) error {
+	data, err := readFileWithinParent(snapshot.path)
+	if err != nil {
+		return err
+	}
+	text := string(data)
+	start, end, present := findCodexBlock(text)
+	if !present || strings.TrimSpace(text[start:end]) != strings.TrimSpace(codexTOMLBlock(activated)) {
+		return errors.New("preserve concurrently changed GitContribute entry")
+	}
+	return writeAtomic(snapshot.path, []byte(text[:start]+snapshot.codexBlock+text[end:]))
+}
+
+func restoreClaudeRegistration(snapshot registrationSnapshot, activated Launcher) error {
+	data, err := readFileWithinParent(snapshot.path)
+	if err != nil {
+		return err
+	}
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		return err
+	}
+	servers, ok := root["mcpServers"].(map[string]any)
+	if !ok || !equalJSON(servers[serverName], map[string]any{"command": activated.Command, "args": activated.Args}) {
+		return errors.New("preserve concurrently changed GitContribute entry")
+	}
+	servers[serverName] = snapshot.claudeEntry
+	root["mcpServers"] = servers
+	return writeJSON(snapshot.path, root)
+}
+
+func activateRegistrations(ctx context.Context, home string, clients []Client, launcher Launcher, checkpoint func(context.Context, int) error, report *Report, snapshots []registrationSnapshot) error {
+	for i, client := range clients {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		result := configureClient(Configure, client, home, launcher, false)
+		report.Results = append(report.Results, result)
+		if result.Error != "" {
+			return fmt.Errorf("activate %s registration: %s", client, result.Error)
+		}
+		snapshots[i].changed = true
+		if err := checkpoint(ctx, i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func verifyRegistrations(home string, clients []Client, launcher Launcher, verify func() error) error {
+	for _, client := range clients {
+		result := configureClient(Configure, client, home, launcher, true)
+		if result.Error != "" || result.Status != "already configured" {
+			return fmt.Errorf("verify %s registration: status %q: %s", client, result.Status, result.Error)
+		}
+	}
+	if verify != nil {
+		return verify()
+	}
+	return nil
+}
+
+func readFileWithinParent(path string) (_ []byte, err error) {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, root.Close()) }()
+	file, err := root.Open(filepath.Base(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, file.Close()) }()
+	return io.ReadAll(file)
 }
 
 func containsClient(clients []Client, want Client) bool {

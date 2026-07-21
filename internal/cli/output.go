@@ -37,6 +37,30 @@ func humanOutput(v any) (string, error) {
 		return controlStatusHuman(r), nil
 	case *DoctorResult:
 		return doctorHuman(r), nil
+	case *CorpusInspectionResult:
+		return corpusInspectionHuman(r), nil
+	case *CorpusBackupResult:
+		result := fmt.Sprintf("Backed up corpus to %s (%d bytes, sha256 %s)", r.Path, r.SizeBytes, r.SHA256)
+		if r.ManifestPath != "" {
+			result += fmt.Sprintf("\nManifest: %s (schema %d, expected %d, %s)", r.ManifestPath, r.SourceSchema, r.ExpectedSchema, r.Compatibility)
+		}
+		return result, nil
+	case *CorpusMigrationResult:
+		return corpusMigrationHuman(r), nil
+	case *CorpusRestoreResult:
+		return corpusRestoreHuman(r), nil
+	case *CorpusInventoryResult:
+		return corpusInventoryHuman(r), nil
+	case *CorpusInventoryListResult:
+		return corpusInventoryListHuman(r), nil
+	case *CorpusPruneResult:
+		return corpusPruneHuman(r), nil
+	case *CorpusRepositoryRemovalResult:
+		return corpusRepositoryRemovalHuman(r), nil
+	case *CorpusProjectionListResult:
+		return corpusProjectionListHuman(r), nil
+	case *CorpusProjectionResult:
+		return corpusProjectionHuman("Rebuilt projection", r), nil
 	case *SyncResult:
 		return syncHuman(r), nil
 	case *radar.Report:

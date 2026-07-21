@@ -32,6 +32,7 @@ type Service struct {
 	cfg             *config.Config
 	paths           *config.Paths
 	corpus          *corpus.Corpus
+	readCorpus      *corpus.Corpus
 	jobs            *JobExecutor
 	ghReader        github.Reader
 	archiveFetcher  discovery.ArchiveFetcher
@@ -131,8 +132,10 @@ func (s *Service) Close() error {
 	s.mu.Lock()
 	jobs := s.jobs
 	c := s.corpus
+	readCorpus := s.readCorpus
 	s.jobs = nil
 	s.corpus = nil
+	s.readCorpus = nil
 	s.mu.Unlock()
 	if s.cancelLifecycle != nil {
 		s.cancelLifecycle()
@@ -143,6 +146,9 @@ func (s *Service) Close() error {
 	}
 	if c != nil {
 		closeErr = errors.Join(closeErr, c.Close())
+	}
+	if readCorpus != nil {
+		closeErr = errors.Join(closeErr, readCorpus.Close())
 	}
 	return closeErr
 }
@@ -207,6 +213,18 @@ func (s *Service) openCorpus(ctx context.Context) (*corpus.Corpus, error) {
 	if err := ensureDatabaseDir(cfg.Database); err != nil {
 		return nil, err
 	}
+	inspection, err := corpus.InspectSchema(ctx, cfg.Database)
+	if err != nil {
+		return nil, err
+	}
+	if inspection.Exists {
+		switch inspection.State {
+		case corpus.SchemaMigrationRequired:
+			return nil, &corpus.MigrationRequiredError{Current: inspection.Current, Target: inspection.Target}
+		case corpus.SchemaNewer:
+			return nil, &corpus.UnsupportedSchemaError{Current: inspection.Current, Target: inspection.Target}
+		}
+	}
 	c, err := corpus.Open(ctx, cfg.Database)
 	if err != nil {
 		return nil, err
@@ -219,6 +237,42 @@ func (s *Service) openCorpus(ctx context.Context) (*corpus.Corpus, error) {
 		return existing, nil
 	}
 	s.corpus = c
+	s.mu.Unlock()
+	return c, nil
+}
+
+// openReadOnlyCorpus opens the configured corpus without creating or
+// migrating it. Read-facing application capabilities use this path so an
+// offline read never implies schema-migration authority.
+func (s *Service) openReadOnlyCorpus(ctx context.Context) (*corpus.Corpus, error) {
+	s.mu.Lock()
+	if s.readCorpus != nil {
+		c := s.readCorpus
+		s.mu.Unlock()
+		return c, nil
+	}
+	s.mu.Unlock()
+	cfg, err := s.loadConfig(false)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Database == "" {
+		return nil, errors.New("database path not configured")
+	}
+	c, err := corpus.OpenReadOnly(ctx, cfg.Database)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	if s.readCorpus != nil {
+		existing := s.readCorpus
+		s.mu.Unlock()
+		if err := c.Close(); err != nil {
+			return nil, fmt.Errorf("close duplicate read-only corpus: %w", err)
+		}
+		return existing, nil
+	}
+	s.readCorpus = c
 	s.mu.Unlock()
 	return c, nil
 }
@@ -361,6 +415,18 @@ func (s *Service) Init(ctx context.Context) (*cli.InitResult, error) {
 	if err := ensureDatabaseDir(cfg.Database); err != nil {
 		return nil, err
 	}
+	inspection, err := corpus.InspectSchema(ctx, cfg.Database)
+	if err != nil {
+		return nil, err
+	}
+	if inspection.Exists {
+		switch inspection.State {
+		case corpus.SchemaMigrationRequired:
+			return nil, &corpus.MigrationRequiredError{Current: inspection.Current, Target: inspection.Target}
+		case corpus.SchemaNewer:
+			return nil, &corpus.UnsupportedSchemaError{Current: inspection.Current, Target: inspection.Target}
+		}
+	}
 	_, err = s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -370,7 +436,7 @@ func (s *Service) Init(ctx context.Context) (*cli.InitResult, error) {
 
 // Status reports whether the corpus is healthy and counts local records.
 func (s *Service) Status(ctx context.Context) (*cli.StatusResult, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return &cli.StatusResult{Healthy: false, Corpus: s.databasePath(), Version: s.version, Message: err.Error()}, nil
 	}
@@ -655,7 +721,7 @@ func (s *Service) Dossier(ctx context.Context, repo cli.RepoRef) (*cli.DossierRe
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
-	if _, err := s.openCorpus(ctx); err != nil {
+	if _, err := s.openReadOnlyCorpus(ctx); err != nil {
 		return nil, err
 	}
 	d, err := s.buildDossier(ctx, ref)

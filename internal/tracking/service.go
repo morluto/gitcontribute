@@ -153,12 +153,8 @@ func (s *Service) ImportLocalMetadata(ctx context.Context, bundle *Bundle) error
 	if bundle == nil {
 		return errors.New("bundle is required")
 	}
-	version, err := ResolveBundleVersion(bundle)
-	if err != nil {
+	if _, err := ResolveBundleVersion(bundle); err != nil {
 		return err
-	}
-	if version < CurrentBundleSchemaVersion && len(bundle.Evidence) > 0 {
-		return errors.New("evidence records require tracking bundle schema version 2")
 	}
 	if len(bundle.TriageEvents) > maxImportRecords || len(bundle.Contributions) > maxImportRecords || len(bundle.ContributionOutcomes) > maxImportRecords || len(bundle.Evidence) > maxImportRecords {
 		return fmt.Errorf("bundle record class cannot exceed %d items", maxImportRecords)
@@ -210,20 +206,16 @@ func (s *Service) ImportLocalMetadata(ctx context.Context, bundle *Bundle) error
 	return s.repo.ImportLocalMetadata(ctx, bundle)
 }
 
-// ResolveBundleVersion accepts legacy unversioned bundles as v1 and rejects
-// unknown schemas before any import writes occur.
+// ResolveBundleVersion rejects any bundle that does not declare the current
+// schema before import writes occur.
 func ResolveBundleVersion(bundle *Bundle) (int, error) {
 	if bundle == nil {
 		return 0, errors.New("bundle is required")
 	}
-	version := bundle.SchemaVersion
-	if version == 0 {
-		version = LegacyBundleSchemaVersion
+	if bundle.SchemaVersion != CurrentBundleSchemaVersion {
+		return 0, fmt.Errorf("tracking bundle schema version must be %d, got %d", CurrentBundleSchemaVersion, bundle.SchemaVersion)
 	}
-	if version < LegacyBundleSchemaVersion || version > CurrentBundleSchemaVersion {
-		return 0, fmt.Errorf("unsupported tracking bundle schema version %d", version)
-	}
-	return version, nil
+	return bundle.SchemaVersion, nil
 }
 
 func validateContribution(c *Contribution) error {

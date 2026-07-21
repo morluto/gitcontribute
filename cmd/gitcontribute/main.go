@@ -22,6 +22,13 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "runtime-contract" {
+		if err := runRuntimeContract(os.Args[2:], os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(ExitGeneral)
+		}
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -54,6 +61,17 @@ func main() {
 	}
 
 	logger.InfoContext(ctx, "command completed", "trace_id", traceID)
+}
+
+func runRuntimeContract(args []string, output io.Writer) error {
+	if len(args) != 0 {
+		return errors.New("runtime-contract does not accept arguments")
+	}
+	contract, err := app.NewRuntimeContract(version)
+	if err != nil {
+		return err
+	}
+	return cli.WriteRuntimeContract(output, contract)
 }
 
 const ExitGeneral = 1

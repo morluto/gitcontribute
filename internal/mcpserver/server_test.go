@@ -173,7 +173,7 @@ func (*fakeReader) SearchRepositories(_ context.Context, in SearchRepositoriesIn
 
 func (*fakeReader) SearchGitHubRepositories(_ context.Context, in SearchGitHubRepositoriesInput) (SearchGitHubRepositoriesOutput, error) {
 	stars := 42
-	applied := in.Query
+	applied := in.RawQuery
 	if applied == "" {
 		applied = in.Text
 	}

@@ -334,7 +334,7 @@ func researchHealthCoverageReason(report *health.Report) string {
 }
 
 func (r *corpusReader) researchCorpusRepo(ctx context.Context, ref domain.RepoRef) (*corpus.Corpus, *corpus.Repository, error) {
-	c, err := r.s.openCorpus(ctx)
+	c, err := r.s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, nil, err
 	}

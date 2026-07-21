@@ -319,7 +319,7 @@ func (r *MCPReader) CheckMergeConflicts(ctx context.Context, in mcpserver.CheckM
 	if len(in.Comparisons) < 1 || len(in.Comparisons) > 50 {
 		return mcpserver.CheckMergeConflictsOutput{}, errors.New("comparisons must contain 1 to 50 items")
 	}
-	c, err := r.openCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.CheckMergeConflictsOutput{}, err
 	}

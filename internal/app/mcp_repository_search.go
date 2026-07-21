@@ -158,21 +158,13 @@ func compileRepositorySearch(in mcpserver.SearchGitHubRepositoriesInput) (string
 }
 
 func repositorySearchMode(in mcpserver.SearchGitHubRepositoriesInput) (string, string, []mcpserver.SearchWarning, bool, error) {
-	legacy := strings.TrimSpace(in.Query)
 	raw := strings.TrimSpace(in.RawQuery)
 	structured := hasStructuredRepositorySearch(in)
-	if legacy != "" && raw != "" {
-		return "", "", nil, false, mcpserver.InvalidArgument("raw_query", "query and raw_query are mutually exclusive; use raw_query for advanced provider syntax", map[string]any{"raw_query": "topic:cuda stars:>500"})
-	}
-	if (legacy != "" || raw != "") && structured {
+	if raw != "" && structured {
 		return "", "", nil, false, mcpserver.InvalidArgument("raw_query", "cannot be combined with structured filters; choose one input mode", map[string]any{"text": "inference", "topics": []string{"cuda"}})
 	}
-	if legacy == "" && raw == "" && !structured {
+	if raw == "" && !structured {
 		return "", "", nil, false, mcpserver.InvalidArgument("text", "provide raw_query or at least one structured filter such as text, topics, language, or pushed_after", map[string]any{"text": "inference", "match_fields": []string{"name", "description"}})
-	}
-	if legacy != "" {
-		warning := mcpserver.SearchWarning{Code: "deprecated_query", Message: "query is retained for compatibility but exposes provider-specific syntax.", Suggestion: "Use structured filters or raw_query."}
-		return legacy, "legacy raw query", []mcpserver.SearchWarning{warning}, false, nil
 	}
 	if raw != "" {
 		return raw, "advanced raw query", nil, false, nil

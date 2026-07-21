@@ -2,6 +2,7 @@ package corpus
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -289,33 +290,27 @@ func TestExportImportLocalMetadataIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestImportLocalMetadataBundleVersionCompatibility(t *testing.T) {
+func TestImportLocalMetadataRequiresCurrentBundleVersion(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	svc := tracking.NewService(c)
-
-	legacy := &tracking.Bundle{TriageEvents: []*tracking.TriageEvent{
-		{ID: "legacy", TargetKind: tracking.TargetRepository, TargetRef: "owner/repo", Outcome: tracking.OutcomeSaved},
-	}}
-	if err := svc.ImportLocalMetadata(ctx, legacy); err != nil {
-		t.Fatalf("legacy import: %v", err)
-	}
-
-	future := &tracking.Bundle{
-		SchemaVersion: tracking.CurrentBundleSchemaVersion + 1,
-		TriageEvents: []*tracking.TriageEvent{
-			{ID: "future", TargetKind: tracking.TargetRepository, TargetRef: "owner/repo", Outcome: tracking.OutcomeIgnored},
-		},
-	}
-	if err := svc.ImportLocalMetadata(ctx, future); err == nil {
-		t.Fatal("expected future schema version error")
+	for _, version := range []int{0, tracking.CurrentBundleSchemaVersion - 1, tracking.CurrentBundleSchemaVersion + 1} {
+		bundle := &tracking.Bundle{
+			SchemaVersion: version,
+			TriageEvents: []*tracking.TriageEvent{
+				{ID: fmt.Sprintf("version-%d", version), TargetKind: tracking.TargetRepository, TargetRef: "owner/repo", Outcome: tracking.OutcomeIgnored},
+			},
+		}
+		if err := svc.ImportLocalMetadata(ctx, bundle); err == nil {
+			t.Fatalf("schema version %d was accepted", version)
+		}
 	}
 	events, err := svc.ListTriageEvents(ctx, tracking.TriageEventFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 1 || events[0].ID != "legacy" {
-		t.Fatalf("future import wrote before rejecting: %+v", events)
+	if len(events) != 0 {
+		t.Fatalf("rejected import wrote records: %+v", events)
 	}
 }
 

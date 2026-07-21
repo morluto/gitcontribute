@@ -388,6 +388,9 @@ func TestSetupDryRunWritesNothing(t *testing.T) {
 	if !report.DryRun {
 		t.Fatalf("report = %+v", report)
 	}
+	if report.Corpus == nil || report.Corpus.State != "missing" || report.Corpus.AvailableDiskBytes == 0 || report.Corpus.BackupRequired {
+		t.Fatalf("dry-run corpus plan = %+v", report.Corpus)
+	}
 	if _, err := os.Stat(filepath.Join(home, ".codex", "config.toml")); !os.IsNotExist(err) {
 		t.Fatalf("dry run wrote client config: %v", err)
 	}

@@ -29,7 +29,7 @@ func TestFreshnessEvaluatorStatuses(t *testing.T) {
 		{name: "missing current", item: &Evidence{Type: EvidenceTypeGitHubSource, SourceProvenance: []SourceRevision{recorded}}, want: FreshnessUnknown, reason: "unavailable"},
 		{name: "current predates export", item: &Evidence{Type: EvidenceTypeGitHubSource, SourceProvenance: []SourceRevision{recorded}}, current: sourceRevisionPtr(testSourceRevision(SourceSubjectThread, "issue", 42, "", time.Unix(99, 0).UTC(), 100)), want: FreshnessUnknown, reason: "predates"},
 		{name: "local evidence", item: &Evidence{Type: EvidenceTypeManualObservation}, want: FreshnessNotApplicable, reason: "local evidence"},
-		{name: "legacy github evidence", item: &Evidence{Type: EvidenceTypeGitHubSource}, want: FreshnessUnknown, reason: "no recorded"},
+		{name: "missing source provenance", item: &Evidence{Type: EvidenceTypeGitHubSource}, want: FreshnessUnknown, reason: "no recorded"},
 	}
 
 	for _, tt := range tests {

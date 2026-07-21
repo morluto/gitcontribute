@@ -39,7 +39,7 @@ func (s *Service) AddLens(ctx context.Context, name string, def lens.Definition)
 
 // ListLenses returns all saved lenses in stable order.
 func (s *Service) ListLenses(ctx context.Context) (*cli.LensListResult, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func (s *Service) ShowLens(ctx context.Context, name string) (*cli.LensResult, e
 	if name == "" {
 		return nil, errors.New("lens name is required")
 	}
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +100,7 @@ func (s *Service) ExplainLens(ctx context.Context, name, ref string, opts cli.Le
 		return nil, errors.New("original search query is required")
 	}
 
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -129,13 +129,14 @@ type SetupMCPCommand struct {
 // only when MCP was selected. A report may contain both successful and failed
 // independent steps.
 type SetupReport struct {
-	Operation         string               `json:"operation"`
-	DryRun            bool                 `json:"dry_run"`
-	MCPCommand        *SetupMCPCommand     `json:"mcp_command,omitempty"`
-	MCPCommandPending bool                 `json:"mcp_command_pending,omitempty"`
-	RestartClients    []string             `json:"restart_clients,omitempty"`
-	Authentication    *SetupAuthentication `json:"authentication,omitempty"`
-	Steps             []SetupStep          `json:"steps"`
+	Operation         string                  `json:"operation"`
+	DryRun            bool                    `json:"dry_run"`
+	MCPCommand        *SetupMCPCommand        `json:"mcp_command,omitempty"`
+	MCPCommandPending bool                    `json:"mcp_command_pending,omitempty"`
+	RestartClients    []string                `json:"restart_clients,omitempty"`
+	Authentication    *SetupAuthentication    `json:"authentication,omitempty"`
+	Corpus            *CorpusInspectionResult `json:"corpus,omitempty"`
+	Steps             []SetupStep             `json:"steps"`
 }
 
 // HasFailures reports whether setup could not produce a usable result. A nil

@@ -69,7 +69,9 @@ type rootCmd struct {
 	Setup         setupCmd         `cmd:"" help:"Set up GitContribute for MCP, CLI, or both"`
 	Remove        removeCmd        `cmd:"" help:"Remove GitContribute coding-agent integrations"`
 	Upgrade       upgradeCmd       `cmd:"" help:"Check for or install the latest release"`
+	Contract      contractCmd      `cmd:"" name:"runtime-contract" help:"Print the executable runtime compatibility contract"`
 	Init          initCmd          `cmd:"" help:"Initialize the local corpus"`
+	Corpus        corpusCmd        `cmd:"" help:"Inspect, back up, or migrate the local corpus"`
 	Configure     configureCmd     `cmd:"" help:"Inspect or update typed configuration"`
 	Metadata      metadataCmd      `cmd:"" help:"Show application metadata and capabilities"`
 	Status        statusCmd        `cmd:"" help:"Show corpus status"`
@@ -143,9 +145,7 @@ type upgradeCmd struct {
 	JSON  bool `name:"json" help:"Print the result as JSON"`
 }
 
-type initCmd struct {
-	JSON bool `name:"json" help:"Print the result as JSON"`
-}
+type contractCmd struct{}
 
 type configureCmd struct {
 	Database         *string `name:"database" help:"Corpus database path"`
@@ -600,7 +600,6 @@ type tuiCmd struct {
 // Run parses arguments and dispatches to the appropriate Service or MCPRunner
 // method. It respects context cancellation.
 func (c *CLI) Run(ctx context.Context, args []string) error {
-	args = normalizeCompatibilityArgs(args)
 	if len(args) == 0 {
 		return c.runDefault(ctx)
 	}
@@ -648,8 +647,12 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runRemoveCommand(ctx, &cli.Remove)
 	case "upgrade":
 		return c.runUpgrade(ctx, &cli.Upgrade)
+	case "runtime-contract":
+		return c.runRuntimeContract(ctx)
 	case "init":
 		return c.runInit(ctx, &cli.Init)
+	case "corpus":
+		return c.runCorpus(ctx, command, &cli.Corpus)
 	case "configure":
 		return c.runConfigure(ctx, &cli.Configure)
 	case "metadata":
@@ -774,6 +777,18 @@ func (c *CLI) runUpgrade(ctx context.Context, cmd *upgradeCmd) error {
 	if report.Command != "" {
 		_, err = fmt.Fprintf(c.stdout, "\n%s", report.Command)
 	}
+	for _, stage := range report.Stages {
+		_, err = fmt.Fprintf(c.stdout, "\n- %s: %s", stage.Name, stage.Status)
+		if stage.Message != "" {
+			_, err = fmt.Fprintf(c.stdout, " — %s", stage.Message)
+		}
+	}
+	if report.Action != "" {
+		_, err = fmt.Fprintf(c.stdout, "\nNext: %s", report.Action)
+	}
+	if report.Rollback != "" {
+		_, err = fmt.Fprintf(c.stdout, "\nRollback: %s", report.Rollback)
+	}
 	if err == nil {
 		_, err = fmt.Fprintln(c.stdout)
 	}
@@ -885,62 +900,6 @@ func (c *CLI) promptLine() (string, error) {
 			}
 			return "", err
 		}
-	}
-}
-
-func normalizeCompatibilityArgs(args []string) []string {
-	if len(args) == 0 {
-		return args
-	}
-	switch args[0] {
-	case "mcp":
-		if len(args) > 1 && args[1] == "serve" {
-			return args
-		}
-		out := make([]string, 0, len(args)+1)
-		out = append(out, "mcp", "serve")
-		return append(out, args[1:]...)
-	case "dossier":
-		if len(args) > 1 && (args[1] == "build" || args[1] == "show" || args[1] == "export") {
-			return args
-		}
-		out := make([]string, 0, len(args)+1)
-		out = append(out, "dossier", "show")
-		return append(out, args[1:]...)
-	case "search":
-		if len(args) > 1 {
-			switch args[1] {
-			case "repos", "issues", "prs", "threads", "code", "all", "--help", "-h":
-				return args
-			}
-		}
-		kind := "all"
-		out := make([]string, 0, len(args)+1)
-		out = append(out, "search")
-		for i := 1; i < len(args); i++ {
-			arg := args[i]
-			switch {
-			case strings.HasPrefix(arg, "--kind="):
-				kind = strings.TrimPrefix(arg, "--kind=")
-			case arg == "--kind" || arg == "-k":
-				if i+1 < len(args) {
-					kind = args[i+1]
-					i++
-				}
-			default:
-				out = append(out, arg)
-			}
-		}
-		return append([]string{"search", kind}, out[1:]...)
-	case "clusters":
-		if len(args) > 1 && (args[1] == "list" || args[1] == "refresh" || args[1] == "--help" || args[1] == "-h") {
-			return args
-		}
-		out := make([]string, 0, len(args)+1)
-		out = append(out, "clusters", "list")
-		return append(out, args[1:]...)
-	default:
-		return args
 	}
 }
 

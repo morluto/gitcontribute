@@ -142,6 +142,9 @@ func (c *Corpus) SearchCodeWithOptions(ctx context.Context, query string, opts C
 	if ftsQuery == "" {
 		return CodeSearchPage{}, nil
 	}
+	if err := c.RequireProjection(ctx, ProjectionNameCodeDocumentsFTS, ProjectionVersionCodeDocumentsFTS); err != nil {
+		return CodeSearchPage{}, err
+	}
 
 	repo := opts.Ref.String()
 	cursor, err := c.decodeCodeCursor(opts.Cursor, query, repo)

@@ -126,15 +126,6 @@ type fakeService struct {
 	err error
 }
 
-func (f *fakeService) Setup(_ context.Context, opts cli.SetupOptions) (*cli.SetupReport, error) {
-	f.lastSetup = opts
-	f.setupCalls = append(f.setupCalls, opts)
-	if f.setupResult != nil {
-		return f.setupResult, nil
-	}
-	return &cli.SetupReport{Operation: "setup", DryRun: opts.DryRun, Steps: []cli.SetupStep{{Name: "codex", Status: "configured"}}}, nil
-}
-
 type startInvArgs struct {
 	Repo   cli.RepoRef
 	Commit string
@@ -675,7 +666,7 @@ func TestSearchDefaults(t *testing.T) {
 	}}
 	c, stdout, _ := newTestCLI(svc, nil)
 
-	err := c.Run(context.Background(), []string{"search", "test"})
+	err := c.Run(context.Background(), []string{"search", "all", "test"})
 	requireNoErr(t, err)
 
 	if !svc.searchCalled {
@@ -736,7 +727,7 @@ func TestSearchNoNetworkImplied(t *testing.T) {
 	svc := &fakeService{searchResult: &cli.SearchResult{Query: "local", Total: 0, Matches: []cli.SearchMatch{}}}
 	c, _, _ := newTestCLI(svc, nil)
 
-	err := c.Run(context.Background(), []string{"search", "local"})
+	err := c.Run(context.Background(), []string{"search", "all", "local"})
 	requireNoErr(t, err)
 	if !svc.searchCalled {
 		t.Fatal("Search was not called")
@@ -747,7 +738,7 @@ func TestSearchInvalidLimit(t *testing.T) {
 	svc := &fakeService{}
 	c, _, _ := newTestCLI(svc, nil)
 
-	err := c.Run(context.Background(), []string{"search", "x", "--limit", "0"})
+	err := c.Run(context.Background(), []string{"search", "all", "x", "--limit", "0"})
 	requireCLIError(t, err, cli.ExitUsage)
 }
 
@@ -755,7 +746,7 @@ func TestSearchInvalidRepoFilter(t *testing.T) {
 	svc := &fakeService{}
 	c, _, _ := newTestCLI(svc, nil)
 
-	err := c.Run(context.Background(), []string{"search", "x", "--repo", "bad"})
+	err := c.Run(context.Background(), []string{"search", "all", "x", "--repo", "bad"})
 	requireCLIError(t, err, cli.ExitUsage)
 }
 
@@ -847,7 +838,7 @@ func TestDossier(t *testing.T) {
 	}}
 	c, stdout, _ := newTestCLI(svc, nil)
 
-	err := c.Run(context.Background(), []string{"dossier", "o/r"})
+	err := c.Run(context.Background(), []string{"dossier", "show", "o/r"})
 	requireNoErr(t, err)
 
 	if !svc.dossierCalled {
@@ -874,7 +865,7 @@ func TestDossierJSON(t *testing.T) {
 	}}
 	c, stdout, _ := newTestCLI(svc, nil)
 
-	err := c.Run(context.Background(), []string{"dossier", "o/r", "--json"})
+	err := c.Run(context.Background(), []string{"dossier", "show", "o/r", "--json"})
 	requireNoErr(t, err)
 
 	var got cli.DossierResult
@@ -890,7 +881,7 @@ func TestMCP(t *testing.T) {
 	runner := &fakeMCPRunner{}
 	c, stdout, stderr := newTestCLI(nil, runner)
 
-	err := c.Run(context.Background(), []string{"mcp"})
+	err := c.Run(context.Background(), []string{"mcp", "serve"})
 	requireNoErr(t, err)
 
 	if !runner.called {

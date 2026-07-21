@@ -110,6 +110,12 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 	if ftsQuery == "" {
 		return ThreadSearchPage{}, nil
 	}
+	if err := c.RequireProjection(ctx, ProjectionNameThreadsFTS, ProjectionVersionThreadsFTS); err != nil {
+		return ThreadSearchPage{}, err
+	}
+	if err := c.RequireProjection(ctx, ProjectionNameFacetObservationsFTS, ProjectionVersionFacetObservationsFTS); err != nil {
+		return ThreadSearchPage{}, err
+	}
 
 	filterKey := threadFilterKey(filter)
 	cursor, err := c.decodeThreadCursor(filter.Cursor, query, filter.Repo, filter.Kind, filterKey)

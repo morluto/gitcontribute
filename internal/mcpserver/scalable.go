@@ -574,16 +574,12 @@ func (s *Server) searchGitHubRepositories(ctx context.Context, _ *mcp.CallToolRe
 }
 
 func validateRepositorySearchInput(in SearchGitHubRepositoriesInput) error {
-	legacy := strings.TrimSpace(in.Query)
 	raw := strings.TrimSpace(in.RawQuery)
 	structured := strings.TrimSpace(in.Text) != "" || len(in.MatchFields) > 0 || len(in.Topics) > 0 || strings.TrimSpace(in.Language) != "" || in.StarsMin != 0 || in.StarsMax != 0 || in.CreatedAfter != "" || in.CreatedBefore != "" || in.PushedAfter != "" || in.PushedBefore != "" || in.Archived != nil || in.Fork != nil
-	if legacy != "" && raw != "" {
-		return InvalidArgument("raw_query", "query and raw_query are mutually exclusive", map[string]any{"raw_query": "topic:cuda stars:>500"})
-	}
-	if (legacy != "" || raw != "") && structured {
+	if raw != "" && structured {
 		return InvalidArgument("raw_query", "cannot be combined with structured filters; choose one input mode", map[string]any{"text": "inference", "topics": []string{"cuda"}})
 	}
-	if legacy == "" && raw == "" && !structured {
+	if raw == "" && !structured {
 		return InvalidArgument("text", "provide raw_query or at least one structured filter", map[string]any{"text": "inference", "match_fields": []string{"name", "description"}})
 	}
 	if len(in.MatchFields) > 0 && strings.TrimSpace(in.Text) == "" {

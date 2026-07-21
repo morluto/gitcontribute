@@ -132,7 +132,7 @@ func (s *Service) AddGHArchiveSource(ctx context.Context, name string, events []
 
 // ShowSource returns one saved discovery source from the local corpus.
 func (s *Service) ShowSource(ctx context.Context, name string) (*cli.SourceResult, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +148,7 @@ func (s *Service) ShowSource(ctx context.Context, name string) (*cli.SourceResul
 
 // ListSources returns all saved discovery sources from the local corpus.
 func (s *Service) ListSources(ctx context.Context) (*cli.SourceListResult, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}

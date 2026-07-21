@@ -14,7 +14,7 @@ import (
 
 // DefineValidation stores a validation definition for an investigation.
 func (s *Service) DefineValidation(ctx context.Context, investigationID string, opts cli.DefineValidationOptions) (*cli.ValidationResult, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -63,7 +63,7 @@ func (s *Service) DefineValidation(ctx context.Context, investigationID string, 
 
 // ShowValidation returns a stored validation definition without executing it.
 func (s *Service) ShowValidation(ctx context.Context, id string) (*cli.ValidationResult, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (s *Service) RunValidation(ctx context.Context, id string, opts cli.RunVali
 
 // CompareValidation compares a base validation run with a candidate validation run.
 func (s *Service) CompareValidation(ctx context.Context, baseRunID, candidateRunID string) (*cli.ValidationComparisonResult, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +117,7 @@ func (s *Service) CompareValidation(ctx context.Context, baseRunID, candidateRun
 
 // ShowEvidence returns the evidence packet for an investigation.
 func (s *Service) ShowEvidence(ctx context.Context, investigationID string) (*cli.EvidenceResult, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +125,7 @@ func (s *Service) ShowEvidence(ctx context.Context, investigationID string) (*cl
 		return nil, mapInvestigationError(err)
 	}
 
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +168,7 @@ func (s *Service) RecordEvidence(ctx context.Context, input RecordEvidenceInput)
 		return nil, errors.New("evidence description is required")
 	}
 
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}

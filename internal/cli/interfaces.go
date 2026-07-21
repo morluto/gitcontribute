@@ -49,25 +49,18 @@ type UpgradeOptions struct {
 	Yes   bool
 }
 
-type UpgradeReport struct {
-	Context string `json:"context"`
-	Current string `json:"current"`
-	Latest  string `json:"latest,omitempty"`
-	Status  string `json:"status"`
-	Command string `json:"command,omitempty"`
-}
-
 type MetadataResult struct {
-	Name          string          `json:"name"`
-	Version       string          `json:"version"`
-	GoVersion     string          `json:"go_version"`
-	OS            string          `json:"os"`
-	Architecture  string          `json:"architecture"`
-	SchemaVersion int64           `json:"schema_version"`
-	ConfigPath    string          `json:"config_path"`
-	CorpusPath    string          `json:"corpus_path"`
-	Capabilities  []string        `json:"capabilities"`
-	Features      map[string]bool `json:"features"`
+	Name                   string          `json:"name"`
+	Version                string          `json:"version"`
+	GoVersion              string          `json:"go_version"`
+	OS                     string          `json:"os"`
+	Architecture           string          `json:"architecture"`
+	SchemaVersion          int64           `json:"schema_version"`
+	SupportedSchemaVersion int64           `json:"supported_schema_version"`
+	ConfigPath             string          `json:"config_path"`
+	CorpusPath             string          `json:"corpus_path"`
+	Capabilities           []string        `json:"capabilities"`
+	Features               map[string]bool `json:"features"`
 }
 
 // ConfigureOptions uses pointers so callers can distinguish an omitted value

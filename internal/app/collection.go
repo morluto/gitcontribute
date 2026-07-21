@@ -114,7 +114,7 @@ func validateCollectionRepoRef(ref string) error {
 
 // ListCollections returns all named collections.
 func (s *Service) ListCollections(ctx context.Context) (*cli.CollectionListResult, error) {
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}

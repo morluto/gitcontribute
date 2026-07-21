@@ -234,19 +234,12 @@ func (r *deadlineRunner) Run(ctx context.Context, _ RunRequest) (*RunResult, err
 	return &RunResult{StartedAt: now, CompletedAt: now, Classification: RunClassificationPassing}, nil
 }
 
-func TestRunValidationAppliesTimeoutToLegacyDefinition(t *testing.T) {
+func TestRunValidationRejectsDefinitionWithoutNormalizedTimeout(t *testing.T) {
 	repo := newFakeRepo()
-	repo.defs["legacy"] = &ValidationDefinition{
-		ID:         "legacy",
-		Command:    []string{"test"},
-		WorkingDir: "/tmp",
-	}
-	runner := &deadlineRunner{}
-	if _, err := NewService(repo, runner).RunValidation(context.Background(), "legacy", RunKindBase); err != nil {
-		t.Fatal(err)
-	}
-	if !runner.hadDeadline || runner.remaining <= defaultValidationTimeout-time.Minute || runner.remaining > defaultValidationTimeout {
-		t.Fatalf("legacy run deadline = %v, want approximately %v", runner.remaining, defaultValidationTimeout)
+	repo.defs["invalid"] = &ValidationDefinition{ID: "invalid", Command: []string{"test"}, WorkingDir: "/tmp"}
+	_, err := NewService(repo, &deadlineRunner{}).RunValidation(context.Background(), "invalid", RunKindBase)
+	if !errors.Is(err, ErrInvalidTimeout) {
+		t.Fatalf("RunValidation error = %v, want ErrInvalidTimeout", err)
 	}
 }
 

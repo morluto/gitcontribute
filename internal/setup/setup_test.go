@@ -2,12 +2,88 @@ package setup
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestActivateExistingRestoresAllRegistrationsWhenInterrupted(t *testing.T) {
+	home := t.TempDir()
+	oldExecutable := filepath.Join(home, "bin", "1.2.3", "gitcontribute")
+	newExecutable := filepath.Join(home, "bin", "1.2.4", "gitcontribute")
+	opts := Options{Operation: Configure, All: true, Home: home, Executable: oldExecutable}
+	if _, err := Run(opts); err != nil {
+		t.Fatal(err)
+	}
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	claudePath := filepath.Join(home, ".claude.json")
+	wantCodex, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantClaude, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	interrupted := errors.New("activation interrupted")
+	opts.Executable = newExecutable
+	_, err = activateExisting(context.Background(), opts, func(_ context.Context, index int) error {
+		if index == 0 {
+			return interrupted
+		}
+		return nil
+	}, nil)
+	if !errors.Is(err, interrupted) {
+		t.Fatalf("activate error = %v, want interruption", err)
+	}
+	gotCodex, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotClaude, err := os.ReadFile(claudePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotCodex, wantCodex) || !bytes.Equal(gotClaude, wantClaude) {
+		t.Fatalf("registrations changed after rollback\ncodex: %s\nclaude: %s", gotCodex, gotClaude)
+	}
+}
+
+func TestActivateExistingPreservesConcurrentEditDuringRollback(t *testing.T) {
+	home := t.TempDir()
+	oldExecutable := filepath.Join(home, "bin", "1.2.3", "gitcontribute")
+	newExecutable := filepath.Join(home, "bin", "1.2.4", "gitcontribute")
+	opts := Options{Operation: Configure, Clients: []Client{Codex}, Home: home, Executable: oldExecutable}
+	if _, err := Run(opts); err != nil {
+		t.Fatal(err)
+	}
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	concurrentEdit := []byte("model = \"concurrent\"\n")
+	interrupted := errors.New("activation interrupted")
+	opts.Executable = newExecutable
+	_, err := activateExisting(context.Background(), opts, func(_ context.Context, _ int) error {
+		if writeErr := os.WriteFile(codexPath, concurrentEdit, 0o600); writeErr != nil {
+			t.Fatal(writeErr)
+		}
+		return interrupted
+	}, nil)
+	var rollbackFailure *ActivationRollbackError
+	if !errors.As(err, &rollbackFailure) {
+		t.Fatalf("activate error = %v, want ActivationRollbackError", err)
+	}
+	got, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, concurrentEdit) {
+		t.Fatalf("concurrent registration edit was overwritten: %q", got)
+	}
+}
 
 func TestRunConfiguresAndRemovesClientsIdempotently(t *testing.T) {
 	home := t.TempDir()

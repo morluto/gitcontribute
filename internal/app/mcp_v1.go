@@ -24,7 +24,7 @@ func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpserver.SearchR
 		}
 	}
 
-	c, err := r.Service.openCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.SearchRepositoriesOutput{}, err
 	}
@@ -98,7 +98,7 @@ func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpserver.ThreadByNum
 	if in.Number < 1 {
 		return mcpserver.ThreadOutput{}, errors.New("number must be positive")
 	}
-	c, err := r.Service.openCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.ThreadOutput{}, err
 	}
@@ -129,7 +129,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		return mcpserver.ExplainMatchOutput{}, err
 	}
 
-	c, err := r.Service.openCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.ExplainMatchOutput{}, err
 	}

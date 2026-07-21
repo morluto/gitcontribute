@@ -63,7 +63,7 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts cli.Searc
 		return searchResult{}, errors.New("search limit cannot exceed 100")
 	}
 
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return searchResult{}, err
 	}

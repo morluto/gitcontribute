@@ -2,7 +2,6 @@ package mcpserver
 
 // SearchGitHubRepositoriesInput defines one bounded live GitHub search.
 type SearchGitHubRepositoriesInput struct {
-	Query          string   `json:"query,omitempty" jsonschema:"Deprecated raw GitHub query"`
 	RawQuery       string   `json:"raw_query,omitempty" jsonschema:"Advanced raw GitHub query; exclusive with filters"`
 	Text           string   `json:"text,omitempty" jsonschema:"Text to match"`
 	MatchFields    []string `json:"match_fields,omitempty" jsonschema:"Text fields: name, description, or readme"`

@@ -382,11 +382,11 @@ func isTerminalJobStatus(status string) bool {
 
 // ListJobs returns bounded durable jobs for CLI and MCP adapters.
 func (s *Service) ListJobs(ctx context.Context, status string, limit int) (*cli.JobListResult, error) {
-	jobs, err := s.Jobs(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
-	items, err := jobs.List(ctx, status, limit)
+	items, err := c.ListJobs(ctx, status, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -399,11 +399,11 @@ func (s *Service) ListJobs(ctx context.Context, status string, limit int) (*cli.
 
 // GetJob returns one durable job by opaque ID.
 func (s *Service) GetJob(ctx context.Context, id string) (*cli.JobResult, error) {
-	jobs, err := s.Jobs(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
-	job, err := jobs.Get(ctx, id)
+	job, err := c.GetJob(ctx, id)
 	if err != nil {
 		return nil, err
 	}

@@ -35,7 +35,7 @@ func (s *Service) Neighbors(ctx context.Context, repo cli.RepoRef, kind string, 
 		return nil, err
 	}
 
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +114,7 @@ func (s *Service) DuplicateCandidates(ctx context.Context, repo cli.RepoRef, kin
 		return nil, err
 	}
 
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +318,7 @@ func (s *Service) PullRequestCollisions(ctx context.Context, repo cli.RepoRef, n
 		return nil, err
 	}
 
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -528,7 +528,7 @@ type CollisionCheckResult struct {
 // CheckHypothesisDuplicates searches the local corpus for threads similar to
 // a hypothesis, returning each finding as evidence.
 func (s *Service) CheckHypothesisDuplicates(ctx context.Context, hypothesisID string, limit int) (*DuplicateCheckResult, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -563,7 +563,7 @@ func (s *Service) CheckHypothesisDuplicates(ctx context.Context, hypothesisID st
 // CheckOpportunityDuplicates searches the local corpus for threads similar to
 // an opportunity.
 func (s *Service) CheckOpportunityDuplicates(ctx context.Context, opportunityID string, limit int) (*DuplicateCheckResult, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -598,7 +598,7 @@ func (s *Service) CheckOpportunityDuplicates(ctx context.Context, opportunityID 
 // CheckHypothesisCollisions searches the local corpus for open pull requests
 // that may collide with a hypothesis.
 func (s *Service) CheckHypothesisCollisions(ctx context.Context, hypothesisID string, limit int) (*CollisionCheckResult, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -617,7 +617,7 @@ func (s *Service) CheckHypothesisCollisions(ctx context.Context, hypothesisID st
 // CheckOpportunityCollisions searches the local corpus for open pull requests
 // that may collide with an opportunity.
 func (s *Service) CheckOpportunityCollisions(ctx context.Context, opportunityID string, limit int) (*CollisionCheckResult, error) {
-	invSvc, err := s.investigationSvc(ctx)
+	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -658,7 +658,7 @@ func (s *Service) findSimilarThreads(ctx context.Context, repo domain.RepoRef, q
 	if err := repo.Validate(); err != nil {
 		return nil, "", err
 	}
-	c, err := s.openCorpus(ctx)
+	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, "", err
 	}
