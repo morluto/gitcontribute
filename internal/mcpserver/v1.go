@@ -224,30 +224,49 @@ type PromoteOpportunityInput struct {
 
 // DefineValidationInput records a bounded validation command without executing it.
 type DefineValidationInput struct {
-	InvestigationID string   `json:"investigation_id" jsonschema:"Investigation ID"`
-	Kind            string   `json:"kind" jsonschema:"Validation kind"`
-	Command         string   `json:"command" jsonschema:"Shell-free command to execute"`
-	WorkingDir      string   `json:"working_dir" jsonschema:"Working directory"`
-	BaseWorkingDir  string   `json:"base_working_dir,omitempty" jsonschema:"Base workspace directory"`
-	CandidateDir    string   `json:"candidate_dir,omitempty" jsonschema:"Candidate workspace directory"`
-	Env             []string `json:"env,omitempty" jsonschema:"Allowed environment variable names"`
-	Timeout         string   `json:"timeout,omitempty" jsonschema:"Positive Go duration; defaults to 30m"`
-	MaxOutputBytes  int64    `json:"max_output_bytes,omitempty" jsonschema:"Maximum captured bytes per output stream; defaults to 65536"`
+	InvestigationID string                         `json:"investigation_id" jsonschema:"Investigation ID"`
+	Kind            string                         `json:"kind" jsonschema:"Validation kind"`
+	Command         string                         `json:"command" jsonschema:"Shell-free command to execute"`
+	WorkingDir      string                         `json:"working_dir" jsonschema:"Working directory"`
+	BaseWorkingDir  string                         `json:"base_working_dir,omitempty" jsonschema:"Base workspace directory"`
+	CandidateDir    string                         `json:"candidate_dir,omitempty" jsonschema:"Candidate workspace directory"`
+	Env             []string                       `json:"env,omitempty" jsonschema:"Allowed environment variable names"`
+	Timeout         string                         `json:"timeout,omitempty" jsonschema:"Positive Go duration; defaults to 30m"`
+	MaxOutputBytes  int64                          `json:"max_output_bytes,omitempty" jsonschema:"Maximum captured bytes per output stream; defaults to 65536"`
+	Observation     *ValidationObservationContract `json:"observation,omitempty" jsonschema:"Expected bounded observations over captured base and candidate output"`
+}
+
+// ValidationExpectedObservation is one output assertion evaluated without a shell.
+type ValidationExpectedObservation struct {
+	Run        string `json:"run" jsonschema:"Run kind: base or candidate"`
+	Name       string `json:"name" jsonschema:"Short observation name"`
+	Source     string `json:"source" jsonschema:"Captured source: stdout, stderr, or artifact"`
+	Matcher    string `json:"matcher" jsonschema:"Matcher: exact or regexp"`
+	Pattern    string `json:"pattern" jsonschema:"Bounded exact string or Go regular expression"`
+	Occurrence string `json:"occurrence,omitempty" jsonschema:"Expected occurrence: present or absent; defaults to present"`
+	Path       string `json:"path,omitempty" jsonschema:"Relative artifact path; valid only when source is artifact"`
+}
+
+// ValidationObservationContract ties output assertions to the claimed behavior.
+type ValidationObservationContract struct {
+	Intent       string                          `json:"intent" jsonschema:"Short proof intent or invariant"`
+	Observations []ValidationExpectedObservation `json:"observations" jsonschema:"One to eight expected observations for each of base and candidate"`
 }
 
 // ValidationOutput is the stable MCP representation of a validation definition.
 type ValidationOutput struct {
-	ID              string   `json:"id"`
-	InvestigationID string   `json:"investigation_id"`
-	Kind            string   `json:"kind"`
-	Command         []string `json:"command"`
-	WorkingDir      string   `json:"working_dir"`
-	BaseWorkingDir  string   `json:"base_working_dir,omitempty"`
-	CandidateDir    string   `json:"candidate_dir,omitempty"`
-	Env             []string `json:"environment_allowlist,omitempty"`
-	Timeout         string   `json:"timeout,omitempty"`
-	MaxOutputBytes  int64    `json:"max_output_bytes,omitempty"`
-	CreatedAt       string   `json:"created_at"`
+	ID              string                         `json:"id"`
+	InvestigationID string                         `json:"investigation_id"`
+	Kind            string                         `json:"kind"`
+	Command         []string                       `json:"command"`
+	WorkingDir      string                         `json:"working_dir"`
+	BaseWorkingDir  string                         `json:"base_working_dir,omitempty"`
+	CandidateDir    string                         `json:"candidate_dir,omitempty"`
+	Env             []string                       `json:"environment_allowlist,omitempty"`
+	Timeout         string                         `json:"timeout,omitempty"`
+	MaxOutputBytes  int64                          `json:"max_output_bytes,omitempty"`
+	Observation     *ValidationObservationContract `json:"observation,omitempty"`
+	CreatedAt       string                         `json:"created_at"`
 }
 
 // PrepareContributionInput renders a local issue or pull-request draft.
@@ -381,6 +400,7 @@ func (s *Server) registerV1() {
 			setDefault(schema, "timeout", "30m")
 			setRange(schema, "max_output_bytes", 1, 64*1024*1024)
 			setDefault(schema, "max_output_bytes", 64*1024)
+			configureValidationObservationSchema(schema)
 		}), output: outputSchema[ValidationOutput]("Persisted validation definition."), handler: s.defineValidation,
 	})
 	addCatalogTool(s, catalogTool[PrepareContributionInput, DraftOutput]{

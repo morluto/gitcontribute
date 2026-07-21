@@ -132,7 +132,30 @@ func (s *Service) loadOpportunityAndRepo(ctx context.Context, c *corpus.Corpus, 
 
 func (s *Service) loadOpportunityEvidence(ctx context.Context, c *corpus.Corpus, opportunityID string) ([]*evidence.Evidence, error) {
 	evSvc := evidence.NewService(c, evidence.NewExecRunner())
-	return evSvc.ListEvidence(ctx, evidence.EvidenceFilter{OpportunityID: opportunityID})
+	items, err := evSvc.ListEvidence(ctx, evidence.EvidenceFilter{OpportunityID: opportunityID})
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range items {
+		if item.ValidationRunID == "" {
+			continue
+		}
+		run, err := c.GetValidationRun(ctx, item.ValidationRunID)
+		if err != nil {
+			return nil, fmt.Errorf("read validation run %q for evidence %q: %w", item.ValidationRunID, item.ID, err)
+		}
+		for _, observation := range run.Observations {
+			if observation.Status != evidence.ObservationMatched {
+				continue
+			}
+			item.Description += fmt.Sprintf(" Matched observation %q", observation.Name)
+			if observation.Excerpt != "" {
+				item.Description += ": " + observation.Excerpt
+			}
+			item.Description += "."
+		}
+	}
+	return items, nil
 }
 
 func (s *Service) workspaceDiff(ctx context.Context, workspaceID string, inv *investigation.Investigation) (string, error) {

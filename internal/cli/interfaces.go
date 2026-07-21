@@ -466,37 +466,66 @@ type DefineValidationOptions struct {
 	Env            []string
 	Timeout        time.Duration
 	MaxOutputBytes int64
+	Observation    *ValidationObservationContract
+}
+
+// ValidationExpectedObservation is one assertion over captured output or a declared artifact.
+type ValidationExpectedObservation struct {
+	Name       string `json:"name"`
+	Source     string `json:"source"`
+	Matcher    string `json:"matcher"`
+	Pattern    string `json:"pattern"`
+	Occurrence string `json:"occurrence"`
+	Path       string `json:"path,omitempty"`
+}
+
+// ValidationObservationContract ties output assertions to a proof intent.
+type ValidationObservationContract struct {
+	Intent    string                          `json:"intent"`
+	Base      []ValidationExpectedObservation `json:"base,omitempty"`
+	Candidate []ValidationExpectedObservation `json:"candidate,omitempty"`
+}
+
+// ValidationObservationResult records one evaluated output assertion.
+type ValidationObservationResult struct {
+	ValidationExpectedObservation
+	Status  string `json:"status"`
+	Excerpt string `json:"excerpt,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 // ValidationResult is a stored validation definition view.
 type ValidationResult struct {
-	ID              string   `json:"id"`
-	InvestigationID string   `json:"investigation_id"`
-	Kind            string   `json:"kind"`
-	Command         []string `json:"command"`
-	WorkingDir      string   `json:"working_dir"`
-	BaseWorkingDir  string   `json:"base_working_dir,omitempty"`
-	CandidateDir    string   `json:"candidate_dir,omitempty"`
-	Env             []string `json:"environment_allowlist,omitempty"`
-	Timeout         string   `json:"timeout,omitempty"`
-	MaxOutputBytes  int64    `json:"max_output_bytes,omitempty"`
-	CreatedAt       string   `json:"created_at"`
+	ID              string                         `json:"id"`
+	InvestigationID string                         `json:"investigation_id"`
+	Kind            string                         `json:"kind"`
+	Command         []string                       `json:"command"`
+	WorkingDir      string                         `json:"working_dir"`
+	BaseWorkingDir  string                         `json:"base_working_dir,omitempty"`
+	CandidateDir    string                         `json:"candidate_dir,omitempty"`
+	Env             []string                       `json:"environment_allowlist,omitempty"`
+	Timeout         string                         `json:"timeout,omitempty"`
+	MaxOutputBytes  int64                          `json:"max_output_bytes,omitempty"`
+	Observation     *ValidationObservationContract `json:"observation,omitempty"`
+	CreatedAt       string                         `json:"created_at"`
 }
 
 // ValidationRunResult is the captured outcome of one validation run.
 type ValidationRunResult struct {
-	ID              string `json:"id"`
-	DefinitionID    string `json:"definition_id"`
-	InvestigationID string `json:"investigation_id"`
-	Kind            string `json:"kind"`
-	ExitCode        int    `json:"exit_code"`
-	Stdout          string `json:"stdout"`
-	Stderr          string `json:"stderr"`
-	Truncated       bool   `json:"truncated"`
-	Error           string `json:"error,omitempty"`
-	Classification  string `json:"classification"`
-	StartedAt       string `json:"started_at"`
-	CompletedAt     string `json:"completed_at"`
+	ID                string                        `json:"id"`
+	DefinitionID      string                        `json:"definition_id"`
+	InvestigationID   string                        `json:"investigation_id"`
+	Kind              string                        `json:"kind"`
+	ExitCode          int                           `json:"exit_code"`
+	Stdout            string                        `json:"stdout"`
+	Stderr            string                        `json:"stderr"`
+	Truncated         bool                          `json:"truncated"`
+	Error             string                        `json:"error,omitempty"`
+	Classification    string                        `json:"classification"`
+	ObservationStatus string                        `json:"observation_status"`
+	Observations      []ValidationObservationResult `json:"observations,omitempty"`
+	StartedAt         string                        `json:"started_at"`
+	CompletedAt       string                        `json:"completed_at"`
 }
 
 // ValidationComparisonResult classifies a base run against a candidate run.

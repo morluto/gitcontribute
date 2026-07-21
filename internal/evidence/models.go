@@ -77,6 +77,65 @@ type Runner interface {
 	Run(ctx context.Context, req RunRequest) (*RunResult, error)
 }
 
+// ObservationSource selects captured command output to inspect.
+type ObservationSource string
+
+const (
+	ObservationStdout   ObservationSource = "stdout"
+	ObservationStderr   ObservationSource = "stderr"
+	ObservationArtifact ObservationSource = "artifact"
+)
+
+// ObservationMatcher selects how captured output is inspected.
+type ObservationMatcher string
+
+const (
+	ObservationExact  ObservationMatcher = "exact"
+	ObservationRegexp ObservationMatcher = "regexp"
+)
+
+// ObservationOccurrence declares whether the matcher must be present or absent.
+type ObservationOccurrence string
+
+const (
+	ObservationPresent ObservationOccurrence = "present"
+	ObservationAbsent  ObservationOccurrence = "absent"
+)
+
+// ExpectedObservation is one bounded assertion over captured output.
+type ExpectedObservation struct {
+	Name       string
+	Source     ObservationSource
+	Matcher    ObservationMatcher
+	Pattern    string
+	Occurrence ObservationOccurrence
+	Path       string
+}
+
+// ObservationContract ties validation output to the intended proof.
+type ObservationContract struct {
+	Intent    string
+	Base      []ExpectedObservation
+	Candidate []ExpectedObservation
+}
+
+// ObservationStatus is the aggregate outcome of a run's output assertions.
+type ObservationStatus string
+
+const (
+	ObservationNotEvaluated ObservationStatus = "not_evaluated"
+	ObservationMatched      ObservationStatus = "matched"
+	ObservationMismatched   ObservationStatus = "mismatched"
+)
+
+// ObservationResult records one assertion and a bounded matching excerpt.
+type ObservationResult struct {
+	ExpectedObservation
+	Status  ObservationStatus
+	Excerpt string
+	Error   string
+}
+
 // ValidationDefinition captures an explicit validation command and its workspace.
 type ValidationDefinition struct {
 	ID              string
@@ -92,25 +151,28 @@ type ValidationDefinition struct {
 	Env             []string // variable names allowed through from the host environment
 	Timeout         time.Duration
 	MaxOutputBytes  int64
+	Observation     *ObservationContract
 	CreatedAt       time.Time
 }
 
 // ValidationRun records the outcome of one execution of a validation definition.
 type ValidationRun struct {
-	ID              string
-	DefinitionID    string
-	InvestigationID string
-	HypothesisID    string
-	OpportunityID   string
-	Kind            RunKind
-	StartedAt       time.Time
-	CompletedAt     time.Time
-	ExitCode        int
-	Stdout          string
-	Stderr          string
-	Truncated       bool
-	Error           string
-	Classification  RunClassification
+	ID                string
+	DefinitionID      string
+	InvestigationID   string
+	HypothesisID      string
+	OpportunityID     string
+	Kind              RunKind
+	StartedAt         time.Time
+	CompletedAt       time.Time
+	ExitCode          int
+	Stdout            string
+	Stderr            string
+	Truncated         bool
+	Error             string
+	Classification    RunClassification
+	ObservationStatus ObservationStatus
+	Observations      []ObservationResult
 }
 
 // Evidence is a piece of supporting, contradicting, or inconclusive proof.

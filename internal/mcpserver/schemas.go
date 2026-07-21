@@ -9,16 +9,17 @@ import (
 )
 
 var outputPropertyDescriptions = map[string]string{
-	"id":                        "Stable GitContribute identifier.",
-	"code":                      "Stable machine-readable warning or error code.",
-	"name":                      "Human-readable stable name.",
+	"id":                        "Stable identifier.",
+	"code":                      "Stable warning or error code.",
+	"name":                      "Stable display name.",
 	"owner":                     "GitHub repository owner.",
 	"repo":                      "GitHub repository name.",
 	"kind":                      "Record or operation kind.",
+	"run":                       "Validation run kind: base or candidate.",
 	"status":                    "Current status.",
-	"state":                     "Current GitHub or local workflow state.",
+	"state":                     "GitHub or workflow state.",
 	"number":                    "GitHub issue or pull request number.",
-	"title":                     "Human-readable title.",
+	"title":                     "Display title.",
 	"body":                      "Stored issue, pull request, or draft body.",
 	"author":                    "GitHub login of the author.",
 	"labels":                    "Stored GitHub labels.",
@@ -39,8 +40,8 @@ var outputPropertyDescriptions = map[string]string{
 	"fields":                    "Stored repository fields from the winning local projection.",
 	"sections":                  "Source-backed dossier sections keyed by section name.",
 	"as_of":                     "RFC 3339 timestamp describing how current the response is.",
-	"updated_at":                "RFC 3339 timestamp of the latest update.",
-	"created_at":                "RFC 3339 timestamp when the record was created.",
+	"updated_at":                "Latest update time (RFC 3339).",
+	"created_at":                "Creation time (RFC 3339).",
 	"started_at":                "RFC 3339 timestamp when execution started.",
 	"completed_at":              "RFC 3339 timestamp when execution completed.",
 	"cancelled_at":              "RFC 3339 timestamp when cancellation was requested or completed.",
@@ -55,7 +56,7 @@ var outputPropertyDescriptions = map[string]string{
 	"bytes":                     "Size of the indexed content in bytes.",
 	"score":                     "Deterministic normalized score from 0.0 to 1.0.",
 	"confidence":                "Confidence value from 0.0 to 1.0.",
-	"reason":                    "Human-readable explanation grounded in stored facts.",
+	"reason":                    "Evidence-backed explanation.",
 	"source_revision":           "Opaque revision of the local source projection used by the result.",
 	"source_refs":               "Source references supporting this record.",
 	"source_provenance":         "Stored source revisions used to derive the evidence.",
@@ -69,7 +70,7 @@ var outputPropertyDescriptions = map[string]string{
 	"count":                     "Number of records represented by this item.",
 	"pages":                     "Number of GitHub pages retrieved.",
 	"requests":                  "Number of external requests performed.",
-	"message":                   "Human-readable operation summary.",
+	"message":                   "Operation summary.",
 	"investigation_id":          "Investigation identifier.",
 	"opportunity_id":            "Contribution opportunity identifier.",
 	"hypothesis_id":             "Hypothesis identifier.",
@@ -110,7 +111,7 @@ var outputPropertyDescriptions = map[string]string{
 	"check_id":                  "Stable readiness check identifier.",
 	"rule_id":                   "Stable rule identifier.",
 	"rule_version":              "Version of the evaluated rule.",
-	"summary":                   "Concise explanation of the result.",
+	"summary":                   "Result summary.",
 	"evidence_refs":             "Evidence references supporting the result.",
 	"remediation":               "Smallest suggested action for a non-pass result.",
 	"request":                   "Structured request submitted for the durable job.",
@@ -136,6 +137,15 @@ var outputPropertyDescriptions = map[string]string{
 	"environment_allowlist":     "Environment variable names allowed during validation.",
 	"timeout":                   "Maximum validation duration as a Go duration string.",
 	"max_output_bytes":          "Maximum captured validation output in bytes.",
+	"observation":               "Optional expected-output contract tied to the validation proof intent.",
+	"intent":                    "Short invariant or behavior the validation is intended to prove.",
+	"base":                      "Expected observations for the base run.",
+	"matcher":                   "Output matcher: exact or regexp.",
+	"pattern":                   "Bounded exact string or Go regular expression.",
+	"occurrence":                "Whether the pattern must be present or absent.",
+	"observation_status":        "Aggregate expected-observation result.",
+	"observations":              "Evaluated expected observations with bounded excerpts.",
+	"excerpt":                   "Bounded captured output or artifact excerpt that matched.",
 	"definition":                "Saved lens definition.",
 	"updated":                   "Number of local projections updated by the operation.",
 	"stable_id":                 "Stable cluster identifier.",
@@ -156,9 +166,9 @@ var outputPropertyDescriptions = map[string]string{
 	"states":                    "Thread states accepted by the saved lens.",
 	"weights":                   "Signal weights applied by the saved lens.",
 	"max_results_per_repo":      "Maximum lens-ranked results returned for one repository.",
-	"items":                     "Ordered per-input results with item-level status.",
-	"key":                       "Stable input-derived identity for this batch item.",
-	"value":                     "Successful value for this batch item.",
+	"items":                     "Ordered item results.",
+	"key":                       "Stable item key.",
+	"value":                     "Successful item value.",
 	"retry_after_ms":            "Suggested milliseconds to wait before retrying this item.",
 	"poll_after_ms":             "Suggested milliseconds to wait before polling the durable job.",
 	"next_action":               "Suggested next tool or recovery action.",
@@ -173,7 +183,7 @@ var outputPropertyDescriptions = map[string]string{
 	"archived":                  "Whether GitHub reports the repository as archived.",
 	"fork":                      "Whether GitHub reports the repository as a fork.",
 	"candidates":                "Compact ranked contribution candidates.",
-	"candidate":                 "Candidate subject associated with this ordered overlap result.",
+	"candidate":                 "Candidate result, subject, or expected candidate-run observations.",
 	"coverage":                  "Explicit completeness state for each evidence facet.",
 	"pull_request_thread_id":    "Local corpus thread identity for the authored pull request.",
 	"repositories":              "Repository identities or per-repository batch results.",
@@ -220,7 +230,7 @@ var outputPropertyDescriptions = map[string]string{
 	"head_oid":                  "Already-fetched head Git object ID.",
 	"merge_base":                "Git merge-base object ID used for comparison.",
 	"conflicted":                "Whether the local Git comparison found merge conflicts.",
-	"source":                    "Input reference or provider source associated with this result.",
+	"source":                    "Input or provider source.",
 	"reasons":                   "Evidence-backed explanations for the result.",
 	"closed_at":                 "RFC 3339 timestamp when GitHub reports the thread closed.",
 	"merged_at":                 "RFC 3339 timestamp when GitHub reports the pull request merged.",
@@ -413,4 +423,49 @@ func setPositiveItems(schema *schemaBuilder, name string) {
 		return
 	}
 	p.Items.Minimum = jsonschema.Ptr(1.0)
+}
+
+func configureValidationObservationSchema(builder *schemaBuilder) {
+	observation := property(builder, "observation")
+	if observation == nil {
+		return
+	}
+	contract := &schemaBuilder{schema: observation, err: builder.err}
+	observations := property(contract, "observations")
+	if observations == nil {
+		return
+	}
+	if observations.Items == nil {
+		*builder.err = fmt.Errorf("MCP schema array property %q has no items schema", "observations")
+		return
+	}
+	observations.MinItems = jsonschema.Ptr(2)
+	observations.MaxItems = jsonschema.Ptr(2 * maxObservationsPerValidationRun)
+	item := &schemaBuilder{schema: observations.Items, err: builder.err}
+	setEnum(item, "run", "base", "candidate")
+	setEnum(item, "source", "stdout", "stderr", "artifact")
+	setEnum(item, "matcher", "exact", "regexp")
+	setEnum(item, "occurrence", "present", "absent")
+	setDefault(item, "occurrence", "present")
+	observations.AllOf = []*jsonschema.Schema{
+		observationRunBounds("base"),
+		observationRunBounds("candidate"),
+	}
+}
+
+const maxObservationsPerValidationRun = 8
+
+func observationRunBounds(run string) *jsonschema.Schema {
+	value := any(run)
+	return &jsonschema.Schema{
+		Contains: &jsonschema.Schema{
+			Type: "object",
+			Properties: map[string]*jsonschema.Schema{
+				"run": {Const: &value},
+			},
+			Required: []string{"run"},
+		},
+		MinContains: jsonschema.Ptr(1),
+		MaxContains: jsonschema.Ptr(maxObservationsPerValidationRun),
+	}
 }

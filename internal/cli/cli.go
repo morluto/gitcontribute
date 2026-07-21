@@ -428,6 +428,7 @@ type defineValidationCmd struct {
 	Env             []string      `name:"env" help:"Host environment variable names to pass through"`
 	Timeout         time.Duration `name:"timeout" help:"Maximum execution time"`
 	MaxOutput       int64         `name:"max-output" help:"Maximum captured output bytes per stream"`
+	Observation     string        `name:"observation-contract" help:"JSON observation contract for base and candidate output"`
 	JSON            bool          `name:"json" help:"Print the result as JSON"`
 }
 
@@ -1548,6 +1549,13 @@ func (c *CLI) runValidation(ctx context.Context, command string, cmd *validation
 	switch command {
 	case "validation define":
 		fmt.Fprintf(c.stderr, "defining validation for investigation %s...\n", cmd.Define.InvestigationID)
+		var observation *ValidationObservationContract
+		if strings.TrimSpace(cmd.Define.Observation) != "" {
+			observation = &ValidationObservationContract{}
+			if err := json.Unmarshal([]byte(cmd.Define.Observation), observation); err != nil {
+				return c.mapError(fmt.Errorf("parse observation contract: %w", err))
+			}
+		}
 		result, err := service.DefineValidation(ctx, cmd.Define.InvestigationID, DefineValidationOptions{
 			Kind:           cmd.Define.Kind,
 			Command:        cmd.Define.Command,
@@ -1557,6 +1565,7 @@ func (c *CLI) runValidation(ctx context.Context, command string, cmd *validation
 			Env:            cmd.Define.Env,
 			Timeout:        cmd.Define.Timeout,
 			MaxOutputBytes: cmd.Define.MaxOutput,
+			Observation:    observation,
 		})
 		if err != nil {
 			return c.mapError(err)

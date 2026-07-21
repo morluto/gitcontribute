@@ -14,5 +14,6 @@ var (
 	ErrInvalidOutputLimit     = errors.New("evidence: output limit is invalid")
 	ErrInvalidTimeout         = errors.New("evidence: timeout is invalid")
 	ErrInvalidEnvironment     = errors.New("evidence: environment allowlist is invalid")
+	ErrInvalidObservation     = errors.New("evidence: observation contract is invalid")
 	ErrExecutionNotAuthorized = errors.New("evidence: host execution requires explicit authorization")
 )
