@@ -1,9 +1,6 @@
 package mcpserver
 
-import (
-	"github.com/google/jsonschema-go/jsonschema"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-)
+import "github.com/modelcontextprotocol/go-sdk/mcp"
 
 // Canonical MCP tool names group operations by capability and side-effect boundary.
 const (
@@ -101,19 +98,27 @@ var canonicalToolNames = []string{
 type catalogTool[In, Out any] struct {
 	name, title, description string
 	annotations              *mcp.ToolAnnotations
-	input                    *jsonschema.Schema
-	output                   *jsonschema.Schema
+	input                    schemaDefinition
+	output                   schemaDefinition
 	handler                  mcp.ToolHandlerFor[In, Out]
 }
 
-func addCatalogTool[In, Out any](server *mcp.Server, tool catalogTool[In, Out]) {
-	mcp.AddTool(server, &mcp.Tool{
+func addCatalogTool[In, Out any](server *Server, tool catalogTool[In, Out]) {
+	if tool.input.err != nil {
+		server.recordRegistrationError(tool.name, "input", tool.input.err)
+		return
+	}
+	if tool.output.err != nil {
+		server.recordRegistrationError(tool.name, "output", tool.output.err)
+		return
+	}
+	mcp.AddTool(server.server, &mcp.Tool{
 		Name:         tool.name,
 		Title:        tool.title,
 		Description:  tool.description,
 		Annotations:  tool.annotations,
-		InputSchema:  tool.input,
-		OutputSchema: tool.output,
+		InputSchema:  tool.input.schema,
+		OutputSchema: tool.output.schema,
 	}, tool.handler)
 }
 
@@ -166,4 +171,4 @@ func cancellationAnnotations() *mcp.ToolAnnotations {
 	}
 }
 
-func noSchemaCustomization(*jsonschema.Schema) {}
+func noSchemaCustomization(*schemaBuilder) {}

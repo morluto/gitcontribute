@@ -779,6 +779,9 @@ func (r *MCPRunner) Run(ctx context.Context, opts cli.MCPOptions) error {
 	if opts.Transport != "stdio" {
 		return fmt.Errorf("unsupported mcp transport %q", opts.Transport)
 	}
-	server := mcpserver.New(r.Service.MCPReader(), r.Service.version)
+	server, err := mcpserver.New(r.Service.MCPReader(), r.Service.version)
+	if err != nil {
+		return err
+	}
 	return server.ServeStdio(ctx)
 }

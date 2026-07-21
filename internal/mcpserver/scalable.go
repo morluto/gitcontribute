@@ -357,28 +357,28 @@ type DeepWikiOutput struct {
 
 func (s *Server) registerScalable() {
 	readOnly := readOnlyAnnotations()
-	addCatalogTool(s.server, catalogTool[GetRepositoriesInput, GetRepositoriesOutput]{name: ToolGetRepositories, title: "Get stored repositories in one batch", description: "Read typed metadata and coverage for up to 100 stored repositories in input order. Missing metadata is returned as null with a sync next action; this offline tool never contacts GitHub.", annotations: readOnly, input: inputSchema[GetRepositoriesInput](func(sc *jsonschema.Schema) { setArrayBounds(sc, "repositories", 1, 100) }), output: outputSchema[GetRepositoriesOutput]("Ordered repository batch with item-level status."), handler: s.getRepositories})
-	addCatalogTool(s.server, catalogTool[GetThreadsInput, GetThreadsOutput]{name: ToolGetThreads, title: "Get stored threads in one batch", description: "Read up to 100 exact stored issues or pull requests in input order. Choose compact for triage and full only for finalists; this tool is offline.", annotations: readOnly, input: inputSchema[GetThreadsInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s, catalogTool[GetRepositoriesInput, GetRepositoriesOutput]{name: ToolGetRepositories, title: "Get stored repositories in one batch", description: "Read typed metadata and coverage for up to 100 stored repositories in input order. Missing metadata is returned as null with a sync next action; this offline tool never contacts GitHub.", annotations: readOnly, input: inputSchema[GetRepositoriesInput](func(sc *schemaBuilder) { setArrayBounds(sc, "repositories", 1, 100) }), output: outputSchema[GetRepositoriesOutput]("Ordered repository batch with item-level status."), handler: s.getRepositories})
+	addCatalogTool(s, catalogTool[GetThreadsInput, GetThreadsOutput]{name: ToolGetThreads, title: "Get stored threads in one batch", description: "Read up to 100 exact stored issues or pull requests in input order. Choose compact for triage and full only for finalists; this tool is offline.", annotations: readOnly, input: inputSchema[GetThreadsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 100)
 		setEnum(sc, "view", "compact", "full")
 		setDefault(sc, "view", "compact")
 	}), output: outputSchema[GetThreadsOutput]("Ordered stored-thread batch with item-level status."), handler: s.getThreads})
-	addCatalogTool(s.server, catalogTool[RankOpportunitiesInput, RankOpportunitiesOutput]{name: ToolRankThreads, title: "Rank stored threads for contribution", description: "Rank open issues across 1-50 required stored repositories. This bounded offline result reports truncation and never persists opportunities.", annotations: readOnly, input: inputSchema[RankOpportunitiesInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s, catalogTool[RankOpportunitiesInput, RankOpportunitiesOutput]{name: ToolRankThreads, title: "Rank stored threads for contribution", description: "Rank open issues across 1-50 required stored repositories. This bounded offline result reports truncation and never persists opportunities.", annotations: readOnly, input: inputSchema[RankOpportunitiesInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "repositories", 1, 50)
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 20)
 		setRange(sc, "max_results_per_repository", 1, 100)
 		setDefault(sc, "max_results_per_repository", 10)
 	}), output: rankOpportunitiesOutputSchema(), handler: s.rankOpportunities})
-	addCatalogTool(s.server, catalogTool[FindPrecedentsInput, FindPrecedentsOutput]{name: ToolFindPrecedents, title: "Find historical issue and pull-request precedents", description: "Find similar closed issues and pull requests for up to 20 source threads, including completed, not-planned, duplicate, and merged evidence. This is an offline historical read, not a current opportunity search.", annotations: readOnly, input: inputSchema[FindPrecedentsInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s, catalogTool[FindPrecedentsInput, FindPrecedentsOutput]{name: ToolFindPrecedents, title: "Find historical issue and pull-request precedents", description: "Find similar closed issues and pull requests for up to 20 source threads, including completed, not-planned, duplicate, and merged evidence. This is an offline historical read, not a current opportunity search.", annotations: readOnly, input: inputSchema[FindPrecedentsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 20)
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 20)
 	}), output: outputSchema[FindPrecedentsOutput]("Historical precedents grouped by source thread."), handler: s.findPrecedents})
-	addCatalogTool(s.server, catalogTool[GetJobsInput, GetJobsOutput]{name: ToolGetJob, title: "Get durable jobs in one batch", description: "Read up to 100 durable jobs in order with structured progress and item-level outcomes.", annotations: readOnly, input: inputSchema[GetJobsInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s, catalogTool[GetJobsInput, GetJobsOutput]{name: ToolGetJob, title: "Get durable jobs in one batch", description: "Read up to 100 durable jobs in order with structured progress and item-level outcomes.", annotations: readOnly, input: inputSchema[GetJobsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "ids", 1, 100)
 	}), output: outputSchema[GetJobsOutput]("Ordered durable-job states."), handler: s.getJobs})
-	addCatalogTool(s.server, catalogTool[SearchGitHubRepositoriesInput, SearchGitHubRepositoriesOutput]{name: ToolSearchGitHubRepositories, title: "Search live GitHub repositories", description: "Find repositories with structured filters and persist metadata. Use raw_query for unsupported GitHub qualifiers. Does not fetch threads or code.", annotations: networkReadAnnotations(), input: inputSchema[SearchGitHubRepositoriesInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s, catalogTool[SearchGitHubRepositoriesInput, SearchGitHubRepositoriesOutput]{name: ToolSearchGitHubRepositories, title: "Search live GitHub repositories", description: "Find repositories with structured filters and persist metadata. Use raw_query for unsupported GitHub qualifiers. Does not fetch threads or code.", annotations: networkReadAnnotations(), input: inputSchema[SearchGitHubRepositoriesInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "match_fields", 1, 3)
 		setArrayEnum(sc, "match_fields", "name", "description", "readme")
 		setArrayBounds(sc, "topics", 1, 10)
@@ -393,8 +393,8 @@ func (s *Server) registerScalable() {
 		setEnum(sc, "response_format", "concise", "detailed")
 		setDefault(sc, "response_format", "detailed")
 	}), output: outputSchema[SearchGitHubRepositoriesOutput]("Live repository search with persisted metadata."), handler: s.searchGitHubRepositories})
-	addCatalogTool(s.server, catalogTool[SyncRepositoryMetadataInput, JobReference]{name: ToolSyncRepositoryMetadata, title: "Sync repository metadata in one batch", description: "Start one durable GitHub read for metadata only for up to 100 explicit repositories. Use it for stars, language, archive state, and issue counts; it does not fetch threads or code.", annotations: networkReadAnnotations(), input: inputSchema[SyncRepositoryMetadataInput](func(sc *jsonschema.Schema) { setArrayBounds(sc, "repositories", 1, 100) }), output: outputSchema[JobReference]("Reference to a metadata synchronization job."), handler: s.syncRepositoryMetadata})
-	addCatalogTool(s.server, catalogTool[SyncThreadsInput, JobReference]{name: ToolSyncThreads, title: "Sync GitHub thread headers in one batch", description: "Sync GitHub issue and pull-request headers across selected repositories or exact threads, plus metadata and policy files; no discussions, reviews, checks, or code.", annotations: networkReadAnnotations(), input: inputSchema[SyncThreadsInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s, catalogTool[SyncRepositoryMetadataInput, JobReference]{name: ToolSyncRepositoryMetadata, title: "Sync repository metadata in one batch", description: "Start one durable GitHub read for metadata only for up to 100 explicit repositories. Use it for stars, language, archive state, and issue counts; it does not fetch threads or code.", annotations: networkReadAnnotations(), input: inputSchema[SyncRepositoryMetadataInput](func(sc *schemaBuilder) { setArrayBounds(sc, "repositories", 1, 100) }), output: outputSchema[JobReference]("Reference to a metadata synchronization job."), handler: s.syncRepositoryMetadata})
+	addCatalogTool(s, catalogTool[SyncThreadsInput, JobReference]{name: ToolSyncThreads, title: "Sync GitHub thread headers in one batch", description: "Sync GitHub issue and pull-request headers across selected repositories or exact threads, plus metadata and policy files; no discussions, reviews, checks, or code.", annotations: networkReadAnnotations(), input: inputSchema[SyncThreadsInput](func(sc *schemaBuilder) {
 		setEnum(sc, "selection", "repositories", "threads")
 		property(sc, "repositories").MaxItems = jsonschema.Ptr(50)
 		property(sc, "threads").MaxItems = jsonschema.Ptr(100)
@@ -405,46 +405,50 @@ func (s *Server) registerScalable() {
 		setRange(sc, "max_requests", 9, 1000)
 		setDefault(sc, "max_requests", 1000)
 	}), output: outputSchema[JobReference]("Reference to a bounded thread-header synchronization job."), handler: s.syncThreads})
-	addCatalogTool(s.server, catalogTool[HydrateThreadsInput, JobReference]{name: ToolHydrateThreads, title: "Fetch selected GitHub thread facets", description: "Fetch explicit comments, issue timelines, pull-request details, reviews, or review comments for up to 100 exact threads. Timeline history is opt-in; hydrate only finalists after ranking.", annotations: networkReadAnnotations(), input: inputSchema[HydrateThreadsInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s, catalogTool[HydrateThreadsInput, JobReference]{name: ToolHydrateThreads, title: "Fetch selected GitHub thread facets", description: "Fetch explicit comments, issue timelines, pull-request details, reviews, or review comments for up to 100 exact threads. Timeline history is opt-in; hydrate only finalists after ranking.", annotations: networkReadAnnotations(), input: inputSchema[HydrateThreadsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 100)
 		setArrayBounds(sc, "facets", 1, 5)
 		setArrayEnum(sc, "facets", "issue_comments", "issue_timeline", "pr_details", "pr_reviews", "pr_review_comments")
 		setRange(sc, "max_pages", 1, 100)
 		setDefault(sc, "max_pages", 3)
 	}), output: outputSchema[JobReference]("Reference to a bounded exact-thread hydration job."), handler: s.hydrateThreads})
-	addCatalogTool(s.server, catalogTool[struct{}, AuthenticatedIdentityOutput]{name: ToolGetAuthenticatedIdentity, title: "Get authenticated GitHub identity", description: "Resolve the current read credential's GitHub login and stable ID. Use before authored pull-request discovery; this performs one external read and never mutates GitHub.", annotations: networkReadAnnotations(), input: inputSchema[struct{}](noSchemaCustomization), output: outputSchema[AuthenticatedIdentityOutput]("Authenticated GitHub identity."), handler: s.getAuthenticatedIdentity})
-	addCatalogTool(s.server, catalogTool[SyncAuthoredPullRequestsInput, JobReference]{name: ToolSyncAuthoredPullRequests, title: "Sync authored pull requests across GitHub", description: "Discover and persist up to 500 pull requests authored by the authenticated GitHub user across repositories. This reads only core thread state; use the dedicated exact-PR health tool afterward.", annotations: networkReadAnnotations(), input: inputSchema[SyncAuthoredPullRequestsInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s, catalogTool[struct{}, AuthenticatedIdentityOutput]{name: ToolGetAuthenticatedIdentity, title: "Get authenticated GitHub identity", description: "Resolve the current read credential's GitHub login and stable ID. Use before authored pull-request discovery; this performs one external read and never mutates GitHub.", annotations: networkReadAnnotations(), input: inputSchema[struct{}](noSchemaCustomization), output: outputSchema[AuthenticatedIdentityOutput]("Authenticated GitHub identity."), handler: s.getAuthenticatedIdentity})
+	addCatalogTool(s, catalogTool[SyncAuthoredPullRequestsInput, JobReference]{name: ToolSyncAuthoredPullRequests, title: "Sync authored pull requests across GitHub", description: "Discover and persist up to 500 pull requests authored by the authenticated GitHub user across repositories. This reads only core thread state; use the dedicated exact-PR health tool afterward.", annotations: networkReadAnnotations(), input: inputSchema[SyncAuthoredPullRequestsInput](func(sc *schemaBuilder) {
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit", 1, 500)
 		setDefault(sc, "limit", 500)
 		setRange(sc, "max_requests", 9, 1000)
 		setDefault(sc, "max_requests", 1000)
 	}), output: outputSchema[JobReference]("Reference to an authored pull-request synchronization job."), handler: s.syncAuthoredPullRequests})
-	addCatalogTool(s.server, catalogTool[SyncPullRequestStatusInput, JobReference]{name: ToolSyncPullRequestStatus, title: "Sync exact PR health", description: "Refresh mergeability, reviews, checks, unresolved conversations, merge state, merge queue, closing issues, and changed files for up to 50 exact pull requests. Returns independent facet completeness; retry only incomplete items.", annotations: networkReadAnnotations(), input: inputSchema[SyncPullRequestStatusInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s, catalogTool[SyncPullRequestStatusInput, JobReference]{name: ToolSyncPullRequestStatus, title: "Sync exact PR health", description: "Refresh mergeability, reviews, checks, unresolved conversations, merge state, merge queue, closing issues, and changed files for up to 50 exact pull requests. Returns independent facet completeness; retry only incomplete items.", annotations: networkReadAnnotations(), input: inputSchema[SyncPullRequestStatusInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "pull_requests", 1, 50)
 		setRange(sc, "max_pages", 1, 20)
 		setDefault(sc, "max_pages", 3)
 	}), output: outputSchema[JobReference]("Reference to a pull-request status synchronization job."), handler: s.syncPullRequestStatus})
-	addCatalogTool(s.server, catalogTool[ListPullRequestPortfolioInput, ListPullRequestPortfolioOutput]{name: ToolListPullRequestPortfolio, title: "List pull requests that need contributor attention", description: "List stored authored pull requests with deterministic attention from lifecycle, checks, review conversations, merge state, queue, and freshness. This offline read reports incomplete facets as unknown; sync authored PRs and health when stale.", annotations: readOnly, input: inputSchema[ListPullRequestPortfolioInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s, catalogTool[ListPullRequestPortfolioInput, ListPullRequestPortfolioOutput]{name: ToolListPullRequestPortfolio, title: "List pull requests that need contributor attention", description: "List stored authored pull requests with deterministic attention from lifecycle, checks, review conversations, merge state, queue, and freshness. This offline read reports incomplete facets as unknown; sync authored PRs and health when stale.", annotations: readOnly, input: inputSchema[ListPullRequestPortfolioInput](func(sc *schemaBuilder) {
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 100)
 	}), output: outputSchema[ListPullRequestPortfolioOutput]("Offline pull-request portfolio with explainable attention states."), handler: s.listPullRequestPortfolio})
-	addCatalogTool(s.server, catalogTool[FindPortfolioOverlapsInput, FindPortfolioOverlapsOutput]{name: ToolFindPortfolioOverlaps, title: "Find overlaps with authored pull requests", description: "Compare up to 50 local candidates with 100 stored authored pull requests using complete changed-path, linked-issue, and opportunity-similarity observations. This offline read returns unknown instead of claiming no overlap when coverage is missing.", annotations: readOnly, input: inputSchema[FindPortfolioOverlapsInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s, catalogTool[FindPortfolioOverlapsInput, FindPortfolioOverlapsOutput]{name: ToolFindPortfolioOverlaps, title: "Find overlaps with authored pull requests", description: "Compare up to 50 local candidates with 100 stored authored pull requests using complete changed-path, linked-issue, and opportunity-similarity observations. This offline read returns unknown instead of claiming no overlap when coverage is missing.", annotations: readOnly, input: inputSchema[FindPortfolioOverlapsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "candidates", 1, 50)
 		setArrayBounds(sc, "pull_requests", 1, 100)
-		if candidate := sc.Defs["PortfolioSubjectInput"]; candidate != nil {
-			setEnum(candidate, "kind", "opportunity", "workspace", "pull_request")
+		if candidate := sc.schema.Defs["PortfolioSubjectInput"]; candidate != nil {
+			setEnum(&schemaBuilder{schema: candidate, err: sc.err}, "kind", "opportunity", "workspace", "pull_request")
 		}
 	}), output: outputSchema[FindPortfolioOverlapsOutput]("Ordered source-backed portfolio overlap results."), handler: s.findPortfolioOverlaps})
-	addCatalogTool(s.server, catalogTool[LinkPullRequestInput, LinkPullRequestOutput]{name: ToolLinkPullRequest, title: "Link a pull request to local contribution work", description: "Idempotently link one stored authored pull request to an existing local opportunity, managed workspace, or both. This writes only local workflow state and never changes GitHub.", annotations: localWriteAnnotations(true), input: inputSchema[LinkPullRequestInput](func(sc *jsonschema.Schema) {
-		sc.AnyOf = []*jsonschema.Schema{{Required: []string{"opportunity_id"}}, {Required: []string{"workspace_id"}}}
-		property(sc, "opportunity_id").MinLength = jsonschema.Ptr(1)
-		property(sc, "workspace_id").MinLength = jsonschema.Ptr(1)
+	addCatalogTool(s, catalogTool[LinkPullRequestInput, LinkPullRequestOutput]{name: ToolLinkPullRequest, title: "Link a pull request to local contribution work", description: "Idempotently link one stored authored pull request to an existing local opportunity, managed workspace, or both. This writes only local workflow state and never changes GitHub.", annotations: localWriteAnnotations(true), input: inputSchema[LinkPullRequestInput](func(sc *schemaBuilder) {
+		sc.schema.AnyOf = []*jsonschema.Schema{{Required: []string{"opportunity_id"}}, {Required: []string{"workspace_id"}}}
+		if p := property(sc, "opportunity_id"); p != nil {
+			p.MinLength = jsonschema.Ptr(1)
+		}
+		if p := property(sc, "workspace_id"); p != nil {
+			p.MinLength = jsonschema.Ptr(1)
+		}
 	}), output: outputSchema[LinkPullRequestOutput]("Stored local pull-request relationship."), handler: s.linkPullRequest})
-	addCatalogTool(s.server, catalogTool[IndexRepositoriesInput, JobReference]{name: ToolIndexRepositories, title: "Acquire and index repository code in one batch", description: "Start a durable low-concurrency Git acquisition and safe code indexing job for up to 10 repositories. This performs network reads, Git processes, and local writes, but disables hooks and never executes repository-controlled code.", annotations: networkReadAnnotations(), input: inputSchema[IndexRepositoriesInput](func(sc *jsonschema.Schema) { setArrayBounds(sc, "repositories", 1, 10) }), output: outputSchema[JobReference]("Reference to a bounded repository acquisition and indexing job."), handler: s.indexRepositories})
-	addCatalogTool(s.server, catalogTool[CheckMergeConflictsInput, CheckMergeConflictsOutput]{name: ToolCheckMergeConflicts, title: "Check local Git merge conflicts in one batch", description: "Compare up to 50 already-fetched base/head OID pairs in managed workspaces using non-mutating Git reads. This never fetches remotes or changes refs, indexes, or worktrees; use it for actual merge conflicts, not competing upstream work.", annotations: processReadAnnotations(), input: inputSchema[CheckMergeConflictsInput](func(sc *jsonschema.Schema) { setArrayBounds(sc, "comparisons", 1, 50) }), output: outputSchema[CheckMergeConflictsOutput]("Ordered local merge-conflict checks."), handler: s.checkMergeConflicts})
-	addCatalogTool(s.server, catalogTool[DeepWikiInput, DeepWikiOutput]{name: ToolQueryDeepWiki, title: "Query derived repository knowledge from DeepWiki", description: "Query DeepWiki for public repository architecture, contribution rules, testing, and subsystem context. Actions map to its public structure, contents, and question reads. Do not use this for live stars, thread state, checks, reviews, or mergeability.", annotations: networkReadAnnotations(), input: inputSchema[DeepWikiInput](func(sc *jsonschema.Schema) {
+	addCatalogTool(s, catalogTool[IndexRepositoriesInput, JobReference]{name: ToolIndexRepositories, title: "Acquire and index repository code in one batch", description: "Start a durable low-concurrency Git acquisition and safe code indexing job for up to 10 repositories. This performs network reads, Git processes, and local writes, but disables hooks and never executes repository-controlled code.", annotations: networkReadAnnotations(), input: inputSchema[IndexRepositoriesInput](func(sc *schemaBuilder) { setArrayBounds(sc, "repositories", 1, 10) }), output: outputSchema[JobReference]("Reference to a bounded repository acquisition and indexing job."), handler: s.indexRepositories})
+	addCatalogTool(s, catalogTool[CheckMergeConflictsInput, CheckMergeConflictsOutput]{name: ToolCheckMergeConflicts, title: "Check local Git merge conflicts in one batch", description: "Compare up to 50 already-fetched base/head OID pairs in managed workspaces using non-mutating Git reads. This never fetches remotes or changes refs, indexes, or worktrees; use it for actual merge conflicts, not competing upstream work.", annotations: processReadAnnotations(), input: inputSchema[CheckMergeConflictsInput](func(sc *schemaBuilder) { setArrayBounds(sc, "comparisons", 1, 50) }), output: outputSchema[CheckMergeConflictsOutput]("Ordered local merge-conflict checks."), handler: s.checkMergeConflicts})
+	addCatalogTool(s, catalogTool[DeepWikiInput, DeepWikiOutput]{name: ToolQueryDeepWiki, title: "Query derived repository knowledge from DeepWiki", description: "Query DeepWiki for public repository architecture, contribution rules, testing, and subsystem context. Actions map to its public structure, contents, and question reads. Do not use this for live stars, thread state, checks, reviews, or mergeability.", annotations: networkReadAnnotations(), input: inputSchema[DeepWikiInput](func(sc *schemaBuilder) {
 		setEnum(sc, "action", "structure", "contents", "question")
 		setArrayBounds(sc, "repositories", 1, 10)
 		setRange(sc, "max_output_bytes", 1024, 1048576)
@@ -725,16 +729,19 @@ func (s *Server) deepWiki(ctx context.Context, _ *mcp.CallToolRequest, in DeepWi
 	return nil, out, err
 }
 
-func setArrayBounds(schema *jsonschema.Schema, name string, minimum, maximum int) {
+func setArrayBounds(schema *schemaBuilder, name string, minimum, maximum int) {
 	p := property(schema, name)
+	if p == nil {
+		return
+	}
 	p.MinItems = jsonschema.Ptr(minimum)
 	p.MaxItems = jsonschema.Ptr(maximum)
 }
 
-func rankOpportunitiesOutputSchema() *jsonschema.Schema {
-	schema := outputSchema[RankOpportunitiesOutput]("Bounded cross-repository Radar ranking.")
-	setOutputPropertyRange(schema, "score", 0, 100)
-	return schema
+func rankOpportunitiesOutputSchema() schemaDefinition {
+	definition := outputSchema[RankOpportunitiesOutput]("Bounded cross-repository Radar ranking.")
+	setOutputPropertyRange(definition.schema, "score", 0, 100)
+	return definition
 }
 
 func setOutputPropertyRange(schema *jsonschema.Schema, name string, minimum, maximum float64) {

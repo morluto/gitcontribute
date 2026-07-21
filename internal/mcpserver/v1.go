@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -282,18 +281,18 @@ type CancelJobInput struct {
 func (s *Server) registerV1() {
 	readOnly := readOnlyAnnotations()
 	localWrite := localWriteAnnotations(false)
-	addCatalogTool(s.server, catalogTool[SearchRepositoriesInput, SearchRepositoriesOutput]{
+	addCatalogTool(s, catalogTool[SearchRepositoriesInput, SearchRepositoriesOutput]{
 		name: ToolSearchRepositories, title: "Search stored repositories",
 		description: "Search local repository owner, name, and description fields, or list a specific repository when owner and repo are supplied together. Results are paginated and this tool never contacts GitHub.",
-		annotations: readOnly, input: inputSchema[SearchRepositoriesInput](func(schema *jsonschema.Schema) {
+		annotations: readOnly, input: inputSchema[SearchRepositoriesInput](func(schema *schemaBuilder) {
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 		}), output: outputSchema[SearchRepositoriesOutput]("One page of stored repository matches."), handler: s.searchRepositories,
 	})
-	addCatalogTool(s.server, catalogTool[SearchThreadsInput, SearchOutput]{
+	addCatalogTool(s, catalogTool[SearchThreadsInput, SearchOutput]{
 		name: ToolSearchThreads, title: "Search stored issues and pull requests",
 		description: "Search locally stored issue and pull-request titles and bodies, optionally restricted to one repository and thread kind. Use the returned cursor for the next page; this tool never contacts GitHub.",
-		annotations: readOnly, input: inputSchema[SearchThreadsInput](func(schema *jsonschema.Schema) {
+		annotations: readOnly, input: inputSchema[SearchThreadsInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 			setEnum(schema, "state", "open", "closed")
 			setEnum(schema, "state_reason", "completed", "not_planned")
@@ -301,100 +300,100 @@ func (s *Server) registerV1() {
 			setDefault(schema, "limit", 20)
 		}), output: outputSchema[SearchOutput]("One page of stored issue and pull-request matches."), handler: s.searchThreads,
 	})
-	addCatalogTool(s.server, catalogTool[GetRepositoryDossierInput, DossierOutput]{
+	addCatalogTool(s, catalogTool[GetRepositoryDossierInput, DossierOutput]{
 		name: ToolGetRepositoryDossier, title: "Get repository dossier",
 		description: "Read the latest persisted source-backed dossier for one repository. Use " + ToolBuildRepositoryDossier + " only when the local dossier must be regenerated; this read never performs that write.",
 		annotations: readOnly, input: inputSchema[GetRepositoryDossierInput](noSchemaCustomization),
 		output: outputSchema[DossierOutput]("Persisted source-backed repository dossier."), handler: s.getRepositoryDossier,
 	})
-	addCatalogTool(s.server, catalogTool[ExplainMatchInput, ExplainMatchOutput]{
+	addCatalogTool(s, catalogTool[ExplainMatchInput, ExplainMatchOutput]{
 		name: ToolExplainMatch, title: "Explain a stored search match",
 		description: "Explain why one repository, thread, or code result matched a prior local query, including score signals, source revision, and facet coverage. Supply the identity fields for the selected match; this tool is offline.",
-		annotations: readOnly, input: inputSchema[ExplainMatchInput](func(schema *jsonschema.Schema) {
+		annotations: readOnly, input: inputSchema[ExplainMatchInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "repo", "issue", "pull_request", "code")
 			setMinimum(schema, "number", 1)
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 		}), output: outputSchema[ExplainMatchOutput]("Stored facts and score signals explaining one search match."), handler: s.explainMatch,
 	})
-	addCatalogTool(s.server, catalogTool[BuildRepositoryDossierInput, JobReference]{
+	addCatalogTool(s, catalogTool[BuildRepositoryDossierInput, JobReference]{
 		name: ToolBuildRepositoryDossier, title: "Build repository dossier",
 		description: "Start an asynchronous local job that rebuilds and persists a source-backed dossier from the existing corpus. It performs no network access; use " + ToolGetRepositoryDossier + " after the job succeeds.",
 		annotations: localWriteAnnotations(true), input: inputSchema[BuildRepositoryDossierInput](noSchemaCustomization),
 		output: outputSchema[JobReference]("Reference to a newly queued dossier build job."), handler: s.buildRepositoryDossier,
 	})
-	addCatalogTool(s.server, catalogTool[CreateWorkspaceInput, JobReference]{
+	addCatalogTool(s, catalogTool[CreateWorkspaceInput, JobReference]{
 		name: ToolCreateWorkspace, title: "Create managed Git workspace",
 		description: "Start an asynchronous job that clones the specified remote and creates a managed worktree for an investigation. This performs network reads, Git process execution, filesystem writes, and local metadata writes, but never mutates GitHub.",
 		annotations: networkReadAnnotations(), input: inputSchema[CreateWorkspaceInput](noSchemaCustomization),
 		output: outputSchema[JobReference]("Reference to a newly queued workspace creation job."), handler: s.createWorkspace,
 	})
-	addCatalogTool(s.server, catalogTool[RunValidationInput, JobReference]{
+	addCatalogTool(s, catalogTool[RunValidationInput, JobReference]{
 		name: ToolRunValidation, title: "Run stored validation command",
 		description: "Execute one stored shell-free validation command against its base or candidate workspace and persist the run asynchronously. This can modify the workspace or host through the authorized command and requires execute=true.",
-		annotations: executionAnnotations(), input: inputSchema[RunValidationInput](func(schema *jsonschema.Schema) {
+		annotations: executionAnnotations(), input: inputSchema[RunValidationInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "base", "candidate")
 			setConst(schema, "execute", true)
 		}), output: outputSchema[JobReference]("Reference to a newly queued validation execution job."), handler: s.runValidation,
 	})
-	addCatalogTool(s.server, catalogTool[StartInvestigationInput, InvestigationOutput]{
+	addCatalogTool(s, catalogTool[StartInvestigationInput, InvestigationOutput]{
 		name: ToolStartInvestigation, title: "Start local investigation",
 		description: "Create and persist a local investigation for one stored repository revision. This does not create a Git worktree or contact GitHub; use " + ToolCreateWorkspace + " separately when filesystem work is authorized.",
 		annotations: localWrite, input: inputSchema[StartInvestigationInput](noSchemaCustomization),
 		output: outputSchema[InvestigationOutput]("Newly created local investigation."), handler: s.startInvestigation,
 	})
-	addCatalogTool(s.server, catalogTool[RecordHypothesisInput, HypothesisOutput]{
+	addCatalogTool(s, catalogTool[RecordHypothesisInput, HypothesisOutput]{
 		name: ToolRecordHypothesis, title: "Record investigation hypothesis",
 		description: "Persist a structured hypothesis and source references in an existing local investigation. Use this only after the problem is concrete enough to state expected or observed behavior; it performs no network access.",
-		annotations: localWrite, input: inputSchema[RecordHypothesisInput](func(schema *jsonschema.Schema) {
+		annotations: localWrite, input: inputSchema[RecordHypothesisInput](func(schema *schemaBuilder) {
 			setEnum(schema, "category", "bug", "performance", "architecture", "testing", "documentation", "maintenance", "compatibility", "security", "other")
 		}), output: outputSchema[HypothesisOutput]("Newly recorded structured hypothesis."), handler: s.recordHypothesis,
 	})
-	addCatalogTool(s.server, catalogTool[CheckDuplicatesInput, CheckOutput]{
+	addCatalogTool(s, catalogTool[CheckDuplicatesInput, CheckOutput]{
 		name: ToolCheckDuplicates, title: "Find issue and PR duplicates",
 		description: "Search the local thread corpus for issues or pull requests that may duplicate one hypothesis or opportunity. This records no evidence and performs no network access; refresh the corpus explicitly if coverage is stale.",
-		annotations: readOnly, input: inputSchema[CheckDuplicatesInput](func(schema *jsonschema.Schema) {
+		annotations: readOnly, input: inputSchema[CheckDuplicatesInput](func(schema *schemaBuilder) {
 			setEnum(schema, "target", "hypothesis", "opportunity")
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 		}), output: outputSchema[CheckOutput]("Evidence-backed duplicate candidates from the local corpus."), handler: s.checkDuplicates,
 	})
-	addCatalogTool(s.server, catalogTool[CheckCollisionsInput, CheckOutput]{
+	addCatalogTool(s, catalogTool[CheckCollisionsInput, CheckOutput]{
 		name: ToolFindCompetingWork, title: "Find competing open pull requests",
 		description: "Search locally stored open pull requests for semantically or explicitly overlapping work for one hypothesis or opportunity. This does not test Git merge conflicts and performs no network access.",
-		annotations: readOnly, input: inputSchema[CheckCollisionsInput](func(schema *jsonschema.Schema) {
+		annotations: readOnly, input: inputSchema[CheckCollisionsInput](func(schema *schemaBuilder) {
 			setEnum(schema, "target", "hypothesis", "opportunity")
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 		}), output: outputSchema[CheckOutput]("Evidence-backed competing open pull requests."), handler: s.checkCollisions,
 	})
-	addCatalogTool(s.server, catalogTool[PromoteOpportunityInput, OpportunityOutput]{
+	addCatalogTool(s, catalogTool[PromoteOpportunityInput, OpportunityOutput]{
 		name: ToolPromoteOpportunity, title: "Promote hypothesis to opportunity",
 		description: "Persist a scoped contribution opportunity from an existing hypothesis, including impact, effort, confidence, dependencies, and source references. This changes local workflow state but never contacts or mutates GitHub.",
-		annotations: localWrite, input: inputSchema[PromoteOpportunityInput](func(schema *jsonschema.Schema) {
+		annotations: localWrite, input: inputSchema[PromoteOpportunityInput](func(schema *schemaBuilder) {
 			setRange(schema, "confidence", 0, 1)
 		}), output: outputSchema[OpportunityOutput]("Newly promoted local contribution opportunity."), handler: s.promoteOpportunity,
 	})
-	addCatalogTool(s.server, catalogTool[DefineValidationInput, ValidationOutput]{
+	addCatalogTool(s, catalogTool[DefineValidationInput, ValidationOutput]{
 		name: ToolDefineValidation, title: "Define validation command",
 		description: "Parse and persist a shell-free validation command, working directory, environment allowlist, timeout, and output bound for an investigation. This does not execute the command; use " + ToolRunValidation + " separately with explicit authorization.",
-		annotations: localWrite, input: inputSchema[DefineValidationInput](func(schema *jsonschema.Schema) {
+		annotations: localWrite, input: inputSchema[DefineValidationInput](func(schema *schemaBuilder) {
 			setDefault(schema, "timeout", "30m")
 			setRange(schema, "max_output_bytes", 1, 64*1024*1024)
 			setDefault(schema, "max_output_bytes", 64*1024)
 		}), output: outputSchema[ValidationOutput]("Persisted validation definition."), handler: s.defineValidation,
 	})
-	addCatalogTool(s.server, catalogTool[PrepareContributionInput, DraftOutput]{
+	addCatalogTool(s, catalogTool[PrepareContributionInput, DraftOutput]{
 		name: ToolPrepareContribution, title: "Prepare local contribution draft",
 		description: "Render and persist a local issue or pull-request draft from an opportunity and supplied evidence summaries. Pull-request drafts require explicit workspace_id, approach, and changes; this tool never inspects a workspace, runs Git, posts, or mutates GitHub.",
-		annotations: localWrite, input: inputSchema[PrepareContributionInput](func(schema *jsonschema.Schema) {
+		annotations: localWrite, input: inputSchema[PrepareContributionInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 		}), output: outputSchema[DraftOutput]("Newly rendered and persisted local contribution draft."), handler: s.prepareContribution,
 	})
-	addCatalogTool(s.server, catalogTool[CancelJobInput, GetJobsOutput]{
+	addCatalogTool(s, catalogTool[CancelJobInput, GetJobsOutput]{
 		name: ToolCancelJob, title: "Cancel durable jobs in one batch",
 		description: "Cancel up to 100 durable jobs in order with isolated item outcomes; repeated cancellation is safe.",
-		annotations: cancellationAnnotations(), input: inputSchema[CancelJobInput](func(sc *jsonschema.Schema) { setArrayBounds(sc, "ids", 1, 100) }),
+		annotations: cancellationAnnotations(), input: inputSchema[CancelJobInput](func(sc *schemaBuilder) { setArrayBounds(sc, "ids", 1, 100) }),
 		output: outputSchema[GetJobsOutput]("Ordered durable job states after cancellation requests."), handler: s.cancelJob,
 	})
 
