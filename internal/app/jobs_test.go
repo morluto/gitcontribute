@@ -189,7 +189,7 @@ func TestJobExecutorRecordsReadErrorAfterStartFailure(t *testing.T) {
 
 	id, err := jobs.Submit(ctx, "start-failure", nil, func(context.Context, func(string, string) error) (any, error) {
 		t.Fatal("job function ran after start failure")
-		return nil, nil
+		return struct{}{}, nil
 	})
 	if err != nil {
 		t.Fatalf("submit: %v", err)

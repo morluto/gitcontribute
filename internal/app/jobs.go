@@ -298,10 +298,14 @@ func (e *JobExecutor) run(id string, fn JobFunc) {
 		job, getErr := e.corpus.GetJob(writeCtx, id)
 		if getErr != nil {
 			message := errors.Join(err, fmt.Errorf("get job after start failure: %w", getErr)).Error()
+			// Best effort: there is no synchronous caller after the executor goroutine starts.
+			//nolint:errcheck
 			_ = e.corpus.TransitionJob(writeCtx, id, corpus.JobStatusQueued, corpus.JobStatusFailed, "", message)
 			return
 		}
 		if job != nil && !isTerminalJobStatus(job.Status) {
+			// Best effort: preserve the original start error in durable job state.
+			//nolint:errcheck
 			_ = e.corpus.TransitionJob(writeCtx, id, job.Status, corpus.JobStatusFailed, "", err.Error())
 		}
 		return
@@ -319,6 +323,8 @@ func (e *JobExecutor) run(id string, fn JobFunc) {
 
 	job, err := e.corpus.GetJob(writeCtx, id)
 	if err != nil {
+		// Best effort: preserve the read error in durable job state.
+		//nolint:errcheck
 		_ = e.finishJob(writeCtx, id, corpus.JobStatusFailed, "", fmt.Errorf("get job after execution: %w", err).Error())
 		return
 	}
