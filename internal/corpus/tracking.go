@@ -415,7 +415,11 @@ func scanContribution(scanner interface {
 		t := scanTime(submittedAt.Int64)
 		item.SubmittedAt = &t
 	}
-	item.Metadata, _ = unmarshalContributionPayload(payload)
+	metadata, err := unmarshalContributionPayload(payload)
+	if err != nil {
+		return nil, fmt.Errorf("decode contribution metadata: %w", err)
+	}
+	item.Metadata = metadata
 	return &item, nil
 }
 

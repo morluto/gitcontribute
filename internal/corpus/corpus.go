@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pressly/goose/v3"
@@ -93,11 +94,14 @@ func buildDSN(path string) string {
 }
 
 func (c *Corpus) applyMigrations(ctx context.Context) error {
-	provider, err := c.migrationProvider()
+	provider, logger, err := c.migrationProvider()
 	if err != nil {
 		return err
 	}
 	current, target, err := provider.GetVersions(ctx)
+	if fatalErr := logger.Err(); fatalErr != nil {
+		return fmt.Errorf("read migration versions: %w", fatalErr)
+	}
 	if err != nil {
 		return fmt.Errorf("read migration versions: %w", err)
 	}
@@ -107,7 +111,13 @@ func (c *Corpus) applyMigrations(ctx context.Context) error {
 	if _, err := provider.Up(ctx); err != nil {
 		return fmt.Errorf("apply migrations: %w", err)
 	}
+	if fatalErr := logger.Err(); fatalErr != nil {
+		return fmt.Errorf("apply migrations: %w", fatalErr)
+	}
 	current, target, err = provider.GetVersions(ctx)
+	if fatalErr := logger.Err(); fatalErr != nil {
+		return fmt.Errorf("verify migration versions: %w", fatalErr)
+	}
 	if err != nil {
 		return fmt.Errorf("verify migration versions: %w", err)
 	}
@@ -117,22 +127,42 @@ func (c *Corpus) applyMigrations(ctx context.Context) error {
 	return nil
 }
 
-func (c *Corpus) migrationProvider() (*goose.Provider, error) {
+func (c *Corpus) migrationProvider() (*goose.Provider, *migrationLogger, error) {
 	migrations, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
-		return nil, fmt.Errorf("open migration filesystem: %w", err)
+		return nil, nil, fmt.Errorf("open migration filesystem: %w", err)
 	}
-	provider, err := goose.NewProvider(goose.DialectSQLite3, c.db, migrations, goose.WithLogger(noopLogger{}))
+	logger := &migrationLogger{}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, c.db, migrations, goose.WithLogger(logger))
 	if err != nil {
-		return nil, fmt.Errorf("create migration provider: %w", err)
+		return nil, nil, fmt.Errorf("create migration provider: %w", err)
 	}
-	return provider, nil
+	if fatalErr := logger.Err(); fatalErr != nil {
+		return nil, nil, fmt.Errorf("create migration provider: %w", fatalErr)
+	}
+	return provider, logger, nil
 }
 
-type noopLogger struct{}
+type migrationLogger struct {
+	mu  sync.Mutex
+	err error
+}
 
-func (noopLogger) Printf(format string, v ...interface{}) {}
-func (noopLogger) Fatalf(format string, v ...interface{}) { panic(fmt.Sprintf(format, v...)) }
+func (*migrationLogger) Printf(format string, v ...interface{}) {}
+
+func (l *migrationLogger) Fatalf(format string, v ...interface{}) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.err == nil {
+		l.err = fmt.Errorf(format, v...)
+	}
+}
+
+func (l *migrationLogger) Err() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.err
+}
 
 func (c *Corpus) verifyPragmas(ctx context.Context) error {
 	var fk int
