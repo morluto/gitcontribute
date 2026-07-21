@@ -650,7 +650,7 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		args map[string]any
 	}{
 		{ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"}},
-		{ToolCreateWorkspace, map[string]any{"investigation_id": "inv-1", "remote": "https://github.com/acme/rocket.git", "base_ref": "main", "candidate_ref": "feature", "name": "ws-1"}},
+		{ToolCreateWorkspace, map[string]any{"investigation_id": "inv-1"}},
 		{ToolRunValidation, map[string]any{"id": "val-1", "kind": "base", "execute": true}},
 		{ToolStartInvestigation, map[string]any{"owner": "acme", "repo": "rocket"}},
 		{ToolRecordHypothesis, map[string]any{"investigation_id": "inv-1", "title": "leak", "description": "memory leak", "category": "bug"}},

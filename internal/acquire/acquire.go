@@ -401,8 +401,10 @@ func (m *Manager) resolveDefaultBranch(ctx context.Context, mirrorPath string) (
 			}
 		}
 	}
-	for _, branch := range []string{"main", "master"} {
-		if _, err := m.git(ctx, mirrorPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch+"^{commit}"); err == nil {
+	out, err = m.git(ctx, mirrorPath, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err == nil {
+		branch := strings.TrimSpace(out)
+		if branch != "" && branch != "HEAD" {
 			return branch, nil
 		}
 	}

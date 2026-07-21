@@ -75,6 +75,36 @@ func (r *countingRunner) Run(context.Context, string, ...string) (string, error)
 	return "", errors.New("unexpected Git invocation")
 }
 
+type scriptedRunner func(context.Context, string, ...string) (string, error)
+
+func (r scriptedRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+	return r(ctx, name, args...)
+}
+
+func TestResolveDefaultBranchFallsBackToMirrorHEAD(t *testing.T) {
+	runner := scriptedRunner(func(_ context.Context, _ string, args ...string) (string, error) {
+		command := strings.Join(args, "\x00")
+		switch {
+		case strings.HasSuffix(command, "ls-remote\x00--symref\x00origin\x00HEAD"):
+			return "", errors.New("remote symref unavailable")
+		case strings.HasSuffix(command, "symbolic-ref\x00--quiet\x00--short\x00HEAD"):
+			return "trunk\n", nil
+		default:
+			t.Fatalf("unexpected git invocation: %q", args)
+			return "", nil
+		}
+	})
+	m := &Manager{runner: runner}
+
+	branch, err := m.resolveDefaultBranch(context.Background(), "/mirror")
+	if err != nil {
+		t.Fatalf("resolve default branch: %v", err)
+	}
+	if branch != "trunk" {
+		t.Fatalf("default branch = %q, want trunk", branch)
+	}
+}
+
 func TestAcquireRejectsCredentialRemoteBeforeSideEffects(t *testing.T) {
 	fixtureUser := strings.Join([]string{"fixture", "user"}, "-")
 	fixturePassword := strings.Join([]string{"fixture", "password"}, "-")
