@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,41 @@ import (
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
 )
+
+type faultingJobStore struct {
+	jobStore
+
+	mu          sync.Mutex
+	getErr      error
+	failNextGet bool
+	startErr    error
+}
+
+func (s *faultingJobStore) GetJob(ctx context.Context, id string) (*corpus.Job, error) {
+	s.mu.Lock()
+	if s.failNextGet {
+		s.failNextGet = false
+		err := s.getErr
+		s.mu.Unlock()
+		return nil, err
+	}
+	s.mu.Unlock()
+	return s.jobStore.GetJob(ctx, id)
+}
+
+func (s *faultingJobStore) StartJobAs(ctx context.Context, id, ownerID string) error {
+	if s.startErr != nil {
+		return s.startErr
+	}
+	return s.jobStore.StartJobAs(ctx, id, ownerID)
+}
+
+func (s *faultingJobStore) failOneGet(err error) {
+	s.mu.Lock()
+	s.getErr = err
+	s.failNextGet = true
+	s.mu.Unlock()
+}
 
 func newJobTestService(t *testing.T) *Service {
 	t.Helper()
@@ -57,6 +93,23 @@ func waitForJobStatus(t *testing.T, jobs *JobExecutor, id, want string, timeout 
 	t.Fatalf("job did not reach status %q within %s", want, timeout)
 }
 
+func waitForCorpusJobStatus(t *testing.T, c *corpus.Corpus, id, want string, timeout time.Duration) {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		job, err := c.GetJob(ctx, id)
+		if err != nil {
+			t.Fatalf("get job: %v", err)
+		}
+		if job != nil && job.Status == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("job did not reach status %q within %s", want, timeout)
+}
+
 func TestSubmitAndCompleteJob(t *testing.T) {
 	ctx := context.Background()
 	svc := newJobTestService(t)
@@ -89,6 +142,66 @@ func TestSubmitAndCompleteJob(t *testing.T) {
 	}
 	if job.Statistics != `{"step":1}` {
 		t.Fatalf("statistics = %q", job.Statistics)
+	}
+}
+
+func TestJobExecutorRecordsReadErrorAfterExecution(t *testing.T) {
+	ctx := context.Background()
+	svc := newJobTestService(t)
+	store := &faultingJobStore{jobStore: svc.corpus}
+	jobs, err := newJobExecutorWithConfig(ctx, store, jobExecutorConfig{pollInterval: time.Hour})
+	if err != nil {
+		t.Fatalf("new executor: %v", err)
+	}
+	svc.jobs = jobs
+
+	id, err := jobs.Submit(ctx, "read-failure", nil, func(context.Context, func(string, string) error) (any, error) {
+		store.failOneGet(errors.New("injected read failure"))
+		return "done", nil
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	waitForCorpusJobStatus(t, svc.corpus, id, corpus.JobStatusFailed, 2*time.Second)
+	job, err := svc.corpus.GetJob(ctx, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !strings.Contains(job.Error, "get job after execution: injected read failure") {
+		t.Fatalf("error = %q, want read failure", job.Error)
+	}
+}
+
+func TestJobExecutorRecordsReadErrorAfterStartFailure(t *testing.T) {
+	ctx := context.Background()
+	svc := newJobTestService(t)
+	store := &faultingJobStore{
+		jobStore: svc.corpus,
+		startErr: errors.New("injected start failure"),
+	}
+	store.failOneGet(errors.New("injected read failure"))
+	jobs, err := newJobExecutorWithConfig(ctx, store, jobExecutorConfig{pollInterval: time.Hour})
+	if err != nil {
+		t.Fatalf("new executor: %v", err)
+	}
+	svc.jobs = jobs
+
+	id, err := jobs.Submit(ctx, "start-failure", nil, func(context.Context, func(string, string) error) (any, error) {
+		t.Fatal("job function ran after start failure")
+		return struct{}{}, nil
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	waitForCorpusJobStatus(t, svc.corpus, id, corpus.JobStatusFailed, 2*time.Second)
+	job, err := svc.corpus.GetJob(ctx, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !strings.Contains(job.Error, "injected start failure") || !strings.Contains(job.Error, "get job after start failure: injected read failure") {
+		t.Fatalf("error = %q, want start and read failures", job.Error)
 	}
 }
 
@@ -201,6 +314,37 @@ func TestJobExecutorCloseCancelsAndWaits(t *testing.T) {
 	if job.Status != corpus.JobStatusCancelled {
 		t.Fatalf("status = %q, want %q", job.Status, corpus.JobStatusCancelled)
 	}
+}
+
+func TestJobExecutorUsesLifecycleContext(t *testing.T) {
+	lifecycle, cancelLifecycle := context.WithCancel(context.Background())
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := NewWithContext(lifecycle, paths, "test", nil)
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+	if _, err := svc.Init(context.Background()); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	jobs, err := svc.Jobs(context.Background())
+	if err != nil {
+		t.Fatalf("jobs: %v", err)
+	}
+
+	started := make(chan struct{})
+	id, err := jobs.Submit(context.Background(), "lifecycle", nil, func(ctx context.Context, _ func(string, string) error) (any, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	<-started
+	cancelLifecycle()
+
+	waitForJobStatus(t, jobs, id, corpus.JobStatusCancelled, 2*time.Second)
 }
 
 func TestStartupReconciliation(t *testing.T) {

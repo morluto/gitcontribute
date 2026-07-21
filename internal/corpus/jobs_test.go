@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -419,5 +420,73 @@ func TestReconcileRespectsLiveOwners(t *testing.T) {
 	}
 	if staleJob.Error != "interrupted by restart (cancellation requested)" {
 		t.Fatalf("stale job error = %q", staleJob.Error)
+	}
+}
+
+func TestRequestJobCancellationRowsAffected(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+
+	if err := c.RequestJobCancellation(ctx, "missing-id"); err == nil {
+		t.Fatal("expected error cancelling missing job")
+	}
+
+	job, err := c.CreateJob(ctx, "sync", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.StartJob(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.TransitionJob(ctx, job.ID, JobStatusRunning, JobStatusSucceeded, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RequestJobCancellation(ctx, job.ID); err == nil {
+		t.Fatal("expected error cancelling terminal job")
+	}
+}
+
+func TestZeroRowTransitionPropagatesGetJobError(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+
+	corrupt := func(id, status string) {
+		t.Helper()
+		if _, err := c.db.ExecContext(ctx, `UPDATE jobs SET status = ?, created_at = 'corrupt' WHERE id = ?`, status, id); err != nil {
+			t.Fatalf("corrupt job: %v", err)
+		}
+	}
+
+	start, err := c.CreateJob(ctx, "sync", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrupt(start.ID, JobStatusSucceeded)
+	if err := c.StartJob(ctx, start.ID); err == nil {
+		t.Fatal("expected error starting corrupt completed job")
+	} else if strings.Contains(err.Error(), "job not found") {
+		t.Fatalf("expected GetJob error to be propagated, got: %v", err)
+	}
+
+	progress, err := c.CreateJob(ctx, "sync", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrupt(progress.ID, JobStatusSucceeded)
+	if err := c.UpdateJobProgress(ctx, progress.ID, "50%", "{}"); err == nil {
+		t.Fatal("expected error updating progress on corrupt completed job")
+	} else if strings.Contains(err.Error(), "job not found") {
+		t.Fatalf("expected GetJob error to be propagated, got: %v", err)
+	}
+
+	transition, err := c.CreateJob(ctx, "sync", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrupt(transition.ID, JobStatusSucceeded)
+	if err := c.TransitionJob(ctx, transition.ID, JobStatusRunning, JobStatusFailed, "", ""); err == nil {
+		t.Fatal("expected error transitioning corrupt completed job")
+	} else if strings.Contains(err.Error(), "job not found") {
+		t.Fatalf("expected GetJob error to be propagated, got: %v", err)
 	}
 }

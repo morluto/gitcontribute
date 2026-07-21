@@ -102,8 +102,15 @@ func (c *Corpus) StartJobAs(ctx context.Context, id, ownerID string) error {
 	if err != nil {
 		return fmt.Errorf("start job: %w", err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		job, _ := c.GetJob(ctx, id)
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read start job result: %w", err)
+	}
+	if n == 0 {
+		job, err := c.GetJob(ctx, id)
+		if err != nil {
+			return fmt.Errorf("resolve start job state: %w", err)
+		}
 		if job == nil {
 			return errors.New("job not found")
 		}
@@ -144,8 +151,15 @@ func (c *Corpus) TransitionJob(ctx context.Context, id, from, to, result, errStr
 	if dbErr != nil {
 		return fmt.Errorf("transition job: %w", dbErr)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		job, _ := c.GetJob(ctx, id)
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read transition result: %w", err)
+	}
+	if n == 0 {
+		job, err := c.GetJob(ctx, id)
+		if err != nil {
+			return fmt.Errorf("resolve transition state: %w", err)
+		}
 		if job == nil {
 			return errors.New("job not found")
 		}
@@ -171,8 +185,15 @@ func (c *Corpus) UpdateJobProgress(ctx context.Context, id, progress, statistics
 	if err != nil {
 		return fmt.Errorf("update job progress: %w", err)
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		job, _ := c.GetJob(ctx, id)
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read update progress result: %w", err)
+	}
+	if n == 0 {
+		job, err := c.GetJob(ctx, id)
+		if err != nil {
+			return fmt.Errorf("resolve update progress state: %w", err)
+		}
 		if job == nil {
 			return errors.New("job not found")
 		}
@@ -191,48 +212,41 @@ func (c *Corpus) UpdateJobProgress(ctx context.Context, id, progress, statistics
 // moved directly to cancelled; running jobs have cancelled_at set so that they
 // finish as cancelled.
 func (c *Corpus) RequestJobCancellation(ctx context.Context, id string) error {
-	tx, err := c.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin cancel job: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var status string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM jobs WHERE id = ?`, id).Scan(&status); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("job not found")
-		}
-		return fmt.Errorf("select job status: %w", err)
-	}
-
 	now := time.Now().UTC()
 	nowEncoded := encodeTime(now)
-	switch status {
-	case JobStatusQueued:
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE jobs
-			SET status = ?, completed_at = ?, cancelled_at = ?, updated_at = ?
-			WHERE id = ? AND status = ?
-		`, JobStatusCancelled, nowEncoded, nowEncoded, nowEncoded, id, JobStatusQueued); err != nil {
-			return fmt.Errorf("cancel queued job: %w", err)
-		}
-	case JobStatusRunning:
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE jobs
-			SET cancelled_at = ?, updated_at = ?
-			WHERE id = ? AND status = ?
-		`, nowEncoded, nowEncoded, id, JobStatusRunning); err != nil {
-			return fmt.Errorf("request job cancellation: %w", err)
-		}
-	default:
-		if isTerminalJobStatus(status) {
-			return fmt.Errorf("job is already %s", status)
-		}
-		return fmt.Errorf("cannot cancel job in status %s", status)
+	res, err := c.db.ExecContext(ctx, `
+		UPDATE jobs
+		SET status = CASE
+		        WHEN status = ? THEN ?
+		        ELSE status
+		    END,
+		    completed_at = CASE
+		        WHEN status = ? THEN ?
+		        ELSE completed_at
+		    END,
+		    cancelled_at = ?,
+		    updated_at = ?
+		WHERE id = ? AND (status = ? OR status = ?)
+	`, JobStatusQueued, JobStatusCancelled, JobStatusQueued, nowEncoded, nowEncoded, nowEncoded, id, JobStatusQueued, JobStatusRunning)
+	if err != nil {
+		return fmt.Errorf("request job cancellation: %w", err)
 	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit cancel job: %w", err)
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read cancel result: %w", err)
+	}
+	if n == 0 {
+		job, err := c.GetJob(ctx, id)
+		if err != nil {
+			return fmt.Errorf("resolve cancellation state: %w", err)
+		}
+		if job == nil {
+			return errors.New("job not found")
+		}
+		if isTerminalJobStatus(job.Status) {
+			return fmt.Errorf("job is already %s", job.Status)
+		}
+		return fmt.Errorf("cannot cancel job in status %s", job.Status)
 	}
 	return nil
 }

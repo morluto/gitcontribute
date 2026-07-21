@@ -339,8 +339,10 @@ func (m *Manager) Create(ctx context.Context, mirrorName, baseRef, candidateRef,
 
 	st, err := m.status(ctx, path)
 	if err != nil {
-		_, _ = m.git(context.Background(), mi.path, "worktree", "remove", "--force", path)
-		return nil, fmt.Errorf("inspect new worktree: %w", err)
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		cleanupErr := m.cleanupWorktree(cleanupCtx, mi.path, path)
+		return nil, errors.Join(fmt.Errorf("inspect new worktree: %w", err), cleanupErr)
 	}
 
 	ws := &Workspace{
@@ -363,6 +365,18 @@ func (m *Manager) Create(ctx context.Context, mirrorName, baseRef, candidateRef,
 	m.workspaces[name] = ws
 	m.mu.Unlock()
 	return ws, nil
+}
+
+func (m *Manager) cleanupWorktree(ctx context.Context, mirrorPath, path string) error {
+	_, gitErr := m.git(ctx, mirrorPath, "worktree", "remove", "--force", path)
+	removeErr := os.RemoveAll(path)
+	if gitErr != nil {
+		gitErr = fmt.Errorf("remove Git worktree: %w", gitErr)
+	}
+	if removeErr != nil {
+		removeErr = fmt.Errorf("remove worktree directory: %w", removeErr)
+	}
+	return errors.Join(gitErr, removeErr)
 }
 
 // Get returns a workspace by name.

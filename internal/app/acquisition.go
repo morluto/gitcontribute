@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/morluto/gitcontribute/internal/acquire"
 	"github.com/morluto/gitcontribute/internal/cli"
@@ -14,7 +16,7 @@ import (
 // Acquire clones or fetches a repository into the managed cache, records the
 // resolved remote URL/default branch/commit SHA/acquired time, and indexes the
 // clean checkout into the corpus. It does not execute repository code.
-func (s *Service) Acquire(ctx context.Context, repo cli.RepoRef, remote string) (*cli.AcquisitionResult, error) {
+func (s *Service) Acquire(ctx context.Context, repo cli.RepoRef, remote string) (result *cli.AcquisitionResult, returnErr error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
@@ -38,7 +40,13 @@ func (s *Service) Acquire(ctx context.Context, repo cli.RepoRef, remote string) 
 	if err != nil {
 		return nil, fmt.Errorf("acquire %s: %w", ref, err)
 	}
-	defer func() { _ = mgr.Cleanup(context.WithoutCancel(ctx), acq) }()
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if err := mgr.Cleanup(cleanupCtx, acq); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("cleanup acquired checkout: %w", err))
+		}
+	}()
 
 	snapshot, err := codeindex.Index(ctx, acq.Path, codeindex.Options{})
 	if err != nil {

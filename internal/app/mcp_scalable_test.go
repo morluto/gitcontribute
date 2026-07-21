@@ -267,6 +267,42 @@ func TestCancelJobsPreservesOrderAndIsIdempotent(t *testing.T) {
 	assertCancelJobsOutput(t, out, queued.ID)
 }
 
+func TestCancelJobsContinuesAfterMalformedJobPayload(t *testing.T) {
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	if _, err := svc.Jobs(ctx); err != nil {
+		t.Fatal(err)
+	}
+	queued, err := svc.corpus.CreateJob(ctx, "sync", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	malformed, err := svc.corpus.CreateJob(ctx, "sync", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.StartJob(ctx, malformed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.TransitionJob(ctx, malformed.ID, corpus.JobStatusRunning, corpus.JobStatusCancelled, "not-json", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := (&MCPReader{svc}).CancelJobs(ctx, mcpserver.CancelJobInput{IDs: []string{malformed.ID, queued.ID}})
+	if err != nil {
+		t.Fatalf("cancel jobs: %v", err)
+	}
+	if out.Status != "partial" || len(out.Items) != 2 {
+		t.Fatalf("cancellation batch = %+v", out)
+	}
+	if got := out.Items[0]; got.Status != "failed" || got.Reason != "decode_failed" || !strings.Contains(got.Message, "decode job result") {
+		t.Fatalf("malformed item = %+v", got)
+	}
+	if got := out.Items[1]; got.Status != "complete" || got.Value == nil || got.Value.Status != "cancelled" {
+		t.Fatalf("queued item = %+v", got)
+	}
+}
+
 func TestMCPSourceRefsToDomainRejectsInvalidTimestamps(t *testing.T) {
 	for _, tc := range []struct {
 		name string
