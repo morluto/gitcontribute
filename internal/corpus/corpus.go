@@ -148,7 +148,7 @@ type migrationLogger struct {
 	err error
 }
 
-func (*migrationLogger) Printf(format string, v ...interface{}) {}
+func (*migrationLogger) Printf(_ string, _ ...interface{}) {}
 
 func (l *migrationLogger) Fatalf(format string, v ...interface{}) {
 	l.mu.Lock()
