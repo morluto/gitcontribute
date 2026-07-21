@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/morluto/gitcontribute/internal/buflimit"
 )
 
 func newRepo(t *testing.T) string {
@@ -402,7 +403,7 @@ func TestRunGitOutputIsBounded(t *testing.T) {
 	writeFile(t, repo, "a.txt", "a\n")
 	commitAll(t, repo, "initial")
 	_, err := runGitLimited(context.Background(), repo, 1, "rev-parse", "HEAD")
-	if !errors.Is(err, ErrOutputLimit) {
+	if !errors.Is(err, buflimit.ErrOutputLimit) {
 		t.Fatalf("runGitLimited error = %v, want ErrOutputLimit", err)
 	}
 }
