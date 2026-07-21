@@ -18,6 +18,7 @@ type CorpusLifecycleService interface {
 	RebuildCorpusProjection(ctx context.Context, name string) (*CorpusProjectionResult, error)
 }
 
+// CorpusRepositoryRemovalResult describes a repository-removal preview or result.
 type CorpusRepositoryRemovalResult struct {
 	Repo                         string `json:"repo"`
 	DryRun                       bool   `json:"dry_run"`
@@ -42,6 +43,7 @@ type CorpusRepositoryRemovalResult struct {
 	PreservedCrossRepoReferences int    `json:"preserved_cross_repo_references"`
 }
 
+// CorpusProjectionResult describes one derived corpus projection.
 type CorpusProjectionResult struct {
 	Name              string `json:"name"`
 	Version           string `json:"version"`
@@ -56,10 +58,12 @@ type CorpusProjectionResult struct {
 	AttemptError      string `json:"attempt_error,omitempty"`
 }
 
+// CorpusProjectionListResult contains bounded projection status records.
 type CorpusProjectionListResult struct {
 	Projections []CorpusProjectionResult `json:"projections"`
 }
 
+// CorpusInventoryResult summarizes one repository's stored corpus data.
 type CorpusInventoryResult struct {
 	Repo                   string `json:"repo"`
 	Issues                 int    `json:"issues"`
@@ -76,6 +80,7 @@ type CorpusInventoryResult struct {
 	WALBytes               int64  `json:"wal_bytes"`
 }
 
+// CorpusRepositoryInventoryResult summarizes one repository in a corpus listing.
 type CorpusRepositoryInventoryResult struct {
 	Repo                   string `json:"repo"`
 	Issues                 int    `json:"issues"`
@@ -91,6 +96,7 @@ type CorpusRepositoryInventoryResult struct {
 	CodeBytes              int64  `json:"code_bytes"`
 }
 
+// CorpusPendingWorkResult describes incomplete explicit corpus work.
 type CorpusPendingWorkResult struct {
 	Kind   string `json:"kind"`
 	Name   string `json:"name"`
@@ -98,6 +104,7 @@ type CorpusPendingWorkResult struct {
 	Detail string `json:"detail,omitempty"`
 }
 
+// CorpusInventoryListResult summarizes all bounded corpus scopes and storage.
 type CorpusInventoryListResult struct {
 	Schema                  *CorpusInspectionResult           `json:"schema"`
 	Repositories            []CorpusRepositoryInventoryResult `json:"repositories"`
@@ -110,11 +117,13 @@ type CorpusInventoryListResult struct {
 	SizeAttribution         string                            `json:"size_attribution"`
 }
 
+// CorpusPruneSnapshot identifies a derived code snapshot selected for deletion.
 type CorpusPruneSnapshot struct {
 	CommitSHA string `json:"commit_sha"`
 	Bytes     int64  `json:"bytes"`
 }
 
+// CorpusPruneResult describes a code-pruning preview or result.
 type CorpusPruneResult struct {
 	Repo         string                `json:"repo"`
 	DryRun       bool                  `json:"dry_run"`
@@ -125,6 +134,7 @@ type CorpusPruneResult struct {
 	ReclaimBytes int64                 `json:"reclaim_bytes"`
 }
 
+// CorpusRestoreResult reports a verified corpus replacement and its safety backup.
 type CorpusRestoreResult struct {
 	Source       string                  `json:"source"`
 	Before       *CorpusInspectionResult `json:"before,omitempty"`
@@ -133,11 +143,13 @@ type CorpusRestoreResult struct {
 	Restored     *CorpusBackupResult     `json:"restored"`
 }
 
+// CorpusMigrateOptions controls explicit migration backup behavior.
 type CorpusMigrateOptions struct {
 	BackupPath string
 	NoBackup   bool
 }
 
+// CorpusMigrationStep reports one planned or completed migration step.
 type CorpusMigrationStep struct {
 	Version           int64  `json:"version"`
 	Name              string `json:"name"`
@@ -150,6 +162,7 @@ type CorpusMigrationStep struct {
 	ProjectionRebuild bool   `json:"projection_rebuild,omitempty"`
 }
 
+// CorpusInspectionResult reports side-effect-free corpus compatibility and scope.
 type CorpusInspectionResult struct {
 	Path                      string                `json:"path"`
 	Exists                    bool                  `json:"exists"`
@@ -168,6 +181,7 @@ type CorpusInspectionResult struct {
 	ProjectionRebuildRequired bool                  `json:"projection_rebuild_required"`
 }
 
+// CorpusBackupResult identifies a verified SQLite backup and manifest.
 type CorpusBackupResult struct {
 	Path           string `json:"path"`
 	ManifestPath   string `json:"manifest_path,omitempty"`
@@ -179,6 +193,7 @@ type CorpusBackupResult struct {
 	Compatibility  string `json:"compatibility,omitempty"`
 }
 
+// CorpusMigrationResult reports the before/after schema and optional backup.
 type CorpusMigrationResult struct {
 	Before *CorpusInspectionResult `json:"before"`
 	After  *CorpusInspectionResult `json:"after"`

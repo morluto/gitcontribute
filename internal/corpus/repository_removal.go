@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"hash"
@@ -44,10 +45,11 @@ type RepositoryRemovalResult struct {
 	Plan *RepositoryRemovalPlan
 }
 
+// ErrRepositoryRemovalPlanStale indicates that a confirmed removal preview changed.
 var ErrRepositoryRemovalPlanStale = errors.New("repository removal plan is stale")
 
 // PlanRepositoryRemoval previews removal without mutating the corpus.
-func (c *Corpus) PlanRepositoryRemoval(ctx context.Context, ref domain.RepoRef) (*RepositoryRemovalPlan, error) {
+func (c *Corpus) PlanRepositoryRemoval(ctx context.Context, ref domain.RepoRef) (plan *RepositoryRemovalPlan, err error) {
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
@@ -55,8 +57,8 @@ func (c *Corpus) PlanRepositoryRemoval(ctx context.Context, ref domain.RepoRef) 
 	if err != nil {
 		return nil, fmt.Errorf("begin repository removal preview: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
-	plan, err := planRepositoryRemoval(ctx, tx, ref)
+	defer rollbackSQLOnReturn(tx, &err)
+	plan, err = planRepositoryRemoval(ctx, tx, ref)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +70,7 @@ func (c *Corpus) PlanRepositoryRemoval(ctx context.Context, ref domain.RepoRef) 
 
 // ApplyRepositoryRemoval verifies the preview inside a transaction and then
 // removes only the named repository's observations and replaceable projections.
-func (c *Corpus) ApplyRepositoryRemoval(ctx context.Context, ref domain.RepoRef, plan *RepositoryRemovalPlan) (*RepositoryRemovalResult, error) {
+func (c *Corpus) ApplyRepositoryRemoval(ctx context.Context, ref domain.RepoRef, plan *RepositoryRemovalPlan) (_ *RepositoryRemovalResult, err error) {
 	if plan == nil {
 		return nil, errors.New("repository removal plan is required")
 	}
@@ -83,7 +85,7 @@ func (c *Corpus) ApplyRepositoryRemoval(ctx context.Context, ref domain.RepoRef,
 	if err != nil {
 		return nil, fmt.Errorf("begin repository removal: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackSQLOnReturn(tx, &err)
 
 	current, err := planRepositoryRemoval(ctx, tx, ref)
 	if err != nil {
@@ -113,7 +115,7 @@ func planRepositoryRemoval(ctx context.Context, db repositoryRemovalQuerier, ref
 		FROM repositories WHERE owner = ? AND name = ?
 	`, ref.Owner, ref.Repo).Scan(&plan.RepositoryID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, ErrRepositoryNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("plan repository removal: select repository: %w", err)
@@ -203,24 +205,30 @@ func planRepositoryRemoval(ctx context.Context, db repositoryRemovalQuerier, ref
 			return nil, err
 		}
 	}
-	plan.Revision = fmt.Sprintf("%x", digest.Sum(nil))
+	plan.Revision = hex.EncodeToString(digest.Sum(nil))
 	return plan, nil
 }
 
-func appendRemovalFingerprint(ctx context.Context, digest hash.Hash, db repositoryRemovalQuerier, name, query string, args ...any) error {
+func appendRemovalFingerprint(ctx context.Context, digest hash.Hash, db repositoryRemovalQuerier, name, query string, args ...any) (returnErr error) {
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("plan repository removal: fingerprint %s: %w", name, err)
 	}
-	defer rows.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, rows.Close())
+	}()
 
 	columns, err := rows.Columns()
 	if err != nil {
 		return fmt.Errorf("plan repository removal: fingerprint %s columns: %w", name, err)
 	}
-	fingerprintField(digest, name)
+	if err := fingerprintField(digest, name); err != nil {
+		return fmt.Errorf("plan repository removal: fingerprint %s label: %w", name, err)
+	}
 	for _, column := range columns {
-		fingerprintField(digest, column)
+		if err := fingerprintField(digest, column); err != nil {
+			return fmt.Errorf("plan repository removal: fingerprint %s column: %w", name, err)
+		}
 	}
 	for rows.Next() {
 		values := make([]any, len(columns))
@@ -232,7 +240,9 @@ func appendRemovalFingerprint(ctx context.Context, digest hash.Hash, db reposito
 			return fmt.Errorf("plan repository removal: fingerprint %s row: %w", name, err)
 		}
 		for _, value := range values {
-			fingerprintField(digest, fmt.Sprintf("%T:%v", value, value))
+			if err := fingerprintField(digest, fmt.Sprintf("%T:%v", value, value)); err != nil {
+				return fmt.Errorf("plan repository removal: fingerprint %s value: %w", name, err)
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -241,8 +251,9 @@ func appendRemovalFingerprint(ctx context.Context, digest hash.Hash, db reposito
 	return nil
 }
 
-func fingerprintField(digest hash.Hash, value string) {
-	_, _ = fmt.Fprintf(digest, "%d:%s", len(value), value)
+func fingerprintField(digest hash.Hash, value string) error {
+	_, err := fmt.Fprintf(digest, "%d:%s", len(value), value)
+	return err
 }
 
 func deleteRepositoryScope(ctx context.Context, tx *sql.Tx, plan *RepositoryRemovalPlan) error {
@@ -281,12 +292,14 @@ func deleteRepositoryScope(ctx context.Context, tx *sql.Tx, plan *RepositoryRemo
 	return nil
 }
 
-func foreignKeyCheck(ctx context.Context, tx *sql.Tx) error {
+func foreignKeyCheck(ctx context.Context, tx *sql.Tx) (returnErr error) {
 	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
 	if err != nil {
 		return fmt.Errorf("check repository removal referential integrity: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, rows.Close())
+	}()
 	if rows.Next() {
 		var table string
 		var rowID sql.NullInt64

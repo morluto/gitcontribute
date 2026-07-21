@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -32,9 +33,9 @@ func TestMigrationFailsFastWhileCorpusIsOpen(t *testing.T) {
 	defer second.Close()
 
 	err = Migrate(ctx, path, nil)
-	var busy *CorpusBusyError
+	var busy *BusyError
 	if !errors.As(err, &busy) {
-		t.Fatalf("Migrate error = %v, want CorpusBusyError", err)
+		t.Fatalf("Migrate error = %v, want BusyError", err)
 	}
 }
 
@@ -136,6 +137,59 @@ func TestBackupIncludesCommittedWALData(t *testing.T) {
 	}
 	if _, err := Backup(ctx, source, destination, nil); err == nil {
 		t.Fatal("backup overwrote an existing destination")
+	}
+}
+
+func TestBackupDoesNotOverwriteTargetsCreatedDuringCopy(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source.db")
+	c, err := Open(ctx, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "external", time.Unix(1, 0), `{}`); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, target := range []string{"backup", "manifest"} {
+		t.Run(target, func(t *testing.T) {
+			destination := filepath.Join(dir, target+".db")
+			racePath := destination
+			if target == "manifest" {
+				racePath = backupManifestPath(destination)
+			}
+			sentinel := []byte("created by another process")
+			created := false
+			_, err := Backup(ctx, source, destination, func(_, _ int) {
+				if created {
+					return
+				}
+				created = true
+				if writeErr := os.WriteFile(racePath, sentinel, 0o600); writeErr != nil {
+					t.Errorf("create racing %s: %v", target, writeErr)
+				}
+			})
+			if err == nil {
+				t.Fatalf("Backup succeeded after %s appeared", target)
+			}
+			if !created {
+				t.Fatalf("backup did not reach progress callback for %s race", target)
+			}
+			got, readErr := os.ReadFile(racePath)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if !bytes.Equal(got, sentinel) {
+				t.Fatalf("racing %s was overwritten: %q", target, got)
+			}
+			if target == "manifest" {
+				if _, statErr := os.Stat(destination); !os.IsNotExist(statErr) {
+					t.Fatalf("failed manifest publication left backup destination: %v", statErr)
+				}
+			}
+		})
 	}
 }
 
@@ -328,6 +382,117 @@ func TestRestoreReplacesCorpusFromVerifiedBackup(t *testing.T) {
 	}
 }
 
+func TestRestoreUsesVerifiedSnapshotWhenSourceChangesDuringCopy(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source.db")
+	backupPath := filepath.Join(dir, "source.backup.db")
+	destination := filepath.Join(dir, "destination.db")
+	c, err := Open(ctx, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ApplyRepositoryObservation(ctx, "owner", "kept", "external", time.Unix(1, 0), `{}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Backup(ctx, source, backupPath, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	mutated := false
+	var mutationErr error
+	_, err = Restore(ctx, backupPath, destination, func(_, _ int) {
+		if mutated {
+			return
+		}
+		mutated = true
+		db, openErr := sql.Open("sqlite", backupPath)
+		if openErr != nil {
+			mutationErr = openErr
+			return
+		}
+		_, execErr := db.ExecContext(ctx, `UPDATE repositories SET name = 'tampered' WHERE name = 'kept'`)
+		mutationErr = errors.Join(execErr, db.Close())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mutationErr != nil {
+		t.Fatalf("mutate original backup during restore: %v", mutationErr)
+	}
+	if !mutated {
+		t.Fatal("restore did not report progress")
+	}
+	restored, err := OpenReadOnly(ctx, destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	kept, err := restored.GetRepository(ctx, "owner", "kept")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept == nil {
+		t.Fatal("restore copied post-manifest source content instead of verified snapshot")
+	}
+}
+
+func TestRestoreReportsCommittedResultWhenSnapshotCleanupFails(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source.db")
+	backupPath := filepath.Join(dir, "source.backup.db")
+	destination := filepath.Join(dir, "destination.db")
+	c, err := Open(ctx, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ApplyRepositoryObservation(ctx, "owner", "committed", "external", time.Unix(1, 0), `{}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Backup(ctx, source, backupPath, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	wantCleanupErr := errors.New("injected snapshot cleanup failure")
+	originalRemove := removeRestoreSnapshot
+	removeRestoreSnapshot = func(string) error { return wantCleanupErr }
+	t.Cleanup(func() { removeRestoreSnapshot = originalRemove })
+	result, err := Restore(ctx, backupPath, destination, nil)
+	var committedErr *PostCommitCleanupError
+	if !errors.As(err, &committedErr) || !errors.Is(err, wantCleanupErr) {
+		t.Fatalf("Restore error = %v, want committed cleanup error", err)
+	}
+	if result.Path != destination || result.SizeBytes == 0 || result.SHA256 == "" {
+		t.Fatalf("committed restore result = %+v", result)
+	}
+	restored, err := OpenReadOnly(ctx, destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	repo, err := restored.GetRepository(ctx, "owner", "committed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo == nil {
+		t.Fatal("restore cleanup failure obscured an uncommitted destination")
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, ".gitcontribute-restore-source-*.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("deferred cleanup left source snapshots: %v", matches)
+	}
+}
+
 func TestRestoreResolvesFileURIDestination(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -356,7 +521,11 @@ func TestRestoreResolvesFileURIDestination(t *testing.T) {
 	if err := destinationCorpus.Close(); err != nil {
 		t.Fatal(err)
 	}
-	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(destination)}
+	uriPath := filepath.ToSlash(destination)
+	if runtime.GOOS == "windows" && filepath.IsAbs(destination) && !strings.HasPrefix(uriPath, "/") {
+		uriPath = "/" + uriPath
+	}
+	u := &url.URL{Scheme: "file", Path: uriPath}
 	query := u.Query()
 	query.Set("cache", "shared")
 	u.RawQuery = query.Encode()

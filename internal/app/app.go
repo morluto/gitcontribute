@@ -267,7 +267,9 @@ func (s *Service) openReadOnlyCorpus(ctx context.Context) (*corpus.Corpus, error
 	if s.readCorpus != nil {
 		existing := s.readCorpus
 		s.mu.Unlock()
-		_ = c.Close()
+		if err := c.Close(); err != nil {
+			return nil, fmt.Errorf("close duplicate read-only corpus: %w", err)
+		}
 		return existing, nil
 	}
 	s.readCorpus = c

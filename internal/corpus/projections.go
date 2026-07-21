@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"strconv"
 	"time"
 )
 
@@ -30,21 +31,30 @@ const (
 type ProjectionStatus string
 
 const (
-	ProjectionStatusAbsent   ProjectionStatus = "absent"
+	// ProjectionStatusAbsent indicates that a derived projection is not built.
+	ProjectionStatusAbsent ProjectionStatus = "absent"
+	// ProjectionStatusBuilding indicates that a projection build is in progress.
 	ProjectionStatusBuilding ProjectionStatus = "building"
-	ProjectionStatusCurrent  ProjectionStatus = "current"
-	ProjectionStatusStale    ProjectionStatus = "stale"
-	ProjectionStatusFailed   ProjectionStatus = "failed"
+	// ProjectionStatusCurrent indicates that the projection matches its source.
+	ProjectionStatusCurrent ProjectionStatus = "current"
+	// ProjectionStatusStale indicates that the projection source has changed.
+	ProjectionStatusStale ProjectionStatus = "stale"
+	// ProjectionStatusFailed indicates that the latest projection build failed.
+	ProjectionStatusFailed ProjectionStatus = "failed"
 )
 
 // ProjectionAttemptStatus describes the most recent explicit rebuild attempt.
 type ProjectionAttemptStatus string
 
 const (
-	ProjectionAttemptNone      ProjectionAttemptStatus = ""
-	ProjectionAttemptBuilding  ProjectionAttemptStatus = "building"
+	// ProjectionAttemptNone indicates that no explicit rebuild has been attempted.
+	ProjectionAttemptNone ProjectionAttemptStatus = ""
+	// ProjectionAttemptBuilding indicates that a rebuild is in progress.
+	ProjectionAttemptBuilding ProjectionAttemptStatus = "building"
+	// ProjectionAttemptSucceeded indicates that a rebuild completed successfully.
 	ProjectionAttemptSucceeded ProjectionAttemptStatus = "succeeded"
-	ProjectionAttemptFailed    ProjectionAttemptStatus = "failed"
+	// ProjectionAttemptFailed indicates that a rebuild failed.
+	ProjectionAttemptFailed ProjectionAttemptStatus = "failed"
 )
 
 // ProjectionState is the durable identity and freshness of a derived SQLite
@@ -74,7 +84,7 @@ var (
 func (c *Corpus) RequireProjection(ctx context.Context, name, version string) error {
 	state, err := c.GetProjectionState(ctx, name)
 	if err != nil {
-		return fmt.Errorf("%w: %s: %v", ErrProjectionStale, name, err)
+		return fmt.Errorf("%w: %s: %w", ErrProjectionStale, name, err)
 	}
 	if state.Version != version || state.RefreshedAt.IsZero() ||
 		(state.Status != ProjectionStatusCurrent && state.Status != ProjectionStatusBuilding && state.Status != ProjectionStatusFailed) {
@@ -110,7 +120,7 @@ func (c *Corpus) GetProjectionState(ctx context.Context, name string) (Projectio
 }
 
 // ListProjectionStates returns all durable derived-projection states.
-func (c *Corpus) ListProjectionStates(ctx context.Context) ([]ProjectionState, error) {
+func (c *Corpus) ListProjectionStates(ctx context.Context) (_ []ProjectionState, returnErr error) {
 	rows, err := c.db.QueryContext(ctx, `
 		SELECT name, version, status, refreshed_at, row_count,
 		       source_revision, content_hash, attempt_status,
@@ -121,7 +131,7 @@ func (c *Corpus) ListProjectionStates(ctx context.Context) ([]ProjectionState, e
 	if err != nil {
 		return nil, fmt.Errorf("list projection states: %w", err)
 	}
-	defer rows.Close()
+	defer func() { returnErr = errors.Join(returnErr, rows.Close()) }()
 
 	var out []ProjectionState
 	for rows.Next() {
@@ -203,11 +213,12 @@ func (c *Corpus) executeSearchProjectionRebuild(ctx context.Context, name, versi
 			// best-effort and must not modify the last successful projection fields.
 			failureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
-			_, _ = c.db.ExecContext(failureCtx, `
+			_, failureErr := c.db.ExecContext(failureCtx, `
 				UPDATE projection_states
 				SET status = ?, attempt_status = ?, attempt_finished_at = ?, attempt_error = ?
 				WHERE name = ?
 			`, string(ProjectionStatusFailed), string(ProjectionAttemptFailed), encodeTime(time.Now().UTC()), projectionAttemptError(err), name)
+			err = errors.Join(err, failureErr)
 		}
 	}()
 
@@ -227,7 +238,7 @@ func (c *Corpus) executeSearchProjectionRebuild(ctx context.Context, name, versi
 	}
 
 	var rowCount int64
-	if err := tx.QueryRowContext(ctx, fmt.Sprintf("SELECT COUNT(*) FROM %s", name)).Scan(&rowCount); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+name).Scan(&rowCount); err != nil {
 		return ProjectionState{}, fmt.Errorf("count %s: %w", name, err)
 	}
 
@@ -276,7 +287,7 @@ type projectionSourceQuerier interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 }
 
-func (c *Corpus) projectionSourceIdentity(ctx context.Context, q projectionSourceQuerier, name string) (string, string, error) {
+func (c *Corpus) projectionSourceIdentity(ctx context.Context, q projectionSourceQuerier, name string) (_ string, _ string, returnErr error) {
 	var query string
 	switch name {
 	case ProjectionNameThreadsFTS:
@@ -292,7 +303,7 @@ func (c *Corpus) projectionSourceIdentity(ctx context.Context, q projectionSourc
 	if err != nil {
 		return "", "", fmt.Errorf("read %s source: %w", name, err)
 	}
-	defer rows.Close()
+	defer func() { returnErr = errors.Join(returnErr, rows.Close()) }()
 
 	h := sha256.New()
 	writeProjectionHashField(h, name)
@@ -302,9 +313,7 @@ func (c *Corpus) projectionSourceIdentity(ctx context.Context, q projectionSourc
 		if err := rows.Scan(&id, &first, &second); err != nil {
 			return "", "", fmt.Errorf("hash %s source: %w", name, err)
 		}
-		var idBytes [8]byte
-		binary.BigEndian.PutUint64(idBytes[:], uint64(id))
-		_, _ = h.Write(idBytes[:])
+		writeProjectionHashField(h, strconv.FormatInt(id, 10))
 		writeProjectionHashField(h, first)
 		writeProjectionHashField(h, second)
 	}

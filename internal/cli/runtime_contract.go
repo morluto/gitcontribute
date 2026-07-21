@@ -7,6 +7,19 @@ import (
 	"io"
 )
 
+// RuntimeContractService reports only immutable executable compatibility
+// metadata. Implementations must not inspect configuration or the corpus.
+type RuntimeContractService interface {
+	RuntimeContract(ctx context.Context) (*RuntimeContractResult, error)
+}
+
+// RuntimeContractResult is immutable executable compatibility metadata.
+type RuntimeContractResult struct {
+	Name                   string `json:"name"`
+	Version                string `json:"version"`
+	SupportedSchemaVersion int64  `json:"supported_schema_version"`
+}
+
 func (c *CLI) runRuntimeContract(ctx context.Context) error {
 	service, ok := c.svc.(RuntimeContractService)
 	if !ok {

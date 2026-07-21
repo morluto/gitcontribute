@@ -44,51 +44,9 @@ type UpgradeService interface {
 	Upgrade(ctx context.Context, opts UpgradeOptions) (*UpgradeReport, error)
 }
 
-// RuntimeContractService reports only immutable executable compatibility
-// metadata. Implementations must not inspect configuration or the corpus.
-type RuntimeContractService interface {
-	RuntimeContract(ctx context.Context) (*RuntimeContractResult, error)
-}
-
-type RuntimeContractResult struct {
-	Name                   string `json:"name"`
-	Version                string `json:"version"`
-	SupportedSchemaVersion int64  `json:"supported_schema_version"`
-}
-
 type UpgradeOptions struct {
 	Check bool
 	Yes   bool
-}
-
-type UpgradeStage struct {
-	Name    string `json:"name"`
-	Status  string `json:"status"`
-	Path    string `json:"path,omitempty"`
-	Version string `json:"version,omitempty"`
-	Target  string `json:"target,omitempty"`
-	Message string `json:"message,omitempty"`
-}
-
-type UpgradeConfiguredClient struct {
-	Name    string `json:"name"`
-	Path    string `json:"path,omitempty"`
-	Version string `json:"version,omitempty"`
-	Status  string `json:"status"`
-	Message string `json:"message,omitempty"`
-}
-
-type UpgradeReport struct {
-	Context           string                    `json:"context"`
-	Current           string                    `json:"current"`
-	Latest            string                    `json:"latest,omitempty"`
-	Status            string                    `json:"status"`
-	Command           string                    `json:"command,omitempty"`
-	Action            string                    `json:"action,omitempty"`
-	Rollback          string                    `json:"rollback,omitempty"`
-	RestartClients    []string                  `json:"restart_clients,omitempty"`
-	Stages            []UpgradeStage            `json:"stages"`
-	ConfiguredClients []UpgradeConfiguredClient `json:"configured_clients,omitempty"`
 }
 
 type MetadataResult struct {

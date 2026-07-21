@@ -16,12 +16,11 @@ func TestRepositoryRemovalDryRunAndExactScope(t *testing.T) {
 	ctx := context.Background()
 	target := domain.RepoRef{Owner: "owner", Repo: "target"}
 	other := domain.RepoRef{Owner: "owner", Repo: "other"}
-	targetRepo, targetThread := seedRemovalRepository(t, ctx, c, target, 1)
-	_, otherThread := seedRemovalRepository(t, ctx, c, other, 2)
+	targetRepo, targetThread := seedRemovalRepository(ctx, t, c, target, 1)
+	_, otherThread := seedRemovalRepository(ctx, t, c, other, 2)
 
-	if _, _, err := c.StoreCodeSnapshot(ctx, target, codeindex.Snapshot{RepoPath: "/target", Commit: "target-sha", TotalBytes: 6, CreatedAt: time.Unix(3, 0), Documents: []codeindex.Document{{Path: "target.go", Content: "target", Bytes: 6}}}); err != nil {
-		t.Fatal(err)
-	}
+	_, _, err := c.StoreCodeSnapshot(ctx, target, codeindex.Snapshot{RepoPath: "/target", Commit: "target-sha", TotalBytes: 6, CreatedAt: time.Unix(3, 0), Documents: []codeindex.Document{{Path: "target.go", Content: "target", Bytes: 6}}})
+	requireRemovalSetup(t, "store target snapshot", err)
 	if _, _, err := c.StoreCodeSnapshot(ctx, other, codeindex.Snapshot{RepoPath: "/other", Commit: "other-sha", TotalBytes: 5, CreatedAt: time.Unix(4, 0), Documents: []codeindex.Document{{Path: "other.go", Content: "other", Bytes: 5}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -38,22 +37,16 @@ func TestRepositoryRemovalDryRunAndExactScope(t *testing.T) {
 		{`INSERT INTO clusters (stable_id, repo_owner, repo_name, state, canonical_kind, canonical_owner, canonical_repo, canonical_number, source_revision, source_window_start, source_window_end, created_at, updated_at) VALUES ('other-cluster', ?, ?, 'active', 'issue', ?, ?, 2, 'rev', 0, 1, ?, ?)`, []any{other.Owner, other.Repo, other.Owner, other.Repo, now, now}},
 	}
 	for _, statement := range statements {
-		if _, err := c.db.ExecContext(ctx, statement.query, statement.args...); err != nil {
-			t.Fatal(err)
-		}
+		_, err := c.db.ExecContext(ctx, statement.query, statement.args...)
+		requireRemovalSetup(t, "seed workflow record", err)
 	}
 	var clusterID int64
-	if err := c.db.QueryRowContext(ctx, `SELECT id FROM clusters WHERE stable_id = 'other-cluster'`).Scan(&clusterID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := c.db.ExecContext(ctx, `INSERT INTO cluster_members (cluster_id, thread_id, kind, owner, repo, number, title, state, score, reason, created_at, updated_at) VALUES (?, ?, 'issue', ?, ?, 1, 'target', 'open', 0.9, 'shared', ?, ?)`, clusterID, targetThread, target.Owner, target.Repo, now, now); err != nil {
-		t.Fatal(err)
-	}
+	requireRemovalSetup(t, "read seeded cluster", c.db.QueryRowContext(ctx, `SELECT id FROM clusters WHERE stable_id = 'other-cluster'`).Scan(&clusterID))
+	_, err = c.db.ExecContext(ctx, `INSERT INTO cluster_members (cluster_id, thread_id, kind, owner, repo, number, title, state, score, reason, created_at, updated_at) VALUES (?, ?, 'issue', ?, ?, 1, 'target', 'open', 0.9, 'shared', ?, ?)`, clusterID, targetThread, target.Owner, target.Repo, now, now)
+	requireRemovalSetup(t, "seed cluster member", err)
 
 	plan, err := c.PlanRepositoryRemoval(ctx, target)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireRemovalSetup(t, "plan repository removal", err)
 	if plan == nil || plan.RepositoryID != targetRepo || plan.Threads != 1 || plan.CodeSnapshots != 1 || plan.PreservedInvestigations != 1 || plan.PreservedCrossRepoReferences != 1 {
 		t.Fatalf("plan = %+v", plan)
 	}
@@ -62,10 +55,9 @@ func TestRepositoryRemovalDryRunAndExactScope(t *testing.T) {
 		t.Fatalf("target inventory after plan = (%+v, %v)", inventory, err)
 	}
 
-	if _, err := c.ApplyRepositoryRemoval(ctx, target, plan); err != nil {
-		t.Fatal(err)
-	}
-	if inventory, err := c.Inventory(ctx, target.Owner, target.Repo); err != nil || inventory != nil {
+	_, err = c.ApplyRepositoryRemoval(ctx, target, plan)
+	requireRemovalSetup(t, "apply repository removal", err)
+	if inventory, err := c.Inventory(ctx, target.Owner, target.Repo); !errors.Is(err, ErrRepositoryNotFound) || inventory != nil {
 		t.Fatalf("target inventory after removal = (%+v, %v)", inventory, err)
 	}
 	if inventory, err := c.Inventory(ctx, other.Owner, other.Repo); err != nil || inventory == nil || inventory.Threads != 1 || inventory.CodeSnapshots != 1 {
@@ -88,11 +80,18 @@ func TestRepositoryRemovalDryRunAndExactScope(t *testing.T) {
 	}
 }
 
+func requireRemovalSetup(t *testing.T, action string, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", action, err)
+	}
+}
+
 func TestRepositoryRemovalRejectsStalePlan(t *testing.T) {
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 	ref := domain.RepoRef{Owner: "owner", Repo: "target"}
-	repoID, _ := seedRemovalRepository(t, ctx, c, ref, 1)
+	repoID, _ := seedRemovalRepository(ctx, t, c, ref, 1)
 	plan, err := c.PlanRepositoryRemoval(ctx, ref)
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +111,7 @@ func TestRepositoryRemovalRejectsSameCountReplacement(t *testing.T) {
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 	ref := domain.RepoRef{Owner: "owner", Repo: "target"}
-	seedRemovalRepository(t, ctx, c, ref, 1)
+	seedRemovalRepository(ctx, t, c, ref, 1)
 	if _, _, err := c.StoreCodeSnapshot(ctx, ref, codeindex.Snapshot{RepoPath: "/target", Commit: "old", TotalBytes: 3, CreatedAt: time.Unix(3, 0), Documents: []codeindex.Document{{Path: "old.go", Content: "old", Bytes: 3}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +137,7 @@ func TestRepositoryRemovalRejectsSameCountReplacement(t *testing.T) {
 func TestRepositoryRemovalCancellationRollsBack(t *testing.T) {
 	c, _ := openTestCorpus(t)
 	ref := domain.RepoRef{Owner: "owner", Repo: "target"}
-	seedRemovalRepository(t, context.Background(), c, ref, 1)
+	seedRemovalRepository(context.Background(), t, c, ref, 1)
 	plan, err := c.PlanRepositoryRemoval(context.Background(), ref)
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +152,7 @@ func TestRepositoryRemovalCancellationRollsBack(t *testing.T) {
 	}
 }
 
-func seedRemovalRepository(t *testing.T, ctx context.Context, c *Corpus, ref domain.RepoRef, number int) (int64, int64) {
+func seedRemovalRepository(ctx context.Context, t *testing.T, c *Corpus, ref domain.RepoRef, number int) (int64, int64) {
 	t.Helper()
 	repo, err := c.ApplyRepositoryObservation(ctx, ref.Owner, ref.Repo, ref.String(), time.Unix(int64(number), 0), `{}`)
 	if err != nil {

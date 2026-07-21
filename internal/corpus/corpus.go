@@ -56,49 +56,80 @@ func (e *UnsupportedSchemaError) Error() string {
 // Open opens or creates a corpus at path, applies pending migrations, and
 // enables WAL, foreign keys, and a busy timeout. The returned Corpus is safe
 // for concurrent use by a single writer with multiple readers.
-func Open(ctx context.Context, path string) (*Corpus, error) {
-	version, exists, err := InspectSchemaVersion(ctx, path)
+func Open(ctx context.Context, path string) (_ *Corpus, returnErr error) {
+	needsInitialization, target, err := inspectOpenRequest(ctx, path)
 	if err != nil {
 		return nil, err
 	}
-	target, err := latestSchemaVersion()
-	if err != nil {
-		return nil, err
-	}
-	if exists && version > target {
-		return nil, &UnsupportedSchemaError{Current: version, Target: target}
-	}
-	if exists && version < target {
-		return nil, &MigrationRequiredError{Current: version, Target: target}
-	}
-	needsInitialization := !exists
 	lease, err := acquireCorpusLease(path, needsInitialization, map[bool]string{true: "initialize corpus", false: "open corpus"}[needsInitialization])
 	if err != nil {
 		return nil, err
 	}
-	release := true
 	defer func() {
-		if release {
-			_ = lease.release()
-		}
+		returnErr = errors.Join(returnErr, lease.release())
 	}()
 	// Recheck compatibility while holding the process lease. A restore may have
 	// replaced the file between the initial side-effect-free inspection and
 	// lease acquisition; ordinary writable open must never gain migration
 	// authority through that race.
-	lockedVersion, lockedExists, err := InspectSchemaVersion(ctx, path)
+	needsInitialization, err = inspectOpenRequestUnderLease(ctx, path, target, needsInitialization)
 	if err != nil {
 		return nil, err
 	}
-	if lockedExists {
-		needsInitialization = false
-		switch {
-		case lockedVersion < target:
-			return nil, &MigrationRequiredError{Current: lockedVersion, Target: target}
-		case lockedVersion > target:
-			return nil, &UnsupportedSchemaError{Current: lockedVersion, Target: target}
+	c, err := openWritableCorpus(ctx, path, lease, needsInitialization)
+	if err != nil {
+		return nil, err
+	}
+	if needsInitialization && lease.lock != nil {
+		c, lease, err = handoffInitializedCorpus(ctx, path, c, lease)
+		if err != nil {
+			return nil, err
 		}
 	}
+	lease = nil
+	return c, nil
+}
+
+func inspectOpenRequest(ctx context.Context, path string) (bool, int64, error) {
+	version, exists, err := InspectSchemaVersion(ctx, path)
+	if err != nil {
+		return false, 0, err
+	}
+	target, err := latestSchemaVersion()
+	if err != nil {
+		return false, 0, err
+	}
+	if err := checkSchemaCompatibility(version, target, exists); err != nil {
+		return false, 0, err
+	}
+	return !exists, target, nil
+}
+
+func inspectOpenRequestUnderLease(ctx context.Context, path string, target int64, needsInitialization bool) (bool, error) {
+	version, exists, err := InspectSchemaVersion(ctx, path)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return needsInitialization, nil
+	}
+	return false, checkSchemaCompatibility(version, target, true)
+}
+
+func checkSchemaCompatibility(current, target int64, exists bool) error {
+	if !exists {
+		return nil
+	}
+	if current < target {
+		return &MigrationRequiredError{Current: current, Target: target}
+	}
+	if current > target {
+		return &UnsupportedSchemaError{Current: current, Target: target}
+	}
+	return nil
+}
+
+func openWritableCorpus(ctx context.Context, path string, lease *corpusLease, needsInitialization bool) (*Corpus, error) {
 	if err := prepareDatabaseFile(path); err != nil {
 		return nil, err
 	}
@@ -110,69 +141,53 @@ func Open(ctx context.Context, path string) (*Corpus, error) {
 	c := &Corpus{db: db, lease: lease}
 	if needsInitialization {
 		if err := c.applyMigrations(ctx); err != nil {
-			_ = db.Close()
-			return nil, err
+			return nil, errors.Join(err, db.Close())
 		}
-	} else {
-		current, expected, err := c.inspectSchemaVersions(ctx)
-		if err != nil {
-			_ = db.Close()
-			return nil, err
-		}
-		if current < expected {
-			_ = db.Close()
-			return nil, &MigrationRequiredError{Current: current, Target: expected}
-		}
-		if current > expected {
-			_ = db.Close()
-			return nil, &UnsupportedSchemaError{Current: current, Target: expected}
-		}
+	} else if err := validateOpenCorpusSchema(ctx, c); err != nil {
+		return nil, errors.Join(err, db.Close())
 	}
 	if err := c.verifyPragmas(ctx); err != nil {
-		_ = db.Close()
-		return nil, err
+		return nil, errors.Join(err, db.Close())
 	}
-	if lease != nil && needsInitialization {
-		// Do not retain a handle to the inode initialized under the exclusive
-		// lease. Restore may replace the path while this process waits to
-		// reacquire a shared lease, so close first and reopen only after the
-		// shared lease is held.
-		if err := db.Close(); err != nil {
-			return nil, fmt.Errorf("close initialized corpus before lease handoff: %w", err)
-		}
-		c.db = nil
-		if err := lease.release(); err != nil {
-			return nil, fmt.Errorf("release migration lease: %w", err)
-		}
-		lease = nil
-		if err := openLeaseHandoff(path); err != nil {
-			return nil, fmt.Errorf("complete corpus lease handoff: %w", err)
-		}
-		lease, err = acquireCorpusLease(path, false, "open corpus")
-		if err != nil {
-			return nil, err
-		}
-		db, err = openDatabase(path)
-		if err != nil {
-			return nil, err
-		}
-		c = &Corpus{db: db, lease: lease}
-		current, expected, inspectErr := c.inspectSchemaVersions(ctx)
-		if inspectErr != nil {
-			_ = db.Close()
-			return nil, inspectErr
-		}
-		if current < expected {
-			_ = db.Close()
-			return nil, &MigrationRequiredError{Current: current, Target: expected}
-		}
-		if current > expected {
-			_ = db.Close()
-			return nil, &UnsupportedSchemaError{Current: current, Target: expected}
-		}
-	}
-	release = false
 	return c, nil
+}
+
+func validateOpenCorpusSchema(ctx context.Context, c *Corpus) error {
+	current, target, err := c.inspectSchemaVersions(ctx)
+	if err != nil {
+		return err
+	}
+	return checkSchemaCompatibility(current, target, true)
+}
+
+func handoffInitializedCorpus(ctx context.Context, path string, c *Corpus, lease *corpusLease) (*Corpus, *corpusLease, error) {
+	// Do not retain a handle to the inode initialized under the exclusive
+	// lease. Restore may replace the path while this process waits to reacquire
+	// a shared lease, so close first and reopen only after that lease is held.
+	if err := c.db.Close(); err != nil {
+		return nil, lease, fmt.Errorf("close initialized corpus before lease handoff: %w", err)
+	}
+	c.db = nil
+	if err := lease.release(); err != nil {
+		return nil, lease, fmt.Errorf("release migration lease: %w", err)
+	}
+	lease = nil
+	if err := openLeaseHandoff(path); err != nil {
+		return nil, nil, fmt.Errorf("complete corpus lease handoff: %w", err)
+	}
+	lease, err := acquireCorpusLease(path, false, "open corpus")
+	if err != nil {
+		return nil, nil, err
+	}
+	db, err := openDatabase(path)
+	if err != nil {
+		return nil, lease, err
+	}
+	c = &Corpus{db: db, lease: lease}
+	if err := validateOpenCorpusSchema(ctx, c); err != nil {
+		return nil, lease, errors.Join(err, db.Close())
+	}
+	return c, lease, nil
 }
 
 func openDatabase(path string) (*sql.DB, error) {
@@ -190,7 +205,7 @@ func openDatabase(path string) (*sql.DB, error) {
 // OpenReadOnly opens an existing, current corpus without creating files or
 // applying migrations. It returns a typed compatibility error when migration
 // or a newer binary is required.
-func OpenReadOnly(ctx context.Context, path string) (*Corpus, error) {
+func OpenReadOnly(ctx context.Context, path string) (_ *Corpus, returnErr error) {
 	filePath, dsn, inspectable, err := schemaInspectionTarget(path)
 	if err != nil {
 		return nil, err
@@ -222,7 +237,7 @@ func OpenReadOnly(ctx context.Context, path string) (*Corpus, error) {
 	release := true
 	defer func() {
 		if release {
-			_ = lease.release()
+			returnErr = errors.Join(returnErr, lease.release())
 		}
 	}()
 	db, err := sql.Open("sqlite", dsn)
@@ -236,16 +251,13 @@ func OpenReadOnly(ctx context.Context, path string) (*Corpus, error) {
 	c := &Corpus{db: db, lease: lease}
 	current, target, err = c.inspectSchemaVersions(ctx)
 	if err != nil {
-		_ = db.Close()
-		return nil, err
+		return nil, errors.Join(err, db.Close())
 	}
 	switch {
 	case current < target:
-		_ = db.Close()
-		return nil, &MigrationRequiredError{Current: current, Target: target}
+		return nil, errors.Join(&MigrationRequiredError{Current: current, Target: target}, db.Close())
 	case current > target:
-		_ = db.Close()
-		return nil, &UnsupportedSchemaError{Current: current, Target: target}
+		return nil, errors.Join(&UnsupportedSchemaError{Current: current, Target: target}, db.Close())
 	}
 	release = false
 	return c, nil

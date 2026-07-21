@@ -100,7 +100,7 @@ func (r *MCPReader) Repository(ctx context.Context, in mcpserver.RepoInput) (mcp
 	if err := ref.Validate(); err != nil {
 		return mcpserver.RepositoryOutput{}, err
 	}
-	c, err := r.Service.openReadOnlyCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.RepositoryOutput{}, err
 	}
@@ -143,7 +143,7 @@ func (r *MCPReader) Thread(ctx context.Context, in mcpserver.ThreadInput) (mcpse
 	if in.Number < 1 {
 		return mcpserver.ThreadOutput{}, errors.New("number must be positive")
 	}
-	c, err := r.Service.openReadOnlyCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.ThreadOutput{}, err
 	}
@@ -199,7 +199,7 @@ func (r *MCPReader) Dossier(ctx context.Context, in mcpserver.RepoInput) (mcpser
 	if err := ref.Validate(); err != nil {
 		return mcpserver.DossierOutput{}, err
 	}
-	if _, err := r.Service.openReadOnlyCorpus(ctx); err != nil {
+	if _, err := r.openReadOnlyCorpus(ctx); err != nil {
 		return mcpserver.DossierOutput{}, err
 	}
 	d, err := r.Service.buildDossier(ctx, ref)
@@ -230,7 +230,7 @@ func (r *MCPReader) SearchCode(ctx context.Context, in mcpserver.SearchCodeInput
 			return mcpserver.SearchCodeOutput{}, err
 		}
 	}
-	c, err := r.Service.openReadOnlyCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.SearchCodeOutput{}, err
 	}
@@ -268,7 +268,7 @@ func (r *MCPReader) Investigation(ctx context.Context, in mcpserver.Investigatio
 	if in.HypothesisLimit < 1 || in.HypothesisLimit > 100 {
 		return mcpserver.InvestigationOutput{}, errors.New("hypothesis_limit must be between 1 and 100")
 	}
-	c, err := r.Service.openReadOnlyCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.InvestigationOutput{}, err
 	}
@@ -327,7 +327,7 @@ func (r *MCPReader) ListOpportunities(ctx context.Context, in mcpserver.ListOppo
 	if in.Limit < 1 || in.Limit > 100 {
 		return mcpserver.ListOpportunitiesOutput{}, errors.New("limit must be between 1 and 100")
 	}
-	c, err := r.Service.openReadOnlyCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.ListOpportunitiesOutput{}, err
 	}
@@ -369,7 +369,7 @@ func (r *MCPReader) Opportunity(ctx context.Context, in mcpserver.OpportunityInp
 	if in.EvidenceLimit < 1 || in.EvidenceLimit > 100 {
 		return mcpserver.OpportunityOutput{}, errors.New("evidence_limit must be between 1 and 100")
 	}
-	c, err := r.Service.openReadOnlyCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.OpportunityOutput{}, err
 	}
@@ -448,7 +448,7 @@ func (r *MCPReader) Evidence(ctx context.Context, in mcpserver.EvidenceInput) (m
 		}
 		filter.Relation = evidence.Relation(in.Relation)
 	}
-	c, err := r.Service.openReadOnlyCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.EvidenceOutput{}, err
 	}
@@ -568,7 +568,7 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpserver.FindClustersI
 	if in.Limit <= 0 || in.Limit > 100 {
 		return mcpserver.FindClustersOutput{}, errors.New("limit must be between 1 and 100")
 	}
-	c, err := r.Service.openReadOnlyCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.FindClustersOutput{}, err
 	}
@@ -615,7 +615,7 @@ func (r *MCPReader) GetCoverage(ctx context.Context, in mcpserver.GetCoverageInp
 	if len(in.Targets) < 1 || len(in.Targets) > 100 {
 		return mcpserver.GetCoverageOutput{}, errors.New("targets must contain 1 to 100 items")
 	}
-	c, err := r.Service.openReadOnlyCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.GetCoverageOutput{}, err
 	}
@@ -720,7 +720,7 @@ func (r *MCPReader) Lens(ctx context.Context, in mcpserver.LensInput) (mcpserver
 	if name == "" {
 		return mcpserver.LensOutput{}, errors.New("name is required")
 	}
-	c, err := r.Service.openReadOnlyCorpus(ctx)
+	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpserver.LensOutput{}, err
 	}

@@ -1,6 +1,7 @@
 package corpus
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,14 +9,14 @@ import (
 	"github.com/gofrs/flock"
 )
 
-// CorpusBusyError reports that another GitContribute process holds an
+// BusyError reports that another GitContribute process holds an
 // incompatible corpus lease. Operations fail fast instead of appearing hung.
-type CorpusBusyError struct {
+type BusyError struct {
 	Path      string
 	Operation string
 }
 
-func (e *CorpusBusyError) Error() string {
+func (e *BusyError) Error() string {
 	return fmt.Sprintf("corpus is in use by another process; cannot %s: %s", e.Operation, e.Path)
 }
 
@@ -26,7 +27,7 @@ type corpusLease struct {
 func acquireCorpusLease(path string, exclusive bool, operation string) (*corpusLease, error) {
 	lockPath, ok := corpusLockPath(path)
 	if !ok {
-		return nil, nil
+		return &corpusLease{}, nil
 	}
 	if err := ensureCorpusLeaseFile(path); err != nil {
 		return nil, err
@@ -45,7 +46,7 @@ func acquireCorpusLease(path string, exclusive bool, operation string) (*corpusL
 		return nil, fmt.Errorf("acquire corpus lease for %s: %w", operation, err)
 	}
 	if !acquired {
-		return nil, &CorpusBusyError{Path: path, Operation: operation}
+		return nil, &BusyError{Path: path, Operation: operation}
 	}
 	return &corpusLease{lock: lock}, nil
 }
@@ -55,11 +56,16 @@ func ensureCorpusLeaseFile(path string) error {
 	if !ok {
 		return nil
 	}
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	directory, base := filepath.Split(lockPath)
+	root, err := os.OpenRoot(directory)
 	if err != nil {
-		return fmt.Errorf("prepare corpus lease: %w", err)
+		return fmt.Errorf("open corpus lease directory: %w", err)
 	}
-	return file.Close()
+	file, err := root.OpenFile(base, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return errors.Join(fmt.Errorf("prepare corpus lease: %w", err), root.Close())
+	}
+	return errors.Join(file.Close(), root.Close())
 }
 
 // CheckExclusiveAccess fails fast when another cooperating process holds a
@@ -92,10 +98,10 @@ func corpusLockPath(path string) (string, bool) {
 func acquireSharedCorpusLeaseIfPresent(path, operation string) (*corpusLease, error) {
 	lockPath, ok := corpusLockPath(path)
 	if !ok {
-		return nil, nil
+		return &corpusLease{}, nil
 	}
 	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
-		return nil, nil
+		return &corpusLease{}, nil
 	} else if err != nil {
 		return nil, fmt.Errorf("inspect corpus lease for %s: %w", operation, err)
 	}
@@ -105,7 +111,7 @@ func acquireSharedCorpusLeaseIfPresent(path, operation string) (*corpusLease, er
 		return nil, fmt.Errorf("acquire corpus lease for %s: %w", operation, err)
 	}
 	if !acquired {
-		return nil, &CorpusBusyError{Path: path, Operation: operation}
+		return nil, &BusyError{Path: path, Operation: operation}
 	}
 	return &corpusLease{lock: lock}, nil
 }
@@ -115,4 +121,8 @@ func (l *corpusLease) release() error {
 		return nil
 	}
 	return l.lock.Unlock()
+}
+
+func releaseLeaseOnReturn(lease *corpusLease, returnErr *error) {
+	*returnErr = errors.Join(*returnErr, lease.release())
 }

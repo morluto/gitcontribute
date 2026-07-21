@@ -42,9 +42,7 @@ func TestRepositoryInventoryCountsAndSizes(t *testing.T) {
 	ref := domain.RepoRef{Owner: owner, Repo: name}
 
 	repo, err := c.ApplyRepositoryObservation(ctx, owner, name, "1", time.Unix(1, 0).UTC(), `{}`)
-	if err != nil {
-		t.Fatalf("apply repository: %v", err)
-	}
+	requireInventorySetup(t, "apply repository", err)
 	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "issue one", "body", "a", time.Unix(10, 0).UTC(), `{}`); err != nil {
 		t.Fatalf("apply issue 1: %v", err)
 	}
@@ -132,10 +130,10 @@ func TestRepositoryInventoryCountsAndSizes(t *testing.T) {
 		t.Fatalf("TotalSize = %d, want >= DBSize %d", inv.TotalSize, inv.DBSize)
 	}
 
-	// Inventory for a missing repository should be nil.
+	// Inventory for a missing repository returns a typed absence.
 	missing, err := c.Inventory(ctx, "missing", "repo")
-	if err != nil {
-		t.Fatalf("inventory missing: %v", err)
+	if !errors.Is(err, ErrRepositoryNotFound) {
+		t.Fatalf("inventory missing error = %v", err)
 	}
 	if missing != nil {
 		t.Fatalf("missing inventory = %+v, want nil", missing)
@@ -208,9 +206,7 @@ func TestCodeSnapshotPrunePreservesLatestN(t *testing.T) {
 	ref := domain.RepoRef{Owner: owner, Repo: name}
 
 	repo, err := c.ApplyRepositoryObservation(ctx, owner, name, "1", time.Unix(1, 0).UTC(), `{}`)
-	if err != nil {
-		t.Fatalf("apply repository: %v", err)
-	}
+	requireInventorySetup(t, "apply repository", err)
 	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "issue", "body", "a", time.Unix(10, 0).UTC(), `{}`); err != nil {
 		t.Fatalf("apply issue: %v", err)
 	}
@@ -282,6 +278,13 @@ func TestCodeSnapshotPrunePreservesLatestN(t *testing.T) {
 	}
 	if len(matches) != 1 || matches[0].Commit != "second" {
 		t.Fatalf("current matches = %+v", matches)
+	}
+}
+
+func requireInventorySetup(t *testing.T, action string, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", action, err)
 	}
 }
 

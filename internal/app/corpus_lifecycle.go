@@ -12,6 +12,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/domain"
 )
 
+// InspectCorpus reports corpus compatibility without mutation.
 func (s *Service) InspectCorpus(ctx context.Context) (*cli.CorpusInspectionResult, error) {
 	cfg, err := s.loadConfig(false)
 	if err != nil {
@@ -24,6 +25,7 @@ func (s *Service) InspectCorpus(ctx context.Context) (*cli.CorpusInspectionResul
 	return corpusInspectionResult(inspection), nil
 }
 
+// InventoryCorpus reports bounded storage details for one repository.
 func (s *Service) InventoryCorpus(ctx context.Context, repo string) (*cli.CorpusInventoryResult, error) {
 	ref, err := parseRepoRef(repo)
 	if err != nil {
@@ -34,11 +36,11 @@ func (s *Service) InventoryCorpus(ctx context.Context, repo string) (*cli.Corpus
 		return nil, err
 	}
 	inv, err := c.Inventory(ctx, ref.Owner, ref.Repo)
+	if errors.Is(err, corpus.ErrRepositoryNotFound) {
+		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %s is not stored", repo))
+	}
 	if err != nil {
 		return nil, err
-	}
-	if inv == nil {
-		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %s is not stored", repo))
 	}
 	return &cli.CorpusInventoryResult{
 		Repo: ref.String(), Issues: inv.Issues, PullRequests: inv.PullRequests, Threads: inv.Threads,
@@ -49,6 +51,7 @@ func (s *Service) InventoryCorpus(ctx context.Context, repo string) (*cli.Corpus
 	}, nil
 }
 
+// ListCorpusInventory reports bounded storage details for every repository scope.
 func (s *Service) ListCorpusInventory(ctx context.Context) (*cli.CorpusInventoryListResult, error) {
 	inspection, err := s.InspectCorpus(ctx)
 	if err != nil {
@@ -118,6 +121,7 @@ func (s *Service) ListCorpusInventory(ctx context.Context) (*cli.CorpusInventory
 	return out, nil
 }
 
+// PlanCodePrune previews derived code snapshots eligible for deletion.
 func (s *Service) PlanCodePrune(ctx context.Context, repo string, keepLatest int) (*cli.CorpusPruneResult, error) {
 	ref, err := parseRepoRef(repo)
 	if err != nil {
@@ -134,6 +138,7 @@ func (s *Service) PlanCodePrune(ctx context.Context, repo string, keepLatest int
 	return codePrunePlanResult(plan), nil
 }
 
+// ApplyCodePrune deletes the exact confirmed derived code-snapshot plan.
 func (s *Service) ApplyCodePrune(ctx context.Context, repo string, keepLatest int, expectedDelete []string) (*cli.CorpusPruneResult, error) {
 	ref, err := parseRepoRef(repo)
 	if err != nil {
@@ -175,6 +180,7 @@ func codePrunePlanResult(plan *corpus.CodeSnapshotPrunePlan) *cli.CorpusPruneRes
 	return out
 }
 
+// PlanRepositoryRemoval previews the exact repository-owned removal scope.
 func (s *Service) PlanRepositoryRemoval(ctx context.Context, repo string) (*cli.CorpusRepositoryRemovalResult, error) {
 	ref, err := parseRepoRef(repo)
 	if err != nil {
@@ -185,6 +191,9 @@ func (s *Service) PlanRepositoryRemoval(ctx context.Context, repo string) (*cli.
 		return nil, err
 	}
 	plan, err := c.PlanRepositoryRemoval(ctx, ref)
+	if errors.Is(err, corpus.ErrRepositoryNotFound) {
+		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %s is not stored", repo))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -194,6 +203,7 @@ func (s *Service) PlanRepositoryRemoval(ctx context.Context, repo string) (*cli.
 	return repositoryRemovalResult(plan, true), nil
 }
 
+// ApplyRepositoryRemoval applies an unchanged, confirmed repository-removal plan.
 func (s *Service) ApplyRepositoryRemoval(ctx context.Context, repo, expectedRevision string) (*cli.CorpusRepositoryRemovalResult, error) {
 	ref, err := parseRepoRef(repo)
 	if err != nil {
@@ -204,6 +214,9 @@ func (s *Service) ApplyRepositoryRemoval(ctx context.Context, repo, expectedRevi
 		return nil, err
 	}
 	plan, err := c.PlanRepositoryRemoval(ctx, ref)
+	if errors.Is(err, corpus.ErrRepositoryNotFound) {
+		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %s is not stored", repo))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -236,6 +249,7 @@ func repositoryRemovalResult(plan *corpus.RepositoryRemovalPlan, dryRun bool) *c
 	}
 }
 
+// ListCorpusProjections reports derived projection identities and freshness.
 func (s *Service) ListCorpusProjections(ctx context.Context) (*cli.CorpusProjectionListResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
@@ -252,6 +266,7 @@ func (s *Service) ListCorpusProjections(ctx context.Context) (*cli.CorpusProject
 	return out, nil
 }
 
+// RebuildCorpusProjection explicitly replaces one derived search projection.
 func (s *Service) RebuildCorpusProjection(ctx context.Context, name string) (*cli.CorpusProjectionResult, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
@@ -313,6 +328,7 @@ func corpusInspectionResult(inspection corpus.SchemaInspection) *cli.CorpusInspe
 	return result
 }
 
+// BackupCorpus creates a verified online backup at destination.
 func (s *Service) BackupCorpus(ctx context.Context, destination string) (*cli.CorpusBackupResult, error) {
 	cfg, err := s.loadConfig(false)
 	if err != nil {
@@ -328,6 +344,7 @@ func (s *Service) BackupCorpus(ctx context.Context, destination string) (*cli.Co
 	return corpusBackupResult(result), nil
 }
 
+// RestoreCorpus replaces the corpus from a verified backup after safety backup.
 func (s *Service) RestoreCorpus(ctx context.Context, source, safetyBackup string) (*cli.CorpusRestoreResult, error) {
 	cfg, err := s.loadConfig(false)
 	if err != nil {
@@ -354,13 +371,20 @@ func (s *Service) RestoreCorpus(ctx context.Context, source, safetyBackup string
 	if safety != nil {
 		report.SafetyBackup = corpusBackupResult(*safety)
 	}
+	if restored.Path != "" {
+		report.Restored = corpusBackupResult(restored)
+	}
 	if err != nil {
+		if report.Restored != nil {
+			if after, inspectErr := corpus.InspectSchema(ctx, cfg.Database); inspectErr == nil {
+				report.After = corpusInspectionResult(after)
+			}
+		}
 		if report.SafetyBackup != nil {
 			return report, fmt.Errorf("restore corpus (safety backup preserved at %s): %w", report.SafetyBackup.Path, err)
 		}
 		return report, err
 	}
-	report.Restored = corpusBackupResult(restored)
 	after, err := corpus.InspectSchema(ctx, cfg.Database)
 	if err != nil {
 		return report, err
@@ -369,6 +393,7 @@ func (s *Service) RestoreCorpus(ctx context.Context, source, safetyBackup string
 	return report, nil
 }
 
+// MigrateCorpus explicitly applies pending schema migrations with backup policy.
 func (s *Service) MigrateCorpus(ctx context.Context, opts cli.CorpusMigrateOptions) (*cli.CorpusMigrationResult, error) {
 	cfg, err := s.loadConfig(false)
 	if err != nil {

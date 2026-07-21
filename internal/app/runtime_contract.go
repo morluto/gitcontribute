@@ -25,6 +25,7 @@ func NewRuntimeContract(version string) (*cli.RuntimeContractResult, error) {
 	}, nil
 }
 
+// RuntimeContract reports immutable executable compatibility metadata.
 func (s *Service) RuntimeContract(ctx context.Context) (*cli.RuntimeContractResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

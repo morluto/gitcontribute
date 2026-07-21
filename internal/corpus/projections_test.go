@@ -2,7 +2,6 @@ package corpus
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -95,26 +94,20 @@ func TestRebuildThreadSearchProjectionIsAtomicAndSetsState(t *testing.T) {
 	c, _ := openTestCorpus(t)
 
 	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
-	if err != nil {
-		t.Fatalf("apply repository: %v", err)
-	}
+	requireProjectionSetup(t, "apply repository", err)
 	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "searchable title", "body text", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
 		t.Fatalf("apply thread: %v", err)
 	}
 
 	before, err := c.GetProjectionState(ctx, ProjectionNameThreadsFTS)
-	if err != nil {
-		t.Fatalf("get state before rebuild: %v", err)
-	}
+	requireProjectionSetup(t, "get state before rebuild", err)
 	// Incremental FTS triggers keep row counts current.
 	if before.RowCount != 1 {
 		t.Fatalf("incremental row count = %d, want 1", before.RowCount)
 	}
 
 	state, err := c.RebuildThreadSearchProjection(ctx)
-	if err != nil {
-		t.Fatalf("rebuild threads_fts: %v", err)
-	}
+	requireProjectionSetup(t, "rebuild threads_fts", err)
 	if state.Name != ProjectionNameThreadsFTS || state.Version != ProjectionVersionThreadsFTS || state.Status != ProjectionStatusCurrent {
 		t.Fatalf("rebuild state = %+v", state)
 	}
@@ -126,18 +119,14 @@ func TestRebuildThreadSearchProjectionIsAtomicAndSetsState(t *testing.T) {
 	}
 
 	results, err := c.SearchThreads(ctx, "searchable", 10)
-	if err != nil {
-		t.Fatalf("search threads: %v", err)
-	}
+	requireProjectionSetup(t, "search threads", err)
 	if len(results) != 1 || results[0].Number != 1 {
 		t.Fatalf("search results = %+v", results)
 	}
 
 	// A second rebuild with unchanged source should remain current and stable.
 	repeat, err := c.RebuildThreadSearchProjection(ctx)
-	if err != nil {
-		t.Fatalf("second rebuild: %v", err)
-	}
+	requireProjectionSetup(t, "second rebuild", err)
 	if repeat.RowCount != state.RowCount || repeat.Status != ProjectionStatusCurrent {
 		t.Fatalf("second rebuild changed row count or status: %+v", repeat)
 	}
@@ -151,9 +140,7 @@ func TestRebuildThreadSearchProjectionIsAtomicAndSetsState(t *testing.T) {
 		t.Fatalf("update thread source: %v", err)
 	}
 	changed, err := c.GetProjectionState(ctx, ProjectionNameThreadsFTS)
-	if err != nil {
-		t.Fatal(err)
-	}
+	requireProjectionSetup(t, "get state after source update", err)
 	if changed.SourceRevision != "" || changed.ContentHash != "" {
 		t.Fatalf("incremental source change retained stale identity: %+v", changed)
 	}
@@ -163,6 +150,13 @@ func TestRebuildThreadSearchProjectionIsAtomicAndSetsState(t *testing.T) {
 	}
 	if rebuilt.SourceRevision == "" || rebuilt.SourceRevision == state.SourceRevision {
 		t.Fatalf("changed source was not re-identified: before=%+v after=%+v", state, rebuilt)
+	}
+}
+
+func requireProjectionSetup(t *testing.T, action string, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", action, err)
 	}
 }
 
@@ -431,19 +425,4 @@ func TestRebuildThreadSearchProjectionRestoresClearedIndex(t *testing.T) {
 	if rebuilt.Status != ProjectionStatusCurrent || rebuilt.RowCount != 1 {
 		t.Fatalf("rebuilt state = %+v", rebuilt)
 	}
-}
-
-func projectionStateFromDB(ctx context.Context, db *sql.DB, name string) (ProjectionState, error) {
-	var state ProjectionState
-	var refreshed int64
-	err := db.QueryRowContext(ctx, `
-		SELECT name, version, status, refreshed_at, row_count
-		FROM projection_states
-		WHERE name = ?
-	`, name).Scan(&state.Name, &state.Version, &state.Status, &refreshed, &state.RowCount)
-	if err != nil {
-		return ProjectionState{}, err
-	}
-	state.RefreshedAt = scanTime(refreshed)
-	return state, nil
 }

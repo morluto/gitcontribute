@@ -143,7 +143,7 @@ func schemaInspectionTarget(path string) (filePath, dsn string, inspectable bool
 // CheckWriteAccessAtPath checks whether an existing compatible corpus can
 // begin a write transaction without opening the migration-capable corpus path.
 // The transaction is always rolled back and no schema or archive data changes.
-func CheckWriteAccessAtPath(ctx context.Context, path string) error {
+func CheckWriteAccessAtPath(ctx context.Context, path string) (returnErr error) {
 	filePath, readOnlyDSN, inspectable, err := schemaInspectionTarget(path)
 	if err != nil {
 		return err
@@ -158,7 +158,7 @@ func CheckWriteAccessAtPath(ctx context.Context, path string) error {
 	if err != nil {
 		return err
 	}
-	defer lease.release()
+	defer releaseLeaseOnReturn(lease, &returnErr)
 	u, err := url.Parse(readOnlyDSN)
 	if err != nil {
 		return fmt.Errorf("parse corpus inspection URI: %w", err)

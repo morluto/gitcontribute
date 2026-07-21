@@ -38,10 +38,10 @@ type RepositoryInventory struct {
 	TotalSize int64
 }
 
-// CorpusInventory is a bounded, read-only summary of every repository-shaped
+// InventorySummary is a bounded, read-only summary of every repository-shaped
 // scope in the corpus. Repository rows and code-only scopes are both included;
 // individual observations and documents are never returned.
-type CorpusInventory struct {
+type InventorySummary struct {
 	Repositories []RepositoryInventory
 
 	ObservationPayloadBytes int64
@@ -54,7 +54,7 @@ type CorpusInventory struct {
 // ListInventory aggregates the corpus by repository. Its result is bounded to
 // one row per stored repository or code-index scope, while the SQL performs
 // grouped scans rather than loading unbounded observation detail into memory.
-func (c *Corpus) ListInventory(ctx context.Context) (*CorpusInventory, error) {
+func (c *Corpus) ListInventory(ctx context.Context) (_ *InventorySummary, returnErr error) {
 	rows, err := c.db.QueryContext(ctx, `
 		SELECT owner, name FROM repositories
 		UNION
@@ -64,9 +64,8 @@ func (c *Corpus) ListInventory(ctx context.Context) (*CorpusInventory, error) {
 	if err != nil {
 		return nil, fmt.Errorf("inventory list repository scopes: %w", err)
 	}
-	defer rows.Close()
-
-	out := &CorpusInventory{}
+	defer func() { returnErr = errors.Join(returnErr, rows.Close()) }()
+	out := &InventorySummary{}
 	byRef := make(map[string]*RepositoryInventory)
 	for rows.Next() {
 		var inv RepositoryInventory
@@ -106,7 +105,26 @@ func (c *Corpus) ListInventory(ctx context.Context) (*CorpusInventory, error) {
 
 func inventoryRefKey(owner, name string) string { return owner + "\x00" + name }
 
-func (c *Corpus) readRepositoryInventoryAggregates(ctx context.Context, byRef map[string]*RepositoryInventory, out *CorpusInventory) error {
+func (c *Corpus) readRepositoryInventoryAggregates(ctx context.Context, byRef map[string]*RepositoryInventory, out *InventorySummary) error {
+	steps := []func(context.Context, map[string]*RepositoryInventory, *InventorySummary) error{
+		c.readThreadInventoryAggregates,
+		c.readObservationInventoryAggregates,
+		c.readFacetCoverageInventoryAggregates,
+		c.readCodeInventoryAggregates,
+	}
+	for _, step := range steps {
+		if err := step(ctx, byRef, out); err != nil {
+			return err
+		}
+	}
+	for i := range out.Repositories {
+		inv := &out.Repositories[i]
+		inv.TotalObservations = inv.RepositoryObservations + inv.ThreadObservations + inv.FacetObservations
+	}
+	return nil
+}
+
+func (c *Corpus) readThreadInventoryAggregates(ctx context.Context, byRef map[string]*RepositoryInventory, _ *InventorySummary) (returnErr error) {
 	rows, err := c.db.QueryContext(ctx, `
 		SELECT r.owner, r.name,
 		       COALESCE(SUM(CASE WHEN t.kind = ? THEN 1 ELSE 0 END), 0),
@@ -119,20 +137,23 @@ func (c *Corpus) readRepositoryInventoryAggregates(ctx context.Context, byRef ma
 	if err != nil {
 		return fmt.Errorf("inventory aggregate threads: %w", err)
 	}
+	defer func() { returnErr = errors.Join(returnErr, rows.Close()) }()
 	for rows.Next() {
 		var owner, name string
 		var issues, prs, threads int
 		if err := rows.Scan(&owner, &name, &issues, &prs, &threads); err != nil {
-			rows.Close()
 			return fmt.Errorf("inventory scan thread aggregates: %w", err)
 		}
 		inv := byRef[inventoryRefKey(owner, name)]
 		inv.Issues, inv.PullRequests, inv.Threads = issues, prs, threads
 	}
-	if err := rows.Close(); err != nil {
-		return err
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inventory iterate thread aggregates: %w", err)
 	}
+	return nil
+}
 
+func (c *Corpus) readObservationInventoryAggregates(ctx context.Context, byRef map[string]*RepositoryInventory, out *InventorySummary) error {
 	type observationQuery struct {
 		query string
 		apply func(*RepositoryInventory, int)
@@ -143,48 +164,61 @@ func (c *Corpus) readRepositoryInventoryAggregates(ctx context.Context, byRef ma
 		{`SELECT r.owner, r.name, COUNT(o.id), COALESCE(MAX(o.observed_at), 0), COALESCE(SUM(length(CAST(o.payload AS BLOB))), 0) FROM repositories r LEFT JOIN facet_observations o ON o.repository_id = r.id GROUP BY r.id, r.owner, r.name`, func(inv *RepositoryInventory, count int) { inv.FacetObservations = count }},
 	}
 	for _, query := range queries {
-		rows, err = c.db.QueryContext(ctx, query.query)
-		if err != nil {
-			return fmt.Errorf("inventory aggregate observations: %w", err)
-		}
-		for rows.Next() {
-			var owner, name string
-			var count int
-			var latest, payloadBytes int64
-			if err := rows.Scan(&owner, &name, &count, &latest, &payloadBytes); err != nil {
-				rows.Close()
-				return fmt.Errorf("inventory scan observation aggregates: %w", err)
-			}
-			inv := byRef[inventoryRefKey(owner, name)]
-			query.apply(inv, count)
-			if latest > 0 && (inv.LatestObservationAt.IsZero() || latest > inv.LatestObservationAt.UnixNano()) {
-				inv.LatestObservationAt = time.Unix(0, latest).UTC()
-			}
-			out.ObservationPayloadBytes += payloadBytes
-		}
-		if err := rows.Close(); err != nil {
+		if err := c.readObservationInventoryAggregate(ctx, query.query, query.apply, byRef, out); err != nil {
 			return err
 		}
 	}
+	return nil
+}
 
-	rows, err = c.db.QueryContext(ctx, `SELECT r.owner, r.name, COUNT(fc.id) FROM repositories r LEFT JOIN facet_coverage fc ON fc.repository_id = r.id GROUP BY r.id, r.owner, r.name`)
+func (c *Corpus) readObservationInventoryAggregate(ctx context.Context, query string, apply func(*RepositoryInventory, int), byRef map[string]*RepositoryInventory, out *InventorySummary) (returnErr error) {
+	rows, err := c.db.QueryContext(ctx, query)
+	if err != nil {
+		return fmt.Errorf("inventory aggregate observations: %w", err)
+	}
+	defer func() { returnErr = errors.Join(returnErr, rows.Close()) }()
+	for rows.Next() {
+		var owner, name string
+		var count int
+		var latest, payloadBytes int64
+		if err := rows.Scan(&owner, &name, &count, &latest, &payloadBytes); err != nil {
+			return fmt.Errorf("inventory scan observation aggregates: %w", err)
+		}
+		inv := byRef[inventoryRefKey(owner, name)]
+		apply(inv, count)
+		if latest > 0 && (inv.LatestObservationAt.IsZero() || latest > inv.LatestObservationAt.UnixNano()) {
+			inv.LatestObservationAt = time.Unix(0, latest).UTC()
+		}
+		out.ObservationPayloadBytes += payloadBytes
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inventory iterate observation aggregates: %w", err)
+	}
+	return nil
+}
+
+func (c *Corpus) readFacetCoverageInventoryAggregates(ctx context.Context, byRef map[string]*RepositoryInventory, _ *InventorySummary) (returnErr error) {
+	rows, err := c.db.QueryContext(ctx, `SELECT r.owner, r.name, COUNT(fc.id) FROM repositories r LEFT JOIN facet_coverage fc ON fc.repository_id = r.id GROUP BY r.id, r.owner, r.name`)
 	if err != nil {
 		return fmt.Errorf("inventory aggregate facet coverage: %w", err)
 	}
+	defer func() { returnErr = errors.Join(returnErr, rows.Close()) }()
 	for rows.Next() {
 		var owner, name string
 		var count int
 		if err := rows.Scan(&owner, &name, &count); err != nil {
-			rows.Close()
-			return err
+			return fmt.Errorf("inventory scan facet coverage: %w", err)
 		}
 		byRef[inventoryRefKey(owner, name)].FacetCoverage = count
 	}
-	if err := rows.Close(); err != nil {
-		return err
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inventory iterate facet coverage: %w", err)
 	}
+	return nil
+}
 
-	rows, err = c.db.QueryContext(ctx, `
+func (c *Corpus) readCodeInventoryAggregates(ctx context.Context, byRef map[string]*RepositoryInventory, out *InventorySummary) (returnErr error) {
+	rows, err := c.db.QueryContext(ctx, `
 		SELECT s.repo_owner, s.repo_name, COUNT(DISTINCT s.id), COUNT(d.id), COALESCE(SUM(d.bytes), 0)
 		FROM code_snapshots s LEFT JOIN code_documents d ON d.snapshot_id = s.id
 		GROUP BY s.repo_owner, s.repo_name
@@ -192,35 +226,33 @@ func (c *Corpus) readRepositoryInventoryAggregates(ctx context.Context, byRef ma
 	if err != nil {
 		return fmt.Errorf("inventory aggregate code: %w", err)
 	}
+	defer func() { returnErr = errors.Join(returnErr, rows.Close()) }()
 	for rows.Next() {
 		var owner, name string
 		var snapshots, documents int
 		var codeBytes int64
 		if err := rows.Scan(&owner, &name, &snapshots, &documents, &codeBytes); err != nil {
-			rows.Close()
-			return err
+			return fmt.Errorf("inventory scan code aggregates: %w", err)
 		}
 		inv := byRef[inventoryRefKey(owner, name)]
 		inv.CodeSnapshots, inv.CodeDocuments, inv.CodeBytes = snapshots, documents, codeBytes
 		out.CodeBytes += codeBytes
 	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	for i := range out.Repositories {
-		inv := &out.Repositories[i]
-		inv.TotalObservations = inv.RepositoryObservations + inv.ThreadObservations + inv.FacetObservations
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inventory iterate code aggregates: %w", err)
 	}
 	return nil
 }
 
+// ErrRepositoryNotFound indicates that an inventory scope is absent.
+var ErrRepositoryNotFound = errors.New("repository not found in corpus")
+
 // Inventory returns a read-only inventory for the named repository.
-// It returns nil, nil when the repository has not been observed.
 func (c *Corpus) Inventory(ctx context.Context, owner, name string) (*RepositoryInventory, error) {
 	var repoID int64
 	err := c.db.QueryRowContext(ctx, `SELECT id FROM repositories WHERE owner = ? AND name = ?`, owner, name).Scan(&repoID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
+		return nil, ErrRepositoryNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("inventory select repository: %w", err)
@@ -279,12 +311,12 @@ func (c *Corpus) Inventory(ctx context.Context, owner, name string) (*Repository
 	return inv, nil
 }
 
-func (c *Corpus) databasePath(ctx context.Context) (string, error) {
+func (c *Corpus) databasePath(ctx context.Context) (_ string, returnErr error) {
 	rows, err := c.db.QueryContext(ctx, `PRAGMA database_list`)
 	if err != nil {
 		return "", fmt.Errorf("inventory pragma database_list: %w", err)
 	}
-	defer rows.Close()
+	defer func() { returnErr = errors.Join(returnErr, rows.Close()) }()
 	for rows.Next() {
 		var seq int
 		var name, file string
@@ -383,13 +415,14 @@ type CodeSnapshotPruneResult struct {
 	ReclaimBytes int64
 }
 
+// ErrCodeSnapshotPrunePlanStale indicates that a confirmed prune preview changed.
 var ErrCodeSnapshotPrunePlanStale = errors.New("code snapshot prune plan is stale")
 
 // ApplyCodeSnapshotPrune transactionally prunes derived code snapshots so that
 // only the latest N remain for the repository. It requires the plan's scope to
 // match the supplied repository reference and recomputes the delete set inside
 // the transaction to preserve the latest N against concurrent inserts.
-func (c *Corpus) ApplyCodeSnapshotPrune(ctx context.Context, ref domain.RepoRef, plan *CodeSnapshotPrunePlan) (*CodeSnapshotPruneResult, error) {
+func (c *Corpus) ApplyCodeSnapshotPrune(ctx context.Context, ref domain.RepoRef, plan *CodeSnapshotPrunePlan) (_ *CodeSnapshotPruneResult, err error) {
 	if plan == nil {
 		return nil, errors.New("prune plan is required")
 	}
@@ -407,7 +440,7 @@ func (c *Corpus) ApplyCodeSnapshotPrune(ctx context.Context, ref domain.RepoRef,
 	if err != nil {
 		return nil, fmt.Errorf("begin code snapshot prune: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackSQLOnReturn(tx, &err)
 
 	snapshots, err := listCodeSnapshotRetentionRefsTx(ctx, tx, ref)
 	if err != nil {
@@ -443,7 +476,7 @@ func (c *Corpus) ApplyCodeSnapshotPrune(ctx context.Context, ref domain.RepoRef,
 	return &CodeSnapshotPruneResult{Ref: ref, KeepLatest: plan.KeepLatest, Deleted: len(toDelete), ReclaimBytes: reclaim}, nil
 }
 
-func (c *Corpus) listCodeSnapshotRetentionRefs(ctx context.Context, ref domain.RepoRef) ([]CodeSnapshotRef, error) {
+func (c *Corpus) listCodeSnapshotRetentionRefs(ctx context.Context, ref domain.RepoRef) (_ []CodeSnapshotRef, returnErr error) {
 	rows, err := c.db.QueryContext(ctx, `
 		SELECT id, commit_sha, created_at, total_bytes
 		FROM code_snapshots
@@ -453,11 +486,11 @@ func (c *Corpus) listCodeSnapshotRetentionRefs(ctx context.Context, ref domain.R
 	if err != nil {
 		return nil, fmt.Errorf("list code snapshots for prune: %w", err)
 	}
-	defer rows.Close()
+	defer func() { returnErr = errors.Join(returnErr, rows.Close()) }()
 	return scanCodeSnapshotRetentionRefs(rows)
 }
 
-func listCodeSnapshotRetentionRefsTx(ctx context.Context, tx *sql.Tx, ref domain.RepoRef) ([]CodeSnapshotRef, error) {
+func listCodeSnapshotRetentionRefsTx(ctx context.Context, tx *sql.Tx, ref domain.RepoRef) (_ []CodeSnapshotRef, returnErr error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, commit_sha, created_at, total_bytes
 		FROM code_snapshots
@@ -467,7 +500,7 @@ func listCodeSnapshotRetentionRefsTx(ctx context.Context, tx *sql.Tx, ref domain
 	if err != nil {
 		return nil, fmt.Errorf("list code snapshots for prune: %w", err)
 	}
-	defer rows.Close()
+	defer func() { returnErr = errors.Join(returnErr, rows.Close()) }()
 	return scanCodeSnapshotRetentionRefs(rows)
 }
 
