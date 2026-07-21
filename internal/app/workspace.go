@@ -45,7 +45,7 @@ func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, o
 
 	baseRef := strings.TrimSpace(opts.BaseRef)
 	if baseRef == "" {
-		baseRef = "main"
+		baseRef = "HEAD"
 	}
 
 	candidateRef := strings.TrimSpace(opts.CandidateRef)

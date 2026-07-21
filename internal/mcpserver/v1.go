@@ -135,10 +135,10 @@ type BuildRepositoryDossierInput RepoInput
 // CreateWorkspaceInput configures a durable managed-workspace creation job.
 type CreateWorkspaceInput struct {
 	InvestigationID string `json:"investigation_id" jsonschema:"Investigation ID"`
-	Remote          string `json:"remote" jsonschema:"Git remote URL to clone"`
-	BaseRef         string `json:"base_ref" jsonschema:"Base ref to resolve"`
-	CandidateRef    string `json:"candidate_ref" jsonschema:"Candidate ref to resolve"`
-	Name            string `json:"name" jsonschema:"Workspace name"`
+	Remote          string `json:"remote,omitempty" jsonschema:"Git remote URL to clone; defaults to the investigation repository"`
+	BaseRef         string `json:"base_ref,omitempty" jsonschema:"Base ref to resolve; defaults to the remote HEAD"`
+	CandidateRef    string `json:"candidate_ref,omitempty" jsonschema:"Candidate ref to resolve; defaults to the investigation commit"`
+	Name            string `json:"name,omitempty" jsonschema:"Workspace name; defaults to a generated ID"`
 }
 
 // RunValidationInput selects a validation definition and explicitly authorizes execution.
@@ -507,15 +507,9 @@ func (s *Server) createWorkspace(ctx context.Context, _ *mcp.CallToolRequest, in
 		return nil, JobReference{}, err
 	}
 	in.Remote = strings.TrimSpace(in.Remote)
-	if in.Remote == "" {
-		return nil, JobReference{}, errors.New("remote is required")
-	}
 	in.BaseRef = strings.TrimSpace(in.BaseRef)
 	in.CandidateRef = strings.TrimSpace(in.CandidateRef)
 	in.Name = strings.TrimSpace(in.Name)
-	if in.BaseRef == "" || in.CandidateRef == "" || in.Name == "" {
-		return nil, JobReference{}, errors.New("base_ref, candidate_ref, and name are required")
-	}
 	operator, ok := s.reader.(Operator)
 	if !ok {
 		return nil, JobReference{}, errors.New("workspace creation is not available")
