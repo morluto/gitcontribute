@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/morluto/gitcontribute/internal/buflimit"
 )
 
 // Document is one bounded, tracked text file from a snapshot.
@@ -54,10 +56,6 @@ var (
 
 	// ErrNotARepository means repoPath is not inside a non-bare git worktree.
 	ErrNotARepository = errors.New("not a git repository")
-
-	// ErrOutputLimit means git produced more metadata than the bounded indexer
-	// was willing to retain in memory.
-	ErrOutputLimit = errors.New("git output exceeds limit")
 )
 
 const (
@@ -256,7 +254,7 @@ func gitHead(ctx context.Context, repoPath string) (string, error) {
 
 func gitStatus(ctx context.Context, repoPath string) (string, error) {
 	out, err := runGit(ctx, repoPath, "status", "--porcelain", "--untracked-files=all")
-	if errors.Is(err, ErrOutputLimit) {
+	if errors.Is(err, buflimit.ErrOutputLimit) {
 		return "dirty", nil
 	}
 	if err != nil {
@@ -357,44 +355,21 @@ func runGitLimited(ctx context.Context, repoPath string, limit int, args ...stri
 		"GIT_OPTIONAL_LOCKS=0",
 		"GIT_TERMINAL_PROMPT=0",
 	)
-	var stdout limitedBuffer
-	stdout.remaining = limit
-	cmd.Stdout = &stdout
-	var stderr limitedBuffer
-	stderr.remaining = 64 << 10
-	cmd.Stderr = &stderr
+	stdout := buflimit.NewBuffer(limit)
+	stderr := buflimit.NewBuffer(64 << 10)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	err := cmd.Run()
-	if errors.Is(stdout.err, ErrOutputLimit) || errors.Is(stderr.err, ErrOutputLimit) {
-		return stdout.buf.String(), ErrOutputLimit
+	if errors.Is(stdout.Err(), buflimit.ErrOutputLimit) || errors.Is(stderr.Err(), buflimit.ErrOutputLimit) {
+		return stdout.String(), buflimit.ErrOutputLimit
 	}
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			exitErr.Stderr = append([]byte(nil), stderr.buf.Bytes()...)
+			exitErr.Stderr = append([]byte(nil), stderr.Bytes()...)
 		}
 	}
-	return stdout.buf.String(), err
-}
-
-type limitedBuffer struct {
-	buf       bytes.Buffer
-	remaining int
-	err       error
-}
-
-func (b *limitedBuffer) Write(p []byte) (int, error) {
-	if len(p) > b.remaining {
-		written := b.remaining
-		if b.remaining > 0 {
-			_, _ = b.buf.Write(p[:b.remaining])
-			b.remaining = 0
-		}
-		b.err = ErrOutputLimit
-		return written, b.err
-	}
-	n, err := b.buf.Write(p)
-	b.remaining -= n
-	return n, err
+	return stdout.String(), err
 }
 
 func safeGitPath(p string) (string, bool) {
