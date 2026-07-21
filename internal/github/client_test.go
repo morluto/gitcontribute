@@ -689,3 +689,73 @@ func TestNoTokenIsAllowed(t *testing.T) {
 		t.Fatalf("GetRepository: %v", err)
 	}
 }
+
+// funcTokenSource adapts a function to the TokenSource interface for tests.
+type funcTokenSource func(context.Context) (string, error)
+
+func (f funcTokenSource) Token(ctx context.Context) (string, error) { return f(ctx) }
+
+func TestClientTokenResolutionUsesRequestContext(t *testing.T) {
+	type ctxKey string
+	const key ctxKey = "github-token-context"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer context-token" {
+			t.Errorf("Authorization = %q, want \"Bearer context-token\"", got)
+		}
+		setRateHeaders(w.Header())
+		writeJSON(w, repoPayload(1, testRepo, testOwner))
+	}))
+	defer srv.Close()
+
+	src := funcTokenSource(func(ctx context.Context) (string, error) {
+		if ctx.Value(key) == nil {
+			return "", errors.New("token source did not receive request context")
+		}
+		return "context-token", nil
+	})
+
+	client, err := NewClient(Config{
+		BaseURL:     srv.URL,
+		UploadURL:   srv.URL,
+		TokenSource: src,
+		Limiter:     noopLimiter{},
+		Retry:       &RetryConfig{MaxAttempts: 1},
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	ctx := context.WithValue(context.Background(), key, "present")
+	if _, _, err := client.GetRepository(ctx, testOwner, testRepo); err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+}
+
+func TestClientTokenResolutionRespectsCancellation(t *testing.T) {
+	src := funcTokenSource(func(ctx context.Context) (string, error) {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		return "token", nil
+	})
+
+	client, err := NewClient(Config{
+		BaseURL:     "http://example.com/",
+		UploadURL:   "http://example.com/",
+		TokenSource: src,
+		Limiter:     noopLimiter{},
+		Retry:       &RetryConfig{MaxAttempts: 1},
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, _, err = client.GetRepository(ctx, testOwner, testRepo)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}

@@ -259,12 +259,14 @@ func (m *Manager) Acquire(ctx context.Context, owner, repo, remote string) (*Acq
 	}
 
 	if err := m.verifyClean(ctx, acq.Path); err != nil {
-		_ = m.cleanupWorktree(context.Background(), acq)
-		return nil, err
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		return nil, errors.Join(err, m.cleanupWorktree(cleanupCtx, acq))
 	}
 	if err := m.writeMetadata(acq); err != nil {
-		_ = m.cleanupWorktree(context.Background(), acq)
-		return nil, err
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		return nil, errors.Join(err, m.cleanupWorktree(cleanupCtx, acq))
 	}
 
 	return acq, nil
@@ -288,11 +290,18 @@ func (m *Manager) cleanupWorktree(ctx context.Context, acq *Acquisition) error {
 	if acq == nil || acq.Path == "" {
 		return nil
 	}
-	// Ignore worktree remove errors; the directory may already be gone.
-	_, _ = m.git(ctx, acq.CachePath, "worktree", "remove", "--force", acq.Path)
-	_ = os.RemoveAll(acq.Path)
-	acq.Path = ""
-	return nil
+	_, gitErr := m.git(ctx, acq.CachePath, "worktree", "remove", "--force", acq.Path)
+	removeErr := os.RemoveAll(acq.Path)
+	if removeErr == nil {
+		acq.Path = ""
+	}
+	if gitErr != nil {
+		gitErr = fmt.Errorf("remove Git worktree: %w", gitErr)
+	}
+	if removeErr != nil {
+		removeErr = fmt.Errorf("remove worktree directory: %w", removeErr)
+	}
+	return errors.Join(gitErr, removeErr)
 }
 
 func (m *Manager) lockMirror(ctx context.Context, name string) (func(), error) {

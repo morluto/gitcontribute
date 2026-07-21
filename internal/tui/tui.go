@@ -123,10 +123,11 @@ type Model struct {
 	actionHandler func(context.Context, Item) tea.Cmd
 }
 
-// New creates a Model for the given reader.
-func New(reader Reader, opts ...Option) Model {
+// New creates a Model for the given reader and lifecycle context.
+func New(ctx context.Context, reader Reader, opts ...Option) Model {
 	m := Model{
 		reader: reader,
+		ctx:    ctx,
 		view:   viewRepositories,
 		items:  make(map[view][]Item),
 		width:  80,
@@ -154,16 +155,9 @@ func (m Model) Init() tea.Cmd {
 	return func() tea.Msg { return loadMsg{} }
 }
 
-func (m Model) ctxOrBackground() context.Context {
-	if m.ctx != nil {
-		return m.ctx
-	}
-	return context.Background()
-}
-
 func (m Model) loadCmd() tea.Cmd {
 	return func() tea.Msg {
-		data, err := m.reader.Load(m.ctxOrBackground())
+		data, err := m.reader.Load(m.ctx)
 		return loadedMsg{data: data, err: err}
 	}
 }
@@ -294,7 +288,7 @@ func (m Model) requestAction() (Model, tea.Cmd) {
 
 	m.actionMsg = "Refresh requested for " + it.Kind + ": " + it.Title
 	if m.actionHandler != nil {
-		return m, m.actionHandler(m.ctxOrBackground(), it)
+		return m, m.actionHandler(m.ctx, it)
 	}
 	return m, nil
 }

@@ -316,6 +316,37 @@ func TestJobExecutorCloseCancelsAndWaits(t *testing.T) {
 	}
 }
 
+func TestJobExecutorUsesLifecycleContext(t *testing.T) {
+	lifecycle, cancelLifecycle := context.WithCancel(context.Background())
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := NewWithContext(lifecycle, paths, "test", nil)
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+	if _, err := svc.Init(context.Background()); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	jobs, err := svc.Jobs(context.Background())
+	if err != nil {
+		t.Fatalf("jobs: %v", err)
+	}
+
+	started := make(chan struct{})
+	id, err := jobs.Submit(context.Background(), "lifecycle", nil, func(ctx context.Context, _ func(string, string) error) (any, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	if err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	<-started
+	cancelLifecycle()
+
+	waitForJobStatus(t, jobs, id, corpus.JobStatusCancelled, 2*time.Second)
+}
+
 func TestStartupReconciliation(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
