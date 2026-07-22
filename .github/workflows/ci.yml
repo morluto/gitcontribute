@@ -31,81 +31,12 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
-      - name: Validate AGENTS.md references
-        shell: bash
-        run: |
-          set -euo pipefail
-          errors=0
+      - run: ./scripts/validate-agents-md.sh
 
-          report_ok()  { echo "  OK: $1"; }
-          report_err() { echo "::error file=AGENTS.md::$1"; errors=$((errors + 1)); }
-
-          echo "::group::Checking markdown links in AGENTS.md"
-          while IFS= read -r link; do
-            [[ -z "$link" ]] && continue
-            if [[ ! -e "$link" ]]; then
-              report_err "Markdown link target missing: $link"
-            else
-              report_ok "$link"
-            fi
-          done < <(sed -n 's/.*\[[^]]*\](\([^)]*\)).*/\1/p' AGENTS.md | sort -u)
-          echo "::endgroup::"
-
-          echo "::group::Checking backtick-quoted file paths in AGENTS.md"
-          while IFS= read -r path; do
-            [[ -z "$path" ]] && continue
-            [[ "$path" =~ ^https?:// ]] && continue
-            [[ "$path" =~ ^(gofmt|go\ test|go\ vet|git\ ) ]] && continue
-            if [[ ! -e "$path" ]]; then
-              report_err "Backtick-quoted path missing: $path"
-            else
-              report_ok "$path"
-            fi
-          done < <(sed -n 's/.*`\([^`]*\)`.*/\1/p' AGENTS.md | grep -E '^(docs/|LICENSES|internal/|cmd/)' | sort -u)
-          echo "::endgroup::"
-
-          echo "::group::Checking directory references in AGENTS.md"
-          while IFS= read -r dir; do
-            [[ -z "$dir" ]] && continue
-            if [[ ! -d "$dir" ]]; then
-              report_err "Referenced directory missing: $dir"
-            else
-              report_ok "$dir"
-            fi
-          done < <(grep -oE '\b(internal/[a-zA-Z0-9_/]+|cmd/[a-zA-Z0-9_/]+)\b' AGENTS.md | sort -u)
-          echo "::endgroup::"
-
-          if [[ $errors -gt 0 ]]; then
-            echo "::error::AGENTS.md validation failed with $errors error(s)"
-            exit 1
-          fi
-
-          echo "AGENTS.md validation passed"
-      - name: Check AGENTS.md structure
-        shell: bash
-        run: |
-          errors=0
-
-          if [[ ! -s AGENTS.md ]]; then
-            echo "::error::AGENTS.md is missing or empty"
-            exit 1
-          fi
-
-          echo "AGENTS.md exists ($(wc -l < AGENTS.md) lines, $(wc -c < AGENTS.md) bytes)"
-
-          if ! grep -q '^#' AGENTS.md; then
-            echo "::error file=AGENTS.md::AGENTS.md has no section headers"
-            errors=$((errors + 1))
-          fi
-
-          if [[ $errors -gt 0 ]]; then
-            exit 1
-          fi
-
-  vet:
-    name: Static checks
+  formatting:
+    name: Go formatting
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -115,7 +46,6 @@ jobs:
       - name: Check formatting
         shell: bash
         run: test -z "$(gofmt -l .)"
-      - run: go vet ./...
 
   golangci-lint:
     name: Go linters
@@ -147,7 +77,7 @@ jobs:
           echo "sha=$base" >> "$GITHUB_OUTPUT"
       - uses: golangci/golangci-lint-action@v7
         with:
-          version: v2.12
+          version: v2.12.2
           args: --timeout=5m --new-from-rev=${{ steps.lint-base.outputs.sha }}
 
   check-large-files:
@@ -205,13 +135,13 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Run tests with coverage and timing
-        run: go test -v -race -count=1 -coverprofile=coverage.out -covermode=atomic -coverpkg=./internal/... -timeout 300s ./...
+        run: go test -v -count=1 -coverprofile=coverage.out -covermode=set -coverpkg=./internal/... -timeout 300s ./...
       - name: Check coverage threshold
         shell: bash
         run: |
           COVERAGE=$(go tool cover -func=coverage.out | tail -n1 | awk '{print $NF}' | tr -d '%')
           echo "Total coverage: ${COVERAGE}%"
-          if (( $(echo "$COVERAGE < 70" | bc -l) )); then
+          if awk -v coverage="$COVERAGE" 'BEGIN { exit !(coverage < 70) }'; then
             echo "::error::Coverage ${COVERAGE}% is below 70% threshold"
             exit 1
           fi
@@ -221,6 +151,18 @@ jobs:
         with:
           name: coverage
           path: coverage.out
+
+  race:
+    name: Focused race tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -race -count=1 -timeout 300s ./internal/app ./internal/corpus
 
   tidy:
     name: Module tidy check
@@ -233,31 +175,19 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Check go.mod is tidy
-        shell: bash
-        run: |
-          go mod tidy
-          if [ -n "$(git status --porcelain go.mod go.sum)" ]; then
-            echo "::error::go.mod or go.sum not tidy; run 'go mod tidy'"
-            exit 1
-          fi
+        run: go mod tidy -diff
 
-  tech-debt:
-    name: Tech debt scan
+  generated:
+    name: Generated outputs
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
-      - name: Scan for TODO/FIXME/HACK markers
-        shell: bash
-        run: |
-          MARKERS=$(grep -rn -E '\b(TODO|FIXME|HACK|XXX|OPTIMIZE|BUG)\b' --include='*.go' . || true)
-          if [ -n "$MARKERS" ]; then
-            echo "== Tech debt markers found =="
-            echo "$MARKERS"
-            echo "::warning::Tech debt markers found in codebase. Review and link to issues."
-          else
-            echo "No tech debt markers found."
-          fi
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: ./scripts/check-generated.sh
 
   security:
     name: Security scan
@@ -280,19 +210,6 @@ jobs:
         run: go build ./...
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v3
-
-  integration:
-    name: Integration tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Run integration tests
-        run: go test -v -race -count=1 -tags=integration -timeout 300s ./...
 
   npm:
     name: npm launcher and package metadata

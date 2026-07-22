@@ -639,6 +639,13 @@ func (r *MCPReader) DeepWiki(ctx context.Context, in mcpserver.DeepWikiInput) (m
 	if len(repositories) > 10 {
 		return mcpserver.DeepWikiOutput{}, errors.New("DeepWiki supports at most 10 repositories")
 	}
+	maxBytes := in.MaxOutputBytes
+	if maxBytes == 0 {
+		maxBytes = 131072
+	}
+	if maxBytes < 1024 || maxBytes > 1048576 {
+		return mcpserver.DeepWikiOutput{}, errors.New("max_output_bytes must be between 1024 and 1048576")
+	}
 	res, err := r.deepWiki().Read(ctx, deepwiki.Request{Action: in.Action, Repository: in.Repository, Repositories: repositories, Question: in.Question})
 	if err != nil {
 		return mcpserver.DeepWikiOutput{}, err
@@ -647,13 +654,6 @@ func (r *MCPReader) DeepWiki(ctx context.Context, in mcpserver.DeepWikiInput) (m
 	if !res.Available {
 		out.Status, out.Reason, out.NextAction = "unavailable", "not_indexed_or_unavailable", "Use GitHub metadata, stored corpus data, or explicit code acquisition instead."
 		return out, nil
-	}
-	maxBytes := in.MaxOutputBytes
-	if maxBytes == 0 {
-		maxBytes = 131072
-	}
-	if maxBytes < 1024 || maxBytes > 1048576 {
-		return mcpserver.DeepWikiOutput{}, errors.New("max_output_bytes must be between 1024 and 1048576")
 	}
 	if len(out.Result) > maxBytes {
 		out.Result = validUTF8Prefix(out.Result, maxBytes)

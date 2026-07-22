@@ -12,6 +12,7 @@
 *.test
 *.out
 coverage.out
+coverage.html
 *.prof
 *.cpuprof
 *.memprof

@@ -667,14 +667,14 @@ the output of `gitcontribute doctor --json`.
 ## 🛠️ Development
 
 ```sh
-go test ./...
-go build -o gitcontribute ./cmd/gitcontribute
-./gitcontribute --help
+make test
+go run ./cmd/gitcontribute --help
 ```
 
 Before changing package boundaries or side effects, read
 [docs/architecture.md](docs/architecture.md). See [CONTRIBUTING.md](CONTRIBUTING.md)
-for the complete development and testing workflow.
+for the fast local checks, complete PR validation, generated-output workflow,
+and focused race-test guidance.
 
 ---
 

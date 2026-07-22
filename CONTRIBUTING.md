@@ -8,26 +8,73 @@ network, process-execution, or protocol code.
 
 Requirements:
 
-- Go 1.26 or newer
-- Git
+- the Go version declared in `go.mod`;
+- Git;
+- Make and curl for the documented convenience targets;
+- golangci-lint v2.12.2 for local linting;
+- pre-commit 4.6.1 if you want the repository-managed Git hooks.
 
-Run the standard validation suite from the repository root:
+The dev container provides the pinned tools and installs the hooks. For a local
+checkout, install golangci-lint and the hooks after installing
+[pre-commit](https://pre-commit.com/#installation):
 
 ```sh
-gofmt -w <changed-go-files>
-go test ./...
-go vet ./...
+go mod download
+make install-tools
+pre-commit install --install-hooks
 ```
+
+The commit hook only formats staged Go files and performs inexpensive text and
+configuration checks. Cached Go tests run at pre-push time. Skip a hook when
+necessary with standard Git or pre-commit controls, then run the corresponding
+check explicitly before opening a pull request.
+
+## Development loop
+
+Use cached tests during normal development:
+
+```sh
+make test
+go test ./internal/app -run '^TestName$'
+```
+
+Run the fast local checks before pushing and the complete validation before a
+pull request:
+
+```sh
+make check
+make verify
+```
+
+`make verify` runs uncached tests, changed-code linting, module-tidiness checks,
+generated-output verification, and documentation validation. It is the complete
+local check, while CI adds platform, coverage, security, and focused race jobs.
+`make lint-full` is available for auditing existing repository-wide lint debt.
+Use `make test-uncached` when only a fresh test run is needed.
 
 Use focused race tests for changes involving SQLite transactions, goroutines,
 filesystem locks, job ownership, or cancellation:
 
 ```sh
-go test -race ./internal/app ./internal/corpus
+make test-race
 ```
 
-The SQLite driver is pure Go. Keep CGO disabled compatibility when changing
+The SQLite driver is pure Go. Keep CGO-disabled compatibility when changing
 storage or build dependencies.
+
+## Generated output and documentation
+
+Generated files are verified in pull-request CI, not at commit time. When a
+change affects generator inputs, refresh and inspect the output explicitly:
+
+```sh
+make generate
+make generate-check
+```
+
+Run `make docs` to perform the same repository-documentation validation used by
+CI. Publishing-only documentation and release notes belong in release
+automation rather than local hooks.
 
 ## Where changes belong
 
@@ -86,7 +133,7 @@ include:
 - transaction rollback after a late validation or persistence failure.
 
 Use local HTTP servers, temporary repositories, and temporary databases. Do
-not depend on live GitHub state in the test suite.
+not depend on live external services in the test suite.
 
 ## Pull requests
 

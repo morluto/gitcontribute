@@ -515,9 +515,11 @@ func TestFindPrecedentsUsesClosedAndMergedHistory(t *testing.T) {
 type fakeDeepWikiReader struct {
 	response deepwiki.Response
 	request  deepwiki.Request
+	calls    int
 }
 
 func (f *fakeDeepWikiReader) Read(_ context.Context, request deepwiki.Request) (deepwiki.Response, error) {
+	f.calls++
 	f.request = request
 	return f.response, nil
 }
@@ -611,8 +613,17 @@ func TestScalableRuntimeBoundsMatchSchemas(t *testing.T) {
 	if _, err := reader.FindPrecedents(context.Background(), mcpserver.FindPrecedentsInput{Threads: []mcpserver.ThreadRef{{Owner: "acme", Repo: "rocket", Number: 1}}, Limit: 101}); err == nil {
 		t.Fatal("find precedents accepted limit above schema maximum")
 	}
-	if _, err := reader.DeepWiki(context.Background(), mcpserver.DeepWikiInput{Action: "question", Repositories: []string{"acme/rocket"}, Question: "architecture?", MaxOutputBytes: 100}); err == nil {
+}
+
+func TestDeepWikiRejectsOutputBoundsBeforeProviderRead(t *testing.T) {
+	svc := newSearchTestService(t)
+	deepWiki := &fakeDeepWikiReader{}
+	svc.SetDeepWikiReader(deepWiki)
+	if _, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpserver.DeepWikiInput{Action: "question", Repositories: []string{"acme/rocket"}, Question: "architecture?", MaxOutputBytes: 100}); err == nil {
 		t.Fatal("DeepWiki accepted max_output_bytes below schema minimum")
+	}
+	if deepWiki.calls != 0 {
+		t.Fatalf("DeepWiki provider called %d times for invalid input", deepWiki.calls)
 	}
 }
 
