@@ -7,13 +7,10 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
+	"github.com/morluto/gitcontribute/internal/redaction"
 )
 
 var (
-	keyValuePattern     = regexp.MustCompile(`(?i)["']?[a-z_]*(?:token|secret|password|api[-_]?key|auth[-_]?token)[a-z_]*["']?\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?:Bearer|Basic|token)\s+[^\s,;}\]]+|[^\s,;}\]]+)`)
-	authHeaderPattern   = regexp.MustCompile(`(?i)(Authorization\s*:\s*(?:Bearer|token|Token|Basic)\s+)(\S+)`)
-	legacyGitHubPat     = regexp.MustCompile(`gh[pousr]_[A-Za-z0-9]{36}`)
-	fineGrainedPat      = regexp.MustCompile(`github_pat_[A-Za-z0-9_]{22,}`)
 	absPathPattern      = regexp.MustCompile(`(?i)(^|[\s"'=(])(/[A-Za-z0-9_.-][^"'\r\n,;}\]]*|[A-Za-z]:\\[^"'\r\n,;}\]]*)`)
 	keyComponentPattern = regexp.MustCompile(`[A-Za-z0-9]+`)
 )
@@ -113,21 +110,9 @@ func sanitizeString(s string) string {
 	if s == "" {
 		return ""
 	}
-	s = keyValuePattern.ReplaceAllStringFunc(s, redactKeyValueMatch)
-	s = authHeaderPattern.ReplaceAllString(s, "${1}[REDACTED]")
-	s = fineGrainedPat.ReplaceAllString(s, "[REDACTED]")
-	s = legacyGitHubPat.ReplaceAllString(s, "[REDACTED]")
+	s = redaction.String(s)
 	s = absPathPattern.ReplaceAllStringFunc(s, redactPathMatch)
 	return s
-}
-
-func redactKeyValueMatch(m string) string {
-	for i, r := range m {
-		if r == ':' || r == '=' {
-			return strings.TrimRight(m[:i+1], " \t") + " [REDACTED]"
-		}
-	}
-	return "[REDACTED]"
 }
 
 func redactPathMatch(m string) string {

@@ -256,6 +256,57 @@ func TestManager_RejectsExistingMirrorForDifferentRemote(t *testing.T) {
 	}
 }
 
+func TestManager_DistinguishesInvalidExistingMirrorPath(t *testing.T) {
+	t.Parallel()
+	manager := newManager(t)
+	path := filepath.Join(manager.root, "mirrors", "origin")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, path, "not a repository")
+
+	err := manager.Clone(context.Background(), "https://github.com/owner/repo.git", "origin")
+	if !errors.Is(err, ErrMirrorInvalid) {
+		t.Fatalf("Clone error = %v, want ErrMirrorInvalid", err)
+	}
+	if errors.Is(err, ErrMirrorExists) {
+		t.Fatalf("Clone error = %v, must not be ErrMirrorExists", err)
+	}
+}
+
+func TestManager_RejectsNonBareExistingMirror(t *testing.T) {
+	t.Parallel()
+	manager := newManager(t)
+	path := filepath.Join(manager.root, "mirrors", "origin")
+	if err := os.MkdirAll(path, 0755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, path, "init")
+
+	err := manager.Clone(context.Background(), "https://github.com/owner/repo.git", "origin")
+	if !errors.Is(err, ErrMirrorInvalid) {
+		t.Fatalf("Clone error = %v, want ErrMirrorInvalid", err)
+	}
+}
+
+func TestManager_RejectsExistingMirrorSymlink(t *testing.T) {
+	t.Parallel()
+	manager := newManager(t)
+	target := t.TempDir()
+	path := filepath.Join(manager.root, "mirrors", "origin")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, path); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	err := manager.Clone(context.Background(), "https://github.com/owner/repo.git", "origin")
+	if !errors.Is(err, ErrMirrorInvalid) {
+		t.Fatalf("Clone error = %v, want ErrMirrorInvalid", err)
+	}
+}
+
 func TestManager_DirtyState(t *testing.T) {
 	ctx := context.Background()
 	remote, _, _ := setupRemote(t)

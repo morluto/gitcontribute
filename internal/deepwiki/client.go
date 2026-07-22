@@ -38,7 +38,10 @@ type Reader interface {
 }
 
 // Client calls a public DeepWiki MCP endpoint. An empty Endpoint uses DefaultEndpoint.
-type Client struct{ Endpoint string }
+type Client struct {
+	Endpoint string
+	callTool func(context.Context, string, string, map[string]any) (*mcp.CallToolResult, error)
+}
 
 var sourceURLPattern = regexp.MustCompile(`https://deepwiki\.com/[^\s)\]}>]+`)
 
@@ -53,17 +56,11 @@ func (c *Client) Read(ctx context.Context, req Request) (_ Response, err error) 
 	if err != nil {
 		return Response{}, err
 	}
-	client := mcp.NewClient(&mcp.Implementation{Name: "gitcontribute", Version: "1"}, nil)
-	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: endpoint}, nil)
-	if err != nil {
-		return Response{}, fmt.Errorf("connect DeepWiki: %w", err)
+	callTool := c.callTool
+	if callTool == nil {
+		callTool = callDeepWikiTool
 	}
-	defer func() {
-		if closeErr := session.Close(); err == nil && closeErr != nil {
-			err = fmt.Errorf("close DeepWiki session: %w", closeErr)
-		}
-	}()
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: arguments})
+	result, err := callTool(ctx, endpoint, name, arguments)
 	if err != nil {
 		return Response{}, fmt.Errorf("call DeepWiki %s: %w", name, err)
 	}
@@ -78,6 +75,24 @@ func (c *Client) Read(ctx context.Context, req Request) (_ Response, err error) 
 	}
 	text := strings.Join(textParts, "\n")
 	return Response{Text: text, SourceURL: sourceURLPattern.FindString(text), Available: true}, nil
+}
+
+func callDeepWikiTool(ctx context.Context, endpoint, name string, arguments map[string]any) (_ *mcp.CallToolResult, err error) {
+	client := mcp.NewClient(&mcp.Implementation{Name: "gitcontribute", Version: "1"}, nil)
+	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: endpoint}, nil)
+	if err != nil {
+		return nil, fmt.Errorf("connect: %w", err)
+	}
+	defer func() {
+		if closeErr := session.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close session: %w", closeErr)
+		}
+	}()
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: arguments})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func toolCall(req Request) (string, map[string]any, error) {

@@ -22,6 +22,7 @@ func TestValidate(t *testing.T) {
 		{name: "ssh user", remote: "ssh://" + sshUser + "@github.com/owner/repo.git"},
 		{name: "ssh no user", remote: "ssh://github.com/owner/repo.git"},
 		{name: "scp-like ssh", remote: sshUser + "@github.com:owner/repo.git"},
+		{name: "scp-like ssh no user", remote: "github.com:owner/repo.git"},
 		{name: "absolute path", remote: "/absolute/path"},
 		{name: "file URL", remote: "file:///local/path"},
 		{name: "empty", remote: "", wantErr: true},
@@ -39,6 +40,8 @@ func TestValidate(t *testing.T) {
 		{name: "SSH missing path", remote: "ssh://" + sshUser + "@github.com", wantErr: true},
 		{name: "SCP-like password", remote: sshUser + colon + fixturePassword + at + "github.com:owner/repo.git", wantErr: true},
 		{name: "SCP-like extra host separator", remote: sshUser + at + "proxy" + at + "github.com:owner/repo.git", wantErr: true},
+		{name: "SCP-like empty host", remote: ":owner/repo.git", wantErr: true},
+		{name: "SCP-like empty path", remote: "github.com:", wantErr: true},
 	}
 
 	for _, tt := range tests {

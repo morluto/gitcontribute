@@ -34,6 +34,7 @@ type circuitBreaker struct {
 
 	consecutiveFailures int
 	lastFailure         time.Time
+	probeStarted        time.Time
 	state               CircuitState
 }
 
@@ -77,10 +78,17 @@ func (cb *circuitBreaker) allow() bool {
 		now := cb.clock()
 		if now.Sub(cb.lastFailure) >= cb.halfOpenWait {
 			cb.state = CircuitHalfOpen
+			cb.probeStarted = now
 			return true
 		}
 		return false
 	case CircuitHalfOpen:
+		now := cb.clock()
+		if now.Sub(cb.probeStarted) >= cb.probeTimeout {
+			cb.state = CircuitOpen
+			cb.lastFailure = now
+			cb.probeStarted = time.Time{}
+		}
 		return false
 	default:
 		return true
@@ -94,6 +102,7 @@ func (cb *circuitBreaker) recordSuccess() {
 	cb.consecutiveFailures = 0
 	if cb.state == CircuitHalfOpen {
 		cb.state = CircuitClosed
+		cb.probeStarted = time.Time{}
 	}
 }
 
@@ -106,6 +115,7 @@ func (cb *circuitBreaker) recordFailure() {
 	cb.lastFailure = cb.clock()
 	if cb.consecutiveFailures >= cb.maxFailures {
 		cb.state = CircuitOpen
+		cb.probeStarted = time.Time{}
 	}
 }
 

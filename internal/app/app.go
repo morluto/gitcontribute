@@ -458,6 +458,7 @@ type SyncOptions struct {
 	State       string
 	Since       time.Time
 	Numbers     []int
+	MaxItems    int
 	MaxPages    int
 	MaxRequests int
 }
@@ -634,6 +635,9 @@ func normalizeSyncOptions(opts SyncOptions) (SyncOptions, error) {
 	}
 	if opts.MaxPages > 1000 {
 		return SyncOptions{}, errors.New("max pages cannot exceed 1000")
+	}
+	if opts.MaxItems < 0 || opts.MaxItems > 1000 {
+		return SyncOptions{}, errors.New("max items must be between 0 and 1000")
 	}
 	if opts.MaxRequests == 0 {
 		opts.MaxRequests = defaultSyncMaxRequests

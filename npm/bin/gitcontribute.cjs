@@ -18,6 +18,13 @@ if (!platform) {
 
 const executable = join(__dirname, "native", platform.target, platform.binary);
 if (!existsSync(executable)) {
+  const packageRoot = join(__dirname, "..", "..");
+  if (existsSync(join(packageRoot, ".git")) || existsSync(join(packageRoot, "go.mod"))) {
+    console.error(`gitcontribute is running from a source checkout or local package at ${packageRoot}.`);
+    console.error("Source packages do not include release-built native binaries. Run the published package with:");
+    console.error("  npx --yes gitcontribute@latest setup");
+    process.exit(1);
+  }
   console.error(`gitcontribute native binary is missing for ${key}: ${executable}`);
   console.error("Reinstall the package, or report the incomplete npm artifact.");
   process.exit(1);

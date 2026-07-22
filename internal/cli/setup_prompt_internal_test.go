@@ -375,6 +375,17 @@ func TestRenderSetupPlanIncludesEffectsAndSafetyBoundary(t *testing.T) {
 	}
 }
 
+func TestRenderSetupPlanLabelsFailedPreflightAsBlocker(t *testing.T) {
+	report := &SetupReport{DryRun: true, Steps: []SetupStep{{Name: "corpus", Status: "failed", Message: "run gitcontribute corpus migrate --yes"}}}
+	got := renderSetupPlan(report)
+	if !strings.Contains(got, "Status: Blocked") || strings.Contains(got, "Action: failed") {
+		t.Fatalf("failed preflight plan = %q", got)
+	}
+	if err := setupFailureError(report); !strings.Contains(err.Error(), "Local corpus: run gitcontribute corpus migrate --yes") {
+		t.Fatalf("failure error = %v", err)
+	}
+}
+
 func TestRenderSetupPlanPresentsManagedRuntimeForMCPOnly(t *testing.T) {
 	got := renderSetupPlan(&SetupReport{DryRun: true, MCPCommand: &SetupMCPCommand{Command: "/home/test/.local/share/gitcontribute/bin/1.2.3/gitcontribute", Args: []string{"mcp", "serve", "--transport=stdio"}}, Steps: []SetupStep{
 		{Name: "mcp-runtime", Status: "would install", Path: "/home/test/.local/share/gitcontribute/bin/1.2.3/gitcontribute"},

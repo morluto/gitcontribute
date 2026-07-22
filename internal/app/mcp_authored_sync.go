@@ -51,7 +51,10 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpserver.Syn
 	incomplete := false
 	requestCapped := false
 	for discovered < in.Limit {
-		if requests >= in.MaxRequests {
+		// Keep enough budget for at least one repository refresh after the next
+		// discovery page. An accepted request must not spend its full budget on
+		// discovery and then make no synchronization progress.
+		if requests+1+syncFixedRequestCost() > in.MaxRequests {
 			requestCapped, incomplete = true, true
 			break
 		}

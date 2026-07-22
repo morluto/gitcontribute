@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,9 +66,61 @@ func TestApplicationWriteOpenDoesNotMigrateExistingCorpus(t *testing.T) {
 	if !report.HasFailures() || report.Corpus == nil || report.Corpus.State != "migration_required" {
 		t.Fatalf("setup corpus preflight = %+v", report)
 	}
+	dryRunReport, err := second.Setup(ctx, cli.SetupOptions{
+		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", DryRun: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dryRunReport.HasFailures() || dryRunReport.Corpus == nil || dryRunReport.Corpus.State != "migration_required" {
+		t.Fatalf("dry-run corpus preflight = %+v", dryRunReport)
+	}
+	if report.Steps[0].Message != dryRunReport.Steps[0].Message || !strings.Contains(report.Steps[0].Message, "gitcontribute corpus migrate --yes") {
+		t.Fatalf("setup diagnostics differ: real=%q dry-run=%q", report.Steps[0].Message, dryRunReport.Steps[0].Message)
+	}
 	for _, step := range report.Steps {
 		if step.Name == "mcp-runtime" {
 			t.Fatalf("setup attempted runtime installation before corpus preflight: %+v", report)
+		}
+	}
+}
+
+func TestSetupFailsFastForNewerCorpusInDryRunAndRealModes(t *testing.T) {
+	home := t.TempDir()
+	dbPath := filepath.Join(home, "newer.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("CREATE TABLE goose_db_version (id INTEGER PRIMARY KEY, version_id INTEGER)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO goose_db_version (id, version_id) VALUES (1, 9999)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := testService(t, home, "1.2.3", dbPath)
+	configPath, err := svc.paths.ConfigFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Database = dbPath
+	if err := config.Save(configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, dryRun := range []bool{false, true} {
+		report, err := svc.Setup(context.Background(), cli.SetupOptions{
+			Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", DryRun: dryRun,
+		})
+		if err == nil || !strings.Contains(err.Error(), "database schema version 9999 is newer than this binary supports") || !strings.Contains(err.Error(), "gitcontribute corpus inspect") {
+			t.Fatalf("dry_run=%v report=%+v error = %v", dryRun, report, err)
+		}
+		if report == nil || report.Corpus == nil || report.Corpus.State != "newer" || len(report.Steps) != 0 {
+			t.Fatalf("dry_run=%v report = %+v", dryRun, report)
 		}
 	}
 }

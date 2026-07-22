@@ -183,7 +183,7 @@ type SyncAuthoredPullRequestsInput struct {
 	State        string `json:"state,omitempty" jsonschema:"open, closed, or all"`
 	UpdatedAfter string `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound"`
 	Limit        int    `json:"limit,omitempty" jsonschema:"Maximum authored pull requests from 1 to 500"`
-	MaxRequests  int    `json:"max_requests,omitempty" jsonschema:"Maximum total GitHub requests from 9 to 1000"`
+	MaxRequests  int    `json:"max_requests,omitempty" jsonschema:"Maximum total GitHub requests from 11 to 1000"`
 }
 
 // SyncPullRequestStatusInput selects pull requests and bounds review hydration.
@@ -428,7 +428,7 @@ func (s *Server) registerScalable() {
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit", 1, 500)
 		setDefault(sc, "limit", 500)
-		setRange(sc, "max_requests", 9, 1000)
+		setRange(sc, "max_requests", 11, 1000)
 		setDefault(sc, "max_requests", 1000)
 	}), output: outputSchema[JobReference]("Reference to an authored pull-request synchronization job."), handler: s.syncAuthoredPullRequests})
 	addCatalogTool(s, catalogTool[SyncPullRequestStatusInput, JobReference]{name: ToolSyncPullRequestStatus, title: "Sync exact PR health", description: "Refresh mergeability, reviews, checks, unresolved conversations, merge state, merge queue, closing issues, and changed files for up to 50 exact pull requests. Returns independent facet completeness; retry only incomplete items.", annotations: networkReadAnnotations(), input: inputSchema[SyncPullRequestStatusInput](func(sc *schemaBuilder) {
@@ -577,13 +577,13 @@ func validateRepositorySearchInput(in SearchGitHubRepositoriesInput) error {
 	raw := strings.TrimSpace(in.RawQuery)
 	structured := strings.TrimSpace(in.Text) != "" || len(in.MatchFields) > 0 || len(in.Topics) > 0 || strings.TrimSpace(in.Language) != "" || in.StarsMin != 0 || in.StarsMax != 0 || in.CreatedAfter != "" || in.CreatedBefore != "" || in.PushedAfter != "" || in.PushedBefore != "" || in.Archived != nil || in.Fork != nil
 	if raw != "" && structured {
-		return InvalidArgument("raw_query", "cannot be combined with structured filters; choose one input mode", map[string]any{"text": "inference", "topics": []string{"cuda"}})
+		return InvalidArgument("raw_query", "cannot be combined with structured filters; choose one input mode", map[string]any{"raw_query": "is:public language:go stars:>=100"})
 	}
 	if raw == "" && !structured {
-		return InvalidArgument("text", "provide raw_query or at least one structured filter", map[string]any{"text": "inference", "match_fields": []string{"name", "description"}})
+		return InvalidArgument("text", "provide raw_query or at least one structured filter", map[string]any{"text": "GitHub contribution research", "match_fields": []string{"name", "description"}})
 	}
 	if len(in.MatchFields) > 0 && strings.TrimSpace(in.Text) == "" {
-		return InvalidArgument("match_fields", "requires text", map[string]any{"text": "inference", "match_fields": []string{"name", "description"}})
+		return InvalidArgument("match_fields", "requires text", map[string]any{"text": "GitHub contribution research", "match_fields": []string{"name", "description"}})
 	}
 	return nil
 }

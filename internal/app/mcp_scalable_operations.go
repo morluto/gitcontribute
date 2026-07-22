@@ -20,6 +20,7 @@ import (
 // SyncRepositoryMetadata submits a durable metadata-only GitHub read. It does
 // not fetch threads, comments, reviews, or code.
 func (r *MCPReader) SyncRepositoryMetadata(ctx context.Context, in mcpserver.SyncRepositoryMetadataInput) (mcpserver.JobReference, error) {
+	in.Repositories = dedupeRepositoryRefs(in.Repositories)
 	if len(in.Repositories) < 1 || len(in.Repositories) > 100 {
 		return mcpserver.JobReference{}, errors.New("repositories must contain 1 to 100 items")
 	}
@@ -43,11 +44,19 @@ func (r *MCPReader) SyncThreads(ctx context.Context, in mcpserver.SyncThreadsInp
 	if in.Selection != "repositories" && in.Selection != "threads" {
 		return mcpserver.JobReference{}, errors.New("selection must be repositories or threads")
 	}
+	in.Repositories = dedupeRepositoryRefs(in.Repositories)
+	in.Threads = dedupeThreadRefs(in.Threads)
 	if in.Selection == "repositories" && (len(in.Repositories) < 1 || len(in.Repositories) > 50) {
 		return mcpserver.JobReference{}, errors.New("repositories must contain 1 to 50 items")
 	}
 	if in.Selection == "threads" && (len(in.Threads) < 1 || len(in.Threads) > 100) {
 		return mcpserver.JobReference{}, errors.New("threads must contain 1 to 100 items")
+	}
+	if in.LimitPerRepository == 0 {
+		in.LimitPerRepository = 100
+	}
+	if in.LimitPerRepository < 1 || in.LimitPerRepository > 1000 {
+		return mcpserver.JobReference{}, errors.New("limit_per_repository must be between 1 and 1000")
 	}
 	var err error
 	in.MaxRequests, err = normalizeSyncBatchMaxRequests(in.MaxRequests)
@@ -146,7 +155,7 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 			defer wg.Done()
 			for index := range jobs {
 				current := tasks[index]
-				opts := SyncOptions{Kind: kind, State: state, Since: since, Numbers: current.numbers, MaxPages: maxPages, MaxRequests: current.maxRequests}
+				opts := SyncOptions{Kind: kind, State: state, Since: since, Numbers: current.numbers, MaxItems: in.LimitPerRepository, MaxPages: maxPages, MaxRequests: current.maxRequests}
 				if len(current.numbers) > 0 {
 					opts.State = "all"
 					opts.Since = time.Time{}
@@ -201,6 +210,7 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 // HydrateThreads submits a durable GitHub read for explicit child facets on
 // selected threads; an empty facet set is rejected.
 func (r *MCPReader) HydrateThreads(ctx context.Context, in mcpserver.HydrateThreadsInput) (mcpserver.JobReference, error) {
+	in.Threads = dedupeThreadRefs(in.Threads)
 	if len(in.Threads) < 1 || len(in.Threads) > 100 {
 		return mcpserver.JobReference{}, errors.New("threads must contain 1 to 100 items")
 	}
@@ -209,6 +219,9 @@ func (r *MCPReader) HydrateThreads(ctx context.Context, in mcpserver.HydrateThre
 	}
 	if in.MaxPages == 0 {
 		in.MaxPages = 3
+	}
+	if in.MaxPages < 1 || in.MaxPages > 100 {
+		return mcpserver.JobReference{}, errors.New("max_pages must be between 1 and 100")
 	}
 	id, err := r.submitJob(ctx, "hydrate_threads", in, func(ctx context.Context, report func(string, string) error) (any, error) {
 		return r.hydrateThreadsBatch(ctx, in, report)
@@ -256,6 +269,9 @@ func (r *MCPReader) SyncAuthoredPullRequests(ctx context.Context, in mcpserver.S
 	if err != nil {
 		return mcpserver.JobReference{}, err
 	}
+	if in.MaxRequests < syncFixedRequestCost()+2 {
+		return mcpserver.JobReference{}, fmt.Errorf("max requests must be between %d and %d", syncFixedRequestCost()+2, defaultSyncBatchMaxRequests)
+	}
 	id, err := r.submitJob(ctx, "sync_authored_pull_requests", in, func(ctx context.Context, report func(string, string) error) (any, error) {
 		return r.syncAuthoredPullRequests(ctx, in, report)
 	})
@@ -269,11 +285,15 @@ func (r *MCPReader) SyncAuthoredPullRequests(ctx context.Context, in mcpserver.S
 // reviews, checks, review conversations, merge state, queue state, closing
 // issues, and changed paths. Each facet retains independent coverage.
 func (r *MCPReader) SyncPullRequestStatus(ctx context.Context, in mcpserver.SyncPullRequestStatusInput) (mcpserver.JobReference, error) {
+	in.PullRequests = dedupeThreadRefs(in.PullRequests)
 	if len(in.PullRequests) < 1 || len(in.PullRequests) > 50 {
 		return mcpserver.JobReference{}, errors.New("pull_requests must contain 1 to 50 items")
 	}
 	if in.MaxPages == 0 {
 		in.MaxPages = 3
+	}
+	if in.MaxPages < 1 || in.MaxPages > 20 {
+		return mcpserver.JobReference{}, errors.New("max_pages must be between 1 and 20")
 	}
 	id, err := r.submitJob(ctx, "sync_pull_request_status", in, func(ctx context.Context, report func(string, string) error) (any, error) {
 		return r.syncPullRequestStatusBatch(ctx, in, report)
@@ -287,6 +307,7 @@ func (r *MCPReader) SyncPullRequestStatus(ctx context.Context, in mcpserver.Sync
 // IndexRepositories submits a durable Git acquisition and safe indexing job
 // with at most two repositories processed concurrently.
 func (r *MCPReader) IndexRepositories(ctx context.Context, in mcpserver.IndexRepositoriesInput) (mcpserver.JobReference, error) {
+	in.Repositories = dedupeIndexRepositoryInputs(in.Repositories)
 	if len(in.Repositories) < 1 || len(in.Repositories) > 10 {
 		return mcpserver.JobReference{}, errors.New("repositories must contain 1 to 10 items")
 	}
@@ -618,7 +639,7 @@ func (r *MCPReader) DeepWiki(ctx context.Context, in mcpserver.DeepWikiInput) (m
 	if len(repositories) > 10 {
 		return mcpserver.DeepWikiOutput{}, errors.New("DeepWiki supports at most 10 repositories")
 	}
-	res, err := r.deepWiki().Read(ctx, deepwiki.Request{Action: in.Action, Repository: in.Repository, Repositories: in.Repositories, Question: in.Question})
+	res, err := r.deepWiki().Read(ctx, deepwiki.Request{Action: in.Action, Repository: in.Repository, Repositories: repositories, Question: in.Question})
 	if err != nil {
 		return mcpserver.DeepWikiOutput{}, err
 	}
@@ -639,6 +660,48 @@ func (r *MCPReader) DeepWiki(ctx context.Context, in mcpserver.DeepWikiInput) (m
 		out.Truncated = true
 	}
 	return out, nil
+}
+
+func dedupeRepositoryRefs(inputs []mcpserver.RepositoryRef) []mcpserver.RepositoryRef {
+	seen := make(map[string]struct{}, len(inputs))
+	out := make([]mcpserver.RepositoryRef, 0, len(inputs))
+	for _, input := range inputs {
+		key := strings.ToLower(input.Owner + "\x00" + input.Repo)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, input)
+	}
+	return out
+}
+
+func dedupeThreadRefs(inputs []mcpserver.ThreadRef) []mcpserver.ThreadRef {
+	seen := make(map[string]struct{}, len(inputs))
+	out := make([]mcpserver.ThreadRef, 0, len(inputs))
+	for _, input := range inputs {
+		key := strings.ToLower(fmt.Sprintf("%s\x00%s\x00%d", input.Owner, input.Repo, input.Number))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, input)
+	}
+	return out
+}
+
+func dedupeIndexRepositoryInputs(inputs []mcpserver.IndexRepositoryInput) []mcpserver.IndexRepositoryInput {
+	seen := make(map[string]struct{}, len(inputs))
+	out := make([]mcpserver.IndexRepositoryInput, 0, len(inputs))
+	for _, input := range inputs {
+		key := strings.ToLower(input.Owner + "\x00" + input.Repo)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, input)
+	}
+	return out
 }
 
 func validUTF8Prefix(value string, maxBytes int) string {

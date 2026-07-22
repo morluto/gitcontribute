@@ -99,7 +99,11 @@ func writeSetupStep(b *strings.Builder, step SetupStep, plan bool) {
 		symbol = "•"
 	}
 	if plan {
-		fmt.Fprintf(b, "\n  %s %s\n    Action: %s\n", symbol, setupStepLabel(step.Name), setupPlanAction(step.Status))
+		label := "Action"
+		if step.Status == "failed" {
+			label = "Status"
+		}
+		fmt.Fprintf(b, "\n  %s %s\n    %s: %s\n", symbol, setupStepLabel(step.Name), label, setupPlanAction(step.Status))
 	} else {
 		fmt.Fprintf(b, "\n  %s %s — %s\n", symbol, setupStepLabel(step.Name), step.Status)
 	}
@@ -133,6 +137,8 @@ func setupPlanAction(status string) string {
 		return "Keep · already configured"
 	case "not installed", "not configured":
 		return "Skip"
+	case "failed":
+		return "Blocked"
 	default:
 		return status
 	}

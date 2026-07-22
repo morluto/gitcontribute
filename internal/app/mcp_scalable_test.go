@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -433,6 +435,22 @@ func TestCompileRepositorySearchRejectsAmbiguousAndInvalidInputs(t *testing.T) {
 	}
 }
 
+func TestRepositorySearchValidationExamplesAreUsable(t *testing.T) {
+	_, _, _, err := compileRepositorySearch(mcpserver.SearchGitHubRepositoriesInput{})
+	var toolErr *mcpserver.ToolError
+	if !errors.As(err, &toolErr) {
+		t.Fatalf("error = %v, want ToolError", err)
+	}
+	if toolErr.Example["text"] != "GitHub contribution research" || !reflect.DeepEqual(toolErr.Example["match_fields"], []string{"name", "description"}) {
+		t.Fatalf("empty-search example = %#v", toolErr.Example)
+	}
+
+	_, _, _, err = compileRepositorySearch(mcpserver.SearchGitHubRepositoriesInput{RawQuery: "language:go", Language: "Go"})
+	if !errors.As(err, &toolErr) || toolErr.Example["raw_query"] != "is:public language:go stars:>=100" {
+		t.Fatalf("ambiguous-search example = %#v, error=%v", toolErr.Example, err)
+	}
+}
+
 func TestCompileRepositorySearchWarnsAboutRawReadmeQueries(t *testing.T) {
 	query, interpretation, warnings, err := compileRepositorySearch(mcpserver.SearchGitHubRepositoriesInput{RawQuery: "attention in:readme"})
 	if err != nil {
@@ -514,6 +532,61 @@ func TestDeepWikiReturnsDerivedProvenanceAndBoundsOutput(t *testing.T) {
 	}
 	if out.Provenance != "derived_external" || !out.Truncated || len(out.Result) != 1024 {
 		t.Fatalf("unexpected DeepWiki result: %+v", out)
+	}
+}
+
+func TestDeepWikiUsesNormalizedRepositoriesForRequestAndOutput(t *testing.T) {
+	svc := newSearchTestService(t)
+	fake := &fakeDeepWikiReader{response: deepwiki.Response{Available: true, Text: "ok"}}
+	svc.SetDeepWikiReader(fake)
+	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpserver.DeepWikiInput{
+		Action: "question", Repository: "acme/rocket", Repositories: []string{"wrong/one", "wrong/two"}, Question: "architecture?", MaxOutputBytes: 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"acme/rocket"}
+	if !reflect.DeepEqual(fake.request.Repositories, want) || !reflect.DeepEqual(out.Repositories, want) {
+		t.Fatalf("request repositories = %v, output repositories = %v", fake.request.Repositories, out.Repositories)
+	}
+}
+
+func TestScalableBatchInputsDeduplicateInFirstSeenOrder(t *testing.T) {
+	repositories := dedupeRepositoryRefs([]mcpserver.RepositoryRef{{Owner: "one", Repo: "repo"}, {Owner: "two", Repo: "repo"}, {Owner: "one", Repo: "repo"}})
+	if want := []mcpserver.RepositoryRef{{Owner: "one", Repo: "repo"}, {Owner: "two", Repo: "repo"}}; !reflect.DeepEqual(repositories, want) {
+		t.Fatalf("repositories = %+v, want %+v", repositories, want)
+	}
+	threads := dedupeThreadRefs([]mcpserver.ThreadRef{{Owner: "one", Repo: "repo", Number: 1}, {Owner: "one", Repo: "repo", Number: 2}, {Owner: "one", Repo: "repo", Number: 1}})
+	if want := []mcpserver.ThreadRef{{Owner: "one", Repo: "repo", Number: 1}, {Owner: "one", Repo: "repo", Number: 2}}; !reflect.DeepEqual(threads, want) {
+		t.Fatalf("threads = %+v, want %+v", threads, want)
+	}
+	indexed := dedupeIndexRepositoryInputs([]mcpserver.IndexRepositoryInput{{Owner: "one", Repo: "repo", Remote: "first"}, {Owner: "one", Repo: "repo", Remote: "second"}})
+	if len(indexed) != 1 || indexed[0].Remote != "first" {
+		t.Fatalf("indexed repositories = %+v", indexed)
+	}
+}
+
+func TestScalableRuntimeRejectsPageBoundsBeforeSubmittingJob(t *testing.T) {
+	reader := &MCPReader{newSearchTestService(t)}
+	ctx := context.Background()
+	thread := mcpserver.ThreadRef{Owner: "acme", Repo: "rocket", Number: 1}
+	for _, maxPages := range []int{-1, 101} {
+		if _, err := reader.HydrateThreads(ctx, mcpserver.HydrateThreadsInput{Threads: []mcpserver.ThreadRef{thread}, Facets: []string{"issue_comments"}, MaxPages: maxPages}); err == nil {
+			t.Fatalf("HydrateThreads accepted max_pages=%d", maxPages)
+		}
+	}
+	for _, maxPages := range []int{-1, 21} {
+		if _, err := reader.SyncPullRequestStatus(ctx, mcpserver.SyncPullRequestStatusInput{PullRequests: []mcpserver.ThreadRef{thread}, MaxPages: maxPages}); err == nil {
+			t.Fatalf("SyncPullRequestStatus accepted max_pages=%d", maxPages)
+		}
+	}
+	for _, limit := range []int{-1, 1001} {
+		if _, err := reader.SyncThreads(ctx, mcpserver.SyncThreadsInput{Selection: "repositories", Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, LimitPerRepository: limit}); err == nil {
+			t.Fatalf("SyncThreads accepted limit_per_repository=%d", limit)
+		}
+	}
+	if _, err := reader.SyncAuthoredPullRequests(ctx, mcpserver.SyncAuthoredPullRequestsInput{Limit: 1, MaxRequests: syncFixedRequestCost() + 1}); err == nil {
+		t.Fatal("SyncAuthoredPullRequests accepted budget that cannot fund identity, discovery, and one repository sync")
 	}
 }
 

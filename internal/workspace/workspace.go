@@ -23,6 +23,7 @@ var (
 	ErrNotManaged     = errors.New("path is not a managed workspace")
 	ErrDirty          = errors.New("dirty workspace cannot be removed without force")
 	ErrMirrorExists   = errors.New("mirror already exists")
+	ErrMirrorInvalid  = errors.New("existing mirror path is not a valid bare repository")
 	ErrMirrorNotFound = errors.New("mirror not found")
 	ErrInvalidName    = errors.New("invalid name")
 	ErrInvalidRemote  = errors.New("invalid remote")
@@ -224,9 +225,16 @@ func (m *Manager) Clone(ctx context.Context, remote, name string) error {
 		return fmt.Errorf("create mirrors dir: %w", err)
 	}
 	path := filepath.Join(mirrorsDir, name)
-	if _, err := os.Stat(path); err == nil {
-		if _, err := m.git(ctx, path, "rev-parse", "--is-bare-repository"); err != nil {
-			return ErrMirrorExists
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%w: mirror path is a symbolic link", ErrMirrorInvalid)
+		}
+		bare, err := m.git(ctx, path, "rev-parse", "--is-bare-repository")
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrMirrorInvalid, err)
+		}
+		if strings.TrimSpace(bare) != "true" {
+			return fmt.Errorf("%w: repository is not bare", ErrMirrorInvalid)
 		}
 		origin, err := m.git(ctx, path, "remote", "get-url", "origin")
 		if err != nil {
@@ -240,6 +248,8 @@ func (m *Manager) Clone(ctx context.Context, remote, name string) error {
 		}
 		m.mirrors[name] = &mirror{name: name, remote: remote, path: path}
 		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect mirror path: %w", err)
 	}
 	if _, err := m.git(ctx, mirrorsDir, "clone", "--mirror", "--no-hardlinks", "--template=", "--", remote, name); err != nil {
 		return fmt.Errorf("clone mirror: %w", err)

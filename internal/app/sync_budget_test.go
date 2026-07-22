@@ -93,6 +93,30 @@ func TestAuthoredPullRequestSyncReusesSearchHeadersWithoutNPlusOne(t *testing.T)
 	}
 }
 
+func TestAuthoredPullRequestMinimumBudgetMakesSyncProgress(t *testing.T) {
+	ctx := context.Background()
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	svc.SetGitHubReader(&authoredHeaderReader{now: now})
+	minimum := syncFixedRequestCost() + 2
+	out, err := svc.syncAuthoredPullRequests(ctx, mcpserver.SyncAuthoredPullRequestsInput{State: "open", Limit: 2, MaxRequests: minimum}, func(string, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	repositories, ok := out["repositories"].([]map[string]any)
+	if !ok || len(repositories) != 1 || repositories[0]["status"] != "complete" || out["planned_requests"] != minimum || out["status"] != "complete" {
+		t.Fatalf("minimum-budget result = %+v", out)
+	}
+}
+
 func TestSyncThreadsBatchPlansBudgetBeforeNetworkAccess(t *testing.T) {
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test", nil)
