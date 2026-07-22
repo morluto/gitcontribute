@@ -16,6 +16,7 @@ import (
 )
 
 func TestStartInvestigationFromThreadPreservesExactBaselineAndReusesOpenPair(t *testing.T) {
+	t.Parallel()
 	fixture := newResearchFixture(t)
 	ref := research.ThreadRef{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Kind: domain.IssueKind, Number: 1}
 	thread, err := fixture.svc.corpus.GetThreadByNumber(fixture.ctx, fixture.repoID, 1)
@@ -64,6 +65,7 @@ func TestStartInvestigationFromThreadPreservesExactBaselineAndReusesOpenPair(t *
 }
 
 func TestStartInvestigationFromThreadBoundsDescription(t *testing.T) {
+	t.Parallel()
 	fixture := newResearchFixture(t)
 	thread, err := fixture.svc.corpus.GetThreadByNumber(fixture.ctx, fixture.repoID, 1)
 	if err != nil {
@@ -86,6 +88,7 @@ func TestStartInvestigationFromThreadBoundsDescription(t *testing.T) {
 }
 
 func TestStartInvestigationFromPullRequestUsesResolvedKind(t *testing.T) {
+	t.Parallel()
 	fixture := newResearchFixture(t)
 	result, err := fixture.svc.StartInvestigationFromThread(fixture.ctx, research.ThreadRef{
 		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Number: 9,
@@ -101,6 +104,7 @@ func TestStartInvestigationFromPullRequestUsesResolvedKind(t *testing.T) {
 }
 
 func TestStartInvestigationFromThreadErrorsAndCancellation(t *testing.T) {
+	t.Parallel()
 	fixture := newResearchFixture(t)
 	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
 	_, err := fixture.svc.StartInvestigationFromThread(fixture.ctx, research.ThreadRef{Repo: repo, Kind: domain.IssueKind, Number: 9})
@@ -132,6 +136,7 @@ func TestStartInvestigationFromThreadErrorsAndCancellation(t *testing.T) {
 }
 
 func TestGetThreadObservationRevisionSelectsExactProjectionRevision(t *testing.T) {
+	t.Parallel()
 	fixture := newResearchFixture(t)
 	thread, err := fixture.svc.corpus.GetThreadByNumber(fixture.ctx, fixture.repoID, 1)
 	if err != nil {

@@ -17,6 +17,7 @@ import (
 )
 
 func TestApplicationWriteOpenDoesNotMigrateExistingCorpus(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home := t.TempDir()
 	paths := config.NewPaths(&config.Env{Home: home})
@@ -86,6 +87,7 @@ func TestApplicationWriteOpenDoesNotMigrateExistingCorpus(t *testing.T) {
 }
 
 func TestSetupFailsFastForNewerCorpusInDryRunAndRealModes(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	dbPath := filepath.Join(home, "newer.db")
 	db, err := sql.Open("sqlite", dbPath)
@@ -126,6 +128,7 @@ func TestSetupFailsFastForNewerCorpusInDryRunAndRealModes(t *testing.T) {
 }
 
 func TestRestoreCorpusCreatesSafetyBackupAndReplacesState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home := t.TempDir()
 	svc, err := New(config.NewPaths(&config.Env{Home: home}), "test", nil)
@@ -175,6 +178,7 @@ func TestRestoreCorpusCreatesSafetyBackupAndReplacesState(t *testing.T) {
 }
 
 func TestProjectionResultExposesSourceAndAttemptState(t *testing.T) {
+	t.Parallel()
 	started := time.Unix(100, 0).UTC()
 	finished := time.Unix(200, 0).UTC()
 	result := projectionResult(corpus.ProjectionState{
@@ -191,6 +195,7 @@ func TestProjectionResultExposesSourceAndAttemptState(t *testing.T) {
 }
 
 func TestListCorpusInventoryCombinesSchemaRepositoriesAndProjections(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	home := t.TempDir()
 	svc, err := New(config.NewPaths(&config.Env{Home: home}), "test", nil)

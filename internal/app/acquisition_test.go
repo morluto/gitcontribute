@@ -50,6 +50,7 @@ func pushCommit(t *testing.T, remote, file, content, message string) string {
 }
 
 func TestAcquireSuccess(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, baseSHA := newTestRemote(t)
 
@@ -90,6 +91,7 @@ func TestAcquireSuccess(t *testing.T) {
 }
 
 func TestAcquireRepeatFetch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, baseSHA := newTestRemote(t)
 
@@ -131,6 +133,7 @@ func TestAcquireRepeatFetch(t *testing.T) {
 }
 
 func TestAcquireFailureAtomicity(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	_, _ = newTestRemote(t)
 
@@ -153,6 +156,7 @@ func TestAcquireFailureAtomicity(t *testing.T) {
 }
 
 func TestAcquireConcurrent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, baseSHA := newTestRemote(t)
 
@@ -190,6 +194,7 @@ func TestAcquireConcurrent(t *testing.T) {
 }
 
 func TestAcquireInvalidRepo(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newLocalService(t)
 	defer func() { _ = svc.Close() }()
@@ -201,6 +206,7 @@ func TestAcquireInvalidRepo(t *testing.T) {
 }
 
 func TestAcquireInvalidRemote(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newLocalService(t)
 	defer func() { _ = svc.Close() }()
