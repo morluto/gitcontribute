@@ -77,6 +77,7 @@ func ghArchiveGZIP(lines ...[]byte) []byte {
 }
 
 func TestAddRepoSourceAndCrawl(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("octocat", "test")
 	defer srv.Close()
@@ -125,6 +126,7 @@ func TestAddRepoSourceAndCrawl(t *testing.T) {
 }
 
 func TestRepoSourceCrawlDeduplicates(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("octocat", "test")
 	defer srv.Close()
@@ -156,6 +158,7 @@ func TestRepoSourceCrawlDeduplicates(t *testing.T) {
 }
 
 func TestRepoSourceCrawlRespectsBudget(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("octocat", "test")
 	defer srv.Close()
@@ -181,6 +184,7 @@ func TestRepoSourceCrawlRespectsBudget(t *testing.T) {
 }
 
 func TestRepoSourceCrawlNoNetwork(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	// Do not set a GitHub reader; the explicit repo source should never need it.
 	svc := newTestServiceNoNetwork(t)
@@ -196,6 +200,7 @@ func TestRepoSourceCrawlNoNetwork(t *testing.T) {
 }
 
 func TestAddGHArchiveSourceAndCrawl(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("octocat", "test")
 	defer srv.Close()
@@ -291,6 +296,7 @@ func TestAddGHArchiveSourceAndCrawl(t *testing.T) {
 }
 
 func TestGHArchiveCrawlSkipsImportedHours(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("octocat", "test")
 	defer srv.Close()
@@ -337,6 +343,7 @@ func TestGHArchiveCrawlSkipsImportedHours(t *testing.T) {
 }
 
 func TestGHArchiveCrawlScopesImportsBySourceDefinition(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("octocat", "test")
 	defer srv.Close()
@@ -372,6 +379,7 @@ func TestGHArchiveCrawlScopesImportsBySourceDefinition(t *testing.T) {
 }
 
 func TestGHArchiveCrawlBudgetEnforcement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("octocat", "test")
 	defer srv.Close()
@@ -415,6 +423,7 @@ func TestGHArchiveCrawlBudgetEnforcement(t *testing.T) {
 }
 
 func TestGHArchiveCrawlRepositoryDedupe(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("octocat", "test")
 	defer srv.Close()
@@ -461,6 +470,7 @@ func TestGHArchiveCrawlRepositoryDedupe(t *testing.T) {
 }
 
 func TestGHArchiveCrawlMalformedArchive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("octocat", "test")
 	defer srv.Close()
@@ -496,6 +506,7 @@ func TestGHArchiveCrawlMalformedArchive(t *testing.T) {
 }
 
 func TestGHArchiveCrawlFetchFailureContinues(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("octocat", "test")
 	defer srv.Close()
@@ -537,6 +548,7 @@ func TestGHArchiveCrawlFetchFailureContinues(t *testing.T) {
 }
 
 func TestArchiveMergePreservesNewerProjection(t *testing.T) {
+	t.Parallel()
 	newer := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
 	signal := discovery.Signal{
 		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, RepoID: 42,
@@ -554,6 +566,7 @@ func TestArchiveMergePreservesNewerProjection(t *testing.T) {
 }
 
 func TestArchiveDiscoveryCannotOutrankCanonicalSync(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -596,6 +609,7 @@ func TestArchiveDiscoveryCannotOutrankCanonicalSync(t *testing.T) {
 }
 
 func TestGHArchiveCrawlCancellation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("octocat", "test")
 	defer srv.Close()
@@ -625,6 +639,7 @@ func TestGHArchiveCrawlCancellation(t *testing.T) {
 }
 
 func TestAddRepoSourceRejectsInvalidURL(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("octocat", "test")
 	defer srv.Close()

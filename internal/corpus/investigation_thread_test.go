@@ -13,6 +13,7 @@ import (
 )
 
 func TestStartThreadInvestigationIsAtomicAndOpenIdempotent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
@@ -47,6 +48,7 @@ func TestStartThreadInvestigationIsAtomicAndOpenIdempotent(t *testing.T) {
 }
 
 func TestStartThreadInvestigationRollsBackLateHypothesisFailure(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
@@ -76,6 +78,7 @@ func TestStartThreadInvestigationRollsBackLateHypothesisFailure(t *testing.T) {
 }
 
 func TestStartThreadInvestigationConcurrentRequestsShareOpenPair(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
@@ -130,6 +133,7 @@ func TestStartThreadInvestigationConcurrentRequestsShareOpenPair(t *testing.T) {
 }
 
 func TestStartThreadInvestigationRejectsRepositoryMismatch(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	item, hypothesis := threadInvestigationPair("inv", "hyp", 1, time.Now().UTC())
 	item.Repo = domain.RepoRef{Owner: "other", Repo: "repo"}

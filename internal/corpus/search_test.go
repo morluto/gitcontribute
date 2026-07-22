@@ -13,6 +13,7 @@ import (
 )
 
 func TestSearchThreadsPageReturnsNextCursorAndTotal(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -82,6 +83,7 @@ func TestSearchThreadsPageReturnsNextCursorAndTotal(t *testing.T) {
 }
 
 func TestSearchThreadsPageMalformedCursorRejected(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -94,6 +96,7 @@ func TestSearchThreadsPageMalformedCursorRejected(t *testing.T) {
 }
 
 func TestSearchThreadsPageHonorsHardMax(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	_, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Limit: 101})
@@ -103,6 +106,7 @@ func TestSearchThreadsPageHonorsHardMax(t *testing.T) {
 }
 
 func TestSearchThreadsPageAppliesMetadataFiltersAndBindsCursor(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
@@ -140,6 +144,7 @@ func TestSearchThreadsPageAppliesMetadataFiltersAndBindsCursor(t *testing.T) {
 }
 
 func TestSearchThreadsPageDoesNotTreatUnknownMergeStateAsFalse(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
@@ -168,6 +173,7 @@ func TestSearchThreadsPageDoesNotTreatUnknownMergeStateAsFalse(t *testing.T) {
 }
 
 func TestSearchThreadsPageIncludesAtomicFacetEvidence(t *testing.T) {
+	t.Parallel()
 	ctx, c, thread, newer := seedFacetSearch(t)
 
 	page, err := c.SearchThreadsPage(ctx, "transport invariant", SearchFilter{Limit: 10})
@@ -194,6 +200,7 @@ func TestSearchThreadsPageIncludesAtomicFacetEvidence(t *testing.T) {
 }
 
 func TestSearchableFacetReplacementHonorsSourceOrdering(t *testing.T) {
+	t.Parallel()
 	ctx, c, thread, _ := seedFacetSearch(t)
 	older := time.Unix(10, 0).UTC()
 	if err := c.ApplyFacetObservationSet(ctx, thread.RepositoryID, &thread.ID, "issue_comments", older, []FacetObservationInput{{SourceUpdatedAt: older, Payload: `[]`, SearchText: "stale replacement"}}, true, 0); err != nil {
@@ -254,6 +261,7 @@ func seedFacetSearch(t *testing.T) (context.Context, *Corpus, *Thread, time.Time
 }
 
 func TestSearchThreadsPageFiltersByAssociationAndAssignee(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
@@ -294,6 +302,7 @@ func TestSearchThreadsPageFiltersByAssociationAndAssignee(t *testing.T) {
 }
 
 func TestListRepositoriesPageReturnsNextCursorAndTotal(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -339,6 +348,7 @@ func TestListRepositoriesPageReturnsNextCursorAndTotal(t *testing.T) {
 }
 
 func TestListRepositoriesQueryWithCursorParenthesizesOR(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -384,6 +394,7 @@ func TestListRepositoriesQueryWithCursorParenthesizesOR(t *testing.T) {
 }
 
 func TestListRepositoriesPageMalformedCursorRejected(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	_, err := c.ListRepositoriesWithOptions(ctx, "", RepositorySearchOptions{Limit: 10, Cursor: "bad-cursor"})
@@ -393,6 +404,7 @@ func TestListRepositoriesPageMalformedCursorRejected(t *testing.T) {
 }
 
 func TestListRepositoriesPageHonorsHardMax(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	_, err := c.ListRepositoriesWithOptions(ctx, "", RepositorySearchOptions{Limit: 101})
@@ -402,6 +414,7 @@ func TestListRepositoriesPageHonorsHardMax(t *testing.T) {
 }
 
 func TestSearchCodePageReturnsNextCursorAndTotal(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
@@ -467,6 +480,7 @@ func TestSearchCodePageReturnsNextCursorAndTotal(t *testing.T) {
 }
 
 func TestSearchCodePageMalformedCursorRejected(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
@@ -477,6 +491,7 @@ func TestSearchCodePageMalformedCursorRejected(t *testing.T) {
 }
 
 func TestSearchCodePageHonorsHardMax(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}

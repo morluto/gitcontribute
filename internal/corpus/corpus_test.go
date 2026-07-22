@@ -27,6 +27,7 @@ func openTestCorpus(t *testing.T) (*Corpus, string) {
 }
 
 func TestMigrationLoggerFatalfRecordsError(t *testing.T) {
+	t.Parallel()
 	logger := &migrationLogger{}
 	logger.Fatalf("migration %d failed", 7)
 	logger.Fatalf("later failure")
@@ -37,6 +38,7 @@ func TestMigrationLoggerFatalfRecordsError(t *testing.T) {
 }
 
 func TestOpenAndPragmas(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -103,6 +105,7 @@ func TestOpenReopensPathAfterInitializationLeaseHandoff(t *testing.T) {
 }
 
 func TestConcurrentOpenUsesIndependentMigrationProviders(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
 	const count = 8
@@ -129,6 +132,7 @@ func TestConcurrentOpenUsesIndependentMigrationProviders(t *testing.T) {
 }
 
 func TestIdempotentReopenAndMigration(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, path := openTestCorpus(t)
 
@@ -162,6 +166,7 @@ func TestIdempotentReopenAndMigration(t *testing.T) {
 }
 
 func TestOpenRejectsSchemaNewerThanBinary(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, path := openTestCorpus(t)
 	_, target, err := c.SchemaVersions(ctx)
@@ -182,6 +187,7 @@ func TestOpenRejectsSchemaNewerThanBinary(t *testing.T) {
 }
 
 func TestCheckWriteAccessReportsContentionImmediatelyAndRestoresTimeout(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, path := openTestCorpus(t)
 	other, err := Open(ctx, path)
@@ -218,6 +224,7 @@ func TestCheckWriteAccessReportsContentionImmediatelyAndRestoresTimeout(t *testi
 }
 
 func TestRepositoryDelayedObservations(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -252,6 +259,7 @@ func TestRepositoryDelayedObservations(t *testing.T) {
 }
 
 func TestRepositoryObservationOrderingPreservesNanoseconds(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -274,6 +282,7 @@ func TestRepositoryObservationOrderingPreservesNanoseconds(t *testing.T) {
 }
 
 func TestSearchTreatsFTSOperatorsAndQuotesLiterally(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Now(), `{}`)
@@ -295,6 +304,7 @@ func TestSearchTreatsFTSOperatorsAndQuotesLiterally(t *testing.T) {
 }
 
 func TestSourceAndLocalProjectionTimesRemainDistinct(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	sourceCreated := time.Unix(100, 123).UTC()
@@ -325,6 +335,7 @@ func TestSourceAndLocalProjectionTimesRemainDistinct(t *testing.T) {
 }
 
 func TestRepositoryEqualTimestampSequenceOrdering(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -360,6 +371,7 @@ func TestRepositoryEqualTimestampSequenceOrdering(t *testing.T) {
 }
 
 func TestThreadDelayedObservations(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -399,6 +411,7 @@ func TestThreadDelayedObservations(t *testing.T) {
 }
 
 func TestThreadEqualTimestampSequenceOrdering(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -428,6 +441,7 @@ func TestThreadEqualTimestampSequenceOrdering(t *testing.T) {
 }
 
 func TestIndependentFacetAdvancement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -483,6 +497,7 @@ func TestIndependentFacetAdvancement(t *testing.T) {
 }
 
 func TestInterruptedAndFailedRuns(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -528,6 +543,7 @@ func TestInterruptedAndFailedRuns(t *testing.T) {
 }
 
 func TestLocalSearch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -571,6 +587,7 @@ func TestLocalSearch(t *testing.T) {
 }
 
 func TestCoverageIsIndependentFromProjections(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -609,6 +626,7 @@ func TestCoverageIsIndependentFromProjections(t *testing.T) {
 }
 
 func TestRunCompletionAndStats(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -636,6 +654,7 @@ func TestRunCompletionAndStats(t *testing.T) {
 }
 
 func TestProjectionIgnoresStaleThreadObservationsBySourceUpdatedAt(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 

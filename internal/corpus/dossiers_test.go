@@ -10,6 +10,7 @@ import (
 )
 
 func TestDossiersMigration(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -56,6 +57,7 @@ func TestDossiersMigration(t *testing.T) {
 }
 
 func TestDossierSaveGetListAndRefresh(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -156,6 +158,7 @@ func TestDossierSaveGetListAndRefresh(t *testing.T) {
 }
 
 func TestDossierSaveAndRefreshAllowSameGeneratedAt(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -203,6 +206,7 @@ func TestDossierSaveAndRefreshAllowSameGeneratedAt(t *testing.T) {
 }
 
 func TestRefreshDossierEqualAsOfProvenance(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -286,6 +290,7 @@ func TestRefreshDossierEqualAsOfProvenance(t *testing.T) {
 }
 
 func TestDossierListReturnsLatestPerRepository(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 

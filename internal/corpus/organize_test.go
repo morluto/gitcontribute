@@ -10,6 +10,7 @@ import (
 )
 
 func TestLensesPersistAndUpdateByName(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "organize.db")
 	c, err := Open(ctx, path)
@@ -57,6 +58,7 @@ func TestLensesPersistAndUpdateByName(t *testing.T) {
 }
 
 func TestSaveLensRejectsInvalidDefinition(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	if _, err := c.SaveLens(context.Background(), lens.Definition{
 		Name: "invalid", Weights: map[string]float64{"activity": 0},
@@ -66,6 +68,7 @@ func TestSaveLensRejectsInvalidDefinition(t *testing.T) {
 }
 
 func TestCollectionsDeduplicateTypedReferences(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	created, err := c.SaveCollection(ctx, "favorites")
@@ -107,6 +110,7 @@ func TestCollectionsDeduplicateTypedReferences(t *testing.T) {
 }
 
 func TestAddCollectionMembersRequiresExistingBoundedCollection(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	if err := c.AddCollectionMembers(ctx, "missing", []CollectionMember{{Kind: "repository", Ref: "o/r"}}); err == nil {

@@ -10,6 +10,7 @@ import (
 )
 
 func TestFindPortfolioOverlapsIsolatesInvalidCandidatesAndMissingPullRequests(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket"}, `{}`)

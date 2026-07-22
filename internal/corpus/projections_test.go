@@ -11,6 +11,7 @@ import (
 )
 
 func TestProjectionStatesSeededByOpen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -43,6 +44,7 @@ func TestProjectionStatesSeededByOpen(t *testing.T) {
 }
 
 func TestGetProjectionStateMissing(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -53,6 +55,7 @@ func TestGetProjectionStateMissing(t *testing.T) {
 }
 
 func TestGetProjectionStateReportsKnownAbsentProjection(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -72,6 +75,7 @@ func TestGetProjectionStateReportsKnownAbsentProjection(t *testing.T) {
 }
 
 func TestThreadSearchRequiresFacetProjection(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	if _, err := c.db.ExecContext(ctx, `UPDATE projection_states SET status = ? WHERE name = ?`, ProjectionStatusStale, ProjectionNameFacetObservationsFTS); err != nil {
@@ -90,6 +94,7 @@ func TestThreadSearchRequiresFacetProjection(t *testing.T) {
 }
 
 func TestRebuildThreadSearchProjectionIsAtomicAndSetsState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -161,6 +166,7 @@ func requireProjectionSetup(t *testing.T, action string, err error) {
 }
 
 func TestBuildingAndFailedAttemptKeepLastCompleteProjectionReadable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
@@ -197,6 +203,7 @@ func TestBuildingAndFailedAttemptKeepLastCompleteProjectionReadable(t *testing.T
 }
 
 func TestFailedRebuildRollsBackIndexAndPreservesLastCompleteMetadata(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
@@ -245,6 +252,7 @@ func TestFailedRebuildRollsBackIndexAndPreservesLastCompleteMetadata(t *testing.
 }
 
 func TestCancelledRebuildPreservesLastCompleteProjection(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
@@ -288,6 +296,7 @@ func TestCancelledRebuildPreservesLastCompleteProjection(t *testing.T) {
 }
 
 func TestRebuildCodeSearchProjectionIsAtomicAndSetsState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
@@ -326,6 +335,7 @@ func TestRebuildCodeSearchProjectionIsAtomicAndSetsState(t *testing.T) {
 }
 
 func TestSearchDoesNotSilentlyRebuildProjections(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -377,6 +387,7 @@ func TestSearchDoesNotSilentlyRebuildProjections(t *testing.T) {
 }
 
 func TestRebuildThreadSearchProjectionRestoresClearedIndex(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 

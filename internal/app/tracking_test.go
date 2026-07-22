@@ -10,6 +10,7 @@ import (
 )
 
 func TestServiceTrackingFlow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -94,6 +95,7 @@ func TestServiceTrackingFlow(t *testing.T) {
 }
 
 func TestServiceExportImportLocalMetadata(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -163,6 +165,7 @@ func TestServiceExportImportLocalMetadata(t *testing.T) {
 }
 
 func TestCollectionValidationSupportsNewReferenceKinds(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()

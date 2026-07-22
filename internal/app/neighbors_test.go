@@ -82,6 +82,7 @@ func seedIssueForNeighbors(t *testing.T, c *corpus.Corpus, repoID int64, number 
 }
 
 func TestNeighborsRankedWithScoreAndReason(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newNeighborService(t)
 	defer func() { _ = svc.Close() }()
@@ -138,6 +139,7 @@ func TestNeighborsRankedWithScoreAndReason(t *testing.T) {
 }
 
 func TestNeighborsStableTieOrdering(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newNeighborService(t)
 	defer func() { _ = svc.Close() }()
@@ -168,6 +170,7 @@ func TestNeighborsStableTieOrdering(t *testing.T) {
 }
 
 func TestNeighborsExcludesQueryAndMissingThread(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newNeighborService(t)
 	defer func() { _ = svc.Close() }()
@@ -199,6 +202,7 @@ func TestNeighborsExcludesQueryAndMissingThread(t *testing.T) {
 }
 
 func TestDuplicateCandidatesReturnsClusterMembers(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newNeighborService(t)
 	defer func() { _ = svc.Close() }()
@@ -243,6 +247,7 @@ func TestDuplicateCandidatesReturnsClusterMembers(t *testing.T) {
 }
 
 func TestDuplicateCandidatesEmptyWhenNoCluster(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newNeighborService(t)
 	defer func() { _ = svc.Close() }()
@@ -269,6 +274,7 @@ func TestDuplicateCandidatesEmptyWhenNoCluster(t *testing.T) {
 }
 
 func TestNeighborQueriesRejectInvalidInput(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newNeighborService(t)
 	defer func() { _ = svc.Close() }()
@@ -292,6 +298,7 @@ func TestNeighborQueriesRejectInvalidInput(t *testing.T) {
 // Ensure the neighbor source revision changes when the candidate population
 // changes, but is stable for identical input.
 func TestNeighborsSourceRevisionReflectsPopulation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newNeighborService(t)
 	defer func() { _ = svc.Close() }()
@@ -328,6 +335,7 @@ func TestNeighborsSourceRevisionReflectsPopulation(t *testing.T) {
 }
 
 func TestNeighborResultJSONShape(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newNeighborService(t)
 	defer func() { _ = svc.Close() }()
@@ -358,6 +366,7 @@ func TestNeighborResultJSONShape(t *testing.T) {
 }
 
 func TestPullRequestCollisions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newNeighborService(t)
 	defer func() { _ = svc.Close() }()

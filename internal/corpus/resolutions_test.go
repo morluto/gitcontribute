@@ -7,6 +7,7 @@ import (
 )
 
 func TestResolutionRecordsAreAppendOnlyAndStaleSafe(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	threadID := insertPortfolioFixture(t, ctx, c)

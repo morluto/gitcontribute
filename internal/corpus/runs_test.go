@@ -7,6 +7,7 @@ import (
 )
 
 func TestListRunsBounded(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 

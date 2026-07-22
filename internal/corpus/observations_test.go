@@ -11,6 +11,7 @@ import (
 )
 
 func TestListThreadsFilteredAppliesStateBeforeLimit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -74,6 +75,7 @@ func TestListThreadsFilteredAppliesStateBeforeLimit(t *testing.T) {
 }
 
 func TestListPullRequestPortfolioFiltersByAuthorAndState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -115,6 +117,7 @@ func TestListPullRequestPortfolioFiltersByAuthorAndState(t *testing.T) {
 }
 
 func TestListPullRequestPortfolioUsesDeterministicGlobalOrder(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -170,6 +173,7 @@ func TestListPullRequestPortfolioUsesDeterministicGlobalOrder(t *testing.T) {
 }
 
 func TestUpsertThreadPersistsMetadataAndDeterministicAssignees(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -237,6 +241,7 @@ func TestUpsertThreadPersistsMetadataAndDeterministicAssignees(t *testing.T) {
 }
 
 func TestUpsertThreadUnknownMergeStateDoesNotEraseKnownState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)

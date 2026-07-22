@@ -66,7 +66,7 @@ test-uncached:
 	$(GO) test -short -parallel=4 -count=1 -timeout 120s ./...
 
 test-race:
-	$(GO) test -short -race -parallel=4 -timeout 300s ./internal/app ./internal/corpus ./internal/workspace
+	$(GO) test -short -race -parallel=2 -timeout 300s ./internal/app ./internal/corpus ./internal/workspace
 
 test-race-full:
 	$(GO) test -race -parallel=4 -count=1 -timeout 300s ./...

@@ -10,6 +10,7 @@ import (
 )
 
 func TestCodeSnapshotsAreAtomicDeduplicatedAndSearchLatest(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}

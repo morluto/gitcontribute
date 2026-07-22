@@ -8,6 +8,7 @@ import (
 )
 
 func TestOpenProtectsDatabaseFile(t *testing.T) {
+	t.Parallel()
 	_, path := openTestCorpus(t)
 	info, err := os.Stat(path)
 	if err != nil {

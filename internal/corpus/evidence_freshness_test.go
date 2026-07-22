@@ -10,6 +10,7 @@ import (
 )
 
 func TestEvidenceThreadFreshnessAndProvenancePersistence(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "freshness.db")
 	c, err := Open(ctx, path)
@@ -69,6 +70,7 @@ func TestEvidenceThreadFreshnessAndProvenancePersistence(t *testing.T) {
 }
 
 func TestEvidenceFacetFreshnessIgnoresUnrelatedFacet(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	repo, _ := c.ApplyRepositoryObservation(ctx, "owner", "repo", "R1", time.Unix(10, 0).UTC(), `{}`)
@@ -107,6 +109,7 @@ func TestEvidenceFacetFreshnessIgnoresUnrelatedFacet(t *testing.T) {
 }
 
 func TestEvidenceFreshnessMissingRevisionIsUnknownAndReadOnly(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	item := &evidence.Evidence{

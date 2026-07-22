@@ -11,6 +11,7 @@ import (
 )
 
 func TestOpenReadOnlyDoesNotCreateMissingCorpus(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "missing.db")
 	if _, err := OpenReadOnly(context.Background(), path); err == nil {
 		t.Fatal("OpenReadOnly unexpectedly opened a missing corpus")
@@ -24,6 +25,7 @@ func TestOpenReadOnlyDoesNotCreateMissingCorpus(t *testing.T) {
 }
 
 func TestOpenReadOnlyReadsCurrentCorpus(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "current.db")
 	c, err := Open(ctx, path)
@@ -45,6 +47,7 @@ func TestOpenReadOnlyReadsCurrentCorpus(t *testing.T) {
 }
 
 func TestOpenReadOnlyRejectsNewerSchemaWithoutDatabaseOrWALMutation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "newer.db")
 	c, err := Open(ctx, path)
@@ -103,6 +106,7 @@ func TestOpenReadOnlyRejectsNewerSchemaWithoutDatabaseOrWALMutation(t *testing.T
 }
 
 func TestInspectSchemaVersionDoesNotCreateMissingCorpus(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "missing.db")
 	version, exists, err := InspectSchemaVersion(context.Background(), path)
 	if err != nil {
@@ -117,6 +121,7 @@ func TestInspectSchemaVersionDoesNotCreateMissingCorpus(t *testing.T) {
 }
 
 func TestInspectSchemaVersionReadsExistingCorpusWithoutMutation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "corpus #1.db")
 	c, err := Open(ctx, path)
@@ -152,6 +157,7 @@ func TestInspectSchemaVersionReadsExistingCorpusWithoutMutation(t *testing.T) {
 }
 
 func TestInspectSchemaVersionSupportsFileURI(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "corpus.db")
 	c, err := Open(ctx, path)

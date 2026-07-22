@@ -9,6 +9,7 @@ import (
 )
 
 func TestValidationObservationPayloadRoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	now := time.Now().UTC()

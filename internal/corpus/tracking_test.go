@@ -14,6 +14,7 @@ import (
 )
 
 func TestTrackingMigrationCreatesTables(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -27,6 +28,7 @@ func TestTrackingMigrationCreatesTables(t *testing.T) {
 }
 
 func TestTriageEventPersistsWithOptionalForeignKeyLinks(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -83,6 +85,7 @@ func TestTriageEventPersistsWithOptionalForeignKeyLinks(t *testing.T) {
 }
 
 func TestTriageEventOrderingIsDeterministic(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	svc := tracking.NewService(c)
@@ -118,6 +121,7 @@ func TestTriageEventOrderingIsDeterministic(t *testing.T) {
 }
 
 func TestContributionLifecyclePersists(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -182,6 +186,7 @@ func TestContributionLifecyclePersists(t *testing.T) {
 }
 
 func TestContributionRequiresExistingOpportunity(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	svc := tracking.NewService(c)
@@ -196,6 +201,7 @@ func TestContributionRequiresExistingOpportunity(t *testing.T) {
 }
 
 func TestExportImportLocalMetadataIsIdempotent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -291,6 +297,7 @@ func TestExportImportLocalMetadataIsIdempotent(t *testing.T) {
 }
 
 func TestImportLocalMetadataRequiresCurrentBundleVersion(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	svc := tracking.NewService(c)
@@ -315,6 +322,7 @@ func TestImportLocalMetadataRequiresCurrentBundleVersion(t *testing.T) {
 }
 
 func TestImportLocalMetadataRejectsInvalidBundleBeforeWriting(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	svc := tracking.NewService(c)
@@ -336,6 +344,7 @@ func TestImportLocalMetadataRejectsInvalidBundleBeforeWriting(t *testing.T) {
 }
 
 func TestImportLocalMetadataIsAtomicOnReferentialFailure(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	svc := tracking.NewService(c)
@@ -394,6 +403,7 @@ func TestImportLocalMetadataIsAtomicOnReferentialFailure(t *testing.T) {
 }
 
 func TestExportRedactsSecretsAndLocalPaths(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	svc := tracking.NewService(c)
@@ -444,6 +454,7 @@ func TestExportRedactsSecretsAndLocalPaths(t *testing.T) {
 }
 
 func TestMalformedContributionMetadataIsPropagated(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 

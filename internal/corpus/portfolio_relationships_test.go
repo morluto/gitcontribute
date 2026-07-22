@@ -9,6 +9,7 @@ import (
 )
 
 func TestPortfolioLinksAreExplicitAndDeterministic(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	prID := insertPortfolioFixture(t, ctx, c)
@@ -47,6 +48,7 @@ func TestPortfolioLinksAreExplicitAndDeterministic(t *testing.T) {
 }
 
 func TestPortfolioSignalsRejectMissingSourceObservation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	prID := insertPortfolioFixture(t, ctx, c)
@@ -61,6 +63,7 @@ func TestPortfolioSignalsRejectMissingSourceObservation(t *testing.T) {
 }
 
 func TestFindPortfolioOverlapsUsesOnlyCoveredObservedSignals(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	prID := insertPortfolioFixture(t, ctx, c)
@@ -112,6 +115,7 @@ func TestFindPortfolioOverlapsUsesOnlyCoveredObservedSignals(t *testing.T) {
 }
 
 func TestFindPortfolioOverlapsRequiresCompleteNegativeCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	prID := insertPortfolioFixture(t, ctx, c)
@@ -134,6 +138,7 @@ func TestFindPortfolioOverlapsRequiresCompleteNegativeCoverage(t *testing.T) {
 }
 
 func TestFindPortfolioOverlapsPullRequestNegativeDoesNotRequireSimilarityFacet(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	firstID := insertPortfolioFixture(t, ctx, c)
@@ -161,6 +166,7 @@ func TestFindPortfolioOverlapsPullRequestNegativeDoesNotRequireSimilarityFacet(t
 }
 
 func TestListPullRequestIssueLinksDistinguishesCoveredEmptyAndBoundsPopulation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	firstID := insertPortfolioFixture(t, ctx, c)

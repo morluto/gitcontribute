@@ -10,6 +10,7 @@ import (
 )
 
 func TestLoadPrecedentRepositoriesGroupsSourcesByRepository(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	repo, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "rocket"}, `{}`)

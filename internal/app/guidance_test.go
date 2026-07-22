@@ -19,6 +19,7 @@ import (
 )
 
 func TestExplicitSyncPersistsSourceBackedContributionGuidance(t *testing.T) {
+	t.Parallel()
 	const guidance = "We accept pull requests for issues labelled `help wanted`."
 	base := &testServer{owner: "octocat", repo: "guided"}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +65,7 @@ func TestExplicitSyncPersistsSourceBackedContributionGuidance(t *testing.T) {
 }
 
 func TestRadarClassifiesStoredPolicyAndNaturalLanguageClaimOffline(t *testing.T) {
+	t.Parallel()
 	fixture := newRadarTestFixture(t)
 	repo, err := fixture.svc.corpus.GetRepository(fixture.ctx, "owner", "repo")
 	if err != nil || repo == nil {
@@ -131,6 +133,7 @@ func (interruptedGuidanceReader) GetRepositoryFile(_ context.Context, _, _, path
 }
 
 func TestGuidanceRetrievalReplacesSnapshotOnlyAfterAllPathsComplete(t *testing.T) {
+	t.Parallel()
 	fixture := newRadarTestFixture(t)
 	repo, err := fixture.svc.corpus.GetRepository(fixture.ctx, "owner", "repo")
 	if err != nil || repo == nil {

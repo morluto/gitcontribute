@@ -19,6 +19,7 @@ import (
 )
 
 func TestRadarCandidateToMCPPreservesRelatedWorkSemantics(t *testing.T) {
+	t.Parallel()
 	out := radarCandidateToMCP(radar.Candidate{RelatedWork: []radar.RelatedWork{{
 		Ref: "pull_request:owner/repo#9", Relation: "depends_on", Direction: "outbound", State: "open",
 	}}})
@@ -28,6 +29,7 @@ func TestRadarCandidateToMCPPreservesRelatedWorkSemantics(t *testing.T) {
 }
 
 func TestRankOpportunitiesReportsBoundedNonPaginatedTruncation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
@@ -104,6 +106,7 @@ func assertRadarCandidateRanks(t *testing.T, candidates []mcpserver.OpportunityC
 }
 
 func TestRankOpportunitiesUsesOneEvaluationTimeAcrossRepositories(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
@@ -128,6 +131,7 @@ func TestRankOpportunitiesUsesOneEvaluationTimeAcrossRepositories(t *testing.T) 
 }
 
 func TestGetRepositoriesPreservesUnknownMetadataAndInputOrder(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	placeholder, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "placeholder"}, `{}`)
@@ -160,6 +164,7 @@ func TestGetRepositoriesPreservesUnknownMetadataAndInputOrder(t *testing.T) {
 }
 
 func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket", SourceUpdatedAt: time.Unix(10, 0).UTC()}, `{}`)
@@ -204,6 +209,7 @@ func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
 }
 
 func TestGetThreadsPreservesUnknownAndObservedFalseMergeState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket"}, `{}`)
@@ -234,6 +240,7 @@ func TestGetThreadsPreservesUnknownAndObservedFalseMergeState(t *testing.T) {
 }
 
 func TestCancelJobsPreservesOrderAndIsIdempotent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	if _, err := svc.Jobs(ctx); err != nil {
@@ -270,6 +277,7 @@ func TestCancelJobsPreservesOrderAndIsIdempotent(t *testing.T) {
 }
 
 func TestCancelJobsContinuesAfterMalformedJobPayload(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	if _, err := svc.Jobs(ctx); err != nil {
@@ -306,6 +314,7 @@ func TestCancelJobsContinuesAfterMalformedJobPayload(t *testing.T) {
 }
 
 func TestMCPSourceRefsToDomainRejectsInvalidTimestamps(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		ref  mcpserver.SourceRef
@@ -357,6 +366,7 @@ func assertCancelJobsOutput(t *testing.T, out mcpserver.GetJobsOutput, queuedID 
 }
 
 func TestJobResultToMCPExposesStructuredDurableProgress(t *testing.T) {
+	t.Parallel()
 	out, err := jobResultToMCP(&cli.JobResult{ID: "job-1", Kind: "sync_threads", Status: "running", Request: `{}`, Progress: "thread_headers", Statistics: `{"completed_items":2,"total_items":5}`, CreatedAt: "2026-07-19T00:00:00Z"})
 	if err != nil {
 		t.Fatal(err)
@@ -385,6 +395,7 @@ func (f *fakeRepositorySearchReader) SearchRepositories(_ context.Context, optio
 }
 
 func TestSearchGitHubRepositoriesPersistsObservedMetadata(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	now := time.Unix(1000, 0).UTC()
@@ -415,6 +426,7 @@ func TestSearchGitHubRepositoriesPersistsObservedMetadata(t *testing.T) {
 }
 
 func TestCompileRepositorySearchRejectsAmbiguousAndInvalidInputs(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   mcpserver.SearchGitHubRepositoriesInput
@@ -436,6 +448,7 @@ func TestCompileRepositorySearchRejectsAmbiguousAndInvalidInputs(t *testing.T) {
 }
 
 func TestRepositorySearchValidationExamplesAreUsable(t *testing.T) {
+	t.Parallel()
 	_, _, _, err := compileRepositorySearch(mcpserver.SearchGitHubRepositoriesInput{})
 	var toolErr *mcpserver.ToolError
 	if !errors.As(err, &toolErr) {
@@ -452,6 +465,7 @@ func TestRepositorySearchValidationExamplesAreUsable(t *testing.T) {
 }
 
 func TestCompileRepositorySearchWarnsAboutRawReadmeQueries(t *testing.T) {
+	t.Parallel()
 	query, interpretation, warnings, err := compileRepositorySearch(mcpserver.SearchGitHubRepositoriesInput{RawQuery: "attention in:readme"})
 	if err != nil {
 		t.Fatal(err)
@@ -462,6 +476,7 @@ func TestCompileRepositorySearchWarnsAboutRawReadmeQueries(t *testing.T) {
 }
 
 func TestCompileRepositorySearchWarnsAboutStructuredReadmeMatching(t *testing.T) {
+	t.Parallel()
 	query, _, warnings, err := compileRepositorySearch(mcpserver.SearchGitHubRepositoriesInput{Text: "attention", MatchFields: []string{"name", "readme"}})
 	if err != nil {
 		t.Fatal(err)
@@ -472,6 +487,7 @@ func TestCompileRepositorySearchWarnsAboutStructuredReadmeMatching(t *testing.T)
 }
 
 func TestRepositorySearchDetailedFormatPreservesSecondaryFacts(t *testing.T) {
+	t.Parallel()
 	archived := true
 	remote := github.Repository{Owner: "acme", Name: "rocket", Description: "fast", Stars: 42, Watchers: 9, Forks: 3, OpenIssues: 7, Archived: archived, Topics: []string{"cuda"}}
 	match := liveRepositorySearchMatch(remote, mcpserver.RepositoryMetadataOutput{Status: "complete"}, "detailed")
@@ -481,6 +497,7 @@ func TestRepositorySearchDetailedFormatPreservesSecondaryFacts(t *testing.T) {
 }
 
 func TestFindPrecedentsUsesClosedAndMergedHistory(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket"}, `{}`)
@@ -525,6 +542,7 @@ func (f *fakeDeepWikiReader) Read(_ context.Context, request deepwiki.Request) (
 }
 
 func TestDeepWikiReturnsDerivedProvenanceAndBoundsOutput(t *testing.T) {
+	t.Parallel()
 	svc := newSearchTestService(t)
 	fake := &fakeDeepWikiReader{response: deepwiki.Response{Available: true, Text: strings.Repeat("x", 2048), SourceURL: "https://deepwiki.com/acme/rocket"}}
 	svc.SetDeepWikiReader(fake)
@@ -538,6 +556,7 @@ func TestDeepWikiReturnsDerivedProvenanceAndBoundsOutput(t *testing.T) {
 }
 
 func TestDeepWikiUsesNormalizedRepositoriesForRequestAndOutput(t *testing.T) {
+	t.Parallel()
 	svc := newSearchTestService(t)
 	fake := &fakeDeepWikiReader{response: deepwiki.Response{Available: true, Text: "ok"}}
 	svc.SetDeepWikiReader(fake)
@@ -554,6 +573,7 @@ func TestDeepWikiUsesNormalizedRepositoriesForRequestAndOutput(t *testing.T) {
 }
 
 func TestScalableBatchInputsDeduplicateInFirstSeenOrder(t *testing.T) {
+	t.Parallel()
 	repositories := dedupeRepositoryRefs([]mcpserver.RepositoryRef{{Owner: "one", Repo: "repo"}, {Owner: "two", Repo: "repo"}, {Owner: "one", Repo: "repo"}})
 	if want := []mcpserver.RepositoryRef{{Owner: "one", Repo: "repo"}, {Owner: "two", Repo: "repo"}}; !reflect.DeepEqual(repositories, want) {
 		t.Fatalf("repositories = %+v, want %+v", repositories, want)
@@ -569,6 +589,7 @@ func TestScalableBatchInputsDeduplicateInFirstSeenOrder(t *testing.T) {
 }
 
 func TestScalableRuntimeRejectsPageBoundsBeforeSubmittingJob(t *testing.T) {
+	t.Parallel()
 	reader := &MCPReader{newSearchTestService(t)}
 	ctx := context.Background()
 	thread := mcpserver.ThreadRef{Owner: "acme", Repo: "rocket", Number: 1}
@@ -593,6 +614,7 @@ func TestScalableRuntimeRejectsPageBoundsBeforeSubmittingJob(t *testing.T) {
 }
 
 func TestDeepWikiTruncationPreservesUTF8(t *testing.T) {
+	t.Parallel()
 	svc := newSearchTestService(t)
 	fake := &fakeDeepWikiReader{response: deepwiki.Response{Available: true, Text: strings.Repeat("x", 1023) + "€", SourceURL: "https://deepwiki.com/acme/rocket"}}
 	svc.SetDeepWikiReader(fake)
@@ -606,6 +628,7 @@ func TestDeepWikiTruncationPreservesUTF8(t *testing.T) {
 }
 
 func TestScalableRuntimeBoundsMatchSchemas(t *testing.T) {
+	t.Parallel()
 	reader := &MCPReader{newSearchTestService(t)}
 	if _, err := reader.RankOpportunities(context.Background(), mcpserver.RankOpportunitiesInput{Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, Limit: 101}); err == nil {
 		t.Fatal("rank opportunities accepted limit above schema maximum")
@@ -616,6 +639,7 @@ func TestScalableRuntimeBoundsMatchSchemas(t *testing.T) {
 }
 
 func TestDeepWikiRejectsOutputBoundsBeforeProviderRead(t *testing.T) {
+	t.Parallel()
 	svc := newSearchTestService(t)
 	deepWiki := &fakeDeepWikiReader{}
 	svc.SetDeepWikiReader(deepWiki)
@@ -628,6 +652,7 @@ func TestDeepWikiRejectsOutputBoundsBeforeProviderRead(t *testing.T) {
 }
 
 func TestPullRequestPortfolioDerivesConflictAndPreservesUnknownCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	now := time.Unix(1000, 0).UTC()
@@ -669,6 +694,7 @@ func TestPullRequestPortfolioDerivesConflictAndPreservesUnknownCoverage(t *testi
 }
 
 func TestPullRequestPortfolioClassifiesClosedUnmerged(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	now := time.Unix(1000, 0).UTC()
@@ -702,6 +728,7 @@ func TestPullRequestPortfolioClassifiesClosedUnmerged(t *testing.T) {
 }
 
 func TestPullRequestPortfolioKeepsComputingMergeabilityUnknown(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	now := time.Unix(1000, 0).UTC()

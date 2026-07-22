@@ -15,6 +15,7 @@ import (
 )
 
 func TestCandidateImprovesBaselineRequiresMatchedObservations(t *testing.T) {
+	t.Parallel()
 	evaluator := &readinessEvaluator{
 		ctx: context.Background(), opportunity: &investigation.Opportunity{ID: "opp"},
 		runs: []*evidence.ValidationRun{
@@ -40,6 +41,7 @@ func TestCandidateImprovesBaselineRequiresMatchedObservations(t *testing.T) {
 }
 
 func TestOpportunityReadinessReportsPassWarnBlockUnknown(t *testing.T) {
+	t.Parallel()
 	fixture := newResearchFixture(t)
 	started, err := fixture.svc.StartInvestigationFromThread(fixture.ctx, research.ThreadRef{
 		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Kind: domain.IssueKind, Number: 1,
