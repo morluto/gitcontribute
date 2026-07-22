@@ -16,13 +16,13 @@ repos:
       - id: gofmt
         name: format staged Go files
         entry: gofmt -w
-        language: system
+        language: unsupported
         types: [go]
 
       - id: go-test
         name: cached Go tests
-        entry: go test -short -parallel=4 -timeout 120s ./...
-        language: system
+        entry: make test
+        language: unsupported
         files: '(^|/).*\.go$|^go\.(mod|sum)$'
         pass_filenames: false
         require_serial: true

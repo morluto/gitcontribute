@@ -75,7 +75,7 @@ test-verbose:
 	$(GO) test -short -v -parallel=4 -timeout 120s ./...
 
 test-cover:
-	$(GO) test -short -count=1 -parallel=4 \
+	$(GO) test -short -parallel=4 \
 		-coverprofile=coverage.out \
 		-covermode=set \
 		-coverpkg=./internal/... \

@@ -8,22 +8,27 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    name: Test (${{ matrix.os }})
+    name: Cross-platform test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # The coverage job runs the complete suite on Linux.
+        os: [macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-      - run: go test -parallel=4 ./...
+      - run: go test -short -parallel=4 ./...
 
   validate-agents-md:
     name: Validate AGENTS.md
@@ -31,7 +36,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
-      - run: ./scripts/validate-agents-md.sh
+      - run: make docs-check
 
   formatting:
     name: Go formatting
@@ -44,8 +49,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Check formatting
-        shell: bash
-        run: test -z "$(gofmt -l .)"
+        run: make fmt-check
 
   golangci-lint:
     name: Go linters
@@ -135,16 +139,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Run tests with coverage and timing
-        run: go test -v -count=1 -coverprofile=coverage.out -covermode=set -coverpkg=./internal/... -timeout 300s ./...
-      - name: Check coverage threshold
-        shell: bash
-        run: |
-          COVERAGE=$(go tool cover -func=coverage.out | tail -n1 | awk '{print $NF}' | tr -d '%')
-          echo "Total coverage: ${COVERAGE}%"
-          if awk -v coverage="$COVERAGE" 'BEGIN { exit !(coverage < 70) }'; then
-            echo "::error::Coverage ${COVERAGE}% is below 70% threshold"
-            exit 1
-          fi
+        run: make cover-check
       - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@v5
@@ -162,7 +157,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: go test -race -count=1 -timeout 300s ./internal/app ./internal/corpus
+      - run: make test-race
 
   tidy:
     name: Module tidy check
@@ -175,7 +170,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Check go.mod is tidy
-        run: go mod tidy -diff
+        run: make tidy-check
 
   generated:
     name: Generated outputs
@@ -187,7 +182,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: ./scripts/check-generated.sh
+      - run: make generate-check
 
   security:
     name: Security scan
