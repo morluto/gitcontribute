@@ -639,8 +639,12 @@ func TestReadOnlyCorpusOpenDoesNotReconcileJobs(t *testing.T) {
 func TestReconcileConcurrentWithHeartbeat(t *testing.T) {
 	ctx := context.Background()
 	svc := newJobTestService(t)
+	const (
+		heartbeatInterval = 20 * time.Millisecond
+		leaseTimeout      = 500 * time.Millisecond
+	)
 	jobsA := newJobExecutorOnService(t, svc, jobExecutorConfig{
-		heartbeatInterval: 20 * time.Millisecond,
+		heartbeatInterval: heartbeatInterval,
 		pollInterval:      50 * time.Millisecond,
 	})
 
@@ -662,11 +666,15 @@ func TestReconcileConcurrentWithHeartbeat(t *testing.T) {
 	}
 	defer func() { _ = cB.Close() }()
 
-	for i := range 20 {
-		if err := cB.ReconcileInterruptedJobs(ctx, 100*time.Millisecond); err != nil {
+	// Reconcile for longer than the lease so the test still fails if the owner
+	// never heartbeats. The wider lease avoids treating ordinary scheduler and
+	// coverage-instrumentation stalls as an abandoned process.
+	deadline := time.Now().Add(2 * leaseTimeout)
+	for i := 0; time.Now().Before(deadline); i++ {
+		if err := cB.ReconcileInterruptedJobs(ctx, leaseTimeout); err != nil {
 			t.Fatalf("reconcile iteration %d: %v", i, err)
 		}
-		time.Sleep(25 * time.Millisecond)
+		time.Sleep(heartbeatInterval)
 	}
 
 	job, err := jobsA.Get(ctx, id)
