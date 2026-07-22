@@ -11,6 +11,7 @@ import (
 )
 
 func TestPublicCorpusReadsDoNotCreateDatabase(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	tests := []struct {
 		name string
@@ -124,6 +125,7 @@ func TestPublicCorpusReadsDoNotCreateDatabase(t *testing.T) {
 }
 
 func TestInvestigationWriteStillInitializesCorpus(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, err := New(config.NewPaths(&config.Env{Home: t.TempDir()}), "test", nil)
 	if err != nil {

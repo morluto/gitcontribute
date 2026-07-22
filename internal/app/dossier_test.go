@@ -16,6 +16,7 @@ import (
 )
 
 func TestBuildAndGetRepositoryDossier(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test", nil)
@@ -158,6 +159,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 }
 
 func TestExtractSeeds(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test", nil)
@@ -363,6 +365,7 @@ func TestExtractSeeds(t *testing.T) {
 }
 
 func TestSeedPolarityUsesOnlyStructuredOutcomeEvidence(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		thread     corpus.Thread
@@ -425,6 +428,7 @@ func TestSeedPolarityUsesOnlyStructuredOutcomeEvidence(t *testing.T) {
 }
 
 func TestExtractSeedsRequiresNoNetwork(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test", nil)

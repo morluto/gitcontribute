@@ -14,6 +14,7 @@ import (
 )
 
 func TestRepositoryHealth(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test", nil)

@@ -13,6 +13,7 @@ import (
 )
 
 func TestCommitClusterProjectionRejectsChangedSource(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	repo, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "rocket"}, `{}`)
@@ -49,6 +50,7 @@ func TestCommitClusterProjectionRejectsChangedSource(t *testing.T) {
 }
 
 func TestConcurrentIdenticalEmptyProjectionHasOneCurrentRun(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	if _, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "empty"}, `{}`); err != nil {
@@ -99,6 +101,7 @@ func TestConcurrentIdenticalEmptyProjectionHasOneCurrentRun(t *testing.T) {
 }
 
 func TestCommitClusterProjectionRejectsMissingRuleVersion(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	if _, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "empty"}, `{}`); err != nil {
@@ -131,6 +134,7 @@ func TestCommitClusterProjectionRejectsMissingRuleVersion(t *testing.T) {
 }
 
 func TestCommitClusterProjectionRejectsMissingSourceRevision(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	ref := domain.RepoRef{Owner: "acme", Repo: "rocket"}
@@ -146,6 +150,7 @@ func TestCommitClusterProjectionRejectsMissingSourceRevision(t *testing.T) {
 }
 
 func TestCommitClusterProjectionRejectsInvalidCandidateBound(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -160,6 +165,7 @@ func TestCommitClusterProjectionRejectsInvalidCandidateBound(t *testing.T) {
 }
 
 func TestCommitClusterProjectionRejectsInvalidRepository(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -175,6 +181,7 @@ func TestCommitClusterProjectionRejectsInvalidRepository(t *testing.T) {
 }
 
 func TestCommitClusterProjectionRejectsClusterFromDifferentSource(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	if _, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "rocket"}, `{}`); err != nil {
@@ -209,6 +216,7 @@ func TestCommitClusterProjectionRejectsClusterFromDifferentSource(t *testing.T) 
 }
 
 func TestCommitClusterProjectionRejectsClusterWithoutStableIdentity(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	if _, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "rocket"}, `{}`); err != nil {
@@ -235,6 +243,7 @@ func TestCommitClusterProjectionRejectsClusterWithoutStableIdentity(t *testing.T
 }
 
 func TestCommitClusterProjectionRejectsClusterFromDifferentRepository(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	if _, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "rocket"}, `{}`); err != nil {

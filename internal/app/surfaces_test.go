@@ -60,6 +60,7 @@ func seedRepoAndThreads(t *testing.T, c *corpus.Corpus) {
 }
 
 func TestServiceClustersAndCluster(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("owner", "repo")
 	defer srv.Close()
@@ -163,6 +164,7 @@ func TestServiceClustersAndCluster(t *testing.T) {
 }
 
 func TestUnchangedEmptyClusterProjectionReportsZeroCurrentCounts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("owner", "empty")
 	defer srv.Close()
@@ -190,6 +192,7 @@ func TestUnchangedEmptyClusterProjectionReportsZeroCurrentCounts(t *testing.T) {
 }
 
 func TestCurrentProjectionClusterCountExcludesRetiredHistory(t *testing.T) {
+	t.Parallel()
 	clusters := []clustering.Cluster{{State: clustering.ClusterOpen}, {State: clustering.ClusterClosed}, {State: clustering.ClusterRetired}}
 	if got := currentProjectionClusterCount(clusters); got != 2 {
 		t.Fatalf("current cluster count = %d, want 2", got)
@@ -197,6 +200,7 @@ func TestCurrentProjectionClusterCountExcludesRetiredHistory(t *testing.T) {
 }
 
 func TestArchiveThreadsIsBoundedAndOffline(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("owner", "repo")
 	defer srv.Close()
@@ -217,6 +221,7 @@ func TestArchiveThreadsIsBoundedAndOffline(t *testing.T) {
 }
 
 func TestServiceLensAndCollections(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("owner", "repo")
 	defer srv.Close()
@@ -292,6 +297,7 @@ func TestServiceLensAndCollections(t *testing.T) {
 }
 
 func TestCollectionServiceRejectsMalformedMembers(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -313,6 +319,7 @@ func TestCollectionServiceRejectsMalformedMembers(t *testing.T) {
 }
 
 func TestArchiveSyncRejectsNegativeSince(t *testing.T) {
+	t.Parallel()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
 	_, err := svc.ArchiveSync(context.Background(), cli.RepoRef{Owner: "o", Repo: "r"}, cli.ArchiveSyncOptions{Since: -time.Hour})
@@ -322,6 +329,7 @@ func TestArchiveSyncRejectsNegativeSince(t *testing.T) {
 }
 
 func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("owner", "repo")
 	defer srv.Close()
@@ -358,6 +366,7 @@ func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
 }
 
 func TestServiceReadsLensFromJSONFile(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("owner", "repo")
 	defer srv.Close()
@@ -401,6 +410,7 @@ func TestServiceReadsLensFromJSONFile(t *testing.T) {
 }
 
 func TestMCPReaderLensResource(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("owner", "repo")
 	defer srv.Close()

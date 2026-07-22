@@ -8,6 +8,7 @@ import (
 )
 
 func TestTUILoadReadsBoundedLocalData(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer svc.Close()

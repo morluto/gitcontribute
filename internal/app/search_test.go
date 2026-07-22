@@ -32,6 +32,7 @@ func newSearchTestService(t *testing.T) *Service {
 }
 
 func TestSearchReturnsNextCursorAndCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	c := svc.corpus
@@ -115,6 +116,7 @@ func TestSearchReturnsNextCursorAndCoverage(t *testing.T) {
 }
 
 func TestThreadSearchMergesRepositoryAndThreadCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	repo, err := svc.corpus.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
@@ -145,6 +147,7 @@ func TestThreadSearchMergesRepositoryAndThreadCoverage(t *testing.T) {
 }
 
 func TestSearchRejectsMalformedCursor(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	_, err := svc.Search(ctx, "term", cli.SearchOptions{Kind: "issues", Limit: 10, Cursor: "not-a-cursor"})
@@ -154,6 +157,7 @@ func TestSearchRejectsMalformedCursor(t *testing.T) {
 }
 
 func TestSearchRejectsCursorForAll(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	_, err := svc.Search(ctx, "term", cli.SearchOptions{Kind: "all", Limit: 10, Cursor: "cursor"})
@@ -163,6 +167,7 @@ func TestSearchRejectsCursorForAll(t *testing.T) {
 }
 
 func TestSearchAllRanksAcrossKindsAndPreservesTotal(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
@@ -185,6 +190,7 @@ func TestSearchAllRanksAcrossKindsAndPreservesTotal(t *testing.T) {
 }
 
 func TestSearchHardMaxLimit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	_, err := svc.Search(ctx, "term", cli.SearchOptions{Kind: "issues", Limit: 101})
@@ -194,6 +200,7 @@ func TestSearchHardMaxLimit(t *testing.T) {
 }
 
 func TestExplainMatchReturnsFactualReasons(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	c := svc.corpus
@@ -254,6 +261,7 @@ func TestExplainMatchReturnsFactualReasons(t *testing.T) {
 }
 
 func TestSearchDefaultLimitAndMax(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 
@@ -319,6 +327,7 @@ func seedLensCorpus(t *testing.T, svc *Service) {
 }
 
 func TestSearchWithLensRanksAndFiltersThreads(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	seedLensCorpus(t, svc)
@@ -359,6 +368,7 @@ func TestSearchWithLensRanksAndFiltersThreads(t *testing.T) {
 }
 
 func TestSearchWithLensDoesNotLeakMatchesForMissingRepository(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	seedLensCorpus(t, svc)
@@ -382,6 +392,7 @@ func TestSearchWithLensDoesNotLeakMatchesForMissingRepository(t *testing.T) {
 }
 
 func TestExplainLens(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	seedLensCorpus(t, svc)
@@ -444,6 +455,7 @@ func TestExplainLens(t *testing.T) {
 }
 
 func TestSearchAllHonorsRepositoryScopeForEveryKind(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	for _, name := range []string{"one", "two"} {
@@ -476,6 +488,7 @@ func TestSearchAllHonorsRepositoryScopeForEveryKind(t *testing.T) {
 }
 
 func TestCodeLensUsesSnapshotTimeForFreshnessFilter(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}

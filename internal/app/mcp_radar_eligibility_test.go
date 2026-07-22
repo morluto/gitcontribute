@@ -7,6 +7,7 @@ import (
 )
 
 func TestMCPCrossRepositoryEligibilityOrderMatchesRadar(t *testing.T) {
+	t.Parallel()
 	ordered := []radar.Eligibility{
 		radar.EligibilityReadyToCode,
 		radar.EligibilityNeedsDiagnosis,

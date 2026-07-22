@@ -12,6 +12,7 @@ import (
 )
 
 func TestCodeSnapshotPruneRejectsStalePlan(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
@@ -35,6 +36,7 @@ func TestCodeSnapshotPruneRejectsStalePlan(t *testing.T) {
 }
 
 func TestRepositoryInventoryCountsAndSizes(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 
@@ -141,6 +143,7 @@ func TestRepositoryInventoryCountsAndSizes(t *testing.T) {
 }
 
 func TestListInventoryAggregatesEveryRepositoryScopeAndFreshness(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 
@@ -199,6 +202,7 @@ func TestListInventoryAggregatesEveryRepositoryScopeAndFreshness(t *testing.T) {
 }
 
 func TestCodeSnapshotPrunePreservesLatestN(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 
@@ -289,6 +293,7 @@ func requireInventorySetup(t *testing.T, action string, err error) {
 }
 
 func TestCodeSnapshotPruneRequiresExactRepoScope(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 

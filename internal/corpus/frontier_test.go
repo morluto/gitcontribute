@@ -7,6 +7,7 @@ import (
 )
 
 func TestFrontierDeduplicatesReplay(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 	item := FrontierItem{
@@ -29,6 +30,7 @@ func TestFrontierDeduplicatesReplay(t *testing.T) {
 }
 
 func TestFrontierLeaseHonorsPriorityReadinessAndBudget(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 	now := time.Unix(1_700_000_000, 123).UTC()
@@ -51,6 +53,7 @@ func TestFrontierLeaseHonorsPriorityReadinessAndBudget(t *testing.T) {
 }
 
 func TestFrontierExpiredLeaseCanBeReclaimed(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 	now := time.Unix(1_700_000_000, 0).UTC()
@@ -78,6 +81,7 @@ func TestFrontierExpiredLeaseCanBeReclaimed(t *testing.T) {
 }
 
 func TestFrontierReleaseRefundsUnstartedAttempt(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 	now := time.Unix(1_700_000_000, 0).UTC()
@@ -110,6 +114,7 @@ func TestFrontierReleaseRefundsUnstartedAttempt(t *testing.T) {
 }
 
 func TestFrontierRetryIsBounded(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 	now := time.Unix(1_700_000_000, 0).UTC()
@@ -141,6 +146,7 @@ func TestFrontierRetryIsBounded(t *testing.T) {
 }
 
 func TestFrontierExpiredFinalAttemptBecomesTerminal(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 	now := time.Unix(1_700_000_000, 0).UTC()

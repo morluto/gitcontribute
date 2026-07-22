@@ -7,6 +7,7 @@ import (
 )
 
 func TestApplyFacetObservationSetReplacesWithEmptyCompleteSet(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -58,6 +59,7 @@ func TestApplyFacetObservationSetReplacesWithEmptyCompleteSet(t *testing.T) {
 }
 
 func TestApplyFacetObservationSetIgnoresStaleEmptySet(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -101,6 +103,7 @@ func TestApplyFacetObservationSetIgnoresStaleEmptySet(t *testing.T) {
 }
 
 func TestListFacetObservationsBoundedPreservesOrderAndReportsMore(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
@@ -140,6 +143,7 @@ func TestListFacetObservationsBoundedPreservesOrderAndReportsMore(t *testing.T) 
 }
 
 func TestApplyFacetObservationSetCASRejectsConcurrentEqualClockReplacement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "1", time.Unix(1, 0).UTC(), `{}`)

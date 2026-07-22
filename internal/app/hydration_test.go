@@ -141,6 +141,7 @@ func seedRepoAndThread(t *testing.T, svc *Service, kind string, number int) (*co
 }
 
 func TestHydrateIssueCommentsPaginatesAndRecordsCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -217,6 +218,7 @@ func TestHydrateIssueCommentsPaginatesAndRecordsCoverage(t *testing.T) {
 }
 
 func TestHydratePullRequestFacets(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -281,6 +283,7 @@ func TestHydratePullRequestFacets(t *testing.T) {
 }
 
 func TestHydratePullRequestDetailsDoesNotProjectStaleSnapshot(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -324,6 +327,7 @@ func TestHydratePullRequestDetailsDoesNotProjectStaleSnapshot(t *testing.T) {
 }
 
 func TestHydratePullRequestReviewsAtPageCapPreservesCompleteSnapshot(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -353,6 +357,7 @@ func TestHydratePullRequestReviewsAtPageCapPreservesCompleteSnapshot(t *testing.
 }
 
 func TestHydrateBoundsPagination(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -387,6 +392,7 @@ func TestHydrateBoundsPagination(t *testing.T) {
 }
 
 func TestHydrateRejectsExcessivePagination(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -400,6 +406,7 @@ func TestHydrateRejectsExcessivePagination(t *testing.T) {
 }
 
 func TestSelectFacetsDeduplicatesRequestedFacets(t *testing.T) {
+	t.Parallel()
 	got, err := selectFacets(corpus.ThreadKindPullRequest, []string{FacetPRDetails, FacetPRDetails, FacetPRReviews})
 	if err != nil {
 		t.Fatalf("select facets: %v", err)
@@ -411,6 +418,7 @@ func TestSelectFacetsDeduplicatesRequestedFacets(t *testing.T) {
 }
 
 func TestHydrateIssueTimelinePersistsExplicitClosingCommitResolution(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -447,6 +455,7 @@ func TestHydrateIssueTimelinePersistsExplicitClosingCommitResolution(t *testing.
 }
 
 func TestHydrateCancellation(t *testing.T) {
+	t.Parallel()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
 	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
@@ -464,6 +473,7 @@ func TestHydrateCancellation(t *testing.T) {
 }
 
 func TestHydrateRecordsRunFailure(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -500,6 +510,7 @@ func TestHydrateRecordsRunFailure(t *testing.T) {
 }
 
 func TestHydrateRequiresSyncedRepositoryAndThread(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -522,6 +533,7 @@ func TestHydrateRequiresSyncedRepositoryAndThread(t *testing.T) {
 }
 
 func TestHydrateRejectsInapplicableFacets(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -537,6 +549,7 @@ func TestHydrateRejectsInapplicableFacets(t *testing.T) {
 }
 
 func TestHydrateIssueCommentsInterruptPage2RetainsOldData(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -606,6 +619,7 @@ func TestHydrateIssueCommentsInterruptPage2RetainsOldData(t *testing.T) {
 }
 
 func TestHydrateIssueCommentsSuccessfulReplacement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -676,6 +690,7 @@ func TestHydrateIssueCommentsSuccessfulReplacement(t *testing.T) {
 }
 
 func TestHydrateRepositoryExactNumbersAreNotLimitedByList(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -695,6 +710,7 @@ func TestHydrateRepositoryExactNumbersAreNotLimitedByList(t *testing.T) {
 }
 
 func TestHydrateRepositoryExactNumberMissingReturnsError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -708,6 +724,7 @@ func TestHydrateRepositoryExactNumberMissingReturnsError(t *testing.T) {
 }
 
 func TestHydrateRepositoryUnknownFacetErrors(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -721,6 +738,7 @@ func TestHydrateRepositoryUnknownFacetErrors(t *testing.T) {
 }
 
 func TestHydrateRepositorySkipsKnownInapplicableFacets(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
@@ -740,6 +758,7 @@ func TestHydrateRepositorySkipsKnownInapplicableFacets(t *testing.T) {
 }
 
 func TestHydrateRepositoryRejectsInvalidExactNumber(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()

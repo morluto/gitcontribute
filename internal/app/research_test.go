@@ -103,6 +103,7 @@ func newResearchFixture(t *testing.T) researchFixture {
 }
 
 func TestThreadResearchBriefUsesOnlyStoredEvidence(t *testing.T) {
+	t.Parallel()
 	fixture := newResearchFixture(t)
 	before, err := fixture.svc.corpus.ListFacetObservations(fixture.ctx, fixture.repoID, &fixture.issueID, FacetIssueComments)
 	if err != nil {
@@ -149,6 +150,7 @@ func TestThreadResearchBriefUsesOnlyStoredEvidence(t *testing.T) {
 }
 
 func TestThreadResearchBriefPRCoverageAndErrors(t *testing.T) {
+	t.Parallel()
 	fixture := newResearchFixture(t)
 	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
 	brief, err := fixture.svc.ThreadResearchBrief(fixture.ctx, research.ThreadRef{Repo: repo, Kind: domain.PullRequestKind, Number: 9})
@@ -181,6 +183,7 @@ func TestThreadResearchBriefPRCoverageAndErrors(t *testing.T) {
 }
 
 func TestThreadResearchBriefBoundsStoredFacetPages(t *testing.T) {
+	t.Parallel()
 	fixture := newResearchFixture(t)
 	pages := make([]corpus.FacetObservationInput, 4)
 	for i := range pages {

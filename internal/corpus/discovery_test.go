@@ -7,6 +7,7 @@ import (
 )
 
 func TestDiscoveryCheckpointDoesNotMoveBackwards(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 	newer := time.Unix(200, 222).UTC()
@@ -24,6 +25,7 @@ func TestDiscoveryCheckpointDoesNotMoveBackwards(t *testing.T) {
 }
 
 func TestArchiveImportIsIdempotent(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 	for range 2 {
@@ -45,6 +47,7 @@ func TestArchiveImportIsIdempotent(t *testing.T) {
 }
 
 func TestDiscoverySourcesAndPartitionsPersist(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 	source, err := c.SaveDiscoverySource(ctx, DiscoverySource{Name: "go", Kind: "search", Definition: `{"query":"language:go"}`, Enabled: true})

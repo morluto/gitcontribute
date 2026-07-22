@@ -7,6 +7,7 @@ import (
 )
 
 func TestRecordRateLimitObservation(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 	now := time.Unix(100, 0).UTC()
@@ -29,6 +30,7 @@ func TestRecordRateLimitObservation(t *testing.T) {
 }
 
 func TestRecordRateLimitObservationStoresMissingResetAsZero(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 	if err := c.RecordRateLimitObservation(ctx, RateLimitObservation{
@@ -46,6 +48,7 @@ func TestRecordRateLimitObservationStoresMissingResetAsZero(t *testing.T) {
 }
 
 func TestLatestRateLimitObservationsReturnsNewestPerResource(t *testing.T) {
+	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 	base := time.Unix(100, 0).UTC()

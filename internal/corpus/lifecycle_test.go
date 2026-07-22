@@ -18,6 +18,7 @@ import (
 )
 
 func TestMigrationFailsFastWhileCorpusIsOpen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "corpus.db")
 	first, err := Open(ctx, path)
@@ -40,6 +41,7 @@ func TestMigrationFailsFastWhileCorpusIsOpen(t *testing.T) {
 }
 
 func TestInspectMissingCorpusHasNoFilesystemSideEffects(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "missing.db")
 	inspection, err := InspectSchema(context.Background(), path)
 	if err != nil {
@@ -56,6 +58,7 @@ func TestInspectMissingCorpusHasNoFilesystemSideEffects(t *testing.T) {
 }
 
 func TestInspectSchemaClassifiesNonDatabaseWithoutMutation(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "damaged.db")
 	want := []byte("this is not a sqlite database")
 	if err := os.WriteFile(path, want, 0o600); err != nil {
@@ -82,6 +85,7 @@ func TestInspectSchemaClassifiesNonDatabaseWithoutMutation(t *testing.T) {
 }
 
 func TestBackupIncludesCommittedWALData(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.db")
@@ -141,6 +145,7 @@ func TestBackupIncludesCommittedWALData(t *testing.T) {
 }
 
 func TestBackupDoesNotOverwriteTargetsCreatedDuringCopy(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.db")
@@ -194,6 +199,7 @@ func TestBackupDoesNotOverwriteTargetsCreatedDuringCopy(t *testing.T) {
 }
 
 func TestCanceledBackupRemovesStagingFiles(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.db")
@@ -227,6 +233,7 @@ func TestCanceledBackupRemovesStagingFiles(t *testing.T) {
 }
 
 func TestRestoreRejectsCorruptedBackupWithoutChangingDestination(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	destination := filepath.Join(dir, "corpus.db")
@@ -273,6 +280,7 @@ func TestRestoreRejectsCorruptedBackupWithoutChangingDestination(t *testing.T) {
 }
 
 func TestCanceledRestorePreservesDestinationAndRemovesStaging(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.db")
@@ -337,6 +345,7 @@ func TestCanceledRestorePreservesDestinationAndRemovesStaging(t *testing.T) {
 }
 
 func TestRestoreReplacesCorpusFromVerifiedBackup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	destination := filepath.Join(dir, "corpus.db")
@@ -383,6 +392,7 @@ func TestRestoreReplacesCorpusFromVerifiedBackup(t *testing.T) {
 }
 
 func TestRestoreUsesVerifiedSnapshotWhenSourceChangesDuringCopy(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.db")
@@ -494,6 +504,7 @@ func TestRestoreReportsCommittedResultWhenSnapshotCleanupFails(t *testing.T) {
 }
 
 func TestRestoreResolvesFileURIDestination(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.db")
@@ -548,6 +559,7 @@ func TestRestoreResolvesFileURIDestination(t *testing.T) {
 }
 
 func TestRestoreRejectsCorruptedBackupAndPreservesWALSidecars(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	destination := filepath.Join(dir, "corpus.db")
@@ -621,6 +633,7 @@ func TestRestoreRejectsCorruptedBackupAndPreservesWALSidecars(t *testing.T) {
 }
 
 func TestRestoreRetiresRealUncheckpointedWAL(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source.db")
@@ -707,6 +720,7 @@ func TestRestoreRetiresRealUncheckpointedWAL(t *testing.T) {
 }
 
 func TestCheckpointDestinationMakesWALDataSelfContained(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "destination.db")
 	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=wal_autocheckpoint(0)&_pragma=busy_timeout(5000)")

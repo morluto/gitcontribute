@@ -55,6 +55,7 @@ func (r *authoredHeaderReader) SearchAuthoredPullRequests(context.Context, githu
 }
 
 func TestAuthoredPullRequestSyncReusesSearchHeadersWithoutNPlusOne(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test", nil)
@@ -94,6 +95,7 @@ func TestAuthoredPullRequestSyncReusesSearchHeadersWithoutNPlusOne(t *testing.T)
 }
 
 func TestAuthoredPullRequestMinimumBudgetMakesSyncProgress(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test", nil)
@@ -118,6 +120,7 @@ func TestAuthoredPullRequestMinimumBudgetMakesSyncProgress(t *testing.T) {
 }
 
 func TestSyncThreadsBatchPlansBudgetBeforeNetworkAccess(t *testing.T) {
+	t.Parallel()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test", nil)
 	if err != nil {
@@ -137,6 +140,7 @@ func TestSyncThreadsBatchPlansBudgetBeforeNetworkAccess(t *testing.T) {
 }
 
 func TestNormalizeSyncBatchMaxRequestsBoundsInput(t *testing.T) {
+	t.Parallel()
 	if got, err := normalizeSyncBatchMaxRequests(0); err != nil || got != defaultSyncBatchMaxRequests {
 		t.Fatalf("default = %d, %v", got, err)
 	}

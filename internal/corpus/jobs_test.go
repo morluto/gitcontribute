@@ -11,6 +11,7 @@ import (
 )
 
 func TestCreateAndGetJob(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -38,6 +39,7 @@ func TestCreateAndGetJob(t *testing.T) {
 }
 
 func TestListJobsFiltersByStatusAndLimits(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -81,6 +83,7 @@ func TestListJobsFiltersByStatusAndLimits(t *testing.T) {
 }
 
 func TestJobStatusTransitions(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -129,6 +132,7 @@ func TestJobStatusTransitions(t *testing.T) {
 }
 
 func TestJobCancellation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -184,6 +188,7 @@ func TestJobCancellation(t *testing.T) {
 }
 
 func TestRecordAndListJobEvents(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -211,6 +216,7 @@ func TestRecordAndListJobEvents(t *testing.T) {
 }
 
 func TestReconcileInterruptedJobs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -257,6 +263,7 @@ func TestReconcileInterruptedJobs(t *testing.T) {
 }
 
 func TestConcurrentReadWhileJobRunning(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -301,6 +308,7 @@ func TestConcurrentReadWhileJobRunning(t *testing.T) {
 }
 
 func TestHeartbeatAndDeleteJobOwner(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -320,6 +328,7 @@ func TestHeartbeatAndDeleteJobOwner(t *testing.T) {
 }
 
 func TestJobListOrderingAndBounds(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -346,6 +355,7 @@ func TestJobListOrderingAndBounds(t *testing.T) {
 }
 
 func TestStartJobAsClaimsOwner(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -375,6 +385,7 @@ func TestStartJobAsClaimsOwner(t *testing.T) {
 }
 
 func TestReconcileRespectsLiveOwners(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -424,6 +435,7 @@ func TestReconcileRespectsLiveOwners(t *testing.T) {
 }
 
 func TestRequestJobCancellationRowsAffected(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
@@ -447,6 +459,7 @@ func TestRequestJobCancellationRowsAffected(t *testing.T) {
 }
 
 func TestZeroRowTransitionPropagatesGetJobError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 

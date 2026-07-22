@@ -11,6 +11,7 @@ import (
 )
 
 func TestLoadOpportunityEvidenceIncludesMatchedValidationObservation(t *testing.T) {
+	t.Parallel()
 	fixture := newResearchFixture(t)
 	ctx := fixture.ctx
 	svc := fixture.svc

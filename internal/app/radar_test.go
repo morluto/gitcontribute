@@ -97,6 +97,7 @@ func newRadarTestFixture(t *testing.T) radarTestFixture {
 }
 
 func TestContributionRadarUsesOnlyStoredEvidence(t *testing.T) {
+	t.Parallel()
 	fixture := newRadarTestFixture(t)
 	before, err := fixture.svc.corpus.ListFacetObservations(fixture.ctx, fixture.repoID, &fixture.issueID, FacetIssueComments)
 	if err != nil {
@@ -156,6 +157,7 @@ func assertContributionRadarEvidence(t *testing.T, report *radar.Report, now tim
 }
 
 func TestContributionRadarDistinguishesMissingRepositoryAndEmptyResult(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test", nil)
@@ -189,6 +191,7 @@ func TestContributionRadarDistinguishesMissingRepositoryAndEmptyResult(t *testin
 }
 
 func TestContributionRadarReadsStoredDuplicateCluster(t *testing.T) {
+	t.Parallel()
 	fixture := newRadarTestFixture(t)
 	repo, err := fixture.svc.corpus.GetRepository(fixture.ctx, "owner", "repo")
 	if err != nil {
@@ -225,6 +228,7 @@ func TestContributionRadarReadsStoredDuplicateCluster(t *testing.T) {
 }
 
 func TestRadarPullRequestClosingReferenceIsPrecise(t *testing.T) {
+	t.Parallel()
 	fixture := newRadarTestFixture(t)
 	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
 	stored, err := fixture.svc.corpus.GetRepository(fixture.ctx, ref.Owner, ref.Repo)
@@ -254,6 +258,7 @@ func TestRadarPullRequestClosingReferenceIsPrecise(t *testing.T) {
 }
 
 func TestContributionRadarUsesAuthoritativeClosingIssueProjection(t *testing.T) {
+	t.Parallel()
 	fixture := newRadarTestFixture(t)
 	pr, err := fixture.svc.corpus.GetThread(fixture.ctx, fixture.repoID, corpus.ThreadKindPullRequest, 9)
 	if err != nil || pr == nil {
@@ -289,6 +294,7 @@ func TestContributionRadarUsesAuthoritativeClosingIssueProjection(t *testing.T) 
 }
 
 func TestContributionRadarUnifiesCommentDependenciesAndTimelineCrossReferences(t *testing.T) {
+	t.Parallel()
 	fixture := newRadarTestFixture(t)
 	for _, number := range []int{10, 11} {
 		if _, err := fixture.svc.corpus.UpsertThread(fixture.ctx, corpus.Thread{
@@ -344,6 +350,7 @@ func TestContributionRadarUnifiesCommentDependenciesAndTimelineCrossReferences(t
 }
 
 func TestNormalizeRadarRelatedWorkReportsEvidenceTruncation(t *testing.T) {
+	t.Parallel()
 	values := make([]radar.RelatedWork, 0, maxRadarEvidencePerRelation+1)
 	for i := 0; i <= maxRadarEvidencePerRelation; i++ {
 		values = append(values, radar.RelatedWork{
@@ -358,6 +365,7 @@ func TestNormalizeRadarRelatedWorkReportsEvidenceTruncation(t *testing.T) {
 }
 
 func TestRadarWorkAccumulatorKeepsStrongLateRelationshipsWithinBound(t *testing.T) {
+	t.Parallel()
 	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
 	accumulator := newRadarWorkAccumulator(repo, 1)
 	for number := 2; number < 2+maxRadarRelatedWork; number++ {

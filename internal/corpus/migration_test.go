@@ -8,6 +8,7 @@ import (
 )
 
 func TestBaselineMigrationCreatesCurrentSchema(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "corpus.db")
 	c, err := Open(ctx, path)

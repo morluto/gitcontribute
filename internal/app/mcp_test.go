@@ -17,6 +17,7 @@ import (
 )
 
 func TestMCPReaderSearchCodeIntegration(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("owner", "repo")
 	defer srv.Close()
@@ -49,6 +50,7 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 }
 
 func TestDecodeJobJSONPreservesStructuredValues(t *testing.T) {
+	t.Parallel()
 	object, err := decodeJobJSON("request", `{"owner":"acme","limit":20}`)
 	if err != nil {
 		t.Fatalf("decode object: %v", err)
@@ -78,6 +80,7 @@ func TestDecodeJobJSONPreservesStructuredValues(t *testing.T) {
 }
 
 func TestMCPReaderRepositorySearchDoesNotFallBackFromMissingExactRepository(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
@@ -98,6 +101,7 @@ func TestMCPReaderRepositorySearchDoesNotFallBackFromMissingExactRepository(t *t
 }
 
 func TestMCPReaderExplainRejectsNonMatchingThreadAndRepository(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
@@ -125,6 +129,7 @@ func TestMCPReaderExplainRejectsNonMatchingThreadAndRepository(t *testing.T) {
 }
 
 func TestMCPReaderSearchAndExplainUseFacetEvidence(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "owner", Name: "repo"}, `{}`)
@@ -176,6 +181,7 @@ func TestMCPReaderSearchAndExplainUseFacetEvidence(t *testing.T) {
 }
 
 func TestMCPReaderExplainCodeRejectsDifferentRequestedPath(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
@@ -198,6 +204,7 @@ func TestMCPReaderExplainCodeRejectsDifferentRequestedPath(t *testing.T) {
 }
 
 func TestMCPReaderExplainCodeExactPathNotOnFirstSearchPage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
@@ -250,6 +257,7 @@ func TestMCPReaderExplainCodeExactPathNotOnFirstSearchPage(t *testing.T) {
 }
 
 func TestMCPReaderExplainCodeRejectsNonMatchingQuery(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
@@ -272,6 +280,7 @@ func TestMCPReaderExplainCodeRejectsNonMatchingQuery(t *testing.T) {
 }
 
 func TestMCPReaderExplainCodeRejectsWrongCommit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
@@ -304,6 +313,7 @@ func TestMCPReaderExplainCodeRejectsWrongCommit(t *testing.T) {
 }
 
 func TestMCPReaderExplainThreadRejectsDifferentRequestedKind(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "owner", Name: "repo"}, `{}`)
@@ -326,6 +336,7 @@ func TestMCPReaderExplainThreadRejectsDifferentRequestedKind(t *testing.T) {
 }
 
 func TestMCPReaderInvestigationWorkflow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("owner", "repo")
 	defer srv.Close()

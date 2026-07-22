@@ -16,6 +16,7 @@ import (
 )
 
 func TestSyncWithOptionsPassesStateAndSinceAndMarksPartialCoverage(t *testing.T) {
+	t.Parallel()
 	base := &testServer{owner: "octocat", repo: "test"}
 	var gotState, gotSince string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -68,6 +69,7 @@ func TestSyncWithOptionsPassesStateAndSinceAndMarksPartialCoverage(t *testing.T)
 }
 
 func TestSyncWithOptionsEnforcesExactItemLimit(t *testing.T) {
+	t.Parallel()
 	base := &testServer{owner: "octocat", repo: "test"}
 	var gotPerPage string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -94,6 +96,7 @@ func TestSyncWithOptionsEnforcesExactItemLimit(t *testing.T) {
 }
 
 func TestPlanArchiveSyncReportsConservativeRequestCeiling(t *testing.T) {
+	t.Parallel()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
 	ctx := context.Background()
@@ -135,6 +138,7 @@ func TestPlanArchiveSyncReportsConservativeRequestCeiling(t *testing.T) {
 }
 
 func TestSyncWithOptionsRefreshesExactNumbersDeterministically(t *testing.T) {
+	t.Parallel()
 	base := &testServer{owner: "octocat", repo: "test"}
 	var gotNumbers []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -175,6 +179,7 @@ func TestSyncWithOptionsRefreshesExactNumbersDeterministically(t *testing.T) {
 }
 
 func TestSyncWithOptionsDoesNotHydratePullRequestDetails(t *testing.T) {
+	t.Parallel()
 	base := &testServer{owner: "octocat", repo: "test"}
 	prDetailRequests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -216,6 +221,7 @@ func TestSyncWithOptionsDoesNotHydratePullRequestDetails(t *testing.T) {
 }
 
 func TestSyncWithOptionsPreservesPreviouslyObservedPullRequestMergeState(t *testing.T) {
+	t.Parallel()
 	base := &testServer{owner: "octocat", repo: "test"}
 	srv := httptest.NewServer(http.HandlerFunc(base.handler))
 	defer srv.Close()
@@ -254,6 +260,7 @@ func TestSyncWithOptionsPreservesPreviouslyObservedPullRequestMergeState(t *test
 }
 
 func TestSyncWithOptionsStopsBeforeRequestBudgetIsExceeded(t *testing.T) {
+	t.Parallel()
 	base := &testServer{owner: "octocat", repo: "test"}
 	pageTwoRequests := 0
 	var srv *httptest.Server
@@ -284,6 +291,7 @@ func TestSyncWithOptionsStopsBeforeRequestBudgetIsExceeded(t *testing.T) {
 }
 
 func TestSyncWithOptionsRejectsExactSelectionOverRequestBudgetBeforeIO(t *testing.T) {
+	t.Parallel()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test", nil)
 	if err != nil {
@@ -298,6 +306,7 @@ func TestSyncWithOptionsRejectsExactSelectionOverRequestBudgetBeforeIO(t *testin
 }
 
 func TestSyncWithOptionsRejectsUnboundedPageLimit(t *testing.T) {
+	t.Parallel()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test", nil)
 	if err != nil {
@@ -310,6 +319,7 @@ func TestSyncWithOptionsRejectsUnboundedPageLimit(t *testing.T) {
 }
 
 func TestSyncWithOptionsRejectsInvalidRequestBudgets(t *testing.T) {
+	t.Parallel()
 	for _, maxRequests := range []int{-1, syncFixedRequestCost() - 1, maxSyncRequests + 1} {
 		if _, err := normalizeSyncOptions(SyncOptions{MaxRequests: maxRequests}); err == nil {
 			t.Fatalf("max requests %d unexpectedly accepted", maxRequests)
@@ -318,6 +328,7 @@ func TestSyncWithOptionsRejectsInvalidRequestBudgets(t *testing.T) {
 }
 
 func TestSyncWithOptionsRejectsConflictingExactFilters(t *testing.T) {
+	t.Parallel()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test", nil)
 	if err != nil {

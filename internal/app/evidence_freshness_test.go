@@ -13,6 +13,7 @@ import (
 )
 
 func TestEvidenceFreshnessFromThreadInvestigationBaseline(t *testing.T) {
+	t.Parallel()
 	fixture := newResearchFixture(t)
 	ref := research.ThreadRef{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Kind: domain.IssueKind, Number: 1}
 	started, err := fixture.svc.StartInvestigationFromThread(fixture.ctx, ref)
@@ -74,6 +75,7 @@ func TestEvidenceFreshnessFromThreadInvestigationBaseline(t *testing.T) {
 }
 
 func TestEvidenceFreshnessManualObservationIsNotApplicable(t *testing.T) {
+	t.Parallel()
 	fixture := newResearchFixture(t)
 	started, err := fixture.svc.StartInvestigationFromThread(fixture.ctx, research.ThreadRef{
 		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Kind: domain.IssueKind, Number: 1,

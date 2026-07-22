@@ -15,6 +15,7 @@ import (
 )
 
 func TestContributionWorkflowPersistsAcrossReopen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "workflow.db")
 	c, err := Open(ctx, path)
@@ -71,6 +72,7 @@ func TestContributionWorkflowPersistsAcrossReopen(t *testing.T) {
 }
 
 func TestFindRelatedUsesRepositoryAndCategory(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	svc := investigation.NewService(c, c)
@@ -90,6 +92,7 @@ func TestFindRelatedUsesRepositoryAndCategory(t *testing.T) {
 }
 
 func TestPromoteHypothesisRollsBackOnOpportunityConflict(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	svc := investigation.NewService(c, c)
@@ -131,6 +134,7 @@ func TestPromoteHypothesisRollsBackOnOpportunityConflict(t *testing.T) {
 }
 
 func TestPromoteHypothesisRejectsStaleConcurrentPromotion(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	svc := investigation.NewService(c, c)
@@ -158,6 +162,7 @@ func TestPromoteHypothesisRejectsStaleConcurrentPromotion(t *testing.T) {
 }
 
 func TestInvestigationAndOpportunityListQueries(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	svc := investigation.NewService(c, c)
@@ -215,6 +220,7 @@ func TestInvestigationAndOpportunityListQueries(t *testing.T) {
 }
 
 func TestWorkspacePersistsAcrossReopen(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "workspace.db")
 	c, err := Open(ctx, path)

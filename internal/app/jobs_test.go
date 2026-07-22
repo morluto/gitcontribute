@@ -111,6 +111,7 @@ func waitForCorpusJobStatus(t *testing.T, c *corpus.Corpus, id, want string, tim
 }
 
 func TestSubmitAndCompleteJob(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newJobTestService(t)
 	jobs, err := svc.Jobs(ctx)
@@ -146,6 +147,7 @@ func TestSubmitAndCompleteJob(t *testing.T) {
 }
 
 func TestJobExecutorRecordsReadErrorAfterExecution(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newJobTestService(t)
 	store := &faultingJobStore{jobStore: svc.corpus}
@@ -174,6 +176,7 @@ func TestJobExecutorRecordsReadErrorAfterExecution(t *testing.T) {
 }
 
 func TestJobExecutorRecordsReadErrorAfterStartFailure(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newJobTestService(t)
 	store := &faultingJobStore{
@@ -206,6 +209,7 @@ func TestJobExecutorRecordsReadErrorAfterStartFailure(t *testing.T) {
 }
 
 func TestJobCancellation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newJobTestService(t)
 	jobs, err := svc.Jobs(ctx)
@@ -243,6 +247,7 @@ func TestJobCancellation(t *testing.T) {
 }
 
 func TestCancelQueuedJob(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newJobTestService(t)
 	jobs, err := svc.Jobs(ctx)
@@ -271,6 +276,7 @@ func TestCancelQueuedJob(t *testing.T) {
 }
 
 func TestJobExecutorCloseCancelsAndWaits(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newJobTestService(t)
 	jobs, err := svc.Jobs(ctx)
@@ -317,6 +323,7 @@ func TestJobExecutorCloseCancelsAndWaits(t *testing.T) {
 }
 
 func TestJobExecutorUsesLifecycleContext(t *testing.T) {
+	t.Parallel()
 	lifecycle, cancelLifecycle := context.WithCancel(context.Background())
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := NewWithContext(lifecycle, paths, "test", nil)
@@ -348,6 +355,7 @@ func TestJobExecutorUsesLifecycleContext(t *testing.T) {
 }
 
 func TestStartupReconciliation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	paths := config.NewPaths(&config.Env{Home: dir})
@@ -404,6 +412,7 @@ func TestStartupReconciliation(t *testing.T) {
 }
 
 func TestConcurrentReadWhileJobRunning(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newJobTestService(t)
 	jobs, err := svc.Jobs(ctx)
@@ -455,6 +464,7 @@ func TestConcurrentReadWhileJobRunning(t *testing.T) {
 }
 
 func TestRemoteCancellationAcrossExecutors(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newJobTestService(t)
 	jobs := newJobExecutorOnService(t, svc, jobExecutorConfig{
@@ -488,6 +498,7 @@ func TestRemoteCancellationAcrossExecutors(t *testing.T) {
 }
 
 func TestLiveOwnerNotReconciledByAnotherExecutor(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newJobTestService(t)
 	jobsA := newJobExecutorOnService(t, svc, jobExecutorConfig{
@@ -530,6 +541,7 @@ func TestLiveOwnerNotReconciledByAnotherExecutor(t *testing.T) {
 }
 
 func TestAbandonedOwnerReconciledByNewExecutor(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newJobTestService(t)
 	// A never heartbeats after its initial registration, so it will be
@@ -552,9 +564,11 @@ func TestAbandonedOwnerReconciledByNewExecutor(t *testing.T) {
 	<-blocked
 	waitForJobStatus(t, jobsA, id, corpus.JobStatusRunning, 1*time.Second)
 
-	// After the short lease expires, a second process opens the database and
-	// reconciles abandoned owners.
-	time.Sleep(300 * time.Millisecond)
+	// Make the owner stale explicitly instead of waiting for wall-clock time.
+	// The executor's one-hour heartbeat interval keeps the fixture stable.
+	if err := svc.corpus.RegisterJobOwner(ctx, jobsA.ownerID, 1, time.Now().UTC().Add(-time.Hour)); err != nil {
+		t.Fatalf("age job owner: %v", err)
+	}
 
 	cB, err := corpus.Open(ctx, svc.databasePath())
 	if err != nil {
@@ -579,6 +593,7 @@ func TestAbandonedOwnerReconciledByNewExecutor(t *testing.T) {
 }
 
 func TestReadOnlyCorpusOpenDoesNotReconcileJobs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
 	paths := config.NewPaths(&config.Env{Home: dir})
@@ -637,6 +652,7 @@ func TestReadOnlyCorpusOpenDoesNotReconcileJobs(t *testing.T) {
 }
 
 func TestReconcileConcurrentWithHeartbeat(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc := newJobTestService(t)
 	const (
