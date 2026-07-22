@@ -133,9 +133,13 @@ func syncExactThreadHeaders(ctx context.Context, reader github.Reader, ref domai
 }
 
 func syncListedThreadHeaders(ctx context.Context, reader github.Reader, ref domain.RepoRef, opts SyncOptions, budget *syncRequestBudget, writer *syncThreadWriter) (syncThreadSelection, error) {
+	perPage := 100
+	if opts.MaxItems > 0 {
+		perPage = min(perPage, opts.MaxItems)
+	}
 	listOpts := github.ListIssueOptions{
 		State: opts.State, Sort: "updated", Direction: "desc", Since: opts.Since,
-		PageOptions: github.PageOptions{Page: 1, PerPage: 100},
+		PageOptions: github.PageOptions{Page: 1, PerPage: perPage},
 	}
 	requests, truncated, requestCapped := 0, false, false
 	for {
@@ -151,8 +155,19 @@ func syncListedThreadHeaders(ctx context.Context, reader github.Reader, ref doma
 			return syncThreadSelection{}, fmt.Errorf("list issues page %d: %w", listOpts.Page, err)
 		}
 		requests++
-		if err := writer.storeAll(res.Items); err != nil {
-			return syncThreadSelection{}, err
+		reachedLimit := false
+		for index, issue := range res.Items {
+			if err := writer.store(issue); err != nil {
+				return syncThreadSelection{}, err
+			}
+			if opts.MaxItems > 0 && writer.updated >= opts.MaxItems {
+				truncated = res.Page.HasNext || index < len(res.Items)-1
+				reachedLimit = true
+				break
+			}
+		}
+		if reachedLimit {
+			break
 		}
 		if !res.Page.HasNext {
 			break
@@ -166,6 +181,9 @@ func syncListedThreadHeaders(ctx context.Context, reader github.Reader, ref doma
 			break
 		}
 		listOpts.Page = res.Page.NextPage
+		if opts.MaxItems > 0 {
+			listOpts.PerPage = min(100, opts.MaxItems-writer.updated)
+		}
 	}
 	complete := opts.Kind == "both" && opts.State == "all" && opts.Since.IsZero() && !truncated
 	return writer.result(requests, complete, requestCapped), nil

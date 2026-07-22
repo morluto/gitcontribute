@@ -67,6 +67,32 @@ func TestSyncWithOptionsPassesStateAndSinceAndMarksPartialCoverage(t *testing.T)
 	}
 }
 
+func TestSyncWithOptionsEnforcesExactItemLimit(t *testing.T) {
+	base := &testServer{owner: "octocat", repo: "test"}
+	var gotPerPage string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/repos/octocat/test/issues" {
+			gotPerPage = r.URL.Query().Get("per_page")
+			w.Header().Set("Content-Type", "application/json")
+			setAppRateHeaders(w.Header())
+			_ = writeAppJSON(w, base.issuePayload())
+			return
+		}
+		base.handler(w, r)
+	}))
+	defer srv.Close()
+
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+	result, err := svc.SyncWithOptions(context.Background(), cli.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{Kind: "pull_request", MaxItems: 1, MaxPages: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPerPage != "1" || result.Updated != 1 {
+		t.Fatalf("per_page=%q updated=%d, want 1 and 1", gotPerPage, result.Updated)
+	}
+}
+
 func TestPlanArchiveSyncReportsConservativeRequestCeiling(t *testing.T) {
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()

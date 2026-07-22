@@ -161,10 +161,10 @@ func repositorySearchMode(in mcpserver.SearchGitHubRepositoriesInput) (string, s
 	raw := strings.TrimSpace(in.RawQuery)
 	structured := hasStructuredRepositorySearch(in)
 	if raw != "" && structured {
-		return "", "", nil, false, mcpserver.InvalidArgument("raw_query", "cannot be combined with structured filters; choose one input mode", map[string]any{"text": "inference", "topics": []string{"cuda"}})
+		return "", "", nil, false, mcpserver.InvalidArgument("raw_query", "cannot be combined with structured filters; choose one input mode", map[string]any{"raw_query": "is:public language:go stars:>=100"})
 	}
 	if raw == "" && !structured {
-		return "", "", nil, false, mcpserver.InvalidArgument("text", "provide raw_query or at least one structured filter such as text, topics, language, or pushed_after", map[string]any{"text": "inference", "match_fields": []string{"name", "description"}})
+		return "", "", nil, false, mcpserver.InvalidArgument("text", "provide raw_query or at least one structured filter such as text, topics, language, or pushed_after", map[string]any{"text": "GitHub contribution research", "match_fields": []string{"name", "description"}})
 	}
 	if raw != "" {
 		return raw, "advanced raw query", nil, false, nil
@@ -187,7 +187,7 @@ func compileStructuredRepositorySearch(in mcpserver.SearchGitHubRepositoriesInpu
 	}
 	for _, topic := range in.Topics {
 		if strings.TrimSpace(topic) == "" {
-			return "", nil, mcpserver.InvalidArgument("topics", "must not contain blank values", map[string]any{"topics": []string{"cuda"}})
+			return "", nil, mcpserver.InvalidArgument("topics", "must not contain blank values", map[string]any{"topics": []string{"go", "github-actions"}})
 		}
 		parts = append(parts, "topic:"+quoteSearchTerm(topic))
 	}
@@ -217,7 +217,7 @@ func compileStructuredRepositorySearch(in mcpserver.SearchGitHubRepositoriesInpu
 
 func validateRepositoryMatchFields(text string, fields []string) error {
 	if len(fields) > 0 && strings.TrimSpace(text) == "" {
-		return mcpserver.InvalidArgument("match_fields", "requires text", map[string]any{"text": "inference", "match_fields": []string{"name", "description"}})
+		return mcpserver.InvalidArgument("match_fields", "requires text", map[string]any{"text": "GitHub contribution research", "match_fields": []string{"name", "description"}})
 	}
 	for _, field := range fields {
 		if field != "name" && field != "description" && field != "readme" {
