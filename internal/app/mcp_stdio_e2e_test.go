@@ -61,6 +61,7 @@ func TestMCPStdioHelper(t *testing.T) {
 //
 //nolint:cyclop
 func TestMCPStdioScalableResearchFlow(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	home := t.TempDir()
@@ -147,6 +148,7 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 }
 
 func TestMCPStdioPullRequestPortfolioFlow(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	home := t.TempDir()

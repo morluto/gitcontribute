@@ -69,6 +69,7 @@ func newManager(t *testing.T) *Manager {
 }
 
 func TestManager_CloneAndResolve(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, baseSHA, candidateSHA := setupRemote(t)
 	mgr := newManager(t)
@@ -99,6 +100,7 @@ func TestManager_CloneAndResolve(t *testing.T) {
 }
 
 func TestManagerCheckMergeUsesAlreadyFetchedRevisionsWithoutMutation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, baseSHA, candidateSHA := setupRemote(t)
 	mgr := newManager(t)
@@ -121,6 +123,7 @@ func TestManagerCheckMergeUsesAlreadyFetchedRevisionsWithoutMutation(t *testing.
 }
 
 func TestManager_CreateAndInspect(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, baseSHA, candidateSHA := setupRemote(t)
 	mgr := newManager(t)
@@ -177,6 +180,7 @@ func TestManager_CreateAndInspect(t *testing.T) {
 }
 
 func TestManager_Fetch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, _, _ := setupRemote(t)
 	mgr := newManager(t)
@@ -203,6 +207,7 @@ func TestManager_Fetch(t *testing.T) {
 }
 
 func TestManager_ReopensAndRefreshesExistingMirror(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, _, _ := setupRemote(t)
 	root := t.TempDir()
@@ -235,6 +240,7 @@ func TestManager_ReopensAndRefreshesExistingMirror(t *testing.T) {
 }
 
 func TestManager_RejectsExistingMirrorForDifferentRemote(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	firstRemote, _, _ := setupRemote(t)
 	secondRemote, _, _ := setupRemote(t)
@@ -308,6 +314,7 @@ func TestManager_RejectsExistingMirrorSymlink(t *testing.T) {
 }
 
 func TestManager_DirtyState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, _, _ := setupRemote(t)
 	mgr := newManager(t)
@@ -347,6 +354,7 @@ func TestManager_DirtyState(t *testing.T) {
 }
 
 func TestManager_DuplicateCreate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, _, _ := setupRemote(t)
 	mgr := newManager(t)
@@ -363,6 +371,7 @@ func TestManager_DuplicateCreate(t *testing.T) {
 }
 
 func TestManager_PathContainment(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, _, _ := setupRemote(t)
 	mgr := newManager(t)
@@ -390,6 +399,7 @@ func TestManager_PathContainment(t *testing.T) {
 }
 
 func TestManager_PathMethodsRejectSymlinkEscape(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	outside := t.TempDir()
 	link := filepath.Join(mgr.root, "workspaces", "escape")
@@ -414,6 +424,7 @@ func TestManager_PathMethodsRejectSymlinkEscape(t *testing.T) {
 }
 
 func TestManager_HasUntrackedByPath(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, _, _ := setupRemote(t)
 	mgr := newManager(t)
@@ -434,6 +445,7 @@ func TestManager_HasUntrackedByPath(t *testing.T) {
 }
 
 func TestManager_Spaces(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, _, _ := setupRemote(t)
 	mgr := newManager(t)
@@ -463,6 +475,7 @@ func TestManager_Spaces(t *testing.T) {
 }
 
 func TestManager_Cancellation(t *testing.T) {
+	t.Parallel()
 	remote, _, _ := setupRemote(t)
 	mgr := newManager(t)
 
@@ -475,6 +488,7 @@ func TestManager_Cancellation(t *testing.T) {
 }
 
 func TestManager_InvalidName(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, _, _ := setupRemote(t)
 	mgr := newManager(t)
@@ -488,6 +502,7 @@ func TestManager_InvalidName(t *testing.T) {
 }
 
 func TestManager_RejectsExecutableRemoteTransport(t *testing.T) {
+	t.Parallel()
 	mgr := newManager(t)
 	err := mgr.Clone(context.Background(), "ext::sh -c touch /tmp/pwned", "origin")
 	if !errors.Is(err, ErrInvalidRemote) {
@@ -505,6 +520,7 @@ func (r *countingRunner) Run(context.Context, string, ...string) (string, error)
 }
 
 func TestManager_CleanupWorktreeReturnsGitRemovalFailure(t *testing.T) {
+	t.Parallel()
 	path := t.TempDir()
 	runner := &countingRunner{}
 	m := &Manager{runner: runner}
@@ -522,6 +538,7 @@ func TestManager_CleanupWorktreeReturnsGitRemovalFailure(t *testing.T) {
 }
 
 func TestManager_RejectsCredentialRemoteBeforeGitOrMirrorWrite(t *testing.T) {
+	t.Parallel()
 	fixtureUser := strings.Join([]string{"fixture", "user"}, "-")
 	fixturePassword := strings.Join([]string{"fixture", "password"}, "-")
 	remote := "https://" + fixtureUser + ":" + fixturePassword + "@github.com/owner/repo.git"
@@ -548,6 +565,7 @@ func TestManager_RejectsCredentialRemoteBeforeGitOrMirrorWrite(t *testing.T) {
 }
 
 func TestManager_StatusDisablesRepositoryFSMonitor(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, _, _ := setupRemote(t)
 	mgr := newManager(t)
@@ -574,6 +592,7 @@ func TestManager_StatusDisablesRepositoryFSMonitor(t *testing.T) {
 }
 
 func TestManager_DiffIncludesWorkingChanges(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	remote, _, _ := setupRemote(t)
 	mgr := newManager(t)
