@@ -3,7 +3,24 @@ package tracking
 import (
 	"strings"
 	"testing"
+
+	"github.com/morluto/gitcontribute/internal/redaction"
 )
+
+func TestSanitizeStringUsesCanonicalCredentialRedaction(t *testing.T) {
+	t.Parallel()
+	fixtures := []string{
+		"Authorization: Bearer fixture-secret",
+		"api_key=fixture-secret",
+		"github_pat_" + strings.Repeat("a", 22),
+		"ghp_" + strings.Repeat("a", 36),
+	}
+	for _, fixture := range fixtures {
+		if got, want := sanitizeString(fixture), redaction.String(fixture); got != want {
+			t.Fatalf("sanitizeString(%q) = %q, canonical redaction = %q", fixture, got, want)
+		}
+	}
+}
 
 func TestSanitizeMetadataRedactsSensitiveKeysRecursively(t *testing.T) {
 	t.Parallel()

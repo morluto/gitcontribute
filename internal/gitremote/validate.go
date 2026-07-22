@@ -37,6 +37,9 @@ func Validate(remote string) error {
 	case strings.HasPrefix(remote, "ssh://"):
 		return validateSSHURL(remote)
 	default:
+		if strings.Contains(remote, "://") {
+			return ErrInvalid
+		}
 		return validateSCPLikeRemote(remote)
 	}
 }
@@ -75,15 +78,19 @@ func validateSSHURL(remote string) error {
 }
 
 func validateSCPLikeRemote(remote string) error {
-	if at := strings.IndexByte(remote, '@'); at > 0 {
-		if strings.Contains(remote[:at], ":") {
-			return ErrInvalid
-		}
-		hostPath := remote[at+1:]
-		if colon := strings.IndexByte(hostPath, ':'); colon > 0 && colon < len(hostPath)-1 &&
-			!strings.Contains(hostPath[:colon], "@") {
-			return nil
-		}
+	colon := strings.IndexByte(remote, ':')
+	if colon <= 0 || colon == len(remote)-1 {
+		return ErrInvalid
 	}
-	return ErrInvalid
+	if at := strings.IndexByte(remote, '@'); at > colon {
+		return ErrInvalid
+	}
+	host := remote[:colon]
+	if strings.ContainsAny(host, "/\\ \t") || strings.Count(host, "@") > 1 {
+		return ErrInvalid
+	}
+	if at := strings.IndexByte(host, '@'); at == 0 || at == len(host)-1 {
+		return ErrInvalid
+	}
+	return nil
 }

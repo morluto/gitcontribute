@@ -115,6 +115,27 @@ func TestCircuitBreakerReopensAfterFailedProbe(t *testing.T) {
 	}
 }
 
+func TestCircuitBreakerReopensAfterProbeTimeout(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	cb := newCircuitBreaker(1, 30*time.Second, 5*time.Second)
+	cb.setClock(func() time.Time { return now })
+	cb.recordFailure()
+
+	now = now.Add(31 * time.Second)
+	if !cb.allow() {
+		t.Fatal("expected probe request to be allowed")
+	}
+	now = now.Add(5 * time.Second)
+	if cb.allow() {
+		t.Fatal("expected timed-out probe to reopen circuit")
+	}
+	now = now.Add(30 * time.Second)
+	if !cb.allow() {
+		t.Fatal("expected new probe after another cooldown")
+	}
+}
+
 func TestCircuitBreakerRecordsSuccessesResetsCounter(t *testing.T) {
 	t.Parallel()
 	cb := newCircuitBreaker(3, 30*time.Second, 5*time.Second)
