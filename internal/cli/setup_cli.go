@@ -167,7 +167,7 @@ func (c *CLI) confirmSetupPlan(ctx context.Context, opts SetupOptions, jsonOutpu
 		return false, NewCLIError(ExitGeneral, fmt.Errorf("write setup plan: %w", err))
 	}
 	if plan.HasFailures() {
-		return false, NewCLIError(ExitGeneral, errors.New("setup plan contains one or more failed steps"))
+		return false, NewCLIError(ExitGeneral, setupFailureError(plan))
 	}
 	prompter := c.setupPrompter
 	if prompter == nil {
@@ -224,9 +224,22 @@ func (c *CLI) executeSetup(ctx context.Context, opts SetupOptions, jsonOutput bo
 		}
 	}
 	if report.HasFailures() {
-		return NewCLIError(ExitGeneral, errors.New("one or more setup steps failed"))
+		return NewCLIError(ExitGeneral, setupFailureError(report))
 	}
 	return nil
+}
+
+func setupFailureError(report *SetupReport) error {
+	for _, step := range report.Steps {
+		if step.Status != "failed" {
+			continue
+		}
+		if step.Message != "" {
+			return fmt.Errorf("%s: %s", setupStepLabel(step.Name), step.Message)
+		}
+		return fmt.Errorf("%s setup step failed", setupStepLabel(step.Name))
+	}
+	return errors.New("one or more setup steps failed")
 }
 
 func setupProgressEnabled(opts SetupOptions, output io.Writer) bool {

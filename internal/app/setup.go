@@ -41,10 +41,10 @@ func (s *Service) setup(ctx context.Context, opts cli.SetupOptions, observer cli
 	if err != nil {
 		return nil, err
 	}
-	if stop, err := run.preflightClients(); err != nil || stop {
+	if stop, err := run.preflightCorpus(); err != nil || stop {
 		return run.report, err
 	}
-	if stop, err := run.preflightCorpus(); err != nil || stop {
+	if stop, err := run.preflightClients(); err != nil || stop {
 		return run.report, err
 	}
 	if err := run.setupRuntime(); err != nil {
@@ -168,25 +168,25 @@ func (r *setupRun) preflightClients() (bool, error) {
 }
 
 func (r *setupRun) preflightCorpus() (bool, error) {
-	if r.operation != clientsetup.Configure || r.opts.DryRun {
+	if r.operation != clientsetup.Configure {
 		return false, nil
 	}
 	inspection, err := r.service.InspectCorpus(r.ctx)
 	if err != nil {
 		return false, err
 	}
+	r.report.Corpus = inspection
 	if inspection.State == "missing" || inspection.State == "current" {
 		return false, nil
 	}
-	r.report.Corpus = inspection
 	step := cli.SetupStep{Name: "corpus", Path: inspection.Path, Status: "failed"}
 	switch inspection.State {
 	case "migration_required":
-		step.Message = "setup will not migrate an existing corpus; run corpus migrate explicitly"
+		step.Message = fmt.Sprintf("database schema version %d requires migration to %d; run gitcontribute corpus migrate --yes", inspection.Current, inspection.Target)
 	case "newer":
-		step.Message = "the corpus schema is newer than this executable"
+		return true, fmt.Errorf("setup cannot continue: database schema version %d is newer than this binary supports (%d) at %s; run a matching GitContribute release, gitcontribute upgrade, or gitcontribute corpus inspect; no changes were made", inspection.Current, inspection.Target, inspection.Path)
 	case "damaged":
-		step.Message = inspection.Problem
+		return true, fmt.Errorf("setup cannot continue: local corpus at %s is damaged: %s; run gitcontribute corpus inspect; no changes were made", inspection.Path, inspection.Problem)
 	default:
 		step.Message = "the corpus cannot be initialized in its current state"
 	}
@@ -307,29 +307,19 @@ func configurationStep(configured *cli.ConfigureResult, err error, existed, dryR
 func (r *setupRun) initializeCorpus(configured bool) {
 	if r.opts.DryRun {
 		step := cli.SetupStep{Name: "corpus", Status: "would initialize"}
-		inspection, err := r.service.InspectCorpus(r.ctx)
-		if err != nil {
+		inspection := r.report.Corpus
+		if inspection == nil {
 			step.Status = "failed"
-			step.Message = err.Error()
+			step.Message = "corpus compatibility was not inspected"
 			r.report.Steps = append(r.report.Steps, step)
 			return
 		}
-		r.report.Corpus = inspection
 		step.Path = inspection.Path
 		switch inspection.State {
 		case "missing":
 			step.Status = "would initialize"
 		case "current":
 			step.Status = "already initialized"
-		case "migration_required":
-			step.Status = "failed"
-			step.Message = "setup will not migrate an existing corpus; run corpus migrate explicitly"
-		case "newer":
-			step.Status = "failed"
-			step.Message = "the corpus schema is newer than this executable"
-		case "damaged":
-			step.Status = "failed"
-			step.Message = inspection.Problem
 		}
 		r.report.Steps = append(r.report.Steps, step)
 		return
