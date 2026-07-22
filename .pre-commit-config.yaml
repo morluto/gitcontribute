@@ -1,3 +1,6 @@
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -11,33 +14,16 @@ repos:
   - repo: local
     hooks:
       - id: gofmt
-        name: gofmt
-        entry: gofmt -l
+        name: format staged Go files
+        entry: gofmt -w
         language: system
         types: [go]
-        pass_filenames: false
-        args: ["."]
-        require_serial: true
 
-      - id: go-vet
-        name: go vet
-        entry: go vet ./...
+      - id: go-test
+        name: cached Go tests
+        entry: go test -short -parallel=4 -timeout 120s ./...
         language: system
-        types: [go]
+        files: '(^|/).*\.go$|^go\.(mod|sum)$'
         pass_filenames: false
         require_serial: true
-
-      - id: golangci-lint
-        name: golangci-lint
-        entry: golangci-lint run
-        language: system
-        types: [go]
-        pass_filenames: false
-        require_serial: true
-
-      - id: go-file-size
-        name: check Go file size
-        entry: bash -c 'find . -name "*.go" -not -path "./.git/*" -exec wc -l {} + | awk '"'"'{if ($1 > 800 && $2 != "total") print $2 ":" $1 " lines (exceeds 800 line limit)"}'"'"' | tee /dev/stderr | grep -q . && exit 1 || exit 0'
-        language: system
-        pass_filenames: false
-        require_serial: true
+        stages: [pre-push]

@@ -1,18 +1,18 @@
 ## Description
 
-<!-- What does this change do and why? -->
+<!-- What problem does this solve, and why does this approach fit the project? -->
 
-## Testing Done
+## Testing
 
-<!-- How was this change tested? Include commands and scenarios. -->
+<!-- List the commands and scenarios that provide useful review evidence. -->
 
-- [ ] `go test ./...` passes
-- [ ] `golangci-lint run ./...` passes
-- [ ] `go test -race ./internal/app ./internal/corpus` passes
+- [ ] `make verify` passes
+- [ ] Focused regression coverage was added or updated where applicable
+- [ ] `make test-race` passes for storage, concurrency, locking, or cancellation changes
 
-## Checklist
+## Compatibility and scope
 
-- [ ] Focused regression tests added for ordering, resumability, cancellation, and side-effect boundaries
-- [ ] Storage invariants preserved (see CONTRIBUTING.md)
-- [ ] `gofmt` applied to changed Go files
-- [ ] No new third-party types exposed outside adapters
+<!-- Note meaningful compatibility effects, limitations, or intentionally unchanged behavior. -->
+
+- [ ] Storage and side-effect invariants remain intact
+- [ ] No unrelated cleanup or generated-output churn is included
