@@ -476,6 +476,45 @@ func (c *Corpus) GetValidationRun(ctx context.Context, id string) (*evidence.Val
 	return &item, nil
 }
 
+// SaveValidationRunGroup persists one bounded repeat/stress aggregate.
+func (c *Corpus) SaveValidationRunGroup(ctx context.Context, item *evidence.ValidationRunGroup) error {
+	if item == nil || item.ID == "" {
+		return errors.New("validation run group id is required")
+	}
+	payload, err := marshalWorkflow(item)
+	if err != nil {
+		return err
+	}
+	_, err = c.db.ExecContext(ctx, `
+		INSERT INTO validation_run_groups (
+			id, definition_id, investigation_id, opportunity_id, classification,
+			requested_runs, completed_runs, payload, started_at, completed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, item.ID, item.DefinitionID, item.InvestigationID, item.OpportunityID, item.Classification,
+		item.RequestedRuns, item.CompletedRuns, payload, encodeTime(item.StartedAt), encodeTime(item.CompletedAt))
+	if err != nil {
+		return fmt.Errorf("save validation run group: %w", err)
+	}
+	return nil
+}
+
+// GetValidationRunGroup returns one persisted repeat/stress aggregate.
+func (c *Corpus) GetValidationRunGroup(ctx context.Context, id string) (*evidence.ValidationRunGroup, error) {
+	var payload string
+	err := c.db.QueryRowContext(ctx, `SELECT payload FROM validation_run_groups WHERE id=?`, id).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, evidence.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get validation run group: %w", err)
+	}
+	var item evidence.ValidationRunGroup
+	if err := unmarshalWorkflow(payload, &item); err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
 // ListValidationRuns returns validation runs scoped to an opportunity.
 func (c *Corpus) ListValidationRuns(ctx context.Context, opportunityID string) ([]*evidence.ValidationRun, error) {
 	return listWorkflowPayloads[evidence.ValidationRun](

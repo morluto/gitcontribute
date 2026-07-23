@@ -253,6 +253,10 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 	assertSchemaValue(t, tools[ToolRankThreads].OutputSchema, []string{"properties", "total", "type"}, "integer")
 	assertSchemaValue(t, tools[ToolRankThreads].OutputSchema, []string{"properties", "truncated", "type"}, "boolean")
 	assertSchemaValue(t, tools[ToolRunValidation].InputSchema, []string{"properties", "execute", "const"}, true)
+	assertSchemaValue(t, tools[ToolDefineValidation].InputSchema, []string{"properties", "protocol", "enum"}, []any{"mcp_stdio"})
+	assertSchemaValue(t, tools[ToolRunRepeatedValidation].InputSchema, []string{"properties", "run_count", "default"}, float64(3))
+	assertSchemaValue(t, tools[ToolRunRepeatedValidation].InputSchema, []string{"properties", "run_count", "maximum"}, float64(100))
+	assertSchemaValue(t, tools[ToolRunRepeatedValidation].InputSchema, []string{"properties", "execute", "const"}, true)
 	assertSchemaValue(t, tools[ToolPromoteOpportunity].InputSchema, []string{"properties", "confidence", "maximum"}, float64(1))
 	validationSchema, err := json.Marshal(tools[ToolDefineValidation].InputSchema)
 	if err != nil {
@@ -347,6 +351,7 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 		{"Clone the remote and create a managed Git worktree", ToolCreateWorkspace},
 		{"Render and persist a pull request draft from a verified managed workspace diff", ToolPrepareContribution},
 		{"Execute the stored validation command against the candidate workspace", ToolRunValidation},
+		{"Run a repeat stress validation group with concurrency and telemetry", ToolRunRepeatedValidation},
 		{"Stop a running durable job", ToolCancelJob},
 		{"Poll several durable jobs together with structured progress", ToolGetJob},
 		{"Read stored facet coverage for several exact threads", ToolGetCoverage},
@@ -395,6 +400,8 @@ func TestInvalidToolCallEvaluation(t *testing.T) {
 		{ToolHydrateThreads, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "rocket", "number": 1}}, "facets": []string{"unknown"}}},
 		{ToolSyncThreads, map[string]any{"selection": "threads", "threads": []any{map[string]any{"owner": "acme", "repo": "rocket", "number": 1}}, "state": "open"}},
 		{ToolRunValidation, map[string]any{"id": "val-1", "kind": "candidate", "execute": false}},
+		{ToolRunRepeatedValidation, map[string]any{"id": "val-1", "target": "both", "run_count": 3, "execute": false}},
+		{ToolDefineValidation, map[string]any{"investigation_id": "inv-1", "kind": "test", "command": "server", "workspace_id": "ws-1", "readiness_timeout": "30s"}},
 		{ToolPromoteOpportunity, map[string]any{"hypothesis_id": "hyp-1", "problem_statement": "p", "scope": "s", "impact": "i", "expected_effort": "e", "confidence": 1.1}},
 		{ToolPrepareContribution, map[string]any{"opportunity_id": "opp-1", "kind": "pull_request", "approach": "focused"}},
 	}
@@ -474,6 +481,10 @@ func TestSideEffectAuthorizationEvaluation(t *testing.T) {
 	run := tools[ToolRunValidation].Annotations
 	if run == nil || run.ReadOnlyHint || run.DestructiveHint == nil || !*run.DestructiveHint {
 		t.Fatalf("validation annotations = %+v", run)
+	}
+	repeat := tools[ToolRunRepeatedValidation].Annotations
+	if repeat == nil || repeat.ReadOnlyHint || repeat.DestructiveHint == nil || !*repeat.DestructiveHint {
+		t.Fatalf("repeated validation annotations = %+v", repeat)
 	}
 	prepare := tools[ToolPrepareContribution]
 	if prepare.Annotations == nil || prepare.Annotations.ReadOnlyHint || prepare.Annotations.OpenWorldHint == nil || *prepare.Annotations.OpenWorldHint {

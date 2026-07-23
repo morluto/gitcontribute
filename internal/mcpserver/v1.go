@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -143,13 +142,6 @@ type CreateWorkspaceInput struct {
 	Name            string `json:"name,omitempty" jsonschema:"Workspace name; defaults to a generated ID"`
 }
 
-// RunValidationInput selects a validation definition and explicitly authorizes execution.
-type RunValidationInput struct {
-	ID      string `json:"id" jsonschema:"Validation definition ID"`
-	Kind    string `json:"kind" jsonschema:"Run kind: base or candidate"`
-	Execute bool   `json:"execute" jsonschema:"Must be true to authorize host execution"`
-}
-
 // StartInvestigationInput creates a local investigation for a repository revision.
 type StartInvestigationInput struct {
 	Owner     string `json:"owner" jsonschema:"GitHub repository owner"`
@@ -227,56 +219,6 @@ type PromoteOpportunityInput struct {
 	SourceRefs          []SourceRef `json:"source_refs,omitempty" jsonschema:"Source references"`
 }
 
-// DefineValidationInput records a bounded validation command without executing it.
-type DefineValidationInput struct {
-	InvestigationID      string                         `json:"investigation_id" jsonschema:"Investigation ID"`
-	Kind                 string                         `json:"kind" jsonschema:"Validation kind"`
-	Command              string                         `json:"command" jsonschema:"Shell-free command to execute"`
-	WorkspaceID          string                         `json:"workspace_id,omitempty" jsonschema:"Managed workspace ID used for both run kinds"`
-	BaseWorkspaceID      string                         `json:"base_workspace_id,omitempty" jsonschema:"Managed base workspace ID; requires candidate_workspace_id"`
-	CandidateWorkspaceID string                         `json:"candidate_workspace_id,omitempty" jsonschema:"Managed candidate workspace ID; requires base_workspace_id"`
-	Env                  []string                       `json:"env,omitempty" jsonschema:"Allowed environment variable names"`
-	Timeout              string                         `json:"timeout,omitempty" jsonschema:"Positive Go duration; defaults to 30m"`
-	MaxOutputBytes       int64                          `json:"max_output_bytes,omitempty" jsonschema:"Maximum captured bytes per output stream; defaults to 65536"`
-	Observation          *ValidationObservationContract `json:"observation,omitempty" jsonschema:"Expected bounded observations over captured base and candidate output"`
-}
-
-// ValidationExpectedObservation is one output assertion evaluated without a shell.
-type ValidationExpectedObservation struct {
-	Run        string `json:"run" jsonschema:"Run kind: base or candidate"`
-	Name       string `json:"name" jsonschema:"Short observation name"`
-	Source     string `json:"source" jsonschema:"Captured source: stdout, stderr, or artifact"`
-	Matcher    string `json:"matcher" jsonschema:"Matcher: exact or regexp"`
-	Pattern    string `json:"pattern" jsonschema:"Bounded exact string or Go regular expression"`
-	Occurrence string `json:"occurrence,omitempty" jsonschema:"Expected occurrence: present or absent; defaults to present"`
-	Path       string `json:"path,omitempty" jsonschema:"Relative artifact path; valid only when source is artifact"`
-}
-
-// ValidationObservationContract ties output assertions to the claimed behavior.
-type ValidationObservationContract struct {
-	Intent       string                          `json:"intent" jsonschema:"Short proof intent or invariant"`
-	Observations []ValidationExpectedObservation `json:"observations" jsonschema:"One to eight expected observations for each of base and candidate"`
-}
-
-// ValidationOutput is the stable MCP representation of a validation definition.
-type ValidationOutput struct {
-	ID                   string                         `json:"id"`
-	InvestigationID      string                         `json:"investigation_id"`
-	Kind                 string                         `json:"kind"`
-	Command              []string                       `json:"command"`
-	WorkingDir           string                         `json:"working_dir"`
-	BaseWorkingDir       string                         `json:"base_working_dir,omitempty"`
-	CandidateDir         string                         `json:"candidate_dir,omitempty"`
-	WorkspaceID          string                         `json:"workspace_id,omitempty" jsonschema:"Managed workspace ID used for both run kinds"`
-	BaseWorkspaceID      string                         `json:"base_workspace_id,omitempty" jsonschema:"Managed base workspace ID"`
-	CandidateWorkspaceID string                         `json:"candidate_workspace_id,omitempty" jsonschema:"Managed candidate workspace ID"`
-	Env                  []string                       `json:"environment_allowlist,omitempty"`
-	Timeout              string                         `json:"timeout,omitempty"`
-	MaxOutputBytes       int64                          `json:"max_output_bytes,omitempty"`
-	Observation          *ValidationObservationContract `json:"observation,omitempty"`
-	CreatedAt            string                         `json:"created_at"`
-}
-
 // CancelJobInput selects durable jobs for bounded, persisted cancellation.
 type CancelJobInput struct {
 	IDs []string `json:"ids" jsonschema:"One to 100 durable job IDs"`
@@ -342,6 +284,19 @@ func (s *Server) registerV1() {
 			setConst(schema, "execute", true)
 		}), output: outputSchema[JobReference]("Reference to a newly queued validation execution job."), handler: s.runValidation,
 	})
+	addCatalogTool(s, catalogTool[RunRepeatedValidationInput, JobReference]{
+		name: ToolRunRepeatedValidation, title: "Run repeated validation",
+		description: "Execute a stored shell-free validation repeatedly with bounded concurrency, independent per-attempt deadlines, process-tree resource telemetry, cleanup checks, and semantic aggregation. Requires execute=true and never contacts GitHub.",
+		annotations: executionAnnotations(), supportedBy: supports[Operator], input: inputSchema[RunRepeatedValidationInput](func(schema *schemaBuilder) {
+			setEnum(schema, "target", "base", "candidate", "both")
+			setRange(schema, "run_count", 1, 100)
+			setDefault(schema, "run_count", 3)
+			setRange(schema, "concurrency", 1, 16)
+			setDefault(schema, "concurrency", 1)
+			setDefault(schema, "sample_interval", "100ms")
+			setConst(schema, "execute", true)
+		}), output: outputSchema[JobReference]("Reference to a newly queued repeat validation job."), handler: s.runRepeatedValidation,
+	})
 	addCatalogTool(s, catalogTool[StartInvestigationInput, InvestigationOutput]{
 		name: ToolStartInvestigation, title: "Start local investigation",
 		description: "Create a local investigation from a commit SHA, or atomically create its initial baseline hypothesis from a stored issue or pull-request number. This does not create a Git worktree or contact GitHub; use " + ToolCreateWorkspace + " separately when filesystem work is authorized.",
@@ -382,11 +337,12 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[DefineValidationInput, ValidationOutput]{
 		name: ToolDefineValidation, title: "Define validation command",
-		description: "Parse and persist a shell-free validation command for managed workspace IDs belonging to the investigation, with an environment allowlist, timeout, and output bound. This does not execute the command; use " + ToolRunValidation + " separately with explicit authorization.",
+		description: "Parse and persist a shell-free validation command for managed workspace IDs belonging to the investigation, with an environment allowlist, timeout, output bound, and optional declared MCP stdio adapter. This does not execute the command; use " + ToolRunValidation + " separately with explicit authorization.",
 		annotations: localWrite, supportedBy: supports[Operator], input: inputSchema[DefineValidationInput](func(schema *schemaBuilder) {
 			setDefault(schema, "timeout", "30m")
 			setRange(schema, "max_output_bytes", 1, 64*1024*1024)
 			setDefault(schema, "max_output_bytes", 64*1024)
+			setEnum(schema, "protocol", "mcp_stdio")
 			configureValidationObservationSchema(schema)
 		}), output: outputSchema[ValidationOutput]("Persisted validation definition."), handler: s.defineValidation,
 	})
@@ -536,26 +492,6 @@ func (s *Server) createWorkspace(ctx context.Context, _ *mcp.CallToolRequest, in
 	return nil, out, err
 }
 
-func (s *Server) runValidation(ctx context.Context, _ *mcp.CallToolRequest, in RunValidationInput) (*mcp.CallToolResult, JobReference, error) {
-	id, err := normalizeID("id", in.ID)
-	if err != nil {
-		return nil, JobReference{}, err
-	}
-	in.ID = id
-	if in.Kind != "base" && in.Kind != "candidate" {
-		return nil, JobReference{}, errors.New("kind must be base or candidate")
-	}
-	if !in.Execute {
-		return nil, JobReference{}, errors.New("execute must be true to authorize host command execution")
-	}
-	operator, ok := s.reader.(Operator)
-	if !ok {
-		return nil, JobReference{}, errors.New("validation is not available")
-	}
-	out, err := operator.RunValidation(ctx, in)
-	return nil, out, err
-}
-
 func (s *Server) startInvestigation(ctx context.Context, _ *mcp.CallToolRequest, in StartInvestigationInput) (*mcp.CallToolResult, InvestigationOutput, error) {
 	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
 		return nil, InvestigationOutput{}, err
@@ -658,40 +594,6 @@ func (s *Server) promoteOpportunity(ctx context.Context, _ *mcp.CallToolRequest,
 		return nil, OpportunityOutput{}, errors.New("opportunity promotion is not available")
 	}
 	out, err := operator.PromoteOpportunity(ctx, in)
-	return nil, out, err
-}
-
-func (s *Server) defineValidation(ctx context.Context, _ *mcp.CallToolRequest, in DefineValidationInput) (*mcp.CallToolResult, ValidationOutput, error) {
-	if _, err := normalizeID("investigation_id", in.InvestigationID); err != nil {
-		return nil, ValidationOutput{}, err
-	}
-	in.Kind = strings.TrimSpace(in.Kind)
-	in.Command = strings.TrimSpace(in.Command)
-	in.WorkspaceID = strings.TrimSpace(in.WorkspaceID)
-	in.BaseWorkspaceID = strings.TrimSpace(in.BaseWorkspaceID)
-	in.CandidateWorkspaceID = strings.TrimSpace(in.CandidateWorkspaceID)
-	if in.Kind == "" || in.Command == "" {
-		return nil, ValidationOutput{}, InvalidArgument("command", "investigation_id, kind, and command are required", map[string]any{"investigation_id": in.InvestigationID, "kind": "regression", "command": "go test ./..."})
-	}
-	if in.WorkspaceID != "" && (in.BaseWorkspaceID != "" || in.CandidateWorkspaceID != "") {
-		return nil, ValidationOutput{}, InvalidArgument("workspace_id", "cannot be combined with base_workspace_id or candidate_workspace_id", map[string]any{"workspace_id": in.WorkspaceID})
-	}
-	if in.WorkspaceID == "" && (in.BaseWorkspaceID == "" || in.CandidateWorkspaceID == "") {
-		return nil, ValidationOutput{}, InvalidArgument("base_workspace_id", "base_workspace_id and candidate_workspace_id must be provided together", map[string]any{"base_workspace_id": "<base-id>", "candidate_workspace_id": "<candidate-id>"})
-	}
-	if in.Timeout != "" {
-		if _, err := time.ParseDuration(in.Timeout); err != nil {
-			return nil, ValidationOutput{}, InvalidArgument("timeout", "must be a positive Go duration", map[string]any{"timeout": "30m"})
-		}
-	}
-	if in.MaxOutputBytes < 0 {
-		return nil, ValidationOutput{}, InvalidArgument("max_output_bytes", "cannot be negative", map[string]any{"max_output_bytes": 65536})
-	}
-	operator, ok := s.reader.(Operator)
-	if !ok {
-		return nil, ValidationOutput{}, errors.New("validation definition is not available")
-	}
-	out, err := operator.DefineValidation(ctx, in)
 	return nil, out, err
 }
 

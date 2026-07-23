@@ -2,6 +2,7 @@ package evidence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -20,13 +21,14 @@ var environmentNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // Service manages validation definitions, runs, evidence, and base-vs-candidate comparisons.
 type Service struct {
-	repo   Repository
-	runner Runner
+	repo      Repository
+	runner    Runner
+	mcpRunner Runner
 }
 
 // NewService returns an EvidenceService backed by repo and runner.
 func NewService(repo Repository, runner Runner) *Service {
-	return &Service{repo: repo, runner: runner}
+	return &Service{repo: repo, runner: runner, mcpRunner: NewMCPStdioRunner()}
 }
 
 // DefineValidation validates and stores a validation definition.
@@ -45,6 +47,20 @@ func (s *Service) DefineValidation(ctx context.Context, d *ValidationDefinition)
 	}
 	if d.Timeout == 0 {
 		d.Timeout = defaultValidationTimeout
+	}
+	if d.Protocol != "" && d.Protocol != ValidationProtocolMCPStdio {
+		return fmt.Errorf("unsupported validation protocol %q", d.Protocol)
+	}
+	if d.Protocol == "" && d.ReadinessTimeout != 0 {
+		return errors.New("readiness timeout requires a declared protocol adapter")
+	}
+	if d.Protocol == ValidationProtocolMCPStdio {
+		if d.ReadinessTimeout == 0 {
+			d.ReadinessTimeout = 30 * time.Second
+		}
+		if d.ReadinessTimeout < 0 || d.ReadinessTimeout > d.Timeout {
+			return errors.New("readiness timeout must be positive and no greater than validation timeout")
+		}
 	}
 	if d.MaxOutputBytes < 0 || d.MaxOutputBytes > maxOutputBytes {
 		return ErrInvalidOutputLimit
@@ -75,6 +91,10 @@ func (s *Service) RunValidation(ctx context.Context, defID string, kind RunKind)
 	if err != nil {
 		return nil, err
 	}
+	return s.runDefinition(ctx, def, kind, def.Timeout, 0)
+}
+
+func (s *Service) runDefinition(ctx context.Context, def *ValidationDefinition, kind RunKind, timeout, sampleInterval time.Duration) (*ValidationRun, error) {
 	workingDir := def.WorkingDir
 	if kind == RunKindBase && def.BaseWorkingDir != "" {
 		workingDir = def.BaseWorkingDir
@@ -86,7 +106,6 @@ func (s *Service) RunValidation(ctx context.Context, defID string, kind RunKind)
 		return nil, ErrMissingWorkspace
 	}
 
-	timeout := def.Timeout
 	if timeout <= 0 || timeout > maxValidationTimeout {
 		return nil, ErrInvalidTimeout
 	}
@@ -98,19 +117,31 @@ func (s *Service) RunValidation(ctx context.Context, defID string, kind RunKind)
 		maxOutput = def.MaxOutputBytes
 	}
 
-	result, err := s.runner.Run(runCtx, RunRequest{
-		Args:           def.Command,
-		Dir:            workingDir,
-		Env:            resolveEnvironment(def.Env),
-		MaxOutputBytes: maxOutput,
+	runner := s.runner
+	if def.Protocol == ValidationProtocolMCPStdio {
+		runner = s.mcpRunner
+	}
+	if runner == nil {
+		return nil, errors.New("validation runner is unavailable")
+	}
+	result, err := runner.Run(runCtx, RunRequest{
+		Args:             def.Command,
+		Dir:              workingDir,
+		Env:              resolveEnvironment(def.Env),
+		MaxOutputBytes:   maxOutput,
+		SampleInterval:   sampleInterval,
+		ReadinessTimeout: def.ReadinessTimeout,
 	})
 	if err != nil {
 		return nil, err
 	}
+	if result == nil {
+		return nil, errors.New("validation runner returned no result")
+	}
 
 	run := &ValidationRun{
 		ID:              uuid.NewString(),
-		DefinitionID:    defID,
+		DefinitionID:    def.ID,
 		InvestigationID: def.InvestigationID,
 		HypothesisID:    def.HypothesisID,
 		OpportunityID:   def.OpportunityID,
@@ -123,6 +154,12 @@ func (s *Service) RunValidation(ctx context.Context, defID string, kind RunKind)
 		Truncated:       result.Truncated,
 		Error:           result.Error,
 		Classification:  result.Classification,
+		Process:         result.Process,
+		Phases:          result.Phases,
+		TimeoutPhase:    result.TimeoutPhase,
+		FailurePhase:    result.FailurePhase,
+		Resources:       result.Resources,
+		Cleanup:         result.Cleanup,
 	}
 	run.ObservationStatus, run.Observations = evaluateObservations(ctx, def.Observation, kind, workingDir, result.Stdout, result.Stderr, maxOutput)
 	saveCtx := ctx

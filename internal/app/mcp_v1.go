@@ -598,6 +598,14 @@ func (r *MCPReader) DefineValidation(ctx context.Context, in mcpserver.DefineVal
 		}
 		timeout = d
 	}
+	var readinessTimeout time.Duration
+	if in.ReadinessTimeout != "" {
+		d, err := time.ParseDuration(in.ReadinessTimeout)
+		if err != nil {
+			return mcpserver.ValidationOutput{}, fmt.Errorf("invalid readiness timeout: %w", err)
+		}
+		readinessTimeout = d
+	}
 	opts := cli.DefineValidationOptions{
 		Kind:                 in.Kind,
 		Command:              in.Command,
@@ -608,6 +616,8 @@ func (r *MCPReader) DefineValidation(ctx context.Context, in mcpserver.DefineVal
 		Timeout:              timeout,
 		MaxOutputBytes:       in.MaxOutputBytes,
 		Observation:          observationContractMCPToCLI(in.Observation),
+		Protocol:             in.Protocol,
+		ReadinessTimeout:     readinessTimeout,
 	}
 	res, err := r.Service.DefineValidation(ctx, in.InvestigationID, opts)
 	if err != nil {
@@ -632,6 +642,8 @@ func validationResultToMCP(res *cli.ValidationResult) mcpserver.ValidationOutput
 		Timeout:              res.Timeout,
 		MaxOutputBytes:       res.MaxOutputBytes,
 		Observation:          observationContractCLIToMCP(res.Observation),
+		Protocol:             res.Protocol,
+		ReadinessTimeout:     res.ReadinessTimeout,
 		CreatedAt:            res.CreatedAt,
 	}
 }

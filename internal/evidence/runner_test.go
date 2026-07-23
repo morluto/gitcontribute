@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -134,5 +135,38 @@ func TestExecRunnerCancellation(t *testing.T) {
 	}
 	if res.Classification != RunClassificationCancelled {
 		t.Fatalf("classification: got %q, want cancelled", res.Classification)
+	}
+}
+
+func TestExecRunnerCapturesProcessTreeTelemetryAndCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX process-group cleanup test")
+	}
+	sh := findOrSkip(t, "sh")
+	r := NewExecRunner()
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+	res, err := r.Run(ctx, RunRequest{Args: []string{sh, "-c", "sleep 10 & wait"}, Dir: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Process.PID <= 0 || res.Process.CreateTimeUnixMilli <= 0 {
+		t.Fatalf("process identity = %+v", res.Process)
+	}
+	if res.Resources.Provider != "gopsutil/v4" || res.Resources.SampleCount == 0 || res.Resources.PeakChildCount.Value == nil || *res.Resources.PeakChildCount.Value < 1 {
+		t.Fatalf("telemetry = %+v", res.Resources)
+	}
+	if (res.Cleanup.Status != "clean" && res.Cleanup.Status != "unavailable") || len(res.Cleanup.Survivors) != 0 {
+		t.Fatalf("cleanup = %+v", res.Cleanup)
+	}
+	if res.TimeoutPhase != "execution" {
+		t.Fatalf("timeout phase = %q", res.TimeoutPhase)
+	}
+}
+
+func TestUnavailableMetricIsNotEncodedAsZero(t *testing.T) {
+	metric := metricInt64(0, errors.New("unsupported platform metric"))
+	if metric.Value != nil || metric.UnavailableReason == "" {
+		t.Fatalf("metric = %+v", metric)
 	}
 }

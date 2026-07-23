@@ -54,10 +54,12 @@ const (
 
 // RunRequest is a shell-free command execution request.
 type RunRequest struct {
-	Args           []string
-	Dir            string
-	Env            []string
-	MaxOutputBytes int64
+	Args             []string
+	Dir              string
+	Env              []string
+	MaxOutputBytes   int64
+	SampleInterval   time.Duration
+	ReadinessTimeout time.Duration
 }
 
 // RunResult is the captured output of one command execution.
@@ -70,6 +72,64 @@ type RunResult struct {
 	CompletedAt    time.Time
 	Error          string
 	Classification RunClassification
+	Process        ProcessIdentity
+	Phases         RunPhases
+	TimeoutPhase   string
+	FailurePhase   string
+	Resources      ResourceTelemetry
+	Cleanup        CleanupResult
+}
+
+// ProcessIdentity prevents PID reuse from merging unrelated process samples.
+type ProcessIdentity struct {
+	PID                 int32
+	CreateTimeUnixMilli int64
+}
+
+// RunPhases records generic process boundaries. Protocol readiness milestones
+// require a declared adapter and are never inferred from command output.
+type RunPhases struct {
+	SpawnStartedAt    time.Time
+	ProcessStartedAt  time.Time
+	InitializedAt     time.Time
+	ToolsListedAt     time.Time
+	FirstResponseAt   time.Time
+	ExecutionEndedAt  time.Time
+	ShutdownStartedAt time.Time
+	ShutdownCheckedAt time.Time
+}
+
+// Int64Metric represents a sampled value. Nil means unavailable, never zero.
+type Int64Metric struct {
+	Value             *int64
+	UnavailableReason string
+}
+
+// Uint64Metric represents a sampled unsigned value.
+type Uint64Metric struct {
+	Value             *uint64
+	UnavailableReason string
+}
+
+// ResourceTelemetry contains bounded process-tree high-water marks.
+type ResourceTelemetry struct {
+	Provider                   string
+	Platform                   string
+	SampleInterval             time.Duration
+	SampleCount                int
+	CPUTimeMillis              Int64Metric
+	PeakRSSBytes               Uint64Metric
+	PeakChildCount             Int64Metric
+	SamplerOverheadNanoseconds int64
+}
+
+// CleanupResult records whether sampled descendants survived the shutdown
+// boundary. Survivors are matched by PID and creation time.
+type CleanupResult struct {
+	Status    string
+	Reason    string
+	Survivors []ProcessIdentity
+	CheckedAt time.Time
 }
 
 // Runner executes an explicit argv inside a workspace directory without a shell.
@@ -165,8 +225,19 @@ type ValidationDefinition struct {
 	Timeout              time.Duration
 	MaxOutputBytes       int64
 	Observation          *ObservationContract
+	Protocol             ValidationProtocol
+	ReadinessTimeout     time.Duration
 	CreatedAt            time.Time
 }
+
+// ValidationProtocol selects an explicit structured adapter. Empty means the
+// generic command runner; protocol milestones are never inferred from stdout.
+type ValidationProtocol string
+
+const (
+	// ValidationProtocolMCPStdio measures initialize and tools/list through the official MCP SDK.
+	ValidationProtocolMCPStdio ValidationProtocol = "mcp_stdio"
+)
 
 // ValidationRun records the outcome of one execution of a validation definition.
 type ValidationRun struct {
@@ -190,6 +261,99 @@ type ValidationRun struct {
 	WorkspaceSnapshotAfter  string
 	WorkspaceBindingStatus  string
 	WorkspaceBindingReason  string
+	Process                 ProcessIdentity
+	Phases                  RunPhases
+	TimeoutPhase            string
+	FailurePhase            string
+	Resources               ResourceTelemetry
+	Cleanup                 CleanupResult
+}
+
+// RunGroupClassification summarizes repeated, semantically comparable runs.
+type RunGroupClassification string
+
+const (
+	// RunGroupStablePass means every comparable attempt passed.
+	RunGroupStablePass RunGroupClassification = "stable_pass"
+	// RunGroupStableFail means every comparable attempt failed.
+	RunGroupStableFail RunGroupClassification = "stable_fail"
+	// RunGroupFlaky means comparable attempts disagreed.
+	RunGroupFlaky RunGroupClassification = "flaky"
+	// RunGroupInconclusive means attempts could not support a semantic conclusion.
+	RunGroupInconclusive RunGroupClassification = "inconclusive"
+	// RunGroupCancelled means the requested sample was not completed.
+	RunGroupCancelled RunGroupClassification = "cancelled"
+)
+
+// RepeatValidationOptions bounds one repeat/stress request.
+type RepeatValidationOptions struct {
+	Kinds          []RunKind
+	RunCount       int
+	Concurrency    int
+	PerRunTimeout  time.Duration
+	OverallTimeout time.Duration
+	SampleInterval time.Duration
+}
+
+// ValidationAttempt is a bounded summary of one independently timed run. Full
+// bounded output remains in the referenced ValidationRun record.
+type ValidationAttempt struct {
+	Index             int
+	Kind              RunKind
+	RunID             string
+	StartedAt         time.Time
+	CompletedAt       time.Time
+	ExitCode          int
+	Classification    RunClassification
+	ObservationStatus ObservationStatus
+	TimeoutPhase      string
+	FailurePhase      string
+	Error             string
+	Process           ProcessIdentity
+	Phases            RunPhases
+	Resources         ResourceTelemetry
+	Cleanup           CleanupResult
+}
+
+// ValidationAggregate preserves semantic and resource conclusions separately.
+type ValidationAggregate struct {
+	Kind                   RunKind
+	Requested              int
+	Completed              int
+	Passing                int
+	Failing                int
+	Inconclusive           int
+	Cancelled              int
+	Classification         RunGroupClassification
+	ResourceClassification string
+}
+
+// ValidationGroupComparison compares stable base and candidate aggregates.
+type ValidationGroupComparison struct {
+	Classification ComparisonClassification
+	Explanation    string
+}
+
+// ValidationRunGroup is one persisted bounded repeat/stress execution.
+type ValidationRunGroup struct {
+	ID                  string
+	DefinitionID        string
+	InvestigationID     string
+	HypothesisID        string
+	OpportunityID       string
+	ConfigurationSHA256 string
+	RequestedRuns       int
+	CompletedRuns       int
+	Concurrency         int
+	PerRunTimeout       time.Duration
+	OverallTimeout      time.Duration
+	SampleInterval      time.Duration
+	Attempts            []ValidationAttempt
+	Aggregates          []ValidationAggregate
+	Classification      RunGroupClassification
+	Comparison          *ValidationGroupComparison
+	StartedAt           time.Time
+	CompletedAt         time.Time
 }
 
 // Evidence is a piece of supporting, contradicting, or inconclusive proof.
