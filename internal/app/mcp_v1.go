@@ -164,8 +164,8 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 			out.RankingMethod = "fts5_bm25_weighted"
 			out.MatchSource = evidence.Source
 			out.SearchTruncated = evidence.Truncated
+			out.Snippet = boundedText(evidence.Excerpt, 2000)
 			if evidence.Source != "thread" {
-				out.Snippet = boundedText(evidence.Excerpt, 2000)
 				sourceRevision = evidence.SourceUpdatedAt
 			}
 		}
@@ -199,10 +199,11 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 			out.SourceRevision = match.Commit
 			out.AsOf = formatTime(match.SnapshotCreatedAt)
 			if in.Query != "" {
-				if rank, found, err := c.CodeSearchRank(ctx, ref, match.Path, match.Commit, in.Query); err != nil {
+				if evidence, found, err := c.FindCodeSearchEvidence(ctx, match.DocID, in.Query); err != nil {
 					return mcpserver.ExplainMatchOutput{}, err
 				} else if found {
-					out.RetrievalRank, out.RankingMethod = &rank, "fts5_bm25_weighted"
+					out.RetrievalRank, out.RankingMethod = &evidence.Rank, "fts5_bm25_weighted"
+					out.Snippet = boundedText(evidence.Excerpt, 2000)
 				} else {
 					return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
 				}
@@ -243,10 +244,11 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		out.Kind = "repo"
 		out.Title = ref.String()
 		out.Snippet = boundedText(repo.Description, 2000)
-		if rank, found, err := c.RepositorySearchRank(ctx, repo.ID, in.Query); err != nil {
+		if evidence, found, err := c.FindRepositorySearchEvidence(ctx, repo.ID, in.Query); err != nil {
 			return mcpserver.ExplainMatchOutput{}, err
 		} else if found {
-			out.RetrievalRank, out.RankingMethod = &rank, "fts5_bm25_weighted"
+			out.RetrievalRank, out.RankingMethod = &evidence.Rank, "fts5_bm25_weighted"
+			out.Snippet = boundedText(evidence.Excerpt, 2000)
 			out.MatchSource = "repository_metadata"
 		} else if in.Query != "" {
 			return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound

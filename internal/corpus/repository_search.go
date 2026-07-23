@@ -158,25 +158,33 @@ func repositoryOrder(ftsQuery, sort string) string {
 	return "repositories.source_updated_at DESC, repositories.id DESC"
 }
 
-// RepositorySearchRank returns the weighted FTS5 rank for one repository.
-func (c *Corpus) RepositorySearchRank(ctx context.Context, id int64, query string) (float64, bool, error) {
+// RepositorySearchEvidence is the ranked excerpt for one repository match.
+type RepositorySearchEvidence struct {
+	Rank    float64
+	Excerpt string
+}
+
+// FindRepositorySearchEvidence returns the weighted FTS5 rank and matching
+// repository metadata excerpt.
+func (c *Corpus) FindRepositorySearchEvidence(ctx context.Context, id int64, query string) (RepositorySearchEvidence, bool, error) {
 	ftsQuery := repositoryFTSQuery(query)
 	if ftsQuery == "" {
-		return 0, false, nil
+		return RepositorySearchEvidence{}, false, nil
 	}
-	var rank float64
+	var evidence RepositorySearchEvidence
 	err := c.db.QueryRowContext(ctx, `
-		SELECT bm25(repositories_fts, 10.0, 10.0, 5.0, 2.0)
+		SELECT bm25(repositories_fts, 10.0, 10.0, 5.0, 2.0),
+		       snippet(repositories_fts, -1, '', '', ' … ', 48)
 		FROM repositories_fts
 		WHERE repositories_fts MATCH ? AND rowid = ?
-	`, ftsQuery, id).Scan(&rank)
+	`, ftsQuery, id).Scan(&evidence.Rank, &evidence.Excerpt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, false, nil
+		return RepositorySearchEvidence{}, false, nil
 	}
 	if err != nil {
-		return 0, false, fmt.Errorf("rank repository search match: %w", err)
+		return RepositorySearchEvidence{}, false, fmt.Errorf("find repository search evidence: %w", err)
 	}
-	return rank, true, nil
+	return evidence, true, nil
 }
 
 func repositoryFTSQuery(query string) string {

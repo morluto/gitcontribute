@@ -20,9 +20,54 @@ func TestCodeSnapshotsAreAtomicDeduplicatedAndSearchLatest(t *testing.T) {
 	if err != nil || !inserted {
 		t.Fatalf("first snapshot = (%d, %v, %v)", firstID, inserted, err)
 	}
-	replayedID, inserted, err := c.StoreCodeSnapshot(ctx, ref, first)
+	reindexed := first
+	reindexed.Documents = []codeindex.Document{{Path: "current.go", Content: "reindexed needle", Bytes: 16, LanguageHint: "go"}}
+	reindexed.TotalBytes = 16
+	reindexed.Manifest = codeindex.Manifest{CoverageKnown: true, TrackedEntries: 1, IndexedFiles: 1}
+	replayedID, inserted, err := c.StoreCodeSnapshot(ctx, ref, reindexed)
 	if err != nil || inserted || replayedID != firstID {
 		t.Fatalf("replayed snapshot = (%d, %v, %v)", replayedID, inserted, err)
+	}
+	latest, err := c.LatestCodeSnapshot(ctx, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest == nil || !latest.Manifest.CoverageKnown || latest.Manifest.IndexedFiles != 1 {
+		t.Fatalf("replayed snapshot manifest = %+v", latest)
+	}
+	reindexedMatches, err := c.SearchCode(ctx, "reindexed", ref, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reindexedMatches) != 1 || reindexedMatches[0].Path != "current.go" {
+		t.Fatalf("reindexed matches = %+v", reindexedMatches)
+	}
+	legacyMatches, err := c.SearchCode(ctx, "legacy", ref, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legacyMatches) != 0 {
+		t.Fatalf("replaced documents remain searchable: %+v", legacyMatches)
+	}
+	invalidReplay := reindexed
+	invalidReplay.Documents = []codeindex.Document{
+		{Path: "duplicate.go", Content: "replacement one", Bytes: 15},
+		{Path: "duplicate.go", Content: "replacement two", Bytes: 15},
+	}
+	invalidReplay.Manifest = codeindex.Manifest{}
+	if _, _, err := c.StoreCodeSnapshot(ctx, ref, invalidReplay); err == nil {
+		t.Fatal("invalid replay unexpectedly succeeded")
+	}
+	reindexedMatches, err = c.SearchCode(ctx, "reindexed", ref, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest, err = c.LatestCodeSnapshot(ctx, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reindexedMatches) != 1 || latest == nil || !latest.Manifest.CoverageKnown {
+		t.Fatalf("failed replay changed snapshot: matches=%+v latest=%+v", reindexedMatches, latest)
 	}
 	second := codeindex.Snapshot{RepoPath: "/repo", Commit: "second", CreatedAt: time.Unix(200, 0), Documents: []codeindex.Document{{Path: "new.go", Content: "current needle", Bytes: 14, LanguageHint: "go"}}, TotalBytes: 14}
 	if _, _, err := c.StoreCodeSnapshot(ctx, ref, second); err != nil {

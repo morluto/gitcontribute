@@ -282,14 +282,14 @@ func (s *Service) searchRepositoryExact(ctx context.Context, c *corpus.Corpus, q
 	hasQuery := strings.TrimSpace(query) != ""
 	var rank float64
 	if hasQuery {
-		var found bool
-		rank, found, err = c.RepositorySearchRank(ctx, repo.ID, query)
+		evidence, found, err := c.FindRepositorySearchEvidence(ctx, repo.ID, query)
 		if err != nil {
 			return searchResult{}, err
 		}
 		if !found {
 			return searchResult{Query: query, Matches: []searchMatch{}}, nil
 		}
+		rank = evidence.Rank
 	}
 	coverage, err := s.coverageNames(ctx, c, repo.ID, nil)
 	if err != nil {

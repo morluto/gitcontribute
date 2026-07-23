@@ -41,8 +41,9 @@ type CodeSearchPage struct {
 	Total      int
 }
 
-// StoreCodeSnapshot atomically stores one complete immutable code snapshot.
-// Replaying the same repository commit returns the existing snapshot id.
+// StoreCodeSnapshot atomically stores one complete code snapshot. Replaying the
+// same repository commit replaces its documents and coverage metadata without
+// changing its ordering relative to other commits.
 func (c *Corpus) StoreCodeSnapshot(ctx context.Context, ref domain.RepoRef, snapshot codeindex.Snapshot) (int64, bool, error) {
 	if err := ref.Validate(); err != nil {
 		return 0, false, err
@@ -55,19 +56,35 @@ func (c *Corpus) StoreCodeSnapshot(ctx context.Context, ref domain.RepoRef, snap
 		return 0, false, fmt.Errorf("begin code snapshot: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	manifest, err := json.Marshal(snapshot.Manifest)
+	if err != nil {
+		return 0, false, fmt.Errorf("encode code index manifest: %w", err)
+	}
 	var existing int64
 	err = tx.QueryRowContext(ctx, `
 		SELECT id FROM code_snapshots WHERE repo_owner=? AND repo_name=? AND commit_sha=?
 	`, ref.Owner, ref.Repo, snapshot.Commit).Scan(&existing)
 	if err == nil {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE code_snapshots
+			SET repo_path = ?, total_bytes = ?, manifest_json = ?
+			WHERE id = ?
+		`, snapshot.RepoPath, snapshot.TotalBytes, string(manifest), existing); err != nil {
+			return 0, false, fmt.Errorf("update code snapshot: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM code_documents WHERE snapshot_id = ?`, existing); err != nil {
+			return 0, false, fmt.Errorf("replace code snapshot documents: %w", err)
+		}
+		if err := storeCodeDocuments(ctx, tx, existing, snapshot.Documents); err != nil {
+			return 0, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return 0, false, fmt.Errorf("commit replaced code snapshot: %w", err)
+		}
 		return existing, false, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return 0, false, fmt.Errorf("find code snapshot: %w", err)
-	}
-	manifest, err := json.Marshal(snapshot.Manifest)
-	if err != nil {
-		return 0, false, fmt.Errorf("encode code index manifest: %w", err)
 	}
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO code_snapshots (repo_owner, repo_name, repo_path, commit_sha, total_bytes, created_at, manifest_json)
@@ -80,18 +97,25 @@ func (c *Corpus) StoreCodeSnapshot(ctx context.Context, ref domain.RepoRef, snap
 	if err != nil {
 		return 0, false, fmt.Errorf("read code snapshot id: %w", err)
 	}
-	for _, document := range snapshot.Documents {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO code_documents (snapshot_id, path, content, bytes, language)
-			VALUES (?, ?, ?, ?, ?)
-		`, snapshotID, document.Path, document.Content, document.Bytes, document.LanguageHint); err != nil {
-			return 0, false, fmt.Errorf("insert code document %q: %w", document.Path, err)
-		}
+	if err := storeCodeDocuments(ctx, tx, snapshotID, snapshot.Documents); err != nil {
+		return 0, false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, false, fmt.Errorf("commit code snapshot: %w", err)
 	}
 	return snapshotID, true, nil
+}
+
+func storeCodeDocuments(ctx context.Context, tx *sql.Tx, snapshotID int64, documents []codeindex.Document) error {
+	for _, document := range documents {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO code_documents (snapshot_id, path, content, bytes, language)
+			VALUES (?, ?, ?, ?, ?)
+		`, snapshotID, document.Path, document.Content, document.Bytes, document.LanguageHint); err != nil {
+			return fmt.Errorf("insert code document %q: %w", document.Path, err)
+		}
+	}
+	return nil
 }
 
 // CodeSnapshotInfo describes one stored code snapshot and its coverage.
@@ -408,28 +432,33 @@ func countCodeMatches(ctx context.Context, queryer codeSnapshotQueryer, ftsQuery
 	return total, nil
 }
 
-// CodeSearchRank returns the weighted FTS5 rank for one indexed file revision.
-func (c *Corpus) CodeSearchRank(ctx context.Context, ref domain.RepoRef, path, commit, query string) (float64, bool, error) {
+// CodeSearchEvidence is the ranked excerpt for one indexed file revision.
+type CodeSearchEvidence struct {
+	Rank    float64
+	Excerpt string
+}
+
+// FindCodeSearchEvidence returns the weighted FTS5 rank and matching excerpt
+// for one exact indexed document.
+func (c *Corpus) FindCodeSearchEvidence(ctx context.Context, docID int64, query string) (CodeSearchEvidence, bool, error) {
 	ftsQuery := literalFTSQuery(query)
 	if ftsQuery == "" {
-		return 0, false, nil
+		return CodeSearchEvidence{}, false, nil
 	}
-	var rank float64
+	var evidence CodeSearchEvidence
 	err := c.db.QueryRowContext(ctx, `
-		SELECT bm25(code_documents_fts, 5.0, 1.0)
+		SELECT bm25(code_documents_fts, 5.0, 1.0),
+		       snippet(code_documents_fts, -1, '', '', ' … ', 48)
 		FROM code_documents_fts
-		JOIN code_documents d ON d.id = code_documents_fts.rowid
-		JOIN code_snapshots s ON s.id = d.snapshot_id
-		WHERE code_documents_fts MATCH ? AND s.repo_owner = ? AND s.repo_name = ?
-		  AND d.path = ? AND s.commit_sha = ?
-	`, ftsQuery, ref.Owner, ref.Repo, path, commit).Scan(&rank)
+		WHERE code_documents_fts MATCH ? AND rowid = ?
+	`, ftsQuery, docID).Scan(&evidence.Rank, &evidence.Excerpt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, false, nil
+		return CodeSearchEvidence{}, false, nil
 	}
 	if err != nil {
-		return 0, false, fmt.Errorf("rank code search match: %w", err)
+		return CodeSearchEvidence{}, false, fmt.Errorf("find code search evidence: %w", err)
 	}
-	return rank, true, nil
+	return evidence, true, nil
 }
 
 func (c *Corpus) decodeCodeCursor(cursor, query, repo string) (*searchCursor, error) {
