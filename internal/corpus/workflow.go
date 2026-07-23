@@ -65,7 +65,7 @@ func listWorkflowPayloads[T any](ctx context.Context, db *sql.DB, operation, que
 	return out, nil
 }
 
-// SaveWorkspace inserts or replaces a managed workspace record.
+// SaveWorkspace inserts or replaces a workspace record.
 func (c *Corpus) SaveWorkspace(ctx context.Context, item *workspace.Workspace) error {
 	if item == nil || item.Name == "" {
 		return errors.New("workspace name is required")
@@ -86,7 +86,7 @@ func (c *Corpus) SaveWorkspace(ctx context.Context, item *workspace.Workspace) e
 	return nil
 }
 
-// GetWorkspace returns a managed workspace by ID, or nil when absent.
+// GetWorkspace returns a workspace by ID.
 func (c *Corpus) GetWorkspace(ctx context.Context, id string) (*workspace.Workspace, error) {
 	var payload string
 	var createdAt int64
@@ -103,6 +103,77 @@ func (c *Corpus) GetWorkspace(ctx context.Context, id string) (*workspace.Worksp
 	}
 	item.CreatedAt = scanTime(createdAt)
 	return &item, nil
+}
+
+// BindWorkspacePath atomically returns an existing exact path binding or
+// inserts item. The immediate transaction prevents concurrent adopters from
+// assigning the same external path to different workspace IDs.
+func (c *Corpus) BindWorkspacePath(ctx context.Context, item *workspace.Workspace) (bound *workspace.Workspace, inserted bool, err error) {
+	if item == nil || item.Name == "" || item.Path == "" {
+		return nil, false, errors.New("workspace name and path are required")
+	}
+	conn, err := c.db.Conn(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("reserve workspace binding connection: %w", err)
+	}
+	defer func() {
+		if closeErr := conn.Close(); err == nil && closeErr != nil {
+			err = fmt.Errorf("close workspace binding connection: %w", closeErr)
+		}
+	}()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return nil, false, fmt.Errorf("begin workspace binding: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			if _, rollbackErr := conn.ExecContext(context.WithoutCancel(ctx), `ROLLBACK`); err == nil && rollbackErr != nil {
+				err = fmt.Errorf("rollback workspace binding: %w", rollbackErr)
+			}
+		}
+	}()
+
+	var payload string
+	var createdAt int64
+	err = conn.QueryRowContext(ctx, `
+		SELECT payload, created_at FROM workspaces
+		WHERE json_extract(payload, '$.Path')=?
+		LIMIT 1
+	`, item.Path).Scan(&payload, &createdAt)
+	if err == nil {
+		var existing workspace.Workspace
+		if err := unmarshalWorkflow(payload, &existing); err != nil {
+			return nil, false, err
+		}
+		existing.CreatedAt = scanTime(createdAt)
+		return &existing, false, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return nil, false, fmt.Errorf("find workspace by path: %w", err)
+	}
+	var exists int
+	if err := conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?)`, item.Name).Scan(&exists); err != nil {
+		return nil, false, fmt.Errorf("check workspace name: %w", err)
+	}
+	if exists != 0 {
+		return nil, false, workspace.ErrExists
+	}
+	payload, err = marshalWorkflow(item)
+	if err != nil {
+		return nil, false, err
+	}
+	if _, err := conn.ExecContext(ctx, `
+		INSERT INTO workspaces (id, investigation_id, payload, created_at)
+		VALUES (?, ?, ?, ?)
+	`, item.Name, item.InvestigationID, payload, encodeTime(item.CreatedAt)); err != nil {
+		return nil, false, fmt.Errorf("bind workspace path: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `COMMIT`); err != nil {
+		return nil, false, fmt.Errorf("commit workspace binding: %w", err)
+	}
+	committed = true
+	result := *item
+	return &result, true, nil
 }
 
 // SaveInvestigation inserts or updates an investigation record.

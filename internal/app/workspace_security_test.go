@@ -92,3 +92,76 @@ func TestWorkspaceCreateAndShow(t *testing.T) {
 		t.Fatalf("workspace roundtrip failed: %+v", shown)
 	}
 }
+
+func TestAdoptWorkspaceIsIdempotentAndUsable(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	remote, baseSHA, candidateSHA := setupAppGitRemote(t)
+	source := filepath.Join(filepath.Dir(remote), "src")
+	external := filepath.Join(t.TempDir(), "existing")
+	runGitApp(t, source, "worktree", "add", "--detach", external, candidateSHA)
+	runGitApp(t, source, "remote", "set-url", "origin", "https://github.com/owner/repo.git")
+	writeAppFile(t, filepath.Join(external, "feature.txt"), "changed")
+	writeAppFile(t, filepath.Join(external, "untracked.txt"), "new")
+
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.AdoptWorkspace(ctx, inv.ID, cli.WorkspaceAdoptOptions{Path: external, BaseRef: "master"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.AdoptWorkspace(ctx, inv.ID, cli.WorkspaceAdoptOptions{Path: external, BaseRef: "master"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID != second.ID || first.Ownership != "external" || first.BaseSHA != baseSHA || !first.Dirty || !first.HasUntracked {
+		t.Fatalf("unexpected adoption results: first=%+v second=%+v", first, second)
+	}
+	diff, err := svc.WorkspaceDiff(ctx, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff.Diff == "" || !diff.HasUntracked {
+		t.Fatalf("adopted diff missing state: %+v", diff)
+	}
+}
+
+func TestAdoptWorkspaceRejectsRepositoryMismatch(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	remote, _, candidateSHA := setupAppGitRemote(t)
+	source := filepath.Join(filepath.Dir(remote), "src")
+	external := filepath.Join(t.TempDir(), "existing")
+	runGitApp(t, source, "worktree", "add", "--detach", external, candidateSHA)
+	runGitApp(t, source, "remote", "set-url", "origin", "https://github.com/other/repo.git")
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AdoptWorkspace(ctx, inv.ID, cli.WorkspaceAdoptOptions{Path: external, BaseRef: "master"}); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("AdoptWorkspace mismatch error = %v", err)
+	}
+}

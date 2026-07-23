@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -316,5 +317,54 @@ func TestWorkspacePersistsAcrossReopen(t *testing.T) {
 	_, err = c.GetWorkspace(ctx, "missing")
 	if !errors.Is(err, workspace.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestBindWorkspacePathSerializesCompetingNames(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, err := Open(ctx, filepath.Join(t.TempDir(), "workspace.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+
+	start := make(chan struct{})
+	type result struct {
+		bound    *workspace.Workspace
+		inserted bool
+		err      error
+	}
+	results := make(chan result, 2)
+	var wg sync.WaitGroup
+	for _, name := range []string{"first", "second"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			bound, inserted, err := c.BindWorkspacePath(ctx, &workspace.Workspace{Name: name, Path: "/tmp/shared", CreatedAt: time.Now().UTC()})
+			results <- result{bound: bound, inserted: inserted, err: err}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	insertions := 0
+	var boundName string
+	for got := range results {
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		if got.inserted {
+			insertions++
+		}
+		if boundName == "" {
+			boundName = got.bound.Name
+		} else if got.bound.Name != boundName {
+			t.Fatalf("path bound to different names: %q and %q", boundName, got.bound.Name)
+		}
+	}
+	if insertions != 1 {
+		t.Fatalf("insertions = %d, want 1", insertions)
 	}
 }

@@ -133,15 +133,6 @@ type JobReference struct {
 // BuildRepositoryDossierInput selects a repository for durable dossier generation.
 type BuildRepositoryDossierInput RepoInput
 
-// CreateWorkspaceInput configures a durable managed-workspace creation job.
-type CreateWorkspaceInput struct {
-	InvestigationID string `json:"investigation_id" jsonschema:"Investigation ID"`
-	Remote          string `json:"remote,omitempty" jsonschema:"Git remote URL to clone; defaults to the investigation repository"`
-	BaseRef         string `json:"base_ref,omitempty" jsonschema:"Base ref to resolve; defaults to the remote HEAD"`
-	CandidateRef    string `json:"candidate_ref,omitempty" jsonschema:"Candidate ref to resolve; defaults to the investigation commit"`
-	Name            string `json:"name,omitempty" jsonschema:"Workspace name; defaults to a generated ID"`
-}
-
 // StartInvestigationInput creates a local investigation for a repository revision.
 type StartInvestigationInput struct {
 	Owner     string `json:"owner" jsonschema:"GitHub repository owner"`
@@ -273,8 +264,14 @@ func (s *Server) registerV1() {
 	addCatalogTool(s, catalogTool[CreateWorkspaceInput, JobReference]{
 		name: ToolCreateWorkspace, title: "Create managed Git workspace",
 		description: "Start an asynchronous job that clones the specified remote and creates a managed worktree for an investigation. This performs network reads, Git process execution, filesystem writes, and local metadata writes, but never mutates GitHub.",
-		annotations: networkReadAnnotations(), supportedBy: supports[Operator], input: inputSchema[CreateWorkspaceInput](noSchemaCustomization),
+		annotations: networkReadAnnotations(), supportedBy: supports[WorkspaceCreator], input: inputSchema[CreateWorkspaceInput](noSchemaCustomization),
 		output: outputSchema[JobReference]("Reference to a newly queued workspace creation job."), handler: s.createWorkspace,
+	})
+	addCatalogTool(s, catalogTool[AdoptWorkspaceInput, AdoptWorkspaceOutput]{
+		name: ToolAdoptWorkspace, title: "Adopt existing Git worktree",
+		description: "Inspect and record an existing local Git worktree for an investigation. This runs read-only Git commands and writes local metadata; it never fetches, changes refs or files, takes deletion ownership, or contacts GitHub.",
+		annotations: localWriteAnnotations(true), supportedBy: supports[WorkspaceAdopter], input: inputSchema[AdoptWorkspaceInput](noSchemaCustomization),
+		output: outputSchema[AdoptWorkspaceOutput]("Persisted external-worktree identity without host paths or remote URLs."), handler: s.adoptWorkspace,
 	})
 	addCatalogTool(s, catalogTool[RunValidationInput, JobReference]{
 		name: ToolRunValidation, title: "Run stored validation command",
@@ -473,22 +470,6 @@ func (s *Server) buildRepositoryDossier(ctx context.Context, _ *mcp.CallToolRequ
 		return nil, JobReference{}, errors.New("dossier build is not available")
 	}
 	out, err := operator.BuildRepositoryDossier(ctx, in)
-	return nil, out, err
-}
-
-func (s *Server) createWorkspace(ctx context.Context, _ *mcp.CallToolRequest, in CreateWorkspaceInput) (*mcp.CallToolResult, JobReference, error) {
-	if _, err := normalizeID("investigation_id", in.InvestigationID); err != nil {
-		return nil, JobReference{}, err
-	}
-	in.Remote = strings.TrimSpace(in.Remote)
-	in.BaseRef = strings.TrimSpace(in.BaseRef)
-	in.CandidateRef = strings.TrimSpace(in.CandidateRef)
-	in.Name = strings.TrimSpace(in.Name)
-	operator, ok := s.reader.(Operator)
-	if !ok {
-		return nil, JobReference{}, errors.New("workspace creation is not available")
-	}
-	out, err := operator.CreateWorkspace(ctx, in)
 	return nil, out, err
 }
 

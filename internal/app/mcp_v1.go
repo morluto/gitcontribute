@@ -322,6 +322,20 @@ func (r *MCPReader) CreateWorkspace(ctx context.Context, in mcpserver.CreateWork
 	return queuedJobReference(id, "create_workspace", "workspace creation job started"), nil
 }
 
+// AdoptWorkspace records an existing worktree synchronously without exposing
+// its host path or remote URL in the protocol result.
+func (r *MCPReader) AdoptWorkspace(ctx context.Context, in mcpserver.AdoptWorkspaceInput) (mcpserver.AdoptWorkspaceOutput, error) {
+	res, err := r.Service.AdoptWorkspace(ctx, in.InvestigationID, cli.WorkspaceAdoptOptions{Path: in.Path, BaseRef: in.BaseRef, Name: in.Name})
+	if err != nil {
+		return mcpserver.AdoptWorkspaceOutput{}, err
+	}
+	return mcpserver.AdoptWorkspaceOutput{
+		ID: res.ID, InvestigationID: res.InvestigationID, Owner: res.Repo.Owner, Repo: res.Repo.Repo,
+		BaseSHA: res.BaseSHA, CandidateSHA: res.CandidateSHA, MergeBase: res.MergeBase,
+		Dirty: res.Dirty, HasUntracked: res.HasUntracked, Ownership: res.Ownership,
+	}, nil
+}
+
 // RunValidation submits a durable validation run.
 func (r *MCPReader) RunValidation(ctx context.Context, in mcpserver.RunValidationInput) (mcpserver.JobReference, error) {
 	runKind := evidence.RunKind(in.Kind)

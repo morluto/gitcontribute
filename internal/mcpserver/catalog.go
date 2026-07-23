@@ -44,6 +44,7 @@ const (
 	ToolPlanSemanticCommits      = "workspace.plan_semantic_commits"
 	ToolQueryDeepWiki            = "research.query_deepwiki"
 	ToolCreateWorkspace          = "workspace.create"
+	ToolAdoptWorkspace           = "workspace.adopt"
 	ToolDefineValidation         = "validation.define"
 	ToolRunValidation            = "validation.run"
 	ToolRunRepeatedValidation    = "validation.run_repeated"
@@ -94,6 +95,7 @@ var canonicalToolNames = []string{
 	ToolPlanSemanticCommits,
 	ToolQueryDeepWiki,
 	ToolCreateWorkspace,
+	ToolAdoptWorkspace,
 	ToolDefineValidation,
 	ToolRunValidation,
 	ToolRunRepeatedValidation,
@@ -189,7 +191,7 @@ var toolsets = map[string][]string{
 		ToolListConcerns, ToolCreateConcern,
 	},
 	"code": {
-		ToolSearchCode, ToolIndexRepositories, ToolCreateWorkspace, ToolCheckMergeConflicts,
+		ToolSearchCode, ToolIndexRepositories, ToolCreateWorkspace, ToolAdoptWorkspace, ToolCheckMergeConflicts,
 		ToolInspectCommitChanges, ToolPlanSemanticCommits,
 		ToolDefineValidation, ToolRunValidation, ToolRunRepeatedValidation, ToolGetJob, ToolCancelJob,
 	},

@@ -199,14 +199,14 @@ func (s *Service) workspaceDiff(ctx context.Context, workspaceID string, inv *in
 	if err != nil {
 		return "", err
 	}
-	hasUntracked, err := mgr.HasUntrackedByPath(ctx, ws.Path)
+	hasUntracked, err := mgr.HasUntrackedWorkspace(ctx, ws)
 	if err != nil {
 		return "", err
 	}
 	if hasUntracked {
 		return "", errors.New("workspace has untracked files; stage them or provide an explicit --changes summary")
 	}
-	return mgr.DiffByPath(ctx, ws.Path, ws.BaseSHA)
+	return mgr.DiffWorkspace(ctx, ws)
 }
 
 // PrepareReviewReportInput scopes a review report to an opportunity and/or workspace.

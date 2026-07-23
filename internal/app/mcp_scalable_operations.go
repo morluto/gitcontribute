@@ -408,7 +408,7 @@ func (r *MCPReader) CheckMergeConflicts(ctx context.Context, in mcpserver.CheckM
 					out.Items[index] = item
 					continue
 				}
-				result, err := manager.CheckMerge(ctx, ws.Path, current.BaseOID, current.HeadOID)
+				result, err := manager.CheckMergeWorkspace(ctx, ws, current.BaseOID, current.HeadOID)
 				if err != nil {
 					item.Status, item.Reason, item.Message = "failed", "merge_check_failed", err.Error()
 					out.Items[index] = item

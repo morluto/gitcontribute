@@ -28,6 +28,7 @@ var (
 	ErrInvalidName    = errors.New("invalid name")
 	ErrInvalidRemote  = errors.New("invalid remote")
 	ErrRemoteMismatch = errors.New("existing mirror remote does not match requested remote")
+	ErrPathChanged    = errors.New("workspace path identity changed")
 )
 
 const (
@@ -74,7 +75,18 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) (string,
 // DefaultRunner returns a Runner backed by the local git executable.
 func DefaultRunner() Runner { return execRunner{} }
 
-// Workspace is a product-owned record for a managed Git worktree.
+// Ownership distinguishes worktrees created by GitContribute from external
+// worktrees that it may inspect but never remove.
+type Ownership string
+
+const (
+	// OwnershipManaged marks a worktree created and removable by GitContribute.
+	OwnershipManaged Ownership = "managed"
+	// OwnershipExternal marks a worktree that GitContribute may inspect but never remove.
+	OwnershipExternal Ownership = "external"
+)
+
+// Workspace is a product-owned record for a Git worktree.
 type Workspace struct {
 	Name            string
 	InvestigationID string
@@ -86,45 +98,26 @@ type Workspace struct {
 	CandidateSHA    string
 	MergeBase       string
 	Dirty           bool
+	HasUntracked    bool
+	Ownership       Ownership
+	GitDir          string
+	GitCommonDir    string
 	CreatedAt       time.Time
 
 	mirror string
 }
 
+// AdoptOptions identifies an existing worktree without granting ownership of
+// its files or refs.
+type AdoptOptions struct {
+	Path    string
+	BaseRef string
+	Name    string
+}
+
 // Status reports the dirty state of a workspace.
 type Status struct {
 	Dirty bool
-}
-
-// MergeCheck is a non-mutating comparison of two already-fetched revisions.
-type MergeCheck struct {
-	MergeBase  string
-	Conflicted bool
-	Summary    string
-}
-
-// CheckMerge compares already-fetched revisions without fetching or changing
-// refs, the index, or a worktree.
-func (m *Manager) CheckMerge(ctx context.Context, path, baseOID, headOID string) (MergeCheck, error) {
-	baseOID, headOID = strings.TrimSpace(baseOID), strings.TrimSpace(headOID)
-	if baseOID == "" || headOID == "" {
-		return MergeCheck{}, errors.New("base and head OIDs are required")
-	}
-	mergeBase, err := m.git(ctx, path, "merge-base", baseOID, headOID)
-	if err != nil {
-		return MergeCheck{}, err
-	}
-	mergeBase = strings.TrimSpace(mergeBase)
-	out, err := m.git(ctx, path, "merge-tree", mergeBase, baseOID, headOID)
-	if err != nil {
-		return MergeCheck{}, err
-	}
-	conflicted := strings.Contains(out, "changed in both") || strings.Contains(out, "<<<<<<<") || strings.Contains(out, "CONFLICT")
-	summary := "revisions merge cleanly"
-	if conflicted {
-		summary = "revisions have merge conflicts"
-	}
-	return MergeCheck{MergeBase: mergeBase, Conflicted: conflicted, Summary: summary}, nil
 }
 
 type mirror struct {
@@ -386,6 +379,7 @@ func (m *Manager) Create(ctx context.Context, mirrorName, baseRef, candidateRef,
 		CandidateSHA: candidateSHA,
 		MergeBase:    mergeBase,
 		Dirty:        st.Dirty,
+		Ownership:    OwnershipManaged,
 		CreatedAt:    time.Now().UTC(),
 		mirror:       mi.name,
 	}
@@ -576,6 +570,15 @@ func (m *Manager) StatusByPath(ctx context.Context, path string) (Status, error)
 	return m.status(ctx, managed)
 }
 
+// StatusWorkspace revalidates workspace authority before reading status.
+func (m *Manager) StatusWorkspace(ctx context.Context, ws *Workspace) (Status, error) {
+	path, err := m.authorizedPath(ctx, ws)
+	if err != nil {
+		return Status{}, err
+	}
+	return m.status(ctx, path)
+}
+
 // DiffByPath returns the diff for a workspace path against the supplied base
 // SHA, including staged and unstaged changes.
 func (m *Manager) DiffByPath(ctx context.Context, path, baseSHA string) (string, error) {
@@ -583,12 +586,25 @@ func (m *Manager) DiffByPath(ctx context.Context, path, baseSHA string) (string,
 	if err != nil {
 		return "", err
 	}
+	return m.diffByPath(ctx, managed, baseSHA)
+}
+
+// DiffWorkspace revalidates workspace authority before reading its diff.
+func (m *Manager) DiffWorkspace(ctx context.Context, ws *Workspace) (string, error) {
+	path, err := m.authorizedPath(ctx, ws)
+	if err != nil {
+		return "", err
+	}
+	return m.diffByPath(ctx, path, ws.BaseSHA)
+}
+
+func (m *Manager) diffByPath(ctx context.Context, path, baseSHA string) (string, error) {
 	args := []string{"diff", "--no-ext-diff", "--no-textconv", "--binary", "--full-index", "--find-renames"}
 	if baseSHA != "" {
 		args = append(args, baseSHA)
 	}
 	args = append(args, "--")
-	out, err := m.git(ctx, managed, args...)
+	out, err := m.git(ctx, path, args...)
 	if err != nil {
 		return "", fmt.Errorf("diff: %w", err)
 	}
@@ -639,12 +655,25 @@ func (m *Manager) ChangedFilesByPath(ctx context.Context, path, baseSHA string) 
 	if err != nil {
 		return nil, err
 	}
+	return m.changedFilesByPath(ctx, managed, baseSHA)
+}
+
+// ChangedFilesWorkspace revalidates workspace authority before listing files.
+func (m *Manager) ChangedFilesWorkspace(ctx context.Context, ws *Workspace) ([]string, error) {
+	path, err := m.authorizedPath(ctx, ws)
+	if err != nil {
+		return nil, err
+	}
+	return m.changedFilesByPath(ctx, path, ws.BaseSHA)
+}
+
+func (m *Manager) changedFilesByPath(ctx context.Context, path, baseSHA string) ([]string, error) {
 	args := []string{"diff", "--name-only", "--find-renames", "-z"}
 	if baseSHA != "" {
 		args = append(args, baseSHA)
 	}
 	args = append(args, "--")
-	out, err := m.git(ctx, managed, args...)
+	out, err := m.git(ctx, path, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list changed files: %w", err)
 	}
@@ -666,7 +695,20 @@ func (m *Manager) HasUntrackedByPath(ctx context.Context, path string) (bool, er
 	if err != nil {
 		return false, err
 	}
-	out, err := m.git(ctx, managed, "ls-files", "--others", "--exclude-standard", "-z")
+	return m.hasUntracked(ctx, managed)
+}
+
+// HasUntrackedWorkspace revalidates workspace authority before reading files.
+func (m *Manager) HasUntrackedWorkspace(ctx context.Context, ws *Workspace) (bool, error) {
+	path, err := m.authorizedPath(ctx, ws)
+	if err != nil {
+		return false, err
+	}
+	return m.hasUntracked(ctx, path)
+}
+
+func (m *Manager) hasUntracked(ctx context.Context, path string) (bool, error) {
+	out, err := m.git(ctx, path, "ls-files", "--others", "--exclude-standard", "-z")
 	if err != nil {
 		return false, fmt.Errorf("list untracked files: %w", err)
 	}
