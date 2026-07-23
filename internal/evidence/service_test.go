@@ -383,6 +383,22 @@ func TestRunValidationResolvesEnvironmentAllowlistAtExecution(t *testing.T) {
 	}
 }
 
+func TestRunValidationInheritsEnvironmentWithEmptyAllowlist(t *testing.T) {
+	repo := newFakeRepo()
+	runner := &capturingRunner{result: &RunResult{Classification: RunClassificationPassing}}
+	svc := NewService(repo, runner)
+	def := &ValidationDefinition{ID: "def", Command: []string{"test"}, WorkingDir: "/tmp/ws"}
+	if err := svc.DefineValidation(context.Background(), def); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RunValidation(context.Background(), def.ID, RunKindBase); err != nil {
+		t.Fatal(err)
+	}
+	if runner.request.Env != nil {
+		t.Fatalf("execution environment = %#v, want nil for inherited environment", runner.request.Env)
+	}
+}
+
 func TestRunValidationPassesOutputBound(t *testing.T) {
 	repo := newFakeRepo()
 	runner := &capturingRunner{result: &RunResult{Classification: RunClassificationPassing}}

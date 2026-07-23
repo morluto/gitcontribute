@@ -345,6 +345,16 @@ func TestIndexExclusions(t *testing.T) {
 	}
 }
 
+func TestIndexRejectsMalformedExclusionPattern(t *testing.T) {
+	repo := newRepo(t)
+	writeFile(t, repo, "keep.go", "package main\n")
+	commitAll(t, repo, "initial")
+
+	if _, err := Index(context.Background(), repo, Options{Exclusions: []string{"["}}); err == nil {
+		t.Fatal("Index accepted malformed exclusion pattern")
+	}
+}
+
 func TestIndexCancellation(t *testing.T) {
 	repo := newRepo(t)
 	writeFile(t, repo, "a.txt", "a\n")

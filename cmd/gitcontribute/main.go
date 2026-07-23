@@ -22,12 +22,16 @@ import (
 var version = "dev"
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	if len(os.Args) > 1 && os.Args[1] == "runtime-contract" {
 		if err := runRuntimeContract(os.Args[2:], os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			os.Exit(ExitGeneral)
+			return ExitGeneral
 		}
-		return
+		return 0
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -45,7 +49,7 @@ func main() {
 	if err != nil {
 		logger.ErrorContext(ctx, "failed to initialize application", "error", err)
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(ExitGeneral)
+		return ExitGeneral
 	}
 	defer func() {
 		if err := svc.Close(); err != nil {
@@ -57,10 +61,11 @@ func main() {
 	c.SetLogger(logger.With("component", "cli"))
 	c.SetTUIRunner(tui.NewRunner(svc, os.Stdin, os.Stdout))
 	if err := c.Run(ctx, os.Args[1:]); err != nil {
-		os.Exit(reportCommandError(ctx, logger, os.Stderr, traceID, err))
+		return reportCommandError(ctx, logger, os.Stderr, traceID, err)
 	}
 
 	logger.InfoContext(ctx, "command completed", "trace_id", traceID)
+	return 0
 }
 
 func runRuntimeContract(args []string, output io.Writer) error {

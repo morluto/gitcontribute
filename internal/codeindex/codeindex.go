@@ -225,6 +225,14 @@ func normalizeOptions(opts Options) (Options, error) {
 	if opts.MaxTotalBytes > hardMaxTotalBytes {
 		return Options{}, fmt.Errorf("max total bytes exceeds hard limit %d", hardMaxTotalBytes)
 	}
+	for _, pattern := range opts.Exclusions {
+		if pattern == "" {
+			continue
+		}
+		if _, err := path.Match(pattern, ""); err != nil {
+			return Options{}, fmt.Errorf("invalid exclusion pattern %q: %w", pattern, err)
+		}
+	}
 	if opts.MaxFiles == 0 {
 		opts.MaxFiles = defaultMaxFiles
 	}

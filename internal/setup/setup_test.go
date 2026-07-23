@@ -185,6 +185,27 @@ func TestDetect(t *testing.T) {
 	}
 }
 
+func TestCheckRegistrationRejectsMalformedClaudeShapes(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		data string
+	}{
+		{name: "servers array", data: `{"mcpServers": []}`},
+		{name: "server scalar", data: `{"mcpServers": {"gitcontribute": 123}}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(tt.data), 0600); err != nil {
+				t.Fatal(err)
+			}
+			registered, _, err := CheckRegistration(Claude, home)
+			if err == nil || registered {
+				t.Fatalf("registration = %t, error = %v; want invalid registration", registered, err)
+			}
+		})
+	}
+}
+
 func TestMalformedClientConfigFailsWithoutOverwrite(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(home, ".codex", "config.toml")

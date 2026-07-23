@@ -178,6 +178,9 @@ func normalizeEnvironmentAllowlist(names []string) ([]string, error) {
 	if len(names) > maxEnvironmentVariables {
 		return nil, fmt.Errorf("%w: at most %d variable names are allowed", ErrInvalidEnvironment, maxEnvironmentVariables)
 	}
+	if len(names) == 0 {
+		return nil, nil
+	}
 	seen := make(map[string]struct{}, len(names))
 	out := make([]string, 0, len(names))
 	for _, name := range names {
@@ -194,6 +197,9 @@ func normalizeEnvironmentAllowlist(names []string) ([]string, error) {
 }
 
 func resolveEnvironment(names []string) []string {
+	if len(names) == 0 {
+		return nil
+	}
 	env := make([]string, 0, len(names))
 	for _, name := range names {
 		if value, exists := os.LookupEnv(name); exists {

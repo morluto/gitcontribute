@@ -195,9 +195,7 @@ func (c *Client) ListIssueTimeline(ctx context.Context, owner, name string, numb
 				event.SourceIsPullRequest = issue.IsPullRequest()
 				if repository := issue.GetRepository(); repository != nil {
 					event.SourceRepository = repository.GetName()
-					if repository.Owner != nil {
-						event.SourceOwner = repository.Owner.GetLogin()
-					}
+					event.SourceOwner = userLogin(repository.Owner)
 				}
 			}
 		}
@@ -461,34 +459,6 @@ func pageInfo(resp *gh.Response) PageInfo {
 	return p
 }
 
-func stringVal(p *string) string {
-	if p == nil {
-		return ""
-	}
-	return *p
-}
-
-func intVal(p *int) int {
-	if p == nil {
-		return 0
-	}
-	return *p
-}
-
-func int64Val(p *int64) int64 {
-	if p == nil {
-		return 0
-	}
-	return *p
-}
-
-func boolVal(p *bool) bool {
-	if p == nil {
-		return false
-	}
-	return *p
-}
-
 func timeVal(t *gh.Timestamp) time.Time {
 	if t == nil {
 		return time.Time{}
@@ -530,6 +500,27 @@ func userLogins(users []*gh.User) []string {
 	return out
 }
 
+func userLogin(user *gh.User) string {
+	if user == nil {
+		return ""
+	}
+	return user.GetLogin()
+}
+
+func milestoneTitle(milestone *gh.Milestone) string {
+	if milestone == nil {
+		return ""
+	}
+	return milestone.GetTitle()
+}
+
+func licenseName(license *gh.License) string {
+	if license == nil {
+		return ""
+	}
+	return license.GetName()
+}
+
 func convertRepository(r *gh.Repository) Repository {
 	if r == nil {
 		return Repository{}
@@ -541,7 +532,7 @@ func convertRepository(r *gh.Repository) Repository {
 	return Repository{
 		ID:            r.GetID(),
 		NodeID:        r.GetNodeID(),
-		Owner:         r.Owner.GetLogin(),
+		Owner:         userLogin(r.Owner),
 		Name:          r.GetName(),
 		FullName:      r.GetFullName(),
 		Description:   r.GetDescription(),
@@ -556,7 +547,7 @@ func convertRepository(r *gh.Repository) Repository {
 		Forks:         r.GetForksCount(),
 		OpenIssues:    openIssues,
 		Language:      r.GetLanguage(),
-		License:       r.License.GetName(),
+		License:       licenseName(r.License),
 		Topics:        r.Topics,
 		CreatedAt:     timeVal(r.CreatedAt),
 		UpdatedAt:     timeVal(r.UpdatedAt),
@@ -588,11 +579,11 @@ func convertIssue(i *gh.Issue) Issue {
 		StateReason:       i.GetStateReason(),
 		Draft:             i.GetDraft(),
 		Locked:            i.GetLocked(),
-		Author:            i.User.GetLogin(),
+		Author:            userLogin(i.User),
 		AuthorAssociation: i.GetAuthorAssociation(),
 		Labels:            labelNames(i.Labels),
 		Assignees:         userLogins(i.Assignees),
-		Milestone:         i.Milestone.GetTitle(),
+		Milestone:         milestoneTitle(i.Milestone),
 		CommentsCount:     i.GetComments(),
 		CreatedAt:         timeVal(i.CreatedAt),
 		UpdatedAt:         timeVal(i.UpdatedAt),
@@ -618,7 +609,7 @@ func convertIssueComment(c *gh.IssueComment) IssueComment {
 		ID:                c.GetID(),
 		NodeID:            c.GetNodeID(),
 		Body:              c.GetBody(),
-		Author:            c.User.GetLogin(),
+		Author:            userLogin(c.User),
 		AuthorAssociation: c.GetAuthorAssociation(),
 		CreatedAt:         timeVal(c.CreatedAt),
 		UpdatedAt:         timeVal(c.UpdatedAt),
@@ -650,11 +641,11 @@ func convertPullRequestDetails(pr *gh.PullRequest) PullRequestDetails {
 		Body:              pr.GetBody(),
 		Draft:             pr.GetDraft(),
 		Locked:            pr.GetLocked(),
-		Author:            pr.User.GetLogin(),
+		Author:            userLogin(pr.User),
 		AuthorAssociation: pr.GetAuthorAssociation(),
 		Labels:            labelNames(pr.Labels),
 		Assignees:         userLogins(pr.Assignees),
-		Milestone:         pr.Milestone.GetTitle(),
+		Milestone:         milestoneTitle(pr.Milestone),
 		CreatedAt:         timeVal(pr.CreatedAt),
 		UpdatedAt:         timeVal(pr.UpdatedAt),
 		ClosedAt:          timePtr(pr.ClosedAt),
@@ -684,7 +675,7 @@ func convertReview(r *gh.PullRequestReview) Review {
 		NodeID:            r.GetNodeID(),
 		State:             r.GetState(),
 		Body:              r.GetBody(),
-		Author:            r.User.GetLogin(),
+		Author:            userLogin(r.User),
 		AuthorAssociation: r.GetAuthorAssociation(),
 		CommitID:          r.GetCommitID(),
 		SubmittedAt:       timeVal(r.SubmittedAt),
@@ -704,7 +695,7 @@ func convertReviewComment(c *gh.PullRequestComment) ReviewComment {
 		Body:              c.GetBody(),
 		Path:              c.GetPath(),
 		DiffHunk:          c.GetDiffHunk(),
-		Author:            c.User.GetLogin(),
+		Author:            userLogin(c.User),
 		AuthorAssociation: c.GetAuthorAssociation(),
 		CommitID:          c.GetCommitID(),
 		OriginalCommitID:  c.GetOriginalCommitID(),

@@ -35,11 +35,12 @@ func TestMCPStdioHelper(_ *testing.T) {
 }
 
 func TestMCPStdioRunnerRecordsSDKMilestones(t *testing.T) {
+	t.Setenv("GITCONTRIBUTE_MCP_HELPER", "1")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	result, err := NewMCPStdioRunner().Run(ctx, RunRequest{
 		Args: []string{os.Args[0], "-test.run=^TestMCPStdioHelper$"}, Dir: t.TempDir(),
-		Env: []string{"GITCONTRIBUTE_MCP_HELPER=1"}, MaxOutputBytes: 4096,
+		Env: nil, MaxOutputBytes: 4096,
 		ReadinessTimeout: time.Second, SampleInterval: 10 * time.Millisecond,
 	})
 	if err != nil {
@@ -53,6 +54,18 @@ func TestMCPStdioRunnerRecordsSDKMilestones(t *testing.T) {
 	}
 	if !strings.Contains(result.Stdout, "fixture.echo") {
 		t.Fatalf("tools/list output = %q", result.Stdout)
+	}
+}
+
+func TestExpectedMCPShutdownSignalIsNonFatal(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("signal exit status is POSIX-specific")
+	}
+	cmd := exec.Command("sh", "-c", "kill -TERM $$")
+	if err := cmd.Run(); err == nil {
+		t.Fatal("signal helper exited successfully")
+	} else if !isExpectedMCPShutdownError(err) {
+		t.Fatalf("shutdown error = %v, want expected signal shutdown", err)
 	}
 }
 
