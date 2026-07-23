@@ -12,12 +12,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Keep a little headroom above the measured scalable-catalog baseline. This is
-// a regression guard, not a claim that the current catalog needs no compaction.
-// The scalable surface currently serializes below 128 KiB. Keep a fixed budget
-// so contract growth remains deliberate while allowing the issue-20 batch and
-// portfolio primitives to ship together.
-const maxSerializedCatalogBytes = 128 * 1024
+// The default agent-facing profile should retain useful descriptions and
+// schemas without consuming an unbounded amount of model context. The explicit
+// "all" profile is intentionally not treated as a default-context contract.
+const maxDefaultCatalogBytes = 96 * 1024
 
 var selectionSynonyms = map[string]string{
 	"execute": "run",
@@ -37,7 +35,17 @@ var selectionStopWords = map[string]bool{
 
 func listedTools(t *testing.T) (map[string]*mcp.Tool, func()) {
 	t.Helper()
-	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	return listedToolsFor(t, []string{"all"})
+}
+
+func listedToolsFor(t *testing.T, toolsets []string) (map[string]*mcp.Tool, func()) {
+	t.Helper()
+	return listedToolsFromReader(t, &fakeReader{searchStarted: make(chan struct{})}, toolsets)
+}
+
+func listedToolsFromReader(t *testing.T, reader Reader, toolsets []string) (map[string]*mcp.Tool, func()) {
+	t.Helper()
+	client, closeSessions := connectWithOptions(t, reader, Options{Toolsets: toolsets})
 	tools := make(map[string]*mcp.Tool)
 	for tool, err := range client.Tools(context.Background(), nil) {
 		if err != nil {
@@ -93,17 +101,17 @@ func TestCanonicalToolCatalogIsNamespacedAndUnambiguous(t *testing.T) {
 	}
 }
 
-func TestSerializedToolCatalogStaysWithinBudget(t *testing.T) {
-	tools, closeSessions := listedTools(t)
+func TestDefaultToolCatalogStaysWithinBudget(t *testing.T) {
+	tools, closeSessions := listedToolsFor(t, []string{"contribute"})
 	defer closeSessions()
 
 	payload, err := json.Marshal(tools)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("serialized MCP catalog: %d tools, %d bytes", len(tools), len(payload))
-	if len(payload) > maxSerializedCatalogBytes {
-		t.Fatalf("serialized MCP catalog is %d bytes, budget is %d", len(payload), maxSerializedCatalogBytes)
+	t.Logf("serialized default MCP catalog: %d tools, %d bytes", len(tools), len(payload))
+	if len(payload) > maxDefaultCatalogBytes {
+		t.Fatalf("serialized default MCP catalog is %d bytes, budget is %d", len(payload), maxDefaultCatalogBytes)
 	}
 }
 
@@ -197,6 +205,26 @@ func TestUnsupportedOptionalCapabilitiesAreNotAdvertised(t *testing.T) {
 	for _, name := range []string{ToolFindNeighbors, ToolGetRepositories, ToolSearchGitHubRepositories, ToolLinkPullRequest, ToolStartInvestigation} {
 		if names[name] {
 			t.Errorf("unsupported optional tool %q was advertised", name)
+		}
+	}
+}
+
+func TestOptionalCapabilitiesAreAdvertisedIndependently(t *testing.T) {
+	base := &fakeReader{searchStarted: make(chan struct{})}
+	research := &fakeOptionalCapabilities{base: base}
+	reader := struct {
+		Reader
+		ResearchReader
+	}{Reader: base, ResearchReader: research}
+	tools, closeSessions := listedToolsFromReader(t, reader, []string{"all"})
+	defer closeSessions()
+
+	if tools[ToolQueryDeepWiki] == nil {
+		t.Fatal("supported research tool was not advertised")
+	}
+	for _, name := range []string{ToolSearchGitHubRepositories, ToolIndexRepositories, ToolCheckMergeConflicts, ToolListPullRequestPortfolio} {
+		if tools[name] != nil {
+			t.Errorf("unrelated unsupported tool %q was advertised", name)
 		}
 	}
 }

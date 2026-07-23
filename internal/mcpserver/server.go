@@ -49,6 +49,10 @@ type ScalableReader interface {
 	RankOpportunities(context.Context, RankOpportunitiesInput) (RankOpportunitiesOutput, error)
 	FindPrecedents(context.Context, FindPrecedentsInput) (FindPrecedentsOutput, error)
 	GetJobs(context.Context, GetJobsInput) (GetJobsOutput, error)
+}
+
+// PortfolioReader exposes bounded offline pull-request portfolio reads.
+type PortfolioReader interface {
 	ListPullRequestPortfolio(context.Context, ListPullRequestPortfolioInput) (ListPullRequestPortfolioOutput, error)
 	FindPortfolioOverlaps(context.Context, FindPortfolioOverlapsInput) (FindPortfolioOverlapsOutput, error)
 }
@@ -59,9 +63,8 @@ type PortfolioOperator interface {
 	LinkPullRequest(context.Context, LinkPullRequestInput) (LinkPullRequestOutput, error)
 }
 
-// ScalableOperator exposes bounded external reads without combining unrelated
-// facets or workflow mutations.
-type ScalableOperator interface {
+// GitHubOperator exposes bounded GitHub reads that update only the local corpus.
+type GitHubOperator interface {
 	SearchGitHubRepositories(context.Context, SearchGitHubRepositoriesInput) (SearchGitHubRepositoriesOutput, error)
 	SyncRepositoryMetadata(context.Context, SyncRepositoryMetadataInput) (JobReference, error)
 	SyncThreads(context.Context, SyncThreadsInput) (JobReference, error)
@@ -69,8 +72,20 @@ type ScalableOperator interface {
 	GetAuthenticatedIdentity(context.Context) (AuthenticatedIdentityOutput, error)
 	SyncAuthoredPullRequests(context.Context, SyncAuthoredPullRequestsInput) (JobReference, error)
 	SyncPullRequestStatus(context.Context, SyncPullRequestStatusInput) (JobReference, error)
+}
+
+// CodeIndexer safely acquires and indexes repository code.
+type CodeIndexer interface {
 	IndexRepositories(context.Context, IndexRepositoriesInput) (JobReference, error)
+}
+
+// MergeConflictReader performs local, non-mutating Git comparisons.
+type MergeConflictReader interface {
 	CheckMergeConflicts(context.Context, CheckMergeConflictsInput) (CheckMergeConflictsOutput, error)
+}
+
+// ResearchReader exposes external derived repository context.
+type ResearchReader interface {
 	DeepWiki(context.Context, DeepWikiInput) (DeepWikiOutput, error)
 }
 
@@ -468,7 +483,6 @@ func NewWithOptions(reader Reader, version string, opts Options) (*Server, error
 		}
 	}
 	enabled := enabledToolNames(opts.Toolsets)
-	pruneUnsupportedTools(reader, enabled)
 	s := &Server{
 		reader:       reader,
 		enabledTools: enabled,
@@ -565,7 +579,7 @@ func (s *Server) register() {
 	addCatalogTool(s, catalogTool[FindNeighborsInput, FindNeighborsOutput]{
 		name: ToolFindNeighbors, title: "Find similar threads",
 		description: "Rank stored threads similar to one issue or pull request using transparent deterministic scoring. Use this for a specific source thread; it never contacts GitHub.",
-		annotations: readOnly, input: inputSchema[FindNeighborsInput](func(schema *schemaBuilder) {
+		annotations: readOnly, supportedBy: supports[NeighborReader], input: inputSchema[FindNeighborsInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 			setMinimum(schema, "number", 1)
 			setRange(schema, "limit", 1, 100)

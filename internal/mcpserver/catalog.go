@@ -101,6 +101,7 @@ var canonicalToolNames = []string{
 type catalogTool[In, Out any] struct {
 	name, title, description string
 	annotations              *mcp.ToolAnnotations
+	supportedBy              func(Reader) bool
 	input                    schemaDefinition
 	output                   schemaDefinition
 	handler                  mcp.ToolHandlerFor[In, Out]
@@ -111,6 +112,9 @@ func addCatalogTool[In, Out any](server *Server, tool catalogTool[In, Out]) {
 		if _, enabled := server.enabledTools[tool.name]; !enabled {
 			return
 		}
+	}
+	if tool.supportedBy != nil && !tool.supportedBy(server.reader) {
+		return
 	}
 	if server.readOnly && (tool.annotations == nil || !tool.annotations.ReadOnlyHint) {
 		return
@@ -131,6 +135,11 @@ func addCatalogTool[In, Out any](server *Server, tool catalogTool[In, Out]) {
 		InputSchema:  tool.input.schema,
 		OutputSchema: tool.output.schema,
 	}, structuredToolErrors(tool.handler))
+}
+
+func supports[T any](reader Reader) bool {
+	_, ok := any(reader).(T)
+	return ok
 }
 
 func structuredToolErrors[In, Out any](handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
@@ -193,34 +202,6 @@ func enabledToolNames(selected []string) map[string]struct{} {
 		}
 	}
 	return enabled
-}
-
-func pruneUnsupportedTools(reader Reader, enabled map[string]struct{}) {
-	remove := func(names ...string) {
-		for _, name := range names {
-			delete(enabled, name)
-		}
-	}
-	if _, ok := reader.(NeighborReader); !ok {
-		remove(ToolFindNeighbors)
-	}
-	if _, ok := reader.(ScalableReader); !ok {
-		remove(ToolGetRepositories, ToolGetThreads, ToolRankThreads, ToolFindPrecedents,
-			ToolListPullRequestPortfolio, ToolFindPortfolioOverlaps)
-	}
-	if _, ok := reader.(ScalableOperator); !ok {
-		remove(ToolSearchGitHubRepositories, ToolSyncRepositoryMetadata, ToolSyncThreads,
-			ToolHydrateThreads, ToolGetAuthenticatedIdentity, ToolSyncAuthoredPullRequests,
-			ToolSyncPullRequestStatus, ToolIndexRepositories, ToolCheckMergeConflicts, ToolQueryDeepWiki)
-	}
-	if _, ok := reader.(PortfolioOperator); !ok {
-		remove(ToolLinkPullRequest)
-	}
-	if _, ok := reader.(Operator); !ok {
-		remove(ToolBuildRepositoryDossier, ToolCancelJob, ToolCreateWorkspace, ToolDefineValidation,
-			ToolRunValidation, ToolStartInvestigation, ToolRecordHypothesis, ToolCheckDuplicates,
-			ToolFindCompetingWork, ToolPromoteOpportunity, ToolPrepareContribution)
-	}
 }
 
 func readOnlyAnnotations() *mcp.ToolAnnotations {
