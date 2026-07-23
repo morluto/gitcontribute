@@ -242,6 +242,34 @@ func (*fakeReader) PlanSemanticCommits(_ context.Context, _ PlanSemanticCommitsI
 	return SemanticCommitPlanOutput{Reconstruction: CommitReconstructionOutput{UnitCount: 1, AssignedCount: 1, Verified: true}}, nil
 }
 
+func (*fakeReader) ListConcerns(_ context.Context, _ ListConcernsInput) (ConcernListOutput, error) {
+	return ConcernListOutput{Concerns: []ConcernOutput{{ID: "concern-1", Owner: "owner", Repo: "repo", Title: "flaky", ProblemStatement: "intermittent", Status: "untriaged", Freshness: "unknown"}}, Total: 1}, nil
+}
+
+func (*fakeReader) CreateConcern(_ context.Context, in CreateConcernInput) (ConcernOutput, error) {
+	return ConcernOutput{ID: "concern-1", Owner: in.Owner, Repo: in.Repo, Title: in.Title, ProblemStatement: in.ProblemStatement, Status: "untriaged", Freshness: "unknown"}, nil
+}
+
+func (*fakeReader) UpdateConcern(_ context.Context, in UpdateConcernInput) (ConcernOutput, error) {
+	var title string
+	if in.Title != nil {
+		title = *in.Title
+	}
+	return ConcernOutput{ID: in.ID, Title: title, Status: "untriaged", Freshness: "unknown"}, nil
+}
+
+func (*fakeReader) SetConcernStatus(_ context.Context, in SetConcernStatusInput) (ConcernOutput, error) {
+	return ConcernOutput{ID: in.ID, Status: in.Status, Freshness: "unknown"}, nil
+}
+
+func (*fakeReader) LinkConcern(_ context.Context, in LinkConcernInput) (ConcernOutput, error) {
+	return ConcernOutput{ID: in.ID, Status: "untriaged", Freshness: "unknown", Links: []ConcernLinkOutput{{Kind: in.Kind, TargetType: in.TargetType, TargetID: in.TargetID}}}, nil
+}
+
+func (*fakeReader) PromoteConcern(_ context.Context, in PromoteConcernInput) (ConcernOutput, error) {
+	return ConcernOutput{ID: in.ID, Status: "promoted", Freshness: "unknown", Promotion: &ConcernPromotionOutput{Kind: in.Kind, InvestigationID: "inv-1", HypothesisID: "hyp-1"}}, nil
+}
+
 func (*fakeReader) DefineValidation(_ context.Context, in DefineValidationInput) (ValidationOutput, error) {
 	return ValidationOutput{ID: "val-1", InvestigationID: in.InvestigationID, Kind: in.Kind, Command: []string{"echo"}}, nil
 }

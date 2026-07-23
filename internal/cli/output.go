@@ -98,6 +98,10 @@ func humanOutput(v any) (string, error) {
 		return opportunityListHuman(r), nil
 	case *WorkspaceResult:
 		return workspaceHuman(r), nil
+	case *ConcernResult:
+		return concernHuman(r), nil
+	case *ConcernListResult:
+		return concernListHuman(r), nil
 	case *ValidationResult:
 		return validationHuman(r), nil
 	case *ValidationRunResult:
@@ -541,6 +545,28 @@ func workspaceHuman(r *WorkspaceResult) string {
 	fmt.Fprintf(&b, "Candidate SHA: %s\n", r.CandidateSHA)
 	fmt.Fprintf(&b, "Merge base: %s\n", r.MergeBase)
 	fmt.Fprintf(&b, "Created: %s", r.CreatedAt)
+	return b.String()
+}
+
+func concernHuman(r *ConcernResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Concern: %s [%s] %s\n", r.ID, r.Status, r.Title)
+	fmt.Fprintf(&b, "Repository: %s\nProblem: %s\nConfidence: %.2f\nFreshness: %s", r.Repo, r.ProblemStatement, r.Confidence, r.Freshness)
+	if r.SuccessCriterion != "" {
+		fmt.Fprintf(&b, "\nSuccess: %s", r.SuccessCriterion)
+	}
+	if r.Notes != "" {
+		fmt.Fprintf(&b, "\nNotes: %s", r.Notes)
+	}
+	return b.String()
+}
+
+func concernListHuman(r *ConcernListResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Concerns: %d", r.Total)
+	for _, item := range r.Concerns {
+		fmt.Fprintf(&b, "\n- %s [%s] %s (%s)", item.ID, item.Status, item.Title, item.Repo)
+	}
 	return b.String()
 }
 

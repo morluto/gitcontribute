@@ -409,7 +409,7 @@ func (s *Server) registerV1() {
 		annotations: cancellationAnnotations(), supportedBy: supports[Operator], input: inputSchema[CancelJobInput](func(sc *schemaBuilder) { setArrayBounds(sc, "ids", 1, 100) }),
 		output: outputSchema[GetJobsOutput]("Ordered durable job states after cancellation requests."), handler: s.cancelJob,
 	})
-
+	s.registerConcernTools()
 }
 
 func (s *Server) searchRepositories(ctx context.Context, _ *mcp.CallToolRequest, in SearchRepositoriesInput) (*mcp.CallToolResult, SearchRepositoriesOutput, error) {
