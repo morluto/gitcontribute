@@ -596,6 +596,7 @@ func (s *Server) register() {
 	s.registerContributionPrompts()
 	s.registerV1()
 	s.registerScalable()
+	s.registerCommitPlanning()
 }
 
 func boolPtr(v bool) *bool { return &v }

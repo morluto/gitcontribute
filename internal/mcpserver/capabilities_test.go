@@ -78,6 +78,7 @@ type completeTestReader struct {
 	GitHubOperator
 	CodeIndexer
 	MergeConflictReader
+	CommitPlannerReader
 	ResearchReader
 	PortfolioOperator
 	Operator
@@ -89,6 +90,7 @@ func completeFakeReader(base *fakeReader) Reader {
 		Reader: base, NeighborReader: optional, ScalableReader: optional,
 		PortfolioReader: optional, GitHubOperator: optional, CodeIndexer: optional,
 		MergeConflictReader: optional, ResearchReader: optional,
-		PortfolioOperator: optional, Operator: base,
+		CommitPlannerReader: base,
+		PortfolioOperator:   optional, Operator: base,
 	}
 }

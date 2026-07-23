@@ -438,6 +438,19 @@ Database and WAL bytes remain whole-file measurements because SQLite pages are
 shared. Logical observation-payload and code-content bytes are reported
 separately rather than attributed to individual database pages.
 
+Semantic commit preparation is a two-step local read. First,
+`workspace.inspect_commit_changes` asks Git for a binary/full-index patch and
+untracked blob identities, then uses the maintained `sourcegraph/go-diff`
+parser to expose stable file and hunk units. Second, the agent supplies semantic
+grouping judgment to `workspace.plan_semantic_commits`; deterministic code
+rejects stale inventories, unknown or duplicate unit assignments, and invalid
+dependency graphs. Ambiguous units remain explicit. A verified reconstruction
+record binds one-to-one unit coverage to the exact source patch and untracked
+content identities. Neither operation stages files, applies patches, creates
+commits, changes refs, executes repository code, or contacts GitHub. Applying a
+plan is intentionally a separate future capability with an explicit mutation
+boundary.
+
 Storage changes should include tests for upgrade behavior, rollback when
 supported, stale-write rejection, transaction atomicity, and deterministic
 query ordering.
