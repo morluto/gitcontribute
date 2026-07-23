@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -58,11 +59,15 @@ func (r *MCPReader) SyncThreads(ctx context.Context, in mcpserver.SyncThreadsInp
 	if in.Selection == "threads" && (len(in.Threads) < 1 || len(in.Threads) > 100) {
 		return mcpserver.JobReference{}, errors.New("threads must contain 1 to 100 items")
 	}
-	if in.LimitPerRepository == 0 {
-		in.LimitPerRepository = 100
-	}
-	if in.LimitPerRepository < 1 || in.LimitPerRepository > 1000 {
-		return mcpserver.JobReference{}, errors.New("limit_per_repository must be between 1 and 1000")
+	if in.Selection == "repositories" {
+		if in.LimitPerRepository == 0 {
+			in.LimitPerRepository = 100
+		}
+		if in.LimitPerRepository < 1 || in.LimitPerRepository > 1000 {
+			return mcpserver.JobReference{}, errors.New("limit_per_repository must be between 1 and 1000")
+		}
+	} else if in.LimitPerRepository != 0 {
+		return mcpserver.JobReference{}, errors.New("limit_per_repository is only valid in repository selection mode")
 	}
 	var err error
 	in.MaxRequests, err = normalizeSyncBatchMaxRequests(in.MaxRequests)
@@ -84,10 +89,11 @@ func (r *MCPReader) SyncThreads(ctx context.Context, in mcpserver.SyncThreadsInp
 //nolint:gocognit
 func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreadsInput, report func(string, string) error) (map[string]any, error) {
 	type task struct {
-		key         string
-		ref         cli.RepoRef
-		numbers     []int
-		maxRequests int
+		key          string
+		ref          cli.RepoRef
+		numbers      []int
+		inputIndexes []int
+		maxRequests  int
 	}
 	var tasks []task
 	if in.Selection == "repositories" {
@@ -96,7 +102,7 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 		}
 	} else {
 		grouped := make(map[string]int)
-		for _, thread := range in.Threads {
+		for inputIndex, thread := range in.Threads {
 			key := thread.Owner + "/" + thread.Repo
 			index, ok := grouped[key]
 			if !ok {
@@ -105,9 +111,14 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 				index = len(tasks) - 1
 			}
 			tasks[index].numbers = append(tasks[index].numbers, thread.Number)
+			tasks[index].inputIndexes = append(tasks[index].inputIndexes, inputIndex)
 		}
 	}
-	if err := report("thread_headers", jobProgressCounts(0, len(tasks))); err != nil {
+	resultCount := len(tasks)
+	if in.Selection == "threads" {
+		resultCount = len(in.Threads)
+	}
+	if err := report("thread_headers", jobProgressCounts(0, resultCount)); err != nil {
 		return nil, err
 	}
 	state := in.State
@@ -130,7 +141,7 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 		}
 		since = parsed
 	}
-	results := make([]map[string]any, len(tasks))
+	taskResults := make([]map[string]any, len(tasks))
 	remainingRequests := in.MaxRequests
 	plannedRequests := 0
 	runnable := make([]int, 0, len(tasks))
@@ -141,7 +152,7 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 		}
 		required := syncFixedRequestCost() + threadRequests
 		if required > remainingRequests {
-			results[index] = syncRequestBudgetUnavailable(tasks[index].key, required, remainingRequests)
+			taskResults[index] = syncRequestBudgetUnavailable(tasks[index].key, required, remainingRequests)
 			continue
 		}
 		tasks[index].maxRequests = required
@@ -169,14 +180,14 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 				res, err := s.SyncWithOptions(ctx, current.ref, opts)
 				if err != nil {
 					status, reason, message, retry := githubBatchError(err)
-					results[index] = map[string]any{"key": current.key, "status": status, "reason": reason, "message": message, "retry_after_ms": retry}
+					taskResults[index] = map[string]any{"key": current.key, "status": status, "reason": reason, "message": message, "retry_after_ms": retry}
 					continue
 				}
 				status := "complete"
 				if res.Capped {
 					status = "partial"
 				}
-				results[index] = map[string]any{"key": current.key, "status": status, "updated": res.Updated, "requests": res.Requests, "request_capped": res.Capped, "message": res.Message}
+				taskResults[index] = map[string]any{"key": current.key, "status": status, "updated": res.Updated, "requests": res.Requests, "request_capped": res.Capped, "message": res.Message}
 			}
 		}()
 	}
@@ -191,20 +202,36 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 	}
 	close(jobs)
 	wg.Wait()
+	results := taskResults
+	if in.Selection == "threads" {
+		results = make([]map[string]any, len(in.Threads))
+		for taskIndex, current := range tasks {
+			for _, inputIndex := range current.inputIndexes {
+				item := maps.Clone(taskResults[taskIndex])
+				delete(item, "requests")
+				delete(item, "updated")
+				thread := in.Threads[inputIndex]
+				item["key"] = fmt.Sprintf("%s/%s#%d", thread.Owner, thread.Repo, thread.Number)
+				results[inputIndex] = item
+			}
+		}
+	}
 	status := "complete"
 	completed := 0
 	requests := 0
-	for _, result := range results {
+	for _, result := range taskResults {
 		if count, ok := result["requests"].(int); ok {
 			requests += count
 		}
+	}
+	for _, result := range results {
 		if result["status"] == "complete" {
 			completed++
 		} else {
 			status = "partial"
 		}
 	}
-	if err := report("thread_headers", jobProgressCounts(len(tasks), len(tasks))); err != nil {
+	if err := report("thread_headers", jobProgressCounts(resultCount, resultCount)); err != nil {
 		return nil, err
 	}
 	return map[string]any{

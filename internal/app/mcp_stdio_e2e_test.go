@@ -189,6 +189,83 @@ func TestMCPStdioPullRequestPortfolioFlow(t *testing.T) {
 	}
 }
 
+func TestMCPStdioExactThreadSyncFlow(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	home := t.TempDir()
+	seedMCPStdioEmptyCorpus(ctx, t, home)
+	githubServer := newMCPGitHubServer(t)
+	defer githubServer.Close()
+	command := exec.Command(os.Args[0], "-test.run=^TestMCPStdioHelper$")
+	command.Env = append(os.Environ(), mcpE2EHomeEnv+"="+home, mcpE2EGitHubEnv+"="+githubServer.URL+"/")
+	client := mcp.NewClient(&mcp.Implementation{Name: "gitcontribute-e2e", Version: "test"}, nil)
+	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: command}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	threads := []any{
+		map[string]any{"owner": "lab", "repo": "project", "kind": "issue", "number": 8},
+		map[string]any{"owner": "lab", "repo": "project", "kind": "pull_request", "number": 7},
+	}
+	for range 2 {
+		job := callMCPTool[mcpserver.JobReference](ctx, t, session, mcpserver.ToolSyncThreads, map[string]any{
+			"selection": "threads", "threads": threads,
+		})
+		waitMCPJob(ctx, t, session, job.ID)
+		detailed := callMCPTool[mcpserver.GetJobsOutput](ctx, t, session, mcpserver.ToolGetJob, map[string]any{
+			"ids": []string{job.ID}, "response_format": "detailed",
+		})
+		assertExactThreadJobItems(t, detailed, []string{"lab/project#8", "lab/project#7"})
+	}
+	inspection, err := New(config.NewPaths(&config.Env{Home: home}), "e2e", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := inspection.ListCorpusInventory(ctx)
+	if closeErr := inspection.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory.Repositories) != 1 || inventory.Repositories[0].ThreadObservations != 2 {
+		t.Fatalf("repeated exact sync duplicated observations: %+v", inventory.Repositories)
+	}
+
+	stored := callMCPTool[mcpserver.GetThreadsOutput](ctx, t, session, mcpserver.ToolGetThreads, map[string]any{"threads": threads})
+	if len(stored.Items) != 2 || stored.Items[0].Value == nil || stored.Items[0].Value.Kind != "issue" || stored.Items[1].Value == nil || stored.Items[1].Value.Kind != "pull_request" {
+		t.Fatalf("exact stored threads = %+v", stored)
+	}
+	status := callMCPTool[mcpserver.JobReference](ctx, t, session, mcpserver.ToolSyncPullRequestStatus, map[string]any{
+		"pull_requests": []any{map[string]any{"owner": "lab", "repo": "project", "kind": "pull_request", "number": 7}},
+	})
+	waitMCPJob(ctx, t, session, status.ID)
+}
+
+func assertExactThreadJobItems(t *testing.T, jobs mcpserver.GetJobsOutput, wantKeys []string) {
+	t.Helper()
+	if len(jobs.Items) != 1 || jobs.Items[0].Value == nil {
+		t.Fatalf("detailed job response = %+v", jobs)
+	}
+	result, ok := jobs.Items[0].Value.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("job result type = %T", jobs.Items[0].Value.Result)
+	}
+	items, ok := result["items"].([]any)
+	if !ok || len(items) != len(wantKeys) {
+		t.Fatalf("job items = %#v", result["items"])
+	}
+	for i, raw := range items {
+		item, ok := raw.(map[string]any)
+		if !ok || item["key"] != wantKeys[i] || item["status"] != "complete" {
+			t.Fatalf("job item %d = %#v, want complete %s", i, raw, wantKeys[i])
+		}
+	}
+}
+
 func seedMCPStdioCorpus(ctx context.Context, t *testing.T, home string) {
 	t.Helper()
 	svc, err := New(config.NewPaths(&config.Env{Home: home}), "e2e", nil)
@@ -298,6 +375,14 @@ func newMCPGitHubServer(t *testing.T) *httptest.Server {
 				"repository_url":"https://api.github.test/repos/lab/project",
 				"html_url":"https://github.com/lab/project/pull/7",
 				"pull_request":{"url":"https://api.github.test/repos/lab/project/pulls/7","html_url":"https://github.com/lab/project/pull/7"},
+				"created_at":"2026-07-15T10:00:00Z","updated_at":"2026-07-18T20:00:00Z"
+			}`))
+		case strings.HasSuffix(r.URL.Path, "/repos/lab/project/issues/8"):
+			_, _ = w.Write([]byte(`{
+				"id":800,"node_id":"I_8","number":8,"state":"open","title":"Document exact sync",
+				"body":"Keep refresh scope narrow","user":{"login":"morluto"},
+				"repository_url":"https://api.github.test/repos/lab/project",
+				"html_url":"https://github.com/lab/project/issues/8",
 				"created_at":"2026-07-15T10:00:00Z","updated_at":"2026-07-18T20:00:00Z"
 			}`))
 		case strings.HasSuffix(r.URL.Path, "/repos/lab/project/pulls/7/reviews"):

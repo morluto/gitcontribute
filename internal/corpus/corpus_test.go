@@ -410,6 +410,33 @@ func TestThreadDelayedObservations(t *testing.T) {
 	}
 }
 
+func TestThreadObservationReplayIsIdempotent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "1", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceUpdatedAt := time.Unix(1000, 0).UTC()
+	for range 2 {
+		if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "title", "body", "author", sourceUpdatedAt, `{"id":1}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	thread, err := c.GetThread(ctx, repo.ID, ThreadKindIssue, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observations, err := c.ListThreadObservations(ctx, thread.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(observations) != 1 {
+		t.Fatalf("replayed observations = %d, want 1", len(observations))
+	}
+}
+
 func TestThreadEqualTimestampSequenceOrdering(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
