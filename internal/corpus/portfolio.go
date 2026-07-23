@@ -73,6 +73,17 @@ func (c *Corpus) ListPullRequestPortfolioPage(ctx context.Context, author, state
 	if err != nil {
 		return PortfolioPage{}, fmt.Errorf("list pull request portfolio: %w", err)
 	}
+	out, err := scanPullRequestPortfolioRows(rows)
+	if err != nil {
+		return PortfolioPage{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return PortfolioPage{}, fmt.Errorf("commit pull request portfolio snapshot: %w", err)
+	}
+	return PortfolioPage{PullRequests: out, Total: total, Truncated: len(out) < total}, nil
+}
+
+func scanPullRequestPortfolioRows(rows *sql.Rows) (_ []PortfolioPullRequest, err error) {
 	defer closeSQLOnReturn(rows, &err)
 	var out []PortfolioPullRequest
 	for rows.Next() {
@@ -87,7 +98,7 @@ func (c *Corpus) ListPullRequestPortfolioPage(ctx context.Context, author, state
 			&item.Thread.Title, &body, &authorValue, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone,
 			&sourceCreated, &sourceUpdated, &item.Thread.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged, &mergedKnown,
 		); err != nil {
-			return PortfolioPage{}, fmt.Errorf("scan pull request portfolio: %w", err)
+			return nil, fmt.Errorf("scan pull request portfolio: %w", err)
 		}
 		item.Thread.Body = body.String
 		item.Thread.StateReason = stateReason.String
@@ -109,13 +120,7 @@ func (c *Corpus) ListPullRequestPortfolioPage(ctx context.Context, author, state
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
-		return PortfolioPage{}, fmt.Errorf("list pull request portfolio: %w", err)
+		return nil, fmt.Errorf("list pull request portfolio: %w", err)
 	}
-	if err := rows.Close(); err != nil {
-		return PortfolioPage{}, fmt.Errorf("close pull request portfolio rows: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return PortfolioPage{}, fmt.Errorf("commit pull request portfolio snapshot: %w", err)
-	}
-	return PortfolioPage{PullRequests: out, Total: total, Truncated: len(out) < total}, nil
+	return out, nil
 }
