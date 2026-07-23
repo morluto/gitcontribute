@@ -14,6 +14,7 @@ type IssueDraft struct {
 	Title         string
 	Body          string
 	RenderedAt    time.Time
+	ManifestID    string
 }
 
 // PullRequestDraft is a rendered PR body ready for review.
@@ -22,6 +23,7 @@ type PullRequestDraft struct {
 	Title         string
 	Body          string
 	RenderedAt    time.Time
+	ManifestID    string
 }
 
 // IssueInput supplies the verified facts and repository guidance used to render an issue.
@@ -31,6 +33,7 @@ type IssueInput struct {
 	Guidance    string
 	Repo        domain.RepoRef
 	Success     string
+	ManifestID  string
 }
 
 // PullRequestInput supplies the verified facts and repository guidance used to render a PR.
@@ -44,4 +47,5 @@ type PullRequestInput struct {
 	Compatibility string
 	Limitations   string
 	LinkedIssue   string
+	ManifestID    string
 }

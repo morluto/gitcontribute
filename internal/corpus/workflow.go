@@ -12,6 +12,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
+	"github.com/morluto/gitcontribute/internal/manifest"
 	"github.com/morluto/gitcontribute/internal/workspace"
 )
 
@@ -543,4 +544,70 @@ func (c *Corpus) getDraft(ctx context.Context, opportunityID, kind string, targe
 		return fmt.Errorf("get contribution draft: %w", err)
 	}
 	return unmarshalWorkflow(payload, target)
+}
+
+// SaveContributionManifest persists one deterministic evidence statement.
+func (c *Corpus) SaveContributionManifest(ctx context.Context, item *manifest.Statement, workspaceID, pullRequestRef string) error {
+	if item == nil {
+		return errors.New("contribution manifest is required")
+	}
+	if err := item.Validate(); err != nil {
+		return err
+	}
+	payload, err := marshalWorkflow(item)
+	if err != nil {
+		return err
+	}
+	_, err = c.db.ExecContext(ctx, `
+		INSERT INTO contribution_manifests (id, opportunity_id, workspace_id, pull_request_ref, content_sha256, payload, generated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (id) DO UPDATE SET workspace_id=excluded.workspace_id,
+			pull_request_ref=excluded.pull_request_ref, content_sha256=excluded.content_sha256, payload=excluded.payload,
+			generated_at=excluded.generated_at
+	`, item.Predicate.ManifestID, item.Predicate.Opportunity.ID, workspaceID, pullRequestRef,
+		item.Predicate.ContentSHA256, payload, encodeTime(item.Predicate.GeneratedAt))
+	if err != nil {
+		return fmt.Errorf("save contribution manifest: %w", err)
+	}
+	return nil
+}
+
+// GetContributionManifest reads one persisted evidence statement.
+func (c *Corpus) GetContributionManifest(ctx context.Context, id string) (*manifest.Statement, error) {
+	var payload string
+	err := c.db.QueryRowContext(ctx, `SELECT payload FROM contribution_manifests WHERE id=?`, id).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, manifest.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get contribution manifest: %w", err)
+	}
+	var item manifest.Statement
+	if err := unmarshalWorkflow(payload, &item); err != nil {
+		return nil, err
+	}
+	if err := item.Validate(); err != nil {
+		return nil, fmt.Errorf("validate contribution manifest: %w", err)
+	}
+	return &item, nil
+}
+
+// LatestContributionManifest reads the newest manifest for an opportunity.
+func (c *Corpus) LatestContributionManifest(ctx context.Context, opportunityID string) (*manifest.Statement, error) {
+	var payload string
+	err := c.db.QueryRowContext(ctx, `SELECT payload FROM contribution_manifests WHERE opportunity_id=? ORDER BY generated_at DESC, id LIMIT 1`, opportunityID).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, manifest.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get latest contribution manifest: %w", err)
+	}
+	var item manifest.Statement
+	if err := unmarshalWorkflow(payload, &item); err != nil {
+		return nil, err
+	}
+	if err := item.Validate(); err != nil {
+		return nil, fmt.Errorf("validate contribution manifest: %w", err)
+	}
+	return &item, nil
 }

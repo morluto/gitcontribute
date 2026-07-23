@@ -399,6 +399,23 @@ prompts that point agents at local resources first. Those prompts must preserve
 the same side-effect boundary: they may suggest explicit tools, but they cannot
 authorize network reads, local writes, process execution, or GitHub mutation.
 
+Contribution evidence manifests are explicit local-write exports. They use an
+in-toto Statement v1 envelope around a product-owned predicate and bind claims
+to repository, opportunity, and optional managed-workspace identities. The
+workspace identity covers HEAD, staged and unstaged patches, bounded untracked
+content, submodules, and commit metadata; every omitted resource becomes an
+explicit gap. Candidate validations are usable only when their pre/post
+snapshot is complete, unchanged, and equal to the exported candidate snapshot.
+Stored GitHub facets and evidence are evaluated independently, so missing,
+stale, or unknown data cannot become a passing claim.
+
+Manifest generation never refreshes GitHub. Callers explicitly sync the exact
+repository or pull-request facets first, then export from SQLite and optional
+non-mutating Git reads. The content ID excludes generation/evaluation clocks,
+is recomputed before persistence, and rejects mismatched subjects or payloads.
+Drafts may store a manifest ID as structured metadata; renderers do not copy
+manifest claims into public prose.
+
 ## Schema changes
 
 Migrations are embedded from `internal/corpus/migrations` and applied by Goose,

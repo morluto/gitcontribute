@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/shlex"
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
+	"github.com/morluto/gitcontribute/internal/workspace"
 )
 
 // DefineValidation stores a validation definition for an investigation.
@@ -30,7 +33,7 @@ func (s *Service) DefineValidation(ctx context.Context, investigationID string, 
 	if len(command) == 0 {
 		return nil, errors.New("validation command is required")
 	}
-	if opts.WorkingDir == "" && (opts.BaseWorkingDir == "" || opts.CandidateDir == "") {
+	if opts.WorkspaceID == "" && opts.BaseWorkspaceID == "" && opts.CandidateWorkspaceID == "" && opts.WorkingDir == "" && (opts.BaseWorkingDir == "" || opts.CandidateDir == "") {
 		return nil, errors.New("validation working directory is required")
 	}
 
@@ -38,19 +41,25 @@ func (s *Service) DefineValidation(ctx context.Context, investigationID string, 
 	if err != nil {
 		return nil, err
 	}
+	if err := s.resolveValidationWorkspaces(ctx, c, inv.ID, &opts); err != nil {
+		return nil, err
+	}
 
 	def := &evidence.ValidationDefinition{
-		InvestigationID: inv.ID,
-		Name:            opts.Kind,
-		Kind:            opts.Kind,
-		Command:         command,
-		WorkingDir:      opts.WorkingDir,
-		BaseWorkingDir:  opts.BaseWorkingDir,
-		CandidateDir:    opts.CandidateDir,
-		Env:             opts.Env,
-		Timeout:         opts.Timeout,
-		MaxOutputBytes:  opts.MaxOutputBytes,
-		Observation:     observationContractToEvidence(opts.Observation),
+		InvestigationID:      inv.ID,
+		Name:                 opts.Kind,
+		Kind:                 opts.Kind,
+		Command:              command,
+		WorkingDir:           opts.WorkingDir,
+		BaseWorkingDir:       opts.BaseWorkingDir,
+		CandidateDir:         opts.CandidateDir,
+		WorkspaceID:          opts.WorkspaceID,
+		BaseWorkspaceID:      opts.BaseWorkspaceID,
+		CandidateWorkspaceID: opts.CandidateWorkspaceID,
+		Env:                  opts.Env,
+		Timeout:              opts.Timeout,
+		MaxOutputBytes:       opts.MaxOutputBytes,
+		Observation:          observationContractToEvidence(opts.Observation),
 	}
 
 	evSvc := evidence.NewService(c, evidence.NewExecRunner())
@@ -88,12 +97,130 @@ func (s *Service) RunValidation(ctx context.Context, id string, opts cli.RunVali
 	if err != nil {
 		return nil, err
 	}
+	def, err := c.GetValidationDefinition(ctx, id)
+	if err != nil {
+		return nil, mapEvidenceError(err)
+	}
+	workspaceID := def.WorkspaceID
+	if runKind == evidence.RunKindBase && def.BaseWorkspaceID != "" {
+		workspaceID = def.BaseWorkspaceID
+	}
+	if runKind == evidence.RunKindCandidate && def.CandidateWorkspaceID != "" {
+		workspaceID = def.CandidateWorkspaceID
+	}
+	var before workspace.Snapshot
+	var beforeErr error
+	var managedWorkspace *workspace.Workspace
+	if workspaceID != "" {
+		managedWorkspace, beforeErr = c.GetWorkspace(ctx, workspaceID)
+		if beforeErr == nil {
+			var manager *workspace.Manager
+			manager, beforeErr = s.workspaceReader()
+			if beforeErr == nil {
+				before, beforeErr = manager.SnapshotByPath(ctx, managedWorkspace.Path, managedWorkspace.BaseSHA, managedWorkspace.MergeBase)
+			}
+		}
+	}
 	evSvc := evidence.NewService(c, evidence.NewExecRunner())
 	run, err := evSvc.RunValidation(ctx, id, runKind)
 	if err != nil {
 		return nil, mapEvidenceError(err)
 	}
+	if err := bindValidationWorkspace(ctx, s, c, run, managedWorkspace, before, beforeErr); err != nil {
+		return nil, err
+	}
 	return validationRunResult(run), nil
+}
+
+func (s *Service) resolveValidationWorkspaces(ctx context.Context, c *corpus.Corpus, investigationID string, opts *cli.DefineValidationOptions) error {
+	if opts.WorkspaceID == "" && opts.BaseWorkspaceID == "" && opts.CandidateWorkspaceID == "" {
+		return nil
+	}
+	manager, err := s.workspaceReader()
+	if err != nil {
+		return fmt.Errorf("open managed workspaces: %w", err)
+	}
+	resolve := func(id string) (*workspace.Workspace, error) {
+		item, err := c.GetWorkspace(ctx, id)
+		if err != nil {
+			return nil, mapWorkspaceError(err)
+		}
+		if item.InvestigationID != investigationID {
+			return nil, errors.New("workspace does not belong to the validation investigation")
+		}
+		if err := manager.ValidateWorkspacePath(item.Path); err != nil {
+			return nil, fmt.Errorf("workspace %q path is not managed: %w", id, err)
+		}
+		return item, nil
+	}
+	if opts.WorkspaceID != "" {
+		if opts.BaseWorkspaceID != "" || opts.CandidateWorkspaceID != "" || opts.WorkingDir != "" || opts.BaseWorkingDir != "" || opts.CandidateDir != "" {
+			return errors.New("workspace-id cannot be combined with other workspace selectors")
+		}
+		item, err := resolve(opts.WorkspaceID)
+		if err != nil {
+			return mapWorkspaceError(err)
+		}
+		opts.WorkingDir = item.Path
+		return nil
+	}
+	if opts.BaseWorkspaceID != "" || opts.CandidateWorkspaceID != "" {
+		if opts.BaseWorkspaceID == "" || opts.CandidateWorkspaceID == "" || opts.WorkingDir != "" || opts.BaseWorkingDir != "" || opts.CandidateDir != "" {
+			return errors.New("base-workspace-id and candidate-workspace-id must be provided together without directory selectors")
+		}
+		base, err := resolve(opts.BaseWorkspaceID)
+		if err != nil {
+			return mapWorkspaceError(err)
+		}
+		candidate, err := resolve(opts.CandidateWorkspaceID)
+		if err != nil {
+			return mapWorkspaceError(err)
+		}
+		opts.BaseWorkingDir, opts.CandidateDir = base.Path, candidate.Path
+	}
+	return nil
+}
+
+func bindValidationWorkspace(ctx context.Context, service *Service, c *corpus.Corpus, run *evidence.ValidationRun, managed *workspace.Workspace, before workspace.Snapshot, beforeErr error) error {
+	run.WorkspaceBindingStatus = "unavailable"
+	switch {
+	case beforeErr != nil:
+		run.WorkspaceBindingReason = "capture pre-run workspace snapshot: " + beforeErr.Error()
+	case managed == nil:
+		run.WorkspaceBindingReason = "validation did not declare a managed workspace"
+	default:
+		run.WorkspaceSnapshotBefore = before.SHA256
+		manager, err := service.workspaceReader()
+		if err != nil {
+			run.WorkspaceBindingReason = "open workspace reader after validation: " + err.Error()
+			break
+		}
+		snapshotCtx, snapshotCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		after, err := manager.SnapshotByPath(snapshotCtx, managed.Path, managed.BaseSHA, managed.MergeBase)
+		snapshotCancel()
+		if err != nil {
+			run.WorkspaceBindingReason = "capture post-run workspace snapshot: " + err.Error()
+			break
+		}
+		run.WorkspaceSnapshotAfter = after.SHA256
+		switch {
+		case !before.Complete || !after.Complete:
+			run.WorkspaceBindingStatus = "incomplete"
+			run.WorkspaceBindingReason = "workspace snapshot contains explicitly unbound content"
+		case before.SHA256 != after.SHA256:
+			run.WorkspaceBindingStatus = "changed"
+			run.WorkspaceBindingReason = "workspace changed while validation was running"
+		default:
+			run.WorkspaceBindingStatus = "bound"
+			run.WorkspaceBindingReason = "pre-run and post-run workspace identities match"
+		}
+	}
+	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := c.SaveValidationRun(saveCtx, run); err != nil {
+		return fmt.Errorf("save validation workspace binding: %w", err)
+	}
+	return nil
 }
 
 // CompareValidation compares a base validation run with a candidate validation run.
@@ -237,37 +364,44 @@ func validationResult(def *evidence.ValidationDefinition) *cli.ValidationResult 
 		timeout = def.Timeout.String()
 	}
 	return &cli.ValidationResult{
-		ID:              def.ID,
-		InvestigationID: def.InvestigationID,
-		Kind:            def.Kind,
-		Command:         def.Command,
-		WorkingDir:      def.WorkingDir,
-		BaseWorkingDir:  def.BaseWorkingDir,
-		CandidateDir:    def.CandidateDir,
-		Env:             append([]string(nil), def.Env...),
-		Timeout:         timeout,
-		MaxOutputBytes:  def.MaxOutputBytes,
-		Observation:     observationContractToCLI(def.Observation),
-		CreatedAt:       formatTime(def.CreatedAt),
+		ID:                   def.ID,
+		InvestigationID:      def.InvestigationID,
+		Kind:                 def.Kind,
+		Command:              def.Command,
+		WorkingDir:           def.WorkingDir,
+		BaseWorkingDir:       def.BaseWorkingDir,
+		CandidateDir:         def.CandidateDir,
+		WorkspaceID:          def.WorkspaceID,
+		BaseWorkspaceID:      def.BaseWorkspaceID,
+		CandidateWorkspaceID: def.CandidateWorkspaceID,
+		Env:                  append([]string(nil), def.Env...),
+		Timeout:              timeout,
+		MaxOutputBytes:       def.MaxOutputBytes,
+		Observation:          observationContractToCLI(def.Observation),
+		CreatedAt:            formatTime(def.CreatedAt),
 	}
 }
 
 func validationRunResult(run *evidence.ValidationRun) *cli.ValidationRunResult {
 	return &cli.ValidationRunResult{
-		ID:                run.ID,
-		DefinitionID:      run.DefinitionID,
-		InvestigationID:   run.InvestigationID,
-		Kind:              string(run.Kind),
-		ExitCode:          run.ExitCode,
-		Stdout:            run.Stdout,
-		Stderr:            run.Stderr,
-		Truncated:         run.Truncated,
-		Error:             run.Error,
-		Classification:    string(run.Classification),
-		ObservationStatus: string(run.ObservationStatus),
-		Observations:      observationResultsToCLI(run.Observations),
-		StartedAt:         formatTime(run.StartedAt),
-		CompletedAt:       formatTime(run.CompletedAt),
+		ID:                      run.ID,
+		DefinitionID:            run.DefinitionID,
+		InvestigationID:         run.InvestigationID,
+		Kind:                    string(run.Kind),
+		ExitCode:                run.ExitCode,
+		Stdout:                  run.Stdout,
+		Stderr:                  run.Stderr,
+		Truncated:               run.Truncated,
+		Error:                   run.Error,
+		Classification:          string(run.Classification),
+		ObservationStatus:       string(run.ObservationStatus),
+		Observations:            observationResultsToCLI(run.Observations),
+		StartedAt:               formatTime(run.StartedAt),
+		CompletedAt:             formatTime(run.CompletedAt),
+		WorkspaceSnapshotBefore: run.WorkspaceSnapshotBefore,
+		WorkspaceSnapshotAfter:  run.WorkspaceSnapshotAfter,
+		WorkspaceBindingStatus:  run.WorkspaceBindingStatus,
+		WorkspaceBindingReason:  run.WorkspaceBindingReason,
 	}
 }
 

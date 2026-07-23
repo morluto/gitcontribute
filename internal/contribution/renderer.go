@@ -58,6 +58,7 @@ func (r *Renderer) RenderIssue(in IssueInput) (*IssueDraft, error) {
 		Title:         o.Title,
 		Body:          strings.TrimSpace(b.String()),
 		RenderedAt:    time.Now().UTC(),
+		ManifestID:    in.ManifestID,
 	}, nil
 }
 
@@ -102,6 +103,7 @@ func (r *Renderer) RenderPullRequest(in PullRequestInput) (*PullRequestDraft, er
 		Title:         o.Title,
 		Body:          strings.TrimSpace(b.String()),
 		RenderedAt:    time.Now().UTC(),
+		ManifestID:    in.ManifestID,
 	}, nil
 }
 

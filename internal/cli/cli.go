@@ -419,17 +419,20 @@ type validationCmd struct {
 }
 
 type defineValidationCmd struct {
-	InvestigationID string        `arg:"" help:"Investigation ID"`
-	Kind            string        `name:"kind" required:"" help:"Validation kind"`
-	Command         string        `name:"command" required:"" help:"Command argv as a single string"`
-	WorkingDir      string        `name:"working-dir" help:"Working directory for both runs"`
-	BaseWorkingDir  string        `name:"base-working-dir" help:"Base workspace directory"`
-	CandidateDir    string        `name:"candidate-dir" help:"Candidate workspace directory"`
-	Env             []string      `name:"env" help:"Host environment variable names to pass through"`
-	Timeout         time.Duration `name:"timeout" help:"Maximum execution time"`
-	MaxOutput       int64         `name:"max-output" help:"Maximum captured output bytes per stream"`
-	Observation     string        `name:"observation-contract" help:"JSON observation contract for base and candidate output"`
-	JSON            bool          `name:"json" help:"Print the result as JSON"`
+	InvestigationID      string        `arg:"" help:"Investigation ID"`
+	Kind                 string        `name:"kind" required:"" help:"Validation kind"`
+	Command              string        `name:"command" required:"" help:"Command argv as a single string"`
+	WorkingDir           string        `name:"working-dir" help:"Working directory for both runs"`
+	BaseWorkingDir       string        `name:"base-working-dir" help:"Base workspace directory"`
+	CandidateDir         string        `name:"candidate-dir" help:"Candidate workspace directory"`
+	WorkspaceID          string        `name:"workspace-id" help:"Managed workspace ID for both runs"`
+	BaseWorkspaceID      string        `name:"base-workspace-id" help:"Managed base workspace ID"`
+	CandidateWorkspaceID string        `name:"candidate-workspace-id" help:"Managed candidate workspace ID"`
+	Env                  []string      `name:"env" help:"Host environment variable names to pass through"`
+	Timeout              time.Duration `name:"timeout" help:"Maximum execution time"`
+	MaxOutput            int64         `name:"max-output" help:"Maximum captured output bytes per stream"`
+	Observation          string        `name:"observation-contract" help:"JSON observation contract for base and candidate output"`
+	JSON                 bool          `name:"json" help:"Print the result as JSON"`
 }
 
 type runValidationCmd struct {
@@ -461,6 +464,7 @@ type issueCmd struct {
 	OpportunityID string `arg:"" help:"Opportunity ID"`
 	Guidance      string `name:"guidance" help:"Repository contribution guidance"`
 	Success       string `name:"success" help:"Success criteria"`
+	ManifestID    string `name:"manifest-id" help:"Stored evidence manifest to reference"`
 	JSON          bool   `name:"json" help:"Print the result as JSON"`
 }
 
@@ -473,6 +477,7 @@ type prCmd struct {
 	Limitations   string `name:"limitations" help:"Limitations"`
 	LinkedIssue   string `name:"linked-issue" help:"Linked issue"`
 	Guidance      string `name:"guidance" help:"Repository contribution guidance"`
+	ManifestID    string `name:"manifest-id" help:"Stored evidence manifest to reference"`
 	JSON          bool   `name:"json" help:"Print the result as JSON"`
 }
 
@@ -507,23 +512,6 @@ type neighborsCmd struct {
 	Kind   string `name:"kind" required:"" enum:"issue,pull_request" help:"Thread kind"`
 	Limit  int    `name:"limit" default:"10" help:"Maximum neighbors to return"`
 	JSON   bool   `name:"json" help:"Print the result as JSON"`
-}
-
-type exportCmd struct {
-	Dossier  exportDossierCmd  `cmd:"" help:"Export a repository dossier"`
-	Evidence exportEvidenceCmd `cmd:"" help:"Export investigation evidence"`
-}
-
-type exportDossierCmd struct {
-	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
-	Format    string `name:"format" default:"markdown" enum:"json,markdown,md" help:"Export format"`
-	Output    string `name:"output" help:"Write to a file instead of stdout"`
-}
-
-type exportEvidenceCmd struct {
-	InvestigationID string `arg:"" help:"Investigation ID"`
-	Format          string `name:"format" default:"markdown" enum:"json,markdown,md" help:"Export format"`
-	Output          string `name:"output" help:"Write to a file instead of stdout"`
 }
 
 type lensCmd struct {
@@ -1519,8 +1507,7 @@ func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) e
 	case "prepare issue":
 		fmt.Fprintf(c.stderr, "preparing issue draft for opportunity %s...\n", cmd.Issue.OpportunityID)
 		result, err := service.PrepareIssue(ctx, cmd.Issue.OpportunityID, PrepareIssueOptions{
-			Guidance: cmd.Issue.Guidance,
-			Success:  cmd.Issue.Success,
+			Guidance: cmd.Issue.Guidance, Success: cmd.Issue.Success, ManifestID: cmd.Issue.ManifestID,
 		})
 		if err != nil {
 			return c.mapError(err)
@@ -1536,6 +1523,7 @@ func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) e
 			Limitations:   cmd.PR.Limitations,
 			LinkedIssue:   cmd.PR.LinkedIssue,
 			Guidance:      cmd.PR.Guidance,
+			ManifestID:    cmd.PR.ManifestID,
 		})
 		if err != nil {
 			return c.mapError(err)
@@ -1926,6 +1914,17 @@ func (c *CLI) runExport(ctx context.Context, command string, cmd *exportCmd) err
 	case "export evidence":
 		result, err = service.ExportEvidence(ctx, cmd.Evidence.InvestigationID, cmd.Evidence.Format)
 		output = cmd.Evidence.Output
+	case "export manifest":
+		opts := ManifestExportOptions{WorkspaceID: cmd.Manifest.WorkspaceID}
+		if cmd.Manifest.PullRequest != "" {
+			repo, number, parseErr := parseThreadRef(cmd.Manifest.PullRequest)
+			if parseErr != nil {
+				return NewCLIError(ExitUsage, parseErr)
+			}
+			opts.PullRequest = &ManifestPullRequestRef{Owner: repo.Owner, Repo: repo.Repo, Number: number}
+		}
+		result, err = service.ExportManifest(ctx, cmd.Manifest.OpportunityID, opts)
+		output = cmd.Manifest.Output
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown export command: %s", command))
 	}

@@ -242,6 +242,10 @@ func (*fakeReader) PrepareContribution(_ context.Context, in PrepareContribution
 	return DraftOutput{OpportunityID: in.OpportunityID, Kind: in.Kind, Title: "draft", Body: "body"}, nil
 }
 
+func (*fakeReader) ExportManifest(_ context.Context, in ExportManifestInput) (ManifestOutput, error) {
+	return ManifestOutput{ManifestID: "sha256:test", ContentSHA256: "test", SchemaVersion: "contribution-evidence.v1", Status: "incomplete", Statement: map[string]any{"opportunity_id": in.OpportunityID}}, nil
+}
+
 func (*fakeReader) CancelJobs(_ context.Context, in CancelJobInput) (GetJobsOutput, error) {
 	items := make([]BatchItem[GetJobOutput], len(in.IDs))
 	for i, id := range in.IDs {

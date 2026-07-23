@@ -13,6 +13,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
+	"github.com/morluto/gitcontribute/internal/manifest"
 )
 
 const maxPreparedDiffBytes = 1 << 20
@@ -26,6 +27,9 @@ func (s *Service) PrepareIssue(ctx context.Context, opportunityID string, opts c
 
 	opp, inv, err := s.loadOpportunityAndRepo(ctx, c, opportunityID)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateDraftManifest(ctx, c, opportunityID, opts.ManifestID); err != nil {
 		return nil, err
 	}
 
@@ -49,12 +53,13 @@ func (s *Service) PrepareIssue(ctx context.Context, opportunityID string, opts c
 		Guidance:    guidance,
 		Repo:        inv.Repo,
 		Success:     opts.Success,
+		ManifestID:  opts.ManifestID,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	return draftResult("issue", draft.OpportunityID, draft.Title, draft.Body, draft.RenderedAt), nil
+	return draftResult("issue", draft.OpportunityID, draft.Title, draft.Body, draft.RenderedAt, draft.ManifestID), nil
 }
 
 // PreparePullRequest renders and stores a pull request draft for an opportunity.
@@ -66,6 +71,9 @@ func (s *Service) PreparePullRequest(ctx context.Context, opportunityID string, 
 
 	opp, inv, err := s.loadOpportunityAndRepo(ctx, c, opportunityID)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateDraftManifest(ctx, c, opportunityID, opts.ManifestID); err != nil {
 		return nil, err
 	}
 
@@ -109,12 +117,13 @@ func (s *Service) PreparePullRequest(ctx context.Context, opportunityID string, 
 		Compatibility: opts.Compatibility,
 		Limitations:   opts.Limitations,
 		LinkedIssue:   opts.LinkedIssue,
+		ManifestID:    opts.ManifestID,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	return draftResult("pull_request", draft.OpportunityID, draft.Title, draft.Body, draft.RenderedAt), nil
+	return draftResult("pull_request", draft.OpportunityID, draft.Title, draft.Body, draft.RenderedAt, draft.ManifestID), nil
 }
 
 func (s *Service) loadOpportunityAndRepo(ctx context.Context, c *corpus.Corpus, opportunityID string) (*investigation.Opportunity, *investigation.Investigation, error) {
@@ -156,6 +165,20 @@ func (s *Service) loadOpportunityEvidence(ctx context.Context, c *corpus.Corpus,
 		}
 	}
 	return items, nil
+}
+
+func validateDraftManifest(ctx context.Context, c *corpus.Corpus, opportunityID, manifestID string) error {
+	if manifestID == "" {
+		return nil
+	}
+	statement, err := c.GetContributionManifest(ctx, manifestID)
+	if err != nil {
+		return err
+	}
+	if statement.Predicate.Opportunity.ID != opportunityID {
+		return fmt.Errorf("%w: manifest %q belongs to opportunity %q", manifest.ErrIdentityMismatch, manifestID, statement.Predicate.Opportunity.ID)
+	}
+	return nil
 }
 
 func (s *Service) workspaceDiff(ctx context.Context, workspaceID string, inv *investigation.Investigation) (string, error) {
@@ -380,12 +403,13 @@ func diffMatchesOpportunity(diff *WorkspaceDiffResult, inv *investigation.Invest
 	return diff.Repo.Owner == inv.Repo.Owner && diff.Repo.Repo == inv.Repo.Repo
 }
 
-func draftResult(kind, opportunityID, title, body string, renderedAt time.Time) *cli.DraftResult {
+func draftResult(kind, opportunityID, title, body string, renderedAt time.Time, manifestID string) *cli.DraftResult {
 	return &cli.DraftResult{
 		OpportunityID: opportunityID,
 		Kind:          kind,
 		Title:         title,
 		Body:          body,
 		RenderedAt:    formatTime(renderedAt),
+		ManifestID:    manifestID,
 	}
 }

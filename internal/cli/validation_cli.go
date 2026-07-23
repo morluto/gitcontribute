@@ -38,6 +38,7 @@ func (c *CLI) defineValidation(ctx context.Context, service ValidationService, c
 	result, err := service.DefineValidation(ctx, cmd.InvestigationID, DefineValidationOptions{
 		Kind: cmd.Kind, Command: cmd.Command, WorkingDir: cmd.WorkingDir,
 		BaseWorkingDir: cmd.BaseWorkingDir, CandidateDir: cmd.CandidateDir,
+		WorkspaceID: cmd.WorkspaceID, BaseWorkspaceID: cmd.BaseWorkspaceID, CandidateWorkspaceID: cmd.CandidateWorkspaceID,
 		Env: cmd.Env, Timeout: cmd.Timeout, MaxOutputBytes: cmd.MaxOutput,
 		Observation: observation,
 	})

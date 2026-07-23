@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -597,20 +598,16 @@ func (r *MCPReader) DefineValidation(ctx context.Context, in mcpserver.DefineVal
 		}
 		timeout = d
 	}
-	workingDir, baseDir, candidateDir, err := r.validationWorkspacePaths(ctx, in)
-	if err != nil {
-		return mcpserver.ValidationOutput{}, err
-	}
 	opts := cli.DefineValidationOptions{
-		Kind:           in.Kind,
-		Command:        in.Command,
-		WorkingDir:     workingDir,
-		BaseWorkingDir: baseDir,
-		CandidateDir:   candidateDir,
-		Env:            append([]string(nil), in.Env...),
-		Timeout:        timeout,
-		MaxOutputBytes: in.MaxOutputBytes,
-		Observation:    observationContractMCPToCLI(in.Observation),
+		Kind:                 in.Kind,
+		Command:              in.Command,
+		WorkspaceID:          in.WorkspaceID,
+		BaseWorkspaceID:      in.BaseWorkspaceID,
+		CandidateWorkspaceID: in.CandidateWorkspaceID,
+		Env:                  append([]string(nil), in.Env...),
+		Timeout:              timeout,
+		MaxOutputBytes:       in.MaxOutputBytes,
+		Observation:          observationContractMCPToCLI(in.Observation),
 	}
 	res, err := r.Service.DefineValidation(ctx, in.InvestigationID, opts)
 	if err != nil {
@@ -619,57 +616,23 @@ func (r *MCPReader) DefineValidation(ctx context.Context, in mcpserver.DefineVal
 	return validationResultToMCP(res), nil
 }
 
-func (r *MCPReader) validationWorkspacePaths(ctx context.Context, in mcpserver.DefineValidationInput) (string, string, string, error) {
-	c, err := r.openReadOnlyCorpus(ctx)
-	if err != nil {
-		return "", "", "", err
-	}
-	mgr, err := r.workspaceReader()
-	if err != nil {
-		return "", "", "", fmt.Errorf("open managed workspaces: %w", err)
-	}
-	resolve := func(id string) (string, error) {
-		ws, err := c.GetWorkspace(ctx, id)
-		if err != nil {
-			return "", mapWorkspaceError(err)
-		}
-		if ws.InvestigationID != in.InvestigationID {
-			return "", fmt.Errorf("workspace %q does not belong to investigation %q", id, in.InvestigationID)
-		}
-		if err := mgr.ValidateWorkspacePath(ws.Path); err != nil {
-			return "", fmt.Errorf("workspace %q path is not managed: %w", id, err)
-		}
-		return ws.Path, nil
-	}
-	if in.WorkspaceID != "" {
-		path, err := resolve(in.WorkspaceID)
-		return path, "", "", err
-	}
-	base, err := resolve(in.BaseWorkspaceID)
-	if err != nil {
-		return "", "", "", err
-	}
-	candidate, err := resolve(in.CandidateWorkspaceID)
-	if err != nil {
-		return "", "", "", err
-	}
-	return "", base, candidate, nil
-}
-
 func validationResultToMCP(res *cli.ValidationResult) mcpserver.ValidationOutput {
 	return mcpserver.ValidationOutput{
-		ID:              res.ID,
-		InvestigationID: res.InvestigationID,
-		Kind:            res.Kind,
-		Command:         res.Command,
-		WorkingDir:      res.WorkingDir,
-		BaseWorkingDir:  res.BaseWorkingDir,
-		CandidateDir:    res.CandidateDir,
-		Env:             res.Env,
-		Timeout:         res.Timeout,
-		MaxOutputBytes:  res.MaxOutputBytes,
-		Observation:     observationContractCLIToMCP(res.Observation),
-		CreatedAt:       res.CreatedAt,
+		ID:                   res.ID,
+		InvestigationID:      res.InvestigationID,
+		Kind:                 res.Kind,
+		Command:              res.Command,
+		WorkingDir:           res.WorkingDir,
+		BaseWorkingDir:       res.BaseWorkingDir,
+		CandidateDir:         res.CandidateDir,
+		WorkspaceID:          res.WorkspaceID,
+		BaseWorkspaceID:      res.BaseWorkspaceID,
+		CandidateWorkspaceID: res.CandidateWorkspaceID,
+		Env:                  res.Env,
+		Timeout:              res.Timeout,
+		MaxOutputBytes:       res.MaxOutputBytes,
+		Observation:          observationContractCLIToMCP(res.Observation),
+		CreatedAt:            res.CreatedAt,
 	}
 }
 
@@ -726,8 +689,9 @@ func (r *MCPReader) PrepareContribution(ctx context.Context, in mcpserver.Prepar
 	switch in.Kind {
 	case "issue":
 		draft, err = r.Service.PrepareIssue(ctx, in.OpportunityID, cli.PrepareIssueOptions{
-			Guidance: in.Guidance,
-			Success:  in.Success,
+			Guidance:   in.Guidance,
+			Success:    in.Success,
+			ManifestID: in.ManifestID,
 		})
 	case "pull_request":
 		draft, err = r.Service.PreparePullRequest(ctx, in.OpportunityID, cli.PreparePROptions{
@@ -738,6 +702,7 @@ func (r *MCPReader) PrepareContribution(ctx context.Context, in mcpserver.Prepar
 			Limitations:   in.Limitations,
 			LinkedIssue:   in.LinkedIssue,
 			Guidance:      in.Guidance,
+			ManifestID:    in.ManifestID,
 		})
 	default:
 		return mcpserver.DraftOutput{}, fmt.Errorf("unsupported contribution kind %q", in.Kind)
@@ -755,5 +720,30 @@ func draftResultToMCP(d *cli.DraftResult) mcpserver.DraftOutput {
 		Title:         d.Title,
 		Body:          d.Body,
 		RenderedAt:    d.RenderedAt,
+		ManifestID:    d.ManifestID,
 	}
+}
+
+// ExportManifest assembles a bounded local contribution evidence statement.
+func (r *MCPReader) ExportManifest(ctx context.Context, in mcpserver.ExportManifestInput) (mcpserver.ManifestOutput, error) {
+	opts := ManifestOptions{WorkspaceID: strings.TrimSpace(in.WorkspaceID)}
+	if in.PullRequest != nil {
+		opts.PullRequest = &ManifestPullRequest{Owner: strings.TrimSpace(in.PullRequest.Owner), Repo: strings.TrimSpace(in.PullRequest.Repo), Number: in.PullRequest.Number}
+	}
+	statement, err := r.ContributionManifest(ctx, in.OpportunityID, opts)
+	if err != nil {
+		return mcpserver.ManifestOutput{}, err
+	}
+	payload, err := json.Marshal(statement)
+	if err != nil {
+		return mcpserver.ManifestOutput{}, err
+	}
+	var structured map[string]any
+	if err := json.Unmarshal(payload, &structured); err != nil {
+		return mcpserver.ManifestOutput{}, err
+	}
+	return mcpserver.ManifestOutput{
+		ManifestID: statement.Predicate.ManifestID, ContentSHA256: statement.Predicate.ContentSHA256,
+		SchemaVersion: statement.Predicate.SchemaVersion, Status: statement.Predicate.Status, Statement: structured,
+	}, nil
 }

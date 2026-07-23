@@ -2,6 +2,7 @@ package corpus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -11,8 +12,61 @@ import (
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
+	"github.com/morluto/gitcontribute/internal/manifest"
 	"github.com/morluto/gitcontribute/internal/workspace"
 )
+
+func TestContributionManifestPersistsAndSelectsLatest(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	svc := investigation.NewService(c, c)
+	inv, err := svc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, "sha", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hypothesis, err := svc.RecordHypothesis(ctx, inv.ID, "proof", "description", investigation.CategoryBug, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opportunity, err := svc.PromoteOpportunity(ctx, hypothesis.ID, "problem", "scope", "impact", "small", 0.8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statement, err := manifest.Finalize(manifest.Predicate{
+		GeneratedAt: time.Unix(100, 0).UTC(), Repository: manifest.RepositoryIdentity{Owner: "owner", Repo: "repo", CommitSHA: "sha"},
+		Opportunity: manifest.OpportunityRecord{ID: opportunity.ID, InvestigationID: inv.ID}, Status: "incomplete",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SaveContributionManifest(ctx, &statement, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.GetContributionManifest(ctx, statement.Predicate.ManifestID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest, err := c.LatestContributionManifest(ctx, opportunity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Predicate.ContentSHA256 != statement.Predicate.ContentSHA256 || latest.Predicate.ManifestID != statement.Predicate.ManifestID {
+		t.Fatalf("manifest roundtrip mismatch: got=%+v latest=%+v", got.Predicate, latest.Predicate)
+	}
+	tampered := statement
+	tampered.Predicate.Opportunity.ProblemStatement = "tampered"
+	payload, err := json.Marshal(tampered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.db.ExecContext(ctx, `UPDATE contribution_manifests SET payload=? WHERE id=?`, payload, statement.Predicate.ManifestID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.GetContributionManifest(ctx, statement.Predicate.ManifestID); err == nil {
+		t.Fatal("tampered persisted manifest passed validation")
+	}
+}
 
 func TestContributionWorkflowPersistsAcrossReopen(t *testing.T) {
 	t.Parallel()

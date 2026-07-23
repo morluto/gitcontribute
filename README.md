@@ -599,6 +599,21 @@ gitcontribute evidence add --type=manual_observation --relation=supporting \
   --opportunity <opportunity-id>
 ```
 
+Export a digest-bound contribution evidence manifest from stored facts and an
+optional managed workspace:
+
+```sh
+gitcontribute export manifest <opportunity-id> \
+  --workspace <workspace-id> \
+  --pull-request owner/repo#42 \
+  --output manifest.json
+```
+
+This command does not contact GitHub. Sync the exact pull request first when
+current checks or reviews matter. Missing or stale facets remain explicit
+manifest gaps. Issue and PR drafts can reference the stored result with
+`--manifest-id` without copying its claims into the rendered body.
+
 Evidence shown through the CLI, exports, and MCP includes a derived freshness
 status. `github_source` evidence recorded from a started thread carries the
 exact corpus source revision it used, so later issue, pull request, facet, or
@@ -657,7 +672,7 @@ Most non-interactive commands accept `--json`. Machine-readable output goes to
 stdout; progress and status messages go to stderr. List commands accept
 `--limit`, and paginated searches return an opaque `next_cursor` where supported.
 
-`dossier export`, `export dossier`, `export evidence`, and `tracking export`
+`dossier export`, `export dossier`, `export evidence`, `export manifest`, and `tracking export`
 accept `--output <file>`.
 
 </details>

@@ -219,6 +219,78 @@ func TestManager_CreateAndInspect(t *testing.T) {
 	}
 }
 
+func TestWorkspaceSnapshotBindsStagedUnstagedAndUntrackedContent(t *testing.T) {
+	ctx := context.Background()
+	remote, baseSHA, _ := setupRemote(t)
+	mgr := newManager(t)
+	if err := mgr.Clone(ctx, remote, "origin"); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := mgr.Create(ctx, "origin", "master", "feature", "snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial, err := mgr.SnapshotByPath(ctx, ws.Path, baseSHA, baseSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !initial.Complete || initial.SHA256 == "" || initial.HeadSHA != ws.CandidateSHA || initial.CommitTotal != 1 {
+		t.Fatalf("initial snapshot = %+v", initial)
+	}
+
+	writeFile(t, filepath.Join(ws.Path, "feature.txt"), "staged")
+	runGit(t, ws.Path, "add", "feature.txt")
+	staged, err := mgr.SnapshotByPath(ctx, ws.Path, baseSHA, baseSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if staged.SHA256 == initial.SHA256 || staged.Staged.SHA256 == initial.Staged.SHA256 {
+		t.Fatal("staged mutation did not change snapshot identity")
+	}
+
+	writeFile(t, filepath.Join(ws.Path, "feature.txt"), "unstaged")
+	unstaged, err := mgr.SnapshotByPath(ctx, ws.Path, baseSHA, baseSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unstaged.SHA256 == staged.SHA256 || unstaged.Unstaged.SHA256 == staged.Unstaged.SHA256 {
+		t.Fatal("unstaged mutation did not change snapshot identity")
+	}
+
+	untrackedPath := filepath.Join(ws.Path, "untracked.txt")
+	writeFile(t, untrackedPath, "first")
+	untracked, err := mgr.SnapshotByPath(ctx, ws.Path, baseSHA, baseSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, untrackedPath, "second")
+	replaced, err := mgr.SnapshotByPath(ctx, ws.Path, baseSHA, baseSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(untracked.Untracked) != 1 || untracked.SHA256 == replaced.SHA256 || untracked.Untracked[0].SHA256 == replaced.Untracked[0].SHA256 {
+		t.Fatalf("untracked replacement was not bound: before=%+v after=%+v", untracked.Untracked, replaced.Untracked)
+	}
+	writeFile(t, filepath.Join(ws.Path, ".gitignore"), "ignored.log\n")
+	writeFile(t, filepath.Join(ws.Path, "ignored.log"), "may affect validation")
+	withIgnored, err := mgr.SnapshotByPath(ctx, ws.Path, baseSHA, baseSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if withIgnored.Complete || !snapshotHasGap(withIgnored.Gaps, "ignored_content_unbound") {
+		t.Fatalf("ignored content was not exposed as incomplete: %+v", withIgnored.Gaps)
+	}
+}
+
+func snapshotHasGap(gaps []SnapshotGap, code string) bool {
+	for _, gap := range gaps {
+		if gap.Code == code {
+			return true
+		}
+	}
+	return false
+}
+
 func TestManager_Fetch(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

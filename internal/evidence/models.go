@@ -148,41 +148,48 @@ type ObservationResult struct {
 
 // ValidationDefinition captures an explicit validation command and its workspace.
 type ValidationDefinition struct {
-	ID              string
-	InvestigationID string
-	HypothesisID    string
-	OpportunityID   string
-	Name            string
-	Kind            string
-	Command         []string
-	WorkingDir      string
-	BaseWorkingDir  string
-	CandidateDir    string
-	Env             []string // variable names allowed through from the host environment
-	Timeout         time.Duration
-	MaxOutputBytes  int64
-	Observation     *ObservationContract
-	CreatedAt       time.Time
+	ID                   string
+	InvestigationID      string
+	HypothesisID         string
+	OpportunityID        string
+	Name                 string
+	Kind                 string
+	Command              []string
+	WorkingDir           string
+	BaseWorkingDir       string
+	CandidateDir         string
+	WorkspaceID          string
+	BaseWorkspaceID      string
+	CandidateWorkspaceID string
+	Env                  []string // variable names allowed through from the host environment
+	Timeout              time.Duration
+	MaxOutputBytes       int64
+	Observation          *ObservationContract
+	CreatedAt            time.Time
 }
 
 // ValidationRun records the outcome of one execution of a validation definition.
 type ValidationRun struct {
-	ID                string
-	DefinitionID      string
-	InvestigationID   string
-	HypothesisID      string
-	OpportunityID     string
-	Kind              RunKind
-	StartedAt         time.Time
-	CompletedAt       time.Time
-	ExitCode          int
-	Stdout            string
-	Stderr            string
-	Truncated         bool
-	Error             string
-	Classification    RunClassification
-	ObservationStatus ObservationStatus
-	Observations      []ObservationResult
+	ID                      string
+	DefinitionID            string
+	InvestigationID         string
+	HypothesisID            string
+	OpportunityID           string
+	Kind                    RunKind
+	StartedAt               time.Time
+	CompletedAt             time.Time
+	ExitCode                int
+	Stdout                  string
+	Stderr                  string
+	Truncated               bool
+	Error                   string
+	Classification          RunClassification
+	ObservationStatus       ObservationStatus
+	Observations            []ObservationResult
+	WorkspaceSnapshotBefore string
+	WorkspaceSnapshotAfter  string
+	WorkspaceBindingStatus  string
+	WorkspaceBindingReason  string
 }
 
 // Evidence is a piece of supporting, contradicting, or inconclusive proof.

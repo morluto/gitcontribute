@@ -50,6 +50,7 @@ const (
 	ToolFindCompetingWork        = "workflow.find_competing_work"
 	ToolPromoteOpportunity       = "workflow.promote_opportunity"
 	ToolPrepareContribution      = "workflow.prepare_contribution"
+	ToolExportManifest           = "workflow.export_manifest"
 	ToolLinkPullRequest          = "workflow.link_pull_request"
 )
 
@@ -95,6 +96,7 @@ var canonicalToolNames = []string{
 	ToolFindCompetingWork,
 	ToolPromoteOpportunity,
 	ToolPrepareContribution,
+	ToolExportManifest,
 	ToolLinkPullRequest,
 }
 
@@ -171,7 +173,7 @@ var toolsets = map[string][]string{
 		ToolSearchGitHubRepositories, ToolSyncRepositoryMetadata, ToolSyncThreads, ToolHydrateThreads,
 		ToolStartInvestigation, ToolRecordHypothesis, ToolCheckDuplicates, ToolFindCompetingWork,
 		ToolPromoteOpportunity, ToolGetInvestigation, ToolListOpportunities, ToolGetOpportunity,
-		ToolGetEvidence, ToolGetReadiness, ToolPrepareContribution,
+		ToolGetEvidence, ToolGetReadiness, ToolPrepareContribution, ToolExportManifest,
 	},
 	"code": {
 		ToolSearchCode, ToolIndexRepositories, ToolCreateWorkspace, ToolCheckMergeConflicts,
