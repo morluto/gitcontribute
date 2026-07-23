@@ -653,7 +653,7 @@ func TestSyncInvalidRepo(t *testing.T) {
 func TestSearchDefaults(t *testing.T) {
 	svc := &fakeService{searchResult: &cli.SearchResult{
 		Query: "test",
-		Kind:  "all",
+		Kind:  "threads",
 		Limit: 20,
 		Total: 1,
 		Matches: []cli.SearchMatch{{
@@ -666,7 +666,7 @@ func TestSearchDefaults(t *testing.T) {
 	}}
 	c, stdout, _ := newTestCLI(svc, nil)
 
-	err := c.Run(context.Background(), []string{"search", "all", "test"})
+	err := c.Run(context.Background(), []string{"search", "threads", "test"})
 	requireNoErr(t, err)
 
 	if !svc.searchCalled {
@@ -675,13 +675,13 @@ func TestSearchDefaults(t *testing.T) {
 	if svc.lastSearchArgs.Query != "test" {
 		t.Fatalf("query=%q, want test", svc.lastSearchArgs.Query)
 	}
-	if svc.lastSearchArgs.Opts.Kind != "all" {
-		t.Fatalf("kind=%q, want all", svc.lastSearchArgs.Opts.Kind)
+	if svc.lastSearchArgs.Opts.Kind != "threads" {
+		t.Fatalf("kind=%q, want threads", svc.lastSearchArgs.Opts.Kind)
 	}
 	if svc.lastSearchArgs.Opts.Limit != 20 {
 		t.Fatalf("limit=%d, want 20", svc.lastSearchArgs.Opts.Limit)
 	}
-	want := "Search: test (kind=all, limit=20)\n1 matches:\n- issue o/r#42: foo (0.90)\n"
+	want := "Search: test (kind=threads, limit=20)\n1 matches:\n- issue o/r#42: foo (relevance 0.9)\n"
 	if got := stdout.String(); got != want {
 		t.Fatalf("stdout=%q, want %q", got, want)
 	}
@@ -698,7 +698,7 @@ func TestSearchJSONWithFlags(t *testing.T) {
 	}}
 	c, stdout, _ := newTestCLI(svc, nil)
 
-	err := c.Run(context.Background(), []string{"search", "issues", "good first issue", "--repo", "o/r", "--state", "open", "--author", "alice", "--label", "bug", "--updated-after", "2026-07-01T00:00:00Z", "--limit", "5", "--cursor", "next-page", "--json"})
+	err := c.Run(context.Background(), []string{"search", "issues", "good first issue", "--repo", "o/r", "--state", "open", "--author", "alice", "--label", "bug", "--updated-after", "2026-07-01T00:00:00Z", "--sort", "updated", "--limit", "5", "--cursor", "next-page", "--json"})
 	requireNoErr(t, err)
 
 	if !svc.searchCalled {
@@ -708,7 +708,7 @@ func TestSearchJSONWithFlags(t *testing.T) {
 		t.Fatalf("query=%q", svc.lastSearchArgs.Query)
 	}
 	opts := svc.lastSearchArgs.Opts
-	if opts.Kind != "issues" || opts.Repo != "o/r" || opts.State != "open" || opts.Author != "alice" || len(opts.Labels) != 1 || opts.Labels[0] != "bug" || opts.UpdatedAfter.Format(time.RFC3339) != "2026-07-01T00:00:00Z" || opts.Limit != 5 || opts.Cursor != "next-page" {
+	if opts.Kind != "issues" || opts.Repo != "o/r" || opts.State != "open" || opts.Author != "alice" || len(opts.Labels) != 1 || opts.Labels[0] != "bug" || opts.UpdatedAfter.Format(time.RFC3339) != "2026-07-01T00:00:00Z" || opts.Sort != "updated" || opts.Limit != 5 || opts.Cursor != "next-page" {
 		t.Fatalf("unexpected options: %+v", opts)
 	}
 
@@ -727,7 +727,7 @@ func TestSearchNoNetworkImplied(t *testing.T) {
 	svc := &fakeService{searchResult: &cli.SearchResult{Query: "local", Total: 0, Matches: []cli.SearchMatch{}}}
 	c, _, _ := newTestCLI(svc, nil)
 
-	err := c.Run(context.Background(), []string{"search", "all", "local"})
+	err := c.Run(context.Background(), []string{"search", "threads", "local"})
 	requireNoErr(t, err)
 	if !svc.searchCalled {
 		t.Fatal("Search was not called")
@@ -738,7 +738,7 @@ func TestSearchInvalidLimit(t *testing.T) {
 	svc := &fakeService{}
 	c, _, _ := newTestCLI(svc, nil)
 
-	err := c.Run(context.Background(), []string{"search", "all", "x", "--limit", "0"})
+	err := c.Run(context.Background(), []string{"search", "threads", "x", "--limit", "0"})
 	requireCLIError(t, err, cli.ExitUsage)
 }
 
@@ -746,7 +746,7 @@ func TestSearchInvalidRepoFilter(t *testing.T) {
 	svc := &fakeService{}
 	c, _, _ := newTestCLI(svc, nil)
 
-	err := c.Run(context.Background(), []string{"search", "all", "x", "--repo", "bad"})
+	err := c.Run(context.Background(), []string{"search", "threads", "x", "--repo", "bad"})
 	requireCLIError(t, err, cli.ExitUsage)
 }
 
@@ -754,7 +754,6 @@ func TestSearchRejectsUnsupportedFilterCombinations(t *testing.T) {
 	svc := &fakeService{}
 	c, _, _ := newTestCLI(svc, nil)
 	for _, args := range [][]string{
-		{"search", "all", "x", "--cursor", "cursor"},
 		{"search", "code", "x", "--state", "open"},
 		{"search", "repos", "x", "--association", "OWNER"},
 		{"search", "code", "x", "--assignee", "alice"},
@@ -890,11 +889,24 @@ func TestMCP(t *testing.T) {
 	if runner.opts.Transport != "stdio" {
 		t.Fatalf("transport=%q, want stdio", runner.opts.Transport)
 	}
+	if strings.Join(runner.opts.Toolsets, ",") != "contribute" {
+		t.Fatalf("toolsets=%v, want contribute", runner.opts.Toolsets)
+	}
 	if stdout.String() != "" {
 		t.Fatalf("unexpected stdout: %q", stdout.String())
 	}
 	if stderr.String() != "starting mcp server (transport=stdio)...\n" {
 		t.Fatalf("stderr=%q", stderr.String())
+	}
+}
+
+func TestMCPReadOnly(t *testing.T) {
+	runner := &fakeMCPRunner{}
+	c, _, _ := newTestCLI(nil, runner)
+
+	requireNoErr(t, c.Run(context.Background(), []string{"mcp", "serve", "--read-only"}))
+	if !runner.opts.ReadOnly {
+		t.Fatal("read-only option was not forwarded")
 	}
 }
 

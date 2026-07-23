@@ -13,6 +13,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/mcpserver"
 )
 
 func TestBuildAndGetRepositoryDossier(t *testing.T) {
@@ -149,11 +150,25 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 		t.Fatal("expected source refs in dossier")
 	}
 
+	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
+		Owner: ref.Owner, Name: ref.Repo, Description: "A changed repo", Stars: 99,
+		SourceUpdatedAt: time.Unix(3000, 0).UTC(),
+	}, `{}`); err != nil {
+		t.Fatalf("update repository after dossier build: %v", err)
+	}
+	mcpDossier, err := svc.MCPReader().Dossier(ctx, mcpserver.RepoInput{Owner: ref.Owner, Repo: ref.Repo})
+	if err != nil {
+		t.Fatalf("read persisted MCP dossier: %v", err)
+	}
+	if stars := mcpDossier.Sections["stars"]; stars != 10 {
+		t.Fatalf("MCP dossier stars = %v, want persisted value 10", stars)
+	}
+
 	res, err := svc.Dossier(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
 	if err != nil {
 		t.Fatalf("dossier summary: %v", err)
 	}
-	if res.Stars != 10 || res.OpenIssues != 1 || res.Summary != "A test repo" {
+	if res.Stars != 99 || res.OpenIssues != 1 || res.Summary != "A changed repo" {
 		t.Fatalf("unexpected dossier summary: %+v", res)
 	}
 }

@@ -58,6 +58,7 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 		Association: in.Association, Assignee: in.Assignee, Labels: in.Labels, UpdatedAfter: updatedAfter,
 		Limit:  in.Limit,
 		Cursor: in.Cursor,
+		Sort:   in.Sort,
 	})
 	if err != nil {
 		return mcpserver.SearchOutput{}, err
@@ -77,15 +78,16 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 			State:             m.State,
 			StateReason:       m.StateReason,
 			Title:             m.Title,
-			Body:              m.Body,
+			Body:              "",
 			Author:            m.Author,
 			AuthorAssociation: m.AuthorAssociation,
 			Labels:            m.Labels,
 			Assignees:         m.Assignees,
 			Draft:             m.Draft, ClosedAt: formatTime(m.ClosedAt), MergedAt: formatTime(m.MergedAt), Merged: knownMergePointer(m.Merged, m.MergedKnown),
-			UpdatedAt:    updatedAt,
-			MatchSource:  m.MatchSource,
-			MatchExcerpt: m.MatchExcerpt,
+			UpdatedAt:      updatedAt,
+			MatchSource:    m.MatchSource,
+			MatchExcerpt:   m.MatchExcerpt,
+			MatchTruncated: m.MatchTruncated,
 		}
 		if m.MatchSource != "" {
 			matches[i].MatchUpdatedAt = formatTime(m.Freshness)
@@ -193,7 +195,7 @@ func knownMergePointer(merged, known bool) *bool {
 	return &merged
 }
 
-// Dossier builds a source-backed repository dossier from local corpus data.
+// Dossier returns the latest persisted source-backed repository dossier.
 func (r *MCPReader) Dossier(ctx context.Context, in mcpserver.RepoInput) (mcpserver.DossierOutput, error) {
 	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
 	if err := ref.Validate(); err != nil {
@@ -202,8 +204,11 @@ func (r *MCPReader) Dossier(ctx context.Context, in mcpserver.RepoInput) (mcpser
 	if _, err := r.openReadOnlyCorpus(ctx); err != nil {
 		return mcpserver.DossierOutput{}, err
 	}
-	d, err := r.Service.buildDossier(ctx, ref)
+	d, err := r.GetRepositoryDossier(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
 	if err != nil {
+		if errors.Is(err, errDossierNotFound) {
+			return mcpserver.DossierOutput{}, mcpserver.ErrNotFound
+		}
 		return mcpserver.DossierOutput{}, err
 	}
 	return dossierToMCPOutput(d), nil
@@ -240,6 +245,23 @@ func (r *MCPReader) SearchCode(ctx context.Context, in mcpserver.SearchCodeInput
 	}
 	matches := page.Matches
 	out := make([]mcpserver.CodeMatchOutput, len(matches))
+	coverageOut := make([]mcpserver.CodeIndexCoverageOutput, 0, len(page.Snapshots)+1)
+	for _, snapshot := range page.Snapshots {
+		manifest := snapshot.Manifest
+		entry := mcpserver.CodeIndexCoverageOutput{Repo: snapshot.Repo.String(), Status: "indexed_coverage_unknown", Commit: snapshot.CommitSHA, Truncated: manifest.Truncated}
+		if manifest.CoverageKnown {
+			entry.Status = "indexed"
+		}
+		entry.IndexedFiles, entry.TrackedEntries = manifest.IndexedFiles, manifest.TrackedEntries
+		entry.SkippedPolicy = manifest.SkippedInvalidPath + manifest.SkippedExcluded + manifest.SkippedNonRegular
+		entry.SkippedLimits = manifest.SkippedOversize + manifest.SkippedTotalBudget + manifest.SkippedFileLimit
+		entry.SkippedNonText = manifest.SkippedNonText
+		entry.SkippedFiles = entry.SkippedPolicy + entry.SkippedLimits + entry.SkippedNonText
+		coverageOut = append(coverageOut, entry)
+	}
+	if ref != (domain.RepoRef{}) && len(page.Snapshots) == 0 {
+		coverageOut = append(coverageOut, mcpserver.CodeIndexCoverageOutput{Repo: ref.String(), Status: "missing"})
+	}
 	for i, m := range matches {
 		repo := m.Repo.String()
 		out[i] = mcpserver.CodeMatchOutput{
@@ -252,7 +274,7 @@ func (r *MCPReader) SearchCode(ctx context.Context, in mcpserver.SearchCodeInput
 			Bytes:    m.Bytes,
 		}
 	}
-	return mcpserver.SearchCodeOutput{Query: in.Query, Total: page.Total, Matches: out, NextCursor: page.NextCursor}, nil
+	return mcpserver.SearchCodeOutput{Query: in.Query, Total: page.Total, Matches: out, Coverage: coverageOut, NextCursor: page.NextCursor}, nil
 }
 
 // Investigation reads a local investigation workspace from the corpus.
@@ -572,15 +594,34 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpserver.FindClustersI
 	if err != nil {
 		return mcpserver.FindClustersOutput{}, err
 	}
+	if (in.Kind == "") != (in.Number == 0) {
+		return mcpserver.FindClustersOutput{}, errors.New("kind and number must be provided together")
+	}
+	if in.Kind != "" {
+		projection, err := c.GetClusterProjectionForMemberWithIdentity(ctx, clustering.MemberRef{Kind: in.Kind, Owner: in.Owner, Repo: in.Repo, Number: in.Number})
+		if err != nil {
+			return mcpserver.FindClustersOutput{}, fmt.Errorf("find cluster member: %w", err)
+		}
+		out := mcpserver.FindClustersOutput{Owner: in.Owner, Repo: in.Repo}
+		if len(projection.Clusters) > 0 {
+			out.Total = 1
+			out.Clusters = []mcpserver.ClusterOutput{clusterToMCP(projection.Clusters[0], 20)}
+		}
+		if projection.Projection != nil {
+			out.RuleVersion = projection.Projection.RuleVersion
+		}
+		return out, nil
+	}
 	projection, err := c.ListClusterProjection(ctx, ref, clustering.ClusterOpen, in.Limit)
 	if err != nil {
 		return mcpserver.FindClustersOutput{}, fmt.Errorf("list clusters: %w", err)
 	}
 	out := mcpserver.FindClustersOutput{
-		Owner:    in.Owner,
-		Repo:     in.Repo,
-		Total:    len(projection.Clusters),
-		Clusters: make([]mcpserver.ClusterOutput, len(projection.Clusters)),
+		Owner:     in.Owner,
+		Repo:      in.Repo,
+		Total:     projection.Total,
+		Truncated: projection.Truncated,
+		Clusters:  make([]mcpserver.ClusterOutput, len(projection.Clusters)),
 	}
 	if projection.Projection != nil {
 		out.RuleVersion = projection.Projection.RuleVersion
@@ -779,7 +820,7 @@ func (r *MCPRunner) Run(ctx context.Context, opts cli.MCPOptions) error {
 	if opts.Transport != "stdio" {
 		return fmt.Errorf("unsupported mcp transport %q", opts.Transport)
 	}
-	server, err := mcpserver.New(r.MCPReader(), r.version)
+	server, err := mcpserver.NewWithOptions(r.MCPReader(), r.version, mcpserver.Options{Toolsets: opts.Toolsets, ReadOnly: opts.ReadOnly})
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -17,6 +18,7 @@ import (
 const maxSeedLimit = 1000
 
 var (
+	errDossierNotFound   = errors.New("dossier not found")
 	conventionalCommitRe = regexp.MustCompile(`(?i)^\s*(feat|fix|docs|style|refactor|test|chore|build|ci|perf|revert)(\([^)]+\))?(!)?:\s*`)
 	issueRefRe           = regexp.MustCompile(`(?i)(?:^|\s)(?:close[ds]?|fix(?:es|ed)?|resolve[ds]?|relate[ds]?|refs?|references?)?\s*#(\d+)`)
 	pathLikeRe           = regexp.MustCompile(`[a-zA-Z0-9_.-]+/[a-zA-Z0-9_./-]+`)
@@ -120,7 +122,7 @@ func (s *Service) GetRepositoryDossier(ctx context.Context, repo cli.RepoRef) (*
 		return nil, fmt.Errorf("get dossier: %w", err)
 	}
 	if record == nil {
-		return nil, fmt.Errorf("dossier not found for %s", ref)
+		return nil, fmt.Errorf("%w for %s", errDossierNotFound, ref)
 	}
 	return dossierFromRecord(record, sources)
 }

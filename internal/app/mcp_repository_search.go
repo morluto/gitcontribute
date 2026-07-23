@@ -57,7 +57,7 @@ func normalizeRepositorySearchPage(in *mcpserver.SearchGitHubRepositoriesInput) 
 		return mcpserver.InvalidArgument("page", "must keep the requested result offset below GitHub's 1,000-result cap", map[string]any{"page": 1, "limit": in.Limit})
 	}
 	if in.ResponseFormat == "" {
-		in.ResponseFormat = "detailed"
+		in.ResponseFormat = "concise"
 	}
 	if in.ResponseFormat != "concise" && in.ResponseFormat != "detailed" {
 		return mcpserver.InvalidArgument("response_format", "must be concise or detailed; use concise for discovery and detailed for finalist inspection", map[string]any{"response_format": "concise"})

@@ -3,23 +3,8 @@ package app
 import (
 	"fmt"
 	"math"
-	"strings"
 	"time"
 )
-
-func uniqueTerms(query string) []string {
-	fields := strings.Fields(query)
-	seen := make(map[string]struct{}, len(fields))
-	terms := make([]string, 0, len(fields))
-	for _, t := range fields {
-		if _, ok := seen[t]; ok {
-			continue
-		}
-		seen[t] = struct{}{}
-		terms = append(terms, t)
-	}
-	return terms
-}
 
 func humanDuration(d time.Duration) string {
 	if d < time.Hour*24 {

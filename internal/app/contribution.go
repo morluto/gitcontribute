@@ -172,7 +172,7 @@ func (s *Service) workspaceDiff(ctx context.Context, workspaceID string, inv *in
 		!strings.EqualFold(ws.RepoName, inv.Repo.Repo) {
 		return "", errors.New("workspace does not belong to the opportunity investigation and repository")
 	}
-	mgr, err := s.workspaceManager(ctx)
+	mgr, err := s.workspaceReader()
 	if err != nil {
 		return "", err
 	}

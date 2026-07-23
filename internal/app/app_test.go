@@ -505,7 +505,17 @@ func TestMCPReaderLocalReads(t *testing.T) {
 	if search.Total != 1 {
 		t.Fatalf("search total = %d, want 1", search.Total)
 	}
+	if search.Matches[0].Body != "" || search.Matches[0].MatchExcerpt == "" {
+		t.Fatalf("MCP search should return a compact match excerpt, got %+v", search.Matches[0])
+	}
 
+	_, err = reader.Dossier(ctx, mcpserver.RepoInput{Owner: "acme", Repo: "rocket"})
+	if !errors.Is(err, mcpserver.ErrNotFound) {
+		t.Fatalf("MCP dossier before build error = %v, want ErrNotFound", err)
+	}
+	if _, err := svc.BuildRepositoryDossier(ctx, cli.RepoRef{Owner: "acme", Repo: "rocket"}); err != nil {
+		t.Fatalf("build dossier: %v", err)
+	}
 	dossier, err := reader.Dossier(ctx, mcpserver.RepoInput{Owner: "acme", Repo: "rocket"})
 	if err != nil {
 		t.Fatalf("mcp dossier: %v", err)
@@ -788,6 +798,49 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 	}
 	if evidence.InvestigationID != inv.ID {
 		t.Fatalf("unexpected evidence result: %+v", evidence)
+	}
+}
+
+func TestMCPValidationResolvesManagedWorkspaceAndRejectsCrossInvestigation(t *testing.T) {
+	ctx := context.Background()
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc123", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := svc.openCorpus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataDir, err := paths.DataDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dataDir, "workspaces", "workspaces", "managed")
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SaveWorkspace(ctx, &workspace.Workspace{Name: "managed", InvestigationID: inv.ID, RepoOwner: "owner", RepoName: "repo", Path: path, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	reader := &MCPReader{Service: svc}
+	defined, err := reader.DefineValidation(ctx, mcpserver.DefineValidationInput{InvestigationID: inv.ID, Kind: "test", Command: "go test ./...", WorkspaceID: "managed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defined.WorkingDir != path {
+		t.Fatalf("working directory = %q, want managed path %q", defined.WorkingDir, path)
+	}
+	if _, err := reader.DefineValidation(ctx, mcpserver.DefineValidationInput{InvestigationID: "different", Kind: "test", Command: "go test ./...", WorkspaceID: "managed"}); err == nil || !strings.Contains(err.Error(), "does not belong") {
+		t.Fatalf("cross-investigation validation error = %v", err)
 	}
 }
 

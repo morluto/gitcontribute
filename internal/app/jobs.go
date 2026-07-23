@@ -61,8 +61,9 @@ func defaultJobExecutorConfig() jobExecutorConfig {
 	}
 }
 
-// JobExecutor submits durable jobs, runs them asynchronously, and supports
-// cancellation, progress recording, and safe shutdown.
+// JobExecutor persists job records, runs work asynchronously in this process,
+// and supports cancellation, progress recording, and safe shutdown. It does
+// not replay interrupted host or network operations after restart.
 //
 // Each executor registers a unique owner in the corpus and heartbeats while it
 // is open. Startup only reconciles jobs whose owner is missing or has a stale
@@ -414,7 +415,7 @@ func (s *Service) GetJob(ctx context.Context, id string) (*cli.JobResult, error)
 	return &result, nil
 }
 
-// submitJob persists a durable job and runs fn asynchronously.
+// submitJob persists a job record and runs fn asynchronously in this process.
 func (s *Service) submitJob(ctx context.Context, kind string, request any, fn JobFunc) (string, error) {
 	jobs, err := s.Jobs(ctx)
 	if err != nil {

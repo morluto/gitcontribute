@@ -28,6 +28,7 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, codeindex.Snapshot{
 		RepoPath: "/repo", Commit: "abc123", CreatedAt: time.Now().UTC(), TotalBytes: 25,
 		Documents: []codeindex.Document{{Path: "parser.go", Content: "func searchableParser() {}", Bytes: 25, LanguageHint: "go"}},
+		Manifest:  codeindex.Manifest{CoverageKnown: true, TrackedEntries: 3, IndexedFiles: 1, SkippedExcluded: 2, Truncated: true},
 	}); err != nil {
 		t.Fatalf("store code snapshot: %v", err)
 	}
@@ -46,6 +47,35 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	}
 	if match.Snippet != "func searchableParser() {}" {
 		t.Fatalf("unexpected snippet: %q", match.Snippet)
+	}
+	if len(out.Coverage) != 1 || out.Coverage[0].Repo != "owner/repo" || out.Coverage[0].Status != "indexed" || !out.Coverage[0].Truncated || out.Coverage[0].IndexedFiles != 1 || out.Coverage[0].SkippedFiles != 2 {
+		t.Fatalf("unexpected code coverage: %+v", out.Coverage)
+	}
+	missing, err := reader.SearchCode(ctx, mcpserver.SearchCodeInput{Owner: "owner", Repo: "repo", Query: "doesNotExist", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing.Matches) != 0 || len(missing.Coverage) != 1 || missing.Coverage[0].Status != "indexed" || !missing.Coverage[0].Truncated {
+		t.Fatalf("zero-match search lost index coverage: %+v", missing)
+	}
+	unindexed, err := reader.SearchCode(ctx, mcpserver.SearchCodeInput{Owner: "owner", Repo: "unindexed", Query: "anything", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unindexed.Coverage) != 1 || unindexed.Coverage[0].Status != "missing" {
+		t.Fatalf("unindexed repository coverage = %+v", unindexed.Coverage)
+	}
+	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, domain.RepoRef{Owner: "owner", Repo: "legacy"}, codeindex.Snapshot{
+		RepoPath: "/legacy", Commit: "old123", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := reader.SearchCode(ctx, mcpserver.SearchCodeInput{Owner: "owner", Repo: "legacy", Query: "anything", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legacy.Coverage) != 1 || legacy.Coverage[0].Status != "indexed_coverage_unknown" {
+		t.Fatalf("legacy snapshot coverage = %+v", legacy.Coverage)
 	}
 }
 
@@ -97,6 +127,24 @@ func TestMCPReaderRepositorySearchDoesNotFallBackFromMissingExactRepository(t *t
 	}
 	if out.Total != 0 || len(out.Matches) != 0 {
 		t.Fatalf("missing exact repository returned global matches: %+v", out)
+	}
+	out, err = svc.MCPReader().SearchRepositories(ctx, mcpserver.SearchRepositoriesInput{
+		Owner: "owner", Repo: "present", Query: "unrelated", Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("search exact repository: %v", err)
+	}
+	if out.Total != 0 || len(out.Matches) != 0 {
+		t.Fatalf("exact repository bypassed query matching: %+v", out)
+	}
+	blank, err := svc.MCPReader().SearchRepositories(ctx, mcpserver.SearchRepositoriesInput{
+		Owner: "owner", Repo: "present", Query: " \t ", Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("search exact repository with blank query: %v", err)
+	}
+	if blank.Total != 1 || len(blank.Matches) != 1 {
+		t.Fatalf("blank exact repository search = %+v", blank)
 	}
 }
 
@@ -166,17 +214,8 @@ func TestMCPReaderSearchAndExplainUseFacetEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if explanation.Score != 1 || !strings.Contains(explanation.Snippet, "rare") || explanation.SourceRevision != commentsAt.Format(time.RFC3339) {
+	if explanation.RetrievalRank == nil || explanation.MatchSource != FacetIssueComments || !strings.Contains(explanation.Snippet, "rare") || explanation.SourceRevision != commentsAt.Format(time.RFC3339) {
 		t.Fatalf("MCP facet explanation = %+v", explanation)
-	}
-	found := false
-	for _, field := range explanation.MatchedFields {
-		if field == FacetIssueComments {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("MCP facet matched fields = %v", explanation.MatchedFields)
 	}
 }
 
@@ -251,7 +290,7 @@ func TestMCPReaderExplainCodeExactPathNotOnFirstSearchPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("explain match: %v", err)
 	}
-	if out.Path != "target.go" || out.Commit != "abc123" || out.Score <= 0 {
+	if out.Path != "target.go" || out.Commit != "abc123" || out.RetrievalRank == nil || out.MatchSource != "code_document" {
 		t.Fatalf("unexpected explain output: %+v", out)
 	}
 }

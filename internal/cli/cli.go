@@ -185,7 +185,6 @@ type searchCmd struct {
 	PRs     searchKindCmd `cmd:"" name:"prs" help:"Search pull requests"`
 	Threads searchKindCmd `cmd:"" help:"Search issues and pull requests"`
 	Code    searchKindCmd `cmd:"" help:"Search indexed code documents"`
-	All     searchKindCmd `cmd:"" help:"Search repositories, threads, and code"`
 }
 
 type searchKindCmd struct {
@@ -197,6 +196,7 @@ type searchKindCmd struct {
 	Assignee     string   `name:"assignee" help:"Restrict to threads assigned to a user"`
 	Labels       []string `name:"label" help:"Require a label (repeatable)"`
 	UpdatedAfter string   `name:"updated-after" help:"Restrict source updates to RFC3339 timestamp or later"`
+	Sort         string   `name:"sort" default:"relevance" enum:"relevance,updated" help:"Order by weighted relevance or newest source update"`
 	Limit        int      `name:"limit" default:"20" help:"Maximum number of results"`
 	Cursor       string   `name:"cursor" help:"Opaque cursor returned by the previous page"`
 	Lens         string   `name:"lens" help:"Rank and filter with a saved lens"`
@@ -590,6 +590,8 @@ type mcpCmd struct {
 
 type mcpServeCmd struct {
 	Transport string `name:"transport" default:"stdio" enum:"stdio" help:"MCP transport protocol"`
+	Toolsets  string `name:"toolsets" default:"contribute" help:"Comma-separated MCP toolsets: contribute, code, research, diagnostics, portfolio, advanced, or all"`
+	ReadOnly  bool   `name:"read-only" help:"Expose only tools annotated as read-only"`
 }
 
 type tuiCmd struct {
@@ -1651,8 +1653,6 @@ func (c *CLI) runSearch(ctx context.Context, command string, cmd *searchCmd) err
 		selected = &cmd.Threads
 	case "code":
 		selected = &cmd.Code
-	case "all":
-		selected = &cmd.All
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown search kind: %s", kind))
 	}
@@ -1660,13 +1660,16 @@ func (c *CLI) runSearch(ctx context.Context, command string, cmd *searchCmd) err
 		Kind: kind, Repo: selected.Repo, State: selected.State, Author: selected.Author,
 		Association: selected.Association, Assignee: selected.Assignee,
 		Labels: selected.Labels, Limit: selected.Limit, Cursor: selected.Cursor,
-		Lens: selected.Lens,
-	}
-	if kind == "all" && opts.Cursor != "" {
-		return NewCLIError(ExitUsage, errors.New("combined search does not support cursor pagination; choose a result kind"))
+		Lens: selected.Lens, Sort: selected.Sort,
 	}
 	if opts.Lens != "" && opts.Cursor != "" {
 		return NewCLIError(ExitUsage, errors.New("cursor pagination cannot be combined with --lens because lens ranking is not cursor-stable"))
+	}
+	if opts.Lens != "" && opts.Sort != "relevance" {
+		return NewCLIError(ExitUsage, errors.New("--sort cannot be combined with --lens because the lens defines the final ranking"))
+	}
+	if kind == "code" && opts.Sort != "relevance" {
+		return NewCLIError(ExitUsage, errors.New("code search supports relevance order only"))
 	}
 	if kind == "repos" || kind == "code" {
 		if opts.State != "all" || opts.Author != "" || opts.Association != "" || opts.Assignee != "" || len(opts.Labels) > 0 || selected.UpdatedAfter != "" {
@@ -1716,7 +1719,11 @@ func (c *CLI) runSeeds(ctx context.Context, cmd *seedsCmd) error {
 
 func (c *CLI) runMCP(ctx context.Context, cmd *mcpCmd) error {
 	fmt.Fprintf(c.stderr, "starting mcp server (transport=%s)...\n", cmd.Serve.Transport)
-	return c.mapError(c.runner.Run(ctx, MCPOptions{Transport: cmd.Serve.Transport}))
+	toolsets := strings.Split(cmd.Serve.Toolsets, ",")
+	for i := range toolsets {
+		toolsets[i] = strings.TrimSpace(toolsets[i])
+	}
+	return c.mapError(c.runner.Run(ctx, MCPOptions{Transport: cmd.Serve.Transport, Toolsets: toolsets, ReadOnly: cmd.Serve.ReadOnly}))
 }
 
 func (c *CLI) runTUI(ctx context.Context, cmd *tuiCmd) error {
