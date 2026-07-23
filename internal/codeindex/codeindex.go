@@ -37,6 +37,22 @@ type Snapshot struct {
 	CreatedAt  time.Time
 	Documents  []Document
 	TotalBytes int
+	Manifest   Manifest
+}
+
+// Manifest makes indexing coverage and every skip category explicit.
+type Manifest struct {
+	CoverageKnown      bool `json:"coverage_known"`
+	TrackedEntries     int  `json:"tracked_entries"`
+	IndexedFiles       int  `json:"indexed_files"`
+	SkippedInvalidPath int  `json:"skipped_invalid_path"`
+	SkippedExcluded    int  `json:"skipped_excluded"`
+	SkippedNonRegular  int  `json:"skipped_non_regular"`
+	SkippedOversize    int  `json:"skipped_oversize"`
+	SkippedTotalBudget int  `json:"skipped_total_budget"`
+	SkippedNonText     int  `json:"skipped_non_text"`
+	SkippedFileLimit   int  `json:"skipped_file_limit"`
+	Truncated          bool `json:"truncated"`
 }
 
 // Options bounds the index operation.
@@ -115,7 +131,6 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 	if err != nil {
 		return Snapshot{}, err
 	}
-
 	createdAt := time.Now().UTC()
 	entries, err := gitTree(ctx, absPath, commit, opts.MaxFiles)
 	if err != nil {
@@ -127,6 +142,7 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 		RepoPath:  absPath,
 		Commit:    commit,
 		CreatedAt: createdAt,
+		Manifest:  Manifest{CoverageKnown: true, TrackedEntries: len(entries)},
 	}
 
 	total := 0
@@ -135,26 +151,34 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 		if err := ctx.Err(); err != nil {
 			return snap, err
 		}
-		if files >= opts.MaxFiles {
-			break
-		}
-
 		clean, ok := safeGitPath(entry.path)
 		if !ok {
+			snap.Manifest.SkippedInvalidPath++
 			continue
 		}
 		if isExcluded(clean, opts.Exclusions) {
+			snap.Manifest.SkippedExcluded++
 			continue
 		}
 
 		if entry.kind != "blob" || !strings.HasPrefix(entry.mode, "100") {
+			snap.Manifest.SkippedNonRegular++
+			continue
+		}
+		if files >= opts.MaxFiles {
+			snap.Manifest.SkippedFileLimit++
+			snap.Manifest.Truncated = true
 			continue
 		}
 		size := entry.size
 		if size > opts.MaxBytesPerFile {
+			snap.Manifest.SkippedOversize++
+			snap.Manifest.Truncated = true
 			continue
 		}
 		if size > opts.MaxTotalBytes-total {
+			snap.Manifest.SkippedTotalBudget++
+			snap.Manifest.Truncated = true
 			continue
 		}
 
@@ -163,6 +187,7 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 			return snap, fmt.Errorf("read %q: %w", clean, err)
 		}
 		if !isText(content) {
+			snap.Manifest.SkippedNonText++
 			continue
 		}
 		snap.Documents = append(snap.Documents, Document{
@@ -176,6 +201,7 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 	}
 
 	snap.TotalBytes = total
+	snap.Manifest.IndexedFiles = len(snap.Documents)
 	status, err = gitStatus(ctx, absPath)
 	if err != nil {
 		return snap, err

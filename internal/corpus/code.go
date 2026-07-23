@@ -3,6 +3,7 @@ package corpus
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -35,6 +36,7 @@ type CodeSearchOptions struct {
 // CodeSearchPage is a paginated result of a code-document keyword search.
 type CodeSearchPage struct {
 	Matches    []CodeMatch
+	Snapshots  []CodeSnapshotInfo
 	NextCursor string
 	Total      int
 }
@@ -63,10 +65,14 @@ func (c *Corpus) StoreCodeSnapshot(ctx context.Context, ref domain.RepoRef, snap
 	if !errors.Is(err, sql.ErrNoRows) {
 		return 0, false, fmt.Errorf("find code snapshot: %w", err)
 	}
+	manifest, err := json.Marshal(snapshot.Manifest)
+	if err != nil {
+		return 0, false, fmt.Errorf("encode code index manifest: %w", err)
+	}
 	result, err := tx.ExecContext(ctx, `
-		INSERT INTO code_snapshots (repo_owner, repo_name, repo_path, commit_sha, total_bytes, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, ref.Owner, ref.Repo, snapshot.RepoPath, snapshot.Commit, snapshot.TotalBytes, encodeTime(snapshot.CreatedAt))
+		INSERT INTO code_snapshots (repo_owner, repo_name, repo_path, commit_sha, total_bytes, created_at, manifest_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, ref.Owner, ref.Repo, snapshot.RepoPath, snapshot.Commit, snapshot.TotalBytes, encodeTime(snapshot.CreatedAt), string(manifest))
 	if err != nil {
 		return 0, false, fmt.Errorf("insert code snapshot: %w", err)
 	}
@@ -88,26 +94,36 @@ func (c *Corpus) StoreCodeSnapshot(ctx context.Context, ref domain.RepoRef, snap
 	return snapshotID, true, nil
 }
 
-// LatestCodeSnapshot returns the most recently stored code snapshot for a
-// repository, or nil if none exists.
-func (c *Corpus) LatestCodeSnapshot(ctx context.Context, ref domain.RepoRef) (*struct {
+// CodeSnapshotInfo describes one stored code snapshot and its coverage.
+type CodeSnapshotInfo struct {
+	Repo      domain.RepoRef
 	RepoPath  string
 	CommitSHA string
 	CreatedAt time.Time
-}, error) {
-	var snap struct {
-		RepoPath  string
-		CommitSHA string
-		CreatedAt time.Time
-	}
+	Manifest  codeindex.Manifest
+}
+
+// LatestCodeSnapshot returns the latest source snapshot selected for a
+// repository, or nil if none exists.
+func (c *Corpus) LatestCodeSnapshot(ctx context.Context, ref domain.RepoRef) (*CodeSnapshotInfo, error) {
+	return latestCodeSnapshot(ctx, c.db, ref)
+}
+
+type codeSnapshotQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func latestCodeSnapshot(ctx context.Context, queryer codeSnapshotQueryer, ref domain.RepoRef) (*CodeSnapshotInfo, error) {
+	var snap CodeSnapshotInfo
 	var created int64
-	err := c.db.QueryRowContext(ctx, `
-		SELECT repo_path, commit_sha, created_at
+	var manifest string
+	err := queryer.QueryRowContext(ctx, `
+		SELECT repo_path, commit_sha, created_at, manifest_json
 		FROM code_snapshots
 		WHERE repo_owner = ? AND repo_name = ?
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1
-	`, ref.Owner, ref.Repo).Scan(&snap.RepoPath, &snap.CommitSHA, &created)
+	`, ref.Owner, ref.Repo).Scan(&snap.RepoPath, &snap.CommitSHA, &created, &manifest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -115,6 +131,10 @@ func (c *Corpus) LatestCodeSnapshot(ctx context.Context, ref domain.RepoRef) (*s
 		return nil, fmt.Errorf("latest code snapshot: %w", err)
 	}
 	snap.CreatedAt = scanTime(created)
+	snap.Repo = ref
+	if err := json.Unmarshal([]byte(manifest), &snap.Manifest); err != nil {
+		return nil, fmt.Errorf("decode code index manifest: %w", err)
+	}
 	return &snap, nil
 }
 
@@ -128,7 +148,8 @@ func (c *Corpus) SearchCode(ctx context.Context, query string, ref domain.RepoRe
 }
 
 // SearchCodeWithOptions searches only the latest indexed snapshot of each
-// repository with stable cursor pagination. Results are ordered by FTS5 rank
+// repository with stable cursor pagination. It returns bounded FTS snippets,
+// not complete files. Results are ordered by weighted FTS5 rank
 // ascending, then document id ascending. No network access occurs.
 func (c *Corpus) SearchCodeWithOptions(ctx context.Context, query string, opts CodeSearchOptions) (CodeSearchPage, error) {
 	if opts.Limit <= 0 {
@@ -157,9 +178,15 @@ func (c *Corpus) SearchCodeWithOptions(ctx context.Context, query string, opts C
 			return CodeSearchPage{}, err
 		}
 	}
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return CodeSearchPage{}, fmt.Errorf("begin code search snapshot: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 
 	statement := `
-		SELECT code_documents_fts.rank, d.id, s.repo_owner, s.repo_name, s.commit_sha, d.path, d.content, d.bytes, d.language, s.id, s.created_at
+		SELECT bm25(code_documents_fts, 5.0, 1.0), d.id, s.repo_owner, s.repo_name, s.commit_sha, d.path,
+		       snippet(code_documents_fts, -1, '', '', ' … ', 48), d.bytes, d.language, s.id, s.created_at
 		FROM code_documents_fts
 		JOIN code_documents d ON d.id = code_documents_fts.rowid
 		JOIN code_snapshots s ON s.id = d.snapshot_id
@@ -173,18 +200,16 @@ func (c *Corpus) SearchCodeWithOptions(ctx context.Context, query string, opts C
 		args = append(args, opts.Ref.Owner, opts.Ref.Repo)
 	}
 	if cursor != nil {
-		statement += ` AND (code_documents_fts.rank > ? OR (code_documents_fts.rank = ? AND d.id > ?))`
+		statement += ` AND (bm25(code_documents_fts, 5.0, 1.0) > ? OR (bm25(code_documents_fts, 5.0, 1.0) = ? AND d.id > ?))`
 		args = append(args, cursor.Rank, cursor.Rank, cursor.ID)
 	}
-	statement += ` ORDER BY code_documents_fts.rank, d.id LIMIT ?`
+	statement += ` ORDER BY bm25(code_documents_fts, 5.0, 1.0), d.id LIMIT ?`
 	args = append(args, opts.Limit+1)
 
-	rows, err := c.db.QueryContext(ctx, statement, args...)
+	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return CodeSearchPage{}, fmt.Errorf("search code: %w", err)
 	}
-	defer rows.Close()
-
 	var matches []CodeMatch
 	for rows.Next() {
 		var match CodeMatch
@@ -197,7 +222,11 @@ func (c *Corpus) SearchCodeWithOptions(ctx context.Context, query string, opts C
 		matches = append(matches, match)
 	}
 	if err := rows.Err(); err != nil {
+		_ = rows.Close()
 		return CodeSearchPage{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return CodeSearchPage{}, fmt.Errorf("close code search rows: %w", err)
 	}
 
 	page := CodeSearchPage{Matches: matches}
@@ -214,12 +243,37 @@ func (c *Corpus) SearchCodeWithOptions(ctx context.Context, query string, opts C
 		})
 	}
 	if len(matches) > opts.Limit || opts.Cursor != "" {
-		page.Total, err = c.countCodeMatches(ctx, ftsQuery, opts.Ref)
+		page.Total, err = countCodeMatches(ctx, tx, ftsQuery, opts.Ref)
 		if err != nil {
 			return CodeSearchPage{}, err
 		}
 	} else {
 		page.Total = len(matches)
+	}
+	refs := make([]domain.RepoRef, 0, len(page.Matches)+1)
+	if opts.Ref != (domain.RepoRef{}) {
+		refs = append(refs, opts.Ref)
+	} else {
+		seen := make(map[domain.RepoRef]struct{}, len(page.Matches))
+		for _, match := range page.Matches {
+			if _, ok := seen[match.Repo]; ok {
+				continue
+			}
+			seen[match.Repo] = struct{}{}
+			refs = append(refs, match.Repo)
+		}
+	}
+	for _, ref := range refs {
+		snapshot, err := latestCodeSnapshot(ctx, tx, ref)
+		if err != nil {
+			return CodeSearchPage{}, err
+		}
+		if snapshot != nil {
+			page.Snapshots = append(page.Snapshots, *snapshot)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return CodeSearchPage{}, fmt.Errorf("commit code search snapshot: %w", err)
 	}
 
 	return page, nil
@@ -310,7 +364,7 @@ func (c *Corpus) ListCodeDocuments(ctx context.Context, ref domain.RepoRef) ([]C
 	return out, rows.Err()
 }
 
-func (c *Corpus) countCodeMatches(ctx context.Context, ftsQuery string, ref domain.RepoRef) (int, error) {
+func countCodeMatches(ctx context.Context, queryer codeSnapshotQueryer, ftsQuery string, ref domain.RepoRef) (int, error) {
 	statement := `
 		SELECT COUNT(*)
 		FROM code_documents_fts
@@ -326,10 +380,34 @@ func (c *Corpus) countCodeMatches(ctx context.Context, ftsQuery string, ref doma
 		args = append(args, ref.Owner, ref.Repo)
 	}
 	var total int
-	if err := c.db.QueryRowContext(ctx, statement, args...).Scan(&total); err != nil {
+	if err := queryer.QueryRowContext(ctx, statement, args...).Scan(&total); err != nil {
 		return 0, fmt.Errorf("count code matches: %w", err)
 	}
 	return total, nil
+}
+
+// CodeSearchRank returns the weighted FTS5 rank for one indexed file revision.
+func (c *Corpus) CodeSearchRank(ctx context.Context, ref domain.RepoRef, path, commit, query string) (float64, bool, error) {
+	ftsQuery := literalFTSQuery(query)
+	if ftsQuery == "" {
+		return 0, false, nil
+	}
+	var rank float64
+	err := c.db.QueryRowContext(ctx, `
+		SELECT bm25(code_documents_fts, 5.0, 1.0)
+		FROM code_documents_fts
+		JOIN code_documents d ON d.id = code_documents_fts.rowid
+		JOIN code_snapshots s ON s.id = d.snapshot_id
+		WHERE code_documents_fts MATCH ? AND s.repo_owner = ? AND s.repo_name = ?
+		  AND d.path = ? AND s.commit_sha = ?
+	`, ftsQuery, ref.Owner, ref.Repo, path, commit).Scan(&rank)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("rank code search match: %w", err)
+	}
+	return rank, true, nil
 }
 
 func (c *Corpus) decodeCodeCursor(cursor, query, repo string) (*searchCursor, error) {

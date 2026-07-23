@@ -34,10 +34,12 @@ type Thread struct {
 // RepositorySnapshot contains all source threads and bounded closed history
 // needed to score every input for one repository.
 type RepositorySnapshot struct {
-	Repository domain.RepoRef
-	Available  bool
-	Sources    map[int]Thread
-	Closed     []Thread
+	Repository      domain.RepoRef
+	Available       bool
+	Sources         map[int]Thread
+	Closed          []Thread
+	ClosedTotal     int
+	ClosedTruncated bool
 }
 
 // RepositoryKey provides a stable case-insensitive grouping key.

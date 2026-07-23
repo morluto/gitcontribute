@@ -44,6 +44,19 @@ func (c *Corpus) ListClusterProjection(ctx context.Context, repo domain.RepoRef,
 		query += ` AND state = ?`
 		args = append(args, string(state))
 	}
+	countQuery := `SELECT COUNT(*) FROM clusters WHERE repo_owner=? AND repo_name=?`
+	countArgs := []any{strings.ToLower(repo.Owner), strings.ToLower(repo.Repo)}
+	if state == "" {
+		countQuery += ` AND state != ?`
+		countArgs = append(countArgs, string(clustering.ClusterRetired))
+	} else {
+		countQuery += ` AND state = ?`
+		countArgs = append(countArgs, string(state))
+	}
+	var total int
+	if err := tx.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		return clusterprojection.List{}, err
+	}
 	query += ` ORDER BY canonical_kind, canonical_owner, canonical_repo, canonical_number, stable_id LIMIT ?`
 	args = append(args, limit)
 	rows, err := tx.QueryContext(ctx, query, args...)
@@ -70,7 +83,7 @@ func (c *Corpus) ListClusterProjection(ctx context.Context, repo domain.RepoRef,
 	if err := tx.Commit(); err != nil {
 		return clusterprojection.List{}, err
 	}
-	return clusterprojection.List{Repo: repo, Projection: identity, Clusters: clusters}, nil
+	return clusterprojection.List{Repo: repo, Projection: identity, Clusters: clusters, Total: total, Truncated: len(clusters) < total}, nil
 }
 
 // GetClusterProjection reads one cluster and its members from one read-only snapshot.
@@ -80,9 +93,55 @@ func (c *Corpus) GetClusterProjection(ctx context.Context, stableID string) (*cl
 
 // GetClusterProjectionForMember reads the current included cluster containing ref.
 func (c *Corpus) GetClusterProjectionForMember(ctx context.Context, ref clustering.MemberRef) (*clustering.Cluster, error) {
-	return c.getClusterProjection(ctx, `JOIN cluster_members member ON member.cluster_id=clusters.id
-		WHERE member.kind=? AND LOWER(member.owner)=LOWER(?) AND LOWER(member.repo)=LOWER(?) AND member.number=? AND member.included=1
-		ORDER BY clusters.id DESC LIMIT 1`, []any{ref.Kind, ref.Owner, ref.Repo, ref.Number})
+	projection, err := c.GetClusterProjectionForMemberWithIdentity(ctx, ref)
+	if err != nil || len(projection.Clusters) == 0 {
+		return nil, err //nolint:nilnil // Corpus getters use a nil result to represent an ordinary miss.
+	}
+	return &projection.Clusters[0], nil
+}
+
+// GetClusterProjectionForMemberWithIdentity reads the current included cluster
+// containing ref together with the projection identity that produced it.
+func (c *Corpus) GetClusterProjectionForMemberWithIdentity(ctx context.Context, ref clustering.MemberRef) (result clusterprojection.List, err error) {
+	repo := domain.RepoRef{Owner: ref.Owner, Repo: ref.Repo}
+	if err := repo.Validate(); err != nil {
+		return clusterprojection.List{}, err
+	}
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return clusterprojection.List{}, err
+	}
+	defer rollbackSQLOnReturn(tx, &err)
+	identity, _, err := loadProjectionStateTx(ctx, tx, repo)
+	if err != nil {
+		return clusterprojection.List{}, err
+	}
+	query := `SELECT clusters.id, clusters.stable_id, clusters.state, clusters.canonical_kind, clusters.canonical_owner, clusters.canonical_repo, clusters.canonical_number,
+		clusters.source_revision, clusters.source_window_start, clusters.source_window_end, clusters.created_at, clusters.updated_at,
+		clusters.repo_owner, clusters.repo_name
+		FROM clusters JOIN cluster_members member ON member.cluster_id=clusters.id
+		WHERE clusters.repo_owner=? AND clusters.repo_name=? AND clusters.state != ?
+		AND member.kind=? AND LOWER(member.owner)=LOWER(?) AND LOWER(member.repo)=LOWER(?) AND member.number=? AND member.included=1
+		ORDER BY clusters.id DESC LIMIT 1`
+	var cluster clustering.Cluster
+	err = scanProjectionCluster(tx.QueryRowContext(ctx, query, strings.ToLower(ref.Owner), strings.ToLower(ref.Repo), clustering.ClusterRetired, ref.Kind, ref.Owner, ref.Repo, ref.Number), &cluster, true)
+	if errors.Is(err, sql.ErrNoRows) {
+		if err := tx.Commit(); err != nil {
+			return clusterprojection.List{}, err
+		}
+		return clusterprojection.List{Repo: repo, Projection: identity}, nil
+	}
+	if err != nil {
+		return clusterprojection.List{}, err
+	}
+	clusters := []clustering.Cluster{cluster}
+	if err := loadProjectionMembersTx(ctx, tx, clusters); err != nil {
+		return clusterprojection.List{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return clusterprojection.List{}, err
+	}
+	return clusterprojection.List{Repo: repo, Projection: identity, Clusters: clusters, Total: 1}, nil
 }
 
 func (c *Corpus) getClusterProjection(ctx context.Context, predicate string, args []any) (result *clustering.Cluster, err error) {

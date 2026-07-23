@@ -64,6 +64,9 @@ func (c *Corpus) LoadPrecedentRepositories(ctx context.Context, refs []precedent
 			return nil, err
 		}
 		snapshot.Available = true
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM threads WHERE repository_id=? AND state='closed'`, repositoryID).Scan(&snapshot.ClosedTotal); err != nil {
+			return nil, err
+		}
 		sources, err := loadThreadsByNumbersTx(ctx, tx, repositoryID, request.numbers)
 		if err != nil {
 			return nil, err
@@ -78,6 +81,7 @@ func (c *Corpus) LoadPrecedentRepositories(ctx context.Context, refs []precedent
 		for _, candidate := range closed {
 			snapshot.Closed = append(snapshot.Closed, precedentThread(candidate))
 		}
+		snapshot.ClosedTruncated = len(snapshot.Closed) < snapshot.ClosedTotal
 		out = append(out, snapshot)
 	}
 	if err := tx.Commit(); err != nil {

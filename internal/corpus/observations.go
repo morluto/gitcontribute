@@ -164,6 +164,7 @@ func (c *Corpus) GetRepositoryByID(ctx context.Context, id int64) (*Repository, 
 type RepositorySearchOptions struct {
 	Limit  int
 	Cursor string
+	Sort   string
 }
 
 // RepositorySearchPage is a paginated result of a repository keyword search.
@@ -183,29 +184,44 @@ func (c *Corpus) ListRepositories(ctx context.Context, query string, limit int) 
 	return page.Repositories, nil
 }
 
-// ListRepositoriesWithOptions returns repositories matching an optional name
-// query with stable cursor pagination. Results are ordered by source_updated_at
-// descending, then id descending, so the same cursor always returns the same
-// next page on an unchanged corpus.
+// ListRepositoriesWithOptions returns repositories matching weighted owner,
+// name, topic, and description text with stable cursor pagination. Relevance
+// is the default; updated order is explicit. Both orders use deterministic
+// tie-breakers on an unchanged corpus.
 func (c *Corpus) ListRepositoriesWithOptions(ctx context.Context, query string, opts RepositorySearchOptions) (RepositorySearchPage, error) {
+	ftsQuery := literalFTSQuery(query)
 	if opts.Limit <= 0 {
 		opts.Limit = 20
 	}
 	if opts.Limit > 100 {
 		return RepositorySearchPage{}, errors.New("repository list limit cannot exceed 100")
 	}
+	if opts.Sort == "" {
+		opts.Sort = "relevance"
+	}
+	if opts.Sort != "relevance" && opts.Sort != "updated" {
+		return RepositorySearchPage{}, errors.New("repository sort must be relevance or updated")
+	}
+	if ftsQuery != "" {
+		if err := c.RequireProjection(ctx, ProjectionNameRepositoriesFTS, ProjectionVersionRepositoriesFTS); err != nil {
+			return RepositorySearchPage{}, err
+		}
+	}
 
-	cursor, err := c.decodeRepoCursor(opts.Cursor, query)
+	cursor, err := c.decodeRepoCursor(opts.Cursor, ftsQuery, opts.Sort)
 	if err != nil {
 		return RepositorySearchPage{}, err
 	}
 
 	args := []any{}
 	where := ""
-	if query != "" {
-		where = `WHERE (owner || '/' || name LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\')`
-		esc := escapeLike(query)
-		args = append(args, "%"+esc+"%", "%"+esc+"%")
+	from := "FROM repositories"
+	rankSelect := "0.0"
+	if ftsQuery != "" {
+		from = "FROM repositories_fts JOIN repositories ON repositories.id = repositories_fts.rowid"
+		where = `WHERE repositories_fts MATCH ?`
+		rankSelect = "bm25(repositories_fts, 10.0, 10.0, 5.0, 2.0)"
+		args = append(args, ftsQuery)
 	}
 	if cursor != nil {
 		if where == "" {
@@ -213,16 +229,21 @@ func (c *Corpus) ListRepositoriesWithOptions(ctx context.Context, query string, 
 		} else {
 			where += ` AND `
 		}
-		where += `(source_updated_at < ? OR (source_updated_at = ? AND id < ?))`
-		args = append(args, cursor.UpdatedAt, cursor.UpdatedAt, cursor.ID)
+		if ftsQuery != "" && opts.Sort == "relevance" {
+			where += `(` + rankSelect + ` > ? OR (` + rankSelect + ` = ? AND (repositories.source_updated_at < ? OR (repositories.source_updated_at = ? AND repositories.id > ?))))`
+			args = append(args, cursor.Rank, cursor.Rank, cursor.UpdatedAt, cursor.UpdatedAt, cursor.ID)
+		} else {
+			where += `(repositories.source_updated_at < ? OR (repositories.source_updated_at = ? AND repositories.id < ?))`
+			args = append(args, cursor.UpdatedAt, cursor.UpdatedAt, cursor.ID)
+		}
 	}
 	args = append(args, opts.Limit+1)
 
 	rows, err := c.db.QueryContext(ctx, `
-		SELECT id, owner, name, external_id, description, default_branch, language, license, topics, stars, watchers, forks, open_issues, archived, fork, source_created_at, source_updated_at, observation_sequence, created_at, updated_at
-		FROM repositories
+		SELECT `+rankSelect+`, repositories.id, repositories.owner, repositories.name, repositories.external_id, repositories.description, repositories.default_branch, repositories.language, repositories.license, repositories.topics, repositories.stars, repositories.watchers, repositories.forks, repositories.open_issues, repositories.archived, repositories.fork, repositories.source_created_at, repositories.source_updated_at, repositories.observation_sequence, repositories.created_at, repositories.updated_at
+		`+from+`
 		`+where+`
-		ORDER BY source_updated_at DESC, id DESC
+		ORDER BY `+repositoryOrder(ftsQuery, opts.Sort)+`
 		LIMIT ?
 	`, args...)
 	if err != nil {
@@ -236,7 +257,7 @@ func (c *Corpus) ListRepositoriesWithOptions(ctx context.Context, query string, 
 		var sourceCreated, src, created, updated int64
 		var archived, fork int
 		var topics string
-		if err := rows.Scan(&r.ID, &r.Owner, &r.Name, &r.ExternalID, &r.Description, &r.DefaultBranch, &r.Language, &r.License, &topics, &r.Stars, &r.Watchers, &r.Forks, &r.OpenIssues, &archived, &fork, &sourceCreated, &src, &r.ObservationSequence, &created, &updated); err != nil {
+		if err := rows.Scan(&r.Rank, &r.ID, &r.Owner, &r.Name, &r.ExternalID, &r.Description, &r.DefaultBranch, &r.Language, &r.License, &topics, &r.Stars, &r.Watchers, &r.Forks, &r.OpenIssues, &archived, &fork, &sourceCreated, &src, &r.ObservationSequence, &created, &updated); err != nil {
 			return RepositorySearchPage{}, err
 		}
 		r.Topics = splitLabels(topics)
@@ -258,14 +279,16 @@ func (c *Corpus) ListRepositoriesWithOptions(ctx context.Context, query string, 
 		last := page.Repositories[len(page.Repositories)-1]
 		page.NextCursor = encodeCursor(searchCursor{
 			Scope:     "repos",
-			Query:     query,
+			Query:     ftsQuery,
 			Kind:      "repo",
+			Filter:    opts.Sort,
+			Rank:      last.Rank,
 			UpdatedAt: encodeTime(last.SourceUpdatedAt),
 			ID:        last.ID,
 		})
 	}
 	if len(out) > opts.Limit || opts.Cursor != "" {
-		page.Total, err = c.countRepositories(ctx, query)
+		page.Total, err = c.countRepositories(ctx, ftsQuery)
 		if err != nil {
 			return RepositorySearchPage{}, err
 		}
@@ -276,18 +299,47 @@ func (c *Corpus) ListRepositoriesWithOptions(ctx context.Context, query string, 
 	return page, nil
 }
 
-func (c *Corpus) countRepositories(ctx context.Context, query string) (int, error) {
+func repositoryOrder(ftsQuery, sort string) string {
+	if ftsQuery != "" && sort == "relevance" {
+		return "bm25(repositories_fts, 10.0, 10.0, 5.0, 2.0), repositories.source_updated_at DESC, repositories.id"
+	}
+	return "repositories.source_updated_at DESC, repositories.id DESC"
+}
+
+// RepositorySearchRank returns the weighted FTS5 rank for one repository.
+func (c *Corpus) RepositorySearchRank(ctx context.Context, id int64, query string) (float64, bool, error) {
+	ftsQuery := literalFTSQuery(query)
+	if ftsQuery == "" {
+		return 0, false, nil
+	}
+	var rank float64
+	err := c.db.QueryRowContext(ctx, `
+		SELECT bm25(repositories_fts, 10.0, 10.0, 5.0, 2.0)
+		FROM repositories_fts
+		WHERE repositories_fts MATCH ? AND rowid = ?
+	`, ftsQuery, id).Scan(&rank)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("rank repository search match: %w", err)
+	}
+	return rank, true, nil
+}
+
+func (c *Corpus) countRepositories(ctx context.Context, ftsQuery string) (int, error) {
 	args := []any{}
 	where := ""
-	if query != "" {
-		where = `WHERE (owner || '/' || name LIKE ? ESCAPE '\' OR description LIKE ? ESCAPE '\')`
-		esc := escapeLike(query)
-		args = append(args, "%"+esc+"%", "%"+esc+"%")
+	from := "repositories"
+	if ftsQuery != "" {
+		from = "repositories_fts JOIN repositories ON repositories.id = repositories_fts.rowid"
+		where = `WHERE repositories_fts MATCH ?`
+		args = append(args, ftsQuery)
 	}
 	var total int
 	err := c.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
-		FROM repositories
+		FROM `+from+`
 		`+where, args...).Scan(&total)
 	if err != nil {
 		return 0, fmt.Errorf("count repositories: %w", err)
@@ -295,7 +347,7 @@ func (c *Corpus) countRepositories(ctx context.Context, query string) (int, erro
 	return total, nil
 }
 
-func (c *Corpus) decodeRepoCursor(cursor, query string) (*searchCursor, error) {
+func (c *Corpus) decodeRepoCursor(cursor, query, sort string) (*searchCursor, error) {
 	if cursor == "" {
 		return nil, nil
 	}
@@ -303,15 +355,10 @@ func (c *Corpus) decodeRepoCursor(cursor, query string) (*searchCursor, error) {
 	if err != nil {
 		return nil, err
 	}
-	if sc.Scope != "repos" || sc.Query != query || sc.Kind != "repo" {
+	if sc.Scope != "repos" || sc.Query != query || sc.Kind != "repo" || sc.Filter != sort {
 		return nil, errors.New("invalid search cursor")
 	}
 	return &sc, nil
-}
-
-func escapeLike(value string) string {
-	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
-	return replacer.Replace(value)
 }
 
 // ListRepositoryObservations returns immutable observations for a repository

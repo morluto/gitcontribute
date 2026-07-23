@@ -114,6 +114,13 @@ func TestListPullRequestPortfolioFiltersByAuthorAndState(t *testing.T) {
 	if len(got) != 2 || got[0].Thread.Number != 2 || got[1].Thread.Number != 1 {
 		t.Fatalf("all-state portfolio = %+v, want #2 then #1", got)
 	}
+	page, err := c.ListPullRequestPortfolioPage(ctx, "alice", "all", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 2 || len(page.PullRequests) != 1 || !page.Truncated {
+		t.Fatalf("bounded portfolio page = %+v", page)
+	}
 }
 
 func TestListPullRequestPortfolioUsesDeterministicGlobalOrder(t *testing.T) {

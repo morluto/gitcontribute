@@ -24,6 +24,8 @@ type List struct {
 	Repo       domain.RepoRef
 	Projection *Identity
 	Clusters   []clustering.Cluster
+	Total      int
+	Truncated  bool
 }
 
 // Matches reports whether the source, governance, and rule inputs are equal.
