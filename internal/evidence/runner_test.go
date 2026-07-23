@@ -144,9 +144,11 @@ func TestExecRunnerCapturesProcessTreeTelemetryAndCleanup(t *testing.T) {
 	}
 	sh := findOrSkip(t, "sh")
 	r := NewExecRunner()
-	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	res, err := r.Run(ctx, RunRequest{Args: []string{sh, "-c", "sleep 10 & wait"}, Dir: t.TempDir()})
+	res, err := r.Run(ctx, RunRequest{
+		Args: []string{sh, "-c", "sleep 10 & wait"}, Dir: t.TempDir(), SampleInterval: 10 * time.Millisecond,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

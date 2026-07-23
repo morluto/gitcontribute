@@ -58,7 +58,9 @@ func (r *MCPStdioRunner) Run(ctx context.Context, req RunRequest) (*RunResult, e
 	// #nosec G204 -- argv is a stored shell-free validation command whose execution requires explicit authorization.
 	cmd := exec.CommandContext(ctx, req.Args[0], req.Args[1:]...)
 	cmd.Dir = req.Dir
-	cmd.Env = req.Env
+	if req.Env != nil {
+		cmd.Env = req.Env
+	}
 	cmd.Stderr = stderr
 	configureCommandCancellation(cmd)
 	transport := &mcp.CommandTransport{Command: cmd, TerminateDuration: mcpShutdownGrace}
@@ -144,7 +146,7 @@ func finishProtocolResult(
 	if closer != nil {
 		shutdownTimedOut, closeErr = closeProtocol(ctx, closer, cmd)
 	}
-	if closeErr != nil && runErr == nil {
+	if closeErr != nil && runErr == nil && !isExpectedMCPShutdownError(closeErr) {
 		runErr = fmt.Errorf("close MCP session: %w", closeErr)
 		classification = RunClassificationError
 		failurePhase = "shutdown"
@@ -170,6 +172,11 @@ func finishProtocolResult(
 		TimeoutPhase: timeoutPhase, FailurePhase: failurePhase,
 		Resources: sampled.telemetry, Cleanup: sampled.cleanup,
 	}
+}
+
+func isExpectedMCPShutdownError(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ProcessState != nil && exitErr.ExitCode() == -1
 }
 
 type protocolCloser interface {

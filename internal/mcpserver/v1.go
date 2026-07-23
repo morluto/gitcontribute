@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"errors"
-	"strconv"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -451,16 +450,6 @@ func (s *Server) explainMatch(ctx context.Context, _ *mcp.CallToolRequest, in Ex
 	return nil, out, err
 }
 
-func (s *Server) getJob(ctx context.Context, _ *mcp.CallToolRequest, in GetJobInput) (*mcp.CallToolResult, GetJobOutput, error) {
-	id, err := normalizeID("id", in.ID)
-	if err != nil {
-		return nil, GetJobOutput{}, err
-	}
-	in.ID = id
-	out, err := s.reader.GetJob(ctx, in)
-	return nil, out, err
-}
-
 func (s *Server) buildRepositoryDossier(ctx context.Context, _ *mcp.CallToolRequest, in BuildRepositoryDossierInput) (*mcp.CallToolResult, JobReference, error) {
 	if err := validateRepo(RepoInput(in)); err != nil {
 		return nil, JobReference{}, err
@@ -588,15 +577,4 @@ func (s *Server) cancelJob(ctx context.Context, _ *mcp.CallToolRequest, in Cance
 	}
 	out, err := operator.CancelJobs(ctx, in)
 	return nil, out, err
-}
-
-func parsePositiveNumber(parts []string, idx int) (int, error) {
-	if len(parts) <= idx {
-		return 0, errors.New("missing path segment")
-	}
-	n, err := strconv.Atoi(parts[idx])
-	if err != nil || n < 1 {
-		return 0, errors.New("invalid positive number")
-	}
-	return n, nil
 }

@@ -144,9 +144,22 @@ func CheckRegistration(client Client, home string) (bool, string, error) {
 		if err := json.Unmarshal(data, &root); err != nil {
 			return false, path, err
 		}
-		servers, _ := root["mcpServers"].(map[string]any)
-		_, present := servers[serverName]
-		return present, path, nil
+		rawServers, present := root["mcpServers"]
+		if !present {
+			return false, path, nil
+		}
+		servers, ok := rawServers.(map[string]any)
+		if !ok {
+			return false, path, errors.New("mcpServers must be an object in claude config")
+		}
+		rawServer, present := servers[serverName]
+		if !present {
+			return false, path, nil
+		}
+		if _, ok := rawServer.(map[string]any); !ok {
+			return false, path, errors.New("gitcontribute server must be an object in claude config")
+		}
+		return true, path, nil
 	default:
 		return false, "", fmt.Errorf("unsupported setup client %q", client)
 	}

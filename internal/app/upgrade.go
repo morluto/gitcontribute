@@ -624,10 +624,12 @@ func readClaudeCommand(path string) (string, []string, error) {
 		return "", nil, errors.New("gitcontribute args are missing from claude config")
 	}
 	args := make([]string, 0, len(argsIn))
-	for _, a := range argsIn {
-		if s, ok := a.(string); ok {
-			args = append(args, s)
+	for i, a := range argsIn {
+		s, ok := a.(string)
+		if !ok {
+			return "", nil, fmt.Errorf("gitcontribute args[%d] must be a string", i)
 		}
+		args = append(args, s)
 	}
 	return command, args, nil
 }

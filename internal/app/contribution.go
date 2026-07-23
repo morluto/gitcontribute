@@ -396,13 +396,6 @@ func evidenceReviewPriority(e *evidence.Evidence) (int, string) {
 	}
 }
 
-func diffMatchesOpportunity(diff *WorkspaceDiffResult, inv *investigation.Investigation, opp *investigation.Opportunity) bool {
-	if diff == nil || inv == nil || opp == nil {
-		return false
-	}
-	return diff.Repo.Owner == inv.Repo.Owner && diff.Repo.Repo == inv.Repo.Repo
-}
-
 func draftResult(kind, opportunityID, title, body string, renderedAt time.Time, manifestID string) *cli.DraftResult {
 	return &cli.DraftResult{
 		OpportunityID: opportunityID,

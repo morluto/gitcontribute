@@ -613,28 +613,6 @@ func (s *Server) register() {
 
 func boolPtr(v bool) *bool { return &v }
 
-func (s *Server) repository(ctx context.Context, _ *mcp.CallToolRequest, in RepoInput) (*mcp.CallToolResult, RepositoryOutput, error) {
-	if err := validateRepo(in); err != nil {
-		return nil, RepositoryOutput{}, err
-	}
-	out, err := s.reader.Repository(ctx, in)
-	return nil, out, err
-}
-
-func (s *Server) thread(ctx context.Context, _ *mcp.CallToolRequest, in ThreadInput) (*mcp.CallToolResult, ThreadOutput, error) {
-	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
-		return nil, ThreadOutput{}, err
-	}
-	if in.Kind != "issue" && in.Kind != "pull_request" {
-		return nil, ThreadOutput{}, InvalidArgument("kind", "must be issue or pull_request", map[string]any{"kind": "issue"})
-	}
-	if in.Number < 1 {
-		return nil, ThreadOutput{}, InvalidArgument("number", "must be positive", map[string]any{"number": 1})
-	}
-	out, err := s.reader.Thread(ctx, in)
-	return nil, out, err
-}
-
 func (s *Server) searchCode(ctx context.Context, _ *mcp.CallToolRequest, in SearchCodeInput) (*mcp.CallToolResult, SearchCodeOutput, error) {
 	if in.Query == "" {
 		return nil, SearchCodeOutput{}, InvalidArgument("query", "is required", map[string]any{"query": "MIDI"})
