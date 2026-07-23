@@ -93,6 +93,7 @@ type rootCmd struct {
 	Duplicates    checkCmd         `cmd:"" help:"Check local duplicate candidates"`
 	Collisions    checkCmd         `cmd:"" help:"Check competing open pull requests"`
 	Opportunity   opportunityCmd   `cmd:"" help:"Manage opportunities"`
+	Concern       concernCmd       `cmd:"" help:"Manage repo-local concern intake"`
 	Workspace     workspaceCmd     `cmd:"" help:"Manage workspaces"`
 	Diff          diffCmd          `cmd:"" help:"Show a workspace diff against its recorded base"`
 	Validation    validationCmd    `cmd:"" help:"Manage validation definitions and runs"`
@@ -388,30 +389,6 @@ type setStatusOpportunityCmd struct {
 	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
 
-type workspaceCmd struct {
-	Create createWorkspaceCmd `cmd:"" help:"Create a workspace for an investigation"`
-	Show   showWorkspaceCmd   `cmd:"" help:"Show a workspace"`
-}
-
-type createWorkspaceCmd struct {
-	InvestigationID string `arg:"" help:"Investigation ID"`
-	Remote          string `name:"remote" help:"Git remote URL (defaults to https://github.com/OWNER/REPO.git)"`
-	Base            string `name:"base" help:"Base ref (defaults to remote HEAD)"`
-	Candidate       string `name:"candidate" help:"Candidate ref (defaults to investigation commit)"`
-	Name            string `name:"name" help:"Workspace name (defaults to generated ID)"`
-	JSON            bool   `name:"json" help:"Print the result as JSON"`
-}
-
-type showWorkspaceCmd struct {
-	ID   string `arg:"" help:"Workspace ID"`
-	JSON bool   `name:"json" help:"Print the result as JSON"`
-}
-
-type diffCmd struct {
-	WorkspaceID string `arg:"" help:"Workspace ID"`
-	JSON        bool   `name:"json" help:"Print the result as JSON"`
-}
-
 type validationCmd struct {
 	Define  defineValidationCmd  `cmd:"" help:"Define a validation"`
 	Run     runValidationCmd     `cmd:"" help:"Run a validation definition"`
@@ -685,6 +662,8 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runCheck(ctx, command, "collisions", &cli.Collisions)
 	case "opportunity":
 		return c.runOpportunity(ctx, command, &cli.Opportunity)
+	case "concern":
+		return c.runConcern(ctx, command, &cli.Concern)
 	case "workspace":
 		return c.runWorkspace(ctx, command, &cli.Workspace)
 	case "diff":

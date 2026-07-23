@@ -103,7 +103,7 @@ func (s *Service) CreateHypothesis(ctx context.Context, investigationID string, 
 	if title == "" {
 		return nil, ErrMissingTitle
 	}
-	if !isValidCategory(in.Category) {
+	if !ValidCategory(in.Category) {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidCategory, in.Category)
 	}
 	if _, err := s.repo.GetInvestigation(ctx, investigationID); err != nil {
@@ -140,7 +140,7 @@ func (s *Service) UpdateHypothesis(ctx context.Context, id string, in UpdateHypo
 	if title == "" {
 		return nil, ErrMissingTitle
 	}
-	if !isValidCategory(in.Category) {
+	if !ValidCategory(in.Category) {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidCategory, in.Category)
 	}
 	h, err := s.repo.GetHypothesis(ctx, id)
@@ -413,7 +413,8 @@ func (s *Service) CheckDuplicates(ctx context.Context, investigationID string) (
 	return s.repo.FindRelated(ctx, inv.Repo, "")
 }
 
-func isValidCategory(c Category) bool {
+// ValidCategory reports whether c is a supported contribution category.
+func ValidCategory(c Category) bool {
 	switch c {
 	case CategoryBug, CategoryPerformance, CategoryArchitecture, CategoryTesting,
 		CategoryDocumentation, CategoryMaintenance, CategoryCompatibility, CategorySecurity, CategoryOther:

@@ -71,6 +71,7 @@ var canonicalToolNames = []string{
 	ToolGetOpportunity,
 	ToolGetEvidence,
 	ToolGetReadiness,
+	ToolListConcerns,
 	ToolFindClusters,
 	ToolFindNeighbors,
 	ToolGetCoverage,
@@ -96,6 +97,11 @@ var canonicalToolNames = []string{
 	ToolRunValidation,
 	ToolStartInvestigation,
 	ToolRecordHypothesis,
+	ToolCreateConcern,
+	ToolUpdateConcern,
+	ToolSetConcernState,
+	ToolLinkConcern,
+	ToolPromoteConcern,
 	ToolCheckDuplicates,
 	ToolFindCompetingWork,
 	ToolPromoteOpportunity,
@@ -178,6 +184,7 @@ var toolsets = map[string][]string{
 		ToolStartInvestigation, ToolRecordHypothesis, ToolCheckDuplicates, ToolFindCompetingWork,
 		ToolPromoteOpportunity, ToolGetInvestigation, ToolListOpportunities, ToolGetOpportunity,
 		ToolGetEvidence, ToolGetReadiness, ToolPrepareContribution, ToolExportManifest,
+		ToolListConcerns, ToolCreateConcern,
 	},
 	"code": {
 		ToolSearchCode, ToolIndexRepositories, ToolCreateWorkspace, ToolCheckMergeConflicts,
@@ -191,6 +198,7 @@ var toolsets = map[string][]string{
 		ToolSyncPullRequestStatus, ToolListPullRequestPortfolio, ToolFindPortfolioOverlaps, ToolLinkPullRequest,
 	},
 	"advanced": {ToolFindClusters, ToolFindNeighbors},
+	"concerns": {ToolListConcerns, ToolCreateConcern, ToolUpdateConcern, ToolSetConcernState, ToolLinkConcern, ToolPromoteConcern},
 }
 
 func enabledToolNames(selected []string) map[string]struct{} {
