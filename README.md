@@ -202,8 +202,17 @@ gitcontribute validation define --kind=test --command="go test ./..." \
   --working-dir=/path/to/workspace <investigation-id>
 gitcontribute validation run <validation-id> --kind=base --execute
 gitcontribute validation run <validation-id> --kind=candidate --execute
+gitcontribute validation repeat <validation-id> --kind=both --runs=5 \
+  --concurrency=2 --execute
 gitcontribute validation compare <base-run-id> <candidate-run-id>
 ```
+
+Repeat validation stores bounded per-attempt results plus stable/flaky/
+inconclusive aggregates. CPU time, peak RSS, child count, process identity, and
+post-shutdown cleanup are sampled through `gopsutil`; unsupported metrics stay
+explicitly unavailable. To measure MCP readiness without parsing stdout, define
+the validation with `--protocol=mcp_stdio --readiness-timeout=30s`. The official
+MCP Go SDK then records initialize and tools/list milestones.
 
 ### 4. Check readiness
 

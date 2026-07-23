@@ -59,11 +59,20 @@ application and domain packages expose product-owned values and interfaces.
 | DeepWiki external read | public repository structure, contents, questions | yes | no | no | no |
 | Git acquisition | acquire, workspace create | remote-dependent | yes | `git` only | no |
 | Local merge check | compare already-fetched revisions | no | no | `git` only | no |
-| Validation | validation run with explicit execution | no by default | yes | yes | no |
+| Validation | validation run/repeat with explicit execution | no by default | yes | yes | no |
 
 Version 1 has no GitHub mutation path. Adding one requires a separate
 application capability and protocol annotation; it must not be hidden behind a
 read operation.
+
+Validation definitions remain shell-free and execution requires an explicit
+authorization flag. Repeat groups bound attempts, concurrency, per-run and
+overall timeouts, captured output, and sampler frequency. The generic process
+runner records spawn/execution/shutdown boundaries and uses `gopsutil` for
+PID-plus-start-time process-tree metrics. Declared `mcp_stdio` definitions use
+the official MCP SDK for initialize and tools/list milestones; protocol state
+is never inferred from arbitrary stdout text. Metric availability and cleanup
+status are persisted separately from semantic pass/fail classification.
 
 ## Corpus model
 
