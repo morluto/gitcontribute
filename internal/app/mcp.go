@@ -214,69 +214,6 @@ func (r *MCPReader) Dossier(ctx context.Context, in mcpserver.RepoInput) (mcpser
 	return dossierToMCPOutput(d), nil
 }
 
-// SearchCode searches indexed code snapshots in the local corpus.
-func (r *MCPReader) SearchCode(ctx context.Context, in mcpserver.SearchCodeInput) (mcpserver.SearchCodeOutput, error) {
-	if in.Query == "" {
-		return mcpserver.SearchCodeOutput{}, errors.New("query is required")
-	}
-	if in.Limit == 0 {
-		in.Limit = 20
-	}
-	if in.Limit < 1 || in.Limit > 100 {
-		return mcpserver.SearchCodeOutput{}, errors.New("limit must be between 1 and 100")
-	}
-	var ref domain.RepoRef
-	if in.Owner != "" || in.Repo != "" {
-		if (in.Owner == "") != (in.Repo == "") {
-			return mcpserver.SearchCodeOutput{}, errors.New("owner and repo must be provided together")
-		}
-		ref = domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
-		if err := ref.Validate(); err != nil {
-			return mcpserver.SearchCodeOutput{}, err
-		}
-	}
-	c, err := r.openReadOnlyCorpus(ctx)
-	if err != nil {
-		return mcpserver.SearchCodeOutput{}, err
-	}
-	page, err := c.SearchCodeWithOptions(ctx, in.Query, corpus.CodeSearchOptions{Ref: ref, Limit: in.Limit, Cursor: in.Cursor})
-	if err != nil {
-		return mcpserver.SearchCodeOutput{}, fmt.Errorf("search code: %w", err)
-	}
-	matches := page.Matches
-	out := make([]mcpserver.CodeMatchOutput, len(matches))
-	coverageOut := make([]mcpserver.CodeIndexCoverageOutput, 0, len(page.Snapshots)+1)
-	for _, snapshot := range page.Snapshots {
-		manifest := snapshot.Manifest
-		entry := mcpserver.CodeIndexCoverageOutput{Repo: snapshot.Repo.String(), Status: "indexed_coverage_unknown", Commit: snapshot.CommitSHA, Truncated: manifest.Truncated}
-		if manifest.CoverageKnown {
-			entry.Status = "indexed"
-		}
-		entry.IndexedFiles, entry.TrackedEntries = manifest.IndexedFiles, manifest.TrackedEntries
-		entry.SkippedPolicy = manifest.SkippedInvalidPath + manifest.SkippedExcluded + manifest.SkippedNonRegular
-		entry.SkippedLimits = manifest.SkippedOversize + manifest.SkippedTotalBudget + manifest.SkippedFileLimit
-		entry.SkippedNonText = manifest.SkippedNonText
-		entry.SkippedFiles = entry.SkippedPolicy + entry.SkippedLimits + entry.SkippedNonText
-		coverageOut = append(coverageOut, entry)
-	}
-	if ref != (domain.RepoRef{}) && len(page.Snapshots) == 0 {
-		coverageOut = append(coverageOut, mcpserver.CodeIndexCoverageOutput{Repo: ref.String(), Status: "missing"})
-	}
-	for i, m := range matches {
-		repo := m.Repo.String()
-		out[i] = mcpserver.CodeMatchOutput{
-			ID:       fmt.Sprintf("%s@%s:%s", repo, m.Commit, m.Path),
-			Repo:     repo,
-			Commit:   m.Commit,
-			Path:     m.Path,
-			Language: m.Language,
-			Snippet:  boundedText(m.Content, 2000),
-			Bytes:    m.Bytes,
-		}
-	}
-	return mcpserver.SearchCodeOutput{Query: in.Query, Total: page.Total, Matches: out, Coverage: coverageOut, NextCursor: page.NextCursor}, nil
-}
-
 // Investigation reads a local investigation workspace from the corpus.
 func (r *MCPReader) Investigation(ctx context.Context, in mcpserver.InvestigationInput) (mcpserver.InvestigationOutput, error) {
 	id, err := normalizeMCPID("id", in.ID)

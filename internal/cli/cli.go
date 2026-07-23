@@ -1717,15 +1717,6 @@ func (c *CLI) runSeeds(ctx context.Context, cmd *seedsCmd) error {
 	return c.render(cmd.JSON, result)
 }
 
-func (c *CLI) runMCP(ctx context.Context, cmd *mcpCmd) error {
-	fmt.Fprintf(c.stderr, "starting mcp server (transport=%s)...\n", cmd.Serve.Transport)
-	toolsets := strings.Split(cmd.Serve.Toolsets, ",")
-	for i := range toolsets {
-		toolsets[i] = strings.TrimSpace(toolsets[i])
-	}
-	return c.mapError(c.runner.Run(ctx, MCPOptions{Transport: cmd.Serve.Transport, Toolsets: toolsets, ReadOnly: cmd.Serve.ReadOnly}))
-}
-
 func (c *CLI) runTUI(ctx context.Context, cmd *tuiCmd) error {
 	if c.tui == nil {
 		return NewCLIError(ExitNotWired, ErrNotWired)
