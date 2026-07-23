@@ -419,7 +419,6 @@ func (s *Server) registerScalable() {
 		setEnum(sc, "kind", "issue", "pull_request", "both")
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit_per_repository", 1, 1000)
-		setDefault(sc, "limit_per_repository", 100)
 		setRange(sc, "max_requests", 9, 1000)
 		setDefault(sc, "max_requests", 1000)
 	}), output: outputSchema[JobReference]("Reference to a bounded thread-header synchronization job."), handler: s.syncThreads})
@@ -629,6 +628,14 @@ func (s *Server) syncThreads(ctx context.Context, _ *mcp.CallToolRequest, in Syn
 	}
 	if in.Selection == "threads" && (len(in.Repositories) > 0 || in.Kind != "" || in.State != "" || in.UpdatedAfter != "" || in.LimitPerRepository != 0) {
 		return nil, JobReference{}, InvalidArgument("selection", "repository filters are not accepted in thread selection mode", nil)
+	}
+	for _, thread := range in.Threads {
+		if err := validateThreadRef(thread, false); err != nil {
+			return nil, JobReference{}, err
+		}
+	}
+	if in.Selection == "repositories" && in.LimitPerRepository == 0 {
+		in.LimitPerRepository = 100
 	}
 	op, ok := s.reader.(GitHubOperator)
 	if !ok {

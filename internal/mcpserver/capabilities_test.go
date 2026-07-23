@@ -2,7 +2,10 @@ package mcpserver
 
 import "context"
 
-type fakeOptionalCapabilities struct{ base *fakeReader }
+type fakeOptionalCapabilities struct {
+	base             *fakeReader
+	syncThreadsInput SyncThreadsInput
+}
 
 func (*fakeOptionalCapabilities) FindNeighbors(context.Context, FindNeighborsInput) (FindNeighborsOutput, error) {
 	return FindNeighborsOutput{}, nil
@@ -42,7 +45,8 @@ func (f *fakeOptionalCapabilities) SearchGitHubRepositories(ctx context.Context,
 func (*fakeOptionalCapabilities) SyncRepositoryMetadata(context.Context, SyncRepositoryMetadataInput) (JobReference, error) {
 	return JobReference{ID: "job-metadata", Status: "queued"}, nil
 }
-func (*fakeOptionalCapabilities) SyncThreads(context.Context, SyncThreadsInput) (JobReference, error) {
+func (f *fakeOptionalCapabilities) SyncThreads(_ context.Context, in SyncThreadsInput) (JobReference, error) {
+	f.syncThreadsInput = in
 	return JobReference{ID: "job-threads", Status: "queued"}, nil
 }
 func (*fakeOptionalCapabilities) HydrateThreads(context.Context, HydrateThreadsInput) (JobReference, error) {

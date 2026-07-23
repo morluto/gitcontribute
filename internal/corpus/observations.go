@@ -285,8 +285,12 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO thread_observations (thread_id, source_updated_at, observation_sequence, payload, observed_at)
-		VALUES (?, ?, ?, ?, ?)
-	`, threadID, srcSec, seq, payload, now); err != nil {
+		SELECT ?, ?, ?, ?, ?
+		WHERE NOT EXISTS (
+			SELECT 1 FROM thread_observations
+			WHERE thread_id = ? AND source_updated_at = ? AND payload = ?
+		)
+	`, threadID, srcSec, seq, payload, now, threadID, srcSec, payload); err != nil {
 		return nil, fmt.Errorf("insert thread observation: %w", err)
 	}
 

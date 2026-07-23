@@ -412,6 +412,57 @@ func TestInvalidToolCallEvaluation(t *testing.T) {
 	}
 }
 
+func TestSyncThreadsDefaultsRemainSelectionSpecific(t *testing.T) {
+	base := &fakeReader{searchStarted: make(chan struct{})}
+	optional := &fakeOptionalCapabilities{base: base}
+	reader := completeTestReader{
+		Reader: base, NeighborReader: optional, ScalableReader: optional,
+		PortfolioReader: optional, GitHubOperator: optional, CodeIndexer: optional,
+		MergeConflictReader: optional, ResearchReader: optional,
+		PortfolioOperator: optional, Operator: base,
+	}
+	client, closeSessions := connect(t, reader)
+	defer closeSessions()
+
+	thread := map[string]any{"owner": "acme", "repo": "rocket", "kind": "pull_request", "number": 7}
+	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: ToolSyncThreads, Arguments: map[string]any{"selection": "threads", "threads": []any{thread}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("exact thread sync rejected: %+v", result.Content)
+	}
+	if optional.syncThreadsInput.LimitPerRepository != 0 {
+		t.Fatalf("thread mode received repository default: %+v", optional.syncThreadsInput)
+	}
+
+	result, err = client.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: ToolSyncThreads, Arguments: map[string]any{
+			"selection": "threads", "threads": []any{thread}, "limit_per_repository": 10,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatal("thread mode accepted explicit repository-only limit")
+	}
+
+	result, err = client.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: ToolSyncThreads, Arguments: map[string]any{
+			"selection": "repositories", "repositories": []any{map[string]any{"owner": "acme", "repo": "rocket"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError || optional.syncThreadsInput.LimitPerRepository != 100 {
+		t.Fatalf("repository mode default = %+v, result = %+v", optional.syncThreadsInput, result.Content)
+	}
+}
+
 func TestSideEffectAuthorizationEvaluation(t *testing.T) {
 	tools, closeSessions := listedTools(t)
 	defer closeSessions()
