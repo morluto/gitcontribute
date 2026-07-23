@@ -1,6 +1,7 @@
 package gitremote
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -54,5 +55,27 @@ func TestValidate(t *testing.T) {
 				t.Fatalf("Validate(%q) = %v, want nil", tt.remote, err)
 			}
 		})
+	}
+}
+
+func TestParseRepositoryIdentity(t *testing.T) {
+	t.Parallel()
+	for _, remote := range []string{
+		"https://github.com/owner/repo.git",
+		"ssh://git@github.com/owner/repo.git",
+		"git@github.com:owner/repo.git",
+	} {
+		identity, err := ParseRepositoryIdentity(remote)
+		if err != nil {
+			t.Fatalf("ParseRepositoryIdentity(%q): %v", remote, err)
+		}
+		if identity.Host != "github.com" || identity.Owner != "owner" || identity.Repo != "repo" {
+			t.Fatalf("ParseRepositoryIdentity(%q) = %+v", remote, identity)
+		}
+	}
+	for _, remote := range []string{"/tmp/repo", "file:///tmp/repo", "https://github.com/owner/group/repo.git"} {
+		if _, err := ParseRepositoryIdentity(remote); !errors.Is(err, ErrRepositoryIdentity) {
+			t.Fatalf("ParseRepositoryIdentity(%q) error = %v", remote, err)
+		}
 	}
 }

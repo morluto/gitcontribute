@@ -14,6 +14,18 @@ import (
 // credentials.
 var ErrInvalid = errors.New("invalid Git remote")
 
+// ErrRepositoryIdentity indicates that a valid remote does not encode a
+// hosted OWNER/REPOSITORY identity.
+var ErrRepositoryIdentity = errors.New("git remote has no hosted repository identity")
+
+// RepositoryIdentity is the credential-free hosted identity encoded by a
+// remote URL.
+type RepositoryIdentity struct {
+	Host  string
+	Owner string
+	Repo  string
+}
+
 // Validate accepts local absolute paths, file URLs, HTTPS URLs, SSH URLs, and
 // SCP-like SSH remotes. HTTPS userinfo and SSH passwords are never accepted;
 // SSH usernames remain supported because they are not secrets.
@@ -42,6 +54,43 @@ func Validate(remote string) error {
 		}
 		return validateSCPLikeRemote(remote)
 	}
+}
+
+// ParseRepositoryIdentity extracts a hosted repository identity from an HTTPS,
+// SSH URL, or SCP-like SSH remote. Local paths and file URLs are valid remotes
+// but do not establish a hosted repository identity.
+func ParseRepositoryIdentity(remote string) (RepositoryIdentity, error) {
+	remote = strings.TrimSpace(remote)
+	if err := Validate(remote); err != nil {
+		return RepositoryIdentity{}, err
+	}
+	if filepath.IsAbs(remote) || path.IsAbs(remote) || strings.HasPrefix(remote, "file://") {
+		return RepositoryIdentity{}, ErrRepositoryIdentity
+	}
+
+	var host, repoPath string
+	if strings.HasPrefix(remote, "https://") || strings.HasPrefix(remote, "ssh://") {
+		u, err := url.Parse(remote)
+		if err != nil {
+			return RepositoryIdentity{}, ErrRepositoryIdentity
+		}
+		host, repoPath = u.Hostname(), u.Path
+	} else {
+		colon := strings.IndexByte(remote, ':')
+		host, repoPath = remote[:colon], remote[colon+1:]
+		if at := strings.LastIndexByte(host, '@'); at >= 0 {
+			host = host[at+1:]
+		}
+	}
+	parts := strings.Split(strings.Trim(repoPath, "/"), "/")
+	if host == "" || len(parts) != 2 {
+		return RepositoryIdentity{}, ErrRepositoryIdentity
+	}
+	repo := strings.TrimSuffix(parts[1], ".git")
+	if parts[0] == "" || repo == "" {
+		return RepositoryIdentity{}, ErrRepositoryIdentity
+	}
+	return RepositoryIdentity{Host: strings.ToLower(host), Owner: parts[0], Repo: repo}, nil
 }
 
 func validateFileURL(remote string) error {
