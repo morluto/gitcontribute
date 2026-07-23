@@ -100,6 +100,7 @@ type Operator interface {
 	CreateWorkspace(context.Context, CreateWorkspaceInput) (JobReference, error)
 	DefineValidation(context.Context, DefineValidationInput) (ValidationOutput, error)
 	RunValidation(context.Context, RunValidationInput) (JobReference, error)
+	RunRepeatedValidation(context.Context, RunRepeatedValidationInput) (JobReference, error)
 	PrepareContribution(context.Context, PrepareContributionInput) (DraftOutput, error)
 	ExportManifest(context.Context, ExportManifestInput) (ManifestOutput, error)
 	CancelJobs(context.Context, CancelJobInput) (GetJobsOutput, error)

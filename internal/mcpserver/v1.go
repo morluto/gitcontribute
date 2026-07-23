@@ -150,6 +150,18 @@ type RunValidationInput struct {
 	Execute bool   `json:"execute" jsonschema:"Must be true to authorize host execution"`
 }
 
+// RunRepeatedValidationInput configures one bounded repeat/stress job.
+type RunRepeatedValidationInput struct {
+	ID             string `json:"id" jsonschema:"Validation definition ID"`
+	Target         string `json:"target" jsonschema:"Run target: base, candidate, or both"`
+	RunCount       int    `json:"run_count,omitempty" jsonschema:"Attempts per target from 1 to 100"`
+	Concurrency    int    `json:"concurrency,omitempty" jsonschema:"Concurrent attempts from 1 to 16"`
+	PerRunTimeout  string `json:"per_run_timeout,omitempty" jsonschema:"Optional Go duration per attempt"`
+	OverallTimeout string `json:"overall_timeout,omitempty" jsonschema:"Optional Go duration for the whole group"`
+	SampleInterval string `json:"sample_interval,omitempty" jsonschema:"Process telemetry interval from 10ms to 10s"`
+	Execute        bool   `json:"execute" jsonschema:"Must be true to authorize host execution"`
+}
+
 // StartInvestigationInput creates a local investigation for a repository revision.
 type StartInvestigationInput struct {
 	Owner     string `json:"owner" jsonschema:"GitHub repository owner"`
@@ -239,6 +251,8 @@ type DefineValidationInput struct {
 	Timeout              string                         `json:"timeout,omitempty" jsonschema:"Positive Go duration; defaults to 30m"`
 	MaxOutputBytes       int64                          `json:"max_output_bytes,omitempty" jsonschema:"Maximum captured bytes per output stream; defaults to 65536"`
 	Observation          *ValidationObservationContract `json:"observation,omitempty" jsonschema:"Expected bounded observations over captured base and candidate output"`
+	Protocol             string                         `json:"protocol,omitempty" jsonschema:"Structured protocol adapter: mcp_stdio"`
+	ReadinessTimeout     string                         `json:"readiness_timeout,omitempty" jsonschema:"Protocol initialization deadline; defaults to 30s"`
 }
 
 // ValidationExpectedObservation is one output assertion evaluated without a shell.
@@ -274,6 +288,8 @@ type ValidationOutput struct {
 	Timeout              string                         `json:"timeout,omitempty"`
 	MaxOutputBytes       int64                          `json:"max_output_bytes,omitempty"`
 	Observation          *ValidationObservationContract `json:"observation,omitempty"`
+	Protocol             string                         `json:"protocol,omitempty" jsonschema:"Declared structured protocol adapter"`
+	ReadinessTimeout     string                         `json:"readiness_timeout,omitempty" jsonschema:"Protocol initialization deadline"`
 	CreatedAt            string                         `json:"created_at"`
 }
 
@@ -342,6 +358,19 @@ func (s *Server) registerV1() {
 			setConst(schema, "execute", true)
 		}), output: outputSchema[JobReference]("Reference to a newly queued validation execution job."), handler: s.runValidation,
 	})
+	addCatalogTool(s, catalogTool[RunRepeatedValidationInput, JobReference]{
+		name: ToolRunRepeatedValidation, title: "Run repeated validation",
+		description: "Execute a stored shell-free validation repeatedly with bounded concurrency, independent per-attempt deadlines, process-tree resource telemetry, cleanup checks, and semantic aggregation. Requires execute=true and never contacts GitHub.",
+		annotations: executionAnnotations(), supportedBy: supports[Operator], input: inputSchema[RunRepeatedValidationInput](func(schema *schemaBuilder) {
+			setEnum(schema, "target", "base", "candidate", "both")
+			setRange(schema, "run_count", 1, 100)
+			setDefault(schema, "run_count", 3)
+			setRange(schema, "concurrency", 1, 16)
+			setDefault(schema, "concurrency", 1)
+			setDefault(schema, "sample_interval", "100ms")
+			setConst(schema, "execute", true)
+		}), output: outputSchema[JobReference]("Reference to a newly queued repeat validation job."), handler: s.runRepeatedValidation,
+	})
 	addCatalogTool(s, catalogTool[StartInvestigationInput, InvestigationOutput]{
 		name: ToolStartInvestigation, title: "Start local investigation",
 		description: "Create a local investigation from a commit SHA, or atomically create its initial baseline hypothesis from a stored issue or pull-request number. This does not create a Git worktree or contact GitHub; use " + ToolCreateWorkspace + " separately when filesystem work is authorized.",
@@ -382,11 +411,12 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[DefineValidationInput, ValidationOutput]{
 		name: ToolDefineValidation, title: "Define validation command",
-		description: "Parse and persist a shell-free validation command for managed workspace IDs belonging to the investigation, with an environment allowlist, timeout, and output bound. This does not execute the command; use " + ToolRunValidation + " separately with explicit authorization.",
+		description: "Parse and persist a shell-free validation command for managed workspace IDs belonging to the investigation, with an environment allowlist, timeout, output bound, and optional declared MCP stdio adapter. This does not execute the command; use " + ToolRunValidation + " separately with explicit authorization.",
 		annotations: localWrite, supportedBy: supports[Operator], input: inputSchema[DefineValidationInput](func(schema *schemaBuilder) {
 			setDefault(schema, "timeout", "30m")
 			setRange(schema, "max_output_bytes", 1, 64*1024*1024)
 			setDefault(schema, "max_output_bytes", 64*1024)
+			setEnum(schema, "protocol", "mcp_stdio")
 			configureValidationObservationSchema(schema)
 		}), output: outputSchema[ValidationOutput]("Persisted validation definition."), handler: s.defineValidation,
 	})
@@ -556,6 +586,35 @@ func (s *Server) runValidation(ctx context.Context, _ *mcp.CallToolRequest, in R
 	return nil, out, err
 }
 
+func (s *Server) runRepeatedValidation(ctx context.Context, _ *mcp.CallToolRequest, in RunRepeatedValidationInput) (*mcp.CallToolResult, JobReference, error) {
+	id, err := normalizeID("id", in.ID)
+	if err != nil {
+		return nil, JobReference{}, err
+	}
+	in.ID = id
+	if in.RunCount == 0 {
+		in.RunCount = 3
+	}
+	if in.Concurrency == 0 {
+		in.Concurrency = 1
+	}
+	if in.SampleInterval == "" {
+		in.SampleInterval = "100ms"
+	}
+	if in.Target != "base" && in.Target != "candidate" && in.Target != "both" {
+		return nil, JobReference{}, errors.New("target must be base, candidate, or both")
+	}
+	if !in.Execute {
+		return nil, JobReference{}, errors.New("execute must be true to authorize host command execution")
+	}
+	operator, ok := s.reader.(Operator)
+	if !ok {
+		return nil, JobReference{}, errors.New("validation is not available")
+	}
+	out, err := operator.RunRepeatedValidation(ctx, in)
+	return nil, out, err
+}
+
 func (s *Server) startInvestigation(ctx context.Context, _ *mcp.CallToolRequest, in StartInvestigationInput) (*mcp.CallToolResult, InvestigationOutput, error) {
 	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
 		return nil, InvestigationOutput{}, err
@@ -682,6 +741,14 @@ func (s *Server) defineValidation(ctx context.Context, _ *mcp.CallToolRequest, i
 	if in.Timeout != "" {
 		if _, err := time.ParseDuration(in.Timeout); err != nil {
 			return nil, ValidationOutput{}, InvalidArgument("timeout", "must be a positive Go duration", map[string]any{"timeout": "30m"})
+		}
+	}
+	if in.ReadinessTimeout != "" {
+		if duration, err := time.ParseDuration(in.ReadinessTimeout); err != nil || duration <= 0 {
+			return nil, ValidationOutput{}, InvalidArgument("readiness_timeout", "must be a positive Go duration", map[string]any{"readiness_timeout": "30s"})
+		}
+		if in.Protocol == "" {
+			return nil, ValidationOutput{}, InvalidArgument("protocol", "readiness_timeout requires a declared protocol adapter", map[string]any{"protocol": "mcp_stdio", "readiness_timeout": "30s"})
 		}
 	}
 	if in.MaxOutputBytes < 0 {

@@ -16,6 +16,7 @@ type fakeExtendedService struct {
 	showWorkspaceCalled     bool
 	defineValidationCalled  bool
 	runValidationCalled     bool
+	repeatValidationCalled  bool
 	compareValidationCalled bool
 	showEvidenceCalled      bool
 	readinessCalled         bool
@@ -23,14 +24,15 @@ type fakeExtendedService struct {
 	prepareIssueCalled      bool
 	preparePRCalled         bool
 
-	workspaceResult     *cli.WorkspaceResult
-	validationResult    *cli.ValidationResult
-	validationRunResult *cli.ValidationRunResult
-	comparisonResult    *cli.ValidationComparisonResult
-	evidenceResult      *cli.EvidenceResult
-	readinessResult     *cli.ReadinessResult
-	readinessCheck      *cli.ReadinessCheck
-	draftResult         *cli.DraftResult
+	workspaceResult       *cli.WorkspaceResult
+	validationResult      *cli.ValidationResult
+	validationRunResult   *cli.ValidationRunResult
+	validationGroupResult *cli.ValidationRunGroupResult
+	comparisonResult      *cli.ValidationComparisonResult
+	evidenceResult        *cli.EvidenceResult
+	readinessResult       *cli.ReadinessResult
+	readinessCheck        *cli.ReadinessCheck
+	draftResult           *cli.DraftResult
 
 	lastWorkspaceInvestigation  string
 	lastCreateWorkspaceOpts     cli.WorkspaceCreateOptions
@@ -40,6 +42,7 @@ type fakeExtendedService struct {
 	lastRunValidationID         string
 	lastRunKind                 string
 	lastRunExecute              bool
+	lastRepeatValidationOpts    cli.RepeatValidationOptions
 	lastCompareBase             string
 	lastCompareCandidate        string
 	lastEvidenceInvestigation   string
@@ -81,6 +84,13 @@ func (f *fakeExtendedService) RunValidation(ctx context.Context, id string, opts
 	f.lastRunKind = opts.Kind
 	f.lastRunExecute = opts.Execute
 	return f.validationRunResult, f.err
+}
+
+func (f *fakeExtendedService) RunValidationGroup(_ context.Context, id string, opts cli.RepeatValidationOptions) (*cli.ValidationRunGroupResult, error) {
+	f.repeatValidationCalled = true
+	f.lastRunValidationID = id
+	f.lastRepeatValidationOpts = opts
+	return f.validationGroupResult, f.err
 }
 
 func (f *fakeExtendedService) CompareValidation(ctx context.Context, baseRunID, candidateRunID string) (*cli.ValidationComparisonResult, error) {
@@ -201,6 +211,10 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 				Status:                        "matched", Excerpt: "expected failure",
 			}},
 		},
+		validationGroupResult: &cli.ValidationRunGroupResult{
+			ID: "group-1", DefinitionID: "val-1", RequestedRuns: 3, CompletedRuns: 3, Classification: "stable_pass",
+			Aggregates: []cli.ValidationAggregateResult{{Kind: "candidate", Requested: 3, Completed: 3, Passing: 3, Classification: "stable_pass", ResourceClassification: "available"}},
+		},
 		comparisonResult: &cli.ValidationComparisonResult{
 			Classification: "fixed",
 			Explanation:    "base failed, candidate passed",
@@ -250,6 +264,16 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Observation status: matched") || !strings.Contains(stdout.String(), "expected failure") {
 		t.Fatalf("observation output missing: %q", stdout.String())
+	}
+
+	stdout.Reset()
+	err = c.Run(context.Background(), []string{"validation", "repeat", "val-1", "--kind", "candidate", "--runs", "3", "--concurrency", "2", "--execute"})
+	requireNoErr(t, err)
+	if !svc.repeatValidationCalled || svc.lastRepeatValidationOpts.RunCount != 3 || svc.lastRepeatValidationOpts.Concurrency != 2 || !svc.lastRepeatValidationOpts.Execute {
+		t.Fatalf("repeat validation opts = %+v", svc.lastRepeatValidationOpts)
+	}
+	if !strings.Contains(stdout.String(), "stable_pass") {
+		t.Fatalf("repeat output = %q", stdout.String())
 	}
 
 	stdout.Reset()

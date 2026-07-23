@@ -392,6 +392,7 @@ type setStatusOpportunityCmd struct {
 type validationCmd struct {
 	Define  defineValidationCmd  `cmd:"" help:"Define a validation"`
 	Run     runValidationCmd     `cmd:"" help:"Run a validation definition"`
+	Repeat  repeatValidationCmd  `cmd:"" help:"Run a bounded repeat/stress validation"`
 	Compare compareValidationCmd `cmd:"" help:"Compare two validation runs"`
 }
 
@@ -409,6 +410,8 @@ type defineValidationCmd struct {
 	Timeout              time.Duration `name:"timeout" help:"Maximum execution time"`
 	MaxOutput            int64         `name:"max-output" help:"Maximum captured output bytes per stream"`
 	Observation          string        `name:"observation-contract" help:"JSON observation contract for base and candidate output"`
+	Protocol             string        `name:"protocol" help:"Structured protocol adapter (mcp_stdio)"`
+	ReadinessTimeout     time.Duration `name:"readiness-timeout" help:"Protocol initialization deadline"`
 	JSON                 bool          `name:"json" help:"Print the result as JSON"`
 }
 
@@ -417,6 +420,18 @@ type runValidationCmd struct {
 	Kind    string `name:"kind" required:"" enum:"base,candidate" help:"Run kind"`
 	Execute bool   `name:"execute" help:"Authorize execution of the displayed command on the host"`
 	JSON    bool   `name:"json" help:"Print the result as JSON"`
+}
+
+type repeatValidationCmd struct {
+	ID             string        `arg:"" help:"Validation definition ID"`
+	Kind           string        `name:"kind" default:"candidate" enum:"base,candidate,both" help:"Run target"`
+	Runs           int           `name:"runs" default:"3" help:"Attempts per target (1-100)"`
+	Concurrency    int           `name:"concurrency" default:"1" help:"Concurrent attempts (1-16)"`
+	PerRunTimeout  time.Duration `name:"per-run-timeout" help:"Per-attempt timeout; defaults to the validation definition"`
+	OverallTimeout time.Duration `name:"overall-timeout" help:"Overall group timeout"`
+	SampleInterval time.Duration `name:"sample-interval" default:"100ms" help:"Process telemetry interval (10ms-10s)"`
+	Execute        bool          `name:"execute" help:"Authorize execution of the displayed command on the host"`
+	JSON           bool          `name:"json" help:"Print the result as JSON"`
 }
 
 type compareValidationCmd struct {

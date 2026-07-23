@@ -13,6 +13,7 @@ import (
 
 type fakeReader struct {
 	searchStarted chan struct{}
+	repeatInput   RunRepeatedValidationInput
 }
 
 func (f *fakeReader) Search(ctx context.Context, in SearchInput) (SearchOutput, error) {
@@ -276,6 +277,11 @@ func (*fakeReader) DefineValidation(_ context.Context, in DefineValidationInput)
 
 func (*fakeReader) RunValidation(_ context.Context, in RunValidationInput) (JobReference, error) {
 	return JobReference{ID: "job-run-" + in.ID, Kind: "run_validation", Status: "queued"}, nil
+}
+
+func (f *fakeReader) RunRepeatedValidation(_ context.Context, in RunRepeatedValidationInput) (JobReference, error) {
+	f.repeatInput = in
+	return JobReference{ID: "job-repeat-" + in.ID, Kind: "run_validation_group", Status: "queued"}, nil
 }
 
 func (*fakeReader) PrepareContribution(_ context.Context, in PrepareContributionInput) (DraftOutput, error) {
@@ -702,6 +708,7 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		ToolSearchRepositories, ToolSearchThreads, ToolGetRepositoryDossier, ToolExplainMatch, ToolGetJob,
 		ToolGetReadiness, ToolBuildRepositoryDossier,
 		ToolCreateWorkspace, ToolRunValidation, ToolStartInvestigation, ToolRecordHypothesis,
+		ToolRunRepeatedValidation,
 		ToolCheckDuplicates, ToolFindCompetingWork, ToolPromoteOpportunity, ToolDefineValidation,
 		ToolPrepareContribution, ToolCancelJob,
 	} {
@@ -738,6 +745,7 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		{ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"}},
 		{ToolCreateWorkspace, map[string]any{"investigation_id": "inv-1"}},
 		{ToolRunValidation, map[string]any{"id": "val-1", "kind": "base", "execute": true}},
+		{ToolRunRepeatedValidation, map[string]any{"id": "val-1", "target": "both", "execute": true}},
 		{ToolStartInvestigation, map[string]any{"owner": "acme", "repo": "rocket", "commit_sha": "abc123"}},
 		{ToolRecordHypothesis, map[string]any{"investigation_id": "inv-1", "title": "leak", "description": "memory leak", "category": "bug"}},
 		{ToolCheckDuplicates, map[string]any{"target": "hypothesis", "id": "hyp-1"}},
@@ -773,5 +781,21 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		if _, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: uri}); err == nil {
 			t.Errorf("unadvertised alias %q was routed", uri)
 		}
+	}
+}
+
+func TestRepeatedValidationAppliesDocumentedDefaults(t *testing.T) {
+	fake := &fakeReader{searchStarted: make(chan struct{})}
+	client, closeSessions := connect(t, fake)
+	defer closeSessions()
+	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      ToolRunRepeatedValidation,
+		Arguments: map[string]any{"id": "val-1", "target": "candidate", "execute": true},
+	})
+	if err != nil || result.IsError {
+		t.Fatalf("call repeated validation: err=%v result=%+v", err, result)
+	}
+	if fake.repeatInput.RunCount != 3 || fake.repeatInput.Concurrency != 1 || fake.repeatInput.SampleInterval != "100ms" {
+		t.Fatalf("repeat defaults = %+v", fake.repeatInput)
 	}
 }

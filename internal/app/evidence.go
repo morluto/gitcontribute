@@ -60,6 +60,8 @@ func (s *Service) DefineValidation(ctx context.Context, investigationID string, 
 		Timeout:              opts.Timeout,
 		MaxOutputBytes:       opts.MaxOutputBytes,
 		Observation:          observationContractToEvidence(opts.Observation),
+		Protocol:             evidence.ValidationProtocol(opts.Protocol),
+		ReadinessTimeout:     opts.ReadinessTimeout,
 	}
 
 	evSvc := evidence.NewService(c, evidence.NewExecRunner())
@@ -223,6 +225,29 @@ func bindValidationWorkspace(ctx context.Context, service *Service, c *corpus.Co
 	return nil
 }
 
+// RunValidationGroup executes a bounded repeat/stress validation group.
+func (s *Service) RunValidationGroup(ctx context.Context, id string, opts cli.RepeatValidationOptions) (*cli.ValidationRunGroupResult, error) {
+	if !opts.Execute {
+		return nil, evidence.ErrExecutionNotAuthorized
+	}
+	kinds := make([]evidence.RunKind, len(opts.Kinds))
+	for index, kind := range opts.Kinds {
+		kinds[index] = evidence.RunKind(kind)
+	}
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	group, err := evidence.NewService(c, evidence.NewExecRunner()).RunValidationGroup(ctx, id, evidence.RepeatValidationOptions{
+		Kinds: kinds, RunCount: opts.RunCount, Concurrency: opts.Concurrency,
+		PerRunTimeout: opts.PerRunTimeout, OverallTimeout: opts.OverallTimeout, SampleInterval: opts.SampleInterval,
+	})
+	if err != nil {
+		return nil, mapEvidenceError(err)
+	}
+	return validationRunGroupResult(group), nil
+}
+
 // CompareValidation compares a base validation run with a candidate validation run.
 func (s *Service) CompareValidation(ctx context.Context, baseRunID, candidateRunID string) (*cli.ValidationComparisonResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
@@ -363,6 +388,10 @@ func validationResult(def *evidence.ValidationDefinition) *cli.ValidationResult 
 	if def.Timeout > 0 {
 		timeout = def.Timeout.String()
 	}
+	readinessTimeout := ""
+	if def.ReadinessTimeout > 0 {
+		readinessTimeout = def.ReadinessTimeout.String()
+	}
 	return &cli.ValidationResult{
 		ID:                   def.ID,
 		InvestigationID:      def.InvestigationID,
@@ -378,6 +407,8 @@ func validationResult(def *evidence.ValidationDefinition) *cli.ValidationResult 
 		Timeout:              timeout,
 		MaxOutputBytes:       def.MaxOutputBytes,
 		Observation:          observationContractToCLI(def.Observation),
+		Protocol:             string(def.Protocol),
+		ReadinessTimeout:     readinessTimeout,
 		CreatedAt:            formatTime(def.CreatedAt),
 	}
 }
@@ -402,7 +433,77 @@ func validationRunResult(run *evidence.ValidationRun) *cli.ValidationRunResult {
 		WorkspaceSnapshotAfter:  run.WorkspaceSnapshotAfter,
 		WorkspaceBindingStatus:  run.WorkspaceBindingStatus,
 		WorkspaceBindingReason:  run.WorkspaceBindingReason,
+		Process:                 validationProcessIdentity(run.Process),
+		Phases:                  validationPhases(run.Phases),
+		TimeoutPhase:            run.TimeoutPhase,
+		FailurePhase:            run.FailurePhase,
+		Resources:               validationResources(run.Resources),
+		Cleanup:                 validationCleanup(run.Cleanup),
 	}
+}
+
+func validationRunGroupResult(group *evidence.ValidationRunGroup) *cli.ValidationRunGroupResult {
+	result := &cli.ValidationRunGroupResult{
+		ID: group.ID, DefinitionID: group.DefinitionID, InvestigationID: group.InvestigationID,
+		ConfigurationSHA256: group.ConfigurationSHA256, RequestedRuns: group.RequestedRuns, CompletedRuns: group.CompletedRuns,
+		Concurrency: group.Concurrency, PerRunTimeout: group.PerRunTimeout.String(), OverallTimeout: group.OverallTimeout.String(),
+		SampleInterval: group.SampleInterval.String(), Classification: string(group.Classification),
+		StartedAt: formatTime(group.StartedAt), CompletedAt: formatTime(group.CompletedAt),
+	}
+	for _, attempt := range group.Attempts {
+		result.Attempts = append(result.Attempts, cli.ValidationAttemptResult{
+			Index: attempt.Index, Kind: string(attempt.Kind), RunID: attempt.RunID,
+			StartedAt: formatTime(attempt.StartedAt), CompletedAt: formatTime(attempt.CompletedAt), ExitCode: attempt.ExitCode,
+			Classification: string(attempt.Classification), ObservationStatus: string(attempt.ObservationStatus),
+			TimeoutPhase: attempt.TimeoutPhase, FailurePhase: attempt.FailurePhase,
+			Error: attempt.Error, Process: validationProcessIdentity(attempt.Process),
+			Phases:    validationPhases(attempt.Phases),
+			Resources: validationResources(attempt.Resources), Cleanup: validationCleanup(attempt.Cleanup),
+		})
+	}
+	for _, aggregate := range group.Aggregates {
+		result.Aggregates = append(result.Aggregates, cli.ValidationAggregateResult{
+			Kind: string(aggregate.Kind), Requested: aggregate.Requested, Completed: aggregate.Completed,
+			Passing: aggregate.Passing, Failing: aggregate.Failing, Inconclusive: aggregate.Inconclusive,
+			Cancelled: aggregate.Cancelled, Classification: string(aggregate.Classification),
+			ResourceClassification: aggregate.ResourceClassification,
+		})
+	}
+	if group.Comparison != nil {
+		result.Comparison = &cli.ValidationGroupComparisonResult{Classification: string(group.Comparison.Classification), Explanation: group.Comparison.Explanation}
+	}
+	return result
+}
+
+func validationPhases(value evidence.RunPhases) cli.ValidationRunPhases {
+	return cli.ValidationRunPhases{
+		SpawnStartedAt: formatTime(value.SpawnStartedAt), ProcessStartedAt: formatTime(value.ProcessStartedAt),
+		InitializedAt: formatTime(value.InitializedAt), ToolsListedAt: formatTime(value.ToolsListedAt),
+		FirstResponseAt: formatTime(value.FirstResponseAt), ExecutionEndedAt: formatTime(value.ExecutionEndedAt),
+		ShutdownStartedAt: formatTime(value.ShutdownStartedAt), ShutdownCheckedAt: formatTime(value.ShutdownCheckedAt),
+	}
+}
+
+func validationProcessIdentity(value evidence.ProcessIdentity) cli.ValidationProcessIdentity {
+	return cli.ValidationProcessIdentity{PID: value.PID, CreateTimeUnixMilli: value.CreateTimeUnixMilli}
+}
+
+func validationResources(value evidence.ResourceTelemetry) cli.ValidationResourceTelemetry {
+	return cli.ValidationResourceTelemetry{
+		Provider: value.Provider, Platform: value.Platform, SampleInterval: value.SampleInterval.String(), SampleCount: value.SampleCount,
+		CPUTimeMillis:              cli.ValidationInt64Metric{Value: value.CPUTimeMillis.Value, UnavailableReason: value.CPUTimeMillis.UnavailableReason},
+		PeakRSSBytes:               cli.ValidationUint64Metric{Value: value.PeakRSSBytes.Value, UnavailableReason: value.PeakRSSBytes.UnavailableReason},
+		PeakChildCount:             cli.ValidationInt64Metric{Value: value.PeakChildCount.Value, UnavailableReason: value.PeakChildCount.UnavailableReason},
+		SamplerOverheadNanoseconds: value.SamplerOverheadNanoseconds,
+	}
+}
+
+func validationCleanup(value evidence.CleanupResult) cli.ValidationCleanupResult {
+	result := cli.ValidationCleanupResult{Status: value.Status, Reason: value.Reason, CheckedAt: formatTime(value.CheckedAt)}
+	for _, survivor := range value.Survivors {
+		result.Survivors = append(result.Survivors, validationProcessIdentity(survivor))
+	}
+	return result
 }
 
 func observationContractToEvidence(contract *cli.ValidationObservationContract) *evidence.ObservationContract {

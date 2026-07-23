@@ -65,6 +65,20 @@ func validationRunHuman(r *ValidationRunResult) string {
 	return b.String()
 }
 
+func validationRunGroupHuman(group *ValidationRunGroupResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Validation group %s: %s (%d/%d runs)\n", group.ID, group.Classification, group.CompletedRuns, group.RequestedRuns)
+	for _, aggregate := range group.Aggregates {
+		fmt.Fprintf(&b, "  %s: %s; pass=%d fail=%d inconclusive=%d cancelled=%d resources=%s\n",
+			aggregate.Kind, aggregate.Classification, aggregate.Passing, aggregate.Failing,
+			aggregate.Inconclusive, aggregate.Cancelled, aggregate.ResourceClassification)
+	}
+	if group.Comparison != nil {
+		fmt.Fprintf(&b, "  comparison: %s — %s\n", group.Comparison.Classification, group.Comparison.Explanation)
+	}
+	return b.String()
+}
+
 func validationComparisonHuman(r *ValidationComparisonResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Comparison: %s\n", r.Classification)

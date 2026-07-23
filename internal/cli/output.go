@@ -106,6 +106,8 @@ func humanOutput(v any) (string, error) {
 		return validationHuman(r), nil
 	case *ValidationRunResult:
 		return validationRunHuman(r), nil
+	case *ValidationRunGroupResult:
+		return validationRunGroupHuman(r), nil
 	case *ValidationComparisonResult:
 		return validationComparisonHuman(r), nil
 	case *EvidenceResult:

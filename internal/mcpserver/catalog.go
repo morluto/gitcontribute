@@ -46,6 +46,7 @@ const (
 	ToolCreateWorkspace          = "workspace.create"
 	ToolDefineValidation         = "validation.define"
 	ToolRunValidation            = "validation.run"
+	ToolRunRepeatedValidation    = "validation.run_repeated"
 	ToolStartInvestigation       = "workflow.start_investigation"
 	ToolRecordHypothesis         = "workflow.record_hypothesis"
 	ToolCheckDuplicates          = "workflow.check_duplicates"
@@ -95,6 +96,7 @@ var canonicalToolNames = []string{
 	ToolCreateWorkspace,
 	ToolDefineValidation,
 	ToolRunValidation,
+	ToolRunRepeatedValidation,
 	ToolStartInvestigation,
 	ToolRecordHypothesis,
 	ToolCreateConcern,
@@ -189,7 +191,7 @@ var toolsets = map[string][]string{
 	"code": {
 		ToolSearchCode, ToolIndexRepositories, ToolCreateWorkspace, ToolCheckMergeConflicts,
 		ToolInspectCommitChanges, ToolPlanSemanticCommits,
-		ToolDefineValidation, ToolRunValidation, ToolGetJob, ToolCancelJob,
+		ToolDefineValidation, ToolRunValidation, ToolRunRepeatedValidation, ToolGetJob, ToolCancelJob,
 	},
 	"research":    {ToolQueryDeepWiki},
 	"diagnostics": {ToolExplainMatch, ToolBuildRepositoryDossier, ToolGetJob},
