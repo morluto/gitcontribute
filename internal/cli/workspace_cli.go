@@ -20,7 +20,9 @@ func (c *CLI) runWorkspace(ctx context.Context, command string, cmd *workspaceCm
 	}
 	switch command {
 	case "workspace create":
-		fmt.Fprintf(c.stderr, "creating workspace for investigation %s...\n", cmd.Create.InvestigationID)
+		if _, err := fmt.Fprintf(c.stderr, "creating workspace for investigation %s...\n", cmd.Create.InvestigationID); err != nil {
+			return err
+		}
 		result, err := service.CreateWorkspace(ctx, cmd.Create.InvestigationID, WorkspaceCreateOptions{
 			Remote:       cmd.Create.Remote,
 			BaseRef:      cmd.Create.Base,

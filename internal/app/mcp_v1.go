@@ -640,43 +640,6 @@ func (r *MCPReader) DefineValidation(ctx context.Context, in mcpserver.DefineVal
 	return validationResultToMCP(res), nil
 }
 
-func (r *MCPReader) validationWorkspacePaths(ctx context.Context, in mcpserver.DefineValidationInput) (string, string, string, error) {
-	c, err := r.openReadOnlyCorpus(ctx)
-	if err != nil {
-		return "", "", "", err
-	}
-	mgr, err := r.workspaceReader()
-	if err != nil {
-		return "", "", "", fmt.Errorf("open managed workspaces: %w", err)
-	}
-	resolve := func(id string) (string, error) {
-		ws, err := c.GetWorkspace(ctx, id)
-		if err != nil {
-			return "", mapWorkspaceError(err)
-		}
-		if ws.InvestigationID != in.InvestigationID {
-			return "", fmt.Errorf("workspace %q does not belong to investigation %q", id, in.InvestigationID)
-		}
-		if err := mgr.ValidateWorkspace(ctx, ws); err != nil {
-			return "", fmt.Errorf("workspace %q path authority is invalid: %w", id, err)
-		}
-		return ws.Path, nil
-	}
-	if in.WorkspaceID != "" {
-		path, err := resolve(in.WorkspaceID)
-		return path, "", "", err
-	}
-	base, err := resolve(in.BaseWorkspaceID)
-	if err != nil {
-		return "", "", "", err
-	}
-	candidate, err := resolve(in.CandidateWorkspaceID)
-	if err != nil {
-		return "", "", "", err
-	}
-	return "", base, candidate, nil
-}
-
 func validationResultToMCP(res *cli.ValidationResult) mcpserver.ValidationOutput {
 	return mcpserver.ValidationOutput{
 		ID:                   res.ID,
