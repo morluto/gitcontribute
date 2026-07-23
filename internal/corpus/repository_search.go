@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // RepositorySearchOptions scopes a paginated repository search.
@@ -84,7 +85,7 @@ func (c *Corpus) prepareRepositorySearch(ctx context.Context, query string, opts
 	if opts.Sort != "relevance" && opts.Sort != "updated" {
 		return opts, "", nil, errors.New("repository sort must be relevance or updated")
 	}
-	ftsQuery := literalFTSQuery(query)
+	ftsQuery := repositoryFTSQuery(query)
 	if ftsQuery != "" {
 		if err := c.RequireProjection(ctx, ProjectionNameRepositoriesFTS, ProjectionVersionRepositoriesFTS); err != nil {
 			return opts, "", nil, err
@@ -159,7 +160,7 @@ func repositoryOrder(ftsQuery, sort string) string {
 
 // RepositorySearchRank returns the weighted FTS5 rank for one repository.
 func (c *Corpus) RepositorySearchRank(ctx context.Context, id int64, query string) (float64, bool, error) {
-	ftsQuery := literalFTSQuery(query)
+	ftsQuery := repositoryFTSQuery(query)
 	if ftsQuery == "" {
 		return 0, false, nil
 	}
@@ -176,6 +177,17 @@ func (c *Corpus) RepositorySearchRank(ctx context.Context, id int64, query strin
 		return 0, false, fmt.Errorf("rank repository search match: %w", err)
 	}
 	return rank, true, nil
+}
+
+func repositoryFTSQuery(query string) string {
+	query = strings.TrimSpace(query)
+	if strings.Count(query, "/") == 1 && !strings.ContainsAny(query, " \t\r\n") {
+		owner, repo, _ := strings.Cut(query, "/")
+		if owner != "" && repo != "" {
+			return `owner : ` + quoteFTSTerm(owner) + ` AND name : ` + quoteFTSTerm(repo)
+		}
+	}
+	return literalFTSQuery(query)
 }
 
 func (c *Corpus) countRepositories(ctx context.Context, ftsQuery string) (int, error) {

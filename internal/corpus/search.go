@@ -376,9 +376,13 @@ func scanThreadsWithRank(rows *sql.Rows) ([]Thread, error) {
 func literalFTSQuery(query string) string {
 	terms := strings.Fields(query)
 	for i, term := range terms {
-		terms[i] = `"` + strings.ReplaceAll(term, `"`, `""`) + `"`
+		terms[i] = quoteFTSTerm(term)
 	}
 	return strings.Join(terms, " ")
+}
+
+func quoteFTSTerm(term string) string {
+	return `"` + strings.ReplaceAll(term, `"`, `""`) + `"`
 }
 
 // searchCursor is the product-owned opaque pagination cursor. It is encoded as

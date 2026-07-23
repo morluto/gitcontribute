@@ -153,15 +153,13 @@ func structuredToolErrors[In, Out any](handler mcp.ToolHandlerFor[In, Out]) mcp.
 			return result, output, toolErr
 		}
 		code := "operation_failed"
-		retryable := false
 		switch {
 		case errors.Is(err, ErrNotFound):
 			code = "not_found"
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 			code = "cancelled"
-			retryable = true
 		}
-		return result, output, &ToolError{Code: code, Message: err.Error(), Retryable: retryable}
+		return result, output, &ToolError{Code: code, Message: err.Error(), Retryable: false}
 	}
 }
 

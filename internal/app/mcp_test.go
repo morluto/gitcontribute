@@ -34,6 +34,9 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	}
 
 	reader := svc.MCPReader()
+	if _, err := reader.SearchCode(ctx, mcpserver.SearchCodeInput{Owner: "owner", Repo: "repo", Query: " \t "}); err == nil {
+		t.Fatal("whitespace-only code query was accepted")
+	}
 	out, err := reader.SearchCode(ctx, mcpserver.SearchCodeInput{Query: "searchableParser", Limit: 10})
 	if err != nil {
 		t.Fatalf("search code: %v", err)

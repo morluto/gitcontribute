@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -12,6 +13,7 @@ import (
 
 // SearchCode searches indexed code snapshots in the local corpus.
 func (r *MCPReader) SearchCode(ctx context.Context, in mcpserver.SearchCodeInput) (mcpserver.SearchCodeOutput, error) {
+	in.Query = strings.TrimSpace(in.Query)
 	if in.Query == "" {
 		return mcpserver.SearchCodeOutput{}, errors.New("query is required")
 	}

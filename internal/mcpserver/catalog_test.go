@@ -115,6 +115,17 @@ func TestDefaultToolCatalogStaysWithinBudget(t *testing.T) {
 	}
 }
 
+func TestStructuredCancellationIsNotRetryable(t *testing.T) {
+	handler := structuredToolErrors(func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
+		return nil, struct{}{}, context.Canceled
+	})
+	_, _, err := handler(context.Background(), nil, struct{}{})
+	toolErr, ok := err.(*ToolError)
+	if !ok || toolErr.Code != "cancelled" || toolErr.Retryable {
+		t.Fatalf("cancellation error = %#v", err)
+	}
+}
+
 func TestContributionToolsetOmitsSpecializedCatalogs(t *testing.T) {
 	server, err := NewWithOptions(&fakeReader{searchStarted: make(chan struct{})}, "test", Options{Toolsets: []string{"contribute"}})
 	if err != nil {

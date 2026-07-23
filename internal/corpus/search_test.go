@@ -517,6 +517,26 @@ func TestRepositorySearchWeightsNameTopicsDescriptionAndSupportsNewestSort(t *te
 	}
 }
 
+func TestRepositorySearchMatchesCanonicalSlug(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	if _, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "rocket", SourceUpdatedAt: time.Unix(100, 0).UTC()}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "other", Description: "rocket", SourceUpdatedAt: time.Unix(200, 0).UTC()}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := c.ListRepositoriesWithOptions(ctx, "acme/rocket", RepositorySearchOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Repositories) != 1 || page.Repositories[0].Owner != "acme" || page.Repositories[0].Name != "rocket" {
+		t.Fatalf("canonical slug search = %+v", page.Repositories)
+	}
+}
+
 func TestSearchCodePageReturnsNextCursorAndTotal(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
