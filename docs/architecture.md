@@ -385,6 +385,28 @@ stale evidence as invalid. Tracking exports require schema version 2 so
 evidence provenance is always explicit; unversioned and other schema versions
 are rejected before import writes begin.
 
+### Concern intake ledger
+
+Repo-local concerns are durable intake records for findings that are not yet
+contribution hypotheses. They are distinct from precedent `Seed` records,
+which are read-only examples extracted from stored threads. Concerns use UUID
+identities, explicit lifecycle transitions, bounded FTS5 search, typed
+relationships, and source revisions evaluated by the existing evidence
+freshness reader.
+
+Creating, listing, searching, updating, or linking a concern is corpus-only:
+it performs no GitHub access, worktree read, or process execution. Similarity
+and duplicate candidates remain typed links and never become a root-cause
+claim. Only the promotion operation may set `promoted`; it atomically creates
+the investigation and seed hypothesis, optionally creates an opportunity, and
+stores the downstream IDs on the concern. A status-only update cannot create a
+partially promoted record.
+
+Concern protocol results expose opaque workspace and evidence IDs but omit
+absolute paths and source-reference URLs. Local provenance retains exact source
+revisions so `fresh`, `stale`, and `unknown` are derived at read time rather
+than persisted as mutable truth.
+
 Contribution readiness is also a pure corpus-read capability. It re-evaluates a
 versioned rule set for one opportunity and returns deterministic checks with
 `pass`, `warn`, `block`, or `unknown` status, evidence references, and
