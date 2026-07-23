@@ -597,20 +597,16 @@ func (r *MCPReader) DefineValidation(ctx context.Context, in mcpserver.DefineVal
 		}
 		timeout = d
 	}
-	workingDir, baseDir, candidateDir, err := r.validationWorkspacePaths(ctx, in)
-	if err != nil {
-		return mcpserver.ValidationOutput{}, err
-	}
 	opts := cli.DefineValidationOptions{
-		Kind:           in.Kind,
-		Command:        in.Command,
-		WorkingDir:     workingDir,
-		BaseWorkingDir: baseDir,
-		CandidateDir:   candidateDir,
-		Env:            append([]string(nil), in.Env...),
-		Timeout:        timeout,
-		MaxOutputBytes: in.MaxOutputBytes,
-		Observation:    observationContractMCPToCLI(in.Observation),
+		Kind:                 in.Kind,
+		Command:              in.Command,
+		WorkspaceID:          in.WorkspaceID,
+		BaseWorkspaceID:      in.BaseWorkspaceID,
+		CandidateWorkspaceID: in.CandidateWorkspaceID,
+		Env:                  append([]string(nil), in.Env...),
+		Timeout:              timeout,
+		MaxOutputBytes:       in.MaxOutputBytes,
+		Observation:          observationContractMCPToCLI(in.Observation),
 	}
 	res, err := r.Service.DefineValidation(ctx, in.InvestigationID, opts)
 	if err != nil {
@@ -619,57 +615,23 @@ func (r *MCPReader) DefineValidation(ctx context.Context, in mcpserver.DefineVal
 	return validationResultToMCP(res), nil
 }
 
-func (r *MCPReader) validationWorkspacePaths(ctx context.Context, in mcpserver.DefineValidationInput) (string, string, string, error) {
-	c, err := r.openReadOnlyCorpus(ctx)
-	if err != nil {
-		return "", "", "", err
-	}
-	mgr, err := r.workspaceReader()
-	if err != nil {
-		return "", "", "", fmt.Errorf("open managed workspaces: %w", err)
-	}
-	resolve := func(id string) (string, error) {
-		ws, err := c.GetWorkspace(ctx, id)
-		if err != nil {
-			return "", mapWorkspaceError(err)
-		}
-		if ws.InvestigationID != in.InvestigationID {
-			return "", fmt.Errorf("workspace %q does not belong to investigation %q", id, in.InvestigationID)
-		}
-		if err := mgr.ValidateWorkspacePath(ws.Path); err != nil {
-			return "", fmt.Errorf("workspace %q path is not managed: %w", id, err)
-		}
-		return ws.Path, nil
-	}
-	if in.WorkspaceID != "" {
-		path, err := resolve(in.WorkspaceID)
-		return path, "", "", err
-	}
-	base, err := resolve(in.BaseWorkspaceID)
-	if err != nil {
-		return "", "", "", err
-	}
-	candidate, err := resolve(in.CandidateWorkspaceID)
-	if err != nil {
-		return "", "", "", err
-	}
-	return "", base, candidate, nil
-}
-
 func validationResultToMCP(res *cli.ValidationResult) mcpserver.ValidationOutput {
 	return mcpserver.ValidationOutput{
-		ID:              res.ID,
-		InvestigationID: res.InvestigationID,
-		Kind:            res.Kind,
-		Command:         res.Command,
-		WorkingDir:      res.WorkingDir,
-		BaseWorkingDir:  res.BaseWorkingDir,
-		CandidateDir:    res.CandidateDir,
-		Env:             res.Env,
-		Timeout:         res.Timeout,
-		MaxOutputBytes:  res.MaxOutputBytes,
-		Observation:     observationContractCLIToMCP(res.Observation),
-		CreatedAt:       res.CreatedAt,
+		ID:                   res.ID,
+		InvestigationID:      res.InvestigationID,
+		Kind:                 res.Kind,
+		Command:              res.Command,
+		WorkingDir:           res.WorkingDir,
+		BaseWorkingDir:       res.BaseWorkingDir,
+		CandidateDir:         res.CandidateDir,
+		WorkspaceID:          res.WorkspaceID,
+		BaseWorkspaceID:      res.BaseWorkspaceID,
+		CandidateWorkspaceID: res.CandidateWorkspaceID,
+		Env:                  res.Env,
+		Timeout:              res.Timeout,
+		MaxOutputBytes:       res.MaxOutputBytes,
+		Observation:          observationContractCLIToMCP(res.Observation),
+		CreatedAt:            res.CreatedAt,
 	}
 }
 

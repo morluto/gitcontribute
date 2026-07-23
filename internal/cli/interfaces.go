@@ -456,49 +456,59 @@ type RunValidationOptions struct {
 
 // DefineValidationOptions carries an explicit validation definition.
 type DefineValidationOptions struct {
-	Kind           string
-	Command        string
-	WorkingDir     string
-	BaseWorkingDir string
-	CandidateDir   string
-	Env            []string
-	Timeout        time.Duration
-	MaxOutputBytes int64
-	Observation    *ValidationObservationContract
+	Kind                 string
+	Command              string
+	WorkingDir           string
+	BaseWorkingDir       string
+	CandidateDir         string
+	WorkspaceID          string
+	BaseWorkspaceID      string
+	CandidateWorkspaceID string
+	Env                  []string
+	Timeout              time.Duration
+	MaxOutputBytes       int64
+	Observation          *ValidationObservationContract
 }
 
 // ValidationResult is a stored validation definition view.
 type ValidationResult struct {
-	ID              string                         `json:"id"`
-	InvestigationID string                         `json:"investigation_id"`
-	Kind            string                         `json:"kind"`
-	Command         []string                       `json:"command"`
-	WorkingDir      string                         `json:"working_dir"`
-	BaseWorkingDir  string                         `json:"base_working_dir,omitempty"`
-	CandidateDir    string                         `json:"candidate_dir,omitempty"`
-	Env             []string                       `json:"environment_allowlist,omitempty"`
-	Timeout         string                         `json:"timeout,omitempty"`
-	MaxOutputBytes  int64                          `json:"max_output_bytes,omitempty"`
-	Observation     *ValidationObservationContract `json:"observation,omitempty"`
-	CreatedAt       string                         `json:"created_at"`
+	ID                   string                         `json:"id"`
+	InvestigationID      string                         `json:"investigation_id"`
+	Kind                 string                         `json:"kind"`
+	Command              []string                       `json:"command"`
+	WorkingDir           string                         `json:"working_dir"`
+	BaseWorkingDir       string                         `json:"base_working_dir,omitempty"`
+	CandidateDir         string                         `json:"candidate_dir,omitempty"`
+	WorkspaceID          string                         `json:"workspace_id,omitempty"`
+	BaseWorkspaceID      string                         `json:"base_workspace_id,omitempty"`
+	CandidateWorkspaceID string                         `json:"candidate_workspace_id,omitempty"`
+	Env                  []string                       `json:"environment_allowlist,omitempty"`
+	Timeout              string                         `json:"timeout,omitempty"`
+	MaxOutputBytes       int64                          `json:"max_output_bytes,omitempty"`
+	Observation          *ValidationObservationContract `json:"observation,omitempty"`
+	CreatedAt            string                         `json:"created_at"`
 }
 
 // ValidationRunResult is the captured outcome of one validation run.
 type ValidationRunResult struct {
-	ID                string                        `json:"id"`
-	DefinitionID      string                        `json:"definition_id"`
-	InvestigationID   string                        `json:"investigation_id"`
-	Kind              string                        `json:"kind"`
-	ExitCode          int                           `json:"exit_code"`
-	Stdout            string                        `json:"stdout"`
-	Stderr            string                        `json:"stderr"`
-	Truncated         bool                          `json:"truncated"`
-	Error             string                        `json:"error,omitempty"`
-	Classification    string                        `json:"classification"`
-	ObservationStatus string                        `json:"observation_status"`
-	Observations      []ValidationObservationResult `json:"observations,omitempty"`
-	StartedAt         string                        `json:"started_at"`
-	CompletedAt       string                        `json:"completed_at"`
+	ID                      string                        `json:"id"`
+	DefinitionID            string                        `json:"definition_id"`
+	InvestigationID         string                        `json:"investigation_id"`
+	Kind                    string                        `json:"kind"`
+	ExitCode                int                           `json:"exit_code"`
+	Stdout                  string                        `json:"stdout"`
+	Stderr                  string                        `json:"stderr"`
+	Truncated               bool                          `json:"truncated"`
+	Error                   string                        `json:"error,omitempty"`
+	Classification          string                        `json:"classification"`
+	ObservationStatus       string                        `json:"observation_status"`
+	Observations            []ValidationObservationResult `json:"observations,omitempty"`
+	StartedAt               string                        `json:"started_at"`
+	CompletedAt             string                        `json:"completed_at"`
+	WorkspaceSnapshotBefore string                        `json:"workspace_snapshot_before,omitempty"`
+	WorkspaceSnapshotAfter  string                        `json:"workspace_snapshot_after,omitempty"`
+	WorkspaceBindingStatus  string                        `json:"workspace_binding_status,omitempty"`
+	WorkspaceBindingReason  string                        `json:"workspace_binding_reason,omitempty"`
 }
 
 // ValidationComparisonResult classifies a base run against a candidate run.

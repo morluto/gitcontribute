@@ -260,18 +260,21 @@ type ValidationObservationContract struct {
 
 // ValidationOutput is the stable MCP representation of a validation definition.
 type ValidationOutput struct {
-	ID              string                         `json:"id"`
-	InvestigationID string                         `json:"investigation_id"`
-	Kind            string                         `json:"kind"`
-	Command         []string                       `json:"command"`
-	WorkingDir      string                         `json:"working_dir"`
-	BaseWorkingDir  string                         `json:"base_working_dir,omitempty"`
-	CandidateDir    string                         `json:"candidate_dir,omitempty"`
-	Env             []string                       `json:"environment_allowlist,omitempty"`
-	Timeout         string                         `json:"timeout,omitempty"`
-	MaxOutputBytes  int64                          `json:"max_output_bytes,omitempty"`
-	Observation     *ValidationObservationContract `json:"observation,omitempty"`
-	CreatedAt       string                         `json:"created_at"`
+	ID                   string                         `json:"id"`
+	InvestigationID      string                         `json:"investigation_id"`
+	Kind                 string                         `json:"kind"`
+	Command              []string                       `json:"command"`
+	WorkingDir           string                         `json:"working_dir"`
+	BaseWorkingDir       string                         `json:"base_working_dir,omitempty"`
+	CandidateDir         string                         `json:"candidate_dir,omitempty"`
+	WorkspaceID          string                         `json:"workspace_id,omitempty" jsonschema:"Managed workspace ID used for both run kinds"`
+	BaseWorkspaceID      string                         `json:"base_workspace_id,omitempty" jsonschema:"Managed base workspace ID"`
+	CandidateWorkspaceID string                         `json:"candidate_workspace_id,omitempty" jsonschema:"Managed candidate workspace ID"`
+	Env                  []string                       `json:"environment_allowlist,omitempty"`
+	Timeout              string                         `json:"timeout,omitempty"`
+	MaxOutputBytes       int64                          `json:"max_output_bytes,omitempty"`
+	Observation          *ValidationObservationContract `json:"observation,omitempty"`
+	CreatedAt            string                         `json:"created_at"`
 }
 
 // PrepareContributionInput renders a local issue or pull-request draft.

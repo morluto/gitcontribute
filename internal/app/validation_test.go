@@ -53,7 +53,11 @@ func TestMCPValidationResolvesManagedWorkspaceAndRejectsCrossInvestigation(t *te
 	if defined.WorkingDir != path {
 		t.Fatalf("working directory = %q, want managed path %q", defined.WorkingDir, path)
 	}
-	if _, err := reader.DefineValidation(ctx, mcpserver.DefineValidationInput{InvestigationID: "different", Kind: "test", Command: "go test ./...", WorkspaceID: "managed"}); err == nil || !strings.Contains(err.Error(), "does not belong") {
+	other, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "def456", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reader.DefineValidation(ctx, mcpserver.DefineValidationInput{InvestigationID: other.ID, Kind: "test", Command: "go test ./...", WorkspaceID: "managed"}); err == nil || !strings.Contains(err.Error(), "does not belong") {
 		t.Fatalf("cross-investigation validation error = %v", err)
 	}
 }

@@ -419,17 +419,20 @@ type validationCmd struct {
 }
 
 type defineValidationCmd struct {
-	InvestigationID string        `arg:"" help:"Investigation ID"`
-	Kind            string        `name:"kind" required:"" help:"Validation kind"`
-	Command         string        `name:"command" required:"" help:"Command argv as a single string"`
-	WorkingDir      string        `name:"working-dir" help:"Working directory for both runs"`
-	BaseWorkingDir  string        `name:"base-working-dir" help:"Base workspace directory"`
-	CandidateDir    string        `name:"candidate-dir" help:"Candidate workspace directory"`
-	Env             []string      `name:"env" help:"Host environment variable names to pass through"`
-	Timeout         time.Duration `name:"timeout" help:"Maximum execution time"`
-	MaxOutput       int64         `name:"max-output" help:"Maximum captured output bytes per stream"`
-	Observation     string        `name:"observation-contract" help:"JSON observation contract for base and candidate output"`
-	JSON            bool          `name:"json" help:"Print the result as JSON"`
+	InvestigationID      string        `arg:"" help:"Investigation ID"`
+	Kind                 string        `name:"kind" required:"" help:"Validation kind"`
+	Command              string        `name:"command" required:"" help:"Command argv as a single string"`
+	WorkingDir           string        `name:"working-dir" help:"Working directory for both runs"`
+	BaseWorkingDir       string        `name:"base-working-dir" help:"Base workspace directory"`
+	CandidateDir         string        `name:"candidate-dir" help:"Candidate workspace directory"`
+	WorkspaceID          string        `name:"workspace-id" help:"Managed workspace ID for both runs"`
+	BaseWorkspaceID      string        `name:"base-workspace-id" help:"Managed base workspace ID"`
+	CandidateWorkspaceID string        `name:"candidate-workspace-id" help:"Managed candidate workspace ID"`
+	Env                  []string      `name:"env" help:"Host environment variable names to pass through"`
+	Timeout              time.Duration `name:"timeout" help:"Maximum execution time"`
+	MaxOutput            int64         `name:"max-output" help:"Maximum captured output bytes per stream"`
+	Observation          string        `name:"observation-contract" help:"JSON observation contract for base and candidate output"`
+	JSON                 bool          `name:"json" help:"Print the result as JSON"`
 }
 
 type runValidationCmd struct {
