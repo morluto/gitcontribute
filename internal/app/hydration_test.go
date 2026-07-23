@@ -212,7 +212,7 @@ func TestHydrateIssueCommentsPaginatesAndRecordsCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("explain hydrated comment match: %v", err)
 	}
-	if !slices.ContainsFunc(explanation.Reasons, func(reason string) bool { return strings.Contains(reason, "stored issue_comments") }) {
+	if !slices.ContainsFunc(explanation.Reasons, func(reason string) bool { return strings.Contains(reason, "query in issue_comments") }) {
 		t.Fatalf("hydrated comment explanation = %+v", explanation)
 	}
 }

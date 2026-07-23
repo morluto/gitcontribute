@@ -24,6 +24,8 @@ type Repository struct {
 	ObservationSequence int64
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+	// Rank is query-specific and populated only by full-text search results.
+	Rank float64
 }
 
 // RepositoryObservation is an immutable snapshot received from a source.
@@ -67,6 +69,7 @@ type Thread struct {
 	MatchSource    string
 	MatchExcerpt   string
 	MatchUpdatedAt time.Time
+	MatchTruncated bool
 }
 
 // ThreadSearchEvidence is the stored document that made an exact thread match.
@@ -75,6 +78,8 @@ type ThreadSearchEvidence struct {
 	Text            string
 	Excerpt         string
 	SourceUpdatedAt time.Time
+	Rank            float64
+	Truncated       bool
 }
 
 // PortfolioPullRequest identifies a pull request together with the repository
@@ -83,6 +88,14 @@ type PortfolioPullRequest struct {
 	Owner  string
 	Repo   string
 	Thread Thread
+}
+
+// PortfolioPage reports the complete matching population separately from the
+// bounded returned items.
+type PortfolioPage struct {
+	PullRequests []PortfolioPullRequest
+	Total        int
+	Truncated    bool
 }
 
 // ThreadKind names the thread types stored by the corpus.

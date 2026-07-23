@@ -12,6 +12,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/investigation"
+	"github.com/morluto/gitcontribute/internal/mcpserver"
 	"github.com/morluto/gitcontribute/internal/research"
 )
 
@@ -100,6 +101,20 @@ func TestStartInvestigationFromPullRequestUsesResolvedKind(t *testing.T) {
 		result.Investigation.ThreadBaseline.Ref != "pull_request:owner/repo#9" || len(result.Hypothesis.Links) != 1 ||
 		result.Hypothesis.Links[0].Kind != string(domain.PullRequestKind) {
 		t.Fatalf("pull-request baseline = %+v", result)
+	}
+}
+
+func TestMCPStartInvestigationFromStoredThreadCreatesBaselineHypothesis(t *testing.T) {
+	t.Parallel()
+	fixture := newResearchFixture(t)
+	out, err := (&MCPReader{Service: fixture.svc}).StartInvestigation(fixture.ctx, mcpserver.StartInvestigationInput{
+		Owner: "owner", Repo: "repo", Number: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.ID == "" || out.HypothesisTotal != 1 || len(out.Hypotheses) != 1 || out.Hypotheses[0].Title == "" {
+		t.Fatalf("atomic thread investigation = %+v", out)
 	}
 }
 

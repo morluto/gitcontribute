@@ -36,6 +36,22 @@ be supported by repeated model-backed or human-agent traces. Such evaluations
 must remain optional and non-gating unless their model, prompts, credentials,
 and sampling policy are made reproducible outside the unit-test suite.
 
+## Optional model-in-the-loop suite
+
+The paired v2 fixtures under `internal/mcpserver/testdata/agent-eval` preserve
+three real failure modes: confusing relevance with newest order, treating
+repository metadata as README coverage, and silently rebuilding a persisted
+dossier. Give the candidate only `public-v2.json` and the seeded MCP server.
+Keep `oracle-v2.json` outside its filesystem and context. A separate reviewer
+scores semantic correctness, required evidence, the critical discriminator,
+and uncertainty before comparing tool calls, response bytes, or latency.
+
+Use the same model, sampling settings, corpus fixture revision, toolsets, and
+read-only mode for baseline/candidate comparisons. Save initialize, tools/list,
+tool calls, tool results, final answer, elapsed time, and failures. At least
+three repeated runs per scenario are needed before making tool-choice claims;
+the deterministic Go tests validate contracts but never count as model runs.
+
 ## Decisions from the initial baseline
 
 The durable-job scenario requires one submission and one poll. The current

@@ -45,16 +45,19 @@ type resourceRequest struct {
 }
 
 func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (any, error) {
+	if req.scheme != "gitcontribute" {
+		return nil, mcp.ResourceNotFoundError(req.uri)
+	}
 	switch req.host {
-	case "repository", "repositories":
+	case "repository":
 		return s.readRepositoryResource(ctx, req)
-	case "dossier", "dossiers":
+	case "dossier":
 		return s.readDossierResource(ctx, req)
 	case "thread":
 		return s.readTypedThreadResource(ctx, req)
 	case "threads":
 		return s.readNumberedThreadResource(ctx, req)
-	case "investigation", "investigations":
+	case "investigation":
 		return s.readInvestigationResource(ctx, req)
 	case "opportunities":
 		return s.readOpportunitiesResource(ctx, req)
@@ -64,12 +67,10 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 		return s.readEvidenceResource(ctx, req)
 	case "readiness":
 		return s.readReadinessResource(ctx, req)
-	case "workflow", "workflows":
+	case "workflow":
 		return readWorkflowResource(req)
-	case "lens", "lenses":
+	case "lens":
 		return s.readLensResource(ctx, req)
-	case "job", "jobs":
-		return s.readJobResource(ctx, req)
 	default:
 		return nil, mcp.ResourceNotFoundError(req.uri)
 	}
@@ -126,9 +127,6 @@ func (s *Server) readOpportunitiesResource(ctx context.Context, req resourceRequ
 	if len(req.parts) != 1 {
 		return nil, mcp.ResourceNotFoundError(req.uri)
 	}
-	if req.scheme == "github-index" {
-		return s.reader.Opportunity(ctx, OpportunityInput{ID: req.parts[0], EvidenceLimit: 100})
-	}
 	return s.reader.ListOpportunities(ctx, ListOpportunitiesInput{InvestigationID: req.parts[0], Limit: 100})
 }
 
@@ -168,37 +166,23 @@ func (s *Server) readLensResource(ctx context.Context, req resourceRequest) (Len
 	return s.reader.Lens(ctx, LensInput{Name: req.parts[0]})
 }
 
-func (s *Server) readJobResource(ctx context.Context, req resourceRequest) (GetJobOutput, error) {
-	if len(req.parts) != 1 {
-		return GetJobOutput{}, mcp.ResourceNotFoundError(req.uri)
-	}
-	return s.reader.GetJob(ctx, GetJobInput{ID: req.parts[0]})
-}
-
 func positivePathNumber(value string) (int, bool) {
 	number, err := strconv.Atoi(value)
 	return number, err == nil && number > 0
 }
 
-func evidenceResourceInput(scheme string, parts []string) (EvidenceInput, bool) {
+func evidenceResourceInput(_ string, parts []string) (EvidenceInput, bool) {
 	var in EvidenceInput
-	if scheme == "github-index" {
-		if len(parts) != 1 {
-			return EvidenceInput{}, false
-		}
-		in.InvestigationID = parts[0]
-	} else {
-		if len(parts) != 2 {
-			return EvidenceInput{}, false
-		}
-		switch parts[0] {
-		case "investigation":
-			in.InvestigationID = parts[1]
-		case "opportunity":
-			in.OpportunityID = parts[1]
-		default:
-			return EvidenceInput{}, false
-		}
+	if len(parts) != 2 {
+		return EvidenceInput{}, false
+	}
+	switch parts[0] {
+	case "investigation":
+		in.InvestigationID = parts[1]
+	case "opportunity":
+		in.OpportunityID = parts[1]
+	default:
+		return EvidenceInput{}, false
 	}
 	in.Limit = 100
 	return in, true

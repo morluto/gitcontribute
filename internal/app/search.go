@@ -43,6 +43,7 @@ type searchMatch struct {
 	Coverage          []string
 	MatchSource       string
 	MatchExcerpt      string
+	MatchTruncated    bool
 	Fields            map[string]any
 }
 
@@ -91,9 +92,9 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts cli.Searc
 			if err != nil {
 				return searchResult{}, err
 			}
-			return s.searchRepositoryExact(ctx, c, query, ref, now)
+			return s.searchRepositoryExact(ctx, c, query, ref)
 		}
-		return s.searchRepositories(ctx, c, query, opts.Limit, opts.Cursor)
+		return s.searchRepositories(ctx, c, query, opts.Limit, opts.Cursor, opts.Sort)
 	case "code":
 		ref, err := s.parseRepoRef(opts.Repo)
 		if err != nil {
@@ -101,10 +102,7 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts cli.Searc
 		}
 		return s.searchCode(ctx, c, query, ref, opts.Limit, opts.Cursor)
 	case "all":
-		if opts.Cursor != "" {
-			return searchResult{}, errors.New("cursor pagination is not supported for combined search")
-		}
-		return s.searchAll(ctx, c, query, opts, now)
+		return searchResult{}, errors.New("combined search is not supported because FTS ranks from different indexes are not comparable; choose repos, threads, issues, prs, or code")
 	default:
 		kind := ""
 		switch opts.Kind {
@@ -123,7 +121,7 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts cli.Searc
 		if query == "" {
 			return searchResult{Query: query, Total: 0, Matches: nil}, nil
 		}
-		return s.searchThreads(ctx, c, query, repoID, repoRef, kind, opts, now)
+		return s.searchThreads(ctx, c, query, repoID, repoRef, kind, opts)
 	}
 }
 
@@ -160,11 +158,12 @@ func (s *Service) resolveRepoFilter(ctx context.Context, c *corpus.Corpus, opts 
 	return repo.ID, ref, nil
 }
 
-func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query string, repoID int64, ref domain.RepoRef, kind string, opts cli.SearchOptions, now time.Time) (searchResult, error) {
+func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query string, repoID int64, ref domain.RepoRef, kind string, opts cli.SearchOptions) (searchResult, error) {
 	filter := corpus.SearchFilter{
 		RepoID: repoID, Repo: ref.String(), Kind: kind, State: opts.State, StateReason: opts.StateReason, Merged: opts.Merged, Author: opts.Author,
 		Association: opts.Association, Assignee: opts.Assignee,
 		Labels: opts.Labels, UpdatedAfter: opts.UpdatedAfter, Limit: opts.Limit, Cursor: opts.Cursor,
+		Sort: opts.Sort,
 	}
 	page, err := c.SearchThreadsPage(ctx, query, filter)
 	if err != nil {
@@ -225,12 +224,13 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 			Freshness: t.SourceUpdatedAt,
 			Coverage:  coverage,
 		}
-		if t.MatchSource != "thread" {
-			m.MatchSource = t.MatchSource
-			m.MatchExcerpt = t.MatchExcerpt
+		m.MatchSource = t.MatchSource
+		m.MatchExcerpt = t.MatchExcerpt
+		m.MatchTruncated = t.MatchTruncated
+		if !t.MatchUpdatedAt.IsZero() {
 			m.Freshness = t.MatchUpdatedAt
 		}
-		m.Score, _ = scoreMatch(query, m, m.Freshness, coverage, now)
+		m.Score = bm25Score(t.Rank)
 		matches = append(matches, m)
 	}
 
@@ -242,15 +242,13 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 	}, nil
 }
 
-func (s *Service) searchRepositories(ctx context.Context, c *corpus.Corpus, query string, limit int, cursor string) (searchResult, error) {
-	page, err := c.ListRepositoriesWithOptions(ctx, query, corpus.RepositorySearchOptions{Limit: limit, Cursor: cursor})
+func (s *Service) searchRepositories(ctx context.Context, c *corpus.Corpus, query string, limit int, cursor, sort string) (searchResult, error) {
+	page, err := c.ListRepositoriesWithOptions(ctx, query, corpus.RepositorySearchOptions{Limit: limit, Cursor: cursor, Sort: sort})
 	if err != nil {
 		return searchResult{}, fmt.Errorf("list repositories: %w", err)
 	}
 
 	coverageCache := make(map[int64][]string)
-	now := s.now()
-
 	matches := make([]searchMatch, 0, len(page.Repositories))
 	for _, r := range page.Repositories {
 		coverage, ok := coverageCache[r.ID]
@@ -261,7 +259,7 @@ func (s *Service) searchRepositories(ctx context.Context, c *corpus.Corpus, quer
 			}
 			coverageCache[r.ID] = coverage
 		}
-		m := repositorySearchMatch(r, query, coverage, now)
+		m := repositorySearchMatch(r, coverage)
 		matches = append(matches, m)
 	}
 
@@ -273,28 +271,38 @@ func (s *Service) searchRepositories(ctx context.Context, c *corpus.Corpus, quer
 	}, nil
 }
 
-func (s *Service) searchRepositoryExact(ctx context.Context, c *corpus.Corpus, query string, ref domain.RepoRef, now time.Time) (searchResult, error) {
+func (s *Service) searchRepositoryExact(ctx context.Context, c *corpus.Corpus, query string, ref domain.RepoRef) (searchResult, error) {
 	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
 	if err != nil {
 		return searchResult{}, err
 	}
-	if repo == nil || !repositoryMatchesQuery(repo, query) {
+	if repo == nil {
 		return searchResult{Query: query, Matches: []searchMatch{}}, nil
+	}
+	hasQuery := strings.TrimSpace(query) != ""
+	var rank float64
+	if hasQuery {
+		evidence, found, err := c.FindRepositorySearchEvidence(ctx, repo.ID, query)
+		if err != nil {
+			return searchResult{}, err
+		}
+		if !found {
+			return searchResult{Query: query, Matches: []searchMatch{}}, nil
+		}
+		rank = evidence.Rank
 	}
 	coverage, err := s.coverageNames(ctx, c, repo.ID, nil)
 	if err != nil {
 		return searchResult{}, err
 	}
-	return searchResult{Query: query, Total: 1, Matches: []searchMatch{repositorySearchMatch(*repo, query, coverage, now)}}, nil
+	match := repositorySearchMatch(*repo, coverage)
+	if hasQuery {
+		match.Score = bm25Score(rank)
+	}
+	return searchResult{Query: query, Total: 1, Matches: []searchMatch{match}}, nil
 }
 
-func repositoryMatchesQuery(repo *corpus.Repository, query string) bool {
-	query = strings.ToLower(strings.TrimSpace(query))
-	return query == "" || strings.Contains(strings.ToLower(repo.Owner+"/"+repo.Name), query) ||
-		strings.Contains(strings.ToLower(repo.Description), query)
-}
-
-func repositorySearchMatch(r corpus.Repository, query string, coverage []string, now time.Time) searchMatch {
+func repositorySearchMatch(r corpus.Repository, coverage []string) searchMatch {
 	ref := domain.RepoRef{Owner: r.Owner, Repo: r.Name}
 	m := searchMatch{
 		Repo: ref, Kind: "repo", Title: ref.String(), Body: r.Description,
@@ -308,7 +316,7 @@ func repositorySearchMatch(r corpus.Repository, query string, coverage []string,
 			"open_issues": r.OpenIssues, "archived": r.Archived, "fork": r.Fork,
 		},
 	}
-	m.Score, _ = scoreMatch(query, m, m.Freshness, coverage, now)
+	m.Score = bm25Score(r.Rank)
 	return m
 }
 
@@ -318,7 +326,6 @@ func (s *Service) searchCode(ctx context.Context, c *corpus.Corpus, query string
 		return searchResult{}, err
 	}
 
-	now := s.now()
 	repoCache := make(map[domain.RepoRef]*corpus.Repository)
 	matches := make([]searchMatch, 0, len(page.Matches))
 	for _, match := range page.Matches {
@@ -348,7 +355,7 @@ func (s *Service) searchCode(ctx context.Context, c *corpus.Corpus, query string
 			m.Watchers = repo.Watchers
 			m.Forks = repo.Forks
 		}
-		m.Score, _ = scoreMatch(query, m, m.Freshness, coverage, now)
+		m.Score = bm25Score(match.Rank)
 		matches = append(matches, m)
 	}
 
@@ -358,44 +365,6 @@ func (s *Service) searchCode(ctx context.Context, c *corpus.Corpus, query string
 		Matches:    matches,
 		NextCursor: page.NextCursor,
 	}, nil
-}
-
-func (s *Service) searchAll(ctx context.Context, c *corpus.Corpus, query string, opts cli.SearchOptions, now time.Time) (searchResult, error) {
-	var combined []searchMatch
-	total := 0
-	for _, kind := range []string{"threads", "repos", "code"} {
-		part := opts
-		part.Kind = kind
-		// Pull a bounded candidate pool per kind before applying the shared
-		// cross-kind score. Each underlying search still enforces the hard 100
-		// result limit and remains entirely local.
-		part.Limit = 100
-		result, err := s.searchCorpus(ctx, query, part)
-		if err != nil {
-			return searchResult{}, err
-		}
-		total += result.Total
-		combined = append(combined, result.Matches...)
-	}
-	slices.SortStableFunc(combined, func(a, b searchMatch) int {
-		if a.Score > b.Score {
-			return -1
-		}
-		if a.Score < b.Score {
-			return 1
-		}
-		if byRepo := strings.Compare(a.Repo.String(), b.Repo.String()); byRepo != 0 {
-			return byRepo
-		}
-		if byKind := strings.Compare(a.Kind, b.Kind); byKind != 0 {
-			return byKind
-		}
-		return strings.Compare(a.Title, b.Title)
-	})
-	if len(combined) > opts.Limit {
-		combined = combined[:opts.Limit]
-	}
-	return searchResult{Query: query, Total: total, Matches: combined}, nil
 }
 
 func (s *Service) searchWithLens(ctx context.Context, c *corpus.Corpus, query string, opts cli.SearchOptions, now time.Time) (searchResult, error) {
@@ -415,7 +384,7 @@ func (s *Service) searchWithLens(ctx context.Context, c *corpus.Corpus, query st
 	candidates := make([]lens.Candidate, 0, len(matches))
 	byID := make(map[string]searchMatch, len(matches))
 	for _, m := range matches {
-		cand := candidateFromMatch(m, query, now)
+		cand := candidateFromMatch(m, now)
 		candidates = append(candidates, cand)
 		byID[cand.ID] = m
 	}
@@ -474,7 +443,7 @@ func (s *Service) collectLensMatches(ctx context.Context, c *corpus.Corpus, quer
 			matches, err = s.collectRepositoryMatches(ctx, c, query, opts)
 		} else {
 			var result searchResult
-			result, err = s.searchRepositoryExact(ctx, c, query, repoRef, now)
+			result, err = s.searchRepositoryExact(ctx, c, query, repoRef)
 			matches = result.Matches
 		}
 	case "code":
@@ -489,7 +458,7 @@ func (s *Service) collectLensMatches(ctx context.Context, c *corpus.Corpus, quer
 			repoMatches, err = s.collectRepositoryMatches(ctx, c, query, opts)
 		} else {
 			var result searchResult
-			result, err = s.searchRepositoryExact(ctx, c, query, repoRef, now)
+			result, err = s.searchRepositoryExact(ctx, c, query, repoRef)
 			repoMatches = result.Matches
 		}
 		if err != nil {
@@ -545,7 +514,7 @@ func (s *Service) collectThreadMatches(ctx context.Context, c *corpus.Corpus, qu
 		collectOpts.Limit = 100
 		collectOpts.Cursor = cursor
 		collectOpts.Lens = ""
-		res, err := s.searchThreads(ctx, c, query, repoID, ref, kind, collectOpts, now)
+		res, err := s.searchThreads(ctx, c, query, repoID, ref, kind, collectOpts)
 		if err != nil {
 			return nil, err
 		}
@@ -565,7 +534,7 @@ func (s *Service) collectRepositoryMatches(ctx context.Context, c *corpus.Corpus
 	var out []searchMatch
 	cursor := ""
 	for len(out) < maxLensCandidates {
-		res, err := s.searchRepositories(ctx, c, query, 100, cursor)
+		res, err := s.searchRepositories(ctx, c, query, 100, cursor, opts.Sort)
 		if err != nil {
 			return nil, err
 		}
@@ -601,7 +570,7 @@ func (s *Service) collectCodeMatches(ctx context.Context, c *corpus.Corpus, quer
 	return out, nil
 }
 
-func candidateFromMatch(m searchMatch, query string, now time.Time) lens.Candidate {
+func candidateFromMatch(m searchMatch, now time.Time) lens.Candidate {
 	id := m.Repo.String()
 	switch m.Kind {
 	case corpus.ThreadKindIssue, corpus.ThreadKindPullRequest:
@@ -623,13 +592,13 @@ func candidateFromMatch(m searchMatch, query string, now time.Time) lens.Candida
 	if m.Kind == corpus.ThreadKindIssue || m.Kind == corpus.ThreadKindPullRequest {
 		cand.Assigned = len(m.Assignees) > 0
 	}
-	cand.Signals = candidateSignals(m, query, now)
+	cand.Signals = candidateSignals(m, now)
 	return cand
 }
 
-func candidateSignals(m searchMatch, query string, now time.Time) map[string]float64 {
+func candidateSignals(m searchMatch, now time.Time) map[string]float64 {
 	signals := map[string]float64{
-		"text_relevance":      textRelevance(query, m.Title, m.Body),
+		"text_relevance":      m.Score,
 		"repository_activity": float64(m.Stars + m.Watchers + m.Forks),
 	}
 	if !m.UpdatedAt.IsZero() && !now.IsZero() {
@@ -638,36 +607,10 @@ func candidateSignals(m searchMatch, query string, now time.Time) map[string]flo
 	return signals
 }
 
-func textRelevance(query, title, body string) float64 {
-	terms := uniqueTerms(strings.ToLower(query))
-	if len(terms) == 0 {
-		return 0
-	}
-	titleL := strings.ToLower(title)
-	bodyL := strings.ToLower(body)
-
-	var score float64
-	matched := 0
-	for _, term := range terms {
-		if term == "" {
-			continue
-		}
-		if strings.Contains(titleL, term) {
-			score += 0.25
-			matched++
-		} else if strings.Contains(bodyL, term) {
-			score += 0.10
-			matched++
-		}
-	}
-	if matched == len(terms) {
-		score += 0.15
-	}
-	if score > 1 {
-		score = 1
-	}
-	return score
-}
+// SQLite FTS5 returns negative BM25 ranks where smaller values are better.
+// Preserve their precision: the values are commonly below 1e-4, so display
+// rounding would collapse distinct matches to zero.
+func bm25Score(rank float64) float64 { return -rank }
 
 func freshnessSignal(updatedAt, now time.Time) float64 {
 	if updatedAt.IsZero() || now.IsZero() {
@@ -745,20 +688,21 @@ func (s *Service) Search(ctx context.Context, query string, opts cli.SearchOptio
 	matches := make([]cli.SearchMatch, len(res.Matches))
 	for i, m := range res.Matches {
 		matches[i] = cli.SearchMatch{
-			Kind:         m.Kind,
-			Repo:         cli.RepoRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo},
-			Title:        m.Title,
-			Number:       m.Number,
-			State:        m.State,
-			Author:       m.Author,
-			Labels:       m.Labels,
-			URL:          m.URL,
-			Score:        roundScore(m.Score),
-			Body:         m.Body,
-			Freshness:    formatSearchTime(m.Freshness),
-			Coverage:     m.Coverage,
-			MatchSource:  m.MatchSource,
-			MatchExcerpt: m.MatchExcerpt,
+			Kind:           m.Kind,
+			Repo:           cli.RepoRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo},
+			Title:          m.Title,
+			Number:         m.Number,
+			State:          m.State,
+			Author:         m.Author,
+			Labels:         m.Labels,
+			URL:            m.URL,
+			Score:          m.Score,
+			Body:           m.Body,
+			Freshness:      formatSearchTime(m.Freshness),
+			Coverage:       m.Coverage,
+			MatchSource:    m.MatchSource,
+			MatchExcerpt:   m.MatchExcerpt,
+			MatchTruncated: m.MatchTruncated,
 		}
 	}
 	return &cli.SearchResult{

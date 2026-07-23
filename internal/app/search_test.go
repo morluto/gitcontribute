@@ -156,17 +156,17 @@ func TestSearchRejectsMalformedCursor(t *testing.T) {
 	}
 }
 
-func TestSearchRejectsCursorForAll(t *testing.T) {
+func TestSearchRejectsCombinedKindsBecauseRanksAreIncomparable(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 	_, err := svc.Search(ctx, "term", cli.SearchOptions{Kind: "all", Limit: 10, Cursor: "cursor"})
-	if err == nil || err.Error() != "cursor pagination is not supported for combined search" {
+	if err == nil || !strings.Contains(err.Error(), "FTS ranks from different indexes are not comparable") {
 		t.Fatalf("unexpected error = %v", err)
 	}
 }
 
-func TestSearchAllRanksAcrossKindsAndPreservesTotal(t *testing.T) {
+func TestSearchAllDoesNotInventCrossIndexRanking(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
@@ -180,12 +180,8 @@ func TestSearchAllRanksAcrossKindsAndPreservesTotal(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc.SetClock(func() time.Time { return time.Unix(100, 0).UTC() })
-	result, err := svc.Search(ctx, "term", cli.SearchOptions{Kind: "all", Limit: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Total != 2 || len(result.Matches) != 1 || result.Matches[0].Kind != corpus.ThreadKindIssue {
-		t.Fatalf("combined result = %+v", result)
+	if _, err := svc.Search(ctx, "term", cli.SearchOptions{Kind: "all", Limit: 1}); err == nil {
+		t.Fatal("combined search unexpectedly invented a cross-index ranking")
 	}
 }
 
@@ -241,8 +237,7 @@ func TestExplainMatchReturnsFactualReasons(t *testing.T) {
 	}
 
 	want := []string{
-		`query term "term" matched in title`,
-		"all query terms matched",
+		"stored FTS5 index matched the query in thread",
 		"source updated",
 		"coverage includes metadata",
 	}
@@ -454,7 +449,7 @@ func TestExplainLens(t *testing.T) {
 	}
 }
 
-func TestSearchAllHonorsRepositoryScopeForEveryKind(t *testing.T) {
+func TestSearchAllIsRejectedEvenWithRepositoryScope(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
@@ -473,17 +468,8 @@ func TestSearchAllHonorsRepositoryScopeForEveryKind(t *testing.T) {
 		}
 	}
 
-	result, err := svc.Search(ctx, "shared term", cli.SearchOptions{Kind: "all", Repo: "owner/one", Limit: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Total != 2 || len(result.Matches) != 2 {
-		t.Fatalf("scoped combined result = %+v", result)
-	}
-	for _, match := range result.Matches {
-		if match.Repo.String() != "owner/one" {
-			t.Fatalf("repository scope leaked match: %+v", match)
-		}
+	if _, err := svc.Search(ctx, "shared term", cli.SearchOptions{Kind: "all", Repo: "owner/one", Limit: 10}); err == nil {
+		t.Fatal("scoped combined search unexpectedly succeeded")
 	}
 }
 

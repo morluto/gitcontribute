@@ -8,6 +8,7 @@ func (s *Server) registerResourceTemplates() {
 	}{
 		{"gitcontribute://repository/{owner}/{repo}", "Repository", "Local repository record"},
 		{"gitcontribute://thread/{owner}/{repo}/{kind}/{number}", "Thread", "Local issue or pull request"},
+		{"gitcontribute://threads/{owner}/{repo}/{number}", "Numbered thread", "Local issue or pull request with kind resolved from the corpus"},
 		{"gitcontribute://dossier/{owner}/{repo}", "Dossier", "Local source-backed repository dossier"},
 		{"gitcontribute://investigation/{id}", "Investigation", "Local investigation workspace"},
 		{"gitcontribute://opportunities/{investigation_id}", "Opportunities", "Local opportunities for an investigation"},
@@ -16,24 +17,6 @@ func (s *Server) registerResourceTemplates() {
 		{"gitcontribute://readiness/{opportunity_id}", "Readiness", "Local contribution readiness report"},
 		{"gitcontribute://workflow/contribution/{opportunity_id}", "Contribution workflow", "Safe contribution workflow resource links and prompts"},
 		{"gitcontribute://lens/{name}", "Lens", "Saved lens definition"},
-	}
-	addResourceTemplates(s, templates)
-}
-
-func (s *Server) registerV1ResourceTemplates() {
-	templates := []struct {
-		template, name, description string
-	}{
-		{"github-index://repositories/{owner}/{repo}", "Repository", "Local repository record"},
-		{"github-index://threads/{owner}/{repo}/{number}", "Thread", "Local issue or pull request by number"},
-		{"github-index://dossiers/{owner}/{repo}", "Dossier", "Local source-backed repository dossier"},
-		{"github-index://investigations/{id}", "Investigation", "Local investigation workspace"},
-		{"github-index://opportunities/{id}", "Opportunity", "Local contribution opportunity"},
-		{"github-index://evidence/{investigation_id}", "Evidence", "Evidence for an investigation"},
-		{"github-index://readiness/{opportunity_id}", "Readiness", "Local contribution readiness report"},
-		{"github-index://workflows/contribution/{opportunity_id}", "Contribution workflow", "Safe contribution workflow links and prompts"},
-		{"github-index://lenses/{name}", "Lens", "Saved lens definition"},
-		{"github-index://jobs/{id}", "Job", "Durable job state"},
 	}
 	addResourceTemplates(s, templates)
 }

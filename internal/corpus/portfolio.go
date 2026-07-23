@@ -14,12 +14,27 @@ import (
 // deterministic so callers can build portfolio views without repository-level
 // N+1 queries.
 func (c *Corpus) ListPullRequestPortfolio(ctx context.Context, author, state string, limit int) (_ []PortfolioPullRequest, err error) {
+	page, err := c.ListPullRequestPortfolioPage(ctx, author, state, limit)
+	if err != nil {
+		return nil, err
+	}
+	return page.PullRequests, nil
+}
+
+// ListPullRequestPortfolioPage returns a bounded portfolio and the exact
+// matching population so callers never mistake the page size for the total.
+func (c *Corpus) ListPullRequestPortfolioPage(ctx context.Context, author, state string, limit int) (_ PortfolioPage, err error) {
 	if limit <= 0 {
 		limit = 1000
 	}
 	if limit > 1000 {
-		return nil, errors.New("pull request portfolio limit cannot exceed 1000")
+		return PortfolioPage{}, errors.New("pull request portfolio limit cannot exceed 1000")
 	}
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return PortfolioPage{}, fmt.Errorf("begin pull request portfolio snapshot: %w", err)
+	}
+	defer rollbackSQLOnReturn(tx, &err)
 
 	query := `
 		SELECT r.owner, r.name,
@@ -37,19 +52,39 @@ func (c *Corpus) ListPullRequestPortfolio(ctx context.Context, author, state str
 		query += ` AND lower(t.state) = lower(?)`
 		args = append(args, state)
 	}
+	countQuery := `SELECT COUNT(*) FROM threads t WHERE t.kind = ?`
+	countArgs := []any{ThreadKindPullRequest}
+	if author != "" {
+		countQuery += ` AND lower(t.author) = lower(?)`
+		countArgs = append(countArgs, author)
+	}
+	if state != "" && !strings.EqualFold(state, "all") {
+		countQuery += ` AND lower(t.state) = lower(?)`
+		countArgs = append(countArgs, state)
+	}
+	var total int
+	if err := tx.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		return PortfolioPage{}, fmt.Errorf("count pull request portfolio: %w", err)
+	}
 	query += ` ORDER BY t.source_updated_at DESC, r.owner ASC, r.name ASC, t.number ASC LIMIT ?`
 	args = append(args, limit)
 
-	rows, err := c.db.QueryContext(ctx, query, args...)
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list pull request portfolio: %w", err)
+		return PortfolioPage{}, fmt.Errorf("list pull request portfolio: %w", err)
 	}
-	defer func() {
-		if closeErr := rows.Close(); err == nil && closeErr != nil {
-			err = fmt.Errorf("close pull request portfolio rows: %w", closeErr)
-		}
-	}()
+	out, err := scanPullRequestPortfolioRows(rows)
+	if err != nil {
+		return PortfolioPage{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return PortfolioPage{}, fmt.Errorf("commit pull request portfolio snapshot: %w", err)
+	}
+	return PortfolioPage{PullRequests: out, Total: total, Truncated: len(out) < total}, nil
+}
 
+func scanPullRequestPortfolioRows(rows *sql.Rows) (_ []PortfolioPullRequest, err error) {
+	defer closeSQLOnReturn(rows, &err)
 	var out []PortfolioPullRequest
 	for rows.Next() {
 		var item PortfolioPullRequest

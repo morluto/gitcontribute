@@ -162,6 +162,12 @@ func (r *MCPReader) GetJobs(ctx context.Context, in mcpserver.GetJobsInput) (mcp
 	if len(ids) < 1 || len(ids) > 100 {
 		return mcpserver.GetJobsOutput{}, errors.New("ids must contain 1 to 100 items")
 	}
+	if in.ResponseFormat == "" {
+		in.ResponseFormat = "concise"
+	}
+	if in.ResponseFormat != "concise" && in.ResponseFormat != "detailed" {
+		return mcpserver.GetJobsOutput{}, errors.New("response_format must be concise or detailed")
+	}
 	out := mcpserver.GetJobsOutput{Status: "complete", Items: make([]mcpserver.BatchItem[mcpserver.GetJobOutput], len(ids))}
 	for i, id := range ids {
 		if err := ctx.Err(); err != nil {
@@ -179,6 +185,12 @@ func (r *MCPReader) GetJobs(ctx context.Context, in mcpserver.GetJobsInput) (mcp
 			item.Message = err.Error()
 			out.Status = "partial"
 		} else {
+			if in.ResponseFormat == "concise" {
+				job.Request, job.Result = nil, nil
+				if job.Status == "succeeded" || job.Status == "failed" || job.Status == "cancelled" {
+					item.NextAction = "Call jobs.get with response_format=detailed to read the terminal payload."
+				}
+			}
 			item.Value = &job
 		}
 		out.Items[i] = item
@@ -205,12 +217,12 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpserver.L
 	if err != nil {
 		return mcpserver.ListPullRequestPortfolioOutput{}, err
 	}
-	stored, err := c.ListPullRequestPortfolio(ctx, strings.TrimSpace(in.Author), in.State, in.Limit)
+	page, err := c.ListPullRequestPortfolioPage(ctx, strings.TrimSpace(in.Author), in.State, in.Limit)
 	if err != nil {
 		return mcpserver.ListPullRequestPortfolioOutput{}, err
 	}
-	out := mcpserver.ListPullRequestPortfolioOutput{Status: "complete", RuleVersion: "portfolio.v2", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpserver.PullRequestPortfolioItem, 0, len(stored)), Total: len(stored)}
-	for _, storedPR := range stored {
+	out := mcpserver.ListPullRequestPortfolioOutput{Status: "complete", RuleVersion: "portfolio.v2", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpserver.PullRequestPortfolioItem, 0, len(page.PullRequests)), Total: page.Total, Truncated: page.Truncated}
+	for _, storedPR := range page.PullRequests {
 		item, err := portfolioItem(ctx, c, storedPR, r.now())
 		if err != nil {
 			return mcpserver.ListPullRequestPortfolioOutput{}, err
@@ -606,13 +618,13 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpserver.FindPrecede
 		}
 		preparedByRepo[precedent.RepositoryKey(snapshot.Repository)] = prepared
 	}
-	out := mcpserver.FindPrecedentsOutput{Status: "complete", Items: make([]mcpserver.BatchItem[[]mcpserver.PrecedentOutput], len(in.Threads))}
+	out := mcpserver.FindPrecedentsOutput{Status: "complete", Items: make([]mcpserver.BatchItem[mcpserver.PrecedentSet], len(in.Threads))}
 	for i, input := range in.Threads {
 		if err := ctx.Err(); err != nil {
 			return mcpserver.FindPrecedentsOutput{}, err
 		}
 		key := fmt.Sprintf("%s/%s#%d", input.Owner, input.Repo, input.Number)
-		item := mcpserver.BatchItem[[]mcpserver.PrecedentOutput]{Key: key, Status: "complete"}
+		item := mcpserver.BatchItem[mcpserver.PrecedentSet]{Key: key, Status: "complete"}
 		repoKey := precedent.RepositoryKey(refs[i].Repository)
 		snapshot := snapshotsByRepo[repoKey]
 		if !snapshot.Available {
@@ -646,8 +658,12 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpserver.FindPrecede
 			}
 			precedents = append(precedents, precedentToMCP(key, input.Owner, input.Repo, candidate, score))
 		}
+		qualifying := len(precedents)
 		precedents = ranking.TopK(precedents, in.Limit, betterPrecedent)
-		item.Value = &precedents
+		item.Value = &mcpserver.PrecedentSet{Matches: precedents, Population: snapshot.ClosedTotal, Considered: len(snapshot.Closed), Truncated: snapshot.ClosedTruncated || len(precedents) < qualifying}
+		if item.Value.Truncated {
+			out.Status = "partial"
+		}
 		out.Total += len(precedents)
 		out.Items[i] = item
 	}

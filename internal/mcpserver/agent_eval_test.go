@@ -55,6 +55,50 @@ func TestAgentEvalBaselineArtifact(t *testing.T) {
 	}
 }
 
+func TestAgentEvalV2PublicAndOracleStayPaired(t *testing.T) {
+	t.Parallel()
+	type scenario struct {
+		ID              string   `json:"id"`
+		Prompt          string   `json:"prompt"`
+		Toolsets        []string `json:"toolsets"`
+		AcceptableTools []string `json:"acceptable_tools"`
+	}
+	type fixture struct {
+		Version         string     `json:"version"`
+		FixtureRevision string     `json:"fixture_revision"`
+		Scenarios       []scenario `json:"scenarios"`
+	}
+	read := func(name string) fixture {
+		data, err := os.ReadFile(filepath.Join("testdata", "agent-eval", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var value fixture
+		if err := json.Unmarshal(data, &value); err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	public, oracle := read("public-v2.json"), read("oracle-v2.json")
+	if public.Version != "agent-tool-eval.v2" || oracle.Version != "agent-tool-eval-oracle.v2" || public.FixtureRevision != oracle.FixtureRevision {
+		t.Fatalf("mismatched eval fixtures: public=%+v oracle=%+v", public, oracle)
+	}
+	if len(public.Scenarios) != len(oracle.Scenarios) || len(public.Scenarios) < 3 {
+		t.Fatalf("scenario counts differ: public=%d oracle=%d", len(public.Scenarios), len(oracle.Scenarios))
+	}
+	for i := range public.Scenarios {
+		if public.Scenarios[i].ID == "" || public.Scenarios[i].ID != oracle.Scenarios[i].ID || strings.TrimSpace(public.Scenarios[i].Prompt) == "" {
+			t.Fatalf("unpaired scenario %d: public=%+v oracle=%+v", i, public.Scenarios[i], oracle.Scenarios[i])
+		}
+		enabled := enabledToolNames(public.Scenarios[i].Toolsets)
+		for _, tool := range oracle.Scenarios[i].AcceptableTools {
+			if _, ok := enabled[tool]; !ok {
+				t.Errorf("scenario %q cannot call acceptable tool %q with toolsets %v", public.Scenarios[i].ID, tool, public.Scenarios[i].Toolsets)
+			}
+		}
+	}
+}
+
 func TestAgentEvalScriptedCurrentContracts(t *testing.T) {
 	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
 	defer closeSessions()

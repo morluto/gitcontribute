@@ -12,12 +12,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Keep a little headroom above the measured scalable-catalog baseline. This is
-// a regression guard, not a claim that the current catalog needs no compaction.
-// The scalable surface currently serializes below 128 KiB. Keep a fixed budget
-// so contract growth remains deliberate while allowing the issue-20 batch and
-// portfolio primitives to ship together.
-const maxSerializedCatalogBytes = 128 * 1024
+// The default agent-facing profile should retain useful descriptions and
+// schemas without consuming an unbounded amount of model context. The explicit
+// "all" profile is intentionally not treated as a default-context contract.
+const maxDefaultCatalogBytes = 96 * 1024
 
 var selectionSynonyms = map[string]string{
 	"execute": "run",
@@ -37,7 +35,17 @@ var selectionStopWords = map[string]bool{
 
 func listedTools(t *testing.T) (map[string]*mcp.Tool, func()) {
 	t.Helper()
-	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	return listedToolsFor(t, []string{"all"})
+}
+
+func listedToolsFor(t *testing.T, toolsets []string) (map[string]*mcp.Tool, func()) {
+	t.Helper()
+	return listedToolsFromReader(t, &fakeReader{searchStarted: make(chan struct{})}, toolsets)
+}
+
+func listedToolsFromReader(t *testing.T, reader Reader, toolsets []string) (map[string]*mcp.Tool, func()) {
+	t.Helper()
+	client, closeSessions := connectWithOptions(t, reader, Options{Toolsets: toolsets})
 	tools := make(map[string]*mcp.Tool)
 	for tool, err := range client.Tools(context.Background(), nil) {
 		if err != nil {
@@ -93,17 +101,142 @@ func TestCanonicalToolCatalogIsNamespacedAndUnambiguous(t *testing.T) {
 	}
 }
 
-func TestSerializedToolCatalogStaysWithinBudget(t *testing.T) {
-	tools, closeSessions := listedTools(t)
+func TestDefaultToolCatalogStaysWithinBudget(t *testing.T) {
+	tools, closeSessions := listedToolsFor(t, []string{"contribute"})
 	defer closeSessions()
 
 	payload, err := json.Marshal(tools)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("serialized MCP catalog: %d tools, %d bytes", len(tools), len(payload))
-	if len(payload) > maxSerializedCatalogBytes {
-		t.Fatalf("serialized MCP catalog is %d bytes, budget is %d", len(payload), maxSerializedCatalogBytes)
+	t.Logf("serialized default MCP catalog: %d tools, %d bytes", len(tools), len(payload))
+	if len(payload) > maxDefaultCatalogBytes {
+		t.Fatalf("serialized default MCP catalog is %d bytes, budget is %d", len(payload), maxDefaultCatalogBytes)
+	}
+}
+
+func TestStructuredCancellationIsNotRetryable(t *testing.T) {
+	handler := structuredToolErrors(func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
+		return nil, struct{}{}, context.Canceled
+	})
+	_, _, err := handler(context.Background(), nil, struct{}{})
+	toolErr, ok := err.(*ToolError)
+	if !ok || toolErr.Code != "cancelled" || toolErr.Retryable {
+		t.Fatalf("cancellation error = %#v", err)
+	}
+}
+
+func TestContributionToolsetOmitsSpecializedCatalogs(t *testing.T) {
+	server, err := NewWithOptions(&fakeReader{searchStarted: make(chan struct{})}, "test", Options{Toolsets: []string{"contribute"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	t1, t2 := mcp.NewInMemoryTransports()
+	serverSession, err := server.MCP().Connect(context.Background(), t1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	clientSession, err := client.Connect(context.Background(), t2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientSession.Close()
+	names := map[string]bool{}
+	for tool, err := range clientSession.Tools(context.Background(), nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		names[tool.Name] = true
+	}
+	if !names[ToolSearchThreads] || !names[ToolPrepareContribution] {
+		t.Fatalf("contribution tools missing: %v", names)
+	}
+	if names[ToolListPullRequestPortfolio] || names[ToolFindClusters] {
+		t.Fatalf("specialized tools leaked into contribution profile: %v", names)
+	}
+}
+
+func TestReadOnlyModeFiltersEverySideEffectingTool(t *testing.T) {
+	server, err := NewWithOptions(&fakeReader{searchStarted: make(chan struct{})}, "test", Options{Toolsets: []string{"all"}, ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	t1, t2 := mcp.NewInMemoryTransports()
+	serverSession, err := server.MCP().Connect(context.Background(), t1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	clientSession, err := client.Connect(context.Background(), t2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientSession.Close()
+	for tool, err := range clientSession.Tools(context.Background(), nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
+			t.Fatalf("non-read-only tool advertised: %s (%+v)", tool.Name, tool.Annotations)
+		}
+	}
+}
+
+func TestUnsupportedOptionalCapabilitiesAreNotAdvertised(t *testing.T) {
+	base := &fakeReader{searchStarted: make(chan struct{})}
+	server, err := NewWithOptions(struct{ Reader }{Reader: base}, "test", Options{Toolsets: []string{"all"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	t1, t2 := mcp.NewInMemoryTransports()
+	serverSession, err := server.MCP().Connect(context.Background(), t1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer serverSession.Close()
+	clientSession, err := client.Connect(context.Background(), t2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientSession.Close()
+	names := map[string]bool{}
+	for tool, err := range clientSession.Tools(context.Background(), nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		names[tool.Name] = true
+	}
+	if !names[ToolSearchThreads] || !names[ToolGetJob] {
+		t.Fatalf("core reader tools missing: %v", names)
+	}
+	for _, name := range []string{ToolFindNeighbors, ToolGetRepositories, ToolSearchGitHubRepositories, ToolLinkPullRequest, ToolStartInvestigation} {
+		if names[name] {
+			t.Errorf("unsupported optional tool %q was advertised", name)
+		}
+	}
+}
+
+func TestOptionalCapabilitiesAreAdvertisedIndependently(t *testing.T) {
+	base := &fakeReader{searchStarted: make(chan struct{})}
+	research := &fakeOptionalCapabilities{base: base}
+	reader := struct {
+		Reader
+		ResearchReader
+	}{Reader: base, ResearchReader: research}
+	tools, closeSessions := listedToolsFromReader(t, reader, []string{"all"})
+	defer closeSessions()
+
+	if tools[ToolQueryDeepWiki] == nil {
+		t.Fatal("supported research tool was not advertised")
+	}
+	for _, name := range []string{ToolSearchGitHubRepositories, ToolIndexRepositories, ToolCheckMergeConflicts, ToolListPullRequestPortfolio} {
+		if tools[name] != nil {
+			t.Errorf("unrelated unsupported tool %q was advertised", name)
+		}
 	}
 }
 
@@ -212,7 +345,7 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 		{"Check actual Git merge conflicts between fetched revisions", ToolCheckMergeConflicts},
 		{"Create a local investigation without cloning a worktree", ToolStartInvestigation},
 		{"Clone the remote and create a managed Git worktree", ToolCreateWorkspace},
-		{"Render and persist a pull request draft from supplied changes", ToolPrepareContribution},
+		{"Render and persist a pull request draft from a verified managed workspace diff", ToolPrepareContribution},
 		{"Execute the stored validation command against the candidate workspace", ToolRunValidation},
 		{"Stop a running durable job", ToolCancelJob},
 		{"Poll several durable jobs together with structured progress", ToolGetJob},
@@ -263,7 +396,7 @@ func TestInvalidToolCallEvaluation(t *testing.T) {
 		{ToolSyncThreads, map[string]any{"selection": "threads", "threads": []any{map[string]any{"owner": "acme", "repo": "rocket", "number": 1}}, "state": "open"}},
 		{ToolRunValidation, map[string]any{"id": "val-1", "kind": "candidate", "execute": false}},
 		{ToolPromoteOpportunity, map[string]any{"hypothesis_id": "hyp-1", "problem_statement": "p", "scope": "s", "impact": "i", "expected_effort": "e", "confidence": 1.1}},
-		{ToolPrepareContribution, map[string]any{"opportunity_id": "opp-1", "kind": "pull_request", "workspace_id": "ws-1", "approach": "focused"}},
+		{ToolPrepareContribution, map[string]any{"opportunity_id": "opp-1", "kind": "pull_request", "approach": "focused"}},
 	}
 
 	accepted := 0
@@ -295,7 +428,7 @@ func TestSideEffectAuthorizationEvaluation(t *testing.T) {
 	if prepare.Annotations == nil || prepare.Annotations.ReadOnlyHint || prepare.Annotations.OpenWorldHint == nil || *prepare.Annotations.OpenWorldHint {
 		t.Fatalf("prepare contribution annotations = %+v", prepare.Annotations)
 	}
-	for _, phrase := range []string{"never inspects a workspace", "runs Git", "never", "mutates GitHub"} {
+	for _, phrase := range []string{"inspects the managed workspace", "non-mutating Git", "Never posts", "mutates GitHub"} {
 		if !strings.Contains(prepare.Description, phrase) {
 			t.Errorf("prepare contribution description does not disclose boundary phrase %q", phrase)
 		}

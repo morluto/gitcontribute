@@ -27,6 +27,14 @@ func (s *Service) workspaceManager(ctx context.Context) (*workspace.Manager, err
 	return workspace.NewManager(root, nil)
 }
 
+func (s *Service) workspaceReader() (*workspace.Manager, error) {
+	dataDir, err := s.paths.DataDir()
+	if err != nil {
+		return nil, err
+	}
+	return workspace.OpenManager(filepath.Join(dataDir, "workspaces"), nil)
+}
+
 // CreateWorkspace creates a managed worktree for an investigation.
 func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, opts cli.WorkspaceCreateOptions) (*cli.WorkspaceResult, error) {
 	invSvc, err := s.writeInvestigationSvc(ctx)
@@ -112,7 +120,7 @@ func (s *Service) ShowWorkspace(ctx context.Context, id string) (*cli.WorkspaceR
 		return nil, mapWorkspaceError(err)
 	}
 
-	mgr, err := s.workspaceManager(ctx)
+	mgr, err := s.workspaceReader()
 	if err == nil {
 		if st, err := mgr.StatusByPath(ctx, ws.Path); err == nil {
 			ws.Dirty = st.Dirty
@@ -157,7 +165,7 @@ func (s *Service) WorkspaceDiff(ctx context.Context, id string) (*WorkspaceDiffR
 		return nil, mapWorkspaceError(err)
 	}
 
-	mgr, err := s.workspaceManager(ctx)
+	mgr, err := s.workspaceReader()
 	if err != nil {
 		return nil, err
 	}

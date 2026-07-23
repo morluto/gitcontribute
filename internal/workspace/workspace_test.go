@@ -68,6 +68,46 @@ func newManager(t *testing.T) *Manager {
 	return m
 }
 
+func TestOpenManagerDoesNotCreateMissingRoot(t *testing.T) {
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), "missing")
+	if _, err := OpenManager(root, nil); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("OpenManager error = %v, want ErrNotFound", err)
+	}
+	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("OpenManager created root or returned unexpected stat error: %v", err)
+	}
+}
+
+func TestValidateWorkspacePathRejectsPathsOutsideWorktreeRoot(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	mgr, err := NewManager(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inside := filepath.Join(root, "workspaces", "workspace")
+	if err := os.MkdirAll(filepath.Dir(inside), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(inside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.ValidateWorkspacePath(inside); err != nil {
+		t.Fatalf("managed path rejected: %v", err)
+	}
+	mirror := filepath.Join(root, "mirrors", "origin.git")
+	if err := os.MkdirAll(mirror, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.ValidateWorkspacePath(mirror); !errors.Is(err, ErrNotManaged) {
+		t.Fatalf("mirror path error = %v, want ErrNotManaged", err)
+	}
+	if err := mgr.ValidateWorkspacePath(t.TempDir()); !errors.Is(err, ErrNotManaged) {
+		t.Fatalf("outside path error = %v, want ErrNotManaged", err)
+	}
+}
+
 func TestManager_CloneAndResolve(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

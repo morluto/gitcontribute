@@ -16,13 +16,15 @@ import (
 // Product-owned names for derived SQLite search projections.
 const (
 	ProjectionNameThreadsFTS           = "threads_fts"
+	ProjectionNameRepositoriesFTS      = "repositories_fts"
 	ProjectionNameFacetObservationsFTS = "facet_observations_fts"
 	ProjectionNameCodeDocumentsFTS     = "code_documents_fts"
 )
 
 // Product-owned versions for derived SQLite search projections.
 const (
-	ProjectionVersionThreadsFTS           = "threads-fts-v1"
+	ProjectionVersionThreadsFTS           = "threads-fts-v3"
+	ProjectionVersionRepositoriesFTS      = "repositories-fts-v1"
 	ProjectionVersionFacetObservationsFTS = "facet-observations-fts-v1"
 	ProjectionVersionCodeDocumentsFTS     = "code-documents-fts-v1"
 )
@@ -152,6 +154,11 @@ func (c *Corpus) ListProjectionStates(ctx context.Context) (_ []ProjectionState,
 // advances the durable projection state. It is explicit: search never calls it.
 func (c *Corpus) RebuildThreadSearchProjection(ctx context.Context) (ProjectionState, error) {
 	return c.rebuildSearchProjection(ctx, ProjectionNameThreadsFTS, ProjectionVersionThreadsFTS)
+}
+
+// RebuildRepositorySearchProjection atomically rebuilds repository search.
+func (c *Corpus) RebuildRepositorySearchProjection(ctx context.Context) (ProjectionState, error) {
+	return c.rebuildSearchProjection(ctx, ProjectionNameRepositoriesFTS, ProjectionVersionRepositoriesFTS)
 }
 
 // RebuildCodeSearchProjection atomically rebuilds the code_documents_fts index
@@ -291,7 +298,9 @@ func (c *Corpus) projectionSourceIdentity(ctx context.Context, q projectionSourc
 	var query string
 	switch name {
 	case ProjectionNameThreadsFTS:
-		query = `SELECT id, title, COALESCE(body, '') FROM threads ORDER BY id`
+		query = `SELECT thread_id, title || char(10) || labels, body || char(10) || facets FROM thread_search_documents ORDER BY thread_id`
+	case ProjectionNameRepositoriesFTS:
+		query = `SELECT id, owner || char(10) || name, COALESCE(topics, '') || char(10) || COALESCE(description, '') FROM repositories ORDER BY id`
 	case ProjectionNameFacetObservationsFTS:
 		query = `SELECT id, COALESCE(search_text, ''), '' FROM facet_observations ORDER BY id`
 	case ProjectionNameCodeDocumentsFTS:
@@ -332,7 +341,7 @@ func writeProjectionHashField(h hash.Hash, value string) {
 }
 
 func isSearchProjection(name string) bool {
-	return name == ProjectionNameThreadsFTS || name == ProjectionNameFacetObservationsFTS || name == ProjectionNameCodeDocumentsFTS
+	return name == ProjectionNameThreadsFTS || name == ProjectionNameRepositoriesFTS || name == ProjectionNameFacetObservationsFTS || name == ProjectionNameCodeDocumentsFTS
 }
 
 func setProjectionTimes(state *ProjectionState, refreshed, attemptStarted, attemptFinished sql.NullInt64) {

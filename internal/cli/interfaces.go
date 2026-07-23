@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/health"
 	"github.com/morluto/gitcontribute/internal/lens"
 )
@@ -209,6 +210,8 @@ func (r RepoRef) String() string { return r.Owner + "/" + r.Repo }
 // MCPOptions carries MCP server startup options.
 type MCPOptions struct {
 	Transport string
+	Toolsets  []string
+	ReadOnly  bool
 }
 
 type TUIOptions struct {
@@ -346,6 +349,7 @@ type SearchOptions struct {
 	Limit        int
 	Cursor       string
 	Lens         string
+	Sort         string
 }
 
 // InitResult is the result of initializing a local corpus.
@@ -390,16 +394,17 @@ type AcquisitionService interface {
 }
 
 type AcquisitionResult struct {
-	Repo          RepoRef `json:"repo"`
-	Remote        string  `json:"remote"`
-	DefaultBranch string  `json:"default_branch"`
-	CommitSHA     string  `json:"commit_sha"`
-	Files         int     `json:"files"`
-	Bytes         int     `json:"bytes"`
-	Indexed       bool    `json:"indexed"`
-	Inserted      bool    `json:"inserted"`
-	AcquiredAt    string  `json:"acquired_at"`
-	Message       string  `json:"message"`
+	Repo          RepoRef            `json:"repo"`
+	Remote        string             `json:"remote"`
+	DefaultBranch string             `json:"default_branch"`
+	CommitSHA     string             `json:"commit_sha"`
+	Files         int                `json:"files"`
+	Bytes         int                `json:"bytes"`
+	Indexed       bool               `json:"indexed"`
+	Inserted      bool               `json:"inserted"`
+	AcquiredAt    string             `json:"acquired_at"`
+	Message       string             `json:"message"`
+	IndexManifest codeindex.Manifest `json:"index_manifest"`
 }
 
 // HealthService exposes deterministic offline repository health metrics.

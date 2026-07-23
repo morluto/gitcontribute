@@ -249,6 +249,16 @@ gitcontribute mcp serve --transport=stdio
 
 MCP capabilities are deliberately separate:
 
+The CLI advertises the focused `contribute` toolset by default. Add specialized
+surfaces only when needed: `mcp serve --toolsets=contribute,code`,
+`--toolsets=contribute,research`, `--toolsets=contribute,portfolio`,
+`--toolsets=contribute,advanced`, or `--toolsets=all`. Smaller catalogs reduce
+overlapping choices and agent context cost; toolsets change discovery only,
+not authority or side-effect annotations.
+Add `--read-only` to remove every tool whose MCP annotation permits local
+writes or execution. External read-only lookups remain available when their
+toolset is enabled.
+
 Tool names use the `<capability>.<action>` namespace. MCP clients qualify them
 with the configured `gitcontribute` server name, producing names such as
 `gitcontribute.corpus.search_repositories`. The server advertises one canonical
@@ -454,7 +464,6 @@ gitcontribute search issues "data race" --repo owner/repo --state open --json
 gitcontribute search prs "flaky" --repo owner/repo --label bug --json
 gitcontribute search threads "memory leak" --repo owner/repo
 gitcontribute search code "context.WithTimeout" --repo owner/repo
-gitcontribute search all "retry" --repo owner/repo
 
 gitcontribute dossier build owner/repo
 gitcontribute dossier export owner/repo --format markdown \
@@ -543,8 +552,15 @@ gitcontribute search issues "retry" --lens my-lens
 gitcontribute lens explain my-lens issue:owner/repo#42 --query "retry"
 ```
 
-Search results explain their scores. Most typed searches support opaque cursor
-pagination; `search all` and lens-ranked searches do not.
+Repository and thread searches use weighted SQLite FTS5 relevance and accept
+`--sort=updated` in the CLI or `sort=updated` through MCP when the task is
+specifically about newest matches.
+Title/name and tags/topics count more than descriptions or bodies; hydrated
+discussion and indexed file contents count less. Search responses are compact
+excerpts, and exact reads provide full details. Most typed searches support
+opaque cursor pagination; lens-ranked searches do not. Cross-kind `search all`
+is intentionally absent because BM25 ranks from separate indexes are not
+comparable.
 
 </details>
 

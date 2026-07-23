@@ -415,7 +415,7 @@ func searchHuman(r *SearchResult) string {
 		}
 		fmt.Fprintf(&b, ": %s", m.Title)
 		if m.Score != 0 {
-			fmt.Fprintf(&b, " (%.2f)", m.Score)
+			fmt.Fprintf(&b, " (relevance %.6g)", m.Score)
 		}
 	}
 	return b.String()

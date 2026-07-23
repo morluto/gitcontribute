@@ -49,6 +49,10 @@ type ScalableReader interface {
 	RankOpportunities(context.Context, RankOpportunitiesInput) (RankOpportunitiesOutput, error)
 	FindPrecedents(context.Context, FindPrecedentsInput) (FindPrecedentsOutput, error)
 	GetJobs(context.Context, GetJobsInput) (GetJobsOutput, error)
+}
+
+// PortfolioReader exposes bounded offline pull-request portfolio reads.
+type PortfolioReader interface {
 	ListPullRequestPortfolio(context.Context, ListPullRequestPortfolioInput) (ListPullRequestPortfolioOutput, error)
 	FindPortfolioOverlaps(context.Context, FindPortfolioOverlapsInput) (FindPortfolioOverlapsOutput, error)
 }
@@ -59,9 +63,8 @@ type PortfolioOperator interface {
 	LinkPullRequest(context.Context, LinkPullRequestInput) (LinkPullRequestOutput, error)
 }
 
-// ScalableOperator exposes bounded external reads without combining unrelated
-// facets or workflow mutations.
-type ScalableOperator interface {
+// GitHubOperator exposes bounded GitHub reads that update only the local corpus.
+type GitHubOperator interface {
 	SearchGitHubRepositories(context.Context, SearchGitHubRepositoriesInput) (SearchGitHubRepositoriesOutput, error)
 	SyncRepositoryMetadata(context.Context, SyncRepositoryMetadataInput) (JobReference, error)
 	SyncThreads(context.Context, SyncThreadsInput) (JobReference, error)
@@ -69,8 +72,20 @@ type ScalableOperator interface {
 	GetAuthenticatedIdentity(context.Context) (AuthenticatedIdentityOutput, error)
 	SyncAuthoredPullRequests(context.Context, SyncAuthoredPullRequestsInput) (JobReference, error)
 	SyncPullRequestStatus(context.Context, SyncPullRequestStatusInput) (JobReference, error)
+}
+
+// CodeIndexer safely acquires and indexes repository code.
+type CodeIndexer interface {
 	IndexRepositories(context.Context, IndexRepositoriesInput) (JobReference, error)
+}
+
+// MergeConflictReader performs local, non-mutating Git comparisons.
+type MergeConflictReader interface {
 	CheckMergeConflicts(context.Context, CheckMergeConflictsInput) (CheckMergeConflictsOutput, error)
+}
+
+// ResearchReader exposes external derived repository context.
+type ResearchReader interface {
 	DeepWiki(context.Context, DeepWikiInput) (DeepWikiOutput, error)
 }
 
@@ -119,6 +134,7 @@ type SearchInput struct {
 	UpdatedAfter string   `json:"updated_after,omitempty"`
 	Limit        int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
 	Cursor       string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
+	Sort         string   `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
 }
 
 // RepositoryOutput is the stable MCP representation of a repository.
@@ -150,6 +166,7 @@ type ThreadOutput struct {
 	UpdatedAt         string   `json:"updated_at,omitempty"`
 	MatchSource       string   `json:"match_source,omitempty"`
 	MatchExcerpt      string   `json:"match_excerpt,omitempty"`
+	MatchTruncated    bool     `json:"match_truncated,omitempty" jsonschema:"Whether the per-thread hydrated search document was bounded"`
 	MatchUpdatedAt    string   `json:"match_updated_at,omitempty"`
 }
 
@@ -198,12 +215,27 @@ type CodeMatchOutput struct {
 	Bytes    int    `json:"bytes"`
 }
 
+// CodeIndexCoverageOutput reports one selected snapshot's indexing coverage.
+type CodeIndexCoverageOutput struct {
+	Repo           string `json:"repo"`
+	Status         string `json:"status" jsonschema:"Index coverage state"`
+	Commit         string `json:"commit"`
+	Truncated      bool   `json:"truncated" jsonschema:"Whether index limits omitted files"`
+	IndexedFiles   int    `json:"indexed_files" jsonschema:"Files indexed in this snapshot"`
+	TrackedEntries int    `json:"tracked_entries" jsonschema:"Tracked tree entries considered"`
+	SkippedFiles   int    `json:"skipped_files" jsonschema:"Entries omitted by policy or limits"`
+	SkippedPolicy  int    `json:"skipped_policy" jsonschema:"Invalid, excluded, or non-regular entries"`
+	SkippedLimits  int    `json:"skipped_limits" jsonschema:"Entries omitted by file-size, total-size, or file-count bounds"`
+	SkippedNonText int    `json:"skipped_non_text" jsonschema:"Entries omitted because content was binary or invalid UTF-8"`
+}
+
 // SearchCodeOutput contains one page of offline code matches.
 type SearchCodeOutput struct {
-	Query      string            `json:"query"`
-	Total      int               `json:"total"`
-	Matches    []CodeMatchOutput `json:"matches"`
-	NextCursor string            `json:"next_cursor,omitempty"`
+	Query      string                    `json:"query"`
+	Total      int                       `json:"total"`
+	Matches    []CodeMatchOutput         `json:"matches"`
+	Coverage   []CodeIndexCoverageOutput `json:"coverage,omitempty"`
+	NextCursor string                    `json:"next_cursor,omitempty"`
 }
 
 // InvestigationInput selects an investigation and bounds nested hypotheses.
@@ -291,9 +323,11 @@ type OpportunityOutput struct {
 
 // FindClustersInput selects a repository and bounds duplicate clusters.
 type FindClustersInput struct {
-	Owner string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo  string `json:"repo" jsonschema:"GitHub repository name"`
-	Limit int    `json:"limit,omitempty" jsonschema:"Maximum clusters from 1 to 100"`
+	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
+	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
+	Kind   string `json:"kind,omitempty" jsonschema:"Optional member kind: issue or pull_request"`
+	Number int    `json:"number,omitempty" jsonschema:"Optional positive member number"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum clusters from 1 to 100"`
 }
 
 // FindNeighborsInput selects a thread and bounds similar-thread results.
@@ -356,6 +390,7 @@ type FindClustersOutput struct {
 	RuleVersion similarity.RuleVersion `json:"rule_version,omitempty"`
 	Total       int                    `json:"total"`
 	Clusters    []ClusterOutput        `json:"clusters"`
+	Truncated   bool                   `json:"truncated" jsonschema:"Whether more clusters matched"`
 }
 
 // CoverageTarget selects repository-level coverage or, when kind and number
@@ -415,16 +450,43 @@ type Server struct {
 	reader          Reader
 	server          *mcp.Server
 	registrationErr error
+	enabledTools    map[string]struct{}
+	readOnly        bool
+}
+
+// Options selects MCP capability profiles. An empty Toolsets list is rejected.
+type Options struct {
+	Toolsets []string
+	ReadOnly bool
 }
 
 // New constructs an MCP server over reader and registers all supported tools
 // and resources. A blank version is reported as "dev".
 func New(reader Reader, version string) (*Server, error) {
+	return NewWithOptions(reader, version, Options{Toolsets: []string{"all"}})
+}
+
+// NewWithOptions constructs an MCP server with selected capability profiles.
+func NewWithOptions(reader Reader, version string, opts Options) (*Server, error) {
 	if version == "" {
 		version = "dev"
 	}
+	if len(opts.Toolsets) == 0 {
+		return nil, errors.New("at least one MCP toolset is required")
+	}
+	for i := range opts.Toolsets {
+		opts.Toolsets[i] = strings.TrimSpace(opts.Toolsets[i])
+		if opts.Toolsets[i] != "all" {
+			if _, ok := toolsets[opts.Toolsets[i]]; !ok {
+				return nil, fmt.Errorf("unknown MCP toolset %q", opts.Toolsets[i])
+			}
+		}
+	}
+	enabled := enabledToolNames(opts.Toolsets)
 	s := &Server{
-		reader: reader,
+		reader:       reader,
+		enabledTools: enabled,
+		readOnly:     opts.ReadOnly,
 		server: mcp.NewServer(&mcp.Implementation{
 			Name:    "gitcontribute",
 			Version: version,
@@ -456,7 +518,7 @@ func (s *Server) register() {
 	readOnly := readOnlyAnnotations()
 	addCatalogTool(s, catalogTool[SearchCodeInput, SearchCodeOutput]{
 		name: ToolSearchCode, title: "Search stored code",
-		description: "Search indexed code snapshots in the local corpus and return bounded snippets with repository, commit, and path context. Provide owner and repo together to restrict the search; this tool is offline.",
+		description: "Search indexed code and return bounded snippets plus selected-snapshot coverage, including for zero scoped matches. Optional owner/repo scope; offline.",
 		annotations: readOnly, input: inputSchema[SearchCodeInput](func(schema *schemaBuilder) {
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
@@ -505,8 +567,11 @@ func (s *Server) register() {
 	})
 	addCatalogTool(s, catalogTool[FindClustersInput, FindClustersOutput]{
 		name: ToolFindClusters, title: "Find duplicate clusters",
-		description: "List stored duplicate clusters for a repository. For one thread, use " + ToolFindNeighbors + ".",
+		description: "List stored duplicate clusters for a repository, or provide kind and number to read the current cluster containing one exact member. Use " + ToolFindNeighbors + " to compute similarity outside the stored projection.",
 		annotations: readOnly, input: inputSchema[FindClustersInput](func(schema *schemaBuilder) {
+			setEnum(schema, "kind", "issue", "pull_request")
+			setMinimum(schema, "number", 1)
+			requireTogether(schema, "kind", "number")
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 		}), output: outputSchema[FindClustersOutput]("Stored duplicate clusters."), handler: s.findClusters,
@@ -514,7 +579,7 @@ func (s *Server) register() {
 	addCatalogTool(s, catalogTool[FindNeighborsInput, FindNeighborsOutput]{
 		name: ToolFindNeighbors, title: "Find similar threads",
 		description: "Rank stored threads similar to one issue or pull request using transparent deterministic scoring. Use this for a specific source thread; it never contacts GitHub.",
-		annotations: readOnly, input: inputSchema[FindNeighborsInput](func(schema *schemaBuilder) {
+		annotations: readOnly, supportedBy: supports[NeighborReader], input: inputSchema[FindNeighborsInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 			setMinimum(schema, "number", 1)
 			setRange(schema, "limit", 1, 100)
@@ -526,12 +591,6 @@ func (s *Server) register() {
 		description: "Read offline facet coverage for up to 100 repository or exact-thread targets with ordered item-level outcomes.",
 		annotations: readOnly, input: inputSchema[GetCoverageInput](func(sc *schemaBuilder) { setArrayBounds(sc, "targets", 1, 100) }),
 		output: outputSchema[GetCoverageOutput]("Ordered local repository or thread facet coverage."), handler: s.getCoverage,
-	})
-	addCatalogTool(s, catalogTool[LensInput, LensOutput]{
-		name: ToolGetLens, title: "Get saved lens",
-		description: "Read one saved local ranking lens by name. Use it to explain or reproduce lens-based ranking; this tool is offline and does not modify the lens.",
-		annotations: readOnly, input: inputSchema[LensInput](noSchemaCustomization),
-		output: outputSchema[LensOutput]("Saved lens definition and timestamps."), handler: s.getLens,
 	})
 	s.registerResourceTemplates()
 	s.registerContributionPrompts()
@@ -554,10 +613,10 @@ func (s *Server) thread(ctx context.Context, _ *mcp.CallToolRequest, in ThreadIn
 		return nil, ThreadOutput{}, err
 	}
 	if in.Kind != "issue" && in.Kind != "pull_request" {
-		return nil, ThreadOutput{}, errors.New("kind must be issue or pull_request")
+		return nil, ThreadOutput{}, InvalidArgument("kind", "must be issue or pull_request", map[string]any{"kind": "issue"})
 	}
 	if in.Number < 1 {
-		return nil, ThreadOutput{}, errors.New("number must be positive")
+		return nil, ThreadOutput{}, InvalidArgument("number", "must be positive", map[string]any{"number": 1})
 	}
 	out, err := s.reader.Thread(ctx, in)
 	return nil, out, err
@@ -565,16 +624,16 @@ func (s *Server) thread(ctx context.Context, _ *mcp.CallToolRequest, in ThreadIn
 
 func (s *Server) searchCode(ctx context.Context, _ *mcp.CallToolRequest, in SearchCodeInput) (*mcp.CallToolResult, SearchCodeOutput, error) {
 	if in.Query == "" {
-		return nil, SearchCodeOutput{}, errors.New("query is required")
+		return nil, SearchCodeOutput{}, InvalidArgument("query", "is required", map[string]any{"query": "MIDI"})
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, SearchCodeOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, SearchCodeOutput{}, InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	if (in.Owner == "") != (in.Repo == "") {
-		return nil, SearchCodeOutput{}, errors.New("owner and repo must be provided together")
+		return nil, SearchCodeOutput{}, InvalidArgument("owner", "owner and repo must be provided together", map[string]any{"owner": "acme", "repo": "synth"})
 	}
 	out, err := s.reader.SearchCode(ctx, in)
 	return nil, out, err
@@ -704,15 +763,6 @@ func (s *Server) getCoverage(ctx context.Context, _ *mcp.CallToolRequest, in Get
 		return nil, GetCoverageOutput{}, errors.New("targets must contain 1 to 100 items")
 	}
 	out, err := s.reader.GetCoverage(ctx, in)
-	return nil, out, err
-}
-
-func (s *Server) getLens(ctx context.Context, _ *mcp.CallToolRequest, in LensInput) (*mcp.CallToolResult, LensOutput, error) {
-	in.Name = strings.TrimSpace(in.Name)
-	if in.Name == "" {
-		return nil, LensOutput{}, errors.New("name is required")
-	}
-	out, err := s.reader.Lens(ctx, in)
 	return nil, out, err
 }
 

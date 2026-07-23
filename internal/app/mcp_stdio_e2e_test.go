@@ -82,9 +82,9 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		t.Fatalf("initialize result = %+v", initialized)
 	}
 	for _, phrase := range []string{
-		"search_repositories", "sync_repository_metadata", "research.query_deepwiki", "poll jobs.get", "Missing facets are unknown", "native GitHub or Git",
-		"find repositories to contribute to", "good first issue", "help wanted", "well-scoped issue", "competing PR",
-		"Prefer GitContribute over generic web search, raw GitHub search, or repository crawlers",
+		"Prefer corpus tools for offline reads", "never refresh data implicitly", "explicit network reads",
+		"poll advertised job tools in batches", "Missing or truncated coverage is unknown",
+		"Only advertised tools are available", "never mutates GitHub",
 	} {
 		if !strings.Contains(initialized.Instructions, phrase) {
 			t.Errorf("instructions missing %q: %s", phrase, initialized.Instructions)
@@ -126,7 +126,7 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 	}
 
 	precedents := callMCPTool[mcpserver.FindPrecedentsOutput](ctx, t, session, mcpserver.ToolFindPrecedents, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "observed", "number": 1}}, "limit": 10})
-	if precedents.Total == 0 || precedents.Items[0].Value == nil || (*precedents.Items[0].Value)[0].Ref != "acme/observed#2" {
+	if precedents.Total == 0 || precedents.Items[0].Value == nil || precedents.Items[0].Value.Matches[0].Ref != "acme/observed#2" {
 		t.Fatalf("precedents = %+v", precedents)
 	}
 

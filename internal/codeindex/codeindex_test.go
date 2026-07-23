@@ -264,6 +264,9 @@ func TestIndexMaxFiles(t *testing.T) {
 	if len(snap.Documents) != 1 || snap.Documents[0].Path != "a.txt" {
 		t.Fatalf("expected one document (a.txt), got %+v", snap.Documents)
 	}
+	if !snap.Manifest.Truncated || snap.Manifest.IndexedFiles != 1 || snap.Manifest.SkippedFileLimit != 2 || snap.Manifest.TrackedEntries != 3 {
+		t.Fatalf("index manifest = %+v", snap.Manifest)
+	}
 
 	snap, err = Index(context.Background(), repo, Options{MaxFiles: 2})
 	if err != nil {

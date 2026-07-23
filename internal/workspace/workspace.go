@@ -139,8 +139,19 @@ type Manager struct {
 	workspaces map[string]*Workspace
 }
 
-// NewManager creates a manager. A nil runner uses the default git runner.
+// NewManager creates a manager and its root when necessary. A nil runner uses
+// the default git runner.
 func NewManager(root string, runner Runner) (*Manager, error) {
+	return configureManager(root, runner, true)
+}
+
+// OpenManager opens an existing manager root without creating filesystem state.
+// Use it for read-only workspace inspection paths.
+func OpenManager(root string, runner Runner) (*Manager, error) {
+	return configureManager(root, runner, false)
+}
+
+func configureManager(root string, runner Runner, create bool) (*Manager, error) {
 	if runner == nil {
 		runner = execRunner{}
 	}
@@ -148,8 +159,17 @@ func NewManager(root string, runner Runner) (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve root: %w", err)
 	}
-	if err := os.MkdirAll(root, 0755); err != nil {
-		return nil, fmt.Errorf("create root: %w", err)
+	if create {
+		if err := os.MkdirAll(root, 0750); err != nil {
+			return nil, fmt.Errorf("create root: %w", err)
+		}
+	} else if info, err := os.Stat(root); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("stat root: %w", err)
+	} else if !info.IsDir() {
+		return nil, ErrNotFound
 	}
 	root, err = filepath.EvalSymlinks(root)
 	if err != nil {
@@ -614,6 +634,20 @@ func (m *Manager) HasUntrackedByPath(ctx context.Context, path string) (bool, er
 	return len(out) > 0, nil
 }
 
+// ValidateWorkspacePath verifies that path exists within the managed worktree
+// subtree without invoking Git or changing filesystem state. Mirrors and other
+// manager state are deliberately excluded from executable capabilities.
+func (m *Manager) ValidateWorkspacePath(path string) error {
+	resolved, err := m.managedPath(path)
+	if err != nil {
+		return err
+	}
+	if !containsPath(filepath.Join(m.root, "workspaces"), resolved) {
+		return ErrNotManaged
+	}
+	return nil
+}
+
 func (m *Manager) managedPath(path string) (string, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -630,7 +664,11 @@ func (m *Manager) managedPath(path string) (string, error) {
 }
 
 func (m *Manager) contains(path string) bool {
-	rel, err := filepath.Rel(m.root, path)
+	return containsPath(m.root, path)
+}
+
+func containsPath(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
 	if err != nil {
 		return false
 	}

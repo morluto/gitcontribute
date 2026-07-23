@@ -13,44 +13,26 @@ import (
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
+	"github.com/morluto/gitcontribute/internal/research"
 )
 
 // SearchRepositories performs a local-only repository search.
 func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpserver.SearchRepositoriesInput) (mcpserver.SearchRepositoriesOutput, error) {
 	repoRef := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
+	repoFilter := ""
 	if in.Owner != "" || in.Repo != "" {
 		if err := repoRef.Validate(); err != nil {
 			return mcpserver.SearchRepositoriesOutput{}, err
 		}
+		repoFilter = repoRef.String()
 	}
 
-	c, err := r.openReadOnlyCorpus(ctx)
-	if err != nil {
-		return mcpserver.SearchRepositoriesOutput{}, err
-	}
-
-	// Exact repository lookup when owner and repo are provided.
-	if in.Owner != "" && in.Repo != "" {
-		repo, err := c.GetRepository(ctx, in.Owner, in.Repo)
-		if err != nil {
-			return mcpserver.SearchRepositoriesOutput{}, fmt.Errorf("get repository: %w", err)
-		}
-		if repo != nil {
-			return mcpserver.SearchRepositoriesOutput{
-				Query: in.Query,
-				Total: 1,
-				Matches: []mcpserver.RepositoryOutput{
-					repositoryToMCPOutput(repo),
-				},
-			}, nil
-		}
-		return mcpserver.SearchRepositoriesOutput{Query: in.Query, Matches: []mcpserver.RepositoryOutput{}}, nil
-	}
-
-	res, err := r.Service.searchCorpus(ctx, in.Query, cli.SearchOptions{
+	res, err := r.searchCorpus(ctx, in.Query, cli.SearchOptions{
 		Kind:   "repos",
+		Repo:   repoFilter,
 		Limit:  in.Limit,
 		Cursor: in.Cursor,
+		Sort:   in.Sort,
 	})
 	if err != nil {
 		return mcpserver.SearchRepositoriesOutput{}, err
@@ -168,28 +150,25 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		out.Title = thread.Title
 		out.Snippet = boundedText(thread.Body, 2000)
 		out.State = thread.State
-		fields := map[string]string{
-			"title":  thread.Title,
-			"body":   thread.Body,
-			"author": thread.Author,
-			"state":  thread.State,
-		}
-		if len(thread.Labels) > 0 {
-			fields["labels"] = strings.Join(thread.Labels, " ")
-		}
 		sourceRevision := thread.SourceUpdatedAt
 		if in.Query != "" {
 			evidence, found, err := c.FindThreadSearchEvidence(ctx, thread.ID, in.Query)
 			if err != nil {
 				return mcpserver.ExplainMatchOutput{}, err
 			}
-			if found && evidence.Source != "thread" {
-				fields[evidence.Source] = evidence.Text
-				out.Snippet = boundedText(evidence.Excerpt, 2000)
+			if !found {
+				return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+			}
+			rank := evidence.Rank
+			out.RetrievalRank = &rank
+			out.RankingMethod = "fts5_bm25_weighted"
+			out.MatchSource = evidence.Source
+			out.SearchTruncated = evidence.Truncated
+			out.Snippet = boundedText(evidence.Excerpt, 2000)
+			if evidence.Source != "thread" {
 				sourceRevision = evidence.SourceUpdatedAt
 			}
 		}
-		out.MatchedFields, out.Score = matchTerms(in.Query, fields)
 		out.SourceRevision = formatTime(sourceRevision)
 		cov, _, err := readCoverageTarget(ctx, c, mcpserver.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
 		if err != nil {
@@ -220,13 +199,16 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 			out.SourceRevision = match.Commit
 			out.AsOf = formatTime(match.SnapshotCreatedAt)
 			if in.Query != "" {
-				out.MatchedFields, out.Score = matchTerms(in.Query, map[string]string{"code": match.Content, "path": match.Path})
-				if out.Score == 0 {
+				if evidence, found, err := c.FindCodeSearchEvidence(ctx, match.DocID, in.Query); err != nil {
+					return mcpserver.ExplainMatchOutput{}, err
+				} else if found {
+					out.RetrievalRank, out.RankingMethod = &evidence.Rank, "fts5_bm25_weighted"
+					out.Snippet = boundedText(evidence.Excerpt, 2000)
+				} else {
 					return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
 				}
-			} else {
-				out.Score = 1.0
 			}
+			out.MatchSource = "code_document"
 			break
 		}
 
@@ -253,21 +235,24 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		out.Commit = match.Commit
 		out.Title = match.Path
 		out.Snippet = boundedText(match.Content, 2000)
-		out.MatchedFields, out.Score = matchTerms(in.Query, map[string]string{"code": match.Content, "path": match.Path})
+		out.MatchSource = "code_document"
+		rank := match.Rank
+		out.RetrievalRank, out.RankingMethod = &rank, "fts5_bm25_weighted"
 		out.SourceRevision = match.Commit
 		out.AsOf = formatTime(match.SnapshotCreatedAt)
 	case "repo":
 		out.Kind = "repo"
 		out.Title = ref.String()
 		out.Snippet = boundedText(repo.Description, 2000)
-		fields := map[string]string{
-			"name":        ref.String(),
-			"description": repo.Description,
-			"language":    repo.Language,
-			"license":     repo.License,
-			"topics":      strings.Join(repo.Topics, " "),
+		if evidence, found, err := c.FindRepositorySearchEvidence(ctx, repo.ID, in.Query); err != nil {
+			return mcpserver.ExplainMatchOutput{}, err
+		} else if found {
+			out.RetrievalRank, out.RankingMethod = &evidence.Rank, "fts5_bm25_weighted"
+			out.Snippet = boundedText(evidence.Excerpt, 2000)
+			out.MatchSource = "repository_metadata"
+		} else if in.Query != "" {
+			return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
 		}
-		out.MatchedFields, out.Score = matchTerms(in.Query, fields)
 		out.SourceRevision = formatTime(repo.SourceUpdatedAt)
 		cov, _, err := readCoverageTarget(ctx, c, mcpserver.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
 		if err != nil {
@@ -279,58 +264,12 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		return mcpserver.ExplainMatchOutput{}, fmt.Errorf("unsupported match kind %q", in.Kind)
 	}
 
-	terms := queryTerms(in.Query)
-	if len(terms) > 0 && out.Score == 0 {
-		return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
-	}
-	out.Reason = fmt.Sprintf("matched %d/%d terms in %s", int(out.Score*float64(len(terms))), len(terms), strings.Join(out.MatchedFields, ", "))
-	if len(terms) == 0 {
-		out.Score = 1.0
+	if strings.TrimSpace(in.Query) == "" {
 		out.Reason = "repository present in local corpus"
+	} else {
+		out.Reason = "matched by the stored weighted FTS5 document; retrieval_rank is the actual lower-is-better BM25 value"
 	}
 	return out, nil
-}
-
-func queryTerms(query string) []string {
-	terms := strings.Fields(strings.ToLower(query))
-	out := make([]string, 0, len(terms))
-	for _, t := range terms {
-		if t != "" {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
-func matchTerms(query string, fields map[string]string) ([]string, float64) {
-	terms := queryTerms(query)
-	if len(terms) == 0 {
-		return nil, 1.0
-	}
-	matchedFields := make([]string, 0, len(fields))
-	allText := make([]string, 0, len(fields))
-	for name, value := range fields {
-		text := strings.ToLower(value)
-		for _, term := range terms {
-			if strings.Contains(text, term) {
-				matchedFields = append(matchedFields, name)
-				break
-			}
-		}
-		allText = append(allText, text)
-	}
-	joined := strings.Join(allText, " ")
-	found := 0
-	for _, term := range terms {
-		if strings.Contains(joined, term) {
-			found++
-		}
-	}
-	score := 0.0
-	if len(terms) > 0 {
-		score = float64(found) / float64(len(terms))
-	}
-	return matchedFields, score
 }
 
 // BuildRepositoryDossier submits a durable job that builds a repository dossier.
@@ -413,6 +352,18 @@ func (r *MCPReader) RunValidation(ctx context.Context, in mcpserver.RunValidatio
 
 // StartInvestigation creates a new investigation workspace.
 func (r *MCPReader) StartInvestigation(ctx context.Context, in mcpserver.StartInvestigationInput) (mcpserver.InvestigationOutput, error) {
+	if in.Number > 0 {
+		res, err := r.StartInvestigationFromThread(ctx, research.ThreadRef{
+			Repo: domain.RepoRef{Owner: in.Owner, Repo: in.Repo}, Kind: domain.ThreadKind(in.Kind), Number: in.Number,
+		})
+		if err != nil {
+			return mcpserver.InvestigationOutput{}, err
+		}
+		out := investigationResultToMCP(res.Investigation)
+		out.HypothesisTotal = 1
+		out.Hypotheses = []mcpserver.HypothesisSummary{{ID: res.Hypothesis.ID, Title: res.Hypothesis.Title, Category: res.Hypothesis.Category}}
+		return out, nil
+	}
 	res, err := r.Service.StartInvestigation(ctx, cli.RepoRef{Owner: in.Owner, Repo: in.Repo}, in.CommitSHA, in.Lens)
 	if err != nil {
 		return mcpserver.InvestigationOutput{}, err
@@ -646,12 +597,16 @@ func (r *MCPReader) DefineValidation(ctx context.Context, in mcpserver.DefineVal
 		}
 		timeout = d
 	}
+	workingDir, baseDir, candidateDir, err := r.validationWorkspacePaths(ctx, in)
+	if err != nil {
+		return mcpserver.ValidationOutput{}, err
+	}
 	opts := cli.DefineValidationOptions{
 		Kind:           in.Kind,
 		Command:        in.Command,
-		WorkingDir:     in.WorkingDir,
-		BaseWorkingDir: in.BaseWorkingDir,
-		CandidateDir:   in.CandidateDir,
+		WorkingDir:     workingDir,
+		BaseWorkingDir: baseDir,
+		CandidateDir:   candidateDir,
 		Env:            append([]string(nil), in.Env...),
 		Timeout:        timeout,
 		MaxOutputBytes: in.MaxOutputBytes,
@@ -662,6 +617,43 @@ func (r *MCPReader) DefineValidation(ctx context.Context, in mcpserver.DefineVal
 		return mcpserver.ValidationOutput{}, err
 	}
 	return validationResultToMCP(res), nil
+}
+
+func (r *MCPReader) validationWorkspacePaths(ctx context.Context, in mcpserver.DefineValidationInput) (string, string, string, error) {
+	c, err := r.openReadOnlyCorpus(ctx)
+	if err != nil {
+		return "", "", "", err
+	}
+	mgr, err := r.workspaceReader()
+	if err != nil {
+		return "", "", "", fmt.Errorf("open managed workspaces: %w", err)
+	}
+	resolve := func(id string) (string, error) {
+		ws, err := c.GetWorkspace(ctx, id)
+		if err != nil {
+			return "", mapWorkspaceError(err)
+		}
+		if ws.InvestigationID != in.InvestigationID {
+			return "", fmt.Errorf("workspace %q does not belong to investigation %q", id, in.InvestigationID)
+		}
+		if err := mgr.ValidateWorkspacePath(ws.Path); err != nil {
+			return "", fmt.Errorf("workspace %q path is not managed: %w", id, err)
+		}
+		return ws.Path, nil
+	}
+	if in.WorkspaceID != "" {
+		path, err := resolve(in.WorkspaceID)
+		return path, "", "", err
+	}
+	base, err := resolve(in.BaseWorkspaceID)
+	if err != nil {
+		return "", "", "", err
+	}
+	candidate, err := resolve(in.CandidateWorkspaceID)
+	if err != nil {
+		return "", "", "", err
+	}
+	return "", base, candidate, nil
 }
 
 func validationResultToMCP(res *cli.ValidationResult) mcpserver.ValidationOutput {

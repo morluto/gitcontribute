@@ -129,12 +129,12 @@ func (s *Service) ExplainLens(ctx context.Context, name, ref string, opts cli.Le
 	if err != nil {
 		return nil, err
 	}
-	targetID := candidateFromMatch(target, query, now).ID
+	targetID := candidateFromMatch(target, now).ID
 
 	candidates := make([]lens.Candidate, 0, len(matches))
 	byID := make(map[string]searchMatch, len(matches))
 	for _, m := range matches {
-		cand := candidateFromMatch(m, query, now)
+		cand := candidateFromMatch(m, now)
 		candidates = append(candidates, cand)
 		byID[cand.ID] = m
 	}

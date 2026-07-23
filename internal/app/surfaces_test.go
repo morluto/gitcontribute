@@ -355,6 +355,11 @@ func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
 	if clusters.RuleVersion != "duplicate-v1" {
 		t.Fatalf("cluster rule version = %q", clusters.RuleVersion)
 	}
+	member := clusters.Clusters[0].Canonical
+	containing, err := reader.FindClusters(ctx, mcpserver.FindClustersInput{Owner: "owner", Repo: "repo", Kind: member.Kind, Number: member.Number, Limit: 10})
+	if err != nil || containing.Total != 1 || len(containing.Clusters) != 1 || containing.Clusters[0].StableID != clusters.Clusters[0].StableID {
+		t.Fatalf("member cluster = %+v, err=%v", containing, err)
+	}
 
 	cov, err := reader.GetCoverage(ctx, mcpserver.GetCoverageInput{Targets: []mcpserver.CoverageTarget{{Owner: "owner", Repo: "repo"}}})
 	if err != nil {

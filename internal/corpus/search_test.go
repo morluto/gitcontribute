@@ -3,6 +3,7 @@ package corpus
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -105,6 +106,43 @@ func TestSearchThreadsPageHonorsHardMax(t *testing.T) {
 	}
 }
 
+func TestSearchThreadsWeightsTitleLabelsAndSupportsNewestSort(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	threads := []Thread{
+		{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 1, State: "open", Title: "music playback fails", Body: "short", SourceUpdatedAt: time.Unix(100, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 2, State: "open", Title: "unrelated request", Body: "music music music music", SourceUpdatedAt: time.Unix(300, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 3, State: "open", Title: "label-only request", Labels: []string{"music"}, SourceUpdatedAt: time.Unix(200, 0).UTC()},
+	}
+	for _, thread := range threads {
+		thread.SourceCreatedAt = thread.SourceUpdatedAt
+		if _, err := c.UpsertThread(ctx, thread, `{}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	relevance, err := c.SearchThreadsPage(ctx, "music", SearchFilter{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(relevance.Threads) != 3 || relevance.Threads[0].Number != 1 {
+		t.Fatalf("weighted relevance order = %+v", relevance.Threads)
+	}
+
+	newest, err := c.SearchThreadsPage(ctx, "music", SearchFilter{Limit: 10, Sort: "updated"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(newest.Threads) != 3 || newest.Threads[0].Number != 2 || newest.Threads[1].Number != 3 {
+		t.Fatalf("updated order = %+v", newest.Threads)
+	}
+}
+
 func TestSearchThreadsPageAppliesMetadataFiltersAndBindsCursor(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -129,7 +167,7 @@ func TestSearchThreadsPageAppliesMetadataFiltersAndBindsCursor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	if len(page.Threads) != 1 || page.Threads[0].Number != 1 || page.Total != 2 || page.NextCursor == "" {
+	if len(page.Threads) != 1 || page.Threads[0].Number != 3 || page.Total != 2 || page.NextCursor == "" {
 		t.Fatalf("page = %+v", page)
 	}
 	filter.Cursor = page.NextCursor
@@ -233,6 +271,36 @@ func TestSearchableFacetReplacementHonorsSourceOrdering(t *testing.T) {
 	}
 }
 
+func TestThreadSearchReportsBoundedHydratedDocument(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "titlematch", "plain", "a", time.Unix(2, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	searchText := "insideboundary " + strings.Repeat("x", maxThreadFacetSearchCharacters) + " titlematch outsideboundary"
+	if err := c.ApplyFacetObservationSet(ctx, repo.ID, &thread.ID, "issue_comments", time.Unix(3, 0).UTC(), []FacetObservationInput{{SourceUpdatedAt: time.Unix(3, 0).UTC(), SearchText: searchText}}, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	page, err := c.SearchThreadsPage(ctx, "insideboundary", SearchFilter{Limit: 10})
+	if err != nil || len(page.Threads) != 1 || !page.Threads[0].MatchTruncated || page.Threads[0].MatchSource != "hydrated_facets" {
+		t.Fatalf("bounded search page = %+v, err=%v", page, err)
+	}
+	titlePage, err := c.SearchThreadsPage(ctx, "titlematch", SearchFilter{Limit: 10})
+	if err != nil || len(titlePage.Threads) != 1 || titlePage.Threads[0].MatchSource != "thread" {
+		t.Fatalf("truncated facet must not replace title attribution: page=%+v err=%v", titlePage, err)
+	}
+	omitted, err := c.SearchThreadsPage(ctx, "outsideboundary", SearchFilter{Limit: 10})
+	if err != nil || omitted.Total != 0 {
+		t.Fatalf("omitted suffix search = %+v, err=%v", omitted, err)
+	}
+}
+
 func seedFacetSearch(t *testing.T) (context.Context, *Corpus, *Thread, time.Time) {
 	t.Helper()
 	ctx := context.Background()
@@ -326,6 +394,10 @@ func TestListRepositoriesPageReturnsNextCursorAndTotal(t *testing.T) {
 	if first.NextCursor == "" {
 		t.Fatal("first page next_cursor is empty")
 	}
+	blank, err := c.ListRepositoriesWithOptions(ctx, " \t ", RepositorySearchOptions{Limit: 10})
+	if err != nil || len(blank.Repositories) != 5 {
+		t.Fatalf("whitespace-only query = %+v, err=%v", blank, err)
+	}
 
 	second, err := c.ListRepositoriesWithOptions(ctx, "", RepositorySearchOptions{Limit: 2, Cursor: first.NextCursor})
 	if err != nil {
@@ -410,6 +482,58 @@ func TestListRepositoriesPageHonorsHardMax(t *testing.T) {
 	_, err := c.ListRepositoriesWithOptions(ctx, "", RepositorySearchOptions{Limit: 101})
 	if err == nil || err.Error() != "repository list limit cannot exceed 100" {
 		t.Fatalf("unexpected error = %v", err)
+	}
+}
+
+func TestRepositorySearchWeightsNameTopicsDescriptionAndSupportsNewestSort(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repositories := []Repository{
+		{Owner: "acme", Name: "music", Description: "tool", SourceUpdatedAt: time.Unix(100, 0).UTC()},
+		{Owner: "acme", Name: "topic-match", Topics: []string{"music"}, SourceUpdatedAt: time.Unix(200, 0).UTC()},
+		{Owner: "acme", Name: "description-match", Description: "music", SourceUpdatedAt: time.Unix(300, 0).UTC()},
+	}
+	for _, repository := range repositories {
+		if _, err := c.UpsertRepository(ctx, repository, `{}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	relevance, err := c.ListRepositoriesWithOptions(ctx, "music", RepositorySearchOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string{relevance.Repositories[0].Name, relevance.Repositories[1].Name, relevance.Repositories[2].Name}; !slices.Equal(got, []string{"music", "topic-match", "description-match"}) {
+		t.Fatalf("weighted repository order = %v", got)
+	}
+
+	newest, err := c.ListRepositoriesWithOptions(ctx, "music", RepositorySearchOptions{Limit: 10, Sort: "updated"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newest.Repositories[0].Name != "description-match" {
+		t.Fatalf("updated repository order = %+v", newest.Repositories)
+	}
+}
+
+func TestRepositorySearchMatchesCanonicalSlug(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	if _, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "rocket", SourceUpdatedAt: time.Unix(100, 0).UTC()}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "other", Description: "rocket", SourceUpdatedAt: time.Unix(200, 0).UTC()}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := c.ListRepositoriesWithOptions(ctx, "acme/rocket", RepositorySearchOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Repositories) != 1 || page.Repositories[0].Owner != "acme" || page.Repositories[0].Name != "rocket" {
+		t.Fatalf("canonical slug search = %+v", page.Repositories)
 	}
 }
 

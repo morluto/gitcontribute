@@ -383,6 +383,32 @@ func TestJobResultToMCPExposesStructuredDurableProgress(t *testing.T) {
 	}
 }
 
+func TestGetJobsConciseOmitsPayloadsAndDetailedReturnsThem(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	job, err := svc.corpus.CreateJob(ctx, "sync", `{"owner":"acme"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := &MCPReader{svc}
+	concise, err := reader.GetJobs(ctx, mcpserver.GetJobsInput{IDs: []string{job.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(concise.Items) != 1 || concise.Items[0].Value == nil || concise.Items[0].Value.Request != nil || concise.Items[0].Value.Result != nil {
+		t.Fatalf("concise jobs output leaked payloads: %+v", concise)
+	}
+	detailed, err := reader.GetJobs(ctx, mcpserver.GetJobsInput{IDs: []string{job.ID}, ResponseFormat: "detailed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, ok := detailed.Items[0].Value.Request.(map[string]any)
+	if !ok || request["owner"] != "acme" {
+		t.Fatalf("detailed jobs output lost request: %+v", detailed)
+	}
+}
+
 type fakeRepositorySearchReader struct {
 	github.Reader
 	result  github.RepositorySearchResult
@@ -518,13 +544,13 @@ func TestFindPrecedentsUsesClosedAndMergedHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Total != 1 || out.Items[0].Value == nil || (*out.Items[0].Value)[0].Ref != "acme/rocket#2" {
+	if out.Total != 1 || out.Items[0].Value == nil || out.Items[0].Value.Matches[0].Ref != "acme/rocket#2" {
 		t.Fatalf("unexpected precedents: %+v", out)
 	}
-	if reasons := (*out.Items[0].Value)[0].Reasons; len(reasons) < 2 || reasons[1] != "pull request merged" {
+	if reasons := out.Items[0].Value.Matches[0].Reasons; len(reasons) < 2 || reasons[1] != "pull request merged" {
 		t.Fatalf("missing merged evidence: %v", reasons)
 	}
-	if got := (*out.Items[0].Value)[0].RuleVersion; got != "precedent-v1" {
+	if got := out.Items[0].Value.Matches[0].RuleVersion; got != "precedent-v1" {
 		t.Fatalf("rule version = %q, want precedent-v1", got)
 	}
 }
@@ -572,19 +598,16 @@ func TestDeepWikiUsesNormalizedRepositoriesForRequestAndOutput(t *testing.T) {
 	}
 }
 
-func TestScalableBatchInputsDeduplicateInFirstSeenOrder(t *testing.T) {
+func TestScalableBatchInputsRejectDuplicatesInsteadOfDroppingOutcomes(t *testing.T) {
 	t.Parallel()
-	repositories := dedupeRepositoryRefs([]mcpserver.RepositoryRef{{Owner: "one", Repo: "repo"}, {Owner: "two", Repo: "repo"}, {Owner: "one", Repo: "repo"}})
-	if want := []mcpserver.RepositoryRef{{Owner: "one", Repo: "repo"}, {Owner: "two", Repo: "repo"}}; !reflect.DeepEqual(repositories, want) {
-		t.Fatalf("repositories = %+v, want %+v", repositories, want)
+	if err := rejectDuplicateRepositoryRefs([]mcpserver.RepositoryRef{{Owner: "one", Repo: "repo"}, {Owner: "ONE", Repo: "repo"}}); err == nil {
+		t.Fatal("duplicate repositories were silently accepted")
 	}
-	threads := dedupeThreadRefs([]mcpserver.ThreadRef{{Owner: "one", Repo: "repo", Number: 1}, {Owner: "one", Repo: "repo", Number: 2}, {Owner: "one", Repo: "repo", Number: 1}})
-	if want := []mcpserver.ThreadRef{{Owner: "one", Repo: "repo", Number: 1}, {Owner: "one", Repo: "repo", Number: 2}}; !reflect.DeepEqual(threads, want) {
-		t.Fatalf("threads = %+v, want %+v", threads, want)
+	if err := rejectDuplicateThreadRefs([]mcpserver.ThreadRef{{Owner: "one", Repo: "repo", Number: 1}, {Owner: "one", Repo: "repo", Number: 1}}); err == nil {
+		t.Fatal("duplicate threads were silently accepted")
 	}
-	indexed := dedupeIndexRepositoryInputs([]mcpserver.IndexRepositoryInput{{Owner: "one", Repo: "repo", Remote: "first"}, {Owner: "one", Repo: "repo", Remote: "second"}})
-	if len(indexed) != 1 || indexed[0].Remote != "first" {
-		t.Fatalf("indexed repositories = %+v", indexed)
+	if err := rejectDuplicateIndexRepositoryInputs([]mcpserver.IndexRepositoryInput{{Owner: "one", Repo: "repo", Remote: "first"}, {Owner: "one", Repo: "repo", Remote: "second"}}); err == nil {
+		t.Fatal("conflicting repository remotes were silently accepted")
 	}
 }
 

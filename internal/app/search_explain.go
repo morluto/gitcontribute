@@ -28,46 +28,18 @@ func (s *Service) ExplainMatch(_ context.Context, query string, match cli.Search
 			return nil, fmt.Errorf("parse freshness: %w", err)
 		}
 	}
-	m := searchMatch{
-		Title:        match.Title,
-		Body:         match.Body,
-		Kind:         match.Kind,
-		MatchSource:  match.MatchSource,
-		MatchExcerpt: match.MatchExcerpt,
-	}
-	score, reasons := scoreMatch(query, m, freshness, match.Coverage, s.now())
-	return &ExplainMatchResult{Score: roundScore(score), Reasons: reasons}, nil
+	reasons := explainMatchReasons(query, match, freshness, s.now())
+	return &ExplainMatchResult{Score: match.Score, Reasons: reasons}, nil
 }
 
-func scoreMatch(query string, m searchMatch, freshness time.Time, coverage []string, now time.Time) (float64, []string) {
-	terms := uniqueTerms(strings.ToLower(query))
-	title := strings.ToLower(m.Title)
-	body := strings.ToLower(m.Body)
-
-	var score float64
+func explainMatchReasons(query string, match cli.SearchMatch, freshness, now time.Time) []string {
 	var reasons []string
-	matched := 0
-	for _, term := range terms {
-		if term == "" {
-			continue
+	if strings.TrimSpace(query) != "" {
+		source := match.MatchSource
+		if source == "" {
+			source = "weighted search document"
 		}
-		if strings.Contains(title, term) {
-			score += 0.25
-			reasons = append(reasons, fmt.Sprintf("query term %q matched in title", term))
-			matched++
-		} else if strings.Contains(body, term) {
-			score += 0.10
-			reasons = append(reasons, fmt.Sprintf("query term %q matched in body", term))
-			matched++
-		} else if m.MatchSource != "" {
-			score += 0.10
-			reasons = append(reasons, fmt.Sprintf("query term %q matched in stored %s", term, m.MatchSource))
-			matched++
-		}
-	}
-	if matched == len(terms) && len(terms) > 0 {
-		score += 0.15
-		reasons = append(reasons, "all query terms matched")
+		reasons = append(reasons, "the stored FTS5 index matched the query in "+source)
 	}
 
 	if !freshness.IsZero() && !now.IsZero() {
@@ -75,28 +47,14 @@ func scoreMatch(query string, m searchMatch, freshness time.Time, coverage []str
 		if age < 0 {
 			age = 0
 		}
-		days := age.Hours() / 24
-		freshnessScore := 1.0 / (1.0 + days/30.0)
-		if freshnessScore > 1 {
-			freshnessScore = 1
-		}
-		score += freshnessScore * 0.20
 		reasons = append(reasons, fmt.Sprintf("source updated %s ago at %s", humanDuration(age), freshness.Format(time.RFC3339)))
 	}
 
-	if len(coverage) > 0 {
-		covScore := float64(len(coverage)) * 0.05
-		if covScore > 0.2 {
-			covScore = 0.2
-		}
-		score += covScore
-		reasons = append(reasons, "coverage includes "+strings.Join(coverage, ", "))
+	if len(match.Coverage) > 0 {
+		reasons = append(reasons, "coverage includes "+strings.Join(match.Coverage, ", "))
 	} else {
 		reasons = append(reasons, "no coverage recorded")
 	}
-
-	if score > 1 {
-		score = 1
-	}
-	return roundScore(score), reasons
+	reasons = append(reasons, "score is weighted FTS5 BM25 rank converted from lower-is-better to higher-is-better relevance")
+	return reasons
 }

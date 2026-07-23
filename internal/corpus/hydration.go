@@ -17,6 +17,8 @@ type FacetObservationInput struct {
 	SearchText string
 }
 
+const maxThreadFacetSearchCharacters = 256 * 1024
+
 // ApplyFacetObservationSet records a complete ordered set of facet observations
 // and advances coverage for the facet in a single transaction. The existing
 // facet observations are replaced only when the new set wins the
@@ -107,6 +109,28 @@ func (c *Corpus) applyFacetObservationSet(ctx context.Context, repoID int64, thr
 	for _, p := range pages {
 		if _, err := c.applyFacetObservationTx(ctx, tx, repoID, threadID, facet, p.SourceUpdatedAt, p.Payload, p.SearchText, now); err != nil {
 			return false, err
+		}
+	}
+	if threadID != nil {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE thread_search_documents
+			SET facets = substr(COALESCE((
+			        SELECT group_concat(search_text, char(10))
+			        FROM (SELECT search_text FROM facet_observations WHERE thread_id = ? ORDER BY observation_sequence)
+			    ), ''), 1, ?),
+			    facets_updated_at = COALESCE((
+			        SELECT MAX(source_updated_at)
+			        FROM facet_observations
+			        WHERE thread_id = ?
+			    ), 0),
+			    facets_truncated = length(COALESCE((
+			        SELECT group_concat(search_text, char(10))
+			        FROM facet_observations
+			        WHERE thread_id = ?
+			    ), '')) > ?
+			WHERE thread_id = ?
+		`, *threadID, maxThreadFacetSearchCharacters, *threadID, *threadID, maxThreadFacetSearchCharacters, *threadID); err != nil {
+			return false, fmt.Errorf("refresh thread search document: %w", err)
 		}
 	}
 

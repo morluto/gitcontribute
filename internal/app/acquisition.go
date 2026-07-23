@@ -78,5 +78,6 @@ func (s *Service) Acquire(ctx context.Context, repo cli.RepoRef, remote string) 
 		Inserted:      inserted,
 		AcquiredAt:    formatTime(acq.AcquiredAt),
 		Message:       message,
+		IndexManifest: snapshot.Manifest,
 	}, nil
 }
