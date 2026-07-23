@@ -1,0 +1,24 @@
+{
+  "version": "agent-tool-eval.v2",
+  "fixture_revision": "search-contract-v3",
+  "scenarios": [
+    {
+      "id": "newest_music_thread",
+      "prompt": "Using only GitContribute's stored corpus, find the newest issue about music in acme/player. Return its issue number and say whether newest or relevance ordering was used.",
+      "toolsets": ["contribute"],
+      "read_only": true
+    },
+    {
+      "id": "readme_evidence_boundary",
+      "prompt": "Using only stored evidence, determine whether acme/synth documents MIDI support. State any coverage limitation instead of guessing.",
+      "toolsets": ["contribute", "code"],
+      "read_only": true
+    },
+    {
+      "id": "persisted_dossier_boundary",
+      "prompt": "Read the persisted dossier for acme/rocket. Do not rebuild it or contact GitHub. Report its as-of revision.",
+      "toolsets": ["contribute"],
+      "read_only": true
+    }
+  ]
+}

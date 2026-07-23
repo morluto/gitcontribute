@@ -1,0 +1,34 @@
+{
+  "version": "agent-tool-eval-oracle.v2",
+  "fixture_revision": "search-contract-v3",
+  "scenarios": [
+    {
+      "id": "newest_music_thread",
+      "correct_conclusion": "Issue 2 is newest.",
+      "required_evidence": ["A stored thread search uses sort=updated.", "The returned source_updated_at orders issue 2 ahead of issue 1."],
+      "critical_discriminator": "Default relevance ranks the older title match first; newest intent requires explicit updated ordering.",
+      "tempting_wrong_path": "Use default relevance and call its first result newest.",
+      "acceptable_tools": ["corpus.search_threads", "corpus.get_threads"],
+      "minimum_semantic_score": 0.8
+    },
+    {
+      "id": "readme_evidence_boundary",
+      "correct_conclusion": "The indexed README documents MIDI support, subject to code-index coverage.",
+      "required_evidence": ["README evidence comes from corpus.search_code, not repository metadata ranking.", "The response reports whether the selected code snapshot was truncated."],
+      "critical_discriminator": "Repository description absence is not evidence that README documentation is absent.",
+      "tempting_wrong_path": "Search only repository names and descriptions, then answer no.",
+      "acceptable_tools": ["corpus.search_code"],
+      "minimum_semantic_score": 0.8
+    },
+    {
+      "id": "persisted_dossier_boundary",
+      "correct_conclusion": "Return the stored dossier and its persisted as-of value without regeneration.",
+      "required_evidence": ["corpus.get_repository_dossier is used.", "No build, sync, or GitHub tool is called."],
+      "critical_discriminator": "The current repository projection can be newer than the persisted dossier; a read must not silently rebuild it.",
+      "tempting_wrong_path": "Call corpus.build_repository_dossier before reading.",
+      "acceptable_tools": ["corpus.get_repository_dossier"],
+      "forbidden_tools": ["corpus.build_repository_dossier", "github.sync_repository_metadata"],
+      "minimum_semantic_score": 0.8
+    }
+  ]
+}

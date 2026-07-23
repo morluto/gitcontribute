@@ -11,3 +11,10 @@ search exclusivity, semantic references, and terminal job behavior.
 
 Do not add credentials, live GitHub responses, wall-clock timings, or claims
 about model success to these fixtures.
+
+`public-v2.json` contains natural held-out prompts only. `oracle-v2.json` is
+evaluator-only: do not place it in the candidate workspace or prompt context.
+It scores conclusions and evidence, not one exact call order. Run the public
+cases repeatedly through the same model and sampling settings with the focused
+catalog, save the full MCP transcript, then have a separate reviewer apply the
+oracle.

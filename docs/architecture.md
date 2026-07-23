@@ -191,10 +191,14 @@ Cancellation, a page error, or a stale source revision leaves the previous
 complete set visible. An empty complete set is meaningful: it replaces old
 children and records complete coverage with zero items.
 
-## Durable jobs
+## Persistent job records
 
-Long-running application operations return durable job IDs. Job state and
-events live in SQLite; goroutines only perform the active work.
+Long-running application operations return stable job IDs. Job state and
+events live in SQLite; active execution remains process-bound. A stale running
+job is marked failed after restart and is never silently replayed, because
+external reads and host operations cannot all promise safe automatic replay.
+The agent may inspect the stored request and explicitly resubmit an idempotent
+operation after reviewing the failure.
 
 Each `JobExecutor` registers an opaque owner ID and periodically updates its
 lease. A new executor reconciles only running jobs whose owner is absent or
@@ -211,9 +215,10 @@ delivered to an in-process worker directly or observed by its polling loop from
 another process. Reconciliation uses an immediate SQLite transaction so a
 heartbeat cannot interleave between the liveness read and stale-owner update.
 MCP job reads expose structured phase, completed-item, total-item, percentage,
-and retry-delay fields. Batch reads and cancellation preserve input order and
-isolate per-item failures; free-form durable event text is not an MCP progress
-contract.
+and retry-delay fields. Concise polling omits stored request and result payloads;
+detailed mode retrieves them after a finalist is terminal. Batch reads and
+cancellation preserve input order and isolate per-item failures; free-form job
+event text is not an MCP progress contract.
 
 ### Bounded batch operations
 
@@ -223,6 +228,30 @@ acquisition uses a lower ceiling because it performs Git processes and local
 writes. A single unavailable or retryable item does not erase successful
 siblings. Callers should retry only items marked retryable and use the provided
 recovery hint for unavailable inputs.
+Duplicate batch keys are rejected before submission instead of being silently
+collapsed, because collapsing would make the returned outcome count differ
+from the requested input count. Index requests also reject two remotes for the
+same repository as ambiguous.
+
+### Agent tool contract
+
+MCP exposes one canonical `gitcontribute://` resource namespace. Historical
+resource aliases are not advertised or routed. Tool names follow capability
+boundaries (`corpus`, `github`, `code`, `workspace`, `validation`, `workflow`,
+and `research`) rather than mirroring low-level API endpoints. Frequently
+chained operations may be consolidated only when they share one authority and
+one failure boundary; a read must never hide a refresh, write, or process run.
+The CLI defaults to the focused `contribute` catalog. Code/workspace execution,
+external derived research, diagnostics, portfolio, and advanced similarity are
+opt-in profiles; `all` exists for auditing and embedding.
+
+Tool inputs are strict and bounded, output distinguishes total population from
+returned/truncated items, and errors state how the caller can recover. MCP SDK
+annotations describe observable effects: pure external reads are read-only and
+idempotent with open-world access, while reads that also persist projections
+remain write operations. Catalog changes require realistic multi-call agent
+evaluations, including held-out queries, tool-call count, errors, latency, and
+context size; scripted schema checks alone do not establish good tool choice.
 
 ## GitHub transport
 
@@ -252,10 +281,36 @@ cleanliness and removed after indexing.
 Validation is a different capability. It executes only after the caller passes
 the explicit execution flag and records the command, working directory,
 environment allowlist, timeout, output bound, and result.
+The MCP definition tool accepts managed workspace IDs rather than arbitrary
+host paths. The application resolves each ID and verifies that it belongs to
+the selected investigation before persisting executable state. The explicit
+CLI remains a local-user interface and may accept a directly supplied path.
 
 ## Search and analysis
 
-Search uses the local SQLite corpus and FTS indexes. Thread search indexes
+Search uses the local SQLite corpus and FTS5 indexes; agents query bounded
+application tools rather than receiving raw database access. Repository ranking
+weights owner/name at 10, topics at 5, and description at 2. Thread ranking
+weights title at 10, labels at 5, body at 2, and complete hydrated facet evidence
+at 0.5. Code ranking weights path at 5 and content at 1. README text remains
+available through code search when indexed; it is not silently treated as
+repository metadata because code coverage can be partial.
+Scoped code search returns the selected snapshot manifest even when no document
+matches, so absence can be separated from a missing or truncated index.
+Snapshots created before manifests were introduced report
+`indexed_coverage_unknown`; their zero skip counts are never presented as proof
+of complete coverage.
+
+Title, labels, body, and hydrated evidence are materialized into one search
+document per thread and ranked by one BM25 invocation. Ranks from the legacy
+thread and facet indexes are never compared; the facet index is used only to
+identify the matching evidence source and excerpt.
+
+Relevance is the default. Equal-ranked results use newest source revision as
+the first tie-breaker. Repository and thread tools also expose `sort=updated`
+for tasks that explicitly ask for the newest matching records. Search returns
+bounded excerpts rather than complete thread bodies or files; exact-object
+tools provide details after the agent narrows candidates. Thread search indexes
 titles and bodies plus product-selected fields from complete hydrated issue
 comments, pull-request reviews, review comments, and opt-in timeline events.
 The searchable facet projection is replaced in the same transaction as its
@@ -265,9 +320,16 @@ document, and matches report the source facet plus a bounded excerpt. Untrusted
 discussion remains searchable data and cannot grant capabilities. Cursors
 encode their query and scope so they cannot be reused for a different search.
 Ordering always has a deterministic tie-breaker.
+Hydrated search text is materialized once per complete facet replacement and
+bounded to 262,144 characters per thread. Results expose
+`match_truncated=true` when that bound omitted text; complete API coverage must
+not be mistaken for complete search-text coverage.
 
-Scores are explanations, not opaque relevance claims. They are derived from
-stored matches, freshness, coverage, and optional lens weights. Lens ranking
+FTS rank is retrieval evidence and must not be relabeled as a separately
+hand-written score. Match explanations report the actual lower-is-better BM25
+rank and the indexed document or hydrated facet that supplied the excerpt;
+they do not guess token matches with a second string matcher. Freshness and
+coverage are separate facts. Lens ranking
 uses a bounded population and therefore does not support cursor pagination.
 Contribution Radar similarly ranks a bounded open-issue population, separates
 score from the explicit `ready_to_code`, `needs_diagnosis`,
