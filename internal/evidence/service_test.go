@@ -3,6 +3,7 @@ package evidence
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,8 +12,10 @@ import (
 )
 
 type fakeRepo struct {
+	mu       sync.Mutex
 	defs     map[string]*ValidationDefinition
 	runs     map[string]*ValidationRun
+	groups   map[string]*ValidationRunGroup
 	evidence map[string]*Evidence
 }
 
@@ -20,16 +23,21 @@ func newFakeRepo() *fakeRepo {
 	return &fakeRepo{
 		defs:     make(map[string]*ValidationDefinition),
 		runs:     make(map[string]*ValidationRun),
+		groups:   make(map[string]*ValidationRunGroup),
 		evidence: make(map[string]*Evidence),
 	}
 }
 
 func (r *fakeRepo) SaveValidationDefinition(_ context.Context, d *ValidationDefinition) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.defs[d.ID] = d
 	return nil
 }
 
 func (r *fakeRepo) GetValidationDefinition(_ context.Context, id string) (*ValidationDefinition, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	d, ok := r.defs[id]
 	if !ok {
 		return nil, ErrNotFound
@@ -38,11 +46,15 @@ func (r *fakeRepo) GetValidationDefinition(_ context.Context, id string) (*Valid
 }
 
 func (r *fakeRepo) SaveValidationRun(_ context.Context, run *ValidationRun) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.runs[run.ID] = run
 	return nil
 }
 
 func (r *fakeRepo) GetValidationRun(_ context.Context, id string) (*ValidationRun, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	run, ok := r.runs[id]
 	if !ok {
 		return nil, ErrNotFound
@@ -50,12 +62,33 @@ func (r *fakeRepo) GetValidationRun(_ context.Context, id string) (*ValidationRu
 	return run, nil
 }
 
+func (r *fakeRepo) SaveValidationRunGroup(_ context.Context, group *ValidationRunGroup) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.groups[group.ID] = group
+	return nil
+}
+
+func (r *fakeRepo) GetValidationRunGroup(_ context.Context, id string) (*ValidationRunGroup, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	group, ok := r.groups[id]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	return group, nil
+}
+
 func (r *fakeRepo) SaveEvidence(_ context.Context, e *Evidence) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.evidence[e.ID] = e
 	return nil
 }
 
 func (r *fakeRepo) ListEvidence(_ context.Context, filter EvidenceFilter) ([]*Evidence, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	var out []*Evidence
 	for _, e := range r.evidence {
 		if filter.OpportunityID != "" && e.OpportunityID != filter.OpportunityID {
@@ -363,6 +396,21 @@ func TestRunValidationPassesOutputBound(t *testing.T) {
 	}
 	if runner.request.MaxOutputBytes != 1024 {
 		t.Fatalf("max output bytes = %d, want 1024", runner.request.MaxOutputBytes)
+	}
+}
+
+func TestDefineValidationRequiresDeclaredProtocolForReadinessDeadline(t *testing.T) {
+	svc := NewService(newFakeRepo(), &fakeRunner{})
+	withoutProtocol := &ValidationDefinition{Command: []string{"server"}, WorkingDir: "/tmp", ReadinessTimeout: time.Second}
+	if err := svc.DefineValidation(context.Background(), withoutProtocol); err == nil {
+		t.Fatal("readiness deadline without protocol was accepted")
+	}
+	withProtocol := &ValidationDefinition{Command: []string{"server"}, WorkingDir: "/tmp", Protocol: ValidationProtocolMCPStdio}
+	if err := svc.DefineValidation(context.Background(), withProtocol); err != nil {
+		t.Fatal(err)
+	}
+	if withProtocol.ReadinessTimeout != 30*time.Second {
+		t.Fatalf("readiness timeout = %s", withProtocol.ReadinessTimeout)
 	}
 }
 

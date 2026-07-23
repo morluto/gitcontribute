@@ -24,6 +24,7 @@ func TestBaselineMigrationCreatesCurrentSchema(t *testing.T) {
 		"investigations", "opportunities", "workspaces", "dossiers", "cluster_runs", "clusters",
 		"contribution_manifests",
 		"concerns", "concern_links", "concerns_fts",
+		"validation_run_groups",
 	} {
 		if !migrationTableExists(ctx, t, c.db, table) {
 			t.Fatalf("table %s missing after baseline migration", table)

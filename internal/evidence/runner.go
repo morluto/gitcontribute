@@ -55,24 +55,51 @@ func (r *ExecRunner) Run(ctx context.Context, req RunRequest) (*RunResult, error
 	configureCommandCancellation(cmd)
 	cmd.WaitDelay = 2 * time.Second
 
-	started := time.Now()
+	started := time.Now().UTC()
+	phases := RunPhases{SpawnStartedAt: started}
 	if err := cmd.Start(); err != nil {
 		if ctx.Err() != nil {
+			completed := time.Now().UTC()
+			timeoutPhase := ""
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				timeoutPhase = "startup"
+			}
 			return &RunResult{
 				ExitCode:       -1,
 				StartedAt:      started,
-				CompletedAt:    time.Now(),
+				CompletedAt:    completed,
 				Error:          ctx.Err().Error(),
 				Classification: RunClassificationCancelled,
+				Phases:         phases,
+				TimeoutPhase:   timeoutPhase,
+				FailurePhase:   "startup",
+				Cleanup:        CleanupResult{Status: "unavailable", Reason: "process did not start", CheckedAt: completed},
 			}, nil
 		}
-		return nil, fmt.Errorf("runner: start: %w", err)
+		completed := time.Now().UTC()
+		return &RunResult{
+			ExitCode: -1, StartedAt: started, CompletedAt: completed,
+			Error: fmt.Sprintf("runner: start: %v", err), Classification: RunClassificationError,
+			Phases: phases, FailurePhase: "startup",
+			Cleanup: CleanupResult{Status: "unavailable", Reason: "process did not start", CheckedAt: completed},
+		}, nil
 	}
+	phases.ProcessStartedAt = time.Now().UTC()
+	// #nosec G115 -- gopsutil models OS process IDs as int32 on supported platforms.
+	sampler := startProcessSampler(ctx, int32(cmd.Process.Pid), req.SampleInterval)
 
 	runErr := cmd.Wait()
-	completed := time.Now()
+	completed := time.Now().UTC()
+	phases.ExecutionEndedAt = completed
+	phases.ShutdownStartedAt = completed
+	sampled := sampler.finish()
+	phases.ShutdownCheckedAt = sampled.cleanup.CheckedAt
 
 	if ctx.Err() != nil {
+		timeoutPhase := ""
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			timeoutPhase = "execution"
+		}
 		return &RunResult{
 			ExitCode:       -1,
 			Stdout:         stdoutBuf.String(),
@@ -82,6 +109,12 @@ func (r *ExecRunner) Run(ctx context.Context, req RunRequest) (*RunResult, error
 			CompletedAt:    completed,
 			Error:          ctx.Err().Error(),
 			Classification: RunClassificationCancelled,
+			Process:        sampled.identity,
+			Phases:         phases,
+			TimeoutPhase:   timeoutPhase,
+			FailurePhase:   "execution",
+			Resources:      sampled.telemetry,
+			Cleanup:        sampled.cleanup,
 		}, nil
 	}
 
@@ -101,6 +134,17 @@ func (r *ExecRunner) Run(ctx context.Context, req RunRequest) (*RunResult, error
 		}
 		runErrStr = runErr.Error()
 	}
+	timeoutPhase := ""
+	if errors.Is(runErr, exec.ErrWaitDelay) {
+		timeoutPhase = "shutdown"
+	}
+	failurePhase := ""
+	if runErr != nil {
+		failurePhase = "execution"
+	}
+	if timeoutPhase == "shutdown" {
+		failurePhase = "shutdown"
+	}
 
 	return &RunResult{
 		ExitCode:       exitCode,
@@ -111,6 +155,12 @@ func (r *ExecRunner) Run(ctx context.Context, req RunRequest) (*RunResult, error
 		CompletedAt:    completed,
 		Error:          runErrStr,
 		Classification: classification,
+		Process:        sampled.identity,
+		Phases:         phases,
+		TimeoutPhase:   timeoutPhase,
+		FailurePhase:   failurePhase,
+		Resources:      sampled.telemetry,
+		Cleanup:        sampled.cleanup,
 	}, nil
 }
 
