@@ -217,6 +217,11 @@ func (f *fakeSurfacesService) ExportEvidence(ctx context.Context, investigationI
 	return &cli.ExportResult{Kind: "evidence", Format: format, Content: "# evidence\n"}, f.err
 }
 
+func (f *fakeSurfacesService) ExportManifest(_ context.Context, opportunityID string, _ cli.ManifestExportOptions) (*cli.ExportResult, error) {
+	f.exportCalled = true
+	return &cli.ExportResult{Kind: "manifest", Format: "json", Content: `{"manifest":"` + opportunityID + `"}`}, f.err
+}
+
 func newSurfacesCLI(svc *fakeSurfacesService) (*cli.CLI, *strings.Builder, *strings.Builder) {
 	var stdout, stderr strings.Builder
 	return cli.New(svc, nil, &stdout, &stderr), &stdout, &stderr

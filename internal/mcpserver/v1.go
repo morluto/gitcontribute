@@ -289,6 +289,7 @@ type PrepareContributionInput struct {
 	LinkedIssue   string `json:"linked_issue,omitempty" jsonschema:"Linked issue for pull requests"`
 	Guidance      string `json:"guidance,omitempty" jsonschema:"Optional guidance to include"`
 	Success       string `json:"success,omitempty" jsonschema:"Success criteria for issue drafts"`
+	ManifestID    string `json:"manifest_id,omitempty" jsonschema:"Stored evidence manifest ID to reference without copying its claims"`
 }
 
 // DraftOutput contains a rendered contribution draft.
@@ -298,6 +299,30 @@ type DraftOutput struct {
 	Title         string `json:"title"`
 	Body          string `json:"body"`
 	RenderedAt    string `json:"rendered_at"`
+	ManifestID    string `json:"manifest_id,omitempty" jsonschema:"Referenced stored evidence manifest ID"`
+}
+
+// ExportManifestInput selects bounded local evidence for one contribution manifest.
+type ExportManifestInput struct {
+	OpportunityID string                    `json:"opportunity_id" jsonschema:"Opportunity ID"`
+	WorkspaceID   string                    `json:"workspace_id,omitempty" jsonschema:"Managed workspace ID to bind"`
+	PullRequest   *ManifestPullRequestInput `json:"pull_request,omitempty" jsonschema:"Exact stored pull request to include"`
+}
+
+// ManifestPullRequestInput identifies one exact stored pull request.
+type ManifestPullRequestInput struct {
+	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
+	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
+	Number int    `json:"number" jsonschema:"Positive pull request number"`
+}
+
+// ManifestOutput returns the stable identity and full in-toto-shaped statement.
+type ManifestOutput struct {
+	ManifestID    string         `json:"manifest_id" jsonschema:"Stable sha256-prefixed manifest ID"`
+	ContentSHA256 string         `json:"content_sha256" jsonschema:"Hex SHA-256 of stable manifest content"`
+	SchemaVersion string         `json:"schema_version" jsonschema:"Contribution manifest predicate schema version"`
+	Status        string         `json:"status" jsonschema:"Overall completeness status"`
+	Statement     map[string]any `json:"statement" jsonschema:"Full in-toto-shaped evidence statement"`
 }
 
 // CancelJobInput selects durable jobs for bounded, persisted cancellation.
@@ -419,6 +444,12 @@ func (s *Server) registerV1() {
 		annotations: localWrite, supportedBy: supports[Operator], input: inputSchema[PrepareContributionInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 		}), output: outputSchema[DraftOutput]("Newly rendered and persisted local contribution draft."), handler: s.prepareContribution,
+	})
+	addCatalogTool(s, catalogTool[ExportManifestInput, ManifestOutput]{
+		name: ToolExportManifest, title: "Export contribution evidence manifest",
+		description: "Generate and persist a deterministic local evidence manifest from SQLite and an optional managed workspace snapshot. It may run non-mutating Git commands but never contacts GitHub; sync exact GitHub facets separately before export.",
+		annotations: localWrite, supportedBy: supports[Operator], input: inputSchema[ExportManifestInput](nil),
+		output: outputSchema[ManifestOutput]("Digest-bound contribution evidence statement with explicit completeness gaps."), handler: s.exportManifest,
 	})
 	addCatalogTool(s, catalogTool[CancelJobInput, GetJobsOutput]{
 		name: ToolCancelJob, title: "Cancel durable jobs in one batch",
@@ -737,6 +768,21 @@ func (s *Server) prepareContribution(ctx context.Context, _ *mcp.CallToolRequest
 		return nil, DraftOutput{}, errors.New("contribution preparation is not available")
 	}
 	out, err := operator.PrepareContribution(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) exportManifest(ctx context.Context, _ *mcp.CallToolRequest, in ExportManifestInput) (*mcp.CallToolResult, ManifestOutput, error) {
+	if _, err := normalizeID("opportunity_id", in.OpportunityID); err != nil {
+		return nil, ManifestOutput{}, err
+	}
+	if in.PullRequest != nil && (strings.TrimSpace(in.PullRequest.Owner) == "" || strings.TrimSpace(in.PullRequest.Repo) == "" || in.PullRequest.Number <= 0) {
+		return nil, ManifestOutput{}, InvalidArgument("pull_request", "owner, repo, and a positive number are required", map[string]any{"owner": "acme", "repo": "rocket", "number": 42})
+	}
+	operator, ok := s.reader.(Operator)
+	if !ok {
+		return nil, ManifestOutput{}, errors.New("manifest export is not available")
+	}
+	out, err := operator.ExportManifest(ctx, in)
 	return nil, out, err
 }
 

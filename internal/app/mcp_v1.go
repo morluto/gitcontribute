@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -688,8 +689,9 @@ func (r *MCPReader) PrepareContribution(ctx context.Context, in mcpserver.Prepar
 	switch in.Kind {
 	case "issue":
 		draft, err = r.Service.PrepareIssue(ctx, in.OpportunityID, cli.PrepareIssueOptions{
-			Guidance: in.Guidance,
-			Success:  in.Success,
+			Guidance:   in.Guidance,
+			Success:    in.Success,
+			ManifestID: in.ManifestID,
 		})
 	case "pull_request":
 		draft, err = r.Service.PreparePullRequest(ctx, in.OpportunityID, cli.PreparePROptions{
@@ -700,6 +702,7 @@ func (r *MCPReader) PrepareContribution(ctx context.Context, in mcpserver.Prepar
 			Limitations:   in.Limitations,
 			LinkedIssue:   in.LinkedIssue,
 			Guidance:      in.Guidance,
+			ManifestID:    in.ManifestID,
 		})
 	default:
 		return mcpserver.DraftOutput{}, fmt.Errorf("unsupported contribution kind %q", in.Kind)
@@ -717,5 +720,30 @@ func draftResultToMCP(d *cli.DraftResult) mcpserver.DraftOutput {
 		Title:         d.Title,
 		Body:          d.Body,
 		RenderedAt:    d.RenderedAt,
+		ManifestID:    d.ManifestID,
 	}
+}
+
+// ExportManifest assembles a bounded local contribution evidence statement.
+func (r *MCPReader) ExportManifest(ctx context.Context, in mcpserver.ExportManifestInput) (mcpserver.ManifestOutput, error) {
+	opts := ManifestOptions{WorkspaceID: strings.TrimSpace(in.WorkspaceID)}
+	if in.PullRequest != nil {
+		opts.PullRequest = &ManifestPullRequest{Owner: strings.TrimSpace(in.PullRequest.Owner), Repo: strings.TrimSpace(in.PullRequest.Repo), Number: in.PullRequest.Number}
+	}
+	statement, err := r.ContributionManifest(ctx, in.OpportunityID, opts)
+	if err != nil {
+		return mcpserver.ManifestOutput{}, err
+	}
+	payload, err := json.Marshal(statement)
+	if err != nil {
+		return mcpserver.ManifestOutput{}, err
+	}
+	var structured map[string]any
+	if err := json.Unmarshal(payload, &structured); err != nil {
+		return mcpserver.ManifestOutput{}, err
+	}
+	return mcpserver.ManifestOutput{
+		ManifestID: statement.Predicate.ManifestID, ContentSHA256: statement.Predicate.ContentSHA256,
+		SchemaVersion: statement.Predicate.SchemaVersion, Status: statement.Predicate.Status, Statement: structured,
+	}, nil
 }

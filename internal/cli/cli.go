@@ -464,6 +464,7 @@ type issueCmd struct {
 	OpportunityID string `arg:"" help:"Opportunity ID"`
 	Guidance      string `name:"guidance" help:"Repository contribution guidance"`
 	Success       string `name:"success" help:"Success criteria"`
+	ManifestID    string `name:"manifest-id" help:"Stored evidence manifest to reference"`
 	JSON          bool   `name:"json" help:"Print the result as JSON"`
 }
 
@@ -476,6 +477,7 @@ type prCmd struct {
 	Limitations   string `name:"limitations" help:"Limitations"`
 	LinkedIssue   string `name:"linked-issue" help:"Linked issue"`
 	Guidance      string `name:"guidance" help:"Repository contribution guidance"`
+	ManifestID    string `name:"manifest-id" help:"Stored evidence manifest to reference"`
 	JSON          bool   `name:"json" help:"Print the result as JSON"`
 }
 
@@ -515,6 +517,7 @@ type neighborsCmd struct {
 type exportCmd struct {
 	Dossier  exportDossierCmd  `cmd:"" help:"Export a repository dossier"`
 	Evidence exportEvidenceCmd `cmd:"" help:"Export investigation evidence"`
+	Manifest exportManifestCmd `cmd:"" help:"Export a contribution evidence manifest"`
 }
 
 type exportDossierCmd struct {
@@ -527,6 +530,13 @@ type exportEvidenceCmd struct {
 	InvestigationID string `arg:"" help:"Investigation ID"`
 	Format          string `name:"format" default:"markdown" enum:"json,markdown,md" help:"Export format"`
 	Output          string `name:"output" help:"Write to a file instead of stdout"`
+}
+
+type exportManifestCmd struct {
+	OpportunityID string `arg:"" help:"Opportunity ID"`
+	WorkspaceID   string `name:"workspace" help:"Managed workspace ID to bind"`
+	PullRequest   string `name:"pull-request" help:"Exact stored pull request as OWNER/REPO#NUMBER"`
+	Output        string `name:"output" help:"Write to a file instead of stdout"`
 }
 
 type lensCmd struct {
@@ -1522,8 +1532,7 @@ func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) e
 	case "prepare issue":
 		fmt.Fprintf(c.stderr, "preparing issue draft for opportunity %s...\n", cmd.Issue.OpportunityID)
 		result, err := service.PrepareIssue(ctx, cmd.Issue.OpportunityID, PrepareIssueOptions{
-			Guidance: cmd.Issue.Guidance,
-			Success:  cmd.Issue.Success,
+			Guidance: cmd.Issue.Guidance, Success: cmd.Issue.Success, ManifestID: cmd.Issue.ManifestID,
 		})
 		if err != nil {
 			return c.mapError(err)
@@ -1539,6 +1548,7 @@ func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) e
 			Limitations:   cmd.PR.Limitations,
 			LinkedIssue:   cmd.PR.LinkedIssue,
 			Guidance:      cmd.PR.Guidance,
+			ManifestID:    cmd.PR.ManifestID,
 		})
 		if err != nil {
 			return c.mapError(err)
@@ -1929,6 +1939,17 @@ func (c *CLI) runExport(ctx context.Context, command string, cmd *exportCmd) err
 	case "export evidence":
 		result, err = service.ExportEvidence(ctx, cmd.Evidence.InvestigationID, cmd.Evidence.Format)
 		output = cmd.Evidence.Output
+	case "export manifest":
+		opts := ManifestExportOptions{WorkspaceID: cmd.Manifest.WorkspaceID}
+		if cmd.Manifest.PullRequest != "" {
+			repo, number, parseErr := parseThreadRef(cmd.Manifest.PullRequest)
+			if parseErr != nil {
+				return NewCLIError(ExitUsage, parseErr)
+			}
+			opts.PullRequest = &ManifestPullRequestRef{Owner: repo.Owner, Repo: repo.Repo, Number: number}
+		}
+		result, err = service.ExportManifest(ctx, cmd.Manifest.OpportunityID, opts)
+		output = cmd.Manifest.Output
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown export command: %s", command))
 	}
