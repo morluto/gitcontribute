@@ -532,8 +532,9 @@ type ContributionService interface {
 
 // PrepareIssueOptions carries optional fields for issue preparation.
 type PrepareIssueOptions struct {
-	Guidance string
-	Success  string
+	Guidance   string
+	Success    string
+	ManifestID string
 }
 
 // PreparePROptions carries explicit and optional fields for PR preparation.
@@ -545,6 +546,7 @@ type PreparePROptions struct {
 	Limitations   string
 	LinkedIssue   string
 	Guidance      string
+	ManifestID    string
 }
 
 // DraftResult is a rendered, locally-stored contribution draft.
@@ -554,6 +556,7 @@ type DraftResult struct {
 	Title         string `json:"title"`
 	Body          string `json:"body"`
 	RenderedAt    string `json:"rendered_at"`
+	ManifestID    string `json:"manifest_id,omitempty"`
 }
 
 // LensService is the optional saved-lens management capability used by the CLI.
@@ -728,6 +731,20 @@ type NeighborResult struct {
 type ExportService interface {
 	ExportDossier(ctx context.Context, repo RepoRef, format string) (*ExportResult, error)
 	ExportEvidence(ctx context.Context, investigationID, format string) (*ExportResult, error)
+	ExportManifest(ctx context.Context, opportunityID string, opts ManifestExportOptions) (*ExportResult, error)
+}
+
+// ManifestExportOptions selects optional local identities for a manifest export.
+type ManifestExportOptions struct {
+	WorkspaceID string
+	PullRequest *ManifestPullRequestRef
+}
+
+// ManifestPullRequestRef identifies one exact stored pull request.
+type ManifestPullRequestRef struct {
+	Owner  string
+	Repo   string
+	Number int
 }
 
 type ExportResult struct {
