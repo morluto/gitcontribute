@@ -461,6 +461,9 @@ func TestManager_PathMethodsRejectSymlinkEscape(t *testing.T) {
 	if _, err := mgr.HasUntrackedByPath(context.Background(), link); !errors.Is(err, ErrNotManaged) {
 		t.Fatalf("HasUntrackedByPath symlink escape = %v, want ErrNotManaged", err)
 	}
+	if _, err := mgr.UntrackedFilesByPath(context.Background(), link); !errors.Is(err, ErrNotManaged) {
+		t.Fatalf("UntrackedFilesByPath symlink escape = %v, want ErrNotManaged", err)
+	}
 }
 
 func TestManager_HasUntrackedByPath(t *testing.T) {
@@ -481,6 +484,13 @@ func TestManager_HasUntrackedByPath(t *testing.T) {
 	writeFile(t, filepath.Join(ws.Path, "new-untracked.txt"), "new")
 	if got, err := mgr.HasUntrackedByPath(ctx, ws.Path); err != nil || !got {
 		t.Fatalf("dirty HasUntrackedByPath = %v, %v", got, err)
+	}
+	files, err := mgr.UntrackedFilesByPath(ctx, ws.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].Path != "new-untracked.txt" || files[0].ObjectID == "" {
+		t.Fatalf("untracked snapshots = %+v", files)
 	}
 }
 
