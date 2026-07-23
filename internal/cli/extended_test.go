@@ -13,6 +13,7 @@ type fakeExtendedService struct {
 	*fakeService
 
 	createWorkspaceCalled   bool
+	adoptWorkspaceCalled    bool
 	showWorkspaceCalled     bool
 	defineValidationCalled  bool
 	runValidationCalled     bool
@@ -36,6 +37,7 @@ type fakeExtendedService struct {
 
 	lastWorkspaceInvestigation  string
 	lastCreateWorkspaceOpts     cli.WorkspaceCreateOptions
+	lastAdoptWorkspaceOpts      cli.WorkspaceAdoptOptions
 	lastShowWorkspaceID         string
 	lastValidationInvestigation string
 	lastDefineValidationOpts    cli.DefineValidationOptions
@@ -58,6 +60,13 @@ func (f *fakeExtendedService) CreateWorkspace(ctx context.Context, investigation
 	f.createWorkspaceCalled = true
 	f.lastWorkspaceInvestigation = investigationID
 	f.lastCreateWorkspaceOpts = opts
+	return f.workspaceResult, f.err
+}
+
+func (f *fakeExtendedService) AdoptWorkspace(_ context.Context, investigationID string, opts cli.WorkspaceAdoptOptions) (*cli.WorkspaceResult, error) {
+	f.adoptWorkspaceCalled = true
+	f.lastWorkspaceInvestigation = investigationID
+	f.lastAdoptWorkspaceOpts = opts
 	return f.workspaceResult, f.err
 }
 
@@ -154,6 +163,13 @@ func TestWorkspaceCreateAndShow(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "ws-1") || !strings.Contains(stderr.String(), "creating workspace") {
 		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	err = c.Run(context.Background(), []string{"workspace", "adopt", "inv-1", "--path", "/tmp/existing", "--base", "main", "--name", "external"})
+	requireNoErr(t, err)
+	if !svc.adoptWorkspaceCalled || svc.lastAdoptWorkspaceOpts.Path != "/tmp/existing" || svc.lastAdoptWorkspaceOpts.BaseRef != "main" {
+		t.Fatalf("adopt workspace args = %+v", svc.lastAdoptWorkspaceOpts)
 	}
 
 	stdout.Reset()

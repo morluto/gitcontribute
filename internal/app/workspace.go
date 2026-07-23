@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/gitremote"
 	"github.com/morluto/gitcontribute/internal/workspace"
 )
 
@@ -25,6 +26,55 @@ func (s *Service) workspaceManager(ctx context.Context) (*workspace.Manager, err
 		return nil, fmt.Errorf("ensure workspace root: %w", err)
 	}
 	return workspace.NewManager(root, nil)
+}
+
+// AdoptWorkspace records an existing local worktree without fetching,
+// changing its refs, or taking ownership of its files.
+func (s *Service) AdoptWorkspace(ctx context.Context, investigationID string, opts cli.WorkspaceAdoptOptions) (*cli.WorkspaceResult, error) {
+	invSvc, err := s.writeInvestigationSvc(ctx)
+	if err != nil {
+		return nil, err
+	}
+	inv, err := invSvc.GetInvestigation(ctx, investigationID)
+	if err != nil {
+		return nil, mapInvestigationError(err)
+	}
+	requestedName := strings.TrimSpace(opts.Name)
+	name := requestedName
+	if name == "" {
+		name = uuid.NewString()
+	}
+	mgr, err := s.workspaceManager(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ws, err := mgr.Adopt(ctx, workspace.AdoptOptions{Path: opts.Path, BaseRef: opts.BaseRef, Name: name})
+	if err != nil {
+		return nil, fmt.Errorf("adopt worktree: %w", err)
+	}
+	identity, err := gitremote.ParseRepositoryIdentity(ws.Remote)
+	if err != nil {
+		return nil, fmt.Errorf("identify origin repository: %w", err)
+	}
+	if !strings.EqualFold(identity.Host, "github.com") || !strings.EqualFold(identity.Owner, inv.Repo.Owner) || !strings.EqualFold(identity.Repo, inv.Repo.Repo) {
+		return nil, fmt.Errorf("origin repository %s/%s does not match investigation repository %s/%s", identity.Owner, identity.Repo, inv.Repo.Owner, inv.Repo.Repo)
+	}
+	ws.InvestigationID, ws.RepoOwner, ws.RepoName = inv.ID, inv.Repo.Owner, inv.Repo.Repo
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	bound, inserted, err := c.BindWorkspacePath(ctx, ws)
+	if errors.Is(err, workspace.ErrExists) {
+		return nil, fmt.Errorf("workspace name %q already exists", name)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !inserted && (bound.InvestigationID != inv.ID || (requestedName != "" && bound.Name != name)) {
+		return nil, fmt.Errorf("worktree path is already bound to workspace %q", bound.Name)
+	}
+	return workspaceResult(bound), nil
 }
 
 func (s *Service) workspaceReader() (*workspace.Manager, error) {
@@ -121,11 +171,14 @@ func (s *Service) ShowWorkspace(ctx context.Context, id string) (*cli.WorkspaceR
 	}
 
 	mgr, err := s.workspaceReader()
-	if err == nil {
-		if st, err := mgr.StatusByPath(ctx, ws.Path); err == nil {
-			ws.Dirty = st.Dirty
-		}
+	if err != nil {
+		return nil, err
 	}
+	st, err := mgr.StatusWorkspace(ctx, ws)
+	if err != nil {
+		return nil, fmt.Errorf("read workspace status: %w", err)
+	}
+	ws.Dirty = st.Dirty
 
 	return workspaceResult(ws), nil
 }
@@ -170,22 +223,22 @@ func (s *Service) WorkspaceDiff(ctx context.Context, id string) (*WorkspaceDiffR
 		return nil, err
 	}
 
-	st, err := mgr.StatusByPath(ctx, ws.Path)
+	st, err := mgr.StatusWorkspace(ctx, ws)
 	if err != nil {
 		return nil, err
 	}
 
-	hasUntracked, err := mgr.HasUntrackedByPath(ctx, ws.Path)
+	hasUntracked, err := mgr.HasUntrackedWorkspace(ctx, ws)
 	if err != nil {
 		return nil, err
 	}
 
-	diff, err := mgr.DiffByPath(ctx, ws.Path, ws.BaseSHA)
+	diff, err := mgr.DiffWorkspace(ctx, ws)
 	if err != nil {
 		return nil, err
 	}
 
-	files, err := mgr.ChangedFilesByPath(ctx, ws.Path, ws.BaseSHA)
+	files, err := mgr.ChangedFilesWorkspace(ctx, ws)
 	if err != nil {
 		return nil, err
 	}
@@ -276,6 +329,8 @@ func workspaceResult(ws *workspace.Workspace) *cli.WorkspaceResult {
 		CandidateSHA:    ws.CandidateSHA,
 		MergeBase:       ws.MergeBase,
 		Dirty:           ws.Dirty,
+		HasUntracked:    ws.HasUntracked,
+		Ownership:       string(ws.Ownership),
 		CreatedAt:       formatTime(ws.CreatedAt),
 	}
 }

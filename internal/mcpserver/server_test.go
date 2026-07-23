@@ -16,6 +16,9 @@ type fakeReader struct {
 	repeatInput   RunRepeatedValidationInput
 }
 
+var _ WorkspaceCreator = (*fakeReader)(nil)
+var _ WorkspaceAdopter = (*fakeReader)(nil)
+
 func (f *fakeReader) Search(ctx context.Context, in SearchInput) (SearchOutput, error) {
 	if in.Query == "block" {
 		close(f.searchStarted)
@@ -269,6 +272,10 @@ func (*fakeReader) LinkConcern(_ context.Context, in LinkConcernInput) (ConcernO
 
 func (*fakeReader) PromoteConcern(_ context.Context, in PromoteConcernInput) (ConcernOutput, error) {
 	return ConcernOutput{ID: in.ID, Status: "promoted", Freshness: "unknown", Promotion: &ConcernPromotionOutput{Kind: in.Kind, InvestigationID: "inv-1", HypothesisID: "hyp-1"}}, nil
+}
+
+func (*fakeReader) AdoptWorkspace(_ context.Context, in AdoptWorkspaceInput) (AdoptWorkspaceOutput, error) {
+	return AdoptWorkspaceOutput{ID: in.Name, InvestigationID: in.InvestigationID, Ownership: "external"}, nil
 }
 
 func (*fakeReader) DefineValidation(_ context.Context, in DefineValidationInput) (ValidationOutput, error) {
@@ -707,8 +714,8 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 	for _, name := range []string{
 		ToolSearchRepositories, ToolSearchThreads, ToolGetRepositoryDossier, ToolExplainMatch, ToolGetJob,
 		ToolGetReadiness, ToolBuildRepositoryDossier,
-		ToolCreateWorkspace, ToolRunValidation, ToolStartInvestigation, ToolRecordHypothesis,
-		ToolRunRepeatedValidation,
+		ToolCreateWorkspace, ToolAdoptWorkspace, ToolRunValidation, ToolRunRepeatedValidation,
+		ToolStartInvestigation, ToolRecordHypothesis,
 		ToolCheckDuplicates, ToolFindCompetingWork, ToolPromoteOpportunity, ToolDefineValidation,
 		ToolPrepareContribution, ToolCancelJob,
 	} {
@@ -744,6 +751,7 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 	}{
 		{ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"}},
 		{ToolCreateWorkspace, map[string]any{"investigation_id": "inv-1"}},
+		{ToolAdoptWorkspace, map[string]any{"investigation_id": "inv-1", "path": "/tmp/worktree", "base_ref": "main", "name": "external"}},
 		{ToolRunValidation, map[string]any{"id": "val-1", "kind": "base", "execute": true}},
 		{ToolRunRepeatedValidation, map[string]any{"id": "val-1", "target": "both", "execute": true}},
 		{ToolStartInvestigation, map[string]any{"owner": "acme", "repo": "rocket", "commit_sha": "abc123"}},

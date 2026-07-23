@@ -62,7 +62,13 @@ func TestCanonicalToolCatalogIsNamespacedAndUnambiguous(t *testing.T) {
 	defer closeSessions()
 
 	if len(tools) != len(canonicalToolNames) {
-		t.Fatalf("listed %d tools, want canonical catalog of %d", len(tools), len(canonicalToolNames))
+		var missing []string
+		for _, name := range canonicalToolNames {
+			if tools[name] == nil {
+				missing = append(missing, name)
+			}
+		}
+		t.Fatalf("listed %d tools, want canonical catalog of %d; missing %v", len(tools), len(canonicalToolNames), missing)
 	}
 	titles := make(map[string]string)
 	for _, name := range canonicalToolNames {
@@ -250,6 +256,7 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 	assertSchemaValue(t, tools[ToolHydrateThreads].InputSchema, []string{"properties", "max_pages", "default"}, float64(3))
 	assertSchemaValue(t, tools[ToolRankThreads].InputSchema, []string{"required"}, []any{"repositories"})
 	assertSchemaValue(t, tools[ToolCreateWorkspace].InputSchema, []string{"required"}, []any{"investigation_id"})
+	assertSchemaValue(t, tools[ToolAdoptWorkspace].InputSchema, []string{"required"}, []any{"investigation_id", "path", "base_ref"})
 	assertSchemaValue(t, tools[ToolRankThreads].OutputSchema, []string{"properties", "total", "type"}, "integer")
 	assertSchemaValue(t, tools[ToolRankThreads].OutputSchema, []string{"properties", "truncated", "type"}, "boolean")
 	assertSchemaValue(t, tools[ToolRunValidation].InputSchema, []string{"properties", "execute", "const"}, true)

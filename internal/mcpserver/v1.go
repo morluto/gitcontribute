@@ -142,6 +142,29 @@ type CreateWorkspaceInput struct {
 	Name            string `json:"name,omitempty" jsonschema:"Workspace name; defaults to a generated ID"`
 }
 
+// AdoptWorkspaceInput identifies an existing local worktree and an already
+// available base revision. Adoption never fetches or changes the worktree.
+type AdoptWorkspaceInput struct {
+	InvestigationID string `json:"investigation_id" jsonschema:"Investigation ID"`
+	Path            string `json:"path" jsonschema:"Existing local worktree root"`
+	BaseRef         string `json:"base_ref" jsonschema:"Base ref already available in the repository"`
+	Name            string `json:"name,omitempty" jsonschema:"Workspace name; defaults to a generated ID"`
+}
+
+// AdoptWorkspaceOutput deliberately omits host paths and remote URLs.
+type AdoptWorkspaceOutput struct {
+	ID              string `json:"id" jsonschema:"Workspace ID"`
+	InvestigationID string `json:"investigation_id" jsonschema:"Investigation ID"`
+	Owner           string `json:"owner" jsonschema:"Repository owner"`
+	Repo            string `json:"repo" jsonschema:"Repository name"`
+	BaseSHA         string `json:"base_sha" jsonschema:"Resolved base commit"`
+	CandidateSHA    string `json:"candidate_sha" jsonschema:"Worktree HEAD observed during adoption"`
+	MergeBase       string `json:"merge_base" jsonschema:"Merge base of base and candidate commits"`
+	Dirty           bool   `json:"dirty" jsonschema:"Whether tracked or untracked changes were observed"`
+	HasUntracked    bool   `json:"has_untracked" jsonschema:"Whether untracked non-ignored files were observed"`
+	Ownership       string `json:"ownership" jsonschema:"Workspace ownership classification"`
+}
+
 // StartInvestigationInput creates a local investigation for a repository revision.
 type StartInvestigationInput struct {
 	Owner     string `json:"owner" jsonschema:"GitHub repository owner"`
@@ -273,8 +296,14 @@ func (s *Server) registerV1() {
 	addCatalogTool(s, catalogTool[CreateWorkspaceInput, JobReference]{
 		name: ToolCreateWorkspace, title: "Create managed Git workspace",
 		description: "Start an asynchronous job that clones the specified remote and creates a managed worktree for an investigation. This performs network reads, Git process execution, filesystem writes, and local metadata writes, but never mutates GitHub.",
-		annotations: networkReadAnnotations(), supportedBy: supports[Operator], input: inputSchema[CreateWorkspaceInput](noSchemaCustomization),
+		annotations: networkReadAnnotations(), supportedBy: supports[WorkspaceCreator], input: inputSchema[CreateWorkspaceInput](noSchemaCustomization),
 		output: outputSchema[JobReference]("Reference to a newly queued workspace creation job."), handler: s.createWorkspace,
+	})
+	addCatalogTool(s, catalogTool[AdoptWorkspaceInput, AdoptWorkspaceOutput]{
+		name: ToolAdoptWorkspace, title: "Adopt existing Git worktree",
+		description: "Inspect and record an existing local Git worktree for an investigation. This runs read-only Git commands and writes local metadata; it never fetches, changes refs or files, takes deletion ownership, or contacts GitHub.",
+		annotations: localWriteAnnotations(true), supportedBy: supports[WorkspaceAdopter], input: inputSchema[AdoptWorkspaceInput](noSchemaCustomization),
+		output: outputSchema[AdoptWorkspaceOutput]("Persisted external-worktree identity without host paths or remote URLs."), handler: s.adoptWorkspace,
 	})
 	addCatalogTool(s, catalogTool[RunValidationInput, JobReference]{
 		name: ToolRunValidation, title: "Run stored validation command",
@@ -476,6 +505,23 @@ func (s *Server) buildRepositoryDossier(ctx context.Context, _ *mcp.CallToolRequ
 	return nil, out, err
 }
 
+func (s *Server) adoptWorkspace(ctx context.Context, _ *mcp.CallToolRequest, in AdoptWorkspaceInput) (*mcp.CallToolResult, AdoptWorkspaceOutput, error) {
+	var err error
+	if in.InvestigationID, err = normalizeID("investigation_id", in.InvestigationID); err != nil {
+		return nil, AdoptWorkspaceOutput{}, err
+	}
+	in.Path, in.BaseRef, in.Name = strings.TrimSpace(in.Path), strings.TrimSpace(in.BaseRef), strings.TrimSpace(in.Name)
+	if in.Path == "" || in.BaseRef == "" {
+		return nil, AdoptWorkspaceOutput{}, errors.New("path and base_ref are required")
+	}
+	operator, ok := s.reader.(WorkspaceAdopter)
+	if !ok {
+		return nil, AdoptWorkspaceOutput{}, errors.New("workspace adoption is not available")
+	}
+	out, err := operator.AdoptWorkspace(ctx, in)
+	return nil, out, err
+}
+
 func (s *Server) createWorkspace(ctx context.Context, _ *mcp.CallToolRequest, in CreateWorkspaceInput) (*mcp.CallToolResult, JobReference, error) {
 	if _, err := normalizeID("investigation_id", in.InvestigationID); err != nil {
 		return nil, JobReference{}, err
@@ -484,7 +530,7 @@ func (s *Server) createWorkspace(ctx context.Context, _ *mcp.CallToolRequest, in
 	in.BaseRef = strings.TrimSpace(in.BaseRef)
 	in.CandidateRef = strings.TrimSpace(in.CandidateRef)
 	in.Name = strings.TrimSpace(in.Name)
-	operator, ok := s.reader.(Operator)
+	operator, ok := s.reader.(WorkspaceCreator)
 	if !ok {
 		return nil, JobReference{}, errors.New("workspace creation is not available")
 	}

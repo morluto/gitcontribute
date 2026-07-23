@@ -1410,6 +1410,17 @@ func (c *CLI) runWorkspace(ctx context.Context, command string, cmd *workspaceCm
 			return c.mapError(err)
 		}
 		return c.render(cmd.Create.JSON, result)
+	case "workspace adopt":
+		if _, err := fmt.Fprintf(c.stderr, "adopting local worktree for investigation %s...\n", cmd.Adopt.InvestigationID); err != nil {
+			return err
+		}
+		result, err := service.AdoptWorkspace(ctx, cmd.Adopt.InvestigationID, WorkspaceAdoptOptions{
+			Path: cmd.Adopt.Path, BaseRef: cmd.Adopt.Base, Name: cmd.Adopt.Name,
+		})
+		if err != nil {
+			return c.mapError(err)
+		}
+		return c.render(cmd.Adopt.JSON, result)
 	case "workspace show":
 		result, err := service.ShowWorkspace(ctx, cmd.Show.ID)
 		if err != nil {

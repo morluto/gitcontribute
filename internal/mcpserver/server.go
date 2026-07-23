@@ -84,6 +84,17 @@ type MergeConflictReader interface {
 	CheckMergeConflicts(context.Context, CheckMergeConflictsInput) (CheckMergeConflictsOutput, error)
 }
 
+// WorkspaceCreator exposes managed workspace creation separately from the
+// broader contribution workflow capability.
+type WorkspaceCreator interface {
+	CreateWorkspace(context.Context, CreateWorkspaceInput) (JobReference, error)
+}
+
+// WorkspaceAdopter exposes non-owning external-worktree registration.
+type WorkspaceAdopter interface {
+	AdoptWorkspace(context.Context, AdoptWorkspaceInput) (AdoptWorkspaceOutput, error)
+}
+
 // ResearchReader exposes external derived repository context.
 type ResearchReader interface {
 	DeepWiki(context.Context, DeepWikiInput) (DeepWikiOutput, error)
@@ -97,7 +108,6 @@ type Operator interface {
 	CheckDuplicates(context.Context, CheckDuplicatesInput) (CheckOutput, error)
 	CheckCollisions(context.Context, CheckCollisionsInput) (CheckOutput, error)
 	PromoteOpportunity(context.Context, PromoteOpportunityInput) (OpportunityOutput, error)
-	CreateWorkspace(context.Context, CreateWorkspaceInput) (JobReference, error)
 	DefineValidation(context.Context, DefineValidationInput) (ValidationOutput, error)
 	RunValidation(context.Context, RunValidationInput) (JobReference, error)
 	RunRepeatedValidation(context.Context, RunRepeatedValidationInput) (JobReference, error)

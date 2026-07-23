@@ -415,7 +415,15 @@ type HealthService interface {
 // WorkspaceService is the optional workspace management capability used by the CLI.
 type WorkspaceService interface {
 	CreateWorkspace(ctx context.Context, investigationID string, opts WorkspaceCreateOptions) (*WorkspaceResult, error)
+	AdoptWorkspace(ctx context.Context, investigationID string, opts WorkspaceAdoptOptions) (*WorkspaceResult, error)
 	ShowWorkspace(ctx context.Context, id string) (*WorkspaceResult, error)
+}
+
+// WorkspaceAdoptOptions identifies an existing local Git worktree.
+type WorkspaceAdoptOptions struct {
+	Path    string
+	BaseRef string
+	Name    string
 }
 
 // WorkspaceCreateOptions carries explicit local-write intent for workspace creation.
@@ -437,6 +445,8 @@ type WorkspaceResult struct {
 	CandidateSHA    string  `json:"candidate_sha"`
 	MergeBase       string  `json:"merge_base"`
 	Dirty           bool    `json:"dirty"`
+	HasUntracked    bool    `json:"has_untracked"`
+	Ownership       string  `json:"ownership"`
 	CreatedAt       string  `json:"created_at"`
 }
 

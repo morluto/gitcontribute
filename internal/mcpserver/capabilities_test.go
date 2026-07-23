@@ -88,6 +88,8 @@ type completeTestReader struct {
 	Operator
 	ConcernReader
 	ConcernOperator
+	WorkspaceCreator
+	WorkspaceAdopter
 }
 
 func completeFakeReader(base *fakeReader) Reader {
@@ -99,5 +101,6 @@ func completeFakeReader(base *fakeReader) Reader {
 		CommitPlannerReader: base,
 		PortfolioOperator:   optional, Operator: base,
 		ConcernReader: base, ConcernOperator: base,
+		WorkspaceCreator: base, WorkspaceAdopter: base,
 	}
 }
