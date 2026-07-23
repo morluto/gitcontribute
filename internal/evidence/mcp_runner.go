@@ -176,7 +176,7 @@ func finishProtocolResult(
 
 func isExpectedMCPShutdownError(err error) bool {
 	var exitErr *exec.ExitError
-	return errors.As(err, &exitErr) && exitErr.ProcessState != nil && exitErr.ProcessState.ExitCode() == -1
+	return errors.As(err, &exitErr) && exitErr.ProcessState != nil && exitErr.ExitCode() == -1
 }
 
 type protocolCloser interface {
