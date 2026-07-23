@@ -51,27 +51,6 @@ func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpserver.SearchR
 	return mcpserver.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: matches, NextCursor: res.NextCursor}, nil
 }
 
-func repositoryToMCPOutput(repo *corpus.Repository) mcpserver.RepositoryOutput {
-	return mcpserver.RepositoryOutput{
-		Owner:     repo.Owner,
-		Repo:      repo.Name,
-		UpdatedAt: formatTime(repo.SourceUpdatedAt),
-		Fields: map[string]any{
-			"description":    repo.Description,
-			"default_branch": repo.DefaultBranch,
-			"language":       repo.Language,
-			"license":        repo.License,
-			"topics":         repo.Topics,
-			"stars":          repo.Stars,
-			"watchers":       repo.Watchers,
-			"forks":          repo.Forks,
-			"open_issues":    repo.OpenIssues,
-			"archived":       repo.Archived,
-			"fork":           repo.Fork,
-		},
-	}
-}
-
 // ThreadByNumber reads an issue or pull request by repository and number only.
 func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpserver.ThreadByNumberInput) (mcpserver.ThreadOutput, error) {
 	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
