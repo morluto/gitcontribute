@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -168,7 +169,9 @@ func TestWorkspaceCreateAndShow(t *testing.T) {
 	stdout.Reset()
 	err = c.Run(context.Background(), []string{"workspace", "adopt", "inv-1", "--path", "/tmp/existing", "--base", "main", "--name", "external"})
 	requireNoErr(t, err)
-	if !svc.adoptWorkspaceCalled || svc.lastAdoptWorkspaceOpts.Path != "/tmp/existing" || svc.lastAdoptWorkspaceOpts.BaseRef != "main" {
+	expectedAdoptPath, err := filepath.Abs("/tmp/existing")
+	requireNoErr(t, err)
+	if !svc.adoptWorkspaceCalled || svc.lastAdoptWorkspaceOpts.Path != expectedAdoptPath || svc.lastAdoptWorkspaceOpts.BaseRef != "main" {
 		t.Fatalf("adopt workspace args = %+v", svc.lastAdoptWorkspaceOpts)
 	}
 
