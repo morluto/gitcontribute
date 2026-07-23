@@ -30,7 +30,10 @@ var (
 	ErrRemoteMismatch = errors.New("existing mirror remote does not match requested remote")
 )
 
-const maxGitOutputBytes = 64 << 20
+const (
+	maxGitOutputBytes = 64 << 20
+	maxUntrackedFiles = 2000
+)
 
 // Runner executes an external command.
 type Runner interface {
@@ -580,7 +583,7 @@ func (m *Manager) DiffByPath(ctx context.Context, path, baseSHA string) (string,
 	if err != nil {
 		return "", err
 	}
-	args := []string{"diff", "--no-ext-diff", "--no-textconv"}
+	args := []string{"diff", "--no-ext-diff", "--no-textconv", "--binary", "--full-index", "--find-renames"}
 	if baseSHA != "" {
 		args = append(args, baseSHA)
 	}
@@ -590,6 +593,42 @@ func (m *Manager) DiffByPath(ctx context.Context, path, baseSHA string) (string,
 		return "", fmt.Errorf("diff: %w", err)
 	}
 	return out, nil
+}
+
+// UntrackedFileSnapshot identifies exact untracked content without returning
+// file bytes. ObjectID is Git's content hash from hash-object --no-filters.
+type UntrackedFileSnapshot struct {
+	Path     string
+	ObjectID string
+}
+
+// UntrackedFilesByPath returns a bounded, deterministic snapshot of untracked,
+// non-ignored files. Git performs path discovery and content hashing.
+func (m *Manager) UntrackedFilesByPath(ctx context.Context, path string) ([]UntrackedFileSnapshot, error) {
+	managed, err := m.managedPath(path)
+	if err != nil {
+		return nil, err
+	}
+	out, err := m.git(ctx, managed, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, fmt.Errorf("list untracked files: %w", err)
+	}
+	parts := strings.Split(out, "\x00")
+	files := make([]UntrackedFileSnapshot, 0, len(parts))
+	for _, file := range parts {
+		if file == "" {
+			continue
+		}
+		if len(files) == maxUntrackedFiles {
+			return nil, fmt.Errorf("workspace exceeds %d untracked files", maxUntrackedFiles)
+		}
+		objectID, err := m.git(ctx, managed, "hash-object", "--no-filters", "--", file)
+		if err != nil {
+			return nil, fmt.Errorf("hash untracked file %q: %w", file, err)
+		}
+		files = append(files, UntrackedFileSnapshot{Path: file, ObjectID: strings.TrimSpace(objectID)})
+	}
+	return files, nil
 }
 
 // ChangedFilesByPath returns raw Git paths changed from the supplied base.

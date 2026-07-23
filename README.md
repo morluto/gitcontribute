@@ -663,6 +663,13 @@ gitcontribute tui owner/repo
 `diff` returns the patch, changed files, and suggested review order. The TUI is
 local-only; add `--json` to emit a non-interactive snapshot.
 
+MCP's `code` toolset also exposes a read-only semantic commit workflow. An
+agent first calls `workspace.inspect_commit_changes` for stable file/hunk IDs,
+then submits its proposed groups to `workspace.plan_semantic_commits`. The
+second tool verifies exact one-to-one coverage and reports ambiguous, mixed,
+generated, binary, formatting-only, and untracked changes. It does not stage or
+commit anything.
+
 </details>
 
 <details>

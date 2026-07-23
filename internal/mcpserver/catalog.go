@@ -40,6 +40,8 @@ const (
 	ToolFindPortfolioOverlaps    = "corpus.find_portfolio_overlaps"
 	ToolIndexRepositories        = "code.index_repositories"
 	ToolCheckMergeConflicts      = "workspace.check_merge_conflicts"
+	ToolInspectCommitChanges     = "workspace.inspect_commit_changes"
+	ToolPlanSemanticCommits      = "workspace.plan_semantic_commits"
 	ToolQueryDeepWiki            = "research.query_deepwiki"
 	ToolCreateWorkspace          = "workspace.create"
 	ToolDefineValidation         = "validation.define"
@@ -86,6 +88,8 @@ var canonicalToolNames = []string{
 	ToolFindPortfolioOverlaps,
 	ToolIndexRepositories,
 	ToolCheckMergeConflicts,
+	ToolInspectCommitChanges,
+	ToolPlanSemanticCommits,
 	ToolQueryDeepWiki,
 	ToolCreateWorkspace,
 	ToolDefineValidation,
@@ -177,6 +181,7 @@ var toolsets = map[string][]string{
 	},
 	"code": {
 		ToolSearchCode, ToolIndexRepositories, ToolCreateWorkspace, ToolCheckMergeConflicts,
+		ToolInspectCommitChanges, ToolPlanSemanticCommits,
 		ToolDefineValidation, ToolRunValidation, ToolGetJob, ToolCancelJob,
 	},
 	"research":    {ToolQueryDeepWiki},

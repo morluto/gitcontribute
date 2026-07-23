@@ -230,6 +230,18 @@ func (*fakeReader) CreateWorkspace(_ context.Context, in CreateWorkspaceInput) (
 	return JobReference{ID: "job-workspace-" + in.Name, Kind: "create_workspace", Status: "queued"}, nil
 }
 
+func (*fakeReader) InspectCommitChanges(_ context.Context, _ InspectCommitChangesInput) (CommitInventoryOutput, error) {
+	return CommitInventoryOutput{
+		Units:             []CommitUnitOutput{{ID: "hunk:one", Kind: "hunk", Path: "main.go", Operation: "modify", ContentSHA256: "one"}},
+		SourcePatchSHA256: "patch",
+		InventorySHA256:   "inventory",
+	}, nil
+}
+
+func (*fakeReader) PlanSemanticCommits(_ context.Context, _ PlanSemanticCommitsInput) (SemanticCommitPlanOutput, error) {
+	return SemanticCommitPlanOutput{Reconstruction: CommitReconstructionOutput{UnitCount: 1, AssignedCount: 1, Verified: true}}, nil
+}
+
 func (*fakeReader) DefineValidation(_ context.Context, in DefineValidationInput) (ValidationOutput, error) {
 	return ValidationOutput{ID: "val-1", InvestigationID: in.InvestigationID, Kind: in.Kind, Command: []string{"echo"}}, nil
 }
