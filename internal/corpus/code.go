@@ -151,82 +151,24 @@ func (c *Corpus) SearchCode(ctx context.Context, query string, ref domain.RepoRe
 // repository with stable cursor pagination. It returns bounded FTS snippets,
 // not complete files. Results are ordered by weighted FTS5 rank
 // ascending, then document id ascending. No network access occurs.
-func (c *Corpus) SearchCodeWithOptions(ctx context.Context, query string, opts CodeSearchOptions) (CodeSearchPage, error) {
-	if opts.Limit <= 0 {
-		opts.Limit = 20
-	}
-	if opts.Limit > 100 {
-		return CodeSearchPage{}, errors.New("code search limit cannot exceed 100")
-	}
-
-	ftsQuery := literalFTSQuery(query)
-	if ftsQuery == "" {
-		return CodeSearchPage{}, nil
-	}
-	if err := c.RequireProjection(ctx, ProjectionNameCodeDocumentsFTS, ProjectionVersionCodeDocumentsFTS); err != nil {
-		return CodeSearchPage{}, err
-	}
-
-	repo := opts.Ref.String()
-	cursor, err := c.decodeCodeCursor(opts.Cursor, query, repo)
+func (c *Corpus) SearchCodeWithOptions(ctx context.Context, query string, opts CodeSearchOptions) (_ CodeSearchPage, err error) {
+	opts, ftsQuery, repo, cursor, err := c.prepareCodeSearch(ctx, query, opts)
 	if err != nil {
 		return CodeSearchPage{}, err
 	}
-
-	if opts.Ref.Owner != "" || opts.Ref.Repo != "" {
-		if err := opts.Ref.Validate(); err != nil {
-			return CodeSearchPage{}, err
-		}
+	if ftsQuery == "" {
+		return CodeSearchPage{}, nil
 	}
 	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return CodeSearchPage{}, fmt.Errorf("begin code search snapshot: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackSQLOnReturn(tx, &err)
 
-	statement := `
-		SELECT bm25(code_documents_fts, 5.0, 1.0), d.id, s.repo_owner, s.repo_name, s.commit_sha, d.path,
-		       snippet(code_documents_fts, -1, '', '', ' … ', 48), d.bytes, d.language, s.id, s.created_at
-		FROM code_documents_fts
-		JOIN code_documents d ON d.id = code_documents_fts.rowid
-		JOIN code_snapshots s ON s.id = d.snapshot_id
-		WHERE code_documents_fts MATCH ?
-		  AND s.id = (SELECT newest.id FROM code_snapshots newest
-		              WHERE newest.repo_owner = s.repo_owner AND newest.repo_name = s.repo_name
-		              ORDER BY newest.created_at DESC, newest.id DESC LIMIT 1)`
-	args := []any{ftsQuery}
-	if opts.Ref.Owner != "" || opts.Ref.Repo != "" {
-		statement += ` AND s.repo_owner = ? AND s.repo_name = ?`
-		args = append(args, opts.Ref.Owner, opts.Ref.Repo)
-	}
-	if cursor != nil {
-		statement += ` AND (bm25(code_documents_fts, 5.0, 1.0) > ? OR (bm25(code_documents_fts, 5.0, 1.0) = ? AND d.id > ?))`
-		args = append(args, cursor.Rank, cursor.Rank, cursor.ID)
-	}
-	statement += ` ORDER BY bm25(code_documents_fts, 5.0, 1.0), d.id LIMIT ?`
-	args = append(args, opts.Limit+1)
-
-	rows, err := tx.QueryContext(ctx, statement, args...)
+	statement, args := codeSearchStatement(ftsQuery, opts, cursor)
+	matches, err := queryCodeSearchMatches(ctx, tx, statement, args)
 	if err != nil {
-		return CodeSearchPage{}, fmt.Errorf("search code: %w", err)
-	}
-	var matches []CodeMatch
-	for rows.Next() {
-		var match CodeMatch
-		var createdAt int64
-		if err := rows.Scan(&match.Rank, &match.DocID, &match.Repo.Owner, &match.Repo.Repo, &match.Commit,
-			&match.Path, &match.Content, &match.Bytes, &match.Language, &match.SnapshotID, &createdAt); err != nil {
-			return CodeSearchPage{}, err
-		}
-		match.SnapshotCreatedAt = scanTime(createdAt)
-		matches = append(matches, match)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
 		return CodeSearchPage{}, err
-	}
-	if err := rows.Close(); err != nil {
-		return CodeSearchPage{}, fmt.Errorf("close code search rows: %w", err)
 	}
 
 	page := CodeSearchPage{Matches: matches}
@@ -250,12 +192,95 @@ func (c *Corpus) SearchCodeWithOptions(ctx context.Context, query string, opts C
 	} else {
 		page.Total = len(matches)
 	}
-	refs := make([]domain.RepoRef, 0, len(page.Matches)+1)
+	page.Snapshots, err = loadCodeSearchSnapshots(ctx, tx, opts.Ref, page.Matches)
+	if err != nil {
+		return CodeSearchPage{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return CodeSearchPage{}, fmt.Errorf("commit code search snapshot: %w", err)
+	}
+
+	return page, nil
+}
+
+func (c *Corpus) prepareCodeSearch(ctx context.Context, query string, opts CodeSearchOptions) (CodeSearchOptions, string, string, *searchCursor, error) {
+	if opts.Limit <= 0 {
+		opts.Limit = 20
+	}
+	if opts.Limit > 100 {
+		return opts, "", "", nil, errors.New("code search limit cannot exceed 100")
+	}
+	ftsQuery := literalFTSQuery(query)
+	if ftsQuery == "" {
+		return opts, "", "", nil, nil
+	}
+	if err := c.RequireProjection(ctx, ProjectionNameCodeDocumentsFTS, ProjectionVersionCodeDocumentsFTS); err != nil {
+		return opts, "", "", nil, err
+	}
 	if opts.Ref != (domain.RepoRef{}) {
-		refs = append(refs, opts.Ref)
-	} else {
-		seen := make(map[domain.RepoRef]struct{}, len(page.Matches))
-		for _, match := range page.Matches {
+		if err := opts.Ref.Validate(); err != nil {
+			return opts, "", "", nil, err
+		}
+	}
+	repo := opts.Ref.String()
+	cursor, err := c.decodeCodeCursor(opts.Cursor, query, repo)
+	return opts, ftsQuery, repo, cursor, err
+}
+
+func codeSearchStatement(ftsQuery string, opts CodeSearchOptions, cursor *searchCursor) (string, []any) {
+	statement := `
+		SELECT bm25(code_documents_fts, 5.0, 1.0), d.id, s.repo_owner, s.repo_name, s.commit_sha, d.path,
+		       snippet(code_documents_fts, -1, '', '', ' … ', 48), d.bytes, d.language, s.id, s.created_at
+		FROM code_documents_fts
+		JOIN code_documents d ON d.id = code_documents_fts.rowid
+		JOIN code_snapshots s ON s.id = d.snapshot_id
+		WHERE code_documents_fts MATCH ?
+		  AND s.id = (SELECT newest.id FROM code_snapshots newest
+		              WHERE newest.repo_owner = s.repo_owner AND newest.repo_name = s.repo_name
+		              ORDER BY newest.created_at DESC, newest.id DESC LIMIT 1)`
+	args := []any{ftsQuery}
+	if opts.Ref != (domain.RepoRef{}) {
+		statement += ` AND s.repo_owner = ? AND s.repo_name = ?`
+		args = append(args, opts.Ref.Owner, opts.Ref.Repo)
+	}
+	if cursor != nil {
+		statement += ` AND (bm25(code_documents_fts, 5.0, 1.0) > ? OR (bm25(code_documents_fts, 5.0, 1.0) = ? AND d.id > ?))`
+		args = append(args, cursor.Rank, cursor.Rank, cursor.ID)
+	}
+	statement += ` ORDER BY bm25(code_documents_fts, 5.0, 1.0), d.id LIMIT ?`
+	return statement, append(args, opts.Limit+1)
+}
+
+func scanCodeSearchMatches(rows *sql.Rows) ([]CodeMatch, error) {
+	var matches []CodeMatch
+	for rows.Next() {
+		var match CodeMatch
+		var createdAt int64
+		if err := rows.Scan(&match.Rank, &match.DocID, &match.Repo.Owner, &match.Repo.Repo, &match.Commit,
+			&match.Path, &match.Content, &match.Bytes, &match.Language, &match.SnapshotID, &createdAt); err != nil {
+			return nil, err
+		}
+		match.SnapshotCreatedAt = scanTime(createdAt)
+		matches = append(matches, match)
+	}
+	return matches, rows.Err()
+}
+
+func queryCodeSearchMatches(ctx context.Context, tx *sql.Tx, statement string, args []any) (_ []CodeMatch, err error) {
+	rows, err := tx.QueryContext(ctx, statement, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search code: %w", err)
+	}
+	defer closeSQLOnReturn(rows, &err)
+	return scanCodeSearchMatches(rows)
+}
+
+func loadCodeSearchSnapshots(ctx context.Context, tx *sql.Tx, scoped domain.RepoRef, matches []CodeMatch) ([]CodeSnapshotInfo, error) {
+	refs := []domain.RepoRef{scoped}
+	if scoped == (domain.RepoRef{}) {
+		refs = refs[:0]
+		seen := make(map[domain.RepoRef]struct{}, len(matches))
+		for _, match := range matches {
 			if _, ok := seen[match.Repo]; ok {
 				continue
 			}
@@ -263,20 +288,17 @@ func (c *Corpus) SearchCodeWithOptions(ctx context.Context, query string, opts C
 			refs = append(refs, match.Repo)
 		}
 	}
+	var snapshots []CodeSnapshotInfo
 	for _, ref := range refs {
 		snapshot, err := latestCodeSnapshot(ctx, tx, ref)
 		if err != nil {
-			return CodeSearchPage{}, err
+			return nil, err
 		}
 		if snapshot != nil {
-			page.Snapshots = append(page.Snapshots, *snapshot)
+			snapshots = append(snapshots, *snapshot)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return CodeSearchPage{}, fmt.Errorf("commit code search snapshot: %w", err)
-	}
-
-	return page, nil
+	return snapshots, nil
 }
 
 const codeListLimit = 10000

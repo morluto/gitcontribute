@@ -23,7 +23,7 @@ func (c *Corpus) ListPullRequestPortfolio(ctx context.Context, author, state str
 
 // ListPullRequestPortfolioPage returns a bounded portfolio and the exact
 // matching population so callers never mistake the page size for the total.
-func (c *Corpus) ListPullRequestPortfolioPage(ctx context.Context, author, state string, limit int) (PortfolioPage, error) {
+func (c *Corpus) ListPullRequestPortfolioPage(ctx context.Context, author, state string, limit int) (_ PortfolioPage, err error) {
 	if limit <= 0 {
 		limit = 1000
 	}
@@ -34,7 +34,7 @@ func (c *Corpus) ListPullRequestPortfolioPage(ctx context.Context, author, state
 	if err != nil {
 		return PortfolioPage{}, fmt.Errorf("begin pull request portfolio snapshot: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer rollbackSQLOnReturn(tx, &err)
 
 	query := `
 		SELECT r.owner, r.name,
@@ -73,6 +73,7 @@ func (c *Corpus) ListPullRequestPortfolioPage(ctx context.Context, author, state
 	if err != nil {
 		return PortfolioPage{}, fmt.Errorf("list pull request portfolio: %w", err)
 	}
+	defer closeSQLOnReturn(rows, &err)
 	var out []PortfolioPullRequest
 	for rows.Next() {
 		var item PortfolioPullRequest
@@ -86,7 +87,6 @@ func (c *Corpus) ListPullRequestPortfolioPage(ctx context.Context, author, state
 			&item.Thread.Title, &body, &authorValue, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone,
 			&sourceCreated, &sourceUpdated, &item.Thread.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged, &mergedKnown,
 		); err != nil {
-			_ = rows.Close()
 			return PortfolioPage{}, fmt.Errorf("scan pull request portfolio: %w", err)
 		}
 		item.Thread.Body = body.String
@@ -109,7 +109,6 @@ func (c *Corpus) ListPullRequestPortfolioPage(ctx context.Context, author, state
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
 		return PortfolioPage{}, fmt.Errorf("list pull request portfolio: %w", err)
 	}
 	if err := rows.Close(); err != nil {
