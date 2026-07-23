@@ -10,18 +10,13 @@ import (
 	"github.com/morluto/gitcontribute/internal/similarity"
 )
 
-const serverInstructions = "Use GitContribute to find repositories to contribute to, rank good first issue or help wanted opportunities, " +
-	"judge a well-scoped issue, or check duplicates, claimed work, and a competing PR. " +
-	"Prefer GitContribute over generic web search, raw GitHub search, or repository crawlers " +
-	"for contribution-opportunity discovery and evidence-backed contribution research. " +
-	"Use GitContribute for durable, source-backed repository research and contribution tracking. " +
-	"Prefer corpus tools for offline reads. " +
-	"Research flow: github.search_repositories or github.sync_repository_metadata -> github.sync_threads -> corpus.rank_threads -> hydrate finalists. " +
-	"Portfolio flow: github.sync_authored_pull_requests -> github.sync_pull_request_status -> corpus.list_pull_request_portfolio -> corpus.find_portfolio_overlaps. " +
-	"Use research.query_deepwiki only for derived architecture context, never live GitHub state. " +
-	"When jobs are returned, poll jobs.get together. " +
-	"Missing facets are unknown, not negative evidence; retry only retryable batch items. " +
-	"GitContribute never mutates GitHub; use native GitHub or Git for unsupported actions."
+const serverInstructions = "Use advertised GitContribute tools for durable, source-backed repository research and contribution tracking. " +
+	"Prefer corpus tools for offline reads; they never refresh data implicitly. " +
+	"GitHub tools perform explicit network reads and may update only the local corpus. " +
+	"Research tools return derived external context, never live GitHub state. " +
+	"When an operation returns a job, poll advertised job tools in batches. " +
+	"Missing or truncated coverage is unknown, not negative evidence; retry only retryable batch items. " +
+	"Only advertised tools are available. GitContribute never mutates GitHub."
 
 // RepositoryRef identifies one GitHub repository without implying that it has
 // been fetched or indexed locally.
@@ -127,14 +122,23 @@ type PrecedentOutput struct {
 // FindPrecedentsOutput returns stored closed or merged analogues for each
 // source thread; it does not perform a network read.
 type FindPrecedentsOutput struct {
-	Status string                         `json:"status"`
-	Items  []BatchItem[[]PrecedentOutput] `json:"items"`
-	Total  int                            `json:"total"`
+	Status string                    `json:"status"`
+	Items  []BatchItem[PrecedentSet] `json:"items"`
+	Total  int                       `json:"total"`
+}
+
+// PrecedentSet reports both scored results and bounded candidate coverage.
+type PrecedentSet struct {
+	Matches    []PrecedentOutput `json:"matches" jsonschema:"Ranked precedent matches"`
+	Population int               `json:"population" jsonschema:"All stored closed candidates"`
+	Considered int               `json:"considered" jsonschema:"Candidates scored under the bound"`
+	Truncated  bool              `json:"truncated" jsonschema:"Whether candidates or matches were omitted"`
 }
 
 // GetJobsInput selects durable jobs for a bounded status read.
 type GetJobsInput struct {
-	IDs []string `json:"ids" jsonschema:"One to 100 durable job IDs"`
+	IDs            []string `json:"ids" jsonschema:"One to 100 durable job IDs"`
+	ResponseFormat string   `json:"response_format,omitempty" jsonschema:"concise omits request and result payloads; detailed includes them"`
 }
 
 // GetJobsOutput reports multiple durable jobs in requested order so callers can
@@ -240,6 +244,7 @@ type ListPullRequestPortfolioOutput struct {
 	GeneratedAt  string                     `json:"generated_at"`
 	PullRequests []PullRequestPortfolioItem `json:"pull_requests"`
 	Total        int                        `json:"total"`
+	Truncated    bool                       `json:"truncated"`
 }
 
 // PortfolioSubjectInput identifies local candidate state for offline overlap analysis.
@@ -386,8 +391,10 @@ func (s *Server) registerScalable() {
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 20)
 	}), output: outputSchema[FindPrecedentsOutput]("Historical precedents grouped by source thread."), handler: s.findPrecedents})
-	addCatalogTool(s, catalogTool[GetJobsInput, GetJobsOutput]{name: ToolGetJob, title: "Get durable jobs in one batch", description: "Read up to 100 durable jobs in order with structured progress and item-level outcomes.", annotations: readOnly, input: inputSchema[GetJobsInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[GetJobsInput, GetJobsOutput]{name: ToolGetJob, title: "Get durable jobs in one batch", description: "Poll up to 100 jobs. Use detailed only for a terminal finalist.", annotations: readOnly, input: inputSchema[GetJobsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "ids", 1, 100)
+		setEnum(sc, "response_format", "concise", "detailed")
+		setDefault(sc, "response_format", "concise")
 	}), output: outputSchema[GetJobsOutput]("Ordered durable-job states."), handler: s.getJobs})
 	addCatalogTool(s, catalogTool[SearchGitHubRepositoriesInput, SearchGitHubRepositoriesOutput]{name: ToolSearchGitHubRepositories, title: "Search live GitHub repositories", description: "Find repositories with structured filters and persist metadata. Use raw_query for unsupported GitHub qualifiers. Does not fetch threads or code.", annotations: networkReadAnnotations(), input: inputSchema[SearchGitHubRepositoriesInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "match_fields", 1, 3)
@@ -402,9 +409,9 @@ func (s *Server) registerScalable() {
 		setRange(sc, "page", 1, 1000)
 		setDefault(sc, "page", 1)
 		setEnum(sc, "response_format", "concise", "detailed")
-		setDefault(sc, "response_format", "detailed")
+		setDefault(sc, "response_format", "concise")
 	}), output: outputSchema[SearchGitHubRepositoriesOutput]("Live repository search with persisted metadata."), handler: s.searchGitHubRepositories})
-	addCatalogTool(s, catalogTool[SyncRepositoryMetadataInput, JobReference]{name: ToolSyncRepositoryMetadata, title: "Sync repository metadata in one batch", description: "Start one durable GitHub read for metadata only for up to 100 explicit repositories. Use it for stars, language, archive state, and issue counts; it does not fetch threads or code.", annotations: networkReadAnnotations(), input: inputSchema[SyncRepositoryMetadataInput](func(sc *schemaBuilder) { setArrayBounds(sc, "repositories", 1, 100) }), output: outputSchema[JobReference]("Reference to a metadata synchronization job."), handler: s.syncRepositoryMetadata})
+	addCatalogTool(s, catalogTool[SyncRepositoryMetadataInput, JobReference]{name: ToolSyncRepositoryMetadata, title: "Sync repository metadata in one batch", description: "Fetch current stars and metadata for up to 100 explicit repositories; no threads or code.", annotations: networkReadAnnotations(), input: inputSchema[SyncRepositoryMetadataInput](func(sc *schemaBuilder) { setArrayBounds(sc, "repositories", 1, 100) }), output: outputSchema[JobReference]("Reference to a metadata synchronization job."), handler: s.syncRepositoryMetadata})
 	addCatalogTool(s, catalogTool[SyncThreadsInput, JobReference]{name: ToolSyncThreads, title: "Sync GitHub thread headers in one batch", description: "Sync GitHub issue and pull-request headers across selected repositories or exact threads, plus metadata and policy files; no discussions, reviews, checks, or code.", annotations: networkReadAnnotations(), input: inputSchema[SyncThreadsInput](func(sc *schemaBuilder) {
 		setEnum(sc, "selection", "repositories", "threads")
 		property(sc, "repositories").MaxItems = jsonschema.Ptr(50)
@@ -423,7 +430,7 @@ func (s *Server) registerScalable() {
 		setRange(sc, "max_pages", 1, 100)
 		setDefault(sc, "max_pages", 3)
 	}), output: outputSchema[JobReference]("Reference to a bounded exact-thread hydration job."), handler: s.hydrateThreads})
-	addCatalogTool(s, catalogTool[struct{}, AuthenticatedIdentityOutput]{name: ToolGetAuthenticatedIdentity, title: "Get authenticated GitHub identity", description: "Resolve the current read credential's GitHub login and stable ID. Use before authored pull-request discovery; this performs one external read and never mutates GitHub.", annotations: networkReadAnnotations(), input: inputSchema[struct{}](noSchemaCustomization), output: outputSchema[AuthenticatedIdentityOutput]("Authenticated GitHub identity."), handler: s.getAuthenticatedIdentity})
+	addCatalogTool(s, catalogTool[struct{}, AuthenticatedIdentityOutput]{name: ToolGetAuthenticatedIdentity, title: "Get authenticated GitHub identity", description: "Resolve the current read credential's GitHub login and stable ID before authored-PR discovery.", annotations: externalReadAnnotations(), input: inputSchema[struct{}](noSchemaCustomization), output: outputSchema[AuthenticatedIdentityOutput]("Authenticated GitHub identity."), handler: s.getAuthenticatedIdentity})
 	addCatalogTool(s, catalogTool[SyncAuthoredPullRequestsInput, JobReference]{name: ToolSyncAuthoredPullRequests, title: "Sync authored pull requests across GitHub", description: "Discover and persist up to 500 pull requests authored by the authenticated GitHub user across repositories. This reads only core thread state; use the dedicated exact-PR health tool afterward.", annotations: networkReadAnnotations(), input: inputSchema[SyncAuthoredPullRequestsInput](func(sc *schemaBuilder) {
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit", 1, 500)
@@ -457,9 +464,9 @@ func (s *Server) registerScalable() {
 			p.MinLength = jsonschema.Ptr(1)
 		}
 	}), output: outputSchema[LinkPullRequestOutput]("Stored local pull-request relationship."), handler: s.linkPullRequest})
-	addCatalogTool(s, catalogTool[IndexRepositoriesInput, JobReference]{name: ToolIndexRepositories, title: "Acquire and index repository code in one batch", description: "Start a durable low-concurrency Git acquisition and safe code indexing job for up to 10 repositories. This performs network reads, Git processes, and local writes, but disables hooks and never executes repository-controlled code.", annotations: networkReadAnnotations(), input: inputSchema[IndexRepositoriesInput](func(sc *schemaBuilder) { setArrayBounds(sc, "repositories", 1, 10) }), output: outputSchema[JobReference]("Reference to a bounded repository acquisition and indexing job."), handler: s.indexRepositories})
-	addCatalogTool(s, catalogTool[CheckMergeConflictsInput, CheckMergeConflictsOutput]{name: ToolCheckMergeConflicts, title: "Check local Git merge conflicts in one batch", description: "Compare up to 50 already-fetched base/head OID pairs in managed workspaces using non-mutating Git reads. This never fetches remotes or changes refs, indexes, or worktrees; use it for actual merge conflicts, not competing upstream work.", annotations: processReadAnnotations(), input: inputSchema[CheckMergeConflictsInput](func(sc *schemaBuilder) { setArrayBounds(sc, "comparisons", 1, 50) }), output: outputSchema[CheckMergeConflictsOutput]("Ordered local merge-conflict checks."), handler: s.checkMergeConflicts})
-	addCatalogTool(s, catalogTool[DeepWikiInput, DeepWikiOutput]{name: ToolQueryDeepWiki, title: "Query derived repository knowledge from DeepWiki", description: "Query DeepWiki for public repository architecture, contribution rules, testing, and subsystem context. Actions map to its public structure, contents, and question reads. Do not use this for live stars, thread state, checks, reviews, or mergeability.", annotations: networkReadAnnotations(), input: inputSchema[DeepWikiInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[IndexRepositoriesInput, JobReference]{name: ToolIndexRepositories, title: "Acquire and index repository code in one batch", description: "Safely acquire and index up to 10 repositories. Runs Git and writes locally; never executes repository code.", annotations: networkReadAnnotations(), input: inputSchema[IndexRepositoriesInput](func(sc *schemaBuilder) { setArrayBounds(sc, "repositories", 1, 10) }), output: outputSchema[JobReference]("Reference to a bounded repository acquisition and indexing job."), handler: s.indexRepositories})
+	addCatalogTool(s, catalogTool[CheckMergeConflictsInput, CheckMergeConflictsOutput]{name: ToolCheckMergeConflicts, title: "Check local Git merge conflicts in one batch", description: "Compare up to 50 fetched OID pairs without fetching or changing repository state.", annotations: processReadAnnotations(), input: inputSchema[CheckMergeConflictsInput](func(sc *schemaBuilder) { setArrayBounds(sc, "comparisons", 1, 50) }), output: outputSchema[CheckMergeConflictsOutput]("Ordered local merge-conflict checks."), handler: s.checkMergeConflicts})
+	addCatalogTool(s, catalogTool[DeepWikiInput, DeepWikiOutput]{name: ToolQueryDeepWiki, title: "Query derived repository knowledge from DeepWiki", description: "Query DeepWiki for public repository architecture, contribution rules, testing, and subsystem context. Actions map to its public structure, contents, and question reads. Do not use this for live stars, thread state, checks, reviews, or mergeability.", annotations: externalReadAnnotations(), input: inputSchema[DeepWikiInput](func(sc *schemaBuilder) {
 		setEnum(sc, "action", "structure", "contents", "question")
 		setArrayBounds(sc, "repositories", 1, 10)
 		setRange(sc, "max_output_bytes", 1024, 1048576)
@@ -485,6 +492,11 @@ func (s *Server) getRepositories(ctx context.Context, _ *mcp.CallToolRequest, in
 func (s *Server) getThreads(ctx context.Context, _ *mcp.CallToolRequest, in GetThreadsInput) (*mcp.CallToolResult, GetThreadsOutput, error) {
 	if in.View == "" {
 		in.View = "compact"
+	}
+	for _, thread := range in.Threads {
+		if err := validateThreadRef(thread, true); err != nil {
+			return nil, GetThreadsOutput{}, err
+		}
 	}
 	r, err := s.scalableReader()
 	if err != nil {
@@ -519,6 +531,12 @@ func (s *Server) findPrecedents(ctx context.Context, _ *mcp.CallToolRequest, in 
 	return nil, out, err
 }
 func (s *Server) getJobs(ctx context.Context, _ *mcp.CallToolRequest, in GetJobsInput) (*mcp.CallToolResult, GetJobsOutput, error) {
+	if in.ResponseFormat == "" {
+		in.ResponseFormat = "concise"
+	}
+	if in.ResponseFormat != "concise" && in.ResponseFormat != "detailed" {
+		return nil, GetJobsOutput{}, InvalidArgument("response_format", "must be concise or detailed", map[string]any{"response_format": "concise"})
+	}
 	if _, ok := s.reader.(ScalableReader); !ok {
 		out := GetJobsOutput{Status: "complete", Items: make([]BatchItem[GetJobOutput], len(in.IDs))}
 		for i, id := range in.IDs {
@@ -536,6 +554,12 @@ func (s *Server) getJobs(ctx context.Context, _ *mcp.CallToolRequest, in GetJobs
 				item.Message = err.Error()
 				out.Status = "partial"
 			} else {
+				if in.ResponseFormat == "concise" {
+					job.Request, job.Result = nil, nil
+					if job.Status == "succeeded" || job.Status == "failed" || job.Status == "cancelled" {
+						item.NextAction = "Call jobs.get with response_format=detailed to read the terminal payload."
+					}
+				}
 				item.Value = &job
 			}
 			out.Items[i] = item
@@ -570,6 +594,9 @@ func (s *Server) searchGitHubRepositories(ctx context.Context, _ *mcp.CallToolRe
 		return nil, SearchGitHubRepositoriesOutput{}, errors.New("live GitHub repository search is not available")
 	}
 	out, err := op.SearchGitHubRepositories(ctx, in)
+	if s.readOnly {
+		out.SuggestedActions = nil
+	}
 	return nil, out, err
 }
 
@@ -589,19 +616,19 @@ func validateRepositorySearchInput(in SearchGitHubRepositoriesInput) error {
 }
 func (s *Server) syncThreads(ctx context.Context, _ *mcp.CallToolRequest, in SyncThreadsInput) (*mcp.CallToolResult, JobReference, error) {
 	if in.Selection != "repositories" && in.Selection != "threads" {
-		return nil, JobReference{}, errors.New("selection must be repositories or threads")
+		return nil, JobReference{}, InvalidArgument("selection", "must be repositories or threads", map[string]any{"selection": "repositories"})
 	}
 	if in.Selection == "repositories" && len(in.Repositories) == 0 {
-		return nil, JobReference{}, errors.New("repositories are required in repository selection mode")
+		return nil, JobReference{}, InvalidArgument("repositories", "are required in repository selection mode", map[string]any{"selection": "repositories", "repositories": []map[string]string{{"owner": "acme", "repo": "rocket"}}})
 	}
 	if in.Selection == "threads" && len(in.Threads) == 0 {
-		return nil, JobReference{}, errors.New("threads are required in thread selection mode")
+		return nil, JobReference{}, InvalidArgument("threads", "are required in thread selection mode", map[string]any{"selection": "threads", "threads": []map[string]any{{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 1}}})
 	}
 	if in.Selection == "repositories" && len(in.Threads) > 0 {
-		return nil, JobReference{}, errors.New("threads are not accepted in repository selection mode")
+		return nil, JobReference{}, InvalidArgument("threads", "are not accepted in repository selection mode", nil)
 	}
 	if in.Selection == "threads" && (len(in.Repositories) > 0 || in.Kind != "" || in.State != "" || in.UpdatedAfter != "" || in.LimitPerRepository != 0) {
-		return nil, JobReference{}, errors.New("repository filters are not accepted in thread selection mode")
+		return nil, JobReference{}, InvalidArgument("selection", "repository filters are not accepted in thread selection mode", nil)
 	}
 	op, ok := s.reader.(ScalableOperator)
 	if !ok {
@@ -612,7 +639,7 @@ func (s *Server) syncThreads(ctx context.Context, _ *mcp.CallToolRequest, in Syn
 }
 func (s *Server) hydrateThreads(ctx context.Context, _ *mcp.CallToolRequest, in HydrateThreadsInput) (*mcp.CallToolResult, JobReference, error) {
 	if len(in.Threads) == 0 || len(in.Facets) == 0 {
-		return nil, JobReference{}, errors.New("threads and at least one facet are required")
+		return nil, JobReference{}, InvalidArgument("facets", "threads and at least one facet are required", map[string]any{"facets": []string{"issue_comments"}})
 	}
 	if in.MaxPages == 0 {
 		in.MaxPages = 3
@@ -648,7 +675,7 @@ func (s *Server) syncAuthoredPullRequests(ctx context.Context, _ *mcp.CallToolRe
 }
 func (s *Server) syncPullRequestStatus(ctx context.Context, _ *mcp.CallToolRequest, in SyncPullRequestStatusInput) (*mcp.CallToolResult, JobReference, error) {
 	if len(in.PullRequests) == 0 {
-		return nil, JobReference{}, errors.New("pull_requests are required")
+		return nil, JobReference{}, InvalidArgument("pull_requests", "are required", nil)
 	}
 	if in.MaxPages == 0 {
 		in.MaxPages = 3
@@ -676,12 +703,44 @@ func (s *Server) listPullRequestPortfolio(ctx context.Context, _ *mcp.CallToolRe
 }
 
 func (s *Server) findPortfolioOverlaps(ctx context.Context, _ *mcp.CallToolRequest, in FindPortfolioOverlapsInput) (*mcp.CallToolResult, FindPortfolioOverlapsOutput, error) {
+	for _, candidate := range in.Candidates {
+		if candidate.Kind != "opportunity" && candidate.Kind != "workspace" && candidate.Kind != "pull_request" {
+			return nil, FindPortfolioOverlapsOutput{}, InvalidArgument("candidates", "candidate kind must be opportunity, workspace, or pull_request", map[string]any{"candidates": []map[string]string{{"kind": "opportunity", "ref": "<id>"}}})
+		}
+		if strings.TrimSpace(candidate.Ref) == "" {
+			return nil, FindPortfolioOverlapsOutput{}, InvalidArgument("candidates", "candidate ref is required", nil)
+		}
+	}
+	for _, pullRequest := range in.PullRequests {
+		if err := validateThreadRef(pullRequest, true); err != nil {
+			return nil, FindPortfolioOverlapsOutput{}, err
+		}
+		if pullRequest.Kind != "" && pullRequest.Kind != "pull_request" {
+			return nil, FindPortfolioOverlapsOutput{}, InvalidArgument("pull_requests", "kind must be pull_request when provided", map[string]any{"kind": "pull_request"})
+		}
+	}
 	r, err := s.scalableReader()
 	if err != nil {
 		return nil, FindPortfolioOverlapsOutput{}, err
 	}
 	out, err := r.FindPortfolioOverlaps(ctx, in)
 	return nil, out, err
+}
+
+func validateThreadRef(ref ThreadRef, kindOptional bool) error {
+	if strings.TrimSpace(ref.Owner) == "" || strings.TrimSpace(ref.Repo) == "" {
+		return InvalidArgument("threads", "owner and repo are required", map[string]any{"owner": "acme", "repo": "rocket", "number": 1})
+	}
+	if ref.Number < 1 {
+		return InvalidArgument("threads", "number must be positive", map[string]any{"owner": ref.Owner, "repo": ref.Repo, "number": 1})
+	}
+	if ref.Kind == "" && kindOptional {
+		return nil
+	}
+	if ref.Kind != "issue" && ref.Kind != "pull_request" {
+		return InvalidArgument("threads", "kind must be issue or pull_request", map[string]any{"kind": "pull_request"})
+	}
+	return nil
 }
 
 func (s *Server) linkPullRequest(ctx context.Context, _ *mcp.CallToolRequest, in LinkPullRequestInput) (*mcp.CallToolResult, LinkPullRequestOutput, error) {
@@ -694,7 +753,7 @@ func (s *Server) linkPullRequest(ctx context.Context, _ *mcp.CallToolRequest, in
 }
 func (s *Server) indexRepositories(ctx context.Context, _ *mcp.CallToolRequest, in IndexRepositoriesInput) (*mcp.CallToolResult, JobReference, error) {
 	if len(in.Repositories) == 0 {
-		return nil, JobReference{}, errors.New("repositories are required")
+		return nil, JobReference{}, InvalidArgument("repositories", "are required", nil)
 	}
 	op, ok := s.reader.(ScalableOperator)
 	if !ok {
@@ -705,7 +764,7 @@ func (s *Server) indexRepositories(ctx context.Context, _ *mcp.CallToolRequest, 
 }
 func (s *Server) checkMergeConflicts(ctx context.Context, _ *mcp.CallToolRequest, in CheckMergeConflictsInput) (*mcp.CallToolResult, CheckMergeConflictsOutput, error) {
 	if len(in.Comparisons) == 0 {
-		return nil, CheckMergeConflictsOutput{}, errors.New("comparisons are required")
+		return nil, CheckMergeConflictsOutput{}, InvalidArgument("comparisons", "are required", nil)
 	}
 	op, ok := s.reader.(ScalableOperator)
 	if !ok {
@@ -720,13 +779,13 @@ func (s *Server) deepWiki(ctx context.Context, _ *mcp.CallToolRequest, in DeepWi
 		in.MaxOutputBytes = 131072
 	}
 	if in.MaxOutputBytes < 1024 || in.MaxOutputBytes > 1048576 {
-		return nil, DeepWikiOutput{}, errors.New("max_output_bytes must be between 1024 and 1048576")
+		return nil, DeepWikiOutput{}, InvalidArgument("max_output_bytes", "must be between 1024 and 1048576", map[string]any{"max_output_bytes": 131072})
 	}
 	if (in.Action == "structure" || in.Action == "contents") && strings.TrimSpace(in.Repository) == "" {
-		return nil, DeepWikiOutput{}, errors.New("repository is required for structure and contents")
+		return nil, DeepWikiOutput{}, InvalidArgument("repository", "is required for structure and contents", map[string]any{"repository": "owner/repo"})
 	}
 	if in.Action == "question" && (len(in.Repositories) == 0 || strings.TrimSpace(in.Question) == "") {
-		return nil, DeepWikiOutput{}, errors.New("repositories and question are required for question")
+		return nil, DeepWikiOutput{}, InvalidArgument("question", "repositories and question are required for question", map[string]any{"repositories": []string{"owner/repo"}, "question": "Where is search ranking implemented?"})
 	}
 	op, ok := s.reader.(ScalableOperator)
 	if !ok {

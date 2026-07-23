@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -15,11 +14,12 @@ import (
 
 // SearchRepositoriesInput describes an offline repository search page.
 type SearchRepositoriesInput struct {
-	Query  string `json:"query,omitempty" jsonschema:"Full-text query over repository owner, name, and description"`
+	Query  string `json:"query,omitempty" jsonschema:"Repository full-text query"`
 	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
 	Repo   string `json:"repo,omitempty" jsonschema:"Optional repository name"`
 	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
 	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
+	Sort   string `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
 }
 
 // SearchRepositoriesOutput contains one page of repository matches.
@@ -32,7 +32,7 @@ type SearchRepositoriesOutput struct {
 
 // SearchThreadsInput describes an offline issue and pull-request search page.
 type SearchThreadsInput struct {
-	Query        string   `json:"query" jsonschema:"Full-text query over thread titles and bodies"`
+	Query        string   `json:"query" jsonschema:"Thread full-text query"`
 	Owner        string   `json:"owner,omitempty" jsonschema:"Optional repository owner"`
 	Repo         string   `json:"repo,omitempty" jsonschema:"Optional repository name"`
 	Kind         string   `json:"kind,omitempty" jsonschema:"Optional thread kind: issue or pull_request"`
@@ -46,6 +46,7 @@ type SearchThreadsInput struct {
 	UpdatedAfter string   `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound"`
 	Limit        int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
 	Cursor       string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
+	Sort         string   `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
 }
 
 // GetRepositoryDossierInput selects a persisted repository dossier.
@@ -65,22 +66,24 @@ type ExplainMatchInput struct {
 
 // ExplainMatchOutput reports the stored facts that contributed to a match score.
 type ExplainMatchOutput struct {
-	Query          string                `json:"query"`
-	Kind           string                `json:"kind"`
-	Owner          string                `json:"owner"`
-	Repo           string                `json:"repo"`
-	Number         int                   `json:"number,omitempty"`
-	Path           string                `json:"path,omitempty"`
-	Commit         string                `json:"commit,omitempty"`
-	State          string                `json:"state,omitempty"`
-	Title          string                `json:"title"`
-	Snippet        string                `json:"snippet,omitempty"`
-	MatchedFields  []string              `json:"matched_fields,omitempty"`
-	Score          float64               `json:"score"`
-	Reason         string                `json:"reason"`
-	SourceRevision string                `json:"source_revision,omitempty"`
-	Facets         []FacetCoverageOutput `json:"facets,omitempty"`
-	AsOf           string                `json:"as_of,omitempty"`
+	Query           string                `json:"query"`
+	Kind            string                `json:"kind"`
+	Owner           string                `json:"owner"`
+	Repo            string                `json:"repo"`
+	Number          int                   `json:"number,omitempty"`
+	Path            string                `json:"path,omitempty"`
+	Commit          string                `json:"commit,omitempty"`
+	State           string                `json:"state,omitempty"`
+	Title           string                `json:"title"`
+	Snippet         string                `json:"snippet,omitempty"`
+	MatchSource     string                `json:"match_source,omitempty" jsonschema:"Stored search document or hydrated facet that matched"`
+	RetrievalRank   *float64              `json:"retrieval_rank,omitempty" jsonschema:"Lower-is-better retrieval rank"`
+	RankingMethod   string                `json:"ranking_method,omitempty" jsonschema:"Retrieval ranking method"`
+	SearchTruncated bool                  `json:"search_truncated,omitempty" jsonschema:"Whether indexed hydrated text was bounded"`
+	Reason          string                `json:"reason"`
+	SourceRevision  string                `json:"source_revision,omitempty"`
+	Facets          []FacetCoverageOutput `json:"facets,omitempty"`
+	AsOf            string                `json:"as_of,omitempty"`
 }
 
 // GetJobInput selects a durable job by opaque ID.
@@ -151,8 +154,10 @@ type RunValidationInput struct {
 type StartInvestigationInput struct {
 	Owner     string `json:"owner" jsonschema:"GitHub repository owner"`
 	Repo      string `json:"repo" jsonschema:"GitHub repository name"`
-	CommitSHA string `json:"commit_sha,omitempty" jsonschema:"Optional commit SHA"`
+	CommitSHA string `json:"commit_sha,omitempty" jsonschema:"Required commit SHA unless number selects a stored thread"`
 	Lens      string `json:"lens,omitempty" jsonschema:"Optional lens name"`
+	Kind      string `json:"kind,omitempty" jsonschema:"Optional stored thread kind"`
+	Number    int    `json:"number,omitempty" jsonschema:"Stored thread number for atomic baseline creation"`
 }
 
 // RecordHypothesisInput records a structured hypothesis and its provenance.
@@ -224,16 +229,16 @@ type PromoteOpportunityInput struct {
 
 // DefineValidationInput records a bounded validation command without executing it.
 type DefineValidationInput struct {
-	InvestigationID string                         `json:"investigation_id" jsonschema:"Investigation ID"`
-	Kind            string                         `json:"kind" jsonschema:"Validation kind"`
-	Command         string                         `json:"command" jsonschema:"Shell-free command to execute"`
-	WorkingDir      string                         `json:"working_dir" jsonschema:"Working directory"`
-	BaseWorkingDir  string                         `json:"base_working_dir,omitempty" jsonschema:"Base workspace directory"`
-	CandidateDir    string                         `json:"candidate_dir,omitempty" jsonschema:"Candidate workspace directory"`
-	Env             []string                       `json:"env,omitempty" jsonschema:"Allowed environment variable names"`
-	Timeout         string                         `json:"timeout,omitempty" jsonschema:"Positive Go duration; defaults to 30m"`
-	MaxOutputBytes  int64                          `json:"max_output_bytes,omitempty" jsonschema:"Maximum captured bytes per output stream; defaults to 65536"`
-	Observation     *ValidationObservationContract `json:"observation,omitempty" jsonschema:"Expected bounded observations over captured base and candidate output"`
+	InvestigationID      string                         `json:"investigation_id" jsonschema:"Investigation ID"`
+	Kind                 string                         `json:"kind" jsonschema:"Validation kind"`
+	Command              string                         `json:"command" jsonschema:"Shell-free command to execute"`
+	WorkspaceID          string                         `json:"workspace_id,omitempty" jsonschema:"Managed workspace ID used for both run kinds"`
+	BaseWorkspaceID      string                         `json:"base_workspace_id,omitempty" jsonschema:"Managed base workspace ID; requires candidate_workspace_id"`
+	CandidateWorkspaceID string                         `json:"candidate_workspace_id,omitempty" jsonschema:"Managed candidate workspace ID; requires base_workspace_id"`
+	Env                  []string                       `json:"env,omitempty" jsonschema:"Allowed environment variable names"`
+	Timeout              string                         `json:"timeout,omitempty" jsonschema:"Positive Go duration; defaults to 30m"`
+	MaxOutputBytes       int64                          `json:"max_output_bytes,omitempty" jsonschema:"Maximum captured bytes per output stream; defaults to 65536"`
+	Observation          *ValidationObservationContract `json:"observation,omitempty" jsonschema:"Expected bounded observations over captured base and candidate output"`
 }
 
 // ValidationExpectedObservation is one output assertion evaluated without a shell.
@@ -302,19 +307,21 @@ func (s *Server) registerV1() {
 	localWrite := localWriteAnnotations(false)
 	addCatalogTool(s, catalogTool[SearchRepositoriesInput, SearchRepositoriesOutput]{
 		name: ToolSearchRepositories, title: "Search stored repositories",
-		description: "Search local repository owner, name, and description fields, or list a specific repository when owner and repo are supplied together. Results are paginated and this tool never contacts GitHub.",
+		description: "Search stored repository names, topics, and descriptions. Supports relevance or updated order; never contacts GitHub.",
 		annotations: readOnly, input: inputSchema[SearchRepositoriesInput](func(schema *schemaBuilder) {
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
+			setEnum(schema, "sort", "relevance", "updated")
 		}), output: outputSchema[SearchRepositoriesOutput]("One page of stored repository matches."), handler: s.searchRepositories,
 	})
 	addCatalogTool(s, catalogTool[SearchThreadsInput, SearchOutput]{
 		name: ToolSearchThreads, title: "Search stored issues and pull requests",
-		description: "Search locally stored issue and pull-request titles and bodies, optionally restricted to one repository and thread kind. Use the returned cursor for the next page; this tool never contacts GitHub.",
+		description: "Search stored issue and PR titles, labels, bodies, and hydrated text. Supports relevance or updated order; never contacts GitHub.",
 		annotations: readOnly, input: inputSchema[SearchThreadsInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 			setEnum(schema, "state", "open", "closed")
 			setEnum(schema, "state_reason", "completed", "not_planned")
+			setEnum(schema, "sort", "relevance", "updated")
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 		}), output: outputSchema[SearchOutput]("One page of stored issue and pull-request matches."), handler: s.searchThreads,
@@ -327,7 +334,7 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[ExplainMatchInput, ExplainMatchOutput]{
 		name: ToolExplainMatch, title: "Explain a stored search match",
-		description: "Explain why one repository, thread, or code result matched a prior local query, including score signals, source revision, and facet coverage. Supply the identity fields for the selected match; this tool is offline.",
+		description: "Read the FTS5 rank, stored match source, source revision, and coverage for one prior repository, thread, or code result. It does not reimplement token matching; this tool is offline.",
 		annotations: readOnly, input: inputSchema[ExplainMatchInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "repo", "issue", "pull_request", "code")
 			setMinimum(schema, "number", 1)
@@ -357,7 +364,7 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[StartInvestigationInput, InvestigationOutput]{
 		name: ToolStartInvestigation, title: "Start local investigation",
-		description: "Create and persist a local investigation for one stored repository revision. This does not create a Git worktree or contact GitHub; use " + ToolCreateWorkspace + " separately when filesystem work is authorized.",
+		description: "Create a local investigation from a commit SHA, or atomically create its initial baseline hypothesis from a stored issue or pull-request number. This does not create a Git worktree or contact GitHub; use " + ToolCreateWorkspace + " separately when filesystem work is authorized.",
 		annotations: localWrite, input: inputSchema[StartInvestigationInput](noSchemaCustomization),
 		output: outputSchema[InvestigationOutput]("Newly created local investigation."), handler: s.startInvestigation,
 	})
@@ -395,7 +402,7 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[DefineValidationInput, ValidationOutput]{
 		name: ToolDefineValidation, title: "Define validation command",
-		description: "Parse and persist a shell-free validation command, working directory, environment allowlist, timeout, and output bound for an investigation. This does not execute the command; use " + ToolRunValidation + " separately with explicit authorization.",
+		description: "Parse and persist a shell-free validation command for managed workspace IDs belonging to the investigation, with an environment allowlist, timeout, and output bound. This does not execute the command; use " + ToolRunValidation + " separately with explicit authorization.",
 		annotations: localWrite, input: inputSchema[DefineValidationInput](func(schema *schemaBuilder) {
 			setDefault(schema, "timeout", "30m")
 			setRange(schema, "max_output_bytes", 1, 64*1024*1024)
@@ -404,8 +411,8 @@ func (s *Server) registerV1() {
 		}), output: outputSchema[ValidationOutput]("Persisted validation definition."), handler: s.defineValidation,
 	})
 	addCatalogTool(s, catalogTool[PrepareContributionInput, DraftOutput]{
-		name: ToolPrepareContribution, title: "Prepare local contribution draft",
-		description: "Render and persist a local issue or pull-request draft from an opportunity and supplied evidence summaries. Pull-request drafts require explicit workspace_id, approach, and changes; this tool never inspects a workspace, runs Git, posts, or mutates GitHub.",
+		name: ToolPrepareContribution, title: "Prepare pull request or issue draft",
+		description: "Render and persist a pull request or issue draft from stored evidence, supplied changes, or a verified workspace diff; it inspects the managed workspace with non-mutating Git when changes are omitted. Never posts or mutates GitHub.",
 		annotations: localWrite, input: inputSchema[PrepareContributionInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 		}), output: outputSchema[DraftOutput]("Newly rendered and persisted local contribution draft."), handler: s.prepareContribution,
@@ -417,7 +424,6 @@ func (s *Server) registerV1() {
 		output: outputSchema[GetJobsOutput]("Ordered durable job states after cancellation requests."), handler: s.cancelJob,
 	})
 
-	s.registerV1ResourceTemplates()
 }
 
 func (s *Server) searchRepositories(ctx context.Context, _ *mcp.CallToolRequest, in SearchRepositoriesInput) (*mcp.CallToolResult, SearchRepositoriesOutput, error) {
@@ -425,10 +431,13 @@ func (s *Server) searchRepositories(ctx context.Context, _ *mcp.CallToolRequest,
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, SearchRepositoriesOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, SearchRepositoriesOutput{}, InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	if (in.Owner == "") != (in.Repo == "") {
 		return nil, SearchRepositoriesOutput{}, InvalidArgument("owner", "owner and repo must be provided together", map[string]any{"owner": "acme", "repo": "rocket"})
+	}
+	if in.Sort != "" && in.Sort != "relevance" && in.Sort != "updated" {
+		return nil, SearchRepositoriesOutput{}, InvalidArgument("sort", "must be relevance or updated", map[string]any{"sort": "updated"})
 	}
 	out, err := s.reader.SearchRepositories(ctx, in)
 	return nil, out, err
@@ -436,30 +445,34 @@ func (s *Server) searchRepositories(ctx context.Context, _ *mcp.CallToolRequest,
 
 func (s *Server) searchThreads(ctx context.Context, _ *mcp.CallToolRequest, in SearchThreadsInput) (*mcp.CallToolResult, SearchOutput, error) {
 	if in.Query == "" {
-		return nil, SearchOutput{}, errors.New("query is required")
+		return nil, SearchOutput{}, InvalidArgument("query", "is required", map[string]any{"query": "music"})
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, SearchOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, SearchOutput{}, InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	if (in.Owner == "") != (in.Repo == "") {
 		return nil, SearchOutput{}, InvalidArgument("owner", "owner and repo must be provided together", map[string]any{"owner": "acme", "repo": "rocket"})
 	}
 	if in.Kind != "" && in.Kind != "issue" && in.Kind != "pull_request" {
-		return nil, SearchOutput{}, errors.New("kind must be issue or pull_request")
+		return nil, SearchOutput{}, InvalidArgument("kind", "must be issue or pull_request", map[string]any{"kind": "issue"})
 	}
 	if in.State != "" && in.State != "open" && in.State != "closed" {
-		return nil, SearchOutput{}, errors.New("state must be open or closed")
+		return nil, SearchOutput{}, InvalidArgument("state", "must be open or closed", map[string]any{"state": "open"})
+	}
+	if in.Sort != "" && in.Sort != "relevance" && in.Sort != "updated" {
+		return nil, SearchOutput{}, InvalidArgument("sort", "must be relevance or updated", map[string]any{"sort": "updated"})
 	}
 	if in.StateReason != "" && in.StateReason != "completed" && in.StateReason != "not_planned" {
-		return nil, SearchOutput{}, errors.New("state_reason must be completed or not_planned")
+		return nil, SearchOutput{}, InvalidArgument("state_reason", "must be completed or not_planned", map[string]any{"state_reason": "completed"})
 	}
 	searchIn := SearchInput{
 		Query: in.Query, Owner: in.Owner, Repo: in.Repo, Kind: in.Kind, State: in.State,
 		StateReason: in.StateReason, Merged: in.Merged, Author: in.Author, Association: in.Association,
 		Assignee: in.Assignee, Labels: in.Labels, UpdatedAfter: in.UpdatedAfter, Limit: in.Limit, Cursor: in.Cursor,
+		Sort: in.Sort,
 	}
 	out, err := s.reader.Search(ctx, searchIn)
 	return nil, out, err
@@ -561,6 +574,16 @@ func (s *Server) startInvestigation(ctx context.Context, _ *mcp.CallToolRequest,
 	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
 		return nil, InvestigationOutput{}, err
 	}
+	if in.Number > 0 {
+		if in.CommitSHA != "" || in.Lens != "" {
+			return nil, InvestigationOutput{}, InvalidArgument("number", "cannot be combined with commit_sha or lens", map[string]any{"owner": in.Owner, "repo": in.Repo, "kind": "issue", "number": in.Number})
+		}
+		if in.Kind != "" && in.Kind != "issue" && in.Kind != "pull_request" {
+			return nil, InvestigationOutput{}, InvalidArgument("kind", "must be issue or pull_request", map[string]any{"kind": "issue"})
+		}
+	} else if strings.TrimSpace(in.CommitSHA) == "" {
+		return nil, InvestigationOutput{}, InvalidArgument("commit_sha", "provide commit_sha or a positive stored thread number", map[string]any{"commit_sha": "<sha>"})
+	}
 	operator, ok := s.reader.(Operator)
 	if !ok {
 		return nil, InvestigationOutput{}, errors.New("investigations are not available")
@@ -658,17 +681,25 @@ func (s *Server) defineValidation(ctx context.Context, _ *mcp.CallToolRequest, i
 	}
 	in.Kind = strings.TrimSpace(in.Kind)
 	in.Command = strings.TrimSpace(in.Command)
-	in.WorkingDir = strings.TrimSpace(in.WorkingDir)
-	if in.Kind == "" || in.Command == "" || in.WorkingDir == "" {
-		return nil, ValidationOutput{}, errors.New("investigation_id, kind, command, and working_dir are required")
+	in.WorkspaceID = strings.TrimSpace(in.WorkspaceID)
+	in.BaseWorkspaceID = strings.TrimSpace(in.BaseWorkspaceID)
+	in.CandidateWorkspaceID = strings.TrimSpace(in.CandidateWorkspaceID)
+	if in.Kind == "" || in.Command == "" {
+		return nil, ValidationOutput{}, InvalidArgument("command", "investigation_id, kind, and command are required", map[string]any{"investigation_id": in.InvestigationID, "kind": "regression", "command": "go test ./..."})
+	}
+	if in.WorkspaceID != "" && (in.BaseWorkspaceID != "" || in.CandidateWorkspaceID != "") {
+		return nil, ValidationOutput{}, InvalidArgument("workspace_id", "cannot be combined with base_workspace_id or candidate_workspace_id", map[string]any{"workspace_id": in.WorkspaceID})
+	}
+	if in.WorkspaceID == "" && (in.BaseWorkspaceID == "" || in.CandidateWorkspaceID == "") {
+		return nil, ValidationOutput{}, InvalidArgument("base_workspace_id", "base_workspace_id and candidate_workspace_id must be provided together", map[string]any{"base_workspace_id": "<base-id>", "candidate_workspace_id": "<candidate-id>"})
 	}
 	if in.Timeout != "" {
 		if _, err := time.ParseDuration(in.Timeout); err != nil {
-			return nil, ValidationOutput{}, fmt.Errorf("invalid timeout duration: %w", err)
+			return nil, ValidationOutput{}, InvalidArgument("timeout", "must be a positive Go duration", map[string]any{"timeout": "30m"})
 		}
 	}
 	if in.MaxOutputBytes < 0 {
-		return nil, ValidationOutput{}, errors.New("max_output_bytes cannot be negative")
+		return nil, ValidationOutput{}, InvalidArgument("max_output_bytes", "cannot be negative", map[string]any{"max_output_bytes": 65536})
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {
@@ -691,9 +722,6 @@ func (s *Server) prepareContribution(ctx context.Context, _ *mcp.CallToolRequest
 	}
 	if in.Kind == "pull_request" && strings.TrimSpace(in.Approach) == "" {
 		return nil, DraftOutput{}, errors.New("approach is required for pull_request drafts")
-	}
-	if in.Kind == "pull_request" && strings.TrimSpace(in.Changes) == "" {
-		return nil, DraftOutput{}, errors.New("changes is required for pull_request drafts; inspect the workspace explicitly before preparing the draft")
 	}
 	if in.Kind == "issue" && (in.WorkspaceID != "" || in.Approach != "" || in.Changes != "" || in.Compatibility != "" || in.Limitations != "" || in.LinkedIssue != "") {
 		return nil, DraftOutput{}, errors.New("pull-request-only fields are not accepted for issue drafts")
