@@ -16,6 +16,7 @@ import (
 )
 
 func TestExecRunnerCancellationKillsProcessGroup(t *testing.T) {
+	t.Parallel()
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		t.Skip("sh not available")

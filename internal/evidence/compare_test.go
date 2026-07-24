@@ -5,6 +5,7 @@ import (
 )
 
 func TestCompare(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		base       *ValidationRun
@@ -65,6 +66,7 @@ func TestCompare(t *testing.T) {
 }
 
 func TestCompareInvalidKind(t *testing.T) {
+	t.Parallel()
 	base := &ValidationRun{Kind: RunKindCandidate, ExitCode: 0, Classification: RunClassificationPassing}
 	candidate := &ValidationRun{Kind: RunKindCandidate, ExitCode: 0, Classification: RunClassificationPassing}
 	if _, err := Compare(base, candidate); err == nil {

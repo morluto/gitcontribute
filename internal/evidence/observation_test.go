@@ -10,6 +10,7 @@ import (
 )
 
 func TestRunValidationEvaluatesObservationContract(t *testing.T) {
+	t.Parallel()
 	repo := newFakeRepo()
 	runner := &fakeRunner{result: &RunResult{
 		ExitCode:       1,
@@ -50,6 +51,7 @@ func TestRunValidationEvaluatesObservationContract(t *testing.T) {
 }
 
 func TestObservationContractSupportsExpectedAbsence(t *testing.T) {
+	t.Parallel()
 	contract := &ObservationContract{
 		Intent: "candidate removes the undersized buffer",
 		Candidate: []ExpectedObservation{{
@@ -64,6 +66,7 @@ func TestObservationContractSupportsExpectedAbsence(t *testing.T) {
 }
 
 func TestObservationContractMatchesBoundedArtifact(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "pipeline.mlir"), []byte("!buffer<4>\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -82,6 +85,7 @@ func TestObservationContractMatchesBoundedArtifact(t *testing.T) {
 }
 
 func TestObservationArtifactRejectsWorkspaceEscape(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	outside := t.TempDir()
 	if err := os.WriteFile(filepath.Join(outside, "secret"), []byte("secret"), 0o600); err != nil {
@@ -104,6 +108,7 @@ func TestObservationArtifactRejectsWorkspaceEscape(t *testing.T) {
 }
 
 func TestDefineValidationRejectsInvalidObservationRegexp(t *testing.T) {
+	t.Parallel()
 	svc := NewService(newFakeRepo(), &fakeRunner{})
 	err := svc.DefineValidation(context.Background(), &ValidationDefinition{
 		Command: []string{"test"}, WorkingDir: "/tmp",
@@ -125,6 +130,7 @@ func TestDefineValidationRejectsInvalidObservationRegexp(t *testing.T) {
 }
 
 func TestEvaluateObservationsReportsCorruptPersistedRegexp(t *testing.T) {
+	t.Parallel()
 	contract := &ObservationContract{
 		Intent: "persisted contract may be corrupt",
 		Base: []ExpectedObservation{{
@@ -139,6 +145,7 @@ func TestEvaluateObservationsReportsCorruptPersistedRegexp(t *testing.T) {
 }
 
 func TestDefineValidationRequiresBaseAndCandidateObservations(t *testing.T) {
+	t.Parallel()
 	svc := NewService(newFakeRepo(), &fakeRunner{})
 	err := svc.DefineValidation(context.Background(), &ValidationDefinition{
 		Command: []string{"test"}, WorkingDir: "/tmp",
@@ -156,6 +163,7 @@ func TestDefineValidationRequiresBaseAndCandidateObservations(t *testing.T) {
 }
 
 func TestCompareValidationObservationMismatchIsInconclusive(t *testing.T) {
+	t.Parallel()
 	base := &ValidationRun{
 		Kind: RunKindBase, ExitCode: 1, Classification: RunClassificationFailing,
 		ObservationStatus: ObservationMismatched,
@@ -174,6 +182,7 @@ func TestCompareValidationObservationMismatchIsInconclusive(t *testing.T) {
 }
 
 func TestCompareValidationPartialObservationIsInconclusive(t *testing.T) {
+	t.Parallel()
 	base := &ValidationRun{
 		Kind: RunKindBase, ExitCode: 1, Classification: RunClassificationFailing,
 		ObservationStatus: ObservationMatched,

@@ -67,6 +67,7 @@ func runResult(classification RunClassification) *RunResult {
 }
 
 func TestRunValidationGroupClassifiesOneOffFailureAsFlaky(t *testing.T) {
+	t.Parallel()
 	runner := &sequenceRunner{results: []*RunResult{runResult(RunClassificationPassing), runResult(RunClassificationFailing), runResult(RunClassificationPassing)}}
 	svc, repo, id := repeatFixture(t, runner, nil)
 	group, err := svc.RunValidationGroup(context.Background(), id, RepeatValidationOptions{Kinds: []RunKind{RunKindCandidate}, RunCount: 3, Concurrency: 1})
@@ -82,6 +83,7 @@ func TestRunValidationGroupClassifiesOneOffFailureAsFlaky(t *testing.T) {
 }
 
 func TestRunValidationGroupKeepsResultsAfterMalformedAttempt(t *testing.T) {
+	t.Parallel()
 	runner := &sequenceRunner{
 		results: []*RunResult{nil, runResult(RunClassificationPassing), runResult(RunClassificationPassing)},
 	}
@@ -96,6 +98,7 @@ func TestRunValidationGroupKeepsResultsAfterMalformedAttempt(t *testing.T) {
 }
 
 func TestRunValidationGroupCancellationReturnsPartialResults(t *testing.T) {
+	t.Parallel()
 	runner := &sequenceRunner{delay: 100 * time.Millisecond, results: []*RunResult{runResult(RunClassificationPassing)}}
 	svc, _, id := repeatFixture(t, runner, nil)
 	group, err := svc.RunValidationGroup(context.Background(), id, RepeatValidationOptions{
@@ -111,6 +114,7 @@ func TestRunValidationGroupCancellationReturnsPartialResults(t *testing.T) {
 }
 
 func TestRunValidationGroupComparisonRejectsUnrelatedCandidateError(t *testing.T) {
+	t.Parallel()
 	contract := &ObservationContract{
 		Intent:    "candidate removes expected symptom",
 		Base:      []ExpectedObservation{{Name: "symptom", Source: ObservationStderr, Matcher: ObservationExact, Pattern: "expected symptom", Occurrence: ObservationPresent}},

@@ -121,6 +121,7 @@ func (f *fakeRunner) Run(_ context.Context, _ RunRequest) (*RunResult, error) {
 }
 
 func TestDefineValidationRequiresCommand(t *testing.T) {
+	t.Parallel()
 	svc := NewService(newFakeRepo(), &fakeRunner{})
 	err := svc.DefineValidation(context.Background(), &ValidationDefinition{
 		WorkingDir: "/tmp",
@@ -131,6 +132,7 @@ func TestDefineValidationRequiresCommand(t *testing.T) {
 }
 
 func TestDefineValidationRequiresWorkspace(t *testing.T) {
+	t.Parallel()
 	svc := NewService(newFakeRepo(), &fakeRunner{})
 	err := svc.DefineValidation(context.Background(), &ValidationDefinition{
 		Command: []string{"go", "test"},
@@ -141,6 +143,7 @@ func TestDefineValidationRequiresWorkspace(t *testing.T) {
 }
 
 func TestRunValidation(t *testing.T) {
+	t.Parallel()
 	repo := newFakeRepo()
 	runner := &fakeRunner{
 		result: &RunResult{
@@ -178,6 +181,7 @@ func TestRunValidation(t *testing.T) {
 }
 
 func TestRunValidationUnknownKind(t *testing.T) {
+	t.Parallel()
 	svc := NewService(newFakeRepo(), &fakeRunner{})
 	def := &ValidationDefinition{ID: "def-1", Command: []string{"go", "test"}, WorkingDir: "/tmp"}
 	_ = svc.DefineValidation(context.Background(), def)
@@ -188,6 +192,7 @@ func TestRunValidationUnknownKind(t *testing.T) {
 }
 
 func TestCreateEvidenceValidates(t *testing.T) {
+	t.Parallel()
 	svc := NewService(newFakeRepo(), &fakeRunner{})
 	err := svc.CreateEvidence(context.Background(), &Evidence{
 		Type:     "not-a-type",
@@ -199,6 +204,7 @@ func TestCreateEvidenceValidates(t *testing.T) {
 }
 
 func TestCompareValidation(t *testing.T) {
+	t.Parallel()
 	repo := newFakeRepo()
 	svc := NewService(repo, &fakeRunner{})
 
@@ -217,6 +223,7 @@ func TestCompareValidation(t *testing.T) {
 }
 
 func TestCompareValidationRejectsDifferentDefinitions(t *testing.T) {
+	t.Parallel()
 	repo := newFakeRepo()
 	svc := NewService(repo, &fakeRunner{})
 	_ = repo.SaveValidationRun(context.Background(), &ValidationRun{ID: "base", DefinitionID: "a", Kind: RunKindBase})
@@ -227,6 +234,7 @@ func TestCompareValidationRejectsDifferentDefinitions(t *testing.T) {
 }
 
 func TestRunValidationUsesKindSpecificWorkspace(t *testing.T) {
+	t.Parallel()
 	repo := newFakeRepo()
 	runner := &capturingRunner{result: &RunResult{Classification: RunClassificationPassing}}
 	svc := NewService(repo, runner)
@@ -268,6 +276,7 @@ func (r *deadlineRunner) Run(ctx context.Context, _ RunRequest) (*RunResult, err
 }
 
 func TestRunValidationRejectsDefinitionWithoutNormalizedTimeout(t *testing.T) {
+	t.Parallel()
 	repo := newFakeRepo()
 	repo.defs["invalid"] = &ValidationDefinition{ID: "invalid", Command: []string{"test"}, WorkingDir: "/tmp"}
 	_, err := NewService(repo, &deadlineRunner{}).RunValidation(context.Background(), "invalid", RunKindBase)
@@ -277,6 +286,7 @@ func TestRunValidationRejectsDefinitionWithoutNormalizedTimeout(t *testing.T) {
 }
 
 func TestDefineValidationStoresKindAndBounds(t *testing.T) {
+	t.Parallel()
 	repo := newFakeRepo()
 	svc := NewService(repo, &fakeRunner{})
 	def := &ValidationDefinition{
@@ -317,6 +327,7 @@ func TestDefineValidationRejectsEnvironmentValues(t *testing.T) {
 }
 
 func TestDefineValidationRejectsInvalidBounds(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		def     *ValidationDefinition
@@ -349,6 +360,7 @@ func TestDefineValidationRejectsInvalidBounds(t *testing.T) {
 }
 
 func TestDefineValidationAppliesSafeTimeoutDefault(t *testing.T) {
+	t.Parallel()
 	def := &ValidationDefinition{Command: []string{"test"}, WorkingDir: "/tmp"}
 	if err := NewService(newFakeRepo(), &fakeRunner{}).DefineValidation(context.Background(), def); err != nil {
 		t.Fatal(err)
@@ -400,6 +412,7 @@ func TestRunValidationInheritsEnvironmentWithEmptyAllowlist(t *testing.T) {
 }
 
 func TestRunValidationPassesOutputBound(t *testing.T) {
+	t.Parallel()
 	repo := newFakeRepo()
 	runner := &capturingRunner{result: &RunResult{Classification: RunClassificationPassing}}
 	svc := NewService(repo, runner)
@@ -416,6 +429,7 @@ func TestRunValidationPassesOutputBound(t *testing.T) {
 }
 
 func TestDefineValidationRequiresDeclaredProtocolForReadinessDeadline(t *testing.T) {
+	t.Parallel()
 	svc := NewService(newFakeRepo(), &fakeRunner{})
 	withoutProtocol := &ValidationDefinition{Command: []string{"server"}, WorkingDir: "/tmp", ReadinessTimeout: time.Second}
 	if err := svc.DefineValidation(context.Background(), withoutProtocol); err == nil {
@@ -431,6 +445,7 @@ func TestDefineValidationRequiresDeclaredProtocolForReadinessDeadline(t *testing
 }
 
 func TestEvidenceWithSourceRef(t *testing.T) {
+	t.Parallel()
 	repo := newFakeRepo()
 	svc := NewService(repo, &fakeRunner{})
 	e := &Evidence{

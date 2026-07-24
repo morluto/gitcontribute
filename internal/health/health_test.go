@@ -62,6 +62,7 @@ func applyRepositoryFacet(ctx context.Context, t *testing.T, c *corpus.Corpus, r
 }
 
 func TestComputeHealthMetrics(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c := openTestCorpus(t)
 
@@ -232,6 +233,7 @@ func TestComputeHealthMetrics(t *testing.T) {
 }
 
 func TestExternalMergeRateRequiresObservedOutcome(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
 	tests := []struct {
 		name         string
@@ -292,6 +294,7 @@ func TestExternalMergeRateRequiresObservedOutcome(t *testing.T) {
 }
 
 func TestComputeHonorsRepositoryThreadCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c := openTestCorpus(t)
 	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
@@ -341,6 +344,7 @@ func float64Pointer(value float64) *float64 {
 }
 
 func TestResponseRequiredFacetCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c := openTestCorpus(t)
 
@@ -423,6 +427,7 @@ func TestResponseRequiredFacetCoverage(t *testing.T) {
 }
 
 func TestResponsePullRequestPartialFacetCoverage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c := openTestCorpus(t)
 
@@ -493,6 +498,7 @@ func TestResponsePullRequestPartialFacetCoverage(t *testing.T) {
 }
 
 func TestResponseSelfCommentCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	c := openTestCorpus(t)
 
