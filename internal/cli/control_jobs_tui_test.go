@@ -9,31 +9,32 @@ import (
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 type fakeControlService struct {
 	*fakeService
-	configureOpts cli.ConfigureOptions
-	metadata      *cli.MetadataResult
-	configured    *cli.ConfigureResult
-	controlStatus *cli.ControlStatusResult
-	doctor        *cli.DoctorResult
+	configureOpts contracts.ConfigureOptions
+	metadata      *contracts.MetadataResult
+	configured    *contracts.ConfigureResult
+	controlStatus *contracts.ControlStatusResult
+	doctor        *contracts.DoctorResult
 }
 
-func (f *fakeControlService) Metadata(context.Context) (*cli.MetadataResult, error) {
+func (f *fakeControlService) Metadata(context.Context) (*contracts.MetadataResult, error) {
 	return f.metadata, nil
 }
 
-func (f *fakeControlService) Configure(_ context.Context, opts cli.ConfigureOptions) (*cli.ConfigureResult, error) {
+func (f *fakeControlService) Configure(_ context.Context, opts contracts.ConfigureOptions) (*contracts.ConfigureResult, error) {
 	f.configureOpts = opts
 	return f.configured, nil
 }
 
-func (f *fakeControlService) ControlStatus(context.Context) (*cli.ControlStatusResult, error) {
+func (f *fakeControlService) ControlStatus(context.Context) (*contracts.ControlStatusResult, error) {
 	return f.controlStatus, nil
 }
 
-func (f *fakeControlService) Doctor(context.Context) (*cli.DoctorResult, error) {
+func (f *fakeControlService) Doctor(context.Context) (*contracts.DoctorResult, error) {
 	return f.doctor, nil
 }
 
@@ -41,12 +42,12 @@ func TestControlCommands(t *testing.T) {
 	t.Parallel()
 	svc := &fakeControlService{
 		fakeService: &fakeService{},
-		metadata:    &cli.MetadataResult{Name: "gitcontribute", Version: "test", Capabilities: []string{"mcp-stdio"}},
-		configured:  &cli.ConfigureResult{Path: "/tmp/config.toml", Changed: true, Config: cli.ConfigResult{CrawlBudget: 25}},
-		controlStatus: &cli.ControlStatusResult{
-			Healthy: true, Counts: cli.ControlCounts{Repositories: 2}, Warnings: []string{},
+		metadata:    &contracts.MetadataResult{Name: "gitcontribute", Version: "test", Capabilities: []string{"mcp-stdio"}},
+		configured:  &contracts.ConfigureResult{Path: "/tmp/config.toml", Changed: true, Config: contracts.ConfigResult{CrawlBudget: 25}},
+		controlStatus: &contracts.ControlStatusResult{
+			Healthy: true, Counts: contracts.ControlCounts{Repositories: 2}, Warnings: []string{},
 		},
-		doctor: &cli.DoctorResult{Healthy: true, Checks: []cli.DoctorCheck{{Name: "git", Status: "ok"}}},
+		doctor: &contracts.DoctorResult{Healthy: true, Checks: []contracts.DoctorCheck{{Name: "git", Status: "ok"}}},
 	}
 
 	c, stdout, _ := newTestCLI(svc, nil)
@@ -78,7 +79,7 @@ func TestDoctorStrictReturnsFailureAfterRenderingDiagnostics(t *testing.T) {
 	t.Parallel()
 	svc := &fakeControlService{
 		fakeService: &fakeService{},
-		doctor: &cli.DoctorResult{Healthy: false, Checks: []cli.DoctorCheck{{
+		doctor: &contracts.DoctorResult{Healthy: false, Checks: []contracts.DoctorCheck{{
 			Name: "database", Status: "error", Required: true, Message: "unavailable",
 		}}},
 	}
@@ -98,27 +99,27 @@ type fakeJobService struct {
 	listedStatus string
 	shownID      string
 	cancelledID  string
-	job          *cli.JobResult
+	job          *contracts.JobResult
 }
 
-func (f *fakeJobService) ListJobs(_ context.Context, status string, _ int) (*cli.JobListResult, error) {
+func (f *fakeJobService) ListJobs(_ context.Context, status string, _ int) (*contracts.JobListResult, error) {
 	f.listedStatus = status
-	return &cli.JobListResult{Jobs: []cli.JobResult{*f.job}}, nil
+	return &contracts.JobListResult{Jobs: []contracts.JobResult{*f.job}}, nil
 }
 
-func (f *fakeJobService) GetJob(_ context.Context, id string) (*cli.JobResult, error) {
+func (f *fakeJobService) GetJob(_ context.Context, id string) (*contracts.JobResult, error) {
 	f.shownID = id
 	return f.job, nil
 }
 
-func (f *fakeJobService) CancelJob(_ context.Context, id string) (*cli.JobResult, error) {
+func (f *fakeJobService) CancelJob(_ context.Context, id string) (*contracts.JobResult, error) {
 	f.cancelledID = id
 	return f.job, nil
 }
 
 func TestJobCommands(t *testing.T) {
 	t.Parallel()
-	svc := &fakeJobService{fakeService: &fakeService{}, job: &cli.JobResult{ID: "job-1", Kind: "crawl", Status: "running", CreatedAt: "now"}}
+	svc := &fakeJobService{fakeService: &fakeService{}, job: &contracts.JobResult{ID: "job-1", Kind: "crawl", Status: "running", CreatedAt: "now"}}
 	c, stdout, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"jobs", "--status", "running", "--json"}))
 	if svc.listedStatus != "running" || !containsText(stdout.String(), "job-1") {
@@ -140,10 +141,10 @@ func TestJobCommands(t *testing.T) {
 
 type fakeTUIRunner struct {
 	called bool
-	opts   cli.TUIOptions
+	opts   contracts.TUIOptions
 }
 
-func (f *fakeTUIRunner) Run(_ context.Context, opts cli.TUIOptions) error {
+func (f *fakeTUIRunner) Run(_ context.Context, opts contracts.TUIOptions) error {
 	f.called = true
 	f.opts = opts
 	return nil

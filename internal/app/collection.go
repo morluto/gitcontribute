@@ -8,13 +8,13 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 // CreateCollection creates a named collection.
-func (s *Service) CreateCollection(ctx context.Context, name string) (*cli.CollectionResult, error) {
+func (s *Service) CreateCollection(ctx context.Context, name string) (*contracts.CollectionResult, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, errors.New("collection name is required")
@@ -31,7 +31,7 @@ func (s *Service) CreateCollection(ctx context.Context, name string) (*cli.Colle
 }
 
 // AddCollectionMembers idempotently adds typed references to a collection.
-func (s *Service) AddCollectionMembers(ctx context.Context, name string, members []cli.CollectionMember) (*cli.CollectionResult, error) {
+func (s *Service) AddCollectionMembers(ctx context.Context, name string, members []contracts.CollectionMember) (*contracts.CollectionResult, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, errors.New("collection name is required")
@@ -65,7 +65,7 @@ func (s *Service) AddCollectionMembers(ctx context.Context, name string, members
 	return collectionResult(col), nil
 }
 
-func validateCollectionMember(member cli.CollectionMember) error {
+func validateCollectionMember(member contracts.CollectionMember) error {
 	kind := strings.TrimSpace(member.Kind)
 	ref := strings.TrimSpace(member.Ref)
 	if ref == "" {
@@ -113,7 +113,7 @@ func validateCollectionRepoRef(ref string) error {
 }
 
 // ListCollections returns all named collections.
-func (s *Service) ListCollections(ctx context.Context) (*cli.CollectionListResult, error) {
+func (s *Service) ListCollections(ctx context.Context) (*contracts.CollectionListResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -122,8 +122,8 @@ func (s *Service) ListCollections(ctx context.Context) (*cli.CollectionListResul
 	if err != nil {
 		return nil, fmt.Errorf("list collections: %w", err)
 	}
-	result := &cli.CollectionListResult{
-		Collections: make([]cli.CollectionResult, len(list.Collections)),
+	result := &contracts.CollectionListResult{
+		Collections: make([]contracts.CollectionResult, len(list.Collections)),
 		Total:       list.Total,
 		Truncated:   list.Truncated,
 	}
@@ -133,8 +133,8 @@ func (s *Service) ListCollections(ctx context.Context) (*cli.CollectionListResul
 	return result, nil
 }
 
-func collectionResult(c *corpus.Collection) *cli.CollectionResult {
-	return &cli.CollectionResult{
+func collectionResult(c *corpus.Collection) *contracts.CollectionResult {
+	return &contracts.CollectionResult{
 		Name:        c.Name,
 		MemberCount: c.MemberCount,
 		CreatedAt:   formatTime(c.CreatedAt),

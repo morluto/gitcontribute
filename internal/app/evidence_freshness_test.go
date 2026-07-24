@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
@@ -21,7 +21,7 @@ func TestEvidenceFreshnessFromThreadInvestigationBaseline(t *testing.T) {
 		t.Fatalf("start from thread: %v", err)
 	}
 
-	recorded, err := fixture.svc.RecordEvidence(fixture.ctx, RecordEvidenceInput{
+	recorded, err := fixture.svc.RecordEvidence(fixture.ctx, contracts.RecordEvidenceInput{
 		InvestigationID: started.Investigation.ID,
 		Type:            string(evidence.EvidenceTypeGitHubSource),
 		Relation:        string(evidence.RelationSupporting),
@@ -83,7 +83,7 @@ func TestEvidenceFreshnessManualObservationIsNotApplicable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start from thread: %v", err)
 	}
-	recorded, err := fixture.svc.RecordEvidence(fixture.ctx, RecordEvidenceInput{
+	recorded, err := fixture.svc.RecordEvidence(fixture.ctx, contracts.RecordEvidenceInput{
 		InvestigationID: started.Investigation.ID,
 		Type:            string(evidence.EvidenceTypeManualObservation),
 		Relation:        string(evidence.RelationSupporting),
@@ -103,7 +103,7 @@ func TestEvidenceFreshnessManualObservationIsNotApplicable(t *testing.T) {
 	}
 }
 
-func evidenceItemByID(t *testing.T, items []cli.EvidenceItem, id string) cli.EvidenceItem {
+func evidenceItemByID(t *testing.T, items []contracts.EvidenceItem, id string) contracts.EvidenceItem {
 	t.Helper()
 	for _, item := range items {
 		if item.ID == id {
@@ -111,5 +111,5 @@ func evidenceItemByID(t *testing.T, items []cli.EvidenceItem, id string) cli.Evi
 		}
 	}
 	t.Fatalf("missing evidence item %q in %+v", id, items)
-	return cli.EvidenceItem{}
+	return contracts.EvidenceItem{}
 }

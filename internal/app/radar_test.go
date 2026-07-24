@@ -13,7 +13,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/clusterprojection"
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
@@ -127,7 +127,7 @@ func TestContributionRadarUsesOnlyStoredEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report, err := fixture.svc.ContributionRadar(fixture.ctx, cli.RadarOptions{Repo: cli.RepoRef{Owner: "owner", Repo: "repo"}, Limit: 20})
+	report, err := fixture.svc.ContributionRadar(fixture.ctx, contracts.RadarOptions{Repo: contracts.RepoRef{Owner: "owner", Repo: "repo"}, Limit: 20})
 	if err != nil {
 		t.Fatalf("contribution radar: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestContributionRadarDistinguishesMissingRepositoryAndEmptyResult(t *testin
 		t.Fatal(err)
 	}
 
-	opts := cli.RadarOptions{Repo: cli.RepoRef{Owner: "owner", Repo: "repo"}}
+	opts := contracts.RadarOptions{Repo: contracts.RepoRef{Owner: "owner", Repo: "repo"}}
 	if _, err := svc.ContributionRadar(ctx, opts); !errors.Is(err, errRepositoryNotFound) {
 		t.Fatalf("missing repository error = %v", err)
 	}
@@ -226,7 +226,7 @@ func TestContributionRadarReadsStoredDuplicateCluster(t *testing.T) {
 	}, `{}`); err != nil {
 		t.Fatal(err)
 	}
-	refresh, err := fixture.svc.RefreshClusters(fixture.ctx, cli.RepoRef{Owner: "owner", Repo: "repo"})
+	refresh, err := fixture.svc.RefreshClusters(fixture.ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestContributionRadarReadsStoredDuplicateCluster(t *testing.T) {
 		t.Fatalf("refresh = %+v", refresh)
 	}
 
-	report, err := fixture.svc.ContributionRadar(fixture.ctx, cli.RadarOptions{Repo: cli.RepoRef{Owner: "owner", Repo: "repo"}})
+	report, err := fixture.svc.ContributionRadar(fixture.ctx, contracts.RadarOptions{Repo: contracts.RepoRef{Owner: "owner", Repo: "repo"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +305,7 @@ func TestContributionRadarUsesAuthoritativeClosingIssueProjection(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	report, err := fixture.svc.ContributionRadar(fixture.ctx, cli.RadarOptions{Repo: cli.RepoRef{Owner: "owner", Repo: "repo"}})
+	report, err := fixture.svc.ContributionRadar(fixture.ctx, contracts.RadarOptions{Repo: contracts.RepoRef{Owner: "owner", Repo: "repo"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,7 +354,7 @@ func TestContributionRadarUnifiesCommentDependenciesAndTimelineCrossReferences(t
 		t.Fatal(err)
 	}
 
-	report, err := fixture.svc.ContributionRadar(fixture.ctx, cli.RadarOptions{Repo: cli.RepoRef{Owner: "owner", Repo: "repo"}})
+	report, err := fixture.svc.ContributionRadar(fixture.ctx, contracts.RadarOptions{Repo: contracts.RepoRef{Owner: "owner", Repo: "repo"}})
 	if err != nil {
 		t.Fatal(err)
 	}

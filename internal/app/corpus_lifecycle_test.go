@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	_ "modernc.org/sqlite"
 )
@@ -57,8 +57,8 @@ func TestApplicationWriteOpenDoesNotMigrateExistingCorpus(t *testing.T) {
 	if err != nil || !exists || version != 0 {
 		t.Fatalf("schema after rejected write open = %d, exists=%v, err=%v", version, exists, err)
 	}
-	report, err := second.Setup(ctx, cli.SetupOptions{
-		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
+	report, err := second.Setup(ctx, contracts.SetupOptions{
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
 		Executable: filepath.Join(home, "missing-runtime"),
 	})
 	if err != nil {
@@ -67,8 +67,8 @@ func TestApplicationWriteOpenDoesNotMigrateExistingCorpus(t *testing.T) {
 	if !report.HasFailures() || report.Corpus == nil || report.Corpus.State != "migration_required" {
 		t.Fatalf("setup corpus preflight = %+v", report)
 	}
-	dryRunReport, err := second.Setup(ctx, cli.SetupOptions{
-		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", DryRun: true,
+	dryRunReport, err := second.Setup(ctx, contracts.SetupOptions{
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", DryRun: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -115,8 +115,8 @@ func TestSetupFailsFastForNewerCorpusInDryRunAndRealModes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, dryRun := range []bool{false, true} {
-		report, err := svc.Setup(context.Background(), cli.SetupOptions{
-			Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", DryRun: dryRun,
+		report, err := svc.Setup(context.Background(), contracts.SetupOptions{
+			Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", DryRun: dryRun,
 		})
 		if err == nil || !strings.Contains(err.Error(), "database schema version 9999 is newer than this binary supports") || !strings.Contains(err.Error(), "gitcontribute corpus inspect") {
 			t.Fatalf("dry_run=%v report=%+v error = %v", dryRun, report, err)

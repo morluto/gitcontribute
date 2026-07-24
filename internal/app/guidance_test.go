@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
@@ -39,7 +39,7 @@ func TestExplicitSyncPersistsSourceBackedContributionGuidance(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
-	if _, err := svc.Sync(ctx, cli.RepoRef{Owner: "octocat", Repo: "guided"}); err != nil {
+	if _, err := svc.Sync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "guided"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -108,7 +108,7 @@ func TestRadarClassifiesStoredPolicyAndNaturalLanguageClaimOffline(t *testing.T)
 		t.Fatal(err)
 	}
 
-	report, err := fixture.svc.ContributionRadar(fixture.ctx, cli.RadarOptions{Repo: cli.RepoRef{Owner: "owner", Repo: "repo"}, Limit: 20})
+	report, err := fixture.svc.ContributionRadar(fixture.ctx, contracts.RadarOptions{Repo: contracts.RepoRef{Owner: "owner", Repo: "repo"}, Limit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}

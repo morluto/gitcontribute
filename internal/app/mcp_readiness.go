@@ -3,26 +3,26 @@ package app
 import (
 	"context"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // Readiness reads a local contribution readiness report through MCP.
-func (r *MCPReader) Readiness(ctx context.Context, in mcpserver.ReadinessInput) (mcpserver.ReadinessOutput, error) {
+func (r *MCPReader) Readiness(ctx context.Context, in mcpcontract.ReadinessInput) (mcpcontract.ReadinessOutput, error) {
 	report, err := r.OpportunityReadiness(ctx, in.OpportunityID)
 	if err != nil {
-		return mcpserver.ReadinessOutput{}, err
+		return mcpcontract.ReadinessOutput{}, err
 	}
 	return readinessToMCP(report), nil
 }
 
-func readinessToMCP(report *cli.ReadinessResult) mcpserver.ReadinessOutput {
+func readinessToMCP(report *contracts.ReadinessResult) mcpcontract.ReadinessOutput {
 	if report == nil {
-		return mcpserver.ReadinessOutput{}
+		return mcpcontract.ReadinessOutput{}
 	}
-	checks := make([]mcpserver.ReadinessCheck, len(report.Checks))
+	checks := make([]mcpcontract.ReadinessCheck, len(report.Checks))
 	for i, check := range report.Checks {
-		checks[i] = mcpserver.ReadinessCheck{
+		checks[i] = mcpcontract.ReadinessCheck{
 			CheckID:      check.CheckID,
 			RuleID:       check.RuleID,
 			RuleVersion:  check.RuleVersion,
@@ -33,7 +33,7 @@ func readinessToMCP(report *cli.ReadinessResult) mcpserver.ReadinessOutput {
 			EvaluatedAt:  check.EvaluatedAt,
 		}
 	}
-	return mcpserver.ReadinessOutput{
+	return mcpcontract.ReadinessOutput{
 		OpportunityID:  report.OpportunityID,
 		RuleSetVersion: report.RuleSetVersion,
 		Status:         report.Status,

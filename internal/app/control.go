@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/github"
 	clientsetup "github.com/morluto/gitcontribute/internal/setup"
@@ -23,7 +23,7 @@ const databaseIntegrityTimeout = 2 * time.Second
 
 // Metadata reports deterministic application and local capability metadata.
 // It performs no network access and never creates or migrates the corpus.
-func (s *Service) Metadata(ctx context.Context) (*cli.MetadataResult, error) {
+func (s *Service) Metadata(ctx context.Context) (*contracts.MetadataResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (s *Service) Metadata(ctx context.Context) (*cli.MetadataResult, error) {
 		"thread-investigation-start", "thread-research-brief", "validation", "workspaces",
 	}
 	sort.Strings(capabilities)
-	return &cli.MetadataResult{
+	return &contracts.MetadataResult{
 		Name:                   "gitcontribute",
 		Version:                s.version,
 		GoVersion:              runtime.Version(),
@@ -94,7 +94,7 @@ func (s *Service) Metadata(ctx context.Context) (*cli.MetadataResult, error) {
 
 // Configure validates and atomically saves supported typed settings. Runtime
 // environment overrides are deliberately not persisted.
-func (s *Service) Configure(ctx context.Context, opts cli.ConfigureOptions) (*cli.ConfigureResult, error) {
+func (s *Service) Configure(ctx context.Context, opts contracts.ConfigureOptions) (*contracts.ConfigureResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -127,12 +127,12 @@ func (s *Service) Configure(ctx context.Context, opts cli.ConfigureOptions) (*cl
 			return nil, fmt.Errorf("reload configuration: %w", err)
 		}
 	}
-	return &cli.ConfigureResult{Path: path, DryRun: opts.DryRun, Changed: changed, Config: configResult(cfg)}, nil
+	return &contracts.ConfigureResult{Path: path, DryRun: opts.DryRun, Changed: changed, Config: configResult(cfg)}, nil
 }
 
 // ControlStatus returns local corpus counts and freshness without network
 // access or implicit hydration.
-func (s *Service) ControlStatus(ctx context.Context) (*cli.ControlStatusResult, error) {
+func (s *Service) ControlStatus(ctx context.Context) (*contracts.ControlStatusResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -150,13 +150,13 @@ func (s *Service) ControlStatus(ctx context.Context) (*cli.ControlStatusResult, 
 	if err != nil {
 		return nil, err
 	}
-	rateLimits := make([]cli.RateLimitState, len(rateObservations))
+	rateLimits := make([]contracts.RateLimitState, len(rateObservations))
 	for i, observation := range rateObservations {
 		resource := observation.Resource
 		if resource == "" {
 			resource = "unknown"
 		}
-		rateLimits[i] = cli.RateLimitState{
+		rateLimits[i] = contracts.RateLimitState{
 			Resource: resource, Limit: observation.Limit, Remaining: observation.Remaining,
 			Used: observation.Used, ResetAt: formatTime(observation.ResetAt),
 			StatusCode: observation.StatusCode, ObservedAt: formatTime(observation.ObservedAt),
@@ -177,12 +177,12 @@ func (s *Service) ControlStatus(ctx context.Context) (*cli.ControlStatusResult, 
 	if !stats.Freshest.IsZero() && s.now().Sub(stats.Freshest) > 7*24*time.Hour {
 		warnings = append(warnings, "freshest GitHub observation is older than 7 days")
 	}
-	return &cli.ControlStatusResult{
+	return &contracts.ControlStatusResult{
 		Healthy:       true,
 		Corpus:        s.databasePath(),
 		Version:       s.version,
 		SchemaVersion: version,
-		Counts: cli.ControlCounts{
+		Counts: contracts.ControlCounts{
 			Repositories:  stats.Repositories,
 			Threads:       stats.Threads,
 			Sources:       stats.Sources,
@@ -198,14 +198,14 @@ func (s *Service) ControlStatus(ctx context.Context) (*cli.ControlStatusResult, 
 
 // Doctor performs bounded local diagnostics. It reports authentication source
 // availability but never returns credential values or command output.
-func (s *Service) Doctor(ctx context.Context) (*cli.DoctorResult, error) {
+func (s *Service) Doctor(ctx context.Context) (*contracts.DoctorResult, error) {
 	return s.doctor(ctx)
 }
 
-func (s *Service) doctor(ctx context.Context) (*cli.DoctorResult, error) {
-	checks := make([]cli.DoctorCheck, 0, 10)
+func (s *Service) doctor(ctx context.Context) (*contracts.DoctorResult, error) {
+	checks := make([]contracts.DoctorCheck, 0, 10)
 	add := func(name string, required bool, err error, success string) {
-		check := cli.DoctorCheck{Name: name, Required: required, Status: "ok", Message: success}
+		check := contracts.DoctorCheck{Name: name, Required: required, Status: "ok", Message: success}
 		if err != nil {
 			check.Status = "error"
 			if !required {
@@ -284,7 +284,7 @@ func (s *Service) doctor(ctx context.Context) (*cli.DoctorResult, error) {
 			break
 		}
 	}
-	return &cli.DoctorResult{Healthy: healthy, Checks: checks}, nil
+	return &contracts.DoctorResult{Healthy: healthy, Checks: checks}, nil
 }
 
 func (s *Service) persistedConfig(path string) (*config.Config, error) {
@@ -309,7 +309,7 @@ func (s *Service) persistedConfig(path string) (*config.Config, error) {
 	return cfg, nil
 }
 
-func applyConfigureOptions(cfg *config.Config, opts cli.ConfigureOptions) {
+func applyConfigureOptions(cfg *config.Config, opts contracts.ConfigureOptions) {
 	if opts.Database != nil {
 		cfg.Database = strings.TrimSpace(*opts.Database)
 	}
@@ -339,8 +339,8 @@ func applyConfigureOptions(cfg *config.Config, opts cli.ConfigureOptions) {
 	}
 }
 
-func configResult(cfg *config.Config) cli.ConfigResult {
-	return cli.ConfigResult{
+func configResult(cfg *config.Config) contracts.ConfigResult {
+	return contracts.ConfigResult{
 		Database:         cfg.Database,
 		TokenSource:      cfg.TokenSource.Method,
 		TokenSourceKey:   cfg.TokenSource.Key,

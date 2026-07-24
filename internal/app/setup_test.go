@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	clientsetup "github.com/morluto/gitcontribute/internal/setup"
 )
 
@@ -28,8 +28,8 @@ func TestSetupInitializesAndRegistersWithoutNetwork(t *testing.T) {
 	}
 	defer svc.Close()
 	packagedExecutable := writeTestExecutable(t, filepath.Join(home, "bin"))
-	report, err := svc.Setup(context.Background(), cli.SetupOptions{
-		Mode: cli.SetupModeMCP, Clients: []string{"codex", "claude"}, TokenSource: "none", Repository: "morluto/gitcontribute", Executable: packagedExecutable,
+	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex", "claude"}, TokenSource: "none", Repository: "morluto/gitcontribute", Executable: packagedExecutable,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func TestSetupInitializesAndRegistersWithoutNetwork(t *testing.T) {
 	if err != nil || len(sources.Sources) != 1 || sources.Sources[0].Name != "morluto-gitcontribute" {
 		t.Fatalf("sources=%+v err=%v", sources, err)
 	}
-	second, err := svc.Setup(context.Background(), cli.SetupOptions{Mode: cli.SetupModeMCP, Clients: []string{"codex", "claude"}, TokenSource: "none", Executable: packagedExecutable})
+	second, err := svc.Setup(context.Background(), contracts.SetupOptions{Mode: contracts.SetupModeMCP, Clients: []string{"codex", "claude"}, TokenSource: "none", Executable: packagedExecutable})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,14 +68,14 @@ func TestSetupRemoveStillUnregistersSelectedMCPClientsWithoutAnAccessMode(t *tes
 		t.Fatal(err)
 	}
 	defer svc.Close()
-	if _, err := svc.Setup(context.Background(), cli.SetupOptions{
-		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
+	if _, err := svc.Setup(context.Background(), contracts.SetupOptions{
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
 		Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	report, err := svc.Setup(context.Background(), cli.SetupOptions{Remove: true, Clients: []string{"codex"}})
+	report, err := svc.Setup(context.Background(), contracts.SetupOptions{Remove: true, Clients: []string{"codex"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,8 +114,8 @@ func TestSetupMCPOnlyInstallsManagedBinaryAndRegistersItsAbsolutePath(t *testing
 		t.Fatal(err)
 	}
 
-	report, err := svc.Setup(context.Background(), cli.SetupOptions{
-		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: source,
+	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: source,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -161,8 +161,8 @@ func TestSetupMCPOnlyKeepsDevelopmentRuntimeDistinctFromLatestRelease(t *testing
 	}
 	defer svc.Close()
 
-	report, err := svc.Setup(context.Background(), cli.SetupOptions{
-		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", DryRun: true,
+	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", DryRun: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -195,8 +195,8 @@ func TestSetupMCPOnlyReusesMatchingManagedBinary(t *testing.T) {
 	if err := os.WriteFile(source, []byte("packaged-native-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	opts := cli.SetupOptions{
-		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: source,
+	opts := contracts.SetupOptions{
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: source,
 	}
 	if _, err := svc.Setup(context.Background(), opts); err != nil {
 		t.Fatal(err)
@@ -272,8 +272,8 @@ func TestSetupBothRegistersTheInstalledCLIWithoutASecondRuntime(t *testing.T) {
 	t.Setenv("PATH", fixtureBin)
 	t.Setenv("GITCONTRIBUTE_TEST_NPM_PREFIX", prefix)
 
-	report, err := svc.Setup(context.Background(), cli.SetupOptions{
-		Mode: cli.SetupModeBoth, Clients: []string{"codex"}, TokenSource: "none",
+	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
+		Mode: contracts.SetupModeBoth, Clients: []string{"codex"}, TokenSource: "none",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -301,8 +301,8 @@ func TestSetupBothDryRunDoesNotPresentTheBootstrapExecutableAsFinalMCPCommand(t 
 	defer svc.Close()
 	t.Setenv("PATH", "")
 
-	report, err := svc.Setup(context.Background(), cli.SetupOptions{
-		Mode: cli.SetupModeBoth, Clients: []string{"codex"}, TokenSource: "none", DryRun: true,
+	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
+		Mode: contracts.SetupModeBoth, Clients: []string{"codex"}, TokenSource: "none", DryRun: true,
 		Executable: "/temporary/npm-cache/gitcontribute",
 	})
 	if err != nil {
@@ -325,8 +325,8 @@ func TestSetupBothInstallationFailureLeavesNoPendingMCPCommandOrConfigWrites(t *
 	defer svc.Close()
 	t.Setenv("PATH", "")
 
-	report, err := svc.Setup(context.Background(), cli.SetupOptions{
-		Mode: cli.SetupModeBoth, Clients: []string{"codex"}, TokenSource: "none",
+	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
+		Mode: contracts.SetupModeBoth, Clients: []string{"codex"}, TokenSource: "none",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -351,8 +351,8 @@ func TestSetupStopsBeforeConfigurationWhenManagedRuntimeCannotBeInstalled(t *tes
 	}
 	defer svc.Close()
 
-	report, err := svc.Setup(context.Background(), cli.SetupOptions{
-		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
+	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
 		Executable: filepath.Join(home, "missing", "gitcontribute"),
 	})
 	if err != nil {
@@ -381,7 +381,7 @@ func TestSetupDryRunWritesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer svc.Close()
-	report, err := svc.Setup(context.Background(), cli.SetupOptions{Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", DryRun: true, Executable: "/bin/gitcontribute"})
+	report, err := svc.Setup(context.Background(), contracts.SetupOptions{Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", DryRun: true, Executable: "/bin/gitcontribute"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,7 +410,7 @@ func TestSetupDoesNotInferClientMutationFromDetection(t *testing.T) {
 	}
 	defer svc.Close()
 
-	_, err = svc.Setup(context.Background(), cli.SetupOptions{Mode: cli.SetupModeMCP, TokenSource: "none", Executable: "/bin/gitcontribute"})
+	_, err = svc.Setup(context.Background(), contracts.SetupOptions{Mode: contracts.SetupModeMCP, TokenSource: "none", Executable: "/bin/gitcontribute"})
 	if err == nil || !strings.Contains(err.Error(), "no coding-agent targets selected") {
 		t.Fatalf("error = %v", err)
 	}
@@ -432,8 +432,8 @@ func TestSetupCLIOnlyDryRunNeedsNoDetectedClientOrNPMProcess(t *testing.T) {
 	defer svc.Close()
 	t.Setenv("PATH", "")
 
-	report, err := svc.Setup(context.Background(), cli.SetupOptions{
-		Mode:        cli.SetupModeCLI,
+	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
+		Mode:        contracts.SetupModeCLI,
 		TokenSource: "none",
 		DryRun:      true,
 	})
@@ -467,8 +467,8 @@ func TestSetupCLIRejectsMCPClientTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer svc.Close()
-	_, err = svc.Setup(context.Background(), cli.SetupOptions{
-		Mode: cli.SetupModeCLI, Clients: []string{"codex"}, TokenSource: "none", DryRun: true,
+	_, err = svc.Setup(context.Background(), contracts.SetupOptions{
+		Mode: contracts.SetupModeCLI, Clients: []string{"codex"}, TokenSource: "none", DryRun: true,
 	})
 	if err == nil || !strings.Contains(err.Error(), "CLI mode cannot configure MCP clients") {
 		t.Fatalf("error = %v", err)
@@ -476,11 +476,11 @@ func TestSetupCLIRejectsMCPClientTargets(t *testing.T) {
 }
 
 func TestSetupSourceNameIsValidAndBounded(t *testing.T) {
-	short := setupSourceName(cli.RepoRef{Owner: "Morluto", Repo: "GitContribute"})
+	short := setupSourceName(contracts.RepoRef{Owner: "Morluto", Repo: "GitContribute"})
 	if short != "morluto-gitcontribute" {
 		t.Fatalf("short name = %q", short)
 	}
-	long := setupSourceName(cli.RepoRef{Owner: "owner", Repo: "this-is-a-very-long-repository-name-that-needs-a-stable-bounded-source-name-suffix"})
+	long := setupSourceName(contracts.RepoRef{Owner: "owner", Repo: "this-is-a-very-long-repository-name-that-needs-a-stable-bounded-source-name-suffix"})
 	if len(long) != 64 {
 		t.Fatalf("long name length = %d: %q", len(long), long)
 	}
@@ -494,7 +494,7 @@ func TestSetupRejectsRepositoryBeforeWriting(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer svc.Close()
-	_, err = svc.Setup(context.Background(), cli.SetupOptions{Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Repository: "not a repository", Executable: "/bin/gitcontribute"})
+	_, err = svc.Setup(context.Background(), contracts.SetupOptions{Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Repository: "not a repository", Executable: "/bin/gitcontribute"})
 	if err == nil {
 		t.Fatal("setup accepted invalid repository")
 	}
@@ -540,15 +540,15 @@ func TestDiscoverSetupReportsDetectedClientsRegistrationAndPaths(t *testing.T) {
 }
 
 type recordingSetupObserver struct {
-	started   []cli.SetupPhase
-	completed []cli.SetupStep
+	started   []contracts.SetupPhase
+	completed []contracts.SetupStep
 }
 
-func (o *recordingSetupObserver) SetupStarted(phase cli.SetupPhase) {
+func (o *recordingSetupObserver) SetupStarted(phase contracts.SetupPhase) {
 	o.started = append(o.started, phase)
 }
 
-func (o *recordingSetupObserver) SetupCompleted(step cli.SetupStep) {
+func (o *recordingSetupObserver) SetupCompleted(step contracts.SetupStep) {
 	o.completed = append(o.completed, step)
 }
 
@@ -563,8 +563,8 @@ func TestSetupWithProgressReportsRealApplicationPhases(t *testing.T) {
 	}
 	defer svc.Close()
 	observer := &recordingSetupObserver{}
-	report, err := svc.SetupWithProgress(context.Background(), cli.SetupOptions{
-		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
+	report, err := svc.SetupWithProgress(context.Background(), contracts.SetupOptions{
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
 	}, observer)
 	if err != nil {
 		t.Fatal(err)
@@ -572,7 +572,7 @@ func TestSetupWithProgressReportsRealApplicationPhases(t *testing.T) {
 	if report.HasFailures() {
 		t.Fatalf("report = %+v", report)
 	}
-	for _, want := range []cli.SetupPhase{cli.SetupPhaseMCPRuntime, cli.SetupPhaseConfiguration, cli.SetupPhaseCorpus, cli.SetupPhaseClients, cli.SetupPhaseVerification} {
+	for _, want := range []contracts.SetupPhase{contracts.SetupPhaseMCPRuntime, contracts.SetupPhaseConfiguration, contracts.SetupPhaseCorpus, contracts.SetupPhaseClients, contracts.SetupPhaseVerification} {
 		if !slices.Contains(observer.started, want) {
 			t.Fatalf("started = %v, missing %q", observer.started, want)
 		}
@@ -600,8 +600,8 @@ func TestSetupInstallsAndReportsCodexSkill(t *testing.T) {
 	}
 	defer svc.Close()
 
-	report, err := svc.Setup(context.Background(), cli.SetupOptions{
-		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
+	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
 		Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
 	})
 	if err != nil {

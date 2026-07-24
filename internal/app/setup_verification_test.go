@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	_ "modernc.org/sqlite"
 )
 
@@ -29,8 +29,8 @@ func TestSetupVerificationDoesNotResolveCredentials(t *testing.T) {
 	}
 	defer svc.Close()
 
-	report, err := svc.Setup(context.Background(), cli.SetupOptions{
-		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "env", TokenSourceKey: "GITCONTRIBUTE_TEST_MISSING_TOKEN",
+	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "env", TokenSourceKey: "GITCONTRIBUTE_TEST_MISSING_TOKEN",
 		Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
 	})
 	if err != nil {
@@ -63,8 +63,8 @@ func TestSetupVerificationReportsFailedRequiredChecks(t *testing.T) {
 	}
 	defer svc.Close()
 
-	report, err := svc.Setup(context.Background(), cli.SetupOptions{
-		Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
+	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
 		Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
 	})
 	if err != nil {
@@ -91,14 +91,14 @@ func TestSetupVerificationIgnoresConcurrentWriter(t *testing.T) {
 		"XDG_DATA_HOME": filepath.Join(home, "data"),
 	}})
 	executable := writeTestExecutable(t, filepath.Join(home, "bin"))
-	setup := func() *cli.SetupReport {
+	setup := func() *contracts.SetupReport {
 		svc, err := New(paths, "1.2.3", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer svc.Close()
-		report, err := svc.Setup(context.Background(), cli.SetupOptions{
-			Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: executable,
+		report, err := svc.Setup(context.Background(), contracts.SetupOptions{
+			Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: executable,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -166,7 +166,7 @@ func TestSetupVerificationRejectsMismatchedClientRegistration(t *testing.T) {
 	}
 	defer svc.Close()
 	executable := writeTestExecutable(t, filepath.Join(home, "bin"))
-	opts := cli.SetupOptions{Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: executable}
+	opts := contracts.SetupOptions{Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: executable}
 	if report, err := svc.Setup(context.Background(), opts); err != nil || report.HasFailures() {
 		t.Fatalf("setup = %+v, %v", report, err)
 	}
@@ -216,14 +216,14 @@ func TestSetupReportsRestartOnlyWhenClientRegistrationChanges(t *testing.T) {
 		"XDG_DATA_HOME": filepath.Join(home, "data"),
 	}})
 	executable := writeTestExecutable(t, filepath.Join(home, "bin"))
-	runSetup := func() *cli.SetupReport {
+	runSetup := func() *contracts.SetupReport {
 		svc, err := New(paths, "1.2.3", nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer svc.Close()
-		report, err := svc.Setup(context.Background(), cli.SetupOptions{
-			Mode: cli.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: executable,
+		report, err := svc.Setup(context.Background(), contracts.SetupOptions{
+			Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: executable,
 		})
 		if err != nil {
 			t.Fatal(err)

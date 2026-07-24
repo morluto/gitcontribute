@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 )
 
@@ -57,7 +57,7 @@ func TestAcquireSuccess(t *testing.T) {
 	svc := newLocalService(t)
 	defer func() { _ = svc.Close() }()
 
-	res, err := svc.Acquire(ctx, cli.RepoRef{Owner: "testowner", Repo: "testrepo"}, remote)
+	res, err := svc.Acquire(ctx, contracts.RepoRef{Owner: "testowner", Repo: "testrepo"}, remote)
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestAcquireRepeatFetch(t *testing.T) {
 	svc := newLocalService(t)
 	defer func() { _ = svc.Close() }()
 
-	res1, err := svc.Acquire(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, remote)
+	res1, err := svc.Acquire(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, remote)
 	if err != nil {
 		t.Fatalf("first acquire: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestAcquireRepeatFetch(t *testing.T) {
 
 	newSHA := pushCommit(t, remote, "feature.go", "package feature\n", "add feature")
 
-	res2, err := svc.Acquire(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, remote)
+	res2, err := svc.Acquire(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, remote)
 	if err != nil {
 		t.Fatalf("second acquire: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestAcquireFailureAtomicity(t *testing.T) {
 	svc := newLocalService(t)
 	defer func() { _ = svc.Close() }()
 
-	_, err := svc.Acquire(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "/nonexistent/remote/path")
+	_, err := svc.Acquire(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "/nonexistent/remote/path")
 	if err == nil {
 		t.Fatal("expected error for invalid remote")
 	}
@@ -171,7 +171,7 @@ func TestAcquireConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			res, err := svc.Acquire(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, remote)
+			res, err := svc.Acquire(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, remote)
 			if err != nil {
 				errs <- err
 				return
@@ -199,7 +199,7 @@ func TestAcquireInvalidRepo(t *testing.T) {
 	svc := newLocalService(t)
 	defer func() { _ = svc.Close() }()
 
-	_, err := svc.Acquire(ctx, cli.RepoRef{Owner: "", Repo: "repo"}, "/some/remote")
+	_, err := svc.Acquire(ctx, contracts.RepoRef{Owner: "", Repo: "repo"}, "/some/remote")
 	if err == nil {
 		t.Fatal("expected error for invalid repo ref")
 	}
@@ -211,7 +211,7 @@ func TestAcquireInvalidRemote(t *testing.T) {
 	svc := newLocalService(t)
 	defer func() { _ = svc.Close() }()
 
-	_, err := svc.Acquire(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "--unsafe")
+	_, err := svc.Acquire(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "--unsafe")
 	if err == nil {
 		t.Fatal("expected error for invalid remote")
 	}

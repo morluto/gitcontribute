@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
@@ -57,7 +57,7 @@ func TestOpportunityReadinessReportsPassWarnBlockUnknown(t *testing.T) {
 		t.Fatalf("update collision: %v", err)
 	}
 
-	supporting, err := fixture.svc.RecordEvidence(fixture.ctx, RecordEvidenceInput{
+	supporting, err := fixture.svc.RecordEvidence(fixture.ctx, contracts.RecordEvidenceInput{
 		OpportunityID: opp.ID,
 		Type:          string(evidence.EvidenceTypeGitHubSource),
 		Relation:      string(evidence.RelationSupporting),
@@ -66,7 +66,7 @@ func TestOpportunityReadinessReportsPassWarnBlockUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("record supporting evidence: %v", err)
 	}
-	contradicting, err := fixture.svc.RecordEvidence(fixture.ctx, RecordEvidenceInput{
+	contradicting, err := fixture.svc.RecordEvidence(fixture.ctx, contracts.RecordEvidenceInput{
 		OpportunityID: opp.ID,
 		Type:          string(evidence.EvidenceTypeManualObservation),
 		Relation:      string(evidence.RelationContradicting),
@@ -107,7 +107,7 @@ func TestOpportunityReadinessReportsPassWarnBlockUnknown(t *testing.T) {
 		}
 	}
 
-	if _, err := fixture.svc.PrepareIssue(fixture.ctx, opp.ID, cli.PrepareIssueOptions{Success: "passing cancellation regression"}); err != nil {
+	if _, err := fixture.svc.PrepareIssue(fixture.ctx, opp.ID, contracts.PrepareIssueOptions{Success: "passing cancellation regression"}); err != nil {
 		t.Fatalf("prepare issue: %v", err)
 	}
 
@@ -203,7 +203,7 @@ func assertReadinessDidNotMutateCorpus(t *testing.T, before, after readinessCorp
 	}
 }
 
-func readinessRuleIDs(checks []cli.ReadinessCheck) []string {
+func readinessRuleIDs(checks []contracts.ReadinessCheck) []string {
 	out := make([]string, len(checks))
 	for i, check := range checks {
 		out[i] = check.RuleID
@@ -211,7 +211,7 @@ func readinessRuleIDs(checks []cli.ReadinessCheck) []string {
 	return out
 }
 
-func readinessStatusByRule(checks []cli.ReadinessCheck) map[string]string {
+func readinessStatusByRule(checks []contracts.ReadinessCheck) map[string]string {
 	out := make(map[string]string, len(checks))
 	for _, check := range checks {
 		out[check.RuleID] = check.Status
@@ -226,7 +226,7 @@ func assertReadinessStatus(t *testing.T, got map[string]string, ruleID, want str
 	}
 }
 
-func readinessRefsContain(checks []cli.ReadinessCheck, ruleID, ref string) bool {
+func readinessRefsContain(checks []contracts.ReadinessCheck, ruleID, ref string) bool {
 	for _, check := range checks {
 		if check.RuleID != ruleID {
 			continue

@@ -10,11 +10,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/deepwiki"
 	"github.com/morluto/gitcontribute/internal/github"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/radar"
 )
 
@@ -38,8 +38,8 @@ func TestRankOpportunitiesReportsBoundedNonPaginatedTruncation(t *testing.T) {
 	seedRadarRepository(ctx, t, svc, "rocket", 5, now)
 
 	reader := &MCPReader{svc}
-	bounded, err := reader.RankOpportunities(ctx, mcpserver.RankOpportunitiesInput{
-		Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: "rocket"}},
+	bounded, err := reader.RankOpportunities(ctx, mcpcontract.RankOpportunitiesInput{
+		Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "rocket"}},
 		Limit:        2, MaxResultsPerRepository: 5,
 	})
 	if err != nil {
@@ -51,8 +51,8 @@ func TestRankOpportunitiesReportsBoundedNonPaginatedTruncation(t *testing.T) {
 	if summary := bounded.Repositories[0].Value; summary == nil || summary.Considered != 5 || summary.Returned != 5 || summary.Truncated || summary.PopulationCapped {
 		t.Fatalf("bounded repository summary = %+v", summary)
 	}
-	perRepositoryBound, err := reader.RankOpportunities(ctx, mcpserver.RankOpportunitiesInput{
-		Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, Limit: 100, MaxResultsPerRepository: 3,
+	perRepositoryBound, err := reader.RankOpportunities(ctx, mcpcontract.RankOpportunitiesInput{
+		Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, Limit: 100, MaxResultsPerRepository: 3,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -63,8 +63,8 @@ func TestRankOpportunitiesReportsBoundedNonPaginatedTruncation(t *testing.T) {
 	if summary := perRepositoryBound.Repositories[0].Value; summary == nil || summary.Considered != 5 || summary.Returned != 3 || !summary.Truncated {
 		t.Fatalf("per-repository bounded summary = %+v", summary)
 	}
-	full, err := reader.RankOpportunities(ctx, mcpserver.RankOpportunitiesInput{
-		Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, Limit: 100, MaxResultsPerRepository: 5,
+	full, err := reader.RankOpportunities(ctx, mcpcontract.RankOpportunitiesInput{
+		Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, Limit: 100, MaxResultsPerRepository: 5,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +96,7 @@ func seedRadarRepository(ctx context.Context, t *testing.T, svc *Service, name s
 	}
 }
 
-func assertRadarCandidateRanks(t *testing.T, candidates []mcpserver.OpportunityCandidateOutput) {
+func assertRadarCandidateRanks(t *testing.T, candidates []mcpcontract.OpportunityCandidateOutput) {
 	t.Helper()
 	for index, candidate := range candidates {
 		if candidate.Rank != index+1 {
@@ -118,8 +118,8 @@ func TestRankOpportunitiesUsesOneEvaluationTimeAcrossRepositories(t *testing.T) 
 	for _, name := range []string{"one", "two"} {
 		seedRadarRepository(ctx, t, svc, name, 1, now)
 	}
-	out, err := (&MCPReader{svc}).RankOpportunities(ctx, mcpserver.RankOpportunitiesInput{
-		Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: "one"}, {Owner: "acme", Repo: "two"}},
+	out, err := (&MCPReader{svc}).RankOpportunities(ctx, mcpcontract.RankOpportunitiesInput{
+		Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "one"}, {Owner: "acme", Repo: "two"}},
 		Limit:        2, MaxResultsPerRepository: 1,
 	})
 	if err != nil {
@@ -145,7 +145,7 @@ func TestGetRepositoriesPreservesUnknownMetadataAndInputOrder(t *testing.T) {
 	if err := svc.corpus.AdvanceFacet(ctx, observed.ID, nil, "metadata", observed.SourceUpdatedAt, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	out, err := (&MCPReader{svc}).GetRepositories(ctx, mcpserver.GetRepositoriesInput{Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: placeholder.Name}, {Owner: "acme", Repo: observed.Name}, {Owner: "acme", Repo: "missing"}}})
+	out, err := (&MCPReader{svc}).GetRepositories(ctx, mcpcontract.GetRepositoriesInput{Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: placeholder.Name}, {Owner: "acme", Repo: observed.Name}, {Owner: "acme", Repo: "missing"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := (&MCPReader{svc}).GetCoverage(ctx, mcpserver.GetCoverageInput{Targets: []mcpserver.CoverageTarget{
+	out, err := (&MCPReader{svc}).GetCoverage(ctx, mcpcontract.GetCoverageInput{Targets: []mcpcontract.CoverageTarget{
 		{Owner: "acme", Repo: "rocket"},
 		{Owner: "acme", Repo: "missing"},
 		{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 7},
@@ -224,7 +224,7 @@ func TestGetThreadsPreservesUnknownAndObservedFalseMergeState(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	out, err := (&MCPReader{svc}).GetThreads(ctx, mcpserver.GetThreadsInput{View: "compact", Threads: []mcpserver.ThreadRef{
+	out, err := (&MCPReader{svc}).GetThreads(ctx, mcpcontract.GetThreadsInput{View: "compact", Threads: []mcpcontract.ThreadRef{
 		{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 1},
 		{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 2},
 	}})
@@ -269,7 +269,7 @@ func TestCancelJobsPreservesOrderAndIsIdempotent(t *testing.T) {
 	}
 
 	reader := &MCPReader{svc}
-	out, err := reader.CancelJobs(ctx, mcpserver.CancelJobInput{IDs: []string{queued.ID, "missing-job", running.ID, terminal.ID, queued.ID, " "}})
+	out, err := reader.CancelJobs(ctx, mcpcontract.CancelJobInput{IDs: []string{queued.ID, "missing-job", running.ID, terminal.ID, queued.ID, " "}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,7 +298,7 @@ func TestCancelJobsContinuesAfterMalformedJobPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := (&MCPReader{svc}).CancelJobs(ctx, mcpserver.CancelJobInput{IDs: []string{malformed.ID, queued.ID}})
+	out, err := (&MCPReader{svc}).CancelJobs(ctx, mcpcontract.CancelJobInput{IDs: []string{malformed.ID, queued.ID}})
 	if err != nil {
 		t.Fatalf("cancel jobs: %v", err)
 	}
@@ -317,21 +317,21 @@ func TestMCPSourceRefsToDomainRejectsInvalidTimestamps(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name string
-		ref  mcpserver.SourceRef
+		ref  mcpcontract.SourceRef
 		want string
 	}{
-		{name: "observed at", ref: mcpserver.SourceRef{ObservedAt: "not-a-date"}, want: "source_refs[0].observed_at"},
-		{name: "as of", ref: mcpserver.SourceRef{AsOf: "not-a-date"}, want: "source_refs[0].as_of"},
+		{name: "observed at", ref: mcpcontract.SourceRef{ObservedAt: "not-a-date"}, want: "source_refs[0].observed_at"},
+		{name: "as of", ref: mcpcontract.SourceRef{AsOf: "not-a-date"}, want: "source_refs[0].as_of"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := mcpSourceRefsToDomain([]mcpserver.SourceRef{tc.ref})
+			_, err := mcpSourceRefsToDomain([]mcpcontract.SourceRef{tc.ref})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("error = %v, want field path %q", err, tc.want)
 			}
 		})
 	}
 
-	refs, err := mcpSourceRefsToDomain([]mcpserver.SourceRef{{ObservedAt: "2026-07-21T00:00:00Z"}})
+	refs, err := mcpSourceRefsToDomain([]mcpcontract.SourceRef{{ObservedAt: "2026-07-21T00:00:00Z"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +340,7 @@ func TestMCPSourceRefsToDomainRejectsInvalidTimestamps(t *testing.T) {
 	}
 }
 
-func assertCancelJobsOutput(t *testing.T, out mcpserver.GetJobsOutput, queuedID string) {
+func assertCancelJobsOutput(t *testing.T, out mcpcontract.GetJobsOutput, queuedID string) {
 	t.Helper()
 	if out.Status != "partial" || len(out.Items) != 6 {
 		t.Fatalf("cancellation batch = %+v", out)
@@ -367,7 +367,7 @@ func assertCancelJobsOutput(t *testing.T, out mcpserver.GetJobsOutput, queuedID 
 
 func TestJobResultToMCPExposesStructuredDurableProgress(t *testing.T) {
 	t.Parallel()
-	out, err := jobResultToMCP(&cli.JobResult{ID: "job-1", Kind: "sync_threads", Status: "running", Request: `{}`, Progress: "thread_headers", Statistics: `{"completed_items":2,"total_items":5}`, CreatedAt: "2026-07-19T00:00:00Z"})
+	out, err := jobResultToMCP(&contracts.JobResult{ID: "job-1", Kind: "sync_threads", Status: "running", Request: `{}`, Progress: "thread_headers", Statistics: `{"completed_items":2,"total_items":5}`, CreatedAt: "2026-07-19T00:00:00Z"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,14 +392,14 @@ func TestGetJobsConciseOmitsPayloadsAndDetailedReturnsThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader := &MCPReader{svc}
-	concise, err := reader.GetJobs(ctx, mcpserver.GetJobsInput{IDs: []string{job.ID}})
+	concise, err := reader.GetJobs(ctx, mcpcontract.GetJobsInput{IDs: []string{job.ID}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(concise.Items) != 1 || concise.Items[0].Value == nil || concise.Items[0].Value.Request != nil || concise.Items[0].Value.Result != nil {
 		t.Fatalf("concise jobs output leaked payloads: %+v", concise)
 	}
-	detailed, err := reader.GetJobs(ctx, mcpserver.GetJobsInput{IDs: []string{job.ID}, ResponseFormat: "detailed"})
+	detailed, err := reader.GetJobs(ctx, mcpcontract.GetJobsInput{IDs: []string{job.ID}, ResponseFormat: "detailed"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +429,7 @@ func TestSearchGitHubRepositoriesPersistsObservedMetadata(t *testing.T) {
 	reader := &fakeRepositorySearchReader{result: github.RepositorySearchResult{Total: 321, Items: []github.Repository{remote}, Page: github.PageInfo{Page: 2, NextPage: 3, HasNext: true}}}
 	svc.SetGitHubReader(reader)
 
-	out, err := (&MCPReader{svc}).SearchGitHubRepositories(ctx, mcpserver.SearchGitHubRepositoriesInput{Text: "fast inference", MatchFields: []string{"name", "description"}, Topics: []string{"llm-inference"}, Language: "Go", StarsMin: 200, PushedAfter: "2026-06-15", Archived: ptr(false), Fork: ptr(false), Sort: "stars", Order: "desc", Limit: 12, Page: 2, ResponseFormat: "concise"})
+	out, err := (&MCPReader{svc}).SearchGitHubRepositories(ctx, mcpcontract.SearchGitHubRepositoriesInput{Text: "fast inference", MatchFields: []string{"name", "description"}, Topics: []string{"llm-inference"}, Language: "Go", StarsMin: 200, PushedAfter: "2026-06-15", Archived: ptr(false), Fork: ptr(false), Sort: "stars", Order: "desc", Limit: 12, Page: 2, ResponseFormat: "concise"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,10 +439,10 @@ func TestSearchGitHubRepositoriesPersistsObservedMetadata(t *testing.T) {
 	if out.NextPage != 3 || out.ResponseFormat != "concise" || len(out.Items) != 1 || out.Items[0].Value == nil || out.Items[0].Value.Ref != "repository:acme/rocket" || *out.Items[0].Value.Stars != 9001 {
 		t.Fatalf("live search result = %+v, options = %+v", out, reader.options)
 	}
-	if out.Items[0].Value.Watchers != nil || len(out.SuggestedActions) != 1 || out.SuggestedActions[0].Tool != mcpserver.ToolSyncThreads {
+	if out.Items[0].Value.Watchers != nil || len(out.SuggestedActions) != 1 || out.SuggestedActions[0].Tool != mcpcontract.ToolSyncThreads {
 		t.Fatalf("concise search context = %+v", out)
 	}
-	stored, err := (&MCPReader{svc}).GetRepositories(ctx, mcpserver.GetRepositoriesInput{Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: "rocket"}}})
+	stored, err := (&MCPReader{svc}).GetRepositories(ctx, mcpcontract.GetRepositoriesInput{Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "rocket"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,14 +455,14 @@ func TestCompileRepositorySearchRejectsAmbiguousAndInvalidInputs(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
-		in   mcpserver.SearchGitHubRepositoriesInput
+		in   mcpcontract.SearchGitHubRepositoriesInput
 	}{
-		{name: "empty", in: mcpserver.SearchGitHubRepositoriesInput{}},
-		{name: "raw and structured", in: mcpserver.SearchGitHubRepositoriesInput{RawQuery: "cuda", Language: "Go"}},
-		{name: "unknown match field", in: mcpserver.SearchGitHubRepositoriesInput{Text: "cuda", MatchFields: []string{"topics"}}},
-		{name: "reversed stars", in: mcpserver.SearchGitHubRepositoriesInput{Text: "cuda", StarsMin: 20, StarsMax: 10}},
-		{name: "invalid date", in: mcpserver.SearchGitHubRepositoriesInput{PushedAfter: "yesterday"}},
-		{name: "reversed dates", in: mcpserver.SearchGitHubRepositoriesInput{CreatedAfter: "2026-07-01", CreatedBefore: "2026-06-01"}},
+		{name: "empty", in: mcpcontract.SearchGitHubRepositoriesInput{}},
+		{name: "raw and structured", in: mcpcontract.SearchGitHubRepositoriesInput{RawQuery: "cuda", Language: "Go"}},
+		{name: "unknown match field", in: mcpcontract.SearchGitHubRepositoriesInput{Text: "cuda", MatchFields: []string{"topics"}}},
+		{name: "reversed stars", in: mcpcontract.SearchGitHubRepositoriesInput{Text: "cuda", StarsMin: 20, StarsMax: 10}},
+		{name: "invalid date", in: mcpcontract.SearchGitHubRepositoriesInput{PushedAfter: "yesterday"}},
+		{name: "reversed dates", in: mcpcontract.SearchGitHubRepositoriesInput{CreatedAfter: "2026-07-01", CreatedBefore: "2026-06-01"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -475,8 +475,8 @@ func TestCompileRepositorySearchRejectsAmbiguousAndInvalidInputs(t *testing.T) {
 
 func TestRepositorySearchValidationExamplesAreUsable(t *testing.T) {
 	t.Parallel()
-	_, _, _, err := compileRepositorySearch(mcpserver.SearchGitHubRepositoriesInput{})
-	var toolErr *mcpserver.ToolError
+	_, _, _, err := compileRepositorySearch(mcpcontract.SearchGitHubRepositoriesInput{})
+	var toolErr *mcpcontract.ToolError
 	if !errors.As(err, &toolErr) {
 		t.Fatalf("error = %v, want ToolError", err)
 	}
@@ -484,7 +484,7 @@ func TestRepositorySearchValidationExamplesAreUsable(t *testing.T) {
 		t.Fatalf("empty-search example = %#v", toolErr.Example)
 	}
 
-	_, _, _, err = compileRepositorySearch(mcpserver.SearchGitHubRepositoriesInput{RawQuery: "language:go", Language: "Go"})
+	_, _, _, err = compileRepositorySearch(mcpcontract.SearchGitHubRepositoriesInput{RawQuery: "language:go", Language: "Go"})
 	if !errors.As(err, &toolErr) || toolErr.Example["raw_query"] != "is:public language:go stars:>=100" {
 		t.Fatalf("ambiguous-search example = %#v, error=%v", toolErr.Example, err)
 	}
@@ -492,7 +492,7 @@ func TestRepositorySearchValidationExamplesAreUsable(t *testing.T) {
 
 func TestCompileRepositorySearchWarnsAboutRawReadmeQueries(t *testing.T) {
 	t.Parallel()
-	query, interpretation, warnings, err := compileRepositorySearch(mcpserver.SearchGitHubRepositoriesInput{RawQuery: "attention in:readme"})
+	query, interpretation, warnings, err := compileRepositorySearch(mcpcontract.SearchGitHubRepositoriesInput{RawQuery: "attention in:readme"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +503,7 @@ func TestCompileRepositorySearchWarnsAboutRawReadmeQueries(t *testing.T) {
 
 func TestCompileRepositorySearchWarnsAboutStructuredReadmeMatching(t *testing.T) {
 	t.Parallel()
-	query, _, warnings, err := compileRepositorySearch(mcpserver.SearchGitHubRepositoriesInput{Text: "attention", MatchFields: []string{"name", "readme"}})
+	query, _, warnings, err := compileRepositorySearch(mcpcontract.SearchGitHubRepositoriesInput{Text: "attention", MatchFields: []string{"name", "readme"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +516,7 @@ func TestRepositorySearchDetailedFormatPreservesSecondaryFacts(t *testing.T) {
 	t.Parallel()
 	archived := true
 	remote := github.Repository{Owner: "acme", Name: "rocket", Description: "fast", Stars: 42, Watchers: 9, Forks: 3, OpenIssues: 7, Archived: archived, Topics: []string{"cuda"}}
-	match := liveRepositorySearchMatch(remote, mcpserver.RepositoryMetadataOutput{Status: "complete"}, "detailed")
+	match := liveRepositorySearchMatch(remote, mcpcontract.RepositoryMetadataOutput{Status: "complete"}, "detailed")
 	if match.Ref != "repository:acme/rocket" || match.Watchers == nil || *match.Watchers != 9 || match.Archived == nil || !*match.Archived || len(match.Topics) != 1 {
 		t.Fatalf("detailed match = %+v", match)
 	}
@@ -540,7 +540,7 @@ func TestFindPrecedentsUsesClosedAndMergedHistory(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	out, err := (&MCPReader{svc}).FindPrecedents(ctx, mcpserver.FindPrecedentsInput{Threads: []mcpserver.ThreadRef{{Owner: "acme", Repo: "rocket", Number: 1}}, Limit: 10})
+	out, err := (&MCPReader{svc}).FindPrecedents(ctx, mcpcontract.FindPrecedentsInput{Threads: []mcpcontract.ThreadRef{{Owner: "acme", Repo: "rocket", Number: 1}}, Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,7 +572,7 @@ func TestDeepWikiReturnsDerivedProvenanceAndBoundsOutput(t *testing.T) {
 	svc := newSearchTestService(t)
 	fake := &fakeDeepWikiReader{response: deepwiki.Response{Available: true, Text: strings.Repeat("x", 2048), SourceURL: "https://deepwiki.com/acme/rocket"}}
 	svc.SetDeepWikiReader(fake)
-	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpserver.DeepWikiInput{Action: "question", Repositories: []string{"acme/rocket"}, Question: "architecture?", MaxOutputBytes: 1024})
+	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{Action: "question", Repositories: []string{"acme/rocket"}, Question: "architecture?", MaxOutputBytes: 1024})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -586,7 +586,7 @@ func TestDeepWikiUsesNormalizedRepositoriesForRequestAndOutput(t *testing.T) {
 	svc := newSearchTestService(t)
 	fake := &fakeDeepWikiReader{response: deepwiki.Response{Available: true, Text: "ok"}}
 	svc.SetDeepWikiReader(fake)
-	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpserver.DeepWikiInput{
+	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{
 		Action: "question", Repository: "acme/rocket", Repositories: []string{"wrong/one", "wrong/two"}, Question: "architecture?", MaxOutputBytes: 1024,
 	})
 	if err != nil {
@@ -600,13 +600,13 @@ func TestDeepWikiUsesNormalizedRepositoriesForRequestAndOutput(t *testing.T) {
 
 func TestScalableBatchInputsRejectDuplicatesInsteadOfDroppingOutcomes(t *testing.T) {
 	t.Parallel()
-	if err := rejectDuplicateRepositoryRefs([]mcpserver.RepositoryRef{{Owner: "one", Repo: "repo"}, {Owner: "ONE", Repo: "repo"}}); err == nil {
+	if err := rejectDuplicateRepositoryRefs([]mcpcontract.RepositoryRef{{Owner: "one", Repo: "repo"}, {Owner: "ONE", Repo: "repo"}}); err == nil {
 		t.Fatal("duplicate repositories were silently accepted")
 	}
-	if err := rejectDuplicateThreadRefs([]mcpserver.ThreadRef{{Owner: "one", Repo: "repo", Number: 1}, {Owner: "one", Repo: "repo", Number: 1}}); err == nil {
+	if err := rejectDuplicateThreadRefs([]mcpcontract.ThreadRef{{Owner: "one", Repo: "repo", Number: 1}, {Owner: "one", Repo: "repo", Number: 1}}); err == nil {
 		t.Fatal("duplicate threads were silently accepted")
 	}
-	if err := rejectDuplicateIndexRepositoryInputs([]mcpserver.IndexRepositoryInput{{Owner: "one", Repo: "repo", Remote: "first"}, {Owner: "one", Repo: "repo", Remote: "second"}}); err == nil {
+	if err := rejectDuplicateIndexRepositoryInputs([]mcpcontract.IndexRepositoryInput{{Owner: "one", Repo: "repo", Remote: "first"}, {Owner: "one", Repo: "repo", Remote: "second"}}); err == nil {
 		t.Fatal("conflicting repository remotes were silently accepted")
 	}
 }
@@ -615,23 +615,23 @@ func TestScalableRuntimeRejectsPageBoundsBeforeSubmittingJob(t *testing.T) {
 	t.Parallel()
 	reader := &MCPReader{newSearchTestService(t)}
 	ctx := context.Background()
-	thread := mcpserver.ThreadRef{Owner: "acme", Repo: "rocket", Number: 1}
+	thread := mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Number: 1}
 	for _, maxPages := range []int{-1, 101} {
-		if _, err := reader.HydrateThreads(ctx, mcpserver.HydrateThreadsInput{Threads: []mcpserver.ThreadRef{thread}, Facets: []string{"issue_comments"}, MaxPages: maxPages}); err == nil {
+		if _, err := reader.HydrateThreads(ctx, mcpcontract.HydrateThreadsInput{Threads: []mcpcontract.ThreadRef{thread}, Facets: []string{"issue_comments"}, MaxPages: maxPages}); err == nil {
 			t.Fatalf("HydrateThreads accepted max_pages=%d", maxPages)
 		}
 	}
 	for _, maxPages := range []int{-1, 21} {
-		if _, err := reader.SyncPullRequestStatus(ctx, mcpserver.SyncPullRequestStatusInput{PullRequests: []mcpserver.ThreadRef{thread}, MaxPages: maxPages}); err == nil {
+		if _, err := reader.SyncPullRequestStatus(ctx, mcpcontract.SyncPullRequestStatusInput{PullRequests: []mcpcontract.ThreadRef{thread}, MaxPages: maxPages}); err == nil {
 			t.Fatalf("SyncPullRequestStatus accepted max_pages=%d", maxPages)
 		}
 	}
 	for _, limit := range []int{-1, 1001} {
-		if _, err := reader.SyncThreads(ctx, mcpserver.SyncThreadsInput{Selection: "repositories", Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, LimitPerRepository: limit}); err == nil {
+		if _, err := reader.SyncThreads(ctx, mcpcontract.SyncThreadsInput{Selection: "repositories", Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, LimitPerRepository: limit}); err == nil {
 			t.Fatalf("SyncThreads accepted limit_per_repository=%d", limit)
 		}
 	}
-	if _, err := reader.SyncAuthoredPullRequests(ctx, mcpserver.SyncAuthoredPullRequestsInput{Limit: 1, MaxRequests: syncFixedRequestCost() + 1}); err == nil {
+	if _, err := reader.SyncAuthoredPullRequests(ctx, mcpcontract.SyncAuthoredPullRequestsInput{Limit: 1, MaxRequests: syncFixedRequestCost() + 1}); err == nil {
 		t.Fatal("SyncAuthoredPullRequests accepted budget that cannot fund identity, discovery, and one repository sync")
 	}
 }
@@ -641,7 +641,7 @@ func TestDeepWikiTruncationPreservesUTF8(t *testing.T) {
 	svc := newSearchTestService(t)
 	fake := &fakeDeepWikiReader{response: deepwiki.Response{Available: true, Text: strings.Repeat("x", 1023) + "€", SourceURL: "https://deepwiki.com/acme/rocket"}}
 	svc.SetDeepWikiReader(fake)
-	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpserver.DeepWikiInput{Action: "contents", Repository: "acme/rocket", MaxOutputBytes: 1024})
+	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{Action: "contents", Repository: "acme/rocket", MaxOutputBytes: 1024})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -653,10 +653,10 @@ func TestDeepWikiTruncationPreservesUTF8(t *testing.T) {
 func TestScalableRuntimeBoundsMatchSchemas(t *testing.T) {
 	t.Parallel()
 	reader := &MCPReader{newSearchTestService(t)}
-	if _, err := reader.RankOpportunities(context.Background(), mcpserver.RankOpportunitiesInput{Repositories: []mcpserver.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, Limit: 101}); err == nil {
+	if _, err := reader.RankOpportunities(context.Background(), mcpcontract.RankOpportunitiesInput{Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, Limit: 101}); err == nil {
 		t.Fatal("rank opportunities accepted limit above schema maximum")
 	}
-	if _, err := reader.FindPrecedents(context.Background(), mcpserver.FindPrecedentsInput{Threads: []mcpserver.ThreadRef{{Owner: "acme", Repo: "rocket", Number: 1}}, Limit: 101}); err == nil {
+	if _, err := reader.FindPrecedents(context.Background(), mcpcontract.FindPrecedentsInput{Threads: []mcpcontract.ThreadRef{{Owner: "acme", Repo: "rocket", Number: 1}}, Limit: 101}); err == nil {
 		t.Fatal("find precedents accepted limit above schema maximum")
 	}
 }
@@ -666,7 +666,7 @@ func TestDeepWikiRejectsOutputBoundsBeforeProviderRead(t *testing.T) {
 	svc := newSearchTestService(t)
 	deepWiki := &fakeDeepWikiReader{}
 	svc.SetDeepWikiReader(deepWiki)
-	if _, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpserver.DeepWikiInput{Action: "question", Repositories: []string{"acme/rocket"}, Question: "architecture?", MaxOutputBytes: 100}); err == nil {
+	if _, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{Action: "question", Repositories: []string{"acme/rocket"}, Question: "architecture?", MaxOutputBytes: 100}); err == nil {
 		t.Fatal("DeepWiki accepted max_output_bytes below schema minimum")
 	}
 	if deepWiki.calls != 0 {
@@ -697,14 +697,14 @@ func TestPullRequestPortfolioDerivesConflictAndPreservesUnknownCoverage(t *testi
 	if err := svc.corpus.ApplyFacetObservationSet(ctx, repo.ID, &conflicted.ID, FacetPRDetails, now, []corpus.FacetObservationInput{{SourceUpdatedAt: now, Payload: string(details)}}, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpserver.ListPullRequestPortfolioInput{Author: "alice", State: "open", Limit: 10})
+	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Author: "alice", State: "open", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if out.Status != "partial" || len(out.PullRequests) != 2 {
 		t.Fatalf("unexpected portfolio: %+v", out)
 	}
-	byNumber := map[int]mcpserver.PullRequestPortfolioItem{}
+	byNumber := map[int]mcpcontract.PullRequestPortfolioItem{}
 	for _, item := range out.PullRequests {
 		byNumber[item.Number] = item
 	}
@@ -734,14 +734,14 @@ func TestPullRequestPortfolioClassifiesClosedUnmerged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpserver.ListPullRequestPortfolioInput{Author: "alice", State: "closed", Limit: 10})
+	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Author: "alice", State: "closed", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(out.PullRequests) != 2 {
 		t.Fatalf("closed pull request classification = %+v", out.PullRequests)
 	}
-	byNumber := map[int]mcpserver.PullRequestPortfolioItem{}
+	byNumber := map[int]mcpcontract.PullRequestPortfolioItem{}
 	for _, item := range out.PullRequests {
 		byNumber[item.Number] = item
 	}
@@ -780,7 +780,7 @@ func TestPullRequestPortfolioKeepsComputingMergeabilityUnknown(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpserver.ListPullRequestPortfolioInput{Author: "alice", State: "open", Limit: 10})
+	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Author: "alice", State: "open", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

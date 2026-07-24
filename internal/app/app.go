@@ -16,7 +16,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/deepwiki"
 	"github.com/morluto/gitcontribute/internal/discovery"
@@ -25,8 +25,15 @@ import (
 	"github.com/morluto/gitcontribute/internal/github"
 )
 
-// Service is the product-owned application layer that satisfies cli.Service.
+// Service is the product-owned application layer that satisfies
+// contracts.Service.
 // MCP reads are exposed through MCPReader.
+var (
+	_ contracts.Service         = (*Service)(nil)
+	_ contracts.WorkflowService = (*Service)(nil)
+	_ contracts.DossierService  = (*Service)(nil)
+)
+
 type Service struct {
 	mu              sync.Mutex
 	cfg             *config.Config
@@ -418,7 +425,7 @@ func (s *Service) databasePath() string {
 
 // Init opens or creates the configured corpus and persists a default
 // configuration if one does not already exist.
-func (s *Service) Init(ctx context.Context) (*cli.InitResult, error) {
+func (s *Service) Init(ctx context.Context) (*contracts.InitResult, error) {
 	cfg, err := s.loadConfig(true)
 	if err != nil {
 		return nil, err
@@ -442,20 +449,20 @@ func (s *Service) Init(ctx context.Context) (*cli.InitResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &cli.InitResult{Path: cfg.Database, Message: "corpus initialized"}, nil
+	return &contracts.InitResult{Path: cfg.Database, Message: "corpus initialized"}, nil
 }
 
 // Status reports whether the corpus is healthy and counts local records.
-func (s *Service) Status(ctx context.Context) (*cli.StatusResult, error) {
+func (s *Service) Status(ctx context.Context) (*contracts.StatusResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return &cli.StatusResult{Healthy: false, Corpus: s.databasePath(), Version: s.version, Message: err.Error()}, nil
+		return &contracts.StatusResult{Healthy: false, Corpus: s.databasePath(), Version: s.version, Message: err.Error()}, nil
 	}
 	st, err := c.Status(ctx)
 	if err != nil {
-		return &cli.StatusResult{Healthy: false, Corpus: s.databasePath(), Version: s.version, Message: err.Error()}, nil
+		return &contracts.StatusResult{Healthy: false, Corpus: s.databasePath(), Version: s.version, Message: err.Error()}, nil
 	}
-	return &cli.StatusResult{
+	return &contracts.StatusResult{
 		Healthy: true,
 		Corpus:  s.databasePath(),
 		Version: s.version,
@@ -481,21 +488,21 @@ const (
 
 // Sync fetches all repository threads. It preserves the original archive API
 // while SyncWithOptions provides bounded incremental and exact refreshes.
-func (s *Service) Sync(ctx context.Context, repo cli.RepoRef) (*cli.SyncResult, error) {
+func (s *Service) Sync(ctx context.Context, repo contracts.RepoRef) (*contracts.SyncResult, error) {
 	return s.SyncWithOptions(ctx, repo, SyncOptions{})
 }
 
 // SyncWithOptions fetches a repository and a bounded thread selection from
 // GitHub, then writes ordered observations to the local corpus.
-func (s *Service) SyncWithOptions(ctx context.Context, repo cli.RepoRef, syncOpts SyncOptions) (*cli.SyncResult, error) {
+func (s *Service) SyncWithOptions(ctx context.Context, repo contracts.RepoRef, syncOpts SyncOptions) (*contracts.SyncResult, error) {
 	return s.syncWithOptions(ctx, repo, syncOpts, nil)
 }
 
-func (s *Service) syncProvidedThreadHeaders(ctx context.Context, repo cli.RepoRef, issues []github.Issue, maxRequests int) (*cli.SyncResult, error) {
+func (s *Service) syncProvidedThreadHeaders(ctx context.Context, repo contracts.RepoRef, issues []github.Issue, maxRequests int) (*contracts.SyncResult, error) {
 	return s.syncWithOptions(ctx, repo, SyncOptions{Kind: "pull_request", State: "all", MaxPages: 1, MaxRequests: maxRequests}, issues)
 }
 
-func (s *Service) syncWithOptions(ctx context.Context, repo cli.RepoRef, syncOpts SyncOptions, provided []github.Issue) (*cli.SyncResult, error) {
+func (s *Service) syncWithOptions(ctx context.Context, repo contracts.RepoRef, syncOpts SyncOptions, provided []github.Issue) (*contracts.SyncResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
@@ -566,7 +573,7 @@ func (s *Service) syncWithOptions(ctx context.Context, repo cli.RepoRef, syncOpt
 		return nil, syncErr
 	}
 
-	return &cli.SyncResult{
+	return &contracts.SyncResult{
 		Repo: repo, Updated: updated, Requests: budget.used, PlannedRequests: plan.plannedRequests, RequestBudget: syncOpts.MaxRequests, Capped: requestCapped,
 		Message: fmt.Sprintf("fetched %d thread headers across %d thread requests", updated, pages),
 	}, nil
@@ -731,7 +738,7 @@ func corpusRepoFromGitHub(r github.Repository) corpus.Repository {
 }
 
 // Dossier builds a deterministic, local-corpus-backed repository dossier.
-func (s *Service) Dossier(ctx context.Context, repo cli.RepoRef) (*cli.DossierResult, error) {
+func (s *Service) Dossier(ctx context.Context, repo contracts.RepoRef) (*contracts.DossierResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
@@ -743,7 +750,7 @@ func (s *Service) Dossier(ctx context.Context, repo cli.RepoRef) (*cli.DossierRe
 	if err != nil {
 		return nil, err
 	}
-	return &cli.DossierResult{
+	return &contracts.DossierResult{
 		Repo:       repo,
 		Summary:    d.Repository.Description,
 		Language:   firstLanguage(d.Repository.Languages),
@@ -755,7 +762,7 @@ func (s *Service) Dossier(ctx context.Context, repo cli.RepoRef) (*cli.DossierRe
 }
 
 // Index records a bounded immutable code snapshot from a clean local checkout.
-func (s *Service) Index(ctx context.Context, repo cli.RepoRef, path string) (*cli.IndexResult, error) {
+func (s *Service) Index(ctx context.Context, repo contracts.RepoRef, path string) (*contracts.IndexResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
@@ -776,7 +783,7 @@ func (s *Service) Index(ctx context.Context, repo cli.RepoRef, path string) (*cl
 	if inserted {
 		message = "snapshot stored"
 	}
-	return &cli.IndexResult{
+	return &contracts.IndexResult{
 		Repo: repo, Path: snapshot.RepoPath, Commit: snapshot.Commit,
 		Files: len(snapshot.Documents), Bytes: snapshot.TotalBytes, Inserted: inserted, Message: message,
 	}, nil

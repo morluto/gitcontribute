@@ -4,7 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 // RuntimeContractService reports only immutable executable compatibility
@@ -13,7 +14,7 @@ import (
 // RuntimeContractResult is immutable executable compatibility metadata.
 
 func (c *CLI) runRuntimeContract(ctx context.Context) error {
-	service, ok := c.svc.(RuntimeContractService)
+	service, ok := c.svc.(contracts.RuntimeContractService)
 	if !ok {
 		return NewCLIError(ExitNotWired, errors.New("runtime contract service is not available"))
 	}
@@ -21,10 +22,5 @@ func (c *CLI) runRuntimeContract(ctx context.Context) error {
 	if err != nil {
 		return c.mapError(err)
 	}
-	return WriteRuntimeContract(c.stdout, contract)
-}
-
-// WriteRuntimeContract emits exactly one machine-readable JSON value.
-func WriteRuntimeContract(output io.Writer, contract *RuntimeContractResult) error {
-	return json.NewEncoder(output).Encode(contract)
+	return json.NewEncoder(c.stdout).Encode(contract)
 }

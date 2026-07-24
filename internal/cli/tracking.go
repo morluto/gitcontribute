@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 const (
@@ -95,8 +97,8 @@ type trackingImportCmd struct {
 	JSON bool   `name:"json" help:"Print the result as JSON"`
 }
 
-func (c *CLI) trackingService() (TrackingService, error) {
-	service, ok := c.svc.(TrackingService)
+func (c *CLI) trackingService() (contracts.TrackingService, error) {
+	service, ok := c.svc.(contracts.TrackingService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -111,7 +113,7 @@ func (c *CLI) runTriage(ctx context.Context, command string, cmd *triageCmd) err
 	switch command {
 	case "triage record":
 		_, _ = fmt.Fprintf(c.stderr, "recording triage outcome for %s...\n", cmd.Record.Target)
-		result, err := service.RecordTriageEvent(ctx, RecordTriageEventOptions{
+		result, err := service.RecordTriageEvent(ctx, contracts.RecordTriageEventOptions{
 			Target:  cmd.Record.Target,
 			Outcome: cmd.Record.Outcome,
 			Reason:  cmd.Record.Reason,
@@ -125,7 +127,7 @@ func (c *CLI) runTriage(ctx context.Context, command string, cmd *triageCmd) err
 		if cmd.List.Limit <= 0 || cmd.List.Limit > maxTrackingListLimit {
 			return NewCLIError(ExitUsage, fmt.Errorf("limit must be between 1 and %d", maxTrackingListLimit))
 		}
-		result, err := service.ListTriageEvents(ctx, ListTriageEventsOptions{
+		result, err := service.ListTriageEvents(ctx, contracts.ListTriageEventsOptions{
 			TargetKind: cmd.List.Kind,
 			TargetRef:  cmd.List.Ref,
 			Outcome:    cmd.List.Outcome,
@@ -149,7 +151,7 @@ func (c *CLI) runContribution(ctx context.Context, command string, cmd *contribu
 	switch command {
 	case "contribution record":
 		_, _ = fmt.Fprintf(c.stderr, "recording contribution for opportunity %s...\n", cmd.Record.OpportunityID)
-		result, err := service.RecordContribution(ctx, RecordContributionOptions{
+		result, err := service.RecordContribution(ctx, contracts.RecordContributionOptions{
 			OpportunityID: cmd.Record.OpportunityID,
 			Kind:          cmd.Record.Kind,
 			Title:         cmd.Record.Title,
@@ -165,7 +167,7 @@ func (c *CLI) runContribution(ctx context.Context, command string, cmd *contribu
 		if cmd.List.Limit <= 0 || cmd.List.Limit > maxTrackingListLimit {
 			return NewCLIError(ExitUsage, fmt.Errorf("limit must be between 1 and %d", maxTrackingListLimit))
 		}
-		result, err := service.ListContributions(ctx, ListContributionsOptions{
+		result, err := service.ListContributions(ctx, contracts.ListContributionsOptions{
 			OpportunityID: cmd.List.OpportunityID,
 			Kind:          cmd.List.Kind,
 			Limit:         cmd.List.Limit,
@@ -182,7 +184,7 @@ func (c *CLI) runContribution(ctx context.Context, command string, cmd *contribu
 		return c.render(cmd.Show.JSON, result)
 	case "contribution outcome":
 		_, _ = fmt.Fprintf(c.stderr, "recording outcome %s for contribution %s...\n", cmd.Outcome.Outcome, cmd.Outcome.ContributionID)
-		result, err := service.RecordContributionOutcome(ctx, RecordContributionOutcomeOptions{
+		result, err := service.RecordContributionOutcome(ctx, contracts.RecordContributionOutcomeOptions{
 			ContributionID: cmd.Outcome.ContributionID,
 			Outcome:        cmd.Outcome.Outcome,
 			Reason:         cmd.Outcome.Reason,
@@ -217,12 +219,12 @@ func (c *CLI) runTracking(ctx context.Context, command string, cmd *trackingCmd)
 	}
 }
 
-func (c *CLI) runTrackingExport(ctx context.Context, cmd *trackingExportCmd, service TrackingService) error {
+func (c *CLI) runTrackingExport(ctx context.Context, cmd *trackingExportCmd, service contracts.TrackingService) error {
 	if cmd.Limit <= 0 || cmd.Limit > 100000 {
 		return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 100000"))
 	}
 	_, _ = fmt.Fprintln(c.stderr, "exporting local tracking metadata...")
-	result, err := service.ExportLocalMetadata(ctx, MetadataExportOptions{Limit: cmd.Limit})
+	result, err := service.ExportLocalMetadata(ctx, contracts.MetadataExportOptions{Limit: cmd.Limit})
 	if err != nil {
 		return c.mapError(err)
 	}
@@ -248,13 +250,13 @@ func (c *CLI) runTrackingExport(ctx context.Context, cmd *trackingExportCmd, ser
 	return nil
 }
 
-func (c *CLI) runTrackingImport(ctx context.Context, cmd *trackingImportCmd, service TrackingService) error {
+func (c *CLI) runTrackingImport(ctx context.Context, cmd *trackingImportCmd, service contracts.TrackingService) error {
 	data, err := c.readMetadataImport(cmd.File)
 	if err != nil {
 		return NewCLIError(ExitUsage, err)
 	}
 	_, _ = fmt.Fprintln(c.stderr, "importing local tracking metadata...")
-	result, err := service.ImportLocalMetadata(ctx, MetadataImportOptions{Data: data})
+	result, err := service.ImportLocalMetadata(ctx, contracts.MetadataImportOptions{Data: data})
 	if err != nil {
 		return c.mapError(err)
 	}

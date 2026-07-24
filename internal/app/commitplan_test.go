@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/commitplan"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 func TestSemanticCommitPlanUsesFrozenWorkspaceSnapshot(t *testing.T) {
@@ -19,11 +19,11 @@ func TestSemanticCommitPlanUsesFrozenWorkspaceSnapshot(t *testing.T) {
 	svc := newLocalService(t)
 	defer func() { _ = svc.Close() }()
 	remote, _, candidateSHA := setupAppGitRemote(t)
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ws, err := svc.CreateWorkspace(ctx, inv.ID, cli.WorkspaceCreateOptions{Remote: remote, BaseRef: "master", CandidateRef: "feature", Name: "commit-plan"})
+	ws, err := svc.CreateWorkspace(ctx, inv.ID, contracts.WorkspaceCreateOptions{Remote: remote, BaseRef: "master", CandidateRef: "feature", Name: "commit-plan"})
 	if err != nil {
 		t.Fatal(err)
 	}

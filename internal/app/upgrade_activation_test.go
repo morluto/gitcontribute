@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/managedbinary"
 	clientsetup "github.com/morluto/gitcontribute/internal/setup"
 	_ "modernc.org/sqlite"
@@ -38,7 +38,7 @@ func TestUpgradeBlocksActivationWhenTargetSchemaExceedsCorpus(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Yes: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestUpgradeBlocksActivationWithInvalidRuntimeContract(t *testing.T) {
 	_, _, configPath, want, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.4")
 	setRuntimeContractOutput(t, "not-json")
 
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Yes: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestUpgradeBlocksActivationWithInvalidRuntimeContract(t *testing.T) {
 func TestUpgradeReportsTargetRuntimeUnavailableWhenNoStagedExecutable(t *testing.T) {
 	_, _, configPath, want, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "")
 
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Yes: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +104,7 @@ func TestUpgradeBlocksActivationWithTrailingRuntimeContract(t *testing.T) {
 	_, _, configPath, want, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.4")
 	setRuntimeContractOutput(t, `{"name":"gitcontribute","version":"1.2.4","supported_schema_version":1}{"unexpected":"second value"}`)
 
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Yes: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestUpgradeRejectsDestinationRuntimeContractDisagreementBeforeRegistration(
 		return []byte(fmt.Sprintf(`{"name":"gitcontribute","version":"1.2.4","supported_schema_version":%d}`, schema)), nil
 	}
 
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Yes: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestUpgradeRejectsMismatchedPostInstallNPMVersion(t *testing.T) {
 	}
 
 	svc := testService(t, home, "1.2.3", "")
-	_, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Yes: true})
+	_, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err == nil {
 		t.Fatal("expected error when installed npm version does not match target")
 	}
@@ -230,7 +230,7 @@ func TestUpgradeBlocksActivationWhenRuntimeContractLacksSupportedSchema(t *testi
 	_, _, configPath, want, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.4")
 	setRuntimeContractOutput(t, `{"name":"gitcontribute","version":"1.2.4"}`)
 
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Yes: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestUpgradeBlocksActivationWhenRuntimeContractLacksSupportedSchema(t *testi
 }
 
 func TestPrivateActivationReportsIncompleteRollback(t *testing.T) {
-	report := &cli.UpgradeReport{}
+	report := &contracts.UpgradeReport{}
 	svc := &Service{}
 	svc.setPrivateActivationFailure(report, 2, &clientsetup.ActivationRollbackError{
 		Cause:    errors.New("verification failed"),

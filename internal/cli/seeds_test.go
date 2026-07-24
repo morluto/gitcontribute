@@ -6,28 +6,43 @@ import (
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 type seedCLIService struct {
 	*fakeService
-	classes    []string
-	polarities []string
-	limit      int
+	opts domain.ExtractSeedsOptions
+	runs int
 }
 
-func (s *seedCLIService) BuildDossierForCLI(context.Context, cli.RepoRef) (any, error) {
+func (s *seedCLIService) BuildRepositoryDossier(context.Context, contracts.RepoRef) (*domain.Dossier, error) {
 	return nil, s.err
 }
 
-func (s *seedCLIService) GetDossierForCLI(context.Context, cli.RepoRef) (any, error) {
+func (s *seedCLIService) GetRepositoryDossier(context.Context, contracts.RepoRef) (*domain.Dossier, error) {
 	return nil, s.err
 }
 
-func (s *seedCLIService) ExtractSeedsForCLI(_ context.Context, _ cli.RepoRef, classes, polarities []string, limit int) (any, error) {
-	s.classes = append([]string(nil), classes...)
-	s.polarities = append([]string(nil), polarities...)
-	s.limit = limit
-	return []any{}, s.err
+func (s *seedCLIService) ExtractSeeds(_ context.Context, _ contracts.RepoRef, opts domain.ExtractSeedsOptions) ([]domain.Seed, error) {
+	s.opts = opts
+	s.runs++
+	return nil, s.err
+}
+
+func TestSeedsCommandRejectsUnknownBoundaryValues(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{
+		{"seeds", "owner/repo", "--from=invented"},
+		{"seeds", "owner/repo", "--polarity=invented"},
+	} {
+		svc := &seedCLIService{fakeService: &fakeService{}}
+		c, _, _ := newTestCLI(svc, nil)
+		requireCLIError(t, c.Run(context.Background(), args), cli.ExitUsage)
+		if svc.runs != 0 {
+			t.Fatalf("ExtractSeeds called %d times for %v", svc.runs, args)
+		}
+	}
 }
 
 func TestSeedsCommandPassesExplicitPolarityControls(t *testing.T) {
@@ -38,14 +53,14 @@ func TestSeedsCommandPassesExplicitPolarityControls(t *testing.T) {
 		"seeds", "owner/repo", "--from=issues", "--polarity=negative,context", "--limit=7", "--json",
 	}))
 
-	if !reflect.DeepEqual(svc.classes, []string{"issues"}) {
-		t.Fatalf("seed classes = %v", svc.classes)
+	if !reflect.DeepEqual(svc.opts.Classes, []domain.SeedSourceClass{domain.SeedSourceClassIssue}) {
+		t.Fatalf("seed classes = %v", svc.opts.Classes)
 	}
-	if !reflect.DeepEqual(svc.polarities, []string{"negative", "context"}) {
-		t.Fatalf("seed polarities = %v", svc.polarities)
+	if !reflect.DeepEqual(svc.opts.Polarities, []domain.SeedPolarity{domain.SeedPolarityNegative, domain.SeedPolarityContext}) {
+		t.Fatalf("seed polarities = %v", svc.opts.Polarities)
 	}
-	if svc.limit != 7 {
-		t.Fatalf("seed limit = %d", svc.limit)
+	if svc.opts.Limit != 7 {
+		t.Fatalf("seed limit = %d", svc.opts.Limit)
 	}
 }
 
@@ -55,10 +70,16 @@ func TestSeedsCommandDefaultsToOutcomeEvidence(t *testing.T) {
 	c, _, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"seeds", "owner/repo", "--json"}))
 
-	if !reflect.DeepEqual(svc.classes, []string{"merged-prs", "closed-prs", "issues"}) {
-		t.Fatalf("default seed classes = %v", svc.classes)
+	wantClasses := []domain.SeedSourceClass{
+		domain.SeedSourceClassMergedPR,
+		domain.SeedSourceClassClosedUnmergedPR,
+		domain.SeedSourceClassIssue,
 	}
-	if !reflect.DeepEqual(svc.polarities, []string{"positive", "negative"}) {
-		t.Fatalf("default seed polarities = %v", svc.polarities)
+	if !reflect.DeepEqual(svc.opts.Classes, wantClasses) {
+		t.Fatalf("default seed classes = %v", svc.opts.Classes)
+	}
+	wantPolarities := []domain.SeedPolarity{domain.SeedPolarityPositive, domain.SeedPolarityNegative}
+	if !reflect.DeepEqual(svc.opts.Polarities, wantPolarities) {
+		t.Fatalf("default seed polarities = %v", svc.opts.Polarities)
 	}
 }

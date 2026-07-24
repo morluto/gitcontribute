@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 func (c *CLI) runValidation(ctx context.Context, command string, cmd *validationCmd) error {
@@ -26,7 +28,7 @@ func (c *CLI) runValidation(ctx context.Context, command string, cmd *validation
 	}
 }
 
-func (c *CLI) executeRepeatedValidation(ctx context.Context, service ValidationService, cmd *repeatValidationCmd) error {
+func (c *CLI) executeRepeatedValidation(ctx context.Context, service contracts.ValidationService, cmd *repeatValidationCmd) error {
 	definition, err := service.ShowValidation(ctx, cmd.ID)
 	if err != nil {
 		return c.mapError(err)
@@ -41,7 +43,7 @@ func (c *CLI) executeRepeatedValidation(ctx context.Context, service ValidationS
 	if _, err := fmt.Fprintf(c.stderr, "executing %d validation attempt(s) per target: %s\n", cmd.Runs, formatCommand(definition.Command)); err != nil {
 		return err
 	}
-	result, err := service.RunValidationGroup(ctx, cmd.ID, RepeatValidationOptions{
+	result, err := service.RunValidationGroup(ctx, cmd.ID, contracts.RepeatValidationOptions{
 		Kinds: kinds, RunCount: cmd.Runs, Concurrency: cmd.Concurrency,
 		PerRunTimeout: cmd.PerRunTimeout, OverallTimeout: cmd.OverallTimeout, SampleInterval: cmd.SampleInterval,
 		Execute: true,
@@ -52,18 +54,18 @@ func (c *CLI) executeRepeatedValidation(ctx context.Context, service ValidationS
 	return c.render(cmd.JSON, result)
 }
 
-func (c *CLI) defineValidation(ctx context.Context, service ValidationService, cmd *defineValidationCmd) error {
+func (c *CLI) defineValidation(ctx context.Context, service contracts.ValidationService, cmd *defineValidationCmd) error {
 	if _, err := fmt.Fprintf(c.stderr, "defining validation for investigation %s...\n", cmd.InvestigationID); err != nil {
 		return err
 	}
-	var observation *ValidationObservationContract
+	var observation *contracts.ValidationObservationContract
 	if strings.TrimSpace(cmd.Observation) != "" {
-		observation = &ValidationObservationContract{}
+		observation = &contracts.ValidationObservationContract{}
 		if err := json.Unmarshal([]byte(cmd.Observation), observation); err != nil {
 			return c.mapError(fmt.Errorf("parse observation contract: %w", err))
 		}
 	}
-	result, err := service.DefineValidation(ctx, cmd.InvestigationID, DefineValidationOptions{
+	result, err := service.DefineValidation(ctx, cmd.InvestigationID, contracts.DefineValidationOptions{
 		Kind: cmd.Kind, Command: cmd.Command, WorkingDir: cmd.WorkingDir,
 		BaseWorkingDir: cmd.BaseWorkingDir, CandidateDir: cmd.CandidateDir,
 		WorkspaceID: cmd.WorkspaceID, BaseWorkspaceID: cmd.BaseWorkspaceID, CandidateWorkspaceID: cmd.CandidateWorkspaceID,
@@ -76,7 +78,7 @@ func (c *CLI) defineValidation(ctx context.Context, service ValidationService, c
 	return c.render(cmd.JSON, result)
 }
 
-func (c *CLI) executeValidation(ctx context.Context, service ValidationService, cmd *runValidationCmd) error {
+func (c *CLI) executeValidation(ctx context.Context, service contracts.ValidationService, cmd *runValidationCmd) error {
 	definition, err := service.ShowValidation(ctx, cmd.ID)
 	if err != nil {
 		return c.mapError(err)
@@ -95,14 +97,14 @@ func (c *CLI) executeValidation(ctx context.Context, service ValidationService, 
 	if _, err := fmt.Fprintf(c.stderr, "executing in %s: %s\n", dir, visible); err != nil {
 		return err
 	}
-	result, err := service.RunValidation(ctx, cmd.ID, RunValidationOptions{Kind: cmd.Kind, Execute: true})
+	result, err := service.RunValidation(ctx, cmd.ID, contracts.RunValidationOptions{Kind: cmd.Kind, Execute: true})
 	if err != nil {
 		return c.mapError(err)
 	}
 	return c.render(cmd.JSON, result)
 }
 
-func (c *CLI) compareValidation(ctx context.Context, service ValidationService, cmd *compareValidationCmd) error {
+func (c *CLI) compareValidation(ctx context.Context, service contracts.ValidationService, cmd *compareValidationCmd) error {
 	result, err := service.CompareValidation(ctx, cmd.BaseRunID, cmd.CandidateRunID)
 	if err != nil {
 		return c.mapError(err)

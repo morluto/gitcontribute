@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/exporter"
 )
 
 // ArchiveSync adapts CLI archive options to the application sync contract.
-func (s *Service) ArchiveSync(ctx context.Context, repo cli.RepoRef, opts cli.ArchiveSyncOptions) (*cli.SyncResult, error) {
+func (s *Service) ArchiveSync(ctx context.Context, repo contracts.RepoRef, opts contracts.ArchiveSyncOptions) (*contracts.SyncResult, error) {
 	if opts.Since < 0 {
 		return nil, errors.New("since duration cannot be negative")
 	}
@@ -27,7 +27,7 @@ func (s *Service) ArchiveSync(ctx context.Context, repo cli.RepoRef, opts cli.Ar
 
 // PlanArchiveSync computes the conservative request ceiling before resolving a
 // GitHub reader or opening the corpus.
-func (s *Service) PlanArchiveSync(_ context.Context, repo cli.RepoRef, opts cli.ArchiveSyncOptions) (*cli.SyncPlanResult, error) {
+func (s *Service) PlanArchiveSync(_ context.Context, repo contracts.RepoRef, opts contracts.ArchiveSyncOptions) (*contracts.SyncPlanResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
@@ -43,7 +43,7 @@ func (s *Service) PlanArchiveSync(_ context.Context, repo cli.RepoRef, opts cli.
 	if err != nil {
 		return nil, err
 	}
-	return &cli.SyncPlanResult{
+	return &contracts.SyncPlanResult{
 		Repo: repo, FixedRequests: plan.fixedRequests, ThreadRequestCeiling: plan.threadRequestCeiling,
 		PlannedRequests: plan.plannedRequests, RequestBudget: normalized.MaxRequests,
 		MaxPages: normalized.MaxPages, ExactThreads: len(normalized.Numbers),
@@ -51,24 +51,24 @@ func (s *Service) PlanArchiveSync(_ context.Context, repo cli.RepoRef, opts cli.
 }
 
 // Hydrate adapts the explicit CLI hydration contract to selective hydration.
-func (s *Service) Hydrate(ctx context.Context, repo cli.RepoRef, number int, opts cli.HydrateOptions) (*cli.HydrateResult, error) {
+func (s *Service) Hydrate(ctx context.Context, repo contracts.RepoRef, number int, opts contracts.HydrateOptions) (*contracts.HydrateResult, error) {
 	result, err := s.HydrateThread(ctx, repo, number, HydrateOptions{Facets: opts.Facets, MaxPages: opts.MaxPages})
 	if err != nil {
 		return nil, err
 	}
-	out := &cli.HydrateResult{
+	out := &contracts.HydrateResult{
 		Repo: result.Repo, Number: result.Number, Kind: result.Kind,
 		Pages: result.Pages, Requests: result.Requests, Message: result.Message,
-		Facets: make([]cli.HydratedFacet, len(result.Facets)),
+		Facets: make([]contracts.HydratedFacet, len(result.Facets)),
 	}
 	for i, facet := range result.Facets {
-		out.Facets[i] = cli.HydratedFacet{Facet: facet.Facet, Count: facet.Count, Pages: facet.Pages, Complete: facet.Complete}
+		out.Facets[i] = contracts.HydratedFacet{Facet: facet.Facet, Count: facet.Count, Pages: facet.Pages, Complete: facet.Complete}
 	}
 	return out, nil
 }
 
 // Coverage returns repository-level facet coverage without network access.
-func (s *Service) Coverage(ctx context.Context, repo cli.RepoRef) (*cli.CoverageResult, error) {
+func (s *Service) Coverage(ctx context.Context, repo contracts.RepoRef) (*contracts.CoverageResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
@@ -88,9 +88,9 @@ func (s *Service) Coverage(ctx context.Context, repo cli.RepoRef) (*cli.Coverage
 	if err != nil {
 		return nil, err
 	}
-	out := &cli.CoverageResult{Repo: repo, Facets: make([]cli.CoverageFacet, len(coverage))}
+	out := &contracts.CoverageResult{Repo: repo, Facets: make([]contracts.CoverageFacet, len(coverage))}
 	for i, facet := range coverage {
-		out.Facets[i] = cli.CoverageFacet{
+		out.Facets[i] = contracts.CoverageFacet{
 			Facet: facet.Facet, Present: true, Complete: facet.Complete, UpdatedAt: formatTime(facet.UpdatedAt),
 		}
 	}
@@ -98,7 +98,7 @@ func (s *Service) Coverage(ctx context.Context, repo cli.RepoRef) (*cli.Coverage
 }
 
 // ArchiveThreads returns bounded current thread projections without network access.
-func (s *Service) ArchiveThreads(ctx context.Context, repo cli.RepoRef, kind, state string, limit int) (*cli.ThreadListResult, error) {
+func (s *Service) ArchiveThreads(ctx context.Context, repo contracts.RepoRef, kind, state string, limit int) (*contracts.ThreadListResult, error) {
 	if limit <= 0 || limit > 1000 {
 		return nil, errors.New("thread limit must be between 1 and 1000")
 	}
@@ -135,10 +135,10 @@ func (s *Service) ArchiveThreads(ctx context.Context, repo cli.RepoRef, kind, st
 	if err != nil {
 		return nil, err
 	}
-	out := &cli.ThreadListResult{Repo: repo, Threads: make([]cli.ThreadListItem, 0, len(threads))}
+	out := &contracts.ThreadListResult{Repo: repo, Threads: make([]contracts.ThreadListItem, 0, len(threads))}
 	var freshest time.Time
 	for _, thread := range threads {
-		out.Threads = append(out.Threads, cli.ThreadListItem{
+		out.Threads = append(out.Threads, contracts.ThreadListItem{
 			Kind: thread.Kind, Number: thread.Number, State: thread.State, Title: thread.Title,
 			Author: thread.Author, Labels: thread.Labels, UpdatedAt: formatTime(thread.SourceUpdatedAt),
 		})
@@ -153,15 +153,15 @@ func (s *Service) ArchiveThreads(ctx context.Context, repo cli.RepoRef, kind, st
 	if err != nil {
 		return nil, err
 	}
-	out.Coverage = make([]cli.CoverageFacet, len(coverage))
+	out.Coverage = make([]contracts.CoverageFacet, len(coverage))
 	for i, facet := range coverage {
-		out.Coverage[i] = cli.CoverageFacet{Facet: facet.Facet, Present: true, Complete: facet.Complete, UpdatedAt: formatTime(facet.UpdatedAt)}
+		out.Coverage[i] = contracts.CoverageFacet{Facet: facet.Facet, Present: true, Complete: facet.Complete, UpdatedAt: formatTime(facet.UpdatedAt)}
 	}
 	return out, nil
 }
 
 // RunHistory returns bounded durable run metadata.
-func (s *Service) RunHistory(ctx context.Context, limit int) (*cli.RunListResult, error) {
+func (s *Service) RunHistory(ctx context.Context, limit int) (*contracts.RunListResult, error) {
 	if limit <= 0 || limit > 1000 {
 		return nil, errors.New("run limit must be between 1 and 1000")
 	}
@@ -173,9 +173,9 @@ func (s *Service) RunHistory(ctx context.Context, limit int) (*cli.RunListResult
 	if err != nil {
 		return nil, err
 	}
-	out := &cli.RunListResult{Runs: make([]cli.RunResult, len(runs))}
+	out := &contracts.RunListResult{Runs: make([]contracts.RunResult, len(runs))}
 	for i, run := range runs {
-		out.Runs[i] = cli.RunResult{
+		out.Runs[i] = contracts.RunResult{
 			ID: run.ID, Kind: run.Kind, Status: run.Status, StartedAt: formatTime(run.StartedAt), Stats: run.Stats, Error: run.Error,
 		}
 		if run.CompletedAt != nil {
@@ -186,18 +186,18 @@ func (s *Service) RunHistory(ctx context.Context, limit int) (*cli.RunListResult
 }
 
 // NeighborQuery returns transparent local nearest-thread results.
-func (s *Service) NeighborQuery(ctx context.Context, repo cli.RepoRef, kind string, number, limit int) (*cli.NeighborListResult, error) {
+func (s *Service) NeighborQuery(ctx context.Context, repo contracts.RepoRef, kind string, number, limit int) (*contracts.NeighborListResult, error) {
 	result, err := s.Neighbors(ctx, repo, kind, number, limit)
 	if err != nil {
 		return nil, err
 	}
-	out := &cli.NeighborListResult{
+	out := &contracts.NeighborListResult{
 		Repo: repo, Kind: result.Kind, Number: result.Number, SourceRevision: result.SourceRevision,
-		Neighbors: make([]cli.NeighborResult, len(result.Neighbors)),
+		Neighbors: make([]contracts.NeighborResult, len(result.Neighbors)),
 	}
 	for i, neighbor := range result.Neighbors {
-		out.Neighbors[i] = cli.NeighborResult{
-			Kind: neighbor.Kind, Repo: cli.RepoRef{Owner: neighbor.Owner, Repo: neighbor.Repo}, Number: neighbor.Number,
+		out.Neighbors[i] = contracts.NeighborResult{
+			Kind: neighbor.Kind, Repo: contracts.RepoRef{Owner: neighbor.Owner, Repo: neighbor.Repo}, Number: neighbor.Number,
 			Title: neighbor.Title, State: neighbor.State, Score: neighbor.Score, Reason: neighbor.Reason,
 		}
 	}
@@ -205,7 +205,7 @@ func (s *Service) NeighborQuery(ctx context.Context, repo cli.RepoRef, kind stri
 }
 
 // ExportDossier builds and renders a deterministic redacted dossier bundle.
-func (s *Service) ExportDossier(ctx context.Context, repo cli.RepoRef, format string) (*cli.ExportResult, error) {
+func (s *Service) ExportDossier(ctx context.Context, repo contracts.RepoRef, format string) (*contracts.ExportResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
@@ -230,11 +230,11 @@ func (s *Service) ExportDossier(ctx context.Context, repo cli.RepoRef, format st
 	if err != nil {
 		return nil, err
 	}
-	return &cli.ExportResult{Kind: "dossier", Format: format, Content: b.String()}, nil
+	return &contracts.ExportResult{Kind: "dossier", Format: format, Content: b.String()}, nil
 }
 
 // ExportEvidence renders a deterministic redacted investigation evidence bundle.
-func (s *Service) ExportEvidence(ctx context.Context, investigationID, format string) (*cli.ExportResult, error) {
+func (s *Service) ExportEvidence(ctx context.Context, investigationID, format string) (*contracts.ExportResult, error) {
 	evidence, err := s.ShowEvidence(ctx, investigationID)
 	if err != nil {
 		return nil, err
@@ -252,7 +252,7 @@ func (s *Service) ExportEvidence(ctx context.Context, investigationID, format st
 	if err != nil {
 		return nil, err
 	}
-	return &cli.ExportResult{Kind: "evidence", Format: format, Content: b.String()}, nil
+	return &contracts.ExportResult{Kind: "evidence", Format: format, Content: b.String()}, nil
 }
 
 func normalizeExportFormat(format string) (string, error) {

@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/managedbinary"
 	_ "modernc.org/sqlite"
 )
@@ -28,7 +28,7 @@ func TestUpgradeNpxDoesNotInstallGlobalPackage(t *testing.T) {
 	}
 	t.Setenv("npm_command", "exec")
 	svc := &Service{version: "1.2.3", paths: config.NewPaths(&config.Env{Home: t.TempDir()})}
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Yes: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,11 +49,11 @@ func TestUpgradeNpxDoesNotInstallGlobalPackage(t *testing.T) {
 }
 
 func TestUpgradeDoesNotInstallAcrossSchemaIncompatibility(t *testing.T) {
-	report := &cli.UpgradeReport{
+	report := &contracts.UpgradeReport{
 		Context: "global-npm", Current: "1.2.3", Latest: "1.2.4",
-		Stages: []cli.UpgradeStage{{Name: "corpus-schema", Status: "migration_required"}},
+		Stages: []contracts.UpgradeStage{{Name: "corpus-schema", Status: "migration_required"}},
 	}
-	if shouldInstall(report, cli.UpgradeOptions{Yes: true}) {
+	if shouldInstall(report, contracts.UpgradeOptions{Yes: true}) {
 		t.Fatal("schema-incompatible upgrade was authorized for installation")
 	}
 }
@@ -89,11 +89,11 @@ func TestUpgradeUsesSemanticVersionOrdering(t *testing.T) {
 			if stage.Status != tt.wantStage {
 				t.Fatalf("npm launcher status = %q, want %q", stage.Status, tt.wantStage)
 			}
-			report := &cli.UpgradeReport{
+			report := &contracts.UpgradeReport{
 				Context: "global-npm",
 				Current: tt.current,
 				Latest:  tt.target,
-				Stages: []cli.UpgradeStage{
+				Stages: []contracts.UpgradeStage{
 					stage,
 					{Name: "corpus-schema", Status: "current"},
 				},
@@ -102,7 +102,7 @@ func TestUpgradeUsesSemanticVersionOrdering(t *testing.T) {
 			if report.Status != tt.wantStatus {
 				t.Fatalf("status = %q, want %q", report.Status, tt.wantStatus)
 			}
-			if got := shouldInstall(report, cli.UpgradeOptions{Yes: true}); got != tt.wantInstall {
+			if got := shouldInstall(report, contracts.UpgradeOptions{Yes: true}); got != tt.wantInstall {
 				t.Fatalf("shouldInstall = %t, want %t", got, tt.wantInstall)
 			}
 		})
@@ -162,7 +162,7 @@ func TestUpgradeReportsInspectableStagesForGlobalNPM(t *testing.T) {
 	}
 
 	svc := testService(t, home, "1.2.3", "")
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Check: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Check: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestUpgradeGlobalNPMInstallsLatest(t *testing.T) {
 	}
 
 	svc := testService(t, home, "1.2.3", "")
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Yes: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestUpgradeWindowsGlobalNPMDoesNotInstall(t *testing.T) {
 	}
 
 	svc := testService(t, home, "1.2.3", "")
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Yes: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +333,7 @@ func TestUpgradeProjectNPMReportsManualUpdate(t *testing.T) {
 	}
 
 	svc := testService(t, home, "1.2.3", "")
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Check: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Check: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestUpgradePrivateMCPRuntimeDetected(t *testing.T) {
 	}
 
 	svc := testService(t, home, "1.2.3", "")
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,7 +393,7 @@ func TestUpgradeConfiguredRuntimeOutdated(t *testing.T) {
 	writeCodexConfig(t, home, runtimePath)
 
 	svc := testService(t, home, "1.2.4", "")
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Check: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Check: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +419,7 @@ func TestUpgradeActivatesPrivateMCPRuntimeFromTargetRelease(t *testing.T) {
 	home, _, _, _, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.4")
 	setRuntimeContract(t, "1.2.4", 1)
 
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Yes: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +494,7 @@ func TestUpgradeCombinedInstallActivatesPrivateRuntimeFromInstalledPackage(t *te
 	writeCodexConfig(t, home, oldRuntime)
 
 	svc := testService(t, home, "1.2.3", "")
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Yes: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -510,7 +510,7 @@ func TestUpgradeOlderUnmanagedBinaryDoesNotChangePrivateRegistration(t *testing.
 	_, _, configPath, want, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.3")
 	setRuntimeContract(t, "1.2.3", 1)
 
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Yes: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +543,7 @@ func TestUpgradeCorpusSchemaMigrationRequired(t *testing.T) {
 	}
 
 	svc := testService(t, home, "1.2.3", dbPath)
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Check: true})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Check: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +579,7 @@ func TestUpgradeCorpusSchemaNewer(t *testing.T) {
 	}
 
 	svc := testService(t, home, "1.2.3", dbPath)
-	report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{})
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -662,7 +662,7 @@ func TestUpgradeUsesTargetContractToRecoverNewerCorpus(t *testing.T) {
 			}
 
 			svc := testService(t, home, "1.2.3", dbPath)
-			report, err := svc.Upgrade(context.Background(), cli.UpgradeOptions{Yes: true})
+			report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -767,7 +767,7 @@ func writeCodexConfig(t *testing.T, home, command string) {
 	}
 }
 
-func assertStage(t *testing.T, report *cli.UpgradeReport, name, wantStatus string) {
+func assertStage(t *testing.T, report *contracts.UpgradeReport, name, wantStatus string) {
 	t.Helper()
 	stage := stageByName(report, name)
 	if stage.Name == "" {
@@ -778,13 +778,13 @@ func assertStage(t *testing.T, report *cli.UpgradeReport, name, wantStatus strin
 	}
 }
 
-func stageByName(report *cli.UpgradeReport, name string) cli.UpgradeStage {
+func stageByName(report *contracts.UpgradeReport, name string) contracts.UpgradeStage {
 	for _, s := range report.Stages {
 		if s.Name == name {
 			return s
 		}
 	}
-	return cli.UpgradeStage{}
+	return contracts.UpgradeStage{}
 }
 
 func joinCalls(calls [][]string) string {

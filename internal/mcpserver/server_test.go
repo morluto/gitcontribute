@@ -14,42 +14,42 @@ import (
 
 type fakeReader struct {
 	searchStarted chan struct{}
-	repeatInput   RunRepeatedValidationInput
+	repeatInput   mcpcontract.RunRepeatedValidationInput
 }
 
 var _ WorkspaceCreator = (*fakeReader)(nil)
 var _ WorkspaceAdopter = (*fakeReader)(nil)
 
-func (f *fakeReader) Search(ctx context.Context, in SearchInput) (SearchOutput, error) {
+func (f *fakeReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcpcontract.SearchOutput, error) {
 	if in.Query == "block" {
 		close(f.searchStarted)
 		<-ctx.Done()
-		return SearchOutput{}, ctx.Err()
+		return mcpcontract.SearchOutput{}, ctx.Err()
 	}
-	match := ThreadOutput{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 7, State: "open", Title: "engine stalls"}
-	return SearchOutput{Query: in.Query, Matches: []ThreadOutput{match}, Total: 1}, nil
+	match := mcpcontract.ThreadOutput{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 7, State: "open", Title: "engine stalls"}
+	return mcpcontract.SearchOutput{Query: in.Query, Matches: []mcpcontract.ThreadOutput{match}, Total: 1}, nil
 }
 
-func (*fakeReader) Repository(context.Context, RepoInput) (RepositoryOutput, error) {
-	return RepositoryOutput{Owner: "acme", Repo: "rocket"}, nil
+func (*fakeReader) Repository(context.Context, mcpcontract.RepoInput) (mcpcontract.RepositoryOutput, error) {
+	return mcpcontract.RepositoryOutput{Owner: "acme", Repo: "rocket"}, nil
 }
 
-func (*fakeReader) Thread(_ context.Context, in ThreadInput) (ThreadOutput, error) {
+func (*fakeReader) Thread(_ context.Context, in mcpcontract.ThreadInput) (mcpcontract.ThreadOutput, error) {
 	if in.Number == 404 {
-		return ThreadOutput{}, ErrNotFound
+		return mcpcontract.ThreadOutput{}, mcpcontract.ErrNotFound
 	}
-	return ThreadOutput{Owner: in.Owner, Repo: in.Repo, Kind: in.Kind, Number: in.Number, Title: "engine stalls"}, nil
+	return mcpcontract.ThreadOutput{Owner: in.Owner, Repo: in.Repo, Kind: in.Kind, Number: in.Number, Title: "engine stalls"}, nil
 }
 
-func (*fakeReader) Dossier(context.Context, RepoInput) (DossierOutput, error) {
-	return DossierOutput{Owner: "acme", Repo: "rocket", Sections: map[string]any{"open_issues": float64(1)}}, nil
+func (*fakeReader) Dossier(context.Context, mcpcontract.RepoInput) (mcpcontract.DossierOutput, error) {
+	return mcpcontract.DossierOutput{Owner: "acme", Repo: "rocket", Sections: map[string]any{"open_issues": float64(1)}}, nil
 }
 
-func (*fakeReader) SearchCode(_ context.Context, in SearchCodeInput) (SearchCodeOutput, error) {
-	return SearchCodeOutput{
+func (*fakeReader) SearchCode(_ context.Context, in mcpcontract.SearchCodeInput) (mcpcontract.SearchCodeOutput, error) {
+	return mcpcontract.SearchCodeOutput{
 		Query: in.Query,
 		Total: 1,
-		Matches: []CodeMatchOutput{{
+		Matches: []mcpcontract.CodeMatchOutput{{
 			ID:       "owner/repo@abc:main.go",
 			Repo:     "owner/repo",
 			Commit:   "abc",
@@ -61,60 +61,60 @@ func (*fakeReader) SearchCode(_ context.Context, in SearchCodeInput) (SearchCode
 	}, nil
 }
 
-func (*fakeReader) Investigation(_ context.Context, in InvestigationInput) (InvestigationOutput, error) {
+func (*fakeReader) Investigation(_ context.Context, in mcpcontract.InvestigationInput) (mcpcontract.InvestigationOutput, error) {
 	if in.ID == "404" {
-		return InvestigationOutput{}, ErrNotFound
+		return mcpcontract.InvestigationOutput{}, mcpcontract.ErrNotFound
 	}
-	return InvestigationOutput{
+	return mcpcontract.InvestigationOutput{
 		ID:              in.ID,
 		Owner:           "acme",
 		Repo:            "rocket",
 		Status:          "open",
 		HypothesisTotal: 1,
-		Hypotheses: []HypothesisSummary{{
+		Hypotheses: []mcpcontract.HypothesisSummary{{
 			ID: "hyp-1", Title: "leak", Category: "bug", Status: "proposed",
 		}},
 	}, nil
 }
 
-func (*fakeReader) ListOpportunities(_ context.Context, in ListOpportunitiesInput) (ListOpportunitiesOutput, error) {
-	return ListOpportunitiesOutput{
-		Opportunities: []OpportunitySummary{{ID: "opp-1", InvestigationID: in.InvestigationID, Title: "fix leak"}},
+func (*fakeReader) ListOpportunities(_ context.Context, in mcpcontract.ListOpportunitiesInput) (mcpcontract.ListOpportunitiesOutput, error) {
+	return mcpcontract.ListOpportunitiesOutput{
+		Opportunities: []mcpcontract.OpportunitySummary{{ID: "opp-1", InvestigationID: in.InvestigationID, Title: "fix leak"}},
 		Total:         1,
 	}, nil
 }
 
-func (*fakeReader) Opportunity(_ context.Context, in OpportunityInput) (OpportunityOutput, error) {
+func (*fakeReader) Opportunity(_ context.Context, in mcpcontract.OpportunityInput) (mcpcontract.OpportunityOutput, error) {
 	if in.ID == "404" {
-		return OpportunityOutput{}, ErrNotFound
+		return mcpcontract.OpportunityOutput{}, mcpcontract.ErrNotFound
 	}
-	return OpportunityOutput{
+	return mcpcontract.OpportunityOutput{
 		ID: in.ID, InvestigationID: "inv-1", Title: "fix leak", Confidence: 0.8,
 		CollisionStatus: "unknown", EvidenceTotal: 1, EvidenceIDs: []string{"ev-1"},
 	}, nil
 }
 
-func (*fakeReader) Evidence(_ context.Context, in EvidenceInput) (EvidenceOutput, error) {
-	return EvidenceOutput{
+func (*fakeReader) Evidence(_ context.Context, in mcpcontract.EvidenceInput) (mcpcontract.EvidenceOutput, error) {
+	return mcpcontract.EvidenceOutput{
 		InvestigationID: in.InvestigationID,
 		OpportunityID:   in.OpportunityID,
 		Total:           1,
-		Evidence: []EvidenceItem{{
+		Evidence: []mcpcontract.EvidenceItem{{
 			ID: "ev-1", Type: "manual_observation", Relation: "supporting", Description: "observed",
 		}},
 	}, nil
 }
 
-func (*fakeReader) Readiness(_ context.Context, in ReadinessInput) (ReadinessOutput, error) {
+func (*fakeReader) Readiness(_ context.Context, in mcpcontract.ReadinessInput) (mcpcontract.ReadinessOutput, error) {
 	if in.OpportunityID == "404" {
-		return ReadinessOutput{}, ErrNotFound
+		return mcpcontract.ReadinessOutput{}, mcpcontract.ErrNotFound
 	}
-	return ReadinessOutput{
+	return mcpcontract.ReadinessOutput{
 		OpportunityID:  in.OpportunityID,
 		RuleSetVersion: "readiness.v1",
 		Status:         "warn",
 		EvaluatedAt:    "2026-07-17T00:00:00Z",
-		Checks: []ReadinessCheck{{
+		Checks: []mcpcontract.ReadinessCheck{{
 			CheckID:      in.OpportunityID + ":evidence_freshness",
 			RuleID:       "evidence_freshness",
 			RuleVersion:  "v1",
@@ -127,19 +127,19 @@ func (*fakeReader) Readiness(_ context.Context, in ReadinessInput) (ReadinessOut
 	}, nil
 }
 
-func (*fakeReader) FindClusters(_ context.Context, in FindClustersInput) (FindClustersOutput, error) {
-	return FindClustersOutput{
+func (*fakeReader) FindClusters(_ context.Context, in mcpcontract.FindClustersInput) (mcpcontract.FindClustersOutput, error) {
+	return mcpcontract.FindClustersOutput{
 		Owner: in.Owner,
 		Repo:  in.Repo,
 		Total: 1,
-		Clusters: []ClusterOutput{{
+		Clusters: []mcpcontract.ClusterOutput{{
 			StableID: "abc12345",
 			State:    "open",
-			Canonical: ClusterMemberOutput{
+			Canonical: mcpcontract.ClusterMemberOutput{
 				Kind: "issue", Owner: in.Owner, Repo: in.Repo, Number: 1,
 			},
 			MemberCount: 2,
-			Members: []ClusterMemberOutput{
+			Members: []mcpcontract.ClusterMemberOutput{
 				{Kind: "issue", Owner: in.Owner, Repo: in.Repo, Number: 1, Title: "first", Score: 1.0, Reason: "canonical member", Included: true},
 				{Kind: "issue", Owner: in.Owner, Repo: in.Repo, Number: 2, Title: "second", Score: 0.9, Reason: "similar title", Included: true},
 			},
@@ -147,20 +147,20 @@ func (*fakeReader) FindClusters(_ context.Context, in FindClustersInput) (FindCl
 	}, nil
 }
 
-func (*fakeReader) GetCoverage(_ context.Context, in GetCoverageInput) (GetCoverageOutput, error) {
-	items := make([]mcpcontract.BatchItem[CoverageOutput], len(in.Targets))
+func (*fakeReader) GetCoverage(_ context.Context, in mcpcontract.GetCoverageInput) (mcpcontract.GetCoverageOutput, error) {
+	items := make([]mcpcontract.BatchItem[mcpcontract.CoverageOutput], len(in.Targets))
 	for i, target := range in.Targets {
-		value := CoverageOutput{Owner: target.Owner, Repo: target.Repo, Kind: target.Kind, Number: target.Number, AsOf: "2026-07-17T00:00:00Z", Facets: []FacetCoverageOutput{{Facet: "metadata", Complete: true, Status: "fresh", UpdatedAt: "2026-07-17T00:00:00Z"}}}
-		items[i] = mcpcontract.BatchItem[CoverageOutput]{Key: target.Owner + "/" + target.Repo, Status: "complete", Value: &value}
+		value := mcpcontract.CoverageOutput{Owner: target.Owner, Repo: target.Repo, Kind: target.Kind, Number: target.Number, AsOf: "2026-07-17T00:00:00Z", Facets: []mcpcontract.FacetCoverageOutput{{Facet: "metadata", Complete: true, Status: "fresh", UpdatedAt: "2026-07-17T00:00:00Z"}}}
+		items[i] = mcpcontract.BatchItem[mcpcontract.CoverageOutput]{Key: target.Owner + "/" + target.Repo, Status: "complete", Value: &value}
 	}
-	return GetCoverageOutput{Status: "complete", Items: items}, nil
+	return mcpcontract.GetCoverageOutput{Status: "complete", Items: items}, nil
 }
 
-func (*fakeReader) Lens(_ context.Context, in LensInput) (LensOutput, error) {
+func (*fakeReader) Lens(_ context.Context, in mcpcontract.LensInput) (mcpcontract.LensOutput, error) {
 	if in.Name == "missing" {
-		return LensOutput{}, ErrNotFound
+		return mcpcontract.LensOutput{}, mcpcontract.ErrNotFound
 	}
-	return LensOutput{
+	return mcpcontract.LensOutput{
 		Name: in.Name,
 		Definition: lens.Definition{
 			Name:    in.Name,
@@ -172,149 +172,149 @@ func (*fakeReader) Lens(_ context.Context, in LensInput) (LensOutput, error) {
 	}, nil
 }
 
-func (*fakeReader) SearchRepositories(_ context.Context, in SearchRepositoriesInput) (SearchRepositoriesOutput, error) {
-	return SearchRepositoriesOutput{Query: in.Query, Total: 1, Matches: []RepositoryOutput{{Owner: in.Owner, Repo: in.Repo}}}, nil
+func (*fakeReader) SearchRepositories(_ context.Context, in mcpcontract.SearchRepositoriesInput) (mcpcontract.SearchRepositoriesOutput, error) {
+	return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: 1, Matches: []mcpcontract.RepositoryOutput{{Owner: in.Owner, Repo: in.Repo}}}, nil
 }
 
-func (*fakeReader) SearchGitHubRepositories(_ context.Context, in SearchGitHubRepositoriesInput) (SearchGitHubRepositoriesOutput, error) {
+func (*fakeReader) SearchGitHubRepositories(_ context.Context, in mcpcontract.SearchGitHubRepositoriesInput) (mcpcontract.SearchGitHubRepositoriesOutput, error) {
 	stars := 42
 	applied := in.RawQuery
 	if applied == "" {
 		applied = in.Text
 	}
-	return SearchGitHubRepositoriesOutput{Status: "complete", Query: applied, Interpretation: "Search using structured repository filters.", ResponseFormat: "concise", Page: 1, Total: 1, Items: []mcpcontract.BatchItem[RepositorySearchMatch]{{Key: "acme/rocket", Status: "complete", Value: &RepositorySearchMatch{Ref: "repository:acme/rocket", Owner: "acme", Repo: "rocket", Stars: &stars}}}}, nil
+	return mcpcontract.SearchGitHubRepositoriesOutput{Status: "complete", Query: applied, Interpretation: "Search using structured repository filters.", ResponseFormat: "concise", Page: 1, Total: 1, Items: []mcpcontract.BatchItem[mcpcontract.RepositorySearchMatch]{{Key: "acme/rocket", Status: "complete", Value: &mcpcontract.RepositorySearchMatch{Ref: "repository:acme/rocket", Owner: "acme", Repo: "rocket", Stars: &stars}}}}, nil
 }
 
-func (*fakeReader) ExplainMatch(_ context.Context, in ExplainMatchInput) (ExplainMatchOutput, error) {
-	return ExplainMatchOutput{Query: in.Query, Owner: in.Owner, Repo: in.Repo, Kind: in.Kind, Number: in.Number, Title: "match"}, nil
+func (*fakeReader) ExplainMatch(_ context.Context, in mcpcontract.ExplainMatchInput) (mcpcontract.ExplainMatchOutput, error) {
+	return mcpcontract.ExplainMatchOutput{Query: in.Query, Owner: in.Owner, Repo: in.Repo, Kind: in.Kind, Number: in.Number, Title: "match"}, nil
 }
 
-func (*fakeReader) GetJob(_ context.Context, in GetJobInput) (GetJobOutput, error) {
+func (*fakeReader) GetJob(_ context.Context, in mcpcontract.GetJobInput) (mcpcontract.GetJobOutput, error) {
 	if in.ID == "missing" {
-		return GetJobOutput{}, ErrNotFound
+		return mcpcontract.GetJobOutput{}, mcpcontract.ErrNotFound
 	}
-	return GetJobOutput{ID: in.ID, Kind: "crawl", Status: "queued"}, nil
+	return mcpcontract.GetJobOutput{ID: in.ID, Kind: "crawl", Status: "queued"}, nil
 }
 
-func (*fakeReader) ThreadByNumber(_ context.Context, in ThreadByNumberInput) (ThreadOutput, error) {
+func (*fakeReader) ThreadByNumber(_ context.Context, in mcpcontract.ThreadByNumberInput) (mcpcontract.ThreadOutput, error) {
 	if in.Number == 404 {
-		return ThreadOutput{}, ErrNotFound
+		return mcpcontract.ThreadOutput{}, mcpcontract.ErrNotFound
 	}
-	return ThreadOutput{Owner: in.Owner, Repo: in.Repo, Kind: "issue", Number: in.Number, Title: "issue"}, nil
+	return mcpcontract.ThreadOutput{Owner: in.Owner, Repo: in.Repo, Kind: "issue", Number: in.Number, Title: "issue"}, nil
 }
 
-func (*fakeReader) BuildRepositoryDossier(_ context.Context, in BuildRepositoryDossierInput) (JobReference, error) {
+func (*fakeReader) BuildRepositoryDossier(_ context.Context, in mcpcontract.BuildRepositoryDossierInput) (mcpcontract.JobReference, error) {
 	id := "job-dossier-" + in.Owner + "-" + in.Repo
-	return JobReference{
+	return mcpcontract.JobReference{
 		ID: id, Ref: "job:" + id, Kind: "build_repository_dossier", Status: "queued", PollAfterMS: 1000,
-		SuggestedActions: []SuggestedAction{{Tool: ToolGetJob, Reason: "Poll this durable job.", Arguments: map[string]any{"ids": []string{id}}}},
+		SuggestedActions: []mcpcontract.SuggestedAction{{Tool: mcpcontract.ToolGetJob, Reason: "Poll this durable job.", Arguments: map[string]any{"ids": []string{id}}}},
 	}, nil
 }
 
-func (*fakeReader) StartInvestigation(_ context.Context, in StartInvestigationInput) (InvestigationOutput, error) {
-	return InvestigationOutput{ID: "inv-1", Owner: in.Owner, Repo: in.Repo, Status: "open"}, nil
+func (*fakeReader) StartInvestigation(_ context.Context, in mcpcontract.StartInvestigationInput) (mcpcontract.InvestigationOutput, error) {
+	return mcpcontract.InvestigationOutput{ID: "inv-1", Owner: in.Owner, Repo: in.Repo, Status: "open"}, nil
 }
 
-func (*fakeReader) RecordHypothesis(_ context.Context, in RecordHypothesisInput) (HypothesisOutput, error) {
-	return HypothesisOutput{ID: "hyp-1", InvestigationID: in.InvestigationID, Title: in.Title, Status: "proposed"}, nil
+func (*fakeReader) RecordHypothesis(_ context.Context, in mcpcontract.RecordHypothesisInput) (mcpcontract.HypothesisOutput, error) {
+	return mcpcontract.HypothesisOutput{ID: "hyp-1", InvestigationID: in.InvestigationID, Title: in.Title, Status: "proposed"}, nil
 }
 
-func (*fakeReader) CheckDuplicates(_ context.Context, in CheckDuplicatesInput) (CheckOutput, error) {
-	return CheckOutput{Target: in.Target, ID: in.ID, Total: 1, Findings: []EvidenceItem{{ID: "ev-1", Type: "github_source", Relation: "inconclusive", Description: "similar"}}}, nil
+func (*fakeReader) CheckDuplicates(_ context.Context, in mcpcontract.CheckDuplicatesInput) (mcpcontract.CheckOutput, error) {
+	return mcpcontract.CheckOutput{Target: in.Target, ID: in.ID, Total: 1, Findings: []mcpcontract.EvidenceItem{{ID: "ev-1", Type: "github_source", Relation: "inconclusive", Description: "similar"}}}, nil
 }
 
-func (*fakeReader) CheckCollisions(_ context.Context, in CheckCollisionsInput) (CheckOutput, error) {
-	return CheckOutput{Target: in.Target, ID: in.ID, Total: 1, Findings: []EvidenceItem{{ID: "ev-1", Type: "github_source", Relation: "contradicting", Description: "collision"}}}, nil
+func (*fakeReader) CheckCollisions(_ context.Context, in mcpcontract.CheckCollisionsInput) (mcpcontract.CheckOutput, error) {
+	return mcpcontract.CheckOutput{Target: in.Target, ID: in.ID, Total: 1, Findings: []mcpcontract.EvidenceItem{{ID: "ev-1", Type: "github_source", Relation: "contradicting", Description: "collision"}}}, nil
 }
 
-func (*fakeReader) PromoteOpportunity(_ context.Context, in PromoteOpportunityInput) (OpportunityOutput, error) {
-	return OpportunityOutput{ID: "opp-1", HypothesisID: in.HypothesisID, Title: in.ProblemStatement, ProblemStatement: in.ProblemStatement, CollisionStatus: "unknown"}, nil
+func (*fakeReader) PromoteOpportunity(_ context.Context, in mcpcontract.PromoteOpportunityInput) (mcpcontract.OpportunityOutput, error) {
+	return mcpcontract.OpportunityOutput{ID: "opp-1", HypothesisID: in.HypothesisID, Title: in.ProblemStatement, ProblemStatement: in.ProblemStatement, CollisionStatus: "unknown"}, nil
 }
 
-func (*fakeReader) CreateWorkspace(_ context.Context, in CreateWorkspaceInput) (JobReference, error) {
-	return JobReference{ID: "job-workspace-" + in.Name, Kind: "create_workspace", Status: "queued"}, nil
+func (*fakeReader) CreateWorkspace(_ context.Context, in mcpcontract.CreateWorkspaceInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-workspace-" + in.Name, Kind: "create_workspace", Status: "queued"}, nil
 }
 
-func (*fakeReader) InspectCommitChanges(_ context.Context, _ InspectCommitChangesInput) (CommitInventoryOutput, error) {
-	return CommitInventoryOutput{
-		Units:             []CommitUnitOutput{{ID: "hunk:one", Kind: "hunk", Path: "main.go", Operation: "modify", ContentSHA256: "one"}},
+func (*fakeReader) InspectCommitChanges(_ context.Context, _ mcpcontract.InspectCommitChangesInput) (mcpcontract.CommitInventoryOutput, error) {
+	return mcpcontract.CommitInventoryOutput{
+		Units:             []mcpcontract.CommitUnitOutput{{ID: "hunk:one", Kind: "hunk", Path: "main.go", Operation: "modify", ContentSHA256: "one"}},
 		SourcePatchSHA256: "patch",
 		InventorySHA256:   "inventory",
 	}, nil
 }
 
-func (*fakeReader) PlanSemanticCommits(_ context.Context, _ PlanSemanticCommitsInput) (SemanticCommitPlanOutput, error) {
-	return SemanticCommitPlanOutput{Reconstruction: CommitReconstructionOutput{UnitCount: 1, AssignedCount: 1, Verified: true}}, nil
+func (*fakeReader) PlanSemanticCommits(_ context.Context, _ mcpcontract.PlanSemanticCommitsInput) (mcpcontract.SemanticCommitPlanOutput, error) {
+	return mcpcontract.SemanticCommitPlanOutput{Reconstruction: mcpcontract.CommitReconstructionOutput{UnitCount: 1, AssignedCount: 1, Verified: true}}, nil
 }
 
-func (*fakeReader) ListConcerns(_ context.Context, _ ListConcernsInput) (ConcernListOutput, error) {
-	return ConcernListOutput{Concerns: []ConcernOutput{{ID: "concern-1", Owner: "owner", Repo: "repo", Title: "flaky", ProblemStatement: "intermittent", Status: "untriaged", Freshness: "unknown"}}, Total: 1}, nil
+func (*fakeReader) ListConcerns(_ context.Context, _ mcpcontract.ListConcernsInput) (mcpcontract.ConcernListOutput, error) {
+	return mcpcontract.ConcernListOutput{Concerns: []mcpcontract.ConcernOutput{{ID: "concern-1", Owner: "owner", Repo: "repo", Title: "flaky", ProblemStatement: "intermittent", Status: "untriaged", Freshness: "unknown"}}, Total: 1}, nil
 }
 
-func (*fakeReader) CreateConcern(_ context.Context, in CreateConcernInput) (ConcernOutput, error) {
-	return ConcernOutput{ID: "concern-1", Owner: in.Owner, Repo: in.Repo, Title: in.Title, ProblemStatement: in.ProblemStatement, Status: "untriaged", Freshness: "unknown"}, nil
+func (*fakeReader) CreateConcern(_ context.Context, in mcpcontract.CreateConcernInput) (mcpcontract.ConcernOutput, error) {
+	return mcpcontract.ConcernOutput{ID: "concern-1", Owner: in.Owner, Repo: in.Repo, Title: in.Title, ProblemStatement: in.ProblemStatement, Status: "untriaged", Freshness: "unknown"}, nil
 }
 
-func (*fakeReader) UpdateConcern(_ context.Context, in UpdateConcernInput) (ConcernOutput, error) {
+func (*fakeReader) UpdateConcern(_ context.Context, in mcpcontract.UpdateConcernInput) (mcpcontract.ConcernOutput, error) {
 	var title string
 	if in.Title != nil {
 		title = *in.Title
 	}
-	return ConcernOutput{ID: in.ID, Title: title, Status: "untriaged", Freshness: "unknown"}, nil
+	return mcpcontract.ConcernOutput{ID: in.ID, Title: title, Status: "untriaged", Freshness: "unknown"}, nil
 }
 
-func (*fakeReader) SetConcernStatus(_ context.Context, in SetConcernStatusInput) (ConcernOutput, error) {
-	return ConcernOutput{ID: in.ID, Status: in.Status, Freshness: "unknown"}, nil
+func (*fakeReader) SetConcernStatus(_ context.Context, in mcpcontract.SetConcernStatusInput) (mcpcontract.ConcernOutput, error) {
+	return mcpcontract.ConcernOutput{ID: in.ID, Status: in.Status, Freshness: "unknown"}, nil
 }
 
-func (*fakeReader) LinkConcern(_ context.Context, in LinkConcernInput) (ConcernOutput, error) {
-	return ConcernOutput{ID: in.ID, Status: "untriaged", Freshness: "unknown", Links: []ConcernLinkOutput{{Kind: in.Kind, TargetType: in.TargetType, TargetID: in.TargetID}}}, nil
+func (*fakeReader) LinkConcern(_ context.Context, in mcpcontract.LinkConcernInput) (mcpcontract.ConcernOutput, error) {
+	return mcpcontract.ConcernOutput{ID: in.ID, Status: "untriaged", Freshness: "unknown", Links: []mcpcontract.ConcernLinkOutput{{Kind: in.Kind, TargetType: in.TargetType, TargetID: in.TargetID}}}, nil
 }
 
-func (*fakeReader) PromoteConcern(_ context.Context, in PromoteConcernInput) (ConcernOutput, error) {
-	return ConcernOutput{ID: in.ID, Status: "promoted", Freshness: "unknown", Promotion: &ConcernPromotionOutput{Kind: in.Kind, InvestigationID: "inv-1", HypothesisID: "hyp-1"}}, nil
+func (*fakeReader) PromoteConcern(_ context.Context, in mcpcontract.PromoteConcernInput) (mcpcontract.ConcernOutput, error) {
+	return mcpcontract.ConcernOutput{ID: in.ID, Status: "promoted", Freshness: "unknown", Promotion: &mcpcontract.ConcernPromotionOutput{Kind: in.Kind, InvestigationID: "inv-1", HypothesisID: "hyp-1"}}, nil
 }
 
-func (*fakeReader) AdoptWorkspace(_ context.Context, in AdoptWorkspaceInput) (AdoptWorkspaceOutput, error) {
-	return AdoptWorkspaceOutput{ID: in.Name, InvestigationID: in.InvestigationID, Ownership: "external"}, nil
+func (*fakeReader) AdoptWorkspace(_ context.Context, in mcpcontract.AdoptWorkspaceInput) (mcpcontract.AdoptWorkspaceOutput, error) {
+	return mcpcontract.AdoptWorkspaceOutput{ID: in.Name, InvestigationID: in.InvestigationID, Ownership: "external"}, nil
 }
 
-func (*fakeReader) DefineValidation(_ context.Context, in DefineValidationInput) (ValidationOutput, error) {
-	return ValidationOutput{ID: "val-1", InvestigationID: in.InvestigationID, Kind: in.Kind, Command: []string{"echo"}}, nil
+func (*fakeReader) DefineValidation(_ context.Context, in mcpcontract.DefineValidationInput) (mcpcontract.ValidationOutput, error) {
+	return mcpcontract.ValidationOutput{ID: "val-1", InvestigationID: in.InvestigationID, Kind: in.Kind, Command: []string{"echo"}}, nil
 }
 
-func (*fakeReader) RunValidation(_ context.Context, in RunValidationInput) (JobReference, error) {
-	return JobReference{ID: "job-run-" + in.ID, Kind: "run_validation", Status: "queued"}, nil
+func (*fakeReader) RunValidation(_ context.Context, in mcpcontract.RunValidationInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-run-" + in.ID, Kind: "run_validation", Status: "queued"}, nil
 }
 
-func (f *fakeReader) RunRepeatedValidation(_ context.Context, in RunRepeatedValidationInput) (JobReference, error) {
+func (f *fakeReader) RunRepeatedValidation(_ context.Context, in mcpcontract.RunRepeatedValidationInput) (mcpcontract.JobReference, error) {
 	f.repeatInput = in
-	return JobReference{ID: "job-repeat-" + in.ID, Kind: "run_validation_group", Status: "queued"}, nil
+	return mcpcontract.JobReference{ID: "job-repeat-" + in.ID, Kind: "run_validation_group", Status: "queued"}, nil
 }
 
-func (*fakeReader) PrepareContribution(_ context.Context, in PrepareContributionInput) (DraftOutput, error) {
-	return DraftOutput{OpportunityID: in.OpportunityID, Kind: in.Kind, Title: "draft", Body: "body"}, nil
+func (*fakeReader) PrepareContribution(_ context.Context, in mcpcontract.PrepareContributionInput) (mcpcontract.DraftOutput, error) {
+	return mcpcontract.DraftOutput{OpportunityID: in.OpportunityID, Kind: in.Kind, Title: "draft", Body: "body"}, nil
 }
 
-func (*fakeReader) ExportManifest(_ context.Context, in ExportManifestInput) (ManifestOutput, error) {
-	return ManifestOutput{ManifestID: "sha256:test", ContentSHA256: "test", SchemaVersion: "contribution-evidence.v1", Status: "incomplete", Statement: map[string]any{"opportunity_id": in.OpportunityID}}, nil
+func (*fakeReader) ExportManifest(_ context.Context, in mcpcontract.ExportManifestInput) (mcpcontract.ManifestOutput, error) {
+	return mcpcontract.ManifestOutput{ManifestID: "sha256:test", ContentSHA256: "test", SchemaVersion: "contribution-evidence.v1", Status: "incomplete", Statement: map[string]any{"opportunity_id": in.OpportunityID}}, nil
 }
 
-func (*fakeReader) CancelJobs(_ context.Context, in CancelJobInput) (GetJobsOutput, error) {
-	items := make([]mcpcontract.BatchItem[GetJobOutput], len(in.IDs))
+func (*fakeReader) CancelJobs(_ context.Context, in mcpcontract.CancelJobInput) (mcpcontract.GetJobsOutput, error) {
+	items := make([]mcpcontract.BatchItem[mcpcontract.GetJobOutput], len(in.IDs))
 	for i, id := range in.IDs {
-		value := GetJobOutput{ID: id, Kind: "crawl", Status: "cancelled"}
-		items[i] = mcpcontract.BatchItem[GetJobOutput]{Key: id, Status: "complete", Value: &value}
+		value := mcpcontract.GetJobOutput{ID: id, Kind: "crawl", Status: "cancelled"}
+		items[i] = mcpcontract.BatchItem[mcpcontract.GetJobOutput]{Key: id, Status: "complete", Value: &value}
 	}
-	return GetJobsOutput{Status: "complete", Items: items}, nil
+	return mcpcontract.GetJobsOutput{Status: "complete", Items: items}, nil
 }
 
-func connect(t *testing.T, reader Reader) (*mcp.ClientSession, func()) {
+func connect(t *testing.T, reader mcpcontract.Reader) (*mcp.ClientSession, func()) {
 	t.Helper()
-	return connectWithOptions(t, reader, Options{Toolsets: []string{"all"}})
+	return connectWithOptions(t, reader, mcpcontract.Options{Toolsets: []string{"all"}})
 }
 
-func connectWithOptions(t *testing.T, reader Reader, options Options) (*mcp.ClientSession, func()) {
+func connectWithOptions(t *testing.T, reader mcpcontract.Reader, options mcpcontract.Options) (*mcp.ClientSession, func()) {
 	t.Helper()
 	if base, ok := reader.(*fakeReader); ok {
 		reader = completeFakeReader(base)
@@ -374,10 +374,10 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 		tools[tool.Name] = tool
 	}
 	for _, name := range []string{
-		ToolGetRepositories, ToolGetThreads, ToolSearchCode, ToolGetInvestigation,
-		ToolListOpportunities, ToolGetOpportunity, ToolGetEvidence, ToolGetReadiness,
-		ToolFindClusters, ToolFindNeighbors, ToolGetCoverage,
-		ToolGetAuthenticatedIdentity, ToolQueryDeepWiki,
+		mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolSearchCode, mcpcontract.ToolGetInvestigation,
+		mcpcontract.ToolListOpportunities, mcpcontract.ToolGetOpportunity, mcpcontract.ToolGetEvidence, mcpcontract.ToolGetReadiness,
+		mcpcontract.ToolFindClusters, mcpcontract.ToolFindNeighbors, mcpcontract.ToolGetCoverage,
+		mcpcontract.ToolGetAuthenticatedIdentity, mcpcontract.ToolQueryDeepWiki,
 	} {
 		tool := tools[name]
 		if tool == nil {
@@ -387,7 +387,7 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 			t.Fatalf("tool %q annotations = %+v", name, tool.Annotations)
 		}
 	}
-	for _, name := range []string{ToolSyncRepositoryMetadata, ToolSyncThreads, ToolHydrateThreads} {
+	for _, name := range []string{mcpcontract.ToolSyncRepositoryMetadata, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads} {
 		tool := tools[name]
 		if tool == nil {
 			t.Fatalf("missing tool %q", name)
@@ -398,7 +398,7 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 	}
 
 	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: ToolSearchThreads, Arguments: map[string]any{"query": "stall"},
+		Name: mcpcontract.ToolSearchThreads, Arguments: map[string]any{"query": "stall"},
 	})
 	if err != nil {
 		t.Fatalf("call search: %v", err)
@@ -410,7 +410,7 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal structured content: %v", err)
 	}
-	var out SearchOutput
+	var out mcpcontract.SearchOutput
 	if err := json.Unmarshal(payload, &out); err != nil {
 		t.Fatalf("decode structured content: %v", err)
 	}
@@ -428,14 +428,14 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 		args      map[string]any
 		wantTotal int
 	}{
-		{ToolSearchCode, map[string]any{"query": "main"}, 1},
-		{ToolGetInvestigation, map[string]any{"id": "inv-1"}, -1},
-		{ToolListOpportunities, map[string]any{"investigation_id": "inv-1"}, 1},
-		{ToolGetOpportunity, map[string]any{"id": "opp-1"}, -1},
-		{ToolGetEvidence, map[string]any{"investigation_id": "inv-1"}, 1},
-		{ToolGetReadiness, map[string]any{"opportunity_id": "opp-1"}, -1},
-		{ToolFindClusters, map[string]any{"owner": "acme", "repo": "rocket"}, 1},
-		{ToolGetCoverage, map[string]any{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket"}}}, -1},
+		{mcpcontract.ToolSearchCode, map[string]any{"query": "main"}, 1},
+		{mcpcontract.ToolGetInvestigation, map[string]any{"id": "inv-1"}, -1},
+		{mcpcontract.ToolListOpportunities, map[string]any{"investigation_id": "inv-1"}, 1},
+		{mcpcontract.ToolGetOpportunity, map[string]any{"id": "opp-1"}, -1},
+		{mcpcontract.ToolGetEvidence, map[string]any{"investigation_id": "inv-1"}, 1},
+		{mcpcontract.ToolGetReadiness, map[string]any{"opportunity_id": "opp-1"}, -1},
+		{mcpcontract.ToolFindClusters, map[string]any{"owner": "acme", "repo": "rocket"}, 1},
+		{mcpcontract.ToolGetCoverage, map[string]any{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket"}}}, -1},
 	}
 	for _, tt := range tests {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
@@ -455,64 +455,64 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 			t.Fatalf("marshal %s: %v", tt.name, err)
 		}
 		switch tt.name {
-		case ToolSearchCode:
-			var out SearchCodeOutput
+		case mcpcontract.ToolSearchCode:
+			var out mcpcontract.SearchCodeOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
 			}
 			if out.Total != tt.wantTotal || len(out.Matches) != tt.wantTotal {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case ToolGetInvestigation:
-			var out InvestigationOutput
+		case mcpcontract.ToolGetInvestigation:
+			var out mcpcontract.InvestigationOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
 			}
 			if out.ID != "inv-1" {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case ToolListOpportunities:
-			var out ListOpportunitiesOutput
+		case mcpcontract.ToolListOpportunities:
+			var out mcpcontract.ListOpportunitiesOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
 			}
 			if out.Total != tt.wantTotal || len(out.Opportunities) != tt.wantTotal {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case ToolGetOpportunity:
-			var out OpportunityOutput
+		case mcpcontract.ToolGetOpportunity:
+			var out mcpcontract.OpportunityOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
 			}
 			if out.ID != "opp-1" {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case ToolGetEvidence:
-			var out EvidenceOutput
+		case mcpcontract.ToolGetEvidence:
+			var out mcpcontract.EvidenceOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
 			}
 			if out.Total != tt.wantTotal || len(out.Evidence) != tt.wantTotal {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case ToolGetReadiness:
-			var out ReadinessOutput
+		case mcpcontract.ToolGetReadiness:
+			var out mcpcontract.ReadinessOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
 			}
 			if out.OpportunityID != "opp-1" || out.Status != "warn" || len(out.Checks) != 1 {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case ToolFindClusters:
-			var out FindClustersOutput
+		case mcpcontract.ToolFindClusters:
+			var out mcpcontract.FindClustersOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
 			}
 			if out.Total != tt.wantTotal || len(out.Clusters) != tt.wantTotal {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case ToolGetCoverage:
-			var out GetCoverageOutput
+		case mcpcontract.ToolGetCoverage:
+			var out mcpcontract.GetCoverageOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
 			}
@@ -530,10 +530,10 @@ func TestReadOnlyToolsRejectAmbiguousOrUnboundedInputs(t *testing.T) {
 		name string
 		args map[string]any
 	}{
-		{ToolGetInvestigation, map[string]any{"id": "inv-1", "hypothesis_limit": 101}},
-		{ToolGetOpportunity, map[string]any{"id": "opp-1", "evidence_limit": 101}},
-		{ToolGetEvidence, map[string]any{"investigation_id": "inv-1", "opportunity_id": "opp-1"}},
-		{ToolGetEvidence, map[string]any{}},
+		{mcpcontract.ToolGetInvestigation, map[string]any{"id": "inv-1", "hypothesis_limit": 101}},
+		{mcpcontract.ToolGetOpportunity, map[string]any{"id": "opp-1", "evidence_limit": 101}},
+		{mcpcontract.ToolGetEvidence, map[string]any{"investigation_id": "inv-1", "opportunity_id": "opp-1"}},
+		{mcpcontract.ToolGetEvidence, map[string]any{}},
 	}
 	for _, tt := range tests {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})
@@ -689,7 +689,7 @@ func TestToolCancellationReachesReader(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		_, err := client.CallTool(ctx, &mcp.CallToolParams{
-			Name: ToolSearchThreads, Arguments: map[string]any{"query": "block"},
+			Name: mcpcontract.ToolSearchThreads, Arguments: map[string]any{"query": "block"},
 		})
 		done <- err
 	}()
@@ -713,12 +713,12 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		ToolSearchRepositories, ToolSearchThreads, ToolGetRepositoryDossier, ToolExplainMatch, ToolGetJob,
-		ToolGetReadiness, ToolBuildRepositoryDossier,
-		ToolCreateWorkspace, ToolAdoptWorkspace, ToolRunValidation, ToolRunRepeatedValidation,
-		ToolStartInvestigation, ToolRecordHypothesis,
-		ToolCheckDuplicates, ToolFindCompetingWork, ToolPromoteOpportunity, ToolDefineValidation,
-		ToolPrepareContribution, ToolCancelJob,
+		mcpcontract.ToolSearchRepositories, mcpcontract.ToolSearchThreads, mcpcontract.ToolGetRepositoryDossier, mcpcontract.ToolExplainMatch, mcpcontract.ToolGetJob,
+		mcpcontract.ToolGetReadiness, mcpcontract.ToolBuildRepositoryDossier,
+		mcpcontract.ToolCreateWorkspace, mcpcontract.ToolAdoptWorkspace, mcpcontract.ToolRunValidation, mcpcontract.ToolRunRepeatedValidation,
+		mcpcontract.ToolStartInvestigation, mcpcontract.ToolRecordHypothesis,
+		mcpcontract.ToolCheckDuplicates, mcpcontract.ToolFindCompetingWork, mcpcontract.ToolPromoteOpportunity, mcpcontract.ToolDefineValidation,
+		mcpcontract.ToolPrepareContribution, mcpcontract.ToolCancelJob,
 	} {
 		if tools[name] == nil {
 			t.Fatalf("missing v1 tool %q", name)
@@ -729,12 +729,12 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		name string
 		args map[string]any
 	}{
-		{ToolSearchRepositories, map[string]any{"query": "rocket"}},
-		{ToolSearchThreads, map[string]any{"query": "stall"}},
-		{ToolGetRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"}},
-		{ToolExplainMatch, map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 7}},
-		{ToolGetJob, map[string]any{"ids": []string{"job-1"}}},
-		{ToolGetReadiness, map[string]any{"opportunity_id": "opp-1"}},
+		{mcpcontract.ToolSearchRepositories, map[string]any{"query": "rocket"}},
+		{mcpcontract.ToolSearchThreads, map[string]any{"query": "stall"}},
+		{mcpcontract.ToolGetRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"}},
+		{mcpcontract.ToolExplainMatch, map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 7}},
+		{mcpcontract.ToolGetJob, map[string]any{"ids": []string{"job-1"}}},
+		{mcpcontract.ToolGetReadiness, map[string]any{"opportunity_id": "opp-1"}},
 	}
 	for _, tt := range readTests {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})
@@ -750,19 +750,19 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		name string
 		args map[string]any
 	}{
-		{ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"}},
-		{ToolCreateWorkspace, map[string]any{"investigation_id": "inv-1"}},
-		{ToolAdoptWorkspace, map[string]any{"investigation_id": "inv-1", "path": "/tmp/worktree", "base_ref": "main", "name": "external"}},
-		{ToolRunValidation, map[string]any{"id": "val-1", "kind": "base", "execute": true}},
-		{ToolRunRepeatedValidation, map[string]any{"id": "val-1", "target": "both", "execute": true}},
-		{ToolStartInvestigation, map[string]any{"owner": "acme", "repo": "rocket", "commit_sha": "abc123"}},
-		{ToolRecordHypothesis, map[string]any{"investigation_id": "inv-1", "title": "leak", "description": "memory leak", "category": "bug"}},
-		{ToolCheckDuplicates, map[string]any{"target": "hypothesis", "id": "hyp-1"}},
-		{ToolFindCompetingWork, map[string]any{"target": "opportunity", "id": "opp-1"}},
-		{ToolPromoteOpportunity, map[string]any{"hypothesis_id": "hyp-1", "problem_statement": "leak", "scope": "small", "impact": "high", "expected_effort": "1h", "confidence": 0.8}},
-		{ToolDefineValidation, map[string]any{"investigation_id": "inv-1", "kind": "test", "command": "go test ./...", "workspace_id": "ws-1"}},
-		{ToolPrepareContribution, map[string]any{"opportunity_id": "opp-1", "kind": "issue"}},
-		{ToolCancelJob, map[string]any{"ids": []string{"job-1"}}},
+		{mcpcontract.ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"}},
+		{mcpcontract.ToolCreateWorkspace, map[string]any{"investigation_id": "inv-1"}},
+		{mcpcontract.ToolAdoptWorkspace, map[string]any{"investigation_id": "inv-1", "path": "/tmp/worktree", "base_ref": "main", "name": "external"}},
+		{mcpcontract.ToolRunValidation, map[string]any{"id": "val-1", "kind": "base", "execute": true}},
+		{mcpcontract.ToolRunRepeatedValidation, map[string]any{"id": "val-1", "target": "both", "execute": true}},
+		{mcpcontract.ToolStartInvestigation, map[string]any{"owner": "acme", "repo": "rocket", "commit_sha": "abc123"}},
+		{mcpcontract.ToolRecordHypothesis, map[string]any{"investigation_id": "inv-1", "title": "leak", "description": "memory leak", "category": "bug"}},
+		{mcpcontract.ToolCheckDuplicates, map[string]any{"target": "hypothesis", "id": "hyp-1"}},
+		{mcpcontract.ToolFindCompetingWork, map[string]any{"target": "opportunity", "id": "opp-1"}},
+		{mcpcontract.ToolPromoteOpportunity, map[string]any{"hypothesis_id": "hyp-1", "problem_statement": "leak", "scope": "small", "impact": "high", "expected_effort": "1h", "confidence": 0.8}},
+		{mcpcontract.ToolDefineValidation, map[string]any{"investigation_id": "inv-1", "kind": "test", "command": "go test ./...", "workspace_id": "ws-1"}},
+		{mcpcontract.ToolPrepareContribution, map[string]any{"opportunity_id": "opp-1", "kind": "issue"}},
+		{mcpcontract.ToolCancelJob, map[string]any{"ids": []string{"job-1"}}},
 	}
 	for _, tt := range writeTests {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})

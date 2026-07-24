@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"charm.land/huh/v2"
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 // ErrSetupCancelled reports a deliberate interactive cancellation.
@@ -17,10 +18,10 @@ var ErrSetupCancelled = errors.New("setup cancelled")
 // SetupPromptRequest contains resolved flags plus the questions that still
 // require interactive consent.
 type SetupPromptRequest struct {
-	Discovery      SetupDiscovery
+	Discovery      contracts.SetupDiscovery
 	PackageRunner  bool
 	Questions      []SetupPromptQuestion
-	Mode           SetupMode
+	Mode           contracts.SetupMode
 	Clients        []string
 	TokenSource    string
 	TokenSourceKey string
@@ -49,7 +50,7 @@ func (r SetupPromptRequest) asks(question SetupPromptQuestion) bool {
 
 // SetupSelection is the typed result of the interactive setup form.
 type SetupSelection struct {
-	Mode           SetupMode
+	Mode           contracts.SetupMode
 	Clients        []string
 	TokenSource    string
 	TokenSourceKey string
@@ -104,7 +105,7 @@ func (p *huhSetupPrompter) Select(ctx context.Context, request SetupPromptReques
 		groups := setupPromptGroups(fields)
 		for index, question := range request.Questions {
 			if question == SetupQuestionClients {
-				groups[index].WithHideFunc(func() bool { return selection.Mode == SetupModeCLI })
+				groups[index].WithHideFunc(func() bool { return selection.Mode == contracts.SetupModeCLI })
 			}
 		}
 		if err := writeHeading(); err != nil {
@@ -121,7 +122,7 @@ func (p *huhSetupPrompter) Select(ctx context.Context, request SetupPromptReques
 			return SetupSelection{}, err
 		}
 		remaining = setupQuestionsWithout(remaining, SetupQuestionAccess)
-		if selection.Mode == SetupModeCLI {
+		if selection.Mode == contracts.SetupModeCLI {
 			remaining = setupQuestionsWithout(remaining, SetupQuestionClients)
 		}
 		remainingRequest := request
@@ -168,13 +169,13 @@ func setupPromptFields(request SetupPromptRequest, selection *SetupSelection) []
 		title := func(value string) string { return value }
 		switch question {
 		case SetupQuestionAccess:
-			selection.Mode = SetupModeMCP
-			fields = append(fields, huh.NewSelect[SetupMode]().
+			selection.Mode = contracts.SetupModeMCP
+			fields = append(fields, huh.NewSelect[contracts.SetupMode]().
 				Title(title("How do you want to use GitContribute?")).
 				Options(
-					huh.NewOption("MCP\n    Install a private runtime and configure coding agents; no global command.", SetupModeMCP),
-					huh.NewOption("CLI\n    Install the global gitcontribute command and TUI; no agent configuration.", SetupModeCLI),
-					huh.NewOption("Both\n    Install the global CLI and configure coding agents to use it for MCP.", SetupModeBoth),
+					huh.NewOption("MCP\n    Install a private runtime and configure coding agents; no global command.", contracts.SetupModeMCP),
+					huh.NewOption("CLI\n    Install the global gitcontribute command and TUI; no agent configuration.", contracts.SetupModeCLI),
+					huh.NewOption("Both\n    Install the global CLI and configure coding agents to use it for MCP.", contracts.SetupModeBoth),
 				).
 				Value(&selection.Mode))
 		case SetupQuestionClients:
@@ -191,7 +192,7 @@ func setupPromptFields(request SetupPromptRequest, selection *SetupSelection) []
 	return fields
 }
 
-func setupClientsField(title string, discovery SetupDiscovery, clients *[]string) huh.Field {
+func setupClientsField(title string, discovery contracts.SetupDiscovery, clients *[]string) huh.Field {
 	if len(*clients) == 0 {
 		for _, client := range discovery.Clients {
 			if client.Registered {
@@ -216,7 +217,7 @@ func setupClientsField(title string, discovery SetupDiscovery, clients *[]string
 		Value(clients)
 }
 
-func renderSetupDiscovery(discovery SetupDiscovery, packageRunner bool) string {
+func renderSetupDiscovery(discovery contracts.SetupDiscovery, packageRunner bool) string {
 	detected := make([]string, 0, len(discovery.Clients)+1)
 	for _, client := range discovery.Clients {
 		if client.Detected {
@@ -331,7 +332,7 @@ func setupPromptGroups(fields []huh.Field) []*huh.Group {
 	return groups
 }
 
-func setupClientLabel(client SetupClientDiscovery) string {
+func setupClientLabel(client contracts.SetupClientDiscovery) string {
 	name := setupClientName(client.Name)
 	state := "not detected"
 	if client.Detected {
@@ -353,7 +354,7 @@ func setupClientName(name string) string {
 	return name
 }
 
-func defaultSetupTokenSource(discovery SetupDiscovery) string {
+func defaultSetupTokenSource(discovery contracts.SetupDiscovery) string {
 	switch discovery.ConfiguredTokenSource {
 	case "gh-cli", "env", "keyring":
 		return discovery.ConfiguredTokenSource
@@ -380,7 +381,7 @@ func setupTokenSourceKey(request SetupPromptRequest, selectedSource string) stri
 	return ""
 }
 
-func setupAuthOptions(discovery SetupDiscovery) []huh.Option[string] {
+func setupAuthOptions(discovery contracts.SetupDiscovery) []huh.Option[string] {
 	gh := "GitHub CLI"
 	if discovery.GitHubCLIAvailable {
 		gh += " · available"

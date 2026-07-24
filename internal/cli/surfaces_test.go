@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/lens"
 )
 
@@ -36,66 +37,66 @@ type fakeSurfacesService struct {
 	neighborsCalled   bool
 	exportCalled      bool
 
-	lastClustersArg     cli.RepoRef
+	lastClustersArg     contracts.RepoRef
 	lastClusterID       string
 	lastClusterLimit    int
 	lastLensName        string
 	lastLensExplainRef  string
-	lastLensExplainOpts cli.LensExplainOptions
+	lastLensExplainOpts contracts.LensExplainOptions
 	lastLensDef         lens.Definition
 	syncEvents          []string
 	lastCreateColName   string
 	lastAddColName      string
-	lastAddColMembers   []cli.CollectionMember
-	lastArchiveOpts     cli.ArchiveSyncOptions
-	lastHydrateOpts     cli.HydrateOptions
+	lastAddColMembers   []contracts.CollectionMember
+	lastArchiveOpts     contracts.ArchiveSyncOptions
+	lastHydrateOpts     contracts.HydrateOptions
 }
 
-func (f *fakeSurfacesService) ListClusters(_ context.Context, repo cli.RepoRef, _ int) (*cli.ClusterListResult, error) {
+func (f *fakeSurfacesService) ListClusters(_ context.Context, repo contracts.RepoRef, _ int) (*contracts.ClusterListResult, error) {
 	f.clustersCalled = true
 	f.lastClustersArg = repo
-	return &cli.ClusterListResult{
+	return &contracts.ClusterListResult{
 		Repo:      repo,
 		Total:     2,
 		Truncated: true,
-		Clusters: []cli.ClusterResult{
+		Clusters: []contracts.ClusterResult{
 			{
 				StableID:    "abc12345",
 				State:       "open",
-				Canonical:   cli.ClusterMember{Kind: "issue", Owner: repo.Owner, Repo: repo.Repo, Number: 1},
+				Canonical:   contracts.ClusterMember{Kind: "issue", Owner: repo.Owner, Repo: repo.Repo, Number: 1},
 				MemberCount: 3,
 			},
 		},
 	}, f.err
 }
 
-func (f *fakeSurfacesService) RefreshClusters(_ context.Context, repo cli.RepoRef) (*cli.ClusterRefreshResult, error) {
+func (f *fakeSurfacesService) RefreshClusters(_ context.Context, repo contracts.RepoRef) (*contracts.ClusterRefreshResult, error) {
 	f.refreshCalled = true
 	f.lastClustersArg = repo
-	return &cli.ClusterRefreshResult{Repo: repo, Disposition: "committed", Projection: cli.ClusterProjectionIdentity{RuleVersion: "duplicate-v1"}}, f.err
+	return &contracts.ClusterRefreshResult{Repo: repo, Disposition: "committed", Projection: contracts.ClusterProjectionIdentity{RuleVersion: "duplicate-v1"}}, f.err
 }
 
-func (f *fakeSurfacesService) Cluster(ctx context.Context, id string, limit int) (*cli.ClusterResult, error) {
+func (f *fakeSurfacesService) Cluster(ctx context.Context, id string, limit int) (*contracts.ClusterResult, error) {
 	f.clusterCalled = true
 	f.lastClusterID = id
 	f.lastClusterLimit = limit
-	return &cli.ClusterResult{
+	return &contracts.ClusterResult{
 		StableID:    id,
 		State:       "open",
-		Canonical:   cli.ClusterMember{Kind: "issue", Owner: "o", Repo: "r", Number: 1},
+		Canonical:   contracts.ClusterMember{Kind: "issue", Owner: "o", Repo: "r", Number: 1},
 		MemberCount: 2,
-		Members: []cli.ClusterMember{
+		Members: []contracts.ClusterMember{
 			{Kind: "issue", Owner: "o", Repo: "r", Number: 1, Title: "first", Score: 1.0, Reason: "canonical", Included: true},
 			{Kind: "issue", Owner: "o", Repo: "r", Number: 2, Title: "second", Score: 0.9, Reason: "similar title", Included: true},
 		},
 	}, f.err
 }
 
-func (f *fakeSurfacesService) AddLens(ctx context.Context, name string, def lens.Definition) (*cli.LensResult, error) {
+func (f *fakeSurfacesService) AddLens(ctx context.Context, name string, def lens.Definition) (*contracts.LensResult, error) {
 	f.addLensCalled = true
 	f.lastLensName = name
 	f.lastLensDef = def
-	return &cli.LensResult{
+	return &contracts.LensResult{
 		Name:       name,
 		Definition: def,
 		CreatedAt:  "2026-07-17T00:00:00Z",
@@ -103,15 +104,15 @@ func (f *fakeSurfacesService) AddLens(ctx context.Context, name string, def lens
 	}, f.err
 }
 
-func (f *fakeSurfacesService) ListLenses(ctx context.Context) (*cli.LensListResult, error) {
+func (f *fakeSurfacesService) ListLenses(ctx context.Context) (*contracts.LensListResult, error) {
 	f.listLensCalled = true
-	return &cli.LensListResult{Lenses: []cli.LensResult{{Name: "active-go"}}, Total: 2, Truncated: true}, f.err
+	return &contracts.LensListResult{Lenses: []contracts.LensResult{{Name: "active-go"}}, Total: 2, Truncated: true}, f.err
 }
 
-func (f *fakeSurfacesService) ShowLens(ctx context.Context, name string) (*cli.LensResult, error) {
+func (f *fakeSurfacesService) ShowLens(ctx context.Context, name string) (*contracts.LensResult, error) {
 	f.showLensCalled = true
 	f.lastLensName = name
-	return &cli.LensResult{
+	return &contracts.LensResult{
 		Name: name,
 		Definition: lens.Definition{
 			Name:    name,
@@ -123,13 +124,13 @@ func (f *fakeSurfacesService) ShowLens(ctx context.Context, name string) (*cli.L
 	}, f.err
 }
 
-func (f *fakeSurfacesService) ExplainLens(ctx context.Context, name, ref string, opts cli.LensExplainOptions) (*cli.LensExplainResult, error) {
+func (f *fakeSurfacesService) ExplainLens(ctx context.Context, name, ref string, opts contracts.LensExplainOptions) (*contracts.LensExplainResult, error) {
 	f.explainLensCalled = true
 	f.lastLensName = name
 	f.lastLensExplainRef = ref
 	f.lastLensExplainOpts = opts
-	return &cli.LensExplainResult{
-		Lens: cli.LensResult{
+	return &contracts.LensExplainResult{
+		Lens: contracts.LensResult{
 			Name: name,
 			Definition: lens.Definition{
 				Name:    name,
@@ -137,91 +138,91 @@ func (f *fakeSurfacesService) ExplainLens(ctx context.Context, name, ref string,
 				Weights: map[string]float64{"relevance": 1},
 			},
 		},
-		Candidate: cli.LensExplainCandidate{
+		Candidate: contracts.LensExplainCandidate{
 			Kind:  "issue",
-			Repo:  cli.RepoRef{Owner: "o", Repo: "r"},
+			Repo:  contracts.RepoRef{Owner: "o", Repo: "r"},
 			Title: "fix it",
 		},
 		Score: 0.75,
-		Signals: []cli.LensExplainSignal{
+		Signals: []contracts.LensExplainSignal{
 			{Name: "relevance", Value: 0.8, Weight: 1, Contribution: 0.75},
 		},
 	}, f.err
 }
 
-func (f *fakeSurfacesService) CreateCollection(ctx context.Context, name string) (*cli.CollectionResult, error) {
+func (f *fakeSurfacesService) CreateCollection(ctx context.Context, name string) (*contracts.CollectionResult, error) {
 	f.createColCalled = true
 	f.lastCreateColName = name
-	return &cli.CollectionResult{Name: name, MemberCount: 0}, f.err
+	return &contracts.CollectionResult{Name: name, MemberCount: 0}, f.err
 }
 
-func (f *fakeSurfacesService) AddCollectionMembers(ctx context.Context, name string, members []cli.CollectionMember) (*cli.CollectionResult, error) {
+func (f *fakeSurfacesService) AddCollectionMembers(ctx context.Context, name string, members []contracts.CollectionMember) (*contracts.CollectionResult, error) {
 	f.addColCalled = true
 	f.lastAddColName = name
 	f.lastAddColMembers = members
-	return &cli.CollectionResult{Name: name, MemberCount: len(members)}, f.err
+	return &contracts.CollectionResult{Name: name, MemberCount: len(members)}, f.err
 }
 
-func (f *fakeSurfacesService) ListCollections(ctx context.Context) (*cli.CollectionListResult, error) {
+func (f *fakeSurfacesService) ListCollections(ctx context.Context) (*contracts.CollectionListResult, error) {
 	f.listColCalled = true
-	return &cli.CollectionListResult{Collections: []cli.CollectionResult{{Name: "favorites", MemberCount: 2}}, Total: 2, Truncated: true}, f.err
+	return &contracts.CollectionListResult{Collections: []contracts.CollectionResult{{Name: "favorites", MemberCount: 2}}, Total: 2, Truncated: true}, f.err
 }
 
-func (f *fakeSurfacesService) ArchiveSync(ctx context.Context, repo cli.RepoRef, opts cli.ArchiveSyncOptions) (*cli.SyncResult, error) {
+func (f *fakeSurfacesService) ArchiveSync(ctx context.Context, repo contracts.RepoRef, opts contracts.ArchiveSyncOptions) (*contracts.SyncResult, error) {
 	f.archiveCalled = true
 	f.syncEvents = append(f.syncEvents, "sync")
 	f.lastArchiveOpts = opts
-	return &cli.SyncResult{Repo: repo, Updated: len(opts.Numbers), PlannedRequests: 11, RequestBudget: opts.MaxRequests, Message: "synced"}, f.err
+	return &contracts.SyncResult{Repo: repo, Updated: len(opts.Numbers), PlannedRequests: 11, RequestBudget: opts.MaxRequests, Message: "synced"}, f.err
 }
 
-func (f *fakeSurfacesService) PlanArchiveSync(_ context.Context, repo cli.RepoRef, opts cli.ArchiveSyncOptions) (*cli.SyncPlanResult, error) {
+func (f *fakeSurfacesService) PlanArchiveSync(_ context.Context, repo contracts.RepoRef, opts contracts.ArchiveSyncOptions) (*contracts.SyncPlanResult, error) {
 	f.planCalled = true
 	f.syncEvents = append(f.syncEvents, "plan")
-	return &cli.SyncPlanResult{
+	return &contracts.SyncPlanResult{
 		Repo: repo, FixedRequests: 9, ThreadRequestCeiling: len(opts.Numbers), PlannedRequests: 9 + len(opts.Numbers),
 		RequestBudget: opts.MaxRequests, MaxPages: opts.MaxPages, ExactThreads: len(opts.Numbers),
 	}, f.err
 }
 
-func (f *fakeSurfacesService) Hydrate(ctx context.Context, repo cli.RepoRef, number int, opts cli.HydrateOptions) (*cli.HydrateResult, error) {
+func (f *fakeSurfacesService) Hydrate(ctx context.Context, repo contracts.RepoRef, number int, opts contracts.HydrateOptions) (*contracts.HydrateResult, error) {
 	f.hydrateCalled = true
 	f.lastHydrateOpts = opts
-	return &cli.HydrateResult{Repo: repo, Number: number, Kind: "issue", Requests: 1, Facets: []cli.HydratedFacet{{Facet: "issue_comments", Complete: true}}}, f.err
+	return &contracts.HydrateResult{Repo: repo, Number: number, Kind: "issue", Requests: 1, Facets: []contracts.HydratedFacet{{Facet: "issue_comments", Complete: true}}}, f.err
 }
 
-func (f *fakeSurfacesService) Coverage(ctx context.Context, repo cli.RepoRef) (*cli.CoverageResult, error) {
+func (f *fakeSurfacesService) Coverage(ctx context.Context, repo contracts.RepoRef) (*contracts.CoverageResult, error) {
 	f.coverageCalled = true
-	return &cli.CoverageResult{Repo: repo, Facets: []cli.CoverageFacet{{Facet: "threads", Present: true, Complete: true}}}, f.err
+	return &contracts.CoverageResult{Repo: repo, Facets: []contracts.CoverageFacet{{Facet: "threads", Present: true, Complete: true}}}, f.err
 }
 
-func (f *fakeSurfacesService) ArchiveThreads(ctx context.Context, repo cli.RepoRef, kind, state string, limit int) (*cli.ThreadListResult, error) {
+func (f *fakeSurfacesService) ArchiveThreads(ctx context.Context, repo contracts.RepoRef, kind, state string, limit int) (*contracts.ThreadListResult, error) {
 	f.threadsCalled = true
-	return &cli.ThreadListResult{Repo: repo, Threads: []cli.ThreadListItem{{Kind: "issue", Number: 1, State: "open", Title: "one"}}}, f.err
+	return &contracts.ThreadListResult{Repo: repo, Threads: []contracts.ThreadListItem{{Kind: "issue", Number: 1, State: "open", Title: "one"}}}, f.err
 }
 
-func (f *fakeSurfacesService) RunHistory(ctx context.Context, limit int) (*cli.RunListResult, error) {
+func (f *fakeSurfacesService) RunHistory(ctx context.Context, limit int) (*contracts.RunListResult, error) {
 	f.runsCalled = true
-	return &cli.RunListResult{Runs: []cli.RunResult{{ID: 1, Kind: "sync", Status: "completed"}}}, f.err
+	return &contracts.RunListResult{Runs: []contracts.RunResult{{ID: 1, Kind: "sync", Status: "completed"}}}, f.err
 }
 
-func (f *fakeSurfacesService) NeighborQuery(ctx context.Context, repo cli.RepoRef, kind string, number, limit int) (*cli.NeighborListResult, error) {
+func (f *fakeSurfacesService) NeighborQuery(ctx context.Context, repo contracts.RepoRef, kind string, number, limit int) (*contracts.NeighborListResult, error) {
 	f.neighborsCalled = true
-	return &cli.NeighborListResult{Repo: repo, Kind: kind, Number: number, SourceRevision: "rev", Neighbors: []cli.NeighborResult{{Kind: "issue", Repo: repo, Number: 2, Score: .8, Reason: "similar title"}}}, f.err
+	return &contracts.NeighborListResult{Repo: repo, Kind: kind, Number: number, SourceRevision: "rev", Neighbors: []contracts.NeighborResult{{Kind: "issue", Repo: repo, Number: 2, Score: .8, Reason: "similar title"}}}, f.err
 }
 
-func (f *fakeSurfacesService) ExportDossier(ctx context.Context, repo cli.RepoRef, format string) (*cli.ExportResult, error) {
+func (f *fakeSurfacesService) ExportDossier(ctx context.Context, repo contracts.RepoRef, format string) (*contracts.ExportResult, error) {
 	f.exportCalled = true
-	return &cli.ExportResult{Kind: "dossier", Format: format, Content: "# dossier\n"}, f.err
+	return &contracts.ExportResult{Kind: "dossier", Format: format, Content: "# dossier\n"}, f.err
 }
 
-func (f *fakeSurfacesService) ExportEvidence(ctx context.Context, investigationID, format string) (*cli.ExportResult, error) {
+func (f *fakeSurfacesService) ExportEvidence(ctx context.Context, investigationID, format string) (*contracts.ExportResult, error) {
 	f.exportCalled = true
-	return &cli.ExportResult{Kind: "evidence", Format: format, Content: "# evidence\n"}, f.err
+	return &contracts.ExportResult{Kind: "evidence", Format: format, Content: "# evidence\n"}, f.err
 }
 
-func (f *fakeSurfacesService) ExportManifest(_ context.Context, opportunityID string, _ cli.ManifestExportOptions) (*cli.ExportResult, error) {
+func (f *fakeSurfacesService) ExportManifest(_ context.Context, opportunityID string, _ contracts.ManifestExportOptions) (*contracts.ExportResult, error) {
 	f.exportCalled = true
-	return &cli.ExportResult{Kind: "manifest", Format: "json", Content: `{"manifest":"` + opportunityID + `"}`}, f.err
+	return &contracts.ExportResult{Kind: "manifest", Format: "json", Content: `{"manifest":"` + opportunityID + `"}`}, f.err
 }
 
 func newSurfacesCLI(svc *fakeSurfacesService) (*cli.CLI, *strings.Builder, *strings.Builder) {
@@ -243,7 +244,7 @@ func TestClustersCommand(t *testing.T) {
 
 	c2, stdout, _ := newSurfacesCLI(svc)
 	requireNoErr(t, c2.Run(context.Background(), []string{"clusters", "list", "o/r", "--json"}))
-	var got cli.ClusterListResult
+	var got contracts.ClusterListResult
 	if err := json.Unmarshal([]byte(stdout.String()), &got); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, stdout.String())
 	}
@@ -292,7 +293,7 @@ func TestLensAddListShow(t *testing.T) {
 
 	c2, stdout, _ := newSurfacesCLI(svc)
 	requireNoErr(t, c2.Run(context.Background(), []string{"lens", "list", "--json"}))
-	var list cli.LensListResult
+	var list contracts.LensListResult
 	if err := json.Unmarshal([]byte(stdout.String()), &list); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, stdout.String())
 	}
@@ -351,7 +352,7 @@ func TestCollectionCreateAddList(t *testing.T) {
 	if !svc.addColCalled || svc.lastAddColName != "favorites" || len(svc.lastAddColMembers) != 3 {
 		t.Fatalf("add collection not called: called=%v name=%q members=%+v", svc.addColCalled, svc.lastAddColName, svc.lastAddColMembers)
 	}
-	want := []cli.CollectionMember{
+	want := []contracts.CollectionMember{
 		{Kind: "repository", Ref: "o/r"},
 		{Kind: "issue", Ref: "o/r#1"},
 		{Kind: "pull_request", Ref: "o/r#2"},

@@ -9,7 +9,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 func TestMCPReaderExplainMatchReturnsMatchingExcerpt(t *testing.T) {
@@ -41,7 +41,7 @@ func TestMCPReaderExplainMatchReturnsMatchingExcerpt(t *testing.T) {
 	}
 
 	reader := svc.MCPReader()
-	threadOut, err := reader.ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+	threadOut, err := reader.ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
 		Owner: ref.Owner, Repo: ref.Repo, Kind: "issue", Number: thread.Number, Query: "deepthreadneedle",
 	})
 	if err != nil {
@@ -51,7 +51,7 @@ func TestMCPReaderExplainMatchReturnsMatchingExcerpt(t *testing.T) {
 		t.Fatalf("thread explanation omitted match: %q", threadOut.Snippet)
 	}
 
-	codeOut, err := reader.ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+	codeOut, err := reader.ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
 		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Path: "deep.go", Commit: "abc123", Query: "deepcodeneedle",
 	})
 	if err != nil {
@@ -61,7 +61,7 @@ func TestMCPReaderExplainMatchReturnsMatchingExcerpt(t *testing.T) {
 		t.Fatalf("code explanation omitted match: %q", codeOut.Snippet)
 	}
 
-	repoOut, err := reader.ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+	repoOut, err := reader.ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
 		Owner: ref.Owner, Repo: ref.Repo, Kind: "repo", Query: "synthwave",
 	})
 	if err != nil {

@@ -3,18 +3,18 @@ package app
 import (
 	"context"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
 )
 
-func evidenceItemResult(ctx context.Context, c *corpus.Corpus, item *evidence.Evidence) (cli.EvidenceItem, error) {
+func evidenceItemResult(ctx context.Context, c *corpus.Corpus, item *evidence.Evidence) (contracts.EvidenceItem, error) {
 	freshness, err := evidence.NewFreshnessEvaluator(c).Evaluate(ctx, item)
 	if err != nil {
-		return cli.EvidenceItem{}, err
+		return contracts.EvidenceItem{}, err
 	}
-	return cli.EvidenceItem{
+	return contracts.EvidenceItem{
 		ID: item.ID, Type: string(item.Type), Relation: string(item.Relation),
 		Description: item.Description, ValidationRunID: item.ValidationRunID,
 		OpportunityID: item.OpportunityID, SourceRefs: workflowSourceRefResults(item.SourceRefs),
@@ -36,14 +36,14 @@ func sourceRevisionFromThreadBaseline(baseline investigation.ThreadBaseline) evi
 	}
 }
 
-func evidenceSourceRevisionResults(values []evidence.SourceRevision) []cli.EvidenceSourceRevisionResult {
+func evidenceSourceRevisionResults(values []evidence.SourceRevision) []contracts.EvidenceSourceRevisionResult {
 	if len(values) == 0 {
 		return nil
 	}
-	result := make([]cli.EvidenceSourceRevisionResult, len(values))
+	result := make([]contracts.EvidenceSourceRevisionResult, len(values))
 	for i, value := range values {
-		result[i] = cli.EvidenceSourceRevisionResult{
-			Subject: cli.EvidenceSourceSubjectResult{
+		result[i] = contracts.EvidenceSourceRevisionResult{
+			Subject: contracts.EvidenceSourceSubjectResult{
 				Kind: string(value.Subject.Kind), Owner: value.Subject.Owner, Repo: value.Subject.Repo,
 				ThreadKind: value.Subject.ThreadKind, Number: value.Subject.Number, Facet: value.Subject.Facet,
 			},

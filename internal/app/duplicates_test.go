@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
@@ -61,7 +61,7 @@ func TestDuplicateAndCollisionChecks(t *testing.T) {
 		t.Fatalf("upsert pr: %v", err)
 	}
 
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
 	if err != nil {
 		t.Fatalf("start investigation: %v", err)
 	}

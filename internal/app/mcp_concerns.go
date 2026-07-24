@@ -6,17 +6,17 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/concern"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // CreateConcern implements the MCP local concern-write capability.
-func (r *MCPReader) CreateConcern(ctx context.Context, in mcpserver.CreateConcernInput) (mcpserver.ConcernOutput, error) {
+func (r *MCPReader) CreateConcern(ctx context.Context, in mcpcontract.CreateConcernInput) (mcpcontract.ConcernOutput, error) {
 	provenance, err := concernSourceProvenance(in.SourceProvenance)
 	if err != nil {
-		return mcpserver.ConcernOutput{}, err
+		return mcpcontract.ConcernOutput{}, err
 	}
 	result, err := r.createConcern(ctx, &concern.Concern{
 		Repo: domain.RepoRef{Owner: in.Owner, Repo: in.Repo}, CommitSHA: in.CommitSHA, WorkspaceID: in.WorkspaceID,
@@ -25,21 +25,21 @@ func (r *MCPReader) CreateConcern(ctx context.Context, in mcpserver.CreateConcer
 		Notes: in.Notes, EvidenceIDs: in.EvidenceIDs, SourceProvenance: provenance,
 	})
 	if err != nil {
-		return mcpserver.ConcernOutput{}, err
+		return mcpcontract.ConcernOutput{}, err
 	}
 	return concernResultToMCP(result), nil
 }
 
 // ListConcerns implements the MCP offline concern-read capability.
-func (r *MCPReader) ListConcerns(ctx context.Context, in mcpserver.ListConcernsInput) (mcpserver.ConcernListOutput, error) {
-	result, err := r.Service.ListConcerns(ctx, cli.ConcernListOptions{
-		Repo: cli.RepoRef{Owner: in.Owner, Repo: in.Repo}, Status: in.Status, Query: in.Query, Limit: in.Limit,
+func (r *MCPReader) ListConcerns(ctx context.Context, in mcpcontract.ListConcernsInput) (mcpcontract.ConcernListOutput, error) {
+	result, err := r.Service.ListConcerns(ctx, contracts.ConcernListOptions{
+		Repo: contracts.RepoRef{Owner: in.Owner, Repo: in.Repo}, Status: in.Status, Query: in.Query, Limit: in.Limit,
 	})
 	if err != nil {
-		return mcpserver.ConcernListOutput{}, err
+		return mcpcontract.ConcernListOutput{}, err
 	}
-	out := mcpserver.ConcernListOutput{
-		Concerns:  make([]mcpserver.ConcernOutput, len(result.Concerns)),
+	out := mcpcontract.ConcernListOutput{
+		Concerns:  make([]mcpcontract.ConcernOutput, len(result.Concerns)),
 		Limit:     result.Limit,
 		Total:     result.Total,
 		Truncated: result.Truncated,
@@ -51,48 +51,48 @@ func (r *MCPReader) ListConcerns(ctx context.Context, in mcpserver.ListConcernsI
 }
 
 // UpdateConcern implements MCP concern content updates.
-func (r *MCPReader) UpdateConcern(ctx context.Context, in mcpserver.UpdateConcernInput) (mcpserver.ConcernOutput, error) {
-	result, err := r.Service.UpdateConcern(ctx, in.ID, cli.ConcernUpdateOptions{
+func (r *MCPReader) UpdateConcern(ctx context.Context, in mcpcontract.UpdateConcernInput) (mcpcontract.ConcernOutput, error) {
+	result, err := r.Service.UpdateConcern(ctx, in.ID, contracts.ConcernUpdateOptions{
 		Title: in.Title, ProblemStatement: in.ProblemStatement, SuspectedOwner: in.SuspectedOwner,
 		Confidence: in.Confidence, Unknowns: in.Unknowns, SuccessCriterion: in.SuccessCriterion,
 		Notes: in.Notes, EvidenceIDs: in.EvidenceIDs,
 	})
 	if err != nil {
-		return mcpserver.ConcernOutput{}, err
+		return mcpcontract.ConcernOutput{}, err
 	}
 	return concernResultToMCP(result), nil
 }
 
 // SetConcernStatus implements MCP concern lifecycle transitions.
-func (r *MCPReader) SetConcernStatus(ctx context.Context, in mcpserver.SetConcernStatusInput) (mcpserver.ConcernOutput, error) {
+func (r *MCPReader) SetConcernStatus(ctx context.Context, in mcpcontract.SetConcernStatusInput) (mcpcontract.ConcernOutput, error) {
 	result, err := r.Service.SetConcernStatus(ctx, in.ID, in.Status, in.Rationale)
 	if err != nil {
-		return mcpserver.ConcernOutput{}, err
+		return mcpcontract.ConcernOutput{}, err
 	}
 	return concernResultToMCP(result), nil
 }
 
 // LinkConcern implements MCP concern relationship writes.
-func (r *MCPReader) LinkConcern(ctx context.Context, in mcpserver.LinkConcernInput) (mcpserver.ConcernOutput, error) {
-	result, err := r.Service.LinkConcern(ctx, in.ID, cli.ConcernLinkOptions{Kind: in.Kind, TargetType: in.TargetType, TargetID: in.TargetID, Note: in.Note})
+func (r *MCPReader) LinkConcern(ctx context.Context, in mcpcontract.LinkConcernInput) (mcpcontract.ConcernOutput, error) {
+	result, err := r.Service.LinkConcern(ctx, in.ID, contracts.ConcernLinkOptions{Kind: in.Kind, TargetType: in.TargetType, TargetID: in.TargetID, Note: in.Note})
 	if err != nil {
-		return mcpserver.ConcernOutput{}, err
+		return mcpcontract.ConcernOutput{}, err
 	}
 	return concernResultToMCP(result), nil
 }
 
 // PromoteConcern implements atomic MCP concern promotion.
-func (r *MCPReader) PromoteConcern(ctx context.Context, in mcpserver.PromoteConcernInput) (mcpserver.ConcernOutput, error) {
-	result, err := r.Service.PromoteConcern(ctx, in.ID, cli.ConcernPromoteOptions{
+func (r *MCPReader) PromoteConcern(ctx context.Context, in mcpcontract.PromoteConcernInput) (mcpcontract.ConcernOutput, error) {
+	result, err := r.Service.PromoteConcern(ctx, in.ID, contracts.ConcernPromoteOptions{
 		Kind: in.Kind, Category: in.Category, Scope: in.Scope, Impact: in.Impact, ExpectedEffort: in.ExpectedEffort,
 	})
 	if err != nil {
-		return mcpserver.ConcernOutput{}, err
+		return mcpcontract.ConcernOutput{}, err
 	}
 	return concernResultToMCP(result), nil
 }
 
-func concernSourceProvenance(values []mcpserver.EvidenceSourceRevision) ([]evidence.SourceRevision, error) {
+func concernSourceProvenance(values []mcpcontract.EvidenceSourceRevision) ([]evidence.SourceRevision, error) {
 	out := make([]evidence.SourceRevision, len(values))
 	for index, value := range values {
 		sourceUpdatedAt, err := parseTime(value.SourceUpdatedAt)
@@ -113,11 +113,11 @@ func concernSourceProvenance(values []mcpserver.EvidenceSourceRevision) ([]evide
 	return out, nil
 }
 
-func concernResultToMCP(value *cli.ConcernResult) mcpserver.ConcernOutput {
+func concernResultToMCP(value *contracts.ConcernResult) mcpcontract.ConcernOutput {
 	if value == nil {
-		return mcpserver.ConcernOutput{}
+		return mcpcontract.ConcernOutput{}
 	}
-	out := mcpserver.ConcernOutput{
+	out := mcpcontract.ConcernOutput{
 		ID: value.ID, Owner: value.Repo.Owner, Repo: value.Repo.Repo, CommitSHA: value.CommitSHA, WorkspaceID: value.WorkspaceID,
 		Title: value.Title, ProblemStatement: value.ProblemStatement, SuspectedOwner: value.SuspectedOwner,
 		Confidence: value.Confidence, Unknowns: value.Unknowns, SuccessCriterion: value.SuccessCriterion,
@@ -126,10 +126,10 @@ func concernResultToMCP(value *cli.ConcernResult) mcpserver.ConcernOutput {
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}
 	for _, link := range value.Links {
-		out.Links = append(out.Links, mcpserver.ConcernLinkOutput{Kind: link.Kind, TargetType: link.TargetType, TargetID: link.TargetID, Note: link.Note})
+		out.Links = append(out.Links, mcpcontract.ConcernLinkOutput{Kind: link.Kind, TargetType: link.TargetType, TargetID: link.TargetID, Note: link.Note})
 	}
 	if value.Promotion != nil {
-		out.Promotion = &mcpserver.ConcernPromotionOutput{
+		out.Promotion = &mcpcontract.ConcernPromotionOutput{
 			Kind: value.Promotion.Kind, InvestigationID: value.Promotion.InvestigationID,
 			HypothesisID: value.Promotion.HypothesisID, OpportunityID: value.Promotion.OpportunityID,
 		}

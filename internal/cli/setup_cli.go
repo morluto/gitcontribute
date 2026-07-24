@@ -8,6 +8,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
@@ -18,7 +20,7 @@ func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
 		}
 		return err
 	}
-	opts := SetupOptions{
+	opts := contracts.SetupOptions{
 		Mode: setupCommandMode(cmd, clients), Clients: clients, AllClients: cmd.AllClients,
 		TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey, Repository: cmd.Repository,
 		DryRun: cmd.DryRun,
@@ -68,18 +70,18 @@ func (c *CLI) prepareSetupCommand(ctx context.Context, cmd *setupCmd) ([]string,
 	return clients, nil
 }
 
-func setupCommandMode(cmd *setupCmd, clients []string) SetupMode {
+func setupCommandMode(cmd *setupCmd, clients []string) contracts.SetupMode {
 	if cmd.Mode != nil {
 		return *cmd.Mode
 	}
 	if len(clients) > 0 || cmd.AllClients {
-		return SetupModeMCP
+		return contracts.SetupModeMCP
 	}
 	return ""
 }
 
 func validateSetupSelection(cmd *setupCmd, clients []string) error {
-	if cmd.Mode != nil && *cmd.Mode == SetupModeCLI && (len(clients) > 0 || cmd.AllClients) {
+	if cmd.Mode != nil && *cmd.Mode == contracts.SetupModeCLI && (len(clients) > 0 || cmd.AllClients) {
 		return NewCLIError(ExitUsage, errors.New("--mode cli cannot be combined with MCP client flags"))
 	}
 	if cmd.Yes {
@@ -102,7 +104,7 @@ func setupQuestions(cmd *setupCmd, clients []string) []SetupPromptQuestion {
 	if !cmd.Yes && mode == "" {
 		questions = append(questions, SetupQuestionAccess)
 	}
-	if !cmd.Yes && mode != SetupModeCLI && len(clients) == 0 && !cmd.AllClients {
+	if !cmd.Yes && mode != contracts.SetupModeCLI && len(clients) == 0 && !cmd.AllClients {
 		questions = append(questions, SetupQuestionClients)
 	}
 	if !cmd.Yes && cmd.TokenSource == "" {
@@ -137,7 +139,7 @@ func (c *CLI) writeSetupCancellation() error {
 	return nil
 }
 
-func (c *CLI) confirmSetupPlan(ctx context.Context, opts SetupOptions, jsonOutput bool) (bool, error) {
+func (c *CLI) confirmSetupPlan(ctx context.Context, opts contracts.SetupOptions, jsonOutput bool) (bool, error) {
 	service, err := c.setupService()
 	if err != nil {
 		return false, err
@@ -176,12 +178,12 @@ func (c *CLI) confirmSetupPlan(ctx context.Context, opts SetupOptions, jsonOutpu
 	return apply, nil
 }
 
-func (c *CLI) executeSetup(ctx context.Context, opts SetupOptions, jsonOutput bool) error {
+func (c *CLI) executeSetup(ctx context.Context, opts contracts.SetupOptions, jsonOutput bool) error {
 	service, err := c.setupService()
 	if err != nil {
 		return err
 	}
-	var report *SetupReport
+	var report *contracts.SetupReport
 	if !jsonOutput && setupProgressEnabled(opts, c.stderr) {
 		progress := startSetupProgress(c.stderr)
 		report, err = service.SetupWithProgress(ctx, opts, progress)
@@ -220,7 +222,7 @@ func (c *CLI) executeSetup(ctx context.Context, opts SetupOptions, jsonOutput bo
 	return nil
 }
 
-func setupFailureError(report *SetupReport) error {
+func setupFailureError(report *contracts.SetupReport) error {
 	for _, step := range report.Steps {
 		if step.Status != "failed" {
 			continue
@@ -233,18 +235,18 @@ func setupFailureError(report *SetupReport) error {
 	return errors.New("one or more setup steps failed")
 }
 
-func setupProgressEnabled(opts SetupOptions, output io.Writer) bool {
+func setupProgressEnabled(opts contracts.SetupOptions, output io.Writer) bool {
 	return setupProgressAnimationAllowed(opts) && interactiveWriter(output)
 }
 
-func setupProgressAnimationAllowed(opts SetupOptions) bool {
+func setupProgressAnimationAllowed(opts contracts.SetupOptions) bool {
 	if opts.DryRun || os.Getenv("GITCONTRIBUTE_ACCESSIBLE") != "" || os.Getenv("TERM") == "dumb" {
 		return false
 	}
 	return true
 }
 
-func setupHuman(report *SetupReport) string {
+func setupHuman(report *contracts.SetupReport) string {
 	var b strings.Builder
 	operation := report.Operation
 	if operation == "" {

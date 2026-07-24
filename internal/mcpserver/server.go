@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // ErrNotFound lets readers distinguish absent corpus objects from failures.
@@ -16,82 +17,82 @@ import (
 
 // NeighborReader is the optional local nearest-thread query capability.
 type NeighborReader interface {
-	FindNeighbors(context.Context, FindNeighborsInput) (FindNeighborsOutput, error)
+	FindNeighbors(context.Context, mcpcontract.FindNeighborsInput) (mcpcontract.FindNeighborsOutput, error)
 }
 
 // ScalableReader exposes bounded vectorized corpus reads. Implementations must
 // remain offline and preserve input order for non-ranked results.
 type ScalableReader interface {
-	GetRepositories(context.Context, GetRepositoriesInput) (GetRepositoriesOutput, error)
-	GetThreads(context.Context, GetThreadsInput) (GetThreadsOutput, error)
-	RankOpportunities(context.Context, RankOpportunitiesInput) (RankOpportunitiesOutput, error)
-	FindPrecedents(context.Context, FindPrecedentsInput) (FindPrecedentsOutput, error)
-	GetJobs(context.Context, GetJobsInput) (GetJobsOutput, error)
+	GetRepositories(context.Context, mcpcontract.GetRepositoriesInput) (mcpcontract.GetRepositoriesOutput, error)
+	GetThreads(context.Context, mcpcontract.GetThreadsInput) (mcpcontract.GetThreadsOutput, error)
+	RankOpportunities(context.Context, mcpcontract.RankOpportunitiesInput) (mcpcontract.RankOpportunitiesOutput, error)
+	FindPrecedents(context.Context, mcpcontract.FindPrecedentsInput) (mcpcontract.FindPrecedentsOutput, error)
+	GetJobs(context.Context, mcpcontract.GetJobsInput) (mcpcontract.GetJobsOutput, error)
 }
 
 // PortfolioReader exposes bounded offline pull-request portfolio reads.
 type PortfolioReader interface {
-	ListPullRequestPortfolio(context.Context, ListPullRequestPortfolioInput) (ListPullRequestPortfolioOutput, error)
-	FindPortfolioOverlaps(context.Context, FindPortfolioOverlapsInput) (FindPortfolioOverlapsOutput, error)
+	ListPullRequestPortfolio(context.Context, mcpcontract.ListPullRequestPortfolioInput) (mcpcontract.ListPullRequestPortfolioOutput, error)
+	FindPortfolioOverlaps(context.Context, mcpcontract.FindPortfolioOverlapsInput) (mcpcontract.FindPortfolioOverlapsOutput, error)
 }
 
 // PortfolioOperator owns explicit local links between observed pull requests
 // and contribution workflow state. It never mutates GitHub.
 type PortfolioOperator interface {
-	LinkPullRequest(context.Context, LinkPullRequestInput) (LinkPullRequestOutput, error)
+	LinkPullRequest(context.Context, mcpcontract.LinkPullRequestInput) (mcpcontract.LinkPullRequestOutput, error)
 }
 
 // GitHubOperator exposes bounded GitHub reads that update only the local corpus.
 type GitHubOperator interface {
-	SearchGitHubRepositories(context.Context, SearchGitHubRepositoriesInput) (SearchGitHubRepositoriesOutput, error)
-	SyncRepositoryMetadata(context.Context, SyncRepositoryMetadataInput) (JobReference, error)
-	SyncThreads(context.Context, SyncThreadsInput) (JobReference, error)
-	HydrateThreads(context.Context, HydrateThreadsInput) (JobReference, error)
-	GetAuthenticatedIdentity(context.Context) (AuthenticatedIdentityOutput, error)
-	SyncAuthoredPullRequests(context.Context, SyncAuthoredPullRequestsInput) (JobReference, error)
-	SyncPullRequestStatus(context.Context, SyncPullRequestStatusInput) (JobReference, error)
+	SearchGitHubRepositories(context.Context, mcpcontract.SearchGitHubRepositoriesInput) (mcpcontract.SearchGitHubRepositoriesOutput, error)
+	SyncRepositoryMetadata(context.Context, mcpcontract.SyncRepositoryMetadataInput) (mcpcontract.JobReference, error)
+	SyncThreads(context.Context, mcpcontract.SyncThreadsInput) (mcpcontract.JobReference, error)
+	HydrateThreads(context.Context, mcpcontract.HydrateThreadsInput) (mcpcontract.JobReference, error)
+	GetAuthenticatedIdentity(context.Context) (mcpcontract.AuthenticatedIdentityOutput, error)
+	SyncAuthoredPullRequests(context.Context, mcpcontract.SyncAuthoredPullRequestsInput) (mcpcontract.JobReference, error)
+	SyncPullRequestStatus(context.Context, mcpcontract.SyncPullRequestStatusInput) (mcpcontract.JobReference, error)
 }
 
 // CodeIndexer safely acquires and indexes repository code.
 type CodeIndexer interface {
-	IndexRepositories(context.Context, IndexRepositoriesInput) (JobReference, error)
+	IndexRepositories(context.Context, mcpcontract.IndexRepositoriesInput) (mcpcontract.JobReference, error)
 }
 
 // MergeConflictReader performs local, non-mutating Git comparisons.
 type MergeConflictReader interface {
-	CheckMergeConflicts(context.Context, CheckMergeConflictsInput) (CheckMergeConflictsOutput, error)
+	CheckMergeConflicts(context.Context, mcpcontract.CheckMergeConflictsInput) (mcpcontract.CheckMergeConflictsOutput, error)
 }
 
 // WorkspaceCreator exposes managed workspace creation separately from the
 // broader contribution workflow capability.
 type WorkspaceCreator interface {
-	CreateWorkspace(context.Context, CreateWorkspaceInput) (JobReference, error)
+	CreateWorkspace(context.Context, mcpcontract.CreateWorkspaceInput) (mcpcontract.JobReference, error)
 }
 
 // WorkspaceAdopter exposes non-owning external-worktree registration.
 type WorkspaceAdopter interface {
-	AdoptWorkspace(context.Context, AdoptWorkspaceInput) (AdoptWorkspaceOutput, error)
+	AdoptWorkspace(context.Context, mcpcontract.AdoptWorkspaceInput) (mcpcontract.AdoptWorkspaceOutput, error)
 }
 
 // ResearchReader exposes external derived repository context.
 type ResearchReader interface {
-	DeepWiki(context.Context, DeepWikiInput) (DeepWikiOutput, error)
+	DeepWiki(context.Context, mcpcontract.DeepWikiInput) (mcpcontract.DeepWikiOutput, error)
 }
 
 // Operator is the optional explicit network-read/local-write capability.
 type Operator interface {
-	BuildRepositoryDossier(context.Context, BuildRepositoryDossierInput) (JobReference, error)
-	StartInvestigation(context.Context, StartInvestigationInput) (InvestigationOutput, error)
-	RecordHypothesis(context.Context, RecordHypothesisInput) (HypothesisOutput, error)
-	CheckDuplicates(context.Context, CheckDuplicatesInput) (CheckOutput, error)
-	CheckCollisions(context.Context, CheckCollisionsInput) (CheckOutput, error)
-	PromoteOpportunity(context.Context, PromoteOpportunityInput) (OpportunityOutput, error)
-	DefineValidation(context.Context, DefineValidationInput) (ValidationOutput, error)
-	RunValidation(context.Context, RunValidationInput) (JobReference, error)
-	RunRepeatedValidation(context.Context, RunRepeatedValidationInput) (JobReference, error)
-	PrepareContribution(context.Context, PrepareContributionInput) (DraftOutput, error)
-	ExportManifest(context.Context, ExportManifestInput) (ManifestOutput, error)
-	CancelJobs(context.Context, CancelJobInput) (GetJobsOutput, error)
+	BuildRepositoryDossier(context.Context, mcpcontract.BuildRepositoryDossierInput) (mcpcontract.JobReference, error)
+	StartInvestigation(context.Context, mcpcontract.StartInvestigationInput) (mcpcontract.InvestigationOutput, error)
+	RecordHypothesis(context.Context, mcpcontract.RecordHypothesisInput) (mcpcontract.HypothesisOutput, error)
+	CheckDuplicates(context.Context, mcpcontract.CheckDuplicatesInput) (mcpcontract.CheckOutput, error)
+	CheckCollisions(context.Context, mcpcontract.CheckCollisionsInput) (mcpcontract.CheckOutput, error)
+	PromoteOpportunity(context.Context, mcpcontract.PromoteOpportunityInput) (mcpcontract.OpportunityOutput, error)
+	DefineValidation(context.Context, mcpcontract.DefineValidationInput) (mcpcontract.ValidationOutput, error)
+	RunValidation(context.Context, mcpcontract.RunValidationInput) (mcpcontract.JobReference, error)
+	RunRepeatedValidation(context.Context, mcpcontract.RunRepeatedValidationInput) (mcpcontract.JobReference, error)
+	PrepareContribution(context.Context, mcpcontract.PrepareContributionInput) (mcpcontract.DraftOutput, error)
+	ExportManifest(context.Context, mcpcontract.ExportManifestInput) (mcpcontract.ManifestOutput, error)
+	CancelJobs(context.Context, mcpcontract.CancelJobInput) (mcpcontract.GetJobsOutput, error)
 }
 
 // RepoInput identifies a repository for an MCP operation.
@@ -166,7 +167,7 @@ type Operator interface {
 
 // Server owns the MCP protocol adapter around a local Reader.
 type Server struct {
-	reader          Reader
+	reader          mcpcontract.Reader
 	server          *mcp.Server
 	registrationErr error
 	enabledTools    map[string]struct{}
@@ -175,14 +176,8 @@ type Server struct {
 
 // Options selects MCP capability profiles. An empty Toolsets list is rejected.
 
-// New constructs an MCP server over reader and registers all supported tools
-// and resources. A blank version is reported as "dev".
-func New(reader Reader, version string) (*Server, error) {
-	return NewWithOptions(reader, version, Options{Toolsets: []string{"all"}})
-}
-
 // NewWithOptions constructs an MCP server with selected capability profiles.
-func NewWithOptions(reader Reader, version string, opts Options) (*Server, error) {
+func NewWithOptions(reader mcpcontract.Reader, version string, opts mcpcontract.Options) (*Server, error) {
 	if version == "" {
 		version = "dev"
 	}
@@ -231,81 +226,81 @@ func (s *Server) ServeStdio(ctx context.Context) error {
 
 func (s *Server) register() {
 	readOnly := readOnlyAnnotations()
-	addCatalogTool(s, catalogTool[SearchCodeInput, SearchCodeOutput]{
-		name: ToolSearchCode, title: "Search stored code",
+	addCatalogTool(s, catalogTool[mcpcontract.SearchCodeInput, mcpcontract.SearchCodeOutput]{
+		name: mcpcontract.ToolSearchCode, title: "Search stored code",
 		description: "Search indexed code and return bounded snippets plus selected-snapshot coverage, including for zero scoped matches. Optional owner/repo scope; offline.",
-		annotations: readOnly, input: inputSchema[SearchCodeInput](func(schema *schemaBuilder) {
+		annotations: readOnly, input: inputSchema[mcpcontract.SearchCodeInput](func(schema *schemaBuilder) {
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 			requireTogether(schema, "owner", "repo")
-		}), output: outputSchema[SearchCodeOutput]("One page of stored code matches."), handler: s.searchCode,
+		}), output: outputSchema[mcpcontract.SearchCodeOutput]("One page of stored code matches."), handler: s.searchCode,
 	})
-	addCatalogTool(s, catalogTool[InvestigationInput, InvestigationOutput]{
-		name: ToolGetInvestigation, title: "Get investigation",
-		description: "Read one local investigation and a bounded set of its hypotheses. Use " + ToolListOpportunities + " separately for promoted contribution opportunities; this tool is offline.",
-		annotations: readOnly, input: inputSchema[InvestigationInput](func(schema *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.InvestigationInput, mcpcontract.InvestigationOutput]{
+		name: mcpcontract.ToolGetInvestigation, title: "Get investigation",
+		description: "Read one local investigation and a bounded set of its hypotheses. Use " + mcpcontract.ToolListOpportunities + " separately for promoted contribution opportunities; this tool is offline.",
+		annotations: readOnly, input: inputSchema[mcpcontract.InvestigationInput](func(schema *schemaBuilder) {
 			setRange(schema, "hypothesis_limit", 1, 100)
 			setDefault(schema, "hypothesis_limit", 20)
-		}), output: outputSchema[InvestigationOutput]("Local investigation with bounded hypothesis summaries."), handler: s.investigation,
+		}), output: outputSchema[mcpcontract.InvestigationOutput]("Local investigation with bounded hypothesis summaries."), handler: s.investigation,
 	})
-	addCatalogTool(s, catalogTool[ListOpportunitiesInput, ListOpportunitiesOutput]{
-		name: ToolListOpportunities, title: "List investigation opportunities",
-		description: "List a bounded set of promoted contribution opportunities for one local investigation. Use " + ToolGetOpportunity + " for full details and evidence identifiers; this tool is offline.",
-		annotations: readOnly, input: inputSchema[ListOpportunitiesInput](func(schema *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.ListOpportunitiesInput, mcpcontract.ListOpportunitiesOutput]{
+		name: mcpcontract.ToolListOpportunities, title: "List investigation opportunities",
+		description: "List a bounded set of promoted contribution opportunities for one local investigation. Use " + mcpcontract.ToolGetOpportunity + " for full details and evidence identifiers; this tool is offline.",
+		annotations: readOnly, input: inputSchema[mcpcontract.ListOpportunitiesInput](func(schema *schemaBuilder) {
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
-		}), output: outputSchema[ListOpportunitiesOutput]("Bounded contribution opportunity summaries."), handler: s.listOpportunities,
+		}), output: outputSchema[mcpcontract.ListOpportunitiesOutput]("Bounded contribution opportunity summaries."), handler: s.listOpportunities,
 	})
-	addCatalogTool(s, catalogTool[OpportunityInput, OpportunityOutput]{
-		name: ToolGetOpportunity, title: "Get contribution opportunity",
-		description: "Read one local contribution opportunity with a bounded set of evidence identifiers. Use " + ToolGetEvidence + " to inspect the evidence records themselves; this tool is offline.",
-		annotations: readOnly, input: inputSchema[OpportunityInput](func(schema *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.OpportunityInput, mcpcontract.OpportunityOutput]{
+		name: mcpcontract.ToolGetOpportunity, title: "Get contribution opportunity",
+		description: "Read one local contribution opportunity with a bounded set of evidence identifiers. Use " + mcpcontract.ToolGetEvidence + " to inspect the evidence records themselves; this tool is offline.",
+		annotations: readOnly, input: inputSchema[mcpcontract.OpportunityInput](func(schema *schemaBuilder) {
 			setRange(schema, "evidence_limit", 1, 100)
 			setDefault(schema, "evidence_limit", 20)
-		}), output: outputSchema[OpportunityOutput]("Local contribution opportunity and evidence references."), handler: s.opportunity,
+		}), output: outputSchema[mcpcontract.OpportunityOutput]("Local contribution opportunity and evidence references."), handler: s.opportunity,
 	})
-	addCatalogTool(s, catalogTool[EvidenceInput, EvidenceOutput]{
-		name: ToolGetEvidence, title: "Get stored evidence",
+	addCatalogTool(s, catalogTool[mcpcontract.EvidenceInput, mcpcontract.EvidenceOutput]{
+		name: mcpcontract.ToolGetEvidence, title: "Get stored evidence",
 		description: "Read bounded evidence for exactly one investigation or opportunity, optionally filtered by relation. Freshness is derived from local corpus revisions; this tool never refreshes GitHub.",
-		annotations: readOnly, input: inputSchema[EvidenceInput](func(schema *schemaBuilder) {
+		annotations: readOnly, input: inputSchema[mcpcontract.EvidenceInput](func(schema *schemaBuilder) {
 			setEnum(schema, "relation", "supporting", "contradicting", "inconclusive", "stale", "invalid")
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 			requireExactlyOne(schema, "investigation_id", "opportunity_id")
-		}), output: outputSchema[EvidenceOutput]("Bounded stored evidence with provenance and derived freshness."), handler: s.evidence,
+		}), output: outputSchema[mcpcontract.EvidenceOutput]("Bounded stored evidence with provenance and derived freshness."), handler: s.evidence,
 	})
-	addCatalogTool(s, catalogTool[ReadinessInput, ReadinessOutput]{
-		name: ToolGetReadiness, title: "Get contribution readiness",
+	addCatalogTool(s, catalogTool[mcpcontract.ReadinessInput, mcpcontract.ReadinessOutput]{
+		name: mcpcontract.ToolGetReadiness, title: "Get contribution readiness",
 		description: "Evaluate deterministic local readiness rules for one opportunity and return pass, warn, block, or unknown checks with evidence and remediation. This is advisory, offline, and does not claim maintainer approval.",
-		annotations: readOnly, input: inputSchema[ReadinessInput](noSchemaCustomization),
-		output: outputSchema[ReadinessOutput]("Deterministic contribution readiness report."), handler: s.readiness,
+		annotations: readOnly, input: inputSchema[mcpcontract.ReadinessInput](noSchemaCustomization),
+		output: outputSchema[mcpcontract.ReadinessOutput]("Deterministic contribution readiness report."), handler: s.readiness,
 	})
-	addCatalogTool(s, catalogTool[FindClustersInput, FindClustersOutput]{
-		name: ToolFindClusters, title: "Find duplicate clusters",
-		description: "List stored duplicate clusters for a repository, or provide kind and number to read the current cluster containing one exact member. Use " + ToolFindNeighbors + " to compute similarity outside the stored projection.",
-		annotations: readOnly, input: inputSchema[FindClustersInput](func(schema *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.FindClustersInput, mcpcontract.FindClustersOutput]{
+		name: mcpcontract.ToolFindClusters, title: "Find duplicate clusters",
+		description: "List stored duplicate clusters for a repository, or provide kind and number to read the current cluster containing one exact member. Use " + mcpcontract.ToolFindNeighbors + " to compute similarity outside the stored projection.",
+		annotations: readOnly, input: inputSchema[mcpcontract.FindClustersInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 			setMinimum(schema, "number", 1)
 			requireTogether(schema, "kind", "number")
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
-		}), output: outputSchema[FindClustersOutput]("Stored duplicate clusters."), handler: s.findClusters,
+		}), output: outputSchema[mcpcontract.FindClustersOutput]("Stored duplicate clusters."), handler: s.findClusters,
 	})
-	addCatalogTool(s, catalogTool[FindNeighborsInput, FindNeighborsOutput]{
-		name: ToolFindNeighbors, title: "Find similar threads",
+	addCatalogTool(s, catalogTool[mcpcontract.FindNeighborsInput, mcpcontract.FindNeighborsOutput]{
+		name: mcpcontract.ToolFindNeighbors, title: "Find similar threads",
 		description: "Rank stored threads similar to one issue or pull request using transparent deterministic scoring. Use this for a specific source thread; it never contacts GitHub.",
-		annotations: readOnly, supportedBy: supports[NeighborReader], input: inputSchema[FindNeighborsInput](func(schema *schemaBuilder) {
+		annotations: readOnly, supportedBy: supports[NeighborReader], input: inputSchema[mcpcontract.FindNeighborsInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 			setMinimum(schema, "number", 1)
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 10)
-		}), output: outputSchema[FindNeighborsOutput]("Similar stored threads with transparent scores."), handler: s.findNeighbors,
+		}), output: outputSchema[mcpcontract.FindNeighborsOutput]("Similar stored threads with transparent scores."), handler: s.findNeighbors,
 	})
-	addCatalogTool(s, catalogTool[GetCoverageInput, GetCoverageOutput]{
-		name: ToolGetCoverage, title: "Get stored facet coverage in one batch",
+	addCatalogTool(s, catalogTool[mcpcontract.GetCoverageInput, mcpcontract.GetCoverageOutput]{
+		name: mcpcontract.ToolGetCoverage, title: "Get stored facet coverage in one batch",
 		description: "Read offline facet coverage for up to 100 repository or exact-thread targets with ordered item-level outcomes.",
-		annotations: readOnly, input: inputSchema[GetCoverageInput](func(sc *schemaBuilder) { setArrayBounds(sc, "targets", 1, 100) }),
-		output: outputSchema[GetCoverageOutput]("Ordered local repository or thread facet coverage."), handler: s.getCoverage,
+		annotations: readOnly, input: inputSchema[mcpcontract.GetCoverageInput](func(sc *schemaBuilder) { setArrayBounds(sc, "targets", 1, 100) }),
+		output: outputSchema[mcpcontract.GetCoverageOutput]("Ordered local repository or thread facet coverage."), handler: s.getCoverage,
 	})
 	s.registerResourceTemplates()
 	s.registerContributionPrompts()
@@ -316,153 +311,153 @@ func (s *Server) register() {
 
 func boolPtr(v bool) *bool { return &v }
 
-func (s *Server) searchCode(ctx context.Context, _ *mcp.CallToolRequest, in SearchCodeInput) (*mcp.CallToolResult, SearchCodeOutput, error) {
+func (s *Server) searchCode(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SearchCodeInput) (*mcp.CallToolResult, mcpcontract.SearchCodeOutput, error) {
 	if in.Query == "" {
-		return nil, SearchCodeOutput{}, InvalidArgument("query", "is required", map[string]any{"query": "MIDI"})
+		return nil, mcpcontract.SearchCodeOutput{}, mcpcontract.InvalidArgument("query", "is required", map[string]any{"query": "MIDI"})
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, SearchCodeOutput{}, InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
+		return nil, mcpcontract.SearchCodeOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	if (in.Owner == "") != (in.Repo == "") {
-		return nil, SearchCodeOutput{}, InvalidArgument("owner", "owner and repo must be provided together", map[string]any{"owner": "acme", "repo": "synth"})
+		return nil, mcpcontract.SearchCodeOutput{}, mcpcontract.InvalidArgument("owner", "owner and repo must be provided together", map[string]any{"owner": "acme", "repo": "synth"})
 	}
 	out, err := s.reader.SearchCode(ctx, in)
 	return nil, out, err
 }
 
-func (s *Server) investigation(ctx context.Context, _ *mcp.CallToolRequest, in InvestigationInput) (*mcp.CallToolResult, InvestigationOutput, error) {
+func (s *Server) investigation(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.InvestigationInput) (*mcp.CallToolResult, mcpcontract.InvestigationOutput, error) {
 	id, err := normalizeID("id", in.ID)
 	if err != nil {
-		return nil, InvestigationOutput{}, err
+		return nil, mcpcontract.InvestigationOutput{}, err
 	}
 	in.ID = id
 	if in.HypothesisLimit == 0 {
 		in.HypothesisLimit = 20
 	}
 	if in.HypothesisLimit < 1 || in.HypothesisLimit > 100 {
-		return nil, InvestigationOutput{}, errors.New("hypothesis_limit must be between 1 and 100")
+		return nil, mcpcontract.InvestigationOutput{}, errors.New("hypothesis_limit must be between 1 and 100")
 	}
 	out, err := s.reader.Investigation(ctx, in)
 	return nil, out, err
 }
 
-func (s *Server) listOpportunities(ctx context.Context, _ *mcp.CallToolRequest, in ListOpportunitiesInput) (*mcp.CallToolResult, ListOpportunitiesOutput, error) {
+func (s *Server) listOpportunities(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.ListOpportunitiesInput) (*mcp.CallToolResult, mcpcontract.ListOpportunitiesOutput, error) {
 	id, err := normalizeID("investigation_id", in.InvestigationID)
 	if err != nil {
-		return nil, ListOpportunitiesOutput{}, err
+		return nil, mcpcontract.ListOpportunitiesOutput{}, err
 	}
 	in.InvestigationID = id
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, ListOpportunitiesOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, mcpcontract.ListOpportunitiesOutput{}, errors.New("limit must be between 1 and 100")
 	}
 	out, err := s.reader.ListOpportunities(ctx, in)
 	return nil, out, err
 }
 
-func (s *Server) opportunity(ctx context.Context, _ *mcp.CallToolRequest, in OpportunityInput) (*mcp.CallToolResult, OpportunityOutput, error) {
+func (s *Server) opportunity(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.OpportunityInput) (*mcp.CallToolResult, mcpcontract.OpportunityOutput, error) {
 	id, err := normalizeID("id", in.ID)
 	if err != nil {
-		return nil, OpportunityOutput{}, err
+		return nil, mcpcontract.OpportunityOutput{}, err
 	}
 	in.ID = id
 	if in.EvidenceLimit == 0 {
 		in.EvidenceLimit = 20
 	}
 	if in.EvidenceLimit < 1 || in.EvidenceLimit > 100 {
-		return nil, OpportunityOutput{}, errors.New("evidence_limit must be between 1 and 100")
+		return nil, mcpcontract.OpportunityOutput{}, errors.New("evidence_limit must be between 1 and 100")
 	}
 	out, err := s.reader.Opportunity(ctx, in)
 	return nil, out, err
 }
 
-func (s *Server) evidence(ctx context.Context, _ *mcp.CallToolRequest, in EvidenceInput) (*mcp.CallToolResult, EvidenceOutput, error) {
+func (s *Server) evidence(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.EvidenceInput) (*mcp.CallToolResult, mcpcontract.EvidenceOutput, error) {
 	in.InvestigationID = strings.TrimSpace(in.InvestigationID)
 	in.OpportunityID = strings.TrimSpace(in.OpportunityID)
 	if (in.InvestigationID == "") == (in.OpportunityID == "") {
-		return nil, EvidenceOutput{}, errors.New("exactly one of investigation_id or opportunity_id is required")
+		return nil, mcpcontract.EvidenceOutput{}, errors.New("exactly one of investigation_id or opportunity_id is required")
 	}
 	if in.InvestigationID != "" {
 		if _, err := normalizeID("investigation_id", in.InvestigationID); err != nil {
-			return nil, EvidenceOutput{}, err
+			return nil, mcpcontract.EvidenceOutput{}, err
 		}
 	} else if _, err := normalizeID("opportunity_id", in.OpportunityID); err != nil {
-		return nil, EvidenceOutput{}, err
+		return nil, mcpcontract.EvidenceOutput{}, err
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, EvidenceOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, mcpcontract.EvidenceOutput{}, errors.New("limit must be between 1 and 100")
 	}
 	out, err := s.reader.Evidence(ctx, in)
 	return nil, out, err
 }
 
-func (s *Server) readiness(ctx context.Context, _ *mcp.CallToolRequest, in ReadinessInput) (*mcp.CallToolResult, ReadinessOutput, error) {
+func (s *Server) readiness(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.ReadinessInput) (*mcp.CallToolResult, mcpcontract.ReadinessOutput, error) {
 	id, err := normalizeID("opportunity_id", in.OpportunityID)
 	if err != nil {
-		return nil, ReadinessOutput{}, err
+		return nil, mcpcontract.ReadinessOutput{}, err
 	}
 	in.OpportunityID = id
 	out, err := s.reader.Readiness(ctx, in)
 	return nil, out, err
 }
 
-func (s *Server) findClusters(ctx context.Context, _ *mcp.CallToolRequest, in FindClustersInput) (*mcp.CallToolResult, FindClustersOutput, error) {
-	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
-		return nil, FindClustersOutput{}, err
+func (s *Server) findClusters(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.FindClustersInput) (*mcp.CallToolResult, mcpcontract.FindClustersOutput, error) {
+	if err := validateRepo(mcpcontract.RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
+		return nil, mcpcontract.FindClustersOutput{}, err
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, FindClustersOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, mcpcontract.FindClustersOutput{}, errors.New("limit must be between 1 and 100")
 	}
 	out, err := s.reader.FindClusters(ctx, in)
 	return nil, out, err
 }
 
-func (s *Server) findNeighbors(ctx context.Context, _ *mcp.CallToolRequest, in FindNeighborsInput) (*mcp.CallToolResult, FindNeighborsOutput, error) {
-	if err := validateRepo(RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
-		return nil, FindNeighborsOutput{}, err
+func (s *Server) findNeighbors(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.FindNeighborsInput) (*mcp.CallToolResult, mcpcontract.FindNeighborsOutput, error) {
+	if err := validateRepo(mcpcontract.RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
+		return nil, mcpcontract.FindNeighborsOutput{}, err
 	}
 	if in.Kind != "issue" && in.Kind != "pull_request" {
-		return nil, FindNeighborsOutput{}, errors.New("kind must be issue or pull_request")
+		return nil, mcpcontract.FindNeighborsOutput{}, errors.New("kind must be issue or pull_request")
 	}
 	if in.Number <= 0 {
-		return nil, FindNeighborsOutput{}, errors.New("number must be positive")
+		return nil, mcpcontract.FindNeighborsOutput{}, errors.New("number must be positive")
 	}
 	if in.Limit == 0 {
 		in.Limit = 10
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, FindNeighborsOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, mcpcontract.FindNeighborsOutput{}, errors.New("limit must be between 1 and 100")
 	}
 	reader, ok := s.reader.(NeighborReader)
 	if !ok {
-		return nil, FindNeighborsOutput{}, errors.New("neighbor queries are not available")
+		return nil, mcpcontract.FindNeighborsOutput{}, errors.New("neighbor queries are not available")
 	}
 	out, err := reader.FindNeighbors(ctx, in)
 	return nil, out, err
 }
 
-func (s *Server) getCoverage(ctx context.Context, _ *mcp.CallToolRequest, in GetCoverageInput) (*mcp.CallToolResult, GetCoverageOutput, error) {
+func (s *Server) getCoverage(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.GetCoverageInput) (*mcp.CallToolResult, mcpcontract.GetCoverageOutput, error) {
 	if len(in.Targets) < 1 || len(in.Targets) > 100 {
-		return nil, GetCoverageOutput{}, errors.New("targets must contain 1 to 100 items")
+		return nil, mcpcontract.GetCoverageOutput{}, errors.New("targets must contain 1 to 100 items")
 	}
 	out, err := s.reader.GetCoverage(ctx, in)
 	return nil, out, err
 }
 
-func validateRepo(in RepoInput) error {
+func validateRepo(in mcpcontract.RepoInput) error {
 	if strings.TrimSpace(in.Owner) == "" || strings.TrimSpace(in.Repo) == "" {
-		return InvalidArgument("owner", "owner and repo are required together", map[string]any{"owner": "acme", "repo": "rocket"})
+		return mcpcontract.InvalidArgument("owner", "owner and repo are required together", map[string]any{"owner": "acme", "repo": "rocket"})
 	}
 	return nil
 }
@@ -470,10 +465,10 @@ func validateRepo(in RepoInput) error {
 func normalizeID(field, value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", InvalidArgument(field, "is required", map[string]any{field: "<id>"})
+		return "", mcpcontract.InvalidArgument(field, "is required", map[string]any{field: "<id>"})
 	}
 	if len(value) > 128 {
-		return "", InvalidArgument(field, "must not exceed 128 bytes", map[string]any{field: "<id>"})
+		return "", mcpcontract.InvalidArgument(field, "must not exceed 128 bytes", map[string]any{field: "<id>"})
 	}
 	return value, nil
 }

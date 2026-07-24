@@ -7,11 +7,13 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/morluto/gitcontribute/internal/contracts"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type setupStartedMsg SetupPhase
-type setupCompletedMsg SetupStep
+type setupStartedMsg contracts.SetupPhase
+type setupCompletedMsg contracts.SetupStep
 type setupFinishedMsg struct{}
 
 type setupProgressModel struct {
@@ -34,7 +36,7 @@ func (m setupProgressModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		m.active = string(message)
 		return m, nil
 	case setupCompletedMsg:
-		step := SetupStep(message)
+		step := contracts.SetupStep(message)
 		m.active = ""
 		m.completed = append(m.completed, fmt.Sprintf("%s %s — %s", setupProgressSymbol(step.Status), setupStepLabel(step.Name), step.Status))
 		return m, nil
@@ -71,11 +73,11 @@ func startSetupProgress(output io.Writer) *setupProgressRenderer {
 	return &setupProgressRenderer{program: program, done: done}
 }
 
-func (r *setupProgressRenderer) SetupStarted(phase SetupPhase) {
+func (r *setupProgressRenderer) SetupStarted(phase contracts.SetupPhase) {
 	r.program.Send(setupStartedMsg(phase))
 }
 
-func (r *setupProgressRenderer) SetupCompleted(step SetupStep) {
+func (r *setupProgressRenderer) SetupCompleted(step contracts.SetupStep) {
 	r.program.Send(setupCompletedMsg(step))
 }
 

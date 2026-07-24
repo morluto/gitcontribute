@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // CreateWorkspaceInput configures a durable managed-workspace creation job.
@@ -15,26 +16,26 @@ import (
 
 // AdoptWorkspaceOutput deliberately omits host paths and remote URLs.
 
-func (s *Server) adoptWorkspace(ctx context.Context, _ *mcp.CallToolRequest, in AdoptWorkspaceInput) (*mcp.CallToolResult, AdoptWorkspaceOutput, error) {
+func (s *Server) adoptWorkspace(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.AdoptWorkspaceInput) (*mcp.CallToolResult, mcpcontract.AdoptWorkspaceOutput, error) {
 	var err error
 	if in.InvestigationID, err = normalizeID("investigation_id", in.InvestigationID); err != nil {
-		return nil, AdoptWorkspaceOutput{}, err
+		return nil, mcpcontract.AdoptWorkspaceOutput{}, err
 	}
 	in.Path, in.BaseRef, in.Name = strings.TrimSpace(in.Path), strings.TrimSpace(in.BaseRef), strings.TrimSpace(in.Name)
 	if in.Path == "" || in.BaseRef == "" {
-		return nil, AdoptWorkspaceOutput{}, errors.New("path and base_ref are required")
+		return nil, mcpcontract.AdoptWorkspaceOutput{}, errors.New("path and base_ref are required")
 	}
 	operator, ok := s.reader.(WorkspaceAdopter)
 	if !ok {
-		return nil, AdoptWorkspaceOutput{}, errors.New("workspace adoption is not available")
+		return nil, mcpcontract.AdoptWorkspaceOutput{}, errors.New("workspace adoption is not available")
 	}
 	out, err := operator.AdoptWorkspace(ctx, in)
 	return nil, out, err
 }
 
-func (s *Server) createWorkspace(ctx context.Context, _ *mcp.CallToolRequest, in CreateWorkspaceInput) (*mcp.CallToolResult, JobReference, error) {
+func (s *Server) createWorkspace(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.CreateWorkspaceInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
 	if _, err := normalizeID("investigation_id", in.InvestigationID); err != nil {
-		return nil, JobReference{}, err
+		return nil, mcpcontract.JobReference{}, err
 	}
 	in.Remote = strings.TrimSpace(in.Remote)
 	in.BaseRef = strings.TrimSpace(in.BaseRef)
@@ -42,7 +43,7 @@ func (s *Server) createWorkspace(ctx context.Context, _ *mcp.CallToolRequest, in
 	in.Name = strings.TrimSpace(in.Name)
 	operator, ok := s.reader.(WorkspaceCreator)
 	if !ok {
-		return nil, JobReference{}, errors.New("workspace creation is not available")
+		return nil, mcpcontract.JobReference{}, errors.New("workspace creation is not available")
 	}
 	out, err := operator.CreateWorkspace(ctx, in)
 	return nil, out, err

@@ -1,8 +1,12 @@
 package cli
 
-import "fmt"
+import (
+	"fmt"
 
-func threadInvestigationHuman(result *ThreadInvestigationResult) string {
+	"github.com/morluto/gitcontribute/internal/contracts"
+)
+
+func threadInvestigationHuman(result *contracts.ThreadInvestigationResult) string {
 	if result == nil || result.Investigation == nil || result.Hypothesis == nil {
 		return "Thread investigation result is incomplete."
 	}

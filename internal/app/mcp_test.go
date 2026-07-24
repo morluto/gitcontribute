@@ -13,7 +13,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 func TestMCPReaderSearchCodeIntegration(t *testing.T) {
@@ -34,10 +34,10 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	}
 
 	reader := svc.MCPReader()
-	if _, err := reader.SearchCode(ctx, mcpserver.SearchCodeInput{Owner: "owner", Repo: "repo", Query: " \t "}); err == nil {
+	if _, err := reader.SearchCode(ctx, mcpcontract.SearchCodeInput{Owner: "owner", Repo: "repo", Query: " \t "}); err == nil {
 		t.Fatal("whitespace-only code query was accepted")
 	}
-	out, err := reader.SearchCode(ctx, mcpserver.SearchCodeInput{Query: "searchableParser", Limit: 10})
+	out, err := reader.SearchCode(ctx, mcpcontract.SearchCodeInput{Query: "searchableParser", Limit: 10})
 	if err != nil {
 		t.Fatalf("search code: %v", err)
 	}
@@ -54,14 +54,14 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	if len(out.Coverage) != 1 || out.Coverage[0].Repo != "owner/repo" || out.Coverage[0].Status != "indexed" || !out.Coverage[0].Truncated || out.Coverage[0].IndexedFiles != 1 || out.Coverage[0].SkippedFiles != 2 {
 		t.Fatalf("unexpected code coverage: %+v", out.Coverage)
 	}
-	missing, err := reader.SearchCode(ctx, mcpserver.SearchCodeInput{Owner: "owner", Repo: "repo", Query: "doesNotExist", Limit: 10})
+	missing, err := reader.SearchCode(ctx, mcpcontract.SearchCodeInput{Owner: "owner", Repo: "repo", Query: "doesNotExist", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(missing.Matches) != 0 || len(missing.Coverage) != 1 || missing.Coverage[0].Status != "indexed" || !missing.Coverage[0].Truncated {
 		t.Fatalf("zero-match search lost index coverage: %+v", missing)
 	}
-	unindexed, err := reader.SearchCode(ctx, mcpserver.SearchCodeInput{Owner: "owner", Repo: "unindexed", Query: "anything", Limit: 10})
+	unindexed, err := reader.SearchCode(ctx, mcpcontract.SearchCodeInput{Owner: "owner", Repo: "unindexed", Query: "anything", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	legacy, err := reader.SearchCode(ctx, mcpserver.SearchCodeInput{Owner: "owner", Repo: "legacy", Query: "anything", Limit: 10})
+	legacy, err := reader.SearchCode(ctx, mcpcontract.SearchCodeInput{Owner: "owner", Repo: "legacy", Query: "anything", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestMCPReaderRepositorySearchDoesNotFallBackFromMissingExactRepository(t *t
 		t.Fatalf("store repository: %v", err)
 	}
 
-	out, err := svc.MCPReader().SearchRepositories(ctx, mcpserver.SearchRepositoriesInput{
+	out, err := svc.MCPReader().SearchRepositories(ctx, mcpcontract.SearchRepositoriesInput{
 		Owner: "owner", Repo: "missing", Query: "searchable", Limit: 10,
 	})
 	if err != nil {
@@ -131,7 +131,7 @@ func TestMCPReaderRepositorySearchDoesNotFallBackFromMissingExactRepository(t *t
 	if out.Total != 0 || len(out.Matches) != 0 {
 		t.Fatalf("missing exact repository returned global matches: %+v", out)
 	}
-	out, err = svc.MCPReader().SearchRepositories(ctx, mcpserver.SearchRepositoriesInput{
+	out, err = svc.MCPReader().SearchRepositories(ctx, mcpcontract.SearchRepositoriesInput{
 		Owner: "owner", Repo: "present", Query: "unrelated", Limit: 10,
 	})
 	if err != nil {
@@ -140,7 +140,7 @@ func TestMCPReaderRepositorySearchDoesNotFallBackFromMissingExactRepository(t *t
 	if out.Total != 0 || len(out.Matches) != 0 {
 		t.Fatalf("exact repository bypassed query matching: %+v", out)
 	}
-	blank, err := svc.MCPReader().SearchRepositories(ctx, mcpserver.SearchRepositoriesInput{
+	blank, err := svc.MCPReader().SearchRepositories(ctx, mcpcontract.SearchRepositoriesInput{
 		Owner: "owner", Repo: "present", Query: " \t ", Limit: 10,
 	})
 	if err != nil {
@@ -169,11 +169,11 @@ func TestMCPReaderExplainRejectsNonMatchingThreadAndRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader := svc.MCPReader()
-	for _, input := range []mcpserver.ExplainMatchInput{
+	for _, input := range []mcpcontract.ExplainMatchInput{
 		{Owner: "owner", Repo: "repo", Kind: "issue", Number: 1, Query: "unrelated"},
 		{Owner: "owner", Repo: "repo", Kind: "repo", Query: "unrelated"},
 	} {
-		if _, err := reader.ExplainMatch(ctx, input); !errors.Is(err, mcpserver.ErrNotFound) {
+		if _, err := reader.ExplainMatch(ctx, input); !errors.Is(err, mcpcontract.ErrNotFound) {
 			t.Fatalf("ExplainMatch(%+v) error = %v, want ErrNotFound", input, err)
 		}
 	}
@@ -204,14 +204,14 @@ func TestMCPReaderSearchAndExplainUseFacetEvidence(t *testing.T) {
 	}
 
 	reader := svc.MCPReader()
-	search, err := reader.Search(ctx, mcpserver.SearchInput{Owner: "owner", Repo: "repo", Kind: "issue", Query: "rare evidence", Limit: 10})
+	search, err := reader.Search(ctx, mcpcontract.SearchInput{Owner: "owner", Repo: "repo", Kind: "issue", Query: "rare evidence", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(search.Matches) != 1 || search.Matches[0].MatchSource != FacetIssueComments || !strings.Contains(search.Matches[0].MatchExcerpt, "rare") || search.Matches[0].MatchUpdatedAt != commentsAt.Format(time.RFC3339) {
 		t.Fatalf("MCP facet search = %+v", search)
 	}
-	explanation, err := reader.ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+	explanation, err := reader.ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
 		Owner: "owner", Repo: "repo", Kind: "issue", Number: 1, Query: "rare evidence", Limit: 10,
 	})
 	if err != nil {
@@ -237,10 +237,10 @@ func TestMCPReaderExplainCodeRejectsDifferentRequestedPath(t *testing.T) {
 		t.Fatalf("store code snapshot: %v", err)
 	}
 
-	_, err := svc.MCPReader().ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+	_, err := svc.MCPReader().ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
 		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Query: "searchableParser", Path: "missing.go", Limit: 10,
 	})
-	if !errors.Is(err, mcpserver.ErrNotFound) {
+	if !errors.Is(err, mcpcontract.ErrNotFound) {
 		t.Fatalf("explain different path error = %v, want ErrNotFound", err)
 	}
 }
@@ -275,7 +275,7 @@ func TestMCPReaderExplainCodeExactPathNotOnFirstSearchPage(t *testing.T) {
 	}
 
 	// Confirm the target is not on the first search page.
-	searchOut, err := svc.MCPReader().SearchCode(ctx, mcpserver.SearchCodeInput{
+	searchOut, err := svc.MCPReader().SearchCode(ctx, mcpcontract.SearchCodeInput{
 		Owner: ref.Owner, Repo: ref.Repo, Query: "searchableParser", Limit: 20,
 	})
 	if err != nil {
@@ -287,7 +287,7 @@ func TestMCPReaderExplainCodeExactPathNotOnFirstSearchPage(t *testing.T) {
 		}
 	}
 
-	out, err := svc.MCPReader().ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+	out, err := svc.MCPReader().ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
 		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Query: "searchableParser", Path: "target.go",
 	})
 	if err != nil {
@@ -313,10 +313,10 @@ func TestMCPReaderExplainCodeRejectsNonMatchingQuery(t *testing.T) {
 		t.Fatalf("store code snapshot: %v", err)
 	}
 
-	_, err := svc.MCPReader().ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+	_, err := svc.MCPReader().ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
 		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Query: "searchableParser", Path: "parser.go",
 	})
-	if !errors.Is(err, mcpserver.ErrNotFound) {
+	if !errors.Is(err, mcpcontract.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for non-matching query, got %v", err)
 	}
 }
@@ -336,14 +336,14 @@ func TestMCPReaderExplainCodeRejectsWrongCommit(t *testing.T) {
 		t.Fatalf("store code snapshot: %v", err)
 	}
 
-	_, err := svc.MCPReader().ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+	_, err := svc.MCPReader().ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
 		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Path: "parser.go", Commit: "deadbeef",
 	})
-	if !errors.Is(err, mcpserver.ErrNotFound) {
+	if !errors.Is(err, mcpcontract.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for wrong commit, got %v", err)
 	}
 
-	out, err := svc.MCPReader().ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+	out, err := svc.MCPReader().ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
 		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Path: "parser.go", Commit: "abc123",
 	})
 	if err != nil {
@@ -369,10 +369,10 @@ func TestMCPReaderExplainThreadRejectsDifferentRequestedKind(t *testing.T) {
 		t.Fatalf("store pull request: %v", err)
 	}
 
-	_, err = svc.MCPReader().ExplainMatch(ctx, mcpserver.ExplainMatchInput{
+	_, err = svc.MCPReader().ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
 		Owner: "owner", Repo: "repo", Kind: "issue", Number: 1, Query: "searchable", Limit: 10,
 	})
-	if !errors.Is(err, mcpserver.ErrNotFound) {
+	if !errors.Is(err, mcpcontract.ErrNotFound) {
 		t.Fatalf("explain different kind error = %v, want ErrNotFound", err)
 	}
 }
@@ -427,7 +427,7 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 
 	reader := svc.MCPReader()
 
-	invOut, err := reader.Investigation(ctx, mcpserver.InvestigationInput{ID: inv.ID, HypothesisLimit: 1})
+	invOut, err := reader.Investigation(ctx, mcpcontract.InvestigationInput{ID: inv.ID, HypothesisLimit: 1})
 	if err != nil {
 		t.Fatalf("get investigation: %v", err)
 	}
@@ -438,7 +438,7 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 		t.Fatalf("unexpected hypotheses: %+v", invOut.Hypotheses)
 	}
 
-	listOut, err := reader.ListOpportunities(ctx, mcpserver.ListOpportunitiesInput{InvestigationID: inv.ID, Limit: 10})
+	listOut, err := reader.ListOpportunities(ctx, mcpcontract.ListOpportunitiesInput{InvestigationID: inv.ID, Limit: 10})
 	if err != nil {
 		t.Fatalf("list opportunities: %v", err)
 	}
@@ -446,7 +446,7 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 		t.Fatalf("unexpected opportunities: %+v", listOut)
 	}
 
-	oppOut, err := reader.Opportunity(ctx, mcpserver.OpportunityInput{ID: opp.ID, EvidenceLimit: 1})
+	oppOut, err := reader.Opportunity(ctx, mcpcontract.OpportunityInput{ID: opp.ID, EvidenceLimit: 1})
 	if err != nil {
 		t.Fatalf("get opportunity: %v", err)
 	}
@@ -460,7 +460,7 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 		t.Fatalf("unexpected evidence ids: %+v", oppOut.EvidenceIDs)
 	}
 
-	evOut, err := reader.Evidence(ctx, mcpserver.EvidenceInput{OpportunityID: opp.ID, Limit: 10})
+	evOut, err := reader.Evidence(ctx, mcpcontract.EvidenceInput{OpportunityID: opp.ID, Limit: 10})
 	if err != nil {
 		t.Fatalf("get evidence: %v", err)
 	}
@@ -473,7 +473,7 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 		}
 	}
 
-	evByInv, err := reader.Evidence(ctx, mcpserver.EvidenceInput{InvestigationID: inv.ID, Relation: "supporting", Limit: 10})
+	evByInv, err := reader.Evidence(ctx, mcpcontract.EvidenceInput{InvestigationID: inv.ID, Relation: "supporting", Limit: 10})
 	if err != nil {
 		t.Fatalf("get evidence by investigation: %v", err)
 	}
@@ -486,7 +486,7 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 		t.Fatalf("seed repository projection: %v", err)
 	}
 
-	readinessOut, err := reader.Readiness(ctx, mcpserver.ReadinessInput{OpportunityID: opp.ID})
+	readinessOut, err := reader.Readiness(ctx, mcpcontract.ReadinessInput{OpportunityID: opp.ID})
 	if err != nil {
 		t.Fatalf("get readiness: %v", err)
 	}

@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 )
 
@@ -96,7 +96,7 @@ func TestNeighborsRankedWithScoreAndReason(t *testing.T) {
 	seedIssueForNeighbors(t, c, repo.ID, 2, "login crash on startup", "the login page crashes", "alice", []string{"bug"})
 	seedIssueForNeighbors(t, c, repo.ID, 3, "add dark mode", "theme support", "bob", []string{"enhancement"})
 
-	res, err := svc.Neighbors(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
+	res, err := svc.Neighbors(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
 	if err != nil {
 		t.Fatalf("neighbors: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestNeighborsRankedWithScoreAndReason(t *testing.T) {
 		}
 	}
 
-	limited, err := svc.Neighbors(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 1)
+	limited, err := svc.Neighbors(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 1)
 	if err != nil {
 		t.Fatalf("limited neighbors: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestNeighborsStableTieOrdering(t *testing.T) {
 		seedIssueForNeighbors(t, c, repo.ID, n, "identical title", "identical body", "alice", []string{"bug"})
 	}
 
-	res, err := svc.Neighbors(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 2)
+	res, err := svc.Neighbors(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 2)
 	if err != nil {
 		t.Fatalf("neighbors: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestNeighborsExcludesQueryAndMissingThread(t *testing.T) {
 	seedIssueForNeighbors(t, c, repo.ID, 1, "query", "body", "alice", nil)
 	seedIssueForNeighbors(t, c, repo.ID, 2, "other", "body", "bob", nil)
 
-	res, err := svc.Neighbors(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
+	res, err := svc.Neighbors(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
 	if err != nil {
 		t.Fatalf("neighbors: %v", err)
 	}
@@ -193,10 +193,10 @@ func TestNeighborsExcludesQueryAndMissingThread(t *testing.T) {
 		}
 	}
 
-	if _, err := svc.Neighbors(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 99, 10); err == nil {
+	if _, err := svc.Neighbors(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 99, 10); err == nil {
 		t.Fatal("expected error for missing thread")
 	}
-	if _, err := svc.Neighbors(ctx, cli.RepoRef{Owner: "unknown", Repo: "repo"}, "issue", 1, 10); err == nil {
+	if _, err := svc.Neighbors(ctx, contracts.RepoRef{Owner: "unknown", Repo: "repo"}, "issue", 1, 10); err == nil {
 		t.Fatal("expected error for missing repository")
 	}
 }
@@ -215,11 +215,11 @@ func TestDuplicateCandidatesReturnsClusterMembers(t *testing.T) {
 	seedIssueForNeighbors(t, c, repo.ID, 1, "fix login crash", "login crashes on startup", "alice", []string{"bug"})
 	seedIssueForNeighbors(t, c, repo.ID, 2, "fix login crash", "the login page crashes", "alice", []string{"bug"})
 
-	if _, err := svc.RefreshClusters(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}); err != nil {
+	if _, err := svc.RefreshClusters(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}); err != nil {
 		t.Fatalf("compute clusters: %v", err)
 	}
 
-	res, err := svc.DuplicateCandidates(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
+	res, err := svc.DuplicateCandidates(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
 	if err != nil {
 		t.Fatalf("duplicate candidates: %v", err)
 	}
@@ -260,11 +260,11 @@ func TestDuplicateCandidatesEmptyWhenNoCluster(t *testing.T) {
 	seedIssueForNeighbors(t, c, repo.ID, 1, "unrelated one", "body", "alice", nil)
 	seedIssueForNeighbors(t, c, repo.ID, 2, "unrelated two", "body", "bob", nil)
 
-	if _, err := svc.RefreshClusters(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}); err != nil {
+	if _, err := svc.RefreshClusters(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}); err != nil {
 		t.Fatalf("compute clusters: %v", err)
 	}
 
-	res, err := svc.DuplicateCandidates(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
+	res, err := svc.DuplicateCandidates(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
 	if err != nil {
 		t.Fatalf("duplicate candidates: %v", err)
 	}
@@ -280,13 +280,13 @@ func TestNeighborQueriesRejectInvalidInput(t *testing.T) {
 	defer func() { _ = svc.Close() }()
 
 	cases := []struct {
-		repo   cli.RepoRef
+		repo   contracts.RepoRef
 		kind   string
 		number int
 	}{
-		{repo: cli.RepoRef{Owner: "", Repo: "repo"}, kind: "issue", number: 1},
-		{repo: cli.RepoRef{Owner: "owner", Repo: "repo"}, kind: "unknown", number: 1},
-		{repo: cli.RepoRef{Owner: "owner", Repo: "repo"}, kind: "issue", number: 0},
+		{repo: contracts.RepoRef{Owner: "", Repo: "repo"}, kind: "issue", number: 1},
+		{repo: contracts.RepoRef{Owner: "owner", Repo: "repo"}, kind: "unknown", number: 1},
+		{repo: contracts.RepoRef{Owner: "owner", Repo: "repo"}, kind: "issue", number: 0},
 	}
 	for _, tc := range cases {
 		if _, err := svc.Neighbors(ctx, tc.repo, tc.kind, tc.number, 10); err == nil {
@@ -311,13 +311,13 @@ func TestNeighborsSourceRevisionReflectsPopulation(t *testing.T) {
 	seedIssueForNeighbors(t, c, repo.ID, 1, "query", "body", "alice", nil)
 	seedIssueForNeighbors(t, c, repo.ID, 2, "neighbor", "body", "bob", nil)
 
-	first, err := svc.Neighbors(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
+	first, err := svc.Neighbors(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
 	if err != nil {
 		t.Fatalf("first neighbors: %v", err)
 	}
 
 	seedIssueForNeighbors(t, c, repo.ID, 3, "another", "body", "carol", nil)
-	second, err := svc.Neighbors(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
+	second, err := svc.Neighbors(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
 	if err != nil {
 		t.Fatalf("second neighbors: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestNeighborsSourceRevisionReflectsPopulation(t *testing.T) {
 		t.Fatal("source revision did not change when population changed")
 	}
 
-	third, err := svc.Neighbors(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
+	third, err := svc.Neighbors(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
 	if err != nil {
 		t.Fatalf("third neighbors: %v", err)
 	}
@@ -348,7 +348,7 @@ func TestNeighborResultJSONShape(t *testing.T) {
 	seedIssueForNeighbors(t, c, repo.ID, 1, "fix login crash", "body", "alice", []string{"bug"})
 	seedIssueForNeighbors(t, c, repo.ID, 2, "login crash on startup", "body", "alice", []string{"bug"})
 
-	res, err := svc.Neighbors(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
+	res, err := svc.Neighbors(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "issue", 1, 10)
 	if err != nil {
 		t.Fatalf("neighbors: %v", err)
 	}
@@ -382,7 +382,7 @@ func TestPullRequestCollisions(t *testing.T) {
 	seedPullRequestForNeighbors(t, c, repo.ID, 4, "old fix", "body", "dave", "closed", "main")
 	seedPullRequestForNeighbors(t, c, repo.ID, 5, "other branch", "body", "eve", "open", "dev")
 
-	res, err := svc.PullRequestCollisions(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, 1, 10)
+	res, err := svc.PullRequestCollisions(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, 10)
 	if err != nil {
 		t.Fatalf("collisions: %v", err)
 	}
@@ -418,7 +418,7 @@ func TestPullRequestCollisions(t *testing.T) {
 		}
 	}
 
-	limited, err := svc.PullRequestCollisions(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, 1, 1)
+	limited, err := svc.PullRequestCollisions(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, 1)
 	if err != nil {
 		t.Fatalf("limited collisions: %v", err)
 	}
@@ -429,7 +429,7 @@ func TestPullRequestCollisions(t *testing.T) {
 		t.Fatalf("limited collision bounds = %+v", limited)
 	}
 
-	closed, err := svc.PullRequestCollisions(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, 4, 10)
+	closed, err := svc.PullRequestCollisions(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 4, 10)
 	if err != nil {
 		t.Fatalf("closed query collisions: %v", err)
 	}

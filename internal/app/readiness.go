@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/contribution"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -26,7 +26,7 @@ const (
 )
 
 // OpportunityReadiness evaluates local, source-backed readiness checks for one opportunity.
-func (s *Service) OpportunityReadiness(ctx context.Context, opportunityID string) (*cli.ReadinessResult, error) {
+func (s *Service) OpportunityReadiness(ctx context.Context, opportunityID string) (*contracts.ReadinessResult, error) {
 	if strings.TrimSpace(opportunityID) == "" {
 		return nil, errors.New("opportunity id is required")
 	}
@@ -56,7 +56,7 @@ func (s *Service) OpportunityReadiness(ctx context.Context, opportunityID string
 	if err != nil {
 		return nil, err
 	}
-	return &cli.ReadinessResult{
+	return &contracts.ReadinessResult{
 		OpportunityID:  opp.ID,
 		RuleSetVersion: readinessRuleSetVersion,
 		Status:         aggregateReadinessStatus(checks),
@@ -66,7 +66,7 @@ func (s *Service) OpportunityReadiness(ctx context.Context, opportunityID string
 }
 
 // ExplainReadiness re-evaluates readiness and returns the requested check.
-func (s *Service) ExplainReadiness(ctx context.Context, checkID string) (*cli.ReadinessCheck, error) {
+func (s *Service) ExplainReadiness(ctx context.Context, checkID string) (*contracts.ReadinessCheck, error) {
 	opportunityID, ruleID, ok := strings.Cut(strings.TrimSpace(checkID), ":")
 	if !ok || opportunityID == "" || ruleID == "" {
 		return nil, fmt.Errorf("invalid readiness check id %q: expected <opportunity-id>:<rule-id>", checkID)
@@ -97,19 +97,19 @@ type readinessEvaluator struct {
 	runs       []*evidence.ValidationRun
 }
 
-func (r *readinessEvaluator) evaluate() ([]cli.ReadinessCheck, error) {
+func (r *readinessEvaluator) evaluate() ([]contracts.ReadinessCheck, error) {
 	if err := r.load(); err != nil {
 		return nil, err
 	}
-	var checks []cli.ReadinessCheck
-	add := func(check cli.ReadinessCheck, err error) error {
+	var checks []contracts.ReadinessCheck
+	add := func(check contracts.ReadinessCheck, err error) error {
 		if err != nil {
 			return err
 		}
 		checks = append(checks, check)
 		return nil
 	}
-	for _, fn := range []func() (cli.ReadinessCheck, error){
+	for _, fn := range []func() (contracts.ReadinessCheck, error){
 		r.repositoryArchived,
 		r.targetThreadOpen,
 		r.baselineFresh,
@@ -155,7 +155,7 @@ func (r *readinessEvaluator) load() error {
 	return nil
 }
 
-func (r *readinessEvaluator) repositoryArchived() (cli.ReadinessCheck, error) {
+func (r *readinessEvaluator) repositoryArchived() (contracts.ReadinessCheck, error) {
 	if r.repository == nil {
 		return r.check("repository_archived", readinessUnknown, "Repository metadata is not present in the local corpus.", nil, "Run an explicit sync before preparing the contribution."), nil
 	}
@@ -165,7 +165,7 @@ func (r *readinessEvaluator) repositoryArchived() (cli.ReadinessCheck, error) {
 	return r.check("repository_archived", readinessPass, "Repository is not archived.", []string{"repo:" + r.inv.Repo.String()}, ""), nil
 }
 
-func (r *readinessEvaluator) targetThreadOpen() (cli.ReadinessCheck, error) {
+func (r *readinessEvaluator) targetThreadOpen() (contracts.ReadinessCheck, error) {
 	if r.inv.ThreadBaseline == nil {
 		return r.check("target_thread_open", readinessUnknown, "Opportunity is not tied to a stored target thread baseline.", nil, "Start from a stored issue or PR thread, or add an explicit source reference."), nil
 	}
@@ -174,7 +174,7 @@ func (r *readinessEvaluator) targetThreadOpen() (cli.ReadinessCheck, error) {
 	}
 	thread, err := r.corpus.GetThread(r.ctx, r.repository.ID, string(r.inv.ThreadBaseline.Kind), r.inv.ThreadBaseline.Number)
 	if err != nil {
-		return cli.ReadinessCheck{}, fmt.Errorf("read readiness target thread: %w", err)
+		return contracts.ReadinessCheck{}, fmt.Errorf("read readiness target thread: %w", err)
 	}
 	ref := r.inv.ThreadBaseline.Ref()
 	if thread == nil {
@@ -186,7 +186,7 @@ func (r *readinessEvaluator) targetThreadOpen() (cli.ReadinessCheck, error) {
 	return r.check("target_thread_open", readinessPass, "Target thread is open.", []string{ref}, ""), nil
 }
 
-func (r *readinessEvaluator) baselineFresh() (cli.ReadinessCheck, error) {
+func (r *readinessEvaluator) baselineFresh() (contracts.ReadinessCheck, error) {
 	if r.inv.ThreadBaseline == nil {
 		return r.check("baseline_freshness", readinessUnknown, "No immutable thread baseline is recorded.", nil, "Start from a stored thread or re-check the target manually."), nil
 	}
@@ -196,7 +196,7 @@ func (r *readinessEvaluator) baselineFresh() (cli.ReadinessCheck, error) {
 	}
 	freshness, err := evidence.NewFreshnessEvaluator(r.corpus).Evaluate(r.ctx, item)
 	if err != nil {
-		return cli.ReadinessCheck{}, fmt.Errorf("evaluate readiness baseline freshness: %w", err)
+		return contracts.ReadinessCheck{}, fmt.Errorf("evaluate readiness baseline freshness: %w", err)
 	}
 	switch freshness.Status {
 	case evidence.FreshnessFresh:
@@ -208,10 +208,10 @@ func (r *readinessEvaluator) baselineFresh() (cli.ReadinessCheck, error) {
 	}
 }
 
-func (r *readinessEvaluator) guidancePresent() (cli.ReadinessCheck, error) {
+func (r *readinessEvaluator) guidancePresent() (contracts.ReadinessCheck, error) {
 	guidance, refs, err := (&corpusReader{s: r.service}).ReadContributionGuidance(r.ctx, r.inv.Repo)
 	if err != nil {
-		return cli.ReadinessCheck{}, fmt.Errorf("read readiness guidance: %w", err)
+		return contracts.ReadinessCheck{}, fmt.Errorf("read readiness guidance: %w", err)
 	}
 	if strings.TrimSpace(guidance) == "" || len(refs) == 0 {
 		return r.check("guidance_present", readinessUnknown, "No source-backed contribution or AI guidance is present in the local corpus.", nil, "Explicitly refresh repository guidance before preparing a public submission."), nil
@@ -219,7 +219,7 @@ func (r *readinessEvaluator) guidancePresent() (cli.ReadinessCheck, error) {
 	return r.check("guidance_present", readinessPass, "Source-backed contribution guidance is available.", sourceRefStrings(refs), ""), nil
 }
 
-func (r *readinessEvaluator) collisionStatus() (cli.ReadinessCheck, error) {
+func (r *readinessEvaluator) collisionStatus() (contracts.ReadinessCheck, error) {
 	switch r.opportunity.CollisionStatus {
 	case investigation.CollisionNone:
 		return r.check("collision_status", readinessPass, "No known competing work is recorded.", nil, ""), nil
@@ -232,7 +232,7 @@ func (r *readinessEvaluator) collisionStatus() (cli.ReadinessCheck, error) {
 	}
 }
 
-func (r *readinessEvaluator) validationPresence() (cli.ReadinessCheck, error) {
+func (r *readinessEvaluator) validationPresence() (contracts.ReadinessCheck, error) {
 	refs := validationRefs(r.runs)
 	switch {
 	case len(r.defs) == 0:
@@ -244,7 +244,7 @@ func (r *readinessEvaluator) validationPresence() (cli.ReadinessCheck, error) {
 	}
 }
 
-func (r *readinessEvaluator) candidateImprovesBaseline() (cli.ReadinessCheck, error) {
+func (r *readinessEvaluator) candidateImprovesBaseline() (contracts.ReadinessCheck, error) {
 	if len(r.runs) == 0 {
 		return r.check("candidate_improves_baseline", readinessUnknown, "No validation runs are available to compare base and candidate behavior.", nil, "Run base and candidate validation before preparing a PR."), nil
 	}
@@ -268,7 +268,7 @@ func (r *readinessEvaluator) candidateImprovesBaseline() (cli.ReadinessCheck, er
 				if base := baseFailing[run.DefinitionID]; base != nil {
 					comparison, err := evidence.Compare(base, run)
 					if err != nil {
-						return cli.ReadinessCheck{}, fmt.Errorf("compare readiness validation runs: %w", err)
+						return contracts.ReadinessCheck{}, fmt.Errorf("compare readiness validation runs: %w", err)
 					}
 					refs := []string{"validation_run:" + base.ID, "validation_run:" + run.ID}
 					if comparison.Classification == evidence.ComparisonFixed {
@@ -290,7 +290,7 @@ func (r *readinessEvaluator) candidateImprovesBaseline() (cli.ReadinessCheck, er
 	return r.check("candidate_improves_baseline", readinessUnknown, "No candidate validation run is recorded.", validationDefinitionRefs(r.defs), "Run candidate validation before preparing a PR."), nil
 }
 
-func (r *readinessEvaluator) evidenceFreshness() (cli.ReadinessCheck, error) {
+func (r *readinessEvaluator) evidenceFreshness() (contracts.ReadinessCheck, error) {
 	if len(r.evidence) == 0 {
 		return r.check("evidence_freshness", readinessUnknown, "No evidence is scoped to this opportunity.", nil, "Record supporting evidence before preparing the contribution."), nil
 	}
@@ -299,7 +299,7 @@ func (r *readinessEvaluator) evidenceFreshness() (cli.ReadinessCheck, error) {
 	for _, item := range r.evidence {
 		f, err := freshness.Evaluate(r.ctx, item)
 		if err != nil {
-			return cli.ReadinessCheck{}, fmt.Errorf("evaluate readiness evidence %q: %w", item.ID, err)
+			return contracts.ReadinessCheck{}, fmt.Errorf("evaluate readiness evidence %q: %w", item.ID, err)
 		}
 		switch f.Status {
 		case evidence.FreshnessStale:
@@ -317,7 +317,7 @@ func (r *readinessEvaluator) evidenceFreshness() (cli.ReadinessCheck, error) {
 	return r.check("evidence_freshness", readinessPass, "Evidence is fresh or local-only.", evidenceRefs(r.evidence), ""), nil
 }
 
-func (r *readinessEvaluator) contradictingEvidence() (cli.ReadinessCheck, error) {
+func (r *readinessEvaluator) contradictingEvidence() (contracts.ReadinessCheck, error) {
 	var refs []string
 	for _, item := range r.evidence {
 		if item.Relation == evidence.RelationContradicting {
@@ -330,14 +330,14 @@ func (r *readinessEvaluator) contradictingEvidence() (cli.ReadinessCheck, error)
 	return r.check("contradicting_evidence", readinessPass, "No contradicting evidence is scoped to this opportunity.", evidenceRefs(r.evidence), ""), nil
 }
 
-func (r *readinessEvaluator) draftReferencesEvidence() (cli.ReadinessCheck, error) {
+func (r *readinessEvaluator) draftReferencesEvidence() (contracts.ReadinessCheck, error) {
 	issue, issueErr := r.corpus.GetIssueDraft(r.ctx, r.opportunity.ID)
 	if issueErr != nil && !errors.Is(issueErr, contribution.ErrNotFound) {
-		return cli.ReadinessCheck{}, fmt.Errorf("read issue draft: %w", issueErr)
+		return contracts.ReadinessCheck{}, fmt.Errorf("read issue draft: %w", issueErr)
 	}
 	pr, prErr := r.corpus.GetPullRequestDraft(r.ctx, r.opportunity.ID)
 	if prErr != nil && !errors.Is(prErr, contribution.ErrNotFound) {
-		return cli.ReadinessCheck{}, fmt.Errorf("read pull request draft: %w", prErr)
+		return contracts.ReadinessCheck{}, fmt.Errorf("read pull request draft: %w", prErr)
 	}
 	var drafts []struct {
 		kind string
@@ -371,8 +371,8 @@ func (r *readinessEvaluator) draftReferencesEvidence() (cli.ReadinessCheck, erro
 	return r.check("draft_references_evidence", readinessWarn, "A local draft exists but does not appear to reference recorded evidence.", draftRefs(drafts), "Regenerate the draft after recording evidence."), nil
 }
 
-func (r *readinessEvaluator) check(ruleID, status, summary string, refs []string, remediation string) cli.ReadinessCheck {
-	return cli.ReadinessCheck{
+func (r *readinessEvaluator) check(ruleID, status, summary string, refs []string, remediation string) contracts.ReadinessCheck {
+	return contracts.ReadinessCheck{
 		CheckID:      r.opportunity.ID + ":" + ruleID,
 		RuleID:       ruleID,
 		RuleVersion:  readinessRuleVersion,
@@ -384,7 +384,7 @@ func (r *readinessEvaluator) check(ruleID, status, summary string, refs []string
 	}
 }
 
-func aggregateReadinessStatus(checks []cli.ReadinessCheck) string {
+func aggregateReadinessStatus(checks []contracts.ReadinessCheck) string {
 	status := readinessPass
 	for _, check := range checks {
 		switch check.Status {

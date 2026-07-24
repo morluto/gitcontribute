@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/radar"
 )
 
@@ -25,135 +26,135 @@ func writeJSON(w io.Writer, v any) error {
 
 func humanOutput(v any) (string, error) {
 	switch r := v.(type) {
-	case *InitResult:
+	case *contracts.InitResult:
 		return initHuman(r), nil
-	case *StatusResult:
+	case *contracts.StatusResult:
 		return statusHuman(r), nil
-	case *MetadataResult:
+	case *contracts.MetadataResult:
 		return metadataHuman(r), nil
-	case *ConfigureResult:
+	case *contracts.ConfigureResult:
 		return configureHuman(r), nil
-	case *ControlStatusResult:
+	case *contracts.ControlStatusResult:
 		return controlStatusHuman(r), nil
-	case *DoctorResult:
+	case *contracts.DoctorResult:
 		return doctorHuman(r), nil
-	case *CorpusInspectionResult:
+	case *contracts.CorpusInspectionResult:
 		return corpusInspectionHuman(r), nil
-	case *CorpusBackupResult:
+	case *contracts.CorpusBackupResult:
 		result := fmt.Sprintf("Backed up corpus to %s (%d bytes, sha256 %s)", r.Path, r.SizeBytes, r.SHA256)
 		if r.ManifestPath != "" {
 			result += fmt.Sprintf("\nManifest: %s (schema %d, expected %d, %s)", r.ManifestPath, r.SourceSchema, r.ExpectedSchema, r.Compatibility)
 		}
 		return result, nil
-	case *CorpusMigrationResult:
+	case *contracts.CorpusMigrationResult:
 		return corpusMigrationHuman(r), nil
-	case *CorpusRestoreResult:
+	case *contracts.CorpusRestoreResult:
 		return corpusRestoreHuman(r), nil
-	case *CorpusInventoryResult:
+	case *contracts.CorpusInventoryResult:
 		return corpusInventoryHuman(r), nil
-	case *CorpusInventoryListResult:
+	case *contracts.CorpusInventoryListResult:
 		return corpusInventoryListHuman(r), nil
-	case *CorpusPruneResult:
+	case *contracts.CorpusPruneResult:
 		return corpusPruneHuman(r), nil
-	case *CorpusRepositoryRemovalResult:
+	case *contracts.CorpusRepositoryRemovalResult:
 		return corpusRepositoryRemovalHuman(r), nil
-	case *CorpusProjectionListResult:
+	case *contracts.CorpusProjectionListResult:
 		return corpusProjectionListHuman(r), nil
-	case *CorpusProjectionResult:
+	case *contracts.CorpusProjectionResult:
 		return corpusProjectionHuman("Rebuilt projection", r), nil
-	case *SyncResult:
+	case *contracts.SyncResult:
 		return syncHuman(r), nil
 	case *radar.Report:
 		return radarHuman(r), nil
-	case *SearchResult:
+	case *contracts.SearchResult:
 		return searchHuman(r), nil
-	case *DossierResult:
+	case *contracts.DossierResult:
 		return dossierHuman(r), nil
-	case *IndexResult:
+	case *contracts.IndexResult:
 		return fmt.Sprintf("Indexed %s at %s: %d files, %d bytes.\n%s", r.Repo, r.Commit, r.Files, r.Bytes, r.Message), nil
-	case *SourceResult:
+	case *contracts.SourceResult:
 		return fmt.Sprintf("Source %s (%s): %s", r.Name, r.Kind, r.Definition), nil
-	case *SourceListResult:
+	case *contracts.SourceListResult:
 		return sourceListHuman(r), nil
-	case *CrawlResult:
+	case *contracts.CrawlResult:
 		return crawlHuman(r), nil
-	case *InvestigationResult:
+	case *contracts.InvestigationResult:
 		return investigationHuman(r), nil
-	case *ThreadInvestigationResult:
+	case *contracts.ThreadInvestigationResult:
 		return threadInvestigationHuman(r), nil
-	case *InvestigationListResult:
+	case *contracts.InvestigationListResult:
 		return investigationListHuman(r), nil
-	case *HypothesisResult:
+	case *contracts.HypothesisResult:
 		return hypothesisHuman(r), nil
-	case *HypothesisListResult:
+	case *contracts.HypothesisListResult:
 		return hypothesisListHuman(r), nil
-	case *OpportunityResult:
+	case *contracts.OpportunityResult:
 		return opportunityHuman(r), nil
-	case *OpportunityListResult:
+	case *contracts.OpportunityListResult:
 		return opportunityListHuman(r), nil
-	case *WorkspaceResult:
+	case *contracts.WorkspaceResult:
 		return workspaceHuman(r), nil
-	case *ConcernResult:
+	case *contracts.ConcernResult:
 		return concernHuman(r), nil
-	case *ConcernListResult:
+	case *contracts.ConcernListResult:
 		return concernListHuman(r), nil
-	case *ValidationResult:
+	case *contracts.ValidationResult:
 		return validationHuman(r), nil
-	case *ValidationRunResult:
+	case *contracts.ValidationRunResult:
 		return validationRunHuman(r), nil
-	case *ValidationRunGroupResult:
+	case *contracts.ValidationRunGroupResult:
 		return validationRunGroupHuman(r), nil
-	case *ValidationComparisonResult:
+	case *contracts.ValidationComparisonResult:
 		return validationComparisonHuman(r), nil
-	case *EvidenceResult:
+	case *contracts.EvidenceResult:
 		return evidenceHuman(r), nil
-	case *ReadinessResult:
+	case *contracts.ReadinessResult:
 		return readinessHuman(r), nil
-	case *ReadinessCheck:
+	case *contracts.ReadinessCheck:
 		return readinessCheckHuman(r), nil
-	case *DraftResult:
+	case *contracts.DraftResult:
 		return draftHuman(r), nil
-	case *ClusterListResult:
+	case *contracts.ClusterListResult:
 		return clusterListHuman(r), nil
-	case *ClusterRefreshResult:
+	case *contracts.ClusterRefreshResult:
 		return fmt.Sprintf("cluster projection %s for %s (%d candidates, %d comparisons, rule %s)", r.Disposition, r.Repo, r.Stats.CandidateCount, r.Stats.ComparedPairs, r.Projection.RuleVersion), nil
-	case *ClusterResult:
+	case *contracts.ClusterResult:
 		return clusterHuman(r), nil
-	case *LensResult:
+	case *contracts.LensResult:
 		return lensHuman(r), nil
-	case *LensListResult:
+	case *contracts.LensListResult:
 		return lensListHuman(r), nil
-	case *LensExplainResult:
+	case *contracts.LensExplainResult:
 		return lensExplainHuman(r), nil
-	case *CollectionResult:
+	case *contracts.CollectionResult:
 		return collectionHuman(r), nil
-	case *CollectionListResult:
+	case *contracts.CollectionListResult:
 		return collectionListHuman(r), nil
-	case *HydrateResult:
+	case *contracts.HydrateResult:
 		return hydrateHuman(r), nil
-	case *CoverageResult:
+	case *contracts.CoverageResult:
 		return coverageHuman(r), nil
-	case *RunListResult:
+	case *contracts.RunListResult:
 		return runsHuman(r), nil
-	case *JobListResult:
+	case *contracts.JobListResult:
 		return jobsHuman(r), nil
-	case *JobResult:
+	case *contracts.JobResult:
 		return jobHuman(r), nil
-	case *NeighborListResult:
+	case *contracts.NeighborListResult:
 		return neighborsHuman(r), nil
-	case *TriageEventResult:
+	case *contracts.TriageEventResult:
 		return triageEventHuman(r), nil
-	case *TriageEventListResult:
+	case *contracts.TriageEventListResult:
 		return triageEventListHuman(r), nil
-	case *ContributionResult:
+	case *contracts.ContributionResult:
 		return contributionHuman(r), nil
-	case *ContributionListResult:
+	case *contracts.ContributionListResult:
 		return contributionListHuman(r), nil
-	case *ContributionOutcomeResult:
+	case *contracts.ContributionOutcomeResult:
 		return contributionOutcomeHuman(r), nil
-	case *ContributionOutcomeListResult:
+	case *contracts.ContributionOutcomeListResult:
 		return contributionOutcomeListHuman(r), nil
-	case *MetadataImportResult:
+	case *contracts.MetadataImportResult:
 		return metadataImportHuman(r), nil
 	default:
 		payload, err := json.MarshalIndent(v, "", "  ")
@@ -243,12 +244,12 @@ func oneLine(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
-func metadataHuman(r *MetadataResult) string {
+func metadataHuman(r *contracts.MetadataResult) string {
 	return fmt.Sprintf("%s %s (%s/%s, %s)\nSchema: %d\nCorpus: %s\nCapabilities: %s",
 		r.Name, r.Version, r.OS, r.Architecture, r.GoVersion, r.SchemaVersion, r.CorpusPath, strings.Join(r.Capabilities, ", "))
 }
 
-func configureHuman(r *ConfigureResult) string {
+func configureHuman(r *contracts.ConfigureResult) string {
 	action := "Configuration unchanged"
 	if r.Changed {
 		action = "Configuration updated"
@@ -262,7 +263,7 @@ func configureHuman(r *ConfigureResult) string {
 		r.Config.OutputFormat, r.Config.OutputMaxResults)
 }
 
-func controlStatusHuman(r *ControlStatusResult) string {
+func controlStatusHuman(r *contracts.ControlStatusResult) string {
 	state := "healthy"
 	if !r.Healthy {
 		state = "not healthy"
@@ -287,7 +288,7 @@ func controlStatusHuman(r *ControlStatusResult) string {
 	return b.String()
 }
 
-func doctorHuman(r *DoctorResult) string {
+func doctorHuman(r *contracts.DoctorResult) string {
 	state := "healthy"
 	if !r.Healthy {
 		state = "unhealthy"
@@ -300,7 +301,7 @@ func doctorHuman(r *DoctorResult) string {
 	return b.String()
 }
 
-func jobsHuman(r *JobListResult) string {
+func jobsHuman(r *contracts.JobListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d jobs", len(r.Jobs))
 	for i := range r.Jobs {
@@ -309,7 +310,7 @@ func jobsHuman(r *JobListResult) string {
 	return b.String()
 }
 
-func jobHuman(r *JobResult) string {
+func jobHuman(r *contracts.JobResult) string {
 	line := fmt.Sprintf("%s %s [%s] created %s", r.ID, r.Kind, r.Status, r.CreatedAt)
 	if r.Progress != "" {
 		line += ": " + r.Progress
@@ -320,7 +321,7 @@ func jobHuman(r *JobResult) string {
 	return line
 }
 
-func hydrateHuman(r *HydrateResult) string {
+func hydrateHuman(r *contracts.HydrateResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Hydrated %s#%d (%s): %d requests", r.Repo, r.Number, r.Kind, r.Requests)
 	for _, facet := range r.Facets {
@@ -333,7 +334,7 @@ func hydrateHuman(r *HydrateResult) string {
 	return b.String()
 }
 
-func coverageHuman(r *CoverageResult) string {
+func coverageHuman(r *contracts.CoverageResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Coverage for %s:", r.Repo)
 	if len(r.Facets) == 0 {
@@ -353,7 +354,7 @@ func coverageHuman(r *CoverageResult) string {
 	return b.String()
 }
 
-func runsHuman(r *RunListResult) string {
+func runsHuman(r *contracts.RunListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d runs", len(r.Runs))
 	for _, run := range r.Runs {
@@ -365,7 +366,7 @@ func runsHuman(r *RunListResult) string {
 	return b.String()
 }
 
-func neighborsHuman(r *NeighborListResult) string {
+func neighborsHuman(r *contracts.NeighborListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Neighbors for %s:%s#%d (revision %s)", r.Repo, r.Kind, r.Number, r.SourceRevision)
 	if len(r.Neighbors) == 0 {
@@ -378,11 +379,11 @@ func neighborsHuman(r *NeighborListResult) string {
 	return b.String()
 }
 
-func initHuman(r *InitResult) string {
+func initHuman(r *contracts.InitResult) string {
 	return fmt.Sprintf("Initialized corpus at %s.\n%s", r.Path, r.Message)
 }
 
-func statusHuman(r *StatusResult) string {
+func statusHuman(r *contracts.StatusResult) string {
 	state := "not healthy"
 	if r.Healthy {
 		state = "healthy"
@@ -390,7 +391,7 @@ func statusHuman(r *StatusResult) string {
 	return fmt.Sprintf("Status: %s (corpus=%s version=%s)\n%s", state, r.Corpus, r.Version, r.Message)
 }
 
-func syncHuman(r *SyncResult) string {
+func syncHuman(r *contracts.SyncResult) string {
 	planning := ""
 	if r.PlannedRequests > 0 {
 		planning = fmt.Sprintf(" Requests: %d actual, up to %d planned (budget %d).", r.Requests, r.PlannedRequests, r.RequestBudget)
@@ -398,7 +399,7 @@ func syncHuman(r *SyncResult) string {
 	return fmt.Sprintf("Synced %s: %d updated.%s\n%s", r.Repo, r.Updated, planning, r.Message)
 }
 
-func searchHuman(r *SearchResult) string {
+func searchHuman(r *contracts.SearchResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Search: %s (kind=%s, limit=%d)", r.Query, r.Kind, r.Limit)
 	if r.Repo != "" {
@@ -422,7 +423,7 @@ func searchHuman(r *SearchResult) string {
 	return b.String()
 }
 
-func dossierHuman(r *DossierResult) string {
+func dossierHuman(r *contracts.DossierResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Dossier: %s\n", r.Repo)
 	fmt.Fprintf(&b, "Summary: %s\n", r.Summary)
@@ -434,7 +435,7 @@ func dossierHuman(r *DossierResult) string {
 	return b.String()
 }
 
-func investigationHuman(r *InvestigationResult) string {
+func investigationHuman(r *contracts.InvestigationResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Investigation: %s (%s)\n", r.ID, r.Status)
 	fmt.Fprintf(&b, "Repository: %s", r.Repo)
@@ -449,7 +450,7 @@ func investigationHuman(r *InvestigationResult) string {
 	return b.String()
 }
 
-func investigationListHuman(r *InvestigationListResult) string {
+func investigationListHuman(r *contracts.InvestigationListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d %s", len(r.Investigations), pluralize(len(r.Investigations), "investigation", "investigations"))
 	for _, inv := range r.Investigations {
@@ -458,7 +459,7 @@ func investigationListHuman(r *InvestigationListResult) string {
 	return b.String()
 }
 
-func hypothesisHuman(r *HypothesisResult) string {
+func hypothesisHuman(r *contracts.HypothesisResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Hypothesis: %s (%s)\n", r.ID, r.Status)
 	fmt.Fprintf(&b, "Investigation: %s\n", r.InvestigationID)
@@ -469,7 +470,7 @@ func hypothesisHuman(r *HypothesisResult) string {
 	return b.String()
 }
 
-func hypothesisListHuman(r *HypothesisListResult) string {
+func hypothesisListHuman(r *contracts.HypothesisListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d %s", len(r.Hypotheses), pluralize(len(r.Hypotheses), "hypothesis", "hypotheses"))
 	for _, h := range r.Hypotheses {
@@ -478,7 +479,7 @@ func hypothesisListHuman(r *HypothesisListResult) string {
 	return b.String()
 }
 
-func opportunityHuman(r *OpportunityResult) string {
+func opportunityHuman(r *contracts.OpportunityResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Opportunity: %s (%s)\n", r.ID, r.Status)
 	fmt.Fprintf(&b, "Investigation: %s\n", r.InvestigationID)
@@ -495,7 +496,7 @@ func opportunityHuman(r *OpportunityResult) string {
 	return b.String()
 }
 
-func opportunityListHuman(r *OpportunityListResult) string {
+func opportunityListHuman(r *contracts.OpportunityListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d %s", len(r.Opportunities), pluralize(len(r.Opportunities), "opportunity", "opportunities"))
 	if r.Filter != "" {
@@ -507,7 +508,7 @@ func opportunityListHuman(r *OpportunityListResult) string {
 	return b.String()
 }
 
-func crawlHuman(r *CrawlResult) string {
+func crawlHuman(r *contracts.CrawlResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Crawled %s: %d repositories", r.Source, r.Repositories)
 	if r.Threads > 0 {
@@ -533,7 +534,7 @@ func pluralize(n int, singular, plural string) string {
 	return plural
 }
 
-func workspaceHuman(r *WorkspaceResult) string {
+func workspaceHuman(r *contracts.WorkspaceResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Workspace: %s (investigation=%s, repo=%s, dirty=%v)\n", r.ID, r.InvestigationID, r.Repo, r.Dirty)
 	fmt.Fprintf(&b, "Path: %s\n", r.Path)
@@ -545,7 +546,7 @@ func workspaceHuman(r *WorkspaceResult) string {
 	return b.String()
 }
 
-func concernHuman(r *ConcernResult) string {
+func concernHuman(r *contracts.ConcernResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Concern: %s [%s] %s\n", r.ID, r.Status, r.Title)
 	fmt.Fprintf(&b, "Repository: %s\nProblem: %s\nConfidence: %.2f\nFreshness: %s", r.Repo, r.ProblemStatement, r.Confidence, r.Freshness)
@@ -558,7 +559,7 @@ func concernHuman(r *ConcernResult) string {
 	return b.String()
 }
 
-func concernListHuman(r *ConcernListResult) string {
+func concernListHuman(r *contracts.ConcernListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Concerns: %d", r.Total)
 	if r.Truncated {
@@ -570,7 +571,7 @@ func concernListHuman(r *ConcernListResult) string {
 	return b.String()
 }
 
-func draftHuman(r *DraftResult) string {
+func draftHuman(r *contracts.DraftResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s draft for opportunity %s\n", r.Kind, r.OpportunityID)
 	fmt.Fprintf(&b, "Title: %s\n", r.Title)
@@ -579,7 +580,7 @@ func draftHuman(r *DraftResult) string {
 	return b.String()
 }
 
-func clusterHuman(r *ClusterResult) string {
+func clusterHuman(r *contracts.ClusterResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Cluster: %s (%s)\n", r.StableID, r.State)
 	fmt.Fprintf(&b, "Canonical: %s/%s:%s#%d\n", r.Canonical.Owner, r.Canonical.Repo, r.Canonical.Kind, r.Canonical.Number)
@@ -594,7 +595,7 @@ func clusterHuman(r *ClusterResult) string {
 	return strings.TrimSpace(b.String())
 }
 
-func lensHuman(r *LensResult) string {
+func lensHuman(r *contracts.LensResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Lens: %s\n", r.Name)
 	f := r.Definition.Filter
@@ -633,7 +634,7 @@ func lensHuman(r *LensResult) string {
 	return b.String()
 }
 
-func lensExplainHuman(r *LensExplainResult) string {
+func lensExplainHuman(r *contracts.LensExplainResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Lens: %s\n", r.Lens.Name)
 	c := r.Candidate
@@ -672,7 +673,7 @@ func lensExplainHuman(r *LensExplainResult) string {
 	return strings.TrimSpace(b.String())
 }
 
-func collectionHuman(r *CollectionResult) string {
+func collectionHuman(r *contracts.CollectionResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Collection: %s\n", r.Name)
 	fmt.Fprintf(&b, "Members: %d\n", r.MemberCount)
@@ -680,7 +681,7 @@ func collectionHuman(r *CollectionResult) string {
 	return b.String()
 }
 
-func triageEventHuman(r *TriageEventResult) string {
+func triageEventHuman(r *contracts.TriageEventResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Triage event: %s (%s)\n", r.ID, r.Outcome)
 	fmt.Fprintf(&b, "Target: %s %s\n", r.TargetKind, r.TargetRef)
@@ -694,7 +695,7 @@ func triageEventHuman(r *TriageEventResult) string {
 	return b.String()
 }
 
-func triageEventListHuman(r *TriageEventListResult) string {
+func triageEventListHuman(r *contracts.TriageEventListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d triage events (limit %d)", len(r.Events), r.Limit)
 	for _, e := range r.Events {
@@ -709,7 +710,7 @@ func triageEventListHuman(r *TriageEventListResult) string {
 	return b.String()
 }
 
-func contributionHuman(r *ContributionResult) string {
+func contributionHuman(r *contracts.ContributionResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Contribution: %s (%s)\n", r.ID, r.Kind)
 	fmt.Fprintf(&b, "Opportunity: %s\n", r.OpportunityID)
@@ -724,7 +725,7 @@ func contributionHuman(r *ContributionResult) string {
 	return b.String()
 }
 
-func contributionListHuman(r *ContributionListResult) string {
+func contributionListHuman(r *contracts.ContributionListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d contributions (limit %d)", len(r.Contributions), r.Limit)
 	for _, c := range r.Contributions {
@@ -733,7 +734,7 @@ func contributionListHuman(r *ContributionListResult) string {
 	return b.String()
 }
 
-func contributionOutcomeHuman(r *ContributionOutcomeResult) string {
+func contributionOutcomeHuman(r *contracts.ContributionOutcomeResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Contribution outcome: %s (%s)\n", r.ID, r.Outcome)
 	fmt.Fprintf(&b, "Contribution: %s\n", r.ContributionID)
@@ -744,7 +745,7 @@ func contributionOutcomeHuman(r *ContributionOutcomeResult) string {
 	return b.String()
 }
 
-func contributionOutcomeListHuman(r *ContributionOutcomeListResult) string {
+func contributionOutcomeListHuman(r *contracts.ContributionOutcomeListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d outcomes for contribution %s", len(r.Outcomes), r.ContributionID)
 	for _, o := range r.Outcomes {
@@ -756,7 +757,7 @@ func contributionOutcomeListHuman(r *ContributionOutcomeListResult) string {
 	return b.String()
 }
 
-func metadataImportHuman(r *MetadataImportResult) string {
+func metadataImportHuman(r *contracts.MetadataImportResult) string {
 	return fmt.Sprintf("Imported tracking bundle v%d: %d triage events, %d contributions, %d contribution outcomes, %d evidence records",
 		r.SchemaVersion, r.TriageEvents, r.Contributions, r.ContributionOutcomes, r.Evidence)
 }

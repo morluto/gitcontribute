@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"strings"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/tracking"
 )
 
-var _ cli.TrackingService = (*Service)(nil)
+var _ contracts.TrackingService = (*Service)(nil)
 
 // RecordTriageEvent records a local triage or feedback outcome for a typed target.
-func (s *Service) RecordTriageEvent(ctx context.Context, opts cli.RecordTriageEventOptions) (*cli.TriageEventResult, error) {
+func (s *Service) RecordTriageEvent(ctx context.Context, opts contracts.RecordTriageEventOptions) (*contracts.TriageEventResult, error) {
 	kind, ref, err := parseTrackingTarget(opts.Target)
 	if err != nil {
 		return nil, err
@@ -36,7 +36,7 @@ func (s *Service) RecordTriageEvent(ctx context.Context, opts cli.RecordTriageEv
 }
 
 // ListTriageEvents returns local triage outcomes in source-event order.
-func (s *Service) ListTriageEvents(ctx context.Context, opts cli.ListTriageEventsOptions) (*cli.TriageEventListResult, error) {
+func (s *Service) ListTriageEvents(ctx context.Context, opts contracts.ListTriageEventsOptions) (*contracts.TriageEventListResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -51,16 +51,16 @@ func (s *Service) ListTriageEvents(ctx context.Context, opts cli.ListTriageEvent
 	if err != nil {
 		return nil, err
 	}
-	out := make([]cli.TriageEventResult, len(events))
+	out := make([]contracts.TriageEventResult, len(events))
 	for i, e := range events {
 		out[i] = *triageEventResult(e)
 	}
-	return &cli.TriageEventListResult{Events: out, Limit: opts.Limit, Total: len(out)}, nil
+	return &contracts.TriageEventListResult{Events: out, Limit: opts.Limit, Total: len(out)}, nil
 }
 
 // RecordContribution stores prepared or submitted contribution metadata for an
 // opportunity, keeping it separate from live GitHub state.
-func (s *Service) RecordContribution(ctx context.Context, opts cli.RecordContributionOptions) (*cli.ContributionResult, error) {
+func (s *Service) RecordContribution(ctx context.Context, opts contracts.RecordContributionOptions) (*contracts.ContributionResult, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -80,7 +80,7 @@ func (s *Service) RecordContribution(ctx context.Context, opts cli.RecordContrib
 }
 
 // GetContribution returns contribution metadata by durable id.
-func (s *Service) GetContribution(ctx context.Context, id string) (*cli.ContributionResult, error) {
+func (s *Service) GetContribution(ctx context.Context, id string) (*contracts.ContributionResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -93,7 +93,7 @@ func (s *Service) GetContribution(ctx context.Context, id string) (*cli.Contribu
 }
 
 // ListContributions returns contribution metadata in prepared-at order.
-func (s *Service) ListContributions(ctx context.Context, opts cli.ListContributionsOptions) (*cli.ContributionListResult, error) {
+func (s *Service) ListContributions(ctx context.Context, opts contracts.ListContributionsOptions) (*contracts.ContributionListResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -106,15 +106,15 @@ func (s *Service) ListContributions(ctx context.Context, opts cli.ListContributi
 	if err != nil {
 		return nil, err
 	}
-	out := make([]cli.ContributionResult, len(items))
+	out := make([]contracts.ContributionResult, len(items))
 	for i, item := range items {
 		out[i] = *contributionResult(item)
 	}
-	return &cli.ContributionListResult{Contributions: out, Limit: opts.Limit, Total: len(out)}, nil
+	return &contracts.ContributionListResult{Contributions: out, Limit: opts.Limit, Total: len(out)}, nil
 }
 
 // RecordContributionOutcome stores a lifecycle outcome for a contribution.
-func (s *Service) RecordContributionOutcome(ctx context.Context, opts cli.RecordContributionOutcomeOptions) (*cli.ContributionOutcomeResult, error) {
+func (s *Service) RecordContributionOutcome(ctx context.Context, opts contracts.RecordContributionOutcomeOptions) (*contracts.ContributionOutcomeResult, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -131,7 +131,7 @@ func (s *Service) RecordContributionOutcome(ctx context.Context, opts cli.Record
 }
 
 // ListContributionOutcomes returns lifecycle outcomes for a contribution.
-func (s *Service) ListContributionOutcomes(ctx context.Context, contributionID string) (*cli.ContributionOutcomeListResult, error) {
+func (s *Service) ListContributionOutcomes(ctx context.Context, contributionID string) (*contracts.ContributionOutcomeListResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -140,17 +140,17 @@ func (s *Service) ListContributionOutcomes(ctx context.Context, contributionID s
 	if err != nil {
 		return nil, err
 	}
-	out := make([]cli.ContributionOutcomeResult, len(outcomes))
+	out := make([]contracts.ContributionOutcomeResult, len(outcomes))
 	for i, o := range outcomes {
 		out[i] = *contributionOutcomeResult(o)
 	}
-	return &cli.ContributionOutcomeListResult{ContributionID: contributionID, Outcomes: out}, nil
+	return &contracts.ContributionOutcomeListResult{ContributionID: contributionID, Outcomes: out}, nil
 }
 
 // ExportLocalMetadata returns a bounded, redacted, deterministic JSON export of
 // local tracking metadata. It does not include tokens, credentials, or absolute
 // local paths.
-func (s *Service) ExportLocalMetadata(ctx context.Context, opts cli.MetadataExportOptions) (*cli.MetadataExportResult, error) {
+func (s *Service) ExportLocalMetadata(ctx context.Context, opts contracts.MetadataExportOptions) (*contracts.MetadataExportResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -163,7 +163,7 @@ func (s *Service) ExportLocalMetadata(ctx context.Context, opts cli.MetadataExpo
 	if err != nil {
 		return nil, fmt.Errorf("marshal local metadata: %w", err)
 	}
-	return &cli.MetadataExportResult{
+	return &contracts.MetadataExportResult{
 		SchemaVersion:        bundle.SchemaVersion,
 		Data:                 json.RawMessage(data),
 		TriageEvents:         len(bundle.TriageEvents),
@@ -175,7 +175,7 @@ func (s *Service) ExportLocalMetadata(ctx context.Context, opts cli.MetadataExpo
 
 // ImportLocalMetadata imports a bounded JSON bundle of local tracking metadata
 // idempotently.
-func (s *Service) ImportLocalMetadata(ctx context.Context, opts cli.MetadataImportOptions) (*cli.MetadataImportResult, error) {
+func (s *Service) ImportLocalMetadata(ctx context.Context, opts contracts.MetadataImportOptions) (*contracts.MetadataImportResult, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -191,7 +191,7 @@ func (s *Service) ImportLocalMetadata(ctx context.Context, opts cli.MetadataImpo
 	if err != nil {
 		return nil, err
 	}
-	return &cli.MetadataImportResult{
+	return &contracts.MetadataImportResult{
 		SchemaVersion:        version,
 		TriageEvents:         len(bundle.TriageEvents),
 		Contributions:        len(bundle.Contributions),
@@ -232,11 +232,11 @@ func normalizeContributionKind(kind string) string {
 	}
 }
 
-func triageEventResult(e *tracking.TriageEvent) *cli.TriageEventResult {
+func triageEventResult(e *tracking.TriageEvent) *contracts.TriageEventResult {
 	if e == nil {
 		return nil
 	}
-	return &cli.TriageEventResult{
+	return &contracts.TriageEventResult{
 		ID:            e.ID,
 		TargetKind:    string(e.TargetKind),
 		TargetRef:     e.TargetRef,
@@ -249,7 +249,7 @@ func triageEventResult(e *tracking.TriageEvent) *cli.TriageEventResult {
 	}
 }
 
-func contributionResult(c *tracking.Contribution) *cli.ContributionResult {
+func contributionResult(c *tracking.Contribution) *contracts.ContributionResult {
 	if c == nil {
 		return nil
 	}
@@ -257,7 +257,7 @@ func contributionResult(c *tracking.Contribution) *cli.ContributionResult {
 	if c.SubmittedAt != nil {
 		submitted = formatTime(*c.SubmittedAt)
 	}
-	return &cli.ContributionResult{
+	return &contracts.ContributionResult{
 		ID:            c.ID,
 		OpportunityID: c.OpportunityID,
 		Kind:          c.Kind,
@@ -273,11 +273,11 @@ func contributionResult(c *tracking.Contribution) *cli.ContributionResult {
 	}
 }
 
-func contributionOutcomeResult(o *tracking.ContributionOutcome) *cli.ContributionOutcomeResult {
+func contributionOutcomeResult(o *tracking.ContributionOutcome) *contracts.ContributionOutcomeResult {
 	if o == nil {
 		return nil
 	}
-	return &cli.ContributionOutcomeResult{
+	return &contracts.ContributionOutcomeResult{
 		ID:             o.ID,
 		ContributionID: o.ContributionID,
 		Outcome:        string(o.Outcome),

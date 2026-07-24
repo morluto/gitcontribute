@@ -7,12 +7,12 @@ import (
 	"strconv"
 	"strings"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 )
 
-func (s *Service) schemaStage(ctx context.Context) cli.UpgradeStage {
-	stage := cli.UpgradeStage{Name: "corpus-schema"}
+func (s *Service) schemaStage(ctx context.Context) contracts.UpgradeStage {
+	stage := contracts.UpgradeStage{Name: "corpus-schema"}
 	path := s.databasePath()
 	if path == "" {
 		stage.Status = "not_configured"
@@ -45,8 +45,8 @@ func (s *Service) schemaStage(ctx context.Context) cli.UpgradeStage {
 	return stage
 }
 
-func activationStage(report *cli.UpgradeReport, opts cli.UpgradeOptions) cli.UpgradeStage {
-	stage := cli.UpgradeStage{Name: "activation"}
+func activationStage(report *contracts.UpgradeReport, opts contracts.UpgradeOptions) contracts.UpgradeStage {
+	stage := contracts.UpgradeStage{Name: "activation"}
 	switch stageStatus(report, "corpus-schema") {
 	case "migration_required":
 		stage.Status = "migrate_first"
@@ -118,7 +118,7 @@ func activationStage(report *cli.UpgradeReport, opts cli.UpgradeOptions) cli.Upg
 	return stage
 }
 
-func outdatedPrivateRuntimeClients(report *cli.UpgradeReport) []string {
+func outdatedPrivateRuntimeClients(report *contracts.UpgradeReport) []string {
 	var clients []string
 	for _, client := range report.ConfiguredClients {
 		if client.Status != "outdated" || strings.Contains(filepath.ToSlash(client.Path), "/node_modules/gitcontribute/") {
@@ -129,7 +129,7 @@ func outdatedPrivateRuntimeClients(report *cli.UpgradeReport) []string {
 	return clients
 }
 
-func registeredClients(report *cli.UpgradeReport) []string {
+func registeredClients(report *contracts.UpgradeReport) []string {
 	var names []string
 	for _, client := range report.ConfiguredClients {
 		if client.Status != "not_configured" && client.Status != "failed" {
@@ -139,8 +139,8 @@ func registeredClients(report *cli.UpgradeReport) []string {
 	return names
 }
 
-func rollbackStage(report *cli.UpgradeReport) cli.UpgradeStage {
-	stage := cli.UpgradeStage{Name: "rollback"}
+func rollbackStage(report *contracts.UpgradeReport) contracts.UpgradeStage {
+	stage := contracts.UpgradeStage{Name: "rollback"}
 	switch report.Context {
 	case "npx":
 		stage.Status = "not_applicable"
@@ -162,7 +162,7 @@ func rollbackStage(report *cli.UpgradeReport) cli.UpgradeStage {
 	return stage
 }
 
-func stageStatus(report *cli.UpgradeReport, name string) string {
+func stageStatus(report *contracts.UpgradeReport, name string) string {
 	for _, stage := range report.Stages {
 		if stage.Name == name {
 			return stage.Status
@@ -171,7 +171,7 @@ func stageStatus(report *cli.UpgradeReport, name string) string {
 	return ""
 }
 
-func stagePath(report *cli.UpgradeReport, name string) string {
+func stagePath(report *contracts.UpgradeReport, name string) string {
 	for _, stage := range report.Stages {
 		if stage.Name == name {
 			return stage.Path
@@ -180,7 +180,7 @@ func stagePath(report *cli.UpgradeReport, name string) string {
 	return ""
 }
 
-func stageVersion(report *cli.UpgradeReport, name string) string {
+func stageVersion(report *contracts.UpgradeReport, name string) string {
 	for _, stage := range report.Stages {
 		if stage.Name == name {
 			return stage.Version
@@ -189,7 +189,7 @@ func stageVersion(report *cli.UpgradeReport, name string) string {
 	return ""
 }
 
-func setStage(report *cli.UpgradeReport, stage cli.UpgradeStage) {
+func setStage(report *contracts.UpgradeReport, stage contracts.UpgradeStage) {
 	for i := range report.Stages {
 		if report.Stages[i].Name == stage.Name {
 			report.Stages[i] = stage

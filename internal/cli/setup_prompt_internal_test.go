@@ -5,6 +5,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 type oneByteReader struct{ reader *strings.Reader }
@@ -28,7 +30,7 @@ func TestAccessibleModeAppliesToSetupKeyAndConfirmationForms(t *testing.T) {
 	prompter := &huhSetupPrompter{input: &oneByteReader{reader: strings.NewReader("2\nGH_CUSTOM\n")}, output: &output}
 	selection, err := prompter.Select(context.Background(), SetupPromptRequest{
 		Questions: []SetupPromptQuestion{SetupQuestionAuth},
-		Discovery: SetupDiscovery{ConfiguredTokenSource: "none"},
+		Discovery: contracts.SetupDiscovery{ConfiguredTokenSource: "none"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +75,7 @@ func TestSetupFieldsRenderAsSeparatePages(t *testing.T) {
 	selection := SetupSelection{}
 	request := SetupPromptRequest{
 		Questions: []SetupPromptQuestion{SetupQuestionAccess, SetupQuestionClients, SetupQuestionAuth},
-		Discovery: SetupDiscovery{Clients: []SetupClientDiscovery{
+		Discovery: contracts.SetupDiscovery{Clients: []contracts.SetupClientDiscovery{
 			{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true},
 		}},
 	}
@@ -99,12 +101,12 @@ func TestSetupQuestionsSkipAccessModeWhenAnMCPClientWasExplicitlySelected(t *tes
 
 func TestSetupQuestionsRespectExplicitAccessMode(t *testing.T) {
 	for _, test := range []struct {
-		mode        SetupMode
+		mode        contracts.SetupMode
 		wantClients bool
 	}{
-		{mode: SetupModeMCP, wantClients: true},
-		{mode: SetupModeCLI, wantClients: false},
-		{mode: SetupModeBoth, wantClients: true},
+		{mode: contracts.SetupModeMCP, wantClients: true},
+		{mode: contracts.SetupModeCLI, wantClients: false},
+		{mode: contracts.SetupModeBoth, wantClients: true},
 	} {
 		t.Run(string(test.mode), func(t *testing.T) {
 			mode := test.mode
@@ -143,7 +145,7 @@ func TestSetupOffersAccessModesInsteadOfPackageRunnerMechanics(t *testing.T) {
 	if strings.Contains(output.String(), "Coding agents · MCP") || strings.Contains(output.String(), "Terminal app") {
 		t.Fatalf("output does not use the simple MCP / CLI / Both labels: %q", output.String())
 	}
-	if selection.Mode != SetupModeCLI {
+	if selection.Mode != contracts.SetupModeCLI {
 		t.Fatal("CLI did not select persistent installation")
 	}
 }
@@ -154,15 +156,15 @@ func TestCLIAccessModeSkipsCodingAgentTargets(t *testing.T) {
 	prompter := &huhSetupPrompter{input: strings.NewReader("2\n4\n"), output: &output}
 	selection, err := prompter.Select(context.Background(), SetupPromptRequest{
 		Questions: []SetupPromptQuestion{SetupQuestionAccess, SetupQuestionClients, SetupQuestionAuth},
-		Discovery: SetupDiscovery{
+		Discovery: contracts.SetupDiscovery{
 			ConfiguredTokenSource: "none",
-			Clients:               []SetupClientDiscovery{{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true}},
+			Clients:               []contracts.SetupClientDiscovery{{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true}},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if selection.Mode != SetupModeCLI || len(selection.Clients) != 0 || selection.TokenSource != "none" {
+	if selection.Mode != contracts.SetupModeCLI || len(selection.Clients) != 0 || selection.TokenSource != "none" {
 		t.Fatalf("selection = %+v", selection)
 	}
 	if strings.Contains(output.String(), "/home/test/.codex/config.toml") {
@@ -176,9 +178,9 @@ func TestMCPAccessModeRequiresExplicitCodingAgentTarget(t *testing.T) {
 	prompter := &huhSetupPrompter{input: strings.NewReader("1\n0\n4\n"), output: &output}
 	_, err := prompter.Select(context.Background(), SetupPromptRequest{
 		Questions: []SetupPromptQuestion{SetupQuestionAccess, SetupQuestionClients, SetupQuestionAuth},
-		Discovery: SetupDiscovery{
+		Discovery: contracts.SetupDiscovery{
 			ConfiguredTokenSource: "none",
-			Clients:               []SetupClientDiscovery{{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true}},
+			Clients:               []contracts.SetupClientDiscovery{{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true}},
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "select at least one coding agent") {
@@ -192,24 +194,24 @@ func TestBothAccessModeSelectsCLIAndExplicitMCPClient(t *testing.T) {
 	prompter := &huhSetupPrompter{input: &oneByteReader{reader: strings.NewReader("3\n1\n0\n4\n")}, output: &output}
 	selection, err := prompter.Select(context.Background(), SetupPromptRequest{
 		Questions: []SetupPromptQuestion{SetupQuestionAccess, SetupQuestionClients, SetupQuestionAuth},
-		Discovery: SetupDiscovery{
+		Discovery: contracts.SetupDiscovery{
 			ConfiguredTokenSource: "none",
-			Clients:               []SetupClientDiscovery{{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true}},
+			Clients:               []contracts.SetupClientDiscovery{{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true}},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if selection.Mode != SetupModeBoth || len(selection.Clients) != 1 || selection.Clients[0] != "codex" {
+	if selection.Mode != contracts.SetupModeBoth || len(selection.Clients) != 1 || selection.Clients[0] != "codex" {
 		t.Fatalf("selection = %+v", selection)
 	}
 }
 
 func TestRenderSetupDiscoveryUsesEvidenceLanguage(t *testing.T) {
-	got := renderSetupDiscovery(SetupDiscovery{
+	got := renderSetupDiscovery(contracts.SetupDiscovery{
 		Version:            "0.3.2",
 		GitHubCLIAvailable: true,
-		Clients:            []SetupClientDiscovery{{Name: "codex", Detected: true}},
+		Clients:            []contracts.SetupClientDiscovery{{Name: "codex", Detected: true}},
 	}, true)
 	for _, want := range []string{"GitContribute setup · v0.3.2 · running with npx", "Detected Codex, GitHub CLI", "Local inspection only", "no changes made"} {
 		if !strings.Contains(got, want) {
@@ -219,7 +221,7 @@ func TestRenderSetupDiscoveryUsesEvidenceLanguage(t *testing.T) {
 }
 
 func TestSetupClientLabelSurfacesDetectionRegistrationAndPath(t *testing.T) {
-	label := setupClientLabel(SetupClientDiscovery{
+	label := setupClientLabel(contracts.SetupClientDiscovery{
 		Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true, Registered: true,
 	})
 	for _, want := range []string{"Codex", "detected", "configured", "/home/test/.codex/config.toml"} {
@@ -231,7 +233,7 @@ func TestSetupClientLabelSurfacesDetectionRegistrationAndPath(t *testing.T) {
 
 func TestSetupDetectionDoesNotSelectClientWithoutPriorIntent(t *testing.T) {
 	clients := []string{}
-	setupClientsField("Coding agents", SetupDiscovery{Clients: []SetupClientDiscovery{
+	setupClientsField("Coding agents", contracts.SetupDiscovery{Clients: []contracts.SetupClientDiscovery{
 		{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true},
 	}}, &clients)
 	if len(clients) != 0 {
@@ -241,7 +243,7 @@ func TestSetupDetectionDoesNotSelectClientWithoutPriorIntent(t *testing.T) {
 
 func TestExistingRegistrationEstablishesClientSelectionIntent(t *testing.T) {
 	clients := []string{}
-	setupClientsField("Coding agents", SetupDiscovery{Clients: []SetupClientDiscovery{
+	setupClientsField("Coding agents", contracts.SetupDiscovery{Clients: []contracts.SetupClientDiscovery{
 		{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true, Registered: true},
 		{Name: "claude", Path: "/home/test/.claude.json", Detected: true},
 	}}, &clients)
@@ -253,13 +255,13 @@ func TestExistingRegistrationEstablishesClientSelectionIntent(t *testing.T) {
 func TestDefaultSetupTokenSource(t *testing.T) {
 	tests := []struct {
 		name      string
-		discovery SetupDiscovery
+		discovery contracts.SetupDiscovery
 		want      string
 	}{
-		{name: "existing config wins", discovery: SetupDiscovery{ConfiguredTokenSource: "env", GitHubCLIAvailable: true}, want: "env"},
-		{name: "available gh cli", discovery: SetupDiscovery{ConfiguredTokenSource: "none", GitHubCLIAvailable: true}, want: "gh-cli"},
-		{name: "present environment", discovery: SetupDiscovery{ConfiguredTokenSource: "none", EnvironmentKeyPresent: true}, want: "env"},
-		{name: "configure later", discovery: SetupDiscovery{ConfiguredTokenSource: "none"}, want: "none"},
+		{name: "existing config wins", discovery: contracts.SetupDiscovery{ConfiguredTokenSource: "env", GitHubCLIAvailable: true}, want: "env"},
+		{name: "available gh cli", discovery: contracts.SetupDiscovery{ConfiguredTokenSource: "none", GitHubCLIAvailable: true}, want: "gh-cli"},
+		{name: "present environment", discovery: contracts.SetupDiscovery{ConfiguredTokenSource: "none", EnvironmentKeyPresent: true}, want: "env"},
+		{name: "configure later", discovery: contracts.SetupDiscovery{ConfiguredTokenSource: "none"}, want: "none"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -271,7 +273,7 @@ func TestDefaultSetupTokenSource(t *testing.T) {
 }
 
 func TestSetupAuthOptionsShowConfiguredEnvironmentKey(t *testing.T) {
-	options := setupAuthOptions(SetupDiscovery{ConfiguredTokenSource: "env", ConfiguredTokenKey: "GH_TOKEN"})
+	options := setupAuthOptions(contracts.SetupDiscovery{ConfiguredTokenSource: "env", ConfiguredTokenKey: "GH_TOKEN"})
 	if len(options) < 2 || !strings.Contains(options[1].Key, "GH_TOKEN") {
 		t.Fatalf("environment option = %+v", options)
 	}
@@ -286,17 +288,17 @@ func TestSetupTokenSourceKeyDoesNotCrossAuthSemantics(t *testing.T) {
 	}{
 		{
 			name:     "keyring to environment",
-			request:  SetupPromptRequest{Discovery: SetupDiscovery{ConfiguredTokenSource: "keyring", ConfiguredTokenKey: "account"}},
+			request:  SetupPromptRequest{Discovery: contracts.SetupDiscovery{ConfiguredTokenSource: "keyring", ConfiguredTokenKey: "account"}},
 			selected: "env", want: "GITHUB_TOKEN",
 		},
 		{
 			name:     "environment to keyring",
-			request:  SetupPromptRequest{Discovery: SetupDiscovery{ConfiguredTokenSource: "env", ConfiguredTokenKey: "GH_TOKEN"}},
+			request:  SetupPromptRequest{Discovery: contracts.SetupDiscovery{ConfiguredTokenSource: "env", ConfiguredTokenKey: "GH_TOKEN"}},
 			selected: "keyring", want: "",
 		},
 		{
 			name:     "same source preserves key",
-			request:  SetupPromptRequest{Discovery: SetupDiscovery{ConfiguredTokenSource: "env", ConfiguredTokenKey: "GH_TOKEN"}},
+			request:  SetupPromptRequest{Discovery: contracts.SetupDiscovery{ConfiguredTokenSource: "env", ConfiguredTokenKey: "GH_TOKEN"}},
 			selected: "env", want: "GH_TOKEN",
 		},
 	}
@@ -311,7 +313,7 @@ func TestSetupTokenSourceKeyDoesNotCrossAuthSemantics(t *testing.T) {
 
 func TestSetupProgressModelKeepsCompletedLinesInOrder(t *testing.T) {
 	model := newSetupProgressModel()
-	for _, step := range []SetupStep{
+	for _, step := range []contracts.SetupStep{
 		{Name: "configuration", Status: "configured"},
 		{Name: "corpus", Status: "initialized"},
 		{Name: "verification", Status: "verified"},
@@ -335,24 +337,24 @@ func TestSetupProgressModelKeepsCompletedLinesInOrder(t *testing.T) {
 }
 
 func TestSetupProgressIsDisabledForDryRunAndAccessibleMode(t *testing.T) {
-	if setupProgressAnimationAllowed(SetupOptions{DryRun: true}) {
+	if setupProgressAnimationAllowed(contracts.SetupOptions{DryRun: true}) {
 		t.Fatal("dry-run unexpectedly enabled animated progress")
 	}
 	t.Setenv("GITCONTRIBUTE_ACCESSIBLE", "1")
-	if setupProgressAnimationAllowed(SetupOptions{}) {
+	if setupProgressAnimationAllowed(contracts.SetupOptions{}) {
 		t.Fatal("accessible mode unexpectedly enabled animated progress")
 	}
 }
 
 func TestSetupProgressModelSettlesActiveWorkIntoResult(t *testing.T) {
 	model := newSetupProgressModel()
-	updated, _ := model.Update(setupStartedMsg(SetupPhaseClients))
+	updated, _ := model.Update(setupStartedMsg(contracts.SetupPhaseClients))
 	model = updated.(setupProgressModel)
 	if got := model.View(); !strings.Contains(got, "Configuring coding agents…") {
 		t.Fatalf("active progress = %q", got)
 	}
 
-	updated, _ = model.Update(setupCompletedMsg(SetupStep{Name: "codex", Status: "configured"}))
+	updated, _ = model.Update(setupCompletedMsg(contracts.SetupStep{Name: "codex", Status: "configured"}))
 	model = updated.(setupProgressModel)
 	got := model.View()
 	if got != "✓ Codex — configured" || strings.Contains(got, "Configuring coding agents") {
@@ -361,7 +363,7 @@ func TestSetupProgressModelSettlesActiveWorkIntoResult(t *testing.T) {
 }
 
 func TestRenderSetupPlanIncludesEffectsAndSafetyBoundary(t *testing.T) {
-	report := &SetupReport{DryRun: true, MCPCommandPending: true, Authentication: &SetupAuthentication{Method: "gh-cli"}, Steps: []SetupStep{
+	report := &contracts.SetupReport{DryRun: true, MCPCommandPending: true, Authentication: &contracts.SetupAuthentication{Method: "gh-cli"}, Steps: []contracts.SetupStep{
 		{Name: "cli", Status: "would install", Message: "npm install --global gitcontribute@0.2.2"},
 		{Name: "codex", Status: "would configure", Path: "/home/test/.codex/config.toml"},
 	}}
@@ -385,7 +387,7 @@ func TestRenderSetupPlanIncludesEffectsAndSafetyBoundary(t *testing.T) {
 }
 
 func TestRenderSetupPlanLabelsFailedPreflightAsBlocker(t *testing.T) {
-	report := &SetupReport{DryRun: true, Steps: []SetupStep{{Name: "corpus", Status: "failed", Message: "run gitcontribute corpus migrate --yes"}}}
+	report := &contracts.SetupReport{DryRun: true, Steps: []contracts.SetupStep{{Name: "corpus", Status: "failed", Message: "run gitcontribute corpus migrate --yes"}}}
 	got := renderSetupPlan(report)
 	if !strings.Contains(got, "Status: Blocked") || strings.Contains(got, "Action: failed") {
 		t.Fatalf("failed preflight plan = %q", got)
@@ -396,7 +398,7 @@ func TestRenderSetupPlanLabelsFailedPreflightAsBlocker(t *testing.T) {
 }
 
 func TestRenderSetupPlanPresentsManagedRuntimeForMCPOnly(t *testing.T) {
-	got := renderSetupPlan(&SetupReport{DryRun: true, MCPCommand: &SetupMCPCommand{Command: "/home/test/.local/share/gitcontribute/bin/1.2.3/gitcontribute", Args: []string{"mcp", "serve", "--transport=stdio"}}, Steps: []SetupStep{
+	got := renderSetupPlan(&contracts.SetupReport{DryRun: true, MCPCommand: &contracts.SetupMCPCommand{Command: "/home/test/.local/share/gitcontribute/bin/1.2.3/gitcontribute", Args: []string{"mcp", "serve", "--transport=stdio"}}, Steps: []contracts.SetupStep{
 		{Name: "mcp-runtime", Status: "would install", Path: "/home/test/.local/share/gitcontribute/bin/1.2.3/gitcontribute"},
 		{Name: "codex", Status: "would configure", Path: "/home/test/.codex/config.toml"},
 	}})
@@ -409,25 +411,25 @@ func TestRenderSetupPlanPresentsManagedRuntimeForMCPOnly(t *testing.T) {
 }
 
 func TestRenderSetupResultTailorsNextCommand(t *testing.T) {
-	report := &SetupReport{Authentication: &SetupAuthentication{Method: "gh-cli"}, RestartClients: []string{"codex"}, Steps: []SetupStep{{Name: "codex", Status: "configured"}, {Name: "verification", Status: "verified"}}}
-	if got := renderSetupResult(report, SetupOptions{Mode: SetupModeBoth}); !strings.Contains(got, "Next\n  gitcontribute\n") || !strings.Contains(got, "Restart Codex") || !strings.Contains(got, "not read or validated") {
+	report := &contracts.SetupReport{Authentication: &contracts.SetupAuthentication{Method: "gh-cli"}, RestartClients: []string{"codex"}, Steps: []contracts.SetupStep{{Name: "codex", Status: "configured"}, {Name: "verification", Status: "verified"}}}
+	if got := renderSetupResult(report, contracts.SetupOptions{Mode: contracts.SetupModeBoth}); !strings.Contains(got, "Next\n  gitcontribute\n") || !strings.Contains(got, "Restart Codex") || !strings.Contains(got, "not read or validated") {
 		t.Fatalf("installed result = %q", got)
 	}
-	if got := renderSetupResult(report, SetupOptions{TokenSource: "none"}); !strings.Contains(got, "Next\n  Use GitContribute from your coding agent.") || strings.Contains(got, "npx") {
+	if got := renderSetupResult(report, contracts.SetupOptions{TokenSource: "none"}); !strings.Contains(got, "Next\n  Use GitContribute from your coding agent.") || strings.Contains(got, "npx") {
 		t.Fatalf("MCP-only result = %q", got)
 	}
 }
 
 func TestRenderSetupResultOmitsAuthenticationWhenSelectionIsUnavailable(t *testing.T) {
-	report := &SetupReport{Steps: []SetupStep{{Name: "verification", Status: "verified"}}}
-	got := renderSetupResult(report, SetupOptions{Mode: SetupModeCLI})
+	report := &contracts.SetupReport{Steps: []contracts.SetupStep{{Name: "verification", Status: "verified"}}}
+	got := renderSetupResult(report, contracts.SetupOptions{Mode: contracts.SetupModeCLI})
 	if strings.Contains(got, "GitHub credentials") || strings.Contains(got, "Configure later") {
 		t.Fatalf("result makes an authentication claim without a selected source: %q", got)
 	}
 }
 
 func TestRenderSetupPlanNamesEnvironmentAuthenticationWithoutSecret(t *testing.T) {
-	report := &SetupReport{DryRun: true, Authentication: &SetupAuthentication{Method: "env", Key: "GH_CUSTOM"}}
+	report := &contracts.SetupReport{DryRun: true, Authentication: &contracts.SetupAuthentication{Method: "env", Key: "GH_CUSTOM"}}
 	got := renderSetupPlan(report)
 	if !strings.Contains(got, "Record: Environment variable GH_CUSTOM") || !strings.Contains(got, "will not be read or validated") {
 		t.Fatalf("environment authentication plan = %q", got)
@@ -435,11 +437,11 @@ func TestRenderSetupPlanNamesEnvironmentAuthenticationWithoutSecret(t *testing.T
 }
 
 func TestRenderSetupResultReportsPartialFailureTruthfully(t *testing.T) {
-	report := &SetupReport{MCPCommand: &SetupMCPCommand{Command: "/home/test/.local/share/gitcontribute/bin/1.2.3/gitcontribute", Args: []string{"mcp", "serve", "--transport=stdio"}}, Steps: []SetupStep{
+	report := &contracts.SetupReport{MCPCommand: &contracts.SetupMCPCommand{Command: "/home/test/.local/share/gitcontribute/bin/1.2.3/gitcontribute", Args: []string{"mcp", "serve", "--transport=stdio"}}, Steps: []contracts.SetupStep{
 		{Name: "configuration", Status: "configured", Path: "/home/test/.config/gitcontribute/config.json"},
 		{Name: "codex", Status: "failed", Path: "/home/test/.codex/config.toml", Message: "invalid TOML"},
 	}}
-	got := renderSetupResult(report, SetupOptions{})
+	got := renderSetupResult(report, contracts.SetupOptions{})
 	for _, want := range []string{
 		"Setup needs attention", "✓ Configuration — configured", "✗ Codex — failed",
 		"Path: /home/test/.codex/config.toml", "Details: invalid TOML", "Fix the failed steps",

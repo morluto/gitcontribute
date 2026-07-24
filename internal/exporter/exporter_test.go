@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 )
 
@@ -61,10 +61,10 @@ func sampleDossier() *domain.Dossier {
 	}
 }
 
-func sampleEvidence() *cli.EvidenceResult {
-	return &cli.EvidenceResult{
+func sampleEvidence() *contracts.EvidenceResult {
+	return &contracts.EvidenceResult{
 		InvestigationID: "inv-1",
-		Evidence: []cli.EvidenceItem{
+		Evidence: []contracts.EvidenceItem{
 			{
 				ID: "ev-2", Type: "manual_observation", Relation: "supporting",
 				Description:     " observed with Authorization: token ghp_000000000000000000000000000000000000",
@@ -76,8 +76,8 @@ func sampleEvidence() *cli.EvidenceResult {
 				Description:     "Linked issue. api_key=supersecret",
 				Freshness:       "stale",
 				FreshnessReason: "thread issue:owner/repo#1 advanced from source_updated_at=2026-07-16T10:00:00Z",
-				SourceProvenance: []cli.EvidenceSourceRevisionResult{{
-					Subject: cli.EvidenceSourceSubjectResult{
+				SourceProvenance: []contracts.EvidenceSourceRevisionResult{{
+					Subject: contracts.EvidenceSourceSubjectResult{
 						Kind: "thread", Owner: "owner", Repo: "repo", ThreadKind: "issue", Number: 1,
 					},
 					SourceUpdatedAt:     now.Add(-2 * time.Hour).Format(time.RFC3339),

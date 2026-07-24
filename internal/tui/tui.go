@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/morluto/gitcontribute/internal/tuicontract"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -57,13 +59,13 @@ func WithSize(w, h int) Option {
 // WithActionHandler registers an optional handler for explicit side-effecting
 // actions such as refresh/hydration. The TUI never invokes it on initial load
 // or search.
-func WithActionHandler(fn func(context.Context, Item) tea.Cmd) Option {
+func WithActionHandler(fn func(context.Context, tuicontract.Item) tea.Cmd) Option {
 	return func(m *Model) { m.actionHandler = fn }
 }
 
 // Model is the TUI state.
 type Model struct {
-	reader Reader
+	reader tuicontract.Reader
 	ctx    context.Context
 
 	width  int
@@ -73,28 +75,28 @@ type Model struct {
 	loading  bool
 	loaded   bool
 	err      error
-	items    map[view][]Item
-	windows  map[view]Window
+	items    map[view][]tuicontract.Item
+	windows  map[view]tuicontract.Window
 	filtered []int
 	cursor   int
 
 	search    textinput.Model
 	searching bool
 
-	detail *Item
+	detail *tuicontract.Item
 	help   bool
 
 	actionMsg     string
-	actionHandler func(context.Context, Item) tea.Cmd
+	actionHandler func(context.Context, tuicontract.Item) tea.Cmd
 }
 
 // New creates a Model for the given reader and lifecycle context.
-func New(ctx context.Context, reader Reader, opts ...Option) Model {
+func New(ctx context.Context, reader tuicontract.Reader, opts ...Option) Model {
 	m := Model{
 		reader: reader,
 		ctx:    ctx,
 		view:   viewRepositories,
-		items:  make(map[view][]Item),
+		items:  make(map[view][]tuicontract.Item),
 		width:  80,
 		height: 24,
 	}
@@ -133,14 +135,14 @@ func (m Model) itemCount() int {
 }
 
 // selectedItem returns the currently selected item, if any.
-func (m Model) selectedItem() (Item, bool) {
+func (m Model) selectedItem() (tuicontract.Item, bool) {
 	if m.cursor < 0 || m.cursor >= len(m.filtered) {
-		return Item{}, false
+		return tuicontract.Item{}, false
 	}
 	idx := m.filtered[m.cursor]
 	items := m.items[m.view]
 	if idx < 0 || idx >= len(items) {
-		return Item{}, false
+		return tuicontract.Item{}, false
 	}
 	return items[idx], true
 }

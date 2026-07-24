@@ -10,10 +10,10 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/clusterprojection"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/lens"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 func seedRepoAndThreads(t *testing.T, c *corpus.Corpus) {
@@ -71,7 +71,7 @@ func TestServiceClustersAndCluster(t *testing.T) {
 
 	seedRepoAndThreads(t, svc.corpus)
 
-	repo := cli.RepoRef{Owner: "owner", Repo: "repo"}
+	repo := contracts.RepoRef{Owner: "owner", Repo: "repo"}
 	before, err := svc.ListClusters(ctx, repo, 10)
 	if err != nil {
 		t.Fatalf("list clusters before refresh: %v", err)
@@ -175,7 +175,7 @@ func TestUnchangedEmptyClusterProjectionReportsZeroCurrentCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	repo := cli.RepoRef{Owner: "owner", Repo: "empty"}
+	repo := contracts.RepoRef{Owner: "owner", Repo: "empty"}
 	first, err := svc.RefreshClusters(ctx, repo)
 	if err != nil {
 		t.Fatal(err)
@@ -194,7 +194,7 @@ func TestUnchangedEmptyClusterProjectionReportsZeroCurrentCounts(t *testing.T) {
 
 func TestClusterListConverterPreservesProjectionTotalAndTruncation(t *testing.T) {
 	t.Parallel()
-	result := clusterListToCLI(cli.RepoRef{Owner: "owner", Repo: "repo"}, clusterprojection.List{
+	result := clusterListToCLI(contracts.RepoRef{Owner: "owner", Repo: "repo"}, clusterprojection.List{
 		Clusters:  make([]clustering.Cluster, 1),
 		Total:     3,
 		Truncated: true,
@@ -221,14 +221,14 @@ func TestArchiveThreadsIsBoundedAndOffline(t *testing.T) {
 	defer func() { _ = svc.Close() }()
 	seedRepoAndThreads(t, svc.corpus)
 
-	result, err := svc.ArchiveThreads(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "issue", "open", 2)
+	result, err := svc.ArchiveThreads(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "issue", "open", 2)
 	if err != nil {
 		t.Fatalf("archive threads: %v", err)
 	}
 	if len(result.Threads) != 2 || result.Threads[0].Number != 6 || result.Freshness == "" {
 		t.Fatalf("result = %+v", result)
 	}
-	if _, err := svc.ArchiveThreads(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "", "", 1001); err == nil {
+	if _, err := svc.ArchiveThreads(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "", "", 1001); err == nil {
 		t.Fatal("expected hard-limit error")
 	}
 }
@@ -289,7 +289,7 @@ func TestServiceLensAndCollections(t *testing.T) {
 		t.Fatalf("collection name = %q", col.Name)
 	}
 
-	updated, err := svc.AddCollectionMembers(ctx, "favorites", []cli.CollectionMember{
+	updated, err := svc.AddCollectionMembers(ctx, "favorites", []contracts.CollectionMember{
 		{Kind: "repository", Ref: "owner/repo"},
 		{Kind: "issue", Ref: "owner/repo#1"},
 	})
@@ -318,14 +318,14 @@ func TestCollectionServiceRejectsMalformedMembers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	invalid := []cli.CollectionMember{
+	invalid := []contracts.CollectionMember{
 		{Kind: "unknown", Ref: "o/r"},
 		{Kind: "repository", Ref: "not-a-repo"},
 		{Kind: "issue", Ref: "o/r#0"},
 		{Kind: "pull_request", Ref: "o/r#abc"},
 	}
 	for _, member := range invalid {
-		if _, err := svc.AddCollectionMembers(ctx, "favorites", []cli.CollectionMember{member}); err == nil {
+		if _, err := svc.AddCollectionMembers(ctx, "favorites", []contracts.CollectionMember{member}); err == nil {
 			t.Fatalf("accepted malformed member %+v", member)
 		}
 	}
@@ -335,7 +335,7 @@ func TestArchiveSyncRejectsNegativeSince(t *testing.T) {
 	t.Parallel()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
-	_, err := svc.ArchiveSync(context.Background(), cli.RepoRef{Owner: "o", Repo: "r"}, cli.ArchiveSyncOptions{Since: -time.Hour})
+	_, err := svc.ArchiveSync(context.Background(), contracts.RepoRef{Owner: "o", Repo: "r"}, contracts.ArchiveSyncOptions{Since: -time.Hour})
 	if err == nil || err.Error() != "since duration cannot be negative" {
 		t.Fatalf("expected negative duration error, got %v", err)
 	}
@@ -353,12 +353,12 @@ func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
 	seedRepoAndThreads(t, svc.corpus)
 
 	// Clusters must be computed before the MCP read tool can list them.
-	if _, err := svc.RefreshClusters(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}); err != nil {
+	if _, err := svc.RefreshClusters(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}); err != nil {
 		t.Fatalf("compute clusters: %v", err)
 	}
 
 	reader := svc.MCPReader()
-	clusters, err := reader.FindClusters(ctx, mcpserver.FindClustersInput{Owner: "owner", Repo: "repo", Limit: 10})
+	clusters, err := reader.FindClusters(ctx, mcpcontract.FindClustersInput{Owner: "owner", Repo: "repo", Limit: 10})
 	if err != nil {
 		t.Fatalf("find clusters: %v", err)
 	}
@@ -369,12 +369,12 @@ func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
 		t.Fatalf("cluster rule version = %q", clusters.RuleVersion)
 	}
 	member := clusters.Clusters[0].Canonical
-	containing, err := reader.FindClusters(ctx, mcpserver.FindClustersInput{Owner: "owner", Repo: "repo", Kind: member.Kind, Number: member.Number, Limit: 10})
+	containing, err := reader.FindClusters(ctx, mcpcontract.FindClustersInput{Owner: "owner", Repo: "repo", Kind: member.Kind, Number: member.Number, Limit: 10})
 	if err != nil || containing.Total != 1 || len(containing.Clusters) != 1 || containing.Clusters[0].StableID != clusters.Clusters[0].StableID {
 		t.Fatalf("member cluster = %+v, err=%v", containing, err)
 	}
 
-	cov, err := reader.GetCoverage(ctx, mcpserver.GetCoverageInput{Targets: []mcpserver.CoverageTarget{{Owner: "owner", Repo: "repo"}}})
+	cov, err := reader.GetCoverage(ctx, mcpcontract.GetCoverageInput{Targets: []mcpcontract.CoverageTarget{{Owner: "owner", Repo: "repo"}}})
 	if err != nil {
 		t.Fatalf("get coverage: %v", err)
 	}
@@ -446,7 +446,7 @@ func TestMCPReaderLensResource(t *testing.T) {
 	}
 
 	reader := svc.MCPReader()
-	out, err := reader.Lens(ctx, mcpserver.LensInput{Name: "mcp-lens"})
+	out, err := reader.Lens(ctx, mcpcontract.LensInput{Name: "mcp-lens"})
 	if err != nil {
 		t.Fatalf("get lens: %v", err)
 	}
@@ -454,7 +454,7 @@ func TestMCPReaderLensResource(t *testing.T) {
 		t.Fatalf("unexpected lens name: %q", out.Name)
 	}
 
-	if _, err := reader.Lens(ctx, mcpserver.LensInput{Name: "missing"}); err == nil {
+	if _, err := reader.Lens(ctx, mcpcontract.LensInput{Name: "missing"}); err == nil {
 		t.Fatal("expected error for missing lens")
 	}
 }

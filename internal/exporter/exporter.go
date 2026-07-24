@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 )
 
@@ -48,11 +48,11 @@ func ExportDossierMarkdown(w io.Writer, d *domain.Dossier) error {
 
 // ExportEvidenceJSON writes a deterministic, redacted JSON representation of an
 // evidence packet to w.
-func ExportEvidenceJSON(w io.Writer, e *cli.EvidenceResult) error {
+func ExportEvidenceJSON(w io.Writer, e *contracts.EvidenceResult) error {
 	if e == nil {
 		return errors.New("evidence result is nil")
 	}
-	re, ok := redact(e).(*cli.EvidenceResult)
+	re, ok := redact(e).(*contracts.EvidenceResult)
 	if !ok {
 		return errors.New("redacted evidence has unexpected type")
 	}
@@ -67,11 +67,11 @@ func ExportEvidenceJSON(w io.Writer, e *cli.EvidenceResult) error {
 
 // ExportEvidenceMarkdown writes a deterministic, redacted Markdown report for an
 // evidence packet to w.
-func ExportEvidenceMarkdown(w io.Writer, e *cli.EvidenceResult) error {
+func ExportEvidenceMarkdown(w io.Writer, e *contracts.EvidenceResult) error {
 	if e == nil {
 		return errors.New("evidence result is nil")
 	}
-	re, ok := redact(e).(*cli.EvidenceResult)
+	re, ok := redact(e).(*contracts.EvidenceResult)
 	if !ok {
 		return errors.New("redacted evidence has unexpected type")
 	}
@@ -121,7 +121,7 @@ func sortThreads(t []domain.DossierThread) {
 	})
 }
 
-func orderEvidence(e *cli.EvidenceResult) {
+func orderEvidence(e *contracts.EvidenceResult) {
 	sort.SliceStable(e.Evidence, func(i, j int) bool {
 		return e.Evidence[i].ID < e.Evidence[j].ID
 	})
@@ -237,7 +237,7 @@ func writeThreadSection(b *strings.Builder, heading string, threads []domain.Dos
 	}
 }
 
-func writeEvidenceMarkdown(w io.Writer, e *cli.EvidenceResult) error {
+func writeEvidenceMarkdown(w io.Writer, e *contracts.EvidenceResult) error {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "# Investigation evidence: %s\n\n", e.InvestigationID)
@@ -275,7 +275,7 @@ func writeEvidenceMarkdown(w io.Writer, e *cli.EvidenceResult) error {
 	return err
 }
 
-func evidenceSubjectKey(subject cli.EvidenceSourceSubjectResult) string {
+func evidenceSubjectKey(subject contracts.EvidenceSourceSubjectResult) string {
 	return fmt.Sprintf("%s:%s/%s:%s:%d:%s", subject.Kind, subject.Owner, subject.Repo, subject.ThreadKind, subject.Number, subject.Facet)
 }
 

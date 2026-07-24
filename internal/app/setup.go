@@ -10,7 +10,7 @@ import (
 	"runtime"
 	"strings"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/managedbinary"
 	clientsetup "github.com/morluto/gitcontribute/internal/setup"
@@ -26,17 +26,17 @@ import (
 // Dry-run setup validates and reports the same access-mode plan without invoking
 // npm or writing local state. Setup performs no GitHub access and never executes
 // repository-controlled code.
-func (s *Service) Setup(ctx context.Context, opts cli.SetupOptions) (*cli.SetupReport, error) {
+func (s *Service) Setup(ctx context.Context, opts contracts.SetupOptions) (*contracts.SetupReport, error) {
 	return s.setup(ctx, opts, nil)
 }
 
 // SetupWithProgress applies setup while reporting phase changes to an optional
 // observer owned by the interactive CLI adapter.
-func (s *Service) SetupWithProgress(ctx context.Context, opts cli.SetupOptions, observer cli.SetupObserver) (*cli.SetupReport, error) {
+func (s *Service) SetupWithProgress(ctx context.Context, opts contracts.SetupOptions, observer contracts.SetupObserver) (*contracts.SetupReport, error) {
 	return s.setup(ctx, opts, observer)
 }
 
-func (s *Service) setup(ctx context.Context, opts cli.SetupOptions, observer cli.SetupObserver) (*cli.SetupReport, error) {
+func (s *Service) setup(ctx context.Context, opts contracts.SetupOptions, observer contracts.SetupObserver) (*contracts.SetupReport, error) {
 	run, err := s.newSetupRun(ctx, opts, observer)
 	if err != nil {
 		return nil, err
@@ -67,10 +67,10 @@ func (s *Service) setup(ctx context.Context, opts cli.SetupOptions, observer cli
 type setupRun struct {
 	service             *Service
 	ctx                 context.Context
-	opts                cli.SetupOptions
-	observer            cli.SetupObserver
+	opts                contracts.SetupOptions
+	observer            contracts.SetupObserver
 	operation           clientsetup.Operation
-	report              *cli.SetupReport
+	report              *contracts.SetupReport
 	clientOptions       clientsetup.Options
 	clientReport        clientsetup.Report
 	managedRuntime      string
@@ -79,7 +79,7 @@ type setupRun struct {
 	configurationOK     bool
 }
 
-func (s *Service) newSetupRun(ctx context.Context, opts cli.SetupOptions, observer cli.SetupObserver) (*setupRun, error) {
+func (s *Service) newSetupRun(ctx context.Context, opts contracts.SetupOptions, observer contracts.SetupObserver) (*setupRun, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -93,10 +93,10 @@ func (s *Service) newSetupRun(ctx context.Context, opts cli.SetupOptions, observ
 	if opts.Remove && opts.Mode != "" {
 		return nil, errors.New("an access mode is not supported by remove")
 	}
-	if operation == clientsetup.Configure && opts.Mode != cli.SetupModeMCP && opts.Mode != cli.SetupModeCLI && opts.Mode != cli.SetupModeBoth {
+	if operation == clientsetup.Configure && opts.Mode != contracts.SetupModeMCP && opts.Mode != contracts.SetupModeCLI && opts.Mode != contracts.SetupModeBoth {
 		return nil, errors.New("setup has no selected access mode")
 	}
-	if operation == clientsetup.Configure && opts.Mode == cli.SetupModeCLI && (len(opts.Clients) > 0 || opts.AllClients) {
+	if operation == clientsetup.Configure && opts.Mode == contracts.SetupModeCLI && (len(opts.Clients) > 0 || opts.AllClients) {
 		return nil, errors.New("CLI mode cannot configure MCP clients")
 	}
 	clients, err := s.setupClients(opts)
@@ -110,14 +110,14 @@ func (s *Service) newSetupRun(ctx context.Context, opts cli.SetupOptions, observ
 	}
 	run := &setupRun{
 		service: s, ctx: ctx, opts: opts, observer: observer, operation: operation,
-		report: &cli.SetupReport{Operation: string(operation), DryRun: opts.DryRun},
+		report: &contracts.SetupReport{Operation: string(operation), DryRun: opts.DryRun},
 		clientOptions: clientsetup.Options{
 			Operation: operation, Clients: clients, All: opts.AllClients, DryRun: opts.DryRun,
 			Home: s.paths.HomeDir(), Executable: opts.Executable,
 		},
 		configurationOK: true,
 	}
-	if operation == clientsetup.Configure && opts.Mode == cli.SetupModeMCP {
+	if operation == clientsetup.Configure && opts.Mode == contracts.SetupModeMCP {
 		dataDir, err := s.paths.DataDir()
 		if err != nil {
 			return nil, err
@@ -127,13 +127,13 @@ func (s *Service) newSetupRun(ctx context.Context, opts cli.SetupOptions, observ
 			return nil, err
 		}
 		run.clientOptions.Executable = run.managedRuntime
-	} else if operation == clientsetup.Configure && opts.Mode == cli.SetupModeBoth {
+	} else if operation == clientsetup.Configure && opts.Mode == contracts.SetupModeBoth {
 		run.mcpCommandPending = true
 	}
 	return run, nil
 }
 
-func (s *Service) setupClients(opts cli.SetupOptions) ([]clientsetup.Client, error) {
+func (s *Service) setupClients(opts contracts.SetupOptions) ([]clientsetup.Client, error) {
 	if !opts.Remove && !opts.Mode.ConfiguresMCP() {
 		return nil, nil
 	}
@@ -179,7 +179,7 @@ func (r *setupRun) preflightCorpus() (bool, error) {
 	if inspection.State == "missing" || inspection.State == "current" {
 		return false, nil
 	}
-	step := cli.SetupStep{Name: "corpus", Path: inspection.Path, Status: "failed"}
+	step := contracts.SetupStep{Name: "corpus", Path: inspection.Path, Status: "failed"}
 	switch inspection.State {
 	case "migration_required":
 		step.Message = fmt.Sprintf("database schema version %d requires migration to %d; run gitcontribute corpus migrate --yes", inspection.Current, inspection.Target)
@@ -201,7 +201,7 @@ func (r *setupRun) setupRuntime() error {
 	if !r.opts.Mode.InstallsCLI() {
 		return r.installManagedRuntime()
 	}
-	setupStarted(r.observer, cli.SetupPhaseCLI)
+	setupStarted(r.observer, contracts.SetupPhaseCLI)
 	step, executable := installCLI(r.ctx, r.opts.Version, r.opts.DryRun)
 	r.report.Steps = append(r.report.Steps, step)
 	setupCompleted(r.observer, step)
@@ -229,13 +229,13 @@ func (r *setupRun) setupRuntime() error {
 }
 
 func (r *setupRun) installManagedRuntime() error {
-	step := cli.SetupStep{Name: "mcp-runtime", Path: r.managedRuntime, Status: "installed"}
+	step := contracts.SetupStep{Name: "mcp-runtime", Path: r.managedRuntime, Status: "installed"}
 	if r.opts.DryRun {
 		step.Status = "would install"
 		r.report.Steps = append(r.report.Steps, step)
 		return nil
 	}
-	setupStarted(r.observer, cli.SetupPhaseMCPRuntime)
+	setupStarted(r.observer, contracts.SetupPhaseMCPRuntime)
 	r.installedExecutable = r.managedRuntime
 	source := r.opts.Executable
 	if source == "" {
@@ -258,7 +258,7 @@ func (r *setupRun) installManagedRuntime() error {
 }
 
 func (r *setupRun) configure() {
-	setupStarted(r.observer, cli.SetupPhaseConfiguration)
+	setupStarted(r.observer, contracts.SetupPhaseConfiguration)
 	configPath, pathErr := r.service.paths.ConfigFile()
 	configExisted := pathErr == nil
 	if configExisted {
@@ -272,8 +272,8 @@ func (r *setupRun) configure() {
 	if tokenSource == "env" && strings.TrimSpace(r.opts.TokenSourceKey) == "" {
 		r.opts.TokenSourceKey = "GITHUB_TOKEN"
 	}
-	r.report.Authentication = &cli.SetupAuthentication{Method: tokenSource, Key: r.opts.TokenSourceKey}
-	options := cli.ConfigureOptions{DryRun: r.opts.DryRun, TokenSource: &tokenSource}
+	r.report.Authentication = &contracts.SetupAuthentication{Method: tokenSource, Key: r.opts.TokenSourceKey}
+	options := contracts.ConfigureOptions{DryRun: r.opts.DryRun, TokenSource: &tokenSource}
 	if r.opts.TokenSourceKey != "" {
 		options.TokenSourceKey = &r.opts.TokenSourceKey
 	}
@@ -287,8 +287,8 @@ func (r *setupRun) configure() {
 	r.initializeCorpus(err == nil)
 }
 
-func configurationStep(configured *cli.ConfigureResult, err error, existed, dryRun bool) cli.SetupStep {
-	step := cli.SetupStep{Name: "configuration", Status: "configured"}
+func configurationStep(configured *contracts.ConfigureResult, err error, existed, dryRun bool) contracts.SetupStep {
+	step := contracts.SetupStep{Name: "configuration", Status: "configured"}
 	if configured != nil {
 		step.Path = configured.Path
 		if dryRun && (!existed || configured.Changed) {
@@ -306,7 +306,7 @@ func configurationStep(configured *cli.ConfigureResult, err error, existed, dryR
 
 func (r *setupRun) initializeCorpus(configured bool) {
 	if r.opts.DryRun {
-		step := cli.SetupStep{Name: "corpus", Status: "would initialize"}
+		step := contracts.SetupStep{Name: "corpus", Status: "would initialize"}
 		inspection := r.report.Corpus
 		if inspection == nil {
 			step.Status = "failed"
@@ -327,9 +327,9 @@ func (r *setupRun) initializeCorpus(configured bool) {
 	if !configured {
 		return
 	}
-	setupStarted(r.observer, cli.SetupPhaseCorpus)
+	setupStarted(r.observer, contracts.SetupPhaseCorpus)
 	initialized, err := r.service.Init(r.ctx)
-	step := cli.SetupStep{Name: "corpus", Status: "initialized"}
+	step := contracts.SetupStep{Name: "corpus", Status: "initialized"}
 	if initialized != nil {
 		step.Path = initialized.Path
 		step.Message = initialized.Message
@@ -348,7 +348,7 @@ func (r *setupRun) registerClients() error {
 		return nil
 	}
 	if !r.opts.DryRun && r.configurationOK {
-		setupStarted(r.observer, cli.SetupPhaseClients)
+		setupStarted(r.observer, contracts.SetupPhaseClients)
 		r.clientOptions.DryRun = false
 		report, err := clientsetup.Run(r.clientOptions)
 		if err != nil {
@@ -371,7 +371,7 @@ func (r *setupRun) setClientReport(report clientsetup.Report) {
 		r.report.MCPCommandPending = true
 		return
 	}
-	r.report.MCPCommand = &cli.SetupMCPCommand{
+	r.report.MCPCommand = &contracts.SetupMCPCommand{
 		Command: report.Launcher.Command,
 		Args:    append([]string(nil), report.Launcher.Args...),
 	}
@@ -380,7 +380,7 @@ func (r *setupRun) setClientReport(report clientsetup.Report) {
 
 func (r *setupRun) appendClientResults() {
 	for _, result := range r.clientReport.Results {
-		step := cli.SetupStep{Name: string(result.Client), Path: result.Path, Status: result.Status, Message: result.Error}
+		step := contracts.SetupStep{Name: string(result.Client), Path: result.Path, Status: result.Status, Message: result.Error}
 		r.report.Steps = append(r.report.Steps, step)
 		if !r.opts.DryRun && r.operation == clientsetup.Configure && (result.Status == "configured" || result.Status == "updated") {
 			r.report.RestartClients = append(r.report.RestartClients, string(result.Client))
@@ -388,7 +388,7 @@ func (r *setupRun) appendClientResults() {
 		setupCompleted(r.observer, step)
 	}
 	if skill := r.clientReport.CodexSkill; skill.Status != "" {
-		step := cli.SetupStep{Name: "codex-skill", Path: skill.Path, Status: skill.Status, Message: skill.Error}
+		step := contracts.SetupStep{Name: "codex-skill", Path: skill.Path, Status: skill.Status, Message: skill.Error}
 		r.report.Steps = append(r.report.Steps, step)
 		setupCompleted(r.observer, step)
 	}
@@ -398,15 +398,15 @@ func (r *setupRun) addRepository() {
 	if r.operation != clientsetup.Configure || strings.TrimSpace(r.opts.Repository) == "" {
 		return
 	}
-	setupStarted(r.observer, cli.SetupPhaseRepository)
+	setupStarted(r.observer, contracts.SetupPhaseRepository)
 	ref, err := setupRepoRef(r.opts.Repository)
-	step := cli.SetupStep{Name: "repository", Status: "added", Message: r.opts.Repository}
+	step := contracts.SetupStep{Name: "repository", Status: "added", Message: r.opts.Repository}
 	if err != nil {
 		step.Status = "failed"
 		step.Message = err.Error()
 	} else if r.opts.DryRun {
 		step.Status = "would add"
-	} else if _, err := r.service.AddRepoSource(r.ctx, setupSourceName(ref), []cli.RepoRef{ref}); err != nil {
+	} else if _, err := r.service.AddRepoSource(r.ctx, setupSourceName(ref), []contracts.RepoRef{ref}); err != nil {
 		step.Status = "failed"
 		step.Message = err.Error()
 	}
@@ -418,8 +418,8 @@ func (r *setupRun) verify() {
 	if r.operation != clientsetup.Configure || r.opts.DryRun {
 		return
 	}
-	setupStarted(r.observer, cli.SetupPhaseVerification)
-	step := cli.SetupStep{Name: "verification", Status: "verified"}
+	setupStarted(r.observer, contracts.SetupPhaseVerification)
+	step := contracts.SetupStep{Name: "verification", Status: "verified"}
 	if err := r.verifyAppliedSetup(); err != nil {
 		step.Status = "failed"
 		step.Message = err.Error()
@@ -486,13 +486,13 @@ func verifySetupExecutable(path string) error {
 	return nil
 }
 
-func setupStarted(observer cli.SetupObserver, phase cli.SetupPhase) {
+func setupStarted(observer contracts.SetupObserver, phase contracts.SetupPhase) {
 	if observer != nil {
 		observer.SetupStarted(phase)
 	}
 }
 
-func setupCompleted(observer cli.SetupObserver, step cli.SetupStep) {
+func setupCompleted(observer contracts.SetupObserver, step contracts.SetupStep) {
 	if observer != nil {
 		observer.SetupCompleted(step)
 	}
@@ -500,7 +500,7 @@ func setupCompleted(observer cli.SetupObserver, step cli.SetupStep) {
 
 // DiscoverSetup inspects local onboarding state without writes, network access,
 // credential resolution, or process execution.
-func (s *Service) DiscoverSetup(ctx context.Context) (*cli.SetupDiscovery, error) {
+func (s *Service) DiscoverSetup(ctx context.Context) (*contracts.SetupDiscovery, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -510,10 +510,10 @@ func (s *Service) DiscoverSetup(ctx context.Context) (*cli.SetupDiscovery, error
 		detected[client] = true
 	}
 
-	result := &cli.SetupDiscovery{Version: s.version}
+	result := &contracts.SetupDiscovery{Version: s.version}
 	for _, client := range clientsetup.AllClients {
 		registered, path, err := clientsetup.CheckRegistration(client, home)
-		item := cli.SetupClientDiscovery{
+		item := contracts.SetupClientDiscovery{
 			Name:       string(client),
 			Path:       path,
 			Detected:   detected[client],
@@ -552,9 +552,9 @@ func (s *Service) DiscoverSetup(ctx context.Context) (*cli.SetupDiscovery, error
 // installCLI converts the requested release into a safe npm package
 // specifier and reports installation as an independent setup step. The returned
 // path is non-empty only after npm succeeded and the command shim was verified.
-func installCLI(ctx context.Context, version string, dryRun bool) (cli.SetupStep, string) {
+func installCLI(ctx context.Context, version string, dryRun bool) (contracts.SetupStep, string) {
 	resolvedVersion, err := clientsetup.ResolveNPMVersion(version)
-	step := cli.SetupStep{Name: "cli", Status: "installed", Message: "npm install --global gitcontribute@" + resolvedVersion}
+	step := contracts.SetupStep{Name: "cli", Status: "installed", Message: "npm install --global gitcontribute@" + resolvedVersion}
 	if err != nil {
 		step.Status = "failed"
 		step.Message = err.Error()
@@ -574,7 +574,7 @@ func installCLI(ctx context.Context, version string, dryRun bool) (cli.SetupStep
 	return step, commandPath
 }
 
-func setupSourceName(ref cli.RepoRef) string {
+func setupSourceName(ref contracts.RepoRef) string {
 	name := strings.ToLower(ref.Owner + "-" + ref.Repo)
 	if len(name) <= 64 {
 		return name
@@ -590,16 +590,16 @@ func autoTokenSource() string {
 	return "none"
 }
 
-func setupRepoRef(value string) (cli.RepoRef, error) {
+func setupRepoRef(value string) (contracts.RepoRef, error) {
 	value = strings.TrimSpace(strings.TrimSuffix(value, "/"))
 	value = strings.TrimPrefix(value, "https://github.com/")
 	parts := strings.Split(value, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return cli.RepoRef{}, fmt.Errorf("repository must be OWNER/REPO")
+		return contracts.RepoRef{}, fmt.Errorf("repository must be OWNER/REPO")
 	}
-	ref := cli.RepoRef{Owner: parts[0], Repo: strings.TrimSuffix(parts[1], ".git")}
+	ref := contracts.RepoRef{Owner: parts[0], Repo: strings.TrimSuffix(parts[1], ".git")}
 	if err := (domain.RepoRef{Owner: ref.Owner, Repo: ref.Repo}).Validate(); err != nil {
-		return cli.RepoRef{}, err
+		return contracts.RepoRef{}, err
 	}
 	return ref, nil
 }

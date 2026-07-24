@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 )
@@ -21,7 +21,7 @@ type HydrateRepositoryOptions struct {
 
 // HydrateRepository hydrates selected facets for threads in a repository.
 // It is explicit, bounded, cancellation-aware, and aggregates per-thread results.
-func (s *Service) HydrateRepository(ctx context.Context, repo cli.RepoRef, opts HydrateRepositoryOptions) (*HydrateResult, error) {
+func (s *Service) HydrateRepository(ctx context.Context, repo contracts.RepoRef, opts HydrateRepositoryOptions) (*HydrateResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
@@ -37,7 +37,7 @@ const maxHydrationPages = 100
 
 // HydrateResult reports the outcome of hydrating a thread.
 type HydrateResult struct {
-	Repo     cli.RepoRef
+	Repo     contracts.RepoRef
 	Number   int
 	Kind     string
 	Facets   []HydratedFacet
@@ -68,7 +68,7 @@ type HydrateOptions struct {
 // stores immutable facet observations. It is explicit, bounded, paginated,
 // cancellation-aware, and records independent facet coverage plus run
 // completion/failure statistics.
-func (s *Service) HydrateThread(ctx context.Context, repo cli.RepoRef, number int, opts HydrateOptions) (*HydrateResult, error) {
+func (s *Service) HydrateThread(ctx context.Context, repo contracts.RepoRef, number int, opts HydrateOptions) (*HydrateResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err

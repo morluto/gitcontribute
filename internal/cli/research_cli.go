@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/research"
 )
 
@@ -18,8 +19,8 @@ type researchBriefCmd struct {
 	JSON   bool   `name:"json" help:"Print JSON (shorthand for --format json)"`
 }
 
-func (c *CLI) researchService() (ResearchService, error) {
-	service, ok := c.svc.(ResearchService)
+func (c *CLI) researchService() (contracts.ResearchService, error) {
+	service, ok := c.svc.(contracts.ResearchService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}

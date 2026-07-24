@@ -7,78 +7,79 @@ import (
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
-func (f *fakeService) InspectCorpus(context.Context) (*cli.CorpusInspectionResult, error) {
-	return &cli.CorpusInspectionResult{Path: "/tmp/corpus.db", Exists: true, State: "migration_required", Current: 24, Target: 27, Repositories: 8, Threads: 8599}, f.err
+func (f *fakeService) InspectCorpus(context.Context) (*contracts.CorpusInspectionResult, error) {
+	return &contracts.CorpusInspectionResult{Path: "/tmp/corpus.db", Exists: true, State: "migration_required", Current: 24, Target: 27, Repositories: 8, Threads: 8599}, f.err
 }
 
-func (f *fakeService) MigrateCorpus(context.Context, cli.CorpusMigrateOptions) (*cli.CorpusMigrationResult, error) {
-	return &cli.CorpusMigrationResult{
-		Before: &cli.CorpusInspectionResult{Current: 24, Target: 27},
-		After:  &cli.CorpusInspectionResult{Current: 27, Target: 27},
-		Backup: &cli.CorpusBackupResult{Path: "/tmp/corpus.bak", SHA256: "abc"},
+func (f *fakeService) MigrateCorpus(context.Context, contracts.CorpusMigrateOptions) (*contracts.CorpusMigrationResult, error) {
+	return &contracts.CorpusMigrationResult{
+		Before: &contracts.CorpusInspectionResult{Current: 24, Target: 27},
+		After:  &contracts.CorpusInspectionResult{Current: 27, Target: 27},
+		Backup: &contracts.CorpusBackupResult{Path: "/tmp/corpus.bak", SHA256: "abc"},
 	}, f.err
 }
 
-func (f *fakeService) BackupCorpus(_ context.Context, destination string) (*cli.CorpusBackupResult, error) {
-	return &cli.CorpusBackupResult{Path: destination, SizeBytes: 42, SHA256: "abc"}, f.err
+func (f *fakeService) BackupCorpus(_ context.Context, destination string) (*contracts.CorpusBackupResult, error) {
+	return &contracts.CorpusBackupResult{Path: destination, SizeBytes: 42, SHA256: "abc"}, f.err
 }
 
-func (f *fakeService) RestoreCorpus(_ context.Context, source, _ string) (*cli.CorpusRestoreResult, error) {
-	return &cli.CorpusRestoreResult{
+func (f *fakeService) RestoreCorpus(_ context.Context, source, _ string) (*contracts.CorpusRestoreResult, error) {
+	return &contracts.CorpusRestoreResult{
 		Source:       source,
-		After:        &cli.CorpusInspectionResult{Current: 27, Repositories: 8, Threads: 8599},
-		SafetyBackup: &cli.CorpusBackupResult{Path: "/tmp/before-restore.bak", SHA256: "def"},
-		Restored:     &cli.CorpusBackupResult{Path: "/tmp/corpus.db", SHA256: "abc"},
+		After:        &contracts.CorpusInspectionResult{Current: 27, Repositories: 8, Threads: 8599},
+		SafetyBackup: &contracts.CorpusBackupResult{Path: "/tmp/before-restore.bak", SHA256: "def"},
+		Restored:     &contracts.CorpusBackupResult{Path: "/tmp/corpus.db", SHA256: "abc"},
 	}, f.err
 }
 
-func (f *fakeService) InventoryCorpus(_ context.Context, repo string) (*cli.CorpusInventoryResult, error) {
-	return &cli.CorpusInventoryResult{Repo: repo, Issues: 3, PullRequests: 2, CodeSnapshots: 4, CodeBytes: 100}, f.err
+func (f *fakeService) InventoryCorpus(_ context.Context, repo string) (*contracts.CorpusInventoryResult, error) {
+	return &contracts.CorpusInventoryResult{Repo: repo, Issues: 3, PullRequests: 2, CodeSnapshots: 4, CodeBytes: 100}, f.err
 }
 
-func (f *fakeService) ListCorpusInventory(context.Context) (*cli.CorpusInventoryListResult, error) {
-	return &cli.CorpusInventoryListResult{
-		Schema:        &cli.CorpusInspectionResult{State: "current", Current: 28, Target: 28},
-		Repositories:  []cli.CorpusRepositoryInventoryResult{{Repo: "owner/repo", PullRequests: 2, ThreadObservations: 2, LatestObservationAt: "2026-07-21T00:00:00Z"}},
-		Projections:   []cli.CorpusProjectionResult{{Name: "threads_fts", Version: "threads-fts-v1", Status: "stale"}},
-		PendingWork:   []cli.CorpusPendingWorkResult{{Kind: "projection", Name: "threads_fts", Status: "stale"}},
+func (f *fakeService) ListCorpusInventory(context.Context) (*contracts.CorpusInventoryListResult, error) {
+	return &contracts.CorpusInventoryListResult{
+		Schema:        &contracts.CorpusInspectionResult{State: "current", Current: 28, Target: 28},
+		Repositories:  []contracts.CorpusRepositoryInventoryResult{{Repo: "owner/repo", PullRequests: 2, ThreadObservations: 2, LatestObservationAt: "2026-07-21T00:00:00Z"}},
+		Projections:   []contracts.CorpusProjectionResult{{Name: "threads_fts", Version: "threads-fts-v1", Status: "stale"}},
+		PendingWork:   []contracts.CorpusPendingWorkResult{{Kind: "projection", Name: "threads_fts", Status: "stale"}},
 		DatabaseBytes: 200, WALBytes: 20, ObservationPayloadBytes: 40,
 	}, f.err
 }
 
-func (f *fakeService) PlanCodePrune(_ context.Context, repo string, keepLatest int) (*cli.CorpusPruneResult, error) {
-	return &cli.CorpusPruneResult{Repo: repo, DryRun: true, KeepLatest: keepLatest, Total: 2, Delete: []cli.CorpusPruneSnapshot{{CommitSHA: "old", Bytes: 40}}, ReclaimBytes: 40}, f.err
+func (f *fakeService) PlanCodePrune(_ context.Context, repo string, keepLatest int) (*contracts.CorpusPruneResult, error) {
+	return &contracts.CorpusPruneResult{Repo: repo, DryRun: true, KeepLatest: keepLatest, Total: 2, Delete: []contracts.CorpusPruneSnapshot{{CommitSHA: "old", Bytes: 40}}, ReclaimBytes: 40}, f.err
 }
 
-func (f *fakeService) ApplyCodePrune(_ context.Context, repo string, keepLatest int, _ []string) (*cli.CorpusPruneResult, error) {
-	return &cli.CorpusPruneResult{Repo: repo, KeepLatest: keepLatest, Total: 2, Delete: []cli.CorpusPruneSnapshot{{CommitSHA: "old", Bytes: 40}}, Deleted: 1, ReclaimBytes: 40}, f.err
+func (f *fakeService) ApplyCodePrune(_ context.Context, repo string, keepLatest int, _ []string) (*contracts.CorpusPruneResult, error) {
+	return &contracts.CorpusPruneResult{Repo: repo, KeepLatest: keepLatest, Total: 2, Delete: []contracts.CorpusPruneSnapshot{{CommitSHA: "old", Bytes: 40}}, Deleted: 1, ReclaimBytes: 40}, f.err
 }
 
-func (f *fakeService) PlanRepositoryRemoval(_ context.Context, repo string) (*cli.CorpusRepositoryRemovalResult, error) {
-	return &cli.CorpusRepositoryRemovalResult{Repo: repo, DryRun: true, Revision: "revision-1", Threads: 5, RepositoryObservations: 1, ThreadObservations: 5, PreservedInvestigations: 2}, f.err
+func (f *fakeService) PlanRepositoryRemoval(_ context.Context, repo string) (*contracts.CorpusRepositoryRemovalResult, error) {
+	return &contracts.CorpusRepositoryRemovalResult{Repo: repo, DryRun: true, Revision: "revision-1", Threads: 5, RepositoryObservations: 1, ThreadObservations: 5, PreservedInvestigations: 2}, f.err
 }
 
-func (f *fakeService) ApplyRepositoryRemoval(_ context.Context, repo, _ string) (*cli.CorpusRepositoryRemovalResult, error) {
-	return &cli.CorpusRepositoryRemovalResult{Repo: repo, Revision: "revision-1", Threads: 5, RepositoryObservations: 1, ThreadObservations: 5, PreservedInvestigations: 2}, f.err
+func (f *fakeService) ApplyRepositoryRemoval(_ context.Context, repo, _ string) (*contracts.CorpusRepositoryRemovalResult, error) {
+	return &contracts.CorpusRepositoryRemovalResult{Repo: repo, Revision: "revision-1", Threads: 5, RepositoryObservations: 1, ThreadObservations: 5, PreservedInvestigations: 2}, f.err
 }
 
-func (f *fakeService) ListCorpusProjections(context.Context) (*cli.CorpusProjectionListResult, error) {
-	return &cli.CorpusProjectionListResult{Projections: []cli.CorpusProjectionResult{{Name: "threads_fts", Version: "threads-fts-v1", Status: "current", RowCount: 12}}}, f.err
+func (f *fakeService) ListCorpusProjections(context.Context) (*contracts.CorpusProjectionListResult, error) {
+	return &contracts.CorpusProjectionListResult{Projections: []contracts.CorpusProjectionResult{{Name: "threads_fts", Version: "threads-fts-v1", Status: "current", RowCount: 12}}}, f.err
 }
 
-func (f *fakeService) RebuildCorpusProjection(_ context.Context, name string) (*cli.CorpusProjectionResult, error) {
-	return &cli.CorpusProjectionResult{Name: name, Version: "threads-fts-v1", Status: "current", RowCount: 12}, f.err
+func (f *fakeService) RebuildCorpusProjection(_ context.Context, name string) (*contracts.CorpusProjectionResult, error) {
+	return &contracts.CorpusProjectionResult{Name: name, Version: "threads-fts-v1", Status: "current", RowCount: 12}, f.err
 }
 
-func (f *fakeService) Setup(_ context.Context, opts cli.SetupOptions) (*cli.SetupReport, error) {
+func (f *fakeService) Setup(_ context.Context, opts contracts.SetupOptions) (*contracts.SetupReport, error) {
 	f.lastSetup = opts
 	f.setupCalls = append(f.setupCalls, opts)
 	if f.setupResult != nil {
 		return f.setupResult, nil
 	}
-	return &cli.SetupReport{Operation: "setup", DryRun: opts.DryRun, Steps: []cli.SetupStep{{Name: "codex", Status: "configured"}}}, nil
+	return &contracts.SetupReport{Operation: "setup", DryRun: opts.DryRun, Steps: []contracts.SetupStep{{Name: "codex", Status: "configured"}}}, nil
 }
 
 func TestCorpusLifecycleCommands(t *testing.T) {

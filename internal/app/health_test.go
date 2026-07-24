@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/health"
@@ -29,7 +29,7 @@ func TestRepositoryHealth(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	svc.SetClock(func() time.Time { return now })
 
-	ref := cli.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := contracts.RepoRef{Owner: "owner", Repo: "repo"}
 	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
 		Owner:           ref.Owner,
 		Name:            ref.Repo,

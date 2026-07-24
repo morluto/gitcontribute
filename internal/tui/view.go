@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/morluto/gitcontribute/internal/tuicontract"
 )
 
 var (
@@ -189,7 +190,7 @@ func (m Model) renderHelp() string {
 	return "Keyboard help\n" + strings.Join(keys, "\n")
 }
 
-func renderCoverage(coverage []Facet) string {
+func renderCoverage(coverage []tuicontract.Facet) string {
 	var lines []string
 	lines = append(lines, "Coverage:")
 	for _, f := range coverage {

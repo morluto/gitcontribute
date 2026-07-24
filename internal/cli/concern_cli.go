@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 type concernCmd struct {
@@ -82,8 +84,8 @@ type promoteConcernCmd struct {
 	JSON     bool   `name:"json" help:"Print the result as JSON"`
 }
 
-func (c *CLI) concernService() (ConcernService, error) {
-	service, ok := c.svc.(ConcernService)
+func (c *CLI) concernService() (contracts.ConcernService, error) {
+	service, ok := c.svc.(contracts.ConcernService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -103,7 +105,7 @@ func (c *CLI) runConcern(ctx context.Context, command string, cmd *concernCmd) e
 		if parseErr != nil {
 			return parseErr
 		}
-		result, err = service.CreateConcern(ctx, ConcernCreateOptions{
+		result, err = service.CreateConcern(ctx, contracts.ConcernCreateOptions{
 			Repo: repo, CommitSHA: cmd.Create.Commit, WorkspaceID: cmd.Create.Workspace,
 			Title: cmd.Create.Title, ProblemStatement: cmd.Create.Problem, SuspectedOwner: cmd.Create.Owner,
 			Confidence: cmd.Create.Confidence, Unknowns: cmd.Create.Unknowns, SuccessCriterion: cmd.Create.Success,
@@ -111,20 +113,20 @@ func (c *CLI) runConcern(ctx context.Context, command string, cmd *concernCmd) e
 		})
 		jsonOutput = cmd.Create.JSON
 	case "concern list":
-		var repo RepoRef
+		var repo contracts.RepoRef
 		if cmd.List.OwnerRepo != "" {
 			repo, err = parseRepo(cmd.List.OwnerRepo)
 			if err != nil {
 				return err
 			}
 		}
-		result, err = service.ListConcerns(ctx, ConcernListOptions{Repo: repo, Status: cmd.List.Status, Query: cmd.List.Query, Limit: cmd.List.Limit})
+		result, err = service.ListConcerns(ctx, contracts.ConcernListOptions{Repo: repo, Status: cmd.List.Status, Query: cmd.List.Query, Limit: cmd.List.Limit})
 		jsonOutput = cmd.List.JSON
 	case "concern show":
 		result, err = service.ShowConcern(ctx, cmd.Show.ID)
 		jsonOutput = cmd.Show.JSON
 	case "concern update":
-		result, err = service.UpdateConcern(ctx, cmd.Update.ID, ConcernUpdateOptions{
+		result, err = service.UpdateConcern(ctx, cmd.Update.ID, contracts.ConcernUpdateOptions{
 			Title: cmd.Update.Title, ProblemStatement: cmd.Update.Problem, SuspectedOwner: cmd.Update.Owner,
 			Confidence: cmd.Update.Confidence, Unknowns: cmd.Update.Unknowns, SuccessCriterion: cmd.Update.Success,
 			Notes: cmd.Update.Notes, EvidenceIDs: cmd.Update.Evidence,
@@ -134,10 +136,10 @@ func (c *CLI) runConcern(ctx context.Context, command string, cmd *concernCmd) e
 		result, err = service.SetConcernStatus(ctx, cmd.Status.ID, cmd.Status.Status, cmd.Status.Rationale)
 		jsonOutput = cmd.Status.JSON
 	case "concern link":
-		result, err = service.LinkConcern(ctx, cmd.Link.ID, ConcernLinkOptions{Kind: cmd.Link.Kind, TargetType: cmd.Link.TargetType, TargetID: cmd.Link.TargetID, Note: cmd.Link.Note})
+		result, err = service.LinkConcern(ctx, cmd.Link.ID, contracts.ConcernLinkOptions{Kind: cmd.Link.Kind, TargetType: cmd.Link.TargetType, TargetID: cmd.Link.TargetID, Note: cmd.Link.Note})
 		jsonOutput = cmd.Link.JSON
 	case "concern promote":
-		result, err = service.PromoteConcern(ctx, cmd.Promote.ID, ConcernPromoteOptions{Kind: cmd.Promote.Kind, Category: cmd.Promote.Category, Scope: cmd.Promote.Scope, Impact: cmd.Promote.Impact, ExpectedEffort: cmd.Promote.Effort})
+		result, err = service.PromoteConcern(ctx, cmd.Promote.ID, contracts.ConcernPromoteOptions{Kind: cmd.Promote.Kind, Category: cmd.Promote.Category, Scope: cmd.Promote.Scope, Impact: cmd.Promote.Impact, ExpectedEffort: cmd.Promote.Effort})
 		jsonOutput = cmd.Promote.JSON
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown concern command: %s", command))

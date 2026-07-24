@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
@@ -25,7 +25,7 @@ func TestContributionManifestInvalidatesValidationWhenUntrackedContentChanges(t 
 	svc := newLocalService(t)
 	defer func() { _ = svc.Close() }()
 	remote, _, candidateSHA := setupAppGitRemote(t)
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestContributionManifestInvalidatesValidationWhenUntrackedContentChanges(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	ws, err := svc.CreateWorkspace(ctx, inv.ID, cli.WorkspaceCreateOptions{Remote: remote, BaseRef: "master", CandidateRef: "feature", Name: "manifest"})
+	ws, err := svc.CreateWorkspace(ctx, inv.ID, contracts.WorkspaceCreateOptions{Remote: remote, BaseRef: "master", CandidateRef: "feature", Name: "manifest"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestContributionManifestInvalidatesValidationWhenUntrackedContentChanges(t 
 	if second.Predicate.Status != "incomplete" || !hasManifestGap(second.Predicate.Gaps, "validations") {
 		t.Fatalf("manifest did not expose stale validation: status=%q gaps=%+v", second.Predicate.Status, second.Predicate.Gaps)
 	}
-	draft, err := svc.PrepareIssue(ctx, opportunity.ID, cli.PrepareIssueOptions{ManifestID: second.Predicate.ManifestID})
+	draft, err := svc.PrepareIssue(ctx, opportunity.ID, contracts.PrepareIssueOptions{ManifestID: second.Predicate.ManifestID})
 	if err != nil {
 		t.Fatal(err)
 	}

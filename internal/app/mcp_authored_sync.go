@@ -7,16 +7,16 @@ import (
 	"sync"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/github"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // This bounded job combines pagination, repository grouping, and ordered worker
 // results because those phases share a single discovery limit and status result.
 //
 //nolint:gocognit,cyclop,funlen
-func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpserver.SyncAuthoredPullRequestsInput, report func(string, string) error) (map[string]any, error) {
+func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpcontract.SyncAuthoredPullRequestsInput, report func(string, string) error) (map[string]any, error) {
 	if err := report("authored_pull_request_discovery", jobProgressCounts(0, in.Limit)); err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpserver.Syn
 			defer wg.Done()
 			for index := range jobs {
 				current := tasks[index]
-				res, err := s.syncProvidedThreadHeaders(ctx, cli.RepoRef{Owner: current.owner, Repo: current.repo}, current.issues, current.maxRequests)
+				res, err := s.syncProvidedThreadHeaders(ctx, contracts.RepoRef{Owner: current.owner, Repo: current.repo}, current.issues, current.maxRequests)
 				if err != nil {
 					status, reason, message, retry := githubBatchError(err)
 					results[index] = map[string]any{"key": current.key, "status": status, "reason": reason, "message": message, "retry_after_ms": retry}

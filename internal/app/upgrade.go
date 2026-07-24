@@ -13,7 +13,7 @@ import (
 	"strings"
 
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/managedbinary"
 	clientsetup "github.com/morluto/gitcontribute/internal/setup"
 	"github.com/pelletier/go-toml/v2"
@@ -60,7 +60,7 @@ func runNPMCommand(ctx context.Context, args []string) ([]byte, error) {
 // corpus schema compatibility, activation/restart action, and rollback
 // limitations. It does not migrate the corpus or silently update an npx
 // invocation.
-func (s *Service) Upgrade(ctx context.Context, opts cli.UpgradeOptions) (*cli.UpgradeReport, error) {
+func (s *Service) Upgrade(ctx context.Context, opts contracts.UpgradeOptions) (*contracts.UpgradeReport, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func (s *Service) Upgrade(ctx context.Context, opts cli.UpgradeOptions) (*cli.Up
 	current := normalizeVersion(s.version)
 	details := discoverInstallation(ctx)
 
-	report := &cli.UpgradeReport{
+	report := &contracts.UpgradeReport{
 		Context: details.context,
 		Current: current,
 		Latest:  latest,
@@ -112,7 +112,7 @@ func (s *Service) Upgrade(ctx context.Context, opts cli.UpgradeOptions) (*cli.Up
 		if err := verifyGlobalNPMVersion(ctx, latest); err != nil {
 			return nil, err
 		}
-		setStage(report, cli.UpgradeStage{
+		setStage(report, contracts.UpgradeStage{
 			Name:    "npm-launcher",
 			Status:  "updated",
 			Path:    stagePath(report, "npm-launcher"),
@@ -170,7 +170,7 @@ func runNPMInstall(ctx context.Context, version string) error {
 	return nil
 }
 
-func shouldInstall(report *cli.UpgradeReport, opts cli.UpgradeOptions) bool {
+func shouldInstall(report *contracts.UpgradeReport, opts contracts.UpgradeOptions) bool {
 	if !opts.Yes {
 		return false
 	}
@@ -187,7 +187,7 @@ func shouldInstall(report *cli.UpgradeReport, opts cli.UpgradeOptions) bool {
 	return disposition == versionUpgrade || disposition == versionPrerelease
 }
 
-func setCommandAndStatus(report *cli.UpgradeReport) {
+func setCommandAndStatus(report *contracts.UpgradeReport) {
 	if stageStatus(report, "corpus-schema") == "migration_required" {
 		report.Status = "schema migration required"
 		return
@@ -280,7 +280,7 @@ func compareVersions(current, target string) versionDisposition {
 	}
 }
 
-func reportVersionDisposition(report *cli.UpgradeReport) versionDisposition {
+func reportVersionDisposition(report *contracts.UpgradeReport) versionDisposition {
 	current := report.Current
 	if report.Context == "global-npm" || report.Context == "project-npm" {
 		if installed := stageVersion(report, "npm-launcher"); installed != "" {
@@ -290,8 +290,8 @@ func reportVersionDisposition(report *cli.UpgradeReport) versionDisposition {
 	return compareVersions(current, report.Latest)
 }
 
-func installationStage(details installDetails, current string) cli.UpgradeStage {
-	return cli.UpgradeStage{
+func installationStage(details installDetails, current string) contracts.UpgradeStage {
+	return contracts.UpgradeStage{
 		Name:    "installation",
 		Status:  details.context,
 		Path:    details.executable,
@@ -361,8 +361,8 @@ func npmPackageRoot(details installDetails) string {
 	return ""
 }
 
-func npmLauncherStage(details installDetails, _ string, latest string) cli.UpgradeStage {
-	stage := cli.UpgradeStage{Name: "npm-launcher"}
+func npmLauncherStage(details installDetails, _ string, latest string) contracts.UpgradeStage {
+	stage := contracts.UpgradeStage{Name: "npm-launcher"}
 	root := npmPackageRoot(details)
 	if root == "" {
 		stage.Status = details.context
@@ -417,8 +417,8 @@ func readPackageVersion(root string) string {
 	return normalizeVersion(pkg.Version)
 }
 
-func (s *Service) privateRuntimeStage(current, latest string) cli.UpgradeStage {
-	stage := cli.UpgradeStage{Name: "private-mcp-runtime"}
+func (s *Service) privateRuntimeStage(current, latest string) contracts.UpgradeStage {
+	stage := contracts.UpgradeStage{Name: "private-mcp-runtime"}
 	dataDir, err := s.paths.DataDir()
 	if err != nil {
 		stage.Status = "failed"
@@ -464,8 +464,8 @@ func (s *Service) privateRuntimeStage(current, latest string) cli.UpgradeStage {
 	return stage
 }
 
-func (s *Service) configuredRuntimesStage(ctx context.Context, current, latest string) ([]cli.UpgradeConfiguredClient, cli.UpgradeStage, error) {
-	stage := cli.UpgradeStage{Name: "configured-runtime"}
+func (s *Service) configuredRuntimesStage(ctx context.Context, current, latest string) ([]contracts.UpgradeConfiguredClient, contracts.UpgradeStage, error) {
+	stage := contracts.UpgradeStage{Name: "configured-runtime"}
 	if err := ctx.Err(); err != nil {
 		return nil, stage, err
 	}
@@ -478,13 +478,13 @@ func (s *Service) configuredRuntimesStage(ctx context.Context, current, latest s
 		stage.Message = "home directory is unavailable"
 		return nil, stage, nil
 	}
-	var clients []cli.UpgradeConfiguredClient
+	var clients []contracts.UpgradeConfiguredClient
 	registered := 0
 	outdated := 0
 	for _, client := range clientsetup.AllClients {
 		c, err := inspectConfiguredClient(home, client, current, latest)
 		if err != nil {
-			c = cli.UpgradeConfiguredClient{Name: string(client), Status: "failed", Message: err.Error()}
+			c = contracts.UpgradeConfiguredClient{Name: string(client), Status: "failed", Message: err.Error()}
 		}
 		clients = append(clients, c)
 		if c.Status != "not_configured" && c.Status != "failed" {
@@ -508,8 +508,8 @@ func (s *Service) configuredRuntimesStage(ctx context.Context, current, latest s
 	return clients, stage, nil
 }
 
-func inspectConfiguredClient(home string, client clientsetup.Client, current, latest string) (cli.UpgradeConfiguredClient, error) {
-	result := cli.UpgradeConfiguredClient{Name: string(client)}
+func inspectConfiguredClient(home string, client clientsetup.Client, current, latest string) (contracts.UpgradeConfiguredClient, error) {
+	result := contracts.UpgradeConfiguredClient{Name: string(client)}
 	registered, path, err := clientsetup.CheckRegistration(client, home)
 	if err != nil {
 		return result, err

@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 type evidenceCmd struct {
@@ -26,8 +28,8 @@ type showEvidenceCmd struct {
 	JSON            bool   `name:"json" help:"Print the result as JSON"`
 }
 
-func (c *CLI) evidenceService() (EvidenceService, error) {
-	service, ok := c.svc.(EvidenceService)
+func (c *CLI) evidenceService() (contracts.EvidenceService, error) {
+	service, ok := c.svc.(contracts.EvidenceService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -41,11 +43,11 @@ func (c *CLI) runEvidence(ctx context.Context, command string, cmd *evidenceCmd)
 	}
 	switch command {
 	case "evidence add":
-		extended, err := c.workflowExtensionService()
+		workflow, err := c.workflowService()
 		if err != nil {
 			return err
 		}
-		result, err := extended.RecordEvidenceForCLI(ctx, RecordEvidenceOptions{
+		result, err := workflow.RecordEvidence(ctx, contracts.RecordEvidenceInput{
 			InvestigationID: cmd.Add.Investigation, HypothesisID: cmd.Add.Hypothesis,
 			OpportunityID: cmd.Add.Opportunity, Type: cmd.Add.Type,
 			Relation: cmd.Add.Relation, Description: cmd.Add.Description,

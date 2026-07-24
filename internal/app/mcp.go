@@ -8,16 +8,16 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/clustering"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/investigation"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
-// MCPReader adapts Service to the mcpserver.Reader interface. It is a thin
+// MCPReader adapts Service to the mcpcontract.Reader interface. It is a thin
 // wrapper because Go does not allow two methods named Search on one type.
 type MCPReader struct{ *Service }
 
@@ -27,48 +27,48 @@ func (r *MCPReader) application() *Service { return r.Service }
 
 // MCPReader returns an MCP adapter backed by this service. Read methods remain
 // offline; methods named sync or hydrate are explicit network-read operations.
-func (s *Service) MCPReader() mcpserver.Reader { return &MCPReader{s} }
+func (s *Service) MCPReader() mcpcontract.Reader { return &MCPReader{s} }
 
 // Search performs a local-only corpus search through the MCP interface.
-func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpserver.SearchOutput, error) {
+func (r *MCPReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcpcontract.SearchOutput, error) {
 	if in.Query == "" {
-		return mcpserver.SearchOutput{}, errors.New("query is required")
+		return mcpcontract.SearchOutput{}, errors.New("query is required")
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return mcpserver.SearchOutput{}, errors.New("limit must be between 1 and 100")
+		return mcpcontract.SearchOutput{}, errors.New("limit must be between 1 and 100")
 	}
 	if in.MatchMode == "" {
 		in.MatchMode = "all"
 	}
 	if in.MatchMode != "all" && in.MatchMode != "any" {
-		return mcpserver.SearchOutput{}, errors.New("match_mode must be all or any")
+		return mcpcontract.SearchOutput{}, errors.New("match_mode must be all or any")
 	}
 	if in.View == "" {
 		in.View = "compact"
 	}
 	if in.View != "compact" && in.View != "full" {
-		return mcpserver.SearchOutput{}, errors.New("view must be compact or full")
+		return mcpcontract.SearchOutput{}, errors.New("view must be compact or full")
 	}
 	var updatedAfter time.Time
 	if strings.TrimSpace(in.UpdatedAfter) != "" {
 		var err error
 		updatedAfter, err = time.Parse(time.RFC3339, in.UpdatedAfter)
 		if err != nil {
-			return mcpserver.SearchOutput{}, errors.New("updated_after must be RFC 3339")
+			return mcpcontract.SearchOutput{}, errors.New("updated_after must be RFC 3339")
 		}
 	}
 
 	repo := ""
 	if (in.Owner == "") != (in.Repo == "") {
-		return mcpserver.SearchOutput{}, errors.New("owner and repo must be provided together")
+		return mcpcontract.SearchOutput{}, errors.New("owner and repo must be provided together")
 	}
 	if in.Owner != "" && in.Repo != "" {
 		repo = in.Owner + "/" + in.Repo
 	}
-	res, err := r.searchCorpus(ctx, in.Query, cli.SearchOptions{
+	res, err := r.searchCorpus(ctx, in.Query, contracts.SearchOptions{
 		Kind:  in.Kind,
 		Repo:  repo,
 		State: in.State, StateReason: in.StateReason, Merged: in.Merged, Author: in.Author,
@@ -78,16 +78,16 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 		Sort:   in.Sort, MatchMode: in.MatchMode,
 	})
 	if err != nil {
-		return mcpserver.SearchOutput{}, err
+		return mcpcontract.SearchOutput{}, err
 	}
 
-	matches := make([]mcpserver.ThreadOutput, len(res.Matches))
+	matches := make([]mcpcontract.ThreadOutput, len(res.Matches))
 	for i, m := range res.Matches {
 		updatedAt := ""
 		if !m.UpdatedAt.IsZero() {
 			updatedAt = m.UpdatedAt.Format(time.RFC3339)
 		}
-		matches[i] = mcpserver.ThreadOutput{
+		matches[i] = mcpcontract.ThreadOutput{
 			Owner:             m.Repo.Owner,
 			Repo:              m.Repo.Repo,
 			Kind:              m.Kind,
@@ -117,7 +117,7 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 	if in.MatchMode == "any" {
 		separator = " OR "
 	}
-	out := mcpserver.SearchOutput{
+	out := mcpcontract.SearchOutput{
 		Query: in.Query, QueryInterpretation: strings.Join(strings.Fields(in.Query), separator),
 		MatchMode: in.MatchMode, View: in.View, Total: res.Total, Matches: matches, NextCursor: res.NextCursor,
 	}
@@ -128,23 +128,23 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 }
 
 // Repository reads a repository projection from the local corpus.
-func (r *MCPReader) Repository(ctx context.Context, in mcpserver.RepoInput) (mcpserver.RepositoryOutput, error) {
+func (r *MCPReader) Repository(ctx context.Context, in mcpcontract.RepoInput) (mcpcontract.RepositoryOutput, error) {
 	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
 	if err := ref.Validate(); err != nil {
-		return mcpserver.RepositoryOutput{}, err
+		return mcpcontract.RepositoryOutput{}, err
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.RepositoryOutput{}, err
+		return mcpcontract.RepositoryOutput{}, err
 	}
 	repo, err := c.GetRepository(ctx, in.Owner, in.Repo)
 	if err != nil {
-		return mcpserver.RepositoryOutput{}, fmt.Errorf("get repository: %w", err)
+		return mcpcontract.RepositoryOutput{}, fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil {
-		return mcpserver.RepositoryOutput{}, failure.NotFound(nil)
+		return mcpcontract.RepositoryOutput{}, failure.NotFound(nil)
 	}
-	return mcpserver.RepositoryOutput{
+	return mcpcontract.RepositoryOutput{
 		Owner:     repo.Owner,
 		Repo:      repo.Name,
 		UpdatedAt: formatTime(repo.SourceUpdatedAt),
@@ -165,34 +165,34 @@ func (r *MCPReader) Repository(ctx context.Context, in mcpserver.RepoInput) (mcp
 }
 
 // Thread reads one issue or pull request from the local corpus.
-func (r *MCPReader) Thread(ctx context.Context, in mcpserver.ThreadInput) (mcpserver.ThreadOutput, error) {
+func (r *MCPReader) Thread(ctx context.Context, in mcpcontract.ThreadInput) (mcpcontract.ThreadOutput, error) {
 	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
 	if err := ref.Validate(); err != nil {
-		return mcpserver.ThreadOutput{}, err
+		return mcpcontract.ThreadOutput{}, err
 	}
 	if in.Kind != "issue" && in.Kind != "pull_request" {
-		return mcpserver.ThreadOutput{}, errors.New("kind must be issue or pull_request")
+		return mcpcontract.ThreadOutput{}, errors.New("kind must be issue or pull_request")
 	}
 	if in.Number < 1 {
-		return mcpserver.ThreadOutput{}, errors.New("number must be positive")
+		return mcpcontract.ThreadOutput{}, errors.New("number must be positive")
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.ThreadOutput{}, err
+		return mcpcontract.ThreadOutput{}, err
 	}
 	repo, err := c.GetRepository(ctx, in.Owner, in.Repo)
 	if err != nil {
-		return mcpserver.ThreadOutput{}, fmt.Errorf("get repository: %w", err)
+		return mcpcontract.ThreadOutput{}, fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil {
-		return mcpserver.ThreadOutput{}, failure.NotFound(nil)
+		return mcpcontract.ThreadOutput{}, failure.NotFound(nil)
 	}
 	thread, err := c.GetThread(ctx, repo.ID, in.Kind, in.Number)
 	if err != nil {
-		return mcpserver.ThreadOutput{}, fmt.Errorf("get thread: %w", err)
+		return mcpcontract.ThreadOutput{}, fmt.Errorf("get thread: %w", err)
 	}
 	if thread == nil {
-		return mcpserver.ThreadOutput{}, failure.NotFound(nil)
+		return mcpcontract.ThreadOutput{}, failure.NotFound(nil)
 	}
 	out := corpusThreadToMCPOutput(thread)
 	out.Owner = in.Owner
@@ -200,8 +200,8 @@ func (r *MCPReader) Thread(ctx context.Context, in mcpserver.ThreadInput) (mcpse
 	return out, nil
 }
 
-func corpusThreadToMCPOutput(t *corpus.Thread) mcpserver.ThreadOutput {
-	return mcpserver.ThreadOutput{
+func corpusThreadToMCPOutput(t *corpus.Thread) mcpcontract.ThreadOutput {
+	return mcpcontract.ThreadOutput{
 		Owner:             "", // filled by caller
 		Repo:              "",
 		Kind:              t.Kind,
@@ -227,62 +227,62 @@ func knownMergePointer(merged, known bool) *bool {
 }
 
 // Dossier returns the latest persisted source-backed repository dossier.
-func (r *MCPReader) Dossier(ctx context.Context, in mcpserver.RepoInput) (mcpserver.DossierOutput, error) {
+func (r *MCPReader) Dossier(ctx context.Context, in mcpcontract.RepoInput) (mcpcontract.DossierOutput, error) {
 	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
 	if err := ref.Validate(); err != nil {
-		return mcpserver.DossierOutput{}, err
+		return mcpcontract.DossierOutput{}, err
 	}
 	if _, err := r.openReadOnlyCorpus(ctx); err != nil {
-		return mcpserver.DossierOutput{}, err
+		return mcpcontract.DossierOutput{}, err
 	}
-	d, err := r.GetRepositoryDossier(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
+	d, err := r.GetRepositoryDossier(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
 	if err != nil {
 		if errors.Is(err, errDossierNotFound) {
-			return mcpserver.DossierOutput{}, failure.NotFound(nil)
+			return mcpcontract.DossierOutput{}, failure.NotFound(nil)
 		}
-		return mcpserver.DossierOutput{}, err
+		return mcpcontract.DossierOutput{}, err
 	}
 	return dossierToMCPOutput(d), nil
 }
 
 // Investigation reads a local investigation workspace from the corpus.
-func (r *MCPReader) Investigation(ctx context.Context, in mcpserver.InvestigationInput) (mcpserver.InvestigationOutput, error) {
+func (r *MCPReader) Investigation(ctx context.Context, in mcpcontract.InvestigationInput) (mcpcontract.InvestigationOutput, error) {
 	id, err := normalizeMCPID("id", in.ID)
 	if err != nil {
-		return mcpserver.InvestigationOutput{}, err
+		return mcpcontract.InvestigationOutput{}, err
 	}
 	in.ID = id
 	if in.HypothesisLimit == 0 {
 		in.HypothesisLimit = 20
 	}
 	if in.HypothesisLimit < 1 || in.HypothesisLimit > 100 {
-		return mcpserver.InvestigationOutput{}, errors.New("hypothesis_limit must be between 1 and 100")
+		return mcpcontract.InvestigationOutput{}, errors.New("hypothesis_limit must be between 1 and 100")
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.InvestigationOutput{}, err
+		return mcpcontract.InvestigationOutput{}, err
 	}
 	inv, err := c.GetInvestigation(ctx, in.ID)
 	if err != nil {
 		if errors.Is(err, investigation.ErrNotFound) {
-			return mcpserver.InvestigationOutput{}, failure.NotFound(nil)
+			return mcpcontract.InvestigationOutput{}, failure.NotFound(nil)
 		}
-		return mcpserver.InvestigationOutput{}, fmt.Errorf("get investigation: %w", err)
+		return mcpcontract.InvestigationOutput{}, fmt.Errorf("get investigation: %w", err)
 	}
 	if inv == nil {
-		return mcpserver.InvestigationOutput{}, failure.NotFound(nil)
+		return mcpcontract.InvestigationOutput{}, failure.NotFound(nil)
 	}
 	hypotheses, err := c.ListHypotheses(ctx, in.ID)
 	if err != nil {
-		return mcpserver.InvestigationOutput{}, fmt.Errorf("list hypotheses: %w", err)
+		return mcpcontract.InvestigationOutput{}, fmt.Errorf("list hypotheses: %w", err)
 	}
 	hypothesisTotal := len(hypotheses)
 	if len(hypotheses) > in.HypothesisLimit {
 		hypotheses = hypotheses[:in.HypothesisLimit]
 	}
-	hyps := make([]mcpserver.HypothesisSummary, len(hypotheses))
+	hyps := make([]mcpcontract.HypothesisSummary, len(hypotheses))
 	for i, h := range hypotheses {
-		hyps[i] = mcpserver.HypothesisSummary{
+		hyps[i] = mcpcontract.HypothesisSummary{
 			ID:          h.ID,
 			Title:       h.Title,
 			Category:    string(h.Category),
@@ -290,7 +290,7 @@ func (r *MCPReader) Investigation(ctx context.Context, in mcpserver.Investigatio
 			Description: h.Description,
 		}
 	}
-	return mcpserver.InvestigationOutput{
+	return mcpcontract.InvestigationOutput{
 		ID:              inv.ID,
 		Owner:           inv.Repo.Owner,
 		Repo:            inv.Repo.Repo,
@@ -305,33 +305,33 @@ func (r *MCPReader) Investigation(ctx context.Context, in mcpserver.Investigatio
 }
 
 // ListOpportunities lists opportunities for a local investigation.
-func (r *MCPReader) ListOpportunities(ctx context.Context, in mcpserver.ListOpportunitiesInput) (mcpserver.ListOpportunitiesOutput, error) {
+func (r *MCPReader) ListOpportunities(ctx context.Context, in mcpcontract.ListOpportunitiesInput) (mcpcontract.ListOpportunitiesOutput, error) {
 	id, err := normalizeMCPID("investigation_id", in.InvestigationID)
 	if err != nil {
-		return mcpserver.ListOpportunitiesOutput{}, err
+		return mcpcontract.ListOpportunitiesOutput{}, err
 	}
 	in.InvestigationID = id
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return mcpserver.ListOpportunitiesOutput{}, errors.New("limit must be between 1 and 100")
+		return mcpcontract.ListOpportunitiesOutput{}, errors.New("limit must be between 1 and 100")
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.ListOpportunitiesOutput{}, err
+		return mcpcontract.ListOpportunitiesOutput{}, err
 	}
 	opps, err := c.ListOpportunities(ctx, in.InvestigationID)
 	if err != nil {
-		return mcpserver.ListOpportunitiesOutput{}, fmt.Errorf("list opportunities: %w", err)
+		return mcpcontract.ListOpportunitiesOutput{}, fmt.Errorf("list opportunities: %w", err)
 	}
 	total := len(opps)
 	if len(opps) > in.Limit {
 		opps = opps[:in.Limit]
 	}
-	out := make([]mcpserver.OpportunitySummary, len(opps))
+	out := make([]mcpcontract.OpportunitySummary, len(opps))
 	for i, o := range opps {
-		out[i] = mcpserver.OpportunitySummary{
+		out[i] = mcpcontract.OpportunitySummary{
 			ID:              o.ID,
 			InvestigationID: o.InvestigationID,
 			Title:           o.Title,
@@ -343,39 +343,39 @@ func (r *MCPReader) ListOpportunities(ctx context.Context, in mcpserver.ListOppo
 			UpdatedAt:       formatTime(o.UpdatedAt),
 		}
 	}
-	return mcpserver.ListOpportunitiesOutput{Opportunities: out, Total: total}, nil
+	return mcpcontract.ListOpportunitiesOutput{Opportunities: out, Total: total}, nil
 }
 
 // Opportunity reads a local contribution opportunity.
-func (r *MCPReader) Opportunity(ctx context.Context, in mcpserver.OpportunityInput) (mcpserver.OpportunityOutput, error) {
+func (r *MCPReader) Opportunity(ctx context.Context, in mcpcontract.OpportunityInput) (mcpcontract.OpportunityOutput, error) {
 	id, err := normalizeMCPID("id", in.ID)
 	if err != nil {
-		return mcpserver.OpportunityOutput{}, err
+		return mcpcontract.OpportunityOutput{}, err
 	}
 	in.ID = id
 	if in.EvidenceLimit == 0 {
 		in.EvidenceLimit = 20
 	}
 	if in.EvidenceLimit < 1 || in.EvidenceLimit > 100 {
-		return mcpserver.OpportunityOutput{}, errors.New("evidence_limit must be between 1 and 100")
+		return mcpcontract.OpportunityOutput{}, errors.New("evidence_limit must be between 1 and 100")
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.OpportunityOutput{}, err
+		return mcpcontract.OpportunityOutput{}, err
 	}
 	opp, err := c.GetOpportunity(ctx, in.ID)
 	if err != nil {
 		if errors.Is(err, investigation.ErrNotFound) {
-			return mcpserver.OpportunityOutput{}, failure.NotFound(nil)
+			return mcpcontract.OpportunityOutput{}, failure.NotFound(nil)
 		}
-		return mcpserver.OpportunityOutput{}, fmt.Errorf("get opportunity: %w", err)
+		return mcpcontract.OpportunityOutput{}, fmt.Errorf("get opportunity: %w", err)
 	}
 	if opp == nil {
-		return mcpserver.OpportunityOutput{}, failure.NotFound(nil)
+		return mcpcontract.OpportunityOutput{}, failure.NotFound(nil)
 	}
 	evs, err := c.ListEvidence(ctx, evidence.EvidenceFilter{OpportunityID: opp.ID})
 	if err != nil {
-		return mcpserver.OpportunityOutput{}, fmt.Errorf("list evidence: %w", err)
+		return mcpcontract.OpportunityOutput{}, fmt.Errorf("list evidence: %w", err)
 	}
 	evidenceTotal := len(evs)
 	if len(evs) > in.EvidenceLimit {
@@ -385,7 +385,7 @@ func (r *MCPReader) Opportunity(ctx context.Context, in mcpserver.OpportunityInp
 	for i, e := range evs {
 		evidenceIDs[i] = e.ID
 	}
-	return mcpserver.OpportunityOutput{
+	return mcpcontract.OpportunityOutput{
 		ID:                  opp.ID,
 		InvestigationID:     opp.InvestigationID,
 		HypothesisID:        opp.HypothesisID,
@@ -409,24 +409,24 @@ func (r *MCPReader) Opportunity(ctx context.Context, in mcpserver.OpportunityInp
 }
 
 // Evidence reads evidence for a local investigation or opportunity.
-func (r *MCPReader) Evidence(ctx context.Context, in mcpserver.EvidenceInput) (mcpserver.EvidenceOutput, error) {
+func (r *MCPReader) Evidence(ctx context.Context, in mcpcontract.EvidenceInput) (mcpcontract.EvidenceOutput, error) {
 	in.InvestigationID = strings.TrimSpace(in.InvestigationID)
 	in.OpportunityID = strings.TrimSpace(in.OpportunityID)
 	if (in.InvestigationID == "") == (in.OpportunityID == "") {
-		return mcpserver.EvidenceOutput{}, errors.New("exactly one of investigation_id or opportunity_id is required")
+		return mcpcontract.EvidenceOutput{}, errors.New("exactly one of investigation_id or opportunity_id is required")
 	}
 	if in.InvestigationID != "" {
 		if _, err := normalizeMCPID("investigation_id", in.InvestigationID); err != nil {
-			return mcpserver.EvidenceOutput{}, err
+			return mcpcontract.EvidenceOutput{}, err
 		}
 	} else if _, err := normalizeMCPID("opportunity_id", in.OpportunityID); err != nil {
-		return mcpserver.EvidenceOutput{}, err
+		return mcpcontract.EvidenceOutput{}, err
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return mcpserver.EvidenceOutput{}, errors.New("limit must be between 1 and 100")
+		return mcpcontract.EvidenceOutput{}, errors.New("limit must be between 1 and 100")
 	}
 	filter := evidence.EvidenceFilter{
 		InvestigationID: in.InvestigationID,
@@ -434,36 +434,36 @@ func (r *MCPReader) Evidence(ctx context.Context, in mcpserver.EvidenceInput) (m
 	}
 	if in.Relation != "" {
 		if !isValidEvidenceRelation(in.Relation) {
-			return mcpserver.EvidenceOutput{}, fmt.Errorf("invalid relation %q", in.Relation)
+			return mcpcontract.EvidenceOutput{}, fmt.Errorf("invalid relation %q", in.Relation)
 		}
 		filter.Relation = evidence.Relation(in.Relation)
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.EvidenceOutput{}, err
+		return mcpcontract.EvidenceOutput{}, err
 	}
 	items, err := c.ListEvidence(ctx, filter)
 	if err != nil {
-		return mcpserver.EvidenceOutput{}, fmt.Errorf("list evidence: %w", err)
+		return mcpcontract.EvidenceOutput{}, fmt.Errorf("list evidence: %w", err)
 	}
 	total := len(items)
 	if len(items) > in.Limit {
 		items = items[:in.Limit]
 	}
-	out := make([]mcpserver.EvidenceItem, len(items))
+	out := make([]mcpcontract.EvidenceItem, len(items))
 	evaluator := evidence.NewFreshnessEvaluator(c)
 	for i, e := range items {
 		freshness, err := evaluator.Evaluate(ctx, e)
 		if err != nil {
-			return mcpserver.EvidenceOutput{}, fmt.Errorf("evaluate evidence %q: %w", e.ID, err)
+			return mcpcontract.EvidenceOutput{}, fmt.Errorf("evaluate evidence %q: %w", e.ID, err)
 		}
-		out[i] = mcpserver.EvidenceItem{
+		out[i] = mcpcontract.EvidenceItem{
 			ID: e.ID, Type: string(e.Type), Relation: string(e.Relation), Description: e.Description,
 			SourceRefs: sourceRefsToMCP(e.SourceRefs), SourceProvenance: evidenceSourceRevisionsToMCP(e.SourceProvenance),
 			Freshness: string(freshness.Status), FreshnessReason: freshness.Reason, CreatedAt: formatTime(e.CreatedAt),
 		}
 	}
-	return mcpserver.EvidenceOutput{
+	return mcpcontract.EvidenceOutput{
 		InvestigationID: in.InvestigationID,
 		OpportunityID:   in.OpportunityID,
 		Total:           total,
@@ -471,14 +471,14 @@ func (r *MCPReader) Evidence(ctx context.Context, in mcpserver.EvidenceInput) (m
 	}, nil
 }
 
-func evidenceSourceRevisionsToMCP(values []evidence.SourceRevision) []mcpserver.EvidenceSourceRevision {
+func evidenceSourceRevisionsToMCP(values []evidence.SourceRevision) []mcpcontract.EvidenceSourceRevision {
 	if len(values) == 0 {
 		return nil
 	}
-	out := make([]mcpserver.EvidenceSourceRevision, len(values))
+	out := make([]mcpcontract.EvidenceSourceRevision, len(values))
 	for i, value := range values {
-		out[i] = mcpserver.EvidenceSourceRevision{
-			Subject: mcpserver.EvidenceSourceSubject{
+		out[i] = mcpcontract.EvidenceSourceRevision{
+			Subject: mcpcontract.EvidenceSourceSubject{
 				Kind: string(value.Subject.Kind), Owner: value.Subject.Owner, Repo: value.Subject.Repo,
 				ThreadKind: value.Subject.ThreadKind, Number: value.Subject.Number, Facet: value.Subject.Facet,
 			},
@@ -489,8 +489,8 @@ func evidenceSourceRevisionsToMCP(values []evidence.SourceRevision) []mcpserver.
 	return out
 }
 
-func dossierToMCPOutput(d *domain.Dossier) mcpserver.DossierOutput {
-	return mcpserver.DossierOutput{
+func dossierToMCPOutput(d *domain.Dossier) mcpcontract.DossierOutput {
+	return mcpcontract.DossierOutput{
 		Owner: d.Repo.Owner,
 		Repo:  d.Repo.Repo,
 		AsOf:  d.AsOf.Format(time.RFC3339),
@@ -515,10 +515,10 @@ func dossierToMCPOutput(d *domain.Dossier) mcpserver.DossierOutput {
 	}
 }
 
-func sourceRefsToMCP(refs []domain.SourceRef) []mcpserver.SourceRef {
-	out := make([]mcpserver.SourceRef, len(refs))
+func sourceRefsToMCP(refs []domain.SourceRef) []mcpcontract.SourceRef {
+	out := make([]mcpcontract.SourceRef, len(refs))
 	for i, r := range refs {
-		out[i] = mcpserver.SourceRef{
+		out[i] = mcpcontract.SourceRef{
 			Source:     r.Source,
 			URL:        r.URL,
 			CommitSHA:  r.CommitSHA,
@@ -550,30 +550,30 @@ func normalizeMCPID(field, value string) (string, error) {
 
 // FindClusters lists duplicate-candidate clusters for a repository from the
 // local corpus without recomputing them.
-func (r *MCPReader) FindClusters(ctx context.Context, in mcpserver.FindClustersInput) (mcpserver.FindClustersOutput, error) {
+func (r *MCPReader) FindClusters(ctx context.Context, in mcpcontract.FindClustersInput) (mcpcontract.FindClustersOutput, error) {
 	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
 	if err := ref.Validate(); err != nil {
-		return mcpserver.FindClustersOutput{}, err
+		return mcpcontract.FindClustersOutput{}, err
 	}
 	if in.Limit <= 0 || in.Limit > 100 {
-		return mcpserver.FindClustersOutput{}, errors.New("limit must be between 1 and 100")
+		return mcpcontract.FindClustersOutput{}, errors.New("limit must be between 1 and 100")
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.FindClustersOutput{}, err
+		return mcpcontract.FindClustersOutput{}, err
 	}
 	if (in.Kind == "") != (in.Number == 0) {
-		return mcpserver.FindClustersOutput{}, errors.New("kind and number must be provided together")
+		return mcpcontract.FindClustersOutput{}, errors.New("kind and number must be provided together")
 	}
 	if in.Kind != "" {
 		projection, err := c.GetClusterProjectionForMemberWithIdentity(ctx, clustering.MemberRef{Kind: in.Kind, Owner: in.Owner, Repo: in.Repo, Number: in.Number})
 		if err != nil {
-			return mcpserver.FindClustersOutput{}, fmt.Errorf("find cluster member: %w", err)
+			return mcpcontract.FindClustersOutput{}, fmt.Errorf("find cluster member: %w", err)
 		}
-		out := mcpserver.FindClustersOutput{Owner: in.Owner, Repo: in.Repo}
+		out := mcpcontract.FindClustersOutput{Owner: in.Owner, Repo: in.Repo}
 		if len(projection.Clusters) > 0 {
 			out.Total = 1
-			out.Clusters = []mcpserver.ClusterOutput{clusterToMCP(projection.Clusters[0], 20)}
+			out.Clusters = []mcpcontract.ClusterOutput{clusterToMCP(projection.Clusters[0], 20)}
 		}
 		if projection.Projection != nil {
 			out.RuleVersion = projection.Projection.RuleVersion
@@ -582,14 +582,14 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpserver.FindClustersI
 	}
 	projection, err := c.ListClusterProjection(ctx, ref, clustering.ClusterOpen, in.Limit)
 	if err != nil {
-		return mcpserver.FindClustersOutput{}, fmt.Errorf("list clusters: %w", err)
+		return mcpcontract.FindClustersOutput{}, fmt.Errorf("list clusters: %w", err)
 	}
-	out := mcpserver.FindClustersOutput{
+	out := mcpcontract.FindClustersOutput{
 		Owner:     in.Owner,
 		Repo:      in.Repo,
 		Total:     projection.Total,
 		Truncated: projection.Truncated,
-		Clusters:  make([]mcpserver.ClusterOutput, len(projection.Clusters)),
+		Clusters:  make([]mcpcontract.ClusterOutput, len(projection.Clusters)),
 	}
 	if projection.Projection != nil {
 		out.RuleVersion = projection.Projection.RuleVersion
@@ -601,17 +601,17 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpserver.FindClustersI
 }
 
 // FindNeighbors ranks similar local threads without network access.
-func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpserver.FindNeighborsInput) (mcpserver.FindNeighborsOutput, error) {
-	result, err := r.Neighbors(ctx, cli.RepoRef{Owner: in.Owner, Repo: in.Repo}, in.Kind, in.Number, in.Limit)
+func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpcontract.FindNeighborsInput) (mcpcontract.FindNeighborsOutput, error) {
+	result, err := r.Neighbors(ctx, contracts.RepoRef{Owner: in.Owner, Repo: in.Repo}, in.Kind, in.Number, in.Limit)
 	if err != nil {
-		return mcpserver.FindNeighborsOutput{}, err
+		return mcpcontract.FindNeighborsOutput{}, err
 	}
-	out := mcpserver.FindNeighborsOutput{
+	out := mcpcontract.FindNeighborsOutput{
 		Owner: in.Owner, Repo: in.Repo, Kind: result.Kind, Number: result.Number, SourceRevision: result.SourceRevision,
-		Neighbors: make([]mcpserver.NeighborOutput, len(result.Neighbors)),
+		Neighbors: make([]mcpcontract.NeighborOutput, len(result.Neighbors)),
 	}
 	for i, neighbor := range result.Neighbors {
-		out.Neighbors[i] = mcpserver.NeighborOutput{
+		out.Neighbors[i] = mcpcontract.NeighborOutput{
 			Kind: neighbor.Kind, Owner: neighbor.Owner, Repo: neighbor.Repo, Number: neighbor.Number,
 			Title: neighbor.Title, State: neighbor.State, Score: neighbor.Score, Reason: neighbor.Reason,
 		}
@@ -620,21 +620,21 @@ func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpserver.FindNeighbor
 }
 
 // GetCoverage returns bounded, input-ordered facet coverage without network access.
-func (r *MCPReader) GetCoverage(ctx context.Context, in mcpserver.GetCoverageInput) (mcpserver.GetCoverageOutput, error) {
+func (r *MCPReader) GetCoverage(ctx context.Context, in mcpcontract.GetCoverageInput) (mcpcontract.GetCoverageOutput, error) {
 	if len(in.Targets) < 1 || len(in.Targets) > 100 {
-		return mcpserver.GetCoverageOutput{}, errors.New("targets must contain 1 to 100 items")
+		return mcpcontract.GetCoverageOutput{}, errors.New("targets must contain 1 to 100 items")
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.GetCoverageOutput{}, err
+		return mcpcontract.GetCoverageOutput{}, err
 	}
-	out := mcpserver.GetCoverageOutput{Status: "complete", Items: make([]mcpserver.BatchItem[mcpserver.CoverageOutput], len(in.Targets))}
+	out := mcpcontract.GetCoverageOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.CoverageOutput], len(in.Targets))}
 	for i, target := range in.Targets {
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
 		key := coverageTargetKey(target)
-		item := mcpserver.BatchItem[mcpserver.CoverageOutput]{Key: key, Status: "complete"}
+		item := mcpcontract.BatchItem[mcpcontract.CoverageOutput]{Key: key, Status: "complete"}
 		value, reason, err := readCoverageTarget(ctx, c, target)
 		if errors.Is(err, errInvalidCoverageTarget) {
 			item.Status, item.Reason = "unavailable", "invalid_reference"
@@ -660,7 +660,7 @@ func (r *MCPReader) GetCoverage(ctx context.Context, in mcpserver.GetCoverageInp
 	return out, nil
 }
 
-func coverageTargetKey(target mcpserver.CoverageTarget) string {
+func coverageTargetKey(target mcpcontract.CoverageTarget) string {
 	key := target.Owner + "/" + target.Repo
 	if target.Kind != "" || target.Number != 0 {
 		key += fmt.Sprintf("/%s#%d", target.Kind, target.Number)
@@ -670,40 +670,40 @@ func coverageTargetKey(target mcpserver.CoverageTarget) string {
 
 var errInvalidCoverageTarget = errors.New("invalid coverage target")
 
-func readCoverageTarget(ctx context.Context, c *corpus.Corpus, target mcpserver.CoverageTarget) (mcpserver.CoverageOutput, string, error) {
+func readCoverageTarget(ctx context.Context, c *corpus.Corpus, target mcpcontract.CoverageTarget) (mcpcontract.CoverageOutput, string, error) {
 	ref := domain.RepoRef{Owner: target.Owner, Repo: target.Repo}
 	if err := ref.Validate(); err != nil {
-		return mcpserver.CoverageOutput{}, "invalid_reference", fmt.Errorf("%w: %w", errInvalidCoverageTarget, err)
+		return mcpcontract.CoverageOutput{}, "invalid_reference", fmt.Errorf("%w: %w", errInvalidCoverageTarget, err)
 	}
 	isThread := target.Kind != "" || target.Number != 0
 	if isThread && ((target.Kind != "issue" && target.Kind != "pull_request") || target.Number < 1) {
-		return mcpserver.CoverageOutput{}, "invalid_reference", errInvalidCoverageTarget
+		return mcpcontract.CoverageOutput{}, "invalid_reference", errInvalidCoverageTarget
 	}
 	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
 	if err != nil {
-		return mcpserver.CoverageOutput{}, "", fmt.Errorf("get repository: %w", err)
+		return mcpcontract.CoverageOutput{}, "", fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil {
-		return mcpserver.CoverageOutput{}, "not_indexed", nil
+		return mcpcontract.CoverageOutput{}, "not_indexed", nil
 	}
 	var threadID *int64
 	asOf := repo.SourceUpdatedAt
 	if isThread {
 		thread, err := c.GetThread(ctx, repo.ID, target.Kind, target.Number)
 		if err != nil {
-			return mcpserver.CoverageOutput{}, "", fmt.Errorf("get thread: %w", err)
+			return mcpcontract.CoverageOutput{}, "", fmt.Errorf("get thread: %w", err)
 		}
 		if thread == nil {
-			return mcpserver.CoverageOutput{}, "not_indexed", nil
+			return mcpcontract.CoverageOutput{}, "not_indexed", nil
 		}
 		threadID = &thread.ID
 		asOf = thread.SourceUpdatedAt
 	}
 	covs, err := c.ListCoverage(ctx, repo.ID, threadID)
 	if err != nil {
-		return mcpserver.CoverageOutput{}, "", fmt.Errorf("list coverage: %w", err)
+		return mcpcontract.CoverageOutput{}, "", fmt.Errorf("list coverage: %w", err)
 	}
-	out := mcpserver.CoverageOutput{Owner: target.Owner, Repo: target.Repo, Kind: target.Kind, Number: target.Number, AsOf: formatTime(asOf), Facets: make([]mcpserver.FacetCoverageOutput, 0, len(covs))}
+	out := mcpcontract.CoverageOutput{Owner: target.Owner, Repo: target.Repo, Kind: target.Kind, Number: target.Number, AsOf: formatTime(asOf), Facets: make([]mcpcontract.FacetCoverageOutput, 0, len(covs))}
 	for _, cov := range covs {
 		if cov.SourceUpdatedAt.After(asOf) {
 			asOf = cov.SourceUpdatedAt
@@ -713,7 +713,7 @@ func readCoverageTarget(ctx context.Context, c *corpus.Corpus, target mcpserver.
 		if !cov.Complete {
 			status = "incomplete"
 		}
-		out.Facets = append(out.Facets, mcpserver.FacetCoverageOutput{
+		out.Facets = append(out.Facets, mcpcontract.FacetCoverageOutput{
 			Facet:     cov.Facet,
 			Complete:  cov.Complete,
 			Status:    status,
@@ -724,23 +724,23 @@ func readCoverageTarget(ctx context.Context, c *corpus.Corpus, target mcpserver.
 }
 
 // Lens reads a saved lens definition from the local corpus.
-func (r *MCPReader) Lens(ctx context.Context, in mcpserver.LensInput) (mcpserver.LensOutput, error) {
+func (r *MCPReader) Lens(ctx context.Context, in mcpcontract.LensInput) (mcpcontract.LensOutput, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
-		return mcpserver.LensOutput{}, errors.New("name is required")
+		return mcpcontract.LensOutput{}, errors.New("name is required")
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.LensOutput{}, err
+		return mcpcontract.LensOutput{}, err
 	}
 	record, err := c.GetLens(ctx, name)
 	if err != nil {
-		return mcpserver.LensOutput{}, fmt.Errorf("get lens: %w", err)
+		return mcpcontract.LensOutput{}, fmt.Errorf("get lens: %w", err)
 	}
 	if record == nil {
-		return mcpserver.LensOutput{}, failure.NotFound(nil)
+		return mcpcontract.LensOutput{}, failure.NotFound(nil)
 	}
-	return mcpserver.LensOutput{
+	return mcpcontract.LensOutput{
 		Name:       record.Definition.Name,
 		Definition: record.Definition,
 		CreatedAt:  formatTime(record.CreatedAt),
@@ -748,14 +748,14 @@ func (r *MCPReader) Lens(ctx context.Context, in mcpserver.LensInput) (mcpserver
 	}, nil
 }
 
-func clusterToMCP(cl clustering.Cluster, memberLimit int) mcpserver.ClusterOutput {
-	members := make([]mcpserver.ClusterMemberOutput, 0, len(cl.Members))
+func clusterToMCP(cl clustering.Cluster, memberLimit int) mcpcontract.ClusterOutput {
+	members := make([]mcpcontract.ClusterMemberOutput, 0, len(cl.Members))
 	count := 0
 	for _, m := range cl.Members {
 		if memberLimit > 0 && count >= memberLimit {
 			break
 		}
-		members = append(members, mcpserver.ClusterMemberOutput{
+		members = append(members, mcpcontract.ClusterMemberOutput{
 			Kind:     m.Ref.Kind,
 			Owner:    m.Ref.Owner,
 			Repo:     m.Ref.Repo,
@@ -768,10 +768,10 @@ func clusterToMCP(cl clustering.Cluster, memberLimit int) mcpserver.ClusterOutpu
 		})
 		count++
 	}
-	return mcpserver.ClusterOutput{
+	return mcpcontract.ClusterOutput{
 		StableID:    cl.StableID,
 		State:       string(cl.State),
-		Canonical:   mcpserver.ClusterMemberOutput{Kind: cl.Canonical.Kind, Owner: cl.Canonical.Owner, Repo: cl.Canonical.Repo, Number: cl.Canonical.Number},
+		Canonical:   mcpcontract.ClusterMemberOutput{Kind: cl.Canonical.Kind, Owner: cl.Canonical.Owner, Repo: cl.Canonical.Repo, Number: cl.Canonical.Number},
 		MemberCount: len(cl.Members),
 		Members:     members,
 	}

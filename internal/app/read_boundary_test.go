@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 func TestPublicCorpusReadsDoNotCreateDatabase(t *testing.T) {
@@ -90,7 +90,7 @@ func TestPublicCorpusReadsDoNotCreateDatabase(t *testing.T) {
 		{
 			name: "prepare review",
 			read: func(ctx context.Context, svc *Service) error {
-				_, err := svc.PrepareReviewReport(ctx, PrepareReviewReportInput{WorkspaceID: "missing"})
+				_, err := svc.PrepareReviewReport(ctx, contracts.PrepareReviewReportInput{WorkspaceID: "missing"})
 				return err
 			},
 		},
@@ -133,7 +133,7 @@ func TestInvestigationWriteStillInitializesCorpus(t *testing.T) {
 	}
 	defer svc.Close()
 
-	if _, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "", ""); err != nil {
+	if _, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(svc.databasePath()); err != nil {

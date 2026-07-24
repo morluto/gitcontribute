@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/workspace"
 )
 
@@ -27,7 +27,7 @@ func TestMCPValidationResolvesManagedWorkspaceAndRejectsCrossInvestigation(t *te
 	if _, err := svc.Init(ctx); err != nil {
 		t.Fatal(err)
 	}
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc123", "")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "abc123", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,18 +47,18 @@ func TestMCPValidationResolvesManagedWorkspaceAndRejectsCrossInvestigation(t *te
 		t.Fatal(err)
 	}
 	reader := &MCPReader{Service: svc}
-	defined, err := reader.DefineValidation(ctx, mcpserver.DefineValidationInput{InvestigationID: inv.ID, Kind: "test", Command: "go test ./...", WorkspaceID: "managed"})
+	defined, err := reader.DefineValidation(ctx, mcpcontract.DefineValidationInput{InvestigationID: inv.ID, Kind: "test", Command: "go test ./...", WorkspaceID: "managed"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if defined.WorkingDir != path {
 		t.Fatalf("working directory = %q, want managed path %q", defined.WorkingDir, path)
 	}
-	other, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "def456", "")
+	other, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "def456", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reader.DefineValidation(ctx, mcpserver.DefineValidationInput{InvestigationID: other.ID, Kind: "test", Command: "go test ./...", WorkspaceID: "managed"}); err == nil || !strings.Contains(err.Error(), "does not belong") {
+	if _, err := reader.DefineValidation(ctx, mcpcontract.DefineValidationInput{InvestigationID: other.ID, Kind: "test", Command: "go test ./...", WorkspaceID: "managed"}); err == nil || !strings.Contains(err.Error(), "does not belong") {
 		t.Fatalf("cross-investigation validation error = %v", err)
 	}
 }
@@ -75,12 +75,12 @@ func TestDefineValidationParsesQuotedArguments(t *testing.T) {
 	if _, err := svc.Init(ctx); err != nil {
 		t.Fatal(err)
 	}
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc123", "")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "abc123", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	def, err := svc.DefineValidation(ctx, inv.ID, cli.DefineValidationOptions{
+	def, err := svc.DefineValidation(ctx, inv.ID, contracts.DefineValidationOptions{
 		Kind: "test", Command: `printf '%s value' ok`, WorkingDir: t.TempDir(),
 	})
 	if err != nil {

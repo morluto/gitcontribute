@@ -4,43 +4,43 @@ import (
 	"context"
 	"testing"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 type fakeConcernService struct {
 	*fakeService
-	created cli.ConcernCreateOptions
-	listed  cli.ConcernListOptions
-	result  *cli.ConcernResult
+	created contracts.ConcernCreateOptions
+	listed  contracts.ConcernListOptions
+	result  *contracts.ConcernResult
 }
 
-func (f *fakeConcernService) CreateConcern(_ context.Context, opts cli.ConcernCreateOptions) (*cli.ConcernResult, error) {
+func (f *fakeConcernService) CreateConcern(_ context.Context, opts contracts.ConcernCreateOptions) (*contracts.ConcernResult, error) {
 	f.created = opts
 	return f.result, nil
 }
-func (f *fakeConcernService) ListConcerns(_ context.Context, opts cli.ConcernListOptions) (*cli.ConcernListResult, error) {
+func (f *fakeConcernService) ListConcerns(_ context.Context, opts contracts.ConcernListOptions) (*contracts.ConcernListResult, error) {
 	f.listed = opts
-	return &cli.ConcernListResult{Concerns: []cli.ConcernResult{*f.result}, Total: 1}, nil
+	return &contracts.ConcernListResult{Concerns: []contracts.ConcernResult{*f.result}, Total: 1}, nil
 }
-func (f *fakeConcernService) ShowConcern(context.Context, string) (*cli.ConcernResult, error) {
+func (f *fakeConcernService) ShowConcern(context.Context, string) (*contracts.ConcernResult, error) {
 	return f.result, nil
 }
-func (f *fakeConcernService) UpdateConcern(context.Context, string, cli.ConcernUpdateOptions) (*cli.ConcernResult, error) {
+func (f *fakeConcernService) UpdateConcern(context.Context, string, contracts.ConcernUpdateOptions) (*contracts.ConcernResult, error) {
 	return f.result, nil
 }
-func (f *fakeConcernService) SetConcernStatus(context.Context, string, string, string) (*cli.ConcernResult, error) {
+func (f *fakeConcernService) SetConcernStatus(context.Context, string, string, string) (*contracts.ConcernResult, error) {
 	return f.result, nil
 }
-func (f *fakeConcernService) LinkConcern(context.Context, string, cli.ConcernLinkOptions) (*cli.ConcernResult, error) {
+func (f *fakeConcernService) LinkConcern(context.Context, string, contracts.ConcernLinkOptions) (*contracts.ConcernResult, error) {
 	return f.result, nil
 }
-func (f *fakeConcernService) PromoteConcern(context.Context, string, cli.ConcernPromoteOptions) (*cli.ConcernResult, error) {
+func (f *fakeConcernService) PromoteConcern(context.Context, string, contracts.ConcernPromoteOptions) (*contracts.ConcernResult, error) {
 	return f.result, nil
 }
 
 func TestConcernCreateAndSearchCLI(t *testing.T) {
 	t.Parallel()
-	svc := &fakeConcernService{fakeService: &fakeService{}, result: &cli.ConcernResult{ID: "concern-1", Repo: cli.RepoRef{Owner: "owner", Repo: "repo"}, Title: "flaky", Status: "untriaged"}}
+	svc := &fakeConcernService{fakeService: &fakeService{}, result: &contracts.ConcernResult{ID: "concern-1", Repo: contracts.RepoRef{Owner: "owner", Repo: "repo"}, Title: "flaky", Status: "untriaged"}}
 	c, _, _ := newTestCLI(svc, nil)
 	if err := c.Run(context.Background(), []string{"concern", "create", "owner/repo", "--commit", "abc", "--title", "flaky", "--problem", "intermittent", "--unknown", "timing"}); err != nil {
 		t.Fatal(err)

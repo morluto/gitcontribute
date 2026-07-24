@@ -6,12 +6,13 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // CommitPlannerReader performs local, read-only Git inspection and planning.
 type CommitPlannerReader interface {
-	InspectCommitChanges(context.Context, InspectCommitChangesInput) (CommitInventoryOutput, error)
-	PlanSemanticCommits(context.Context, PlanSemanticCommitsInput) (SemanticCommitPlanOutput, error)
+	InspectCommitChanges(context.Context, mcpcontract.InspectCommitChangesInput) (mcpcontract.CommitInventoryOutput, error)
+	PlanSemanticCommits(context.Context, mcpcontract.PlanSemanticCommitsInput) (mcpcontract.SemanticCommitPlanOutput, error)
 }
 
 // InspectCommitChangesInput selects one managed workspace.
@@ -38,41 +39,41 @@ type CommitPlannerReader interface {
 
 func (s *Server) registerCommitPlanning() {
 	readOnly := readOnlyAnnotations()
-	addCatalogTool(s, catalogTool[InspectCommitChangesInput, CommitInventoryOutput]{
-		name: ToolInspectCommitChanges, title: "Inspect semantic commit units",
+	addCatalogTool(s, catalogTool[mcpcontract.InspectCommitChangesInput, mcpcontract.CommitInventoryOutput]{
+		name: mcpcontract.ToolInspectCommitChanges, title: "Inspect semantic commit units",
 		description: "Parse a managed workspace's local Git diff into stable file and hunk IDs, including rename, binary, generated, and untracked warnings. Call this before planning; it never stages files or changes history.",
-		annotations: readOnly, supportedBy: supports[CommitPlannerReader], input: inputSchema[InspectCommitChangesInput](noSchemaCustomization),
-		output: outputSchema[CommitInventoryOutput]("Frozen hunk inventory and exact reconstruction digests."), handler: s.inspectCommitChanges,
+		annotations: readOnly, supportedBy: supports[CommitPlannerReader], input: inputSchema[mcpcontract.InspectCommitChangesInput](noSchemaCustomization),
+		output: outputSchema[mcpcontract.CommitInventoryOutput]("Frozen hunk inventory and exact reconstruction digests."), handler: s.inspectCommitChanges,
 	})
-	addCatalogTool(s, catalogTool[PlanSemanticCommitsInput, SemanticCommitPlanOutput]{
-		name: ToolPlanSemanticCommits, title: "Plan semantic commits",
-		description: "Validate agent-authored semantic groups against the exact inventory from " + ToolInspectCommitChanges + ". Unassigned ambiguity stays explicit; duplicate assignment fails. This is read-only and never stages, commits, or rewrites history.",
-		annotations: readOnly, supportedBy: supports[CommitPlannerReader], input: inputSchema[PlanSemanticCommitsInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.PlanSemanticCommitsInput, mcpcontract.SemanticCommitPlanOutput]{
+		name: mcpcontract.ToolPlanSemanticCommits, title: "Plan semantic commits",
+		description: "Validate agent-authored semantic groups against the exact inventory from " + mcpcontract.ToolInspectCommitChanges + ". Unassigned ambiguity stays explicit; duplicate assignment fails. This is read-only and never stages, commits, or rewrites history.",
+		annotations: readOnly, supportedBy: supports[CommitPlannerReader], input: inputSchema[mcpcontract.PlanSemanticCommitsInput](func(sc *schemaBuilder) {
 			setArrayBounds(sc, "groups", 0, 100)
 			setArrayBounds(sc, "unresolved", 0, 2000)
-		}), output: outputSchema[SemanticCommitPlanOutput]("Semantic groups, warnings, unresolved units, and exact one-to-one coverage proof."), handler: s.planSemanticCommits,
+		}), output: outputSchema[mcpcontract.SemanticCommitPlanOutput]("Semantic groups, warnings, unresolved units, and exact one-to-one coverage proof."), handler: s.planSemanticCommits,
 	})
 }
 
-func (s *Server) inspectCommitChanges(ctx context.Context, _ *mcp.CallToolRequest, in InspectCommitChangesInput) (*mcp.CallToolResult, CommitInventoryOutput, error) {
+func (s *Server) inspectCommitChanges(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.InspectCommitChangesInput) (*mcp.CallToolResult, mcpcontract.CommitInventoryOutput, error) {
 	if strings.TrimSpace(in.WorkspaceID) == "" {
-		return nil, CommitInventoryOutput{}, InvalidArgument("workspace_id", "is required", nil)
+		return nil, mcpcontract.CommitInventoryOutput{}, mcpcontract.InvalidArgument("workspace_id", "is required", nil)
 	}
 	reader, ok := s.reader.(CommitPlannerReader)
 	if !ok {
-		return nil, CommitInventoryOutput{}, errors.New("semantic commit planning is not available")
+		return nil, mcpcontract.CommitInventoryOutput{}, errors.New("semantic commit planning is not available")
 	}
 	out, err := reader.InspectCommitChanges(ctx, in)
 	return nil, out, err
 }
 
-func (s *Server) planSemanticCommits(ctx context.Context, _ *mcp.CallToolRequest, in PlanSemanticCommitsInput) (*mcp.CallToolResult, SemanticCommitPlanOutput, error) {
+func (s *Server) planSemanticCommits(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.PlanSemanticCommitsInput) (*mcp.CallToolResult, mcpcontract.SemanticCommitPlanOutput, error) {
 	if strings.TrimSpace(in.WorkspaceID) == "" || strings.TrimSpace(in.ExpectedInventorySHA256) == "" {
-		return nil, SemanticCommitPlanOutput{}, InvalidArgument("expected_inventory_sha256", "workspace_id and expected_inventory_sha256 are required", nil)
+		return nil, mcpcontract.SemanticCommitPlanOutput{}, mcpcontract.InvalidArgument("expected_inventory_sha256", "workspace_id and expected_inventory_sha256 are required", nil)
 	}
 	reader, ok := s.reader.(CommitPlannerReader)
 	if !ok {
-		return nil, SemanticCommitPlanOutput{}, errors.New("semantic commit planning is not available")
+		return nil, mcpcontract.SemanticCommitPlanOutput{}, errors.New("semantic commit planning is not available")
 	}
 	out, err := reader.PlanSemanticCommits(ctx, in)
 	return nil, out, err

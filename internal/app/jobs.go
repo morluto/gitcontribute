@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/failure"
 )
@@ -383,7 +383,7 @@ func isTerminalJobStatus(status string) bool {
 }
 
 // ListJobs returns bounded durable jobs for CLI and MCP adapters.
-func (s *Service) ListJobs(ctx context.Context, status string, limit int) (*cli.JobListResult, error) {
+func (s *Service) ListJobs(ctx context.Context, status string, limit int) (*contracts.JobListResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -392,7 +392,7 @@ func (s *Service) ListJobs(ctx context.Context, status string, limit int) (*cli.
 	if err != nil {
 		return nil, err
 	}
-	result := &cli.JobListResult{Jobs: make([]cli.JobResult, len(items))}
+	result := &contracts.JobListResult{Jobs: make([]contracts.JobResult, len(items))}
 	for i := range items {
 		result.Jobs[i] = jobResult(&items[i])
 	}
@@ -400,7 +400,7 @@ func (s *Service) ListJobs(ctx context.Context, status string, limit int) (*cli.
 }
 
 // GetJob returns one durable job by opaque ID.
-func (s *Service) GetJob(ctx context.Context, id string) (*cli.JobResult, error) {
+func (s *Service) GetJob(ctx context.Context, id string) (*contracts.JobResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -426,7 +426,7 @@ func (s *Service) submitJob(ctx context.Context, kind string, request any, fn Jo
 }
 
 // CancelJob records and applies a cancellation request, then returns current state.
-func (s *Service) CancelJob(ctx context.Context, id string) (*cli.JobResult, error) {
+func (s *Service) CancelJob(ctx context.Context, id string) (*contracts.JobResult, error) {
 	jobs, err := s.Jobs(ctx)
 	if err != nil {
 		return nil, err
@@ -437,8 +437,8 @@ func (s *Service) CancelJob(ctx context.Context, id string) (*cli.JobResult, err
 	return s.GetJob(ctx, id)
 }
 
-func jobResult(job *corpus.Job) cli.JobResult {
-	result := cli.JobResult{
+func jobResult(job *corpus.Job) contracts.JobResult {
+	result := contracts.JobResult{
 		ID: job.ID, Kind: job.Kind, Status: job.Status, Request: job.Request,
 		Result: job.Result, Error: job.Error, Progress: job.Progress,
 		Statistics: job.Statistics, CreatedAt: formatTime(job.CreatedAt),

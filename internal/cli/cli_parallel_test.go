@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/health"
 )
 
 func TestIndex(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{indexResult: &cli.IndexResult{Repo: cli.RepoRef{Owner: "o", Repo: "r"}, Commit: "abc", Files: 2}}
+	svc := &fakeService{indexResult: &contracts.IndexResult{Repo: contracts.RepoRef{Owner: "o", Repo: "r"}, Commit: "abc", Files: 2}}
 	c, stdout, stderr := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"index", "o/r", "/checkout"}))
 	if !svc.indexCalled || svc.lastIndexRepo.String() != "o/r" || svc.lastIndexPath != "/checkout" {
@@ -27,8 +28,8 @@ func TestIndex(t *testing.T) {
 
 func TestAcquire(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{acquisitionResult: &cli.AcquisitionResult{
-		Repo: cli.RepoRef{Owner: "o", Repo: "r"}, CommitSHA: "abc", Indexed: true,
+	svc := &fakeService{acquisitionResult: &contracts.AcquisitionResult{
+		Repo: contracts.RepoRef{Owner: "o", Repo: "r"}, CommitSHA: "abc", Indexed: true,
 	}}
 	c, stdout, stderr := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"acquire", "o/r", "--remote", "https://example.test/o/r.git", "--json"}))
@@ -56,8 +57,8 @@ func TestHealth(t *testing.T) {
 func TestSourceAddSearchAndList(t *testing.T) {
 	t.Parallel()
 	svc := &fakeService{
-		sourceResult:     &cli.SourceResult{Name: "active-go", Kind: "search", Definition: `{"query":"language:go"}`, Enabled: true},
-		sourceListResult: &cli.SourceListResult{Sources: []cli.SourceResult{{Name: "active-go", Kind: "search", Enabled: true}}, Total: 2, Truncated: true},
+		sourceResult:     &contracts.SourceResult{Name: "active-go", Kind: "search", Definition: `{"query":"language:go"}`, Enabled: true},
+		sourceListResult: &contracts.SourceListResult{Sources: []contracts.SourceResult{{Name: "active-go", Kind: "search", Enabled: true}}, Total: 2, Truncated: true},
 	}
 	c, stdout, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "search", "--name", "active-go", "--query", "language:go"}))
@@ -78,7 +79,7 @@ func TestSourceAddSearchAndList(t *testing.T) {
 func TestSourceAddRepos(t *testing.T) {
 	t.Parallel()
 	svc := &fakeService{
-		sourceResult: &cli.SourceResult{Name: "golang-go", Kind: "repos", Definition: `{"repositories":[{"owner":"golang","repo":"go"}]}`, Enabled: true},
+		sourceResult: &contracts.SourceResult{Name: "golang-go", Kind: "repos", Definition: `{"repositories":[{"owner":"golang","repo":"go"}]}`, Enabled: true},
 	}
 	c, stdout, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "golang/go"}))
@@ -92,7 +93,7 @@ func TestSourceAddRepos(t *testing.T) {
 
 func TestSourceAddReposAcceptsURL(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{sourceResult: &cli.SourceResult{Name: "x-y", Kind: "repos"}}
+	svc := &fakeService{sourceResult: &contracts.SourceResult{Name: "x-y", Kind: "repos"}}
 	c, _, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "https://github.com/X/Y"}))
 	if len(svc.lastSourceRefs) != 1 || svc.lastSourceRefs[0].String() != "X/Y" {
@@ -102,7 +103,7 @@ func TestSourceAddReposAcceptsURL(t *testing.T) {
 
 func TestSourceAddReposImportsStructuredStdin(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{sourceResult: &cli.SourceResult{Name: "imported", Kind: "repos", Enabled: true}}
+	svc := &fakeService{sourceResult: &contracts.SourceResult{Name: "imported", Kind: "repos", Enabled: true}}
 	c, _, _ := newTestCLI(svc, nil)
 	c.SetInput(strings.NewReader(`{"repositories":["one/first",{"owner":"two","repo":"second"},{"full_name":"three/third"}]}`))
 	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "--name", "imported", "--file", "-"}))
@@ -117,7 +118,7 @@ func TestSourceAddReposImportsLineFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("# favorites\none/first\nhttps://github.com/two/second\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	svc := &fakeService{sourceResult: &cli.SourceResult{Name: "imported", Kind: "repos", Enabled: true}}
+	svc := &fakeService{sourceResult: &contracts.SourceResult{Name: "imported", Kind: "repos", Enabled: true}}
 	c, _, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "--name", "imported", "--file", path}))
 	if len(svc.lastSourceRefs) != 2 || svc.lastSourceRefs[1].String() != "two/second" {
@@ -139,7 +140,7 @@ func TestSourceAddReposRejectsInvalidURL(t *testing.T) {
 func TestSourceAddGHArchive(t *testing.T) {
 	t.Parallel()
 	svc := &fakeService{
-		sourceResult: &cli.SourceResult{Name: "gharchive", Kind: "gharchive", Definition: `{"events":["PushEvent","IssuesEvent"]}`, Enabled: true},
+		sourceResult: &contracts.SourceResult{Name: "gharchive", Kind: "gharchive", Definition: `{"events":["PushEvent","IssuesEvent"]}`, Enabled: true},
 	}
 	c, stdout, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "gharchive", "--events", "PushEvent,IssuesEvent"}))
@@ -164,7 +165,7 @@ func TestSourceAddGHArchiveRejectsUnknownEvent(t *testing.T) {
 
 func TestSourceShow(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{sourceResult: &cli.SourceResult{Name: "gharchive", Kind: "gharchive", Definition: `{}`, Enabled: true}}
+	svc := &fakeService{sourceResult: &contracts.SourceResult{Name: "gharchive", Kind: "gharchive", Definition: `{}`, Enabled: true}}
 	c, stdout, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"source", "show", "gharchive"}))
 	if !svc.showSourceCalled || svc.lastShowSourceName != "gharchive" {
@@ -177,7 +178,7 @@ func TestSourceShow(t *testing.T) {
 
 func TestCrawlDispatchesBoundedOptions(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{crawlResult: &cli.CrawlResult{
+	svc := &fakeService{crawlResult: &contracts.CrawlResult{
 		Source: "active-go", Windows: 2, Repositories: 7, Requests: 4, Checkpoint: "2026-07-16T00:00:00Z",
 	}}
 	c, stdout, stderr := newTestCLI(svc, nil)

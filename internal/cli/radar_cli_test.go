@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/radar"
 )
 
@@ -15,10 +16,10 @@ type radarFakeService struct {
 	*fakeService
 	called bool
 	result *radar.Report
-	opts   cli.RadarOptions
+	opts   contracts.RadarOptions
 }
 
-func (f *radarFakeService) ContributionRadar(_ context.Context, opts cli.RadarOptions) (*radar.Report, error) {
+func (f *radarFakeService) ContributionRadar(_ context.Context, opts contracts.RadarOptions) (*radar.Report, error) {
 	f.called = true
 	f.opts = opts
 	return f.result, f.err

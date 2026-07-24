@@ -5,70 +5,71 @@ import (
 	"errors"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // Canonical MCP tool names group operations by capability and side-effect boundary.
 
 var canonicalToolNames = []string{
-	ToolSearchRepositories,
-	ToolSearchThreads,
-	ToolSearchCode,
-	ToolGetRepositories,
-	ToolGetThreads,
-	ToolRankThreads,
-	ToolFindPrecedents,
-	ToolGetRepositoryDossier,
-	ToolExplainMatch,
-	ToolGetInvestigation,
-	ToolListOpportunities,
-	ToolGetOpportunity,
-	ToolGetEvidence,
-	ToolGetReadiness,
+	mcpcontract.ToolSearchRepositories,
+	mcpcontract.ToolSearchThreads,
+	mcpcontract.ToolSearchCode,
+	mcpcontract.ToolGetRepositories,
+	mcpcontract.ToolGetThreads,
+	mcpcontract.ToolRankThreads,
+	mcpcontract.ToolFindPrecedents,
+	mcpcontract.ToolGetRepositoryDossier,
+	mcpcontract.ToolExplainMatch,
+	mcpcontract.ToolGetInvestigation,
+	mcpcontract.ToolListOpportunities,
+	mcpcontract.ToolGetOpportunity,
+	mcpcontract.ToolGetEvidence,
+	mcpcontract.ToolGetReadiness,
 	ToolListConcerns,
-	ToolFindClusters,
-	ToolFindNeighbors,
-	ToolGetCoverage,
-	ToolBuildRepositoryDossier,
-	ToolGetJob,
-	ToolCancelJob,
-	ToolSearchGitHubRepositories,
-	ToolSyncRepositoryMetadata,
-	ToolSyncThreads,
-	ToolHydrateThreads,
-	ToolGetAuthenticatedIdentity,
-	ToolSyncAuthoredPullRequests,
-	ToolSyncPullRequestStatus,
-	ToolListPullRequestPortfolio,
-	ToolFindPortfolioOverlaps,
-	ToolIndexRepositories,
-	ToolCheckMergeConflicts,
-	ToolInspectCommitChanges,
-	ToolPlanSemanticCommits,
-	ToolQueryDeepWiki,
-	ToolCreateWorkspace,
-	ToolAdoptWorkspace,
-	ToolDefineValidation,
-	ToolRunValidation,
-	ToolRunRepeatedValidation,
-	ToolStartInvestigation,
-	ToolRecordHypothesis,
+	mcpcontract.ToolFindClusters,
+	mcpcontract.ToolFindNeighbors,
+	mcpcontract.ToolGetCoverage,
+	mcpcontract.ToolBuildRepositoryDossier,
+	mcpcontract.ToolGetJob,
+	mcpcontract.ToolCancelJob,
+	mcpcontract.ToolSearchGitHubRepositories,
+	mcpcontract.ToolSyncRepositoryMetadata,
+	mcpcontract.ToolSyncThreads,
+	mcpcontract.ToolHydrateThreads,
+	mcpcontract.ToolGetAuthenticatedIdentity,
+	mcpcontract.ToolSyncAuthoredPullRequests,
+	mcpcontract.ToolSyncPullRequestStatus,
+	mcpcontract.ToolListPullRequestPortfolio,
+	mcpcontract.ToolFindPortfolioOverlaps,
+	mcpcontract.ToolIndexRepositories,
+	mcpcontract.ToolCheckMergeConflicts,
+	mcpcontract.ToolInspectCommitChanges,
+	mcpcontract.ToolPlanSemanticCommits,
+	mcpcontract.ToolQueryDeepWiki,
+	mcpcontract.ToolCreateWorkspace,
+	mcpcontract.ToolAdoptWorkspace,
+	mcpcontract.ToolDefineValidation,
+	mcpcontract.ToolRunValidation,
+	mcpcontract.ToolRunRepeatedValidation,
+	mcpcontract.ToolStartInvestigation,
+	mcpcontract.ToolRecordHypothesis,
 	ToolCreateConcern,
 	ToolUpdateConcern,
 	ToolSetConcernState,
 	ToolLinkConcern,
 	ToolPromoteConcern,
-	ToolCheckDuplicates,
-	ToolFindCompetingWork,
-	ToolPromoteOpportunity,
-	ToolPrepareContribution,
-	ToolExportManifest,
-	ToolLinkPullRequest,
+	mcpcontract.ToolCheckDuplicates,
+	mcpcontract.ToolFindCompetingWork,
+	mcpcontract.ToolPromoteOpportunity,
+	mcpcontract.ToolPrepareContribution,
+	mcpcontract.ToolExportManifest,
+	mcpcontract.ToolLinkPullRequest,
 }
 
 type catalogTool[In, Out any] struct {
 	name, title, description string
 	annotations              *mcp.ToolAnnotations
-	supportedBy              func(Reader) bool
+	supportedBy              func(mcpcontract.Reader) bool
 	input                    schemaDefinition
 	output                   schemaDefinition
 	handler                  mcp.ToolHandlerFor[In, Out]
@@ -104,7 +105,7 @@ func addCatalogTool[In, Out any](server *Server, tool catalogTool[In, Out]) {
 	}, structuredToolErrors(tool.handler))
 }
 
-func supports[T any](reader Reader) bool {
+func supports[T any](reader mcpcontract.Reader) bool {
 	_, ok := any(reader).(T)
 	return ok
 }
@@ -115,7 +116,7 @@ func structuredToolErrors[In, Out any](handler mcp.ToolHandlerFor[In, Out]) mcp.
 		if err == nil {
 			return result, output, nil
 		}
-		var toolErr *ToolError
+		var toolErr *mcpcontract.ToolError
 		if errors.As(err, &toolErr) {
 			return result, output, toolErr
 		}
@@ -126,33 +127,33 @@ func structuredToolErrors[In, Out any](handler mcp.ToolHandlerFor[In, Out]) mcp.
 		case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
 			code = "cancelled"
 		}
-		return result, output, &ToolError{Code: code, Message: err.Error(), Retryable: false}
+		return result, output, &mcpcontract.ToolError{Code: code, Message: err.Error(), Retryable: false}
 	}
 }
 
 var toolsets = map[string][]string{
 	"contribute": {
-		ToolSearchRepositories, ToolSearchThreads, ToolGetRepositories, ToolGetThreads,
-		ToolRankThreads, ToolFindPrecedents, ToolGetRepositoryDossier,
-		ToolGetCoverage, ToolGetJob, ToolCancelJob,
-		ToolSearchGitHubRepositories, ToolSyncRepositoryMetadata, ToolSyncThreads, ToolHydrateThreads,
-		ToolStartInvestigation, ToolRecordHypothesis, ToolCheckDuplicates, ToolFindCompetingWork,
-		ToolPromoteOpportunity, ToolGetInvestigation, ToolListOpportunities, ToolGetOpportunity,
-		ToolGetEvidence, ToolGetReadiness, ToolPrepareContribution, ToolExportManifest,
+		mcpcontract.ToolSearchRepositories, mcpcontract.ToolSearchThreads, mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads,
+		mcpcontract.ToolRankThreads, mcpcontract.ToolFindPrecedents, mcpcontract.ToolGetRepositoryDossier,
+		mcpcontract.ToolGetCoverage, mcpcontract.ToolGetJob, mcpcontract.ToolCancelJob,
+		mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolSyncRepositoryMetadata, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads,
+		mcpcontract.ToolStartInvestigation, mcpcontract.ToolRecordHypothesis, mcpcontract.ToolCheckDuplicates, mcpcontract.ToolFindCompetingWork,
+		mcpcontract.ToolPromoteOpportunity, mcpcontract.ToolGetInvestigation, mcpcontract.ToolListOpportunities, mcpcontract.ToolGetOpportunity,
+		mcpcontract.ToolGetEvidence, mcpcontract.ToolGetReadiness, mcpcontract.ToolPrepareContribution, mcpcontract.ToolExportManifest,
 		ToolListConcerns, ToolCreateConcern,
 	},
 	"code": {
-		ToolSearchCode, ToolIndexRepositories, ToolCreateWorkspace, ToolAdoptWorkspace, ToolCheckMergeConflicts,
-		ToolInspectCommitChanges, ToolPlanSemanticCommits,
-		ToolDefineValidation, ToolRunValidation, ToolRunRepeatedValidation, ToolGetJob, ToolCancelJob,
+		mcpcontract.ToolSearchCode, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCreateWorkspace, mcpcontract.ToolAdoptWorkspace, mcpcontract.ToolCheckMergeConflicts,
+		mcpcontract.ToolInspectCommitChanges, mcpcontract.ToolPlanSemanticCommits,
+		mcpcontract.ToolDefineValidation, mcpcontract.ToolRunValidation, mcpcontract.ToolRunRepeatedValidation, mcpcontract.ToolGetJob, mcpcontract.ToolCancelJob,
 	},
-	"research":    {ToolQueryDeepWiki},
-	"diagnostics": {ToolExplainMatch, ToolBuildRepositoryDossier, ToolGetJob},
+	"research":    {mcpcontract.ToolQueryDeepWiki},
+	"diagnostics": {mcpcontract.ToolExplainMatch, mcpcontract.ToolBuildRepositoryDossier, mcpcontract.ToolGetJob},
 	"portfolio": {
-		ToolGetJob, ToolCancelJob, ToolGetAuthenticatedIdentity, ToolSyncAuthoredPullRequests,
-		ToolSyncPullRequestStatus, ToolListPullRequestPortfolio, ToolFindPortfolioOverlaps, ToolLinkPullRequest,
+		mcpcontract.ToolGetJob, mcpcontract.ToolCancelJob, mcpcontract.ToolGetAuthenticatedIdentity, mcpcontract.ToolSyncAuthoredPullRequests,
+		mcpcontract.ToolSyncPullRequestStatus, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolFindPortfolioOverlaps, mcpcontract.ToolLinkPullRequest,
 	},
-	"advanced": {ToolFindClusters, ToolFindNeighbors},
+	"advanced": {mcpcontract.ToolFindClusters, mcpcontract.ToolFindNeighbors},
 	"concerns": {ToolListConcerns, ToolCreateConcern, ToolUpdateConcern, ToolSetConcernState, ToolLinkConcern, ToolPromoteConcern},
 }
 
