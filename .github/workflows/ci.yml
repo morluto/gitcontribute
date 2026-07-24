@@ -146,7 +146,7 @@ jobs:
         run: make cover-check
       - name: Upload coverage artifact
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.out
