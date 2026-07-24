@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/discovery"
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -84,7 +84,7 @@ func TestAddRepoSourceAndCrawl(t *testing.T) {
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
 
-	source, err := svc.AddRepoSource(ctx, "my-repos", []cli.RepoRef{{Owner: "golang", Repo: "go"}, {Owner: "octocat", Repo: "hello-world"}})
+	source, err := svc.AddRepoSource(ctx, "my-repos", []contracts.RepoRef{{Owner: "golang", Repo: "go"}, {Owner: "octocat", Repo: "hello-world"}})
 	if err != nil {
 		t.Fatalf("add repo source: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestAddRepoSourceAndCrawl(t *testing.T) {
 		t.Fatalf("unexpected source: %+v", source)
 	}
 
-	result, err := svc.Crawl(ctx, "my-repos", cli.CrawlOptions{Since: time.Hour, Budget: 10})
+	result, err := svc.Crawl(ctx, "my-repos", contracts.CrawlOptions{Since: time.Hour, Budget: 10})
 	if err != nil {
 		t.Fatalf("crawl repo source: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestRepoSourceCrawlDeduplicates(t *testing.T) {
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
 
-	source, err := svc.AddRepoSource(ctx, "dupes", []cli.RepoRef{
+	source, err := svc.AddRepoSource(ctx, "dupes", []contracts.RepoRef{
 		{Owner: "golang", Repo: "go"},
 		{Owner: "golang", Repo: "go"},
 		{Owner: "golang", Repo: "go"},
@@ -141,7 +141,7 @@ func TestRepoSourceCrawlDeduplicates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add repo source: %v", err)
 	}
-	if _, err := svc.Crawl(ctx, source.Name, cli.CrawlOptions{Since: time.Hour, Budget: 10}); err != nil {
+	if _, err := svc.Crawl(ctx, source.Name, contracts.CrawlOptions{Since: time.Hour, Budget: 10}); err != nil {
 		t.Fatalf("crawl: %v", err)
 	}
 	c, err := svc.openCorpus(ctx)
@@ -165,7 +165,7 @@ func TestRepoSourceCrawlRespectsBudget(t *testing.T) {
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
 
-	refs := []cli.RepoRef{
+	refs := []contracts.RepoRef{
 		{Owner: "a", Repo: "one"},
 		{Owner: "a", Repo: "two"},
 		{Owner: "a", Repo: "three"},
@@ -174,7 +174,7 @@ func TestRepoSourceCrawlRespectsBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add repo source: %v", err)
 	}
-	result, err := svc.Crawl(ctx, source.Name, cli.CrawlOptions{Since: time.Hour, Budget: 2})
+	result, err := svc.Crawl(ctx, source.Name, contracts.CrawlOptions{Since: time.Hour, Budget: 2})
 	if err != nil {
 		t.Fatalf("crawl: %v", err)
 	}
@@ -190,11 +190,11 @@ func TestRepoSourceCrawlNoNetwork(t *testing.T) {
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
 
-	source, err := svc.AddRepoSource(ctx, "offline", []cli.RepoRef{{Owner: "a", Repo: "b"}})
+	source, err := svc.AddRepoSource(ctx, "offline", []contracts.RepoRef{{Owner: "a", Repo: "b"}})
 	if err != nil {
 		t.Fatalf("add repo source: %v", err)
 	}
-	if _, err := svc.Crawl(ctx, source.Name, cli.CrawlOptions{Since: time.Hour, Budget: 10}); err != nil {
+	if _, err := svc.Crawl(ctx, source.Name, contracts.CrawlOptions{Since: time.Hour, Budget: 10}); err != nil {
 		t.Fatalf("crawl: %v", err)
 	}
 }
@@ -235,7 +235,7 @@ func TestAddGHArchiveSourceAndCrawl(t *testing.T) {
 		t.Fatalf("unexpected source kind %q", source.Kind)
 	}
 
-	result, err := svc.Crawl(ctx, source.Name, cli.CrawlOptions{Since: 2 * time.Hour, Budget: 10})
+	result, err := svc.Crawl(ctx, source.Name, contracts.CrawlOptions{Since: 2 * time.Hour, Budget: 10})
 	if err != nil {
 		t.Fatalf("crawl gharchive: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestGHArchiveCrawlSkipsImportedHours(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add source: %v", err)
 	}
-	if _, err := svc.Crawl(ctx, source.Name, cli.CrawlOptions{Since: 2 * time.Hour, Budget: 10}); err != nil {
+	if _, err := svc.Crawl(ctx, source.Name, contracts.CrawlOptions{Since: 2 * time.Hour, Budget: 10}); err != nil {
 		t.Fatalf("first crawl: %v", err)
 	}
 	first := len(fetcher.fetchedKeys())
@@ -327,7 +327,7 @@ func TestGHArchiveCrawlSkipsImportedHours(t *testing.T) {
 		t.Fatal("no hours fetched")
 	}
 
-	result, err := svc.Crawl(ctx, source.Name, cli.CrawlOptions{Since: 2 * time.Hour, Budget: 10})
+	result, err := svc.Crawl(ctx, source.Name, contracts.CrawlOptions{Since: 2 * time.Hour, Budget: 10})
 	if err != nil {
 		t.Fatalf("second crawl: %v", err)
 	}
@@ -368,8 +368,8 @@ func TestGHArchiveCrawlScopesImportsBySourceDefinition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, source := range []*cli.SourceResult{issues, pulls} {
-		if _, err := svc.Crawl(ctx, source.Name, cli.CrawlOptions{Since: time.Hour, Budget: 1}); err != nil {
+	for _, source := range []*contracts.SourceResult{issues, pulls} {
+		if _, err := svc.Crawl(ctx, source.Name, contracts.CrawlOptions{Since: time.Hour, Budget: 1}); err != nil {
 			t.Fatalf("crawl %s: %v", source.Name, err)
 		}
 	}
@@ -404,7 +404,7 @@ func TestGHArchiveCrawlBudgetEnforcement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add source: %v", err)
 	}
-	result, err := svc.Crawl(ctx, source.Name, cli.CrawlOptions{Since: 2 * time.Hour, Budget: 1})
+	result, err := svc.Crawl(ctx, source.Name, contracts.CrawlOptions{Since: 2 * time.Hour, Budget: 1})
 	if err != nil {
 		t.Fatalf("crawl: %v", err)
 	}
@@ -457,7 +457,7 @@ func TestGHArchiveCrawlRepositoryDedupe(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add source: %v", err)
 	}
-	result, err := svc.Crawl(ctx, source.Name, cli.CrawlOptions{Since: time.Hour, Budget: 10})
+	result, err := svc.Crawl(ctx, source.Name, contracts.CrawlOptions{Since: time.Hour, Budget: 10})
 	if err != nil {
 		t.Fatalf("crawl: %v", err)
 	}
@@ -488,7 +488,7 @@ func TestGHArchiveCrawlMalformedArchive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add source: %v", err)
 	}
-	result, err := svc.Crawl(ctx, source.Name, cli.CrawlOptions{Since: time.Hour, Budget: 10})
+	result, err := svc.Crawl(ctx, source.Name, contracts.CrawlOptions{Since: time.Hour, Budget: 10})
 	if err != nil {
 		t.Fatalf("crawl: %v", err)
 	}
@@ -530,7 +530,7 @@ func TestGHArchiveCrawlFetchFailureContinues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add source: %v", err)
 	}
-	result, err := svc.Crawl(ctx, source.Name, cli.CrawlOptions{Since: 2 * time.Hour, Budget: 10})
+	result, err := svc.Crawl(ctx, source.Name, contracts.CrawlOptions{Since: 2 * time.Hour, Budget: 10})
 	if err != nil {
 		t.Fatalf("crawl: %v", err)
 	}
@@ -632,7 +632,7 @@ func TestGHArchiveCrawlCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	cancel()
-	_, err = svc.Crawl(ctx, source.Name, cli.CrawlOptions{Since: time.Hour, Budget: 10})
+	_, err = svc.Crawl(ctx, source.Name, contracts.CrawlOptions{Since: time.Hour, Budget: 10})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
@@ -646,7 +646,7 @@ func TestAddRepoSourceRejectsInvalidURL(t *testing.T) {
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
 
-	_, err := svc.AddRepoSource(ctx, "bad", []cli.RepoRef{{Owner: "gitlab.com/foo", Repo: "bar"}})
+	_, err := svc.AddRepoSource(ctx, "bad", []contracts.RepoRef{{Owner: "gitlab.com/foo", Repo: "bar"}})
 	if err == nil || !strings.Contains(err.Error(), "invalid") {
 		t.Fatalf("expected invalid repo error, got %v", err)
 	}

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/failure"
@@ -57,7 +57,7 @@ type searchResult struct {
 
 const maxLensCandidates = 1000
 
-func (s *Service) searchCorpus(ctx context.Context, query string, opts cli.SearchOptions) (searchResult, error) {
+func (s *Service) searchCorpus(ctx context.Context, query string, opts contracts.SearchOptions) (searchResult, error) {
 	if opts.Limit <= 0 {
 		opts.Limit = 20
 	}
@@ -141,7 +141,7 @@ func (s *Service) parseRepoRef(repo string) (domain.RepoRef, error) {
 	return ref, nil
 }
 
-func (s *Service) resolveRepoFilter(ctx context.Context, c *corpus.Corpus, opts cli.SearchOptions) (int64, domain.RepoRef, error) {
+func (s *Service) resolveRepoFilter(ctx context.Context, c *corpus.Corpus, opts contracts.SearchOptions) (int64, domain.RepoRef, error) {
 	if opts.Repo == "" || opts.Kind == "code" || opts.Kind == "all" || opts.Kind == "repos" {
 		return 0, domain.RepoRef{}, nil
 	}
@@ -159,7 +159,7 @@ func (s *Service) resolveRepoFilter(ctx context.Context, c *corpus.Corpus, opts 
 	return repo.ID, ref, nil
 }
 
-func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query string, repoID int64, ref domain.RepoRef, kind string, opts cli.SearchOptions) (searchResult, error) {
+func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query string, repoID int64, ref domain.RepoRef, kind string, opts contracts.SearchOptions) (searchResult, error) {
 	filter := corpus.SearchFilter{
 		RepoID: repoID, Repo: ref.String(), Kind: kind, State: opts.State, StateReason: opts.StateReason, Merged: opts.Merged, Author: opts.Author,
 		Association: opts.Association, Assignee: opts.Assignee,
@@ -368,7 +368,7 @@ func (s *Service) searchCode(ctx context.Context, c *corpus.Corpus, query string
 	}, nil
 }
 
-func (s *Service) searchWithLens(ctx context.Context, c *corpus.Corpus, query string, opts cli.SearchOptions, now time.Time) (searchResult, error) {
+func (s *Service) searchWithLens(ctx context.Context, c *corpus.Corpus, query string, opts contracts.SearchOptions, now time.Time) (searchResult, error) {
 	lensRecord, err := c.GetLens(ctx, opts.Lens)
 	if err != nil {
 		return searchResult{}, fmt.Errorf("load lens: %w", err)
@@ -417,7 +417,7 @@ func (s *Service) searchWithLens(ctx context.Context, c *corpus.Corpus, query st
 	return searchResult{Query: query, Total: totalEligible, Matches: out, NextCursor: ""}, nil
 }
 
-func (s *Service) collectLensMatches(ctx context.Context, c *corpus.Corpus, query string, opts cli.SearchOptions, now time.Time) ([]searchMatch, error) {
+func (s *Service) collectLensMatches(ctx context.Context, c *corpus.Corpus, query string, opts contracts.SearchOptions, now time.Time) ([]searchMatch, error) {
 	var err error
 	var repoRef domain.RepoRef
 	var repoID int64
@@ -507,7 +507,7 @@ func threadKindFromSearchKind(kind string) string {
 	}
 }
 
-func (s *Service) collectThreadMatches(ctx context.Context, c *corpus.Corpus, query string, repoID int64, ref domain.RepoRef, kind string, opts cli.SearchOptions, _ time.Time) ([]searchMatch, error) {
+func (s *Service) collectThreadMatches(ctx context.Context, c *corpus.Corpus, query string, repoID int64, ref domain.RepoRef, kind string, opts contracts.SearchOptions, _ time.Time) ([]searchMatch, error) {
 	var out []searchMatch
 	cursor := ""
 	for len(out) < maxLensCandidates {
@@ -531,7 +531,7 @@ func (s *Service) collectThreadMatches(ctx context.Context, c *corpus.Corpus, qu
 	return out, nil
 }
 
-func (s *Service) collectRepositoryMatches(ctx context.Context, c *corpus.Corpus, query string, opts cli.SearchOptions) ([]searchMatch, error) {
+func (s *Service) collectRepositoryMatches(ctx context.Context, c *corpus.Corpus, query string, opts contracts.SearchOptions) ([]searchMatch, error) {
 	var out []searchMatch
 	cursor := ""
 	for len(out) < maxLensCandidates {
@@ -551,7 +551,7 @@ func (s *Service) collectRepositoryMatches(ctx context.Context, c *corpus.Corpus
 	return out, nil
 }
 
-func (s *Service) collectCodeMatches(ctx context.Context, c *corpus.Corpus, query string, ref domain.RepoRef, _ cli.SearchOptions) ([]searchMatch, error) {
+func (s *Service) collectCodeMatches(ctx context.Context, c *corpus.Corpus, query string, ref domain.RepoRef, _ contracts.SearchOptions) ([]searchMatch, error) {
 	var out []searchMatch
 	cursor := ""
 	for len(out) < maxLensCandidates {
@@ -675,7 +675,7 @@ func threadURL(ref domain.RepoRef, kind string, number int) string {
 }
 
 // Search performs a local-only corpus search and supports repo and kind filters.
-func (s *Service) Search(ctx context.Context, query string, opts cli.SearchOptions) (*cli.SearchResult, error) {
+func (s *Service) Search(ctx context.Context, query string, opts contracts.SearchOptions) (*contracts.SearchResult, error) {
 	if opts.Limit <= 0 {
 		opts.Limit = 20
 	}
@@ -686,11 +686,11 @@ func (s *Service) Search(ctx context.Context, query string, opts cli.SearchOptio
 	if err != nil {
 		return nil, err
 	}
-	matches := make([]cli.SearchMatch, len(res.Matches))
+	matches := make([]contracts.SearchMatch, len(res.Matches))
 	for i, m := range res.Matches {
-		matches[i] = cli.SearchMatch{
+		matches[i] = contracts.SearchMatch{
 			Kind:           m.Kind,
-			Repo:           cli.RepoRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo},
+			Repo:           contracts.RepoRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo},
 			Title:          m.Title,
 			Number:         m.Number,
 			State:          m.State,
@@ -706,7 +706,7 @@ func (s *Service) Search(ctx context.Context, query string, opts cli.SearchOptio
 			MatchTruncated: m.MatchTruncated,
 		}
 	}
-	return &cli.SearchResult{
+	return &contracts.SearchResult{
 		Query:      query,
 		Kind:       opts.Kind,
 		Repo:       opts.Repo,

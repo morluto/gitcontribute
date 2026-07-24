@@ -5,23 +5,25 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morluto/gitcontribute/internal/tuicontract"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 type fakeReader struct {
-	data      Data
+	data      tuicontract.Data
 	err       error
 	loadCount int
 }
 
-func (f *fakeReader) Load(ctx context.Context) (Data, error) {
+func (f *fakeReader) Load(ctx context.Context) (tuicontract.Data, error) {
 	f.loadCount++
 	return f.data, f.err
 }
 
-func sampleData() Data {
-	return Data{
-		Repositories: []Item{
+func sampleData() tuicontract.Data {
+	return tuicontract.Data{
+		Repositories: []tuicontract.Item{
 			{
 				Kind:     "repo",
 				ID:       "1",
@@ -30,29 +32,29 @@ func sampleData() Data {
 				Subtitle: "Go · 100 stars",
 				Source:   "github:rest",
 				AsOf:     "2026-07-17T00:00:00Z",
-				Coverage: []Facet{
+				Coverage: []tuicontract.Facet{
 					{Name: "metadata", Present: true, Complete: true, AsOf: "2026-07-17T00:00:00Z"},
 					{Name: "threads", Present: true, Complete: false, AsOf: "2026-07-16T00:00:00Z"},
 				},
 			},
 		},
-		Threads: []Item{
+		Threads: []tuicontract.Item{
 			{Kind: "thread", ID: "2", Ref: "owner/repo#1", Title: "Fix bug", Subtitle: "open", Source: "github:rest", AsOf: "2026-07-17T00:00:00Z"},
 			{Kind: "thread", ID: "3", Ref: "owner/repo#2", Title: "Add feature", Subtitle: "closed", Source: "github:rest", AsOf: "2026-07-16T00:00:00Z"},
 		},
-		Clusters: []Item{
+		Clusters: []tuicontract.Item{
 			{Kind: "cluster", ID: "c1", Title: "Duplicate reports", Subtitle: "2 members"},
 		},
-		Investigations: []Item{
+		Investigations: []tuicontract.Item{
 			{Kind: "investigation", ID: "i1", Title: "Investigate crash", Subtitle: "open"},
 		},
-		Opportunities: []Item{
+		Opportunities: []tuicontract.Item{
 			{Kind: "opportunity", ID: "o1", Title: "Refactor parser", Subtitle: "validated"},
 		},
 	}
 }
 
-func loadModel(t *testing.T, r Reader) Model {
+func loadModel(t *testing.T, r tuicontract.Reader) Model {
 	t.Helper()
 	m := New(context.Background(), r)
 
@@ -170,7 +172,7 @@ func TestDetailShowsCoverageAndSource(t *testing.T) {
 }
 
 func TestEmptyState(t *testing.T) {
-	fake := &fakeReader{data: Data{}}
+	fake := &fakeReader{data: tuicontract.Data{}}
 	m := loadModel(t, fake)
 
 	out := m.View()

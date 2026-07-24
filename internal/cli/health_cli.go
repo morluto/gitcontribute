@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/health"
 )
 
@@ -17,8 +18,8 @@ type healthCmd struct {
 	JSON       bool          `name:"json" help:"Print the result as JSON"`
 }
 
-func (c *CLI) healthService() (HealthService, error) {
-	service, ok := c.svc.(HealthService)
+func (c *CLI) healthService() (contracts.HealthService, error) {
+	service, ok := c.svc.(contracts.HealthService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}

@@ -14,8 +14,10 @@ import (
 	"time"
 
 	"github.com/alecthomas/kong"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/discovery"
 	"github.com/morluto/gitcontribute/internal/lens"
+
 	gitlog "github.com/morluto/gitcontribute/internal/log"
 )
 
@@ -24,9 +26,9 @@ const maxSearchLimit = 100
 // CLI is a Kong-based adapter that parses arguments and dispatches to product-
 // owned application services. It owns no domain logic.
 type CLI struct {
-	svc           Service
-	runner        MCPRunner
-	tui           TUIRunner
+	svc           contracts.Service
+	runner        contracts.MCPRunner
+	tui           contracts.TUIRunner
 	stdin         io.Reader
 	stdout        io.Writer
 	stderr        io.Writer
@@ -35,7 +37,7 @@ type CLI struct {
 }
 
 // New constructs a CLI that writes results to stdout and progress to stderr.
-func New(service Service, runner MCPRunner, stdout, stderr io.Writer) *CLI {
+func New(service contracts.Service, runner contracts.MCPRunner, stdout, stderr io.Writer) *CLI {
 	if stdout == nil {
 		stdout = io.Discard
 	}
@@ -51,7 +53,7 @@ func (c *CLI) SetLogger(logger *slog.Logger) {
 }
 
 // SetTUIRunner wires the optional terminal UI adapter.
-func (c *CLI) SetTUIRunner(runner TUIRunner) { c.tui = runner }
+func (c *CLI) SetTUIRunner(runner contracts.TUIRunner) { c.tui = runner }
 
 // SetInput replaces stdin for commands that explicitly import from "-".
 func (c *CLI) SetInput(input io.Reader) {
@@ -119,16 +121,16 @@ type rootCmd struct {
 }
 
 type setupCmd struct {
-	Codex          bool       `name:"codex" help:"Configure Codex"`
-	Claude         bool       `name:"claude" help:"Configure Claude Code"`
-	AllClients     bool       `name:"all-clients" help:"Configure every supported client"`
-	Mode           *SetupMode `name:"mode" enum:"mcp,cli,both" help:"Access mode (mcp, cli, or both)"`
-	TokenSource    string     `name:"token-source" help:"GitHub token source (none, env, gh-cli, or keyring)"`
-	TokenSourceKey string     `name:"token-source-key" help:"Environment variable or keyring entry name"`
-	Repository     string     `name:"repo" help:"Add an initial OWNER/REPO source without syncing it"`
-	Yes            bool       `name:"yes" short:"y" help:"Accept the plan without prompting"`
-	DryRun         bool       `name:"dry-run" help:"Show planned changes without writing"`
-	JSON           bool       `name:"json" help:"Print the result as JSON"`
+	Codex          bool                 `name:"codex" help:"Configure Codex"`
+	Claude         bool                 `name:"claude" help:"Configure Claude Code"`
+	AllClients     bool                 `name:"all-clients" help:"Configure every supported client"`
+	Mode           *contracts.SetupMode `name:"mode" enum:"mcp,cli,both" help:"Access mode (mcp, cli, or both)"`
+	TokenSource    string               `name:"token-source" help:"GitHub token source (none, env, gh-cli, or keyring)"`
+	TokenSourceKey string               `name:"token-source-key" help:"Environment variable or keyring entry name"`
+	Repository     string               `name:"repo" help:"Add an initial OWNER/REPO source without syncing it"`
+	Yes            bool                 `name:"yes" short:"y" help:"Accept the plan without prompting"`
+	DryRun         bool                 `name:"dry-run" help:"Show planned changes without writing"`
+	JSON           bool                 `name:"json" help:"Print the result as JSON"`
 }
 
 type removeCmd struct {
@@ -677,59 +679,8 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	}
 }
 
-func (c *CLI) runUpgrade(ctx context.Context, cmd *upgradeCmd) error {
-	service, ok := c.svc.(UpgradeService)
-	if !ok {
-		return NewCLIError(ExitNotWired, ErrNotWired)
-	}
-	if !cmd.Check && !cmd.Yes {
-		if !c.interactiveInput() {
-			return NewCLIError(ExitUsage, errors.New("interactive upgrade requires a terminal; pass --check or --yes"))
-		}
-		confirmed, err := c.confirmSetup("Install the latest global npm release")
-		if err != nil {
-			return NewCLIError(ExitUsage, err)
-		}
-		if !confirmed {
-			_, _ = fmt.Fprintln(c.stderr, "Upgrade cancelled.")
-			return nil
-		}
-		cmd.Yes = true
-	}
-	report, err := service.Upgrade(ctx, UpgradeOptions{Check: cmd.Check, Yes: cmd.Yes})
-	if err != nil {
-		return NewCLIError(ExitGeneral, err)
-	}
-	if cmd.JSON {
-		return writeJSON(c.stdout, report)
-	}
-	_, err = fmt.Fprintf(c.stdout, "Upgrade [%s]: %s", report.Context, report.Status)
-	if report.Latest != "" {
-		_, err = fmt.Fprintf(c.stdout, " (current %s, latest %s)", report.Current, report.Latest)
-	}
-	if report.Command != "" {
-		_, err = fmt.Fprintf(c.stdout, "\n%s", report.Command)
-	}
-	for _, stage := range report.Stages {
-		_, err = fmt.Fprintf(c.stdout, "\n- %s: %s", stage.Name, stage.Status)
-		if stage.Message != "" {
-			_, err = fmt.Fprintf(c.stdout, " — %s", stage.Message)
-		}
-	}
-	if report.Action != "" {
-		_, err = fmt.Fprintf(c.stdout, "\nNext: %s", report.Action)
-	}
-	if report.Rollback != "" {
-		_, err = fmt.Fprintf(c.stdout, "\nRollback: %s", report.Rollback)
-	}
-	if err == nil {
-		_, err = fmt.Fprintln(c.stdout)
-	}
-	return err
-}
-
-func (c *CLI) setupService() (SetupService, error) {
-	service, ok := c.svc.(SetupService)
+func (c *CLI) setupService() (contracts.SetupService, error) {
+	service, ok := c.svc.(contracts.SetupService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -762,7 +713,7 @@ func (c *CLI) runRemoveCommand(ctx context.Context, cmd *removeCmd) error {
 			return nil
 		}
 	}
-	return c.executeSetup(ctx, SetupOptions{Remove: true, Clients: clients, AllClients: all, DryRun: cmd.DryRun}, cmd.JSON)
+	return c.executeSetup(ctx, contracts.SetupOptions{Remove: true, Clients: clients, AllClients: all, DryRun: cmd.DryRun}, cmd.JSON)
 }
 
 func selectedSetupClients(codex, claude bool) []string {
@@ -836,136 +787,136 @@ func (c *CLI) promptLine() (string, error) {
 	}
 }
 
-func (c *CLI) discoveryService() (DiscoveryService, error) {
-	service, ok := c.svc.(DiscoveryService)
+func (c *CLI) discoveryService() (contracts.DiscoveryService, error) {
+	service, ok := c.svc.(contracts.DiscoveryService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) tailService() (TailService, error) {
-	service, ok := c.svc.(TailService)
+func (c *CLI) tailService() (contracts.TailService, error) {
+	service, ok := c.svc.(contracts.TailService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) controlService() (ControlService, error) {
-	service, ok := c.svc.(ControlService)
+func (c *CLI) controlService() (contracts.ControlService, error) {
+	service, ok := c.svc.(contracts.ControlService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) jobService() (JobService, error) {
-	service, ok := c.svc.(JobService)
+func (c *CLI) jobService() (contracts.JobService, error) {
+	service, ok := c.svc.(contracts.JobService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) workflowExtensionService() (WorkflowExtensionService, error) {
-	service, ok := c.svc.(WorkflowExtensionService)
+func (c *CLI) workflowService() (contracts.WorkflowService, error) {
+	service, ok := c.svc.(contracts.WorkflowService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) dossierExtensionService() (DossierExtensionService, error) {
-	service, ok := c.svc.(DossierExtensionService)
+func (c *CLI) dossierService() (contracts.DossierService, error) {
+	service, ok := c.svc.(contracts.DossierService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) investigationService() (InvestigationService, error) {
-	service, ok := c.svc.(InvestigationService)
+func (c *CLI) investigationService() (contracts.InvestigationService, error) {
+	service, ok := c.svc.(contracts.InvestigationService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) validationService() (ValidationService, error) {
-	service, ok := c.svc.(ValidationService)
+func (c *CLI) validationService() (contracts.ValidationService, error) {
+	service, ok := c.svc.(contracts.ValidationService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) contributionService() (ContributionService, error) {
-	service, ok := c.svc.(ContributionService)
+func (c *CLI) contributionService() (contracts.ContributionService, error) {
+	service, ok := c.svc.(contracts.ContributionService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) clusteringService() (ClusteringService, error) {
-	service, ok := c.svc.(ClusteringService)
+func (c *CLI) clusteringService() (contracts.ClusteringService, error) {
+	service, ok := c.svc.(contracts.ClusteringService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) lensService() (LensService, error) {
-	service, ok := c.svc.(LensService)
+func (c *CLI) lensService() (contracts.LensService, error) {
+	service, ok := c.svc.(contracts.LensService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) collectionService() (CollectionService, error) {
-	service, ok := c.svc.(CollectionService)
+func (c *CLI) collectionService() (contracts.CollectionService, error) {
+	service, ok := c.svc.(contracts.CollectionService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) archiveService() (ArchiveService, error) {
-	service, ok := c.svc.(ArchiveService)
+func (c *CLI) archiveService() (contracts.ArchiveService, error) {
+	service, ok := c.svc.(contracts.ArchiveService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) localQueryService() (LocalQueryService, error) {
-	service, ok := c.svc.(LocalQueryService)
+func (c *CLI) localQueryService() (contracts.LocalQueryService, error) {
+	service, ok := c.svc.(contracts.LocalQueryService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) archiveThreadService() (ArchiveThreadService, error) {
-	service, ok := c.svc.(ArchiveThreadService)
+func (c *CLI) archiveThreadService() (contracts.ArchiveThreadService, error) {
+	service, ok := c.svc.(contracts.ArchiveThreadService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) acquisitionService() (AcquisitionService, error) {
-	service, ok := c.svc.(AcquisitionService)
+func (c *CLI) acquisitionService() (contracts.AcquisitionService, error) {
+	service, ok := c.svc.(contracts.AcquisitionService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	return service, nil
 }
 
-func (c *CLI) exportService() (ExportService, error) {
-	service, ok := c.svc.(ExportService)
+func (c *CLI) exportService() (contracts.ExportService, error) {
+	service, ok := c.svc.(contracts.ExportService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -1021,7 +972,7 @@ func (c *CLI) runSource(ctx context.Context, command string, cmd *sourceCmd) err
 	}
 }
 
-func (c *CLI) parseRepoSourceArgs(cmd sourceAddReposCmd) ([]RepoRef, string, error) {
+func (c *CLI) parseRepoSourceArgs(cmd sourceAddReposCmd) ([]contracts.RepoRef, string, error) {
 	rawRepos := append([]string(nil), cmd.Repos...)
 	file := strings.TrimSpace(cmd.File)
 	if len(rawRepos) == 1 && rawRepos[0] == "-" && file == "" {
@@ -1052,7 +1003,7 @@ func (c *CLI) parseRepoSourceArgs(cmd sourceAddReposCmd) ([]RepoRef, string, err
 	if len(rawRepos) == 0 {
 		return nil, "", errors.New("at least one repository is required")
 	}
-	refs := make([]RepoRef, 0, len(rawRepos))
+	refs := make([]contracts.RepoRef, 0, len(rawRepos))
 	seen := make(map[string]struct{}, len(rawRepos))
 	for _, raw := range rawRepos {
 		raw = strings.TrimSpace(raw)
@@ -1063,7 +1014,7 @@ func (c *CLI) parseRepoSourceArgs(cmd sourceAddReposCmd) ([]RepoRef, string, err
 		if err != nil {
 			return nil, "", err
 		}
-		ref := RepoRef{Owner: dr.Owner, Repo: dr.Repo}
+		ref := contracts.RepoRef{Owner: dr.Owner, Repo: dr.Repo}
 		key := strings.ToLower(ref.String())
 		if _, exists := seen[key]; exists {
 			continue
@@ -1204,7 +1155,7 @@ func (c *CLI) runCrawl(ctx context.Context, cmd *crawlCmd) error {
 		return err
 	}
 	_, _ = fmt.Fprintf(c.stderr, "crawling %s...\n", cmd.Name)
-	result, err := service.Crawl(ctx, cmd.Name, CrawlOptions{Since: cmd.Since, Budget: cmd.Budget})
+	result, err := service.Crawl(ctx, cmd.Name, contracts.CrawlOptions{Since: cmd.Since, Budget: cmd.Budget})
 	if err != nil {
 		return c.mapError(err)
 	}
@@ -1220,7 +1171,7 @@ func (c *CLI) runTail(ctx context.Context, cmd *tailCmd) error {
 		return err
 	}
 	_, _ = fmt.Fprintf(c.stderr, "tailing source %s every %s...\n", cmd.Name, cmd.Interval)
-	result, err := service.TailSource(ctx, cmd.Name, TailOptions{
+	result, err := service.TailSource(ctx, cmd.Name, contracts.TailOptions{
 		Since: cmd.Since, Budget: cmd.Budget, Interval: cmd.Interval, Once: cmd.Once,
 	})
 	if err != nil {
@@ -1280,11 +1231,11 @@ func (c *CLI) runHypothesis(ctx context.Context, command string, cmd *hypothesis
 		}
 		return c.render(cmd.Add.JSON, result)
 	case "hypothesis update":
-		extended, err := c.workflowExtensionService()
+		workflow, err := c.workflowService()
 		if err != nil {
 			return err
 		}
-		result, err := extended.UpdateHypothesisForCLI(ctx, cmd.Update.ID, HypothesisUpdateOptions{
+		result, err := workflow.UpdateHypothesisFields(ctx, cmd.Update.ID, contracts.HypothesisUpdateOptions{
 			Title: cmd.Update.Title, Description: cmd.Update.Description, Category: cmd.Update.Category,
 			ExpectedBehavior: cmd.Update.ExpectedBehavior, ObservedBehavior: cmd.Update.ObservedBehavior,
 			PotentialImpact: cmd.Update.PotentialImpact, OpenQuestions: cmd.Update.OpenQuestions,
@@ -1295,11 +1246,11 @@ func (c *CLI) runHypothesis(ctx context.Context, command string, cmd *hypothesis
 		}
 		return c.render(cmd.Update.JSON, result)
 	case "hypothesis set-status":
-		extended, err := c.workflowExtensionService()
+		workflow, err := c.workflowService()
 		if err != nil {
 			return err
 		}
-		result, err := extended.TransitionHypothesisForCLI(ctx, cmd.SetStatus.ID, cmd.SetStatus.Status, cmd.SetStatus.Rationale)
+		result, err := workflow.TransitionHypothesis(ctx, cmd.SetStatus.ID, cmd.SetStatus.Status, cmd.SetStatus.Rationale)
 		if err != nil {
 			return c.mapError(err)
 		}
@@ -1347,11 +1298,11 @@ func (c *CLI) runOpportunity(ctx context.Context, command string, cmd *opportuni
 		}
 		return c.render(cmd.SetStatus.JSON, result)
 	case "opportunity set-collision":
-		extended, err := c.workflowExtensionService()
+		workflow, err := c.workflowService()
 		if err != nil {
 			return err
 		}
-		result, err := extended.SetCollisionForCLI(ctx, cmd.SetCollision.ID, cmd.SetCollision.Status, cmd.SetCollision.Rationale)
+		result, err := workflow.UpdateOpportunityCollisionStatus(ctx, cmd.SetCollision.ID, cmd.SetCollision.Status, cmd.SetCollision.Rationale)
 		if err != nil {
 			return c.mapError(err)
 		}
@@ -1368,15 +1319,22 @@ func (c *CLI) runCheck(ctx context.Context, command, kind string, cmd *checkCmd)
 	if cmd.Check.Limit <= 0 || cmd.Check.Limit > 100 {
 		return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 100"))
 	}
-	service, err := c.workflowExtensionService()
+	service, err := c.workflowService()
 	if err != nil {
 		return err
 	}
 	var result any
-	if kind == "duplicates" {
-		result, err = service.CheckDuplicatesForCLI(ctx, cmd.Check.Target, cmd.Check.ID, cmd.Check.Limit)
-	} else {
-		result, err = service.CheckCollisionsForCLI(ctx, cmd.Check.Target, cmd.Check.ID, cmd.Check.Limit)
+	switch {
+	case kind == "duplicates" && cmd.Check.Target == "hypothesis":
+		result, err = service.CheckHypothesisDuplicates(ctx, cmd.Check.ID, cmd.Check.Limit)
+	case kind == "duplicates" && cmd.Check.Target == "opportunity":
+		result, err = service.CheckOpportunityDuplicates(ctx, cmd.Check.ID, cmd.Check.Limit)
+	case kind == "collisions" && cmd.Check.Target == "hypothesis":
+		result, err = service.CheckHypothesisCollisions(ctx, cmd.Check.ID, cmd.Check.Limit)
+	case kind == "collisions" && cmd.Check.Target == "opportunity":
+		result, err = service.CheckOpportunityCollisions(ctx, cmd.Check.ID, cmd.Check.Limit)
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown %s target %q", kind, cmd.Check.Target))
 	}
 	if err != nil {
 		return c.mapError(err)
@@ -1400,7 +1358,7 @@ func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) e
 	switch command {
 	case "prepare issue":
 		_, _ = fmt.Fprintf(c.stderr, "preparing issue draft for opportunity %s...\n", cmd.Issue.OpportunityID)
-		result, err := service.PrepareIssue(ctx, cmd.Issue.OpportunityID, PrepareIssueOptions{
+		result, err := service.PrepareIssue(ctx, cmd.Issue.OpportunityID, contracts.PrepareIssueOptions{
 			Guidance: cmd.Issue.Guidance, Success: cmd.Issue.Success, ManifestID: cmd.Issue.ManifestID,
 		})
 		if err != nil {
@@ -1409,7 +1367,7 @@ func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) e
 		return c.render(cmd.Issue.JSON, result)
 	case "prepare pr":
 		_, _ = fmt.Fprintf(c.stderr, "preparing pull request draft for opportunity %s...\n", cmd.PR.OpportunityID)
-		result, err := service.PreparePullRequest(ctx, cmd.PR.OpportunityID, PreparePROptions{
+		result, err := service.PreparePullRequest(ctx, cmd.PR.OpportunityID, contracts.PreparePROptions{
 			WorkspaceID:   cmd.PR.WorkspaceID,
 			Approach:      cmd.PR.Approach,
 			Changes:       cmd.PR.Changes,
@@ -1424,11 +1382,14 @@ func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) e
 		}
 		return c.render(cmd.PR.JSON, result)
 	case "prepare review":
-		extended, err := c.workflowExtensionService()
+		workflow, err := c.workflowService()
 		if err != nil {
 			return err
 		}
-		result, err := extended.PrepareReviewForCLI(ctx, cmd.Review.OpportunityID, cmd.Review.WorkspaceID)
+		result, err := workflow.PrepareReviewReport(ctx, contracts.PrepareReviewReportInput{
+			OpportunityID: cmd.Review.OpportunityID,
+			WorkspaceID:   cmd.Review.WorkspaceID,
+		})
 		if err != nil {
 			return c.mapError(err)
 		}
@@ -1482,7 +1443,7 @@ func (c *CLI) runConfigure(ctx context.Context, cmd *configureCmd) error {
 	if err != nil {
 		return err
 	}
-	result, err := service.Configure(ctx, ConfigureOptions{
+	result, err := service.Configure(ctx, contracts.ConfigureOptions{
 		Database: cmd.Database, TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey,
 		CrawlBudget: cmd.CrawlBudget, CrawlConcurrency: cmd.CrawlConcurrency,
 		CrawlRetryLimit: cmd.CrawlRetryLimit, CrawlTimeout: cmd.CrawlTimeout,
@@ -1507,7 +1468,7 @@ func (c *CLI) runMetadata(ctx context.Context, cmd *metadataCmd) error {
 }
 
 func (c *CLI) runStatus(ctx context.Context, cmd *statusCmd) error {
-	if service, ok := c.svc.(ControlService); ok {
+	if service, ok := c.svc.(contracts.ControlService); ok {
 		res, err := service.ControlStatus(ctx)
 		if err != nil {
 			return c.mapError(err)
@@ -1538,7 +1499,7 @@ func (c *CLI) runSearch(ctx context.Context, command string, cmd *searchCmd) err
 	default:
 		return NewCLIError(ExitUsage, fmt.Errorf("unknown search kind: %s", kind))
 	}
-	opts := SearchOptions{
+	opts := contracts.SearchOptions{
 		Kind: kind, Repo: selected.Repo, State: selected.State, Author: selected.Author,
 		Association: selected.Association, Assignee: selected.Assignee,
 		Labels: selected.Labels, Limit: selected.Limit, Cursor: selected.Cursor,
@@ -1580,30 +1541,11 @@ func (c *CLI) runSearch(ctx context.Context, command string, cmd *searchCmd) err
 	return c.render(selected.JSON, res)
 }
 
-func (c *CLI) runSeeds(ctx context.Context, cmd *seedsCmd) error {
-	if cmd.Limit <= 0 || cmd.Limit > 100 {
-		return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 100"))
-	}
-	repo, err := parseRepo(cmd.OwnerRepo)
-	if err != nil {
-		return err
-	}
-	service, err := c.dossierExtensionService()
-	if err != nil {
-		return err
-	}
-	result, err := service.ExtractSeedsForCLI(ctx, repo, splitCSV(cmd.From), splitCSV(cmd.Polarity), cmd.Limit)
-	if err != nil {
-		return c.mapError(err)
-	}
-	return c.render(cmd.JSON, result)
-}
-
 func (c *CLI) runTUI(ctx context.Context, cmd *tuiCmd) error {
 	if c.tui == nil {
 		return NewCLIError(ExitNotWired, ErrNotWired)
 	}
-	var repo RepoRef
+	var repo contracts.RepoRef
 	var err error
 	if cmd.OwnerRepo != "" {
 		repo, err = parseRepo(cmd.OwnerRepo)
@@ -1611,7 +1553,7 @@ func (c *CLI) runTUI(ctx context.Context, cmd *tuiCmd) error {
 			return err
 		}
 	}
-	return c.mapError(c.tui.Run(ctx, TUIOptions{Repo: repo, JSON: cmd.JSON}))
+	return c.mapError(c.tui.Run(ctx, contracts.TUIOptions{Repo: repo, JSON: cmd.JSON}))
 }
 
 func (c *CLI) render(json bool, v any) error {
@@ -1640,12 +1582,12 @@ func (c *CLI) mapError(err error) error {
 	return NewCLIError(ExitGeneral, err)
 }
 
-func parseRepo(s string) (RepoRef, error) {
+func parseRepo(s string) (contracts.RepoRef, error) {
 	parts := strings.Split(s, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return RepoRef{}, NewCLIError(ExitUsage, fmt.Errorf("invalid repository %q: expected OWNER/REPO", s))
+		return contracts.RepoRef{}, NewCLIError(ExitUsage, fmt.Errorf("invalid repository %q: expected OWNER/REPO", s))
 	}
-	return RepoRef{Owner: parts[0], Repo: parts[1]}, nil
+	return contracts.RepoRef{Owner: parts[0], Repo: parts[1]}, nil
 }
 
 func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) error {
@@ -1662,7 +1604,7 @@ func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) e
 			return NewCLIError(ExitUsage, err)
 		}
 		_, _ = fmt.Fprintf(c.stderr, "hydrating %s#%d...\n", repo, number)
-		result, err := service.Hydrate(ctx, repo, number, HydrateOptions{
+		result, err := service.Hydrate(ctx, repo, number, contracts.HydrateOptions{
 			Facets: splitCSV(cmd.Hydrate.With), MaxPages: cmd.Hydrate.MaxPages,
 		})
 		if err != nil {
@@ -1753,7 +1695,7 @@ func (c *CLI) runJob(ctx context.Context, command string, cmd *jobCmd) error {
 	if err != nil {
 		return err
 	}
-	var result *JobResult
+	var result *contracts.JobResult
 	var jsonOutput bool
 	switch command {
 	case "job show":
@@ -1795,7 +1737,7 @@ func (c *CLI) runExport(ctx context.Context, command string, cmd *exportCmd) err
 	if err != nil {
 		return err
 	}
-	var result *ExportResult
+	var result *contracts.ExportResult
 	var output string
 	switch command {
 	case "export dossier":
@@ -1809,13 +1751,13 @@ func (c *CLI) runExport(ctx context.Context, command string, cmd *exportCmd) err
 		result, err = service.ExportEvidence(ctx, cmd.Evidence.InvestigationID, cmd.Evidence.Format)
 		output = cmd.Evidence.Output
 	case "export manifest":
-		opts := ManifestExportOptions{WorkspaceID: cmd.Manifest.WorkspaceID}
+		opts := contracts.ManifestExportOptions{WorkspaceID: cmd.Manifest.WorkspaceID}
 		if cmd.Manifest.PullRequest != "" {
 			repo, number, parseErr := parseThreadRef(cmd.Manifest.PullRequest)
 			if parseErr != nil {
 				return NewCLIError(ExitUsage, parseErr)
 			}
-			opts.PullRequest = &ManifestPullRequestRef{Owner: repo.Owner, Repo: repo.Repo, Number: number}
+			opts.PullRequest = &contracts.ManifestPullRequestRef{Owner: repo.Owner, Repo: repo.Repo, Number: number}
 		}
 		result, err = service.ExportManifest(ctx, cmd.Manifest.OpportunityID, opts)
 		output = cmd.Manifest.Output
@@ -1839,18 +1781,18 @@ func (c *CLI) runExport(ctx context.Context, command string, cmd *exportCmd) err
 	return c.mapError(err)
 }
 
-func parseThreadRef(raw string) (RepoRef, int, error) {
+func parseThreadRef(raw string) (contracts.RepoRef, int, error) {
 	idx := strings.LastIndexByte(raw, '#')
 	if idx <= 0 || idx == len(raw)-1 {
-		return RepoRef{}, 0, fmt.Errorf("invalid thread reference %q: expected OWNER/REPO#NUMBER", raw)
+		return contracts.RepoRef{}, 0, fmt.Errorf("invalid thread reference %q: expected OWNER/REPO#NUMBER", raw)
 	}
 	repo, err := parseRepo(raw[:idx])
 	if err != nil {
-		return RepoRef{}, 0, err
+		return contracts.RepoRef{}, 0, err
 	}
 	number, err := strconv.Atoi(raw[idx+1:])
 	if err != nil || number <= 0 {
-		return RepoRef{}, 0, fmt.Errorf("invalid thread reference %q: expected positive number", raw)
+		return contracts.RepoRef{}, 0, fmt.Errorf("invalid thread reference %q: expected positive number", raw)
 	}
 	return repo, number, nil
 }
@@ -1931,7 +1873,7 @@ func (c *CLI) runLens(ctx context.Context, command string, cmd *lensCmd) error {
 				return NewCLIError(ExitUsage, fmt.Errorf("invalid --updated-after: %w", err))
 			}
 		}
-		res, err := service.ExplainLens(ctx, cmd.Explain.Name, cmd.Explain.Ref, LensExplainOptions{
+		res, err := service.ExplainLens(ctx, cmd.Explain.Name, cmd.Explain.Ref, contracts.LensExplainOptions{
 			Query: cmd.Explain.Query, Repo: cmd.Explain.Repo, Kind: cmd.Explain.Kind,
 			State: cmd.Explain.State, Author: cmd.Explain.Author, Association: cmd.Explain.Association,
 			Assignee: cmd.Explain.Assignee, Labels: cmd.Explain.Labels, UpdatedAfter: updatedAfter,
@@ -1962,7 +1904,7 @@ func (c *CLI) runCollection(ctx context.Context, command string, cmd *collection
 		if len(cmd.Add.Members) == 0 {
 			return NewCLIError(ExitUsage, errors.New("at least one member is required"))
 		}
-		members := make([]CollectionMember, len(cmd.Add.Members))
+		members := make([]contracts.CollectionMember, len(cmd.Add.Members))
 		for i, raw := range cmd.Add.Members {
 			member, err := parseCollectionMember(raw)
 			if err != nil {
@@ -1987,10 +1929,10 @@ func (c *CLI) runCollection(ctx context.Context, command string, cmd *collection
 	}
 }
 
-func parseCollectionMember(raw string) (CollectionMember, error) {
+func parseCollectionMember(raw string) (contracts.CollectionMember, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return CollectionMember{}, errors.New("collection member cannot be empty")
+		return contracts.CollectionMember{}, errors.New("collection member cannot be empty")
 	}
 
 	var kind, ref string
@@ -2009,20 +1951,20 @@ func parseCollectionMember(raw string) (CollectionMember, error) {
 	case "pr", "pull_request", "pullrequest":
 		kind = "pull_request"
 	default:
-		return CollectionMember{}, fmt.Errorf("unknown collection member kind %q", kind)
+		return contracts.CollectionMember{}, fmt.Errorf("unknown collection member kind %q", kind)
 	}
 
 	if kind == "repository" {
 		if _, err := parseRepo(ref); err != nil {
-			return CollectionMember{}, fmt.Errorf("invalid repository reference %q", ref)
+			return contracts.CollectionMember{}, fmt.Errorf("invalid repository reference %q", ref)
 		}
 	} else {
 		if err := parseCollectionThreadRef(ref); err != nil {
-			return CollectionMember{}, err
+			return contracts.CollectionMember{}, err
 		}
 	}
 
-	return CollectionMember{Kind: kind, Ref: ref}, nil
+	return contracts.CollectionMember{Kind: kind, Ref: ref}, nil
 }
 
 func parseCollectionThreadRef(ref string) error {

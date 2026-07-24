@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/gitremote"
 	"github.com/morluto/gitcontribute/internal/workspace"
@@ -31,7 +31,7 @@ func (s *Service) workspaceManager(_ context.Context) (*workspace.Manager, error
 
 // AdoptWorkspace records an existing local worktree without fetching,
 // changing its refs, or taking ownership of its files.
-func (s *Service) AdoptWorkspace(ctx context.Context, investigationID string, opts cli.WorkspaceAdoptOptions) (*cli.WorkspaceResult, error) {
+func (s *Service) AdoptWorkspace(ctx context.Context, investigationID string, opts contracts.WorkspaceAdoptOptions) (*contracts.WorkspaceResult, error) {
 	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
@@ -87,7 +87,7 @@ func (s *Service) workspaceReader() (*workspace.Manager, error) {
 }
 
 // CreateWorkspace creates a managed worktree for an investigation.
-func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, opts cli.WorkspaceCreateOptions) (*cli.WorkspaceResult, error) {
+func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, opts contracts.WorkspaceCreateOptions) (*contracts.WorkspaceResult, error) {
 	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
@@ -161,7 +161,7 @@ func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, o
 }
 
 // ShowWorkspace returns a workspace by ID with its current dirty state.
-func (s *Service) ShowWorkspace(ctx context.Context, id string) (*cli.WorkspaceResult, error) {
+func (s *Service) ShowWorkspace(ctx context.Context, id string) (*contracts.WorkspaceResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -184,32 +184,9 @@ func (s *Service) ShowWorkspace(ctx context.Context, id string) (*cli.WorkspaceR
 	return workspaceResult(ws), nil
 }
 
-// ReviewStep is one suggested review item with a stable priority.
-type ReviewStep struct {
-	Path      string `json:"path"`
-	Priority  int    `json:"priority"`
-	Rationale string `json:"rationale"`
-}
-
-// WorkspaceDiffResult is the complete diff metadata for a workspace.
-type WorkspaceDiffResult struct {
-	ID               string       `json:"id"`
-	Repo             cli.RepoRef  `json:"repo"`
-	BaseSHA          string       `json:"base_sha"`
-	CandidateSHA     string       `json:"candidate_sha"`
-	MergeBase        string       `json:"merge_base"`
-	Dirty            bool         `json:"dirty"`
-	HasUntracked     bool         `json:"has_untracked"`
-	Diff             string       `json:"diff"`
-	ChangedFiles     []string     `json:"changed_files"`
-	ChangedFileCount int          `json:"changed_file_count"`
-	DiffBytes        int          `json:"diff_bytes"`
-	ReviewOrder      []ReviewStep `json:"review_order"`
-}
-
 // WorkspaceDiff returns the current diff of a workspace against its recorded
 // base, including changed files and a suggested review order.
-func (s *Service) WorkspaceDiff(ctx context.Context, id string) (*WorkspaceDiffResult, error) {
+func (s *Service) WorkspaceDiff(ctx context.Context, id string) (*contracts.WorkspaceDiffResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -243,9 +220,9 @@ func (s *Service) WorkspaceDiff(ctx context.Context, id string) (*WorkspaceDiffR
 	if err != nil {
 		return nil, err
 	}
-	result := &WorkspaceDiffResult{
+	result := &contracts.WorkspaceDiffResult{
 		ID:               ws.Name,
-		Repo:             cli.RepoRef{Owner: ws.RepoOwner, Repo: ws.RepoName},
+		Repo:             contracts.RepoRef{Owner: ws.RepoOwner, Repo: ws.RepoName},
 		BaseSHA:          ws.BaseSHA,
 		CandidateSHA:     ws.CandidateSHA,
 		MergeBase:        ws.MergeBase,
@@ -260,10 +237,10 @@ func (s *Service) WorkspaceDiff(ctx context.Context, id string) (*WorkspaceDiffR
 	return result, nil
 }
 
-func reviewOrderFromFiles(files []string) []ReviewStep {
-	steps := make([]ReviewStep, 0, len(files))
+func reviewOrderFromFiles(files []string) []contracts.ReviewStep {
+	steps := make([]contracts.ReviewStep, 0, len(files))
 	for _, f := range files {
-		steps = append(steps, ReviewStep{Path: f, Priority: reviewPriority(f), Rationale: reviewRationale(f)})
+		steps = append(steps, contracts.ReviewStep{Path: f, Priority: reviewPriority(f), Rationale: reviewRationale(f)})
 	}
 	sort.Slice(steps, func(i, j int) bool {
 		if steps[i].Priority != steps[j].Priority {
@@ -319,11 +296,11 @@ func mirrorNameFor(owner, repo, remote string) string {
 	return fmt.Sprintf("%s-%x", prefix, sum[:hashBytes])
 }
 
-func workspaceResult(ws *workspace.Workspace) *cli.WorkspaceResult {
-	return &cli.WorkspaceResult{
+func workspaceResult(ws *workspace.Workspace) *contracts.WorkspaceResult {
+	return &contracts.WorkspaceResult{
 		ID:              ws.Name,
 		InvestigationID: ws.InvestigationID,
-		Repo:            cli.RepoRef{Owner: ws.RepoOwner, Repo: ws.RepoName},
+		Repo:            contracts.RepoRef{Owner: ws.RepoOwner, Repo: ws.RepoName},
 		Path:            ws.Path,
 		Remote:          ws.Remote,
 		BaseSHA:         ws.BaseSHA,

@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/github"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/precedent"
 	"github.com/morluto/gitcontribute/internal/radar"
 	"github.com/morluto/gitcontribute/internal/ranking"
@@ -23,18 +23,18 @@ import (
 
 // GetRepositories performs an offline, input-ordered corpus read and clears
 // repository facts when metadata coverage has not been observed.
-func (r *MCPReader) GetRepositories(ctx context.Context, in mcpserver.GetRepositoriesInput) (mcpserver.GetRepositoriesOutput, error) {
+func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepositoriesInput) (mcpcontract.GetRepositoriesOutput, error) {
 	if len(in.Repositories) < 1 || len(in.Repositories) > 100 {
-		return mcpserver.GetRepositoriesOutput{}, errors.New("repositories must contain 1 to 100 items")
+		return mcpcontract.GetRepositoriesOutput{}, errors.New("repositories must contain 1 to 100 items")
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.GetRepositoriesOutput{}, err
+		return mcpcontract.GetRepositoriesOutput{}, err
 	}
-	out := mcpserver.GetRepositoriesOutput{Status: "complete", Items: make([]mcpserver.BatchItem[mcpserver.TypedRepositoryOutput], len(in.Repositories))}
+	out := mcpcontract.GetRepositoriesOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput], len(in.Repositories))}
 	for i, input := range in.Repositories {
 		key := input.Owner + "/" + input.Repo
-		item := mcpserver.BatchItem[mcpserver.TypedRepositoryOutput]{Key: key, Status: "complete"}
+		item := mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput]{Key: key, Status: "complete"}
 		ref := domain.RepoRef{Owner: input.Owner, Repo: input.Repo}
 		if err := ref.Validate(); err != nil {
 			item.Status, item.Reason, item.Message = "failed", "invalid_reference", err.Error()
@@ -44,7 +44,7 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpserver.GetReposit
 		}
 		repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
 		if err != nil {
-			return mcpserver.GetRepositoriesOutput{}, err
+			return mcpcontract.GetRepositoriesOutput{}, err
 		}
 		if repo == nil {
 			item.Status, item.Reason, item.Message = "unavailable", "not_indexed", "repository is not present in the local corpus"
@@ -56,17 +56,17 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpserver.GetReposit
 		value := typedRepository(repo)
 		coverage, err := c.GetCoverage(ctx, repo.ID, nil, "metadata")
 		if err != nil {
-			return mcpserver.GetRepositoriesOutput{}, err
+			return mcpcontract.GetRepositoriesOutput{}, err
 		}
 		if coverage == nil {
-			value.Metadata = mcpserver.RepositoryMetadataOutput{Status: "missing", NextAction: "Call github.sync_repository_metadata for this repository."}
+			value.Metadata = mcpcontract.RepositoryMetadataOutput{Status: "missing", NextAction: "Call github.sync_repository_metadata for this repository."}
 			clearRepositoryFacts(&value)
 		} else {
 			status := "complete"
 			if !coverage.Complete {
 				status = "partial"
 			}
-			value.Metadata = mcpserver.RepositoryMetadataOutput{Status: status, ObservedAt: formatTime(coverage.UpdatedAt), SourceUpdatedAt: formatTime(coverage.SourceUpdatedAt)}
+			value.Metadata = mcpcontract.RepositoryMetadataOutput{Status: status, ObservedAt: formatTime(coverage.UpdatedAt), SourceUpdatedAt: formatTime(coverage.SourceUpdatedAt)}
 		}
 		item.Value = &value
 		out.Items[i] = item
@@ -74,11 +74,11 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpserver.GetReposit
 	return out, nil
 }
 
-func typedRepository(repo *corpus.Repository) mcpserver.TypedRepositoryOutput {
-	return mcpserver.TypedRepositoryOutput{Ref: "repository:" + repo.Owner + "/" + repo.Name, Owner: repo.Owner, Repo: repo.Name, Description: ptr(repo.Description), DefaultBranch: ptr(repo.DefaultBranch), Language: ptr(repo.Language), License: ptr(repo.License), Topics: append([]string(nil), repo.Topics...), Stars: ptr(repo.Stars), Watchers: ptr(repo.Watchers), Forks: ptr(repo.Forks), OpenIssues: ptr(repo.OpenIssues), Archived: ptr(repo.Archived), Fork: ptr(repo.Fork)}
+func typedRepository(repo *corpus.Repository) mcpcontract.TypedRepositoryOutput {
+	return mcpcontract.TypedRepositoryOutput{Ref: "repository:" + repo.Owner + "/" + repo.Name, Owner: repo.Owner, Repo: repo.Name, Description: ptr(repo.Description), DefaultBranch: ptr(repo.DefaultBranch), Language: ptr(repo.Language), License: ptr(repo.License), Topics: append([]string(nil), repo.Topics...), Stars: ptr(repo.Stars), Watchers: ptr(repo.Watchers), Forks: ptr(repo.Forks), OpenIssues: ptr(repo.OpenIssues), Archived: ptr(repo.Archived), Fork: ptr(repo.Fork)}
 }
 
-func clearRepositoryFacts(v *mcpserver.TypedRepositoryOutput) {
+func clearRepositoryFacts(v *mcpcontract.TypedRepositoryOutput) {
 	v.Description = nil
 	v.DefaultBranch = nil
 	v.Language = nil
@@ -95,24 +95,24 @@ func ptr[T any](v T) *T { return &v }
 
 // GetThreads performs an offline, input-ordered exact-thread read. Compact mode
 // omits bodies to keep broad triage responses bounded.
-func (r *MCPReader) GetThreads(ctx context.Context, in mcpserver.GetThreadsInput) (mcpserver.GetThreadsOutput, error) {
+func (r *MCPReader) GetThreads(ctx context.Context, in mcpcontract.GetThreadsInput) (mcpcontract.GetThreadsOutput, error) {
 	if len(in.Threads) < 1 || len(in.Threads) > 100 {
-		return mcpserver.GetThreadsOutput{}, errors.New("threads must contain 1 to 100 items")
+		return mcpcontract.GetThreadsOutput{}, errors.New("threads must contain 1 to 100 items")
 	}
 	if in.View == "" {
 		in.View = "compact"
 	}
 	if in.View != "compact" && in.View != "full" {
-		return mcpserver.GetThreadsOutput{}, errors.New("view must be compact or full")
+		return mcpcontract.GetThreadsOutput{}, errors.New("view must be compact or full")
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.GetThreadsOutput{}, err
+		return mcpcontract.GetThreadsOutput{}, err
 	}
-	out := mcpserver.GetThreadsOutput{Status: "complete", Items: make([]mcpserver.BatchItem[mcpserver.ThreadOutput], len(in.Threads))}
+	out := mcpcontract.GetThreadsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.ThreadOutput], len(in.Threads))}
 	for i, input := range in.Threads {
 		key := fmt.Sprintf("%s/%s#%d", input.Owner, input.Repo, input.Number)
-		item := mcpserver.BatchItem[mcpserver.ThreadOutput]{Key: key, Status: "complete"}
+		item := mcpcontract.BatchItem[mcpcontract.ThreadOutput]{Key: key, Status: "complete"}
 		ref := domain.RepoRef{Owner: input.Owner, Repo: input.Repo}
 		if err := ref.Validate(); err != nil || input.Number < 1 {
 			item.Status, item.Reason, item.Message = "failed", "invalid_reference", "invalid thread reference"
@@ -122,7 +122,7 @@ func (r *MCPReader) GetThreads(ctx context.Context, in mcpserver.GetThreadsInput
 		}
 		repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
 		if err != nil {
-			return mcpserver.GetThreadsOutput{}, err
+			return mcpcontract.GetThreadsOutput{}, err
 		}
 		if repo == nil {
 			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", "repository is not present in the local corpus"
@@ -137,7 +137,7 @@ func (r *MCPReader) GetThreads(ctx context.Context, in mcpserver.GetThreadsInput
 			thread, err = c.GetThread(ctx, repo.ID, input.Kind, input.Number)
 		}
 		if err != nil {
-			return mcpserver.GetThreadsOutput{}, err
+			return mcpcontract.GetThreadsOutput{}, err
 		}
 		if thread == nil {
 			item.Status, item.Reason, item.Message = "unavailable", "not_indexed", "thread is not present in the local corpus"
@@ -158,24 +158,24 @@ func (r *MCPReader) GetThreads(ctx context.Context, in mcpserver.GetThreadsInput
 }
 
 // GetJobs reads up to 100 durable job records without waiting for completion.
-func (r *MCPReader) GetJobs(ctx context.Context, in mcpserver.GetJobsInput) (mcpserver.GetJobsOutput, error) {
+func (r *MCPReader) GetJobs(ctx context.Context, in mcpcontract.GetJobsInput) (mcpcontract.GetJobsOutput, error) {
 	ids := append([]string(nil), in.IDs...)
 	if len(ids) < 1 || len(ids) > 100 {
-		return mcpserver.GetJobsOutput{}, errors.New("ids must contain 1 to 100 items")
+		return mcpcontract.GetJobsOutput{}, errors.New("ids must contain 1 to 100 items")
 	}
 	if in.ResponseFormat == "" {
 		in.ResponseFormat = "concise"
 	}
 	if in.ResponseFormat != "concise" && in.ResponseFormat != "detailed" {
-		return mcpserver.GetJobsOutput{}, errors.New("response_format must be concise or detailed")
+		return mcpcontract.GetJobsOutput{}, errors.New("response_format must be concise or detailed")
 	}
-	out := mcpserver.GetJobsOutput{Status: "complete", Items: make([]mcpserver.BatchItem[mcpserver.GetJobOutput], len(ids))}
+	out := mcpcontract.GetJobsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.GetJobOutput], len(ids))}
 	for i, id := range ids {
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
-		item := mcpserver.BatchItem[mcpserver.GetJobOutput]{Key: id, Status: "complete"}
-		job, err := r.GetJob(ctx, mcpserver.GetJobInput{ID: id})
+		item := mcpcontract.BatchItem[mcpcontract.GetJobOutput]{Key: id, Status: "complete"}
+		job, err := r.GetJob(ctx, mcpcontract.GetJobInput{ID: id})
 		if err != nil {
 			if failure.Is(err, failure.KindNotFound) {
 				item.Status, item.Reason = "unavailable", "not_found"
@@ -200,32 +200,32 @@ func (r *MCPReader) GetJobs(ctx context.Context, in mcpserver.GetJobsInput) (mcp
 
 // ListPullRequestPortfolio performs an offline projection over stored authored
 // PRs and status facets; unsupported health facets remain explicitly unknown.
-func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpserver.ListPullRequestPortfolioInput) (mcpserver.ListPullRequestPortfolioOutput, error) {
+func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract.ListPullRequestPortfolioInput) (mcpcontract.ListPullRequestPortfolioOutput, error) {
 	if in.State == "" {
 		in.State = "open"
 	}
 	if in.State != "open" && in.State != "closed" && in.State != "all" {
-		return mcpserver.ListPullRequestPortfolioOutput{}, errors.New("state must be open, closed, or all")
+		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("state must be open, closed, or all")
 	}
 	if in.Limit == 0 {
 		in.Limit = 100
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return mcpserver.ListPullRequestPortfolioOutput{}, errors.New("limit must be between 1 and 100")
+		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("limit must be between 1 and 100")
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.ListPullRequestPortfolioOutput{}, err
+		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
 	page, err := c.ListPullRequestPortfolioPage(ctx, strings.TrimSpace(in.Author), in.State, in.Limit)
 	if err != nil {
-		return mcpserver.ListPullRequestPortfolioOutput{}, err
+		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
-	out := mcpserver.ListPullRequestPortfolioOutput{Status: "complete", RuleVersion: "portfolio.v2", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpserver.PullRequestPortfolioItem, 0, len(page.PullRequests)), Total: page.Total, Truncated: page.Truncated}
+	out := mcpcontract.ListPullRequestPortfolioOutput{Status: "complete", RuleVersion: "portfolio.v2", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpcontract.PullRequestPortfolioItem, 0, len(page.PullRequests)), Total: page.Total, Truncated: page.Truncated}
 	for _, storedPR := range page.PullRequests {
 		item, err := portfolioItem(ctx, c, storedPR, r.now())
 		if err != nil {
-			return mcpserver.ListPullRequestPortfolioOutput{}, err
+			return mcpcontract.ListPullRequestPortfolioOutput{}, err
 		}
 		if item.StatusCoverage != "complete" {
 			out.Status = "partial"
@@ -239,9 +239,9 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpserver.L
 // portfolio.v2 classification together so unknown facets cannot become facts.
 //
 //nolint:gocognit,cyclop
-func portfolioItem(ctx context.Context, c *corpus.Corpus, stored corpus.PortfolioPullRequest, now time.Time) (mcpserver.PullRequestPortfolioItem, error) {
+func portfolioItem(ctx context.Context, c *corpus.Corpus, stored corpus.PortfolioPullRequest, now time.Time) (mcpcontract.PullRequestPortfolioItem, error) {
 	t := stored.Thread
-	out := mcpserver.PullRequestPortfolioItem{Ref: fmt.Sprintf("%s/%s#%d", stored.Owner, stored.Repo, t.Number), Owner: stored.Owner, Repo: stored.Repo, Number: t.Number, Title: t.Title, State: t.State, Author: t.Author, Draft: t.Draft, SourceUpdatedAt: formatTime(t.SourceUpdatedAt), StatusCoverage: "missing"}
+	out := mcpcontract.PullRequestPortfolioItem{Ref: fmt.Sprintf("%s/%s#%d", stored.Owner, stored.Repo, t.Number), Owner: stored.Owner, Repo: stored.Repo, Number: t.Number, Title: t.Title, State: t.State, Author: t.Author, Draft: t.Draft, SourceUpdatedAt: formatTime(t.SourceUpdatedAt), StatusCoverage: "missing"}
 	facets := []string{FacetPRDetails, FacetPRReviews, FacetPRChecks, FacetPRReviewThreads, FacetPRMergeState, FacetPRMergeQueue, FacetPRClosingIssues, FacetPRFiles}
 	coverage := make(map[string]*corpus.Coverage, len(facets))
 	complete, observed := true, 0
@@ -262,7 +262,7 @@ func portfolioItem(ctx context.Context, c *corpus.Corpus, stored corpus.Portfoli
 		if cov == nil || !cov.Complete {
 			complete = false
 		}
-		entry := mcpserver.FacetCoverageOutput{Facet: facet, Status: status}
+		entry := mcpcontract.FacetCoverageOutput{Facet: facet, Status: status}
 		if cov != nil {
 			entry.Complete, entry.UpdatedAt = cov.Complete, formatTime(cov.UpdatedAt)
 		}
@@ -476,9 +476,9 @@ func classifyChecks(checks []github.PullRequestCheck) string {
 }
 
 // RankOpportunities performs deterministic offline Radar ranking across stored repositories.
-func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpserver.RankOpportunitiesInput) (mcpserver.RankOpportunitiesOutput, error) {
+func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpcontract.RankOpportunitiesInput) (mcpcontract.RankOpportunitiesOutput, error) {
 	if len(in.Repositories) < 1 || len(in.Repositories) > 50 {
-		return mcpserver.RankOpportunitiesOutput{}, errors.New("repositories must contain 1 to 50 items")
+		return mcpcontract.RankOpportunitiesOutput{}, errors.New("repositories must contain 1 to 50 items")
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
@@ -487,22 +487,22 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpserver.RankOppo
 		in.MaxResultsPerRepository = 10
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return mcpserver.RankOpportunitiesOutput{}, errors.New("limit must be between 1 and 100")
+		return mcpcontract.RankOpportunitiesOutput{}, errors.New("limit must be between 1 and 100")
 	}
 	if in.MaxResultsPerRepository < 1 || in.MaxResultsPerRepository > 100 {
-		return mcpserver.RankOpportunitiesOutput{}, errors.New("max_results_per_repository must be between 1 and 100")
+		return mcpcontract.RankOpportunitiesOutput{}, errors.New("max_results_per_repository must be between 1 and 100")
 	}
 	evaluationTime := r.now().UTC()
-	out := mcpserver.RankOpportunitiesOutput{
+	out := mcpcontract.RankOpportunitiesOutput{
 		Status: "complete", GeneratedAt: formatTime(evaluationTime),
-		Candidates:   make([]mcpserver.OpportunityCandidateOutput, 0, in.Limit),
-		Repositories: make([]mcpserver.BatchItem[mcpserver.RepositoryOpportunitySummaryOutput], len(in.Repositories)),
+		Candidates:   make([]mcpcontract.OpportunityCandidateOutput, 0, in.Limit),
+		Repositories: make([]mcpcontract.BatchItem[mcpcontract.RepositoryOpportunitySummaryOutput], len(in.Repositories)),
 	}
-	var candidates []mcpserver.OpportunityCandidateOutput
+	var candidates []mcpcontract.OpportunityCandidateOutput
 	for i, input := range in.Repositories {
 		key := input.Owner + "/" + input.Repo
-		item := mcpserver.BatchItem[mcpserver.RepositoryOpportunitySummaryOutput]{Key: key, Status: "complete"}
-		report, err := r.contributionRadarAt(ctx, cli.RadarOptions{Repo: cli.RepoRef{Owner: input.Owner, Repo: input.Repo}, Limit: in.MaxResultsPerRepository}, evaluationTime)
+		item := mcpcontract.BatchItem[mcpcontract.RepositoryOpportunitySummaryOutput]{Key: key, Status: "complete"}
+		report, err := r.contributionRadarAt(ctx, contracts.RadarOptions{Repo: contracts.RepoRef{Owner: input.Owner, Repo: input.Repo}, Limit: in.MaxResultsPerRepository}, evaluationTime)
 		if err != nil {
 			item.Status, item.Reason, item.Message = "unavailable", "not_indexed", err.Error()
 			item.NextAction = "Sync repository metadata and open issue headers before ranking."
@@ -510,7 +510,7 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpserver.RankOppo
 			out.Status = "partial"
 			continue
 		}
-		summary := mcpserver.RepositoryOpportunitySummaryOutput{
+		summary := mcpcontract.RepositoryOpportunitySummaryOutput{
 			Repo: report.Repo, TotalOpenIssues: report.TotalOpenIssues, Considered: report.CandidatePopulation,
 			Returned: len(report.Candidates), Truncated: len(report.Candidates) < report.CandidatePopulation,
 			PopulationCapped: report.PopulationCapped,
@@ -541,8 +541,8 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpserver.RankOppo
 	return out, nil
 }
 
-func radarCandidateToMCP(c radar.Candidate) mcpserver.OpportunityCandidateOutput {
-	out := mcpserver.OpportunityCandidateOutput{Ref: c.Ref, Repo: c.Repo, Number: c.Number, Title: c.Title, URL: c.URL, Score: c.Score, Eligibility: string(c.Eligibility), Confidence: c.Confidence, SourceUpdatedAt: formatTime(c.SourceUpdatedAt)}
+func radarCandidateToMCP(c radar.Candidate) mcpcontract.OpportunityCandidateOutput {
+	out := mcpcontract.OpportunityCandidateOutput{Ref: c.Ref, Repo: c.Repo, Number: c.Number, Title: c.Title, URL: c.URL, Score: c.Score, Eligibility: string(c.Eligibility), Confidence: c.Confidence, SourceUpdatedAt: formatTime(c.SourceUpdatedAt)}
 	for _, signal := range c.PositiveSignals {
 		out.PositiveSignals = append(out.PositiveSignals, signal.Summary)
 	}
@@ -559,7 +559,7 @@ func radarCandidateToMCP(c radar.Candidate) mcpserver.OpportunityCandidateOutput
 		out.LinkedPullRequests = append(out.LinkedPullRequests, linked.Number)
 	}
 	for _, work := range c.RelatedWork {
-		out.RelatedWork = append(out.RelatedWork, mcpserver.OpportunityRelatedWorkOutput{
+		out.RelatedWork = append(out.RelatedWork, mcpcontract.OpportunityRelatedWorkOutput{
 			Ref: work.Ref, Relation: work.Relation, Direction: work.Direction, State: work.State,
 		})
 	}
@@ -583,19 +583,19 @@ func eligibilityRank(v string) int {
 // input order and item-level recovery guidance in the bounded batch response.
 //
 //nolint:gocognit
-func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpserver.FindPrecedentsInput) (mcpserver.FindPrecedentsOutput, error) {
+func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpcontract.FindPrecedentsInput) (mcpcontract.FindPrecedentsOutput, error) {
 	if len(in.Threads) < 1 || len(in.Threads) > 20 {
-		return mcpserver.FindPrecedentsOutput{}, errors.New("threads must contain 1 to 20 items")
+		return mcpcontract.FindPrecedentsOutput{}, errors.New("threads must contain 1 to 20 items")
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return mcpserver.FindPrecedentsOutput{}, errors.New("limit must be between 1 and 100")
+		return mcpcontract.FindPrecedentsOutput{}, errors.New("limit must be between 1 and 100")
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.FindPrecedentsOutput{}, err
+		return mcpcontract.FindPrecedentsOutput{}, err
 	}
 	refs := make([]precedent.SourceRef, len(in.Threads))
 	for i, input := range in.Threads {
@@ -603,7 +603,7 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpserver.FindPrecede
 	}
 	snapshots, err := c.LoadPrecedentRepositories(ctx, refs, 2000)
 	if err != nil {
-		return mcpserver.FindPrecedentsOutput{}, err
+		return mcpcontract.FindPrecedentsOutput{}, err
 	}
 	snapshotsByRepo := make(map[string]precedent.RepositorySnapshot, len(snapshots))
 	for _, snapshot := range snapshots {
@@ -618,13 +618,13 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpserver.FindPrecede
 		}
 		preparedByRepo[precedent.RepositoryKey(snapshot.Repository)] = prepared
 	}
-	out := mcpserver.FindPrecedentsOutput{Status: "complete", Items: make([]mcpserver.BatchItem[mcpserver.PrecedentSet], len(in.Threads))}
+	out := mcpcontract.FindPrecedentsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.PrecedentSet], len(in.Threads))}
 	for i, input := range in.Threads {
 		if err := ctx.Err(); err != nil {
-			return mcpserver.FindPrecedentsOutput{}, err
+			return mcpcontract.FindPrecedentsOutput{}, err
 		}
 		key := fmt.Sprintf("%s/%s#%d", input.Owner, input.Repo, input.Number)
-		item := mcpserver.BatchItem[mcpserver.PrecedentSet]{Key: key, Status: "complete"}
+		item := mcpcontract.BatchItem[mcpcontract.PrecedentSet]{Key: key, Status: "complete"}
 		repoKey := precedent.RepositoryKey(refs[i].Repository)
 		snapshot := snapshotsByRepo[repoKey]
 		if !snapshot.Available {
@@ -640,12 +640,12 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpserver.FindPrecede
 			out.Status = "partial"
 			continue
 		}
-		precedents := make([]mcpserver.PrecedentOutput, 0, in.Limit)
+		precedents := make([]mcpcontract.PrecedentOutput, 0, in.Limit)
 		preparedSource := rule.Prepare(source.Title + " " + source.Body)
 		for candidateIndex, prepared := range preparedByRepo[repoKey] {
 			if candidateIndex%1024 == 0 {
 				if err := ctx.Err(); err != nil {
-					return mcpserver.FindPrecedentsOutput{}, err
+					return mcpcontract.FindPrecedentsOutput{}, err
 				}
 			}
 			candidate := prepared.thread
@@ -660,7 +660,7 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpserver.FindPrecede
 		}
 		qualifying := len(precedents)
 		precedents = ranking.TopK(precedents, in.Limit, betterPrecedent)
-		item.Value = &mcpserver.PrecedentSet{Matches: precedents, Population: snapshot.ClosedTotal, Considered: len(snapshot.Closed), Truncated: snapshot.ClosedTruncated || len(precedents) < qualifying}
+		item.Value = &mcpcontract.PrecedentSet{Matches: precedents, Population: snapshot.ClosedTotal, Considered: len(snapshot.Closed), Truncated: snapshot.ClosedTruncated || len(precedents) < qualifying}
 		if item.Value.Truncated {
 			out.Status = "partial"
 		}
@@ -675,14 +675,14 @@ type preparedPrecedent struct {
 	text   similarity.PreparedLexical
 }
 
-func betterPrecedent(a, b mcpserver.PrecedentOutput) bool {
+func betterPrecedent(a, b mcpcontract.PrecedentOutput) bool {
 	if a.Score != b.Score {
 		return a.Score > b.Score
 	}
 	return a.Ref < b.Ref
 }
 
-func precedentToMCP(source, owner, repo string, t precedent.Thread, score float64) mcpserver.PrecedentOutput {
+func precedentToMCP(source, owner, repo string, t precedent.Thread, score float64) mcpcontract.PrecedentOutput {
 	reasons := []string{"similar stored title or body"}
 	if t.Merged {
 		reasons = append(reasons, "pull request merged")
@@ -696,5 +696,5 @@ func precedentToMCP(source, owner, repo string, t precedent.Thread, score float6
 			reasons = append(reasons, "label: "+label)
 		}
 	}
-	return mcpserver.PrecedentOutput{Source: source, Ref: fmt.Sprintf("%s/%s#%d", owner, repo, t.Number), Kind: t.Kind, State: t.State, StateReason: t.StateReason, Title: t.Title, Score: score, RuleVersion: similarity.PrecedentV1, Reasons: reasons, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.MergedAt)}
+	return mcpcontract.PrecedentOutput{Source: source, Ref: fmt.Sprintf("%s/%s#%d", owner, repo, t.Number), Kind: t.Kind, State: t.State, StateReason: t.StateReason, Title: t.Title, Score: score, RuleVersion: similarity.PrecedentV1, Reasons: reasons, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.MergedAt)}
 }

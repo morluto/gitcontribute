@@ -28,7 +28,7 @@ type dossierExportCmd struct {
 }
 
 func (c *CLI) runDossier(ctx context.Context, command string, cmd *dossierCmd) error {
-	service, err := c.dossierExtensionService()
+	service, err := c.dossierService()
 	if err != nil {
 		// Preserve the original dossier command for lightweight implementations.
 		if command == "dossier show" {
@@ -52,14 +52,14 @@ func (c *CLI) runDossier(ctx context.Context, command string, cmd *dossierCmd) e
 		if parseErr != nil {
 			return parseErr
 		}
-		result, err = service.BuildDossierForCLI(ctx, repo)
+		result, err = service.BuildRepositoryDossier(ctx, repo)
 		jsonOutput = cmd.Build.JSON
 	case "dossier show":
 		repo, parseErr := parseRepo(cmd.Show.OwnerRepo)
 		if parseErr != nil {
 			return parseErr
 		}
-		result, err = service.GetDossierForCLI(ctx, repo)
+		result, err = service.GetRepositoryDossier(ctx, repo)
 		jsonOutput = cmd.Show.JSON
 	case "dossier export":
 		return c.runExport(ctx, "export dossier", &exportCmd{Dossier: exportDossierCmd{

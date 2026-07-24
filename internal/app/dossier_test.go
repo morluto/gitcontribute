@@ -11,11 +11,11 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/dossier"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 func TestBuildAndGetRepositoryDossier(t *testing.T) {
@@ -121,7 +121,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 		t.Fatalf("upsert issue: %v", err)
 	}
 
-	d, err := svc.BuildRepositoryDossier(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
+	d, err := svc.BuildRepositoryDossier(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
 	if err != nil {
 		t.Fatalf("build dossier: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 		t.Fatalf("unexpected unknown-merge PRs: count=%d recent=%+v", d.ClosedPullRequestUnknownCount, d.RecentClosedUnknownPullRequests)
 	}
 
-	got, err := svc.GetRepositoryDossier(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
+	got, err := svc.GetRepositoryDossier(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
 	if err != nil {
 		t.Fatalf("get dossier: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 	}, `{}`); err != nil {
 		t.Fatalf("update repository after dossier build: %v", err)
 	}
-	mcpDossier, err := svc.MCPReader().Dossier(ctx, mcpserver.RepoInput{Owner: ref.Owner, Repo: ref.Repo})
+	mcpDossier, err := svc.MCPReader().Dossier(ctx, mcpcontract.RepoInput{Owner: ref.Owner, Repo: ref.Repo})
 	if err != nil {
 		t.Fatalf("read persisted MCP dossier: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 		t.Fatalf("MCP dossier stars = %v, want persisted value 10", stars)
 	}
 
-	res, err := svc.Dossier(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
+	res, err := svc.Dossier(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
 	if err != nil {
 		t.Fatalf("dossier summary: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestExtractSeeds(t *testing.T) {
 		t.Fatalf("upsert not-planned issue: %v", err)
 	}
 
-	seeds, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{})
+	seeds, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{})
 	if err != nil {
 		t.Fatalf("extract seeds: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestExtractSeeds(t *testing.T) {
 		t.Fatalf("not-planned issue polarity/evidence = %+v", notPlanned)
 	}
 
-	contextOnly, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{
+	contextOnly, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{
 		Classes:    []domain.SeedSourceClass{domain.SeedSourceClassIssue},
 		Polarities: []domain.SeedPolarity{domain.SeedPolarityContext},
 		Limit:      10,
@@ -376,7 +376,7 @@ func TestExtractSeeds(t *testing.T) {
 		t.Fatalf("expected open issue context, got %+v", contextOnly)
 	}
 
-	negativeIssues, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{
+	negativeIssues, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{
 		Classes:    []domain.SeedSourceClass{domain.SeedSourceClassIssue},
 		Polarities: []domain.SeedPolarity{domain.SeedPolarityNegative},
 		Limit:      10,
@@ -387,7 +387,7 @@ func TestExtractSeeds(t *testing.T) {
 	if len(negativeIssues) != 1 || negativeIssues[0].Number != 2 {
 		t.Fatalf("expected not-planned issue only, got %+v", negativeIssues)
 	}
-	empty, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{
+	empty, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{
 		Classes:    []domain.SeedSourceClass{domain.SeedSourceClassMergedPR},
 		Polarities: []domain.SeedPolarity{domain.SeedPolarityContext},
 		Limit:      10,
@@ -399,7 +399,7 @@ func TestExtractSeeds(t *testing.T) {
 		t.Fatalf("empty seed selection = %#v, want non-nil empty list", empty)
 	}
 
-	bounded, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Limit: 1})
+	bounded, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Limit: 1})
 	if err != nil {
 		t.Fatalf("extract bounded: %v", err)
 	}
@@ -407,22 +407,11 @@ func TestExtractSeeds(t *testing.T) {
 		t.Fatalf("expected 1 seed with limit 1, got %d", len(bounded))
 	}
 
-	if _, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Polarities: []domain.SeedPolarity{"invented"}}); err == nil || !strings.Contains(err.Error(), "unknown seed polarity") {
+	if _, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Polarities: []domain.SeedPolarity{"invented"}}); err == nil || !strings.Contains(err.Error(), "unknown seed polarity") {
 		t.Fatalf("invalid polarity error = %v", err)
 	}
-	if _, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Classes: []domain.SeedSourceClass{"invented"}}); err == nil || !strings.Contains(err.Error(), "unknown seed source class") {
+	if _, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Classes: []domain.SeedSourceClass{"invented"}}); err == nil || !strings.Contains(err.Error(), "unknown seed source class") {
 		t.Fatalf("invalid source class error = %v", err)
-	}
-	cliSeeds, err := svc.ExtractSeedsForCLI(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, []string{"issues"}, []string{"context"}, 10)
-	if err != nil {
-		t.Fatalf("extract CLI context seeds: %v", err)
-	}
-	typedCLISeeds, ok := cliSeeds.([]domain.Seed)
-	if !ok || len(typedCLISeeds) != 1 || typedCLISeeds[0].Number != 1 {
-		t.Fatalf("CLI context seeds = %#v", cliSeeds)
-	}
-	if _, err := svc.ExtractSeedsForCLI(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, nil, []string{"invented"}, 10); err == nil || !strings.Contains(err.Error(), "unknown seed polarity") {
-		t.Fatalf("invalid CLI polarity error = %v", err)
 	}
 }
 
@@ -526,7 +515,7 @@ func TestExtractSeedsRequiresNoNetwork(t *testing.T) {
 		t.Fatalf("upsert thread: %v", err)
 	}
 
-	seeds, err := svc.ExtractSeeds(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Polarities: []domain.SeedPolarity{domain.SeedPolarityContext}})
+	seeds, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Polarities: []domain.SeedPolarity{domain.SeedPolarityContext}})
 	if err != nil {
 		t.Fatalf("extract seeds without network reader: %v", err)
 	}

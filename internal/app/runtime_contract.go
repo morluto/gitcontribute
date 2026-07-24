@@ -5,14 +5,14 @@ import (
 	"errors"
 	"strings"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 )
 
 // NewRuntimeContract constructs immutable executable compatibility metadata.
 // It does not resolve configuration, inspect a corpus, access the network, or
 // write local state.
-func NewRuntimeContract(version string) (*cli.RuntimeContractResult, error) {
+func NewRuntimeContract(version string) (*contracts.RuntimeContractResult, error) {
 	if strings.TrimSpace(version) == "" {
 		return nil, errors.New("runtime version is empty")
 	}
@@ -20,13 +20,13 @@ func NewRuntimeContract(version string) (*cli.RuntimeContractResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &cli.RuntimeContractResult{
+	return &contracts.RuntimeContractResult{
 		Name: "gitcontribute", Version: version, SupportedSchemaVersion: schema,
 	}, nil
 }
 
 // RuntimeContract reports immutable executable compatibility metadata.
-func (s *Service) RuntimeContract(ctx context.Context) (*cli.RuntimeContractResult, error) {
+func (s *Service) RuntimeContract(ctx context.Context) (*contracts.RuntimeContractResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

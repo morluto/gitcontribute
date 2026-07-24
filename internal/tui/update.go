@@ -3,13 +3,15 @@ package tui
 import (
 	"fmt"
 
+	"github.com/morluto/gitcontribute/internal/tuicontract"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 type loadMsg struct{}
 
 type loadedMsg struct {
-	data Data
+	data tuicontract.Data
 	err  error
 }
 
@@ -26,20 +28,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.err = msg.err
 			m.loaded = false
-			m.items = make(map[view][]Item)
-			m.windows = make(map[view]Window)
+			m.items = make(map[view][]tuicontract.Item)
+			m.windows = make(map[view]tuicontract.Window)
 			m.filtered = nil
 			return m, nil
 		}
 		m.loaded = true
-		m.items = map[view][]Item{
+		m.items = map[view][]tuicontract.Item{
 			viewRepositories:   msg.data.Repositories,
 			viewThreads:        msg.data.Threads,
 			viewClusters:       msg.data.Clusters,
 			viewInvestigations: msg.data.Investigations,
 			viewOpportunities:  msg.data.Opportunities,
 		}
-		m.windows = map[view]Window{
+		m.windows = map[view]tuicontract.Window{
 			viewRepositories:   msg.data.Windows[string(viewRepositories)],
 			viewThreads:        msg.data.Windows[string(viewThreads)],
 			viewClusters:       msg.data.Windows[string(viewClusters)],

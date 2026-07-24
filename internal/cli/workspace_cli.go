@@ -3,10 +3,12 @@ package cli
 import (
 	"context"
 	"fmt"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
-func (c *CLI) workspaceService() (WorkspaceService, error) {
-	service, ok := c.svc.(WorkspaceService)
+func (c *CLI) workspaceService() (contracts.WorkspaceService, error) {
+	service, ok := c.svc.(contracts.WorkspaceService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -23,7 +25,7 @@ func (c *CLI) runWorkspace(ctx context.Context, command string, cmd *workspaceCm
 		if _, err := fmt.Fprintf(c.stderr, "creating workspace for investigation %s...\n", cmd.Create.InvestigationID); err != nil {
 			return err
 		}
-		result, err := service.CreateWorkspace(ctx, cmd.Create.InvestigationID, WorkspaceCreateOptions{
+		result, err := service.CreateWorkspace(ctx, cmd.Create.InvestigationID, contracts.WorkspaceCreateOptions{
 			Remote:       cmd.Create.Remote,
 			BaseRef:      cmd.Create.Base,
 			CandidateRef: cmd.Create.Candidate,
@@ -37,7 +39,7 @@ func (c *CLI) runWorkspace(ctx context.Context, command string, cmd *workspaceCm
 		if _, err := fmt.Fprintf(c.stderr, "adopting local worktree for investigation %s...\n", cmd.Adopt.InvestigationID); err != nil {
 			return err
 		}
-		result, err := service.AdoptWorkspace(ctx, cmd.Adopt.InvestigationID, WorkspaceAdoptOptions{
+		result, err := service.AdoptWorkspace(ctx, cmd.Adopt.InvestigationID, contracts.WorkspaceAdoptOptions{
 			Path: cmd.Adopt.Path, BaseRef: cmd.Adopt.Base, Name: cmd.Adopt.Name,
 		})
 		if err != nil {
@@ -56,11 +58,11 @@ func (c *CLI) runWorkspace(ctx context.Context, command string, cmd *workspaceCm
 }
 
 func (c *CLI) runDiff(ctx context.Context, cmd *diffCmd) error {
-	service, err := c.workflowExtensionService()
+	service, err := c.workflowService()
 	if err != nil {
 		return err
 	}
-	result, err := service.WorkspaceDiffForCLI(ctx, cmd.WorkspaceID)
+	result, err := service.WorkspaceDiff(ctx, cmd.WorkspaceID)
 	if err != nil {
 		return c.mapError(err)
 	}

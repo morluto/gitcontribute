@@ -3,9 +3,11 @@ package cli
 import (
 	"fmt"
 	"strings"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
-func corpusProjectionListHuman(r *CorpusProjectionListResult) string {
+func corpusProjectionListHuman(r *contracts.CorpusProjectionListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Corpus projections: %d", len(r.Projections))
 	for _, projection := range r.Projections {
@@ -14,7 +16,7 @@ func corpusProjectionListHuman(r *CorpusProjectionListResult) string {
 	return b.String()
 }
 
-func corpusProjectionHuman(prefix string, r *CorpusProjectionResult) string {
+func corpusProjectionHuman(prefix string, r *contracts.CorpusProjectionResult) string {
 	line := fmt.Sprintf("%s %s: %s, %d rows", r.Name, r.Version, r.Status, r.RowCount)
 	if prefix != "" {
 		line = fmt.Sprintf("%s %s at %s: %s, %d rows", prefix, r.Name, r.Version, r.Status, r.RowCount)
@@ -31,12 +33,12 @@ func corpusProjectionHuman(prefix string, r *CorpusProjectionResult) string {
 	return line
 }
 
-func corpusInventoryHuman(r *CorpusInventoryResult) string {
+func corpusInventoryHuman(r *contracts.CorpusInventoryResult) string {
 	return fmt.Sprintf("Corpus inventory %s: %d issues, %d pull requests, %d observations; %d code snapshots, %d code bytes; database %d bytes + WAL %d bytes",
 		r.Repo, r.Issues, r.PullRequests, r.RepositoryObservations+r.ThreadObservations+r.FacetObservations, r.CodeSnapshots, r.CodeBytes, r.DatabaseBytes, r.WALBytes)
 }
 
-func corpusInventoryListHuman(r *CorpusInventoryListResult) string {
+func corpusInventoryListHuman(r *contracts.CorpusInventoryListResult) string {
 	var b strings.Builder
 	state := "unknown"
 	if r.Schema != nil {
@@ -65,7 +67,7 @@ func corpusInventoryListHuman(r *CorpusInventoryListResult) string {
 	return b.String()
 }
 
-func corpusPruneHuman(r *CorpusPruneResult) string {
+func corpusPruneHuman(r *contracts.CorpusPruneResult) string {
 	action := "Would delete"
 	if !r.DryRun {
 		action = "Deleted"
@@ -73,7 +75,7 @@ func corpusPruneHuman(r *CorpusPruneResult) string {
 	return fmt.Sprintf("%s %d derived code snapshots for %s; keep latest %d; reclaimable bytes %d", action, len(r.Delete), r.Repo, r.KeepLatest, r.ReclaimBytes)
 }
 
-func corpusRepositoryRemovalHuman(r *CorpusRepositoryRemovalResult) string {
+func corpusRepositoryRemovalHuman(r *contracts.CorpusRepositoryRemovalResult) string {
 	action := "Would remove"
 	if !r.DryRun {
 		action = "Removed"
@@ -84,7 +86,7 @@ func corpusRepositoryRemovalHuman(r *CorpusRepositoryRemovalResult) string {
 		r.CodeSnapshots, r.Dossiers, r.Clusters, linkedRecords, r.PreservedInvestigations, r.PreservedCrossRepoReferences)
 }
 
-func corpusRestoreHuman(r *CorpusRestoreResult) string {
+func corpusRestoreHuman(r *contracts.CorpusRestoreResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Restored corpus from %s", r.Source)
 	if r.SafetyBackup != nil {
@@ -99,7 +101,7 @@ func corpusRestoreHuman(r *CorpusRestoreResult) string {
 	return b.String()
 }
 
-func corpusInspectionHuman(r *CorpusInspectionResult) string {
+func corpusInspectionHuman(r *contracts.CorpusInspectionResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Corpus %s: %s (schema %d -> %d, %d bytes)", r.Path, r.State, r.Current, r.Target, r.SizeBytes)
 	fmt.Fprintf(&b, "\n%d repositories, %d threads", r.Repositories, r.Threads)
@@ -109,7 +111,7 @@ func corpusInspectionHuman(r *CorpusInspectionResult) string {
 	return b.String()
 }
 
-func corpusMigrationHuman(r *CorpusMigrationResult) string {
+func corpusMigrationHuman(r *contracts.CorpusMigrationResult) string {
 	var b strings.Builder
 	if r.Before != nil && r.After != nil {
 		fmt.Fprintf(&b, "Migrated corpus schema %d -> %d", r.Before.Current, r.After.Current)

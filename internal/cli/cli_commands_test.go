@@ -10,11 +10,12 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 func TestInit(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{initResult: &cli.InitResult{Path: "/tmp/gc", Message: "ready"}}
+	svc := &fakeService{initResult: &contracts.InitResult{Path: "/tmp/gc", Message: "ready"}}
 	c, stdout, stderr := newTestCLI(svc, nil)
 
 	err := c.Run(context.Background(), []string{"init"})
@@ -34,13 +35,13 @@ func TestInit(t *testing.T) {
 
 func TestInitJSON(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{initResult: &cli.InitResult{Path: "/tmp/gc", Message: "ready"}}
+	svc := &fakeService{initResult: &contracts.InitResult{Path: "/tmp/gc", Message: "ready"}}
 	c, stdout, _ := newTestCLI(svc, nil)
 
 	err := c.Run(context.Background(), []string{"init", "--json"})
 	requireNoErr(t, err)
 
-	var got cli.InitResult
+	var got contracts.InitResult
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("invalid JSON: %v\noutput: %s", err, stdout.String())
 	}
@@ -51,7 +52,7 @@ func TestInitJSON(t *testing.T) {
 
 func TestStatus(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{statusResult: &cli.StatusResult{Healthy: true, Corpus: "gc", Version: "0.0.1", Message: "ok"}}
+	svc := &fakeService{statusResult: &contracts.StatusResult{Healthy: true, Corpus: "gc", Version: "0.0.1", Message: "ok"}}
 	c, stdout, _ := newTestCLI(svc, nil)
 
 	err := c.Run(context.Background(), []string{"status"})
@@ -81,14 +82,14 @@ func TestSyncInvalidRepo(t *testing.T) {
 
 func TestSearchDefaults(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{searchResult: &cli.SearchResult{
+	svc := &fakeService{searchResult: &contracts.SearchResult{
 		Query: "test",
 		Kind:  "threads",
 		Limit: 20,
 		Total: 1,
-		Matches: []cli.SearchMatch{{
+		Matches: []contracts.SearchMatch{{
 			Kind:   "issue",
-			Repo:   cli.RepoRef{Owner: "o", Repo: "r"},
+			Repo:   contracts.RepoRef{Owner: "o", Repo: "r"},
 			Title:  "foo",
 			Number: 42,
 			Score:  0.9,
@@ -119,13 +120,13 @@ func TestSearchDefaults(t *testing.T) {
 
 func TestSearchJSONWithFlags(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{searchResult: &cli.SearchResult{
+	svc := &fakeService{searchResult: &contracts.SearchResult{
 		Query:   "good first issue",
 		Kind:    "issues",
 		Repo:    "o/r",
 		Limit:   5,
 		Total:   0,
-		Matches: []cli.SearchMatch{},
+		Matches: []contracts.SearchMatch{},
 	}}
 	c, stdout, _ := newTestCLI(svc, nil)
 
@@ -143,7 +144,7 @@ func TestSearchJSONWithFlags(t *testing.T) {
 		t.Fatalf("unexpected options: %+v", opts)
 	}
 
-	var got cli.SearchResult
+	var got contracts.SearchResult
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("invalid JSON: %v\noutput: %s", err, stdout.String())
 	}
@@ -156,7 +157,7 @@ func TestSearchNoNetworkImplied(t *testing.T) {
 	t.Parallel()
 	// Search must be local; the CLI dispatches to the injected service without
 	// any hidden network access.
-	svc := &fakeService{searchResult: &cli.SearchResult{Query: "local", Total: 0, Matches: []cli.SearchMatch{}}}
+	svc := &fakeService{searchResult: &contracts.SearchResult{Query: "local", Total: 0, Matches: []contracts.SearchMatch{}}}
 	c, _, _ := newTestCLI(svc, nil)
 
 	err := c.Run(context.Background(), []string{"search", "threads", "local"})
@@ -202,12 +203,12 @@ func TestSearchRejectsUnsupportedFilterCombinations(t *testing.T) {
 
 func TestSearchThreadMetadataFlags(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{searchResult: &cli.SearchResult{
+	svc := &fakeService{searchResult: &contracts.SearchResult{
 		Query:   "term",
 		Kind:    "issues",
 		Limit:   10,
 		Total:   0,
-		Matches: []cli.SearchMatch{},
+		Matches: []contracts.SearchMatch{},
 	}}
 	c, _, _ := newTestCLI(svc, nil)
 
@@ -228,12 +229,12 @@ func TestSearchThreadMetadataFlags(t *testing.T) {
 
 func TestSearchWithLensFlag(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{searchResult: &cli.SearchResult{
+	svc := &fakeService{searchResult: &contracts.SearchResult{
 		Query:   "test",
 		Kind:    "issues",
 		Limit:   10,
 		Total:   1,
-		Matches: []cli.SearchMatch{},
+		Matches: []contracts.SearchMatch{},
 	}}
 	c, _, _ := newTestCLI(svc, nil)
 
@@ -265,8 +266,8 @@ func TestSearchRejectsLensWithCursor(t *testing.T) {
 
 func TestDossier(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{dossierResult: &cli.DossierResult{
-		Repo:       cli.RepoRef{Owner: "o", Repo: "r"},
+	svc := &fakeService{dossierResult: &contracts.DossierResult{
+		Repo:       contracts.RepoRef{Owner: "o", Repo: "r"},
 		Summary:    "A Go CLI",
 		Language:   "Go",
 		Stars:      100,
@@ -282,7 +283,7 @@ func TestDossier(t *testing.T) {
 	if !svc.dossierCalled {
 		t.Fatal("Dossier was not called")
 	}
-	if svc.lastDossierArg != (cli.RepoRef{Owner: "o", Repo: "r"}) {
+	if svc.lastDossierArg != (contracts.RepoRef{Owner: "o", Repo: "r"}) {
 		t.Fatalf("dossier repo=%+v", svc.lastDossierArg)
 	}
 	want := "Dossier: o/r\nSummary: A Go CLI\nLanguage: Go\nStars: 100\nOpen issues: 5\nCoverage: metadata, threads\nFreshness: 2026-07-16T00:00:00Z\n"
@@ -293,8 +294,8 @@ func TestDossier(t *testing.T) {
 
 func TestDossierJSON(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{dossierResult: &cli.DossierResult{
-		Repo:       cli.RepoRef{Owner: "o", Repo: "r"},
+	svc := &fakeService{dossierResult: &contracts.DossierResult{
+		Repo:       contracts.RepoRef{Owner: "o", Repo: "r"},
 		Summary:    "A Go CLI",
 		Language:   "Go",
 		Stars:      100,
@@ -307,7 +308,7 @@ func TestDossierJSON(t *testing.T) {
 	err := c.Run(context.Background(), []string{"dossier", "show", "o/r", "--json"})
 	requireNoErr(t, err)
 
-	var got cli.DossierResult
+	var got contracts.DossierResult
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("invalid JSON: %v\noutput: %s", err, stdout.String())
 	}
@@ -337,7 +338,7 @@ func TestUnknownCommand(t *testing.T) {
 
 func TestSetupNonInteractiveJSON(t *testing.T) {
 	t.Parallel()
-	svc := &fakeService{setupResult: &cli.SetupReport{Operation: "setup", DryRun: true, MCPCommand: &cli.SetupMCPCommand{Command: "/managed/gitcontribute", Args: []string{"mcp", "serve", "--transport=stdio"}}, Steps: []cli.SetupStep{{Name: "codex", Status: "would configure"}}}}
+	svc := &fakeService{setupResult: &contracts.SetupReport{Operation: "setup", DryRun: true, MCPCommand: &contracts.SetupMCPCommand{Command: "/managed/gitcontribute", Args: []string{"mcp", "serve", "--transport=stdio"}}, Steps: []contracts.SetupStep{{Name: "codex", Status: "would configure"}}}}
 	var out bytes.Buffer
 	c := cli.New(svc, &fakeMCPRunner{}, &out, io.Discard)
 	if err := c.Run(context.Background(), []string{"setup", "--mode", "mcp", "--codex", "--token-source", "none", "--dry-run", "--json"}); err != nil {
@@ -354,18 +355,18 @@ func TestSetupNonInteractiveJSON(t *testing.T) {
 func TestInvestigationStartShowAndList(t *testing.T) {
 	t.Parallel()
 	svc := &fakeService{
-		startInvResult: &cli.InvestigationResult{
-			ID: "inv-1", Repo: cli.RepoRef{Owner: "o", Repo: "r"},
+		startInvResult: &contracts.InvestigationResult{
+			ID: "inv-1", Repo: contracts.RepoRef{Owner: "o", Repo: "r"},
 			CommitSHA: "abc", Lens: "go", Status: "open",
 			CreatedAt: "2026-07-17T00:00:00Z", UpdatedAt: "2026-07-17T00:00:00Z",
 		},
-		showInvResult: &cli.InvestigationResult{
-			ID: "inv-1", Repo: cli.RepoRef{Owner: "o", Repo: "r"},
+		showInvResult: &contracts.InvestigationResult{
+			ID: "inv-1", Repo: contracts.RepoRef{Owner: "o", Repo: "r"},
 			Status: "open", CreatedAt: "2026-07-17T00:00:00Z", UpdatedAt: "2026-07-17T00:00:00Z",
 		},
-		listInvResult: &cli.InvestigationListResult{
-			Investigations: []cli.InvestigationResult{
-				{ID: "inv-1", Repo: cli.RepoRef{Owner: "o", Repo: "r"}, Status: "open", CreatedAt: "2026-07-17T00:00:00Z", UpdatedAt: "2026-07-17T00:00:00Z"},
+		listInvResult: &contracts.InvestigationListResult{
+			Investigations: []contracts.InvestigationResult{
+				{ID: "inv-1", Repo: contracts.RepoRef{Owner: "o", Repo: "r"}, Status: "open", CreatedAt: "2026-07-17T00:00:00Z", UpdatedAt: "2026-07-17T00:00:00Z"},
 			},
 		},
 	}
@@ -415,12 +416,12 @@ func TestInvestigationStartRejectsInvalidRepo(t *testing.T) {
 func TestHypothesisAddAndList(t *testing.T) {
 	t.Parallel()
 	svc := &fakeService{
-		addHypResult: &cli.HypothesisResult{
+		addHypResult: &contracts.HypothesisResult{
 			ID: "hyp-1", InvestigationID: "inv-1", Title: "race", Description: "race desc", Category: "bug", Status: "proposed",
 			CreatedAt: "2026-07-17T00:00:00Z", UpdatedAt: "2026-07-17T00:00:00Z",
 		},
-		listHypResult: &cli.HypothesisListResult{
-			Hypotheses: []cli.HypothesisResult{
+		listHypResult: &contracts.HypothesisListResult{
+			Hypotheses: []contracts.HypothesisResult{
 				{ID: "hyp-1", InvestigationID: "inv-1", Title: "race", Category: "bug", Status: "proposed"},
 			},
 		},
@@ -450,23 +451,23 @@ func TestHypothesisAddAndList(t *testing.T) {
 func TestOpportunityPromoteShowListAndSetStatus(t *testing.T) {
 	t.Parallel()
 	svc := &fakeService{
-		promoteOppResult: &cli.OpportunityResult{
+		promoteOppResult: &contracts.OpportunityResult{
 			ID: "opp-1", InvestigationID: "inv-1", HypothesisID: "hyp-1", Title: "race",
 			ProblemStatement: "data race", Scope: "pkg/foo", Impact: "crash", ExpectedEffort: "small",
 			Confidence: 0.8, Category: "bug", CollisionStatus: "unknown", Status: "hypothesis",
 			CreatedAt: "2026-07-17T00:00:00Z", UpdatedAt: "2026-07-17T00:00:00Z",
 		},
-		showOppResult: &cli.OpportunityResult{
+		showOppResult: &contracts.OpportunityResult{
 			ID: "opp-1", Title: "race", Status: "reproduced", Confidence: 0.8,
 			CreatedAt: "2026-07-17T00:00:00Z", UpdatedAt: "2026-07-17T00:01:00Z",
 		},
-		listOppResult: &cli.OpportunityListResult{
+		listOppResult: &contracts.OpportunityListResult{
 			Filter: "inv-1",
-			Opportunities: []cli.OpportunityResult{
+			Opportunities: []contracts.OpportunityResult{
 				{ID: "opp-1", Title: "race", Status: "reproduced", Confidence: 0.8, Category: "bug"},
 			},
 		},
-		setStatusOppResult: &cli.OpportunityResult{
+		setStatusOppResult: &contracts.OpportunityResult{
 			ID: "opp-1", Title: "race", Status: "reproduced",
 		},
 	}

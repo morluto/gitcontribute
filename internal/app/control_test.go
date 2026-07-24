@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/github"
 )
@@ -162,7 +162,7 @@ func TestConfigureInvalidInputDoesNotReplaceFile(t *testing.T) {
 	}
 
 	invalid := 0
-	if _, err := svc.Configure(context.Background(), cli.ConfigureOptions{CrawlBudget: &invalid}); err == nil {
+	if _, err := svc.Configure(context.Background(), contracts.ConfigureOptions{CrawlBudget: &invalid}); err == nil {
 		t.Fatal("Configure succeeded with zero crawl budget")
 	}
 	after, err := os.ReadFile(path)
@@ -183,7 +183,7 @@ func TestConfigureDryRunDoesNotSave(t *testing.T) {
 	defer svc.Close()
 
 	budget := 25
-	result, err := svc.Configure(context.Background(), cli.ConfigureOptions{CrawlBudget: &budget, DryRun: true})
+	result, err := svc.Configure(context.Background(), contracts.ConfigureOptions{CrawlBudget: &budget, DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestDoctorDoesNotExposeEnvironmentToken(t *testing.T) {
 	}
 	defer svc.Close()
 	method, key := "env", "GITCONTRIBUTE_TEST_TOKEN"
-	if _, err := svc.Configure(context.Background(), cli.ConfigureOptions{TokenSource: &method, TokenSourceKey: &key}); err != nil {
+	if _, err := svc.Configure(context.Background(), contracts.ConfigureOptions{TokenSource: &method, TokenSourceKey: &key}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -305,7 +305,7 @@ func TestConfigureDoesNotPersistEnvOverrides(t *testing.T) {
 	t.Setenv("GITCONTRIBUTE_DATABASE", envDB)
 
 	budget := 25
-	result, err := svc.Configure(context.Background(), cli.ConfigureOptions{CrawlBudget: &budget})
+	result, err := svc.Configure(context.Background(), contracts.ConfigureOptions{CrawlBudget: &budget})
 	if err != nil {
 		t.Fatalf("configure: %v", err)
 	}

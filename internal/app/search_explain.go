@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 // ExplainMatchResult exposes the factual signals that contribute to a match
@@ -19,7 +19,7 @@ type ExplainMatchResult struct {
 // ExplainMatch returns factual score reasons for a search match without network
 // access. The returned reasons describe stored text matches, source freshness,
 // and coverage signals.
-func (s *Service) ExplainMatch(_ context.Context, query string, match cli.SearchMatch) (*ExplainMatchResult, error) {
+func (s *Service) ExplainMatch(_ context.Context, query string, match contracts.SearchMatch) (*ExplainMatchResult, error) {
 	var freshness time.Time
 	if match.Freshness != "" {
 		var err error
@@ -32,7 +32,7 @@ func (s *Service) ExplainMatch(_ context.Context, query string, match cli.Search
 	return &ExplainMatchResult{Score: match.Score, Reasons: reasons}, nil
 }
 
-func explainMatchReasons(query string, match cli.SearchMatch, freshness, now time.Time) []string {
+func explainMatchReasons(query string, match contracts.SearchMatch, freshness, now time.Time) []string {
 	var reasons []string
 	if strings.TrimSpace(query) != "" {
 		source := match.MatchSource

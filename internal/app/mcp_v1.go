@@ -8,28 +8,28 @@ import (
 	"strings"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/investigation"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/research"
 )
 
 // SearchRepositories performs a local-only repository search.
-func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpserver.SearchRepositoriesInput) (mcpserver.SearchRepositoriesOutput, error) {
+func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpcontract.SearchRepositoriesInput) (mcpcontract.SearchRepositoriesOutput, error) {
 	repoRef := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
 	repoFilter := ""
 	if in.Owner != "" || in.Repo != "" {
 		if err := repoRef.Validate(); err != nil {
-			return mcpserver.SearchRepositoriesOutput{}, err
+			return mcpcontract.SearchRepositoriesOutput{}, err
 		}
 		repoFilter = repoRef.String()
 	}
 
-	res, err := r.searchCorpus(ctx, in.Query, cli.SearchOptions{
+	res, err := r.searchCorpus(ctx, in.Query, contracts.SearchOptions{
 		Kind:   "repos",
 		Repo:   repoFilter,
 		Limit:  in.Limit,
@@ -37,47 +37,47 @@ func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpserver.SearchR
 		Sort:   in.Sort,
 	})
 	if err != nil {
-		return mcpserver.SearchRepositoriesOutput{}, err
+		return mcpcontract.SearchRepositoriesOutput{}, err
 	}
 
-	matches := make([]mcpserver.RepositoryOutput, len(res.Matches))
+	matches := make([]mcpcontract.RepositoryOutput, len(res.Matches))
 	for i, m := range res.Matches {
-		matches[i] = mcpserver.RepositoryOutput{
+		matches[i] = mcpcontract.RepositoryOutput{
 			Owner:     m.Repo.Owner,
 			Repo:      m.Repo.Repo,
 			UpdatedAt: formatTime(m.UpdatedAt),
 			Fields:    m.Fields,
 		}
 	}
-	return mcpserver.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: matches, NextCursor: res.NextCursor}, nil
+	return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: matches, NextCursor: res.NextCursor}, nil
 }
 
 // ThreadByNumber reads an issue or pull request by repository and number only.
-func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpserver.ThreadByNumberInput) (mcpserver.ThreadOutput, error) {
+func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpcontract.ThreadByNumberInput) (mcpcontract.ThreadOutput, error) {
 	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
 	if err := ref.Validate(); err != nil {
-		return mcpserver.ThreadOutput{}, err
+		return mcpcontract.ThreadOutput{}, err
 	}
 	if in.Number < 1 {
-		return mcpserver.ThreadOutput{}, errors.New("number must be positive")
+		return mcpcontract.ThreadOutput{}, errors.New("number must be positive")
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.ThreadOutput{}, err
+		return mcpcontract.ThreadOutput{}, err
 	}
 	repo, err := c.GetRepository(ctx, in.Owner, in.Repo)
 	if err != nil {
-		return mcpserver.ThreadOutput{}, fmt.Errorf("get repository: %w", err)
+		return mcpcontract.ThreadOutput{}, fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil {
-		return mcpserver.ThreadOutput{}, failure.NotFound(nil)
+		return mcpcontract.ThreadOutput{}, failure.NotFound(nil)
 	}
 	thread, err := c.GetThreadByNumber(ctx, repo.ID, in.Number)
 	if err != nil {
-		return mcpserver.ThreadOutput{}, fmt.Errorf("get thread: %w", err)
+		return mcpcontract.ThreadOutput{}, fmt.Errorf("get thread: %w", err)
 	}
 	if thread == nil {
-		return mcpserver.ThreadOutput{}, failure.NotFound(nil)
+		return mcpcontract.ThreadOutput{}, failure.NotFound(nil)
 	}
 	out := corpusThreadToMCPOutput(thread)
 	out.Owner = in.Owner
@@ -86,25 +86,25 @@ func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpserver.ThreadByNum
 }
 
 // ExplainMatch explains why a search result matched.
-func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchInput) (mcpserver.ExplainMatchOutput, error) {
+func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpcontract.ExplainMatchInput) (mcpcontract.ExplainMatchOutput, error) {
 	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
 	if err := ref.Validate(); err != nil {
-		return mcpserver.ExplainMatchOutput{}, err
+		return mcpcontract.ExplainMatchOutput{}, err
 	}
 
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.ExplainMatchOutput{}, err
+		return mcpcontract.ExplainMatchOutput{}, err
 	}
 	repo, err := c.GetRepository(ctx, in.Owner, in.Repo)
 	if err != nil {
-		return mcpserver.ExplainMatchOutput{}, fmt.Errorf("get repository: %w", err)
+		return mcpcontract.ExplainMatchOutput{}, fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil {
-		return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
+		return mcpcontract.ExplainMatchOutput{}, failure.NotFound(nil)
 	}
 
-	out := mcpserver.ExplainMatchOutput{
+	out := mcpcontract.ExplainMatchOutput{
 		Query: in.Query,
 		Owner: in.Owner,
 		Repo:  in.Repo,
@@ -114,17 +114,17 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 	switch out.Kind {
 	case "", "issue", "pull_request":
 		if in.Number < 1 {
-			return mcpserver.ExplainMatchOutput{}, errors.New("number is required for thread matches")
+			return mcpcontract.ExplainMatchOutput{}, errors.New("number is required for thread matches")
 		}
 		thread, err := c.GetThreadByNumber(ctx, repo.ID, in.Number)
 		if err != nil {
-			return mcpserver.ExplainMatchOutput{}, fmt.Errorf("get thread: %w", err)
+			return mcpcontract.ExplainMatchOutput{}, fmt.Errorf("get thread: %w", err)
 		}
 		if thread == nil {
-			return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
+			return mcpcontract.ExplainMatchOutput{}, failure.NotFound(nil)
 		}
 		if in.Kind != "" && thread.Kind != in.Kind {
-			return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
+			return mcpcontract.ExplainMatchOutput{}, failure.NotFound(nil)
 		}
 		out.Kind = thread.Kind
 		out.Number = thread.Number
@@ -135,10 +135,10 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		if in.Query != "" {
 			evidence, found, err := c.FindThreadSearchEvidence(ctx, thread.ID, in.Query)
 			if err != nil {
-				return mcpserver.ExplainMatchOutput{}, err
+				return mcpcontract.ExplainMatchOutput{}, err
 			}
 			if !found {
-				return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
+				return mcpcontract.ExplainMatchOutput{}, failure.NotFound(nil)
 			}
 			rank := evidence.Rank
 			out.RetrievalRank = &rank
@@ -151,26 +151,26 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 			}
 		}
 		out.SourceRevision = formatTime(sourceRevision)
-		cov, _, err := readCoverageTarget(ctx, c, mcpserver.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
+		cov, _, err := readCoverageTarget(ctx, c, mcpcontract.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
 		if err != nil {
-			return mcpserver.ExplainMatchOutput{}, fmt.Errorf("read repository coverage: %w", err)
+			return mcpcontract.ExplainMatchOutput{}, fmt.Errorf("read repository coverage: %w", err)
 		}
 		out.Facets = cov.Facets
 		out.AsOf = cov.AsOf
 	case "code":
 		if in.Path != "" || in.Commit != "" {
 			if in.Path == "" {
-				return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
+				return mcpcontract.ExplainMatchOutput{}, failure.NotFound(nil)
 			}
 			match, err := c.GetCodeDocument(ctx, ref, in.Path)
 			if err != nil {
-				return mcpserver.ExplainMatchOutput{}, fmt.Errorf("get code document: %w", err)
+				return mcpcontract.ExplainMatchOutput{}, fmt.Errorf("get code document: %w", err)
 			}
 			if match == nil {
-				return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
+				return mcpcontract.ExplainMatchOutput{}, failure.NotFound(nil)
 			}
 			if in.Commit != "" && match.Commit != in.Commit {
-				return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
+				return mcpcontract.ExplainMatchOutput{}, failure.NotFound(nil)
 			}
 			out.Kind = "code"
 			out.Path = match.Path
@@ -181,12 +181,12 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 			out.AsOf = formatTime(match.SnapshotCreatedAt)
 			if in.Query != "" {
 				if evidence, found, err := c.FindCodeSearchEvidence(ctx, match.DocID, in.Query); err != nil {
-					return mcpserver.ExplainMatchOutput{}, err
+					return mcpcontract.ExplainMatchOutput{}, err
 				} else if found {
 					out.RetrievalRank, out.RankingMethod = &evidence.Rank, "fts5_bm25_weighted"
 					out.Snippet = boundedText(evidence.Excerpt, 2000)
 				} else {
-					return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
+					return mcpcontract.ExplainMatchOutput{}, failure.NotFound(nil)
 				}
 			}
 			out.MatchSource = "code_document"
@@ -195,7 +195,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 
 		matches, err := c.SearchCode(ctx, in.Query, ref, in.Limit)
 		if err != nil {
-			return mcpserver.ExplainMatchOutput{}, fmt.Errorf("search code: %w", err)
+			return mcpcontract.ExplainMatchOutput{}, fmt.Errorf("search code: %w", err)
 		}
 		var match *corpus.CodeMatch
 		for i := range matches {
@@ -209,7 +209,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 			match = &matches[0]
 		}
 		if match == nil {
-			return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
+			return mcpcontract.ExplainMatchOutput{}, failure.NotFound(nil)
 		}
 		out.Kind = "code"
 		out.Path = match.Path
@@ -226,23 +226,23 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		out.Title = ref.String()
 		out.Snippet = boundedText(repo.Description, 2000)
 		if evidence, found, err := c.FindRepositorySearchEvidence(ctx, repo.ID, in.Query); err != nil {
-			return mcpserver.ExplainMatchOutput{}, err
+			return mcpcontract.ExplainMatchOutput{}, err
 		} else if found {
 			out.RetrievalRank, out.RankingMethod = &evidence.Rank, "fts5_bm25_weighted"
 			out.Snippet = boundedText(evidence.Excerpt, 2000)
 			out.MatchSource = "repository_metadata"
 		} else if in.Query != "" {
-			return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
+			return mcpcontract.ExplainMatchOutput{}, failure.NotFound(nil)
 		}
 		out.SourceRevision = formatTime(repo.SourceUpdatedAt)
-		cov, _, err := readCoverageTarget(ctx, c, mcpserver.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
+		cov, _, err := readCoverageTarget(ctx, c, mcpcontract.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
 		if err != nil {
-			return mcpserver.ExplainMatchOutput{}, fmt.Errorf("read repository coverage: %w", err)
+			return mcpcontract.ExplainMatchOutput{}, fmt.Errorf("read repository coverage: %w", err)
 		}
 		out.Facets = cov.Facets
 		out.AsOf = cov.AsOf
 	default:
-		return mcpserver.ExplainMatchOutput{}, fmt.Errorf("unsupported match kind %q", in.Kind)
+		return mcpcontract.ExplainMatchOutput{}, fmt.Errorf("unsupported match kind %q", in.Kind)
 	}
 
 	if strings.TrimSpace(in.Query) == "" {
@@ -254,8 +254,8 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 }
 
 // BuildRepositoryDossier submits a durable job that builds a repository dossier.
-func (r *MCPReader) BuildRepositoryDossier(ctx context.Context, in mcpserver.BuildRepositoryDossierInput) (mcpserver.JobReference, error) {
-	repo := cli.RepoRef{Owner: in.Owner, Repo: in.Repo}
+func (r *MCPReader) BuildRepositoryDossier(ctx context.Context, in mcpcontract.BuildRepositoryDossierInput) (mcpcontract.JobReference, error) {
+	repo := contracts.RepoRef{Owner: in.Owner, Repo: in.Repo}
 	id, err := r.submitJob(ctx, "build_repository_dossier", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
 		if err := report("repository_dossier", jobProgressCounts(0, 1)); err != nil {
 			return nil, err
@@ -270,14 +270,14 @@ func (r *MCPReader) BuildRepositoryDossier(ctx context.Context, in mcpserver.Bui
 		return res, nil
 	})
 	if err != nil {
-		return mcpserver.JobReference{}, err
+		return mcpcontract.JobReference{}, err
 	}
 	return queuedJobReference(id, "build_repository_dossier", "dossier build job started"), nil
 }
 
 // CreateWorkspace submits a durable job that clones a remote and creates a worktree.
-func (r *MCPReader) CreateWorkspace(ctx context.Context, in mcpserver.CreateWorkspaceInput) (mcpserver.JobReference, error) {
-	opts := cli.WorkspaceCreateOptions{
+func (r *MCPReader) CreateWorkspace(ctx context.Context, in mcpcontract.CreateWorkspaceInput) (mcpcontract.JobReference, error) {
+	opts := contracts.WorkspaceCreateOptions{
 		Remote:       in.Remote,
 		BaseRef:      in.BaseRef,
 		CandidateRef: in.CandidateRef,
@@ -297,19 +297,19 @@ func (r *MCPReader) CreateWorkspace(ctx context.Context, in mcpserver.CreateWork
 		return res, nil
 	})
 	if err != nil {
-		return mcpserver.JobReference{}, err
+		return mcpcontract.JobReference{}, err
 	}
 	return queuedJobReference(id, "create_workspace", "workspace creation job started"), nil
 }
 
 // AdoptWorkspace records an existing worktree synchronously without exposing
 // its host path or remote URL in the protocol result.
-func (r *MCPReader) AdoptWorkspace(ctx context.Context, in mcpserver.AdoptWorkspaceInput) (mcpserver.AdoptWorkspaceOutput, error) {
-	res, err := r.application().AdoptWorkspace(ctx, in.InvestigationID, cli.WorkspaceAdoptOptions{Path: in.Path, BaseRef: in.BaseRef, Name: in.Name})
+func (r *MCPReader) AdoptWorkspace(ctx context.Context, in mcpcontract.AdoptWorkspaceInput) (mcpcontract.AdoptWorkspaceOutput, error) {
+	res, err := r.application().AdoptWorkspace(ctx, in.InvestigationID, contracts.WorkspaceAdoptOptions{Path: in.Path, BaseRef: in.BaseRef, Name: in.Name})
 	if err != nil {
-		return mcpserver.AdoptWorkspaceOutput{}, err
+		return mcpcontract.AdoptWorkspaceOutput{}, err
 	}
-	return mcpserver.AdoptWorkspaceOutput{
+	return mcpcontract.AdoptWorkspaceOutput{
 		ID: res.ID, InvestigationID: res.InvestigationID, Owner: res.Repo.Owner, Repo: res.Repo.Repo,
 		BaseSHA: res.BaseSHA, CandidateSHA: res.CandidateSHA, MergeBase: res.MergeBase,
 		Dirty: res.Dirty, HasUntracked: res.HasUntracked, Ownership: res.Ownership,
@@ -317,15 +317,15 @@ func (r *MCPReader) AdoptWorkspace(ctx context.Context, in mcpserver.AdoptWorksp
 }
 
 // RunValidation submits a durable validation run.
-func (r *MCPReader) RunValidation(ctx context.Context, in mcpserver.RunValidationInput) (mcpserver.JobReference, error) {
+func (r *MCPReader) RunValidation(ctx context.Context, in mcpcontract.RunValidationInput) (mcpcontract.JobReference, error) {
 	runKind := evidence.RunKind(in.Kind)
 	if runKind != evidence.RunKindBase && runKind != evidence.RunKindCandidate {
-		return mcpserver.JobReference{}, errors.New("kind must be base or candidate")
+		return mcpcontract.JobReference{}, errors.New("kind must be base or candidate")
 	}
 	if !in.Execute {
-		return mcpserver.JobReference{}, errors.New("execute must be true to authorize host command execution")
+		return mcpcontract.JobReference{}, errors.New("execute must be true to authorize host command execution")
 	}
-	opts := cli.RunValidationOptions{Kind: in.Kind, Execute: true}
+	opts := contracts.RunValidationOptions{Kind: in.Kind, Execute: true}
 	id, err := r.submitJob(ctx, "run_validation", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
 		if err := report("validation", jobProgressCounts(0, 1)); err != nil {
 			return nil, err
@@ -340,34 +340,34 @@ func (r *MCPReader) RunValidation(ctx context.Context, in mcpserver.RunValidatio
 		return res, nil
 	})
 	if err != nil {
-		return mcpserver.JobReference{}, err
+		return mcpcontract.JobReference{}, err
 	}
 	return queuedJobReference(id, "run_validation", "validation run started"), nil
 }
 
 // StartInvestigation creates a new investigation workspace.
-func (r *MCPReader) StartInvestigation(ctx context.Context, in mcpserver.StartInvestigationInput) (mcpserver.InvestigationOutput, error) {
+func (r *MCPReader) StartInvestigation(ctx context.Context, in mcpcontract.StartInvestigationInput) (mcpcontract.InvestigationOutput, error) {
 	if in.Number > 0 {
 		res, err := r.StartInvestigationFromThread(ctx, research.ThreadRef{
 			Repo: domain.RepoRef{Owner: in.Owner, Repo: in.Repo}, Kind: domain.ThreadKind(in.Kind), Number: in.Number,
 		})
 		if err != nil {
-			return mcpserver.InvestigationOutput{}, err
+			return mcpcontract.InvestigationOutput{}, err
 		}
 		out := investigationResultToMCP(res.Investigation)
 		out.HypothesisTotal = 1
-		out.Hypotheses = []mcpserver.HypothesisSummary{{ID: res.Hypothesis.ID, Title: res.Hypothesis.Title, Category: res.Hypothesis.Category}}
+		out.Hypotheses = []mcpcontract.HypothesisSummary{{ID: res.Hypothesis.ID, Title: res.Hypothesis.Title, Category: res.Hypothesis.Category}}
 		return out, nil
 	}
-	res, err := r.application().StartInvestigation(ctx, cli.RepoRef{Owner: in.Owner, Repo: in.Repo}, in.CommitSHA, in.Lens)
+	res, err := r.application().StartInvestigation(ctx, contracts.RepoRef{Owner: in.Owner, Repo: in.Repo}, in.CommitSHA, in.Lens)
 	if err != nil {
-		return mcpserver.InvestigationOutput{}, err
+		return mcpcontract.InvestigationOutput{}, err
 	}
 	return investigationResultToMCP(res), nil
 }
 
-func investigationResultToMCP(res *cli.InvestigationResult) mcpserver.InvestigationOutput {
-	return mcpserver.InvestigationOutput{
+func investigationResultToMCP(res *contracts.InvestigationResult) mcpcontract.InvestigationOutput {
+	return mcpcontract.InvestigationOutput{
 		ID:              res.ID,
 		Owner:           res.Repo.Owner,
 		Repo:            res.Repo.Repo,
@@ -381,10 +381,10 @@ func investigationResultToMCP(res *cli.InvestigationResult) mcpserver.Investigat
 }
 
 // RecordHypothesis records a fully structured hypothesis.
-func (r *MCPReader) RecordHypothesis(ctx context.Context, in mcpserver.RecordHypothesisInput) (mcpserver.HypothesisOutput, error) {
+func (r *MCPReader) RecordHypothesis(ctx context.Context, in mcpcontract.RecordHypothesisInput) (mcpcontract.HypothesisOutput, error) {
 	sourceRefs, err := mcpSourceRefsToDomain(in.SourceRefs)
 	if err != nil {
-		return mcpserver.HypothesisOutput{}, err
+		return mcpcontract.HypothesisOutput{}, err
 	}
 	input := investigation.CreateHypothesisInput{
 		Title:              in.Title,
@@ -399,13 +399,13 @@ func (r *MCPReader) RecordHypothesis(ctx context.Context, in mcpserver.RecordHyp
 	}
 	h, err := r.CreateHypothesis(ctx, in.InvestigationID, input)
 	if err != nil {
-		return mcpserver.HypothesisOutput{}, err
+		return mcpcontract.HypothesisOutput{}, err
 	}
 	return hypothesisToMCP(h), nil
 }
 
-func hypothesisToMCP(h *investigation.Hypothesis) mcpserver.HypothesisOutput {
-	return mcpserver.HypothesisOutput{
+func hypothesisToMCP(h *investigation.Hypothesis) mcpcontract.HypothesisOutput {
+	return mcpcontract.HypothesisOutput{
 		ID:                 h.ID,
 		InvestigationID:    h.InvestigationID,
 		Title:              h.Title,
@@ -423,7 +423,7 @@ func hypothesisToMCP(h *investigation.Hypothesis) mcpserver.HypothesisOutput {
 	}
 }
 
-func mcpSourceRefsToDomain(refs []mcpserver.SourceRef) ([]domain.SourceRef, error) {
+func mcpSourceRefsToDomain(refs []mcpcontract.SourceRef) ([]domain.SourceRef, error) {
 	out := make([]domain.SourceRef, len(refs))
 	for i, r := range refs {
 		observedAt, err := parseTime(r.ObservedAt)
@@ -454,8 +454,8 @@ func parseTime(s string) (time.Time, error) {
 }
 
 // CheckDuplicates finds duplicate-candidate threads for a hypothesis or opportunity.
-func (r *MCPReader) CheckDuplicates(ctx context.Context, in mcpserver.CheckDuplicatesInput) (mcpserver.CheckOutput, error) {
-	var result *DuplicateCheckResult
+func (r *MCPReader) CheckDuplicates(ctx context.Context, in mcpcontract.CheckDuplicatesInput) (mcpcontract.CheckOutput, error) {
+	var result *contracts.DuplicateCheckResult
 	var err error
 	switch in.Target {
 	case "hypothesis":
@@ -463,17 +463,17 @@ func (r *MCPReader) CheckDuplicates(ctx context.Context, in mcpserver.CheckDupli
 	case "opportunity":
 		result, err = r.CheckOpportunityDuplicates(ctx, in.ID, in.Limit)
 	default:
-		return mcpserver.CheckOutput{}, fmt.Errorf("unknown target %q", in.Target)
+		return mcpcontract.CheckOutput{}, fmt.Errorf("unknown target %q", in.Target)
 	}
 	if err != nil {
-		return mcpserver.CheckOutput{}, err
+		return mcpcontract.CheckOutput{}, err
 	}
 	return duplicateCheckResultToMCP(in.Target, in.ID, result), nil
 }
 
 // CheckCollisions finds open pull request collisions for a hypothesis or opportunity.
-func (r *MCPReader) CheckCollisions(ctx context.Context, in mcpserver.CheckCollisionsInput) (mcpserver.CheckOutput, error) {
-	var result *CollisionCheckResult
+func (r *MCPReader) CheckCollisions(ctx context.Context, in mcpcontract.CheckCollisionsInput) (mcpcontract.CheckOutput, error) {
+	var result *contracts.CollisionCheckResult
 	var err error
 	switch in.Target {
 	case "hypothesis":
@@ -481,16 +481,16 @@ func (r *MCPReader) CheckCollisions(ctx context.Context, in mcpserver.CheckColli
 	case "opportunity":
 		result, err = r.CheckOpportunityCollisions(ctx, in.ID, in.Limit)
 	default:
-		return mcpserver.CheckOutput{}, fmt.Errorf("unknown target %q", in.Target)
+		return mcpcontract.CheckOutput{}, fmt.Errorf("unknown target %q", in.Target)
 	}
 	if err != nil {
-		return mcpserver.CheckOutput{}, err
+		return mcpcontract.CheckOutput{}, err
 	}
 	return collisionCheckResultToMCP(in.Target, in.ID, result), nil
 }
 
-func duplicateCheckResultToMCP(target, id string, result *DuplicateCheckResult) mcpserver.CheckOutput {
-	return mcpserver.CheckOutput{
+func duplicateCheckResultToMCP(target, id string, result *contracts.DuplicateCheckResult) mcpcontract.CheckOutput {
+	return mcpcontract.CheckOutput{
 		Target:         target,
 		ID:             id,
 		Repo:           result.Repo.String(),
@@ -502,10 +502,10 @@ func duplicateCheckResultToMCP(target, id string, result *DuplicateCheckResult) 
 	}
 }
 
-func collisionCheckResultToMCP(target, id string, result *CollisionCheckResult) mcpserver.CheckOutput {
+func collisionCheckResultToMCP(target, id string, result *contracts.CollisionCheckResult) mcpcontract.CheckOutput {
 	findings := make([]evidence.Evidence, len(result.Findings))
 	copy(findings, result.Findings)
-	return mcpserver.CheckOutput{
+	return mcpcontract.CheckOutput{
 		Target:         target,
 		ID:             id,
 		Repo:           result.Repo.String(),
@@ -517,10 +517,10 @@ func collisionCheckResultToMCP(target, id string, result *CollisionCheckResult) 
 	}
 }
 
-func evidenceToMCPItems(items []evidence.Evidence) []mcpserver.EvidenceItem {
-	out := make([]mcpserver.EvidenceItem, len(items))
+func evidenceToMCPItems(items []evidence.Evidence) []mcpcontract.EvidenceItem {
+	out := make([]mcpcontract.EvidenceItem, len(items))
 	for i, e := range items {
-		out[i] = mcpserver.EvidenceItem{
+		out[i] = mcpcontract.EvidenceItem{
 			ID:          e.ID,
 			Type:        string(e.Type),
 			Relation:    string(e.Relation),
@@ -533,10 +533,10 @@ func evidenceToMCPItems(items []evidence.Evidence) []mcpserver.EvidenceItem {
 }
 
 // PromoteOpportunity promotes a hypothesis to an opportunity.
-func (r *MCPReader) PromoteOpportunity(ctx context.Context, in mcpserver.PromoteOpportunityInput) (mcpserver.OpportunityOutput, error) {
+func (r *MCPReader) PromoteOpportunity(ctx context.Context, in mcpcontract.PromoteOpportunityInput) (mcpcontract.OpportunityOutput, error) {
 	sourceRefs, err := mcpSourceRefsToDomain(in.SourceRefs)
 	if err != nil {
-		return mcpserver.OpportunityOutput{}, err
+		return mcpcontract.OpportunityOutput{}, err
 	}
 	input := investigation.PromoteOpportunityInput{
 		ProblemStatement:    in.ProblemStatement,
@@ -550,14 +550,14 @@ func (r *MCPReader) PromoteOpportunity(ctx context.Context, in mcpserver.Promote
 	}
 	o, err := r.PromoteOpportunityWithInput(ctx, in.HypothesisID, input)
 	if err != nil {
-		return mcpserver.OpportunityOutput{}, err
+		return mcpcontract.OpportunityOutput{}, err
 	}
 	return opportunityToMCP(o), nil
 }
 
-func opportunityToMCP(o *investigation.Opportunity) mcpserver.OpportunityOutput {
+func opportunityToMCP(o *investigation.Opportunity) mcpcontract.OpportunityOutput {
 	evidenceTotal := len(o.EvidenceIDs)
-	return mcpserver.OpportunityOutput{
+	return mcpcontract.OpportunityOutput{
 		ID:                  o.ID,
 		InvestigationID:     o.InvestigationID,
 		HypothesisID:        o.HypothesisID,
@@ -581,12 +581,12 @@ func opportunityToMCP(o *investigation.Opportunity) mcpserver.OpportunityOutput 
 }
 
 // DefineValidation stores a validation definition.
-func (r *MCPReader) DefineValidation(ctx context.Context, in mcpserver.DefineValidationInput) (mcpserver.ValidationOutput, error) {
+func (r *MCPReader) DefineValidation(ctx context.Context, in mcpcontract.DefineValidationInput) (mcpcontract.ValidationOutput, error) {
 	var timeout time.Duration
 	if in.Timeout != "" {
 		d, err := time.ParseDuration(in.Timeout)
 		if err != nil {
-			return mcpserver.ValidationOutput{}, fmt.Errorf("invalid timeout: %w", err)
+			return mcpcontract.ValidationOutput{}, fmt.Errorf("invalid timeout: %w", err)
 		}
 		timeout = d
 	}
@@ -594,11 +594,11 @@ func (r *MCPReader) DefineValidation(ctx context.Context, in mcpserver.DefineVal
 	if in.ReadinessTimeout != "" {
 		d, err := time.ParseDuration(in.ReadinessTimeout)
 		if err != nil {
-			return mcpserver.ValidationOutput{}, fmt.Errorf("invalid readiness timeout: %w", err)
+			return mcpcontract.ValidationOutput{}, fmt.Errorf("invalid readiness timeout: %w", err)
 		}
 		readinessTimeout = d
 	}
-	opts := cli.DefineValidationOptions{
+	opts := contracts.DefineValidationOptions{
 		Kind:                 in.Kind,
 		Command:              in.Command,
 		WorkspaceID:          in.WorkspaceID,
@@ -613,13 +613,13 @@ func (r *MCPReader) DefineValidation(ctx context.Context, in mcpserver.DefineVal
 	}
 	res, err := r.application().DefineValidation(ctx, in.InvestigationID, opts)
 	if err != nil {
-		return mcpserver.ValidationOutput{}, err
+		return mcpcontract.ValidationOutput{}, err
 	}
 	return validationResultToMCP(res), nil
 }
 
-func validationResultToMCP(res *cli.ValidationResult) mcpserver.ValidationOutput {
-	return mcpserver.ValidationOutput{
+func validationResultToMCP(res *contracts.ValidationResult) mcpcontract.ValidationOutput {
+	return mcpcontract.ValidationOutput{
 		ID:                   res.ID,
 		InvestigationID:      res.InvestigationID,
 		Kind:                 res.Kind,
@@ -640,24 +640,24 @@ func validationResultToMCP(res *cli.ValidationResult) mcpserver.ValidationOutput
 	}
 }
 
-func observationContractMCPToCLI(contract *mcpserver.ValidationObservationContract) *cli.ValidationObservationContract {
+func observationContractMCPToCLI(contract *mcpcontract.ValidationObservationContract) *contracts.ValidationObservationContract {
 	if contract == nil {
 		return nil
 	}
-	return &cli.ValidationObservationContract{
+	return &contracts.ValidationObservationContract{
 		Intent:    contract.Intent,
 		Base:      expectedObservationsMCPToCLI(contract.Observations, "base"),
 		Candidate: expectedObservationsMCPToCLI(contract.Observations, "candidate"),
 	}
 }
 
-func expectedObservationsMCPToCLI(items []mcpserver.ValidationExpectedObservation, run string) []cli.ValidationExpectedObservation {
-	out := make([]cli.ValidationExpectedObservation, 0, len(items))
+func expectedObservationsMCPToCLI(items []mcpcontract.ValidationExpectedObservation, run string) []contracts.ValidationExpectedObservation {
+	out := make([]contracts.ValidationExpectedObservation, 0, len(items))
 	for _, item := range items {
 		if item.Run != run {
 			continue
 		}
-		out = append(out, cli.ValidationExpectedObservation{
+		out = append(out, contracts.ValidationExpectedObservation{
 			Name: item.Name, Source: item.Source, Matcher: item.Matcher,
 			Pattern: item.Pattern, Occurrence: item.Occurrence, Path: item.Path,
 		})
@@ -665,20 +665,20 @@ func expectedObservationsMCPToCLI(items []mcpserver.ValidationExpectedObservatio
 	return out
 }
 
-func observationContractCLIToMCP(contract *cli.ValidationObservationContract) *mcpserver.ValidationObservationContract {
+func observationContractCLIToMCP(contract *contracts.ValidationObservationContract) *mcpcontract.ValidationObservationContract {
 	if contract == nil {
 		return nil
 	}
-	return &mcpserver.ValidationObservationContract{
+	return &mcpcontract.ValidationObservationContract{
 		Intent:       contract.Intent,
 		Observations: append(expectedObservationsCLIToMCP(contract.Base, "base"), expectedObservationsCLIToMCP(contract.Candidate, "candidate")...),
 	}
 }
 
-func expectedObservationsCLIToMCP(items []cli.ValidationExpectedObservation, run string) []mcpserver.ValidationExpectedObservation {
-	out := make([]mcpserver.ValidationExpectedObservation, len(items))
+func expectedObservationsCLIToMCP(items []contracts.ValidationExpectedObservation, run string) []mcpcontract.ValidationExpectedObservation {
+	out := make([]mcpcontract.ValidationExpectedObservation, len(items))
 	for i, item := range items {
-		out[i] = mcpserver.ValidationExpectedObservation{
+		out[i] = mcpcontract.ValidationExpectedObservation{
 			Run: run, Name: item.Name, Source: item.Source, Matcher: item.Matcher,
 			Pattern: item.Pattern, Occurrence: item.Occurrence, Path: item.Path,
 		}
@@ -687,18 +687,18 @@ func expectedObservationsCLIToMCP(items []cli.ValidationExpectedObservation, run
 }
 
 // PrepareContribution renders a contribution draft for an opportunity.
-func (r *MCPReader) PrepareContribution(ctx context.Context, in mcpserver.PrepareContributionInput) (mcpserver.DraftOutput, error) {
-	var draft *cli.DraftResult
+func (r *MCPReader) PrepareContribution(ctx context.Context, in mcpcontract.PrepareContributionInput) (mcpcontract.DraftOutput, error) {
+	var draft *contracts.DraftResult
 	var err error
 	switch in.Kind {
 	case "issue":
-		draft, err = r.PrepareIssue(ctx, in.OpportunityID, cli.PrepareIssueOptions{
+		draft, err = r.PrepareIssue(ctx, in.OpportunityID, contracts.PrepareIssueOptions{
 			Guidance:   in.Guidance,
 			Success:    in.Success,
 			ManifestID: in.ManifestID,
 		})
 	case "pull_request":
-		draft, err = r.PreparePullRequest(ctx, in.OpportunityID, cli.PreparePROptions{
+		draft, err = r.PreparePullRequest(ctx, in.OpportunityID, contracts.PreparePROptions{
 			WorkspaceID:   in.WorkspaceID,
 			Approach:      in.Approach,
 			Changes:       in.Changes,
@@ -709,16 +709,16 @@ func (r *MCPReader) PrepareContribution(ctx context.Context, in mcpserver.Prepar
 			ManifestID:    in.ManifestID,
 		})
 	default:
-		return mcpserver.DraftOutput{}, fmt.Errorf("unsupported contribution kind %q", in.Kind)
+		return mcpcontract.DraftOutput{}, fmt.Errorf("unsupported contribution kind %q", in.Kind)
 	}
 	if err != nil {
-		return mcpserver.DraftOutput{}, err
+		return mcpcontract.DraftOutput{}, err
 	}
 	return draftResultToMCP(draft), nil
 }
 
-func draftResultToMCP(d *cli.DraftResult) mcpserver.DraftOutput {
-	return mcpserver.DraftOutput{
+func draftResultToMCP(d *contracts.DraftResult) mcpcontract.DraftOutput {
+	return mcpcontract.DraftOutput{
 		OpportunityID: d.OpportunityID,
 		Kind:          d.Kind,
 		Title:         d.Title,
@@ -729,24 +729,24 @@ func draftResultToMCP(d *cli.DraftResult) mcpserver.DraftOutput {
 }
 
 // ExportManifest assembles a bounded local contribution evidence statement.
-func (r *MCPReader) ExportManifest(ctx context.Context, in mcpserver.ExportManifestInput) (mcpserver.ManifestOutput, error) {
+func (r *MCPReader) ExportManifest(ctx context.Context, in mcpcontract.ExportManifestInput) (mcpcontract.ManifestOutput, error) {
 	opts := ManifestOptions{WorkspaceID: strings.TrimSpace(in.WorkspaceID)}
 	if in.PullRequest != nil {
 		opts.PullRequest = &ManifestPullRequest{Owner: strings.TrimSpace(in.PullRequest.Owner), Repo: strings.TrimSpace(in.PullRequest.Repo), Number: in.PullRequest.Number}
 	}
 	statement, err := r.ContributionManifest(ctx, in.OpportunityID, opts)
 	if err != nil {
-		return mcpserver.ManifestOutput{}, err
+		return mcpcontract.ManifestOutput{}, err
 	}
 	payload, err := json.Marshal(statement)
 	if err != nil {
-		return mcpserver.ManifestOutput{}, err
+		return mcpcontract.ManifestOutput{}, err
 	}
 	var structured map[string]any
 	if err := json.Unmarshal(payload, &structured); err != nil {
-		return mcpserver.ManifestOutput{}, err
+		return mcpcontract.ManifestOutput{}, err
 	}
-	return mcpserver.ManifestOutput{
+	return mcpcontract.ManifestOutput{
 		ManifestID: statement.Predicate.ManifestID, ContentSHA256: statement.Predicate.ContentSHA256,
 		SchemaVersion: statement.Predicate.SchemaVersion, Status: statement.Predicate.Status, Statement: structured,
 	}, nil

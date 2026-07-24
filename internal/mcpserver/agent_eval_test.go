@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // These evaluations deliberately use scripted calls. They measure the MCP
@@ -318,7 +319,7 @@ func TestAgentEvalScriptedCurrentContracts(t *testing.T) {
 	defer closeSessions()
 
 	t.Run("known repository search is one bounded structured call", func(t *testing.T) {
-		result := callAgentEvalTool(t, client, ToolSearchRepositories, map[string]any{
+		result := callAgentEvalTool(t, client, mcpcontract.ToolSearchRepositories, map[string]any{
 			"owner": "acme", "repo": "rocket", "limit": 5,
 		})
 		if result.IsError || result.StructuredContent == nil {
@@ -328,7 +329,7 @@ func TestAgentEvalScriptedCurrentContracts(t *testing.T) {
 
 	t.Run("ambiguous repository identity is rejected visibly", func(t *testing.T) {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
-			Name: ToolSearchRepositories, Arguments: map[string]any{"owner": "acme"},
+			Name: mcpcontract.ToolSearchRepositories, Arguments: map[string]any{"owner": "acme"},
 		})
 		if err == nil && (result == nil || !result.IsError) {
 			t.Fatalf("partial repository identity was accepted: result=%+v err=%v", result, err)
@@ -339,7 +340,7 @@ func TestAgentEvalScriptedCurrentContracts(t *testing.T) {
 	})
 
 	t.Run("raw and structured search modes are rejected", func(t *testing.T) {
-		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: ToolSearchGitHubRepositories, Arguments: map[string]any{"raw_query": "topic:cuda", "language": "Go"}})
+		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: mcpcontract.ToolSearchGitHubRepositories, Arguments: map[string]any{"raw_query": "topic:cuda", "language": "Go"}})
 		if err == nil && (result == nil || !result.IsError) {
 			t.Fatalf("ambiguous search was accepted: result=%+v err=%v", result, err)
 		}
@@ -349,19 +350,19 @@ func TestAgentEvalScriptedCurrentContracts(t *testing.T) {
 	})
 
 	t.Run("durable operation exposes a pollable job", func(t *testing.T) {
-		started := callAgentEvalTool(t, client, ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"})
+		started := callAgentEvalTool(t, client, mcpcontract.ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"})
 		payload, err := json.Marshal(started.StructuredContent)
 		if err != nil {
 			t.Fatal(err)
 		}
-		var job JobReference
+		var job mcpcontract.JobReference
 		if err := json.Unmarshal(payload, &job); err != nil {
 			t.Fatal(err)
 		}
-		if job.ID == "" || job.Ref != "job:"+job.ID || job.Status == "" || job.PollAfterMS < 1 || len(job.SuggestedActions) != 1 || job.SuggestedActions[0].Tool != ToolGetJob {
+		if job.ID == "" || job.Ref != "job:"+job.ID || job.Status == "" || job.PollAfterMS < 1 || len(job.SuggestedActions) != 1 || job.SuggestedActions[0].Tool != mcpcontract.ToolGetJob {
 			t.Fatalf("job reference is not pollable: %+v", job)
 		}
-		polled := callAgentEvalTool(t, client, ToolGetJob, map[string]any{"ids": []string{job.ID}})
+		polled := callAgentEvalTool(t, client, mcpcontract.ToolGetJob, map[string]any{"ids": []string{job.ID}})
 		if polled.IsError || polled.StructuredContent == nil {
 			t.Fatalf("poll result = %+v", polled)
 		}
@@ -428,18 +429,18 @@ func agentEvalString(value any) string {
 	return text
 }
 
-func agentEvalToolError(t *testing.T, result *mcp.CallToolResult) ToolError {
+func agentEvalToolError(t *testing.T, result *mcp.CallToolResult) mcpcontract.ToolError {
 	t.Helper()
 	for _, content := range result.Content {
 		text, ok := content.(*mcp.TextContent)
 		if !ok {
 			continue
 		}
-		var toolError ToolError
+		var toolError mcpcontract.ToolError
 		if json.Unmarshal([]byte(text.Text), &toolError) == nil && toolError.Code != "" {
 			return toolError
 		}
 	}
 	t.Fatalf("tool error content is not a ToolError JSON object: %+v", result.Content)
-	return ToolError{}
+	return mcpcontract.ToolError{}
 }

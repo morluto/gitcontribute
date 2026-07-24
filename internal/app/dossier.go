@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/dossier"
@@ -44,7 +44,7 @@ var rejectionLabels = map[string]struct{}{
 
 // BuildRepositoryDossier builds a deterministic dossier from local corpus data,
 // persists it safely, and returns the result.
-func (s *Service) BuildRepositoryDossier(ctx context.Context, repo cli.RepoRef) (*domain.Dossier, error) {
+func (s *Service) BuildRepositoryDossier(ctx context.Context, repo contracts.RepoRef) (*domain.Dossier, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
@@ -107,7 +107,7 @@ func (s *Service) BuildRepositoryDossier(ctx context.Context, repo cli.RepoRef) 
 }
 
 // GetRepositoryDossier returns the most recently persisted dossier for a repository.
-func (s *Service) GetRepositoryDossier(ctx context.Context, repo cli.RepoRef) (*domain.Dossier, error) {
+func (s *Service) GetRepositoryDossier(ctx context.Context, repo contracts.RepoRef) (*domain.Dossier, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
@@ -152,7 +152,7 @@ func dossierFromRecord(record *corpus.DossierRecord, sources []corpus.DossierSou
 // merged PRs, closed-unmerged PRs, and issues. By default it returns only
 // positive and negative outcome evidence; issue-only context is opt-in. It
 // performs no network access.
-func (s *Service) ExtractSeeds(ctx context.Context, repo cli.RepoRef, opts domain.ExtractSeedsOptions) ([]domain.Seed, error) {
+func (s *Service) ExtractSeeds(ctx context.Context, repo contracts.RepoRef, opts domain.ExtractSeedsOptions) ([]domain.Seed, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err

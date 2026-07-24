@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/morluto/gitcontribute/internal/radar"
+	"github.com/morluto/gitcontribute/internal/research"
 )
 
 // LocalQueryService exposes bounded offline corpus queries.
@@ -140,6 +141,18 @@ type InvestigationResult struct {
 	AuditTrail       []WorkflowAuditResult `json:"audit_trail,omitempty"`
 	CreatedAt        string                `json:"created_at"`
 	UpdatedAt        string                `json:"updated_at"`
+}
+
+// ResearchService exposes deterministic local thread briefs as an optional
+// offline-read capability.
+type ResearchService interface {
+	ThreadResearchBrief(ctx context.Context, ref research.ThreadRef) (*research.Brief, error)
+}
+
+// ThreadInvestigationService starts an investigation and seed hypothesis from
+// one stored thread.
+type ThreadInvestigationService interface {
+	StartInvestigationFromThread(ctx context.Context, ref research.ThreadRef) (*ThreadInvestigationResult, error)
 }
 
 // HypothesisResult is a single hypothesis view.

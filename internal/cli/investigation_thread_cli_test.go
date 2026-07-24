@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/research"
 )
@@ -15,10 +16,10 @@ type threadInvestigationFakeService struct {
 	*fakeService
 	called bool
 	ref    research.ThreadRef
-	result *cli.ThreadInvestigationResult
+	result *contracts.ThreadInvestigationResult
 }
 
-func (f *threadInvestigationFakeService) StartInvestigationFromThread(_ context.Context, ref research.ThreadRef) (*cli.ThreadInvestigationResult, error) {
+func (f *threadInvestigationFakeService) StartInvestigationFromThread(_ context.Context, ref research.ThreadRef) (*contracts.ThreadInvestigationResult, error) {
 	f.called = true
 	f.ref = ref
 	return f.result, f.err
@@ -26,13 +27,13 @@ func (f *threadInvestigationFakeService) StartInvestigationFromThread(_ context.
 
 func TestInvestigationStartThreadParsesTypedRefAndRendersJSON(t *testing.T) {
 	t.Parallel()
-	result := &cli.ThreadInvestigationResult{
+	result := &contracts.ThreadInvestigationResult{
 		Created: true,
-		Investigation: &cli.InvestigationResult{
-			ID: "inv", Repo: cli.RepoRef{Owner: "o", Repo: "r"}, Status: "open",
-			ThreadBaseline: &cli.ThreadBaselineResult{Ref: "pull_request:o/r#7", ObservationID: 11, ObservationSequence: 4},
+		Investigation: &contracts.InvestigationResult{
+			ID: "inv", Repo: contracts.RepoRef{Owner: "o", Repo: "r"}, Status: "open",
+			ThreadBaseline: &contracts.ThreadBaselineResult{Ref: "pull_request:o/r#7", ObservationID: 11, ObservationSequence: 4},
 		},
-		Hypothesis: &cli.HypothesisResult{ID: "hyp", InvestigationID: "inv", Title: "stored title", Category: "other", Status: "proposed"},
+		Hypothesis: &contracts.HypothesisResult{ID: "hyp", InvestigationID: "inv", Title: "stored title", Category: "other", Status: "proposed"},
 	}
 	service := &threadInvestigationFakeService{fakeService: &fakeService{}, result: result}
 	c, stdout, _ := newTestCLI(service, nil)
@@ -40,7 +41,7 @@ func TestInvestigationStartThreadParsesTypedRefAndRendersJSON(t *testing.T) {
 	if !service.called || service.ref.Kind != domain.PullRequestKind || service.ref.Repo.String() != "o/r" || service.ref.Number != 7 {
 		t.Fatalf("start-thread call = called:%t ref:%+v", service.called, service.ref)
 	}
-	var output cli.ThreadInvestigationResult
+	var output contracts.ThreadInvestigationResult
 	if err := json.Unmarshal(stdout.Bytes(), &output); err != nil {
 		t.Fatalf("decode output: %v\n%s", err, stdout.String())
 	}
@@ -72,15 +73,15 @@ func TestInvestigationStartThreadValidatesRefAndCapability(t *testing.T) {
 
 func TestInvestigationStartThreadHumanOutputExplainsReuse(t *testing.T) {
 	t.Parallel()
-	result := &cli.ThreadInvestigationResult{
+	result := &contracts.ThreadInvestigationResult{
 		Created: false,
-		Investigation: &cli.InvestigationResult{
-			ID: "inv", Repo: cli.RepoRef{Owner: "o", Repo: "r"}, Status: "open",
-			ThreadBaseline: &cli.ThreadBaselineResult{
+		Investigation: &contracts.InvestigationResult{
+			ID: "inv", Repo: contracts.RepoRef{Owner: "o", Repo: "r"}, Status: "open",
+			ThreadBaseline: &contracts.ThreadBaselineResult{
 				Ref: "issue:o/r#1", ObservationID: 8, ObservationSequence: 3, SourceUpdatedAt: "2026-07-17T12:00:00Z",
 			},
 		},
-		Hypothesis: &cli.HypothesisResult{ID: "hyp", InvestigationID: "inv", Title: "title", Category: "other", Status: "proposed"},
+		Hypothesis: &contracts.HypothesisResult{ID: "hyp", InvestigationID: "inv", Title: "title", Category: "other", Status: "proposed"},
 	}
 	service := &threadInvestigationFakeService{fakeService: &fakeService{}, result: result}
 	c, stdout, _ := newTestCLI(service, nil)

@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/managedbinary"
 	clientsetup "github.com/morluto/gitcontribute/internal/setup"
@@ -22,7 +22,7 @@ type installDetails struct {
 	npmRoot    string
 }
 
-func (s *Service) validateNewerCorpusTarget(ctx context.Context, report *cli.UpgradeReport, candidate, target string) bool {
+func (s *Service) validateNewerCorpusTarget(ctx context.Context, report *contracts.UpgradeReport, candidate, target string) bool {
 	fail := func(err error) bool {
 		stage := upgradeStage(report, "activation")
 		stage.Status = "target_validation_failed"
@@ -56,7 +56,7 @@ func (s *Service) validateNewerCorpusTarget(ctx context.Context, report *cli.Upg
 	if !corpusExists {
 		return fail(errors.New("configured corpus disappeared during target validation"))
 	}
-	stage := cli.UpgradeStage{
+	stage := contracts.UpgradeStage{
 		Name:    "corpus-schema",
 		Path:    s.databasePath(),
 		Version: strconv.FormatInt(currentSchema, 10),
@@ -89,7 +89,7 @@ func (s *Service) validateNewerCorpusTarget(ctx context.Context, report *cli.Upg
 	}
 }
 
-func (s *Service) activatePrivateRuntime(ctx context.Context, report *cli.UpgradeReport, details installDetails) {
+func (s *Service) activatePrivateRuntime(ctx context.Context, report *contracts.UpgradeReport, details installDetails) {
 	clients := outdatedPrivateRuntimeClients(report)
 	if len(clients) == 0 {
 		return
@@ -137,7 +137,7 @@ func (s *Service) activatePrivateRuntime(ctx context.Context, report *cli.Upgrad
 		case currentSchema < contract.SupportedSchemaVersion:
 			msg := fmt.Sprintf("corpus schema %d is older than target schema %d; migrate the corpus before activating", currentSchema, contract.SupportedSchemaVersion)
 			s.setPrivateActivationFailure(report, len(clients), errors.New(msg))
-			setStage(report, cli.UpgradeStage{
+			setStage(report, contracts.UpgradeStage{
 				Name:    "corpus-schema",
 				Status:  "migration_required",
 				Version: strconv.FormatInt(currentSchema, 10),
@@ -151,7 +151,7 @@ func (s *Service) activatePrivateRuntime(ctx context.Context, report *cli.Upgrad
 		case currentSchema > contract.SupportedSchemaVersion:
 			msg := fmt.Sprintf("corpus schema %d is newer than target schema %d", currentSchema, contract.SupportedSchemaVersion)
 			s.setPrivateActivationFailure(report, len(clients), errors.New(msg))
-			setStage(report, cli.UpgradeStage{
+			setStage(report, contracts.UpgradeStage{
 				Name:    "corpus-schema",
 				Status:  "newer",
 				Version: strconv.FormatInt(currentSchema, 10),
@@ -192,14 +192,14 @@ func (s *Service) activatePrivateRuntime(ctx context.Context, report *cli.Upgrad
 		s.setPrivateActivationFailure(report, len(clients), fmt.Errorf("installed runtime contract disagrees with source candidate: source=%+v destination=%+v", *contract, *destinationContract))
 		return
 	}
-	setStage(report, cli.UpgradeStage{
+	setStage(report, contracts.UpgradeStage{
 		Name: "private-mcp-runtime", Status: "staged", Path: destination,
 		Version: target, Target: target, Message: fmt.Sprintf("private MCP runtime %s is staged; client activation is pending", target),
 	})
 	s.activateConfiguredClients(ctx, report, clients, destination, target)
 }
 
-func (s *Service) activateConfiguredClients(ctx context.Context, report *cli.UpgradeReport, clients []string, destination, target string) {
+func (s *Service) activateConfiguredClients(ctx context.Context, report *contracts.UpgradeReport, clients []string, destination, target string) {
 	setupClients := make([]clientsetup.Client, 0, len(clients))
 	for _, name := range clients {
 		setupClients = append(setupClients, clientsetup.Client(name))
@@ -212,15 +212,15 @@ func (s *Service) activateConfiguredClients(ctx context.Context, report *cli.Upg
 		return
 	}
 
-	setStage(report, cli.UpgradeStage{
+	setStage(report, contracts.UpgradeStage{
 		Name: "private-mcp-runtime", Status: "verified", Path: destination,
 		Version: target, Target: target, Message: fmt.Sprintf("private MCP runtime %s is staged and verified", target),
 	})
-	setStage(report, cli.UpgradeStage{
+	setStage(report, contracts.UpgradeStage{
 		Name: "configured-runtime", Status: "activated",
 		Message: fmt.Sprintf("%d registered client(s) now reference runtime %s", len(clients), target),
 	})
-	setStage(report, cli.UpgradeStage{
+	setStage(report, contracts.UpgradeStage{
 		Name: "activation", Status: "restart_required",
 		Message: "activation is verified; restart the configured clients to replace their running MCP processes",
 	})
@@ -228,16 +228,16 @@ func (s *Service) activateConfiguredClients(ctx context.Context, report *cli.Upg
 	report.Action = "restart the configured clients to activate the verified MCP runtime"
 	report.RestartClients = append([]string(nil), clients...)
 	report.Rollback = "the previous versioned runtime remains installed; rerun setup with that compatible release to reactivate it"
-	setStage(report, cli.UpgradeStage{Name: "rollback", Status: "available", Message: report.Rollback})
+	setStage(report, contracts.UpgradeStage{Name: "rollback", Status: "available", Message: report.Rollback})
 }
 
-func readRuntimeContract(ctx context.Context, path string) (*cli.RuntimeContractResult, error) {
+func readRuntimeContract(ctx context.Context, path string) (*contracts.RuntimeContractResult, error) {
 	out, err := runtimeContractCommand(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("execute %s runtime-contract: %w", path, err)
 	}
 	dec := json.NewDecoder(bytes.NewReader(out))
-	var meta cli.RuntimeContractResult
+	var meta contracts.RuntimeContractResult
 	if err := dec.Decode(&meta); err != nil {
 		return nil, fmt.Errorf("parse runtime contract output: %w", err)
 	}
@@ -254,7 +254,7 @@ func readRuntimeContract(ctx context.Context, path string) (*cli.RuntimeContract
 	return &meta, nil
 }
 
-func (s *Service) verifyPrivateActivation(ctx context.Context, report *cli.UpgradeReport, clients []clientsetup.Client, destination, target string) error {
+func (s *Service) verifyPrivateActivation(ctx context.Context, report *contracts.UpgradeReport, clients []clientsetup.Client, destination, target string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -275,7 +275,7 @@ func (s *Service) verifyPrivateActivation(ctx context.Context, report *cli.Upgra
 	return nil
 }
 
-func (s *Service) setPrivateActivationFailure(report *cli.UpgradeReport, clientCount int, err error) {
+func (s *Service) setPrivateActivationFailure(report *contracts.UpgradeReport, clientCount int, err error) {
 	stage := upgradeStage(report, "activation")
 	var rollbackFailure *clientsetup.ActivationRollbackError
 	if errors.As(err, &rollbackFailure) {
@@ -296,11 +296,11 @@ func (s *Service) setPrivateActivationFailure(report *cli.UpgradeReport, clientC
 	report.RestartClients = nil
 }
 
-func upgradeStage(report *cli.UpgradeReport, name string) cli.UpgradeStage {
+func upgradeStage(report *contracts.UpgradeReport, name string) contracts.UpgradeStage {
 	for _, stage := range report.Stages {
 		if stage.Name == name {
 			return stage
 		}
 	}
-	return cli.UpgradeStage{Name: name}
+	return contracts.UpgradeStage{Name: name}
 }

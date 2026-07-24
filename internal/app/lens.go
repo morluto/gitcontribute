@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/failure"
@@ -17,7 +17,7 @@ import (
 )
 
 // AddLens validates and stores a lens definition.
-func (s *Service) AddLens(ctx context.Context, name string, def lens.Definition) (*cli.LensResult, error) {
+func (s *Service) AddLens(ctx context.Context, name string, def lens.Definition) (*contracts.LensResult, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, errors.New("lens name is required")
@@ -39,7 +39,7 @@ func (s *Service) AddLens(ctx context.Context, name string, def lens.Definition)
 }
 
 // ListLenses returns all saved lenses in stable order.
-func (s *Service) ListLenses(ctx context.Context) (*cli.LensListResult, error) {
+func (s *Service) ListLenses(ctx context.Context) (*contracts.LensListResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -48,8 +48,8 @@ func (s *Service) ListLenses(ctx context.Context) (*cli.LensListResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list lenses: %w", err)
 	}
-	result := &cli.LensListResult{
-		Lenses:    make([]cli.LensResult, len(list.Records)),
+	result := &contracts.LensListResult{
+		Lenses:    make([]contracts.LensResult, len(list.Records)),
 		Total:     list.Total,
 		Truncated: list.Truncated,
 	}
@@ -60,7 +60,7 @@ func (s *Service) ListLenses(ctx context.Context) (*cli.LensListResult, error) {
 }
 
 // ShowLens returns a saved lens by name.
-func (s *Service) ShowLens(ctx context.Context, name string) (*cli.LensResult, error) {
+func (s *Service) ShowLens(ctx context.Context, name string) (*contracts.LensResult, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, errors.New("lens name is required")
@@ -79,8 +79,8 @@ func (s *Service) ShowLens(ctx context.Context, name string) (*cli.LensResult, e
 	return lensResult(record), nil
 }
 
-func lensResult(r *corpus.LensRecord) *cli.LensResult {
-	return &cli.LensResult{
+func lensResult(r *corpus.LensRecord) *contracts.LensResult {
+	return &contracts.LensResult{
 		Name:       r.Definition.Name,
 		Definition: r.Definition,
 		CreatedAt:  formatTime(r.CreatedAt),
@@ -91,7 +91,7 @@ func lensResult(r *corpus.LensRecord) *cli.LensResult {
 // ExplainLens returns the saved definition, candidate facts, normalized signals,
 // weighted contributions, final score, population context, and missing signals
 // for a candidate under a saved lens. It performs no network access.
-func (s *Service) ExplainLens(ctx context.Context, name, ref string, opts cli.LensExplainOptions) (*cli.LensExplainResult, error) {
+func (s *Service) ExplainLens(ctx context.Context, name, ref string, opts contracts.LensExplainOptions) (*contracts.LensExplainResult, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, errors.New("lens name is required")
@@ -126,7 +126,7 @@ func (s *Service) ExplainLens(ctx context.Context, name, ref string, opts cli.Le
 	if kind == "" {
 		kind = inferredKind
 	}
-	matches, err := s.collectLensMatches(ctx, c, query, cli.SearchOptions{
+	matches, err := s.collectLensMatches(ctx, c, query, contracts.SearchOptions{
 		Kind: kind, Repo: opts.Repo, State: opts.State, Author: opts.Author,
 		Association: opts.Association, Assignee: opts.Assignee,
 		Labels: opts.Labels, UpdatedAfter: opts.UpdatedAfter,
@@ -350,21 +350,21 @@ func parseThreadRef(ref string) (domain.RepoRef, int, error) {
 	return repoRef, number, nil
 }
 
-func buildLensExplainResult(record *corpus.LensRecord, found lens.Result, match searchMatch, populationSize int, scope, query string, now time.Time) *cli.LensExplainResult {
-	result := &cli.LensExplainResult{
+func buildLensExplainResult(record *corpus.LensRecord, found lens.Result, match searchMatch, populationSize int, scope, query string, now time.Time) *contracts.LensExplainResult {
+	result := &contracts.LensExplainResult{
 		Lens:            *lensResult(record),
 		Query:           query,
 		PopulationSize:  populationSize,
 		PopulationScope: scope,
 		EvaluatedAt:     now.Format(time.RFC3339),
 		Score:           roundScore(found.Score),
-		Signals:         make([]cli.LensExplainSignal, 0, len(record.Definition.Weights)),
+		Signals:         make([]contracts.LensExplainSignal, 0, len(record.Definition.Weights)),
 		MissingSignals:  []string{},
 	}
 
-	result.Candidate = cli.LensExplainCandidate{
+	result.Candidate = contracts.LensExplainCandidate{
 		Kind:      match.Kind,
-		Repo:      cli.RepoRef{Owner: match.Repo.Owner, Repo: match.Repo.Repo},
+		Repo:      contracts.RepoRef{Owner: match.Repo.Owner, Repo: match.Repo.Repo},
 		Number:    match.Number,
 		Title:     match.Title,
 		State:     match.State,
@@ -379,7 +379,7 @@ func buildLensExplainResult(record *corpus.LensRecord, found lens.Result, match 
 	sort.Strings(names)
 	for _, name := range names {
 		weight := record.Definition.Weights[name]
-		sig := cli.LensExplainSignal{
+		sig := contracts.LensExplainSignal{
 			Name:         name,
 			Weight:       weight,
 			Missing:      true,

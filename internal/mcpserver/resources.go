@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
@@ -75,80 +76,80 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 	}
 }
 
-func (s *Server) readRepositoryResource(ctx context.Context, req resourceRequest) (RepositoryOutput, error) {
+func (s *Server) readRepositoryResource(ctx context.Context, req resourceRequest) (mcpcontract.RepositoryOutput, error) {
 	if len(req.parts) != 2 {
-		return RepositoryOutput{}, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.RepositoryOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
-	return s.reader.Repository(ctx, RepoInput{Owner: req.parts[0], Repo: req.parts[1]})
+	return s.reader.Repository(ctx, mcpcontract.RepoInput{Owner: req.parts[0], Repo: req.parts[1]})
 }
 
-func (s *Server) readDossierResource(ctx context.Context, req resourceRequest) (DossierOutput, error) {
+func (s *Server) readDossierResource(ctx context.Context, req resourceRequest) (mcpcontract.DossierOutput, error) {
 	if len(req.parts) != 2 {
-		return DossierOutput{}, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.DossierOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
-	return s.reader.Dossier(ctx, RepoInput{Owner: req.parts[0], Repo: req.parts[1]})
+	return s.reader.Dossier(ctx, mcpcontract.RepoInput{Owner: req.parts[0], Repo: req.parts[1]})
 }
 
-func (s *Server) readTypedThreadResource(ctx context.Context, req resourceRequest) (ThreadOutput, error) {
+func (s *Server) readTypedThreadResource(ctx context.Context, req resourceRequest) (mcpcontract.ThreadOutput, error) {
 	if len(req.parts) != 4 {
-		return ThreadOutput{}, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.ThreadOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
 	number, ok := positivePathNumber(req.parts[3])
 	if !ok {
-		return ThreadOutput{}, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.ThreadOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
-	return s.reader.Thread(ctx, ThreadInput{
+	return s.reader.Thread(ctx, mcpcontract.ThreadInput{
 		Owner: req.parts[0], Repo: req.parts[1], Kind: req.parts[2], Number: number,
 	})
 }
 
-func (s *Server) readNumberedThreadResource(ctx context.Context, req resourceRequest) (ThreadOutput, error) {
+func (s *Server) readNumberedThreadResource(ctx context.Context, req resourceRequest) (mcpcontract.ThreadOutput, error) {
 	if len(req.parts) != 3 {
-		return ThreadOutput{}, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.ThreadOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
 	number, ok := positivePathNumber(req.parts[2])
 	if !ok {
-		return ThreadOutput{}, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.ThreadOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
-	return s.reader.ThreadByNumber(ctx, ThreadByNumberInput{
+	return s.reader.ThreadByNumber(ctx, mcpcontract.ThreadByNumberInput{
 		Owner: req.parts[0], Repo: req.parts[1], Number: number,
 	})
 }
 
-func (s *Server) readInvestigationResource(ctx context.Context, req resourceRequest) (InvestigationOutput, error) {
+func (s *Server) readInvestigationResource(ctx context.Context, req resourceRequest) (mcpcontract.InvestigationOutput, error) {
 	if len(req.parts) != 1 {
-		return InvestigationOutput{}, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.InvestigationOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
-	return s.reader.Investigation(ctx, InvestigationInput{ID: req.parts[0], HypothesisLimit: 100})
+	return s.reader.Investigation(ctx, mcpcontract.InvestigationInput{ID: req.parts[0], HypothesisLimit: 100})
 }
 
 func (s *Server) readOpportunitiesResource(ctx context.Context, req resourceRequest) (any, error) {
 	if len(req.parts) != 1 {
 		return nil, mcp.ResourceNotFoundError(req.uri)
 	}
-	return s.reader.ListOpportunities(ctx, ListOpportunitiesInput{InvestigationID: req.parts[0], Limit: 100})
+	return s.reader.ListOpportunities(ctx, mcpcontract.ListOpportunitiesInput{InvestigationID: req.parts[0], Limit: 100})
 }
 
-func (s *Server) readOpportunityResource(ctx context.Context, req resourceRequest) (OpportunityOutput, error) {
+func (s *Server) readOpportunityResource(ctx context.Context, req resourceRequest) (mcpcontract.OpportunityOutput, error) {
 	if len(req.parts) != 1 {
-		return OpportunityOutput{}, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.OpportunityOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
-	return s.reader.Opportunity(ctx, OpportunityInput{ID: req.parts[0], EvidenceLimit: 100})
+	return s.reader.Opportunity(ctx, mcpcontract.OpportunityInput{ID: req.parts[0], EvidenceLimit: 100})
 }
 
-func (s *Server) readEvidenceResource(ctx context.Context, req resourceRequest) (EvidenceOutput, error) {
+func (s *Server) readEvidenceResource(ctx context.Context, req resourceRequest) (mcpcontract.EvidenceOutput, error) {
 	in, ok := evidenceResourceInput(req.scheme, req.parts)
 	if !ok {
-		return EvidenceOutput{}, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.EvidenceOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
 	return s.reader.Evidence(ctx, in)
 }
 
-func (s *Server) readReadinessResource(ctx context.Context, req resourceRequest) (ReadinessOutput, error) {
+func (s *Server) readReadinessResource(ctx context.Context, req resourceRequest) (mcpcontract.ReadinessOutput, error) {
 	if len(req.parts) != 1 {
-		return ReadinessOutput{}, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.ReadinessOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
-	return s.reader.Readiness(ctx, ReadinessInput{OpportunityID: req.parts[0]})
+	return s.reader.Readiness(ctx, mcpcontract.ReadinessInput{OpportunityID: req.parts[0]})
 }
 
 func readWorkflowResource(req resourceRequest) (ContributionWorkflowResource, error) {
@@ -158,11 +159,11 @@ func readWorkflowResource(req resourceRequest) (ContributionWorkflowResource, er
 	return contributionWorkflowResource(req.parts[1]), nil
 }
 
-func (s *Server) readLensResource(ctx context.Context, req resourceRequest) (LensOutput, error) {
+func (s *Server) readLensResource(ctx context.Context, req resourceRequest) (mcpcontract.LensOutput, error) {
 	if len(req.parts) != 1 {
-		return LensOutput{}, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.LensOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
-	return s.reader.Lens(ctx, LensInput{Name: req.parts[0]})
+	return s.reader.Lens(ctx, mcpcontract.LensInput{Name: req.parts[0]})
 }
 
 func positivePathNumber(value string) (int, bool) {
@@ -170,10 +171,10 @@ func positivePathNumber(value string) (int, bool) {
 	return number, err == nil && number > 0
 }
 
-func evidenceResourceInput(_ string, parts []string) (EvidenceInput, bool) {
-	var in EvidenceInput
+func evidenceResourceInput(_ string, parts []string) (mcpcontract.EvidenceInput, bool) {
+	var in mcpcontract.EvidenceInput
 	if len(parts) != 2 {
-		return EvidenceInput{}, false
+		return mcpcontract.EvidenceInput{}, false
 	}
 	switch parts[0] {
 	case "investigation":
@@ -181,7 +182,7 @@ func evidenceResourceInput(_ string, parts []string) (EvidenceInput, bool) {
 	case "opportunity":
 		in.OpportunityID = parts[1]
 	default:
-		return EvidenceInput{}, false
+		return mcpcontract.EvidenceInput{}, false
 	}
 	in.Limit = 100
 	return in, true

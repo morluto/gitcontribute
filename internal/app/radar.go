@@ -9,7 +9,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/clusterprojection"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/radar"
@@ -23,13 +23,13 @@ const (
 
 // ContributionRadar ranks a bounded set of locally stored open issues. It is
 // a strict corpus read: it neither resolves a GitHub reader nor writes state.
-func (s *Service) ContributionRadar(ctx context.Context, opts cli.RadarOptions) (*radar.Report, error) {
+func (s *Service) ContributionRadar(ctx context.Context, opts contracts.RadarOptions) (*radar.Report, error) {
 	return s.contributionRadarAt(ctx, opts, s.now())
 }
 
 // contributionRadarAt lets one cross-repository ranking use a single scoring
 // instant while keeping the public CLI service contract small.
-func (s *Service) contributionRadarAt(ctx context.Context, opts cli.RadarOptions, evaluationTime time.Time) (*radar.Report, error) {
+func (s *Service) contributionRadarAt(ctx context.Context, opts contracts.RadarOptions, evaluationTime time.Time) (*radar.Report, error) {
 	ref := domain.RepoRef{Owner: opts.Repo.Owner, Repo: opts.Repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err

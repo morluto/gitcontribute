@@ -8,12 +8,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/investigation"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/research"
 )
 
@@ -108,7 +108,7 @@ func TestStartInvestigationFromPullRequestUsesResolvedKind(t *testing.T) {
 func TestMCPStartInvestigationFromStoredThreadCreatesBaselineHypothesis(t *testing.T) {
 	t.Parallel()
 	fixture := newResearchFixture(t)
-	out, err := (&MCPReader{Service: fixture.svc}).StartInvestigation(fixture.ctx, mcpserver.StartInvestigationInput{
+	out, err := (&MCPReader{Service: fixture.svc}).StartInvestigation(fixture.ctx, mcpcontract.StartInvestigationInput{
 		Owner: "owner", Repo: "repo", Number: 1,
 	})
 	if err != nil {
@@ -174,7 +174,7 @@ func TestGetThreadObservationRevisionSelectsExactProjectionRevision(t *testing.T
 	}
 }
 
-func assertThreadStartResult(t *testing.T, result *cli.ThreadInvestigationResult, thread *corpus.Thread, observation *corpus.ThreadObservation) {
+func assertThreadStartResult(t *testing.T, result *contracts.ThreadInvestigationResult, thread *corpus.Thread, observation *corpus.ThreadObservation) {
 	t.Helper()
 	if !result.Created || result.Investigation.ThreadBaseline.ObservationID != observation.ID ||
 		result.Investigation.ThreadBaseline.ObservationSequence != observation.ObservationSequence ||

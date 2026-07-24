@@ -3,9 +3,11 @@ package cli
 import (
 	"fmt"
 	"strings"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
-func sourceListHuman(r *SourceListResult) string {
+func sourceListHuman(r *contracts.SourceListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d sources", len(r.Sources))
 	if r.Truncated {
@@ -17,7 +19,7 @@ func sourceListHuman(r *SourceListResult) string {
 	return b.String()
 }
 
-func clusterListHuman(r *ClusterListResult) string {
+func clusterListHuman(r *contracts.ClusterListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Clusters for %s: %d found", r.Repo, r.Total)
 	if r.Truncated {
@@ -29,7 +31,7 @@ func clusterListHuman(r *ClusterListResult) string {
 	return b.String()
 }
 
-func lensListHuman(r *LensListResult) string {
+func lensListHuman(r *contracts.LensListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d lenses", len(r.Lenses))
 	if r.Truncated {
@@ -41,7 +43,7 @@ func lensListHuman(r *LensListResult) string {
 	return b.String()
 }
 
-func collectionListHuman(r *CollectionListResult) string {
+func collectionListHuman(r *contracts.CollectionListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%d collections", len(r.Collections))
 	if r.Truncated {

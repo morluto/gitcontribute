@@ -9,7 +9,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/clusterprojection"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/similarity"
@@ -17,7 +17,7 @@ import (
 
 // ListClusters reads the current stored duplicate-candidate projection. It does
 // not compute or write cluster state.
-func (s *Service) ListClusters(ctx context.Context, repo cli.RepoRef, limit int) (*cli.ClusterListResult, error) {
+func (s *Service) ListClusters(ctx context.Context, repo contracts.RepoRef, limit int) (*contracts.ClusterListResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := validateClusterList(ref, limit); err != nil {
 		return nil, err
@@ -35,7 +35,7 @@ func (s *Service) ListClusters(ctx context.Context, repo cli.RepoRef, limit int)
 
 // RefreshClusters explicitly computes and persists the duplicate-candidate
 // projection for a repository.
-func (s *Service) RefreshClusters(ctx context.Context, repo cli.RepoRef) (*cli.ClusterRefreshResult, error) {
+func (s *Service) RefreshClusters(ctx context.Context, repo contracts.RepoRef) (*contracts.ClusterRefreshResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
@@ -88,11 +88,11 @@ func currentProjectionClusterCount(clusters []clustering.Cluster) int {
 	return count
 }
 
-func clusterRefreshToCLI(repo cli.RepoRef, disposition string, identity clusterprojection.Identity, stats clusterprojection.RefreshStats) *cli.ClusterRefreshResult {
-	return &cli.ClusterRefreshResult{
+func clusterRefreshToCLI(repo contracts.RepoRef, disposition string, identity clusterprojection.Identity, stats clusterprojection.RefreshStats) *contracts.ClusterRefreshResult {
+	return &contracts.ClusterRefreshResult{
 		Repo: repo, Disposition: disposition,
-		Projection: cli.ClusterProjectionIdentity{SourceRevision: identity.SourceRevision, GovernanceRevision: identity.GovernanceRevision, RuleVersion: string(identity.RuleVersion), RunID: identity.RunID},
-		Stats:      cli.ClusterRefreshStats{CandidateCount: stats.CandidateCount, RequiredPairs: stats.RequiredPairs, ComparedPairs: stats.ComparedPairs, ClusterCount: stats.ClusterCount, SnapshotQueries: stats.SnapshotQueries, CommitQueries: stats.CommitQueries},
+		Projection: contracts.ClusterProjectionIdentity{SourceRevision: identity.SourceRevision, GovernanceRevision: identity.GovernanceRevision, RuleVersion: string(identity.RuleVersion), RunID: identity.RunID},
+		Stats:      contracts.ClusterRefreshStats{CandidateCount: stats.CandidateCount, RequiredPairs: stats.RequiredPairs, ComparedPairs: stats.ComparedPairs, ClusterCount: stats.ClusterCount, SnapshotQueries: stats.SnapshotQueries, CommitQueries: stats.CommitQueries},
 	}
 }
 
@@ -106,14 +106,14 @@ func validateClusterList(ref domain.RepoRef, limit int) error {
 	return nil
 }
 
-func clusterListToCLI(repo cli.RepoRef, projection clusterprojection.List, limit int) *cli.ClusterListResult {
-	result := &cli.ClusterListResult{
+func clusterListToCLI(repo contracts.RepoRef, projection clusterprojection.List, limit int) *contracts.ClusterListResult {
+	result := &contracts.ClusterListResult{
 		Repo:      repo,
 		Total:     projection.Total,
 		Truncated: projection.Truncated,
 	}
 	if projection.Projection != nil {
-		result.Projection = &cli.ClusterProjectionIdentity{SourceRevision: projection.Projection.SourceRevision, GovernanceRevision: projection.Projection.GovernanceRevision, RuleVersion: string(projection.Projection.RuleVersion), RunID: projection.Projection.RunID}
+		result.Projection = &contracts.ClusterProjectionIdentity{SourceRevision: projection.Projection.SourceRevision, GovernanceRevision: projection.Projection.GovernanceRevision, RuleVersion: string(projection.Projection.RuleVersion), RunID: projection.Projection.RunID}
 	}
 	for i, cl := range projection.Clusters {
 		if i >= limit {
@@ -125,7 +125,7 @@ func clusterListToCLI(repo cli.RepoRef, projection clusterprojection.List, limit
 }
 
 // Cluster returns a single cluster by stable id.
-func (s *Service) Cluster(ctx context.Context, id string, limit int) (*cli.ClusterResult, error) {
+func (s *Service) Cluster(ctx context.Context, id string, limit int) (*contracts.ClusterResult, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return nil, errors.New("cluster id is required")
@@ -151,15 +151,15 @@ func (s *Service) Cluster(ctx context.Context, id string, limit int) (*cli.Clust
 	return clusterToCLI(*cl, limit), nil
 }
 
-func clusterToCLI(cl clustering.Cluster, memberLimit int) *cli.ClusterResult {
-	var members []cli.ClusterMember
+func clusterToCLI(cl clustering.Cluster, memberLimit int) *contracts.ClusterResult {
+	var members []contracts.ClusterMember
 	if memberLimit > 0 {
-		members = make([]cli.ClusterMember, 0, len(cl.Members))
+		members = make([]contracts.ClusterMember, 0, len(cl.Members))
 		for count, m := range cl.Members {
 			if count >= memberLimit {
 				break
 			}
-			members = append(members, cli.ClusterMember{
+			members = append(members, contracts.ClusterMember{
 				Kind:     m.Ref.Kind,
 				Owner:    m.Ref.Owner,
 				Repo:     m.Ref.Repo,
@@ -172,10 +172,10 @@ func clusterToCLI(cl clustering.Cluster, memberLimit int) *cli.ClusterResult {
 			})
 		}
 	}
-	return &cli.ClusterResult{
+	return &contracts.ClusterResult{
 		StableID:    cl.StableID,
 		State:       string(cl.State),
-		Canonical:   cli.ClusterMember{Kind: cl.Canonical.Kind, Owner: cl.Canonical.Owner, Repo: cl.Canonical.Repo, Number: cl.Canonical.Number},
+		Canonical:   contracts.ClusterMember{Kind: cl.Canonical.Kind, Owner: cl.Canonical.Owner, Repo: cl.Canonical.Repo, Number: cl.Canonical.Number},
 		MemberCount: len(cl.Members),
 		Members:     members,
 	}

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 type runtimeContractService struct {
@@ -13,9 +13,9 @@ type runtimeContractService struct {
 	called bool
 }
 
-func (s *runtimeContractService) RuntimeContract(context.Context) (*cli.RuntimeContractResult, error) {
+func (s *runtimeContractService) RuntimeContract(context.Context) (*contracts.RuntimeContractResult, error) {
 	s.called = true
-	return &cli.RuntimeContractResult{Name: "gitcontribute", Version: "1.2.4", SupportedSchemaVersion: 28}, nil
+	return &contracts.RuntimeContractResult{Name: "gitcontribute", Version: "1.2.4", SupportedSchemaVersion: 28}, nil
 }
 
 func TestRuntimeContractCommandIsAlwaysMachineReadable(t *testing.T) {

@@ -9,11 +9,11 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/lens"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 func newSearchTestService(t *testing.T) *Service {
@@ -60,7 +60,7 @@ func TestSearchReturnsNextCursorAndCoverage(t *testing.T) {
 
 	svc.SetClock(func() time.Time { return time.Unix(100, 0).UTC() })
 
-	first, err := svc.Search(ctx, "term", cli.SearchOptions{Kind: "issues", Limit: 2})
+	first, err := svc.Search(ctx, "term", contracts.SearchOptions{Kind: "issues", Limit: 2})
 	if err != nil {
 		t.Fatalf("first page: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestSearchReturnsNextCursorAndCoverage(t *testing.T) {
 		t.Fatal("first page next_cursor is empty")
 	}
 
-	second, err := svc.Search(ctx, "term", cli.SearchOptions{Kind: "issues", Limit: 2, Cursor: first.NextCursor})
+	second, err := svc.Search(ctx, "term", contracts.SearchOptions{Kind: "issues", Limit: 2, Cursor: first.NextCursor})
 	if err != nil {
 		t.Fatalf("second page: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestSearchReturnsNextCursorAndCoverage(t *testing.T) {
 		t.Fatalf("second page total = %d, want 5", second.Total)
 	}
 
-	third, err := svc.Search(ctx, "term", cli.SearchOptions{Kind: "issues", Limit: 2, Cursor: second.NextCursor})
+	third, err := svc.Search(ctx, "term", contracts.SearchOptions{Kind: "issues", Limit: 2, Cursor: second.NextCursor})
 	if err != nil {
 		t.Fatalf("third page: %v", err)
 	}
@@ -105,11 +105,11 @@ func TestSearchReturnsNextCursorAndCoverage(t *testing.T) {
 		}
 	}
 
-	mcpFirst, err := (&MCPReader{Service: svc}).Search(ctx, mcpserver.SearchInput{Query: "term", Kind: "issues", Limit: 2})
+	mcpFirst, err := (&MCPReader{Service: svc}).Search(ctx, mcpcontract.SearchInput{Query: "term", Kind: "issues", Limit: 2})
 	if err != nil || mcpFirst.NextCursor == "" || len(mcpFirst.Matches) != 2 {
 		t.Fatalf("MCP first page = %+v, err=%v", mcpFirst, err)
 	}
-	mcpSecond, err := (&MCPReader{Service: svc}).Search(ctx, mcpserver.SearchInput{Query: "term", Kind: "issues", Limit: 2, Cursor: mcpFirst.NextCursor})
+	mcpSecond, err := (&MCPReader{Service: svc}).Search(ctx, mcpcontract.SearchInput{Query: "term", Kind: "issues", Limit: 2, Cursor: mcpFirst.NextCursor})
 	if err != nil || len(mcpSecond.Matches) != 2 {
 		t.Fatalf("MCP second page = %+v, err=%v", mcpSecond, err)
 	}
@@ -134,7 +134,7 @@ func TestThreadSearchMergesRepositoryAndThreadCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := svc.Search(ctx, "search", cli.SearchOptions{Kind: "issues", Limit: 10})
+	result, err := svc.Search(ctx, "search", contracts.SearchOptions{Kind: "issues", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,18 +158,18 @@ func TestMCPSearchDefaultsCompactAndOffersFullView(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader := &MCPReader{Service: svc}
-	compact, err := reader.Search(ctx, mcpserver.SearchInput{Query: "alpha beta", Kind: "issues"})
+	compact, err := reader.Search(ctx, mcpcontract.SearchInput{Query: "alpha beta", Kind: "issues"})
 	if err != nil || compact.View != "compact" || compact.MatchMode != "all" || compact.QueryInterpretation != "alpha AND beta" || len(compact.Matches) != 1 {
 		t.Fatalf("compact search = (%+v, %v)", compact, err)
 	}
 	if compact.Matches[0].Body != "" {
 		t.Fatalf("compact search leaked body: %+v", compact.Matches[0])
 	}
-	full, err := reader.Search(ctx, mcpserver.SearchInput{Query: "alpha beta", Kind: "issues", View: "full"})
+	full, err := reader.Search(ctx, mcpcontract.SearchInput{Query: "alpha beta", Kind: "issues", View: "full"})
 	if err != nil || len(full.Matches) != 1 || full.Matches[0].Body != "full body detail" {
 		t.Fatalf("full search = (%+v, %v)", full, err)
 	}
-	missing, err := reader.Search(ctx, mcpserver.SearchInput{Query: "alpha missing", Kind: "issues"})
+	missing, err := reader.Search(ctx, mcpcontract.SearchInput{Query: "alpha missing", Kind: "issues"})
 	if err != nil || missing.Suggestion == "" {
 		t.Fatalf("strict zero-match guidance = (%+v, %v)", missing, err)
 	}
@@ -179,7 +179,7 @@ func TestSearchRejectsMalformedCursor(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
-	_, err := svc.Search(ctx, "term", cli.SearchOptions{Kind: "issues", Limit: 10, Cursor: "not-a-cursor"})
+	_, err := svc.Search(ctx, "term", contracts.SearchOptions{Kind: "issues", Limit: 10, Cursor: "not-a-cursor"})
 	if err == nil || !strings.Contains(err.Error(), "invalid cursor") {
 		t.Fatalf("unexpected error = %v", err)
 	}
@@ -189,7 +189,7 @@ func TestSearchRejectsCombinedKindsBecauseRanksAreIncomparable(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
-	_, err := svc.Search(ctx, "term", cli.SearchOptions{Kind: "all", Limit: 10, Cursor: "cursor"})
+	_, err := svc.Search(ctx, "term", contracts.SearchOptions{Kind: "all", Limit: 10, Cursor: "cursor"})
 	if err == nil || !strings.Contains(err.Error(), "FTS ranks from different indexes are not comparable") {
 		t.Fatalf("unexpected error = %v", err)
 	}
@@ -209,7 +209,7 @@ func TestSearchAllDoesNotInventCrossIndexRanking(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc.SetClock(func() time.Time { return time.Unix(100, 0).UTC() })
-	if _, err := svc.Search(ctx, "term", cli.SearchOptions{Kind: "all", Limit: 1}); err == nil {
+	if _, err := svc.Search(ctx, "term", contracts.SearchOptions{Kind: "all", Limit: 1}); err == nil {
 		t.Fatal("combined search unexpectedly invented a cross-index ranking")
 	}
 }
@@ -218,7 +218,7 @@ func TestSearchHardMaxLimit(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
-	_, err := svc.Search(ctx, "term", cli.SearchOptions{Kind: "issues", Limit: 101})
+	_, err := svc.Search(ctx, "term", contracts.SearchOptions{Kind: "issues", Limit: 101})
 	if err == nil || err.Error() != "search limit cannot exceed 100" {
 		t.Fatalf("unexpected error = %v", err)
 	}
@@ -249,7 +249,7 @@ func TestExplainMatchReturnsFactualReasons(t *testing.T) {
 
 	svc.SetClock(func() time.Time { return time.Unix(100, 0).UTC() })
 
-	result, err := svc.Search(ctx, "term", cli.SearchOptions{Kind: "issues", Limit: 10})
+	result, err := svc.Search(ctx, "term", contracts.SearchOptions{Kind: "issues", Limit: 10})
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestSearchDefaultLimitAndMax(t *testing.T) {
 	ctx := context.Background()
 	svc := newSearchTestService(t)
 
-	result, err := svc.Search(ctx, "x", cli.SearchOptions{})
+	result, err := svc.Search(ctx, "x", contracts.SearchOptions{})
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -373,7 +373,7 @@ func TestSearchWithLensRanksAndFiltersThreads(t *testing.T) {
 
 	svc.SetClock(func() time.Time { return time.Unix(100000, 0).UTC() })
 
-	result, err := svc.Search(ctx, "login", cli.SearchOptions{Kind: "issues", Lens: "active-go", Limit: 2})
+	result, err := svc.Search(ctx, "login", contracts.SearchOptions{Kind: "issues", Lens: "active-go", Limit: 2})
 	if err != nil {
 		t.Fatalf("search with lens: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestSearchWithLensDoesNotLeakMatchesForMissingRepository(t *testing.T) {
 		t.Fatalf("save lens: %v", err)
 	}
 
-	result, err := svc.Search(ctx, "login", cli.SearchOptions{
+	result, err := svc.Search(ctx, "login", contracts.SearchOptions{
 		Kind: "issues", Repo: "missing/repo", Lens: "active-go", Limit: 10,
 	})
 	if err != nil {
@@ -438,7 +438,7 @@ func TestExplainLens(t *testing.T) {
 
 	svc.SetClock(func() time.Time { return time.Unix(100000, 0).UTC() })
 
-	ex, err := svc.ExplainLens(ctx, "active-go", "owner/repo#1", cli.LensExplainOptions{Query: "login"})
+	ex, err := svc.ExplainLens(ctx, "active-go", "owner/repo#1", contracts.LensExplainOptions{Query: "login"})
 	if err != nil {
 		t.Fatalf("explain lens: %v", err)
 	}
@@ -469,7 +469,7 @@ func TestExplainLens(t *testing.T) {
 	if !foundMissing {
 		t.Fatalf("expected missing signal to be reported: %+v", ex.Signals)
 	}
-	search, err := svc.Search(ctx, "login", cli.SearchOptions{Kind: "issues", Lens: "active-go", Limit: 10})
+	search, err := svc.Search(ctx, "login", contracts.SearchOptions{Kind: "issues", Lens: "active-go", Limit: 10})
 	if err != nil {
 		t.Fatalf("search with lens: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestSearchAllIsRejectedEvenWithRepositoryScope(t *testing.T) {
 		}
 	}
 
-	if _, err := svc.Search(ctx, "shared term", cli.SearchOptions{Kind: "all", Repo: "owner/one", Limit: 10}); err == nil {
+	if _, err := svc.Search(ctx, "shared term", contracts.SearchOptions{Kind: "all", Repo: "owner/one", Limit: 10}); err == nil {
 		t.Fatal("scoped combined search unexpectedly succeeded")
 	}
 }
@@ -524,7 +524,7 @@ func TestCodeLensUsesSnapshotTimeForFreshnessFilter(t *testing.T) {
 	}
 	svc.SetClock(func() time.Time { return now.Add(time.Minute) })
 
-	result, err := svc.Search(ctx, "freshSearchTerm", cli.SearchOptions{Kind: "code", Repo: ref.String(), Lens: "fresh", Limit: 10})
+	result, err := svc.Search(ctx, "freshSearchTerm", contracts.SearchOptions{Kind: "code", Repo: ref.String(), Lens: "fresh", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

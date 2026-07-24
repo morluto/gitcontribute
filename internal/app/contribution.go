@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/contribution"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/evidence"
@@ -19,7 +19,7 @@ import (
 const maxPreparedDiffBytes = 1 << 20
 
 // PrepareIssue renders and stores an issue draft for an opportunity.
-func (s *Service) PrepareIssue(ctx context.Context, opportunityID string, opts cli.PrepareIssueOptions) (*cli.DraftResult, error) {
+func (s *Service) PrepareIssue(ctx context.Context, opportunityID string, opts contracts.PrepareIssueOptions) (*contracts.DraftResult, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -63,7 +63,7 @@ func (s *Service) PrepareIssue(ctx context.Context, opportunityID string, opts c
 }
 
 // PreparePullRequest renders and stores a pull request draft for an opportunity.
-func (s *Service) PreparePullRequest(ctx context.Context, opportunityID string, opts cli.PreparePROptions) (*cli.DraftResult, error) {
+func (s *Service) PreparePullRequest(ctx context.Context, opportunityID string, opts contracts.PreparePROptions) (*contracts.DraftResult, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -209,44 +209,13 @@ func (s *Service) workspaceDiff(ctx context.Context, workspaceID string, inv *in
 	return mgr.DiffWorkspace(ctx, ws)
 }
 
-// PrepareReviewReportInput scopes a review report to an opportunity and/or workspace.
-type PrepareReviewReportInput struct {
-	OpportunityID string
-	WorkspaceID   string
-}
-
-// EvidenceSummary counts evidence by relation.
-type EvidenceSummary struct {
-	Supporting    int `json:"supporting"`
-	Contradicting int `json:"contradicting"`
-	Inconclusive  int `json:"inconclusive"`
-	Stale         int `json:"stale"`
-	Invalid       int `json:"invalid"`
-	Total         int `json:"total"`
-}
-
-// ReviewReport is a read-only preparation artifact with collision findings,
-// complete diff metadata, and a suggested review order.
-type ReviewReport struct {
-	OpportunityID        string               `json:"opportunity_id,omitempty"`
-	WorkspaceID          string               `json:"workspace_id,omitempty"`
-	Repo                 cli.RepoRef          `json:"repo"`
-	OpportunityStatus    string               `json:"opportunity_status,omitempty"`
-	CollisionStatus      string               `json:"collision_status,omitempty"`
-	CollisionFindings    []evidence.Evidence  `json:"collision_findings"`
-	DiffMetadata         *WorkspaceDiffResult `json:"diff_metadata,omitempty"`
-	EvidenceSummary      EvidenceSummary      `json:"evidence_summary"`
-	SuggestedReviewOrder []ReviewStep         `json:"suggested_review_order"`
-	RenderedAt           time.Time            `json:"rendered_at"`
-}
-
 // PrepareReviewReport assembles a review report for an opportunity and/or workspace.
-func (s *Service) PrepareReviewReport(ctx context.Context, input PrepareReviewReportInput) (*ReviewReport, error) {
+func (s *Service) PrepareReviewReport(ctx context.Context, input contracts.PrepareReviewReportInput) (*contracts.ReviewReport, error) {
 	if input.OpportunityID == "" && input.WorkspaceID == "" {
 		return nil, errors.New("opportunity or workspace is required")
 	}
 
-	report := &ReviewReport{
+	report := &contracts.ReviewReport{
 		OpportunityID: input.OpportunityID,
 		WorkspaceID:   input.WorkspaceID,
 		RenderedAt:    time.Now().UTC(),
@@ -263,7 +232,7 @@ func (s *Service) PrepareReviewReport(ctx context.Context, input PrepareReviewRe
 		}
 		report.OpportunityStatus = string(opp.Status)
 		report.CollisionStatus = string(opp.CollisionStatus)
-		report.Repo = cli.RepoRef{Owner: inv.Repo.Owner, Repo: inv.Repo.Repo}
+		report.Repo = contracts.RepoRef{Owner: inv.Repo.Owner, Repo: inv.Repo.Repo}
 
 		opportunityEvidence, err = s.evidenceForOpportunity(ctx, input.OpportunityID)
 		if err != nil {
@@ -334,8 +303,8 @@ func (s *Service) evidenceForOpportunity(ctx context.Context, opportunityID stri
 	return evSvc.ListEvidence(ctx, evidence.EvidenceFilter{OpportunityID: opportunityID})
 }
 
-func summarizeEvidence(items []*evidence.Evidence) EvidenceSummary {
-	var s EvidenceSummary
+func summarizeEvidence(items []*evidence.Evidence) contracts.EvidenceSummary {
+	var s contracts.EvidenceSummary
 	for _, e := range items {
 		if e == nil {
 			continue
@@ -357,14 +326,14 @@ func summarizeEvidence(items []*evidence.Evidence) EvidenceSummary {
 	return s
 }
 
-func reviewOrderFromEvidence(items []*evidence.Evidence) []ReviewStep {
-	steps := make([]ReviewStep, 0, len(items))
+func reviewOrderFromEvidence(items []*evidence.Evidence) []contracts.ReviewStep {
+	steps := make([]contracts.ReviewStep, 0, len(items))
 	for _, e := range items {
 		if e == nil {
 			continue
 		}
 		priority, rationale := evidenceReviewPriority(e)
-		steps = append(steps, ReviewStep{
+		steps = append(steps, contracts.ReviewStep{
 			Path:      e.Description,
 			Priority:  priority,
 			Rationale: rationale,
@@ -396,8 +365,8 @@ func evidenceReviewPriority(e *evidence.Evidence) (int, string) {
 	}
 }
 
-func draftResult(kind, opportunityID, title, body string, renderedAt time.Time, manifestID string) *cli.DraftResult {
-	return &cli.DraftResult{
+func draftResult(kind, opportunityID, title, body string, renderedAt time.Time, manifestID string) *contracts.DraftResult {
+	return &contracts.DraftResult{
 		OpportunityID: opportunityID,
 		Kind:          kind,
 		Title:         title,

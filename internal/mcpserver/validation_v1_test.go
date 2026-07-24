@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 func TestRepeatedValidationAppliesDocumentedDefaults(t *testing.T) {
@@ -12,7 +13,7 @@ func TestRepeatedValidationAppliesDocumentedDefaults(t *testing.T) {
 	client, closeSessions := connect(t, fake)
 	defer closeSessions()
 	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
-		Name:      ToolRunRepeatedValidation,
+		Name:      mcpcontract.ToolRunRepeatedValidation,
 		Arguments: map[string]any{"id": "val-1", "target": "candidate", "execute": true},
 	})
 	if err != nil || result.IsError {

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 type fakeSetupPrompter struct {
@@ -17,13 +18,13 @@ type fakeSetupPrompter struct {
 	request   cli.SetupPromptRequest
 }
 
-func (f *fakeService) SetupWithProgress(ctx context.Context, opts cli.SetupOptions, _ cli.SetupObserver) (*cli.SetupReport, error) {
+func (f *fakeService) SetupWithProgress(ctx context.Context, opts contracts.SetupOptions, _ contracts.SetupObserver) (*contracts.SetupReport, error) {
 	return f.Setup(ctx, opts)
 }
 
-func (f *fakeService) DiscoverSetup(context.Context) (*cli.SetupDiscovery, error) {
-	return &cli.SetupDiscovery{
-		Clients: []cli.SetupClientDiscovery{
+func (f *fakeService) DiscoverSetup(context.Context) (*contracts.SetupDiscovery, error) {
+	return &contracts.SetupDiscovery{
+		Clients: []contracts.SetupClientDiscovery{
 			{Name: "codex", Path: "/home/test/.codex/config.toml", Detected: true},
 			{Name: "claude", Path: "/home/test/.claude.json", Detected: true},
 		},
@@ -41,7 +42,7 @@ func (p *fakeSetupPrompter) Confirm(context.Context, string) (bool, error) {
 }
 
 func TestRemoveAllNonInteractive(t *testing.T) {
-	svc := &fakeService{setupResult: &cli.SetupReport{Operation: "remove", Steps: []cli.SetupStep{{Name: "codex", Status: "removed"}}}}
+	svc := &fakeService{setupResult: &contracts.SetupReport{Operation: "remove", Steps: []contracts.SetupStep{{Name: "codex", Status: "removed"}}}}
 	c := cli.New(svc, &fakeMCPRunner{}, io.Discard, io.Discard)
 	if err := c.Run(context.Background(), []string{"remove", "--all-clients", "--yes"}); err != nil {
 		t.Fatal(err)
@@ -53,15 +54,15 @@ func TestRemoveAllNonInteractive(t *testing.T) {
 
 func TestSetupWizardCanInstallTerminalWithoutMCP(t *testing.T) {
 	t.Setenv("npm_command", "exec")
-	svc := &fakeService{setupResult: &cli.SetupReport{Operation: "setup", Steps: []cli.SetupStep{{Name: "cli", Status: "installed"}}}}
+	svc := &fakeService{setupResult: &contracts.SetupReport{Operation: "setup", Steps: []contracts.SetupStep{{Name: "cli", Status: "installed"}}}}
 	c, _, _ := newTestCLI(svc, nil)
-	prompter := &fakeSetupPrompter{selection: cli.SetupSelection{Mode: cli.SetupModeCLI, TokenSource: "none"}, confirmed: true}
+	prompter := &fakeSetupPrompter{selection: cli.SetupSelection{Mode: contracts.SetupModeCLI, TokenSource: "none"}, confirmed: true}
 	c.SetSetupPrompter(prompter)
 
 	if err := c.Run(context.Background(), []string{"setup"}); err != nil {
 		t.Fatal(err)
 	}
-	if svc.lastSetup.Mode != cli.SetupModeCLI || len(svc.lastSetup.Clients) != 0 {
+	if svc.lastSetup.Mode != contracts.SetupModeCLI || len(svc.lastSetup.Clients) != 0 {
 		t.Fatalf("options = %+v", svc.lastSetup)
 	}
 	if len(prompter.request.Questions) != 3 {
@@ -71,17 +72,17 @@ func TestSetupWizardCanInstallTerminalWithoutMCP(t *testing.T) {
 
 func TestSetupWizardPreviewsPlanBeforeConfirmation(t *testing.T) {
 	t.Setenv("npm_command", "exec")
-	svc := &fakeService{setupResult: &cli.SetupReport{
+	svc := &fakeService{setupResult: &contracts.SetupReport{
 		Operation: "setup",
 		DryRun:    true,
-		Steps: []cli.SetupStep{{
+		Steps: []contracts.SetupStep{{
 			Name: "cli", Status: "would install",
 			Message: "npm install --global gitcontribute@0.1.1",
 		}},
 	}}
 	c, stdout, stderr := newTestCLI(svc, nil)
 	prompter := &fakeSetupPrompter{
-		selection: cli.SetupSelection{Mode: cli.SetupModeBoth, Clients: []string{"codex"}, TokenSource: "none"},
+		selection: cli.SetupSelection{Mode: contracts.SetupModeBoth, Clients: []string{"codex"}, TokenSource: "none"},
 		confirmed: false,
 	}
 	c.SetSetupPrompter(prompter)
@@ -89,7 +90,7 @@ func TestSetupWizardPreviewsPlanBeforeConfirmation(t *testing.T) {
 	if err := c.Run(context.Background(), []string{"setup"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(svc.setupCalls) != 1 || !svc.setupCalls[0].DryRun || svc.setupCalls[0].Mode != cli.SetupModeBoth {
+	if len(svc.setupCalls) != 1 || !svc.setupCalls[0].DryRun || svc.setupCalls[0].Mode != contracts.SetupModeBoth {
 		t.Fatalf("setup calls = %+v", svc.setupCalls)
 	}
 	if !containsAll(stdout.String(), "Setup plan", "npm install --global gitcontribute@0.1.1", "will not contact GitHub") {
@@ -101,11 +102,11 @@ func TestSetupWizardPreviewsPlanBeforeConfirmation(t *testing.T) {
 }
 
 func TestSetupDryRunHumanOutputRemainsAPlan(t *testing.T) {
-	svc := &fakeService{setupResult: &cli.SetupReport{
+	svc := &fakeService{setupResult: &contracts.SetupReport{
 		Operation:  "setup",
 		DryRun:     true,
-		MCPCommand: &cli.SetupMCPCommand{Command: "/home/test/.local/share/gitcontribute/bin/0.1.1/gitcontribute", Args: []string{"mcp", "serve", "--transport=stdio"}},
-		Steps:      []cli.SetupStep{{Name: "codex", Status: "would configure"}},
+		MCPCommand: &contracts.SetupMCPCommand{Command: "/home/test/.local/share/gitcontribute/bin/0.1.1/gitcontribute", Args: []string{"mcp", "serve", "--transport=stdio"}},
+		Steps:      []contracts.SetupStep{{Name: "codex", Status: "would configure"}},
 	}}
 	var out bytes.Buffer
 	c := cli.New(svc, &fakeMCPRunner{}, &out, io.Discard)
@@ -145,12 +146,12 @@ func TestSetupYesRequiresExplicitAuthenticationChoice(t *testing.T) {
 }
 
 func TestSetupYesAcceptsExplicitCLIMode(t *testing.T) {
-	svc := &fakeService{setupResult: &cli.SetupReport{Operation: "setup", Steps: []cli.SetupStep{{Name: "cli", Status: "installed"}}}}
+	svc := &fakeService{setupResult: &contracts.SetupReport{Operation: "setup", Steps: []contracts.SetupStep{{Name: "cli", Status: "installed"}}}}
 	c, _, _ := newTestCLI(svc, nil)
 	if err := c.Run(context.Background(), []string{"setup", "--mode", "cli", "--token-source", "none", "--yes"}); err != nil {
 		t.Fatal(err)
 	}
-	if svc.lastSetup.Mode != cli.SetupModeCLI || len(svc.lastSetup.Clients) != 0 {
+	if svc.lastSetup.Mode != contracts.SetupModeCLI || len(svc.lastSetup.Clients) != 0 {
 		t.Fatalf("options = %+v", svc.lastSetup)
 	}
 }
@@ -192,9 +193,9 @@ func TestSetupJSONDryRunRequiresExplicitMode(t *testing.T) {
 }
 
 func TestSetupYesAcceptsExplicitMCPModes(t *testing.T) {
-	for _, mode := range []cli.SetupMode{cli.SetupModeMCP, cli.SetupModeBoth} {
+	for _, mode := range []contracts.SetupMode{contracts.SetupModeMCP, contracts.SetupModeBoth} {
 		t.Run(string(mode), func(t *testing.T) {
-			svc := &fakeService{setupResult: &cli.SetupReport{Operation: "setup", Steps: []cli.SetupStep{{Name: "codex", Status: "configured"}}}}
+			svc := &fakeService{setupResult: &contracts.SetupReport{Operation: "setup", Steps: []contracts.SetupStep{{Name: "codex", Status: "configured"}}}}
 			c, _, _ := newTestCLI(svc, nil)
 			err := c.Run(context.Background(), []string{"setup", "--mode", string(mode), "--codex", "--token-source", "none", "--yes"})
 			if err != nil {

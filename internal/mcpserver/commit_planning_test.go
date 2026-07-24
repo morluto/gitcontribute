@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 func TestSemanticCommitToolsAreReadOnlyAndSequenced(t *testing.T) {
@@ -17,14 +18,14 @@ func TestSemanticCommitToolsAreReadOnlyAndSequenced(t *testing.T) {
 		}
 		tools[tool.Name] = tool
 	}
-	for _, name := range []string{ToolInspectCommitChanges, ToolPlanSemanticCommits} {
+	for _, name := range []string{mcpcontract.ToolInspectCommitChanges, mcpcontract.ToolPlanSemanticCommits} {
 		tool := tools[name]
 		if tool == nil || tool.Annotations == nil || !tool.Annotations.ReadOnlyHint {
 			t.Fatalf("tool %q is missing or not read-only: %+v", name, tool)
 		}
 	}
-	assertSchemaValue(t, tools[ToolPlanSemanticCommits].InputSchema, []string{"properties", "groups", "maxItems"}, float64(100))
-	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: ToolInspectCommitChanges, Arguments: map[string]any{"workspace_id": "ws-1"}})
+	assertSchemaValue(t, tools[mcpcontract.ToolPlanSemanticCommits].InputSchema, []string{"properties", "groups", "maxItems"}, float64(100))
+	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: mcpcontract.ToolInspectCommitChanges, Arguments: map[string]any{"workspace_id": "ws-1"}})
 	if err != nil || result.IsError || result.StructuredContent == nil {
 		t.Fatalf("inspect commit changes: err=%v result=%+v", err, result)
 	}

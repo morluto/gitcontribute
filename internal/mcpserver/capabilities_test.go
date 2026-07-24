@@ -8,78 +8,78 @@ import (
 
 type fakeOptionalCapabilities struct {
 	base             *fakeReader
-	syncThreadsInput SyncThreadsInput
+	syncThreadsInput mcpcontract.SyncThreadsInput
 }
 
-func (*fakeOptionalCapabilities) FindNeighbors(context.Context, FindNeighborsInput) (FindNeighborsOutput, error) {
-	return FindNeighborsOutput{}, nil
+func (*fakeOptionalCapabilities) FindNeighbors(context.Context, mcpcontract.FindNeighborsInput) (mcpcontract.FindNeighborsOutput, error) {
+	return mcpcontract.FindNeighborsOutput{}, nil
 }
-func (*fakeOptionalCapabilities) GetRepositories(context.Context, GetRepositoriesInput) (GetRepositoriesOutput, error) {
-	return GetRepositoriesOutput{Status: "complete"}, nil
+func (*fakeOptionalCapabilities) GetRepositories(context.Context, mcpcontract.GetRepositoriesInput) (mcpcontract.GetRepositoriesOutput, error) {
+	return mcpcontract.GetRepositoriesOutput{Status: "complete"}, nil
 }
-func (*fakeOptionalCapabilities) GetThreads(context.Context, GetThreadsInput) (GetThreadsOutput, error) {
-	return GetThreadsOutput{Status: "complete"}, nil
+func (*fakeOptionalCapabilities) GetThreads(context.Context, mcpcontract.GetThreadsInput) (mcpcontract.GetThreadsOutput, error) {
+	return mcpcontract.GetThreadsOutput{Status: "complete"}, nil
 }
-func (*fakeOptionalCapabilities) RankOpportunities(context.Context, RankOpportunitiesInput) (RankOpportunitiesOutput, error) {
-	return RankOpportunitiesOutput{Status: "complete"}, nil
+func (*fakeOptionalCapabilities) RankOpportunities(context.Context, mcpcontract.RankOpportunitiesInput) (mcpcontract.RankOpportunitiesOutput, error) {
+	return mcpcontract.RankOpportunitiesOutput{Status: "complete"}, nil
 }
-func (*fakeOptionalCapabilities) FindPrecedents(context.Context, FindPrecedentsInput) (FindPrecedentsOutput, error) {
-	return FindPrecedentsOutput{Status: "complete"}, nil
+func (*fakeOptionalCapabilities) FindPrecedents(context.Context, mcpcontract.FindPrecedentsInput) (mcpcontract.FindPrecedentsOutput, error) {
+	return mcpcontract.FindPrecedentsOutput{Status: "complete"}, nil
 }
-func (f *fakeOptionalCapabilities) GetJobs(ctx context.Context, in GetJobsInput) (GetJobsOutput, error) {
-	items := make([]mcpcontract.BatchItem[GetJobOutput], len(in.IDs))
+func (f *fakeOptionalCapabilities) GetJobs(ctx context.Context, in mcpcontract.GetJobsInput) (mcpcontract.GetJobsOutput, error) {
+	items := make([]mcpcontract.BatchItem[mcpcontract.GetJobOutput], len(in.IDs))
 	for i, id := range in.IDs {
-		job, err := f.base.GetJob(ctx, GetJobInput{ID: id})
+		job, err := f.base.GetJob(ctx, mcpcontract.GetJobInput{ID: id})
 		if err != nil {
-			return GetJobsOutput{}, err
+			return mcpcontract.GetJobsOutput{}, err
 		}
-		items[i] = mcpcontract.BatchItem[GetJobOutput]{Key: id, Status: "complete", Value: &job}
+		items[i] = mcpcontract.BatchItem[mcpcontract.GetJobOutput]{Key: id, Status: "complete", Value: &job}
 	}
-	return GetJobsOutput{Status: "complete", Items: items}, nil
+	return mcpcontract.GetJobsOutput{Status: "complete", Items: items}, nil
 }
-func (*fakeOptionalCapabilities) ListPullRequestPortfolio(context.Context, ListPullRequestPortfolioInput) (ListPullRequestPortfolioOutput, error) {
-	return ListPullRequestPortfolioOutput{Status: "complete"}, nil
+func (*fakeOptionalCapabilities) ListPullRequestPortfolio(context.Context, mcpcontract.ListPullRequestPortfolioInput) (mcpcontract.ListPullRequestPortfolioOutput, error) {
+	return mcpcontract.ListPullRequestPortfolioOutput{Status: "complete"}, nil
 }
-func (*fakeOptionalCapabilities) FindPortfolioOverlaps(context.Context, FindPortfolioOverlapsInput) (FindPortfolioOverlapsOutput, error) {
-	return FindPortfolioOverlapsOutput{Status: "complete"}, nil
+func (*fakeOptionalCapabilities) FindPortfolioOverlaps(context.Context, mcpcontract.FindPortfolioOverlapsInput) (mcpcontract.FindPortfolioOverlapsOutput, error) {
+	return mcpcontract.FindPortfolioOverlapsOutput{Status: "complete"}, nil
 }
-func (f *fakeOptionalCapabilities) SearchGitHubRepositories(ctx context.Context, in SearchGitHubRepositoriesInput) (SearchGitHubRepositoriesOutput, error) {
+func (f *fakeOptionalCapabilities) SearchGitHubRepositories(ctx context.Context, in mcpcontract.SearchGitHubRepositoriesInput) (mcpcontract.SearchGitHubRepositoriesOutput, error) {
 	return f.base.SearchGitHubRepositories(ctx, in)
 }
-func (*fakeOptionalCapabilities) SyncRepositoryMetadata(context.Context, SyncRepositoryMetadataInput) (JobReference, error) {
-	return JobReference{ID: "job-metadata", Status: "queued"}, nil
+func (*fakeOptionalCapabilities) SyncRepositoryMetadata(context.Context, mcpcontract.SyncRepositoryMetadataInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-metadata", Status: "queued"}, nil
 }
-func (f *fakeOptionalCapabilities) SyncThreads(_ context.Context, in SyncThreadsInput) (JobReference, error) {
+func (f *fakeOptionalCapabilities) SyncThreads(_ context.Context, in mcpcontract.SyncThreadsInput) (mcpcontract.JobReference, error) {
 	f.syncThreadsInput = in
-	return JobReference{ID: "job-threads", Status: "queued"}, nil
+	return mcpcontract.JobReference{ID: "job-threads", Status: "queued"}, nil
 }
-func (*fakeOptionalCapabilities) HydrateThreads(context.Context, HydrateThreadsInput) (JobReference, error) {
-	return JobReference{ID: "job-hydrate", Status: "queued"}, nil
+func (*fakeOptionalCapabilities) HydrateThreads(context.Context, mcpcontract.HydrateThreadsInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-hydrate", Status: "queued"}, nil
 }
-func (*fakeOptionalCapabilities) GetAuthenticatedIdentity(context.Context) (AuthenticatedIdentityOutput, error) {
-	return AuthenticatedIdentityOutput{Login: "alice"}, nil
+func (*fakeOptionalCapabilities) GetAuthenticatedIdentity(context.Context) (mcpcontract.AuthenticatedIdentityOutput, error) {
+	return mcpcontract.AuthenticatedIdentityOutput{Login: "alice"}, nil
 }
-func (*fakeOptionalCapabilities) SyncAuthoredPullRequests(context.Context, SyncAuthoredPullRequestsInput) (JobReference, error) {
-	return JobReference{ID: "job-authored", Status: "queued"}, nil
+func (*fakeOptionalCapabilities) SyncAuthoredPullRequests(context.Context, mcpcontract.SyncAuthoredPullRequestsInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-authored", Status: "queued"}, nil
 }
-func (*fakeOptionalCapabilities) SyncPullRequestStatus(context.Context, SyncPullRequestStatusInput) (JobReference, error) {
-	return JobReference{ID: "job-status", Status: "queued"}, nil
+func (*fakeOptionalCapabilities) SyncPullRequestStatus(context.Context, mcpcontract.SyncPullRequestStatusInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-status", Status: "queued"}, nil
 }
-func (*fakeOptionalCapabilities) IndexRepositories(context.Context, IndexRepositoriesInput) (JobReference, error) {
-	return JobReference{ID: "job-index", Status: "queued"}, nil
+func (*fakeOptionalCapabilities) IndexRepositories(context.Context, mcpcontract.IndexRepositoriesInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-index", Status: "queued"}, nil
 }
-func (*fakeOptionalCapabilities) CheckMergeConflicts(context.Context, CheckMergeConflictsInput) (CheckMergeConflictsOutput, error) {
-	return CheckMergeConflictsOutput{Status: "complete"}, nil
+func (*fakeOptionalCapabilities) CheckMergeConflicts(context.Context, mcpcontract.CheckMergeConflictsInput) (mcpcontract.CheckMergeConflictsOutput, error) {
+	return mcpcontract.CheckMergeConflictsOutput{Status: "complete"}, nil
 }
-func (*fakeOptionalCapabilities) DeepWiki(context.Context, DeepWikiInput) (DeepWikiOutput, error) {
-	return DeepWikiOutput{Status: "complete"}, nil
+func (*fakeOptionalCapabilities) DeepWiki(context.Context, mcpcontract.DeepWikiInput) (mcpcontract.DeepWikiOutput, error) {
+	return mcpcontract.DeepWikiOutput{Status: "complete"}, nil
 }
-func (*fakeOptionalCapabilities) LinkPullRequest(context.Context, LinkPullRequestInput) (LinkPullRequestOutput, error) {
-	return LinkPullRequestOutput{}, nil
+func (*fakeOptionalCapabilities) LinkPullRequest(context.Context, mcpcontract.LinkPullRequestInput) (mcpcontract.LinkPullRequestOutput, error) {
+	return mcpcontract.LinkPullRequestOutput{}, nil
 }
 
 type completeTestReader struct {
-	Reader
+	mcpcontract.Reader
 	NeighborReader
 	ScalableReader
 	PortfolioReader
@@ -96,7 +96,7 @@ type completeTestReader struct {
 	WorkspaceAdopter
 }
 
-func completeFakeReader(base *fakeReader) Reader {
+func completeFakeReader(base *fakeReader) mcpcontract.Reader {
 	optional := &fakeOptionalCapabilities{base: base}
 	return completeTestReader{
 		Reader: base, NeighborReader: optional, ScalableReader: optional,

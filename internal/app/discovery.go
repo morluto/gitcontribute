@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/discovery"
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -42,7 +42,7 @@ func validateSourceName(name string) error {
 
 // AddSearchSource stores a named GitHub repository-search source without
 // executing it.
-func (s *Service) AddSearchSource(ctx context.Context, name, query string) (*cli.SourceResult, error) {
+func (s *Service) AddSearchSource(ctx context.Context, name, query string) (*contracts.SourceResult, error) {
 	name = strings.TrimSpace(name)
 	query = strings.TrimSpace(query)
 	if err := validateSourceName(name); err != nil {
@@ -69,7 +69,7 @@ func (s *Service) AddSearchSource(ctx context.Context, name, query string) (*cli
 }
 
 // AddRepoSource stores a named, explicit set of repositories without fetching them.
-func (s *Service) AddRepoSource(ctx context.Context, name string, refs []cli.RepoRef) (*cli.SourceResult, error) {
+func (s *Service) AddRepoSource(ctx context.Context, name string, refs []contracts.RepoRef) (*contracts.SourceResult, error) {
 	name = strings.TrimSpace(name)
 	if err := validateSourceName(name); err != nil {
 		return nil, err
@@ -103,7 +103,7 @@ func (s *Service) AddRepoSource(ctx context.Context, name string, refs []cli.Rep
 }
 
 // AddGHArchiveSource stores a named GH Archive event filter without fetching data.
-func (s *Service) AddGHArchiveSource(ctx context.Context, name string, events []string) (*cli.SourceResult, error) {
+func (s *Service) AddGHArchiveSource(ctx context.Context, name string, events []string) (*contracts.SourceResult, error) {
 	name = strings.TrimSpace(name)
 	if err := validateSourceName(name); err != nil {
 		return nil, err
@@ -131,7 +131,7 @@ func (s *Service) AddGHArchiveSource(ctx context.Context, name string, events []
 }
 
 // ShowSource returns one saved discovery source from the local corpus.
-func (s *Service) ShowSource(ctx context.Context, name string) (*cli.SourceResult, error) {
+func (s *Service) ShowSource(ctx context.Context, name string) (*contracts.SourceResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -147,7 +147,7 @@ func (s *Service) ShowSource(ctx context.Context, name string) (*cli.SourceResul
 }
 
 // ListSources returns all saved discovery sources from the local corpus.
-func (s *Service) ListSources(ctx context.Context) (*cli.SourceListResult, error) {
+func (s *Service) ListSources(ctx context.Context) (*contracts.SourceListResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -156,8 +156,8 @@ func (s *Service) ListSources(ctx context.Context) (*cli.SourceListResult, error
 	if err != nil {
 		return nil, err
 	}
-	result := &cli.SourceListResult{
-		Sources:   make([]cli.SourceResult, len(list.Sources)),
+	result := &contracts.SourceListResult{
+		Sources:   make([]contracts.SourceResult, len(list.Sources)),
 		Total:     list.Total,
 		Truncated: list.Truncated,
 	}
@@ -167,15 +167,15 @@ func (s *Service) ListSources(ctx context.Context) (*cli.SourceListResult, error
 	return result, nil
 }
 
-func sourceResult(source *corpus.DiscoverySource) *cli.SourceResult {
-	return &cli.SourceResult{
+func sourceResult(source *corpus.DiscoverySource) *contracts.SourceResult {
+	return &contracts.SourceResult{
 		Name: source.Name, Kind: source.Kind, Definition: source.Definition, Enabled: source.Enabled,
 	}
 }
 
 // Crawl performs one explicit, bounded read for a saved discovery source and
 // persists its checkpoint only after the bounded operation succeeds.
-func (s *Service) Crawl(ctx context.Context, name string, opts cli.CrawlOptions) (*cli.CrawlResult, error) {
+func (s *Service) Crawl(ctx context.Context, name string, opts contracts.CrawlOptions) (*contracts.CrawlResult, error) {
 	if opts.Since <= 0 || opts.Budget <= 0 || opts.Budget > 5000 {
 		return nil, errors.New("invalid crawl since or budget")
 	}
@@ -205,13 +205,13 @@ func (s *Service) Crawl(ctx context.Context, name string, opts cli.CrawlOptions)
 // TailSource repeatedly advances a named source until cancellation. Each
 // iteration is an ordinary idempotent crawl and therefore retains its own run
 // record, checkpoint, request budget, and failure state.
-func (s *Service) TailSource(ctx context.Context, name string, opts cli.TailOptions) (*cli.TailResult, error) {
+func (s *Service) TailSource(ctx context.Context, name string, opts contracts.TailOptions) (*contracts.TailResult, error) {
 	if opts.Since <= 0 || opts.Budget <= 0 || opts.Budget > 5000 || opts.Interval <= 0 {
 		return nil, errors.New("invalid tail since, budget, or interval")
 	}
-	result := &cli.TailResult{Source: name}
+	result := &contracts.TailResult{Source: name}
 	for {
-		last, err := s.Crawl(ctx, name, cli.CrawlOptions{Since: opts.Since, Budget: opts.Budget})
+		last, err := s.Crawl(ctx, name, contracts.CrawlOptions{Since: opts.Since, Budget: opts.Budget})
 		if err != nil {
 			return nil, err
 		}
@@ -232,7 +232,7 @@ func (s *Service) TailSource(ctx context.Context, name string, opts cli.TailOpti
 	}
 }
 
-func (s *Service) crawlSearchSource(ctx context.Context, c *corpus.Corpus, source *corpus.DiscoverySource, opts cli.CrawlOptions) (_ *cli.CrawlResult, resultErr error) {
+func (s *Service) crawlSearchSource(ctx context.Context, c *corpus.Corpus, source *corpus.DiscoverySource, opts contracts.CrawlOptions) (_ *contracts.CrawlResult, resultErr error) {
 	var definition searchSourceDefinition
 	if err := json.Unmarshal([]byte(source.Definition), &definition); err != nil {
 		return nil, fmt.Errorf("decode source %q: %w", source.Name, err)
@@ -331,13 +331,13 @@ func (s *Service) crawlSearchSource(ctx context.Context, c *corpus.Corpus, sourc
 	if err := c.FinishRun(ctx, run.ID, string(stats)); err != nil {
 		return nil, err
 	}
-	return &cli.CrawlResult{
+	return &contracts.CrawlResult{
 		Source: source.Name, Windows: len(windows), Repositories: discovered,
 		Requests: budgeted.used, Checkpoint: now.Format(time.RFC3339),
 	}, nil
 }
 
-func (s *Service) crawlRepoSource(ctx context.Context, c *corpus.Corpus, source *corpus.DiscoverySource, opts cli.CrawlOptions) (_ *cli.CrawlResult, resultErr error) {
+func (s *Service) crawlRepoSource(ctx context.Context, c *corpus.Corpus, source *corpus.DiscoverySource, opts contracts.CrawlOptions) (_ *contracts.CrawlResult, resultErr error) {
 	var definition repoSourceDefinition
 	if err := json.Unmarshal([]byte(source.Definition), &definition); err != nil {
 		return nil, fmt.Errorf("decode source %q: %w", source.Name, err)
@@ -396,7 +396,7 @@ func (s *Service) crawlRepoSource(ctx context.Context, c *corpus.Corpus, source 
 	if err := c.FinishRun(ctx, run.ID, string(stats)); err != nil {
 		return nil, err
 	}
-	return &cli.CrawlResult{
+	return &contracts.CrawlResult{
 		Source: source.Name, Repositories: processed,
 		Requests: 0, Checkpoint: now.Format(time.RFC3339),
 	}, nil
@@ -407,7 +407,7 @@ type repoSourceObservation struct {
 	Ref    domain.RepoRef `json:"ref"`
 }
 
-func (s *Service) crawlGHArchiveSource(ctx context.Context, c *corpus.Corpus, source *corpus.DiscoverySource, opts cli.CrawlOptions) (_ *cli.CrawlResult, resultErr error) {
+func (s *Service) crawlGHArchiveSource(ctx context.Context, c *corpus.Corpus, source *corpus.DiscoverySource, opts contracts.CrawlOptions) (_ *contracts.CrawlResult, resultErr error) {
 	var definition ghArchiveSourceDefinition
 	if err := json.Unmarshal([]byte(source.Definition), &definition); err != nil {
 		return nil, fmt.Errorf("decode source %q: %w", source.Name, err)
@@ -521,7 +521,7 @@ func (s *Service) crawlGHArchiveSource(ctx context.Context, c *corpus.Corpus, so
 	if !stats.checkpoint.IsZero() {
 		checkpoint = stats.checkpoint.Format(time.RFC3339)
 	}
-	return &cli.CrawlResult{
+	return &contracts.CrawlResult{
 		Source:       source.Name,
 		Windows:      stats.hours(),
 		Repositories: stats.repositories,

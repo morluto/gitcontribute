@@ -3,9 +3,11 @@ package cli
 import (
 	"fmt"
 	"strings"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
-func evidenceHuman(r *EvidenceResult) string {
+func evidenceHuman(r *contracts.EvidenceResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Evidence for investigation %s:\n", r.InvestigationID)
 	if len(r.Evidence) == 0 {

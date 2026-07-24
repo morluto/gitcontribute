@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/research"
 )
 
@@ -12,18 +13,12 @@ type startThreadInvestigationCmd struct {
 	JSON   bool   `name:"json" help:"Print the result as JSON"`
 }
 
-// ThreadInvestigationService is the optional local-write capability for
-// starting an investigation and seed hypothesis from one stored thread.
-type ThreadInvestigationService interface {
-	StartInvestigationFromThread(ctx context.Context, ref research.ThreadRef) (*ThreadInvestigationResult, error)
-}
-
 func (c *CLI) runStartThreadInvestigation(ctx context.Context, cmd *startThreadInvestigationCmd) error {
 	ref, err := research.ParseThreadRef(cmd.Thread)
 	if err != nil {
 		return NewCLIError(ExitUsage, err)
 	}
-	service, ok := c.svc.(ThreadInvestigationService)
+	service, ok := c.svc.(contracts.ThreadInvestigationService)
 	if !ok {
 		return NewCLIError(ExitNotWired, ErrNotWired)
 	}

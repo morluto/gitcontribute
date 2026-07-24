@@ -8,7 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/morluto/gitcontribute/internal/concern"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/failure"
@@ -32,7 +32,7 @@ func (s *Service) readConcernService(ctx context.Context) (*concern.Service, err
 }
 
 // CreateConcern records one local concern without external access.
-func (s *Service) CreateConcern(ctx context.Context, opts cli.ConcernCreateOptions) (*cli.ConcernResult, error) {
+func (s *Service) CreateConcern(ctx context.Context, opts contracts.ConcernCreateOptions) (*contracts.ConcernResult, error) {
 	return s.createConcern(ctx, &concern.Concern{
 		Repo: domain.RepoRef{Owner: opts.Repo.Owner, Repo: opts.Repo.Repo}, CommitSHA: opts.CommitSHA, WorkspaceID: opts.WorkspaceID,
 		Title: opts.Title, ProblemStatement: opts.ProblemStatement, SuspectedOwner: opts.SuspectedOwner,
@@ -41,7 +41,7 @@ func (s *Service) CreateConcern(ctx context.Context, opts cli.ConcernCreateOptio
 	})
 }
 
-func (s *Service) createConcern(ctx context.Context, input *concern.Concern) (*cli.ConcernResult, error) {
+func (s *Service) createConcern(ctx context.Context, input *concern.Concern) (*contracts.ConcernResult, error) {
 	svc, err := s.writeConcernService(ctx)
 	if err != nil {
 		return nil, err
@@ -54,7 +54,7 @@ func (s *Service) createConcern(ctx context.Context, input *concern.Concern) (*c
 }
 
 // ListConcerns performs a bounded offline concern list or search.
-func (s *Service) ListConcerns(ctx context.Context, opts cli.ConcernListOptions) (*cli.ConcernListResult, error) {
+func (s *Service) ListConcerns(ctx context.Context, opts contracts.ConcernListOptions) (*contracts.ConcernListResult, error) {
 	svc, err := s.readConcernService(ctx)
 	if err != nil {
 		return nil, err
@@ -65,8 +65,8 @@ func (s *Service) ListConcerns(ctx context.Context, opts cli.ConcernListOptions)
 	if err != nil {
 		return nil, mapConcernError(err)
 	}
-	result := &cli.ConcernListResult{
-		Concerns:  make([]cli.ConcernResult, 0, len(page.Concerns)),
+	result := &contracts.ConcernListResult{
+		Concerns:  make([]contracts.ConcernResult, 0, len(page.Concerns)),
 		Limit:     page.Limit,
 		Total:     page.Total,
 		Truncated: page.Total > len(page.Concerns),
@@ -82,7 +82,7 @@ func (s *Service) ListConcerns(ctx context.Context, opts cli.ConcernListOptions)
 }
 
 // ShowConcern returns one local concern with derived freshness.
-func (s *Service) ShowConcern(ctx context.Context, id string) (*cli.ConcernResult, error) {
+func (s *Service) ShowConcern(ctx context.Context, id string) (*contracts.ConcernResult, error) {
 	svc, err := s.readConcernService(ctx)
 	if err != nil {
 		return nil, err
@@ -95,7 +95,7 @@ func (s *Service) ShowConcern(ctx context.Context, id string) (*cli.ConcernResul
 }
 
 // UpdateConcern changes editable concern content without changing status.
-func (s *Service) UpdateConcern(ctx context.Context, id string, opts cli.ConcernUpdateOptions) (*cli.ConcernResult, error) {
+func (s *Service) UpdateConcern(ctx context.Context, id string, opts contracts.ConcernUpdateOptions) (*contracts.ConcernResult, error) {
 	svc, err := s.writeConcernService(ctx)
 	if err != nil {
 		return nil, err
@@ -136,7 +136,7 @@ func (s *Service) UpdateConcern(ctx context.Context, id string, opts cli.Concern
 }
 
 // SetConcernStatus applies one validated non-promotion transition.
-func (s *Service) SetConcernStatus(ctx context.Context, id, status, rationale string) (*cli.ConcernResult, error) {
+func (s *Service) SetConcernStatus(ctx context.Context, id, status, rationale string) (*contracts.ConcernResult, error) {
 	svc, err := s.writeConcernService(ctx)
 	if err != nil {
 		return nil, err
@@ -149,7 +149,7 @@ func (s *Service) SetConcernStatus(ctx context.Context, id, status, rationale st
 }
 
 // LinkConcern attaches one explicit typed relationship.
-func (s *Service) LinkConcern(ctx context.Context, id string, opts cli.ConcernLinkOptions) (*cli.ConcernResult, error) {
+func (s *Service) LinkConcern(ctx context.Context, id string, opts contracts.ConcernLinkOptions) (*contracts.ConcernResult, error) {
 	svc, err := s.writeConcernService(ctx)
 	if err != nil {
 		return nil, err
@@ -161,7 +161,7 @@ func (s *Service) LinkConcern(ctx context.Context, id string, opts cli.ConcernLi
 }
 
 // PromoteConcern atomically creates downstream investigation workflow records.
-func (s *Service) PromoteConcern(ctx context.Context, id string, opts cli.ConcernPromoteOptions) (*cli.ConcernResult, error) {
+func (s *Service) PromoteConcern(ctx context.Context, id string, opts contracts.ConcernPromoteOptions) (*contracts.ConcernResult, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -211,7 +211,7 @@ func (s *Service) PromoteConcern(ctx context.Context, id string, opts cli.Concer
 	return s.concernResult(ctx, item)
 }
 
-func (s *Service) concernResult(ctx context.Context, item *concern.Concern) (*cli.ConcernResult, error) {
+func (s *Service) concernResult(ctx context.Context, item *concern.Concern) (*contracts.ConcernResult, error) {
 	freshness := evidence.Freshness{Status: evidence.FreshnessUnknown, Reason: "concern has no recorded corpus source revision"}
 	if len(item.SourceProvenance) > 0 {
 		c, err := s.openReadOnlyCorpus(ctx)
@@ -223,18 +223,18 @@ func (s *Service) concernResult(ctx context.Context, item *concern.Concern) (*cl
 			return nil, err
 		}
 	}
-	result := &cli.ConcernResult{
-		ID: item.ID, Repo: cli.RepoRef{Owner: item.Repo.Owner, Repo: item.Repo.Repo}, CommitSHA: item.CommitSHA, WorkspaceID: item.WorkspaceID,
+	result := &contracts.ConcernResult{
+		ID: item.ID, Repo: contracts.RepoRef{Owner: item.Repo.Owner, Repo: item.Repo.Repo}, CommitSHA: item.CommitSHA, WorkspaceID: item.WorkspaceID,
 		Title: item.Title, ProblemStatement: item.ProblemStatement, SuspectedOwner: item.SuspectedOwner, Confidence: item.Confidence,
 		Unknowns: append([]string(nil), item.Unknowns...), SuccessCriterion: item.SuccessCriterion, Notes: item.Notes,
 		EvidenceIDs: append([]string(nil), item.EvidenceIDs...), SourceRefCount: len(item.SourceRefs), Freshness: string(freshness.Status),
 		FreshnessReason: freshness.Reason, Status: string(item.Status), CreatedAt: formatTime(item.CreatedAt), UpdatedAt: formatTime(item.UpdatedAt),
 	}
 	for _, link := range item.Links {
-		result.Links = append(result.Links, cli.ConcernLinkResult{Kind: string(link.Kind), TargetType: link.TargetType, TargetID: link.TargetID, Note: link.Note})
+		result.Links = append(result.Links, contracts.ConcernLinkResult{Kind: string(link.Kind), TargetType: link.TargetType, TargetID: link.TargetID, Note: link.Note})
 	}
 	if item.Promotion != nil {
-		result.Promotion = &cli.ConcernPromotionResult{Kind: item.Promotion.Kind, InvestigationID: item.Promotion.InvestigationID, HypothesisID: item.Promotion.HypothesisID, OpportunityID: item.Promotion.OpportunityID}
+		result.Promotion = &contracts.ConcernPromotionResult{Kind: item.Promotion.Kind, InvestigationID: item.Promotion.InvestigationID, HypothesisID: item.Promotion.HypothesisID, OpportunityID: item.Promotion.OpportunityID}
 	}
 	return result, nil
 }

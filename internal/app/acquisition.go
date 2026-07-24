@@ -9,14 +9,14 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/acquire"
 	"github.com/morluto/gitcontribute/internal/codeindex"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 // Acquire clones or fetches a repository into the managed cache, records the
 // resolved remote URL/default branch/commit SHA/acquired time, and indexes the
 // clean checkout into the corpus. It does not execute repository code.
-func (s *Service) Acquire(ctx context.Context, repo cli.RepoRef, remote string) (result *cli.AcquisitionResult, returnErr error) {
+func (s *Service) Acquire(ctx context.Context, repo contracts.RepoRef, remote string) (result *contracts.AcquisitionResult, returnErr error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
@@ -67,7 +67,7 @@ func (s *Service) Acquire(ctx context.Context, repo cli.RepoRef, remote string) 
 		message = "acquired; snapshot already indexed"
 	}
 
-	return &cli.AcquisitionResult{
+	return &contracts.AcquisitionResult{
 		Repo:          repo,
 		Remote:        acq.Remote,
 		DefaultBranch: acq.DefaultBranch,

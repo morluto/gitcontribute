@@ -3,9 +3,11 @@ package cli
 import (
 	"fmt"
 	"strings"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
-func validationHuman(r *ValidationResult) string {
+func validationHuman(r *contracts.ValidationResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Validation: %s (kind=%s, investigation=%s)\n", r.ID, r.Kind, r.InvestigationID)
 	fmt.Fprintf(&b, "Command: %s\n", strings.Join(r.Command, " "))
@@ -33,7 +35,7 @@ func validationHuman(r *ValidationResult) string {
 	return b.String()
 }
 
-func validationRunHuman(r *ValidationRunResult) string {
+func validationRunHuman(r *contracts.ValidationRunResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Validation run: %s (kind=%s, classification=%s, exit=%d)\n", r.ID, r.Kind, r.Classification, r.ExitCode)
 	if r.ObservationStatus != "" {
@@ -65,7 +67,7 @@ func validationRunHuman(r *ValidationRunResult) string {
 	return b.String()
 }
 
-func validationRunGroupHuman(group *ValidationRunGroupResult) string {
+func validationRunGroupHuman(group *contracts.ValidationRunGroupResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Validation group %s: %s (%d/%d runs)\n", group.ID, group.Classification, group.CompletedRuns, group.RequestedRuns)
 	for _, aggregate := range group.Aggregates {
@@ -79,7 +81,7 @@ func validationRunGroupHuman(group *ValidationRunGroupResult) string {
 	return b.String()
 }
 
-func validationComparisonHuman(r *ValidationComparisonResult) string {
+func validationComparisonHuman(r *contracts.ValidationComparisonResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Comparison: %s\n", r.Classification)
 	fmt.Fprintf(&b, "Explanation: %s\n", r.Explanation)

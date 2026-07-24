@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/concern"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 )
@@ -16,8 +16,8 @@ func TestConcernWorkflowRemainsLocalAndPromotes(t *testing.T) {
 	ctx := context.Background()
 	svc := newLocalService(t)
 	defer func() { _ = svc.Close() }()
-	created, err := svc.CreateConcern(ctx, cli.ConcernCreateOptions{
-		Repo: cli.RepoRef{Owner: "owner", Repo: "repo"}, CommitSHA: "abc",
+	created, err := svc.CreateConcern(ctx, contracts.ConcernCreateOptions{
+		Repo: contracts.RepoRef{Owner: "owner", Repo: "repo"}, CommitSHA: "abc",
 		Title: "flaky MCP test", ProblemStatement: "fails intermittently", Confidence: 0.4,
 		EvidenceIDs: []string{"evidence-1"}, Unknowns: []string{"scheduler timing"},
 		Notes: "private scratch note",
@@ -29,17 +29,17 @@ func TestConcernWorkflowRemainsLocalAndPromotes(t *testing.T) {
 		t.Fatalf("unexpected created concern: %+v", created)
 	}
 	empty := ""
-	updated, err := svc.UpdateConcern(ctx, created.ID, cli.ConcernUpdateOptions{Notes: &empty})
+	updated, err := svc.UpdateConcern(ctx, created.ID, contracts.ConcernUpdateOptions{Notes: &empty})
 	if err != nil || updated.Notes != "" {
 		t.Fatalf("clear concern notes: result=%+v err=%v", updated, err)
 	}
-	if _, err := svc.LinkConcern(ctx, created.ID, cli.ConcernLinkOptions{Kind: "duplicate_candidate", TargetType: "thread", TargetID: "owner/repo:issue#7"}); err != nil {
+	if _, err := svc.LinkConcern(ctx, created.ID, contracts.ConcernLinkOptions{Kind: "duplicate_candidate", TargetType: "thread", TargetID: "owner/repo:issue#7"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.SetConcernStatus(ctx, created.ID, "accepted", "worth investigation"); err != nil {
 		t.Fatal(err)
 	}
-	promoted, err := svc.PromoteConcern(ctx, created.ID, cli.ConcernPromoteOptions{
+	promoted, err := svc.PromoteConcern(ctx, created.ID, contracts.ConcernPromoteOptions{
 		Kind: "opportunity", Category: "testing", Scope: "MCP transport tests", Impact: "flaky CI", ExpectedEffort: "small",
 	})
 	if err != nil {
@@ -59,7 +59,7 @@ func TestConcernWorkflowRemainsLocalAndPromotes(t *testing.T) {
 	if len(opportunity.EvidenceIDs) != 1 || opportunity.EvidenceIDs[0] != "evidence-1" {
 		t.Fatalf("promotion lost evidence IDs: %+v", opportunity)
 	}
-	listed, err := svc.ListConcerns(ctx, cli.ConcernListOptions{Repo: created.Repo, Query: "scheduler", Limit: 10})
+	listed, err := svc.ListConcerns(ctx, contracts.ConcernListOptions{Repo: created.Repo, Query: "scheduler", Limit: 10})
 	if err != nil || listed.Total != 1 || listed.Truncated || listed.Limit != 10 || len(listed.Concerns) != 1 || len(listed.Concerns[0].Links) != 3 {
 		t.Fatalf("search promoted concern: result=%+v err=%v", listed, err)
 	}
@@ -71,15 +71,15 @@ func TestConcernListReportsMatchingPopulation(t *testing.T) {
 	svc := newLocalService(t)
 	defer func() { _ = svc.Close() }()
 	for _, title := range []string{"scheduler one", "scheduler two", "scheduler three"} {
-		if _, err := svc.CreateConcern(ctx, cli.ConcernCreateOptions{
-			Repo: cli.RepoRef{Owner: "owner", Repo: "repo"}, CommitSHA: "abc", Title: title, ProblemStatement: "bounded list",
+		if _, err := svc.CreateConcern(ctx, contracts.ConcernCreateOptions{
+			Repo: contracts.RepoRef{Owner: "owner", Repo: "repo"}, CommitSHA: "abc", Title: title, ProblemStatement: "bounded list",
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	listed, err := svc.ListConcerns(ctx, cli.ConcernListOptions{
-		Repo: cli.RepoRef{Owner: "owner", Repo: "repo"}, Query: "scheduler", Limit: 2,
+	listed, err := svc.ListConcerns(ctx, contracts.ConcernListOptions{
+		Repo: contracts.RepoRef{Owner: "owner", Repo: "repo"}, Query: "scheduler", Limit: 2,
 	})
 
 	if err != nil {

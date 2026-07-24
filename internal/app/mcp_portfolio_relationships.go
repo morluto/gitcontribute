@@ -8,47 +8,47 @@ import (
 	"strings"
 
 	"github.com/morluto/gitcontribute/internal/corpus"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // FindPortfolioOverlaps is a pure corpus read over complete normalized signal
 // snapshots. It preserves candidate order and never treats absent coverage as
 // proof that no overlap exists.
-func (r *MCPReader) FindPortfolioOverlaps(ctx context.Context, in mcpserver.FindPortfolioOverlapsInput) (mcpserver.FindPortfolioOverlapsOutput, error) {
+func (r *MCPReader) FindPortfolioOverlaps(ctx context.Context, in mcpcontract.FindPortfolioOverlapsInput) (mcpcontract.FindPortfolioOverlapsOutput, error) {
 	if len(in.Candidates) < 1 || len(in.Candidates) > 50 {
-		return mcpserver.FindPortfolioOverlapsOutput{}, errors.New("candidates must contain 1 to 50 items")
+		return mcpcontract.FindPortfolioOverlapsOutput{}, errors.New("candidates must contain 1 to 50 items")
 	}
 	if len(in.PullRequests) < 1 || len(in.PullRequests) > 100 {
-		return mcpserver.FindPortfolioOverlapsOutput{}, errors.New("pull_requests must contain 1 to 100 items")
+		return mcpcontract.FindPortfolioOverlapsOutput{}, errors.New("pull_requests must contain 1 to 100 items")
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return mcpserver.FindPortfolioOverlapsOutput{}, err
+		return mcpcontract.FindPortfolioOverlapsOutput{}, err
 	}
-	out := mcpserver.FindPortfolioOverlapsOutput{Status: "complete", Items: make([]mcpserver.BatchItem[mcpserver.PortfolioOverlapOutput], len(in.Candidates))}
+	out := mcpcontract.FindPortfolioOverlapsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.PortfolioOverlapOutput], len(in.Candidates))}
 	candidates, candidateIndexes := collectPortfolioCandidates(in.Candidates, &out)
 	prIDs, missingPullRequests, err := resolvePortfolioPullRequests(ctx, c, in.PullRequests)
 	if err != nil {
-		return mcpserver.FindPortfolioOverlapsOutput{}, err
+		return mcpcontract.FindPortfolioOverlapsOutput{}, err
 	}
 	if len(candidates) == 0 {
 		return out, nil
 	}
 	if len(prIDs) == 0 {
 		for _, index := range candidateIndexes {
-			out.Items[index] = mcpserver.BatchItem[mcpserver.PortfolioOverlapOutput]{Key: in.Candidates[index].Kind + ":" + in.Candidates[index].Ref, Status: "unavailable", Reason: "pull_requests_not_stored", Message: "none of the requested pull requests are available in the local corpus", NextAction: "Sync the exact authored pull requests, then retry this comparison."}
+			out.Items[index] = mcpcontract.BatchItem[mcpcontract.PortfolioOverlapOutput]{Key: in.Candidates[index].Kind + ":" + in.Candidates[index].Ref, Status: "unavailable", Reason: "pull_requests_not_stored", Message: "none of the requested pull requests are available in the local corpus", NextAction: "Sync the exact authored pull requests, then retry this comparison."}
 		}
 		out.Status = "partial"
 		return out, nil
 	}
 	results, err := c.FindPortfolioOverlaps(ctx, candidates, prIDs)
 	if err != nil {
-		return mcpserver.FindPortfolioOverlapsOutput{}, err
+		return mcpcontract.FindPortfolioOverlapsOutput{}, err
 	}
 	for resultIndex, result := range results {
 		i := candidateIndexes[resultIndex]
 		value := portfolioOverlapOutput(result)
-		batch := mcpserver.BatchItem[mcpserver.PortfolioOverlapOutput]{Key: result.Candidate.Kind + ":" + result.Candidate.Ref, Status: "complete", Value: &value}
+		batch := mcpcontract.BatchItem[mcpcontract.PortfolioOverlapOutput]{Key: result.Candidate.Kind + ":" + result.Candidate.Ref, Status: "complete", Value: &value}
 		if missingPullRequests {
 			out.Status = "partial"
 			batch.Status, batch.Reason, batch.NextAction = "retryable", "comparison_set_incomplete", "Sync the missing pull requests, then retry this comparison."
@@ -61,11 +61,11 @@ func (r *MCPReader) FindPortfolioOverlaps(ctx context.Context, in mcpserver.Find
 	return out, nil
 }
 
-func collectPortfolioCandidates(inputs []mcpserver.PortfolioSubjectInput, out *mcpserver.FindPortfolioOverlapsOutput) ([]corpus.PortfolioSubject, []int) {
+func collectPortfolioCandidates(inputs []mcpcontract.PortfolioSubjectInput, out *mcpcontract.FindPortfolioOverlapsOutput) ([]corpus.PortfolioSubject, []int) {
 	var candidates []corpus.PortfolioSubject
 	var indexes []int
 	for i, candidate := range inputs {
-		item := mcpserver.BatchItem[mcpserver.PortfolioOverlapOutput]{Key: candidate.Kind + ":" + candidate.Ref}
+		item := mcpcontract.BatchItem[mcpcontract.PortfolioOverlapOutput]{Key: candidate.Kind + ":" + candidate.Ref}
 		if !validPortfolioSubjectInput(candidate) {
 			item.Status, item.Reason, item.Message = "failed", "invalid_candidate", "kind must be opportunity, workspace, or pull_request and ref must be a valid local ID"
 			out.Status, out.Items[i] = "partial", item
@@ -77,7 +77,7 @@ func collectPortfolioCandidates(inputs []mcpserver.PortfolioSubjectInput, out *m
 	return candidates, indexes
 }
 
-func resolvePortfolioPullRequests(ctx context.Context, c *corpus.Corpus, refs []mcpserver.ThreadRef) ([]int64, bool, error) {
+func resolvePortfolioPullRequests(ctx context.Context, c *corpus.Corpus, refs []mcpcontract.ThreadRef) ([]int64, bool, error) {
 	var ids []int64
 	missing := false
 	for _, ref := range refs {
@@ -102,12 +102,12 @@ func resolvePortfolioPullRequests(ctx context.Context, c *corpus.Corpus, refs []
 	return ids, missing, nil
 }
 
-func portfolioOverlapOutput(result corpus.PortfolioOverlapResult) mcpserver.PortfolioOverlapOutput {
-	value := mcpserver.PortfolioOverlapOutput{Candidate: mcpserver.PortfolioSubjectInput{Kind: result.Candidate.Kind, Ref: result.Candidate.Ref}, Status: result.Status, Coverage: result.Coverage}
+func portfolioOverlapOutput(result corpus.PortfolioOverlapResult) mcpcontract.PortfolioOverlapOutput {
+	value := mcpcontract.PortfolioOverlapOutput{Candidate: mcpcontract.PortfolioSubjectInput{Kind: result.Candidate.Kind, Ref: result.Candidate.Ref}, Status: result.Status, Coverage: result.Coverage}
 	for _, match := range result.Matches {
-		converted := mcpserver.PortfolioOverlapMatchOutput{PullRequestThreadID: match.PullRequestThreadID}
+		converted := mcpcontract.PortfolioOverlapMatchOutput{PullRequestThreadID: match.PullRequestThreadID}
 		for _, evidence := range match.Evidence {
-			item := mcpserver.PortfolioOverlapEvidenceOutput{Kind: evidence.Kind, Value: evidence.Value, Score: evidence.Score}
+			item := mcpcontract.PortfolioOverlapEvidenceOutput{Kind: evidence.Kind, Value: evidence.Value, Score: evidence.Score}
 			for _, ref := range evidence.SourceObservationRefs {
 				item.SourceRefs = append(item.SourceRefs, ref.Kind+":"+strconv.FormatInt(ref.ID, 10))
 			}
@@ -118,7 +118,7 @@ func portfolioOverlapOutput(result corpus.PortfolioOverlapResult) mcpserver.Port
 	return value
 }
 
-func validPortfolioSubjectInput(candidate mcpserver.PortfolioSubjectInput) bool {
+func validPortfolioSubjectInput(candidate mcpcontract.PortfolioSubjectInput) bool {
 	ref := strings.TrimSpace(candidate.Ref)
 	if ref == "" {
 		return false
@@ -135,23 +135,23 @@ func validPortfolioSubjectInput(candidate mcpserver.PortfolioSubjectInput) bool 
 }
 
 // LinkPullRequest records an explicit local relationship without mutating GitHub.
-func (r *MCPReader) LinkPullRequest(ctx context.Context, in mcpserver.LinkPullRequestInput) (mcpserver.LinkPullRequestOutput, error) {
+func (r *MCPReader) LinkPullRequest(ctx context.Context, in mcpcontract.LinkPullRequestInput) (mcpcontract.LinkPullRequestOutput, error) {
 	c, err := r.openCorpus(ctx)
 	if err != nil {
-		return mcpserver.LinkPullRequestOutput{}, err
+		return mcpcontract.LinkPullRequestOutput{}, err
 	}
 	thread, err := resolveStoredPullRequest(ctx, c, in.PullRequest)
 	if err != nil {
-		return mcpserver.LinkPullRequestOutput{}, err
+		return mcpcontract.LinkPullRequestOutput{}, err
 	}
 	link, err := c.SavePortfolioLink(ctx, corpus.PortfolioLink{PullRequestThreadID: thread.ID, OpportunityID: strings.TrimSpace(in.OpportunityID), WorkspaceID: strings.TrimSpace(in.WorkspaceID)})
 	if err != nil {
-		return mcpserver.LinkPullRequestOutput{}, err
+		return mcpcontract.LinkPullRequestOutput{}, err
 	}
-	return mcpserver.LinkPullRequestOutput{ID: link.ID, PullRequestThreadID: link.PullRequestThreadID, OpportunityID: link.OpportunityID, WorkspaceID: link.WorkspaceID, CreatedAt: formatTime(link.CreatedAt)}, nil
+	return mcpcontract.LinkPullRequestOutput{ID: link.ID, PullRequestThreadID: link.PullRequestThreadID, OpportunityID: link.OpportunityID, WorkspaceID: link.WorkspaceID, CreatedAt: formatTime(link.CreatedAt)}, nil
 }
 
-func resolveStoredPullRequest(ctx context.Context, c *corpus.Corpus, ref mcpserver.ThreadRef) (*corpus.Thread, error) {
+func resolveStoredPullRequest(ctx context.Context, c *corpus.Corpus, ref mcpcontract.ThreadRef) (*corpus.Thread, error) {
 	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
 	if err != nil {
 		return nil, err

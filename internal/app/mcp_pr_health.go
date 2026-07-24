@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/github"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 const pullRequestStatusWorkers = 4
@@ -20,7 +20,7 @@ const pullRequestStatusWorkers = 4
 // syncPullRequestStatusBatch preserves input order and isolates failures by PR.
 // It uses the existing REST hydration path for details and reviews, then one
 // typed GraphQL read for health facets unavailable from REST.
-func (s *Service) syncPullRequestStatusBatch(ctx context.Context, in mcpserver.SyncPullRequestStatusInput, report func(string, string) error) (map[string]any, error) {
+func (s *Service) syncPullRequestStatusBatch(ctx context.Context, in mcpcontract.SyncPullRequestStatusInput, report func(string, string) error) (map[string]any, error) {
 	results := make([]map[string]any, len(in.PullRequests))
 	work := make(chan int)
 	workers := min(pullRequestStatusWorkers, len(in.PullRequests))
@@ -62,12 +62,12 @@ func (s *Service) syncPullRequestStatusBatch(ctx context.Context, in mcpserver.S
 	return map[string]any{"status": status, "items": results, "completed": completed, "total": len(results)}, nil
 }
 
-func (s *Service) syncOnePullRequestStatus(ctx context.Context, ref mcpserver.ThreadRef, maxPages int) map[string]any {
+func (s *Service) syncOnePullRequestStatus(ctx context.Context, ref mcpcontract.ThreadRef, maxPages int) map[string]any {
 	key := fmt.Sprintf("%s/%s#%d", ref.Owner, ref.Repo, ref.Number)
 	if ref.Number <= 0 {
 		return map[string]any{"key": key, "status": "failed", "reason": "invalid_reference", "message": "pull request number must be positive"}
 	}
-	hydrated, err := s.HydrateThread(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, ref.Number, HydrateOptions{Facets: []string{FacetPRDetails, FacetPRReviews}, MaxPages: maxPages})
+	hydrated, err := s.HydrateThread(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, ref.Number, HydrateOptions{Facets: []string{FacetPRDetails, FacetPRReviews}, MaxPages: maxPages})
 	if err != nil {
 		status, reason, message, retry := githubBatchError(err)
 		return map[string]any{"key": key, "status": status, "reason": reason, "message": message, "retry_after_ms": retry}
@@ -108,7 +108,7 @@ func (s *Service) syncOnePullRequestStatus(ctx context.Context, ref mcpserver.Th
 	return item
 }
 
-func (s *Service) persistPullRequestHealth(ctx context.Context, ref mcpserver.ThreadRef, remote github.PullRequestStatus, hydrated []HydratedFacet, baselines map[string]int64) ([]map[string]any, error) {
+func (s *Service) persistPullRequestHealth(ctx context.Context, ref mcpcontract.ThreadRef, remote github.PullRequestStatus, hydrated []HydratedFacet, baselines map[string]int64) ([]map[string]any, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -251,7 +251,7 @@ func persistHealthFacet(ctx context.Context, c *corpus.Corpus, repoID, threadID 
 	return c.ApplyFacetObservationSetCAS(ctx, repoID, &threadID, facet.name, sourceUpdatedAt, pages, true, 0, expectedSequence)
 }
 
-func (s *Service) pullRequestHealthBaselines(ctx context.Context, ref mcpserver.ThreadRef) (map[string]int64, error) {
+func (s *Service) pullRequestHealthBaselines(ctx context.Context, ref mcpcontract.ThreadRef) (map[string]int64, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err

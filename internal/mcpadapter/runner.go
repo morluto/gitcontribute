@@ -7,6 +7,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/app"
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
 )
 
@@ -29,7 +30,7 @@ func (r *Runner) Run(ctx context.Context, opts contracts.MCPOptions) error {
 	server, err := mcpserver.NewWithOptions(
 		r.service.MCPReader(),
 		r.version,
-		mcpserver.Options{Toolsets: opts.Toolsets, ReadOnly: opts.ReadOnly},
+		mcpcontract.Options{Toolsets: opts.Toolsets, ReadOnly: opts.ReadOnly},
 	)
 	if err != nil {
 		return err

@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/investigation"
 )
 
 // StartInvestigation creates a new investigation scoped to a repository.
-func (s *Service) StartInvestigation(ctx context.Context, repo cli.RepoRef, commitSHA, lens string) (*cli.InvestigationResult, error) {
+func (s *Service) StartInvestigation(ctx context.Context, repo contracts.RepoRef, commitSHA, lens string) (*contracts.InvestigationResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
@@ -31,7 +31,7 @@ func (s *Service) StartInvestigation(ctx context.Context, repo cli.RepoRef, comm
 }
 
 // ShowInvestigation returns an investigation by ID.
-func (s *Service) ShowInvestigation(ctx context.Context, id string) (*cli.InvestigationResult, error) {
+func (s *Service) ShowInvestigation(ctx context.Context, id string) (*contracts.InvestigationResult, error) {
 	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
@@ -44,7 +44,7 @@ func (s *Service) ShowInvestigation(ctx context.Context, id string) (*cli.Invest
 }
 
 // ListInvestigations returns all investigations.
-func (s *Service) ListInvestigations(ctx context.Context) (*cli.InvestigationListResult, error) {
+func (s *Service) ListInvestigations(ctx context.Context) (*contracts.InvestigationListResult, error) {
 	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
@@ -53,7 +53,7 @@ func (s *Service) ListInvestigations(ctx context.Context) (*cli.InvestigationLis
 	if err != nil {
 		return nil, err
 	}
-	result := &cli.InvestigationListResult{Investigations: make([]cli.InvestigationResult, len(items))}
+	result := &contracts.InvestigationListResult{Investigations: make([]contracts.InvestigationResult, len(items))}
 	for i, inv := range items {
 		result.Investigations[i] = *investigationResult(inv)
 	}
@@ -61,7 +61,7 @@ func (s *Service) ListInvestigations(ctx context.Context) (*cli.InvestigationLis
 }
 
 // AddHypothesis records a hypothesis under an investigation.
-func (s *Service) AddHypothesis(ctx context.Context, investigationID, title, description, category string) (*cli.HypothesisResult, error) {
+func (s *Service) AddHypothesis(ctx context.Context, investigationID, title, description, category string) (*contracts.HypothesisResult, error) {
 	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
@@ -74,7 +74,7 @@ func (s *Service) AddHypothesis(ctx context.Context, investigationID, title, des
 }
 
 // ListHypotheses returns hypotheses for an investigation.
-func (s *Service) ListHypotheses(ctx context.Context, investigationID string) (*cli.HypothesisListResult, error) {
+func (s *Service) ListHypotheses(ctx context.Context, investigationID string) (*contracts.HypothesisListResult, error) {
 	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
@@ -83,7 +83,7 @@ func (s *Service) ListHypotheses(ctx context.Context, investigationID string) (*
 	if err != nil {
 		return nil, err
 	}
-	result := &cli.HypothesisListResult{Hypotheses: make([]cli.HypothesisResult, len(items))}
+	result := &contracts.HypothesisListResult{Hypotheses: make([]contracts.HypothesisResult, len(items))}
 	for i, h := range items {
 		result.Hypotheses[i] = *hypothesisResult(h)
 	}
@@ -91,7 +91,7 @@ func (s *Service) ListHypotheses(ctx context.Context, investigationID string) (*
 }
 
 // PromoteOpportunity converts a proposed hypothesis into an opportunity.
-func (s *Service) PromoteOpportunity(ctx context.Context, hypothesisID, problem, scope, impact, effort string, confidence float64) (*cli.OpportunityResult, error) {
+func (s *Service) PromoteOpportunity(ctx context.Context, hypothesisID, problem, scope, impact, effort string, confidence float64) (*contracts.OpportunityResult, error) {
 	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
@@ -104,7 +104,7 @@ func (s *Service) PromoteOpportunity(ctx context.Context, hypothesisID, problem,
 }
 
 // ShowOpportunity returns an opportunity by ID.
-func (s *Service) ShowOpportunity(ctx context.Context, id string) (*cli.OpportunityResult, error) {
+func (s *Service) ShowOpportunity(ctx context.Context, id string) (*contracts.OpportunityResult, error) {
 	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
@@ -117,7 +117,7 @@ func (s *Service) ShowOpportunity(ctx context.Context, id string) (*cli.Opportun
 }
 
 // ListOpportunities returns opportunities, optionally filtered to one investigation.
-func (s *Service) ListOpportunities(ctx context.Context, investigationID string) (*cli.OpportunityListResult, error) {
+func (s *Service) ListOpportunities(ctx context.Context, investigationID string) (*contracts.OpportunityListResult, error) {
 	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
@@ -126,8 +126,8 @@ func (s *Service) ListOpportunities(ctx context.Context, investigationID string)
 	if err != nil {
 		return nil, err
 	}
-	result := &cli.OpportunityListResult{
-		Opportunities: make([]cli.OpportunityResult, len(items)),
+	result := &contracts.OpportunityListResult{
+		Opportunities: make([]contracts.OpportunityResult, len(items)),
 		Filter:        investigationID,
 	}
 	for i, o := range items {
@@ -137,7 +137,7 @@ func (s *Service) ListOpportunities(ctx context.Context, investigationID string)
 }
 
 // SetOpportunityStatus transitions an opportunity with a recorded rationale.
-func (s *Service) SetOpportunityStatus(ctx context.Context, id, status, rationale string) (*cli.OpportunityResult, error) {
+func (s *Service) SetOpportunityStatus(ctx context.Context, id, status, rationale string) (*contracts.OpportunityResult, error) {
 	opStatus, err := parseOpportunityStatus(status)
 	if err != nil {
 		return nil, err
@@ -172,6 +172,57 @@ func (s *Service) UpdateHypothesis(ctx context.Context, hypothesisID string, inp
 		return nil, err
 	}
 	return invSvc.UpdateHypothesis(ctx, hypothesisID, input)
+}
+
+// UpdateHypothesisFields applies a partial update without making callers
+// reconstruct unchanged hypothesis state.
+func (s *Service) UpdateHypothesisFields(ctx context.Context, hypothesisID string, opts contracts.HypothesisUpdateOptions) (*investigation.Hypothesis, error) {
+	invSvc, err := s.writeInvestigationSvc(ctx)
+	if err != nil {
+		return nil, err
+	}
+	current, err := invSvc.GetHypothesis(ctx, hypothesisID)
+	if err != nil {
+		return nil, mapInvestigationError(err)
+	}
+	input := investigation.UpdateHypothesisInput{
+		Title:              current.Title,
+		Description:        current.Description,
+		Category:           current.Category,
+		ExpectedBehavior:   current.ExpectedBehavior,
+		ObservedBehavior:   current.ObservedBehavior,
+		PotentialImpact:    current.PotentialImpact,
+		OpenQuestions:      append([]string(nil), current.OpenQuestions...),
+		AffectedComponents: append([]string(nil), current.AffectedComponents...),
+		SourceRefs:         append([]domain.SourceRef(nil), current.SourceRefs...),
+		Links:              append([]investigation.Link(nil), current.Links...),
+		Rationale:          opts.Rationale,
+	}
+	if opts.Title != nil {
+		input.Title = *opts.Title
+	}
+	if opts.Description != nil {
+		input.Description = *opts.Description
+	}
+	if opts.Category != nil {
+		input.Category = investigation.Category(*opts.Category)
+	}
+	if opts.ExpectedBehavior != nil {
+		input.ExpectedBehavior = *opts.ExpectedBehavior
+	}
+	if opts.ObservedBehavior != nil {
+		input.ObservedBehavior = *opts.ObservedBehavior
+	}
+	if opts.PotentialImpact != nil {
+		input.PotentialImpact = *opts.PotentialImpact
+	}
+	if opts.OpenQuestions != nil {
+		input.OpenQuestions = append([]string(nil), opts.OpenQuestions...)
+	}
+	if opts.AffectedComponents != nil {
+		input.AffectedComponents = append([]string(nil), opts.AffectedComponents...)
+	}
+	return s.UpdateHypothesis(ctx, hypothesisID, input)
 }
 
 // TransitionHypothesis advances a hypothesis through its lifecycle with rationale.
@@ -232,9 +283,9 @@ func (s *Service) readInvestigationSvc(ctx context.Context) (*investigation.Serv
 	return investigation.NewService(c, c), nil
 }
 
-func investigationResult(inv *investigation.Investigation) *cli.InvestigationResult {
-	return &cli.InvestigationResult{
-		ID: inv.ID, Repo: cli.RepoRef{Owner: inv.Repo.Owner, Repo: inv.Repo.Repo},
+func investigationResult(inv *investigation.Investigation) *contracts.InvestigationResult {
+	return &contracts.InvestigationResult{
+		ID: inv.ID, Repo: contracts.RepoRef{Owner: inv.Repo.Owner, Repo: inv.Repo.Repo},
 		CommitSHA: inv.CommitSHA, Lens: inv.Lens, Status: string(inv.Status),
 		ThreadBaseline: threadBaselineResult(inv.ThreadBaseline), SeedHypothesisID: inv.SeedHypothesisID,
 		AuditTrail: workflowAuditResults(inv.AuditTrail),
@@ -242,8 +293,8 @@ func investigationResult(inv *investigation.Investigation) *cli.InvestigationRes
 	}
 }
 
-func hypothesisResult(h *investigation.Hypothesis) *cli.HypothesisResult {
-	return &cli.HypothesisResult{
+func hypothesisResult(h *investigation.Hypothesis) *contracts.HypothesisResult {
+	return &contracts.HypothesisResult{
 		ID:              h.ID,
 		InvestigationID: h.InvestigationID,
 		Title:           h.Title,
@@ -258,8 +309,8 @@ func hypothesisResult(h *investigation.Hypothesis) *cli.HypothesisResult {
 	}
 }
 
-func opportunityResult(o *investigation.Opportunity) *cli.OpportunityResult {
-	return &cli.OpportunityResult{
+func opportunityResult(o *investigation.Opportunity) *contracts.OpportunityResult {
+	return &contracts.OpportunityResult{
 		ID:               o.ID,
 		InvestigationID:  o.InvestigationID,
 		HypothesisID:     o.HypothesisID,

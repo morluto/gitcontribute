@@ -7,27 +7,27 @@ import (
 	"fmt"
 	"strings"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/failure"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // GetJob reads a durable job by ID.
-func (r *MCPReader) GetJob(ctx context.Context, in mcpserver.GetJobInput) (mcpserver.GetJobOutput, error) {
+func (r *MCPReader) GetJob(ctx context.Context, in mcpcontract.GetJobInput) (mcpcontract.GetJobOutput, error) {
 	job, err := r.Service.GetJob(ctx, in.ID)
 	if err != nil {
-		return mcpserver.GetJobOutput{}, err
+		return mcpcontract.GetJobOutput{}, err
 	}
 	return jobResultToMCP(job)
 }
 
 // CancelJobs requests bounded cancellation in input order. Missing and terminal
 // jobs remain item-level outcomes so one bad ID does not hide successful writes.
-func (r *MCPReader) CancelJobs(ctx context.Context, in mcpserver.CancelJobInput) (mcpserver.GetJobsOutput, error) {
+func (r *MCPReader) CancelJobs(ctx context.Context, in mcpcontract.CancelJobInput) (mcpcontract.GetJobsOutput, error) {
 	if len(in.IDs) < 1 || len(in.IDs) > 100 {
-		return mcpserver.GetJobsOutput{}, errors.New("ids must contain 1 to 100 items")
+		return mcpcontract.GetJobsOutput{}, errors.New("ids must contain 1 to 100 items")
 	}
-	out := mcpserver.GetJobsOutput{Status: "complete", Items: make([]mcpserver.BatchItem[mcpserver.GetJobOutput], len(in.IDs))}
+	out := mcpcontract.GetJobsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.GetJobOutput], len(in.IDs))}
 	for i, inputID := range in.IDs {
 		if err := ctx.Err(); err != nil {
 			return out, err
@@ -41,9 +41,9 @@ func (r *MCPReader) CancelJobs(ctx context.Context, in mcpserver.CancelJobInput)
 	return out, nil
 }
 
-func (r *MCPReader) cancelJobItem(ctx context.Context, inputID string) mcpserver.BatchItem[mcpserver.GetJobOutput] {
+func (r *MCPReader) cancelJobItem(ctx context.Context, inputID string) mcpcontract.BatchItem[mcpcontract.GetJobOutput] {
 	id := strings.TrimSpace(inputID)
-	item := mcpserver.BatchItem[mcpserver.GetJobOutput]{Key: id, Status: "complete"}
+	item := mcpcontract.BatchItem[mcpcontract.GetJobOutput]{Key: id, Status: "complete"}
 	if id == "" {
 		item.Status, item.Reason, item.Message = "failed", "invalid_id", "job ID must not be empty"
 		return item
@@ -80,7 +80,7 @@ func (r *MCPReader) cancelJobItem(ctx context.Context, inputID string) mcpserver
 	return jobResultItem(item, job)
 }
 
-func jobResultItem(item mcpserver.BatchItem[mcpserver.GetJobOutput], job *cli.JobResult) mcpserver.BatchItem[mcpserver.GetJobOutput] {
+func jobResultItem(item mcpcontract.BatchItem[mcpcontract.GetJobOutput], job *contracts.JobResult) mcpcontract.BatchItem[mcpcontract.GetJobOutput] {
 	value, err := jobResultToMCP(job)
 	if err != nil {
 		item.Status, item.Reason, item.Message = "failed", "decode_failed", err.Error()
@@ -93,14 +93,14 @@ func jobResultItem(item mcpserver.BatchItem[mcpserver.GetJobOutput], job *cli.Jo
 	return item
 }
 
-func jobResultToMCP(job *cli.JobResult) (mcpserver.GetJobOutput, error) {
+func jobResultToMCP(job *contracts.JobResult) (mcpcontract.GetJobOutput, error) {
 	request, err := decodeJobJSON("request", job.Request)
 	if err != nil {
-		return mcpserver.GetJobOutput{}, err
+		return mcpcontract.GetJobOutput{}, err
 	}
 	result, err := decodeJobJSON("result", job.Result)
 	if err != nil {
-		return mcpserver.GetJobOutput{}, err
+		return mcpcontract.GetJobOutput{}, err
 	}
 	phase, completed, total := decodeJobProgress(job)
 	percent := 0
@@ -114,7 +114,7 @@ func jobResultToMCP(job *cli.JobResult) (mcpserver.GetJobOutput, error) {
 	if job.Status == "queued" || job.Status == "running" {
 		retryAfter = 1000
 	}
-	return mcpserver.GetJobOutput{
+	return mcpcontract.GetJobOutput{
 		ID: job.ID, Kind: job.Kind, Status: job.Status, Request: request, Result: result, Error: job.Error,
 		Phase: phase, CompletedItems: completed, TotalItems: total, ProgressPercent: percent, RetryAfterMS: retryAfter,
 		CreatedAt: job.CreatedAt, StartedAt: job.StartedAt, CompletedAt: job.CompletedAt, CancelledAt: job.CancelledAt,
@@ -122,7 +122,7 @@ func jobResultToMCP(job *cli.JobResult) (mcpserver.GetJobOutput, error) {
 	}, nil
 }
 
-func decodeJobProgress(job *cli.JobResult) (string, int, int) {
+func decodeJobProgress(job *contracts.JobResult) (string, int, int) {
 	phase := strings.TrimSpace(job.Progress)
 	var counts struct {
 		CompletedItems int `json:"completed_items"`

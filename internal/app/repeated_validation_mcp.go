@@ -7,14 +7,14 @@ import (
 	"strings"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // RunRepeatedValidation submits a durable repeat/stress validation group.
-func (r *MCPReader) RunRepeatedValidation(ctx context.Context, in mcpserver.RunRepeatedValidationInput) (mcpserver.JobReference, error) {
+func (r *MCPReader) RunRepeatedValidation(ctx context.Context, in mcpcontract.RunRepeatedValidationInput) (mcpcontract.JobReference, error) {
 	if !in.Execute {
-		return mcpserver.JobReference{}, errors.New("execute must be true to authorize host command execution")
+		return mcpcontract.JobReference{}, errors.New("execute must be true to authorize host command execution")
 	}
 	if in.RunCount == 0 {
 		in.RunCount = 3
@@ -31,17 +31,17 @@ func (r *MCPReader) RunRepeatedValidation(ctx context.Context, in mcpserver.RunR
 	}
 	perRunTimeout, err := parseOptionalDuration(in.PerRunTimeout)
 	if err != nil {
-		return mcpserver.JobReference{}, fmt.Errorf("per_run_timeout: %w", err)
+		return mcpcontract.JobReference{}, fmt.Errorf("per_run_timeout: %w", err)
 	}
 	overallTimeout, err := parseOptionalDuration(in.OverallTimeout)
 	if err != nil {
-		return mcpserver.JobReference{}, fmt.Errorf("overall_timeout: %w", err)
+		return mcpcontract.JobReference{}, fmt.Errorf("overall_timeout: %w", err)
 	}
 	sampleInterval, err := parseOptionalDuration(in.SampleInterval)
 	if err != nil {
-		return mcpserver.JobReference{}, fmt.Errorf("sample_interval: %w", err)
+		return mcpcontract.JobReference{}, fmt.Errorf("sample_interval: %w", err)
 	}
-	opts := cli.RepeatValidationOptions{
+	opts := contracts.RepeatValidationOptions{
 		Kinds: kinds, RunCount: in.RunCount, Concurrency: in.Concurrency,
 		PerRunTimeout: perRunTimeout, OverallTimeout: overallTimeout, SampleInterval: sampleInterval, Execute: true,
 	}
@@ -59,7 +59,7 @@ func (r *MCPReader) RunRepeatedValidation(ctx context.Context, in mcpserver.RunR
 		return result, nil
 	})
 	if err != nil {
-		return mcpserver.JobReference{}, err
+		return mcpcontract.JobReference{}, err
 	}
 	return queuedJobReference(id, "run_validation_group", "repeat validation job started"), nil
 }

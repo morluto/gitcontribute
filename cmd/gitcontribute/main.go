@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -78,7 +79,7 @@ func runRuntimeContract(args []string, output io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return cli.WriteRuntimeContract(output, contract)
+	return json.NewEncoder(output).Encode(contract)
 }
 
 const ExitGeneral = 1

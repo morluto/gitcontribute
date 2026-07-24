@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/tracking"
 )
 
@@ -15,7 +15,7 @@ func TestServiceTrackingFlow(t *testing.T) {
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
 
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
 	if err != nil {
 		t.Fatalf("start investigation: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestServiceTrackingFlow(t *testing.T) {
 		t.Fatalf("promote opportunity: %v", err)
 	}
 
-	event, err := svc.RecordTriageEvent(ctx, cli.RecordTriageEventOptions{
+	event, err := svc.RecordTriageEvent(ctx, contracts.RecordTriageEventOptions{
 		Target:  "opportunity:" + opp.ID,
 		Outcome: string(tracking.OutcomeInvestigated),
 		Reason:  "looks promising",
@@ -44,7 +44,7 @@ func TestServiceTrackingFlow(t *testing.T) {
 		t.Fatalf("expected lens active-go, got %q", event.Lens)
 	}
 
-	list, err := svc.ListTriageEvents(ctx, cli.ListTriageEventsOptions{Lens: "active-go"})
+	list, err := svc.ListTriageEvents(ctx, contracts.ListTriageEventsOptions{Lens: "active-go"})
 	if err != nil {
 		t.Fatalf("list triage events: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestServiceTrackingFlow(t *testing.T) {
 		t.Fatalf("unexpected triage events: %+v", list.Events)
 	}
 
-	contribution, err := svc.RecordContribution(ctx, cli.RecordContributionOptions{
+	contribution, err := svc.RecordContribution(ctx, contracts.RecordContributionOptions{
 		OpportunityID: opp.ID,
 		Kind:          "issue",
 		Title:         "parser panics",
@@ -65,7 +65,7 @@ func TestServiceTrackingFlow(t *testing.T) {
 		t.Fatal("expected durable contribution id")
 	}
 
-	submitted, err := svc.RecordContributionOutcome(ctx, cli.RecordContributionOutcomeOptions{
+	submitted, err := svc.RecordContributionOutcome(ctx, contracts.RecordContributionOutcomeOptions{
 		ContributionID: contribution.ID,
 		Outcome:        string(tracking.OutcomeSubmitted),
 		Reason:         "opened on GitHub",
@@ -100,11 +100,11 @@ func TestServiceExportImportLocalMetadata(t *testing.T) {
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
 
-	inv, _ := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, _ := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
 	h, _ := svc.AddHypothesis(ctx, inv.ID, "panic", "desc", "bug")
 	opp, _ := svc.PromoteOpportunity(ctx, h.ID, "panic", "parser", "crash", "small", 0.8)
 
-	_, err := svc.RecordTriageEvent(ctx, cli.RecordTriageEventOptions{
+	_, err := svc.RecordTriageEvent(ctx, contracts.RecordTriageEventOptions{
 		Target:  "opportunity:" + opp.ID,
 		Outcome: string(tracking.OutcomeSaved),
 	})
@@ -112,7 +112,7 @@ func TestServiceExportImportLocalMetadata(t *testing.T) {
 		t.Fatalf("record triage event: %v", err)
 	}
 
-	contribution, err := svc.RecordContribution(ctx, cli.RecordContributionOptions{
+	contribution, err := svc.RecordContribution(ctx, contracts.RecordContributionOptions{
 		OpportunityID: opp.ID,
 		Kind:          "issue",
 		Title:         "parser panics",
@@ -121,7 +121,7 @@ func TestServiceExportImportLocalMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("record contribution: %v", err)
 	}
-	_, err = svc.RecordContributionOutcome(ctx, cli.RecordContributionOutcomeOptions{
+	_, err = svc.RecordContributionOutcome(ctx, contracts.RecordContributionOutcomeOptions{
 		ContributionID: contribution.ID,
 		Outcome:        string(tracking.OutcomeMerged),
 	})
@@ -129,7 +129,7 @@ func TestServiceExportImportLocalMetadata(t *testing.T) {
 		t.Fatalf("record outcome: %v", err)
 	}
 
-	result, err := svc.ExportLocalMetadata(ctx, cli.MetadataExportOptions{})
+	result, err := svc.ExportLocalMetadata(ctx, contracts.MetadataExportOptions{})
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestServiceExportImportLocalMetadata(t *testing.T) {
 		t.Fatalf("expected triage_events in JSON export")
 	}
 
-	imported, err := svc.ImportLocalMetadata(ctx, cli.MetadataImportOptions{Data: result.Data})
+	imported, err := svc.ImportLocalMetadata(ctx, contracts.MetadataImportOptions{Data: result.Data})
 	if err != nil {
 		t.Fatalf("import: %v", err)
 	}
@@ -149,16 +149,16 @@ func TestServiceExportImportLocalMetadata(t *testing.T) {
 		t.Fatalf("unexpected import version: %+v", imported)
 	}
 
-	contribs, _ := svc.ListContributions(ctx, cli.ListContributionsOptions{})
+	contribs, _ := svc.ListContributions(ctx, contracts.ListContributionsOptions{})
 	if len(contribs.Contributions) != 1 || contribs.Contributions[0].OpportunityID != opp.ID {
 		t.Fatalf("unexpected imported contribution: %+v", contribs)
 	}
 
-	_, err = svc.ImportLocalMetadata(ctx, cli.MetadataImportOptions{Data: result.Data})
+	_, err = svc.ImportLocalMetadata(ctx, contracts.MetadataImportOptions{Data: result.Data})
 	if err != nil {
 		t.Fatalf("second import should be idempotent: %v", err)
 	}
-	contribs2, _ := svc.ListContributions(ctx, cli.ListContributionsOptions{})
+	contribs2, _ := svc.ListContributions(ctx, contracts.ListContributionsOptions{})
 	if len(contribs2.Contributions) != 1 {
 		t.Fatalf("expected 1 contribution after re-import, got %d", len(contribs2.Contributions))
 	}
@@ -174,7 +174,7 @@ func TestCollectionValidationSupportsNewReferenceKinds(t *testing.T) {
 		t.Fatalf("create collection: %v", err)
 	}
 
-	valid := []cli.CollectionMember{
+	valid := []contracts.CollectionMember{
 		{Kind: "thread", Ref: "owner/repo#1"},
 		{Kind: "opportunity", Ref: "11111111-1111-1111-1111-111111111111"},
 		{Kind: "investigation", Ref: "22222222-2222-2222-2222-222222222222"},
@@ -183,13 +183,13 @@ func TestCollectionValidationSupportsNewReferenceKinds(t *testing.T) {
 		t.Fatalf("valid members rejected: %v", err)
 	}
 
-	invalid := []cli.CollectionMember{
+	invalid := []contracts.CollectionMember{
 		{Kind: "thread", Ref: "owner/repo#0"},
 		{Kind: "opportunity", Ref: "not-a-uuid"},
 		{Kind: "investigation", Ref: ""},
 	}
 	for _, m := range invalid {
-		if _, err := svc.AddCollectionMembers(ctx, "tracked", []cli.CollectionMember{m}); err == nil {
+		if _, err := svc.AddCollectionMembers(ctx, "tracked", []contracts.CollectionMember{m}); err == nil {
 			t.Fatalf("accepted invalid member %+v", m)
 		}
 	}

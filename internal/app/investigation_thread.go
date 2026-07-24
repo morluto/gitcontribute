@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/failure"
@@ -20,7 +20,7 @@ const maxThreadSeedDescription = 5000
 // StartInvestigationFromThread atomically creates an investigation and seed
 // hypothesis from one exact local observation. It performs no network access
 // or process execution.
-func (s *Service) StartInvestigationFromThread(ctx context.Context, requested research.ThreadRef) (*cli.ThreadInvestigationResult, error) {
+func (s *Service) StartInvestigationFromThread(ctx context.Context, requested research.ThreadRef) (*contracts.ThreadInvestigationResult, error) {
 	if err := requested.Validate(); err != nil {
 		return nil, err
 	}
@@ -77,7 +77,7 @@ func (s *Service) StartInvestigationFromThread(ctx context.Context, requested re
 		}
 		return nil, fmt.Errorf("start investigation from thread: %w", err)
 	}
-	return &cli.ThreadInvestigationResult{
+	return &contracts.ThreadInvestigationResult{
 		Created: result.Created, Investigation: investigationResult(result.Investigation),
 		Hypothesis: hypothesisResult(result.Hypothesis),
 	}, nil
@@ -92,11 +92,11 @@ func boundedThreadSeedDescription(value string) (string, bool) {
 	return strings.TrimSpace(string(runes[:maxThreadSeedDescription])) + "…", true
 }
 
-func threadBaselineResult(value *investigation.ThreadBaseline) *cli.ThreadBaselineResult {
+func threadBaselineResult(value *investigation.ThreadBaseline) *contracts.ThreadBaselineResult {
 	if value == nil {
 		return nil
 	}
-	return &cli.ThreadBaselineResult{
+	return &contracts.ThreadBaselineResult{
 		Ref: value.Ref(), Repository: value.Repo.String(), Kind: string(value.Kind), Number: value.Number,
 		ObservationID: value.ObservationID, SourceUpdatedAt: formatTime(value.SourceUpdatedAt),
 		ObservationSequence: value.ObservationSequence, ObservedAt: formatTime(value.ObservedAt),
@@ -104,44 +104,44 @@ func threadBaselineResult(value *investigation.ThreadBaseline) *cli.ThreadBaseli
 	}
 }
 
-func workflowSourceRefResult(value domain.SourceRef) cli.WorkflowSourceRefResult {
-	return cli.WorkflowSourceRefResult{
+func workflowSourceRefResult(value domain.SourceRef) contracts.WorkflowSourceRefResult {
+	return contracts.WorkflowSourceRefResult{
 		Source: value.Source, URL: value.URL, CommitSHA: value.CommitSHA,
 		ObservedAt: formatTime(value.ObservedAt), AsOf: formatTime(value.AsOf),
 	}
 }
 
-func workflowAuditResults(values []investigation.StatusChange) []cli.WorkflowAuditResult {
+func workflowAuditResults(values []investigation.StatusChange) []contracts.WorkflowAuditResult {
 	if len(values) == 0 {
 		return nil
 	}
-	result := make([]cli.WorkflowAuditResult, len(values))
+	result := make([]contracts.WorkflowAuditResult, len(values))
 	for index, value := range values {
-		result[index] = cli.WorkflowAuditResult{
+		result[index] = contracts.WorkflowAuditResult{
 			From: value.From, To: value.To, Rationale: value.Rationale, At: formatTime(value.At),
 		}
 	}
 	return result
 }
 
-func workflowSourceRefResults(values []domain.SourceRef) []cli.WorkflowSourceRefResult {
+func workflowSourceRefResults(values []domain.SourceRef) []contracts.WorkflowSourceRefResult {
 	if len(values) == 0 {
 		return nil
 	}
-	result := make([]cli.WorkflowSourceRefResult, len(values))
+	result := make([]contracts.WorkflowSourceRefResult, len(values))
 	for index, value := range values {
 		result[index] = workflowSourceRefResult(value)
 	}
 	return result
 }
 
-func workflowLinkResults(values []investigation.Link) []cli.WorkflowLinkResult {
+func workflowLinkResults(values []investigation.Link) []contracts.WorkflowLinkResult {
 	if len(values) == 0 {
 		return nil
 	}
-	result := make([]cli.WorkflowLinkResult, len(values))
+	result := make([]contracts.WorkflowLinkResult, len(values))
 	for index, value := range values {
-		result[index] = cli.WorkflowLinkResult{Kind: value.Kind, Ref: value.Ref, Source: workflowSourceRefResult(value.Source)}
+		result[index] = contracts.WorkflowLinkResult{Kind: value.Kind, Ref: value.Ref, Source: workflowSourceRefResult(value.Source)}
 	}
 	return result
 }

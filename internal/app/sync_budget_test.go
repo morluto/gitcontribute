@@ -8,7 +8,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/github"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 type authoredHeaderReader struct {
@@ -70,7 +70,7 @@ func TestAuthoredPullRequestSyncReusesSearchHeadersWithoutNPlusOne(t *testing.T)
 	reader := &authoredHeaderReader{now: now}
 	svc.SetGitHubReader(reader)
 
-	out, err := svc.syncAuthoredPullRequests(ctx, mcpserver.SyncAuthoredPullRequestsInput{State: "open", Limit: 2, MaxRequests: 20}, func(string, string) error { return nil })
+	out, err := svc.syncAuthoredPullRequests(ctx, mcpcontract.SyncAuthoredPullRequestsInput{State: "open", Limit: 2, MaxRequests: 20}, func(string, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestAuthoredPullRequestMinimumBudgetMakesSyncProgress(t *testing.T) {
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 	svc.SetGitHubReader(&authoredHeaderReader{now: now})
 	minimum := syncFixedRequestCost() + 2
-	out, err := svc.syncAuthoredPullRequests(ctx, mcpserver.SyncAuthoredPullRequestsInput{State: "open", Limit: 2, MaxRequests: minimum}, func(string, string) error { return nil })
+	out, err := svc.syncAuthoredPullRequests(ctx, mcpcontract.SyncAuthoredPullRequestsInput{State: "open", Limit: 2, MaxRequests: minimum}, func(string, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,8 +126,8 @@ func TestSyncThreadsBatchPlansBudgetBeforeNetworkAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := svc.syncThreadsBatch(context.Background(), mcpserver.SyncThreadsInput{
-		Selection: "repositories", Repositories: []mcpserver.RepositoryRef{{Owner: "owner", Repo: "repo"}},
+	out, err := svc.syncThreadsBatch(context.Background(), mcpcontract.SyncThreadsInput{
+		Selection: "repositories", Repositories: []mcpcontract.RepositoryRef{{Owner: "owner", Repo: "repo"}},
 		LimitPerRepository: 100, MaxRequests: syncFixedRequestCost(),
 	}, func(string, string) error { return nil })
 	if err != nil {
@@ -146,9 +146,9 @@ func TestSyncThreadsBatchThreadTotalCountsRequestedThreads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := svc.syncThreadsBatch(context.Background(), mcpserver.SyncThreadsInput{
+	out, err := svc.syncThreadsBatch(context.Background(), mcpcontract.SyncThreadsInput{
 		Selection: "threads",
-		Threads: []mcpserver.ThreadRef{
+		Threads: []mcpcontract.ThreadRef{
 			{Owner: "owner", Repo: "repo", Number: 1},
 			{Owner: "owner", Repo: "repo", Number: 2},
 		},

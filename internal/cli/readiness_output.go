@@ -3,9 +3,11 @@ package cli
 import (
 	"fmt"
 	"strings"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
-func readinessHuman(r *ReadinessResult) string {
+func readinessHuman(r *contracts.ReadinessResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Readiness for opportunity %s: %s (%s)\n", r.OpportunityID, r.Status, r.RuleSetVersion)
 	for _, check := range r.Checks {
@@ -21,7 +23,7 @@ func readinessHuman(r *ReadinessResult) string {
 	return strings.TrimSpace(b.String())
 }
 
-func readinessCheckHuman(check *ReadinessCheck) string {
+func readinessCheckHuman(check *contracts.ReadinessCheck) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s: %s\n", check.CheckID, check.Status)
 	fmt.Fprintf(&b, "Rule: %s (%s)\n", check.RuleID, check.RuleVersion)

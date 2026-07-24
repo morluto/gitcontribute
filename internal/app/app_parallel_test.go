@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/github"
 )
 
@@ -21,7 +21,7 @@ func TestEndToEndSyncSearchDossier(t *testing.T) {
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
 
-	syncRes, err := svc.Sync(ctx, cli.RepoRef{Owner: "octocat", Repo: "test"})
+	syncRes, err := svc.Sync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "test"})
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
@@ -29,7 +29,7 @@ func TestEndToEndSyncSearchDossier(t *testing.T) {
 		t.Fatalf("updated = %d, want 2", syncRes.Updated)
 	}
 
-	searchRes, err := svc.Search(ctx, "searchable", cli.SearchOptions{Kind: "issues", Limit: 10})
+	searchRes, err := svc.Search(ctx, "searchable", contracts.SearchOptions{Kind: "issues", Limit: 10})
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestEndToEndSyncSearchDossier(t *testing.T) {
 		t.Fatalf("unexpected match: %+v", searchRes.Matches[0])
 	}
 
-	dossierRes, err := svc.Dossier(ctx, cli.RepoRef{Owner: "octocat", Repo: "test"})
+	dossierRes, err := svc.Dossier(ctx, contracts.RepoRef{Owner: "octocat", Repo: "test"})
 	if err != nil {
 		t.Fatalf("dossier: %v", err)
 	}
@@ -63,10 +63,10 @@ func TestTailSourceRunsOneIdempotentIteration(t *testing.T) {
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
 
-	if _, err := svc.AddRepoSource(ctx, "explicit", []cli.RepoRef{{Owner: "octocat", Repo: "tail"}}); err != nil {
+	if _, err := svc.AddRepoSource(ctx, "explicit", []contracts.RepoRef{{Owner: "octocat", Repo: "tail"}}); err != nil {
 		t.Fatalf("add source: %v", err)
 	}
-	result, err := svc.TailSource(ctx, "explicit", cli.TailOptions{
+	result, err := svc.TailSource(ctx, "explicit", contracts.TailOptions{
 		Since: time.Hour, Budget: 1, Interval: time.Minute, Once: true,
 	})
 	if err != nil {
@@ -87,7 +87,7 @@ func TestDiscoveryCrawlDoesNotAdvanceCheckpointWhenBudgetExhausted(t *testing.T)
 	if _, err := svc.AddSearchSource(ctx, "bounded", "language:go"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Crawl(ctx, "bounded", cli.CrawlOptions{Since: time.Hour, Budget: 1}); err == nil || !strings.Contains(err.Error(), "budget") {
+	if _, err := svc.Crawl(ctx, "bounded", contracts.CrawlOptions{Since: time.Hour, Budget: 1}); err == nil || !strings.Contains(err.Error(), "budget") {
 		t.Fatalf("crawl error = %v, want budget exhaustion", err)
 	}
 	c, err := svc.openCorpus(ctx)
@@ -118,10 +118,10 @@ func TestSearchReportsDefaultLimit(t *testing.T) {
 	defer srv.Close()
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
-	if _, err := svc.Sync(ctx, cli.RepoRef{Owner: "octocat", Repo: "test"}); err != nil {
+	if _, err := svc.Sync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "test"}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := svc.Search(ctx, "searchable", cli.SearchOptions{})
+	result, err := svc.Search(ctx, "searchable", contracts.SearchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

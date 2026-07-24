@@ -7,14 +7,14 @@ import (
 	"path/filepath"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/failure"
 )
 
 // InspectCorpus reports corpus compatibility without mutation.
-func (s *Service) InspectCorpus(ctx context.Context) (*cli.CorpusInspectionResult, error) {
+func (s *Service) InspectCorpus(ctx context.Context) (*contracts.CorpusInspectionResult, error) {
 	cfg, err := s.loadConfig(false)
 	if err != nil {
 		return nil, err
@@ -27,7 +27,7 @@ func (s *Service) InspectCorpus(ctx context.Context) (*cli.CorpusInspectionResul
 }
 
 // InventoryCorpus reports bounded storage details for one repository.
-func (s *Service) InventoryCorpus(ctx context.Context, repo string) (*cli.CorpusInventoryResult, error) {
+func (s *Service) InventoryCorpus(ctx context.Context, repo string) (*contracts.CorpusInventoryResult, error) {
 	ref, err := parseRepoRef(repo)
 	if err != nil {
 		return nil, err
@@ -43,7 +43,7 @@ func (s *Service) InventoryCorpus(ctx context.Context, repo string) (*cli.Corpus
 	if err != nil {
 		return nil, err
 	}
-	return &cli.CorpusInventoryResult{
+	return &contracts.CorpusInventoryResult{
 		Repo: ref.String(), Issues: inv.Issues, PullRequests: inv.PullRequests, Threads: inv.Threads,
 		RepositoryObservations: inv.RepositoryObservations, ThreadObservations: inv.ThreadObservations,
 		FacetObservations: inv.FacetObservations, FacetCoverage: inv.FacetCoverage,
@@ -53,7 +53,7 @@ func (s *Service) InventoryCorpus(ctx context.Context, repo string) (*cli.Corpus
 }
 
 // ListCorpusInventory reports bounded storage details for every repository scope.
-func (s *Service) ListCorpusInventory(ctx context.Context) (*cli.CorpusInventoryListResult, error) {
+func (s *Service) ListCorpusInventory(ctx context.Context) (*contracts.CorpusInventoryListResult, error) {
 	inspection, err := s.InspectCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -70,10 +70,10 @@ func (s *Service) ListCorpusInventory(ctx context.Context) (*cli.CorpusInventory
 	if err != nil {
 		return nil, err
 	}
-	out := &cli.CorpusInventoryListResult{
+	out := &contracts.CorpusInventoryListResult{
 		Schema:                  inspection,
-		Repositories:            make([]cli.CorpusRepositoryInventoryResult, len(inv.Repositories)),
-		Projections:             make([]cli.CorpusProjectionResult, len(states)),
+		Repositories:            make([]contracts.CorpusRepositoryInventoryResult, len(inv.Repositories)),
+		Projections:             make([]contracts.CorpusProjectionResult, len(states)),
 		ObservationPayloadBytes: inv.ObservationPayloadBytes,
 		CodeBytes:               inv.CodeBytes,
 		DatabaseBytes:           inv.DBSize,
@@ -81,7 +81,7 @@ func (s *Service) ListCorpusInventory(ctx context.Context) (*cli.CorpusInventory
 		SizeAttribution:         "SQLite database and WAL pages are shared; observation payload and code content bytes are logical measurements, not page allocation",
 	}
 	for i, item := range inv.Repositories {
-		result := cli.CorpusRepositoryInventoryResult{
+		result := contracts.CorpusRepositoryInventoryResult{
 			Repo:   domain.RepoRef{Owner: item.RepoOwner, Repo: item.RepoName}.String(),
 			Issues: item.Issues, PullRequests: item.PullRequests, Threads: item.Threads,
 			RepositoryObservations: item.RepositoryObservations, ThreadObservations: item.ThreadObservations,
@@ -97,7 +97,7 @@ func (s *Service) ListCorpusInventory(ctx context.Context) (*cli.CorpusInventory
 		out.Projections[i] = projectionResult(state)
 	}
 	for _, step := range inspection.Pending {
-		out.PendingWork = append(out.PendingWork, cli.CorpusPendingWorkResult{
+		out.PendingWork = append(out.PendingWork, contracts.CorpusPendingWorkResult{
 			Kind: "migration", Name: fmt.Sprintf("%03d_%s", step.Version, step.Name), Status: "pending",
 		})
 	}
@@ -115,7 +115,7 @@ func (s *Service) ListCorpusInventory(ctx context.Context) (*cli.CorpusInventory
 		if expected != "" && state.Version != expected {
 			detail = fmt.Sprintf("version %s; expected %s", state.Version, expected)
 		}
-		out.PendingWork = append(out.PendingWork, cli.CorpusPendingWorkResult{
+		out.PendingWork = append(out.PendingWork, contracts.CorpusPendingWorkResult{
 			Kind: "projection", Name: state.Name, Status: string(state.Status), Detail: detail,
 		})
 	}
@@ -123,7 +123,7 @@ func (s *Service) ListCorpusInventory(ctx context.Context) (*cli.CorpusInventory
 }
 
 // PlanCodePrune previews derived code snapshots eligible for deletion.
-func (s *Service) PlanCodePrune(ctx context.Context, repo string, keepLatest int) (*cli.CorpusPruneResult, error) {
+func (s *Service) PlanCodePrune(ctx context.Context, repo string, keepLatest int) (*contracts.CorpusPruneResult, error) {
 	ref, err := parseRepoRef(repo)
 	if err != nil {
 		return nil, err
@@ -140,7 +140,7 @@ func (s *Service) PlanCodePrune(ctx context.Context, repo string, keepLatest int
 }
 
 // ApplyCodePrune deletes the exact confirmed derived code-snapshot plan.
-func (s *Service) ApplyCodePrune(ctx context.Context, repo string, keepLatest int, expectedDelete []string) (*cli.CorpusPruneResult, error) {
+func (s *Service) ApplyCodePrune(ctx context.Context, repo string, keepLatest int, expectedDelete []string) (*contracts.CorpusPruneResult, error) {
 	ref, err := parseRepoRef(repo)
 	if err != nil {
 		return nil, err
@@ -173,16 +173,16 @@ func (s *Service) ApplyCodePrune(ctx context.Context, repo string, keepLatest in
 	return out, nil
 }
 
-func codePrunePlanResult(plan *corpus.CodeSnapshotPrunePlan) *cli.CorpusPruneResult {
-	out := &cli.CorpusPruneResult{Repo: plan.Ref.String(), DryRun: true, KeepLatest: plan.KeepLatest, Total: plan.TotalSnapshots, ReclaimBytes: plan.ReclaimBytes}
+func codePrunePlanResult(plan *corpus.CodeSnapshotPrunePlan) *contracts.CorpusPruneResult {
+	out := &contracts.CorpusPruneResult{Repo: plan.Ref.String(), DryRun: true, KeepLatest: plan.KeepLatest, Total: plan.TotalSnapshots, ReclaimBytes: plan.ReclaimBytes}
 	for _, snapshot := range plan.Delete {
-		out.Delete = append(out.Delete, cli.CorpusPruneSnapshot{CommitSHA: snapshot.CommitSHA, Bytes: snapshot.TotalBytes})
+		out.Delete = append(out.Delete, contracts.CorpusPruneSnapshot{CommitSHA: snapshot.CommitSHA, Bytes: snapshot.TotalBytes})
 	}
 	return out
 }
 
 // PlanRepositoryRemoval previews the exact repository-owned removal scope.
-func (s *Service) PlanRepositoryRemoval(ctx context.Context, repo string) (*cli.CorpusRepositoryRemovalResult, error) {
+func (s *Service) PlanRepositoryRemoval(ctx context.Context, repo string) (*contracts.CorpusRepositoryRemovalResult, error) {
 	ref, err := parseRepoRef(repo)
 	if err != nil {
 		return nil, err
@@ -205,7 +205,7 @@ func (s *Service) PlanRepositoryRemoval(ctx context.Context, repo string) (*cli.
 }
 
 // ApplyRepositoryRemoval applies an unchanged, confirmed repository-removal plan.
-func (s *Service) ApplyRepositoryRemoval(ctx context.Context, repo, expectedRevision string) (*cli.CorpusRepositoryRemovalResult, error) {
+func (s *Service) ApplyRepositoryRemoval(ctx context.Context, repo, expectedRevision string) (*contracts.CorpusRepositoryRemovalResult, error) {
 	ref, err := parseRepoRef(repo)
 	if err != nil {
 		return nil, err
@@ -234,8 +234,8 @@ func (s *Service) ApplyRepositoryRemoval(ctx context.Context, repo, expectedRevi
 	return repositoryRemovalResult(result.Plan, false), nil
 }
 
-func repositoryRemovalResult(plan *corpus.RepositoryRemovalPlan, dryRun bool) *cli.CorpusRepositoryRemovalResult {
-	return &cli.CorpusRepositoryRemovalResult{
+func repositoryRemovalResult(plan *corpus.RepositoryRemovalPlan, dryRun bool) *contracts.CorpusRepositoryRemovalResult {
+	return &contracts.CorpusRepositoryRemovalResult{
 		Repo: plan.Ref.String(), DryRun: dryRun, Revision: plan.Revision,
 		RepositoryObservations: plan.RepositoryObservations, Threads: plan.Threads,
 		ThreadObservations: plan.ThreadObservations, FacetObservations: plan.FacetObservations,
@@ -251,7 +251,7 @@ func repositoryRemovalResult(plan *corpus.RepositoryRemovalPlan, dryRun bool) *c
 }
 
 // ListCorpusProjections reports derived projection identities and freshness.
-func (s *Service) ListCorpusProjections(ctx context.Context) (*cli.CorpusProjectionListResult, error) {
+func (s *Service) ListCorpusProjections(ctx context.Context) (*contracts.CorpusProjectionListResult, error) {
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -260,7 +260,7 @@ func (s *Service) ListCorpusProjections(ctx context.Context) (*cli.CorpusProject
 	if err != nil {
 		return nil, err
 	}
-	out := &cli.CorpusProjectionListResult{Projections: make([]cli.CorpusProjectionResult, len(states))}
+	out := &contracts.CorpusProjectionListResult{Projections: make([]contracts.CorpusProjectionResult, len(states))}
 	for i := range states {
 		out.Projections[i] = projectionResult(states[i])
 	}
@@ -268,7 +268,7 @@ func (s *Service) ListCorpusProjections(ctx context.Context) (*cli.CorpusProject
 }
 
 // RebuildCorpusProjection explicitly replaces one derived search projection.
-func (s *Service) RebuildCorpusProjection(ctx context.Context, name string) (*cli.CorpusProjectionResult, error) {
+func (s *Service) RebuildCorpusProjection(ctx context.Context, name string) (*contracts.CorpusProjectionResult, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -291,8 +291,8 @@ func (s *Service) RebuildCorpusProjection(ctx context.Context, name string) (*cl
 	return &result, nil
 }
 
-func projectionResult(state corpus.ProjectionState) cli.CorpusProjectionResult {
-	result := cli.CorpusProjectionResult{
+func projectionResult(state corpus.ProjectionState) contracts.CorpusProjectionResult {
+	result := contracts.CorpusProjectionResult{
 		Name: state.Name, Version: state.Version, Status: string(state.Status), RowCount: state.RowCount,
 		SourceRevision: state.SourceRevision, ContentHash: state.ContentHash,
 		AttemptStatus: string(state.AttemptStatus), AttemptError: state.AttemptError,
@@ -309,18 +309,18 @@ func projectionResult(state corpus.ProjectionState) cli.CorpusProjectionResult {
 	return result
 }
 
-func corpusInspectionResult(inspection corpus.SchemaInspection) *cli.CorpusInspectionResult {
-	result := &cli.CorpusInspectionResult{
+func corpusInspectionResult(inspection corpus.SchemaInspection) *contracts.CorpusInspectionResult {
+	result := &contracts.CorpusInspectionResult{
 		Path: inspection.Path, Exists: inspection.Exists, SizeBytes: inspection.SizeBytes, WALBytes: inspection.WALBytes,
 		State: string(inspection.State), Current: inspection.Current, Target: inspection.Target,
 		Repositories: inspection.Repository, Threads: inspection.Threads,
 		Problem:        inspection.Problem,
 		BackupRequired: inspection.BackupRequired, RequiredDiskBytes: inspection.RequiredDiskBytes,
 		AvailableDiskBytes: inspection.AvailableDiskBytes, ProjectionRebuildRequired: inspection.ProjectionRebuildRequired,
-		Pending: make([]cli.CorpusMigrationStep, 0, len(inspection.Pending)),
+		Pending: make([]contracts.CorpusMigrationStep, 0, len(inspection.Pending)),
 	}
 	for _, step := range inspection.Pending {
-		result.Pending = append(result.Pending, cli.CorpusMigrationStep{
+		result.Pending = append(result.Pending, contracts.CorpusMigrationStep{
 			Version: step.Version, Name: step.Name, Phase: "pending", AffectedRows: step.AffectedRows,
 			EstimateAvailable: step.EstimateAvailable, Transactional: step.Transactional,
 			Resumable: step.Resumable, ResumeStrategy: step.ResumeStrategy, ProjectionRebuild: step.ProjectionRebuild,
@@ -330,7 +330,7 @@ func corpusInspectionResult(inspection corpus.SchemaInspection) *cli.CorpusInspe
 }
 
 // BackupCorpus creates a verified online backup at destination.
-func (s *Service) BackupCorpus(ctx context.Context, destination string) (*cli.CorpusBackupResult, error) {
+func (s *Service) BackupCorpus(ctx context.Context, destination string) (*contracts.CorpusBackupResult, error) {
 	cfg, err := s.loadConfig(false)
 	if err != nil {
 		return nil, err
@@ -346,7 +346,7 @@ func (s *Service) BackupCorpus(ctx context.Context, destination string) (*cli.Co
 }
 
 // RestoreCorpus replaces the corpus from a verified backup after safety backup.
-func (s *Service) RestoreCorpus(ctx context.Context, source, safetyBackup string) (*cli.CorpusRestoreResult, error) {
+func (s *Service) RestoreCorpus(ctx context.Context, source, safetyBackup string) (*contracts.CorpusRestoreResult, error) {
 	cfg, err := s.loadConfig(false)
 	if err != nil {
 		return nil, err
@@ -358,7 +358,7 @@ func (s *Service) RestoreCorpus(ctx context.Context, source, safetyBackup string
 	if err != nil {
 		return nil, err
 	}
-	report := &cli.CorpusRestoreResult{Source: source, Before: corpusInspectionResult(before)}
+	report := &contracts.CorpusRestoreResult{Source: source, Before: corpusInspectionResult(before)}
 	if err := s.releaseCorpusForMigration(); err != nil {
 		return nil, err
 	}
@@ -395,7 +395,7 @@ func (s *Service) RestoreCorpus(ctx context.Context, source, safetyBackup string
 }
 
 // MigrateCorpus explicitly applies pending schema migrations with backup policy.
-func (s *Service) MigrateCorpus(ctx context.Context, opts cli.CorpusMigrateOptions) (*cli.CorpusMigrationResult, error) {
+func (s *Service) MigrateCorpus(ctx context.Context, opts contracts.CorpusMigrateOptions) (*contracts.CorpusMigrationResult, error) {
 	cfg, err := s.loadConfig(false)
 	if err != nil {
 		return nil, err
@@ -410,7 +410,7 @@ func (s *Service) MigrateCorpus(ctx context.Context, opts cli.CorpusMigrateOptio
 	if before.State == corpus.SchemaDamaged {
 		return nil, fmt.Errorf("cannot migrate damaged corpus: %s", before.Problem)
 	}
-	report := &cli.CorpusMigrationResult{Before: corpusInspectionResult(before)}
+	report := &contracts.CorpusMigrationResult{Before: corpusInspectionResult(before)}
 	if before.State == corpus.SchemaCurrent {
 		report.After = corpusInspectionResult(before)
 		return report, nil
@@ -427,7 +427,7 @@ func (s *Service) MigrateCorpus(ctx context.Context, opts cli.CorpusMigrateOptio
 		}
 	}
 	backup, err := corpus.MigrateWithBackup(ctx, cfg.Database, destination, func(progress corpus.MigrationProgress) {
-		report.Steps = append(report.Steps, cli.CorpusMigrationStep{Version: progress.Version, Name: progress.Name, Phase: progress.Phase})
+		report.Steps = append(report.Steps, contracts.CorpusMigrationStep{Version: progress.Version, Name: progress.Name, Phase: progress.Phase})
 	})
 	if backup != nil {
 		report.Backup = corpusBackupResult(*backup)
@@ -446,8 +446,8 @@ func (s *Service) MigrateCorpus(ctx context.Context, opts cli.CorpusMigrateOptio
 	return report, nil
 }
 
-func corpusBackupResult(result corpus.BackupResult) *cli.CorpusBackupResult {
-	out := &cli.CorpusBackupResult{
+func corpusBackupResult(result corpus.BackupResult) *contracts.CorpusBackupResult {
+	out := &contracts.CorpusBackupResult{
 		Path: result.Path, ManifestPath: result.ManifestPath, SizeBytes: result.SizeBytes,
 		SHA256: result.SHA256, SourceSchema: result.SourceSchema,
 		ExpectedSchema: result.ExpectedSchema, Compatibility: string(result.Compatibility),

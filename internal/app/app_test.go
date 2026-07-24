@@ -18,13 +18,13 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/investigation"
-	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/workspace"
 )
 
@@ -225,7 +225,7 @@ func TestDiscoveryCrawlPersistsRepositoryFrontierAndCheckpoint(t *testing.T) {
 		t.Fatalf("sources = %+v", listed.Sources)
 	}
 
-	result, err := svc.Crawl(ctx, "active-go", cli.CrawlOptions{Since: 24 * time.Hour, Budget: 10})
+	result, err := svc.Crawl(ctx, "active-go", contracts.CrawlOptions{Since: 24 * time.Hour, Budget: 10})
 	if err != nil {
 		t.Fatalf("crawl: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestDiscoveryCrawlPersistsRepositoryFrontierAndCheckpoint(t *testing.T) {
 		t.Fatalf("checkpoint = %v exists=%v err=%v", checkpoint, exists, err)
 	}
 
-	second, err := svc.Crawl(ctx, "active-go", cli.CrawlOptions{Since: 24 * time.Hour, Budget: 10})
+	second, err := svc.Crawl(ctx, "active-go", contracts.CrawlOptions{Since: 24 * time.Hour, Budget: 10})
 	if err != nil {
 		t.Fatalf("incremental crawl: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestContributionGuidanceDoesNotClaimUnfetchedSource(t *testing.T) {
 	defer srv.Close()
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
-	if _, err := svc.Sync(ctx, cli.RepoRef{Owner: "octocat", Repo: "test"}); err != nil {
+	if _, err := svc.Sync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "test"}); err != nil {
 		t.Fatal(err)
 	}
 	guidance, refs, err := (&corpusReader{s: svc}).ReadContributionGuidance(ctx, domain.RepoRef{Owner: "octocat", Repo: "test"})
@@ -304,13 +304,13 @@ func TestMCPReaderLocalReads(t *testing.T) {
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
 
-	if _, err := svc.Sync(ctx, cli.RepoRef{Owner: "acme", Repo: "rocket"}); err != nil {
+	if _, err := svc.Sync(ctx, contracts.RepoRef{Owner: "acme", Repo: "rocket"}); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 
 	reader := svc.MCPReader()
 
-	repo, err := reader.Repository(ctx, mcpserver.RepoInput{Owner: "acme", Repo: "rocket"})
+	repo, err := reader.Repository(ctx, mcpcontract.RepoInput{Owner: "acme", Repo: "rocket"})
 	if err != nil {
 		t.Fatalf("mcp repository: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestMCPReaderLocalReads(t *testing.T) {
 		t.Fatalf("unexpected repository output: %+v", repo)
 	}
 
-	thread, err := reader.Thread(ctx, mcpserver.ThreadInput{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 1})
+	thread, err := reader.Thread(ctx, mcpcontract.ThreadInput{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 1})
 	if err != nil {
 		t.Fatalf("mcp thread: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestMCPReaderLocalReads(t *testing.T) {
 		t.Fatalf("unexpected thread output: %+v", thread)
 	}
 
-	search, err := reader.Search(ctx, mcpserver.SearchInput{Query: "searchable", Kind: "issue", Limit: 10})
+	search, err := reader.Search(ctx, mcpcontract.SearchInput{Query: "searchable", Kind: "issue", Limit: 10})
 	if err != nil {
 		t.Fatalf("mcp search: %v", err)
 	}
@@ -337,14 +337,14 @@ func TestMCPReaderLocalReads(t *testing.T) {
 		t.Fatalf("MCP search should return a compact match excerpt, got %+v", search.Matches[0])
 	}
 
-	_, err = reader.Dossier(ctx, mcpserver.RepoInput{Owner: "acme", Repo: "rocket"})
-	if !errors.Is(err, mcpserver.ErrNotFound) {
+	_, err = reader.Dossier(ctx, mcpcontract.RepoInput{Owner: "acme", Repo: "rocket"})
+	if !errors.Is(err, mcpcontract.ErrNotFound) {
 		t.Fatalf("MCP dossier before build error = %v, want ErrNotFound", err)
 	}
-	if _, err := svc.BuildRepositoryDossier(ctx, cli.RepoRef{Owner: "acme", Repo: "rocket"}); err != nil {
+	if _, err := svc.BuildRepositoryDossier(ctx, contracts.RepoRef{Owner: "acme", Repo: "rocket"}); err != nil {
 		t.Fatalf("build dossier: %v", err)
 	}
-	dossier, err := reader.Dossier(ctx, mcpserver.RepoInput{Owner: "acme", Repo: "rocket"})
+	dossier, err := reader.Dossier(ctx, mcpcontract.RepoInput{Owner: "acme", Repo: "rocket"})
 	if err != nil {
 		t.Fatalf("mcp dossier: %v", err)
 	}
@@ -355,11 +355,11 @@ func TestMCPReaderLocalReads(t *testing.T) {
 		t.Fatalf("dossier missing stars section: %+v", dossier.Sections)
 	}
 
-	_, err = reader.Thread(ctx, mcpserver.ThreadInput{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 404})
+	_, err = reader.Thread(ctx, mcpcontract.ThreadInput{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 404})
 	if err == nil {
 		t.Fatal("expected not found for missing thread")
 	}
-	if !errors.Is(err, mcpserver.ErrNotFound) {
+	if !errors.Is(err, mcpcontract.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
@@ -367,7 +367,7 @@ func TestMCPReaderLocalReads(t *testing.T) {
 func TestMCPSearchRequiresCompleteRepositoryFilter(t *testing.T) {
 	t.Parallel()
 	svc := &Service{}
-	_, err := svc.MCPReader().Search(context.Background(), mcpserver.SearchInput{Query: "bug", Owner: "owner"})
+	_, err := svc.MCPReader().Search(context.Background(), mcpcontract.SearchInput{Query: "bug", Owner: "owner"})
 	if err == nil || !strings.Contains(err.Error(), "provided together") {
 		t.Fatalf("Search error = %v", err)
 	}
@@ -392,7 +392,7 @@ func TestSearchCodeUsesStoredSnapshotWithoutNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := svc.Search(ctx, "searchableParser", cli.SearchOptions{Kind: "code", Repo: "owner/repo", Limit: 10})
+	result, err := svc.Search(ctx, "searchableParser", contracts.SearchOptions{Kind: "code", Repo: "owner/repo", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +414,7 @@ func TestInvestigationAndOpportunityFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "go")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "go")
 	if err != nil {
 		t.Fatalf("start investigation: %v", err)
 	}
@@ -500,7 +500,7 @@ func TestPrepareContributionDrafts(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "", "")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "", "")
 	if err != nil {
 		t.Fatalf("start investigation: %v", err)
 	}
@@ -513,7 +513,7 @@ func TestPrepareContributionDrafts(t *testing.T) {
 		t.Fatalf("promote opportunity: %v", err)
 	}
 
-	issue, err := svc.PrepareIssue(ctx, opp.ID, cli.PrepareIssueOptions{Success: "Pass tests without panic"})
+	issue, err := svc.PrepareIssue(ctx, opp.ID, contracts.PrepareIssueOptions{Success: "Pass tests without panic"})
 	if err != nil {
 		t.Fatalf("prepare issue: %v", err)
 	}
@@ -524,7 +524,7 @@ func TestPrepareContributionDrafts(t *testing.T) {
 		t.Fatalf("issue body missing expected sections: %s", issue.Body)
 	}
 
-	pr, err := svc.PreparePullRequest(ctx, opp.ID, cli.PreparePROptions{
+	pr, err := svc.PreparePullRequest(ctx, opp.ID, contracts.PreparePROptions{
 		Approach:      "Serialize access with a mutex",
 		Changes:       "Lock around parser state",
 		Compatibility: "No breaking changes",
@@ -555,7 +555,7 @@ func TestPrepareContributionDrafts(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.PreparePullRequest(ctx, opp.ID, cli.PreparePROptions{
+	_, err = svc.PreparePullRequest(ctx, opp.ID, contracts.PreparePROptions{
 		WorkspaceID: "unrelated-workspace",
 		Approach:    "Serialize access with a mutex",
 	})
@@ -577,13 +577,13 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc123", "")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "abc123", "")
 	if err != nil {
 		t.Fatalf("start investigation: %v", err)
 	}
 
 	dir := t.TempDir()
-	def, err := svc.DefineValidation(ctx, inv.ID, cli.DefineValidationOptions{
+	def, err := svc.DefineValidation(ctx, inv.ID, contracts.DefineValidationOptions{
 		Kind:           "test",
 		Command:        "echo ok",
 		WorkingDir:     dir,
@@ -597,11 +597,11 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 		t.Fatalf("unexpected validation: %+v", def)
 	}
 
-	if _, err := svc.RunValidation(ctx, def.ID, cli.RunValidationOptions{Kind: "base"}); !errors.Is(err, evidence.ErrExecutionNotAuthorized) {
+	if _, err := svc.RunValidation(ctx, def.ID, contracts.RunValidationOptions{Kind: "base"}); !errors.Is(err, evidence.ErrExecutionNotAuthorized) {
 		t.Fatalf("unauthorized run error = %v, want ErrExecutionNotAuthorized", err)
 	}
 
-	baseRun, err := svc.RunValidation(ctx, def.ID, cli.RunValidationOptions{Kind: "base", Execute: true})
+	baseRun, err := svc.RunValidation(ctx, def.ID, contracts.RunValidationOptions{Kind: "base", Execute: true})
 	if err != nil {
 		t.Fatalf("run base: %v", err)
 	}
@@ -609,7 +609,7 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 		t.Fatalf("unexpected base run: %+v", baseRun)
 	}
 
-	candidateRun, err := svc.RunValidation(ctx, def.ID, cli.RunValidationOptions{Kind: "candidate", Execute: true})
+	candidateRun, err := svc.RunValidation(ctx, def.ID, contracts.RunValidationOptions{Kind: "candidate", Execute: true})
 	if err != nil {
 		t.Fatalf("run candidate: %v", err)
 	}
@@ -718,7 +718,7 @@ func TestCreateAndUpdateHypothesis(t *testing.T) {
 	svc := newLocalService(t)
 	defer func() { _ = svc.Close() }()
 
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
 	if err != nil {
 		t.Fatalf("start investigation: %v", err)
 	}
@@ -773,7 +773,7 @@ func TestRecordEvidence(t *testing.T) {
 	svc := newLocalService(t)
 	defer func() { _ = svc.Close() }()
 
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
 	if err != nil {
 		t.Fatalf("start investigation: %v", err)
 	}
@@ -783,7 +783,7 @@ func TestRecordEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create hypothesis: %v", err)
 	}
-	e, err := svc.RecordEvidence(ctx, RecordEvidenceInput{
+	e, err := svc.RecordEvidence(ctx, contracts.RecordEvidenceInput{
 		HypothesisID: h.ID,
 		Type:         string(evidence.EvidenceTypeManualObservation),
 		Relation:     string(evidence.RelationSupporting),
@@ -806,7 +806,7 @@ func TestPromoteOpportunityWithDependencies(t *testing.T) {
 	svc := newLocalService(t)
 	defer func() { _ = svc.Close() }()
 
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
 	if err != nil {
 		t.Fatalf("start investigation: %v", err)
 	}
@@ -861,11 +861,11 @@ func TestWorkspaceDiffAndReviewReport(t *testing.T) {
 
 	remote, baseSHA, candidateSHA := setupAppGitRemote(t)
 
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
 	if err != nil {
 		t.Fatalf("start investigation: %v", err)
 	}
-	ws, err := svc.CreateWorkspace(ctx, inv.ID, cli.WorkspaceCreateOptions{
+	ws, err := svc.CreateWorkspace(ctx, inv.ID, contracts.WorkspaceCreateOptions{
 		Remote:       remote,
 		BaseRef:      "master",
 		CandidateRef: "feature",
@@ -917,7 +917,7 @@ func TestWorkspaceDiffAndReviewReport(t *testing.T) {
 		t.Fatalf("promote opportunity: %v", err)
 	}
 
-	report, err := svc.PrepareReviewReport(ctx, PrepareReviewReportInput{
+	report, err := svc.PrepareReviewReport(ctx, contracts.PrepareReviewReportInput{
 		OpportunityID: o.ID,
 		WorkspaceID:   ws.ID,
 	})
@@ -942,7 +942,7 @@ func TestWorkspaceDiffAndReviewReport(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.PrepareReviewReport(ctx, PrepareReviewReportInput{
+	_, err = svc.PrepareReviewReport(ctx, contracts.PrepareReviewReportInput{
 		OpportunityID: o.ID,
 		WorkspaceID:   "unrelated-workspace",
 	})
@@ -1010,7 +1010,7 @@ func TestSyncMapsIssueMetadataToThread(t *testing.T) {
 	}
 	svc.SetGitHubReader(reader)
 
-	if _, err := svc.Sync(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}); err != nil {
+	if _, err := svc.Sync(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 

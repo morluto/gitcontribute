@@ -3,9 +3,11 @@ package cli
 import (
 	"fmt"
 	"strings"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
-func renderSetupPlan(report *SetupReport) string {
+func renderSetupPlan(report *contracts.SetupReport) string {
 	var b strings.Builder
 	b.WriteString("Setup plan\n\nReview these changes")
 	for _, step := range report.Steps {
@@ -33,7 +35,7 @@ func renderSetupPlan(report *SetupReport) string {
 	return b.String()
 }
 
-func setupCLIInstallCommand(report *SetupReport) string {
+func setupCLIInstallCommand(report *contracts.SetupReport) string {
 	for _, step := range report.Steps {
 		if step.Name == "cli" && step.Message != "" {
 			return step.Message
@@ -42,7 +44,7 @@ func setupCLIInstallCommand(report *SetupReport) string {
 	return "npm install --global gitcontribute"
 }
 
-func renderSetupResult(report *SetupReport, opts SetupOptions) string {
+func renderSetupResult(report *contracts.SetupReport, opts contracts.SetupOptions) string {
 	var b strings.Builder
 	if report.HasFailures() {
 		b.WriteString("✗ Setup needs attention\n\n")
@@ -79,7 +81,7 @@ func renderSetupResult(report *SetupReport, opts SetupOptions) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func writeSetupMCPCommand(b *strings.Builder, command *SetupMCPCommand) {
+func writeSetupMCPCommand(b *strings.Builder, command *contracts.SetupMCPCommand) {
 	if command == nil {
 		return
 	}
@@ -89,7 +91,7 @@ func writeSetupMCPCommand(b *strings.Builder, command *SetupMCPCommand) {
 	}
 }
 
-func writeSetupStep(b *strings.Builder, step SetupStep, plan bool) {
+func writeSetupStep(b *strings.Builder, step contracts.SetupStep, plan bool) {
 	symbol := "✓"
 	if step.Status == "failed" {
 		symbol = "✗"
@@ -144,7 +146,7 @@ func setupPlanAction(status string) string {
 	}
 }
 
-func setupPlanInstallsCLI(report *SetupReport) bool {
+func setupPlanInstallsCLI(report *contracts.SetupReport) bool {
 	for _, step := range report.Steps {
 		if step.Name == "cli" && step.Status == "would install" {
 			return true
@@ -153,7 +155,7 @@ func setupPlanInstallsCLI(report *SetupReport) bool {
 	return false
 }
 
-func setupPlanInstallsManagedRuntime(report *SetupReport) bool {
+func setupPlanInstallsManagedRuntime(report *contracts.SetupReport) bool {
 	for _, step := range report.Steps {
 		if step.Name == "mcp-runtime" && step.Status == "would install" {
 			return true
@@ -162,7 +164,7 @@ func setupPlanInstallsManagedRuntime(report *SetupReport) bool {
 	return false
 }
 
-func writeSetupAuthentication(b *strings.Builder, auth *SetupAuthentication, plan bool) {
+func writeSetupAuthentication(b *strings.Builder, auth *contracts.SetupAuthentication, plan bool) {
 	if auth == nil || strings.TrimSpace(auth.Method) == "" {
 		return
 	}

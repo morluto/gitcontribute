@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 type fakeExtendedService struct {
@@ -26,69 +26,69 @@ type fakeExtendedService struct {
 	prepareIssueCalled      bool
 	preparePRCalled         bool
 
-	workspaceResult       *cli.WorkspaceResult
-	validationResult      *cli.ValidationResult
-	validationRunResult   *cli.ValidationRunResult
-	validationGroupResult *cli.ValidationRunGroupResult
-	comparisonResult      *cli.ValidationComparisonResult
-	evidenceResult        *cli.EvidenceResult
-	readinessResult       *cli.ReadinessResult
-	readinessCheck        *cli.ReadinessCheck
-	draftResult           *cli.DraftResult
+	workspaceResult       *contracts.WorkspaceResult
+	validationResult      *contracts.ValidationResult
+	validationRunResult   *contracts.ValidationRunResult
+	validationGroupResult *contracts.ValidationRunGroupResult
+	comparisonResult      *contracts.ValidationComparisonResult
+	evidenceResult        *contracts.EvidenceResult
+	readinessResult       *contracts.ReadinessResult
+	readinessCheck        *contracts.ReadinessCheck
+	draftResult           *contracts.DraftResult
 
 	lastWorkspaceInvestigation  string
-	lastCreateWorkspaceOpts     cli.WorkspaceCreateOptions
-	lastAdoptWorkspaceOpts      cli.WorkspaceAdoptOptions
+	lastCreateWorkspaceOpts     contracts.WorkspaceCreateOptions
+	lastAdoptWorkspaceOpts      contracts.WorkspaceAdoptOptions
 	lastShowWorkspaceID         string
 	lastValidationInvestigation string
-	lastDefineValidationOpts    cli.DefineValidationOptions
+	lastDefineValidationOpts    contracts.DefineValidationOptions
 	lastRunValidationID         string
 	lastRunKind                 string
 	lastRunExecute              bool
-	lastRepeatValidationOpts    cli.RepeatValidationOptions
+	lastRepeatValidationOpts    contracts.RepeatValidationOptions
 	lastCompareBase             string
 	lastCompareCandidate        string
 	lastEvidenceInvestigation   string
 	lastReadinessOpportunity    string
 	lastReadinessCheck          string
 	lastPrepareIssueID          string
-	lastPrepareIssueOpts        cli.PrepareIssueOptions
+	lastPrepareIssueOpts        contracts.PrepareIssueOptions
 	lastPreparePRID             string
-	lastPreparePROpts           cli.PreparePROptions
+	lastPreparePROpts           contracts.PreparePROptions
 }
 
-func (f *fakeExtendedService) CreateWorkspace(ctx context.Context, investigationID string, opts cli.WorkspaceCreateOptions) (*cli.WorkspaceResult, error) {
+func (f *fakeExtendedService) CreateWorkspace(ctx context.Context, investigationID string, opts contracts.WorkspaceCreateOptions) (*contracts.WorkspaceResult, error) {
 	f.createWorkspaceCalled = true
 	f.lastWorkspaceInvestigation = investigationID
 	f.lastCreateWorkspaceOpts = opts
 	return f.workspaceResult, f.err
 }
 
-func (f *fakeExtendedService) AdoptWorkspace(_ context.Context, investigationID string, opts cli.WorkspaceAdoptOptions) (*cli.WorkspaceResult, error) {
+func (f *fakeExtendedService) AdoptWorkspace(_ context.Context, investigationID string, opts contracts.WorkspaceAdoptOptions) (*contracts.WorkspaceResult, error) {
 	f.adoptWorkspaceCalled = true
 	f.lastWorkspaceInvestigation = investigationID
 	f.lastAdoptWorkspaceOpts = opts
 	return f.workspaceResult, f.err
 }
 
-func (f *fakeExtendedService) ShowWorkspace(ctx context.Context, id string) (*cli.WorkspaceResult, error) {
+func (f *fakeExtendedService) ShowWorkspace(ctx context.Context, id string) (*contracts.WorkspaceResult, error) {
 	f.showWorkspaceCalled = true
 	f.lastShowWorkspaceID = id
 	return f.workspaceResult, f.err
 }
 
-func (f *fakeExtendedService) DefineValidation(ctx context.Context, investigationID string, opts cli.DefineValidationOptions) (*cli.ValidationResult, error) {
+func (f *fakeExtendedService) DefineValidation(ctx context.Context, investigationID string, opts contracts.DefineValidationOptions) (*contracts.ValidationResult, error) {
 	f.defineValidationCalled = true
 	f.lastValidationInvestigation = investigationID
 	f.lastDefineValidationOpts = opts
 	return f.validationResult, f.err
 }
 
-func (f *fakeExtendedService) ShowValidation(ctx context.Context, id string) (*cli.ValidationResult, error) {
+func (f *fakeExtendedService) ShowValidation(ctx context.Context, id string) (*contracts.ValidationResult, error) {
 	return f.validationResult, f.err
 }
 
-func (f *fakeExtendedService) RunValidation(ctx context.Context, id string, opts cli.RunValidationOptions) (*cli.ValidationRunResult, error) {
+func (f *fakeExtendedService) RunValidation(ctx context.Context, id string, opts contracts.RunValidationOptions) (*contracts.ValidationRunResult, error) {
 	f.runValidationCalled = true
 	f.lastRunValidationID = id
 	f.lastRunKind = opts.Kind
@@ -96,46 +96,46 @@ func (f *fakeExtendedService) RunValidation(ctx context.Context, id string, opts
 	return f.validationRunResult, f.err
 }
 
-func (f *fakeExtendedService) RunValidationGroup(_ context.Context, id string, opts cli.RepeatValidationOptions) (*cli.ValidationRunGroupResult, error) {
+func (f *fakeExtendedService) RunValidationGroup(_ context.Context, id string, opts contracts.RepeatValidationOptions) (*contracts.ValidationRunGroupResult, error) {
 	f.repeatValidationCalled = true
 	f.lastRunValidationID = id
 	f.lastRepeatValidationOpts = opts
 	return f.validationGroupResult, f.err
 }
 
-func (f *fakeExtendedService) CompareValidation(ctx context.Context, baseRunID, candidateRunID string) (*cli.ValidationComparisonResult, error) {
+func (f *fakeExtendedService) CompareValidation(ctx context.Context, baseRunID, candidateRunID string) (*contracts.ValidationComparisonResult, error) {
 	f.compareValidationCalled = true
 	f.lastCompareBase = baseRunID
 	f.lastCompareCandidate = candidateRunID
 	return f.comparisonResult, f.err
 }
 
-func (f *fakeExtendedService) ShowEvidence(ctx context.Context, investigationID string) (*cli.EvidenceResult, error) {
+func (f *fakeExtendedService) ShowEvidence(ctx context.Context, investigationID string) (*contracts.EvidenceResult, error) {
 	f.showEvidenceCalled = true
 	f.lastEvidenceInvestigation = investigationID
 	return f.evidenceResult, f.err
 }
 
-func (f *fakeExtendedService) OpportunityReadiness(_ context.Context, opportunityID string) (*cli.ReadinessResult, error) {
+func (f *fakeExtendedService) OpportunityReadiness(_ context.Context, opportunityID string) (*contracts.ReadinessResult, error) {
 	f.readinessCalled = true
 	f.lastReadinessOpportunity = opportunityID
 	return f.readinessResult, f.err
 }
 
-func (f *fakeExtendedService) ExplainReadiness(_ context.Context, checkID string) (*cli.ReadinessCheck, error) {
+func (f *fakeExtendedService) ExplainReadiness(_ context.Context, checkID string) (*contracts.ReadinessCheck, error) {
 	f.explainReadinessCalled = true
 	f.lastReadinessCheck = checkID
 	return f.readinessCheck, f.err
 }
 
-func (f *fakeExtendedService) PrepareIssue(ctx context.Context, opportunityID string, opts cli.PrepareIssueOptions) (*cli.DraftResult, error) {
+func (f *fakeExtendedService) PrepareIssue(ctx context.Context, opportunityID string, opts contracts.PrepareIssueOptions) (*contracts.DraftResult, error) {
 	f.prepareIssueCalled = true
 	f.lastPrepareIssueID = opportunityID
 	f.lastPrepareIssueOpts = opts
 	return f.draftResult, f.err
 }
 
-func (f *fakeExtendedService) PreparePullRequest(ctx context.Context, opportunityID string, opts cli.PreparePROptions) (*cli.DraftResult, error) {
+func (f *fakeExtendedService) PreparePullRequest(ctx context.Context, opportunityID string, opts contracts.PreparePROptions) (*contracts.DraftResult, error) {
 	f.preparePRCalled = true
 	f.lastPreparePRID = opportunityID
 	f.lastPreparePROpts = opts
@@ -146,10 +146,10 @@ func TestWorkspaceCreateAndShow(t *testing.T) {
 	t.Parallel()
 	svc := &fakeExtendedService{
 		fakeService: &fakeService{},
-		workspaceResult: &cli.WorkspaceResult{
+		workspaceResult: &contracts.WorkspaceResult{
 			ID:              "ws-1",
 			InvestigationID: "inv-1",
-			Repo:            cli.RepoRef{Owner: "o", Repo: "r"},
+			Repo:            contracts.RepoRef{Owner: "o", Repo: "r"},
 			Path:            "/tmp/ws",
 			BaseSHA:         "abc",
 			CandidateSHA:    "def",
@@ -191,7 +191,7 @@ func TestWorkspaceCreateDefersDefaultsToService(t *testing.T) {
 	t.Parallel()
 	svc := &fakeExtendedService{
 		fakeService:     &fakeService{},
-		workspaceResult: &cli.WorkspaceResult{ID: "ws-1"},
+		workspaceResult: &contracts.WorkspaceResult{ID: "ws-1"},
 	}
 	c, _, _ := newTestCLI(svc, nil)
 
@@ -200,7 +200,7 @@ func TestWorkspaceCreateDefersDefaultsToService(t *testing.T) {
 	if !svc.createWorkspaceCalled || svc.lastWorkspaceInvestigation != "inv-1" {
 		t.Fatalf("workspace creation was not delegated: %+v", svc.lastCreateWorkspaceOpts)
 	}
-	if svc.lastCreateWorkspaceOpts != (cli.WorkspaceCreateOptions{}) {
+	if svc.lastCreateWorkspaceOpts != (contracts.WorkspaceCreateOptions{}) {
 		t.Fatalf("CLI supplied application defaults: %+v", svc.lastCreateWorkspaceOpts)
 	}
 }
@@ -209,7 +209,7 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 	t.Parallel()
 	svc := &fakeExtendedService{
 		fakeService: &fakeService{},
-		validationResult: &cli.ValidationResult{
+		validationResult: &contracts.ValidationResult{
 			ID:              "val-1",
 			InvestigationID: "inv-1",
 			Kind:            "test",
@@ -219,7 +219,7 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 			MaxOutputBytes:  1024,
 			CreatedAt:       "2026-07-17T00:00:00Z",
 		},
-		validationRunResult: &cli.ValidationRunResult{
+		validationRunResult: &contracts.ValidationRunResult{
 			ID:                "run-1",
 			DefinitionID:      "val-1",
 			Kind:              "base",
@@ -228,16 +228,16 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 			StartedAt:         "2026-07-17T00:00:00Z",
 			CompletedAt:       "2026-07-17T00:00:01Z",
 			ObservationStatus: "matched",
-			Observations: []cli.ValidationObservationResult{{
-				ValidationExpectedObservation: cli.ValidationExpectedObservation{Name: "symptom", Source: "stderr", Matcher: "exact", Occurrence: "present"},
+			Observations: []contracts.ValidationObservationResult{{
+				ValidationExpectedObservation: contracts.ValidationExpectedObservation{Name: "symptom", Source: "stderr", Matcher: "exact", Occurrence: "present"},
 				Status:                        "matched", Excerpt: "expected failure",
 			}},
 		},
-		validationGroupResult: &cli.ValidationRunGroupResult{
+		validationGroupResult: &contracts.ValidationRunGroupResult{
 			ID: "group-1", DefinitionID: "val-1", RequestedRuns: 3, CompletedRuns: 3, Classification: "stable_pass",
-			Aggregates: []cli.ValidationAggregateResult{{Kind: "candidate", Requested: 3, Completed: 3, Passing: 3, Classification: "stable_pass", ResourceClassification: "available"}},
+			Aggregates: []contracts.ValidationAggregateResult{{Kind: "candidate", Requested: 3, Completed: 3, Passing: 3, Classification: "stable_pass", ResourceClassification: "available"}},
 		},
-		comparisonResult: &cli.ValidationComparisonResult{
+		comparisonResult: &contracts.ValidationComparisonResult{
 			Classification: "fixed",
 			Explanation:    "base failed, candidate passed",
 		},
@@ -313,9 +313,9 @@ func TestEvidenceShow(t *testing.T) {
 	t.Parallel()
 	svc := &fakeExtendedService{
 		fakeService: &fakeService{},
-		evidenceResult: &cli.EvidenceResult{
+		evidenceResult: &contracts.EvidenceResult{
 			InvestigationID: "inv-1",
-			Evidence: []cli.EvidenceItem{
+			Evidence: []contracts.EvidenceItem{
 				{
 					ID: "ev-1", Type: "github_source", Relation: "supporting", Description: "observed panic",
 					Freshness: "stale", FreshnessReason: "thread issue:owner/repo#1 advanced from source_updated_at=2026-07-16T00:00:00Z",
@@ -341,12 +341,12 @@ func TestReadinessOpportunityAndExplain(t *testing.T) {
 	t.Parallel()
 	svc := &fakeExtendedService{
 		fakeService: &fakeService{},
-		readinessResult: &cli.ReadinessResult{
+		readinessResult: &contracts.ReadinessResult{
 			OpportunityID:  "opp-1",
 			RuleSetVersion: "readiness.v1",
 			Status:         "block",
 			EvaluatedAt:    "2026-07-17T00:00:00Z",
-			Checks: []cli.ReadinessCheck{{
+			Checks: []contracts.ReadinessCheck{{
 				CheckID:      "opp-1:candidate_improves_baseline",
 				RuleID:       "candidate_improves_baseline",
 				RuleVersion:  "v1",
@@ -357,7 +357,7 @@ func TestReadinessOpportunityAndExplain(t *testing.T) {
 				EvaluatedAt:  "2026-07-17T00:00:00Z",
 			}},
 		},
-		readinessCheck: &cli.ReadinessCheck{
+		readinessCheck: &contracts.ReadinessCheck{
 			CheckID:      "opp-1:evidence_freshness",
 			RuleID:       "evidence_freshness",
 			RuleVersion:  "v1",
@@ -396,7 +396,7 @@ func TestPrepareIssueAndPullRequest(t *testing.T) {
 	t.Parallel()
 	svc := &fakeExtendedService{
 		fakeService: &fakeService{},
-		draftResult: &cli.DraftResult{
+		draftResult: &contracts.DraftResult{
 			OpportunityID: "opp-1",
 			Kind:          "issue",
 			Title:         "Fix race",

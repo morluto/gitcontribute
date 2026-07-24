@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/config"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/workspace"
 )
 
@@ -32,7 +32,7 @@ func TestWorkspaceCreateAndShow(t *testing.T) {
 		t.Fatalf("init: %v", err)
 	}
 
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
 	if err != nil {
 		t.Fatalf("start investigation: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestWorkspaceCreateAndShow(t *testing.T) {
 		fixtureUser := strings.Join([]string{"fixture", "user"}, "-")
 		fixturePassword := strings.Join([]string{"fixture", "password"}, "-")
 		credentialRemote := "https://" + fixtureUser + ":" + fixturePassword + "@github.com/owner/repo.git"
-		_, err := svc.CreateWorkspace(ctx, inv.ID, cli.WorkspaceCreateOptions{
+		_, err := svc.CreateWorkspace(ctx, inv.ID, contracts.WorkspaceCreateOptions{
 			Remote: credentialRemote,
 			Name:   "credential-test",
 		})
@@ -68,7 +68,7 @@ func TestWorkspaceCreateAndShow(t *testing.T) {
 		}
 	})
 
-	ws, err := svc.CreateWorkspace(ctx, inv.ID, cli.WorkspaceCreateOptions{
+	ws, err := svc.CreateWorkspace(ctx, inv.ID, contracts.WorkspaceCreateOptions{
 		Remote:       remote,
 		BaseRef:      "master",
 		CandidateRef: "feature",
@@ -116,15 +116,15 @@ func TestAdoptWorkspaceIsIdempotentAndUsable(t *testing.T) {
 	if _, err := svc.Init(ctx); err != nil {
 		t.Fatal(err)
 	}
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := svc.AdoptWorkspace(ctx, inv.ID, cli.WorkspaceAdoptOptions{Path: external, BaseRef: "master"})
+	first, err := svc.AdoptWorkspace(ctx, inv.ID, contracts.WorkspaceAdoptOptions{Path: external, BaseRef: "master"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := svc.AdoptWorkspace(ctx, inv.ID, cli.WorkspaceAdoptOptions{Path: external, BaseRef: "master"})
+	second, err := svc.AdoptWorkspace(ctx, inv.ID, contracts.WorkspaceAdoptOptions{Path: external, BaseRef: "master"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,11 +157,11 @@ func TestAdoptWorkspaceRejectsRepositoryMismatch(t *testing.T) {
 	if _, err := svc.Init(ctx); err != nil {
 		t.Fatal(err)
 	}
-	inv, err := svc.StartInvestigation(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
+	inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, candidateSHA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.AdoptWorkspace(ctx, inv.ID, cli.WorkspaceAdoptOptions{Path: external, BaseRef: "master"}); err == nil || !strings.Contains(err.Error(), "does not match") {
+	if _, err := svc.AdoptWorkspace(ctx, inv.ID, contracts.WorkspaceAdoptOptions{Path: external, BaseRef: "master"}); err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("AdoptWorkspace mismatch error = %v", err)
 	}
 }

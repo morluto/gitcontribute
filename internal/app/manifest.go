@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/contribution"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -163,7 +163,7 @@ func validateManifestReferences(predicate manifest.Predicate) error {
 }
 
 // ExportManifest generates, persists, and renders one local JSON statement.
-func (s *Service) ExportManifest(ctx context.Context, opportunityID string, opts cli.ManifestExportOptions) (*cli.ExportResult, error) {
+func (s *Service) ExportManifest(ctx context.Context, opportunityID string, opts contracts.ManifestExportOptions) (*contracts.ExportResult, error) {
 	manifestOpts := ManifestOptions{WorkspaceID: opts.WorkspaceID}
 	if opts.PullRequest != nil {
 		manifestOpts.PullRequest = &ManifestPullRequest{Owner: opts.PullRequest.Owner, Repo: opts.PullRequest.Repo, Number: opts.PullRequest.Number}
@@ -176,7 +176,7 @@ func (s *Service) ExportManifest(ctx context.Context, opportunityID string, opts
 	if err != nil {
 		return nil, fmt.Errorf("encode contribution manifest: %w", err)
 	}
-	return &cli.ExportResult{Kind: "manifest", Format: "json", Content: string(payload)}, nil
+	return &contracts.ExportResult{Kind: "manifest", Format: "json", Content: string(payload)}, nil
 }
 
 func (s *Service) addManifestWorkspace(ctx context.Context, c *corpus.Corpus, investigationID, owner, repo, workspaceID string, predicate *manifest.Predicate) error {

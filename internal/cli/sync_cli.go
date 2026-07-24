@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 func (c *CLI) runSync(ctx context.Context, cmd *syncCmd) error {
@@ -11,8 +13,8 @@ func (c *CLI) runSync(ctx context.Context, cmd *syncCmd) error {
 	if err != nil {
 		return err
 	}
-	if planner, ok := c.svc.(SyncPlanningService); ok {
-		plan, err := planner.PlanArchiveSync(ctx, repo, ArchiveSyncOptions{State: "all"})
+	if planner, ok := c.svc.(contracts.SyncPlanningService); ok {
+		plan, err := planner.PlanArchiveSync(ctx, repo, contracts.ArchiveSyncOptions{State: "all"})
 		if err != nil {
 			return c.mapError(err)
 		}
@@ -49,7 +51,7 @@ func (c *CLI) runArchiveSync(ctx context.Context, cmd *archiveSyncCmd) error {
 	if len(numbers) > 0 && (cmd.State != "all" || cmd.Since != 0) {
 		return NewCLIError(ExitUsage, errors.New("state and since filters cannot be combined with exact thread numbers"))
 	}
-	opts := ArchiveSyncOptions{
+	opts := contracts.ArchiveSyncOptions{
 		State: cmd.State, Since: cmd.Since, Numbers: numbers, MaxPages: cmd.MaxPages, MaxRequests: cmd.MaxRequests,
 	}
 	plan, err := service.PlanArchiveSync(ctx, repo, opts)
@@ -78,7 +80,7 @@ func (c *CLI) runArchiveRefresh(ctx context.Context, cmd *archiveRefreshCmd) err
 	if err != nil {
 		return err
 	}
-	opts := ArchiveSyncOptions{State: "all", MaxPages: cmd.MaxPages}
+	opts := contracts.ArchiveSyncOptions{State: "all", MaxPages: cmd.MaxPages}
 	plan, err := service.PlanArchiveSync(ctx, repo, opts)
 	if err != nil {
 		return c.mapError(err)
@@ -96,7 +98,7 @@ func (c *CLI) runArchiveRefresh(ctx context.Context, cmd *archiveRefreshCmd) err
 	return c.render(cmd.JSON, result)
 }
 
-func (c *CLI) printSyncPlan(plan *SyncPlanResult) error {
+func (c *CLI) printSyncPlan(plan *contracts.SyncPlanResult) error {
 	if plan == nil {
 		return nil
 	}

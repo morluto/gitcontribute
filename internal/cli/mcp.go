@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 func (c *CLI) runMCP(ctx context.Context, cmd *mcpCmd) error {
@@ -14,5 +16,5 @@ func (c *CLI) runMCP(ctx context.Context, cmd *mcpCmd) error {
 	for i := range toolsets {
 		toolsets[i] = strings.TrimSpace(toolsets[i])
 	}
-	return c.mapError(c.runner.Run(ctx, MCPOptions{Transport: cmd.Serve.Transport, Toolsets: toolsets, ReadOnly: cmd.Serve.ReadOnly}))
+	return c.mapError(c.runner.Run(ctx, contracts.MCPOptions{Transport: cmd.Serve.Transport, Toolsets: toolsets, ReadOnly: cmd.Serve.ReadOnly}))
 }

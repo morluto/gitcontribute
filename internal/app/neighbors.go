@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/morluto/gitcontribute/internal/clustering"
-	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
@@ -31,7 +31,7 @@ const (
 // Neighbors returns a bounded, ranked list of threads most similar to the
 // query thread. Results include transparent scores, reasons, and the source
 // revision of the candidate population. No network access occurs.
-func (s *Service) Neighbors(ctx context.Context, repo cli.RepoRef, kind string, number int, limit int) (*NeighborsResult, error) {
+func (s *Service) Neighbors(ctx context.Context, repo contracts.RepoRef, kind string, number int, limit int) (*NeighborsResult, error) {
 	ref, dref, err := validateThreadQuery(repo, kind, number)
 	if err != nil {
 		return nil, err
@@ -107,7 +107,7 @@ func (s *Service) Neighbors(ctx context.Context, repo cli.RepoRef, kind string, 
 // deterministic order, transparent scores, the cluster stable id, canonical
 // member, and source revision. If the thread is not in a cluster, the result
 // is empty.
-func (s *Service) DuplicateCandidates(ctx context.Context, repo cli.RepoRef, kind string, number int, limit int) (*DuplicateCandidatesResult, error) {
+func (s *Service) DuplicateCandidates(ctx context.Context, repo contracts.RepoRef, kind string, number int, limit int) (*DuplicateCandidatesResult, error) {
 	ref, dref, err := validateThreadQuery(repo, kind, number)
 	if err != nil {
 		return nil, err
@@ -194,7 +194,7 @@ func (s *Service) DuplicateCandidates(ctx context.Context, repo cli.RepoRef, kin
 	return result, nil
 }
 
-func validateThreadQuery(repo cli.RepoRef, kind string, number int) (clustering.MemberRef, domain.RepoRef, error) {
+func validateThreadQuery(repo contracts.RepoRef, kind string, number int) (clustering.MemberRef, domain.RepoRef, error) {
 	dref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := dref.Validate(); err != nil {
 		return clustering.MemberRef{}, dref, err
@@ -311,7 +311,7 @@ type PullRequestCollisionResult struct {
 // base branch from the stored PR payload, explicit cross-references in the
 // title/body, and shared author. No network access occurs and no semantic file
 // overlap is invented.
-func (s *Service) PullRequestCollisions(ctx context.Context, repo cli.RepoRef, number int, limit int) (*PullRequestCollisionResult, error) {
+func (s *Service) PullRequestCollisions(ctx context.Context, repo contracts.RepoRef, number int, limit int) (*PullRequestCollisionResult, error) {
 	if number <= 0 {
 		return nil, errors.New("pull request number must be positive")
 	}
@@ -508,34 +508,9 @@ func sortPRCollisions(c []PullRequestCollision) {
 	})
 }
 
-// DuplicateCheckResult is the set of possible duplicate threads for a workflow item.
-type DuplicateCheckResult struct {
-	HypothesisID   string              `json:"hypothesis_id,omitempty"`
-	OpportunityID  string              `json:"opportunity_id,omitempty"`
-	Repo           domain.RepoRef      `json:"repo"`
-	Query          string              `json:"query"`
-	Findings       []evidence.Evidence `json:"findings"`
-	SourceRevision string              `json:"source_revision"`
-	Limit          int                 `json:"limit"`
-	Total          int                 `json:"total"`
-}
-
-// CollisionCheckResult is the set of open pull requests that may collide with
-// a workflow item.
-type CollisionCheckResult struct {
-	HypothesisID   string              `json:"hypothesis_id,omitempty"`
-	OpportunityID  string              `json:"opportunity_id,omitempty"`
-	Repo           domain.RepoRef      `json:"repo"`
-	Query          string              `json:"query"`
-	Findings       []evidence.Evidence `json:"findings"`
-	SourceRevision string              `json:"source_revision"`
-	Limit          int                 `json:"limit"`
-	Total          int                 `json:"total"`
-}
-
 // CheckHypothesisDuplicates searches the local corpus for threads similar to
 // a hypothesis, returning each finding as evidence.
-func (s *Service) CheckHypothesisDuplicates(ctx context.Context, hypothesisID string, limit int) (*DuplicateCheckResult, error) {
+func (s *Service) CheckHypothesisDuplicates(ctx context.Context, hypothesisID string, limit int) (*contracts.DuplicateCheckResult, error) {
 	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
@@ -557,7 +532,7 @@ func (s *Service) CheckHypothesisDuplicates(ctx context.Context, hypothesisID st
 	for _, n := range neighbors {
 		findings = append(findings, evidenceFromNeighbor(n, inv.Repo, inv.ID, h.ID, "", evidence.RelationInconclusive))
 	}
-	return &DuplicateCheckResult{
+	return &contracts.DuplicateCheckResult{
 		HypothesisID:   h.ID,
 		Repo:           inv.Repo,
 		Query:          query.Title,
@@ -570,7 +545,7 @@ func (s *Service) CheckHypothesisDuplicates(ctx context.Context, hypothesisID st
 
 // CheckOpportunityDuplicates searches the local corpus for threads similar to
 // an opportunity.
-func (s *Service) CheckOpportunityDuplicates(ctx context.Context, opportunityID string, limit int) (*DuplicateCheckResult, error) {
+func (s *Service) CheckOpportunityDuplicates(ctx context.Context, opportunityID string, limit int) (*contracts.DuplicateCheckResult, error) {
 	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
@@ -592,7 +567,7 @@ func (s *Service) CheckOpportunityDuplicates(ctx context.Context, opportunityID 
 	for _, n := range neighbors {
 		findings = append(findings, evidenceFromNeighbor(n, inv.Repo, inv.ID, o.HypothesisID, o.ID, evidence.RelationInconclusive))
 	}
-	return &DuplicateCheckResult{
+	return &contracts.DuplicateCheckResult{
 		OpportunityID:  o.ID,
 		Repo:           inv.Repo,
 		Query:          query.Title,
@@ -605,7 +580,7 @@ func (s *Service) CheckOpportunityDuplicates(ctx context.Context, opportunityID 
 
 // CheckHypothesisCollisions searches the local corpus for open pull requests
 // that may collide with a hypothesis.
-func (s *Service) CheckHypothesisCollisions(ctx context.Context, hypothesisID string, limit int) (*CollisionCheckResult, error) {
+func (s *Service) CheckHypothesisCollisions(ctx context.Context, hypothesisID string, limit int) (*contracts.CollisionCheckResult, error) {
 	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
@@ -624,7 +599,7 @@ func (s *Service) CheckHypothesisCollisions(ctx context.Context, hypothesisID st
 
 // CheckOpportunityCollisions searches the local corpus for open pull requests
 // that may collide with an opportunity.
-func (s *Service) CheckOpportunityCollisions(ctx context.Context, opportunityID string, limit int) (*CollisionCheckResult, error) {
+func (s *Service) CheckOpportunityCollisions(ctx context.Context, opportunityID string, limit int) (*contracts.CollisionCheckResult, error) {
 	invSvc, err := s.readInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
@@ -641,7 +616,7 @@ func (s *Service) CheckOpportunityCollisions(ctx context.Context, opportunityID 
 	return s.collisionsForQuery(ctx, inv, o.HypothesisID, o.ID, query, limit)
 }
 
-func (s *Service) collisionsForQuery(ctx context.Context, inv *investigation.Investigation, hypothesisID, opportunityID string, query clustering.Candidate, limit int) (*CollisionCheckResult, error) {
+func (s *Service) collisionsForQuery(ctx context.Context, inv *investigation.Investigation, hypothesisID, opportunityID string, query clustering.Candidate, limit int) (*contracts.CollisionCheckResult, error) {
 	neighbors, revision, effectiveLimit, err := s.findSimilarThreads(ctx, inv.Repo, query, corpus.ThreadKindPullRequest, true, limit)
 	if err != nil {
 		return nil, err
@@ -650,7 +625,7 @@ func (s *Service) collisionsForQuery(ctx context.Context, inv *investigation.Inv
 	for _, n := range neighbors {
 		findings = append(findings, evidenceFromNeighbor(n, inv.Repo, inv.ID, hypothesisID, opportunityID, evidence.RelationContradicting))
 	}
-	return &CollisionCheckResult{
+	return &contracts.CollisionCheckResult{
 		HypothesisID:   hypothesisID,
 		OpportunityID:  opportunityID,
 		Repo:           inv.Repo,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/radar"
 )
 
@@ -13,8 +14,8 @@ type radarCmd struct {
 	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
 
-func (c *CLI) radarService() (RadarService, error) {
-	service, ok := c.svc.(RadarService)
+func (c *CLI) radarService() (contracts.RadarService, error) {
+	service, ok := c.svc.(contracts.RadarService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -33,7 +34,7 @@ func (c *CLI) runRadar(ctx context.Context, cmd *radarCmd) error {
 	if err != nil {
 		return err
 	}
-	result, err := service.ContributionRadar(ctx, RadarOptions{Repo: repo, Limit: cmd.Limit})
+	result, err := service.ContributionRadar(ctx, contracts.RadarOptions{Repo: repo, Limit: cmd.Limit})
 	if err != nil {
 		return c.mapError(err)
 	}

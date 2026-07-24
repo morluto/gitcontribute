@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 type initCmd struct {
@@ -79,7 +81,7 @@ type corpusRestoreCmd struct {
 }
 
 func (c *CLI) runCorpus(ctx context.Context, command string, cmd *corpusCmd) error {
-	service, ok := c.svc.(CorpusLifecycleService)
+	service, ok := c.svc.(contracts.CorpusLifecycleService)
 	if !ok {
 		return NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -109,7 +111,7 @@ func (c *CLI) runCorpus(ctx context.Context, command string, cmd *corpusCmd) err
 	}
 }
 
-func (c *CLI) runCorpusInspect(ctx context.Context, service CorpusLifecycleService, json bool) error {
+func (c *CLI) runCorpusInspect(ctx context.Context, service contracts.CorpusLifecycleService, json bool) error {
 	result, err := service.InspectCorpus(ctx)
 	if err != nil {
 		return c.mapError(err)
@@ -117,7 +119,7 @@ func (c *CLI) runCorpusInspect(ctx context.Context, service CorpusLifecycleServi
 	return c.render(json, result)
 }
 
-func (c *CLI) runCorpusBackup(ctx context.Context, service CorpusLifecycleService, cmd *corpusBackupCmd) error {
+func (c *CLI) runCorpusBackup(ctx context.Context, service contracts.CorpusLifecycleService, cmd *corpusBackupCmd) error {
 	result, err := service.BackupCorpus(ctx, cmd.Destination)
 	if err != nil {
 		return c.mapError(err)
@@ -142,19 +144,19 @@ func (c *CLI) confirmCorpusAction(yes bool, nonInteractiveError, prompt, cancell
 	return confirmed, err
 }
 
-func (c *CLI) runCorpusMigrate(ctx context.Context, service CorpusLifecycleService, cmd *corpusMigrateCmd) error {
+func (c *CLI) runCorpusMigrate(ctx context.Context, service contracts.CorpusLifecycleService, cmd *corpusMigrateCmd) error {
 	confirmed, err := c.confirmCorpusAction(cmd.Yes, "corpus migration requires --yes in non-interactive use", "Back up and migrate the configured corpus", "Corpus migration cancelled.")
 	if err != nil || !confirmed {
 		return err
 	}
-	result, err := service.MigrateCorpus(ctx, CorpusMigrateOptions{BackupPath: cmd.BackupPath, NoBackup: cmd.NoBackup})
+	result, err := service.MigrateCorpus(ctx, contracts.CorpusMigrateOptions{BackupPath: cmd.BackupPath, NoBackup: cmd.NoBackup})
 	if err != nil {
 		return c.mapError(err)
 	}
 	return c.render(cmd.JSON, result)
 }
 
-func (c *CLI) runCorpusRestore(ctx context.Context, service CorpusLifecycleService, cmd *corpusRestoreCmd) error {
+func (c *CLI) runCorpusRestore(ctx context.Context, service contracts.CorpusLifecycleService, cmd *corpusRestoreCmd) error {
 	confirmed, err := c.confirmCorpusAction(cmd.Yes, "corpus restore requires --yes in non-interactive use", "Replace the configured corpus after creating a safety backup", "Corpus restore cancelled.")
 	if err != nil || !confirmed {
 		return err
@@ -166,7 +168,7 @@ func (c *CLI) runCorpusRestore(ctx context.Context, service CorpusLifecycleServi
 	return c.render(cmd.JSON, result)
 }
 
-func (c *CLI) runCorpusInventory(ctx context.Context, service CorpusLifecycleService, cmd *corpusInventoryCmd) error {
+func (c *CLI) runCorpusInventory(ctx context.Context, service contracts.CorpusLifecycleService, cmd *corpusInventoryCmd) error {
 	result, err := service.InventoryCorpus(ctx, cmd.Repo)
 	if err != nil {
 		return c.mapError(err)
@@ -174,7 +176,7 @@ func (c *CLI) runCorpusInventory(ctx context.Context, service CorpusLifecycleSer
 	return c.render(cmd.JSON, result)
 }
 
-func (c *CLI) runCorpusList(ctx context.Context, service CorpusLifecycleService, json bool) error {
+func (c *CLI) runCorpusList(ctx context.Context, service contracts.CorpusLifecycleService, json bool) error {
 	result, err := service.ListCorpusInventory(ctx)
 	if err != nil {
 		return c.mapError(err)
@@ -182,7 +184,7 @@ func (c *CLI) runCorpusList(ctx context.Context, service CorpusLifecycleService,
 	return c.render(json, result)
 }
 
-func (c *CLI) runCorpusPrune(ctx context.Context, service CorpusLifecycleService, cmd *corpusPruneCodeCmd) error {
+func (c *CLI) runCorpusPrune(ctx context.Context, service contracts.CorpusLifecycleService, cmd *corpusPruneCodeCmd) error {
 	plan, err := service.PlanCodePrune(ctx, cmd.Repo, cmd.KeepLatest)
 	if err != nil {
 		return c.mapError(err)
@@ -201,7 +203,7 @@ func (c *CLI) runCorpusPrune(ctx context.Context, service CorpusLifecycleService
 	return c.render(cmd.JSON, result)
 }
 
-func (c *CLI) runCorpusRemoveRepository(ctx context.Context, service CorpusLifecycleService, cmd *corpusRemoveRepositoryCmd) error {
+func (c *CLI) runCorpusRemoveRepository(ctx context.Context, service contracts.CorpusLifecycleService, cmd *corpusRemoveRepositoryCmd) error {
 	plan, err := service.PlanRepositoryRemoval(ctx, cmd.Repo)
 	if err != nil {
 		return c.mapError(err)
@@ -216,7 +218,7 @@ func (c *CLI) runCorpusRemoveRepository(ctx context.Context, service CorpusLifec
 	return c.render(cmd.JSON, result)
 }
 
-func (c *CLI) runCorpusProjections(ctx context.Context, service CorpusLifecycleService, json bool) error {
+func (c *CLI) runCorpusProjections(ctx context.Context, service contracts.CorpusLifecycleService, json bool) error {
 	result, err := service.ListCorpusProjections(ctx)
 	if err != nil {
 		return c.mapError(err)
@@ -224,7 +226,7 @@ func (c *CLI) runCorpusProjections(ctx context.Context, service CorpusLifecycleS
 	return c.render(json, result)
 }
 
-func (c *CLI) runCorpusRebuildProjection(ctx context.Context, service CorpusLifecycleService, cmd *corpusRebuildProjectionCmd) error {
+func (c *CLI) runCorpusRebuildProjection(ctx context.Context, service contracts.CorpusLifecycleService, cmd *corpusRebuildProjectionCmd) error {
 	if !cmd.Yes {
 		return NewCLIError(ExitUsage, errors.New("projection rebuild requires --yes"))
 	}

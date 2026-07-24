@@ -15,6 +15,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/github"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
 )
 
@@ -47,7 +48,11 @@ func TestMCPStdioHelper(t *testing.T) {
 		}
 		svc.SetGitHubReader(reader)
 	}
-	server, err := mcpserver.New(svc.MCPReader(), "e2e")
+	server, err := mcpserver.NewWithOptions(
+		svc.MCPReader(),
+		"e2e",
+		mcpcontract.Options{Toolsets: []string{"all"}},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,16 +103,16 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		}
 		tools[tool.Name] = tool
 	}
-	for _, name := range []string{mcpserver.ToolGetRepositories, mcpserver.ToolGetThreads, mcpserver.ToolRankThreads, mcpserver.ToolFindPrecedents, mcpserver.ToolListPullRequestPortfolio, mcpserver.ToolSearchGitHubRepositories, mcpserver.ToolSyncRepositoryMetadata, mcpserver.ToolSyncThreads, mcpserver.ToolHydrateThreads, mcpserver.ToolQueryDeepWiki, mcpserver.ToolIndexRepositories, mcpserver.ToolCheckMergeConflicts} {
+	for _, name := range []string{mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolRankThreads, mcpcontract.ToolFindPrecedents, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolSyncRepositoryMetadata, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads, mcpcontract.ToolQueryDeepWiki, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCheckMergeConflicts} {
 		if tools[name] == nil {
 			t.Errorf("tools/list missing %s", name)
 		}
 	}
 
-	metadataJob := callMCPTool[mcpserver.JobReference](ctx, t, session, mcpserver.ToolSyncRepositoryMetadata, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}}})
+	metadataJob := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncRepositoryMetadata, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}}})
 	metadataResult := waitMCPJob(ctx, t, session, metadataJob.ID)
 
-	repositories := callMCPTool[mcpserver.GetRepositoriesOutput](ctx, t, session, mcpserver.ToolGetRepositories, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}, map[string]any{"owner": "acme", "repo": "placeholder"}}})
+	repositories := callMCPTool[mcpcontract.GetRepositoriesOutput](ctx, t, session, mcpcontract.ToolGetRepositories, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}, map[string]any{"owner": "acme", "repo": "placeholder"}}})
 	if len(repositories.Items) != 2 || repositories.Items[0].Value == nil || repositories.Items[0].Value.Stars == nil || *repositories.Items[0].Value.Stars != 9001 {
 		t.Fatalf("observed repository batch = %+v, value = %+v, metadata job = %+v", repositories, repositories.Items[0].Value, metadataResult)
 	}
@@ -115,30 +120,30 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		t.Fatalf("placeholder exposed false metadata: %+v", repositories.Items[1])
 	}
 
-	threads := callMCPTool[mcpserver.GetThreadsOutput](ctx, t, session, mcpserver.ToolGetThreads, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "observed", "number": 1}, map[string]any{"owner": "acme", "repo": "observed", "number": 2}}, "view": "compact"})
+	threads := callMCPTool[mcpcontract.GetThreadsOutput](ctx, t, session, mcpcontract.ToolGetThreads, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "observed", "number": 1}, map[string]any{"owner": "acme", "repo": "observed", "number": 2}}, "view": "compact"})
 	if len(threads.Items) != 2 || threads.Items[0].Value == nil || threads.Items[0].Value.Body != "" {
 		t.Fatalf("compact thread batch = %+v", threads)
 	}
 
-	ranked := callMCPTool[mcpserver.RankOpportunitiesOutput](ctx, t, session, mcpserver.ToolRankThreads, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}}, "limit": 10, "max_results_per_repository": 10})
+	ranked := callMCPTool[mcpcontract.RankOpportunitiesOutput](ctx, t, session, mcpcontract.ToolRankThreads, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}}, "limit": 10, "max_results_per_repository": 10})
 	if len(ranked.Candidates) == 0 || ranked.Candidates[0].Number != 1 {
 		t.Fatalf("ranked opportunities = %+v", ranked)
 	}
 
-	precedents := callMCPTool[mcpserver.FindPrecedentsOutput](ctx, t, session, mcpserver.ToolFindPrecedents, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "observed", "number": 1}}, "limit": 10})
+	precedents := callMCPTool[mcpcontract.FindPrecedentsOutput](ctx, t, session, mcpcontract.ToolFindPrecedents, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "observed", "number": 1}}, "limit": 10})
 	if precedents.Total == 0 || precedents.Items[0].Value == nil || precedents.Items[0].Value.Matches[0].Ref != "acme/observed#2" {
 		t.Fatalf("precedents = %+v", precedents)
 	}
 
-	portfolio := callMCPTool[mcpserver.ListPullRequestPortfolioOutput](ctx, t, session, mcpserver.ToolListPullRequestPortfolio, map[string]any{"author": "morluto", "state": "open", "limit": 10})
+	portfolio := callMCPTool[mcpcontract.ListPullRequestPortfolioOutput](ctx, t, session, mcpcontract.ToolListPullRequestPortfolio, map[string]any{"author": "morluto", "state": "open", "limit": 10})
 	if len(portfolio.PullRequests) != 1 || portfolio.PullRequests[0].Attention != "unknown" {
 		t.Fatalf("portfolio = %+v", portfolio)
 	}
 
-	job := callMCPTool[mcpserver.JobReference](ctx, t, session, mcpserver.ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "observed"})
+	job := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "observed"})
 	waitMCPJob(ctx, t, session, job.ID)
 
-	invalid, err := session.CallTool(ctx, &mcp.CallToolParams{Name: mcpserver.ToolHydrateThreads, Arguments: map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "observed", "number": 1}}, "facets": []any{}}})
+	invalid, err := session.CallTool(ctx, &mcp.CallToolParams{Name: mcpcontract.ToolHydrateThreads, Arguments: map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "observed", "number": 1}}, "facets": []any{}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,16 +169,16 @@ func TestMCPStdioPullRequestPortfolioFlow(t *testing.T) {
 	}
 	defer session.Close()
 
-	identity := callMCPTool[mcpserver.AuthenticatedIdentityOutput](ctx, t, session, mcpserver.ToolGetAuthenticatedIdentity, map[string]any{})
+	identity := callMCPTool[mcpcontract.AuthenticatedIdentityOutput](ctx, t, session, mcpcontract.ToolGetAuthenticatedIdentity, map[string]any{})
 	if identity.Login != "morluto" || identity.ID != 99 {
 		t.Fatalf("authenticated identity = %+v", identity)
 	}
-	authored := callMCPTool[mcpserver.JobReference](ctx, t, session, mcpserver.ToolSyncAuthoredPullRequests, map[string]any{"state": "open", "limit": 10})
+	authored := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncAuthoredPullRequests, map[string]any{"state": "open", "limit": 10})
 	authoredResult := waitMCPJob(ctx, t, session, authored.ID)
-	status := callMCPTool[mcpserver.JobReference](ctx, t, session, mcpserver.ToolSyncPullRequestStatus, map[string]any{"pull_requests": []any{map[string]any{"owner": "lab", "repo": "project", "number": 7}}})
+	status := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncPullRequestStatus, map[string]any{"pull_requests": []any{map[string]any{"owner": "lab", "repo": "project", "number": 7}}})
 	waitMCPJob(ctx, t, session, status.ID)
 
-	portfolio := callMCPTool[mcpserver.ListPullRequestPortfolioOutput](ctx, t, session, mcpserver.ToolListPullRequestPortfolio, map[string]any{"author": "morluto", "state": "open", "limit": 10})
+	portfolio := callMCPTool[mcpcontract.ListPullRequestPortfolioOutput](ctx, t, session, mcpcontract.ToolListPullRequestPortfolio, map[string]any{"author": "morluto", "state": "open", "limit": 10})
 	if len(portfolio.PullRequests) != 1 {
 		t.Fatalf("portfolio = %+v, authored job = %+v", portfolio, authoredResult)
 	}
@@ -211,11 +216,11 @@ func TestMCPStdioExactThreadSyncFlow(t *testing.T) {
 		map[string]any{"owner": "lab", "repo": "project", "kind": "pull_request", "number": 7},
 	}
 	for range 2 {
-		job := callMCPTool[mcpserver.JobReference](ctx, t, session, mcpserver.ToolSyncThreads, map[string]any{
+		job := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncThreads, map[string]any{
 			"selection": "threads", "threads": threads,
 		})
 		waitMCPJob(ctx, t, session, job.ID)
-		detailed := callMCPTool[mcpserver.GetJobsOutput](ctx, t, session, mcpserver.ToolGetJob, map[string]any{
+		detailed := callMCPTool[mcpcontract.GetJobsOutput](ctx, t, session, mcpcontract.ToolGetJob, map[string]any{
 			"ids": []string{job.ID}, "response_format": "detailed",
 		})
 		assertExactThreadJobItems(t, detailed, []string{"lab/project#8", "lab/project#7"})
@@ -235,17 +240,17 @@ func TestMCPStdioExactThreadSyncFlow(t *testing.T) {
 		t.Fatalf("repeated exact sync duplicated observations: %+v", inventory.Repositories)
 	}
 
-	stored := callMCPTool[mcpserver.GetThreadsOutput](ctx, t, session, mcpserver.ToolGetThreads, map[string]any{"threads": threads})
+	stored := callMCPTool[mcpcontract.GetThreadsOutput](ctx, t, session, mcpcontract.ToolGetThreads, map[string]any{"threads": threads})
 	if len(stored.Items) != 2 || stored.Items[0].Value == nil || stored.Items[0].Value.Kind != "issue" || stored.Items[1].Value == nil || stored.Items[1].Value.Kind != "pull_request" {
 		t.Fatalf("exact stored threads = %+v", stored)
 	}
-	status := callMCPTool[mcpserver.JobReference](ctx, t, session, mcpserver.ToolSyncPullRequestStatus, map[string]any{
+	status := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncPullRequestStatus, map[string]any{
 		"pull_requests": []any{map[string]any{"owner": "lab", "repo": "project", "kind": "pull_request", "number": 7}},
 	})
 	waitMCPJob(ctx, t, session, status.ID)
 }
 
-func assertExactThreadJobItems(t *testing.T, jobs mcpserver.GetJobsOutput, wantKeys []string) {
+func assertExactThreadJobItems(t *testing.T, jobs mcpcontract.GetJobsOutput, wantKeys []string) {
 	t.Helper()
 	if len(jobs.Items) != 1 || jobs.Items[0].Value == nil {
 		t.Fatalf("detailed job response = %+v", jobs)
@@ -400,12 +405,12 @@ func newMCPGitHubServer(t *testing.T) *httptest.Server {
 	}))
 }
 
-func waitMCPJob(ctx context.Context, t *testing.T, session *mcp.ClientSession, id string) mcpserver.GetJobOutput {
+func waitMCPJob(ctx context.Context, t *testing.T, session *mcp.ClientSession, id string) mcpcontract.GetJobOutput {
 	t.Helper()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		jobs := callMCPTool[mcpserver.GetJobsOutput](ctx, t, session, mcpserver.ToolGetJob, map[string]any{"ids": []string{id}})
+		jobs := callMCPTool[mcpcontract.GetJobsOutput](ctx, t, session, mcpcontract.ToolGetJob, map[string]any{"ids": []string{id}})
 		if len(jobs.Items) != 1 || jobs.Items[0].Value == nil {
 			t.Fatalf("job %s missing from batch response: %+v", id, jobs)
 		}

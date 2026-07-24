@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+
+	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
 type readinessCmd struct {
@@ -20,8 +22,8 @@ type readinessExplainCmd struct {
 	JSON    bool   `name:"json" help:"Print the result as JSON"`
 }
 
-func (c *CLI) readinessService() (ReadinessService, error) {
-	service, ok := c.svc.(ReadinessService)
+func (c *CLI) readinessService() (contracts.ReadinessService, error) {
+	service, ok := c.svc.(contracts.ReadinessService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
