@@ -139,6 +139,31 @@ func TestSyncThreadsBatchPlansBudgetBeforeNetworkAccess(t *testing.T) {
 	}
 }
 
+func TestSyncThreadsBatchThreadTotalCountsRequestedThreads(t *testing.T) {
+	t.Parallel()
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := svc.syncThreadsBatch(context.Background(), mcpserver.SyncThreadsInput{
+		Selection: "threads",
+		Threads: []mcpserver.ThreadRef{
+			{Owner: "owner", Repo: "repo", Number: 1},
+			{Owner: "owner", Repo: "repo", Number: 2},
+		},
+		LimitPerRepository: 100,
+		MaxRequests:        syncFixedRequestCost(),
+	}, func(string, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, ok := out["items"].([]map[string]any)
+	if !ok || len(items) != 2 || out["total"] != 2 || out["completed"] != 0 || out["status"] != "partial" {
+		t.Fatalf("thread-mode result = %+v", out)
+	}
+}
+
 func TestNormalizeSyncBatchMaxRequestsBoundsInput(t *testing.T) {
 	t.Parallel()
 	if got, err := normalizeSyncBatchMaxRequests(0); err != nil || got != defaultSyncBatchMaxRequests {

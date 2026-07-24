@@ -235,7 +235,7 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpserver.SyncThreads
 		return nil, err
 	}
 	return map[string]any{
-		"status": status, "items": results, "completed": completed, "total": len(tasks),
+		"status": status, "items": results, "completed": completed, "total": resultCount,
 		"requests": requests, "request_budget": in.MaxRequests, "planned_requests": plannedRequests,
 	}, nil
 }
