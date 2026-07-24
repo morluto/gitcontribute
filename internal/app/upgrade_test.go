@@ -387,6 +387,7 @@ func TestUpgradePrivateMCPRuntimeDetected(t *testing.T) {
 }
 
 func TestUpgradeConfiguredRuntimeOutdated(t *testing.T) {
+	t.Setenv("npm_config_update_notifier", "false")
 	home := t.TempDir()
 	runtimePath := filepath.Join(home, ".local", "share", "gitcontribute", "bin", "1.2.3", "gitcontribute")
 	writeCodexConfig(t, home, runtimePath)
