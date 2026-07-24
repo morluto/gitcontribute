@@ -431,3 +431,32 @@ func TestPullRequestCollisions(t *testing.T) {
 		t.Fatalf("expected at least one collision for closed query PR with same base open PRs")
 	}
 }
+
+func TestSimilarityCandidateWindowScalesWithRequestedLimit(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		limit          int
+		effectiveLimit int
+		candidates     int
+	}{
+		{limit: 0, effectiveLimit: defaultNeighborsLimit, candidates: minCandidateLimit},
+		{limit: 10, effectiveLimit: 10, candidates: minCandidateLimit},
+		{limit: 20, effectiveLimit: 20, candidates: 400},
+		{limit: maxResultLimit, effectiveLimit: maxResultLimit, candidates: maxCandidateLimit},
+	}
+	for _, tt := range tests {
+		effective, err := normalizeSimilarityLimit(tt.limit)
+		if err != nil {
+			t.Fatalf("normalize %d: %v", tt.limit, err)
+		}
+		if effective != tt.effectiveLimit {
+			t.Fatalf("normalize %d = %d, want %d", tt.limit, effective, tt.effectiveLimit)
+		}
+		if got := similarityCandidateLimit(effective); got != tt.candidates {
+			t.Fatalf("candidate limit for %d = %d, want %d", effective, got, tt.candidates)
+		}
+	}
+	if _, err := normalizeSimilarityLimit(maxResultLimit + 1); err == nil {
+		t.Fatal("oversized similarity limit was accepted")
+	}
+}

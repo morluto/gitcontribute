@@ -106,7 +106,11 @@ func validateClusterList(ref domain.RepoRef, limit int) error {
 }
 
 func clusterListToCLI(repo cli.RepoRef, projection clusterprojection.List, limit int) *cli.ClusterListResult {
-	result := &cli.ClusterListResult{Repo: repo, Total: len(projection.Clusters)}
+	result := &cli.ClusterListResult{
+		Repo:      repo,
+		Total:     projection.Total,
+		Truncated: projection.Truncated,
+	}
 	if projection.Projection != nil {
 		result.Projection = &cli.ClusterProjectionIdentity{SourceRevision: projection.Projection.SourceRevision, GovernanceRevision: projection.Projection.GovernanceRevision, RuleVersion: string(projection.Projection.RuleVersion), RunID: projection.Projection.RunID}
 	}

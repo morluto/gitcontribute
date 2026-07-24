@@ -152,13 +152,17 @@ func (s *Service) ListSources(ctx context.Context) (*cli.SourceListResult, error
 	if err != nil {
 		return nil, err
 	}
-	sources, err := c.ListDiscoverySources(ctx)
+	list, err := c.ListDiscoverySources(ctx)
 	if err != nil {
 		return nil, err
 	}
-	result := &cli.SourceListResult{Sources: make([]cli.SourceResult, len(sources))}
-	for i := range sources {
-		result.Sources[i] = *sourceResult(&sources[i])
+	result := &cli.SourceListResult{
+		Sources:   make([]cli.SourceResult, len(list.Sources)),
+		Total:     list.Total,
+		Truncated: list.Truncated,
+	}
+	for i := range list.Sources {
+		result.Sources[i] = *sourceResult(&list.Sources[i])
 	}
 	return result, nil
 }

@@ -159,7 +159,9 @@ type SourceResult struct {
 }
 
 type SourceListResult struct {
-	Sources []SourceResult `json:"sources"`
+	Sources   []SourceResult `json:"sources"`
+	Total     int            `json:"total"`
+	Truncated bool           `json:"truncated"`
 }
 
 type CrawlOptions struct {
@@ -520,7 +522,9 @@ type LensResult struct {
 
 // LensListResult is a list of saved lenses.
 type LensListResult struct {
-	Lenses []LensResult `json:"lenses"`
+	Lenses    []LensResult `json:"lenses"`
+	Total     int          `json:"total"`
+	Truncated bool         `json:"truncated"`
 }
 
 // LensExplainResult explains a saved lens score for one candidate.
@@ -582,6 +586,8 @@ type CollectionResult struct {
 // CollectionListResult is a list of collections.
 type CollectionListResult struct {
 	Collections []CollectionResult `json:"collections"`
+	Total       int                `json:"total"`
+	Truncated   bool               `json:"truncated"`
 }
 
 // LocalQueryService exposes bounded offline corpus queries.

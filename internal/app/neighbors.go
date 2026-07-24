@@ -24,6 +24,8 @@ const (
 	defaultCollisionLimit = 10
 	maxResultLimit        = 1000
 	maxCandidateLimit     = 10000
+	minCandidateLimit     = 200
+	candidateLimitFactor  = 20
 )
 
 // Neighbors returns a bounded, ranked list of threads most similar to the
@@ -31,6 +33,10 @@ const (
 // revision of the candidate population. No network access occurs.
 func (s *Service) Neighbors(ctx context.Context, repo cli.RepoRef, kind string, number int, limit int) (*NeighborsResult, error) {
 	ref, dref, err := validateThreadQuery(repo, kind, number)
+	if err != nil {
+		return nil, err
+	}
+	limit, err = normalizeSimilarityLimit(limit)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +62,7 @@ func (s *Service) Neighbors(ctx context.Context, repo cli.RepoRef, kind string, 
 		return nil, fmt.Errorf("thread not found: %s", ref.String())
 	}
 
-	threads, err := c.ListThreads(ctx, repository.ID, "", maxCandidateLimit)
+	threads, err := c.ListThreads(ctx, repository.ID, "", similarityCandidateLimit(limit))
 	if err != nil {
 		return nil, err
 	}
@@ -68,13 +74,6 @@ func (s *Service) Neighbors(ctx context.Context, repo cli.RepoRef, kind string, 
 			continue
 		}
 		candidates = append(candidates, candidateFromThread(*repository, t))
-	}
-
-	if limit <= 0 {
-		limit = defaultNeighborsLimit
-	}
-	if limit > maxResultLimit {
-		return nil, fmt.Errorf("neighbors limit cannot exceed %d", maxResultLimit)
 	}
 
 	scored, err := clustering.Neighbors(ctx, queryCand, candidates, limit)
@@ -541,7 +540,7 @@ func (s *Service) CheckHypothesisDuplicates(ctx context.Context, hypothesisID st
 		return nil, mapInvestigationError(err)
 	}
 	query := candidateFromHypothesis(h, inv.Repo)
-	neighbors, revision, err := s.findSimilarThreads(ctx, inv.Repo, query, "", false, limit)
+	neighbors, revision, effectiveLimit, err := s.findSimilarThreads(ctx, inv.Repo, query, "", false, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -555,7 +554,7 @@ func (s *Service) CheckHypothesisDuplicates(ctx context.Context, hypothesisID st
 		Query:          query.Title,
 		Findings:       findings,
 		SourceRevision: revision,
-		Limit:          limit,
+		Limit:          effectiveLimit,
 		Total:          len(findings),
 	}, nil
 }
@@ -576,7 +575,7 @@ func (s *Service) CheckOpportunityDuplicates(ctx context.Context, opportunityID 
 		return nil, mapInvestigationError(err)
 	}
 	query := candidateFromOpportunity(o, inv.Repo)
-	neighbors, revision, err := s.findSimilarThreads(ctx, inv.Repo, query, "", false, limit)
+	neighbors, revision, effectiveLimit, err := s.findSimilarThreads(ctx, inv.Repo, query, "", false, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -590,7 +589,7 @@ func (s *Service) CheckOpportunityDuplicates(ctx context.Context, opportunityID 
 		Query:          query.Title,
 		Findings:       findings,
 		SourceRevision: revision,
-		Limit:          limit,
+		Limit:          effectiveLimit,
 		Total:          len(findings),
 	}, nil
 }
@@ -634,7 +633,7 @@ func (s *Service) CheckOpportunityCollisions(ctx context.Context, opportunityID 
 }
 
 func (s *Service) collisionsForQuery(ctx context.Context, inv *investigation.Investigation, hypothesisID, opportunityID string, query clustering.Candidate, limit int) (*CollisionCheckResult, error) {
-	neighbors, revision, err := s.findSimilarThreads(ctx, inv.Repo, query, corpus.ThreadKindPullRequest, true, limit)
+	neighbors, revision, effectiveLimit, err := s.findSimilarThreads(ctx, inv.Repo, query, corpus.ThreadKindPullRequest, true, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -649,51 +648,64 @@ func (s *Service) collisionsForQuery(ctx context.Context, inv *investigation.Inv
 		Query:          query.Title,
 		Findings:       findings,
 		SourceRevision: revision,
-		Limit:          limit,
+		Limit:          effectiveLimit,
 		Total:          len(findings),
 	}, nil
 }
 
-func (s *Service) findSimilarThreads(ctx context.Context, repo domain.RepoRef, query clustering.Candidate, kind string, onlyOpen bool, limit int) ([]clustering.Neighbor, string, error) {
+func (s *Service) findSimilarThreads(ctx context.Context, repo domain.RepoRef, query clustering.Candidate, kind string, onlyOpen bool, limit int) ([]clustering.Neighbor, string, int, error) {
 	if err := repo.Validate(); err != nil {
-		return nil, "", err
+		return nil, "", 0, err
+	}
+	limit, err := normalizeSimilarityLimit(limit)
+	if err != nil {
+		return nil, "", 0, err
 	}
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 	repository, err := c.GetRepository(ctx, repo.Owner, repo.Repo)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 	if repository == nil {
 		// No local corpus data for this repository; return an empty result without
 		// performing network access.
-		return nil, "", nil
+		return nil, "", limit, nil
 	}
-	threads, err := c.ListThreads(ctx, repository.ID, kind, maxCandidateLimit)
+	state := ""
+	if onlyOpen {
+		state = "open"
+	}
+	threads, err := c.ListThreadsFiltered(ctx, repository.ID, kind, state, similarityCandidateLimit(limit))
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 	candidates := make([]clustering.Candidate, 0, len(threads))
 	for _, t := range threads {
-		if onlyOpen && t.State != "open" {
-			continue
-		}
-		if kind != "" && t.Kind != kind {
-			continue
-		}
 		candidates = append(candidates, candidateFromThread(*repository, t))
-	}
-	if limit <= 0 {
-		limit = defaultNeighborsLimit
 	}
 	all := append([]clustering.Candidate{query}, candidates...)
 	neighbors, err := clustering.Neighbors(ctx, query, candidates, limit)
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
-	return neighbors, clustering.SourceRevision(all), nil
+	return neighbors, clustering.SourceRevision(all), limit, nil
+}
+
+func normalizeSimilarityLimit(limit int) (int, error) {
+	if limit <= 0 {
+		return defaultNeighborsLimit, nil
+	}
+	if limit > maxResultLimit {
+		return 0, fmt.Errorf("neighbors limit cannot exceed %d", maxResultLimit)
+	}
+	return limit, nil
+}
+
+func similarityCandidateLimit(limit int) int {
+	return min(maxCandidateLimit, max(minCandidateLimit, limit*candidateLimitFactor))
 }
 
 func candidateFromHypothesis(h *investigation.Hypothesis, repo domain.RepoRef) clustering.Candidate {

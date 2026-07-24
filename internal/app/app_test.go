@@ -221,7 +221,7 @@ func TestDiscoveryCrawlPersistsRepositoryFrontierAndCheckpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list sources: %v", err)
 	}
-	if len(listed.Sources) != 1 || listed.Sources[0].Name != "active-go" {
+	if len(listed.Sources) != 1 || listed.Sources[0].Name != "active-go" || listed.Total != 1 || listed.Truncated {
 		t.Fatalf("sources = %+v", listed.Sources)
 	}
 
@@ -913,20 +913,23 @@ func TestDuplicateAndCollisionChecks(t *testing.T) {
 		t.Fatalf("create hypothesis: %v", err)
 	}
 
-	dup, err := svc.CheckHypothesisDuplicates(ctx, h.ID, 10)
+	dup, err := svc.CheckHypothesisDuplicates(ctx, h.ID, 0)
 	if err != nil {
 		t.Fatalf("check duplicates: %v", err)
 	}
-	if dup.Total == 0 {
-		t.Fatalf("expected duplicate candidates, got 0")
+	if dup.Total == 0 || dup.Limit != defaultNeighborsLimit {
+		t.Fatalf("duplicate result = %+v", dup)
+	}
+	if _, err := svc.CheckHypothesisDuplicates(ctx, h.ID, maxResultLimit+1); err == nil {
+		t.Fatal("oversized duplicate limit was accepted")
 	}
 
-	coll, err := svc.CheckHypothesisCollisions(ctx, h.ID, 10)
+	coll, err := svc.CheckHypothesisCollisions(ctx, h.ID, 0)
 	if err != nil {
 		t.Fatalf("check collisions: %v", err)
 	}
-	if coll.Total == 0 {
-		t.Fatalf("expected open PR collisions, got 0")
+	if coll.Total == 0 || coll.Limit != defaultNeighborsLimit {
+		t.Fatalf("collision result = %+v", coll)
 	}
 	for _, f := range coll.Findings {
 		if f.Relation != evidence.RelationContradicting {

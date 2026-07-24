@@ -2,6 +2,7 @@ package corpus
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -61,7 +62,7 @@ func TestDiscoverySourcesAndPartitionsPersist(t *testing.T) {
 		t.Fatal(err)
 	}
 	sources, err := c.ListDiscoverySources(ctx)
-	if err != nil || len(sources) != 1 || sources[0].Name != "go" {
+	if err != nil || len(sources.Sources) != 1 || sources.Sources[0].Name != "go" || sources.Total != 1 || sources.Truncated {
 		t.Fatalf("ListDiscoverySources = (%+v, %v)", sources, err)
 	}
 	var count int
@@ -77,5 +78,36 @@ func TestDiscoverySourcesAndPartitionsPersist(t *testing.T) {
 	}
 	if pages != 3 {
 		t.Fatalf("source partition pages = %d, want 3", pages)
+	}
+}
+
+func TestDiscoverySourceListExposesHardCapTruncation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	tx, err := c.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := encodeTime(time.Unix(100, 0))
+	for i := 0; i <= discoverySourceListLimit; i++ {
+		name := fmt.Sprintf("source-%04d", i)
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO discovery_sources (name, kind, definition, enabled, created_at, updated_at)
+			VALUES (?, 'repos', '{}', 1, ?, ?)
+		`, name, now, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	sources, err := c.ListDiscoverySources(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources.Sources) != discoverySourceListLimit || sources.Total != discoverySourceListLimit+1 || !sources.Truncated {
+		t.Fatalf("sources = returned:%d total:%d truncated:%v", len(sources.Sources), sources.Total, sources.Truncated)
 	}
 }

@@ -2,6 +2,7 @@ package corpus
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -52,7 +53,7 @@ func TestLensesPersistAndUpdateByName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != 1 || records[0].Definition.MaxResultsPerRepo != 2 {
+	if len(records.Records) != 1 || records.Records[0].Definition.MaxResultsPerRepo != 2 || records.Total != 1 || records.Truncated {
 		t.Fatalf("lenses = %+v", records)
 	}
 }
@@ -100,11 +101,11 @@ func TestCollectionsDeduplicateTypedReferences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 3 || got[0].Kind != "issue" || got[1].Kind != "pull_request" || got[2].Kind != "repository" {
+	if len(got.Members) != 3 || got.Members[0].Kind != "issue" || got.Members[1].Kind != "pull_request" || got.Members[2].Kind != "repository" || got.Total != 3 || got.Truncated {
 		t.Fatalf("members = %+v", got)
 	}
 	collections, err := c.ListCollections(ctx)
-	if err != nil || len(collections) != 1 || collections[0].MemberCount != 3 {
+	if err != nil || len(collections.Collections) != 1 || collections.Collections[0].MemberCount != 3 || collections.Total != 1 || collections.Truncated {
 		t.Fatalf("collections = %+v, err = %v", collections, err)
 	}
 }
@@ -122,5 +123,64 @@ func TestAddCollectionMembersRequiresExistingBoundedCollection(t *testing.T) {
 	oversized := make([]CollectionMember, maxCollectionBatchSize+1)
 	if err := c.AddCollectionMembers(ctx, "saved", oversized); err == nil {
 		t.Fatal("expected oversized batch error")
+	}
+}
+
+func TestOrganizeListsExposeHardCapTruncation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	tx, err := c.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := encodeTime(time.Unix(100, 0))
+	for i := 0; i <= lensListLimit; i++ {
+		name := fmt.Sprintf("lens-%04d", i)
+		definition := fmt.Sprintf(`{"name":%q,"weights":{"activity":1}}`, name)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO lenses (name, definition, created_at, updated_at) VALUES (?, ?, ?, ?)`, name, definition, now, now); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO collections (name, created_at, updated_at) VALUES (?, ?, ?)`, fmt.Sprintf("collection-%04d", i), now, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := tx.ExecContext(ctx, `INSERT INTO collections (name, created_at, updated_at) VALUES ('members', ?, ?)`, now, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	collectionID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i <= collectionMemberListLimit; i++ {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO collection_members (collection_id, ref, kind, added_at) VALUES (?, ?, 'issue', ?)`, collectionID, fmt.Sprintf("owner/repo#%05d", i), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	lenses, err := c.ListLenses(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lenses.Records) != lensListLimit || lenses.Total != lensListLimit+1 || !lenses.Truncated {
+		t.Fatalf("lenses = returned:%d total:%d truncated:%v", len(lenses.Records), lenses.Total, lenses.Truncated)
+	}
+	collections, err := c.ListCollections(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(collections.Collections) != collectionListLimit || collections.Total != collectionListLimit+2 || !collections.Truncated {
+		t.Fatalf("collections = returned:%d total:%d truncated:%v", len(collections.Collections), collections.Total, collections.Truncated)
+	}
+	members, err := c.ListCollectionMembers(ctx, "members")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(members.Members) != collectionMemberListLimit || members.Total != collectionMemberListLimit+1 || !members.Truncated {
+		t.Fatalf("members = returned:%d total:%d truncated:%v", len(members.Members), members.Total, members.Truncated)
 	}
 }
