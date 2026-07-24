@@ -44,6 +44,8 @@ The dependency direction is toward product-owned contracts:
 
 Third-party SDK and database types terminate inside their adapters. The
 application and domain packages expose product-owned values and interfaces.
+Inbound adapters import those contracts directly; they do not re-export
+product-owned types, errors, or constants.
 
 ## Capability boundaries
 
