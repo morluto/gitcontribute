@@ -28,7 +28,7 @@ func redactValue(v reflect.Value) reflect.Value {
 	switch v.Kind() {
 	case reflect.String:
 		return reflect.ValueOf(redactString(v.String())).Convert(v.Type())
-	case reflect.Ptr:
+	case reflect.Pointer:
 		if v.IsNil() {
 			return reflect.Zero(v.Type())
 		}

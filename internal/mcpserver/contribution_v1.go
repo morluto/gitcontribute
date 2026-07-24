@@ -9,52 +9,14 @@ import (
 )
 
 // PrepareContributionInput renders a local issue or pull-request draft.
-type PrepareContributionInput struct {
-	OpportunityID string `json:"opportunity_id" jsonschema:"Opportunity ID"`
-	Kind          string `json:"kind" jsonschema:"Contribution kind: issue or pull_request"`
-	WorkspaceID   string `json:"workspace_id,omitempty" jsonschema:"Workspace ID for pull_request drafts"`
-	Approach      string `json:"approach,omitempty" jsonschema:"Approach summary for pull requests"`
-	Changes       string `json:"changes,omitempty" jsonschema:"Changes summary for pull requests"`
-	Compatibility string `json:"compatibility,omitempty" jsonschema:"Compatibility notes for pull requests"`
-	Limitations   string `json:"limitations,omitempty" jsonschema:"Limitations for pull requests"`
-	LinkedIssue   string `json:"linked_issue,omitempty" jsonschema:"Linked issue for pull requests"`
-	Guidance      string `json:"guidance,omitempty" jsonschema:"Optional guidance to include"`
-	Success       string `json:"success,omitempty" jsonschema:"Success criteria for issue drafts"`
-	ManifestID    string `json:"manifest_id,omitempty" jsonschema:"Stored evidence manifest ID to reference without copying its claims"`
-}
 
 // DraftOutput contains a rendered contribution draft.
-type DraftOutput struct {
-	OpportunityID string `json:"opportunity_id"`
-	Kind          string `json:"kind"`
-	Title         string `json:"title"`
-	Body          string `json:"body"`
-	RenderedAt    string `json:"rendered_at"`
-	ManifestID    string `json:"manifest_id,omitempty" jsonschema:"Referenced stored evidence manifest ID"`
-}
 
 // ExportManifestInput selects bounded local evidence for one contribution manifest.
-type ExportManifestInput struct {
-	OpportunityID string                    `json:"opportunity_id" jsonschema:"Opportunity ID"`
-	WorkspaceID   string                    `json:"workspace_id,omitempty" jsonschema:"Managed workspace ID to bind"`
-	PullRequest   *ManifestPullRequestInput `json:"pull_request,omitempty" jsonschema:"Exact stored pull request to include"`
-}
 
 // ManifestPullRequestInput identifies one exact stored pull request.
-type ManifestPullRequestInput struct {
-	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
-	Number int    `json:"number" jsonschema:"Positive pull request number"`
-}
 
 // ManifestOutput returns the stable identity and full in-toto-shaped statement.
-type ManifestOutput struct {
-	ManifestID    string         `json:"manifest_id" jsonschema:"Stable sha256-prefixed manifest ID"`
-	ContentSHA256 string         `json:"content_sha256" jsonschema:"Hex SHA-256 of stable manifest content"`
-	SchemaVersion string         `json:"schema_version" jsonschema:"Contribution manifest predicate schema version"`
-	Status        string         `json:"status" jsonschema:"Overall completeness status"`
-	Statement     map[string]any `json:"statement" jsonschema:"Full in-toto-shaped evidence statement"`
-}
 
 func (s *Server) prepareContribution(ctx context.Context, _ *mcp.CallToolRequest, in PrepareContributionInput) (*mcp.CallToolResult, DraftOutput, error) {
 	if _, err := normalizeID("opportunity_id", in.OpportunityID); err != nil {

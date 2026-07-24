@@ -27,6 +27,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			m.loaded = false
 			m.items = make(map[view][]Item)
+			m.windows = make(map[view]Window)
 			m.filtered = nil
 			return m, nil
 		}
@@ -37,6 +38,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			viewClusters:       msg.data.Clusters,
 			viewInvestigations: msg.data.Investigations,
 			viewOpportunities:  msg.data.Opportunities,
+		}
+		m.windows = map[view]Window{
+			viewRepositories:   msg.data.Windows[string(viewRepositories)],
+			viewThreads:        msg.data.Windows[string(viewThreads)],
+			viewClusters:       msg.data.Windows[string(viewClusters)],
+			viewInvestigations: msg.data.Windows[string(viewInvestigations)],
+			viewOpportunities:  msg.data.Windows[string(viewOpportunities)],
 		}
 		m.applyFilter()
 		return m, nil

@@ -9,9 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/lens"
 )
 
@@ -73,7 +74,7 @@ func (s *Service) ShowLens(ctx context.Context, name string) (*cli.LensResult, e
 		return nil, fmt.Errorf("get lens: %w", err)
 	}
 	if record == nil {
-		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("lens %q not found", name))
+		return nil, failure.NotFound(fmt.Errorf("lens %q not found", name))
 	}
 	return lensResult(record), nil
 }
@@ -114,7 +115,7 @@ func (s *Service) ExplainLens(ctx context.Context, name, ref string, opts cli.Le
 		return nil, fmt.Errorf("load lens: %w", err)
 	}
 	if lensRecord == nil {
-		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("lens %q not found", name))
+		return nil, failure.NotFound(fmt.Errorf("lens %q not found", name))
 	}
 	now := s.now()
 	target, inferredKind, err := s.resolveLensExplainTarget(ctx, c, ref)
@@ -209,7 +210,7 @@ func (s *Service) resolveRepoLensTarget(ctx context.Context, c *corpus.Corpus, r
 		return searchMatch{}, "", err
 	}
 	if repo == nil {
-		return searchMatch{}, "", cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %q not found", repoRef))
+		return searchMatch{}, "", failure.NotFound(fmt.Errorf("repository %q not found", repoRef))
 	}
 	return searchMatch{
 		Repo:      domain.RepoRef{Owner: repo.Owner, Repo: repo.Name},
@@ -237,7 +238,7 @@ func (s *Service) resolveThreadLensTarget(ctx context.Context, c *corpus.Corpus,
 		return searchMatch{}, "", err
 	}
 	if repo == nil {
-		return searchMatch{}, "", cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %q not found", repoRef))
+		return searchMatch{}, "", failure.NotFound(fmt.Errorf("repository %q not found", repoRef))
 	}
 
 	thread, err := c.GetThreadByNumber(ctx, repo.ID, number)
@@ -245,7 +246,7 @@ func (s *Service) resolveThreadLensTarget(ctx context.Context, c *corpus.Corpus,
 		return searchMatch{}, "", err
 	}
 	if thread == nil {
-		return searchMatch{}, "", cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("thread %q not found", ref))
+		return searchMatch{}, "", failure.NotFound(fmt.Errorf("thread %q not found", ref))
 	}
 	if kind != "" && thread.Kind != kind {
 		return searchMatch{}, "", fmt.Errorf("thread %q is a %s, not a %s", ref, thread.Kind, kind)
@@ -294,7 +295,7 @@ func (s *Service) resolveCodeLensTarget(ctx context.Context, c *corpus.Corpus, r
 		return searchMatch{}, "", err
 	}
 	if repo == nil {
-		return searchMatch{}, "", cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %q not found", repoRef))
+		return searchMatch{}, "", failure.NotFound(fmt.Errorf("repository %q not found", repoRef))
 	}
 
 	doc, err := c.GetCodeDocument(ctx, repoRef, path)
@@ -302,7 +303,7 @@ func (s *Service) resolveCodeLensTarget(ctx context.Context, c *corpus.Corpus, r
 		return searchMatch{}, "", err
 	}
 	if doc == nil {
-		return searchMatch{}, "", cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("code document %q not found", ref))
+		return searchMatch{}, "", failure.NotFound(fmt.Errorf("code document %q not found", ref))
 	}
 
 	return searchMatch{

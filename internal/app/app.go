@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/config"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/deepwiki"
 	"github.com/morluto/gitcontribute/internal/discovery"
@@ -309,7 +309,18 @@ func ensureDatabaseDir(database string) error {
 	if database == ":memory:" || strings.HasPrefix(database, "file:") {
 		return nil
 	}
-	return ensurePrivateDir(filepath.Dir(database))
+	dir := filepath.Dir(database)
+	info, err := os.Stat(dir)
+	if err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("database parent %q is not a directory", dir)
+		}
+		return nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.MkdirAll(dir, 0700)
 }
 
 func (s *Service) newGitHubReader() (github.Reader, error) {

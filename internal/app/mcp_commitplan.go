@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/morluto/gitcontribute/internal/commitplan"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // InspectCommitChanges implements the MCP commit-inventory capability.

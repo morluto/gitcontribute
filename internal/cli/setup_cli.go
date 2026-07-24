@@ -111,15 +111,6 @@ func setupQuestions(cmd *setupCmd, clients []string) []SetupPromptQuestion {
 	return questions
 }
 
-func containsSetupQuestion(questions []SetupPromptQuestion, want SetupPromptQuestion) bool {
-	for _, question := range questions {
-		if question == want {
-			return true
-		}
-	}
-	return false
-}
-
 func (c *CLI) promptSetupSelection(ctx context.Context, cmd *setupCmd, clients []string, questions []SetupPromptQuestion) (SetupSelection, error) {
 	service, err := c.setupService()
 	if err != nil {

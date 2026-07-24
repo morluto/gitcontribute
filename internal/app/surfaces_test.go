@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/clusterprojection"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/lens"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 func seedRepoAndThreads(t *testing.T, c *corpus.Corpus) {

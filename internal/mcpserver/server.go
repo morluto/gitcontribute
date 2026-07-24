@@ -7,34 +7,12 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/morluto/gitcontribute/internal/lens"
-	"github.com/morluto/gitcontribute/internal/similarity"
 )
 
 // ErrNotFound lets readers distinguish absent corpus objects from failures.
-var ErrNotFound = errors.New("not found")
 
 // Reader is the local, read-only application boundary exposed through MCP.
 // Implementations must not perform network access.
-type Reader interface {
-	Search(context.Context, SearchInput) (SearchOutput, error)
-	SearchRepositories(context.Context, SearchRepositoriesInput) (SearchRepositoriesOutput, error)
-	Repository(context.Context, RepoInput) (RepositoryOutput, error)
-	Thread(context.Context, ThreadInput) (ThreadOutput, error)
-	ThreadByNumber(context.Context, ThreadByNumberInput) (ThreadOutput, error)
-	Dossier(context.Context, RepoInput) (DossierOutput, error)
-	SearchCode(context.Context, SearchCodeInput) (SearchCodeOutput, error)
-	ExplainMatch(context.Context, ExplainMatchInput) (ExplainMatchOutput, error)
-	GetJob(context.Context, GetJobInput) (GetJobOutput, error)
-	Investigation(context.Context, InvestigationInput) (InvestigationOutput, error)
-	ListOpportunities(context.Context, ListOpportunitiesInput) (ListOpportunitiesOutput, error)
-	Opportunity(context.Context, OpportunityInput) (OpportunityOutput, error)
-	Evidence(context.Context, EvidenceInput) (EvidenceOutput, error)
-	Readiness(context.Context, ReadinessInput) (ReadinessOutput, error)
-	FindClusters(context.Context, FindClustersInput) (FindClustersOutput, error)
-	GetCoverage(context.Context, GetCoverageInput) (GetCoverageOutput, error)
-	Lens(context.Context, LensInput) (LensOutput, error)
-}
 
 // NeighborReader is the optional local nearest-thread query capability.
 type NeighborReader interface {
@@ -117,345 +95,74 @@ type Operator interface {
 }
 
 // RepoInput identifies a repository for an MCP operation.
-type RepoInput struct {
-	Owner string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo  string `json:"repo" jsonschema:"GitHub repository name"`
-}
 
 // ThreadInput identifies an issue or pull request for an MCP operation.
-type ThreadInput struct {
-	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
-	Kind   string `json:"kind" jsonschema:"Thread kind: issue or pull_request"`
-	Number int    `json:"number" jsonschema:"GitHub issue or pull request number"`
-}
 
 // SearchInput describes an offline thread search page.
-type SearchInput struct {
-	Query        string   `json:"query" jsonschema:"Full-text query"`
-	Owner        string   `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo         string   `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Kind         string   `json:"kind,omitempty" jsonschema:"Optional thread kind"`
-	State        string   `json:"state,omitempty"`
-	StateReason  string   `json:"state_reason,omitempty"`
-	Merged       *bool    `json:"merged,omitempty"`
-	Author       string   `json:"author,omitempty"`
-	Association  string   `json:"author_association,omitempty"`
-	Assignee     string   `json:"assignee,omitempty"`
-	Labels       []string `json:"labels,omitempty"`
-	UpdatedAfter string   `json:"updated_after,omitempty"`
-	Limit        int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-	Cursor       string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
-	Sort         string   `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
-}
 
 // RepositoryOutput is the stable MCP representation of a repository.
-type RepositoryOutput struct {
-	Owner     string         `json:"owner"`
-	Repo      string         `json:"repo"`
-	UpdatedAt string         `json:"updated_at,omitempty"`
-	Fields    map[string]any `json:"fields,omitempty"`
-}
 
 // ThreadOutput is the stable MCP representation of an issue or pull request.
-type ThreadOutput struct {
-	Owner             string   `json:"owner"`
-	Repo              string   `json:"repo"`
-	Kind              string   `json:"kind"`
-	Number            int      `json:"number"`
-	State             string   `json:"state"`
-	StateReason       string   `json:"state_reason,omitempty"`
-	Title             string   `json:"title"`
-	Body              string   `json:"body,omitempty"`
-	Author            string   `json:"author,omitempty"`
-	AuthorAssociation string   `json:"author_association,omitempty"`
-	Labels            []string `json:"labels,omitempty"`
-	Assignees         []string `json:"assignees,omitempty"`
-	Draft             bool     `json:"draft,omitempty"`
-	ClosedAt          string   `json:"closed_at,omitempty"`
-	MergedAt          string   `json:"merged_at,omitempty"`
-	Merged            *bool    `json:"merged,omitempty"`
-	UpdatedAt         string   `json:"updated_at,omitempty"`
-	MatchSource       string   `json:"match_source,omitempty"`
-	MatchExcerpt      string   `json:"match_excerpt,omitempty"`
-	MatchTruncated    bool     `json:"match_truncated,omitempty" jsonschema:"Whether the per-thread hydrated search document was bounded"`
-	MatchUpdatedAt    string   `json:"match_updated_at,omitempty"`
-}
 
 // SearchOutput contains one page of offline thread matches.
-type SearchOutput struct {
-	Query      string         `json:"query"`
-	Matches    []ThreadOutput `json:"matches"`
-	Total      int            `json:"total"`
-	NextCursor string         `json:"next_cursor,omitempty"`
-}
 
 // DossierOutput contains a persisted repository dossier snapshot.
-type DossierOutput struct {
-	Owner    string         `json:"owner"`
-	Repo     string         `json:"repo"`
-	AsOf     string         `json:"as_of,omitempty"`
-	Sections map[string]any `json:"sections"`
-}
 
 // SourceRef records provenance for an MCP result or workflow artifact.
-type SourceRef struct {
-	Source     string `json:"source" jsonschema:"Source identifier"`
-	URL        string `json:"url,omitempty" jsonschema:"Source URL"`
-	CommitSHA  string `json:"commit_sha,omitempty" jsonschema:"Source commit SHA"`
-	ObservedAt string `json:"observed_at,omitempty" jsonschema:"Observation timestamp"`
-	AsOf       string `json:"as_of,omitempty" jsonschema:"As-of timestamp"`
-}
 
 // SearchCodeInput describes an offline code search page.
-type SearchCodeInput struct {
-	Query  string `json:"query" jsonschema:"Code search query"`
-	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo   string `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
-}
 
 // CodeMatchOutput identifies one stored code match.
-type CodeMatchOutput struct {
-	ID       string `json:"id"`
-	Repo     string `json:"repo"`
-	Commit   string `json:"commit"`
-	Path     string `json:"path"`
-	Language string `json:"language,omitempty"`
-	Snippet  string `json:"snippet"`
-	Bytes    int    `json:"bytes"`
-}
 
 // CodeIndexCoverageOutput reports one selected snapshot's indexing coverage.
-type CodeIndexCoverageOutput struct {
-	Repo           string `json:"repo"`
-	Status         string `json:"status" jsonschema:"Index coverage state"`
-	Commit         string `json:"commit"`
-	Truncated      bool   `json:"truncated" jsonschema:"Whether index limits omitted files"`
-	IndexedFiles   int    `json:"indexed_files" jsonschema:"Files indexed in this snapshot"`
-	TrackedEntries int    `json:"tracked_entries" jsonschema:"Tracked tree entries considered"`
-	SkippedFiles   int    `json:"skipped_files" jsonschema:"Entries omitted by policy or limits"`
-	SkippedPolicy  int    `json:"skipped_policy" jsonschema:"Invalid, excluded, or non-regular entries"`
-	SkippedLimits  int    `json:"skipped_limits" jsonschema:"Entries omitted by file-size, total-size, or file-count bounds"`
-	SkippedNonText int    `json:"skipped_non_text" jsonschema:"Entries omitted because content was binary or invalid UTF-8"`
-}
 
 // SearchCodeOutput contains one page of offline code matches.
-type SearchCodeOutput struct {
-	Query      string                    `json:"query"`
-	Total      int                       `json:"total"`
-	Matches    []CodeMatchOutput         `json:"matches"`
-	Coverage   []CodeIndexCoverageOutput `json:"coverage,omitempty"`
-	NextCursor string                    `json:"next_cursor,omitempty"`
-}
 
 // InvestigationInput selects an investigation and bounds nested hypotheses.
-type InvestigationInput struct {
-	ID              string `json:"id" jsonschema:"Investigation ID"`
-	HypothesisLimit int    `json:"hypothesis_limit,omitempty" jsonschema:"Maximum hypotheses from 1 to 100"`
-}
 
 // HypothesisSummary is the compact hypothesis representation nested in an investigation.
-type HypothesisSummary struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Category    string `json:"category"`
-	Status      string `json:"status"`
-	Description string `json:"description,omitempty"`
-}
 
 // InvestigationOutput is the stable MCP representation of an investigation.
-type InvestigationOutput struct {
-	ID              string              `json:"id"`
-	Owner           string              `json:"owner"`
-	Repo            string              `json:"repo"`
-	CommitSHA       string              `json:"commit_sha,omitempty"`
-	Lens            string              `json:"lens,omitempty"`
-	Status          string              `json:"status"`
-	CreatedAt       string              `json:"created_at"`
-	UpdatedAt       string              `json:"updated_at"`
-	HypothesisTotal int                 `json:"hypothesis_total"`
-	Hypotheses      []HypothesisSummary `json:"hypotheses,omitempty"`
-}
 
 // ListOpportunitiesInput selects and bounds opportunities for an investigation.
-type ListOpportunitiesInput struct {
-	InvestigationID string `json:"investigation_id" jsonschema:"Investigation ID"`
-	Limit           int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-}
 
 // OpportunitySummary is the compact opportunity representation used in lists.
-type OpportunitySummary struct {
-	ID              string  `json:"id"`
-	InvestigationID string  `json:"investigation_id"`
-	Title           string  `json:"title"`
-	Category        string  `json:"category"`
-	Status          string  `json:"status"`
-	Confidence      float64 `json:"confidence"`
-	CollisionStatus string  `json:"collision_status"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
-}
 
 // ListOpportunitiesOutput contains bounded opportunities for an investigation.
-type ListOpportunitiesOutput struct {
-	Opportunities []OpportunitySummary `json:"opportunities"`
-	Total         int                  `json:"total"`
-}
 
 // OpportunityInput selects an opportunity and bounds nested evidence.
-type OpportunityInput struct {
-	ID            string `json:"id" jsonschema:"Opportunity ID"`
-	EvidenceLimit int    `json:"evidence_limit,omitempty" jsonschema:"Maximum evidence IDs from 1 to 100"`
-}
 
 // OpportunityOutput is the stable MCP representation of a contribution opportunity.
-type OpportunityOutput struct {
-	ID                  string      `json:"id"`
-	InvestigationID     string      `json:"investigation_id"`
-	HypothesisID        string      `json:"hypothesis_id,omitempty"`
-	Title               string      `json:"title"`
-	ProblemStatement    string      `json:"problem_statement"`
-	Category            string      `json:"category"`
-	Scope               string      `json:"scope"`
-	Impact              string      `json:"impact"`
-	Confidence          float64     `json:"confidence"`
-	ExpectedEffort      string      `json:"expected_effort,omitempty"`
-	Dependencies        []string    `json:"dependencies,omitempty"`
-	CollisionStatus     string      `json:"collision_status"`
-	MaintainerAlignment string      `json:"maintainer_alignment,omitempty"`
-	SourceRefs          []SourceRef `json:"source_refs,omitempty"`
-	EvidenceTotal       int         `json:"evidence_total"`
-	EvidenceIDs         []string    `json:"evidence_ids,omitempty"`
-	Status              string      `json:"status"`
-	CreatedAt           string      `json:"created_at"`
-	UpdatedAt           string      `json:"updated_at"`
-}
 
 // FindClustersInput selects a repository and bounds duplicate clusters.
-type FindClustersInput struct {
-	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
-	Kind   string `json:"kind,omitempty" jsonschema:"Optional member kind: issue or pull_request"`
-	Number int    `json:"number,omitempty" jsonschema:"Optional positive member number"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum clusters from 1 to 100"`
-}
 
 // FindNeighborsInput selects a thread and bounds similar-thread results.
-type FindNeighborsInput struct {
-	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
-	Kind   string `json:"kind" jsonschema:"Thread kind: issue or pull_request"`
-	Number int    `json:"number" jsonschema:"GitHub issue or pull request number"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum neighbors from 1 to 100"`
-}
 
 // NeighborOutput describes one similar stored thread and its score.
-type NeighborOutput struct {
-	Kind   string  `json:"kind"`
-	Owner  string  `json:"owner"`
-	Repo   string  `json:"repo"`
-	Number int     `json:"number"`
-	Title  string  `json:"title"`
-	State  string  `json:"state"`
-	Score  float64 `json:"score"`
-	Reason string  `json:"reason"`
-}
 
 // FindNeighborsOutput contains deterministic neighbors for a stored thread.
-type FindNeighborsOutput struct {
-	Owner          string           `json:"owner"`
-	Repo           string           `json:"repo"`
-	Kind           string           `json:"kind"`
-	Number         int              `json:"number"`
-	SourceRevision string           `json:"source_revision"`
-	Neighbors      []NeighborOutput `json:"neighbors"`
-}
 
 // ClusterMemberOutput describes one member of a duplicate cluster.
-type ClusterMemberOutput struct {
-	Kind     string  `json:"kind"`
-	Owner    string  `json:"owner"`
-	Repo     string  `json:"repo"`
-	Number   int     `json:"number"`
-	Title    string  `json:"title,omitempty"`
-	State    string  `json:"state,omitempty"`
-	Score    float64 `json:"score"`
-	Reason   string  `json:"reason"`
-	Included bool    `json:"included"`
-}
 
 // ClusterOutput contains a stable duplicate cluster and its canonical member.
-type ClusterOutput struct {
-	StableID    string                `json:"stable_id"`
-	State       string                `json:"state"`
-	Canonical   ClusterMemberOutput   `json:"canonical"`
-	MemberCount int                   `json:"member_count"`
-	Members     []ClusterMemberOutput `json:"members,omitempty"`
-}
 
 // FindClustersOutput contains duplicate clusters for a repository.
-type FindClustersOutput struct {
-	Owner       string                 `json:"owner"`
-	Repo        string                 `json:"repo"`
-	RuleVersion similarity.RuleVersion `json:"rule_version,omitempty"`
-	Total       int                    `json:"total"`
-	Clusters    []ClusterOutput        `json:"clusters"`
-	Truncated   bool                   `json:"truncated" jsonschema:"Whether more clusters matched"`
-}
 
 // CoverageTarget selects repository-level coverage or, when kind and number
 // are both present, coverage for one exact stored thread.
-type CoverageTarget struct {
-	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
-	Kind   string `json:"kind,omitempty" jsonschema:"Optional thread kind: issue or pull_request"`
-	Number int    `json:"number,omitempty" jsonschema:"Optional positive issue or pull request number"`
-}
 
 // GetCoverageInput selects bounded repository or thread facet coverage reads.
-type GetCoverageInput struct {
-	Targets []CoverageTarget `json:"targets" jsonschema:"One to 100 repository or exact-thread targets"`
-}
 
 // FacetCoverageOutput reports completeness and freshness for one facet.
-type FacetCoverageOutput struct {
-	Facet     string `json:"facet"`
-	Complete  bool   `json:"complete"`
-	Status    string `json:"status"`
-	UpdatedAt string `json:"updated_at"`
-}
 
 // CoverageOutput reports all known coverage for one repository or thread.
-type CoverageOutput struct {
-	Owner  string                `json:"owner"`
-	Repo   string                `json:"repo"`
-	Kind   string                `json:"kind,omitempty"`
-	Number int                   `json:"number,omitempty"`
-	AsOf   string                `json:"as_of"`
-	Facets []FacetCoverageOutput `json:"facets"`
-}
 
 // GetCoverageOutput preserves target order and isolates missing or invalid
 // targets without failing unrelated coverage reads.
-type GetCoverageOutput struct {
-	Status string                      `json:"status"`
-	Items  []BatchItem[CoverageOutput] `json:"items"`
-}
 
 // LensInput selects a saved lens by name.
-type LensInput struct {
-	Name string `json:"name" jsonschema:"Lens name"`
-}
 
 // LensOutput contains a saved lens definition and timestamps.
-type LensOutput struct {
-	Name       string          `json:"name"`
-	Definition lens.Definition `json:"definition"`
-	CreatedAt  string          `json:"created_at"`
-	UpdatedAt  string          `json:"updated_at"`
-}
 
 // Server owns the MCP protocol adapter around a local Reader.
 type Server struct {
@@ -467,10 +174,6 @@ type Server struct {
 }
 
 // Options selects MCP capability profiles. An empty Toolsets list is rejected.
-type Options struct {
-	Toolsets []string
-	ReadOnly bool
-}
 
 // New constructs an MCP server over reader and registers all supported tools
 // and resources. A blank version is reported as "dev".

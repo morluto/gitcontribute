@@ -9,7 +9,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 func TestMCPReaderExplainMatchReturnsMatchingExcerpt(t *testing.T) {

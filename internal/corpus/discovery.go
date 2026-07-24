@@ -93,7 +93,7 @@ func (c *Corpus) ListDiscoverySources(ctx context.Context) (DiscoverySourceList,
 	if err != nil {
 		return DiscoverySourceList{}, fmt.Errorf("list discovery sources: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var result DiscoverySourceList
 	for rows.Next() {
 		var source DiscoverySource

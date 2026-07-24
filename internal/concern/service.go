@@ -60,8 +60,9 @@ func (s *Service) Get(ctx context.Context, id string) (*Concern, error) {
 	return s.repo.GetConcern(ctx, strings.TrimSpace(id))
 }
 
-// List returns at most 100 concerns and performs no external reads.
-func (s *Service) List(ctx context.Context, filter Filter) ([]*Concern, error) {
+// List returns at most 100 concerns with exact population metadata and performs
+// no external reads.
+func (s *Service) List(ctx context.Context, filter Filter) (*ListResult, error) {
 	if filter.Limit <= 0 {
 		filter.Limit = 20
 	}
@@ -95,7 +96,7 @@ func (s *Service) Update(ctx context.Context, item *Concern) (*Concern, error) {
 		return nil, err
 	}
 	itemCopy.UpdatedAt = time.Now().UTC()
-	if err := s.repo.SaveConcern(ctx, &itemCopy); err != nil {
+	if err := s.repo.UpdateConcern(ctx, stored, &itemCopy); err != nil {
 		return nil, err
 	}
 	return &itemCopy, nil
@@ -103,10 +104,11 @@ func (s *Service) Update(ctx context.Context, item *Concern) (*Concern, error) {
 
 // SetStatus applies an explicit lifecycle transition with rationale.
 func (s *Service) SetStatus(ctx context.Context, id string, next Status, rationale string) (*Concern, error) {
-	item, err := s.repo.GetConcern(ctx, strings.TrimSpace(id))
+	stored, err := s.repo.GetConcern(ctx, strings.TrimSpace(id))
 	if err != nil {
 		return nil, err
 	}
+	item := cloneConcern(stored)
 	rationale = strings.TrimSpace(rationale)
 	if rationale == "" {
 		return nil, errors.New("status rationale is required")
@@ -117,10 +119,10 @@ func (s *Service) SetStatus(ctx context.Context, id string, next Status, rationa
 	now := time.Now().UTC()
 	item.AuditTrail = append(item.AuditTrail, StatusChange{From: item.Status, To: next, Rationale: rationale, At: now})
 	item.Status, item.UpdatedAt = next, now
-	if err := s.repo.SaveConcern(ctx, item); err != nil {
+	if err := s.repo.UpdateConcern(ctx, stored, &item); err != nil {
 		return nil, err
 	}
-	return item, nil
+	return &item, nil
 }
 
 // Link records an explicit relationship. Duplicate candidates remain links;

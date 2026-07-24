@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morluto/gitcontribute/internal/cli"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/failure"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // GetJob reads a durable job by ID.
@@ -49,8 +50,7 @@ func (r *MCPReader) cancelJobItem(ctx context.Context, inputID string) mcpserver
 	}
 	current, err := r.Service.GetJob(ctx, id)
 	if err != nil {
-		var cliErr *cli.CLIError
-		if errors.As(err, &cliErr) && cliErr.Code == cli.ExitNotFound {
+		if failure.Is(err, failure.KindNotFound) {
 			item.Status, item.Reason = "unavailable", "not_found"
 		} else {
 			item.Status, item.Reason = "failed", "read_failed"

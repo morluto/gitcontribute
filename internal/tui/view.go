@@ -55,10 +55,19 @@ func (m Model) renderHeader() string {
 	label := viewLabels[m.view]
 	total := m.itemCount()
 	visible := len(m.filtered)
+	sourceTotal := total
+	partial := false
+	if window, ok := m.windows[m.view]; ok {
+		sourceTotal, partial = window.Total, window.Truncated
+	}
 
 	header := titleStyle.Render("GitContribute")
 	viewLine := headerStyle.Render(fmt.Sprintf(" %s ", label))
-	count := dimStyle.Render(fmt.Sprintf(" %d/%d ", visible, total))
+	countText := fmt.Sprintf(" %d/%d ", visible, sourceTotal)
+	if partial {
+		countText = fmt.Sprintf(" %d/%d partial ", visible, sourceTotal)
+	}
+	count := dimStyle.Render(countText)
 
 	line := header + viewLine + count
 	if m.actionMsg != "" {

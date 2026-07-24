@@ -3,8 +3,8 @@ package app
 import (
 	"context"
 
-	"github.com/morluto/gitcontribute/internal/cli"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // Readiness reads a local contribution readiness report through MCP.

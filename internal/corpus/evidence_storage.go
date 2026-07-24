@@ -74,6 +74,10 @@ func (c *Corpus) CreateEvidence(ctx context.Context, item *evidence.Evidence) er
 
 // ListEvidence returns evidence matching the supplied local filter.
 func (c *Corpus) ListEvidence(ctx context.Context, filter evidence.EvidenceFilter) (out []*evidence.Evidence, err error) {
+	return listEvidenceRows(ctx, c.db, filter, 0)
+}
+
+func listEvidenceRows(ctx context.Context, db dbQueryer, filter evidence.EvidenceFilter, limit int) (out []*evidence.Evidence, err error) {
 	query := `SELECT e.payload, e.source_provenance FROM evidence e WHERE 1=1`
 	var args []any
 	if filter.InvestigationID != "" {
@@ -96,8 +100,12 @@ func (c *Corpus) ListEvidence(ctx context.Context, filter evidence.EvidenceFilte
 		query += ` AND e.relation=?`
 		args = append(args, filter.Relation)
 	}
-	query += ` ORDER BY e.created_at, e.id LIMIT 10000`
-	rows, err := c.db.QueryContext(ctx, query, args...)
+	query += ` ORDER BY e.created_at, e.id`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list evidence: %w", err)
 	}

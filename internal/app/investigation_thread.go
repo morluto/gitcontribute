@@ -7,9 +7,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/investigation"
 	"github.com/morluto/gitcontribute/internal/research"
 )
@@ -35,18 +36,18 @@ func (s *Service) StartInvestigationFromThread(ctx context.Context, requested re
 		return nil, fmt.Errorf("get thread investigation repository: %w", err)
 	}
 	if repo == nil {
-		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("%w: %s", errRepositoryNotFound, requested.Repo))
+		return nil, failure.NotFound(fmt.Errorf("%w: %s", errRepositoryNotFound, requested.Repo))
 	}
 	thread, err := c.GetThreadByNumber(ctx, repo.ID, requested.Number)
 	if err != nil {
 		return nil, fmt.Errorf("get thread investigation source: %w", err)
 	}
 	if thread == nil {
-		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("%w: %s#%d", research.ErrThreadNotFound, requested.Repo, requested.Number))
+		return nil, failure.NotFound(fmt.Errorf("%w: %s#%d", research.ErrThreadNotFound, requested.Repo, requested.Number))
 	}
 	storedKind := domain.ThreadKind(thread.Kind)
 	if requested.Kind != "" && requested.Kind != storedKind {
-		return nil, cli.NewCLIError(cli.ExitNotFound, research.KindMismatchError(requested.Kind, storedKind))
+		return nil, failure.NotFound(research.KindMismatchError(requested.Kind, storedKind))
 	}
 	resolved := research.ThreadRef{Repo: requested.Repo, Kind: storedKind, Number: requested.Number}
 	observation, err := c.GetThreadObservationRevision(ctx, thread.ID, thread.SourceUpdatedAt, thread.ObservationSequence)

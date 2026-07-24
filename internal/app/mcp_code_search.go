@@ -8,7 +8,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // SearchCode searches indexed code snapshots in the local corpus.

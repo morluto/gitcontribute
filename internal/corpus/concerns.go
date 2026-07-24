@@ -48,6 +48,43 @@ func (c *Corpus) SaveConcern(ctx context.Context, item *concern.Concern) error {
 	return nil
 }
 
+// UpdateConcern replaces exactly the revision returned to the caller. Links
+// live in concern_links and are excluded from the payload comparison.
+func (c *Corpus) UpdateConcern(ctx context.Context, previous, next *concern.Concern) error {
+	if previous == nil || next == nil || previous.ID == "" || previous.ID != next.ID {
+		return errors.New("matching concern revisions are required")
+	}
+	previousPayload, err := json.Marshal(previous)
+	if err != nil {
+		return fmt.Errorf("marshal previous concern: %w", err)
+	}
+	nextPayload, err := json.Marshal(next)
+	if err != nil {
+		return fmt.Errorf("marshal concern: %w", err)
+	}
+	result, err := c.db.ExecContext(ctx, `
+		UPDATE concerns SET
+			repo_owner=?, repo_name=?, commit_sha=?, workspace_id=?, title=?,
+			problem_statement=?, suspected_owner=?, unknowns=?, success_criterion=?,
+			status=?, confidence=?, payload=?, updated_at=?
+		WHERE id=? AND json_remove(payload, '$.Links')=json_remove(?, '$.Links')
+	`, next.Repo.Owner, next.Repo.Repo, next.CommitSHA, next.WorkspaceID, next.Title,
+		next.ProblemStatement, next.SuspectedOwner, strings.Join(next.Unknowns, "\n"),
+		next.SuccessCriterion, next.Status, next.Confidence, nextPayload,
+		encodeTime(next.UpdatedAt), next.ID, previousPayload)
+	if err != nil {
+		return fmt.Errorf("update concern: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read concern update result: %w", err)
+	}
+	if changed != 1 {
+		return concern.ErrConflict
+	}
+	return nil
+}
+
 // GetConcern returns one local concern with its explicit links.
 func (c *Corpus) GetConcern(ctx context.Context, id string) (*concern.Concern, error) {
 	var payload string
@@ -70,16 +107,16 @@ func (c *Corpus) GetConcern(ctx context.Context, id string) (*concern.Concern, e
 }
 
 // ListConcerns performs a bounded offline FTS5 search or updated-order list.
-func (c *Corpus) ListConcerns(ctx context.Context, filter concern.Filter) (_ []*concern.Concern, err error) {
+func (c *Corpus) ListConcerns(ctx context.Context, filter concern.Filter) (_ *concern.ListResult, err error) {
 	query := literalFTSQuery(filter.Query)
 	from, where := "FROM concerns c", []string{"1=1"}
 	args := make([]any, 0, 4)
-	order := "c.updated_at DESC, c.id"
+	rank := "0.0"
 	if query != "" {
 		from = "FROM concerns_fts JOIN concerns c ON c.rowid=concerns_fts.rowid"
 		where = append(where, "concerns_fts MATCH ?")
 		args = append(args, query)
-		order = "bm25(concerns_fts, 10.0, 5.0, 2.0, 1.0, 1.0), c.updated_at DESC, c.id"
+		rank = "bm25(concerns_fts, 10.0, 5.0, 2.0, 1.0, 1.0)"
 	}
 	if filter.Repo.Owner != "" {
 		where = append(where, "c.repo_owner=? COLLATE NOCASE", "c.repo_name=? COLLATE NOCASE")
@@ -89,8 +126,34 @@ func (c *Corpus) ListConcerns(ctx context.Context, filter concern.Filter) (_ []*
 		where = append(where, "c.status=?")
 		args = append(args, filter.Status)
 	}
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin concern list: %w", err)
+	}
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			err = errors.Join(err, rollbackErr)
+		}
+	}()
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) `+from+` WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count concerns: %w", err)
+	}
 	args = append(args, filter.Limit)
-	rows, err := c.db.QueryContext(ctx, `SELECT c.payload `+from+` WHERE `+strings.Join(where, " AND ")+` ORDER BY `+order+` LIMIT ?`, args...)
+	rows, err := tx.QueryContext(ctx, `
+		WITH bounded AS (
+			SELECT c.id, c.payload, c.updated_at, `+rank+` AS rank
+			`+from+` WHERE `+strings.Join(where, " AND ")+`
+			ORDER BY rank, c.updated_at DESC, c.id LIMIT ?
+		)
+		SELECT b.payload,
+		       l.kind, l.target_type, l.target_id, l.note, l.created_at
+		FROM bounded b
+		LEFT JOIN concern_links l ON l.concern_id=b.id
+		ORDER BY b.rank, b.updated_at DESC, b.id,
+		         l.kind, l.target_type, l.target_id
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list concerns: %w", err)
 	}
@@ -99,22 +162,44 @@ func (c *Corpus) ListConcerns(ctx context.Context, filter concern.Filter) (_ []*
 			err = fmt.Errorf("close concern rows: %w", closeErr)
 		}
 	}()
-	var items []*concern.Concern
+	result := &concern.ListResult{Limit: filter.Limit, Total: total}
+	var current *concern.Concern
 	for rows.Next() {
 		var payload string
-		if err := rows.Scan(&payload); err != nil {
+		var kind, targetType, targetID, note sql.NullString
+		var createdAt sql.NullInt64
+		if err := rows.Scan(&payload, &kind, &targetType, &targetID, &note, &createdAt); err != nil {
 			return nil, err
 		}
 		item, err := decodeConcern(payload)
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, item)
+		if current == nil || current.ID != item.ID {
+			item.Links = nil
+			result.Concerns = append(result.Concerns, item)
+			current = item
+		}
+		if kind.Valid {
+			current.Links = append(current.Links, concern.Link{
+				Kind:       concern.LinkKind(kind.String),
+				TargetType: targetType.String,
+				TargetID:   targetID.String,
+				Note:       note.String,
+				CreatedAt:  scanTime(createdAt.Int64),
+			})
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return items, nil
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close concern rows: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit concern list: %w", err)
+	}
+	return result, nil
 }
 
 // AddConcernLink idempotently stores one typed relationship.

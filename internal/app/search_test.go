@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/config"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/lens"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 func newSearchTestService(t *testing.T) *Service {
@@ -143,6 +143,35 @@ func TestThreadSearchMergesRepositoryAndThreadCoverage(t *testing.T) {
 	}
 	if diff := cmp.Diff([]string{FacetIssueComments, "threads"}, result.Matches[0].Coverage); diff != "" {
 		t.Fatalf("coverage mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestMCPSearchDefaultsCompactAndOffersFullView(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	repo, err := svc.corpus.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.corpus.ApplyThreadObservation(ctx, repo.ID, corpus.ThreadKindIssue, 1, "open", "alpha beta", "full body detail", "author", time.Unix(2, 0).UTC(), `{}`); err != nil {
+		t.Fatal(err)
+	}
+	reader := &MCPReader{Service: svc}
+	compact, err := reader.Search(ctx, mcpserver.SearchInput{Query: "alpha beta", Kind: "issues"})
+	if err != nil || compact.View != "compact" || compact.MatchMode != "all" || compact.QueryInterpretation != "alpha AND beta" || len(compact.Matches) != 1 {
+		t.Fatalf("compact search = (%+v, %v)", compact, err)
+	}
+	if compact.Matches[0].Body != "" {
+		t.Fatalf("compact search leaked body: %+v", compact.Matches[0])
+	}
+	full, err := reader.Search(ctx, mcpserver.SearchInput{Query: "alpha beta", Kind: "issues", View: "full"})
+	if err != nil || len(full.Matches) != 1 || full.Matches[0].Body != "full body detail" {
+		t.Fatalf("full search = (%+v, %v)", full, err)
+	}
+	missing, err := reader.Search(ctx, mcpserver.SearchInput{Query: "alpha missing", Kind: "issues"})
+	if err != nil || missing.Suggestion == "" {
+		t.Fatalf("strict zero-match guidance = (%+v, %v)", missing, err)
 	}
 }
 

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/corpus"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 func TestFindPortfolioOverlapsIsolatesInvalidCandidatesAndMissingPullRequests(t *testing.T) {

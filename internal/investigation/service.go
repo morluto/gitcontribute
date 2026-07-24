@@ -27,7 +27,7 @@ func NewService(repo Repository, evidence EvidenceStore) *Service {
 // StartInvestigation creates a new investigation for a repository and commit.
 func (s *Service) StartInvestigation(ctx context.Context, repo domain.RepoRef, commitSHA, lens string) (*Investigation, error) {
 	if err := repo.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidRepo, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidRepo, err)
 	}
 	now := time.Now().UTC()
 	inv := &Investigation{
@@ -147,6 +147,12 @@ func (s *Service) UpdateHypothesis(ctx context.Context, id string, in UpdateHypo
 	if err != nil {
 		return nil, err
 	}
+	previous := *h
+	previous.OpenQuestions = append([]string(nil), h.OpenQuestions...)
+	previous.AffectedComponents = append([]string(nil), h.AffectedComponents...)
+	previous.SourceRefs = append([]domain.SourceRef(nil), h.SourceRefs...)
+	previous.Links = append([]Link(nil), h.Links...)
+	previous.AuditTrail = append([]StatusChange(nil), h.AuditTrail...)
 	h.Title = title
 	h.Description = in.Description
 	h.Category = in.Category
@@ -166,7 +172,7 @@ func (s *Service) UpdateHypothesis(ctx context.Context, id string, in UpdateHypo
 		})
 	}
 	h.UpdatedAt = time.Now().UTC()
-	if err := s.repo.SaveHypothesis(ctx, h); err != nil {
+	if err := s.repo.UpdateHypothesis(ctx, &previous, h); err != nil {
 		return nil, err
 	}
 	return h, nil
@@ -178,10 +184,13 @@ func (s *Service) TransitionHypothesis(ctx context.Context, id string, to Hypoth
 	if err != nil {
 		return nil, err
 	}
+	previous := *h
+	previous.SourceRefs = append([]domain.SourceRef(nil), h.SourceRefs...)
+	previous.AuditTrail = append([]StatusChange(nil), h.AuditTrail...)
 	if err := h.Transition(to, rationale); err != nil {
 		return nil, err
 	}
-	if err := s.repo.SaveHypothesis(ctx, h); err != nil {
+	if err := s.repo.UpdateHypothesis(ctx, &previous, h); err != nil {
 		return nil, err
 	}
 	return h, nil
@@ -309,6 +318,11 @@ func (s *Service) SetOpportunityStatus(ctx context.Context, id string, to Opport
 		return nil, err
 	}
 
+	previous := *o
+	previous.EvidenceIDs = append([]string(nil), o.EvidenceIDs...)
+	previous.SourceRefs = append([]domain.SourceRef(nil), o.SourceRefs...)
+	previous.AuditTrail = append([]StatusChange(nil), o.AuditTrail...)
+
 	advancing := isAdvancingStatus(to) && o.Status != to
 	if advancing {
 		all, err := s.evidence.ListEvidence(ctx, evidence.EvidenceFilter{OpportunityID: id})
@@ -325,7 +339,7 @@ func (s *Service) SetOpportunityStatus(ctx context.Context, id string, to Opport
 	if err := o.Transition(to, rationale); err != nil {
 		return nil, err
 	}
-	if err := s.repo.SaveOpportunity(ctx, o); err != nil {
+	if err := s.repo.UpdateOpportunity(ctx, &previous, o, advancing); err != nil {
 		return nil, err
 	}
 	return o, nil
@@ -389,6 +403,10 @@ func (s *Service) UpdateCollisionStatus(ctx context.Context, id string, status C
 	if previous == status {
 		return o, nil
 	}
+	stored := *o
+	stored.EvidenceIDs = append([]string(nil), o.EvidenceIDs...)
+	stored.SourceRefs = append([]domain.SourceRef(nil), o.SourceRefs...)
+	stored.AuditTrail = append([]StatusChange(nil), o.AuditTrail...)
 	now := time.Now().UTC()
 	o.CollisionStatus = status
 	o.AuditTrail = append(o.AuditTrail, StatusChange{
@@ -398,7 +416,7 @@ func (s *Service) UpdateCollisionStatus(ctx context.Context, id string, status C
 		At:        now,
 	})
 	o.UpdatedAt = now
-	if err := s.repo.SaveOpportunity(ctx, o); err != nil {
+	if err := s.repo.UpdateOpportunity(ctx, &stored, o, false); err != nil {
 		return nil, err
 	}
 	return o, nil

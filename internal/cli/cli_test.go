@@ -124,6 +124,25 @@ type fakeService struct {
 	err error
 }
 
+type coreOnlyService struct{}
+
+func (coreOnlyService) Init(context.Context) (*cli.InitResult, error) { return nil, nil }
+func (coreOnlyService) Status(context.Context) (*cli.StatusResult, error) {
+	return nil, nil
+}
+func (coreOnlyService) Sync(context.Context, cli.RepoRef) (*cli.SyncResult, error) {
+	return nil, nil
+}
+func (coreOnlyService) Search(context.Context, string, cli.SearchOptions) (*cli.SearchResult, error) {
+	return nil, nil
+}
+func (coreOnlyService) Dossier(context.Context, cli.RepoRef) (*cli.DossierResult, error) {
+	return nil, nil
+}
+func (coreOnlyService) Index(context.Context, cli.RepoRef, string) (*cli.IndexResult, error) {
+	return nil, nil
+}
+
 type startInvArgs struct {
 	Repo   cli.RepoRef
 	Commit string
@@ -716,7 +735,7 @@ func TestContextCancellation(t *testing.T) {
 
 func TestUnknownCommand(t *testing.T) {
 	t.Parallel()
-	c, _, _ := newTestCLI(&fakeService{}, nil)
+	c, _, _ := newTestCLI(coreOnlyService{}, nil)
 	err := c.Run(context.Background(), []string{"nope"})
 	requireCLIError(t, err, cli.ExitUsage)
 }
@@ -898,7 +917,7 @@ func TestOpportunityPromoteShowListAndSetStatus(t *testing.T) {
 
 func TestInvestigationCommandRequiresService(t *testing.T) {
 	t.Parallel()
-	c, _, _ := newTestCLI(cli.NewBootstrapService(), nil)
+	c, _, _ := newTestCLI(coreOnlyService{}, nil)
 	err := c.Run(context.Background(), []string{"investigation", "list"})
 	requireCLIError(t, err, cli.ExitNotWired)
 }

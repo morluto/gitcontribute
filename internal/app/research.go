@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/research"
 )
 
@@ -16,7 +16,7 @@ func (s *Service) ThreadResearchBrief(ctx context.Context, ref research.ThreadRe
 		return brief, nil
 	}
 	if errors.Is(err, errRepositoryNotFound) || errors.Is(err, research.ErrThreadNotFound) || errors.Is(err, research.ErrThreadKindMismatch) {
-		return nil, cli.NewCLIError(cli.ExitNotFound, err)
+		return nil, failure.NotFound(err)
 	}
 	return nil, err
 }

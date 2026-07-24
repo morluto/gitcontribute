@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/research"
 )
@@ -166,12 +166,11 @@ func TestThreadResearchBriefPRCoverageAndErrors(t *testing.T) {
 	}
 
 	_, err = fixture.svc.ThreadResearchBrief(fixture.ctx, research.ThreadRef{Repo: repo, Kind: domain.IssueKind, Number: 9})
-	var cliErr *cli.CLIError
-	if !errors.As(err, &cliErr) || cliErr.Code != cli.ExitNotFound || !errors.Is(err, research.ErrThreadKindMismatch) {
+	if !failure.Is(err, failure.KindNotFound) || !errors.Is(err, research.ErrThreadKindMismatch) {
 		t.Fatalf("kind mismatch error = %v", err)
 	}
 	_, err = fixture.svc.ThreadResearchBrief(fixture.ctx, research.ThreadRef{Repo: repo, Number: 404})
-	if !errors.As(err, &cliErr) || cliErr.Code != cli.ExitNotFound || !errors.Is(err, research.ErrThreadNotFound) {
+	if !failure.Is(err, failure.KindNotFound) || !errors.Is(err, research.ErrThreadNotFound) {
 		t.Fatalf("missing thread error = %v", err)
 	}
 	cancelled, cancel := context.WithCancel(fixture.ctx)

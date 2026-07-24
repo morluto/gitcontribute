@@ -8,12 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
+	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/investigation"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/research"
 )
 
@@ -69,14 +70,14 @@ func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpserver.ThreadByNum
 		return mcpserver.ThreadOutput{}, fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil {
-		return mcpserver.ThreadOutput{}, mcpserver.ErrNotFound
+		return mcpserver.ThreadOutput{}, failure.NotFound(nil)
 	}
 	thread, err := c.GetThreadByNumber(ctx, repo.ID, in.Number)
 	if err != nil {
 		return mcpserver.ThreadOutput{}, fmt.Errorf("get thread: %w", err)
 	}
 	if thread == nil {
-		return mcpserver.ThreadOutput{}, mcpserver.ErrNotFound
+		return mcpserver.ThreadOutput{}, failure.NotFound(nil)
 	}
 	out := corpusThreadToMCPOutput(thread)
 	out.Owner = in.Owner
@@ -100,7 +101,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 		return mcpserver.ExplainMatchOutput{}, fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil {
-		return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+		return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
 	}
 
 	out := mcpserver.ExplainMatchOutput{
@@ -120,10 +121,10 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 			return mcpserver.ExplainMatchOutput{}, fmt.Errorf("get thread: %w", err)
 		}
 		if thread == nil {
-			return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+			return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
 		}
 		if in.Kind != "" && thread.Kind != in.Kind {
-			return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+			return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
 		}
 		out.Kind = thread.Kind
 		out.Number = thread.Number
@@ -137,7 +138,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 				return mcpserver.ExplainMatchOutput{}, err
 			}
 			if !found {
-				return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+				return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
 			}
 			rank := evidence.Rank
 			out.RetrievalRank = &rank
@@ -159,17 +160,17 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 	case "code":
 		if in.Path != "" || in.Commit != "" {
 			if in.Path == "" {
-				return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+				return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
 			}
 			match, err := c.GetCodeDocument(ctx, ref, in.Path)
 			if err != nil {
 				return mcpserver.ExplainMatchOutput{}, fmt.Errorf("get code document: %w", err)
 			}
 			if match == nil {
-				return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+				return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
 			}
 			if in.Commit != "" && match.Commit != in.Commit {
-				return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+				return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
 			}
 			out.Kind = "code"
 			out.Path = match.Path
@@ -185,7 +186,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 					out.RetrievalRank, out.RankingMethod = &evidence.Rank, "fts5_bm25_weighted"
 					out.Snippet = boundedText(evidence.Excerpt, 2000)
 				} else {
-					return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+					return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
 				}
 			}
 			out.MatchSource = "code_document"
@@ -208,7 +209,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 			match = &matches[0]
 		}
 		if match == nil {
-			return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+			return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
 		}
 		out.Kind = "code"
 		out.Path = match.Path
@@ -231,7 +232,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 			out.Snippet = boundedText(evidence.Excerpt, 2000)
 			out.MatchSource = "repository_metadata"
 		} else if in.Query != "" {
-			return mcpserver.ExplainMatchOutput{}, mcpserver.ErrNotFound
+			return mcpserver.ExplainMatchOutput{}, failure.NotFound(nil)
 		}
 		out.SourceRevision = formatTime(repo.SourceUpdatedAt)
 		cov, _, err := readCoverageTarget(ctx, c, mcpserver.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
@@ -255,11 +256,11 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpserver.ExplainMatchI
 // BuildRepositoryDossier submits a durable job that builds a repository dossier.
 func (r *MCPReader) BuildRepositoryDossier(ctx context.Context, in mcpserver.BuildRepositoryDossierInput) (mcpserver.JobReference, error) {
 	repo := cli.RepoRef{Owner: in.Owner, Repo: in.Repo}
-	id, err := r.Service.submitJob(ctx, "build_repository_dossier", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
+	id, err := r.submitJob(ctx, "build_repository_dossier", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
 		if err := report("repository_dossier", jobProgressCounts(0, 1)); err != nil {
 			return nil, err
 		}
-		res, err := r.Service.BuildRepositoryDossier(ctx, repo)
+		res, err := r.application().BuildRepositoryDossier(ctx, repo)
 		if err != nil {
 			return nil, err
 		}
@@ -282,11 +283,11 @@ func (r *MCPReader) CreateWorkspace(ctx context.Context, in mcpserver.CreateWork
 		CandidateRef: in.CandidateRef,
 		Name:         in.Name,
 	}
-	id, err := r.Service.submitJob(ctx, "create_workspace", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
+	id, err := r.submitJob(ctx, "create_workspace", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
 		if err := report("workspace_creation", jobProgressCounts(0, 1)); err != nil {
 			return nil, err
 		}
-		res, err := r.Service.CreateWorkspace(ctx, in.InvestigationID, opts)
+		res, err := r.application().CreateWorkspace(ctx, in.InvestigationID, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -304,7 +305,7 @@ func (r *MCPReader) CreateWorkspace(ctx context.Context, in mcpserver.CreateWork
 // AdoptWorkspace records an existing worktree synchronously without exposing
 // its host path or remote URL in the protocol result.
 func (r *MCPReader) AdoptWorkspace(ctx context.Context, in mcpserver.AdoptWorkspaceInput) (mcpserver.AdoptWorkspaceOutput, error) {
-	res, err := r.Service.AdoptWorkspace(ctx, in.InvestigationID, cli.WorkspaceAdoptOptions{Path: in.Path, BaseRef: in.BaseRef, Name: in.Name})
+	res, err := r.application().AdoptWorkspace(ctx, in.InvestigationID, cli.WorkspaceAdoptOptions{Path: in.Path, BaseRef: in.BaseRef, Name: in.Name})
 	if err != nil {
 		return mcpserver.AdoptWorkspaceOutput{}, err
 	}
@@ -325,11 +326,11 @@ func (r *MCPReader) RunValidation(ctx context.Context, in mcpserver.RunValidatio
 		return mcpserver.JobReference{}, errors.New("execute must be true to authorize host command execution")
 	}
 	opts := cli.RunValidationOptions{Kind: in.Kind, Execute: true}
-	id, err := r.Service.submitJob(ctx, "run_validation", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
+	id, err := r.submitJob(ctx, "run_validation", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
 		if err := report("validation", jobProgressCounts(0, 1)); err != nil {
 			return nil, err
 		}
-		res, err := r.Service.RunValidation(ctx, in.ID, opts)
+		res, err := r.application().RunValidation(ctx, in.ID, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -358,7 +359,7 @@ func (r *MCPReader) StartInvestigation(ctx context.Context, in mcpserver.StartIn
 		out.Hypotheses = []mcpserver.HypothesisSummary{{ID: res.Hypothesis.ID, Title: res.Hypothesis.Title, Category: res.Hypothesis.Category}}
 		return out, nil
 	}
-	res, err := r.Service.StartInvestigation(ctx, cli.RepoRef{Owner: in.Owner, Repo: in.Repo}, in.CommitSHA, in.Lens)
+	res, err := r.application().StartInvestigation(ctx, cli.RepoRef{Owner: in.Owner, Repo: in.Repo}, in.CommitSHA, in.Lens)
 	if err != nil {
 		return mcpserver.InvestigationOutput{}, err
 	}
@@ -396,7 +397,7 @@ func (r *MCPReader) RecordHypothesis(ctx context.Context, in mcpserver.RecordHyp
 		AffectedComponents: append([]string(nil), in.AffectedComponents...),
 		SourceRefs:         sourceRefs,
 	}
-	h, err := r.Service.CreateHypothesis(ctx, in.InvestigationID, input)
+	h, err := r.CreateHypothesis(ctx, in.InvestigationID, input)
 	if err != nil {
 		return mcpserver.HypothesisOutput{}, err
 	}
@@ -458,9 +459,9 @@ func (r *MCPReader) CheckDuplicates(ctx context.Context, in mcpserver.CheckDupli
 	var err error
 	switch in.Target {
 	case "hypothesis":
-		result, err = r.Service.CheckHypothesisDuplicates(ctx, in.ID, in.Limit)
+		result, err = r.CheckHypothesisDuplicates(ctx, in.ID, in.Limit)
 	case "opportunity":
-		result, err = r.Service.CheckOpportunityDuplicates(ctx, in.ID, in.Limit)
+		result, err = r.CheckOpportunityDuplicates(ctx, in.ID, in.Limit)
 	default:
 		return mcpserver.CheckOutput{}, fmt.Errorf("unknown target %q", in.Target)
 	}
@@ -476,9 +477,9 @@ func (r *MCPReader) CheckCollisions(ctx context.Context, in mcpserver.CheckColli
 	var err error
 	switch in.Target {
 	case "hypothesis":
-		result, err = r.Service.CheckHypothesisCollisions(ctx, in.ID, in.Limit)
+		result, err = r.CheckHypothesisCollisions(ctx, in.ID, in.Limit)
 	case "opportunity":
-		result, err = r.Service.CheckOpportunityCollisions(ctx, in.ID, in.Limit)
+		result, err = r.CheckOpportunityCollisions(ctx, in.ID, in.Limit)
 	default:
 		return mcpserver.CheckOutput{}, fmt.Errorf("unknown target %q", in.Target)
 	}
@@ -503,9 +504,7 @@ func duplicateCheckResultToMCP(target, id string, result *DuplicateCheckResult) 
 
 func collisionCheckResultToMCP(target, id string, result *CollisionCheckResult) mcpserver.CheckOutput {
 	findings := make([]evidence.Evidence, len(result.Findings))
-	for i := range result.Findings {
-		findings[i] = result.Findings[i]
-	}
+	copy(findings, result.Findings)
 	return mcpserver.CheckOutput{
 		Target:         target,
 		ID:             id,
@@ -549,7 +548,7 @@ func (r *MCPReader) PromoteOpportunity(ctx context.Context, in mcpserver.Promote
 		MaintainerAlignment: in.MaintainerAlignment,
 		SourceRefs:          sourceRefs,
 	}
-	o, err := r.Service.PromoteOpportunityWithInput(ctx, in.HypothesisID, input)
+	o, err := r.PromoteOpportunityWithInput(ctx, in.HypothesisID, input)
 	if err != nil {
 		return mcpserver.OpportunityOutput{}, err
 	}
@@ -612,7 +611,7 @@ func (r *MCPReader) DefineValidation(ctx context.Context, in mcpserver.DefineVal
 		Protocol:             in.Protocol,
 		ReadinessTimeout:     readinessTimeout,
 	}
-	res, err := r.Service.DefineValidation(ctx, in.InvestigationID, opts)
+	res, err := r.application().DefineValidation(ctx, in.InvestigationID, opts)
 	if err != nil {
 		return mcpserver.ValidationOutput{}, err
 	}
@@ -693,13 +692,13 @@ func (r *MCPReader) PrepareContribution(ctx context.Context, in mcpserver.Prepar
 	var err error
 	switch in.Kind {
 	case "issue":
-		draft, err = r.Service.PrepareIssue(ctx, in.OpportunityID, cli.PrepareIssueOptions{
+		draft, err = r.PrepareIssue(ctx, in.OpportunityID, cli.PrepareIssueOptions{
 			Guidance:   in.Guidance,
 			Success:    in.Success,
 			ManifestID: in.ManifestID,
 		})
 	case "pull_request":
-		draft, err = r.Service.PreparePullRequest(ctx, in.OpportunityID, cli.PreparePROptions{
+		draft, err = r.PreparePullRequest(ctx, in.OpportunityID, cli.PreparePROptions{
 			WorkspaceID:   in.WorkspaceID,
 			Approach:      in.Approach,
 			Changes:       in.Changes,

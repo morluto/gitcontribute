@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/concern"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 )
@@ -60,8 +60,33 @@ func TestConcernWorkflowRemainsLocalAndPromotes(t *testing.T) {
 		t.Fatalf("promotion lost evidence IDs: %+v", opportunity)
 	}
 	listed, err := svc.ListConcerns(ctx, cli.ConcernListOptions{Repo: created.Repo, Query: "scheduler", Limit: 10})
-	if err != nil || listed.Total != 1 {
+	if err != nil || listed.Total != 1 || listed.Truncated || listed.Limit != 10 || len(listed.Concerns) != 1 || len(listed.Concerns[0].Links) != 3 {
 		t.Fatalf("search promoted concern: result=%+v err=%v", listed, err)
+	}
+}
+
+func TestConcernListReportsMatchingPopulation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newLocalService(t)
+	defer func() { _ = svc.Close() }()
+	for _, title := range []string{"scheduler one", "scheduler two", "scheduler three"} {
+		if _, err := svc.CreateConcern(ctx, cli.ConcernCreateOptions{
+			Repo: cli.RepoRef{Owner: "owner", Repo: "repo"}, CommitSHA: "abc", Title: title, ProblemStatement: "bounded list",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	listed, err := svc.ListConcerns(ctx, cli.ConcernListOptions{
+		Repo: cli.RepoRef{Owner: "owner", Repo: "repo"}, Query: "scheduler", Limit: 2,
+	})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed.Total != 3 || !listed.Truncated || listed.Limit != 2 || len(listed.Concerns) != 2 {
+		t.Fatalf("bounded concern result = %+v", listed)
 	}
 }
 

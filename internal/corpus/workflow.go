@@ -216,11 +216,11 @@ func (c *Corpus) GetInvestigation(ctx context.Context, id string) (*investigatio
 
 // ListInvestigations returns investigations in deterministic creation order.
 func (c *Corpus) ListInvestigations(ctx context.Context) ([]*investigation.Investigation, error) {
-	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM investigations ORDER BY created_at, id LIMIT 10000`)
+	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM investigations ORDER BY created_at, id`)
 	if err != nil {
 		return nil, fmt.Errorf("list investigations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*investigation.Investigation
 	for rows.Next() {
 		var payload string
@@ -257,6 +257,31 @@ func (c *Corpus) SaveHypothesis(ctx context.Context, item *investigation.Hypothe
 	return nil
 }
 
+// UpdateHypothesis conditionally replaces the exact revision read by the
+// caller, preserving concurrent status and audit updates.
+func (c *Corpus) UpdateHypothesis(ctx context.Context, previous, next *investigation.Hypothesis) error {
+	if previous == nil || next == nil || previous.ID == "" || previous.ID != next.ID {
+		return errors.New("matching hypothesis revisions are required")
+	}
+	previousPayload, err := marshalWorkflow(previous)
+	if err != nil {
+		return err
+	}
+	nextPayload, err := marshalWorkflow(next)
+	if err != nil {
+		return err
+	}
+	result, err := c.db.ExecContext(ctx, `
+		UPDATE hypotheses SET investigation_id=?, category=?, status=?, payload=?, updated_at=?
+		WHERE id=? AND payload=?
+	`, next.InvestigationID, next.Category, next.Status, nextPayload,
+		encodeTime(next.UpdatedAt), next.ID, previousPayload)
+	if err != nil {
+		return fmt.Errorf("update hypothesis: %w", err)
+	}
+	return requireWorkflowRevision(result)
+}
+
 // GetHypothesis returns a hypothesis by ID, or nil when absent.
 func (c *Corpus) GetHypothesis(ctx context.Context, id string) (*investigation.Hypothesis, error) {
 	var payload string
@@ -276,11 +301,11 @@ func (c *Corpus) GetHypothesis(ctx context.Context, id string) (*investigation.H
 
 // ListHypotheses returns hypotheses belonging to an investigation.
 func (c *Corpus) ListHypotheses(ctx context.Context, investigationID string) ([]*investigation.Hypothesis, error) {
-	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM hypotheses WHERE investigation_id=? ORDER BY created_at, id LIMIT 10000`, investigationID)
+	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM hypotheses WHERE investigation_id=? ORDER BY created_at, id`, investigationID)
 	if err != nil {
 		return nil, fmt.Errorf("list hypotheses: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*investigation.Hypothesis
 	for rows.Next() {
 		var payload string
@@ -315,6 +340,73 @@ func (c *Corpus) SaveOpportunity(ctx context.Context, item *investigation.Opport
 	`, item.ID, item.InvestigationID, item.HypothesisID, item.Category, item.Status, payload, encodeTime(item.CreatedAt), encodeTime(item.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("save opportunity: %w", err)
+	}
+	return nil
+}
+
+// UpdateOpportunity conditionally replaces the exact revision read by the
+// caller. For advancing transitions, the same SQL statement also rejects any
+// contradicting evidence visible when the status write is serialized.
+func (c *Corpus) UpdateOpportunity(ctx context.Context, previous, next *investigation.Opportunity, blockContradicting bool) error {
+	if previous == nil || next == nil || previous.ID == "" || previous.ID != next.ID {
+		return errors.New("matching opportunity revisions are required")
+	}
+	previousPayload, err := marshalWorkflow(previous)
+	if err != nil {
+		return err
+	}
+	nextPayload, err := marshalWorkflow(next)
+	if err != nil {
+		return err
+	}
+	block := 0
+	if blockContradicting {
+		block = 1
+	}
+	result, err := c.db.ExecContext(ctx, `
+		UPDATE opportunities SET investigation_id=?, hypothesis_id=?, category=?, status=?, payload=?, updated_at=?
+		WHERE id=? AND payload=?
+		  AND (?=0 OR NOT EXISTS (
+			SELECT 1 FROM evidence
+			WHERE opportunity_id=? AND relation=?
+		  ))
+	`, next.InvestigationID, next.HypothesisID, next.Category, next.Status,
+		nextPayload, encodeTime(next.UpdatedAt), next.ID, previousPayload,
+		block, next.ID, evidence.RelationContradicting)
+	if err != nil {
+		return fmt.Errorf("update opportunity: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read workflow update result: %w", err)
+	}
+	if changed == 1 {
+		return nil
+	}
+	if blockContradicting {
+		var exists int
+		if err := c.db.QueryRowContext(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM evidence
+				WHERE opportunity_id=? AND relation=?
+			)
+		`, next.ID, evidence.RelationContradicting).Scan(&exists); err != nil {
+			return fmt.Errorf("check contradicting evidence: %w", err)
+		}
+		if exists != 0 {
+			return investigation.ErrContradictingEvidence
+		}
+	}
+	return investigation.ErrConflict
+}
+
+func requireWorkflowRevision(result sql.Result) error {
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read workflow update result: %w", err)
+	}
+	if changed != 1 {
+		return investigation.ErrConflict
 	}
 	return nil
 }
@@ -414,12 +506,12 @@ func (c *Corpus) ListOpportunities(ctx context.Context, investigationID string) 
 		query += ` WHERE investigation_id=?`
 		args = append(args, investigationID)
 	}
-	query += ` ORDER BY created_at, id LIMIT 10000`
+	query += ` ORDER BY created_at, id`
 	rows, err := c.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list opportunities: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*investigation.Opportunity
 	for rows.Next() {
 		var payload string
@@ -444,7 +536,7 @@ func (c *Corpus) FindRelated(ctx context.Context, ref domain.RepoRef, category i
 	if err != nil {
 		return nil, fmt.Errorf("find related investigations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []domain.SourceRef
 	for rows.Next() {
 		var payload string
@@ -502,7 +594,7 @@ func (c *Corpus) GetValidationDefinition(ctx context.Context, id string) (*evide
 func (c *Corpus) ListValidationDefinitions(ctx context.Context, opportunityID string) ([]*evidence.ValidationDefinition, error) {
 	return listWorkflowPayloads[evidence.ValidationDefinition](
 		ctx, c.db, "list validation definitions",
-		`SELECT payload FROM validation_definitions WHERE opportunity_id=? ORDER BY created_at, id LIMIT 10000`,
+		`SELECT payload FROM validation_definitions WHERE opportunity_id=? ORDER BY created_at, id`,
 		opportunityID,
 	)
 }
@@ -590,7 +682,7 @@ func (c *Corpus) GetValidationRunGroup(ctx context.Context, id string) (*evidenc
 func (c *Corpus) ListValidationRuns(ctx context.Context, opportunityID string) ([]*evidence.ValidationRun, error) {
 	return listWorkflowPayloads[evidence.ValidationRun](
 		ctx, c.db, "list validation runs",
-		`SELECT payload FROM validation_runs WHERE opportunity_id=? ORDER BY completed_at, id LIMIT 10000`,
+		`SELECT payload FROM validation_runs WHERE opportunity_id=? ORDER BY completed_at, id`,
 		opportunityID,
 	)
 }

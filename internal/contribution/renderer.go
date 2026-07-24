@@ -35,22 +35,22 @@ func (r *Renderer) RenderIssue(in IssueInput) (*IssueDraft, error) {
 	o := in.Opportunity
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("## Problem\n\n%s\n", o.ProblemStatement))
+	_, _ = fmt.Fprintf(&b, "## Problem\n\n%s\n", o.ProblemStatement)
 	if o.Scope != "" {
-		b.WriteString(fmt.Sprintf("\n## Scope\n\n%s\n", o.Scope))
+		_, _ = fmt.Fprintf(&b, "\n## Scope\n\n%s\n", o.Scope)
 	}
 	if o.Impact != "" {
-		b.WriteString(fmt.Sprintf("\n## Impact\n\n%s\n", o.Impact))
+		_, _ = fmt.Fprintf(&b, "\n## Impact\n\n%s\n", o.Impact)
 	}
 
 	r.writeEvidenceSection(&b, "Evidence", in.Evidence)
 	r.writeReproductionSection(&b, in.Evidence)
 
 	if in.Success != "" {
-		b.WriteString(fmt.Sprintf("\n## Success Criteria\n\n%s\n", in.Success))
+		fmt.Fprintf(&b, "\n## Success Criteria\n\n%s\n", in.Success)
 	}
 	if in.Guidance != "" {
-		b.WriteString(fmt.Sprintf("\n## Repository Guidance\n\n%s\n", in.Guidance))
+		fmt.Fprintf(&b, "\n## Repository Guidance\n\n%s\n", in.Guidance)
 	}
 
 	return &IssueDraft{
@@ -74,28 +74,28 @@ func (r *Renderer) RenderPullRequest(in PullRequestInput) (*PullRequestDraft, er
 	o := in.Opportunity
 	var b strings.Builder
 
-	b.WriteString(fmt.Sprintf("## Motivation\n\n%s\n", o.ProblemStatement))
+	fmt.Fprintf(&b, "## Motivation\n\n%s\n", o.ProblemStatement)
 	if o.Impact != "" {
-		b.WriteString(fmt.Sprintf("\n## Concrete Outcome\n\n%s\n", o.Impact))
+		fmt.Fprintf(&b, "\n## Concrete Outcome\n\n%s\n", o.Impact)
 	}
-	b.WriteString(fmt.Sprintf("\n## Approach\n\n%s\n", in.Approach))
+	fmt.Fprintf(&b, "\n## Approach\n\n%s\n", in.Approach)
 	if in.Changes != "" {
-		b.WriteString(fmt.Sprintf("\n## Focused Changes\n\n%s\n", in.Changes))
+		fmt.Fprintf(&b, "\n## Focused Changes\n\n%s\n", in.Changes)
 	}
 
 	r.writeEvidenceSection(&b, "Validation", in.Evidence)
 
 	if in.Compatibility != "" {
-		b.WriteString(fmt.Sprintf("\n## Compatibility\n\n%s\n", in.Compatibility))
+		fmt.Fprintf(&b, "\n## Compatibility\n\n%s\n", in.Compatibility)
 	}
 	if in.Limitations != "" {
-		b.WriteString(fmt.Sprintf("\n## Limitations\n\n%s\n", in.Limitations))
+		fmt.Fprintf(&b, "\n## Limitations\n\n%s\n", in.Limitations)
 	}
 	if in.LinkedIssue != "" {
-		b.WriteString(fmt.Sprintf("\n## Issue Linkage\n\n%s\n", in.LinkedIssue))
+		fmt.Fprintf(&b, "\n## Issue Linkage\n\n%s\n", in.LinkedIssue)
 	}
 	if in.Guidance != "" {
-		b.WriteString(fmt.Sprintf("\n## Repository Guidance\n\n%s\n", in.Guidance))
+		fmt.Fprintf(&b, "\n## Repository Guidance\n\n%s\n", in.Guidance)
 	}
 
 	return &PullRequestDraft{
@@ -128,14 +128,14 @@ func (r *Renderer) writeEvidenceSection(b *strings.Builder, heading string, all 
 		return sorted[i].ID < sorted[j].ID
 	})
 
-	b.WriteString(fmt.Sprintf("\n## %s\n\n", heading))
+	fmt.Fprintf(b, "\n## %s\n\n", heading)
 	for _, e := range sorted {
-		b.WriteString(fmt.Sprintf("- **%s**: %s", e.Relation, e.Description))
+		fmt.Fprintf(b, "- **%s**: %s", e.Relation, e.Description)
 		if e.Type != "" {
-			b.WriteString(fmt.Sprintf(" (type: %s)", e.Type))
+			fmt.Fprintf(b, " (type: %s)", e.Type)
 		}
 		if e.ValidationRunID != "" {
-			b.WriteString(fmt.Sprintf(" [run: %s]", e.ValidationRunID))
+			fmt.Fprintf(b, " [run: %s]", e.ValidationRunID)
 		}
 		b.WriteString("\n")
 	}
@@ -158,9 +158,9 @@ func (r *Renderer) writeReproductionSection(b *strings.Builder, all []*evidence.
 	sort.SliceStable(repros, func(i, j int) bool { return repros[i].ID < repros[j].ID })
 	b.WriteString("\n## Reproduction\n\n")
 	for _, e := range repros {
-		b.WriteString(fmt.Sprintf("- %s", e.Description))
+		fmt.Fprintf(b, "- %s", e.Description)
 		if e.ValidationRunID != "" {
-			b.WriteString(fmt.Sprintf(" [run: %s]", e.ValidationRunID))
+			fmt.Fprintf(b, " [run: %s]", e.ValidationRunID)
 		}
 		b.WriteString("\n")
 	}

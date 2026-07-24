@@ -34,7 +34,7 @@ func TestCircuitBreakerHalfOpenAfterCooldown(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	cb := newCircuitBreaker(3, 30*time.Second, 5*time.Second)
-	cb.setClock(func() time.Time { return now })
+	cb.clock = func() time.Time { return now }
 
 	// Open the circuit.
 	cb.recordFailure()
@@ -46,7 +46,7 @@ func TestCircuitBreakerHalfOpenAfterCooldown(t *testing.T) {
 	}
 
 	// Advance past half-open wait.
-	cb.setClock(func() time.Time { return now.Add(31 * time.Second) })
+	cb.clock = func() time.Time { return now.Add(31 * time.Second) }
 
 	if !cb.allow() {
 		t.Fatal("expected circuit to allow probe after cooldown")
@@ -62,7 +62,7 @@ func TestCircuitBreakerClosesAfterSuccessfulProbe(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	cb := newCircuitBreaker(3, 30*time.Second, 5*time.Second)
-	cb.setClock(func() time.Time { return now })
+	cb.clock = func() time.Time { return now }
 
 	// Open the circuit.
 	cb.recordFailure()
@@ -70,7 +70,7 @@ func TestCircuitBreakerClosesAfterSuccessfulProbe(t *testing.T) {
 	cb.recordFailure()
 
 	// Advance past cooldown.
-	cb.setClock(func() time.Time { return now.Add(31 * time.Second) })
+	cb.clock = func() time.Time { return now.Add(31 * time.Second) }
 
 	// Probe succeeds.
 	if !cb.allow() {
@@ -91,7 +91,7 @@ func TestCircuitBreakerReopensAfterFailedProbe(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	cb := newCircuitBreaker(3, 30*time.Second, 5*time.Second)
-	cb.setClock(func() time.Time { return now })
+	cb.clock = func() time.Time { return now }
 
 	// Open the circuit.
 	cb.recordFailure()
@@ -99,7 +99,7 @@ func TestCircuitBreakerReopensAfterFailedProbe(t *testing.T) {
 	cb.recordFailure()
 
 	// Advance past cooldown.
-	cb.setClock(func() time.Time { return now.Add(31 * time.Second) })
+	cb.clock = func() time.Time { return now.Add(31 * time.Second) }
 
 	// Probe allowed.
 	if !cb.allow() {
@@ -119,7 +119,7 @@ func TestCircuitBreakerReopensAfterProbeTimeout(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	cb := newCircuitBreaker(1, 30*time.Second, 5*time.Second)
-	cb.setClock(func() time.Time { return now })
+	cb.clock = func() time.Time { return now }
 	cb.recordFailure()
 
 	now = now.Add(31 * time.Second)

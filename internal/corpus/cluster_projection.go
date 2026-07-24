@@ -86,6 +86,58 @@ func (c *Corpus) ListClusterProjection(ctx context.Context, repo domain.RepoRef,
 	return clusterprojection.List{Repo: repo, Projection: identity, Clusters: clusters, Total: total, Truncated: len(clusters) < total}, nil
 }
 
+// ListRecentClusters returns the globally newest non-retired clusters from one
+// read snapshot. It avoids repository-order bias in bounded browse surfaces.
+func (c *Corpus) ListRecentClusters(ctx context.Context, limit int) (_ []clustering.Cluster, total int, err error) {
+	if limit < 1 || limit > 1000 {
+		return nil, 0, errors.New("recent cluster limit must be between 1 and 1000")
+	}
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rollbackSQLOnReturn(tx, &err)
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM clusters WHERE state != ?`, string(clustering.ClusterRetired)).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, stable_id, state, canonical_kind, canonical_owner, canonical_repo, canonical_number,
+		       source_revision, source_window_start, source_window_end, created_at, updated_at,
+		       repo_owner, repo_name
+		FROM clusters
+		WHERE state != ?
+		ORDER BY updated_at DESC, stable_id
+		LIMIT ?
+	`, string(clustering.ClusterRetired), limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { err = errors.Join(err, rows.Close()) }()
+	var clusters []clustering.Cluster
+	for rows.Next() {
+		var cluster clustering.Cluster
+		if err := scanProjectionCluster(rows, &cluster, true); err != nil {
+			return nil, 0, err
+		}
+		clusters = append(clusters, cluster)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, 0, err
+	}
+	if len(clusters) > 0 {
+		if err := loadProjectionMembersTx(ctx, tx, clusters); err != nil {
+			return nil, 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, 0, err
+	}
+	return clusters, total, nil
+}
+
 // GetClusterProjection reads one cluster and its members from one read-only snapshot.
 func (c *Corpus) GetClusterProjection(ctx context.Context, stableID string) (*clustering.Cluster, error) {
 	return c.getClusterProjection(ctx, `WHERE stable_id=?`, []any{stableID})

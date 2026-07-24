@@ -9,6 +9,15 @@ import (
 
 type oneByteReader struct{ reader *strings.Reader }
 
+func containsSetupQuestion(questions []SetupPromptQuestion, want SetupPromptQuestion) bool {
+	for _, question := range questions {
+		if question == want {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *oneByteReader) Read(buffer []byte) (int, error) {
 	return r.reader.Read(buffer[:1])
 }

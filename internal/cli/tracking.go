@@ -110,7 +110,7 @@ func (c *CLI) runTriage(ctx context.Context, command string, cmd *triageCmd) err
 	}
 	switch command {
 	case "triage record":
-		fmt.Fprintf(c.stderr, "recording triage outcome for %s...\n", cmd.Record.Target)
+		_, _ = fmt.Fprintf(c.stderr, "recording triage outcome for %s...\n", cmd.Record.Target)
 		result, err := service.RecordTriageEvent(ctx, RecordTriageEventOptions{
 			Target:  cmd.Record.Target,
 			Outcome: cmd.Record.Outcome,
@@ -148,7 +148,7 @@ func (c *CLI) runContribution(ctx context.Context, command string, cmd *contribu
 	}
 	switch command {
 	case "contribution record":
-		fmt.Fprintf(c.stderr, "recording contribution for opportunity %s...\n", cmd.Record.OpportunityID)
+		_, _ = fmt.Fprintf(c.stderr, "recording contribution for opportunity %s...\n", cmd.Record.OpportunityID)
 		result, err := service.RecordContribution(ctx, RecordContributionOptions{
 			OpportunityID: cmd.Record.OpportunityID,
 			Kind:          cmd.Record.Kind,
@@ -181,7 +181,7 @@ func (c *CLI) runContribution(ctx context.Context, command string, cmd *contribu
 		}
 		return c.render(cmd.Show.JSON, result)
 	case "contribution outcome":
-		fmt.Fprintf(c.stderr, "recording outcome %s for contribution %s...\n", cmd.Outcome.Outcome, cmd.Outcome.ContributionID)
+		_, _ = fmt.Fprintf(c.stderr, "recording outcome %s for contribution %s...\n", cmd.Outcome.Outcome, cmd.Outcome.ContributionID)
 		result, err := service.RecordContributionOutcome(ctx, RecordContributionOutcomeOptions{
 			ContributionID: cmd.Outcome.ContributionID,
 			Outcome:        cmd.Outcome.Outcome,
@@ -221,7 +221,7 @@ func (c *CLI) runTrackingExport(ctx context.Context, cmd *trackingExportCmd, ser
 	if cmd.Limit <= 0 || cmd.Limit > 100000 {
 		return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 100000"))
 	}
-	fmt.Fprintln(c.stderr, "exporting local tracking metadata...")
+	_, _ = fmt.Fprintln(c.stderr, "exporting local tracking metadata...")
 	result, err := service.ExportLocalMetadata(ctx, MetadataExportOptions{Limit: cmd.Limit})
 	if err != nil {
 		return c.mapError(err)
@@ -253,7 +253,7 @@ func (c *CLI) runTrackingImport(ctx context.Context, cmd *trackingImportCmd, ser
 	if err != nil {
 		return NewCLIError(ExitUsage, err)
 	}
-	fmt.Fprintln(c.stderr, "importing local tracking metadata...")
+	_, _ = fmt.Fprintln(c.stderr, "importing local tracking metadata...")
 	result, err := service.ImportLocalMetadata(ctx, MetadataImportOptions{Data: data})
 	if err != nil {
 		return c.mapError(err)
@@ -270,7 +270,7 @@ func (c *CLI) readMetadataImport(file string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("open import file: %w", err)
 		}
-		defer opened.Close()
+		defer func() { _ = opened.Close() }()
 		reader = opened
 	}
 	data, err := io.ReadAll(io.LimitReader(reader, maxMetadataImportBytes+1))

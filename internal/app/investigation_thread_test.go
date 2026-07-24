@@ -8,11 +8,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/investigation"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/research"
 )
 
@@ -123,18 +124,17 @@ func TestStartInvestigationFromThreadErrorsAndCancellation(t *testing.T) {
 	fixture := newResearchFixture(t)
 	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
 	_, err := fixture.svc.StartInvestigationFromThread(fixture.ctx, research.ThreadRef{Repo: repo, Kind: domain.IssueKind, Number: 9})
-	var cliErr *cli.CLIError
-	if !errors.As(err, &cliErr) || cliErr.Code != cli.ExitNotFound || !errors.Is(err, research.ErrThreadKindMismatch) {
+	if !failure.Is(err, failure.KindNotFound) || !errors.Is(err, research.ErrThreadKindMismatch) {
 		t.Fatalf("kind mismatch error = %v", err)
 	}
 	_, err = fixture.svc.StartInvestigationFromThread(fixture.ctx, research.ThreadRef{Repo: repo, Number: 404})
-	if !errors.As(err, &cliErr) || cliErr.Code != cli.ExitNotFound || !errors.Is(err, research.ErrThreadNotFound) {
+	if !failure.Is(err, failure.KindNotFound) || !errors.Is(err, research.ErrThreadNotFound) {
 		t.Fatalf("missing thread error = %v", err)
 	}
 	_, err = fixture.svc.StartInvestigationFromThread(fixture.ctx, research.ThreadRef{
 		Repo: domain.RepoRef{Owner: "other", Repo: "repo"}, Number: 1,
 	})
-	if !errors.As(err, &cliErr) || cliErr.Code != cli.ExitNotFound {
+	if !failure.Is(err, failure.KindNotFound) {
 		t.Fatalf("repository isolation error = %v", err)
 	}
 

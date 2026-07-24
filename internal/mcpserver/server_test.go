@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/morluto/gitcontribute/internal/lens"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 type fakeReader struct {
@@ -147,10 +148,10 @@ func (*fakeReader) FindClusters(_ context.Context, in FindClustersInput) (FindCl
 }
 
 func (*fakeReader) GetCoverage(_ context.Context, in GetCoverageInput) (GetCoverageOutput, error) {
-	items := make([]BatchItem[CoverageOutput], len(in.Targets))
+	items := make([]mcpcontract.BatchItem[CoverageOutput], len(in.Targets))
 	for i, target := range in.Targets {
 		value := CoverageOutput{Owner: target.Owner, Repo: target.Repo, Kind: target.Kind, Number: target.Number, AsOf: "2026-07-17T00:00:00Z", Facets: []FacetCoverageOutput{{Facet: "metadata", Complete: true, Status: "fresh", UpdatedAt: "2026-07-17T00:00:00Z"}}}
-		items[i] = BatchItem[CoverageOutput]{Key: target.Owner + "/" + target.Repo, Status: "complete", Value: &value}
+		items[i] = mcpcontract.BatchItem[CoverageOutput]{Key: target.Owner + "/" + target.Repo, Status: "complete", Value: &value}
 	}
 	return GetCoverageOutput{Status: "complete", Items: items}, nil
 }
@@ -181,7 +182,7 @@ func (*fakeReader) SearchGitHubRepositories(_ context.Context, in SearchGitHubRe
 	if applied == "" {
 		applied = in.Text
 	}
-	return SearchGitHubRepositoriesOutput{Status: "complete", Query: applied, Interpretation: "Search using structured repository filters.", ResponseFormat: "concise", Page: 1, Total: 1, Items: []BatchItem[RepositorySearchMatch]{{Key: "acme/rocket", Status: "complete", Value: &RepositorySearchMatch{Ref: "repository:acme/rocket", Owner: "acme", Repo: "rocket", Stars: &stars}}}}, nil
+	return SearchGitHubRepositoriesOutput{Status: "complete", Query: applied, Interpretation: "Search using structured repository filters.", ResponseFormat: "concise", Page: 1, Total: 1, Items: []mcpcontract.BatchItem[RepositorySearchMatch]{{Key: "acme/rocket", Status: "complete", Value: &RepositorySearchMatch{Ref: "repository:acme/rocket", Owner: "acme", Repo: "rocket", Stars: &stars}}}}, nil
 }
 
 func (*fakeReader) ExplainMatch(_ context.Context, in ExplainMatchInput) (ExplainMatchOutput, error) {
@@ -300,10 +301,10 @@ func (*fakeReader) ExportManifest(_ context.Context, in ExportManifestInput) (Ma
 }
 
 func (*fakeReader) CancelJobs(_ context.Context, in CancelJobInput) (GetJobsOutput, error) {
-	items := make([]BatchItem[GetJobOutput], len(in.IDs))
+	items := make([]mcpcontract.BatchItem[GetJobOutput], len(in.IDs))
 	for i, id := range in.IDs {
 		value := GetJobOutput{ID: id, Kind: "crawl", Status: "cancelled"}
-		items[i] = BatchItem[GetJobOutput]{Key: id, Status: "complete", Value: &value}
+		items[i] = mcpcontract.BatchItem[GetJobOutput]{Key: id, Status: "complete", Value: &value}
 	}
 	return GetJobsOutput{Status: "complete", Items: items}, nil
 }

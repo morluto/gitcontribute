@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/concern"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
+	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/investigation"
 )
 
@@ -58,14 +59,19 @@ func (s *Service) ListConcerns(ctx context.Context, opts cli.ConcernListOptions)
 	if err != nil {
 		return nil, err
 	}
-	items, err := svc.List(ctx, concern.Filter{
+	page, err := svc.List(ctx, concern.Filter{
 		Repo: domain.RepoRef{Owner: opts.Repo.Owner, Repo: opts.Repo.Repo}, Status: concern.Status(opts.Status), Query: opts.Query, Limit: opts.Limit,
 	})
 	if err != nil {
 		return nil, mapConcernError(err)
 	}
-	result := &cli.ConcernListResult{Concerns: make([]cli.ConcernResult, 0, len(items)), Total: len(items)}
-	for _, item := range items {
+	result := &cli.ConcernListResult{
+		Concerns:  make([]cli.ConcernResult, 0, len(page.Concerns)),
+		Limit:     page.Limit,
+		Total:     page.Total,
+		Truncated: page.Total > len(page.Concerns),
+	}
+	for _, item := range page.Concerns {
 		converted, err := s.concernResult(ctx, item)
 		if err != nil {
 			return nil, err
@@ -235,7 +241,7 @@ func (s *Service) concernResult(ctx context.Context, item *concern.Concern) (*cl
 
 func mapConcernError(err error) error {
 	if errors.Is(err, concern.ErrNotFound) {
-		return cli.NewCLIError(cli.ExitNotFound, err)
+		return failure.NotFound(err)
 	}
 	return err
 }

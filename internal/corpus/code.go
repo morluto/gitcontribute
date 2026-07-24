@@ -394,7 +394,7 @@ func (c *Corpus) ListCodeDocuments(ctx context.Context, ref domain.RepoRef) ([]C
 	if err != nil {
 		return nil, fmt.Errorf("list code documents: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []CodeMatch
 	for rows.Next() {

@@ -8,10 +8,11 @@ import (
 	"time"
 
 	"github.com/google/shlex"
-	"github.com/morluto/gitcontribute/internal/cli"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
+	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/workspace"
 )
 
@@ -565,7 +566,7 @@ func observationResultsToCLI(items []evidence.ObservationResult) []cli.Validatio
 
 func mapEvidenceError(err error) error {
 	if errors.Is(err, evidence.ErrNotFound) {
-		return cli.NewCLIError(cli.ExitNotFound, err)
+		return failure.NotFound(err)
 	}
 	return err
 }

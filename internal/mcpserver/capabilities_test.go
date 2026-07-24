@@ -1,6 +1,10 @@
 package mcpserver
 
-import "context"
+import (
+	"context"
+
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
+)
 
 type fakeOptionalCapabilities struct {
 	base             *fakeReader
@@ -23,13 +27,13 @@ func (*fakeOptionalCapabilities) FindPrecedents(context.Context, FindPrecedentsI
 	return FindPrecedentsOutput{Status: "complete"}, nil
 }
 func (f *fakeOptionalCapabilities) GetJobs(ctx context.Context, in GetJobsInput) (GetJobsOutput, error) {
-	items := make([]BatchItem[GetJobOutput], len(in.IDs))
+	items := make([]mcpcontract.BatchItem[GetJobOutput], len(in.IDs))
 	for i, id := range in.IDs {
 		job, err := f.base.GetJob(ctx, GetJobInput{ID: id})
 		if err != nil {
 			return GetJobsOutput{}, err
 		}
-		items[i] = BatchItem[GetJobOutput]{Key: id, Status: "complete", Value: &job}
+		items[i] = mcpcontract.BatchItem[GetJobOutput]{Key: id, Status: "complete", Value: &job}
 	}
 	return GetJobsOutput{Status: "complete", Items: items}, nil
 }

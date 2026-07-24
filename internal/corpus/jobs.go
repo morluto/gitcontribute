@@ -72,7 +72,7 @@ func (c *Corpus) ListJobs(ctx context.Context, status string, limit int) ([]Job,
 	if err != nil {
 		return nil, fmt.Errorf("list jobs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []Job
 	for rows.Next() {
@@ -274,7 +274,7 @@ func (c *Corpus) ListJobEvents(ctx context.Context, jobID string) ([]JobEvent, e
 	if err != nil {
 		return nil, fmt.Errorf("list job events: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []JobEvent
 	for rows.Next() {
@@ -302,7 +302,7 @@ func (c *Corpus) ReconcileInterruptedJobs(ctx context.Context, leaseTimeout time
 	if err != nil {
 		return fmt.Errorf("reserve reconcile connection: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if err := beginReconcileTransaction(ctx, conn); err != nil {
 		return fmt.Errorf("begin reconcile jobs: %w", err)

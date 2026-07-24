@@ -7,18 +7,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/clustering"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
+	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/investigation"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // MCPReader adapts Service to the mcpserver.Reader interface. It is a thin
 // wrapper because Go does not allow two methods named Search on one type.
 type MCPReader struct{ *Service }
+
+// application disambiguates product methods shadowed by MCP projection methods
+// with the same name.
+func (r *MCPReader) application() *Service { return r.Service }
 
 // MCPReader returns an MCP adapter backed by this service. Read methods remain
 // offline; methods named sync or hydrate are explicit network-read operations.
@@ -34,6 +39,18 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 	}
 	if in.Limit < 1 || in.Limit > 100 {
 		return mcpserver.SearchOutput{}, errors.New("limit must be between 1 and 100")
+	}
+	if in.MatchMode == "" {
+		in.MatchMode = "all"
+	}
+	if in.MatchMode != "all" && in.MatchMode != "any" {
+		return mcpserver.SearchOutput{}, errors.New("match_mode must be all or any")
+	}
+	if in.View == "" {
+		in.View = "compact"
+	}
+	if in.View != "compact" && in.View != "full" {
+		return mcpserver.SearchOutput{}, errors.New("view must be compact or full")
 	}
 	var updatedAfter time.Time
 	if strings.TrimSpace(in.UpdatedAfter) != "" {
@@ -51,14 +68,14 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 	if in.Owner != "" && in.Repo != "" {
 		repo = in.Owner + "/" + in.Repo
 	}
-	res, err := r.Service.searchCorpus(ctx, in.Query, cli.SearchOptions{
+	res, err := r.searchCorpus(ctx, in.Query, cli.SearchOptions{
 		Kind:  in.Kind,
 		Repo:  repo,
 		State: in.State, StateReason: in.StateReason, Merged: in.Merged, Author: in.Author,
 		Association: in.Association, Assignee: in.Assignee, Labels: in.Labels, UpdatedAfter: updatedAfter,
 		Limit:  in.Limit,
 		Cursor: in.Cursor,
-		Sort:   in.Sort,
+		Sort:   in.Sort, MatchMode: in.MatchMode,
 	})
 	if err != nil {
 		return mcpserver.SearchOutput{}, err
@@ -89,11 +106,25 @@ func (r *MCPReader) Search(ctx context.Context, in mcpserver.SearchInput) (mcpse
 			MatchExcerpt:   m.MatchExcerpt,
 			MatchTruncated: m.MatchTruncated,
 		}
+		if in.View == "full" {
+			matches[i].Body = m.Body
+		}
 		if m.MatchSource != "" {
 			matches[i].MatchUpdatedAt = formatTime(m.Freshness)
 		}
 	}
-	return mcpserver.SearchOutput{Query: in.Query, Total: res.Total, Matches: matches, NextCursor: res.NextCursor}, nil
+	separator := " AND "
+	if in.MatchMode == "any" {
+		separator = " OR "
+	}
+	out := mcpserver.SearchOutput{
+		Query: in.Query, QueryInterpretation: strings.Join(strings.Fields(in.Query), separator),
+		MatchMode: in.MatchMode, View: in.View, Total: res.Total, Matches: matches, NextCursor: res.NextCursor,
+	}
+	if out.Total == 0 && in.MatchMode == "all" && len(strings.Fields(in.Query)) > 1 {
+		out.Suggestion = "No all-term matches. Retry with match_mode=any or fewer terms; verify corpus coverage before inferring absence."
+	}
+	return out, nil
 }
 
 // Repository reads a repository projection from the local corpus.
@@ -111,7 +142,7 @@ func (r *MCPReader) Repository(ctx context.Context, in mcpserver.RepoInput) (mcp
 		return mcpserver.RepositoryOutput{}, fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil {
-		return mcpserver.RepositoryOutput{}, mcpserver.ErrNotFound
+		return mcpserver.RepositoryOutput{}, failure.NotFound(nil)
 	}
 	return mcpserver.RepositoryOutput{
 		Owner:     repo.Owner,
@@ -154,14 +185,14 @@ func (r *MCPReader) Thread(ctx context.Context, in mcpserver.ThreadInput) (mcpse
 		return mcpserver.ThreadOutput{}, fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil {
-		return mcpserver.ThreadOutput{}, mcpserver.ErrNotFound
+		return mcpserver.ThreadOutput{}, failure.NotFound(nil)
 	}
 	thread, err := c.GetThread(ctx, repo.ID, in.Kind, in.Number)
 	if err != nil {
 		return mcpserver.ThreadOutput{}, fmt.Errorf("get thread: %w", err)
 	}
 	if thread == nil {
-		return mcpserver.ThreadOutput{}, mcpserver.ErrNotFound
+		return mcpserver.ThreadOutput{}, failure.NotFound(nil)
 	}
 	out := corpusThreadToMCPOutput(thread)
 	out.Owner = in.Owner
@@ -207,7 +238,7 @@ func (r *MCPReader) Dossier(ctx context.Context, in mcpserver.RepoInput) (mcpser
 	d, err := r.GetRepositoryDossier(ctx, cli.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
 	if err != nil {
 		if errors.Is(err, errDossierNotFound) {
-			return mcpserver.DossierOutput{}, mcpserver.ErrNotFound
+			return mcpserver.DossierOutput{}, failure.NotFound(nil)
 		}
 		return mcpserver.DossierOutput{}, err
 	}
@@ -234,12 +265,12 @@ func (r *MCPReader) Investigation(ctx context.Context, in mcpserver.Investigatio
 	inv, err := c.GetInvestigation(ctx, in.ID)
 	if err != nil {
 		if errors.Is(err, investigation.ErrNotFound) {
-			return mcpserver.InvestigationOutput{}, mcpserver.ErrNotFound
+			return mcpserver.InvestigationOutput{}, failure.NotFound(nil)
 		}
 		return mcpserver.InvestigationOutput{}, fmt.Errorf("get investigation: %w", err)
 	}
 	if inv == nil {
-		return mcpserver.InvestigationOutput{}, mcpserver.ErrNotFound
+		return mcpserver.InvestigationOutput{}, failure.NotFound(nil)
 	}
 	hypotheses, err := c.ListHypotheses(ctx, in.ID)
 	if err != nil {
@@ -335,12 +366,12 @@ func (r *MCPReader) Opportunity(ctx context.Context, in mcpserver.OpportunityInp
 	opp, err := c.GetOpportunity(ctx, in.ID)
 	if err != nil {
 		if errors.Is(err, investigation.ErrNotFound) {
-			return mcpserver.OpportunityOutput{}, mcpserver.ErrNotFound
+			return mcpserver.OpportunityOutput{}, failure.NotFound(nil)
 		}
 		return mcpserver.OpportunityOutput{}, fmt.Errorf("get opportunity: %w", err)
 	}
 	if opp == nil {
-		return mcpserver.OpportunityOutput{}, mcpserver.ErrNotFound
+		return mcpserver.OpportunityOutput{}, failure.NotFound(nil)
 	}
 	evs, err := c.ListEvidence(ctx, evidence.EvidenceFilter{OpportunityID: opp.ID})
 	if err != nil {
@@ -571,7 +602,7 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpserver.FindClustersI
 
 // FindNeighbors ranks similar local threads without network access.
 func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpserver.FindNeighborsInput) (mcpserver.FindNeighborsOutput, error) {
-	result, err := r.Service.Neighbors(ctx, cli.RepoRef{Owner: in.Owner, Repo: in.Repo}, in.Kind, in.Number, in.Limit)
+	result, err := r.Neighbors(ctx, cli.RepoRef{Owner: in.Owner, Repo: in.Repo}, in.Kind, in.Number, in.Limit)
 	if err != nil {
 		return mcpserver.FindNeighborsOutput{}, err
 	}
@@ -707,7 +738,7 @@ func (r *MCPReader) Lens(ctx context.Context, in mcpserver.LensInput) (mcpserver
 		return mcpserver.LensOutput{}, fmt.Errorf("get lens: %w", err)
 	}
 	if record == nil {
-		return mcpserver.LensOutput{}, mcpserver.ErrNotFound
+		return mcpserver.LensOutput{}, failure.NotFound(nil)
 	}
 	return mcpserver.LensOutput{
 		Name:       record.Definition.Name,
@@ -744,22 +775,4 @@ func clusterToMCP(cl clustering.Cluster, memberLimit int) mcpserver.ClusterOutpu
 		MemberCount: len(cl.Members),
 		Members:     members,
 	}
-}
-
-// MCPRunner implements cli.MCPRunner by starting an MCP server over stdio.
-type MCPRunner struct{ *Service }
-
-// NewMCPRunner returns a cli.MCPRunner backed by the service.
-func (s *Service) NewMCPRunner() cli.MCPRunner { return &MCPRunner{s} }
-
-// Run starts the MCP server using the requested transport.
-func (r *MCPRunner) Run(ctx context.Context, opts cli.MCPOptions) error {
-	if opts.Transport != "stdio" {
-		return fmt.Errorf("unsupported mcp transport %q", opts.Transport)
-	}
-	server, err := mcpserver.NewWithOptions(r.MCPReader(), r.version, mcpserver.Options{Toolsets: opts.Toolsets, ReadOnly: opts.ReadOnly})
-	if err != nil {
-		return err
-	}
-	return server.ServeStdio(ctx)
 }

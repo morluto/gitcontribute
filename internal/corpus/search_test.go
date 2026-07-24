@@ -96,6 +96,33 @@ func TestSearchThreadsPageMalformedCursorRejected(t *testing.T) {
 	}
 }
 
+func TestSearchThreadsPageSupportsAnyTermModeAndBindsCursor(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for number, title := range []string{"alpha only", "beta only", "alpha beta"} {
+		if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, number+1, "open", title, "", "a", time.Unix(int64(number+2), 0).UTC(), `{}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	all, err := c.SearchThreadsPage(ctx, "alpha beta", SearchFilter{Limit: 10, MatchMode: "all"})
+	if err != nil || all.Total != 1 {
+		t.Fatalf("all-term search = (%+v, %v)", all, err)
+	}
+	any, err := c.SearchThreadsPage(ctx, "alpha beta", SearchFilter{Limit: 1, MatchMode: "any"})
+	if err != nil || any.Total != 3 || any.NextCursor == "" {
+		t.Fatalf("any-term search = (%+v, %v)", any, err)
+	}
+	if _, err := c.SearchThreadsPage(ctx, "alpha beta", SearchFilter{Limit: 1, MatchMode: "all", Cursor: any.NextCursor}); err == nil {
+		t.Fatal("cursor created for any-term search was accepted by all-term search")
+	}
+}
+
 func TestSearchThreadsPageHonorsHardMax(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

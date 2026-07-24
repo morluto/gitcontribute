@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/github"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // SearchGitHubRepositories performs one bounded live repository search and

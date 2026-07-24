@@ -39,12 +39,12 @@ func TestConcernPersistenceSearchAndLinks(t *testing.T) {
 	if err := svc.Link(ctx, first.ID, concern.Link{Kind: concern.LinkRelated, TargetType: "concern", TargetID: second.ID, Note: "same adapter"}); err != nil {
 		t.Fatal(err)
 	}
-	items, err := svc.List(ctx, concern.Filter{Repo: domain.RepoRef{Owner: "OWNER", Repo: "REPO"}, Query: "scheduler", Limit: 10})
+	page, err := svc.List(ctx, concern.Filter{Repo: domain.RepoRef{Owner: "OWNER", Repo: "REPO"}, Query: "scheduler", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].ID != first.ID {
-		t.Fatalf("unexpected search results: %+v", items)
+	if page.Total != 1 || len(page.Concerns) != 1 || page.Concerns[0].ID != first.ID || len(page.Concerns[0].Links) != 1 {
+		t.Fatalf("unexpected search results: %+v", page)
 	}
 	shown, err := svc.Get(ctx, first.ID)
 	if err != nil || len(shown.Links) != 1 {

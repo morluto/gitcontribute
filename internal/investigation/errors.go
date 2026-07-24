@@ -11,4 +11,5 @@ var (
 	ErrInvalidCategory       = errors.New("investigation: invalid category")
 	ErrInvalidThreadBaseline = errors.New("investigation: invalid thread baseline")
 	ErrContradictingEvidence = errors.New("investigation: contradicting evidence blocks this transition")
+	ErrConflict              = errors.New("investigation: record changed concurrently")
 )

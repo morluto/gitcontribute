@@ -12,8 +12,8 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/managedbinary"
 	clientsetup "github.com/morluto/gitcontribute/internal/setup"
 	"github.com/pelletier/go-toml/v2"
@@ -337,10 +337,6 @@ func discoverInstallation(ctx context.Context) installDetails {
 		executable: executable,
 		npmRoot:    root,
 	}
-}
-
-func detectInstallContext(ctx context.Context) string {
-	return discoverInstallation(ctx).context
 }
 
 func classifyNPMExecutable(executable, globalRoot string) string {

@@ -24,6 +24,16 @@ func (r *memoryRepository) SaveConcern(_ context.Context, item *Concern) error {
 	return nil
 }
 
+func (r *memoryRepository) UpdateConcern(_ context.Context, previous, next *Concern) error {
+	current := r.items[previous.ID]
+	if current == nil || !current.UpdatedAt.Equal(previous.UpdatedAt) {
+		return ErrConflict
+	}
+	stored := cloneConcern(next)
+	r.items[next.ID] = &stored
+	return nil
+}
+
 func (r *memoryRepository) GetConcern(_ context.Context, id string) (*Concern, error) {
 	item := r.items[id]
 	if item == nil {
@@ -34,13 +44,13 @@ func (r *memoryRepository) GetConcern(_ context.Context, id string) (*Concern, e
 	return &stored, nil
 }
 
-func (r *memoryRepository) ListConcerns(_ context.Context, _ Filter) ([]*Concern, error) {
+func (r *memoryRepository) ListConcerns(_ context.Context, filter Filter) (*ListResult, error) {
 	out := make([]*Concern, 0, len(r.items))
 	for _, item := range r.items {
 		stored := cloneConcern(item)
 		out = append(out, &stored)
 	}
-	return out, nil
+	return &ListResult{Concerns: out, Total: len(out), Limit: filter.Limit}, nil
 }
 
 func (r *memoryRepository) AddConcernLink(_ context.Context, id string, link Link) error {

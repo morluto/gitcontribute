@@ -14,7 +14,9 @@ import (
 	"github.com/morluto/gitcontribute/internal/app"
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
+	"github.com/morluto/gitcontribute/internal/failure"
 	gitlog "github.com/morluto/gitcontribute/internal/log"
+	"github.com/morluto/gitcontribute/internal/mcpadapter"
 	"github.com/morluto/gitcontribute/internal/tui"
 )
 
@@ -57,7 +59,7 @@ func run() int {
 		}
 	}()
 
-	c := cli.New(svc, svc.NewMCPRunner(), os.Stdout, os.Stderr)
+	c := cli.New(svc, mcpadapter.New(svc, version), os.Stdout, os.Stderr)
 	c.SetLogger(logger.With("component", "cli"))
 	c.SetTUIRunner(tui.NewRunner(svc, os.Stdin, os.Stdout))
 	if err := c.Run(ctx, os.Args[1:]); err != nil {
@@ -90,6 +92,9 @@ func logInvocationStart(ctx context.Context, logger *slog.Logger, traceID string
 }
 
 func reportCommandError(ctx context.Context, logger *slog.Logger, stderr io.Writer, traceID string, err error) int {
+	if failure.Is(err, failure.KindNotFound) {
+		err = cli.NewCLIError(cli.ExitNotFound, err)
+	}
 	var cliErr *cli.CLIError
 	if errors.As(err, &cliErr) {
 		logger.DebugContext(ctx, "command failed",

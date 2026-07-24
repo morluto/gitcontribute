@@ -65,6 +65,11 @@ func (r *fakeRepo) SaveHypothesis(_ context.Context, h *Hypothesis) error {
 	return nil
 }
 
+func (r *fakeRepo) UpdateHypothesis(_ context.Context, _, next *Hypothesis) error {
+	r.hypotheses[next.ID] = next
+	return nil
+}
+
 func (r *fakeRepo) GetHypothesis(_ context.Context, id string) (*Hypothesis, error) {
 	h, ok := r.hypotheses[id]
 	if !ok {
@@ -85,6 +90,11 @@ func (r *fakeRepo) ListHypotheses(_ context.Context, investigationID string) ([]
 
 func (r *fakeRepo) SaveOpportunity(_ context.Context, o *Opportunity) error {
 	r.opportunities[o.ID] = o
+	return nil
+}
+
+func (r *fakeRepo) UpdateOpportunity(_ context.Context, _, next *Opportunity, _ bool) error {
+	r.opportunities[next.ID] = next
 	return nil
 }
 

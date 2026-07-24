@@ -47,7 +47,7 @@ func (c *Corpus) LatestRateLimitObservations(ctx context.Context, limit int) ([]
 	if err != nil {
 		return nil, fmt.Errorf("query latest rate-limit observations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var observations []RateLimitObservation
 	for rows.Next() {

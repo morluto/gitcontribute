@@ -11,12 +11,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/morluto/gitcontribute/internal/cli"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/gitremote"
 	"github.com/morluto/gitcontribute/internal/workspace"
 )
 
-func (s *Service) workspaceManager(ctx context.Context) (*workspace.Manager, error) {
+func (s *Service) workspaceManager(_ context.Context) (*workspace.Manager, error) {
 	dataDir, err := s.paths.DataDir()
 	if err != nil {
 		return nil, err
@@ -337,7 +338,7 @@ func workspaceResult(ws *workspace.Workspace) *cli.WorkspaceResult {
 
 func mapWorkspaceError(err error) error {
 	if errors.Is(err, workspace.ErrNotFound) {
-		return cli.NewCLIError(cli.ExitNotFound, err)
+		return failure.NotFound(err)
 	}
 	return err
 }

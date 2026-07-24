@@ -52,7 +52,7 @@ func StaticTokenSource(token string) TokenSource {
 
 type staticTokenSource string
 
-func (s staticTokenSource) Token(ctx context.Context) (string, error) {
+func (s staticTokenSource) Token(_ context.Context) (string, error) {
 	if s == "" {
 		return "", ErrNoToken
 	}
@@ -68,7 +68,7 @@ type envTokenSource struct {
 	Name string
 }
 
-func (s *envTokenSource) Token(ctx context.Context) (string, error) {
+func (s *envTokenSource) Token(_ context.Context) (string, error) {
 	v := os.Getenv(s.Name)
 	if v == "" {
 		return "", ErrNoToken

@@ -9,30 +9,10 @@ import (
 )
 
 // ReadinessInput selects a contribution opportunity readiness report.
-type ReadinessInput struct {
-	OpportunityID string `json:"opportunity_id" jsonschema:"Opportunity ID"`
-}
 
 // ReadinessCheck is one explainable readiness rule result.
-type ReadinessCheck struct {
-	CheckID      string   `json:"check_id"`
-	RuleID       string   `json:"rule_id"`
-	RuleVersion  string   `json:"rule_version"`
-	Status       string   `json:"status"`
-	Summary      string   `json:"summary"`
-	EvidenceRefs []string `json:"evidence_refs,omitempty"`
-	Remediation  string   `json:"remediation,omitempty"`
-	EvaluatedAt  string   `json:"evaluated_at"`
-}
 
 // ReadinessOutput is the stable MCP representation of one readiness report.
-type ReadinessOutput struct {
-	OpportunityID  string           `json:"opportunity_id"`
-	RuleSetVersion string           `json:"rule_set_version"`
-	Status         string           `json:"status"`
-	EvaluatedAt    string           `json:"evaluated_at"`
-	Checks         []ReadinessCheck `json:"checks"`
-}
 
 // ContributionWorkflowResource links safe local resources and prompts for one opportunity.
 type ContributionWorkflowResource struct {

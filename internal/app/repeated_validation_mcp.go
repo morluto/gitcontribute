@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // RunRepeatedValidation submits a durable repeat/stress validation group.
