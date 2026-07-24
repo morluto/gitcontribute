@@ -180,6 +180,7 @@ func TestWorkerRejectsUnsafeConfiguration(t *testing.T) {
 		{Frontier: c, Handler: HandlerFunc(func(context.Context, corpus.FrontierItem) error { return nil }), Budget: 1},
 		{Frontier: c, Handler: HandlerFunc(func(context.Context, corpus.FrontierItem) error { return nil }), ID: "w", Budget: 1, BatchSize: maxBatchSize + 1},
 		{Frontier: c, Handler: HandlerFunc(func(context.Context, corpus.FrontierItem) error { return nil }), ID: "w", Budget: 1, LeaseDuration: time.Second, HandlerTimeout: time.Second},
+		{Frontier: c, Handler: HandlerFunc(func(context.Context, corpus.FrontierItem) error { return nil }), ID: "w", Budget: 1, LeaseDuration: time.Minute, HandlerTimeout: time.Minute - terminalWriteTimeout + time.Nanosecond},
 	}
 	for _, worker := range tests {
 		if _, err := worker.RunOnce(context.Background()); err == nil {

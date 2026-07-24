@@ -31,10 +31,13 @@ if (!existsSync(executable)) {
 }
 
 const child = spawn(executable, process.argv.slice(2), { stdio: "inherit", windowsHide: false });
+const signalHandlers = new Map();
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-  process.on(signal, () => {
+  const handler = () => {
     if (!child.killed) child.kill(signal);
-  });
+  };
+  signalHandlers.set(signal, handler);
+  process.on(signal, handler);
 }
 child.on("error", (error) => {
   console.error(`failed to start gitcontribute: ${error.message}`);
@@ -42,7 +45,13 @@ child.on("error", (error) => {
 });
 child.on("exit", (code, signal) => {
   if (signal) {
-    process.kill(process.pid, signal);
+    const handler = signalHandlers.get(signal);
+    if (handler) process.off(signal, handler);
+    try {
+      process.kill(process.pid, signal);
+    } catch {
+      process.exitCode = 1;
+    }
     return;
   }
   process.exitCode = code ?? 1;

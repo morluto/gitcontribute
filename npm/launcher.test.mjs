@@ -32,6 +32,28 @@ test("launcher selects the host binary and forwards arguments and exit status", 
   }
 });
 
+test("launcher preserves native signal termination", { skip: process.platform === "win32" }, async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-launcher-signal-"));
+  try {
+    const packageDir = join(workspace, "package");
+    const target = `${process.platform}-${process.arch}`;
+    const fixtureDir = join(packageDir, "npm", "bin", "native", target);
+    await mkdir(fixtureDir, { recursive: true });
+    await copyFile(join(root, "npm", "bin", "gitcontribute.cjs"), join(packageDir, "npm", "bin", "gitcontribute.cjs"));
+    await writeFile(join(packageDir, "npm", "platforms.json"), JSON.stringify({ [target]: { target, binary: "gitcontribute" } }));
+    const fixture = join(fixtureDir, "gitcontribute");
+    await writeFile(fixture, "#!/bin/sh\nkill -TERM $$\n");
+    await chmod(fixture, 0o755);
+
+    const result = spawnSync(process.execPath, [join(packageDir, "npm", "bin", "gitcontribute.cjs")], { encoding: "utf8" });
+
+    assert.equal(result.status, null);
+    assert.equal(result.signal, "SIGTERM");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("published package has no install lifecycle", async () => {
   const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
   for (const name of ["preinstall", "install", "postinstall"]) assert.equal(pkg.scripts?.[name], undefined);

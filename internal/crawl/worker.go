@@ -21,6 +21,7 @@ const (
 	defaultHandlerTimeout = 90 * time.Second
 	defaultBackoff        = 30 * time.Second
 	maxBackoff            = time.Hour
+	terminalWriteTimeout  = 5 * time.Second
 	maxErrorLength        = 4096
 )
 
@@ -120,7 +121,7 @@ func (w *Worker) RunOnce(ctx context.Context) (Stats, error) {
 		handleErr := cfg.Handler.Handle(itemCtx, item)
 		cancel()
 		finishedAt := cfg.now()
-		cleanup, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		cleanup, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), terminalWriteTimeout)
 		if handleErr == nil {
 			err = cfg.Frontier.CompleteFrontierItem(cleanup, item.ID, cfg.ID, finishedAt)
 			cleanupCancel()
@@ -190,8 +191,8 @@ func (w *Worker) config() (*Worker, error) {
 	if cfg.HandlerTimeout == 0 {
 		cfg.HandlerTimeout = defaultHandlerTimeout
 	}
-	if cfg.HandlerTimeout <= 0 || cfg.HandlerTimeout >= cfg.LeaseDuration {
-		return nil, errors.New("crawl handler timeout must be positive and shorter than the lease")
+	if cfg.HandlerTimeout <= 0 || cfg.HandlerTimeout+terminalWriteTimeout > cfg.LeaseDuration {
+		return nil, fmt.Errorf("crawl handler timeout must leave at least %s of the lease for the terminal write", terminalWriteTimeout)
 	}
 	if cfg.Backoff == 0 {
 		cfg.Backoff = defaultBackoff
@@ -213,7 +214,7 @@ func (w *Worker) config() (*Worker, error) {
 func (w *Worker) now() time.Time { return w.Now().UTC() }
 
 func (w *Worker) release(parent context.Context, items []corpus.FrontierItem) error {
-	cleanup, cancel := context.WithTimeout(context.WithoutCancel(parent), 5*time.Second)
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(parent), terminalWriteTimeout)
 	defer cancel()
 	now := w.now()
 	var errs []error
