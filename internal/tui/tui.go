@@ -9,42 +9,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Reader is a narrow local data source for the TUI. Implementations must not
-// perform network I/O.
-type Reader interface {
-	Load(ctx context.Context) (Data, error)
-}
-
-// Data is the offline dataset loaded by the reader.
-type Data struct {
-	Repositories   []Item `json:"repositories"`
-	Threads        []Item `json:"threads"`
-	Clusters       []Item `json:"clusters"`
-	Investigations []Item `json:"investigations"`
-	Opportunities  []Item `json:"opportunities"`
-}
-
-// Item is one browsable record.
-type Item struct {
-	Kind     string  `json:"kind"`
-	ID       string  `json:"id"`
-	Ref      string  `json:"ref"`
-	Title    string  `json:"title"`
-	Subtitle string  `json:"subtitle,omitempty"`
-	Detail   string  `json:"detail,omitempty"`
-	Source   string  `json:"source,omitempty"`
-	AsOf     string  `json:"as_of,omitempty"`
-	Coverage []Facet `json:"coverage,omitempty"`
-}
-
-// Facet describes coverage for one data facet.
-type Facet struct {
-	Name     string `json:"name"`
-	Present  bool   `json:"present"`
-	Complete bool   `json:"complete"`
-	AsOf     string `json:"as_of,omitempty"`
-}
-
 // view is the current browse category.
 type view string
 
@@ -110,6 +74,7 @@ type Model struct {
 	loaded   bool
 	err      error
 	items    map[view][]Item
+	windows  map[view]Window
 	filtered []int
 	cursor   int
 
@@ -165,18 +130,6 @@ func (m Model) loadCmd() tea.Cmd {
 // itemCount returns the total number of items in the current view.
 func (m Model) itemCount() int {
 	return len(m.items[m.view])
-}
-
-// filteredItems returns the currently visible items for the current view.
-func (m Model) filteredItems() []Item {
-	out := make([]Item, 0, len(m.filtered))
-	items := m.items[m.view]
-	for _, idx := range m.filtered {
-		if idx >= 0 && idx < len(items) {
-			out = append(out, items[idx])
-		}
-	}
-	return out
 }
 
 // selectedItem returns the currently selected item, if any.

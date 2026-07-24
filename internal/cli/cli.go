@@ -1040,7 +1040,7 @@ func (c *CLI) parseRepoSourceArgs(cmd sourceAddReposCmd) ([]RepoRef, string, err
 			if err != nil {
 				return nil, "", fmt.Errorf("open repository file: %w", err)
 			}
-			defer opened.Close()
+			defer func() { _ = opened.Close() }()
 			reader = opened
 		}
 		var err error
@@ -1203,7 +1203,7 @@ func (c *CLI) runCrawl(ctx context.Context, cmd *crawlCmd) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(c.stderr, "crawling %s...\n", cmd.Name)
+	_, _ = fmt.Fprintf(c.stderr, "crawling %s...\n", cmd.Name)
 	result, err := service.Crawl(ctx, cmd.Name, CrawlOptions{Since: cmd.Since, Budget: cmd.Budget})
 	if err != nil {
 		return c.mapError(err)
@@ -1219,7 +1219,7 @@ func (c *CLI) runTail(ctx context.Context, cmd *tailCmd) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(c.stderr, "tailing source %s every %s...\n", cmd.Name, cmd.Interval)
+	_, _ = fmt.Fprintf(c.stderr, "tailing source %s every %s...\n", cmd.Name, cmd.Interval)
 	result, err := service.TailSource(ctx, cmd.Name, TailOptions{
 		Since: cmd.Since, Budget: cmd.Budget, Interval: cmd.Interval, Once: cmd.Once,
 	})
@@ -1243,7 +1243,7 @@ func (c *CLI) runInvestigation(ctx context.Context, command string, cmd *investi
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(c.stderr, "starting investigation for %s...\n", repo)
+		_, _ = fmt.Fprintf(c.stderr, "starting investigation for %s...\n", repo)
 		result, err := service.StartInvestigation(ctx, repo, cmd.Start.Commit, cmd.Start.Lens)
 		if err != nil {
 			return c.mapError(err)
@@ -1273,7 +1273,7 @@ func (c *CLI) runHypothesis(ctx context.Context, command string, cmd *hypothesis
 	}
 	switch command {
 	case "hypothesis add":
-		fmt.Fprintf(c.stderr, "recording hypothesis for investigation %s...\n", cmd.Add.InvestigationID)
+		_, _ = fmt.Fprintf(c.stderr, "recording hypothesis for investigation %s...\n", cmd.Add.InvestigationID)
 		result, err := service.AddHypothesis(ctx, cmd.Add.InvestigationID, cmd.Add.Title, cmd.Add.Description, cmd.Add.Category)
 		if err != nil {
 			return c.mapError(err)
@@ -1322,7 +1322,7 @@ func (c *CLI) runOpportunity(ctx context.Context, command string, cmd *opportuni
 	}
 	switch command {
 	case "opportunity promote":
-		fmt.Fprintf(c.stderr, "promoting hypothesis %s to opportunity...\n", cmd.Promote.HypothesisID)
+		_, _ = fmt.Fprintf(c.stderr, "promoting hypothesis %s to opportunity...\n", cmd.Promote.HypothesisID)
 		result, err := service.PromoteOpportunity(ctx, cmd.Promote.HypothesisID, cmd.Promote.Problem, cmd.Promote.Scope, cmd.Promote.Impact, cmd.Promote.Effort, cmd.Promote.Confidence)
 		if err != nil {
 			return c.mapError(err)
@@ -1399,7 +1399,7 @@ func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) e
 	}
 	switch command {
 	case "prepare issue":
-		fmt.Fprintf(c.stderr, "preparing issue draft for opportunity %s...\n", cmd.Issue.OpportunityID)
+		_, _ = fmt.Fprintf(c.stderr, "preparing issue draft for opportunity %s...\n", cmd.Issue.OpportunityID)
 		result, err := service.PrepareIssue(ctx, cmd.Issue.OpportunityID, PrepareIssueOptions{
 			Guidance: cmd.Issue.Guidance, Success: cmd.Issue.Success, ManifestID: cmd.Issue.ManifestID,
 		})
@@ -1408,7 +1408,7 @@ func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) e
 		}
 		return c.render(cmd.Issue.JSON, result)
 	case "prepare pr":
-		fmt.Fprintf(c.stderr, "preparing pull request draft for opportunity %s...\n", cmd.PR.OpportunityID)
+		_, _ = fmt.Fprintf(c.stderr, "preparing pull request draft for opportunity %s...\n", cmd.PR.OpportunityID)
 		result, err := service.PreparePullRequest(ctx, cmd.PR.OpportunityID, PreparePROptions{
 			WorkspaceID:   cmd.PR.WorkspaceID,
 			Approach:      cmd.PR.Approach,
@@ -1443,7 +1443,7 @@ func (c *CLI) runIndex(ctx context.Context, cmd *indexCmd) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(c.stderr, "indexing %s from %s...\n", repo, cmd.Path)
+	_, _ = fmt.Fprintf(c.stderr, "indexing %s from %s...\n", repo, cmd.Path)
 	result, err := c.svc.Index(ctx, repo, cmd.Path)
 	if err != nil {
 		return c.mapError(err)
@@ -1460,7 +1460,7 @@ func (c *CLI) runAcquire(ctx context.Context, cmd *acquireCmd) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(c.stderr, "acquiring and indexing %s...\n", repo)
+	_, _ = fmt.Fprintf(c.stderr, "acquiring and indexing %s...\n", repo)
 	result, err := service.Acquire(ctx, repo, cmd.Remote)
 	if err != nil {
 		return c.mapError(err)
@@ -1469,7 +1469,7 @@ func (c *CLI) runAcquire(ctx context.Context, cmd *acquireCmd) error {
 }
 
 func (c *CLI) runInit(ctx context.Context, cmd *initCmd) error {
-	fmt.Fprintln(c.stderr, "initializing...")
+	_, _ = fmt.Fprintln(c.stderr, "initializing...")
 	res, err := c.svc.Init(ctx)
 	if err != nil {
 		return c.mapError(err)
@@ -1661,7 +1661,7 @@ func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) e
 		if err != nil {
 			return NewCLIError(ExitUsage, err)
 		}
-		fmt.Fprintf(c.stderr, "hydrating %s#%d...\n", repo, number)
+		_, _ = fmt.Fprintf(c.stderr, "hydrating %s#%d...\n", repo, number)
 		result, err := service.Hydrate(ctx, repo, number, HydrateOptions{
 			Facets: splitCSV(cmd.Hydrate.With), MaxPages: cmd.Hydrate.MaxPages,
 		})
@@ -1799,9 +1799,9 @@ func (c *CLI) runExport(ctx context.Context, command string, cmd *exportCmd) err
 	var output string
 	switch command {
 	case "export dossier":
-		repo, err := parseRepo(cmd.Dossier.OwnerRepo)
-		if err != nil {
-			return err
+		repo, parseErr := parseRepo(cmd.Dossier.OwnerRepo)
+		if parseErr != nil {
+			return parseErr
 		}
 		result, err = service.ExportDossier(ctx, repo, cmd.Dossier.Format)
 		output = cmd.Dossier.Output
@@ -1829,7 +1829,7 @@ func (c *CLI) runExport(ctx context.Context, command string, cmd *exportCmd) err
 		if err := os.WriteFile(output, []byte(result.Content), 0600); err != nil {
 			return c.mapError(fmt.Errorf("write export: %w", err))
 		}
-		fmt.Fprintf(c.stderr, "wrote %s %s export to %s\n", result.Kind, result.Format, output)
+		_, _ = fmt.Fprintf(c.stderr, "wrote %s %s export to %s\n", result.Kind, result.Format, output)
 		return nil
 	}
 	_, err = io.WriteString(c.stdout, result.Content)
@@ -1899,7 +1899,7 @@ func (c *CLI) runLens(ctx context.Context, command string, cmd *lensCmd) error {
 		if strings.TrimSpace(cmd.Add.Name) == "" {
 			return NewCLIError(ExitUsage, errors.New("lens name is required"))
 		}
-		fmt.Fprintf(c.stderr, "saving lens %s...\n", cmd.Add.Name)
+		_, _ = fmt.Fprintf(c.stderr, "saving lens %s...\n", cmd.Add.Name)
 		res, err := service.AddLens(ctx, cmd.Add.Name, def)
 		if err != nil {
 			return c.mapError(err)
@@ -1952,7 +1952,7 @@ func (c *CLI) runCollection(ctx context.Context, command string, cmd *collection
 	}
 	switch command {
 	case "collection create":
-		fmt.Fprintf(c.stderr, "creating collection %s...\n", cmd.Create.Name)
+		_, _ = fmt.Fprintf(c.stderr, "creating collection %s...\n", cmd.Create.Name)
 		res, err := service.CreateCollection(ctx, cmd.Create.Name)
 		if err != nil {
 			return c.mapError(err)
@@ -1970,7 +1970,7 @@ func (c *CLI) runCollection(ctx context.Context, command string, cmd *collection
 			}
 			members[i] = member
 		}
-		fmt.Fprintf(c.stderr, "adding %d member(s) to collection %s...\n", len(members), cmd.Add.Name)
+		_, _ = fmt.Fprintf(c.stderr, "adding %d member(s) to collection %s...\n", len(members), cmd.Add.Name)
 		res, err := service.AddCollectionMembers(ctx, cmd.Add.Name, members)
 		if err != nil {
 			return c.mapError(err)

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 )
 
 // ExplainMatchResult exposes the factual signals that contribute to a match

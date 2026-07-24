@@ -248,7 +248,7 @@ func drainAndClose(resp *http.Response) {
 		return
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }
 
 func (r *RetryConfig) delay(attempt int, resp *http.Response) time.Duration {
@@ -353,7 +353,7 @@ func observation(req *http.Request, resp *http.Response, attempt int, delay time
 	return obs
 }
 
-func rateInfoFromHeaders(h http.Header, now time.Time) RateInfo {
+func rateInfoFromHeaders(h http.Header, _ time.Time) RateInfo {
 	parseInt := func(key string) int {
 		v, _ := strconv.Atoi(h.Get(key))
 		return v

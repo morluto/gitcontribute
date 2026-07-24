@@ -6,13 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/morluto/gitcontribute/internal/contribution"
-	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
-	"github.com/morluto/gitcontribute/internal/manifest"
 	"github.com/morluto/gitcontribute/internal/workspace"
 )
 
@@ -216,11 +213,11 @@ func (c *Corpus) GetInvestigation(ctx context.Context, id string) (*investigatio
 
 // ListInvestigations returns investigations in deterministic creation order.
 func (c *Corpus) ListInvestigations(ctx context.Context) ([]*investigation.Investigation, error) {
-	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM investigations ORDER BY created_at, id LIMIT 10000`)
+	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM investigations ORDER BY created_at, id`)
 	if err != nil {
 		return nil, fmt.Errorf("list investigations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*investigation.Investigation
 	for rows.Next() {
 		var payload string
@@ -257,6 +254,31 @@ func (c *Corpus) SaveHypothesis(ctx context.Context, item *investigation.Hypothe
 	return nil
 }
 
+// UpdateHypothesis conditionally replaces the exact revision read by the
+// caller, preserving concurrent status and audit updates.
+func (c *Corpus) UpdateHypothesis(ctx context.Context, previous, next *investigation.Hypothesis) error {
+	if previous == nil || next == nil || previous.ID == "" || previous.ID != next.ID {
+		return errors.New("matching hypothesis revisions are required")
+	}
+	previousPayload, err := marshalWorkflow(previous)
+	if err != nil {
+		return err
+	}
+	nextPayload, err := marshalWorkflow(next)
+	if err != nil {
+		return err
+	}
+	result, err := c.db.ExecContext(ctx, `
+		UPDATE hypotheses SET investigation_id=?, category=?, status=?, payload=?, updated_at=?
+		WHERE id=? AND payload=?
+	`, next.InvestigationID, next.Category, next.Status, nextPayload,
+		encodeTime(next.UpdatedAt), next.ID, previousPayload)
+	if err != nil {
+		return fmt.Errorf("update hypothesis: %w", err)
+	}
+	return requireWorkflowRevision(result)
+}
+
 // GetHypothesis returns a hypothesis by ID, or nil when absent.
 func (c *Corpus) GetHypothesis(ctx context.Context, id string) (*investigation.Hypothesis, error) {
 	var payload string
@@ -276,11 +298,11 @@ func (c *Corpus) GetHypothesis(ctx context.Context, id string) (*investigation.H
 
 // ListHypotheses returns hypotheses belonging to an investigation.
 func (c *Corpus) ListHypotheses(ctx context.Context, investigationID string) ([]*investigation.Hypothesis, error) {
-	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM hypotheses WHERE investigation_id=? ORDER BY created_at, id LIMIT 10000`, investigationID)
+	rows, err := c.db.QueryContext(ctx, `SELECT payload FROM hypotheses WHERE investigation_id=? ORDER BY created_at, id`, investigationID)
 	if err != nil {
 		return nil, fmt.Errorf("list hypotheses: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []*investigation.Hypothesis
 	for rows.Next() {
 		var payload string
@@ -315,6 +337,73 @@ func (c *Corpus) SaveOpportunity(ctx context.Context, item *investigation.Opport
 	`, item.ID, item.InvestigationID, item.HypothesisID, item.Category, item.Status, payload, encodeTime(item.CreatedAt), encodeTime(item.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("save opportunity: %w", err)
+	}
+	return nil
+}
+
+// UpdateOpportunity conditionally replaces the exact revision read by the
+// caller. For advancing transitions, the same SQL statement also rejects any
+// contradicting evidence visible when the status write is serialized.
+func (c *Corpus) UpdateOpportunity(ctx context.Context, previous, next *investigation.Opportunity, blockContradicting bool) error {
+	if previous == nil || next == nil || previous.ID == "" || previous.ID != next.ID {
+		return errors.New("matching opportunity revisions are required")
+	}
+	previousPayload, err := marshalWorkflow(previous)
+	if err != nil {
+		return err
+	}
+	nextPayload, err := marshalWorkflow(next)
+	if err != nil {
+		return err
+	}
+	block := 0
+	if blockContradicting {
+		block = 1
+	}
+	result, err := c.db.ExecContext(ctx, `
+		UPDATE opportunities SET investigation_id=?, hypothesis_id=?, category=?, status=?, payload=?, updated_at=?
+		WHERE id=? AND payload=?
+		  AND (?=0 OR NOT EXISTS (
+			SELECT 1 FROM evidence
+			WHERE opportunity_id=? AND relation=?
+		  ))
+	`, next.InvestigationID, next.HypothesisID, next.Category, next.Status,
+		nextPayload, encodeTime(next.UpdatedAt), next.ID, previousPayload,
+		block, next.ID, evidence.RelationContradicting)
+	if err != nil {
+		return fmt.Errorf("update opportunity: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read workflow update result: %w", err)
+	}
+	if changed == 1 {
+		return nil
+	}
+	if blockContradicting {
+		var exists int
+		if err := c.db.QueryRowContext(ctx, `
+			SELECT EXISTS(
+				SELECT 1 FROM evidence
+				WHERE opportunity_id=? AND relation=?
+			)
+		`, next.ID, evidence.RelationContradicting).Scan(&exists); err != nil {
+			return fmt.Errorf("check contradicting evidence: %w", err)
+		}
+		if exists != 0 {
+			return investigation.ErrContradictingEvidence
+		}
+	}
+	return investigation.ErrConflict
+}
+
+func requireWorkflowRevision(result sql.Result) error {
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read workflow update result: %w", err)
+	}
+	if changed != 1 {
+		return investigation.ErrConflict
 	}
 	return nil
 }
@@ -387,337 +476,4 @@ func (c *Corpus) promoteHypothesis(ctx context.Context, hypothesis *investigatio
 		return fmt.Errorf("commit hypothesis promotion: %w", err)
 	}
 	return nil
-}
-
-// GetOpportunity returns an opportunity with its dependencies and provenance.
-func (c *Corpus) GetOpportunity(ctx context.Context, id string) (*investigation.Opportunity, error) {
-	var payload string
-	err := c.db.QueryRowContext(ctx, `SELECT payload FROM opportunities WHERE id=?`, id).Scan(&payload)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, investigation.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get opportunity: %w", err)
-	}
-	var item investigation.Opportunity
-	if err := unmarshalWorkflow(payload, &item); err != nil {
-		return nil, err
-	}
-	return &item, nil
-}
-
-// ListOpportunities returns opportunities belonging to an investigation.
-func (c *Corpus) ListOpportunities(ctx context.Context, investigationID string) ([]*investigation.Opportunity, error) {
-	query := `SELECT payload FROM opportunities`
-	var args []any
-	if investigationID != "" {
-		query += ` WHERE investigation_id=?`
-		args = append(args, investigationID)
-	}
-	query += ` ORDER BY created_at, id LIMIT 10000`
-	rows, err := c.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list opportunities: %w", err)
-	}
-	defer rows.Close()
-	var out []*investigation.Opportunity
-	for rows.Next() {
-		var payload string
-		if err := rows.Scan(&payload); err != nil {
-			return nil, err
-		}
-		var item investigation.Opportunity
-		if err := unmarshalWorkflow(payload, &item); err != nil {
-			return nil, err
-		}
-		out = append(out, &item)
-	}
-	return out, rows.Err()
-}
-
-// FindRelated returns stored source references related to a repository and category.
-func (c *Corpus) FindRelated(ctx context.Context, ref domain.RepoRef, category investigation.Category) ([]domain.SourceRef, error) {
-	rows, err := c.db.QueryContext(ctx, `
-		SELECT h.payload FROM hypotheses h JOIN investigations i ON i.id=h.investigation_id
-		WHERE i.repo_owner=? AND i.repo_name=? AND (?='' OR h.category=?) ORDER BY h.created_at
-	`, ref.Owner, ref.Repo, category, category)
-	if err != nil {
-		return nil, fmt.Errorf("find related investigations: %w", err)
-	}
-	defer rows.Close()
-	var out []domain.SourceRef
-	for rows.Next() {
-		var payload string
-		if err := rows.Scan(&payload); err != nil {
-			return nil, err
-		}
-		var item investigation.Hypothesis
-		if err := unmarshalWorkflow(payload, &item); err != nil {
-			return nil, err
-		}
-		out = append(out, item.SourceRefs...)
-	}
-	return out, rows.Err()
-}
-
-// SaveValidationDefinition persists a validation plan without executing it.
-func (c *Corpus) SaveValidationDefinition(ctx context.Context, item *evidence.ValidationDefinition) error {
-	if item == nil || item.ID == "" {
-		return errors.New("validation definition id is required")
-	}
-	payload, err := marshalWorkflow(item)
-	if err != nil {
-		return err
-	}
-	_, err = c.db.ExecContext(ctx, `
-		INSERT INTO validation_definitions (id, investigation_id, hypothesis_id, opportunity_id, payload, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT (id) DO UPDATE SET investigation_id=excluded.investigation_id,
-			hypothesis_id=excluded.hypothesis_id, opportunity_id=excluded.opportunity_id, payload=excluded.payload
-	`, item.ID, item.InvestigationID, item.HypothesisID, item.OpportunityID, payload, encodeTime(item.CreatedAt))
-	if err != nil {
-		return fmt.Errorf("save validation definition: %w", err)
-	}
-	return nil
-}
-
-// GetValidationDefinition returns a validation plan by ID, or nil when absent.
-func (c *Corpus) GetValidationDefinition(ctx context.Context, id string) (*evidence.ValidationDefinition, error) {
-	var payload string
-	err := c.db.QueryRowContext(ctx, `SELECT payload FROM validation_definitions WHERE id=?`, id).Scan(&payload)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, evidence.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get validation definition: %w", err)
-	}
-	var item evidence.ValidationDefinition
-	if err := unmarshalWorkflow(payload, &item); err != nil {
-		return nil, err
-	}
-	return &item, nil
-}
-
-// ListValidationDefinitions returns validation plans scoped to an opportunity.
-func (c *Corpus) ListValidationDefinitions(ctx context.Context, opportunityID string) ([]*evidence.ValidationDefinition, error) {
-	return listWorkflowPayloads[evidence.ValidationDefinition](
-		ctx, c.db, "list validation definitions",
-		`SELECT payload FROM validation_definitions WHERE opportunity_id=? ORDER BY created_at, id LIMIT 10000`,
-		opportunityID,
-	)
-}
-
-// SaveValidationRun persists the bounded result of an authorized validation execution.
-func (c *Corpus) SaveValidationRun(ctx context.Context, item *evidence.ValidationRun) error {
-	if item == nil || item.ID == "" {
-		return errors.New("validation run id is required")
-	}
-	payload, err := marshalWorkflow(item)
-	if err != nil {
-		return err
-	}
-	_, err = c.db.ExecContext(ctx, `
-		INSERT INTO validation_runs (id, definition_id, investigation_id, hypothesis_id, opportunity_id, kind, classification, payload, started_at, completed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (id) DO UPDATE SET definition_id=excluded.definition_id,
-			investigation_id=excluded.investigation_id, hypothesis_id=excluded.hypothesis_id,
-			opportunity_id=excluded.opportunity_id, kind=excluded.kind,
-			classification=excluded.classification, payload=excluded.payload, completed_at=excluded.completed_at
-	`, item.ID, item.DefinitionID, item.InvestigationID, item.HypothesisID, item.OpportunityID, item.Kind, item.Classification, payload, encodeTime(item.StartedAt), encodeTime(item.CompletedAt))
-	if err != nil {
-		return fmt.Errorf("save validation run: %w", err)
-	}
-	return nil
-}
-
-// GetValidationRun returns a validation result by ID, or nil when absent.
-func (c *Corpus) GetValidationRun(ctx context.Context, id string) (*evidence.ValidationRun, error) {
-	var payload string
-	err := c.db.QueryRowContext(ctx, `SELECT payload FROM validation_runs WHERE id=?`, id).Scan(&payload)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, evidence.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get validation run: %w", err)
-	}
-	var item evidence.ValidationRun
-	if err := unmarshalWorkflow(payload, &item); err != nil {
-		return nil, err
-	}
-	return &item, nil
-}
-
-// SaveValidationRunGroup persists one bounded repeat/stress aggregate.
-func (c *Corpus) SaveValidationRunGroup(ctx context.Context, item *evidence.ValidationRunGroup) error {
-	if item == nil || item.ID == "" {
-		return errors.New("validation run group id is required")
-	}
-	payload, err := marshalWorkflow(item)
-	if err != nil {
-		return err
-	}
-	_, err = c.db.ExecContext(ctx, `
-		INSERT INTO validation_run_groups (
-			id, definition_id, investigation_id, opportunity_id, classification,
-			requested_runs, completed_runs, payload, started_at, completed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, item.ID, item.DefinitionID, item.InvestigationID, item.OpportunityID, item.Classification,
-		item.RequestedRuns, item.CompletedRuns, payload, encodeTime(item.StartedAt), encodeTime(item.CompletedAt))
-	if err != nil {
-		return fmt.Errorf("save validation run group: %w", err)
-	}
-	return nil
-}
-
-// GetValidationRunGroup returns one persisted repeat/stress aggregate.
-func (c *Corpus) GetValidationRunGroup(ctx context.Context, id string) (*evidence.ValidationRunGroup, error) {
-	var payload string
-	err := c.db.QueryRowContext(ctx, `SELECT payload FROM validation_run_groups WHERE id=?`, id).Scan(&payload)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, evidence.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get validation run group: %w", err)
-	}
-	var item evidence.ValidationRunGroup
-	if err := unmarshalWorkflow(payload, &item); err != nil {
-		return nil, err
-	}
-	return &item, nil
-}
-
-// ListValidationRuns returns validation runs scoped to an opportunity.
-func (c *Corpus) ListValidationRuns(ctx context.Context, opportunityID string) ([]*evidence.ValidationRun, error) {
-	return listWorkflowPayloads[evidence.ValidationRun](
-		ctx, c.db, "list validation runs",
-		`SELECT payload FROM validation_runs WHERE opportunity_id=? ORDER BY completed_at, id LIMIT 10000`,
-		opportunityID,
-	)
-}
-
-// SaveIssueDraft persists the latest rendered issue draft for an opportunity.
-func (c *Corpus) SaveIssueDraft(ctx context.Context, item *contribution.IssueDraft) error {
-	if item == nil {
-		return errors.New("issue draft is required")
-	}
-	return c.saveDraft(ctx, item.OpportunityID, "issue", item, item.RenderedAt)
-}
-
-// GetIssueDraft returns the issue draft for an opportunity, or nil when absent.
-func (c *Corpus) GetIssueDraft(ctx context.Context, opportunityID string) (*contribution.IssueDraft, error) {
-	var item contribution.IssueDraft
-	if err := c.getDraft(ctx, opportunityID, "issue", &item); err != nil {
-		return nil, err
-	}
-	return &item, nil
-}
-
-// SavePullRequestDraft persists the latest pull-request draft for an opportunity.
-func (c *Corpus) SavePullRequestDraft(ctx context.Context, item *contribution.PullRequestDraft) error {
-	if item == nil {
-		return errors.New("pull request draft is required")
-	}
-	return c.saveDraft(ctx, item.OpportunityID, "pull_request", item, item.RenderedAt)
-}
-
-// GetPullRequestDraft returns the pull-request draft for an opportunity, or nil when absent.
-func (c *Corpus) GetPullRequestDraft(ctx context.Context, opportunityID string) (*contribution.PullRequestDraft, error) {
-	var item contribution.PullRequestDraft
-	if err := c.getDraft(ctx, opportunityID, "pull_request", &item); err != nil {
-		return nil, err
-	}
-	return &item, nil
-}
-
-func (c *Corpus) saveDraft(ctx context.Context, opportunityID, kind string, item any, renderedAt time.Time) error {
-	if opportunityID == "" {
-		return errors.New("draft opportunity id is required")
-	}
-	payload, err := marshalWorkflow(item)
-	if err != nil {
-		return err
-	}
-	_, err = c.db.ExecContext(ctx, `INSERT INTO contribution_drafts (opportunity_id, kind, payload, rendered_at) VALUES (?, ?, ?, ?) ON CONFLICT (opportunity_id, kind) DO UPDATE SET payload=excluded.payload, rendered_at=excluded.rendered_at`, opportunityID, kind, payload, encodeTime(renderedAt))
-	if err != nil {
-		return fmt.Errorf("save contribution draft: %w", err)
-	}
-	return nil
-}
-
-func (c *Corpus) getDraft(ctx context.Context, opportunityID, kind string, target any) error {
-	var payload string
-	err := c.db.QueryRowContext(ctx, `SELECT payload FROM contribution_drafts WHERE opportunity_id=? AND kind=?`, opportunityID, kind).Scan(&payload)
-	if errors.Is(err, sql.ErrNoRows) {
-		return contribution.ErrNotFound
-	}
-	if err != nil {
-		return fmt.Errorf("get contribution draft: %w", err)
-	}
-	return unmarshalWorkflow(payload, target)
-}
-
-// SaveContributionManifest persists one deterministic evidence statement.
-func (c *Corpus) SaveContributionManifest(ctx context.Context, item *manifest.Statement, workspaceID, pullRequestRef string) error {
-	if item == nil {
-		return errors.New("contribution manifest is required")
-	}
-	if err := item.Validate(); err != nil {
-		return err
-	}
-	payload, err := marshalWorkflow(item)
-	if err != nil {
-		return err
-	}
-	_, err = c.db.ExecContext(ctx, `
-		INSERT INTO contribution_manifests (id, opportunity_id, workspace_id, pull_request_ref, content_sha256, payload, generated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (id) DO UPDATE SET workspace_id=excluded.workspace_id,
-			pull_request_ref=excluded.pull_request_ref, content_sha256=excluded.content_sha256, payload=excluded.payload,
-			generated_at=excluded.generated_at
-	`, item.Predicate.ManifestID, item.Predicate.Opportunity.ID, workspaceID, pullRequestRef,
-		item.Predicate.ContentSHA256, payload, encodeTime(item.Predicate.GeneratedAt))
-	if err != nil {
-		return fmt.Errorf("save contribution manifest: %w", err)
-	}
-	return nil
-}
-
-// GetContributionManifest reads one persisted evidence statement.
-func (c *Corpus) GetContributionManifest(ctx context.Context, id string) (*manifest.Statement, error) {
-	var payload string
-	err := c.db.QueryRowContext(ctx, `SELECT payload FROM contribution_manifests WHERE id=?`, id).Scan(&payload)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, manifest.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get contribution manifest: %w", err)
-	}
-	var item manifest.Statement
-	if err := unmarshalWorkflow(payload, &item); err != nil {
-		return nil, err
-	}
-	if err := item.Validate(); err != nil {
-		return nil, fmt.Errorf("validate contribution manifest: %w", err)
-	}
-	return &item, nil
-}
-
-// LatestContributionManifest reads the newest manifest for an opportunity.
-func (c *Corpus) LatestContributionManifest(ctx context.Context, opportunityID string) (*manifest.Statement, error) {
-	var payload string
-	err := c.db.QueryRowContext(ctx, `SELECT payload FROM contribution_manifests WHERE opportunity_id=? ORDER BY generated_at DESC, id LIMIT 1`, opportunityID).Scan(&payload)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, manifest.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get latest contribution manifest: %w", err)
-	}
-	var item manifest.Statement
-	if err := unmarshalWorkflow(payload, &item); err != nil {
-		return nil, err
-	}
-	if err := item.Validate(); err != nil {
-		return nil, fmt.Errorf("validate contribution manifest: %w", err)
-	}
-	return &item, nil
 }

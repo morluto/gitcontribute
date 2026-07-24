@@ -38,116 +38,24 @@ type ConcernOperator interface {
 }
 
 // CreateConcernInput records one repository concern and its provenance.
-type CreateConcernInput struct {
-	Owner            string                   `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo             string                   `json:"repo" jsonschema:"GitHub repository name"`
-	CommitSHA        string                   `json:"commit_sha,omitempty" jsonschema:"Source commit SHA; required unless workspace_id is set"`
-	WorkspaceID      string                   `json:"workspace_id,omitempty" jsonschema:"Opaque workspace ID; required unless commit_sha is set"`
-	Title            string                   `json:"title" jsonschema:"Concise concern title"`
-	ProblemStatement string                   `json:"problem_statement" jsonschema:"Observed or suspected problem"`
-	SuspectedOwner   string                   `json:"suspected_owner,omitempty" jsonschema:"Suspected code ownership boundary"`
-	Confidence       float64                  `json:"confidence" jsonschema:"Confidence from 0 to 1"`
-	Unknowns         []string                 `json:"unknowns,omitempty" jsonschema:"Explicit unknowns"`
-	SuccessCriterion string                   `json:"success_criterion,omitempty" jsonschema:"Proof or success criterion"`
-	Notes            string                   `json:"notes,omitempty" jsonschema:"Local notes"`
-	EvidenceIDs      []string                 `json:"evidence_ids,omitempty" jsonschema:"Existing local evidence IDs"`
-	SourceProvenance []EvidenceSourceRevision `json:"source_provenance,omitempty" jsonschema:"Exact stored source revisions used by this concern"`
-}
 
 // ListConcernsInput filters and bounds offline concern reads.
-type ListConcernsInput struct {
-	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner; provide with repo"`
-	Repo   string `json:"repo,omitempty" jsonschema:"Optional repository name; provide with owner"`
-	Status string `json:"status,omitempty" jsonschema:"Optional concern status"`
-	Query  string `json:"query,omitempty" jsonschema:"Literal full-text search query"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-}
 
 // UpdateConcernInput replaces explicitly supplied editable fields.
-type UpdateConcernInput struct {
-	ID               string   `json:"id" jsonschema:"Concern ID"`
-	Title            *string  `json:"title,omitempty" jsonschema:"Replacement title"`
-	ProblemStatement *string  `json:"problem_statement,omitempty" jsonschema:"Replacement problem statement"`
-	SuspectedOwner   *string  `json:"suspected_owner,omitempty" jsonschema:"Replacement owner boundary"`
-	Confidence       *float64 `json:"confidence,omitempty" jsonschema:"Replacement confidence from 0 to 1"`
-	Unknowns         []string `json:"unknowns,omitempty" jsonschema:"Replacement explicit unknowns"`
-	SuccessCriterion *string  `json:"success_criterion,omitempty" jsonschema:"Replacement success criterion"`
-	Notes            *string  `json:"notes,omitempty" jsonschema:"Replacement local notes"`
-	EvidenceIDs      []string `json:"evidence_ids,omitempty" jsonschema:"Replacement evidence IDs"`
-}
 
 // SetConcernStatusInput requests one lifecycle transition.
-type SetConcernStatusInput struct {
-	ID        string `json:"id" jsonschema:"Concern ID"`
-	Status    string `json:"status" jsonschema:"Target lifecycle status"`
-	Rationale string `json:"rationale" jsonschema:"Reason for the transition"`
-}
 
 // LinkConcernInput records one typed relationship.
-type LinkConcernInput struct {
-	ID         string `json:"id" jsonschema:"Concern ID"`
-	Kind       string `json:"kind" jsonschema:"Relationship kind"`
-	TargetType string `json:"target_type" jsonschema:"Target record type"`
-	TargetID   string `json:"target_id" jsonschema:"Target record ID"`
-	Note       string `json:"note,omitempty" jsonschema:"Relationship note"`
-}
 
 // PromoteConcernInput configures atomic downstream workflow creation.
-type PromoteConcernInput struct {
-	ID             string `json:"id" jsonschema:"Concern ID"`
-	Kind           string `json:"kind" jsonschema:"Promotion target: investigation or opportunity"`
-	Category       string `json:"category" jsonschema:"Contribution category"`
-	Scope          string `json:"scope,omitempty" jsonschema:"Required opportunity scope"`
-	Impact         string `json:"impact,omitempty" jsonschema:"Required opportunity impact"`
-	ExpectedEffort string `json:"expected_effort,omitempty" jsonschema:"Required expected effort"`
-}
 
 // ConcernLinkOutput is a transport-safe relationship.
-type ConcernLinkOutput struct {
-	Kind       string `json:"kind" jsonschema:"Relationship kind"`
-	TargetType string `json:"target_type" jsonschema:"Target record type"`
-	TargetID   string `json:"target_id" jsonschema:"Target record ID"`
-	Note       string `json:"note,omitempty" jsonschema:"Relationship note"`
-}
 
 // ConcernPromotionOutput preserves created downstream identities.
-type ConcernPromotionOutput struct {
-	Kind            string `json:"kind" jsonschema:"Promotion target kind"`
-	InvestigationID string `json:"investigation_id" jsonschema:"Created investigation ID"`
-	HypothesisID    string `json:"hypothesis_id" jsonschema:"Created hypothesis ID"`
-	OpportunityID   string `json:"opportunity_id,omitempty" jsonschema:"Created opportunity ID"`
-}
 
 // ConcernOutput omits absolute paths and source-reference URLs.
-type ConcernOutput struct {
-	ID               string                  `json:"id" jsonschema:"Concern ID"`
-	Owner            string                  `json:"owner" jsonschema:"Repository owner"`
-	Repo             string                  `json:"repo" jsonschema:"Repository name"`
-	CommitSHA        string                  `json:"commit_sha,omitempty" jsonschema:"Source commit SHA"`
-	WorkspaceID      string                  `json:"workspace_id,omitempty" jsonschema:"Opaque workspace ID"`
-	Title            string                  `json:"title" jsonschema:"Concern title"`
-	ProblemStatement string                  `json:"problem_statement" jsonschema:"Concern problem statement"`
-	SuspectedOwner   string                  `json:"suspected_owner,omitempty" jsonschema:"Suspected ownership boundary"`
-	Confidence       float64                 `json:"confidence" jsonschema:"Confidence from 0 to 1"`
-	Unknowns         []string                `json:"unknowns,omitempty" jsonschema:"Explicit unknowns"`
-	SuccessCriterion string                  `json:"success_criterion,omitempty" jsonschema:"Proof or success criterion"`
-	Notes            string                  `json:"notes,omitempty" jsonschema:"Local notes"`
-	EvidenceIDs      []string                `json:"evidence_ids,omitempty" jsonschema:"Linked evidence IDs"`
-	SourceRefCount   int                     `json:"source_ref_count" jsonschema:"Number of private source references retained locally"`
-	Freshness        string                  `json:"freshness" jsonschema:"Derived source freshness"`
-	FreshnessReason  string                  `json:"freshness_reason" jsonschema:"Freshness explanation"`
-	Links            []ConcernLinkOutput     `json:"links,omitempty" jsonschema:"Explicit concern relationships"`
-	Status           string                  `json:"status" jsonschema:"Concern lifecycle status"`
-	Promotion        *ConcernPromotionOutput `json:"promotion,omitempty" jsonschema:"Downstream workflow identity"`
-	CreatedAt        string                  `json:"created_at" jsonschema:"Creation time"`
-	UpdatedAt        string                  `json:"updated_at" jsonschema:"Latest update time"`
-}
 
 // ConcernListOutput contains one bounded offline result set.
-type ConcernListOutput struct {
-	Concerns []ConcernOutput `json:"concerns" jsonschema:"Bounded concern results"`
-	Total    int             `json:"total" jsonschema:"Number of returned concerns"`
-}
 
 func (s *Server) registerConcernTools() {
 	readOnly := readOnlyAnnotations()

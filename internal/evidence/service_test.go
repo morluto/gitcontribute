@@ -395,7 +395,7 @@ func TestRunValidationResolvesEnvironmentAllowlistAtExecution(t *testing.T) {
 	}
 }
 
-func TestRunValidationInheritsEnvironmentWithEmptyAllowlist(t *testing.T) {
+func TestRunValidationUsesEmptyEnvironmentWithEmptyAllowlist(t *testing.T) {
 	repo := newFakeRepo()
 	runner := &capturingRunner{result: &RunResult{Classification: RunClassificationPassing}}
 	svc := NewService(repo, runner)
@@ -406,8 +406,8 @@ func TestRunValidationInheritsEnvironmentWithEmptyAllowlist(t *testing.T) {
 	if _, err := svc.RunValidation(context.Background(), def.ID, RunKindBase); err != nil {
 		t.Fatal(err)
 	}
-	if runner.request.Env != nil {
-		t.Fatalf("execution environment = %#v, want nil for inherited environment", runner.request.Env)
+	if runner.request.Env == nil || len(runner.request.Env) != 0 {
+		t.Fatalf("execution environment = %#v, want explicit empty environment", runner.request.Env)
 	}
 }
 

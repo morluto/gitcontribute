@@ -12,8 +12,8 @@ const (
 	ExitCancelled = 130
 )
 
-// ErrNotWired is returned by the bootstrap placeholder until a real service or
-// runner is integrated.
+// ErrNotWired reports that an optional capability is unavailable from the
+// connected service or runner.
 var ErrNotWired = errors.New("not wired: integration not yet implemented")
 
 // CLIError attaches a stable exit code to an error.

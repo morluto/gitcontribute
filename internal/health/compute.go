@@ -39,11 +39,15 @@ func Compute(ctx context.Context, c *corpus.Corpus, repoID int64, opts Options) 
 	if err != nil {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
+	threadTotal, err := c.CountThreadsFiltered(ctx, repoID, "", "")
+	if err != nil {
+		return nil, fmt.Errorf("count threads: %w", err)
+	}
 	threadCoverage, err := c.GetCoverage(ctx, repoID, nil, facetThreads)
 	if err != nil {
 		return nil, fmt.Errorf("get thread coverage: %w", err)
 	}
-	threadsComplete := threadCoverage != nil && threadCoverage.Complete && len(threads) < threadListLimit
+	threadsComplete := completeThreadSample(threadCoverage != nil && threadCoverage.Complete, threadTotal, threadListLimit)
 	threadsIncomplete := !threadsComplete
 
 	now := opts.Now
@@ -111,6 +115,10 @@ func Compute(ctx context.Context, c *corpus.Corpus, repoID int64, opts Options) 
 	report.Response = response
 
 	return report, nil
+}
+
+func completeThreadSample(sourceComplete bool, total, limit int) bool {
+	return sourceComplete && total <= limit
 }
 
 func resolveWindowStart(startOpt time.Time, threads []corpus.Thread, repo *corpus.Repository) (time.Time, string) {

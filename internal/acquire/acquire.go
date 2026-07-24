@@ -147,8 +147,11 @@ func NewManager(root string, runner runner) (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve acquisition root: %w", err)
 	}
-	if err := os.MkdirAll(root, 0755); err != nil {
+	if err := os.MkdirAll(root, 0700); err != nil {
 		return nil, fmt.Errorf("create acquisition root: %w", err)
+	}
+	if err := os.Chmod(root, 0700); err != nil {
+		return nil, fmt.Errorf("protect acquisition root: %w", err)
 	}
 	root, err = filepath.EvalSymlinks(root)
 	if err != nil {
@@ -215,7 +218,7 @@ func (m *Manager) Acquire(ctx context.Context, owner, repo, remote string) (*Acq
 	}
 
 	worktreePath := filepath.Join(m.root, "worktrees", uuid.NewString())
-	if err := os.MkdirAll(filepath.Dir(worktreePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(worktreePath), 0700); err != nil {
 		return nil, fmt.Errorf("create worktrees dir: %w", err)
 	}
 	if _, err := m.git(ctx, mirrorPath, "worktree", "add", "--detach", worktreePath, commit); err != nil {
@@ -281,7 +284,7 @@ func (m *Manager) cleanupWorktree(ctx context.Context, acq *Acquisition) error {
 
 func (m *Manager) lockMirror(ctx context.Context, name string) (func(), error) {
 	lockDir := filepath.Join(m.root, "locks")
-	if err := os.MkdirAll(lockDir, 0755); err != nil {
+	if err := os.MkdirAll(lockDir, 0700); err != nil {
 		return nil, fmt.Errorf("create lock directory: %w", err)
 	}
 
@@ -336,7 +339,7 @@ func (m *Manager) git(ctx context.Context, dir string, args ...string) (string, 
 
 func (m *Manager) cloneMirror(ctx context.Context, remote, mirrorPath string) error {
 	parent := filepath.Dir(mirrorPath)
-	if err := os.MkdirAll(parent, 0755); err != nil {
+	if err := os.MkdirAll(parent, 0700); err != nil {
 		return fmt.Errorf("create mirrors dir: %w", err)
 	}
 
@@ -421,7 +424,7 @@ func (m *Manager) writeMetadata(acq *Acquisition) error {
 		return fmt.Errorf("create metadata: %w", err)
 	}
 	tmpPath := f.Name()
-	defer os.Remove(tmpPath)
+	defer func() { _ = os.Remove(tmpPath) }()
 	if err := f.Chmod(0600); err != nil {
 		_ = f.Close()
 		return fmt.Errorf("secure metadata: %w", err)

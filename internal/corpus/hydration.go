@@ -223,7 +223,7 @@ func (c *Corpus) listFacetObservations(ctx context.Context, repoID int64, thread
 	if err != nil {
 		return nil, false, fmt.Errorf("list facet observations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []FacetObservation
 	for rows.Next() {

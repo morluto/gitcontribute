@@ -7,10 +7,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/clusterprojection"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/similarity"
 )
 
@@ -145,7 +146,7 @@ func (s *Service) Cluster(ctx context.Context, id string, limit int) (*cli.Clust
 		return nil, fmt.Errorf("get cluster: %w", err)
 	}
 	if cl == nil {
-		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("cluster %q not found", id))
+		return nil, failure.NotFound(fmt.Errorf("cluster %q not found", id))
 	}
 	return clusterToCLI(*cl, limit), nil
 }

@@ -1,4 +1,4 @@
-package cli
+package contracts
 
 import (
 	"context"
@@ -207,8 +207,6 @@ type RepoRef struct {
 	Repo  string `json:"repo"`
 }
 
-func (r RepoRef) String() string { return r.Owner + "/" + r.Repo }
-
 // MCPOptions carries MCP server startup options.
 type MCPOptions struct {
 	Transport string
@@ -352,6 +350,7 @@ type SearchOptions struct {
 	Cursor       string
 	Lens         string
 	Sort         string
+	MatchMode    string
 }
 
 // InitResult is the result of initializing a local corpus.
@@ -588,126 +587,4 @@ type CollectionListResult struct {
 	Collections []CollectionResult `json:"collections"`
 	Total       int                `json:"total"`
 	Truncated   bool               `json:"truncated"`
-}
-
-// LocalQueryService exposes bounded offline corpus queries.
-type LocalQueryService interface {
-	Coverage(ctx context.Context, repo RepoRef) (*CoverageResult, error)
-	RunHistory(ctx context.Context, limit int) (*RunListResult, error)
-	NeighborQuery(ctx context.Context, repo RepoRef, kind string, number, limit int) (*NeighborListResult, error)
-}
-
-// ArchiveThreadService exposes the bounded offline archive listing separately
-// from the stable local-query interface.
-type ArchiveThreadService interface {
-	ArchiveThreads(ctx context.Context, repo RepoRef, kind, state string, limit int) (*ThreadListResult, error)
-}
-
-type ThreadListResult struct {
-	Repo      RepoRef          `json:"repo"`
-	Threads   []ThreadListItem `json:"threads"`
-	Freshness string           `json:"freshness,omitempty"`
-	Coverage  []CoverageFacet  `json:"coverage,omitempty"`
-}
-
-type ThreadListItem struct {
-	Kind      string   `json:"kind"`
-	Number    int      `json:"number"`
-	State     string   `json:"state"`
-	Title     string   `json:"title"`
-	Author    string   `json:"author,omitempty"`
-	Labels    []string `json:"labels,omitempty"`
-	UpdatedAt string   `json:"updated_at"`
-}
-
-type CoverageResult struct {
-	Repo   RepoRef         `json:"repo"`
-	Facets []CoverageFacet `json:"facets"`
-}
-
-type CoverageFacet struct {
-	Facet     string `json:"facet"`
-	Present   bool   `json:"present"`
-	Complete  bool   `json:"complete"`
-	UpdatedAt string `json:"updated_at,omitempty"`
-}
-
-type RunListResult struct {
-	Runs []RunResult `json:"runs"`
-}
-
-type RunResult struct {
-	ID          int64  `json:"id"`
-	Kind        string `json:"kind"`
-	Status      string `json:"status"`
-	StartedAt   string `json:"started_at"`
-	CompletedAt string `json:"completed_at,omitempty"`
-	Stats       string `json:"stats,omitempty"`
-	Error       string `json:"error,omitempty"`
-}
-
-type NeighborListResult struct {
-	Repo           RepoRef          `json:"repo"`
-	Kind           string           `json:"kind"`
-	Number         int              `json:"number"`
-	SourceRevision string           `json:"source_revision"`
-	Neighbors      []NeighborResult `json:"neighbors"`
-}
-
-type NeighborResult struct {
-	Kind   string  `json:"kind"`
-	Repo   RepoRef `json:"repo"`
-	Number int     `json:"number"`
-	Title  string  `json:"title"`
-	State  string  `json:"state"`
-	Score  float64 `json:"score"`
-	Reason string  `json:"reason"`
-}
-
-// TrackingService exposes local triage, contribution, and metadata portability
-// operations. Implementations must keep local state separate from GitHub state
-// and must not perform network access.
-type TrackingService interface {
-	RecordTriageEvent(ctx context.Context, opts RecordTriageEventOptions) (*TriageEventResult, error)
-	ListTriageEvents(ctx context.Context, opts ListTriageEventsOptions) (*TriageEventListResult, error)
-	RecordContribution(ctx context.Context, opts RecordContributionOptions) (*ContributionResult, error)
-	GetContribution(ctx context.Context, id string) (*ContributionResult, error)
-	ListContributions(ctx context.Context, opts ListContributionsOptions) (*ContributionListResult, error)
-	RecordContributionOutcome(ctx context.Context, opts RecordContributionOutcomeOptions) (*ContributionOutcomeResult, error)
-	ListContributionOutcomes(ctx context.Context, contributionID string) (*ContributionOutcomeListResult, error)
-	ExportLocalMetadata(ctx context.Context, opts MetadataExportOptions) (*MetadataExportResult, error)
-	ImportLocalMetadata(ctx context.Context, opts MetadataImportOptions) (*MetadataImportResult, error)
-}
-
-type RecordTriageEventOptions struct {
-	Target  string
-	Outcome string
-	Reason  string
-	Lens    string
-}
-
-type TriageEventResult struct {
-	ID            string `json:"id"`
-	TargetKind    string `json:"target_kind"`
-	TargetRef     string `json:"target_ref"`
-	Outcome       string `json:"outcome"`
-	Reason        string `json:"reason,omitempty"`
-	Lens          string `json:"lens,omitempty"`
-	SourceEventAt string `json:"source_event_at,omitempty"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
-}
-
-type ListTriageEventsOptions struct {
-	TargetKind string
-	TargetRef  string
-	Outcome    string
-	Lens       string
-	Limit      int
-}
-
-type TriageEventListResult struct {
-	Events []TriageEventResult `json:"events"`
-	Limit  int                 `json:"limit"`
-	Total  int                 `json:"total"`
 }

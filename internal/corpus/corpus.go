@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/pressly/goose/v3"
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // Register the product-owned SQLite adapter.
 )
 
 //go:embed migrations/*.sql
@@ -25,8 +25,9 @@ var openLeaseHandoff = func(string) error { return nil }
 // and threads. It stores immutable observations and separately maintained
 // current projections, runs, coverage facts, and FTS5 search indexes.
 type Corpus struct {
-	db    *sql.DB
-	lease *corpusLease
+	db       *sql.DB
+	lease    *corpusLease
+	watchDSN string
 }
 
 // MigrationRequiredError reports that a corpus must be migrated before the
@@ -138,7 +139,7 @@ func openWritableCorpus(ctx context.Context, path string, lease *corpusLease, ne
 		return nil, err
 	}
 
-	c := &Corpus{db: db, lease: lease}
+	c := &Corpus{db: db, lease: lease, watchDSN: corpusWatchDSN(path)}
 	if needsInitialization {
 		if err := c.applyMigrations(ctx); err != nil {
 			return nil, errors.Join(err, db.Close())
@@ -183,7 +184,7 @@ func handoffInitializedCorpus(ctx context.Context, path string, c *Corpus, lease
 	if err != nil {
 		return nil, lease, err
 	}
-	c = &Corpus{db: db, lease: lease}
+	c = &Corpus{db: db, lease: lease, watchDSN: corpusWatchDSN(path)}
 	if err := validateOpenCorpusSchema(ctx, c); err != nil {
 		return nil, lease, errors.Join(err, db.Close())
 	}
@@ -248,7 +249,7 @@ func OpenReadOnly(ctx context.Context, path string) (_ *Corpus, returnErr error)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
 
-	c := &Corpus{db: db, lease: lease}
+	c := &Corpus{db: db, lease: lease, watchDSN: dsn}
 	current, target, err = c.inspectSchemaVersions(ctx)
 	if err != nil {
 		return nil, errors.Join(err, db.Close())
@@ -264,17 +265,29 @@ func OpenReadOnly(ctx context.Context, path string) (_ *Corpus, returnErr error)
 }
 
 func prepareDatabaseFile(path string) error {
-	if path == ":memory:" || strings.HasPrefix(path, "file:") || strings.Contains(path, "?") {
+	if path == ":memory:" || strings.Contains(path, "?") && !strings.HasPrefix(path, "file:") {
 		return nil
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	filePath := path
+	if strings.HasPrefix(path, "file:") {
+		var inspectable bool
+		var err error
+		filePath, _, inspectable, err = schemaInspectionTarget(path)
+		if err != nil {
+			return err
+		}
+		if !inspectable {
+			return nil
+		}
+	}
+	f, err := os.OpenFile(filePath, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return fmt.Errorf("prepare corpus db: %w", err)
 	}
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("close prepared corpus db: %w", err)
 	}
-	if err := os.Chmod(path, 0600); err != nil {
+	if err := os.Chmod(filePath, 0600); err != nil {
 		return fmt.Errorf("protect corpus db: %w", err)
 	}
 	return nil

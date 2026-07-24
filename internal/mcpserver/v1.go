@@ -11,22 +11,8 @@ import (
 // V1 read-only tool inputs and outputs.
 
 // SearchRepositoriesInput describes an offline repository search page.
-type SearchRepositoriesInput struct {
-	Query  string `json:"query,omitempty" jsonschema:"Repository full-text query"`
-	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo   string `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
-	Sort   string `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
-}
 
 // SearchRepositoriesOutput contains one page of repository matches.
-type SearchRepositoriesOutput struct {
-	Query      string             `json:"query"`
-	Total      int                `json:"total"`
-	Matches    []RepositoryOutput `json:"matches"`
-	NextCursor string             `json:"next_cursor,omitempty"`
-}
 
 // SearchThreadsInput describes an offline issue and pull-request search page.
 type SearchThreadsInput struct {
@@ -45,174 +31,44 @@ type SearchThreadsInput struct {
 	Limit        int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
 	Cursor       string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
 	Sort         string   `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
+	MatchMode    string   `json:"match_mode,omitempty" jsonschema:"Term matching: all requires every term; any requires at least one term"`
+	View         string   `json:"view,omitempty" jsonschema:"compact omits full bodies and returns bounded excerpts; full includes stored bodies"`
 }
 
 // GetRepositoryDossierInput selects a persisted repository dossier.
 type GetRepositoryDossierInput RepoInput
 
 // ExplainMatchInput identifies an exact stored result and its original query.
-type ExplainMatchInput struct {
-	Query  string `json:"query,omitempty" jsonschema:"Original search query"`
-	Owner  string `json:"owner" jsonschema:"Repository owner"`
-	Repo   string `json:"repo" jsonschema:"Repository name"`
-	Kind   string `json:"kind,omitempty" jsonschema:"Match kind: repo, issue, pull_request, or code"`
-	Number int    `json:"number,omitempty" jsonschema:"Thread number for issue or pull_request matches"`
-	Path   string `json:"path,omitempty" jsonschema:"File path for code matches"`
-	Commit string `json:"commit,omitempty" jsonschema:"Commit SHA for code matches"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum explanation facets from 1 to 100"`
-}
 
 // ExplainMatchOutput reports the stored facts that contributed to a match score.
-type ExplainMatchOutput struct {
-	Query           string                `json:"query"`
-	Kind            string                `json:"kind"`
-	Owner           string                `json:"owner"`
-	Repo            string                `json:"repo"`
-	Number          int                   `json:"number,omitempty"`
-	Path            string                `json:"path,omitempty"`
-	Commit          string                `json:"commit,omitempty"`
-	State           string                `json:"state,omitempty"`
-	Title           string                `json:"title"`
-	Snippet         string                `json:"snippet,omitempty"`
-	MatchSource     string                `json:"match_source,omitempty" jsonschema:"Stored search document or hydrated facet that matched"`
-	RetrievalRank   *float64              `json:"retrieval_rank,omitempty" jsonschema:"Lower-is-better retrieval rank"`
-	RankingMethod   string                `json:"ranking_method,omitempty" jsonschema:"Retrieval ranking method"`
-	SearchTruncated bool                  `json:"search_truncated,omitempty" jsonschema:"Whether indexed hydrated text was bounded"`
-	Reason          string                `json:"reason"`
-	SourceRevision  string                `json:"source_revision,omitempty"`
-	Facets          []FacetCoverageOutput `json:"facets,omitempty"`
-	AsOf            string                `json:"as_of,omitempty"`
-}
 
 // GetJobInput selects a durable job by opaque ID.
-type GetJobInput struct {
-	ID string `json:"id" jsonschema:"Durable job ID"`
-}
 
 // GetJobOutput reports durable state and structured progress for a job.
-type GetJobOutput struct {
-	ID                    string `json:"id"`
-	Kind                  string `json:"kind"`
-	Status                string `json:"status"`
-	Request               any    `json:"request,omitempty"`
-	Result                any    `json:"result,omitempty"`
-	Error                 string `json:"error,omitempty"`
-	Phase                 string `json:"phase,omitempty"`
-	CompletedItems        int    `json:"completed_items"`
-	TotalItems            int    `json:"total_items"`
-	ProgressPercent       int    `json:"progress_percent"`
-	RetryAfterMS          int    `json:"retry_after_ms,omitempty"`
-	CreatedAt             string `json:"created_at"`
-	StartedAt             string `json:"started_at,omitempty"`
-	CompletedAt           string `json:"completed_at,omitempty"`
-	CancelledAt           string `json:"cancelled_at,omitempty"`
-	CancellationRequested bool   `json:"cancellation_requested"`
-}
 
 // ThreadByNumberInput identifies a stored issue or pull request by number.
-type ThreadByNumberInput struct {
-	Owner  string `json:"owner"`
-	Repo   string `json:"repo"`
-	Number int    `json:"number"`
-}
 
 // JobReference is returned by long-running tools that submit durable jobs.
-type JobReference struct {
-	ID               string            `json:"id"`
-	Ref              string            `json:"ref"`
-	Kind             string            `json:"kind"`
-	Status           string            `json:"status"`
-	Message          string            `json:"message"`
-	PollAfterMS      int               `json:"poll_after_ms,omitempty"`
-	SuggestedActions []SuggestedAction `json:"suggested_actions,omitempty"`
-}
 
 // V1 operation inputs and outputs.
 
 // BuildRepositoryDossierInput selects a repository for durable dossier generation.
-type BuildRepositoryDossierInput RepoInput
 
 // StartInvestigationInput creates a local investigation for a repository revision.
-type StartInvestigationInput struct {
-	Owner     string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo      string `json:"repo" jsonschema:"GitHub repository name"`
-	CommitSHA string `json:"commit_sha,omitempty" jsonschema:"Required commit SHA unless number selects a stored thread"`
-	Lens      string `json:"lens,omitempty" jsonschema:"Optional lens name"`
-	Kind      string `json:"kind,omitempty" jsonschema:"Optional stored thread kind"`
-	Number    int    `json:"number,omitempty" jsonschema:"Stored thread number for atomic baseline creation"`
-}
 
 // RecordHypothesisInput records a structured hypothesis and its provenance.
-type RecordHypothesisInput struct {
-	InvestigationID    string      `json:"investigation_id" jsonschema:"Investigation ID"`
-	Title              string      `json:"title" jsonschema:"Hypothesis title"`
-	Description        string      `json:"description" jsonschema:"Hypothesis description"`
-	Category           string      `json:"category" jsonschema:"Category such as bug, performance, or documentation"`
-	ExpectedBehavior   string      `json:"expected_behavior,omitempty" jsonschema:"Expected behavior"`
-	ObservedBehavior   string      `json:"observed_behavior,omitempty" jsonschema:"Observed behavior"`
-	PotentialImpact    string      `json:"potential_impact,omitempty" jsonschema:"Potential impact"`
-	OpenQuestions      []string    `json:"open_questions,omitempty" jsonschema:"Open questions"`
-	AffectedComponents []string    `json:"affected_components,omitempty" jsonschema:"Affected components"`
-	SourceRefs         []SourceRef `json:"source_refs,omitempty" jsonschema:"Source references"`
-}
 
 // HypothesisOutput is the stable MCP representation of a hypothesis.
-type HypothesisOutput struct {
-	ID                 string      `json:"id"`
-	InvestigationID    string      `json:"investigation_id"`
-	Title              string      `json:"title"`
-	Description        string      `json:"description"`
-	Category           string      `json:"category"`
-	ExpectedBehavior   string      `json:"expected_behavior,omitempty"`
-	ObservedBehavior   string      `json:"observed_behavior,omitempty"`
-	PotentialImpact    string      `json:"potential_impact,omitempty"`
-	OpenQuestions      []string    `json:"open_questions,omitempty"`
-	AffectedComponents []string    `json:"affected_components,omitempty"`
-	SourceRefs         []SourceRef `json:"source_refs,omitempty"`
-	Status             string      `json:"status"`
-	CreatedAt          string      `json:"created_at"`
-	UpdatedAt          string      `json:"updated_at"`
-}
 
 // CheckDuplicatesInput selects a hypothesis or opportunity for duplicate analysis.
-type CheckDuplicatesInput struct {
-	Target string `json:"target" jsonschema:"Target scope: hypothesis or opportunity"`
-	ID     string `json:"id" jsonschema:"Hypothesis or opportunity ID"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum findings from 1 to 100"`
-}
 
 // CheckCollisionsInput selects a hypothesis or opportunity for collision analysis.
-type CheckCollisionsInput CheckDuplicatesInput
 
 // CheckOutput contains evidence-backed duplicate or collision findings.
-type CheckOutput struct {
-	Target         string         `json:"target"`
-	ID             string         `json:"id"`
-	Repo           string         `json:"repo,omitempty"`
-	Query          string         `json:"query,omitempty"`
-	Total          int            `json:"total"`
-	Findings       []EvidenceItem `json:"findings,omitempty"`
-	SourceRevision string         `json:"source_revision,omitempty"`
-	Limit          int            `json:"limit"`
-}
 
 // PromoteOpportunityInput converts a hypothesis into a scoped opportunity.
-type PromoteOpportunityInput struct {
-	HypothesisID        string      `json:"hypothesis_id" jsonschema:"Hypothesis ID to promote"`
-	ProblemStatement    string      `json:"problem_statement" jsonschema:"Problem statement"`
-	Scope               string      `json:"scope" jsonschema:"Scope of the opportunity"`
-	Impact              string      `json:"impact" jsonschema:"Impact of the opportunity"`
-	ExpectedEffort      string      `json:"expected_effort" jsonschema:"Expected effort"`
-	Confidence          float64     `json:"confidence" jsonschema:"Confidence from 0.0 to 1.0"`
-	Dependencies        []string    `json:"dependencies,omitempty" jsonschema:"Dependencies"`
-	MaintainerAlignment string      `json:"maintainer_alignment,omitempty" jsonschema:"Maintainer alignment note"`
-	SourceRefs          []SourceRef `json:"source_refs,omitempty" jsonschema:"Source references"`
-}
 
 // CancelJobInput selects durable jobs for bounded, persisted cancellation.
-type CancelJobInput struct {
-	IDs []string `json:"ids" jsonschema:"One to 100 durable job IDs"`
-}
 
 func (s *Server) registerV1() {
 	readOnly := readOnlyAnnotations()
@@ -228,12 +84,16 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[SearchThreadsInput, SearchOutput]{
 		name: ToolSearchThreads, title: "Search stored issues and pull requests",
-		description: "Search stored issue and PR titles, labels, bodies, and hydrated text. Supports relevance or updated order; never contacts GitHub.",
+		description: "Search stored issue and PR titles, labels, bodies, and hydrated text. Terms use strict all-term matching by default; retry with match_mode=any for bounded broader recall. Compact view omits bodies; hydrate exact finalists with corpus.get_threads. Never contacts GitHub.",
 		annotations: readOnly, input: inputSchema[SearchThreadsInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 			setEnum(schema, "state", "open", "closed")
 			setEnum(schema, "state_reason", "completed", "not_planned")
 			setEnum(schema, "sort", "relevance", "updated")
+			setEnum(schema, "match_mode", "all", "any")
+			setDefault(schema, "match_mode", "all")
+			setEnum(schema, "view", "compact", "full")
+			setDefault(schema, "view", "compact")
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 		}), output: outputSchema[SearchOutput]("One page of stored issue and pull-request matches."), handler: s.searchThreads,
@@ -406,12 +266,19 @@ func (s *Server) searchThreads(ctx context.Context, _ *mcp.CallToolRequest, in S
 	if in.StateReason != "" && in.StateReason != "completed" && in.StateReason != "not_planned" {
 		return nil, SearchOutput{}, InvalidArgument("state_reason", "must be completed or not_planned", map[string]any{"state_reason": "completed"})
 	}
-	searchIn := SearchInput{
-		Query: in.Query, Owner: in.Owner, Repo: in.Repo, Kind: in.Kind, State: in.State,
-		StateReason: in.StateReason, Merged: in.Merged, Author: in.Author, Association: in.Association,
-		Assignee: in.Assignee, Labels: in.Labels, UpdatedAfter: in.UpdatedAfter, Limit: in.Limit, Cursor: in.Cursor,
-		Sort: in.Sort,
+	if in.MatchMode == "" {
+		in.MatchMode = "all"
 	}
+	if in.MatchMode != "all" && in.MatchMode != "any" {
+		return nil, SearchOutput{}, InvalidArgument("match_mode", "must be all or any", map[string]any{"match_mode": "all"})
+	}
+	if in.View == "" {
+		in.View = "compact"
+	}
+	if in.View != "compact" && in.View != "full" {
+		return nil, SearchOutput{}, InvalidArgument("view", "must be compact or full", map[string]any{"view": "compact"})
+	}
+	searchIn := SearchInput(in)
 	out, err := s.reader.Search(ctx, searchIn)
 	return nil, out, err
 }

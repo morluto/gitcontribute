@@ -151,7 +151,7 @@ func (r *ArchiveReader) Read(ctx context.Context, hour time.Time, in io.Reader, 
 		stream = lr
 		closeFn = lr.Close
 	}
-	defer closeFn()
+	defer func() { _ = closeFn() }()
 
 	maxEventBytes := r.MaxEventBytes
 	if maxEventBytes <= 0 {

@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/concern"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // CreateConcern implements the MCP local concern-write capability.
@@ -38,7 +38,12 @@ func (r *MCPReader) ListConcerns(ctx context.Context, in mcpserver.ListConcernsI
 	if err != nil {
 		return mcpserver.ConcernListOutput{}, err
 	}
-	out := mcpserver.ConcernListOutput{Concerns: make([]mcpserver.ConcernOutput, len(result.Concerns)), Total: result.Total}
+	out := mcpserver.ConcernListOutput{
+		Concerns:  make([]mcpserver.ConcernOutput, len(result.Concerns)),
+		Limit:     result.Limit,
+		Total:     result.Total,
+		Truncated: result.Truncated,
+	}
 	for index := range result.Concerns {
 		out.Concerns[index] = concernResultToMCP(&result.Concerns[index])
 	}

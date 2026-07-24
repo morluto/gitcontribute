@@ -57,13 +57,6 @@ func newCircuitBreaker(maxFailures int, halfOpenWait, probeTimeout time.Duration
 	}
 }
 
-// setClock overrides the time source for testing.
-func (cb *circuitBreaker) setClock(clock func() time.Time) {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	cb.clock = clock
-}
-
 // allow reports whether a request should be permitted based on the current
 // circuit state. If the circuit is half-open and a probe is in-flight,
 // subsequent requests are rejected until the probe completes.

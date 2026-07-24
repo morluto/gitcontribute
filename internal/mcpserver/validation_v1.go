@@ -10,77 +10,16 @@ import (
 )
 
 // RunValidationInput selects a validation definition and explicitly authorizes execution.
-type RunValidationInput struct {
-	ID      string `json:"id" jsonschema:"Validation definition ID"`
-	Kind    string `json:"kind" jsonschema:"Run kind: base or candidate"`
-	Execute bool   `json:"execute" jsonschema:"Must be true to authorize host execution"`
-}
 
 // RunRepeatedValidationInput configures one bounded repeat/stress job.
-type RunRepeatedValidationInput struct {
-	ID             string `json:"id" jsonschema:"Validation definition ID"`
-	Target         string `json:"target" jsonschema:"Run target: base, candidate, or both"`
-	RunCount       int    `json:"run_count,omitempty" jsonschema:"Attempts per target from 1 to 100"`
-	Concurrency    int    `json:"concurrency,omitempty" jsonschema:"Concurrent attempts from 1 to 16"`
-	PerRunTimeout  string `json:"per_run_timeout,omitempty" jsonschema:"Optional Go duration per attempt"`
-	OverallTimeout string `json:"overall_timeout,omitempty" jsonschema:"Optional Go duration for the whole group"`
-	SampleInterval string `json:"sample_interval,omitempty" jsonschema:"Process telemetry interval from 10ms to 10s"`
-	Execute        bool   `json:"execute" jsonschema:"Must be true to authorize host execution"`
-}
 
 // DefineValidationInput records a bounded validation command without executing it.
-type DefineValidationInput struct {
-	InvestigationID      string                         `json:"investigation_id" jsonschema:"Investigation ID"`
-	Kind                 string                         `json:"kind" jsonschema:"Validation kind"`
-	Command              string                         `json:"command" jsonschema:"Shell-free command to execute"`
-	WorkspaceID          string                         `json:"workspace_id,omitempty" jsonschema:"Managed workspace ID used for both run kinds"`
-	BaseWorkspaceID      string                         `json:"base_workspace_id,omitempty" jsonschema:"Managed base workspace ID; requires candidate_workspace_id"`
-	CandidateWorkspaceID string                         `json:"candidate_workspace_id,omitempty" jsonschema:"Managed candidate workspace ID; requires base_workspace_id"`
-	Env                  []string                       `json:"env,omitempty" jsonschema:"Allowed environment variable names"`
-	Timeout              string                         `json:"timeout,omitempty" jsonschema:"Positive Go duration; defaults to 30m"`
-	MaxOutputBytes       int64                          `json:"max_output_bytes,omitempty" jsonschema:"Maximum captured bytes per output stream; defaults to 65536"`
-	Observation          *ValidationObservationContract `json:"observation,omitempty" jsonschema:"Expected bounded observations over captured base and candidate output"`
-	Protocol             string                         `json:"protocol,omitempty" jsonschema:"Structured protocol adapter: mcp_stdio"`
-	ReadinessTimeout     string                         `json:"readiness_timeout,omitempty" jsonschema:"Protocol initialization deadline; defaults to 30s"`
-}
 
 // ValidationExpectedObservation is one output assertion evaluated without a shell.
-type ValidationExpectedObservation struct {
-	Run        string `json:"run" jsonschema:"Run kind: base or candidate"`
-	Name       string `json:"name" jsonschema:"Short observation name"`
-	Source     string `json:"source" jsonschema:"Captured source: stdout, stderr, or artifact"`
-	Matcher    string `json:"matcher" jsonschema:"Matcher: exact or regexp"`
-	Pattern    string `json:"pattern" jsonschema:"Bounded exact string or Go regular expression"`
-	Occurrence string `json:"occurrence,omitempty" jsonschema:"Expected occurrence: present or absent; defaults to present"`
-	Path       string `json:"path,omitempty" jsonschema:"Relative artifact path; valid only when source is artifact"`
-}
 
 // ValidationObservationContract ties output assertions to the claimed behavior.
-type ValidationObservationContract struct {
-	Intent       string                          `json:"intent" jsonschema:"Short proof intent or invariant"`
-	Observations []ValidationExpectedObservation `json:"observations" jsonschema:"One to eight expected observations for each of base and candidate"`
-}
 
 // ValidationOutput is the stable MCP representation of a validation definition.
-type ValidationOutput struct {
-	ID                   string                         `json:"id"`
-	InvestigationID      string                         `json:"investigation_id"`
-	Kind                 string                         `json:"kind"`
-	Command              []string                       `json:"command"`
-	WorkingDir           string                         `json:"working_dir"`
-	BaseWorkingDir       string                         `json:"base_working_dir,omitempty"`
-	CandidateDir         string                         `json:"candidate_dir,omitempty"`
-	WorkspaceID          string                         `json:"workspace_id,omitempty" jsonschema:"Managed workspace ID used for both run kinds"`
-	BaseWorkspaceID      string                         `json:"base_workspace_id,omitempty" jsonschema:"Managed base workspace ID"`
-	CandidateWorkspaceID string                         `json:"candidate_workspace_id,omitempty" jsonschema:"Managed candidate workspace ID"`
-	Env                  []string                       `json:"environment_allowlist,omitempty"`
-	Timeout              string                         `json:"timeout,omitempty"`
-	MaxOutputBytes       int64                          `json:"max_output_bytes,omitempty"`
-	Observation          *ValidationObservationContract `json:"observation,omitempty"`
-	Protocol             string                         `json:"protocol,omitempty" jsonschema:"Declared structured protocol adapter"`
-	ReadinessTimeout     string                         `json:"readiness_timeout,omitempty" jsonschema:"Protocol initialization deadline"`
-	CreatedAt            string                         `json:"created_at"`
-}
 
 func (s *Server) runValidation(ctx context.Context, _ *mcp.CallToolRequest, in RunValidationInput) (*mcp.CallToolResult, JobReference, error) {
 	id, err := normalizeID("id", in.ID)

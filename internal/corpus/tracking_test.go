@@ -2,6 +2,7 @@ package corpus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -12,6 +13,64 @@ import (
 	"github.com/morluto/gitcontribute/internal/investigation"
 	"github.com/morluto/gitcontribute/internal/tracking"
 )
+
+func TestImportLocalMetadataOrdersMutableRecordsAndRejectsEqualConflicts(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	at := time.Unix(100, 0).UTC()
+	event := &tracking.TriageEvent{
+		ID: "shared", TargetKind: tracking.TargetRepository, TargetRef: "owner/repo",
+		Outcome: tracking.OutcomeSaved, CreatedAt: at, UpdatedAt: at,
+	}
+	if err := c.ImportLocalMetadata(ctx, &tracking.Bundle{TriageEvents: []*tracking.TriageEvent{event}}); err != nil {
+		t.Fatal(err)
+	}
+	equalConflict := *event
+	equalConflict.Outcome = tracking.OutcomeIgnored
+	if err := c.ImportLocalMetadata(ctx, &tracking.Bundle{TriageEvents: []*tracking.TriageEvent{&equalConflict}}); !errors.Is(err, tracking.ErrImportConflict) {
+		t.Fatalf("equal divergent import error = %v", err)
+	}
+	older := equalConflict
+	older.UpdatedAt = at.Add(-time.Second)
+	if err := c.ImportLocalMetadata(ctx, &tracking.Bundle{TriageEvents: []*tracking.TriageEvent{&older}}); err != nil {
+		t.Fatalf("older import: %v", err)
+	}
+	events, err := c.ListTriageEvents(ctx, tracking.TriageEventFilter{})
+	if err != nil || len(events) != 1 || events[0].Outcome != tracking.OutcomeSaved {
+		t.Fatalf("older import replaced record: (%+v, %v)", events, err)
+	}
+	newer := equalConflict
+	newer.UpdatedAt = at.Add(time.Second)
+	if err := c.ImportLocalMetadata(ctx, &tracking.Bundle{TriageEvents: []*tracking.TriageEvent{&newer}}); err != nil {
+		t.Fatalf("newer import: %v", err)
+	}
+	events, err = c.ListTriageEvents(ctx, tracking.TriageEventFilter{})
+	if err != nil || events[0].Outcome != tracking.OutcomeIgnored {
+		t.Fatalf("newer import did not replace record: (%+v, %v)", events, err)
+	}
+}
+
+func TestExportLocalMetadataRejectsTruncationButAllowsExactLimit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	at := time.Unix(100, 0).UTC()
+	bundle := &tracking.Bundle{TriageEvents: []*tracking.TriageEvent{
+		{ID: "one", TargetKind: tracking.TargetRepository, TargetRef: "owner/one", Outcome: tracking.OutcomeSaved, CreatedAt: at, UpdatedAt: at},
+		{ID: "two", TargetKind: tracking.TargetRepository, TargetRef: "owner/two", Outcome: tracking.OutcomeSaved, CreatedAt: at, UpdatedAt: at},
+	}}
+	if err := c.ImportLocalMetadata(ctx, bundle); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ExportLocalMetadata(ctx, tracking.ExportOptions{Limit: 1}); !errors.Is(err, tracking.ErrExportTruncated) {
+		t.Fatalf("truncated export error = %v", err)
+	}
+	exported, err := c.ExportLocalMetadata(ctx, tracking.ExportOptions{Limit: 2})
+	if err != nil || len(exported.TriageEvents) != 2 {
+		t.Fatalf("exact-limit export = (%+v, %v)", exported, err)
+	}
+}
 
 func TestTrackingMigrationCreatesTables(t *testing.T) {
 	t.Parallel()

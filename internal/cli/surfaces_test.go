@@ -3,6 +3,7 @@ package cli_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"slices"
 	"strings"
@@ -433,5 +434,21 @@ func TestExportCommandWritesContent(t *testing.T) {
 	requireNoErr(t, c.Run(context.Background(), []string{"export", "dossier", "o/r"}))
 	if !svc.exportCalled || stdout.String() != "# dossier\n" {
 		t.Fatalf("export output = %q", stdout.String())
+	}
+}
+
+func TestExportDossierReturnsServiceErrorWithoutOutput(t *testing.T) {
+	t.Parallel()
+	wantErr := errors.New("export failed")
+	svc := &fakeSurfacesService{fakeService: &fakeService{err: wantErr}}
+	c, stdout, _ := newSurfacesCLI(svc)
+
+	err := c.Run(context.Background(), []string{"export", "dossier", "o/r"})
+
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("error = %v, want %v", err, wantErr)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("output = %q, want empty", stdout.String())
 	}
 }

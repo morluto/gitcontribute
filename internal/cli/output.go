@@ -561,6 +561,9 @@ func concernHuman(r *ConcernResult) string {
 func concernListHuman(r *ConcernListResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Concerns: %d", r.Total)
+	if r.Truncated {
+		fmt.Fprintf(&b, " (showing %d; limit %d)", len(r.Concerns), r.Limit)
+	}
 	for _, item := range r.Concerns {
 		fmt.Fprintf(&b, "\n- %s [%s] %s (%s)", item.ID, item.Status, item.Title, item.Repo)
 	}

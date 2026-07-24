@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/morluto/gitcontribute/internal/corpus"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // FindPortfolioOverlaps is a pure corpus read over complete normalized signal

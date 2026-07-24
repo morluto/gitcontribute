@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/managedbinary"
 	_ "modernc.org/sqlite"
 )
@@ -112,7 +112,7 @@ func TestUpgradeUsesSemanticVersionOrdering(t *testing.T) {
 func TestDetectInstallContextDefaultsOther(t *testing.T) {
 	t.Setenv("npm_command", "")
 	t.Setenv("npm_lifecycle_event", "")
-	if got := detectInstallContext(context.Background()); got == "npx" {
+	if got := discoverInstallation(context.Background()).context; got == "npx" {
 		t.Fatalf("context = %s", got)
 	}
 }

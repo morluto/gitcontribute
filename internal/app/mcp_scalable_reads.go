@@ -9,11 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/github"
-	"github.com/morluto/gitcontribute/internal/mcpserver"
+	mcpserver "github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/precedent"
 	"github.com/morluto/gitcontribute/internal/radar"
 	"github.com/morluto/gitcontribute/internal/ranking"
@@ -176,8 +177,7 @@ func (r *MCPReader) GetJobs(ctx context.Context, in mcpserver.GetJobsInput) (mcp
 		item := mcpserver.BatchItem[mcpserver.GetJobOutput]{Key: id, Status: "complete"}
 		job, err := r.GetJob(ctx, mcpserver.GetJobInput{ID: id})
 		if err != nil {
-			var cliErr *cli.CLIError
-			if errors.As(err, &cliErr) && cliErr.Code == cli.ExitNotFound {
+			if failure.Is(err, failure.KindNotFound) {
 				item.Status, item.Reason = "unavailable", "not_found"
 			} else {
 				item.Status, item.Reason = "failed", "read_failed"

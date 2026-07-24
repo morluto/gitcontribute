@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/clustering"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
@@ -295,12 +295,15 @@ type PullRequestCollision struct {
 
 // PullRequestCollisionResult is the response for a focused open-PR collision query.
 type PullRequestCollisionResult struct {
-	Repo           string                 `json:"repo"`
-	Number         int                    `json:"number"`
-	Limit          int                    `json:"limit"`
-	Total          int                    `json:"total"`
-	SourceRevision string                 `json:"source_revision"`
-	Collisions     []PullRequestCollision `json:"collisions"`
+	Repo             string                 `json:"repo"`
+	Number           int                    `json:"number"`
+	Limit            int                    `json:"limit"`
+	Total            int                    `json:"total"`
+	Truncated        bool                   `json:"truncated"`
+	Population       int                    `json:"population"`
+	PopulationCapped bool                   `json:"population_capped"`
+	SourceRevision   string                 `json:"source_revision"`
+	Collisions       []PullRequestCollision `json:"collisions"`
 }
 
 // PullRequestCollisions returns a bounded, ranked list of open pull requests
@@ -345,7 +348,11 @@ func (s *Service) PullRequestCollisions(ctx context.Context, repo cli.RepoRef, n
 	queryBase := parsePRBaseRef(queryPayload)
 	queryRefs := clustering.ExtractMemberRefs(query.Title+"\n"+query.Body, dref)
 
-	prs, err := c.ListThreads(ctx, repository.ID, corpus.ThreadKindPullRequest, maxCandidateLimit)
+	population, err := c.CountThreadsFiltered(ctx, repository.ID, corpus.ThreadKindPullRequest, "open")
+	if err != nil {
+		return nil, err
+	}
+	prs, err := c.ListThreadsFiltered(ctx, repository.ID, corpus.ThreadKindPullRequest, "open", maxCandidateLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -356,9 +363,6 @@ func (s *Service) PullRequestCollisions(ctx context.Context, repo cli.RepoRef, n
 
 	for _, t := range prs {
 		if t.Number == number {
-			continue
-		}
-		if t.State != "open" {
 			continue
 		}
 		all = append(all, candidateFromThread(*repository, t))
@@ -389,17 +393,22 @@ func (s *Service) PullRequestCollisions(ctx context.Context, repo cli.RepoRef, n
 	if limit > maxResultLimit {
 		return nil, fmt.Errorf("collision limit cannot exceed %d", maxResultLimit)
 	}
-	if len(collisions) > limit {
+	total := len(collisions)
+	truncated := total > limit
+	if truncated {
 		collisions = collisions[:limit]
 	}
 
 	return &PullRequestCollisionResult{
-		Repo:           dref.String(),
-		Number:         number,
-		Limit:          limit,
-		Total:          len(collisions),
-		SourceRevision: clustering.SourceRevision(all),
-		Collisions:     collisions,
+		Repo:             dref.String(),
+		Number:           number,
+		Limit:            limit,
+		Total:            total,
+		Truncated:        truncated,
+		Population:       len(prs),
+		PopulationCapped: population > len(prs),
+		SourceRevision:   clustering.SourceRevision(all),
+		Collisions:       collisions,
 	}, nil
 }
 
@@ -748,7 +757,7 @@ func candidateFromOpportunity(o *investigation.Opportunity, repo domain.RepoRef)
 	return clustering.Candidate{Repo: repo, Title: o.Title, Body: body}
 }
 
-func evidenceFromNeighbor(n clustering.Neighbor, repo domain.RepoRef, investigationID, hypothesisID, opportunityID string, relation evidence.Relation) evidence.Evidence {
+func evidenceFromNeighbor(n clustering.Neighbor, _ domain.RepoRef, investigationID, hypothesisID, opportunityID string, relation evidence.Relation) evidence.Evidence {
 	path := "issues"
 	if strings.EqualFold(n.Ref.Kind, corpus.ThreadKindPullRequest) {
 		path = "pull"

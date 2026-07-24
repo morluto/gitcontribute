@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -22,7 +21,7 @@ func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest)
 		uri: uri, scheme: u.Scheme, host: u.Host,
 		parts: strings.Split(strings.Trim(u.Path, "/"), "/"),
 	})
-	if errors.Is(err, ErrNotFound) {
+	if isNotFound(err) {
 		return nil, mcp.ResourceNotFoundError(uri)
 	}
 	if err != nil {

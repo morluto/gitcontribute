@@ -6,8 +6,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 )
 
 func TestPublicCorpusReadsDoNotCreateDatabase(t *testing.T) {

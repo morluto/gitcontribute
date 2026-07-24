@@ -19,7 +19,10 @@ func ExportDossierJSON(w io.Writer, d *domain.Dossier) error {
 	if d == nil {
 		return errors.New("dossier is nil")
 	}
-	rd := redact(d).(*domain.Dossier)
+	rd, ok := redact(d).(*domain.Dossier)
+	if !ok {
+		return errors.New("redacted dossier has unexpected type")
+	}
 	orderDossier(rd)
 	b, err := json.MarshalIndent(rd, "", "  ")
 	if err != nil {
@@ -35,7 +38,10 @@ func ExportDossierMarkdown(w io.Writer, d *domain.Dossier) error {
 	if d == nil {
 		return errors.New("dossier is nil")
 	}
-	rd := redact(d).(*domain.Dossier)
+	rd, ok := redact(d).(*domain.Dossier)
+	if !ok {
+		return errors.New("redacted dossier has unexpected type")
+	}
 	orderDossier(rd)
 	return writeDossierMarkdown(w, rd)
 }
@@ -46,7 +52,10 @@ func ExportEvidenceJSON(w io.Writer, e *cli.EvidenceResult) error {
 	if e == nil {
 		return errors.New("evidence result is nil")
 	}
-	re := redact(e).(*cli.EvidenceResult)
+	re, ok := redact(e).(*cli.EvidenceResult)
+	if !ok {
+		return errors.New("redacted evidence has unexpected type")
+	}
 	orderEvidence(re)
 	b, err := json.MarshalIndent(re, "", "  ")
 	if err != nil {
@@ -62,7 +71,10 @@ func ExportEvidenceMarkdown(w io.Writer, e *cli.EvidenceResult) error {
 	if e == nil {
 		return errors.New("evidence result is nil")
 	}
-	re := redact(e).(*cli.EvidenceResult)
+	re, ok := redact(e).(*cli.EvidenceResult)
+	if !ok {
+		return errors.New("redacted evidence has unexpected type")
+	}
 	orderEvidence(re)
 	return writeEvidenceMarkdown(w, re)
 }

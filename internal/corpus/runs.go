@@ -133,7 +133,7 @@ func (c *Corpus) ListRuns(ctx context.Context, limit int) ([]Run, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []Run
 	for rows.Next() {
@@ -167,7 +167,7 @@ func (c *Corpus) ListRunEvents(ctx context.Context, runID int64) ([]RunEvent, er
 	if err != nil {
 		return nil, fmt.Errorf("list run events: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []RunEvent
 	for rows.Next() {

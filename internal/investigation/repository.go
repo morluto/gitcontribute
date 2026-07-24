@@ -15,9 +15,11 @@ type Repository interface {
 	GetInvestigation(ctx context.Context, id string) (*Investigation, error)
 	ListInvestigations(ctx context.Context) ([]*Investigation, error)
 	SaveHypothesis(ctx context.Context, h *Hypothesis) error
+	UpdateHypothesis(ctx context.Context, previous, next *Hypothesis) error
 	GetHypothesis(ctx context.Context, id string) (*Hypothesis, error)
 	ListHypotheses(ctx context.Context, investigationID string) ([]*Hypothesis, error)
 	SaveOpportunity(ctx context.Context, o *Opportunity) error
+	UpdateOpportunity(ctx context.Context, previous, next *Opportunity, blockContradicting bool) error
 	PromoteHypothesisWithEvidence(ctx context.Context, h *Hypothesis, o *Opportunity, e *evidence.Evidence) error
 	GetOpportunity(ctx context.Context, id string) (*Opportunity, error)
 	ListOpportunities(ctx context.Context, investigationID string) ([]*Opportunity, error)

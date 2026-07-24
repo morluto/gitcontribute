@@ -135,7 +135,7 @@ func insertDossierSourcesTx(ctx context.Context, tx *sql.Tx, dossierID int64, so
 	if err != nil {
 		return fmt.Errorf("prepare dossier sources: %w", err)
 	}
-	defer stmt.Close()
+	defer func() { _ = stmt.Close() }()
 
 	for _, src := range sources {
 		_, err := stmt.ExecContext(ctx, dossierID, src.Source, src.URL, src.CommitSHA, encodeTime(src.ObservedAt), encodeTime(src.AsOf))
@@ -203,7 +203,7 @@ func getDossierSourcesQuery(ctx context.Context, q queryer, dossierID int64) ([]
 	if err != nil {
 		return nil, fmt.Errorf("list dossier sources: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []DossierSource
 	for rows.Next() {
@@ -221,7 +221,7 @@ func getDossierSourcesQuery(ctx context.Context, q queryer, dossierID int64) ([]
 
 func dossierContentDigest(commitSHA, sectionMetadata, snapshot string, sources []domain.SourceRef) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "commit_sha:%s\nsection_metadata:%s\nsnapshot:%s\n", commitSHA, sectionMetadata, snapshot)
+	_, _ = fmt.Fprintf(h, "commit_sha:%s\nsection_metadata:%s\nsnapshot:%s\n", commitSHA, sectionMetadata, snapshot)
 
 	sorted := make([]domain.SourceRef, len(sources))
 	copy(sorted, sources)
@@ -244,7 +244,7 @@ func dossierContentDigest(commitSHA, sectionMetadata, snapshot string, sources [
 	})
 
 	for _, s := range sorted {
-		fmt.Fprintf(h, "source:%s\nurl:%s\ncommit_sha:%s\nobserved_at:%d\nas_of:%d\n", s.Source, s.URL, s.CommitSHA, encodeTime(s.ObservedAt), encodeTime(s.AsOf))
+		_, _ = fmt.Fprintf(h, "source:%s\nurl:%s\ncommit_sha:%s\nobserved_at:%d\nas_of:%d\n", s.Source, s.URL, s.CommitSHA, encodeTime(s.ObservedAt), encodeTime(s.AsOf))
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -273,7 +273,7 @@ func (c *Corpus) ListDossiers(ctx context.Context, limit int) ([]DossierRecord, 
 	if err != nil {
 		return nil, fmt.Errorf("list dossiers: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []DossierRecord
 	for rows.Next() {

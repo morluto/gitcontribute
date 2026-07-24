@@ -172,7 +172,7 @@ func (c *Corpus) ListRepositoryObservations(ctx context.Context, repoID int64) (
 	if err != nil {
 		return nil, fmt.Errorf("list repository observations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []RepositoryObservation
 	for rows.Next() {
@@ -407,7 +407,7 @@ func (c *Corpus) ListThreads(ctx context.Context, repoID int64, kind string, lim
 	if err != nil {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return scanThreads(rows)
 }
@@ -445,7 +445,7 @@ func (c *Corpus) ListThreadsFiltered(ctx context.Context, repoID int64, kind, st
 	if err != nil {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return scanThreads(rows)
 }
@@ -604,7 +604,7 @@ func (c *Corpus) ListThreadObservations(ctx context.Context, threadID int64) ([]
 	if err != nil {
 		return nil, fmt.Errorf("list thread observations: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []ThreadObservation
 	for rows.Next() {

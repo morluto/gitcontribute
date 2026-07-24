@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 
@@ -89,5 +90,9 @@ func Run(ctx context.Context, reader Reader, input io.Reader, output io.Writer) 
 	if err != nil {
 		return Model{}, err
 	}
-	return final.(Model), nil
+	model, ok := final.(Model)
+	if !ok {
+		return Model{}, fmt.Errorf("unexpected terminal model %T", final)
+	}
+	return model, nil
 }

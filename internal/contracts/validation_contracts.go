@@ -1,7 +1,8 @@
-package cli
+package contracts
 
 import (
 	"context"
+
 	"time"
 )
 
@@ -212,4 +213,51 @@ type ValidationComparisonResult struct {
 	Candidate      *ValidationRunResult `json:"candidate"`
 	Classification string               `json:"classification"`
 	Explanation    string               `json:"explanation"`
+}
+
+// ValidationExpectedObservation is one assertion over captured output or a declared artifact.
+type ValidationExpectedObservation struct {
+	Name       string `json:"name"`
+	Source     string `json:"source"`
+	Matcher    string `json:"matcher"`
+	Pattern    string `json:"pattern"`
+	Occurrence string `json:"occurrence"`
+	Path       string `json:"path,omitempty"`
+}
+
+// ValidationObservationContract ties output assertions to a proof intent.
+type ValidationObservationContract struct {
+	Intent    string                          `json:"intent"`
+	Base      []ValidationExpectedObservation `json:"base,omitempty"`
+	Candidate []ValidationExpectedObservation `json:"candidate,omitempty"`
+}
+
+// ValidationObservationResult records one evaluated output assertion.
+type ValidationObservationResult struct {
+	ValidationExpectedObservation
+	Status  string `json:"status"`
+	Excerpt string `json:"excerpt,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (r RepoRef) String() string { return r.Owner + "/" + r.Repo }
+
+// InstallsCLI reports whether setup should install the global command.
+func (m SetupMode) InstallsCLI() bool { return m == SetupModeCLI || m == SetupModeBoth }
+
+// ConfiguresMCP reports whether setup should register coding-agent access.
+func (m SetupMode) ConfiguresMCP() bool { return m == SetupModeMCP || m == SetupModeBoth }
+
+// HasFailures reports whether setup could not produce a usable result. A nil
+// report is a failure because callers cannot verify any planned or applied step.
+func (r *SetupReport) HasFailures() bool {
+	if r == nil {
+		return true
+	}
+	for _, step := range r.Steps {
+		if step.Status == "failed" {
+			return true
+		}
+	}
+	return false
 }

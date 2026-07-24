@@ -353,7 +353,7 @@ func gitBlob(ctx context.Context, repoPath, object string, size int) ([]byte, er
 		return nil, fmt.Errorf("read Git blob %s: %w", object, err)
 	}
 	if len(out) != size {
-		return nil, fmt.Errorf("Git blob %s size changed: got %d, want %d", object, len(out), size)
+		return nil, fmt.Errorf("git blob %s size changed: got %d, want %d", object, len(out), size)
 	}
 	return []byte(out), nil
 }
@@ -363,7 +363,7 @@ func isHexObjectID(value string) bool {
 		return false
 	}
 	for _, char := range value {
-		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
 			return false
 		}
 	}

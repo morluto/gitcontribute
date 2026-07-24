@@ -26,6 +26,11 @@ jobs:
       - run: go test ./...
       - run: go vet ./...
       - run: test -z "$(gofmt -l .)"
+      - name: Verify release version
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: node scripts/verify-release-version.mjs "${VERSION#v}"
       - run: npm run test:npm
 
   build-npm-binaries:

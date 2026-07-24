@@ -169,7 +169,7 @@ func (c *Corpus) SavePortfolioLink(ctx context.Context, link PortfolioLink) (*Po
 func (c *Corpus) ListPortfolioLinks(ctx context.Context) (out []PortfolioLink, err error) {
 	rows, err := c.db.QueryContext(ctx, `
 		SELECT id, pull_request_thread_id, COALESCE(opportunity_id, ''), COALESCE(workspace_id, ''), created_at
-		FROM portfolio_links ORDER BY pull_request_thread_id, opportunity_id, workspace_id, id LIMIT 10000
+		FROM portfolio_links ORDER BY pull_request_thread_id, opportunity_id, workspace_id, id
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("list portfolio links: %w", err)

@@ -22,7 +22,7 @@ help:
 	@echo "  make check         fast formatting, test, and changed-code lint checks"
 	@echo "  make verify        complete uncached local validation"
 	@echo "  make test-race     focused race tests for stateful packages"
-	@echo "  make lint-full     audit the complete repository, including existing debt"
+	@echo "  make lint-full     enforce the complete repository lint baseline"
 	@echo "  make fmt           format all Go packages"
 	@echo "  make generate      refresh generated outputs"
 	@echo "  make install-tools install the pinned golangci-lint version"
@@ -122,4 +122,4 @@ docs-check:
 
 check: fmt-check test lint-changed
 
-verify: fmt-check test-uncached lint tidy-check generate-check docs-check
+verify: fmt-check test-uncached lint-full tidy-check generate-check docs-check

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/commitplan"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 )
 
 func TestSemanticCommitPlanUsesFrozenWorkspaceSnapshot(t *testing.T) {

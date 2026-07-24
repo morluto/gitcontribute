@@ -59,33 +59,15 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
-      - name: Resolve lint comparison base
-        id: lint-base
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PUSH_BEFORE: ${{ github.event.before }}
-        run: |
-          base=$PUSH_BEFORE
-          if [[ $EVENT_NAME == pull_request ]]; then
-            base=$PR_BASE
-          fi
-          if [[ -z $base || $base =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}"; then
-            base=$(git rev-list --max-parents=0 HEAD)
-          fi
-          echo "sha=$base" >> "$GITHUB_OUTPUT"
       - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.12.2
-          args: --timeout=5m --new-from-rev=${{ steps.lint-base.outputs.sha }}
+          args: --timeout=5m
 
   check-large-files:
     name: Check file sizes

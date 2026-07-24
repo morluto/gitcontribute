@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/config"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 )
 
@@ -392,6 +392,9 @@ func TestPullRequestCollisions(t *testing.T) {
 	if len(res.Collisions) != 2 {
 		t.Fatalf("collisions = %d, want 2: %+v", len(res.Collisions), res.Collisions)
 	}
+	if res.Total != 2 || res.Truncated || res.Population != 4 || res.PopulationCapped {
+		t.Fatalf("collision bounds = %+v", res)
+	}
 
 	want := []struct {
 		number int
@@ -421,6 +424,9 @@ func TestPullRequestCollisions(t *testing.T) {
 	}
 	if len(limited.Collisions) != 1 || limited.Collisions[0].Number != 2 {
 		t.Fatalf("limited collisions = %+v", limited.Collisions)
+	}
+	if limited.Total != 2 || !limited.Truncated || limited.Population != 4 || limited.PopulationCapped {
+		t.Fatalf("limited collision bounds = %+v", limited)
 	}
 
 	closed, err := svc.PullRequestCollisions(ctx, cli.RepoRef{Owner: "owner", Repo: "repo"}, 4, 10)

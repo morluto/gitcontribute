@@ -11,4 +11,7 @@ var (
 	ErrInvalidTransition = errors.New("invalid concern status transition")
 	// ErrInvalidLink indicates a malformed or unsupported relationship.
 	ErrInvalidLink = errors.New("invalid concern link")
+	// ErrConflict indicates that a caller tried to replace a revision it no
+	// longer owns.
+	ErrConflict = errors.New("concern changed concurrently")
 )

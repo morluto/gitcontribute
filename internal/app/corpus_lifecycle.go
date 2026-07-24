@@ -7,9 +7,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/failure"
 )
 
 // InspectCorpus reports corpus compatibility without mutation.
@@ -37,7 +38,7 @@ func (s *Service) InventoryCorpus(ctx context.Context, repo string) (*cli.Corpus
 	}
 	inv, err := c.Inventory(ctx, ref.Owner, ref.Repo)
 	if errors.Is(err, corpus.ErrRepositoryNotFound) {
-		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %s is not stored", repo))
+		return nil, failure.NotFound(fmt.Errorf("repository %s is not stored", repo))
 	}
 	if err != nil {
 		return nil, err
@@ -192,13 +193,13 @@ func (s *Service) PlanRepositoryRemoval(ctx context.Context, repo string) (*cli.
 	}
 	plan, err := c.PlanRepositoryRemoval(ctx, ref)
 	if errors.Is(err, corpus.ErrRepositoryNotFound) {
-		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %s is not stored", repo))
+		return nil, failure.NotFound(fmt.Errorf("repository %s is not stored", repo))
 	}
 	if err != nil {
 		return nil, err
 	}
 	if plan == nil {
-		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %s is not stored", repo))
+		return nil, failure.NotFound(fmt.Errorf("repository %s is not stored", repo))
 	}
 	return repositoryRemovalResult(plan, true), nil
 }
@@ -215,13 +216,13 @@ func (s *Service) ApplyRepositoryRemoval(ctx context.Context, repo, expectedRevi
 	}
 	plan, err := c.PlanRepositoryRemoval(ctx, ref)
 	if errors.Is(err, corpus.ErrRepositoryNotFound) {
-		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %s is not stored", repo))
+		return nil, failure.NotFound(fmt.Errorf("repository %s is not stored", repo))
 	}
 	if err != nil {
 		return nil, err
 	}
 	if plan == nil {
-		return nil, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("repository %s is not stored", repo))
+		return nil, failure.NotFound(fmt.Errorf("repository %s is not stored", repo))
 	}
 	if plan.Revision != expectedRevision {
 		return nil, corpus.ErrRepositoryRemovalPlanStale

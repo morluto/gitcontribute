@@ -28,6 +28,28 @@ func TestKeyedLocksReleaseUnusedEntries(t *testing.T) {
 	}
 }
 
+func TestNewManagerProtectsExistingAcquisitionRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX directory modes are not available on Windows")
+	}
+	root := filepath.Join(t.TempDir(), "acquisitions")
+	if err := os.Mkdir(root, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := NewManager(root, &countingRunner{}); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := info.Mode().Perm(); got != 0700 {
+		t.Fatalf("acquisition root mode = %o, want 700", got)
+	}
+}
+
 func TestValidateRemoteRejectsCredentialsAndPreservesSSH(t *testing.T) {
 	sshUser := strings.Join([]string{"g", "it"}, "")
 	valid := []string{

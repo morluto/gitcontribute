@@ -23,6 +23,10 @@ type dbExecer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
+type dbQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
 var _ tracking.Repository = (*Corpus)(nil)
 
 // RecordTriageEvent stores a triage event with optional foreign-key-safe links.
@@ -69,6 +73,52 @@ func (c *Corpus) recordTriageEventTx(ctx context.Context, db dbExecer, e *tracki
 		return fmt.Errorf("record triage event: %w", err)
 	}
 	return nil
+}
+
+func (c *Corpus) importTriageEventTx(ctx context.Context, tx *sql.Tx, e *tracking.TriageEvent) error {
+	createdAt := encodeTime(e.CreatedAt)
+	updatedAt := encodeTime(e.UpdatedAt)
+	sourceEventAt := encodeTime(e.SourceEventAt)
+	result, err := tx.ExecContext(ctx, `
+		INSERT INTO triage_events (id, target_kind, target_ref, outcome, reason, lens, source_event_at, created_at, updated_at, repository_id, thread_id, investigation_id, opportunity_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (id) DO UPDATE SET
+			target_kind=excluded.target_kind, target_ref=excluded.target_ref,
+			outcome=excluded.outcome, reason=excluded.reason, lens=excluded.lens,
+			source_event_at=excluded.source_event_at, created_at=excluded.created_at,
+			updated_at=excluded.updated_at, repository_id=excluded.repository_id,
+			thread_id=excluded.thread_id, investigation_id=excluded.investigation_id,
+			opportunity_id=excluded.opportunity_id
+		WHERE excluded.updated_at > triage_events.updated_at
+	`, e.ID, string(e.TargetKind), e.TargetRef, string(e.Outcome), e.Reason, e.Lens,
+		sourceEventAt, createdAt, updatedAt, nullInt64(e.RepositoryID), nullInt64(e.ThreadID),
+		nullString(e.InvestigationID), nullString(e.OpportunityID))
+	if err != nil {
+		return fmt.Errorf("import triage event: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed == 1 {
+		return err
+	}
+	var storedUpdatedAt int64
+	var same int
+	err = tx.QueryRowContext(ctx, `
+		SELECT updated_at,
+		       target_kind=? AND target_ref=? AND outcome=? AND reason=? AND lens=?
+		       AND source_event_at=? AND created_at=?
+		       AND repository_id IS ? AND thread_id IS ?
+		       AND investigation_id IS ? AND opportunity_id IS ?
+		FROM triage_events WHERE id=?
+	`, string(e.TargetKind), e.TargetRef, string(e.Outcome), e.Reason, e.Lens,
+		sourceEventAt, createdAt, nullInt64(e.RepositoryID), nullInt64(e.ThreadID),
+		nullString(e.InvestigationID), nullString(e.OpportunityID), e.ID).Scan(&storedUpdatedAt, &same)
+	if err != nil {
+		return err
+	}
+	if updatedAt < storedUpdatedAt || same != 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: triage event %q has different equal-timestamp content", tracking.ErrImportConflict, e.ID)
 }
 
 func resolveTriageLinks(ctx context.Context, c *Corpus, e *tracking.TriageEvent) error {
@@ -236,7 +286,7 @@ func (c *Corpus) ListTriageEvents(ctx context.Context, filter tracking.TriageEve
 	if err != nil {
 		return nil, fmt.Errorf("list triage events: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []*tracking.TriageEvent
 	for rows.Next() {
@@ -325,6 +375,51 @@ func (c *Corpus) saveContributionTx(ctx context.Context, db dbExecer, item *trac
 	return nil
 }
 
+func (c *Corpus) importContributionTx(ctx context.Context, tx *sql.Tx, item *tracking.Contribution) error {
+	payload, err := marshalContributionPayload(item.Metadata)
+	if err != nil {
+		return err
+	}
+	createdAt, updatedAt := encodeTime(item.CreatedAt), encodeTime(item.UpdatedAt)
+	preparedAt, submittedAt := encodeTime(item.PreparedAt), encodeOptionalTime(item.SubmittedAt)
+	result, err := tx.ExecContext(ctx, `
+		INSERT INTO contributions (id, opportunity_id, kind, title, body, reference, reference_url, prepared_at, submitted_at, created_at, updated_at, payload)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (id) DO UPDATE SET
+			opportunity_id=excluded.opportunity_id, kind=excluded.kind,
+			title=excluded.title, body=excluded.body, reference=excluded.reference,
+			reference_url=excluded.reference_url, prepared_at=excluded.prepared_at,
+			submitted_at=excluded.submitted_at, updated_at=excluded.updated_at,
+			payload=excluded.payload
+		WHERE excluded.updated_at > contributions.updated_at
+	`, item.ID, item.OpportunityID, item.Kind, item.Title, item.Body, item.Reference,
+		item.ReferenceURL, preparedAt, submittedAt, createdAt, updatedAt, payload)
+	if err != nil {
+		return fmt.Errorf("import contribution: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed == 1 {
+		return err
+	}
+	var storedUpdatedAt int64
+	var same int
+	err = tx.QueryRowContext(ctx, `
+		SELECT updated_at,
+		       opportunity_id=? AND kind=? AND title=? AND body=?
+		       AND reference=? AND reference_url=? AND prepared_at=?
+		       AND submitted_at IS ? AND created_at=? AND payload=?
+		FROM contributions WHERE id=?
+	`, item.OpportunityID, item.Kind, item.Title, item.Body, item.Reference,
+		item.ReferenceURL, preparedAt, submittedAt, createdAt, payload, item.ID).Scan(&storedUpdatedAt, &same)
+	if err != nil {
+		return err
+	}
+	if updatedAt < storedUpdatedAt || same != 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: contribution %q has different equal-timestamp content", tracking.ErrImportConflict, item.ID)
+}
+
 func marshalContributionPayload(metadata map[string]any) (string, error) {
 	if metadata == nil {
 		return "{}", nil
@@ -384,7 +479,7 @@ func (c *Corpus) ListContributions(ctx context.Context, filter tracking.Contribu
 	if err != nil {
 		return nil, fmt.Errorf("list contributions: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []*tracking.Contribution
 	for rows.Next() {
@@ -472,6 +567,34 @@ func (c *Corpus) recordContributionOutcomeTx(ctx context.Context, db dbExecer, o
 	return nil
 }
 
+func (c *Corpus) importContributionOutcomeTx(ctx context.Context, tx *sql.Tx, o *tracking.ContributionOutcome) error {
+	createdAt, sourceEventAt := encodeTime(o.CreatedAt), encodeTime(o.SourceEventAt)
+	result, err := tx.ExecContext(ctx, `
+		INSERT INTO contribution_outcomes (id, contribution_id, outcome, reason, source_event_at, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT (id) DO NOTHING
+	`, o.ID, o.ContributionID, string(o.Outcome), o.Reason, sourceEventAt, createdAt)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed == 1 {
+		return err
+	}
+	var same int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT contribution_id=? AND outcome=? AND reason=?
+		       AND source_event_at=? AND created_at=?
+		FROM contribution_outcomes WHERE id=?
+	`, o.ContributionID, string(o.Outcome), o.Reason, sourceEventAt, createdAt, o.ID).Scan(&same); err != nil {
+		return err
+	}
+	if same == 0 {
+		return fmt.Errorf("%w: contribution outcome %q has different content", tracking.ErrImportConflict, o.ID)
+	}
+	return nil
+}
+
 // ListContributionOutcomes returns outcomes for a contribution.
 func (c *Corpus) ListContributionOutcomes(ctx context.Context, contributionID string) ([]*tracking.ContributionOutcome, error) {
 	rows, err := c.db.QueryContext(ctx, `
@@ -483,7 +606,7 @@ func (c *Corpus) ListContributionOutcomes(ctx context.Context, contributionID st
 	if err != nil {
 		return nil, fmt.Errorf("list contribution outcomes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []*tracking.ContributionOutcome
 	for rows.Next() {
@@ -510,191 +633,90 @@ func (c *Corpus) ExportLocalMetadata(ctx context.Context, opts tracking.ExportOp
 		return nil, fmt.Errorf("export limit cannot exceed 100000")
 	}
 
-	bundle := &tracking.Bundle{SchemaVersion: tracking.CurrentBundleSchemaVersion}
-
-	triageEvents, err := c.ListTriageEvents(ctx, tracking.TriageEventFilter{Limit: limit})
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return nil, err
-	}
-	bundle.TriageEvents = triageEvents
-
-	contributions, err := c.ListContributions(ctx, tracking.ContributionFilter{Limit: limit})
-	if err != nil {
-		return nil, err
-	}
-	bundle.Contributions = contributions
-
-	if err := c.exportContributionOutcomes(ctx, bundle, limit); err != nil {
-		return nil, err
-	}
-	evidenceItems, err := c.ListEvidence(ctx, evidence.EvidenceFilter{})
-	if err != nil {
-		return nil, err
-	}
-	if len(evidenceItems) > limit {
-		evidenceItems = evidenceItems[:limit]
-	}
-	bundle.Evidence = evidenceItems
-
-	tracking.OrderBundle(bundle)
-	return tracking.SanitizeBundle(bundle), nil
-}
-
-func (c *Corpus) exportContributionOutcomes(ctx context.Context, bundle *tracking.Bundle, limit int) error {
-	rows, err := c.db.QueryContext(ctx, `
-		SELECT o.id, o.contribution_id, o.outcome, o.reason, o.source_event_at, o.created_at
-		FROM contribution_outcomes AS o
-		JOIN (
-			SELECT id FROM contributions ORDER BY prepared_at, id LIMIT ?
-		) AS selected ON selected.id = o.contribution_id
-		ORDER BY o.source_event_at, o.id
-		LIMIT ?
-	`, limit, limit)
-	if err != nil {
-		return fmt.Errorf("export contribution outcomes: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var o tracking.ContributionOutcome
-		var sourceEventAt, createdAt int64
-		if err := rows.Scan(&o.ID, &o.ContributionID, &o.Outcome, &o.Reason, &sourceEventAt, &createdAt); err != nil {
-			return err
-		}
-		o.SourceEventAt = scanTime(sourceEventAt)
-		o.CreatedAt = scanTime(createdAt)
-		bundle.ContributionOutcomes = append(bundle.ContributionOutcomes, &o)
-	}
-	return rows.Err()
-}
-
-// ImportLocalMetadata imports a bounded bundle idempotently. All writes happen
-// in a single transaction; any referential or database failure leaves the
-// corpus unchanged.
-func (c *Corpus) ImportLocalMetadata(ctx context.Context, bundle *tracking.Bundle) error {
-	if bundle == nil {
-		return errors.New("bundle is required")
-	}
-	for i, e := range bundle.TriageEvents {
-		if e == nil {
-			return fmt.Errorf("triage event %d is null", i)
-		}
-	}
-	for i, item := range bundle.Contributions {
-		if item == nil {
-			return fmt.Errorf("contribution %d is null", i)
-		}
-	}
-	for i, o := range bundle.ContributionOutcomes {
-		if o == nil {
-			return fmt.Errorf("contribution outcome %d is null", i)
-		}
-	}
-	for i, item := range bundle.Evidence {
-		if item == nil {
-			return fmt.Errorf("evidence %d is null", i)
-		}
-		if err := c.validateImportedEvidenceScope(ctx, item); err != nil {
-			return fmt.Errorf("resolve evidence %q scope: %w", item.ID, err)
-		}
-	}
-
-	// Resolve triage links and validate contribution/outcome references outside
-	// the write transaction so the transaction contains only upserts and can be
-	// rolled back atomically on any failure.
-	resolvedEvents := make([]*tracking.TriageEvent, len(bundle.TriageEvents))
-	for i, e := range bundle.TriageEvents {
-		cp := *e
-		if err := resolveTriageLinks(ctx, c, &cp); err != nil {
-			return fmt.Errorf("resolve triage event %q: %w", cp.ID, err)
-		}
-		resolvedEvents[i] = &cp
-	}
-
-	for _, item := range bundle.Contributions {
-		if _, err := c.GetOpportunity(ctx, item.OpportunityID); err != nil {
-			if errors.Is(err, investigation.ErrNotFound) {
-				return fmt.Errorf("opportunity %q not found for contribution %q", item.OpportunityID, item.ID)
-			}
-			return fmt.Errorf("resolve contribution %q opportunity: %w", item.ID, err)
-		}
-	}
-
-	contributionIDs := make(map[string]struct{}, len(bundle.Contributions))
-	for _, item := range bundle.Contributions {
-		contributionIDs[item.ID] = struct{}{}
-	}
-	for _, o := range bundle.ContributionOutcomes {
-		if _, ok := contributionIDs[o.ContributionID]; ok {
-			continue
-		}
-		contrib, err := c.GetContribution(ctx, o.ContributionID)
-		if err != nil {
-			return fmt.Errorf("resolve outcome %q contribution: %w", o.ID, err)
-		}
-		if contrib == nil {
-			return fmt.Errorf("contribution %q not found for outcome %q", o.ContributionID, o.ID)
-		}
-	}
-	tx, err := c.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin import local metadata: %w", err)
+		return nil, fmt.Errorf("begin tracking export snapshot: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	for _, e := range resolvedEvents {
-		if err := c.recordTriageEventTx(ctx, tx, e); err != nil {
-			return fmt.Errorf("import triage event %q: %w", e.ID, err)
+	for _, recordClass := range []struct {
+		name  string
+		table string
+	}{
+		{"triage events", "triage_events"},
+		{"contributions", "contributions"},
+		{"contribution outcomes", "contribution_outcomes"},
+		{"evidence", "evidence"},
+	} {
+		var total int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+recordClass.table).Scan(&total); err != nil {
+			return nil, fmt.Errorf("count %s: %w", recordClass.name, err)
 		}
-	}
-	for _, item := range bundle.Contributions {
-		if err := c.saveContributionTx(ctx, tx, item); err != nil {
-			return fmt.Errorf("import contribution %q: %w", item.ID, err)
-		}
-	}
-	for _, o := range bundle.ContributionOutcomes {
-		if err := c.recordContributionOutcomeTx(ctx, tx, o); err != nil {
-			return fmt.Errorf("import contribution outcome %q: %w", o.ID, err)
-		}
-	}
-	for _, item := range bundle.Evidence {
-		if err := c.saveEvidenceTx(ctx, tx, item); err != nil {
-			return fmt.Errorf("import evidence %q: %w", item.ID, err)
+		if total > limit {
+			return nil, fmt.Errorf("%w: %s total %d exceeds limit %d", tracking.ErrExportTruncated, recordClass.name, total, limit)
 		}
 	}
 
+	bundle := &tracking.Bundle{SchemaVersion: tracking.CurrentBundleSchemaVersion}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id, target_kind, target_ref, outcome, reason, lens, source_event_at,
+		       created_at, updated_at, repository_id, thread_id, investigation_id, opportunity_id
+		FROM triage_events ORDER BY source_event_at, id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("export triage events: %w", err)
+	}
+	for rows.Next() {
+		item, scanErr := scanTriageEvent(rows)
+		if scanErr != nil {
+			_ = rows.Close()
+			return nil, scanErr
+		}
+		bundle.TriageEvents = append(bundle.TriageEvents, item)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	rows, err = tx.QueryContext(ctx, `
+		SELECT id, opportunity_id, kind, title, body, reference, reference_url,
+		       prepared_at, submitted_at, created_at, updated_at, payload
+		FROM contributions ORDER BY prepared_at, id
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("export contributions: %w", err)
+	}
+	for rows.Next() {
+		item, scanErr := scanContribution(rows)
+		if scanErr != nil {
+			_ = rows.Close()
+			return nil, scanErr
+		}
+		bundle.Contributions = append(bundle.Contributions, item)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	if err := c.exportContributionOutcomes(ctx, tx, bundle); err != nil {
+		return nil, err
+	}
+	bundle.Evidence, err = listEvidenceRows(ctx, tx, evidence.EvidenceFilter{}, 0)
+	if err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit import local metadata: %w", err)
+		return nil, fmt.Errorf("commit tracking export snapshot: %w", err)
 	}
-	return nil
-}
 
-func (c *Corpus) validateImportedEvidenceScope(ctx context.Context, item *evidence.Evidence) error {
-	if item.InvestigationID != "" {
-		if _, err := c.GetInvestigation(ctx, item.InvestigationID); err != nil {
-			return err
-		}
-	}
-	if item.HypothesisID != "" {
-		hypothesis, err := c.GetHypothesis(ctx, item.HypothesisID)
-		if err != nil {
-			return err
-		}
-		if item.InvestigationID != "" && hypothesis.InvestigationID != item.InvestigationID {
-			return errors.New("hypothesis belongs to another investigation")
-		}
-	}
-	if item.OpportunityID != "" {
-		opportunity, err := c.GetOpportunity(ctx, item.OpportunityID)
-		if err != nil {
-			return err
-		}
-		if item.InvestigationID != "" && opportunity.InvestigationID != item.InvestigationID {
-			return errors.New("opportunity belongs to another investigation")
-		}
-		if item.HypothesisID != "" && opportunity.HypothesisID != item.HypothesisID {
-			return errors.New("opportunity belongs to another hypothesis")
-		}
-	}
-	return nil
+	tracking.OrderBundle(bundle)
+	return tracking.SanitizeBundle(bundle), nil
 }

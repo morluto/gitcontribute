@@ -166,7 +166,7 @@ func (c *Corpus) ListCoverage(ctx context.Context, repoID int64, threadID *int64
 	if err != nil {
 		return nil, fmt.Errorf("list coverage: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []Coverage
 	for rows.Next() {

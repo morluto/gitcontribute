@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/acquire"
-	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/codeindex"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 )
 

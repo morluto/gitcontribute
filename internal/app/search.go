@@ -8,9 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/lens"
 )
 
@@ -163,7 +164,7 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 		RepoID: repoID, Repo: ref.String(), Kind: kind, State: opts.State, StateReason: opts.StateReason, Merged: opts.Merged, Author: opts.Author,
 		Association: opts.Association, Assignee: opts.Assignee,
 		Labels: opts.Labels, UpdatedAfter: opts.UpdatedAfter, Limit: opts.Limit, Cursor: opts.Cursor,
-		Sort: opts.Sort,
+		Sort: opts.Sort, MatchMode: opts.MatchMode,
 	}
 	page, err := c.SearchThreadsPage(ctx, query, filter)
 	if err != nil {
@@ -373,7 +374,7 @@ func (s *Service) searchWithLens(ctx context.Context, c *corpus.Corpus, query st
 		return searchResult{}, fmt.Errorf("load lens: %w", err)
 	}
 	if lensRecord == nil {
-		return searchResult{}, cli.NewCLIError(cli.ExitNotFound, fmt.Errorf("lens %q not found", opts.Lens))
+		return searchResult{}, failure.NotFound(fmt.Errorf("lens %q not found", opts.Lens))
 	}
 	def := lensRecord.Definition
 	matches, err := s.collectLensMatches(ctx, c, query, opts, now)
@@ -506,7 +507,7 @@ func threadKindFromSearchKind(kind string) string {
 	}
 }
 
-func (s *Service) collectThreadMatches(ctx context.Context, c *corpus.Corpus, query string, repoID int64, ref domain.RepoRef, kind string, opts cli.SearchOptions, now time.Time) ([]searchMatch, error) {
+func (s *Service) collectThreadMatches(ctx context.Context, c *corpus.Corpus, query string, repoID int64, ref domain.RepoRef, kind string, opts cli.SearchOptions, _ time.Time) ([]searchMatch, error) {
 	var out []searchMatch
 	cursor := ""
 	for len(out) < maxLensCandidates {
@@ -550,7 +551,7 @@ func (s *Service) collectRepositoryMatches(ctx context.Context, c *corpus.Corpus
 	return out, nil
 }
 
-func (s *Service) collectCodeMatches(ctx context.Context, c *corpus.Corpus, query string, ref domain.RepoRef, opts cli.SearchOptions) ([]searchMatch, error) {
+func (s *Service) collectCodeMatches(ctx context.Context, c *corpus.Corpus, query string, ref domain.RepoRef, _ cli.SearchOptions) ([]searchMatch, error) {
 	var out []searchMatch
 	cursor := ""
 	for len(out) < maxLensCandidates {

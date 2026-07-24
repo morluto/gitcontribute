@@ -29,6 +29,7 @@ type SearchFilter struct {
 	Limit        int
 	Cursor       string
 	Sort         string
+	MatchMode    string
 }
 
 // ThreadSearchPage is a paginated result of a thread keyword search.
@@ -120,8 +121,14 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 	if filter.Sort != "relevance" && filter.Sort != "updated" {
 		return ThreadSearchPage{}, errors.New("search sort must be relevance or updated")
 	}
+	if filter.MatchMode == "" {
+		filter.MatchMode = "all"
+	}
+	if filter.MatchMode != "all" && filter.MatchMode != "any" {
+		return ThreadSearchPage{}, errors.New("search match mode must be all or any")
+	}
 
-	ftsQuery := literalFTSQuery(query)
+	ftsQuery := literalFTSQueryMode(query, filter.MatchMode)
 	if ftsQuery == "" {
 		return ThreadSearchPage{}, nil
 	}
@@ -175,7 +182,7 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 	if err != nil {
 		return ThreadSearchPage{}, fmt.Errorf("search threads: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	threads, err := scanThreadsWithRank(rows)
 	if err != nil {
@@ -325,7 +332,7 @@ func threadFilterKey(filter SearchFilter) string {
 	slices.Sort(labels)
 	return strings.Join([]string{
 		strings.ToLower(filter.State), strings.ToLower(filter.StateReason), fmt.Sprint(filter.Merged), strings.ToLower(filter.Author), strings.ToLower(filter.Association), strings.ToLower(filter.Assignee), strings.Join(labels, ","),
-		strconv.FormatInt(encodeTime(filter.UpdatedAfter), 10), filter.Sort,
+		strconv.FormatInt(encodeTime(filter.UpdatedAfter), 10), filter.Sort, filter.MatchMode,
 	}, "|")
 }
 
@@ -374,9 +381,16 @@ func scanThreadsWithRank(rows *sql.Rows) ([]Thread, error) {
 // literalFTSQuery treats user input as terms rather than exposing FTS5 query
 // operators. This keeps ordinary punctuation and unmatched quotes searchable.
 func literalFTSQuery(query string) string {
+	return literalFTSQueryMode(query, "all")
+}
+
+func literalFTSQueryMode(query, mode string) string {
 	terms := strings.Fields(query)
 	for i, term := range terms {
 		terms[i] = quoteFTSTerm(term)
+	}
+	if mode == "any" {
+		return strings.Join(terms, " OR ")
 	}
 	return strings.Join(terms, " ")
 }

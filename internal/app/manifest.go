@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/contribution"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -21,6 +21,7 @@ import (
 )
 
 const manifestFacetStaleAfter = 14 * 24 * time.Hour
+const manifestSnapshotAttempts = 3
 
 // ManifestOptions selects optional local workspace and exact stored PR inputs.
 type ManifestOptions struct {
@@ -41,6 +42,41 @@ func (s *Service) ContributionManifest(ctx context.Context, opportunityID string
 	if err != nil {
 		return nil, err
 	}
+	for attempt := 0; attempt < manifestSnapshotAttempts; attempt++ {
+		watch, err := c.BeginChangeWatch(ctx)
+		if err != nil {
+			return nil, err
+		}
+		statement, err := s.assembleContributionManifest(ctx, c, opportunityID, opts)
+		if err != nil {
+			_ = watch.Close()
+			return nil, err
+		}
+		unchanged, watchErr := watch.Unchanged(ctx)
+		closeErr := watch.Close()
+		if watchErr != nil || closeErr != nil {
+			return nil, errors.Join(watchErr, closeErr)
+		}
+		if !unchanged {
+			continue
+		}
+		if err := validateManifestReferences(statement.Predicate); err != nil {
+			return nil, err
+		}
+		pullRequestRef := ""
+		if statement.Predicate.PullRequest != nil {
+			pr := statement.Predicate.PullRequest
+			pullRequestRef = fmt.Sprintf("%s/%s#%d", pr.Owner, pr.Repo, pr.Number)
+		}
+		if err := c.SaveContributionManifest(ctx, statement, opts.WorkspaceID, pullRequestRef); err != nil {
+			return nil, err
+		}
+		return statement, nil
+	}
+	return nil, errors.New("corpus changed while assembling contribution manifest; retry")
+}
+
+func (s *Service) assembleContributionManifest(ctx context.Context, c *corpus.Corpus, opportunityID string, opts ManifestOptions) (*manifest.Statement, error) {
 	opp, inv, err := s.loadOpportunityAndRepo(ctx, c, opportunityID)
 	if err != nil {
 		return nil, err
@@ -67,9 +103,8 @@ func (s *Service) ContributionManifest(ctx context.Context, opportunityID string
 	if err := s.addManifestReadiness(ctx, opp.ID, &predicate); err != nil {
 		return nil, err
 	}
-	pullRequestRef := ""
 	if opts.PullRequest != nil {
-		pullRequestRef, err = s.addManifestPullRequest(ctx, c, inv.Repo.Owner, inv.Repo.Repo, *opts.PullRequest, now, &predicate)
+		_, err = s.addManifestPullRequest(ctx, c, inv.Repo.Owner, inv.Repo.Repo, *opts.PullRequest, now, &predicate)
 		if err != nil {
 			return nil, err
 		}
@@ -88,10 +123,43 @@ func (s *Service) ContributionManifest(ctx context.Context, opportunityID string
 	if err != nil {
 		return nil, err
 	}
-	if err := c.SaveContributionManifest(ctx, &statement, opts.WorkspaceID, pullRequestRef); err != nil {
-		return nil, err
-	}
 	return &statement, nil
+}
+
+func validateManifestReferences(predicate manifest.Predicate) error {
+	evidenceIDs := make(map[string]struct{}, len(predicate.Evidence))
+	for _, item := range predicate.Evidence {
+		evidenceIDs[item.ID] = struct{}{}
+	}
+	definitionIDs := make(map[string]struct{}, len(predicate.Validations))
+	runIDs := make(map[string]struct{}, len(predicate.Validations))
+	for _, item := range predicate.Validations {
+		definitionIDs[item.DefinitionID] = struct{}{}
+		runIDs[item.RunID] = struct{}{}
+	}
+	for _, check := range predicate.Readiness.Checks {
+		for _, ref := range check.EvidenceRefs {
+			kind, id, ok := strings.Cut(ref, ":")
+			if !ok {
+				continue
+			}
+			var present bool
+			switch kind {
+			case "evidence":
+				_, present = evidenceIDs[id]
+			case "validation_definition":
+				_, present = definitionIDs[id]
+			case "validation_run":
+				_, present = runIDs[id]
+			default:
+				continue
+			}
+			if !present {
+				return fmt.Errorf("%w: readiness reference %q is absent from the manifest", manifest.ErrIdentityMismatch, ref)
+			}
+		}
+	}
+	return nil
 }
 
 // ExportManifest generates, persists, and renders one local JSON statement.

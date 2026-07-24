@@ -121,7 +121,7 @@ func (c *Corpus) ListLenses(ctx context.Context) (LensList, error) {
 	if err != nil {
 		return LensList{}, fmt.Errorf("list lenses: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var result LensList
 	for rows.Next() {
 		var payload string
@@ -192,7 +192,7 @@ func (c *Corpus) ListCollections(ctx context.Context) (CollectionList, error) {
 	if err != nil {
 		return CollectionList{}, fmt.Errorf("list collections: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var result CollectionList
 	for rows.Next() {
 		var item Collection
@@ -277,7 +277,7 @@ func (c *Corpus) ListCollectionMembers(ctx context.Context, collectionName strin
 	if err != nil {
 		return CollectionMemberList{}, fmt.Errorf("list collection members: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var result CollectionMemberList
 	for rows.Next() {
 		var member CollectionMember

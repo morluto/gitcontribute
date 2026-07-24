@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/morluto/gitcontribute/internal/clustering"
+	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
-	"github.com/morluto/gitcontribute/internal/tui"
+	tui "github.com/morluto/gitcontribute/internal/tuicontract"
 )
 
 const maxTUIItems = 100
@@ -19,11 +19,23 @@ func (s *Service) Load(ctx context.Context) (tui.Data, error) {
 	if err != nil {
 		return tui.Data{}, err
 	}
-	repos, err := c.ListRepositories(ctx, "", maxTUIItems)
-	if err != nil {
-		return tui.Data{}, err
+	var repos []corpus.Repository
+	cursor := ""
+	for {
+		page, err := c.ListRepositoriesWithOptions(ctx, "", corpus.RepositorySearchOptions{Limit: maxTUIItems, Cursor: cursor, Sort: "updated"})
+		if err != nil {
+			return tui.Data{}, err
+		}
+		repos = append(repos, page.Repositories...)
+		if page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
 	}
-	data := tui.Data{Repositories: make([]tui.Item, 0, len(repos))}
+	data := tui.Data{
+		Repositories: make([]tui.Item, 0, min(len(repos), maxTUIItems)),
+		Windows:      make(map[string]tui.Window),
+	}
 	for _, repo := range repos {
 		ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Name}
 		coverage, err := c.ListCoverage(ctx, repo.ID, nil)
@@ -34,50 +46,51 @@ func (s *Service) Load(ctx context.Context) (tui.Data, error) {
 		for i, facet := range coverage {
 			itemCoverage[i] = tui.Facet{Name: facet.Facet, Present: true, Complete: facet.Complete, AsOf: formatTime(facet.SourceUpdatedAt)}
 		}
-		data.Repositories = append(data.Repositories, tui.Item{
-			Kind: "repository", ID: repo.ExternalID, Ref: ref.String(), Title: ref.String(),
-			Subtitle: repo.Language, Detail: repo.Description, Source: "https://github.com/" + ref.String(),
-			AsOf: formatTime(repo.SourceUpdatedAt), Coverage: itemCoverage,
+		if len(data.Repositories) < maxTUIItems {
+			data.Repositories = append(data.Repositories, tui.Item{
+				Kind: "repository", ID: repo.ExternalID, Ref: ref.String(), Title: ref.String(),
+				Subtitle: repo.Language, Detail: repo.Description, Source: "https://github.com/" + ref.String(),
+				AsOf: formatTime(repo.SourceUpdatedAt), Coverage: itemCoverage,
+			})
+		}
+
+		threadTotal, err := c.CountThreadsFiltered(ctx, repo.ID, "", "")
+		if err != nil {
+			return tui.Data{}, err
+		}
+		threadWindow := data.Windows["threads"]
+		threadWindow.Total += threadTotal
+		data.Windows["threads"] = threadWindow
+		threads, err := c.ListThreads(ctx, repo.ID, "", maxTUIItems)
+		if err != nil {
+			return tui.Data{}, err
+		}
+		for _, thread := range threads {
+			data.Threads = append(data.Threads, tui.Item{
+				Kind: thread.Kind, ID: fmt.Sprintf("%d", thread.ID), Ref: fmt.Sprintf("%s#%d", ref, thread.Number),
+				Title: thread.Title, Subtitle: thread.State + " by " + thread.Author, Detail: thread.Body,
+				Source: threadURL(ref, thread.Kind, thread.Number), AsOf: formatTime(thread.SourceUpdatedAt),
+			})
+		}
+	}
+
+	clusters, clusterTotal, err := c.ListRecentClusters(ctx, maxTUIItems)
+	if err != nil {
+		return tui.Data{}, err
+	}
+	data.Windows["clusters"] = tui.Window{Total: clusterTotal}
+	for _, cluster := range clusters {
+		data.Clusters = append(data.Clusters, tui.Item{
+			Kind: "cluster", ID: cluster.StableID, Ref: cluster.Repo.String() + ":cluster:" + cluster.StableID,
+			Title: cluster.StableID, Subtitle: fmt.Sprintf("%s · %d members", cluster.State, len(cluster.Members)),
+			Detail: fmt.Sprintf("Canonical: %s", cluster.Canonical), Source: "local clustering",
+			AsOf: formatTime(cluster.UpdatedAt),
 		})
-
-		remaining := maxTUIItems - len(data.Threads)
-		if remaining > 0 {
-			threads, err := c.ListThreads(ctx, repo.ID, "", remaining)
-			if err != nil {
-				return tui.Data{}, err
-			}
-			for _, thread := range threads {
-				data.Threads = append(data.Threads, tui.Item{
-					Kind: thread.Kind, ID: fmt.Sprintf("%d", thread.ID), Ref: fmt.Sprintf("%s#%d", ref, thread.Number),
-					Title: thread.Title, Subtitle: thread.State + " by " + thread.Author, Detail: thread.Body,
-					Source: threadURL(ref, thread.Kind, thread.Number), AsOf: formatTime(thread.SourceUpdatedAt),
-				})
-			}
-		}
-
-		remaining = maxTUIItems - len(data.Clusters)
-		if remaining > 0 {
-			projection, err := c.ListClusterProjection(ctx, ref, clustering.ClusterState(""), remaining)
-			if err != nil {
-				return tui.Data{}, err
-			}
-			for _, cluster := range projection.Clusters {
-				data.Clusters = append(data.Clusters, tui.Item{
-					Kind: "cluster", ID: cluster.StableID, Ref: ref.String() + ":cluster:" + cluster.StableID,
-					Title: cluster.StableID, Subtitle: fmt.Sprintf("%s · %d members", cluster.State, len(cluster.Members)),
-					Detail: fmt.Sprintf("Canonical: %s", cluster.Canonical), Source: "local clustering",
-					AsOf: formatTime(cluster.UpdatedAt),
-				})
-			}
-		}
 	}
 
 	investigations, err := c.ListInvestigations(ctx)
 	if err != nil {
 		return tui.Data{}, err
-	}
-	if len(investigations) > maxTUIItems {
-		investigations = investigations[:maxTUIItems]
 	}
 	repoByInvestigation := make(map[string]domain.RepoRef, len(investigations))
 	for _, inv := range investigations {
@@ -92,9 +105,6 @@ func (s *Service) Load(ctx context.Context) (tui.Data, error) {
 	if err != nil {
 		return tui.Data{}, err
 	}
-	if len(opportunities) > maxTUIItems {
-		opportunities = opportunities[:maxTUIItems]
-	}
 	for _, opportunity := range opportunities {
 		repo := repoByInvestigation[opportunity.InvestigationID]
 		data.Opportunities = append(data.Opportunities, tui.Item{
@@ -105,7 +115,34 @@ func (s *Service) Load(ctx context.Context) (tui.Data, error) {
 	}
 
 	sortTUIData(&data)
+	data.Repositories = capTUIItems(data.Repositories)
+	data.Threads = capTUIItems(data.Threads)
+	data.Clusters = capTUIItems(data.Clusters)
+	data.Investigations = capTUIItems(data.Investigations)
+	data.Opportunities = capTUIItems(data.Opportunities)
+	data.Windows["repositories"] = tui.Window{Total: len(repos), Truncated: len(repos) > len(data.Repositories)}
+	for name, loaded := range map[string]int{
+		"threads": len(data.Threads), "clusters": len(data.Clusters),
+		"investigations": len(data.Investigations), "opportunities": len(data.Opportunities),
+	} {
+		window := data.Windows[name]
+		switch name {
+		case "investigations":
+			window.Total = len(investigations)
+		case "opportunities":
+			window.Total = len(opportunities)
+		}
+		window.Truncated = window.Total > loaded
+		data.Windows[name] = window
+	}
 	return data, nil
+}
+
+func capTUIItems(items []tui.Item) []tui.Item {
+	if len(items) > maxTUIItems {
+		return items[:maxTUIItems]
+	}
+	return items
 }
 
 func sortTUIData(data *tui.Data) {

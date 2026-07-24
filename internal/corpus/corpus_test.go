@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/go-cmp/cmp/cmpopts"
 )
 
 func openTestCorpus(t *testing.T) (*Corpus, string) {
@@ -711,8 +710,4 @@ func TestProjectionIgnoresStaleThreadObservationsBySourceUpdatedAt(t *testing.T)
 	if !thread.SourceUpdatedAt.Equal(newer) {
 		t.Fatalf("source_updated_at = %v, want %v", thread.SourceUpdatedAt, newer)
 	}
-}
-
-func ignoreVolatile() cmp.Option {
-	return cmpopts.IgnoreFields(Repository{}, "ID", "CreatedAt", "UpdatedAt", "ObservationSequence")
 }

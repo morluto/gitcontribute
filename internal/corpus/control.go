@@ -110,7 +110,7 @@ func (c *Corpus) CheckWriteAccess(ctx context.Context) (err error) {
 	if err != nil {
 		return fmt.Errorf("acquire database connection: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	var busyTimeout int
 	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&busyTimeout); err != nil {
 		return fmt.Errorf("read database busy timeout: %w", err)

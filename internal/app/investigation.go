@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/investigation"
 )
 
@@ -285,7 +286,7 @@ func formatTime(t time.Time) string {
 
 func mapInvestigationError(err error) error {
 	if errors.Is(err, investigation.ErrNotFound) {
-		return cli.NewCLIError(cli.ExitNotFound, err)
+		return failure.NotFound(err)
 	}
 	return err
 }

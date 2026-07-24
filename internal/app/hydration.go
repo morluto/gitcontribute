@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/cli"
+	cli "github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
@@ -248,6 +248,10 @@ func (f *facetRunner) hydrateIssueTimeline() (HydratedFacet, error) {
 	if !ok {
 		return HydratedFacet{}, errors.New("GitHub reader does not support issue timelines")
 	}
+	expectedSequence, err := f.facetBaseline(FacetIssueTimeline)
+	if err != nil {
+		return HydratedFacet{}, err
+	}
 	opts := github.PageOptions{Page: 1, PerPage: 100}
 	var total, pages int
 	var complete bool
@@ -290,14 +294,18 @@ func (f *facetRunner) hydrateIssueTimeline() (HydratedFacet, error) {
 		opts.Page = res.Page.NextPage
 	}
 	if !complete {
-		if err := f.c.AdvanceFacet(f.ctx, f.repoID, &f.threadID, FacetIssueTimeline, sourceUpdatedAt, false, f.runID); err != nil {
+		if _, err := f.c.AdvanceFacetCAS(f.ctx, f.repoID, &f.threadID, FacetIssueTimeline, sourceUpdatedAt, false, f.runID, expectedSequence); err != nil {
 			return HydratedFacet{}, err
 		}
 		return HydratedFacet{Facet: FacetIssueTimeline, Count: total, Pages: pages, Complete: false}, nil
 	}
 	collapseFacetSearchText(pageObservations)
-	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetIssueTimeline, sourceUpdatedAt, pageObservations, true, f.runID); err != nil {
+	applied, err := f.c.ApplyFacetObservationSetCAS(f.ctx, f.repoID, &f.threadID, FacetIssueTimeline, sourceUpdatedAt, pageObservations, true, f.runID, expectedSequence)
+	if err != nil {
 		return HydratedFacet{}, err
+	}
+	if !applied {
+		return HydratedFacet{Facet: FacetIssueTimeline, Count: total, Pages: pages, Complete: true}, nil
 	}
 	coverage, err := f.c.GetCoverage(f.ctx, f.repoID, &f.threadID, FacetIssueTimeline)
 	if err != nil {
@@ -373,28 +381,34 @@ type facetRunner struct {
 	maxPages int
 }
 
-func (f *facetRunner) hydrateIssueComments() (HydratedFacet, error) {
+type paginatedFacetSpec[T any] struct {
+	facet          string
+	marshalContext string
+	fetch          func(github.PageOptions) (github.ListResult[T], error)
+	latest         func([]T) time.Time
+	searchText     func([]T) string
+}
+
+func hydratePaginatedFacet[T any](f *facetRunner, spec paginatedFacetSpec[T]) (HydratedFacet, error) {
+	expectedSequence, err := f.facetBaseline(spec.facet)
+	if err != nil {
+		return HydratedFacet{}, err
+	}
 	opts := github.PageOptions{Page: 1, PerPage: 100}
 	var total, pages int
 	var complete bool
 	var pageObservations []corpus.FacetObservationInput
 	sourceUpdatedAt := f.thread.SourceUpdatedAt
-
-	for {
-		if pages >= f.maxPages {
-			break
-		}
+	for pages < f.maxPages {
 		if err := f.ctx.Err(); err != nil {
 			return HydratedFacet{}, err
 		}
-
-		res, err := f.reader.ListIssueComments(f.ctx, f.ref.Owner, f.ref.Repo, f.thread.Number, opts)
+		res, err := spec.fetch(opts)
 		if err != nil {
 			return HydratedFacet{}, err
 		}
 		pages++
-
-		pageUpdated := latestFromIssueComments(res.Items)
+		pageUpdated := spec.latest(res.Items)
 		if pageUpdated.IsZero() {
 			pageUpdated = f.thread.SourceUpdatedAt
 		}
@@ -403,15 +417,14 @@ func (f *facetRunner) hydrateIssueComments() (HydratedFacet, error) {
 		}
 		payload, err := json.Marshal(res.Items)
 		if err != nil {
-			return HydratedFacet{}, fmt.Errorf("marshal issue comments: %w", err)
+			return HydratedFacet{}, fmt.Errorf("marshal %s: %w", spec.marshalContext, err)
 		}
 		pageObservations = append(pageObservations, corpus.FacetObservationInput{
 			SourceUpdatedAt: pageUpdated,
 			Payload:         string(payload),
-			SearchText:      issueCommentsSearchText(res.Items),
+			SearchText:      spec.searchText(res.Items),
 		})
 		total += len(res.Items)
-
 		if !res.Page.HasNext {
 			complete = true
 			break
@@ -423,20 +436,46 @@ func (f *facetRunner) hydrateIssueComments() (HydratedFacet, error) {
 		return HydratedFacet{}, err
 	}
 	if !complete {
-		if err := f.c.AdvanceFacet(f.ctx, f.repoID, &f.threadID, FacetIssueComments, sourceUpdatedAt, false, f.runID); err != nil {
+		if _, err := f.c.AdvanceFacetCAS(f.ctx, f.repoID, &f.threadID, spec.facet, sourceUpdatedAt, false, f.runID, expectedSequence); err != nil {
 			return HydratedFacet{}, err
 		}
-		return HydratedFacet{Facet: FacetIssueComments, Count: total, Pages: pages, Complete: false}, nil
+		return HydratedFacet{Facet: spec.facet, Count: total, Pages: pages, Complete: false}, nil
 	}
 	collapseFacetSearchText(pageObservations)
-	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetIssueComments, sourceUpdatedAt, pageObservations, true, f.runID); err != nil {
+	if _, err := f.c.ApplyFacetObservationSetCAS(f.ctx, f.repoID, &f.threadID, spec.facet, sourceUpdatedAt, pageObservations, true, f.runID, expectedSequence); err != nil {
 		return HydratedFacet{}, err
 	}
+	return HydratedFacet{Facet: spec.facet, Count: total, Pages: pages, Complete: true}, nil
+}
 
-	return HydratedFacet{Facet: FacetIssueComments, Count: total, Pages: pages, Complete: complete}, nil
+func (f *facetRunner) facetBaseline(facet string) (int64, error) {
+	coverage, err := f.c.GetCoverage(f.ctx, f.repoID, &f.threadID, facet)
+	if err != nil {
+		return 0, err
+	}
+	if coverage == nil {
+		return 0, nil
+	}
+	return coverage.ObservationSequence, nil
+}
+
+func (f *facetRunner) hydrateIssueComments() (HydratedFacet, error) {
+	return hydratePaginatedFacet(f, paginatedFacetSpec[github.IssueComment]{
+		facet:          FacetIssueComments,
+		marshalContext: "issue comments",
+		fetch: func(opts github.PageOptions) (github.ListResult[github.IssueComment], error) {
+			return f.reader.ListIssueComments(f.ctx, f.ref.Owner, f.ref.Repo, f.thread.Number, opts)
+		},
+		latest:     latestFromIssueComments,
+		searchText: issueCommentsSearchText,
+	})
 }
 
 func (f *facetRunner) hydratePullRequestDetails() (HydratedFacet, error) {
+	expectedSequence, err := f.facetBaseline(FacetPRDetails)
+	if err != nil {
+		return HydratedFacet{}, err
+	}
 	pr, _, err := f.reader.GetPullRequestDetails(f.ctx, f.ref.Owner, f.ref.Repo, f.thread.Number)
 	if err != nil {
 		return HydratedFacet{}, err
@@ -452,7 +491,7 @@ func (f *facetRunner) hydratePullRequestDetails() (HydratedFacet, error) {
 	}
 
 	pages := []corpus.FacetObservationInput{{SourceUpdatedAt: updatedAt, Payload: string(payload)}}
-	applied, err := f.c.ApplyFacetObservationSetIfNewer(f.ctx, f.repoID, &f.threadID, FacetPRDetails, updatedAt, pages, true, f.runID)
+	applied, err := f.c.ApplyFacetObservationSetCAS(f.ctx, f.repoID, &f.threadID, FacetPRDetails, updatedAt, pages, true, f.runID, expectedSequence)
 	if err != nil {
 		return HydratedFacet{}, err
 	}
@@ -496,129 +535,27 @@ func (f *facetRunner) hydratePullRequestDetails() (HydratedFacet, error) {
 }
 
 func (f *facetRunner) hydratePullRequestReviews() (HydratedFacet, error) {
-	opts := github.PageOptions{Page: 1, PerPage: 100}
-	var total, pages int
-	var complete bool
-	var pageObservations []corpus.FacetObservationInput
-	sourceUpdatedAt := f.thread.SourceUpdatedAt
-
-	for {
-		if pages >= f.maxPages {
-			break
-		}
-		if err := f.ctx.Err(); err != nil {
-			return HydratedFacet{}, err
-		}
-
-		res, err := f.reader.ListPullRequestReviews(f.ctx, f.ref.Owner, f.ref.Repo, f.thread.Number, opts)
-		if err != nil {
-			return HydratedFacet{}, err
-		}
-		pages++
-
-		pageUpdated := latestFromReviews(res.Items)
-		if pageUpdated.IsZero() {
-			pageUpdated = f.thread.SourceUpdatedAt
-		}
-		if pageUpdated.After(sourceUpdatedAt) {
-			sourceUpdatedAt = pageUpdated
-		}
-		payload, err := json.Marshal(res.Items)
-		if err != nil {
-			return HydratedFacet{}, fmt.Errorf("marshal pr reviews: %w", err)
-		}
-		pageObservations = append(pageObservations, corpus.FacetObservationInput{
-			SourceUpdatedAt: pageUpdated,
-			Payload:         string(payload),
-			SearchText:      pullRequestReviewsSearchText(res.Items),
-		})
-		total += len(res.Items)
-
-		if !res.Page.HasNext {
-			complete = true
-			break
-		}
-		opts.Page = res.Page.NextPage
-	}
-
-	if err := f.ctx.Err(); err != nil {
-		return HydratedFacet{}, err
-	}
-	if !complete {
-		if err := f.c.AdvanceFacet(f.ctx, f.repoID, &f.threadID, FacetPRReviews, sourceUpdatedAt, false, f.runID); err != nil {
-			return HydratedFacet{}, err
-		}
-		return HydratedFacet{Facet: FacetPRReviews, Count: total, Pages: pages, Complete: false}, nil
-	}
-	collapseFacetSearchText(pageObservations)
-	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetPRReviews, sourceUpdatedAt, pageObservations, true, f.runID); err != nil {
-		return HydratedFacet{}, err
-	}
-
-	return HydratedFacet{Facet: FacetPRReviews, Count: total, Pages: pages, Complete: complete}, nil
+	return hydratePaginatedFacet(f, paginatedFacetSpec[github.Review]{
+		facet:          FacetPRReviews,
+		marshalContext: "pr reviews",
+		fetch: func(opts github.PageOptions) (github.ListResult[github.Review], error) {
+			return f.reader.ListPullRequestReviews(f.ctx, f.ref.Owner, f.ref.Repo, f.thread.Number, opts)
+		},
+		latest:     latestFromReviews,
+		searchText: pullRequestReviewsSearchText,
+	})
 }
 
 func (f *facetRunner) hydratePullRequestReviewComments() (HydratedFacet, error) {
-	opts := github.PageOptions{Page: 1, PerPage: 100}
-	var total, pages int
-	var complete bool
-	var pageObservations []corpus.FacetObservationInput
-	sourceUpdatedAt := f.thread.SourceUpdatedAt
-
-	for {
-		if pages >= f.maxPages {
-			break
-		}
-		if err := f.ctx.Err(); err != nil {
-			return HydratedFacet{}, err
-		}
-
-		res, err := f.reader.ListPullRequestComments(f.ctx, f.ref.Owner, f.ref.Repo, f.thread.Number, opts)
-		if err != nil {
-			return HydratedFacet{}, err
-		}
-		pages++
-
-		pageUpdated := latestFromReviewComments(res.Items)
-		if pageUpdated.IsZero() {
-			pageUpdated = f.thread.SourceUpdatedAt
-		}
-		if pageUpdated.After(sourceUpdatedAt) {
-			sourceUpdatedAt = pageUpdated
-		}
-		payload, err := json.Marshal(res.Items)
-		if err != nil {
-			return HydratedFacet{}, fmt.Errorf("marshal pr review comments: %w", err)
-		}
-		pageObservations = append(pageObservations, corpus.FacetObservationInput{
-			SourceUpdatedAt: pageUpdated,
-			Payload:         string(payload),
-			SearchText:      reviewCommentsSearchText(res.Items),
-		})
-		total += len(res.Items)
-
-		if !res.Page.HasNext {
-			complete = true
-			break
-		}
-		opts.Page = res.Page.NextPage
-	}
-
-	if err := f.ctx.Err(); err != nil {
-		return HydratedFacet{}, err
-	}
-	if !complete {
-		if err := f.c.AdvanceFacet(f.ctx, f.repoID, &f.threadID, FacetPRReviewComments, sourceUpdatedAt, false, f.runID); err != nil {
-			return HydratedFacet{}, err
-		}
-		return HydratedFacet{Facet: FacetPRReviewComments, Count: total, Pages: pages, Complete: false}, nil
-	}
-	collapseFacetSearchText(pageObservations)
-	if err := f.c.ApplyFacetObservationSet(f.ctx, f.repoID, &f.threadID, FacetPRReviewComments, sourceUpdatedAt, pageObservations, true, f.runID); err != nil {
-		return HydratedFacet{}, err
-	}
-
-	return HydratedFacet{Facet: FacetPRReviewComments, Count: total, Pages: pages, Complete: complete}, nil
+	return hydratePaginatedFacet(f, paginatedFacetSpec[github.ReviewComment]{
+		facet:          FacetPRReviewComments,
+		marshalContext: "pr review comments",
+		fetch: func(opts github.PageOptions) (github.ListResult[github.ReviewComment], error) {
+			return f.reader.ListPullRequestComments(f.ctx, f.ref.Owner, f.ref.Repo, f.thread.Number, opts)
+		},
+		latest:     latestFromReviewComments,
+		searchText: reviewCommentsSearchText,
+	})
 }
 
 func latestFromIssueComments(items []github.IssueComment) time.Time {
