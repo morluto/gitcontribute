@@ -409,9 +409,11 @@ func beginReconcileTransaction(ctx context.Context, conn *sql.Conn) error {
 	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout = %d", reconcileBusyTimeout.Milliseconds())); err != nil {
 		return fmt.Errorf("configure reconcile busy timeout: %w", err)
 	}
-	defer func() {
-		_, _ = conn.ExecContext(context.Background(), fmt.Sprintf("PRAGMA busy_timeout = %d", originalBusyTimeout))
-	}()
+	defer func(ctx context.Context) {
+		if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout = %d", originalBusyTimeout)); err != nil {
+			return
+		}
+	}(context.WithoutCancel(ctx))
 
 	var lastErr error
 	for attempt := 0; attempt < reconcileBeginTries; attempt++ {
