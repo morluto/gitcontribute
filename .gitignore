@@ -24,10 +24,11 @@ go.work.sum
 # === Dependency directories ===
 /vendor/
 
-# === IDE ===
+# === IDE / agent artifacts ===
 .idea/
 .vscode/
 .factory/
+.codex/
 *.swp
 *.swo
 *~
