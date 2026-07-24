@@ -470,6 +470,80 @@ func (c *Corpus) CountThreadsFiltered(ctx context.Context, repoID int64, kind, s
 	return total, nil
 }
 
+// RepositoryThreadCounts summarizes every stored issue and pull request for a
+// repository without materializing thread bodies.
+type RepositoryThreadCounts struct {
+	OpenIssues            int
+	ClosedIssues          int
+	OpenPullRequests      int
+	MergedPullRequests    int
+	ClosedUnmergedPRs     int
+	ClosedUnknownMergePRs int
+}
+
+// CountRepositoryThreads returns complete repository thread counts.
+func (c *Corpus) CountRepositoryThreads(ctx context.Context, repoID int64) (RepositoryThreadCounts, error) {
+	var counts RepositoryThreadCounts
+	err := c.db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(SUM(CASE WHEN kind = ? AND state = 'open' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN kind = ? AND state = 'closed' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN kind = ? AND state = 'open' THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN kind = ? AND state = 'closed' AND merged_known = 1 AND merged = 1 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN kind = ? AND state = 'closed' AND merged_known = 1 AND merged = 0 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN kind = ? AND state = 'closed' AND merged_known = 0 THEN 1 ELSE 0 END), 0)
+		FROM threads
+		WHERE repository_id = ?
+	`, ThreadKindIssue, ThreadKindIssue, ThreadKindPullRequest, ThreadKindPullRequest,
+		ThreadKindPullRequest, ThreadKindPullRequest, repoID).Scan(
+		&counts.OpenIssues,
+		&counts.ClosedIssues,
+		&counts.OpenPullRequests,
+		&counts.MergedPullRequests,
+		&counts.ClosedUnmergedPRs,
+		&counts.ClosedUnknownMergePRs,
+	)
+	if err != nil {
+		return RepositoryThreadCounts{}, fmt.Errorf("count repository threads: %w", err)
+	}
+	return counts, nil
+}
+
+// ListThreadsByStateAndMerge returns every matching thread when limit is
+// non-positive. Positive limits apply after all predicates.
+func (c *Corpus) ListThreadsByStateAndMerge(ctx context.Context, repoID int64, kind, state string, merged *bool, limit int) (_ []Thread, returnErr error) {
+	query := `
+		SELECT id, repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone,
+		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged, merged_known
+		FROM threads
+		WHERE repository_id = ?`
+	args := []any{repoID}
+	if kind != "" {
+		query += ` AND kind = ?`
+		args = append(args, kind)
+	}
+	if state != "" && state != "all" {
+		query += ` AND state = ?`
+		args = append(args, state)
+	}
+	if merged != nil && kind == ThreadKindPullRequest {
+		query += ` AND merged_known = 1 AND merged = ?`
+		args = append(args, *merged)
+	}
+	query += ` ORDER BY source_updated_at DESC, number DESC`
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+
+	rows, err := c.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list threads by state and merge: %w", err)
+	}
+	defer func() { returnErr = errors.Join(returnErr, rows.Close()) }()
+	return scanThreads(rows)
+}
+
 // LatestThreadObservation returns the most recent observation for a thread
 // by source time and observation sequence.
 func (c *Corpus) LatestThreadObservation(ctx context.Context, threadID int64) (*ThreadObservation, error) {

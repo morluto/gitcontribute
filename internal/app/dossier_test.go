@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/dossier"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
 )
 
@@ -170,6 +172,51 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 	}
 	if res.Stars != 99 || res.OpenIssues != 1 || res.Summary != "A changed repo" {
 		t.Fatalf("unexpected dossier summary: %+v", res)
+	}
+}
+
+func TestCorpusReaderDoesNotTruncateRepositoriesAboveOneThousandThreads(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newLocalService(t)
+	defer func() { _ = svc.Close() }()
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
+		Owner: "owner", Name: "large", ExternalID: "R_large", SourceUpdatedAt: time.Unix(2000, 0).UTC(),
+	}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for number := 1; number <= 1001; number++ {
+		if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
+			RepositoryID:    repo.ID,
+			Kind:            corpus.ThreadKindIssue,
+			Number:          number,
+			State:           "open",
+			Title:           fmt.Sprintf("issue %d", number),
+			SourceUpdatedAt: time.Unix(int64(2000+number), 0).UTC(),
+		}, `{}`); err != nil {
+			t.Fatalf("upsert issue %d: %v", number, err)
+		}
+	}
+
+	reader := &corpusReader{s: svc}
+	stored, _, err := reader.ReadRepository(ctx, domain.RepoRef{Owner: "owner", Repo: "large"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.OpenIssueCount != 1001 {
+		t.Fatalf("open issue count = %d, want 1001", stored.OpenIssueCount)
+	}
+	threads, _, err := reader.ReadThreads(ctx, domain.RepoRef{Owner: "owner", Repo: "large"}, dossier.ThreadQuery{
+		Kind:  domain.IssueKind,
+		State: domain.OpenState,
+		Limit: 1001,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(threads) != 1001 {
+		t.Fatalf("thread count = %d, want 1001", len(threads))
 	}
 }
 

@@ -74,6 +74,41 @@ func TestListThreadsFilteredAppliesStateBeforeLimit(t *testing.T) {
 	}
 }
 
+func TestListThreadsByStateAndMergeIgnoresMergedOutsidePullRequests(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged := true
+	for _, thread := range []Thread{
+		{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 1, State: "open", Title: "issue", SourceUpdatedAt: time.Unix(3, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 2, State: "closed", Title: "merged", Merged: true, MergedKnown: true, SourceUpdatedAt: time.Unix(2, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 3, State: "closed", Title: "unmerged", MergedKnown: true, SourceUpdatedAt: time.Unix(1, 0).UTC()},
+	} {
+		if _, err := c.UpsertThread(ctx, thread, `{}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	issues, err := c.ListThreadsByStateAndMerge(ctx, repo.ID, ThreadKindIssue, "open", &merged, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || issues[0].Number != 1 {
+		t.Fatalf("issues = %+v", issues)
+	}
+	pullRequests, err := c.ListThreadsByStateAndMerge(ctx, repo.ID, ThreadKindPullRequest, "closed", &merged, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pullRequests) != 1 || pullRequests[0].Number != 2 {
+		t.Fatalf("pull requests = %+v", pullRequests)
+	}
+}
+
 func TestListPullRequestPortfolioFiltersByAuthorAndState(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
