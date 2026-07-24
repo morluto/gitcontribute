@@ -38,6 +38,11 @@ make test
 go test ./internal/app -run '^TestName$'
 ```
 
+The repository test suite uses eight package workers and eight in-process
+parallel test slots by default because its isolated SQLite and filesystem
+tests are I/O-heavy. Override either value for a constrained machine, for
+example `make test TEST_PACKAGE_PARALLELISM=4 TEST_PARALLELISM=4`.
+
 Run the fast local checks before pushing and the complete validation before a
 pull request:
 

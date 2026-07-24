@@ -28,7 +28,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: go test -short -parallel=4 ./...
+          cache-dependency-path: go.sum
+      - run: go test -short -p=8 -parallel=8 ./...
 
   validate-agents-md:
     name: Validate AGENTS.md
@@ -48,6 +49,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
       - name: Check formatting
         run: make fmt-check
 
@@ -63,6 +65,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
       - name: Resolve lint comparison base
         id: lint-base
         shell: bash
@@ -138,6 +141,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
       - name: Run tests with coverage and timing
         run: make cover-check
       - name: Upload coverage artifact
@@ -157,6 +161,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
       - run: make test-race
 
   tidy:
@@ -169,6 +174,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
       - name: Check go.mod is tidy
         run: make tidy-check
 
@@ -182,6 +188,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
       - run: make generate-check
 
   security:
@@ -197,6 +204,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
@@ -219,6 +227,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
       - run: npm run test:npm
       - run: npm run test:e2e
       - run: npm pack --dry-run
