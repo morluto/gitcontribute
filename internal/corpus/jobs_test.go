@@ -262,6 +262,34 @@ func TestReconcileInterruptedJobs(t *testing.T) {
 	}
 }
 
+func TestBeginReconcileTransactionPreservesConnectionBusyTimeout(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	conn, err := c.db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	var before int
+	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	if err := beginReconcileTransaction(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = conn.ExecContext(context.Background(), "ROLLBACK") }()
+
+	var after int
+	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if before != 5000 || after != before {
+		t.Fatalf("busy timeout changed from %d to %d", before, after)
+	}
+}
+
 func TestConcurrentReadWhileJobRunning(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

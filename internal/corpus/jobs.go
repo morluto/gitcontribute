@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"modernc.org/sqlite"
 )
 
 // ErrJobCancelled is returned when a terminal transition is blocked because a
@@ -390,40 +389,12 @@ func (c *Corpus) ReconcileInterruptedJobs(ctx context.Context, leaseTimeout time
 	return nil
 }
 
-const (
-	reconcileBusyTimeout = 100 * time.Millisecond
-	reconcileBeginTries  = 20
-	reconcileRetryDelay  = 25 * time.Millisecond
-)
-
 func beginReconcileTransaction(ctx context.Context, conn *sql.Conn) error {
-	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout = %d", reconcileBusyTimeout.Milliseconds())); err != nil {
-		return fmt.Errorf("configure reconcile busy timeout: %w", err)
-	}
-
-	var lastErr error
-	for attempt := 0; attempt < reconcileBeginTries; attempt++ {
-		_, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE")
-		if err == nil {
-			return nil
-		}
-		lastErr = err
-		if !isSQLiteBusy(err) {
-			return err
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(reconcileRetryDelay):
-		}
-	}
-	return lastErr
-}
-
-func isSQLiteBusy(err error) bool {
-	var sqliteErr *sqlite.Error
-	return errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == 5
+	// buildDSN configures SQLite's bounded busy handler on every connection.
+	// Keep that connection-wide policy intact instead of replacing it with a
+	// shorter reconcile-only timeout and a second retry loop.
+	_, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE")
+	return err
 }
 
 const jobSelect = `
