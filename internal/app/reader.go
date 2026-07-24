@@ -32,19 +32,18 @@ func (r *corpusReader) ReadRepository(ctx context.Context, ref domain.RepoRef) (
 		return domain.Repository{}, nil, fmt.Errorf("%w: %s", errRepositoryNotFound, ref)
 	}
 
-	threads, err := c.ListThreads(ctx, repo.ID, "", 0)
+	counts, err := c.CountRepositoryThreads(ctx, repo.ID)
 	if err != nil {
-		return domain.Repository{}, nil, fmt.Errorf("list threads: %w", err)
+		return domain.Repository{}, nil, fmt.Errorf("count repository threads: %w", err)
 	}
-	counts := countThreads(threads)
 
 	domainRepo := corpusRepoToDomain(ref, repo)
-	domainRepo.OpenIssueCount = counts.openIssues
-	domainRepo.ClosedIssueCount = counts.closedIssues
-	domainRepo.OpenPullRequestCount = counts.openPRs
-	domainRepo.MergedPullRequestCount = counts.mergedPRs
-	domainRepo.ClosedUnmergedPullRequestCount = counts.closedUnmergedPRs
-	domainRepo.ClosedPullRequestUnknownCount = counts.unknownMergePRs
+	domainRepo.OpenIssueCount = counts.OpenIssues
+	domainRepo.ClosedIssueCount = counts.ClosedIssues
+	domainRepo.OpenPullRequestCount = counts.OpenPullRequests
+	domainRepo.MergedPullRequestCount = counts.MergedPullRequests
+	domainRepo.ClosedUnmergedPullRequestCount = counts.ClosedUnmergedPRs
+	domainRepo.ClosedPullRequestUnknownCount = counts.ClosedUnknownMergePRs
 
 	if snap, err := c.LatestCodeSnapshot(ctx, ref); err != nil {
 		return domain.Repository{}, nil, fmt.Errorf("latest code snapshot: %w", err)
@@ -75,7 +74,7 @@ func (r *corpusReader) ReadThreads(ctx context.Context, ref domain.RepoRef, q do
 	}
 
 	kind := string(q.Kind)
-	threads, err := c.ListThreads(ctx, repo.ID, kind, 0)
+	threads, err := c.ListThreadsByStateAndMerge(ctx, repo.ID, kind, string(q.State), q.Merged, q.Limit)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list threads: %w", err)
 	}
@@ -83,23 +82,11 @@ func (r *corpusReader) ReadThreads(ctx context.Context, ref domain.RepoRef, q do
 	var out []domain.Thread
 	var latest time.Time
 	for _, t := range threads {
-		if q.State != "" && t.State != string(q.State) {
-			continue
-		}
-		if q.Merged != nil && t.Kind == corpus.ThreadKindPullRequest {
-			if !t.MergedKnown || t.Merged != *q.Merged {
-				continue
-			}
-		}
 		dt := corpusThreadToDomain(ref, t)
 		out = append(out, dt)
 		if t.SourceUpdatedAt.After(latest) {
 			latest = t.SourceUpdatedAt
 		}
-	}
-
-	if q.Limit > 0 && len(out) > q.Limit {
-		out = out[:q.Limit]
 	}
 
 	sourceRef := domain.SourceRef{
@@ -171,40 +158,6 @@ func (r *corpusReader) ReadContributionGuidance(ctx context.Context, ref domain.
 	}
 	guidance, refs := renderContributionGuidance(documents)
 	return guidance, refs, nil
-}
-
-type threadCounts struct {
-	openIssues        int
-	closedIssues      int
-	openPRs           int
-	mergedPRs         int
-	closedUnmergedPRs int
-	unknownMergePRs   int
-}
-
-func countThreads(threads []corpus.Thread) threadCounts {
-	var c threadCounts
-	for _, t := range threads {
-		switch t.Kind {
-		case corpus.ThreadKindIssue:
-			if t.State == "open" {
-				c.openIssues++
-			} else {
-				c.closedIssues++
-			}
-		case corpus.ThreadKindPullRequest:
-			if t.State == "open" {
-				c.openPRs++
-			} else if !t.MergedKnown {
-				c.unknownMergePRs++
-			} else if t.Merged {
-				c.mergedPRs++
-			} else {
-				c.closedUnmergedPRs++
-			}
-		}
-	}
-	return c
 }
 
 func corpusRepoToDomain(ref domain.RepoRef, repo *corpus.Repository) domain.Repository {

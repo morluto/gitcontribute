@@ -57,7 +57,7 @@ func TestSourceAddSearchAndList(t *testing.T) {
 	t.Parallel()
 	svc := &fakeService{
 		sourceResult:     &cli.SourceResult{Name: "active-go", Kind: "search", Definition: `{"query":"language:go"}`, Enabled: true},
-		sourceListResult: &cli.SourceListResult{Sources: []cli.SourceResult{{Name: "active-go", Kind: "search", Enabled: true}}},
+		sourceListResult: &cli.SourceListResult{Sources: []cli.SourceResult{{Name: "active-go", Kind: "search", Enabled: true}}, Total: 2, Truncated: true},
 	}
 	c, stdout, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "search", "--name", "active-go", "--query", "language:go"}))
@@ -70,7 +70,7 @@ func TestSourceAddSearchAndList(t *testing.T) {
 
 	stdout.Reset()
 	requireNoErr(t, c.Run(context.Background(), []string{"source", "list"}))
-	if !svc.listSourcesCalled || !strings.Contains(stdout.String(), "active-go") {
+	if !svc.listSourcesCalled || !strings.Contains(stdout.String(), "active-go") || !strings.Contains(stdout.String(), "1 sources of 2 (truncated)") {
 		t.Fatalf("listed=%v stdout=%q", svc.listSourcesCalled, stdout.String())
 	}
 }

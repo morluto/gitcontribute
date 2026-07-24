@@ -118,12 +118,16 @@ func (s *Service) ListCollections(ctx context.Context) (*cli.CollectionListResul
 	if err != nil {
 		return nil, err
 	}
-	cols, err := c.ListCollections(ctx)
+	list, err := c.ListCollections(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list collections: %w", err)
 	}
-	result := &cli.CollectionListResult{Collections: make([]cli.CollectionResult, len(cols))}
-	for i, col := range cols {
+	result := &cli.CollectionListResult{
+		Collections: make([]cli.CollectionResult, len(list.Collections)),
+		Total:       list.Total,
+		Truncated:   list.Truncated,
+	}
+	for i, col := range list.Collections {
 		result.Collections[i] = *collectionResult(&col)
 	}
 	return result, nil

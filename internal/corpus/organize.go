@@ -13,9 +13,12 @@ import (
 )
 
 const (
-	maxSavedNameLength     = 128
-	maxCollectionBatchSize = 1000
-	maxCollectionRefLength = 2048
+	maxSavedNameLength        = 128
+	maxCollectionBatchSize    = 1000
+	maxCollectionRefLength    = 2048
+	lensListLimit             = 1000
+	collectionListLimit       = 1000
+	collectionMemberListLimit = 10000
 )
 
 // LensRecord is a durable, reusable ranking definition.
@@ -23,6 +26,13 @@ type LensRecord struct {
 	Definition lens.Definition
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+}
+
+// LensList is one bounded, stable page of saved lenses.
+type LensList struct {
+	Records   []LensRecord
+	Total     int
+	Truncated bool
 }
 
 // Collection is a named set of local corpus references.
@@ -34,11 +44,25 @@ type Collection struct {
 	UpdatedAt   time.Time
 }
 
+// CollectionList is one bounded, stable page of named collections.
+type CollectionList struct {
+	Collections []Collection
+	Total       int
+	Truncated   bool
+}
+
 // CollectionMember is one typed stable reference in a collection.
 type CollectionMember struct {
 	Ref     string
 	Kind    string
 	AddedAt time.Time
+}
+
+// CollectionMemberList is one bounded, stable page of collection members.
+type CollectionMemberList struct {
+	Members   []CollectionMember
+	Total     int
+	Truncated bool
 }
 
 // SaveLens creates or replaces a named lens after validating its scoring
@@ -88,31 +112,36 @@ func (c *Corpus) GetLens(ctx context.Context, name string) (*LensRecord, error) 
 	return &LensRecord{Definition: definition, CreatedAt: scanTime(createdAt), UpdatedAt: scanTime(updatedAt)}, nil
 }
 
-// ListLenses returns saved lenses in stable name order.
-func (c *Corpus) ListLenses(ctx context.Context) ([]LensRecord, error) {
+// ListLenses returns a bounded lens page in stable name order.
+func (c *Corpus) ListLenses(ctx context.Context) (LensList, error) {
 	rows, err := c.db.QueryContext(ctx, `
-		SELECT definition, created_at, updated_at FROM lenses ORDER BY name LIMIT 1000
-	`)
+		SELECT definition, created_at, updated_at, (SELECT COUNT(*) FROM lenses)
+		FROM lenses ORDER BY name LIMIT ?
+	`, lensListLimit)
 	if err != nil {
-		return nil, fmt.Errorf("list lenses: %w", err)
+		return LensList{}, fmt.Errorf("list lenses: %w", err)
 	}
 	defer rows.Close()
-	var records []LensRecord
+	var result LensList
 	for rows.Next() {
 		var payload string
 		var createdAt, updatedAt int64
-		if err := rows.Scan(&payload, &createdAt, &updatedAt); err != nil {
-			return nil, err
+		if err := rows.Scan(&payload, &createdAt, &updatedAt, &result.Total); err != nil {
+			return LensList{}, err
 		}
 		var definition lens.Definition
 		if err := json.Unmarshal([]byte(payload), &definition); err != nil {
-			return nil, fmt.Errorf("decode lens: %w", err)
+			return LensList{}, fmt.Errorf("decode lens: %w", err)
 		}
-		records = append(records, LensRecord{
+		result.Records = append(result.Records, LensRecord{
 			Definition: definition, CreatedAt: scanTime(createdAt), UpdatedAt: scanTime(updatedAt),
 		})
 	}
-	return records, rows.Err()
+	if err := rows.Err(); err != nil {
+		return LensList{}, err
+	}
+	result.Truncated = result.Total > len(result.Records)
+	return result, nil
 }
 
 // SaveCollection creates a named collection or returns its existing identity.
@@ -152,29 +181,34 @@ func (c *Corpus) GetCollection(ctx context.Context, name string) (*Collection, e
 	return &item, nil
 }
 
-// ListCollections returns collections in stable name order.
-func (c *Corpus) ListCollections(ctx context.Context) ([]Collection, error) {
+// ListCollections returns a bounded collection page in stable name order.
+func (c *Corpus) ListCollections(ctx context.Context) (CollectionList, error) {
 	rows, err := c.db.QueryContext(ctx, `
-		SELECT c.id, c.name, COUNT(m.ref), c.created_at, c.updated_at
+		SELECT c.id, c.name, COUNT(m.ref), c.created_at, c.updated_at,
+		       (SELECT COUNT(*) FROM collections)
 		FROM collections c LEFT JOIN collection_members m ON m.collection_id=c.id
-		GROUP BY c.id ORDER BY c.name LIMIT 1000
-	`)
+		GROUP BY c.id ORDER BY c.name LIMIT ?
+	`, collectionListLimit)
 	if err != nil {
-		return nil, fmt.Errorf("list collections: %w", err)
+		return CollectionList{}, fmt.Errorf("list collections: %w", err)
 	}
 	defer rows.Close()
-	var collections []Collection
+	var result CollectionList
 	for rows.Next() {
 		var item Collection
 		var createdAt, updatedAt int64
-		if err := rows.Scan(&item.ID, &item.Name, &item.MemberCount, &createdAt, &updatedAt); err != nil {
-			return nil, err
+		if err := rows.Scan(&item.ID, &item.Name, &item.MemberCount, &createdAt, &updatedAt, &result.Total); err != nil {
+			return CollectionList{}, err
 		}
 		item.CreatedAt = scanTime(createdAt)
 		item.UpdatedAt = scanTime(updatedAt)
-		collections = append(collections, item)
+		result.Collections = append(result.Collections, item)
 	}
-	return collections, rows.Err()
+	if err := rows.Err(); err != nil {
+		return CollectionList{}, err
+	}
+	result.Truncated = result.Total > len(result.Collections)
+	return result, nil
 }
 
 // AddCollectionMembers idempotently adds a bounded batch of typed references.
@@ -228,28 +262,37 @@ func (c *Corpus) AddCollectionMembers(ctx context.Context, collectionName string
 	return nil
 }
 
-// ListCollectionMembers returns members in stable kind and reference order.
-func (c *Corpus) ListCollectionMembers(ctx context.Context, collectionName string) ([]CollectionMember, error) {
+// ListCollectionMembers returns a bounded member page in stable kind and
+// reference order.
+func (c *Corpus) ListCollectionMembers(ctx context.Context, collectionName string) (CollectionMemberList, error) {
+	name := strings.TrimSpace(collectionName)
 	rows, err := c.db.QueryContext(ctx, `
-		SELECT m.ref, m.kind, m.added_at FROM collection_members m
+		SELECT m.ref, m.kind, m.added_at,
+		       (SELECT COUNT(*) FROM collection_members cm
+		        JOIN collections cc ON cc.id=cm.collection_id WHERE cc.name=?)
+		FROM collection_members m
 		JOIN collections c ON c.id=m.collection_id
-		WHERE c.name=? ORDER BY m.kind, m.ref LIMIT 10000
-	`, strings.TrimSpace(collectionName))
+		WHERE c.name=? ORDER BY m.kind, m.ref LIMIT ?
+	`, name, name, collectionMemberListLimit)
 	if err != nil {
-		return nil, fmt.Errorf("list collection members: %w", err)
+		return CollectionMemberList{}, fmt.Errorf("list collection members: %w", err)
 	}
 	defer rows.Close()
-	var members []CollectionMember
+	var result CollectionMemberList
 	for rows.Next() {
 		var member CollectionMember
 		var addedAt int64
-		if err := rows.Scan(&member.Ref, &member.Kind, &addedAt); err != nil {
-			return nil, err
+		if err := rows.Scan(&member.Ref, &member.Kind, &addedAt, &result.Total); err != nil {
+			return CollectionMemberList{}, err
 		}
 		member.AddedAt = scanTime(addedAt)
-		members = append(members, member)
+		result.Members = append(result.Members, member)
 	}
-	return members, rows.Err()
+	if err := rows.Err(); err != nil {
+		return CollectionMemberList{}, err
+	}
+	result.Truncated = result.Total > len(result.Members)
+	return result, nil
 }
 
 func validateSavedText(field, value string, limit int) (string, error) {

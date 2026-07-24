@@ -1,0 +1,54 @@
+{
+  "version": "agent-tool-eval-calibration.v1",
+  "expected_pass": true,
+  "trajectories": [
+    {
+      "scenario_id": "contribution_readiness",
+      "claims": [
+        "stored_checks_unavailable",
+        "exact_revisions_compared",
+        "base_failure_unrelated",
+        "remaining_proof_explicit"
+      ],
+      "evidence": [
+        "checks-attempt-97",
+        "5f27d874d0f94c8d1c4130902bf62cb9d15f5f8a",
+        "8c2e7f92f657b118b5f4368443ad18080eecfe55",
+        "package assets/embed: fixture directory missing"
+      ]
+    },
+    {
+      "scenario_id": "repository_research",
+      "claims": [
+        "missing_coverage_not_absence",
+        "complete_zero_is_scope_bounded",
+        "derived_error_not_analysis",
+        "authority_boundary_preserved"
+      ],
+      "evidence": [
+        "1b8dce63e8ff09337c02065eef1f80b6d875ae44",
+        "c375eca88a428ced70a837d9972a91c9b5f65bda",
+        "internal/retry/budget.go",
+        "threads-page-3"
+      ]
+    },
+    {
+      "scenario_id": "version_aware_critique",
+      "claims": [
+        "zero_search_is_coverage_routing",
+        "coverage_tool_already_existed",
+        "response_omission_is_version_lag",
+        "stale_bootstrap_distinct_from_pinning",
+        "provider_status_is_current_defect",
+        "single_trace_not_quality_proof"
+      ],
+      "evidence": [
+        "0.8.0",
+        "0.10.0",
+        "corpus.get_coverage",
+        "4a8fc06791eb0f012329121a2163378c285dfa27"
+      ]
+    }
+  ]
+}
+

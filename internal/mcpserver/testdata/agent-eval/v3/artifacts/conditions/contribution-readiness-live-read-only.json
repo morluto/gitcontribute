@@ -1,0 +1,8 @@
+{
+  "condition": "live_read_only",
+  "workflow_revision": "8c2e7f92f657b118b5f4368443ad18080eecfe55",
+  "job": "windows",
+  "conclusion": "failure",
+  "artifact_observation": "TestLeaseRenewal: database is locked (SQLITE_BUSY)",
+  "observed_at": "2026-02-12T14:31:00Z"
+}

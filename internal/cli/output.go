@@ -74,12 +74,7 @@ func humanOutput(v any) (string, error) {
 	case *SourceResult:
 		return fmt.Sprintf("Source %s (%s): %s", r.Name, r.Kind, r.Definition), nil
 	case *SourceListResult:
-		var b strings.Builder
-		fmt.Fprintf(&b, "%d sources", len(r.Sources))
-		for _, source := range r.Sources {
-			fmt.Fprintf(&b, "\n- %s (%s)", source.Name, source.Kind)
-		}
-		return b.String(), nil
+		return sourceListHuman(r), nil
 	case *CrawlResult:
 		return crawlHuman(r), nil
 	case *InvestigationResult:
@@ -581,15 +576,6 @@ func draftHuman(r *DraftResult) string {
 	return b.String()
 }
 
-func clusterListHuman(r *ClusterListResult) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Clusters for %s: %d found", r.Repo, r.Total)
-	for _, cl := range r.Clusters {
-		fmt.Fprintf(&b, "\n- %s [%s] %s/%s:%s#%d (%d members)", cl.StableID, cl.State, cl.Canonical.Owner, cl.Canonical.Repo, cl.Canonical.Kind, cl.Canonical.Number, cl.MemberCount)
-	}
-	return b.String()
-}
-
 func clusterHuman(r *ClusterResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Cluster: %s (%s)\n", r.StableID, r.State)
@@ -644,15 +630,6 @@ func lensHuman(r *LensResult) string {
 	return b.String()
 }
 
-func lensListHuman(r *LensListResult) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d lenses", len(r.Lenses))
-	for _, l := range r.Lenses {
-		fmt.Fprintf(&b, "\n- %s", l.Name)
-	}
-	return b.String()
-}
-
 func lensExplainHuman(r *LensExplainResult) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Lens: %s\n", r.Lens.Name)
@@ -697,15 +674,6 @@ func collectionHuman(r *CollectionResult) string {
 	fmt.Fprintf(&b, "Collection: %s\n", r.Name)
 	fmt.Fprintf(&b, "Members: %d\n", r.MemberCount)
 	fmt.Fprintf(&b, "Created: %s\nUpdated: %s", r.CreatedAt, r.UpdatedAt)
-	return b.String()
-}
-
-func collectionListHuman(r *CollectionListResult) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "%d collections", len(r.Collections))
-	for _, col := range r.Collections {
-		fmt.Fprintf(&b, "\n- %s (%d members)", col.Name, col.MemberCount)
-	}
 	return b.String()
 }
 

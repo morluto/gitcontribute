@@ -1,0 +1,4 @@
+{
+  "condition": "no_authoritative_fallback",
+  "explicit_refresh_permitted": false
+}

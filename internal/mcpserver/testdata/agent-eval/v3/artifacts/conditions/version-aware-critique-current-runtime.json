@@ -1,0 +1,5 @@
+{
+  "condition": "current_runtime",
+  "runtime_version": "0.10.0",
+  "current_contract_available": true
+}

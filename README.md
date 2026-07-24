@@ -47,10 +47,13 @@ inspection, health analysis, dossiers, and investigations run entirely offline.
 Run the guided setup with Node.js 18 or newer:
 
 ```sh
-npx gitcontribute setup
+npx --yes gitcontribute@latest setup
 ```
 
 The wizard shows the resolved GitContribute version before any choice.
+The explicit `@latest` selects the current stable bootstrap even when the
+current project has an older `gitcontribute` dependency. Setup then persists
+the resolved exact version as an immutable private runtime.
 
 The interactive wizard offers three access modes:
 
@@ -91,13 +94,13 @@ For non-interactive setup, select the access mode explicitly:
 
 ```sh
 # Both: CLI and Codex MCP
-npx gitcontribute setup --mode both --codex --token-source none --yes
+npx --yes gitcontribute@latest setup --mode both --codex --token-source none --yes
 
 # CLI only
-npx gitcontribute setup --mode cli --token-source none --yes
+npx --yes gitcontribute@latest setup --mode cli --token-source none --yes
 
 # MCP only; installs a private runtime without a global command
-npx gitcontribute setup --mode mcp --codex --token-source none --yes
+npx --yes gitcontribute@latest setup --mode mcp --codex --token-source none --yes
 ```
 
 MCP-only setup is used through the configured coding agent. Run setup again and
@@ -122,12 +125,12 @@ runtimes, uninstall the CLI, or remove application configuration or corpus data.
 
 ```sh
 npm install --save-dev gitcontribute
-npx gitcontribute setup --mode mcp --codex --token-source none --yes
+npm exec -- gitcontribute setup --mode mcp --codex --token-source none --yes
 ```
 
-The npm package has no install lifecycle and performs no download during
-installation. Native binaries are included for macOS ARM64/x64, Linux ARM64/x64,
-and Windows x64.
+This form intentionally uses the project-pinned dependency. The npm package
+has no install lifecycle and performs no download during installation. Native
+binaries are included for macOS ARM64/x64, Linux ARM64/x64, and Windows x64.
 
 ### Build from source
 

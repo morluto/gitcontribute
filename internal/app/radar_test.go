@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/cli"
+	"github.com/morluto/gitcontribute/internal/clustering"
+	"github.com/morluto/gitcontribute/internal/clusterprojection"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -18,6 +20,27 @@ import (
 	"github.com/morluto/gitcontribute/internal/radar"
 	"github.com/morluto/gitcontribute/internal/relatedwork"
 )
+
+func TestRadarDuplicateClusterCapUsesProjectionMetadata(t *testing.T) {
+	t.Parallel()
+	clusters := make([]clustering.Cluster, 1000)
+	_, capped := radarDuplicateClusterFacts(domain.RepoRef{Owner: "owner", Repo: "repo"}, clusterprojection.List{
+		Clusters:  clusters,
+		Total:     len(clusters),
+		Truncated: false,
+	})
+	if capped {
+		t.Fatal("exactly 1000 complete clusters reported as capped")
+	}
+	_, capped = radarDuplicateClusterFacts(domain.RepoRef{Owner: "owner", Repo: "repo"}, clusterprojection.List{
+		Clusters:  clusters,
+		Total:     len(clusters) + 1,
+		Truncated: true,
+	})
+	if !capped {
+		t.Fatal("truncated projection did not report capped scan")
+	}
+}
 
 type panicRadarReader struct{ github.Reader }
 

@@ -43,7 +43,14 @@ type Client struct {
 	callTool func(context.Context, string, string, map[string]any) (*mcp.CallToolResult, error)
 }
 
-var sourceURLPattern = regexp.MustCompile(`https://deepwiki\.com/[^\s)\]}>]+`)
+var (
+	sourceURLPattern      = regexp.MustCompile(`https://deepwiki\.com/[^\s)\]}>]+`)
+	providerErrorPrefixes = []string{
+		"error processing question:",
+		"error fetching wiki structure:",
+		"error fetching wiki contents:",
+	}
+)
 
 // Read performs one public DeepWiki tool call and returns text content only. It
 // neither persists the response nor treats it as GitHub authority.
@@ -74,7 +81,22 @@ func (c *Client) Read(ctx context.Context, req Request) (_ Response, err error) 
 		}
 	}
 	text := strings.Join(textParts, "\n")
-	return Response{Text: text, SourceURL: sourceURLPattern.FindString(text), Available: true}, nil
+	response := Response{Text: text, SourceURL: sourceURLPattern.FindString(text), Available: true}
+	if isProviderErrorText(text) {
+		response.Available = false
+	}
+	return response, nil
+}
+
+func isProviderErrorText(text string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(text))
+	for _, prefix := range providerErrorPrefixes {
+		if strings.HasPrefix(normalized, prefix) {
+			return true
+		}
+	}
+	return strings.HasPrefix(normalized, "repository not found.") &&
+		strings.Contains(normalized, "deepwiki.com")
 }
 
 func callDeepWikiTool(ctx context.Context, endpoint, name string, arguments map[string]any) (_ *mcp.CallToolResult, err error) {

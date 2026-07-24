@@ -64,5 +64,6 @@ type ClusterListResult struct {
 	Repo       RepoRef                    `json:"repo"`
 	Projection *ClusterProjectionIdentity `json:"projection,omitempty"`
 	Total      int                        `json:"total"`
+	Truncated  bool                       `json:"truncated"`
 	Clusters   []ClusterResult            `json:"clusters"`
 }

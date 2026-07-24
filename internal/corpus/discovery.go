@@ -74,30 +74,44 @@ func (c *Corpus) GetDiscoverySource(ctx context.Context, name string) (*Discover
 	return &source, nil
 }
 
-// ListDiscoverySources returns all sources in stable name order.
-func (c *Corpus) ListDiscoverySources(ctx context.Context) ([]DiscoverySource, error) {
+// DiscoverySourceList is one bounded, stable page of discovery sources.
+type DiscoverySourceList struct {
+	Sources   []DiscoverySource
+	Total     int
+	Truncated bool
+}
+
+const discoverySourceListLimit = 1000
+
+// ListDiscoverySources returns a bounded source page in stable name order.
+func (c *Corpus) ListDiscoverySources(ctx context.Context) (DiscoverySourceList, error) {
 	rows, err := c.db.QueryContext(ctx, `
-		SELECT id, name, kind, definition, enabled, created_at, updated_at
-		FROM discovery_sources ORDER BY name LIMIT 1000
-	`)
+		SELECT id, name, kind, definition, enabled, created_at, updated_at,
+		       (SELECT COUNT(*) FROM discovery_sources)
+		FROM discovery_sources ORDER BY name LIMIT ?
+	`, discoverySourceListLimit)
 	if err != nil {
-		return nil, fmt.Errorf("list discovery sources: %w", err)
+		return DiscoverySourceList{}, fmt.Errorf("list discovery sources: %w", err)
 	}
 	defer rows.Close()
-	var sources []DiscoverySource
+	var result DiscoverySourceList
 	for rows.Next() {
 		var source DiscoverySource
 		var enabled int
 		var created, updated int64
-		if err := rows.Scan(&source.ID, &source.Name, &source.Kind, &source.Definition, &enabled, &created, &updated); err != nil {
-			return nil, err
+		if err := rows.Scan(&source.ID, &source.Name, &source.Kind, &source.Definition, &enabled, &created, &updated, &result.Total); err != nil {
+			return DiscoverySourceList{}, err
 		}
 		source.Enabled = enabled != 0
 		source.CreatedAt = scanTime(created)
 		source.UpdatedAt = scanTime(updated)
-		sources = append(sources, source)
+		result.Sources = append(result.Sources, source)
 	}
-	return sources, rows.Err()
+	if err := rows.Err(); err != nil {
+		return DiscoverySourceList{}, err
+	}
+	result.Truncated = result.Total > len(result.Sources)
+	return result, nil
 }
 
 // RecordSourcePartition upserts the latest observation for one stable window.

@@ -77,6 +77,58 @@ func TestClientReadHandlesProviderAndTransportFailures(t *testing.T) {
 	}
 }
 
+func TestClientReadClassifiesProviderErrorTextAsUnavailable(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		text string
+	}{
+		{
+			name: "question with mixed repository availability",
+			text: "Error processing question: Repository not found. Visit https://deepwiki.com to index it. Requested repos: indexed/repo, missing/repo",
+		},
+		{
+			name: "structure unavailable",
+			text: "Error fetching wiki structure: Repository not found.",
+		},
+		{
+			name: "bare repository error",
+			text: "Repository not found. Visit https://deepwiki.com to index it.",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &Client{callTool: func(context.Context, string, string, map[string]any) (*mcp.CallToolResult, error) {
+				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: tt.text}}}, nil
+			}}
+			got, err := client.Read(context.Background(), Request{
+				Action:       "question",
+				Repositories: []string{"indexed/repo", "missing/repo"},
+				Question:     "Compare them.",
+			})
+			if err != nil || got.Available || got.Text != tt.text {
+				t.Fatalf("provider error text = %+v, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestClientReadKeepsNormalMultiRepositoryAnswerAvailable(t *testing.T) {
+	t.Parallel()
+	const answer = "indexed/repo and other/repo both organize documentation by subsystem."
+	client := &Client{callTool: func(context.Context, string, string, map[string]any) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: answer}}}, nil
+	}}
+	got, err := client.Read(context.Background(), Request{
+		Action:       "question",
+		Repositories: []string{"indexed/repo", "other/repo"},
+		Question:     "Compare them.",
+	})
+	if err != nil || !got.Available || got.Text != answer {
+		t.Fatalf("normal answer = %+v, %v", got, err)
+	}
+}
+
 func TestClientReadAcceptsEmptySuccessfulResponse(t *testing.T) {
 	t.Parallel()
 	client := &Client{callTool: func(context.Context, string, string, map[string]any) (*mcp.CallToolResult, error) {

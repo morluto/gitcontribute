@@ -43,12 +43,16 @@ func (s *Service) ListLenses(ctx context.Context) (*cli.LensListResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	records, err := c.ListLenses(ctx)
+	list, err := c.ListLenses(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list lenses: %w", err)
 	}
-	result := &cli.LensListResult{Lenses: make([]cli.LensResult, len(records))}
-	for i, r := range records {
+	result := &cli.LensListResult{
+		Lenses:    make([]cli.LensResult, len(list.Records)),
+		Total:     list.Total,
+		Truncated: list.Truncated,
+	}
+	for i, r := range list.Records {
 		result.Lenses[i] = *lensResult(&r)
 	}
 	return result, nil

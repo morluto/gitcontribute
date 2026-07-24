@@ -1,0 +1,8 @@
+{
+  "condition": "fallback_unavailable",
+  "source_revision": "1b8dce63e8ff09337c02065eef1f80b6d875ae44",
+  "source_match": {
+    "path": "internal/retry/budget.go",
+    "symbol": "AdaptiveBudget"
+  }
+}

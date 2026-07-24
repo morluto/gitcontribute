@@ -54,8 +54,9 @@ func (f *fakeSurfacesService) ListClusters(_ context.Context, repo cli.RepoRef, 
 	f.clustersCalled = true
 	f.lastClustersArg = repo
 	return &cli.ClusterListResult{
-		Repo:  repo,
-		Total: 2,
+		Repo:      repo,
+		Total:     2,
+		Truncated: true,
 		Clusters: []cli.ClusterResult{
 			{
 				StableID:    "abc12345",
@@ -103,7 +104,7 @@ func (f *fakeSurfacesService) AddLens(ctx context.Context, name string, def lens
 
 func (f *fakeSurfacesService) ListLenses(ctx context.Context) (*cli.LensListResult, error) {
 	f.listLensCalled = true
-	return &cli.LensListResult{Lenses: []cli.LensResult{{Name: "active-go"}}}, f.err
+	return &cli.LensListResult{Lenses: []cli.LensResult{{Name: "active-go"}}, Total: 2, Truncated: true}, f.err
 }
 
 func (f *fakeSurfacesService) ShowLens(ctx context.Context, name string) (*cli.LensResult, error) {
@@ -162,7 +163,7 @@ func (f *fakeSurfacesService) AddCollectionMembers(ctx context.Context, name str
 
 func (f *fakeSurfacesService) ListCollections(ctx context.Context) (*cli.CollectionListResult, error) {
 	f.listColCalled = true
-	return &cli.CollectionListResult{Collections: []cli.CollectionResult{{Name: "favorites", MemberCount: 2}}}, f.err
+	return &cli.CollectionListResult{Collections: []cli.CollectionResult{{Name: "favorites", MemberCount: 2}}, Total: 2, Truncated: true}, f.err
 }
 
 func (f *fakeSurfacesService) ArchiveSync(ctx context.Context, repo cli.RepoRef, opts cli.ArchiveSyncOptions) (*cli.SyncResult, error) {
@@ -235,7 +236,7 @@ func TestClustersCommand(t *testing.T) {
 	if !svc.clustersCalled || svc.lastClustersArg.String() != "o/r" {
 		t.Fatalf("clusters not called: called=%v repo=%+v", svc.clustersCalled, svc.lastClustersArg)
 	}
-	if !strings.Contains(stdout.String(), "abc12345") {
+	if !strings.Contains(stdout.String(), "abc12345") || !strings.Contains(stdout.String(), "1 shown, truncated") {
 		t.Fatalf("stdout = %q", stdout.String())
 	}
 
@@ -245,7 +246,7 @@ func TestClustersCommand(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout.String()), &got); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, stdout.String())
 	}
-	if got.Total != 2 {
+	if got.Total != 2 || !got.Truncated {
 		t.Fatalf("unexpected JSON: %+v", got)
 	}
 
@@ -294,7 +295,7 @@ func TestLensAddListShow(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout.String()), &list); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, stdout.String())
 	}
-	if len(list.Lenses) != 1 {
+	if len(list.Lenses) != 1 || list.Total != 2 || !list.Truncated {
 		t.Fatalf("unexpected list: %+v", list)
 	}
 
@@ -362,7 +363,7 @@ func TestCollectionCreateAddList(t *testing.T) {
 
 	c3, stdout, _ := newSurfacesCLI(svc)
 	requireNoErr(t, c3.Run(context.Background(), []string{"collection", "list"}))
-	if !svc.listColCalled || !strings.Contains(stdout.String(), "favorites") {
+	if !svc.listColCalled || !strings.Contains(stdout.String(), "favorites") || !strings.Contains(stdout.String(), "1 collections of 2 (truncated)") {
 		t.Fatalf("list collections not called: called=%v stdout=%q", svc.listColCalled, stdout.String())
 	}
 }

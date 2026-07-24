@@ -1,0 +1,183 @@
+{
+  "version": "agent-tool-eval.v3",
+  "fixture_revision": "evidence-boundaries-v1",
+  "minimum_trials_per_condition": 5,
+  "controlled_variables": [
+    "model",
+    "client",
+    "prompt",
+    "fixture_revision",
+    "permissions",
+    "sampling_settings",
+    "token_budget"
+  ],
+  "scenarios": [
+    {
+      "id": "contribution_readiness",
+      "class": "validation",
+      "prompt": "Assess whether the stored contribution can be called ready. Compare the exact base and candidate revisions, use any current evidence available in this condition, and return a compact evidence bundle that states remaining proof gaps.",
+      "starting_artifacts": [
+        "artifacts/contribution-readiness.json"
+      ],
+      "requested_deliverable": "A readiness decision plus a source-, revision-, freshness-, and coverage-aware evidence bundle.",
+      "conditions": [
+        {
+          "id": "stored_only",
+          "toolsets": [
+            "contribute"
+          ],
+          "live_ci_access": false,
+          "artifacts": [
+            "artifacts/conditions/contribution-readiness-stored-only.json"
+          ]
+        },
+        {
+          "id": "live_read_only",
+          "toolsets": [
+            "contribute",
+            "github_read_only"
+          ],
+          "live_ci_access": true,
+          "artifacts": [
+            "artifacts/conditions/contribution-readiness-live-read-only.json"
+          ]
+        },
+        {
+          "id": "permission_limited",
+          "toolsets": [
+            "contribute"
+          ],
+          "live_ci_access": "permission_denied",
+          "artifacts": [
+            "artifacts/conditions/contribution-readiness-permission-limited.json"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "repository_research",
+      "class": "retrieval",
+      "prompt": "Determine what the supplied repository evidence establishes about the requested implementation and related work. Use authoritative fallback when this condition permits it. Distinguish observations from inference and report unresolved scope instead of guessing.",
+      "starting_artifacts": [
+        "artifacts/repository-research.json"
+      ],
+      "requested_deliverable": "A bounded research conclusion with coverage, revision, authority, and remaining-proof metadata.",
+      "conditions": [
+        {
+          "id": "baseline_native",
+          "toolsets": [
+            "native_read_only"
+          ],
+          "artifacts": [
+            "artifacts/conditions/repository-research-baseline-native.json"
+          ]
+        },
+        {
+          "id": "current_gitcontribute",
+          "toolsets": [
+            "contribute",
+            "code",
+            "research"
+          ],
+          "artifacts": [
+            "artifacts/conditions/repository-research-current-gitcontribute.json"
+          ]
+        },
+        {
+          "id": "fallback_unavailable",
+          "toolsets": [
+            "native_read_only"
+          ],
+          "gitcontribute_available": false,
+          "artifacts": [
+            "artifacts/conditions/repository-research-fallback-unavailable.json"
+          ]
+        },
+        {
+          "id": "no_authoritative_fallback",
+          "toolsets": [
+            "contribute",
+            "code",
+            "research"
+          ],
+          "native_read_only": false,
+          "artifacts": [
+            "artifacts/conditions/repository-research-no-authoritative-fallback.json"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "version_aware_critique",
+      "class": "tool_skill_critique",
+      "prompt": "Review how the supplied tooling affected this completed repository-research workflow. Rank confirmed product defects, deployment/version problems, routing mistakes, capabilities already present, and follow-up evaluations. Recommend upstream work only where the evidence supports it.",
+      "starting_artifacts": [
+        "artifacts/version-aware-critique.json"
+      ],
+      "requested_deliverable": "A ranked critique whose findings identify evidence type, affected revision, freshness, confidence, owner, counterfactual, and disconfirming evidence.",
+      "conditions": [
+        {
+          "id": "baseline",
+          "toolsets": [
+            "native_read_only"
+          ],
+          "artifacts": [
+            "artifacts/conditions/version-aware-critique-baseline.json"
+          ]
+        },
+        {
+          "id": "pinned_runtime",
+          "toolsets": [
+            "contribute"
+          ],
+          "runtime_version": "0.8.0",
+          "artifacts": [
+            "artifacts/conditions/version-aware-critique-pinned-runtime.json"
+          ]
+        },
+        {
+          "id": "version_aware",
+          "toolsets": [
+            "contribute",
+            "native_read_only"
+          ],
+          "runtime_version": "0.8.0",
+          "current_contract_available": true,
+          "artifacts": [
+            "artifacts/conditions/version-aware-critique-version-aware.json"
+          ]
+        },
+        {
+          "id": "current_runtime",
+          "toolsets": [
+            "contribute",
+            "code",
+            "research"
+          ],
+          "runtime_version": "0.10.0",
+          "artifacts": [
+            "artifacts/conditions/version-aware-critique-current-runtime.json"
+          ]
+        }
+      ]
+    }
+  ],
+  "efficiency_metrics": [
+    "time_to_decisive_evidence_ms",
+    "mcp_calls",
+    "network_reads",
+    "model_facing_tokens",
+    "retries",
+    "repeated_reads",
+    "handoff_bytes"
+  ],
+  "reviewer_handoff": {
+    "input": "public task plus candidate-declared evidence bundle only",
+    "must_verify": [
+      "claim source and revision",
+      "coverage and freshness",
+      "observation versus inference",
+      "remaining proof"
+    ]
+  }
+}

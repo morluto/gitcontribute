@@ -10,6 +10,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/clustering"
+	"github.com/morluto/gitcontribute/internal/clusterprojection"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/lens"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
@@ -191,6 +192,18 @@ func TestUnchangedEmptyClusterProjectionReportsZeroCurrentCounts(t *testing.T) {
 	}
 }
 
+func TestClusterListConverterPreservesProjectionTotalAndTruncation(t *testing.T) {
+	t.Parallel()
+	result := clusterListToCLI(cli.RepoRef{Owner: "owner", Repo: "repo"}, clusterprojection.List{
+		Clusters:  make([]clustering.Cluster, 1),
+		Total:     3,
+		Truncated: true,
+	}, 1)
+	if result.Total != 3 || !result.Truncated || len(result.Clusters) != 1 {
+		t.Fatalf("cluster list = %+v", result)
+	}
+}
+
 func TestCurrentProjectionClusterCountExcludesRetiredHistory(t *testing.T) {
 	t.Parallel()
 	clusters := []clustering.Cluster{{State: clustering.ClusterOpen}, {State: clustering.ClusterClosed}, {State: clustering.ClusterRetired}}
@@ -264,7 +277,7 @@ func TestServiceLensAndCollections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list lenses: %v", err)
 	}
-	if len(list.Lenses) != 1 || list.Lenses[0].Name != "active-go" {
+	if len(list.Lenses) != 1 || list.Lenses[0].Name != "active-go" || list.Total != 1 || list.Truncated {
 		t.Fatalf("unexpected lenses: %+v", list)
 	}
 
@@ -291,7 +304,7 @@ func TestServiceLensAndCollections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list collections: %v", err)
 	}
-	if len(cols.Collections) != 1 || cols.Collections[0].MemberCount != 2 {
+	if len(cols.Collections) != 1 || cols.Collections[0].MemberCount != 2 || cols.Total != 1 || cols.Truncated {
 		t.Fatalf("unexpected collections: %+v", cols)
 	}
 }
