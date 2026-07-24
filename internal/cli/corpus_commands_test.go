@@ -82,6 +82,7 @@ func (f *fakeService) Setup(_ context.Context, opts cli.SetupOptions) (*cli.Setu
 }
 
 func TestCorpusLifecycleCommands(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{}
 	c, stdout, _ := newTestCLI(svc, nil)
 
@@ -149,6 +150,7 @@ func TestCorpusLifecycleCommands(t *testing.T) {
 }
 
 func TestCorpusDestructiveCommandsRequireConsent(t *testing.T) {
+	t.Parallel()
 	c, _, _ := newTestCLI(&fakeService{}, nil)
 	input, err := os.CreateTemp(t.TempDir(), "stdin")
 	if err != nil {

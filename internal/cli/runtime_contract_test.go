@@ -19,6 +19,7 @@ func (s *runtimeContractService) RuntimeContract(context.Context) (*cli.RuntimeC
 }
 
 func TestRuntimeContractCommandIsAlwaysMachineReadable(t *testing.T) {
+	t.Parallel()
 	service := &runtimeContractService{fakeService: &fakeService{}}
 	command, stdout, _ := newTestCLI(service, nil)
 	requireNoErr(t, command.Run(context.Background(), []string{"runtime-contract"}))

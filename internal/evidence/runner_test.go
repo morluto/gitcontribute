@@ -20,6 +20,7 @@ func findOrSkip(t *testing.T, name string) string {
 }
 
 func TestExecRunnerRejectsUnboundedCapture(t *testing.T) {
+	t.Parallel()
 	r := NewExecRunner()
 	_, err := r.Run(context.Background(), RunRequest{Args: []string{"ignored"}, Dir: t.TempDir(), MaxOutputBytes: maxOutputBytes + 1})
 	if !errors.Is(err, ErrInvalidOutputLimit) {
@@ -28,6 +29,7 @@ func TestExecRunnerRejectsUnboundedCapture(t *testing.T) {
 }
 
 func TestExecRunnerEcho(t *testing.T) {
+	t.Parallel()
 	echo := findOrSkip(t, "echo")
 	r := NewExecRunner()
 	ctx := context.Background()
@@ -52,6 +54,7 @@ func TestExecRunnerEcho(t *testing.T) {
 }
 
 func TestExecRunnerNoShell(t *testing.T) {
+	t.Parallel()
 	echo := findOrSkip(t, "echo")
 	r := NewExecRunner()
 	ctx := context.Background()
@@ -75,6 +78,7 @@ func TestExecRunnerNoShell(t *testing.T) {
 }
 
 func TestExecRunnerFailingExit(t *testing.T) {
+	t.Parallel()
 	falseCmd := findOrSkip(t, "false")
 	r := NewExecRunner()
 	ctx := context.Background()
@@ -96,6 +100,7 @@ func TestExecRunnerFailingExit(t *testing.T) {
 }
 
 func TestExecRunnerTruncation(t *testing.T) {
+	t.Parallel()
 	printf := findOrSkip(t, "printf")
 	r := NewExecRunner()
 	ctx := context.Background()
@@ -119,6 +124,7 @@ func TestExecRunnerTruncation(t *testing.T) {
 }
 
 func TestExecRunnerCancellation(t *testing.T) {
+	t.Parallel()
 	sleep := findOrSkip(t, "sleep")
 	r := NewExecRunner()
 	dir := t.TempDir()
@@ -167,6 +173,7 @@ func TestExecRunnerCapturesProcessTreeTelemetryAndCleanup(t *testing.T) {
 }
 
 func TestUnavailableMetricIsNotEncodedAsZero(t *testing.T) {
+	t.Parallel()
 	metric := metricInt64(0, errors.New("unsupported platform metric"))
 	if metric.Value != nil || metric.UnavailableReason == "" {
 		t.Fatalf("metric = %+v", metric)

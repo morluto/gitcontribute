@@ -38,6 +38,7 @@ func (f *fakeControlService) Doctor(context.Context) (*cli.DoctorResult, error) 
 }
 
 func TestControlCommands(t *testing.T) {
+	t.Parallel()
 	svc := &fakeControlService{
 		fakeService: &fakeService{},
 		metadata:    &cli.MetadataResult{Name: "gitcontribute", Version: "test", Capabilities: []string{"mcp-stdio"}},
@@ -74,6 +75,7 @@ func TestControlCommands(t *testing.T) {
 }
 
 func TestDoctorStrictReturnsFailureAfterRenderingDiagnostics(t *testing.T) {
+	t.Parallel()
 	svc := &fakeControlService{
 		fakeService: &fakeService{},
 		doctor: &cli.DoctorResult{Healthy: false, Checks: []cli.DoctorCheck{{
@@ -115,6 +117,7 @@ func (f *fakeJobService) CancelJob(_ context.Context, id string) (*cli.JobResult
 }
 
 func TestJobCommands(t *testing.T) {
+	t.Parallel()
 	svc := &fakeJobService{fakeService: &fakeService{}, job: &cli.JobResult{ID: "job-1", Kind: "crawl", Status: "running", CreatedAt: "now"}}
 	c, stdout, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"jobs", "--status", "running", "--json"}))
@@ -147,6 +150,7 @@ func (f *fakeTUIRunner) Run(_ context.Context, opts cli.TUIOptions) error {
 }
 
 func TestTUICommandDispatch(t *testing.T) {
+	t.Parallel()
 	runner := &fakeTUIRunner{}
 	c, _, _ := newTestCLI(&fakeService{}, nil)
 	c.SetTUIRunner(runner)
@@ -157,6 +161,7 @@ func TestTUICommandDispatch(t *testing.T) {
 }
 
 func TestBareInvocationDispatchesTUI(t *testing.T) {
+	t.Parallel()
 	runner := &fakeTUIRunner{}
 	c, _, _ := newTestCLI(&fakeService{}, nil)
 	c.SetInput(strings.NewReader(""))
@@ -169,6 +174,7 @@ func TestBareInvocationDispatchesTUI(t *testing.T) {
 }
 
 func TestBareInvocationWithoutTerminalReturnsConciseUsageError(t *testing.T) {
+	t.Parallel()
 	input, output, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("create input pipe: %v", err)
@@ -197,6 +203,7 @@ func TestBareInvocationWithoutTerminalReturnsConciseUsageError(t *testing.T) {
 }
 
 func TestBareInvocationRequiresInteractiveOutput(t *testing.T) {
+	t.Parallel()
 	outputReader, outputWriter, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("create output pipe: %v", err)
@@ -222,6 +229,7 @@ func TestBareInvocationRequiresInteractiveOutput(t *testing.T) {
 }
 
 func TestMCPServeCommand(t *testing.T) {
+	t.Parallel()
 	runner := &fakeMCPRunner{}
 	c, _, _ := newTestCLI(nil, runner)
 	requireNoErr(t, c.Run(context.Background(), []string{"mcp", "serve", "--transport", "stdio"}))

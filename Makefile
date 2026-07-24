@@ -10,10 +10,15 @@ GOFMT ?= gofmt
 GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || printf '%s/bin/golangci-lint' "$$($(GO) env GOPATH)")
 GOLANGCI_LINT_VERSION ?= v2.12.2
 GOLANGCI_LINT_BIN ?= $(shell $(GO) env GOPATH)/bin
+# Most repository tests are I/O-heavy and opt into t.Parallel. Keep this
+# overridable for constrained machines while allowing local and CI runs to
+# use more than the historical four-test cap.
+TEST_PARALLELISM ?= 8
+TEST_PACKAGE_PARALLELISM ?= 8
 
 help:
 	@echo "Common targets:"
-	@echo "  make test          cached local test suite"
+	@echo "  make test          cached local test suite (packages=$(TEST_PACKAGE_PARALLELISM), tests=$(TEST_PARALLELISM))"
 	@echo "  make check         fast formatting, test, and changed-code lint checks"
 	@echo "  make verify        complete uncached local validation"
 	@echo "  make test-race     focused race tests for stateful packages"
@@ -60,22 +65,26 @@ install-tools:
 	sh "$$installer" -b "$(GOLANGCI_LINT_BIN)" "$(GOLANGCI_LINT_VERSION)"
 
 test:
-	$(GO) test -short -parallel=4 -timeout 120s ./...
+	$(GO) test -short -p=$(TEST_PACKAGE_PARALLELISM) -parallel=$(TEST_PARALLELISM) -timeout 120s ./...
 
 test-uncached:
-	$(GO) test -short -parallel=4 -count=1 -timeout 120s ./...
+	$(GO) test -short -p=$(TEST_PACKAGE_PARALLELISM) -parallel=$(TEST_PARALLELISM) -count=1 -timeout 120s ./...
 
 test-race:
-	$(GO) test -short -race -parallel=2 -timeout 300s ./internal/app ./internal/corpus ./internal/workspace
+	# Keep package-level overlap for cross-package race coverage while bounding
+	# in-process test concurrency for the CPU-heavy SQLite tests.
+	$(GO) test -short -race -p=4 -parallel=2 -timeout 600s ./internal/app ./internal/corpus ./internal/workspace
 
 test-race-full:
-	$(GO) test -race -parallel=4 -count=1 -timeout 300s ./...
+	# Keep package-level overlap for cross-package race coverage while bounding
+	# in-process test concurrency for the CPU-heavy SQLite tests.
+	$(GO) test -race -p=4 -parallel=2 -count=1 -timeout 900s ./...
 
 test-verbose:
-	$(GO) test -short -v -parallel=4 -timeout 120s ./...
+	$(GO) test -short -v -p=$(TEST_PACKAGE_PARALLELISM) -parallel=$(TEST_PARALLELISM) -timeout 120s ./...
 
 test-cover:
-	$(GO) test -short -parallel=4 \
+	$(GO) test -short -p=$(TEST_PACKAGE_PARALLELISM) -parallel=$(TEST_PARALLELISM) \
 		-coverprofile=coverage.out \
 		-covermode=set \
 		-coverpkg=./internal/... \

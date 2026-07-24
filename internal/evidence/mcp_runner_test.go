@@ -58,6 +58,7 @@ func TestMCPStdioRunnerRecordsSDKMilestones(t *testing.T) {
 }
 
 func TestExpectedMCPShutdownSignalIsNonFatal(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("signal exit status is POSIX-specific")
 	}
@@ -70,6 +71,7 @@ func TestExpectedMCPShutdownSignalIsNonFatal(t *testing.T) {
 }
 
 func TestMCPStdioRunnerClassifiesReadinessDeadline(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture is POSIX-only")
 	}
@@ -92,6 +94,7 @@ func TestMCPStdioRunnerClassifiesReadinessDeadline(t *testing.T) {
 }
 
 func TestCloseProtocolBoundsStuckShutdownAndUsesConfiguredCancellation(t *testing.T) {
+	t.Parallel()
 	done := make(chan struct{})
 	defer close(done)
 	ctx, cancel := context.WithCancel(context.Background())

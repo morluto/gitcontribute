@@ -12,6 +12,7 @@ import (
 )
 
 func TestTriageRecordDispatchesOptions(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{triageEventResult: &cli.TriageEventResult{
 		ID: "te-1", TargetKind: "opportunity", TargetRef: "opp-1", Outcome: "investigated", Lens: "active-go",
 	}}
@@ -35,6 +36,7 @@ func TestTriageRecordDispatchesOptions(t *testing.T) {
 }
 
 func TestTriageListDispatchesBoundedOptions(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{triageEventListResult: &cli.TriageEventListResult{Events: []cli.TriageEventResult{
 		{ID: "te-1", TargetKind: "repository", TargetRef: "owner/repo", Outcome: "saved"},
 	}}}
@@ -52,6 +54,7 @@ func TestTriageListDispatchesBoundedOptions(t *testing.T) {
 }
 
 func TestTriageListRejectsInvalidLimit(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{}
 	c, _, _ := newTestCLI(svc, nil)
 	err := c.Run(context.Background(), []string{"triage", "list", "--limit", "0"})
@@ -62,6 +65,7 @@ func TestTriageListRejectsInvalidLimit(t *testing.T) {
 }
 
 func TestContributionRecordDispatchesOptions(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{contributionResult: &cli.ContributionResult{
 		ID: "c-1", OpportunityID: "opp-1", Kind: "issue", Title: "parser panics",
 	}}
@@ -86,6 +90,7 @@ func TestContributionRecordDispatchesOptions(t *testing.T) {
 }
 
 func TestContributionListAndShow(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{
 		contributionListResult: &cli.ContributionListResult{Contributions: []cli.ContributionResult{
 			{ID: "c-1", OpportunityID: "opp-1", Kind: "issue", Title: "parser panics"},
@@ -115,6 +120,7 @@ func TestContributionListAndShow(t *testing.T) {
 }
 
 func TestContributionOutcomeAndOutcomes(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{
 		contributionOutcomeResult: &cli.ContributionOutcomeResult{
 			ID: "co-1", ContributionID: "c-1", Outcome: "submitted",
@@ -146,6 +152,7 @@ func TestContributionOutcomeAndOutcomes(t *testing.T) {
 }
 
 func TestTrackingExportWritesBundleToStdout(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{metadataExportResult: &cli.MetadataExportResult{
 		SchemaVersion:        2,
 		Data:                 []byte(`{"schema_version":2,"triage_events":[],"evidence":[]}`),
@@ -168,6 +175,7 @@ func TestTrackingExportWritesBundleToStdout(t *testing.T) {
 }
 
 func TestTrackingExportWritesBundleToFile(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{metadataExportResult: &cli.MetadataExportResult{
 		SchemaVersion:        2,
 		Data:                 []byte(`{"schema_version":2,"triage_events":[],"evidence":[{}]}`),
@@ -188,6 +196,7 @@ func TestTrackingExportWritesBundleToFile(t *testing.T) {
 }
 
 func TestTrackingImportReadsStdin(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{metadataImportResult: &cli.MetadataImportResult{SchemaVersion: 2, Evidence: 1}}
 	c, stdout, _ := newTestCLI(svc, nil)
 	c.SetInput(strings.NewReader(`{"triage_events":[]}`))
@@ -204,6 +213,7 @@ func TestTrackingImportReadsStdin(t *testing.T) {
 }
 
 func TestTrackingImportReadsFile(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{metadataImportResult: &cli.MetadataImportResult{}}
 	path := filepath.Join(t.TempDir(), "metadata.json")
 	if err := os.WriteFile(path, []byte(`{"triage_events":[]}`), 0o600); err != nil {

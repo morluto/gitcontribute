@@ -16,6 +16,7 @@ import (
 )
 
 func TestMCPValidationResolvesManagedWorkspaceAndRejectsCrossInvestigation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test", nil)
@@ -63,6 +64,7 @@ func TestMCPValidationResolvesManagedWorkspaceAndRejectsCrossInvestigation(t *te
 }
 
 func TestDefineValidationParsesQuotedArguments(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test", nil)

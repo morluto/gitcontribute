@@ -25,6 +25,7 @@ func (f *threadInvestigationFakeService) StartInvestigationFromThread(_ context.
 }
 
 func TestInvestigationStartThreadParsesTypedRefAndRendersJSON(t *testing.T) {
+	t.Parallel()
 	result := &cli.ThreadInvestigationResult{
 		Created: true,
 		Investigation: &cli.InvestigationResult{
@@ -49,6 +50,7 @@ func TestInvestigationStartThreadParsesTypedRefAndRendersJSON(t *testing.T) {
 }
 
 func TestInvestigationStartThreadValidatesRefAndCapability(t *testing.T) {
+	t.Parallel()
 	service := &threadInvestigationFakeService{fakeService: &fakeService{}}
 	c, _, _ := newTestCLI(service, nil)
 	err := c.Run(context.Background(), []string{"investigation", "start-thread", "bad-ref"})
@@ -69,6 +71,7 @@ func TestInvestigationStartThreadValidatesRefAndCapability(t *testing.T) {
 }
 
 func TestInvestigationStartThreadHumanOutputExplainsReuse(t *testing.T) {
+	t.Parallel()
 	result := &cli.ThreadInvestigationResult{
 		Created: false,
 		Investigation: &cli.InvestigationResult{

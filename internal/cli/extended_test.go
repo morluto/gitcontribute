@@ -143,6 +143,7 @@ func (f *fakeExtendedService) PreparePullRequest(ctx context.Context, opportunit
 }
 
 func TestWorkspaceCreateAndShow(t *testing.T) {
+	t.Parallel()
 	svc := &fakeExtendedService{
 		fakeService: &fakeService{},
 		workspaceResult: &cli.WorkspaceResult{
@@ -187,6 +188,7 @@ func TestWorkspaceCreateAndShow(t *testing.T) {
 }
 
 func TestWorkspaceCreateDefersDefaultsToService(t *testing.T) {
+	t.Parallel()
 	svc := &fakeExtendedService{
 		fakeService:     &fakeService{},
 		workspaceResult: &cli.WorkspaceResult{ID: "ws-1"},
@@ -204,6 +206,7 @@ func TestWorkspaceCreateDefersDefaultsToService(t *testing.T) {
 }
 
 func TestValidationDefineRunAndCompare(t *testing.T) {
+	t.Parallel()
 	svc := &fakeExtendedService{
 		fakeService: &fakeService{},
 		validationResult: &cli.ValidationResult{
@@ -307,6 +310,7 @@ func TestValidationDefineRunAndCompare(t *testing.T) {
 }
 
 func TestEvidenceShow(t *testing.T) {
+	t.Parallel()
 	svc := &fakeExtendedService{
 		fakeService: &fakeService{},
 		evidenceResult: &cli.EvidenceResult{
@@ -334,6 +338,7 @@ func TestEvidenceShow(t *testing.T) {
 }
 
 func TestReadinessOpportunityAndExplain(t *testing.T) {
+	t.Parallel()
 	svc := &fakeExtendedService{
 		fakeService: &fakeService{},
 		readinessResult: &cli.ReadinessResult{
@@ -388,6 +393,7 @@ func TestReadinessOpportunityAndExplain(t *testing.T) {
 }
 
 func TestPrepareIssueAndPullRequest(t *testing.T) {
+	t.Parallel()
 	svc := &fakeExtendedService{
 		fakeService: &fakeService{},
 		draftResult: &cli.DraftResult{

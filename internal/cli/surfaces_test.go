@@ -228,6 +228,7 @@ func newSurfacesCLI(svc *fakeSurfacesService) (*cli.CLI, *strings.Builder, *stri
 }
 
 func TestClustersCommand(t *testing.T) {
+	t.Parallel()
 	svc := &fakeSurfacesService{fakeService: &fakeService{}}
 	c, stdout, _ := newSurfacesCLI(svc)
 	requireNoErr(t, c.Run(context.Background(), []string{"clusters", "list", "o/r"}))
@@ -256,6 +257,7 @@ func TestClustersCommand(t *testing.T) {
 }
 
 func TestClusterShowCommand(t *testing.T) {
+	t.Parallel()
 	svc := &fakeSurfacesService{fakeService: &fakeService{}}
 	c, stdout, _ := newSurfacesCLI(svc)
 	requireNoErr(t, c.Run(context.Background(), []string{"cluster", "show", "abc12345"}))
@@ -268,6 +270,7 @@ func TestClusterShowCommand(t *testing.T) {
 }
 
 func TestLensAddListShow(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := dir + "/lens.json"
 	data := []byte(`{"filter":{"kinds":["issue"],"updated_within":"720h"},"weights":{"relevance":1}}`)
@@ -325,6 +328,7 @@ func TestLensAddListShow(t *testing.T) {
 }
 
 func TestLensExplainRequiresRef(t *testing.T) {
+	t.Parallel()
 	svc := &fakeSurfacesService{fakeService: &fakeService{}}
 	c, _, _ := newSurfacesCLI(svc)
 	err := c.Run(context.Background(), []string{"lens", "explain", "active-go"})
@@ -332,6 +336,7 @@ func TestLensExplainRequiresRef(t *testing.T) {
 }
 
 func TestCollectionCreateAddList(t *testing.T) {
+	t.Parallel()
 	svc := &fakeSurfacesService{fakeService: &fakeService{}}
 	c, stdout, _ := newSurfacesCLI(svc)
 	requireNoErr(t, c.Run(context.Background(), []string{"collection", "create", "favorites"}))
@@ -363,6 +368,7 @@ func TestCollectionCreateAddList(t *testing.T) {
 }
 
 func TestCollectionAddRejectsInvalidMember(t *testing.T) {
+	t.Parallel()
 	svc := &fakeSurfacesService{fakeService: &fakeService{}}
 	c, _, _ := newSurfacesCLI(svc)
 	err := c.Run(context.Background(), []string{"collection", "add", "favorites", "bad"})
@@ -373,6 +379,7 @@ func TestCollectionAddRejectsInvalidMember(t *testing.T) {
 }
 
 func TestArchiveAndLocalQueryCommands(t *testing.T) {
+	t.Parallel()
 	svc := &fakeSurfacesService{fakeService: &fakeService{}}
 	c, stdout, stderr := newSurfacesCLI(svc)
 
@@ -405,6 +412,7 @@ func TestArchiveAndLocalQueryCommands(t *testing.T) {
 }
 
 func TestArchiveSyncRejectsConflictingFiltersBeforeDispatch(t *testing.T) {
+	t.Parallel()
 	svc := &fakeSurfacesService{fakeService: &fakeService{}}
 	c, _, stderr := newSurfacesCLI(svc)
 	err := c.Run(context.Background(), []string{"archive", "sync", "o/r", "--numbers", "1", "--since", "1h"})
@@ -418,6 +426,7 @@ func TestArchiveSyncRejectsConflictingFiltersBeforeDispatch(t *testing.T) {
 }
 
 func TestExportCommandWritesContent(t *testing.T) {
+	t.Parallel()
 	svc := &fakeSurfacesService{fakeService: &fakeService{}}
 	c, stdout, _ := newSurfacesCLI(svc)
 	requireNoErr(t, c.Run(context.Background(), []string{"export", "dossier", "o/r"}))

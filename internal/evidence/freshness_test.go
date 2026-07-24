@@ -15,6 +15,7 @@ func (f revisionReaderFunc) CurrentSourceRevision(ctx context.Context, subject S
 }
 
 func TestFreshnessEvaluatorStatuses(t *testing.T) {
+	t.Parallel()
 	recorded := testSourceRevision(SourceSubjectThread, "issue", 42, "", time.Unix(100, 0).UTC(), 7)
 	tests := []struct {
 		name    string
@@ -49,6 +50,7 @@ func TestFreshnessEvaluatorStatuses(t *testing.T) {
 }
 
 func TestFreshnessEvaluatorReasonIsDeterministic(t *testing.T) {
+	t.Parallel()
 	a := testSourceRevision(SourceSubjectFacet, "issue", 1, "issue_comments", time.Unix(100, 0).UTC(), 4)
 	b := testSourceRevision(SourceSubjectFacet, "issue", 1, "pr_reviews", time.Unix(100, 0).UTC(), 5)
 	reader := revisionReaderFunc(func(_ context.Context, subject SourceSubject) (*SourceRevision, error) {
@@ -77,6 +79,7 @@ func TestFreshnessEvaluatorReasonIsDeterministic(t *testing.T) {
 }
 
 func TestNormalizeSourceRevisionsRejectsInvalidAndDuplicateSubjects(t *testing.T) {
+	t.Parallel()
 	revision := testSourceRevision(SourceSubjectThread, "issue", 1, "", time.Unix(100, 0).UTC(), 1)
 	if _, err := NormalizeSourceRevisions([]SourceRevision{revision, revision}); err == nil {
 		t.Fatal("duplicate subject accepted")
@@ -88,6 +91,7 @@ func TestNormalizeSourceRevisionsRejectsInvalidAndDuplicateSubjects(t *testing.T
 }
 
 func TestFreshnessEvaluatorHonorsCancellation(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	called := false

@@ -7,6 +7,7 @@ import (
 )
 
 func TestMCP(t *testing.T) {
+	t.Parallel()
 	runner := &fakeMCPRunner{}
 	c, stdout, stderr := newTestCLI(nil, runner)
 
@@ -29,6 +30,7 @@ func TestMCP(t *testing.T) {
 }
 
 func TestMCPReadOnly(t *testing.T) {
+	t.Parallel()
 	runner := &fakeMCPRunner{}
 	c, _, _ := newTestCLI(nil, runner)
 
