@@ -15,6 +15,7 @@ import (
 
 	"github.com/gofrs/flock"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/pelletier/go-toml/v2/unstable"
 )
 
 const serverName = "gitcontribute"
@@ -26,12 +27,16 @@ const codexSkillOwnershipMarker = "<!-- Managed by gitcontribute setup. Manual e
 var codexSkillContent = []byte(`---
 name: gitcontribute
 description: >
-  Use for source-backed GitHub contribution workflows: repository and code research, issue triage, pull request review, contributor portfolio analysis, contribution preparation, duplicate and competing-work detection, investigations, workspaces, and validation evidence. Do not use for simple one-off GitHub lookups, ordinary local git commands, or GitHub mutations.
+  Use for source-backed GitHub contribution workflows: repository and code research, issue drafting and triage, pre-filing duplicate checks, pull request review, contributor portfolio analysis, contribution preparation, competing-work detection, investigations, workspaces, and validation evidence. Trigger on requests such as "check for a related issue before filing", "avoid duplicate reports", or "triage these findings". Do not use for simple one-off GitHub lookups, ordinary local git commands, or GitHub mutations.
 ---
 
 <!-- Managed by gitcontribute setup. Manual edits may be replaced. -->
 
-When the user's request matches the description above, prefer the GitContribute MCP server. Discover its tools (names prefixed with mcp__gitcontribute__) and choose the narrowest tool for the task, such as portfolio research, repository search, investigation management, or workspace creation. Let the tool schemas and contracts guide arguments; do not invent unsupported fields. If no GitContribute tool fits, fall back to ordinary tools.
+When the user's request matches the description above, prefer the GitContribute MCP server. Discover its tools (names prefixed with mcp__gitcontribute__) and choose the narrowest tool for the task. Let the tool schemas and contracts guide arguments; do not invent unsupported fields.
+
+For issue drafting, triage, and duplicate checks: inspect corpus coverage and freshness; perform one bounded sync only when coverage is missing or stale; search stored threads offline; broaden strict multi-term searches when needed; hydrate only exact finalists; then verify current state with live GitHub before filing. Never treat zero matches as absence when coverage is incomplete or the query may be too strict.
+
+Use native GitHub tools for final live-state verification and every mutation. If no GitContribute tool fits, fall back to ordinary tools.
 `)
 
 type codexSkillState string
@@ -661,7 +666,6 @@ func editClaude(path string, operation Operation, launcher Launcher, dryRun bool
 	return "configured", nil
 }
 
-var tomlSection = regexp.MustCompile(`(?m)^\[[^\n]+\]\r?$`)
 var npmVersion = regexp.MustCompile(`^(latest|[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$`)
 
 func editCodex(path string, operation Operation, launcher Launcher, dryRun bool) (string, error) {
@@ -722,22 +726,54 @@ func editCodex(path string, operation Operation, launcher Launcher, dryRun bool)
 }
 
 func findCodexBlock(text string) (int, int, bool) {
-	header := "[mcp_servers.gitcontribute]"
-	start := strings.Index(text, header)
-	if start < 0 || (start > 0 && text[start-1] != '\n') {
-		return 0, 0, false
-	}
-	rest := text[start+len(header):]
-	locations := tomlSection.FindAllStringIndex(rest, -1)
-	end := len(text)
-	for _, location := range locations {
-		candidate := start + len(header) + location[0]
-		if candidate > start {
-			end = candidate
-			break
+	var parser unstable.Parser
+	parser.Reset([]byte(text))
+	start := -1
+	for parser.NextExpression() {
+		expression := parser.Expression()
+		if expression.Kind != unstable.Table && expression.Kind != unstable.ArrayTable {
+			continue
+		}
+		offset := tableHeaderOffset([]byte(text), expression)
+		if offset < 0 {
+			return 0, 0, false
+		}
+		if start >= 0 {
+			return start, offset, true
+		}
+		if expression.Kind == unstable.Table && isCodexServerTable(expression) {
+			start = offset
 		}
 	}
-	return start, end, true
+	if parser.Error() != nil || start < 0 {
+		return 0, 0, false
+	}
+	return start, len(text), true
+}
+
+func tableHeaderOffset(document []byte, table *unstable.Node) int {
+	key := table.Key()
+	if !key.Next() {
+		return -1
+	}
+	keyOffset := int(key.Node().Raw.Offset)
+	lineStart := bytes.LastIndexByte(document[:keyOffset], '\n') + 1
+	bracketOffset := bytes.IndexByte(document[lineStart:keyOffset], '[')
+	if bracketOffset < 0 {
+		return -1
+	}
+	return lineStart
+}
+
+func isCodexServerTable(table *unstable.Node) bool {
+	key := table.Key()
+	if !key.Next() || string(key.Node().Data) != "mcp_servers" {
+		return false
+	}
+	if !key.Next() || string(key.Node().Data) != serverName {
+		return false
+	}
+	return !key.Next()
 }
 
 func codexTOMLBlock(launcher Launcher) string {

@@ -54,6 +54,37 @@ func TestActivateExistingRestoresAllRegistrationsWhenInterrupted(t *testing.T) {
 	}
 }
 
+func TestEditCodexPreservesIndentedFollowingTable(t *testing.T) {
+	for _, operation := range []Operation{Configure, Remove} {
+		t.Run(string(operation), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.toml")
+			following := "    [projects.\"/tmp/example\"]\ntrust_level = \"trusted\"\n"
+			input := "# [mcp_servers.gitcontribute] is managed below\n[mcp_servers.\"gitcontribute\"]\ncommand = \"old\"\nargs = [\"mcp\", \"serve\"]\n\n" + following
+			if err := os.WriteFile(path, []byte(input), 0600); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := editCodex(path, operation, Launcher{Command: "new", Args: []string{"mcp", "serve"}}, false); err != nil {
+				t.Fatal(err)
+			}
+
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(got), following) {
+				t.Fatalf("following table changed or removed:\n%s", got)
+			}
+			if operation == Configure && !strings.Contains(string(got), "command = \"new\"") {
+				t.Fatalf("GitContribute table was not updated:\n%s", got)
+			}
+			if operation == Remove && strings.Contains(string(got), "command = \"old\"") {
+				t.Fatalf("GitContribute table was not removed:\n%s", got)
+			}
+		})
+	}
+}
+
 func TestActivateExistingPreservesConcurrentEditDuringRollback(t *testing.T) {
 	home := t.TempDir()
 	oldExecutable := filepath.Join(home, "bin", "1.2.3", "gitcontribute")
@@ -259,6 +290,10 @@ func TestRunInstallsAndRemovesCodexSkillIdempotently(t *testing.T) {
 	}
 	if !bytes.Equal(written, codexSkillContent) {
 		t.Fatalf("skill content mismatch")
+	}
+	if !bytes.Contains(written, []byte("check for a related issue before filing")) ||
+		!bytes.Contains(written, []byte("inspect corpus coverage and freshness")) {
+		t.Fatalf("skill lacks issue-triage routing:\n%s", written)
 	}
 
 	report, err = Run(Options{Operation: Configure, Clients: []Client{Codex}, Home: home, Executable: "/bin/gitcontribute"})
