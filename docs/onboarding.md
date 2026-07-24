@@ -3,23 +3,28 @@
 The primary installation and onboarding entry point is:
 
 ```sh
-npx gitcontribute setup
+npx --yes gitcontribute@latest setup
 ```
 
 The wizard identifies the resolved GitContribute version before any choice.
+The explicit `@latest` prevents an older dependency in the current project or
+an ancestor `node_modules` directory from becoming the bootstrap runtime.
+After selection, setup still installs and registers one exact immutable
+version. An intentionally pinned project runtime can instead use
+`npm exec -- gitcontribute setup`.
 
 The interactive wizard presents three access modes: MCP, CLI, or Both.
 Non-interactive callers select the same product choice with `--mode`.
 
 ```sh
 # Both: CLI and Codex MCP
-npx gitcontribute setup --mode both --codex --token-source none --yes
+npx --yes gitcontribute@latest setup --mode both --codex --token-source none --yes
 
 # CLI only
-npx gitcontribute setup --mode cli --token-source none --yes
+npx --yes gitcontribute@latest setup --mode cli --token-source none --yes
 
 # MCP only; private runtime without a global command
-npx gitcontribute setup --mode mcp --codex --token-source none --yes
+npx --yes gitcontribute@latest setup --mode mcp --codex --token-source none --yes
 ```
 
 GitContribute remains a native Go application. The `gitcontribute` npm package

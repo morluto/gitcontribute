@@ -37,6 +37,14 @@ test("published package has no install lifecycle", async () => {
   for (const name of ["preinstall", "install", "postinstall"]) assert.equal(pkg.scripts?.[name], undefined);
 });
 
+test("stable bootstrap documentation bypasses stale local packages", async () => {
+  for (const path of ["README.md", join("docs", "onboarding.md")]) {
+    const documentation = await readFile(join(root, path), "utf8");
+    assert.match(documentation, /npx --yes gitcontribute@latest setup/);
+    assert.doesNotMatch(documentation, /npx gitcontribute setup/);
+  }
+});
+
 test("launcher distinguishes source checkout from incomplete package", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-launcher-missing-"));
   try {
