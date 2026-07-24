@@ -21,7 +21,10 @@ func NewRuntimeContract(version string) (*contracts.RuntimeContractResult, error
 		return nil, err
 	}
 	return &contracts.RuntimeContractResult{
-		Name: "gitcontribute", Version: version, SupportedSchemaVersion: schema,
+		Name:                   "gitcontribute",
+		Version:                version,
+		SupportedSchemaLineage: corpus.SupportedSchemaLineage(),
+		SupportedSchemaVersion: schema,
 	}, nil
 }
 

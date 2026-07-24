@@ -108,6 +108,15 @@ Migration creates its own verified backup unless `--no-backup` is explicitly
 selected. Running MCP processes hold shared corpus process leases, so migration
 fails fast until those processes are restarted or stopped.
 
+The canonical schema baseline is an intentional hard cutover. Supported
+corpora carry its durable SQLite lineage identifier; an unmarked corpus or a
+corpus from another lineage cannot be migrated in place, regardless of its
+numeric schema version. Setup, inspection, and upgrade leave an incompatible
+corpus unchanged. Use a matching release, or archive or move the database out
+of the configured path and run `npx --yes gitcontribute@latest setup` to
+initialize the current corpus. There is no automatic recreate or deletion
+command.
+
 Setup never chooses repository or code-index scope. Repository data enters the
 corpus only through explicit sync/hydration commands; code enters only through
 explicit index/acquire commands. List every stored repository scope with
@@ -164,6 +173,20 @@ SQLite. The report lists clients that must restart before their running MCP
 processes use the activated release. An older unmanaged binary that cannot
 obtain target-release bytes leaves registrations unchanged and tells the user
 to rerun upgrade from the installed target release.
+
+MCP-only setup does not install a command on `PATH`. Run its upgrade checks
+through the current package explicitly:
+
+```sh
+npx --yes gitcontribute@latest upgrade --check
+npx --yes gitcontribute@latest upgrade --yes
+```
+
+Upgrade distinguishes an ephemeral `npx` invocation, project-local npm,
+global npm, and GitContribute's versioned private MCP runtimes. GitContribute is
+currently published through npm, so it does not probe or invoke package
+managers such as Homebrew or Cargo.
+
 `gitcontribute remove` deletes only selected coding-agent registrations. It
 does not delete versioned private runtimes, uninstall the global CLI, or remove
 application configuration or corpus data. Use

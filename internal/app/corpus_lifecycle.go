@@ -407,6 +407,9 @@ func (s *Service) MigrateCorpus(ctx context.Context, opts contracts.CorpusMigrat
 	if before.State == corpus.SchemaNewer {
 		return nil, &corpus.UnsupportedSchemaError{Current: before.Current, Target: before.Target}
 	}
+	if before.State == corpus.SchemaIncompatible {
+		return nil, &corpus.IncompatibleSchemaError{Current: before.Current, Target: before.Target}
+	}
 	if before.State == corpus.SchemaDamaged {
 		return nil, fmt.Errorf("cannot migrate damaged corpus: %s", before.Problem)
 	}

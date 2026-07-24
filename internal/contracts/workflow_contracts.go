@@ -219,6 +219,7 @@ type RuntimeContractService interface {
 type RuntimeContractResult struct {
 	Name                   string `json:"name"`
 	Version                string `json:"version"`
+	SupportedSchemaLineage string `json:"supported_schema_lineage"`
 	SupportedSchemaVersion int64  `json:"supported_schema_version"`
 }
 

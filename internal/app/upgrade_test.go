@@ -14,6 +14,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/managedbinary"
 	_ "modernc.org/sqlite"
 )
@@ -49,12 +50,14 @@ func TestUpgradeNpxDoesNotInstallGlobalPackage(t *testing.T) {
 }
 
 func TestUpgradeDoesNotInstallAcrossSchemaIncompatibility(t *testing.T) {
-	report := &contracts.UpgradeReport{
-		Context: "global-npm", Current: "1.2.3", Latest: "1.2.4",
-		Stages: []contracts.UpgradeStage{{Name: "corpus-schema", Status: "migration_required"}},
-	}
-	if shouldInstall(report, contracts.UpgradeOptions{Yes: true}) {
-		t.Fatal("schema-incompatible upgrade was authorized for installation")
+	for _, status := range []string{"migration_required", "incompatible"} {
+		report := &contracts.UpgradeReport{
+			Context: "global-npm", Current: "1.2.3", Latest: "1.2.4",
+			Stages: []contracts.UpgradeStage{{Name: "corpus-schema", Status: status}},
+		}
+		if shouldInstall(report, contracts.UpgradeOptions{Yes: true}) {
+			t.Fatalf("schema status %q authorized installation", status)
+		}
 	}
 }
 
@@ -528,14 +531,25 @@ func TestUpgradeCorpusSchemaMigrationRequired(t *testing.T) {
 	home := t.TempDir()
 	dbPath := filepath.Join(home, "gitcontribute.db")
 
+	current, err := corpus.Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := current.Close(); err != nil {
+		t.Fatal(err)
+	}
+	target, err := corpus.SupportedSchemaVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("CREATE TABLE goose_db_version (id INTEGER PRIMARY KEY, version_id INTEGER)"); err != nil {
+	if _, err := db.Exec("DELETE FROM goose_db_version"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("INSERT INTO goose_db_version (id, version_id) VALUES (1, 0)"); err != nil {
+	if _, err := db.Exec("INSERT INTO goose_db_version (id, version_id, is_applied, tstamp) VALUES (1, ?, 1, CURRENT_TIMESTAMP)", target-1); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -560,7 +574,7 @@ func TestUpgradeCorpusSchemaMigrationRequired(t *testing.T) {
 	}
 }
 
-func TestUpgradeCorpusSchemaNewer(t *testing.T) {
+func TestUpgradeCorpusSchemaIncompatible(t *testing.T) {
 	home := t.TempDir()
 	dbPath := filepath.Join(home, "gitcontribute.db")
 
@@ -584,97 +598,93 @@ func TestUpgradeCorpusSchemaNewer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if report.Status != "corpus newer than binary" {
+	if report.Status != "corpus schema incompatible" {
 		t.Fatalf("status = %q", report.Status)
 	}
-	assertStage(t, report, "corpus-schema", "newer")
-	assertStage(t, report, "activation", "rollback_or_upgrade")
+	assertStage(t, report, "corpus-schema", "incompatible")
+	assertStage(t, report, "activation", "matching_release_or_cutover")
 }
 
-func TestUpgradeUsesTargetContractToRecoverNewerCorpus(t *testing.T) {
-	for _, tt := range []struct {
-		name         string
-		targetSchema int64
-		wantStatus   string
-		wantStage    string
-	}{
-		{name: "matching target", targetSchema: 9999, wantStatus: "updated", wantStage: "current"},
-		{name: "mismatched target", targetSchema: 1, wantStatus: "corpus newer than binary", wantStage: "newer"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			originalCmd := upgradeCommand
-			originalExec := osExecutable
-			originalContract := runtimeContractCommand
-			originalGOOS := upgradeGOOS
-			t.Cleanup(func() {
-				upgradeCommand = originalCmd
-				osExecutable = originalExec
-				runtimeContractCommand = originalContract
-				upgradeGOOS = originalGOOS
-			})
-			upgradeGOOS = "linux"
-			t.Setenv("npm_command", "")
-			t.Setenv("npm_lifecycle_event", "")
+func TestUpgradeRecoversNewerSchemaInCanonicalLineage(t *testing.T) {
+	originalCmd := upgradeCommand
+	originalExec := osExecutable
+	originalContract := runtimeContractCommand
+	originalGOOS := upgradeGOOS
+	t.Cleanup(func() {
+		upgradeCommand = originalCmd
+		osExecutable = originalExec
+		runtimeContractCommand = originalContract
+		upgradeGOOS = originalGOOS
+	})
+	upgradeGOOS = "linux"
+	t.Setenv("npm_command", "")
+	t.Setenv("npm_lifecycle_event", "")
 
-			home := t.TempDir()
-			dbPath := filepath.Join(home, "gitcontribute.db")
-			db, err := sql.Open("sqlite", dbPath)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := db.Exec("CREATE TABLE goose_db_version (id INTEGER PRIMARY KEY, version_id INTEGER)"); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := db.Exec("INSERT INTO goose_db_version (id, version_id) VALUES (1, 9999)"); err != nil {
-				t.Fatal(err)
-			}
-			if err := db.Close(); err != nil {
-				t.Fatal(err)
-			}
-
-			globalRoot := filepath.Join(home, "global", "lib", "node_modules")
-			packageRoot := filepath.Join(globalRoot, "gitcontribute")
-			executable := filepath.Join(packageRoot, "npm", "bin", "native", "linux-x64", "gitcontribute")
-			if err := os.MkdirAll(filepath.Dir(executable), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(executable, []byte("release-1.2.3"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			writePackageJSON(t, packageRoot, "1.2.3")
-			osExecutable = func() (string, error) { return executable, nil }
-			upgradeCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
-				switch {
-				case name == "npm" && len(args) >= 2 && args[0] == "root" && args[1] == "--global":
-					return []byte(globalRoot + "\n"), nil
-				case name == "npm" && len(args) >= 2 && args[0] == "view" && args[1] == "gitcontribute":
-					return []byte("1.2.4\n"), nil
-				case name == "npm" && len(args) >= 2 && args[0] == "install" && args[1] == "--global":
-					writePackageJSON(t, packageRoot, "1.2.4")
-					return nil, nil
-				default:
-					t.Fatalf("unexpected command: %s %v", name, args)
-					return nil, nil
-				}
-			}
-			runtimeContractCommand = func(_ context.Context, _ string) ([]byte, error) {
-				return []byte(fmt.Sprintf(`{"name":"gitcontribute","version":"1.2.4","supported_schema_version":%d}`, tt.targetSchema)), nil
-			}
-
-			svc := testService(t, home, "1.2.3", dbPath)
-			report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if report.Status != tt.wantStatus {
-				t.Fatalf("status = %q, want %q", report.Status, tt.wantStatus)
-			}
-			assertStage(t, report, "corpus-schema", tt.wantStage)
-			if clients := outdatedPrivateRuntimeClients(report); len(clients) != 0 {
-				t.Fatalf("outdated clients = %v, want none", clients)
-			}
-		})
+	home := t.TempDir()
+	dbPath := filepath.Join(home, "gitcontribute.db")
+	c, err := corpus.Open(context.Background(), dbPath)
+	if err != nil {
+		t.Fatal(err)
 	}
+	currentSchema, err := c.SchemaVersion(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(context.Background(), `INSERT INTO goose_db_version (version_id, is_applied, tstamp) VALUES (?, 1, CURRENT_TIMESTAMP)`, currentSchema+1); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	globalRoot := filepath.Join(home, "global", "lib", "node_modules")
+	packageRoot := filepath.Join(globalRoot, "gitcontribute")
+	executable := filepath.Join(packageRoot, "npm", "bin", "native", "linux-x64", "gitcontribute")
+	if err := os.MkdirAll(filepath.Dir(executable), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(executable, []byte("release-1.2.3"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writePackageJSON(t, packageRoot, "1.2.3")
+	osExecutable = func() (string, error) { return executable, nil }
+	upgradeCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		switch {
+		case name == "npm" && len(args) >= 2 && args[0] == "root" && args[1] == "--global":
+			return []byte(globalRoot + "\n"), nil
+		case name == "npm" && len(args) >= 2 && args[0] == "view" && args[1] == "gitcontribute":
+			return []byte("1.2.4\n"), nil
+		case name == "npm" && len(args) >= 2 && args[0] == "install" && args[1] == "--global":
+			writePackageJSON(t, packageRoot, "1.2.4")
+			return nil, nil
+		default:
+			t.Fatalf("unexpected command: %s %v", name, args)
+			return nil, nil
+		}
+	}
+	runtimeContractCommand = func(_ context.Context, _ string) ([]byte, error) {
+		return []byte(fmt.Sprintf(
+			`{"name":"gitcontribute","version":"1.2.4","supported_schema_lineage":%q,"supported_schema_version":%d}`,
+			corpus.SupportedSchemaLineage(), currentSchema+1,
+		)), nil
+	}
+
+	svc := testService(t, home, "1.2.3", dbPath)
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Status != "updated" {
+		t.Fatalf("status = %q, want updated", report.Status)
+	}
+	assertStage(t, report, "corpus-schema", "current")
 }
 
 func setRuntimeContract(t *testing.T, version string, supportedSchema int64) {
@@ -682,7 +692,7 @@ func setRuntimeContract(t *testing.T, version string, supportedSchema int64) {
 	original := runtimeContractCommand
 	t.Cleanup(func() { runtimeContractCommand = original })
 	runtimeContractCommand = func(_ context.Context, _ string) ([]byte, error) {
-		return []byte(fmt.Sprintf(`{"name":"gitcontribute","version":%q,"supported_schema_version":%d,"schema_version":0}`, version, supportedSchema)), nil
+		return []byte(fmt.Sprintf(`{"name":"gitcontribute","version":%q,"supported_schema_lineage":%q,"supported_schema_version":%d}`, version, corpus.SupportedSchemaLineage(), supportedSchema)), nil
 	}
 }
 

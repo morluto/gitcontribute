@@ -27,8 +27,12 @@ const (
 	SchemaCurrent SchemaState = "current"
 	// SchemaMigrationRequired indicates that the corpus must be migrated.
 	SchemaMigrationRequired SchemaState = "migration_required"
-	// SchemaNewer indicates that the corpus is newer than this runtime supports.
+	// SchemaNewer indicates that the corpus belongs to the canonical lineage
+	// but requires a newer runtime.
 	SchemaNewer SchemaState = "newer"
+	// SchemaIncompatible indicates that the corpus belongs to an unsupported
+	// schema lineage. Inspection never mutates it.
+	SchemaIncompatible SchemaState = "incompatible"
 	// SchemaDamaged indicates that SQLite could not read the corpus safely.
 	SchemaDamaged SchemaState = "damaged"
 )
@@ -154,6 +158,9 @@ func migrateWithLease(ctx context.Context, path string, observer MigrationObserv
 	db.SetConnMaxLifetime(0)
 	defer closeSQLOnReturn(db, &returnErr)
 	c := &Corpus{db: db}
+	if err := c.establishSchemaIdentity(ctx); err != nil {
+		return err
+	}
 	if err := c.ApplyMigrations(ctx, observer); err != nil {
 		return err
 	}
@@ -254,6 +261,14 @@ func inspectSchemaContents(ctx context.Context, db *sql.DB, result SchemaInspect
 }
 
 func schemaInspectionError(result SchemaInspection, err error) (SchemaInspection, error) {
+	var incompatible *IncompatibleSchemaError
+	if errors.As(err, &incompatible) {
+		result.Current = incompatible.Current
+		result.Target = incompatible.Target
+		result.State = SchemaIncompatible
+		result.Problem = "corpus schema identity does not match this release"
+		return result, nil
+	}
 	if isSQLiteDamage(err) {
 		result.State = SchemaDamaged
 		result.Problem = err.Error()

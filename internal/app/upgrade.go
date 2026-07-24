@@ -51,6 +51,9 @@ func runNPMCommand(ctx context.Context, args []string) ([]byte, error) {
 	default:
 		return nil, fmt.Errorf("unsupported npm arguments %q", args)
 	}
+	if args[0] != "install" {
+		return command.Output()
+	}
 	return command.CombinedOutput()
 }
 
@@ -127,7 +130,7 @@ func (s *Service) Upgrade(ctx context.Context, opts contracts.UpgradeOptions) (*
 		}
 	}
 
-	if opts.Yes && len(outdatedPrivateRuntimeClients(report)) > 0 {
+	if opts.Yes && stageStatus(report, "corpus-schema") != "incompatible" && len(outdatedPrivateRuntimeClients(report)) > 0 {
 		s.activatePrivateRuntime(ctx, report, details)
 	}
 
@@ -180,7 +183,7 @@ func shouldInstall(report *contracts.UpgradeReport, opts contracts.UpgradeOption
 	if upgradeGOOS == "windows" {
 		return false
 	}
-	if status := stageStatus(report, "corpus-schema"); status == "migration_required" || status == "failed" {
+	if status := stageStatus(report, "corpus-schema"); status == "migration_required" || status == "incompatible" || status == "failed" {
 		return false
 	}
 	disposition := reportVersionDisposition(report)
@@ -193,7 +196,11 @@ func setCommandAndStatus(report *contracts.UpgradeReport) {
 		return
 	}
 	if stageStatus(report, "corpus-schema") == "newer" {
-		report.Status = "corpus newer than binary"
+		report.Status = "corpus requires newer release"
+		return
+	}
+	if stageStatus(report, "corpus-schema") == "incompatible" {
+		report.Status = "corpus schema incompatible"
 		return
 	}
 

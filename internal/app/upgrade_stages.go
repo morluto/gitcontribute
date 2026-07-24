@@ -40,7 +40,10 @@ func (s *Service) schemaStage(ctx context.Context) contracts.UpgradeStage {
 		stage.Message = fmt.Sprintf("corpus migration required: current %d, target %d", inspection.Current, inspection.Target)
 	case corpus.SchemaNewer:
 		stage.Status = "newer"
-		stage.Message = fmt.Sprintf("corpus schema %d is newer than this binary supports (%d)", inspection.Current, inspection.Target)
+		stage.Message = fmt.Sprintf("corpus schema %d requires a newer release than this binary's schema %d", inspection.Current, inspection.Target)
+	case corpus.SchemaIncompatible:
+		stage.Status = "incompatible"
+		stage.Message = fmt.Sprintf("corpus schema %d is incompatible with this binary's schema %d and cannot be migrated in place", inspection.Current, inspection.Target)
 	}
 	return stage
 }
@@ -54,8 +57,13 @@ func activationStage(report *contracts.UpgradeReport, opts contracts.UpgradeOpti
 		report.Action = stage.Message
 		return stage
 	case "newer":
-		stage.Status = "rollback_or_upgrade"
-		stage.Message = "corpus was written by a newer binary; upgrade to a matching release first"
+		stage.Status = "upgrade_required"
+		stage.Message = "upgrade to a release that supports this canonical corpus schema"
+		report.Action = stage.Message
+		return stage
+	case "incompatible":
+		stage.Status = "matching_release_or_cutover"
+		stage.Message = "use a matching release for this corpus, or archive or move it out of the configured path and rerun setup"
 		report.Action = stage.Message
 		return stage
 	}

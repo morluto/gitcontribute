@@ -197,6 +197,9 @@ func validateRestoreArtifact(ctx context.Context, source string, manifest Backup
 	if inspection.State == SchemaNewer {
 		return &UnsupportedSchemaError{Current: inspection.Current, Target: inspection.Target}
 	}
+	if inspection.State == SchemaIncompatible {
+		return &IncompatibleSchemaError{Current: inspection.Current, Target: inspection.Target}
+	}
 	return nil
 }
 

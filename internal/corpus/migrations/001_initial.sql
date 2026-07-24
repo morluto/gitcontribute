@@ -1,5 +1,6 @@
 -- +goose Up
 -- +goose StatementBegin
+PRAGMA application_id = 1195594818;
 CREATE TABLE observation_sequences (
     name TEXT PRIMARY KEY,
     next_value INTEGER NOT NULL
