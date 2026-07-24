@@ -1,0 +1,40 @@
+{
+  "artifact_version": "contribution-readiness.v1",
+  "repository": "northstar/pulse",
+  "stored_pull_request": {
+    "number": 74,
+    "base_revision": "5f27d874d0f94c8d1c4130902bf62cb9d15f5f8a",
+    "head_revision": "8c2e7f92f657b118b5f4368443ad18080eecfe55",
+    "source_revision": "thread-observation-411",
+    "observed_at": "2026-02-10T09:00:00Z",
+    "state": "open",
+    "mergeability": "unknown"
+  },
+  "checks_facet": {
+    "status": "unavailable",
+    "complete": false,
+    "source_revision": "checks-attempt-97",
+    "observed_at": "2026-02-10T09:00:04Z",
+    "items": []
+  },
+  "validation_definition": {
+    "base_revision": "5f27d874d0f94c8d1c4130902bf62cb9d15f5f8a",
+    "candidate_revision": "8c2e7f92f657b118b5f4368443ad18080eecfe55",
+    "command": "go test ./...",
+    "expected_observation": "TestLeaseRenewal survives concurrent reconciliation"
+  },
+  "recorded_validation": {
+    "base": {
+      "revision": "5f27d874d0f94c8d1c4130902bf62cb9d15f5f8a",
+      "exit_code": 1,
+      "observed_symptom": "package assets/embed: fixture directory missing",
+      "matches_expected_observation": false
+    },
+    "candidate": {
+      "revision": "8c2e7f92f657b118b5f4368443ad18080eecfe55",
+      "exit_code": 0,
+      "observed_symptom": "all package tests passed",
+      "matches_expected_observation": false
+    }
+  }
+}

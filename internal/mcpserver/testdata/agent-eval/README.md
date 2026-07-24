@@ -18,3 +18,8 @@ It scores conclusions and evidence, not one exact call order. Run the public
 cases repeatedly through the same model and sampling settings with the focused
 catalog, save the full MCP transcript, then have a separate reviewer apply the
 oracle.
+
+`v3/` adds evidence-boundary scenarios for stale contribution readiness, empty
+or unavailable repository research, and version-aware tool critique. Its
+manifest freezes every public and private artifact; its calibration
+trajectories prove that the hidden semantic gates reject the intended traps.

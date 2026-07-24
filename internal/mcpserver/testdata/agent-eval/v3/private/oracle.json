@@ -1,0 +1,134 @@
+{
+  "version": "agent-tool-eval-oracle.v3",
+  "fixture_revision": "evidence-boundaries-v1",
+  "semantic_threshold": 0.8,
+  "scenarios": [
+    {
+      "id": "contribution_readiness",
+      "correct_conclusion": "Readiness is unsupported in stored-only and permission-limited conditions; live read-only condition is not ready because the exact head revision has the expected failing CI symptom.",
+      "acceptable_alternatives": [
+        "Return unknown with an explicit current-check proof gap when live evidence is unavailable.",
+        "Return not ready when authoritative current CI records the expected symptom at the exact head revision."
+      ],
+      "required_claims": [
+        "stored_checks_unavailable",
+        "exact_revisions_compared",
+        "base_failure_unrelated",
+        "remaining_proof_explicit"
+      ],
+      "required_evidence": [
+        "checks-attempt-97",
+        "5f27d874d0f94c8d1c4130902bf62cb9d15f5f8a",
+        "8c2e7f92f657b118b5f4368443ad18080eecfe55",
+        "package assets/embed: fixture directory missing"
+      ],
+      "critical_discriminator": "A nonzero base result is unrelated to the expected concurrency symptom, while current CI at the exact head revision records that symptom.",
+      "tempting_wrong_path": "Treat unavailable checks as passing or treat the unrelated base failure plus green candidate run as causal regression proof.",
+      "known_uncertainty": "Stored-only and permission-limited conditions cannot establish current workflow state.",
+      "tool_boundary": {
+        "can": "Read stored revisions, coverage, validation, and condition-authorized current CI.",
+        "cannot": "Turn unavailable checks into pass or infer causality from exit status alone."
+      },
+      "rubric": {
+        "semantic_correctness": 35,
+        "evidence_grounding": 25,
+        "discriminator_handling": 15,
+        "tool_use": 10,
+        "validation_integrity": 10,
+        "handoff_quality": 5
+      },
+      "hard_failures": [
+        "missing_checks_are_passing",
+        "unrelated_base_failure_is_regression_proof",
+        "revision_mismatch_ignored",
+        "proof_gap_omitted"
+      ]
+    },
+    {
+      "id": "repository_research",
+      "correct_conclusion": "The missing-coverage zero result proves no absence; the complete control proves only no match in its frozen query/snapshot; provider error prose contains no analysis; authoritative fallback finds implementation evidence when available.",
+      "acceptable_alternatives": [
+        "Use an explicit bounded refresh before concluding.",
+        "Use native source or GitHub reads when authorized.",
+        "Return unresolved when neither refresh nor authoritative fallback is permitted."
+      ],
+      "required_claims": [
+        "missing_coverage_not_absence",
+        "complete_zero_is_scope_bounded",
+        "derived_error_not_analysis",
+        "authority_boundary_preserved"
+      ],
+      "required_evidence": [
+        "1b8dce63e8ff09337c02065eef1f80b6d875ae44",
+        "c375eca88a428ced70a837d9972a91c9b5f65bda",
+        "internal/retry/budget.go",
+        "threads-page-3"
+      ],
+      "critical_discriminator": "Coverage and authority must be inspected before an empty result becomes an absence claim.",
+      "tempting_wrong_path": "Report that no implementation or related issue exists from zero matches or error-only derived prose.",
+      "known_uncertainty": "Without refresh or fallback, current source and thread state remain unknown.",
+      "tool_boundary": {
+        "can": "Report stored snapshot coverage, perform bounded explicit refreshes, and provide derived navigation context.",
+        "cannot": "Prove semantic absence beyond query/snapshot scope or make derived prose current authority."
+      },
+      "rubric": {
+        "semantic_correctness": 35,
+        "evidence_grounding": 25,
+        "discriminator_handling": 15,
+        "tool_use": 10,
+        "validation_integrity": 10,
+        "handoff_quality": 5
+      },
+      "hard_failures": [
+        "missing_coverage_converted_to_absence",
+        "provider_error_treated_as_analysis",
+        "derived_prose_called_authoritative",
+        "proof_gap_omitted"
+      ]
+    },
+    {
+      "id": "version_aware_critique",
+      "correct_conclusion": "Classify zero search as coverage/routing, the old response omission as version lag, stale unqualified bootstrap and current provider-status behavior as distinct product defects, exact pinning as intentional, and broad quality claims as unsupported.",
+      "acceptable_alternatives": [
+        "Rank either reproduced current defect first when evidence type and affected revision remain explicit."
+      ],
+      "required_claims": [
+        "zero_search_is_coverage_routing",
+        "coverage_tool_already_existed",
+        "response_omission_is_version_lag",
+        "stale_bootstrap_distinct_from_pinning",
+        "provider_status_is_current_defect",
+        "single_trace_not_quality_proof"
+      ],
+      "required_evidence": [
+        "0.8.0",
+        "0.10.0",
+        "corpus.get_coverage",
+        "4a8fc06791eb0f012329121a2163378c285dfa27"
+      ],
+      "critical_discriminator": "Check deployed/current versions and coverage contracts before labeling an observation a current missing capability.",
+      "tempting_wrong_path": "Propose a coverage feature that existed, blame code search for an unindexed corpus, or replace exact runtime identity with implicit latest execution.",
+      "known_uncertainty": "One workflow cannot establish comparative product quality.",
+      "tool_boundary": {
+        "can": "Expose stored coverage and compare supplied versioned contracts.",
+        "cannot": "Infer current behavior from an old runtime or general quality from one trace."
+      },
+      "rubric": {
+        "semantic_correctness": 35,
+        "evidence_grounding": 25,
+        "discriminator_handling": 15,
+        "tool_use": 10,
+        "validation_integrity": 10,
+        "handoff_quality": 5
+      },
+      "hard_failures": [
+        "unindexed_zero_called_search_defect",
+        "existing_capability_proposed_as_new",
+        "old_omission_called_current",
+        "exact_pinning_called_defect",
+        "provider_defect_dismissed_as_version_lag"
+      ]
+    }
+  ]
+}
+
