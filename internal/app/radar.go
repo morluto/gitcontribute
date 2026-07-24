@@ -9,6 +9,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/clustering"
+	"github.com/morluto/gitcontribute/internal/clusterprojection"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/radar"
@@ -190,6 +191,11 @@ func radarDuplicateClusters(ctx context.Context, c *corpus.Corpus, ref domain.Re
 	if err != nil {
 		return nil, false, fmt.Errorf("list duplicate clusters: %w", err)
 	}
+	out, capped := radarDuplicateClusterFacts(ref, projection)
+	return out, capped, nil
+}
+
+func radarDuplicateClusterFacts(ref domain.RepoRef, projection clusterprojection.List) (map[int]*radar.DuplicateCluster, bool) {
 	out := make(map[int]*radar.DuplicateCluster)
 	clusters := projection.Clusters
 	for _, cluster := range clusters {
@@ -215,7 +221,7 @@ func radarDuplicateClusters(ctx context.Context, c *corpus.Corpus, ref domain.Re
 			}
 		}
 	}
-	return out, len(clusters) == 1000, nil
+	return out, projection.Truncated
 }
 
 func radarClusterMemberRef(ref clustering.MemberRef) string {
