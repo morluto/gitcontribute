@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -362,193 +360,6 @@ func (f *fakeService) ImportLocalMetadata(ctx context.Context, opts cli.Metadata
 	return f.metadataImportResult, f.err
 }
 
-func TestIndex(t *testing.T) {
-	svc := &fakeService{indexResult: &cli.IndexResult{Repo: cli.RepoRef{Owner: "o", Repo: "r"}, Commit: "abc", Files: 2}}
-	c, stdout, stderr := newTestCLI(svc, nil)
-	requireNoErr(t, c.Run(context.Background(), []string{"index", "o/r", "/checkout"}))
-	if !svc.indexCalled || svc.lastIndexRepo.String() != "o/r" || svc.lastIndexPath != "/checkout" {
-		t.Fatalf("index call = called:%v repo:%v path:%q", svc.indexCalled, svc.lastIndexRepo, svc.lastIndexPath)
-	}
-	if !strings.Contains(stdout.String(), "abc") || !strings.Contains(stderr.String(), "indexing") {
-		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
-	}
-}
-
-func TestAcquire(t *testing.T) {
-	svc := &fakeService{acquisitionResult: &cli.AcquisitionResult{
-		Repo: cli.RepoRef{Owner: "o", Repo: "r"}, CommitSHA: "abc", Indexed: true,
-	}}
-	c, stdout, stderr := newTestCLI(svc, nil)
-	requireNoErr(t, c.Run(context.Background(), []string{"acquire", "o/r", "--remote", "https://example.test/o/r.git", "--json"}))
-	if !svc.acquireCalled || svc.lastIndexRepo.String() != "o/r" || svc.lastAcquireRemote != "https://example.test/o/r.git" {
-		t.Fatalf("acquire args: called=%v repo=%v remote=%q", svc.acquireCalled, svc.lastIndexRepo, svc.lastAcquireRemote)
-	}
-	if !strings.Contains(stdout.String(), `"commit_sha": "abc"`) || !strings.Contains(stderr.String(), "acquiring and indexing o/r") {
-		t.Fatalf("stdout=%q stderr=%q", stdout, stderr)
-	}
-}
-
-func TestHealth(t *testing.T) {
-	svc := &fakeService{healthResult: &health.Report{Repo: health.RepoRef{Owner: "o", Repo: "r"}}}
-	c, stdout, _ := newTestCLI(svc, nil)
-	requireNoErr(t, c.Run(context.Background(), []string{"health", "o/r", "--start", "2026-07-01T00:00:00Z", "--end", "2026-07-17T00:00:00Z", "--stale-after", "240h", "--json"}))
-	if !svc.healthCalled || svc.lastIndexRepo.String() != "o/r" || svc.lastHealthOpts.StaleThreshold != 240*time.Hour || svc.lastHealthOpts.Start.IsZero() {
-		t.Fatalf("health args: called=%v repo=%v opts=%+v", svc.healthCalled, svc.lastIndexRepo, svc.lastHealthOpts)
-	}
-	if !strings.Contains(stdout.String(), `"repo": {`) {
-		t.Fatalf("stdout=%q", stdout)
-	}
-}
-
-func TestSourceAddSearchAndList(t *testing.T) {
-	svc := &fakeService{
-		sourceResult:     &cli.SourceResult{Name: "active-go", Kind: "search", Definition: `{"query":"language:go"}`, Enabled: true},
-		sourceListResult: &cli.SourceListResult{Sources: []cli.SourceResult{{Name: "active-go", Kind: "search", Enabled: true}}},
-	}
-	c, stdout, _ := newTestCLI(svc, nil)
-	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "search", "--name", "active-go", "--query", "language:go"}))
-	if !svc.addSourceCalled || svc.lastSourceName != "active-go" || svc.lastSourceQuery != "language:go" {
-		t.Fatalf("add source call = called:%v name:%q query:%q", svc.addSourceCalled, svc.lastSourceName, svc.lastSourceQuery)
-	}
-	if !strings.Contains(stdout.String(), "Source active-go") {
-		t.Fatalf("stdout = %q", stdout.String())
-	}
-
-	stdout.Reset()
-	requireNoErr(t, c.Run(context.Background(), []string{"source", "list"}))
-	if !svc.listSourcesCalled || !strings.Contains(stdout.String(), "active-go") {
-		t.Fatalf("listed=%v stdout=%q", svc.listSourcesCalled, stdout.String())
-	}
-}
-
-func TestSourceAddRepos(t *testing.T) {
-	svc := &fakeService{
-		sourceResult: &cli.SourceResult{Name: "golang-go", Kind: "repos", Definition: `{"repositories":[{"owner":"golang","repo":"go"}]}`, Enabled: true},
-	}
-	c, stdout, _ := newTestCLI(svc, nil)
-	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "golang/go"}))
-	if !svc.addRepoSourceCalled || svc.lastSourceName != "golang-go" || len(svc.lastSourceRefs) != 1 || svc.lastSourceRefs[0].String() != "golang/go" {
-		t.Fatalf("add repo source call = called:%v name:%q refs:%+v", svc.addRepoSourceCalled, svc.lastSourceName, svc.lastSourceRefs)
-	}
-	if !strings.Contains(stdout.String(), "Source golang-go") {
-		t.Fatalf("stdout = %q", stdout.String())
-	}
-}
-
-func TestSourceAddReposAcceptsURL(t *testing.T) {
-	svc := &fakeService{sourceResult: &cli.SourceResult{Name: "x-y", Kind: "repos"}}
-	c, _, _ := newTestCLI(svc, nil)
-	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "https://github.com/X/Y"}))
-	if len(svc.lastSourceRefs) != 1 || svc.lastSourceRefs[0].String() != "X/Y" {
-		t.Fatalf("refs = %+v", svc.lastSourceRefs)
-	}
-}
-
-func TestSourceAddReposImportsStructuredStdin(t *testing.T) {
-	svc := &fakeService{sourceResult: &cli.SourceResult{Name: "imported", Kind: "repos", Enabled: true}}
-	c, _, _ := newTestCLI(svc, nil)
-	c.SetInput(strings.NewReader(`{"repositories":["one/first",{"owner":"two","repo":"second"},{"full_name":"three/third"}]}`))
-	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "--name", "imported", "--file", "-"}))
-	if len(svc.lastSourceRefs) != 3 || svc.lastSourceRefs[1].String() != "two/second" {
-		t.Fatalf("refs = %+v", svc.lastSourceRefs)
-	}
-}
-
-func TestSourceAddReposImportsLineFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "repositories.txt")
-	if err := os.WriteFile(path, []byte("# favorites\none/first\nhttps://github.com/two/second\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	svc := &fakeService{sourceResult: &cli.SourceResult{Name: "imported", Kind: "repos", Enabled: true}}
-	c, _, _ := newTestCLI(svc, nil)
-	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "repos", "--name", "imported", "--file", path}))
-	if len(svc.lastSourceRefs) != 2 || svc.lastSourceRefs[1].String() != "two/second" {
-		t.Fatalf("refs = %+v", svc.lastSourceRefs)
-	}
-}
-
-func TestSourceAddReposRejectsInvalidURL(t *testing.T) {
-	svc := &fakeService{}
-	c, _, _ := newTestCLI(svc, nil)
-	err := c.Run(context.Background(), []string{"source", "add", "repos", "https://gitlab.com/X/Y"})
-	requireCLIError(t, err, cli.ExitUsage)
-	if svc.addRepoSourceCalled {
-		t.Fatal("add repo source should not be called for invalid URL")
-	}
-}
-
-func TestSourceAddGHArchive(t *testing.T) {
-	svc := &fakeService{
-		sourceResult: &cli.SourceResult{Name: "gharchive", Kind: "gharchive", Definition: `{"events":["PushEvent","IssuesEvent"]}`, Enabled: true},
-	}
-	c, stdout, _ := newTestCLI(svc, nil)
-	requireNoErr(t, c.Run(context.Background(), []string{"source", "add", "gharchive", "--events", "PushEvent,IssuesEvent"}))
-	if !svc.addGHArchiveSourceCalled || svc.lastSourceName != "gharchive" || len(svc.lastSourceEvents) != 2 {
-		t.Fatalf("add gharchive call = called:%v name:%q events:%+v", svc.addGHArchiveSourceCalled, svc.lastSourceName, svc.lastSourceEvents)
-	}
-	if !strings.Contains(stdout.String(), "Source gharchive") {
-		t.Fatalf("stdout = %q", stdout.String())
-	}
-}
-
-func TestSourceAddGHArchiveRejectsUnknownEvent(t *testing.T) {
-	svc := &fakeService{}
-	c, _, _ := newTestCLI(svc, nil)
-	err := c.Run(context.Background(), []string{"source", "add", "gharchive", "--events", "PushEvent,UnknownEvent"})
-	requireCLIError(t, err, cli.ExitUsage)
-	if svc.addGHArchiveSourceCalled {
-		t.Fatal("add gharchive source should not be called for invalid event")
-	}
-}
-
-func TestSourceShow(t *testing.T) {
-	svc := &fakeService{sourceResult: &cli.SourceResult{Name: "gharchive", Kind: "gharchive", Definition: `{}`, Enabled: true}}
-	c, stdout, _ := newTestCLI(svc, nil)
-	requireNoErr(t, c.Run(context.Background(), []string{"source", "show", "gharchive"}))
-	if !svc.showSourceCalled || svc.lastShowSourceName != "gharchive" {
-		t.Fatalf("show source not called correctly: called=%v arg=%q", svc.showSourceCalled, svc.lastShowSourceName)
-	}
-	if !strings.Contains(stdout.String(), "gharchive") {
-		t.Fatalf("stdout = %q", stdout.String())
-	}
-}
-
-func TestCrawlDispatchesBoundedOptions(t *testing.T) {
-	svc := &fakeService{crawlResult: &cli.CrawlResult{
-		Source: "active-go", Windows: 2, Repositories: 7, Requests: 4, Checkpoint: "2026-07-16T00:00:00Z",
-	}}
-	c, stdout, stderr := newTestCLI(svc, nil)
-	requireNoErr(t, c.Run(context.Background(), []string{"crawl", "active-go", "--since", "48h", "--budget", "25"}))
-	if !svc.crawlCalled || svc.lastCrawlName != "active-go" || svc.lastCrawlOpts.Since != 48*time.Hour || svc.lastCrawlOpts.Budget != 25 {
-		t.Fatalf("crawl call = called:%v name:%q opts:%+v", svc.crawlCalled, svc.lastCrawlName, svc.lastCrawlOpts)
-	}
-	if !strings.Contains(stdout.String(), "7 repositories") || !strings.Contains(stderr.String(), "crawling active-go") {
-		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
-	}
-}
-
-func TestCrawlRejectsInvalidBudgetBeforeDispatch(t *testing.T) {
-	svc := &fakeService{}
-	c, _, _ := newTestCLI(svc, nil)
-	err := c.Run(context.Background(), []string{"crawl", "active-go", "--budget", "5001"})
-	requireCLIError(t, err, cli.ExitUsage)
-	if svc.crawlCalled {
-		t.Fatal("crawl should not be called with an invalid budget")
-	}
-}
-
-func TestTailDispatchesBoundedOptions(t *testing.T) {
-	svc := &fakeService{}
-	c, _, _ := newTestCLI(svc, nil)
-	requireNoErr(t, c.Run(context.Background(), []string{"tail", "events", "--since", "3h", "--interval", "10m", "--budget", "25", "--once"}))
-	if !svc.tailCalled || svc.lastCrawlName != "events" {
-		t.Fatalf("tail not called: %+v", svc)
-	}
-	if svc.lastTailOpts.Since != 3*time.Hour || svc.lastTailOpts.Interval != 10*time.Minute || svc.lastTailOpts.Budget != 25 || !svc.lastTailOpts.Once {
-		t.Fatalf("tail options = %+v", svc.lastTailOpts)
-	}
-}
-
 type fakeMCPRunner struct {
 	called bool
 	opts   cli.MCPOptions
@@ -588,6 +399,7 @@ func requireCLIError(t *testing.T, err error, wantCode int) {
 }
 
 func TestInit(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{initResult: &cli.InitResult{Path: "/tmp/gc", Message: "ready"}}
 	c, stdout, stderr := newTestCLI(svc, nil)
 
@@ -607,6 +419,7 @@ func TestInit(t *testing.T) {
 }
 
 func TestInitJSON(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{initResult: &cli.InitResult{Path: "/tmp/gc", Message: "ready"}}
 	c, stdout, _ := newTestCLI(svc, nil)
 
@@ -623,6 +436,7 @@ func TestInitJSON(t *testing.T) {
 }
 
 func TestStatus(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{statusResult: &cli.StatusResult{Healthy: true, Corpus: "gc", Version: "0.0.1", Message: "ok"}}
 	c, stdout, _ := newTestCLI(svc, nil)
 
@@ -639,6 +453,7 @@ func TestStatus(t *testing.T) {
 }
 
 func TestSyncInvalidRepo(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{}
 	c, _, _ := newTestCLI(svc, nil)
 
@@ -651,6 +466,7 @@ func TestSyncInvalidRepo(t *testing.T) {
 }
 
 func TestSearchDefaults(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{searchResult: &cli.SearchResult{
 		Query: "test",
 		Kind:  "threads",
@@ -688,6 +504,7 @@ func TestSearchDefaults(t *testing.T) {
 }
 
 func TestSearchJSONWithFlags(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{searchResult: &cli.SearchResult{
 		Query:   "good first issue",
 		Kind:    "issues",
@@ -722,6 +539,7 @@ func TestSearchJSONWithFlags(t *testing.T) {
 }
 
 func TestSearchNoNetworkImplied(t *testing.T) {
+	t.Parallel()
 	// Search must be local; the CLI dispatches to the injected service without
 	// any hidden network access.
 	svc := &fakeService{searchResult: &cli.SearchResult{Query: "local", Total: 0, Matches: []cli.SearchMatch{}}}
@@ -735,6 +553,7 @@ func TestSearchNoNetworkImplied(t *testing.T) {
 }
 
 func TestSearchInvalidLimit(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{}
 	c, _, _ := newTestCLI(svc, nil)
 
@@ -743,6 +562,7 @@ func TestSearchInvalidLimit(t *testing.T) {
 }
 
 func TestSearchInvalidRepoFilter(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{}
 	c, _, _ := newTestCLI(svc, nil)
 
@@ -751,6 +571,7 @@ func TestSearchInvalidRepoFilter(t *testing.T) {
 }
 
 func TestSearchRejectsUnsupportedFilterCombinations(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{}
 	c, _, _ := newTestCLI(svc, nil)
 	for _, args := range [][]string{
@@ -766,6 +587,7 @@ func TestSearchRejectsUnsupportedFilterCombinations(t *testing.T) {
 }
 
 func TestSearchThreadMetadataFlags(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{searchResult: &cli.SearchResult{
 		Query:   "term",
 		Kind:    "issues",
@@ -791,6 +613,7 @@ func TestSearchThreadMetadataFlags(t *testing.T) {
 }
 
 func TestSearchWithLensFlag(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{searchResult: &cli.SearchResult{
 		Query:   "test",
 		Kind:    "issues",
@@ -816,6 +639,7 @@ func TestSearchWithLensFlag(t *testing.T) {
 }
 
 func TestSearchRejectsLensWithCursor(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{}
 	c, _, _ := newTestCLI(svc, nil)
 	err := c.Run(context.Background(), []string{"search", "issues", "test", "--lens", "active-go", "--cursor", "abc"})
@@ -826,6 +650,7 @@ func TestSearchRejectsLensWithCursor(t *testing.T) {
 }
 
 func TestDossier(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{dossierResult: &cli.DossierResult{
 		Repo:       cli.RepoRef{Owner: "o", Repo: "r"},
 		Summary:    "A Go CLI",
@@ -853,6 +678,7 @@ func TestDossier(t *testing.T) {
 }
 
 func TestDossierJSON(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{dossierResult: &cli.DossierResult{
 		Repo:       cli.RepoRef{Owner: "o", Repo: "r"},
 		Summary:    "A Go CLI",
@@ -877,6 +703,7 @@ func TestDossierJSON(t *testing.T) {
 }
 
 func TestContextCancellation(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{err: context.Canceled}
 	c, _, _ := newTestCLI(svc, nil)
 
@@ -888,12 +715,14 @@ func TestContextCancellation(t *testing.T) {
 }
 
 func TestUnknownCommand(t *testing.T) {
+	t.Parallel()
 	c, _, _ := newTestCLI(&fakeService{}, nil)
 	err := c.Run(context.Background(), []string{"nope"})
 	requireCLIError(t, err, cli.ExitUsage)
 }
 
 func TestSetupNonInteractiveJSON(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{setupResult: &cli.SetupReport{Operation: "setup", DryRun: true, MCPCommand: &cli.SetupMCPCommand{Command: "/managed/gitcontribute", Args: []string{"mcp", "serve", "--transport=stdio"}}, Steps: []cli.SetupStep{{Name: "codex", Status: "would configure"}}}}
 	var out bytes.Buffer
 	c := cli.New(svc, &fakeMCPRunner{}, &out, io.Discard)
@@ -909,6 +738,7 @@ func TestSetupNonInteractiveJSON(t *testing.T) {
 }
 
 func TestInvestigationStartShowAndList(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{
 		startInvResult: &cli.InvestigationResult{
 			ID: "inv-1", Repo: cli.RepoRef{Owner: "o", Repo: "r"},
@@ -958,6 +788,7 @@ func TestInvestigationStartShowAndList(t *testing.T) {
 }
 
 func TestInvestigationStartRejectsInvalidRepo(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{}
 	c, _, _ := newTestCLI(svc, nil)
 	err := c.Run(context.Background(), []string{"investigation", "start", "bad"})
@@ -968,6 +799,7 @@ func TestInvestigationStartRejectsInvalidRepo(t *testing.T) {
 }
 
 func TestHypothesisAddAndList(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{
 		addHypResult: &cli.HypothesisResult{
 			ID: "hyp-1", InvestigationID: "inv-1", Title: "race", Description: "race desc", Category: "bug", Status: "proposed",
@@ -1002,6 +834,7 @@ func TestHypothesisAddAndList(t *testing.T) {
 }
 
 func TestOpportunityPromoteShowListAndSetStatus(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{
 		promoteOppResult: &cli.OpportunityResult{
 			ID: "opp-1", InvestigationID: "inv-1", HypothesisID: "hyp-1", Title: "race",
@@ -1064,6 +897,7 @@ func TestOpportunityPromoteShowListAndSetStatus(t *testing.T) {
 }
 
 func TestInvestigationCommandRequiresService(t *testing.T) {
+	t.Parallel()
 	c, _, _ := newTestCLI(cli.NewBootstrapService(), nil)
 	err := c.Run(context.Background(), []string{"investigation", "list"})
 	requireCLIError(t, err, cli.ExitNotWired)

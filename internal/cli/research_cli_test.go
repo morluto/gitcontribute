@@ -26,6 +26,7 @@ func (f *researchFakeService) ThreadResearchBrief(_ context.Context, ref researc
 }
 
 func TestResearchBriefMarkdownAndTypedRef(t *testing.T) {
+	t.Parallel()
 	svc := &researchFakeService{fakeService: &fakeService{}, result: researchCLIBrief()}
 	c, stdout, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"research", "brief", "pr:o/r#7", "--format", "markdown"}))
@@ -40,6 +41,7 @@ func TestResearchBriefMarkdownAndTypedRef(t *testing.T) {
 }
 
 func TestResearchBriefJSONAndValidation(t *testing.T) {
+	t.Parallel()
 	svc := &researchFakeService{fakeService: &fakeService{}, result: researchCLIBrief()}
 	c, stdout, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"research", "brief", "o/r#7", "--json"}))
@@ -67,6 +69,7 @@ func TestResearchBriefJSONAndValidation(t *testing.T) {
 }
 
 func TestResearchBriefRequiresCapability(t *testing.T) {
+	t.Parallel()
 	c, _, _ := newTestCLI(&fakeService{}, nil)
 	err := c.Run(context.Background(), []string{"research", "brief", "o/r#1"})
 	if err == nil {

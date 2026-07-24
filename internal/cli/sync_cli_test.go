@@ -9,6 +9,7 @@ import (
 )
 
 func TestSync(t *testing.T) {
+	t.Parallel()
 	svc := &fakeService{
 		syncResult:     &cli.SyncResult{Repo: cli.RepoRef{Owner: "o", Repo: "r"}, Updated: 7, Requests: 10, PlannedRequests: 100, RequestBudget: 100, Message: "ok"},
 		syncPlanResult: &cli.SyncPlanResult{Repo: cli.RepoRef{Owner: "o", Repo: "r"}, FixedRequests: 9, ThreadRequestCeiling: 91, PlannedRequests: 100, RequestBudget: 100},

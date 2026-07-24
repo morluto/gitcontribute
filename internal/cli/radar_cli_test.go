@@ -25,6 +25,7 @@ func (f *radarFakeService) ContributionRadar(_ context.Context, opts cli.RadarOp
 }
 
 func TestRadarRendersExplanations(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	svc := &radarFakeService{fakeService: &fakeService{}, result: &radar.Report{
 		Repo: "o/r", ScoreVersion: radar.ScoreVersion, SourceAsOf: now, TotalOpenIssues: 3, CandidatePopulation: 3,
@@ -53,6 +54,7 @@ func TestRadarRendersExplanations(t *testing.T) {
 }
 
 func TestRadarJSONAndLimitValidation(t *testing.T) {
+	t.Parallel()
 	svc := &radarFakeService{fakeService: &fakeService{}, result: &radar.Report{Repo: "o/r", ScoreVersion: radar.ScoreVersion, Candidates: []radar.Candidate{}}}
 	c, stdout, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"radar", "o/r", "--limit", "500", "--json"}))

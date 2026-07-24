@@ -8,6 +8,7 @@ import (
 )
 
 func TestArchiveHydrateHelpListsEveryLegalFacet(t *testing.T) {
+	t.Parallel()
 	help := commandHelp(t, "archive", "hydrate", "--help")
 	for _, facet := range []string{
 		"issue_comments", "issue_timeline", "pr_details", "pr_reviews", "pr_review_comments",
@@ -22,6 +23,7 @@ func TestArchiveHydrateHelpListsEveryLegalFacet(t *testing.T) {
 }
 
 func TestRadarHelpRequiresPositionalRepository(t *testing.T) {
+	t.Parallel()
 	help := commandHelp(t, "radar", "--help")
 	if !strings.Contains(help, "Usage: gitcontribute radar <owner/repo>") {
 		t.Fatalf("radar repository is not visibly required:\n%s", help)

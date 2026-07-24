@@ -39,6 +39,7 @@ func (f *fakeConcernService) PromoteConcern(context.Context, string, cli.Concern
 }
 
 func TestConcernCreateAndSearchCLI(t *testing.T) {
+	t.Parallel()
 	svc := &fakeConcernService{fakeService: &fakeService{}, result: &cli.ConcernResult{ID: "concern-1", Repo: cli.RepoRef{Owner: "owner", Repo: "repo"}, Title: "flaky", Status: "untriaged"}}
 	c, _, _ := newTestCLI(svc, nil)
 	if err := c.Run(context.Background(), []string{"concern", "create", "owner/repo", "--commit", "abc", "--title", "flaky", "--problem", "intermittent", "--unknown", "timing"}); err != nil {

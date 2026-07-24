@@ -31,6 +31,7 @@ func (s *seedCLIService) ExtractSeedsForCLI(_ context.Context, _ cli.RepoRef, cl
 }
 
 func TestSeedsCommandPassesExplicitPolarityControls(t *testing.T) {
+	t.Parallel()
 	svc := &seedCLIService{fakeService: &fakeService{}}
 	c, _, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{
@@ -49,6 +50,7 @@ func TestSeedsCommandPassesExplicitPolarityControls(t *testing.T) {
 }
 
 func TestSeedsCommandDefaultsToOutcomeEvidence(t *testing.T) {
+	t.Parallel()
 	svc := &seedCLIService{fakeService: &fakeService{}}
 	c, _, _ := newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"seeds", "owner/repo", "--json"}))
