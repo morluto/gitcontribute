@@ -309,16 +309,16 @@ func loadClusterCandidatesTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRe
 		return nil, err
 	}
 	if len(out) > maxCandidates {
-		budget := clustering.DefaultExactPairBudget()
-		required, capacityErr := budget.Required(len(out))
+		budget := clustering.DefaultComparisonBudget()
+		possible, capacityErr := budget.Possible(len(out))
 		if capacityErr != nil {
 			var capacity *clustering.CapacityError
 			if !errors.As(capacityErr, &capacity) {
 				return nil, capacityErr
 			}
-			required = capacity.RequiredPairs
+			possible = capacity.PossiblePairs
 		}
-		return nil, &clustering.CapacityError{CandidateCount: len(out), RequiredPairs: required, AllowedPairs: uint64(budget)}
+		return nil, &clustering.CapacityError{CandidateCount: len(out), PossiblePairs: possible, AllowedPairs: uint64(budget)}
 	}
 	return out, nil
 }
@@ -461,8 +461,9 @@ func loadProjectionOverridesTx(ctx context.Context, tx *sql.Tx, repo domain.Repo
 
 // CommitClusterProjection validates a complete refresh result, obtains the
 // SQLite writer, rechecks source and governance revisions, and atomically
-// advances the current projection. Exact computation must already be complete;
-// this method never performs pair evaluation while holding the transaction.
+// advances the current projection. Cluster computation must already be
+// complete; this method never performs pair evaluation while holding the
+// transaction.
 func (c *Corpus) CommitClusterProjection(ctx context.Context, commit clusterprojection.Commit) (result clusterprojection.CommitResult, err error) {
 	if err := ctx.Err(); err != nil {
 		return clusterprojection.CommitResult{}, err

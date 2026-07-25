@@ -9,7 +9,17 @@ import (
 	"github.com/morluto/gitcontribute/internal/domain"
 )
 
-const defaultMaxBodyTokens = 1000
+const (
+	defaultMaxBodyTokens      = 1000
+	duplicateThreshold        = 0.30
+	duplicateTitleWeight      = 0.45
+	duplicateBodyWeight       = 0.05
+	duplicateLabelWeight      = 0.05
+	duplicateReferenceWeight  = 0.40
+	duplicateSameAuthorWeight = 0.05
+
+	duplicateMaxScoreWithoutTitleOrReference = duplicateBodyWeight + duplicateLabelWeight + duplicateSameAuthorWeight
+)
 
 // ThreadRef identifies one issue or pull request for exact similarity scoring.
 type ThreadRef struct {
@@ -56,8 +66,13 @@ func DefaultDuplicateRule() DuplicateRule {
 // Version identifies the exact duplicate scoring semantics.
 func (DuplicateRule) Version() RuleVersion { return DuplicateV1 }
 
+// Threshold returns the minimum duplicate-v1 score.
+func (DuplicateRule) Threshold() float64 { return duplicateThreshold }
+
 // Valid reports whether the rule was created by a supported constructor.
-func (r DuplicateRule) Valid() bool { return r.maxBodyTokens > 0 }
+func (r DuplicateRule) Valid() bool {
+	return r.maxBodyTokens > 0 && duplicateThreshold > duplicateMaxScoreWithoutTitleOrReference
+}
 
 // PreparedDuplicate is an immutable duplicate-v1 representation of a thread.
 type PreparedDuplicate struct {
@@ -93,12 +108,12 @@ type DuplicateSignals struct {
 
 // Score returns the weighted duplicate-v1 score.
 func (s DuplicateSignals) Score() float64 {
-	raw := s.TitleJaccard*0.45 + s.BodyJaccard*0.05 + s.LabelJaccard*0.05
+	raw := s.TitleJaccard*duplicateTitleWeight + s.BodyJaccard*duplicateBodyWeight + s.LabelJaccard*duplicateLabelWeight
 	if s.ExplicitRef {
-		raw += 0.40
+		raw += duplicateReferenceWeight
 	}
 	if s.SameAuthor {
-		raw += 0.05
+		raw += duplicateSameAuthorWeight
 	}
 	return math.Min(1, raw)
 }
@@ -137,14 +152,23 @@ type DuplicateScore struct {
 
 // Compare scores two prepared threads exactly under duplicate-v1.
 func (r DuplicateRule) Compare(a, b PreparedDuplicate) DuplicateScore {
-	signals := DuplicateSignals{
+	signals := r.signals(a, b)
+	return DuplicateScore{Value: signals.Score(), Reason: signals.Reason(), Signals: signals, RuleVersion: r.Version()}
+}
+
+// Score returns the exact duplicate-v1 score without building an explanation.
+func (r DuplicateRule) Score(a, b PreparedDuplicate) float64 {
+	return r.signals(a, b).Score()
+}
+
+func (DuplicateRule) signals(a, b PreparedDuplicate) DuplicateSignals {
+	return DuplicateSignals{
 		ExplicitRef:  references(a.references, b.ref) || references(b.references, a.ref),
 		TitleJaccard: jaccard(a.title, b.title),
 		BodyJaccard:  jaccard(a.body, b.body),
 		LabelJaccard: jaccard(a.labels, b.labels),
 		SameAuthor:   a.author != "" && a.author == b.author,
 	}
-	return DuplicateScore{Value: signals.Score(), Reason: signals.Reason(), Signals: signals, RuleVersion: r.Version()}
 }
 
 func references(refs []ThreadRef, candidate ThreadRef) bool {

@@ -117,7 +117,7 @@ func humanOutput(v any) (string, error) {
 	case *contracts.ClusterListResult:
 		return clusterListHuman(r), nil
 	case *contracts.ClusterRefreshResult:
-		return fmt.Sprintf("cluster projection %s for %s (%d candidates, %d comparisons, rule %s)", r.Disposition, r.Repo, r.Stats.CandidateCount, r.Stats.ComparedPairs, r.Projection.RuleVersion), nil
+		return fmt.Sprintf("cluster projection %s for %s (%d candidates, %d/%d pairs scored, rule %s)", r.Disposition, r.Repo, r.Stats.CandidateCount, r.Stats.ScoredPairs, r.Stats.PossiblePairs, r.Projection.RuleVersion), nil
 	case *contracts.ClusterResult:
 		return clusterHuman(r), nil
 	case *contracts.LensResult:

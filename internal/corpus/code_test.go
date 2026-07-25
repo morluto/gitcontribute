@@ -35,6 +35,20 @@ func TestCodeSnapshotsAreAtomicDeduplicatedAndSearchLatest(t *testing.T) {
 	if latest == nil || !latest.Manifest.CoverageKnown || latest.Manifest.IndexedFiles != 1 {
 		t.Fatalf("replayed snapshot manifest = %+v", latest)
 	}
+	exact, err := c.CodeSnapshot(ctx, ref, "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exact == nil || exact.CommitSHA != "first" || exact.TotalBytes != 16 {
+		t.Fatalf("exact snapshot = %+v", exact)
+	}
+	missing, err := c.CodeSnapshot(ctx, ref, "missing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missing != nil {
+		t.Fatalf("missing snapshot = %+v, want nil", missing)
+	}
 	reindexedMatches, err := c.SearchCode(ctx, "reindexed", ref, 10)
 	if err != nil {
 		t.Fatal(err)

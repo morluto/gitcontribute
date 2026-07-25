@@ -5,10 +5,12 @@
 package codeindex
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -42,17 +44,18 @@ type Snapshot struct {
 
 // Manifest makes indexing coverage and every skip category explicit.
 type Manifest struct {
-	CoverageKnown      bool `json:"coverage_known"`
-	TrackedEntries     int  `json:"tracked_entries"`
-	IndexedFiles       int  `json:"indexed_files"`
-	SkippedInvalidPath int  `json:"skipped_invalid_path"`
-	SkippedExcluded    int  `json:"skipped_excluded"`
-	SkippedNonRegular  int  `json:"skipped_non_regular"`
-	SkippedOversize    int  `json:"skipped_oversize"`
-	SkippedTotalBudget int  `json:"skipped_total_budget"`
-	SkippedNonText     int  `json:"skipped_non_text"`
-	SkippedFileLimit   int  `json:"skipped_file_limit"`
-	Truncated          bool `json:"truncated"`
+	FormatVersion      string `json:"format_version,omitempty"`
+	CoverageKnown      bool   `json:"coverage_known"`
+	TrackedEntries     int    `json:"tracked_entries"`
+	IndexedFiles       int    `json:"indexed_files"`
+	SkippedInvalidPath int    `json:"skipped_invalid_path"`
+	SkippedExcluded    int    `json:"skipped_excluded"`
+	SkippedNonRegular  int    `json:"skipped_non_regular"`
+	SkippedOversize    int    `json:"skipped_oversize"`
+	SkippedTotalBudget int    `json:"skipped_total_budget"`
+	SkippedNonText     int    `json:"skipped_non_text"`
+	SkippedFileLimit   int    `json:"skipped_file_limit"`
+	Truncated          bool   `json:"truncated"`
 }
 
 // Options bounds the index operation.
@@ -75,6 +78,7 @@ var (
 )
 
 const (
+	FormatVersion          = "codeindex-v1"
 	defaultMaxFiles        = 10_000
 	defaultMaxBytesPerFile = 1 << 20
 	defaultMaxTotalBytes   = 64 << 20
@@ -94,43 +98,57 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 	if err != nil {
 		return Snapshot{}, err
 	}
+	absPath, commit, err := Probe(ctx, repoPath)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return indexCommit(ctx, absPath, commit, opts)
+}
+
+// Probe validates a repository for indexing and returns its canonical root and
+// current commit without reading any blobs.
+func Probe(ctx context.Context, repoPath string) (string, string, error) {
 	absPath, err := filepath.Abs(repoPath)
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("resolve repo path: %w", err)
+		return "", "", fmt.Errorf("resolve repo path: %w", err)
 	}
 	absPath, err = filepath.EvalSymlinks(absPath)
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("resolve repo path: %w", err)
+		return "", "", fmt.Errorf("resolve repo path: %w", err)
 	}
 
 	if err := ctx.Err(); err != nil {
-		return Snapshot{}, err
+		return "", "", err
 	}
 
 	top, err := validateRepo(ctx, absPath)
 	if err != nil {
-		return Snapshot{}, err
+		return "", "", err
 	}
 	top, err = filepath.EvalSymlinks(top)
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("resolve repo root: %w", err)
+		return "", "", fmt.Errorf("resolve repo root: %w", err)
 	}
 	if absPath != top {
-		return Snapshot{}, fmt.Errorf("repo path %q is not the repository root", absPath)
+		return "", "", fmt.Errorf("repo path %q is not the repository root", absPath)
 	}
 
 	status, err := gitStatus(ctx, absPath)
 	if err != nil {
-		return Snapshot{}, err
+		return "", "", err
 	}
 	if status != "" {
-		return Snapshot{}, ErrDirtyWorktree
+		return "", "", ErrDirtyWorktree
 	}
 
 	commit, err := gitHead(ctx, absPath)
 	if err != nil {
-		return Snapshot{}, err
+		return "", "", err
 	}
+	return absPath, commit, nil
+}
+
+func indexCommit(ctx context.Context, absPath, commit string, opts Options) (Snapshot, error) {
 	createdAt := time.Now().UTC()
 	entries, err := gitTree(ctx, absPath, commit, opts.MaxFiles)
 	if err != nil {
@@ -142,8 +160,16 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 		RepoPath:  absPath,
 		Commit:    commit,
 		CreatedAt: createdAt,
-		Manifest:  Manifest{CoverageKnown: true, TrackedEntries: len(entries)},
+		Manifest: Manifest{
+			FormatVersion: FormatVersion, CoverageKnown: true, TrackedEntries: len(entries),
+		},
 	}
+
+	blobs, err := startGitBlobBatch(ctx, absPath)
+	if err != nil {
+		return snap, err
+	}
+	defer blobs.Abort()
 
 	total := 0
 	files := 0
@@ -182,7 +208,7 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 			continue
 		}
 
-		content, err := gitBlob(ctx, absPath, entry.object, size)
+		content, err := blobs.Read(entry.object, size)
 		if err != nil {
 			return snap, fmt.Errorf("read %q: %w", clean, err)
 		}
@@ -202,7 +228,10 @@ func Index(ctx context.Context, repoPath string, opts Options) (Snapshot, error)
 
 	snap.TotalBytes = total
 	snap.Manifest.IndexedFiles = len(snap.Documents)
-	status, err = gitStatus(ctx, absPath)
+	if err := blobs.Close(); err != nil {
+		return snap, err
+	}
+	status, err := gitStatus(ctx, absPath)
 	if err != nil {
 		return snap, err
 	}
@@ -339,6 +368,133 @@ func gitTree(ctx context.Context, repoPath, commit string, maxFiles int) ([]tree
 		})
 	}
 	return entries, nil
+}
+
+type gitBlobBatch struct {
+	ctx    context.Context
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout *bufio.Reader
+	stderr *buflimit.Buffer
+	waited bool
+}
+
+func startGitBlobBatch(ctx context.Context, repoPath string) (*gitBlobBatch, error) {
+	gitArgs := []string{
+		"--no-optional-locks",
+		"-c", "core.fsmonitor=false",
+		"-c", "core.untrackedCache=false",
+		"-c", "core.hooksPath=" + os.DevNull,
+		"-C", repoPath,
+		"cat-file", "--batch",
+	}
+	cmd := exec.CommandContext(ctx, "git", gitArgs...)
+	cmd.Env = append(os.Environ(),
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_OPTIONAL_LOCKS=0",
+		"GIT_TERMINAL_PROMPT=0",
+	)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("open Git blob input: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		_ = stdin.Close()
+		return nil, fmt.Errorf("open Git blob output: %w", err)
+	}
+	stderr := buflimit.NewBuffer(64 << 10)
+	cmd.Stderr = stderr
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		return nil, fmt.Errorf("start Git blob batch: %w", err)
+	}
+	return &gitBlobBatch{
+		ctx: ctx, cmd: cmd, stdin: stdin, stdout: bufio.NewReader(stdout), stderr: stderr,
+	}, nil
+}
+
+func (b *gitBlobBatch) Read(object string, expectedSize int) ([]byte, error) {
+	if expectedSize < 0 {
+		return nil, errors.New("git blob size is unavailable")
+	}
+	if !isHexObjectID(object) {
+		return nil, fmt.Errorf("invalid Git object ID %q", object)
+	}
+	if _, err := io.WriteString(b.stdin, object+"\n"); err != nil {
+		return nil, b.commandError("write Git blob request", err)
+	}
+	header, err := b.stdout.ReadString('\n')
+	if err != nil {
+		return nil, b.commandError("read Git blob header", err)
+	}
+	fields := strings.Fields(header)
+	if len(fields) != 3 {
+		return nil, fmt.Errorf("parse Git blob header %q", strings.TrimSpace(header))
+	}
+	if fields[0] != object || fields[1] != "blob" {
+		return nil, fmt.Errorf("unexpected Git blob header %q", strings.TrimSpace(header))
+	}
+	size, err := strconv.Atoi(fields[2])
+	if err != nil {
+		return nil, fmt.Errorf("parse Git blob size %q: %w", fields[2], err)
+	}
+	if size != expectedSize {
+		return nil, fmt.Errorf("git blob %s size changed: got %d, want %d", object, size, expectedSize)
+	}
+	content := make([]byte, size)
+	if _, err := io.ReadFull(b.stdout, content); err != nil {
+		return nil, b.commandError("read Git blob content", err)
+	}
+	terminator, err := b.stdout.ReadByte()
+	if err != nil {
+		return nil, b.commandError("read Git blob terminator", err)
+	}
+	if terminator != '\n' {
+		return nil, fmt.Errorf("git blob %s has invalid batch terminator", object)
+	}
+	return content, nil
+}
+
+func (b *gitBlobBatch) Close() error {
+	if b.waited {
+		return nil
+	}
+	b.waited = true
+	closeErr := b.stdin.Close()
+	waitErr := b.cmd.Wait()
+	if errors.Is(b.stderr.Err(), buflimit.ErrOutputLimit) {
+		return buflimit.ErrOutputLimit
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close Git blob input: %w", closeErr)
+	}
+	if waitErr != nil {
+		return b.commandError("finish Git blob batch", waitErr)
+	}
+	return nil
+}
+
+func (b *gitBlobBatch) Abort() {
+	if b.waited {
+		return
+	}
+	if b.cmd.Process != nil {
+		_ = b.cmd.Process.Kill()
+	}
+	_ = b.Close()
+}
+
+func (b *gitBlobBatch) commandError(operation string, err error) error {
+	if ctxErr := b.ctx.Err(); ctxErr != nil {
+		return ctxErr
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		exitErr.Stderr = append([]byte(nil), b.stderr.Bytes()...)
+	}
+	return fmt.Errorf("%s: %w", operation, err)
 }
 
 func gitBlob(ctx context.Context, repoPath, object string, size int) ([]byte, error) {

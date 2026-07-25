@@ -83,14 +83,14 @@ func TestServiceClustersAndCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("refresh clusters: %v", err)
 	}
-	if firstRefresh.Disposition != "committed" || firstRefresh.Stats.ComparedPairs == 0 {
+	if firstRefresh.Disposition != "committed" || firstRefresh.Stats.ScoredPairs == 0 {
 		t.Fatalf("first refresh = %+v", firstRefresh)
 	}
 	secondRefresh, err := svc.RefreshClusters(ctx, repo)
 	if err != nil {
 		t.Fatalf("unchanged refresh: %v", err)
 	}
-	if secondRefresh.Disposition != "unchanged" || secondRefresh.Stats.ComparedPairs != 0 || secondRefresh.Stats.RequiredPairs != 0 || secondRefresh.Stats.CommitQueries != 0 {
+	if secondRefresh.Disposition != "unchanged" || secondRefresh.Stats.ScoredPairs != 0 || secondRefresh.Stats.PossiblePairs != 0 || secondRefresh.Stats.CommitQueries != 0 {
 		t.Fatalf("second refresh = %+v, want unchanged with no pair or commit work", secondRefresh)
 	}
 	if secondRefresh.Stats.CandidateCount != firstRefresh.Stats.CandidateCount || secondRefresh.Stats.ClusterCount != firstRefresh.Stats.ClusterCount || secondRefresh.Stats.ClusterCount == 0 {
@@ -187,7 +187,7 @@ func TestUnchangedEmptyClusterProjectionReportsZeroCurrentCounts(t *testing.T) {
 	if first.Disposition != "committed" || second.Disposition != "unchanged" || first.Projection.RunID != second.Projection.RunID {
 		t.Fatalf("empty refreshes: first=%+v second=%+v", first, second)
 	}
-	if second.Stats.CandidateCount != 0 || second.Stats.ClusterCount != 0 || second.Stats.RequiredPairs != 0 || second.Stats.ComparedPairs != 0 || second.Stats.CommitQueries != 0 || second.Stats.SnapshotQueries == 0 {
+	if second.Stats.CandidateCount != 0 || second.Stats.ClusterCount != 0 || second.Stats.PossiblePairs != 0 || second.Stats.ScoredPairs != 0 || second.Stats.CommitQueries != 0 || second.Stats.SnapshotQueries == 0 {
 		t.Fatalf("unchanged empty stats = %+v", second.Stats)
 	}
 }

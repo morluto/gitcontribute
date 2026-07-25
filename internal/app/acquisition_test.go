@@ -7,7 +7,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 )
@@ -129,6 +131,58 @@ func TestAcquireRepeatFetch(t *testing.T) {
 	}
 	if snap == nil || snap.CommitSHA != newSHA {
 		t.Fatalf("latest snapshot not updated: %+v", snap)
+	}
+}
+
+func TestAcquireUnchangedCommitReusesCurrentSnapshot(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	remote, commit := newTestRemote(t)
+	ref := contracts.RepoRef{Owner: "owner", Repo: "repo"}
+
+	svc := newLocalService(t)
+	defer func() { _ = svc.Close() }()
+
+	first, err := svc.Acquire(ctx, ref, remote)
+	if err != nil {
+		t.Fatalf("first acquire: %v", err)
+	}
+	replacement := codeindex.Snapshot{
+		RepoPath: first.Remote,
+		Commit:   commit,
+		Documents: []codeindex.Document{{
+			Path: "sentinel.txt", Content: "preserved sentinel", Bytes: len("preserved sentinel"),
+		}},
+		TotalBytes: len("preserved sentinel"),
+		CreatedAt:  time.Now().UTC(),
+		Manifest: codeindex.Manifest{
+			FormatVersion:  codeindex.FormatVersion,
+			CoverageKnown:  true,
+			TrackedEntries: 1,
+			IndexedFiles:   1,
+		},
+	}
+	if _, _, err := svc.corpus.StoreCodeSnapshot(
+		ctx, domain.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, replacement,
+	); err != nil {
+		t.Fatalf("replace snapshot: %v", err)
+	}
+
+	second, err := svc.Acquire(ctx, ref, remote)
+	if err != nil {
+		t.Fatalf("second acquire: %v", err)
+	}
+	if second.Inserted || second.Message != "acquired; snapshot already indexed" {
+		t.Fatalf("second acquire = %+v", second)
+	}
+	matches, err := svc.corpus.SearchCode(
+		ctx, "sentinel", domain.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, 10,
+	)
+	if err != nil {
+		t.Fatalf("search preserved snapshot: %v", err)
+	}
+	if len(matches) != 1 || matches[0].Path != "sentinel.txt" {
+		t.Fatalf("snapshot was reindexed: %+v", matches)
 	}
 }
 

@@ -229,6 +229,41 @@ func TestJobCancellation(t *testing.T) {
 	}
 }
 
+func TestStoppedJobIDsIncludesCancelledAndMissing(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+
+	live, err := c.CreateJob(ctx, "live", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := c.CreateJob(ctx, "cancelled", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.StartJob(ctx, cancelled.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RequestJobCancellation(ctx, cancelled.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	stopped, err := c.StoppedJobIDs(ctx, []string{live.ID, cancelled.ID, "missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := stopped[live.ID]; ok {
+		t.Fatalf("live job %q marked stopped", live.ID)
+	}
+	if _, ok := stopped[cancelled.ID]; !ok {
+		t.Fatalf("cancelled job %q not marked stopped", cancelled.ID)
+	}
+	if _, ok := stopped["missing"]; !ok {
+		t.Fatal("missing job not marked stopped")
+	}
+}
+
 func TestRecordAndListJobEvents(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

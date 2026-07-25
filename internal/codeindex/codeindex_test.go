@@ -108,6 +108,30 @@ func TestIndexBasic(t *testing.T) {
 	if snap.TotalBytes != total {
 		t.Fatalf("TotalBytes: got %d, want %d", snap.TotalBytes, total)
 	}
+	if snap.Manifest.FormatVersion != FormatVersion {
+		t.Fatalf("manifest format = %q, want %q", snap.Manifest.FormatVersion, FormatVersion)
+	}
+}
+
+func TestIndexBatchReadsEmptyAndMultilineBlobs(t *testing.T) {
+	repo := newRepo(t)
+	writeFile(t, repo, "empty.txt", "")
+	writeFile(t, repo, "multiline.txt", "first\nsecond\n")
+	commitAll(t, repo, "initial")
+
+	snap, err := Index(context.Background(), repo, Options{})
+	if err != nil {
+		t.Fatalf("Index failed: %v", err)
+	}
+	if len(snap.Documents) != 2 {
+		t.Fatalf("documents = %d, want 2", len(snap.Documents))
+	}
+	if snap.Documents[0].Path != "empty.txt" || snap.Documents[0].Content != "" {
+		t.Fatalf("empty document = %+v", snap.Documents[0])
+	}
+	if snap.Documents[1].Path != "multiline.txt" || snap.Documents[1].Content != "first\nsecond\n" {
+		t.Fatalf("multiline document = %+v", snap.Documents[1])
+	}
 }
 
 func TestIndexStableResults(t *testing.T) {

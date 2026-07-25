@@ -157,7 +157,8 @@ Refresh is a separate, explicit local-write capability:
 read one repository snapshot
   -> identify source + governance + rule versions
   -> close the read transaction
-  -> perform bounded, cancellable exact comparisons
+  -> generate a lossless bounded candidate-pair set
+  -> score candidate pairs exactly with cancellation
   -> reconcile durable governance
   -> begin write transaction and recheck revisions
   -> atomically replace the visible projection
@@ -171,12 +172,17 @@ repositories do not recompute on every refresh. If source or governance changes
 during computation, commit returns a stale-input error and leaves the previous
 complete projection visible.
 
-`duplicate-v1` is exact all-pairs work under one 10,000,000-comparison budget;
-the maximum candidate population is derived from that budget rather than
-configured independently. Cancellation is checked during preparation and pair
-evaluation. Similarity preparation and scoring live in `internal/similarity`;
-`internal/clustering` remains storage-free, while `internal/corpus` owns
-snapshots, governance transactions, and atomic projection replacement.
+`duplicate-v1` scores pairs at a `0.30` threshold. Candidate generation is
+lossless: every pair with an explicit thread reference or shared normalized
+title token is scored exactly. A pair with neither signal can contribute at
+most `0.15` from body, labels, and author, so it cannot reach the threshold.
+The 10,000,000-comparison budget remains a worst-case population bound; sparse
+repositories score fewer pairs. Refresh statistics distinguish all
+`possible_pairs` from exact `scored_pairs`. Cancellation is checked during
+preparation and candidate evaluation. Similarity preparation, candidate
+selection, and scoring live in `internal/similarity`; `internal/clustering`
+remains storage-free, while `internal/corpus` owns snapshots, governance
+transactions, and atomic projection replacement.
 
 Membership overrides are durable governance, not direct projection edits.
 Adding an override and advancing its repository governance revision happen in
@@ -222,9 +228,12 @@ queued -> running -> succeeded
 ```
 
 Terminal states do not transition again. Cancellation is first persisted, then
-delivered to an in-process worker directly or observed by its polling loop from
-another process. Reconciliation uses an immediate SQLite transaction so a
-heartbeat cannot interleave between the liveness read and stale-owner update.
+delivered to an in-process worker directly or observed by one executor-wide
+poll that checks all active job IDs together. Executors cap both running and
+admitted jobs, so nested operation-specific worker pools cannot create
+unbounded process-wide concurrency. Reconciliation uses an immediate SQLite
+transaction so a heartbeat cannot interleave between the liveness read and
+stale-owner update.
 MCP job reads expose structured phase, completed-item, total-item, percentage,
 and retry-delay fields. Concise polling omits stored request and result payloads;
 detailed mode retrieves them after a finalist is terminal. Batch reads and
@@ -287,7 +296,11 @@ disabled where applicable. Crawling and indexing never run repository code.
 Managed mirrors are keyed by repository identity and remote, and acquisition
 uses both in-process and filesystem locks. Remote validation rejects embedded
 credentials before metadata is written. Transient worktrees are checked for
-cleanliness and removed after indexing.
+cleanliness and removed after indexing. The indexer streams all selected blobs
+through one long-lived `git cat-file --batch` process and prepares one SQLite
+insert statement per snapshot transaction. A clean commit with a stored
+current-format snapshot is reused without rereading blobs or replacing its
+documents; the format version changes whenever indexing semantics change.
 
 Validation is a different capability. It executes only after the caller passes
 the explicit execution flag and records the command, working directory,
@@ -315,7 +328,10 @@ of complete coverage.
 Title, labels, body, and hydrated evidence are materialized into one search
 document per thread and ranked by one BM25 invocation. Ranks from the legacy
 thread and facet indexes are never compared; the facet index is used only to
-identify the matching evidence source and excerpt.
+identify the matching evidence source and excerpt. A thread page and its exact
+count share one read transaction. Counts use a lean FTS match set rather than
+recomputing ranking and excerpts, and the first-page no-overflow case derives
+its total directly from the returned rows.
 
 Relevance is the default. Equal-ranked results use newest source revision as
 the first tie-breaker. Repository and thread tools also expose `sort=updated`

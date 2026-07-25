@@ -146,7 +146,7 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 		return ThreadSearchPage{}, err
 	}
 
-	sql := threadSearchMatchesSQL + `
+	statement := threadSearchMatchesSQL + `
 		SELECT m.rank, t.id, t.repository_id, t.kind, t.number, t.state, t.state_reason, t.title, t.body, t.author, t.author_association, t.labels, t.assignees, t.draft, t.locked, t.milestone,
 		       t.source_created_at, t.source_updated_at, t.observation_sequence, t.created_at, t.updated_at, t.closed_at, t.merged_at, t.merged, t.merged_known,
 		       m.source, m.excerpt, m.source_updated_at, m.search_truncated
@@ -155,39 +155,49 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 		WHERE 1 = 1`
 	args := threadSearchArguments(ftsQuery)
 	if filter.RepoID != 0 {
-		sql += ` AND t.repository_id = ?`
+		statement += ` AND t.repository_id = ?`
 		args = append(args, filter.RepoID)
 	}
 	if filter.Kind != "" {
-		sql += ` AND t.kind = ?`
+		statement += ` AND t.kind = ?`
 		args = append(args, filter.Kind)
 	}
-	sql, args = appendThreadMetadataFilters(sql, args, filter)
+	statement, args = appendThreadMetadataFilters(statement, args, filter)
 	if cursor != nil {
 		if filter.Sort == "updated" {
-			sql += ` AND (t.source_updated_at < ? OR (t.source_updated_at = ? AND t.id < ?))`
+			statement += ` AND (t.source_updated_at < ? OR (t.source_updated_at = ? AND t.id < ?))`
 			args = append(args, cursor.UpdatedAt, cursor.UpdatedAt, cursor.ID)
 		} else {
-			sql += ` AND (m.rank > ? OR (m.rank = ? AND (t.source_updated_at < ? OR (t.source_updated_at = ? AND t.id > ?))))`
+			statement += ` AND (m.rank > ? OR (m.rank = ? AND (t.source_updated_at < ? OR (t.source_updated_at = ? AND t.id > ?))))`
 			args = append(args, cursor.Rank, cursor.Rank, cursor.UpdatedAt, cursor.UpdatedAt, cursor.ID)
 		}
 	}
 	if filter.Sort == "updated" {
-		sql += ` ORDER BY t.source_updated_at DESC, t.id DESC LIMIT ?`
+		statement += ` ORDER BY t.source_updated_at DESC, t.id DESC LIMIT ?`
 	} else {
-		sql += ` ORDER BY m.rank, t.source_updated_at DESC, t.id LIMIT ?`
+		statement += ` ORDER BY m.rank, t.source_updated_at DESC, t.id LIMIT ?`
 	}
 	args = append(args, filter.Limit+1)
 
-	rows, err := c.db.QueryContext(ctx, sql, args...)
+	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return ThreadSearchPage{}, fmt.Errorf("begin thread search snapshot: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return ThreadSearchPage{}, fmt.Errorf("search threads: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
 	threads, err := scanThreadsWithRank(rows)
+	closeErr := rows.Close()
 	if err != nil {
 		return ThreadSearchPage{}, err
+	}
+	if closeErr != nil {
+		return ThreadSearchPage{}, fmt.Errorf("close thread search rows: %w", closeErr)
 	}
 
 	page := ThreadSearchPage{Threads: threads}
@@ -205,61 +215,73 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 			ID:        last.ID,
 		})
 	}
-	if len(threads) > filter.Limit || filter.Cursor != "" {
-		page.Total, err = c.countThreadMatches(ctx, ftsQuery, filter)
+	if filter.Merged == nil && len(threads) <= filter.Limit && cursor == nil {
+		page.Total = len(threads)
+	} else {
+		page.Total, page.UnknownMergeCount, err = countThreadMatchSummary(ctx, tx, ftsQuery, filter)
 		if err != nil {
 			return ThreadSearchPage{}, err
 		}
-	} else {
-		page.Total = len(threads)
 	}
-	page.UnknownMergeCount, err = c.countUnknownMergeMatches(ctx, ftsQuery, filter)
-	if err != nil {
-		return ThreadSearchPage{}, err
+	if err := tx.Commit(); err != nil {
+		return ThreadSearchPage{}, fmt.Errorf("commit thread search snapshot: %w", err)
 	}
 
 	return page, nil
 }
 
-func (c *Corpus) countThreadMatches(ctx context.Context, ftsQuery string, filter SearchFilter) (int, error) {
-	return c.countThreadMatchesWhere(ctx, ftsQuery, filter, "")
-}
-
-func (c *Corpus) countUnknownMergeMatches(ctx context.Context, ftsQuery string, filter SearchFilter) (int, error) {
+func countThreadMatchSummary(ctx context.Context, tx *sql.Tx, ftsQuery string, filter SearchFilter) (int, int, error) {
+	statement := `
+		WITH matching_threads AS (
+			SELECT d.thread_id
+			FROM threads_fts
+			JOIN thread_search_documents d ON d.thread_id = threads_fts.rowid
+			WHERE threads_fts MATCH ?
+		)
+		SELECT `
+	args := []any{ftsQuery}
 	if filter.Merged == nil {
-		return 0, nil
+		statement += `COUNT(*)`
+	} else {
+		statement += `COALESCE(SUM(CASE
+			WHEN t.kind = 'pull_request' AND t.merged_known = 1 AND t.merged = ? THEN 1
+			ELSE 0
+		END), 0)`
+		if *filter.Merged {
+			args = append(args, 1)
+		} else {
+			args = append(args, 0)
+		}
 	}
-	filter.Merged = nil
-	return c.countThreadMatchesWhere(
-		ctx, ftsQuery, filter,
-		` AND t.kind = ? AND t.merged_known = 0`,
-		ThreadKindPullRequest,
-	)
-}
-
-func (c *Corpus) countThreadMatchesWhere(ctx context.Context, ftsQuery string, filter SearchFilter, suffix string, suffixArgs ...any) (int, error) {
-	sql := threadSearchMatchesSQL + `
-		SELECT COUNT(*)
-		FROM search_matches m
+	statement += `,
+		       COALESCE(SUM(CASE
+		           WHEN ? = 1 AND t.kind = 'pull_request' AND t.merged_known = 0 THEN 1
+		           ELSE 0
+		       END), 0)
+		FROM matching_threads m
 		JOIN threads t ON t.id = m.thread_id
 		WHERE 1 = 1`
-	args := threadSearchArguments(ftsQuery)
+	if filter.Merged == nil {
+		args = append(args, 0)
+	} else {
+		args = append(args, 1)
+	}
 	if filter.RepoID != 0 {
-		sql += ` AND t.repository_id = ?`
+		statement += ` AND t.repository_id = ?`
 		args = append(args, filter.RepoID)
 	}
 	if filter.Kind != "" {
-		sql += ` AND t.kind = ?`
+		statement += ` AND t.kind = ?`
 		args = append(args, filter.Kind)
 	}
-	sql, args = appendThreadMetadataFilters(sql, args, filter)
-	sql += suffix
-	args = append(args, suffixArgs...)
-	var total int
-	if err := c.db.QueryRowContext(ctx, sql, args...).Scan(&total); err != nil {
-		return 0, fmt.Errorf("count threads: %w", err)
+	summaryFilter := filter
+	summaryFilter.Merged = nil
+	statement, args = appendThreadMetadataFilters(statement, args, summaryFilter)
+	var total, unknownMerge int
+	if err := tx.QueryRowContext(ctx, statement, args...).Scan(&total, &unknownMerge); err != nil {
+		return 0, 0, fmt.Errorf("count thread matches: %w", err)
 	}
-	return total, nil
+	return total, unknownMerge, nil
 }
 
 // FindThreadSearchEvidence returns the best stored document matching query for

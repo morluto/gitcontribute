@@ -25,7 +25,7 @@ func TestCommitClusterProjectionRejectsChangedSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.RepoRef{Owner: "acme", Repo: "rocket"}
-	maxCandidates := clustering.DefaultExactPairBudget().MaxCandidates()
+	maxCandidates := clustering.DefaultComparisonBudget().MaxCandidates()
 	snapshot, err := c.LoadClusterRefreshSnapshot(ctx, ref, maxCandidates)
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestConcurrentIdenticalEmptyProjectionHasOneCurrentRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.RepoRef{Owner: "acme", Repo: "empty"}
-	maxCandidates := clustering.DefaultExactPairBudget().MaxCandidates()
+	maxCandidates := clustering.DefaultComparisonBudget().MaxCandidates()
 	snapshot, err := c.LoadClusterRefreshSnapshot(ctx, ref, maxCandidates)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestCommitClusterProjectionRejectsMissingRuleVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := domain.RepoRef{Owner: "acme", Repo: "empty"}
-	maxCandidates := clustering.DefaultExactPairBudget().MaxCandidates()
+	maxCandidates := clustering.DefaultComparisonBudget().MaxCandidates()
 	snapshot, err := c.LoadClusterRefreshSnapshot(ctx, ref, maxCandidates)
 	if err != nil {
 		t.Fatal(err)
@@ -142,7 +142,7 @@ func TestCommitClusterProjectionRejectsMissingSourceRevision(t *testing.T) {
 	_, err := c.CommitClusterProjection(ctx, clusterprojection.Commit{
 		Repo:          ref,
 		RuleVersion:   similarity.DuplicateV1,
-		MaxCandidates: clustering.DefaultExactPairBudget().MaxCandidates(),
+		MaxCandidates: clustering.DefaultComparisonBudget().MaxCandidates(),
 	})
 	if err == nil || err.Error() != "cluster source revision is required" {
 		t.Fatalf("commit error = %v, want missing source revision", err)
@@ -173,7 +173,7 @@ func TestCommitClusterProjectionRejectsInvalidRepository(t *testing.T) {
 		Repo:           domain.RepoRef{Owner: "acme"},
 		ExpectedSource: "revision",
 		RuleVersion:    similarity.DuplicateV1,
-		MaxCandidates:  clustering.DefaultExactPairBudget().MaxCandidates(),
+		MaxCandidates:  clustering.DefaultComparisonBudget().MaxCandidates(),
 	})
 	if err == nil || err.Error() != "repo is required" {
 		t.Fatalf("commit error = %v, want invalid repository", err)
@@ -188,7 +188,7 @@ func TestCommitClusterProjectionRejectsClusterFromDifferentSource(t *testing.T) 
 		t.Fatal(err)
 	}
 	ref := domain.RepoRef{Owner: "acme", Repo: "rocket"}
-	maxCandidates := clustering.DefaultExactPairBudget().MaxCandidates()
+	maxCandidates := clustering.DefaultComparisonBudget().MaxCandidates()
 	snapshot, err := c.LoadClusterRefreshSnapshot(ctx, ref, maxCandidates)
 	if err != nil {
 		t.Fatal(err)
@@ -223,7 +223,7 @@ func TestCommitClusterProjectionRejectsClusterWithoutStableIdentity(t *testing.T
 		t.Fatal(err)
 	}
 	ref := domain.RepoRef{Owner: "acme", Repo: "rocket"}
-	maxCandidates := clustering.DefaultExactPairBudget().MaxCandidates()
+	maxCandidates := clustering.DefaultComparisonBudget().MaxCandidates()
 	snapshot, err := c.LoadClusterRefreshSnapshot(ctx, ref, maxCandidates)
 	if err != nil {
 		t.Fatal(err)
@@ -250,7 +250,7 @@ func TestCommitClusterProjectionRejectsClusterFromDifferentRepository(t *testing
 		t.Fatal(err)
 	}
 	ref := domain.RepoRef{Owner: "acme", Repo: "rocket"}
-	maxCandidates := clustering.DefaultExactPairBudget().MaxCandidates()
+	maxCandidates := clustering.DefaultComparisonBudget().MaxCandidates()
 	snapshot, err := c.LoadClusterRefreshSnapshot(ctx, ref, maxCandidates)
 	if err != nil {
 		t.Fatal(err)
