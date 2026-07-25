@@ -1,7 +1,9 @@
 package lens
 
 import (
+	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -87,5 +89,18 @@ func TestValidateRejectsImpossibleFiltersAndCaps(t *testing.T) {
 		if err := Validate(def); err == nil {
 			t.Fatalf("Validate accepted %+v", def)
 		}
+	}
+}
+
+func TestFilterJSONRequiresDurationString(t *testing.T) {
+	t.Parallel()
+
+	var filter Filter
+	err := json.Unmarshal([]byte(`{"updated_within":3600000000000}`), &filter)
+	if err == nil {
+		t.Fatal("numeric updated_within was accepted")
+	}
+	if !strings.Contains(err.Error(), "cannot unmarshal number") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -32,8 +32,7 @@ type Filter struct {
 	MinStars        int           `json:"min_stars,omitempty"`
 }
 
-// UnmarshalJSON supports JSON lens definitions where updated_within may be
-// expressed as a Go duration string (e.g. "720h") or as nanoseconds.
+// UnmarshalJSON normalizes omitted weights to an empty map.
 func (d *Definition) UnmarshalJSON(data []byte) error {
 	type alias Definition
 	var raw struct {
@@ -80,13 +79,13 @@ func (f Filter) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON supports duration strings for updated_within.
 func (f *Filter) UnmarshalJSON(data []byte) error {
 	type rawFilter struct {
-		Kinds           []string        `json:"kinds"`
-		States          []string        `json:"states"`
-		Languages       []string        `json:"languages"`
-		ExcludeArchived bool            `json:"exclude_archived"`
-		Unassigned      bool            `json:"unassigned"`
-		UpdatedWithin   json.RawMessage `json:"updated_within"`
-		MinStars        int             `json:"min_stars"`
+		Kinds           []string `json:"kinds"`
+		States          []string `json:"states"`
+		Languages       []string `json:"languages"`
+		ExcludeArchived bool     `json:"exclude_archived"`
+		Unassigned      bool     `json:"unassigned"`
+		UpdatedWithin   *string  `json:"updated_within"`
+		MinStars        int      `json:"min_stars"`
 	}
 	var raw rawFilter
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -99,21 +98,12 @@ func (f *Filter) UnmarshalJSON(data []byte) error {
 	f.Unassigned = raw.Unassigned
 	f.MinStars = raw.MinStars
 
-	if len(raw.UpdatedWithin) > 0 {
-		var s string
-		if err := json.Unmarshal(raw.UpdatedWithin, &s); err == nil {
-			d, err := time.ParseDuration(s)
-			if err != nil {
-				return fmt.Errorf("parse updated_within duration: %w", err)
-			}
-			f.UpdatedWithin = d
-		} else {
-			var n int64
-			if err := json.Unmarshal(raw.UpdatedWithin, &n); err != nil {
-				return fmt.Errorf("updated_within must be a duration string or nanoseconds: %w", err)
-			}
-			f.UpdatedWithin = time.Duration(n)
+	if raw.UpdatedWithin != nil {
+		d, err := time.ParseDuration(*raw.UpdatedWithin)
+		if err != nil {
+			return fmt.Errorf("parse updated_within duration: %w", err)
 		}
+		f.UpdatedWithin = d
 	}
 	return nil
 }
