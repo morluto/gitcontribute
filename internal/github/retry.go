@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +16,7 @@ const (
 	defaultRetryAttempts  = 5
 	defaultRetryBaseDelay = 100 * time.Millisecond
 	defaultRetryMaxDelay  = 30 * time.Second
+	maxRetryDrainBytes    = 32 * 1024
 )
 
 // RetryConfig controls how the retry transport paces and observes retries.
@@ -24,6 +26,7 @@ type RetryConfig struct {
 	MaxDelay    time.Duration
 	Clock       func() time.Time
 	Sleeper     func(context.Context, time.Duration) error
+	Jitter      func(time.Duration) time.Duration
 	OnAttempt   func(RetryObservation)
 }
 
@@ -56,6 +59,7 @@ func DefaultRetryConfig() *RetryConfig {
 		MaxAttempts: defaultRetryAttempts,
 		BaseDelay:   defaultRetryBaseDelay,
 		MaxDelay:    defaultRetryMaxDelay,
+		Jitter:      equalJitter,
 	}
 }
 
@@ -72,6 +76,9 @@ func (r *RetryConfig) withDefaults() *RetryConfig {
 	}
 	if c.MaxDelay <= 0 {
 		c.MaxDelay = defaultRetryMaxDelay
+	}
+	if c.Jitter == nil {
+		c.Jitter = equalJitter
 	}
 	return &c
 }
@@ -185,13 +192,22 @@ func isReplayable(req *http.Request) bool {
 	}
 	switch req.Method {
 	case http.MethodGet, http.MethodHead:
+		return req.Body == nil || req.Body == http.NoBody
+	case http.MethodPost:
+		replayable, _ := req.Context().Value(replayableReadKey{}).(bool)
+		return replayable && req.GetBody != nil
 	default:
 		return false
 	}
-	if req.Body != nil && req.Body != http.NoBody {
-		return false
+}
+
+type replayableReadKey struct{}
+
+func markReplayableRead(req *http.Request) *http.Request {
+	if req == nil {
+		return nil
 	}
-	return true
+	return req.WithContext(context.WithValue(req.Context(), replayableReadKey{}, true))
 }
 
 func cloneRequest(req *http.Request) (*http.Request, error) {
@@ -202,10 +218,20 @@ func cloneRequest(req *http.Request) (*http.Request, error) {
 	if clone == nil {
 		return nil, errors.New("request clone returned nil")
 	}
-	// Safe idempotent reads have no body; clear any body references to avoid
-	// sharing or accidental replay of non-replayable payloads.
-	clone.Body = nil
-	clone.GetBody = nil
+	if req.Body != nil && req.Body != http.NoBody {
+		if req.GetBody == nil {
+			return nil, errors.New("replayable request body cannot be recreated")
+		}
+		body, err := req.GetBody()
+		if err != nil {
+			return nil, fmt.Errorf("recreate request body: %w", err)
+		}
+		clone.Body = body
+		clone.GetBody = req.GetBody
+	} else {
+		clone.Body = nil
+		clone.GetBody = nil
+	}
 	return clone, nil
 }
 
@@ -247,7 +273,7 @@ func drainAndClose(resp *http.Response) {
 	if resp == nil || resp.Body == nil {
 		return
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
+	_, _ = io.CopyN(io.Discard, resp.Body, maxRetryDrainBytes)
 	_ = resp.Body.Close()
 }
 
@@ -271,6 +297,15 @@ func (r *RetryConfig) delay(attempt int, resp *http.Response) time.Duration {
 	}
 	if backoff > max {
 		backoff = max
+	}
+	if r.Jitter != nil {
+		backoff = r.Jitter(backoff)
+		if backoff < 0 {
+			backoff = 0
+		}
+		if backoff > max {
+			backoff = max
+		}
 	}
 
 	if resp == nil {
@@ -302,6 +337,15 @@ func (r *RetryConfig) delay(attempt int, resp *http.Response) time.Duration {
 		delay = max
 	}
 	return delay
+}
+
+func equalJitter(delay time.Duration) time.Duration {
+	if delay <= 1 {
+		return delay
+	}
+	half := delay / 2
+	// Jitter is scheduling noise, not a security decision.
+	return half + time.Duration(rand.Int64N(int64(delay-half)+1)) //nolint:gosec // non-cryptographic backoff jitter
 }
 
 func parseRetryAfter(value string, now time.Time) time.Duration {

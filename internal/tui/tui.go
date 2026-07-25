@@ -5,10 +5,10 @@ import (
 	"context"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	"charm.land/bubbles/v2/textinput"
 	"github.com/morluto/gitcontribute/internal/tuicontract"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // view is the current browse category.
@@ -110,7 +110,7 @@ func New(ctx context.Context, reader tuicontract.Reader, opts ...Option) Model {
 	ti.CharLimit = 120
 	ti.ShowSuggestions = false
 	if m.width > 4 {
-		ti.Width = m.width - 4
+		ti.SetWidth(m.width - 4)
 	}
 	m.search = ti
 

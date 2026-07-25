@@ -135,7 +135,7 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		t.Fatalf("precedents = %+v", precedents)
 	}
 
-	portfolio := callMCPTool[mcpcontract.ListPullRequestPortfolioOutput](ctx, t, session, mcpcontract.ToolListPullRequestPortfolio, map[string]any{"author": "morluto", "state": "open", "limit": 10})
+	portfolio := callMCPTool[mcpcontract.ListPullRequestPortfolioOutput](ctx, t, session, mcpcontract.ToolListPullRequestPortfolio, map[string]any{"author": "morluto", "state": "open", "limit": 10, "response_format": "detailed"})
 	if len(portfolio.PullRequests) != 1 || portfolio.PullRequests[0].Attention != "unknown" {
 		t.Fatalf("portfolio = %+v", portfolio)
 	}
@@ -178,7 +178,7 @@ func TestMCPStdioPullRequestPortfolioFlow(t *testing.T) {
 	status := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncPullRequestStatus, map[string]any{"pull_requests": []any{map[string]any{"owner": "lab", "repo": "project", "number": 7}}})
 	waitMCPJob(ctx, t, session, status.ID)
 
-	portfolio := callMCPTool[mcpcontract.ListPullRequestPortfolioOutput](ctx, t, session, mcpcontract.ToolListPullRequestPortfolio, map[string]any{"author": "morluto", "state": "open", "limit": 10})
+	portfolio := callMCPTool[mcpcontract.ListPullRequestPortfolioOutput](ctx, t, session, mcpcontract.ToolListPullRequestPortfolio, map[string]any{"author": "morluto", "state": "open", "limit": 10, "response_format": "detailed"})
 	if len(portfolio.PullRequests) != 1 {
 		t.Fatalf("portfolio = %+v, authored job = %+v", portfolio, authoredResult)
 	}

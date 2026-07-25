@@ -257,9 +257,10 @@ type SyncPullRequestStatusInput struct {
 
 // ListPullRequestPortfolioInput filters and bounds the stored pull-request portfolio.
 type ListPullRequestPortfolioInput struct {
-	Author string `json:"author,omitempty" jsonschema:"Optional authored GitHub login"`
-	State  string `json:"state,omitempty" jsonschema:"open, closed, or all"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum pull requests from 1 to 100"`
+	Author         string `json:"author,omitempty" jsonschema:"Optional authored GitHub login"`
+	State          string `json:"state,omitempty" jsonschema:"open, closed, or all"`
+	Limit          int    `json:"limit,omitempty" jsonschema:"Maximum pull requests from 1 to 100; defaults to 20"`
+	ResponseFormat string `json:"response_format,omitempty" jsonschema:"concise or detailed; defaults to concise"`
 }
 
 // PullRequestPortfolioItem contains source-backed PR facts and a deterministic
@@ -291,19 +292,20 @@ type PullRequestPortfolioItem struct {
 	ClosingIssues           []string              `json:"closing_issues,omitempty"`
 	ChangedFiles            []string              `json:"changed_files,omitempty"`
 	StatusCoverage          string                `json:"status_coverage"`
-	Facets                  []FacetCoverageOutput `json:"facets"`
+	Facets                  []FacetCoverageOutput `json:"facets,omitempty"`
 	SourceUpdatedAt         string                `json:"source_updated_at"`
 	StatusObservedAt        string                `json:"status_observed_at,omitempty"`
 }
 
 // ListPullRequestPortfolioOutput contains a deterministic portfolio projection.
 type ListPullRequestPortfolioOutput struct {
-	Status       string                     `json:"status"`
-	RuleVersion  string                     `json:"rule_version"`
-	GeneratedAt  string                     `json:"generated_at"`
-	PullRequests []PullRequestPortfolioItem `json:"pull_requests"`
-	Total        int                        `json:"total"`
-	Truncated    bool                       `json:"truncated"`
+	Status         string                     `json:"status"`
+	ResponseFormat string                     `json:"response_format"`
+	RuleVersion    string                     `json:"rule_version"`
+	GeneratedAt    string                     `json:"generated_at"`
+	PullRequests   []PullRequestPortfolioItem `json:"pull_requests"`
+	Total          int                        `json:"total"`
+	Truncated      bool                       `json:"truncated"`
 }
 
 // PortfolioSubjectInput identifies local candidate state for offline overlap analysis.
@@ -405,12 +407,18 @@ type CheckMergeConflictsOutput struct {
 
 // DeepWikiInput selects one bounded external derived-knowledge read. DeepWiki
 // results are context, not authority for current GitHub state.
+const (
+	DeepWikiMinOutputBytes     = 1024
+	DeepWikiDefaultOutputBytes = 128 * 1024
+	DeepWikiMaxOutputBytes     = 1024 * 1024
+)
+
 type DeepWikiInput struct {
 	Action         string   `json:"action" jsonschema:"structure, contents, or question"`
 	Repository     string   `json:"repository,omitempty" jsonschema:"OWNER/REPO for structure or contents"`
 	Repositories   []string `json:"repositories,omitempty" jsonschema:"One to 10 OWNER/REPO values for question"`
 	Question       string   `json:"question,omitempty" jsonschema:"Focused cross-repository question"`
-	MaxOutputBytes int      `json:"max_output_bytes,omitempty" jsonschema:"Maximum returned bytes from 1024 to 1048576"`
+	MaxOutputBytes int      `json:"max_output_bytes,omitempty" jsonschema:"Maximum returned bytes from 1024 to 1048576; defaults to 131072 because contents has no continuation protocol"`
 }
 
 // DeepWikiOutput labels provider prose as derived external content and reports

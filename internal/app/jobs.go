@@ -13,6 +13,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/failure"
+	"golang.org/x/sync/semaphore"
 )
 
 // JobFunc performs asynchronous work for a job. It receives a context that is
@@ -50,8 +51,8 @@ type jobExecutorConfig struct {
 	leaseTimeout      time.Duration
 	heartbeatInterval time.Duration
 	pollInterval      time.Duration
-	maxConcurrentJobs int
-	maxAdmittedJobs   int
+	maxConcurrentJobs int64
+	maxAdmittedJobs   int64
 }
 
 func defaultJobExecutorConfig() jobExecutorConfig {
@@ -79,18 +80,14 @@ type JobExecutor struct {
 	rootCtx context.Context
 	cancel  context.CancelFunc
 	cfg     jobExecutorConfig
+	slots   *semaphore.Weighted
 
 	mu            sync.Mutex
 	cond          *sync.Cond
 	closed        bool
 	admitted      map[string]context.CancelFunc
-	admittedCount int
-	permits       chan struct{}
+	admittedCount int64
 	backgroundWG  sync.WaitGroup
-}
-
-func newJobExecutor(ctx context.Context, c *corpus.Corpus) (*JobExecutor, error) {
-	return newJobExecutorWithConfig(ctx, c, defaultJobExecutorConfig())
 }
 
 func newJobExecutorWithConfig(ctx context.Context, c jobStore, cfg jobExecutorConfig) (*JobExecutor, error) {
@@ -119,7 +116,7 @@ func newJobExecutorWithConfig(ctx context.Context, c jobStore, cfg jobExecutorCo
 		ownerID:  ownerID,
 		cfg:      cfg,
 		admitted: make(map[string]context.CancelFunc),
-		permits:  make(chan struct{}, cfg.maxConcurrentJobs),
+		slots:    semaphore.NewWeighted(cfg.maxConcurrentJobs),
 	}
 	e.rootCtx, e.cancel = context.WithCancel(ctx)
 	e.cond = sync.NewCond(&e.mu)
@@ -320,10 +317,7 @@ func (e *JobExecutor) run(jobCtx context.Context, id string, cancel context.Canc
 		e.mu.Unlock()
 	}()
 
-	select {
-	case e.permits <- struct{}{}:
-		defer func() { <-e.permits }()
-	case <-jobCtx.Done():
+	if err := e.slots.Acquire(jobCtx, 1); err != nil {
 		if e.rootCtx.Err() != nil {
 			_ = e.corpus.TransitionJob(
 				context.WithoutCancel(jobCtx), id,
@@ -332,6 +326,7 @@ func (e *JobExecutor) run(jobCtx context.Context, id string, cancel context.Canc
 		}
 		return
 	}
+	defer e.slots.Release(1)
 
 	e.mu.Lock()
 	if e.closed {

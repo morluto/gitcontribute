@@ -146,6 +146,59 @@ func TestSubmitAndCompleteJob(t *testing.T) {
 	}
 }
 
+func TestJobExecutorBoundsConcurrentJobs(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newJobTestService(t)
+	jobs := newJobExecutorOnService(t, svc, jobExecutorConfig{pollInterval: time.Hour, maxConcurrentJobs: 1})
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	firstID, err := jobs.Submit(ctx, "first", nil, func(context.Context, func(string, string) error) (any, error) {
+		close(firstStarted)
+		<-releaseFirst
+		return map[string]bool{"ok": true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-firstStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first job did not start")
+	}
+
+	secondStarted := make(chan struct{})
+	secondID, err := jobs.Submit(ctx, "second", nil, func(context.Context, func(string, string) error) (any, error) {
+		close(secondStarted)
+		return map[string]bool{"ok": true}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-secondStarted:
+		t.Fatal("second job started above configured concurrency")
+	case <-time.After(100 * time.Millisecond):
+	}
+	second, err := jobs.Get(ctx, secondID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Status != corpus.JobStatusQueued {
+		t.Fatalf("waiting job status = %q, want queued", second.Status)
+	}
+
+	close(releaseFirst)
+	waitForJobStatus(t, jobs, firstID, corpus.JobStatusSucceeded, 2*time.Second)
+	select {
+	case <-secondStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second job did not start after slot release")
+	}
+	waitForJobStatus(t, jobs, secondID, corpus.JobStatusSucceeded, 2*time.Second)
+}
+
 func TestJobExecutorRecordsReadErrorAfterExecution(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

@@ -100,6 +100,44 @@ func (c *Corpus) StoppedJobIDs(ctx context.Context, ids []string) (_ map[string]
 	return stopped, nil
 }
 
+// GetJobsBatch returns jobs keyed by ID in one query. When includePayload is
+// false, request and result blobs are not loaded from SQLite.
+func (c *Corpus) GetJobsBatch(ctx context.Context, ids []string, includePayload bool) (map[string]*Job, error) {
+	if len(ids) > maxBatchReadItems {
+		return nil, errors.New("job batch cannot exceed 100 items")
+	}
+	if len(ids) == 0 {
+		return map[string]*Job{}, nil
+	}
+	selection := jobSelect
+	if !includePayload {
+		selection = jobSummarySelect
+	}
+	placeholders := sqlPlaceholders(len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := c.db.QueryContext(ctx, selection+` WHERE id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get jobs batch: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make(map[string]*Job, len(ids))
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan jobs batch: %w", err)
+		}
+		out[job.ID] = job
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate jobs batch: %w", err)
+	}
+	return out, nil
+}
+
 // ListJobs returns recent jobs bounded by limit, optionally filtered by status.
 func (c *Corpus) ListJobs(ctx context.Context, status string, limit int) ([]Job, error) {
 	if limit <= 0 {
@@ -479,6 +517,11 @@ func isSQLiteBusy(err error) bool {
 
 const jobSelect = `
 	SELECT id, kind, status, request, result, error, progress, statistics,
+	       created_at, started_at, completed_at, updated_at, cancelled_at
+	FROM jobs`
+
+const jobSummarySelect = `
+	SELECT id, kind, status, '', NULL, error, progress, statistics,
 	       created_at, started_at, completed_at, updated_at, cancelled_at
 	FROM jobs`
 

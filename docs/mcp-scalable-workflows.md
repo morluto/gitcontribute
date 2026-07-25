@@ -57,6 +57,11 @@ explicit `raw_query` field; there is no deprecated alias.
   GitHub state.
 - `github.sync_threads` stores issue or pull-request headers. Child comments
   and reviews require explicit `github.hydrate_threads` facets.
+- `github.hydrate_threads` refreshes each selected thread header before fetching
+  child facets, so exact finalists do not inherit stale header coverage. The
+  repository metadata must already exist locally, and each item's `requests`
+  count includes its one exact-header request. Successful items report
+  `header_refreshed: true`.
 - Pull-request headers do not contain merge outcomes. Until `pr_details` is
   hydrated, a closed PR's `merged` value is omitted and outcome-sensitive
   offline reads report it as unknown rather than closed-unmerged.

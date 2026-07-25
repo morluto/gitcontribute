@@ -321,7 +321,7 @@ func TestSetupProgressModelKeepsCompletedLinesInOrder(t *testing.T) {
 		updated, _ := model.Update(setupCompletedMsg(step))
 		model = updated.(setupProgressModel)
 	}
-	view := model.View()
+	view := model.View().Content
 	wants := []string{"✓ Configuration — configured", "✓ Local corpus — initialized", "✓ Verification — verified"}
 	last := -1
 	for _, want := range wants {
@@ -350,13 +350,13 @@ func TestSetupProgressModelSettlesActiveWorkIntoResult(t *testing.T) {
 	model := newSetupProgressModel()
 	updated, _ := model.Update(setupStartedMsg(contracts.SetupPhaseClients))
 	model = updated.(setupProgressModel)
-	if got := model.View(); !strings.Contains(got, "Configuring coding agents…") {
+	if got := model.View().Content; !strings.Contains(got, "Configuring coding agents…") {
 		t.Fatalf("active progress = %q", got)
 	}
 
 	updated, _ = model.Update(setupCompletedMsg(contracts.SetupStep{Name: "codex", Status: "configured"}))
 	model = updated.(setupProgressModel)
-	got := model.View()
+	got := model.View().Content
 	if got != "✓ Codex — configured" || strings.Contains(got, "Configuring coding agents") {
 		t.Fatalf("settled progress = %q", got)
 	}

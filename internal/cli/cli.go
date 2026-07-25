@@ -157,8 +157,6 @@ type configureCmd struct {
 	CrawlConcurrency *int    `name:"crawl-concurrency" help:"Default crawl concurrency"`
 	CrawlRetryLimit  *int    `name:"crawl-retry-limit" help:"Default retry limit"`
 	CrawlTimeout     *string `name:"crawl-timeout" help:"Default request timeout"`
-	OutputFormat     *string `name:"output-format" help:"Default output format (text or json)"`
-	OutputMaxResults *int    `name:"output-max-results" help:"Default maximum result count"`
 	DryRun           bool    `name:"dry-run" help:"Validate and show without saving"`
 	JSON             bool    `name:"json" help:"Print the result as JSON"`
 }
@@ -262,7 +260,7 @@ type sourceListCmd struct {
 type crawlCmd struct {
 	Name   string        `arg:"" help:"Source name"`
 	Since  time.Duration `name:"since" default:"720h" help:"Initial historical window"`
-	Budget int           `name:"budget" default:"500" help:"Maximum GitHub API requests"`
+	Budget int           `name:"budget" help:"Maximum GitHub API requests (defaults to configured crawl budget)"`
 	JSON   bool          `name:"json" help:"Print the result as JSON"`
 }
 
@@ -1142,8 +1140,8 @@ func parseGHArchiveEvents(events string) ([]string, error) {
 }
 
 func (c *CLI) runCrawl(ctx context.Context, cmd *crawlCmd) error {
-	if cmd.Since <= 0 || cmd.Budget <= 0 || cmd.Budget > 5000 {
-		return NewCLIError(ExitUsage, errors.New("--since must be positive and --budget must be between 1 and 5000"))
+	if cmd.Since <= 0 || cmd.Budget < 0 || cmd.Budget > 5000 {
+		return NewCLIError(ExitUsage, errors.New("--since must be positive and --budget must be between 1 and 5000 when set"))
 	}
 	service, err := c.discoveryService()
 	if err != nil {
@@ -1442,7 +1440,7 @@ func (c *CLI) runConfigure(ctx context.Context, cmd *configureCmd) error {
 		Database: cmd.Database, TokenSource: cmd.TokenSource, TokenSourceKey: cmd.TokenSourceKey,
 		CrawlBudget: cmd.CrawlBudget, CrawlConcurrency: cmd.CrawlConcurrency,
 		CrawlRetryLimit: cmd.CrawlRetryLimit, CrawlTimeout: cmd.CrawlTimeout,
-		OutputFormat: cmd.OutputFormat, OutputMaxResults: cmd.OutputMaxResults, DryRun: cmd.DryRun,
+		DryRun: cmd.DryRun,
 	})
 	if err != nil {
 		return c.mapError(err)

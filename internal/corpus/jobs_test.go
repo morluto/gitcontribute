@@ -38,6 +38,48 @@ func TestCreateAndGetJob(t *testing.T) {
 	}
 }
 
+func TestGetJobsBatchCanSkipPayloadBlobs(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	first, err := c.CreateJob(ctx, "sync", `{"large":"request"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := c.CreateJob(ctx, "sync", `{"second":true}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.StartJob(ctx, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.TransitionJob(ctx, first.ID, JobStatusRunning, JobStatusSucceeded, `{"large":"result"}`, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	ids := []string{second.ID, "missing", first.ID}
+	summary, err := c.GetJobsBatch(ctx, ids, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summary) != 2 || summary["missing"] != nil {
+		t.Fatalf("summary jobs = %+v", summary)
+	}
+	if summary[first.ID].Request != "" || summary[first.ID].Result != "" || summary[first.ID].Status != JobStatusSucceeded {
+		t.Fatalf("summary loaded payload or lost status: %+v", summary[first.ID])
+	}
+	detailed, err := c.GetJobsBatch(ctx, ids, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detailed[first.ID].Request != `{"large":"request"}` || detailed[first.ID].Result != `{"large":"result"}` {
+		t.Fatalf("detailed payload = %+v", detailed[first.ID])
+	}
+	if _, err := c.GetJobsBatch(ctx, make([]string, maxBatchReadItems+1), false); err == nil {
+		t.Fatal("job batch accepted an oversized ID set")
+	}
+}
+
 func TestListJobsFiltersByStatusAndLimits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

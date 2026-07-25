@@ -376,7 +376,7 @@ contacting GitHub. `gitcontribute configure` updates `config.toml` atomically:
 gitcontribute configure --database /path/to/corpus.db
 gitcontribute configure --token-source env --token-source-key GITHUB_TOKEN
 gitcontribute configure --token-source gh-cli
-gitcontribute configure --output-format json
+gitcontribute configure --crawl-budget 1000
 ```
 
 Authentication sources are `none`, `env`, `gh-cli`, and `keyring`. Tokens are

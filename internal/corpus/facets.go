@@ -8,6 +8,18 @@ import (
 	"time"
 )
 
+// ThreadFacetKey identifies one thread-scoped hydration facet.
+type ThreadFacetKey struct {
+	ThreadID int64
+	Facet    string
+}
+
+// RepositoryFacetKey identifies one repository-scoped hydration facet.
+type RepositoryFacetKey struct {
+	RepositoryID int64
+	Facet        string
+}
+
 // AdvanceFacet records progress on a hydration facet for a repository or thread.
 // The update wins only when the new (source_updated_at, observation_sequence)
 // ordering is greater, so facets advance independently from one another and
@@ -148,6 +160,112 @@ func (c *Corpus) GetCoverage(ctx context.Context, repoID int64, threadID *int64,
 	cov.SourceUpdatedAt = scanTime(src)
 	cov.UpdatedAt = scanTime(updated)
 	return &cov, nil
+}
+
+// ListThreadCoverageBatch returns stored coverage for a bounded set of thread
+// facets in one query. Missing keys are intentionally absent from the result.
+func (c *Corpus) ListThreadCoverageBatch(ctx context.Context, threadIDs []int64, facets []string) (map[ThreadFacetKey]*Coverage, error) {
+	if err := validateThreadFacetBatch(threadIDs, facets); err != nil {
+		return nil, err
+	}
+	if len(threadIDs) == 0 || len(facets) == 0 {
+		return map[ThreadFacetKey]*Coverage{}, nil
+	}
+	threadPlaceholders := sqlPlaceholders(len(threadIDs))
+	facetPlaceholders := sqlPlaceholders(len(facets))
+	args := make([]any, 0, len(threadIDs)+len(facets))
+	for _, threadID := range threadIDs {
+		args = append(args, threadID)
+	}
+	for _, facet := range facets {
+		args = append(args, facet)
+	}
+	rows, err := c.db.QueryContext(ctx, `
+		SELECT id, repository_id, thread_id, facet, source_updated_at, observation_sequence, complete, run_id, updated_at
+		FROM facet_coverage
+		WHERE thread_id IN (`+threadPlaceholders+`) AND facet IN (`+facetPlaceholders+`)
+		ORDER BY thread_id, facet
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list thread coverage batch: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make(map[ThreadFacetKey]*Coverage)
+	for rows.Next() {
+		var cov Coverage
+		var runID, threadID sql.NullInt64
+		var sourceUpdatedAt, updatedAt int64
+		if err := rows.Scan(&cov.ID, &cov.RepositoryID, &threadID, &cov.Facet, &sourceUpdatedAt, &cov.ObservationSequence, &cov.Complete, &runID, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan thread coverage batch: %w", err)
+		}
+		if !threadID.Valid {
+			continue
+		}
+		cov.ThreadID = &threadID.Int64
+		if runID.Valid {
+			cov.RunID = &runID.Int64
+		}
+		cov.SourceUpdatedAt = scanTime(sourceUpdatedAt)
+		cov.UpdatedAt = scanTime(updatedAt)
+		out[ThreadFacetKey{ThreadID: threadID.Int64, Facet: cov.Facet}] = &cov
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate thread coverage batch: %w", err)
+	}
+	return out, nil
+}
+
+// ListRepositoryCoverageBatch returns repository-scoped coverage for a bounded
+// set of repository facets in one query. Missing keys are absent.
+func (c *Corpus) ListRepositoryCoverageBatch(ctx context.Context, repositoryIDs []int64, facets []string) (map[RepositoryFacetKey]*Coverage, error) {
+	if err := validateFacetBatch(repositoryIDs, facets, "repository"); err != nil {
+		return nil, err
+	}
+	if len(repositoryIDs) == 0 || len(facets) == 0 {
+		return map[RepositoryFacetKey]*Coverage{}, nil
+	}
+	repositoryPlaceholders := sqlPlaceholders(len(repositoryIDs))
+	facetPlaceholders := sqlPlaceholders(len(facets))
+	args := make([]any, 0, len(repositoryIDs)+len(facets))
+	for _, repositoryID := range repositoryIDs {
+		args = append(args, repositoryID)
+	}
+	for _, facet := range facets {
+		args = append(args, facet)
+	}
+	rows, err := c.db.QueryContext(ctx, `
+		SELECT id, repository_id, thread_id, facet, source_updated_at, observation_sequence, complete, run_id, updated_at
+		FROM facet_coverage
+		WHERE repository_id IN (`+repositoryPlaceholders+`)
+		  AND thread_id IS NULL
+		  AND facet IN (`+facetPlaceholders+`)
+		ORDER BY repository_id, facet
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list repository coverage batch: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make(map[RepositoryFacetKey]*Coverage)
+	for rows.Next() {
+		var cov Coverage
+		var runID, threadID sql.NullInt64
+		var sourceUpdatedAt, updatedAt int64
+		if err := rows.Scan(&cov.ID, &cov.RepositoryID, &threadID, &cov.Facet, &sourceUpdatedAt, &cov.ObservationSequence, &cov.Complete, &runID, &updatedAt); err != nil {
+			return nil, fmt.Errorf("scan repository coverage batch: %w", err)
+		}
+		if runID.Valid {
+			cov.RunID = &runID.Int64
+		}
+		cov.SourceUpdatedAt = scanTime(sourceUpdatedAt)
+		cov.UpdatedAt = scanTime(updatedAt)
+		out[RepositoryFacetKey{RepositoryID: cov.RepositoryID, Facet: cov.Facet}] = &cov
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate repository coverage batch: %w", err)
+	}
+	return out, nil
 }
 
 // ListCoverage returns all coverage facts for a repository or thread.

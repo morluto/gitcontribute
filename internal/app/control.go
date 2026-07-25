@@ -331,12 +331,6 @@ func applyConfigureOptions(cfg *config.Config, opts contracts.ConfigureOptions) 
 	if opts.CrawlTimeout != nil {
 		cfg.Crawl.Timeout = strings.TrimSpace(*opts.CrawlTimeout)
 	}
-	if opts.OutputFormat != nil {
-		cfg.Output.Format = strings.ToLower(strings.TrimSpace(*opts.OutputFormat))
-	}
-	if opts.OutputMaxResults != nil {
-		cfg.Output.MaxResults = *opts.OutputMaxResults
-	}
 }
 
 func configResult(cfg *config.Config) contracts.ConfigResult {
@@ -348,8 +342,6 @@ func configResult(cfg *config.Config) contracts.ConfigResult {
 		CrawlConcurrency: cfg.Crawl.Concurrency,
 		CrawlRetryLimit:  cfg.Crawl.RetryLimit,
 		CrawlTimeout:     cfg.Crawl.Timeout,
-		OutputFormat:     cfg.Output.Format,
-		OutputMaxResults: cfg.Output.MaxResults,
 	}
 }
 

@@ -203,6 +203,79 @@ func (c *Corpus) ListFacetObservationsBounded(ctx context.Context, repoID int64,
 	return c.listFacetObservations(ctx, repoID, threadID, facet, limit)
 }
 
+// FacetObservationBatch is one bounded thread-facet observation sequence.
+type FacetObservationBatch struct {
+	Observations []FacetObservation
+	HasMore      bool
+}
+
+// ListThreadFacetObservationsBatch returns up to limit observations per
+// thread-facet key in one query while preserving observation order.
+func (c *Corpus) ListThreadFacetObservationsBatch(ctx context.Context, threadIDs []int64, facets []string, limit int) (map[ThreadFacetKey]FacetObservationBatch, error) {
+	if limit <= 0 || limit > 1000 {
+		return nil, errors.New("facet observation limit must be between 1 and 1000")
+	}
+	if err := validateThreadFacetBatch(threadIDs, facets); err != nil {
+		return nil, err
+	}
+	if len(threadIDs) == 0 || len(facets) == 0 {
+		return map[ThreadFacetKey]FacetObservationBatch{}, nil
+	}
+	threadPlaceholders := sqlPlaceholders(len(threadIDs))
+	facetPlaceholders := sqlPlaceholders(len(facets))
+	args := make([]any, 0, len(threadIDs)+len(facets)+1)
+	for _, threadID := range threadIDs {
+		args = append(args, threadID)
+	}
+	for _, facet := range facets {
+		args = append(args, facet)
+	}
+	args = append(args, limit)
+	rows, err := c.db.QueryContext(ctx, `
+		WITH ranked AS (
+			SELECT id, repository_id, thread_id, facet, source_updated_at, observation_sequence, payload, observed_at,
+			       ROW_NUMBER() OVER (PARTITION BY thread_id, facet ORDER BY observation_sequence) AS row_number,
+			       COUNT(*) OVER (PARTITION BY thread_id, facet) AS total
+			FROM facet_observations
+			WHERE thread_id IN (`+threadPlaceholders+`) AND facet IN (`+facetPlaceholders+`)
+		)
+		SELECT id, repository_id, thread_id, facet, source_updated_at, observation_sequence, payload, observed_at, total
+		FROM ranked
+		WHERE row_number <= ?
+		ORDER BY thread_id, facet, observation_sequence
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list thread facet observations batch: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make(map[ThreadFacetKey]FacetObservationBatch)
+	for rows.Next() {
+		var observation FacetObservation
+		var threadID sql.NullInt64
+		var sourceUpdatedAt, observedAt int64
+		var total int
+		if err := rows.Scan(&observation.ID, &observation.RepositoryID, &threadID, &observation.Facet, &sourceUpdatedAt, &observation.ObservationSequence, &observation.Payload, &observedAt, &total); err != nil {
+			return nil, fmt.Errorf("scan thread facet observations batch: %w", err)
+		}
+		if !threadID.Valid {
+			continue
+		}
+		observation.ThreadID = &threadID.Int64
+		observation.SourceUpdatedAt = scanTime(sourceUpdatedAt)
+		observation.ObservedAt = scanTime(observedAt)
+		key := ThreadFacetKey{ThreadID: threadID.Int64, Facet: observation.Facet}
+		batch := out[key]
+		batch.Observations = append(batch.Observations, observation)
+		batch.HasMore = total > limit
+		out[key] = batch
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate thread facet observations batch: %w", err)
+	}
+	return out, nil
+}
+
 func (c *Corpus) listFacetObservations(ctx context.Context, repoID int64, threadID *int64, facet string, limit int) ([]FacetObservation, bool, error) {
 	tid := sql.NullInt64{}
 	if threadID != nil {
