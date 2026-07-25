@@ -343,7 +343,7 @@ func (m *Manager) cloneMirror(ctx context.Context, remote, mirrorPath string) er
 		return fmt.Errorf("create mirrors dir: %w", err)
 	}
 
-	tmpName := "." + filepath.Base(mirrorPath) + "-" + uuid.NewString()
+	tmpName := ".clone-" + uuid.NewString()
 	tmpPath := filepath.Join(parent, tmpName)
 
 	defer func() {
