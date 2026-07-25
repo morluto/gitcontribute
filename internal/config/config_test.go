@@ -34,7 +34,6 @@ func TestConfigRoundtrip(t *testing.T) {
 	cfg := &Config{
 		TokenSource: TokenSource{Method: "env", Key: "GITHUB_TOKEN"},
 		Crawl:       Crawl{Budget: 500, Concurrency: 8, RetryLimit: 2, Timeout: "1m"},
-		Output:      Output{Format: "json", MaxResults: 50},
 	}
 	if err := ApplyDefaults(cfg, paths); err != nil {
 		t.Fatalf("ApplyDefaults error: %v", err)
@@ -146,8 +145,6 @@ func TestConfigEnvOverrides(t *testing.T) {
 		"GITCONTRIBUTE_CRAWL_CONCURRENCY":   "7",
 		"GITCONTRIBUTE_CRAWL_RETRY_LIMIT":   "1",
 		"GITCONTRIBUTE_CRAWL_TIMEOUT":       "5s",
-		"GITCONTRIBUTE_OUTPUT_FORMAT":       "json",
-		"GITCONTRIBUTE_OUTPUT_MAX_RESULTS":  "10",
 	}
 	getenv := func(k string) string { return env[k] }
 
@@ -164,9 +161,6 @@ func TestConfigEnvOverrides(t *testing.T) {
 	if cfg.Crawl.Budget != 123 || cfg.Crawl.Concurrency != 7 || cfg.Crawl.RetryLimit != 1 || cfg.Crawl.Timeout != "5s" {
 		t.Fatalf("Crawl = %+v", cfg.Crawl)
 	}
-	if cfg.Output.Format != "json" || cfg.Output.MaxResults != 10 {
-		t.Fatalf("Output = %+v", cfg.Output)
-	}
 }
 
 func TestConfigValidation(t *testing.T) {
@@ -182,63 +176,52 @@ func TestConfigValidation(t *testing.T) {
 				Database:    "/tmp/db",
 				TokenSource: TokenSource{Method: "gh-cli"},
 				Crawl:       Crawl{Budget: 1, Concurrency: 1, RetryLimit: 0, Timeout: "1s"},
-				Output:      Output{Format: "json", MaxResults: 0},
 			},
 		},
 		{
 			name:    "missing database",
-			cfg:     &Config{Database: "", TokenSource: TokenSource{Method: "none"}, Crawl: Crawl{Budget: 1, Concurrency: 1}, Output: Output{Format: "text"}},
+			cfg:     &Config{Database: "", TokenSource: TokenSource{Method: "none"}, Crawl: Crawl{Budget: 1, Concurrency: 1}},
 			wantErr: "database path must be set",
 		},
 		{
 			name:    "token env missing key",
-			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "env"}, Crawl: Crawl{Budget: 1, Concurrency: 1}, Output: Output{Format: "text"}},
+			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "env"}, Crawl: Crawl{Budget: 1, Concurrency: 1}},
 			wantErr: "token_source key is required when method is env",
 		},
 		{
 			name:    "token keyring missing account",
-			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "keyring"}, Crawl: Crawl{Budget: 1, Concurrency: 1}, Output: Output{Format: "text"}},
+			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "keyring"}, Crawl: Crawl{Budget: 1, Concurrency: 1}},
 			wantErr: "token_source key is required when method is keyring",
 		},
 		{
 			name:    "token keyring blank account",
-			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "keyring", Key: "  \t"}, Crawl: Crawl{Budget: 1, Concurrency: 1}, Output: Output{Format: "text"}},
+			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "keyring", Key: "  \t"}, Crawl: Crawl{Budget: 1, Concurrency: 1}},
 			wantErr: "token_source key is required when method is keyring",
 		},
 		{
 			name:    "invalid token method",
-			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "magic"}, Crawl: Crawl{Budget: 1, Concurrency: 1}, Output: Output{Format: "text"}},
+			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "magic"}, Crawl: Crawl{Budget: 1, Concurrency: 1}},
 			wantErr: "invalid token_source method",
 		},
 		{
 			name:    "invalid budget",
-			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "none"}, Crawl: Crawl{Budget: 0, Concurrency: 1}, Output: Output{Format: "text"}},
+			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "none"}, Crawl: Crawl{Budget: 0, Concurrency: 1}},
 			wantErr: "crawl budget must be positive",
 		},
 		{
 			name:    "invalid concurrency",
-			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "none"}, Crawl: Crawl{Budget: 1, Concurrency: -1}, Output: Output{Format: "text"}},
+			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "none"}, Crawl: Crawl{Budget: 1, Concurrency: -1}},
 			wantErr: "crawl concurrency must be positive",
 		},
 		{
 			name:    "invalid retry limit",
-			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "none"}, Crawl: Crawl{Budget: 1, Concurrency: 1, RetryLimit: -1}, Output: Output{Format: "text"}},
+			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "none"}, Crawl: Crawl{Budget: 1, Concurrency: 1, RetryLimit: -1}},
 			wantErr: "crawl retry_limit must be non-negative",
 		},
 		{
 			name:    "invalid timeout",
-			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "none"}, Crawl: Crawl{Budget: 1, Concurrency: 1, Timeout: "not-a-duration"}, Output: Output{Format: "text"}},
+			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "none"}, Crawl: Crawl{Budget: 1, Concurrency: 1, Timeout: "not-a-duration"}},
 			wantErr: "crawl timeout is not a valid duration",
-		},
-		{
-			name:    "invalid output format",
-			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "none"}, Crawl: Crawl{Budget: 1, Concurrency: 1}, Output: Output{Format: "xml"}},
-			wantErr: "invalid output format",
-		},
-		{
-			name:    "negative max results",
-			cfg:     &Config{Database: "/tmp/db", TokenSource: TokenSource{Method: "none"}, Crawl: Crawl{Budget: 1, Concurrency: 1}, Output: Output{Format: "text", MaxResults: -1}},
-			wantErr: "output max_results must be non-negative",
 		},
 	}
 

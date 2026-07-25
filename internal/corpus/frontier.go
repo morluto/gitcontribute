@@ -276,10 +276,6 @@ const frontierSelect = `
 	       lease_expires_at, failure_kind, last_error, created_at, updated_at
 	FROM frontier_items`
 
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
 func scanFrontierItem(row rowScanner) (*FrontierItem, error) {
 	var item FrontierItem
 	var owner, repo, threadKind, facet, reason, source sql.NullString
