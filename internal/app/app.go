@@ -490,23 +490,15 @@ const (
 	maxSyncRequests        = 1000
 )
 
-// Sync fetches all repository threads. It preserves the original archive API
-// while SyncWithOptions provides bounded incremental and exact refreshes.
-func (s *Service) Sync(ctx context.Context, repo contracts.RepoRef) (*contracts.SyncResult, error) {
-	return s.SyncWithOptions(ctx, repo, SyncOptions{})
-}
-
-// SyncWithOptions fetches a repository and a bounded thread selection from
-// GitHub, then writes ordered observations to the local corpus.
-func (s *Service) SyncWithOptions(ctx context.Context, repo contracts.RepoRef, syncOpts SyncOptions) (*contracts.SyncResult, error) {
-	return s.syncWithOptions(ctx, repo, syncOpts, nil)
+func (s *Service) sync(ctx context.Context, repo contracts.RepoRef, syncOpts SyncOptions) (*contracts.SyncResult, error) {
+	return s.syncWithThreadHeaders(ctx, repo, syncOpts, nil)
 }
 
 func (s *Service) syncProvidedThreadHeaders(ctx context.Context, repo contracts.RepoRef, issues []github.Issue, maxRequests int) (*contracts.SyncResult, error) {
-	return s.syncWithOptions(ctx, repo, SyncOptions{Kind: "pull_request", State: "all", MaxPages: 1, MaxRequests: maxRequests}, issues)
+	return s.syncWithThreadHeaders(ctx, repo, SyncOptions{Kind: "pull_request", State: "all", MaxPages: 1, MaxRequests: maxRequests}, issues)
 }
 
-func (s *Service) syncWithOptions(ctx context.Context, repo contracts.RepoRef, syncOpts SyncOptions, provided []github.Issue) (*contracts.SyncResult, error) {
+func (s *Service) syncWithThreadHeaders(ctx context.Context, repo contracts.RepoRef, syncOpts SyncOptions, provided []github.Issue) (*contracts.SyncResult, error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err

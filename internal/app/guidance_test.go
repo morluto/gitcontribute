@@ -39,7 +39,7 @@ func TestExplicitSyncPersistsSourceBackedContributionGuidance(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
-	if _, err := svc.Sync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "guided"}); err != nil {
+	if _, err := svc.ArchiveSync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "guided"}, contracts.ArchiveSyncOptions{State: "all"}); err != nil {
 		t.Fatal(err)
 	}
 

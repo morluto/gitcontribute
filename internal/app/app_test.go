@@ -283,7 +283,7 @@ func TestContributionGuidanceDoesNotClaimUnfetchedSource(t *testing.T) {
 	defer srv.Close()
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
-	if _, err := svc.Sync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "test"}); err != nil {
+	if _, err := svc.ArchiveSync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "test"}, contracts.ArchiveSyncOptions{State: "all"}); err != nil {
 		t.Fatal(err)
 	}
 	guidance, refs, err := (&corpusReader{s: svc}).ReadContributionGuidance(ctx, domain.RepoRef{Owner: "octocat", Repo: "test"})
@@ -304,7 +304,7 @@ func TestMCPReaderLocalReads(t *testing.T) {
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
 
-	if _, err := svc.Sync(ctx, contracts.RepoRef{Owner: "acme", Repo: "rocket"}); err != nil {
+	if _, err := svc.ArchiveSync(ctx, contracts.RepoRef{Owner: "acme", Repo: "rocket"}, contracts.ArchiveSyncOptions{State: "all"}); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 
@@ -1010,7 +1010,7 @@ func TestSyncMapsIssueMetadataToThread(t *testing.T) {
 	}
 	svc.SetGitHubReader(reader)
 
-	if _, err := svc.Sync(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}); err != nil {
+	if _, err := svc.ArchiveSync(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, contracts.ArchiveSyncOptions{State: "all"}); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 

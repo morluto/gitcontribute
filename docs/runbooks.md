@@ -53,7 +53,7 @@ If the probe succeeds, the circuit closes; if it fails, the circuit re-opens.
 
 To check circuit status, enable debug logging:
 ```sh
-GITCONTRIBUTE_LOG_LEVEL=debug gitcontribute sync owner/repo
+GITCONTRIBUTE_LOG_LEVEL=debug gitcontribute archive sync owner/repo
 ```
 
 ## Job Reconciliation
