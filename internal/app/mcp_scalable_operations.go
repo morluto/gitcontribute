@@ -517,7 +517,10 @@ func (s *Service) hydrateThreadsBatch(ctx context.Context, in mcpcontract.Hydrat
 					results[index] = map[string]any{"key": key, "status": status, "reason": reason, "message": message, "retry_after_ms": retry}
 					continue
 				}
-				results[index] = map[string]any{"key": key, "status": "complete", "kind": res.Kind, "requests": res.Requests, "facets": res.Facets}
+				results[index] = map[string]any{
+					"key": key, "status": "complete", "kind": res.Kind,
+					"header_refreshed": true, "requests": res.Requests, "facets": res.Facets,
+				}
 			}
 		}()
 	}

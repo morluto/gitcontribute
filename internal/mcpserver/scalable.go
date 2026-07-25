@@ -177,7 +177,7 @@ func (s *Server) registerScalable() {
 		setRange(sc, "max_requests", 9, 1000)
 		setDefault(sc, "max_requests", 1000)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded thread-header synchronization job."), handler: s.syncThreads})
-	addCatalogTool(s, catalogTool[mcpcontract.HydrateThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolHydrateThreads, title: "Fetch selected GitHub thread facets", description: "Fetch explicit comments, issue timelines, pull-request details, reviews, or review comments for up to 100 exact threads. Timeline history is opt-in; hydrate only finalists after ranking.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.HydrateThreadsInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.HydrateThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolHydrateThreads, title: "Fetch selected GitHub thread facets", description: "Refresh each exact thread header, then fetch explicit comments, issue timelines, pull-request details, reviews, or review comments for up to 100 threads. Repository metadata must already be synced. Each item reports the header request plus facet requests. Timeline history is opt-in; hydrate only finalists after ranking.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.HydrateThreadsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 100)
 		setArrayBounds(sc, "facets", 1, 5)
 		setArrayEnum(sc, "facets", "issue_comments", "issue_timeline", "pr_details", "pr_reviews", "pr_review_comments")
