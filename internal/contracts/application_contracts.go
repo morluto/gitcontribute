@@ -73,8 +73,6 @@ type ConfigureOptions struct {
 	CrawlConcurrency *int
 	CrawlRetryLimit  *int
 	CrawlTimeout     *string
-	OutputFormat     *string
-	OutputMaxResults *int
 	DryRun           bool
 }
 
@@ -86,8 +84,6 @@ type ConfigResult struct {
 	CrawlConcurrency int    `json:"crawl_concurrency"`
 	CrawlRetryLimit  int    `json:"crawl_retry_limit"`
 	CrawlTimeout     string `json:"crawl_timeout"`
-	OutputFormat     string `json:"output_format"`
-	OutputMaxResults int    `json:"output_max_results"`
 }
 
 type ConfigureResult struct {

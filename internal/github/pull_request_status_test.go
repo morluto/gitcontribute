@@ -71,6 +71,46 @@ func TestGetPullRequestStatusConvertsHealthAndReportsPartialCoverage(t *testing.
 	}
 }
 
+func TestGetPullRequestStatusRetriesReplayableGraphQLPost(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts == 1 {
+			http.Error(w, "transient", http.StatusInternalServerError)
+			return
+		}
+		pullRequest := map[string]any{
+			"id": "PR_20", "updatedAt": "2026-07-19T08:30:00Z", "headRefOid": "abc123",
+			"mergeStateStatus": "CLEAN", "mergeable": "MERGEABLE",
+			"closingIssuesReferences": emptyConnection(), "files": emptyConnection(),
+			"reviewThreads": emptyConnection(), "commits": map[string]any{"nodes": []any{}},
+		}
+		writeJSON(w, map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": pullRequest}}})
+	}))
+	defer srv.Close()
+
+	client, err := NewClient(Config{
+		BaseURL: srv.URL, UploadURL: srv.URL, Limiter: noopLimiter{},
+		Retry: &RetryConfig{
+			MaxAttempts: 2,
+			BaseDelay:   time.Nanosecond,
+			MaxDelay:    time.Nanosecond,
+			Sleeper:     func(context.Context, time.Duration) error { return nil },
+			Jitter:      func(delay time.Duration) time.Duration { return delay },
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.GetPullRequestStatus(context.Background(), "acme", "project", 20, PullRequestStatusOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 2 || result.HeadSHA != "abc123" {
+		t.Fatalf("attempts=%d status=%+v", attempts, result)
+	}
+}
+
 func TestGetPullRequestStatusPaginatesFacetsToCompletion(t *testing.T) {
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

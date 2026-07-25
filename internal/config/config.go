@@ -20,7 +20,6 @@ type Config struct {
 	Database    string      `toml:"database,omitempty"`
 	TokenSource TokenSource `toml:"token_source,omitempty"`
 	Crawl       Crawl       `toml:"crawl,omitempty"`
-	Output      Output      `toml:"output,omitempty"`
 }
 
 // TokenSource describes how to obtain a GitHub token. The token itself is never
@@ -38,12 +37,6 @@ type Crawl struct {
 	Timeout     string `toml:"timeout,omitempty"`
 }
 
-// Output holds default output settings.
-type Output struct {
-	Format     string `toml:"format"`
-	MaxResults int    `toml:"max_results"`
-}
-
 // Default returns a Config populated with built-in defaults. Database and paths
 // are left empty so that ApplyDefaults can resolve them against Paths.
 func Default() *Config {
@@ -54,10 +47,6 @@ func Default() *Config {
 			Concurrency: 4,
 			RetryLimit:  3,
 			Timeout:     "30s",
-		},
-		Output: Output{
-			Format:     "text",
-			MaxResults: 100,
 		},
 	}
 }
@@ -154,13 +143,6 @@ func ApplyDefaults(cfg *Config, paths *Paths) error {
 	if cfg.Crawl.Timeout == "" {
 		cfg.Crawl.Timeout = "30s"
 	}
-	if cfg.Output.Format == "" {
-		cfg.Output.Format = "text"
-	}
-	if cfg.Output.MaxResults == 0 {
-		cfg.Output.MaxResults = 100
-	}
-
 	if cfg.Database == "" && paths != nil {
 		db, err := paths.DatabasePath()
 		if err != nil {
@@ -214,16 +196,6 @@ func ApplyEnv(cfg *Config, getenv func(string) string) error {
 	if v := getenv("GITCONTRIBUTE_CRAWL_TIMEOUT"); v != "" {
 		cfg.Crawl.Timeout = v
 	}
-	if v := getenv("GITCONTRIBUTE_OUTPUT_FORMAT"); v != "" {
-		cfg.Output.Format = strings.ToLower(v)
-	}
-	if v := getenv("GITCONTRIBUTE_OUTPUT_MAX_RESULTS"); v != "" {
-		n, err := strconv.Atoi(v)
-		if err != nil {
-			return fmt.Errorf("GITCONTRIBUTE_OUTPUT_MAX_RESULTS: %w", err)
-		}
-		cfg.Output.MaxResults = n
-	}
 	return nil
 }
 
@@ -259,15 +231,6 @@ func Validate(cfg *Config) error {
 		if _, err := time.ParseDuration(cfg.Crawl.Timeout); err != nil {
 			return fmt.Errorf("crawl timeout is not a valid duration: %w", err)
 		}
-	}
-
-	switch cfg.Output.Format {
-	case "text", "json":
-	default:
-		return fmt.Errorf("invalid output format %q", cfg.Output.Format)
-	}
-	if cfg.Output.MaxResults < 0 {
-		return errors.New("output max_results must be non-negative")
 	}
 
 	return nil

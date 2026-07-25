@@ -116,6 +116,7 @@ func (c *Client) getPullRequestStatusPage(ctx context.Context, owner, name strin
 	if err != nil {
 		return PullRequestStatus{}, fmt.Errorf("create pull request status request: %w", err)
 	}
+	req = markReplayableRead(req)
 	var envelope pullRequestStatusEnvelope
 	resp, err := c.gh.Do(req, &envelope)
 	if err != nil {

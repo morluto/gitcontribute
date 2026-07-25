@@ -418,7 +418,12 @@ func (s *Service) addManifestPullRequest(ctx context.Context, c *corpus.Corpus, 
 	if err != nil {
 		return "", err
 	}
-	item, err := portfolioItem(ctx, c, corpus.PortfolioPullRequest{Owner: storedRepo.Owner, Repo: storedRepo.Name, Thread: *thread}, now)
+	stored := corpus.PortfolioPullRequest{Owner: storedRepo.Owner, Repo: storedRepo.Name, Thread: *thread}
+	readSet, err := loadPortfolioReadSet(ctx, c, []corpus.PortfolioPullRequest{stored}, portfolioDetailed)
+	if err != nil {
+		return "", err
+	}
+	item, err := portfolioItem(stored, now, readSet, portfolioDetailed)
 	if err != nil {
 		return "", err
 	}

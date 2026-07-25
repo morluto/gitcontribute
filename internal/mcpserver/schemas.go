@@ -299,12 +299,12 @@ func outputSchema[T any](description string) schemaDefinition {
 	}
 	definition.schema.Description = description
 	var buildErr error
-	describeOutputProperties(&schemaBuilder{schema: definition.schema, err: &buildErr})
+	describeOutputProperties(&schemaBuilder{schema: definition.schema, err: &buildErr}, true)
 	definition.err = buildErr
 	return definition
 }
 
-func describeOutputProperties(builder *schemaBuilder) {
+func describeOutputProperties(builder *schemaBuilder, includeDescriptions bool) {
 	if builder.schema == nil || *builder.err != nil {
 		return
 	}
@@ -320,7 +320,7 @@ func describeOutputProperties(builder *schemaBuilder) {
 		setMinimum(builder, "retry_after_ms", 0)
 	}
 	for name, property := range schema.Properties {
-		if property.Description == "" {
+		if includeDescriptions && property.Description == "" {
 			property.Description = outputPropertyDescriptions[name]
 		}
 		if strings.HasSuffix(name, "_at") || name == "as_of" {
@@ -330,12 +330,12 @@ func describeOutputProperties(builder *schemaBuilder) {
 			property.Minimum = jsonschema.Ptr(0.0)
 			property.Maximum = jsonschema.Ptr(1.0)
 		}
-		describeOutputProperties(&schemaBuilder{schema: property, err: builder.err})
-		describeOutputProperties(&schemaBuilder{schema: property.Items, err: builder.err})
-		describeOutputProperties(&schemaBuilder{schema: property.AdditionalProperties, err: builder.err})
+		describeOutputProperties(&schemaBuilder{schema: property, err: builder.err}, false)
+		describeOutputProperties(&schemaBuilder{schema: property.Items, err: builder.err}, false)
+		describeOutputProperties(&schemaBuilder{schema: property.AdditionalProperties, err: builder.err}, false)
 	}
 	for _, definition := range schema.Defs {
-		describeOutputProperties(&schemaBuilder{schema: definition, err: builder.err})
+		describeOutputProperties(&schemaBuilder{schema: definition, err: builder.err}, false)
 	}
 }
 

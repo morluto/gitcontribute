@@ -19,7 +19,7 @@ import (
 // The issue-set preparation workflow consolidates a frequent path without
 // hiding the general precedent and coverage tools. Keep its additional typed
 // contract inside an explicit bounded increase to the default catalog.
-const maxDefaultCatalogBytes = 108 * 1024
+const maxDefaultCatalogBytes = 88 * 1024
 
 var selectionSynonyms = map[string]string{
 	"execute": "run",
@@ -298,7 +298,7 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 		if strings.TrimSpace(stringValue(output["description"])) == "" {
 			t.Errorf("tool %q output schema has no root description", name)
 		}
-		assertPropertiesDescribed(t, name, output)
+		assertTopLevelPropertiesDescribed(t, name, output)
 	}
 }
 
@@ -531,7 +531,7 @@ func assertSchemaValue(t *testing.T, raw any, path []string, want any) {
 	}
 }
 
-func assertPropertiesDescribed(t *testing.T, toolName string, schema map[string]any) {
+func assertTopLevelPropertiesDescribed(t *testing.T, toolName string, schema map[string]any) {
 	t.Helper()
 	if properties, ok := schema["properties"].(map[string]any); ok {
 		for name, raw := range properties {
@@ -542,18 +542,7 @@ func assertPropertiesDescribed(t *testing.T, toolName string, schema map[string]
 			if strings.TrimSpace(stringValue(property["description"])) == "" {
 				t.Errorf("tool %q output property %q has no description", toolName, name)
 			}
-			assertPropertiesDescribed(t, toolName, property)
 		}
-	}
-	if definitions, ok := schema["$defs"].(map[string]any); ok {
-		for _, raw := range definitions {
-			if definition, ok := raw.(map[string]any); ok {
-				assertPropertiesDescribed(t, toolName, definition)
-			}
-		}
-	}
-	if items, ok := schema["items"].(map[string]any); ok {
-		assertPropertiesDescribed(t, toolName, items)
 	}
 }
 

@@ -257,10 +257,9 @@ func configureHuman(r *contracts.ConfigureResult) string {
 	if r.DryRun {
 		action = "Configuration dry run"
 	}
-	return fmt.Sprintf("%s: %s\nDatabase: %s\nToken source: %s\nCrawl: budget=%d concurrency=%d retries=%d timeout=%s\nOutput: %s, max=%d",
+	return fmt.Sprintf("%s: %s\nDatabase: %s\nToken source: %s\nCrawl: budget=%d concurrency=%d retries=%d timeout=%s",
 		action, r.Path, r.Config.Database, r.Config.TokenSource, r.Config.CrawlBudget,
-		r.Config.CrawlConcurrency, r.Config.CrawlRetryLimit, r.Config.CrawlTimeout,
-		r.Config.OutputFormat, r.Config.OutputMaxResults)
+		r.Config.CrawlConcurrency, r.Config.CrawlRetryLimit, r.Config.CrawlTimeout)
 }
 
 func controlStatusHuman(r *contracts.ControlStatusResult) string {

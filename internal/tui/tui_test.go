@@ -4,10 +4,11 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/morluto/gitcontribute/internal/tuicontract"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 type fakeReader struct {
@@ -100,16 +101,16 @@ func TestSearchFiltersLoadedData(t *testing.T) {
 	m := loadModel(t, fake)
 
 	// switch to threads view
-	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	model, _ := m.Update(keyPress('2'))
 	m = model.(Model)
 
 	// focus search
-	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	model, _ = m.Update(keyPress('/'))
 	m = model.(Model)
 
 	// type "feature"
 	for _, r := range "feature" {
-		model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		model, _ := m.Update(keyPress(r))
 		m = model.(Model)
 	}
 
@@ -132,7 +133,7 @@ func TestViewSwitch(t *testing.T) {
 	m := loadModel(t, fake)
 
 	for i := 0; i < len(viewOrder); i++ {
-		model, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+		model, _ := m.Update(keyPress(tea.KeyTab))
 		m = model.(Model)
 	}
 
@@ -140,7 +141,7 @@ func TestViewSwitch(t *testing.T) {
 		t.Fatalf("expected to cycle back to repositories, got %s", m.view)
 	}
 
-	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	model, _ := m.Update(keyPress('3'))
 	m = model.(Model)
 	if m.view != viewClusters {
 		t.Fatalf("expected clusters view, got %s", m.view)
@@ -156,14 +157,14 @@ func TestDetailShowsCoverageAndSource(t *testing.T) {
 	fake := &fakeReader{data: sampleData()}
 	m := loadModel(t, fake)
 
-	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model, _ := m.Update(keyPress(tea.KeyEnter))
 	m = model.(Model)
 
 	if m.detail == nil {
 		t.Fatal("expected detail to be set")
 	}
 
-	out := m.View()
+	out := m.View().Content
 	for _, want := range []string{"owner/repo", "Coverage:", "metadata", "threads", "github:rest", "2026-07-17"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected view to contain %q, got:\n%s", want, out)
@@ -175,7 +176,7 @@ func TestEmptyState(t *testing.T) {
 	fake := &fakeReader{data: tuicontract.Data{}}
 	m := loadModel(t, fake)
 
-	out := m.View()
+	out := m.View().Content
 	if !strings.Contains(out, "No items") {
 		t.Fatalf("expected empty state message, got:\n%s", out)
 	}
@@ -188,7 +189,7 @@ func TestErrorState(t *testing.T) {
 	if m.err == nil {
 		t.Fatal("expected error state")
 	}
-	out := m.View()
+	out := m.View().Content
 	if !strings.Contains(out, "Error:") {
 		t.Fatalf("expected error message, got:\n%s", out)
 	}
@@ -198,14 +199,14 @@ func TestKeyboardHelp(t *testing.T) {
 	fake := &fakeReader{data: sampleData()}
 	m := loadModel(t, fake)
 
-	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	model, _ := m.Update(keyPress('?'))
 	m = model.(Model)
 
 	if !m.help {
 		t.Fatal("expected help to be visible")
 	}
 
-	out := m.View()
+	out := m.View().Content
 	for _, want := range []string{"Keyboard help", "quit", "filter", "refresh/hydration"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected help to contain %q, got:\n%s", want, out)
@@ -217,7 +218,7 @@ func TestRefreshActionIntent(t *testing.T) {
 	fake := &fakeReader{data: sampleData()}
 	m := loadModel(t, fake)
 
-	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	model, _ := m.Update(keyPress('r'))
 	m = model.(Model)
 
 	if !strings.Contains(m.actionMsg, "Refresh requested") {
@@ -233,28 +234,28 @@ func TestSearchExitAndDetailClose(t *testing.T) {
 	m := loadModel(t, fake)
 
 	// open search
-	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	model, _ := m.Update(keyPress('/'))
 	m = model.(Model)
 	if !m.searching {
 		t.Fatal("expected search to be active")
 	}
 
 	// close search
-	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model, _ = m.Update(keyPress(tea.KeyEsc))
 	m = model.(Model)
 	if m.searching {
 		t.Fatal("expected search to be inactive")
 	}
 
 	// open detail
-	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model, _ = m.Update(keyPress(tea.KeyEnter))
 	m = model.(Model)
 	if m.detail == nil {
 		t.Fatal("expected detail")
 	}
 
 	// close detail
-	model, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model, _ = m.Update(keyPress(tea.KeyEsc))
 	m = model.(Model)
 	if m.detail != nil {
 		t.Fatal("expected detail to be closed")
@@ -265,7 +266,7 @@ func TestQuit(t *testing.T) {
 	fake := &fakeReader{data: sampleData()}
 	m := loadModel(t, fake)
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	_, cmd := m.Update(keyPress('q'))
 	if cmd == nil {
 		t.Fatal("expected quit command")
 	}
@@ -274,4 +275,12 @@ func TestQuit(t *testing.T) {
 	if _, ok := msg.(tea.QuitMsg); !ok {
 		t.Fatalf("expected quit message, got %T", msg)
 	}
+}
+
+func keyPress(code rune) tea.KeyPressMsg {
+	key := tea.Key{Code: code}
+	if unicode.IsPrint(code) {
+		key.Text = string(code)
+	}
+	return tea.KeyPressMsg(key)
 }

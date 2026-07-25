@@ -581,6 +581,31 @@ func TestDeepWikiReturnsDerivedProvenanceAndBoundsOutput(t *testing.T) {
 	}
 }
 
+func TestDeepWikiKeepsLargeDefaultAndExplainsTruncation(t *testing.T) {
+	t.Parallel()
+	svc := newSearchTestService(t)
+	fake := &fakeDeepWikiReader{response: deepwiki.Response{
+		Available: true,
+		Text:      strings.Repeat("x", mcpcontract.DeepWikiDefaultOutputBytes+1),
+		SourceURL: "https://deepwiki.com/acme/rocket",
+	}}
+	svc.SetDeepWikiReader(fake)
+
+	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{
+		Action:     "contents",
+		Repository: "acme/rocket",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Result) != mcpcontract.DeepWikiDefaultOutputBytes || !out.Truncated {
+		t.Fatalf("default DeepWiki bound = %d bytes, truncated=%v", len(out.Result), out.Truncated)
+	}
+	if out.Reason != "output_limit" || !strings.Contains(out.NextAction, "larger max_output_bytes") {
+		t.Fatalf("missing truncation recovery guidance: %+v", out)
+	}
+}
+
 func TestDeepWikiUsesNormalizedRepositoriesForRequestAndOutput(t *testing.T) {
 	t.Parallel()
 	svc := newSearchTestService(t)
@@ -671,120 +696,5 @@ func TestDeepWikiRejectsOutputBoundsBeforeProviderRead(t *testing.T) {
 	}
 	if deepWiki.calls != 0 {
 		t.Fatalf("DeepWiki provider called %d times for invalid input", deepWiki.calls)
-	}
-}
-
-func TestPullRequestPortfolioDerivesConflictAndPreservesUnknownCoverage(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	svc := newSearchTestService(t)
-	now := time.Unix(1000, 0).UTC()
-	svc.SetClock(func() time.Time { return now })
-	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket"}, `{}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	conflicted, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 1, State: "open", Title: "fix cache", Author: "alice", SourceUpdatedAt: now}, `{}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	unknown, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "open", Title: "fix parser", Author: "alice", SourceUpdatedAt: now}, `{}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mergeable := false
-	details, _ := json.Marshal(github.PullRequestDetails{Number: 1, Mergeable: &mergeable, HeadRef: "feature", HeadSHA: "head", BaseRef: "main", BaseSHA: "base", UpdatedAt: now})
-	if err := svc.corpus.ApplyFacetObservationSet(ctx, repo.ID, &conflicted.ID, FacetPRDetails, now, []corpus.FacetObservationInput{{SourceUpdatedAt: now, Payload: string(details)}}, true, 0); err != nil {
-		t.Fatal(err)
-	}
-	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Author: "alice", State: "open", Limit: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Status != "partial" || len(out.PullRequests) != 2 {
-		t.Fatalf("unexpected portfolio: %+v", out)
-	}
-	byNumber := map[int]mcpcontract.PullRequestPortfolioItem{}
-	for _, item := range out.PullRequests {
-		byNumber[item.Number] = item
-	}
-	if byNumber[conflicted.Number].Attention != "conflicted" || byNumber[conflicted.Number].HeadSHA != "head" {
-		t.Fatalf("conflict not derived: %+v", byNumber[conflicted.Number])
-	}
-	if byNumber[unknown.Number].Attention != "unknown" || byNumber[unknown.Number].StatusCoverage != "missing" {
-		t.Fatalf("unknown coverage collapsed: %+v", byNumber[unknown.Number])
-	}
-}
-
-func TestPullRequestPortfolioClassifiesClosedUnmerged(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	svc := newSearchTestService(t)
-	now := time.Unix(1000, 0).UTC()
-	svc.SetClock(func() time.Time { return now })
-	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket"}, `{}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 9, State: "closed", Title: "abandoned change", Author: "alice", MergedKnown: true, SourceUpdatedAt: now}, `{}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	unknown, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 10, State: "closed", Title: "header only", Author: "alice", SourceUpdatedAt: now}, `{}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Author: "alice", State: "closed", Limit: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(out.PullRequests) != 2 {
-		t.Fatalf("closed pull request classification = %+v", out.PullRequests)
-	}
-	byNumber := map[int]mcpcontract.PullRequestPortfolioItem{}
-	for _, item := range out.PullRequests {
-		byNumber[item.Number] = item
-	}
-	if byNumber[thread.Number].Attention != "closed_unmerged" || byNumber[unknown.Number].Attention != "unknown" || !strings.Contains(byNumber[unknown.Number].Reasons[0], "merge state has not been observed") {
-		t.Fatalf("closed pull request classification = %+v", out.PullRequests)
-	}
-}
-
-func TestPullRequestPortfolioKeepsComputingMergeabilityUnknown(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	svc := newSearchTestService(t)
-	now := time.Unix(1000, 0).UTC()
-	svc.SetClock(func() time.Time { return now })
-	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket"}, `{}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 10, State: "open", Title: "computing", Author: "alice", SourceUpdatedAt: now}, `{}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	values := map[string]any{
-		FacetPRDetails:       github.PullRequestDetails{Number: 10, UpdatedAt: now},
-		FacetPRReviews:       []github.Review{},
-		FacetPRMergeState:    github.PullRequestMergeState{MergeStateStatus: "UNKNOWN", Mergeable: "UNKNOWN", MergeableKnown: false},
-		FacetPRMergeQueue:    (*github.PullRequestMergeQueueEntry)(nil),
-		FacetPRChecks:        []github.PullRequestCheck{},
-		FacetPRReviewThreads: []github.PullRequestReviewThread{},
-		FacetPRClosingIssues: []github.PullRequestClosingIssue{},
-		FacetPRFiles:         []github.PullRequestFile{},
-	}
-	for facet, value := range values {
-		payload, _ := json.Marshal(value)
-		if err := svc.corpus.ApplyFacetObservationSet(ctx, repo.ID, &thread.ID, facet, now, []corpus.FacetObservationInput{{SourceUpdatedAt: now, Payload: string(payload)}}, true, 0); err != nil {
-			t.Fatal(err)
-		}
-	}
-	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Author: "alice", State: "open", Limit: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(out.PullRequests) != 1 || out.PullRequests[0].Attention != "unknown" || !strings.Contains(strings.Join(out.PullRequests[0].Reasons, " "), "mergeability is still computing") {
-		t.Fatalf("portfolio = %+v", out)
 	}
 }

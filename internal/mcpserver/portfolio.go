@@ -14,7 +14,10 @@ func (s *Server) listPullRequestPortfolio(ctx context.Context, _ *mcp.CallToolRe
 		in.State = "open"
 	}
 	if in.Limit == 0 {
-		in.Limit = 100
+		in.Limit = 20
+	}
+	if in.ResponseFormat == "" {
+		in.ResponseFormat = "concise"
 	}
 	reader, ok := s.reader.(PortfolioReader)
 	if !ok {

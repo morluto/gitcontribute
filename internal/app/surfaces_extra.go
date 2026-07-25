@@ -52,14 +52,18 @@ func (s *Service) PlanArchiveSync(_ context.Context, repo contracts.RepoRef, opt
 
 // Hydrate adapts the explicit CLI hydration contract to selective hydration.
 func (s *Service) Hydrate(ctx context.Context, repo contracts.RepoRef, number int, opts contracts.HydrateOptions) (*contracts.HydrateResult, error) {
+	if err := s.refreshHydrationThreadHeader(ctx, repo, number); err != nil {
+		return nil, fmt.Errorf("refresh thread header: %w", err)
+	}
 	result, err := s.HydrateThread(ctx, repo, number, HydrateOptions{Facets: opts.Facets, MaxPages: opts.MaxPages})
 	if err != nil {
 		return nil, err
 	}
 	out := &contracts.HydrateResult{
 		Repo: result.Repo, Number: result.Number, Kind: result.Kind,
-		Pages: result.Pages, Requests: result.Requests, Message: result.Message,
-		Facets: make([]contracts.HydratedFacet, len(result.Facets)),
+		Pages: result.Pages, Requests: result.Requests + 1,
+		Message: "refreshed thread header and " + result.Message,
+		Facets:  make([]contracts.HydratedFacet, len(result.Facets)),
 	}
 	for i, facet := range result.Facets {
 		out.Facets[i] = contracts.HydratedFacet{Facet: facet.Facet, Count: facet.Count, Pages: facet.Pages, Complete: facet.Complete}

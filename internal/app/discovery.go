@@ -176,6 +176,9 @@ func sourceResult(source *corpus.DiscoverySource) *contracts.SourceResult {
 // Crawl performs one explicit, bounded read for a saved discovery source and
 // persists its checkpoint only after the bounded operation succeeds.
 func (s *Service) Crawl(ctx context.Context, name string, opts contracts.CrawlOptions) (*contracts.CrawlResult, error) {
+	if opts.Budget == 0 && s.cfg != nil {
+		opts.Budget = s.cfg.Crawl.Budget
+	}
 	if opts.Since <= 0 || opts.Budget <= 0 || opts.Budget > 5000 {
 		return nil, errors.New("invalid crawl since or budget")
 	}

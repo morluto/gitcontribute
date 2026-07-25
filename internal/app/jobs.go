@@ -13,6 +13,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/failure"
+	"golang.org/x/sync/semaphore"
 )
 
 // JobFunc performs asynchronous work for a job. It receives a context that is
@@ -52,6 +53,7 @@ type jobExecutorConfig struct {
 	leaseTimeout      time.Duration
 	heartbeatInterval time.Duration
 	pollInterval      time.Duration
+	maxConcurrentJobs int64
 }
 
 func defaultJobExecutorConfig() jobExecutorConfig {
@@ -59,6 +61,7 @@ func defaultJobExecutorConfig() jobExecutorConfig {
 		leaseTimeout:      10 * time.Second,
 		heartbeatInterval: 2 * time.Second,
 		pollInterval:      200 * time.Millisecond,
+		maxConcurrentJobs: 4,
 	}
 }
 
@@ -77,6 +80,7 @@ type JobExecutor struct {
 	rootCtx context.Context
 	cancel  context.CancelFunc
 	cfg     jobExecutorConfig
+	slots   *semaphore.Weighted
 
 	mu          sync.Mutex
 	cond        *sync.Cond
@@ -84,10 +88,6 @@ type JobExecutor struct {
 	active      map[string]*activeJob
 	activeCount int
 	heartbeatWG sync.WaitGroup
-}
-
-func newJobExecutor(ctx context.Context, c *corpus.Corpus) (*JobExecutor, error) {
-	return newJobExecutorWithConfig(ctx, c, defaultJobExecutorConfig())
 }
 
 func newJobExecutorWithConfig(ctx context.Context, c jobStore, cfg jobExecutorConfig) (*JobExecutor, error) {
@@ -100,12 +100,16 @@ func newJobExecutorWithConfig(ctx context.Context, c jobStore, cfg jobExecutorCo
 	if cfg.pollInterval <= 0 {
 		cfg.pollInterval = defaultJobExecutorConfig().pollInterval
 	}
+	if cfg.maxConcurrentJobs <= 0 {
+		cfg.maxConcurrentJobs = defaultJobExecutorConfig().maxConcurrentJobs
+	}
 
 	ownerID := uuid.NewString()
 	e := &JobExecutor{
 		corpus:  c,
 		ownerID: ownerID,
 		cfg:     cfg,
+		slots:   semaphore.NewWeighted(cfg.maxConcurrentJobs),
 		active:  make(map[string]*activeJob),
 	}
 	e.rootCtx, e.cancel = context.WithCancel(ctx)
@@ -283,6 +287,16 @@ func (e *JobExecutor) pollCancellation(ctx context.Context, id string, cancel co
 
 func (e *JobExecutor) run(id string, fn JobFunc) {
 	defer e.decrement()
+
+	if err := e.slots.Acquire(e.rootCtx, 1); err != nil {
+		writeCtx := context.WithoutCancel(e.rootCtx)
+		job, getErr := e.corpus.GetJob(writeCtx, id)
+		if getErr == nil && job != nil && job.Status == corpus.JobStatusQueued {
+			_ = e.corpus.TransitionJob(writeCtx, id, corpus.JobStatusQueued, corpus.JobStatusFailed, "", "executor closed before start")
+		}
+		return
+	}
+	defer e.slots.Release(1)
 
 	jobCtx, cancel := context.WithCancel(e.rootCtx)
 	defer cancel()

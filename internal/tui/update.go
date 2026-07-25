@@ -5,7 +5,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/tuicontract"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 type loadMsg struct{}
@@ -55,18 +55,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		if m.width > 4 {
-			m.search.Width = m.width - 4
+			m.search.SetWidth(m.width - 4)
 		}
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 	}
 
 	return m, nil
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.search.Focused() {
 		switch msg.String() {
 		case "esc":

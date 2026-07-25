@@ -378,13 +378,14 @@ func TestGHArchiveCrawlScopesImportsBySourceDefinition(t *testing.T) {
 	}
 }
 
-func TestGHArchiveCrawlBudgetEnforcement(t *testing.T) {
+func TestGHArchiveCrawlUsesConfiguredBudgetWhenOmitted(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	srv := newTestServer("octocat", "test")
 	defer srv.Close()
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
+	svc.cfg.Crawl.Budget = 1
 
 	now := time.Date(2023, 1, 1, 2, 15, 0, 0, time.UTC)
 	fetcher := &fakeArchiveFetcher{files: map[string][]byte{
@@ -404,7 +405,7 @@ func TestGHArchiveCrawlBudgetEnforcement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add source: %v", err)
 	}
-	result, err := svc.Crawl(ctx, source.Name, contracts.CrawlOptions{Since: 2 * time.Hour, Budget: 1})
+	result, err := svc.Crawl(ctx, source.Name, contracts.CrawlOptions{Since: 2 * time.Hour})
 	if err != nil {
 		t.Fatalf("crawl: %v", err)
 	}
