@@ -27,7 +27,7 @@ type rawRadarRelatedWork struct {
 	evidence  radar.RelatedWorkEvidence
 }
 
-func radarPullRequestRelatedWork(ctx context.Context, c *corpus.Corpus, stored *corpus.Repository, ref domain.RepoRef, issues, pullRequests []corpus.Thread) (map[int][]radar.RelatedWork, bool, error) {
+func radarPullRequestRelatedWork(ctx context.Context, c *corpus.Corpus, stored *corpus.Repository, ref domain.RepoRef, issues, pullRequests []corpus.Thread, state string) (map[int][]radar.RelatedWork, bool, error) {
 	issueNumbers := make(map[int]struct{}, len(issues))
 	for _, issue := range issues {
 		issueNumbers[issue.Number] = struct{}{}
@@ -36,7 +36,7 @@ func radarPullRequestRelatedWork(ctx context.Context, c *corpus.Corpus, stored *
 	if err != nil {
 		return nil, false, err
 	}
-	projected, projectedCapped, err := c.ListPullRequestIssueLinks(ctx, stored.ID, "open", radarPullRequestPopulation)
+	projected, projectedCapped, err := c.ListPullRequestIssueLinks(ctx, stored.ID, state, radarPullRequestPopulation)
 	if err != nil {
 		return nil, false, fmt.Errorf("list authoritative closing-issue relationships: %w", err)
 	}
@@ -335,14 +335,19 @@ func resolveRadarReference(ctx context.Context, c *corpus.Corpus, reference rela
 }
 
 func normalizeRadarRelatedWork(values []radar.RelatedWork, limit int) ([]radar.RelatedWork, bool) {
+	out, _, recordsCapped, evidenceCapped := normalizeRadarRelatedWorkDetails(values, limit)
+	return out, recordsCapped || evidenceCapped
+}
+
+func normalizeRadarRelatedWorkDetails(values []radar.RelatedWork, limit int) ([]radar.RelatedWork, int, bool, bool) {
 	merged := map[string]radar.RelatedWork{}
-	capped := false
+	evidenceCapped := false
 	for _, value := range values {
 		key := strings.ToLower(value.Ref)
 		current, ok := merged[key]
 		if !ok {
 			if len(value.Evidence) > maxRadarEvidencePerRelation {
-				capped = true
+				evidenceCapped = true
 			}
 			value.Evidence = normalizeRadarRelationshipEvidence(value.Evidence)
 			merged[key] = value
@@ -365,7 +370,7 @@ func normalizeRadarRelatedWork(values []radar.RelatedWork, limit int) ([]radar.R
 		}
 		combinedEvidence := append(current.Evidence, value.Evidence...)
 		if len(combinedEvidence) > maxRadarEvidencePerRelation {
-			capped = true
+			evidenceCapped = true
 		}
 		current.Evidence = normalizeRadarRelationshipEvidence(combinedEvidence)
 		merged[key] = current
@@ -381,11 +386,12 @@ func normalizeRadarRelatedWork(values []radar.RelatedWork, limit int) ([]radar.R
 		}
 		return out[i].Ref < out[j].Ref
 	})
-	if len(out) > limit {
+	total := len(out)
+	recordsCapped := total > limit
+	if recordsCapped {
 		out = out[:limit]
-		capped = true
 	}
-	return out, capped
+	return out, total, recordsCapped, evidenceCapped
 }
 
 func normalizeRadarRelationshipEvidence(values []radar.RelatedWorkEvidence) []radar.RelatedWorkEvidence {

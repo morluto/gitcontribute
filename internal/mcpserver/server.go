@@ -30,6 +30,12 @@ type ScalableReader interface {
 	GetJobs(context.Context, mcpcontract.GetJobsInput) (mcpcontract.GetJobsOutput, error)
 }
 
+// IssueSetReader prepares bounded contribution evidence from exact stored
+// issues without requiring or creating durable workflow state.
+type IssueSetReader interface {
+	PrepareIssueSet(context.Context, mcpcontract.PrepareIssueSetInput) (mcpcontract.PrepareIssueSetOutput, error)
+}
+
 // PortfolioReader exposes bounded offline pull-request portfolio reads.
 type PortfolioReader interface {
 	ListPullRequestPortfolio(context.Context, mcpcontract.ListPullRequestPortfolioInput) (mcpcontract.ListPullRequestPortfolioOutput, error)

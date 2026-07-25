@@ -61,10 +61,12 @@ func TestAgentEvalBaselineArtifact(t *testing.T) {
 func TestAgentEvalV2PublicAndOracleStayPaired(t *testing.T) {
 	t.Parallel()
 	type scenario struct {
-		ID              string   `json:"id"`
-		Prompt          string   `json:"prompt"`
-		Toolsets        []string `json:"toolsets"`
-		AcceptableTools []string `json:"acceptable_tools"`
+		ID                   string   `json:"id"`
+		Prompt               string   `json:"prompt"`
+		Toolsets             []string `json:"toolsets"`
+		AcceptableTools      []string `json:"acceptable_tools"`
+		ForbiddenTools       []string `json:"forbidden_tools"`
+		ExpectedMaxToolCalls int      `json:"expected_max_tool_calls"`
 	}
 	type fixture struct {
 		Version         string     `json:"version"`
@@ -98,6 +100,16 @@ func TestAgentEvalV2PublicAndOracleStayPaired(t *testing.T) {
 			if _, ok := enabled[tool]; !ok {
 				t.Errorf("scenario %q cannot call acceptable tool %q with toolsets %v", public.Scenarios[i].ID, tool, public.Scenarios[i].Toolsets)
 			}
+		}
+		for _, tool := range oracle.Scenarios[i].ForbiddenTools {
+			for _, acceptable := range oracle.Scenarios[i].AcceptableTools {
+				if tool == acceptable {
+					t.Errorf("scenario %q marks tool %q both acceptable and forbidden", public.Scenarios[i].ID, tool)
+				}
+			}
+		}
+		if public.Scenarios[i].ID == "exact_issue_set_preparation" && oracle.Scenarios[i].ExpectedMaxToolCalls != 1 {
+			t.Errorf("exact issue-set scenario max calls = %d, want 1", oracle.Scenarios[i].ExpectedMaxToolCalls)
 		}
 	}
 }
@@ -324,6 +336,15 @@ func TestAgentEvalScriptedCurrentContracts(t *testing.T) {
 		})
 		if result.IsError || result.StructuredContent == nil {
 			t.Fatalf("search result = %+v", result)
+		}
+	})
+
+	t.Run("exact issue-set preparation is one offline aggregate call", func(t *testing.T) {
+		result := callAgentEvalTool(t, client, mcpcontract.ToolPrepareIssueSet, map[string]any{
+			"owner": "acme", "repo": "rocket", "issue_numbers": []int{7, 11, 14},
+		})
+		if result.IsError || result.StructuredContent == nil {
+			t.Fatalf("issue-set result = %+v", result)
 		}
 	})
 

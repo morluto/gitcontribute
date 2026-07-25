@@ -16,7 +16,10 @@ import (
 // The default agent-facing profile should retain useful descriptions and
 // schemas without consuming an unbounded amount of model context. The explicit
 // "all" profile is intentionally not treated as a default-context contract.
-const maxDefaultCatalogBytes = 96 * 1024
+// The issue-set preparation workflow consolidates a frequent path without
+// hiding the general precedent and coverage tools. Keep its additional typed
+// contract inside an explicit bounded increase to the default catalog.
+const maxDefaultCatalogBytes = 108 * 1024
 
 var selectionSynonyms = map[string]string{
 	"execute": "run",
@@ -350,6 +353,7 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 		{"Fetch comments and reviews for one stored pull request from GitHub", mcpcontract.ToolHydrateThreads},
 		{"Rank stored open issues for contribution across selected repositories", mcpcontract.ToolRankThreads},
 		{"Find similar completed and rejected historical work for this issue", mcpcontract.ToolFindPrecedents},
+		{"Prepare contribution evidence and linkage guidance for fourteen exact issues", mcpcontract.ToolPrepareIssueSet},
 		{"Ask DeepWiki to compare the architecture of three public repositories", mcpcontract.ToolQueryDeepWiki},
 		{"Refresh mergeability and reviews for my selected pull requests", mcpcontract.ToolSyncPullRequestStatus},
 		{"List my stored pull requests that need contributor attention", mcpcontract.ToolListPullRequestPortfolio},

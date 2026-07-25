@@ -1,6 +1,6 @@
 {
   "version": "agent-tool-eval.v2",
-  "fixture_revision": "search-contract-v3",
+  "fixture_revision": "agent-contract-v4",
   "scenarios": [
     {
       "id": "newest_music_thread",
@@ -17,6 +17,12 @@
     {
       "id": "persisted_dossier_boundary",
       "prompt": "Read the persisted dossier for acme/rocket. Do not rebuild it or contact GitHub. Report its as-of revision.",
+      "toolsets": ["contribute"],
+      "read_only": true
+    },
+    {
+      "id": "exact_issue_set_preparation",
+      "prompt": "Using only GitContribute's stored corpus, prepare contribution evidence for issues 7, 11, and 14 in acme/rocket. Include missing coverage and exact recovery actions, and distinguish Closes, Advances, and Related candidates without claiming that an implementation satisfies any issue.",
       "toolsets": ["contribute"],
       "read_only": true
     }

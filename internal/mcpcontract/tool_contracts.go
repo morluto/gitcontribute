@@ -34,6 +34,7 @@ const (
 	ToolGetThreads               = "corpus.get_threads"
 	ToolRankThreads              = "corpus.rank_threads"
 	ToolFindPrecedents           = "corpus.find_precedents"
+	ToolPrepareIssueSet          = "workflow.prepare_issue_set"
 	ToolGetRepositoryDossier     = "corpus.get_repository_dossier"
 	ToolExplainMatch             = "corpus.explain_match"
 	ToolGetInvestigation         = "corpus.get_investigation"
