@@ -14,6 +14,7 @@ const serverInstructions = "Use advertised GitContribute tools for durable, sour
 	"Prefer corpus tools for offline reads; they never refresh data implicitly. " +
 	"GitHub tools perform explicit network reads and may update only the local corpus. " +
 	"Research tools return derived external context, never live GitHub state. " +
+	"Use workflow.prepare_issue_set when exact issue numbers already define the contribution scope. " +
 	"When an operation returns a job, poll advertised job tools in batches. " +
 	"Missing or truncated coverage is unknown, not negative evidence; retry only retryable batch items. " +
 	"Only advertised tools are available. GitContribute never mutates GitHub."
@@ -132,6 +133,19 @@ func (s *Server) registerScalable() {
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 20)
 	}), output: outputSchema[mcpcontract.FindPrecedentsOutput]("Historical precedents grouped by source thread."), handler: s.findPrecedents})
+	addCatalogTool(s, catalogTool[mcpcontract.PrepareIssueSetInput, mcpcontract.PrepareIssueSetOutput]{name: mcpcontract.ToolPrepareIssueSet, title: "Prepare contribution evidence from exact issues", description: "Compose stored issue facts, coverage gaps, related work, merge-confirmed precedents, and conservative linkage candidates for 1-20 exact issues in one repository. This offline read creates no opportunity or draft and never claims that a diff satisfies an issue.", annotations: readOnly, supportedBy: supports[IssueSetReader], input: inputSchema[mcpcontract.PrepareIssueSetInput](func(sc *schemaBuilder) {
+		setArrayBounds(sc, "issue_numbers", 1, 20)
+		if numbers := property(sc, "issue_numbers"); numbers != nil {
+			numbers.UniqueItems = true
+			if numbers.Items != nil {
+				numbers.Items.Minimum = jsonschema.Ptr(1.0)
+			}
+		}
+		setRange(sc, "precedent_limit", 1, 10)
+		setDefault(sc, "precedent_limit", 3)
+		setEnum(sc, "response_format", "concise", "detailed")
+		setDefault(sc, "response_format", "concise")
+	}), output: outputSchema[mcpcontract.PrepareIssueSetOutput]("Contribution-facing evidence for an exact stored issue set."), handler: s.prepareIssueSet})
 	addCatalogTool(s, catalogTool[mcpcontract.GetJobsInput, mcpcontract.GetJobsOutput]{name: mcpcontract.ToolGetJob, title: "Get durable jobs in one batch", description: "Poll up to 100 jobs. Use detailed only for a terminal finalist.", annotations: readOnly, input: inputSchema[mcpcontract.GetJobsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "ids", 1, 100)
 		setEnum(sc, "response_format", "concise", "detailed")
@@ -319,6 +333,15 @@ func (s *Server) syncRepositoryMetadata(ctx context.Context, _ *mcp.CallToolRequ
 		return nil, mcpcontract.JobReference{}, errors.New("repository metadata sync is not available")
 	}
 	out, err := op.SyncRepositoryMetadata(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) prepareIssueSet(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.PrepareIssueSetInput) (*mcp.CallToolResult, mcpcontract.PrepareIssueSetOutput, error) {
+	r, ok := s.reader.(IssueSetReader)
+	if !ok {
+		return nil, mcpcontract.PrepareIssueSetOutput{}, errors.New("issue-set preparation is not available")
+	}
+	out, err := r.PrepareIssueSet(ctx, in)
 	return nil, out, err
 }
 

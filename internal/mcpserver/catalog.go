@@ -18,6 +18,7 @@ var canonicalToolNames = []string{
 	mcpcontract.ToolGetThreads,
 	mcpcontract.ToolRankThreads,
 	mcpcontract.ToolFindPrecedents,
+	mcpcontract.ToolPrepareIssueSet,
 	mcpcontract.ToolGetRepositoryDossier,
 	mcpcontract.ToolExplainMatch,
 	mcpcontract.ToolGetInvestigation,
@@ -134,7 +135,7 @@ func structuredToolErrors[In, Out any](handler mcp.ToolHandlerFor[In, Out]) mcp.
 var toolsets = map[string][]string{
 	"contribute": {
 		mcpcontract.ToolSearchRepositories, mcpcontract.ToolSearchThreads, mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads,
-		mcpcontract.ToolRankThreads, mcpcontract.ToolFindPrecedents, mcpcontract.ToolGetRepositoryDossier,
+		mcpcontract.ToolRankThreads, mcpcontract.ToolFindPrecedents, mcpcontract.ToolPrepareIssueSet, mcpcontract.ToolGetRepositoryDossier,
 		mcpcontract.ToolGetCoverage, mcpcontract.ToolGetJob, mcpcontract.ToolCancelJob,
 		mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolSyncRepositoryMetadata, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads,
 		mcpcontract.ToolStartInvestigation, mcpcontract.ToolRecordHypothesis, mcpcontract.ToolCheckDuplicates, mcpcontract.ToolFindCompetingWork,

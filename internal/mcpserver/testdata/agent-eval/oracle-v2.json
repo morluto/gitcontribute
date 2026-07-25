@@ -1,6 +1,6 @@
 {
   "version": "agent-tool-eval-oracle.v2",
-  "fixture_revision": "search-contract-v3",
+  "fixture_revision": "agent-contract-v4",
   "scenarios": [
     {
       "id": "newest_music_thread",
@@ -28,6 +28,17 @@
       "tempting_wrong_path": "Call corpus.build_repository_dossier before reading.",
       "acceptable_tools": ["corpus.get_repository_dossier"],
       "forbidden_tools": ["corpus.build_repository_dossier", "github.sync_repository_metadata"],
+      "minimum_semantic_score": 0.8
+    },
+    {
+      "id": "exact_issue_set_preparation",
+      "correct_conclusion": "Return one offline issue-set evidence result whose linkage remains advisory and whose missing evidence has explicit recovery actions.",
+      "required_evidence": ["workflow.prepare_issue_set receives the three exact issue numbers in one bounded call.", "Issue and relationship coverage qualify absence claims.", "Every linkage candidate requires confirmation from the implementation."],
+      "critical_discriminator": "Known issue scope does not require durable opportunities, draft rendering, or separate thread, coverage, and precedent calls.",
+      "tempting_wrong_path": "Create opportunities or manually compose corpus.get_threads, corpus.get_coverage, and corpus.find_precedents before preparing a draft.",
+      "acceptable_tools": ["workflow.prepare_issue_set"],
+      "forbidden_tools": ["corpus.get_threads", "corpus.get_coverage", "corpus.find_precedents", "workflow.prepare_contribution"],
+      "expected_max_tool_calls": 1,
       "minimum_semantic_score": 0.8
     }
   ]

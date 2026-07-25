@@ -265,7 +265,7 @@ func TestRadarPullRequestClosingReferenceIsPrecise(t *testing.T) {
 	links, _, err := radarPullRequestRelatedWork(fixture.ctx, fixture.svc.corpus, stored, ref, issues, []corpus.Thread{{
 		Kind: corpus.ThreadKindPullRequest, Number: 8, Title: "Handle both reports",
 		Body: "Fixes #1 and also discusses #2. Fixes other/project#3.",
-	}})
+	}}, "open")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -26,6 +26,9 @@ func (*fakeOptionalCapabilities) RankOpportunities(context.Context, mcpcontract.
 func (*fakeOptionalCapabilities) FindPrecedents(context.Context, mcpcontract.FindPrecedentsInput) (mcpcontract.FindPrecedentsOutput, error) {
 	return mcpcontract.FindPrecedentsOutput{Status: "complete"}, nil
 }
+func (*fakeOptionalCapabilities) PrepareIssueSet(context.Context, mcpcontract.PrepareIssueSetInput) (mcpcontract.PrepareIssueSetOutput, error) {
+	return mcpcontract.PrepareIssueSetOutput{Status: "complete"}, nil
+}
 func (f *fakeOptionalCapabilities) GetJobs(ctx context.Context, in mcpcontract.GetJobsInput) (mcpcontract.GetJobsOutput, error) {
 	items := make([]mcpcontract.BatchItem[mcpcontract.GetJobOutput], len(in.IDs))
 	for i, id := range in.IDs {
@@ -82,6 +85,7 @@ type completeTestReader struct {
 	mcpcontract.Reader
 	NeighborReader
 	ScalableReader
+	IssueSetReader
 	PortfolioReader
 	GitHubOperator
 	CodeIndexer
@@ -99,7 +103,7 @@ type completeTestReader struct {
 func completeFakeReader(base *fakeReader) mcpcontract.Reader {
 	optional := &fakeOptionalCapabilities{base: base}
 	return completeTestReader{
-		Reader: base, NeighborReader: optional, ScalableReader: optional,
+		Reader: base, NeighborReader: optional, ScalableReader: optional, IssueSetReader: optional,
 		PortfolioReader: optional, GitHubOperator: optional, CodeIndexer: optional,
 		MergeConflictReader: optional, ResearchReader: optional,
 		CommitPlannerReader: base,

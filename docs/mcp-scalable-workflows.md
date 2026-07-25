@@ -16,6 +16,7 @@ research.query_deepwiki
 github.sync_threads -> jobs.get -> corpus.rank_threads
 github.hydrate_threads -> jobs.get -> corpus.get_threads
 corpus.find_precedents -> workflow.find_competing_work
+workflow.prepare_issue_set
 ```
 
 - `github.search_repositories` runs one bounded live search and persists the
@@ -59,6 +60,43 @@ explicit `raw_query` field; there is no deprecated alias.
 - Pull-request headers do not contain merge outcomes. Until `pr_details` is
   hydrated, a closed PR's `merged` value is omitted and outcome-sensitive
   offline reads report it as unknown rather than closed-unmerged.
+
+## Exact issue-set preparation
+
+Use `workflow.prepare_issue_set` when the contribution is already scoped by
+known issue numbers and creating opportunities would add no useful state:
+
+```json
+{
+  "owner": "acme",
+  "repo": "rocket",
+  "issue_numbers": [7, 11, 14],
+  "precedent_limit": 3,
+  "response_format": "concise"
+}
+```
+
+The tool is an offline read. It composes exact issue facts, body and
+comment/timeline coverage, related open and closed work, merge-confirmed
+precedents, duplicate-cluster evidence, and precise sync or hydration recovery
+calls. It does not render a draft, create an opportunity, inspect a workspace
+diff, or claim that an implementation satisfies an issue. Linkage therefore
+defaults to `related` and always requires caller confirmation before choosing
+`Closes`, `Advances`, or `Related`.
+
+Repository `threads` coverage qualifies the related-work population. When that
+coverage is absent or incomplete, the result remains partial and suggests an
+explicit all-state pull-request sync instead of treating the stored count as
+exhaustive.
+
+`concise` omits issue bodies and detailed relationship evidence and returns at
+most five related-work records per issue. `related_work_total` distinguishes
+that response shortening from missing corpus evidence. When an upstream bound
+prevents an exhaustive count, `related_work_total_known` is false and the count
+is a lower bound. `related_work_truncated` says explicitly that records or
+evidence were omitted. Empty stored bodies are reported as unknown because the
+current corpus projection cannot distinguish a known-empty body from a body
+that was not captured.
 
 ## Pull-request portfolio
 

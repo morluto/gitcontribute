@@ -278,7 +278,7 @@ name per operation; unnamespaced compatibility aliases are not registered.
 
 | Capability | Examples |
 | --- | --- |
-| **Offline reads** | Batch-inspect repositories, threads, and jobs; filter open or closed work; rank opportunities across repositories; find historical precedents; and review the authored pull-request portfolio. |
+| **Offline reads** | Batch-inspect repositories, threads, and jobs; filter open or closed work; rank opportunities across repositories; prepare evidence for exact issue sets; find historical precedents; and review the authored pull-request portfolio. |
 | **Network reads** | Batch-sync repository metadata or thread headers, hydrate selected finalists, discover authored pull requests, refresh PR status, and query derived public-repository context through DeepWiki. |
 | **Local writes** | Start investigations, record hypotheses, promote opportunities, define validations, and prepare drafts. |
 | **Execution** | Safely acquire and index repository code with Git only, or run a validation only when the request includes `execute: true`. |
@@ -290,7 +290,7 @@ github.search_repositories -> corpus.get_repositories
 github.sync_repository_metadata -> corpus.get_repositories
 -> research.query_deepwiki -> github.sync_threads
 -> corpus.rank_threads -> github.hydrate_threads
--> corpus.find_precedents
+-> workflow.prepare_issue_set
 ```
 
 For contribution follow-up, use `github.sync_authored_pull_requests`, then

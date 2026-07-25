@@ -63,7 +63,7 @@ func (s *Service) contributionRadarAt(ctx context.Context, opts contracts.RadarO
 	if err != nil {
 		return nil, fmt.Errorf("list open pull requests: %w", err)
 	}
-	relatedByIssue, relationshipScanCapped, err := radarPullRequestRelatedWork(ctx, c, stored, ref, issues, openPullRequests)
+	relatedByIssue, relationshipScanCapped, err := radarPullRequestRelatedWork(ctx, c, stored, ref, issues, openPullRequests, "open")
 	if err != nil {
 		return nil, err
 	}
