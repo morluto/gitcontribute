@@ -228,12 +228,23 @@ func TestSearchThreadsPageDoesNotTreatUnknownMergeStateAsFalse(t *testing.T) {
 	}
 	merged, unmerged := true, false
 	mergedPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Merged: &merged, Limit: 10})
-	if err != nil || len(mergedPage.Threads) != 1 || mergedPage.Threads[0].Number != 1 {
+	if err != nil || len(mergedPage.Threads) != 1 || mergedPage.Threads[0].Number != 1 || mergedPage.UnknownMergeCount != 1 {
 		t.Fatalf("merged page = %+v, %v", mergedPage, err)
 	}
 	unmergedPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Merged: &unmerged, Limit: 10})
-	if err != nil || len(unmergedPage.Threads) != 1 || unmergedPage.Threads[0].Number != 2 {
+	if err != nil || len(unmergedPage.Threads) != 1 || unmergedPage.Threads[0].Number != 2 || unmergedPage.UnknownMergeCount != 1 {
 		t.Fatalf("unmerged page = %+v, %v", unmergedPage, err)
+	}
+
+	if _, err := c.UpsertThread(ctx, Thread{
+		RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 3, State: "closed",
+		Title: "shared term", Merged: true, MergedKnown: true, SourceUpdatedAt: time.Unix(40, 0).UTC(),
+	}, `{"Merged":true}`); err != nil {
+		t.Fatal(err)
+	}
+	hydratedPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Merged: &merged, Limit: 10})
+	if err != nil || len(hydratedPage.Threads) != 2 || hydratedPage.UnknownMergeCount != 0 {
+		t.Fatalf("hydrated page = %+v, %v", hydratedPage, err)
 	}
 }
 

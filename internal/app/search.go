@@ -49,10 +49,11 @@ type searchMatch struct {
 }
 
 type searchResult struct {
-	Query      string
-	Total      int
-	Matches    []searchMatch
-	NextCursor string
+	Query             string
+	Total             int
+	Matches           []searchMatch
+	NextCursor        string
+	UnknownMergeCount int
 }
 
 const maxLensCandidates = 1000
@@ -236,10 +237,11 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 	}
 
 	return searchResult{
-		Query:      query,
-		Total:      page.Total,
-		Matches:    matches,
-		NextCursor: page.NextCursor,
+		Query:             query,
+		Total:             page.Total,
+		Matches:           matches,
+		NextCursor:        page.NextCursor,
+		UnknownMergeCount: page.UnknownMergeCount,
 	}, nil
 }
 
@@ -707,12 +709,13 @@ func (s *Service) Search(ctx context.Context, query string, opts contracts.Searc
 		}
 	}
 	return &contracts.SearchResult{
-		Query:      query,
-		Kind:       opts.Kind,
-		Repo:       opts.Repo,
-		Limit:      opts.Limit,
-		Total:      res.Total,
-		Matches:    matches,
-		NextCursor: res.NextCursor,
+		Query:             query,
+		Kind:              opts.Kind,
+		Repo:              opts.Repo,
+		Limit:             opts.Limit,
+		Total:             res.Total,
+		Matches:           matches,
+		NextCursor:        res.NextCursor,
+		UnknownMergeCount: res.UnknownMergeCount,
 	}, nil
 }
