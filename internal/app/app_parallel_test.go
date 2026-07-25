@@ -21,7 +21,7 @@ func TestEndToEndSyncSearchDossier(t *testing.T) {
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
 
-	syncRes, err := svc.Sync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "test"})
+	syncRes, err := svc.ArchiveSync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "test"}, contracts.ArchiveSyncOptions{State: "all"})
 	if err != nil {
 		t.Fatalf("sync: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestSearchReportsDefaultLimit(t *testing.T) {
 	defer srv.Close()
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
-	if _, err := svc.Sync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "test"}); err != nil {
+	if _, err := svc.ArchiveSync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "test"}, contracts.ArchiveSyncOptions{State: "all"}); err != nil {
 		t.Fatal(err)
 	}
 	result, err := svc.Search(ctx, "searchable", contracts.SearchOptions{})

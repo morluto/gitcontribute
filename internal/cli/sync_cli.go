@@ -8,30 +8,6 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
-func (c *CLI) runSync(ctx context.Context, cmd *syncCmd) error {
-	repo, err := parseRepo(cmd.OwnerRepo)
-	if err != nil {
-		return err
-	}
-	if planner, ok := c.svc.(contracts.SyncPlanningService); ok {
-		plan, err := planner.PlanArchiveSync(ctx, repo, contracts.ArchiveSyncOptions{State: "all"})
-		if err != nil {
-			return c.mapError(err)
-		}
-		if err := c.printSyncPlan(plan); err != nil {
-			return err
-		}
-	}
-	if _, err := fmt.Fprintf(c.stderr, "syncing %s...\n", repo); err != nil {
-		return err
-	}
-	res, err := c.svc.Sync(ctx, repo)
-	if err != nil {
-		return c.mapError(err)
-	}
-	return c.render(cmd.JSON, res)
-}
-
 func (c *CLI) runArchiveSync(ctx context.Context, cmd *archiveSyncCmd) error {
 	service, err := c.archiveService()
 	if err != nil {

@@ -14,7 +14,6 @@ import (
 type fakeService struct {
 	initCalled               bool
 	statusCalled             bool
-	syncCalled               bool
 	syncPlanCalled           bool
 	searchCalled             bool
 	dossierCalled            bool
@@ -49,7 +48,6 @@ type fakeService struct {
 
 	initResult         *contracts.InitResult
 	statusResult       *contracts.StatusResult
-	syncResult         *contracts.SyncResult
 	syncPlanResult     *contracts.SyncPlanResult
 	searchResult       *contracts.SearchResult
 	dossierResult      *contracts.DossierResult
@@ -78,7 +76,6 @@ type fakeService struct {
 	metadataExportResult          *contracts.MetadataExportResult
 	metadataImportResult          *contracts.MetadataImportResult
 
-	lastSyncArg    contracts.RepoRef
 	lastSearchArgs struct {
 		Query string
 		Opts  contracts.SearchOptions
@@ -127,9 +124,6 @@ func (coreOnlyService) Init(context.Context) (*contracts.InitResult, error) { re
 func (coreOnlyService) Status(context.Context) (*contracts.StatusResult, error) {
 	return nil, nil
 }
-func (coreOnlyService) Sync(context.Context, contracts.RepoRef) (*contracts.SyncResult, error) {
-	return nil, nil
-}
 func (coreOnlyService) Search(context.Context, string, contracts.SearchOptions) (*contracts.SearchResult, error) {
 	return nil, nil
 }
@@ -176,12 +170,6 @@ func (f *fakeService) Init(ctx context.Context) (*contracts.InitResult, error) {
 func (f *fakeService) Status(ctx context.Context) (*contracts.StatusResult, error) {
 	f.statusCalled = true
 	return f.statusResult, f.err
-}
-
-func (f *fakeService) Sync(ctx context.Context, repo contracts.RepoRef) (*contracts.SyncResult, error) {
-	f.syncCalled = true
-	f.lastSyncArg = repo
-	return f.syncResult, f.err
 }
 
 func (f *fakeService) PlanArchiveSync(_ context.Context, _ contracts.RepoRef, _ contracts.ArchiveSyncOptions) (*contracts.SyncPlanResult, error) {

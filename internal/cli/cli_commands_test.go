@@ -67,16 +67,15 @@ func TestStatus(t *testing.T) {
 	}
 }
 
-func TestSyncInvalidRepo(t *testing.T) {
+func TestRemovedSyncCommandIsRejected(t *testing.T) {
 	t.Parallel()
 	svc := &fakeService{}
 	c, _, _ := newTestCLI(svc, nil)
 
-	err := c.Run(context.Background(), []string{"sync", "invalid"})
+	err := c.Run(context.Background(), []string{"sync", "o/r"})
 	requireCLIError(t, err, cli.ExitUsage)
-
-	if svc.syncCalled {
-		t.Fatal("Sync should not be called with invalid repo")
+	if !strings.Contains(err.Error(), "sync was removed; use `gitcontribute archive sync OWNER/REPO`") {
+		t.Fatalf("error = %q", err)
 	}
 }
 

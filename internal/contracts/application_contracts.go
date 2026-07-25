@@ -15,7 +15,6 @@ import (
 type Service interface {
 	Init(ctx context.Context) (*InitResult, error)
 	Status(ctx context.Context) (*StatusResult, error)
-	Sync(ctx context.Context, repo RepoRef) (*SyncResult, error)
 	Search(ctx context.Context, query string, opts SearchOptions) (*SearchResult, error)
 	Dossier(ctx context.Context, repo RepoRef) (*DossierResult, error)
 	Index(ctx context.Context, repo RepoRef, path string) (*IndexResult, error)

@@ -80,7 +80,6 @@ type rootCmd struct {
 	Doctor        doctorCmd        `cmd:"" help:"Diagnose local configuration and dependencies"`
 	Health        healthCmd        `cmd:"" help:"Compute offline repository health and community metrics"`
 	Radar         radarCmd         `cmd:"" help:"Rank explainable contribution candidates from the local corpus"`
-	Sync          syncCmd          `cmd:"" help:"Sync a repository into the corpus"`
 	Search        searchCmd        `cmd:"" help:"Search the local corpus"`
 	Dossier       dossierCmd       `cmd:"" help:"Show repository dossier"`
 	Research      researchCmd      `cmd:"" help:"Build source-backed local research briefs"`
@@ -175,11 +174,6 @@ type doctorCmd struct {
 
 type statusCmd struct {
 	JSON bool `name:"json" help:"Print the result as JSON"`
-}
-
-type syncCmd struct {
-	OwnerRepo string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
-	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type searchCmd struct {
@@ -536,6 +530,9 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return c.runDefault(ctx)
 	}
+	if args[0] == "sync" {
+		return NewCLIError(ExitUsage, errors.New("sync was removed; use `gitcontribute archive sync OWNER/REPO`"))
+	}
 	var cli rootCmd
 	parser, err := kong.New(&cli,
 		kong.Name("gitcontribute"),
@@ -598,8 +595,6 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 		return c.runHealth(ctx, &cli.Health)
 	case "radar":
 		return c.runRadar(ctx, &cli.Radar)
-	case "sync":
-		return c.runSync(ctx, &cli.Sync)
 	case "search":
 		return c.runSearch(ctx, command, &cli.Search)
 	case "dossier":

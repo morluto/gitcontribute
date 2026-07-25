@@ -78,7 +78,7 @@ contribution candidates, and search the local corpus:
 
 ```sh
 gitcontribute tui
-gitcontribute sync owner/repo
+gitcontribute archive sync owner/repo
 gitcontribute radar owner/repo --limit 10
 gitcontribute search threads "connection timeout" \
   --repo owner/repo --json
@@ -421,7 +421,7 @@ gitcontribute tail golang-events --since 2h --budget 500 --interval 1h
 Sync and selectively hydrate repository archives:
 
 ```sh
-gitcontribute sync owner/repo
+gitcontribute archive sync owner/repo
 gitcontribute archive sync owner/repo --since 168h --state open --max-requests 100
 gitcontribute archive sync owner/repo --numbers 42,108
 gitcontribute archive refresh owner/repo

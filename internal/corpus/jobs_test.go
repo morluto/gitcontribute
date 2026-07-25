@@ -290,6 +290,58 @@ func TestBeginReconcileTransactionPreservesConnectionBusyTimeout(t *testing.T) {
 	}
 }
 
+func TestBeginReconcileTransactionRetriesBusyWriter(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, path := openTestCorpus(t)
+	other, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+
+	blocker, err := c.db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Close()
+	if _, err := blocker.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		t.Fatalf("begin blocker transaction: %v", err)
+	}
+
+	conn, err := other.db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "PRAGMA busy_timeout = 1"); err != nil {
+		t.Fatalf("set short busy timeout: %v", err)
+	}
+
+	released := make(chan error, 1)
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_, err := blocker.ExecContext(context.Background(), "ROLLBACK")
+		released <- err
+	}()
+
+	if err := beginReconcileTransaction(ctx, conn); err != nil {
+		t.Fatalf("begin reconcile transaction: %v", err)
+	}
+	defer func() { _, _ = conn.ExecContext(context.Background(), "ROLLBACK") }()
+	if err := <-released; err != nil {
+		t.Fatalf("release blocker transaction: %v", err)
+	}
+
+	var busyTimeout int
+	if err := conn.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
+		t.Fatal(err)
+	}
+	if busyTimeout != 1 {
+		t.Fatalf("busy timeout = %d, want 1", busyTimeout)
+	}
+}
+
 func TestConcurrentReadWhileJobRunning(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

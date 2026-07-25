@@ -177,7 +177,7 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpcontract.SyncThrea
 					opts.State = "all"
 					opts.Since = time.Time{}
 				}
-				res, err := s.SyncWithOptions(ctx, current.ref, opts)
+				res, err := s.sync(ctx, current.ref, opts)
 				if err != nil {
 					status, reason, message, retry := githubBatchError(err)
 					taskResults[index] = map[string]any{"key": current.key, "status": status, "reason": reason, "message": message, "retry_after_ms": retry}

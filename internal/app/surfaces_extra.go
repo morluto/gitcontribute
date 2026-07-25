@@ -22,7 +22,7 @@ func (s *Service) ArchiveSync(ctx context.Context, repo contracts.RepoRef, opts 
 	if opts.Since > 0 {
 		syncOpts.Since = s.now().Add(-opts.Since)
 	}
-	return s.SyncWithOptions(ctx, repo, syncOpts)
+	return s.sync(ctx, repo, syncOpts)
 }
 
 // PlanArchiveSync computes the conservative request ceiling before resolving a

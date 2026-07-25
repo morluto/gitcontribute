@@ -3,6 +3,7 @@
 package lens
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,8 +33,7 @@ type Filter struct {
 	MinStars        int           `json:"min_stars,omitempty"`
 }
 
-// UnmarshalJSON supports JSON lens definitions where updated_within may be
-// expressed as a Go duration string (e.g. "720h") or as nanoseconds.
+// UnmarshalJSON normalizes omitted weights to an empty map.
 func (d *Definition) UnmarshalJSON(data []byte) error {
 	type alias Definition
 	var raw struct {
@@ -99,21 +99,16 @@ func (f *Filter) UnmarshalJSON(data []byte) error {
 	f.Unassigned = raw.Unassigned
 	f.MinStars = raw.MinStars
 
-	if len(raw.UpdatedWithin) > 0 {
-		var s string
-		if err := json.Unmarshal(raw.UpdatedWithin, &s); err == nil {
-			d, err := time.ParseDuration(s)
-			if err != nil {
-				return fmt.Errorf("parse updated_within duration: %w", err)
-			}
-			f.UpdatedWithin = d
-		} else {
-			var n int64
-			if err := json.Unmarshal(raw.UpdatedWithin, &n); err != nil {
-				return fmt.Errorf("updated_within must be a duration string or nanoseconds: %w", err)
-			}
-			f.UpdatedWithin = time.Duration(n)
+	if len(raw.UpdatedWithin) > 0 && !bytes.Equal(bytes.TrimSpace(raw.UpdatedWithin), []byte("null")) {
+		var value string
+		if err := json.Unmarshal(raw.UpdatedWithin, &value); err != nil {
+			return errors.New(`updated_within must be a duration string such as "720h"; numeric nanoseconds are not supported`)
 		}
+		d, err := time.ParseDuration(value)
+		if err != nil {
+			return fmt.Errorf(`updated_within must be a valid duration string such as "720h": %w`, err)
+		}
+		f.UpdatedWithin = d
 	}
 	return nil
 }
