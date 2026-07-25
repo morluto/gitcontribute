@@ -297,9 +297,13 @@ func (s *Service) Jobs(ctx context.Context) (*JobExecutor, error) {
 	if s.jobs != nil {
 		return s.jobs, nil
 	}
+	jobConfig := defaultJobExecutorConfig()
+	if s.cfg != nil && s.cfg.Crawl.Concurrency > 0 {
+		jobConfig.maxConcurrentJobs = int64(s.cfg.Crawl.Concurrency)
+	}
 	// Jobs outlive this request and remain bounded by the service lifecycle.
 	//nolint:contextcheck
-	jobs, err := newJobExecutor(s.lifecycleCtx, c)
+	jobs, err := newJobExecutorWithConfig(s.lifecycleCtx, c, jobConfig)
 	if err != nil {
 		return nil, err
 	}
