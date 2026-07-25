@@ -100,7 +100,7 @@ func TestFilterJSONRequiresDurationString(t *testing.T) {
 	if err == nil {
 		t.Fatal("numeric updated_within was accepted")
 	}
-	if !strings.Contains(err.Error(), "cannot unmarshal number") {
+	if !strings.Contains(err.Error(), `updated_within must be a duration string such as "720h"; numeric nanoseconds are not supported`) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

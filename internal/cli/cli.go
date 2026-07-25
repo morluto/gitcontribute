@@ -530,6 +530,9 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return c.runDefault(ctx)
 	}
+	if args[0] == "sync" {
+		return NewCLIError(ExitUsage, errors.New("sync was removed; use `gitcontribute archive sync OWNER/REPO`"))
+	}
 	var cli rootCmd
 	parser, err := kong.New(&cli,
 		kong.Name("gitcontribute"),

@@ -74,6 +74,9 @@ func TestRemovedSyncCommandIsRejected(t *testing.T) {
 
 	err := c.Run(context.Background(), []string{"sync", "o/r"})
 	requireCLIError(t, err, cli.ExitUsage)
+	if !strings.Contains(err.Error(), "sync was removed; use `gitcontribute archive sync OWNER/REPO`") {
+		t.Fatalf("error = %q", err)
+	}
 }
 
 func TestSearchDefaults(t *testing.T) {

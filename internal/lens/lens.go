@@ -3,6 +3,7 @@
 package lens
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,13 +80,13 @@ func (f Filter) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON supports duration strings for updated_within.
 func (f *Filter) UnmarshalJSON(data []byte) error {
 	type rawFilter struct {
-		Kinds           []string `json:"kinds"`
-		States          []string `json:"states"`
-		Languages       []string `json:"languages"`
-		ExcludeArchived bool     `json:"exclude_archived"`
-		Unassigned      bool     `json:"unassigned"`
-		UpdatedWithin   *string  `json:"updated_within"`
-		MinStars        int      `json:"min_stars"`
+		Kinds           []string        `json:"kinds"`
+		States          []string        `json:"states"`
+		Languages       []string        `json:"languages"`
+		ExcludeArchived bool            `json:"exclude_archived"`
+		Unassigned      bool            `json:"unassigned"`
+		UpdatedWithin   json.RawMessage `json:"updated_within"`
+		MinStars        int             `json:"min_stars"`
 	}
 	var raw rawFilter
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -98,10 +99,14 @@ func (f *Filter) UnmarshalJSON(data []byte) error {
 	f.Unassigned = raw.Unassigned
 	f.MinStars = raw.MinStars
 
-	if raw.UpdatedWithin != nil {
-		d, err := time.ParseDuration(*raw.UpdatedWithin)
+	if len(raw.UpdatedWithin) > 0 && !bytes.Equal(bytes.TrimSpace(raw.UpdatedWithin), []byte("null")) {
+		var value string
+		if err := json.Unmarshal(raw.UpdatedWithin, &value); err != nil {
+			return errors.New(`updated_within must be a duration string such as "720h"; numeric nanoseconds are not supported`)
+		}
+		d, err := time.ParseDuration(value)
 		if err != nil {
-			return fmt.Errorf("parse updated_within duration: %w", err)
+			return fmt.Errorf(`updated_within must be a valid duration string such as "720h": %w`, err)
 		}
 		f.UpdatedWithin = d
 	}
