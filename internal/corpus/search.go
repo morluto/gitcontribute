@@ -34,9 +34,10 @@ type SearchFilter struct {
 
 // ThreadSearchPage is a paginated result of a thread keyword search.
 type ThreadSearchPage struct {
-	Threads    []Thread
-	NextCursor string
-	Total      int
+	Threads           []Thread
+	NextCursor        string
+	Total             int
+	UnknownMergeCount int
 }
 
 const threadSearchMatchesSQL = `
@@ -212,11 +213,31 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 	} else {
 		page.Total = len(threads)
 	}
+	page.UnknownMergeCount, err = c.countUnknownMergeMatches(ctx, ftsQuery, filter)
+	if err != nil {
+		return ThreadSearchPage{}, err
+	}
 
 	return page, nil
 }
 
 func (c *Corpus) countThreadMatches(ctx context.Context, ftsQuery string, filter SearchFilter) (int, error) {
+	return c.countThreadMatchesWhere(ctx, ftsQuery, filter, "")
+}
+
+func (c *Corpus) countUnknownMergeMatches(ctx context.Context, ftsQuery string, filter SearchFilter) (int, error) {
+	if filter.Merged == nil {
+		return 0, nil
+	}
+	filter.Merged = nil
+	return c.countThreadMatchesWhere(
+		ctx, ftsQuery, filter,
+		` AND t.kind = ? AND t.merged_known = 0`,
+		ThreadKindPullRequest,
+	)
+}
+
+func (c *Corpus) countThreadMatchesWhere(ctx context.Context, ftsQuery string, filter SearchFilter, suffix string, suffixArgs ...any) (int, error) {
 	sql := threadSearchMatchesSQL + `
 		SELECT COUNT(*)
 		FROM search_matches m
@@ -232,6 +253,8 @@ func (c *Corpus) countThreadMatches(ctx context.Context, ftsQuery string, filter
 		args = append(args, filter.Kind)
 	}
 	sql, args = appendThreadMetadataFilters(sql, args, filter)
+	sql += suffix
+	args = append(args, suffixArgs...)
 	var total int
 	if err := c.db.QueryRowContext(ctx, sql, args...).Scan(&total); err != nil {
 		return 0, fmt.Errorf("count threads: %w", err)

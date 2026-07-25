@@ -106,6 +106,7 @@ type SearchOutput struct {
 	Matches             []ThreadOutput `json:"matches"`
 	Total               int            `json:"total"`
 	NextCursor          string         `json:"next_cursor,omitempty"`
+	UnknownMergeCount   int            `json:"unknown_merge_count,omitempty"`
 	Suggestion          string         `json:"suggestion,omitempty"`
 }
 

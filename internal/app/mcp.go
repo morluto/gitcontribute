@@ -120,8 +120,11 @@ func (r *MCPReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcp
 	out := mcpcontract.SearchOutput{
 		Query: in.Query, QueryInterpretation: strings.Join(strings.Fields(in.Query), separator),
 		MatchMode: in.MatchMode, View: in.View, Total: res.Total, Matches: matches, NextCursor: res.NextCursor,
+		UnknownMergeCount: res.UnknownMergeCount,
 	}
-	if out.Total == 0 && in.MatchMode == "all" && len(strings.Fields(in.Query)) > 1 {
+	if out.UnknownMergeCount > 0 {
+		out.Suggestion = "Some otherwise-matching pull requests have unknown merge state. Repeat without the merged filter to identify finalists, then hydrate pr_details before inferring absence."
+	} else if out.Total == 0 && in.MatchMode == "all" && len(strings.Fields(in.Query)) > 1 {
 		out.Suggestion = "No all-term matches. Retry with match_mode=any or fewer terms; verify corpus coverage before inferring absence."
 	}
 	return out, nil

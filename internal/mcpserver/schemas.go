@@ -40,6 +40,7 @@ var outputPropertyDescriptions = map[string]string{
 	"limit":                     "Maximum number of records requested.",
 	"matches":                   "Ordered matches for the current page.",
 	"next_cursor":               "Opaque cursor for the next page; absent when there is no next page.",
+	"unknown_merge_count":       "Otherwise-matching pull requests excluded because their merge state is unknown.",
 	"fields":                    "Stored repository fields from the winning local projection.",
 	"sections":                  "Source-backed dossier sections keyed by section name.",
 	"as_of":                     "RFC 3339 timestamp describing how current the response is.",

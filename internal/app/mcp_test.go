@@ -222,6 +222,45 @@ func TestMCPReaderSearchAndExplainUseFacetEvidence(t *testing.T) {
 	}
 }
 
+func TestMCPReaderSearchReportsUnknownMergeState(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "owner", Name: "repo"}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, thread := range []corpus.Thread{
+		{
+			RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 1, State: "closed",
+			Title: "shared term", Merged: true, MergedKnown: true, SourceUpdatedAt: time.Unix(10, 0).UTC(),
+		},
+		{
+			RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed",
+			Title: "shared term", SourceUpdatedAt: time.Unix(20, 0).UTC(),
+		},
+	} {
+		if _, err := svc.corpus.UpsertThread(ctx, thread, `{}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	merged := true
+	out, err := svc.MCPReader().Search(ctx, mcpcontract.SearchInput{
+		Query: "term", Owner: "owner", Repo: "repo", Kind: corpus.ThreadKindPullRequest,
+		State: "closed", Merged: &merged,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Matches) != 1 || out.Matches[0].Number != 1 || out.UnknownMergeCount != 1 {
+		t.Fatalf("search output = %+v", out)
+	}
+	if suggestion := strings.ToLower(out.Suggestion); !strings.Contains(suggestion, "without the merged filter") || !strings.Contains(suggestion, "hydrate pr_details") {
+		t.Fatalf("suggestion = %q", out.Suggestion)
+	}
+}
+
 func TestMCPReaderExplainCodeRejectsDifferentRequestedPath(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
