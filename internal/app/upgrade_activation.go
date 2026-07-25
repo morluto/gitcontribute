@@ -45,6 +45,9 @@ func (s *Service) validateNewerCorpusTarget(ctx context.Context, report *contrac
 	if normalizeVersion(contract.Version) != normalizeVersion(target) {
 		return fail(fmt.Errorf("installed target reports version %s, not target %s", contract.Version, target))
 	}
+	if contract.SupportedSchemaLineage != corpus.SupportedSchemaLineage() {
+		return fail(fmt.Errorf("installed target reports schema lineage %q, not %q", contract.SupportedSchemaLineage, corpus.SupportedSchemaLineage()))
+	}
 	if contract.SupportedSchemaVersion <= 0 {
 		return fail(errors.New("installed target does not report a supported schema version"))
 	}
@@ -72,9 +75,9 @@ func (s *Service) validateNewerCorpusTarget(ctx context.Context, report *contrac
 		return false
 	case currentSchema > contract.SupportedSchemaVersion:
 		stage.Status = "newer"
-		stage.Message = fmt.Sprintf("corpus schema %d is newer than installed target schema %d", currentSchema, contract.SupportedSchemaVersion)
+		stage.Message = fmt.Sprintf("corpus schema %d requires a newer release than installed target schema %d", currentSchema, contract.SupportedSchemaVersion)
 		setStage(report, stage)
-		report.Status = "corpus newer than binary"
+		report.Status = "corpus requires newer release"
 		report.Action = "upgrade to a release that supports the current corpus schema"
 		return false
 	default:
@@ -126,6 +129,10 @@ func (s *Service) activatePrivateRuntime(ctx context.Context, report *contracts.
 		s.setPrivateActivationFailure(report, len(clients), errors.New("staged executable does not report a supported schema version"))
 		return
 	}
+	if contract.SupportedSchemaLineage != corpus.SupportedSchemaLineage() {
+		s.setPrivateActivationFailure(report, len(clients), fmt.Errorf("staged executable reports schema lineage %q, not %q", contract.SupportedSchemaLineage, corpus.SupportedSchemaLineage()))
+		return
+	}
 
 	currentSchema, corpusExists, err := corpus.InspectSchemaVersion(ctx, s.databasePath())
 	if err != nil {
@@ -149,7 +156,7 @@ func (s *Service) activatePrivateRuntime(ctx context.Context, report *contracts.
 			report.Rollback = "prior client registrations remain unchanged"
 			return
 		case currentSchema > contract.SupportedSchemaVersion:
-			msg := fmt.Sprintf("corpus schema %d is newer than target schema %d", currentSchema, contract.SupportedSchemaVersion)
+			msg := fmt.Sprintf("corpus schema %d requires a newer release than target schema %d", currentSchema, contract.SupportedSchemaVersion)
 			s.setPrivateActivationFailure(report, len(clients), errors.New(msg))
 			setStage(report, contracts.UpgradeStage{
 				Name:    "corpus-schema",
@@ -158,7 +165,7 @@ func (s *Service) activatePrivateRuntime(ctx context.Context, report *contracts.
 				Target:  strconv.FormatInt(contract.SupportedSchemaVersion, 10),
 				Message: msg,
 			})
-			report.Status = "corpus newer than binary"
+			report.Status = "corpus requires newer release"
 			report.Action = "upgrade to a release that supports the current corpus schema"
 			report.Rollback = "prior client registrations remain unchanged"
 			return

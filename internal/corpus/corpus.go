@@ -39,12 +39,11 @@ type MigrationRequiredError struct {
 }
 
 func (e *MigrationRequiredError) Error() string {
-	return fmt.Sprintf("database schema migration required: current version %d, target version %d; inspect with `gitcontribute corpus inspect`, then run `gitcontribute corpus migrate --yes`", e.Current, e.Target)
+	return fmt.Sprintf("database schema migration required: current version %d, target version %d; inspect with `npx --yes gitcontribute@latest corpus inspect`, then run `npx --yes gitcontribute@latest corpus migrate --yes`", e.Current, e.Target)
 }
 
-// UnsupportedSchemaError reports that the corpus was written by a newer
-// binary. Retaining an older executable is not sufficient for rollback once
-// the durable schema has advanced.
+// UnsupportedSchemaError reports that the corpus belongs to this product
+// lineage but requires a newer binary.
 type UnsupportedSchemaError struct {
 	Current int64
 	Target  int64
@@ -52,6 +51,17 @@ type UnsupportedSchemaError struct {
 
 func (e *UnsupportedSchemaError) Error() string {
 	return fmt.Sprintf("database schema version %d is newer than this binary supports (%d)", e.Current, e.Target)
+}
+
+// IncompatibleSchemaError reports that a database does not carry this
+// product's durable schema identity. The database remains untouched.
+type IncompatibleSchemaError struct {
+	Current int64
+	Target  int64
+}
+
+func (e *IncompatibleSchemaError) Error() string {
+	return fmt.Sprintf("database schema version %d has an incompatible schema identity; this binary supports lineage %q at version %d", e.Current, schemaLineage, e.Target)
 }
 
 // Open opens or creates a corpus at path, applies pending migrations, and
@@ -100,10 +110,13 @@ func inspectOpenRequest(ctx context.Context, path string) (bool, int64, error) {
 	if err != nil {
 		return false, 0, err
 	}
+	if !exists || version == 0 {
+		return true, target, nil
+	}
 	if err := checkSchemaCompatibility(version, target, exists); err != nil {
 		return false, 0, err
 	}
-	return !exists, target, nil
+	return false, target, nil
 }
 
 func inspectOpenRequestUnderLease(ctx context.Context, path string, target int64, needsInitialization bool) (bool, error) {
@@ -113,6 +126,9 @@ func inspectOpenRequestUnderLease(ctx context.Context, path string, target int64
 	}
 	if !exists {
 		return needsInitialization, nil
+	}
+	if version == 0 && needsInitialization {
+		return true, nil
 	}
 	return false, checkSchemaCompatibility(version, target, true)
 }
@@ -141,6 +157,9 @@ func openWritableCorpus(ctx context.Context, path string, lease *corpusLease, ne
 
 	c := &Corpus{db: db, lease: lease, watchDSN: corpusWatchDSN(path)}
 	if needsInitialization {
+		if err := c.establishSchemaIdentity(ctx); err != nil {
+			return nil, errors.Join(err, db.Close())
+		}
 		if err := c.applyMigrations(ctx); err != nil {
 			return nil, errors.Join(err, db.Close())
 		}

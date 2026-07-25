@@ -57,13 +57,37 @@ func (c *Corpus) inspectSchemaVersions(ctx context.Context) (current, target int
 		return 0, 0, fmt.Errorf("inspect migration table: %w", err)
 	}
 	if tableCount == 0 {
+		var applicationID int
+		if err := c.db.QueryRowContext(ctx, `PRAGMA application_id`).Scan(&applicationID); err != nil {
+			return 0, 0, fmt.Errorf("inspect corpus identity: %w", err)
+		}
+		if applicationID != 0 && applicationID != schemaApplicationID {
+			return 0, target, &IncompatibleSchemaError{Current: 0, Target: target}
+		}
+		var objectCount int
+		if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'`).Scan(&objectCount); err != nil {
+			return 0, 0, fmt.Errorf("inspect corpus objects: %w", err)
+		}
+		if objectCount != 0 {
+			return 0, target, &IncompatibleSchemaError{Current: 0, Target: target}
+		}
 		return 0, target, nil
+	}
+	var applicationID int
+	if err := c.db.QueryRowContext(ctx, `PRAGMA application_id`).Scan(&applicationID); err != nil {
+		return 0, 0, fmt.Errorf("inspect corpus identity: %w", err)
 	}
 	if err := c.db.QueryRowContext(ctx, `SELECT version_id FROM goose_db_version ORDER BY id DESC LIMIT 1`).Scan(&current); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			if applicationID != schemaApplicationID {
+				return 0, target, &IncompatibleSchemaError{Current: 0, Target: target}
+			}
 			return 0, target, nil
 		}
 		return 0, 0, fmt.Errorf("inspect applied schema version: %w", err)
+	}
+	if applicationID != schemaApplicationID {
+		return current, target, &IncompatibleSchemaError{Current: current, Target: target}
 	}
 	return current, target, nil
 }

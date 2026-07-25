@@ -230,6 +230,8 @@ func (s *Service) openCorpus(ctx context.Context) (*corpus.Corpus, error) {
 			return nil, &corpus.MigrationRequiredError{Current: inspection.Current, Target: inspection.Target}
 		case corpus.SchemaNewer:
 			return nil, &corpus.UnsupportedSchemaError{Current: inspection.Current, Target: inspection.Target}
+		case corpus.SchemaIncompatible:
+			return nil, &corpus.IncompatibleSchemaError{Current: inspection.Current, Target: inspection.Target}
 		}
 	}
 	c, err := corpus.Open(ctx, cfg.Database)
@@ -443,6 +445,8 @@ func (s *Service) Init(ctx context.Context) (*contracts.InitResult, error) {
 			return nil, &corpus.MigrationRequiredError{Current: inspection.Current, Target: inspection.Target}
 		case corpus.SchemaNewer:
 			return nil, &corpus.UnsupportedSchemaError{Current: inspection.Current, Target: inspection.Target}
+		case corpus.SchemaIncompatible:
+			return nil, &corpus.IncompatibleSchemaError{Current: inspection.Current, Target: inspection.Target}
 		}
 	}
 	_, err = s.openCorpus(ctx)

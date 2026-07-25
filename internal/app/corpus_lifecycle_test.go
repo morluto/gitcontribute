@@ -76,7 +76,7 @@ func TestApplicationWriteOpenDoesNotMigrateExistingCorpus(t *testing.T) {
 	if !dryRunReport.HasFailures() || dryRunReport.Corpus == nil || dryRunReport.Corpus.State != "migration_required" {
 		t.Fatalf("dry-run corpus preflight = %+v", dryRunReport)
 	}
-	if report.Steps[0].Message != dryRunReport.Steps[0].Message || !strings.Contains(report.Steps[0].Message, "gitcontribute corpus migrate --yes") {
+	if report.Steps[0].Message != dryRunReport.Steps[0].Message || !strings.Contains(report.Steps[0].Message, "npx --yes gitcontribute@latest corpus migrate --yes") {
 		t.Fatalf("setup diagnostics differ: real=%q dry-run=%q", report.Steps[0].Message, dryRunReport.Steps[0].Message)
 	}
 	for _, step := range report.Steps {
@@ -86,7 +86,7 @@ func TestApplicationWriteOpenDoesNotMigrateExistingCorpus(t *testing.T) {
 	}
 }
 
-func TestSetupFailsFastForNewerCorpusInDryRunAndRealModes(t *testing.T) {
+func TestSetupFailsFastForUnmarkedCorpusInDryRunAndRealModes(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	dbPath := filepath.Join(home, "newer.db")
@@ -118,10 +118,13 @@ func TestSetupFailsFastForNewerCorpusInDryRunAndRealModes(t *testing.T) {
 		report, err := svc.Setup(context.Background(), contracts.SetupOptions{
 			Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", DryRun: dryRun,
 		})
-		if err == nil || !strings.Contains(err.Error(), "database schema version 9999 is newer than this binary supports") || !strings.Contains(err.Error(), "gitcontribute corpus inspect") {
+		if err == nil ||
+			!strings.Contains(err.Error(), "database schema version 9999 has an incompatible schema identity") ||
+			!strings.Contains(err.Error(), "cannot be migrated in place") ||
+			!strings.Contains(err.Error(), "npx --yes gitcontribute@latest setup") {
 			t.Fatalf("dry_run=%v report=%+v error = %v", dryRun, report, err)
 		}
-		if report == nil || report.Corpus == nil || report.Corpus.State != "newer" || len(report.Steps) != 0 {
+		if report == nil || report.Corpus == nil || report.Corpus.State != "incompatible" || len(report.Steps) != 0 {
 			t.Fatalf("dry_run=%v report = %+v", dryRun, report)
 		}
 	}

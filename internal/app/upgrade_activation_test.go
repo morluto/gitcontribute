@@ -3,7 +3,6 @@ package app
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/managedbinary"
 	clientsetup "github.com/morluto/gitcontribute/internal/setup"
 	_ "modernc.org/sqlite"
@@ -24,14 +24,8 @@ func TestUpgradeBlocksActivationWhenTargetSchemaExceedsCorpus(t *testing.T) {
 	svc.cfg.Database = dbPath
 	setRuntimeContract(t, "1.2.4", 999)
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := corpus.Open(context.Background(), dbPath)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("CREATE TABLE goose_db_version (id INTEGER PRIMARY KEY, version_id INTEGER)"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("INSERT INTO goose_db_version (id, version_id) VALUES (1, 1)"); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -128,7 +122,7 @@ func TestReadRuntimeContractAcceptsUnknownFields(t *testing.T) {
 	var gotPath string
 	runtimeContractCommand = func(_ context.Context, path string) ([]byte, error) {
 		gotPath = path
-		return []byte(`{"name":"gitcontribute","version":"1.2.4","supported_schema_version":28,"future_field":{"enabled":true}}`), nil
+		return []byte(`{"name":"gitcontribute","version":"1.2.4","supported_schema_lineage":"gitcontribute-canonical-v1","supported_schema_version":28,"future_field":{"enabled":true}}`), nil
 	}
 	contract, err := readRuntimeContract(context.Background(), "/release/candidate")
 	if err != nil {
@@ -158,7 +152,7 @@ func TestUpgradeRejectsDestinationRuntimeContractDisagreementBeforeRegistration(
 		if filepath.Clean(path) == filepath.Clean(destination) {
 			schema = 2
 		}
-		return []byte(fmt.Sprintf(`{"name":"gitcontribute","version":"1.2.4","supported_schema_version":%d}`, schema)), nil
+		return []byte(fmt.Sprintf(`{"name":"gitcontribute","version":"1.2.4","supported_schema_lineage":"gitcontribute-canonical-v1","supported_schema_version":%d}`, schema)), nil
 	}
 
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})

@@ -460,10 +460,15 @@ step boundaries, and holds an exclusive cross-process corpus lease. Normal
 readers hold shared leases; incompatible work fails fast instead of waiting on
 SQLite until an opaque deadline.
 
-Schema history starts from the canonical `001_initial.sql` baseline. The
-project does not carry compatibility migrations for pre-release corpus layouts;
-future schema changes append migrations from this baseline. A corpus created by
-an older development build must be recreated rather than upgraded in place.
+Schema history starts from the canonical `001_initial.sql` baseline. Every
+supported corpus carries the canonical lineage identifier in SQLite's
+`application_id`; numeric migration versions are never used to infer lineage.
+Unmarked corpora and corpora from another lineage remain untouched and cannot
+be migrated in place, even when their numeric version happens to match. Use a
+matching release, or archive or move the incompatible corpus out of the
+configured database path before setup creates a corpus on the canonical
+baseline. Future schema changes may append migrations within this identified
+lineage.
 
 `setup` may create a missing empty corpus. It must not migrate an existing
 corpus or rebuild derived indexes as a side effect of installing a launcher or

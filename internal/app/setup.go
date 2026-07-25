@@ -182,11 +182,13 @@ func (r *setupRun) preflightCorpus() (bool, error) {
 	step := contracts.SetupStep{Name: "corpus", Path: inspection.Path, Status: "failed"}
 	switch inspection.State {
 	case "migration_required":
-		step.Message = fmt.Sprintf("database schema version %d requires migration to %d; run gitcontribute corpus migrate --yes", inspection.Current, inspection.Target)
+		step.Message = fmt.Sprintf("database schema version %d requires migration to %d; run `npx --yes gitcontribute@latest corpus migrate --yes`", inspection.Current, inspection.Target)
 	case "newer":
-		return true, fmt.Errorf("setup cannot continue: database schema version %d is newer than this binary supports (%d) at %s; run a matching GitContribute release, gitcontribute upgrade, or gitcontribute corpus inspect; no changes were made", inspection.Current, inspection.Target, inspection.Path)
+		return true, fmt.Errorf("setup cannot continue: database schema version %d is newer than this binary supports (%d) at %s; run `npx --yes gitcontribute@latest upgrade`, or use a matching GitContribute release; no changes were made", inspection.Current, inspection.Target, inspection.Path)
+	case "incompatible":
+		return true, fmt.Errorf("setup cannot continue: database schema version %d has an incompatible schema identity at %s and cannot be migrated in place; use a matching GitContribute release, or archive or move the corpus out of the configured path and rerun `npx --yes gitcontribute@latest setup`; no changes were made", inspection.Current, inspection.Path)
 	case "damaged":
-		return true, fmt.Errorf("setup cannot continue: local corpus at %s is damaged: %s; run gitcontribute corpus inspect; no changes were made", inspection.Path, inspection.Problem)
+		return true, fmt.Errorf("setup cannot continue: local corpus at %s is damaged: %s; run `npx --yes gitcontribute@latest corpus inspect`; no changes were made", inspection.Path, inspection.Problem)
 	default:
 		step.Message = "the corpus cannot be initialized in its current state"
 	}

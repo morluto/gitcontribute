@@ -22,8 +22,11 @@ func TestRunRuntimeContractEmitsOnlyImmutableCompatibilityFields(t *testing.T) {
 	if err := dec.Decode(&got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 3 || got["name"] != "gitcontribute" || got["version"] != version {
+	if len(got) != 4 || got["name"] != "gitcontribute" || got["version"] != version {
 		t.Fatalf("runtime contract = %#v", got)
+	}
+	if got["supported_schema_lineage"] != "gitcontribute-canonical-v1" {
+		t.Fatalf("runtime contract lineage = %#v", got)
 	}
 	if got["supported_schema_version"].(float64) <= 0 {
 		t.Fatalf("runtime contract schema = %#v", got)

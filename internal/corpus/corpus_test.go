@@ -2,6 +2,8 @@ package corpus
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -164,7 +166,7 @@ func TestIdempotentReopenAndMigration(t *testing.T) {
 	}
 }
 
-func TestOpenRejectsSchemaNewerThanBinary(t *testing.T) {
+func TestOpenRejectsNewerSchema(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	c, path := openTestCorpus(t)
@@ -182,6 +184,135 @@ func TestOpenRejectsSchemaNewerThanBinary(t *testing.T) {
 	_, err = Open(ctx, path)
 	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("schema version %d is newer", target+1)) {
 		t.Fatalf("Open error = %v", err)
+	}
+}
+
+func TestOpenRejectsUnmarkedMatchingSchema(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "unmarked.db")
+	target, err := latestSchemaVersion()
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE goose_db_version (id INTEGER PRIMARY KEY, version_id INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO goose_db_version (id, version_id) VALUES (1, ?)`, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Open(ctx, path)
+	var incompatible *IncompatibleSchemaError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("Open error = %v, want IncompatibleSchemaError", err)
+	}
+}
+
+func TestOpenRejectsEmptyDatabaseOwnedByAnotherApplication(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "foreign.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `PRAGMA application_id = 42`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Open(ctx, path)
+	var incompatible *IncompatibleSchemaError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("Open error = %v, want IncompatibleSchemaError", err)
+	}
+	db, err = sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var applicationID int
+	if err := db.QueryRowContext(ctx, `PRAGMA application_id`).Scan(&applicationID); err != nil {
+		t.Fatal(err)
+	}
+	if applicationID != 42 {
+		t.Fatalf("application_id = %d, want 42", applicationID)
+	}
+}
+
+func TestOpenRejectsUnmarkedEmptyMigrationTable(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "empty-migration-table.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE goose_db_version (id INTEGER PRIMARY KEY, version_id INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Open(ctx, path)
+	var incompatible *IncompatibleSchemaError
+	if !errors.As(err, &incompatible) {
+		t.Fatalf("Open error = %v, want IncompatibleSchemaError", err)
+	}
+	db, err = sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var tableCount int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'repositories'`).Scan(&tableCount); err != nil {
+		t.Fatal(err)
+	}
+	if tableCount != 0 {
+		t.Fatal("Open initialized an unmarked database")
+	}
+}
+
+func TestOpenRetriesMarkedInterruptedInitialization(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "interrupted.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, fmt.Sprintf(`PRAGMA application_id = %d`, schemaApplicationID)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TABLE goose_db_version (id INTEGER PRIMARY KEY, version_id INTEGER NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("retry Open: %v", err)
+	}
+	defer c.Close()
+	current, target, err := c.SchemaVersions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current != target {
+		t.Fatalf("schema version = %d, want %d", current, target)
 	}
 }
 
