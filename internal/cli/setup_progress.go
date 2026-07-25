@@ -6,10 +6,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/spinner"
+	"charm.land/bubbles/v2/spinner"
 	"github.com/morluto/gitcontribute/internal/contracts"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 type setupStartedMsg contracts.SetupPhase
@@ -50,12 +50,12 @@ func (m setupProgressModel) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m setupProgressModel) View() string {
+func (m setupProgressModel) View() tea.View {
 	lines := append([]string(nil), m.completed...)
 	if m.active != "" {
 		lines = append(lines, fmt.Sprintf("%s %s…", m.spinner.View(), setupProgressAction(m.active)))
 	}
-	return strings.Join(lines, "\n")
+	return tea.NewView(strings.Join(lines, "\n"))
 }
 
 type setupProgressRenderer struct {

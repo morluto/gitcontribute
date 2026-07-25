@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/morluto/gitcontribute/internal/tuicontract"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 var (
@@ -20,7 +22,7 @@ var (
 )
 
 // View renders the current model state.
-func (m Model) View() string {
+func (m Model) View() tea.View {
 	if m.width <= 0 {
 		m.width = 80
 	}
@@ -49,7 +51,7 @@ func (m Model) View() string {
 	}
 
 	lines = append(lines, m.renderFooter())
-	return strings.Join(lines, "\n")
+	return tea.NewView(strings.Join(lines, "\n"))
 }
 
 func (m Model) renderHeader() string {
