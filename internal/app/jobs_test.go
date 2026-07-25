@@ -275,6 +275,101 @@ func TestCancelQueuedJob(t *testing.T) {
 	waitForJobStatus(t, jobs, id, corpus.JobStatusCancelled, 2*time.Second)
 }
 
+func TestJobExecutorBoundsRunningAndPendingJobs(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newJobTestService(t)
+	jobs := newJobExecutorOnService(t, svc, jobExecutorConfig{
+		heartbeatInterval: time.Hour,
+		pollInterval:      time.Hour,
+		maxConcurrentJobs: 2,
+		maxAdmittedJobs:   3,
+	})
+
+	release := make(chan struct{})
+	started := make(chan struct{}, 2)
+	block := func(jobCtx context.Context, _ func(string, string) error) (any, error) {
+		started <- struct{}{}
+		select {
+		case <-release:
+			return "done", nil
+		case <-jobCtx.Done():
+			return nil, jobCtx.Err()
+		}
+	}
+
+	first, err := jobs.Submit(ctx, "first", nil, block)
+	if err != nil {
+		t.Fatalf("submit first: %v", err)
+	}
+	<-started
+	second, err := jobs.Submit(ctx, "second", nil, block)
+	if err != nil {
+		t.Fatalf("submit second: %v", err)
+	}
+	<-started
+
+	queuedRan := make(chan struct{}, 1)
+	third, err := jobs.Submit(ctx, "third", nil, func(context.Context, func(string, string) error) (any, error) {
+		queuedRan <- struct{}{}
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatalf("submit third: %v", err)
+	}
+	waitForJobStatus(t, jobs, third, corpus.JobStatusQueued, time.Second)
+
+	if _, err := jobs.Submit(ctx, "overflow", nil, block); !errors.Is(err, ErrJobQueueFull) {
+		t.Fatalf("overflow submit error = %v, want %v", err, ErrJobQueueFull)
+	}
+	if err := jobs.Cancel(ctx, third); err != nil {
+		t.Fatalf("cancel queued job: %v", err)
+	}
+	waitForJobStatus(t, jobs, third, corpus.JobStatusCancelled, time.Second)
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		jobs.mu.Lock()
+		pending := jobs.admittedCount
+		jobs.mu.Unlock()
+		if pending == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("cancelled queued job still consumes admission: %d jobs", pending)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	replacement, err := jobs.Submit(ctx, "replacement", nil, block)
+	if err != nil {
+		t.Fatalf("submit after queued cancellation: %v", err)
+	}
+
+	close(release)
+	waitForJobStatus(t, jobs, first, corpus.JobStatusSucceeded, time.Second)
+	waitForJobStatus(t, jobs, second, corpus.JobStatusSucceeded, time.Second)
+	waitForJobStatus(t, jobs, replacement, corpus.JobStatusSucceeded, time.Second)
+
+	deadline = time.Now().Add(time.Second)
+	for {
+		jobs.mu.Lock()
+		pending := jobs.admittedCount
+		jobs.mu.Unlock()
+		if pending == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("executor still tracks %d jobs", pending)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	select {
+	case <-queuedRan:
+		t.Fatal("cancelled queued job function ran")
+	default:
+	}
+}
+
 func TestJobExecutorCloseCancelsAndWaits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -495,6 +590,80 @@ func TestRemoteCancellationAcrossExecutors(t *testing.T) {
 	}
 
 	waitForJobStatus(t, jobs, id, corpus.JobStatusCancelled, 2*time.Second)
+}
+
+func TestRemoteCancellationReleasesQueuedAdmission(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newJobTestService(t)
+	jobs := newJobExecutorOnService(t, svc, jobExecutorConfig{
+		pollInterval:      20 * time.Millisecond,
+		maxConcurrentJobs: 1,
+		maxAdmittedJobs:   2,
+	})
+
+	release := make(chan struct{})
+	started := make(chan struct{}, 2)
+	block := func(jobCtx context.Context, _ func(string, string) error) (any, error) {
+		started <- struct{}{}
+		select {
+		case <-release:
+			return "done", nil
+		case <-jobCtx.Done():
+			return nil, jobCtx.Err()
+		}
+	}
+	first, err := jobs.Submit(ctx, "first", nil, block)
+	if err != nil {
+		t.Fatalf("submit first: %v", err)
+	}
+	<-started
+
+	queuedRan := make(chan struct{}, 1)
+	queued, err := jobs.Submit(ctx, "queued", nil, func(context.Context, func(string, string) error) (any, error) {
+		queuedRan <- struct{}{}
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatalf("submit queued: %v", err)
+	}
+
+	c2, err := corpus.Open(ctx, svc.databasePath())
+	if err != nil {
+		t.Fatalf("open second corpus: %v", err)
+	}
+	defer func() { _ = c2.Close() }()
+	if err := c2.RequestJobCancellation(ctx, queued); err != nil {
+		t.Fatalf("remote cancel: %v", err)
+	}
+	waitForJobStatus(t, jobs, queued, corpus.JobStatusCancelled, time.Second)
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		jobs.mu.Lock()
+		admitted := jobs.admittedCount
+		jobs.mu.Unlock()
+		if admitted == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("remote-cancelled queued job still consumes admission: %d jobs", admitted)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	replacement, err := jobs.Submit(ctx, "replacement", nil, block)
+	if err != nil {
+		t.Fatalf("submit replacement: %v", err)
+	}
+	close(release)
+	waitForJobStatus(t, jobs, first, corpus.JobStatusSucceeded, time.Second)
+	waitForJobStatus(t, jobs, replacement, corpus.JobStatusSucceeded, time.Second)
+	select {
+	case <-queuedRan:
+		t.Fatal("remote-cancelled queued job function ran")
+	default:
+	}
 }
 
 func TestLiveOwnerNotReconciledByAnotherExecutor(t *testing.T) {

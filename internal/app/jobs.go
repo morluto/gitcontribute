@@ -22,16 +22,14 @@ type JobFunc func(ctx context.Context, report func(progress, statistics string) 
 
 const jobCleanupTimeout = 5 * time.Second
 
+var ErrJobQueueFull = errors.New("job executor queue is full")
+
 func jobProgressCounts(completed, total int) string {
 	return fmt.Sprintf(`{"completed_items":%d,"total_items":%d}`, completed, total)
 }
 
-type activeJob struct {
-	id     string
-	cancel context.CancelFunc
-}
-
 type jobStore interface {
+	StoppedJobIDs(context.Context, []string) (map[string]struct{}, error)
 	CreateJob(context.Context, string, string) (*corpus.Job, error)
 	DeleteJobOwner(context.Context, string) error
 	GetJob(context.Context, string) (*corpus.Job, error)
@@ -52,6 +50,8 @@ type jobExecutorConfig struct {
 	leaseTimeout      time.Duration
 	heartbeatInterval time.Duration
 	pollInterval      time.Duration
+	maxConcurrentJobs int
+	maxAdmittedJobs   int
 }
 
 func defaultJobExecutorConfig() jobExecutorConfig {
@@ -59,6 +59,8 @@ func defaultJobExecutorConfig() jobExecutorConfig {
 		leaseTimeout:      10 * time.Second,
 		heartbeatInterval: 2 * time.Second,
 		pollInterval:      200 * time.Millisecond,
+		maxConcurrentJobs: 4,
+		maxAdmittedJobs:   256,
 	}
 }
 
@@ -68,9 +70,9 @@ func defaultJobExecutorConfig() jobExecutorConfig {
 //
 // Each executor registers a unique owner in the corpus and heartbeats while it
 // is open. Startup only reconciles jobs whose owner is missing or has a stale
-// heartbeat; live owners from other processes are never failed. Workers poll
-// the corpus for cancellation requests so a job cancelled by another process
-// stops promptly.
+// heartbeat; live owners from other processes are never failed. One executor
+// watcher polls admitted IDs together so cross-process cancellation stays prompt
+// without one SQLite query loop per job.
 type JobExecutor struct {
 	corpus  jobStore
 	ownerID string
@@ -78,12 +80,13 @@ type JobExecutor struct {
 	cancel  context.CancelFunc
 	cfg     jobExecutorConfig
 
-	mu          sync.Mutex
-	cond        *sync.Cond
-	closed      bool
-	active      map[string]*activeJob
-	activeCount int
-	heartbeatWG sync.WaitGroup
+	mu            sync.Mutex
+	cond          *sync.Cond
+	closed        bool
+	admitted      map[string]context.CancelFunc
+	admittedCount int
+	permits       chan struct{}
+	backgroundWG  sync.WaitGroup
 }
 
 func newJobExecutor(ctx context.Context, c *corpus.Corpus) (*JobExecutor, error) {
@@ -100,13 +103,23 @@ func newJobExecutorWithConfig(ctx context.Context, c jobStore, cfg jobExecutorCo
 	if cfg.pollInterval <= 0 {
 		cfg.pollInterval = defaultJobExecutorConfig().pollInterval
 	}
+	if cfg.maxConcurrentJobs <= 0 {
+		cfg.maxConcurrentJobs = defaultJobExecutorConfig().maxConcurrentJobs
+	}
+	if cfg.maxAdmittedJobs <= 0 {
+		cfg.maxAdmittedJobs = defaultJobExecutorConfig().maxAdmittedJobs
+	}
+	if cfg.maxAdmittedJobs < cfg.maxConcurrentJobs {
+		return nil, errors.New("maximum admitted jobs cannot be lower than maximum concurrent jobs")
+	}
 
 	ownerID := uuid.NewString()
 	e := &JobExecutor{
-		corpus:  c,
-		ownerID: ownerID,
-		cfg:     cfg,
-		active:  make(map[string]*activeJob),
+		corpus:   c,
+		ownerID:  ownerID,
+		cfg:      cfg,
+		admitted: make(map[string]context.CancelFunc),
+		permits:  make(chan struct{}, cfg.maxConcurrentJobs),
 	}
 	e.rootCtx, e.cancel = context.WithCancel(ctx)
 	e.cond = sync.NewCond(&e.mu)
@@ -117,12 +130,13 @@ func newJobExecutorWithConfig(ctx context.Context, c jobStore, cfg jobExecutorCo
 		return nil, fmt.Errorf("register job owner: %w", err)
 	}
 
-	e.heartbeatWG.Add(1)
+	e.backgroundWG.Add(2)
 	go e.heartbeat()
+	go e.watchCancellations()
 
 	if err := c.ReconcileInterruptedJobs(ctx, cfg.leaseTimeout); err != nil {
 		e.cancel()
-		e.heartbeatWG.Wait()
+		e.backgroundWG.Wait()
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), jobCleanupTimeout)
 		defer cleanupCancel()
 		cleanupErr := c.DeleteJobOwner(cleanupCtx, ownerID)
@@ -142,22 +156,31 @@ func (e *JobExecutor) Submit(ctx context.Context, kind string, request any, fn J
 		e.mu.Unlock()
 		return "", errors.New("job executor is closed")
 	}
-	e.activeCount++
+	if e.admittedCount >= e.cfg.maxAdmittedJobs {
+		e.mu.Unlock()
+		return "", ErrJobQueueFull
+	}
+	e.admittedCount++
 	e.mu.Unlock()
 
 	reqJSON, err := json.Marshal(request)
 	if err != nil {
-		e.decrement()
+		e.releaseAdmission()
 		return "", fmt.Errorf("marshal job request: %w", err)
 	}
 
 	job, err := e.corpus.CreateJob(ctx, kind, string(reqJSON))
 	if err != nil {
-		e.decrement()
+		e.releaseAdmission()
 		return "", err
 	}
 
-	go e.run(job.ID, fn)
+	jobCtx, cancel := context.WithCancel(e.rootCtx)
+	e.mu.Lock()
+	e.admitted[job.ID] = cancel
+	e.mu.Unlock()
+
+	go e.run(jobCtx, job.ID, cancel, fn)
 	return job.ID, nil
 }
 
@@ -179,16 +202,15 @@ func (e *JobExecutor) Cancel(ctx context.Context, id string) error {
 		return err
 	}
 	e.mu.Lock()
-	aj, ok := e.active[id]
+	cancel, ok := e.admitted[id]
 	e.mu.Unlock()
 	if ok {
-		aj.cancel()
+		cancel()
 	}
 	return nil
 }
 
-// Close cancels all running jobs and waits for their goroutines to finish
-// before returning.
+// Close stops running and waiting jobs and waits for their goroutines.
 func (e *JobExecutor) Close() error {
 	e.mu.Lock()
 	if e.closed {
@@ -196,40 +218,40 @@ func (e *JobExecutor) Close() error {
 		return nil
 	}
 	e.closed = true
-	active := make([]*activeJob, 0, len(e.active))
-	for _, aj := range e.active {
-		active = append(active, aj)
+	admitted := make([]context.CancelFunc, 0, len(e.admitted))
+	for _, cancel := range e.admitted {
+		admitted = append(admitted, cancel)
 	}
 	e.mu.Unlock()
 
-	for _, aj := range active {
-		aj.cancel()
+	for _, cancel := range admitted {
+		cancel()
 	}
 	e.cancel()
 
 	e.mu.Lock()
-	for e.activeCount > 0 {
+	for e.admittedCount > 0 {
 		e.cond.Wait()
 	}
 	e.mu.Unlock()
 
-	e.heartbeatWG.Wait()
+	e.backgroundWG.Wait()
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(e.rootCtx), jobCleanupTimeout)
 	defer cleanupCancel()
 	return e.corpus.DeleteJobOwner(cleanupCtx, e.ownerID)
 }
 
-func (e *JobExecutor) decrement() {
+func (e *JobExecutor) releaseAdmission() {
 	e.mu.Lock()
-	e.activeCount--
-	if e.activeCount == 0 {
+	e.admittedCount--
+	if e.admittedCount == 0 {
 		e.cond.Broadcast()
 	}
 	e.mu.Unlock()
 }
 
 func (e *JobExecutor) heartbeat() {
-	defer e.heartbeatWG.Done()
+	defer e.backgroundWG.Done()
 	ticker := time.NewTicker(e.cfg.heartbeatInterval)
 	defer ticker.Stop()
 	for {
@@ -252,40 +274,64 @@ func (e *JobExecutor) heartbeat() {
 	}
 }
 
-func (e *JobExecutor) pollCancellation(ctx context.Context, id string, cancel context.CancelFunc) {
+func (e *JobExecutor) watchCancellations() {
+	defer e.backgroundWG.Done()
 	ticker := time.NewTicker(e.cfg.pollInterval)
 	defer ticker.Stop()
 	for {
 		select {
-		case <-ctx.Done():
+		case <-e.rootCtx.Done():
 			return
 		case <-ticker.C:
-			job, err := e.corpus.GetJob(ctx, id)
+			e.mu.Lock()
+			ids := make([]string, 0, len(e.admitted))
+			admitted := make(map[string]context.CancelFunc, len(e.admitted))
+			for id, cancel := range e.admitted {
+				ids = append(ids, id)
+				admitted[id] = cancel
+			}
+			e.mu.Unlock()
+			if len(ids) == 0 {
+				continue
+			}
+			stopped, err := e.corpus.StoppedJobIDs(e.rootCtx, ids)
 			if err != nil {
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				// Transient DB errors (e.g. SQLITE_BUSY) are retried; only a
-				// definitive absence or a persisted cancellation stops the job.
+				// Transient DB errors (for example SQLITE_BUSY) retry next tick.
 				continue
 			}
-			if job == nil {
-				cancel()
-				return
-			}
-			if job.CancelledAt != nil && !job.CancelledAt.IsZero() {
-				cancel()
-				return
+			for id := range stopped {
+				if cancel := admitted[id]; cancel != nil {
+					cancel()
+				}
 			}
 		}
 	}
 }
 
-func (e *JobExecutor) run(id string, fn JobFunc) {
-	defer e.decrement()
-
-	jobCtx, cancel := context.WithCancel(e.rootCtx)
+func (e *JobExecutor) run(jobCtx context.Context, id string, cancel context.CancelFunc, fn JobFunc) {
+	defer e.releaseAdmission()
 	defer cancel()
+	defer func() {
+		e.mu.Lock()
+		delete(e.admitted, id)
+		e.mu.Unlock()
+	}()
+
+	select {
+	case e.permits <- struct{}{}:
+		defer func() { <-e.permits }()
+	case <-jobCtx.Done():
+		if e.rootCtx.Err() != nil {
+			_ = e.corpus.TransitionJob(
+				context.WithoutCancel(jobCtx), id,
+				corpus.JobStatusQueued, corpus.JobStatusFailed, "", "executor closed before start",
+			)
+		}
+		return
+	}
 
 	e.mu.Lock()
 	if e.closed {
@@ -293,15 +339,7 @@ func (e *JobExecutor) run(id string, fn JobFunc) {
 		_ = e.corpus.TransitionJob(context.WithoutCancel(jobCtx), id, corpus.JobStatusQueued, corpus.JobStatusFailed, "", "executor closed before start")
 		return
 	}
-	e.active[id] = &activeJob{id: id, cancel: cancel}
 	e.mu.Unlock()
-
-	defer func() {
-		e.mu.Lock()
-		delete(e.active, id)
-		e.mu.Unlock()
-		cancel()
-	}()
 
 	if err := e.corpus.StartJobAs(jobCtx, id, e.ownerID); err != nil {
 		writeCtx := context.WithoutCancel(jobCtx)
@@ -320,8 +358,6 @@ func (e *JobExecutor) run(id string, fn JobFunc) {
 		}
 		return
 	}
-
-	go e.pollCancellation(jobCtx, id, cancel)
 
 	_ = e.corpus.RecordJobEvent(context.WithoutCancel(jobCtx), id, "info", "job started")
 

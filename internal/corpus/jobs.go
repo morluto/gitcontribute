@@ -52,6 +52,54 @@ func (c *Corpus) GetJob(ctx context.Context, id string) (*Job, error) {
 	return job, nil
 }
 
+// StoppedJobIDs returns job IDs with a persisted cancellation request or no
+// durable row. Workers must stop in either case.
+func (c *Corpus) StoppedJobIDs(ctx context.Context, ids []string) (_ map[string]struct{}, err error) {
+	stopped := make(map[string]struct{})
+	if len(ids) == 0 {
+		return stopped, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i := range ids {
+		args[i] = ids[i]
+	}
+	rows, err := c.db.QueryContext(ctx, `
+		SELECT id, cancelled_at
+		FROM jobs
+		WHERE id IN (`+placeholders+`)
+	`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list stopped jobs: %w", err)
+	}
+	defer func() {
+		if closeErr := rows.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
+	found := make(map[string]struct{}, len(ids))
+	for rows.Next() {
+		var id string
+		var cancelledAt sql.NullInt64
+		if err := rows.Scan(&id, &cancelledAt); err != nil {
+			return nil, err
+		}
+		found[id] = struct{}{}
+		if cancelledAt.Valid {
+			stopped[id] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		if _, ok := found[id]; !ok {
+			stopped[id] = struct{}{}
+		}
+	}
+	return stopped, nil
+}
+
 // ListJobs returns recent jobs bounded by limit, optionally filtered by status.
 func (c *Corpus) ListJobs(ctx context.Context, status string, limit int) ([]Job, error) {
 	if limit <= 0 {
