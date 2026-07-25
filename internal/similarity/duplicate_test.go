@@ -22,6 +22,9 @@ func TestDuplicateV1ExplainsExplicitReference(t *testing.T) {
 	})
 
 	got := rule.Compare(a, b)
+	if score := rule.Score(a, b); score != got.Value {
+		t.Fatalf("Score = %.2f, Compare.Value = %.2f", score, got.Value)
+	}
 	if got.Value != 0.40 {
 		t.Fatalf("score = %.2f, want 0.40", got.Value)
 	}

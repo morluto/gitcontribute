@@ -5,41 +5,42 @@ import (
 	"math"
 )
 
-const defaultExactPairBudget ExactPairBudget = 10_000_000
+const defaultComparisonBudget ComparisonBudget = 10_000_000
 
-// ExactPairBudget bounds the number of exact candidate comparisons in one clustering run.
-type ExactPairBudget uint64
+// ComparisonBudget bounds the worst-case exact scores in one clustering run.
+type ComparisonBudget uint64
 
-// DefaultExactPairBudget returns the repository's supported exact-work budget.
-func DefaultExactPairBudget() ExactPairBudget { return defaultExactPairBudget }
+// DefaultComparisonBudget returns the repository's supported scoring budget.
+func DefaultComparisonBudget() ComparisonBudget { return defaultComparisonBudget }
 
-// CapacityError reports candidate work that cannot execute within an exact pair budget.
+// CapacityError reports a population whose worst-case work exceeds the budget.
 type CapacityError struct {
 	CandidateCount int
-	RequiredPairs  uint64
+	PossiblePairs  uint64
 	AllowedPairs   uint64
 }
 
-// Error describes the rejected exact-work request.
+// Error describes the rejected scoring request.
 func (e *CapacityError) Error() string {
-	return fmt.Sprintf("%d candidates require %d exact pairs; limit is %d", e.CandidateCount, e.RequiredPairs, e.AllowedPairs)
+	return fmt.Sprintf("%d candidates have %d possible pairs; limit is %d", e.CandidateCount, e.PossiblePairs, e.AllowedPairs)
 }
 
-// Required returns the exact pair count or a CapacityError when it exceeds the budget.
-func (b ExactPairBudget) Required(candidateCount int) (uint64, error) {
-	required := requiredPairs(candidateCount)
-	if required > uint64(b) {
-		return required, &CapacityError{CandidateCount: candidateCount, RequiredPairs: required, AllowedPairs: uint64(b)}
+// Possible returns the population's possible pair count or a CapacityError
+// when worst-case scoring would exceed the budget.
+func (b ComparisonBudget) Possible(candidateCount int) (uint64, error) {
+	possible := possiblePairs(candidateCount)
+	if possible > uint64(b) {
+		return possible, &CapacityError{CandidateCount: candidateCount, PossiblePairs: possible, AllowedPairs: uint64(b)}
 	}
-	return required, nil
+	return possible, nil
 }
 
-// MaxCandidates returns the greatest population whose all-pairs work fits the budget.
-func (b ExactPairBudget) MaxCandidates() int {
+// MaxCandidates returns the greatest population whose worst-case work fits the budget.
+func (b ComparisonBudget) MaxCandidates() int {
 	low, high := uint64(0), uint64(b)+2
 	for low < high {
 		mid := low + (high-low+1)/2
-		if requiredPairsUint64(mid) <= uint64(b) {
+		if possiblePairsUint64(mid) <= uint64(b) {
 			low = mid
 		} else {
 			high = mid - 1
@@ -51,14 +52,14 @@ func (b ExactPairBudget) MaxCandidates() int {
 	return int(low)
 }
 
-func requiredPairs(candidateCount int) uint64 {
+func possiblePairs(candidateCount int) uint64 {
 	if candidateCount < 2 {
 		return 0
 	}
-	return requiredPairsUint64(uint64(candidateCount))
+	return possiblePairsUint64(uint64(candidateCount))
 }
 
-func requiredPairsUint64(candidateCount uint64) uint64 {
+func possiblePairsUint64(candidateCount uint64) uint64 {
 	if candidateCount < 2 {
 		return 0
 	}

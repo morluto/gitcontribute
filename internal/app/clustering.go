@@ -44,7 +44,7 @@ func (s *Service) RefreshClusters(ctx context.Context, repo contracts.RepoRef) (
 	if err != nil {
 		return nil, err
 	}
-	engine, err := clustering.NewEngine(similarity.DefaultDuplicateRule(), clustering.DefaultExactPairBudget())
+	engine, err := clustering.NewEngine(similarity.DefaultDuplicateRule(), clustering.DefaultComparisonBudget())
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (s *Service) RefreshClusters(ctx context.Context, repo contracts.RepoRef) (
 	if err != nil {
 		return nil, err
 	}
-	stats := clusterprojection.RefreshStats{CandidateCount: computation.CandidateCount, RequiredPairs: computation.RequiredPairs, ComparedPairs: computation.ComparedPairs, ClusterCount: len(clusters), SnapshotQueries: snapshot.ReadStatements}
+	stats := clusterprojection.RefreshStats{CandidateCount: computation.CandidateCount, PossiblePairs: computation.PossiblePairs, ScoredPairs: computation.ScoredPairs, ClusterCount: len(clusters), SnapshotQueries: snapshot.ReadStatements}
 	committed, err := c.CommitClusterProjection(ctx, clusterprojection.Commit{Repo: ref, ExpectedSource: snapshot.SourceRevision, ExpectedGovernance: snapshot.GovernanceRevision, RuleVersion: engine.RuleVersion(), Clusters: clusters, Stats: stats, MaxCandidates: engine.MaxCandidates()})
 	if err != nil {
 		return nil, fmt.Errorf("commit cluster projection: %w", err)
@@ -92,7 +92,7 @@ func clusterRefreshToCLI(repo contracts.RepoRef, disposition string, identity cl
 	return &contracts.ClusterRefreshResult{
 		Repo: repo, Disposition: disposition,
 		Projection: contracts.ClusterProjectionIdentity{SourceRevision: identity.SourceRevision, GovernanceRevision: identity.GovernanceRevision, RuleVersion: string(identity.RuleVersion), RunID: identity.RunID},
-		Stats:      contracts.ClusterRefreshStats{CandidateCount: stats.CandidateCount, RequiredPairs: stats.RequiredPairs, ComparedPairs: stats.ComparedPairs, ClusterCount: stats.ClusterCount, SnapshotQueries: stats.SnapshotQueries, CommitQueries: stats.CommitQueries},
+		Stats:      contracts.ClusterRefreshStats{CandidateCount: stats.CandidateCount, PossiblePairs: stats.PossiblePairs, ScoredPairs: stats.ScoredPairs, ClusterCount: stats.ClusterCount, SnapshotQueries: stats.SnapshotQueries, CommitQueries: stats.CommitQueries},
 	}
 }
 

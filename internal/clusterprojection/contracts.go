@@ -52,8 +52,8 @@ type RefreshSnapshot struct {
 // an unchanged refresh skips pair evaluation and commit work.
 type RefreshStats struct {
 	CandidateCount  int    `json:"candidate_count"`
-	RequiredPairs   uint64 `json:"required_pairs"`
-	ComparedPairs   uint64 `json:"compared_pairs"`
+	PossiblePairs   uint64 `json:"possible_pairs"`
+	ScoredPairs     uint64 `json:"scored_pairs"`
 	ClusterCount    int    `json:"cluster_count"`
 	SnapshotQueries int    `json:"snapshot_queries"`
 	CommitQueries   int    `json:"commit_queries"`

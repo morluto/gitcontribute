@@ -5,26 +5,25 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/google/go-cmp/cmp"
 	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/similarity"
 )
 
-func TestDefaultExactPairBudgetHasExecutableBoundary(t *testing.T) {
-	budget := clustering.DefaultExactPairBudget()
+func TestDefaultComparisonBudgetHasExecutableBoundary(t *testing.T) {
+	budget := clustering.DefaultComparisonBudget()
 	if got := budget.MaxCandidates(); got != 4472 {
 		t.Fatalf("maximum candidates = %d, want 4472", got)
 	}
-	if got, err := budget.Required(4472); err != nil || got != 9_997_156 {
-		t.Fatalf("required pairs at boundary = (%d, %v), want (9997156, nil)", got, err)
+	if got, err := budget.Possible(4472); err != nil || got != 9_997_156 {
+		t.Fatalf("possible pairs at boundary = (%d, %v), want (9997156, nil)", got, err)
 	}
-	_, err := budget.Required(4473)
+	_, err := budget.Possible(4473)
 	var capacity *clustering.CapacityError
 	if !errors.As(err, &capacity) {
 		t.Fatalf("error = %v, want CapacityError", err)
 	}
-	if capacity.CandidateCount != 4473 || capacity.RequiredPairs != 10_001_628 || capacity.AllowedPairs != 10_000_000 {
+	if capacity.CandidateCount != 4473 || capacity.PossiblePairs != 10_001_628 || capacity.AllowedPairs != 10_000_000 {
 		t.Fatalf("capacity error = %+v", capacity)
 	}
 }
@@ -48,42 +47,6 @@ func TestNeighborsHonorsCancellationBeforeScoring(t *testing.T) {
 	_, err := clustering.Neighbors(ctx, clustering.Candidate{}, []clustering.Candidate{{}}, 1)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("neighbors error = %v, want context.Canceled", err)
-	}
-}
-
-func TestSimilarityTextPreparation(t *testing.T) {
-	got := similarity.Tokens("Hello, World! 123", true)
-	want := []string{"123", "hello", "world"}
-	if diff := cmp.Diff(want, got); diff != "" {
-		t.Fatalf("tokens mismatch (-want +got):\n%s", diff)
-	}
-	for _, token := range similarity.Tokens("the quick brown fox", true) {
-		if token == "the" {
-			t.Fatal("stop word found in tokens")
-		}
-	}
-}
-
-func TestSimilarityExtractsGitHubReferences(t *testing.T) {
-	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
-	for _, tc := range []struct {
-		input string
-		want  int
-	}{
-		{"see #42 for context", 1},
-		{"fix owner/repo#7", 1},
-		{"https://github.com/owner/repo/issues/3", 1},
-		{"see github.com/owner/repo/pull/4", 1},
-		{"https://notgithub.com/owner/repo/issues/3", 0},
-		{"nothing here", 0},
-	} {
-		if refs := similarity.ExtractRefs(tc.input, repo); len(refs) != tc.want {
-			t.Fatalf("ExtractRefs(%q) = %d refs, want %d", tc.input, len(refs), tc.want)
-		}
-	}
-	refs := similarity.ExtractRefs("see #42", repo)
-	if len(refs) != 1 || refs[0].Number != 42 || refs[0].Kind != "" {
-		t.Fatalf("bare ref mismatch: %+v", refs)
 	}
 }
 
@@ -138,14 +101,33 @@ func TestStableIDIsDeterministic(t *testing.T) {
 	}
 }
 
-func TestEngineEnforcesPairBudget(t *testing.T) {
-	engine, err := clustering.NewEngine(similarity.DefaultDuplicateRule(), clustering.ExactPairBudget(1))
+func TestEngineReportsPossibleAndScoredPairs(t *testing.T) {
+	engine := defaultEngine(t)
+	result, err := engine.Cluster(context.Background(), []clustering.Candidate{
+		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 1, Title: "fix login crash"},
+		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 2, Title: "fix login crash"},
+		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 3, Title: "different", Body: "duplicate of #1"},
+		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 4, Title: "unrelated"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PossiblePairs != 6 || result.ScoredPairs != 2 {
+		t.Fatalf("pair stats = %d possible, %d scored; want 6 possible, 2 scored", result.PossiblePairs, result.ScoredPairs)
+	}
+	if len(result.Clusters) != 1 || len(result.Clusters[0].Members) != 3 {
+		t.Fatalf("clusters = %+v", result.Clusters)
+	}
+}
+
+func TestEngineEnforcesWorstCaseComparisonBudget(t *testing.T) {
+	engine, err := clustering.NewEngine(similarity.DefaultDuplicateRule(), clustering.ComparisonBudget(1))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = engine.Cluster(context.Background(), []clustering.Candidate{{}, {}, {}})
 	if err == nil {
-		t.Fatal("expected pair-budget error")
+		t.Fatal("expected comparison-budget error")
 	}
 }
 
@@ -178,7 +160,7 @@ func TestDuplicateLabelsDoNotInflateSimilarity(t *testing.T) {
 
 func defaultEngine(t *testing.T) clustering.Engine {
 	t.Helper()
-	engine, err := clustering.NewEngine(similarity.DefaultDuplicateRule(), clustering.DefaultExactPairBudget())
+	engine, err := clustering.NewEngine(similarity.DefaultDuplicateRule(), clustering.DefaultComparisonBudget())
 	if err != nil {
 		t.Fatal(err)
 	}

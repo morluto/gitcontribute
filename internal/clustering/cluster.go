@@ -12,11 +12,11 @@ import (
 	"github.com/morluto/gitcontribute/internal/similarity"
 )
 
-func computeClusters(ctx context.Context, candidates []Candidate, rule similarity.DuplicateRule, budget ExactPairBudget, threshold float64) (Computation, error) {
+func computeClusters(ctx context.Context, candidates []Candidate, rule similarity.DuplicateRule, budget ComparisonBudget) (Computation, error) {
 	if err := ctx.Err(); err != nil {
 		return Computation{}, err
 	}
-	required, err := budget.Required(len(candidates))
+	possible, err := budget.Possible(len(candidates))
 	if err != nil {
 		return Computation{}, err
 	}
@@ -24,7 +24,7 @@ func computeClusters(ctx context.Context, candidates []Candidate, rule similarit
 	if err != nil {
 		return Computation{}, err
 	}
-	groups, pairs, err := compareCandidates(ctx, prepared, rule, threshold)
+	groups, scored, err := compareCandidates(ctx, prepared, rule)
 	if err != nil {
 		return Computation{}, err
 	}
@@ -33,8 +33,8 @@ func computeClusters(ctx context.Context, candidates []Candidate, rule similarit
 	return Computation{
 		Clusters:       clusters,
 		CandidateCount: len(candidates),
-		RequiredPairs:  required,
-		ComparedPairs:  pairs,
+		PossiblePairs:  possible,
+		ScoredPairs:    scored,
 		RuleVersion:    rule.Version(),
 	}, nil
 }
@@ -50,28 +50,24 @@ func prepareCandidates(ctx context.Context, candidates []Candidate, rule similar
 	return prepared, nil
 }
 
-func compareCandidates(ctx context.Context, prepared []similarity.PreparedDuplicate, rule similarity.DuplicateRule, threshold float64) (map[int][]int, uint64, error) {
+func compareCandidates(ctx context.Context, prepared []similarity.PreparedDuplicate, rule similarity.DuplicateRule) (map[int][]int, uint64, error) {
 	sets := newCandidateSets(len(prepared))
-	var pairs uint64
-	for i := range prepared {
-		for j := i + 1; j < len(prepared); j++ {
-			if pairs%1024 == 0 {
-				if err := ctx.Err(); err != nil {
-					return nil, pairs, err
-				}
-			}
-			if rule.Compare(prepared[i], prepared[j]).Value >= threshold {
-				sets.join(i, j)
-			}
-			pairs++
+	var scored uint64
+	err := rule.VisitCandidatePairs(ctx, prepared, func(i, j int) {
+		if rule.Score(prepared[i], prepared[j]) >= rule.Threshold() {
+			sets.join(i, j)
 		}
+		scored++
+	})
+	if err != nil {
+		return nil, scored, err
 	}
 	groups := make(map[int][]int)
 	for i := range prepared {
 		root := sets.root(i)
 		groups[root] = append(groups[root], i)
 	}
-	return groups, pairs, nil
+	return groups, scored, nil
 }
 
 func buildClusters(candidates []Candidate, prepared []similarity.PreparedDuplicate, groups map[int][]int, rule similarity.DuplicateRule) []Cluster {
