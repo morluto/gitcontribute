@@ -680,9 +680,9 @@ func (r *MCPReader) DeepWiki(ctx context.Context, in mcpcontract.DeepWikiInput) 
 	}
 	maxBytes := in.MaxOutputBytes
 	if maxBytes == 0 {
-		maxBytes = 131072
+		maxBytes = mcpcontract.DeepWikiDefaultOutputBytes
 	}
-	if maxBytes < 1024 || maxBytes > 1048576 {
+	if maxBytes < mcpcontract.DeepWikiMinOutputBytes || maxBytes > mcpcontract.DeepWikiMaxOutputBytes {
 		return mcpcontract.DeepWikiOutput{}, errors.New("max_output_bytes must be between 1024 and 1048576")
 	}
 	res, err := r.deepWiki().Read(ctx, deepwiki.Request{Action: in.Action, Repository: in.Repository, Repositories: repositories, Question: in.Question})
@@ -697,6 +697,8 @@ func (r *MCPReader) DeepWiki(ctx context.Context, in mcpcontract.DeepWikiInput) 
 	if len(out.Result) > maxBytes {
 		out.Result = validUTF8Prefix(out.Result, maxBytes)
 		out.Truncated = true
+		out.Reason = "output_limit"
+		out.NextAction = "Retry with a larger max_output_bytes (up to 1048576), or narrow the request."
 	}
 	return out, nil
 }

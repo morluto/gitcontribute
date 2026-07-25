@@ -142,6 +142,69 @@ func TestListFacetObservationsBoundedPreservesOrderAndReportsMore(t *testing.T) 
 	}
 }
 
+func TestThreadFacetBatchReadsPreservePerFacetBounds(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindPullRequest, 1, "open", "first", "", "a", time.Unix(2, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindPullRequest, 2, "open", "second", "", "a", time.Unix(2, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstPages := []FacetObservationInput{
+		{SourceUpdatedAt: time.Unix(3, 0).UTC(), Payload: `{"page":1}`},
+		{SourceUpdatedAt: time.Unix(4, 0).UTC(), Payload: `{"page":2}`},
+	}
+	if err := c.ApplyFacetObservationSet(ctx, repo.ID, &first.ID, "reviews", time.Unix(4, 0).UTC(), firstPages, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ApplyFacetObservationSet(ctx, repo.ID, &second.ID, "checks", time.Unix(5, 0).UTC(), []FacetObservationInput{{SourceUpdatedAt: time.Unix(5, 0).UTC(), Payload: `[]`}}, false, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	keys := []int64{first.ID, second.ID}
+	coverage, err := c.ListThreadCoverageBatch(ctx, keys, []string{"reviews", "checks"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := coverage[ThreadFacetKey{ThreadID: first.ID, Facet: "reviews"}]; got == nil || !got.Complete {
+		t.Fatalf("first reviews coverage = %+v", got)
+	}
+	if got := coverage[ThreadFacetKey{ThreadID: second.ID, Facet: "checks"}]; got == nil || got.Complete {
+		t.Fatalf("second checks coverage = %+v", got)
+	}
+	if got := coverage[ThreadFacetKey{ThreadID: first.ID, Facet: "checks"}]; got != nil {
+		t.Fatalf("unexpected missing coverage = %+v", got)
+	}
+
+	observations, err := c.ListThreadFacetObservationsBatch(ctx, keys, []string{"reviews", "checks"}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstBatch := observations[ThreadFacetKey{ThreadID: first.ID, Facet: "reviews"}]
+	if !firstBatch.HasMore || len(firstBatch.Observations) != 1 || firstBatch.Observations[0].Payload != `{"page":1}` {
+		t.Fatalf("first reviews observations = %+v", firstBatch)
+	}
+	secondBatch := observations[ThreadFacetKey{ThreadID: second.ID, Facet: "checks"}]
+	if secondBatch.HasMore || len(secondBatch.Observations) != 1 {
+		t.Fatalf("second checks observations = %+v", secondBatch)
+	}
+	oversized := make([]int64, maxBatchReadItems+1)
+	if _, err := c.ListThreadCoverageBatch(ctx, oversized, []string{"checks"}); err == nil {
+		t.Fatal("coverage batch accepted an oversized thread set")
+	}
+	if _, err := c.ListThreadFacetObservationsBatch(ctx, oversized, []string{"checks"}, 1); err == nil {
+		t.Fatal("observation batch accepted an oversized thread set")
+	}
+}
+
 func TestApplyFacetObservationSetCASRejectsConcurrentEqualClockReplacement(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

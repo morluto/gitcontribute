@@ -200,7 +200,9 @@ func (s *Server) registerScalable() {
 	addCatalogTool(s, catalogTool[mcpcontract.ListPullRequestPortfolioInput, mcpcontract.ListPullRequestPortfolioOutput]{name: mcpcontract.ToolListPullRequestPortfolio, title: "List pull requests that need contributor attention", description: "List stored authored pull requests with deterministic attention from lifecycle, checks, review conversations, merge state, queue, and freshness. This offline read reports incomplete facets as unknown; sync authored PRs and health when stale.", annotations: readOnly, supportedBy: supports[PortfolioReader], input: inputSchema[mcpcontract.ListPullRequestPortfolioInput](func(sc *schemaBuilder) {
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit", 1, 100)
-		setDefault(sc, "limit", 100)
+		setDefault(sc, "limit", 20)
+		setEnum(sc, "response_format", "concise", "detailed")
+		setDefault(sc, "response_format", "concise")
 	}), output: outputSchema[mcpcontract.ListPullRequestPortfolioOutput]("Offline pull-request portfolio with explainable attention states."), handler: s.listPullRequestPortfolio})
 	addCatalogTool(s, catalogTool[mcpcontract.FindPortfolioOverlapsInput, mcpcontract.FindPortfolioOverlapsOutput]{name: mcpcontract.ToolFindPortfolioOverlaps, title: "Find overlaps with authored pull requests", description: "Compare up to 50 local candidates with 100 stored authored pull requests using complete changed-path, linked-issue, and opportunity-similarity observations. This offline read returns unknown instead of claiming no overlap when coverage is missing.", annotations: readOnly, supportedBy: supports[PortfolioReader], input: inputSchema[mcpcontract.FindPortfolioOverlapsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "candidates", 1, 50)
@@ -223,8 +225,8 @@ func (s *Server) registerScalable() {
 	addCatalogTool(s, catalogTool[mcpcontract.DeepWikiInput, mcpcontract.DeepWikiOutput]{name: mcpcontract.ToolQueryDeepWiki, title: "Query derived repository knowledge from DeepWiki", description: "Query DeepWiki for public repository architecture, contribution rules, testing, and subsystem context. Actions map to its public structure, contents, and question reads. Do not use this for live stars, thread state, checks, reviews, or mergeability.", annotations: externalReadAnnotations(), supportedBy: supports[ResearchReader], input: inputSchema[mcpcontract.DeepWikiInput](func(sc *schemaBuilder) {
 		setEnum(sc, "action", "structure", "contents", "question")
 		setArrayBounds(sc, "repositories", 1, 10)
-		setRange(sc, "max_output_bytes", 1024, 1048576)
-		setDefault(sc, "max_output_bytes", 131072)
+		setRange(sc, "max_output_bytes", mcpcontract.DeepWikiMinOutputBytes, mcpcontract.DeepWikiMaxOutputBytes)
+		setDefault(sc, "max_output_bytes", mcpcontract.DeepWikiDefaultOutputBytes)
 	}), output: outputSchema[mcpcontract.DeepWikiOutput]("Derived DeepWiki response with provenance."), handler: s.deepWiki})
 }
 
@@ -483,10 +485,10 @@ func (s *Server) checkMergeConflicts(ctx context.Context, _ *mcp.CallToolRequest
 func (s *Server) deepWiki(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.DeepWikiInput) (*mcp.CallToolResult, mcpcontract.DeepWikiOutput, error) {
 	in.Action = strings.TrimSpace(in.Action)
 	if in.MaxOutputBytes == 0 {
-		in.MaxOutputBytes = 131072
+		in.MaxOutputBytes = mcpcontract.DeepWikiDefaultOutputBytes
 	}
-	if in.MaxOutputBytes < 1024 || in.MaxOutputBytes > 1048576 {
-		return nil, mcpcontract.DeepWikiOutput{}, mcpcontract.InvalidArgument("max_output_bytes", "must be between 1024 and 1048576", map[string]any{"max_output_bytes": 131072})
+	if in.MaxOutputBytes < mcpcontract.DeepWikiMinOutputBytes || in.MaxOutputBytes > mcpcontract.DeepWikiMaxOutputBytes {
+		return nil, mcpcontract.DeepWikiOutput{}, mcpcontract.InvalidArgument("max_output_bytes", "must be between 1024 and 1048576", map[string]any{"max_output_bytes": mcpcontract.DeepWikiDefaultOutputBytes})
 	}
 	if (in.Action == "structure" || in.Action == "contents") && strings.TrimSpace(in.Repository) == "" {
 		return nil, mcpcontract.DeepWikiOutput{}, mcpcontract.InvalidArgument("repository", "is required for structure and contents", map[string]any{"repository": "owner/repo"})

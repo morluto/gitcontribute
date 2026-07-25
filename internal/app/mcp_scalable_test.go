@@ -581,6 +581,31 @@ func TestDeepWikiReturnsDerivedProvenanceAndBoundsOutput(t *testing.T) {
 	}
 }
 
+func TestDeepWikiKeepsLargeDefaultAndExplainsTruncation(t *testing.T) {
+	t.Parallel()
+	svc := newSearchTestService(t)
+	fake := &fakeDeepWikiReader{response: deepwiki.Response{
+		Available: true,
+		Text:      strings.Repeat("x", mcpcontract.DeepWikiDefaultOutputBytes+1),
+		SourceURL: "https://deepwiki.com/acme/rocket",
+	}}
+	svc.SetDeepWikiReader(fake)
+
+	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{
+		Action:     "contents",
+		Repository: "acme/rocket",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Result) != mcpcontract.DeepWikiDefaultOutputBytes || !out.Truncated {
+		t.Fatalf("default DeepWiki bound = %d bytes, truncated=%v", len(out.Result), out.Truncated)
+	}
+	if out.Reason != "output_limit" || !strings.Contains(out.NextAction, "larger max_output_bytes") {
+		t.Fatalf("missing truncation recovery guidance: %+v", out)
+	}
+}
+
 func TestDeepWikiUsesNormalizedRepositoriesForRequestAndOutput(t *testing.T) {
 	t.Parallel()
 	svc := newSearchTestService(t)
@@ -697,7 +722,7 @@ func TestPullRequestPortfolioDerivesConflictAndPreservesUnknownCoverage(t *testi
 	if err := svc.corpus.ApplyFacetObservationSet(ctx, repo.ID, &conflicted.ID, FacetPRDetails, now, []corpus.FacetObservationInput{{SourceUpdatedAt: now, Payload: string(details)}}, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Author: "alice", State: "open", Limit: 10})
+	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Author: "alice", State: "open", Limit: 10, ResponseFormat: "detailed"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -714,6 +739,25 @@ func TestPullRequestPortfolioDerivesConflictAndPreservesUnknownCoverage(t *testi
 	if byNumber[unknown.Number].Attention != "unknown" || byNumber[unknown.Number].StatusCoverage != "missing" {
 		t.Fatalf("unknown coverage collapsed: %+v", byNumber[unknown.Number])
 	}
+	concise, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Author: "alice", State: "open", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if concise.ResponseFormat != "concise" || concise.PullRequests[0].HeadSHA != "" || len(concise.PullRequests[0].Facets) != 0 {
+		t.Fatalf("concise portfolio leaked detailed fields: %+v", concise)
+	}
+	detailedJSON, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conciseJSON, err := json.Marshal(concise)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conciseJSON) >= len(detailedJSON) {
+		t.Fatalf("concise portfolio is not smaller: concise=%d detailed=%d", len(conciseJSON), len(detailedJSON))
+	}
+	t.Logf("portfolio response bytes: concise=%d detailed=%d", len(conciseJSON), len(detailedJSON))
 }
 
 func TestPullRequestPortfolioClassifiesClosedUnmerged(t *testing.T) {
