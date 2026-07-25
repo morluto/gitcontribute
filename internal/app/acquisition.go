@@ -48,14 +48,40 @@ func (s *Service) Acquire(ctx context.Context, repo contracts.RepoRef, remote st
 		}
 	}()
 
-	snapshot, err := codeindex.Index(ctx, acq.Path, codeindex.Options{})
-	if err != nil {
-		return nil, fmt.Errorf("index acquired checkout: %w", err)
-	}
-
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
+	}
+	existing, err := c.CodeSnapshot(ctx, ref, acq.CommitSHA)
+	if err != nil {
+		return nil, fmt.Errorf("find code snapshot: %w", err)
+	}
+	if existing != nil && existing.Manifest.FormatVersion == codeindex.FormatVersion {
+		_, confirmedCommit, err := codeindex.Probe(ctx, acq.Path)
+		if err != nil {
+			return nil, fmt.Errorf("verify acquired checkout: %w", err)
+		}
+		if confirmedCommit != acq.CommitSHA {
+			return nil, fmt.Errorf("acquired checkout changed before snapshot reuse: commit %q", confirmedCommit)
+		}
+		return &contracts.AcquisitionResult{
+			Repo:          repo,
+			Remote:        acq.Remote,
+			DefaultBranch: acq.DefaultBranch,
+			CommitSHA:     acq.CommitSHA,
+			Files:         existing.Manifest.IndexedFiles,
+			Bytes:         existing.TotalBytes,
+			Indexed:       true,
+			Inserted:      false,
+			AcquiredAt:    formatTime(acq.AcquiredAt),
+			Message:       "acquired; snapshot already indexed",
+			IndexManifest: existing.Manifest,
+		}, nil
+	}
+
+	snapshot, err := codeindex.Index(ctx, acq.Path, codeindex.Options{})
+	if err != nil {
+		return nil, fmt.Errorf("index acquired checkout: %w", err)
 	}
 	_, inserted, err := c.StoreCodeSnapshot(ctx, ref, snapshot)
 	if err != nil {

@@ -462,7 +462,8 @@ gitcontribute acquire owner/repo \
 ```
 
 The indexer reads blobs directly from Git, skips binaries and non-UTF-8 content,
-enforces size limits, and rejects dirty worktrees.
+enforces size limits, and rejects dirty worktrees. It reuses a stored snapshot
+when the clean commit and index format are unchanged.
 
 </details>
 

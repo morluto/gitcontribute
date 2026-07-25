@@ -107,11 +107,18 @@ func (c *Corpus) StoreCodeSnapshot(ctx context.Context, ref domain.RepoRef, snap
 }
 
 func storeCodeDocuments(ctx context.Context, tx *sql.Tx, snapshotID int64, documents []codeindex.Document) error {
+	statement, err := tx.PrepareContext(ctx, `
+		INSERT INTO code_documents (snapshot_id, path, content, bytes, language)
+		VALUES (?, ?, ?, ?, ?)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare code document insert: %w", err)
+	}
+	defer func() { _ = statement.Close() }()
 	for _, document := range documents {
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO code_documents (snapshot_id, path, content, bytes, language)
-			VALUES (?, ?, ?, ?, ?)
-		`, snapshotID, document.Path, document.Content, document.Bytes, document.LanguageHint); err != nil {
+		if _, err := statement.ExecContext(
+			ctx, snapshotID, document.Path, document.Content, document.Bytes, document.LanguageHint,
+		); err != nil {
 			return fmt.Errorf("insert code document %q: %w", document.Path, err)
 		}
 	}
@@ -120,11 +127,12 @@ func storeCodeDocuments(ctx context.Context, tx *sql.Tx, snapshotID int64, docum
 
 // CodeSnapshotInfo describes one stored code snapshot and its coverage.
 type CodeSnapshotInfo struct {
-	Repo      domain.RepoRef
-	RepoPath  string
-	CommitSHA string
-	CreatedAt time.Time
-	Manifest  codeindex.Manifest
+	Repo       domain.RepoRef
+	RepoPath   string
+	CommitSHA  string
+	TotalBytes int
+	CreatedAt  time.Time
+	Manifest   codeindex.Manifest
 }
 
 // LatestCodeSnapshot returns the latest source snapshot selected for a
@@ -133,26 +141,46 @@ func (c *Corpus) LatestCodeSnapshot(ctx context.Context, ref domain.RepoRef) (*C
 	return latestCodeSnapshot(ctx, c.db, ref)
 }
 
+// CodeSnapshot returns the stored snapshot for an exact repository commit.
+func (c *Corpus) CodeSnapshot(ctx context.Context, ref domain.RepoRef, commit string) (*CodeSnapshotInfo, error) {
+	if err := ref.Validate(); err != nil {
+		return nil, err
+	}
+	if commit == "" {
+		return nil, errors.New("code snapshot commit is required")
+	}
+	return scanCodeSnapshot(c.db.QueryRowContext(ctx, `
+		SELECT repo_path, commit_sha, total_bytes, created_at, manifest_json
+		FROM code_snapshots
+		WHERE repo_owner = ? AND repo_name = ? AND commit_sha = ?
+		LIMIT 1
+	`, ref.Owner, ref.Repo, commit), ref)
+}
+
 type codeSnapshotQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 func latestCodeSnapshot(ctx context.Context, queryer codeSnapshotQueryer, ref domain.RepoRef) (*CodeSnapshotInfo, error) {
-	var snap CodeSnapshotInfo
-	var created int64
-	var manifest string
-	err := queryer.QueryRowContext(ctx, `
-		SELECT repo_path, commit_sha, created_at, manifest_json
+	return scanCodeSnapshot(queryer.QueryRowContext(ctx, `
+		SELECT repo_path, commit_sha, total_bytes, created_at, manifest_json
 		FROM code_snapshots
 		WHERE repo_owner = ? AND repo_name = ?
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1
-	`, ref.Owner, ref.Repo).Scan(&snap.RepoPath, &snap.CommitSHA, &created, &manifest)
+	`, ref.Owner, ref.Repo), ref)
+}
+
+func scanCodeSnapshot(row *sql.Row, ref domain.RepoRef) (*CodeSnapshotInfo, error) {
+	var snap CodeSnapshotInfo
+	var created int64
+	var manifest string
+	err := row.Scan(&snap.RepoPath, &snap.CommitSHA, &snap.TotalBytes, &created, &manifest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("latest code snapshot: %w", err)
+		return nil, fmt.Errorf("read code snapshot: %w", err)
 	}
 	snap.CreatedAt = scanTime(created)
 	snap.Repo = ref
