@@ -35,18 +35,12 @@ jobs:
 
   build-npm-binaries:
     name: Build npm binary ${{ matrix.target }}
-    needs: validate
+    needs: [validate, platform_matrix]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { target: darwin-arm64, goos: darwin, goarch: arm64, binary: gitcontribute }
-          - { target: darwin-x64, goos: darwin, goarch: amd64, binary: gitcontribute }
-          - { target: linux-arm64, goos: linux, goarch: arm64, binary: gitcontribute }
-          - { target: linux-x64, goos: linux, goarch: amd64, binary: gitcontribute }
-          - { target: win32-x64, goos: windows, goarch: amd64, binary: gitcontribute.exe }
+      matrix: ${{ fromJSON(needs.platform_matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -71,6 +65,22 @@ jobs:
           name: native-${{ matrix.target }}
           path: dist/${{ matrix.target }}/${{ matrix.binary }}
           if-no-files-found: error
+
+  platform_matrix:
+    name: Derive npm release targets
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.platforms.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - id: platforms
+        shell: bash
+        run: echo "matrix=$(node scripts/release-platform-matrix.mjs)" >> "$GITHUB_OUTPUT"
 
   goreleaser:
     name: Build and release

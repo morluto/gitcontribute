@@ -41,3 +41,12 @@ test("build assembles every native binary into one npm tarball", async () => {
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("release matrix is derived from the npm platform manifest", () => {
+  const matrix = spawnSync(process.execPath, [join(root, "scripts", "release-platform-matrix.mjs")], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  assert.equal(matrix.status, 0, matrix.stderr || matrix.stdout);
+  assert.deepEqual(JSON.parse(matrix.stdout).include, Object.values(platforms));
+});
