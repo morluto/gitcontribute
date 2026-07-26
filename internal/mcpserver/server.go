@@ -358,7 +358,7 @@ func (s *Server) investigation(ctx context.Context, _ *mcp.CallToolRequest, in m
 		in.HypothesisLimit = 20
 	}
 	if in.HypothesisLimit < 1 || in.HypothesisLimit > 100 {
-		return nil, mcpcontract.InvestigationOutput{}, errors.New("hypothesis_limit must be between 1 and 100")
+		return nil, mcpcontract.InvestigationOutput{}, mcpcontract.InvalidArgument("hypothesis_limit", "must be between 1 and 100", map[string]any{"hypothesis_limit": 20})
 	}
 	out, err := s.reader.Investigation(ctx, in)
 	return nil, out, err
@@ -374,7 +374,7 @@ func (s *Server) listOpportunities(ctx context.Context, _ *mcp.CallToolRequest, 
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, mcpcontract.ListOpportunitiesOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, mcpcontract.ListOpportunitiesOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	out, err := s.reader.ListOpportunities(ctx, in)
 	return nil, out, err
@@ -390,7 +390,7 @@ func (s *Server) opportunity(ctx context.Context, _ *mcp.CallToolRequest, in mcp
 		in.EvidenceLimit = 20
 	}
 	if in.EvidenceLimit < 1 || in.EvidenceLimit > 100 {
-		return nil, mcpcontract.OpportunityOutput{}, errors.New("evidence_limit must be between 1 and 100")
+		return nil, mcpcontract.OpportunityOutput{}, mcpcontract.InvalidArgument("evidence_limit", "must be between 1 and 100", map[string]any{"evidence_limit": 20})
 	}
 	out, err := s.reader.Opportunity(ctx, in)
 	return nil, out, err
@@ -400,7 +400,7 @@ func (s *Server) evidence(ctx context.Context, _ *mcp.CallToolRequest, in mcpcon
 	in.InvestigationID = strings.TrimSpace(in.InvestigationID)
 	in.OpportunityID = strings.TrimSpace(in.OpportunityID)
 	if (in.InvestigationID == "") == (in.OpportunityID == "") {
-		return nil, mcpcontract.EvidenceOutput{}, errors.New("exactly one of investigation_id or opportunity_id is required")
+		return nil, mcpcontract.EvidenceOutput{}, mcpcontract.InvalidArgument("investigation_id", "provide exactly one of investigation_id or opportunity_id", map[string]any{"investigation_id": "<id>"})
 	}
 	if in.InvestigationID != "" {
 		if _, err := normalizeID("investigation_id", in.InvestigationID); err != nil {
@@ -413,7 +413,7 @@ func (s *Server) evidence(ctx context.Context, _ *mcp.CallToolRequest, in mcpcon
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, mcpcontract.EvidenceOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, mcpcontract.EvidenceOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	out, err := s.reader.Evidence(ctx, in)
 	return nil, out, err
@@ -467,7 +467,9 @@ func (s *Server) findNeighbors(ctx context.Context, _ *mcp.CallToolRequest, in m
 
 func (s *Server) getCoverage(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.GetCoverageInput) (*mcp.CallToolResult, mcpcontract.GetCoverageOutput, error) {
 	if len(in.Targets) < 1 || len(in.Targets) > 100 {
-		return nil, mcpcontract.GetCoverageOutput{}, errors.New("targets must contain 1 to 100 items")
+		return nil, mcpcontract.GetCoverageOutput{}, mcpcontract.InvalidArgument("targets", "must contain 1 to 100 items", map[string]any{
+			"targets": []map[string]string{{"owner": "acme", "repo": "rocket"}},
+		})
 	}
 	out, err := s.reader.GetCoverage(ctx, in)
 	return nil, out, err

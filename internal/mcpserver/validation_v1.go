@@ -29,10 +29,10 @@ func (s *Server) runValidation(ctx context.Context, _ *mcp.CallToolRequest, in m
 	}
 	in.ID = id
 	if in.Kind != "base" && in.Kind != "candidate" {
-		return nil, mcpcontract.JobReference{}, errors.New("kind must be base or candidate")
+		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("kind", "must be base or candidate", map[string]any{"kind": "candidate"})
 	}
 	if !in.Execute {
-		return nil, mcpcontract.JobReference{}, errors.New("execute must be true to authorize host command execution")
+		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("execute", "must be true to authorize host command execution", map[string]any{"execute": true})
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {
@@ -58,10 +58,10 @@ func (s *Server) runRepeatedValidation(ctx context.Context, _ *mcp.CallToolReque
 		in.SampleInterval = "100ms"
 	}
 	if in.Target != "base" && in.Target != "candidate" && in.Target != "both" {
-		return nil, mcpcontract.JobReference{}, errors.New("target must be base, candidate, or both")
+		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("target", "must be base, candidate, or both", map[string]any{"target": "both"})
 	}
 	if !in.Execute {
-		return nil, mcpcontract.JobReference{}, errors.New("execute must be true to authorize host command execution")
+		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("execute", "must be true to authorize host command execution", map[string]any{"execute": true})
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {
