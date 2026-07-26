@@ -13,6 +13,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/facets"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/health"
 	"github.com/morluto/gitcontribute/internal/research"
@@ -364,10 +365,7 @@ func researchThreadSource(ctx context.Context, c *corpus.Corpus, ref research.Th
 }
 
 func researchFacets(kind domain.ThreadKind) []string {
-	if kind == domain.PullRequestKind {
-		return []string{FacetIssueComments, FacetPRDetails, FacetPRReviews, FacetPRReviewComments}
-	}
-	return []string{FacetIssueComments}
+	return facets.DefaultFor(string(kind))
 }
 
 func readResearchFacet(ctx context.Context, c *corpus.Corpus, repoID, threadID int64, ref research.ThreadRef, facet string) (research.FacetCoverage, []research.DiscussionItem, bool, error) {

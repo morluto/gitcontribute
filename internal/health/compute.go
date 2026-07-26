@@ -11,6 +11,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/facets"
 	"github.com/morluto/gitcontribute/internal/github"
 )
 
@@ -18,9 +19,9 @@ const (
 	defaultStaleThreshold = 14 * 24 * time.Hour
 	threadListLimit       = 10000
 
-	facetIssueComments    = "issue_comments"
-	facetPRReviews        = "pr_reviews"
-	facetPRReviewComments = "pr_review_comments"
+	facetIssueComments    = facets.IssueComments
+	facetPRReviews        = facets.PRReviews
+	facetPRReviewComments = facets.PRReviewComments
 	facetThreads          = "threads"
 )
 
@@ -415,7 +416,7 @@ func computeResponseTimes(ctx context.Context, c *corpus.Corpus, threads []corpu
 	if err != nil {
 		return out, err
 	}
-	out.Issues = buildResponseMetric(issueSamples, window, issueCoverage, "issue_comments")
+	out.Issues = buildResponseMetric(issueSamples, window, issueCoverage, facets.IssueComments)
 
 	prSamples, prCoverage, err := responseSamples(ctx, c, threads, start, end, corpus.ThreadKindPullRequest)
 	if err != nil {
