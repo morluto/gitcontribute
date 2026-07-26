@@ -253,22 +253,24 @@ type OpportunityOutput struct {
 	UpdatedAt           string      `json:"updated_at"`
 }
 
-// FindClustersInput selects a repository and bounds duplicate clusters.
-type FindClustersInput struct {
+// ClusterTarget selects one repository or one exact cluster member.
+type ClusterTarget struct {
 	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
 	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
 	Kind   string `json:"kind,omitempty" jsonschema:"Optional member kind: issue or pull_request"`
 	Number int    `json:"number,omitempty" jsonschema:"Optional positive member number"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum clusters from 1 to 100"`
 }
 
-// FindNeighborsInput selects a thread and bounds similar-thread results.
+// FindClustersInput selects up to 20 repositories or exact cluster members.
+type FindClustersInput struct {
+	Targets []ClusterTarget `json:"targets" jsonschema:"One to 20 repository or exact-member targets"`
+	Limit   int             `json:"limit,omitempty" jsonschema:"Maximum clusters per target from 1 to 100"`
+}
+
+// FindNeighborsInput selects source threads and bounds similar-thread results.
 type FindNeighborsInput struct {
-	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
-	Kind   string `json:"kind" jsonschema:"Thread kind: issue or pull_request"`
-	Number int    `json:"number" jsonschema:"GitHub issue or pull request number"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum neighbors from 1 to 100"`
+	Threads []ThreadRef `json:"threads" jsonschema:"One to 20 exact source threads"`
+	Limit   int         `json:"limit,omitempty" jsonschema:"Maximum neighbors per source thread from 1 to 100"`
 }
 
 // NeighborOutput describes one similar stored thread and its score.
@@ -283,14 +285,20 @@ type NeighborOutput struct {
 	Reason string  `json:"reason"`
 }
 
-// FindNeighborsOutput contains deterministic neighbors for a stored thread.
-type FindNeighborsOutput struct {
+// NeighborSetOutput contains deterministic neighbors for one stored thread.
+type NeighborSetOutput struct {
 	Owner          string           `json:"owner"`
 	Repo           string           `json:"repo"`
 	Kind           string           `json:"kind"`
 	Number         int              `json:"number"`
 	SourceRevision string           `json:"source_revision"`
 	Neighbors      []NeighborOutput `json:"neighbors"`
+}
+
+// FindNeighborsOutput preserves source-thread order and isolates item failures.
+type FindNeighborsOutput struct {
+	Status string                         `json:"status"`
+	Items  []BatchItem[NeighborSetOutput] `json:"items"`
 }
 
 // ClusterMemberOutput describes one member of a duplicate cluster.
@@ -315,14 +323,20 @@ type ClusterOutput struct {
 	Members     []ClusterMemberOutput `json:"members,omitempty"`
 }
 
-// FindClustersOutput contains duplicate clusters for a repository.
-type FindClustersOutput struct {
+// ClusterSetOutput contains duplicate clusters for one repository target.
+type ClusterSetOutput struct {
 	Owner       string                 `json:"owner"`
 	Repo        string                 `json:"repo"`
 	RuleVersion similarity.RuleVersion `json:"rule_version,omitempty"`
 	Total       int                    `json:"total"`
 	Clusters    []ClusterOutput        `json:"clusters"`
 	Truncated   bool                   `json:"truncated" jsonschema:"Whether more clusters matched"`
+}
+
+// FindClustersOutput preserves target order and isolates item failures.
+type FindClustersOutput struct {
+	Status string                        `json:"status"`
+	Items  []BatchItem[ClusterSetOutput] `json:"items"`
 }
 
 // CoverageTarget selects repository-level coverage or, when kind and number

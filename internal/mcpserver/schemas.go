@@ -43,6 +43,8 @@ var outputPropertyDescriptions = map[string]string{
 	"unknown_merge_count":       "Otherwise-matching pull requests excluded because their merge state is unknown.",
 	"fields":                    "Stored repository fields from the winning local projection.",
 	"sections":                  "Source-backed dossier sections keyed by section name.",
+	"dossier_status":            "Persisted dossier availability: available or missing.",
+	"dossier_as_of":             "RFC 3339 as-of timestamp of the latest persisted dossier.",
 	"as_of":                     "RFC 3339 timestamp describing how current the response is.",
 	"updated_at":                "Latest update time (RFC 3339).",
 	"created_at":                "Creation time (RFC 3339).",

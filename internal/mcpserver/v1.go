@@ -85,7 +85,7 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[SearchThreadsInput, mcpcontract.SearchOutput]{
 		name: mcpcontract.ToolSearchThreads, title: "Search stored issues and pull requests",
-		description: "Search stored issue and PR titles, labels, bodies, and hydrated text. Terms use strict all-term matching by default; retry with match_mode=any for bounded broader recall. Compact view omits bodies; hydrate exact finalists with corpus.get_threads. Never contacts GitHub.",
+		description: "Search stored issue and PR titles, labels, bodies, and hydrated text. Terms use strict all-term matching by default; retry with match_mode=any for bounded broader recall. Compact view omits bodies; read exact finalists with corpus.get_threads, and use github.hydrate_threads only for missing child facets. Never contacts GitHub.",
 		annotations: readOnly, input: inputSchema[SearchThreadsInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 			setEnum(schema, "state", "open", "closed")
@@ -101,7 +101,7 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[GetRepositoryDossierInput, mcpcontract.DossierOutput]{
 		name: mcpcontract.ToolGetRepositoryDossier, title: "Get repository dossier",
-		description: "Read the latest persisted source-backed dossier for one repository. Use " + mcpcontract.ToolBuildRepositoryDossier + " only when the local dossier must be regenerated; this read never performs that write.",
+		description: "Read the latest persisted source-backed dossier for one known repository finalist. Do not use this scalar tool to discover or compare repositories; call " + mcpcontract.ToolGetRepositories + " first to inspect repository and dossier availability in one batch. Use " + mcpcontract.ToolBuildRepositoryDossier + " only when a local dossier must be explicitly regenerated; this read never performs that write.",
 		annotations: readOnly, input: inputSchema[GetRepositoryDossierInput](noSchemaCustomization),
 		output: outputSchema[mcpcontract.DossierOutput]("Persisted source-backed repository dossier."), handler: s.getRepositoryDossier,
 	})
@@ -300,19 +300,19 @@ func (s *Server) explainMatch(ctx context.Context, _ *mcp.CallToolRequest, in mc
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, mcpcontract.ExplainMatchOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, mcpcontract.ExplainMatchOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	if in.Kind != "" && in.Kind != "repo" && in.Kind != "issue" && in.Kind != "pull_request" && in.Kind != "code" {
-		return nil, mcpcontract.ExplainMatchOutput{}, errors.New("kind must be repo, issue, pull_request, or code")
+		return nil, mcpcontract.ExplainMatchOutput{}, mcpcontract.InvalidArgument("kind", "must be repo, issue, pull_request, or code", map[string]any{"kind": "issue"})
 	}
 	if (in.Kind == "issue" || in.Kind == "pull_request") && in.Number < 1 {
-		return nil, mcpcontract.ExplainMatchOutput{}, errors.New("number is required for issue and pull_request matches")
+		return nil, mcpcontract.ExplainMatchOutput{}, mcpcontract.InvalidArgument("number", "is required for issue and pull_request matches", map[string]any{"number": 1})
 	}
 	if in.Kind == "code" && (strings.TrimSpace(in.Path) == "" || strings.TrimSpace(in.Commit) == "") {
-		return nil, mcpcontract.ExplainMatchOutput{}, errors.New("path and commit are required for code matches")
+		return nil, mcpcontract.ExplainMatchOutput{}, mcpcontract.InvalidArgument("path", "path and commit are required for code matches", map[string]any{"path": "main.go", "commit": "<sha>"})
 	}
 	if in.Kind == "repo" && (in.Number != 0 || in.Path != "" || in.Commit != "") || (in.Kind == "issue" || in.Kind == "pull_request") && (in.Path != "" || in.Commit != "") || in.Kind == "code" && in.Number != 0 {
-		return nil, mcpcontract.ExplainMatchOutput{}, errors.New("identity fields do not match kind; use number for threads, path and commit for code, and neither for repositories")
+		return nil, mcpcontract.ExplainMatchOutput{}, mcpcontract.InvalidArgument("kind", "identity fields do not match kind; use number for threads, path and commit for code, and neither for repositories", map[string]any{"kind": "issue", "number": 1})
 	}
 	out, err := s.reader.ExplainMatch(ctx, in)
 	return nil, out, err
@@ -360,7 +360,7 @@ func (s *Server) recordHypothesis(ctx context.Context, _ *mcp.CallToolRequest, i
 	in.Description = strings.TrimSpace(in.Description)
 	in.Category = strings.TrimSpace(in.Category)
 	if in.Title == "" || in.Description == "" || in.Category == "" {
-		return nil, mcpcontract.HypothesisOutput{}, errors.New("title, description, and category are required")
+		return nil, mcpcontract.HypothesisOutput{}, mcpcontract.InvalidArgument("title", "title, description, and category are required", map[string]any{"title": "Observed behavior", "description": "Describe the evidence-backed hypothesis.", "category": "bug"})
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {
@@ -378,7 +378,7 @@ func (s *Server) checkDuplicates(ctx context.Context, _ *mcp.CallToolRequest, in
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, mcpcontract.CheckOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, mcpcontract.CheckOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {
@@ -396,7 +396,7 @@ func (s *Server) checkCollisions(ctx context.Context, _ *mcp.CallToolRequest, in
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, mcpcontract.CheckOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, mcpcontract.CheckOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {
@@ -412,7 +412,7 @@ func validateCheckInput(in *mcpcontract.CheckDuplicatesInput) error {
 	}
 	in.Target = strings.ToLower(strings.TrimSpace(in.Target))
 	if in.Target != "hypothesis" && in.Target != "opportunity" {
-		return errors.New("target must be hypothesis or opportunity")
+		return mcpcontract.InvalidArgument("target", "must be hypothesis or opportunity", map[string]any{"target": "hypothesis"})
 	}
 	return nil
 }
@@ -422,10 +422,10 @@ func (s *Server) promoteOpportunity(ctx context.Context, _ *mcp.CallToolRequest,
 		return nil, mcpcontract.OpportunityOutput{}, err
 	}
 	if strings.TrimSpace(in.ProblemStatement) == "" || strings.TrimSpace(in.Scope) == "" || strings.TrimSpace(in.Impact) == "" || strings.TrimSpace(in.ExpectedEffort) == "" {
-		return nil, mcpcontract.OpportunityOutput{}, errors.New("problem_statement, scope, impact, and expected_effort are required")
+		return nil, mcpcontract.OpportunityOutput{}, mcpcontract.InvalidArgument("problem_statement", "problem_statement, scope, impact, and expected_effort are required", map[string]any{"problem_statement": "Concrete problem", "scope": "Bounded scope", "impact": "Observed impact", "expected_effort": "small"})
 	}
 	if in.Confidence < 0 || in.Confidence > 1 {
-		return nil, mcpcontract.OpportunityOutput{}, errors.New("confidence must be between 0.0 and 1.0")
+		return nil, mcpcontract.OpportunityOutput{}, mcpcontract.InvalidArgument("confidence", "must be between 0.0 and 1.0", map[string]any{"confidence": 0.8})
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {
@@ -437,7 +437,7 @@ func (s *Server) promoteOpportunity(ctx context.Context, _ *mcp.CallToolRequest,
 
 func (s *Server) cancelJob(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.CancelJobInput) (*mcp.CallToolResult, mcpcontract.GetJobsOutput, error) {
 	if len(in.IDs) < 1 || len(in.IDs) > 100 {
-		return nil, mcpcontract.GetJobsOutput{}, errors.New("ids must contain 1 to 100 items")
+		return nil, mcpcontract.GetJobsOutput{}, mcpcontract.InvalidArgument("ids", "must contain 1 to 100 items", map[string]any{"ids": []string{"<job-id>"}})
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {

@@ -23,7 +23,7 @@ func (s *Server) adoptWorkspace(ctx context.Context, _ *mcp.CallToolRequest, in 
 	}
 	in.Path, in.BaseRef, in.Name = strings.TrimSpace(in.Path), strings.TrimSpace(in.BaseRef), strings.TrimSpace(in.Name)
 	if in.Path == "" || in.BaseRef == "" {
-		return nil, mcpcontract.AdoptWorkspaceOutput{}, errors.New("path and base_ref are required")
+		return nil, mcpcontract.AdoptWorkspaceOutput{}, mcpcontract.InvalidArgument("path", "path and base_ref are required", map[string]any{"path": "/absolute/worktree", "base_ref": "origin/main"})
 	}
 	operator, ok := s.reader.(WorkspaceAdopter)
 	if !ok {

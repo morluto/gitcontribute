@@ -141,19 +141,25 @@ type Operator interface {
 
 // OpportunityOutput is the stable MCP representation of a contribution opportunity.
 
-// FindClustersInput selects a repository and bounds duplicate clusters.
+// ClusterTarget selects one repository or exact cluster member.
 
-// FindNeighborsInput selects a thread and bounds similar-thread results.
+// FindClustersInput selects bounded cluster targets.
+
+// FindNeighborsInput selects bounded source threads.
 
 // NeighborOutput describes one similar stored thread and its score.
 
-// FindNeighborsOutput contains deterministic neighbors for a stored thread.
+// NeighborSetOutput contains deterministic neighbors for one stored thread.
+
+// FindNeighborsOutput preserves source-thread order and item failures.
 
 // ClusterMemberOutput describes one member of a duplicate cluster.
 
 // ClusterOutput contains a stable duplicate cluster and its canonical member.
 
-// FindClustersOutput contains duplicate clusters for a repository.
+// ClusterSetOutput contains duplicate clusters for one repository target.
+
+// FindClustersOutput preserves target order and item failures.
 
 // CoverageTarget selects repository-level coverage or, when kind and number
 // are both present, coverage for one exact stored thread.
@@ -282,25 +288,33 @@ func (s *Server) register() {
 		output: outputSchema[mcpcontract.ReadinessOutput]("Deterministic contribution readiness report."), handler: s.readiness,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.FindClustersInput, mcpcontract.FindClustersOutput]{
-		name: mcpcontract.ToolFindClusters, title: "Find duplicate clusters",
-		description: "List stored duplicate clusters for a repository, or provide kind and number to read the current cluster containing one exact member. Use " + mcpcontract.ToolFindNeighbors + " to compute similarity outside the stored projection.",
+		name: mcpcontract.ToolFindClusters, title: "Find duplicate clusters in one batch",
+		description: "Read stored duplicate clusters for up to 20 repository or exact-member targets in input order. This does not recompute similarity; use " + mcpcontract.ToolFindNeighbors + " for transient nearest-thread scoring. Offline.",
 		annotations: readOnly, input: inputSchema[mcpcontract.FindClustersInput](func(schema *schemaBuilder) {
-			setEnum(schema, "kind", "issue", "pull_request")
-			setMinimum(schema, "number", 1)
-			requireTogether(schema, "kind", "number")
+			setArrayBounds(schema, "targets", 1, 20)
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
-		}), output: outputSchema[mcpcontract.FindClustersOutput]("Stored duplicate clusters."), handler: s.findClusters,
+			if target := schema.schema.Defs["ClusterTarget"]; target != nil {
+				targetSchema := &schemaBuilder{schema: target, err: schema.err}
+				setEnum(targetSchema, "kind", "issue", "pull_request")
+				setMinimum(targetSchema, "number", 1)
+				requireTogether(targetSchema, "kind", "number")
+			}
+		}), output: outputSchema[mcpcontract.FindClustersOutput]("Ordered stored duplicate-cluster results."), handler: s.findClusters,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.FindNeighborsInput, mcpcontract.FindNeighborsOutput]{
-		name: mcpcontract.ToolFindNeighbors, title: "Find similar threads",
-		description: "Rank stored threads similar to one issue or pull request using transparent deterministic scoring. Use this for a specific source thread; it never contacts GitHub.",
+		name: mcpcontract.ToolFindNeighbors, title: "Find similar threads in one batch",
+		description: "Rank stored threads similar to up to 20 exact source threads with transparent deterministic scoring and ordered item outcomes. This is transient offline similarity, not a stored duplicate-cluster read.",
 		annotations: readOnly, supportedBy: supports[NeighborReader], input: inputSchema[mcpcontract.FindNeighborsInput](func(schema *schemaBuilder) {
-			setEnum(schema, "kind", "issue", "pull_request")
-			setMinimum(schema, "number", 1)
+			setArrayBounds(schema, "threads", 1, 20)
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 10)
-		}), output: outputSchema[mcpcontract.FindNeighborsOutput]("Similar stored threads with transparent scores."), handler: s.findNeighbors,
+			if thread := schema.schema.Defs["ThreadRef"]; thread != nil {
+				threadSchema := &schemaBuilder{schema: thread, err: schema.err}
+				setEnum(threadSchema, "kind", "issue", "pull_request")
+				setMinimum(threadSchema, "number", 1)
+			}
+		}), output: outputSchema[mcpcontract.FindNeighborsOutput]("Ordered similar-thread results with transparent scores."), handler: s.findNeighbors,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.GetCoverageInput, mcpcontract.GetCoverageOutput]{
 		name: mcpcontract.ToolGetCoverage, title: "Get stored facet coverage in one batch",
@@ -344,7 +358,7 @@ func (s *Server) investigation(ctx context.Context, _ *mcp.CallToolRequest, in m
 		in.HypothesisLimit = 20
 	}
 	if in.HypothesisLimit < 1 || in.HypothesisLimit > 100 {
-		return nil, mcpcontract.InvestigationOutput{}, errors.New("hypothesis_limit must be between 1 and 100")
+		return nil, mcpcontract.InvestigationOutput{}, mcpcontract.InvalidArgument("hypothesis_limit", "must be between 1 and 100", map[string]any{"hypothesis_limit": 20})
 	}
 	out, err := s.reader.Investigation(ctx, in)
 	return nil, out, err
@@ -360,7 +374,7 @@ func (s *Server) listOpportunities(ctx context.Context, _ *mcp.CallToolRequest, 
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, mcpcontract.ListOpportunitiesOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, mcpcontract.ListOpportunitiesOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	out, err := s.reader.ListOpportunities(ctx, in)
 	return nil, out, err
@@ -376,7 +390,7 @@ func (s *Server) opportunity(ctx context.Context, _ *mcp.CallToolRequest, in mcp
 		in.EvidenceLimit = 20
 	}
 	if in.EvidenceLimit < 1 || in.EvidenceLimit > 100 {
-		return nil, mcpcontract.OpportunityOutput{}, errors.New("evidence_limit must be between 1 and 100")
+		return nil, mcpcontract.OpportunityOutput{}, mcpcontract.InvalidArgument("evidence_limit", "must be between 1 and 100", map[string]any{"evidence_limit": 20})
 	}
 	out, err := s.reader.Opportunity(ctx, in)
 	return nil, out, err
@@ -386,7 +400,7 @@ func (s *Server) evidence(ctx context.Context, _ *mcp.CallToolRequest, in mcpcon
 	in.InvestigationID = strings.TrimSpace(in.InvestigationID)
 	in.OpportunityID = strings.TrimSpace(in.OpportunityID)
 	if (in.InvestigationID == "") == (in.OpportunityID == "") {
-		return nil, mcpcontract.EvidenceOutput{}, errors.New("exactly one of investigation_id or opportunity_id is required")
+		return nil, mcpcontract.EvidenceOutput{}, mcpcontract.InvalidArgument("investigation_id", "provide exactly one of investigation_id or opportunity_id", map[string]any{"investigation_id": "<id>"})
 	}
 	if in.InvestigationID != "" {
 		if _, err := normalizeID("investigation_id", in.InvestigationID); err != nil {
@@ -399,7 +413,7 @@ func (s *Server) evidence(ctx context.Context, _ *mcp.CallToolRequest, in mcpcon
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, mcpcontract.EvidenceOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, mcpcontract.EvidenceOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	out, err := s.reader.Evidence(ctx, in)
 	return nil, out, err
@@ -416,34 +430,32 @@ func (s *Server) readiness(ctx context.Context, _ *mcp.CallToolRequest, in mcpco
 }
 
 func (s *Server) findClusters(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.FindClustersInput) (*mcp.CallToolResult, mcpcontract.FindClustersOutput, error) {
-	if err := validateRepo(mcpcontract.RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
-		return nil, mcpcontract.FindClustersOutput{}, err
+	if len(in.Targets) < 1 || len(in.Targets) > 20 {
+		return nil, mcpcontract.FindClustersOutput{}, mcpcontract.InvalidArgument("targets", "must contain 1 to 20 items", map[string]any{
+			"targets": []map[string]string{{"owner": "acme", "repo": "rocket"}},
+		})
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, mcpcontract.FindClustersOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, mcpcontract.FindClustersOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	out, err := s.reader.FindClusters(ctx, in)
 	return nil, out, err
 }
 
 func (s *Server) findNeighbors(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.FindNeighborsInput) (*mcp.CallToolResult, mcpcontract.FindNeighborsOutput, error) {
-	if err := validateRepo(mcpcontract.RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
-		return nil, mcpcontract.FindNeighborsOutput{}, err
-	}
-	if in.Kind != "issue" && in.Kind != "pull_request" {
-		return nil, mcpcontract.FindNeighborsOutput{}, errors.New("kind must be issue or pull_request")
-	}
-	if in.Number <= 0 {
-		return nil, mcpcontract.FindNeighborsOutput{}, errors.New("number must be positive")
+	if len(in.Threads) < 1 || len(in.Threads) > 20 {
+		return nil, mcpcontract.FindNeighborsOutput{}, mcpcontract.InvalidArgument("threads", "must contain 1 to 20 items", map[string]any{
+			"threads": []map[string]any{{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 1}},
+		})
 	}
 	if in.Limit == 0 {
 		in.Limit = 10
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, mcpcontract.FindNeighborsOutput{}, errors.New("limit must be between 1 and 100")
+		return nil, mcpcontract.FindNeighborsOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 10})
 	}
 	reader, ok := s.reader.(NeighborReader)
 	if !ok {
@@ -455,7 +467,9 @@ func (s *Server) findNeighbors(ctx context.Context, _ *mcp.CallToolRequest, in m
 
 func (s *Server) getCoverage(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.GetCoverageInput) (*mcp.CallToolResult, mcpcontract.GetCoverageOutput, error) {
 	if len(in.Targets) < 1 || len(in.Targets) > 100 {
-		return nil, mcpcontract.GetCoverageOutput{}, errors.New("targets must contain 1 to 100 items")
+		return nil, mcpcontract.GetCoverageOutput{}, mcpcontract.InvalidArgument("targets", "must contain 1 to 100 items", map[string]any{
+			"targets": []map[string]string{{"owner": "acme", "repo": "rocket"}},
+		})
 	}
 	out, err := s.reader.GetCoverage(ctx, in)
 	return nil, out, err

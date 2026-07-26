@@ -121,7 +121,7 @@ func (s *Server) createConcern(ctx context.Context, _ *mcp.CallToolRequest, in m
 		return nil, mcpcontract.ConcernOutput{}, err
 	}
 	if strings.TrimSpace(in.CommitSHA) == "" && strings.TrimSpace(in.WorkspaceID) == "" {
-		return nil, mcpcontract.ConcernOutput{}, errors.New("commit_sha or workspace_id is required")
+		return nil, mcpcontract.ConcernOutput{}, mcpcontract.InvalidArgument("commit_sha", "commit_sha or workspace_id is required", map[string]any{"commit_sha": "<sha>"})
 	}
 	operator, ok := s.reader.(ConcernOperator)
 	if !ok {

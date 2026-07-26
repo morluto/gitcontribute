@@ -25,19 +25,19 @@ func (s *Server) prepareContribution(ctx context.Context, _ *mcp.CallToolRequest
 	}
 	in.Kind = strings.ToLower(strings.TrimSpace(in.Kind))
 	if in.Kind != "issue" && in.Kind != "pull_request" {
-		return nil, mcpcontract.DraftOutput{}, errors.New("kind must be issue or pull_request")
+		return nil, mcpcontract.DraftOutput{}, mcpcontract.InvalidArgument("kind", "must be issue or pull_request", map[string]any{"kind": "pull_request"})
 	}
 	if in.Kind == "pull_request" && strings.TrimSpace(in.WorkspaceID) == "" {
-		return nil, mcpcontract.DraftOutput{}, errors.New("workspace_id is required for pull_request drafts")
+		return nil, mcpcontract.DraftOutput{}, mcpcontract.InvalidArgument("workspace_id", "is required for pull_request drafts", map[string]any{"workspace_id": "<id>"})
 	}
 	if in.Kind == "pull_request" && strings.TrimSpace(in.Approach) == "" {
-		return nil, mcpcontract.DraftOutput{}, errors.New("approach is required for pull_request drafts")
+		return nil, mcpcontract.DraftOutput{}, mcpcontract.InvalidArgument("approach", "is required for pull_request drafts", map[string]any{"approach": "Describe the implementation approach."})
 	}
 	if in.Kind == "issue" && (in.WorkspaceID != "" || in.Approach != "" || in.Changes != "" || in.Compatibility != "" || in.Limitations != "" || in.LinkedIssue != "") {
-		return nil, mcpcontract.DraftOutput{}, errors.New("pull-request-only fields are not accepted for issue drafts")
+		return nil, mcpcontract.DraftOutput{}, mcpcontract.InvalidArgument("kind", "pull-request-only fields are not accepted for issue drafts", map[string]any{"kind": "pull_request"})
 	}
 	if in.Kind == "pull_request" && in.Success != "" {
-		return nil, mcpcontract.DraftOutput{}, errors.New("success is only accepted for issue drafts")
+		return nil, mcpcontract.DraftOutput{}, mcpcontract.InvalidArgument("success", "is only accepted for issue drafts", map[string]any{"kind": "issue", "success": "Describe the desired outcome."})
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {

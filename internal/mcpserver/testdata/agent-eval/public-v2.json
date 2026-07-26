@@ -1,6 +1,6 @@
 {
   "version": "agent-tool-eval.v2",
-  "fixture_revision": "agent-contract-v4",
+  "fixture_revision": "agent-contract-v5",
   "scenarios": [
     {
       "id": "newest_music_thread",
@@ -17,6 +17,12 @@
     {
       "id": "persisted_dossier_boundary",
       "prompt": "Read the persisted dossier for acme/rocket. Do not rebuild it or contact GitHub. Report its as-of revision.",
+      "toolsets": ["contribute"],
+      "read_only": true
+    },
+    {
+      "id": "repository_dossier_availability",
+      "prompt": "Using only GitContribute's stored corpus, compare repository metadata and persisted-dossier availability for acme/rocket, acme/player, and acme/synth. Do not read full dossiers, rebuild them, sync metadata, or contact GitHub. Report unavailable items.",
       "toolsets": ["contribute"],
       "read_only": true
     },

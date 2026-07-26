@@ -210,7 +210,7 @@ several scalar or ambiguous tools instead of adding aliases indefinitely.
 | `corpus.search_repositories` | Search and filter stored repository projections | 100 results | None |
 | `corpus.search_threads` | Search and filter stored issues and pull requests | 100 results | None |
 | `corpus.search_code` | Search indexed code snapshots | 100 results | None |
-| `corpus.get_repositories` | Read stored metadata and coverage for repository references | 100 repositories | None |
+| `corpus.get_repositories` | Read stored metadata, coverage, and persisted-dossier availability for repository references | 100 repositories | None |
 | `corpus.get_threads` | Read compact or full stored thread projections | 100 threads | None |
 | `corpus.get_repository_dossier` | Read one persisted repository dossier | 1 repository | None |
 | `corpus.explain_match` | Explain one prior stored search result | 1 result | None |
@@ -513,6 +513,8 @@ contract. Use typed nullable fields plus facet coverage:
     "observed_at": "...",
     "source_updated_at": "..."
   },
+  "dossier_status": "available",
+  "dossier_as_of": "...",
   "description": "...",
   "stars": 86581,
   "open_issues": 5818,
@@ -524,16 +526,11 @@ For an explicit but unsynchronized identity:
 
 ```json
 {
-  "owner": "vllm-project",
-  "repo": "vllm",
-  "metadata": {
-    "status": "missing",
-    "next_action": "Call github.sync_repository_metadata."
-  },
-  "description": null,
-  "stars": null,
-  "open_issues": null,
-  "archived": null
+  "key": "vllm-project/vllm",
+  "status": "unavailable",
+  "reason": "not_indexed",
+  "message": "repository is not present in the local corpus",
+  "next_action": "Call github.sync_repository_metadata for this repository."
 }
 ```
 

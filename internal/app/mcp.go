@@ -235,14 +235,46 @@ func (r *MCPReader) Dossier(ctx context.Context, in mcpcontract.RepoInput) (mcpc
 	if err := ref.Validate(); err != nil {
 		return mcpcontract.DossierOutput{}, err
 	}
-	if _, err := r.openReadOnlyCorpus(ctx); err != nil {
+	c, err := r.openReadOnlyCorpus(ctx)
+	if err != nil {
 		return mcpcontract.DossierOutput{}, err
 	}
-	d, err := r.GetRepositoryDossier(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
+	repository, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
 	if err != nil {
-		if errors.Is(err, errDossierNotFound) {
-			return mcpcontract.DossierOutput{}, failure.NotFound(nil)
-		}
+		return mcpcontract.DossierOutput{}, err
+	}
+	if repository == nil {
+		return mcpcontract.DossierOutput{}, mcpcontract.Unavailable(
+			"repository_not_indexed",
+			fmt.Sprintf("Repository %s is not present in the local corpus.", ref),
+			mcpcontract.SuggestedAction{
+				Tool:   mcpcontract.ToolSyncRepositoryMetadata,
+				Reason: "Persist repository metadata before requesting local derived artifacts.",
+				Arguments: map[string]any{
+					"repositories": []map[string]string{{"owner": ref.Owner, "repo": ref.Repo}},
+				},
+			},
+		)
+	}
+	record, sources, err := c.GetDossier(ctx, ref.Owner, ref.Repo)
+	if err != nil {
+		return mcpcontract.DossierOutput{}, fmt.Errorf("get dossier: %w", err)
+	}
+	if record == nil {
+		return mcpcontract.DossierOutput{}, mcpcontract.Unavailable(
+			"dossier_not_persisted",
+			fmt.Sprintf("No persisted dossier exists for %s.", ref),
+			mcpcontract.SuggestedAction{
+				Tool:   mcpcontract.ToolGetRepositories,
+				Reason: "Read available repository metadata without creating local state.",
+				Arguments: map[string]any{
+					"repositories": []map[string]string{{"owner": ref.Owner, "repo": ref.Repo}},
+				},
+			},
+		)
+	}
+	d, err := dossierFromRecord(record, sources)
+	if err != nil {
 		return mcpcontract.DossierOutput{}, err
 	}
 	return dossierToMCPOutput(d), nil
@@ -549,77 +581,6 @@ func normalizeMCPID(field, value string) (string, error) {
 		return "", fmt.Errorf("%s exceeds 128 bytes", field)
 	}
 	return value, nil
-}
-
-// FindClusters lists duplicate-candidate clusters for a repository from the
-// local corpus without recomputing them.
-func (r *MCPReader) FindClusters(ctx context.Context, in mcpcontract.FindClustersInput) (mcpcontract.FindClustersOutput, error) {
-	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
-	if err := ref.Validate(); err != nil {
-		return mcpcontract.FindClustersOutput{}, err
-	}
-	if in.Limit <= 0 || in.Limit > 100 {
-		return mcpcontract.FindClustersOutput{}, errors.New("limit must be between 1 and 100")
-	}
-	c, err := r.openReadOnlyCorpus(ctx)
-	if err != nil {
-		return mcpcontract.FindClustersOutput{}, err
-	}
-	if (in.Kind == "") != (in.Number == 0) {
-		return mcpcontract.FindClustersOutput{}, errors.New("kind and number must be provided together")
-	}
-	if in.Kind != "" {
-		projection, err := c.GetClusterProjectionForMemberWithIdentity(ctx, clustering.MemberRef{Kind: in.Kind, Owner: in.Owner, Repo: in.Repo, Number: in.Number})
-		if err != nil {
-			return mcpcontract.FindClustersOutput{}, fmt.Errorf("find cluster member: %w", err)
-		}
-		out := mcpcontract.FindClustersOutput{Owner: in.Owner, Repo: in.Repo}
-		if len(projection.Clusters) > 0 {
-			out.Total = 1
-			out.Clusters = []mcpcontract.ClusterOutput{clusterToMCP(projection.Clusters[0], 20)}
-		}
-		if projection.Projection != nil {
-			out.RuleVersion = projection.Projection.RuleVersion
-		}
-		return out, nil
-	}
-	projection, err := c.ListClusterProjection(ctx, ref, clustering.ClusterOpen, in.Limit)
-	if err != nil {
-		return mcpcontract.FindClustersOutput{}, fmt.Errorf("list clusters: %w", err)
-	}
-	out := mcpcontract.FindClustersOutput{
-		Owner:     in.Owner,
-		Repo:      in.Repo,
-		Total:     projection.Total,
-		Truncated: projection.Truncated,
-		Clusters:  make([]mcpcontract.ClusterOutput, len(projection.Clusters)),
-	}
-	if projection.Projection != nil {
-		out.RuleVersion = projection.Projection.RuleVersion
-	}
-	for i, cl := range projection.Clusters {
-		out.Clusters[i] = clusterToMCP(cl, 20)
-	}
-	return out, nil
-}
-
-// FindNeighbors ranks similar local threads without network access.
-func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpcontract.FindNeighborsInput) (mcpcontract.FindNeighborsOutput, error) {
-	result, err := r.Neighbors(ctx, contracts.RepoRef{Owner: in.Owner, Repo: in.Repo}, in.Kind, in.Number, in.Limit)
-	if err != nil {
-		return mcpcontract.FindNeighborsOutput{}, err
-	}
-	out := mcpcontract.FindNeighborsOutput{
-		Owner: in.Owner, Repo: in.Repo, Kind: result.Kind, Number: result.Number, SourceRevision: result.SourceRevision,
-		Neighbors: make([]mcpcontract.NeighborOutput, len(result.Neighbors)),
-	}
-	for i, neighbor := range result.Neighbors {
-		out.Neighbors[i] = mcpcontract.NeighborOutput{
-			Kind: neighbor.Kind, Owner: neighbor.Owner, Repo: neighbor.Repo, Number: neighbor.Number,
-			Title: neighbor.Title, State: neighbor.State, Score: neighbor.Score, Reason: neighbor.Reason,
-		}
-	}
-	return out, nil
 }
 
 // GetCoverage returns bounded, input-ordered facet coverage without network access.

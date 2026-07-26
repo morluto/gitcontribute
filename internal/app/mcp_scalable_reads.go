@@ -50,6 +50,10 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 	if err != nil {
 		return mcpcontract.GetRepositoriesOutput{}, err
 	}
+	dossiersByRepository, err := c.GetLatestDossierMetadataBatch(ctx, repositoryIDs)
+	if err != nil {
+		return mcpcontract.GetRepositoriesOutput{}, err
+	}
 	for i, input := range in.Repositories {
 		key := input.Owner + "/" + input.Repo
 		item := mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput]{Key: key, Status: "complete"}
@@ -69,6 +73,11 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 			continue
 		}
 		value := typedRepository(repo)
+		value.DossierStatus = "missing"
+		if dossierMetadata, ok := dossiersByRepository[repo.ID]; ok {
+			value.DossierStatus = "available"
+			value.DossierAsOf = formatTime(dossierMetadata.AsOf)
+		}
 		coverage := coverageByRepository[corpus.RepositoryFacetKey{RepositoryID: repo.ID, Facet: "metadata"}]
 		if coverage == nil {
 			value.Metadata = mcpcontract.RepositoryMetadataOutput{Status: "missing", NextAction: "Call github.sync_repository_metadata for this repository."}

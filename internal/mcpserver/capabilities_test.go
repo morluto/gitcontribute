@@ -14,8 +14,25 @@ type fakeOptionalCapabilities struct {
 func (*fakeOptionalCapabilities) FindNeighbors(context.Context, mcpcontract.FindNeighborsInput) (mcpcontract.FindNeighborsOutput, error) {
 	return mcpcontract.FindNeighborsOutput{}, nil
 }
-func (*fakeOptionalCapabilities) GetRepositories(context.Context, mcpcontract.GetRepositoriesInput) (mcpcontract.GetRepositoriesOutput, error) {
-	return mcpcontract.GetRepositoriesOutput{Status: "complete"}, nil
+func (*fakeOptionalCapabilities) GetRepositories(_ context.Context, in mcpcontract.GetRepositoriesInput) (mcpcontract.GetRepositoriesOutput, error) {
+	items := make([]mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput], len(in.Repositories))
+	for i, repository := range in.Repositories {
+		value := mcpcontract.TypedRepositoryOutput{
+			Ref:           "repository:" + repository.Owner + "/" + repository.Repo,
+			Owner:         repository.Owner,
+			Repo:          repository.Repo,
+			Metadata:      mcpcontract.RepositoryMetadataOutput{Status: "complete"},
+			DossierStatus: "missing",
+		}
+		if repository.Repo == "rocket" {
+			value.DossierStatus = "available"
+			value.DossierAsOf = "2026-07-25T00:00:00Z"
+		}
+		items[i] = mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput]{
+			Key: repository.Owner + "/" + repository.Repo, Status: "complete", Value: &value,
+		}
+	}
+	return mcpcontract.GetRepositoriesOutput{Status: "complete", Items: items}, nil
 }
 func (*fakeOptionalCapabilities) GetThreads(context.Context, mcpcontract.GetThreadsInput) (mcpcontract.GetThreadsOutput, error) {
 	return mcpcontract.GetThreadsOutput{Status: "complete"}, nil

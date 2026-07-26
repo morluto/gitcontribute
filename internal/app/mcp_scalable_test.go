@@ -145,6 +145,10 @@ func TestGetRepositoriesPreservesUnknownMetadataAndInputOrder(t *testing.T) {
 	if err := svc.corpus.AdvanceFacet(ctx, observed.ID, nil, "metadata", observed.SourceUpdatedAt, true, 0); err != nil {
 		t.Fatal(err)
 	}
+	dossierAsOf := time.Unix(20, 0).UTC()
+	if _, err := svc.corpus.SaveDossier(ctx, observed.ID, observed.Owner, observed.Name, "sha", dossierAsOf, `{}`, `{}`, dossierAsOf, nil); err != nil {
+		t.Fatal(err)
+	}
 	out, err := (&MCPReader{svc}).GetRepositories(ctx, mcpcontract.GetRepositoriesInput{Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: placeholder.Name}, {Owner: "acme", Repo: observed.Name}, {Owner: "acme", Repo: "missing"}}})
 	if err != nil {
 		t.Fatal(err)
@@ -152,10 +156,10 @@ func TestGetRepositoriesPreservesUnknownMetadataAndInputOrder(t *testing.T) {
 	if out.Status != "partial" || len(out.Items) != 3 {
 		t.Fatalf("unexpected batch: %+v", out)
 	}
-	if got := out.Items[0].Value; got == nil || got.Metadata.Status != "missing" || got.Stars != nil {
+	if got := out.Items[0].Value; got == nil || got.Metadata.Status != "missing" || got.Stars != nil || got.DossierStatus != "missing" || got.DossierAsOf != "" {
 		t.Fatalf("placeholder exposed false facts: %+v", got)
 	}
-	if got := out.Items[1].Value; got == nil || got.Metadata.Status != "complete" || got.Stars == nil || *got.Stars != 42 {
+	if got := out.Items[1].Value; got == nil || got.Metadata.Status != "complete" || got.Stars == nil || *got.Stars != 42 || got.DossierStatus != "available" || got.DossierAsOf != dossierAsOf.Format(time.RFC3339) {
 		t.Fatalf("observed metadata missing: %+v", got)
 	}
 	if out.Items[2].Key != "acme/missing" || out.Items[2].Status != "unavailable" {

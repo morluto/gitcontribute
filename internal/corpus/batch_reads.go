@@ -58,6 +58,55 @@ func (c *Corpus) GetRepositoriesBatch(ctx context.Context, keys []RepositoryKey)
 	return out, nil
 }
 
+// GetLatestDossierMetadataBatch returns the latest persisted dossier metadata
+// for each requested repository ID without loading dossier snapshots.
+func (c *Corpus) GetLatestDossierMetadataBatch(ctx context.Context, repositoryIDs []int64) (map[int64]DossierMetadata, error) {
+	if len(repositoryIDs) > maxBatchReadItems {
+		return nil, fmt.Errorf("dossier metadata batch cannot exceed %d items", maxBatchReadItems)
+	}
+	if len(repositoryIDs) == 0 {
+		return map[int64]DossierMetadata{}, nil
+	}
+	placeholders := make([]string, len(repositoryIDs))
+	args := make([]any, len(repositoryIDs))
+	for i, repositoryID := range repositoryIDs {
+		placeholders[i] = "?"
+		args[i] = repositoryID
+	}
+	rows, err := c.db.QueryContext(ctx, `
+		SELECT d.repository_id, d.as_of, d.generated_at
+		FROM dossiers d
+		WHERE d.repository_id IN (`+strings.Join(placeholders, ",")+`)
+		  AND d.id = (
+			  SELECT d2.id
+			  FROM dossiers d2
+			  WHERE d2.repository_id = d.repository_id
+			  ORDER BY d2.generated_at DESC, d2.id DESC
+			  LIMIT 1
+		  )
+		ORDER BY d.repository_id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get dossier metadata batch: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := make(map[int64]DossierMetadata, len(repositoryIDs))
+	for rows.Next() {
+		var metadata DossierMetadata
+		var asOf, generatedAt int64
+		if err := rows.Scan(&metadata.RepositoryID, &asOf, &generatedAt); err != nil {
+			return nil, fmt.Errorf("scan dossier metadata batch: %w", err)
+		}
+		metadata.AsOf = scanTime(asOf)
+		metadata.GeneratedAt = scanTime(generatedAt)
+		out[metadata.RepositoryID] = metadata
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate dossier metadata batch: %w", err)
+	}
+	return out, nil
+}
+
 // GetThreadsBatch reads up to 100 exact thread projections in one query.
 // Missing threads are absent from the returned map.
 func (c *Corpus) GetThreadsBatch(ctx context.Context, keys []ThreadKey) (map[ThreadKey]*Thread, error) {

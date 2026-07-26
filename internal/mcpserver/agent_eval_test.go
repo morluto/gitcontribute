@@ -108,8 +108,9 @@ func TestAgentEvalV2PublicAndOracleStayPaired(t *testing.T) {
 				}
 			}
 		}
-		if public.Scenarios[i].ID == "exact_issue_set_preparation" && oracle.Scenarios[i].ExpectedMaxToolCalls != 1 {
-			t.Errorf("exact issue-set scenario max calls = %d, want 1", oracle.Scenarios[i].ExpectedMaxToolCalls)
+		if (public.Scenarios[i].ID == "exact_issue_set_preparation" || public.Scenarios[i].ID == "repository_dossier_availability") &&
+			oracle.Scenarios[i].ExpectedMaxToolCalls != 1 {
+			t.Errorf("%s scenario max calls = %d, want 1", public.Scenarios[i].ID, oracle.Scenarios[i].ExpectedMaxToolCalls)
 		}
 	}
 }
@@ -327,7 +328,7 @@ func agentEvalV3TrajectoryPasses(value agentEvalV3Trajectory, oracles map[string
 }
 
 func TestAgentEvalScriptedCurrentContracts(t *testing.T) {
-	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	client, closeSessions := connect(t, completeFakeReader(&fakeReader{searchStarted: make(chan struct{})}))
 	defer closeSessions()
 
 	t.Run("known repository search is one bounded structured call", func(t *testing.T) {
@@ -345,6 +346,31 @@ func TestAgentEvalScriptedCurrentContracts(t *testing.T) {
 		})
 		if result.IsError || result.StructuredContent == nil {
 			t.Fatalf("issue-set result = %+v", result)
+		}
+	})
+
+	t.Run("repository and dossier availability is one offline batch", func(t *testing.T) {
+		result := callAgentEvalTool(t, client, mcpcontract.ToolGetRepositories, map[string]any{
+			"repositories": []map[string]any{
+				{"owner": "acme", "repo": "rocket"},
+				{"owner": "acme", "repo": "player"},
+				{"owner": "acme", "repo": "synth"},
+			},
+		})
+		payload, err := json.Marshal(result.StructuredContent)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var output mcpcontract.GetRepositoriesOutput
+		if err := json.Unmarshal(payload, &output); err != nil {
+			t.Fatal(err)
+		}
+		if result.IsError || output.Status != "complete" || len(output.Items) != 3 {
+			t.Fatalf("repository batch result = %+v", result)
+		}
+		if output.Items[0].Value == nil || output.Items[0].Value.DossierStatus != "available" ||
+			output.Items[1].Value == nil || output.Items[1].Value.DossierStatus != "missing" {
+			t.Fatalf("dossier availability is not explicit: %+v", output.Items)
 		}
 	})
 

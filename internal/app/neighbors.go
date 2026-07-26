@@ -59,7 +59,7 @@ func (s *Service) Neighbors(ctx context.Context, repo contracts.RepoRef, kind st
 		return nil, err
 	}
 	if query == nil {
-		return nil, fmt.Errorf("thread not found: %s", ref.String())
+		return nil, fmt.Errorf("%w: %s", errThreadNotFound, ref.String())
 	}
 
 	threads, err := c.ListThreads(ctx, repository.ID, "", similarityCandidateLimit(limit))
@@ -131,7 +131,7 @@ func (s *Service) DuplicateCandidates(ctx context.Context, repo contracts.RepoRe
 		return nil, err
 	}
 	if query == nil {
-		return nil, fmt.Errorf("thread not found: %s", ref.String())
+		return nil, fmt.Errorf("%w: %s", errThreadNotFound, ref.String())
 	}
 
 	cluster, err := c.GetClusterProjectionForMember(ctx, ref)
