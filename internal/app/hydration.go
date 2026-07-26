@@ -31,9 +31,6 @@ const (
 	FacetIssueTimeline    = facets.IssueTimeline
 )
 
-var issueFacets = facets.DefaultFor(facets.IssueKind)
-var pullRequestFacets = facets.DefaultFor(facets.PullRequestKind)
-
 const maxHydrationPages = 100
 
 // HydrateResult reports the outcome of hydrating a thread.
