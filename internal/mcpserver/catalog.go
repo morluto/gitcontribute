@@ -8,65 +8,6 @@ import (
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
-// Canonical MCP tool names group operations by capability and side-effect boundary.
-
-var canonicalToolNames = []string{
-	mcpcontract.ToolSearchRepositories,
-	mcpcontract.ToolSearchThreads,
-	mcpcontract.ToolSearchCode,
-	mcpcontract.ToolGetRepositories,
-	mcpcontract.ToolGetThreads,
-	mcpcontract.ToolRankThreads,
-	mcpcontract.ToolFindPrecedents,
-	mcpcontract.ToolPrepareIssueSet,
-	mcpcontract.ToolGetRepositoryDossier,
-	mcpcontract.ToolExplainMatch,
-	mcpcontract.ToolGetInvestigation,
-	mcpcontract.ToolListOpportunities,
-	mcpcontract.ToolGetOpportunity,
-	mcpcontract.ToolGetEvidence,
-	mcpcontract.ToolGetReadiness,
-	ToolListConcerns,
-	mcpcontract.ToolFindClusters,
-	mcpcontract.ToolFindNeighbors,
-	mcpcontract.ToolGetCoverage,
-	mcpcontract.ToolBuildRepositoryDossier,
-	mcpcontract.ToolGetJob,
-	mcpcontract.ToolCancelJob,
-	mcpcontract.ToolSearchGitHubRepositories,
-	mcpcontract.ToolSyncRepositoryMetadata,
-	mcpcontract.ToolSyncThreads,
-	mcpcontract.ToolHydrateThreads,
-	mcpcontract.ToolGetAuthenticatedIdentity,
-	mcpcontract.ToolSyncAuthoredPullRequests,
-	mcpcontract.ToolSyncPullRequestStatus,
-	mcpcontract.ToolListPullRequestPortfolio,
-	mcpcontract.ToolFindPortfolioOverlaps,
-	mcpcontract.ToolIndexRepositories,
-	mcpcontract.ToolCheckMergeConflicts,
-	mcpcontract.ToolInspectCommitChanges,
-	mcpcontract.ToolPlanSemanticCommits,
-	mcpcontract.ToolQueryDeepWiki,
-	mcpcontract.ToolCreateWorkspace,
-	mcpcontract.ToolAdoptWorkspace,
-	mcpcontract.ToolDefineValidation,
-	mcpcontract.ToolRunValidation,
-	mcpcontract.ToolRunRepeatedValidation,
-	mcpcontract.ToolStartInvestigation,
-	mcpcontract.ToolRecordHypothesis,
-	ToolCreateConcern,
-	ToolUpdateConcern,
-	ToolSetConcernState,
-	ToolLinkConcern,
-	ToolPromoteConcern,
-	mcpcontract.ToolCheckDuplicates,
-	mcpcontract.ToolFindCompetingWork,
-	mcpcontract.ToolPromoteOpportunity,
-	mcpcontract.ToolPrepareContribution,
-	mcpcontract.ToolExportManifest,
-	mcpcontract.ToolLinkPullRequest,
-}
-
 type catalogTool[In, Out any] struct {
 	name, title, description string
 	annotations              *mcp.ToolAnnotations
@@ -109,6 +50,19 @@ func addCatalogTool[In, Out any](server *Server, tool catalogTool[In, Out]) {
 func supports[T any](reader mcpcontract.Reader) bool {
 	_, ok := any(reader).(T)
 	return ok
+}
+
+// allToolNames is a test and selection projection of the named toolsets. The
+// runtime "all" profile does not use this list: it leaves filtering disabled
+// and therefore follows the tools actually registered by the server.
+func allToolNames() map[string]struct{} {
+	all := make(map[string]struct{})
+	for _, names := range toolsets {
+		for _, name := range names {
+			all[name] = struct{}{}
+		}
+	}
+	return all
 }
 
 func structuredToolErrors[In, Out any](handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
@@ -162,16 +116,22 @@ func enabledToolNames(selected []string) map[string]struct{} {
 	enabled := make(map[string]struct{})
 	for _, name := range selected {
 		if name == "all" {
-			for _, tool := range canonicalToolNames {
-				enabled[tool] = struct{}{}
-			}
-			return enabled
+			return allToolNames()
 		}
 		for _, tool := range toolsets[name] {
 			enabled[tool] = struct{}{}
 		}
 	}
 	return enabled
+}
+
+func toolFilter(selected []string) map[string]struct{} {
+	for _, name := range selected {
+		if name == "all" {
+			return nil
+		}
+	}
+	return enabledToolNames(selected)
 }
 
 func readOnlyAnnotations() *mcp.ToolAnnotations {

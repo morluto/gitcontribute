@@ -204,7 +204,7 @@ func NewWithOptions(reader mcpcontract.Reader, version string, opts mcpcontract.
 			}
 		}
 	}
-	enabled := enabledToolNames(opts.Toolsets)
+	enabled := toolFilter(opts.Toolsets)
 	s := &Server{
 		reader:       reader,
 		enabledTools: enabled,

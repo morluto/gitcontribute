@@ -268,7 +268,7 @@ func readRadarIssueTimeline(ctx context.Context, c *corpus.Corpus, repoID, issue
 				continue
 			}
 			accumulator.append(reference, "inbound", radar.RelatedWorkEvidence{
-				Kind: "issue_timeline", SourceURL: issueURL, SourceAsOf: observation.SourceUpdatedAt,
+				Kind: FacetIssueTimeline, SourceURL: issueURL, SourceAsOf: observation.SourceUpdatedAt,
 			})
 		}
 	}

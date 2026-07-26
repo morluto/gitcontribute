@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/facets"
 )
 
 const (
@@ -525,7 +526,7 @@ func (a *candidateAssessment) addCollisionSignals() {
 func (a *candidateAssessment) addCoverageUnknowns() {
 	metadataComplete := coverageComplete(a.repo.Coverage, "metadata")
 	threadsComplete := coverageComplete(a.repo.Coverage, "threads")
-	commentsPresent, commentsComplete := coverageState(a.issue.Coverage, "issue_comments")
+	commentsPresent, commentsComplete := coverageState(a.issue.Coverage, facets.IssueComments)
 	if !metadataComplete {
 		a.candidate.Unknowns = append(a.candidate.Unknowns, Unknown{
 			Code:        "metadata_coverage_incomplete",

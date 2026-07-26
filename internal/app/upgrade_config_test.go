@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	clientsetup "github.com/morluto/gitcontribute/internal/setup"
 )
 
 func TestReadClaudeCommandRejectsNonStringArguments(t *testing.T) {
@@ -13,7 +15,7 @@ func TestReadClaudeCommandRejectsNonStringArguments(t *testing.T) {
 	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := readClaudeCommand(path); err == nil || !strings.Contains(err.Error(), "args[1]") {
+	if _, err := clientsetup.ReadCommandFile(clientsetup.Claude, path); err == nil || !strings.Contains(err.Error(), "args[1]") {
 		t.Fatalf("readClaudeCommand error = %v, want indexed non-string argument error", err)
 	}
 }

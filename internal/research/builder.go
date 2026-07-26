@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/facets"
 	"github.com/morluto/gitcontribute/internal/relatedwork"
 )
 
@@ -581,10 +582,7 @@ func codeTerms(title string, labels []string) []string {
 }
 
 func discussionCoverageGap(kind domain.ThreadKind, coverage []FacetCoverage) string {
-	required := []string{"issue_comments"}
-	if kind == domain.PullRequestKind {
-		required = append(required, "pr_details", "pr_reviews", "pr_review_comments")
-	}
+	required := facets.DefaultFor(string(kind))
 	byFacet := map[string]FacetCoverage{}
 	for _, item := range coverage {
 		byFacet[item.Facet] = item

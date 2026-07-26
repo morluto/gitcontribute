@@ -12,26 +12,24 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/facets"
 	"github.com/morluto/gitcontribute/internal/github"
 )
 
 // Thread facets that selective hydration can retrieve.
 const (
-	FacetIssueComments    = "issue_comments"
-	FacetPRDetails        = "pr_details"
-	FacetPRReviews        = "pr_reviews"
-	FacetPRReviewComments = "pr_review_comments"
-	FacetPRChecks         = "pr_checks"
-	FacetPRReviewThreads  = "pr_review_threads"
-	FacetPRMergeState     = "pr_merge_state"
-	FacetPRMergeQueue     = "pr_merge_queue"
-	FacetPRClosingIssues  = "pr_closing_issues"
-	FacetPRFiles          = "pr_files"
-	FacetIssueTimeline    = "issue_timeline"
+	FacetIssueComments    = facets.IssueComments
+	FacetPRDetails        = facets.PRDetails
+	FacetPRReviews        = facets.PRReviews
+	FacetPRReviewComments = facets.PRReviewComments
+	FacetPRChecks         = facets.PRChecks
+	FacetPRReviewThreads  = facets.PRReviewThreads
+	FacetPRMergeState     = facets.PRMergeState
+	FacetPRMergeQueue     = facets.PRMergeQueue
+	FacetPRClosingIssues  = facets.PRClosingIssues
+	FacetPRFiles          = facets.PRFiles
+	FacetIssueTimeline    = facets.IssueTimeline
 )
-
-var issueFacets = []string{FacetIssueComments}
-var pullRequestFacets = []string{FacetIssueComments, FacetPRDetails, FacetPRReviews, FacetPRReviewComments}
 
 const maxHydrationPages = 100
 
@@ -206,22 +204,15 @@ func (s *Service) HydrateThread(ctx context.Context, repo contracts.RepoRef, num
 }
 
 func selectFacets(kind string, requested []string) ([]string, error) {
-	var allowed []string
-	switch kind {
-	case corpus.ThreadKindIssue:
-		allowed = issueFacets
-	case corpus.ThreadKindPullRequest:
-		allowed = pullRequestFacets
-	default:
+	defaults := facets.DefaultFor(kind)
+	if len(defaults) == 0 {
 		return nil, fmt.Errorf("unknown thread kind %q", kind)
 	}
 
 	if len(requested) == 0 {
-		return allowed, nil
+		return defaults, nil
 	}
-	// Timeline history is intentionally opt-in because it can be much larger
-	// than the default hydration set.
-	allowed = append(append([]string(nil), allowed...), FacetIssueTimeline)
+	allowed := facets.SelectableFor(kind)
 
 	allowedSet := make(map[string]struct{}, len(allowed))
 	for _, f := range allowed {

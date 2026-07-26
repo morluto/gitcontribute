@@ -7,6 +7,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/facets"
 )
 
 const hydrateRepoThreadLimit = 10000
@@ -134,11 +135,8 @@ func validateRequestedFacets(requested []string) error {
 	if len(requested) == 0 {
 		return nil
 	}
-	known := make(map[string]struct{}, len(issueFacets)+len(pullRequestFacets))
-	for _, f := range issueFacets {
-		known[f] = struct{}{}
-	}
-	for _, f := range pullRequestFacets {
+	known := make(map[string]struct{})
+	for _, f := range facets.SelectableNames() {
 		known[f] = struct{}{}
 	}
 	for _, f := range requested {
@@ -150,19 +148,14 @@ func validateRequestedFacets(requested []string) error {
 }
 
 func applicableFacets(kind string, requested []string) []string {
-	var allowed []string
-	switch kind {
-	case corpus.ThreadKindIssue:
-		allowed = issueFacets
-	case corpus.ThreadKindPullRequest:
-		allowed = pullRequestFacets
-	default:
+	defaults := facets.DefaultFor(kind)
+	if len(defaults) == 0 {
 		return nil
 	}
-
 	if len(requested) == 0 {
-		return allowed
+		return defaults
 	}
+	allowed := facets.SelectableFor(kind)
 
 	allowedSet := make(map[string]struct{}, len(allowed))
 	for _, f := range allowed {

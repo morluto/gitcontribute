@@ -1,22 +1,32 @@
 {
   "darwin-arm64": {
     "target": "darwin-arm64",
-    "binary": "gitcontribute"
+    "binary": "gitcontribute",
+    "goos": "darwin",
+    "goarch": "arm64"
   },
   "darwin-x64": {
     "target": "darwin-x64",
-    "binary": "gitcontribute"
+    "binary": "gitcontribute",
+    "goos": "darwin",
+    "goarch": "amd64"
   },
   "linux-arm64": {
     "target": "linux-arm64",
-    "binary": "gitcontribute"
+    "binary": "gitcontribute",
+    "goos": "linux",
+    "goarch": "arm64"
   },
   "linux-x64": {
     "target": "linux-x64",
-    "binary": "gitcontribute"
+    "binary": "gitcontribute",
+    "goos": "linux",
+    "goarch": "amd64"
   },
   "win32-x64": {
     "target": "win32-x64",
-    "binary": "gitcontribute.exe"
+    "binary": "gitcontribute.exe",
+    "goos": "windows",
+    "goarch": "amd64"
   }
 }

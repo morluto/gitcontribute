@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/facets"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
@@ -180,7 +181,7 @@ func (s *Server) registerScalable() {
 	addCatalogTool(s, catalogTool[mcpcontract.HydrateThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolHydrateThreads, title: "Fetch selected GitHub thread facets", description: "Refresh each exact thread header, then fetch explicit comments, issue timelines, pull-request details, reviews, or review comments for up to 100 threads. Repository metadata must already be synced. Each item reports the header request plus facet requests. Timeline history is opt-in; hydrate only finalists after ranking.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.HydrateThreadsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 100)
 		setArrayBounds(sc, "facets", 1, 5)
-		setArrayEnum(sc, "facets", "issue_comments", "issue_timeline", "pr_details", "pr_reviews", "pr_review_comments")
+		setArrayEnum(sc, "facets", facets.SelectableNames()...)
 		setRange(sc, "max_pages", 1, 100)
 		setDefault(sc, "max_pages", 3)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded exact-thread hydration job."), handler: s.hydrateThreads})
@@ -412,7 +413,7 @@ func (s *Server) syncThreads(ctx context.Context, _ *mcp.CallToolRequest, in mcp
 }
 func (s *Server) hydrateThreads(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.HydrateThreadsInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
 	if len(in.Threads) == 0 || len(in.Facets) == 0 {
-		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("facets", "threads and at least one facet are required", map[string]any{"facets": []string{"issue_comments"}})
+		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("facets", "threads and at least one facet are required", map[string]any{"facets": []string{facets.IssueComments}})
 	}
 	if in.MaxPages == 0 {
 		in.MaxPages = 3

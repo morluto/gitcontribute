@@ -61,9 +61,6 @@ const (
 	Claude Client = "claude"
 )
 
-// AllClients lists supported adapters in deterministic application order.
-var AllClients = []Client{Codex, Claude}
-
 // Launcher is the exact process command stored in a coding client's MCP
 // configuration.
 type Launcher struct {
@@ -108,11 +105,10 @@ type Report struct {
 // present under home. Detection performs no writes.
 func Detect(home string) []Client {
 	var out []Client
-	if exists(filepath.Join(home, ".codex")) {
-		out = append(out, Codex)
-	}
-	if exists(filepath.Join(home, ".claude")) || exists(filepath.Join(home, ".claude.json")) {
-		out = append(out, Claude)
+	for _, adapter := range clientAdapters {
+		if adapter.detect(home) {
+			out = append(out, adapter.client)
+		}
 	}
 	return out
 }
@@ -120,50 +116,20 @@ func Detect(home string) []Client {
 // CheckRegistration reports whether the selected client has a GitContribute
 // MCP entry without changing its configuration.
 func CheckRegistration(client Client, home string) (bool, string, error) {
-	switch client {
-	case Codex:
-		path := filepath.Join(home, ".codex", "config.toml")
-		data, err := os.ReadFile(path)
-		if errors.Is(err, os.ErrNotExist) {
-			return false, path, nil
-		}
-		if err != nil {
-			return false, path, err
-		}
-		_, _, present := findCodexBlock(string(data))
-		return present, path, nil
-	case Claude:
-		path := filepath.Join(home, ".claude.json")
-		data, err := os.ReadFile(path)
-		if errors.Is(err, os.ErrNotExist) {
-			return false, path, nil
-		}
-		if err != nil {
-			return false, path, err
-		}
-		var root map[string]any
-		if err := json.Unmarshal(data, &root); err != nil {
-			return false, path, err
-		}
-		rawServers, present := root["mcpServers"]
-		if !present {
-			return false, path, nil
-		}
-		servers, ok := rawServers.(map[string]any)
-		if !ok {
-			return false, path, errors.New("mcpServers must be an object in claude config")
-		}
-		rawServer, present := servers[serverName]
-		if !present {
-			return false, path, nil
-		}
-		if _, ok := rawServer.(map[string]any); !ok {
-			return false, path, errors.New("gitcontribute server must be an object in claude config")
-		}
-		return true, path, nil
-	default:
-		return false, "", fmt.Errorf("unsupported setup client %q", client)
+	adapter, err := clientAdapterFor(client)
+	if err != nil {
+		return false, "", err
 	}
+	path := adapter.path(home)
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, path, nil
+	}
+	if err != nil {
+		return false, path, err
+	}
+	present, err := adapter.check(data)
+	return present, path, err
 }
 
 // Run validates every selected client, resolves one shared launcher, and then
@@ -250,6 +216,7 @@ func acquireSetupLease(home string) (*flock.Flock, error) {
 }
 
 type registrationSnapshot struct {
+	adapter     *clientAdapter
 	client      Client
 	path        string
 	mode        os.FileMode
@@ -310,28 +277,17 @@ func snapshotRegistrations(clients []Client, home string) ([]registrationSnapsho
 		if err != nil {
 			return nil, fmt.Errorf("snapshot %s registration: %w", client, err)
 		}
-		info, err := os.Stat(path)
+		mode, err := registrationFileMode(path)
 		if err != nil {
 			return nil, fmt.Errorf("inspect %s registration permissions: %w", client, err)
 		}
-		snapshot := registrationSnapshot{client: client, path: path, mode: info.Mode().Perm()}
-		switch client {
-		case Codex:
-			start, end, present := findCodexBlock(string(data))
-			if !present {
-				return nil, errors.New("codex registration disappeared before activation")
-			}
-			snapshot.codexBlock = string(data[start:end])
-		case Claude:
-			var root map[string]any
-			if err := json.Unmarshal(data, &root); err != nil {
-				return nil, fmt.Errorf("parse Claude registration snapshot: %w", err)
-			}
-			servers, ok := root["mcpServers"].(map[string]any)
-			if !ok {
-				return nil, errors.New("claude mcpServers disappeared before activation")
-			}
-			snapshot.claudeEntry = servers[serverName]
+		adapter, err := clientAdapterFor(client)
+		if err != nil {
+			return nil, err
+		}
+		snapshot := registrationSnapshot{adapter: adapter, client: client, path: path, mode: mode}
+		if err := adapter.snapshotData(data, &snapshot); err != nil {
+			return nil, err
 		}
 		snapshots = append(snapshots, snapshot)
 	}
@@ -354,13 +310,7 @@ func restoreRegistrationSnapshots(snapshots []registrationSnapshot, activated La
 			restoreErrs = append(restoreErrs, fmt.Errorf("preserve concurrently changed registration %s", snapshot.path))
 			continue
 		}
-		var restoreErr error
-		switch snapshot.client {
-		case Codex:
-			restoreErr = restoreCodexRegistration(snapshot, activated)
-		case Claude:
-			restoreErr = restoreClaudeRegistration(snapshot, activated)
-		}
+		restoreErr := snapshot.adapter.restore(snapshot, activated)
 		if restoreErr != nil {
 			restoreErrs = append(restoreErrs, fmt.Errorf("restore %s: %w", snapshot.path, restoreErr))
 			continue
@@ -464,8 +414,8 @@ func selectedClients(opts Options) ([]Client, error) {
 	}
 	seen := map[Client]bool{}
 	for _, client := range wanted {
-		if client != Codex && client != Claude {
-			return nil, fmt.Errorf("unsupported setup client %q", client)
+		if _, err := clientAdapterFor(client); err != nil {
+			return nil, err
 		}
 		seen[client] = true
 	}

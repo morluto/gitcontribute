@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -65,6 +66,11 @@ func TestCanonicalToolCatalogIsNamespacedAndUnambiguous(t *testing.T) {
 	tools, closeSessions := listedTools(t)
 	defer closeSessions()
 
+	canonicalToolNames := make([]string, 0, len(allToolNames()))
+	for name := range allToolNames() {
+		canonicalToolNames = append(canonicalToolNames, name)
+	}
+	sort.Strings(canonicalToolNames)
 	if len(tools) != len(canonicalToolNames) {
 		var missing []string
 		for _, name := range canonicalToolNames {
