@@ -128,23 +128,28 @@ func (*fakeReader) Readiness(_ context.Context, in mcpcontract.ReadinessInput) (
 }
 
 func (*fakeReader) FindClusters(_ context.Context, in mcpcontract.FindClustersInput) (mcpcontract.FindClustersOutput, error) {
-	return mcpcontract.FindClustersOutput{
-		Owner: in.Owner,
-		Repo:  in.Repo,
-		Total: 1,
-		Clusters: []mcpcontract.ClusterOutput{{
-			StableID: "abc12345",
-			State:    "open",
-			Canonical: mcpcontract.ClusterMemberOutput{
-				Kind: "issue", Owner: in.Owner, Repo: in.Repo, Number: 1,
-			},
-			MemberCount: 2,
-			Members: []mcpcontract.ClusterMemberOutput{
-				{Kind: "issue", Owner: in.Owner, Repo: in.Repo, Number: 1, Title: "first", Score: 1.0, Reason: "canonical member", Included: true},
-				{Kind: "issue", Owner: in.Owner, Repo: in.Repo, Number: 2, Title: "second", Score: 0.9, Reason: "similar title", Included: true},
-			},
-		}},
-	}, nil
+	items := make([]mcpcontract.BatchItem[mcpcontract.ClusterSetOutput], len(in.Targets))
+	for i, target := range in.Targets {
+		value := mcpcontract.ClusterSetOutput{
+			Owner: target.Owner,
+			Repo:  target.Repo,
+			Total: 1,
+			Clusters: []mcpcontract.ClusterOutput{{
+				StableID: "abc12345",
+				State:    "open",
+				Canonical: mcpcontract.ClusterMemberOutput{
+					Kind: "issue", Owner: target.Owner, Repo: target.Repo, Number: 1,
+				},
+				MemberCount: 2,
+				Members: []mcpcontract.ClusterMemberOutput{
+					{Kind: "issue", Owner: target.Owner, Repo: target.Repo, Number: 1, Title: "first", Score: 1.0, Reason: "canonical member", Included: true},
+					{Kind: "issue", Owner: target.Owner, Repo: target.Repo, Number: 2, Title: "second", Score: 0.9, Reason: "similar title", Included: true},
+				},
+			}},
+		}
+		items[i] = mcpcontract.BatchItem[mcpcontract.ClusterSetOutput]{Key: target.Owner + "/" + target.Repo, Status: "complete", Value: &value}
+	}
+	return mcpcontract.FindClustersOutput{Status: "complete", Items: items}, nil
 }
 
 func (*fakeReader) GetCoverage(_ context.Context, in mcpcontract.GetCoverageInput) (mcpcontract.GetCoverageOutput, error) {
@@ -434,7 +439,7 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 		{mcpcontract.ToolGetOpportunity, map[string]any{"id": "opp-1"}, -1},
 		{mcpcontract.ToolGetEvidence, map[string]any{"investigation_id": "inv-1"}, 1},
 		{mcpcontract.ToolGetReadiness, map[string]any{"opportunity_id": "opp-1"}, -1},
-		{mcpcontract.ToolFindClusters, map[string]any{"owner": "acme", "repo": "rocket"}, 1},
+		{mcpcontract.ToolFindClusters, map[string]any{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket"}}}, 1},
 		{mcpcontract.ToolGetCoverage, map[string]any{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket"}}}, -1},
 	}
 	for _, tt := range tests {
@@ -508,7 +513,7 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 			if err := json.Unmarshal(payload, &out); err != nil {
 				t.Fatalf("decode %s: %v", tt.name, err)
 			}
-			if out.Total != tt.wantTotal || len(out.Clusters) != tt.wantTotal {
+			if len(out.Items) != 1 || out.Items[0].Value == nil || out.Items[0].Value.Total != tt.wantTotal || len(out.Items[0].Value.Clusters) != tt.wantTotal {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
 		case mcpcontract.ToolGetCoverage:

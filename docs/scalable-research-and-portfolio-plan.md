@@ -210,7 +210,7 @@ several scalar or ambiguous tools instead of adding aliases indefinitely.
 | `corpus.search_repositories` | Search and filter stored repository projections | 100 results | None |
 | `corpus.search_threads` | Search and filter stored issues and pull requests | 100 results | None |
 | `corpus.search_code` | Search indexed code snapshots | 100 results | None |
-| `corpus.get_repositories` | Read stored metadata and coverage for repository references | 100 repositories | None |
+| `corpus.get_repositories` | Read stored metadata, coverage, and persisted-dossier availability for repository references | 100 repositories | None |
 | `corpus.get_threads` | Read compact or full stored thread projections | 100 threads | None |
 | `corpus.get_repository_dossier` | Read one persisted repository dossier | 1 repository | None |
 | `corpus.explain_match` | Explain one prior stored search result | 1 result | None |

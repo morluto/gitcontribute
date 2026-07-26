@@ -358,20 +358,60 @@ func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
 	}
 
 	reader := svc.MCPReader()
-	clusters, err := reader.FindClusters(ctx, mcpcontract.FindClustersInput{Owner: "owner", Repo: "repo", Limit: 10})
+	clusters, err := reader.FindClusters(ctx, mcpcontract.FindClustersInput{
+		Targets: []mcpcontract.ClusterTarget{
+			{Owner: "owner", Repo: "repo"},
+			{Owner: "owner", Repo: "missing"},
+		},
+		Limit: 10,
+	})
 	if err != nil {
 		t.Fatalf("find clusters: %v", err)
 	}
-	if clusters.Total == 0 {
+	if clusters.Status != "partial" || len(clusters.Items) != 2 || clusters.Items[0].Value == nil || clusters.Items[1].Reason != "repository_not_indexed" {
+		t.Fatalf("cluster batch = %+v", clusters)
+	}
+	clusterSet := clusters.Items[0].Value
+	if clusterSet.Total == 0 {
 		t.Fatal("expected clusters from MCP")
 	}
-	if clusters.RuleVersion != "duplicate-v1" {
-		t.Fatalf("cluster rule version = %q", clusters.RuleVersion)
+	if clusterSet.RuleVersion != "duplicate-v1" {
+		t.Fatalf("cluster rule version = %q", clusterSet.RuleVersion)
 	}
-	member := clusters.Clusters[0].Canonical
-	containing, err := reader.FindClusters(ctx, mcpcontract.FindClustersInput{Owner: "owner", Repo: "repo", Kind: member.Kind, Number: member.Number, Limit: 10})
-	if err != nil || containing.Total != 1 || len(containing.Clusters) != 1 || containing.Clusters[0].StableID != clusters.Clusters[0].StableID {
+	isolatedInvalid, err := reader.FindClusters(ctx, mcpcontract.FindClustersInput{
+		Targets: []mcpcontract.ClusterTarget{
+			{Owner: "owner", Repo: "repo"},
+			{Owner: "owner", Repo: "repo", Number: 7},
+		},
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("find clusters with invalid item: %v", err)
+	}
+	if isolatedInvalid.Status != "partial" || len(isolatedInvalid.Items) != 2 || isolatedInvalid.Items[0].Value == nil || isolatedInvalid.Items[1].Reason != "invalid_reference" {
+		t.Fatalf("cluster invalid-item isolation = %+v", isolatedInvalid)
+	}
+	member := clusterSet.Clusters[0].Canonical
+	containing, err := reader.FindClusters(ctx, mcpcontract.FindClustersInput{
+		Targets: []mcpcontract.ClusterTarget{{Owner: "owner", Repo: "repo", Kind: member.Kind, Number: member.Number}},
+		Limit:   10,
+	})
+	if err != nil || len(containing.Items) != 1 || containing.Items[0].Value == nil || containing.Items[0].Value.Total != 1 || len(containing.Items[0].Value.Clusters) != 1 || containing.Items[0].Value.Clusters[0].StableID != clusterSet.Clusters[0].StableID {
 		t.Fatalf("member cluster = %+v, err=%v", containing, err)
+	}
+
+	neighbors, err := reader.(*MCPReader).FindNeighbors(ctx, mcpcontract.FindNeighborsInput{
+		Threads: []mcpcontract.ThreadRef{
+			{Owner: "owner", Repo: "repo", Kind: member.Kind, Number: member.Number},
+			{Owner: "owner", Repo: "missing", Kind: "issue", Number: 1},
+		},
+		Limit: 5,
+	})
+	if err != nil {
+		t.Fatalf("find neighbors: %v", err)
+	}
+	if neighbors.Status != "partial" || len(neighbors.Items) != 2 || neighbors.Items[0].Value == nil || neighbors.Items[1].Reason != "repository_not_indexed" {
+		t.Fatalf("neighbor batch = %+v", neighbors)
 	}
 
 	cov, err := reader.GetCoverage(ctx, mcpcontract.GetCoverageInput{Targets: []mcpcontract.CoverageTarget{{Owner: "owner", Repo: "repo"}}})

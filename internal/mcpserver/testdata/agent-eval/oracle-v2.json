@@ -1,6 +1,6 @@
 {
   "version": "agent-tool-eval-oracle.v2",
-  "fixture_revision": "agent-contract-v4",
+  "fixture_revision": "agent-contract-v5",
   "scenarios": [
     {
       "id": "newest_music_thread",
@@ -28,6 +28,17 @@
       "tempting_wrong_path": "Call corpus.build_repository_dossier before reading.",
       "acceptable_tools": ["corpus.get_repository_dossier"],
       "forbidden_tools": ["corpus.build_repository_dossier", "github.sync_repository_metadata"],
+      "minimum_semantic_score": 0.8
+    },
+    {
+      "id": "repository_dossier_availability",
+      "correct_conclusion": "Return one ordered repository batch containing stored metadata and dossier availability, while qualifying unavailable repositories.",
+      "required_evidence": ["corpus.get_repositories receives all three repository references in one bounded call.", "Complete items report dossier_status and dossier_as_of when available.", "Unavailable items retain item-level status and recovery guidance."],
+      "critical_discriminator": "Comparing dossier availability does not require loading each full dossier or performing any write or network operation.",
+      "tempting_wrong_path": "Fan out three corpus.get_repository_dossier calls and retry not-found results with build or sync tools.",
+      "acceptable_tools": ["corpus.get_repositories"],
+      "forbidden_tools": ["corpus.get_repository_dossier", "corpus.build_repository_dossier", "github.sync_repository_metadata"],
+      "expected_max_tool_calls": 1,
       "minimum_semantic_score": 0.8
     },
     {

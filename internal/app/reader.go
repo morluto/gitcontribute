@@ -11,7 +11,10 @@ import (
 	"github.com/morluto/gitcontribute/internal/dossier"
 )
 
-var errRepositoryNotFound = errors.New("repository not found")
+var (
+	errRepositoryNotFound = errors.New("repository not found")
+	errThreadNotFound     = errors.New("thread not found")
+)
 
 type corpusReader struct {
 	s *Service

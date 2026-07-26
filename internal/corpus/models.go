@@ -219,6 +219,14 @@ type DossierRecord struct {
 	CreatedAt       time.Time
 }
 
+// DossierMetadata is the small latest-snapshot projection needed by bounded
+// repository reads.
+type DossierMetadata struct {
+	RepositoryID int64
+	AsOf         time.Time
+	GeneratedAt  time.Time
+}
+
 // DossierSource is one exact source recorded for a dossier.
 type DossierSource struct {
 	ID         int64

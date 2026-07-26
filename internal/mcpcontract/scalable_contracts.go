@@ -125,6 +125,8 @@ type TypedRepositoryOutput struct {
 	Owner         string                   `json:"owner"`
 	Repo          string                   `json:"repo"`
 	Metadata      RepositoryMetadataOutput `json:"metadata"`
+	DossierStatus string                   `json:"dossier_status" jsonschema:"Persisted dossier availability: available or missing"`
+	DossierAsOf   string                   `json:"dossier_as_of,omitempty" jsonschema:"As-of timestamp of the latest persisted dossier"`
 	Description   *string                  `json:"description"`
 	DefaultBranch *string                  `json:"default_branch"`
 	Language      *string                  `json:"language"`

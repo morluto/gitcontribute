@@ -30,6 +30,11 @@ func TestBatchReadsReturnRequestedRepositoriesThreadsAndCoverage(t *testing.T) {
 	if err := c.AdvanceFacet(ctx, repo.ID, nil, "metadata", now, true, 0); err != nil {
 		t.Fatal(err)
 	}
+	for i, asOf := range []time.Time{now.Add(-time.Hour), now} {
+		if _, err := c.SaveDossier(ctx, repo.ID, repo.Owner, repo.Name, "sha", asOf, `{}`, `{}`, now.Add(time.Duration(i)*time.Minute), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	repositories, err := c.GetRepositoriesBatch(ctx, []RepositoryKey{
 		{Owner: "missing", Name: "repo"},
@@ -73,6 +78,16 @@ func TestBatchReadsReturnRequestedRepositoriesThreadsAndCoverage(t *testing.T) {
 	if got := coverage[RepositoryFacetKey{RepositoryID: repo.ID, Facet: "metadata"}]; got == nil || !got.Complete {
 		t.Fatalf("coverage = %+v", got)
 	}
+	dossiers, err := c.GetLatestDossierMetadataBatch(ctx, []int64{repo.ID, repo.ID + 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dossiers[repo.ID]; !got.AsOf.Equal(now) {
+		t.Fatalf("dossier metadata = %+v", got)
+	}
+	if _, ok := dossiers[repo.ID+100]; ok {
+		t.Fatal("unexpected dossier metadata for missing repository")
+	}
 }
 
 func TestBatchReadsRejectOversizedInputs(t *testing.T) {
@@ -90,5 +105,8 @@ func TestBatchReadsRejectOversizedInputs(t *testing.T) {
 	}
 	if _, err := c.ListRepositoryCoverageBatch(ctx, make([]int64, maxBatchReadItems+1), []string{"metadata"}); err == nil || !strings.Contains(err.Error(), "cannot exceed 100") {
 		t.Fatalf("coverage batch error = %v", err)
+	}
+	if _, err := c.GetLatestDossierMetadataBatch(ctx, make([]int64, maxBatchReadItems+1)); err == nil || !strings.Contains(err.Error(), "cannot exceed 100") {
+		t.Fatalf("dossier metadata batch error = %v", err)
 	}
 }

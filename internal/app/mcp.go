@@ -235,14 +235,46 @@ func (r *MCPReader) Dossier(ctx context.Context, in mcpcontract.RepoInput) (mcpc
 	if err := ref.Validate(); err != nil {
 		return mcpcontract.DossierOutput{}, err
 	}
-	if _, err := r.openReadOnlyCorpus(ctx); err != nil {
+	c, err := r.openReadOnlyCorpus(ctx)
+	if err != nil {
 		return mcpcontract.DossierOutput{}, err
 	}
-	d, err := r.GetRepositoryDossier(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
+	repository, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
 	if err != nil {
-		if errors.Is(err, errDossierNotFound) {
-			return mcpcontract.DossierOutput{}, failure.NotFound(nil)
-		}
+		return mcpcontract.DossierOutput{}, err
+	}
+	if repository == nil {
+		return mcpcontract.DossierOutput{}, mcpcontract.Unavailable(
+			"repository_not_indexed",
+			fmt.Sprintf("Repository %s is not present in the local corpus.", ref),
+			mcpcontract.SuggestedAction{
+				Tool:   mcpcontract.ToolSyncRepositoryMetadata,
+				Reason: "Persist repository metadata before requesting local derived artifacts.",
+				Arguments: map[string]any{
+					"repositories": []map[string]string{{"owner": ref.Owner, "repo": ref.Repo}},
+				},
+			},
+		)
+	}
+	record, sources, err := c.GetDossier(ctx, ref.Owner, ref.Repo)
+	if err != nil {
+		return mcpcontract.DossierOutput{}, fmt.Errorf("get dossier: %w", err)
+	}
+	if record == nil {
+		return mcpcontract.DossierOutput{}, mcpcontract.Unavailable(
+			"dossier_not_persisted",
+			fmt.Sprintf("No persisted dossier exists for %s.", ref),
+			mcpcontract.SuggestedAction{
+				Tool:   mcpcontract.ToolGetRepositories,
+				Reason: "Read available repository metadata without creating local state.",
+				Arguments: map[string]any{
+					"repositories": []map[string]string{{"owner": ref.Owner, "repo": ref.Repo}},
+				},
+			},
+		)
+	}
+	d, err := dossierFromRecord(record, sources)
+	if err != nil {
 		return mcpcontract.DossierOutput{}, err
 	}
 	return dossierToMCPOutput(d), nil
@@ -551,29 +583,88 @@ func normalizeMCPID(field, value string) (string, error) {
 	return value, nil
 }
 
-// FindClusters lists duplicate-candidate clusters for a repository from the
-// local corpus without recomputing them.
+// FindClusters lists duplicate-candidate clusters for bounded repository
+// targets from the local corpus without recomputing them.
 func (r *MCPReader) FindClusters(ctx context.Context, in mcpcontract.FindClustersInput) (mcpcontract.FindClustersOutput, error) {
-	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
-	if err := ref.Validate(); err != nil {
-		return mcpcontract.FindClustersOutput{}, err
+	if len(in.Targets) < 1 || len(in.Targets) > 20 {
+		return mcpcontract.FindClustersOutput{}, mcpcontract.InvalidArgument("targets", "must contain 1 to 20 items", map[string]any{
+			"targets": []map[string]string{{"owner": "acme", "repo": "rocket"}},
+		})
+	}
+	if in.Limit == 0 {
+		in.Limit = 20
 	}
 	if in.Limit <= 0 || in.Limit > 100 {
-		return mcpcontract.FindClustersOutput{}, errors.New("limit must be between 1 and 100")
+		return mcpcontract.FindClustersOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpcontract.FindClustersOutput{}, err
 	}
-	if (in.Kind == "") != (in.Number == 0) {
-		return mcpcontract.FindClustersOutput{}, errors.New("kind and number must be provided together")
+	out := mcpcontract.FindClustersOutput{
+		Status: "complete",
+		Items:  make([]mcpcontract.BatchItem[mcpcontract.ClusterSetOutput], len(in.Targets)),
 	}
-	if in.Kind != "" {
-		projection, err := c.GetClusterProjectionForMemberWithIdentity(ctx, clustering.MemberRef{Kind: in.Kind, Owner: in.Owner, Repo: in.Repo, Number: in.Number})
-		if err != nil {
-			return mcpcontract.FindClustersOutput{}, fmt.Errorf("find cluster member: %w", err)
+	seen := make(map[string]struct{}, len(in.Targets))
+	for i, target := range in.Targets {
+		key := clusterTargetKey(target)
+		item := mcpcontract.BatchItem[mcpcontract.ClusterSetOutput]{Key: key, Status: "complete"}
+		if err := validateClusterTarget(target); err != nil {
+			item.Status, item.Reason, item.Message = "failed", "invalid_reference", err.Error()
+			out.Status = "partial"
+			out.Items[i] = item
+			continue
 		}
-		out := mcpcontract.FindClustersOutput{Owner: in.Owner, Repo: in.Repo}
+		normalizedKey := strings.ToLower(key)
+		if _, duplicate := seen[normalizedKey]; duplicate {
+			return mcpcontract.FindClustersOutput{}, mcpcontract.InvalidArgument("targets", "must not contain duplicate targets", map[string]any{
+				"targets": []map[string]string{{"owner": "acme", "repo": "rocket"}},
+			})
+		}
+		seen[normalizedKey] = struct{}{}
+		value, err := findClustersTarget(ctx, c, target, in.Limit)
+		switch {
+		case err == nil:
+			item.Value = &value
+		case errors.Is(err, errRepositoryNotFound):
+			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", err.Error()
+			item.NextAction = "Call github.sync_repository_metadata for this repository."
+			out.Status = "partial"
+		case errors.Is(err, errThreadNotFound):
+			item.Status, item.Reason, item.Message = "unavailable", "thread_not_indexed", err.Error()
+			item.NextAction = "Call github.sync_threads for this exact thread."
+			out.Status = "partial"
+		default:
+			item.Status, item.Reason, item.Message = "failed", "read_failed", err.Error()
+			out.Status = "partial"
+		}
+		out.Items[i] = item
+	}
+	return out, nil
+}
+
+func findClustersTarget(ctx context.Context, c *corpus.Corpus, target mcpcontract.ClusterTarget, limit int) (mcpcontract.ClusterSetOutput, error) {
+	ref := domain.RepoRef{Owner: target.Owner, Repo: target.Repo}
+	repository, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	if err != nil {
+		return mcpcontract.ClusterSetOutput{}, err
+	}
+	if repository == nil {
+		return mcpcontract.ClusterSetOutput{}, fmt.Errorf("%w: %s", errRepositoryNotFound, ref)
+	}
+	if target.Kind != "" {
+		thread, err := c.GetThread(ctx, repository.ID, target.Kind, target.Number)
+		if err != nil {
+			return mcpcontract.ClusterSetOutput{}, err
+		}
+		if thread == nil {
+			return mcpcontract.ClusterSetOutput{}, fmt.Errorf("%w: %s#%d", errThreadNotFound, ref, target.Number)
+		}
+		projection, err := c.GetClusterProjectionForMemberWithIdentity(ctx, clustering.MemberRef{Kind: target.Kind, Owner: target.Owner, Repo: target.Repo, Number: target.Number})
+		if err != nil {
+			return mcpcontract.ClusterSetOutput{}, fmt.Errorf("find cluster member: %w", err)
+		}
+		out := mcpcontract.ClusterSetOutput{Owner: target.Owner, Repo: target.Repo}
 		if len(projection.Clusters) > 0 {
 			out.Total = 1
 			out.Clusters = []mcpcontract.ClusterOutput{clusterToMCP(projection.Clusters[0], 20)}
@@ -583,13 +674,13 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpcontract.FindCluster
 		}
 		return out, nil
 	}
-	projection, err := c.ListClusterProjection(ctx, ref, clustering.ClusterOpen, in.Limit)
+	projection, err := c.ListClusterProjection(ctx, ref, clustering.ClusterOpen, limit)
 	if err != nil {
-		return mcpcontract.FindClustersOutput{}, fmt.Errorf("list clusters: %w", err)
+		return mcpcontract.ClusterSetOutput{}, fmt.Errorf("list clusters: %w", err)
 	}
-	out := mcpcontract.FindClustersOutput{
-		Owner:     in.Owner,
-		Repo:      in.Repo,
+	out := mcpcontract.ClusterSetOutput{
+		Owner:     target.Owner,
+		Repo:      target.Repo,
 		Total:     projection.Total,
 		Truncated: projection.Truncated,
 		Clusters:  make([]mcpcontract.ClusterOutput, len(projection.Clusters)),
@@ -603,23 +694,107 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpcontract.FindCluster
 	return out, nil
 }
 
-// FindNeighbors ranks similar local threads without network access.
+func validateClusterTarget(target mcpcontract.ClusterTarget) error {
+	if err := (domain.RepoRef{Owner: target.Owner, Repo: target.Repo}).Validate(); err != nil {
+		return err
+	}
+	if (target.Kind == "") != (target.Number == 0) {
+		return errors.New("kind and number must be provided together")
+	}
+	if target.Kind != "" && target.Kind != "issue" && target.Kind != "pull_request" {
+		return errors.New("kind must be issue or pull_request")
+	}
+	if target.Number < 0 {
+		return errors.New("number must be positive")
+	}
+	return nil
+}
+
+func clusterTargetKey(target mcpcontract.ClusterTarget) string {
+	key := target.Owner + "/" + target.Repo
+	if target.Kind != "" && target.Number > 0 {
+		return fmt.Sprintf("%s:%s#%d", key, target.Kind, target.Number)
+	}
+	return key
+}
+
+// FindNeighbors ranks similar local threads in input order without network
+// access.
 func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpcontract.FindNeighborsInput) (mcpcontract.FindNeighborsOutput, error) {
-	result, err := r.Neighbors(ctx, contracts.RepoRef{Owner: in.Owner, Repo: in.Repo}, in.Kind, in.Number, in.Limit)
-	if err != nil {
-		return mcpcontract.FindNeighborsOutput{}, err
+	if len(in.Threads) < 1 || len(in.Threads) > 20 {
+		return mcpcontract.FindNeighborsOutput{}, mcpcontract.InvalidArgument("threads", "must contain 1 to 20 items", map[string]any{
+			"threads": []map[string]any{{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 1}},
+		})
+	}
+	if in.Limit == 0 {
+		in.Limit = 10
+	}
+	if in.Limit < 1 || in.Limit > 100 {
+		return mcpcontract.FindNeighborsOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 10})
 	}
 	out := mcpcontract.FindNeighborsOutput{
-		Owner: in.Owner, Repo: in.Repo, Kind: result.Kind, Number: result.Number, SourceRevision: result.SourceRevision,
-		Neighbors: make([]mcpcontract.NeighborOutput, len(result.Neighbors)),
+		Status: "complete",
+		Items:  make([]mcpcontract.BatchItem[mcpcontract.NeighborSetOutput], len(in.Threads)),
 	}
-	for i, neighbor := range result.Neighbors {
-		out.Neighbors[i] = mcpcontract.NeighborOutput{
-			Kind: neighbor.Kind, Owner: neighbor.Owner, Repo: neighbor.Repo, Number: neighbor.Number,
-			Title: neighbor.Title, State: neighbor.State, Score: neighbor.Score, Reason: neighbor.Reason,
+	seen := make(map[string]struct{}, len(in.Threads))
+	for i, thread := range in.Threads {
+		key := fmt.Sprintf("%s/%s:%s#%d", thread.Owner, thread.Repo, thread.Kind, thread.Number)
+		item := mcpcontract.BatchItem[mcpcontract.NeighborSetOutput]{Key: key, Status: "complete"}
+		if err := validateSimilarityThread(thread); err != nil {
+			item.Status, item.Reason, item.Message = "failed", "invalid_reference", err.Error()
+			out.Status = "partial"
+			out.Items[i] = item
+			continue
 		}
+		normalizedKey := strings.ToLower(key)
+		if _, duplicate := seen[normalizedKey]; duplicate {
+			return mcpcontract.FindNeighborsOutput{}, mcpcontract.InvalidArgument("threads", "must not contain duplicate threads", map[string]any{
+				"threads": []map[string]any{{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 1}},
+			})
+		}
+		seen[normalizedKey] = struct{}{}
+		result, err := r.Neighbors(ctx, contracts.RepoRef{Owner: thread.Owner, Repo: thread.Repo}, thread.Kind, thread.Number, in.Limit)
+		switch {
+		case err == nil:
+			value := mcpcontract.NeighborSetOutput{
+				Owner: thread.Owner, Repo: thread.Repo, Kind: result.Kind, Number: result.Number, SourceRevision: result.SourceRevision,
+				Neighbors: make([]mcpcontract.NeighborOutput, len(result.Neighbors)),
+			}
+			for j, neighbor := range result.Neighbors {
+				value.Neighbors[j] = mcpcontract.NeighborOutput{
+					Kind: neighbor.Kind, Owner: neighbor.Owner, Repo: neighbor.Repo, Number: neighbor.Number,
+					Title: neighbor.Title, State: neighbor.State, Score: neighbor.Score, Reason: neighbor.Reason,
+				}
+			}
+			item.Value = &value
+		case errors.Is(err, errRepositoryNotFound):
+			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", err.Error()
+			item.NextAction = "Call github.sync_repository_metadata for this repository."
+			out.Status = "partial"
+		case errors.Is(err, errThreadNotFound):
+			item.Status, item.Reason, item.Message = "unavailable", "thread_not_indexed", err.Error()
+			item.NextAction = "Call github.sync_threads for this exact thread."
+			out.Status = "partial"
+		default:
+			item.Status, item.Reason, item.Message = "failed", "read_failed", err.Error()
+			out.Status = "partial"
+		}
+		out.Items[i] = item
 	}
 	return out, nil
+}
+
+func validateSimilarityThread(thread mcpcontract.ThreadRef) error {
+	if err := (domain.RepoRef{Owner: thread.Owner, Repo: thread.Repo}).Validate(); err != nil {
+		return err
+	}
+	if thread.Kind != "issue" && thread.Kind != "pull_request" {
+		return errors.New("kind must be issue or pull_request")
+	}
+	if thread.Number <= 0 {
+		return errors.New("number must be positive")
+	}
+	return nil
 }
 
 // GetCoverage returns bounded, input-ordered facet coverage without network access.

@@ -85,7 +85,7 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[SearchThreadsInput, mcpcontract.SearchOutput]{
 		name: mcpcontract.ToolSearchThreads, title: "Search stored issues and pull requests",
-		description: "Search stored issue and PR titles, labels, bodies, and hydrated text. Terms use strict all-term matching by default; retry with match_mode=any for bounded broader recall. Compact view omits bodies; hydrate exact finalists with corpus.get_threads. Never contacts GitHub.",
+		description: "Search stored issue and PR titles, labels, bodies, and hydrated text. Terms use strict all-term matching by default; retry with match_mode=any for bounded broader recall. Compact view omits bodies; read exact finalists with corpus.get_threads, and use github.hydrate_threads only for missing child facets. Never contacts GitHub.",
 		annotations: readOnly, input: inputSchema[SearchThreadsInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 			setEnum(schema, "state", "open", "closed")
@@ -101,7 +101,7 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[GetRepositoryDossierInput, mcpcontract.DossierOutput]{
 		name: mcpcontract.ToolGetRepositoryDossier, title: "Get repository dossier",
-		description: "Read the latest persisted source-backed dossier for one repository. Use " + mcpcontract.ToolBuildRepositoryDossier + " only when the local dossier must be regenerated; this read never performs that write.",
+		description: "Read the latest persisted source-backed dossier for one known repository finalist. Do not use this scalar tool to discover or compare repositories; call " + mcpcontract.ToolGetRepositories + " first to inspect repository and dossier availability in one batch. Use " + mcpcontract.ToolBuildRepositoryDossier + " only when a local dossier must be explicitly regenerated; this read never performs that write.",
 		annotations: readOnly, input: inputSchema[GetRepositoryDossierInput](noSchemaCustomization),
 		output: outputSchema[mcpcontract.DossierOutput]("Persisted source-backed repository dossier."), handler: s.getRepositoryDossier,
 	})

@@ -39,12 +39,14 @@ and sampling policy are made reproducible outside the unit-test suite.
 ## Optional model-in-the-loop suite
 
 The paired v2 fixtures under `internal/mcpserver/testdata/agent-eval` preserve
-three real failure modes: confusing relevance with newest order, treating
-repository metadata as README coverage, and silently rebuilding a persisted
-dossier. Give the candidate only `public-v2.json` and the seeded MCP server.
-Keep `oracle-v2.json` outside its filesystem and context. A separate reviewer
-scores semantic correctness, required evidence, the critical discriminator,
-and uncertainty before comparing tool calls, response bytes, or latency.
+five real failure modes: confusing relevance with newest order, treating
+repository metadata as README coverage, silently rebuilding a persisted
+dossier, fanning out scalar dossier reads when only availability is needed, and
+manually composing reads for an exact issue set. Give the candidate only
+`public-v2.json` and the seeded MCP server. Keep `oracle-v2.json` outside its
+filesystem and context. A separate reviewer scores semantic correctness,
+required evidence, the critical discriminator, and uncertainty before
+comparing tool calls, response bytes, or latency.
 
 Use the same model, sampling settings, corpus fixture revision, toolsets, and
 read-only mode for baseline/candidate comparisons. Save initialize, tools/list,

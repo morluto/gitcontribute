@@ -45,8 +45,16 @@ request-specific warnings, semantic `repository:owner/name` references, and a
 non-mandatory suggested thread-sync call. Advanced provider syntax uses the
 explicit `raw_query` field; there is no deprecated alias.
 - `github.sync_repository_metadata` refreshes facts for known repositories only.
-- `corpus.get_repositories`, `corpus.get_threads`,
-  `corpus.rank_threads`, and `corpus.find_precedents` are offline.
+- `corpus.get_repositories` returns stored metadata plus `dossier_status` and
+  `dossier_as_of` for up to 100 repositories. Use that batch to compare
+  candidates and dossier availability; load a full persisted dossier only for
+  a known finalist with `corpus.get_repository_dossier`.
+- `corpus.get_repositories`, `corpus.get_threads`, `corpus.find_clusters`,
+  `corpus.find_neighbors`, `corpus.rank_threads`, and
+  `corpus.find_precedents` are offline.
+- `corpus.find_clusters` and `corpus.find_neighbors` accept up to 20 repository
+  or source-thread targets respectively. Their ordered item results isolate
+  missing or invalid targets instead of forcing scalar retry loops.
 - `corpus.rank_threads` requires one to 50 repositories. Its derived ranking is
   intentionally non-paginated; inspect `total` and `truncated`, then raise the
   limit or narrow the repository set when more candidates are needed. Per-repo

@@ -25,6 +25,18 @@ func InvalidArgument(field, message string, example map[string]any) error {
 	return &ToolError{Code: "invalid_argument", Field: field, Message: message, Example: example}
 }
 
+// Unavailable reports an agent-readable terminal state with explicit recovery
+// actions. It is used when retrying the same read cannot make the object
+// available without a distinct acquisition or build step.
+func Unavailable(code, message string, actions ...SuggestedAction) error {
+	return &ToolError{
+		Code:             code,
+		Message:          message,
+		Retryable:        false,
+		SuggestedActions: append([]SuggestedAction(nil), actions...),
+	}
+}
+
 // Canonical MCP tool names group operations by capability and side-effect boundary.
 const (
 	ToolSearchRepositories       = "corpus.search_repositories"
