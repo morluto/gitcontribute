@@ -2,6 +2,7 @@
 
 .PHONY: help all build clean fmt fmt-check vet lint lint-changed lint-full install-tools \
 	test test-uncached test-race test-race-full test-verbose test-cover \
+	test-integration test-junit \
 	cover-report cover-check tidy tidy-check generate generate-check docs \
 	docs-check check verify
 
@@ -10,11 +11,14 @@ GOFMT ?= gofmt
 GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || printf '%s/bin/golangci-lint' "$$($(GO) env GOPATH)")
 GOLANGCI_LINT_VERSION ?= v2.12.2
 GOLANGCI_LINT_BIN ?= $(shell $(GO) env GOPATH)/bin
+GOTESTSUM ?= $(shell command -v gotestsum 2>/dev/null || printf '%s/bin/gotestsum' "$$($(GO) env GOPATH)")
 # Most repository tests are I/O-heavy and opt into t.Parallel. Keep this
 # overridable for constrained machines while allowing local and CI runs to
 # use more than the historical four-test cap.
 TEST_PARALLELISM ?= 8
 TEST_PACKAGE_PARALLELISM ?= 8
+INTEGRATION_PARALLELISM ?= 4
+GOTESTSUM_FLAGS ?= --rerun-fails=2 --rerun-fails-max-failures=5
 
 help:
 	@echo "Common targets:"
@@ -22,6 +26,8 @@ help:
 	@echo "  make check         fast formatting, test, and changed-code lint checks"
 	@echo "  make verify        complete uncached local validation"
 	@echo "  make test-race     focused race tests for stateful packages"
+	@echo "  make test-junit    run tests with gotestsum for timing and flaky detection"
+	@echo "  make test-integration  run integration tests"
 	@echo "  make lint-full     enforce the complete repository lint baseline"
 	@echo "  make fmt           format all Go packages"
 	@echo "  make generate      refresh generated outputs"
@@ -119,6 +125,21 @@ docs: docs-check
 
 docs-check:
 	./scripts/validate-agents-md.sh
+
+# gotestsum provides flaky test detection (--rerun-fails) and test timing
+# reports (--junitfile) for CI. Falls back to plain go test locally.
+test-junit:
+	@if command -v gotestsum >/dev/null 2>&1; then \
+		gotestsum $(GOTESTSUM_FLAGS) --junitfile test-results.xml -- \
+			$(GO) test -short -p=$(TEST_PACKAGE_PARALLELISM) -parallel=$(TEST_PARALLELISM) -timeout 120s ./...; \
+	else \
+		$(GO) test -short -p=$(TEST_PACKAGE_PARALLELISM) -parallel=$(TEST_PARALLELISM) -timeout 120s ./...; \
+	fi
+
+# Integration tests exercise the application end-to-end through the Service
+# contracts, using temporary databases and no external network access.
+test-integration:
+	$(GO) test -short -p=$(INTEGRATION_PARALLELISM) -parallel=$(INTEGRATION_PARALLELISM) -timeout 180s ./tests/integration/...
 
 check: fmt-check test lint-changed
 

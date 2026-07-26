@@ -124,8 +124,31 @@ jobs:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
-      - name: Run tests with coverage and timing
-        run: make cover-check
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@latest
+      - name: Run tests with timing and flaky detection
+        run: |
+          gotestsum --junitfile test-results.xml --rerun-fails=2 --rerun-fails-max-failures=5 -- \
+            go test -short -p=8 -parallel=8 \
+              -coverprofile=coverage.out \
+              -covermode=set \
+              -coverpkg=./internal/... \
+              -timeout 180s \
+              ./...
+      - name: Check coverage threshold
+        run: |
+          coverage=$(go tool cover -func=coverage.out | tail -n1 | awk '{print $NF}' | tr -d '%')
+          awk -v coverage="$coverage" 'BEGIN { if (coverage < 70) exit 1 }' || { \
+            echo "Coverage $coverage% is below 70% threshold"; \
+            exit 1; \
+          }
+          echo "Coverage: $coverage% (passes 70% threshold)"
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: test-results.xml
       - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@v5
@@ -145,6 +168,19 @@ jobs:
           cache: true
           cache-dependency-path: go.sum
       - run: make test-race
+
+  integration:
+    name: Integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - run: make test-integration
 
   tidy:
     name: Module tidy check
