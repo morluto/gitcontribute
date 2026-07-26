@@ -16,6 +16,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/managedbinary"
+	clientsetup "github.com/morluto/gitcontribute/internal/setup"
 	_ "modernc.org/sqlite"
 )
 
@@ -434,12 +435,12 @@ func TestUpgradeActivatesPrivateMCPRuntimeFromTargetRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	command, _, err := readCodexCommand(filepath.Join(home, ".codex", "config.toml"))
+	launcher, err := clientsetup.ReadCommandFile(clientsetup.Codex, filepath.Join(home, ".codex", "config.toml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if command != wantRuntime {
-		t.Fatalf("configured command = %q, want %q", command, wantRuntime)
+	if launcher.Command != wantRuntime {
+		t.Fatalf("configured command = %q, want %q", launcher.Command, wantRuntime)
 	}
 	if got, err := os.ReadFile(wantRuntime); err != nil || string(got) != "release-1.2.4" {
 		t.Fatalf("staged runtime = %q, %v", got, err)

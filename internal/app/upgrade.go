@@ -16,7 +16,6 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/managedbinary"
 	clientsetup "github.com/morluto/gitcontribute/internal/setup"
-	"github.com/pelletier/go-toml/v2"
 	"golang.org/x/mod/semver"
 )
 
@@ -424,6 +423,20 @@ func readPackageVersion(root string) string {
 	return normalizeVersion(pkg.Version)
 }
 
+func readUpgradeFile(path string) (_ []byte, err error) {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, root.Close()) }()
+	file, err := root.Open(filepath.Base(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { err = errors.Join(err, file.Close()) }()
+	return io.ReadAll(file)
+}
+
 func (s *Service) privateRuntimeStage(current, latest string) contracts.UpgradeStage {
 	stage := contracts.UpgradeStage{Name: "private-mcp-runtime"}
 	dataDir, err := s.paths.DataDir()
@@ -556,85 +569,11 @@ func inspectConfiguredClient(home string, client clientsetup.Client, current, la
 }
 
 func readClientCommand(client clientsetup.Client, home string) (string, []string, error) {
-	switch client {
-	case clientsetup.Codex:
-		return readCodexCommand(filepath.Join(home, ".codex", "config.toml"))
-	case clientsetup.Claude:
-		return readClaudeCommand(filepath.Join(home, ".claude.json"))
-	default:
-		return "", nil, fmt.Errorf("unsupported client %q", client)
-	}
-}
-
-func readCodexCommand(path string) (string, []string, error) {
-	data, err := readUpgradeFile(path)
+	launcher, err := clientsetup.ReadCommand(client, home)
 	if err != nil {
 		return "", nil, err
 	}
-	var cfg struct {
-		MCPServers map[string]struct {
-			Command string   `toml:"command"`
-			Args    []string `toml:"args"`
-		} `toml:"mcp_servers"`
-	}
-	if err := toml.Unmarshal(data, &cfg); err != nil {
-		return "", nil, err
-	}
-	server, ok := cfg.MCPServers["gitcontribute"]
-	if !ok {
-		return "", nil, errors.New("gitcontribute server not found in codex config")
-	}
-	return server.Command, server.Args, nil
-}
-
-func readUpgradeFile(path string) (_ []byte, err error) {
-	root, err := os.OpenRoot(filepath.Dir(path))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { err = errors.Join(err, root.Close()) }()
-	file, err := root.Open(filepath.Base(path))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { err = errors.Join(err, file.Close()) }()
-	return io.ReadAll(file)
-}
-
-func readClaudeCommand(path string) (string, []string, error) {
-	data, err := readUpgradeFile(path)
-	if err != nil {
-		return "", nil, err
-	}
-	var root map[string]any
-	if err := json.Unmarshal(data, &root); err != nil {
-		return "", nil, err
-	}
-	servers, ok := root["mcpServers"].(map[string]any)
-	if !ok {
-		return "", nil, errors.New("mcpServers is missing from claude config")
-	}
-	server, ok := servers["gitcontribute"].(map[string]any)
-	if !ok {
-		return "", nil, errors.New("gitcontribute server not found in claude config")
-	}
-	command, ok := server["command"].(string)
-	if !ok || command == "" {
-		return "", nil, errors.New("gitcontribute command is missing from claude config")
-	}
-	argsIn, ok := server["args"].([]any)
-	if !ok {
-		return "", nil, errors.New("gitcontribute args are missing from claude config")
-	}
-	args := make([]string, 0, len(argsIn))
-	for i, a := range argsIn {
-		s, ok := a.(string)
-		if !ok {
-			return "", nil, fmt.Errorf("gitcontribute args[%d] must be a string", i)
-		}
-		args = append(args, s)
-	}
-	return command, args, nil
+	return launcher.Command, launcher.Args, nil
 }
 
 func runtimeVersionFromPath(command string) string {

@@ -48,17 +48,12 @@ func ResolveNPMVersion(version string) (string, error) {
 }
 
 func configureClient(operation Operation, client Client, home string, launcher Launcher, dryRun bool) Result {
-	var path string
-	var status string
-	var err error
-	switch client {
-	case Codex:
-		path = filepath.Join(home, ".codex", "config.toml")
-		status, err = editCodex(path, operation, launcher, dryRun)
-	case Claude:
-		path = filepath.Join(home, ".claude.json")
-		status, err = editClaude(path, operation, launcher, dryRun)
+	adapter, err := clientAdapterFor(client)
+	if err != nil {
+		return Result{Client: client, Status: "failed", Error: err.Error()}
 	}
+	path := adapter.path(home)
+	status, err := adapter.configure(path, operation, launcher, dryRun)
 	result := Result{Client: client, Path: path, Status: status}
 	if err != nil {
 		result.Status = "failed"
