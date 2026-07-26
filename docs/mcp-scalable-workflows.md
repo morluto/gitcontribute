@@ -44,7 +44,10 @@ Search responses return the compiled provider `query`, a short interpretation,
 request-specific warnings, semantic `repository:owner/name` references, and a
 non-mandatory suggested thread-sync call. Advanced provider syntax uses the
 explicit `raw_query` field; there is no deprecated alias.
-- `github.sync_repository_metadata` refreshes facts for known repositories only.
+- `github.sync_repository_metadata` fetches and persists facts for explicit
+  repository identities, whether or not they are already present locally. Use
+  it to recover a `repository_not_indexed` result, then poll the returned job
+  before reading the repository again.
 - `corpus.get_repositories` returns stored metadata plus `dossier_status` and
   `dossier_as_of` for up to 100 repositories. Use that batch to compare
   candidates and dossier availability; load a full persisted dossier only for
@@ -159,6 +162,18 @@ jobs together with vectorized `jobs.get`, then retry only retryable items. Never
 interpret absent coverage as a zero, a passing check, or a lack of competing
 work. New job references carry a semantic `job:<id>` reference,
 `poll_after_ms`, and a machine-readable suggested `jobs.get` call.
+
+Repository and dossier absence have different recovery paths:
+
+- `repository_not_indexed` means no local repository projection exists. Call
+  `github.sync_repository_metadata`, poll the job with `jobs.get`, and then
+  retry the offline read.
+- `dossier_not_persisted` means the repository exists locally but has no saved
+  dossier. Use `corpus.get_repositories` for metadata and dossier availability;
+  call `corpus.build_repository_dossier` only when creating that local artifact
+  is actually required.
+
+Retrying `corpus.get_repository_dossier` alone cannot resolve either state.
 
 `corpus.get_coverage` accepts up to 100 ordered repository or exact-thread
 targets. `jobs.cancel` accepts up to 100 IDs and returns isolated item outcomes;

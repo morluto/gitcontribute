@@ -513,6 +513,8 @@ contract. Use typed nullable fields plus facet coverage:
     "observed_at": "...",
     "source_updated_at": "..."
   },
+  "dossier_status": "available",
+  "dossier_as_of": "...",
   "description": "...",
   "stars": 86581,
   "open_issues": 5818,
@@ -524,16 +526,11 @@ For an explicit but unsynchronized identity:
 
 ```json
 {
-  "owner": "vllm-project",
-  "repo": "vllm",
-  "metadata": {
-    "status": "missing",
-    "next_action": "Call github.sync_repository_metadata."
-  },
-  "description": null,
-  "stars": null,
-  "open_issues": null,
-  "archived": null
+  "key": "vllm-project/vllm",
+  "status": "unavailable",
+  "reason": "not_indexed",
+  "message": "repository is not present in the local corpus",
+  "next_action": "Call github.sync_repository_metadata for this repository."
 }
 ```
 

@@ -287,7 +287,7 @@ A scalable discovery flow is:
 
 ```text
 github.search_repositories -> corpus.get_repositories
-github.sync_repository_metadata -> corpus.get_repositories
+github.sync_repository_metadata -> jobs.get -> corpus.get_repositories
 -> research.query_deepwiki -> github.sync_threads
 -> corpus.rank_threads -> github.hydrate_threads
 -> workflow.prepare_issue_set
