@@ -162,7 +162,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read persisted MCP dossier: %v", err)
 	}
-	if stars := mcpDossier.Sections["stars"]; stars != 10 {
+	if stars := mcpDossier.Sections.Stars; stars != 10 {
 		t.Fatalf("MCP dossier stars = %v, want persisted value 10", stars)
 	}
 

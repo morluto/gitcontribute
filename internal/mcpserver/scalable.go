@@ -16,6 +16,7 @@ const serverInstructions = "Use advertised GitContribute tools for durable, sour
 	"Prefer corpus tools for offline reads; they never refresh data implicitly. " +
 	"GitHub tools perform explicit network reads and may update only the local corpus. " +
 	"Research tools return derived external context, never live GitHub state. " +
+	"The durable workflow is concern to investigation to hypothesis to opportunity to workspace to draft; use only the stages advertised by the active profile. " +
 	"Use workflow.prepare_issue_set when exact issue numbers already define the contribution scope. " +
 	"When an operation returns a job, poll advertised job tools in batches. " +
 	"Missing or truncated coverage is unknown, not negative evidence; retry only retryable batch items. " +
@@ -117,7 +118,7 @@ const serverInstructions = "Use advertised GitContribute tools for durable, sour
 
 func (s *Server) registerScalable() {
 	readOnly := readOnlyAnnotations()
-	addCatalogTool(s, catalogTool[mcpcontract.GetRepositoriesInput, mcpcontract.GetRepositoriesOutput]{name: mcpcontract.ToolGetRepositories, title: "Get stored repositories in one batch", description: "Read typed metadata, coverage, and persisted dossier availability for up to 100 repositories in input order. Use this for repository comparison and before scalar dossier drill-down. Missing metadata is returned as null with a sync next action; this offline tool never contacts GitHub.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.GetRepositoriesInput](func(sc *schemaBuilder) { setArrayBounds(sc, "repositories", 1, 100) }), output: outputSchema[mcpcontract.GetRepositoriesOutput]("Ordered repository batch with item-level status and dossier availability."), handler: s.getRepositories})
+	addCatalogTool(s, catalogTool[mcpcontract.GetRepositoriesInput, mcpcontract.GetRepositoriesOutput]{name: mcpcontract.ToolGetRepositories, title: "Get stored repositories in one batch", description: "Read metadata, coverage, and dossier availability for up to 100 stored repositories. Use for comparison before scalar dossier reads. Missing metadata includes a sync action. Offline.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.GetRepositoriesInput](func(sc *schemaBuilder) { setArrayBounds(sc, "repositories", 1, 100) }), output: outputSchema[mcpcontract.GetRepositoriesOutput]("Ordered repository batch with item-level status and dossier availability."), handler: s.getRepositories})
 	addCatalogTool(s, catalogTool[mcpcontract.GetThreadsInput, mcpcontract.GetThreadsOutput]{name: mcpcontract.ToolGetThreads, title: "Get stored threads in one batch", description: "Read up to 100 exact stored issues or pull requests in input order. Choose compact for triage and full only for finalists; this tool is offline.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.GetThreadsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 100)
 		setEnum(sc, "view", "compact", "full")
@@ -129,13 +130,13 @@ func (s *Server) registerScalable() {
 		setDefault(sc, "limit", 20)
 		setRange(sc, "max_results_per_repository", 1, 100)
 		setDefault(sc, "max_results_per_repository", 10)
-	}), output: rankOpportunitiesOutputSchema(), handler: s.rankOpportunities})
+	}), output: outputSchema[mcpcontract.RankOpportunitiesOutput]("Bounded cross-repository Radar ranking."), handler: s.rankOpportunities})
 	addCatalogTool(s, catalogTool[mcpcontract.FindPrecedentsInput, mcpcontract.FindPrecedentsOutput]{name: mcpcontract.ToolFindPrecedents, title: "Find historical issue and pull-request precedents", description: "Find similar closed issues and pull requests for up to 20 source threads, including completed, not-planned, duplicate, and merged evidence. This is an offline historical read, not a current opportunity search.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.FindPrecedentsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 20)
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 20)
 	}), output: outputSchema[mcpcontract.FindPrecedentsOutput]("Historical precedents grouped by source thread."), handler: s.findPrecedents})
-	addCatalogTool(s, catalogTool[mcpcontract.PrepareIssueSetInput, mcpcontract.PrepareIssueSetOutput]{name: mcpcontract.ToolPrepareIssueSet, title: "Prepare contribution evidence from exact issues", description: "Compose stored issue facts, coverage gaps, related work, merge-confirmed precedents, and conservative linkage candidates for 1-20 exact issues in one repository. This offline read creates no opportunity or draft and never claims that a diff satisfies an issue.", annotations: readOnly, supportedBy: supports[IssueSetReader], input: inputSchema[mcpcontract.PrepareIssueSetInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.PrepareIssueSetInput, mcpcontract.PrepareIssueSetOutput]{name: mcpcontract.ToolPrepareIssueSet, title: "Prepare contribution evidence from exact issues", description: "Compose stored facts, coverage gaps, related work, merged precedents, and linkage candidates for 1-20 exact issues. Prefer this to manual reads. Offline; creates no opportunity or draft.", annotations: readOnly, supportedBy: supports[IssueSetReader], input: inputSchema[mcpcontract.PrepareIssueSetInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "issue_numbers", 1, 20)
 		if numbers := property(sc, "issue_numbers"); numbers != nil {
 			numbers.UniqueItems = true
@@ -148,7 +149,7 @@ func (s *Server) registerScalable() {
 		setEnum(sc, "response_format", "concise", "detailed")
 		setDefault(sc, "response_format", "concise")
 	}), output: outputSchema[mcpcontract.PrepareIssueSetOutput]("Contribution-facing evidence for an exact stored issue set."), handler: s.prepareIssueSet})
-	addCatalogTool(s, catalogTool[mcpcontract.GetJobsInput, mcpcontract.GetJobsOutput]{name: mcpcontract.ToolGetJob, title: "Get durable jobs in one batch", description: "Poll up to 100 jobs. Use detailed only for a terminal finalist.", annotations: readOnly, input: inputSchema[mcpcontract.GetJobsInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.GetJobsInput, mcpcontract.GetJobsOutput]{name: mcpcontract.ToolGetJob, title: "Get durable jobs in one batch", description: "Poll up to 100 jobs with execution state, terminal outcome, progress, and artifact links. Use concise while polling and detailed after completion. Offline; executor blobs stay hidden.", annotations: readOnly, input: inputSchema[mcpcontract.GetJobsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "ids", 1, 100)
 		setEnum(sc, "response_format", "concise", "detailed")
 		setDefault(sc, "response_format", "concise")
@@ -167,13 +168,14 @@ func (s *Server) registerScalable() {
 		setDefault(sc, "page", 1)
 		setEnum(sc, "response_format", "concise", "detailed")
 		setDefault(sc, "response_format", "concise")
+		configureRepositorySearchModes(sc)
 	}), output: outputSchema[mcpcontract.SearchGitHubRepositoriesOutput]("Live repository search with persisted metadata."), handler: s.searchGitHubRepositories})
 	addCatalogTool(s, catalogTool[mcpcontract.SyncRepositoryContextInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncRepositoryContext, title: "Sync repository context in one batch", description: "Fetch current GitHub stars, metadata, and fixed contribution-guidance files for up to 100 explicit repositories; no threads or code.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncRepositoryContextInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "repositories", 1, 100)
 		setRange(sc, "max_requests", float64(repositorycontext.RequestCost()), 1000)
 		setDefault(sc, "max_requests", 1000)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a repository-context synchronization job."), handler: s.syncRepositoryContext})
-	addCatalogTool(s, catalogTool[mcpcontract.SyncThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncThreads, title: "Sync GitHub thread headers in one batch", description: "Sync GitHub issue and pull-request headers across repositories whose context is already stored; no metadata, policy files, discussions, reviews, checks, or code.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncThreadsInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.SyncThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncThreads, title: "Sync GitHub thread headers in one batch", description: "Fetch and persist GitHub issue or pull-request headers for up to 50 repositories or 100 exact threads. Use exact mode for known numbers and repository mode for discovery. Fetches no metadata, policy files, comments, reviews, checks, or code.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncThreadsInput](func(sc *schemaBuilder) {
 		setEnum(sc, "selection", "repositories", "threads")
 		property(sc, "repositories").MaxItems = jsonschema.Ptr(50)
 		property(sc, "threads").MaxItems = jsonschema.Ptr(100)
@@ -182,14 +184,59 @@ func (s *Server) registerScalable() {
 		setRange(sc, "limit_per_repository", 1, 1000)
 		setRange(sc, "max_requests", 1, 1000)
 		setDefault(sc, "max_requests", 1000)
+		configureSyncThreadModes(sc)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded thread-header synchronization job."), handler: s.syncThreads})
-	addCatalogTool(s, catalogTool[mcpcontract.HydrateThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolHydrateThreads, title: "Fetch selected GitHub thread facets", description: "Refresh each exact thread header, then fetch explicit comments, issue timelines, pull-request details, reviews, or review comments for up to 100 threads. Repository metadata must already be synced. Each item reports the header request plus facet requests. Timeline history is opt-in; hydrate only finalists after ranking.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.HydrateThreadsInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.HydrateThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolHydrateThreads, title: "Fetch comments and reviews for exact stored threads", description: "Refresh exact headers, comments, reviews, or other selected facets for up to 100 stored threads. Use only after ranking finalists; repository metadata must already exist. Performs GitHub reads and local writes, never GitHub mutation.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.HydrateThreadsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 100)
 		setArrayBounds(sc, "facets", 1, 5)
 		setArrayEnum(sc, "facets", facets.SelectableNames()...)
 		setRange(sc, "max_pages", 1, 100)
 		setDefault(sc, "max_pages", 3)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded exact-thread hydration job."), handler: s.hydrateThreads})
+	addCatalogTool(s, catalogTool[mcpcontract.MineRepositoryFixPatternsInput, mcpcontract.JobReference]{
+		name: mcpcontract.ToolMineRepositoryFixPatterns, title: "Mine repository fix patterns",
+		description: "Mine repository-level evidence about how similar problems were accepted, rejected, or superseded. Searches stored pull requests, refreshes only bounded unknown-state finalists, and persists a report separating explicit links from similarity. Prefer this over repeated search and hydration loops; not for live competing-work checks. Performs GitHub reads and local writes, never GitHub mutation.",
+		annotations: networkReadAnnotations(), supportedBy: supports[FixPatternWorkflow],
+		input: inputSchema[mcpcontract.MineRepositoryFixPatternsInput](func(sc *schemaBuilder) {
+			setArrayBounds(sc, "symptom_taxonomy", 1, 12)
+			setArrayBounds(sc, "merge_outcomes", 1, 5)
+			property(sc, "merge_outcomes").UniqueItems = true
+			setRange(sc, "candidate_limit", 1, 100)
+			setDefault(sc, "candidate_limit", mcpcontract.DefaultFixPatternCandidateLimit)
+			setRange(sc, "hydration_limit", 0, 100)
+			setDefault(sc, "hydration_limit", mcpcontract.DefaultFixPatternHydrationLimit)
+			setRange(sc, "representative_limit", 1, 20)
+			setDefault(sc, "representative_limit", mcpcontract.DefaultFixPatternRepresentativeLimit)
+			symptoms := property(sc, "symptom_taxonomy")
+			if symptoms != nil && symptoms.Items != nil {
+				name := symptoms.Items.Properties["name"]
+				if name != nil {
+					name.MinLength = jsonschema.Ptr(1)
+					name.Pattern = nonWhitespacePattern
+				}
+				terms := symptoms.Items.Properties["terms"]
+				if terms != nil {
+					terms.MinItems = jsonschema.Ptr(1)
+					terms.MaxItems = jsonschema.Ptr(12)
+					terms.UniqueItems = true
+					if terms.Items != nil {
+						terms.Items.MinLength = jsonschema.Ptr(1)
+						terms.Items.Pattern = nonWhitespacePattern
+					}
+				}
+			}
+			window := property(sc, "time_window")
+			if window != nil {
+				for _, field := range []string{"updated_after", "updated_before"} {
+					if value := window.Properties[field]; value != nil {
+						value.Format = "date-time"
+					}
+				}
+			}
+		}),
+		output:  outputSchema[mcpcontract.JobReference]("Reference to a bounded repository fix-pattern mining job."),
+		handler: s.mineRepositoryFixPatterns,
+	})
 	addCatalogTool(s, catalogTool[struct{}, mcpcontract.AuthenticatedIdentityOutput]{name: mcpcontract.ToolGetAuthenticatedIdentity, title: "Get authenticated GitHub identity", description: "Resolve the current read credential's GitHub login and stable ID before authored-PR discovery.", annotations: externalReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[struct{}](noSchemaCustomization), output: outputSchema[mcpcontract.AuthenticatedIdentityOutput]("Authenticated GitHub identity."), handler: s.getAuthenticatedIdentity})
 	addCatalogTool(s, catalogTool[mcpcontract.SyncAuthoredPullRequestsInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncAuthoredPullRequests, title: "Sync authored pull requests across GitHub", description: "Discover and persist up to 500 pull requests authored by the authenticated GitHub user across repositories. This reads only core thread state; use the dedicated exact-PR health tool afterward.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncAuthoredPullRequestsInput](func(sc *schemaBuilder) {
 		setEnum(sc, "state", "open", "closed", "all")
@@ -203,6 +250,15 @@ func (s *Server) registerScalable() {
 		setRange(sc, "max_pages", 1, 20)
 		setDefault(sc, "max_pages", 3)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a pull-request status synchronization job."), handler: s.syncPullRequestStatus})
+	addCatalogTool(s, catalogTool[mcpcontract.SyncPortfolioInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPortfolio, title: "Refresh the authored pull-request portfolio", description: "Discover pull requests authored by the active GitHub identity and refresh health for up to 100 resulting records in one durable job. Use this common portfolio refresh outcome instead of manually chaining identity, discovery, and exact-status tools; retain the primitives for partial recovery. This performs bounded network reads and writes only the local corpus.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncPortfolioInput](func(sc *schemaBuilder) {
+		setEnum(sc, "state", "open", "closed", "all")
+		setRange(sc, "limit", 1, 100)
+		setDefault(sc, "limit", 100)
+		setRange(sc, "discovery_max_requests", 2, 1000)
+		setDefault(sc, "discovery_max_requests", 1000)
+		setRange(sc, "status_max_pages", 1, 20)
+		setDefault(sc, "status_max_pages", 3)
+	}), output: outputSchema[mcpcontract.JobReference]("Reference to an authored portfolio synchronization job."), handler: s.syncPortfolio})
 	addCatalogTool(s, catalogTool[mcpcontract.ListPullRequestPortfolioInput, mcpcontract.ListPullRequestPortfolioOutput]{name: mcpcontract.ToolListPullRequestPortfolio, title: "List pull requests that need contributor attention", description: "List stored authored pull requests with deterministic attention from lifecycle, checks, review conversations, merge state, queue, and freshness. This offline read reports incomplete facets as unknown; sync authored PRs and health when stale.", annotations: readOnly, supportedBy: supports[PortfolioReader], input: inputSchema[mcpcontract.ListPullRequestPortfolioInput](func(sc *schemaBuilder) {
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit", 1, 100)
@@ -233,6 +289,7 @@ func (s *Server) registerScalable() {
 		setArrayBounds(sc, "repositories", 1, 10)
 		setRange(sc, "max_output_bytes", mcpcontract.DeepWikiMinOutputBytes, mcpcontract.DeepWikiMaxOutputBytes)
 		setDefault(sc, "max_output_bytes", mcpcontract.DeepWikiDefaultOutputBytes)
+		configureDeepWikiModes(sc)
 	}), output: outputSchema[mcpcontract.DeepWikiOutput]("Derived DeepWiki response with provenance."), handler: s.deepWiki})
 }
 
@@ -316,24 +373,50 @@ func (s *Server) getJobs(ctx context.Context, _ *mcp.CallToolRequest, in mcpcont
 				item.Message = err.Error()
 				out.Status = "partial"
 			} else {
+				normalizeJobExecution(&job)
 				if in.ResponseFormat == "concise" {
-					job.Request, job.Result = nil, nil
 					if job.Status == "succeeded" || job.Status == "failed" || job.Status == "cancelled" {
-						item.NextAction = "Call jobs.get with response_format=detailed to read the terminal payload."
+						item.NextAction = "Call jobs.get with response_format=detailed to read typed artifact and follow-up references."
 					}
 				}
 				item.Value = &job
 			}
 			out.Items[i] = item
 		}
-		return nil, out, nil
+		return linkedJobResources(out), out, nil
 	}
 	r, err := s.scalableReader()
 	if err != nil {
 		return nil, mcpcontract.GetJobsOutput{}, err
 	}
 	out, err := r.GetJobs(ctx, in)
-	return nil, out, err
+	if err != nil {
+		return nil, out, err
+	}
+	for i := range out.Items {
+		if out.Items[i].Value != nil {
+			normalizeJobExecution(out.Items[i].Value)
+		}
+	}
+	return linkedJobResources(out), out, nil
+}
+
+func normalizeJobExecution(job *mcpcontract.GetJobOutput) {
+	switch job.Status {
+	case "queued":
+		job.ExecutionState, job.Outcome = "queued", ""
+	case "running":
+		job.ExecutionState, job.Outcome = "running", ""
+	case "succeeded":
+		job.ExecutionState = "terminal"
+		if job.Outcome == "" {
+			job.Outcome = "succeeded"
+		}
+	case "failed":
+		job.ExecutionState, job.Outcome = "terminal", "failed"
+	case "cancelled":
+		job.ExecutionState, job.Outcome = "terminal", "cancelled"
+	}
 }
 func (s *Server) syncRepositoryContext(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SyncRepositoryContextInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
 	op, ok := s.reader.(GitHubOperator)
@@ -373,10 +456,9 @@ func (s *Server) searchGitHubRepositories(ctx context.Context, _ *mcp.CallToolRe
 
 func validateRepositorySearchInput(in mcpcontract.SearchGitHubRepositoriesInput) error {
 	raw := strings.TrimSpace(in.RawQuery)
-	structured := strings.TrimSpace(in.Text) != "" || len(in.MatchFields) > 0 || len(in.Topics) > 0 || strings.TrimSpace(in.Language) != "" || in.StarsMin != 0 || in.StarsMax != 0 || in.CreatedAfter != "" || in.CreatedBefore != "" || in.PushedAfter != "" || in.PushedBefore != "" || in.Archived != nil || in.Fork != nil
-	if raw != "" && structured {
-		return mcpcontract.InvalidArgument("raw_query", "cannot be combined with structured filters; choose one input mode", map[string]any{"raw_query": "is:public language:go stars:>=100"})
-	}
+	structured := strings.TrimSpace(in.Text) != "" || len(in.MatchFields) > 0 || len(in.Topics) > 0 || strings.TrimSpace(in.Language) != "" || in.StarsMin != nil || in.StarsMax != nil || in.CreatedAfter != "" || in.CreatedBefore != "" || in.PushedAfter != "" || in.PushedBefore != "" || in.Archived != nil || in.Fork != nil
+	// The SDK owns the raw-versus-structured shape. These checks retain only
+	// whitespace semantics that JSON Schema cannot express.
 	if raw == "" && !structured {
 		return mcpcontract.InvalidArgument("text", "provide raw_query or at least one structured filter", map[string]any{"text": "GitHub contribution research", "match_fields": []string{"name", "description"}})
 	}
@@ -386,21 +468,6 @@ func validateRepositorySearchInput(in mcpcontract.SearchGitHubRepositoriesInput)
 	return nil
 }
 func (s *Server) syncThreads(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SyncThreadsInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
-	if in.Selection != "repositories" && in.Selection != "threads" {
-		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("selection", "must be repositories or threads", map[string]any{"selection": "repositories"})
-	}
-	if in.Selection == "repositories" && len(in.Repositories) == 0 {
-		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("repositories", "are required in repository selection mode", map[string]any{"selection": "repositories", "repositories": []map[string]string{{"owner": "acme", "repo": "rocket"}}})
-	}
-	if in.Selection == "threads" && len(in.Threads) == 0 {
-		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("threads", "are required in thread selection mode", map[string]any{"selection": "threads", "threads": []map[string]any{{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 1}}})
-	}
-	if in.Selection == "repositories" && len(in.Threads) > 0 {
-		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("threads", "are not accepted in repository selection mode", nil)
-	}
-	if in.Selection == "threads" && (len(in.Repositories) > 0 || in.Kind != "" || in.State != "" || in.UpdatedAfter != "" || in.LimitPerRepository != 0) {
-		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("selection", "repository filters are not accepted in thread selection mode", nil)
-	}
 	for _, thread := range in.Threads {
 		if err := validateThreadRef(thread, false); err != nil {
 			return nil, mcpcontract.JobReference{}, err
@@ -428,6 +495,15 @@ func (s *Server) hydrateThreads(ctx context.Context, _ *mcp.CallToolRequest, in 
 		return nil, mcpcontract.JobReference{}, errors.New("batch thread hydration is not available")
 	}
 	out, err := op.HydrateThreads(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) mineRepositoryFixPatterns(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.MineRepositoryFixPatternsInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
+	operator, ok := s.reader.(FixPatternOperator)
+	if !ok {
+		return nil, mcpcontract.JobReference{}, errors.New("repository fix-pattern mining is not available")
+	}
+	out, err := operator.MineRepositoryFixPatterns(ctx, in)
 	return nil, out, err
 }
 func (s *Server) getAuthenticatedIdentity(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, mcpcontract.AuthenticatedIdentityOutput, error) {
@@ -466,6 +542,26 @@ func (s *Server) syncPullRequestStatus(ctx context.Context, _ *mcp.CallToolReque
 	out, err := op.SyncPullRequestStatus(ctx, in)
 	return nil, out, err
 }
+func (s *Server) syncPortfolio(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SyncPortfolioInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
+	if in.State == "" {
+		in.State = "open"
+	}
+	if in.Limit == 0 {
+		in.Limit = 100
+	}
+	if in.DiscoveryMaxRequests == 0 {
+		in.DiscoveryMaxRequests = 1000
+	}
+	if in.StatusMaxPages == 0 {
+		in.StatusMaxPages = 3
+	}
+	op, ok := s.reader.(GitHubOperator)
+	if !ok {
+		return nil, mcpcontract.JobReference{}, errors.New("portfolio synchronization is not available")
+	}
+	out, err := op.SyncPortfolio(ctx, in)
+	return nil, out, err
+}
 func (s *Server) indexRepositories(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.IndexRepositoriesInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
 	if len(in.Repositories) == 0 {
 		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("repositories", "are required", nil)
@@ -496,12 +592,6 @@ func (s *Server) deepWiki(ctx context.Context, _ *mcp.CallToolRequest, in mcpcon
 	if in.MaxOutputBytes < mcpcontract.DeepWikiMinOutputBytes || in.MaxOutputBytes > mcpcontract.DeepWikiMaxOutputBytes {
 		return nil, mcpcontract.DeepWikiOutput{}, mcpcontract.InvalidArgument("max_output_bytes", "must be between 1024 and 1048576", map[string]any{"max_output_bytes": mcpcontract.DeepWikiDefaultOutputBytes})
 	}
-	if (in.Action == "structure" || in.Action == "contents") && strings.TrimSpace(in.Repository) == "" {
-		return nil, mcpcontract.DeepWikiOutput{}, mcpcontract.InvalidArgument("repository", "is required for structure and contents", map[string]any{"repository": "owner/repo"})
-	}
-	if in.Action == "question" && (len(in.Repositories) == 0 || strings.TrimSpace(in.Question) == "") {
-		return nil, mcpcontract.DeepWikiOutput{}, mcpcontract.InvalidArgument("question", "repositories and question are required for question", map[string]any{"repositories": []string{"owner/repo"}, "question": "Where is search ranking implemented?"})
-	}
 	op, ok := s.reader.(ResearchReader)
 	if !ok {
 		return nil, mcpcontract.DeepWikiOutput{}, errors.New("DeepWiki is not available")
@@ -517,28 +607,4 @@ func setArrayBounds(schema *schemaBuilder, name string, minimum, maximum int) {
 	}
 	p.MinItems = jsonschema.Ptr(minimum)
 	p.MaxItems = jsonschema.Ptr(maximum)
-}
-
-func rankOpportunitiesOutputSchema() schemaDefinition {
-	definition := outputSchema[mcpcontract.RankOpportunitiesOutput]("Bounded cross-repository Radar ranking.")
-	setOutputPropertyRange(definition.schema, "score", 0, 100)
-	return definition
-}
-
-func setOutputPropertyRange(schema *jsonschema.Schema, name string, minimum, maximum float64) {
-	if schema == nil {
-		return
-	}
-	if field := schema.Properties[name]; field != nil {
-		field.Minimum = jsonschema.Ptr(minimum)
-		field.Maximum = jsonschema.Ptr(maximum)
-	}
-	for _, field := range schema.Properties {
-		setOutputPropertyRange(field, name, minimum, maximum)
-	}
-	setOutputPropertyRange(schema.Items, name, minimum, maximum)
-	setOutputPropertyRange(schema.AdditionalProperties, name, minimum, maximum)
-	for _, definition := range schema.Defs {
-		setOutputPropertyRange(definition, name, minimum, maximum)
-	}
 }

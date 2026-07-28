@@ -82,8 +82,11 @@ func TestAuthoredPullRequestSyncReusesSearchHeadersWithoutNPlusOne(t *testing.T)
 	if reader.listRequests != 0 || reader.prDetailRequests != 0 {
 		t.Fatalf("redundant reads: issue lists=%d PR details=%d", reader.listRequests, reader.prDetailRequests)
 	}
-	if out["requests"] != 2 || out["planned_requests"] != 2 || out["status"] != "complete" {
+	if out.Requests != 2 || out.PlannedRequests != 2 || out.Status != "complete" {
 		t.Fatalf("result = %+v", out)
+	}
+	if len(out.PullRequestTargets) != 2 || out.PullRequestTargets[0].Number != 2 || out.PullRequestTargets[1].Number != 3 {
+		t.Fatalf("discovered status targets = %+v", out.PullRequestTargets)
 	}
 	c, err := svc.openCorpus(ctx)
 	if err != nil {
@@ -128,8 +131,7 @@ func TestAuthoredPullRequestMinimumBudgetMakesSyncProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	repositories, ok := out["repositories"].([]map[string]any)
-	if !ok || len(repositories) != 1 || repositories[0]["status"] != "complete" || out["planned_requests"] != minimum || out["status"] != "complete" {
+	if len(out.Repositories) != 1 || out.Repositories[0].Status != "complete" || out.PlannedRequests != minimum || out.Status != "complete" {
 		t.Fatalf("minimum-budget result = %+v", out)
 	}
 }

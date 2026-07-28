@@ -291,21 +291,22 @@ type OpportunityListResult struct {
 
 // SearchOptions carries parameters for a local corpus search.
 type SearchOptions struct {
-	Kind         string
-	Repo         string
-	State        string
-	StateReason  string
-	Merged       *bool
-	Author       string
-	Association  string
-	Assignee     string
-	Labels       []string
-	UpdatedAfter time.Time
-	Limit        int
-	Cursor       string
-	Lens         string
-	Sort         string
-	MatchMode    string
+	Kind          string
+	Repo          string
+	State         string
+	StateReason   string
+	Merged        *bool
+	Author        string
+	Association   string
+	Assignee      string
+	Labels        []string
+	UpdatedAfter  time.Time
+	UpdatedBefore time.Time
+	Limit         int
+	Cursor        string
+	Lens          string
+	Sort          string
+	MatchMode     string
 }
 
 // InitResult is the result of initializing a local corpus.

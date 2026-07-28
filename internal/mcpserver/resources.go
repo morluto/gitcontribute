@@ -71,9 +71,22 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 		return readWorkflowResource(req)
 	case "lens":
 		return s.readLensResource(ctx, req)
+	case "fix-pattern-report":
+		return s.readFixPatternReportResource(ctx, req)
 	default:
 		return nil, mcp.ResourceNotFoundError(req.uri)
 	}
+}
+
+func (s *Server) readFixPatternReportResource(ctx context.Context, req resourceRequest) (mcpcontract.FixPatternReport, error) {
+	if len(req.parts) != 1 {
+		return mcpcontract.FixPatternReport{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	reader, ok := s.reader.(FixPatternReader)
+	if !ok {
+		return mcpcontract.FixPatternReport{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	return reader.GetFixPatternReport(ctx, req.parts[0])
 }
 
 func (s *Server) readRepositoryResource(ctx context.Context, req resourceRequest) (mcpcontract.RepositoryOutput, error) {

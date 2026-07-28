@@ -193,7 +193,7 @@ func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpcontract.FindNeighb
 			for j, neighbor := range result.Neighbors {
 				value.Neighbors[j] = mcpcontract.NeighborOutput{
 					Kind: neighbor.Kind, Owner: neighbor.Owner, Repo: neighbor.Repo, Number: neighbor.Number,
-					Title: neighbor.Title, State: neighbor.State, Score: neighbor.Score, Reason: neighbor.Reason,
+					Title: neighbor.Title, State: neighbor.State, Score: mcpcontract.SimilarityScore(neighbor.Score), Reason: neighbor.Reason,
 				}
 			}
 			item.Value = &value

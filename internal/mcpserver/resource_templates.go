@@ -2,10 +2,14 @@ package mcpserver
 
 import "github.com/modelcontextprotocol/go-sdk/mcp"
 
+type resourceTemplateDefinition struct {
+	template    string
+	name        string
+	description string
+}
+
 func (s *Server) registerResourceTemplates() {
-	templates := []struct {
-		template, name, description string
-	}{
+	templates := []resourceTemplateDefinition{
 		{"gitcontribute://repository/{owner}/{repo}", "Repository", "Local repository record"},
 		{"gitcontribute://thread/{owner}/{repo}/{kind}/{number}", "Thread", "Local issue or pull request"},
 		{"gitcontribute://threads/{owner}/{repo}/{number}", "Numbered thread", "Local issue or pull request with kind resolved from the corpus"},
@@ -18,12 +22,16 @@ func (s *Server) registerResourceTemplates() {
 		{"gitcontribute://workflow/contribution/{opportunity_id}", "Contribution workflow", "Safe contribution workflow resource links and prompts"},
 		{"gitcontribute://lens/{name}", "Lens", "Saved lens definition"},
 	}
+	if _, ok := s.reader.(FixPatternReader); ok {
+		templates = append(templates, resourceTemplateDefinition{
+			template: "gitcontribute://fix-pattern-report/{job_id}",
+			name:     "Fix-pattern report", description: "Typed repository contribution-pattern report produced by a durable workflow",
+		})
+	}
 	addResourceTemplates(s, templates)
 }
 
-func addResourceTemplates(s *Server, templates []struct {
-	template, name, description string
-}) {
+func addResourceTemplates(s *Server, templates []resourceTemplateDefinition) {
 	for _, t := range templates {
 		s.server.AddResourceTemplate(&mcp.ResourceTemplate{
 			URITemplate: t.template,

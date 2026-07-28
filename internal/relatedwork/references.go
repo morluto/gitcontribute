@@ -19,6 +19,10 @@ const (
 	RelationMentions = "mentions"
 	// RelationClaimsToClose is an explicit closing-keyword or GitHub closing-issue relationship.
 	RelationClaimsToClose = "claims_to_close"
+	// RelationReplaces means the source says it supersedes the referenced thread.
+	RelationReplaces = "replaces"
+	// RelationSupersededBy means the source says the referenced thread supersedes it.
+	RelationSupersededBy = "superseded_by"
 	// RelationDependsOn means the source states that it requires the referenced thread.
 	RelationDependsOn = "depends_on"
 	// RelationBlocks means the source states that it blocks the referenced thread.
@@ -33,6 +37,8 @@ const githubThreadReference = `((?:(?:https?://)?(?:www\.)?github\.com/[a-z0-9](
 
 var (
 	closingReferencePattern = regexp.MustCompile(`(?i)\b(?:close(?:s|d)?|fix(?:es|ed)?|resolve(?:s|d)?)\s*:?\s*` + githubThreadReference)
+	replacesPattern         = regexp.MustCompile(`(?i)\b(?:supersedes|replaces)\s*:?\s*` + githubThreadReference)
+	supersededByPattern     = regexp.MustCompile(`(?i)\b(?:superseded|replaced)\s+by\s*:?\s*` + githubThreadReference)
 	dependencyPattern       = regexp.MustCompile(`(?i)\b(?:depends?\s+on|blocked\s+by|requires?|prerequisite\s+is|based\s+on|stacked\s+(?:on|upon)(?:\s+top\s+of)?|built\s+on|after)\s*:?\s*` + githubThreadReference)
 	blocksPattern           = regexp.MustCompile(`(?i)\b(?:blocks?|unblocks?|prerequisite\s+for)\s*:?\s*` + githubThreadReference)
 )
@@ -45,6 +51,7 @@ type Reference struct {
 	Kind     domain.ThreadKind
 	Number   int
 	Relation string
+	Evidence string
 }
 
 // Extract returns sorted, unique references from unquoted prose. Fenced code,
@@ -53,9 +60,13 @@ type Reference struct {
 func Extract(text string, defaultRepo domain.RepoRef) []Reference {
 	text = unquotedMarkdown(text)
 	refs := similarity.ExtractRefs(text, defaultRepo)
-	relations := make(map[similarity.ThreadRef]string, len(refs))
+	type relationEvidence struct {
+		relation string
+		evidence string
+	}
+	relations := make(map[similarity.ThreadRef]relationEvidence, len(refs))
 	for _, ref := range refs {
-		relations[ref] = RelationExplicitReference
+		relations[ref] = relationEvidence{relation: RelationExplicitReference}
 	}
 	applyRelation := func(pattern *regexp.Regexp, relation string) {
 		for _, match := range pattern.FindAllStringSubmatch(text, -1) {
@@ -63,19 +74,25 @@ func Extract(text string, defaultRepo domain.RepoRef) []Reference {
 				continue
 			}
 			for _, ref := range similarity.ExtractRefs(match[1], defaultRepo) {
-				if Priority(relation) > Priority(relations[ref]) {
-					relations[ref] = relation
+				if Priority(relation) > Priority(relations[ref].relation) {
+					relations[ref] = relationEvidence{relation: relation, evidence: strings.TrimSpace(match[0])}
 				}
 			}
 		}
 	}
 	applyRelation(blocksPattern, RelationBlocks)
 	applyRelation(dependencyPattern, RelationDependsOn)
+	applyRelation(replacesPattern, RelationReplaces)
+	applyRelation(supersededByPattern, RelationSupersededBy)
 	applyRelation(closingReferencePattern, RelationClaimsToClose)
 
 	out := make([]Reference, 0, len(refs))
 	for _, ref := range refs {
-		out = append(out, Reference{Repo: ref.Repo, Kind: ref.Kind, Number: ref.Number, Relation: relations[ref]})
+		relation := relations[ref]
+		out = append(out, Reference{
+			Repo: ref.Repo, Kind: ref.Kind, Number: ref.Number,
+			Relation: relation.relation, Evidence: relation.evidence,
+		})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Repo.String() != out[j].Repo.String() {
@@ -93,6 +110,10 @@ func Extract(text string, defaultRepo domain.RepoRef) []Reference {
 func Priority(relation string) int {
 	switch relation {
 	case RelationClaimsToClose:
+		return 8
+	case RelationSupersededBy:
+		return 7
+	case RelationReplaces:
 		return 6
 	case RelationDependsOn:
 		return 5

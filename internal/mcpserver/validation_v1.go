@@ -83,12 +83,6 @@ func (s *Server) defineValidation(ctx context.Context, _ *mcp.CallToolRequest, i
 	if in.Kind == "" || in.Command == "" {
 		return nil, mcpcontract.ValidationOutput{}, mcpcontract.InvalidArgument("command", "investigation_id, kind, and command are required", map[string]any{"investigation_id": in.InvestigationID, "kind": "regression", "command": "go test ./..."})
 	}
-	if in.WorkspaceID != "" && (in.BaseWorkspaceID != "" || in.CandidateWorkspaceID != "") {
-		return nil, mcpcontract.ValidationOutput{}, mcpcontract.InvalidArgument("workspace_id", "cannot be combined with base_workspace_id or candidate_workspace_id", map[string]any{"workspace_id": in.WorkspaceID})
-	}
-	if in.WorkspaceID == "" && (in.BaseWorkspaceID == "" || in.CandidateWorkspaceID == "") {
-		return nil, mcpcontract.ValidationOutput{}, mcpcontract.InvalidArgument("base_workspace_id", "base_workspace_id and candidate_workspace_id must be provided together", map[string]any{"base_workspace_id": "<base-id>", "candidate_workspace_id": "<candidate-id>"})
-	}
 	if in.Timeout != "" {
 		if _, err := time.ParseDuration(in.Timeout); err != nil {
 			return nil, mcpcontract.ValidationOutput{}, mcpcontract.InvalidArgument("timeout", "must be a positive Go duration", map[string]any{"timeout": "30m"})
@@ -101,9 +95,6 @@ func (s *Server) defineValidation(ctx context.Context, _ *mcp.CallToolRequest, i
 		if in.Protocol == "" {
 			return nil, mcpcontract.ValidationOutput{}, mcpcontract.InvalidArgument("protocol", "readiness_timeout requires a declared protocol adapter", map[string]any{"protocol": "mcp_stdio", "readiness_timeout": "30s"})
 		}
-	}
-	if in.MaxOutputBytes < 0 {
-		return nil, mcpcontract.ValidationOutput{}, mcpcontract.InvalidArgument("max_output_bytes", "cannot be negative", map[string]any{"max_output_bytes": 65536})
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {

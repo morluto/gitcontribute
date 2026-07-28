@@ -32,11 +32,17 @@ type searchMatch struct {
 	MergedAt          time.Time
 	Merged            bool
 	MergedKnown       bool
+	Description       string
+	DefaultBranch     string
 	Language          string
+	License           string
+	Topics            []string
 	Archived          bool
+	Fork              bool
 	Stars             int
 	Watchers          int
 	Forks             int
+	OpenIssues        int
 	UpdatedAt         time.Time
 	URL               string
 	Score             float64
@@ -45,7 +51,6 @@ type searchMatch struct {
 	MatchSource       string
 	MatchExcerpt      string
 	MatchTruncated    bool
-	Fields            map[string]any
 }
 
 type searchResult struct {
@@ -164,7 +169,7 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 	filter := corpus.SearchFilter{
 		RepoID: repoID, Repo: ref.String(), Kind: kind, State: opts.State, StateReason: opts.StateReason, Merged: opts.Merged, Author: opts.Author,
 		Association: opts.Association, Assignee: opts.Assignee,
-		Labels: opts.Labels, UpdatedAfter: opts.UpdatedAfter, Limit: opts.Limit, Cursor: opts.Cursor,
+		Labels: opts.Labels, UpdatedAfter: opts.UpdatedAfter, UpdatedBefore: opts.UpdatedBefore, Limit: opts.Limit, Cursor: opts.Cursor,
 		Sort: opts.Sort, MatchMode: opts.MatchMode,
 	}
 	page, err := c.SearchThreadsPage(ctx, query, filter)
@@ -309,15 +314,11 @@ func repositorySearchMatch(r corpus.Repository, coverage []string) searchMatch {
 	ref := domain.RepoRef{Owner: r.Owner, Repo: r.Name}
 	m := searchMatch{
 		Repo: ref, Kind: "repo", Title: ref.String(), Body: r.Description,
-		URL: fmt.Sprintf("https://github.com/%s", ref), Language: r.Language,
-		Archived: r.Archived, Stars: r.Stars, Watchers: r.Watchers, Forks: r.Forks,
+		URL: fmt.Sprintf("https://github.com/%s", ref), Description: r.Description,
+		DefaultBranch: r.DefaultBranch, Language: r.Language, License: r.License,
+		Topics: r.Topics, Archived: r.Archived, Fork: r.Fork, Stars: r.Stars,
+		Watchers: r.Watchers, Forks: r.Forks, OpenIssues: r.OpenIssues,
 		UpdatedAt: r.SourceUpdatedAt, Freshness: r.SourceUpdatedAt, Coverage: coverage,
-		Fields: map[string]any{
-			"description": r.Description, "default_branch": r.DefaultBranch,
-			"language": r.Language, "license": r.License, "topics": r.Topics,
-			"stars": r.Stars, "watchers": r.Watchers, "forks": r.Forks,
-			"open_issues": r.OpenIssues, "archived": r.Archived, "fork": r.Fork,
-		},
 	}
 	m.Score = bm25Score(r.Rank)
 	return m

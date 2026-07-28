@@ -90,7 +90,9 @@ func (w *syncThreadWriter) store(issue github.Issue) error {
 		return err
 	}
 	thread.RepositoryID = w.repositoryID
-	if _, err := w.corpus.UpsertThread(w.ctx, thread, payload); err != nil {
+	if _, err := corpus.RetryBusyValue(w.ctx, func(ctx context.Context) (*corpus.Thread, error) {
+		return w.corpus.UpsertThread(ctx, thread, payload)
+	}); err != nil {
 		return fmt.Errorf("upsert thread: %w", err)
 	}
 	w.updated++

@@ -95,7 +95,6 @@ var toolsets = map[string][]string{
 		mcpcontract.ToolStartInvestigation, mcpcontract.ToolRecordHypothesis, mcpcontract.ToolCheckDuplicates, mcpcontract.ToolFindCompetingWork,
 		mcpcontract.ToolPromoteOpportunity, mcpcontract.ToolGetInvestigation, mcpcontract.ToolListOpportunities, mcpcontract.ToolGetOpportunity,
 		mcpcontract.ToolGetEvidence, mcpcontract.ToolGetReadiness, mcpcontract.ToolPrepareContribution, mcpcontract.ToolExportManifest,
-		ToolListConcerns, ToolCreateConcern,
 	},
 	"code": {
 		mcpcontract.ToolSearchCode, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCreateWorkspace, mcpcontract.ToolAdoptWorkspace, mcpcontract.ToolCheckMergeConflicts,
@@ -106,9 +105,10 @@ var toolsets = map[string][]string{
 	"diagnostics": {mcpcontract.ToolExplainMatch, mcpcontract.ToolBuildRepositoryDossier, mcpcontract.ToolGetJob},
 	"portfolio": {
 		mcpcontract.ToolGetJob, mcpcontract.ToolCancelJob, mcpcontract.ToolGetAuthenticatedIdentity, mcpcontract.ToolSyncAuthoredPullRequests,
-		mcpcontract.ToolSyncPullRequestStatus, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolFindPortfolioOverlaps, mcpcontract.ToolLinkPullRequest,
+		mcpcontract.ToolSyncPullRequestStatus, mcpcontract.ToolSyncPortfolio, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolFindPortfolioOverlaps, mcpcontract.ToolLinkPullRequest,
 	},
 	"advanced": {mcpcontract.ToolFindClusters, mcpcontract.ToolFindNeighbors},
+	"patterns": {mcpcontract.ToolMineRepositoryFixPatterns, mcpcontract.ToolGetJob, mcpcontract.ToolCancelJob},
 	"concerns": {ToolListConcerns, ToolCreateConcern, ToolUpdateConcern, ToolSetConcernState, ToolLinkConcern, ToolPromoteConcern},
 }
 
