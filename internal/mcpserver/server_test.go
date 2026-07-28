@@ -392,7 +392,7 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 			t.Fatalf("tool %q annotations = %+v", name, tool.Annotations)
 		}
 	}
-	for _, name := range []string{mcpcontract.ToolSyncRepositoryMetadata, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads} {
+	for _, name := range []string{mcpcontract.ToolSyncRepositoryContext, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads} {
 		tool := tools[name]
 		if tool == nil {
 			t.Fatalf("missing tool %q", name)

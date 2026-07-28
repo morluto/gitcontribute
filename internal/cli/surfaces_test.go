@@ -175,11 +175,25 @@ func (f *fakeSurfacesService) ArchiveSync(ctx context.Context, repo contracts.Re
 	return &contracts.SyncResult{Repo: repo, Updated: len(opts.Numbers), PlannedRequests: 11, RequestBudget: opts.MaxRequests, Message: "synced"}, f.err
 }
 
+func (f *fakeSurfacesService) RepositoryContextSync(_ context.Context, repo contracts.RepoRef, maxRequests int) (*contracts.RepositoryContextResult, error) {
+	f.syncEvents = append(f.syncEvents, "context-sync")
+	return &contracts.RepositoryContextResult{
+		Repo: repo, Requests: 9, PlannedRequests: 9, RequestBudget: maxRequests, Message: "context synced",
+	}, f.err
+}
+
+func (f *fakeSurfacesService) PlanRepositoryContextSync(_ context.Context, repo contracts.RepoRef, maxRequests int) (*contracts.SyncPlanResult, error) {
+	f.syncEvents = append(f.syncEvents, "context-plan")
+	return &contracts.SyncPlanResult{
+		Repo: repo, FixedRequests: 9, PlannedRequests: 9, RequestBudget: maxRequests,
+	}, f.err
+}
+
 func (f *fakeSurfacesService) PlanArchiveSync(_ context.Context, repo contracts.RepoRef, opts contracts.ArchiveSyncOptions) (*contracts.SyncPlanResult, error) {
 	f.planCalled = true
 	f.syncEvents = append(f.syncEvents, "plan")
 	return &contracts.SyncPlanResult{
-		Repo: repo, FixedRequests: 9, ThreadRequestCeiling: len(opts.Numbers), PlannedRequests: 9 + len(opts.Numbers),
+		Repo: repo, ThreadRequestCeiling: len(opts.Numbers), PlannedRequests: len(opts.Numbers),
 		RequestBudget: opts.MaxRequests, MaxPages: opts.MaxPages, ExactThreads: len(opts.Numbers),
 	}, f.err
 }
@@ -386,11 +400,18 @@ func TestArchiveAndLocalQueryCommands(t *testing.T) {
 	svc := &fakeSurfacesService{fakeService: &fakeService{}}
 	c, stdout, stderr := newSurfacesCLI(svc)
 
+	requireNoErr(t, c.Run(context.Background(), []string{"archive", "sync-context", "o/r", "--max-requests", "9", "--json"}))
+	if !slices.Equal(svc.syncEvents, []string{"context-plan", "context-sync"}) {
+		t.Fatalf("context sync was not planned before execution: %v", svc.syncEvents)
+	}
+	svc.syncEvents = nil
+	stderr.Reset()
+	stdout.Reset()
 	requireNoErr(t, c.Run(context.Background(), []string{"archive", "sync", "o/r", "--numbers", "2,1", "--max-pages", "5", "--max-requests", "12", "--json"}))
 	if !svc.archiveCalled || !svc.planCalled || len(svc.lastArchiveOpts.Numbers) != 2 || svc.lastArchiveOpts.MaxPages != 5 || svc.lastArchiveOpts.MaxRequests != 12 {
 		t.Fatalf("archive options = %+v", svc.lastArchiveOpts)
 	}
-	if !slices.Equal(svc.syncEvents, []string{"plan", "sync"}) || !strings.Contains(stderr.String(), "planned sync for o/r: up to 11 requests (9 fixed + up to 2 thread requests; budget 12)") {
+	if !slices.Equal(svc.syncEvents, []string{"plan", "sync"}) || !strings.Contains(stderr.String(), "planned sync for o/r: up to 2 requests (0 fixed + up to 2 thread requests; budget 12)") {
 		t.Fatalf("sync was not planned before execution: events=%v stderr=%q", svc.syncEvents, stderr.String())
 	}
 	stdout.Reset()

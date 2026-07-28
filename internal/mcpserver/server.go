@@ -51,7 +51,7 @@ type PortfolioOperator interface {
 // GitHubOperator exposes bounded GitHub reads that update only the local corpus.
 type GitHubOperator interface {
 	SearchGitHubRepositories(context.Context, mcpcontract.SearchGitHubRepositoriesInput) (mcpcontract.SearchGitHubRepositoriesOutput, error)
-	SyncRepositoryMetadata(context.Context, mcpcontract.SyncRepositoryMetadataInput) (mcpcontract.JobReference, error)
+	SyncRepositoryContext(context.Context, mcpcontract.SyncRepositoryContextInput) (mcpcontract.JobReference, error)
 	SyncThreads(context.Context, mcpcontract.SyncThreadsInput) (mcpcontract.JobReference, error)
 	HydrateThreads(context.Context, mcpcontract.HydrateThreadsInput) (mcpcontract.JobReference, error)
 	GetAuthenticatedIdentity(context.Context) (mcpcontract.AuthenticatedIdentityOutput, error)

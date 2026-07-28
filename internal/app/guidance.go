@@ -12,6 +12,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
+	"github.com/morluto/gitcontribute/internal/repositorycontext"
 )
 
 const (
@@ -20,16 +21,7 @@ const (
 	maxGuidanceDocumentBytes  = 256 * 1024
 )
 
-var contributionGuidancePaths = []string{
-	".github/CONTRIBUTING.md",
-	"CONTRIBUTING.md",
-	"docs/CONTRIBUTING.md",
-	".github/AI_POLICY.md",
-	".github/AI-CONTRIBUTION-POLICY.md",
-	".github/GENERATIVE_AI_POLICY.md",
-	"AI_POLICY.md",
-	"AI.md",
-}
+var contributionGuidancePaths = repositorycontext.GuidancePaths()
 
 type storedGuidanceDocument struct {
 	File       github.RepositoryFile
@@ -51,7 +43,7 @@ func syncRepositoryGuidance(
 ) error {
 	fileReader, ok := reader.(github.RepositoryFileReader)
 	if !ok {
-		return nil
+		return errors.New("GitHub reader does not support repository contribution-guidance reads")
 	}
 
 	pages := make([]corpus.FacetObservationInput, 0, len(contributionGuidancePaths))

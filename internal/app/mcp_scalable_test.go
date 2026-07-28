@@ -660,8 +660,8 @@ func TestScalableRuntimeRejectsPageBoundsBeforeSubmittingJob(t *testing.T) {
 			t.Fatalf("SyncThreads accepted limit_per_repository=%d", limit)
 		}
 	}
-	if _, err := reader.SyncAuthoredPullRequests(ctx, mcpcontract.SyncAuthoredPullRequestsInput{Limit: 1, MaxRequests: syncFixedRequestCost() + 1}); err == nil {
-		t.Fatal("SyncAuthoredPullRequests accepted budget that cannot fund identity, discovery, and one repository sync")
+	if _, err := reader.SyncAuthoredPullRequests(ctx, mcpcontract.SyncAuthoredPullRequestsInput{Limit: 1, MaxRequests: 1}); err == nil {
+		t.Fatal("SyncAuthoredPullRequests accepted a budget that cannot fund identity and discovery")
 	}
 }
 

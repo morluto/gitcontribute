@@ -248,7 +248,7 @@ func (r *MCPReader) Dossier(ctx context.Context, in mcpcontract.RepoInput) (mcpc
 			"repository_not_indexed",
 			fmt.Sprintf("Repository %s is not present in the local corpus.", ref),
 			mcpcontract.SuggestedAction{
-				Tool:   mcpcontract.ToolSyncRepositoryMetadata,
+				Tool:   mcpcontract.ToolSyncRepositoryContext,
 				Reason: "Persist repository metadata before requesting local derived artifacts.",
 				Arguments: map[string]any{
 					"repositories": []map[string]string{{"owner": ref.Owner, "repo": ref.Repo}},

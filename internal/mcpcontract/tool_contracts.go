@@ -61,7 +61,7 @@ const (
 	ToolGetJob                   = "jobs.get"
 	ToolCancelJob                = "jobs.cancel"
 	ToolSearchGitHubRepositories = "github.search_repositories"
-	ToolSyncRepositoryMetadata   = "github.sync_repository_metadata"
+	ToolSyncRepositoryContext    = "github.sync_repository_context"
 	ToolSyncThreads              = "github.sync_threads"
 	ToolHydrateThreads           = "github.hydrate_threads"
 	ToolGetAuthenticatedIdentity = "github.get_authenticated_identity"

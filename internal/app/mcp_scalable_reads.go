@@ -67,7 +67,7 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 		repo := repositories[corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo}]
 		if repo == nil {
 			item.Status, item.Reason, item.Message = "unavailable", "not_indexed", "repository is not present in the local corpus"
-			item.NextAction = "Call github.sync_repository_metadata for this repository."
+			item.NextAction = "Call github.sync_repository_context for this repository."
 			out.Items[i] = item
 			out.Status = "partial"
 			continue
@@ -80,7 +80,7 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 		}
 		coverage := coverageByRepository[corpus.RepositoryFacetKey{RepositoryID: repo.ID, Facet: "metadata"}]
 		if coverage == nil {
-			value.Metadata = mcpcontract.RepositoryMetadataOutput{Status: "missing", NextAction: "Call github.sync_repository_metadata for this repository."}
+			value.Metadata = mcpcontract.RepositoryMetadataOutput{Status: "missing", NextAction: "Call github.sync_repository_context for this repository."}
 			clearRepositoryFacts(&value)
 		} else {
 			status := "complete"

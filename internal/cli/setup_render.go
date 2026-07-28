@@ -71,7 +71,7 @@ func renderSetupResult(report *contracts.SetupReport, opts contracts.SetupOption
 	if !report.HasFailures() {
 		b.WriteString("\nNext\n")
 		if opts.Mode.InstallsCLI() {
-			b.WriteString("  gitcontribute\n  gitcontribute archive sync owner/repo")
+			b.WriteString("  gitcontribute\n  gitcontribute archive sync-context owner/repo\n  gitcontribute archive sync owner/repo")
 		} else {
 			b.WriteString("  Use GitContribute from your coding agent.")
 		}

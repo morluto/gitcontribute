@@ -353,7 +353,7 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 		{"Search locally stored issue titles for a retry deadlock", mcpcontract.ToolSearchThreads},
 		{"Search live GitHub for highly starred inference repositories", mcpcontract.ToolSearchGitHubRepositories},
 		{"Read metadata for twelve repositories already stored in the corpus", mcpcontract.ToolGetRepositories},
-		{"Fetch current GitHub stars and metadata for twelve repositories", mcpcontract.ToolSyncRepositoryMetadata},
+		{"Fetch current GitHub stars, metadata, and contribution guidance for twelve repositories", mcpcontract.ToolSyncRepositoryContext},
 		{"Read the complete stored body of pull request 42", mcpcontract.ToolGetThreads},
 		{"Refresh issue and pull request thread headers for selected repositories from GitHub", mcpcontract.ToolSyncThreads},
 		{"Fetch comments and reviews for one stored pull request from GitHub", mcpcontract.ToolHydrateThreads},

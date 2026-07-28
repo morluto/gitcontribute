@@ -209,9 +209,11 @@ type GetJobsOutput struct {
 	Items  []BatchItem[GetJobOutput] `json:"items"`
 }
 
-// SyncRepositoryMetadataInput selects repositories for asynchronous metadata refresh.
-type SyncRepositoryMetadataInput struct {
+// SyncRepositoryContextInput selects repositories for asynchronous metadata
+// and contribution-guidance refresh.
+type SyncRepositoryContextInput struct {
 	Repositories []RepositoryRef `json:"repositories" jsonschema:"One to 100 explicit repositories"`
+	MaxRequests  int             `json:"max_requests,omitempty" jsonschema:"Maximum total GitHub requests"`
 }
 
 // SyncThreadsInput selects either bounded repository-wide header discovery or
@@ -224,7 +226,7 @@ type SyncThreadsInput struct {
 	State              string          `json:"state,omitempty" jsonschema:"open, closed, or all in repository mode"`
 	UpdatedAfter       string          `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound in repository mode"`
 	LimitPerRepository int             `json:"limit_per_repository,omitempty" jsonschema:"Maximum headers per repository from 1 to 1000"`
-	MaxRequests        int             `json:"max_requests,omitempty" jsonschema:"Maximum total GitHub requests from 9 to 1000"`
+	MaxRequests        int             `json:"max_requests,omitempty" jsonschema:"Maximum total GitHub thread requests from 1 to 1000"`
 }
 
 // HydrateThreadsInput requests explicit child facets for already selected
@@ -248,7 +250,7 @@ type SyncAuthoredPullRequestsInput struct {
 	State        string `json:"state,omitempty" jsonschema:"open, closed, or all"`
 	UpdatedAfter string `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound"`
 	Limit        int    `json:"limit,omitempty" jsonschema:"Maximum authored pull requests from 1 to 500"`
-	MaxRequests  int    `json:"max_requests,omitempty" jsonschema:"Maximum total GitHub requests from 11 to 1000"`
+	MaxRequests  int    `json:"max_requests,omitempty" jsonschema:"Maximum total GitHub requests from 2 to 1000"`
 }
 
 // SyncPullRequestStatusInput selects pull requests and bounds review hydration.

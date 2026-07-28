@@ -54,6 +54,7 @@ type WorkflowAuditResult struct {
 // ArchiveService exposes explicit network-reading archive operations.
 type ArchiveService interface {
 	SyncPlanningService
+	RepositoryContextSync(ctx context.Context, repo RepoRef, maxRequests int) (*RepositoryContextResult, error)
 	ArchiveSync(ctx context.Context, repo RepoRef, opts ArchiveSyncOptions) (*SyncResult, error)
 	Hydrate(ctx context.Context, repo RepoRef, number int, opts HydrateOptions) (*HydrateResult, error)
 }
@@ -61,7 +62,17 @@ type ArchiveService interface {
 // SyncPlanningService computes a bounded request plan without network or
 // corpus access.
 type SyncPlanningService interface {
+	PlanRepositoryContextSync(ctx context.Context, repo RepoRef, maxRequests int) (*SyncPlanResult, error)
 	PlanArchiveSync(ctx context.Context, repo RepoRef, opts ArchiveSyncOptions) (*SyncPlanResult, error)
+}
+
+// RepositoryContextResult reports one repository metadata and guidance refresh.
+type RepositoryContextResult struct {
+	Repo            RepoRef `json:"repo"`
+	Requests        int     `json:"requests"`
+	PlannedRequests int     `json:"planned_requests"`
+	RequestBudget   int     `json:"request_budget"`
+	Message         string  `json:"message"`
 }
 
 // ArchiveSyncOptions bounds and filters one explicit archive synchronization.

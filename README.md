@@ -78,6 +78,7 @@ contribution candidates, and search the local corpus:
 
 ```sh
 gitcontribute tui
+gitcontribute archive sync-context owner/repo
 gitcontribute archive sync owner/repo
 gitcontribute radar owner/repo --limit 10
 gitcontribute search threads "connection timeout" \
@@ -287,7 +288,7 @@ A scalable discovery flow is:
 
 ```text
 github.search_repositories -> corpus.get_repositories
-github.sync_repository_metadata -> jobs.get -> corpus.get_repositories
+github.sync_repository_context -> jobs.get -> corpus.get_repositories
 -> research.query_deepwiki -> github.sync_threads
 -> corpus.rank_threads -> github.hydrate_threads
 -> workflow.prepare_issue_set
@@ -421,6 +422,7 @@ gitcontribute tail golang-events --since 2h --budget 500 --interval 1h
 Sync and selectively hydrate repository archives:
 
 ```sh
+gitcontribute archive sync-context owner/repo
 gitcontribute archive sync owner/repo
 gitcontribute archive sync owner/repo --since 168h --state open --max-requests 100
 gitcontribute archive sync owner/repo --numbers 42,108

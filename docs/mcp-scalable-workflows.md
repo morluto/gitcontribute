@@ -11,7 +11,7 @@ Use the cheapest authoritative source first, and hydrate only finalists:
 
 ```text
 github.search_repositories -> corpus.get_repositories
-github.sync_repository_metadata -> jobs.get -> corpus.get_repositories
+github.sync_repository_context -> jobs.get -> corpus.get_repositories
 research.query_deepwiki
 github.sync_threads -> jobs.get -> corpus.rank_threads
 github.hydrate_threads -> jobs.get -> corpus.get_threads
@@ -44,8 +44,8 @@ Search responses return the compiled provider `query`, a short interpretation,
 request-specific warnings, semantic `repository:owner/name` references, and a
 non-mandatory suggested thread-sync call. Advanced provider syntax uses the
 explicit `raw_query` field; there is no deprecated alias.
-- `github.sync_repository_metadata` fetches and persists facts for explicit
-  repository identities, whether or not they are already present locally. Use
+- `github.sync_repository_context` fetches and persists metadata and fixed
+  contribution-guidance files for explicit repository identities. Use
   it to recover a `repository_not_indexed` result, then poll the returned job
   before reading the repository again.
 - `corpus.get_repositories` returns stored metadata plus `dossier_status` and
@@ -166,7 +166,7 @@ work. New job references carry a semantic `job:<id>` reference,
 Repository and dossier absence have different recovery paths:
 
 - `repository_not_indexed` means no local repository projection exists. Call
-  `github.sync_repository_metadata`, poll the job with `jobs.get`, and then
+  `github.sync_repository_context`, poll the job with `jobs.get`, and then
   retry the offline read.
 - `dossier_not_persisted` means the repository exists locally but has no saved
   dossier. Use `corpus.get_repositories` for metadata and dossier availability;
@@ -210,7 +210,7 @@ go test ./internal/app -run '^TestMCPStdio(ScalableResearch|PullRequestPortfolio
 
 The tests launch the application as an MCP subprocess, use a real file-backed
 SQLite corpus, and route the real GitHub HTTP adapter to a controlled test
-server. They cover initialization and tool discovery, metadata synchronization,
+server. They cover initialization and tool discovery, repository-context synchronization,
 offline batch reads, ranking, precedents, authored-PR discovery, status
 hydration, portfolio classification, vectorized durable-job polling, and a
 protocol-visible invalid hydration request. They do not contact live GitHub or

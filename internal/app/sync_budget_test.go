@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/config"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
@@ -19,6 +20,10 @@ type authoredHeaderReader struct {
 
 func (r *authoredHeaderReader) GetRepository(context.Context, string, string) (github.Repository, github.RateInfo, error) {
 	return github.Repository{Owner: "owner", Name: "repo", NodeID: "R_repo", DefaultBranch: "main", UpdatedAt: r.now}, github.RateInfo{}, nil
+}
+
+func (*authoredHeaderReader) GetRepositoryFile(_ context.Context, _, _, path string) (github.RepositoryFile, github.RateInfo, error) {
+	return github.RepositoryFile{}, github.RateInfo{}, &github.NotFoundError{Resource: path}
 }
 
 func (r *authoredHeaderReader) ListIssues(context.Context, string, string, github.ListIssueOptions) (github.ListResult[github.Issue], error) {
@@ -77,7 +82,7 @@ func TestAuthoredPullRequestSyncReusesSearchHeadersWithoutNPlusOne(t *testing.T)
 	if reader.listRequests != 0 || reader.prDetailRequests != 0 {
 		t.Fatalf("redundant reads: issue lists=%d PR details=%d", reader.listRequests, reader.prDetailRequests)
 	}
-	if out["requests"] != 3 || out["planned_requests"] != 11 || out["status"] != "complete" {
+	if out["requests"] != 2 || out["planned_requests"] != 2 || out["status"] != "complete" {
 		t.Fatalf("result = %+v", out)
 	}
 	c, err := svc.openCorpus(ctx)
@@ -87,6 +92,16 @@ func TestAuthoredPullRequestSyncReusesSearchHeadersWithoutNPlusOne(t *testing.T)
 	repo, err := c.GetRepository(ctx, "owner", "repo")
 	if err != nil || repo == nil {
 		t.Fatalf("repository = %+v, %v", repo, err)
+	}
+	if !repo.SourceUpdatedAt.IsZero() {
+		t.Fatalf("authored search timestamp leaked into repository metadata ordering: %v", repo.SourceUpdatedAt)
+	}
+	if _, err := svc.RepositoryContextSync(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 0); err != nil {
+		t.Fatalf("repository context sync after authored discovery: %v", err)
+	}
+	repo, err = c.GetRepository(ctx, "owner", "repo")
+	if err != nil || repo == nil || repo.ExternalID != "R_repo" || !repo.SourceUpdatedAt.Equal(now) {
+		t.Fatalf("repository context did not replace authored identity: %+v, %v", repo, err)
 	}
 	threads, err := c.ListThreadsFiltered(ctx, repo.ID, "pull_request", "open", 10)
 	if err != nil || len(threads) != 2 || threads[0].Number != 3 || threads[1].Number != 2 {
@@ -108,7 +123,7 @@ func TestAuthoredPullRequestMinimumBudgetMakesSyncProgress(t *testing.T) {
 	}
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 	svc.SetGitHubReader(&authoredHeaderReader{now: now})
-	minimum := syncFixedRequestCost() + 2
+	minimum := 2
 	out, err := svc.syncAuthoredPullRequests(ctx, mcpcontract.SyncAuthoredPullRequestsInput{State: "open", Limit: 2, MaxRequests: minimum}, func(string, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
@@ -119,22 +134,23 @@ func TestAuthoredPullRequestMinimumBudgetMakesSyncProgress(t *testing.T) {
 	}
 }
 
-func TestSyncThreadsBatchPlansBudgetBeforeNetworkAccess(t *testing.T) {
+func TestSyncThreadsBatchReportsMissingRepositoryWithoutNetworkAccess(t *testing.T) {
 	t.Parallel()
 	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
 	svc, err := New(paths, "test", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = svc.Close() }()
 	out, err := svc.syncThreadsBatch(context.Background(), mcpcontract.SyncThreadsInput{
 		Selection: "repositories", Repositories: []mcpcontract.RepositoryRef{{Owner: "owner", Repo: "repo"}},
-		LimitPerRepository: 100, MaxRequests: syncFixedRequestCost(),
+		LimitPerRepository: 100, MaxRequests: 1,
 	}, func(string, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
 	items, ok := out["items"].([]map[string]any)
-	if !ok || len(items) != 1 || items[0]["reason"] != "request_budget_exceeded" || out["status"] != "partial" || out["requests"] != 0 {
+	if !ok || len(items) != 1 || items[0]["reason"] != "repository_not_indexed" || out["status"] != "partial" || out["requests"] != 0 {
 		t.Fatalf("result = %+v", out)
 	}
 }
@@ -146,6 +162,7 @@ func TestSyncThreadsBatchThreadTotalCountsRequestedThreads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = svc.Close() }()
 	out, err := svc.syncThreadsBatch(context.Background(), mcpcontract.SyncThreadsInput{
 		Selection: "threads",
 		Threads: []mcpcontract.ThreadRef{
@@ -153,7 +170,7 @@ func TestSyncThreadsBatchThreadTotalCountsRequestedThreads(t *testing.T) {
 			{Owner: "owner", Repo: "repo", Number: 2},
 		},
 		LimitPerRepository: 100,
-		MaxRequests:        syncFixedRequestCost(),
+		MaxRequests:        1,
 	}, func(string, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
@@ -161,17 +178,5 @@ func TestSyncThreadsBatchThreadTotalCountsRequestedThreads(t *testing.T) {
 	items, ok := out["items"].([]map[string]any)
 	if !ok || len(items) != 2 || out["total"] != 2 || out["completed"] != 0 || out["status"] != "partial" {
 		t.Fatalf("thread-mode result = %+v", out)
-	}
-}
-
-func TestNormalizeSyncBatchMaxRequestsBoundsInput(t *testing.T) {
-	t.Parallel()
-	if got, err := normalizeSyncBatchMaxRequests(0); err != nil || got != defaultSyncBatchMaxRequests {
-		t.Fatalf("default = %d, %v", got, err)
-	}
-	for _, value := range []int{syncFixedRequestCost() - 1, defaultSyncBatchMaxRequests + 1} {
-		if _, err := normalizeSyncBatchMaxRequests(value); err == nil {
-			t.Fatalf("budget %d unexpectedly accepted", value)
-		}
 	}
 }
