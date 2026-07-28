@@ -141,6 +141,7 @@ func TestSyncThreadsBatchReportsMissingRepositoryWithoutNetworkAccess(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = svc.Close() }()
 	out, err := svc.syncThreadsBatch(context.Background(), mcpcontract.SyncThreadsInput{
 		Selection: "repositories", Repositories: []mcpcontract.RepositoryRef{{Owner: "owner", Repo: "repo"}},
 		LimitPerRepository: 100, MaxRequests: 1,
@@ -161,6 +162,7 @@ func TestSyncThreadsBatchThreadTotalCountsRequestedThreads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = svc.Close() }()
 	out, err := svc.syncThreadsBatch(context.Background(), mcpcontract.SyncThreadsInput{
 		Selection: "threads",
 		Threads: []mcpcontract.ThreadRef{
