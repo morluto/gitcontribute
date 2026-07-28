@@ -17,9 +17,10 @@ import (
 // Config is the typed TOML application configuration. It never stores raw
 // GitHub tokens; only a token source descriptor.
 type Config struct {
-	Database    string      `toml:"database,omitempty"`
-	TokenSource TokenSource `toml:"token_source,omitempty"`
-	Crawl       Crawl       `toml:"crawl,omitempty"`
+	Database     string        `toml:"database,omitempty"`
+	TokenSource  TokenSource   `toml:"token_source,omitempty"`
+	Crawl        Crawl         `toml:"crawl,omitempty"`
+	LegacyOutput *legacyOutput `toml:"output,omitempty"`
 }
 
 // TokenSource describes how to obtain a GitHub token. The token itself is never
@@ -35,6 +36,13 @@ type Crawl struct {
 	Concurrency int    `toml:"concurrency"`
 	RetryLimit  int    `toml:"retry_limit"`
 	Timeout     string `toml:"timeout,omitempty"`
+}
+
+// legacyOutput accepts the output section written by releases before v0.13.0.
+// Load discards it so the next Save migrates the config to the current schema.
+type legacyOutput struct {
+	Format     string `toml:"format"`
+	MaxResults int    `toml:"max_results"`
 }
 
 // Default returns a Config populated with built-in defaults. Database and paths
@@ -59,6 +67,7 @@ func Load(r io.Reader) (*Config, error) {
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("decode config: %w", err)
 	}
+	cfg.LegacyOutput = nil
 	return &cfg, nil
 }
 
