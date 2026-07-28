@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -16,7 +17,7 @@ import (
 // results because those phases share a single discovery limit and status result.
 //
 //nolint:gocognit,cyclop,funlen
-func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpcontract.SyncAuthoredPullRequestsInput, report func(string, string) error) (map[string]any, error) {
+func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpcontract.SyncAuthoredPullRequestsInput, report func(string, string) error) (*authoredPullRequestSyncResult, error) {
 	if err := report("authored_pull_request_discovery", jobProgressCounts(0, in.Limit)); err != nil {
 		return nil, err
 	}
@@ -47,6 +48,8 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpcontract.S
 	page := 1
 	byRepo := make(map[string][]github.Issue)
 	order := make([]string, 0)
+	pullRequestRefs := make([]string, 0, in.Limit)
+	pullRequestTargets := make([]mcpcontract.ThreadRef, 0, in.Limit)
 	discovered := 0
 	incomplete := false
 	requestCapped := false
@@ -71,6 +74,10 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpcontract.S
 				order = append(order, key)
 			}
 			byRepo[key] = append(byRepo[key], pr)
+			pullRequestRefs = append(pullRequestRefs, fmt.Sprintf("%s#%d", key, pr.Number))
+			pullRequestTargets = append(pullRequestTargets, mcpcontract.ThreadRef{
+				Owner: pr.RepositoryOwner, Repo: pr.RepositoryName, Kind: "pull_request", Number: pr.Number,
+			})
 			discovered++
 			if discovered >= in.Limit {
 				break
@@ -90,7 +97,7 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpcontract.S
 		owner, repo, _ := strings.Cut(key, "/")
 		tasks = append(tasks, authoredTask{key: key, owner: owner, repo: repo, issues: append([]github.Issue(nil), byRepo[key]...)})
 	}
-	results := make([]map[string]any, len(tasks))
+	results := make([]authoredRepositorySyncResult, len(tasks))
 	plannedRequests := requests
 	runnable := make([]int, len(tasks))
 	for index := range tasks {
@@ -108,10 +115,10 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpcontract.S
 				res, err := s.syncProvidedThreadHeaders(ctx, contracts.RepoRef{Owner: current.owner, Repo: current.repo}, current.issues)
 				if err != nil {
 					status, reason, message, retry := githubBatchError(err)
-					results[index] = map[string]any{"key": current.key, "status": status, "reason": reason, "message": message, "retry_after_ms": retry}
+					results[index] = authoredRepositorySyncResult{Key: current.key, Status: status, Reason: reason, Message: message, RetryAfterMS: retry}
 					continue
 				}
-				results[index] = map[string]any{"key": current.key, "status": "complete", "updated": res.Updated, "requests": res.Requests}
+				results[index] = authoredRepositorySyncResult{Key: current.key, Status: "complete", Updated: res.Updated, Requests: res.Requests}
 			}
 		}()
 	}
@@ -129,10 +136,8 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpcontract.S
 	status := "complete"
 	completed := 0
 	for _, result := range results {
-		if count, ok := result["requests"].(int); ok {
-			requests += count
-		}
-		if result["status"] == "complete" {
+		requests += result.Requests
+		if result.Status == "complete" {
 			completed++
 		} else {
 			status = "partial"
@@ -141,9 +146,34 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpcontract.S
 	if err := report("authored_pull_request_headers", jobProgressCounts(len(tasks), len(tasks))); err != nil {
 		return nil, err
 	}
-	return map[string]any{
-		"status": status, "login": identity.Login, "pull_requests": discovered, "repositories": results,
-		"search_incomplete": incomplete, "request_capped": requestCapped, "requests": requests,
-		"request_budget": in.MaxRequests, "planned_requests": plannedRequests,
+	return &authoredPullRequestSyncResult{
+		Status: status, Login: identity.Login, PullRequests: discovered,
+		PullRequestRefs: pullRequestRefs, PullRequestTargets: pullRequestTargets, Repositories: results,
+		SearchIncomplete: incomplete, RequestCapped: requestCapped, Requests: requests,
+		RequestBudget: in.MaxRequests, PlannedRequests: plannedRequests,
 	}, nil
+}
+
+type authoredPullRequestSyncResult struct {
+	Status             string                         `json:"status"`
+	Login              string                         `json:"login"`
+	PullRequests       int                            `json:"pull_requests"`
+	PullRequestRefs    []string                       `json:"pull_request_refs"`
+	PullRequestTargets []mcpcontract.ThreadRef        `json:"-"`
+	Repositories       []authoredRepositorySyncResult `json:"repositories"`
+	SearchIncomplete   bool                           `json:"search_incomplete"`
+	RequestCapped      bool                           `json:"request_capped"`
+	Requests           int                            `json:"requests"`
+	RequestBudget      int                            `json:"request_budget"`
+	PlannedRequests    int                            `json:"planned_requests"`
+}
+
+type authoredRepositorySyncResult struct {
+	Key          string `json:"key"`
+	Status       string `json:"status"`
+	Reason       string `json:"reason,omitempty"`
+	Message      string `json:"message,omitempty"`
+	RetryAfterMS int    `json:"retry_after_ms,omitempty"`
+	Updated      int    `json:"updated,omitempty"`
+	Requests     int    `json:"requests,omitempty"`
 }

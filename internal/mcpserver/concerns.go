@@ -79,6 +79,7 @@ func (s *Server) registerConcernTools() {
 			setArrayBounds(sc, "unknowns", 0, 100)
 			setArrayBounds(sc, "evidence_ids", 0, 100)
 			setArrayBounds(sc, "source_provenance", 0, 100)
+			configureConcernSourceModes(sc)
 		}), output: outputSchema[mcpcontract.ConcernOutput]("Persisted local concern without absolute paths or source URLs."), handler: s.createConcern,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.UpdateConcernInput, mcpcontract.ConcernOutput]{

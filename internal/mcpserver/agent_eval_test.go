@@ -162,6 +162,126 @@ func TestAgentEvalV3EvidenceBoundaryFixtures(t *testing.T) {
 	validateAgentEvalV3Calibrations(t, public, oracles)
 }
 
+const agentEvalV4Root = "testdata/agent-eval/v4"
+
+type agentEvalV4Catalog struct {
+	ID            string   `json:"id"`
+	Toolsets      []string `json:"toolsets"`
+	DisabledTools []string `json:"disabled_tools"`
+	SHA256        string   `json:"sha256"`
+}
+
+type agentEvalV4Condition struct {
+	ID      string `json:"id"`
+	Catalog string `json:"catalog"`
+}
+
+type agentEvalV4Scenario struct {
+	ID         string                 `json:"id"`
+	Prompt     string                 `json:"prompt"`
+	Conditions []agentEvalV4Condition `json:"conditions"`
+}
+
+func TestAgentEvalV4ToolSelectionFixtures(t *testing.T) {
+	t.Parallel()
+	var public struct {
+		Version                   string `json:"version"`
+		FixtureRevision           string `json:"fixture_revision"`
+		MinimumTrialsPerCondition int    `json:"minimum_trials_per_condition"`
+		ExternalOracle            struct {
+			Version string `json:"version"`
+			SHA256  string `json:"sha256"`
+		} `json:"external_oracle"`
+		ControlledVariables []string              `json:"controlled_variables"`
+		Catalogs            []agentEvalV4Catalog  `json:"catalogs"`
+		Scenarios           []agentEvalV4Scenario `json:"scenarios"`
+		SemanticMetrics     []string              `json:"semantic_metrics"`
+		EfficiencyMetrics   []string              `json:"efficiency_metrics"`
+	}
+	publicData := readAgentEvalV4JSON(t, "public.json", &public)
+	if public.Version != "agent-tool-eval.v4" || public.FixtureRevision != "mcp-tool-redesign-v1" ||
+		public.MinimumTrialsPerCondition < 3 || public.ExternalOracle.Version != "agent-tool-eval-oracle.v4" ||
+		len(public.ExternalOracle.SHA256) != 64 || len(public.Catalogs) != 6 || len(public.Scenarios) != 10 {
+		t.Fatalf("incomplete public v4 fixture: %+v", public)
+	}
+	for _, field := range []string{"required_behaviors", "hard_failures"} {
+		if strings.Contains(string(publicData), field) {
+			t.Fatalf("public v4 fixture leaks oracle field %q", field)
+		}
+	}
+	for _, required := range []string{"model", "sampling_settings", "catalog_fingerprint", "corpus_revision", "permissions", "task_prompt", "token_budget"} {
+		if !containsString(public.ControlledVariables, required) {
+			t.Errorf("controlled variables omit %q", required)
+		}
+	}
+	if len(public.SemanticMetrics) == 0 || len(public.EfficiencyMetrics) == 0 {
+		t.Fatal("semantic and efficiency metrics must both be declared")
+	}
+
+	catalogIDs := make(map[string]bool, len(public.Catalogs))
+	for _, catalog := range public.Catalogs {
+		if catalog.ID == "" || catalogIDs[catalog.ID] {
+			t.Fatalf("missing or duplicate v4 catalog id %q", catalog.ID)
+		}
+		catalogIDs[catalog.ID] = true
+		tools, closeSessions := listedToolsFor(t, catalog.Toolsets)
+		for _, disabled := range catalog.DisabledTools {
+			if tools[disabled] == nil {
+				closeSessions()
+				t.Fatalf("catalog %q disables absent tool %q", catalog.ID, disabled)
+			}
+			delete(tools, disabled)
+		}
+		payload, err := json.Marshal(tools)
+		closeSessions()
+		if err != nil {
+			t.Fatalf("marshal catalog %q: %v", catalog.ID, err)
+		}
+		got := fmt.Sprintf("%x", sha256.Sum256(payload))
+		if catalog.SHA256 != got {
+			t.Errorf("catalog %q sha256 = %s, want %s", catalog.ID, got, catalog.SHA256)
+		}
+	}
+
+	scenarioIDs := make(map[string]bool, len(public.Scenarios))
+	for _, scenario := range public.Scenarios {
+		if scenario.ID == "" || scenarioIDs[scenario.ID] || strings.TrimSpace(scenario.Prompt) == "" || len(scenario.Conditions) < 2 {
+			t.Fatalf("incomplete or duplicate v4 scenario: %+v", scenario)
+		}
+		scenarioIDs[scenario.ID] = true
+		for _, condition := range scenario.Conditions {
+			if condition.ID == "" || !catalogIDs[condition.Catalog] {
+				t.Fatalf("scenario %q has invalid condition %+v", scenario.ID, condition)
+			}
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(agentEvalV4Root, "private", "oracle.json")); !os.IsNotExist(err) {
+		t.Fatalf("v4 oracle must remain out of band, stat error = %v", err)
+	}
+}
+
+func readAgentEvalV4JSON(t *testing.T, path string, target any) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(agentEvalV4Root, path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, target); err != nil {
+		t.Fatalf("decode %s: %v", path, err)
+	}
+	return data
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func readAgentEvalV3JSON(t *testing.T, path string, target any) []byte {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(agentEvalV3Root, path))
@@ -345,7 +465,7 @@ func TestAgentEvalScriptedCurrentContracts(t *testing.T) {
 			"owner": "acme", "repo": "rocket", "issue_numbers": []int{7, 11, 14},
 		})
 		if result.IsError || result.StructuredContent == nil {
-			t.Fatalf("issue-set result = %+v", result)
+			t.Fatalf("issue-set result = %+v; content = %q", result, agentEvalResultText(result))
 		}
 	})
 
@@ -391,8 +511,11 @@ func TestAgentEvalScriptedCurrentContracts(t *testing.T) {
 		if err == nil && (result == nil || !result.IsError) {
 			t.Fatalf("ambiguous search was accepted: result=%+v err=%v", result, err)
 		}
-		if result != nil && agentEvalToolError(t, result).Code != "invalid_argument" {
-			t.Fatalf("error is not actionable: %+v", result.Content)
+		if result != nil {
+			message := agentEvalResultText(result)
+			if !strings.Contains(message, "github-search-raw-query") || !strings.Contains(message, "github-search-structured") {
+				t.Fatalf("schema error does not identify the rejected modes: %q", message)
+			}
 		}
 	})
 
@@ -406,7 +529,7 @@ func TestAgentEvalScriptedCurrentContracts(t *testing.T) {
 		if err := json.Unmarshal(payload, &job); err != nil {
 			t.Fatal(err)
 		}
-		if job.ID == "" || job.Ref != "job:"+job.ID || job.Status == "" || job.PollAfterMS < 1 || len(job.SuggestedActions) != 1 || job.SuggestedActions[0].Tool != mcpcontract.ToolGetJob {
+		if job.ID == "" || job.Ref != "job:"+job.ID || job.Status == "" || job.PollAfterMS < 1 || job.FollowUp == nil || job.FollowUp.Tool != mcpcontract.ToolGetJob {
 			t.Fatalf("job reference is not pollable: %+v", job)
 		}
 		polled := callAgentEvalTool(t, client, mcpcontract.ToolGetJob, map[string]any{"ids": []string{job.ID}})
@@ -474,6 +597,16 @@ func callAgentEvalTool(t *testing.T, client *mcp.ClientSession, name string, arg
 func agentEvalString(value any) string {
 	text, _ := value.(string)
 	return text
+}
+
+func agentEvalResultText(result *mcp.CallToolResult) string {
+	var parts []string
+	for _, content := range result.Content {
+		if text, ok := content.(*mcp.TextContent); ok {
+			parts = append(parts, text.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func agentEvalToolError(t *testing.T, result *mcp.CallToolResult) mcpcontract.ToolError {

@@ -60,6 +60,17 @@ func (r *MCPReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcp
 			return mcpcontract.SearchOutput{}, errors.New("updated_after must be RFC 3339")
 		}
 	}
+	var updatedBefore time.Time
+	if strings.TrimSpace(in.UpdatedBefore) != "" {
+		var err error
+		updatedBefore, err = time.Parse(time.RFC3339, in.UpdatedBefore)
+		if err != nil {
+			return mcpcontract.SearchOutput{}, errors.New("updated_before must be RFC 3339")
+		}
+	}
+	if !updatedAfter.IsZero() && !updatedBefore.IsZero() && updatedBefore.Before(updatedAfter) {
+		return mcpcontract.SearchOutput{}, errors.New("updated_before must not be earlier than updated_after")
+	}
 
 	repo := ""
 	if (in.Owner == "") != (in.Repo == "") {
@@ -72,7 +83,7 @@ func (r *MCPReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcp
 		Kind:  in.Kind,
 		Repo:  repo,
 		State: in.State, StateReason: in.StateReason, Merged: in.Merged, Author: in.Author,
-		Association: in.Association, Assignee: in.Assignee, Labels: in.Labels, UpdatedAfter: updatedAfter,
+		Association: in.Association, Assignee: in.Assignee, Labels: in.Labels, UpdatedAfter: updatedAfter, UpdatedBefore: updatedBefore,
 		Limit:  in.Limit,
 		Cursor: in.Cursor,
 		Sort:   in.Sort, MatchMode: in.MatchMode,
@@ -136,35 +147,16 @@ func (r *MCPReader) Repository(ctx context.Context, in mcpcontract.RepoInput) (m
 	if err := ref.Validate(); err != nil {
 		return mcpcontract.RepositoryOutput{}, err
 	}
-	c, err := r.openReadOnlyCorpus(ctx)
+	batch, err := r.GetRepositories(ctx, mcpcontract.GetRepositoriesInput{
+		Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
+	})
 	if err != nil {
 		return mcpcontract.RepositoryOutput{}, err
 	}
-	repo, err := c.GetRepository(ctx, in.Owner, in.Repo)
-	if err != nil {
-		return mcpcontract.RepositoryOutput{}, fmt.Errorf("get repository: %w", err)
-	}
-	if repo == nil {
+	if len(batch.Items) != 1 || batch.Items[0].Value == nil {
 		return mcpcontract.RepositoryOutput{}, failure.NotFound(nil)
 	}
-	return mcpcontract.RepositoryOutput{
-		Owner:     repo.Owner,
-		Repo:      repo.Name,
-		UpdatedAt: formatTime(repo.SourceUpdatedAt),
-		Fields: map[string]any{
-			"description":    repo.Description,
-			"default_branch": repo.DefaultBranch,
-			"language":       repo.Language,
-			"license":        repo.License,
-			"topics":         repo.Topics,
-			"stars":          repo.Stars,
-			"watchers":       repo.Watchers,
-			"forks":          repo.Forks,
-			"open_issues":    repo.OpenIssues,
-			"archived":       repo.Archived,
-			"fork":           repo.Fork,
-		},
-	}, nil
+	return *batch.Items[0].Value, nil
 }
 
 // Thread reads one issue or pull request from the local corpus.
@@ -250,8 +242,8 @@ func (r *MCPReader) Dossier(ctx context.Context, in mcpcontract.RepoInput) (mcpc
 			mcpcontract.SuggestedAction{
 				Tool:   mcpcontract.ToolSyncRepositoryContext,
 				Reason: "Persist repository metadata before requesting local derived artifacts.",
-				Arguments: map[string]any{
-					"repositories": []map[string]string{{"owner": ref.Owner, "repo": ref.Repo}},
+				Arguments: &mcpcontract.SuggestedActionArguments{
+					Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
 				},
 			},
 		)
@@ -267,8 +259,8 @@ func (r *MCPReader) Dossier(ctx context.Context, in mcpcontract.RepoInput) (mcpc
 			mcpcontract.SuggestedAction{
 				Tool:   mcpcontract.ToolGetRepositories,
 				Reason: "Read available repository metadata without creating local state.",
-				Arguments: map[string]any{
-					"repositories": []map[string]string{{"owner": ref.Owner, "repo": ref.Repo}},
+				Arguments: &mcpcontract.SuggestedActionArguments{
+					Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
 				},
 			},
 		)
@@ -372,7 +364,7 @@ func (r *MCPReader) ListOpportunities(ctx context.Context, in mcpcontract.ListOp
 			Title:           o.Title,
 			Category:        string(o.Category),
 			Status:          string(o.Status),
-			Confidence:      o.Confidence,
+			Confidence:      mcpcontract.Probability(o.Confidence),
 			CollisionStatus: string(o.CollisionStatus),
 			CreatedAt:       formatTime(o.CreatedAt),
 			UpdatedAt:       formatTime(o.UpdatedAt),
@@ -429,7 +421,7 @@ func (r *MCPReader) Opportunity(ctx context.Context, in mcpcontract.OpportunityI
 		Category:            string(opp.Category),
 		Scope:               opp.Scope,
 		Impact:              opp.Impact,
-		Confidence:          opp.Confidence,
+		Confidence:          mcpcontract.Probability(opp.Confidence),
 		ExpectedEffort:      opp.ExpectedEffort,
 		Dependencies:        opp.Dependencies,
 		CollisionStatus:     string(opp.CollisionStatus),
@@ -525,29 +517,50 @@ func evidenceSourceRevisionsToMCP(values []evidence.SourceRevision) []mcpcontrac
 }
 
 func dossierToMCPOutput(d *domain.Dossier) mcpcontract.DossierOutput {
+	recentLimit := max(
+		len(d.RecentMergedPullRequests),
+		len(d.RecentOpenPullRequests),
+		len(d.RecentClosedUnmergedPullRequests),
+		len(d.RecentClosedUnknownPullRequests),
+		len(d.RecentIssues),
+	)
+	recentTruncated :=
+		d.MergedPullRequestCount > len(d.RecentMergedPullRequests) ||
+			d.OpenPullRequestCount > len(d.RecentOpenPullRequests) ||
+			d.ClosedUnmergedPullRequestCount > len(d.RecentClosedUnmergedPullRequests) ||
+			d.ClosedPullRequestUnknownCount > len(d.RecentClosedUnknownPullRequests) ||
+			d.OpenIssueCount+d.ClosedIssueCount > len(d.RecentIssues)
 	return mcpcontract.DossierOutput{
-		Owner: d.Repo.Owner,
-		Repo:  d.Repo.Repo,
-		AsOf:  d.AsOf.Format(time.RFC3339),
-		Sections: map[string]any{
-			"description":                     d.Repository.Description,
-			"language":                        firstLanguage(d.Repository.Languages),
-			"stars":                           d.Repository.Stars,
-			"open_issues":                     d.OpenIssueCount,
-			"closed_issues":                   d.ClosedIssueCount,
-			"open_prs":                        d.OpenPullRequestCount,
-			"merged_prs":                      d.MergedPullRequestCount,
-			"closed_unmerged_prs":             d.ClosedUnmergedPullRequestCount,
-			"closed_unknown_merge_prs":        d.ClosedPullRequestUnknownCount,
-			"recent_merged_prs":               d.RecentMergedPullRequests,
-			"recent_open_prs":                 d.RecentOpenPullRequests,
-			"recent_closed_unmerged_prs":      d.RecentClosedUnmergedPullRequests,
-			"recent_closed_unknown_merge_prs": d.RecentClosedUnknownPullRequests,
-			"recent_issues":                   d.RecentIssues,
-			"guidance":                        d.ContributionGuidance,
-			"coverage":                        coverageNames(d.Coverage),
+		Owner: d.Repo.Owner, Repo: d.Repo.Repo, AsOf: d.AsOf.Format(time.RFC3339),
+		RecentItemsLimit: mcpcontract.NonNegativeInt(recentLimit), RecentItemsTruncated: recentTruncated,
+		Sections: mcpcontract.DossierSections{
+			Description: d.Repository.Description, Language: firstLanguage(d.Repository.Languages),
+			Stars:      mcpcontract.NonNegativeInt(d.Repository.Stars),
+			OpenIssues: mcpcontract.NonNegativeInt(d.OpenIssueCount), ClosedIssues: mcpcontract.NonNegativeInt(d.ClosedIssueCount),
+			OpenPullRequests: mcpcontract.NonNegativeInt(d.OpenPullRequestCount), MergedPullRequests: mcpcontract.NonNegativeInt(d.MergedPullRequestCount),
+			ClosedUnmergedPullRequests:       mcpcontract.NonNegativeInt(d.ClosedUnmergedPullRequestCount),
+			ClosedUnknownMergePullRequests:   mcpcontract.NonNegativeInt(d.ClosedPullRequestUnknownCount),
+			RecentMergedPullRequests:         dossierThreadsToMCP(d.RecentMergedPullRequests),
+			RecentOpenPullRequests:           dossierThreadsToMCP(d.RecentOpenPullRequests),
+			RecentClosedUnmergedPullRequests: dossierThreadsToMCP(d.RecentClosedUnmergedPullRequests),
+			RecentClosedUnknownPullRequests:  dossierThreadsToMCP(d.RecentClosedUnknownPullRequests),
+			RecentIssues:                     dossierThreadsToMCP(d.RecentIssues),
+			Guidance:                         d.ContributionGuidance, Coverage: coverageNames(d.Coverage),
 		},
 	}
+}
+
+func dossierThreadsToMCP(threads []domain.DossierThread) []mcpcontract.DossierThreadOutput {
+	out := make([]mcpcontract.DossierThreadOutput, len(threads))
+	for i, thread := range threads {
+		out[i] = mcpcontract.DossierThreadOutput{
+			Number: thread.Number, Title: thread.Title, Author: thread.Author, State: string(thread.State), Draft: thread.Draft,
+			CreatedAt: formatTime(thread.CreatedAt), UpdatedAt: formatTime(thread.UpdatedAt),
+			ClosedAt: formatTime(thread.ClosedAt), MergedAt: formatTime(thread.MergedAt),
+			Labels: append([]string(nil), thread.Labels...),
+		}
+	}
+	return out
 }
 
 func sourceRefsToMCP(refs []domain.SourceRef) []mcpcontract.SourceRef {
@@ -726,7 +739,7 @@ func clusterToMCP(cl clustering.Cluster, memberLimit int) mcpcontract.ClusterOut
 			Number:   m.Ref.Number,
 			Title:    m.Title,
 			State:    m.State,
-			Score:    m.Score,
+			Score:    mcpcontract.SimilarityScore(m.Score),
 			Reason:   m.Reason,
 			Included: m.Included,
 		})

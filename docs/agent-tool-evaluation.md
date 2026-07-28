@@ -48,6 +48,15 @@ filesystem and context. A separate reviewer scores semantic correctness,
 required evidence, the critical discriminator, and uncertainty before
 comparing tool calls, response bytes, or latency.
 
+The v4 suite turns the MCP redesign decisions into controlled comparisons:
+stored versus live search, aggregate versus manual issue preparation,
+discriminated input modes, resource versus scalar reads, portfolio composition,
+DeepWiki truncation recovery, evidence coverage, and the concern lifecycle.
+It fingerprints the exact serialized catalog for every condition and requires
+at least three trials. The hash-committed semantic oracle is mounted only in the
+evaluator process and applied before efficiency metrics; the public fixture
+itself is not evidence that model trials ran.
+
 Use the same model, sampling settings, corpus fixture revision, toolsets, and
 read-only mode for baseline/candidate comparisons. Save initialize, tools/list,
 tool calls, tool results, final answer, elapsed time, and failures. At least
@@ -79,6 +88,10 @@ contracts include:
 - preserving semantic references across concise and detailed responses;
 - returning stable, duplicate-free pagination;
 - avoiding poll suggestions for terminal jobs.
+- comparing `workflow.mine_repository_fix_patterns` with manual
+  search/select/hydrate loops on a repository where closed PR headers have
+  unknown merge state; score confirmed merged, closed-unmerged, superseded,
+  open, and unknown outcomes separately.
 
 Run the focused suite with:
 

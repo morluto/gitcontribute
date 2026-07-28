@@ -21,7 +21,7 @@ func (r *MCPReader) CreateConcern(ctx context.Context, in mcpcontract.CreateConc
 	result, err := r.createConcern(ctx, &concern.Concern{
 		Repo: domain.RepoRef{Owner: in.Owner, Repo: in.Repo}, CommitSHA: in.CommitSHA, WorkspaceID: in.WorkspaceID,
 		Title: in.Title, ProblemStatement: in.ProblemStatement, SuspectedOwner: in.SuspectedOwner,
-		Confidence: in.Confidence, Unknowns: in.Unknowns, SuccessCriterion: in.SuccessCriterion,
+		Confidence: float64(in.Confidence), Unknowns: in.Unknowns, SuccessCriterion: in.SuccessCriterion,
 		Notes: in.Notes, EvidenceIDs: in.EvidenceIDs, SourceProvenance: provenance,
 	})
 	if err != nil {
@@ -52,9 +52,14 @@ func (r *MCPReader) ListConcerns(ctx context.Context, in mcpcontract.ListConcern
 
 // UpdateConcern implements MCP concern content updates.
 func (r *MCPReader) UpdateConcern(ctx context.Context, in mcpcontract.UpdateConcernInput) (mcpcontract.ConcernOutput, error) {
+	var confidence *float64
+	if in.Confidence != nil {
+		value := float64(*in.Confidence)
+		confidence = &value
+	}
 	result, err := r.Service.UpdateConcern(ctx, in.ID, contracts.ConcernUpdateOptions{
 		Title: in.Title, ProblemStatement: in.ProblemStatement, SuspectedOwner: in.SuspectedOwner,
-		Confidence: in.Confidence, Unknowns: in.Unknowns, SuccessCriterion: in.SuccessCriterion,
+		Confidence: confidence, Unknowns: in.Unknowns, SuccessCriterion: in.SuccessCriterion,
 		Notes: in.Notes, EvidenceIDs: in.EvidenceIDs,
 	})
 	if err != nil {
@@ -120,7 +125,7 @@ func concernResultToMCP(value *contracts.ConcernResult) mcpcontract.ConcernOutpu
 	out := mcpcontract.ConcernOutput{
 		ID: value.ID, Owner: value.Repo.Owner, Repo: value.Repo.Repo, CommitSHA: value.CommitSHA, WorkspaceID: value.WorkspaceID,
 		Title: value.Title, ProblemStatement: value.ProblemStatement, SuspectedOwner: value.SuspectedOwner,
-		Confidence: value.Confidence, Unknowns: value.Unknowns, SuccessCriterion: value.SuccessCriterion,
+		Confidence: mcpcontract.Probability(value.Confidence), Unknowns: value.Unknowns, SuccessCriterion: value.SuccessCriterion,
 		Notes: value.Notes, EvidenceIDs: value.EvidenceIDs, SourceRefCount: value.SourceRefCount,
 		Freshness: value.Freshness, FreshnessReason: value.FreshnessReason, Status: value.Status,
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,

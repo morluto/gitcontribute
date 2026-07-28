@@ -63,24 +63,57 @@ type GetJobInput struct {
 	ID string `json:"id" jsonschema:"Durable job ID"`
 }
 
-// GetJobOutput reports durable state and structured progress for a job.
+// JobArtifactReference identifies a bounded durable result without exposing the
+// job executor's stored request or result representation.
+type JobArtifactReference struct {
+	Kind                string               `json:"kind" jsonschema:"Artifact kind owned by GitContribute"`
+	ID                  string               `json:"id,omitempty" jsonschema:"Stable artifact identifier when one exists"`
+	URI                 string               `json:"uri,omitempty" jsonschema:"MCP resource URI when the artifact is readable as a resource"`
+	Count               *NonNegativeInt      `json:"count,omitempty" jsonschema:"Known number of affected objects for a bounded collection, including zero"`
+	References          []string             `json:"references,omitempty" jsonschema:"Bounded exact repository, thread, or pull-request references produced by the job"`
+	ReferencesTruncated bool                 `json:"references_truncated,omitempty" jsonschema:"Whether more exact references exist than this bounded response includes"`
+	Failures            []JobArtifactFailure `json:"failures,omitempty" jsonschema:"Bounded per-reference outcomes that require retry or recovery"`
+}
+
+// JobArtifactFailure preserves one actionable item-level outcome without
+// exposing an executor's arbitrary stored result representation.
+type JobArtifactFailure struct {
+	Reference    string          `json:"reference"`
+	Status       BatchItemStatus `json:"status"`
+	Reason       string          `json:"reason,omitempty"`
+	Message      string          `json:"message,omitempty"`
+	RetryAfterMS NonNegativeInt  `json:"retry_after_ms,omitempty"`
+}
+
+// JobFollowUp points to the typed read plane for a job's durable result.
+type JobFollowUp struct {
+	Tool        string `json:"tool,omitempty" jsonschema:"Outcome-oriented tool to use next"`
+	ResourceURI string `json:"resource_uri,omitempty" jsonschema:"MCP resource URI to read next"`
+	Reason      string `json:"reason" jsonschema:"Why this follow-up is appropriate"`
+}
+
+// GetJobOutput reports durable state and structured progress for a job. Stored
+// executor request and result blobs are intentionally not model-visible.
 type GetJobOutput struct {
-	ID                    string `json:"id"`
-	Kind                  string `json:"kind"`
-	Status                string `json:"status"`
-	Request               any    `json:"request,omitempty"`
-	Result                any    `json:"result,omitempty"`
-	Error                 string `json:"error,omitempty"`
-	Phase                 string `json:"phase,omitempty"`
-	CompletedItems        int    `json:"completed_items"`
-	TotalItems            int    `json:"total_items"`
-	ProgressPercent       int    `json:"progress_percent"`
-	RetryAfterMS          int    `json:"retry_after_ms,omitempty"`
-	CreatedAt             string `json:"created_at"`
-	StartedAt             string `json:"started_at,omitempty"`
-	CompletedAt           string `json:"completed_at,omitempty"`
-	CancelledAt           string `json:"cancelled_at,omitempty"`
-	CancellationRequested bool   `json:"cancellation_requested"`
+	ID                    string                 `json:"id"`
+	Kind                  string                 `json:"kind" jsonschema:"Durable job kind"`
+	Status                JobStatus              `json:"-"`
+	ExecutionState        JobExecutionState      `json:"execution_state"`
+	Outcome               JobOutcome             `json:"outcome,omitempty"`
+	Summary               string                 `json:"summary"`
+	Artifacts             []JobArtifactReference `json:"artifacts,omitempty"`
+	FollowUp              *JobFollowUp           `json:"follow_up,omitempty"`
+	Error                 string                 `json:"error,omitempty"`
+	Phase                 string                 `json:"phase,omitempty" jsonschema:"Current bounded workflow phase"`
+	CompletedItems        NonNegativeInt         `json:"completed_items"`
+	TotalItems            NonNegativeInt         `json:"total_items"`
+	ProgressPercent       ProgressPercent        `json:"progress_percent"`
+	RetryAfterMS          NonNegativeInt         `json:"retry_after_ms,omitempty"`
+	CreatedAt             string                 `json:"created_at"`
+	StartedAt             string                 `json:"started_at,omitempty"`
+	CompletedAt           string                 `json:"completed_at,omitempty"`
+	CancelledAt           string                 `json:"cancelled_at,omitempty"`
+	CancellationRequested bool                   `json:"cancellation_requested"`
 }
 
 // ThreadByNumberInput identifies a stored issue or pull request by number.
@@ -92,13 +125,13 @@ type ThreadByNumberInput struct {
 
 // JobReference is returned by long-running tools that submit durable jobs.
 type JobReference struct {
-	ID               string            `json:"id"`
-	Ref              string            `json:"ref"`
-	Kind             string            `json:"kind"`
-	Status           string            `json:"status"`
-	Message          string            `json:"message"`
-	PollAfterMS      int               `json:"poll_after_ms,omitempty"`
-	SuggestedActions []SuggestedAction `json:"suggested_actions,omitempty"`
+	ID          string         `json:"id"`
+	Ref         string         `json:"ref"`
+	Kind        string         `json:"kind"`
+	Status      JobStatus      `json:"status"`
+	Message     string         `json:"message"`
+	PollAfterMS NonNegativeInt `json:"poll_after_ms,omitempty"`
+	FollowUp    *JobFollowUp   `json:"follow_up,omitempty"`
 }
 
 // BuildRepositoryDossierInput selects a repository for durable dossier generation.
@@ -175,7 +208,7 @@ type PromoteOpportunityInput struct {
 	Scope               string      `json:"scope" jsonschema:"Scope of the opportunity"`
 	Impact              string      `json:"impact" jsonschema:"Impact of the opportunity"`
 	ExpectedEffort      string      `json:"expected_effort" jsonschema:"Expected effort"`
-	Confidence          float64     `json:"confidence" jsonschema:"Confidence from 0.0 to 1.0"`
+	Confidence          Probability `json:"confidence" jsonschema:"Confidence from 0.0 to 1.0"`
 	Dependencies        []string    `json:"dependencies,omitempty" jsonschema:"Dependencies"`
 	MaintainerAlignment string      `json:"maintainer_alignment,omitempty" jsonschema:"Maintainer alignment note"`
 	SourceRefs          []SourceRef `json:"source_refs,omitempty" jsonschema:"Source references"`

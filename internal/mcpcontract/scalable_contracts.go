@@ -13,8 +13,8 @@ type SearchGitHubRepositoriesInput struct {
 	MatchFields    []string `json:"match_fields,omitempty" jsonschema:"Text fields: name, description, or readme"`
 	Topics         []string `json:"topics,omitempty" jsonschema:"Topics that must all match"`
 	Language       string   `json:"language,omitempty" jsonschema:"Primary language"`
-	StarsMin       int      `json:"stars_min,omitempty" jsonschema:"Minimum stargazer count"`
-	StarsMax       int      `json:"stars_max,omitempty" jsonschema:"Maximum stargazer count"`
+	StarsMin       *int     `json:"stars_min,omitempty" jsonschema:"Minimum stargazer count, including zero"`
+	StarsMax       *int     `json:"stars_max,omitempty" jsonschema:"Maximum stargazer count, including zero"`
 	CreatedAfter   string   `json:"created_after,omitempty" jsonschema:"Created on or after YYYY-MM-DD"`
 	CreatedBefore  string   `json:"created_before,omitempty" jsonschema:"Created on or before YYYY-MM-DD"`
 	PushedAfter    string   `json:"pushed_after,omitempty" jsonschema:"Pushed on or after YYYY-MM-DD"`
@@ -30,9 +30,21 @@ type SearchGitHubRepositoriesInput struct {
 
 // SuggestedAction describes a non-mandatory follow-up with reusable arguments.
 type SuggestedAction struct {
-	Tool      string         `json:"tool"`
-	Reason    string         `json:"reason"`
-	Arguments map[string]any `json:"arguments,omitempty"`
+	Tool      string                    `json:"tool"`
+	Reason    string                    `json:"reason"`
+	Arguments *SuggestedActionArguments `json:"arguments,omitempty"`
+}
+
+// SuggestedActionArguments is the bounded union of reusable follow-up
+// selections returned by GitContribute tools.
+type SuggestedActionArguments struct {
+	IDs          []string        `json:"ids,omitempty"`
+	Selection    string          `json:"selection,omitempty"`
+	Repositories []RepositoryRef `json:"repositories,omitempty"`
+	Threads      []ThreadRef     `json:"threads,omitempty"`
+	Facets       []string        `json:"facets,omitempty"`
+	Kind         string          `json:"kind,omitempty"`
+	State        string          `json:"state,omitempty"`
 }
 
 // SearchWarning explains a request-specific limitation and how to improve it.
@@ -60,6 +72,8 @@ type RepositorySearchMatch struct {
 	OpenIssues    *int                     `json:"open_issues,omitempty"`
 	Archived      *bool                    `json:"archived,omitempty"`
 	Fork          *bool                    `json:"fork,omitempty"`
+	DossierStatus string                   `json:"dossier_status" jsonschema:"Persisted dossier availability: available or missing"`
+	DossierAsOf   string                   `json:"dossier_as_of,omitempty"`
 }
 
 // SearchGitHubRepositoriesOutput contains search results and completeness metadata.
@@ -97,13 +111,13 @@ type ThreadRef struct {
 // input order. Value is present for complete items; recovery fields explain
 // retryable, unavailable, or failed items without failing unrelated work.
 type BatchItem[T any] struct {
-	Key          string `json:"key"`
-	Status       string `json:"status"`
-	Value        *T     `json:"value,omitempty"`
-	Reason       string `json:"reason,omitempty"`
-	Message      string `json:"message,omitempty"`
-	RetryAfterMS int    `json:"retry_after_ms,omitempty"`
-	NextAction   string `json:"next_action,omitempty"`
+	Key          string          `json:"key"`
+	Status       BatchItemStatus `json:"status"`
+	Value        *T              `json:"value,omitempty"`
+	Reason       string          `json:"reason,omitempty"`
+	Message      string          `json:"message,omitempty"`
+	RetryAfterMS NonNegativeInt  `json:"retry_after_ms,omitempty"`
+	NextAction   string          `json:"next_action,omitempty"`
 }
 
 // GetRepositoriesInput selects repositories for a bounded corpus read.
@@ -127,6 +141,7 @@ type TypedRepositoryOutput struct {
 	Metadata      RepositoryMetadataOutput `json:"metadata"`
 	DossierStatus string                   `json:"dossier_status" jsonschema:"Persisted dossier availability: available or missing"`
 	DossierAsOf   string                   `json:"dossier_as_of,omitempty" jsonschema:"As-of timestamp of the latest persisted dossier"`
+	UpdatedAt     string                   `json:"updated_at,omitempty" jsonschema:"Latest observed repository source timestamp in RFC 3339 form"`
 	Description   *string                  `json:"description"`
 	DefaultBranch *string                  `json:"default_branch"`
 	Language      *string                  `json:"language"`
@@ -173,7 +188,7 @@ type PrecedentOutput struct {
 	State       string                 `json:"state"`
 	StateReason string                 `json:"state_reason,omitempty"`
 	Title       string                 `json:"title"`
-	Score       float64                `json:"score"`
+	Score       SimilarityScore        `json:"score"`
 	RuleVersion similarity.RuleVersion `json:"rule_version"`
 	Reasons     []string               `json:"reasons"`
 	ClosedAt    string                 `json:"closed_at,omitempty"`
@@ -253,6 +268,17 @@ type SyncAuthoredPullRequestsInput struct {
 	MaxRequests  int    `json:"max_requests,omitempty" jsonschema:"Maximum total GitHub requests from 2 to 1000"`
 }
 
+// SyncPortfolioInput bounds one outcome-oriented authored-PR discovery and
+// health refresh. The primitive sync tools remain available in the portfolio
+// profile for specialized recovery.
+type SyncPortfolioInput struct {
+	State                string `json:"state,omitempty" jsonschema:"open, closed, or all; defaults to open"`
+	UpdatedAfter         string `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound for authored-PR discovery"`
+	Limit                int    `json:"limit,omitempty" jsonschema:"Maximum pull requests to discover and refresh from 1 to 100; defaults to 100"`
+	DiscoveryMaxRequests int    `json:"discovery_max_requests,omitempty" jsonschema:"Maximum GitHub requests for identity and authored-PR discovery from 2 to 1000"`
+	StatusMaxPages       int    `json:"status_max_pages,omitempty" jsonschema:"Maximum pages per pull-request health facet from 1 to 20; defaults to 3"`
+}
+
 // SyncPullRequestStatusInput selects pull requests and bounds review hydration.
 type SyncPullRequestStatusInput struct {
 	PullRequests []ThreadRef `json:"pull_requests" jsonschema:"One to 50 exact pull requests"`
@@ -326,10 +352,10 @@ type FindPortfolioOverlapsInput struct {
 
 // PortfolioOverlapEvidenceOutput is one exact observed overlap reason.
 type PortfolioOverlapEvidenceOutput struct {
-	Kind       string   `json:"kind"`
-	Value      string   `json:"value"`
-	Score      float64  `json:"score,omitempty"`
-	SourceRefs []string `json:"source_refs"`
+	Kind       string          `json:"kind"`
+	Value      string          `json:"value"`
+	Score      SimilarityScore `json:"score,omitempty"`
+	SourceRefs []string        `json:"source_refs"`
 }
 
 // PortfolioOverlapMatchOutput associates overlap evidence with one authored PR.
@@ -413,7 +439,7 @@ type CheckMergeConflictsOutput struct {
 // results are context, not authority for current GitHub state.
 const (
 	DeepWikiMinOutputBytes     = 1024
-	DeepWikiDefaultOutputBytes = 128 * 1024
+	DeepWikiDefaultOutputBytes = 32 * 1024
 	DeepWikiMaxOutputBytes     = 1024 * 1024
 )
 
@@ -422,7 +448,7 @@ type DeepWikiInput struct {
 	Repository     string   `json:"repository,omitempty" jsonschema:"OWNER/REPO for structure or contents"`
 	Repositories   []string `json:"repositories,omitempty" jsonschema:"One to 10 OWNER/REPO values for question"`
 	Question       string   `json:"question,omitempty" jsonschema:"Focused cross-repository question"`
-	MaxOutputBytes int      `json:"max_output_bytes,omitempty" jsonschema:"Maximum returned bytes from 1024 to 1048576; defaults to 131072 because contents has no continuation protocol"`
+	MaxOutputBytes int      `json:"max_output_bytes,omitempty" jsonschema:"Maximum returned bytes from 1024 to 1048576; defaults to 32768. Prefer structure followed by a focused question when more context is needed"`
 }
 
 // DeepWikiOutput labels provider prose as derived external content and reports

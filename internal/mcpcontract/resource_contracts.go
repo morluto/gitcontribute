@@ -45,32 +45,28 @@ type ThreadInput struct {
 
 // SearchInput describes an offline thread search page.
 type SearchInput struct {
-	Query        string   `json:"query" jsonschema:"Full-text query"`
-	Owner        string   `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo         string   `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Kind         string   `json:"kind,omitempty" jsonschema:"Optional thread kind"`
-	State        string   `json:"state,omitempty"`
-	StateReason  string   `json:"state_reason,omitempty"`
-	Merged       *bool    `json:"merged,omitempty"`
-	Author       string   `json:"author,omitempty"`
-	Association  string   `json:"author_association,omitempty"`
-	Assignee     string   `json:"assignee,omitempty"`
-	Labels       []string `json:"labels,omitempty"`
-	UpdatedAfter string   `json:"updated_after,omitempty"`
-	Limit        int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-	Cursor       string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
-	Sort         string   `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
-	MatchMode    string   `json:"match_mode,omitempty" jsonschema:"Term matching: all requires every term; any requires at least one term"`
-	View         string   `json:"view,omitempty" jsonschema:"compact omits full bodies and keeps bounded excerpts; full includes stored bodies"`
+	Query         string   `json:"query" jsonschema:"Full-text query"`
+	Owner         string   `json:"owner,omitempty" jsonschema:"Optional repository owner"`
+	Repo          string   `json:"repo,omitempty" jsonschema:"Optional repository name"`
+	Kind          string   `json:"kind,omitempty" jsonschema:"Optional thread kind"`
+	State         string   `json:"state,omitempty"`
+	StateReason   string   `json:"state_reason,omitempty"`
+	Merged        *bool    `json:"merged,omitempty"`
+	Author        string   `json:"author,omitempty"`
+	Association   string   `json:"author_association,omitempty"`
+	Assignee      string   `json:"assignee,omitempty"`
+	Labels        []string `json:"labels,omitempty"`
+	UpdatedAfter  string   `json:"updated_after,omitempty"`
+	UpdatedBefore string   `json:"updated_before,omitempty"`
+	Limit         int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Cursor        string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
+	Sort          string   `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
+	MatchMode     string   `json:"match_mode,omitempty" jsonschema:"Term matching: all requires every term; any requires at least one term"`
+	View          string   `json:"view,omitempty" jsonschema:"compact omits full bodies and keeps bounded excerpts; full includes stored bodies"`
 }
 
 // RepositoryOutput is the stable MCP representation of a repository.
-type RepositoryOutput struct {
-	Owner     string         `json:"owner"`
-	Repo      string         `json:"repo"`
-	UpdatedAt string         `json:"updated_at,omitempty"`
-	Fields    map[string]any `json:"fields,omitempty"`
-}
+type RepositoryOutput = TypedRepositoryOutput
 
 // ThreadOutput is the stable MCP representation of an issue or pull request.
 type ThreadOutput struct {
@@ -112,10 +108,46 @@ type SearchOutput struct {
 
 // DossierOutput contains a persisted repository dossier snapshot.
 type DossierOutput struct {
-	Owner    string         `json:"owner"`
-	Repo     string         `json:"repo"`
-	AsOf     string         `json:"as_of,omitempty"`
-	Sections map[string]any `json:"sections"`
+	Owner                string          `json:"owner"`
+	Repo                 string          `json:"repo"`
+	AsOf                 string          `json:"as_of,omitempty"`
+	RecentItemsLimit     NonNegativeInt  `json:"recent_items_limit" jsonschema:"Maximum items retained in each recent-thread section"`
+	RecentItemsTruncated bool            `json:"recent_items_truncated" jsonschema:"True when at least one recent-thread section is a bounded sample"`
+	Sections             DossierSections `json:"sections"`
+}
+
+// DossierSections is the stable typed projection of persisted dossier data.
+type DossierSections struct {
+	Description                      string                `json:"description,omitempty"`
+	Language                         string                `json:"language,omitempty"`
+	Stars                            NonNegativeInt        `json:"stars"`
+	OpenIssues                       NonNegativeInt        `json:"open_issues"`
+	ClosedIssues                     NonNegativeInt        `json:"closed_issues"`
+	OpenPullRequests                 NonNegativeInt        `json:"open_prs"`
+	MergedPullRequests               NonNegativeInt        `json:"merged_prs"`
+	ClosedUnmergedPullRequests       NonNegativeInt        `json:"closed_unmerged_prs"`
+	ClosedUnknownMergePullRequests   NonNegativeInt        `json:"closed_unknown_merge_prs"`
+	RecentMergedPullRequests         []DossierThreadOutput `json:"recent_merged_prs"`
+	RecentOpenPullRequests           []DossierThreadOutput `json:"recent_open_prs"`
+	RecentClosedUnmergedPullRequests []DossierThreadOutput `json:"recent_closed_unmerged_prs"`
+	RecentClosedUnknownPullRequests  []DossierThreadOutput `json:"recent_closed_unknown_merge_prs"`
+	RecentIssues                     []DossierThreadOutput `json:"recent_issues"`
+	Guidance                         string                `json:"guidance,omitempty"`
+	Coverage                         []string              `json:"coverage" jsonschema:"Observed dossier facets; omitted facets are unknown"`
+}
+
+// DossierThreadOutput is one bounded recent thread summary.
+type DossierThreadOutput struct {
+	Number    int      `json:"number"`
+	Title     string   `json:"title"`
+	Author    string   `json:"author,omitempty"`
+	State     string   `json:"state"`
+	Draft     bool     `json:"draft,omitempty"`
+	CreatedAt string   `json:"created_at,omitempty"`
+	UpdatedAt string   `json:"updated_at,omitempty"`
+	ClosedAt  string   `json:"closed_at,omitempty"`
+	MergedAt  string   `json:"merged_at,omitempty"`
+	Labels    []string `json:"labels,omitempty"`
 }
 
 // SourceRef records provenance for an MCP result or workflow artifact.
@@ -207,15 +239,15 @@ type ListOpportunitiesInput struct {
 
 // OpportunitySummary is the compact opportunity representation used in lists.
 type OpportunitySummary struct {
-	ID              string  `json:"id"`
-	InvestigationID string  `json:"investigation_id"`
-	Title           string  `json:"title"`
-	Category        string  `json:"category"`
-	Status          string  `json:"status"`
-	Confidence      float64 `json:"confidence"`
-	CollisionStatus string  `json:"collision_status"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
+	ID              string      `json:"id"`
+	InvestigationID string      `json:"investigation_id"`
+	Title           string      `json:"title"`
+	Category        string      `json:"category"`
+	Status          string      `json:"status"`
+	Confidence      Probability `json:"confidence"`
+	CollisionStatus string      `json:"collision_status"`
+	CreatedAt       string      `json:"created_at"`
+	UpdatedAt       string      `json:"updated_at"`
 }
 
 // ListOpportunitiesOutput contains bounded opportunities for an investigation.
@@ -240,7 +272,7 @@ type OpportunityOutput struct {
 	Category            string      `json:"category"`
 	Scope               string      `json:"scope"`
 	Impact              string      `json:"impact"`
-	Confidence          float64     `json:"confidence"`
+	Confidence          Probability `json:"confidence"`
 	ExpectedEffort      string      `json:"expected_effort,omitempty"`
 	Dependencies        []string    `json:"dependencies,omitempty"`
 	CollisionStatus     string      `json:"collision_status"`
@@ -275,14 +307,14 @@ type FindNeighborsInput struct {
 
 // NeighborOutput describes one similar stored thread and its score.
 type NeighborOutput struct {
-	Kind   string  `json:"kind"`
-	Owner  string  `json:"owner"`
-	Repo   string  `json:"repo"`
-	Number int     `json:"number"`
-	Title  string  `json:"title"`
-	State  string  `json:"state"`
-	Score  float64 `json:"score"`
-	Reason string  `json:"reason"`
+	Kind   string          `json:"kind"`
+	Owner  string          `json:"owner"`
+	Repo   string          `json:"repo"`
+	Number int             `json:"number"`
+	Title  string          `json:"title"`
+	State  string          `json:"state"`
+	Score  SimilarityScore `json:"score"`
+	Reason string          `json:"reason"`
 }
 
 // NeighborSetOutput contains deterministic neighbors for one stored thread.
@@ -303,15 +335,15 @@ type FindNeighborsOutput struct {
 
 // ClusterMemberOutput describes one member of a duplicate cluster.
 type ClusterMemberOutput struct {
-	Kind     string  `json:"kind"`
-	Owner    string  `json:"owner"`
-	Repo     string  `json:"repo"`
-	Number   int     `json:"number"`
-	Title    string  `json:"title,omitempty"`
-	State    string  `json:"state,omitempty"`
-	Score    float64 `json:"score"`
-	Reason   string  `json:"reason"`
-	Included bool    `json:"included"`
+	Kind     string          `json:"kind"`
+	Owner    string          `json:"owner"`
+	Repo     string          `json:"repo"`
+	Number   int             `json:"number"`
+	Title    string          `json:"title,omitempty"`
+	State    string          `json:"state,omitempty"`
+	Score    SimilarityScore `json:"score"`
+	Reason   string          `json:"reason"`
+	Included bool            `json:"included"`
 }
 
 // ClusterOutput contains a stable duplicate cluster and its canonical member.

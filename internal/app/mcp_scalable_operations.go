@@ -398,9 +398,9 @@ func (r *MCPReader) IndexRepositories(ctx context.Context, in mcpcontract.IndexR
 func queuedJobReference(id, kind, message string) mcpcontract.JobReference {
 	return mcpcontract.JobReference{
 		ID: id, Ref: "job:" + id, Kind: kind, Status: "queued", Message: message, PollAfterMS: 1000,
-		SuggestedActions: []mcpcontract.SuggestedAction{{
-			Tool: mcpcontract.ToolGetJob, Reason: "Poll this durable job after the suggested delay.", Arguments: map[string]any{"ids": []string{id}},
-		}},
+		FollowUp: &mcpcontract.JobFollowUp{
+			Tool: mcpcontract.ToolGetJob, Reason: "Poll this job ID after the suggested delay.",
+		},
 	}
 }
 
@@ -742,7 +742,11 @@ func (r *MCPReader) DeepWiki(ctx context.Context, in mcpcontract.DeepWikiInput) 
 		out.Result = validUTF8Prefix(out.Result, maxBytes)
 		out.Truncated = true
 		out.Reason = "output_limit"
-		out.NextAction = "Retry with a larger max_output_bytes (up to 1048576), or narrow the request."
+		if in.Action == "contents" {
+			out.NextAction = "Call structure, then ask a focused question about the relevant section. Increase max_output_bytes only when the focused read is still incomplete."
+		} else {
+			out.NextAction = "Narrow the question or repository set. Increase max_output_bytes only when the focused read is still incomplete."
+		}
 	}
 	return out, nil
 }

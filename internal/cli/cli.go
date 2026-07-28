@@ -513,7 +513,7 @@ type mcpCmd struct {
 
 type mcpServeCmd struct {
 	Transport string `name:"transport" default:"stdio" enum:"stdio" help:"MCP transport protocol"`
-	Toolsets  string `name:"toolsets" default:"contribute" help:"Comma-separated MCP toolsets: contribute, code, research, diagnostics, portfolio, advanced, or all"`
+	Toolsets  string `name:"toolsets" default:"contribute" help:"Comma-separated MCP toolsets: contribute, code, research, diagnostics, portfolio, advanced, patterns, concerns, or all"`
 	ReadOnly  bool   `name:"read-only" help:"Expose only tools annotated as read-only"`
 }
 
