@@ -77,6 +77,35 @@ explicit `raw_query` field; there is no deprecated alias.
   hydrated, a closed PR's `merged` value is omitted and outcome-sensitive
   offline reads report it as unknown rather than closed-unmerged.
 
+### Repository fix-pattern mining
+
+The opt-in `patterns` profile exposes the trace-backed aggregate:
+
+```text
+workflow.mine_repository_fix_patterns
+  -> jobs.get
+  -> gitcontribute://fix-pattern-report/{job_id}
+```
+
+Use it to summarize how one stored repository handled caller-defined symptom
+categories over an explicit observation window. It searches the local corpus
+first, refreshes only a bounded set of finalists whose merge outcome is
+unknown, and persists a typed report. `candidate_limit`, `hydration_limit`, and
+`representative_limit` bound search, network work, and returned context
+independently. Set `hydration_limit: 0` to request a strictly offline analysis;
+otherwise the workflow performs GitHub reads and idempotent local writes.
+
+Coverage reports candidate matches, unique pull requests, unknown outcomes
+before and after hydration, hydration failures, and candidate truncation.
+Merged, closed-unmerged, superseded, open, and unknown remain separate
+outcomes. Only closed PRs with unknown merge state consume the hydration
+budget. An example is marked `accepted_fix` only when refreshed state confirms
+it was merged and stored pull-request text contains an explicit closing
+relationship. A similar closed PR is never promoted to accepted-fix evidence.
+Relationship and proof-style labels are bounded lexical projections, so the
+report preserves their supporting phrase and states that similarity is not
+causal proof.
+
 ## Exact issue-set preparation
 
 Use `workflow.prepare_issue_set` when the contribution is already scoped by
@@ -170,7 +199,7 @@ Repository and dossier absence have different recovery paths:
   retry the offline read.
 - `dossier_not_persisted` means the repository exists locally but has no saved
   dossier. Use `corpus.get_repositories` for metadata and dossier availability;
-  call `corpus.build_repository_dossier` only when creating that local artifact
+  call `workflow.build_repository_dossier` only when creating that local artifact
   is actually required.
 
 Retrying `corpus.get_repository_dossier` alone cannot resolve either state.
