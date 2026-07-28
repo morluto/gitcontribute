@@ -58,7 +58,7 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpcontract.FindCluster
 			item.Value = &value
 		case errors.Is(err, errRepositoryNotFound):
 			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", err.Error()
-			item.NextAction = "Call github.sync_repository_metadata for this repository."
+			item.NextAction = "Call github.sync_repository_context for this repository."
 			out.Status = "partial"
 		case errors.Is(err, errThreadNotFound):
 			item.Status, item.Reason, item.Message = "unavailable", "thread_not_indexed", err.Error()
@@ -193,13 +193,13 @@ func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpcontract.FindNeighb
 			for j, neighbor := range result.Neighbors {
 				value.Neighbors[j] = mcpcontract.NeighborOutput{
 					Kind: neighbor.Kind, Owner: neighbor.Owner, Repo: neighbor.Repo, Number: neighbor.Number,
-					Title: neighbor.Title, State: neighbor.State, Score: neighbor.Score, Reason: neighbor.Reason,
+					Title: neighbor.Title, State: neighbor.State, Score: mcpcontract.SimilarityScore(neighbor.Score), Reason: neighbor.Reason,
 				}
 			}
 			item.Value = &value
 		case errors.Is(err, errRepositoryNotFound):
 			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", err.Error()
-			item.NextAction = "Call github.sync_repository_metadata for this repository."
+			item.NextAction = "Call github.sync_repository_context for this repository."
 			out.Status = "partial"
 		case errors.Is(err, errThreadNotFound):
 			item.Status, item.Reason, item.Message = "unavailable", "thread_not_indexed", err.Error()

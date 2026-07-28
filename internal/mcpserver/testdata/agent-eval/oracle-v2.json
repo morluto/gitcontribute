@@ -25,9 +25,9 @@
       "correct_conclusion": "Return the stored dossier and its persisted as-of value without regeneration.",
       "required_evidence": ["corpus.get_repository_dossier is used.", "No build, sync, or GitHub tool is called."],
       "critical_discriminator": "The current repository projection can be newer than the persisted dossier; a read must not silently rebuild it.",
-      "tempting_wrong_path": "Call corpus.build_repository_dossier before reading.",
+      "tempting_wrong_path": "Call workflow.build_repository_dossier before reading.",
       "acceptable_tools": ["corpus.get_repository_dossier"],
-      "forbidden_tools": ["corpus.build_repository_dossier", "github.sync_repository_metadata"],
+      "forbidden_tools": ["workflow.build_repository_dossier", "github.sync_repository_context"],
       "minimum_semantic_score": 0.8
     },
     {
@@ -37,7 +37,7 @@
       "critical_discriminator": "Comparing dossier availability does not require loading each full dossier or performing any write or network operation.",
       "tempting_wrong_path": "Fan out three corpus.get_repository_dossier calls and retry not-found results with build or sync tools.",
       "acceptable_tools": ["corpus.get_repositories"],
-      "forbidden_tools": ["corpus.get_repository_dossier", "corpus.build_repository_dossier", "github.sync_repository_metadata"],
+      "forbidden_tools": ["corpus.get_repository_dossier", "workflow.build_repository_dossier", "github.sync_repository_context"],
       "expected_max_tool_calls": 1,
       "minimum_semantic_score": 0.8
     },

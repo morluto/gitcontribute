@@ -23,6 +23,10 @@ func (f *threadMetadataReader) ListIssues(ctx context.Context, owner, name strin
 	return github.ListResult[github.Issue]{Items: f.issues, Page: github.PageInfo{}}, nil
 }
 
+func (*threadMetadataReader) GetRepositoryFile(_ context.Context, _, _, path string) (github.RepositoryFile, github.RateInfo, error) {
+	return github.RepositoryFile{}, github.RateInfo{}, &github.NotFoundError{Resource: path}
+}
+
 func (f *threadMetadataReader) ListIssueComments(ctx context.Context, owner, name string, issueNumber int, opts github.PageOptions) (github.ListResult[github.IssueComment], error) {
 	return github.ListResult[github.IssueComment]{}, nil
 }
@@ -69,7 +73,9 @@ func TestSyncMapsIssueMetadataToThread(t *testing.T) {
 	}
 	svc.SetGitHubReader(reader)
 
-	if _, err := svc.ArchiveSync(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, contracts.ArchiveSyncOptions{State: "all"}); err != nil {
+	repoRef := contracts.RepoRef{Owner: "owner", Repo: "repo"}
+	syncRepositoryContextForTest(t, svc, repoRef)
+	if _, err := svc.ArchiveSync(ctx, repoRef, contracts.ArchiveSyncOptions{State: "all"}); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 

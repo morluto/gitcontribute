@@ -19,9 +19,6 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
-        with:
-          release-type: go
-          package-name: gitcontribute
 
   # After release-please creates a tag, the existing release.yml (tag-triggered)
   # handles goreleaser builds, npm publish, and release notes.

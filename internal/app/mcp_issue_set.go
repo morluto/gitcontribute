@@ -392,9 +392,9 @@ func preparedIssueSourceAsOf(value mcpcontract.PreparedIssueEvidence) string {
 func issueSyncAction(ref domain.RepoRef, number int) mcpcontract.SuggestedAction {
 	return mcpcontract.SuggestedAction{
 		Tool: mcpcontract.ToolSyncThreads, Reason: "Fetch the exact issue header and body into the local corpus.",
-		Arguments: map[string]any{
-			"selection": "threads",
-			"threads":   []map[string]any{{"owner": ref.Owner, "repo": ref.Repo, "kind": corpus.ThreadKindIssue, "number": number}},
+		Arguments: &mcpcontract.SuggestedActionArguments{
+			Selection: "threads",
+			Threads:   []mcpcontract.ThreadRef{{Owner: ref.Owner, Repo: ref.Repo, Kind: corpus.ThreadKindIssue, Number: number}},
 		},
 	}
 }
@@ -402,9 +402,9 @@ func issueSyncAction(ref domain.RepoRef, number int) mcpcontract.SuggestedAction
 func issueHydrateAction(ref domain.RepoRef, number int, facet string) mcpcontract.SuggestedAction {
 	return mcpcontract.SuggestedAction{
 		Tool: mcpcontract.ToolHydrateThreads, Reason: "Complete the missing issue evidence facet.",
-		Arguments: map[string]any{
-			"threads": []map[string]any{{"owner": ref.Owner, "repo": ref.Repo, "kind": corpus.ThreadKindIssue, "number": number}},
-			"facets":  []string{facet},
+		Arguments: &mcpcontract.SuggestedActionArguments{
+			Threads: []mcpcontract.ThreadRef{{Owner: ref.Owner, Repo: ref.Repo, Kind: corpus.ThreadKindIssue, Number: number}},
+			Facets:  []string{facet},
 		},
 	}
 }
@@ -412,11 +412,11 @@ func issueHydrateAction(ref domain.RepoRef, number int, facet string) mcpcontrac
 func repositoryPullRequestSyncAction(ref domain.RepoRef) mcpcontract.SuggestedAction {
 	return mcpcontract.SuggestedAction{
 		Tool: mcpcontract.ToolSyncThreads, Reason: "Complete the stored pull-request population used for related-work analysis.",
-		Arguments: map[string]any{
-			"selection":    "repositories",
-			"repositories": []map[string]any{{"owner": ref.Owner, "repo": ref.Repo}},
-			"kind":         corpus.ThreadKindPullRequest,
-			"state":        "all",
+		Arguments: &mcpcontract.SuggestedActionArguments{
+			Selection:    "repositories",
+			Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
+			Kind:         corpus.ThreadKindPullRequest,
+			State:        "all",
 		},
 	}
 }
@@ -424,11 +424,11 @@ func repositoryPullRequestSyncAction(ref domain.RepoRef) mcpcontract.SuggestedAc
 func repositoryHistorySyncAction(ref domain.RepoRef) mcpcontract.SuggestedAction {
 	return mcpcontract.SuggestedAction{
 		Tool: mcpcontract.ToolSyncThreads, Reason: "Fetch closed issue and pull-request headers used for historical precedent analysis.",
-		Arguments: map[string]any{
-			"selection":    "repositories",
-			"repositories": []map[string]any{{"owner": ref.Owner, "repo": ref.Repo}},
-			"kind":         "both",
-			"state":        "closed",
+		Arguments: &mcpcontract.SuggestedActionArguments{
+			Selection:    "repositories",
+			Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
+			Kind:         "both",
+			State:        "closed",
 		},
 	}
 }

@@ -20,7 +20,7 @@ const pullRequestStatusWorkers = 4
 // syncPullRequestStatusBatch preserves input order and isolates failures by PR.
 // It uses the existing REST hydration path for details and reviews, then one
 // typed GraphQL read for health facets unavailable from REST.
-func (s *Service) syncPullRequestStatusBatch(ctx context.Context, in mcpcontract.SyncPullRequestStatusInput, report func(string, string) error) (map[string]any, error) {
+func (s *Service) syncPullRequestStatusBatch(ctx context.Context, in mcpcontract.SyncPullRequestStatusInput, report func(string, string) error) (pullRequestStatusBatchResult, error) {
 	results := make([]map[string]any, len(in.PullRequests))
 	work := make(chan int)
 	workers := min(pullRequestStatusWorkers, len(in.PullRequests))
@@ -41,7 +41,7 @@ func (s *Service) syncPullRequestStatusBatch(ctx context.Context, in mcpcontract
 		case <-ctx.Done():
 			close(work)
 			wg.Wait()
-			return nil, ctx.Err()
+			return pullRequestStatusBatchResult{}, ctx.Err()
 		}
 	}
 	close(work)
@@ -49,17 +49,50 @@ func (s *Service) syncPullRequestStatusBatch(ctx context.Context, in mcpcontract
 
 	completed := 0
 	status := "complete"
-	for _, item := range results {
+	failures := make([]pullRequestStatusFailure, 0)
+	for index, item := range results {
 		if item["status"] == "complete" {
 			completed++
 		} else {
 			status = "partial"
+			ref := in.PullRequests[index]
+			failure := pullRequestStatusFailure{
+				Reference: fmt.Sprintf("%s/%s#%d", ref.Owner, ref.Repo, ref.Number),
+				Status:    stringMapValue(item, "status"),
+				Reason:    stringMapValue(item, "reason"),
+				Message:   stringMapValue(item, "message"),
+			}
+			if retry, ok := item["retry_after_ms"].(int); ok && retry > 0 {
+				failure.RetryAfterMS = retry
+			}
+			failures = append(failures, failure)
 		}
 	}
 	if err := report("pull_request_status", jobProgressCounts(len(results), len(results))); err != nil {
-		return nil, err
+		return pullRequestStatusBatchResult{}, err
 	}
-	return map[string]any{"status": status, "items": results, "completed": completed, "total": len(results)}, nil
+	return pullRequestStatusBatchResult{Status: status, Items: results, Failures: failures, Completed: completed, Total: len(results)}, nil
+}
+
+type pullRequestStatusBatchResult struct {
+	Status    string                     `json:"status"`
+	Items     []map[string]any           `json:"items"`
+	Failures  []pullRequestStatusFailure `json:"failures,omitempty"`
+	Completed int                        `json:"completed"`
+	Total     int                        `json:"total"`
+}
+
+type pullRequestStatusFailure struct {
+	Reference    string `json:"reference"`
+	Status       string `json:"status"`
+	Reason       string `json:"reason,omitempty"`
+	Message      string `json:"message,omitempty"`
+	RetryAfterMS int    `json:"retry_after_ms,omitempty"`
+}
+
+func stringMapValue(item map[string]any, key string) string {
+	value, _ := item[key].(string)
+	return value
 }
 
 func (s *Service) syncOnePullRequestStatus(ctx context.Context, ref mcpcontract.ThreadRef, maxPages int) map[string]any {

@@ -107,9 +107,9 @@ func testPaths(t *testing.T) *config.Paths {
 	return config.NewPaths(&config.Env{
 		Home: home,
 		Vars: map[string]string{
-			"XDG_CONFIG_HOME":      filepath.Join(home, ".config"),
-			"XDG_DATA_HOME":        filepath.Join(home, ".local", "share"),
-			"GITCONTRIBUTE_TEST":   "1",
+			"XDG_CONFIG_HOME":    filepath.Join(home, ".config"),
+			"XDG_DATA_HOME":      filepath.Join(home, ".local", "share"),
+			"GITCONTRIBUTE_TEST": "1",
 		},
 	})
 }

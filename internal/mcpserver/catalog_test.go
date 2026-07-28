@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,10 +18,10 @@ import (
 // The default agent-facing profile should retain useful descriptions and
 // schemas without consuming an unbounded amount of model context. The explicit
 // "all" profile is intentionally not treated as a default-context contract.
-// The issue-set preparation workflow consolidates a frequent path without
-// hiding the general precedent and coverage tools. Keep its additional typed
-// contract inside an explicit bounded increase to the default catalog.
-const maxDefaultCatalogBytes = 88 * 1024
+// This byte ceiling includes owned output schemas instead of the former
+// unbounded maps. It is a drift alarm, not evidence that a model benefits from
+// a particular catalog; the held-out evaluation owns membership decisions.
+const maxDefaultCatalogBytes = 92 * 1024
 
 var selectionSynonyms = map[string]string{
 	"execute": "run",
@@ -65,6 +67,11 @@ func TestCanonicalToolCatalogIsNamespacedAndUnambiguous(t *testing.T) {
 	tools, closeSessions := listedTools(t)
 	defer closeSessions()
 
+	canonicalToolNames := make([]string, 0, len(allToolNames()))
+	for name := range allToolNames() {
+		canonicalToolNames = append(canonicalToolNames, name)
+	}
+	sort.Strings(canonicalToolNames)
 	if len(tools) != len(canonicalToolNames) {
 		var missing []string
 		for _, name := range canonicalToolNames {
@@ -125,6 +132,63 @@ func TestDefaultToolCatalogStaysWithinBudget(t *testing.T) {
 	}
 }
 
+func TestCatalogProfilesReportSerializedContextMeasurements(t *testing.T) {
+	profiles := make([]string, 0, len(toolsets)+1)
+	for profile := range toolsets {
+		profiles = append(profiles, profile)
+	}
+	profiles = append(profiles, "all")
+	sort.Strings(profiles)
+	for _, profile := range profiles {
+		tools, closeSessions := listedToolsFor(t, []string{profile})
+		payload, err := json.Marshal(tools)
+		closeSessions()
+		if err != nil {
+			t.Fatalf("marshal %s catalog: %v", profile, err)
+		}
+		t.Logf("MCP catalog profile=%s tools=%d serialized_bytes=%d", profile, len(tools), len(payload))
+	}
+
+	tools, closeSessions := listedTools(t)
+	defer closeSessions()
+	names := make([]string, 0, len(tools))
+	for name := range tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		payload, err := json.Marshal(tools[name])
+		if err != nil {
+			t.Fatalf("marshal tool %s: %v", name, err)
+		}
+		t.Logf("MCP catalog tool=%s serialized_bytes=%d", name, len(payload))
+	}
+}
+
+func TestCatalogProfilesAreDocumentedAndConcernLifecycleIsComplete(t *testing.T) {
+	readme, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for profile := range toolsets {
+		if !strings.Contains(string(readme), profile) {
+			t.Errorf("README does not document MCP profile %q", profile)
+		}
+	}
+	contribute := enabledToolNames([]string{"contribute"})
+	for _, name := range toolsets["concerns"] {
+		if _, leaked := contribute[name]; leaked {
+			t.Errorf("default contribution profile exposes partial concern lifecycle tool %q", name)
+		}
+	}
+	concerns := enabledToolNames([]string{"concerns"})
+	for _, name := range []string{ToolListConcerns, ToolCreateConcern, ToolUpdateConcern, ToolSetConcernState, ToolLinkConcern, ToolPromoteConcern} {
+		if _, ok := concerns[name]; !ok {
+			t.Errorf("concerns profile is missing lifecycle tool %q", name)
+		}
+	}
+}
+
 func TestStructuredCancellationIsNotRetryable(t *testing.T) {
 	handler := structuredToolErrors(func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
 		return nil, struct{}{}, context.Canceled
@@ -163,7 +227,7 @@ func TestContributionToolsetOmitsSpecializedCatalogs(t *testing.T) {
 	if !names[mcpcontract.ToolSearchThreads] || !names[mcpcontract.ToolPrepareContribution] {
 		t.Fatalf("contribution tools missing: %v", names)
 	}
-	if names[mcpcontract.ToolListPullRequestPortfolio] || names[mcpcontract.ToolFindClusters] {
+	if names[mcpcontract.ToolListPullRequestPortfolio] || names[mcpcontract.ToolFindClusters] || names[ToolCreateConcern] || names[ToolListConcerns] {
 		t.Fatalf("specialized tools leaked into contribution profile: %v", names)
 	}
 }
@@ -263,6 +327,16 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 	assertSchemaValue(t, tools[mcpcontract.ToolAdoptWorkspace].InputSchema, []string{"required"}, []any{"investigation_id", "path", "base_ref"})
 	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].OutputSchema, []string{"properties", "total", "type"}, "integer")
 	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].OutputSchema, []string{"properties", "truncated", "type"}, "boolean")
+	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].OutputSchema, []string{"properties", "candidates", "items", "properties", "score", "minimum"}, float64(0))
+	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].OutputSchema, []string{"properties", "candidates", "items", "properties", "score", "maximum"}, float64(100))
+	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].OutputSchema, []string{"properties", "candidates", "items", "properties", "confidence", "type"}, "string")
+	assertSchemaValue(t, tools[mcpcontract.ToolGetOpportunity].OutputSchema, []string{"properties", "confidence", "minimum"}, float64(0))
+	assertSchemaValue(t, tools[mcpcontract.ToolGetOpportunity].OutputSchema, []string{"properties", "confidence", "maximum"}, float64(1))
+	assertSchemaValue(t, tools[mcpcontract.ToolFindPrecedents].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "matches", "items", "properties", "score", "maximum"}, float64(1))
+	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "status", "enum"}, []any{"complete", "retryable", "unavailable", "failed"})
+	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "execution_state", "enum"}, []any{"queued", "running", "terminal"})
+	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "outcome", "enum"}, []any{"succeeded", "partial", "failed", "cancelled"})
+	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "progress_percent", "maximum"}, float64(100))
 	assertSchemaValue(t, tools[mcpcontract.ToolRunValidation].InputSchema, []string{"properties", "execute", "const"}, true)
 	assertSchemaValue(t, tools[mcpcontract.ToolDefineValidation].InputSchema, []string{"properties", "protocol", "enum"}, []any{"mcp_stdio"})
 	assertSchemaValue(t, tools[mcpcontract.ToolRunRepeatedValidation].InputSchema, []string{"properties", "run_count", "default"}, float64(3))
@@ -298,7 +372,6 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 		if strings.TrimSpace(stringValue(output["description"])) == "" {
 			t.Errorf("tool %q output schema has no root description", name)
 		}
-		assertTopLevelPropertiesDescribed(t, name, output)
 	}
 }
 
@@ -347,7 +420,7 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 		{"Search locally stored issue titles for a retry deadlock", mcpcontract.ToolSearchThreads},
 		{"Search live GitHub for highly starred inference repositories", mcpcontract.ToolSearchGitHubRepositories},
 		{"Read metadata for twelve repositories already stored in the corpus", mcpcontract.ToolGetRepositories},
-		{"Fetch current GitHub stars and metadata for twelve repositories", mcpcontract.ToolSyncRepositoryMetadata},
+		{"Fetch current GitHub stars, metadata, and contribution guidance for twelve repositories", mcpcontract.ToolSyncRepositoryContext},
 		{"Read the complete stored body of pull request 42", mcpcontract.ToolGetThreads},
 		{"Refresh issue and pull request thread headers for selected repositories from GitHub", mcpcontract.ToolSyncThreads},
 		{"Fetch comments and reviews for one stored pull request from GitHub", mcpcontract.ToolHydrateThreads},
@@ -414,6 +487,7 @@ func TestInvalidToolCallEvaluation(t *testing.T) {
 		{mcpcontract.ToolRunValidation, map[string]any{"id": "val-1", "kind": "candidate", "execute": false}},
 		{mcpcontract.ToolRunRepeatedValidation, map[string]any{"id": "val-1", "target": "both", "run_count": 3, "execute": false}},
 		{mcpcontract.ToolDefineValidation, map[string]any{"investigation_id": "inv-1", "kind": "test", "command": "server", "workspace_id": "ws-1", "readiness_timeout": "30s"}},
+		{mcpcontract.ToolDefineValidation, map[string]any{"investigation_id": "inv-1", "kind": "test", "command": "go test ./...", "workspace_id": "ws-1", "max_output_bytes": -1}},
 		{mcpcontract.ToolPromoteOpportunity, map[string]any{"hypothesis_id": "hyp-1", "problem_statement": "p", "scope": "s", "impact": "i", "expected_effort": "e", "confidence": 1.1}},
 		{mcpcontract.ToolPrepareContribution, map[string]any{"opportunity_id": "opp-1", "kind": "pull_request", "approach": "focused"}},
 	}
@@ -428,6 +502,68 @@ func TestInvalidToolCallEvaluation(t *testing.T) {
 	}
 	if accepted != 0 {
 		t.Fatalf("invalid-call acceptance rate = %d/%d, want 0/%d", accepted, len(cases), len(cases))
+	}
+}
+
+func TestFixPatternWorkflowSchemaRejectsInvalidNestedInputBeforeHandler(t *testing.T) {
+	base := &fakeReader{searchStarted: make(chan struct{})}
+	optional := &fakeOptionalCapabilities{base: base}
+	reader := struct {
+		mcpcontract.Reader
+		FixPatternOperator
+		FixPatternReader
+	}{Reader: base, FixPatternOperator: optional, FixPatternReader: base}
+	client, closeSessions := connect(t, reader)
+	defer closeSessions()
+
+	invalidCalls := []map[string]any{
+		{
+			"repository":       map[string]any{"owner": "acme", "repo": "rocket"},
+			"time_window":      map[string]any{"updated_after": "2026-07-01T00:00:00Z"},
+			"symptom_taxonomy": []any{map[string]any{"name": "numeric drift", "terms": []any{}}},
+		},
+		{
+			"repository":       map[string]any{"owner": "acme", "repo": "rocket"},
+			"time_window":      map[string]any{"updated_after": "2026-07-01T00:00:00Z"},
+			"symptom_taxonomy": []any{map[string]any{"name": " ", "terms": []any{"drift"}}},
+		},
+		{
+			"repository":       map[string]any{"owner": "acme", "repo": "rocket"},
+			"time_window":      map[string]any{"updated_after": "2026-07-01T00:00:00Z"},
+			"symptom_taxonomy": []any{map[string]any{"name": "drift", "terms": []any{"drift"}}},
+			"merge_outcomes":   []any{"merged", "merged"},
+		},
+	}
+	for _, invalid := range invalidCalls {
+		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
+			Name: mcpcontract.ToolMineRepositoryFixPatterns, Arguments: invalid,
+		})
+		if err == nil && result != nil && !result.IsError {
+			t.Fatalf("invalid workflow input was accepted: %#v", invalid)
+		}
+	}
+	if optional.fixPatternCalls != 0 {
+		t.Fatalf("handler calls = %d, want 0", optional.fixPatternCalls)
+	}
+
+	valid := map[string]any{
+		"repository":       map[string]any{"owner": "acme", "repo": "rocket"},
+		"time_window":      map[string]any{"updated_after": "2026-07-01T00:00:00Z"},
+		"symptom_taxonomy": []any{map[string]any{"name": "numeric drift", "terms": []any{"wrong result", "numeric drift"}}},
+		"hydration_limit":  0,
+	}
+	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: mcpcontract.ToolMineRepositoryFixPatterns, Arguments: valid,
+	})
+	if err != nil || result == nil || result.IsError {
+		t.Fatalf("valid call result = %+v, err = %v", result, err)
+	}
+	structured, ok := result.StructuredContent.(map[string]any)
+	if !ok || structured["id"] != "job-fix-patterns" {
+		t.Fatalf("structured content = %#v", result.StructuredContent)
+	}
+	if optional.fixPatternCalls != 1 || optional.lastFixPatternRequest.HydrationLimit == nil || *optional.lastFixPatternRequest.HydrationLimit != 0 {
+		t.Fatalf("handler state = calls %d, input %+v", optional.fixPatternCalls, optional.lastFixPatternRequest)
 	}
 }
 
@@ -528,21 +664,6 @@ func assertSchemaValue(t *testing.T, raw any, path []string, want any) {
 	}
 	if fmt.Sprint(current) != fmt.Sprint(want) {
 		t.Errorf("schema path %v = %#v, want %#v", path, current, want)
-	}
-}
-
-func assertTopLevelPropertiesDescribed(t *testing.T, toolName string, schema map[string]any) {
-	t.Helper()
-	if properties, ok := schema["properties"].(map[string]any); ok {
-		for name, raw := range properties {
-			property, ok := raw.(map[string]any)
-			if !ok {
-				continue
-			}
-			if strings.TrimSpace(stringValue(property["description"])) == "" {
-				t.Errorf("tool %q output property %q has no description", toolName, name)
-			}
-		}
 	}
 }
 

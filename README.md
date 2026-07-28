@@ -78,6 +78,7 @@ contribution candidates, and search the local corpus:
 
 ```sh
 gitcontribute tui
+gitcontribute archive sync-context owner/repo
 gitcontribute archive sync owner/repo
 gitcontribute radar owner/repo --limit 10
 gitcontribute search threads "connection timeout" \
@@ -264,7 +265,13 @@ MCP capabilities are deliberately separate:
 The CLI advertises the focused `contribute` toolset by default. Add specialized
 surfaces only when needed: `mcp serve --toolsets=contribute,code`,
 `--toolsets=contribute,research`, `--toolsets=contribute,portfolio`,
-`--toolsets=contribute,advanced`, or `--toolsets=all`. Smaller catalogs reduce
+`--toolsets=contribute,diagnostics`, `--toolsets=contribute,advanced`,
+`--toolsets=contribute,patterns`, `--toolsets=contribute,concerns`, or
+`--toolsets=all`. The `patterns` profile adds bounded repository-level
+accepted-fix mining with automatic finalist hydration. The `concerns` profile
+contains the complete create, update, transition, link, and atomic-promotion
+lifecycle; concern creation is intentionally not exposed alone in the default
+profile. Smaller catalogs reduce
 overlapping choices and agent context cost; toolsets change discovery only,
 not authority or side-effect annotations.
 Add `--read-only` to remove every tool whose MCP annotation permits local
@@ -287,20 +294,21 @@ A scalable discovery flow is:
 
 ```text
 github.search_repositories -> corpus.get_repositories
-github.sync_repository_metadata -> jobs.get -> corpus.get_repositories
+github.sync_repository_context -> jobs.get -> corpus.get_repositories
 -> research.query_deepwiki -> github.sync_threads
 -> corpus.rank_threads -> github.hydrate_threads
 -> workflow.prepare_issue_set
 ```
 
-For contribution follow-up, use `github.sync_authored_pull_requests`, then
-`github.sync_pull_request_status` and `corpus.list_pull_request_portfolio`.
-Missing coverage is returned as unknown rather than as a false zero or negative.
-PR status currently includes lifecycle, mergeability, head/base revisions, and
-stored reviews. Checks, unresolved review threads, detailed merge state, merge
-queue, and portfolio overlap are deliberately reported as unavailable. See the
+For the common portfolio refresh outcome, the specialized `portfolio` profile
+offers `github.sync_portfolio`; the authored-discovery and exact-status
+primitives remain available for partial recovery. Missing coverage is returned
+as unknown rather than as a false zero or negative. PR status keeps independent
+coverage for lifecycle, mergeability, revisions, reviews, checks, unresolved
+conversations, merge state, queue, closing issues, and changed files. See the
 [scalable MCP workflow guide](docs/mcp-scalable-workflows.md) for recovery and
-coverage details.
+coverage details and the [MCP redesign notes](docs/mcp-tool-redesign.md) for
+schema ownership, response contracts, and the model-evidence ship gate.
 
 Contribution workflow resources and prompts are available for agents:
 
@@ -421,6 +429,7 @@ gitcontribute tail golang-events --since 2h --budget 500 --interval 1h
 Sync and selectively hydrate repository archives:
 
 ```sh
+gitcontribute archive sync-context owner/repo
 gitcontribute archive sync owner/repo
 gitcontribute archive sync owner/repo --since 168h --state open --max-requests 100
 gitcontribute archive sync owner/repo --numbers 42,108

@@ -18,7 +18,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/radar"
 )
 
-func TestExplicitSyncPersistsSourceBackedContributionGuidance(t *testing.T) {
+func TestRepositoryContextSyncPersistsSourceBackedContributionGuidance(t *testing.T) {
 	t.Parallel()
 	const guidance = "We accept pull requests for issues labelled `help wanted`."
 	base := &testServer{owner: "octocat", repo: "guided"}
@@ -39,7 +39,7 @@ func TestExplicitSyncPersistsSourceBackedContributionGuidance(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
-	if _, err := svc.ArchiveSync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "guided"}, contracts.ArchiveSyncOptions{State: "all"}); err != nil {
+	if _, err := svc.RepositoryContextSync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "guided"}, 0); err != nil {
 		t.Fatal(err)
 	}
 

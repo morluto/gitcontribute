@@ -12,26 +12,24 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/facets"
 	"github.com/morluto/gitcontribute/internal/github"
 )
 
 // Thread facets that selective hydration can retrieve.
 const (
-	FacetIssueComments    = "issue_comments"
-	FacetPRDetails        = "pr_details"
-	FacetPRReviews        = "pr_reviews"
-	FacetPRReviewComments = "pr_review_comments"
-	FacetPRChecks         = "pr_checks"
-	FacetPRReviewThreads  = "pr_review_threads"
-	FacetPRMergeState     = "pr_merge_state"
-	FacetPRMergeQueue     = "pr_merge_queue"
-	FacetPRClosingIssues  = "pr_closing_issues"
-	FacetPRFiles          = "pr_files"
-	FacetIssueTimeline    = "issue_timeline"
+	FacetIssueComments    = facets.IssueComments
+	FacetPRDetails        = facets.PRDetails
+	FacetPRReviews        = facets.PRReviews
+	FacetPRReviewComments = facets.PRReviewComments
+	FacetPRChecks         = facets.PRChecks
+	FacetPRReviewThreads  = facets.PRReviewThreads
+	FacetPRMergeState     = facets.PRMergeState
+	FacetPRMergeQueue     = facets.PRMergeQueue
+	FacetPRClosingIssues  = facets.PRClosingIssues
+	FacetPRFiles          = facets.PRFiles
+	FacetIssueTimeline    = facets.IssueTimeline
 )
-
-var issueFacets = []string{FacetIssueComments}
-var pullRequestFacets = []string{FacetIssueComments, FacetPRDetails, FacetPRReviews, FacetPRReviewComments}
 
 const maxHydrationPages = 100
 
@@ -97,7 +95,9 @@ func (s *Service) HydrateThread(ctx context.Context, repo contracts.RepoRef, num
 		}
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		_ = c.FailRun(cleanupCtx, run.ID, hydrateErr.Error())
+		_ = corpus.RetryBusy(cleanupCtx, func(ctx context.Context) error {
+			return c.FailRun(ctx, run.ID, hydrateErr.Error())
+		})
 	}()
 
 	repoProjection, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
@@ -196,7 +196,9 @@ func (s *Service) HydrateThread(ctx context.Context, repo contracts.RepoRef, num
 		"pages":    result.Pages,
 		"requests": result.Requests,
 	})
-	if err := c.FinishRun(ctx, run.ID, string(statsPayload)); err != nil {
+	if err := corpus.RetryBusy(ctx, func(ctx context.Context) error {
+		return c.FinishRun(ctx, run.ID, string(statsPayload))
+	}); err != nil {
 		hydrateErr = err
 		return nil, hydrateErr
 	}
@@ -206,22 +208,15 @@ func (s *Service) HydrateThread(ctx context.Context, repo contracts.RepoRef, num
 }
 
 func selectFacets(kind string, requested []string) ([]string, error) {
-	var allowed []string
-	switch kind {
-	case corpus.ThreadKindIssue:
-		allowed = issueFacets
-	case corpus.ThreadKindPullRequest:
-		allowed = pullRequestFacets
-	default:
+	defaults := facets.DefaultFor(kind)
+	if len(defaults) == 0 {
 		return nil, fmt.Errorf("unknown thread kind %q", kind)
 	}
 
 	if len(requested) == 0 {
-		return allowed, nil
+		return defaults, nil
 	}
-	// Timeline history is intentionally opt-in because it can be much larger
-	// than the default hydration set.
-	allowed = append(append([]string(nil), allowed...), FacetIssueTimeline)
+	allowed := facets.SelectableFor(kind)
 
 	allowedSet := make(map[string]struct{}, len(allowed))
 	for _, f := range allowed {
@@ -294,13 +289,17 @@ func (f *facetRunner) hydrateIssueTimeline() (HydratedFacet, error) {
 		opts.Page = res.Page.NextPage
 	}
 	if !complete {
-		if _, err := f.c.AdvanceFacetCAS(f.ctx, f.repoID, &f.threadID, FacetIssueTimeline, sourceUpdatedAt, false, f.runID, expectedSequence); err != nil {
+		if _, err := corpus.RetryBusyValue(f.ctx, func(ctx context.Context) (bool, error) {
+			return f.c.AdvanceFacetCAS(ctx, f.repoID, &f.threadID, FacetIssueTimeline, sourceUpdatedAt, false, f.runID, expectedSequence)
+		}); err != nil {
 			return HydratedFacet{}, err
 		}
 		return HydratedFacet{Facet: FacetIssueTimeline, Count: total, Pages: pages, Complete: false}, nil
 	}
 	collapseFacetSearchText(pageObservations)
-	applied, err := f.c.ApplyFacetObservationSetCAS(f.ctx, f.repoID, &f.threadID, FacetIssueTimeline, sourceUpdatedAt, pageObservations, true, f.runID, expectedSequence)
+	applied, err := corpus.RetryBusyValue(f.ctx, func(ctx context.Context) (bool, error) {
+		return f.c.ApplyFacetObservationSetCAS(ctx, f.repoID, &f.threadID, FacetIssueTimeline, sourceUpdatedAt, pageObservations, true, f.runID, expectedSequence)
+	})
 	if err != nil {
 		return HydratedFacet{}, err
 	}
@@ -365,7 +364,9 @@ func (f *facetRunner) persistTimelineResolution(events []github.IssueTimelineEve
 			return errors.New("closing commit timeline observation is unavailable")
 		}
 	}
-	_, err := f.c.SaveResolutionRecord(f.ctx, corpus.ResolutionRecord{ThreadID: f.threadID, Kind: kind, Summary: summary, RuleVersion: "resolution.v1", SourceUpdatedAt: sourceUpdatedAt, SourceObservationRefs: refs})
+	_, err := corpus.RetryBusyValue(f.ctx, func(ctx context.Context) (*corpus.ResolutionRecord, error) {
+		return f.c.SaveResolutionRecord(ctx, corpus.ResolutionRecord{ThreadID: f.threadID, Kind: kind, Summary: summary, RuleVersion: "resolution.v1", SourceUpdatedAt: sourceUpdatedAt, SourceObservationRefs: refs})
+	})
 	return err
 }
 
@@ -436,13 +437,17 @@ func hydratePaginatedFacet[T any](f *facetRunner, spec paginatedFacetSpec[T]) (H
 		return HydratedFacet{}, err
 	}
 	if !complete {
-		if _, err := f.c.AdvanceFacetCAS(f.ctx, f.repoID, &f.threadID, spec.facet, sourceUpdatedAt, false, f.runID, expectedSequence); err != nil {
+		if _, err := corpus.RetryBusyValue(f.ctx, func(ctx context.Context) (bool, error) {
+			return f.c.AdvanceFacetCAS(ctx, f.repoID, &f.threadID, spec.facet, sourceUpdatedAt, false, f.runID, expectedSequence)
+		}); err != nil {
 			return HydratedFacet{}, err
 		}
 		return HydratedFacet{Facet: spec.facet, Count: total, Pages: pages, Complete: false}, nil
 	}
 	collapseFacetSearchText(pageObservations)
-	if _, err := f.c.ApplyFacetObservationSetCAS(f.ctx, f.repoID, &f.threadID, spec.facet, sourceUpdatedAt, pageObservations, true, f.runID, expectedSequence); err != nil {
+	if _, err := corpus.RetryBusyValue(f.ctx, func(ctx context.Context) (bool, error) {
+		return f.c.ApplyFacetObservationSetCAS(ctx, f.repoID, &f.threadID, spec.facet, sourceUpdatedAt, pageObservations, true, f.runID, expectedSequence)
+	}); err != nil {
 		return HydratedFacet{}, err
 	}
 	return HydratedFacet{Facet: spec.facet, Count: total, Pages: pages, Complete: true}, nil
@@ -491,7 +496,9 @@ func (f *facetRunner) hydratePullRequestDetails() (HydratedFacet, error) {
 	}
 
 	pages := []corpus.FacetObservationInput{{SourceUpdatedAt: updatedAt, Payload: string(payload)}}
-	applied, err := f.c.ApplyFacetObservationSetCAS(f.ctx, f.repoID, &f.threadID, FacetPRDetails, updatedAt, pages, true, f.runID, expectedSequence)
+	applied, err := corpus.RetryBusyValue(f.ctx, func(ctx context.Context) (bool, error) {
+		return f.c.ApplyFacetObservationSetCAS(ctx, f.repoID, &f.threadID, FacetPRDetails, updatedAt, pages, true, f.runID, expectedSequence)
+	})
 	if err != nil {
 		return HydratedFacet{}, err
 	}
@@ -525,7 +532,9 @@ func (f *facetRunner) hydratePullRequestDetails() (HydratedFacet, error) {
 	} else {
 		projection.MergedAt = time.Time{}
 	}
-	stored, err := f.c.UpsertThread(f.ctx, projection, string(payload))
+	stored, err := corpus.RetryBusyValue(f.ctx, func(ctx context.Context) (*corpus.Thread, error) {
+		return f.c.UpsertThread(ctx, projection, string(payload))
+	})
 	if err != nil {
 		return HydratedFacet{}, fmt.Errorf("project pr details: %w", err)
 	}

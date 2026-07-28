@@ -12,15 +12,17 @@ import (
 	"unicode/utf8"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/deepwiki"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/repositorycontext"
 )
 
-// SyncRepositoryMetadata submits a durable metadata-only GitHub read. It does
-// not fetch threads, comments, reviews, or code.
-func (r *MCPReader) SyncRepositoryMetadata(ctx context.Context, in mcpcontract.SyncRepositoryMetadataInput) (mcpcontract.JobReference, error) {
+// SyncRepositoryContext submits a durable metadata and contribution-guidance
+// GitHub read. It does not fetch threads, comments, reviews, or code.
+func (r *MCPReader) SyncRepositoryContext(ctx context.Context, in mcpcontract.SyncRepositoryContextInput) (mcpcontract.JobReference, error) {
 	if err := rejectDuplicateRepositoryRefs(in.Repositories); err != nil {
 		return mcpcontract.JobReference{}, err
 	}
@@ -32,17 +34,26 @@ func (r *MCPReader) SyncRepositoryMetadata(ctx context.Context, in mcpcontract.S
 			return mcpcontract.JobReference{}, err
 		}
 	}
-	id, err := r.submitJob(ctx, "sync_repository_metadata", in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.syncRepositoryMetadata(ctx, in.Repositories, report)
+	if in.MaxRequests == 0 {
+		in.MaxRequests = defaultSyncBatchMaxRequests
+	}
+	if in.MaxRequests < repositorycontext.RequestCost() || in.MaxRequests > defaultSyncBatchMaxRequests {
+		return mcpcontract.JobReference{}, fmt.Errorf(
+			"max requests must be between %d and %d",
+			repositorycontext.RequestCost(), defaultSyncBatchMaxRequests,
+		)
+	}
+	id, err := r.submitJob(ctx, "sync_repository_context", in, func(ctx context.Context, report func(string, string) error) (any, error) {
+		return r.syncRepositoryContext(ctx, in, report)
 	})
 	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
-	return queuedJobReference(id, "sync_repository_metadata", "repository metadata sync job started"), nil
+	return queuedJobReference(id, "sync_repository_context", "repository context sync job started"), nil
 }
 
-// SyncThreads submits a durable bounded GitHub read for repository metadata,
-// fixed contribution-policy paths, and thread headers.
+// SyncThreads submits a durable bounded GitHub read for thread headers in
+// repositories that already have local identities.
 func (r *MCPReader) SyncThreads(ctx context.Context, in mcpcontract.SyncThreadsInput) (mcpcontract.JobReference, error) {
 	if in.Selection != "repositories" && in.Selection != "threads" {
 		return mcpcontract.JobReference{}, errors.New("selection must be repositories or threads")
@@ -69,10 +80,11 @@ func (r *MCPReader) SyncThreads(ctx context.Context, in mcpcontract.SyncThreadsI
 	} else if in.LimitPerRepository != 0 {
 		return mcpcontract.JobReference{}, errors.New("limit_per_repository is only valid in repository selection mode")
 	}
-	var err error
-	in.MaxRequests, err = normalizeSyncBatchMaxRequests(in.MaxRequests)
-	if err != nil {
-		return mcpcontract.JobReference{}, err
+	if in.MaxRequests == 0 {
+		in.MaxRequests = defaultSyncBatchMaxRequests
+	}
+	if in.MaxRequests < 1 || in.MaxRequests > defaultSyncBatchMaxRequests {
+		return mcpcontract.JobReference{}, fmt.Errorf("max requests must be between 1 and %d", defaultSyncBatchMaxRequests)
 	}
 	id, err := r.submitJob(ctx, "sync_threads", in, func(ctx context.Context, report func(string, string) error) (any, error) {
 		return r.syncThreadsBatch(ctx, in, report)
@@ -142,19 +154,40 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpcontract.SyncThrea
 		since = parsed
 	}
 	taskResults := make([]map[string]any, len(tasks))
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
 	remainingRequests := in.MaxRequests
 	plannedRequests := 0
 	runnable := make([]int, 0, len(tasks))
 	for index := range tasks {
+		stored, err := c.GetRepository(ctx, tasks[index].ref.Owner, tasks[index].ref.Repo)
+		if err != nil {
+			return nil, err
+		}
+		if stored == nil {
+			taskResults[index] = map[string]any{
+				"key": tasks[index].key, "status": "unavailable", "reason": "repository_not_indexed",
+				"message": "repository is not stored; call github.sync_repository_context first",
+			}
+			continue
+		}
 		threadRequests := maxPages
 		if len(tasks[index].numbers) > 0 {
 			threadRequests = len(tasks[index].numbers)
+			if threadRequests > remainingRequests {
+				taskResults[index] = syncRequestBudgetUnavailable(tasks[index].key, threadRequests, remainingRequests)
+				continue
+			}
+		} else if threadRequests > remainingRequests {
+			threadRequests = remainingRequests
 		}
-		required := syncFixedRequestCost() + threadRequests
-		if required > remainingRequests {
-			taskResults[index] = syncRequestBudgetUnavailable(tasks[index].key, required, remainingRequests)
+		if threadRequests < 1 {
+			taskResults[index] = syncRequestBudgetUnavailable(tasks[index].key, 1, remainingRequests)
 			continue
 		}
+		required := threadRequests
 		tasks[index].maxRequests = required
 		remainingRequests -= required
 		plannedRequests += required
@@ -177,7 +210,7 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpcontract.SyncThrea
 					opts.State = "all"
 					opts.Since = time.Time{}
 				}
-				res, err := s.sync(ctx, current.ref, opts)
+				res, err := s.syncThreadHeaders(ctx, current.ref, opts)
 				if err != nil {
 					status, reason, message, retry := githubBatchError(err)
 					taskResults[index] = map[string]any{"key": current.key, "status": status, "reason": reason, "message": message, "retry_after_ms": retry}
@@ -299,13 +332,11 @@ func (r *MCPReader) SyncAuthoredPullRequests(ctx context.Context, in mcpcontract
 	if in.Limit < 1 || in.Limit > 500 {
 		return mcpcontract.JobReference{}, errors.New("limit must be between 1 and 500")
 	}
-	var err error
-	in.MaxRequests, err = normalizeSyncBatchMaxRequests(in.MaxRequests)
-	if err != nil {
-		return mcpcontract.JobReference{}, err
+	if in.MaxRequests == 0 {
+		in.MaxRequests = defaultSyncBatchMaxRequests
 	}
-	if in.MaxRequests < syncFixedRequestCost()+2 {
-		return mcpcontract.JobReference{}, fmt.Errorf("max requests must be between %d and %d", syncFixedRequestCost()+2, defaultSyncBatchMaxRequests)
+	if in.MaxRequests < 2 || in.MaxRequests > defaultSyncBatchMaxRequests {
+		return mcpcontract.JobReference{}, fmt.Errorf("max requests must be between 2 and %d", defaultSyncBatchMaxRequests)
 	}
 	id, err := r.submitJob(ctx, "sync_authored_pull_requests", in, func(ctx context.Context, report func(string, string) error) (any, error) {
 		return r.syncAuthoredPullRequests(ctx, in, report)
@@ -367,9 +398,9 @@ func (r *MCPReader) IndexRepositories(ctx context.Context, in mcpcontract.IndexR
 func queuedJobReference(id, kind, message string) mcpcontract.JobReference {
 	return mcpcontract.JobReference{
 		ID: id, Ref: "job:" + id, Kind: kind, Status: "queued", Message: message, PollAfterMS: 1000,
-		SuggestedActions: []mcpcontract.SuggestedAction{{
-			Tool: mcpcontract.ToolGetJob, Reason: "Poll this durable job after the suggested delay.", Arguments: map[string]any{"ids": []string{id}},
-		}},
+		FollowUp: &mcpcontract.JobFollowUp{
+			Tool: mcpcontract.ToolGetJob, Reason: "Poll this job ID after the suggested delay.",
+		},
 	}
 }
 
@@ -554,90 +585,100 @@ func (s *Service) hydrateThreadsBatch(ctx context.Context, in mcpcontract.Hydrat
 // ordered result mapping in one place to preserve item-level failure semantics.
 //
 //nolint:gocognit
-func (s *Service) syncRepositoryMetadata(ctx context.Context, refs []mcpcontract.RepositoryRef, report func(string, string) error) (mcpcontract.GetRepositoriesOutput, error) {
-	if err := report("repository_metadata", jobProgressCounts(0, len(refs))); err != nil {
-		return mcpcontract.GetRepositoriesOutput{}, err
+func (s *Service) syncRepositoryContext(ctx context.Context, in mcpcontract.SyncRepositoryContextInput, report func(string, string) error) (map[string]any, error) {
+	if err := report("repository_context", jobProgressCounts(0, len(in.Repositories))); err != nil {
+		return nil, err
 	}
 	reader, err := s.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
 	if err != nil {
-		return mcpcontract.GetRepositoriesOutput{}, err
+		return nil, err
 	}
 	c, err := s.openCorpus(ctx)
 	if err != nil {
-		return mcpcontract.GetRepositoriesOutput{}, err
+		return nil, err
 	}
-	out := mcpcontract.GetRepositoriesOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput], len(refs))}
-	type work struct {
-		index int
-		ref   mcpcontract.RepositoryRef
-	}
-	jobs := make(chan work)
-	var wg sync.WaitGroup
-	workers := 8
-	if len(refs) < workers {
-		workers = len(refs)
-	}
-	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for current := range jobs {
-				if ctx.Err() != nil {
-					return
-				}
-				key := current.ref.Owner + "/" + current.ref.Repo
-				item := mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput]{Key: key, Status: "complete"}
-				remote, _, err := reader.GetRepository(ctx, current.ref.Owner, current.ref.Repo)
-				if err != nil {
-					item.Status, item.Reason, item.Message, item.RetryAfterMS = githubBatchError(err)
-					out.Items[current.index] = item
-					continue
-				}
-				payload, err := json.Marshal(remote)
-				if err != nil {
-					item.Status, item.Reason, item.Message = "failed", "marshal", err.Error()
-					out.Items[current.index] = item
-					continue
-				}
-				stored, err := c.UpsertRepository(ctx, corpusRepoFromGitHub(remote), string(payload))
-				if err == nil {
-					err = c.AdvanceFacet(ctx, stored.ID, nil, "metadata", remote.UpdatedAt, true, 0)
-				}
-				if err != nil {
-					item.Status, item.Reason, item.Message = "failed", "storage", err.Error()
-					out.Items[current.index] = item
-					continue
-				}
-				value := typedRepository(stored)
-				value.Metadata = mcpcontract.RepositoryMetadataOutput{Status: "complete", ObservedAt: formatTime(s.now()), SourceUpdatedAt: formatTime(remote.UpdatedAt)}
-				item.Value = &value
-				out.Items[current.index] = item
-			}
-		}()
-	}
-	for i, ref := range refs {
-		select {
-		case jobs <- work{i, ref}:
-		case <-ctx.Done():
-			close(jobs)
-			wg.Wait()
-			return out, ctx.Err()
-		}
-	}
-	close(jobs)
-	wg.Wait()
+	results := make([]map[string]any, len(in.Repositories))
+	remaining := in.MaxRequests
+	planned := 0
+	requests := 0
 	completed := 0
-	for _, item := range out.Items {
-		if item.Status == "complete" {
-			completed++
-		} else {
-			out.Status = "partial"
+	for index, input := range in.Repositories {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
+		key := input.Owner + "/" + input.Repo
+		required := repositorycontext.RequestCost()
+		if required > remaining {
+			results[index] = syncRequestBudgetUnavailable(key, required, remaining)
+			continue
+		}
+		remaining -= required
+		planned += required
+		budget := newSyncRequestBudget(required)
+		ref := domain.RepoRef{Owner: input.Owner, Repo: input.Repo}
+		repo, syncErr := syncRepositoryContextItem(ctx, c, reader, ref, budget)
+		requests += budget.used
+		if syncErr != nil {
+			status, reason, message, retry := githubBatchError(syncErr)
+			results[index] = map[string]any{
+				"key": key, "status": status, "reason": reason, "message": message,
+				"retry_after_ms": retry, "requests": budget.used,
+			}
+			continue
+		}
+		results[index] = map[string]any{
+			"key": key, "status": "complete", "requests": budget.used,
+			"repository": typedRepository(&repo),
+			"facets": map[string]any{
+				"metadata":              map[string]any{"status": "complete"},
+				"contribution_guidance": map[string]any{"status": "complete"},
+			},
+		}
+		completed++
 	}
-	if err := report("repository_metadata", jobProgressCounts(len(refs), len(refs))); err != nil {
-		return out, err
+	status := "complete"
+	if completed != len(results) {
+		status = "partial"
 	}
-	return out, nil
+	if err := report("repository_context", jobProgressCounts(len(results), len(results))); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"status": status, "items": results, "completed": completed, "total": len(results),
+		"requests": requests, "request_budget": in.MaxRequests, "planned_requests": planned,
+	}, nil
+}
+
+func syncRepositoryContextItem(
+	ctx context.Context,
+	c *corpus.Corpus,
+	reader github.Reader,
+	ref domain.RepoRef,
+	budget *syncRequestBudget,
+) (_ corpus.Repository, resultErr error) {
+	run, err := c.StartRun(ctx, "sync_repository_context")
+	if err != nil {
+		return corpus.Repository{}, err
+	}
+	defer func() {
+		if resultErr != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = c.FailRun(cleanupCtx, run.ID, resultErr.Error())
+		}
+	}()
+	repo, _, err := syncRepositoryHeader(ctx, c, reader, ref, run.ID, budget)
+	if err != nil {
+		return corpus.Repository{}, err
+	}
+	stats, err := json.Marshal(map[string]int{"requests": budget.used, "request_budget": budget.limit})
+	if err != nil {
+		return corpus.Repository{}, err
+	}
+	if err := c.FinishRun(ctx, run.ID, string(stats)); err != nil {
+		return corpus.Repository{}, err
+	}
+	return repo, nil
 }
 
 func githubBatchError(err error) (status, reason, message string, retryMS int) {
@@ -701,7 +742,11 @@ func (r *MCPReader) DeepWiki(ctx context.Context, in mcpcontract.DeepWikiInput) 
 		out.Result = validUTF8Prefix(out.Result, maxBytes)
 		out.Truncated = true
 		out.Reason = "output_limit"
-		out.NextAction = "Retry with a larger max_output_bytes (up to 1048576), or narrow the request."
+		if in.Action == "contents" {
+			out.NextAction = "Call structure, then ask a focused question about the relevant section. Increase max_output_bytes only when the focused read is still incomplete."
+		} else {
+			out.NextAction = "Narrow the question or repository set. Increase max_output_bytes only when the focused read is still incomplete."
+		}
 	}
 	return out, nil
 }

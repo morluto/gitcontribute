@@ -280,7 +280,7 @@ func TestContributionGuidanceDoesNotClaimUnfetchedSource(t *testing.T) {
 	defer srv.Close()
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
-	if _, err := svc.ArchiveSync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "test"}, contracts.ArchiveSyncOptions{State: "all"}); err != nil {
+	if _, err := svc.RepositoryContextSync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "test"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	guidance, refs, err := (&corpusReader{s: svc}).ReadContributionGuidance(ctx, domain.RepoRef{Owner: "octocat", Repo: "test"})
@@ -301,7 +301,9 @@ func TestMCPReaderLocalReads(t *testing.T) {
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
 
-	if _, err := svc.ArchiveSync(ctx, contracts.RepoRef{Owner: "acme", Repo: "rocket"}, contracts.ArchiveSyncOptions{State: "all"}); err != nil {
+	repoRef := contracts.RepoRef{Owner: "acme", Repo: "rocket"}
+	syncRepositoryContextForTest(t, svc, repoRef)
+	if _, err := svc.ArchiveSync(ctx, repoRef, contracts.ArchiveSyncOptions{State: "all"}); err != nil {
 		t.Fatalf("sync: %v", err)
 	}
 
@@ -311,7 +313,7 @@ func TestMCPReaderLocalReads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mcp repository: %v", err)
 	}
-	if repo.Owner != "acme" || repo.Repo != "rocket" || repo.Fields["stars"] != 42 || repo.UpdatedAt != "2024-01-01T00:00:00Z" {
+	if repo.Owner != "acme" || repo.Repo != "rocket" || repo.Stars == nil || *repo.Stars != 42 || repo.UpdatedAt != "2024-01-01T00:00:00Z" {
 		t.Fatalf("unexpected repository output: %+v", repo)
 	}
 
@@ -341,7 +343,7 @@ func TestMCPReaderLocalReads(t *testing.T) {
 	}
 	_, err = reader.Dossier(ctx, mcpcontract.RepoInput{Owner: "acme", Repo: "missing"})
 	var repositoryErr *mcpcontract.ToolError
-	if !errors.As(err, &repositoryErr) || repositoryErr.Code != "repository_not_indexed" || len(repositoryErr.SuggestedActions) != 1 || repositoryErr.SuggestedActions[0].Tool != mcpcontract.ToolSyncRepositoryMetadata {
+	if !errors.As(err, &repositoryErr) || repositoryErr.Code != "repository_not_indexed" || len(repositoryErr.SuggestedActions) != 1 || repositoryErr.SuggestedActions[0].Tool != mcpcontract.ToolSyncRepositoryContext {
 		t.Fatalf("MCP dossier for missing repository error = %+v", err)
 	}
 	if _, err := svc.BuildRepositoryDossier(ctx, contracts.RepoRef{Owner: "acme", Repo: "rocket"}); err != nil {
@@ -354,8 +356,8 @@ func TestMCPReaderLocalReads(t *testing.T) {
 	if dossier.Owner != "acme" || dossier.Repo != "rocket" {
 		t.Fatalf("unexpected dossier output: %+v", dossier)
 	}
-	if _, ok := dossier.Sections["stars"]; !ok {
-		t.Fatalf("dossier missing stars section: %+v", dossier.Sections)
+	if dossier.Sections.Stars != 42 {
+		t.Fatalf("dossier missing typed stars section: %+v", dossier.Sections)
 	}
 
 	_, err = reader.Thread(ctx, mcpcontract.ThreadInput{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 404})

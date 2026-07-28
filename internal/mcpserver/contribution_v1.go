@@ -23,21 +23,13 @@ func (s *Server) prepareContribution(ctx context.Context, _ *mcp.CallToolRequest
 	if _, err := normalizeID("opportunity_id", in.OpportunityID); err != nil {
 		return nil, mcpcontract.DraftOutput{}, err
 	}
-	in.Kind = strings.ToLower(strings.TrimSpace(in.Kind))
-	if in.Kind != "issue" && in.Kind != "pull_request" {
-		return nil, mcpcontract.DraftOutput{}, mcpcontract.InvalidArgument("kind", "must be issue or pull_request", map[string]any{"kind": "pull_request"})
-	}
+	// The SDK owns the issue-versus-pull-request shape. Trimming remains here
+	// because JSON Schema minLength does not reject whitespace-only values.
 	if in.Kind == "pull_request" && strings.TrimSpace(in.WorkspaceID) == "" {
 		return nil, mcpcontract.DraftOutput{}, mcpcontract.InvalidArgument("workspace_id", "is required for pull_request drafts", map[string]any{"workspace_id": "<id>"})
 	}
 	if in.Kind == "pull_request" && strings.TrimSpace(in.Approach) == "" {
 		return nil, mcpcontract.DraftOutput{}, mcpcontract.InvalidArgument("approach", "is required for pull_request drafts", map[string]any{"approach": "Describe the implementation approach."})
-	}
-	if in.Kind == "issue" && (in.WorkspaceID != "" || in.Approach != "" || in.Changes != "" || in.Compatibility != "" || in.Limitations != "" || in.LinkedIssue != "") {
-		return nil, mcpcontract.DraftOutput{}, mcpcontract.InvalidArgument("kind", "pull-request-only fields are not accepted for issue drafts", map[string]any{"kind": "pull_request"})
-	}
-	if in.Kind == "pull_request" && in.Success != "" {
-		return nil, mcpcontract.DraftOutput{}, mcpcontract.InvalidArgument("success", "is only accepted for issue drafts", map[string]any{"kind": "issue", "success": "Describe the desired outcome."})
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {

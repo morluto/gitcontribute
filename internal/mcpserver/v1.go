@@ -17,23 +17,24 @@ import (
 
 // SearchThreadsInput describes an offline issue and pull-request search page.
 type SearchThreadsInput struct {
-	Query        string   `json:"query" jsonschema:"Thread full-text query"`
-	Owner        string   `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo         string   `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Kind         string   `json:"kind,omitempty" jsonschema:"Optional thread kind: issue or pull_request"`
-	State        string   `json:"state,omitempty" jsonschema:"Optional open or closed state"`
-	StateReason  string   `json:"state_reason,omitempty" jsonschema:"Optional GitHub completed or not_planned state reason"`
-	Merged       *bool    `json:"merged,omitempty" jsonschema:"Optional pull request merged state"`
-	Author       string   `json:"author,omitempty" jsonschema:"Optional author login"`
-	Association  string   `json:"author_association,omitempty" jsonschema:"Optional GitHub author association"`
-	Assignee     string   `json:"assignee,omitempty" jsonschema:"Optional assignee login"`
-	Labels       []string `json:"labels,omitempty" jsonschema:"Labels that must all be present"`
-	UpdatedAfter string   `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound"`
-	Limit        int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-	Cursor       string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
-	Sort         string   `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
-	MatchMode    string   `json:"match_mode,omitempty" jsonschema:"Term matching: all requires every term; any requires at least one term"`
-	View         string   `json:"view,omitempty" jsonschema:"compact omits full bodies and returns bounded excerpts; full includes stored bodies"`
+	Query         string   `json:"query" jsonschema:"Thread full-text query"`
+	Owner         string   `json:"owner,omitempty" jsonschema:"Optional repository owner"`
+	Repo          string   `json:"repo,omitempty" jsonschema:"Optional repository name"`
+	Kind          string   `json:"kind,omitempty" jsonschema:"Optional thread kind: issue or pull_request"`
+	State         string   `json:"state,omitempty" jsonschema:"Optional open or closed state"`
+	StateReason   string   `json:"state_reason,omitempty" jsonschema:"Optional GitHub completed or not_planned state reason"`
+	Merged        *bool    `json:"merged,omitempty" jsonschema:"Optional pull request merged state"`
+	Author        string   `json:"author,omitempty" jsonschema:"Optional author login"`
+	Association   string   `json:"author_association,omitempty" jsonschema:"Optional GitHub author association"`
+	Assignee      string   `json:"assignee,omitempty" jsonschema:"Optional assignee login"`
+	Labels        []string `json:"labels,omitempty" jsonschema:"Labels that must all be present"`
+	UpdatedAfter  string   `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound"`
+	UpdatedBefore string   `json:"updated_before,omitempty" jsonschema:"Optional RFC 3339 upper bound"`
+	Limit         int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Cursor        string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
+	Sort          string   `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
+	MatchMode     string   `json:"match_mode,omitempty" jsonschema:"Term matching: all requires every term; any requires at least one term"`
+	View          string   `json:"view,omitempty" jsonschema:"compact omits full bodies and returns bounded excerpts; full includes stored bodies"`
 }
 
 // GetRepositoryDossierInput selects a persisted repository dossier.
@@ -85,7 +86,7 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[SearchThreadsInput, mcpcontract.SearchOutput]{
 		name: mcpcontract.ToolSearchThreads, title: "Search stored issues and pull requests",
-		description: "Search stored issue and PR titles, labels, bodies, and hydrated text. Terms use strict all-term matching by default; retry with match_mode=any for bounded broader recall. Compact view omits bodies; read exact finalists with corpus.get_threads, and use github.hydrate_threads only for missing child facets. Never contacts GitHub.",
+		description: "Search stored issue and PR titles, labels, bodies, and hydrated text. All terms are required by default; use match_mode=any for broader recall. Compact output is bounded. Read finalists with corpus.get_threads and hydrate only missing facets. Offline.",
 		annotations: readOnly, input: inputSchema[SearchThreadsInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 			setEnum(schema, "state", "open", "closed")
@@ -101,7 +102,7 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[GetRepositoryDossierInput, mcpcontract.DossierOutput]{
 		name: mcpcontract.ToolGetRepositoryDossier, title: "Get repository dossier",
-		description: "Read the latest persisted source-backed dossier for one known repository finalist. Do not use this scalar tool to discover or compare repositories; call " + mcpcontract.ToolGetRepositories + " first to inspect repository and dossier availability in one batch. Use " + mcpcontract.ToolBuildRepositoryDossier + " only when a local dossier must be explicitly regenerated; this read never performs that write.",
+		description: "Read one persisted source-backed dossier for a known finalist. Use " + mcpcontract.ToolGetRepositories + " for discovery or comparison and " + mcpcontract.ToolBuildRepositoryDossier + " to regenerate. Offline.",
 		annotations: readOnly, input: inputSchema[GetRepositoryDossierInput](noSchemaCustomization),
 		output: outputSchema[mcpcontract.DossierOutput]("Persisted source-backed repository dossier."), handler: s.getRepositoryDossier,
 	})
@@ -157,7 +158,7 @@ func (s *Server) registerV1() {
 	addCatalogTool(s, catalogTool[mcpcontract.StartInvestigationInput, mcpcontract.InvestigationOutput]{
 		name: mcpcontract.ToolStartInvestigation, title: "Start local investigation",
 		description: "Create a local investigation from a commit SHA, or atomically create its initial baseline hypothesis from a stored issue or pull-request number. This does not create a Git worktree or contact GitHub; use " + mcpcontract.ToolCreateWorkspace + " separately when filesystem work is authorized.",
-		annotations: localWrite, supportedBy: supports[Operator], input: inputSchema[mcpcontract.StartInvestigationInput](noSchemaCustomization),
+		annotations: localWrite, supportedBy: supports[Operator], input: inputSchema[mcpcontract.StartInvestigationInput](configureInvestigationSourceModes),
 		output: outputSchema[mcpcontract.InvestigationOutput]("Newly created local investigation."), handler: s.startInvestigation,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.RecordHypothesisInput, mcpcontract.HypothesisOutput]{
@@ -201,6 +202,7 @@ func (s *Server) registerV1() {
 			setDefault(schema, "max_output_bytes", 64*1024)
 			setEnum(schema, "protocol", "mcp_stdio")
 			configureValidationObservationSchema(schema)
+			configureValidationWorkspaceModes(schema)
 		}), output: outputSchema[mcpcontract.ValidationOutput]("Persisted validation definition."), handler: s.defineValidation,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.PrepareContributionInput, mcpcontract.DraftOutput]{
@@ -208,6 +210,7 @@ func (s *Server) registerV1() {
 		description: "Render and persist a pull request or issue draft from stored evidence, supplied changes, or a verified workspace diff; it inspects the managed workspace with non-mutating Git when changes are omitted. Never posts or mutates GitHub.",
 		annotations: localWrite, supportedBy: supports[Operator], input: inputSchema[mcpcontract.PrepareContributionInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
+			configureContributionDraftModes(schema)
 		}), output: outputSchema[mcpcontract.DraftOutput]("Newly rendered and persisted local contribution draft."), handler: s.prepareContribution,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.ExportManifestInput, mcpcontract.ManifestOutput]{
@@ -289,7 +292,11 @@ func (s *Server) getRepositoryDossier(ctx context.Context, _ *mcp.CallToolReques
 		return nil, mcpcontract.DossierOutput{}, err
 	}
 	out, err := s.reader.Dossier(ctx, mcpcontract.RepoInput(in))
-	return nil, out, err
+	if err != nil {
+		return nil, out, err
+	}
+	uri := "gitcontribute://dossier/" + in.Owner + "/" + in.Repo
+	return linkedResource(uri, "dossier", "Repository dossier", "Persisted source-backed repository dossier."), out, nil
 }
 
 func (s *Server) explainMatch(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.ExplainMatchInput) (*mcp.CallToolResult, mcpcontract.ExplainMatchOutput, error) {
@@ -334,14 +341,7 @@ func (s *Server) startInvestigation(ctx context.Context, _ *mcp.CallToolRequest,
 	if err := validateRepo(mcpcontract.RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
 		return nil, mcpcontract.InvestigationOutput{}, err
 	}
-	if in.Number > 0 {
-		if in.CommitSHA != "" || in.Lens != "" {
-			return nil, mcpcontract.InvestigationOutput{}, mcpcontract.InvalidArgument("number", "cannot be combined with commit_sha or lens", map[string]any{"owner": in.Owner, "repo": in.Repo, "kind": "issue", "number": in.Number})
-		}
-		if in.Kind != "" && in.Kind != "issue" && in.Kind != "pull_request" {
-			return nil, mcpcontract.InvestigationOutput{}, mcpcontract.InvalidArgument("kind", "must be issue or pull_request", map[string]any{"kind": "issue"})
-		}
-	} else if strings.TrimSpace(in.CommitSHA) == "" {
+	if in.Number <= 0 && strings.TrimSpace(in.CommitSHA) == "" {
 		return nil, mcpcontract.InvestigationOutput{}, mcpcontract.InvalidArgument("commit_sha", "provide commit_sha or a positive stored thread number", map[string]any{"commit_sha": "<sha>"})
 	}
 	operator, ok := s.reader.(Operator)
@@ -349,7 +349,10 @@ func (s *Server) startInvestigation(ctx context.Context, _ *mcp.CallToolRequest,
 		return nil, mcpcontract.InvestigationOutput{}, errors.New("investigations are not available")
 	}
 	out, err := operator.StartInvestigation(ctx, in)
-	return nil, out, err
+	if err != nil {
+		return nil, out, err
+	}
+	return linkedResource("gitcontribute://investigation/"+out.ID, "investigation", "Investigation", "Persisted local investigation."), out, nil
 }
 
 func (s *Server) recordHypothesis(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.RecordHypothesisInput) (*mcp.CallToolResult, mcpcontract.HypothesisOutput, error) {
@@ -432,7 +435,10 @@ func (s *Server) promoteOpportunity(ctx context.Context, _ *mcp.CallToolRequest,
 		return nil, mcpcontract.OpportunityOutput{}, errors.New("opportunity promotion is not available")
 	}
 	out, err := operator.PromoteOpportunity(ctx, in)
-	return nil, out, err
+	if err != nil {
+		return nil, out, err
+	}
+	return linkedResource("gitcontribute://opportunity/"+out.ID, "opportunity", "Opportunity", "Persisted local contribution opportunity."), out, nil
 }
 
 func (s *Server) cancelJob(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.CancelJobInput) (*mcp.CallToolResult, mcpcontract.GetJobsOutput, error) {
@@ -444,5 +450,10 @@ func (s *Server) cancelJob(ctx context.Context, _ *mcp.CallToolRequest, in mcpco
 		return nil, mcpcontract.GetJobsOutput{}, errors.New("job cancellation is not available")
 	}
 	out, err := operator.CancelJobs(ctx, in)
-	return nil, out, err
+	for i := range out.Items {
+		if out.Items[i].Value != nil {
+			normalizeJobExecution(out.Items[i].Value)
+		}
+	}
+	return linkedJobResources(out), out, err
 }

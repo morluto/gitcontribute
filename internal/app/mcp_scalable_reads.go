@@ -67,7 +67,7 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 		repo := repositories[corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo}]
 		if repo == nil {
 			item.Status, item.Reason, item.Message = "unavailable", "not_indexed", "repository is not present in the local corpus"
-			item.NextAction = "Call github.sync_repository_metadata for this repository."
+			item.NextAction = "Call github.sync_repository_context for this repository."
 			out.Items[i] = item
 			out.Status = "partial"
 			continue
@@ -80,7 +80,7 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 		}
 		coverage := coverageByRepository[corpus.RepositoryFacetKey{RepositoryID: repo.ID, Facet: "metadata"}]
 		if coverage == nil {
-			value.Metadata = mcpcontract.RepositoryMetadataOutput{Status: "missing", NextAction: "Call github.sync_repository_metadata for this repository."}
+			value.Metadata = mcpcontract.RepositoryMetadataOutput{Status: "missing", NextAction: "Call github.sync_repository_context for this repository."}
 			clearRepositoryFacts(&value)
 		} else {
 			status := "complete"
@@ -96,7 +96,7 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 }
 
 func typedRepository(repo *corpus.Repository) mcpcontract.TypedRepositoryOutput {
-	return mcpcontract.TypedRepositoryOutput{Ref: "repository:" + repo.Owner + "/" + repo.Name, Owner: repo.Owner, Repo: repo.Name, Description: ptr(repo.Description), DefaultBranch: ptr(repo.DefaultBranch), Language: ptr(repo.Language), License: ptr(repo.License), Topics: append([]string(nil), repo.Topics...), Stars: ptr(repo.Stars), Watchers: ptr(repo.Watchers), Forks: ptr(repo.Forks), OpenIssues: ptr(repo.OpenIssues), Archived: ptr(repo.Archived), Fork: ptr(repo.Fork)}
+	return mcpcontract.TypedRepositoryOutput{Ref: "repository:" + repo.Owner + "/" + repo.Name, Owner: repo.Owner, Repo: repo.Name, UpdatedAt: formatTime(repo.SourceUpdatedAt), Description: ptr(repo.Description), DefaultBranch: ptr(repo.DefaultBranch), Language: ptr(repo.Language), License: ptr(repo.License), Topics: append([]string(nil), repo.Topics...), Stars: ptr(repo.Stars), Watchers: ptr(repo.Watchers), Forks: ptr(repo.Forks), OpenIssues: ptr(repo.OpenIssues), Archived: ptr(repo.Archived), Fork: ptr(repo.Fork)}
 }
 
 func clearRepositoryFacts(v *mcpcontract.TypedRepositoryOutput) {
@@ -220,16 +220,11 @@ func (r *MCPReader) GetJobs(ctx context.Context, in mcpcontract.GetJobsInput) (m
 			item.Status, item.Reason, item.Message = "unavailable", "not_found", "job is not present in the local corpus"
 			out.Status = "partial"
 		} else {
-			job, decodeErr := jobResultToMCP(ptr(jobResult(stored)))
-			if decodeErr != nil {
-				item.Status, item.Reason, item.Message = "failed", "decode_failed", decodeErr.Error()
-				out.Status = "partial"
-			} else {
-				if in.ResponseFormat == "concise" && (job.Status == "succeeded" || job.Status == "failed" || job.Status == "cancelled") {
-					item.NextAction = "Call jobs.get with response_format=detailed to read the terminal payload."
-				}
-				item.Value = &job
+			job := jobResultToMCP(ptr(jobResult(stored)), in.ResponseFormat == "detailed")
+			if in.ResponseFormat == "concise" && (job.Status == "succeeded" || job.Status == "failed" || job.Status == "cancelled") {
+				item.NextAction = "Call jobs.get with response_format=detailed to read typed artifact and follow-up references."
 			}
+			item.Value = &job
 		}
 		out.Items[i] = item
 	}
@@ -637,7 +632,7 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpcontract.RankOp
 }
 
 func radarCandidateToMCP(c radar.Candidate) mcpcontract.OpportunityCandidateOutput {
-	out := mcpcontract.OpportunityCandidateOutput{Ref: c.Ref, Repo: c.Repo, Number: c.Number, Title: c.Title, URL: c.URL, Score: c.Score, Eligibility: string(c.Eligibility), Confidence: c.Confidence, SourceUpdatedAt: formatTime(c.SourceUpdatedAt)}
+	out := mcpcontract.OpportunityCandidateOutput{Ref: c.Ref, Repo: c.Repo, Number: c.Number, Title: c.Title, URL: c.URL, Score: mcpcontract.RadarScore(c.Score), Eligibility: string(c.Eligibility), Confidence: c.Confidence, SourceUpdatedAt: formatTime(c.SourceUpdatedAt)}
 	for _, signal := range c.PositiveSignals {
 		out.PositiveSignals = append(out.PositiveSignals, signal.Summary)
 	}
@@ -791,5 +786,5 @@ func precedentToMCP(source, owner, repo string, t precedent.Thread, score float6
 			reasons = append(reasons, "label: "+label)
 		}
 	}
-	return mcpcontract.PrecedentOutput{Source: source, Ref: fmt.Sprintf("%s/%s#%d", owner, repo, t.Number), Kind: t.Kind, State: t.State, StateReason: t.StateReason, Title: t.Title, Score: score, RuleVersion: similarity.PrecedentV1, Reasons: reasons, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.MergedAt)}
+	return mcpcontract.PrecedentOutput{Source: source, Ref: fmt.Sprintf("%s/%s#%d", owner, repo, t.Number), Kind: t.Kind, State: t.State, StateReason: t.StateReason, Title: t.Title, Score: mcpcontract.SimilarityScore(score), RuleVersion: similarity.PrecedentV1, Reasons: reasons, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.MergedAt)}
 }

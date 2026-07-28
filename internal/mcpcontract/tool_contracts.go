@@ -1,6 +1,10 @@
 package mcpcontract
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/morluto/gitcontribute/internal/manifest"
+)
 
 // ToolError is the stable, actionable shape for agent-correctable requests.
 type ToolError struct {
@@ -39,54 +43,56 @@ func Unavailable(code, message string, actions ...SuggestedAction) error {
 
 // Canonical MCP tool names group operations by capability and side-effect boundary.
 const (
-	ToolSearchRepositories       = "corpus.search_repositories"
-	ToolSearchThreads            = "corpus.search_threads"
-	ToolSearchCode               = "corpus.search_code"
-	ToolGetRepositories          = "corpus.get_repositories"
-	ToolGetThreads               = "corpus.get_threads"
-	ToolRankThreads              = "corpus.rank_threads"
-	ToolFindPrecedents           = "corpus.find_precedents"
-	ToolPrepareIssueSet          = "workflow.prepare_issue_set"
-	ToolGetRepositoryDossier     = "corpus.get_repository_dossier"
-	ToolExplainMatch             = "corpus.explain_match"
-	ToolGetInvestigation         = "corpus.get_investigation"
-	ToolListOpportunities        = "corpus.list_opportunities"
-	ToolGetOpportunity           = "corpus.get_opportunity"
-	ToolGetEvidence              = "corpus.get_evidence"
-	ToolGetReadiness             = "corpus.get_readiness"
-	ToolFindClusters             = "corpus.find_clusters"
-	ToolFindNeighbors            = "corpus.find_neighbors"
-	ToolGetCoverage              = "corpus.get_coverage"
-	ToolBuildRepositoryDossier   = "corpus.build_repository_dossier"
-	ToolGetJob                   = "jobs.get"
-	ToolCancelJob                = "jobs.cancel"
-	ToolSearchGitHubRepositories = "github.search_repositories"
-	ToolSyncRepositoryMetadata   = "github.sync_repository_metadata"
-	ToolSyncThreads              = "github.sync_threads"
-	ToolHydrateThreads           = "github.hydrate_threads"
-	ToolGetAuthenticatedIdentity = "github.get_authenticated_identity"
-	ToolSyncAuthoredPullRequests = "github.sync_authored_pull_requests"
-	ToolSyncPullRequestStatus    = "github.sync_pull_request_status"
-	ToolListPullRequestPortfolio = "corpus.list_pull_request_portfolio"
-	ToolFindPortfolioOverlaps    = "corpus.find_portfolio_overlaps"
-	ToolIndexRepositories        = "code.index_repositories"
-	ToolCheckMergeConflicts      = "workspace.check_merge_conflicts"
-	ToolInspectCommitChanges     = "workspace.inspect_commit_changes"
-	ToolPlanSemanticCommits      = "workspace.plan_semantic_commits"
-	ToolQueryDeepWiki            = "research.query_deepwiki"
-	ToolCreateWorkspace          = "workspace.create"
-	ToolAdoptWorkspace           = "workspace.adopt"
-	ToolDefineValidation         = "validation.define"
-	ToolRunValidation            = "validation.run"
-	ToolRunRepeatedValidation    = "validation.run_repeated"
-	ToolStartInvestigation       = "workflow.start_investigation"
-	ToolRecordHypothesis         = "workflow.record_hypothesis"
-	ToolCheckDuplicates          = "workflow.check_duplicates"
-	ToolFindCompetingWork        = "workflow.find_competing_work"
-	ToolPromoteOpportunity       = "workflow.promote_opportunity"
-	ToolPrepareContribution      = "workflow.prepare_contribution"
-	ToolExportManifest           = "workflow.export_manifest"
-	ToolLinkPullRequest          = "workflow.link_pull_request"
+	ToolSearchRepositories        = "corpus.search_repositories"
+	ToolSearchThreads             = "corpus.search_threads"
+	ToolSearchCode                = "corpus.search_code"
+	ToolGetRepositories           = "corpus.get_repositories"
+	ToolGetThreads                = "corpus.get_threads"
+	ToolRankThreads               = "corpus.rank_threads"
+	ToolFindPrecedents            = "corpus.find_precedents"
+	ToolPrepareIssueSet           = "workflow.prepare_issue_set"
+	ToolGetRepositoryDossier      = "corpus.get_repository_dossier"
+	ToolExplainMatch              = "corpus.explain_match"
+	ToolGetInvestigation          = "corpus.get_investigation"
+	ToolListOpportunities         = "corpus.list_opportunities"
+	ToolGetOpportunity            = "corpus.get_opportunity"
+	ToolGetEvidence               = "corpus.get_evidence"
+	ToolGetReadiness              = "corpus.get_readiness"
+	ToolFindClusters              = "corpus.find_clusters"
+	ToolFindNeighbors             = "corpus.find_neighbors"
+	ToolGetCoverage               = "corpus.get_coverage"
+	ToolBuildRepositoryDossier    = "workflow.build_repository_dossier"
+	ToolMineRepositoryFixPatterns = "workflow.mine_repository_fix_patterns"
+	ToolGetJob                    = "jobs.get"
+	ToolCancelJob                 = "jobs.cancel"
+	ToolSearchGitHubRepositories  = "github.search_repositories"
+	ToolSyncRepositoryContext     = "github.sync_repository_context"
+	ToolSyncThreads               = "github.sync_threads"
+	ToolHydrateThreads            = "github.hydrate_threads"
+	ToolGetAuthenticatedIdentity  = "github.get_authenticated_identity"
+	ToolSyncAuthoredPullRequests  = "github.sync_authored_pull_requests"
+	ToolSyncPullRequestStatus     = "github.sync_pull_request_status"
+	ToolSyncPortfolio             = "github.sync_portfolio"
+	ToolListPullRequestPortfolio  = "corpus.list_pull_request_portfolio"
+	ToolFindPortfolioOverlaps     = "corpus.find_portfolio_overlaps"
+	ToolIndexRepositories         = "code.index_repositories"
+	ToolCheckMergeConflicts       = "workspace.check_merge_conflicts"
+	ToolInspectCommitChanges      = "workspace.inspect_commit_changes"
+	ToolPlanSemanticCommits       = "workspace.plan_semantic_commits"
+	ToolQueryDeepWiki             = "research.query_deepwiki"
+	ToolCreateWorkspace           = "workspace.create"
+	ToolAdoptWorkspace            = "workspace.adopt"
+	ToolDefineValidation          = "validation.define"
+	ToolRunValidation             = "validation.run"
+	ToolRunRepeatedValidation     = "validation.run_repeated"
+	ToolStartInvestigation        = "workflow.start_investigation"
+	ToolRecordHypothesis          = "workflow.record_hypothesis"
+	ToolCheckDuplicates           = "workflow.check_duplicates"
+	ToolFindCompetingWork         = "workflow.find_competing_work"
+	ToolPromoteOpportunity        = "workflow.promote_opportunity"
+	ToolPrepareContribution       = "workflow.prepare_contribution"
+	ToolExportManifest            = "workflow.export_manifest"
+	ToolLinkPullRequest           = "workflow.link_pull_request"
 )
 
 // InspectCommitChangesInput selects one managed workspace.
@@ -198,7 +204,7 @@ type CreateConcernInput struct {
 	Title            string                   `json:"title" jsonschema:"Concise concern title"`
 	ProblemStatement string                   `json:"problem_statement" jsonschema:"Observed or suspected problem"`
 	SuspectedOwner   string                   `json:"suspected_owner,omitempty" jsonschema:"Suspected code ownership boundary"`
-	Confidence       float64                  `json:"confidence" jsonschema:"Confidence from 0 to 1"`
+	Confidence       Probability              `json:"confidence" jsonschema:"Confidence from 0 to 1"`
 	Unknowns         []string                 `json:"unknowns,omitempty" jsonschema:"Explicit unknowns"`
 	SuccessCriterion string                   `json:"success_criterion,omitempty" jsonschema:"Proof or success criterion"`
 	Notes            string                   `json:"notes,omitempty" jsonschema:"Local notes"`
@@ -217,15 +223,15 @@ type ListConcernsInput struct {
 
 // UpdateConcernInput replaces explicitly supplied editable fields.
 type UpdateConcernInput struct {
-	ID               string   `json:"id" jsonschema:"Concern ID"`
-	Title            *string  `json:"title,omitempty" jsonschema:"Replacement title"`
-	ProblemStatement *string  `json:"problem_statement,omitempty" jsonschema:"Replacement problem statement"`
-	SuspectedOwner   *string  `json:"suspected_owner,omitempty" jsonschema:"Replacement owner boundary"`
-	Confidence       *float64 `json:"confidence,omitempty" jsonschema:"Replacement confidence from 0 to 1"`
-	Unknowns         []string `json:"unknowns,omitempty" jsonschema:"Replacement explicit unknowns"`
-	SuccessCriterion *string  `json:"success_criterion,omitempty" jsonschema:"Replacement success criterion"`
-	Notes            *string  `json:"notes,omitempty" jsonschema:"Replacement local notes"`
-	EvidenceIDs      []string `json:"evidence_ids,omitempty" jsonschema:"Replacement evidence IDs"`
+	ID               string       `json:"id" jsonschema:"Concern ID"`
+	Title            *string      `json:"title,omitempty" jsonschema:"Replacement title"`
+	ProblemStatement *string      `json:"problem_statement,omitempty" jsonschema:"Replacement problem statement"`
+	SuspectedOwner   *string      `json:"suspected_owner,omitempty" jsonschema:"Replacement owner boundary"`
+	Confidence       *Probability `json:"confidence,omitempty" jsonschema:"Replacement confidence from 0 to 1"`
+	Unknowns         []string     `json:"unknowns,omitempty" jsonschema:"Replacement explicit unknowns"`
+	SuccessCriterion *string      `json:"success_criterion,omitempty" jsonschema:"Replacement success criterion"`
+	Notes            *string      `json:"notes,omitempty" jsonschema:"Replacement local notes"`
+	EvidenceIDs      []string     `json:"evidence_ids,omitempty" jsonschema:"Replacement evidence IDs"`
 }
 
 // SetConcernStatusInput requests one lifecycle transition.
@@ -280,7 +286,7 @@ type ConcernOutput struct {
 	Title            string                  `json:"title" jsonschema:"Concern title"`
 	ProblemStatement string                  `json:"problem_statement" jsonschema:"Concern problem statement"`
 	SuspectedOwner   string                  `json:"suspected_owner,omitempty" jsonschema:"Suspected ownership boundary"`
-	Confidence       float64                 `json:"confidence" jsonschema:"Confidence from 0 to 1"`
+	Confidence       Probability             `json:"confidence" jsonschema:"Confidence from 0 to 1"`
 	Unknowns         []string                `json:"unknowns,omitempty" jsonschema:"Explicit unknowns"`
 	SuccessCriterion string                  `json:"success_criterion,omitempty" jsonschema:"Proof or success criterion"`
 	Notes            string                  `json:"notes,omitempty" jsonschema:"Local notes"`
@@ -344,11 +350,11 @@ type ManifestPullRequestInput struct {
 
 // ManifestOutput returns the stable identity and full in-toto-shaped statement.
 type ManifestOutput struct {
-	ManifestID    string         `json:"manifest_id" jsonschema:"Stable sha256-prefixed manifest ID"`
-	ContentSHA256 string         `json:"content_sha256" jsonschema:"Hex SHA-256 of stable manifest content"`
-	SchemaVersion string         `json:"schema_version" jsonschema:"Contribution manifest predicate schema version"`
-	Status        string         `json:"status" jsonschema:"Overall completeness status"`
-	Statement     map[string]any `json:"statement" jsonschema:"Full in-toto-shaped evidence statement"`
+	ManifestID    string             `json:"manifest_id" jsonschema:"Stable sha256-prefixed manifest ID"`
+	ContentSHA256 string             `json:"content_sha256" jsonschema:"Hex SHA-256 of stable manifest content"`
+	SchemaVersion string             `json:"schema_version" jsonschema:"Contribution manifest predicate schema version"`
+	Status        string             `json:"status" jsonschema:"Overall completeness status"`
+	Statement     manifest.Statement `json:"statement" jsonschema:"Typed in-toto-shaped evidence statement owned by GitContribute"`
 }
 
 // EvidenceInput filters and bounds stored evidence.
@@ -413,9 +419,9 @@ type OpportunityCandidateOutput struct {
 	Number             int                            `json:"number"`
 	Title              string                         `json:"title"`
 	URL                string                         `json:"url"`
-	Score              int                            `json:"score"`
+	Score              RadarScore                     `json:"score" jsonschema:"Deterministic Contribution Radar score from 0 to 100"`
 	Eligibility        string                         `json:"eligibility"`
-	Confidence         string                         `json:"confidence"`
+	Confidence         string                         `json:"confidence" jsonschema:"Categorical evidence confidence such as low, medium, or high"`
 	PositiveSignals    []string                       `json:"positive_signals,omitempty"`
 	Risks              []string                       `json:"risks,omitempty"`
 	Blockers           []string                       `json:"blockers,omitempty"`

@@ -55,3 +55,17 @@ func TestExtractHandlesTildeFenceAndUnmatchedBacktickAsProse(t *testing.T) {
 		t.Fatalf("references = %+v", refs)
 	}
 }
+
+func TestExtractClassifiesReplacementDirectionAndEvidence(t *testing.T) {
+	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	refs := Extract("Superseded by: #8. Replaces owner/repo#3.", repo)
+	if len(refs) != 2 {
+		t.Fatalf("references = %+v", refs)
+	}
+	want := map[int]string{3: RelationReplaces, 8: RelationSupersededBy}
+	for _, ref := range refs {
+		if ref.Relation != want[ref.Number] || ref.Evidence == "" {
+			t.Fatalf("reference = %+v, want relation %q with evidence", ref, want[ref.Number])
+		}
+	}
+}
