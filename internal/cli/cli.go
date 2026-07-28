@@ -1583,55 +1583,6 @@ func parseRepo(s string) (contracts.RepoRef, error) {
 	return contracts.RepoRef{Owner: parts[0], Repo: parts[1]}, nil
 }
 
-func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) error {
-	switch command {
-	case "archive sync-context":
-		return c.runArchiveContextSync(ctx, &cmd.SyncContext)
-	case "archive sync":
-		return c.runArchiveSync(ctx, &cmd.Sync)
-	case "archive hydrate":
-		service, err := c.archiveService()
-		if err != nil {
-			return err
-		}
-		repo, number, err := parseThreadRef(cmd.Hydrate.Thread)
-		if err != nil {
-			return NewCLIError(ExitUsage, err)
-		}
-		_, _ = fmt.Fprintf(c.stderr, "hydrating %s#%d...\n", repo, number)
-		result, err := service.Hydrate(ctx, repo, number, contracts.HydrateOptions{
-			Facets: splitCSV(cmd.Hydrate.With), MaxPages: cmd.Hydrate.MaxPages,
-		})
-		if err != nil {
-			return c.mapError(err)
-		}
-		return c.render(cmd.Hydrate.JSON, result)
-	case "archive refresh":
-		return c.runArchiveRefresh(ctx, &cmd.Refresh)
-	case "archive threads":
-		repo, err := parseRepo(cmd.Threads.OwnerRepo)
-		if err != nil {
-			return err
-		}
-		if cmd.Threads.Limit <= 0 || cmd.Threads.Limit > 1000 {
-			return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 1000"))
-		}
-		service, err := c.archiveThreadService()
-		if err != nil {
-			return err
-		}
-		result, err := service.ArchiveThreads(ctx, repo, cmd.Threads.Kind, cmd.Threads.State, cmd.Threads.Limit)
-		if err != nil {
-			return c.mapError(err)
-		}
-		return c.render(cmd.Threads.JSON, result)
-	case "archive coverage":
-		return c.runCoverage(ctx, &cmd.Coverage)
-	default:
-		return NewCLIError(ExitUsage, fmt.Errorf("unknown archive command: %s", command))
-	}
-}
-
 func (c *CLI) runCoverage(ctx context.Context, cmd *coverageCmd) error {
 	repo, err := parseRepo(cmd.OwnerRepo)
 	if err != nil {
