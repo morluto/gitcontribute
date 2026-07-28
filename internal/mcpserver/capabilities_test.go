@@ -66,7 +66,7 @@ func (*fakeOptionalCapabilities) FindPortfolioOverlaps(context.Context, mcpcontr
 func (f *fakeOptionalCapabilities) SearchGitHubRepositories(ctx context.Context, in mcpcontract.SearchGitHubRepositoriesInput) (mcpcontract.SearchGitHubRepositoriesOutput, error) {
 	return f.base.SearchGitHubRepositories(ctx, in)
 }
-func (*fakeOptionalCapabilities) SyncRepositoryMetadata(context.Context, mcpcontract.SyncRepositoryMetadataInput) (mcpcontract.JobReference, error) {
+func (*fakeOptionalCapabilities) SyncRepositoryContext(context.Context, mcpcontract.SyncRepositoryContextInput) (mcpcontract.JobReference, error) {
 	return mcpcontract.JobReference{ID: "job-metadata", Status: "queued"}, nil
 }
 func (f *fakeOptionalCapabilities) SyncThreads(_ context.Context, in mcpcontract.SyncThreadsInput) (mcpcontract.JobReference, error) {

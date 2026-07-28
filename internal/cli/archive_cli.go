@@ -3,11 +3,18 @@ package cli
 import "time"
 
 type archiveCmd struct {
-	Sync     archiveSyncCmd    `cmd:"" help:"Synchronize repository threads"`
-	Hydrate  archiveHydrateCmd `cmd:"" help:"Hydrate one issue or pull request"`
-	Refresh  archiveRefreshCmd `cmd:"" help:"Refresh all repository threads"`
-	Threads  archiveThreadsCmd `cmd:"" help:"List archived repository threads"`
-	Coverage coverageCmd       `cmd:"" help:"Show repository facet coverage"`
+	SyncContext archiveContextSyncCmd `cmd:"" name:"sync-context" help:"Synchronize repository metadata and contribution guidance"`
+	Sync        archiveSyncCmd        `cmd:"" help:"Synchronize repository threads"`
+	Hydrate     archiveHydrateCmd     `cmd:"" help:"Hydrate one issue or pull request"`
+	Refresh     archiveRefreshCmd     `cmd:"" help:"Refresh all repository threads"`
+	Threads     archiveThreadsCmd     `cmd:"" help:"List archived repository threads"`
+	Coverage    coverageCmd           `cmd:"" help:"Show repository facet coverage"`
+}
+
+type archiveContextSyncCmd struct {
+	OwnerRepo   string `arg:"" name:"owner/repo" help:"Repository as OWNER/REPO"`
+	MaxRequests int    `name:"max-requests" help:"Maximum total GitHub requests (defaults to the repository-context plan)"`
+	JSON        bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type archiveSyncCmd struct {

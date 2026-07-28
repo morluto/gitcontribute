@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/morluto/gitcontribute/internal/facets"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/repositorycontext"
 )
 
 const serverInstructions = "Use advertised GitContribute tools for durable, source-backed repository research and contribution tracking. " +
@@ -57,7 +58,7 @@ const serverInstructions = "Use advertised GitContribute tools for durable, sour
 // GetJobsOutput reports multiple durable jobs in requested order so callers can
 // poll concurrent work with one MCP round trip.
 
-// SyncRepositoryMetadataInput selects repositories for asynchronous metadata refresh.
+// SyncRepositoryContextInput selects repositories for asynchronous context refresh.
 
 // SyncThreadsInput selects either bounded repository-wide header discovery or
 // exact thread refresh. It never requests child comments, reviews, or code.
@@ -167,15 +168,19 @@ func (s *Server) registerScalable() {
 		setEnum(sc, "response_format", "concise", "detailed")
 		setDefault(sc, "response_format", "concise")
 	}), output: outputSchema[mcpcontract.SearchGitHubRepositoriesOutput]("Live repository search with persisted metadata."), handler: s.searchGitHubRepositories})
-	addCatalogTool(s, catalogTool[mcpcontract.SyncRepositoryMetadataInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncRepositoryMetadata, title: "Sync repository metadata in one batch", description: "Fetch current stars and metadata for up to 100 explicit repositories; no threads or code.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncRepositoryMetadataInput](func(sc *schemaBuilder) { setArrayBounds(sc, "repositories", 1, 100) }), output: outputSchema[mcpcontract.JobReference]("Reference to a metadata synchronization job."), handler: s.syncRepositoryMetadata})
-	addCatalogTool(s, catalogTool[mcpcontract.SyncThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncThreads, title: "Sync GitHub thread headers in one batch", description: "Sync GitHub issue and pull-request headers across selected repositories or exact threads, plus metadata and policy files; no discussions, reviews, checks, or code.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncThreadsInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.SyncRepositoryContextInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncRepositoryContext, title: "Sync repository context in one batch", description: "Fetch current GitHub stars, metadata, and fixed contribution-guidance files for up to 100 explicit repositories; no threads or code.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncRepositoryContextInput](func(sc *schemaBuilder) {
+		setArrayBounds(sc, "repositories", 1, 100)
+		setRange(sc, "max_requests", float64(repositorycontext.RequestCost()), 1000)
+		setDefault(sc, "max_requests", 1000)
+	}), output: outputSchema[mcpcontract.JobReference]("Reference to a repository-context synchronization job."), handler: s.syncRepositoryContext})
+	addCatalogTool(s, catalogTool[mcpcontract.SyncThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncThreads, title: "Sync GitHub thread headers in one batch", description: "Sync GitHub issue and pull-request headers across repositories whose context is already stored; no metadata, policy files, discussions, reviews, checks, or code.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncThreadsInput](func(sc *schemaBuilder) {
 		setEnum(sc, "selection", "repositories", "threads")
 		property(sc, "repositories").MaxItems = jsonschema.Ptr(50)
 		property(sc, "threads").MaxItems = jsonschema.Ptr(100)
 		setEnum(sc, "kind", "issue", "pull_request", "both")
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit_per_repository", 1, 1000)
-		setRange(sc, "max_requests", 9, 1000)
+		setRange(sc, "max_requests", 1, 1000)
 		setDefault(sc, "max_requests", 1000)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded thread-header synchronization job."), handler: s.syncThreads})
 	addCatalogTool(s, catalogTool[mcpcontract.HydrateThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolHydrateThreads, title: "Fetch selected GitHub thread facets", description: "Refresh each exact thread header, then fetch explicit comments, issue timelines, pull-request details, reviews, or review comments for up to 100 threads. Repository metadata must already be synced. Each item reports the header request plus facet requests. Timeline history is opt-in; hydrate only finalists after ranking.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.HydrateThreadsInput](func(sc *schemaBuilder) {
@@ -190,7 +195,7 @@ func (s *Server) registerScalable() {
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit", 1, 500)
 		setDefault(sc, "limit", 500)
-		setRange(sc, "max_requests", 11, 1000)
+		setRange(sc, "max_requests", 2, 1000)
 		setDefault(sc, "max_requests", 1000)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to an authored pull-request synchronization job."), handler: s.syncAuthoredPullRequests})
 	addCatalogTool(s, catalogTool[mcpcontract.SyncPullRequestStatusInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPullRequestStatus, title: "Sync exact PR health", description: "Refresh mergeability, reviews, checks, unresolved conversations, merge state, merge queue, closing issues, and changed files for up to 50 exact pull requests. Returns independent facet completeness; retry only incomplete items.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncPullRequestStatusInput](func(sc *schemaBuilder) {
@@ -330,12 +335,12 @@ func (s *Server) getJobs(ctx context.Context, _ *mcp.CallToolRequest, in mcpcont
 	out, err := r.GetJobs(ctx, in)
 	return nil, out, err
 }
-func (s *Server) syncRepositoryMetadata(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SyncRepositoryMetadataInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
+func (s *Server) syncRepositoryContext(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SyncRepositoryContextInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
 	op, ok := s.reader.(GitHubOperator)
 	if !ok {
-		return nil, mcpcontract.JobReference{}, errors.New("repository metadata sync is not available")
+		return nil, mcpcontract.JobReference{}, errors.New("repository context sync is not available")
 	}
-	out, err := op.SyncRepositoryMetadata(ctx, in)
+	out, err := op.SyncRepositoryContext(ctx, in)
 	return nil, out, err
 }
 

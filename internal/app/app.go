@@ -493,22 +493,74 @@ const (
 	maxSyncRequests        = 1000
 )
 
-func (s *Service) sync(ctx context.Context, repo contracts.RepoRef, syncOpts SyncOptions) (*contracts.SyncResult, error) {
-	return s.syncWithThreadHeaders(ctx, repo, syncOpts, nil)
+func (s *Service) syncProvidedThreadHeaders(ctx context.Context, repo contracts.RepoRef, issues []github.Issue) (_ *contracts.SyncResult, resultErr error) {
+	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
+	if err := ref.Validate(); err != nil {
+		return nil, err
+	}
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sourceUpdatedAt := time.Time{}
+	for _, issue := range issues {
+		if issue.UpdatedAt.After(sourceUpdatedAt) {
+			sourceUpdatedAt = issue.UpdatedAt
+		}
+	}
+	stored, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	if err != nil {
+		return nil, err
+	}
+	if stored == nil {
+		payload, err := json.Marshal(map[string]any{"source": "authored_pull_request_search", "owner": ref.Owner, "repo": ref.Repo})
+		if err != nil {
+			return nil, err
+		}
+		stored, err = c.UpsertRepository(ctx, corpus.Repository{
+			Owner: ref.Owner, Name: ref.Repo,
+		}, string(payload))
+		if err != nil {
+			return nil, fmt.Errorf("store authored repository identity: %w", err)
+		}
+	}
+	run, err := c.StartRun(ctx, "sync_authored_pull_request_headers")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if resultErr != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = c.FailRun(cleanupCtx, run.ID, resultErr.Error())
+		}
+	}()
+	writer := &syncThreadWriter{
+		ctx: ctx, corpus: c, repositoryID: stored.ID, kind: "pull_request", sourceUpdatedAt: sourceUpdatedAt,
+	}
+	if err := writer.storeAll(issues); err != nil {
+		return nil, err
+	}
+	if err := c.AdvanceFacet(ctx, stored.ID, nil, "threads", sourceUpdatedAt, false, run.ID); err != nil {
+		return nil, err
+	}
+	if err := c.FinishRun(ctx, run.ID, `{"requests":0,"complete":false}`); err != nil {
+		return nil, err
+	}
+	return &contracts.SyncResult{
+		Repo: repo, Updated: writer.updated, Requests: 0, PlannedRequests: 0, RequestBudget: 0,
+		Message: fmt.Sprintf("stored %d provided thread headers", writer.updated),
+	}, nil
 }
 
-func (s *Service) syncProvidedThreadHeaders(ctx context.Context, repo contracts.RepoRef, issues []github.Issue, maxRequests int) (*contracts.SyncResult, error) {
-	return s.syncWithThreadHeaders(ctx, repo, SyncOptions{Kind: "pull_request", State: "all", MaxPages: 1, MaxRequests: maxRequests}, issues)
-}
-
-func (s *Service) syncWithThreadHeaders(ctx context.Context, repo contracts.RepoRef, syncOpts SyncOptions, provided []github.Issue) (*contracts.SyncResult, error) {
+func (s *Service) syncThreadHeaders(ctx context.Context, repo contracts.RepoRef, syncOpts SyncOptions) (_ *contracts.SyncResult, resultErr error) {
 	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
 	if err := ref.Validate(); err != nil {
 		return nil, err
 	}
 	var plan syncRequestPlan
 	var err error
-	syncOpts, plan, err = planSyncOptions(syncOpts)
+	syncOpts, plan, err = planThreadSyncOptions(syncOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -516,65 +568,54 @@ func (s *Service) syncWithThreadHeaders(ctx context.Context, repo contracts.Repo
 	if err != nil {
 		return nil, err
 	}
-	budget := newSyncRequestBudget(syncOpts.MaxRequests)
+	repoProjection, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	if err != nil {
+		return nil, fmt.Errorf("get repository: %w", err)
+	}
+	if repoProjection == nil {
+		return nil, fmt.Errorf(
+			"repository %s is not stored; run `gitcontribute archive sync-context %s`",
+			ref, ref,
+		)
+	}
 	reader, err := s.githubReader()
 	if err != nil {
 		return nil, err
 	}
-
-	run, err := c.StartRun(ctx, "sync")
+	run, err := c.StartRun(ctx, "sync_threads")
 	if err != nil {
 		return nil, err
 	}
-	var syncErr error
 	defer func() {
-		if syncErr != nil {
+		if resultErr != nil {
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer cancel()
-			_ = c.FailRun(cleanupCtx, run.ID, syncErr.Error())
+			_ = c.FailRun(cleanupCtx, run.ID, resultErr.Error())
 		}
 	}()
-
-	if err := c.RecordRunEvent(ctx, run.ID, "info", fmt.Sprintf("syncing %s", ref)); err != nil {
-		syncErr = err
-		return nil, syncErr
-	}
-
-	repoProjection, lastSourceUpdated, err := syncRepositoryHeader(ctx, c, reader, ref, run.ID, budget)
+	budget := newSyncRequestBudget(syncOpts.MaxRequests)
+	selection, err := syncThreadHeaderSelection(ctx, c, reader, ref, repoProjection.ID, repoProjection.SourceUpdatedAt, syncOpts, nil, budget)
 	if err != nil {
-		syncErr = err
-		return nil, syncErr
+		return nil, err
 	}
-
-	selection, err := syncThreadHeaderSelection(ctx, c, reader, ref, repoProjection.ID, lastSourceUpdated, syncOpts, provided, budget)
-	if err != nil {
-		syncErr = err
-		return nil, syncErr
+	if err := c.AdvanceFacet(ctx, repoProjection.ID, nil, "threads", selection.sourceUpdatedAt, selection.complete, run.ID); err != nil {
+		return nil, fmt.Errorf("advance threads facet: %w", err)
 	}
-	updated, pages := selection.updated, selection.requests
-	lastSourceUpdated, complete, requestCapped := selection.sourceUpdatedAt, selection.complete, selection.requestCapped
-
-	if err := c.AdvanceFacet(ctx, repoProjection.ID, nil, "threads", lastSourceUpdated, complete, run.ID); err != nil {
-		syncErr = fmt.Errorf("advance threads facet: %w", err)
-		return nil, syncErr
-	}
-
+	requestCapped := selection.requestCapped || (len(syncOpts.Numbers) == 0 && plan.threadRequestCeiling < syncOpts.MaxPages)
 	stats, err := json.Marshal(map[string]any{
-		"pages": pages, "threads": updated, "complete": complete, "requests": budget.used,
-		"request_budget": budget.limit, "request_capped": requestCapped,
+		"pages": selection.requests, "threads": selection.updated, "complete": selection.complete,
+		"requests": budget.used, "request_budget": budget.limit, "request_capped": requestCapped,
 	})
 	if err != nil {
-		syncErr = fmt.Errorf("marshal sync statistics: %w", err)
-		return nil, syncErr
+		return nil, fmt.Errorf("marshal sync statistics: %w", err)
 	}
 	if err := c.FinishRun(ctx, run.ID, string(stats)); err != nil {
-		syncErr = err
-		return nil, syncErr
+		return nil, err
 	}
-
 	return &contracts.SyncResult{
-		Repo: repo, Updated: updated, Requests: budget.used, PlannedRequests: plan.plannedRequests, RequestBudget: syncOpts.MaxRequests, Capped: requestCapped,
-		Message: fmt.Sprintf("fetched %d thread headers across %d thread requests", updated, pages),
+		Repo: repo, Updated: selection.updated, Requests: budget.used, PlannedRequests: plan.plannedRequests,
+		RequestBudget: syncOpts.MaxRequests, Capped: requestCapped,
+		Message: fmt.Sprintf("fetched %d thread headers across %d thread requests", selection.updated, selection.requests),
 	}, nil
 }
 
@@ -602,39 +643,35 @@ func (b *syncRequestBudget) take() error {
 	return nil
 }
 
-func syncFixedRequestCost() int {
-	return 1 + len(contributionGuidancePaths)
-}
-
 type syncRequestPlan struct {
-	fixedRequests        int
 	threadRequestCeiling int
 	plannedRequests      int
 }
 
-func planSyncOptions(opts SyncOptions) (SyncOptions, syncRequestPlan, error) {
-	normalized, err := normalizeSyncOptions(opts)
+func planThreadSyncOptions(opts SyncOptions) (SyncOptions, syncRequestPlan, error) {
+	normalized, err := normalizeThreadSyncOptions(opts)
 	if err != nil {
 		return SyncOptions{}, syncRequestPlan{}, err
 	}
-	fixed := syncFixedRequestCost()
-	remaining := normalized.MaxRequests - fixed
-	threadCeiling := normalized.MaxPages
+	requestCeiling := normalized.MaxPages
 	if len(normalized.Numbers) > 0 {
-		threadCeiling = len(normalized.Numbers)
-		if threadCeiling > remaining {
-			required := fixed + threadCeiling
-			return SyncOptions{}, syncRequestPlan{}, fmt.Errorf("exact thread selection requires at least %d requests; max requests is %d", required, normalized.MaxRequests)
+		requestCeiling = len(normalized.Numbers)
+		if requestCeiling > normalized.MaxRequests {
+			return SyncOptions{}, syncRequestPlan{}, fmt.Errorf(
+				"exact thread selection requires at least %d requests; max requests is %d",
+				requestCeiling, normalized.MaxRequests,
+			)
 		}
-	} else if threadCeiling > remaining {
-		threadCeiling = remaining
+	} else if requestCeiling > normalized.MaxRequests {
+		requestCeiling = normalized.MaxRequests
 	}
 	return normalized, syncRequestPlan{
-		fixedRequests: fixed, threadRequestCeiling: threadCeiling, plannedRequests: fixed + threadCeiling,
+		threadRequestCeiling: requestCeiling,
+		plannedRequests:      requestCeiling,
 	}, nil
 }
 
-func normalizeSyncOptions(opts SyncOptions) (SyncOptions, error) {
+func normalizeThreadSyncOptions(opts SyncOptions) (SyncOptions, error) {
 	if opts.Kind == "" {
 		opts.Kind = "both"
 	}
@@ -659,8 +696,8 @@ func normalizeSyncOptions(opts SyncOptions) (SyncOptions, error) {
 	if opts.MaxRequests == 0 {
 		opts.MaxRequests = defaultSyncMaxRequests
 	}
-	if opts.MaxRequests < syncFixedRequestCost() || opts.MaxRequests > maxSyncRequests {
-		return SyncOptions{}, fmt.Errorf("max requests must be between %d and %d", syncFixedRequestCost(), maxSyncRequests)
+	if opts.MaxRequests < 1 || opts.MaxRequests > maxSyncRequests {
+		return SyncOptions{}, fmt.Errorf("max requests must be between 1 and %d", maxSyncRequests)
 	}
 	if len(opts.Numbers) > 100 {
 		return SyncOptions{}, errors.New("exact thread selection cannot exceed 100 numbers")

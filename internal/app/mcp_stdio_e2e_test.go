@@ -103,18 +103,18 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		}
 		tools[tool.Name] = tool
 	}
-	for _, name := range []string{mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolRankThreads, mcpcontract.ToolFindPrecedents, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolSyncRepositoryMetadata, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads, mcpcontract.ToolQueryDeepWiki, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCheckMergeConflicts} {
+	for _, name := range []string{mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolRankThreads, mcpcontract.ToolFindPrecedents, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolSyncRepositoryContext, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads, mcpcontract.ToolQueryDeepWiki, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCheckMergeConflicts} {
 		if tools[name] == nil {
 			t.Errorf("tools/list missing %s", name)
 		}
 	}
 
-	metadataJob := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncRepositoryMetadata, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}}})
-	metadataResult := waitMCPJob(ctx, t, session, metadataJob.ID)
+	contextJob := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncRepositoryContext, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}}})
+	contextResult := waitMCPJob(ctx, t, session, contextJob.ID)
 
 	repositories := callMCPTool[mcpcontract.GetRepositoriesOutput](ctx, t, session, mcpcontract.ToolGetRepositories, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}, map[string]any{"owner": "acme", "repo": "placeholder"}}})
 	if len(repositories.Items) != 2 || repositories.Items[0].Value == nil || repositories.Items[0].Value.Stars == nil || *repositories.Items[0].Value.Stars != 9001 {
-		t.Fatalf("observed repository batch = %+v, value = %+v, metadata job = %+v", repositories, repositories.Items[0].Value, metadataResult)
+		t.Fatalf("observed repository batch = %+v, value = %+v, context job = %+v", repositories, repositories.Items[0].Value, contextResult)
 	}
 	if repositories.Items[1].Value == nil || repositories.Items[1].Value.Metadata.Status != "missing" || repositories.Items[1].Value.Stars != nil {
 		t.Fatalf("placeholder exposed false metadata: %+v", repositories.Items[1])
@@ -215,6 +215,10 @@ func TestMCPStdioExactThreadSyncFlow(t *testing.T) {
 		map[string]any{"owner": "lab", "repo": "project", "kind": "issue", "number": 8},
 		map[string]any{"owner": "lab", "repo": "project", "kind": "pull_request", "number": 7},
 	}
+	contextJob := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncRepositoryContext, map[string]any{
+		"repositories": []any{map[string]any{"owner": "lab", "repo": "project"}},
+	})
+	waitMCPJob(ctx, t, session, contextJob.ID)
 	for range 2 {
 		job := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncThreads, map[string]any{
 			"selection": "threads", "threads": threads,

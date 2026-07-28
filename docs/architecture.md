@@ -88,21 +88,20 @@ The corpus separates source history from convenient current state:
 - **Facet coverage** records whether a facet fetch completed and the source
   revision it represents.
 
-An explicit repository sync also checks a fixed, bounded set of conventional
+An explicit repository-context sync checks a fixed, bounded set of conventional
 `CONTRIBUTING.md` and AI-policy paths. Found text is stored as an untrusted
 repository-level `contribution_guidance` facet with exact file provenance.
 Offline readers may classify only predefined policy statements; repository
 text cannot introduce instructions or grant capabilities.
 
 Thread-header sync never fetches pull-request detail facets per listed item.
-Metadata, fixed policy paths, exact reads, and list pages share one explicit
-request budget; batch sync plans conservative per-repository allocations in
-stable input order before starting workers. Generated network remediation
-commands always carry the applicable explicit page or request bounds.
-CLI sync and archive-refresh commands compute and print a conservative request
-ceiling before resolving the GitHub reader. The same normalized plan supplies
-the post-run `planned_requests` and `request_budget` fields, so preflight and
-execution cannot silently use different bounds.
+Repository metadata and fixed policy paths share one explicit context budget.
+Thread-header sync is a separate capability over an existing repository
+projection: pageable selections consume as many list requests as fit, while
+exact selections are admitted atomically. Batch allocation is stable by input
+order. Each executor consumes the immutable plan produced before network or
+corpus writes, and reports the same `planned_requests` and `request_budget`
+values afterward.
 
 The issue-list endpoint used by thread-header sync does not expose pull-request
 merge state. A header-only closed pull request therefore stores merge state as

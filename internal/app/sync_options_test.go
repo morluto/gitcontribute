@@ -13,6 +13,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/repositorycontext"
 )
 
 func TestSyncPassesStateAndSinceAndMarksPartialCoverage(t *testing.T) {
@@ -34,8 +35,9 @@ func TestSyncPassesStateAndSinceAndMarksPartialCoverage(t *testing.T) {
 
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
+	syncRepositoryContextForTest(t, svc, contracts.RepoRef{Owner: "octocat", Repo: "test"})
 	since := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	result, err := svc.sync(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{
+	result, err := svc.syncThreadHeaders(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{
 		State: "open", Since: since, MaxPages: 2,
 	})
 	if err != nil {
@@ -44,7 +46,7 @@ func TestSyncPassesStateAndSinceAndMarksPartialCoverage(t *testing.T) {
 	if result.Updated != 1 {
 		t.Fatalf("updated = %d, want 1", result.Updated)
 	}
-	if result.Requests != syncFixedRequestCost()+1 || result.PlannedRequests != syncFixedRequestCost()+2 || result.RequestBudget != defaultSyncMaxRequests || result.Capped {
+	if result.Requests != 1 || result.PlannedRequests != 2 || result.RequestBudget != defaultSyncMaxRequests || result.Capped {
 		t.Fatalf("request accounting = %+v", result)
 	}
 	if gotState != "open" || gotSince != since.Format(time.RFC3339) {
@@ -86,12 +88,74 @@ func TestSyncEnforcesExactItemLimit(t *testing.T) {
 
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
-	result, err := svc.sync(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{Kind: "pull_request", MaxItems: 1, MaxPages: 1})
+	repo := contracts.RepoRef{Owner: "octocat", Repo: "test"}
+	syncRepositoryContextForTest(t, svc, repo)
+	result, err := svc.syncThreadHeaders(context.Background(), repo, SyncOptions{Kind: "pull_request", MaxItems: 1, MaxPages: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if gotPerPage != "1" || result.Updated != 1 {
 		t.Fatalf("per_page=%q updated=%d, want 1 and 1", gotPerPage, result.Updated)
+	}
+}
+
+func TestArchiveSyncUsesBoundedBudgetForThreadPages(t *testing.T) {
+	t.Parallel()
+	base := &testServer{owner: "octocat", repo: "test"}
+	threadRequests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/repos/octocat/test/issues" {
+			threadRequests++
+			w.Header().Set("Content-Type", "application/json")
+			setAppRateHeaders(w.Header())
+			_ = writeAppJSON(w, base.issuePayload()[:1])
+			return
+		}
+		base.handler(w, r)
+	}))
+	defer srv.Close()
+
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+	repo := contracts.RepoRef{Owner: "octocat", Repo: "test"}
+	syncRepositoryContextForTest(t, svc, repo)
+	threadRequests = 0
+
+	result, err := svc.ArchiveSync(context.Background(), repo, contracts.ArchiveSyncOptions{
+		State: "all", MaxPages: 10, MaxRequests: 1,
+	})
+	if err != nil {
+		t.Fatalf("archive sync: %v", err)
+	}
+	if threadRequests != 1 || result.Requests != 1 || result.PlannedRequests != 1 || !result.Capped {
+		t.Fatalf("requests=%d result=%+v, want one capped thread request", threadRequests, result)
+	}
+}
+
+func TestRepositoryContextSyncDoesNotFetchThreads(t *testing.T) {
+	t.Parallel()
+	base := &testServer{owner: "octocat", repo: "test"}
+	threadRequests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v3/repos/octocat/test/issues" {
+			threadRequests++
+		}
+		base.handler(w, r)
+	}))
+	defer srv.Close()
+
+	svc := newTestService(t, srv)
+	defer func() { _ = svc.Close() }()
+	result, err := svc.RepositoryContextSync(
+		context.Background(),
+		contracts.RepoRef{Owner: "octocat", Repo: "test"},
+		0,
+	)
+	if err != nil {
+		t.Fatalf("repository context sync: %v", err)
+	}
+	if threadRequests != 0 || result.Requests != repositorycontext.RequestCost() {
+		t.Fatalf("thread requests=%d result=%+v", threadRequests, result)
 	}
 }
 
@@ -101,7 +165,7 @@ func TestPlanArchiveSyncReportsConservativeRequestCeiling(t *testing.T) {
 	defer func() { _ = svc.Close() }()
 	ctx := context.Background()
 	repo := contracts.RepoRef{Owner: "owner", Repo: "repo"}
-	fixed := syncFixedRequestCost()
+	fixed := 0
 
 	tests := []struct {
 		name              string
@@ -112,10 +176,10 @@ func TestPlanArchiveSyncReportsConservativeRequestCeiling(t *testing.T) {
 		wantExact         int
 		wantErrorContains string
 	}{
-		{name: "defaults use request budget", opts: contracts.ArchiveSyncOptions{}, wantThreads: defaultSyncMaxRequests - fixed, wantPlanned: defaultSyncMaxRequests, wantBudget: defaultSyncMaxRequests},
-		{name: "page ceiling", opts: contracts.ArchiveSyncOptions{MaxPages: 3, MaxRequests: 20}, wantThreads: 3, wantPlanned: fixed + 3, wantBudget: 20},
-		{name: "exact threads", opts: contracts.ArchiveSyncOptions{Numbers: []int{2, 1}, MaxPages: 5, MaxRequests: 12}, wantThreads: 2, wantPlanned: fixed + 2, wantBudget: 12, wantExact: 2},
-		{name: "exact selection exceeds budget", opts: contracts.ArchiveSyncOptions{Numbers: []int{1, 2}, MaxRequests: fixed + 1}, wantErrorContains: "exact thread selection requires at least"},
+		{name: "defaults use request budget", opts: contracts.ArchiveSyncOptions{}, wantThreads: defaultSyncMaxRequests, wantPlanned: defaultSyncMaxRequests, wantBudget: defaultSyncMaxRequests},
+		{name: "page ceiling", opts: contracts.ArchiveSyncOptions{MaxPages: 3, MaxRequests: 20}, wantThreads: 3, wantPlanned: 3, wantBudget: 20},
+		{name: "exact threads", opts: contracts.ArchiveSyncOptions{Numbers: []int{2, 1}, MaxPages: 5, MaxRequests: 12}, wantThreads: 2, wantPlanned: 2, wantBudget: 12, wantExact: 2},
+		{name: "exact selection exceeds budget", opts: contracts.ArchiveSyncOptions{Numbers: []int{1, 2}, MaxRequests: 1}, wantErrorContains: "exact thread selection requires at least"},
 	}
 
 	for _, test := range tests {
@@ -161,7 +225,9 @@ func TestSyncRefreshesExactNumbersDeterministically(t *testing.T) {
 
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
-	result, err := svc.sync(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{
+	repo := contracts.RepoRef{Owner: "octocat", Repo: "test"}
+	syncRepositoryContextForTest(t, svc, repo)
+	result, err := svc.ArchiveSync(context.Background(), repo, contracts.ArchiveSyncOptions{
 		Numbers: []int{2, 1, 2},
 	})
 	if err != nil {
@@ -170,7 +236,7 @@ func TestSyncRefreshesExactNumbersDeterministically(t *testing.T) {
 	if result.Updated != 2 {
 		t.Fatalf("updated = %d, want 2", result.Updated)
 	}
-	if result.Requests != syncFixedRequestCost()+2 || result.Capped {
+	if result.Requests != 2 || result.Capped {
 		t.Fatalf("request accounting = %+v", result)
 	}
 	if !reflect.DeepEqual(gotNumbers, []string{"1", "2"}) {
@@ -192,11 +258,13 @@ func TestSyncDoesNotHydratePullRequestDetails(t *testing.T) {
 
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
-	result, err := svc.sync(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{MaxRequests: syncFixedRequestCost() + 1})
+	repoRef := contracts.RepoRef{Owner: "octocat", Repo: "test"}
+	syncRepositoryContextForTest(t, svc, repoRef)
+	result, err := svc.ArchiveSync(context.Background(), repoRef, contracts.ArchiveSyncOptions{MaxRequests: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Updated != 2 || result.Requests != syncFixedRequestCost()+1 || prDetailRequests != 0 {
+	if result.Updated != 2 || result.Requests != 1 || prDetailRequests != 0 {
 		t.Fatalf("result=%+v PR detail requests=%d", result, prDetailRequests)
 	}
 	c, err := svc.openCorpus(context.Background())
@@ -229,7 +297,9 @@ func TestSyncPreservesPreviouslyObservedPullRequestMergeState(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
-	if _, err := svc.sync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{MaxRequests: syncFixedRequestCost() + 1}); err != nil {
+	repoRef := contracts.RepoRef{Owner: "octocat", Repo: "test"}
+	syncRepositoryContextForTest(t, svc, repoRef)
+	if _, err := svc.ArchiveSync(ctx, repoRef, contracts.ArchiveSyncOptions{MaxRequests: 1}); err != nil {
 		t.Fatal(err)
 	}
 	c, err := svc.openCorpus(ctx)
@@ -250,7 +320,7 @@ func TestSyncPreservesPreviouslyObservedPullRequestMergeState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := svc.sync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{MaxRequests: syncFixedRequestCost() + 1}); err != nil {
+	if _, err := svc.ArchiveSync(ctx, repoRef, contracts.ArchiveSyncOptions{MaxRequests: 1}); err != nil {
 		t.Fatal(err)
 	}
 	pr, err = c.GetThread(ctx, repo.ID, "pull_request", 2)
@@ -281,11 +351,13 @@ func TestSyncStopsBeforeRequestBudgetIsExceeded(t *testing.T) {
 
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
-	result, err := svc.sync(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{MaxPages: 5, MaxRequests: syncFixedRequestCost() + 1})
+	repo := contracts.RepoRef{Owner: "octocat", Repo: "test"}
+	syncRepositoryContextForTest(t, svc, repo)
+	result, err := svc.ArchiveSync(context.Background(), repo, contracts.ArchiveSyncOptions{MaxPages: 5, MaxRequests: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Requests != syncFixedRequestCost()+1 || !result.Capped || pageTwoRequests != 0 {
+	if result.Requests != 1 || !result.Capped || pageTwoRequests != 0 {
 		t.Fatalf("result=%+v page two requests=%d", result, pageTwoRequests)
 	}
 }
@@ -297,8 +369,8 @@ func TestSyncRejectsExactSelectionOverRequestBudgetBeforeIO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.sync(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{
-		Numbers: []int{1, 2}, MaxRequests: syncFixedRequestCost() + 1,
+	_, err = svc.syncThreadHeaders(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{
+		Numbers: []int{1, 2}, MaxRequests: 1,
 	})
 	if err == nil || !strings.Contains(err.Error(), "exact thread selection requires") {
 		t.Fatalf("budget error = %v", err)
@@ -312,7 +384,7 @@ func TestSyncRejectsUnboundedPageLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.sync(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{MaxPages: 1001})
+	_, err = svc.syncThreadHeaders(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{MaxPages: 1001})
 	if err == nil {
 		t.Fatal("expected max-pages validation error")
 	}
@@ -320,8 +392,8 @@ func TestSyncRejectsUnboundedPageLimit(t *testing.T) {
 
 func TestSyncRejectsInvalidRequestBudgets(t *testing.T) {
 	t.Parallel()
-	for _, maxRequests := range []int{-1, syncFixedRequestCost() - 1, maxSyncRequests + 1} {
-		if _, err := normalizeSyncOptions(SyncOptions{MaxRequests: maxRequests}); err == nil {
+	for _, maxRequests := range []int{-1, maxSyncRequests + 1} {
+		if _, err := normalizeThreadSyncOptions(SyncOptions{MaxRequests: maxRequests}); err == nil {
 			t.Fatalf("max requests %d unexpectedly accepted", maxRequests)
 		}
 	}
@@ -334,11 +406,18 @@ func TestSyncRejectsConflictingExactFilters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.sync(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{
+	_, err = svc.syncThreadHeaders(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{
 		State: "open", Numbers: []int{1},
 	})
 	if err == nil {
 		t.Fatal("expected conflicting filter validation error")
+	}
+}
+
+func syncRepositoryContextForTest(t *testing.T, svc *Service, repo contracts.RepoRef) {
+	t.Helper()
+	if _, err := svc.RepositoryContextSync(context.Background(), repo, 0); err != nil {
+		t.Fatalf("sync repository context: %v", err)
 	}
 }
 

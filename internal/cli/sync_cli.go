@@ -8,6 +8,42 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 )
 
+func (c *CLI) runArchiveContextSync(ctx context.Context, cmd *archiveContextSyncCmd) error {
+	service, err := c.archiveService()
+	if err != nil {
+		return err
+	}
+	repo, err := parseRepo(cmd.OwnerRepo)
+	if err != nil {
+		return err
+	}
+	plan, err := service.PlanRepositoryContextSync(ctx, repo, cmd.MaxRequests)
+	if err != nil {
+		return c.mapError(err)
+	}
+	if err := c.printRepositoryContextPlan(plan); err != nil {
+		return err
+	}
+	result, err := service.RepositoryContextSync(ctx, repo, cmd.MaxRequests)
+	if err != nil {
+		return c.mapError(err)
+	}
+	if cmd.JSON {
+		return writeJSON(c.stdout, result)
+	}
+	_, err = fmt.Fprintf(c.stdout, "Synced repository context for %s with %d requests.\n%s\n", result.Repo, result.Requests, result.Message)
+	return err
+}
+
+func (c *CLI) printRepositoryContextPlan(plan *contracts.SyncPlanResult) error {
+	if plan == nil {
+		return nil
+	}
+	_, err := fmt.Fprintf(c.stderr, "planned repository-context sync for %s: %d requests (budget %d)\n",
+		plan.Repo, plan.PlannedRequests, plan.RequestBudget)
+	return err
+}
+
 func (c *CLI) runArchiveSync(ctx context.Context, cmd *archiveSyncCmd) error {
 	service, err := c.archiveService()
 	if err != nil {

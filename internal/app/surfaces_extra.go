@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,7 +12,70 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/exporter"
+	"github.com/morluto/gitcontribute/internal/repositorycontext"
 )
+
+func (s *Service) RepositoryContextSync(ctx context.Context, repo contracts.RepoRef, maxRequests int) (_ *contracts.RepositoryContextResult, resultErr error) {
+	plan, err := planRepositoryContextSync(repo, maxRequests)
+	if err != nil {
+		return nil, err
+	}
+	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	reader, err := s.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
+	if err != nil {
+		return nil, err
+	}
+	run, err := c.StartRun(ctx, "sync_repository_context")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if resultErr != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = c.FailRun(cleanupCtx, run.ID, resultErr.Error())
+		}
+	}()
+	budget := newSyncRequestBudget(plan.RequestBudget)
+	if _, _, err := syncRepositoryHeader(ctx, c, reader, ref, run.ID, budget); err != nil {
+		return nil, err
+	}
+	stats, err := json.Marshal(map[string]int{"requests": budget.used, "request_budget": plan.RequestBudget})
+	if err != nil {
+		return nil, err
+	}
+	if err := c.FinishRun(ctx, run.ID, string(stats)); err != nil {
+		return nil, err
+	}
+	return &contracts.RepositoryContextResult{
+		Repo: repo, Requests: budget.used, PlannedRequests: plan.PlannedRequests, RequestBudget: plan.RequestBudget,
+		Message: "refreshed repository metadata and contribution guidance",
+	}, nil
+}
+
+func (s *Service) PlanRepositoryContextSync(_ context.Context, repo contracts.RepoRef, maxRequests int) (*contracts.SyncPlanResult, error) {
+	return planRepositoryContextSync(repo, maxRequests)
+}
+
+func planRepositoryContextSync(repo contracts.RepoRef, maxRequests int) (*contracts.SyncPlanResult, error) {
+	if err := (domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}).Validate(); err != nil {
+		return nil, err
+	}
+	required := repositorycontext.RequestCost()
+	if maxRequests == 0 {
+		maxRequests = required
+	}
+	if maxRequests < required || maxRequests > maxSyncRequests {
+		return nil, fmt.Errorf("max requests must be between %d and %d", required, maxSyncRequests)
+	}
+	return &contracts.SyncPlanResult{
+		Repo: repo, FixedRequests: required, PlannedRequests: required, RequestBudget: maxRequests,
+	}, nil
+}
 
 // ArchiveSync adapts CLI archive options to the application sync contract.
 func (s *Service) ArchiveSync(ctx context.Context, repo contracts.RepoRef, opts contracts.ArchiveSyncOptions) (*contracts.SyncResult, error) {
@@ -22,7 +86,7 @@ func (s *Service) ArchiveSync(ctx context.Context, repo contracts.RepoRef, opts 
 	if opts.Since > 0 {
 		syncOpts.Since = s.now().Add(-opts.Since)
 	}
-	return s.sync(ctx, repo, syncOpts)
+	return s.syncThreadHeaders(ctx, repo, syncOpts)
 }
 
 // PlanArchiveSync computes the conservative request ceiling before resolving a
@@ -39,12 +103,12 @@ func (s *Service) PlanArchiveSync(_ context.Context, repo contracts.RepoRef, opt
 	if opts.Since > 0 {
 		syncOpts.Since = s.now().Add(-opts.Since)
 	}
-	normalized, plan, err := planSyncOptions(syncOpts)
+	normalized, plan, err := planThreadSyncOptions(syncOpts)
 	if err != nil {
 		return nil, err
 	}
 	return &contracts.SyncPlanResult{
-		Repo: repo, FixedRequests: plan.fixedRequests, ThreadRequestCeiling: plan.threadRequestCeiling,
+		Repo: repo, FixedRequests: 0, ThreadRequestCeiling: plan.threadRequestCeiling,
 		PlannedRequests: plan.plannedRequests, RequestBudget: normalized.MaxRequests,
 		MaxPages: normalized.MaxPages, ExactThreads: len(normalized.Numbers),
 	}, nil

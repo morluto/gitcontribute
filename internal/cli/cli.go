@@ -1585,6 +1585,8 @@ func parseRepo(s string) (contracts.RepoRef, error) {
 
 func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) error {
 	switch command {
+	case "archive sync-context":
+		return c.runArchiveContextSync(ctx, &cmd.SyncContext)
 	case "archive sync":
 		return c.runArchiveSync(ctx, &cmd.Sync)
 	case "archive hydrate":

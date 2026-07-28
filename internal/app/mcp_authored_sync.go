@@ -51,10 +51,7 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpcontract.S
 	incomplete := false
 	requestCapped := false
 	for discovered < in.Limit {
-		// Keep enough budget for at least one repository refresh after the next
-		// discovery page. An accepted request must not spend its full budget on
-		// discovery and then make no synchronization progress.
-		if requests+1+syncFixedRequestCost() > in.MaxRequests {
+		if requests+1 > in.MaxRequests {
 			requestCapped, incomplete = true, true
 			break
 		}
@@ -87,7 +84,6 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpcontract.S
 	type authoredTask struct {
 		key, owner, repo string
 		issues           []github.Issue
-		maxRequests      int
 	}
 	tasks := make([]authoredTask, 0, len(order))
 	for _, key := range order {
@@ -95,20 +91,10 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpcontract.S
 		tasks = append(tasks, authoredTask{key: key, owner: owner, repo: repo, issues: append([]github.Issue(nil), byRepo[key]...)})
 	}
 	results := make([]map[string]any, len(tasks))
-	remainingRequests := in.MaxRequests - requests
 	plannedRequests := requests
-	runnable := make([]int, 0, len(tasks))
+	runnable := make([]int, len(tasks))
 	for index := range tasks {
-		required := syncFixedRequestCost()
-		if required > remainingRequests {
-			results[index] = syncRequestBudgetUnavailable(tasks[index].key, required, remainingRequests)
-			requestCapped = true
-			continue
-		}
-		tasks[index].maxRequests = required
-		remainingRequests -= required
-		plannedRequests += required
-		runnable = append(runnable, index)
+		runnable[index] = index
 	}
 	jobs := make(chan int)
 	var wg sync.WaitGroup
@@ -119,7 +105,7 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpcontract.S
 			defer wg.Done()
 			for index := range jobs {
 				current := tasks[index]
-				res, err := s.syncProvidedThreadHeaders(ctx, contracts.RepoRef{Owner: current.owner, Repo: current.repo}, current.issues, current.maxRequests)
+				res, err := s.syncProvidedThreadHeaders(ctx, contracts.RepoRef{Owner: current.owner, Repo: current.repo}, current.issues)
 				if err != nil {
 					status, reason, message, retry := githubBatchError(err)
 					results[index] = map[string]any{"key": current.key, "status": status, "reason": reason, "message": message, "retry_after_ms": retry}

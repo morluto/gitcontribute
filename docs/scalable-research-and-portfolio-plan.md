@@ -41,8 +41,8 @@ operate on a bounded collection. Atomic must not be confused with scalar.
 
 Examples:
 
-- `github.sync_repository_metadata` is atomic even when it accepts 50
-  repositories, because it retrieves one metadata facet.
+- `github.sync_repository_context` allocates complete repository units because
+  metadata and the fixed guidance-path set share one bounded context plan.
 - `github.sync_pull_request_status` is atomic even when it accepts 50 pull
   requests, because it retrieves one coherent status snapshot for each.
 - `github.sync_everything_and_recommend` would not be atomic because it mixes
@@ -253,7 +253,7 @@ population-capped counts. Callers raise the limit or narrow the repository set.
 | --- | --- | ---: | --- |
 | `github.get_authenticated_identity` | Resolve the authenticated GitHub login and stable ID | 1 identity | Synchronous |
 | `github.search_repositories` | Run one bounded GitHub repository search and persist metadata observations | 100 repositories | Synchronous |
-| `github.sync_repository_metadata` | Fetch metadata only for explicit repositories | 100 repositories | Job |
+| `github.sync_repository_context` | Fetch metadata and contribution guidance for explicit repositories | 100 repositories | Job |
 | `github.sync_threads` | Fetch compact thread projections by repository filters or exact references | 50 repositories or 100 threads | Job |
 | `github.hydrate_threads` | Fetch selected child facets for exact cross-repository thread references | 100 threads | Job |
 | `github.sync_authored_pull_requests` | Discover and persist pull requests authored by the authenticated user | 500 pull requests | Job |
@@ -530,7 +530,7 @@ For an explicit but unsynchronized identity:
   "status": "unavailable",
   "reason": "not_indexed",
   "message": "repository is not present in the local corpus",
-  "next_action": "Call github.sync_repository_metadata for this repository."
+  "next_action": "Call github.sync_repository_context for this repository."
 }
 ```
 
@@ -765,7 +765,7 @@ Proposed initialize instructions:
 Use GitContribute for durable, source-backed research across GitHub repositories,
 issues, pull requests, code snapshots, contribution opportunities, and the
 user's pull-request portfolio. Prefer corpus tools for offline reads. Use
-github.sync_repository_metadata for stars and repository facts,
+github.sync_repository_context for stars, repository facts, and guidance,
 github.sync_threads for current issue/PR headers, and hydrate only selected
 facets after ranking. Use research.query_deepwiki for architecture, contribution,
 testing, and subsystem context across public repositories; do not treat it as
@@ -783,7 +783,7 @@ mutates GitHub.
 
 | User intent | Preferred tool | Nearest alternative | Why GitContribute wins | Do not use when | Next step |
 | --- | --- | --- | --- | --- | --- |
-| Get stars and basic facts for many repositories | `github.sync_repository_metadata` | `gh api`, web search | Bounded batch plus durable coverage | A one-off fact should not be persisted | `corpus.get_repositories` |
+| Get repository facts and contribution guidance | `github.sync_repository_context` | `gh api`, web search | Bounded batch plus durable coverage | A one-off fact should not be persisted | `corpus.get_repositories` |
 | Understand architecture across candidate repositories | `research.query_deepwiki` | Clone and inspect, generic web | Existing indexed repository knowledge, up to 10 repos | Live issue/PR state is required | Rank repository fit or inspect GitHub |
 | Find open contribution candidates | `corpus.rank_threads` | Generic GitHub label search | Explainable ranking with stored coverage and collision evidence | Corpus is missing or stale | `github.sync_threads` then retry |
 | Find how similar work was fixed before | `corpus.find_precedents` | Generic text search | Resolution-aware historical retrieval | The source issue is not yet stored | Sync the source and relevant history |
@@ -804,7 +804,7 @@ removed rather than retained as aliases.
 | --- | --- |
 | `corpus.get_repository` | `corpus.get_repositories` with one-item input |
 | `corpus.get_thread` | `corpus.get_threads` with one-item input |
-| `github.sync_repository` | `github.sync_repository_metadata` plus `github.sync_threads` |
+| `github.sync_repository` | `github.sync_repository_context` plus `github.sync_threads` |
 | `github.hydrate_thread` | `github.hydrate_threads` |
 | `github.hydrate_repository` | `github.hydrate_threads` with cross-repository exact refs |
 | `github.start_crawl` | CLI/TUI recurring-source operation or a repaired internal source runner; remove from normal MCP discovery |
@@ -851,7 +851,7 @@ multi-job polling takes one tool call.
 ### Phase 2: Bounded GitHub ingestion
 
 - Implement `github.get_authenticated_identity`.
-- Implement batch repository metadata synchronization.
+- Implement batch repository-context synchronization.
 - Implement discriminated batch thread synchronization.
 - Implement cross-repository facet hydration.
 - Use bounded concurrency and per-item outcomes.
@@ -984,7 +984,7 @@ Initial targets for the audited scenario:
 - Fetch metadata for 12 explicit repositories in at most two model-visible tool
   rounds: submit and, if asynchronous, one batch status read.
 - No scalar repository reads are required to obtain the batch result.
-- No issue pages are fetched for a metadata-only request.
+- No issue pages are fetched for a repository-context request.
 - Compare repository knowledge for up to 10 public repositories with one
   DeepWiki call.
 - Refresh status for 25 authored PRs in one job and one batch result read.
@@ -1041,7 +1041,7 @@ Non-goals:
 The first shippable slice should prove the architecture with one end-to-end
 flow:
 
-1. `github.sync_repository_metadata` for up to 100 repositories.
+1. `github.sync_repository_context` for up to 100 repositories.
 2. `corpus.get_repositories` with typed nullable metadata and coverage.
 3. Vectorized `jobs.get` with per-item progress.
 4. `research.query_deepwiki` with the three public read actions.
