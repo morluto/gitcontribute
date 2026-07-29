@@ -74,6 +74,17 @@ func activationStage(report *contracts.UpgradeReport, opts contracts.UpgradeOpti
 		report.RestartClients = clients
 		return stage
 	}
+	if clients := staleRegistrationClients(report); len(clients) > 0 {
+		stage.Status = "repair_required"
+		if opts.Yes {
+			stage.Status = "repair_pending"
+			stage.Message = "repair stale MCP registrations, then restart the configured clients"
+		} else {
+			stage.Message = "stale MCP registrations require repair; pass --yes to repair them"
+		}
+		report.Action = stage.Message
+		return stage
+	}
 	switch report.Context {
 	case "npx":
 		stage.Status = "not_required"
@@ -128,13 +139,43 @@ func activationStage(report *contracts.UpgradeReport, opts contracts.UpgradeOpti
 
 func outdatedPrivateRuntimeClients(report *contracts.UpgradeReport) []string {
 	var clients []string
+	target := report.Latest
+	if target == "" {
+		target = report.Current
+	}
 	for _, client := range report.ConfiguredClients {
-		if client.Status != "outdated" || strings.Contains(filepath.ToSlash(client.Path), "/node_modules/gitcontribute/") {
+		privateRuntime := !strings.Contains(filepath.ToSlash(client.Path), "/node_modules/gitcontribute/")
+		outdated := client.Status == "outdated"
+		staleAndOutdated := client.Status == "stale" &&
+			(compareVersions(client.Version, target) == versionUpgrade || compareVersions(client.Version, target) == versionPrerelease)
+		if !privateRuntime || (!outdated && !staleAndOutdated) {
 			continue
 		}
 		clients = append(clients, client.Name)
 	}
 	return clients
+}
+
+func staleRegistrationClients(report *contracts.UpgradeReport) []string {
+	var clients []string
+	for _, client := range report.ConfiguredClients {
+		if client.Status == "stale" {
+			clients = append(clients, client.Name)
+		}
+	}
+	return clients
+}
+
+func registrationRepairAllowed(report *contracts.UpgradeReport) bool {
+	switch stageStatus(report, "corpus-schema") {
+	case "migration_required", "newer", "incompatible", "failed":
+		return false
+	}
+	switch stageStatus(report, "activation") {
+	case "failed", "rollback_failed", "target_runtime_unavailable", "target_validation_failed":
+		return false
+	}
+	return true
 }
 
 func registeredClients(report *contracts.UpgradeReport) []string {

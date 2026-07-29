@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -286,6 +287,46 @@ func TestDoctorInspectsEffectiveRuntimeConfig(t *testing.T) {
 	if svc.databasePath() != envDB {
 		t.Fatalf("doctor did not apply env override: got %q, want %q", svc.databasePath(), envDB)
 	}
+}
+
+func TestDoctorRejectsStaleMCPRegistration(t *testing.T) {
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home})
+	svc, err := New(paths, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	if _, err := svc.Init(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	codexDir := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(codexDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	command := filepath.Join(home, "bin", "gitcontribute")
+	configText := "[mcp_servers.gitcontribute]\ncommand = " + fmt.Sprintf("%q", command) + "\nargs = [\"mcp\"]\n"
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(configText), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.Doctor(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Healthy {
+		t.Fatalf("stale registration reported healthy: %+v", result)
+	}
+	for _, check := range result.Checks {
+		if check.Name == "mcp_codex" {
+			if !check.Required || check.Status != "error" || !strings.Contains(check.Message, "gitcontribute setup") {
+				t.Fatalf("mcp check = %+v", check)
+			}
+			return
+		}
+	}
+	t.Fatalf("mcp_codex check missing: %+v", result.Checks)
 }
 
 func TestConfigureDoesNotPersistEnvOverrides(t *testing.T) {

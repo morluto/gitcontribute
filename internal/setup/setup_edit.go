@@ -30,7 +30,21 @@ func ResolveLauncher(opts Options) (Launcher, error) {
 	if err != nil {
 		return Launcher{}, fmt.Errorf("resolve executable path: %w", err)
 	}
-	return Launcher{Command: executable, Args: []string{"mcp", "serve", "--transport=stdio"}}, nil
+	return CanonicalLauncher(executable)
+}
+
+// CanonicalLauncher returns the current MCP launcher for an already resolved
+// durable executable path.
+func CanonicalLauncher(executable string) (Launcher, error) {
+	launcher := Launcher{Command: executable, Args: canonicalMCPArgs()}
+	if err := ValidateLauncher(launcher); err != nil {
+		return Launcher{}, err
+	}
+	return launcher, nil
+}
+
+func canonicalMCPArgs() []string {
+	return []string{"mcp", "serve", "--transport=stdio"}
 }
 
 // ResolveNPMVersion returns a registry-safe package version for CLI installation

@@ -238,6 +238,71 @@ func (s *Service) activateConfiguredClients(ctx context.Context, report *contrac
 	setStage(report, contracts.UpgradeStage{Name: "rollback", Status: "available", Message: report.Rollback})
 }
 
+func (s *Service) repairStaleRegistrations(ctx context.Context, report *contracts.UpgradeReport) {
+	clients := staleRegistrationClients(report)
+	if len(clients) == 0 {
+		return
+	}
+	setupClients := make([]clientsetup.Client, 0, len(clients))
+	for _, name := range clients {
+		setupClients = append(setupClients, clientsetup.Client(name))
+	}
+	if _, err := clientsetup.RepairExisting(ctx, s.paths.HomeDir(), setupClients); err != nil {
+		stage := upgradeStage(report, "activation")
+		stage.Status = "failed"
+		stage.Message = fmt.Sprintf("repair stale MCP registrations: %s; prior registrations were preserved", err)
+		setStage(report, stage)
+		report.Status = "registration repair failed"
+		report.Action = "resolve the registration error and run upgrade --yes again"
+		return
+	}
+
+	for _, client := range setupClients {
+		configured, err := inspectConfiguredClient(s.paths.HomeDir(), client, report.Current, report.Latest)
+		if err != nil || configured.Status == "stale" || configured.Status == "failed" || configured.Status == "not_configured" {
+			stage := upgradeStage(report, "activation")
+			stage.Status = "failed"
+			if err != nil {
+				stage.Message = fmt.Sprintf("verify repaired %s registration: %s", client, err)
+			} else {
+				stage.Message = fmt.Sprintf("verify repaired %s registration: status %q", client, configured.Status)
+			}
+			setStage(report, stage)
+			report.Status = "registration repair failed"
+			report.Action = "inspect configured client registrations before retrying upgrade"
+			return
+		}
+		for i := range report.ConfiguredClients {
+			if report.ConfiguredClients[i].Name == string(client) {
+				report.ConfiguredClients[i] = configured
+			}
+		}
+	}
+
+	setStage(report, contracts.UpgradeStage{
+		Name:    "configured-runtime",
+		Status:  "repaired",
+		Message: fmt.Sprintf("%d stale client registration(s) now use the canonical MCP launcher", len(clients)),
+	})
+	setStage(report, contracts.UpgradeStage{
+		Name:    "activation",
+		Status:  "restart_required",
+		Message: "registration repair is verified; restart the configured clients to replace their running MCP processes",
+	})
+	report.Status = "restart required"
+	report.Action = "restart the configured clients to use the repaired MCP registrations"
+	seen := make(map[string]bool, len(report.RestartClients)+len(clients))
+	for _, name := range report.RestartClients {
+		seen[name] = true
+	}
+	for _, name := range clients {
+		if !seen[name] {
+			report.RestartClients = append(report.RestartClients, name)
+			seen[name] = true
+		}
+	}
+}
+
 func readRuntimeContract(ctx context.Context, path string) (*contracts.RuntimeContractResult, error) {
 	out, err := runtimeContractCommand(ctx, path)
 	if err != nil {

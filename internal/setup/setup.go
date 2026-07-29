@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/gofrs/flock"
@@ -66,6 +67,25 @@ const (
 type Launcher struct {
 	Command string   `json:"command"`
 	Args    []string `json:"args"`
+}
+
+// RegistrationStatus describes whether an existing GitContribute MCP entry
+// satisfies the current launcher contract.
+type RegistrationStatus string
+
+const (
+	RegistrationAbsent  RegistrationStatus = "absent"
+	RegistrationCurrent RegistrationStatus = "current"
+	RegistrationStale   RegistrationStatus = "stale"
+)
+
+// RegistrationInspection is a read-only, client-neutral view of one MCP entry.
+type RegistrationInspection struct {
+	Client   Client             `json:"client"`
+	Path     string             `json:"path"`
+	Status   RegistrationStatus `json:"status"`
+	Launcher Launcher           `json:"launcher,omitempty"`
+	Message  string             `json:"message,omitempty"`
 }
 
 // Options controls coding-client MCP registration.
@@ -130,6 +150,64 @@ func CheckRegistration(client Client, home string) (bool, string, error) {
 	}
 	present, err := adapter.check(data)
 	return present, path, err
+}
+
+// InspectRegistration parses and validates the complete GitContribute launcher
+// without changing client-owned configuration.
+func InspectRegistration(client Client, home string) (RegistrationInspection, error) {
+	adapter, err := clientAdapterFor(client)
+	if err != nil {
+		return RegistrationInspection{}, err
+	}
+	inspection := RegistrationInspection{Client: client, Path: adapter.path(home), Status: RegistrationAbsent}
+	data, err := os.ReadFile(inspection.Path)
+	if errors.Is(err, os.ErrNotExist) {
+		return inspection, nil
+	}
+	if err != nil {
+		return inspection, err
+	}
+	present, err := adapter.check(data)
+	if err != nil {
+		return inspection, err
+	}
+	if !present {
+		return inspection, nil
+	}
+	inspection.Launcher, err = adapter.read(data)
+	if err != nil {
+		return inspection, err
+	}
+	if message := launcherValidationMessage(inspection.Launcher); message != "" {
+		inspection.Status = RegistrationStale
+		inspection.Message = message
+		return inspection, nil
+	}
+	inspection.Status = RegistrationCurrent
+	return inspection, nil
+}
+
+func launcherValidationMessage(launcher Launcher) string {
+	if err := ValidateLauncher(launcher); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+// ValidateLauncher checks the durable command shape accepted by the current
+// GitContribute MCP server. It does not execute the command.
+func ValidateLauncher(launcher Launcher) error {
+	if strings.TrimSpace(launcher.Command) == "" {
+		return errors.New("launcher command is missing")
+	}
+	if !filepath.IsAbs(launcher.Command) {
+		return fmt.Errorf("launcher command %q is not absolute", launcher.Command)
+	}
+	want := canonicalMCPArgs()
+	if !slices.Equal(launcher.Args, want) {
+		return fmt.Errorf("launcher arguments are %q; expected %q", launcher.Args, want)
+	}
+	return nil
 }
 
 // Run validates every selected client, resolves one shared launcher, and then
@@ -203,6 +281,52 @@ func ActivateExistingAndVerify(ctx context.Context, opts Options, verify func() 
 	return activateExisting(ctx, opts, func(ctx context.Context, _ int) error { return ctx.Err() }, verify)
 }
 
+// RepairExisting rewrites existing registrations to the canonical MCP
+// arguments while preserving each registration's durable executable path. The
+// selected registrations are repaired as one rollback-safe operation.
+func RepairExisting(ctx context.Context, home string, clients []Client) (_ Report, returnErr error) {
+	if home == "" {
+		var err error
+		home, err = os.UserHomeDir()
+		if err != nil {
+			return Report{}, fmt.Errorf("resolve home directory: %w", err)
+		}
+	}
+	lease, err := acquireSetupLease(home)
+	if err != nil {
+		return Report{}, err
+	}
+	defer func() { returnErr = errors.Join(returnErr, lease.Unlock()) }()
+
+	selected, err := selectedClients(Options{Clients: clients})
+	if err != nil {
+		return Report{}, err
+	}
+	launchers := make(map[Client]Launcher, len(selected))
+	for _, client := range selected {
+		inspection, err := InspectRegistration(client, home)
+		if err != nil {
+			return Report{}, fmt.Errorf("inspect %s registration: %w", client, err)
+		}
+		if inspection.Status == RegistrationAbsent {
+			return Report{}, fmt.Errorf("%s registration changed before repair", client)
+		}
+		launcher, err := CanonicalLauncher(inspection.Launcher.Command)
+		if err != nil {
+			return Report{}, fmt.Errorf("resolve %s launcher repair: %w", client, err)
+		}
+		launchers[client] = launcher
+	}
+	return activateExistingLaunchers(
+		ctx,
+		home,
+		selected,
+		launchers,
+		func(ctx context.Context, _ int) error { return ctx.Err() },
+		nil,
+	)
+}
+
 func acquireSetupLease(home string) (*flock.Flock, error) {
 	lease := flock.New(filepath.Join(home, ".gitcontribute-setup.lock"))
 	acquired, err := lease.TryLock()
@@ -222,6 +346,7 @@ type registrationSnapshot struct {
 	mode        os.FileMode
 	codexBlock  string
 	claudeEntry any
+	activated   Launcher
 	changed     bool
 }
 
@@ -239,25 +364,42 @@ func activateExisting(ctx context.Context, opts Options, checkpoint func(context
 	if err != nil {
 		return Report{}, err
 	}
+	launchers := make(map[Client]Launcher, len(clients))
+	for _, client := range clients {
+		launchers[client] = launcher
+	}
+	return activateExistingLaunchers(ctx, opts.Home, clients, launchers, checkpoint, verify)
+}
 
-	snapshots, err := snapshotRegistrations(clients, opts.Home)
+func activateExistingLaunchers(
+	ctx context.Context,
+	home string,
+	clients []Client,
+	launchers map[Client]Launcher,
+	checkpoint func(context.Context, int) error,
+	verify func() error,
+) (Report, error) {
+	snapshots, err := snapshotRegistrations(clients, home)
 	if err != nil {
 		return Report{}, err
 	}
 
-	report := Report{Operation: Configure, Launcher: launcher}
+	report := Report{Operation: Configure}
+	if len(clients) > 0 {
+		report.Launcher = launchers[clients[0]]
+	}
 	rollback := func(cause error) (Report, error) {
-		rollbackErr := restoreRegistrationSnapshots(snapshots, launcher)
+		rollbackErr := restoreRegistrationSnapshots(snapshots)
 		if rollbackErr != nil {
 			return report, &ActivationRollbackError{Cause: cause, Rollback: rollbackErr}
 		}
 		return report, cause
 	}
 
-	if err := activateRegistrations(ctx, opts.Home, clients, launcher, checkpoint, &report, snapshots); err != nil {
+	if err := activateRegistrations(ctx, home, clients, launchers, checkpoint, &report, snapshots); err != nil {
 		return rollback(err)
 	}
-	if err := verifyRegistrations(opts.Home, clients, launcher, verify); err != nil {
+	if err := verifyRegistrations(home, clients, launchers, verify); err != nil {
 		return rollback(err)
 	}
 	return report, nil
@@ -294,7 +436,7 @@ func snapshotRegistrations(clients []Client, home string) ([]registrationSnapsho
 	return snapshots, nil
 }
 
-func restoreRegistrationSnapshots(snapshots []registrationSnapshot, activated Launcher) error {
+func restoreRegistrationSnapshots(snapshots []registrationSnapshot) error {
 	var restoreErrs []error
 	for i := len(snapshots) - 1; i >= 0; i-- {
 		snapshot := snapshots[i]
@@ -310,7 +452,7 @@ func restoreRegistrationSnapshots(snapshots []registrationSnapshot, activated La
 			restoreErrs = append(restoreErrs, fmt.Errorf("preserve concurrently changed registration %s", snapshot.path))
 			continue
 		}
-		restoreErr := snapshot.adapter.restore(snapshot, activated)
+		restoreErr := snapshot.adapter.restore(snapshot, snapshot.activated)
 		if restoreErr != nil {
 			restoreErrs = append(restoreErrs, fmt.Errorf("restore %s: %w", snapshot.path, restoreErr))
 			continue
@@ -353,16 +495,21 @@ func restoreClaudeRegistration(snapshot registrationSnapshot, activated Launcher
 	return writeJSON(snapshot.path, root)
 }
 
-func activateRegistrations(ctx context.Context, home string, clients []Client, launcher Launcher, checkpoint func(context.Context, int) error, report *Report, snapshots []registrationSnapshot) error {
+func activateRegistrations(ctx context.Context, home string, clients []Client, launchers map[Client]Launcher, checkpoint func(context.Context, int) error, report *Report, snapshots []registrationSnapshot) error {
 	for i, client := range clients {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		launcher, ok := launchers[client]
+		if !ok {
+			return fmt.Errorf("activate %s registration: launcher is missing", client)
 		}
 		result := configureClient(Configure, client, home, launcher, false)
 		report.Results = append(report.Results, result)
 		if result.Error != "" {
 			return fmt.Errorf("activate %s registration: %s", client, result.Error)
 		}
+		snapshots[i].activated = launcher
 		snapshots[i].changed = true
 		if err := checkpoint(ctx, i); err != nil {
 			return err
@@ -371,8 +518,12 @@ func activateRegistrations(ctx context.Context, home string, clients []Client, l
 	return nil
 }
 
-func verifyRegistrations(home string, clients []Client, launcher Launcher, verify func() error) error {
+func verifyRegistrations(home string, clients []Client, launchers map[Client]Launcher, verify func() error) error {
 	for _, client := range clients {
+		launcher, ok := launchers[client]
+		if !ok {
+			return fmt.Errorf("verify %s registration: launcher is missing", client)
+		}
 		result := configureClient(Configure, client, home, launcher, true)
 		if result.Error != "" || result.Status != "already configured" {
 			return fmt.Errorf("verify %s registration: status %q: %s", client, result.Status, result.Error)
