@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/contribution"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/investigation"
+	"github.com/morluto/gitcontribute/internal/manifest"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/research"
 )
@@ -324,34 +326,6 @@ func (r *MCPReader) AdoptWorkspace(ctx context.Context, in mcpcontract.AdoptWork
 }
 
 // RunValidation submits a durable validation run.
-func (r *MCPReader) RunValidation(ctx context.Context, in mcpcontract.RunValidationInput) (mcpcontract.JobReference, error) {
-	runKind := evidence.RunKind(in.Kind)
-	if runKind != evidence.RunKindBase && runKind != evidence.RunKindCandidate {
-		return mcpcontract.JobReference{}, errors.New("kind must be base or candidate")
-	}
-	if !in.Execute {
-		return mcpcontract.JobReference{}, errors.New("execute must be true to authorize host command execution")
-	}
-	opts := contracts.RunValidationOptions{Kind: in.Kind, Execute: true}
-	id, err := r.submitJob(ctx, "run_validation", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
-		if err := report("validation", jobProgressCounts(0, 1)); err != nil {
-			return nil, err
-		}
-		res, err := r.application().RunValidation(ctx, in.ID, opts)
-		if err != nil {
-			return nil, err
-		}
-		if err := report("validation", jobProgressCounts(1, 1)); err != nil {
-			return nil, err
-		}
-		return res, nil
-	})
-	if err != nil {
-		return mcpcontract.JobReference{}, err
-	}
-	return queuedJobReference(id, "run_validation", "validation run started"), nil
-}
-
 // StartInvestigation creates a new investigation workspace.
 func (r *MCPReader) StartInvestigation(ctx context.Context, in mcpcontract.StartInvestigationInput) (mcpcontract.InvestigationOutput, error) {
 	if in.Number > 0 {
@@ -749,6 +723,22 @@ func draftResultToMCP(d *contracts.DraftResult) mcpcontract.DraftOutput {
 	return out
 }
 
+func draftArtifactToMCP(d *contribution.DraftArtifact) mcpcontract.DraftOutput {
+	out := mcpcontract.DraftOutput{
+		ID: d.ID, Revision: d.Revision, OpportunityID: d.OpportunityID, Kind: d.Kind,
+		Repository: d.Repository, Title: d.Title, Body: d.Body,
+		TitleBytes: d.TitleBytes, BodyBytes: d.BodyBytes, TitleSHA256: d.TitleSHA256, BodySHA256: d.BodySHA256,
+		EvidenceIDs: append([]string(nil), d.EvidenceIDs...), RenderedAt: d.RenderedAt.UTC().Format(time.RFC3339Nano),
+		ManifestID: d.ManifestID,
+	}
+	for _, warning := range d.Warnings {
+		out.Warnings = append(out.Warnings, mcpcontract.DraftDiagnosticOutput{
+			Code: warning.Code, Severity: warning.Severity, Message: warning.Message, ByteOffset: warning.ByteOffset,
+		})
+	}
+	return out
+}
+
 // ExportManifest assembles a bounded local contribution evidence statement.
 func (r *MCPReader) ExportManifest(ctx context.Context, in mcpcontract.ExportManifestInput) (mcpcontract.ManifestOutput, error) {
 	opts := ManifestOptions{WorkspaceID: strings.TrimSpace(in.WorkspaceID)}
@@ -759,8 +749,12 @@ func (r *MCPReader) ExportManifest(ctx context.Context, in mcpcontract.ExportMan
 	if err != nil {
 		return mcpcontract.ManifestOutput{}, err
 	}
+	return manifestStatementToMCP(statement), nil
+}
+
+func manifestStatementToMCP(statement *manifest.Statement) mcpcontract.ManifestOutput {
 	return mcpcontract.ManifestOutput{
 		ManifestID: statement.Predicate.ManifestID, ContentSHA256: statement.Predicate.ContentSHA256,
 		SchemaVersion: statement.Predicate.SchemaVersion, Status: statement.Predicate.Status, Statement: *statement,
-	}, nil
+	}
 }

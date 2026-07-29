@@ -15,7 +15,7 @@ github.sync_repository_context -> jobs.get -> corpus.get_repositories
 research.query_deepwiki
 github.sync_threads -> jobs.get -> corpus.rank_threads
 github.hydrate_threads -> jobs.get -> corpus.get_threads
-corpus.find_precedents -> workflow.find_competing_work
+corpus.find_precedents -> workflow.find_related_work
 workflow.prepare_issue_set
 ```
 

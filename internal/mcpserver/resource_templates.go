@@ -28,6 +28,24 @@ func (s *Server) registerResourceTemplates() {
 			name:     "Fix-pattern report", description: "Typed repository contribution-pattern report produced by a durable workflow",
 		})
 	}
+	if _, ok := s.reader.(concernResourceReader); ok {
+		templates = append(templates, resourceTemplateDefinition{
+			template: "gitcontribute://concern/{id}",
+			name:     "Concern", description: "Persisted local repository concern",
+		})
+	}
+	if _, ok := s.reader.(draftResourceReader); ok {
+		templates = append(templates, resourceTemplateDefinition{
+			template: "gitcontribute://draft/{id}/{revision}",
+			name:     "Draft", description: "Immutable persisted contribution-draft revision",
+		})
+	}
+	if _, ok := s.reader.(manifestResourceReader); ok {
+		templates = append(templates, resourceTemplateDefinition{
+			template: "gitcontribute://manifest/{id}",
+			name:     "Manifest", description: "Persisted contribution evidence manifest",
+		})
+	}
 	addResourceTemplates(s, templates)
 }
 

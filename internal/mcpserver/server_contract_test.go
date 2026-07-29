@@ -82,6 +82,81 @@ func TestDurableToolResultsIncludeSDKResourceLinks(t *testing.T) {
 	}
 }
 
+func TestDurableProducerReferencesRoundTripThroughResources(t *testing.T) {
+	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	defer closeSessions()
+
+	tests := []struct {
+		name string
+		tool string
+		args map[string]any
+		uri  string
+		kind string
+	}{
+		{
+			name: "record hypothesis returns parent investigation",
+			tool: mcpcontract.ToolRecordHypothesis,
+			args: map[string]any{"investigation_id": "inv-1", "title": "leak", "description": "memory leak", "category": "bug"},
+			uri:  "gitcontribute://investigation/inv-1",
+			kind: "investigation",
+		},
+		{
+			name: "create concern",
+			tool: ToolCreateConcern,
+			args: map[string]any{"owner": "acme", "repo": "rocket", "commit_sha": "abc123", "title": "stall", "problem_statement": "requests stall", "confidence": 0.5},
+			uri:  "gitcontribute://concern/concern-1",
+			kind: "concern",
+		},
+		{
+			name: "prepare immutable draft",
+			tool: mcpcontract.ToolPrepareContribution,
+			args: map[string]any{"opportunity_id": "opp-1", "kind": "issue"},
+			uri:  "gitcontribute://draft/draft-1/1",
+			kind: "draft",
+		},
+		{
+			name: "export manifest",
+			tool: mcpcontract.ToolExportManifest,
+			args: map[string]any{"opportunity_id": "opp-1"},
+			uri:  "gitcontribute://manifest/sha256%3Atest",
+			kind: "manifest",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.tool, Arguments: tt.args})
+			if err != nil || result.IsError {
+				t.Fatalf("call %s: err=%v result=%+v", tt.tool, err, result)
+			}
+			payload, err := json.Marshal(result.StructuredContent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var ref mcpcontract.DurableArtifactReference
+			if err := json.Unmarshal(payload, &ref); err != nil {
+				t.Fatal(err)
+			}
+			if ref.URI != tt.uri || ref.Kind != tt.kind || ref.ID == "" {
+				t.Fatalf("reference = %+v, want kind=%q uri=%q", ref, tt.kind, tt.uri)
+			}
+			if len(result.Content) != 2 {
+				t.Fatalf("content = %+v", result.Content)
+			}
+			link, ok := result.Content[1].(*mcp.ResourceLink)
+			if !ok || link.URI != tt.uri {
+				t.Fatalf("resource link = %#v", result.Content[1])
+			}
+			resource, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: tt.uri})
+			if err != nil {
+				t.Fatalf("read %s: %v", tt.uri, err)
+			}
+			if len(resource.Contents) != 1 || resource.Contents[0].Text == "" {
+				t.Fatalf("resource %s = %+v", tt.uri, resource)
+			}
+		})
+	}
+}
+
 func TestStartInvestigationReturnsCompactResourceReference(t *testing.T) {
 	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
 	defer closeSessions()

@@ -9,6 +9,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 func TestConcernWorkflowRemainsLocalAndPromotes(t *testing.T) {
@@ -27,6 +28,13 @@ func TestConcernWorkflowRemainsLocalAndPromotes(t *testing.T) {
 	}
 	if created.Status != "untriaged" || created.Freshness != "unknown" {
 		t.Fatalf("unexpected created concern: %+v", created)
+	}
+	resource, err := (&MCPReader{svc}).Concern(ctx, mcpcontract.ConcernInput{ID: created.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resource.ID != created.ID || resource.Title != created.Title || resource.ProblemStatement != created.ProblemStatement {
+		t.Fatalf("concern resource = %+v", resource)
 	}
 	empty := ""
 	updated, err := svc.UpdateConcern(ctx, created.ID, contracts.ConcernUpdateOptions{Notes: &empty})

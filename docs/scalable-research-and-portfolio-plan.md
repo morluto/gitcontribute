@@ -434,17 +434,17 @@ from one turn rather than emitting one `jobs.get` call per job.
 | --- | --- | --- |
 | `workflow.start_investigation` | Create an investigation from a stored repository or thread revision | Local write |
 | `workflow.record_hypothesis` | Record a structured, source-referenced hypothesis | Local write |
-| `workflow.find_duplicates` | Find issue/PR duplicates for a hypothesis or opportunity | None |
-| `workflow.find_competing_work` | Find semantically or explicitly overlapping open pull requests | None |
+| `workflow.find_related_work` | Find issue/PR duplicates, overlapping open pull requests, or both | None |
 | `workflow.promote_opportunity` | Promote a hypothesis into a scoped opportunity | Local write |
 | `workflow.link_pull_request` | Link an observed authored PR to an opportunity and optional workspace | Local write |
 | `validation.define` | Define a shell-free validation command | Local write |
 | `validation.run` | Execute an explicitly authorized validation | Process execution and local write |
 | `workflow.prepare_contribution` | Render and persist a local contribution draft | Local write |
 
-Rename `workflow.check_collisions` to `workflow.find_competing_work` so agents do
-not mistake it for Git merge-conflict detection. Git conflict detection belongs
-only to `workspace.check_merge_conflicts`.
+Expose duplicate and competing-work discovery through
+`workflow.find_related_work`, with explicit `kinds` selecting either or both
+populations. Git conflict detection belongs only to
+`workspace.check_merge_conflicts`.
 
 ## 5. Common batch result contract
 
@@ -785,7 +785,7 @@ mutates GitHub.
 | Understand architecture across candidate repositories | `research.query_deepwiki` | Clone and inspect, generic web | Existing indexed repository knowledge, up to 10 repos | Live issue/PR state is required | Rank repository fit or inspect GitHub |
 | Find open contribution candidates | `corpus.rank_threads` | Generic GitHub label search | Explainable ranking with stored coverage and collision evidence | Corpus is missing or stale | `github.sync_threads` then retry |
 | Find how similar work was fixed before | `corpus.find_precedents` | Generic text search | Resolution-aware historical retrieval | The source issue is not yet stored | Sync the source and relevant history |
-| Check whether another PR implements an issue | `workflow.find_competing_work` | `gh search prs` | Local deterministic similarity and explicit references | Corpus open-PR coverage is stale | Sync open PRs and retry |
+| Check whether another PR implements an issue | `workflow.find_related_work` | `gh search prs` | Local deterministic similarity and explicit references | Corpus open-PR coverage is stale | Sync open PRs and retry |
 | Check actual Git merge conflicts | `workspace.check_merge_conflicts` | `git merge-tree` manually | Managed revisions, durable evidence, bounded batch | Current base/head OIDs have not been fetched | Refresh PR status first |
 | See all authored PRs needing attention | `corpus.list_pull_request_portfolio` | GitHub dashboard | Offline cross-repo triage linked to local opportunities | Live state is required and stale | Sync authored PRs/status first |
 | Refresh authored PR state | `github.sync_authored_pull_requests` | GitHub dashboard, `gh search prs` | Cross-repo discovery and durable observations | No GitHub credential is available | Report authentication recovery |
@@ -807,7 +807,7 @@ removed rather than retained as aliases.
 | `github.hydrate_repository` | `github.hydrate_threads` with cross-repository exact refs |
 | `github.start_crawl` | CLI/TUI recurring-source operation or a repaired internal source runner; remove from normal MCP discovery |
 | scalar `jobs.get` | vectorized `jobs.get` |
-| `workflow.check_collisions` | `workflow.find_competing_work` |
+| `workflow.check_collisions` and duplicate checks | `workflow.find_related_work` |
 | CLI-only Radar | `corpus.rank_threads` |
 | manual-only tracking | GitHub portfolio sync plus explicit local linking |
 | single-repository acquire/index | `code.index_repositories` |

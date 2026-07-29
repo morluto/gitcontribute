@@ -27,16 +27,28 @@ Repository dossiers, repository projections, and manifest statements are
 typed. DeepWiki defaults to 32 KiB and directs truncated reads toward structure
 or a focused question before a larger response.
 
-Tool results link durable dossiers, investigations, opportunities, evidence,
-readiness reports, and job artifacts with SDK-native resource links. Resources
-are the canonical detailed read plane for durable artifacts; the catalog does
-not duplicate them as scalar tools. Producers return compact typed references
-so clients follow the exact resource URI instead of consuming duplicate
-structured output. Bounded searches, rankings, and multi-object reads remain
-tools because they are queries rather than durable-artifact representations.
+Tool results link durable concerns, dossiers, investigations, opportunities,
+evidence, readiness reports, immutable draft revisions, contribution manifests,
+and job artifacts with SDK-native resource links. Resources are the canonical
+detailed read plane for durable artifacts; the catalog does not duplicate them
+as scalar tools. Producers return compact typed references so clients follow
+the exact resource URI instead of consuming duplicate structured output.
+Recording a hypothesis returns its parent investigation reference because the
+investigation resource is the canonical aggregate that contains hypotheses.
+Bounded searches, rankings, and multi-object reads remain tools because they are
+queries rather than durable-artifact representations.
 Clients must support MCP `resources/read`; Codex exposes that operation as
 `read_mcp_resource`. GitContribute does not provide a parallel generic read
 tool or scalar artifact fallback.
+
+Validation receipts remain ordinary tool results. They are small execution
+classifications needed immediately by the caller, so replacing them with a
+second read would add ceremony without reducing a material payload. Workspaces
+also remain operational tool results: their lifecycle is coupled to host
+filesystem and process capabilities, and their public representation
+intentionally omits host paths. Neither is an independently browsable durable
+artifact today; revisit that boundary only when a concrete cross-session read
+workflow needs it.
 
 The catalog preserves offline reads, network reads, local writes, process
 execution, and external mutation as separate capabilities. The unified catalog

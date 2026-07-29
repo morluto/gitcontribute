@@ -231,11 +231,10 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "execution_state", "enum"}, []any{"queued", "running", "terminal"})
 	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "outcome", "enum"}, []any{"succeeded", "partial", "failed", "cancelled"})
 	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "progress_percent", "maximum"}, float64(100))
+	assertSchemaValue(t, tools[mcpcontract.ToolRunValidation].InputSchema, []string{"properties", "run_count", "default"}, float64(1))
+	assertSchemaValue(t, tools[mcpcontract.ToolRunValidation].InputSchema, []string{"properties", "run_count", "maximum"}, float64(100))
 	assertSchemaValue(t, tools[mcpcontract.ToolRunValidation].InputSchema, []string{"properties", "execute", "const"}, true)
 	assertSchemaValue(t, tools[mcpcontract.ToolDefineValidation].InputSchema, []string{"properties", "protocol", "enum"}, []any{"mcp_stdio"})
-	assertSchemaValue(t, tools[mcpcontract.ToolRunRepeatedValidation].InputSchema, []string{"properties", "run_count", "default"}, float64(3))
-	assertSchemaValue(t, tools[mcpcontract.ToolRunRepeatedValidation].InputSchema, []string{"properties", "run_count", "maximum"}, float64(100))
-	assertSchemaValue(t, tools[mcpcontract.ToolRunRepeatedValidation].InputSchema, []string{"properties", "execute", "const"}, true)
 	assertSchemaValue(t, tools[mcpcontract.ToolPromoteOpportunity].InputSchema, []string{"properties", "confidence", "maximum"}, float64(1))
 	validationSchema, err := json.Marshal(tools[mcpcontract.ToolDefineValidation].InputSchema)
 	if err != nil {
@@ -330,15 +329,15 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 		{"Clone the remote and create a managed Git worktree", mcpcontract.ToolCreateWorkspace},
 		{"Render and persist a pull request draft from a verified managed workspace diff", mcpcontract.ToolPrepareContribution},
 		{"Execute the stored validation command against the candidate workspace", mcpcontract.ToolRunValidation},
-		{"Run a repeat stress validation group with concurrency and telemetry", mcpcontract.ToolRunRepeatedValidation},
+		{"Run a repeat stress validation group with concurrency and telemetry", mcpcontract.ToolRunValidation},
 		{"Stop a running durable job", mcpcontract.ToolCancelJob},
 		{"Poll several durable jobs together with structured progress", mcpcontract.ToolGetJob},
 		{"Read stored facet coverage for several exact threads", mcpcontract.ToolGetCoverage},
 		{"Compare contribution candidates with my authored pull requests for overlap", mcpcontract.ToolFindPortfolioOverlaps},
 		{"Link an authored pull request to a local opportunity", mcpcontract.ToolLinkPullRequest},
 		{"Rebuild and persist the repository dossier from the local corpus", mcpcontract.ToolBuildRepositoryDossier},
-		{"Find open pull requests that might conflict with this opportunity", mcpcontract.ToolFindCompetingWork},
-		{"Find issues that may duplicate this hypothesis", mcpcontract.ToolCheckDuplicates},
+		{"Find open pull requests that might conflict with this opportunity", mcpcontract.ToolFindRelatedWork},
+		{"Find issues that may duplicate this hypothesis", mcpcontract.ToolFindRelatedWork},
 	}
 
 	correct := 0
@@ -374,8 +373,8 @@ func TestInvalidToolCallEvaluation(t *testing.T) {
 		{mcpcontract.ToolLinkPullRequest, map[string]any{"pull_request": map[string]any{"owner": "acme", "repo": "rocket", "number": 1}}},
 		{mcpcontract.ToolHydrateThreads, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "rocket", "number": 1}}, "facets": []string{"unknown"}}},
 		{mcpcontract.ToolSyncThreads, map[string]any{"selection": "threads", "threads": []any{map[string]any{"owner": "acme", "repo": "rocket", "number": 1}}, "state": "open"}},
-		{mcpcontract.ToolRunValidation, map[string]any{"id": "val-1", "kind": "candidate", "execute": false}},
-		{mcpcontract.ToolRunRepeatedValidation, map[string]any{"id": "val-1", "target": "both", "run_count": 3, "execute": false}},
+		{mcpcontract.ToolRunValidation, map[string]any{"id": "val-1", "target": "candidate", "execute": false}},
+		{mcpcontract.ToolRunValidation, map[string]any{"id": "val-1", "target": "both", "run_count": 101, "execute": true}},
 		{mcpcontract.ToolDefineValidation, map[string]any{"investigation_id": "inv-1", "kind": "test", "command": "server", "workspace_id": "ws-1", "readiness_timeout": "30s"}},
 		{mcpcontract.ToolDefineValidation, map[string]any{"investigation_id": "inv-1", "kind": "test", "command": "go test ./...", "workspace_id": "ws-1", "max_output_bytes": -1}},
 		{mcpcontract.ToolPromoteOpportunity, map[string]any{"hypothesis_id": "hyp-1", "problem_statement": "p", "scope": "s", "impact": "i", "expected_effort": "e", "confidence": 1.1}},
@@ -519,10 +518,6 @@ func TestSideEffectAuthorizationEvaluation(t *testing.T) {
 	run := tools[mcpcontract.ToolRunValidation].Annotations
 	if run == nil || run.ReadOnlyHint || run.DestructiveHint == nil || !*run.DestructiveHint {
 		t.Fatalf("validation annotations = %+v", run)
-	}
-	repeat := tools[mcpcontract.ToolRunRepeatedValidation].Annotations
-	if repeat == nil || repeat.ReadOnlyHint || repeat.DestructiveHint == nil || !*repeat.DestructiveHint {
-		t.Fatalf("repeated validation annotations = %+v", repeat)
 	}
 	prepare := tools[mcpcontract.ToolPrepareContribution]
 	if prepare.Annotations == nil || prepare.Annotations.ReadOnlyHint || prepare.Annotations.OpenWorldHint == nil || *prepare.Annotations.OpenWorldHint {

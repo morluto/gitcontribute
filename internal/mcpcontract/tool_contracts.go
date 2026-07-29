@@ -78,12 +78,10 @@ const (
 	ToolAdoptWorkspace            = "workspace.adopt"
 	ToolDefineValidation          = "validation.define"
 	ToolRunValidation             = "validation.run"
-	ToolRunRepeatedValidation     = "validation.run_repeated"
 	ToolAttachValidationReceipt   = "validation.attach_receipt"
 	ToolStartInvestigation        = "workflow.start_investigation"
 	ToolRecordHypothesis          = "workflow.record_hypothesis"
-	ToolCheckDuplicates           = "workflow.check_duplicates"
-	ToolFindCompetingWork         = "workflow.find_competing_work"
+	ToolFindRelatedWork           = "workflow.find_related_work"
 	ToolPromoteOpportunity        = "workflow.promote_opportunity"
 	ToolPrepareContribution       = "workflow.prepare_contribution"
 	ToolVerifyPublishedDraft      = "workflow.verify_published_draft"
@@ -297,12 +295,25 @@ type ConcernOutput struct {
 	UpdatedAt        string                  `json:"updated_at" jsonschema:"Latest update time"`
 }
 
+// ConcernSummaryOutput contains the triage fields needed before reading a concern resource.
+type ConcernSummaryOutput struct {
+	ID         string      `json:"id" jsonschema:"Stable concern ID"`
+	Owner      string      `json:"owner" jsonschema:"Repository owner"`
+	Repo       string      `json:"repo" jsonschema:"Repository name"`
+	Title      string      `json:"title" jsonschema:"Concern title"`
+	Confidence Probability `json:"confidence" jsonschema:"Confidence from zero to one"`
+	Freshness  string      `json:"freshness" jsonschema:"Derived freshness state"`
+	Status     string      `json:"status" jsonschema:"Concern lifecycle status"`
+	UpdatedAt  string      `json:"updated_at" jsonschema:"Latest update time"`
+	URI        string      `json:"uri" jsonschema:"Exact opaque concern resource URI"`
+}
+
 // ConcernListOutput contains one bounded offline result set.
 type ConcernListOutput struct {
-	Concerns  []ConcernOutput `json:"concerns" jsonschema:"Bounded concern results"`
-	Limit     int             `json:"limit" jsonschema:"Effective result limit"`
-	Total     int             `json:"total" jsonschema:"Total matching concerns"`
-	Truncated bool            `json:"truncated" jsonschema:"Whether more matching concerns exist"`
+	Concerns  []ConcernSummaryOutput `json:"concerns" jsonschema:"Bounded concern summaries with resource URIs"`
+	Limit     int                    `json:"limit" jsonschema:"Effective result limit"`
+	Total     int                    `json:"total" jsonschema:"Total matching concerns"`
+	Truncated bool                   `json:"truncated" jsonschema:"Whether more matching concerns exist"`
 }
 
 // PrepareContributionInput renders a local issue or pull-request draft.

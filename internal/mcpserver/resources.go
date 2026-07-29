@@ -12,6 +12,18 @@ import (
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
+type concernResourceReader interface {
+	Concern(context.Context, mcpcontract.ConcernInput) (mcpcontract.ConcernOutput, error)
+}
+
+type draftResourceReader interface {
+	Draft(context.Context, mcpcontract.DraftInput) (mcpcontract.DraftOutput, error)
+}
+
+type manifestResourceReader interface {
+	Manifest(context.Context, mcpcontract.ManifestInput) (mcpcontract.ManifestOutput, error)
+}
+
 func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 	uri := req.Params.URI
 	u, err := url.Parse(uri)
@@ -73,9 +85,52 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 		return s.readLensResource(ctx, req)
 	case "fix-pattern-report":
 		return s.readFixPatternReportResource(ctx, req)
+	case "concern":
+		return s.readConcernResource(ctx, req)
+	case "draft":
+		return s.readDraftResource(ctx, req)
+	case "manifest":
+		return s.readManifestResource(ctx, req)
 	default:
 		return nil, mcp.ResourceNotFoundError(req.uri)
 	}
+}
+
+func (s *Server) readConcernResource(ctx context.Context, req resourceRequest) (mcpcontract.ConcernOutput, error) {
+	if len(req.parts) != 1 || strings.TrimSpace(req.parts[0]) == "" {
+		return mcpcontract.ConcernOutput{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	reader, ok := s.reader.(concernResourceReader)
+	if !ok {
+		return mcpcontract.ConcernOutput{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	return reader.Concern(ctx, mcpcontract.ConcernInput{ID: req.parts[0]})
+}
+
+func (s *Server) readDraftResource(ctx context.Context, req resourceRequest) (mcpcontract.DraftOutput, error) {
+	if len(req.parts) != 2 || strings.TrimSpace(req.parts[0]) == "" {
+		return mcpcontract.DraftOutput{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	revision, ok := positivePathNumber(req.parts[1])
+	if !ok {
+		return mcpcontract.DraftOutput{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	reader, ok := s.reader.(draftResourceReader)
+	if !ok {
+		return mcpcontract.DraftOutput{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	return reader.Draft(ctx, mcpcontract.DraftInput{ID: req.parts[0], Revision: revision})
+}
+
+func (s *Server) readManifestResource(ctx context.Context, req resourceRequest) (mcpcontract.ManifestOutput, error) {
+	if len(req.parts) != 1 || strings.TrimSpace(req.parts[0]) == "" {
+		return mcpcontract.ManifestOutput{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	reader, ok := s.reader.(manifestResourceReader)
+	if !ok {
+		return mcpcontract.ManifestOutput{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	return reader.Manifest(ctx, mcpcontract.ManifestInput{ID: req.parts[0]})
 }
 
 func (s *Server) readFixPatternReportResource(ctx context.Context, req resourceRequest) (mcpcontract.FixPatternReport, error) {

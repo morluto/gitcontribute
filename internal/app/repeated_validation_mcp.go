@@ -11,13 +11,13 @@ import (
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
-// RunRepeatedValidation submits a durable repeat/stress validation group.
-func (r *MCPReader) RunRepeatedValidation(ctx context.Context, in mcpcontract.RunRepeatedValidationInput) (mcpcontract.JobReference, error) {
+// RunValidation submits one bounded validation execution group.
+func (r *MCPReader) RunValidation(ctx context.Context, in mcpcontract.RunValidationInput) (mcpcontract.JobReference, error) {
 	if !in.Execute {
 		return mcpcontract.JobReference{}, errors.New("execute must be true to authorize host command execution")
 	}
 	if in.RunCount == 0 {
-		in.RunCount = 3
+		in.RunCount = 1
 	}
 	if in.Concurrency == 0 {
 		in.Concurrency = 1
