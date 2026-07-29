@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.14.0](https://github.com/morluto/gitcontribute/compare/v0.13.0...v0.14.0) (2026-07-29)
+
+
+### Features
+
+* **contribution:** add evidence-backed draft handoff ([c3ce58c](https://github.com/morluto/gitcontribute/commit/c3ce58ced769be8cb155a2fee54d8655dd252849))
+* **contribution:** preserve proof-aware draft artifacts ([3cfed98](https://github.com/morluto/gitcontribute/commit/3cfed98e13dc57b133f3e27093b5b80405fabe7a))
+* **tui:** add contribution research workflow ([5aa5d7e](https://github.com/morluto/gitcontribute/commit/5aa5d7e0b42f1b367814716e6d0096ccd9adbf50))
+* **validation:** import external execution receipts ([6fc9341](https://github.com/morluto/gitcontribute/commit/6fc9341eff9ab567d1a4cb709517bcb1dd906ddd))
+* **workflow:** derive issue contribution dispositions ([c240571](https://github.com/morluto/gitcontribute/commit/c240571839ae8ead4763ac316c59cbe8353b6608))
+
+
+### Bug Fixes
+
+* **config:** accept retired output settings ([1ed08ae](https://github.com/morluto/gitcontribute/commit/1ed08aec86b8ca25c015b9d3c78d76e53ed8f6fa))
+* **config:** migrate retired output settings ([5099e85](https://github.com/morluto/gitcontribute/commit/5099e85fe63d2a852f3e439c2df58d3c6dad0404))
+* **contribution:** satisfy draft validation lint ([9cf46a0](https://github.com/morluto/gitcontribute/commit/9cf46a0d8af97b63190a476f0d6aa21e8fd000f8))
+* **github:** capture selected API version provenance ([8a2f9e5](https://github.com/morluto/gitcontribute/commit/8a2f9e5985ccadfa3ca8bd9d4be81e46432e1f1c))
+
 ## [0.13.0](https://github.com/morluto/gitcontribute/compare/v0.12.0...v0.13.0) (2026-07-28)
 
 
