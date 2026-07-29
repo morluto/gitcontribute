@@ -103,3 +103,15 @@ func (s *Server) defineValidation(ctx context.Context, _ *mcp.CallToolRequest, i
 	out, err := operator.DefineValidation(ctx, in)
 	return nil, out, err
 }
+
+func (s *Server) attachValidationReceipt(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.AttachValidationReceiptInput) (*mcp.CallToolResult, mcpcontract.ExternalValidationReceiptOutput, error) {
+	if len(in.ReceiptJSON) == 0 || len(in.ReceiptJSON) > 2<<20 {
+		return nil, mcpcontract.ExternalValidationReceiptOutput{}, mcpcontract.InvalidArgument("receipt_json", "must contain one receipt no larger than 2 MiB", nil)
+	}
+	operator, ok := s.reader.(ValidationReceiptOperator)
+	if !ok {
+		return nil, mcpcontract.ExternalValidationReceiptOutput{}, errors.New("external validation receipt import is unavailable")
+	}
+	out, err := operator.AttachValidationReceipt(ctx, in)
+	return nil, out, err
+}

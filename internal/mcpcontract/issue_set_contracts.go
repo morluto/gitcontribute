@@ -55,26 +55,37 @@ type IssueSetLinkageCandidate struct {
 	Basis                string   `json:"basis"`
 }
 
+// ContributionDisposition is a conservative, evidence-backed recommendation
+// made before an implementation workspace is created.
+type ContributionDisposition struct {
+	Status       string   `json:"status"`
+	Confidence   string   `json:"confidence"`
+	EvidenceRefs []string `json:"evidence_refs,omitempty"`
+	Unknowns     []string `json:"unknowns,omitempty"`
+	NextAction   string   `json:"next_action"`
+}
+
 // PreparedIssueEvidence contains stored facts and bounded derived evidence for
 // one exact supplied issue.
 type PreparedIssueEvidence struct {
-	Number                int                       `json:"number"`
-	Title                 string                    `json:"title"`
-	State                 string                    `json:"state"`
-	StateReason           string                    `json:"state_reason,omitempty"`
-	Labels                []string                  `json:"labels,omitempty"`
-	BodyStatus            string                    `json:"body_status"`
-	Body                  string                    `json:"body,omitempty"`
-	SourceUpdatedAt       string                    `json:"source_updated_at,omitempty"`
-	Coverage              []FacetCoverageOutput     `json:"coverage"`
-	Gaps                  []IssueSetGap             `json:"gaps,omitempty"`
-	RelatedWork           []IssueSetRelatedWork     `json:"related_work"`
-	RelatedWorkTotal      int                       `json:"related_work_total"`
-	RelatedWorkTotalKnown bool                      `json:"related_work_total_known"`
-	RelatedWorkTruncated  bool                      `json:"related_work_truncated"`
-	AcceptedExamples      []PrecedentOutput         `json:"accepted_examples"`
-	DuplicateCluster      *IssueSetDuplicateCluster `json:"duplicate_cluster,omitempty"`
-	Linkage               IssueSetLinkageCandidate  `json:"linkage"`
+	Number                  int                       `json:"number"`
+	Title                   string                    `json:"title"`
+	State                   string                    `json:"state"`
+	StateReason             string                    `json:"state_reason,omitempty"`
+	Labels                  []string                  `json:"labels,omitempty"`
+	BodyStatus              string                    `json:"body_status"`
+	Body                    string                    `json:"body,omitempty"`
+	SourceUpdatedAt         string                    `json:"source_updated_at,omitempty"`
+	Coverage                []FacetCoverageOutput     `json:"coverage"`
+	Gaps                    []IssueSetGap             `json:"gaps,omitempty"`
+	RelatedWork             []IssueSetRelatedWork     `json:"related_work"`
+	RelatedWorkTotal        int                       `json:"related_work_total"`
+	RelatedWorkTotalKnown   bool                      `json:"related_work_total_known"`
+	RelatedWorkTruncated    bool                      `json:"related_work_truncated"`
+	AcceptedExamples        []PrecedentOutput         `json:"accepted_examples"`
+	DuplicateCluster        *IssueSetDuplicateCluster `json:"duplicate_cluster,omitempty"`
+	Linkage                 IssueSetLinkageCandidate  `json:"linkage"`
+	ContributionDisposition ContributionDisposition   `json:"contribution_disposition"`
 }
 
 // PrepareIssueSetOutput preserves requested issue order and reports all

@@ -725,14 +725,28 @@ func (r *MCPReader) PrepareContribution(ctx context.Context, in mcpcontract.Prep
 }
 
 func draftResultToMCP(d *contracts.DraftResult) mcpcontract.DraftOutput {
-	return mcpcontract.DraftOutput{
+	out := mcpcontract.DraftOutput{
+		ID:            d.ID,
+		Revision:      d.Revision,
 		OpportunityID: d.OpportunityID,
 		Kind:          d.Kind,
+		Repository:    d.Repository,
 		Title:         d.Title,
 		Body:          d.Body,
+		TitleBytes:    d.TitleBytes,
+		BodyBytes:     d.BodyBytes,
+		TitleSHA256:   d.TitleSHA256,
+		BodySHA256:    d.BodySHA256,
+		EvidenceIDs:   append([]string(nil), d.EvidenceIDs...),
 		RenderedAt:    d.RenderedAt,
 		ManifestID:    d.ManifestID,
 	}
+	for _, warning := range d.Warnings {
+		out.Warnings = append(out.Warnings, mcpcontract.DraftDiagnosticOutput{
+			Code: warning.Code, Severity: warning.Severity, Message: warning.Message, ByteOffset: warning.ByteOffset,
+		})
+	}
+	return out
 }
 
 // ExportManifest assembles a bounded local contribution evidence statement.

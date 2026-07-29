@@ -238,6 +238,21 @@ type RunRepeatedValidationInput struct {
 	Execute        bool   `json:"execute" jsonschema:"Must be true to authorize host execution"`
 }
 
+type AttachValidationReceiptInput struct {
+	ReceiptJSON string `json:"receipt_json" jsonschema:"External validation receipt JSON using gitcontribute.external-validation.v1; maximum 2 MiB"`
+}
+
+type ExternalValidationReceiptOutput struct {
+	RunID           string `json:"run_id"`
+	DefinitionID    string `json:"definition_id"`
+	InvestigationID string `json:"investigation_id"`
+	Kind            string `json:"kind"`
+	Classification  string `json:"classification"`
+	ReceiptSHA256   string `json:"receipt_sha256"`
+	Producer        string `json:"producer"`
+	Incomplete      bool   `json:"incomplete"`
+}
+
 // DefineValidationInput records a bounded validation command without executing it.
 type DefineValidationInput struct {
 	InvestigationID      string                         `json:"investigation_id" jsonschema:"Investigation ID"`

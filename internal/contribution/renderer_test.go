@@ -107,6 +107,57 @@ func TestRenderPullRequest(t *testing.T) {
 	}
 }
 
+func TestRenderPullRequestIncludesCompatibleBeforeAfterProof(t *testing.T) {
+	def := &evidence.ValidationDefinition{ID: "def", Command: []string{"go", "test", "./pkg/foo", "-run", "TestRace"}}
+	base := &evidence.ValidationRun{
+		ID: "base", DefinitionID: def.ID, Kind: evidence.RunKindBase,
+		Classification: evidence.RunClassificationFailing, ObservationStatus: evidence.ObservationMatched,
+		WorkspaceSnapshotAfter: "base-sha",
+		Observations: []evidence.ObservationResult{{
+			ExpectedObservation: evidence.ExpectedObservation{Name: "race reproduced"},
+			Status:              evidence.ObservationMatched, Excerpt: "DATA RACE",
+		}},
+	}
+	candidate := &evidence.ValidationRun{
+		ID: "candidate", DefinitionID: def.ID, Kind: evidence.RunKindCandidate,
+		Classification: evidence.RunClassificationPassing, ObservationStatus: evidence.ObservationMatched,
+		WorkspaceSnapshotAfter: "candidate-sha",
+	}
+	draft, err := NewRenderer().RenderPullRequest(PullRequestInput{
+		Opportunity: sampleOpportunity(), Approach: "Synchronize access.", Evidence: []*evidence.Evidence{
+			{ID: "base-evidence", Type: evidence.EvidenceTypeBaseFailingRegression, Relation: evidence.RelationSupporting, ValidationRun: base, ValidationDefinition: def},
+			{ID: "candidate-evidence", Type: evidence.EvidenceTypeCandidatePassingRegression, Relation: evidence.RelationSupporting, ValidationRun: candidate, ValidationDefinition: def},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Before/after regression proof", "base-sha", "candidate-sha", "race reproduced", `["go","test","./pkg/foo","-run","TestRace"]`, "sha256:"} {
+		if !strings.Contains(draft.Body, want) {
+			t.Fatalf("proof missing %q:\n%s", want, draft.Body)
+		}
+	}
+}
+
+func TestRenderPullRequestLabelsCandidateOnlyValidation(t *testing.T) {
+	def := &evidence.ValidationDefinition{ID: "def", Command: []string{"go", "test", "./..."}}
+	run := &evidence.ValidationRun{
+		ID: "candidate", DefinitionID: def.ID, Kind: evidence.RunKindCandidate,
+		Classification: evidence.RunClassificationPassing,
+	}
+	draft, err := NewRenderer().RenderPullRequest(PullRequestInput{
+		Opportunity: sampleOpportunity(), Approach: "Change behavior.", Evidence: []*evidence.Evidence{{
+			ID: "candidate-evidence", Relation: evidence.RelationSupporting, ValidationRun: run, ValidationDefinition: def,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(draft.Body, "Candidate validation only") || !strings.Contains(draft.Body, "not causal regression proof") {
+		t.Fatalf("candidate-only proof mislabeled:\n%s", draft.Body)
+	}
+}
+
 func TestRenderPullRequestRequiresApproach(t *testing.T) {
 	r := NewRenderer()
 	if _, err := r.RenderPullRequest(PullRequestInput{Opportunity: sampleOpportunity()}); err == nil {

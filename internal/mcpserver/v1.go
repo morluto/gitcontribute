@@ -205,6 +205,13 @@ func (s *Server) registerV1() {
 			configureValidationWorkspaceModes(schema)
 		}), output: outputSchema[mcpcontract.ValidationOutput]("Persisted validation definition."), handler: s.defineValidation,
 	})
+	addCatalogTool(s, catalogTool[mcpcontract.AttachValidationReceiptInput, mcpcontract.ExternalValidationReceiptOutput]{
+		name: mcpcontract.ToolAttachValidationReceipt, title: "Attach external validation receipt",
+		description: "Validate and persist a bounded, versioned external execution receipt without running its command or contacting its producer.",
+		annotations: localWrite, supportedBy: supports[ValidationReceiptOperator],
+		input:  inputSchema[mcpcontract.AttachValidationReceiptInput](noSchemaCustomization),
+		output: outputSchema[mcpcontract.ExternalValidationReceiptOutput]("Stored external receipt identity and result."), handler: s.attachValidationReceipt,
+	})
 	addCatalogTool(s, catalogTool[mcpcontract.PrepareContributionInput, mcpcontract.DraftOutput]{
 		name: mcpcontract.ToolPrepareContribution, title: "Prepare pull request or issue draft",
 		description: "Render and persist a pull request or issue draft from stored evidence, supplied changes, or a verified workspace diff; it inspects the managed workspace with non-mutating Git when changes are omitted. Never posts or mutates GitHub.",
@@ -212,6 +219,16 @@ func (s *Server) registerV1() {
 			setEnum(schema, "kind", "issue", "pull_request")
 			configureContributionDraftModes(schema)
 		}), output: outputSchema[mcpcontract.DraftOutput]("Newly rendered and persisted local contribution draft."), handler: s.prepareContribution,
+	})
+	addCatalogTool(s, catalogTool[mcpcontract.VerifyPublishedDraftInput, mcpcontract.PublishedDraftVerificationOutput]{
+		name: mcpcontract.ToolVerifyPublishedDraft, title: "Verify published draft bytes",
+		description: "Compare one immutable local draft revision with one explicitly synchronized GitHub issue or pull request. Read-only and never refreshes or edits GitHub.",
+		annotations: readOnly, supportedBy: supports[PublishedDraftVerifier],
+		input: inputSchema[mcpcontract.VerifyPublishedDraftInput](func(schema *schemaBuilder) {
+			setEnum(schema, "kind", "issue", "pull_request")
+			setRange(schema, "revision", 1, 1<<31-1)
+			setRange(schema, "number", 1, 1<<31-1)
+		}), output: outputSchema[mcpcontract.PublishedDraftVerificationOutput]("Exact, normalized-only, mismatch, or unknown comparison."), handler: s.verifyPublishedDraft,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.ExportManifestInput, mcpcontract.ManifestOutput]{
 		name: mcpcontract.ToolExportManifest, title: "Export contribution evidence manifest",

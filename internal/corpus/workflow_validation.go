@@ -225,7 +225,8 @@ func (c *Corpus) SaveIssueDraft(ctx context.Context, item *contribution.IssueDra
 	if item == nil {
 		return errors.New("issue draft is required")
 	}
-	return c.saveDraft(ctx, item.OpportunityID, "issue", item, item.RenderedAt)
+	contribution.EnsureDraftIdentity(&item.DraftIdentity, item.Repository, "issue", item.Title, item.Body)
+	return c.saveDraft(ctx, item.OpportunityID, "issue", &item.DraftIdentity, item, item.RenderedAt)
 }
 
 // GetIssueDraft returns the issue draft for an opportunity, or nil when absent.
@@ -242,7 +243,8 @@ func (c *Corpus) SavePullRequestDraft(ctx context.Context, item *contribution.Pu
 	if item == nil {
 		return errors.New("pull request draft is required")
 	}
-	return c.saveDraft(ctx, item.OpportunityID, "pull_request", item, item.RenderedAt)
+	contribution.EnsureDraftIdentity(&item.DraftIdentity, item.Repository, "pull_request", item.Title, item.Body)
+	return c.saveDraft(ctx, item.OpportunityID, "pull_request", &item.DraftIdentity, item, item.RenderedAt)
 }
 
 // GetPullRequestDraft returns the pull-request draft for an opportunity, or nil when absent.
@@ -254,19 +256,42 @@ func (c *Corpus) GetPullRequestDraft(ctx context.Context, opportunityID string) 
 	return &item, nil
 }
 
-func (c *Corpus) saveDraft(ctx context.Context, opportunityID, kind string, item any, renderedAt time.Time) error {
+func (c *Corpus) saveDraft(ctx context.Context, opportunityID, kind string, identity *contribution.DraftIdentity, item any, renderedAt time.Time) error {
 	if opportunityID == "" {
 		return errors.New("draft opportunity id is required")
+	}
+	if identity == nil || identity.ID == "" || identity.TitleSHA256 == "" || identity.BodySHA256 == "" {
+		return errors.New("draft byte identity is required")
+	}
+	tx, err := c.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin contribution draft revision: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(revision), 0) + 1 FROM contribution_draft_revisions WHERE opportunity_id=? AND kind=?`,
+		opportunityID, kind,
+	).Scan(&identity.Revision); err != nil {
+		return fmt.Errorf("select contribution draft revision: %w", err)
 	}
 	payload, err := marshalWorkflow(item)
 	if err != nil {
 		return err
 	}
-	_, err = c.db.ExecContext(ctx, `INSERT INTO contribution_drafts (opportunity_id, kind, payload, rendered_at) VALUES (?, ?, ?, ?) ON CONFLICT (opportunity_id, kind) DO UPDATE SET payload=excluded.payload, rendered_at=excluded.rendered_at`, opportunityID, kind, payload, encodeTime(renderedAt))
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO contribution_draft_revisions
+			(draft_id, opportunity_id, kind, revision, title_sha256, body_sha256, payload, rendered_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		identity.ID, opportunityID, kind, identity.Revision, identity.TitleSHA256, identity.BodySHA256, payload, encodeTime(renderedAt),
+	)
 	if err != nil {
-		return fmt.Errorf("save contribution draft: %w", err)
+		return fmt.Errorf("save contribution draft revision: %w", err)
 	}
-	return nil
+	_, err = tx.ExecContext(ctx, `INSERT INTO contribution_drafts (opportunity_id, kind, payload, rendered_at) VALUES (?, ?, ?, ?) ON CONFLICT (opportunity_id, kind) DO UPDATE SET payload=excluded.payload, rendered_at=excluded.rendered_at`, opportunityID, kind, payload, encodeTime(renderedAt))
+	if err != nil {
+		return fmt.Errorf("save latest contribution draft: %w", err)
+	}
+	return tx.Commit()
 }
 
 func (c *Corpus) getDraft(ctx context.Context, opportunityID, kind string, target any) error {
@@ -279,6 +304,46 @@ func (c *Corpus) getDraft(ctx context.Context, opportunityID, kind string, targe
 		return fmt.Errorf("get contribution draft: %w", err)
 	}
 	return unmarshalWorkflow(payload, target)
+}
+
+// GetContributionDraftRevision returns one immutable stored draft revision.
+func (c *Corpus) GetContributionDraftRevision(ctx context.Context, draftID string, revision int) (*contribution.DraftArtifact, error) {
+	if draftID == "" || revision < 1 {
+		return nil, errors.New("draft id and positive revision are required")
+	}
+	var kind, payload string
+	err := c.db.QueryRowContext(ctx,
+		`SELECT kind, payload FROM contribution_draft_revisions WHERE draft_id=? AND revision=?`,
+		draftID, revision,
+	).Scan(&kind, &payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, contribution.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get contribution draft revision: %w", err)
+	}
+	switch kind {
+	case "issue":
+		var draft contribution.IssueDraft
+		if err := unmarshalWorkflow(payload, &draft); err != nil {
+			return nil, err
+		}
+		return &contribution.DraftArtifact{
+			DraftIdentity: draft.DraftIdentity, OpportunityID: draft.OpportunityID, Title: draft.Title,
+			Body: draft.Body, RenderedAt: draft.RenderedAt, ManifestID: draft.ManifestID,
+		}, nil
+	case "pull_request":
+		var draft contribution.PullRequestDraft
+		if err := unmarshalWorkflow(payload, &draft); err != nil {
+			return nil, err
+		}
+		return &contribution.DraftArtifact{
+			DraftIdentity: draft.DraftIdentity, OpportunityID: draft.OpportunityID, Title: draft.Title,
+			Body: draft.Body, RenderedAt: draft.RenderedAt, ManifestID: draft.ManifestID,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported stored draft kind %q", kind)
+	}
 }
 
 // SaveContributionManifest persists one deterministic evidence statement.

@@ -267,6 +267,28 @@ type ValidationRun struct {
 	FailurePhase            string
 	Resources               ResourceTelemetry
 	Cleanup                 CleanupResult
+	ExecutionOrigin         string
+	External                *ExternalReceiptProvenance
+}
+
+// ExternalReceiptProvenance preserves the trust and source boundary of a
+// validation observation produced outside GitContribute.
+type ExternalReceiptProvenance struct {
+	SchemaVersion  string
+	Producer       string
+	ValidationID   string
+	ReceiptSHA256  string
+	Repository     string
+	Revision       string
+	ArtifactSHA256 string
+	Provider       string
+	ExternalRunID  string
+	Command        []string
+	WorkingDir     string
+	Environment    map[string]string
+	Artifacts      map[string]string
+	Limitations    []string
+	Incomplete     bool
 }
 
 // RunGroupClassification summarizes repeated, semantically comparable runs.
@@ -358,17 +380,19 @@ type ValidationRunGroup struct {
 
 // Evidence is a piece of supporting, contradicting, or inconclusive proof.
 type Evidence struct {
-	ID               string
-	InvestigationID  string
-	HypothesisID     string
-	OpportunityID    string
-	ValidationRunID  string
-	Type             EvidenceType
-	Relation         Relation
-	Description      string
-	SourceRefs       []domain.SourceRef
-	SourceProvenance []SourceRevision
-	CreatedAt        time.Time
+	ID                   string
+	InvestigationID      string
+	HypothesisID         string
+	OpportunityID        string
+	ValidationRunID      string
+	Type                 EvidenceType
+	Relation             Relation
+	Description          string
+	SourceRefs           []domain.SourceRef
+	SourceProvenance     []SourceRevision
+	CreatedAt            time.Time
+	ValidationRun        *ValidationRun
+	ValidationDefinition *ValidationDefinition
 }
 
 // ComparisonClassification is the result of comparing a base run to a candidate run.

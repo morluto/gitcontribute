@@ -21,7 +21,7 @@ import (
 // This byte ceiling includes owned output schemas instead of the former
 // unbounded maps. It is a drift alarm, not evidence that a model benefits from
 // a particular catalog; the held-out evaluation owns membership decisions.
-const maxDefaultCatalogBytes = 92 * 1024
+const maxDefaultCatalogBytes = 100 * 1024
 
 var selectionSynonyms = map[string]string{
 	"execute": "run",
@@ -129,6 +129,22 @@ func TestDefaultToolCatalogStaysWithinBudget(t *testing.T) {
 	t.Logf("serialized default MCP catalog: %d tools, %d bytes", len(tools), len(payload))
 	if len(payload) > maxDefaultCatalogBytes {
 		t.Fatalf("serialized default MCP catalog is %d bytes, budget is %d", len(payload), maxDefaultCatalogBytes)
+	}
+}
+
+func TestContributionAndCodeProfilesExposeDraftVerificationAndReceiptImport(t *testing.T) {
+	if !supports[PublishedDraftVerifier](&fakeReader{}) || !supports[ValidationReceiptOperator](&fakeReader{}) {
+		t.Fatal("fake reader does not expose new capabilities")
+	}
+	contribute, closeContribute := listedToolsFor(t, []string{"contribute"})
+	defer closeContribute()
+	if contribute[mcpcontract.ToolVerifyPublishedDraft] == nil {
+		t.Fatalf("contribute profile omits published draft verification: %v", contribute)
+	}
+	code, closeCode := listedToolsFor(t, []string{"code"})
+	defer closeCode()
+	if code[mcpcontract.ToolAttachValidationReceipt] == nil {
+		t.Fatal("code profile omits external validation receipt import")
 	}
 }
 

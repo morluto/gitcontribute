@@ -383,39 +383,6 @@ type setStatusOpportunityCmd struct {
 	JSON      bool   `name:"json" help:"Print the result as JSON"`
 }
 
-type prepareCmd struct {
-	Issue  issueCmd  `cmd:"" help:"Prepare an issue draft"`
-	PR     prCmd     `cmd:"" name:"pr" help:"Prepare a pull request draft"`
-	Review reviewCmd `cmd:"" help:"Prepare a read-only review report"`
-}
-
-type reviewCmd struct {
-	OpportunityID string `arg:"" optional:"" help:"Opportunity ID"`
-	WorkspaceID   string `name:"workspace" help:"Workspace ID"`
-	JSON          bool   `name:"json" help:"Print the result as JSON"`
-}
-
-type issueCmd struct {
-	OpportunityID string `arg:"" help:"Opportunity ID"`
-	Guidance      string `name:"guidance" help:"Repository contribution guidance"`
-	Success       string `name:"success" help:"Success criteria"`
-	ManifestID    string `name:"manifest-id" help:"Stored evidence manifest to reference"`
-	JSON          bool   `name:"json" help:"Print the result as JSON"`
-}
-
-type prCmd struct {
-	OpportunityID string `arg:"" help:"Opportunity ID"`
-	WorkspaceID   string `name:"workspace" help:"Workspace ID to include diff as changes"`
-	Approach      string `name:"approach" required:"" help:"Approach description"`
-	Changes       string `name:"changes" help:"Focused changes description"`
-	Compatibility string `name:"compatibility" help:"Compatibility notes"`
-	Limitations   string `name:"limitations" help:"Limitations"`
-	LinkedIssue   string `name:"linked-issue" help:"Linked issue"`
-	Guidance      string `name:"guidance" help:"Repository contribution guidance"`
-	ManifestID    string `name:"manifest-id" help:"Stored evidence manifest to reference"`
-	JSON          bool   `name:"json" help:"Print the result as JSON"`
-}
-
 type runsCmd struct {
 	Limit int  `name:"limit" default:"50" help:"Maximum runs to return"`
 	JSON  bool `name:"json" help:"Print the result as JSON"`
@@ -1341,55 +1308,6 @@ func formatCommand(args []string) string {
 		quoted[i] = strconv.Quote(arg)
 	}
 	return strings.Join(quoted, " ")
-}
-
-func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) error {
-	service, err := c.contributionService()
-	if err != nil {
-		return err
-	}
-	switch command {
-	case "prepare issue":
-		_, _ = fmt.Fprintf(c.stderr, "preparing issue draft for opportunity %s...\n", cmd.Issue.OpportunityID)
-		result, err := service.PrepareIssue(ctx, cmd.Issue.OpportunityID, contracts.PrepareIssueOptions{
-			Guidance: cmd.Issue.Guidance, Success: cmd.Issue.Success, ManifestID: cmd.Issue.ManifestID,
-		})
-		if err != nil {
-			return c.mapError(err)
-		}
-		return c.render(cmd.Issue.JSON, result)
-	case "prepare pr":
-		_, _ = fmt.Fprintf(c.stderr, "preparing pull request draft for opportunity %s...\n", cmd.PR.OpportunityID)
-		result, err := service.PreparePullRequest(ctx, cmd.PR.OpportunityID, contracts.PreparePROptions{
-			WorkspaceID:   cmd.PR.WorkspaceID,
-			Approach:      cmd.PR.Approach,
-			Changes:       cmd.PR.Changes,
-			Compatibility: cmd.PR.Compatibility,
-			Limitations:   cmd.PR.Limitations,
-			LinkedIssue:   cmd.PR.LinkedIssue,
-			Guidance:      cmd.PR.Guidance,
-			ManifestID:    cmd.PR.ManifestID,
-		})
-		if err != nil {
-			return c.mapError(err)
-		}
-		return c.render(cmd.PR.JSON, result)
-	case "prepare review":
-		workflow, err := c.workflowService()
-		if err != nil {
-			return err
-		}
-		result, err := workflow.PrepareReviewReport(ctx, contracts.PrepareReviewReportInput{
-			OpportunityID: cmd.Review.OpportunityID,
-			WorkspaceID:   cmd.Review.WorkspaceID,
-		})
-		if err != nil {
-			return c.mapError(err)
-		}
-		return c.render(cmd.Review.JSON, result)
-	default:
-		return NewCLIError(ExitUsage, fmt.Errorf("unknown prepare command: %s", command))
-	}
 }
 
 func (c *CLI) runIndex(ctx context.Context, cmd *indexCmd) error {

@@ -11,14 +11,50 @@ import (
 // IssueDraft is a rendered issue body ready for review.
 type IssueDraft struct {
 	OpportunityID string
-	Title         string
-	Body          string
-	RenderedAt    time.Time
-	ManifestID    string
+	DraftIdentity
+	Title      string
+	Body       string
+	RenderedAt time.Time
+	ManifestID string
 }
 
 // PullRequestDraft is a rendered PR body ready for review.
 type PullRequestDraft struct {
+	OpportunityID string
+	DraftIdentity
+	Title      string
+	Body       string
+	RenderedAt time.Time
+	ManifestID string
+}
+
+// DraftIdentity binds one stored revision to the exact rendered UTF-8 bytes.
+type DraftIdentity struct {
+	ID          string
+	Revision    int
+	Repository  string
+	Kind        string
+	TitleBytes  int
+	BodyBytes   int
+	TitleSHA256 string
+	BodySHA256  string
+	EvidenceIDs []string
+	Warnings    []DraftDiagnostic
+}
+
+// DraftDiagnostic reports an exact-byte validation finding without rewriting
+// the draft.
+type DraftDiagnostic struct {
+	Code       string
+	Severity   string
+	Message    string
+	ByteOffset int
+}
+
+// DraftArtifact is the common exact-byte view of an issue or pull-request
+// draft revision.
+type DraftArtifact struct {
+	DraftIdentity
 	OpportunityID string
 	Title         string
 	Body          string

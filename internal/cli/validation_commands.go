@@ -3,10 +3,16 @@ package cli
 import "time"
 
 type validationCmd struct {
-	Define  defineValidationCmd  `cmd:"" help:"Define a validation"`
-	Run     runValidationCmd     `cmd:"" help:"Run a validation definition"`
-	Repeat  repeatValidationCmd  `cmd:"" help:"Run a bounded repeat/stress validation"`
-	Compare compareValidationCmd `cmd:"" help:"Compare two validation runs"`
+	Define  defineValidationCmd        `cmd:"" help:"Define a validation"`
+	Run     runValidationCmd           `cmd:"" help:"Run a validation definition"`
+	Repeat  repeatValidationCmd        `cmd:"" help:"Run a bounded repeat/stress validation"`
+	Compare compareValidationCmd       `cmd:"" help:"Compare two validation runs"`
+	Attach  attachValidationReceiptCmd `cmd:"" help:"Attach an external validation receipt without executing it"`
+}
+
+type attachValidationReceiptCmd struct {
+	File string `arg:"" type:"existingfile" help:"Versioned external receipt JSON file"`
+	JSON bool   `name:"json" help:"Print the result as JSON"`
 }
 
 type defineValidationCmd struct {
