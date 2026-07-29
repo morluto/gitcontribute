@@ -14,6 +14,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
 	"github.com/morluto/gitcontribute/internal/manifest"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/research"
 )
 
@@ -177,6 +178,13 @@ func TestContributionManifestKeepsMissingPullRequestFacetsIncomplete(t *testing.
 	}
 	if statement.Predicate.PullRequest == nil || statement.Predicate.Status != "incomplete" {
 		t.Fatalf("partial PR manifest = %+v", statement.Predicate)
+	}
+	resource, err := (&MCPReader{fixture.svc}).Manifest(fixture.ctx, mcpcontract.ManifestInput{ID: statement.Predicate.ManifestID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resource.ManifestID != statement.Predicate.ManifestID || resource.ContentSHA256 != statement.Predicate.ContentSHA256 {
+		t.Fatalf("manifest resource = %+v", resource)
 	}
 	for _, facet := range statement.Predicate.PullRequest.Facets {
 		if facet.Status != "complete" && !hasManifestGap(statement.Predicate.Gaps, "pull_request") {

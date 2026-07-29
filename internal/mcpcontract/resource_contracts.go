@@ -43,6 +43,22 @@ type ThreadInput struct {
 	Number int    `json:"number" jsonschema:"GitHub issue or pull request number"`
 }
 
+// ConcernInput identifies one persisted local concern.
+type ConcernInput struct {
+	ID string `json:"id" jsonschema:"Concern ID"`
+}
+
+// DraftInput identifies one immutable persisted contribution-draft revision.
+type DraftInput struct {
+	ID       string `json:"id" jsonschema:"Draft ID"`
+	Revision int    `json:"revision" jsonschema:"Positive draft revision"`
+}
+
+// ManifestInput identifies one persisted contribution evidence manifest.
+type ManifestInput struct {
+	ID string `json:"id" jsonschema:"Manifest ID"`
+}
+
 // SearchInput describes an offline thread search page.
 type SearchInput struct {
 	Query         string   `json:"query" jsonschema:"Full-text query"`

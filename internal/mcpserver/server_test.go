@@ -324,7 +324,11 @@ func (f *fakeReader) RunRepeatedValidation(_ context.Context, in mcpcontract.Run
 
 func (f *fakeReader) PrepareContribution(_ context.Context, in mcpcontract.PrepareContributionInput) (mcpcontract.DraftOutput, error) {
 	f.recordCall("prepare_contribution")
-	return mcpcontract.DraftOutput{OpportunityID: in.OpportunityID, Kind: in.Kind, Title: "draft", Body: "body"}, nil
+	return mcpcontract.DraftOutput{ID: "draft-1", Revision: 1, OpportunityID: in.OpportunityID, Kind: in.Kind, Title: "draft", Body: "body"}, nil
+}
+
+func (*fakeReader) Draft(_ context.Context, in mcpcontract.DraftInput) (mcpcontract.DraftOutput, error) {
+	return mcpcontract.DraftOutput{ID: in.ID, Revision: in.Revision, OpportunityID: "opp-1", Kind: "issue", Title: "draft", Body: "body"}, nil
 }
 
 func (f *fakeReader) AttachValidationReceipt(_ context.Context, in mcpcontract.AttachValidationReceiptInput) (mcpcontract.ExternalValidationReceiptOutput, error) {
@@ -339,6 +343,14 @@ func (f *fakeReader) VerifyPublishedDraft(_ context.Context, in mcpcontract.Veri
 
 func (*fakeReader) ExportManifest(_ context.Context, in mcpcontract.ExportManifestInput) (mcpcontract.ManifestOutput, error) {
 	return mcpcontract.ManifestOutput{ManifestID: "sha256:test", ContentSHA256: "test", SchemaVersion: "contribution-evidence.v1", Status: "incomplete"}, nil
+}
+
+func (*fakeReader) Manifest(_ context.Context, in mcpcontract.ManifestInput) (mcpcontract.ManifestOutput, error) {
+	return mcpcontract.ManifestOutput{ManifestID: in.ID, ContentSHA256: "test", SchemaVersion: "contribution-evidence.v1", Status: "incomplete"}, nil
+}
+
+func (*fakeReader) Concern(_ context.Context, in mcpcontract.ConcernInput) (mcpcontract.ConcernOutput, error) {
+	return mcpcontract.ConcernOutput{ID: in.ID, Title: "concern", Status: "untriaged", Freshness: "unknown"}, nil
 }
 
 func (*fakeReader) CancelJobs(_ context.Context, in mcpcontract.CancelJobInput) (mcpcontract.GetJobsOutput, error) {
@@ -718,6 +730,23 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 	} {
 		if _, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: uri}); err == nil {
 			t.Errorf("unadvertised alias %q was routed", uri)
+		}
+	}
+
+	templates := map[string]bool{}
+	for template, err := range client.ResourceTemplates(context.Background(), nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		templates[template.URITemplate] = true
+	}
+	for _, uriTemplate := range []string{
+		"gitcontribute://concern/{id}",
+		"gitcontribute://draft/{id}/{revision}",
+		"gitcontribute://manifest/{id}",
+	} {
+		if !templates[uriTemplate] {
+			t.Errorf("missing resource template %q", uriTemplate)
 		}
 	}
 }

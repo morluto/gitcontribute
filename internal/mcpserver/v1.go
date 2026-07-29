@@ -152,12 +152,12 @@ func (s *Server) registerV1() {
 		annotations: localWrite, supportedBy: supports[Operator], input: inputSchema[mcpcontract.StartInvestigationInput](configureInvestigationSourceModes),
 		output: outputSchema[mcpcontract.DurableArtifactReference]("Compact reference to the newly created investigation resource."), handler: s.startInvestigation,
 	})
-	addCatalogTool(s, catalogTool[mcpcontract.RecordHypothesisInput, mcpcontract.HypothesisOutput]{
+	addCatalogTool(s, catalogTool[mcpcontract.RecordHypothesisInput, mcpcontract.DurableArtifactReference]{
 		name: mcpcontract.ToolRecordHypothesis, title: "Record investigation hypothesis",
 		description: "Persist a structured hypothesis and source references in an existing local investigation. Use this only after the problem is concrete enough to state expected or observed behavior; it performs no network access.",
 		annotations: localWrite, supportedBy: supports[Operator], input: inputSchema[mcpcontract.RecordHypothesisInput](func(schema *schemaBuilder) {
 			setEnum(schema, "category", "bug", "performance", "architecture", "testing", "documentation", "maintenance", "compatibility", "security", "other")
-		}), output: outputSchema[mcpcontract.HypothesisOutput]("Newly recorded structured hypothesis."), handler: s.recordHypothesis,
+		}), output: outputSchema[mcpcontract.DurableArtifactReference]("Compact reference to the updated investigation resource."), handler: s.recordHypothesis,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.CheckDuplicatesInput, mcpcontract.CheckOutput]{
 		name: mcpcontract.ToolCheckDuplicates, title: "Find issue and PR duplicates",
@@ -203,13 +203,13 @@ func (s *Server) registerV1() {
 		input:  inputSchema[mcpcontract.AttachValidationReceiptInput](noSchemaCustomization),
 		output: outputSchema[mcpcontract.ExternalValidationReceiptOutput]("Stored external receipt identity and result."), handler: s.attachValidationReceipt,
 	})
-	addCatalogTool(s, catalogTool[mcpcontract.PrepareContributionInput, mcpcontract.DraftOutput]{
+	addCatalogTool(s, catalogTool[mcpcontract.PrepareContributionInput, mcpcontract.DurableArtifactReference]{
 		name: mcpcontract.ToolPrepareContribution, title: "Prepare pull request or issue draft",
 		description: "Render and persist a pull request or issue draft from stored evidence, supplied changes, or a verified workspace diff; it inspects the managed workspace with non-mutating Git when changes are omitted. Never posts or mutates GitHub.",
 		annotations: localWrite, supportedBy: supports[Operator], input: inputSchema[mcpcontract.PrepareContributionInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 			configureContributionDraftModes(schema)
-		}), output: outputSchema[mcpcontract.DraftOutput]("Newly rendered and persisted local contribution draft."), handler: s.prepareContribution,
+		}), output: outputSchema[mcpcontract.DurableArtifactReference]("Compact reference to the immutable persisted draft resource."), handler: s.prepareContribution,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.VerifyPublishedDraftInput, mcpcontract.PublishedDraftVerificationOutput]{
 		name: mcpcontract.ToolVerifyPublishedDraft, title: "Verify published draft bytes",
@@ -221,11 +221,11 @@ func (s *Server) registerV1() {
 			setRange(schema, "number", 1, 1<<31-1)
 		}), output: outputSchema[mcpcontract.PublishedDraftVerificationOutput]("Exact, normalized-only, mismatch, or unknown comparison."), handler: s.verifyPublishedDraft,
 	})
-	addCatalogTool(s, catalogTool[mcpcontract.ExportManifestInput, mcpcontract.ManifestOutput]{
+	addCatalogTool(s, catalogTool[mcpcontract.ExportManifestInput, mcpcontract.DurableArtifactReference]{
 		name: mcpcontract.ToolExportManifest, title: "Export contribution evidence manifest",
 		description: "Generate and persist a deterministic local evidence manifest from SQLite and an optional managed workspace snapshot. It may run non-mutating Git commands but never contacts GitHub; sync exact GitHub facets separately before export.",
 		annotations: localWrite, supportedBy: supports[Operator], input: inputSchema[mcpcontract.ExportManifestInput](nil),
-		output: outputSchema[mcpcontract.ManifestOutput]("Digest-bound contribution evidence statement with explicit completeness gaps."), handler: s.exportManifest,
+		output: outputSchema[mcpcontract.DurableArtifactReference]("Compact reference to the persisted contribution evidence manifest."), handler: s.exportManifest,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.CancelJobInput, mcpcontract.GetJobsOutput]{
 		name: mcpcontract.ToolCancelJob, title: "Cancel durable jobs in one batch",
@@ -353,22 +353,26 @@ func (s *Server) startInvestigation(ctx context.Context, _ *mcp.CallToolRequest,
 	return linkedResource(uri, "investigation", "Investigation", "Persisted local investigation."), ref, nil
 }
 
-func (s *Server) recordHypothesis(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.RecordHypothesisInput) (*mcp.CallToolResult, mcpcontract.HypothesisOutput, error) {
+func (s *Server) recordHypothesis(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.RecordHypothesisInput) (*mcp.CallToolResult, mcpcontract.DurableArtifactReference, error) {
 	if _, err := normalizeID("investigation_id", in.InvestigationID); err != nil {
-		return nil, mcpcontract.HypothesisOutput{}, err
+		return nil, mcpcontract.DurableArtifactReference{}, err
 	}
 	in.Title = strings.TrimSpace(in.Title)
 	in.Description = strings.TrimSpace(in.Description)
 	in.Category = strings.TrimSpace(in.Category)
 	if in.Title == "" || in.Description == "" || in.Category == "" {
-		return nil, mcpcontract.HypothesisOutput{}, mcpcontract.InvalidArgument("title", "title, description, and category are required", map[string]any{"title": "Observed behavior", "description": "Describe the evidence-backed hypothesis.", "category": "bug"})
+		return nil, mcpcontract.DurableArtifactReference{}, mcpcontract.InvalidArgument("title", "title, description, and category are required", map[string]any{"title": "Observed behavior", "description": "Describe the evidence-backed hypothesis.", "category": "bug"})
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {
-		return nil, mcpcontract.HypothesisOutput{}, errors.New("hypothesis recording is not available")
+		return nil, mcpcontract.DurableArtifactReference{}, errors.New("hypothesis recording is not available")
 	}
-	out, err := operator.RecordHypothesis(ctx, in)
-	return nil, out, err
+	if _, err := operator.RecordHypothesis(ctx, in); err != nil {
+		return nil, mcpcontract.DurableArtifactReference{}, err
+	}
+	uri := "gitcontribute://investigation/" + in.InvestigationID
+	ref := mcpcontract.DurableArtifactReference{Kind: "investigation", ID: in.InvestigationID, URI: uri}
+	return linkedResource(uri, "investigation", "Investigation", "Investigation containing the persisted hypothesis."), ref, nil
 }
 
 func (s *Server) checkDuplicates(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.CheckDuplicatesInput) (*mcp.CallToolResult, mcpcontract.CheckOutput, error) {

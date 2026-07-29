@@ -528,6 +528,13 @@ func TestPrepareContributionDrafts(t *testing.T) {
 	if !strings.Contains(issue.Body, "Problem") || !strings.Contains(issue.Body, "Pass tests without panic") {
 		t.Fatalf("issue body missing expected sections: %s", issue.Body)
 	}
+	draftResource, err := (&MCPReader{svc}).Draft(ctx, mcpcontract.DraftInput{ID: issue.ID, Revision: issue.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draftResource.ID != issue.ID || draftResource.Revision != issue.Revision || draftResource.TitleSHA256 != issue.TitleSHA256 || draftResource.Body != issue.Body {
+		t.Fatalf("draft resource = %+v", draftResource)
+	}
 
 	pr, err := svc.PreparePullRequest(ctx, opp.ID, contracts.PreparePROptions{
 		Approach:      "Serialize access with a mutex",
