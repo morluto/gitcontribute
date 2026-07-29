@@ -190,6 +190,8 @@ jobs:
             });
           ' <<<"$metadata"
       - name: Publish npm package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NODE_AUTH_TOKEN }}
         run: npm publish --provenance --access public
       - name: Attach npm package to GitHub release
         env:
