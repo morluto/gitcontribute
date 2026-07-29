@@ -11,6 +11,12 @@ func Compare(base, candidate *ValidationRun) (*ComparisonResult, error) {
 	if base.Kind != RunKindBase || candidate.Kind != RunKindCandidate {
 		return nil, ErrInvalidComparison
 	}
+	if base.DefinitionID != candidate.DefinitionID {
+		return inconclusiveComparison(base, candidate, "base and candidate do not share one validation definition"), nil
+	}
+	if reason := incompatibleRunIdentity(base, candidate); reason != "" {
+		return inconclusiveComparison(base, candidate, reason), nil
+	}
 
 	classification, explanation := classify(base, candidate)
 	return &ComparisonResult{
@@ -19,6 +25,38 @@ func Compare(base, candidate *ValidationRun) (*ComparisonResult, error) {
 		Classification: classification,
 		Explanation:    explanation,
 	}, nil
+}
+
+func inconclusiveComparison(base, candidate *ValidationRun, explanation string) *ComparisonResult {
+	return &ComparisonResult{Base: base, Candidate: candidate, Classification: ComparisonInconclusive, Explanation: explanation}
+}
+
+func incompatibleRunIdentity(base, candidate *ValidationRun) string {
+	if base.ExecutionOrigin == "external" || candidate.ExecutionOrigin == "external" {
+		if base.ExecutionOrigin != candidate.ExecutionOrigin {
+			return "external and locally executed observations cannot establish a confirmatory comparison"
+		}
+		if base.External == nil || candidate.External == nil {
+			return "external receipt provenance is missing"
+		}
+		if base.External.Incomplete || candidate.External.Incomplete {
+			return "one or both external receipts are producer-declared incomplete"
+		}
+		if base.External.Repository == "" || candidate.External.Repository == "" ||
+			base.External.Revision == "" || candidate.External.Revision == "" ||
+			base.External.ArtifactSHA256 == "" || candidate.External.ArtifactSHA256 == "" {
+			return "external source or artifact identity is incomplete"
+		}
+		if base.External.Repository != candidate.External.Repository {
+			return "external receipts identify different repositories"
+		}
+	}
+	for _, run := range []*ValidationRun{base, candidate} {
+		if run.WorkspaceBindingStatus == "stale" || run.WorkspaceBindingStatus == "incompatible" {
+			return fmt.Sprintf("%s workspace binding is %s", run.Kind, run.WorkspaceBindingStatus)
+		}
+	}
+	return ""
 }
 
 func classify(base, candidate *ValidationRun) (ComparisonClassification, string) {

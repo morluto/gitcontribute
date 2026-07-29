@@ -15,6 +15,42 @@ type ValidationService interface {
 	CompareValidation(ctx context.Context, baseRunID, candidateRunID string) (*ValidationComparisonResult, error)
 }
 
+// ValidationReceiptService is the optional no-execution receipt import
+// capability used by CLI and MCP adapters.
+type ValidationReceiptService interface {
+	AttachValidationReceipt(ctx context.Context, receipt ExternalValidationReceipt) (*ValidationRunResult, error)
+}
+
+// ExternalValidationReceipt is an untrusted producer receipt imported without
+// executing its command.
+type ExternalValidationReceipt struct {
+	SchemaVersion   string            `json:"schema_version"`
+	Producer        string            `json:"producer"`
+	ReceiptSHA256   string            `json:"receipt_sha256"`
+	ValidationID    string            `json:"validation_id"`
+	InvestigationID string            `json:"investigation_id"`
+	OpportunityID   string            `json:"opportunity_id,omitempty"`
+	Kind            string            `json:"kind"`
+	Repository      string            `json:"repository,omitempty"`
+	Revision        string            `json:"revision,omitempty"`
+	ArtifactSHA256  string            `json:"artifact_sha256,omitempty"`
+	Provider        string            `json:"provider,omitempty"`
+	ExternalRunID   string            `json:"external_run_id,omitempty"`
+	Command         []string          `json:"argv,omitempty"`
+	WorkingDir      string            `json:"working_dir,omitempty"`
+	Environment     map[string]string `json:"environment,omitempty"`
+	Artifacts       map[string]string `json:"artifacts,omitempty"`
+	StartedAt       time.Time         `json:"started_at"`
+	CompletedAt     time.Time         `json:"completed_at"`
+	ExitCode        int               `json:"exit_code"`
+	Classification  string            `json:"classification"`
+	Stdout          string            `json:"stdout,omitempty"`
+	Stderr          string            `json:"stderr,omitempty"`
+	Truncated       bool              `json:"truncated,omitempty"`
+	Limitations     []string          `json:"limitations,omitempty"`
+	Incomplete      bool              `json:"incomplete,omitempty"`
+}
+
 // RunValidationOptions carries the run target and explicit host-execution authorization.
 type RunValidationOptions struct {
 	Kind    string
@@ -97,6 +133,26 @@ type ValidationRunResult struct {
 	FailurePhase            string                        `json:"failure_phase,omitempty"`
 	Resources               ValidationResourceTelemetry   `json:"resources"`
 	Cleanup                 ValidationCleanupResult       `json:"cleanup"`
+	ExecutionOrigin         string                        `json:"execution_origin,omitempty"`
+	External                *ExternalValidationProvenance `json:"external,omitempty"`
+}
+
+type ExternalValidationProvenance struct {
+	SchemaVersion  string            `json:"schema_version"`
+	Producer       string            `json:"producer"`
+	ValidationID   string            `json:"validation_id"`
+	ReceiptSHA256  string            `json:"receipt_sha256"`
+	Repository     string            `json:"repository,omitempty"`
+	Revision       string            `json:"revision,omitempty"`
+	ArtifactSHA256 string            `json:"artifact_sha256,omitempty"`
+	Provider       string            `json:"provider,omitempty"`
+	ExternalRunID  string            `json:"external_run_id,omitempty"`
+	Command        []string          `json:"argv,omitempty"`
+	WorkingDir     string            `json:"working_dir,omitempty"`
+	Environment    map[string]string `json:"environment,omitempty"`
+	Artifacts      map[string]string `json:"artifacts,omitempty"`
+	Limitations    []string          `json:"limitations,omitempty"`
+	Incomplete     bool              `json:"incomplete,omitempty"`
 }
 
 // ValidationProcessIdentity identifies a sampled process without conflating PID reuse.
