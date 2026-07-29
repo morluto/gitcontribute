@@ -215,13 +215,6 @@ func requireTogether(builder *schemaBuilder, names ...string) {
 	}
 }
 
-func requireExactlyOne(builder *schemaBuilder, first, second string) {
-	builder.schema.OneOf = []*jsonschema.Schema{
-		{Required: []string{first}, Not: &jsonschema.Schema{Required: []string{second}}},
-		{Required: []string{second}, Not: &jsonschema.Schema{Required: []string{first}}},
-	}
-}
-
 func configureValidationObservationSchema(builder *schemaBuilder) {
 	observation := property(builder, "observation")
 	if observation == nil {

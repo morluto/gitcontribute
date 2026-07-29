@@ -2,9 +2,7 @@ package mcpserver
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,176 +12,19 @@ import (
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
-// These evaluations deliberately use scripted calls. They measure the MCP
-// contract an agent sees, not a model's ability to choose the right tool.
-func TestAgentEvalBaselineArtifact(t *testing.T) {
-	t.Parallel()
+const agentEvalV5Root = "testdata/agent-eval/v5"
 
-	data, err := os.ReadFile(filepath.Join("testdata", "agent-eval", "baseline.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var baseline struct {
-		Version   string `json:"version"`
-		Scenarios []struct {
-			Name    string `json:"name"`
-			Metrics struct {
-				Completed             bool `json:"completed"`
-				ToolCalls             int  `json:"tool_calls"`
-				ToolErrors            int  `json:"tool_errors"`
-				InvalidArgumentErrors int  `json:"invalid_argument_errors"`
-				ResponseBytes         int  `json:"response_bytes"`
-				PollCalls             int  `json:"poll_calls"`
-			} `json:"metrics"`
-		} `json:"scenarios"`
-	}
-	if err := json.Unmarshal(data, &baseline); err != nil {
-		t.Fatalf("decode baseline: %v", err)
-	}
-	if baseline.Version != "agent-tool-eval.v1" {
-		t.Fatalf("baseline version = %q", baseline.Version)
-	}
-	if len(baseline.Scenarios) < 3 {
-		t.Fatalf("baseline has %d scenarios, want at least 3", len(baseline.Scenarios))
-	}
-	seen := map[string]bool{}
-	for _, scenario := range baseline.Scenarios {
-		if scenario.Name == "" || seen[scenario.Name] {
-			t.Fatalf("missing or duplicate scenario name %q", scenario.Name)
-		}
-		seen[scenario.Name] = true
-		if scenario.Metrics.ToolCalls < 1 || scenario.Metrics.ResponseBytes < 1 {
-			t.Fatalf("scenario %q has incomplete metrics: %+v", scenario.Name, scenario.Metrics)
-		}
-	}
-}
-
-func TestAgentEvalV2PublicAndOracleStayPaired(t *testing.T) {
+func TestAgentEvalV5UnifiedCatalogDecisionFixtures(t *testing.T) {
 	t.Parallel()
+	type condition struct {
+		ID          string `json:"id"`
+		CatalogMode string `json:"catalog_mode"`
+		LoadingMode string `json:"loading_mode"`
+	}
 	type scenario struct {
-		ID                   string   `json:"id"`
-		Prompt               string   `json:"prompt"`
-		Toolsets             []string `json:"toolsets"`
-		AcceptableTools      []string `json:"acceptable_tools"`
-		ForbiddenTools       []string `json:"forbidden_tools"`
-		ExpectedMaxToolCalls int      `json:"expected_max_tool_calls"`
+		ID     string `json:"id"`
+		Prompt string `json:"prompt"`
 	}
-	type fixture struct {
-		Version         string     `json:"version"`
-		FixtureRevision string     `json:"fixture_revision"`
-		Scenarios       []scenario `json:"scenarios"`
-	}
-	read := func(name string) fixture {
-		data, err := os.ReadFile(filepath.Join("testdata", "agent-eval", name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		var value fixture
-		if err := json.Unmarshal(data, &value); err != nil {
-			t.Fatal(err)
-		}
-		return value
-	}
-	public, oracle := read("public-v2.json"), read("oracle-v2.json")
-	if public.Version != "agent-tool-eval.v2" || oracle.Version != "agent-tool-eval-oracle.v2" || public.FixtureRevision != oracle.FixtureRevision {
-		t.Fatalf("mismatched eval fixtures: public=%+v oracle=%+v", public, oracle)
-	}
-	if len(public.Scenarios) != len(oracle.Scenarios) || len(public.Scenarios) < 3 {
-		t.Fatalf("scenario counts differ: public=%d oracle=%d", len(public.Scenarios), len(oracle.Scenarios))
-	}
-	for i := range public.Scenarios {
-		if public.Scenarios[i].ID == "" || public.Scenarios[i].ID != oracle.Scenarios[i].ID || strings.TrimSpace(public.Scenarios[i].Prompt) == "" {
-			t.Fatalf("unpaired scenario %d: public=%+v oracle=%+v", i, public.Scenarios[i], oracle.Scenarios[i])
-		}
-		enabled := enabledToolNames(public.Scenarios[i].Toolsets)
-		for _, tool := range oracle.Scenarios[i].AcceptableTools {
-			if _, ok := enabled[tool]; !ok {
-				t.Errorf("scenario %q cannot call acceptable tool %q with toolsets %v", public.Scenarios[i].ID, tool, public.Scenarios[i].Toolsets)
-			}
-		}
-		for _, tool := range oracle.Scenarios[i].ForbiddenTools {
-			for _, acceptable := range oracle.Scenarios[i].AcceptableTools {
-				if tool == acceptable {
-					t.Errorf("scenario %q marks tool %q both acceptable and forbidden", public.Scenarios[i].ID, tool)
-				}
-			}
-		}
-		if (public.Scenarios[i].ID == "exact_issue_set_preparation" || public.Scenarios[i].ID == "repository_dossier_availability") &&
-			oracle.Scenarios[i].ExpectedMaxToolCalls != 1 {
-			t.Errorf("%s scenario max calls = %d, want 1", public.Scenarios[i].ID, oracle.Scenarios[i].ExpectedMaxToolCalls)
-		}
-	}
-}
-
-const agentEvalV3Root = "testdata/agent-eval/v3"
-
-type agentEvalV3Condition struct {
-	ID        string   `json:"id"`
-	Artifacts []string `json:"artifacts"`
-}
-
-type agentEvalV3PublicScenario struct {
-	ID                string                 `json:"id"`
-	Prompt            string                 `json:"prompt"`
-	StartingArtifacts []string               `json:"starting_artifacts"`
-	Conditions        []agentEvalV3Condition `json:"conditions"`
-}
-
-type agentEvalV3Public struct {
-	Version                   string                      `json:"version"`
-	FixtureRevision           string                      `json:"fixture_revision"`
-	MinimumTrialsPerCondition int                         `json:"minimum_trials_per_condition"`
-	Scenarios                 []agentEvalV3PublicScenario `json:"scenarios"`
-	ReviewerHandoff           struct {
-		Input string `json:"input"`
-	} `json:"reviewer_handoff"`
-}
-
-type agentEvalV3OracleScenario struct {
-	ID               string         `json:"id"`
-	RequiredClaims   []string       `json:"required_claims"`
-	RequiredEvidence []string       `json:"required_evidence"`
-	HardFailures     []string       `json:"hard_failures"`
-	Rubric           map[string]int `json:"rubric"`
-}
-
-type agentEvalV3Trajectory struct {
-	ScenarioID string   `json:"scenario_id"`
-	Claims     []string `json:"claims"`
-	Evidence   []string `json:"evidence"`
-}
-
-func TestAgentEvalV3EvidenceBoundaryFixtures(t *testing.T) {
-	t.Parallel()
-	public := loadAgentEvalV3Public(t)
-	oracles := loadAgentEvalV3Oracles(t, public)
-	visibility := validateAgentEvalV3Manifest(t, public.FixtureRevision)
-	validateAgentEvalV3ArtifactVisibility(t, public, oracles, visibility)
-	validateAgentEvalV3Calibrations(t, public, oracles)
-}
-
-const agentEvalV4Root = "testdata/agent-eval/v4"
-
-type agentEvalV4Catalog struct {
-	ID            string   `json:"id"`
-	Toolsets      []string `json:"toolsets"`
-	DisabledTools []string `json:"disabled_tools"`
-	SHA256        string   `json:"sha256"`
-}
-
-type agentEvalV4Condition struct {
-	ID      string `json:"id"`
-	Catalog string `json:"catalog"`
-}
-
-type agentEvalV4Scenario struct {
-	ID         string                 `json:"id"`
-	Prompt     string                 `json:"prompt"`
-	Conditions []agentEvalV4Condition `json:"conditions"`
-}
-
-func TestAgentEvalV4ToolSelectionFixtures(t *testing.T) {
-	t.Parallel()
 	var public struct {
 		Version                   string `json:"version"`
 		FixtureRevision           string `json:"fixture_revision"`
@@ -192,85 +33,74 @@ func TestAgentEvalV4ToolSelectionFixtures(t *testing.T) {
 			Version string `json:"version"`
 			SHA256  string `json:"sha256"`
 		} `json:"external_oracle"`
-		ControlledVariables []string              `json:"controlled_variables"`
-		Catalogs            []agentEvalV4Catalog  `json:"catalogs"`
-		Scenarios           []agentEvalV4Scenario `json:"scenarios"`
-		SemanticMetrics     []string              `json:"semantic_metrics"`
-		EfficiencyMetrics   []string              `json:"efficiency_metrics"`
+		ControlledVariables []string    `json:"controlled_variables"`
+		Conditions          []condition `json:"conditions"`
+		Scenarios           []scenario  `json:"scenarios"`
+		SemanticMetrics     []string    `json:"semantic_metrics"`
+		EfficiencyMetrics   []string    `json:"efficiency_metrics"`
 	}
-	publicData := readAgentEvalV4JSON(t, "public.json", &public)
-	if public.Version != "agent-tool-eval.v4" || public.FixtureRevision != "mcp-tool-redesign-v1" ||
-		public.MinimumTrialsPerCondition < 3 || public.ExternalOracle.Version != "agent-tool-eval-oracle.v4" ||
-		len(public.ExternalOracle.SHA256) != 64 || len(public.Catalogs) != 6 || len(public.Scenarios) != 10 {
-		t.Fatalf("incomplete public v4 fixture: %+v", public)
+	data, err := os.ReadFile(filepath.Join(agentEvalV5Root, "public.json"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, field := range []string{"required_behaviors", "hard_failures"} {
-		if strings.Contains(string(publicData), field) {
-			t.Fatalf("public v4 fixture leaks oracle field %q", field)
+	if err := json.Unmarshal(data, &public); err != nil {
+		t.Fatal(err)
+	}
+	if public.Version != "agent-tool-eval.v5" ||
+		public.FixtureRevision != "unified-catalog-decision-v1" ||
+		public.MinimumTrialsPerCondition < 3 ||
+		public.ExternalOracle.Version != "agent-tool-eval-oracle.v5" ||
+		len(public.ExternalOracle.SHA256) != 64 {
+		t.Fatalf("incomplete public v5 fixture: %+v", public)
+	}
+	for _, leaked := range []string{"acceptable_tools", "hard_failures"} {
+		if strings.Contains(string(data), leaked) {
+			t.Fatalf("public v5 fixture leaks oracle field %q", leaked)
 		}
 	}
-	for _, required := range []string{"model", "sampling_settings", "catalog_fingerprint", "corpus_revision", "permissions", "task_prompt", "token_budget"} {
+	for _, required := range []string{
+		"model", "sampling_settings", "catalog_fingerprint", "corpus_revision",
+		"permissions", "task_prompt", "token_budget",
+	} {
 		if !containsString(public.ControlledVariables, required) {
 			t.Errorf("controlled variables omit %q", required)
 		}
 	}
-	if len(public.SemanticMetrics) == 0 || len(public.EfficiencyMetrics) == 0 {
-		t.Fatal("semantic and efficiency metrics must both be declared")
+	wantConditions := map[string]condition{
+		"unified_eager":       {ID: "unified_eager", CatalogMode: "all", LoadingMode: "eager"},
+		"unified_host_search": {ID: "unified_host_search", CatalogMode: "all", LoadingMode: "host_tool_search"},
 	}
-
-	catalogIDs := make(map[string]bool, len(public.Catalogs))
-	for _, catalog := range public.Catalogs {
-		if catalog.ID == "" || catalogIDs[catalog.ID] {
-			t.Fatalf("missing or duplicate v4 catalog id %q", catalog.ID)
-		}
-		catalogIDs[catalog.ID] = true
-		tools, closeSessions := listedToolsFor(t, catalog.Toolsets)
-		for _, disabled := range catalog.DisabledTools {
-			if tools[disabled] == nil {
-				closeSessions()
-				t.Fatalf("catalog %q disables absent tool %q", catalog.ID, disabled)
-			}
-			delete(tools, disabled)
-		}
-		payload, err := json.Marshal(tools)
-		closeSessions()
-		if err != nil {
-			t.Fatalf("marshal catalog %q: %v", catalog.ID, err)
-		}
-		got := fmt.Sprintf("%x", sha256.Sum256(payload))
-		if catalog.SHA256 != got {
-			t.Errorf("catalog %q sha256 = %s, want %s", catalog.ID, got, catalog.SHA256)
+	if len(public.Conditions) != len(wantConditions) {
+		t.Fatalf("conditions = %+v", public.Conditions)
+	}
+	for _, got := range public.Conditions {
+		if want, ok := wantConditions[got.ID]; !ok || got != want {
+			t.Errorf("unexpected condition %+v", got)
 		}
 	}
-
 	scenarioIDs := make(map[string]bool, len(public.Scenarios))
 	for _, scenario := range public.Scenarios {
-		if scenario.ID == "" || scenarioIDs[scenario.ID] || strings.TrimSpace(scenario.Prompt) == "" || len(scenario.Conditions) < 2 {
-			t.Fatalf("incomplete or duplicate v4 scenario: %+v", scenario)
+		if scenario.ID == "" || scenarioIDs[scenario.ID] || strings.TrimSpace(scenario.Prompt) == "" {
+			t.Fatalf("incomplete or duplicate scenario %+v", scenario)
 		}
 		scenarioIDs[scenario.ID] = true
-		for _, condition := range scenario.Conditions {
-			if condition.ID == "" || !catalogIDs[condition.Catalog] {
-				t.Fatalf("scenario %q has invalid condition %+v", scenario.ID, condition)
-			}
+	}
+	for _, required := range []string{"task_success", "side_effect_correctness"} {
+		if !containsString(public.SemanticMetrics, required) {
+			t.Errorf("semantic metrics omit %q", required)
 		}
 	}
-
-	if _, err := os.Stat(filepath.Join(agentEvalV4Root, "private", "oracle.json")); !os.IsNotExist(err) {
-		t.Fatalf("v4 oracle must remain out of band, stat error = %v", err)
+	for _, required := range []string{
+		"initial_tool_context_tokens", "loaded_tool_context_tokens",
+		"tool_search_calls", "operational_tool_calls",
+	} {
+		if !containsString(public.EfficiencyMetrics, required) {
+			t.Errorf("efficiency metrics omit %q", required)
+		}
 	}
-}
-
-func readAgentEvalV4JSON(t *testing.T, path string, target any) []byte {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(agentEvalV4Root, path))
-	if err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(agentEvalV5Root, "private", "oracle.json")); !os.IsNotExist(err) {
+		t.Fatalf("v5 oracle must remain out of band, stat error = %v", err)
 	}
-	if err := json.Unmarshal(data, target); err != nil {
-		t.Fatalf("decode %s: %v", path, err)
-	}
-	return data
 }
 
 func containsString(values []string, target string) bool {
@@ -280,171 +110,6 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
-}
-
-func readAgentEvalV3JSON(t *testing.T, path string, target any) []byte {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join(agentEvalV3Root, path))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(data, target); err != nil {
-		t.Fatalf("decode %s: %v", path, err)
-	}
-	return data
-}
-
-func loadAgentEvalV3Public(t *testing.T) agentEvalV3Public {
-	t.Helper()
-	var public agentEvalV3Public
-	data := readAgentEvalV3JSON(t, "public.json", &public)
-	if public.Version != "agent-tool-eval.v3" || public.MinimumTrialsPerCondition < 5 || len(public.Scenarios) != 3 || strings.TrimSpace(public.ReviewerHandoff.Input) == "" {
-		t.Fatalf("incomplete public fixture: %+v", public)
-	}
-	for _, leaked := range []string{"critical_discriminator", "tempting_wrong_path", "hard_failures", "correct_conclusion"} {
-		if strings.Contains(string(data), leaked) {
-			t.Fatalf("public fixture leaks oracle field %q", leaked)
-		}
-	}
-	return public
-}
-
-func loadAgentEvalV3Oracles(t *testing.T, public agentEvalV3Public) map[string]agentEvalV3OracleScenario {
-	t.Helper()
-	var oracle struct {
-		Version         string                      `json:"version"`
-		FixtureRevision string                      `json:"fixture_revision"`
-		Scenarios       []agentEvalV3OracleScenario `json:"scenarios"`
-	}
-	readAgentEvalV3JSON(t, filepath.Join("private", "oracle.json"), &oracle)
-	if oracle.Version != "agent-tool-eval-oracle.v3" || oracle.FixtureRevision != public.FixtureRevision || len(oracle.Scenarios) != len(public.Scenarios) {
-		t.Fatalf("public/oracle mismatch: public=%+v oracle=%+v", public, oracle)
-	}
-	oracles := make(map[string]agentEvalV3OracleScenario, len(oracle.Scenarios))
-	for _, scenario := range oracle.Scenarios {
-		totalWeight := 0
-		for _, weight := range scenario.Rubric {
-			totalWeight += weight
-		}
-		if scenario.ID == "" || len(scenario.RequiredClaims) == 0 || len(scenario.RequiredEvidence) == 0 || len(scenario.HardFailures) == 0 || totalWeight != 100 {
-			t.Fatalf("incomplete oracle scenario: %+v", scenario)
-		}
-		oracles[scenario.ID] = scenario
-	}
-	return oracles
-}
-
-func validateAgentEvalV3Manifest(t *testing.T, fixtureRevision string) map[string]string {
-	t.Helper()
-	var manifest struct {
-		FixtureRevision string `json:"fixture_revision"`
-		Artifacts       []struct {
-			Path       string `json:"path"`
-			Visibility string `json:"visibility"`
-			SHA256     string `json:"sha256"`
-		} `json:"artifacts"`
-	}
-	readAgentEvalV3JSON(t, "manifest.json", &manifest)
-	if manifest.FixtureRevision != fixtureRevision || len(manifest.Artifacts) < 8 {
-		t.Fatalf("incomplete manifest: %+v", manifest)
-	}
-	visibility := make(map[string]string, len(manifest.Artifacts))
-	for _, artifact := range manifest.Artifacts {
-		if filepath.IsAbs(artifact.Path) || strings.Contains(artifact.Path, "..") {
-			t.Fatalf("unsafe manifest path %q", artifact.Path)
-		}
-		data, err := os.ReadFile(filepath.Join(agentEvalV3Root, artifact.Path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := fmt.Sprintf("%x", sha256.Sum256(data)); got != artifact.SHA256 {
-			t.Fatalf("artifact %s hash = %s, want %s", artifact.Path, got, artifact.SHA256)
-		}
-		if _, exists := visibility[artifact.Path]; exists {
-			t.Fatalf("duplicate manifest artifact %q", artifact.Path)
-		}
-		visibility[artifact.Path] = artifact.Visibility
-	}
-	return visibility
-}
-
-func validateAgentEvalV3ArtifactVisibility(t *testing.T, public agentEvalV3Public, oracles map[string]agentEvalV3OracleScenario, visibility map[string]string) {
-	t.Helper()
-	for _, scenario := range public.Scenarios {
-		if strings.TrimSpace(scenario.Prompt) == "" || len(scenario.StartingArtifacts) != 1 || len(scenario.Conditions) < 3 {
-			t.Fatalf("incomplete public scenario: %+v", scenario)
-		}
-		if _, ok := oracles[scenario.ID]; !ok {
-			t.Fatalf("public scenario %q has no oracle", scenario.ID)
-		}
-		if visibility[scenario.StartingArtifacts[0]] != "candidate" {
-			t.Fatalf("scenario %q artifact is not candidate-visible", scenario.ID)
-		}
-		conditionArtifacts := make(map[string]bool, len(scenario.Conditions))
-		for _, condition := range scenario.Conditions {
-			if condition.ID == "" || len(condition.Artifacts) != 1 {
-				t.Fatalf("scenario %q has incomplete condition: %+v", scenario.ID, condition)
-			}
-			artifact := condition.Artifacts[0]
-			if visibility[artifact] != "candidate" {
-				t.Fatalf("scenario %q condition %q artifact is not candidate-visible", scenario.ID, condition.ID)
-			}
-			if conditionArtifacts[artifact] {
-				t.Fatalf("scenario %q reuses condition artifact %q", scenario.ID, artifact)
-			}
-			conditionArtifacts[artifact] = true
-		}
-	}
-}
-
-func validateAgentEvalV3Calibrations(t *testing.T, public agentEvalV3Public, oracles map[string]agentEvalV3OracleScenario) {
-	t.Helper()
-	for _, name := range []string{"calibration-good.json", "calibration-bad.json"} {
-		var fixture struct {
-			ExpectedPass bool                    `json:"expected_pass"`
-			Trajectories []agentEvalV3Trajectory `json:"trajectories"`
-		}
-		readAgentEvalV3JSON(t, filepath.Join("private", name), &fixture)
-		if len(fixture.Trajectories) != len(public.Scenarios) {
-			t.Fatalf("%s trajectory count = %d", name, len(fixture.Trajectories))
-		}
-		for _, trajectory := range fixture.Trajectories {
-			if got := agentEvalV3TrajectoryPasses(trajectory, oracles); got != fixture.ExpectedPass {
-				t.Fatalf("%s scenario %q pass = %v, want %v", name, trajectory.ScenarioID, got, fixture.ExpectedPass)
-			}
-		}
-	}
-}
-
-func agentEvalV3TrajectoryPasses(value agentEvalV3Trajectory, oracles map[string]agentEvalV3OracleScenario) bool {
-	scenario, ok := oracles[value.ScenarioID]
-	if !ok {
-		return false
-	}
-	claims := make(map[string]bool, len(value.Claims))
-	for _, claim := range value.Claims {
-		claims[claim] = true
-	}
-	evidence := make(map[string]bool, len(value.Evidence))
-	for _, item := range value.Evidence {
-		evidence[item] = true
-	}
-	for _, required := range scenario.RequiredClaims {
-		if !claims[required] {
-			return false
-		}
-	}
-	for _, required := range scenario.RequiredEvidence {
-		if !evidence[required] {
-			return false
-		}
-	}
-	for _, failure := range scenario.HardFailures {
-		if claims[failure] {
-			return false
-		}
-	}
-	return true
 }
 
 func TestAgentEvalScriptedCurrentContracts(t *testing.T) {

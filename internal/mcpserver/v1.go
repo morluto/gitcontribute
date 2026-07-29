@@ -37,9 +37,6 @@ type SearchThreadsInput struct {
 	View          string   `json:"view,omitempty" jsonschema:"compact omits full bodies and returns bounded excerpts; full includes stored bodies"`
 }
 
-// GetRepositoryDossierInput selects a persisted repository dossier.
-type GetRepositoryDossierInput mcpcontract.RepoInput
-
 // ExplainMatchInput identifies an exact stored result and its original query.
 
 // ExplainMatchOutput reports the stored facts that contributed to a match score.
@@ -100,12 +97,6 @@ func (s *Server) registerV1() {
 			setDefault(schema, "limit", 20)
 		}), output: outputSchema[mcpcontract.SearchOutput]("One page of stored issue and pull-request matches."), handler: s.searchThreads,
 	})
-	addCatalogTool(s, catalogTool[GetRepositoryDossierInput, mcpcontract.DossierOutput]{
-		name: mcpcontract.ToolGetRepositoryDossier, title: "Get repository dossier",
-		description: "Read one persisted source-backed dossier for a known finalist. Use " + mcpcontract.ToolGetRepositories + " for discovery or comparison and " + mcpcontract.ToolBuildRepositoryDossier + " to regenerate. Offline.",
-		annotations: readOnly, input: inputSchema[GetRepositoryDossierInput](noSchemaCustomization),
-		output: outputSchema[mcpcontract.DossierOutput]("Persisted source-backed repository dossier."), handler: s.getRepositoryDossier,
-	})
 	addCatalogTool(s, catalogTool[mcpcontract.ExplainMatchInput, mcpcontract.ExplainMatchOutput]{
 		name: mcpcontract.ToolExplainMatch, title: "Explain a stored search match",
 		description: "Read the FTS5 rank, stored match source, source revision, and coverage for one prior repository, thread, or code result. It does not reimplement token matching; this tool is offline.",
@@ -118,7 +109,7 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.BuildRepositoryDossierInput, mcpcontract.JobReference]{
 		name: mcpcontract.ToolBuildRepositoryDossier, title: "Build repository dossier",
-		description: "Start an asynchronous local job that rebuilds and persists a source-backed dossier from the existing corpus. It performs no network access; use " + mcpcontract.ToolGetRepositoryDossier + " after the job succeeds.",
+		description: "Start an asynchronous local job that rebuilds and persists a source-backed dossier from the existing corpus. It performs no network access; read the returned dossier resource after the job succeeds.",
 		annotations: localWriteAnnotations(true), supportedBy: supports[Operator], input: inputSchema[mcpcontract.BuildRepositoryDossierInput](noSchemaCustomization),
 		output: outputSchema[mcpcontract.JobReference]("Reference to a newly queued dossier build job."), handler: s.buildRepositoryDossier,
 	})
@@ -155,11 +146,11 @@ func (s *Server) registerV1() {
 			setConst(schema, "execute", true)
 		}), output: outputSchema[mcpcontract.JobReference]("Reference to a newly queued repeat validation job."), handler: s.runRepeatedValidation,
 	})
-	addCatalogTool(s, catalogTool[mcpcontract.StartInvestigationInput, mcpcontract.InvestigationOutput]{
+	addCatalogTool(s, catalogTool[mcpcontract.StartInvestigationInput, mcpcontract.DurableArtifactReference]{
 		name: mcpcontract.ToolStartInvestigation, title: "Start local investigation",
-		description: "Create a local investigation from a commit SHA, or atomically create its initial baseline hypothesis from a stored issue or pull-request number. This does not create a Git worktree or contact GitHub; use " + mcpcontract.ToolCreateWorkspace + " separately when filesystem work is authorized.",
+		description: "Create a durable local investigation from a commit SHA, or atomically create its initial baseline hypothesis from a stored issue or pull-request number. Returns a compact resource reference; read its exact URI for the canonical investigation. This does not create a Git worktree or contact GitHub; use " + mcpcontract.ToolCreateWorkspace + " separately when filesystem work is authorized.",
 		annotations: localWrite, supportedBy: supports[Operator], input: inputSchema[mcpcontract.StartInvestigationInput](configureInvestigationSourceModes),
-		output: outputSchema[mcpcontract.InvestigationOutput]("Newly created local investigation."), handler: s.startInvestigation,
+		output: outputSchema[mcpcontract.DurableArtifactReference]("Compact reference to the newly created investigation resource."), handler: s.startInvestigation,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.RecordHypothesisInput, mcpcontract.HypothesisOutput]{
 		name: mcpcontract.ToolRecordHypothesis, title: "Record investigation hypothesis",
@@ -186,12 +177,12 @@ func (s *Server) registerV1() {
 			setDefault(schema, "limit", 20)
 		}), output: outputSchema[mcpcontract.CheckOutput]("Evidence-backed competing open pull requests."), handler: s.checkCollisions,
 	})
-	addCatalogTool(s, catalogTool[mcpcontract.PromoteOpportunityInput, mcpcontract.OpportunityOutput]{
+	addCatalogTool(s, catalogTool[mcpcontract.PromoteOpportunityInput, mcpcontract.DurableArtifactReference]{
 		name: mcpcontract.ToolPromoteOpportunity, title: "Promote hypothesis to opportunity",
-		description: "Persist a scoped contribution opportunity from an existing hypothesis, including impact, effort, confidence, dependencies, and source references. This changes local workflow state but never contacts or mutates GitHub.",
+		description: "Persist a scoped contribution opportunity from an existing hypothesis. Returns a compact resource reference; read its exact URI for impact, effort, confidence, dependencies, and source references. This changes local workflow state but never contacts or mutates GitHub.",
 		annotations: localWrite, supportedBy: supports[Operator], input: inputSchema[mcpcontract.PromoteOpportunityInput](func(schema *schemaBuilder) {
 			setRange(schema, "confidence", 0, 1)
-		}), output: outputSchema[mcpcontract.OpportunityOutput]("Newly promoted local contribution opportunity."), handler: s.promoteOpportunity,
+		}), output: outputSchema[mcpcontract.DurableArtifactReference]("Compact reference to the newly promoted opportunity resource."), handler: s.promoteOpportunity,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.DefineValidationInput, mcpcontract.ValidationOutput]{
 		name: mcpcontract.ToolDefineValidation, title: "Define validation command",
@@ -304,18 +295,6 @@ func (s *Server) searchThreads(ctx context.Context, _ *mcp.CallToolRequest, in S
 	return nil, out, err
 }
 
-func (s *Server) getRepositoryDossier(ctx context.Context, _ *mcp.CallToolRequest, in GetRepositoryDossierInput) (*mcp.CallToolResult, mcpcontract.DossierOutput, error) {
-	if err := validateRepo(mcpcontract.RepoInput(in)); err != nil {
-		return nil, mcpcontract.DossierOutput{}, err
-	}
-	out, err := s.reader.Dossier(ctx, mcpcontract.RepoInput(in))
-	if err != nil {
-		return nil, out, err
-	}
-	uri := "gitcontribute://dossier/" + in.Owner + "/" + in.Repo
-	return linkedResource(uri, "dossier", "Repository dossier", "Persisted source-backed repository dossier."), out, nil
-}
-
 func (s *Server) explainMatch(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.ExplainMatchInput) (*mcp.CallToolResult, mcpcontract.ExplainMatchOutput, error) {
 	if err := validateRepo(mcpcontract.RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
 		return nil, mcpcontract.ExplainMatchOutput{}, err
@@ -354,22 +333,24 @@ func (s *Server) buildRepositoryDossier(ctx context.Context, _ *mcp.CallToolRequ
 	return nil, out, err
 }
 
-func (s *Server) startInvestigation(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.StartInvestigationInput) (*mcp.CallToolResult, mcpcontract.InvestigationOutput, error) {
+func (s *Server) startInvestigation(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.StartInvestigationInput) (*mcp.CallToolResult, mcpcontract.DurableArtifactReference, error) {
 	if err := validateRepo(mcpcontract.RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
-		return nil, mcpcontract.InvestigationOutput{}, err
+		return nil, mcpcontract.DurableArtifactReference{}, err
 	}
 	if in.Number <= 0 && strings.TrimSpace(in.CommitSHA) == "" {
-		return nil, mcpcontract.InvestigationOutput{}, mcpcontract.InvalidArgument("commit_sha", "provide commit_sha or a positive stored thread number", map[string]any{"commit_sha": "<sha>"})
+		return nil, mcpcontract.DurableArtifactReference{}, mcpcontract.InvalidArgument("commit_sha", "provide commit_sha or a positive stored thread number", map[string]any{"commit_sha": "<sha>"})
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {
-		return nil, mcpcontract.InvestigationOutput{}, errors.New("investigations are not available")
+		return nil, mcpcontract.DurableArtifactReference{}, errors.New("investigations are not available")
 	}
 	out, err := operator.StartInvestigation(ctx, in)
 	if err != nil {
-		return nil, out, err
+		return nil, mcpcontract.DurableArtifactReference{}, err
 	}
-	return linkedResource("gitcontribute://investigation/"+out.ID, "investigation", "Investigation", "Persisted local investigation."), out, nil
+	uri := "gitcontribute://investigation/" + out.ID
+	ref := mcpcontract.DurableArtifactReference{Kind: "investigation", ID: out.ID, URI: uri}
+	return linkedResource(uri, "investigation", "Investigation", "Persisted local investigation."), ref, nil
 }
 
 func (s *Server) recordHypothesis(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.RecordHypothesisInput) (*mcp.CallToolResult, mcpcontract.HypothesisOutput, error) {
@@ -437,25 +418,27 @@ func validateCheckInput(in *mcpcontract.CheckDuplicatesInput) error {
 	return nil
 }
 
-func (s *Server) promoteOpportunity(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.PromoteOpportunityInput) (*mcp.CallToolResult, mcpcontract.OpportunityOutput, error) {
+func (s *Server) promoteOpportunity(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.PromoteOpportunityInput) (*mcp.CallToolResult, mcpcontract.DurableArtifactReference, error) {
 	if _, err := normalizeID("hypothesis_id", in.HypothesisID); err != nil {
-		return nil, mcpcontract.OpportunityOutput{}, err
+		return nil, mcpcontract.DurableArtifactReference{}, err
 	}
 	if strings.TrimSpace(in.ProblemStatement) == "" || strings.TrimSpace(in.Scope) == "" || strings.TrimSpace(in.Impact) == "" || strings.TrimSpace(in.ExpectedEffort) == "" {
-		return nil, mcpcontract.OpportunityOutput{}, mcpcontract.InvalidArgument("problem_statement", "problem_statement, scope, impact, and expected_effort are required", map[string]any{"problem_statement": "Concrete problem", "scope": "Bounded scope", "impact": "Observed impact", "expected_effort": "small"})
+		return nil, mcpcontract.DurableArtifactReference{}, mcpcontract.InvalidArgument("problem_statement", "problem_statement, scope, impact, and expected_effort are required", map[string]any{"problem_statement": "Concrete problem", "scope": "Bounded scope", "impact": "Observed impact", "expected_effort": "small"})
 	}
 	if in.Confidence < 0 || in.Confidence > 1 {
-		return nil, mcpcontract.OpportunityOutput{}, mcpcontract.InvalidArgument("confidence", "must be between 0.0 and 1.0", map[string]any{"confidence": 0.8})
+		return nil, mcpcontract.DurableArtifactReference{}, mcpcontract.InvalidArgument("confidence", "must be between 0.0 and 1.0", map[string]any{"confidence": 0.8})
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {
-		return nil, mcpcontract.OpportunityOutput{}, errors.New("opportunity promotion is not available")
+		return nil, mcpcontract.DurableArtifactReference{}, errors.New("opportunity promotion is not available")
 	}
 	out, err := operator.PromoteOpportunity(ctx, in)
 	if err != nil {
-		return nil, out, err
+		return nil, mcpcontract.DurableArtifactReference{}, err
 	}
-	return linkedResource("gitcontribute://opportunity/"+out.ID, "opportunity", "Opportunity", "Persisted local contribution opportunity."), out, nil
+	uri := "gitcontribute://opportunity/" + out.ID
+	ref := mcpcontract.DurableArtifactReference{Kind: "opportunity", ID: out.ID, URI: uri}
+	return linkedResource(uri, "opportunity", "Opportunity", "Persisted local contribution opportunity."), ref, nil
 }
 
 func (s *Server) cancelJob(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.CancelJobInput) (*mcp.CallToolResult, mcpcontract.GetJobsOutput, error) {

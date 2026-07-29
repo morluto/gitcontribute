@@ -7,7 +7,6 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/app"
 	"github.com/morluto/gitcontribute/internal/contracts"
-	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
 )
 
@@ -27,11 +26,11 @@ func (r *Runner) Run(ctx context.Context, opts contracts.MCPOptions) error {
 	if opts.Transport != "stdio" {
 		return fmt.Errorf("unsupported mcp transport %q", opts.Transport)
 	}
-	server, err := mcpserver.NewWithOptions(
-		r.service.MCPReader(),
-		r.version,
-		mcpcontract.Options{Toolsets: opts.Toolsets, ReadOnly: opts.ReadOnly},
-	)
+	newServer := mcpserver.New
+	if opts.ReadOnly {
+		newServer = mcpserver.NewReadOnly
+	}
+	server, err := newServer(r.service.MCPReader(), r.version)
 	if err != nil {
 		return err
 	}

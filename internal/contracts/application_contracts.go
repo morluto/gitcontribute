@@ -205,7 +205,6 @@ type RepoRef struct {
 // MCPOptions carries MCP server startup options.
 type MCPOptions struct {
 	Transport string
-	Toolsets  []string
 	ReadOnly  bool
 }
 

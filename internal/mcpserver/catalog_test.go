@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,14 +13,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
-
-// The default agent-facing profile should retain useful descriptions and
-// schemas without consuming an unbounded amount of model context. The explicit
-// "all" profile is intentionally not treated as a default-context contract.
-// This byte ceiling includes owned output schemas instead of the former
-// unbounded maps. It is a drift alarm, not evidence that a model benefits from
-// a particular catalog; the held-out evaluation owns membership decisions.
-const maxDefaultCatalogBytes = 100 * 1024
 
 var selectionSynonyms = map[string]string{
 	"execute": "run",
@@ -41,17 +32,12 @@ var selectionStopWords = map[string]bool{
 
 func listedTools(t *testing.T) (map[string]*mcp.Tool, func()) {
 	t.Helper()
-	return listedToolsFor(t, []string{"all"})
+	return listedToolsFromReader(t, &fakeReader{searchStarted: make(chan struct{})})
 }
 
-func listedToolsFor(t *testing.T, toolsets []string) (map[string]*mcp.Tool, func()) {
+func listedToolsFromReader(t *testing.T, reader mcpcontract.Reader) (map[string]*mcp.Tool, func()) {
 	t.Helper()
-	return listedToolsFromReader(t, &fakeReader{searchStarted: make(chan struct{})}, toolsets)
-}
-
-func listedToolsFromReader(t *testing.T, reader mcpcontract.Reader, toolsets []string) (map[string]*mcp.Tool, func()) {
-	t.Helper()
-	client, closeSessions := connectWithOptions(t, reader, mcpcontract.Options{Toolsets: toolsets})
+	client, closeSessions := connectServer(t, reader, false)
 	tools := make(map[string]*mcp.Tool)
 	for tool, err := range client.Tools(context.Background(), nil) {
 		if err != nil {
@@ -67,20 +53,11 @@ func TestCanonicalToolCatalogIsNamespacedAndUnambiguous(t *testing.T) {
 	tools, closeSessions := listedTools(t)
 	defer closeSessions()
 
-	canonicalToolNames := make([]string, 0, len(allToolNames()))
-	for name := range allToolNames() {
+	canonicalToolNames := make([]string, 0, len(tools))
+	for name := range tools {
 		canonicalToolNames = append(canonicalToolNames, name)
 	}
 	sort.Strings(canonicalToolNames)
-	if len(tools) != len(canonicalToolNames) {
-		var missing []string
-		for _, name := range canonicalToolNames {
-			if tools[name] == nil {
-				missing = append(missing, name)
-			}
-		}
-		t.Fatalf("listed %d tools, want canonical catalog of %d; missing %v", len(tools), len(canonicalToolNames), missing)
-	}
 	titles := make(map[string]string)
 	for _, name := range canonicalToolNames {
 		tool := tools[name]
@@ -118,55 +95,14 @@ func TestCanonicalToolCatalogIsNamespacedAndUnambiguous(t *testing.T) {
 	}
 }
 
-func TestDefaultToolCatalogStaysWithinBudget(t *testing.T) {
-	tools, closeSessions := listedToolsFor(t, []string{"contribute"})
+func TestUnifiedCatalogReportsSerializedContextMeasurements(t *testing.T) {
+	tools, closeSessions := listedTools(t)
 	defer closeSessions()
-
 	payload, err := json.Marshal(tools)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("serialized default MCP catalog: %d tools, %d bytes", len(tools), len(payload))
-	if len(payload) > maxDefaultCatalogBytes {
-		t.Fatalf("serialized default MCP catalog is %d bytes, budget is %d", len(payload), maxDefaultCatalogBytes)
-	}
-}
-
-func TestContributionAndCodeProfilesExposeDraftVerificationAndReceiptImport(t *testing.T) {
-	if !supports[PublishedDraftVerifier](&fakeReader{}) || !supports[ValidationReceiptOperator](&fakeReader{}) {
-		t.Fatal("fake reader does not expose new capabilities")
-	}
-	contribute, closeContribute := listedToolsFor(t, []string{"contribute"})
-	defer closeContribute()
-	if contribute[mcpcontract.ToolVerifyPublishedDraft] == nil {
-		t.Fatalf("contribute profile omits published draft verification: %v", contribute)
-	}
-	code, closeCode := listedToolsFor(t, []string{"code"})
-	defer closeCode()
-	if code[mcpcontract.ToolAttachValidationReceipt] == nil {
-		t.Fatal("code profile omits external validation receipt import")
-	}
-}
-
-func TestCatalogProfilesReportSerializedContextMeasurements(t *testing.T) {
-	profiles := make([]string, 0, len(toolsets)+1)
-	for profile := range toolsets {
-		profiles = append(profiles, profile)
-	}
-	profiles = append(profiles, "all")
-	sort.Strings(profiles)
-	for _, profile := range profiles {
-		tools, closeSessions := listedToolsFor(t, []string{profile})
-		payload, err := json.Marshal(tools)
-		closeSessions()
-		if err != nil {
-			t.Fatalf("marshal %s catalog: %v", profile, err)
-		}
-		t.Logf("MCP catalog profile=%s tools=%d serialized_bytes=%d", profile, len(tools), len(payload))
-	}
-
-	tools, closeSessions := listedTools(t)
-	defer closeSessions()
+	t.Logf("MCP unified catalog tools=%d serialized_bytes=%d", len(tools), len(payload))
 	names := make([]string, 0, len(tools))
 	for name := range tools {
 		names = append(names, name)
@@ -181,30 +117,6 @@ func TestCatalogProfilesReportSerializedContextMeasurements(t *testing.T) {
 	}
 }
 
-func TestCatalogProfilesAreDocumentedAndConcernLifecycleIsComplete(t *testing.T) {
-	readme, err := os.ReadFile("../../README.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for profile := range toolsets {
-		if !strings.Contains(string(readme), profile) {
-			t.Errorf("README does not document MCP profile %q", profile)
-		}
-	}
-	contribute := enabledToolNames([]string{"contribute"})
-	for _, name := range toolsets["concerns"] {
-		if _, leaked := contribute[name]; leaked {
-			t.Errorf("default contribution profile exposes partial concern lifecycle tool %q", name)
-		}
-	}
-	concerns := enabledToolNames([]string{"concerns"})
-	for _, name := range []string{ToolListConcerns, ToolCreateConcern, ToolUpdateConcern, ToolSetConcernState, ToolLinkConcern, ToolPromoteConcern} {
-		if _, ok := concerns[name]; !ok {
-			t.Errorf("concerns profile is missing lifecycle tool %q", name)
-		}
-	}
-}
-
 func TestStructuredCancellationIsNotRetryable(t *testing.T) {
 	handler := structuredToolErrors(func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, struct{}, error) {
 		return nil, struct{}{}, context.Canceled
@@ -216,40 +128,8 @@ func TestStructuredCancellationIsNotRetryable(t *testing.T) {
 	}
 }
 
-func TestContributionToolsetOmitsSpecializedCatalogs(t *testing.T) {
-	server, err := NewWithOptions(&fakeReader{searchStarted: make(chan struct{})}, "test", mcpcontract.Options{Toolsets: []string{"contribute"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
-	t1, t2 := mcp.NewInMemoryTransports()
-	serverSession, err := server.MCP().Connect(context.Background(), t1, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer serverSession.Close()
-	clientSession, err := client.Connect(context.Background(), t2, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer clientSession.Close()
-	names := map[string]bool{}
-	for tool, err := range clientSession.Tools(context.Background(), nil) {
-		if err != nil {
-			t.Fatal(err)
-		}
-		names[tool.Name] = true
-	}
-	if !names[mcpcontract.ToolSearchThreads] || !names[mcpcontract.ToolPrepareContribution] {
-		t.Fatalf("contribution tools missing: %v", names)
-	}
-	if names[mcpcontract.ToolListPullRequestPortfolio] || names[mcpcontract.ToolFindClusters] || names[ToolCreateConcern] || names[ToolListConcerns] {
-		t.Fatalf("specialized tools leaked into contribution profile: %v", names)
-	}
-}
-
 func TestReadOnlyModeFiltersEverySideEffectingTool(t *testing.T) {
-	server, err := NewWithOptions(&fakeReader{searchStarted: make(chan struct{})}, "test", mcpcontract.Options{Toolsets: []string{"all"}, ReadOnly: true})
+	server, err := NewReadOnly(&fakeReader{searchStarted: make(chan struct{})}, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +157,7 @@ func TestReadOnlyModeFiltersEverySideEffectingTool(t *testing.T) {
 
 func TestUnsupportedOptionalCapabilitiesAreNotAdvertised(t *testing.T) {
 	base := &fakeReader{searchStarted: make(chan struct{})}
-	server, err := NewWithOptions(struct{ mcpcontract.Reader }{Reader: base}, "test", mcpcontract.Options{Toolsets: []string{"all"}})
+	server, err := New(struct{ mcpcontract.Reader }{Reader: base}, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +197,7 @@ func TestOptionalCapabilitiesAreAdvertisedIndependently(t *testing.T) {
 		mcpcontract.Reader
 		ResearchReader
 	}{Reader: base, ResearchReader: research}
-	tools, closeSessions := listedToolsFromReader(t, reader, []string{"all"})
+	tools, closeSessions := listedToolsFromReader(t, reader)
 	defer closeSessions()
 
 	if tools[mcpcontract.ToolQueryDeepWiki] == nil {
@@ -346,8 +226,6 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].OutputSchema, []string{"properties", "candidates", "items", "properties", "score", "minimum"}, float64(0))
 	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].OutputSchema, []string{"properties", "candidates", "items", "properties", "score", "maximum"}, float64(100))
 	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].OutputSchema, []string{"properties", "candidates", "items", "properties", "confidence", "type"}, "string")
-	assertSchemaValue(t, tools[mcpcontract.ToolGetOpportunity].OutputSchema, []string{"properties", "confidence", "minimum"}, float64(0))
-	assertSchemaValue(t, tools[mcpcontract.ToolGetOpportunity].OutputSchema, []string{"properties", "confidence", "maximum"}, float64(1))
 	assertSchemaValue(t, tools[mcpcontract.ToolFindPrecedents].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "matches", "items", "properties", "score", "maximum"}, float64(1))
 	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "status", "enum"}, []any{"complete", "retryable", "unavailable", "failed"})
 	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "execution_state", "enum"}, []any{"queued", "running", "terminal"})
@@ -458,9 +336,7 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 		{"Read stored facet coverage for several exact threads", mcpcontract.ToolGetCoverage},
 		{"Compare contribution candidates with my authored pull requests for overlap", mcpcontract.ToolFindPortfolioOverlaps},
 		{"Link an authored pull request to a local opportunity", mcpcontract.ToolLinkPullRequest},
-		{"Review readiness blockers and warnings for an opportunity", mcpcontract.ToolGetReadiness},
 		{"Rebuild and persist the repository dossier from the local corpus", mcpcontract.ToolBuildRepositoryDossier},
-		{"Read the existing persisted repository dossier without rebuilding it", mcpcontract.ToolGetRepositoryDossier},
 		{"Find open pull requests that might conflict with this opportunity", mcpcontract.ToolFindCompetingWork},
 		{"Find issues that may duplicate this hypothesis", mcpcontract.ToolCheckDuplicates},
 	}
@@ -496,8 +372,6 @@ func TestInvalidToolCallEvaluation(t *testing.T) {
 		{mcpcontract.ToolCancelJob, map[string]any{"ids": []any{}}},
 		{mcpcontract.ToolFindPortfolioOverlaps, map[string]any{"candidates": []any{map[string]any{"kind": "thread", "ref": "1"}}, "pull_requests": []any{map[string]any{"owner": "acme", "repo": "rocket", "number": 1}}}},
 		{mcpcontract.ToolLinkPullRequest, map[string]any{"pull_request": map[string]any{"owner": "acme", "repo": "rocket", "number": 1}}},
-		{mcpcontract.ToolGetEvidence, map[string]any{}},
-		{mcpcontract.ToolGetEvidence, map[string]any{"investigation_id": "inv-1", "opportunity_id": "opp-1"}},
 		{mcpcontract.ToolHydrateThreads, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "rocket", "number": 1}}, "facets": []string{"unknown"}}},
 		{mcpcontract.ToolSyncThreads, map[string]any{"selection": "threads", "threads": []any{map[string]any{"owner": "acme", "repo": "rocket", "number": 1}}, "state": "open"}},
 		{mcpcontract.ToolRunValidation, map[string]any{"id": "val-1", "kind": "candidate", "execute": false}},

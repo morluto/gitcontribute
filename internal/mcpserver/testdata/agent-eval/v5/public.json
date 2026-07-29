@@ -1,0 +1,68 @@
+{
+  "version": "agent-tool-eval.v5",
+  "fixture_revision": "unified-catalog-decision-v1",
+  "minimum_trials_per_condition": 3,
+  "external_oracle": {
+    "version": "agent-tool-eval-oracle.v5",
+    "sha256": "b4e993e2176a519b1106364236f6944e82af52a3cc458d18f71628b83bbbc8b2"
+  },
+  "controlled_variables": [
+    "model",
+    "sampling_settings",
+    "catalog_fingerprint",
+    "corpus_revision",
+    "permissions",
+    "task_prompt",
+    "token_budget"
+  ],
+  "conditions": [
+    {"id": "unified_eager", "catalog_mode": "all", "loading_mode": "eager"},
+    {"id": "unified_host_search", "catalog_mode": "all", "loading_mode": "host_tool_search"}
+  ],
+  "scenarios": [
+    {
+      "id": "exact_issue_research",
+      "prompt": "Research the supplied exact GitHub issues, preserving coverage, provenance, related work, and explicit unknowns."
+    },
+    {
+      "id": "adopt_and_validate_worktrees",
+      "prompt": "Adopt the supplied base and candidate worktrees and compare their authorized validation evidence without fetching new revisions."
+    },
+    {
+      "id": "external_architecture_research",
+      "prompt": "Ask DeepWiki how the supplied public repositories structure their MCP catalogs, and keep that derived context separate from live GitHub facts."
+    },
+    {
+      "id": "authored_pr_health",
+      "prompt": "Refresh checks, reviews, and merge state for the supplied authored pull requests, then return the durable job reference."
+    },
+    {
+      "id": "ranking_diagnosis",
+      "prompt": "Explain why the supplied stored search result ranked above another result without contacting GitHub."
+    },
+    {
+      "id": "accepted_fix_patterns",
+      "prompt": "Mine the stored repository history for recurring accepted fix patterns while preserving unknown merge outcomes."
+    },
+    {
+      "id": "record_local_concern",
+      "prompt": "Record the supplied source-backed local concern without promoting it or mutating GitHub."
+    }
+  ],
+  "semantic_metrics": [
+    "task_success",
+    "tool_selection_correctness",
+    "argument_correctness",
+    "side_effect_correctness",
+    "uncertainty_correctness"
+  ],
+  "efficiency_metrics": [
+    "initial_tool_context_tokens",
+    "loaded_tool_context_tokens",
+    "tool_search_calls",
+    "operational_tool_calls",
+    "invalid_calls",
+    "latency_ms",
+    "native_fallback"
+  ]
+}

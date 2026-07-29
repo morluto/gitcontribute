@@ -480,7 +480,6 @@ type mcpCmd struct {
 
 type mcpServeCmd struct {
 	Transport string `name:"transport" default:"stdio" enum:"stdio" help:"MCP transport protocol"`
-	Toolsets  string `name:"toolsets" default:"contribute" help:"Comma-separated MCP toolsets: contribute, code, research, diagnostics, portfolio, advanced, patterns, concerns, or all"`
 	ReadOnly  bool   `name:"read-only" help:"Expose only tools annotated as read-only"`
 }
 
@@ -494,9 +493,6 @@ type tuiCmd struct {
 func (c *CLI) Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return c.runDefault(ctx)
-	}
-	if args[0] == "sync" {
-		return NewCLIError(ExitUsage, errors.New("sync was removed; use `gitcontribute archive sync OWNER/REPO`"))
 	}
 	var cli rootCmd
 	parser, err := kong.New(&cli,

@@ -116,53 +116,6 @@ unknown_key = "should fail"
 	}
 }
 
-func TestConfigRetiredOutputFieldsAreMigrated(t *testing.T) {
-	t.Parallel()
-	input := `
-database = "/tmp/test.db"
-
-[output]
-format = "json"
-max_results = 25
-`
-	cfg, err := Load(strings.NewReader(input))
-	if err != nil {
-		t.Fatalf("Load error: %v", err)
-	}
-	if cfg.Database != "/tmp/test.db" {
-		t.Fatalf("Database = %q, want %q", cfg.Database, "/tmp/test.db")
-	}
-
-	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := Save(path, cfg); err != nil {
-		t.Fatalf("Save error: %v", err)
-	}
-	saved, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile error: %v", err)
-	}
-	if strings.Contains(string(saved), "[output]") {
-		t.Fatalf("saved config retained retired output section:\n%s", saved)
-	}
-}
-
-func TestConfigRetiredOutputUnknownFieldsAreRejected(t *testing.T) {
-	t.Parallel()
-	input := `
-[output]
-format = "json"
-unknown_nested = true
-`
-	_, err := Load(strings.NewReader(input))
-	if err == nil {
-		t.Fatal("expected error for unknown retired output field, got nil")
-	}
-	var strictErr *toml.StrictMissingError
-	if !errors.As(err, &strictErr) {
-		t.Fatalf("expected *toml.StrictMissingError, got %T: %v", err, err)
-	}
-}
-
 func TestConfigNestedUnknownFieldsRejected(t *testing.T) {
 	t.Parallel()
 	input := `

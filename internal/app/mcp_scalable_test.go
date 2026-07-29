@@ -457,7 +457,8 @@ func TestGetJobsDetailedReturnsTypedArtifactsWithoutStoredPayloads(t *testing.T)
 	value := detailed.Items[0].Value
 	if value == nil || len(value.Artifacts) != 1 || value.Artifacts[0].Kind != "dossier" ||
 		value.Artifacts[0].URI != "gitcontribute://dossier/acme/rocket" ||
-		value.FollowUp == nil || value.FollowUp.Tool != mcpcontract.ToolGetRepositoryDossier {
+		value.FollowUp == nil || value.FollowUp.Tool != "" ||
+		value.FollowUp.ResourceURI != "gitcontribute://dossier/acme/rocket" {
 		t.Fatalf("detailed jobs output lost typed artifact reference: %+v", detailed)
 	}
 }

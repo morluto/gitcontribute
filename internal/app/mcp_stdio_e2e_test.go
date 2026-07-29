@@ -49,11 +49,7 @@ func TestMCPStdioHelper(t *testing.T) {
 		}
 		svc.SetGitHubReader(reader)
 	}
-	server, err := mcpserver.NewWithOptions(
-		svc.MCPReader(),
-		"e2e",
-		mcpcontract.Options{Toolsets: []string{"all"}},
-	)
+	server, err := mcpserver.New(svc.MCPReader(), "e2e")
 	if err != nil {
 		t.Fatal(err)
 	}
