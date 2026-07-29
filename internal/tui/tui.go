@@ -165,10 +165,6 @@ func (m Model) loadCmd() tea.Cmd {
 	}
 }
 
-func (m Model) itemCount() int {
-	return len(m.items[m.view])
-}
-
 func (m Model) selectedItem() (tuicontract.Item, bool) {
 	if m.cursor < 0 || m.cursor >= len(m.filtered) {
 		return tuicontract.Item{}, false

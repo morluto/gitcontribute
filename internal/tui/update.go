@@ -241,11 +241,12 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.prevView()
 		}
 	case "]", "l":
-		if m.focus == focusNavigation {
+		switch m.focus {
+		case focusNavigation:
 			m.focus = focusList
-		} else if m.focus == focusList {
+		case focusList:
 			m.focus = focusDetail
-		} else {
+		default:
 			m.nextView()
 		}
 	case "/":
