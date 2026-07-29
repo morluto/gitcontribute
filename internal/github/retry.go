@@ -392,7 +392,10 @@ func observation(req *http.Request, resp *http.Response, attempt int, delay time
 	if resp != nil {
 		obs.StatusCode = resp.StatusCode
 		obs.RateLimit = rateInfoFromHeaders(resp.Header, now)
-		obs.APIVersion = resp.Header.Get("X-GitHub-Api-Version")
+		obs.APIVersion = resp.Header.Get("X-GitHub-Api-Version-Selected")
+		if obs.APIVersion == "" {
+			obs.APIVersion = resp.Header.Get("X-GitHub-Api-Version")
+		}
 	}
 	return obs
 }

@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -39,14 +38,22 @@ func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpcontract.Searc
 	if err != nil {
 		return mcpcontract.SearchRepositoriesOutput{}, err
 	}
+	if len(res.Matches) == 0 {
+		return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: []mcpcontract.RepositoryOutput{}, NextCursor: res.NextCursor}, nil
+	}
 
-	matches := make([]mcpcontract.RepositoryOutput, len(res.Matches))
+	refs := make([]mcpcontract.RepositoryRef, len(res.Matches))
 	for i, m := range res.Matches {
-		matches[i] = mcpcontract.RepositoryOutput{
-			Owner:     m.Repo.Owner,
-			Repo:      m.Repo.Repo,
-			UpdatedAt: formatTime(m.UpdatedAt),
-			Fields:    m.Fields,
+		refs[i] = mcpcontract.RepositoryRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo}
+	}
+	batch, err := r.GetRepositories(ctx, mcpcontract.GetRepositoriesInput{Repositories: refs})
+	if err != nil {
+		return mcpcontract.SearchRepositoriesOutput{}, err
+	}
+	matches := make([]mcpcontract.RepositoryOutput, 0, len(batch.Items))
+	for _, item := range batch.Items {
+		if item.Value != nil {
+			matches = append(matches, *item.Value)
 		}
 	}
 	return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: matches, NextCursor: res.NextCursor}, nil
@@ -543,7 +550,7 @@ func (r *MCPReader) PromoteOpportunity(ctx context.Context, in mcpcontract.Promo
 		Scope:               in.Scope,
 		Impact:              in.Impact,
 		ExpectedEffort:      in.ExpectedEffort,
-		Confidence:          in.Confidence,
+		Confidence:          float64(in.Confidence),
 		Dependencies:        append([]string(nil), in.Dependencies...),
 		MaintainerAlignment: in.MaintainerAlignment,
 		SourceRefs:          sourceRefs,
@@ -566,7 +573,7 @@ func opportunityToMCP(o *investigation.Opportunity) mcpcontract.OpportunityOutpu
 		Category:            string(o.Category),
 		Scope:               o.Scope,
 		Impact:              o.Impact,
-		Confidence:          o.Confidence,
+		Confidence:          mcpcontract.Probability(o.Confidence),
 		ExpectedEffort:      o.ExpectedEffort,
 		Dependencies:        o.Dependencies,
 		CollisionStatus:     string(o.CollisionStatus),
@@ -718,14 +725,28 @@ func (r *MCPReader) PrepareContribution(ctx context.Context, in mcpcontract.Prep
 }
 
 func draftResultToMCP(d *contracts.DraftResult) mcpcontract.DraftOutput {
-	return mcpcontract.DraftOutput{
+	out := mcpcontract.DraftOutput{
+		ID:            d.ID,
+		Revision:      d.Revision,
 		OpportunityID: d.OpportunityID,
 		Kind:          d.Kind,
+		Repository:    d.Repository,
 		Title:         d.Title,
 		Body:          d.Body,
+		TitleBytes:    d.TitleBytes,
+		BodyBytes:     d.BodyBytes,
+		TitleSHA256:   d.TitleSHA256,
+		BodySHA256:    d.BodySHA256,
+		EvidenceIDs:   append([]string(nil), d.EvidenceIDs...),
 		RenderedAt:    d.RenderedAt,
 		ManifestID:    d.ManifestID,
 	}
+	for _, warning := range d.Warnings {
+		out.Warnings = append(out.Warnings, mcpcontract.DraftDiagnosticOutput{
+			Code: warning.Code, Severity: warning.Severity, Message: warning.Message, ByteOffset: warning.ByteOffset,
+		})
+	}
+	return out
 }
 
 // ExportManifest assembles a bounded local contribution evidence statement.
@@ -738,16 +759,8 @@ func (r *MCPReader) ExportManifest(ctx context.Context, in mcpcontract.ExportMan
 	if err != nil {
 		return mcpcontract.ManifestOutput{}, err
 	}
-	payload, err := json.Marshal(statement)
-	if err != nil {
-		return mcpcontract.ManifestOutput{}, err
-	}
-	var structured map[string]any
-	if err := json.Unmarshal(payload, &structured); err != nil {
-		return mcpcontract.ManifestOutput{}, err
-	}
 	return mcpcontract.ManifestOutput{
 		ManifestID: statement.Predicate.ManifestID, ContentSHA256: statement.Predicate.ContentSHA256,
-		SchemaVersion: statement.Predicate.SchemaVersion, Status: statement.Predicate.Status, Statement: structured,
+		SchemaVersion: statement.Predicate.SchemaVersion, Status: statement.Predicate.Status, Statement: *statement,
 	}, nil
 }

@@ -23,3 +23,8 @@ oracle.
 or unavailable repository research, and version-aware tool critique. Its
 manifest freezes every public and private artifact; its calibration
 trajectories prove that the hidden semantic gates reject the intended traps.
+
+`v4/` evaluates the redesign's competing tools and modes. It freezes exact
+serialized catalog fingerprints, commits only the out-of-band oracle hash, and
+requires three trials per condition before consolidation or default-catalog
+claims.

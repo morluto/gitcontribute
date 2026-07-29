@@ -94,21 +94,22 @@ var toolsets = map[string][]string{
 		mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolSyncRepositoryContext, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads,
 		mcpcontract.ToolStartInvestigation, mcpcontract.ToolRecordHypothesis, mcpcontract.ToolCheckDuplicates, mcpcontract.ToolFindCompetingWork,
 		mcpcontract.ToolPromoteOpportunity, mcpcontract.ToolGetInvestigation, mcpcontract.ToolListOpportunities, mcpcontract.ToolGetOpportunity,
-		mcpcontract.ToolGetEvidence, mcpcontract.ToolGetReadiness, mcpcontract.ToolPrepareContribution, mcpcontract.ToolExportManifest,
-		ToolListConcerns, ToolCreateConcern,
+		mcpcontract.ToolGetEvidence, mcpcontract.ToolGetReadiness, mcpcontract.ToolPrepareContribution, mcpcontract.ToolVerifyPublishedDraft, mcpcontract.ToolExportManifest,
 	},
 	"code": {
 		mcpcontract.ToolSearchCode, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCreateWorkspace, mcpcontract.ToolAdoptWorkspace, mcpcontract.ToolCheckMergeConflicts,
 		mcpcontract.ToolInspectCommitChanges, mcpcontract.ToolPlanSemanticCommits,
-		mcpcontract.ToolDefineValidation, mcpcontract.ToolRunValidation, mcpcontract.ToolRunRepeatedValidation, mcpcontract.ToolGetJob, mcpcontract.ToolCancelJob,
+		mcpcontract.ToolDefineValidation, mcpcontract.ToolRunValidation, mcpcontract.ToolRunRepeatedValidation, mcpcontract.ToolAttachValidationReceipt,
+		mcpcontract.ToolGetJob, mcpcontract.ToolCancelJob,
 	},
 	"research":    {mcpcontract.ToolQueryDeepWiki},
 	"diagnostics": {mcpcontract.ToolExplainMatch, mcpcontract.ToolBuildRepositoryDossier, mcpcontract.ToolGetJob},
 	"portfolio": {
 		mcpcontract.ToolGetJob, mcpcontract.ToolCancelJob, mcpcontract.ToolGetAuthenticatedIdentity, mcpcontract.ToolSyncAuthoredPullRequests,
-		mcpcontract.ToolSyncPullRequestStatus, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolFindPortfolioOverlaps, mcpcontract.ToolLinkPullRequest,
+		mcpcontract.ToolSyncPullRequestStatus, mcpcontract.ToolSyncPortfolio, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolFindPortfolioOverlaps, mcpcontract.ToolLinkPullRequest,
 	},
 	"advanced": {mcpcontract.ToolFindClusters, mcpcontract.ToolFindNeighbors},
+	"patterns": {mcpcontract.ToolMineRepositoryFixPatterns, mcpcontract.ToolGetJob, mcpcontract.ToolCancelJob},
 	"concerns": {ToolListConcerns, ToolCreateConcern, ToolUpdateConcern, ToolSetConcernState, ToolLinkConcern, ToolPromoteConcern},
 }
 

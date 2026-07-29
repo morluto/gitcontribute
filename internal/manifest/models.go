@@ -85,27 +85,29 @@ type OpportunityRecord struct {
 
 // ValidationRecord binds a stored run to its command and candidate identity.
 type ValidationRecord struct {
-	DefinitionID            string                        `json:"definition_id"`
-	RunID                   string                        `json:"run_id"`
-	Kind                    string                        `json:"kind"`
-	Command                 []string                      `json:"command"`
-	CommandSHA256           string                        `json:"command_sha256"`
-	ExecutionContractSHA256 string                        `json:"execution_contract_sha256"`
-	EnvironmentAllowlist    []string                      `json:"environment_allowlist"`
-	Timeout                 string                        `json:"timeout"`
-	MaxOutputBytes          int64                         `json:"max_output_bytes"`
-	Observation             *evidence.ObservationContract `json:"observation,omitempty"`
-	Classification          string                        `json:"classification"`
-	ObservationStatus       string                        `json:"observation_status"`
-	Observations            []evidence.ObservationResult  `json:"observations"`
-	StartedAt               time.Time                     `json:"started_at"`
-	CompletedAt             time.Time                     `json:"completed_at"`
-	WorkspaceSnapshotBefore string                        `json:"workspace_snapshot_before,omitempty"`
-	WorkspaceSnapshotAfter  string                        `json:"workspace_snapshot_after,omitempty"`
-	WorkspaceBindingStatus  string                        `json:"workspace_binding_status"`
-	WorkspaceCompatibility  string                        `json:"workspace_compatibility"`
-	CompatibilityReason     string                        `json:"compatibility_reason"`
-	Selected                bool                          `json:"selected_for_completeness"`
+	DefinitionID            string                              `json:"definition_id"`
+	RunID                   string                              `json:"run_id"`
+	Kind                    string                              `json:"kind"`
+	Command                 []string                            `json:"command"`
+	CommandSHA256           string                              `json:"command_sha256"`
+	ExecutionContractSHA256 string                              `json:"execution_contract_sha256"`
+	EnvironmentAllowlist    []string                            `json:"environment_allowlist"`
+	Timeout                 string                              `json:"timeout"`
+	MaxOutputBytes          int64                               `json:"max_output_bytes"`
+	Observation             *evidence.ObservationContract       `json:"observation,omitempty"`
+	Classification          string                              `json:"classification"`
+	ObservationStatus       string                              `json:"observation_status"`
+	Observations            []evidence.ObservationResult        `json:"observations"`
+	StartedAt               time.Time                           `json:"started_at"`
+	CompletedAt             time.Time                           `json:"completed_at"`
+	WorkspaceSnapshotBefore string                              `json:"workspace_snapshot_before,omitempty"`
+	WorkspaceSnapshotAfter  string                              `json:"workspace_snapshot_after,omitempty"`
+	WorkspaceBindingStatus  string                              `json:"workspace_binding_status"`
+	WorkspaceCompatibility  string                              `json:"workspace_compatibility"`
+	CompatibilityReason     string                              `json:"compatibility_reason"`
+	ExecutionOrigin         string                              `json:"execution_origin,omitempty"`
+	External                *evidence.ExternalReceiptProvenance `json:"external,omitempty"`
+	Selected                bool                                `json:"selected_for_completeness"`
 }
 
 // EvidenceRecord captures a stored evidence item and evaluated freshness.

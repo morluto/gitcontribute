@@ -280,7 +280,7 @@ func TestCancelJobsPreservesOrderAndIsIdempotent(t *testing.T) {
 	assertCancelJobsOutput(t, out, queued.ID)
 }
 
-func TestCancelJobsContinuesAfterMalformedJobPayload(t *testing.T) {
+func TestCancelJobsDoesNotExposeOrDependOnMalformedStoredPayload(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
@@ -306,10 +306,10 @@ func TestCancelJobsContinuesAfterMalformedJobPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cancel jobs: %v", err)
 	}
-	if out.Status != "partial" || len(out.Items) != 2 {
+	if out.Status != "complete" || len(out.Items) != 2 {
 		t.Fatalf("cancellation batch = %+v", out)
 	}
-	if got := out.Items[0]; got.Status != "failed" || got.Reason != "decode_failed" || !strings.Contains(got.Message, "decode job result") {
+	if got := out.Items[0]; got.Status != "complete" || got.Value == nil || got.Value.Status != "cancelled" || len(got.Value.Artifacts) != 0 {
 		t.Fatalf("malformed item = %+v", got)
 	}
 	if got := out.Items[1]; got.Status != "complete" || got.Value == nil || got.Value.Status != "cancelled" {
@@ -371,10 +371,7 @@ func assertCancelJobsOutput(t *testing.T, out mcpcontract.GetJobsOutput, queuedI
 
 func TestJobResultToMCPExposesStructuredDurableProgress(t *testing.T) {
 	t.Parallel()
-	out, err := jobResultToMCP(&contracts.JobResult{ID: "job-1", Kind: "sync_threads", Status: "running", Request: `{}`, Progress: "thread_headers", Statistics: `{"completed_items":2,"total_items":5}`, CreatedAt: "2026-07-19T00:00:00Z"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	out := jobResultToMCP(&contracts.JobResult{ID: "job-1", Kind: "sync_threads", Status: "running", Request: `{}`, Progress: "thread_headers", Statistics: `{"completed_items":2,"total_items":5}`, CreatedAt: "2026-07-19T00:00:00Z"}, true)
 	if out.Phase != "thread_headers" || out.CompletedItems != 2 || out.TotalItems != 5 || out.ProgressPercent != 40 || out.RetryAfterMS != 1000 {
 		t.Fatalf("structured progress = %+v", out)
 	}
@@ -382,17 +379,64 @@ func TestJobResultToMCPExposesStructuredDurableProgress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(encoded), `"progress":`) || strings.Contains(string(encoded), `"statistics":`) {
-		t.Fatalf("legacy free-form progress leaked into MCP output: %s", encoded)
+	if strings.Contains(string(encoded), `"progress":`) || strings.Contains(string(encoded), `"statistics":`) ||
+		strings.Contains(string(encoded), `"request":`) || strings.Contains(string(encoded), `"result":`) {
+		t.Fatalf("executor storage representation leaked into MCP output: %s", encoded)
 	}
 }
 
-func TestGetJobsConciseOmitsPayloadsAndDetailedReturnsThem(t *testing.T) {
+func TestJobResultToMCPPreservesEmptyAndPartialTypedOutcomes(t *testing.T) {
+	t.Parallel()
+	empty := jobResultToMCP(&contracts.JobResult{
+		ID: "job-empty", Kind: "sync_threads", Status: "succeeded",
+		Result: `{"status":"complete","items":[]}`, CreatedAt: "2026-07-19T00:00:00Z",
+	}, true)
+	if len(empty.Artifacts) != 1 || empty.Artifacts[0].Count == nil || *empty.Artifacts[0].Count != 0 {
+		t.Fatalf("known empty artifact count = %+v", empty.Artifacts)
+	}
+
+	partial := jobResultToMCP(&contracts.JobResult{
+		ID: "job-partial", Kind: "sync_portfolio", Status: "succeeded",
+		Result:    `{"status":"partial","pull_requests":["acme/rocket#7"],"refreshed":0,"failures":[{"reference":"acme/rocket#7","status":"retryable","reason":"facet_incomplete"}]}`,
+		CreatedAt: "2026-07-19T00:00:00Z",
+	}, true)
+	if !strings.Contains(partial.Summary, "partial") || len(partial.Artifacts) != 1 ||
+		!reflect.DeepEqual(partial.Artifacts[0].References, []string{"acme/rocket#7"}) ||
+		len(partial.Artifacts[0].Failures) != 1 || partial.Artifacts[0].Failures[0].Reason != "facet_incomplete" {
+		t.Fatalf("partial portfolio outcome = %+v", partial)
+	}
+
+	fixPatterns := jobResultToMCP(&contracts.JobResult{
+		ID: "job-patterns", Kind: "mine_repository_fix_patterns", Status: "succeeded",
+		Result: `{"status":"complete","coverage":{"unique_candidates":21}}`, CreatedAt: "2026-07-19T00:00:00Z",
+	}, true)
+	if fixPatterns.ExecutionState != "terminal" || fixPatterns.Outcome != "succeeded" ||
+		len(fixPatterns.Artifacts) != 1 || fixPatterns.Artifacts[0].Kind != "fix_pattern_report" ||
+		fixPatterns.Artifacts[0].URI != "gitcontribute://fix-pattern-report/job-patterns" {
+		t.Fatalf("fix-pattern job outcome = %+v", fixPatterns)
+	}
+
+	runningPatterns := jobResultToMCP(&contracts.JobResult{
+		ID: "job-running-patterns", Kind: "mine_repository_fix_patterns", Status: "running",
+	}, true)
+	if len(runningPatterns.Artifacts) != 0 || runningPatterns.FollowUp == nil ||
+		runningPatterns.FollowUp.Tool != mcpcontract.ToolGetJob {
+		t.Fatalf("running fix-pattern job advertised unavailable artifacts: %+v", runningPatterns)
+	}
+}
+
+func TestGetJobsDetailedReturnsTypedArtifactsWithoutStoredPayloads(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
-	job, err := svc.corpus.CreateJob(ctx, "sync", `{"owner":"acme"}`)
+	job, err := svc.corpus.CreateJob(ctx, "build_repository_dossier", `{"owner":"acme","repo":"rocket"}`)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.StartJob(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.TransitionJob(ctx, job.ID, corpus.JobStatusRunning, corpus.JobStatusSucceeded, `{"status":"complete"}`, ""); err != nil {
 		t.Fatal(err)
 	}
 	reader := &MCPReader{svc}
@@ -400,16 +444,21 @@ func TestGetJobsConciseOmitsPayloadsAndDetailedReturnsThem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(concise.Items) != 1 || concise.Items[0].Value == nil || concise.Items[0].Value.Request != nil || concise.Items[0].Value.Result != nil {
-		t.Fatalf("concise jobs output leaked payloads: %+v", concise)
+	if len(concise.Items) != 1 || concise.Items[0].Value == nil || len(concise.Items[0].Value.Artifacts) != 0 {
+		t.Fatalf("concise jobs output should remain a bounded state summary: %+v", concise)
+	}
+	if concise.Items[0].NextAction == "" {
+		t.Fatalf("default concise terminal result lacks detailed recovery hint: %+v", concise)
 	}
 	detailed, err := reader.GetJobs(ctx, mcpcontract.GetJobsInput{IDs: []string{job.ID}, ResponseFormat: "detailed"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, ok := detailed.Items[0].Value.Request.(map[string]any)
-	if !ok || request["owner"] != "acme" {
-		t.Fatalf("detailed jobs output lost request: %+v", detailed)
+	value := detailed.Items[0].Value
+	if value == nil || len(value.Artifacts) != 1 || value.Artifacts[0].Kind != "dossier" ||
+		value.Artifacts[0].URI != "gitcontribute://dossier/acme/rocket" ||
+		value.FollowUp == nil || value.FollowUp.Tool != mcpcontract.ToolGetRepositoryDossier {
+		t.Fatalf("detailed jobs output lost typed artifact reference: %+v", detailed)
 	}
 }
 
@@ -433,7 +482,7 @@ func TestSearchGitHubRepositoriesPersistsObservedMetadata(t *testing.T) {
 	reader := &fakeRepositorySearchReader{result: github.RepositorySearchResult{Total: 321, Items: []github.Repository{remote}, Page: github.PageInfo{Page: 2, NextPage: 3, HasNext: true}}}
 	svc.SetGitHubReader(reader)
 
-	out, err := (&MCPReader{svc}).SearchGitHubRepositories(ctx, mcpcontract.SearchGitHubRepositoriesInput{Text: "fast inference", MatchFields: []string{"name", "description"}, Topics: []string{"llm-inference"}, Language: "Go", StarsMin: 200, PushedAfter: "2026-06-15", Archived: ptr(false), Fork: ptr(false), Sort: "stars", Order: "desc", Limit: 12, Page: 2, ResponseFormat: "concise"})
+	out, err := (&MCPReader{svc}).SearchGitHubRepositories(ctx, mcpcontract.SearchGitHubRepositoriesInput{Text: "fast inference", MatchFields: []string{"name", "description"}, Topics: []string{"llm-inference"}, Language: "Go", StarsMin: ptr(200), PushedAfter: "2026-06-15", Archived: ptr(false), Fork: ptr(false), Sort: "stars", Order: "desc", Limit: 12, Page: 2, ResponseFormat: "concise"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,12 +495,25 @@ func TestSearchGitHubRepositoriesPersistsObservedMetadata(t *testing.T) {
 	if out.Items[0].Value.Watchers != nil || len(out.SuggestedActions) != 1 || out.SuggestedActions[0].Tool != mcpcontract.ToolSyncThreads {
 		t.Fatalf("concise search context = %+v", out)
 	}
+	if out.Items[0].Value.DossierStatus != "missing" {
+		t.Fatalf("new search result dossier availability = %+v", out.Items[0].Value)
+	}
 	stored, err := (&MCPReader{svc}).GetRepositories(ctx, mcpcontract.GetRepositoriesInput{Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "rocket"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stored.Items[0].Value == nil || stored.Items[0].Value.Metadata.Status != "complete" || *stored.Items[0].Value.Stars != 9001 {
 		t.Fatalf("search metadata was not persisted: %+v", stored)
+	}
+	if _, err := svc.BuildRepositoryDossier(ctx, contracts.RepoRef{Owner: "acme", Repo: "rocket"}); err != nil {
+		t.Fatal(err)
+	}
+	out, err = (&MCPReader{svc}).SearchGitHubRepositories(ctx, mcpcontract.SearchGitHubRepositoriesInput{Text: "fast inference", Limit: 12, Page: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Items[0].Value == nil || out.Items[0].Value.DossierStatus != "available" || out.Items[0].Value.DossierAsOf == "" {
+		t.Fatalf("live search did not report local dossier availability: %+v", out)
 	}
 }
 
@@ -464,7 +526,7 @@ func TestCompileRepositorySearchRejectsAmbiguousAndInvalidInputs(t *testing.T) {
 		{name: "empty", in: mcpcontract.SearchGitHubRepositoriesInput{}},
 		{name: "raw and structured", in: mcpcontract.SearchGitHubRepositoriesInput{RawQuery: "cuda", Language: "Go"}},
 		{name: "unknown match field", in: mcpcontract.SearchGitHubRepositoriesInput{Text: "cuda", MatchFields: []string{"topics"}}},
-		{name: "reversed stars", in: mcpcontract.SearchGitHubRepositoriesInput{Text: "cuda", StarsMin: 20, StarsMax: 10}},
+		{name: "reversed stars", in: mcpcontract.SearchGitHubRepositoriesInput{Text: "cuda", StarsMin: ptr(20), StarsMax: ptr(10)}},
 		{name: "invalid date", in: mcpcontract.SearchGitHubRepositoriesInput{PushedAfter: "yesterday"}},
 		{name: "reversed dates", in: mcpcontract.SearchGitHubRepositoriesInput{CreatedAfter: "2026-07-01", CreatedBefore: "2026-06-01"}},
 	}
@@ -474,6 +536,18 @@ func TestCompileRepositorySearchRejectsAmbiguousAndInvalidInputs(t *testing.T) {
 				t.Fatal("invalid search was accepted")
 			}
 		})
+	}
+}
+
+func TestCompileRepositorySearchPreservesExplicitZeroStarBound(t *testing.T) {
+	t.Parallel()
+	zero := 0
+	query, _, _, err := compileRepositorySearch(mcpcontract.SearchGitHubRepositoriesInput{StarsMax: &zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query != "stars:<=0" {
+		t.Fatalf("query = %q, want stars:<=0", query)
 	}
 }
 
@@ -585,7 +659,7 @@ func TestDeepWikiReturnsDerivedProvenanceAndBoundsOutput(t *testing.T) {
 	}
 }
 
-func TestDeepWikiKeepsLargeDefaultAndExplainsTruncation(t *testing.T) {
+func TestDeepWikiUsesBoundedDefaultAndSteersFocusedRecovery(t *testing.T) {
 	t.Parallel()
 	svc := newSearchTestService(t)
 	fake := &fakeDeepWikiReader{response: deepwiki.Response{
@@ -605,7 +679,7 @@ func TestDeepWikiKeepsLargeDefaultAndExplainsTruncation(t *testing.T) {
 	if len(out.Result) != mcpcontract.DeepWikiDefaultOutputBytes || !out.Truncated {
 		t.Fatalf("default DeepWiki bound = %d bytes, truncated=%v", len(out.Result), out.Truncated)
 	}
-	if out.Reason != "output_limit" || !strings.Contains(out.NextAction, "larger max_output_bytes") {
+	if out.Reason != "output_limit" || !strings.Contains(out.NextAction, "Call structure") || !strings.Contains(out.NextAction, "focused question") {
 		t.Fatalf("missing truncation recovery guidance: %+v", out)
 	}
 }

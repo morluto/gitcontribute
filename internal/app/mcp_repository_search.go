@@ -72,6 +72,7 @@ func (r *MCPReader) persistRepositorySearch(ctx context.Context, in mcpcontract.
 	}
 	out := repositorySearchOutput(in, query, interpretation, warnings, result)
 	observedAt := r.now()
+	repositoryIDs := make([]int64, 0, len(result.Items))
 	for i, remote := range result.Items {
 		payload, err := json.Marshal(remote)
 		if err != nil {
@@ -84,9 +85,21 @@ func (r *MCPReader) persistRepositorySearch(ctx context.Context, in mcpcontract.
 		if err != nil {
 			return mcpcontract.SearchGitHubRepositoriesOutput{}, err
 		}
+		repositoryIDs = append(repositoryIDs, stored.ID)
 		metadata := mcpcontract.RepositoryMetadataOutput{Status: "complete", ObservedAt: formatTime(observedAt), SourceUpdatedAt: formatTime(remote.UpdatedAt)}
 		value := liveRepositorySearchMatch(remote, metadata, in.ResponseFormat)
+		value.DossierStatus = "missing"
 		out.Items[i] = mcpcontract.BatchItem[mcpcontract.RepositorySearchMatch]{Key: remote.Owner + "/" + remote.Name, Status: "complete", Value: &value}
+	}
+	dossiers, err := c.GetLatestDossierMetadataBatch(ctx, repositoryIDs)
+	if err != nil {
+		return mcpcontract.SearchGitHubRepositoriesOutput{}, err
+	}
+	for i, repositoryID := range repositoryIDs {
+		if dossier, ok := dossiers[repositoryID]; ok && out.Items[i].Value != nil {
+			out.Items[i].Value.DossierStatus = "available"
+			out.Items[i].Value.DossierAsOf = formatTime(dossier.AsOf)
+		}
 	}
 	addRepositorySearchAction(&out, result.Items)
 	return out, nil
@@ -121,7 +134,10 @@ func addRepositorySearchAction(out *mcpcontract.SearchGitHubRepositoriesOutput, 
 	for _, remote := range items {
 		repositories = append(repositories, mcpcontract.RepositoryRef{Owner: remote.Owner, Repo: remote.Name})
 	}
-	out.SuggestedActions = []mcpcontract.SuggestedAction{{Tool: mcpcontract.ToolSyncThreads, Reason: "Fetch open issue headers only for repositories selected from these metadata results.", Arguments: map[string]any{"selection": "repositories", "repositories": repositories, "state": "open"}}}
+	out.SuggestedActions = []mcpcontract.SuggestedAction{{
+		Tool: mcpcontract.ToolSyncThreads, Reason: "Fetch open issue headers only for repositories selected from these metadata results.",
+		Arguments: &mcpcontract.SuggestedActionArguments{Selection: "repositories", Repositories: repositories, State: "open"},
+	}}
 }
 
 func liveRepositorySearchMatch(remote github.Repository, metadata mcpcontract.RepositoryMetadataOutput, format string) mcpcontract.RepositorySearchMatch {
@@ -173,7 +189,7 @@ func repositorySearchMode(in mcpcontract.SearchGitHubRepositoriesInput) (string,
 }
 
 func hasStructuredRepositorySearch(in mcpcontract.SearchGitHubRepositoriesInput) bool {
-	return strings.TrimSpace(in.Text) != "" || len(in.MatchFields) > 0 || len(in.Topics) > 0 || strings.TrimSpace(in.Language) != "" || in.StarsMin != 0 || in.StarsMax != 0 || in.CreatedAfter != "" || in.CreatedBefore != "" || in.PushedAfter != "" || in.PushedBefore != "" || in.Archived != nil || in.Fork != nil
+	return strings.TrimSpace(in.Text) != "" || len(in.MatchFields) > 0 || len(in.Topics) > 0 || strings.TrimSpace(in.Language) != "" || in.StarsMin != nil || in.StarsMax != nil || in.CreatedAfter != "" || in.CreatedBefore != "" || in.PushedAfter != "" || in.PushedBefore != "" || in.Archived != nil || in.Fork != nil
 }
 
 func compileStructuredRepositorySearch(in mcpcontract.SearchGitHubRepositoriesInput) (string, []mcpcontract.SearchWarning, error) {
@@ -194,7 +210,8 @@ func compileStructuredRepositorySearch(in mcpcontract.SearchGitHubRepositoriesIn
 	if language := strings.TrimSpace(in.Language); language != "" {
 		parts = append(parts, "language:"+quoteSearchTerm(language))
 	}
-	if in.StarsMin < 0 || in.StarsMax < 0 || in.StarsMax > 0 && in.StarsMin > in.StarsMax {
+	if in.StarsMin != nil && *in.StarsMin < 0 || in.StarsMax != nil && *in.StarsMax < 0 ||
+		in.StarsMin != nil && in.StarsMax != nil && *in.StarsMin > *in.StarsMax {
 		return "", nil, mcpcontract.InvalidArgument("stars_min", "stars bounds must be non-negative and stars_min cannot exceed stars_max", map[string]any{"stars_min": 200, "stars_max": 10000})
 	}
 	parts = appendNumericRange(parts, "stars", in.StarsMin, in.StarsMax)
@@ -257,14 +274,14 @@ func quoteSearchTerm(value string) string {
 	return value
 }
 
-func appendNumericRange(parts []string, name string, minimum, maximum int) []string {
+func appendNumericRange(parts []string, name string, minimum, maximum *int) []string {
 	switch {
-	case minimum > 0 && maximum > 0:
-		return append(parts, fmt.Sprintf("%s:%d..%d", name, minimum, maximum))
-	case minimum > 0:
-		return append(parts, fmt.Sprintf("%s:>=%d", name, minimum))
-	case maximum > 0:
-		return append(parts, fmt.Sprintf("%s:<=%d", name, maximum))
+	case minimum != nil && maximum != nil:
+		return append(parts, fmt.Sprintf("%s:%d..%d", name, *minimum, *maximum))
+	case minimum != nil:
+		return append(parts, fmt.Sprintf("%s:>=%d", name, *minimum))
+	case maximum != nil:
+		return append(parts, fmt.Sprintf("%s:<=%d", name, *maximum))
 	default:
 		return parts
 	}

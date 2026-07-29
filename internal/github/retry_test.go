@@ -607,7 +607,7 @@ func TestRetryTransportObservation(t *testing.T) {
 					"X-Ratelimit-Limit":     []string{"5000"},
 					"X-Ratelimit-Remaining": []string{"0"},
 					"X-Ratelimit-Reset":     []string{strconv.FormatInt(reset, 10)},
-					http.CanonicalHeaderKey("X-GitHub-Api-Version"): []string{"2022-11-28"},
+					http.CanonicalHeaderKey("X-GitHub-Api-Version-Selected"): []string{"2026-03-10"},
 				},
 			},
 			{status: http.StatusOK, body: "ok"},
@@ -664,8 +664,8 @@ func TestRetryTransportObservation(t *testing.T) {
 	if first.Delay != time.Hour {
 		t.Fatalf("first delay = %v, want 1h", first.Delay)
 	}
-	if first.APIVersion != "2022-11-28" {
-		t.Fatalf("api version = %q, want 2022-11-28", first.APIVersion)
+	if first.APIVersion != "2026-03-10" {
+		t.Fatalf("api version = %q, want 2026-03-10", first.APIVersion)
 	}
 
 	u, err := url.Parse(first.SourceURL)

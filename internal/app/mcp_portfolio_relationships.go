@@ -107,7 +107,7 @@ func portfolioOverlapOutput(result corpus.PortfolioOverlapResult) mcpcontract.Po
 	for _, match := range result.Matches {
 		converted := mcpcontract.PortfolioOverlapMatchOutput{PullRequestThreadID: match.PullRequestThreadID}
 		for _, evidence := range match.Evidence {
-			item := mcpcontract.PortfolioOverlapEvidenceOutput{Kind: evidence.Kind, Value: evidence.Value, Score: evidence.Score}
+			item := mcpcontract.PortfolioOverlapEvidenceOutput{Kind: evidence.Kind, Value: evidence.Value, Score: mcpcontract.SimilarityScore(evidence.Score)}
 			for _, ref := range evidence.SourceObservationRefs {
 				item.SourceRefs = append(item.SourceRefs, ref.Kind+":"+strconv.FormatInt(ref.ID, 10))
 			}

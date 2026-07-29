@@ -57,6 +57,26 @@ type GitHubOperator interface {
 	GetAuthenticatedIdentity(context.Context) (mcpcontract.AuthenticatedIdentityOutput, error)
 	SyncAuthoredPullRequests(context.Context, mcpcontract.SyncAuthoredPullRequestsInput) (mcpcontract.JobReference, error)
 	SyncPullRequestStatus(context.Context, mcpcontract.SyncPullRequestStatusInput) (mcpcontract.JobReference, error)
+	SyncPortfolio(context.Context, mcpcontract.SyncPortfolioInput) (mcpcontract.JobReference, error)
+}
+
+// FixPatternOperator owns the bounded repository-level search, finalist
+// hydration, and typed report workflow. It performs GitHub reads and updates
+// only the local corpus.
+type FixPatternOperator interface {
+	MineRepositoryFixPatterns(context.Context, mcpcontract.MineRepositoryFixPatternsInput) (mcpcontract.JobReference, error)
+}
+
+// FixPatternReader exposes only terminal persisted reports and remains offline.
+type FixPatternReader interface {
+	GetFixPatternReport(context.Context, string) (mcpcontract.FixPatternReport, error)
+}
+
+// FixPatternWorkflow keeps submission and persisted report retrieval together
+// so an advertised workflow never returns an unreadable resource link.
+type FixPatternWorkflow interface {
+	FixPatternOperator
+	FixPatternReader
 }
 
 // CodeIndexer safely acquires and indexes repository code.
@@ -99,6 +119,14 @@ type Operator interface {
 	PrepareContribution(context.Context, mcpcontract.PrepareContributionInput) (mcpcontract.DraftOutput, error)
 	ExportManifest(context.Context, mcpcontract.ExportManifestInput) (mcpcontract.ManifestOutput, error)
 	CancelJobs(context.Context, mcpcontract.CancelJobInput) (mcpcontract.GetJobsOutput, error)
+}
+
+type ValidationReceiptOperator interface {
+	AttachValidationReceipt(context.Context, mcpcontract.AttachValidationReceiptInput) (mcpcontract.ExternalValidationReceiptOutput, error)
+}
+
+type PublishedDraftVerifier interface {
+	VerifyPublishedDraft(context.Context, mcpcontract.VerifyPublishedDraftInput) (mcpcontract.PublishedDraftVerificationOutput, error)
 }
 
 // RepoInput identifies a repository for an MCP operation.
@@ -361,7 +389,10 @@ func (s *Server) investigation(ctx context.Context, _ *mcp.CallToolRequest, in m
 		return nil, mcpcontract.InvestigationOutput{}, mcpcontract.InvalidArgument("hypothesis_limit", "must be between 1 and 100", map[string]any{"hypothesis_limit": 20})
 	}
 	out, err := s.reader.Investigation(ctx, in)
-	return nil, out, err
+	if err != nil {
+		return nil, out, err
+	}
+	return linkedResource("gitcontribute://investigation/"+out.ID, "investigation", "Investigation", "Persisted local investigation."), out, nil
 }
 
 func (s *Server) listOpportunities(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.ListOpportunitiesInput) (*mcp.CallToolResult, mcpcontract.ListOpportunitiesOutput, error) {
@@ -377,7 +408,10 @@ func (s *Server) listOpportunities(ctx context.Context, _ *mcp.CallToolRequest, 
 		return nil, mcpcontract.ListOpportunitiesOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	out, err := s.reader.ListOpportunities(ctx, in)
-	return nil, out, err
+	if err != nil {
+		return nil, out, err
+	}
+	return linkedResource("gitcontribute://opportunities/"+in.InvestigationID, "opportunities", "Investigation opportunities", "Persisted opportunities for this investigation."), out, nil
 }
 
 func (s *Server) opportunity(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.OpportunityInput) (*mcp.CallToolResult, mcpcontract.OpportunityOutput, error) {
@@ -393,7 +427,10 @@ func (s *Server) opportunity(ctx context.Context, _ *mcp.CallToolRequest, in mcp
 		return nil, mcpcontract.OpportunityOutput{}, mcpcontract.InvalidArgument("evidence_limit", "must be between 1 and 100", map[string]any{"evidence_limit": 20})
 	}
 	out, err := s.reader.Opportunity(ctx, in)
-	return nil, out, err
+	if err != nil {
+		return nil, out, err
+	}
+	return linkedResource("gitcontribute://opportunity/"+out.ID, "opportunity", "Opportunity", "Persisted local contribution opportunity."), out, nil
 }
 
 func (s *Server) evidence(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.EvidenceInput) (*mcp.CallToolResult, mcpcontract.EvidenceOutput, error) {
@@ -416,7 +453,14 @@ func (s *Server) evidence(ctx context.Context, _ *mcp.CallToolRequest, in mcpcon
 		return nil, mcpcontract.EvidenceOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	out, err := s.reader.Evidence(ctx, in)
-	return nil, out, err
+	if err != nil {
+		return nil, out, err
+	}
+	scope, id := "investigation", in.InvestigationID
+	if in.OpportunityID != "" {
+		scope, id = "opportunity", in.OpportunityID
+	}
+	return linkedResource("gitcontribute://evidence/"+scope+"/"+id, "evidence", "Evidence", "Persisted evidence set."), out, nil
 }
 
 func (s *Server) readiness(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.ReadinessInput) (*mcp.CallToolResult, mcpcontract.ReadinessOutput, error) {
@@ -426,7 +470,10 @@ func (s *Server) readiness(ctx context.Context, _ *mcp.CallToolRequest, in mcpco
 	}
 	in.OpportunityID = id
 	out, err := s.reader.Readiness(ctx, in)
-	return nil, out, err
+	if err != nil {
+		return nil, out, err
+	}
+	return linkedResource("gitcontribute://readiness/"+in.OpportunityID, "readiness", "Contribution readiness", "Persisted contribution readiness report."), out, nil
 }
 
 func (s *Server) findClusters(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.FindClustersInput) (*mcp.CallToolResult, mcpcontract.FindClustersOutput, error) {

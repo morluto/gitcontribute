@@ -3,264 +3,11 @@ package mcpserver
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
+	"reflect"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
-
-var outputPropertyDescriptions = map[string]string{
-	"id":                        "Stable identifier.",
-	"code":                      "Stable warning or error code.",
-	"name":                      "Stable display name.",
-	"owner":                     "GitHub repository owner.",
-	"repo":                      "GitHub repository name.",
-	"kind":                      "Record or operation kind.",
-	"run":                       "Validation run kind: base or candidate.",
-	"status":                    "Current status.",
-	"state":                     "GitHub or workflow state.",
-	"number":                    "GitHub issue or pull request number.",
-	"title":                     "Display title.",
-	"body":                      "Stored issue, pull request, or draft body.",
-	"author":                    "GitHub login of the author.",
-	"labels":                    "Stored GitHub labels.",
-	"query":                     "Search query used to produce this result.",
-	"query_interpretation":      "Literal terms joined with the effective all-term or any-term operator.",
-	"match_mode":                "Effective term matching mode: all or any.",
-	"view":                      "Effective response detail level: compact or full.",
-	"interpretation":            "Concise explanation of how the request was interpreted.",
-	"response_format":           "Response detail level used for this result.",
-	"page":                      "One-based provider result page.",
-	"next_page":                 "Next provider result page; absent when no next page is available.",
-	"warnings":                  "Request-specific limitations that affect interpretation.",
-	"suggestion":                "Actionable adjustment that addresses the warning.",
-	"suggested_actions":         "Non-mandatory follow-up tool calls with reusable arguments.",
-	"tool":                      "Canonical GitContribute tool name for a suggested action.",
-	"arguments":                 "Arguments for the suggested tool call.",
-	"total":                     "Total number of matching records represented by this response.",
-	"limit":                     "Maximum number of records requested.",
-	"matches":                   "Ordered matches for the current page.",
-	"next_cursor":               "Opaque cursor for the next page; absent when there is no next page.",
-	"unknown_merge_count":       "Otherwise-matching pull requests excluded because their merge state is unknown.",
-	"fields":                    "Stored repository fields from the winning local projection.",
-	"sections":                  "Source-backed dossier sections keyed by section name.",
-	"dossier_status":            "Persisted dossier availability: available or missing.",
-	"dossier_as_of":             "RFC 3339 as-of timestamp of the latest persisted dossier.",
-	"as_of":                     "RFC 3339 timestamp describing how current the response is.",
-	"updated_at":                "Latest update time (RFC 3339).",
-	"created_at":                "Creation time (RFC 3339).",
-	"started_at":                "RFC 3339 timestamp when execution started.",
-	"completed_at":              "RFC 3339 timestamp when execution completed.",
-	"cancelled_at":              "RFC 3339 timestamp when cancellation was requested or completed.",
-	"observed_at":               "RFC 3339 timestamp when source data was observed.",
-	"rendered_at":               "RFC 3339 timestamp when the draft was rendered.",
-	"evaluated_at":              "RFC 3339 timestamp when the rule was evaluated.",
-	"commit":                    "Git commit SHA for the indexed snapshot.",
-	"commit_sha":                "Git commit SHA associated with the record.",
-	"path":                      "Repository-relative file path.",
-	"language":                  "Detected source language.",
-	"snippet":                   "Relevant bounded excerpt from the stored source.",
-	"bytes":                     "Size of the indexed content in bytes.",
-	"score":                     "Deterministic normalized score from 0.0 to 1.0.",
-	"confidence":                "Confidence value from 0.0 to 1.0.",
-	"reason":                    "Evidence-backed explanation.",
-	"source_revision":           "Opaque revision of the local source projection used by the result.",
-	"source_refs":               "Source references supporting this record.",
-	"source_provenance":         "Stored source revisions used to derive the evidence.",
-	"matched_fields":            "Fields that contributed to the match.",
-	"match_source":              "Stored thread field or hydrated facet that produced the full-text match.",
-	"match_excerpt":             "Bounded excerpt from the stored document that produced the match.",
-	"match_updated_at":          "RFC 3339 source revision timestamp of the stored matching document.",
-	"facets":                    "Facet coverage or hydration results.",
-	"facet":                     "Stored GitHub facet name.",
-	"complete":                  "Whether retrieval completed without a page cap or interruption.",
-	"count":                     "Number of records represented by this item.",
-	"pages":                     "Number of GitHub pages retrieved.",
-	"requests":                  "Number of external requests performed.",
-	"message":                   "Operation summary.",
-	"investigation_id":          "Investigation identifier.",
-	"opportunity_id":            "Contribution opportunity identifier.",
-	"hypothesis_id":             "Hypothesis identifier.",
-	"hypothesis_total":          "Total hypotheses associated with the investigation.",
-	"hypotheses":                "Bounded hypothesis summaries.",
-	"opportunities":             "Bounded contribution opportunity summaries.",
-	"evidence":                  "Bounded evidence records.",
-	"evidence_total":            "Total evidence records associated with the opportunity.",
-	"evidence_ids":              "Bounded evidence identifiers for follow-up reads.",
-	"findings":                  "Evidence-backed duplicate or collision candidates.",
-	"clusters":                  "Duplicate-candidate clusters.",
-	"neighbors":                 "Similar stored threads ordered by score.",
-	"canonical":                 "Canonical member selected for the cluster.",
-	"members":                   "Cluster members.",
-	"member_count":              "Total members in the cluster.",
-	"included":                  "Whether the member passed the cluster inclusion threshold.",
-	"problem_statement":         "Concrete contribution problem statement.",
-	"scope":                     "Intended contribution scope.",
-	"impact":                    "Expected user or project impact.",
-	"expected_effort":           "Estimated implementation effort.",
-	"dependencies":              "Known dependencies or prerequisites.",
-	"maintainer_alignment":      "Recorded maintainer-alignment context; not proof of approval.",
-	"collision_status":          "Assessment of potentially competing open work.",
-	"description":               "Human-readable record description.",
-	"category":                  "Contribution hypothesis category.",
-	"expected_behavior":         "Expected behavior stated by the investigation.",
-	"observed_behavior":         "Observed behavior stated by the investigation.",
-	"potential_impact":          "Potential impact stated by the investigation.",
-	"open_questions":            "Questions that remain unresolved.",
-	"affected_components":       "Repository components believed to be affected.",
-	"relation":                  "How this evidence relates to the hypothesis or opportunity.",
-	"direction":                 "Whether related work points into or out from the candidate.",
-	"related_work":              "Stored issue, pull-request, dependency, cross-reference, and duplicate-cluster relationships.",
-	"freshness":                 "Derived evidence freshness classification.",
-	"freshness_reason":          "Explanation for the freshness classification.",
-	"rule_set_version":          "Version of the deterministic readiness rule set.",
-	"checks":                    "Individual deterministic readiness checks.",
-	"check_id":                  "Stable readiness check identifier.",
-	"rule_id":                   "Stable rule identifier.",
-	"rule_version":              "Version of the evaluated rule.",
-	"summary":                   "Result summary.",
-	"evidence_refs":             "Evidence references supporting the result.",
-	"remediation":               "Smallest suggested action for a non-pass result.",
-	"request":                   "Structured request submitted for the durable job.",
-	"result":                    "Structured result produced by a completed durable job.",
-	"error":                     "Failure message for an unsuccessful job.",
-	"phase":                     "Current durable job phase.",
-	"completed_items":           "Items completed in the current phase.",
-	"total_items":               "Total items in the current phase.",
-	"progress_percent":          "Integer completion percentage.",
-	"cancellation_requested":    "Whether durable cancellation has been requested.",
-	"checks_status":             "Derived check-rollup state from complete stored check coverage.",
-	"checks_total":              "Number of checks in the complete stored head-revision snapshot.",
-	"unresolved_review_threads": "Count of current unresolved, non-outdated review conversations when coverage is complete.",
-	"merge_state_status":        "Detailed GitHub merge-state status when observed.",
-	"merge_queue_state":         "Observed merge-queue entry state; absent only when complete coverage confirms no entry.",
-	"merge_queue_position":      "Observed position of the pull request in the merge queue.",
-	"closing_issues":            "Issues GitHub reports will be closed by this pull request.",
-	"changed_files":             "Complete stored set of changed repository-relative paths.",
-	"command":                   "Shell-free command and arguments.",
-	"working_dir":               "Workspace directory used for validation.",
-	"base_working_dir":          "Base workspace directory used for comparison validation.",
-	"candidate_dir":             "Candidate workspace directory used for comparison validation.",
-	"environment_allowlist":     "Environment variable names allowed during validation.",
-	"timeout":                   "Maximum validation duration as a Go duration string.",
-	"max_output_bytes":          "Maximum captured validation output in bytes.",
-	"observation":               "Optional expected-output contract tied to the validation proof intent.",
-	"intent":                    "Short invariant or behavior the validation is intended to prove.",
-	"base":                      "Expected observations for the base run.",
-	"matcher":                   "Output matcher: exact or regexp.",
-	"pattern":                   "Bounded exact string or Go regular expression.",
-	"occurrence":                "Whether the pattern must be present or absent.",
-	"observation_status":        "Aggregate expected-observation result.",
-	"observations":              "Evaluated expected observations with bounded excerpts.",
-	"excerpt":                   "Bounded captured output or artifact excerpt that matched.",
-	"definition":                "Saved lens definition.",
-	"updated":                   "Number of local projections updated by the operation.",
-	"stable_id":                 "Stable cluster identifier.",
-	"observation_sequence":      "Monotonic local observation sequence.",
-	"source_updated_at":         "RFC 3339 timestamp reported by the source.",
-	"thread_kind":               "Stored thread kind: issue or pull_request.",
-	"lens":                      "Saved lens name associated with the investigation.",
-	"target":                    "Record type checked: hypothesis or opportunity.",
-	"type":                      "Domain-specific evidence or source type.",
-	"subject":                   "Stored corpus subject whose revision is tracked.",
-	"filter":                    "Saved lens filters used to select candidate records.",
-	"languages":                 "Repository languages accepted by the saved lens.",
-	"exclude_archived":          "Whether archived repositories are excluded.",
-	"unassigned":                "Whether results must be unassigned.",
-	"updated_within":            "Maximum age accepted by the saved lens.",
-	"min_stars":                 "Minimum repository star count accepted by the saved lens.",
-	"kinds":                     "Thread kinds accepted by the saved lens.",
-	"states":                    "Thread states accepted by the saved lens.",
-	"weights":                   "Signal weights applied by the saved lens.",
-	"max_results_per_repo":      "Maximum lens-ranked results returned for one repository.",
-	"items":                     "Ordered item results.",
-	"key":                       "Stable item key.",
-	"value":                     "Successful item value.",
-	"retry_after_ms":            "Suggested milliseconds to wait before retrying this item.",
-	"poll_after_ms":             "Suggested milliseconds to wait before polling the durable job.",
-	"next_action":               "Suggested next tool or recovery action.",
-	"metadata":                  "Repository metadata facet coverage and provenance.",
-	"default_branch":            "Repository default branch reported by GitHub.",
-	"license":                   "Repository license identifier reported by GitHub.",
-	"topics":                    "Repository topics reported by GitHub.",
-	"stars":                     "GitHub stargazer count when metadata is observed.",
-	"watchers":                  "GitHub watcher count when metadata is observed.",
-	"forks":                     "GitHub fork count when metadata is observed.",
-	"open_issues":               "GitHub open issue and pull-request count when metadata is observed.",
-	"archived":                  "Whether GitHub reports the repository as archived.",
-	"fork":                      "Whether GitHub reports the repository as a fork.",
-	"candidates":                "Compact ranked contribution candidates.",
-	"candidate":                 "Candidate result, subject, or expected candidate-run observations.",
-	"coverage":                  "Explicit completeness state for each evidence facet.",
-	"pull_request_thread_id":    "Local corpus thread identity for the authored pull request.",
-	"repositories":              "Repository identities or per-repository batch results.",
-	"rank":                      "One-based position in the returned ranking.",
-	"ref":                       "Stable repository or thread reference.",
-	"url":                       "Canonical source URL for the record.",
-	"eligibility":               "Candidate action state: ready_to_code, needs_diagnosis, needs_coordination, or blocked.",
-	"positive_signals":          "Stored facts that increased the candidate score.",
-	"risks":                     "Stored facts that indicate contribution risk.",
-	"blockers":                  "Stored facts that objectively block the contribution.",
-	"unknowns":                  "Missing evidence that was not treated as negative.",
-	"linked_pull_requests":      "Stored pull requests explicitly linked to the candidate.",
-	"total_open_issues":         "Stored open issues in the repository.",
-	"considered":                "Issues evaluated in the bounded population.",
-	"returned":                  "Candidates returned per repository.",
-	"population_capped":         "Whether the population was capped.",
-	"generated_at":              "RFC 3339 timestamp when this derived result was generated.",
-	"provider":                  "External provider that produced derived context.",
-	"action":                    "Provider operation used for this result.",
-	"question":                  "Exact question sent to the external provider.",
-	"source_url":                "Provider or source URL supporting this result.",
-	"retrieved_at":              "RFC 3339 timestamp when external context was retrieved.",
-	"provenance":                "Source class distinguishing facts from derived external prose.",
-	"truncated":                 "Whether the result was shortened to its requested byte bound.",
-	"state_reason":              "GitHub reason associated with a closed thread state.",
-	"author_association":        "GitHub association of the thread author with the repository.",
-	"assignees":                 "GitHub logins assigned to the thread.",
-	"draft":                     "Whether GitHub reports the pull request as draft.",
-	"merged":                    "Whether GitHub reports the pull request as merged.",
-	"login":                     "Authenticated GitHub login.",
-	"node_id":                   "Stable GitHub GraphQL node identifier.",
-	"pull_requests":             "Bounded pull requests represented by this result.",
-	"attention":                 "Primary deterministic contributor attention state.",
-	"mergeable":                 "GitHub mergeability when computation completed.",
-	"head_ref":                  "Pull-request head branch name.",
-	"head_sha":                  "Observed pull-request head commit OID.",
-	"base_ref":                  "Pull-request base branch name.",
-	"base_sha":                  "Observed pull-request base commit OID.",
-	"review_decision":           "Decision derived from latest stored reviews per reviewer.",
-	"status_coverage":           "Completeness of stored pull-request status facets.",
-	"status_observed_at":        "RFC 3339 timestamp when status details were observed.",
-	"workspace_id":              "Managed local workspace identifier.",
-	"base_oid":                  "Already-fetched base Git object ID.",
-	"head_oid":                  "Already-fetched head Git object ID.",
-	"merge_base":                "Git merge-base object ID used for comparison.",
-	"conflicted":                "Whether the local Git comparison found merge conflicts.",
-	"source":                    "Input or provider source.",
-	"reasons":                   "Evidence-backed explanations for the result.",
-	"closed_at":                 "RFC 3339 timestamp when GitHub reports the thread closed.",
-	"merged_at":                 "RFC 3339 timestamp when GitHub reports the pull request merged.",
-	"incomplete":                "Whether GitHub reported that the bounded search result may be incomplete.",
-	"pushed_at":                 "RFC 3339 timestamp of the latest repository push reported by GitHub.",
-	"body_status":               "Whether the stored issue body is available or unknown.",
-	"gaps":                      "Missing or incomplete evidence with exact bounded recovery actions.",
-	"related_work_total":        "Distinct related-work count before response shortening; a lower bound when related_work_total_known is false.",
-	"related_work_total_known":  "Whether related_work_total is an exhaustive count under stored coverage.",
-	"related_work_truncated":    "Whether related-work evidence or response details were omitted.",
-	"accepted_examples":         "Merge-confirmed pull-request precedents offered for review guidance.",
-	"duplicate_cluster":         "Stored duplicate-candidate cluster evidence for this issue.",
-	"linkage":                   "Advisory pull-request linkage candidate requiring implementation review.",
-	"issue_number":              "Exact supplied GitHub issue number.",
-	"allowed_relations":         "Supported linkage relations the caller may confirm.",
-	"requires_confirmation":     "Whether the caller must confirm the relationship from the implemented diff.",
-	"basis":                     "Stored evidence and caution underlying the advisory relation.",
-	"evidence_kinds":            "Kinds of stored observations supporting the relationship.",
-	"canonical_ref":             "Canonical thread reference selected for a duplicate cluster.",
-	"candidate_count":           "Number of other stored duplicate candidates in the cluster.",
-	"source_as_of":              "Latest RFC 3339 source timestamp represented by the issue set.",
-	"relationship_population":   "Total stored pull requests eligible for related-work analysis.",
-	"relationship_considered":   "Stored pull requests examined under the population bound.",
-}
 
 type schemaDefinition struct {
 	schema *jsonschema.Schema
@@ -273,7 +20,84 @@ type schemaBuilder struct {
 }
 
 func inferredSchema[T any]() schemaDefinition {
-	schema, err := jsonschema.For[T](nil)
+	schema, err := jsonschema.For[T](&jsonschema.ForOptions{
+		TypeSchemas: map[reflect.Type]*jsonschema.Schema{
+			reflect.TypeFor[mcpcontract.Probability](): {
+				Type:        "number",
+				Description: "Numeric confidence from 0 to 1.",
+				Minimum:     jsonschema.Ptr(0.0),
+				Maximum:     jsonschema.Ptr(1.0),
+			},
+			reflect.TypeFor[mcpcontract.SimilarityScore](): {
+				Type:        "number",
+				Description: "Normalized similarity score from 0 to 1.",
+				Minimum:     jsonschema.Ptr(0.0),
+				Maximum:     jsonschema.Ptr(1.0),
+			},
+			reflect.TypeFor[mcpcontract.RadarScore](): {
+				Type:        "integer",
+				Description: "Deterministic Contribution Radar score from 0 to 100.",
+				Minimum:     jsonschema.Ptr(0.0),
+				Maximum:     jsonschema.Ptr(100.0),
+			},
+			reflect.TypeFor[mcpcontract.ProgressPercent](): {
+				Type:        "integer",
+				Description: "Integer completion percentage from 0 to 100.",
+				Minimum:     jsonschema.Ptr(0.0),
+				Maximum:     jsonschema.Ptr(100.0),
+			},
+			reflect.TypeFor[mcpcontract.NonNegativeInt](): {
+				Type:        "integer",
+				Description: "Non-negative integer count or delay.",
+				Minimum:     jsonschema.Ptr(0.0),
+			},
+			reflect.TypeFor[mcpcontract.BatchItemStatus](): {
+				Type:        "string",
+				Description: "Per-item batch outcome.",
+				Enum:        []any{"complete", "retryable", "unavailable", "failed"},
+			},
+			reflect.TypeFor[mcpcontract.JobStatus](): {
+				Type:        "string",
+				Description: "Durable job lifecycle status.",
+				Enum:        []any{"queued", "running", "succeeded", "failed", "cancelled"},
+			},
+			reflect.TypeFor[mcpcontract.JobExecutionState](): {
+				Type:        "string",
+				Description: "Whether a durable job is queued, running, or terminal.",
+				Enum:        []any{"queued", "running", "terminal"},
+			},
+			reflect.TypeFor[mcpcontract.JobOutcome](): {
+				Type:        "string",
+				Description: "Terminal job outcome; omitted until execution is terminal.",
+				Enum:        []any{"succeeded", "partial", "failed", "cancelled"},
+			},
+			reflect.TypeFor[mcpcontract.FixPatternOutcome](): {
+				Type:        "string",
+				Description: "Pull-request outcome; merged state comes from GitHub and superseded requires an explicit replacement relationship.",
+				Enum:        []any{"merged", "closed_unmerged", "superseded", "open", "unknown"},
+			},
+			reflect.TypeFor[mcpcontract.FixPatternRelationship](): {
+				Type:        "string",
+				Description: "Evidence connecting a pull request to an issue.",
+				Enum:        []any{"closes", "references", "explicit_replacement", "similarity_only"},
+			},
+			reflect.TypeFor[mcpcontract.FixPatternReportStatus](): {
+				Type:        "string",
+				Description: "Whether the bounded report is complete or retains coverage limits or failures.",
+				Enum:        []any{"complete", "partial"},
+			},
+			reflect.TypeFor[mcpcontract.FixPatternProofStyle](): {
+				Type:        "string",
+				Description: "Evidence style detected in stored pull-request text.",
+				Enum:        []any{"regression_test", "reproduction", "benchmark", "before_after", "screenshot"},
+			},
+			reflect.TypeFor[mcpcontract.FixPatternRelatedKind](): {
+				Type:        "string",
+				Description: "Stored thread kind of a related target.",
+				Enum:        []any{"issue", "pull_request"},
+			},
+		},
+	})
 	if err != nil {
 		return schemaDefinition{err: fmt.Errorf("infer MCP schema: %w", err)}
 	}
@@ -296,49 +120,10 @@ func inputSchema[T any](customize func(*schemaBuilder)) schemaDefinition {
 
 func outputSchema[T any](description string) schemaDefinition {
 	definition := inferredSchema[T]()
-	if definition.err != nil {
-		return definition
+	if definition.err == nil {
+		definition.schema.Description = description
 	}
-	definition.schema.Description = description
-	var buildErr error
-	describeOutputProperties(&schemaBuilder{schema: definition.schema, err: &buildErr}, true)
-	definition.err = buildErr
 	return definition
-}
-
-func describeOutputProperties(builder *schemaBuilder, includeDescriptions bool) {
-	if builder.schema == nil || *builder.err != nil {
-		return
-	}
-	schema := builder.schema
-	if schema.Properties["key"] != nil && schema.Properties["value"] != nil && schema.Properties["reason"] != nil {
-		setEnum(builder, "status", "complete", "retryable", "unavailable", "failed")
-	}
-	if schema.Properties["progress_percent"] != nil {
-		setEnum(builder, "status", "queued", "running", "succeeded", "failed", "cancelled")
-		setRange(builder, "progress_percent", 0, 100)
-		setMinimum(builder, "completed_items", 0)
-		setMinimum(builder, "total_items", 0)
-		setMinimum(builder, "retry_after_ms", 0)
-	}
-	for name, property := range schema.Properties {
-		if includeDescriptions && property.Description == "" {
-			property.Description = outputPropertyDescriptions[name]
-		}
-		if strings.HasSuffix(name, "_at") || name == "as_of" {
-			property.Format = "date-time"
-		}
-		if name == "score" || name == "confidence" {
-			property.Minimum = jsonschema.Ptr(0.0)
-			property.Maximum = jsonschema.Ptr(1.0)
-		}
-		describeOutputProperties(&schemaBuilder{schema: property, err: builder.err}, false)
-		describeOutputProperties(&schemaBuilder{schema: property.Items, err: builder.err}, false)
-		describeOutputProperties(&schemaBuilder{schema: property.AdditionalProperties, err: builder.err}, false)
-	}
-	for _, definition := range schema.Defs {
-		describeOutputProperties(&schemaBuilder{schema: definition, err: builder.err}, false)
-	}
 }
 
 func property(builder *schemaBuilder, name string) *jsonschema.Schema {
@@ -436,6 +221,7 @@ func requireExactlyOne(builder *schemaBuilder, first, second string) {
 		{Required: []string{second}, Not: &jsonschema.Schema{Required: []string{first}}},
 	}
 }
+
 func configureValidationObservationSchema(builder *schemaBuilder) {
 	observation := property(builder, "observation")
 	if observation == nil {

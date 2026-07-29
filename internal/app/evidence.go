@@ -13,6 +13,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/failure"
+	"github.com/morluto/gitcontribute/internal/investigation"
 	"github.com/morluto/gitcontribute/internal/workspace"
 )
 
@@ -268,6 +269,43 @@ func (s *Service) CompareValidation(ctx context.Context, baseRunID, candidateRun
 	}, nil
 }
 
+// AttachValidationReceipt imports a structured external receipt without
+// executing its declared command.
+func (s *Service) AttachValidationReceipt(ctx context.Context, receipt contracts.ExternalValidationReceipt) (*contracts.ValidationRunResult, error) {
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	invSvc := investigation.NewService(c, c)
+	if _, err := invSvc.GetInvestigation(ctx, receipt.InvestigationID); err != nil {
+		return nil, mapInvestigationError(err)
+	}
+	if receipt.OpportunityID != "" {
+		opportunity, err := invSvc.GetOpportunity(ctx, receipt.OpportunityID)
+		if err != nil {
+			return nil, mapInvestigationError(err)
+		}
+		if opportunity.InvestigationID != receipt.InvestigationID {
+			return nil, errors.New("external receipt opportunity does not belong to its investigation")
+		}
+	}
+	run, err := evidence.NewService(c, nil).AttachExternalReceipt(ctx, evidence.ExternalReceipt{
+		SchemaVersion: receipt.SchemaVersion, Producer: receipt.Producer, ReceiptSHA256: receipt.ReceiptSHA256,
+		ValidationID:    receipt.ValidationID,
+		InvestigationID: receipt.InvestigationID, OpportunityID: receipt.OpportunityID, Kind: evidence.RunKind(receipt.Kind),
+		Repository: receipt.Repository, Revision: receipt.Revision, ArtifactSHA256: receipt.ArtifactSHA256,
+		Provider: receipt.Provider, ExternalRunID: receipt.ExternalRunID, Command: receipt.Command, WorkingDir: receipt.WorkingDir,
+		Environment: receipt.Environment, Artifacts: receipt.Artifacts, StartedAt: receipt.StartedAt, CompletedAt: receipt.CompletedAt,
+		ExitCode: receipt.ExitCode, Classification: evidence.RunClassification(receipt.Classification),
+		Stdout: receipt.Stdout, Stderr: receipt.Stderr, Truncated: receipt.Truncated,
+		Limitations: receipt.Limitations, Incomplete: receipt.Incomplete,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return validationRunResult(run), nil
+}
+
 // ShowEvidence returns the evidence packet for an investigation.
 func (s *Service) ShowEvidence(ctx context.Context, investigationID string) (*contracts.EvidenceResult, error) {
 	invSvc, err := s.readInvestigationSvc(ctx)
@@ -402,7 +440,7 @@ func validationResult(def *evidence.ValidationDefinition) *contracts.ValidationR
 }
 
 func validationRunResult(run *evidence.ValidationRun) *contracts.ValidationRunResult {
-	return &contracts.ValidationRunResult{
+	result := &contracts.ValidationRunResult{
 		ID:                      run.ID,
 		DefinitionID:            run.DefinitionID,
 		InvestigationID:         run.InvestigationID,
@@ -427,7 +465,19 @@ func validationRunResult(run *evidence.ValidationRun) *contracts.ValidationRunRe
 		FailurePhase:            run.FailurePhase,
 		Resources:               validationResources(run.Resources),
 		Cleanup:                 validationCleanup(run.Cleanup),
+		ExecutionOrigin:         run.ExecutionOrigin,
 	}
+	if run.External != nil {
+		result.External = &contracts.ExternalValidationProvenance{
+			SchemaVersion: run.External.SchemaVersion, Producer: run.External.Producer, ReceiptSHA256: run.External.ReceiptSHA256,
+			ValidationID: run.External.ValidationID,
+			Repository:   run.External.Repository, Revision: run.External.Revision, ArtifactSHA256: run.External.ArtifactSHA256,
+			Provider: run.External.Provider, ExternalRunID: run.External.ExternalRunID, Command: append([]string(nil), run.External.Command...),
+			WorkingDir: run.External.WorkingDir, Environment: run.External.Environment, Artifacts: run.External.Artifacts,
+			Limitations: append([]string(nil), run.External.Limitations...), Incomplete: run.External.Incomplete,
+		}
+	}
+	return result
 }
 
 func validationRunGroupResult(group *evidence.ValidationRunGroup) *contracts.ValidationRunGroupResult {

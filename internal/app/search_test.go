@@ -115,6 +115,50 @@ func TestSearchReturnsNextCursorAndCoverage(t *testing.T) {
 	}
 }
 
+func TestSearchUpdatedBeforeBoundsResultsAndBindsCursor(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	repo, err := svc.corpus.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	for number := 1; number <= 3; number++ {
+		if _, err := svc.corpus.ApplyThreadObservation(
+			ctx, repo.ID, corpus.ThreadKindIssue, number, "open", "numeric drift", "wrong result", "alice",
+			base.Add(time.Duration(number-1)*24*time.Hour), `{}`,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	upper := base.Add(24 * time.Hour)
+	first, err := svc.Search(ctx, "numeric drift", contracts.SearchOptions{
+		Kind: "issues", Repo: "owner/repo", UpdatedBefore: upper, Limit: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Total != 2 || len(first.Matches) != 1 || first.NextCursor == "" {
+		t.Fatalf("first page = %+v", first)
+	}
+	if _, err := svc.Search(ctx, "numeric drift", contracts.SearchOptions{
+		Kind: "issues", Repo: "owner/repo", UpdatedBefore: upper.Add(24 * time.Hour), Limit: 1, Cursor: first.NextCursor,
+	}); err == nil {
+		t.Fatal("cursor was accepted with a different updated_before bound")
+	}
+	mcpResult, err := (&MCPReader{Service: svc}).Search(ctx, mcpcontract.SearchInput{
+		Query: "numeric drift", Kind: "issues", Owner: "owner", Repo: "repo",
+		UpdatedBefore: upper.Format(time.RFC3339), Limit: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mcpResult.Total != 2 || len(mcpResult.Matches) != 2 {
+		t.Fatalf("MCP bounded result = %+v", mcpResult)
+	}
+}
+
 func TestThreadSearchMergesRepositoryAndThreadCoverage(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

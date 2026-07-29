@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"modernc.org/sqlite"
 )
 
 // ErrJobCancelled is returned when a terminal transition is blocked because a
@@ -476,43 +475,15 @@ func (c *Corpus) ReconcileInterruptedJobs(ctx context.Context, leaseTimeout time
 	return nil
 }
 
-const (
-	reconcileBeginAttempts = 4
-	reconcileRetryDelay    = 25 * time.Millisecond
-)
-
 func beginReconcileTransaction(ctx context.Context, conn *sql.Conn) error {
 	// BEGIN IMMEDIATE avoids a lock-upgrade race, while the connection's
 	// busy_timeout handles ordinary writer contention. Rapid heartbeat writes
 	// can still exhaust that timeout on Windows, so retry the whole acquisition
 	// without shortening or otherwise mutating the connection-wide timeout.
-	var lastErr error
-	for attempt := 0; attempt < reconcileBeginAttempts; attempt++ {
+	return RetryBusy(ctx, func(ctx context.Context) error {
 		_, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE")
-		if err == nil {
-			return nil
-		}
-		if !isSQLiteBusy(err) {
-			return err
-		}
-		lastErr = err
-		if attempt == reconcileBeginAttempts-1 {
-			break
-		}
-		timer := time.NewTimer(reconcileRetryDelay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-	return lastErr
-}
-
-func isSQLiteBusy(err error) bool {
-	var sqliteErr *sqlite.Error
-	return errors.As(err, &sqliteErr) && sqliteErr.Code()&0xff == 5
+		return err
+	})
 }
 
 const jobSelect = `

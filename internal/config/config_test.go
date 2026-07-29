@@ -116,47 +116,21 @@ unknown_key = "should fail"
 	}
 }
 
-func TestConfigNestedUnknownFieldsRejected(t *testing.T) {
-	t.Parallel()
-	input := `
-[crawl]
-budget = 100
-unknown_nested = 42
-`
-	_, err := Load(strings.NewReader(input))
-	if err == nil {
-		t.Fatal("expected error for unknown nested field, got nil")
-	}
-	var strictErr *toml.StrictMissingError
-	if !errors.As(err, &strictErr) {
-		t.Fatalf("expected *toml.StrictMissingError, got %T: %v", err, err)
-	}
-}
-
-func TestConfigAcceptsRetiredOutputTable(t *testing.T) {
+func TestConfigRetiredOutputFieldsAreMigrated(t *testing.T) {
 	t.Parallel()
 	input := `
 database = "/tmp/test.db"
 
-[token_source]
-method = "gh-cli"
-
-[crawl]
-budget = 1000
-concurrency = 4
-retry_limit = 3
-timeout = "30s"
-
 [output]
-format = "text"
-max_results = 100
+format = "json"
+max_results = 25
 `
 	cfg, err := Load(strings.NewReader(input))
 	if err != nil {
 		t.Fatalf("Load error: %v", err)
 	}
-	if cfg.Database != "/tmp/test.db" || cfg.TokenSource.Method != "gh-cli" {
-		t.Fatalf("unexpected active config: %+v", cfg)
+	if cfg.Database != "/tmp/test.db" {
+		t.Fatalf("Database = %q, want %q", cfg.Database, "/tmp/test.db")
 	}
 
 	path := filepath.Join(t.TempDir(), "config.toml")
@@ -168,20 +142,37 @@ max_results = 100
 		t.Fatalf("ReadFile error: %v", err)
 	}
 	if strings.Contains(string(saved), "[output]") {
-		t.Fatalf("canonical config retained retired output table:\n%s", saved)
+		t.Fatalf("saved config retained retired output section:\n%s", saved)
 	}
 }
 
-func TestConfigRetiredOutputTableStillRejectsUnknownFields(t *testing.T) {
+func TestConfigRetiredOutputUnknownFieldsAreRejected(t *testing.T) {
 	t.Parallel()
 	input := `
 [output]
-format = "text"
-surprise = true
+format = "json"
+unknown_nested = true
 `
 	_, err := Load(strings.NewReader(input))
 	if err == nil {
 		t.Fatal("expected error for unknown retired output field, got nil")
+	}
+	var strictErr *toml.StrictMissingError
+	if !errors.As(err, &strictErr) {
+		t.Fatalf("expected *toml.StrictMissingError, got %T: %v", err, err)
+	}
+}
+
+func TestConfigNestedUnknownFieldsRejected(t *testing.T) {
+	t.Parallel()
+	input := `
+[crawl]
+budget = 100
+unknown_nested = 42
+`
+	_, err := Load(strings.NewReader(input))
+	if err == nil {
+		t.Fatal("expected error for unknown nested field, got nil")
 	}
 	var strictErr *toml.StrictMissingError
 	if !errors.As(err, &strictErr) {

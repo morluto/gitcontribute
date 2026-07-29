@@ -280,7 +280,8 @@ func buildManifestValidation(definition *evidence.ValidationDefinition, run *evi
 		Classification: string(run.Classification), ObservationStatus: string(run.ObservationStatus),
 		Observations: append([]evidence.ObservationResult(nil), run.Observations...), StartedAt: run.StartedAt, CompletedAt: run.CompletedAt,
 		WorkspaceSnapshotBefore: run.WorkspaceSnapshotBefore, WorkspaceSnapshotAfter: run.WorkspaceSnapshotAfter,
-		WorkspaceBindingStatus: run.WorkspaceBindingStatus, Selected: selected,
+		WorkspaceBindingStatus: run.WorkspaceBindingStatus, ExecutionOrigin: run.ExecutionOrigin,
+		External: run.External, Selected: selected,
 	}
 	record.WorkspaceCompatibility, record.CompatibilityReason = validationWorkspaceCompatibility(run, current)
 	if !selected {
@@ -331,6 +332,12 @@ type validationExecutionContract struct {
 }
 
 func validationWorkspaceCompatibility(run *evidence.ValidationRun, current *workspace.Snapshot) (string, string) {
+	if run.ExecutionOrigin == "external" {
+		if run.External == nil || run.External.Incomplete {
+			return "unknown", "external validation receipt identity is missing or producer-declared incomplete"
+		}
+		return "external_unverified", "receipt identity is preserved, but GitContribute did not execute or independently verify it"
+	}
 	if run.WorkspaceBindingStatus != "bound" {
 		status := run.WorkspaceBindingStatus
 		if status == "" {

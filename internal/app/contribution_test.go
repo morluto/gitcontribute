@@ -1,7 +1,6 @@
 package app
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -62,7 +61,8 @@ func TestLoadOpportunityEvidenceIncludesMatchedValidationObservation(t *testing.
 	if err != nil {
 		t.Fatalf("load evidence: %v", err)
 	}
-	if len(items) != 1 || !strings.Contains(items[0].Description, `Matched observation "undersized buffer": !buffer<3>`) {
-		t.Fatalf("evidence = %#v, want matched observation", items)
+	if len(items) != 1 || items[0].ValidationRun == nil || items[0].ValidationDefinition == nil ||
+		items[0].ValidationRun.Observations[0].Excerpt != "!buffer<3>" {
+		t.Fatalf("evidence = %#v, want structured validation proof", items)
 	}
 }

@@ -7,8 +7,10 @@ import (
 )
 
 type fakeOptionalCapabilities struct {
-	base             *fakeReader
-	syncThreadsInput mcpcontract.SyncThreadsInput
+	base                  *fakeReader
+	syncThreadsInput      mcpcontract.SyncThreadsInput
+	fixPatternCalls       int
+	lastFixPatternRequest mcpcontract.MineRepositoryFixPatternsInput
 }
 
 func (*fakeOptionalCapabilities) FindNeighbors(context.Context, mcpcontract.FindNeighborsInput) (mcpcontract.FindNeighborsOutput, error) {
@@ -37,8 +39,26 @@ func (*fakeOptionalCapabilities) GetRepositories(_ context.Context, in mcpcontra
 func (*fakeOptionalCapabilities) GetThreads(context.Context, mcpcontract.GetThreadsInput) (mcpcontract.GetThreadsOutput, error) {
 	return mcpcontract.GetThreadsOutput{Status: "complete"}, nil
 }
-func (*fakeOptionalCapabilities) RankOpportunities(context.Context, mcpcontract.RankOpportunitiesInput) (mcpcontract.RankOpportunitiesOutput, error) {
-	return mcpcontract.RankOpportunitiesOutput{Status: "complete"}, nil
+func (f *fakeOptionalCapabilities) RankOpportunities(context.Context, mcpcontract.RankOpportunitiesInput) (mcpcontract.RankOpportunitiesOutput, error) {
+	score := 87
+	if f.base.radarScore != 0 {
+		score = f.base.radarScore
+	}
+	return mcpcontract.RankOpportunitiesOutput{
+		Status: "complete",
+		Candidates: []mcpcontract.OpportunityCandidateOutput{{
+			Rank:        1,
+			Ref:         "thread:acme/rocket/issue/7",
+			Repo:        "acme/rocket",
+			Number:      7,
+			Title:       "engine stalls",
+			URL:         "https://github.com/acme/rocket/issues/7",
+			Score:       mcpcontract.RadarScore(score),
+			Eligibility: "needs_coordination",
+			Confidence:  "medium",
+		}},
+		Total: 1,
+	}, nil
 }
 func (*fakeOptionalCapabilities) FindPrecedents(context.Context, mcpcontract.FindPrecedentsInput) (mcpcontract.FindPrecedentsOutput, error) {
 	return mcpcontract.FindPrecedentsOutput{Status: "complete"}, nil
@@ -64,17 +84,24 @@ func (*fakeOptionalCapabilities) FindPortfolioOverlaps(context.Context, mcpcontr
 	return mcpcontract.FindPortfolioOverlapsOutput{Status: "complete"}, nil
 }
 func (f *fakeOptionalCapabilities) SearchGitHubRepositories(ctx context.Context, in mcpcontract.SearchGitHubRepositoriesInput) (mcpcontract.SearchGitHubRepositoriesOutput, error) {
+	f.base.recordCall("search_github_repositories")
 	return f.base.SearchGitHubRepositories(ctx, in)
 }
 func (*fakeOptionalCapabilities) SyncRepositoryContext(context.Context, mcpcontract.SyncRepositoryContextInput) (mcpcontract.JobReference, error) {
 	return mcpcontract.JobReference{ID: "job-metadata", Status: "queued"}, nil
 }
 func (f *fakeOptionalCapabilities) SyncThreads(_ context.Context, in mcpcontract.SyncThreadsInput) (mcpcontract.JobReference, error) {
+	f.base.recordCall("sync_threads")
 	f.syncThreadsInput = in
 	return mcpcontract.JobReference{ID: "job-threads", Status: "queued"}, nil
 }
 func (*fakeOptionalCapabilities) HydrateThreads(context.Context, mcpcontract.HydrateThreadsInput) (mcpcontract.JobReference, error) {
 	return mcpcontract.JobReference{ID: "job-hydrate", Status: "queued"}, nil
+}
+func (f *fakeOptionalCapabilities) MineRepositoryFixPatterns(_ context.Context, in mcpcontract.MineRepositoryFixPatternsInput) (mcpcontract.JobReference, error) {
+	f.fixPatternCalls++
+	f.lastFixPatternRequest = in
+	return mcpcontract.JobReference{ID: "job-fix-patterns", Kind: "mine_repository_fix_patterns", Status: "queued"}, nil
 }
 func (*fakeOptionalCapabilities) GetAuthenticatedIdentity(context.Context) (mcpcontract.AuthenticatedIdentityOutput, error) {
 	return mcpcontract.AuthenticatedIdentityOutput{Login: "alice"}, nil
@@ -85,13 +112,17 @@ func (*fakeOptionalCapabilities) SyncAuthoredPullRequests(context.Context, mcpco
 func (*fakeOptionalCapabilities) SyncPullRequestStatus(context.Context, mcpcontract.SyncPullRequestStatusInput) (mcpcontract.JobReference, error) {
 	return mcpcontract.JobReference{ID: "job-status", Status: "queued"}, nil
 }
+func (*fakeOptionalCapabilities) SyncPortfolio(context.Context, mcpcontract.SyncPortfolioInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-portfolio", Kind: "sync_portfolio", Status: "queued"}, nil
+}
 func (*fakeOptionalCapabilities) IndexRepositories(context.Context, mcpcontract.IndexRepositoriesInput) (mcpcontract.JobReference, error) {
 	return mcpcontract.JobReference{ID: "job-index", Status: "queued"}, nil
 }
 func (*fakeOptionalCapabilities) CheckMergeConflicts(context.Context, mcpcontract.CheckMergeConflictsInput) (mcpcontract.CheckMergeConflictsOutput, error) {
 	return mcpcontract.CheckMergeConflictsOutput{Status: "complete"}, nil
 }
-func (*fakeOptionalCapabilities) DeepWiki(context.Context, mcpcontract.DeepWikiInput) (mcpcontract.DeepWikiOutput, error) {
+func (f *fakeOptionalCapabilities) DeepWiki(context.Context, mcpcontract.DeepWikiInput) (mcpcontract.DeepWikiOutput, error) {
+	f.base.recordCall("deepwiki")
 	return mcpcontract.DeepWikiOutput{Status: "complete"}, nil
 }
 func (*fakeOptionalCapabilities) LinkPullRequest(context.Context, mcpcontract.LinkPullRequestInput) (mcpcontract.LinkPullRequestOutput, error) {
@@ -105,6 +136,8 @@ type completeTestReader struct {
 	IssueSetReader
 	PortfolioReader
 	GitHubOperator
+	FixPatternOperator
+	FixPatternReader
 	CodeIndexer
 	MergeConflictReader
 	CommitPlannerReader
@@ -115,17 +148,20 @@ type completeTestReader struct {
 	ConcernOperator
 	WorkspaceCreator
 	WorkspaceAdopter
+	ValidationReceiptOperator
+	PublishedDraftVerifier
 }
 
 func completeFakeReader(base *fakeReader) mcpcontract.Reader {
 	optional := &fakeOptionalCapabilities{base: base}
 	return completeTestReader{
 		Reader: base, NeighborReader: optional, ScalableReader: optional, IssueSetReader: optional,
-		PortfolioReader: optional, GitHubOperator: optional, CodeIndexer: optional,
+		PortfolioReader: optional, GitHubOperator: optional, FixPatternOperator: optional, FixPatternReader: base, CodeIndexer: optional,
 		MergeConflictReader: optional, ResearchReader: optional,
 		CommitPlannerReader: base,
 		PortfolioOperator:   optional, Operator: base,
 		ConcernReader: base, ConcernOperator: base,
 		WorkspaceCreator: base, WorkspaceAdopter: base,
+		ValidationReceiptOperator: base, PublishedDraftVerifier: base,
 	}
 }

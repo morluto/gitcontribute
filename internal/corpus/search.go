@@ -15,21 +15,22 @@ import (
 
 // SearchFilter scopes a thread keyword search.
 type SearchFilter struct {
-	RepoID       int64
-	Repo         string
-	Kind         string
-	State        string
-	StateReason  string
-	Merged       *bool
-	Author       string
-	Association  string
-	Assignee     string
-	Labels       []string
-	UpdatedAfter time.Time
-	Limit        int
-	Cursor       string
-	Sort         string
-	MatchMode    string
+	RepoID        int64
+	Repo          string
+	Kind          string
+	State         string
+	StateReason   string
+	Merged        *bool
+	Author        string
+	Association   string
+	Assignee      string
+	Labels        []string
+	UpdatedAfter  time.Time
+	UpdatedBefore time.Time
+	Limit         int
+	Cursor        string
+	Sort          string
+	MatchMode     string
 }
 
 // ThreadSearchPage is a paginated result of a thread keyword search.
@@ -366,6 +367,10 @@ func appendThreadMetadataFilters(query string, args []any, filter SearchFilter) 
 		query += ` AND t.source_updated_at >= ?`
 		args = append(args, encodeTime(filter.UpdatedAfter))
 	}
+	if !filter.UpdatedBefore.IsZero() {
+		query += ` AND t.source_updated_at <= ?`
+		args = append(args, encodeTime(filter.UpdatedBefore))
+	}
 	return query, args
 }
 
@@ -377,7 +382,7 @@ func threadFilterKey(filter SearchFilter) string {
 	slices.Sort(labels)
 	return strings.Join([]string{
 		strings.ToLower(filter.State), strings.ToLower(filter.StateReason), fmt.Sprint(filter.Merged), strings.ToLower(filter.Author), strings.ToLower(filter.Association), strings.ToLower(filter.Assignee), strings.Join(labels, ","),
-		strconv.FormatInt(encodeTime(filter.UpdatedAfter), 10), filter.Sort, filter.MatchMode,
+		strconv.FormatInt(encodeTime(filter.UpdatedAfter), 10), strconv.FormatInt(encodeTime(filter.UpdatedBefore), 10), filter.Sort, filter.MatchMode,
 	}, "|")
 }
 
