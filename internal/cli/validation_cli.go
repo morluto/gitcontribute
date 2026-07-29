@@ -42,7 +42,7 @@ func (c *CLI) attachValidationReceipt(ctx context.Context, service contracts.Val
 	if err != nil {
 		return fmt.Errorf("open external validation receipt: %w", err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	decoder := json.NewDecoder(io.LimitReader(file, 2<<20))
 	decoder.DisallowUnknownFields()
 	var receipt contracts.ExternalValidationReceipt

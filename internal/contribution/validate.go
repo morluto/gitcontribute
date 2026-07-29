@@ -66,7 +66,11 @@ func ValidateDraftBytes(title, body []byte) []DraftDiagnostic {
 		if !entering || node.Kind() != ast.KindText {
 			return ast.WalkContinue, nil
 		}
-		segment := node.(*ast.Text).Segment
+		textNode, ok := node.(*ast.Text)
+		if !ok {
+			return ast.WalkContinue, nil
+		}
+		segment := textNode.Segment
 		value := segment.Value(body)
 		if at := bytes.Index(value, []byte(`\n`)); at >= 0 {
 			out = append(out, DraftDiagnostic{
@@ -122,7 +126,7 @@ func markdownHeadings(source []byte) map[string]struct{} {
 	document := goldmark.DefaultParser().Parse(text.NewReader(source))
 	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
 		if entering && node.Kind() == ast.KindHeading {
-			heading := strings.ToLower(strings.TrimSpace(string(node.Text(source))))
+			heading := strings.ToLower(strings.TrimSpace(markdownNodeText(node, source)))
 			if heading != "" {
 				out[heading] = struct{}{}
 			}
@@ -130,6 +134,23 @@ func markdownHeadings(source []byte) map[string]struct{} {
 		return ast.WalkContinue, nil
 	})
 	return out
+}
+
+func markdownNodeText(root ast.Node, source []byte) string {
+	var value strings.Builder
+	_ = ast.Walk(root, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		switch node := node.(type) {
+		case *ast.Text:
+			value.Write(node.Value(source))
+		case *ast.String:
+			value.Write(node.Value)
+		}
+		return ast.WalkContinue, nil
+	})
+	return value.String()
 }
 
 func unmatchedFenceOffset(body []byte) int {
