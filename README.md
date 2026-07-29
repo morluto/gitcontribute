@@ -15,6 +15,8 @@ validating, and preparing focused GitHub contributions.
 
 [Quick start](#-quick-start) · [How it works](#-how-it-works) · [CLI guide](#-cli-guide) · [MCP](#-use-with-ai-agents) · [Safety](#-safety-by-design) · [Contributing](CONTRIBUTING.md)
 
+![GitContribute contribution workbench](docs/assets/gitcontribute-tui-workbench.png)
+
 </div>
 
 ---
