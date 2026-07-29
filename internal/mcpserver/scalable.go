@@ -16,9 +16,10 @@ const serverInstructions = "Use advertised GitContribute tools for durable, sour
 	"Prefer corpus tools for offline reads; they never refresh data implicitly. " +
 	"GitHub tools perform explicit network reads and may update only the local corpus. " +
 	"Research tools return derived external context, never live GitHub state. " +
-	"The durable workflow is concern to investigation to hypothesis to opportunity to workspace to draft; use only the stages advertised by the active profile. " +
+	"The durable workflow is concern to investigation to hypothesis to opportunity to workspace to draft; use only advertised stages. " +
 	"Use workflow.prepare_issue_set when exact issue numbers already define the contribution scope. " +
 	"When an operation returns a job, poll advertised job tools in batches. " +
+	"To inspect a returned resource, ask the host to perform MCP resources/read with this server and the exact URI; in Codex, call read_mcp_resource. Treat resource URIs as opaque identifiers and never shorten, pluralize, or reconstruct them. " +
 	"Missing or truncated coverage is unknown, not negative evidence; retry only retryable batch items. " +
 	"Only advertised tools are available. GitContribute never mutates GitHub."
 

@@ -1,11 +1,5 @@
 package mcpcontract
 
-// Options selects MCP capability profiles. An empty Toolsets list is rejected.
-type Options struct {
-	Toolsets []string
-	ReadOnly bool
-}
-
 // SearchRepositoriesInput describes an offline repository search page.
 type SearchRepositoriesInput struct {
 	Query  string `json:"query,omitempty" jsonschema:"Repository full-text query"`
@@ -136,6 +130,14 @@ type JobReference struct {
 
 // BuildRepositoryDossierInput selects a repository for durable dossier generation.
 type BuildRepositoryDossierInput RepoInput
+
+// DurableArtifactReference identifies a persisted object whose canonical
+// detailed representation is available through MCP resources.
+type DurableArtifactReference struct {
+	Kind string `json:"kind" jsonschema:"Persisted artifact kind"`
+	ID   string `json:"id" jsonschema:"Stable artifact identifier"`
+	URI  string `json:"uri" jsonschema:"Exact opaque MCP resource URI to read"`
+}
 
 // StartInvestigationInput creates a local investigation for a repository revision.
 type StartInvestigationInput struct {

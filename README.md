@@ -222,10 +222,9 @@ gitcontribute tui
 
 ## MCP
 
-The default `contribute` MCP profile is focused on contribution research.
-Additional `code`, `research`, `diagnostics`, `portfolio`, `advanced`,
-`patterns`, and `concerns` profiles are opt-in so agents do not receive a
-large overlapping tool catalog by default.
+The MCP server advertises one unified catalog. Hosts such as Codex and Claude
+Code can discover large MCP catalogs with native tool search, so setup does not
+ask users to choose permanent capability profiles.
 
 ```sh
 gitcontribute setup --mode mcp --codex --token-source none --yes
@@ -240,7 +239,7 @@ gitcontribute mcp serve --transport=stdio
 
 Add `--read-only` to remove tools that permit local writes or execution. See
 [Scalable MCP workflows](docs/mcp-scalable-workflows.md) for the tool sequence,
-coverage model, partial-result recovery, and specialized toolsets.
+coverage model, partial-result recovery, and side-effect boundaries.
 
 ## Side-effect boundaries
 

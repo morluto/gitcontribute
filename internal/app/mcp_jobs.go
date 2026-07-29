@@ -213,7 +213,7 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 		if json.Unmarshal([]byte(job.Request), &request) == nil && request.Owner != "" && request.Repo != "" {
 			uri := fmt.Sprintf("gitcontribute://dossier/%s/%s", request.Owner, request.Repo)
 			return []mcpcontract.JobArtifactReference{{Kind: "dossier", ID: request.Owner + "/" + request.Repo, URI: uri}},
-				followUp(mcpcontract.ToolGetRepositoryDossier, uri, "Read the persisted typed dossier.")
+				followUp("", uri, "Read the persisted typed dossier resource.")
 		}
 	case "create_workspace":
 		var result struct {
@@ -228,16 +228,14 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 			ID string `json:"id"`
 		}
 		if json.Unmarshal([]byte(job.Result), &result) == nil && result.ID != "" {
-			return []mcpcontract.JobArtifactReference{{Kind: "validation_run", ID: result.ID}},
-				followUp(mcpcontract.ToolGetEvidence, "", "Read persisted validation evidence through the typed evidence plane.")
+			return []mcpcontract.JobArtifactReference{{Kind: "validation_run", ID: result.ID}}, nil
 		}
 	case "run_validation_group":
 		var result struct {
 			ID string `json:"id"`
 		}
 		if json.Unmarshal([]byte(job.Result), &result) == nil && result.ID != "" {
-			return []mcpcontract.JobArtifactReference{{Kind: "validation_group", ID: result.ID}},
-				followUp(mcpcontract.ToolGetEvidence, "", "Read persisted validation evidence through the typed evidence plane.")
+			return []mcpcontract.JobArtifactReference{{Kind: "validation_group", ID: result.ID}}, nil
 		}
 	case "sync_repository_context":
 		return batch("repository_batch", mcpcontract.ToolGetRepositories, "Read synchronized repository facts and coverage from the offline corpus.")

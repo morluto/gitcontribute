@@ -260,9 +260,11 @@ boundaries (`corpus`, `github`, `code`, `workspace`, `validation`, `workflow`,
 and `research`) rather than mirroring low-level API endpoints. Frequently
 chained operations may be consolidated only when they share one authority and
 one failure boundary; a read must never hide a refresh, write, or process run.
-The CLI defaults to the focused `contribute` catalog. Code/workspace execution,
-external derived research, diagnostics, portfolio, and advanced similarity are
-opt-in profiles; `all` exists for auditing and embedding.
+The CLI exposes the unified `all` catalog. Internal catalog projections are
+used only by controlled tool-selection evaluations. The catalog keeps
+code/workspace execution, external derived research, diagnostics, portfolio,
+and advanced similarity as separately annotated capabilities rather than
+separate user-configured profiles.
 
 Tool inputs are strict and bounded, output distinguishes total population from
 returned/truncated items, and errors state how the caller can recover. MCP SDK

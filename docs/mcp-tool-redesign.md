@@ -28,16 +28,21 @@ typed. DeepWiki defaults to 32 KiB and directs truncated reads toward structure
 or a focused question before a larger response.
 
 Tool results link durable dossiers, investigations, opportunities, evidence,
-readiness reports, and job artifacts with SDK-native resource links. Scalar
-read tools remain available until the v4 client-compatibility evaluation shows
-that supported clients reliably follow resources. Resources and scalar tools
-must not both be read for one result.
+readiness reports, and job artifacts with SDK-native resource links. Resources
+are the canonical detailed read plane for durable artifacts; the catalog does
+not duplicate them as scalar tools. Producers return compact typed references
+so clients follow the exact resource URI instead of consuming duplicate
+structured output. Bounded searches, rankings, and multi-object reads remain
+tools because they are queries rather than durable-artifact representations.
+Clients must support MCP `resources/read`; Codex exposes that operation as
+`read_mcp_resource`. GitContribute does not provide a parallel generic read
+tool or scalar artifact fallback.
 
 The catalog preserves offline reads, network reads, local writes, process
-execution, and external mutation as separate capabilities. The default
-`contribute` profile contains no partial concern lifecycle; the specialized
-`concerns` profile exposes the complete lifecycle. The dossier build operation
-is named `workflow.build_repository_dossier` because it writes local state.
+execution, and external mutation as separate capabilities. The unified catalog
+exposes the complete concern lifecycle rather than a partial subset. The
+dossier build operation is named `workflow.build_repository_dossier` because
+it writes local state.
 
 ## Consolidation decisions
 
@@ -46,13 +51,13 @@ Durable submission and polling, validation definition and authorized
 execution, and commit inspection and planning remain separate because each
 boundary permits meaningful agent judgment or authorization.
 
-Live repository search includes local dossier availability. The specialized
-portfolio profile offers `github.sync_portfolio`, a bounded durable job that
+Live repository search includes local dossier availability. The catalog offers
+`github.sync_portfolio`, a bounded durable job that
 uses the existing authored-discovery and exact-status operations and chunks
 status refreshes at 50 pull requests. The underlying primitives remain
 available for recovery and partial workflows.
 
-The `patterns` profile offers
+The catalog offers
 `workflow.mine_repository_fix_patterns`. It consolidates the observed
 search-select-hydrate-rescan loop while preserving the real durable-job,
 network-read, and local-write boundaries. The triggering agent trace found 587
@@ -60,24 +65,20 @@ otherwise matching pull requests with unknown merge state, then required 26
 exact hydrations to recover 21 confirmed merged examples; one persistence step
 also encountered `SQLITE_BUSY`. The aggregate therefore hydrates only bounded
 unknown-state finalists, reports unknowns before and after hydration, and
-separates confirmed merged fixes from merely similar closed work. It remains
-opt-in until held-out model trials justify default-profile membership.
+separates confirmed merged fixes from merely similar closed work.
 
-DeepWiki retains one tool with three discriminated modes. Static profiles
-remain the capability-discovery mechanism; the server does not mutate a global
+DeepWiki retains one tool with three discriminated modes. Host-native tool
+search is the capability-discovery mechanism; the server does not mutate its
 catalog or add a custom discovery meta-tool.
 
 ## Evidence gate
 
-Catalog byte measurements are regression proxies, not model evidence. The v4
-fixtures under `internal/mcpserver/testdata/agent-eval/v4` freeze catalog
-fingerprints and compare the ten ambiguous workflows called out in the design
-review. Each condition requires at least three trials with frozen model,
-sampling settings, catalog, corpus revision, permissions, prompt, and token
-budget.
+Catalog byte measurements are regression proxies, not model evidence. The v5
+fixture under `internal/mcpserver/testdata/agent-eval/v5` records the unified
+catalog decision and compares eager loading with host-native tool search. Each
+condition requires at least three trials with frozen model, sampling settings,
+catalog, corpus revision, permissions, prompt, and token budget.
 
 Semantic correctness and side-effect correctness are gates. Only afterward may
 invalid calls, redundant calls, result tokens, latency, and recovery success be
-compared. No further default-profile reduction ships until those trials show at
-least 25% lower model-visible catalog context without a meaningful task-success
-regression, an increased invalid-call rate, or lost side-effect disclosure.
+compared. The fixture does not claim that model trials have run.

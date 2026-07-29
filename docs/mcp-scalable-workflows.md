@@ -51,7 +51,7 @@ explicit `raw_query` field; there is no deprecated alias.
 - `corpus.get_repositories` returns stored metadata plus `dossier_status` and
   `dossier_as_of` for up to 100 repositories. Use that batch to compare
   candidates and dossier availability; load a full persisted dossier only for
-  a known finalist with `corpus.get_repository_dossier`.
+  a known finalist through `gitcontribute://dossier/{owner}/{repo}`.
 - `corpus.get_repositories`, `corpus.get_threads`, `corpus.find_clusters`,
   `corpus.find_neighbors`, `corpus.rank_threads`, and
   `corpus.find_precedents` are offline.
@@ -79,7 +79,7 @@ explicit `raw_query` field; there is no deprecated alias.
 
 ### Repository fix-pattern mining
 
-The opt-in `patterns` profile exposes the trace-backed aggregate:
+The unified catalog exposes the trace-backed aggregate:
 
 ```text
 workflow.mine_repository_fix_patterns
@@ -202,15 +202,18 @@ Repository and dossier absence have different recovery paths:
   call `workflow.build_repository_dossier` only when creating that local artifact
   is actually required.
 
-Retrying `corpus.get_repository_dossier` alone cannot resolve either state.
+Reading the dossier resource again cannot resolve either state.
 
 `corpus.get_coverage` accepts up to 100 ordered repository or exact-thread
 targets. `jobs.cancel` accepts up to 100 IDs and returns isolated item outcomes;
 repeating cancellation is safe. `jobs.get` exposes structured phase and item
 counts rather than requiring clients to parse event prose.
 
-The MCP catalog does not advertise scalar compatibility aliases. Use one-item
-arrays with `corpus.get_repositories`, `corpus.get_threads`,
+The MCP catalog does not advertise scalar compatibility aliases or duplicate
+durable-artifact getters. Read dossiers, investigations, opportunities,
+evidence, readiness reports, workflows, and lenses through their
+`gitcontribute://` resources. Use one-item arrays with
+`corpus.get_repositories`, `corpus.get_threads`,
 `github.sync_threads`, `github.hydrate_threads`, and `jobs.get` when only one
 target is needed. Configured recurring-source crawls remain a CLI/TUI workflow,
 not an MCP discovery primitive.

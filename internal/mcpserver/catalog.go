@@ -18,11 +18,6 @@ type catalogTool[In, Out any] struct {
 }
 
 func addCatalogTool[In, Out any](server *Server, tool catalogTool[In, Out]) {
-	if server.enabledTools != nil {
-		if _, enabled := server.enabledTools[tool.name]; !enabled {
-			return
-		}
-	}
 	if tool.supportedBy != nil && !tool.supportedBy(server.reader) {
 		return
 	}
@@ -52,19 +47,6 @@ func supports[T any](reader mcpcontract.Reader) bool {
 	return ok
 }
 
-// allToolNames is a test and selection projection of the named toolsets. The
-// runtime "all" profile does not use this list: it leaves filtering disabled
-// and therefore follows the tools actually registered by the server.
-func allToolNames() map[string]struct{} {
-	all := make(map[string]struct{})
-	for _, names := range toolsets {
-		for _, name := range names {
-			all[name] = struct{}{}
-		}
-	}
-	return all
-}
-
 func structuredToolErrors[In, Out any](handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
 	return func(ctx context.Context, request *mcp.CallToolRequest, input In) (*mcp.CallToolResult, Out, error) {
 		result, output, err := handler(ctx, request, input)
@@ -84,55 +66,6 @@ func structuredToolErrors[In, Out any](handler mcp.ToolHandlerFor[In, Out]) mcp.
 		}
 		return result, output, &mcpcontract.ToolError{Code: code, Message: err.Error(), Retryable: false}
 	}
-}
-
-var toolsets = map[string][]string{
-	"contribute": {
-		mcpcontract.ToolSearchRepositories, mcpcontract.ToolSearchThreads, mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads,
-		mcpcontract.ToolRankThreads, mcpcontract.ToolFindPrecedents, mcpcontract.ToolPrepareIssueSet, mcpcontract.ToolGetRepositoryDossier,
-		mcpcontract.ToolGetCoverage, mcpcontract.ToolGetJob, mcpcontract.ToolCancelJob,
-		mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolSyncRepositoryContext, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads,
-		mcpcontract.ToolStartInvestigation, mcpcontract.ToolRecordHypothesis, mcpcontract.ToolCheckDuplicates, mcpcontract.ToolFindCompetingWork,
-		mcpcontract.ToolPromoteOpportunity, mcpcontract.ToolGetInvestigation, mcpcontract.ToolListOpportunities, mcpcontract.ToolGetOpportunity,
-		mcpcontract.ToolGetEvidence, mcpcontract.ToolGetReadiness, mcpcontract.ToolPrepareContribution, mcpcontract.ToolVerifyPublishedDraft, mcpcontract.ToolExportManifest,
-	},
-	"code": {
-		mcpcontract.ToolSearchCode, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCreateWorkspace, mcpcontract.ToolAdoptWorkspace, mcpcontract.ToolCheckMergeConflicts,
-		mcpcontract.ToolInspectCommitChanges, mcpcontract.ToolPlanSemanticCommits,
-		mcpcontract.ToolDefineValidation, mcpcontract.ToolRunValidation, mcpcontract.ToolRunRepeatedValidation, mcpcontract.ToolAttachValidationReceipt,
-		mcpcontract.ToolGetJob, mcpcontract.ToolCancelJob,
-	},
-	"research":    {mcpcontract.ToolQueryDeepWiki},
-	"diagnostics": {mcpcontract.ToolExplainMatch, mcpcontract.ToolBuildRepositoryDossier, mcpcontract.ToolGetJob},
-	"portfolio": {
-		mcpcontract.ToolGetJob, mcpcontract.ToolCancelJob, mcpcontract.ToolGetAuthenticatedIdentity, mcpcontract.ToolSyncAuthoredPullRequests,
-		mcpcontract.ToolSyncPullRequestStatus, mcpcontract.ToolSyncPortfolio, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolFindPortfolioOverlaps, mcpcontract.ToolLinkPullRequest,
-	},
-	"advanced": {mcpcontract.ToolFindClusters, mcpcontract.ToolFindNeighbors},
-	"patterns": {mcpcontract.ToolMineRepositoryFixPatterns, mcpcontract.ToolGetJob, mcpcontract.ToolCancelJob},
-	"concerns": {ToolListConcerns, ToolCreateConcern, ToolUpdateConcern, ToolSetConcernState, ToolLinkConcern, ToolPromoteConcern},
-}
-
-func enabledToolNames(selected []string) map[string]struct{} {
-	enabled := make(map[string]struct{})
-	for _, name := range selected {
-		if name == "all" {
-			return allToolNames()
-		}
-		for _, tool := range toolsets[name] {
-			enabled[tool] = struct{}{}
-		}
-	}
-	return enabled
-}
-
-func toolFilter(selected []string) map[string]struct{} {
-	for _, name := range selected {
-		if name == "all" {
-			return nil
-		}
-	}
-	return enabledToolNames(selected)
 }
 
 func readOnlyAnnotations() *mcp.ToolAnnotations {

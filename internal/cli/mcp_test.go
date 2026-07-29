@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 )
 
@@ -17,9 +16,6 @@ func TestMCP(t *testing.T) {
 	}
 	if runner.opts.Transport != "stdio" {
 		t.Fatalf("transport=%q, want stdio", runner.opts.Transport)
-	}
-	if strings.Join(runner.opts.Toolsets, ",") != "contribute" {
-		t.Fatalf("toolsets=%v, want contribute", runner.opts.Toolsets)
 	}
 	if stdout.String() != "" {
 		t.Fatalf("unexpected stdout: %q", stdout.String())

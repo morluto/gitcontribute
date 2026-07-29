@@ -24,6 +24,10 @@ func TestServerInstructionsContainRoutingPhrases(t *testing.T) {
 		"explicit network reads",
 		"concern to investigation to hypothesis to opportunity to workspace to draft",
 		"poll advertised job tools in batches",
+		"perform MCP resources/read",
+		"in Codex, call read_mcp_resource",
+		"exact URI",
+		"never shorten, pluralize, or reconstruct them",
 		"Only advertised tools are available",
 		"never mutates GitHub",
 	} {
@@ -38,8 +42,10 @@ func TestDurableToolResultsIncludeSDKResourceLinks(t *testing.T) {
 	defer closeSessions()
 
 	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
-		Name:      mcpcontract.ToolGetRepositoryDossier,
-		Arguments: map[string]any{"owner": "acme", "repo": "rocket"},
+		Name: mcpcontract.ToolStartInvestigation,
+		Arguments: map[string]any{
+			"owner": "acme", "repo": "rocket", "commit_sha": "abc123",
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -47,12 +53,120 @@ func TestDurableToolResultsIncludeSDKResourceLinks(t *testing.T) {
 	if result.StructuredContent == nil {
 		t.Fatal("resource-linked tool lost SDK-populated structured content")
 	}
-	if len(result.Content) != 1 {
+	if len(result.Content) != 2 {
 		t.Fatalf("resource-linked content = %+v", result.Content)
 	}
-	link, ok := result.Content[0].(*mcp.ResourceLink)
-	if !ok || link.URI != "gitcontribute://dossier/acme/rocket" || link.MIMEType != "application/json" {
-		t.Fatalf("resource link = %#v", result.Content[0])
+	instruction, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("resource instruction = %#v", result.Content[0])
+	}
+	for _, phrase := range []string{
+		"perform MCP `resources/read` with this server",
+		"in Codex, call `read_mcp_resource`",
+		`exact URI "gitcontribute://investigation/inv-1"`,
+		"copy it verbatim without shortening, pluralizing, or reconstructing it",
+		"Do not substitute structured tool output for the resource read",
+	} {
+		if !strings.Contains(instruction.Text, phrase) {
+			t.Errorf("resource instruction missing %q: %q", phrase, instruction.Text)
+		}
+	}
+	link, ok := result.Content[1].(*mcp.ResourceLink)
+	if !ok || link.URI != "gitcontribute://investigation/inv-1" || link.MIMEType != "application/json" {
+		t.Fatalf("resource link = %#v", result.Content[1])
+	}
+	for _, phrase := range []string{"exact opaque URI unchanged", "do not shorten, pluralize, or reconstruct it"} {
+		if !strings.Contains(link.Description, phrase) {
+			t.Errorf("resource link description missing %q: %q", phrase, link.Description)
+		}
+	}
+}
+
+func TestStartInvestigationReturnsCompactResourceReference(t *testing.T) {
+	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	defer closeSessions()
+
+	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: mcpcontract.ToolStartInvestigation,
+		Arguments: map[string]any{
+			"owner": "acme", "repo": "rocket", "commit_sha": "abc123",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ref mcpcontract.DurableArtifactReference
+	if err := json.Unmarshal(payload, &ref); err != nil {
+		t.Fatal(err)
+	}
+	if ref.Kind != "investigation" || ref.ID != "inv-1" || ref.URI != "gitcontribute://investigation/inv-1" {
+		t.Fatalf("compact reference = %+v", ref)
+	}
+	for _, forbidden := range []string{`"owner"`, `"repo"`, `"status"`, `"hypotheses"`} {
+		if strings.Contains(string(payload), forbidden) {
+			t.Errorf("compact reference leaked investigation field %s: %s", forbidden, payload)
+		}
+	}
+}
+
+func TestPromoteOpportunityReturnsCompactResourceReference(t *testing.T) {
+	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	defer closeSessions()
+
+	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: mcpcontract.ToolPromoteOpportunity,
+		Arguments: map[string]any{
+			"hypothesis_id": "hyp-1", "problem_statement": "leak", "scope": "small",
+			"impact": "high", "expected_effort": "1h", "confidence": 0.8,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ref mcpcontract.DurableArtifactReference
+	if err := json.Unmarshal(payload, &ref); err != nil {
+		t.Fatal(err)
+	}
+	if ref.Kind != "opportunity" || ref.ID != "opp-1" || ref.URI != "gitcontribute://opportunity/opp-1" {
+		t.Fatalf("compact reference = %+v", ref)
+	}
+	for _, forbidden := range []string{`"problem_statement"`, `"scope"`, `"impact"`, `"confidence"`, `"source_refs"`} {
+		if strings.Contains(string(payload), forbidden) {
+			t.Errorf("compact reference leaked opportunity field %s: %s", forbidden, payload)
+		}
+	}
+}
+
+func TestCanonicalResourcesReplaceScalarArtifactGetters(t *testing.T) {
+	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	defer closeSessions()
+
+	tools := map[string]bool{}
+	for tool, err := range client.Tools(context.Background(), nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		tools[tool.Name] = true
+	}
+	for _, retired := range []string{
+		"corpus.get_repository_dossier",
+		"corpus.get_investigation",
+		"corpus.list_opportunities",
+		"corpus.get_opportunity",
+		"corpus.get_evidence",
+		"corpus.get_readiness",
+	} {
+		if tools[retired] {
+			t.Errorf("retired scalar artifact getter remains advertised: %s", retired)
+		}
 	}
 }
 
@@ -104,8 +218,7 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 		tools[tool.Name] = tool
 	}
 	for _, name := range []string{
-		mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolSearchCode, mcpcontract.ToolGetInvestigation,
-		mcpcontract.ToolListOpportunities, mcpcontract.ToolGetOpportunity, mcpcontract.ToolGetEvidence, mcpcontract.ToolGetReadiness,
+		mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolSearchCode,
 		mcpcontract.ToolFindClusters, mcpcontract.ToolFindNeighbors, mcpcontract.ToolGetCoverage,
 		mcpcontract.ToolGetAuthenticatedIdentity, mcpcontract.ToolQueryDeepWiki,
 	} {

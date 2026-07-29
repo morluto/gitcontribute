@@ -212,7 +212,6 @@ several scalar or ambiguous tools instead of adding aliases indefinitely.
 | `corpus.search_code` | Search indexed code snapshots | 100 results | None |
 | `corpus.get_repositories` | Read stored metadata, coverage, and persisted-dossier availability for repository references | 100 repositories | None |
 | `corpus.get_threads` | Read compact or full stored thread projections | 100 threads | None |
-| `corpus.get_repository_dossier` | Read one persisted repository dossier | 1 repository | None |
 | `corpus.explain_match` | Explain one prior stored search result | 1 result | None |
 | `corpus.get_coverage` | Read facet coverage for repositories or threads | 100 targets | None |
 | `corpus.find_clusters` | Read duplicate clusters for repositories | 20 repositories | None |
@@ -221,12 +220,11 @@ several scalar or ambiguous tools instead of adding aliases indefinitely.
 | `corpus.find_precedents` | Find completed, fixed, duplicate, rejected, and superseded historical work | 20 source threads, 100 results | None |
 | `corpus.list_pull_request_portfolio` | List authored pull requests with locally derived attention state | 100 results | None |
 | `corpus.find_portfolio_overlaps` | Compare candidate work with authored pull requests and local opportunities | 50 candidates | None |
-| `corpus.get_investigation` | Read one local investigation | 1 investigation | None |
-| `corpus.list_opportunities` | List opportunities for one investigation | 100 results | None |
-| `corpus.get_opportunity` | Read one opportunity | 1 opportunity | None |
-| `corpus.get_evidence` | Read evidence for one investigation or opportunity | 100 records | None |
-| `corpus.get_readiness` | Evaluate deterministic readiness for one opportunity | 1 opportunity | None |
-| `corpus.get_lens` | Read one stored lens | 1 lens | None |
+
+Durable dossiers, investigations, investigation opportunity collections,
+individual opportunities, evidence sets, readiness reports, contribution
+workflows, and lenses use the canonical `gitcontribute://` MCP resource
+templates. They are not duplicated as scalar tools.
 
 `corpus.search_threads` should support structured filters in addition to text:
 

@@ -352,15 +352,19 @@ func (*fakeReader) CancelJobs(_ context.Context, in mcpcontract.CancelJobInput) 
 
 func connect(t *testing.T, reader mcpcontract.Reader) (*mcp.ClientSession, func()) {
 	t.Helper()
-	return connectWithOptions(t, reader, mcpcontract.Options{Toolsets: []string{"all"}})
+	return connectServer(t, reader, false)
 }
 
-func connectWithOptions(t *testing.T, reader mcpcontract.Reader, options mcpcontract.Options) (*mcp.ClientSession, func()) {
+func connectServer(t *testing.T, reader mcpcontract.Reader, readOnly bool) (*mcp.ClientSession, func()) {
 	t.Helper()
 	if base, ok := reader.(*fakeReader); ok {
 		reader = completeFakeReader(base)
 	}
-	server, err := NewWithOptions(reader, "test", options)
+	newServer := New
+	if readOnly {
+		newServer = NewReadOnly
+	}
+	server, err := newServer(reader, "test")
 	if err != nil {
 		t.Fatalf("create server: %v", err)
 	}
@@ -391,11 +395,6 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 		wantTotal int
 	}{
 		{mcpcontract.ToolSearchCode, map[string]any{"query": "main"}, 1},
-		{mcpcontract.ToolGetInvestigation, map[string]any{"id": "inv-1"}, -1},
-		{mcpcontract.ToolListOpportunities, map[string]any{"investigation_id": "inv-1"}, 1},
-		{mcpcontract.ToolGetOpportunity, map[string]any{"id": "opp-1"}, -1},
-		{mcpcontract.ToolGetEvidence, map[string]any{"investigation_id": "inv-1"}, 1},
-		{mcpcontract.ToolGetReadiness, map[string]any{"opportunity_id": "opp-1"}, -1},
 		{mcpcontract.ToolFindClusters, map[string]any{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket"}}}, 1},
 		{mcpcontract.ToolGetCoverage, map[string]any{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket"}}}, -1},
 	}
@@ -425,46 +424,6 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 			if out.Total != tt.wantTotal || len(out.Matches) != tt.wantTotal {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		case mcpcontract.ToolGetInvestigation:
-			var out mcpcontract.InvestigationOutput
-			if err := json.Unmarshal(payload, &out); err != nil {
-				t.Fatalf("decode %s: %v", tt.name, err)
-			}
-			if out.ID != "inv-1" {
-				t.Fatalf("%s output = %+v", tt.name, out)
-			}
-		case mcpcontract.ToolListOpportunities:
-			var out mcpcontract.ListOpportunitiesOutput
-			if err := json.Unmarshal(payload, &out); err != nil {
-				t.Fatalf("decode %s: %v", tt.name, err)
-			}
-			if out.Total != tt.wantTotal || len(out.Opportunities) != tt.wantTotal {
-				t.Fatalf("%s output = %+v", tt.name, out)
-			}
-		case mcpcontract.ToolGetOpportunity:
-			var out mcpcontract.OpportunityOutput
-			if err := json.Unmarshal(payload, &out); err != nil {
-				t.Fatalf("decode %s: %v", tt.name, err)
-			}
-			if out.ID != "opp-1" {
-				t.Fatalf("%s output = %+v", tt.name, out)
-			}
-		case mcpcontract.ToolGetEvidence:
-			var out mcpcontract.EvidenceOutput
-			if err := json.Unmarshal(payload, &out); err != nil {
-				t.Fatalf("decode %s: %v", tt.name, err)
-			}
-			if out.Total != tt.wantTotal || len(out.Evidence) != tt.wantTotal {
-				t.Fatalf("%s output = %+v", tt.name, out)
-			}
-		case mcpcontract.ToolGetReadiness:
-			var out mcpcontract.ReadinessOutput
-			if err := json.Unmarshal(payload, &out); err != nil {
-				t.Fatalf("decode %s: %v", tt.name, err)
-			}
-			if out.OpportunityID != "opp-1" || out.Status != "warn" || len(out.Checks) != 1 {
-				t.Fatalf("%s output = %+v", tt.name, out)
-			}
 		case mcpcontract.ToolFindClusters:
 			var out mcpcontract.FindClustersOutput
 			if err := json.Unmarshal(payload, &out); err != nil {
@@ -481,26 +440,6 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 			if len(out.Items) != 1 || out.Items[0].Value == nil || out.Items[0].Value.Owner != "acme" || out.Items[0].Value.Repo != "rocket" || len(out.Items[0].Value.Facets) == 0 {
 				t.Fatalf("%s output = %+v", tt.name, out)
 			}
-		}
-	}
-}
-
-func TestReadOnlyToolsRejectAmbiguousOrUnboundedInputs(t *testing.T) {
-	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
-	defer closeSessions()
-	tests := []struct {
-		name string
-		args map[string]any
-	}{
-		{mcpcontract.ToolGetInvestigation, map[string]any{"id": "inv-1", "hypothesis_limit": 101}},
-		{mcpcontract.ToolGetOpportunity, map[string]any{"id": "opp-1", "evidence_limit": 101}},
-		{mcpcontract.ToolGetEvidence, map[string]any{"investigation_id": "inv-1", "opportunity_id": "opp-1"}},
-		{mcpcontract.ToolGetEvidence, map[string]any{}},
-	}
-	for _, tt := range tests {
-		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})
-		if err == nil && (result == nil || !result.IsError) {
-			t.Fatalf("%s accepted %+v: result=%+v", tt.name, tt.args, result)
 		}
 	}
 }
@@ -705,8 +644,8 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 	}
 
 	for _, name := range []string{
-		mcpcontract.ToolSearchRepositories, mcpcontract.ToolSearchThreads, mcpcontract.ToolGetRepositoryDossier, mcpcontract.ToolExplainMatch, mcpcontract.ToolGetJob,
-		mcpcontract.ToolGetReadiness, mcpcontract.ToolBuildRepositoryDossier,
+		mcpcontract.ToolSearchRepositories, mcpcontract.ToolSearchThreads, mcpcontract.ToolExplainMatch, mcpcontract.ToolGetJob,
+		mcpcontract.ToolBuildRepositoryDossier,
 		mcpcontract.ToolCreateWorkspace, mcpcontract.ToolAdoptWorkspace, mcpcontract.ToolRunValidation, mcpcontract.ToolRunRepeatedValidation,
 		mcpcontract.ToolStartInvestigation, mcpcontract.ToolRecordHypothesis,
 		mcpcontract.ToolCheckDuplicates, mcpcontract.ToolFindCompetingWork, mcpcontract.ToolPromoteOpportunity, mcpcontract.ToolDefineValidation,
@@ -723,10 +662,8 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 	}{
 		{mcpcontract.ToolSearchRepositories, map[string]any{"query": "rocket"}},
 		{mcpcontract.ToolSearchThreads, map[string]any{"query": "stall"}},
-		{mcpcontract.ToolGetRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"}},
 		{mcpcontract.ToolExplainMatch, map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 7}},
 		{mcpcontract.ToolGetJob, map[string]any{"ids": []string{"job-1"}}},
-		{mcpcontract.ToolGetReadiness, map[string]any{"opportunity_id": "opp-1"}},
 	}
 	for _, tt := range readTests {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})
