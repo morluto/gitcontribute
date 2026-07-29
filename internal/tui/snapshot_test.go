@@ -53,8 +53,9 @@ func TestRendererSnapshots(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read golden %s: %v (run go test ./internal/tui -run TestRendererSnapshots -update-tui)", path, err)
 			}
-			if got != string(want) {
-				t.Fatalf("renderer snapshot differs from %s; review, then update with -update-tui\n%s", path, firstSnapshotDifference(string(want), got))
+			wantText := strings.ReplaceAll(string(want), "\r\n", "\n")
+			if got != wantText {
+				t.Fatalf("renderer snapshot differs from %s; review, then update with -update-tui\n%s", path, firstSnapshotDifference(wantText, got))
 			}
 		})
 	}
