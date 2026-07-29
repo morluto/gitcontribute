@@ -1,12 +1,25 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Tag to build and publish
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing tag to build and publish
+        required: true
+        type: string
 
 permissions:
   contents: read
+
+concurrency:
+  group: release-${{ inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   validate:
@@ -15,6 +28,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag || github.ref_name }}
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -29,7 +44,7 @@ jobs:
       - name: Verify release version
         shell: bash
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ inputs.release_tag || github.ref_name }}
         run: node scripts/verify-release-version.mjs "${VERSION#v}"
       - run: npm run test:npm
 
@@ -43,6 +58,8 @@ jobs:
       matrix: ${{ fromJSON(needs.platform_matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag || github.ref_name }}
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -56,7 +73,7 @@ jobs:
           CGO_ENABLED: "0"
           TARGET: ${{ matrix.target }}
           BINARY: ${{ matrix.binary }}
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ inputs.release_tag || github.ref_name }}
         run: |
           mkdir -p "dist/$TARGET"
           go build -trimpath -ldflags "-s -w -X main.version=${VERSION#v}" -o "dist/$TARGET/$BINARY" ./cmd/gitcontribute
@@ -75,6 +92,8 @@ jobs:
       matrix: ${{ steps.platforms.outputs.matrix }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag || github.ref_name }}
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -93,6 +112,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ inputs.release_tag || github.ref_name }}
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -118,6 +138,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag || github.ref_name }}
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -139,14 +161,14 @@ jobs:
       - name: Verify release version
         shell: bash
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ inputs.release_tag || github.ref_name }}
         run: node scripts/verify-release-version.mjs "${VERSION#v}"
       - run: npm run test:npm
       - run: npm run build:npm
       - name: Build and inspect npm tarball
         shell: bash
         env:
-          VERSION: ${{ github.ref_name }}
+          VERSION: ${{ inputs.release_tag || github.ref_name }}
         run: |
           npm pack --pack-destination dist
           tarball=$(find dist -maxdepth 1 -name 'gitcontribute-*.tgz' -print -quit)
@@ -172,10 +194,11 @@ jobs:
       - name: Attach npm package to GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         shell: bash
         run: |
           tarball=$(find dist -maxdepth 1 -name 'gitcontribute-*.tgz' -print -quit)
-          gh release upload "${{ github.ref_name }}" "$tarball" dist/npm-SHA256SUMS --clobber
+          gh release upload "$RELEASE_TAG" "$tarball" dist/npm-SHA256SUMS --clobber
 
   release-notes:
     name: Generate release notes
@@ -188,6 +211,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ inputs.release_tag || github.ref_name }}
       - name: Generate changelog
         uses: orhun/git-cliff-action@v4
         with:
