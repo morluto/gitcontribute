@@ -229,10 +229,10 @@ func (s *Service) activateConfiguredClients(ctx context.Context, report *contrac
 	})
 	setStage(report, contracts.UpgradeStage{
 		Name: "activation", Status: "restart_required",
-		Message: "activation is verified; restart the configured clients to replace their running MCP processes",
+		Message: "activation is verified; the upgrade takes effect after you restart the configured MCP clients (quit and reopen each one) so they replace their running MCP processes",
 	})
 	report.Status = "restart required"
-	report.Action = "restart the configured clients to activate the verified MCP runtime"
+	report.Action = "restart the configured MCP clients (quit and reopen each one) to activate the verified MCP runtime"
 	report.RestartClients = append([]string(nil), clients...)
 	report.Rollback = "the previous versioned runtime remains installed; rerun setup with that compatible release to reactivate it"
 	setStage(report, contracts.UpgradeStage{Name: "rollback", Status: "available", Message: report.Rollback})
@@ -287,10 +287,10 @@ func (s *Service) repairStaleRegistrations(ctx context.Context, report *contract
 	setStage(report, contracts.UpgradeStage{
 		Name:    "activation",
 		Status:  "restart_required",
-		Message: "registration repair is verified; restart the configured clients to replace their running MCP processes",
+		Message: "registration repair is verified; the upgrade takes effect after you restart the configured MCP clients (quit and reopen each one) so they replace their running MCP processes",
 	})
 	report.Status = "restart required"
-	report.Action = "restart the configured clients to use the repaired MCP registrations"
+	report.Action = "restart the configured MCP clients (quit and reopen each one) to use the repaired MCP registrations"
 	seen := make(map[string]bool, len(report.RestartClients)+len(clients))
 	for _, name := range report.RestartClients {
 		seen[name] = true

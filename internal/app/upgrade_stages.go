@@ -69,7 +69,7 @@ func activationStage(report *contracts.UpgradeReport, opts contracts.UpgradeOpti
 	}
 	if clients := outdatedPrivateRuntimeClients(report); len(clients) > 0 {
 		stage.Status = "setup_required"
-		stage.Message = "versioned private MCP runtimes are not replaced by npm launcher upgrade; rerun setup with the target release, then restart configured clients"
+		stage.Message = "versioned private MCP runtimes are not replaced by npm launcher upgrade; rerun setup with the target release, then restart the configured MCP clients (quit and reopen each one)"
 		report.Action = stage.Message
 		report.RestartClients = clients
 		return stage
@@ -78,7 +78,7 @@ func activationStage(report *contracts.UpgradeReport, opts contracts.UpgradeOpti
 		stage.Status = "repair_required"
 		if opts.Yes {
 			stage.Status = "repair_pending"
-			stage.Message = "repair stale MCP registrations, then restart the configured clients"
+			stage.Message = "repair stale MCP registrations, then restart the configured MCP clients (quit and reopen each one)"
 		} else {
 			stage.Message = "stale MCP registrations require repair; pass --yes to repair them"
 		}
@@ -117,7 +117,7 @@ func activationStage(report *contracts.UpgradeReport, opts contracts.UpgradeOpti
 					stage.Message = "close running GitContribute processes, then run the displayed command"
 				} else {
 					stage.Status = "install_and_restart"
-					stage.Message = "install the latest release, then restart configured clients"
+					stage.Message = "install the latest release, then restart the configured MCP clients (quit and reopen each one)"
 					report.RestartClients = registeredClients(report)
 				}
 			case opts.Check:
@@ -129,7 +129,7 @@ func activationStage(report *contracts.UpgradeReport, opts contracts.UpgradeOpti
 				}
 			default:
 				stage.Status = "awaiting_confirmation"
-				stage.Message = "pass --yes to install the latest release and restart clients"
+				stage.Message = "pass --yes to install the latest release and restart the configured MCP clients (quit and reopen each one)"
 			}
 		}
 	}
