@@ -276,7 +276,10 @@ func (*fakeReader) PlanSemanticCommits(_ context.Context, _ mcpcontract.PlanSema
 }
 
 func (*fakeReader) ListConcerns(_ context.Context, _ mcpcontract.ListConcernsInput) (mcpcontract.ConcernListOutput, error) {
-	return mcpcontract.ConcernListOutput{Concerns: []mcpcontract.ConcernOutput{{ID: "concern-1", Owner: "owner", Repo: "repo", Title: "flaky", ProblemStatement: "intermittent", Status: "untriaged", Freshness: "unknown"}}, Total: 1}, nil
+	return mcpcontract.ConcernListOutput{Concerns: []mcpcontract.ConcernSummaryOutput{{
+		ID: "concern-1", Owner: "owner", Repo: "repo", Title: "flaky", Status: "untriaged",
+		Freshness: "unknown", URI: "gitcontribute://concern/concern-1",
+	}}, Total: 1}, nil
 }
 
 func (f *fakeReader) CreateConcern(_ context.Context, in mcpcontract.CreateConcernInput) (mcpcontract.ConcernOutput, error) {

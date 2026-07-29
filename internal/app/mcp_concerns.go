@@ -39,13 +39,19 @@ func (r *MCPReader) ListConcerns(ctx context.Context, in mcpcontract.ListConcern
 		return mcpcontract.ConcernListOutput{}, err
 	}
 	out := mcpcontract.ConcernListOutput{
-		Concerns:  make([]mcpcontract.ConcernOutput, len(result.Concerns)),
+		Concerns:  make([]mcpcontract.ConcernSummaryOutput, len(result.Concerns)),
 		Limit:     result.Limit,
 		Total:     result.Total,
 		Truncated: result.Truncated,
 	}
 	for index := range result.Concerns {
-		out.Concerns[index] = concernResultToMCP(&result.Concerns[index])
+		value := &result.Concerns[index]
+		out.Concerns[index] = mcpcontract.ConcernSummaryOutput{
+			ID: value.ID, Owner: value.Repo.Owner, Repo: value.Repo.Repo, Title: value.Title,
+			Confidence: mcpcontract.Probability(value.Confidence), Freshness: value.Freshness,
+			Status: value.Status, UpdatedAt: value.UpdatedAt,
+			URI: "gitcontribute://concern/" + value.ID,
+		}
 	}
 	return out, nil
 }

@@ -64,13 +64,13 @@ func (s *Server) registerConcernTools() {
 	write := localWriteAnnotations(false)
 	addCatalogTool(s, catalogTool[mcpcontract.ListConcernsInput, mcpcontract.ConcernListOutput]{
 		name: ToolListConcerns, title: "List local concerns",
-		description: "List or search the bounded repo-local concern ledger using stored SQLite data. This never contacts GitHub, reads a worktree, or executes code.",
+		description: "List or search compact triage summaries from the repo-local concern ledger. Read a returned resource URI for the complete concern. This never contacts GitHub, reads a worktree, or executes code.",
 		annotations: readOnly, supportedBy: supports[ConcernReader], input: inputSchema[mcpcontract.ListConcernsInput](func(sc *schemaBuilder) {
 			requireTogether(sc, "owner", "repo")
 			setEnum(sc, "status", "untriaged", "accepted", "investigating", "deferred", "promoted", "resolved")
 			setRange(sc, "limit", 1, 100)
 			setDefault(sc, "limit", 20)
-		}), output: outputSchema[mcpcontract.ConcernListOutput]("Bounded local concern results with derived freshness."), handler: s.listConcerns,
+		}), output: outputSchema[mcpcontract.ConcernListOutput]("Bounded concern summaries with derived freshness and exact resource URIs."), handler: s.listConcerns,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.CreateConcernInput, mcpcontract.DurableArtifactReference]{
 		name: ToolCreateConcern, title: "Create local concern",
