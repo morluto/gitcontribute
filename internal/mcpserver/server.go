@@ -121,6 +121,14 @@ type Operator interface {
 	CancelJobs(context.Context, mcpcontract.CancelJobInput) (mcpcontract.GetJobsOutput, error)
 }
 
+type ValidationReceiptOperator interface {
+	AttachValidationReceipt(context.Context, mcpcontract.AttachValidationReceiptInput) (mcpcontract.ExternalValidationReceiptOutput, error)
+}
+
+type PublishedDraftVerifier interface {
+	VerifyPublishedDraft(context.Context, mcpcontract.VerifyPublishedDraftInput) (mcpcontract.PublishedDraftVerificationOutput, error)
+}
+
 // RepoInput identifies a repository for an MCP operation.
 
 // ThreadInput identifies an issue or pull request for an MCP operation.

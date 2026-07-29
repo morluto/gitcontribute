@@ -85,12 +85,14 @@ const (
 	ToolDefineValidation          = "validation.define"
 	ToolRunValidation             = "validation.run"
 	ToolRunRepeatedValidation     = "validation.run_repeated"
+	ToolAttachValidationReceipt   = "validation.attach_receipt"
 	ToolStartInvestigation        = "workflow.start_investigation"
 	ToolRecordHypothesis          = "workflow.record_hypothesis"
 	ToolCheckDuplicates           = "workflow.check_duplicates"
 	ToolFindCompetingWork         = "workflow.find_competing_work"
 	ToolPromoteOpportunity        = "workflow.promote_opportunity"
 	ToolPrepareContribution       = "workflow.prepare_contribution"
+	ToolVerifyPublishedDraft      = "workflow.verify_published_draft"
 	ToolExportManifest            = "workflow.export_manifest"
 	ToolLinkPullRequest           = "workflow.link_pull_request"
 )
@@ -326,12 +328,61 @@ type PrepareContributionInput struct {
 
 // DraftOutput contains a rendered contribution draft.
 type DraftOutput struct {
-	OpportunityID string `json:"opportunity_id"`
-	Kind          string `json:"kind"`
-	Title         string `json:"title"`
-	Body          string `json:"body"`
-	RenderedAt    string `json:"rendered_at"`
-	ManifestID    string `json:"manifest_id,omitempty" jsonschema:"Referenced stored evidence manifest ID"`
+	ID            string                  `json:"id"`
+	Revision      int                     `json:"revision"`
+	OpportunityID string                  `json:"opportunity_id"`
+	Kind          string                  `json:"kind"`
+	Repository    string                  `json:"repository"`
+	Title         string                  `json:"title"`
+	Body          string                  `json:"body"`
+	TitleBytes    int                     `json:"title_bytes"`
+	BodyBytes     int                     `json:"body_bytes"`
+	TitleSHA256   string                  `json:"title_sha256"`
+	BodySHA256    string                  `json:"body_sha256"`
+	EvidenceIDs   []string                `json:"evidence_ids,omitempty"`
+	Warnings      []DraftDiagnosticOutput `json:"warnings,omitempty"`
+	RenderedAt    string                  `json:"rendered_at"`
+	ManifestID    string                  `json:"manifest_id,omitempty" jsonschema:"Referenced stored evidence manifest ID"`
+}
+
+type DraftDiagnosticOutput struct {
+	Code       string `json:"code"`
+	Severity   string `json:"severity"`
+	Message    string `json:"message"`
+	ByteOffset int    `json:"byte_offset,omitempty"`
+}
+
+type VerifyPublishedDraftInput struct {
+	DraftID  string `json:"draft_id" jsonschema:"Stored draft ID"`
+	Revision int    `json:"revision" jsonschema:"Positive immutable draft revision"`
+	Owner    string `json:"owner" jsonschema:"GitHub repository owner"`
+	Repo     string `json:"repo" jsonschema:"GitHub repository name"`
+	Kind     string `json:"kind" jsonschema:"Published kind: issue or pull_request"`
+	Number   int    `json:"number" jsonschema:"Positive issue or pull-request number"`
+}
+
+type PublishedDraftDifferenceOutput struct {
+	FirstDifferingLine int `json:"first_differing_line,omitempty"`
+	DraftBytes         int `json:"draft_bytes"`
+	PublishedBytes     int `json:"published_bytes"`
+}
+
+type PublishedDraftVerificationOutput struct {
+	Status               string                          `json:"status"`
+	DraftID              string                          `json:"draft_id"`
+	Revision             int                             `json:"revision"`
+	PublishedRef         string                          `json:"published_ref"`
+	TitleComparison      string                          `json:"title_comparison,omitempty"`
+	BodyComparison       string                          `json:"body_comparison,omitempty"`
+	DraftTitleSHA256     string                          `json:"draft_title_sha256"`
+	DraftBodySHA256      string                          `json:"draft_body_sha256"`
+	PublishedTitleSHA256 string                          `json:"published_title_sha256,omitempty"`
+	PublishedBodySHA256  string                          `json:"published_body_sha256,omitempty"`
+	ObservedAt           string                          `json:"observed_at,omitempty"`
+	SourceUpdatedAt      string                          `json:"source_updated_at,omitempty"`
+	CoverageStatus       string                          `json:"coverage_status"`
+	Difference           *PublishedDraftDifferenceOutput `json:"difference,omitempty"`
+	Reason               string                          `json:"reason,omitempty"`
 }
 
 // ExportManifestInput selects bounded local evidence for one contribution manifest.

@@ -24,6 +24,8 @@ require (
 	modernc.org/sqlite v1.54.0
 )
 
+require github.com/yuin/goldmark v1.8.5 // indirect
+
 require (
 	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.8

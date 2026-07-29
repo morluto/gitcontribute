@@ -20,13 +20,13 @@
       "id": "contribute",
       "toolsets": ["contribute"],
       "disabled_tools": [],
-      "sha256": "10daf5747e9cad9a5583b36da28eb3939de086cb69bf7d4c35e886566e82c1d8"
+      "sha256": "eb195b3f536ed51119c319c0a56b8818b2412c916ede52363d2685bcdcaa9f8c"
     },
     {
       "id": "contribute_without_issue_set",
       "toolsets": ["contribute"],
       "disabled_tools": ["workflow.prepare_issue_set"],
-      "sha256": "f5e9b5e4508c68c09e701f2e7cc70884ec62c13f34cbd119ce2ec90b4026277c"
+      "sha256": "b3a372e3b4d4e195daf986260b328593bff6d75869a4afcb23457872207b2ea9"
     },
     {
       "id": "portfolio",

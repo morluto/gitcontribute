@@ -59,7 +59,7 @@ func (s *Service) PrepareIssue(ctx context.Context, opportunityID string, opts c
 		return nil, err
 	}
 
-	return draftResult("issue", draft.OpportunityID, draft.Title, draft.Body, draft.RenderedAt, draft.ManifestID), nil
+	return draftResult(draft.DraftIdentity, draft.OpportunityID, draft.Title, draft.Body, draft.RenderedAt, draft.ManifestID), nil
 }
 
 // PreparePullRequest renders and stores a pull request draft for an opportunity.
@@ -123,7 +123,7 @@ func (s *Service) PreparePullRequest(ctx context.Context, opportunityID string, 
 		return nil, err
 	}
 
-	return draftResult("pull_request", draft.OpportunityID, draft.Title, draft.Body, draft.RenderedAt, draft.ManifestID), nil
+	return draftResult(draft.DraftIdentity, draft.OpportunityID, draft.Title, draft.Body, draft.RenderedAt, draft.ManifestID), nil
 }
 
 func (s *Service) loadOpportunityAndRepo(ctx context.Context, c *corpus.Corpus, opportunityID string) (*investigation.Opportunity, *investigation.Investigation, error) {
@@ -153,16 +153,12 @@ func (s *Service) loadOpportunityEvidence(ctx context.Context, c *corpus.Corpus,
 		if err != nil {
 			return nil, fmt.Errorf("read validation run %q for evidence %q: %w", item.ValidationRunID, item.ID, err)
 		}
-		for _, observation := range run.Observations {
-			if observation.Status != evidence.ObservationMatched {
-				continue
-			}
-			item.Description += fmt.Sprintf(" Matched observation %q", observation.Name)
-			if observation.Excerpt != "" {
-				item.Description += ": " + observation.Excerpt
-			}
-			item.Description += "."
+		item.ValidationRun = run
+		definition, err := c.GetValidationDefinition(ctx, run.DefinitionID)
+		if err != nil {
+			return nil, fmt.Errorf("read validation definition %q for evidence %q: %w", run.DefinitionID, item.ID, err)
 		}
+		item.ValidationDefinition = definition
 	}
 	return items, nil
 }
@@ -365,13 +361,27 @@ func evidenceReviewPriority(e *evidence.Evidence) (int, string) {
 	}
 }
 
-func draftResult(kind, opportunityID, title, body string, renderedAt time.Time, manifestID string) *contracts.DraftResult {
-	return &contracts.DraftResult{
+func draftResult(identity contribution.DraftIdentity, opportunityID, title, body string, renderedAt time.Time, manifestID string) *contracts.DraftResult {
+	result := &contracts.DraftResult{
+		ID:            identity.ID,
+		Revision:      identity.Revision,
 		OpportunityID: opportunityID,
-		Kind:          kind,
+		Kind:          identity.Kind,
+		Repository:    identity.Repository,
 		Title:         title,
 		Body:          body,
+		TitleBytes:    identity.TitleBytes,
+		BodyBytes:     identity.BodyBytes,
+		TitleSHA256:   identity.TitleSHA256,
+		BodySHA256:    identity.BodySHA256,
+		EvidenceIDs:   append([]string(nil), identity.EvidenceIDs...),
 		RenderedAt:    formatTime(renderedAt),
 		ManifestID:    manifestID,
 	}
+	for _, warning := range identity.Warnings {
+		result.Warnings = append(result.Warnings, contracts.DraftDiagnosticResult{
+			Code: warning.Code, Severity: warning.Severity, Message: warning.Message, ByteOffset: warning.ByteOffset,
+		})
+	}
+	return result
 }

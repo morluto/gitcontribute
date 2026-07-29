@@ -19,6 +19,9 @@ type fakeReader struct {
 	calls         map[string]int
 }
 
+var _ PublishedDraftVerifier = (*fakeReader)(nil)
+var _ ValidationReceiptOperator = (*fakeReader)(nil)
+
 func (*fakeReader) GetFixPatternReport(context.Context, string) (mcpcontract.FixPatternReport, error) {
 	return mcpcontract.FixPatternReport{
 		Status:     "complete",
@@ -322,6 +325,16 @@ func (f *fakeReader) RunRepeatedValidation(_ context.Context, in mcpcontract.Run
 func (f *fakeReader) PrepareContribution(_ context.Context, in mcpcontract.PrepareContributionInput) (mcpcontract.DraftOutput, error) {
 	f.recordCall("prepare_contribution")
 	return mcpcontract.DraftOutput{OpportunityID: in.OpportunityID, Kind: in.Kind, Title: "draft", Body: "body"}, nil
+}
+
+func (f *fakeReader) AttachValidationReceipt(_ context.Context, in mcpcontract.AttachValidationReceiptInput) (mcpcontract.ExternalValidationReceiptOutput, error) {
+	f.recordCall("attach_validation_receipt")
+	return mcpcontract.ExternalValidationReceiptOutput{RunID: "external-run", ReceiptSHA256: "digest"}, nil
+}
+
+func (f *fakeReader) VerifyPublishedDraft(_ context.Context, in mcpcontract.VerifyPublishedDraftInput) (mcpcontract.PublishedDraftVerificationOutput, error) {
+	f.recordCall("verify_published_draft")
+	return mcpcontract.PublishedDraftVerificationOutput{Status: "exact_match", DraftID: in.DraftID, Revision: in.Revision}, nil
 }
 
 func (*fakeReader) ExportManifest(_ context.Context, in mcpcontract.ExportManifestInput) (mcpcontract.ManifestOutput, error) {

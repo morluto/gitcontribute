@@ -148,6 +148,8 @@ type completeTestReader struct {
 	ConcernOperator
 	WorkspaceCreator
 	WorkspaceAdopter
+	ValidationReceiptOperator
+	PublishedDraftVerifier
 }
 
 func completeFakeReader(base *fakeReader) mcpcontract.Reader {
@@ -160,5 +162,6 @@ func completeFakeReader(base *fakeReader) mcpcontract.Reader {
 		PortfolioOperator:   optional, Operator: base,
 		ConcernReader: base, ConcernOperator: base,
 		WorkspaceCreator: base, WorkspaceAdopter: base,
+		ValidationReceiptOperator: base, PublishedDraftVerifier: base,
 	}
 }
