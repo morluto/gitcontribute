@@ -262,11 +262,27 @@ func (s *Service) doctor(ctx context.Context) (*contracts.DoctorResult, error) {
 
 	if home := s.paths.HomeDir(); home != "" {
 		for _, client := range clientsetup.Detect(home) {
-			registered, _, checkErr := clientsetup.CheckRegistration(client, home)
-			if checkErr == nil && !registered {
-				checkErr = errors.New("client detected but GitContribute MCP registration is absent")
+			inspection, inspectErr := clientsetup.InspectRegistration(client, home)
+			switch {
+			case inspectErr != nil:
+				add("mcp_"+string(client), true, inspectErr, "")
+			case inspection.Status == clientsetup.RegistrationAbsent:
+				add(
+					"mcp_"+string(client),
+					false,
+					errors.New("client detected but GitContribute MCP registration is absent"),
+					"",
+				)
+			case inspection.Status == clientsetup.RegistrationStale:
+				add(
+					"mcp_"+string(client),
+					true,
+					fmt.Errorf("%s; run gitcontribute setup to repair the registration", inspection.Message),
+					"",
+				)
+			default:
+				add("mcp_"+string(client), true, nil, "GitContribute MCP registration uses the canonical launcher")
 			}
-			add("mcp_"+string(client), false, checkErr, "GitContribute MCP registration is present")
 			if client == clientsetup.Codex {
 				present, _, skillErr := clientsetup.CodexSkillInstalled(home)
 				if skillErr == nil && !present {

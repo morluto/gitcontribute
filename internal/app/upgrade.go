@@ -132,6 +132,9 @@ func (s *Service) Upgrade(ctx context.Context, opts contracts.UpgradeOptions) (*
 	if opts.Yes && stageStatus(report, "corpus-schema") != "incompatible" && len(outdatedPrivateRuntimeClients(report)) > 0 {
 		s.activatePrivateRuntime(ctx, report, details)
 	}
+	if opts.Yes && registrationRepairAllowed(report) && len(staleRegistrationClients(report)) > 0 {
+		s.repairStaleRegistrations(ctx, report)
+	}
 
 	return report, nil
 }
@@ -244,6 +247,12 @@ func setCommandAndStatus(report *contracts.UpgradeReport) {
 		}
 	default:
 		report.Status = "unknown"
+	}
+	switch stageStatus(report, "configured-runtime") {
+	case "failed":
+		report.Status = "configured client inspection failed"
+	case "repair_required":
+		report.Status = "registration repair required"
 	}
 }
 
@@ -501,6 +510,8 @@ func (s *Service) configuredRuntimesStage(ctx context.Context, current, latest s
 	var clients []contracts.UpgradeConfiguredClient
 	registered := 0
 	outdated := 0
+	stale := 0
+	failed := 0
 	for _, client := range clientsetup.AllClients {
 		c, err := inspectConfiguredClient(home, client, current, latest)
 		if err != nil {
@@ -513,11 +524,23 @@ func (s *Service) configuredRuntimesStage(ctx context.Context, current, latest s
 		if c.Status == "outdated" {
 			outdated++
 		}
+		if c.Status == "stale" {
+			stale++
+		}
+		if c.Status == "failed" {
+			failed++
+		}
 	}
 	switch {
+	case failed > 0:
+		stage.Status = "failed"
+		stage.Message = fmt.Sprintf("%d registered client(s) could not be inspected", failed)
 	case registered == 0:
 		stage.Status = "not_configured"
 		stage.Message = "no coding clients are registered"
+	case stale > 0:
+		stage.Status = "repair_required"
+		stage.Message = fmt.Sprintf("%d registered client(s) use a stale MCP launcher", stale)
 	case outdated > 0:
 		stage.Status = "restart_required"
 		stage.Message = fmt.Sprintf("%d registered client(s) reference an outdated runtime", outdated)
@@ -530,19 +553,16 @@ func (s *Service) configuredRuntimesStage(ctx context.Context, current, latest s
 
 func inspectConfiguredClient(home string, client clientsetup.Client, current, latest string) (contracts.UpgradeConfiguredClient, error) {
 	result := contracts.UpgradeConfiguredClient{Name: string(client)}
-	registered, path, err := clientsetup.CheckRegistration(client, home)
+	inspection, err := clientsetup.InspectRegistration(client, home)
 	if err != nil {
 		return result, err
 	}
-	if !registered {
+	if inspection.Status == clientsetup.RegistrationAbsent {
 		result.Status = "not_configured"
-		result.Path = path
+		result.Path = inspection.Path
 		return result, nil
 	}
-	command, args, err := readClientCommand(client, home)
-	if err != nil {
-		return result, err
-	}
+	command := inspection.Launcher.Command
 	version := runtimeVersionFromPath(command)
 	target := current
 	if disposition := compareVersions(current, latest); disposition == versionUpgrade || disposition == versionPrerelease {
@@ -550,7 +570,12 @@ func inspectConfiguredClient(home string, client clientsetup.Client, current, la
 	}
 	result.Path = command
 	result.Version = version
-	result.Message = strings.Join(args, " ")
+	if inspection.Status == clientsetup.RegistrationStale {
+		result.Status = "stale"
+		result.Message = inspection.Message
+		return result, nil
+	}
+	result.Message = strings.Join(inspection.Launcher.Args, " ")
 	switch compareVersions(version, target) {
 	case versionCurrent:
 		result.Status = "target"
@@ -566,14 +591,6 @@ func inspectConfiguredClient(home string, client clientsetup.Client, current, la
 		}
 	}
 	return result, nil
-}
-
-func readClientCommand(client clientsetup.Client, home string) (string, []string, error) {
-	launcher, err := clientsetup.ReadCommand(client, home)
-	if err != nil {
-		return "", nil, err
-	}
-	return launcher.Command, launcher.Args, nil
 }
 
 func runtimeVersionFromPath(command string) string {
