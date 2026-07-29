@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/morluto/gitcontribute/compare/v0.14.0...v0.15.0) (2026-07-29)
+
+
+### Features
+
+* **mcp:** add canonical workflow artifact resources ([4bcdb77](https://github.com/morluto/gitcontribute/commit/4bcdb777109821fb5d8933a59969fd8764aa99a3))
+
 ## [0.14.0](https://github.com/morluto/gitcontribute/compare/v0.13.0...v0.14.0) (2026-07-29)
 
 
