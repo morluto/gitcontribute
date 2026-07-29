@@ -62,7 +62,7 @@ func run() int {
 
 	c := cli.New(svc, mcpadapter.New(svc, version), os.Stdout, os.Stderr)
 	c.SetLogger(logger.With("component", "cli"))
-	c.SetTUIRunner(tui.NewRunner(svc, os.Stdin, os.Stdout))
+	c.SetTUIRunner(tui.NewRunner(svc, svc, svc, os.Stdin, os.Stdout))
 	if err := c.Run(ctx, os.Args[1:]); err != nil {
 		return reportCommandError(ctx, logger, os.Stderr, traceID, err)
 	}

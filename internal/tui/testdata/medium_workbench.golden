@@ -1,0 +1,30 @@
+GitContribute  openclaw/openclaw           OFFLINE · as of 2026-07-17           / search
+┌────────────────────────────────────────┐┌────────────────────────────────────────────┐
+│[ / ] stage  DISCOVER  2                ││Slack socket mode receives no inbound       │
+│                                        ││events                                      │
+│› Slack socket mode receives no inbou…  ││                                            │
+│  score 82 · needs diagnosis · opencl…  ││NEEDS DIAGNOSIS                             │
+│                                        ││Confidence: medium                          │
+│  Control UI authentication disconnec…  ││Radar score: 82                             │
+│  score 67 · needs coordination · ope…  ││                                            │
+│                                        ││Summary                                     │
+│                              1/2  50%  ││A clear regression window is stored, but    │
+│                                        ││no local reproduction has been recorded.    │
+│                                        ││                                            │
+│                                        ││Why it matters                              │
+│                                        ││+ Clear regression window from 2026.3.11    │
+│                                        ││  to 2026.3.12.                             │
+│                                        ││+ A maintainer acknowledged the report.     │
+│                                        ││                                            │
+│                                        ││Risks                                       │
+│                                        ││! No reproduction has been recorded.        │
+│                                        ││! Comments are not fully synchronized.      │
+│                                        ││                                            │
+│                                        ││Related work                                │
+│                                        ││○ PR #45287 · non-closing                   │
+│                                        ││                                            │
+│                                        ││Next                                        │
+│                                        ││[Enter] Open research brief                 │
+│                                        ││[a] Start investigation (+1)                │
+└────────────────────────────────────────┘└────────────────────────────────────────────┘
+tab focus   ↑↓ move   enter inspect   [ ] stage   a actions   / filter   ? help   q quit

@@ -1,0 +1,36 @@
+GitContribute  openclaw/openclaw                          OFFLINE · as of 2026-07-17                          / search
+┌────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│RESEARCH BRIEF                                                                                                      │
+│                                                                                                                    │
+│Slack socket mode receives no inbound events                                                                        │
+│issue:openclaw/openclaw#45311                                                                                       │
+│Source as of 2026-07-17                                                                                             │
+│                                                                                                                    │
+│Problem                                                                                                             │
+│After upgrading from 2026.3.11 to 2026.3.12, Slack socket mode connects successfully but receives no inbound        │
+│message events.                                                                                                     │
+│                                                                                                                    │
+│Expected behavior                                                                                                   │
+│• Connected socket-mode sessions forward inbound Slack events to the gateway.                                       │
+│  issue body                                                                                                        │
+│                                                                                                                    │
+│Relevant discussion                                                                                                 │
+│• A maintainer confirmed the affected release window.                                                               │
+│  maintainer comment                                                                                                │
+│                                                                                                                    │
+│Reproduction status                                                                                                 │
+│• No successful local reproduction is stored.                                                                       │
+│  local corpus                                                                                                      │
+│                                                                                                                    │
+│Related work                                                                                                        │
+│• PR #45287 may overlap but does not close the issue.                                                               │
+│  local pull-request index                                                                                          │
+│                                                                                                                    │
+│Missing evidence                                                                                                    │
+│! Complete synchronized comments                                                                                    │
+│! A minimal reproduction on 2026.3.12                                                                               │
+│                                                                                                                    │
+│Suggested next step                                                                                                 │
+│› Start an investigation and reproduce the socket event path locally.                                               │
+└────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+↑↓ scroll   pgup/pgdown page   home top   esc return
