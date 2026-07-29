@@ -174,6 +174,13 @@ processes use the activated release. An older unmanaged binary that cannot
 obtain target-release bytes leaves registrations unchanged and tells the user
 to rerun upgrade from the installed target release.
 
+Client inspection validates the complete MCP launcher, including
+`mcp serve --transport=stdio`. `doctor` reports an existing stale launcher as a
+required diagnostic failure. `upgrade --check` reports it as
+`repair_required`, while `upgrade --yes` repairs the arguments in one
+rollback-safe activation, preserves each durable executable path, and reports
+the clients that must restart.
+
 MCP-only setup does not install a command on `PATH`. Run its upgrade checks
 through the current package explicitly:
 

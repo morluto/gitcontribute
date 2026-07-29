@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -202,6 +203,42 @@ func TestLauncherUsesTheExplicitManagedExecutable(t *testing.T) {
 	wantArgs := []string{"mcp", "serve", "--transport=stdio"}
 	if strings.Join(report.Launcher.Args, "\x00") != strings.Join(wantArgs, "\x00") {
 		t.Fatalf("launcher = %+v", report.Launcher)
+	}
+}
+
+func TestInspectAndRepairStaleRegistration(t *testing.T) {
+	home := t.TempDir()
+	command := filepath.Join(home, "bin", "gitcontribute")
+	path := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stale := "[mcp_servers.gitcontribute]\ncommand = " + fmt.Sprintf("%q", command) + "\nargs = [\"mcp\"]\n"
+	if err := os.WriteFile(path, []byte(stale), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	inspection, err := InspectRegistration(Codex, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.Status != RegistrationStale || !strings.Contains(inspection.Message, "expected") {
+		t.Fatalf("inspection = %+v", inspection)
+	}
+
+	report, err := RepairExisting(context.Background(), home, []Client{Codex})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Results) != 1 || report.Results[0].Status != "updated" {
+		t.Fatalf("repair report = %+v", report)
+	}
+	inspection, err = InspectRegistration(Codex, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inspection.Status != RegistrationCurrent || inspection.Launcher.Command != command {
+		t.Fatalf("repaired inspection = %+v", inspection)
 	}
 }
 

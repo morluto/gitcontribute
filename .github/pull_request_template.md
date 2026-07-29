@@ -1,6 +1,7 @@
 ## Description
 
 <!-- What problem does this solve, and why does this approach fit the project? -->
+<!-- Use a Conventional Commit PR title, for example: fix(mcp): repair stale registrations -->
 
 ## Testing
 
