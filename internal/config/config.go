@@ -22,6 +22,22 @@ type Config struct {
 	Crawl       Crawl       `toml:"crawl,omitempty"`
 }
 
+// fileConfig is the on-disk compatibility boundary. Output used to configure
+// CLI rendering, but rendering is now selected per command. Keeping the exact
+// retired shape here lets existing config files load without weakening strict
+// decoding for genuinely unknown fields.
+type fileConfig struct {
+	Database    string       `toml:"database,omitempty"`
+	TokenSource TokenSource  `toml:"token_source,omitempty"`
+	Crawl       Crawl        `toml:"crawl,omitempty"`
+	Output      legacyOutput `toml:"output,omitempty"`
+}
+
+type legacyOutput struct {
+	Format     string `toml:"format,omitempty"`
+	MaxResults int    `toml:"max_results,omitempty"`
+}
+
 // TokenSource describes how to obtain a GitHub token. The token itself is never
 // persisted here.
 type TokenSource struct {
@@ -52,14 +68,19 @@ func Default() *Config {
 }
 
 // Load reads TOML from r and decodes it into a Config. Unknown fields are
-// rejected when go-toml/v2's strict mode is available.
+// rejected. The retired output table is accepted only as a migration shim and
+// is not part of the active application configuration.
 func Load(r io.Reader) (*Config, error) {
-	var cfg Config
+	var disk fileConfig
 	dec := toml.NewDecoder(r).DisallowUnknownFields()
-	if err := dec.Decode(&cfg); err != nil {
+	if err := dec.Decode(&disk); err != nil {
 		return nil, fmt.Errorf("decode config: %w", err)
 	}
-	return &cfg, nil
+	return &Config{
+		Database:    disk.Database,
+		TokenSource: disk.TokenSource,
+		Crawl:       disk.Crawl,
+	}, nil
 }
 
 // LoadFile reads and decodes the TOML file at path.
