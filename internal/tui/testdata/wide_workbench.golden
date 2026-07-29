@@ -1,0 +1,36 @@
+GitContribute  openclaw/openclaw                          OFFLINE · as of 2026-07-17                          / search
+┌───────────────────────┐┌────────────────────────────────────────────┐┌─────────────────────────────────────────────┐
+│CONTRIBUTIONS          ││DISCOVER  2                                 ││Slack socket mode receives no inbound        │
+│› Discover         2   ││                                            ││events                                       │
+│  Research         1   ││› Slack socket mode receives no inbound e…  ││                                             │
+│  Active           1   ││  score 82 · needs diagnosis · openclaw/o…  ││NEEDS DIAGNOSIS                              │
+│  Validate         1   ││                                            ││Confidence: medium                           │
+│  Ready            1   ││  Control UI authentication disconnects     ││Radar score: 82                              │
+│                       ││  score 67 · needs coordination · opencla…  ││                                             │
+│PORTFOLIO              ││                                            ││Summary                                      │
+│  Submitted        1   ││                                  1/2  50%  ││A clear regression window is stored, but no  │
+│  Needs you        1   ││                                            ││local reproduction has been recorded.        │
+│                       ││                                            ││                                             │
+│SOURCES                ││                                            ││Why it matters                               │
+│  Repositories     1   ││                                            ││+ Clear regression window from 2026.3.11 to  │
+│  Sync status      1   ││                                            ││  2026.3.12.                                 │
+│  Related work     1   ││                                            ││+ A maintainer acknowledged the report.      │
+│                       ││                                            ││                                             │
+│                       ││                                            ││Risks                                        │
+│                       ││                                            ││! No reproduction has been recorded.         │
+│                       ││                                            ││! Comments are not fully synchronized.       │
+│                       ││                                            ││                                             │
+│                       ││                                            ││Related work                                 │
+│                       ││                                            ││○ PR #45287 · non-closing                    │
+│                       ││                                            ││                                             │
+│                       ││                                            ││Source                                       │
+│                       ││                                            ││openclaw/openclaw#45311                      │
+│                       ││                                            ││https://github.com/openclaw/openclaw/issues  │
+│                       ││                                            ││/45311                                       │
+│                       ││                                            ││Observed 2026-07-17                          │
+│                       ││                                            ││                                             │
+│                       ││                                            ││Next                                         │
+│                       ││                                            ││[Enter] Open research brief                  │
+│                       ││                                            ││[a] Start investigation (+1)                 │
+└───────────────────────┘└────────────────────────────────────────────┘└─────────────────────────────────────────────┘
+tab focus   ↑↓ move   enter inspect   [ ] stage   a actions   / filter   ? help   q quit

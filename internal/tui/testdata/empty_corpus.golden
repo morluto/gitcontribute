@@ -1,0 +1,36 @@
+GitContribute  local corpus                              OFFLINE · local corpus                               / search
+┌───────────────────────┐┌────────────────────────────────────────────┐┌─────────────────────────────────────────────┐
+│CONTRIBUTIONS          ││DISCOVER  0                                 ││DETAIL                                       │
+│› Discover         0   ││                                            ││                                             │
+│  Research         0   ││                                            ││Select an item to inspect its evidence and   │
+│  Active           0   ││No contribution candidates yet.             ││next action.                                 │
+│  Validate         0   ││                                            ││                                             │
+│  Ready            0   ││The local corpus contains no repositories.  ││                                             │
+│                       ││Run: gitcontribute source add repos         ││                                             │
+│PORTFOLIO              ││OWNER/REPO                                  ││                                             │
+│  Submitted        0   ││Then: gitcontribute archive sync            ││                                             │
+│  Needs you        0   ││OWNER/REPO                                  ││                                             │
+│                       ││                                            ││                                             │
+│SOURCES                ││                                            ││                                             │
+│  Repositories     0   ││                                            ││                                             │
+│  Sync status      0   ││                                            ││                                             │
+│  Related work     0   ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+│                       ││                                            ││                                             │
+└───────────────────────┘└────────────────────────────────────────────┘└─────────────────────────────────────────────┘
+tab focus   ↑↓ move   enter inspect   [ ] stage   a actions   / filter   ? help   q quit

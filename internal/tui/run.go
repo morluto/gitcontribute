@@ -17,40 +17,57 @@ var errReaderNotConfigured = errors.New("tui reader is not configured")
 
 // Runner implements the product-owned TUI runner contract.
 type Runner struct {
-	reader tuicontract.Reader
-	input  io.Reader
-	output io.Writer
+	reader  tuicontract.Reader
+	actions tuicontract.ActionProvider
+	briefs  tuicontract.BriefProvider
+	input   io.Reader
+	output  io.Writer
 }
 
-func NewRunner(reader tuicontract.Reader, input io.Reader, output io.Writer) *Runner {
-	return &Runner{reader: reader, input: input, output: output}
+func NewRunner(
+	reader tuicontract.Reader,
+	actions tuicontract.ActionProvider,
+	briefs tuicontract.BriefProvider,
+	input io.Reader,
+	output io.Writer,
+) *Runner {
+	return &Runner{reader: reader, actions: actions, briefs: briefs, input: input, output: output}
 }
 
 func (r *Runner) Run(ctx context.Context, opts contracts.TUIOptions) error {
 	if r == nil || r.reader == nil {
 		return errReaderNotConfigured
 	}
-	if opts.JSON || opts.Repo.Owner != "" {
+	if opts.JSON {
 		data, err := r.reader.Load(ctx)
 		if err != nil {
 			return err
 		}
 		data = filterData(data, opts.Repo.String())
-		if opts.JSON {
-			enc := json.NewEncoder(r.output)
-			enc.SetIndent("", "  ")
-			return enc.Encode(data)
-		}
-		_, err = Run(ctx, staticReader{data: data}, r.input, r.output)
+		enc := json.NewEncoder(r.output)
+		enc.SetIndent("", "  ")
+		return enc.Encode(data)
+	}
+	if opts.Repo.Owner != "" {
+		_, err := run(ctx, filteredReader{reader: r.reader, repo: opts.Repo.String()}, r.actions, r.briefs, r.input, r.output)
 		return err
 	}
-	_, err := Run(ctx, r.reader, r.input, r.output)
+	_, err := run(ctx, r.reader, r.actions, r.briefs, r.input, r.output)
 	return err
 }
 
-type staticReader struct{ data tuicontract.Data }
+type filteredReader struct {
+	reader tuicontract.Reader
+	repo   string
+}
 
-func (r staticReader) Load(context.Context) (tuicontract.Data, error) { return r.data, nil }
+func (r filteredReader) Load(ctx context.Context) (tuicontract.Data, error) {
+	data, err := r.reader.Load(ctx)
+	if err != nil {
+		return tuicontract.Data{}, err
+	}
+	return filterData(data, r.repo), nil
+}
 
 func filterData(data tuicontract.Data, repo string) tuicontract.Data {
 	if repo == "" || repo == "/" {
@@ -61,6 +78,9 @@ func filterData(data tuicontract.Data, repo string) tuicontract.Data {
 		for _, item := range items {
 			ref := strings.ToLower(item.Ref)
 			want := strings.ToLower(repo)
+			for _, prefix := range []string{"issue:", "pr:", "pull_request:"} {
+				ref = strings.TrimPrefix(ref, prefix)
+			}
 			if ref == want || strings.HasPrefix(ref, want+"#") || strings.HasPrefix(ref, want+":") {
 				out = append(out, item)
 			}
@@ -68,10 +88,14 @@ func filterData(data tuicontract.Data, repo string) tuicontract.Data {
 		return out
 	}
 	data.Repositories = keep(data.Repositories)
+	data.SyncStatuses = keep(data.SyncStatuses)
 	data.Threads = keep(data.Threads)
 	data.Clusters = keep(data.Clusters)
 	data.Investigations = keep(data.Investigations)
 	data.Opportunities = keep(data.Opportunities)
+	data.Candidates = keep(data.Candidates)
+	data.Hypotheses = keep(data.Hypotheses)
+	data.Contributions = keep(data.Contributions)
 	return data
 }
 
@@ -81,7 +105,18 @@ func filterData(data tuicontract.Data, repo string) tuicontract.Data {
 // Reader, and input/output streams. The TUI loads local data on start and
 // never performs network I/O on its own.
 func Run(ctx context.Context, reader tuicontract.Reader, input io.Reader, output io.Writer) (Model, error) {
-	m := New(ctx, reader)
+	return run(ctx, reader, nil, nil, input, output)
+}
+
+func run(
+	ctx context.Context,
+	reader tuicontract.Reader,
+	actions tuicontract.ActionProvider,
+	briefs tuicontract.BriefProvider,
+	input io.Reader,
+	output io.Writer,
+) (Model, error) {
+	m := New(ctx, reader, WithActionProvider(actions), WithBriefProvider(briefs))
 
 	p := tea.NewProgram(
 		m,

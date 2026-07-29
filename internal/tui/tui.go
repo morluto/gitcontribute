@@ -1,4 +1,4 @@
-// Package tui provides an offline terminal UI for browsing local corpus data.
+// Package tui provides an offline contribution workbench over local corpus data.
 package tui
 
 import (
@@ -6,46 +6,61 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
-	"github.com/morluto/gitcontribute/internal/tuicontract"
-
 	tea "charm.land/bubbletea/v2"
+	"github.com/morluto/gitcontribute/internal/tuicontract"
 )
 
-// view is the current browse category.
+const wideLayoutMinimum = 108
+
 type view string
 
 const (
-	viewRepositories   view = "repositories"
-	viewThreads        view = "threads"
-	viewClusters       view = "clusters"
-	viewInvestigations view = "investigations"
-	viewOpportunities  view = "opportunities"
+	viewDiscover     view = "discover"
+	viewResearch     view = "research"
+	viewActive       view = "active"
+	viewValidate     view = "validate"
+	viewReady        view = "ready"
+	viewSubmitted    view = "submitted"
+	viewNeedsYou     view = "needs_you"
+	viewRepositories view = "repositories"
+	viewSyncStatus   view = "sync_status"
+	viewRelatedWork  view = "related_work"
 )
 
-var (
-	viewOrder = []view{
-		viewRepositories,
-		viewThreads,
-		viewClusters,
-		viewInvestigations,
-		viewOpportunities,
-	}
+type viewSpec struct {
+	view  view
+	group string
+	label string
+	key   string
+}
 
-	viewLabels = map[view]string{
-		viewRepositories:   "Repositories",
-		viewThreads:        "Threads",
-		viewClusters:       "Clusters",
-		viewInvestigations: "Investigations",
-		viewOpportunities:  "Opportunities",
-	}
+var viewSpecs = []viewSpec{
+	{viewDiscover, "CONTRIBUTIONS", "Discover", "candidates"},
+	{viewResearch, "CONTRIBUTIONS", "Research", "hypotheses"},
+	{viewActive, "CONTRIBUTIONS", "Active", "investigations"},
+	{viewValidate, "CONTRIBUTIONS", "Validate", "opportunities"},
+	{viewReady, "CONTRIBUTIONS", "Ready", "opportunities"},
+	{viewSubmitted, "PORTFOLIO", "Submitted", "contributions"},
+	{viewNeedsYou, "PORTFOLIO", "Needs you", "needs_you"},
+	{viewRepositories, "SOURCES", "Repositories", "repositories"},
+	{viewSyncStatus, "SOURCES", "Sync status", "sync_statuses"},
+	{viewRelatedWork, "SOURCES", "Related work", "clusters"},
+}
 
-	viewKeys = map[rune]view{
-		'1': viewRepositories,
-		'2': viewThreads,
-		'3': viewClusters,
-		'4': viewInvestigations,
-		'5': viewOpportunities,
+var viewOrder = func() []view {
+	out := make([]view, 0, len(viewSpecs))
+	for _, spec := range viewSpecs {
+		out = append(out, spec.view)
 	}
+	return out
+}()
+
+type paneFocus int
+
+const (
+	focusNavigation paneFocus = iota
+	focusList
+	focusDetail
 )
 
 // Option customizes a Model.
@@ -53,14 +68,18 @@ type Option func(*Model)
 
 // WithSize sets the initial terminal size.
 func WithSize(w, h int) Option {
-	return func(m *Model) { m.width = w; m.height = h }
+	return func(m *Model) { m.width, m.height = w, h }
 }
 
-// WithActionHandler registers an optional handler for explicit side-effecting
-// actions such as refresh/hydration. The TUI never invokes it on initial load
-// or search.
-func WithActionHandler(fn func(context.Context, tuicontract.Item) tea.Cmd) Option {
-	return func(m *Model) { m.actionHandler = fn }
+// WithActionProvider registers typed contextual application operations.
+// Loading, navigation, filtering, and detail inspection remain local.
+func WithActionProvider(provider tuicontract.ActionProvider) Option {
+	return func(m *Model) { m.actionProvider = provider }
+}
+
+// WithBriefProvider registers the offline research-brief capability.
+func WithBriefProvider(provider tuicontract.BriefProvider) Option {
+	return func(m *Model) { m.briefProvider = provider }
 }
 
 // Model is the TUI state.
@@ -71,23 +90,42 @@ type Model struct {
 	width  int
 	height int
 
-	view     view
-	loading  bool
-	loaded   bool
-	err      error
-	items    map[view][]tuicontract.Item
-	windows  map[view]tuicontract.Window
-	filtered []int
-	cursor   int
+	view      view
+	focus     paneFocus
+	loading   bool
+	loaded    bool
+	err       error
+	items     map[view][]tuicontract.Item
+	windows   map[view]tuicontract.Window
+	filtered  []int
+	cursor    int
+	listStart int
+	detailTop int
 
-	search    textinput.Model
-	searching bool
+	search        textinput.Model
+	searching     bool
+	help          bool
+	briefOpen     bool
+	briefTop      int
+	briefProvider tuicontract.BriefProvider
+	briefLoading  bool
+	briefErr      error
+	briefItem     tuicontract.Item
+	brief         tuicontract.ResearchBrief
 
-	detail *tuicontract.Item
-	help   bool
-
-	actionMsg     string
-	actionHandler func(context.Context, tuicontract.Item) tea.Cmd
+	actionMsg       string
+	actionProvider  tuicontract.ActionProvider
+	actionOpen      bool
+	actionLoading   bool
+	actionExecuting bool
+	actionConfirm   bool
+	actionErr       error
+	actionItem      tuicontract.Item
+	actions         []tuicontract.Action
+	actionCursor    int
+	resultOpen      bool
+	resultTop       int
+	actionResult    tuicontract.ActionResult
 }
 
 // New creates a Model for the given reader and lifecycle context.
@@ -95,7 +133,8 @@ func New(ctx context.Context, reader tuicontract.Reader, opts ...Option) Model {
 	m := Model{
 		reader: reader,
 		ctx:    ctx,
-		view:   viewRepositories,
+		view:   viewDiscover,
+		focus:  focusList,
 		items:  make(map[view][]tuicontract.Item),
 		width:  80,
 		height: 24,
@@ -105,15 +144,12 @@ func New(ctx context.Context, reader tuicontract.Reader, opts ...Option) Model {
 	}
 
 	ti := textinput.New()
-	ti.Placeholder = "filter..."
-	ti.Prompt = ""
+	ti.Placeholder = "Filter this stage…"
+	ti.Prompt = "/ "
 	ti.CharLimit = 120
 	ti.ShowSuggestions = false
-	if m.width > 4 {
-		ti.SetWidth(m.width - 4)
-	}
 	m.search = ti
-
+	m.resizeSearch()
 	return m
 }
 
@@ -129,12 +165,6 @@ func (m Model) loadCmd() tea.Cmd {
 	}
 }
 
-// itemCount returns the total number of items in the current view.
-func (m Model) itemCount() int {
-	return len(m.items[m.view])
-}
-
-// selectedItem returns the currently selected item, if any.
 func (m Model) selectedItem() (tuicontract.Item, bool) {
 	if m.cursor < 0 || m.cursor >= len(m.filtered) {
 		return tuicontract.Item{}, false
@@ -147,24 +177,15 @@ func (m Model) selectedItem() (tuicontract.Item, bool) {
 	return items[idx], true
 }
 
-// applyFilter recomputes the visible indices from the search value.
 func (m *Model) applyFilter() {
 	query := strings.ToLower(strings.TrimSpace(m.search.Value()))
 	items := m.items[m.view]
-
-	if query == "" {
-		m.filtered = make([]int, len(items))
-		for i := range items {
-			m.filtered[i] = i
-		}
-		m.capCursor()
-		return
-	}
-
-	m.filtered = nil
-	for i, it := range items {
-		text := strings.ToLower(it.Kind + " " + it.Ref + " " + it.Title + " " + it.Subtitle)
-		if strings.Contains(text, query) {
+	m.filtered = m.filtered[:0]
+	for i, item := range items {
+		text := strings.ToLower(strings.Join([]string{
+			item.Kind, item.Ref, item.Title, item.Subtitle, item.Status,
+		}, " "))
+		if query == "" || strings.Contains(text, query) {
 			m.filtered = append(m.filtered, i)
 		}
 	}
@@ -174,76 +195,192 @@ func (m *Model) applyFilter() {
 func (m *Model) capCursor() {
 	if len(m.filtered) == 0 {
 		m.cursor = 0
+		m.listStart = 0
 		return
 	}
-	if m.cursor < 0 {
-		m.cursor = 0
-	}
-	if m.cursor >= len(m.filtered) {
-		m.cursor = len(m.filtered) - 1
-	}
+	m.cursor = max(0, min(m.cursor, len(m.filtered)-1))
+	m.ensureCursorVisible()
 }
 
 func (m *Model) cursorUp() {
 	if m.cursor > 0 {
 		m.cursor--
+		m.detailTop = 0
+		m.ensureCursorVisible()
 	}
 }
 
 func (m *Model) cursorDown() {
 	if m.cursor < len(m.filtered)-1 {
 		m.cursor++
+		m.detailTop = 0
+		m.ensureCursorVisible()
 	}
 }
 
-func (m *Model) switchView(v view) {
-	m.view = v
-	m.detail = nil
+func (m *Model) ensureCursorVisible() {
+	page := max(1, m.listPageSize())
+	if m.cursor < m.listStart {
+		m.listStart = m.cursor
+	}
+	if m.cursor >= m.listStart+page {
+		m.listStart = m.cursor - page + 1
+	}
+	maxStart := max(0, len(m.filtered)-page)
+	m.listStart = min(m.listStart, maxStart)
+}
+
+func (m *Model) switchView(next view) {
+	m.view = next
 	m.cursor = 0
+	m.listStart = 0
+	m.detailTop = 0
+	m.briefOpen = false
+	m.briefTop = 0
+	m.resultOpen = false
+	m.resultTop = 0
+	m.actionMsg = ""
 	m.applyFilter()
 }
 
+func (m *Model) focusActionTarget(target *tuicontract.ActionTarget) {
+	if target == nil || target.ID == "" {
+		return
+	}
+	targetView := view(target.Stage)
+	if _, ok := m.items[targetView]; !ok {
+		return
+	}
+	m.search.SetValue("")
+	m.switchView(targetView)
+	for position, index := range m.filtered {
+		if index >= 0 && index < len(m.items[m.view]) && m.items[m.view][index].ID == target.ID {
+			m.cursor = position
+			m.ensureCursorVisible()
+			break
+		}
+	}
+}
+
 func (m *Model) nextView() {
-	for i, v := range viewOrder {
-		if v == m.view {
+	for i, current := range viewOrder {
+		if current == m.view {
 			m.switchView(viewOrder[(i+1)%len(viewOrder)])
 			return
 		}
 	}
-	m.switchView(viewOrder[0])
 }
 
 func (m *Model) prevView() {
-	for i, v := range viewOrder {
-		if v == m.view {
+	for i, current := range viewOrder {
+		if current == m.view {
 			m.switchView(viewOrder[(i-1+len(viewOrder))%len(viewOrder)])
 			return
 		}
 	}
-	m.switchView(viewOrder[0])
 }
 
-func (m *Model) showDetail() {
-	it, ok := m.selectedItem()
-	if !ok {
+func (m *Model) cycleFocus(reverse bool) {
+	focuses := []paneFocus{focusList, focusDetail}
+	if m.width >= wideLayoutMinimum {
+		focuses = []paneFocus{focusNavigation, focusList, focusDetail}
+	}
+	for i, current := range focuses {
+		if current != m.focus {
+			continue
+		}
+		step := 1
+		if reverse {
+			step = -1
+		}
+		m.focus = focuses[(i+step+len(focuses))%len(focuses)]
 		return
 	}
-	m.detail = &it
+	m.focus = focuses[0]
 }
 
-func (m Model) requestAction() (Model, tea.Cmd) {
-	it, ok := m.selectedItem()
-	if m.detail != nil {
-		it = *m.detail
-		ok = true
-	}
-	if !ok {
+func (m *Model) resizeSearch() {
+	width := m.listPanelWidth() - 6
+	m.search.SetWidth(max(12, width))
+}
+
+func (m Model) openActions() (Model, tea.Cmd) {
+	item, ok := m.selectedItem()
+	if !ok || m.actionProvider == nil {
 		return m, nil
 	}
-
-	m.actionMsg = "Refresh requested for " + it.Kind + ": " + it.Title
-	if m.actionHandler != nil {
-		return m, m.actionHandler(m.ctx, it)
+	m.actionOpen = true
+	m.actionLoading = true
+	m.actionExecuting = false
+	m.actionConfirm = false
+	m.actionErr = nil
+	m.actionItem = item
+	m.actions = nil
+	m.actionCursor = 0
+	return m, func() tea.Msg {
+		actions, err := m.actionProvider.Actions(m.ctx, item)
+		return actionsLoadedMsg{actions: actions, err: err}
 	}
-	return m, nil
+}
+
+func (m Model) retryActionDiscovery() (Model, tea.Cmd) {
+	if m.actionProvider == nil || m.actionItem.Kind == "" {
+		return m, nil
+	}
+	m.actionLoading = true
+	m.actionErr = nil
+	m.actions = nil
+	m.actionCursor = 0
+	item := m.actionItem
+	return m, func() tea.Msg {
+		actions, err := m.actionProvider.Actions(m.ctx, item)
+		return actionsLoadedMsg{actions: actions, err: err}
+	}
+}
+
+func (m Model) selectedAction() (tuicontract.Action, bool) {
+	if m.actionCursor < 0 || m.actionCursor >= len(m.actions) {
+		return tuicontract.Action{}, false
+	}
+	return m.actions[m.actionCursor], true
+}
+
+func (m Model) executeSelectedAction() (Model, tea.Cmd) {
+	action, ok := m.selectedAction()
+	if !ok || m.actionProvider == nil {
+		return m, nil
+	}
+	m.actionExecuting = true
+	m.actionConfirm = false
+	m.actionErr = nil
+	request := tuicontract.ActionRequest{ActionID: action.ID, Item: m.actionItem}
+	return m, func() tea.Msg {
+		result, err := m.actionProvider.ExecuteAction(m.ctx, request)
+		return actionCompletedMsg{result: result, err: err}
+	}
+}
+
+func (m Model) openBrief(item tuicontract.Item) (Model, tea.Cmd) {
+	m.briefOpen = true
+	m.briefTop = 0
+	m.briefErr = nil
+	m.briefItem = item
+	m.brief = tuicontract.ResearchBrief{}
+	if m.briefProvider == nil {
+		return m, nil
+	}
+	m.briefLoading = true
+	return m, func() tea.Msg {
+		brief, err := m.briefProvider.ResearchBrief(m.ctx, item)
+		return briefLoadedMsg{itemRef: item.Ref, brief: brief, err: err}
+	}
+}
+
+func currentViewSpec(current view) viewSpec {
+	for _, spec := range viewSpecs {
+		if spec.view == current {
+			return spec
+		}
+	}
+	return viewSpecs[0]
 }

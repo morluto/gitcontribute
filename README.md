@@ -12,6 +12,8 @@ Local research and validation for GitHub contributions.
 
 [Quick start](#quick-start) · [Workflow](#contribution-workflow) · [CLI](#cli) · [MCP](#mcp) · [Safety](#side-effect-boundaries) · [Documentation](#documentation)
 
+![GitContribute contribution workbench](docs/assets/gitcontribute-tui-workbench.png)
+
 </div>
 
 `gitcontribute` is available as a CLI, terminal UI, and MCP server for coding
@@ -220,9 +222,10 @@ gitcontribute tui
 
 ## MCP
 
-The default MCP catalog is focused on contribution research. Additional
-toolsets for code, portfolio analysis, diagnostics, and advanced workflows are
-opt-in so agents do not receive a large overlapping tool catalog by default.
+The default `contribute` MCP profile is focused on contribution research.
+Additional `code`, `research`, `diagnostics`, `portfolio`, `advanced`,
+`patterns`, and `concerns` profiles are opt-in so agents do not receive a
+large overlapping tool catalog by default.
 
 ```sh
 gitcontribute setup --mode mcp --codex --token-source none --yes

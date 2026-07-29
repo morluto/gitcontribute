@@ -2,10 +2,12 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"unicode"
 
+	"charm.land/lipgloss/v2"
 	"github.com/morluto/gitcontribute/internal/tuicontract"
 
 	tea "charm.land/bubbletea/v2"
@@ -17,6 +19,38 @@ type fakeReader struct {
 	loadCount int
 }
 
+type fakeActionProvider struct {
+	actions      []tuicontract.Action
+	result       tuicontract.ActionResult
+	actionsErr   error
+	executeErr   error
+	executeCount int
+	request      tuicontract.ActionRequest
+}
+
+type fakeBriefProvider struct {
+	brief tuicontract.ResearchBrief
+	err   error
+	calls int
+	item  tuicontract.Item
+}
+
+func (f *fakeBriefProvider) ResearchBrief(_ context.Context, item tuicontract.Item) (tuicontract.ResearchBrief, error) {
+	f.calls++
+	f.item = item
+	return f.brief, f.err
+}
+
+func (f *fakeActionProvider) Actions(context.Context, tuicontract.Item) ([]tuicontract.Action, error) {
+	return f.actions, f.actionsErr
+}
+
+func (f *fakeActionProvider) ExecuteAction(_ context.Context, request tuicontract.ActionRequest) (tuicontract.ActionResult, error) {
+	f.executeCount++
+	f.request = request
+	return f.result, f.executeErr
+}
+
 func (f *fakeReader) Load(ctx context.Context) (tuicontract.Data, error) {
 	f.loadCount++
 	return f.data, f.err
@@ -24,6 +58,36 @@ func (f *fakeReader) Load(ctx context.Context) (tuicontract.Data, error) {
 
 func sampleData() tuicontract.Data {
 	return tuicontract.Data{
+		Candidates: []tuicontract.Item{
+			{
+				Kind: "candidate", ID: "owner/repo#1", Ref: "owner/repo#1", Title: "Fix bug",
+				Status: "ready_to_code", Score: 76, Confidence: "high",
+				Assessment: &tuicontract.Assessment{
+					Positive: []tuicontract.Fact{{Code: "clear_scope", Summary: "The requested behavior is explicit."}},
+					Risks:    []tuicontract.Fact{{Code: "coverage", Summary: "Discussion coverage is incomplete."}},
+				},
+			},
+			{Kind: "candidate", ID: "owner/repo#2", Ref: "owner/repo#2", Title: "Add feature", Status: "needs_coordination", Score: 61},
+		},
+		Hypotheses: []tuicontract.Item{
+			{Kind: "hypothesis", ID: "h1", Ref: "owner/repo:hypothesis:h1", Title: "Parser can panic", Status: "proposed"},
+		},
+		SyncStatuses: []tuicontract.Item{
+			{
+				Kind: "sync_status", ID: "owner/repo", Ref: "owner/repo", Title: "owner/repo",
+				Status: "partial", AsOf: "2026-07-17T00:00:00Z",
+				Detail: "Candidate ranking evidence is incomplete.",
+				Coverage: []tuicontract.Facet{
+					{Name: "metadata", Present: true, Complete: true, AsOf: "2026-07-17T00:00:00Z"},
+					{Name: "threads", Present: true, Complete: false, AsOf: "2026-07-16T00:00:00Z"},
+					{Name: "contribution_guidance", Present: false, Complete: false},
+				},
+				Assessment: &tuicontract.Assessment{
+					Risks: []tuicontract.Fact{{Summary: "The latest thread sync is partial."}},
+				},
+				Commands: []string{"gitcontribute archive sync owner/repo"},
+			},
+		},
 		Repositories: []tuicontract.Item{
 			{
 				Kind:     "repo",
@@ -50,14 +114,19 @@ func sampleData() tuicontract.Data {
 			{Kind: "investigation", ID: "i1", Title: "Investigate crash", Subtitle: "open"},
 		},
 		Opportunities: []tuicontract.Item{
-			{Kind: "opportunity", ID: "o1", Title: "Refactor parser", Subtitle: "validated"},
+			{Kind: "opportunity", ID: "o1", Title: "Refactor parser", Subtitle: "validated", Stage: "ready"},
+			{Kind: "opportunity", ID: "o2", Title: "Bound retries", Subtitle: "reproduced", Stage: "validate"},
+		},
+		Contributions: []tuicontract.Item{
+			{Kind: "contribution", ID: "p1", Title: "Fix parser panic", Status: "submitted"},
+			{Kind: "contribution", ID: "p2", Title: "Document retry limits", Status: "prepared"},
 		},
 	}
 }
 
-func loadModel(t *testing.T, r tuicontract.Reader) Model {
+func loadModel(t *testing.T, r tuicontract.Reader, opts ...Option) Model {
 	t.Helper()
-	m := New(context.Background(), r)
+	m := New(context.Background(), r, opts...)
 
 	cmd := m.Init()
 	if cmd == nil {
@@ -91,8 +160,8 @@ func TestInitLoadsData(t *testing.T) {
 	if fake.loadCount != 1 {
 		t.Fatalf("expected one Load call, got %d", fake.loadCount)
 	}
-	if len(m.filtered) != 1 {
-		t.Fatalf("expected 1 repository visible, got %d", len(m.filtered))
+	if len(m.filtered) != 2 {
+		t.Fatalf("expected 2 candidates visible, got %d", len(m.filtered))
 	}
 }
 
@@ -100,12 +169,8 @@ func TestSearchFiltersLoadedData(t *testing.T) {
 	fake := &fakeReader{data: sampleData()}
 	m := loadModel(t, fake)
 
-	// switch to threads view
-	model, _ := m.Update(keyPress('2'))
-	m = model.(Model)
-
 	// focus search
-	model, _ = m.Update(keyPress('/'))
+	model, _ := m.Update(keyPress('/'))
 	m = model.(Model)
 
 	// type "feature"
@@ -132,19 +197,15 @@ func TestViewSwitch(t *testing.T) {
 	fake := &fakeReader{data: sampleData()}
 	m := loadModel(t, fake)
 
-	for i := 0; i < len(viewOrder); i++ {
-		model, _ := m.Update(keyPress(tea.KeyTab))
-		m = model.(Model)
-	}
-
-	if m.view != viewRepositories {
-		t.Fatalf("expected to cycle back to repositories, got %s", m.view)
-	}
-
-	model, _ := m.Update(keyPress('3'))
+	model, _ := m.Update(keyPress('9'))
 	m = model.(Model)
-	if m.view != viewClusters {
-		t.Fatalf("expected clusters view, got %s", m.view)
+	if m.view != viewSyncStatus {
+		t.Fatalf("expected sync-status view, got %s", m.view)
+	}
+	model, _ = m.Update(keyPress('0'))
+	m = model.(Model)
+	if m.view != viewRelatedWork {
+		t.Fatalf("expected related-work view from key 0, got %s", m.view)
 	}
 
 	// switch does not call reader
@@ -157,17 +218,46 @@ func TestDetailShowsCoverageAndSource(t *testing.T) {
 	fake := &fakeReader{data: sampleData()}
 	m := loadModel(t, fake)
 
-	model, _ := m.Update(keyPress(tea.KeyEnter))
+	model, _ := m.Update(keyPress('8'))
+	m = model.(Model)
+	model, _ = m.Update(keyPress(tea.KeyEnter))
 	m = model.(Model)
 
-	if m.detail == nil {
-		t.Fatal("expected detail to be set")
+	if m.focus != focusDetail {
+		t.Fatal("expected detail pane to be focused")
 	}
 
-	out := m.View().Content
-	for _, want := range []string{"owner/repo", "Coverage:", "metadata", "threads", "github:rest", "2026-07-17"} {
+	out := m.renderDetail(36, 100)
+	for _, want := range []string{"owner/repo", "Coverage", "metadata", "threads", "github:rest", "2026-07-17"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected view to contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestDetailMakesLongTitlesAndSourcesFullyInspectable(t *testing.T) {
+	data := sampleData()
+	data.Repositories[0].Title = "An intentionally long repository title whose unique ending must remain visible"
+	data.Repositories[0].Ref = "owner/repository-with-a-very-long-name-and-distinct-ref-ending"
+	data.Repositories[0].Source = "https://example.invalid/owner/repository/blob/main/a/very/long/path/with-distinct-source-ending"
+	m := loadModel(t, &fakeReader{data: data})
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 36})
+	m = model.(Model)
+	model, _ = m.Update(keyPress('8'))
+	m = model.(Model)
+	model, _ = m.Update(keyPress(tea.KeyEnter))
+	m = model.(Model)
+
+	out := m.renderDetail(36, 100)
+	for _, want := range []string{
+		"An intentionally long repository",
+		"title whose unique ending must",
+		"remain visible",
+		"distinct-ref-ending",
+		"distinct-source-ending",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("detail omitted long-value segment %q:\n%s", want, out)
 		}
 	}
 }
@@ -175,10 +265,38 @@ func TestDetailShowsCoverageAndSource(t *testing.T) {
 func TestEmptyState(t *testing.T) {
 	fake := &fakeReader{data: tuicontract.Data{}}
 	m := loadModel(t, fake)
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 140, Height: 36})
+	m = model.(Model)
 
 	out := m.View().Content
-	if !strings.Contains(out, "No items") {
-		t.Fatalf("expected empty state message, got:\n%s", out)
+	for _, want := range []string{
+		"No contribution candidates yet",
+		"The local corpus contains no repositories",
+		"gitcontribute source add repos OWNER/REPO",
+		"gitcontribute archive sync OWNER/REPO",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected empty state to contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestEmptyCandidatesWithRepositoryPointsToSyncStatus(t *testing.T) {
+	data := sampleData()
+	data.Candidates = nil
+	m := loadModel(t, &fakeReader{data: data})
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 118, Height: 36})
+	m = model.(Model)
+
+	out := m.View().Content
+	for _, want := range []string{
+		"No contribution candidates yet",
+		"Open Sync status [9]",
+		"gitcontribute archive sync OWNER/REPO",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("candidate empty state omitted %q:\n%s", want, out)
+		}
 	}
 }
 
@@ -190,7 +308,7 @@ func TestErrorState(t *testing.T) {
 		t.Fatal("expected error state")
 	}
 	out := m.View().Content
-	if !strings.Contains(out, "Error:") {
+	if !strings.Contains(out, "Error") {
 		t.Fatalf("expected error message, got:\n%s", out)
 	}
 }
@@ -198,8 +316,10 @@ func TestErrorState(t *testing.T) {
 func TestKeyboardHelp(t *testing.T) {
 	fake := &fakeReader{data: sampleData()}
 	m := loadModel(t, fake)
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 118, Height: 50})
+	m = model.(Model)
 
-	model, _ := m.Update(keyPress('?'))
+	model, _ = m.Update(keyPress('?'))
 	m = model.(Model)
 
 	if !m.help {
@@ -207,25 +327,21 @@ func TestKeyboardHelp(t *testing.T) {
 	}
 
 	out := m.View().Content
-	for _, want := range []string{"Keyboard help", "quit", "filter", "refresh/hydration"} {
+	for _, want := range []string{"Keyboard help", "quit", "filter"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected help to contain %q, got:\n%s", want, out)
 		}
 	}
-}
-
-func TestRefreshActionIntent(t *testing.T) {
-	fake := &fakeReader{data: sampleData()}
-	m := loadModel(t, fake)
-
-	model, _ := m.Update(keyPress('r'))
-	m = model.(Model)
-
-	if !strings.Contains(m.actionMsg, "Refresh requested") {
-		t.Fatalf("expected refresh action intent, got %q", m.actionMsg)
-	}
-	if fake.loadCount != 1 {
-		t.Fatalf("refresh action must not call Load; got %d calls", fake.loadCount)
+	for _, want := range []string{
+		"Discover · ranked issues",
+		"Research · proposed hypotheses",
+		"Active · investigations in progress",
+		"Validate · opportunities needing evidence",
+		"Ready · opportunities passing local checks",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected stage definition %q, got:\n%s", want, out)
+		}
 	}
 }
 
@@ -247,18 +363,293 @@ func TestSearchExitAndDetailClose(t *testing.T) {
 		t.Fatal("expected search to be inactive")
 	}
 
-	// open detail
+	// Open detail for a non-candidate item. Candidate Enter opens its research
+	// brief instead.
+	model, _ = m.Update(keyPress('8'))
+	m = model.(Model)
 	model, _ = m.Update(keyPress(tea.KeyEnter))
 	m = model.(Model)
-	if m.detail == nil {
-		t.Fatal("expected detail")
+	if m.focus != focusDetail {
+		t.Fatal("expected detail focus")
 	}
 
 	// close detail
 	model, _ = m.Update(keyPress(tea.KeyEsc))
 	m = model.(Model)
-	if m.detail != nil {
-		t.Fatal("expected detail to be closed")
+	if m.focus != focusList {
+		t.Fatal("expected list focus")
+	}
+}
+
+func TestCandidateEnterOpensResearchBriefAndEscRestoresSelection(t *testing.T) {
+	m := loadModel(t, &fakeReader{data: sampleData()})
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 118, Height: 36})
+	m = model.(Model)
+	model, _ = m.Update(keyPress(tea.KeyDown))
+	m = model.(Model)
+	before := m.String()
+
+	model, _ = m.Update(keyPress(tea.KeyEnter))
+	m = model.(Model)
+	out := m.View().Content
+	for _, want := range []string{"RESEARCH BRIEF", "Problem", "Add feature"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("candidate Enter did not open a research brief containing %q:\n%s", want, out)
+		}
+	}
+
+	model, _ = m.Update(keyPress(tea.KeyEsc))
+	m = model.(Model)
+	if got := m.String(); got != before {
+		t.Fatalf("selection changed after closing brief: got %q, want %q", got, before)
+	}
+	if !strings.Contains(m.View().Content, "CONTRIBUTIONS") {
+		t.Fatalf("Esc did not restore the workbench:\n%s", m.View().Content)
+	}
+}
+
+func TestCandidateEnterOpensResearchBriefAtEveryResponsiveSize(t *testing.T) {
+	for _, size := range []struct {
+		name          string
+		width, height int
+	}{
+		{"wide", 118, 36},
+		{"medium", 88, 30},
+		{"narrow", 60, 30},
+	} {
+		size := size
+		t.Run(size.name, func(t *testing.T) {
+			m := loadModel(t, &fakeReader{data: sampleData()})
+			model, _ := m.Update(tea.WindowSizeMsg{Width: size.width, Height: size.height})
+			m = model.(Model)
+			model, _ = m.Update(keyPress(tea.KeyEnter))
+			m = model.(Model)
+			if !m.briefOpen || !strings.Contains(m.View().Content, "RESEARCH BRIEF") {
+				t.Fatalf("candidate Enter did not open the brief at %dx%d:\n%s", size.width, size.height, m.View().Content)
+			}
+		})
+	}
+}
+
+func TestResearchBriefLoadingFailureAndRetryHaveRecoveryGuidance(t *testing.T) {
+	briefs := &fakeBriefProvider{err: context.DeadlineExceeded}
+	m := loadModel(t, &fakeReader{data: sampleData()}, WithBriefProvider(briefs))
+	model, cmd := m.Update(keyPress(tea.KeyEnter))
+	m = model.(Model)
+	if cmd == nil || !strings.Contains(m.View().Content, "Loading stored research brief") {
+		t.Fatalf("brief loading state is not visible:\n%s", m.View().Content)
+	}
+	model, _ = m.Update(cmd())
+	m = model.(Model)
+	for _, want := range []string{"Research brief unavailable", "Recovery", "Enter to retry", "Esc to return"} {
+		if !strings.Contains(m.View().Content, want) {
+			t.Fatalf("brief failure omitted %q:\n%s", want, m.View().Content)
+		}
+	}
+	briefs.err = nil
+	briefs.brief = snapshotBrief()
+	model, cmd = m.Update(keyPress(tea.KeyEnter))
+	m = model.(Model)
+	if cmd == nil {
+		t.Fatal("brief retry did not issue a local read")
+	}
+	model, _ = m.Update(cmd())
+	m = model.(Model)
+	if m.briefErr != nil || !strings.Contains(m.View().Content, "Expected behavior") {
+		t.Fatalf("brief retry did not recover:\n%s", m.View().Content)
+	}
+}
+
+func TestCandidateResearchBriefRendersStoredEvidenceSections(t *testing.T) {
+	briefs := &fakeBriefProvider{brief: tuicontract.ResearchBrief{
+		Ref:        "issue:owner/repo#1",
+		Title:      "Fix bug",
+		Problem:    "Requests can hang after cancellation.",
+		SourceAsOf: "2026-07-17T00:00:00Z",
+		ExpectedBehavior: []tuicontract.BriefFact{{
+			Summary: "Cancellation should stop the request.", Source: "issue:owner/repo#1",
+		}},
+		Discussion: []tuicontract.BriefFact{{
+			Summary: "A maintainer requested a regression test.", Source: "comment:17",
+		}},
+		ReproductionStatus: tuicontract.BriefFact{Summary: "No stored reproduction is available."},
+		RelatedWork: []tuicontract.BriefFact{{
+			Summary: "PR #9 may overlap.", Source: "pr:owner/repo#9",
+		}},
+		MissingEvidence: []string{"issue_comments"},
+		SuggestedNext:   []string{"gitcontribute hydrate owner/repo#1 --facets issue_comments"},
+	}}
+	m := loadModel(t, &fakeReader{data: sampleData()}, WithBriefProvider(briefs))
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 118, Height: 48})
+	m = model.(Model)
+	model, cmd := m.Update(keyPress(tea.KeyEnter))
+	m = model.(Model)
+	if cmd == nil {
+		t.Fatal("candidate Enter must request the stored research brief")
+	}
+	model, _ = m.Update(cmd())
+	m = model.(Model)
+
+	out := m.View().Content
+	for _, want := range []string{
+		"Problem", "Requests can hang", "Expected behavior", "Cancellation should stop",
+		"Relevant discussion", "maintainer requested", "Reproduction status",
+		"Related work", "PR #9", "Missing evidence", "issue_comments",
+		"Suggested next step", "gitcontribute hydrate",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("research brief omitted %q:\n%s", want, out)
+		}
+	}
+	if briefs.calls != 1 || briefs.item.Ref != "owner/repo#1" {
+		t.Fatalf("brief provider calls=%d item=%+v", briefs.calls, briefs.item)
+	}
+}
+
+func TestWideWorkbenchKeepsWorkflowListAndEvidenceVisible(t *testing.T) {
+	fake := &fakeReader{data: sampleData()}
+	m := loadModel(t, fake)
+	m.actionProvider = &fakeActionProvider{}
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 118, Height: 36})
+	m = model.(Model)
+
+	out := m.View().Content
+	for _, want := range []string{"CONTRIBUTIONS", "DISCOVER", "READY TO CODE", "Why it matters", "Risks", "1/2", "a actions"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected workbench to contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestDetailShowsSelectedItemsPrimaryContextualAction(t *testing.T) {
+	data := sampleData()
+	data.Candidates[0].Actions = []tuicontract.Action{{
+		ID: "start_investigation", Label: "Start investigation",
+		Capability: tuicontract.CapabilityLocalWrite, RequiresConfirmation: true,
+	}}
+	data.Hypotheses[0].Actions = []tuicontract.Action{{
+		ID: "check_duplicates", Label: "Check duplicates",
+		Capability: tuicontract.CapabilityOfflineRead,
+	}}
+	provider := &fakeActionProvider{}
+	m := loadModel(t, &fakeReader{data: data}, WithActionProvider(provider))
+
+	if out := m.View().Content; !strings.Contains(out, "[a] Start investigation") {
+		t.Fatalf("candidate detail omitted its primary action:\n%s", out)
+	}
+	model, _ := m.Update(keyPress('2'))
+	m = model.(Model)
+	if out := m.View().Content; !strings.Contains(out, "[a] Check duplicates") {
+		t.Fatalf("hypothesis detail omitted its primary action:\n%s", out)
+	}
+}
+
+func TestDetailKeepsPrimaryActionVisibleWhenEvidenceOverflows(t *testing.T) {
+	data := sampleData()
+	data.Candidates[0].Actions = []tuicontract.Action{{
+		ID: "start_investigation", Label: "Start investigation",
+		Capability: tuicontract.CapabilityLocalWrite, RequiresConfirmation: true,
+	}}
+	data.Candidates[0].Assessment = &tuicontract.Assessment{}
+	for i := 0; i < 20; i++ {
+		data.Candidates[0].Assessment.Risks = append(data.Candidates[0].Assessment.Risks, tuicontract.Fact{
+			Summary: fmt.Sprintf("Stored risk %02d needs review before work starts.", i),
+		})
+	}
+	m := loadModel(t, &fakeReader{data: data}, WithActionProvider(&fakeActionProvider{}))
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 118, Height: 24})
+	m = model.(Model)
+
+	if out := m.View().Content; !strings.Contains(out, "[a] Start investigation") {
+		t.Fatalf("overflowing evidence hid the primary next action:\n%s", out)
+	}
+}
+
+func TestSyncStatusExplainsCoverageFreshnessAndExplicitRecovery(t *testing.T) {
+	m := loadModel(t, &fakeReader{data: sampleData()})
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 118, Height: 36})
+	m = model.(Model)
+	model, _ = m.Update(keyPress('9'))
+	m = model.(Model)
+
+	out := m.View().Content
+	for _, want := range []string{
+		"SYNC STATUS", "owner/repo", "PARTIAL", "Candidate ranking evidence is incomplete",
+		"metadata", "threads", "contribution_guidance", "latest thread sync is partial",
+		"gitcontribute archive sync owner/repo",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("sync status omitted %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestListUsesViewportAndKeepsCursorVisible(t *testing.T) {
+	data := sampleData()
+	data.Candidates = nil
+	for i := 0; i < 20; i++ {
+		data.Candidates = append(data.Candidates, tuicontract.Item{
+			Kind: "candidate", ID: fmt.Sprint(i), Ref: fmt.Sprintf("owner/repo#%d", i),
+			Title: fmt.Sprintf("Candidate %02d", i), Status: "needs_diagnosis",
+		})
+	}
+	m := loadModel(t, &fakeReader{data: data})
+	model, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
+	m = model.(Model)
+	for range 12 {
+		model, _ = m.Update(keyPress(tea.KeyDown))
+		m = model.(Model)
+	}
+
+	out := m.View().Content
+	if !strings.Contains(out, "Candidate 12") || strings.Contains(out, "Candidate 00") {
+		t.Fatalf("expected viewport to follow cursor, got:\n%s", out)
+	}
+}
+
+func TestWorkbenchNeverExceedsTerminalViewport(t *testing.T) {
+	t.Parallel()
+	for _, size := range []struct {
+		width  int
+		height int
+	}{
+		{40, 12},
+		{60, 20},
+		{72, 24},
+		{107, 30},
+		{108, 30},
+		{118, 36},
+		{160, 48},
+	} {
+		t.Run(fmt.Sprintf("%dx%d", size.width, size.height), func(t *testing.T) {
+			m := loadModel(t, &fakeReader{data: sampleData()})
+			model, _ := m.Update(tea.WindowSizeMsg{Width: size.width, Height: size.height})
+			m = model.(Model)
+			assertViewportBounds(t, m.View().Content, size.width, size.height)
+
+			m.actionProvider = &fakeActionProvider{actions: []tuicontract.Action{{
+				ID: "start", Label: "Start investigation", Description: "Create local records.",
+				Capability: tuicontract.CapabilityLocalWrite, RequiresConfirmation: true,
+			}}}
+			model, cmd := m.Update(keyPress('a'))
+			m = model.(Model)
+			model, _ = m.Update(cmd())
+			m = model.(Model)
+			assertViewportBounds(t, m.View().Content, size.width, size.height)
+		})
+	}
+}
+
+func assertViewportBounds(t *testing.T, content string, width, height int) {
+	t.Helper()
+	lines := strings.Split(content, "\n")
+	if len(lines) > height {
+		t.Fatalf("rendered %d lines into %d-row terminal", len(lines), height)
+	}
+	for i, line := range lines {
+		if got := lipgloss.Width(line); got > width {
+			t.Fatalf("line %d rendered width %d into %d-column terminal: %q", i+1, got, width, line)
+		}
 	}
 }
 

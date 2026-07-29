@@ -1,0 +1,36 @@
+GitContribute  openclaw/openclaw                          OFFLINE · as of 2026-07-17                          / search
+
+                     ┌──────────────────────────────────────────────────────────────────────────┐
+                     │Actions                                                                   │
+                     │openclaw/openclaw#45311 · Slack socket mode receives no inbound events    │
+                     │                                                                          │
+                     │Confirm local write                                                       │
+                     │                                                                          │
+                     │Start investigation                                                       │
+                     │Create a local investigation and initial hypothesis.                      │
+                     │                                                                          │
+                     │Capability: local corpus write                                            │
+                     │No network access or GitHub mutation.                                     │
+                     │                                                                          │
+                     │Continue? [y/N]                                                           │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     │                                                                          │
+                     └──────────────────────────────────────────────────────────────────────────┘
+
+y / enter confirm   n / esc cancel   local corpus only · no GitHub mutation
