@@ -12,8 +12,6 @@ import (
 
 // RunValidationInput selects a validation definition and explicitly authorizes execution.
 
-// RunRepeatedValidationInput configures one bounded repeat/stress job.
-
 // DefineValidationInput records a bounded validation command without executing it.
 
 // ValidationExpectedObservation is one output assertion evaluated without a shell.
@@ -28,8 +26,17 @@ func (s *Server) runValidation(ctx context.Context, _ *mcp.CallToolRequest, in m
 		return nil, mcpcontract.JobReference{}, err
 	}
 	in.ID = id
-	if in.Kind != "base" && in.Kind != "candidate" {
-		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("kind", "must be base or candidate", map[string]any{"kind": "candidate"})
+	if in.RunCount == 0 {
+		in.RunCount = 1
+	}
+	if in.Concurrency == 0 {
+		in.Concurrency = 1
+	}
+	if in.SampleInterval == "" {
+		in.SampleInterval = "100ms"
+	}
+	if in.Target != "base" && in.Target != "candidate" && in.Target != "both" {
+		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("target", "must be base, candidate, or both", map[string]any{"target": "candidate"})
 	}
 	if !in.Execute {
 		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("execute", "must be true to authorize host command execution", map[string]any{"execute": true})
@@ -39,35 +46,6 @@ func (s *Server) runValidation(ctx context.Context, _ *mcp.CallToolRequest, in m
 		return nil, mcpcontract.JobReference{}, errors.New("validation is not available")
 	}
 	out, err := operator.RunValidation(ctx, in)
-	return nil, out, err
-}
-
-func (s *Server) runRepeatedValidation(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.RunRepeatedValidationInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
-	id, err := normalizeID("id", in.ID)
-	if err != nil {
-		return nil, mcpcontract.JobReference{}, err
-	}
-	in.ID = id
-	if in.RunCount == 0 {
-		in.RunCount = 3
-	}
-	if in.Concurrency == 0 {
-		in.Concurrency = 1
-	}
-	if in.SampleInterval == "" {
-		in.SampleInterval = "100ms"
-	}
-	if in.Target != "base" && in.Target != "candidate" && in.Target != "both" {
-		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("target", "must be base, candidate, or both", map[string]any{"target": "both"})
-	}
-	if !in.Execute {
-		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("execute", "must be true to authorize host command execution", map[string]any{"execute": true})
-	}
-	operator, ok := s.reader.(Operator)
-	if !ok {
-		return nil, mcpcontract.JobReference{}, errors.New("validation is not available")
-	}
-	out, err := operator.RunRepeatedValidation(ctx, in)
 	return nil, out, err
 }
 

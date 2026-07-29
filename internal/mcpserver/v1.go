@@ -127,24 +127,16 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.RunValidationInput, mcpcontract.JobReference]{
 		name: mcpcontract.ToolRunValidation, title: "Run stored validation command",
-		description: "Execute one stored shell-free validation command against its base or candidate workspace and persist the run asynchronously. This can modify the workspace or host through the authorized command and requires execute=true.",
+		description: "Execute a stored shell-free validation against base, candidate, or both workspaces. Set run_count above 1 for repeated or stress validation with bounded concurrency and telemetry. This can modify the workspace or host through the authorized command and requires execute=true.",
 		annotations: executionAnnotations(), supportedBy: supports[Operator], input: inputSchema[mcpcontract.RunValidationInput](func(schema *schemaBuilder) {
-			setEnum(schema, "kind", "base", "candidate")
-			setConst(schema, "execute", true)
-		}), output: outputSchema[mcpcontract.JobReference]("Reference to a newly queued validation execution job."), handler: s.runValidation,
-	})
-	addCatalogTool(s, catalogTool[mcpcontract.RunRepeatedValidationInput, mcpcontract.JobReference]{
-		name: mcpcontract.ToolRunRepeatedValidation, title: "Run repeated validation",
-		description: "Execute a stored shell-free validation repeatedly with bounded concurrency, independent per-attempt deadlines, process-tree resource telemetry, cleanup checks, and semantic aggregation. Requires execute=true and never contacts GitHub.",
-		annotations: executionAnnotations(), supportedBy: supports[Operator], input: inputSchema[mcpcontract.RunRepeatedValidationInput](func(schema *schemaBuilder) {
 			setEnum(schema, "target", "base", "candidate", "both")
 			setRange(schema, "run_count", 1, 100)
-			setDefault(schema, "run_count", 3)
+			setDefault(schema, "run_count", 1)
 			setRange(schema, "concurrency", 1, 16)
 			setDefault(schema, "concurrency", 1)
 			setDefault(schema, "sample_interval", "100ms")
 			setConst(schema, "execute", true)
-		}), output: outputSchema[mcpcontract.JobReference]("Reference to a newly queued repeat validation job."), handler: s.runRepeatedValidation,
+		}), output: outputSchema[mcpcontract.JobReference]("Reference to a newly queued validation execution job."), handler: s.runValidation,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.StartInvestigationInput, mcpcontract.DurableArtifactReference]{
 		name: mcpcontract.ToolStartInvestigation, title: "Start local investigation",
@@ -159,23 +151,16 @@ func (s *Server) registerV1() {
 			setEnum(schema, "category", "bug", "performance", "architecture", "testing", "documentation", "maintenance", "compatibility", "security", "other")
 		}), output: outputSchema[mcpcontract.DurableArtifactReference]("Compact reference to the updated investigation resource."), handler: s.recordHypothesis,
 	})
-	addCatalogTool(s, catalogTool[mcpcontract.CheckDuplicatesInput, mcpcontract.CheckOutput]{
-		name: mcpcontract.ToolCheckDuplicates, title: "Find issue and PR duplicates",
-		description: "Search the local thread corpus for issues or pull requests that may duplicate one hypothesis or opportunity. This records no evidence and performs no network access; refresh the corpus explicitly if coverage is stale.",
-		annotations: readOnly, supportedBy: supports[Operator], input: inputSchema[mcpcontract.CheckDuplicatesInput](func(schema *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.FindRelatedWorkInput, mcpcontract.FindRelatedWorkOutput]{
+		name: mcpcontract.ToolFindRelatedWork, title: "Find related issues and open pull requests",
+		description: "Search the local corpus for duplicate issues and pull requests, open pull requests that may compete or conflict, or both for one hypothesis or opportunity. Returns each requested population separately; this records no evidence, tests no Git merge conflicts, and performs no network access.",
+		annotations: readOnly, supportedBy: supports[Operator], input: inputSchema[mcpcontract.FindRelatedWorkInput](func(schema *schemaBuilder) {
 			setEnum(schema, "target", "hypothesis", "opportunity")
+			setArrayBounds(schema, "kinds", 1, 2)
+			setArrayEnum(schema, "kinds", "duplicates", "competing_pull_requests")
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
-		}), output: outputSchema[mcpcontract.CheckOutput]("Evidence-backed duplicate candidates from the local corpus."), handler: s.checkDuplicates,
-	})
-	addCatalogTool(s, catalogTool[mcpcontract.CheckCollisionsInput, mcpcontract.CheckOutput]{
-		name: mcpcontract.ToolFindCompetingWork, title: "Find competing open pull requests",
-		description: "Search locally stored open pull requests for semantically or explicitly overlapping work for one hypothesis or opportunity. This does not test Git merge conflicts and performs no network access.",
-		annotations: readOnly, supportedBy: supports[Operator], input: inputSchema[mcpcontract.CheckCollisionsInput](func(schema *schemaBuilder) {
-			setEnum(schema, "target", "hypothesis", "opportunity")
-			setRange(schema, "limit", 1, 100)
-			setDefault(schema, "limit", 20)
-		}), output: outputSchema[mcpcontract.CheckOutput]("Evidence-backed competing open pull requests."), handler: s.checkCollisions,
+		}), output: outputSchema[mcpcontract.FindRelatedWorkOutput]("Requested related-work populations grouped by kind."), handler: s.findRelatedWork,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.PromoteOpportunityInput, mcpcontract.DurableArtifactReference]{
 		name: mcpcontract.ToolPromoteOpportunity, title: "Promote hypothesis to opportunity",
@@ -375,40 +360,51 @@ func (s *Server) recordHypothesis(ctx context.Context, _ *mcp.CallToolRequest, i
 	return linkedResource(uri, "investigation", "Investigation", "Investigation containing the persisted hypothesis."), ref, nil
 }
 
-func (s *Server) checkDuplicates(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.CheckDuplicatesInput) (*mcp.CallToolResult, mcpcontract.CheckOutput, error) {
-	if err := validateCheckInput(&in); err != nil {
-		return nil, mcpcontract.CheckOutput{}, err
+func (s *Server) findRelatedWork(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.FindRelatedWorkInput) (*mcp.CallToolResult, mcpcontract.FindRelatedWorkOutput, error) {
+	check := mcpcontract.CheckDuplicatesInput{Target: in.Target, ID: in.ID, Limit: in.Limit}
+	if err := validateCheckInput(&check); err != nil {
+		return nil, mcpcontract.FindRelatedWorkOutput{}, err
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
+		check.Limit = 20
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return nil, mcpcontract.CheckOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
+		return nil, mcpcontract.FindRelatedWorkOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
 	}
 	operator, ok := s.reader.(Operator)
 	if !ok {
-		return nil, mcpcontract.CheckOutput{}, errors.New("duplicate checks are not available")
+		return nil, mcpcontract.FindRelatedWorkOutput{}, errors.New("related-work checks are not available")
 	}
-	out, err := operator.CheckDuplicates(ctx, in)
-	return nil, out, err
-}
-
-func (s *Server) checkCollisions(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.CheckCollisionsInput) (*mcp.CallToolResult, mcpcontract.CheckOutput, error) {
-	if err := validateCheckInput((*mcpcontract.CheckDuplicatesInput)(&in)); err != nil {
-		return nil, mcpcontract.CheckOutput{}, err
+	kinds := in.Kinds
+	if len(kinds) == 0 {
+		kinds = []string{"duplicates", "competing_pull_requests"}
 	}
-	if in.Limit == 0 {
-		in.Limit = 20
+	var out mcpcontract.FindRelatedWorkOutput
+	seen := make(map[string]bool, len(kinds))
+	for _, kind := range kinds {
+		if seen[kind] {
+			return nil, mcpcontract.FindRelatedWorkOutput{}, mcpcontract.InvalidArgument("kinds", "must not contain duplicates", map[string]any{"kinds": []string{"duplicates", "competing_pull_requests"}})
+		}
+		seen[kind] = true
+		switch kind {
+		case "duplicates":
+			value, err := operator.CheckDuplicates(ctx, check)
+			if err != nil {
+				return nil, mcpcontract.FindRelatedWorkOutput{}, err
+			}
+			out.Duplicates = &value
+		case "competing_pull_requests":
+			value, err := operator.CheckCollisions(ctx, mcpcontract.CheckCollisionsInput(check))
+			if err != nil {
+				return nil, mcpcontract.FindRelatedWorkOutput{}, err
+			}
+			out.CompetingPullRequests = &value
+		default:
+			return nil, mcpcontract.FindRelatedWorkOutput{}, mcpcontract.InvalidArgument("kinds", "must contain duplicates or competing_pull_requests", map[string]any{"kinds": []string{"duplicates", "competing_pull_requests"}})
+		}
 	}
-	if in.Limit < 1 || in.Limit > 100 {
-		return nil, mcpcontract.CheckOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
-	}
-	operator, ok := s.reader.(Operator)
-	if !ok {
-		return nil, mcpcontract.CheckOutput{}, errors.New("collision checks are not available")
-	}
-	out, err := operator.CheckCollisions(ctx, in)
-	return nil, out, err
+	return nil, out, nil
 }
 
 func validateCheckInput(in *mcpcontract.CheckDuplicatesInput) error {

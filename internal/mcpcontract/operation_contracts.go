@@ -203,6 +203,20 @@ type CheckOutput struct {
 	Limit          int            `json:"limit"`
 }
 
+// FindRelatedWorkInput selects one workflow target and related-work populations.
+type FindRelatedWorkInput struct {
+	Target string   `json:"target" jsonschema:"Target scope: hypothesis or opportunity"`
+	ID     string   `json:"id" jsonschema:"Hypothesis or opportunity ID"`
+	Kinds  []string `json:"kinds,omitempty" jsonschema:"Related-work populations: duplicates and/or competing_pull_requests; defaults to both"`
+	Limit  int      `json:"limit,omitempty" jsonschema:"Maximum findings per population from 1 to 100"`
+}
+
+// FindRelatedWorkOutput groups independently derived related-work populations.
+type FindRelatedWorkOutput struct {
+	Duplicates            *CheckOutput `json:"duplicates,omitempty"`
+	CompetingPullRequests *CheckOutput `json:"competing_pull_requests,omitempty"`
+}
+
 // PromoteOpportunityInput converts a hypothesis into a scoped opportunity.
 type PromoteOpportunityInput struct {
 	HypothesisID        string      `json:"hypothesis_id" jsonschema:"Hypothesis ID to promote"`
@@ -221,19 +235,12 @@ type CancelJobInput struct {
 	IDs []string `json:"ids" jsonschema:"One to 100 durable job IDs"`
 }
 
-// RunValidationInput selects a validation definition and explicitly authorizes execution.
+// RunValidationInput configures one bounded validation execution job.
 type RunValidationInput struct {
-	ID      string `json:"id" jsonschema:"Validation definition ID"`
-	Kind    string `json:"kind" jsonschema:"Run kind: base or candidate"`
-	Execute bool   `json:"execute" jsonschema:"Must be true to authorize host execution"`
-}
-
-// RunRepeatedValidationInput configures one bounded repeat/stress job.
-type RunRepeatedValidationInput struct {
 	ID             string `json:"id" jsonschema:"Validation definition ID"`
 	Target         string `json:"target" jsonschema:"Run target: base, candidate, or both"`
-	RunCount       int    `json:"run_count,omitempty" jsonschema:"Attempts per target from 1 to 100"`
-	Concurrency    int    `json:"concurrency,omitempty" jsonschema:"Concurrent attempts from 1 to 16"`
+	RunCount       int    `json:"run_count,omitempty" jsonschema:"Attempts per target from 1 to 100; defaults to 1"`
+	Concurrency    int    `json:"concurrency,omitempty" jsonschema:"Concurrent attempts from 1 to 16; defaults to 1"`
 	PerRunTimeout  string `json:"per_run_timeout,omitempty" jsonschema:"Optional Go duration per attempt"`
 	OverallTimeout string `json:"overall_timeout,omitempty" jsonschema:"Optional Go duration for the whole group"`
 	SampleInterval string `json:"sample_interval,omitempty" jsonschema:"Process telemetry interval from 10ms to 10s"`

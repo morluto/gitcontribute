@@ -55,9 +55,9 @@ Canonical MCP composition:
 1. Use `workspace.adopt` or `workspace.create` for the authorized base and
    candidate worktrees.
 2. Use `validation.define` once with the exact command and both workspace IDs.
-3. Use `validation.run` for one base and one candidate execution, or
-   `validation.run_repeated` when repeated evidence is required. Execution
-   remains an explicit process capability.
+3. Use `validation.run` with `target: both`; set `run_count` above one when
+   repeated evidence is required. Execution remains an explicit process
+   capability.
 4. Wait for the returned durable jobs and compare their typed validation
    records. Preserve the command, commit, environment policy, timing, exit
    status, bounded output, and observation contract in the evidence handoff.

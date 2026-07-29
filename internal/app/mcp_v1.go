@@ -326,34 +326,6 @@ func (r *MCPReader) AdoptWorkspace(ctx context.Context, in mcpcontract.AdoptWork
 }
 
 // RunValidation submits a durable validation run.
-func (r *MCPReader) RunValidation(ctx context.Context, in mcpcontract.RunValidationInput) (mcpcontract.JobReference, error) {
-	runKind := evidence.RunKind(in.Kind)
-	if runKind != evidence.RunKindBase && runKind != evidence.RunKindCandidate {
-		return mcpcontract.JobReference{}, errors.New("kind must be base or candidate")
-	}
-	if !in.Execute {
-		return mcpcontract.JobReference{}, errors.New("execute must be true to authorize host command execution")
-	}
-	opts := contracts.RunValidationOptions{Kind: in.Kind, Execute: true}
-	id, err := r.submitJob(ctx, "run_validation", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
-		if err := report("validation", jobProgressCounts(0, 1)); err != nil {
-			return nil, err
-		}
-		res, err := r.application().RunValidation(ctx, in.ID, opts)
-		if err != nil {
-			return nil, err
-		}
-		if err := report("validation", jobProgressCounts(1, 1)); err != nil {
-			return nil, err
-		}
-		return res, nil
-	})
-	if err != nil {
-		return mcpcontract.JobReference{}, err
-	}
-	return queuedJobReference(id, "run_validation", "validation run started"), nil
-}
-
 // StartInvestigation creates a new investigation workspace.
 func (r *MCPReader) StartInvestigation(ctx context.Context, in mcpcontract.StartInvestigationInput) (mcpcontract.InvestigationOutput, error) {
 	if in.Number > 0 {

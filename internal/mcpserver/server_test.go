@@ -13,10 +13,10 @@ import (
 )
 
 type fakeReader struct {
-	searchStarted chan struct{}
-	repeatInput   mcpcontract.RunRepeatedValidationInput
-	radarScore    int
-	calls         map[string]int
+	searchStarted   chan struct{}
+	validationInput mcpcontract.RunValidationInput
+	radarScore      int
+	calls           map[string]int
 }
 
 var _ PublishedDraftVerifier = (*fakeReader)(nil)
@@ -313,12 +313,8 @@ func (f *fakeReader) DefineValidation(_ context.Context, in mcpcontract.DefineVa
 	return mcpcontract.ValidationOutput{ID: "val-1", InvestigationID: in.InvestigationID, Kind: in.Kind, Command: []string{"echo"}}, nil
 }
 
-func (*fakeReader) RunValidation(_ context.Context, in mcpcontract.RunValidationInput) (mcpcontract.JobReference, error) {
-	return mcpcontract.JobReference{ID: "job-run-" + in.ID, Kind: "run_validation", Status: "queued"}, nil
-}
-
-func (f *fakeReader) RunRepeatedValidation(_ context.Context, in mcpcontract.RunRepeatedValidationInput) (mcpcontract.JobReference, error) {
-	f.repeatInput = in
+func (f *fakeReader) RunValidation(_ context.Context, in mcpcontract.RunValidationInput) (mcpcontract.JobReference, error) {
+	f.validationInput = in
 	return mcpcontract.JobReference{ID: "job-repeat-" + in.ID, Kind: "run_validation_group", Status: "queued"}, nil
 }
 
@@ -658,9 +654,9 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 	for _, name := range []string{
 		mcpcontract.ToolSearchRepositories, mcpcontract.ToolSearchThreads, mcpcontract.ToolExplainMatch, mcpcontract.ToolGetJob,
 		mcpcontract.ToolBuildRepositoryDossier,
-		mcpcontract.ToolCreateWorkspace, mcpcontract.ToolAdoptWorkspace, mcpcontract.ToolRunValidation, mcpcontract.ToolRunRepeatedValidation,
+		mcpcontract.ToolCreateWorkspace, mcpcontract.ToolAdoptWorkspace, mcpcontract.ToolRunValidation,
 		mcpcontract.ToolStartInvestigation, mcpcontract.ToolRecordHypothesis,
-		mcpcontract.ToolCheckDuplicates, mcpcontract.ToolFindCompetingWork, mcpcontract.ToolPromoteOpportunity, mcpcontract.ToolDefineValidation,
+		mcpcontract.ToolFindRelatedWork, mcpcontract.ToolPromoteOpportunity, mcpcontract.ToolDefineValidation,
 		mcpcontract.ToolPrepareContribution, mcpcontract.ToolCancelJob,
 	} {
 		if tools[name] == nil {
@@ -694,12 +690,10 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		{mcpcontract.ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"}},
 		{mcpcontract.ToolCreateWorkspace, map[string]any{"investigation_id": "inv-1"}},
 		{mcpcontract.ToolAdoptWorkspace, map[string]any{"investigation_id": "inv-1", "path": "/tmp/worktree", "base_ref": "main", "name": "external"}},
-		{mcpcontract.ToolRunValidation, map[string]any{"id": "val-1", "kind": "base", "execute": true}},
-		{mcpcontract.ToolRunRepeatedValidation, map[string]any{"id": "val-1", "target": "both", "execute": true}},
+		{mcpcontract.ToolRunValidation, map[string]any{"id": "val-1", "target": "both", "run_count": 3, "execute": true}},
 		{mcpcontract.ToolStartInvestigation, map[string]any{"owner": "acme", "repo": "rocket", "commit_sha": "abc123"}},
 		{mcpcontract.ToolRecordHypothesis, map[string]any{"investigation_id": "inv-1", "title": "leak", "description": "memory leak", "category": "bug"}},
-		{mcpcontract.ToolCheckDuplicates, map[string]any{"target": "hypothesis", "id": "hyp-1"}},
-		{mcpcontract.ToolFindCompetingWork, map[string]any{"target": "opportunity", "id": "opp-1"}},
+		{mcpcontract.ToolFindRelatedWork, map[string]any{"target": "hypothesis", "id": "hyp-1", "kinds": []string{"duplicates"}}},
 		{mcpcontract.ToolPromoteOpportunity, map[string]any{"hypothesis_id": "hyp-1", "problem_statement": "leak", "scope": "small", "impact": "high", "expected_effort": "1h", "confidence": 0.8}},
 		{mcpcontract.ToolDefineValidation, map[string]any{"investigation_id": "inv-1", "kind": "test", "command": "go test ./...", "workspace_id": "ws-1"}},
 		{mcpcontract.ToolPrepareContribution, map[string]any{"opportunity_id": "opp-1", "kind": "issue"}},

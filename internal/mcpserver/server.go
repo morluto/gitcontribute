@@ -115,7 +115,6 @@ type Operator interface {
 	PromoteOpportunity(context.Context, mcpcontract.PromoteOpportunityInput) (mcpcontract.OpportunityOutput, error)
 	DefineValidation(context.Context, mcpcontract.DefineValidationInput) (mcpcontract.ValidationOutput, error)
 	RunValidation(context.Context, mcpcontract.RunValidationInput) (mcpcontract.JobReference, error)
-	RunRepeatedValidation(context.Context, mcpcontract.RunRepeatedValidationInput) (mcpcontract.JobReference, error)
 	PrepareContribution(context.Context, mcpcontract.PrepareContributionInput) (mcpcontract.DraftOutput, error)
 	Draft(context.Context, mcpcontract.DraftInput) (mcpcontract.DraftOutput, error)
 	ExportManifest(context.Context, mcpcontract.ExportManifestInput) (mcpcontract.ManifestOutput, error)
