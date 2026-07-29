@@ -146,3 +146,12 @@ Keep changes focused on one outcome. For storage, concurrency, protocol, or
 execution changes, describe the invariant being protected and include the
 focused regression command. For large changes, give reviewers an order that
 starts with the owner boundary and highest-risk state transition.
+
+## Commits and releases
+
+This repository uses merge commits to preserve individual commit history.
+Release Please derives versions and release notes from Conventional Commit
+subjects in that merged history. Use `fix:` for user-facing bug fixes, `feat:`
+for user-facing features, and either an `!` after the type or a
+`BREAKING CHANGE:` footer for breaking changes. Scopes are optional, for
+example `fix(mcp): repair stale launcher registrations`.
