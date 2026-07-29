@@ -244,15 +244,16 @@ func (e *JobExecutor) releaseAdmission() {
 
 func (e *JobExecutor) heartbeat() {
 	defer e.backgroundWG.Done()
-	ticker := time.NewTicker(e.cfg.heartbeatInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(e.cfg.heartbeatInterval)
+	defer timer.Stop()
 	for {
 		select {
 		case <-e.rootCtx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			err := e.corpus.HeartbeatJobOwner(e.rootCtx, e.ownerID, time.Now().UTC())
 			if err == nil {
+				timer.Reset(e.cfg.heartbeatInterval)
 				continue
 			}
 			if errors.Is(err, corpus.ErrJobOwnerNotFound) || errors.Is(err, context.Canceled) {
@@ -260,8 +261,10 @@ func (e *JobExecutor) heartbeat() {
 				// down; stop heartbeating.
 				return
 			}
-			// Transient errors (database locked, network, etc.) are retried on
-			// the next tick so a temporary stall does not kill a live owner.
+			// Wait a full interval after a transient failure. A fixed-rate ticker
+			// can have another tick waiting after a slow SQLite call and turn a
+			// temporary stall into sustained writer pressure.
+			timer.Reset(e.cfg.heartbeatInterval)
 		}
 	}
 }

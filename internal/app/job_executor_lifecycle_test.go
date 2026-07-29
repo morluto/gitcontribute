@@ -2,12 +2,28 @@ package app
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
 )
+
+type delayedHeartbeatStore struct {
+	jobStore
+	calls        chan time.Time
+	releaseFirst chan struct{}
+	once         sync.Once
+}
+
+func (s *delayedHeartbeatStore) HeartbeatJobOwner(_ context.Context, _ string, _ time.Time) error {
+	s.calls <- time.Now()
+	s.once.Do(func() {
+		<-s.releaseFirst
+	})
+	return nil
+}
 
 func TestJobExecutorCloseCancelsAndWaits(t *testing.T) {
 	t.Parallel()
@@ -86,4 +102,53 @@ func TestJobExecutorUsesLifecycleContext(t *testing.T) {
 	cancelLifecycle()
 
 	waitForJobStatus(t, jobs, id, corpus.JobStatusCancelled, 2*time.Second)
+}
+
+func TestJobExecutorHeartbeatWaitsAfterSlowAttempt(t *testing.T) {
+	t.Parallel()
+	const interval = 100 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	store := &delayedHeartbeatStore{
+		calls:        make(chan time.Time, 2),
+		releaseFirst: make(chan struct{}),
+	}
+	executor := &JobExecutor{
+		corpus:  store,
+		ownerID: "owner",
+		cfg: jobExecutorConfig{
+			heartbeatInterval: interval,
+		},
+		rootCtx: ctx,
+	}
+	executor.backgroundWG.Add(1)
+	go executor.heartbeat()
+	t.Cleanup(func() {
+		cancel()
+		executor.backgroundWG.Wait()
+	})
+
+	select {
+	case <-store.calls:
+	case <-time.After(5 * interval):
+		t.Fatal("first heartbeat did not start")
+	}
+
+	// Keep the first attempt blocked past several nominal ticks. A fixed-rate
+	// ticker would leave a catch-up tick waiting and issue the next write as
+	// soon as this attempt returns.
+	time.Sleep(3 * interval)
+	close(store.releaseFirst)
+
+	select {
+	case <-store.calls:
+		t.Fatal("second heartbeat started without waiting after the slow attempt")
+	case <-time.After(interval / 2):
+	}
+
+	select {
+	case <-store.calls:
+	case <-time.After(5 * interval):
+		t.Fatal("second heartbeat did not start after the interval")
+	}
 }
