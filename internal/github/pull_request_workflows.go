@@ -589,7 +589,9 @@ func (c *Client) downloadWorkflowJobLog(ctx context.Context, owner, repo string,
 	if err != nil {
 		return CIJobLog{}, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return CIJobLog{}, fmt.Errorf("download workflow job log: %s", resp.Status)
 	}

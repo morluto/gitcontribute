@@ -232,31 +232,11 @@ func (s *Server) readTypedThreadResource(ctx context.Context, req resourceReques
 	})
 }
 
-func (s *Server) readNumberedThreadResource(ctx context.Context, req resourceRequest) (mcpcontract.ThreadOutput, error) {
-	if len(req.parts) != 3 {
-		return mcpcontract.ThreadOutput{}, mcp.ResourceNotFoundError(req.uri)
-	}
-	number, ok := positivePathNumber(req.parts[2])
-	if !ok {
-		return mcpcontract.ThreadOutput{}, mcp.ResourceNotFoundError(req.uri)
-	}
-	return s.reader.ThreadByNumber(ctx, mcpcontract.ThreadByNumberInput{
-		Owner: req.parts[0], Repo: req.parts[1], Number: number,
-	})
-}
-
 func (s *Server) readInvestigationResource(ctx context.Context, req resourceRequest) (mcpcontract.InvestigationOutput, error) {
 	if len(req.parts) != 1 {
 		return mcpcontract.InvestigationOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
 	return s.reader.Investigation(ctx, mcpcontract.InvestigationInput{ID: req.parts[0], HypothesisLimit: 100})
-}
-
-func (s *Server) readOpportunitiesResource(ctx context.Context, req resourceRequest) (any, error) {
-	if len(req.parts) != 1 {
-		return nil, mcp.ResourceNotFoundError(req.uri)
-	}
-	return s.reader.ListOpportunities(ctx, mcpcontract.ListOpportunitiesInput{InvestigationID: req.parts[0], Limit: 100})
 }
 
 func (s *Server) readOpportunityResource(ctx context.Context, req resourceRequest) (mcpcontract.OpportunityOutput, error) {
@@ -279,13 +259,6 @@ func (s *Server) readReadinessResource(ctx context.Context, req resourceRequest)
 		return mcpcontract.ReadinessOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
 	return s.reader.Readiness(ctx, mcpcontract.ReadinessInput{OpportunityID: req.parts[0]})
-}
-
-func readWorkflowResource(req resourceRequest) (ContributionWorkflowResource, error) {
-	if len(req.parts) != 2 || req.parts[0] != "contribution" {
-		return ContributionWorkflowResource{}, mcp.ResourceNotFoundError(req.uri)
-	}
-	return contributionWorkflowResource(req.parts[1]), nil
 }
 
 func (s *Server) readLensResource(ctx context.Context, req resourceRequest) (mcpcontract.LensOutput, error) {

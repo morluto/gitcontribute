@@ -94,7 +94,7 @@ func validateFeedbackChannels(channels []string) error {
 }
 
 func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.SyncPullRequestFeedbackInput, report func(string, string) error) (pullRequestWorkflowResult, error) {
-	reader, err := r.githubReader()
+	reader, err := r.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
 	if err != nil {
 		return pullRequestWorkflowResult{}, err
 	}
@@ -217,7 +217,7 @@ func (r *MCPReader) SyncCIFailures(ctx context.Context, in mcpcontract.SyncCIFai
 }
 
 func (r *MCPReader) syncCIFailures(ctx context.Context, in mcpcontract.SyncCIFailuresInput, report func(string, string) error) (pullRequestWorkflowResult, error) {
-	reader, err := r.githubReader()
+	reader, err := r.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
 	if err != nil {
 		return pullRequestWorkflowResult{}, err
 	}
