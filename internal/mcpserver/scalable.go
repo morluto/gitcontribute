@@ -240,6 +240,7 @@ func (s *Server) registerScalable() {
 		setRange(sc, "discovery_max_requests", 2, 1000)
 		setRange(sc, "status_max_pages", 1, 20)
 		setDefault(sc, "status_max_pages", 3)
+		configureSyncPortfolioModes(sc)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a pull-request portfolio synchronization job."), handler: s.syncPortfolio})
 	addCatalogTool(s, catalogTool[mcpcontract.SyncPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPullRequestFeedback, title: "Synchronize pull-request feedback", description: "Fetch independently covered issue comments, submitted reviews, inline comments, and review-thread topology for 1-50 exact pull requests under one total request budget.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackOperator], input: inputSchema[mcpcontract.SyncPullRequestFeedbackInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "pull_requests", 1, 50)

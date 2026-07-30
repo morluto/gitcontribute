@@ -7,6 +7,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
+	"github.com/morluto/gitcontribute/internal/workspace"
 )
 
 // Workspace returns a host-path-free workspace projection for offline resource
@@ -18,6 +19,9 @@ func (r *MCPReader) Workspace(ctx context.Context, id string) (mcpcontract.Works
 	}
 	ws, err := c.GetWorkspace(ctx, id)
 	if err != nil {
+		if errors.Is(err, workspace.ErrNotFound) {
+			return mcpcontract.WorkspaceResource{}, failure.NotFound(err)
+		}
 		return mcpcontract.WorkspaceResource{}, err
 	}
 	return mcpcontract.WorkspaceResource{

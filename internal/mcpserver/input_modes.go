@@ -44,6 +44,22 @@ func configureSyncThreadModes(builder *schemaBuilder) {
 	builder.schema.OneOf = []*jsonschema.Schema{repositories, threads}
 }
 
+func configureSyncPortfolioModes(builder *schemaBuilder) {
+	authored := schemaMode("selection", "authored",
+		nil,
+		[]string{"pull_requests"},
+	)
+	authored.ID = "urn:gitcontribute:mode:sync-pull-request-portfolio-authored"
+
+	explicit := schemaMode("selection", "explicit",
+		[]string{"pull_requests"},
+		[]string{"state", "updated_after", "limit", "discovery_max_requests"},
+	)
+	explicit.ID = "urn:gitcontribute:mode:sync-pull-request-portfolio-explicit"
+	explicit.Properties["pull_requests"] = &jsonschema.Schema{MinItems: jsonschema.Ptr(1)}
+	builder.schema.OneOf = []*jsonschema.Schema{authored, explicit}
+}
+
 func configureDeepWikiModes(builder *schemaBuilder) {
 	structure := schemaMode("action", "structure",
 		[]string{"repository"},

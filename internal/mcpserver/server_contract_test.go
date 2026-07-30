@@ -446,6 +446,7 @@ func TestMultiModeSchemasRejectCrossModeFieldsBeforeHandler(t *testing.T) {
 	}{
 		{"repository search", mcpcontract.ToolSearchGitHubRepositories, "search_github_repositories", "github-search-", map[string]any{"raw_query": "topic:cuda", "language": "Go"}},
 		{"sync threads", mcpcontract.ToolSyncThreads, "sync_threads", "sync-threads-", map[string]any{"selection": "threads", "threads": []map[string]any{{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 7}}, "repositories": []map[string]any{{"owner": "acme", "repo": "rocket"}}}},
+		{"sync portfolio", mcpcontract.ToolSyncPortfolio, "sync_portfolio", "sync-pull-request-portfolio-", map[string]any{"selection": "explicit", "pull_requests": []map[string]any{{"owner": "acme", "repo": "rocket", "kind": "pull_request", "number": 7}}, "state": "open"}},
 		{"DeepWiki", mcpcontract.ToolQueryDeepWiki, "deepwiki", "deepwiki-", map[string]any{"action": "question", "repository": "acme/rocket", "repositories": []string{"acme/rocket"}, "question": "Where is ranking?"}},
 		{"DeepWiki blank repository", mcpcontract.ToolQueryDeepWiki, "deepwiki", "deepwiki-contents", map[string]any{"action": "contents", "repository": " \t "}},
 		{"DeepWiki blank question", mcpcontract.ToolQueryDeepWiki, "deepwiki", "deepwiki-question", map[string]any{"action": "question", "repositories": []string{"acme/rocket"}, "question": " \t "}},
