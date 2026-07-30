@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -52,6 +53,14 @@ func TestIncompletePullRequestFacetPreservesLastCompleteObservation(t *testing.T
 	}
 	if coverage == nil || coverage.Complete || !coverage.SourceUpdatedAt.Equal(incompleteAt) {
 		t.Fatalf("coverage = %+v, want newer incomplete coverage", coverage)
+	}
+	resource, err := reader.CIFailureResource(ctx, "acme", "rocket", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective, _ := resource["effective_coverage"].(map[string]any)
+	if complete, _ := effective["complete"].(bool); complete {
+		t.Fatalf("resource effective coverage = %+v, want incomplete", effective)
 	}
 }
 
@@ -122,4 +131,52 @@ func (r *boundedWorkflowReader) GetPullRequestFeedback(context.Context, string, 
 
 func (r *boundedWorkflowReader) GetPullRequestCI(context.Context, string, string, int, github.CIFailureOptions, *github.RequestBudget) (github.PullRequestCI, error) {
 	return r.ci, nil
+}
+
+func TestFeedbackResourceUsesPublicChannelsAndPreservesThreadSelection(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	t.Cleanup(func() { _ = svc.Close() })
+	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket", SourceUpdatedAt: now}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
+		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7, SourceUpdatedAt: now,
+	}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	reader := &MCPReader{Service: svc}
+	ref := mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7}
+	snapshot := github.PullRequestFeedback{
+		HeadSHA: "head", SourceUpdatedAt: now, ThreadState: "unresolved",
+		Coverage: map[string]github.FeedbackCoverage{
+			"issue_comments": {Complete: true},
+			"review_threads": {Complete: true},
+		},
+	}
+	if err := reader.persistPullRequestFeedback(ctx, ref, snapshot, []string{"issue_comments", "review_threads"}); err != nil {
+		t.Fatal(err)
+	}
+	resource, err := reader.PullRequestFeedbackResource(ctx, "acme", "rocket", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channels := resource["channels"].(map[string]any)
+	if channels["issue_comments"] == nil || channels["review_threads"] == nil || channels[facetPRFeedbackIssueComments] != nil {
+		t.Fatalf("channels = %+v", channels)
+	}
+	reviewThreads := channels["review_threads"].(map[string]any)
+	if reviewThreads["selection"] != "unresolved" {
+		t.Fatalf("review-thread selection = %v", reviewThreads["selection"])
+	}
+}
+
+func TestWorkflowFailurePreservesRetryableGitHubClassification(t *testing.T) {
+	ref := mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Number: 7}
+	item := workflowFailure(ref, &github.TransientError{Cause: errors.New("head changed")}, mcpcontract.ToolSyncCIFailures)
+	if item.Status != "retryable" || item.Code != "transient" || item.RetryAfterMS == 0 || item.NextAction == "" {
+		t.Fatalf("item = %+v", item)
+	}
 }

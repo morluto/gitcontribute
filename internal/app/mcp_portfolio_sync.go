@@ -25,6 +25,9 @@ func (r *MCPReader) SyncPortfolio(ctx context.Context, in mcpcontract.SyncPortfo
 		if err := rejectDuplicateThreadRefs(in.PullRequests); err != nil {
 			return mcpcontract.JobReference{}, err
 		}
+		if err := validatePullRequestRefs(in.PullRequests, "pull_requests"); err != nil {
+			return mcpcontract.JobReference{}, err
+		}
 		if in.State != "" || in.UpdatedAfter != "" || in.Limit != 0 || in.DiscoveryMaxRequests != 0 {
 			return mcpcontract.JobReference{}, errors.New("state, updated_after, limit, and discovery_max_requests are only valid in authored mode")
 		}

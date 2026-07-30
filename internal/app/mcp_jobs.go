@@ -167,10 +167,14 @@ func jobSummary(job *contracts.JobResult, completed, total int) string {
 
 func jobResultStatus(job *contracts.JobResult) string {
 	var result struct {
-		Status string `json:"status"`
+		Status      string `json:"status"`
+		BatchStatus string `json:"batch_status"`
 	}
 	if json.Unmarshal([]byte(job.Result), &result) != nil {
 		return ""
+	}
+	if result.BatchStatus != "" {
+		return result.BatchStatus
 	}
 	return result.Status
 }

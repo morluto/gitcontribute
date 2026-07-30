@@ -715,6 +715,23 @@ func TestScalableBatchInputsRejectDuplicatesInsteadOfDroppingOutcomes(t *testing
 	}
 }
 
+func TestPullRequestWorkflowsRejectMalformedReferencesBeforeSubmission(t *testing.T) {
+	t.Parallel()
+	reader := &MCPReader{newSearchTestService(t)}
+	for _, ref := range []mcpcontract.ThreadRef{
+		{Owner: " ", Repo: "rocket", Number: 1},
+		{Owner: "acme", Repo: " ", Number: 1},
+		{Owner: "acme", Repo: "rocket", Number: 0},
+		{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 1},
+	} {
+		if _, err := reader.SyncPortfolio(context.Background(), mcpcontract.SyncPortfolioInput{
+			Selection: "explicit", PullRequests: []mcpcontract.ThreadRef{ref},
+		}); err == nil {
+			t.Fatalf("SyncPortfolio accepted malformed pull request %+v", ref)
+		}
+	}
+}
+
 func TestScalableRuntimeRejectsPageBoundsBeforeSubmittingJob(t *testing.T) {
 	t.Parallel()
 	reader := &MCPReader{newSearchTestService(t)}

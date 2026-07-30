@@ -715,6 +715,25 @@ func rejectDuplicateThreadRefs(inputs []mcpcontract.ThreadRef) error {
 	return nil
 }
 
+func validatePullRequestRefs(inputs []mcpcontract.ThreadRef, path string) error {
+	for i, input := range inputs {
+		itemPath := fmt.Sprintf("%s[%d]", path, i)
+		if strings.TrimSpace(input.Owner) == "" {
+			return mcpcontract.InvalidArgument(itemPath+".owner", "must not be blank", nil)
+		}
+		if strings.TrimSpace(input.Repo) == "" {
+			return mcpcontract.InvalidArgument(itemPath+".repo", "must not be blank", nil)
+		}
+		if input.Number <= 0 {
+			return mcpcontract.InvalidArgument(itemPath+".number", "must be positive", nil)
+		}
+		if input.Kind != "" && input.Kind != corpus.ThreadKindPullRequest {
+			return mcpcontract.InvalidArgument(itemPath+".kind", "must be pull_request when provided", nil)
+		}
+	}
+	return nil
+}
+
 func rejectDuplicateIndexRepositoryInputs(inputs []mcpcontract.IndexRepositoryInput) error {
 	seen := make(map[string]struct{}, len(inputs))
 	for _, input := range inputs {

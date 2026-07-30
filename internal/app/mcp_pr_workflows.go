@@ -41,6 +41,9 @@ func (r *MCPReader) SyncPullRequestFeedback(ctx context.Context, in mcpcontract.
 	if err := rejectDuplicateThreadRefs(in.PullRequests); err != nil {
 		return mcpcontract.JobReference{}, err
 	}
+	if err := validatePullRequestRefs(in.PullRequests, "pull_requests"); err != nil {
+		return mcpcontract.JobReference{}, err
+	}
 	if len(in.PullRequests) < 1 || len(in.PullRequests) > 50 {
 		return mcpcontract.JobReference{}, errors.New("pull_requests must contain 1 to 50 items")
 	}
@@ -109,6 +112,7 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 		snapshot, readErr := feedbackReader.GetPullRequestFeedback(ctx, ref.Owner, ref.Repo, ref.Number, github.PullRequestFeedbackOptions{
 			Channels: in.Channels, ThreadState: in.ThreadState, MaxItemsPerChannel: in.MaxItemsPerChannel,
 		}, budget)
+		snapshot.ThreadState = in.ThreadState
 		if readErr != nil {
 			var persistErr error
 			if len(snapshot.Coverage) > 0 {
@@ -178,10 +182,14 @@ func (r *MCPReader) persistPullRequestFeedback(ctx context.Context, ref mcpcontr
 	}
 	for _, channel := range channels {
 		payload := struct {
-			HeadSHA  string                  `json:"head_sha"`
-			Coverage github.FeedbackCoverage `json:"coverage"`
-			Items    any                     `json:"items"`
+			HeadSHA   string                  `json:"head_sha"`
+			Coverage  github.FeedbackCoverage `json:"coverage"`
+			Selection string                  `json:"selection,omitempty"`
+			Items     any                     `json:"items"`
 		}{HeadSHA: snapshot.HeadSHA, Coverage: snapshot.Coverage[channel], Items: values[channel]}
+		if channel == "review_threads" {
+			payload.Selection = snapshot.ThreadState
+		}
 		if err := r.persistPullRequestWorkflowFacet(ctx, ref, facets[channel], snapshot.SourceUpdatedAt, payload, snapshot.Coverage[channel].Complete); err != nil {
 			return err
 		}
@@ -191,6 +199,9 @@ func (r *MCPReader) persistPullRequestFeedback(ctx context.Context, ref mcpcontr
 
 func (r *MCPReader) SyncCIFailures(ctx context.Context, in mcpcontract.SyncCIFailuresInput) (mcpcontract.JobReference, error) {
 	if err := rejectDuplicateThreadRefs(in.PullRequests); err != nil {
+		return mcpcontract.JobReference{}, err
+	}
+	if err := validatePullRequestRefs(in.PullRequests, "pull_requests"); err != nil {
 		return mcpcontract.JobReference{}, err
 	}
 	if len(in.PullRequests) < 1 || len(in.PullRequests) > 20 {
@@ -251,7 +262,7 @@ func (r *MCPReader) syncCIFailures(ctx context.Context, in mcpcontract.SyncCIFai
 		if readErr != nil {
 			var persistErr error
 			if snapshot.HeadSHA != "" && len(snapshot.Coverage) > 0 {
-				persistErr = r.persistPullRequestWorkflowFacet(ctx, ref, facetPRCIReport, time.Time{}, snapshot, false)
+				persistErr = r.persistPullRequestWorkflowFacet(ctx, ref, facetPRCIReport, snapshot.SourceUpdatedAt, snapshot, false)
 			}
 			if persistErr != nil {
 				item.Status, item.Code, item.Message = "failed", "persist_partial_ci_failed", persistErr.Error()
@@ -261,7 +272,7 @@ func (r *MCPReader) syncCIFailures(ctx context.Context, in mcpcontract.SyncCIFai
 			out.BatchStatus = "partial"
 		} else {
 			complete := ciSnapshotComplete(snapshot)
-			if err := r.persistPullRequestWorkflowFacet(ctx, ref, facetPRCIReport, time.Time{}, snapshot, complete); err != nil {
+			if err := r.persistPullRequestWorkflowFacet(ctx, ref, facetPRCIReport, snapshot.SourceUpdatedAt, snapshot, complete); err != nil {
 				item.Status, item.Code, item.Message = "failed", "persist_ci_failed", err.Error()
 				out.BatchStatus = "partial"
 			} else if !complete {
@@ -335,9 +346,18 @@ func (r *MCPReader) persistPullRequestWorkflowFacet(ctx context.Context, ref mcp
 }
 
 func workflowFailure(ref mcpcontract.ThreadRef, err error, tool string) pullRequestWorkflowItem {
-	item := pullRequestWorkflowItem{Key: pullRequestKey(ref), Status: "failed", Code: "github_read_failed", Message: err.Error()}
 	if errors.Is(err, github.ErrRequestBudgetExhausted) {
-		item.Status, item.Code = "retryable", "request_budget_exhausted"
+		return pullRequestWorkflowItem{
+			Key: pullRequestKey(ref), Status: "retryable", Code: "request_budget_exhausted", Message: err.Error(),
+			NextAction: "Retry only this pull request with " + tool + " and a sufficient max_requests bound.",
+		}
+	}
+	status, code, message, retryAfterMS := githubBatchError(err)
+	item := pullRequestWorkflowItem{
+		Key: pullRequestKey(ref), Status: mcpcontract.BatchItemStatus(status), Code: code,
+		Message: message, RetryAfterMS: retryAfterMS,
+	}
+	if status == "retryable" {
 		item.NextAction = "Retry only this pull request with " + tool + " and a sufficient max_requests bound."
 	}
 	return item

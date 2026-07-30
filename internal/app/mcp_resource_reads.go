@@ -33,21 +33,29 @@ func (r *MCPReader) Workspace(ctx context.Context, id string) (mcpcontract.Works
 }
 
 func (r *MCPReader) PullRequestFeedbackResource(ctx context.Context, owner, repo string, number int) (map[string]any, error) {
-	facets := []string{facetPRFeedbackIssueComments, facetPRFeedbackReviews, facetPRFeedbackInlineComments, facetPRFeedbackReviewThreads}
+	facets := []struct {
+		channel string
+		facet   string
+	}{
+		{"issue_comments", facetPRFeedbackIssueComments},
+		{"submitted_reviews", facetPRFeedbackReviews},
+		{"inline_comments", facetPRFeedbackInlineComments},
+		{"review_threads", facetPRFeedbackReviewThreads},
+	}
 	channels := make(map[string]any, len(facets))
 	out := map[string]any{
 		"schema_version": "gitcontribute.pull-request-feedback.v1",
 		"owner":          owner, "repo": repo, "number": number, "channels": channels,
 	}
-	for _, facet := range facets {
-		value, err := r.pullRequestWorkflowFacet(ctx, owner, repo, number, facet)
+	for _, target := range facets {
+		value, err := r.pullRequestWorkflowFacet(ctx, owner, repo, number, target.facet)
 		if err != nil {
 			if isCorpusNotFound(err) {
 				continue
 			}
 			return nil, err
 		}
-		channels[facet] = value
+		channels[target.channel] = value
 	}
 	if len(channels) == 0 {
 		return nil, failure.NotFound(errors.New("pull-request feedback is not stored"))
@@ -120,6 +128,16 @@ func (r *MCPReader) pullRequestWorkflowFacet(ctx context.Context, owner, repo st
 	var value map[string]any
 	if err := json.Unmarshal([]byte(observations[0].Payload), &value); err != nil {
 		return nil, err
+	}
+	coverage, err := c.GetCoverage(ctx, storedRepo.ID, &thread.ID, facet)
+	if err != nil {
+		return nil, err
+	}
+	if coverage != nil {
+		value["effective_coverage"] = map[string]any{
+			"complete":          coverage.Complete,
+			"source_updated_at": formatTime(coverage.SourceUpdatedAt),
+		}
 	}
 	return value, nil
 }
