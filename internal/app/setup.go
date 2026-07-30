@@ -142,7 +142,7 @@ func (s *Service) setupClients(opts contracts.SetupOptions) ([]clientsetup.Clien
 		clients = append(clients, clientsetup.Client(strings.ToLower(strings.TrimSpace(value))))
 	}
 	if len(clients) == 0 && !opts.AllClients {
-		return nil, errors.New("no coding-agent targets selected; pass --codex, --claude, or --all-clients")
+		return nil, errors.New("no coding-agent targets selected; pass --codex, --claude, --devin, or --all-clients")
 	}
 	return clients, nil
 }

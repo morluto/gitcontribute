@@ -121,6 +121,7 @@ type rootCmd struct {
 type setupCmd struct {
 	Codex          bool                 `name:"codex" help:"Configure Codex"`
 	Claude         bool                 `name:"claude" help:"Configure Claude Code"`
+	Devin          bool                 `name:"devin" help:"Configure Devin"`
 	AllClients     bool                 `name:"all-clients" help:"Configure every supported client"`
 	Mode           *contracts.SetupMode `name:"mode" enum:"mcp,cli,both" help:"Access mode (mcp, cli, or both)"`
 	TokenSource    string               `name:"token-source" help:"GitHub token source (none, env, gh-cli, or keyring)"`
@@ -134,6 +135,7 @@ type setupCmd struct {
 type removeCmd struct {
 	Codex      bool `name:"codex" help:"Remove the Codex registration"`
 	Claude     bool `name:"claude" help:"Remove the Claude Code registration"`
+	Devin      bool `name:"devin" help:"Remove the Devin registration"`
 	AllClients bool `name:"all-clients" help:"Remove every supported registration"`
 	Yes        bool `name:"yes" short:"y" help:"Accept the plan without prompting"`
 	DryRun     bool `name:"dry-run" help:"Show planned changes without writing"`
@@ -620,7 +622,7 @@ func (c *CLI) setupService() (contracts.SetupService, error) {
 }
 
 func (c *CLI) runRemoveCommand(ctx context.Context, cmd *removeCmd) error {
-	clients := selectedSetupClients(cmd.Codex, cmd.Claude)
+	clients := selectedSetupClients(cmd.Codex, cmd.Claude, cmd.Devin)
 	all := cmd.AllClients
 	needsPrompt := !cmd.Yes && ((len(clients) == 0 && !all) || !cmd.DryRun)
 	if needsPrompt && !c.interactiveInput() {
@@ -648,7 +650,7 @@ func (c *CLI) runRemoveCommand(ctx context.Context, cmd *removeCmd) error {
 	return c.executeSetup(ctx, contracts.SetupOptions{Remove: true, Clients: clients, AllClients: all, DryRun: cmd.DryRun}, cmd.JSON)
 }
 
-func selectedSetupClients(codex, claude bool) []string {
+func selectedSetupClients(codex, claude, devin bool) []string {
 	var clients []string
 	if codex {
 		clients = append(clients, "codex")
@@ -656,11 +658,14 @@ func selectedSetupClients(codex, claude bool) []string {
 	if claude {
 		clients = append(clients, "claude")
 	}
+	if devin {
+		clients = append(clients, "devin")
+	}
 	return clients
 }
 
 func (c *CLI) promptClients(action string, allowNone bool) ([]string, error) {
-	choices := "codex,claude"
+	choices := "codex,claude,devin"
 	if allowNone {
 		choices += ",none"
 	}
@@ -673,7 +678,7 @@ func (c *CLI) promptClients(action string, allowNone bool) ([]string, error) {
 	}
 	line = strings.TrimSpace(line)
 	if line == "" {
-		line = "codex,claude"
+		line = "codex,claude,devin"
 	}
 	if allowNone && strings.EqualFold(line, "none") {
 		return nil, nil
@@ -681,8 +686,8 @@ func (c *CLI) promptClients(action string, allowNone bool) ([]string, error) {
 	var clients []string
 	for _, value := range strings.Split(line, ",") {
 		value = strings.ToLower(strings.TrimSpace(value))
-		if value != "codex" && value != "claude" {
-			return nil, fmt.Errorf("unsupported client %q; choose codex and/or claude", value)
+		if value != "codex" && value != "claude" && value != "devin" {
+			return nil, fmt.Errorf("unsupported client %q; choose codex, claude, and/or devin", value)
 		}
 		clients = append(clients, value)
 	}

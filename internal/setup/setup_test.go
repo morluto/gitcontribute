@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -247,9 +248,57 @@ func TestDetect(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(home, ".codex"), 0700); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(home, ".config", "devin"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	got := Detect(home)
-	if len(got) != 1 || got[0] != Codex {
+	if len(got) != 2 || got[0] != Codex || got[1] != Devin {
 		t.Fatalf("detected = %v", got)
+	}
+}
+
+func TestRunConfiguresDevinUserMCPRegistration(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".config", "devin", "mcp_config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{"other":{"command":"other"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	opts := Options{Operation: Configure, Clients: []Client{Devin}, Home: home, Executable: "/bin/gitcontribute"}
+	report, err := Run(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Results[0].Status != "configured" {
+		t.Fatalf("report = %+v", report)
+	}
+	launcher, err := ReadCommand(Devin, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launcher.Command != "/bin/gitcontribute" || !slices.Equal(launcher.Args, canonicalMCPArgs()) {
+		t.Fatalf("launcher = %+v", launcher)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		t.Fatal(err)
+	}
+	if root["mcpServers"].(map[string]any)["other"] == nil {
+		t.Fatal("Devin setup removed an unrelated MCP registration")
+	}
+	opts.Operation = Remove
+	report, err = Run(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Results[0].Status != "removed" {
+		t.Fatalf("remove report = %+v", report)
 	}
 }
 

@@ -154,7 +154,7 @@ func inspectCodexSkill(path string) (codexSkillState, error) {
 	return codexSkillUnmanaged, nil
 }
 
-func editClaude(path string, operation Operation, launcher Launcher, dryRun bool) (string, error) {
+func editJSONRegistration(path string, operation Operation, launcher Launcher, dryRun bool) (string, error) {
 	root := map[string]any{}
 	original, err := os.ReadFile(path)
 	if err == nil && len(bytes.TrimSpace(original)) > 0 {

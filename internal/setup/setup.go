@@ -60,6 +60,7 @@ type Client string
 const (
 	Codex  Client = "codex"
 	Claude Client = "claude"
+	Devin  Client = "devin"
 )
 
 // Launcher is the exact process command stored in a coding client's MCP
@@ -340,14 +341,14 @@ func acquireSetupLease(home string) (*flock.Flock, error) {
 }
 
 type registrationSnapshot struct {
-	adapter     *clientAdapter
-	client      Client
-	path        string
-	mode        os.FileMode
-	codexBlock  string
-	claudeEntry any
-	activated   Launcher
-	changed     bool
+	adapter    *clientAdapter
+	client     Client
+	path       string
+	mode       os.FileMode
+	codexBlock string
+	jsonEntry  any
+	activated  Launcher
+	changed    bool
 }
 
 func activateExisting(ctx context.Context, opts Options, checkpoint func(context.Context, int) error, verify func() error) (Report, error) {
@@ -477,7 +478,7 @@ func restoreCodexRegistration(snapshot registrationSnapshot, activated Launcher)
 	return writeAtomic(snapshot.path, []byte(text[:start]+snapshot.codexBlock+text[end:]))
 }
 
-func restoreClaudeRegistration(snapshot registrationSnapshot, activated Launcher) error {
+func restoreJSONRegistration(snapshot registrationSnapshot, activated Launcher) error {
 	data, err := readFileWithinParent(snapshot.path)
 	if err != nil {
 		return err
@@ -490,7 +491,7 @@ func restoreClaudeRegistration(snapshot registrationSnapshot, activated Launcher
 	if !ok || !equalJSON(servers[serverName], map[string]any{"command": activated.Command, "args": activated.Args}) {
 		return errors.New("preserve concurrently changed GitContribute entry")
 	}
-	servers[serverName] = snapshot.claudeEntry
+	servers[serverName] = snapshot.jsonEntry
 	root["mcpServers"] = servers
 	return writeJSON(snapshot.path, root)
 }

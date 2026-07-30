@@ -39,11 +39,21 @@ var clientAdapters = []*clientAdapter{
 		client:       Claude,
 		path:         claudeConfigPath,
 		detect:       detectClaude,
-		check:        checkClaudeRegistration,
-		configure:    editClaude,
-		snapshotData: snapshotClaudeRegistration,
-		restore:      restoreClaudeRegistration,
-		read:         readClaudeCommand,
+		check:        checkJSONRegistration,
+		configure:    editJSONRegistration,
+		snapshotData: snapshotJSONRegistration,
+		restore:      restoreJSONRegistration,
+		read:         readJSONCommand,
+	},
+	{
+		client:       Devin,
+		path:         devinConfigPath,
+		detect:       detectDevin,
+		check:        checkJSONRegistration,
+		configure:    editJSONRegistration,
+		snapshotData: snapshotJSONRegistration,
+		restore:      restoreJSONRegistration,
+		read:         readJSONCommand,
 	},
 }
 
@@ -75,6 +85,10 @@ func claudeConfigPath(home string) string {
 	return filepath.Join(home, ".claude.json")
 }
 
+func devinConfigPath(home string) string {
+	return filepath.Join(home, ".config", "devin", "mcp_config.json")
+}
+
 func detectCodex(home string) bool {
 	return exists(filepath.Dir(codexConfigPath(home)))
 }
@@ -83,12 +97,16 @@ func detectClaude(home string) bool {
 	return exists(filepath.Join(home, ".claude")) || exists(claudeConfigPath(home))
 }
 
+func detectDevin(home string) bool {
+	return exists(filepath.Join(home, ".config", "devin"))
+}
+
 func checkCodexRegistration(data []byte) (bool, error) {
 	_, _, present := findCodexBlock(string(data))
 	return present, nil
 }
 
-func checkClaudeRegistration(data []byte) (bool, error) {
+func checkJSONRegistration(data []byte) (bool, error) {
 	var root map[string]any
 	if err := json.Unmarshal(data, &root); err != nil {
 		return false, err
@@ -120,7 +138,7 @@ func snapshotCodexRegistration(data []byte, snapshot *registrationSnapshot) erro
 	return nil
 }
 
-func snapshotClaudeRegistration(data []byte, snapshot *registrationSnapshot) error {
+func snapshotJSONRegistration(data []byte, snapshot *registrationSnapshot) error {
 	var root map[string]any
 	if err := json.Unmarshal(data, &root); err != nil {
 		return fmt.Errorf("parse Claude registration snapshot: %w", err)
@@ -129,7 +147,7 @@ func snapshotClaudeRegistration(data []byte, snapshot *registrationSnapshot) err
 	if !ok {
 		return errors.New("claude mcpServers disappeared before activation")
 	}
-	snapshot.claudeEntry = servers[serverName]
+	snapshot.jsonEntry = servers[serverName]
 	return nil
 }
 
@@ -183,7 +201,7 @@ func readCodexCommand(data []byte) (Launcher, error) {
 	return Launcher{Command: server.Command, Args: server.Args}, nil
 }
 
-func readClaudeCommand(data []byte) (Launcher, error) {
+func readJSONCommand(data []byte) (Launcher, error) {
 	var root map[string]any
 	if err := json.Unmarshal(data, &root); err != nil {
 		return Launcher{}, err
