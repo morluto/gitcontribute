@@ -64,10 +64,12 @@ execution, and commit inspection and planning remain separate because each
 boundary permits meaningful agent judgment or authorization.
 
 Live repository search includes local dossier availability. The catalog offers
-`github.sync_portfolio`, a bounded durable job that
-uses the existing authored-discovery and exact-status operations and chunks
-status refreshes at 50 pull requests. The underlying primitives remain
-available for recovery and partial workflows.
+`github.sync_pull_request_portfolio`, a bounded durable job with authored and
+explicit selection modes. Authenticated identity, authored discovery, and
+exact status refresh are internal phases and are not advertised as recovery
+primitives. Feedback and CI use the separate
+`github.sync_pull_request_feedback` and `github.sync_ci_failures` jobs so their
+coverage and retry behavior remain visible.
 
 The catalog offers
 `workflow.mine_repository_fix_patterns`. It consolidates the observed

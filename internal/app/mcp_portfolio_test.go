@@ -35,7 +35,7 @@ func TestPullRequestPortfolioDerivesConflictAndPreservesUnknownCoverage(t *testi
 	if err := svc.corpus.ApplyFacetObservationSet(ctx, repo.ID, &conflicted.ID, FacetPRDetails, now, []corpus.FacetObservationInput{{SourceUpdatedAt: now, Payload: string(details)}}, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Author: "alice", State: "open", Limit: 10, ResponseFormat: "detailed"})
+	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Authors: []string{"alice"}, State: "open", Limit: 10, View: "full"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,11 +52,11 @@ func TestPullRequestPortfolioDerivesConflictAndPreservesUnknownCoverage(t *testi
 	if byNumber[unknown.Number].Attention != "unknown" || byNumber[unknown.Number].StatusCoverage != "missing" {
 		t.Fatalf("unknown coverage collapsed: %+v", byNumber[unknown.Number])
 	}
-	concise, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Author: "alice", State: "open", Limit: 10})
+	concise, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Authors: []string{"alice"}, State: "open", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if concise.ResponseFormat != "concise" || concise.PullRequests[0].HeadSHA != "" || len(concise.PullRequests[0].Facets) != 0 {
+	if concise.View != "compact" || concise.PullRequests[0].HeadSHA != "" || len(concise.PullRequests[0].Facets) != 0 {
 		t.Fatalf("concise portfolio leaked detailed fields: %+v", concise)
 	}
 	detailedJSON, err := json.Marshal(out)
@@ -91,7 +91,7 @@ func TestPullRequestPortfolioClassifiesClosedUnmerged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Author: "alice", State: "closed", Limit: 10})
+	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Authors: []string{"alice"}, State: "closed", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestPullRequestPortfolioKeepsComputingMergeabilityUnknown(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Author: "alice", State: "open", Limit: 10})
+	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Authors: []string{"alice"}, State: "open", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}

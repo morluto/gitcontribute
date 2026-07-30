@@ -234,17 +234,20 @@ func (r *MCPReader) GetJobs(ctx context.Context, in mcpcontract.GetJobsInput) (m
 // ListPullRequestPortfolio performs an offline projection over stored authored
 // PRs and status facets; unsupported health facets remain explicitly unknown.
 func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract.ListPullRequestPortfolioInput) (mcpcontract.ListPullRequestPortfolioOutput, error) {
+	if len(in.Authors) > 1 {
+		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("authors must contain at most one item")
+	}
 	if in.State == "" {
 		in.State = "open"
 	}
 	if in.State != "open" && in.State != "closed" && in.State != "all" {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("state must be open, closed, or all")
 	}
-	if in.ResponseFormat == "" {
-		in.ResponseFormat = "concise"
+	if in.View == "" {
+		in.View = "compact"
 	}
-	if in.ResponseFormat != "concise" && in.ResponseFormat != "detailed" {
-		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("response_format must be concise or detailed")
+	if in.View != "compact" && in.View != "full" {
+		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("view must be compact or full")
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
@@ -256,16 +259,20 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
-	page, err := c.ListPullRequestPortfolioPage(ctx, strings.TrimSpace(in.Author), in.State, in.Limit)
+	author := ""
+	if len(in.Authors) > 0 {
+		author = strings.TrimSpace(in.Authors[0])
+	}
+	page, err := c.ListPullRequestPortfolioPage(ctx, author, in.State, in.Limit)
 	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
-	format := portfolioResponseFormat(in.ResponseFormat)
+	format := portfolioResponseFormat(map[string]string{"compact": "concise", "full": "detailed"}[in.View])
 	readSet, err := loadPortfolioReadSet(ctx, c, page.PullRequests, format)
 	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
-	out := mcpcontract.ListPullRequestPortfolioOutput{Status: "complete", ResponseFormat: in.ResponseFormat, RuleVersion: "portfolio.v2", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpcontract.PullRequestPortfolioItem, 0, len(page.PullRequests)), Total: page.Total, Truncated: page.Truncated}
+	out := mcpcontract.ListPullRequestPortfolioOutput{Status: "complete", View: in.View, RuleVersion: "portfolio.v2", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpcontract.PullRequestPortfolioItem, 0, len(page.PullRequests)), Total: page.Total, Truncated: page.Truncated}
 	for _, storedPR := range page.PullRequests {
 		item, err := portfolioItem(storedPR, r.now(), readSet, format)
 		if err != nil {

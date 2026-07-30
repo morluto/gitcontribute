@@ -160,7 +160,7 @@ func TestSetupYesMCPModeRequiresExplicitTarget(t *testing.T) {
 	svc := &fakeService{}
 	c, _, _ := newTestCLI(svc, nil)
 	err := c.Run(context.Background(), []string{"setup", "--mode", "mcp", "--token-source", "none", "--yes"})
-	if err == nil || !strings.Contains(err.Error(), "requires --codex, --claude, or --all-clients") {
+	if err == nil || !strings.Contains(err.Error(), "requires --codex, --claude, --devin, or --all-clients") {
 		t.Fatalf("error = %v", err)
 	}
 	if len(svc.setupCalls) != 0 {

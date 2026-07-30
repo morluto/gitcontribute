@@ -68,12 +68,6 @@ const serverInstructions = "Use advertised GitContribute tools for durable, sour
 // HydrateThreadsInput requests explicit child facets for already selected
 // threads. Facets must be non-empty to prevent accidental broad hydration.
 
-// AuthenticatedIdentityOutput identifies the account associated with active credentials.
-
-// SyncAuthoredPullRequestsInput bounds authored pull-request discovery and refresh.
-
-// SyncPullRequestStatusInput selects pull requests and bounds review hydration.
-
 // ListPullRequestPortfolioInput filters and bounds the stored pull-request portfolio.
 
 // PullRequestPortfolioItem contains source-backed PR facts and a deterministic
@@ -187,7 +181,7 @@ func (s *Server) registerScalable() {
 		setDefault(sc, "max_requests", 1000)
 		configureSyncThreadModes(sc)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded thread-header synchronization job."), handler: s.syncThreads})
-	addCatalogTool(s, catalogTool[mcpcontract.HydrateThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolHydrateThreads, title: "Fetch comments and reviews for exact stored threads", description: "Refresh exact headers, comments, reviews, or other selected facets for up to 100 stored threads. Use only after ranking finalists; repository metadata must already exist. Performs GitHub reads and local writes, never GitHub mutation.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.HydrateThreadsInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.HydrateThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolHydrateThreads, title: "Synchronize selected GitHub thread details", description: "Fetch selected GitHub child data for up to 100 known issues or pull requests. Use after ranking finalists. Do not use to inspect existing corpus coverage; corpus.get_coverage is the offline coverage read.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.HydrateThreadsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 100)
 		setArrayBounds(sc, "facets", 1, 5)
 		setArrayEnum(sc, "facets", facets.SelectableNames()...)
@@ -238,34 +232,43 @@ func (s *Server) registerScalable() {
 		output:  outputSchema[mcpcontract.JobReference]("Reference to a bounded repository fix-pattern mining job."),
 		handler: s.mineRepositoryFixPatterns,
 	})
-	addCatalogTool(s, catalogTool[struct{}, mcpcontract.AuthenticatedIdentityOutput]{name: mcpcontract.ToolGetAuthenticatedIdentity, title: "Get authenticated GitHub identity", description: "Resolve the current read credential's GitHub login and stable ID before authored-PR discovery.", annotations: externalReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[struct{}](noSchemaCustomization), output: outputSchema[mcpcontract.AuthenticatedIdentityOutput]("Authenticated GitHub identity."), handler: s.getAuthenticatedIdentity})
-	addCatalogTool(s, catalogTool[mcpcontract.SyncAuthoredPullRequestsInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncAuthoredPullRequests, title: "Sync authored pull requests across GitHub", description: "Discover and persist up to 500 pull requests authored by the authenticated GitHub user across repositories. This reads only core thread state; use the dedicated exact-PR health tool afterward.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncAuthoredPullRequestsInput](func(sc *schemaBuilder) {
-		setEnum(sc, "state", "open", "closed", "all")
-		setRange(sc, "limit", 1, 500)
-		setDefault(sc, "limit", 500)
-		setRange(sc, "max_requests", 2, 1000)
-		setDefault(sc, "max_requests", 1000)
-	}), output: outputSchema[mcpcontract.JobReference]("Reference to an authored pull-request synchronization job."), handler: s.syncAuthoredPullRequests})
-	addCatalogTool(s, catalogTool[mcpcontract.SyncPullRequestStatusInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPullRequestStatus, title: "Sync exact PR health", description: "Refresh mergeability, reviews, checks, unresolved conversations, merge state, merge queue, closing issues, and changed files for up to 50 exact pull requests. Returns independent facet completeness; retry only incomplete items.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncPullRequestStatusInput](func(sc *schemaBuilder) {
-		setArrayBounds(sc, "pull_requests", 1, 50)
-		setRange(sc, "max_pages", 1, 20)
-		setDefault(sc, "max_pages", 3)
-	}), output: outputSchema[mcpcontract.JobReference]("Reference to a pull-request status synchronization job."), handler: s.syncPullRequestStatus})
-	addCatalogTool(s, catalogTool[mcpcontract.SyncPortfolioInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPortfolio, title: "Refresh the authored pull-request portfolio", description: "Discover pull requests authored by the active GitHub identity and refresh health for up to 100 resulting records in one durable job. Use this common portfolio refresh outcome instead of manually chaining identity, discovery, and exact-status tools; retain the primitives for partial recovery. This performs bounded network reads and writes only the local corpus.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncPortfolioInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.SyncPortfolioInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPortfolio, title: "Synchronize a pull-request portfolio", description: "Use for an authored portfolio or 1-100 exact pull requests. Refreshes PR details, merge state, checks, review state, unresolved threads, merge queue, files, and closing issues in one durable job.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncPortfolioInput](func(sc *schemaBuilder) {
+		setEnum(sc, "selection", "authored", "explicit")
+		setArrayBounds(sc, "pull_requests", 1, 100)
+		constrainPullRequestRefs(sc, "pull_requests")
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit", 1, 100)
-		setDefault(sc, "limit", 100)
 		setRange(sc, "discovery_max_requests", 2, 1000)
-		setDefault(sc, "discovery_max_requests", 1000)
 		setRange(sc, "status_max_pages", 1, 20)
 		setDefault(sc, "status_max_pages", 3)
-	}), output: outputSchema[mcpcontract.JobReference]("Reference to an authored portfolio synchronization job."), handler: s.syncPortfolio})
+		configureSyncPortfolioModes(sc)
+	}), output: outputSchema[mcpcontract.JobReference]("Reference to a pull-request portfolio synchronization job."), handler: s.syncPortfolio})
+	addCatalogTool(s, catalogTool[mcpcontract.SyncPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPullRequestFeedback, title: "Synchronize pull-request feedback", description: "Fetch independently covered issue comments, submitted reviews, inline comments, and review-thread topology for 1-50 exact pull requests under one total request budget.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackOperator], input: inputSchema[mcpcontract.SyncPullRequestFeedbackInput](func(sc *schemaBuilder) {
+		setArrayBounds(sc, "pull_requests", 1, 50)
+		constrainPullRequestRefs(sc, "pull_requests")
+		setArrayBounds(sc, "channels", 1, 4)
+		setArrayEnum(sc, "channels", "issue_comments", "submitted_reviews", "inline_comments", "review_threads")
+		property(sc, "channels").UniqueItems = true
+		setEnum(sc, "thread_state", "unresolved", "all")
+		setRange(sc, "max_items_per_channel", 1, 1000)
+		setRange(sc, "max_requests", 1, 1000)
+	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded pull-request feedback job."), handler: s.syncPullRequestFeedback})
+	addCatalogTool(s, catalogTool[mcpcontract.SyncCIFailuresInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncCIFailures, title: "Synchronize pull-request CI failures", description: "Resolve each current head SHA and normalize legacy statuses, check runs, Actions runs, jobs, and optionally bounded failed-job logs for 1-20 exact pull requests.", annotations: networkReadAnnotations(), supportedBy: supports[CIFailureOperator], input: inputSchema[mcpcontract.SyncCIFailuresInput](func(sc *schemaBuilder) {
+		setArrayBounds(sc, "pull_requests", 1, 20)
+		constrainPullRequestRefs(sc, "pull_requests")
+		setEnum(sc, "logs", "none", "failures_only")
+		setRange(sc, "max_runs_per_pr", 1, 100)
+		setRange(sc, "max_jobs_per_run", 1, 100)
+		setRange(sc, "max_log_bytes_per_job", 1024, 1048576)
+		setRange(sc, "max_requests", 1, 1000)
+	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded CI diagnostics job."), handler: s.syncCIFailures})
 	addCatalogTool(s, catalogTool[mcpcontract.ListPullRequestPortfolioInput, mcpcontract.ListPullRequestPortfolioOutput]{name: mcpcontract.ToolListPullRequestPortfolio, title: "List pull requests that need contributor attention", description: "List stored authored pull requests with deterministic attention from lifecycle, checks, review conversations, merge state, queue, and freshness. This offline read reports incomplete facets as unknown; sync authored PRs and health when stale.", annotations: readOnly, supportedBy: supports[PortfolioReader], input: inputSchema[mcpcontract.ListPullRequestPortfolioInput](func(sc *schemaBuilder) {
+		setArrayBounds(sc, "authors", 0, 1)
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 20)
-		setEnum(sc, "response_format", "concise", "detailed")
-		setDefault(sc, "response_format", "concise")
+		setEnum(sc, "view", "compact", "full")
+		setDefault(sc, "view", "compact")
 	}), output: outputSchema[mcpcontract.ListPullRequestPortfolioOutput]("Offline pull-request portfolio with explainable attention states."), handler: s.listPullRequestPortfolio})
 	addCatalogTool(s, catalogTool[mcpcontract.FindPortfolioOverlapsInput, mcpcontract.FindPortfolioOverlapsOutput]{name: mcpcontract.ToolFindPortfolioOverlaps, title: "Find overlaps with authored pull requests", description: "Compare up to 50 local candidates with 100 stored authored pull requests using complete changed-path, linked-issue, and opportunity-similarity observations. This offline read returns unknown instead of claiming no overlap when coverage is missing.", annotations: readOnly, supportedBy: supports[PortfolioReader], input: inputSchema[mcpcontract.FindPortfolioOverlapsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "candidates", 1, 50)
@@ -507,50 +510,17 @@ func (s *Server) mineRepositoryFixPatterns(ctx context.Context, _ *mcp.CallToolR
 	out, err := operator.MineRepositoryFixPatterns(ctx, in)
 	return nil, out, err
 }
-func (s *Server) getAuthenticatedIdentity(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, mcpcontract.AuthenticatedIdentityOutput, error) {
-	op, ok := s.reader.(GitHubOperator)
-	if !ok {
-		return nil, mcpcontract.AuthenticatedIdentityOutput{}, errors.New("GitHub identity lookup is not available")
-	}
-	out, err := op.GetAuthenticatedIdentity(ctx)
-	return nil, out, err
-}
-func (s *Server) syncAuthoredPullRequests(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SyncAuthoredPullRequestsInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
-	if in.State == "" {
-		in.State = "open"
-	}
-	if in.Limit == 0 {
-		in.Limit = 500
-	}
-	op, ok := s.reader.(GitHubOperator)
-	if !ok {
-		return nil, mcpcontract.JobReference{}, errors.New("authored pull-request sync is not available")
-	}
-	out, err := op.SyncAuthoredPullRequests(ctx, in)
-	return nil, out, err
-}
-func (s *Server) syncPullRequestStatus(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SyncPullRequestStatusInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
-	if len(in.PullRequests) == 0 {
-		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("pull_requests", "are required", nil)
-	}
-	if in.MaxPages == 0 {
-		in.MaxPages = 3
-	}
-	op, ok := s.reader.(GitHubOperator)
-	if !ok {
-		return nil, mcpcontract.JobReference{}, errors.New("pull-request status sync is not available")
-	}
-	out, err := op.SyncPullRequestStatus(ctx, in)
-	return nil, out, err
-}
 func (s *Server) syncPortfolio(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SyncPortfolioInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
-	if in.State == "" {
+	if in.Selection == "" {
+		in.Selection = "authored"
+	}
+	if in.Selection == "authored" && in.State == "" {
 		in.State = "open"
 	}
-	if in.Limit == 0 {
+	if in.Selection == "authored" && in.Limit == 0 {
 		in.Limit = 100
 	}
-	if in.DiscoveryMaxRequests == 0 {
+	if in.Selection == "authored" && in.DiscoveryMaxRequests == 0 {
 		in.DiscoveryMaxRequests = 1000
 	}
 	if in.StatusMaxPages == 0 {
@@ -561,6 +531,28 @@ func (s *Server) syncPortfolio(ctx context.Context, _ *mcp.CallToolRequest, in m
 		return nil, mcpcontract.JobReference{}, errors.New("portfolio synchronization is not available")
 	}
 	out, err := op.SyncPortfolio(ctx, in)
+	return nil, out, err
+}
+func (s *Server) syncPullRequestFeedback(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SyncPullRequestFeedbackInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
+	if len(in.PullRequests) == 0 {
+		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("pull_requests", "are required", nil)
+	}
+	op, ok := s.reader.(PullRequestFeedbackOperator)
+	if !ok {
+		return nil, mcpcontract.JobReference{}, errors.New("pull-request feedback synchronization is not available")
+	}
+	out, err := op.SyncPullRequestFeedback(ctx, in)
+	return nil, out, err
+}
+func (s *Server) syncCIFailures(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SyncCIFailuresInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
+	if len(in.PullRequests) == 0 {
+		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("pull_requests", "are required", nil)
+	}
+	op, ok := s.reader.(CIFailureOperator)
+	if !ok {
+		return nil, mcpcontract.JobReference{}, errors.New("CI failure synchronization is not available")
+	}
+	out, err := op.SyncCIFailures(ctx, in)
 	return nil, out, err
 }
 func (s *Server) indexRepositories(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.IndexRepositoriesInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {

@@ -25,6 +25,9 @@ npx --yes gitcontribute@latest setup --mode cli --token-source none --yes
 
 # MCP only; private runtime without a global command
 npx --yes gitcontribute@latest setup --mode mcp --codex --token-source none --yes
+
+# MCP only for a detected Devin CLI installation
+npx --yes gitcontribute@latest setup --mode mcp --devin --token-source none --yes
 ```
 
 GitContribute remains a native Go application. The `gitcontribute` npm package
@@ -46,7 +49,10 @@ through a local file copy. The client-registration engine plans and applies only
 GitContribute-owned entries:
 
 - `[mcp_servers.gitcontribute]` in Codex TOML configuration;
-- `mcpServers.gitcontribute` in Claude JSON configuration.
+- `mcpServers.gitcontribute` in Claude JSON configuration;
+- `mcpServers.gitcontribute` in Devin's user-scoped
+  `~/.config/devin/mcp_config.json` (or `%APPDATA%\devin\mcp_config.json` on
+  Windows).
 
 Codex setup also installs a `gitcontribute` discovery skill under
 `~/.codex/skills/gitcontribute` so deferred MCP tools can be matched

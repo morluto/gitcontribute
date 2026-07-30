@@ -396,7 +396,7 @@ func TestJobResultToMCPPreservesEmptyAndPartialTypedOutcomes(t *testing.T) {
 	}
 
 	partial := jobResultToMCP(&contracts.JobResult{
-		ID: "job-partial", Kind: "sync_portfolio", Status: "succeeded",
+		ID: "job-partial", Kind: "sync_pull_request_portfolio", Status: "succeeded",
 		Result:    `{"status":"partial","pull_requests":["acme/rocket#7"],"refreshed":0,"failures":[{"reference":"acme/rocket#7","status":"retryable","reason":"facet_incomplete"}]}`,
 		CreatedAt: "2026-07-19T00:00:00Z",
 	}, true)
@@ -715,6 +715,23 @@ func TestScalableBatchInputsRejectDuplicatesInsteadOfDroppingOutcomes(t *testing
 	}
 }
 
+func TestPullRequestWorkflowsRejectMalformedReferencesBeforeSubmission(t *testing.T) {
+	t.Parallel()
+	reader := &MCPReader{newSearchTestService(t)}
+	for _, ref := range []mcpcontract.ThreadRef{
+		{Owner: " ", Repo: "rocket", Number: 1},
+		{Owner: "acme", Repo: " ", Number: 1},
+		{Owner: "acme", Repo: "rocket", Number: 0},
+		{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 1},
+	} {
+		if _, err := reader.SyncPortfolio(context.Background(), mcpcontract.SyncPortfolioInput{
+			Selection: "explicit", PullRequests: []mcpcontract.ThreadRef{ref},
+		}); err == nil {
+			t.Fatalf("SyncPortfolio accepted malformed pull request %+v", ref)
+		}
+	}
+}
+
 func TestScalableRuntimeRejectsPageBoundsBeforeSubmittingJob(t *testing.T) {
 	t.Parallel()
 	reader := &MCPReader{newSearchTestService(t)}
@@ -726,8 +743,8 @@ func TestScalableRuntimeRejectsPageBoundsBeforeSubmittingJob(t *testing.T) {
 		}
 	}
 	for _, maxPages := range []int{-1, 21} {
-		if _, err := reader.SyncPullRequestStatus(ctx, mcpcontract.SyncPullRequestStatusInput{PullRequests: []mcpcontract.ThreadRef{thread}, MaxPages: maxPages}); err == nil {
-			t.Fatalf("SyncPullRequestStatus accepted max_pages=%d", maxPages)
+		if _, err := reader.SyncPortfolio(ctx, mcpcontract.SyncPortfolioInput{Selection: "explicit", PullRequests: []mcpcontract.ThreadRef{thread}, StatusMaxPages: maxPages}); err == nil {
+			t.Fatalf("SyncPortfolio accepted status_max_pages=%d", maxPages)
 		}
 	}
 	for _, limit := range []int{-1, 1001} {
@@ -735,8 +752,8 @@ func TestScalableRuntimeRejectsPageBoundsBeforeSubmittingJob(t *testing.T) {
 			t.Fatalf("SyncThreads accepted limit_per_repository=%d", limit)
 		}
 	}
-	if _, err := reader.SyncAuthoredPullRequests(ctx, mcpcontract.SyncAuthoredPullRequestsInput{Limit: 1, MaxRequests: 1}); err == nil {
-		t.Fatal("SyncAuthoredPullRequests accepted a budget that cannot fund identity and discovery")
+	if _, err := reader.SyncPortfolio(ctx, mcpcontract.SyncPortfolioInput{Selection: "authored", Limit: 1, DiscoveryMaxRequests: 1}); err == nil {
+		t.Fatal("SyncPortfolio accepted a budget that cannot fund identity and discovery")
 	}
 }
 

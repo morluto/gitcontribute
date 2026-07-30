@@ -41,7 +41,7 @@ func (c *CLI) runSetupCommand(ctx context.Context, cmd *setupCmd) error {
 }
 
 func (c *CLI) prepareSetupCommand(ctx context.Context, cmd *setupCmd) ([]string, error) {
-	clients := selectedSetupClients(cmd.Codex, cmd.Claude)
+	clients := selectedSetupClients(cmd.Codex, cmd.Claude, cmd.Devin)
 	if err := validateSetupSelection(cmd, clients); err != nil {
 		return nil, err
 	}
@@ -89,7 +89,7 @@ func validateSetupSelection(cmd *setupCmd, clients []string) error {
 			return NewCLIError(ExitUsage, errors.New("--yes requires an explicit setup mode; pass --mode mcp, --mode cli, or --mode both"))
 		}
 		if cmd.Mode.ConfiguresMCP() && len(clients) == 0 && !cmd.AllClients {
-			return NewCLIError(ExitUsage, fmt.Errorf("--mode %s with --yes requires --codex, --claude, or --all-clients", *cmd.Mode))
+			return NewCLIError(ExitUsage, fmt.Errorf("--mode %s with --yes requires --codex, --claude, --devin, or --all-clients", *cmd.Mode))
 		}
 		if strings.TrimSpace(cmd.TokenSource) == "" {
 			return NewCLIError(ExitUsage, errors.New("--yes requires --token-source so authentication configuration is explicit"))

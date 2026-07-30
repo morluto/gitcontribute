@@ -103,17 +103,14 @@ func (f *fakeOptionalCapabilities) MineRepositoryFixPatterns(_ context.Context, 
 	f.lastFixPatternRequest = in
 	return mcpcontract.JobReference{ID: "job-fix-patterns", Kind: "mine_repository_fix_patterns", Status: "queued"}, nil
 }
-func (*fakeOptionalCapabilities) GetAuthenticatedIdentity(context.Context) (mcpcontract.AuthenticatedIdentityOutput, error) {
-	return mcpcontract.AuthenticatedIdentityOutput{Login: "alice"}, nil
-}
-func (*fakeOptionalCapabilities) SyncAuthoredPullRequests(context.Context, mcpcontract.SyncAuthoredPullRequestsInput) (mcpcontract.JobReference, error) {
-	return mcpcontract.JobReference{ID: "job-authored", Status: "queued"}, nil
-}
-func (*fakeOptionalCapabilities) SyncPullRequestStatus(context.Context, mcpcontract.SyncPullRequestStatusInput) (mcpcontract.JobReference, error) {
-	return mcpcontract.JobReference{ID: "job-status", Status: "queued"}, nil
-}
 func (*fakeOptionalCapabilities) SyncPortfolio(context.Context, mcpcontract.SyncPortfolioInput) (mcpcontract.JobReference, error) {
-	return mcpcontract.JobReference{ID: "job-portfolio", Kind: "sync_portfolio", Status: "queued"}, nil
+	return mcpcontract.JobReference{ID: "job-portfolio", Kind: "sync_pull_request_portfolio", Status: "queued"}, nil
+}
+func (*fakeOptionalCapabilities) SyncPullRequestFeedback(context.Context, mcpcontract.SyncPullRequestFeedbackInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-feedback", Kind: "sync_pull_request_feedback", Status: "queued"}, nil
+}
+func (*fakeOptionalCapabilities) SyncCIFailures(context.Context, mcpcontract.SyncCIFailuresInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-ci", Kind: "sync_ci_failures", Status: "queued"}, nil
 }
 func (*fakeOptionalCapabilities) IndexRepositories(context.Context, mcpcontract.IndexRepositoriesInput) (mcpcontract.JobReference, error) {
 	return mcpcontract.JobReference{ID: "job-index", Status: "queued"}, nil
@@ -136,6 +133,8 @@ type completeTestReader struct {
 	IssueSetReader
 	PortfolioReader
 	GitHubOperator
+	PullRequestFeedbackOperator
+	CIFailureOperator
 	FixPatternOperator
 	FixPatternReader
 	CodeIndexer
@@ -156,7 +155,8 @@ func completeFakeReader(base *fakeReader) mcpcontract.Reader {
 	optional := &fakeOptionalCapabilities{base: base}
 	return completeTestReader{
 		Reader: base, NeighborReader: optional, ScalableReader: optional, IssueSetReader: optional,
-		PortfolioReader: optional, GitHubOperator: optional, FixPatternOperator: optional, FixPatternReader: base, CodeIndexer: optional,
+		PortfolioReader: optional, GitHubOperator: optional, PullRequestFeedbackOperator: optional, CIFailureOperator: optional,
+		FixPatternOperator: optional, FixPatternReader: base, CodeIndexer: optional,
 		MergeConflictReader: optional, ResearchReader: optional,
 		CommitPlannerReader: base,
 		PortfolioOperator:   optional, Operator: base,

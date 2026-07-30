@@ -24,6 +24,16 @@ type manifestResourceReader interface {
 	Manifest(context.Context, mcpcontract.ManifestInput) (mcpcontract.ManifestOutput, error)
 }
 
+type workspaceResourceReader interface {
+	Workspace(context.Context, string) (mcpcontract.WorkspaceResource, error)
+}
+
+type pullRequestWorkflowResourceReader interface {
+	PullRequestFeedbackResource(context.Context, string, string, int) (map[string]any, error)
+	CIFailureResource(context.Context, string, string, int) (map[string]any, error)
+	CIJobLogResource(context.Context, string, string, int, int64) (map[string]any, error)
+}
+
 func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 	uri := req.Params.URI
 	u, err := url.Parse(uri)
@@ -67,20 +77,14 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 		return s.readDossierResource(ctx, req)
 	case "thread":
 		return s.readTypedThreadResource(ctx, req)
-	case "threads":
-		return s.readNumberedThreadResource(ctx, req)
 	case "investigation":
 		return s.readInvestigationResource(ctx, req)
-	case "opportunities":
-		return s.readOpportunitiesResource(ctx, req)
 	case "opportunity":
 		return s.readOpportunityResource(ctx, req)
 	case "evidence":
 		return s.readEvidenceResource(ctx, req)
 	case "readiness":
 		return s.readReadinessResource(ctx, req)
-	case "workflow":
-		return readWorkflowResource(req)
 	case "lens":
 		return s.readLensResource(ctx, req)
 	case "fix-pattern-report":
@@ -91,9 +95,66 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 		return s.readDraftResource(ctx, req)
 	case "manifest":
 		return s.readManifestResource(ctx, req)
+	case "workspace":
+		return s.readWorkspaceResource(ctx, req)
+	case "pull-request-feedback":
+		return s.readPullRequestFeedbackResource(ctx, req)
+	case "ci-failure-report":
+		return s.readCIFailureResource(ctx, req)
+	case "ci-job-log":
+		return s.readCIJobLogResource(ctx, req)
 	default:
 		return nil, mcp.ResourceNotFoundError(req.uri)
 	}
+}
+
+func (s *Server) readPullRequestFeedbackResource(ctx context.Context, req resourceRequest) (map[string]any, error) {
+	reader, ok := s.reader.(pullRequestWorkflowResourceReader)
+	number, valid := pullRequestResourceNumber(req.parts)
+	if !ok || !valid {
+		return nil, mcp.ResourceNotFoundError(req.uri)
+	}
+	return reader.PullRequestFeedbackResource(ctx, req.parts[0], req.parts[1], number)
+}
+
+func (s *Server) readCIFailureResource(ctx context.Context, req resourceRequest) (map[string]any, error) {
+	reader, ok := s.reader.(pullRequestWorkflowResourceReader)
+	number, valid := pullRequestResourceNumber(req.parts)
+	if !ok || !valid {
+		return nil, mcp.ResourceNotFoundError(req.uri)
+	}
+	return reader.CIFailureResource(ctx, req.parts[0], req.parts[1], number)
+}
+
+func (s *Server) readCIJobLogResource(ctx context.Context, req resourceRequest) (map[string]any, error) {
+	reader, ok := s.reader.(pullRequestWorkflowResourceReader)
+	if !ok || len(req.parts) != 4 {
+		return nil, mcp.ResourceNotFoundError(req.uri)
+	}
+	number, valid := positivePathNumber(req.parts[2])
+	jobID, jobErr := strconv.ParseInt(req.parts[3], 10, 64)
+	if !valid || jobErr != nil || jobID <= 0 {
+		return nil, mcp.ResourceNotFoundError(req.uri)
+	}
+	return reader.CIJobLogResource(ctx, req.parts[0], req.parts[1], number, jobID)
+}
+
+func pullRequestResourceNumber(parts []string) (int, bool) {
+	if len(parts) != 3 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return 0, false
+	}
+	return positivePathNumber(parts[2])
+}
+
+func (s *Server) readWorkspaceResource(ctx context.Context, req resourceRequest) (mcpcontract.WorkspaceResource, error) {
+	if len(req.parts) != 1 || strings.TrimSpace(req.parts[0]) == "" {
+		return mcpcontract.WorkspaceResource{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	reader, ok := s.reader.(workspaceResourceReader)
+	if !ok {
+		return mcpcontract.WorkspaceResource{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	return reader.Workspace(ctx, req.parts[0])
 }
 
 func (s *Server) readConcernResource(ctx context.Context, req resourceRequest) (mcpcontract.ConcernOutput, error) {
@@ -171,31 +232,11 @@ func (s *Server) readTypedThreadResource(ctx context.Context, req resourceReques
 	})
 }
 
-func (s *Server) readNumberedThreadResource(ctx context.Context, req resourceRequest) (mcpcontract.ThreadOutput, error) {
-	if len(req.parts) != 3 {
-		return mcpcontract.ThreadOutput{}, mcp.ResourceNotFoundError(req.uri)
-	}
-	number, ok := positivePathNumber(req.parts[2])
-	if !ok {
-		return mcpcontract.ThreadOutput{}, mcp.ResourceNotFoundError(req.uri)
-	}
-	return s.reader.ThreadByNumber(ctx, mcpcontract.ThreadByNumberInput{
-		Owner: req.parts[0], Repo: req.parts[1], Number: number,
-	})
-}
-
 func (s *Server) readInvestigationResource(ctx context.Context, req resourceRequest) (mcpcontract.InvestigationOutput, error) {
 	if len(req.parts) != 1 {
 		return mcpcontract.InvestigationOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
 	return s.reader.Investigation(ctx, mcpcontract.InvestigationInput{ID: req.parts[0], HypothesisLimit: 100})
-}
-
-func (s *Server) readOpportunitiesResource(ctx context.Context, req resourceRequest) (any, error) {
-	if len(req.parts) != 1 {
-		return nil, mcp.ResourceNotFoundError(req.uri)
-	}
-	return s.reader.ListOpportunities(ctx, mcpcontract.ListOpportunitiesInput{InvestigationID: req.parts[0], Limit: 100})
 }
 
 func (s *Server) readOpportunityResource(ctx context.Context, req resourceRequest) (mcpcontract.OpportunityOutput, error) {
@@ -218,13 +259,6 @@ func (s *Server) readReadinessResource(ctx context.Context, req resourceRequest)
 		return mcpcontract.ReadinessOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
 	return s.reader.Readiness(ctx, mcpcontract.ReadinessInput{OpportunityID: req.parts[0]})
-}
-
-func readWorkflowResource(req resourceRequest) (ContributionWorkflowResource, error) {
-	if len(req.parts) != 2 || req.parts[0] != "contribution" {
-		return ContributionWorkflowResource{}, mcp.ResourceNotFoundError(req.uri)
-	}
-	return contributionWorkflowResource(req.parts[1]), nil
 }
 
 func (s *Server) readLensResource(ctx context.Context, req resourceRequest) (mcpcontract.LensOutput, error) {

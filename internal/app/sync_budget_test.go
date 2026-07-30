@@ -75,7 +75,7 @@ func TestAuthoredPullRequestSyncReusesSearchHeadersWithoutNPlusOne(t *testing.T)
 	reader := &authoredHeaderReader{now: now}
 	svc.SetGitHubReader(reader)
 
-	out, err := svc.syncAuthoredPullRequests(ctx, mcpcontract.SyncAuthoredPullRequestsInput{State: "open", Limit: 2, MaxRequests: 20}, func(string, string) error { return nil })
+	out, err := svc.syncAuthoredPullRequests(ctx, authoredPullRequestSyncOptions{State: "open", Limit: 2, MaxRequests: 20}, func(string, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestAuthoredPullRequestMinimumBudgetMakesSyncProgress(t *testing.T) {
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 	svc.SetGitHubReader(&authoredHeaderReader{now: now})
 	minimum := 2
-	out, err := svc.syncAuthoredPullRequests(ctx, mcpcontract.SyncAuthoredPullRequestsInput{State: "open", Limit: 2, MaxRequests: minimum}, func(string, string) error { return nil })
+	out, err := svc.syncAuthoredPullRequests(ctx, authoredPullRequestSyncOptions{State: "open", Limit: 2, MaxRequests: minimum}, func(string, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}

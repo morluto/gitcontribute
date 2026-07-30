@@ -21,6 +21,7 @@ func TestJobExecutionSeparatesRunningStateFromTerminalOutcome(t *testing.T) {
 		{name: "running", job: contracts.JobResult{Status: "running"}, execution: "running"},
 		{name: "succeeded", job: contracts.JobResult{Status: "succeeded", Result: `{"status":"complete"}`}, execution: "terminal", outcome: "succeeded"},
 		{name: "partial", job: contracts.JobResult{Status: "succeeded", Result: `{"status":"partial"}`}, execution: "terminal", outcome: "partial"},
+		{name: "partial batch", job: contracts.JobResult{Status: "succeeded", Result: `{"batch_status":"partial"}`}, execution: "terminal", outcome: "partial"},
 		{name: "failed", job: contracts.JobResult{Status: "failed"}, execution: "terminal", outcome: "failed"},
 		{name: "cancelled", job: contracts.JobResult{Status: "cancelled"}, execution: "terminal", outcome: "cancelled"},
 	}
@@ -49,5 +50,19 @@ func TestGetJobOutputHidesLegacyStatusFromModelVisibleJSON(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"execution_state":"terminal"`) || !strings.Contains(string(data), `"outcome":"succeeded"`) {
 		t.Fatalf("new job state contract missing: %s", data)
+	}
+}
+
+func TestRemovedJobKindsDoNotExposeCompatibilityArtifacts(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"sync_portfolio", "sync_authored_pull_requests", "sync_pull_request_status", "hydrate_threads"} {
+		t.Run(kind, func(t *testing.T) {
+			out := jobResultToMCP(&contracts.JobResult{
+				Kind: kind, Status: "succeeded", Result: `{"status":"complete","items":[]}`,
+			}, true)
+			if len(out.Artifacts) != 0 || out.FollowUp != nil {
+				t.Fatalf("removed job kind exposed compatibility output: artifacts=%+v follow_up=%+v", out.Artifacts, out.FollowUp)
+			}
+		})
 	}
 }

@@ -528,7 +528,7 @@ func TestDiscoverSetupReportsDetectedClientsRegistrationAndPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !discovery.EnvironmentKeyPresent || len(discovery.Clients) != 2 {
+	if !discovery.EnvironmentKeyPresent || len(discovery.Clients) != 3 {
 		t.Fatalf("discovery = %+v", discovery)
 	}
 	if discovery.Clients[0].Name != "codex" || !discovery.Clients[0].Detected || !discovery.Clients[0].Registered || discovery.Clients[0].Path != filepath.Join(home, ".codex", "config.toml") {
@@ -536,6 +536,13 @@ func TestDiscoverSetupReportsDetectedClientsRegistrationAndPaths(t *testing.T) {
 	}
 	if discovery.Clients[1].Name != "claude" || !discovery.Clients[1].Detected || discovery.Clients[1].Registered || discovery.Clients[1].Path != filepath.Join(home, ".claude.json") {
 		t.Fatalf("claude discovery = %+v", discovery.Clients[1])
+	}
+	wantDevinPath := filepath.Join(home, ".config", "devin", "mcp_config.json")
+	if runtime.GOOS == "windows" {
+		wantDevinPath = filepath.Join(home, "AppData", "Roaming", "devin", "mcp_config.json")
+	}
+	if discovery.Clients[2].Name != "devin" || discovery.Clients[2].Detected || discovery.Clients[2].Registered || discovery.Clients[2].Path != wantDevinPath {
+		t.Fatalf("devin discovery = %+v", discovery.Clients[2])
 	}
 }
 

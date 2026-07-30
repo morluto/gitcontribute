@@ -13,11 +13,18 @@ import (
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
+type authoredPullRequestSyncOptions struct {
+	State        string
+	UpdatedAfter string
+	Limit        int
+	MaxRequests  int
+}
+
 // This bounded job combines pagination, repository grouping, and ordered worker
 // results because those phases share a single discovery limit and status result.
 //
 //nolint:gocognit,cyclop,funlen
-func (s *Service) syncAuthoredPullRequests(ctx context.Context, in mcpcontract.SyncAuthoredPullRequestsInput, report func(string, string) error) (*authoredPullRequestSyncResult, error) {
+func (s *Service) syncAuthoredPullRequests(ctx context.Context, in authoredPullRequestSyncOptions, report func(string, string) error) (*authoredPullRequestSyncResult, error) {
 	if err := report("authored_pull_request_discovery", jobProgressCounts(0, in.Limit)); err != nil {
 		return nil, err
 	}

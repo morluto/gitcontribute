@@ -348,7 +348,7 @@ func setupClientLabel(client contracts.SetupClientDiscovery) string {
 }
 
 func setupClientName(name string) string {
-	if display := map[string]string{"codex": "Codex", "claude": "Claude Code"}[name]; display != "" {
+	if display := map[string]string{"codex": "Codex", "claude": "Claude Code", "devin": "Devin"}[name]; display != "" {
 		return display
 	}
 	return name

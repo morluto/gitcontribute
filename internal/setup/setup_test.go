@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -247,9 +248,72 @@ func TestDetect(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(home, ".codex"), 0700); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Dir(devinConfigPath(home)), 0700); err != nil {
+		t.Fatal(err)
+	}
 	got := Detect(home)
-	if len(got) != 1 || got[0] != Codex {
+	if len(got) != 2 || got[0] != Codex || got[1] != Devin {
 		t.Fatalf("detected = %v", got)
+	}
+}
+
+func TestRunConfiguresDevinUserMCPRegistration(t *testing.T) {
+	home := t.TempDir()
+	path := devinConfigPath(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{"other":{"command":"other"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(home, "bin", "gitcontribute")
+	opts := Options{Operation: Configure, Clients: []Client{Devin}, Home: home, Executable: executable}
+	report, err := Run(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Results[0].Status != "configured" {
+		t.Fatalf("report = %+v", report)
+	}
+	launcher, err := ReadCommand(Devin, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if launcher.Command != executable || !slices.Equal(launcher.Args, canonicalMCPArgs()) {
+		t.Fatalf("launcher = %+v", launcher)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		t.Fatal(err)
+	}
+	if root["mcpServers"].(map[string]any)["other"] == nil {
+		t.Fatal("Devin setup removed an unrelated MCP registration")
+	}
+	opts.Operation = Remove
+	report, err = Run(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Results[0].Status != "removed" {
+		t.Fatalf("remove report = %+v", report)
+	}
+}
+
+func TestDevinConfigPathUsesPlatformUserConfigDirectory(t *testing.T) {
+	home := filepath.Join("home", "alice")
+	if got, want := devinConfigPathForOS(home, "linux", ""), filepath.Join(home, ".config", "devin", "mcp_config.json"); got != want {
+		t.Fatalf("Linux path = %q, want %q", got, want)
+	}
+	if got, want := devinConfigPathForOS(home, "windows", ""), filepath.Join(home, "AppData", "Roaming", "devin", "mcp_config.json"); got != want {
+		t.Fatalf("Windows path = %q, want %q", got, want)
+	}
+	redirected := filepath.Join("redirected", "roaming")
+	if got, want := devinConfigPathForOS(home, "windows", redirected), filepath.Join(redirected, "devin", "mcp_config.json"); got != want {
+		t.Fatalf("redirected Windows path = %q, want %q", got, want)
 	}
 }
 

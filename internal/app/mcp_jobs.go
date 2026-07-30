@@ -12,6 +12,11 @@ import (
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
+const (
+	jobKindSyncPullRequestPortfolio = "sync_pull_request_portfolio"
+	jobKindSyncThreadFacets         = "sync_thread_facets"
+)
+
 // GetJob reads a durable job by ID.
 func (r *MCPReader) GetJob(ctx context.Context, in mcpcontract.GetJobInput) (mcpcontract.GetJobOutput, error) {
 	job, err := r.Service.GetJob(ctx, in.ID)
@@ -167,10 +172,14 @@ func jobSummary(job *contracts.JobResult, completed, total int) string {
 
 func jobResultStatus(job *contracts.JobResult) string {
 	var result struct {
-		Status string `json:"status"`
+		Status      string `json:"status"`
+		BatchStatus string `json:"batch_status"`
 	}
 	if json.Unmarshal([]byte(job.Result), &result) != nil {
 		return ""
+	}
+	if result.BatchStatus != "" {
+		return result.BatchStatus
 	}
 	return result.Status
 }
@@ -239,9 +248,9 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 		}
 	case "sync_repository_context":
 		return batch("repository_batch", mcpcontract.ToolGetRepositories, "Read synchronized repository facts and coverage from the offline corpus.")
-	case "sync_threads", "hydrate_threads":
+	case "sync_threads", jobKindSyncThreadFacets:
 		return batch("thread_batch", mcpcontract.ToolGetThreads, "Read synchronized thread facts and coverage from the offline corpus.")
-	case "sync_portfolio":
+	case jobKindSyncPullRequestPortfolio:
 		var result struct {
 			PullRequests []string `json:"pull_requests"`
 			Refreshed    int      `json:"refreshed"`
@@ -266,22 +275,47 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 				Kind: "pull_request_batch", Count: &value, References: append([]string(nil), result.PullRequests...), Failures: failures,
 			}}, followUp(mcpcontract.ToolListPullRequestPortfolio, "", "Read these refreshed pull requests from the offline portfolio.")
 		}
-	case "sync_authored_pull_requests":
-		var result struct {
-			PullRequests    int      `json:"pull_requests"`
-			PullRequestRefs []string `json:"pull_request_refs"`
-		}
+	case "sync_pull_request_feedback", "sync_ci_failures":
+		var result pullRequestWorkflowResult
 		if json.Unmarshal([]byte(job.Result), &result) == nil {
-			limit := min(len(result.PullRequestRefs), 100)
-			value := mcpcontract.NonNegativeInt(result.PullRequests)
-			return []mcpcontract.JobArtifactReference{{
-				Kind: "pull_request_batch", Count: &value,
-				References:          append([]string(nil), result.PullRequestRefs[:limit]...),
-				ReferencesTruncated: len(result.PullRequestRefs) > limit,
-			}}, followUp(mcpcontract.ToolListPullRequestPortfolio, "", "Read the discovered pull requests from the offline portfolio.")
+			kind := "pull_request_feedback"
+			tool := mcpcontract.ToolSyncPullRequestFeedback
+			reason := "Read the persisted feedback snapshots through their resource links."
+			if job.Kind == "sync_ci_failures" {
+				kind, tool = "ci_failure_report", mcpcontract.ToolSyncCIFailures
+				reason = "Read the persisted CI reports and bounded job logs through their resource links."
+			}
+			artifact := mcpcontract.JobArtifactReference{Kind: kind}
+			if len(result.Items) == 0 {
+				var request struct {
+					PullRequests []mcpcontract.ThreadRef `json:"pull_requests"`
+				}
+				if json.Unmarshal([]byte(job.Request), &request) == nil {
+					for _, ref := range request.PullRequests {
+						resourceKind := "pull-request-feedback"
+						if job.Kind == "sync_ci_failures" {
+							resourceKind = "ci-failure-report"
+						}
+						artifact.References = append(artifact.References, fmt.Sprintf(
+							"gitcontribute://%s/%s/%s/%d", resourceKind, ref.Owner, ref.Repo, ref.Number,
+						))
+					}
+				}
+			}
+			for _, item := range result.Items {
+				if item.Status == "complete" {
+					artifact.References = append(artifact.References, item.ResourceURI)
+					continue
+				}
+				artifact.Failures = append(artifact.Failures, mcpcontract.JobArtifactFailure{
+					Reference: item.Key, Status: item.Status, Reason: item.Code, Message: item.Message,
+					RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfterMS),
+				})
+			}
+			count := mcpcontract.NonNegativeInt(len(artifact.References))
+			artifact.Count = &count
+			return []mcpcontract.JobArtifactReference{artifact}, followUp(tool, "", reason)
 		}
-	case "sync_pull_request_status":
-		return batch("pull_request_batch", mcpcontract.ToolListPullRequestPortfolio, "Read the refreshed pull-request portfolio from the offline corpus.")
 	case "index_repositories":
 		return batch("code_index", mcpcontract.ToolSearchCode, "Search the locally indexed code corpus.")
 	}

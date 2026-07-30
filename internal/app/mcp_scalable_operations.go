@@ -291,85 +291,13 @@ func (r *MCPReader) HydrateThreads(ctx context.Context, in mcpcontract.HydrateTh
 	if in.MaxPages < 1 || in.MaxPages > 100 {
 		return mcpcontract.JobReference{}, errors.New("max_pages must be between 1 and 100")
 	}
-	id, err := r.submitJob(ctx, "hydrate_threads", in, func(ctx context.Context, report func(string, string) error) (any, error) {
+	id, err := r.submitJob(ctx, jobKindSyncThreadFacets, in, func(ctx context.Context, report func(string, string) error) (any, error) {
 		return r.hydrateThreadsBatch(ctx, in, report)
 	})
 	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
-	return queuedJobReference(id, "hydrate_threads", "thread hydration job started"), nil
-}
-
-// GetAuthenticatedIdentity reads the GitHub account associated with the active credential.
-func (r *MCPReader) GetAuthenticatedIdentity(ctx context.Context) (mcpcontract.AuthenticatedIdentityOutput, error) {
-	reader, err := r.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
-	if err != nil {
-		return mcpcontract.AuthenticatedIdentityOutput{}, err
-	}
-	identityReader, ok := reader.(github.IdentityReader)
-	if !ok {
-		return mcpcontract.AuthenticatedIdentityOutput{}, errors.New("GitHub reader does not support authenticated identity lookup")
-	}
-	identity, _, err := identityReader.GetAuthenticatedIdentity(ctx)
-	if err != nil {
-		return mcpcontract.AuthenticatedIdentityOutput{}, err
-	}
-	return mcpcontract.AuthenticatedIdentityOutput{Login: identity.Login, ID: identity.ID, NodeID: identity.NodeID, ObservedAt: formatTime(r.now())}, nil
-}
-
-// SyncAuthoredPullRequests submits a durable GitHub search and exact-header
-// refresh for pull requests authored by the authenticated account.
-func (r *MCPReader) SyncAuthoredPullRequests(ctx context.Context, in mcpcontract.SyncAuthoredPullRequestsInput) (mcpcontract.JobReference, error) {
-	if in.State == "" {
-		in.State = "open"
-	}
-	if in.State != "open" && in.State != "closed" && in.State != "all" {
-		return mcpcontract.JobReference{}, errors.New("state must be open, closed, or all")
-	}
-	if in.Limit == 0 {
-		in.Limit = 500
-	}
-	if in.Limit < 1 || in.Limit > 500 {
-		return mcpcontract.JobReference{}, errors.New("limit must be between 1 and 500")
-	}
-	if in.MaxRequests == 0 {
-		in.MaxRequests = defaultSyncBatchMaxRequests
-	}
-	if in.MaxRequests < 2 || in.MaxRequests > defaultSyncBatchMaxRequests {
-		return mcpcontract.JobReference{}, fmt.Errorf("max requests must be between 2 and %d", defaultSyncBatchMaxRequests)
-	}
-	id, err := r.submitJob(ctx, "sync_authored_pull_requests", in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.syncAuthoredPullRequests(ctx, in, report)
-	})
-	if err != nil {
-		return mcpcontract.JobReference{}, err
-	}
-	return queuedJobReference(id, "sync_authored_pull_requests", "authored pull-request synchronization job started"), nil
-}
-
-// SyncPullRequestStatus submits a bounded source-backed refresh of PR details,
-// reviews, checks, review conversations, merge state, queue state, closing
-// issues, and changed paths. Each facet retains independent coverage.
-func (r *MCPReader) SyncPullRequestStatus(ctx context.Context, in mcpcontract.SyncPullRequestStatusInput) (mcpcontract.JobReference, error) {
-	if err := rejectDuplicateThreadRefs(in.PullRequests); err != nil {
-		return mcpcontract.JobReference{}, err
-	}
-	if len(in.PullRequests) < 1 || len(in.PullRequests) > 50 {
-		return mcpcontract.JobReference{}, errors.New("pull_requests must contain 1 to 50 items")
-	}
-	if in.MaxPages == 0 {
-		in.MaxPages = 3
-	}
-	if in.MaxPages < 1 || in.MaxPages > 20 {
-		return mcpcontract.JobReference{}, errors.New("max_pages must be between 1 and 20")
-	}
-	id, err := r.submitJob(ctx, "sync_pull_request_status", in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.syncPullRequestStatusBatch(ctx, in, report)
-	})
-	if err != nil {
-		return mcpcontract.JobReference{}, err
-	}
-	return queuedJobReference(id, "sync_pull_request_status", "pull-request status synchronization job started"), nil
+	return queuedJobReference(id, jobKindSyncThreadFacets, "thread facet synchronization job started"), nil
 }
 
 // IndexRepositories submits a durable Git acquisition and safe indexing job
@@ -431,11 +359,23 @@ func (r *MCPReader) CheckMergeConflicts(ctx context.Context, in mcpcontract.Chec
 			defer wg.Done()
 			for index := range jobs {
 				current := in.Comparisons[index]
-				key := current.WorkspaceID + ":" + current.BaseOID + ".." + current.HeadOID
+				key := current.WorkspaceID
 				item := mcpcontract.BatchItem[mcpcontract.MergeConflictOutput]{Key: key, Status: "complete"}
 				ws, err := c.GetWorkspace(ctx, current.WorkspaceID)
 				if err != nil {
 					item.Status, item.Reason, item.Message = "failed", "workspace_not_found", err.Error()
+					out.Items[index] = item
+					continue
+				}
+				if current.BaseOID == "" {
+					current.BaseOID = ws.BaseSHA
+				}
+				if current.HeadOID == "" {
+					current.HeadOID = ws.CandidateSHA
+				}
+				item.Key = current.WorkspaceID + ":" + current.BaseOID + ".." + current.HeadOID
+				if current.BaseOID == "" || current.HeadOID == "" {
+					item.Status, item.Reason, item.Message = "unavailable", "missing_objects", "workspace does not record both base and head OIDs"
 					out.Items[index] = item
 					continue
 				}
@@ -771,6 +711,25 @@ func rejectDuplicateThreadRefs(inputs []mcpcontract.ThreadRef) error {
 			return mcpcontract.InvalidArgument("threads", fmt.Sprintf("duplicate thread %s/%s#%d", input.Owner, input.Repo, input.Number), nil)
 		}
 		seen[key] = struct{}{}
+	}
+	return nil
+}
+
+func validatePullRequestRefs(inputs []mcpcontract.ThreadRef, path string) error {
+	for i, input := range inputs {
+		itemPath := fmt.Sprintf("%s[%d]", path, i)
+		if strings.TrimSpace(input.Owner) == "" {
+			return mcpcontract.InvalidArgument(itemPath+".owner", "must not be blank", nil)
+		}
+		if strings.TrimSpace(input.Repo) == "" {
+			return mcpcontract.InvalidArgument(itemPath+".repo", "must not be blank", nil)
+		}
+		if input.Number <= 0 {
+			return mcpcontract.InvalidArgument(itemPath+".number", "must be positive", nil)
+		}
+		if input.Kind != "" && input.Kind != corpus.ThreadKindPullRequest {
+			return mcpcontract.InvalidArgument(itemPath+".kind", "must be pull_request when provided", nil)
+		}
 	}
 	return nil
 }

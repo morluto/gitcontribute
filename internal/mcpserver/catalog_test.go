@@ -227,7 +227,7 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].OutputSchema, []string{"properties", "candidates", "items", "properties", "score", "maximum"}, float64(100))
 	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].OutputSchema, []string{"properties", "candidates", "items", "properties", "confidence", "type"}, "string")
 	assertSchemaValue(t, tools[mcpcontract.ToolFindPrecedents].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "matches", "items", "properties", "score", "maximum"}, float64(1))
-	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "status", "enum"}, []any{"complete", "retryable", "unavailable", "failed"})
+	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "item_status", "enum"}, []any{"complete", "retryable", "unavailable", "failed"})
 	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "execution_state", "enum"}, []any{"queued", "running", "terminal"})
 	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "outcome", "enum"}, []any{"succeeded", "partial", "failed", "cancelled"})
 	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "progress_percent", "maximum"}, float64(100))
@@ -316,12 +316,12 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 		{"Fetch current GitHub stars, metadata, and contribution guidance for twelve repositories", mcpcontract.ToolSyncRepositoryContext},
 		{"Read the complete stored body of pull request 42", mcpcontract.ToolGetThreads},
 		{"Refresh issue and pull request thread headers for selected repositories from GitHub", mcpcontract.ToolSyncThreads},
-		{"Fetch comments and reviews for one stored pull request from GitHub", mcpcontract.ToolHydrateThreads},
+		{"Fetch comments and reviews for one stored pull request from GitHub", mcpcontract.ToolSyncPullRequestFeedback},
 		{"Rank stored open issues for contribution across selected repositories", mcpcontract.ToolRankThreads},
 		{"Find similar completed and rejected historical work for this issue", mcpcontract.ToolFindPrecedents},
 		{"Prepare contribution evidence and linkage guidance for fourteen exact issues", mcpcontract.ToolPrepareIssueSet},
 		{"Ask DeepWiki to compare the architecture of three public repositories", mcpcontract.ToolQueryDeepWiki},
-		{"Refresh mergeability and reviews for my selected pull requests", mcpcontract.ToolSyncPullRequestStatus},
+		{"Refresh mergeability, checks, queue state, and changed files for my selected pull requests", mcpcontract.ToolSyncPortfolio},
 		{"List my stored pull requests that need contributor attention", mcpcontract.ToolListPullRequestPortfolio},
 		{"Acquire and index code for several repositories", mcpcontract.ToolIndexRepositories},
 		{"Check actual Git merge conflicts between fetched revisions", mcpcontract.ToolCheckMergeConflicts},
@@ -461,7 +461,7 @@ func TestSyncThreadsDefaultsRemainSelectionSpecific(t *testing.T) {
 	optional := &fakeOptionalCapabilities{base: base}
 	reader := completeTestReader{
 		Reader: base, NeighborReader: optional, ScalableReader: optional,
-		PortfolioReader: optional, GitHubOperator: optional, CodeIndexer: optional,
+		PortfolioReader: optional, GitHubOperator: optional, PullRequestFeedbackOperator: optional, CIFailureOperator: optional, CodeIndexer: optional,
 		MergeConflictReader: optional, ResearchReader: optional,
 		PortfolioOperator: optional, Operator: base,
 	}

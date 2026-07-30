@@ -211,6 +211,8 @@ func setupStepLabel(name string) string {
 		return "Codex skill"
 	case "claude":
 		return "Claude Code"
+	case "devin":
+		return "Devin"
 	case "repository":
 		return "Repository source"
 	case "verification":

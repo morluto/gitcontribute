@@ -105,7 +105,6 @@ type rootCmd struct {
 	Coverage      coverageCmd      `cmd:"" help:"Show local repository facet coverage"`
 	Runs          runsCmd          `cmd:"" help:"List durable operation runs"`
 	Jobs          jobsCmd          `cmd:"" help:"List durable background jobs"`
-	Job           jobCmd           `cmd:"" help:"Inspect or cancel a durable job"`
 	Neighbors     neighborsCmd     `cmd:"" help:"Find similar local threads"`
 	Export        exportCmd        `cmd:"" help:"Export redacted local bundles"`
 	Clusters      clustersCmd      `cmd:"" help:"List or explicitly refresh duplicate-candidate clusters"`
@@ -122,6 +121,7 @@ type rootCmd struct {
 type setupCmd struct {
 	Codex          bool                 `name:"codex" help:"Configure Codex"`
 	Claude         bool                 `name:"claude" help:"Configure Claude Code"`
+	Devin          bool                 `name:"devin" help:"Configure Devin"`
 	AllClients     bool                 `name:"all-clients" help:"Configure every supported client"`
 	Mode           *contracts.SetupMode `name:"mode" enum:"mcp,cli,both" help:"Access mode (mcp, cli, or both)"`
 	TokenSource    string               `name:"token-source" help:"GitHub token source (none, env, gh-cli, or keyring)"`
@@ -135,6 +135,7 @@ type setupCmd struct {
 type removeCmd struct {
 	Codex      bool `name:"codex" help:"Remove the Codex registration"`
 	Claude     bool `name:"claude" help:"Remove the Claude Code registration"`
+	Devin      bool `name:"devin" help:"Remove the Devin registration"`
 	AllClients bool `name:"all-clients" help:"Remove every supported registration"`
 	Yes        bool `name:"yes" short:"y" help:"Accept the plan without prompting"`
 	DryRun     bool `name:"dry-run" help:"Show planned changes without writing"`
@@ -388,27 +389,6 @@ type runsCmd struct {
 	JSON  bool `name:"json" help:"Print the result as JSON"`
 }
 
-type jobsCmd struct {
-	Status string `name:"status" help:"Filter by status (queued, running, succeeded, failed, or cancelled)"`
-	Limit  int    `name:"limit" default:"50" help:"Maximum jobs to return"`
-	JSON   bool   `name:"json" help:"Print the result as JSON"`
-}
-
-type jobCmd struct {
-	Show   jobShowCmd   `cmd:"" help:"Show one durable job"`
-	Cancel jobCancelCmd `cmd:"" help:"Request cancellation"`
-}
-
-type jobShowCmd struct {
-	ID   string `arg:"" help:"Opaque job ID"`
-	JSON bool   `name:"json" help:"Print the result as JSON"`
-}
-
-type jobCancelCmd struct {
-	ID   string `arg:"" help:"Opaque job ID"`
-	JSON bool   `name:"json" help:"Print the result as JSON"`
-}
-
 type neighborsCmd struct {
 	Thread string `arg:"" name:"owner/repo#number" help:"Thread as OWNER/REPO#NUMBER"`
 	Kind   string `name:"kind" required:"" enum:"issue,pull_request" help:"Thread kind"`
@@ -605,9 +585,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	case "runs":
 		return c.runRuns(ctx, &cli.Runs)
 	case "jobs":
-		return c.runJobs(ctx, &cli.Jobs)
-	case "job":
-		return c.runJob(ctx, command, &cli.Job)
+		return c.runJobs(ctx, command, &cli.Jobs)
 	case "neighbors":
 		return c.runNeighbors(ctx, &cli.Neighbors)
 	case "export":
@@ -644,7 +622,7 @@ func (c *CLI) setupService() (contracts.SetupService, error) {
 }
 
 func (c *CLI) runRemoveCommand(ctx context.Context, cmd *removeCmd) error {
-	clients := selectedSetupClients(cmd.Codex, cmd.Claude)
+	clients := selectedSetupClients(cmd.Codex, cmd.Claude, cmd.Devin)
 	all := cmd.AllClients
 	needsPrompt := !cmd.Yes && ((len(clients) == 0 && !all) || !cmd.DryRun)
 	if needsPrompt && !c.interactiveInput() {
@@ -672,7 +650,7 @@ func (c *CLI) runRemoveCommand(ctx context.Context, cmd *removeCmd) error {
 	return c.executeSetup(ctx, contracts.SetupOptions{Remove: true, Clients: clients, AllClients: all, DryRun: cmd.DryRun}, cmd.JSON)
 }
 
-func selectedSetupClients(codex, claude bool) []string {
+func selectedSetupClients(codex, claude, devin bool) []string {
 	var clients []string
 	if codex {
 		clients = append(clients, "codex")
@@ -680,11 +658,14 @@ func selectedSetupClients(codex, claude bool) []string {
 	if claude {
 		clients = append(clients, "claude")
 	}
+	if devin {
+		clients = append(clients, "devin")
+	}
 	return clients
 }
 
 func (c *CLI) promptClients(action string, allowNone bool) ([]string, error) {
-	choices := "codex,claude"
+	choices := "codex,claude,devin"
 	if allowNone {
 		choices += ",none"
 	}
@@ -697,7 +678,7 @@ func (c *CLI) promptClients(action string, allowNone bool) ([]string, error) {
 	}
 	line = strings.TrimSpace(line)
 	if line == "" {
-		line = "codex,claude"
+		line = "codex,claude,devin"
 	}
 	if allowNone && strings.EqualFold(line, "none") {
 		return nil, nil
@@ -705,8 +686,8 @@ func (c *CLI) promptClients(action string, allowNone bool) ([]string, error) {
 	var clients []string
 	for _, value := range strings.Split(line, ",") {
 		value = strings.ToLower(strings.TrimSpace(value))
-		if value != "codex" && value != "claude" {
-			return nil, fmt.Errorf("unsupported client %q; choose codex and/or claude", value)
+		if value != "codex" && value != "claude" && value != "devin" {
+			return nil, fmt.Errorf("unsupported client %q; choose codex, claude, and/or devin", value)
 		}
 		clients = append(clients, value)
 	}
@@ -761,14 +742,6 @@ func (c *CLI) tailService() (contracts.TailService, error) {
 
 func (c *CLI) controlService() (contracts.ControlService, error) {
 	service, ok := c.svc.(contracts.ControlService)
-	if !ok {
-		return nil, NewCLIError(ExitNotWired, ErrNotWired)
-	}
-	return service, nil
-}
-
-func (c *CLI) jobService() (contracts.JobService, error) {
-	service, ok := c.svc.(contracts.JobService)
 	if !ok {
 		return nil, NewCLIError(ExitNotWired, ErrNotWired)
 	}
@@ -1526,51 +1499,6 @@ func (c *CLI) runRuns(ctx context.Context, cmd *runsCmd) error {
 		return c.mapError(err)
 	}
 	return c.render(cmd.JSON, result)
-}
-
-func (c *CLI) runJobs(ctx context.Context, cmd *jobsCmd) error {
-	if cmd.Limit <= 0 || cmd.Limit > 1000 {
-		return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 1000"))
-	}
-	if cmd.Status != "" {
-		switch cmd.Status {
-		case "queued", "running", "succeeded", "failed", "cancelled":
-		default:
-			return NewCLIError(ExitUsage, fmt.Errorf("invalid job status %q", cmd.Status))
-		}
-	}
-	service, err := c.jobService()
-	if err != nil {
-		return err
-	}
-	result, err := service.ListJobs(ctx, cmd.Status, cmd.Limit)
-	if err != nil {
-		return c.mapError(err)
-	}
-	return c.render(cmd.JSON, result)
-}
-
-func (c *CLI) runJob(ctx context.Context, command string, cmd *jobCmd) error {
-	service, err := c.jobService()
-	if err != nil {
-		return err
-	}
-	var result *contracts.JobResult
-	var jsonOutput bool
-	switch command {
-	case "job show":
-		result, err = service.GetJob(ctx, cmd.Show.ID)
-		jsonOutput = cmd.Show.JSON
-	case "job cancel":
-		result, err = service.CancelJob(ctx, cmd.Cancel.ID)
-		jsonOutput = cmd.Cancel.JSON
-	default:
-		return NewCLIError(ExitUsage, fmt.Errorf("unknown job command: %s", command))
-	}
-	if err != nil {
-		return c.mapError(err)
-	}
-	return c.render(jsonOutput, result)
 }
 
 func (c *CLI) runNeighbors(ctx context.Context, cmd *neighborsCmd) error {

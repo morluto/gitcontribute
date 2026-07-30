@@ -41,6 +41,42 @@ func (f *fakeReader) recordCall(name string) {
 var _ WorkspaceCreator = (*fakeReader)(nil)
 var _ WorkspaceAdopter = (*fakeReader)(nil)
 
+func (*fakeReader) PullRequestFeedbackResource(context.Context, string, string, int) (map[string]any, error) {
+	return map[string]any{"schema_version": "gitcontribute.pull-request-feedback.v1"}, nil
+}
+
+func (*fakeReader) CIFailureResource(context.Context, string, string, int) (map[string]any, error) {
+	return map[string]any{"schema_version": "gitcontribute.ci-failure-report.v1"}, nil
+}
+
+func (*fakeReader) CIJobLogResource(context.Context, string, string, int, int64) (map[string]any, error) {
+	return map[string]any{"schema_version": "gitcontribute.ci-job-log.v1", "body": "failure"}, nil
+}
+
+func TestPullRequestWorkflowResourcesAreReadable(t *testing.T) {
+	server := &Server{reader: &fakeReader{}}
+	tests := []struct {
+		uri, version string
+	}{
+		{"gitcontribute://pull-request-feedback/acme/project/7", "gitcontribute.pull-request-feedback.v1"},
+		{"gitcontribute://ci-failure-report/acme/project/7", "gitcontribute.ci-failure-report.v1"},
+		{"gitcontribute://ci-job-log/acme/project/7/31", "gitcontribute.ci-job-log.v1"},
+	}
+	for _, test := range tests {
+		u := strings.TrimPrefix(test.uri, "gitcontribute://")
+		host, path, _ := strings.Cut(u, "/")
+		value, err := server.readResourceValue(context.Background(), resourceRequest{
+			uri: test.uri, scheme: "gitcontribute", host: host, parts: strings.Split(path, "/"),
+		})
+		if err != nil {
+			t.Fatalf("%s: %v", test.uri, err)
+		}
+		if got := value.(map[string]any)["schema_version"]; got != test.version {
+			t.Fatalf("%s schema_version=%v", test.uri, got)
+		}
+	}
+}
+
 func (f *fakeReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcpcontract.SearchOutput, error) {
 	if in.Query == "block" {
 		close(f.searchStarted)
@@ -483,12 +519,10 @@ func TestInvestigationOpportunityEvidenceResources(t *testing.T) {
 
 	cases := []string{
 		"gitcontribute://investigation/inv-1",
-		"gitcontribute://opportunities/inv-1",
 		"gitcontribute://opportunity/opp-1",
 		"gitcontribute://evidence/investigation/inv-1",
 		"gitcontribute://evidence/opportunity/opp-1",
 		"gitcontribute://readiness/opp-1",
-		"gitcontribute://workflow/contribution/opp-1",
 		"gitcontribute://fix-pattern-report/job-fix-patterns",
 	}
 	for _, uri := range cases {
@@ -589,8 +623,8 @@ func TestContributionWorkflowPrompts(t *testing.T) {
 		t.Fatalf("investigate prompt content = %#v", investigate.Messages[0].Content)
 	}
 	if strings.Contains(investigateText.Text, "/issue/17") ||
-		!strings.Contains(investigateText.Text, "gitcontribute://threads/acme/rocket/17") ||
-		!strings.Contains(investigateText.Text, "returned kind") {
+		!strings.Contains(investigateText.Text, "corpus.get_threads") ||
+		!strings.Contains(investigateText.Text, "acme/rocket#17") {
 		t.Fatalf("investigate prompt hardcodes or fails to resolve thread kind:\n%s", investigateText.Text)
 	}
 

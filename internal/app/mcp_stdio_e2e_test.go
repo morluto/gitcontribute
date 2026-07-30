@@ -132,7 +132,7 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		t.Fatalf("precedents = %+v", precedents)
 	}
 
-	portfolio := callMCPTool[mcpcontract.ListPullRequestPortfolioOutput](ctx, t, session, mcpcontract.ToolListPullRequestPortfolio, map[string]any{"author": "morluto", "state": "open", "limit": 10, "response_format": "detailed"})
+	portfolio := callMCPTool[mcpcontract.ListPullRequestPortfolioOutput](ctx, t, session, mcpcontract.ToolListPullRequestPortfolio, map[string]any{"authors": []any{"morluto"}, "state": "open", "limit": 10, "view": "full"})
 	if len(portfolio.PullRequests) != 1 || portfolio.PullRequests[0].Attention != "unknown" {
 		t.Fatalf("portfolio = %+v", portfolio)
 	}
@@ -166,14 +166,10 @@ func TestMCPStdioPullRequestPortfolioFlow(t *testing.T) {
 	}
 	defer session.Close()
 
-	identity := callMCPTool[mcpcontract.AuthenticatedIdentityOutput](ctx, t, session, mcpcontract.ToolGetAuthenticatedIdentity, map[string]any{})
-	if identity.Login != "morluto" || identity.ID != 99 {
-		t.Fatalf("authenticated identity = %+v", identity)
-	}
-	sync := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncPortfolio, map[string]any{"state": "open", "limit": 10})
+	sync := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncPortfolio, map[string]any{"selection": "authored", "state": "open", "limit": 10})
 	syncResult := waitMCPJob(ctx, t, session, sync.ID)
 
-	portfolio := callMCPTool[mcpcontract.ListPullRequestPortfolioOutput](ctx, t, session, mcpcontract.ToolListPullRequestPortfolio, map[string]any{"author": "morluto", "state": "open", "limit": 10, "response_format": "detailed"})
+	portfolio := callMCPTool[mcpcontract.ListPullRequestPortfolioOutput](ctx, t, session, mcpcontract.ToolListPullRequestPortfolio, map[string]any{"authors": []any{"morluto"}, "state": "open", "limit": 10, "view": "full"})
 	if len(portfolio.PullRequests) != 1 {
 		t.Fatalf("portfolio = %+v, sync job = %+v", portfolio, syncResult)
 	}
@@ -243,10 +239,45 @@ func TestMCPStdioExactThreadSyncFlow(t *testing.T) {
 	if len(stored.Items) != 2 || stored.Items[0].Value == nil || stored.Items[0].Value.Kind != "issue" || stored.Items[1].Value == nil || stored.Items[1].Value.Kind != "pull_request" {
 		t.Fatalf("exact stored threads = %+v", stored)
 	}
-	status := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncPullRequestStatus, map[string]any{
+	status := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncPortfolio, map[string]any{
+		"selection":     "explicit",
 		"pull_requests": []any{map[string]any{"owner": "lab", "repo": "project", "kind": "pull_request", "number": 7}},
 	})
 	waitMCPJob(ctx, t, session, status.ID)
+
+	feedback := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncPullRequestFeedback, map[string]any{
+		"pull_requests": []any{map[string]any{"owner": "lab", "repo": "project", "kind": "pull_request", "number": 7}},
+		"channels":      []any{"issue_comments", "submitted_reviews", "inline_comments", "review_threads"},
+		"thread_state":  "all",
+		"max_requests":  10,
+	})
+	waitMCPJob(ctx, t, session, feedback.ID)
+	feedbackJobs := callMCPTool[mcpcontract.GetJobsOutput](ctx, t, session, mcpcontract.ToolGetJob, map[string]any{"ids": []string{feedback.ID}, "response_format": "detailed"})
+	feedbackResult := *feedbackJobs.Items[0].Value
+	if len(feedbackResult.Artifacts) != 1 || len(feedbackResult.Artifacts[0].References) != 1 {
+		t.Fatalf("feedback job = %+v", feedbackResult)
+	}
+	if _, err := session.ReadResource(ctx, &mcp.ReadResourceParams{URI: feedbackResult.Artifacts[0].References[0]}); err != nil {
+		t.Fatalf("read feedback resource: %v", err)
+	}
+
+	ci := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncCIFailures, map[string]any{
+		"pull_requests":         []any{map[string]any{"owner": "lab", "repo": "project", "kind": "pull_request", "number": 7}},
+		"logs":                  "none",
+		"max_runs_per_pr":       5,
+		"max_jobs_per_run":      5,
+		"max_requests":          10,
+		"max_log_bytes_per_job": 1024,
+	})
+	waitMCPJob(ctx, t, session, ci.ID)
+	ciJobs := callMCPTool[mcpcontract.GetJobsOutput](ctx, t, session, mcpcontract.ToolGetJob, map[string]any{"ids": []string{ci.ID}, "response_format": "detailed"})
+	ciResult := *ciJobs.Items[0].Value
+	if len(ciResult.Artifacts) != 1 || len(ciResult.Artifacts[0].References) != 1 {
+		t.Fatalf("CI artifacts = %+v", ciResult.Artifacts)
+	}
+	if _, err := session.ReadResource(ctx, &mcp.ReadResourceParams{URI: ciResult.Artifacts[0].References[0]}); err != nil {
+		t.Fatalf("read CI resource: %v", err)
+	}
 }
 
 func assertExactThreadJobItems(t *testing.T, jobs mcpcontract.GetJobsOutput, wantKeys []string) {
@@ -387,6 +418,16 @@ func newMCPGitHubServer(t *testing.T) *httptest.Server {
 			}`))
 		case strings.HasSuffix(r.URL.Path, "/repos/lab/project/pulls/7/reviews"):
 			_, _ = w.Write([]byte(`[{"id":701,"node_id":"R_701","state":"APPROVED","user":{"login":"reviewer"},"commit_id":"head123","submitted_at":"2026-07-18T21:00:00Z"}]`))
+		case strings.HasSuffix(r.URL.Path, "/repos/lab/project/issues/7/comments"):
+			_, _ = w.Write([]byte(`[{"id":702,"body":"top-level feedback","user":{"login":"reviewer"},"created_at":"2026-07-18T21:00:00Z","updated_at":"2026-07-18T21:00:00Z"}]`))
+		case strings.HasSuffix(r.URL.Path, "/repos/lab/project/pulls/7/comments"):
+			_, _ = w.Write([]byte(`[{"id":703,"node_id":"C_703","body":"inline feedback","path":"internal/cache.go","line":12,"commit_id":"head123","user":{"login":"reviewer"},"created_at":"2026-07-18T21:00:00Z","updated_at":"2026-07-18T21:00:00Z"}]`))
+		case strings.HasSuffix(r.URL.Path, "/repos/lab/project/commits/head123/status"):
+			_, _ = w.Write([]byte(`{"state":"success","statuses":[{"context":"external","state":"success"}]}`))
+		case strings.HasSuffix(r.URL.Path, "/repos/lab/project/commits/head123/check-runs"):
+			_, _ = w.Write([]byte(`{"total_count":1,"check_runs":[{"id":1,"name":"test","status":"completed","conclusion":"success"}]}`))
+		case strings.HasSuffix(r.URL.Path, "/repos/lab/project/actions/runs"):
+			_, _ = w.Write([]byte(`{"total_count":0,"workflow_runs":[]}`))
 		case strings.HasSuffix(r.URL.Path, "/repos/lab/project/pulls/7"):
 			_, _ = w.Write([]byte(`{
 				"id":700,"node_id":"PR_7","number":7,"state":"open","title":"Fix cache lifecycle",
