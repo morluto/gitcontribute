@@ -537,7 +537,11 @@ func TestDiscoverSetupReportsDetectedClientsRegistrationAndPaths(t *testing.T) {
 	if discovery.Clients[1].Name != "claude" || !discovery.Clients[1].Detected || discovery.Clients[1].Registered || discovery.Clients[1].Path != filepath.Join(home, ".claude.json") {
 		t.Fatalf("claude discovery = %+v", discovery.Clients[1])
 	}
-	if discovery.Clients[2].Name != "devin" || discovery.Clients[2].Detected || discovery.Clients[2].Registered || discovery.Clients[2].Path != filepath.Join(home, ".config", "devin", "mcp_config.json") {
+	wantDevinPath := filepath.Join(home, ".config", "devin", "mcp_config.json")
+	if runtime.GOOS == "windows" {
+		wantDevinPath = filepath.Join(home, "AppData", "Roaming", "devin", "mcp_config.json")
+	}
+	if discovery.Clients[2].Name != "devin" || discovery.Clients[2].Detected || discovery.Clients[2].Registered || discovery.Clients[2].Path != wantDevinPath {
 		t.Fatalf("devin discovery = %+v", discovery.Clients[2])
 	}
 }

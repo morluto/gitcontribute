@@ -248,7 +248,7 @@ func TestDetect(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(home, ".codex"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(home, ".config", "devin"), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(devinConfigPath(home)), 0700); err != nil {
 		t.Fatal(err)
 	}
 	got := Detect(home)
@@ -259,14 +259,15 @@ func TestDetect(t *testing.T) {
 
 func TestRunConfiguresDevinUserMCPRegistration(t *testing.T) {
 	home := t.TempDir()
-	path := filepath.Join(home, ".config", "devin", "mcp_config.json")
+	path := devinConfigPath(home)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte(`{"mcpServers":{"other":{"command":"other"}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	opts := Options{Operation: Configure, Clients: []Client{Devin}, Home: home, Executable: "/bin/gitcontribute"}
+	executable := filepath.Join(home, "bin", "gitcontribute")
+	opts := Options{Operation: Configure, Clients: []Client{Devin}, Home: home, Executable: executable}
 	report, err := Run(opts)
 	if err != nil {
 		t.Fatal(err)
@@ -278,7 +279,7 @@ func TestRunConfiguresDevinUserMCPRegistration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if launcher.Command != "/bin/gitcontribute" || !slices.Equal(launcher.Args, canonicalMCPArgs()) {
+	if launcher.Command != executable || !slices.Equal(launcher.Args, canonicalMCPArgs()) {
 		t.Fatalf("launcher = %+v", launcher)
 	}
 	data, err := os.ReadFile(path)
