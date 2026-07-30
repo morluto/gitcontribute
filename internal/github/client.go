@@ -72,7 +72,8 @@ type PullRequestStatusReader interface {
 
 // Client wraps go-github behind a narrow, domain-neutral interface.
 type Client struct {
-	gh *gh.Client
+	gh             *gh.Client
+	downloadClient *http.Client
 }
 
 // Config controls how the GitHub client is constructed.
@@ -129,13 +130,16 @@ func NewClient(cfg Config) (*Client, error) {
 		cb:     newCircuitBreaker(defaultCBMaxFailures, defaultCBHalfOpenWait, defaultCBProbeTimeout),
 	}
 
-	cfg.HTTPClient.Transport = &authTransport{
+	apiClient := *cfg.HTTPClient
+	apiClient.Transport = &authTransport{
 		Base:   retrier,
 		Source: cfg.TokenSource,
 	}
+	downloadClient := *cfg.HTTPClient
+	downloadClient.Transport = baseTransport
 
 	opts := []gh.ClientOptionsFunc{
-		gh.WithHTTPClient(cfg.HTTPClient),
+		gh.WithHTTPClient(&apiClient),
 		gh.WithEnterpriseURLs(cfg.BaseURL, cfg.UploadURL),
 	}
 
@@ -143,7 +147,7 @@ func NewClient(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{gh: ghc}, nil
+	return &Client{gh: ghc, downloadClient: &downloadClient}, nil
 }
 
 // GetRepository reads repository metadata and the response rate-limit state.

@@ -11,6 +11,12 @@ import (
 	"testing"
 )
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
 func TestGetPullRequestFeedbackPreservesChannelsAndThreadState(t *testing.T) {
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -82,6 +88,7 @@ func TestGetPullRequestFeedbackEnforcesTotalRequestBudget(t *testing.T) {
 
 func TestGetPullRequestCINormalizesProvidersAndBoundsLogs(t *testing.T) {
 	var baseURL string
+	logUsedConfiguredTransport := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v3/repos/acme/project/pulls/7":
@@ -116,8 +123,22 @@ func TestGetPullRequestCINormalizesProvidersAndBoundsLogs(t *testing.T) {
 	baseURL = srv.URL
 	defer srv.Close()
 
+	baseTransport := http.DefaultTransport
+	client, err := NewClient(Config{
+		BaseURL: srv.URL, UploadURL: srv.URL, TokenSource: StaticTokenSource("secret-token"),
+		Limiter: noopLimiter{}, Retry: &RetryConfig{MaxAttempts: 1},
+		HTTPClient: &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path == "/job-log" {
+				logUsedConfiguredTransport = true
+			}
+			return baseTransport.RoundTrip(req)
+		})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	budget := NewRequestBudget(7)
-	got, err := newTestClient(t, srv, StaticTokenSource("secret-token")).GetPullRequestCI(context.Background(), "acme", "project", 7, CIFailureOptions{
+	got, err := client.GetPullRequestCI(context.Background(), "acme", "project", 7, CIFailureOptions{
 		MaxRuns: 5, MaxJobsPerRun: 5, MaxLogBytes: 5, Logs: "failures_only",
 	}, budget)
 	if err != nil {
@@ -129,6 +150,9 @@ func TestGetPullRequestCINormalizesProvidersAndBoundsLogs(t *testing.T) {
 	log := got.Runs[0].Jobs[0].Log
 	if log == nil || log.Body != "01234" || !log.Truncated {
 		t.Fatalf("log=%+v", log)
+	}
+	if !logUsedConfiguredTransport {
+		t.Fatal("signed log download did not use the configured transport")
 	}
 	var persisted map[string]any
 	data, _ := json.Marshal(got)

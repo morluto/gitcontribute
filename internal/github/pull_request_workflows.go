@@ -573,17 +573,22 @@ func (c *Client) downloadWorkflowJobLog(ctx context.Context, owner, repo string,
 	if err := validateLogDownloadURL(location); err != nil {
 		return CIJobLog{}, err
 	}
-	downloadClient := &http.Client{
-		Timeout: 2 * time.Minute,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if err := validateLogDownloadURL(req.URL); err != nil {
-				return err
-			}
-			if len(via) >= 3 {
-				return errors.New("too many CI log redirects")
-			}
-			return nil
-		},
+	downloadClient := *c.downloadClient
+	if downloadClient.Timeout == 0 {
+		downloadClient.Timeout = 2 * time.Minute
+	}
+	configuredRedirect := downloadClient.CheckRedirect
+	downloadClient.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if err := validateLogDownloadURL(req.URL); err != nil {
+			return err
+		}
+		if len(via) >= 3 {
+			return errors.New("too many CI log redirects")
+		}
+		if configuredRedirect != nil {
+			return configuredRedirect(req, via)
+		}
+		return nil
 	}
 	resp, err := downloadClient.Do(req)
 	if err != nil {
