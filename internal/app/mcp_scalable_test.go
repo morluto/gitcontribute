@@ -396,7 +396,7 @@ func TestJobResultToMCPPreservesEmptyAndPartialTypedOutcomes(t *testing.T) {
 	}
 
 	partial := jobResultToMCP(&contracts.JobResult{
-		ID: "job-partial", Kind: "sync_portfolio", Status: "succeeded",
+		ID: "job-partial", Kind: "sync_pull_request_portfolio", Status: "succeeded",
 		Result:    `{"status":"partial","pull_requests":["acme/rocket#7"],"refreshed":0,"failures":[{"reference":"acme/rocket#7","status":"retryable","reason":"facet_incomplete"}]}`,
 		CreatedAt: "2026-07-19T00:00:00Z",
 	}, true)

@@ -52,3 +52,17 @@ func TestGetJobOutputHidesLegacyStatusFromModelVisibleJSON(t *testing.T) {
 		t.Fatalf("new job state contract missing: %s", data)
 	}
 }
+
+func TestRemovedJobKindsDoNotExposeCompatibilityArtifacts(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []string{"sync_portfolio", "sync_authored_pull_requests", "sync_pull_request_status", "hydrate_threads"} {
+		t.Run(kind, func(t *testing.T) {
+			out := jobResultToMCP(&contracts.JobResult{
+				Kind: kind, Status: "succeeded", Result: `{"status":"complete","items":[]}`,
+			}, true)
+			if len(out.Artifacts) != 0 || out.FollowUp != nil {
+				t.Fatalf("removed job kind exposed compatibility output: artifacts=%+v follow_up=%+v", out.Artifacts, out.FollowUp)
+			}
+		})
+	}
+}

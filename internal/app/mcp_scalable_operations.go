@@ -291,13 +291,13 @@ func (r *MCPReader) HydrateThreads(ctx context.Context, in mcpcontract.HydrateTh
 	if in.MaxPages < 1 || in.MaxPages > 100 {
 		return mcpcontract.JobReference{}, errors.New("max_pages must be between 1 and 100")
 	}
-	id, err := r.submitJob(ctx, "hydrate_threads", in, func(ctx context.Context, report func(string, string) error) (any, error) {
+	id, err := r.submitJob(ctx, jobKindSyncThreadFacets, in, func(ctx context.Context, report func(string, string) error) (any, error) {
 		return r.hydrateThreadsBatch(ctx, in, report)
 	})
 	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
-	return queuedJobReference(id, "hydrate_threads", "thread hydration job started"), nil
+	return queuedJobReference(id, jobKindSyncThreadFacets, "thread facet synchronization job started"), nil
 }
 
 // IndexRepositories submits a durable Git acquisition and safe indexing job

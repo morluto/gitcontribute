@@ -104,7 +104,7 @@ func (f *fakeOptionalCapabilities) MineRepositoryFixPatterns(_ context.Context, 
 	return mcpcontract.JobReference{ID: "job-fix-patterns", Kind: "mine_repository_fix_patterns", Status: "queued"}, nil
 }
 func (*fakeOptionalCapabilities) SyncPortfolio(context.Context, mcpcontract.SyncPortfolioInput) (mcpcontract.JobReference, error) {
-	return mcpcontract.JobReference{ID: "job-portfolio", Kind: "sync_portfolio", Status: "queued"}, nil
+	return mcpcontract.JobReference{ID: "job-portfolio", Kind: "sync_pull_request_portfolio", Status: "queued"}, nil
 }
 func (*fakeOptionalCapabilities) SyncPullRequestFeedback(context.Context, mcpcontract.SyncPullRequestFeedbackInput) (mcpcontract.JobReference, error) {
 	return mcpcontract.JobReference{ID: "job-feedback", Kind: "sync_pull_request_feedback", Status: "queued"}, nil

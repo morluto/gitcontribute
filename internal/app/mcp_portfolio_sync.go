@@ -64,7 +64,7 @@ func (r *MCPReader) SyncPortfolio(ctx context.Context, in mcpcontract.SyncPortfo
 		return mcpcontract.JobReference{}, errors.New("status_max_pages must be between 1 and 20")
 	}
 
-	id, err := r.submitJob(ctx, "sync_portfolio", in, func(ctx context.Context, report func(string, string) error) (any, error) {
+	id, err := r.submitJob(ctx, jobKindSyncPullRequestPortfolio, in, func(ctx context.Context, report func(string, string) error) (any, error) {
 		if in.Selection == "explicit" {
 			references := make([]string, len(in.PullRequests))
 			for i, ref := range in.PullRequests {
@@ -125,7 +125,7 @@ func (r *MCPReader) SyncPortfolio(ctx context.Context, in mcpcontract.SyncPortfo
 	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
-	return queuedJobReference(id, "sync_portfolio", "portfolio synchronization job started"), nil
+	return queuedJobReference(id, jobKindSyncPullRequestPortfolio, "portfolio synchronization job started"), nil
 }
 
 type syncPortfolioResult struct {

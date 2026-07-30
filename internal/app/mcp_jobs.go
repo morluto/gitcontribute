@@ -12,6 +12,11 @@ import (
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
+const (
+	jobKindSyncPullRequestPortfolio = "sync_pull_request_portfolio"
+	jobKindSyncThreadFacets         = "sync_thread_facets"
+)
+
 // GetJob reads a durable job by ID.
 func (r *MCPReader) GetJob(ctx context.Context, in mcpcontract.GetJobInput) (mcpcontract.GetJobOutput, error) {
 	job, err := r.Service.GetJob(ctx, in.ID)
@@ -243,9 +248,9 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 		}
 	case "sync_repository_context":
 		return batch("repository_batch", mcpcontract.ToolGetRepositories, "Read synchronized repository facts and coverage from the offline corpus.")
-	case "sync_threads", "hydrate_threads":
+	case "sync_threads", jobKindSyncThreadFacets:
 		return batch("thread_batch", mcpcontract.ToolGetThreads, "Read synchronized thread facts and coverage from the offline corpus.")
-	case "sync_portfolio":
+	case jobKindSyncPullRequestPortfolio:
 		var result struct {
 			PullRequests []string `json:"pull_requests"`
 			Refreshed    int      `json:"refreshed"`
@@ -270,22 +275,6 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 				Kind: "pull_request_batch", Count: &value, References: append([]string(nil), result.PullRequests...), Failures: failures,
 			}}, followUp(mcpcontract.ToolListPullRequestPortfolio, "", "Read these refreshed pull requests from the offline portfolio.")
 		}
-	case "sync_authored_pull_requests":
-		var result struct {
-			PullRequests    int      `json:"pull_requests"`
-			PullRequestRefs []string `json:"pull_request_refs"`
-		}
-		if json.Unmarshal([]byte(job.Result), &result) == nil {
-			limit := min(len(result.PullRequestRefs), 100)
-			value := mcpcontract.NonNegativeInt(result.PullRequests)
-			return []mcpcontract.JobArtifactReference{{
-				Kind: "pull_request_batch", Count: &value,
-				References:          append([]string(nil), result.PullRequestRefs[:limit]...),
-				ReferencesTruncated: len(result.PullRequestRefs) > limit,
-			}}, followUp(mcpcontract.ToolListPullRequestPortfolio, "", "Read the discovered pull requests from the offline portfolio.")
-		}
-	case "sync_pull_request_status":
-		return batch("pull_request_batch", mcpcontract.ToolListPullRequestPortfolio, "Read the refreshed pull-request portfolio from the offline corpus.")
 	case "sync_pull_request_feedback", "sync_ci_failures":
 		var result pullRequestWorkflowResult
 		if json.Unmarshal([]byte(job.Result), &result) == nil {

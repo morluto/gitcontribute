@@ -1,8 +1,8 @@
 # Contribution operation migration
 
 This release intentionally removes the scalar and compatibility contribution
-surfaces. Existing durable jobs remain readable through `jobs.get`, but their
-stored requests cannot be replayed through removed operations.
+surfaces. Jobs created by removed operations are not replayable after the hard
+cutover; callers must submit the canonical operation instead.
 
 | Removed tool or command | Replacement |
 | --- | --- |
