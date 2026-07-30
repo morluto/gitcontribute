@@ -92,7 +92,7 @@ func TestGetPullRequestCINormalizesProvidersAndBoundsLogs(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v3/repos/acme/project/pulls/7":
-			writeJSON(w, map[string]any{"head": map[string]any{"sha": "head-7"}})
+			writeJSON(w, map[string]any{"head": map[string]any{"sha": "head-7"}, "updated_at": "2026-07-30T10:00:00Z"})
 		case "/api/v3/repos/acme/project/commits/head-7/status":
 			writeJSON(w, map[string]any{"state": "failure", "statuses": []any{map[string]any{"context": "external-ci", "state": "failure", "target_url": "https://ci.example/1"}}})
 		case "/api/v3/repos/acme/project/commits/head-7/check-runs":
@@ -146,6 +146,9 @@ func TestGetPullRequestCINormalizesProvidersAndBoundsLogs(t *testing.T) {
 	}
 	if budget.Completed() != 7 || got.HeadSHA != "head-7" || len(got.Statuses) != 1 || len(got.CheckRuns) != 1 || len(got.Runs) != 1 {
 		t.Fatalf("requests=%d ci=%+v", budget.Completed(), got)
+	}
+	if got.SourceUpdatedAt.IsZero() {
+		t.Fatal("CI snapshot omitted the authoritative pull-request revision")
 	}
 	log := got.Runs[0].Jobs[0].Log
 	if log == nil || log.Body != "01234" || !log.Truncated {

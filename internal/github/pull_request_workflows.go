@@ -96,6 +96,7 @@ type FeedbackThread struct {
 type PullRequestFeedback struct {
 	HeadSHA         string                      `json:"head_sha"`
 	SourceUpdatedAt time.Time                   `json:"source_updated_at"`
+	ThreadState     string                      `json:"thread_state,omitempty"`
 	IssueComments   []FeedbackComment           `json:"issue_comments,omitempty"`
 	Reviews         []FeedbackReview            `json:"submitted_reviews,omitempty"`
 	InlineComments  []FeedbackComment           `json:"inline_comments,omitempty"`
@@ -108,7 +109,7 @@ type PullRequestFeedbackReader interface {
 }
 
 func (c *Client) GetPullRequestFeedback(ctx context.Context, owner, repo string, number int, opts PullRequestFeedbackOptions, budget *RequestBudget) (PullRequestFeedback, error) {
-	out := PullRequestFeedback{Coverage: make(map[string]FeedbackCoverage)}
+	out := PullRequestFeedback{Coverage: make(map[string]FeedbackCoverage), ThreadState: opts.ThreadState}
 	if err := budget.Take(); err != nil {
 		return out, err
 	}
@@ -453,11 +454,12 @@ type CIRun struct {
 	JobsTruncated bool    `json:"jobs_truncated"`
 }
 type PullRequestCI struct {
-	HeadSHA   string                      `json:"head_sha"`
-	Statuses  []CICheck                   `json:"statuses"`
-	CheckRuns []CICheck                   `json:"check_runs"`
-	Runs      []CIRun                     `json:"workflow_runs"`
-	Coverage  map[string]FeedbackCoverage `json:"coverage"`
+	HeadSHA         string                      `json:"head_sha"`
+	SourceUpdatedAt time.Time                   `json:"source_updated_at"`
+	Statuses        []CICheck                   `json:"statuses"`
+	CheckRuns       []CICheck                   `json:"check_runs"`
+	Runs            []CIRun                     `json:"workflow_runs"`
+	Coverage        map[string]FeedbackCoverage `json:"coverage"`
 }
 type PullRequestCIReader interface {
 	GetPullRequestCI(context.Context, string, string, int, CIFailureOptions, *RequestBudget) (PullRequestCI, error)
@@ -473,6 +475,7 @@ func (c *Client) GetPullRequestCI(ctx context.Context, owner, repo string, numbe
 		return out, classifyError(err)
 	}
 	out.HeadSHA = pr.GetHead().GetSHA()
+	out.SourceUpdatedAt = pr.GetUpdatedAt().Time
 
 	for page := 1; ; {
 		if err := budget.Take(); err != nil {
