@@ -87,11 +87,18 @@ func claudeConfigPath(home string) string {
 }
 
 func devinConfigPath(home string) string {
-	return devinConfigPathForOS(home, runtime.GOOS)
+	appData := ""
+	if userHome, err := os.UserHomeDir(); err == nil && filepath.Clean(home) == filepath.Clean(userHome) {
+		appData = os.Getenv("APPDATA")
+	}
+	return devinConfigPathForOS(home, runtime.GOOS, appData)
 }
 
-func devinConfigPathForOS(home, goos string) string {
+func devinConfigPathForOS(home, goos, appData string) string {
 	if goos == "windows" {
+		if appData != "" {
+			return filepath.Join(appData, "devin", "mcp_config.json")
+		}
 		return filepath.Join(home, "AppData", "Roaming", "devin", "mcp_config.json")
 	}
 	return filepath.Join(home, ".config", "devin", "mcp_config.json")

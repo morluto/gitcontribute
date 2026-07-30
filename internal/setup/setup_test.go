@@ -304,11 +304,15 @@ func TestRunConfiguresDevinUserMCPRegistration(t *testing.T) {
 
 func TestDevinConfigPathUsesPlatformUserConfigDirectory(t *testing.T) {
 	home := filepath.Join("home", "alice")
-	if got, want := devinConfigPathForOS(home, "linux"), filepath.Join(home, ".config", "devin", "mcp_config.json"); got != want {
+	if got, want := devinConfigPathForOS(home, "linux", ""), filepath.Join(home, ".config", "devin", "mcp_config.json"); got != want {
 		t.Fatalf("Linux path = %q, want %q", got, want)
 	}
-	if got, want := devinConfigPathForOS(home, "windows"), filepath.Join(home, "AppData", "Roaming", "devin", "mcp_config.json"); got != want {
+	if got, want := devinConfigPathForOS(home, "windows", ""), filepath.Join(home, "AppData", "Roaming", "devin", "mcp_config.json"); got != want {
 		t.Fatalf("Windows path = %q, want %q", got, want)
+	}
+	redirected := filepath.Join("redirected", "roaming")
+	if got, want := devinConfigPathForOS(home, "windows", redirected), filepath.Join(redirected, "devin", "mcp_config.json"); got != want {
+		t.Fatalf("redirected Windows path = %q, want %q", got, want)
 	}
 }
 
