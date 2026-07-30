@@ -73,9 +73,10 @@ func TestBoundedWorkflowSnapshotsReturnRetryablePartialItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
+	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
 		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7, SourceUpdatedAt: now,
-	}, `{}`); err != nil {
+	}, `{}`)
+	if err != nil {
 		t.Fatal(err)
 	}
 	svc.SetGitHubReader(&boundedWorkflowReader{
@@ -117,12 +118,34 @@ func TestBoundedWorkflowSnapshotsReturnRetryablePartialItems(t *testing.T) {
 	if ci.BatchStatus != "partial" || ci.Items[0].Status != "retryable" || ci.Items[0].ResourceURI != "" {
 		t.Fatalf("CI result = %+v", ci)
 	}
+
+	// A budget can be exhausted immediately after the PR lookup, before any
+	// child collection adds coverage. The refresh must still advance the
+	// stored facet so the prior complete report is no longer treated as fresh.
+	svc.SetGitHubReader(&boundedWorkflowReader{
+		ci:    github.PullRequestCI{HeadSHA: "new-head", SourceUpdatedAt: now.Add(time.Hour)},
+		ciErr: github.ErrRequestBudgetExhausted,
+	})
+	if _, err := reader.syncCIFailures(ctx, mcpcontract.SyncCIFailuresInput{
+		PullRequests: []mcpcontract.ThreadRef{ref}, MaxRunsPerPR: 1, MaxJobsPerRun: 1,
+		MaxLogBytesPerJob: 1024, MaxRequests: 1,
+	}, report); err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := svc.corpus.GetCoverage(ctx, repo.ID, &thread.ID, facetPRCIReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if coverage != nil && coverage.Complete {
+		t.Fatalf("CI coverage remained complete after pre-collection budget exhaustion: %+v", coverage)
+	}
 }
 
 type boundedWorkflowReader struct {
 	panicRadarReader
 	feedback github.PullRequestFeedback
 	ci       github.PullRequestCI
+	ciErr    error
 }
 
 func (r *boundedWorkflowReader) GetPullRequestFeedback(context.Context, string, string, int, github.PullRequestFeedbackOptions, *github.RequestBudget) (github.PullRequestFeedback, error) {
@@ -130,7 +153,7 @@ func (r *boundedWorkflowReader) GetPullRequestFeedback(context.Context, string, 
 }
 
 func (r *boundedWorkflowReader) GetPullRequestCI(context.Context, string, string, int, github.CIFailureOptions, *github.RequestBudget) (github.PullRequestCI, error) {
-	return r.ci, nil
+	return r.ci, r.ciErr
 }
 
 func TestFeedbackResourceUsesPublicChannelsAndPreservesThreadSelection(t *testing.T) {

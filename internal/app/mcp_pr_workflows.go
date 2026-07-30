@@ -261,7 +261,11 @@ func (r *MCPReader) syncCIFailures(ctx context.Context, in mcpcontract.SyncCIFai
 		}, budget)
 		if readErr != nil {
 			var persistErr error
-			if snapshot.HeadSHA != "" && len(snapshot.Coverage) > 0 {
+			// The PR lookup establishes the head even when the first child
+			// collection consumes the remaining request budget. Advance the
+			// facet in that case so an older complete report is not presented as
+			// current after an unsuccessful refresh.
+			if snapshot.HeadSHA != "" {
 				persistErr = r.persistPullRequestWorkflowFacet(ctx, ref, facetPRCIReport, snapshot.SourceUpdatedAt, snapshot, false)
 			}
 			if persistErr != nil {

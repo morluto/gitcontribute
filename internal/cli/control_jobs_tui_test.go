@@ -100,6 +100,8 @@ type fakeJobService struct {
 	shownID      string
 	cancelledID  string
 	job          *contracts.JobResult
+	getErrors    map[string]error
+	cancelErrors map[string]error
 }
 
 func (f *fakeJobService) ListJobs(_ context.Context, status string, _ int) (*contracts.JobListResult, error) {
@@ -109,11 +111,17 @@ func (f *fakeJobService) ListJobs(_ context.Context, status string, _ int) (*con
 
 func (f *fakeJobService) GetJob(_ context.Context, id string) (*contracts.JobResult, error) {
 	f.shownID = id
+	if err := f.getErrors[id]; err != nil {
+		return nil, err
+	}
 	return f.job, nil
 }
 
 func (f *fakeJobService) CancelJob(_ context.Context, id string) (*contracts.JobResult, error) {
 	f.cancelledID = id
+	if err := f.cancelErrors[id]; err != nil {
+		return nil, err
+	}
 	return f.job, nil
 }
 
@@ -136,6 +144,28 @@ func TestJobCommands(t *testing.T) {
 	requireNoErr(t, c.Run(context.Background(), []string{"jobs", "cancel", "job-1"}))
 	if svc.cancelledID != "job-1" {
 		t.Fatalf("cancelled id=%q", svc.cancelledID)
+	}
+}
+
+func TestJobBatchPreservesPerIDFailuresAndHumanRendering(t *testing.T) {
+	t.Parallel()
+	svc := &fakeJobService{
+		fakeService:  &fakeService{},
+		job:          &contracts.JobResult{ID: "job-ok", Kind: "crawl", Status: "running", CreatedAt: "now"},
+		getErrors:    map[string]error{"job-missing": errors.New("job not found")},
+		cancelErrors: map[string]error{"job-missing": errors.New("job not found")},
+	}
+	c, stdout, _ := newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"jobs", "get", "job-missing", "job-ok"}))
+	output := stdout.String()
+	if !strings.Contains(output, "job-missing") || !strings.Contains(output, "job-ok") {
+		t.Fatalf("batch output omitted an item outcome: %q", output)
+	}
+
+	c, stdout, _ = newTestCLI(svc, nil)
+	requireNoErr(t, c.Run(context.Background(), []string{"jobs", "cancel", "job-missing", "job-ok", "--json"}))
+	if !strings.Contains(stdout.String(), `"id": "job-missing"`) || !strings.Contains(stdout.String(), `"id": "job-ok"`) {
+		t.Fatalf("JSON batch output omitted an item outcome: %s", stdout.String())
 	}
 }
 

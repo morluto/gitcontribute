@@ -77,7 +77,7 @@ func (c *CLI) runJobsBatch(ctx context.Context, service contracts.JobService, id
 	if len(ids) < 1 || len(ids) > 100 {
 		return NewCLIError(ExitUsage, errors.New("ids must contain 1 to 100 items"))
 	}
-	results := make([]*contracts.JobResult, 0, len(ids))
+	results := make([]contracts.JobResult, 0, len(ids))
 	for _, id := range ids {
 		var (
 			result *contracts.JobResult
@@ -89,9 +89,14 @@ func (c *CLI) runJobsBatch(ctx context.Context, service contracts.JobService, id
 			result, err = service.GetJob(ctx, id)
 		}
 		if err != nil {
-			return c.mapError(err)
+			results = append(results, contracts.JobResult{ID: id, Status: "failed", Error: err.Error()})
+			continue
 		}
-		results = append(results, result)
+		if result == nil {
+			results = append(results, contracts.JobResult{ID: id, Status: "failed", Error: "job service returned no result"})
+			continue
+		}
+		results = append(results, *result)
 	}
-	return c.render(jsonOutput, results)
+	return c.render(jsonOutput, &contracts.JobListResult{Jobs: results})
 }

@@ -192,6 +192,27 @@ func setDefault(schema *schemaBuilder, name string, value any) {
 	}
 }
 
+func constrainPullRequestRefs(builder *schemaBuilder, name string) {
+	array := property(builder, name)
+	if array == nil || array.Items == nil {
+		return
+	}
+	thread := builder.schema.Defs["ThreadRef"]
+	if thread == nil {
+		return
+	}
+	threadBuilder := &schemaBuilder{schema: thread, err: builder.err}
+	setEnum(threadBuilder, "kind", "pull_request")
+	setMinimum(threadBuilder, "number", 1)
+	for _, field := range []string{"owner", "repo"} {
+		value := property(threadBuilder, field)
+		if value != nil {
+			value.MinLength = jsonschema.Ptr(1)
+			value.Pattern = nonWhitespacePattern
+		}
+	}
+}
+
 func setConst(schema *schemaBuilder, name string, value any) {
 	p := property(schema, name)
 	if p != nil {

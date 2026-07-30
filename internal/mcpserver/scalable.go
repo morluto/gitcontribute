@@ -235,6 +235,7 @@ func (s *Server) registerScalable() {
 	addCatalogTool(s, catalogTool[mcpcontract.SyncPortfolioInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPortfolio, title: "Synchronize a pull-request portfolio", description: "Use for an authored portfolio or 1-100 exact pull requests. Refreshes PR details, merge state, checks, review state, unresolved threads, merge queue, files, and closing issues in one durable job.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncPortfolioInput](func(sc *schemaBuilder) {
 		setEnum(sc, "selection", "authored", "explicit")
 		setArrayBounds(sc, "pull_requests", 1, 100)
+		constrainPullRequestRefs(sc, "pull_requests")
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit", 1, 100)
 		setRange(sc, "discovery_max_requests", 2, 1000)
@@ -244,6 +245,7 @@ func (s *Server) registerScalable() {
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a pull-request portfolio synchronization job."), handler: s.syncPortfolio})
 	addCatalogTool(s, catalogTool[mcpcontract.SyncPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPullRequestFeedback, title: "Synchronize pull-request feedback", description: "Fetch independently covered issue comments, submitted reviews, inline comments, and review-thread topology for 1-50 exact pull requests under one total request budget.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackOperator], input: inputSchema[mcpcontract.SyncPullRequestFeedbackInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "pull_requests", 1, 50)
+		constrainPullRequestRefs(sc, "pull_requests")
 		setArrayBounds(sc, "channels", 1, 4)
 		setArrayEnum(sc, "channels", "issue_comments", "submitted_reviews", "inline_comments", "review_threads")
 		property(sc, "channels").UniqueItems = true
@@ -253,6 +255,7 @@ func (s *Server) registerScalable() {
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded pull-request feedback job."), handler: s.syncPullRequestFeedback})
 	addCatalogTool(s, catalogTool[mcpcontract.SyncCIFailuresInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncCIFailures, title: "Synchronize pull-request CI failures", description: "Resolve each current head SHA and normalize legacy statuses, check runs, Actions runs, jobs, and optionally bounded failed-job logs for 1-20 exact pull requests.", annotations: networkReadAnnotations(), supportedBy: supports[CIFailureOperator], input: inputSchema[mcpcontract.SyncCIFailuresInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "pull_requests", 1, 20)
+		constrainPullRequestRefs(sc, "pull_requests")
 		setEnum(sc, "logs", "none", "failures_only")
 		setRange(sc, "max_runs_per_pr", 1, 100)
 		setRange(sc, "max_jobs_per_run", 1, 100)

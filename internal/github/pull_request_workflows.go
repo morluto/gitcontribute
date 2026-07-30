@@ -133,6 +133,12 @@ func (c *Client) GetPullRequestFeedback(ctx context.Context, owner, repo string,
 			var graphHead string
 			out.ReviewThreads, graphHead, updated, out.Coverage[channel], err = c.feedbackReviewThreads(ctx, owner, repo, number, opts, budget)
 			if err == nil && graphHead != out.HeadSHA {
+				// Do not let a topology fetched for a different head be
+				// persisted as complete data under the original PR revision.
+				coverage := out.Coverage[channel]
+				coverage.Complete = false
+				coverage.Reason = "head_changed"
+				out.Coverage[channel] = coverage
 				err = &TransientError{Cause: errors.New("pull request head changed while feedback was fetched")}
 			}
 			if updated.After(out.SourceUpdatedAt) {
