@@ -105,7 +105,6 @@ type rootCmd struct {
 	Coverage      coverageCmd      `cmd:"" help:"Show local repository facet coverage"`
 	Runs          runsCmd          `cmd:"" help:"List durable operation runs"`
 	Jobs          jobsCmd          `cmd:"" help:"List durable background jobs"`
-	Job           jobCmd           `cmd:"" help:"Inspect or cancel a durable job"`
 	Neighbors     neighborsCmd     `cmd:"" help:"Find similar local threads"`
 	Export        exportCmd        `cmd:"" help:"Export redacted local bundles"`
 	Clusters      clustersCmd      `cmd:"" help:"List or explicitly refresh duplicate-candidate clusters"`
@@ -389,24 +388,25 @@ type runsCmd struct {
 }
 
 type jobsCmd struct {
+	List   jobsListCmd   `cmd:"" help:"List durable jobs"`
+	Get    jobsGetCmd    `cmd:"" help:"Get one or more durable jobs"`
+	Cancel jobsCancelCmd `cmd:"" help:"Request bounded cancellation"`
+}
+
+type jobsListCmd struct {
 	Status string `name:"status" help:"Filter by status (queued, running, succeeded, failed, or cancelled)"`
 	Limit  int    `name:"limit" default:"50" help:"Maximum jobs to return"`
 	JSON   bool   `name:"json" help:"Print the result as JSON"`
 }
 
-type jobCmd struct {
-	Show   jobShowCmd   `cmd:"" help:"Show one durable job"`
-	Cancel jobCancelCmd `cmd:"" help:"Request cancellation"`
+type jobsGetCmd struct {
+	IDs  []string `arg:"" name:"id" help:"One to 100 opaque job IDs"`
+	JSON bool     `name:"json" help:"Print the result as JSON"`
 }
 
-type jobShowCmd struct {
-	ID   string `arg:"" help:"Opaque job ID"`
-	JSON bool   `name:"json" help:"Print the result as JSON"`
-}
-
-type jobCancelCmd struct {
-	ID   string `arg:"" help:"Opaque job ID"`
-	JSON bool   `name:"json" help:"Print the result as JSON"`
+type jobsCancelCmd struct {
+	IDs  []string `arg:"" name:"id" help:"One to 100 opaque job IDs"`
+	JSON bool     `name:"json" help:"Print the result as JSON"`
 }
 
 type neighborsCmd struct {
@@ -605,9 +605,7 @@ func (c *CLI) Run(ctx context.Context, args []string) error {
 	case "runs":
 		return c.runRuns(ctx, &cli.Runs)
 	case "jobs":
-		return c.runJobs(ctx, &cli.Jobs)
-	case "job":
-		return c.runJob(ctx, command, &cli.Job)
+		return c.runJobs(ctx, command, &cli.Jobs)
 	case "neighbors":
 		return c.runNeighbors(ctx, &cli.Neighbors)
 	case "export":
@@ -1528,7 +1526,24 @@ func (c *CLI) runRuns(ctx context.Context, cmd *runsCmd) error {
 	return c.render(cmd.JSON, result)
 }
 
-func (c *CLI) runJobs(ctx context.Context, cmd *jobsCmd) error {
+func (c *CLI) runJobs(ctx context.Context, command string, cmd *jobsCmd) error {
+	service, err := c.jobService()
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "jobs list":
+		return c.runJobsList(ctx, service, &cmd.List)
+	case "jobs get":
+		return c.runJobsBatch(ctx, service, cmd.Get.IDs, false, cmd.Get.JSON)
+	case "jobs cancel":
+		return c.runJobsBatch(ctx, service, cmd.Cancel.IDs, true, cmd.Cancel.JSON)
+	default:
+		return NewCLIError(ExitUsage, fmt.Errorf("unknown jobs command: %s", command))
+	}
+}
+
+func (c *CLI) runJobsList(ctx context.Context, service contracts.JobService, cmd *jobsListCmd) error {
 	if cmd.Limit <= 0 || cmd.Limit > 1000 {
 		return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 1000"))
 	}
@@ -1539,10 +1554,6 @@ func (c *CLI) runJobs(ctx context.Context, cmd *jobsCmd) error {
 			return NewCLIError(ExitUsage, fmt.Errorf("invalid job status %q", cmd.Status))
 		}
 	}
-	service, err := c.jobService()
-	if err != nil {
-		return err
-	}
 	result, err := service.ListJobs(ctx, cmd.Status, cmd.Limit)
 	if err != nil {
 		return c.mapError(err)
@@ -1550,27 +1561,27 @@ func (c *CLI) runJobs(ctx context.Context, cmd *jobsCmd) error {
 	return c.render(cmd.JSON, result)
 }
 
-func (c *CLI) runJob(ctx context.Context, command string, cmd *jobCmd) error {
-	service, err := c.jobService()
-	if err != nil {
-		return err
+func (c *CLI) runJobsBatch(ctx context.Context, service contracts.JobService, ids []string, cancel, jsonOutput bool) error {
+	if len(ids) < 1 || len(ids) > 100 {
+		return NewCLIError(ExitUsage, errors.New("ids must contain 1 to 100 items"))
 	}
-	var result *contracts.JobResult
-	var jsonOutput bool
-	switch command {
-	case "job show":
-		result, err = service.GetJob(ctx, cmd.Show.ID)
-		jsonOutput = cmd.Show.JSON
-	case "job cancel":
-		result, err = service.CancelJob(ctx, cmd.Cancel.ID)
-		jsonOutput = cmd.Cancel.JSON
-	default:
-		return NewCLIError(ExitUsage, fmt.Errorf("unknown job command: %s", command))
+	results := make([]*contracts.JobResult, 0, len(ids))
+	for _, id := range ids {
+		var (
+			result *contracts.JobResult
+			err    error
+		)
+		if cancel {
+			result, err = service.CancelJob(ctx, id)
+		} else {
+			result, err = service.GetJob(ctx, id)
+		}
+		if err != nil {
+			return c.mapError(err)
+		}
+		results = append(results, result)
 	}
-	if err != nil {
-		return c.mapError(err)
-	}
-	return c.render(jsonOutput, result)
+	return c.render(jsonOutput, results)
 }
 
 func (c *CLI) runNeighbors(ctx context.Context, cmd *neighborsCmd) error {

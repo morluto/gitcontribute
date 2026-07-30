@@ -7,6 +7,23 @@ import (
 	"github.com/morluto/gitcontribute/internal/similarity"
 )
 
+// WorkspaceResource is the canonical host-path-free representation of a
+// managed workspace.
+type WorkspaceResource struct {
+	SchemaVersion   string `json:"schema_version"`
+	ID              string `json:"id"`
+	InvestigationID string `json:"investigation_id,omitempty"`
+	Owner           string `json:"owner"`
+	Repo            string `json:"repo"`
+	BaseSHA         string `json:"base_sha"`
+	HeadSHA         string `json:"head_sha"`
+	MergeBase       string `json:"merge_base,omitempty"`
+	Ownership       string `json:"ownership"`
+	Dirty           bool   `json:"dirty"`
+	HasUntracked    bool   `json:"has_untracked"`
+	CreatedAt       string `json:"created_at"`
+}
+
 // Reader is the local, read-only application boundary exposed through MCP.
 // Implementations must not perform network access.
 type Reader interface {

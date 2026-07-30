@@ -12,14 +12,11 @@ func (s *Server) registerResourceTemplates() {
 	templates := []resourceTemplateDefinition{
 		{"gitcontribute://repository/{owner}/{repo}", "Repository", "Local repository record"},
 		{"gitcontribute://thread/{owner}/{repo}/{kind}/{number}", "Thread", "Local issue or pull request"},
-		{"gitcontribute://threads/{owner}/{repo}/{number}", "Numbered thread", "Local issue or pull request with kind resolved from the corpus"},
 		{"gitcontribute://dossier/{owner}/{repo}", "Dossier", "Local source-backed repository dossier"},
 		{"gitcontribute://investigation/{id}", "Investigation", "Local investigation workspace"},
-		{"gitcontribute://opportunities/{investigation_id}", "Opportunities", "Local opportunities for an investigation"},
 		{"gitcontribute://opportunity/{id}", "Opportunity", "Local contribution opportunity"},
 		{"gitcontribute://evidence/{scope}/{id}", "Evidence", "Local evidence for an investigation or opportunity"},
 		{"gitcontribute://readiness/{opportunity_id}", "Readiness", "Local contribution readiness report"},
-		{"gitcontribute://workflow/contribution/{opportunity_id}", "Contribution workflow", "Safe contribution workflow resource links and prompts"},
 		{"gitcontribute://lens/{name}", "Lens", "Saved lens definition"},
 	}
 	if _, ok := s.reader.(FixPatternReader); ok {
@@ -45,6 +42,28 @@ func (s *Server) registerResourceTemplates() {
 			template: "gitcontribute://manifest/{id}",
 			name:     "Manifest", description: "Persisted contribution evidence manifest",
 		})
+	}
+	if _, ok := s.reader.(workspaceResourceReader); ok {
+		templates = append(templates, resourceTemplateDefinition{
+			template: "gitcontribute://workspace/{id}",
+			name:     "Workspace", description: "Host-path-free managed workspace with immutable recorded revisions",
+		})
+	}
+	if _, ok := s.reader.(pullRequestWorkflowResourceReader); ok {
+		templates = append(templates,
+			resourceTemplateDefinition{
+				template: "gitcontribute://pull-request-feedback/{owner}/{repo}/{number}",
+				name:     "Pull-request feedback", description: "Persisted feedback channels with independent coverage",
+			},
+			resourceTemplateDefinition{
+				template: "gitcontribute://ci-failure-report/{owner}/{repo}/{number}",
+				name:     "CI failure report", description: "Persisted statuses, checks, workflow runs, and jobs",
+			},
+			resourceTemplateDefinition{
+				template: "gitcontribute://ci-job-log/{owner}/{repo}/{number}/{job_id}",
+				name:     "CI job log", description: "Bounded persisted log for one CI job",
+			},
+		)
 	}
 	addResourceTemplates(s, templates)
 }

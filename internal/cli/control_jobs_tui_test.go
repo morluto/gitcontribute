@@ -121,19 +121,19 @@ func TestJobCommands(t *testing.T) {
 	t.Parallel()
 	svc := &fakeJobService{fakeService: &fakeService{}, job: &contracts.JobResult{ID: "job-1", Kind: "crawl", Status: "running", CreatedAt: "now"}}
 	c, stdout, _ := newTestCLI(svc, nil)
-	requireNoErr(t, c.Run(context.Background(), []string{"jobs", "--status", "running", "--json"}))
+	requireNoErr(t, c.Run(context.Background(), []string{"jobs", "list", "--status", "running", "--json"}))
 	if svc.listedStatus != "running" || !containsText(stdout.String(), "job-1") {
 		t.Fatalf("status=%q output=%q", svc.listedStatus, stdout.String())
 	}
 
 	c, _, _ = newTestCLI(svc, nil)
-	requireNoErr(t, c.Run(context.Background(), []string{"job", "show", "job-1"}))
+	requireNoErr(t, c.Run(context.Background(), []string{"jobs", "get", "job-1"}))
 	if svc.shownID != "job-1" {
 		t.Fatalf("shown id=%q", svc.shownID)
 	}
 
 	c, _, _ = newTestCLI(svc, nil)
-	requireNoErr(t, c.Run(context.Background(), []string{"job", "cancel", "job-1"}))
+	requireNoErr(t, c.Run(context.Background(), []string{"jobs", "cancel", "job-1"}))
 	if svc.cancelledID != "job-1" {
 		t.Fatalf("cancelled id=%q", svc.cancelledID)
 	}

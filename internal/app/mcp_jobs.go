@@ -282,6 +282,47 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 		}
 	case "sync_pull_request_status":
 		return batch("pull_request_batch", mcpcontract.ToolListPullRequestPortfolio, "Read the refreshed pull-request portfolio from the offline corpus.")
+	case "sync_pull_request_feedback", "sync_ci_failures":
+		var result pullRequestWorkflowResult
+		if json.Unmarshal([]byte(job.Result), &result) == nil {
+			kind := "pull_request_feedback"
+			tool := mcpcontract.ToolSyncPullRequestFeedback
+			reason := "Read the persisted feedback snapshots through their resource links."
+			if job.Kind == "sync_ci_failures" {
+				kind, tool = "ci_failure_report", mcpcontract.ToolSyncCIFailures
+				reason = "Read the persisted CI reports and bounded job logs through their resource links."
+			}
+			artifact := mcpcontract.JobArtifactReference{Kind: kind}
+			if len(result.Items) == 0 {
+				var request struct {
+					PullRequests []mcpcontract.ThreadRef `json:"pull_requests"`
+				}
+				if json.Unmarshal([]byte(job.Request), &request) == nil {
+					for _, ref := range request.PullRequests {
+						resourceKind := "pull-request-feedback"
+						if job.Kind == "sync_ci_failures" {
+							resourceKind = "ci-failure-report"
+						}
+						artifact.References = append(artifact.References, fmt.Sprintf(
+							"gitcontribute://%s/%s/%s/%d", resourceKind, ref.Owner, ref.Repo, ref.Number,
+						))
+					}
+				}
+			}
+			for _, item := range result.Items {
+				if item.Status == "complete" {
+					artifact.References = append(artifact.References, item.ResourceURI)
+					continue
+				}
+				artifact.Failures = append(artifact.Failures, mcpcontract.JobArtifactFailure{
+					Reference: item.Key, Status: item.Status, Reason: item.Code, Message: item.Message,
+					RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfterMS),
+				})
+			}
+			count := mcpcontract.NonNegativeInt(len(artifact.References))
+			artifact.Count = &count
+			return []mcpcontract.JobArtifactReference{artifact}, followUp(tool, "", reason)
+		}
 	case "index_repositories":
 		return batch("code_index", mcpcontract.ToolSearchCode, "Search the locally indexed code corpus.")
 	}

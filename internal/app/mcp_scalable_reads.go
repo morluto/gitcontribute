@@ -12,6 +12,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/precedent"
@@ -19,6 +20,117 @@ import (
 	"github.com/morluto/gitcontribute/internal/ranking"
 	"github.com/morluto/gitcontribute/internal/similarity"
 )
+
+// Workspace returns a host-path-free workspace projection for offline resource
+// reads.
+func (r *MCPReader) Workspace(ctx context.Context, id string) (mcpcontract.WorkspaceResource, error) {
+	c, err := r.openReadOnlyCorpus(ctx)
+	if err != nil {
+		return mcpcontract.WorkspaceResource{}, err
+	}
+	ws, err := c.GetWorkspace(ctx, id)
+	if err != nil {
+		return mcpcontract.WorkspaceResource{}, err
+	}
+	return mcpcontract.WorkspaceResource{
+		SchemaVersion: "gitcontribute.workspace.v1", ID: ws.Name, InvestigationID: ws.InvestigationID,
+		Owner: ws.RepoOwner, Repo: ws.RepoName, BaseSHA: ws.BaseSHA, HeadSHA: ws.CandidateSHA,
+		MergeBase: ws.MergeBase, Ownership: string(ws.Ownership), Dirty: ws.Dirty,
+		HasUntracked: ws.HasUntracked, CreatedAt: formatTime(ws.CreatedAt),
+	}, nil
+}
+
+func (r *MCPReader) PullRequestFeedbackResource(ctx context.Context, owner, repo string, number int) (map[string]any, error) {
+	facets := []string{facetPRFeedbackIssueComments, facetPRFeedbackReviews, facetPRFeedbackInlineComments, facetPRFeedbackReviewThreads}
+	out := map[string]any{"schema_version": "gitcontribute.pull-request-feedback.v1", "owner": owner, "repo": repo, "number": number, "channels": map[string]any{}}
+	channels := out["channels"].(map[string]any)
+	for _, facet := range facets {
+		value, err := r.pullRequestWorkflowFacet(ctx, owner, repo, number, facet)
+		if err != nil {
+			if isCorpusNotFound(err) {
+				continue
+			}
+			return nil, err
+		}
+		channels[facet] = value
+	}
+	if len(channels) == 0 {
+		return nil, failure.NotFound(errors.New("pull-request feedback is not stored"))
+	}
+	return out, nil
+}
+
+func (r *MCPReader) CIFailureResource(ctx context.Context, owner, repo string, number int) (map[string]any, error) {
+	value, err := r.pullRequestWorkflowFacet(ctx, owner, repo, number, facetPRCIReport)
+	if err != nil {
+		return nil, err
+	}
+	value["schema_version"] = "gitcontribute.ci-failure-report.v1"
+	value["owner"], value["repo"], value["number"] = owner, repo, number
+	return value, nil
+}
+
+func (r *MCPReader) CIJobLogResource(ctx context.Context, owner, repo string, number int, jobID int64) (map[string]any, error) {
+	report, err := r.CIFailureResource(ctx, owner, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	runs, _ := report["workflow_runs"].([]any)
+	for _, rawRun := range runs {
+		run, _ := rawRun.(map[string]any)
+		jobs, _ := run["jobs"].([]any)
+		for _, rawJob := range jobs {
+			job, _ := rawJob.(map[string]any)
+			id, _ := job["id"].(float64)
+			if int64(id) == jobID {
+				log, ok := job["log"].(map[string]any)
+				if !ok {
+					return nil, failure.NotFound(errors.New("CI job log is not stored"))
+				}
+				log["schema_version"] = "gitcontribute.ci-job-log.v1"
+				return log, nil
+			}
+		}
+	}
+	return nil, failure.NotFound(errors.New("CI job log is not stored"))
+}
+
+func (r *MCPReader) pullRequestWorkflowFacet(ctx context.Context, owner, repo string, number int, facet string) (map[string]any, error) {
+	c, err := r.openReadOnlyCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	storedRepo, err := c.GetRepository(ctx, owner, repo)
+	if err != nil || storedRepo == nil {
+		if err == nil {
+			err = failure.NotFound(errors.New("repository is not stored"))
+		}
+		return nil, err
+	}
+	thread, err := c.GetThreadByNumber(ctx, storedRepo.ID, number)
+	if err != nil || thread == nil {
+		if err == nil {
+			err = failure.NotFound(errors.New("pull request is not stored"))
+		}
+		return nil, err
+	}
+	observations, _, err := c.ListFacetObservationsBounded(ctx, storedRepo.ID, &thread.ID, facet, 1)
+	if err != nil {
+		return nil, err
+	}
+	if len(observations) == 0 {
+		return nil, failure.NotFound(errors.New("facet is not stored"))
+	}
+	var value map[string]any
+	if err := json.Unmarshal([]byte(observations[0].Payload), &value); err != nil {
+		return nil, err
+	}
+	return value, nil
+}
+
+func isCorpusNotFound(err error) bool {
+	return failure.Is(err, failure.KindNotFound)
+}
 
 // GetRepositories performs an offline, input-ordered corpus read and clears
 // repository facts when metadata coverage has not been observed.
@@ -234,17 +346,20 @@ func (r *MCPReader) GetJobs(ctx context.Context, in mcpcontract.GetJobsInput) (m
 // ListPullRequestPortfolio performs an offline projection over stored authored
 // PRs and status facets; unsupported health facets remain explicitly unknown.
 func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract.ListPullRequestPortfolioInput) (mcpcontract.ListPullRequestPortfolioOutput, error) {
+	if len(in.Authors) > 1 {
+		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("authors must contain at most one item")
+	}
 	if in.State == "" {
 		in.State = "open"
 	}
 	if in.State != "open" && in.State != "closed" && in.State != "all" {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("state must be open, closed, or all")
 	}
-	if in.ResponseFormat == "" {
-		in.ResponseFormat = "concise"
+	if in.View == "" {
+		in.View = "compact"
 	}
-	if in.ResponseFormat != "concise" && in.ResponseFormat != "detailed" {
-		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("response_format must be concise or detailed")
+	if in.View != "compact" && in.View != "full" {
+		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("view must be compact or full")
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
@@ -256,16 +371,20 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
-	page, err := c.ListPullRequestPortfolioPage(ctx, strings.TrimSpace(in.Author), in.State, in.Limit)
+	author := ""
+	if len(in.Authors) > 0 {
+		author = strings.TrimSpace(in.Authors[0])
+	}
+	page, err := c.ListPullRequestPortfolioPage(ctx, author, in.State, in.Limit)
 	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
-	format := portfolioResponseFormat(in.ResponseFormat)
+	format := portfolioResponseFormat(map[string]string{"compact": "concise", "full": "detailed"}[in.View])
 	readSet, err := loadPortfolioReadSet(ctx, c, page.PullRequests, format)
 	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
-	out := mcpcontract.ListPullRequestPortfolioOutput{Status: "complete", ResponseFormat: in.ResponseFormat, RuleVersion: "portfolio.v2", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpcontract.PullRequestPortfolioItem, 0, len(page.PullRequests)), Total: page.Total, Truncated: page.Truncated}
+	out := mcpcontract.ListPullRequestPortfolioOutput{Status: "complete", View: in.View, RuleVersion: "portfolio.v2", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpcontract.PullRequestPortfolioItem, 0, len(page.PullRequests)), Total: page.Total, Truncated: page.Truncated}
 	for _, storedPR := range page.PullRequests {
 		item, err := portfolioItem(storedPR, r.now(), readSet, format)
 		if err != nil {

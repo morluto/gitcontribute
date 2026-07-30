@@ -54,10 +54,15 @@ type GitHubOperator interface {
 	SyncRepositoryContext(context.Context, mcpcontract.SyncRepositoryContextInput) (mcpcontract.JobReference, error)
 	SyncThreads(context.Context, mcpcontract.SyncThreadsInput) (mcpcontract.JobReference, error)
 	HydrateThreads(context.Context, mcpcontract.HydrateThreadsInput) (mcpcontract.JobReference, error)
-	GetAuthenticatedIdentity(context.Context) (mcpcontract.AuthenticatedIdentityOutput, error)
-	SyncAuthoredPullRequests(context.Context, mcpcontract.SyncAuthoredPullRequestsInput) (mcpcontract.JobReference, error)
-	SyncPullRequestStatus(context.Context, mcpcontract.SyncPullRequestStatusInput) (mcpcontract.JobReference, error)
 	SyncPortfolio(context.Context, mcpcontract.SyncPortfolioInput) (mcpcontract.JobReference, error)
+}
+
+type PullRequestFeedbackOperator interface {
+	SyncPullRequestFeedback(context.Context, mcpcontract.SyncPullRequestFeedbackInput) (mcpcontract.JobReference, error)
+}
+
+type CIFailureOperator interface {
+	SyncCIFailures(context.Context, mcpcontract.SyncCIFailuresInput) (mcpcontract.JobReference, error)
 }
 
 // FixPatternOperator owns the bounded repository-level search, finalist

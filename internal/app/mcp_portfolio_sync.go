@@ -12,27 +12,46 @@ import (
 // SyncPortfolio submits one bounded job that discovers pull requests authored
 // by the active credential and refreshes health for the resulting stored set.
 func (r *MCPReader) SyncPortfolio(ctx context.Context, in mcpcontract.SyncPortfolioInput) (mcpcontract.JobReference, error) {
-	if in.State == "" {
+	if in.Selection == "" {
+		in.Selection = "authored"
+	}
+	if in.Selection != "authored" && in.Selection != "explicit" {
+		return mcpcontract.JobReference{}, errors.New("selection must be authored or explicit")
+	}
+	if in.Selection == "explicit" {
+		if len(in.PullRequests) < 1 || len(in.PullRequests) > 100 {
+			return mcpcontract.JobReference{}, errors.New("pull_requests must contain 1 to 100 items in explicit mode")
+		}
+		if err := rejectDuplicateThreadRefs(in.PullRequests); err != nil {
+			return mcpcontract.JobReference{}, err
+		}
+		if in.State != "" || in.UpdatedAfter != "" || in.Limit != 0 || in.DiscoveryMaxRequests != 0 {
+			return mcpcontract.JobReference{}, errors.New("state, updated_after, limit, and discovery_max_requests are only valid in authored mode")
+		}
+	} else if len(in.PullRequests) > 0 {
+		return mcpcontract.JobReference{}, errors.New("pull_requests is only valid in explicit mode")
+	}
+	if in.Selection == "authored" && in.State == "" {
 		in.State = "open"
 	}
-	if in.State != "open" && in.State != "closed" && in.State != "all" {
+	if in.Selection == "authored" && in.State != "open" && in.State != "closed" && in.State != "all" {
 		return mcpcontract.JobReference{}, errors.New("state must be open, closed, or all")
 	}
-	if in.UpdatedAfter != "" {
+	if in.Selection == "authored" && in.UpdatedAfter != "" {
 		if _, err := time.Parse(time.RFC3339, in.UpdatedAfter); err != nil {
 			return mcpcontract.JobReference{}, errors.New("updated_after must be RFC 3339")
 		}
 	}
-	if in.Limit == 0 {
+	if in.Selection == "authored" && in.Limit == 0 {
 		in.Limit = 100
 	}
-	if in.Limit < 1 || in.Limit > 100 {
+	if in.Selection == "authored" && (in.Limit < 1 || in.Limit > 100) {
 		return mcpcontract.JobReference{}, errors.New("limit must be between 1 and 100")
 	}
-	if in.DiscoveryMaxRequests == 0 {
+	if in.Selection == "authored" && in.DiscoveryMaxRequests == 0 {
 		in.DiscoveryMaxRequests = defaultSyncBatchMaxRequests
 	}
-	if in.DiscoveryMaxRequests < 2 || in.DiscoveryMaxRequests > defaultSyncBatchMaxRequests {
+	if in.Selection == "authored" && (in.DiscoveryMaxRequests < 2 || in.DiscoveryMaxRequests > defaultSyncBatchMaxRequests) {
 		return mcpcontract.JobReference{}, fmt.Errorf("discovery_max_requests must be between 2 and %d", defaultSyncBatchMaxRequests)
 	}
 	if in.StatusMaxPages == 0 {
@@ -43,7 +62,29 @@ func (r *MCPReader) SyncPortfolio(ctx context.Context, in mcpcontract.SyncPortfo
 	}
 
 	id, err := r.submitJob(ctx, "sync_portfolio", in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		discovery, err := r.syncAuthoredPullRequests(ctx, mcpcontract.SyncAuthoredPullRequestsInput{
+		if in.Selection == "explicit" {
+			references := make([]string, len(in.PullRequests))
+			for i, ref := range in.PullRequests {
+				references[i] = fmt.Sprintf("%s/%s#%d", ref.Owner, ref.Repo, ref.Number)
+			}
+			refreshed := 0
+			failures := make([]pullRequestStatusFailure, 0)
+			status := "complete"
+			for start := 0; start < len(in.PullRequests); start += 50 {
+				end := min(start+50, len(in.PullRequests))
+				batch, err := r.syncPullRequestStatusBatch(ctx, pullRequestStatusBatchInput{PullRequests: in.PullRequests[start:end], MaxPages: in.StatusMaxPages}, report)
+				if err != nil {
+					return nil, err
+				}
+				refreshed += batch.Completed
+				failures = append(failures, batch.Failures...)
+				if batch.Status != "complete" {
+					status = "partial"
+				}
+			}
+			return syncPortfolioResult{Status: status, Discovered: len(in.PullRequests), Refreshed: refreshed, PullRequests: references, Failures: failures, DiscoveryStatus: "complete"}, nil
+		}
+		discovery, err := r.syncAuthoredPullRequests(ctx, authoredPullRequestSyncOptions{
 			State: in.State, UpdatedAfter: in.UpdatedAfter, Limit: in.Limit, MaxRequests: in.DiscoveryMaxRequests,
 		}, report)
 		if err != nil {
@@ -59,7 +100,7 @@ func (r *MCPReader) SyncPortfolio(ctx context.Context, in mcpcontract.SyncPortfo
 		failures := make([]pullRequestStatusFailure, 0)
 		for start := 0; start < len(refs); start += 50 {
 			end := min(start+50, len(refs))
-			batch, err := r.syncPullRequestStatusBatch(ctx, mcpcontract.SyncPullRequestStatusInput{
+			batch, err := r.syncPullRequestStatusBatch(ctx, pullRequestStatusBatchInput{
 				PullRequests: refs[start:end], MaxPages: in.StatusMaxPages,
 			}, report)
 			if err != nil {

@@ -17,10 +17,15 @@ import (
 
 const pullRequestStatusWorkers = 4
 
+type pullRequestStatusBatchInput struct {
+	PullRequests []mcpcontract.ThreadRef
+	MaxPages     int
+}
+
 // syncPullRequestStatusBatch preserves input order and isolates failures by PR.
 // It uses the existing REST hydration path for details and reviews, then one
 // typed GraphQL read for health facets unavailable from REST.
-func (s *Service) syncPullRequestStatusBatch(ctx context.Context, in mcpcontract.SyncPullRequestStatusInput, report func(string, string) error) (pullRequestStatusBatchResult, error) {
+func (s *Service) syncPullRequestStatusBatch(ctx context.Context, in pullRequestStatusBatchInput, report func(string, string) error) (pullRequestStatusBatchResult, error) {
 	results := make([]map[string]any, len(in.PullRequests))
 	work := make(chan int)
 	workers := min(pullRequestStatusWorkers, len(in.PullRequests))
@@ -136,7 +141,7 @@ func (s *Service) syncOnePullRequestStatus(ctx context.Context, ref mcpcontract.
 	item := map[string]any{"key": key, "status": itemStatus, "facets": facets, "head_sha": remote.HeadSHA}
 	if itemStatus == "retryable" {
 		item["reason"] = "facet_incomplete"
-		item["next_action"] = "Retry github.sync_pull_request_status for this pull request."
+		item["next_action"] = "Retry github.sync_pull_request_portfolio in explicit mode for this pull request."
 	}
 	return item
 }

@@ -295,7 +295,7 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 	for _, name := range []string{
 		mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolSearchCode,
 		mcpcontract.ToolFindClusters, mcpcontract.ToolFindNeighbors, mcpcontract.ToolGetCoverage,
-		mcpcontract.ToolGetAuthenticatedIdentity, mcpcontract.ToolQueryDeepWiki,
+		mcpcontract.ToolQueryDeepWiki,
 	} {
 		tool := tools[name]
 		if tool == nil {

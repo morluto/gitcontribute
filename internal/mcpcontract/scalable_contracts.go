@@ -112,7 +112,7 @@ type ThreadRef struct {
 // retryable, unavailable, or failed items without failing unrelated work.
 type BatchItem[T any] struct {
 	Key          string          `json:"key"`
-	Status       BatchItemStatus `json:"status"`
+	Status       BatchItemStatus `json:"item_status"`
 	Value        *T              `json:"value,omitempty"`
 	Reason       string          `json:"reason,omitempty"`
 	Message      string          `json:"message,omitempty"`
@@ -158,7 +158,7 @@ type TypedRepositoryOutput struct {
 // GetRepositoriesOutput preserves repository input order and represents
 // unobserved metadata with nullable facts instead of false zero values.
 type GetRepositoriesOutput struct {
-	Status string                             `json:"status"`
+	Status string                             `json:"batch_status"`
 	Items  []BatchItem[TypedRepositoryOutput] `json:"items"`
 }
 
@@ -170,7 +170,7 @@ type GetThreadsInput struct {
 
 // GetThreadsOutput preserves exact-thread input order and item-level failures.
 type GetThreadsOutput struct {
-	Status string                    `json:"status"`
+	Status string                    `json:"batch_status"`
 	Items  []BatchItem[ThreadOutput] `json:"items"`
 }
 
@@ -220,7 +220,7 @@ type GetJobsInput struct {
 // GetJobsOutput reports multiple durable jobs in requested order so callers can
 // poll concurrent work with one MCP round trip.
 type GetJobsOutput struct {
-	Status string                    `json:"status"`
+	Status string                    `json:"batch_status"`
 	Items  []BatchItem[GetJobOutput] `json:"items"`
 }
 
@@ -252,45 +252,46 @@ type HydrateThreadsInput struct {
 	MaxPages int         `json:"max_pages,omitempty" jsonschema:"Maximum pages per facet from 1 to 100"`
 }
 
-// AuthenticatedIdentityOutput identifies the account associated with active credentials.
-type AuthenticatedIdentityOutput struct {
-	Login      string `json:"login"`
-	ID         int64  `json:"id"`
-	NodeID     string `json:"node_id,omitempty"`
-	ObservedAt string `json:"observed_at"`
-}
-
-// SyncAuthoredPullRequestsInput bounds authored pull-request discovery and refresh.
-type SyncAuthoredPullRequestsInput struct {
-	State        string `json:"state,omitempty" jsonschema:"open, closed, or all"`
-	UpdatedAfter string `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound"`
-	Limit        int    `json:"limit,omitempty" jsonschema:"Maximum authored pull requests from 1 to 500"`
-	MaxRequests  int    `json:"max_requests,omitempty" jsonschema:"Maximum total GitHub requests from 2 to 1000"`
-}
-
 // SyncPortfolioInput bounds one outcome-oriented authored-PR discovery and
 // health refresh. The primitive sync tools remain available in the portfolio
 // profile for specialized recovery.
 type SyncPortfolioInput struct {
-	State                string `json:"state,omitempty" jsonschema:"open, closed, or all; defaults to open"`
-	UpdatedAfter         string `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound for authored-PR discovery"`
-	Limit                int    `json:"limit,omitempty" jsonschema:"Maximum pull requests to discover and refresh from 1 to 100; defaults to 100"`
-	DiscoveryMaxRequests int    `json:"discovery_max_requests,omitempty" jsonschema:"Maximum GitHub requests for identity and authored-PR discovery from 2 to 1000"`
-	StatusMaxPages       int    `json:"status_max_pages,omitempty" jsonschema:"Maximum pages per pull-request health facet from 1 to 20; defaults to 3"`
+	Selection            string      `json:"selection" jsonschema:"Selection mode: authored or explicit"`
+	PullRequests         []ThreadRef `json:"pull_requests,omitempty" jsonschema:"One to 100 exact pull requests in explicit mode"`
+	State                string      `json:"state,omitempty" jsonschema:"open, closed, or all; defaults to open"`
+	UpdatedAfter         string      `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound for authored-PR discovery"`
+	Limit                int         `json:"limit,omitempty" jsonschema:"Maximum pull requests to discover and refresh from 1 to 100; defaults to 100"`
+	DiscoveryMaxRequests int         `json:"discovery_max_requests,omitempty" jsonschema:"Maximum GitHub requests for identity and authored-PR discovery from 2 to 1000"`
+	StatusMaxPages       int         `json:"status_max_pages,omitempty" jsonschema:"Maximum pages per pull-request health facet from 1 to 20; defaults to 3"`
 }
 
-// SyncPullRequestStatusInput selects pull requests and bounds review hydration.
-type SyncPullRequestStatusInput struct {
-	PullRequests []ThreadRef `json:"pull_requests" jsonschema:"One to 50 exact pull requests"`
-	MaxPages     int         `json:"max_pages,omitempty" jsonschema:"Maximum review pages from 1 to 20"`
+// SyncPullRequestFeedbackInput refreshes distinct human feedback channels for
+// exact pull requests without conflating absent coverage with no feedback.
+type SyncPullRequestFeedbackInput struct {
+	PullRequests       []ThreadRef `json:"pull_requests" jsonschema:"One to 50 exact pull requests"`
+	ThreadState        string      `json:"thread_state,omitempty" jsonschema:"Review threads to return: unresolved or all"`
+	Channels           []string    `json:"channels" jsonschema:"One or more of issue_comments, submitted_reviews, inline_comments, review_threads"`
+	MaxItemsPerChannel int         `json:"max_items_per_channel,omitempty" jsonschema:"Maximum items per requested channel from 1 to 1000"`
+	MaxRequests        int         `json:"max_requests,omitempty" jsonschema:"Maximum total GitHub requests from 1 to 1000"`
+}
+
+// SyncCIFailuresInput refreshes normalized CI observations for exact pull
+// requests. Large logs are persisted and linked from the terminal job.
+type SyncCIFailuresInput struct {
+	PullRequests      []ThreadRef `json:"pull_requests" jsonschema:"One to 20 exact pull requests"`
+	Logs              string      `json:"logs,omitempty" jsonschema:"Log acquisition mode: none or failures_only"`
+	MaxRunsPerPR      int         `json:"max_runs_per_pr,omitempty" jsonschema:"Maximum workflow runs per pull request from 1 to 100"`
+	MaxJobsPerRun     int         `json:"max_jobs_per_run,omitempty" jsonschema:"Maximum jobs per workflow run from 1 to 100"`
+	MaxLogBytesPerJob int         `json:"max_log_bytes_per_job,omitempty" jsonschema:"Maximum persisted log bytes per failed job from 1024 to 1048576"`
+	MaxRequests       int         `json:"max_requests,omitempty" jsonschema:"Maximum total GitHub requests from 1 to 1000"`
 }
 
 // ListPullRequestPortfolioInput filters and bounds the stored pull-request portfolio.
 type ListPullRequestPortfolioInput struct {
-	Author         string `json:"author,omitempty" jsonschema:"Optional authored GitHub login"`
-	State          string `json:"state,omitempty" jsonschema:"open, closed, or all"`
-	Limit          int    `json:"limit,omitempty" jsonschema:"Maximum pull requests from 1 to 100; defaults to 20"`
-	ResponseFormat string `json:"response_format,omitempty" jsonschema:"concise or detailed; defaults to concise"`
+	Authors []string `json:"authors,omitempty" jsonschema:"Zero or one author login"`
+	State   string   `json:"state,omitempty" jsonschema:"open, closed, or all"`
+	Limit   int      `json:"limit,omitempty" jsonschema:"Maximum pull requests from 1 to 100; defaults to 20"`
+	View    string   `json:"view,omitempty" jsonschema:"compact or full; defaults to compact"`
 }
 
 // PullRequestPortfolioItem contains source-backed PR facts and a deterministic
@@ -329,13 +330,13 @@ type PullRequestPortfolioItem struct {
 
 // ListPullRequestPortfolioOutput contains a deterministic portfolio projection.
 type ListPullRequestPortfolioOutput struct {
-	Status         string                     `json:"status"`
-	ResponseFormat string                     `json:"response_format"`
-	RuleVersion    string                     `json:"rule_version"`
-	GeneratedAt    string                     `json:"generated_at"`
-	PullRequests   []PullRequestPortfolioItem `json:"pull_requests"`
-	Total          int                        `json:"total"`
-	Truncated      bool                       `json:"truncated"`
+	Status       string                     `json:"status"`
+	View         string                     `json:"view"`
+	RuleVersion  string                     `json:"rule_version"`
+	GeneratedAt  string                     `json:"generated_at"`
+	PullRequests []PullRequestPortfolioItem `json:"pull_requests"`
+	Total        int                        `json:"total"`
+	Truncated    bool                       `json:"truncated"`
 }
 
 // PortfolioSubjectInput identifies local candidate state for offline overlap analysis.
@@ -408,9 +409,9 @@ type IndexRepositoriesInput struct {
 
 // MergeConflictInput names two already-fetched revisions in a managed workspace.
 type MergeConflictInput struct {
-	WorkspaceID string `json:"workspace_id"`
-	BaseOID     string `json:"base_oid"`
-	HeadOID     string `json:"head_oid"`
+	WorkspaceID string `json:"workspace_id" jsonschema:"Managed workspace ID"`
+	BaseOID     string `json:"base_oid,omitempty" jsonschema:"Optional explicit base OID; defaults to the workspace recorded base"`
+	HeadOID     string `json:"head_oid,omitempty" jsonschema:"Optional explicit head OID; defaults to the workspace recorded candidate"`
 }
 
 // CheckMergeConflictsInput selects local revision comparisons.
@@ -431,7 +432,7 @@ type MergeConflictOutput struct {
 // CheckMergeConflictsOutput preserves comparison order and isolates local Git
 // failures to the affected comparison.
 type CheckMergeConflictsOutput struct {
-	Status string                           `json:"status"`
+	Status string                           `json:"batch_status"`
 	Items  []BatchItem[MergeConflictOutput] `json:"items"`
 }
 

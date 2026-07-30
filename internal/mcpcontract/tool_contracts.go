@@ -10,7 +10,7 @@ import (
 type ToolError struct {
 	Code             string            `json:"code"`
 	Message          string            `json:"message"`
-	Field            string            `json:"field,omitempty"`
+	Field            string            `json:"path,omitempty"`
 	Retryable        bool              `json:"retryable"`
 	Example          map[string]any    `json:"example,omitempty"`
 	SuggestedActions []SuggestedAction `json:"suggested_actions,omitempty"`
@@ -48,7 +48,7 @@ const (
 	ToolSearchCode                = "corpus.search_code"
 	ToolGetRepositories           = "corpus.get_repositories"
 	ToolGetThreads                = "corpus.get_threads"
-	ToolRankThreads               = "corpus.rank_threads"
+	ToolRankThreads               = "corpus.rank_contribution_candidates"
 	ToolFindPrecedents            = "corpus.find_precedents"
 	ToolPrepareIssueSet           = "workflow.prepare_issue_set"
 	ToolExplainMatch              = "corpus.explain_match"
@@ -62,14 +62,14 @@ const (
 	ToolSearchGitHubRepositories  = "github.search_repositories"
 	ToolSyncRepositoryContext     = "github.sync_repository_context"
 	ToolSyncThreads               = "github.sync_threads"
-	ToolHydrateThreads            = "github.hydrate_threads"
-	ToolGetAuthenticatedIdentity  = "github.get_authenticated_identity"
-	ToolSyncAuthoredPullRequests  = "github.sync_authored_pull_requests"
-	ToolSyncPullRequestStatus     = "github.sync_pull_request_status"
-	ToolSyncPortfolio             = "github.sync_portfolio"
-	ToolListPullRequestPortfolio  = "corpus.list_pull_request_portfolio"
-	ToolFindPortfolioOverlaps     = "corpus.find_portfolio_overlaps"
+	ToolHydrateThreads            = "github.sync_thread_facets"
+	ToolSyncPortfolio             = "github.sync_pull_request_portfolio"
+	ToolSyncPullRequestFeedback   = "github.sync_pull_request_feedback"
+	ToolSyncCIFailures            = "github.sync_ci_failures"
+	ToolListPullRequestPortfolio  = "corpus.list_pull_requests"
+	ToolFindPortfolioOverlaps     = "corpus.find_pull_request_overlaps"
 	ToolIndexRepositories         = "code.index_repositories"
+	ToolPreparePullRequests       = "workspace.prepare_pull_requests"
 	ToolCheckMergeConflicts       = "workspace.check_merge_conflicts"
 	ToolInspectCommitChanges      = "workspace.inspect_commit_changes"
 	ToolPlanSemanticCommits       = "workspace.plan_semantic_commits"

@@ -726,8 +726,8 @@ func TestScalableRuntimeRejectsPageBoundsBeforeSubmittingJob(t *testing.T) {
 		}
 	}
 	for _, maxPages := range []int{-1, 21} {
-		if _, err := reader.SyncPullRequestStatus(ctx, mcpcontract.SyncPullRequestStatusInput{PullRequests: []mcpcontract.ThreadRef{thread}, MaxPages: maxPages}); err == nil {
-			t.Fatalf("SyncPullRequestStatus accepted max_pages=%d", maxPages)
+		if _, err := reader.SyncPortfolio(ctx, mcpcontract.SyncPortfolioInput{Selection: "explicit", PullRequests: []mcpcontract.ThreadRef{thread}, StatusMaxPages: maxPages}); err == nil {
+			t.Fatalf("SyncPortfolio accepted status_max_pages=%d", maxPages)
 		}
 	}
 	for _, limit := range []int{-1, 1001} {
@@ -735,8 +735,8 @@ func TestScalableRuntimeRejectsPageBoundsBeforeSubmittingJob(t *testing.T) {
 			t.Fatalf("SyncThreads accepted limit_per_repository=%d", limit)
 		}
 	}
-	if _, err := reader.SyncAuthoredPullRequests(ctx, mcpcontract.SyncAuthoredPullRequestsInput{Limit: 1, MaxRequests: 1}); err == nil {
-		t.Fatal("SyncAuthoredPullRequests accepted a budget that cannot fund identity and discovery")
+	if _, err := reader.SyncPortfolio(ctx, mcpcontract.SyncPortfolioInput{Selection: "authored", Limit: 1, DiscoveryMaxRequests: 1}); err == nil {
+		t.Fatal("SyncPortfolio accepted a budget that cannot fund identity and discovery")
 	}
 }
 
