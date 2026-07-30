@@ -117,7 +117,11 @@ are nullable: when no explicitly observed closed external outcome exists, JSON
 reports `null` and the health coverage explains why the rate is unavailable. A
 known zero merge rate remains distinct from an unknown rate.
 
-Authored pull requests use the ordinary repository and thread projections.
+Pull-request portfolios use the ordinary repository and thread projections.
+`github.sync_pull_request_portfolio` is the only public portfolio producer. Its
+discriminated selection is either authored discovery or an explicit bounded
+set; identity lookup, authored discovery, and scalar status refresh are
+internal phases rather than separately advertised operations.
 REST `pr_details` and `pr_reviews` facets are combined with typed GraphQL
 facets for checks, unresolved review threads, detailed merge state, merge queue,
 closing issues, and changed files. Each facet has independent coverage; an
@@ -125,6 +129,12 @@ incomplete refresh preserves the previous complete child snapshot but marks
 the newer coverage incomplete. Offline portfolio reads therefore return
 `unknown` instead of treating missing checks as passing or missing overlap
 signals as no overlap.
+
+Feedback and CI are separate producer capabilities. Feedback preserves issue
+comments, submitted reviews, inline comments, and GraphQL review-thread
+topology as independently covered channels. CI observations bind checks and
+statuses to the pull request's observed head SHA. An unsupported log request
+fails before submission rather than producing fabricated log coverage.
 
 Portfolio relationships and derived resolution records are local product
 contracts. Their normalized snapshots carry rule versions and exact source

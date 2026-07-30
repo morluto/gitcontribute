@@ -13,8 +13,8 @@ Use the cheapest authoritative source first, and hydrate only finalists:
 github.search_repositories -> corpus.get_repositories
 github.sync_repository_context -> jobs.get -> corpus.get_repositories
 research.query_deepwiki
-github.sync_threads -> jobs.get -> corpus.rank_threads
-github.hydrate_threads -> jobs.get -> corpus.get_threads
+github.sync_threads -> jobs.get -> corpus.rank_contribution_candidates
+github.sync_thread_facets -> jobs.get -> corpus.get_threads
 corpus.find_precedents -> workflow.find_related_work
 workflow.prepare_issue_set
 ```
@@ -53,12 +53,12 @@ explicit `raw_query` field; there is no deprecated alias.
   candidates and dossier availability; load a full persisted dossier only for
   a known finalist through `gitcontribute://dossier/{owner}/{repo}`.
 - `corpus.get_repositories`, `corpus.get_threads`, `corpus.find_clusters`,
-  `corpus.find_neighbors`, `corpus.rank_threads`, and
+  `corpus.find_neighbors`, `corpus.rank_contribution_candidates`, and
   `corpus.find_precedents` are offline.
 - `corpus.find_clusters` and `corpus.find_neighbors` accept up to 20 repository
   or source-thread targets respectively. Their ordered item results isolate
   missing or invalid targets instead of forcing scalar retry loops.
-- `corpus.rank_threads` requires one to 50 repositories. Its derived ranking is
+- `corpus.rank_contribution_candidates` requires one to 50 repositories. Its derived ranking is
   intentionally non-paginated; inspect `total` and `truncated`, then raise the
   limit or narrow the repository set when more candidates are needed. Per-repo
   summaries distinguish the evaluated population, returned candidates, and an
@@ -67,8 +67,8 @@ explicit `raw_query` field; there is no deprecated alias.
   untrusted derived context, is not persisted, and is not authority for live
   GitHub state.
 - `github.sync_threads` stores issue or pull-request headers. Child comments
-  and reviews require explicit `github.hydrate_threads` facets.
-- `github.hydrate_threads` refreshes each selected thread header before fetching
+  and reviews require explicit `github.sync_thread_facets` facets.
+- `github.sync_thread_facets` refreshes each selected thread header before fetching
   child facets, so exact finalists do not inherit stale header coverage. The
   repository metadata must already exist locally, and each item's `requests`
   count includes its one exact-header request. Successful items report
@@ -146,11 +146,9 @@ that was not captured.
 ## Pull-request portfolio
 
 ```text
-github.get_authenticated_identity
--> github.sync_authored_pull_requests -> jobs.get
--> github.sync_pull_request_status -> jobs.get
--> corpus.list_pull_request_portfolio
--> corpus.find_portfolio_overlaps
+github.sync_pull_request_portfolio(selection=authored) -> jobs.get
+-> corpus.list_pull_requests
+-> corpus.find_pull_request_overlaps
 ```
 
 The status adapter stores REST pull-request details and reviews plus typed,
@@ -159,7 +157,7 @@ detailed merge state, merge queue, closing issues, and changed files. The
 offline portfolio derives deterministic attention states only from complete
 facets. A null or still-computing mergeability value remains unknown.
 
-`corpus.find_portfolio_overlaps` compares up to 50 stored candidates with
+`corpus.find_pull_request_overlaps` compares up to 50 stored candidates with
 authored pull requests using complete normalized changed-path, linked-issue,
 and stored opportunity-similarity evidence. It returns `unknown` unless every
 required facet is complete; it never performs network access. Use
@@ -214,7 +212,7 @@ durable-artifact getters. Read dossiers, investigations, opportunities,
 evidence, readiness reports, workflows, and lenses through their
 `gitcontribute://` resources. Use one-item arrays with
 `corpus.get_repositories`, `corpus.get_threads`,
-`github.sync_threads`, `github.hydrate_threads`, and `jobs.get` when only one
+`github.sync_threads`, `github.sync_thread_facets`, and `jobs.get` when only one
 target is needed. Configured recurring-source crawls remain a CLI/TUI workflow,
 not an MCP discovery primitive.
 
