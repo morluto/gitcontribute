@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -86,6 +87,13 @@ func claudeConfigPath(home string) string {
 }
 
 func devinConfigPath(home string) string {
+	return devinConfigPathForOS(home, runtime.GOOS)
+}
+
+func devinConfigPathForOS(home, goos string) string {
+	if goos == "windows" {
+		return filepath.Join(home, "AppData", "Roaming", "devin", "mcp_config.json")
+	}
 	return filepath.Join(home, ".config", "devin", "mcp_config.json")
 }
 
@@ -98,7 +106,7 @@ func detectClaude(home string) bool {
 }
 
 func detectDevin(home string) bool {
-	return exists(filepath.Join(home, ".config", "devin"))
+	return exists(filepath.Dir(devinConfigPath(home)))
 }
 
 func checkCodexRegistration(data []byte) (bool, error) {

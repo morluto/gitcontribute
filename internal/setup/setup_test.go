@@ -302,6 +302,16 @@ func TestRunConfiguresDevinUserMCPRegistration(t *testing.T) {
 	}
 }
 
+func TestDevinConfigPathUsesPlatformUserConfigDirectory(t *testing.T) {
+	home := filepath.Join("home", "alice")
+	if got, want := devinConfigPathForOS(home, "linux"), filepath.Join(home, ".config", "devin", "mcp_config.json"); got != want {
+		t.Fatalf("Linux path = %q, want %q", got, want)
+	}
+	if got, want := devinConfigPathForOS(home, "windows"), filepath.Join(home, "AppData", "Roaming", "devin", "mcp_config.json"); got != want {
+		t.Fatalf("Windows path = %q, want %q", got, want)
+	}
+}
+
 func TestCheckRegistrationRejectsMalformedClaudeShapes(t *testing.T) {
 	for _, tt := range []struct {
 		name string

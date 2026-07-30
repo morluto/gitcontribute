@@ -51,7 +51,8 @@ GitContribute-owned entries:
 - `[mcp_servers.gitcontribute]` in Codex TOML configuration;
 - `mcpServers.gitcontribute` in Claude JSON configuration;
 - `mcpServers.gitcontribute` in Devin's user-scoped
-  `~/.config/devin/mcp_config.json`.
+  `~/.config/devin/mcp_config.json` (or `%APPDATA%\devin\mcp_config.json` on
+  Windows).
 
 Codex setup also installs a `gitcontribute` discovery skill under
 `~/.codex/skills/gitcontribute` so deferred MCP tools can be matched
