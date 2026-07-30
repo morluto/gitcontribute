@@ -123,6 +123,13 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 		} else if err := r.persistPullRequestFeedback(ctx, ref, snapshot, in.Channels); err != nil {
 			item.Status, item.Code, item.Message = "failed", "persist_feedback_failed", err.Error()
 			out.BatchStatus = "partial"
+		} else if !feedbackSnapshotComplete(snapshot, in.Channels) {
+			item.Status = "retryable"
+			item.Code = "feedback_coverage_incomplete"
+			item.Message = "one or more feedback channels reached max_items_per_channel"
+			item.NextAction = "Retry only this pull request with a larger max_items_per_channel bound."
+			item.HeadSHA = snapshot.HeadSHA
+			out.BatchStatus = "partial"
 		} else {
 			item.HeadSHA = snapshot.HeadSHA
 			item.ResourceURI = fmt.Sprintf("gitcontribute://pull-request-feedback/%s/%s/%d", ref.Owner, ref.Repo, ref.Number)
@@ -147,6 +154,15 @@ func coveredFeedbackChannels(requested []string, coverage map[string]github.Feed
 		}
 	}
 	return channels
+}
+
+func feedbackSnapshotComplete(snapshot github.PullRequestFeedback, channels []string) bool {
+	for _, channel := range channels {
+		if !snapshot.Coverage[channel].Complete {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *MCPReader) persistPullRequestFeedback(ctx context.Context, ref mcpcontract.ThreadRef, snapshot github.PullRequestFeedback, channels []string) error {
@@ -243,12 +259,22 @@ func (r *MCPReader) syncCIFailures(ctx context.Context, in mcpcontract.SyncCIFai
 				item = workflowFailure(ref, readErr, mcpcontract.ToolSyncCIFailures)
 			}
 			out.BatchStatus = "partial"
-		} else if err := r.persistPullRequestWorkflowFacet(ctx, ref, facetPRCIReport, time.Time{}, snapshot, ciSnapshotComplete(snapshot)); err != nil {
-			item.Status, item.Code, item.Message = "failed", "persist_ci_failed", err.Error()
-			out.BatchStatus = "partial"
 		} else {
-			item.HeadSHA = snapshot.HeadSHA
-			item.ResourceURI = fmt.Sprintf("gitcontribute://ci-failure-report/%s/%s/%d", ref.Owner, ref.Repo, ref.Number)
+			complete := ciSnapshotComplete(snapshot)
+			if err := r.persistPullRequestWorkflowFacet(ctx, ref, facetPRCIReport, time.Time{}, snapshot, complete); err != nil {
+				item.Status, item.Code, item.Message = "failed", "persist_ci_failed", err.Error()
+				out.BatchStatus = "partial"
+			} else if !complete {
+				item.Status = "retryable"
+				item.Code = "ci_coverage_incomplete"
+				item.Message = "one or more CI collections reached a configured item bound"
+				item.NextAction = "Retry only this pull request with larger run or job bounds."
+				item.HeadSHA = snapshot.HeadSHA
+				out.BatchStatus = "partial"
+			} else {
+				item.HeadSHA = snapshot.HeadSHA
+				item.ResourceURI = fmt.Sprintf("gitcontribute://ci-failure-report/%s/%s/%d", ref.Owner, ref.Repo, ref.Number)
+			}
 		}
 		out.Items[index] = item
 		if err := report("ci_failures", jobProgressCounts(index+1, len(in.PullRequests))); err != nil {
@@ -298,6 +324,9 @@ func (r *MCPReader) persistPullRequestWorkflowFacet(ctx context.Context, ref mcp
 	if sourceUpdatedAt.IsZero() {
 		sourceUpdatedAt = thread.SourceUpdatedAt
 	}
+	if !complete {
+		return c.AdvanceFacet(ctx, repo.ID, &thread.ID, facet, sourceUpdatedAt, false, 0)
+	}
 	payload, err := json.Marshal(value)
 	if err != nil {
 		return err
@@ -320,7 +349,7 @@ func pullRequestKey(ref mcpcontract.ThreadRef) string {
 
 func allWorkflowItemsFailed(items []pullRequestWorkflowItem) bool {
 	for _, item := range items {
-		if item.Status == "complete" {
+		if item.Status == "complete" || item.Status == "retryable" {
 			return false
 		}
 	}
