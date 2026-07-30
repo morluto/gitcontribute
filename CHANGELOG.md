@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.16.0](https://github.com/morluto/gitcontribute/compare/v0.15.0...v0.16.0) (2026-07-30)
+
+
+### Features
+
+* **mcp:** redesign contribution workflow operations ([76b94fb](https://github.com/morluto/gitcontribute/commit/76b94fbdd913ac39ce1daa5f1e3e1d1c288314ea))
+* redesign contribution workflow operations ([799e1a6](https://github.com/morluto/gitcontribute/commit/799e1a60d344046516c13ab480c67cde5eeadcf6))
+* **setup:** configure detected Devin clients ([fe891fa](https://github.com/morluto/gitcontribute/commit/fe891faa28dc4786945480b489db1ae259b24481))
+
+
+### Bug Fixes
+
+* **app:** prevent heartbeat write bursts ([c2769da](https://github.com/morluto/gitcontribute/commit/c2769da3c4feb1d1d8d96896a95ea7344e3c8389))
+* **app:** prevent heartbeat write bursts ([be8967b](https://github.com/morluto/gitcontribute/commit/be8967b86d5406bf338c3012e34cc47f2b0cc23b))
+* **github:** bind CI snapshots to PR revisions ([2d561e0](https://github.com/morluto/gitcontribute/commit/2d561e0105b175be6b56dec048782f0115911641))
+* **github:** preserve transport for CI log downloads ([b9c67bc](https://github.com/morluto/gitcontribute/commit/b9c67bc177d95f51095e3e1299c4c5c58f67c0a8))
+* **mcp:** enforce workflow input boundaries ([faebca9](https://github.com/morluto/gitcontribute/commit/faebca9fd2f7150b9e61b3f464256e5a98a6db0f))
+* **release:** pass NODE_AUTH_TOKEN to npm publish step ([cfba588](https://github.com/morluto/gitcontribute/commit/cfba5881c600bed213a46679052635c63995f67a))
+* **setup:** honor redirected Devin config roots ([5a9241a](https://github.com/morluto/gitcontribute/commit/5a9241a7b142abceb8ba6c3af14de1e6fa43a5e6))
+* **setup:** resolve Devin config paths by platform ([2908971](https://github.com/morluto/gitcontribute/commit/2908971b1b9429e0732e5005e4bb310acba29693))
+* **upgrade:** clarify that the upgrade takes effect after an MCP client restart ([f4cdef2](https://github.com/morluto/gitcontribute/commit/f4cdef26fbef7994c7a6c1462bd37596b77bb177))
+* **workflows:** close review race and batch job gaps ([cd08162](https://github.com/morluto/gitcontribute/commit/cd08162b9d9c66fc27c66829393b7882bb467c8e))
+* **workflows:** preserve complete PR snapshots ([fbf0e02](https://github.com/morluto/gitcontribute/commit/fbf0e022c0ee1e167c37278ba153ac51d52720cb))
+* **workflows:** preserve effective batch semantics ([3408267](https://github.com/morluto/gitcontribute/commit/3408267a6de3d6e134139130656957adc6ed7962))
+
 ## [0.15.0](https://github.com/morluto/gitcontribute/compare/v0.14.0...v0.15.0) (2026-07-29)
 
 
