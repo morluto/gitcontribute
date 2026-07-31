@@ -404,8 +404,8 @@ func TestCoverageTargetSchemaAcceptsRepositoryAndExactThreadOnly(t *testing.T) {
 	defer closeSessions()
 
 	valid := []map[string]any{
-		{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket"}}},
-		{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket", "kind": "pull_request", "number": 7}}},
+		{"targets": []any{map[string]any{"type": "repository", "repository": map[string]any{"owner": "acme", "repo": "rocket"}}}},
+		{"targets": []any{map[string]any{"type": "exact_thread", "repository": map[string]any{"owner": "acme", "repo": "rocket"}, "thread": map[string]any{"kind": "pull_request", "number": 7}}}},
 	}
 	for _, args := range valid {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: mcpcontract.ToolGetCoverage, Arguments: args})
@@ -421,11 +421,10 @@ func TestCoverageTargetSchemaAcceptsRepositoryAndExactThreadOnly(t *testing.T) {
 	}
 
 	invalid := []map[string]any{
-		{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue"}}},
-		{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket", "number": 7}}},
-		{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket", "kind": "discussion", "number": 7}}},
-		{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 0}}},
-		{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 7, "extra": true}}},
+		{"targets": []any{map[string]any{"type": "unknown", "repository": map[string]any{"owner": "acme", "repo": "rocket"}}}},
+		{"targets": []any{map[string]any{"type": "exact_thread", "repository": map[string]any{"owner": "acme", "repo": "rocket"}, "thread": map[string]any{"kind": "discussion", "number": 7}}}},
+		{"targets": []any{map[string]any{"type": "exact_thread", "repository": map[string]any{"owner": "acme", "repo": "rocket"}, "thread": map[string]any{"kind": "issue", "number": 0}}}},
+		{"targets": []any{map[string]any{"type": "repository", "repository": map[string]any{"owner": "acme", "repo": "rocket"}, "extra": true}}},
 	}
 	for _, args := range invalid {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: mcpcontract.ToolGetCoverage, Arguments: args})

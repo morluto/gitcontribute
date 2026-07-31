@@ -89,7 +89,7 @@ func jobResultItem(item mcpcontract.BatchItem[mcpcontract.GetJobOutput], job *co
 	value := jobResultToMCP(job, true)
 	item.Value = &value
 	if value.Status == "running" {
-		item.Recovery = recoveryPlan("blocked", "Poll jobs.get until this job reaches a terminal state.", mcpcontract.ToolCall{Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{value.ID}}})
+		item.Recovery = recoveryPlan("blocked", "Poll jobs.get until this job reaches a terminal state.", mcpcontract.RecoveryAction(mcpcontract.GetJobsInput{IDs: []string{value.ID}}))
 	}
 	return item
 }
@@ -122,7 +122,7 @@ func jobResultToMCP(job *contracts.JobResult, includeDetails bool) mcpcontract.G
 			out.Artifacts, out.FollowUp = jobArtifactsAndFollowUp(job, total)
 		case "queued", "running":
 			out.FollowUp = &mcpcontract.JobFollowUp{
-				Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{job.ID}}, RetryAfterMS: mcpcontract.NonNegativeInt(retryAfter), Reason: "Poll this job until execution_state is terminal.",
+				Action: mcpcontract.FollowUpAction{Type: "poll_job", PollJob: &mcpcontract.GetJobsInput{IDs: []string{job.ID}}}, RetryAfterMS: mcpcontract.NonNegativeInt(retryAfter), Reason: "Poll this job until execution_state is terminal.",
 			}
 		}
 	}
@@ -184,12 +184,12 @@ func jobResultStatus(job *contracts.JobResult) string {
 	return result.Status
 }
 
-func portfolioReadFollowUpArguments(request mcpcontract.SyncPortfolioInput, login string, references []string) *mcpcontract.ToolCallArguments {
+func portfolioReadFollowUpArguments(request mcpcontract.SyncPortfolioInput, login string, references []string) *mcpcontract.ListPullRequestPortfolioInput {
 	limit := request.Limit
 	state := request.State
 	if request.Selection == "authored" {
 		if login != "" {
-			return &mcpcontract.ToolCallArguments{Authors: []string{login}, State: state, Limit: limit, View: "compact"}
+			return &mcpcontract.ListPullRequestPortfolioInput{Authors: []string{login}, State: state, Limit: limit, View: "compact"}
 		}
 	} else {
 		state = "all"
@@ -200,15 +200,14 @@ func portfolioReadFollowUpArguments(request mcpcontract.SyncPortfolioInput, logi
 	if limit == 0 {
 		limit = 20
 	}
-	return &mcpcontract.ToolCallArguments{State: state, Limit: limit, View: "compact"}
+	return &mcpcontract.ListPullRequestPortfolioInput{State: state, Limit: limit, View: "compact"}
 }
 
 func facetBatchArtifact(refs []mcpcontract.ThreadRef, facetNames []string) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
 	value := mcpcontract.NonNegativeInt(len(refs))
 	follow := &mcpcontract.JobFollowUp{
-		Tool:      mcpcontract.ToolGetThreadFacets,
-		Arguments: &mcpcontract.ToolCallArguments{Threads: refs, Facets: append([]string(nil), facetNames...)},
-		Reason:    "Read the synchronized facet coverage and canonical facet resources from the offline corpus.",
+		Action: mcpcontract.FollowUpAction{Type: "get_thread_facets", GetThreadFacets: &mcpcontract.GetThreadFacetsInput{Threads: refs, Facets: append([]string(nil), facetNames...)}},
+		Reason: "Read the synchronized facet coverage and canonical facet resources from the offline corpus.",
 	}
 	return []mcpcontract.JobArtifactReference{{Kind: "thread_facet_batch", Count: &value, References: threadRefKeys(refs)}}, follow
 }

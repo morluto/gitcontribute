@@ -67,7 +67,7 @@ func TestGetThreadFacetsIsOfflineAndReturnsCanonicalResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if missing.Items[0].Value == nil || missing.Items[0].Value.Facets[0].Status != "not_observed" || missing.Items[0].Value.Facets[0].Recovery == nil || missing.Items[0].Value.Facets[0].Recovery.Reason != "facet_not_observed" || missing.Items[0].Value.Facets[0].Recovery.Then[0].Tool != mcpcontract.ToolHydrateThreads {
+	if missing.Items[0].Value == nil || missing.Items[0].Value.Facets[0].Status != "not_observed" || missing.Items[0].Value.Facets[0].Recovery == nil || missing.Items[0].Value.Facets[0].Recovery.Reason != "facet_not_observed" || missing.Items[0].Value.Facets[0].Recovery.Then[0].Type != "hydrate_threads" {
 		t.Fatalf("missing facet recovery = %+v", missing.Items[0])
 	}
 
@@ -93,10 +93,10 @@ func TestFacetJobFollowUpReadsFacetSurface(t *testing.T) {
 		Result:  `{"status":"complete","items":[]}`,
 	}
 	artifacts, follow := jobArtifactsAndFollowUp(job, 1)
-	if len(artifacts) != 1 || artifacts[0].Kind != "thread_facet_batch" || follow == nil || follow.Tool != mcpcontract.ToolGetThreadFacets || follow.Arguments == nil {
+	if len(artifacts) != 1 || artifacts[0].Kind != "thread_facet_batch" || follow == nil || follow.Action.Type != "get_thread_facets" || follow.Action.GetThreadFacets == nil {
 		t.Fatalf("facet job result = artifacts:%+v follow:%+v", artifacts, follow)
 	}
-	if len(follow.Arguments.Threads) != 1 || follow.Arguments.Threads[0].Kind != "pull_request" || len(follow.Arguments.Facets) != 1 || follow.Arguments.Facets[0] != "pr_details" {
-		t.Fatalf("facet follow-up arguments = %+v", follow.Arguments)
+	if len(follow.Action.GetThreadFacets.Threads) != 1 || follow.Action.GetThreadFacets.Threads[0].Kind != "pull_request" || len(follow.Action.GetThreadFacets.Facets) != 1 || follow.Action.GetThreadFacets.Facets[0] != "pr_details" {
+		t.Fatalf("facet follow-up arguments = %+v", follow.Action)
 	}
 }

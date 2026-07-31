@@ -208,21 +208,21 @@ func recoveryPlan(reason, message string, calls ...mcpcontract.ToolCall) *mcpcon
 }
 
 func syncRepositoryContextCall(owner, repo string) mcpcontract.ToolCall {
-	return mcpcontract.ToolCall{Tool: mcpcontract.ToolSyncRepositoryContext, Arguments: &mcpcontract.ToolCallArguments{
+	return mcpcontract.RecoveryAction(mcpcontract.SyncRepositoryContextInput{
 		Repositories: []mcpcontract.RepositoryRef{{Owner: owner, Repo: repo}},
-	}}
+	})
 }
 
 func syncThreadCall(ref mcpcontract.ThreadRef) mcpcontract.ToolCall {
-	return mcpcontract.ToolCall{Tool: mcpcontract.ToolSyncThreads, Arguments: &mcpcontract.ToolCallArguments{
+	return mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{
 		Selection: "threads", Threads: []mcpcontract.ThreadRef{ref},
-	}}
+	})
 }
 
 func syncThreadFacetsCall(ref mcpcontract.ThreadRef, facetNames []string) mcpcontract.ToolCall {
-	return mcpcontract.ToolCall{Tool: mcpcontract.ToolHydrateThreads, Arguments: &mcpcontract.ToolCallArguments{
+	return mcpcontract.RecoveryAction(mcpcontract.HydrateThreadsInput{
 		Threads: []mcpcontract.ThreadRef{ref}, Facets: append([]string(nil), facetNames...),
-	}}
+	})
 }
 
 func syncFacetCall(ref mcpcontract.ThreadRef, facetName string) mcpcontract.ToolCall {
@@ -235,9 +235,9 @@ func syncFacetCall(ref mcpcontract.ThreadRef, facetName string) mcpcontract.Tool
 }
 
 func syncPullRequestCalls(refs []mcpcontract.ThreadRef) []mcpcontract.ToolCall {
-	return []mcpcontract.ToolCall{{Tool: mcpcontract.ToolSyncPortfolio, Arguments: &mcpcontract.ToolCallArguments{
+	return []mcpcontract.ToolCall{mcpcontract.RecoveryAction(mcpcontract.SyncPortfolioInput{
 		Selection: "explicit", PullRequests: append([]mcpcontract.ThreadRef(nil), refs...),
-	}}}
+	})}
 }
 
 func threadRefKey(ref mcpcontract.ThreadRef) string {

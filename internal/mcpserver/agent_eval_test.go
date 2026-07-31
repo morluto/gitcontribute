@@ -194,7 +194,7 @@ func TestAgentEvalScriptedCurrentContracts(t *testing.T) {
 		if err := json.Unmarshal(payload, &job); err != nil {
 			t.Fatal(err)
 		}
-		if job.ID == "" || job.Ref != "job:"+job.ID || job.Status == "" || job.PollAfterMS < 1 || job.FollowUp == nil || job.FollowUp.Tool != mcpcontract.ToolGetJob {
+		if job.ID == "" || job.Ref != "job:"+job.ID || job.Status == "" || job.PollAfterMS < 1 || job.FollowUp == nil || job.FollowUp.Action.Type != "poll_job" {
 			t.Fatalf("job reference is not pollable: %+v", job)
 		}
 		polled := callAgentEvalTool(t, client, mcpcontract.ToolGetJob, map[string]any{"ids": []string{job.ID}})

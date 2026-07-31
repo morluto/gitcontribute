@@ -136,7 +136,7 @@ func addRepositorySearchAction(out *mcpcontract.SearchGitHubRepositoriesOutput, 
 	}
 	out.RecoveryPlans = []mcpcontract.RecoveryPlan{{
 		Version: mcpcontract.RecoveryPlanVersion, Reason: "coverage_stale", Message: "Fetch open issue headers only for repositories selected from these metadata results.",
-		Then: []mcpcontract.ToolCall{{Tool: mcpcontract.ToolSyncThreads, Arguments: &mcpcontract.ToolCallArguments{Selection: "repositories", Repositories: repositories, State: "open"}}},
+		Then: []mcpcontract.ToolCall{mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{Selection: "repositories", Repositories: repositories, State: "open"})},
 	}}
 }
 

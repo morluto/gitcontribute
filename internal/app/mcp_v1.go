@@ -42,7 +42,11 @@ func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpcontract.Searc
 		return mcpcontract.SearchRepositoriesOutput{}, err
 	}
 	if len(res.Matches) == 0 {
-		return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: []mcpcontract.RepositoryOutput{}, NextCursor: res.NextCursor, CorpusRevision: res.CorpusRevision}, nil
+		provenance, err := offlineReadProvenance("repository_search", res.CorpusRevision, in, res.NextCursor == "", res.NextCursor != "", true)
+		if err != nil {
+			return mcpcontract.SearchRepositoriesOutput{}, err
+		}
+		return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: []mcpcontract.RepositoryOutput{}, NextCursor: res.NextCursor, CorpusRevision: res.CorpusRevision, Provenance: provenance}, nil
 	}
 
 	refs := make([]mcpcontract.RepositoryRef, len(res.Matches))
@@ -59,7 +63,11 @@ func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpcontract.Searc
 			matches = append(matches, *item.Value)
 		}
 	}
-	return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: matches, NextCursor: res.NextCursor, CorpusRevision: res.CorpusRevision}, nil
+	provenance, err := offlineReadProvenance("repository_search", res.CorpusRevision, in, res.NextCursor == "", res.NextCursor != "", true)
+	if err != nil {
+		return mcpcontract.SearchRepositoriesOutput{}, err
+	}
+	return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: matches, NextCursor: res.NextCursor, CorpusRevision: res.CorpusRevision, Provenance: provenance}, nil
 }
 
 // ThreadByNumber reads an issue or pull request by repository and number only.
@@ -169,7 +177,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpcontract.ExplainMatc
 			}
 		}
 		out.SourceRevision = formatTime(sourceRevision)
-		cov, _, err := readCoverageTarget(ctx, c, mcpcontract.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
+		cov, _, err := readCoverageTarget(ctx, c, mcpcontract.CoverageTarget{Type: mcpcontract.CoverageTargetRepository, Repository: mcpcontract.RepositoryRef{Owner: in.Owner, Repo: in.Repo}})
 		if err != nil {
 			return mcpcontract.ExplainMatchOutput{}, fmt.Errorf("read repository coverage: %w", err)
 		}
@@ -253,7 +261,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpcontract.ExplainMatc
 			return mcpcontract.ExplainMatchOutput{}, failure.NotFound(nil)
 		}
 		out.SourceRevision = formatTime(repo.SourceUpdatedAt)
-		cov, _, err := readCoverageTarget(ctx, c, mcpcontract.CoverageTarget{Owner: in.Owner, Repo: in.Repo})
+		cov, _, err := readCoverageTarget(ctx, c, mcpcontract.CoverageTarget{Type: mcpcontract.CoverageTargetRepository, Repository: mcpcontract.RepositoryRef{Owner: in.Owner, Repo: in.Repo}})
 		if err != nil {
 			return mcpcontract.ExplainMatchOutput{}, fmt.Errorf("read repository coverage: %w", err)
 		}

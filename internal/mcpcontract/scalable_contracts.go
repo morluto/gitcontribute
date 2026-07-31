@@ -37,48 +37,52 @@ type RecoveryPlan struct {
 	Then    []ToolCall `json:"then,omitempty"`
 }
 
-// ToolCall is one typed, replayable MCP call in a recovery plan.
+// ToolCall is one discriminated, replayable MCP action in a recovery plan.
 type ToolCall struct {
-	Tool      string             `json:"tool"`
-	Arguments *ToolCallArguments `json:"arguments,omitempty"`
+	Type                  string                        `json:"type"`
+	PollJob               *GetJobsInput                 `json:"poll_job,omitempty"`
+	GetRepositories       *GetRepositoriesInput         `json:"get_repositories,omitempty"`
+	EnsureCoverage        *EnsureCoverageInput          `json:"ensure_coverage,omitempty"`
+	SyncRepositoryContext *SyncRepositoryContextInput   `json:"sync_repository_context,omitempty"`
+	SyncThreads           *SyncThreadsInput             `json:"sync_threads,omitempty"`
+	HydrateThreads        *HydrateThreadsInput          `json:"hydrate_threads,omitempty"`
+	SyncPortfolio         *SyncPortfolioInput           `json:"sync_portfolio,omitempty"`
+	SyncFeedback          *SyncPullRequestFeedbackInput `json:"sync_pull_request_feedback,omitempty"`
+	SyncCI                *SyncCIFailuresInput          `json:"sync_ci_failures,omitempty"`
+	QueryDeepWiki         *DeepWikiInput                `json:"query_deepwiki,omitempty"`
 }
 
-// ToolCallArguments is the bounded typed argument union used by advertised
-// recovery calls. Fields are intentionally limited to canonical MCP inputs.
-type ToolCallArguments struct {
-	IDs                []string        `json:"ids,omitempty"`
-	Query              string          `json:"query,omitempty"`
-	Owner              string          `json:"owner,omitempty"`
-	Repo               string          `json:"repo,omitempty"`
-	Commit             string          `json:"commit,omitempty"`
-	CorpusRevision     *int64          `json:"corpus_revision,omitempty"`
-	WorkspaceID        string          `json:"workspace_id,omitempty"`
-	Selection          string          `json:"selection,omitempty"`
-	Repositories       []RepositoryRef `json:"repositories,omitempty"`
-	Threads            []ThreadRef     `json:"threads,omitempty"`
-	PullRequests       []ThreadRef     `json:"pull_requests,omitempty"`
-	Facets             []string        `json:"facets,omitempty"`
-	Kind               string          `json:"kind,omitempty"`
-	State              string          `json:"state,omitempty"`
-	MaxPages           int             `json:"max_pages,omitempty"`
-	MaxRequests        int             `json:"max_requests,omitempty"`
-	LimitPerRepository int             `json:"limit_per_repository,omitempty"`
-	ResponseFormat     string          `json:"response_format,omitempty"`
-	Channels           []string        `json:"channels,omitempty"`
-	ThreadState        string          `json:"thread_state,omitempty"`
-	Logs               string          `json:"logs,omitempty"`
-	MaxItemsPerChannel int             `json:"max_items_per_channel,omitempty"`
-	MaxRunsPerPR       int             `json:"max_runs_per_pr,omitempty"`
-	MaxJobsPerRun      int             `json:"max_jobs_per_run,omitempty"`
-	MaxLogBytesPerJob  int             `json:"max_log_bytes_per_job,omitempty"`
-	Action             string          `json:"action,omitempty"`
-	Repository         string          `json:"repository,omitempty"`
-	Authors            []string        `json:"authors,omitempty"`
-	Limit              int             `json:"limit,omitempty"`
-	View               string          `json:"view,omitempty"`
-	Question           string          `json:"question,omitempty"`
-	UpdatedAfter       string          `json:"updated_after,omitempty"`
-	UpdatedBefore      string          `json:"updated_before,omitempty"`
+type recoveryActionInput interface {
+	GetJobsInput | GetRepositoriesInput | EnsureCoverageInput | SyncRepositoryContextInput | SyncThreadsInput | HydrateThreadsInput | SyncPortfolioInput | SyncPullRequestFeedbackInput | SyncCIFailuresInput | DeepWikiInput
+}
+
+// RecoveryAction derives the action discriminator from a concrete input type,
+// making incompatible tool/argument combinations unrepresentable.
+func RecoveryAction[T recoveryActionInput](input T) ToolCall {
+	switch value := any(input).(type) {
+	case GetJobsInput:
+		return ToolCall{Type: "poll_job", PollJob: &value}
+	case GetRepositoriesInput:
+		return ToolCall{Type: "get_repositories", GetRepositories: &value}
+	case EnsureCoverageInput:
+		return ToolCall{Type: "ensure_coverage", EnsureCoverage: &value}
+	case SyncRepositoryContextInput:
+		return ToolCall{Type: "sync_repository_context", SyncRepositoryContext: &value}
+	case SyncThreadsInput:
+		return ToolCall{Type: "sync_threads", SyncThreads: &value}
+	case HydrateThreadsInput:
+		return ToolCall{Type: "hydrate_threads", HydrateThreads: &value}
+	case SyncPortfolioInput:
+		return ToolCall{Type: "sync_portfolio", SyncPortfolio: &value}
+	case SyncPullRequestFeedbackInput:
+		return ToolCall{Type: "sync_pull_request_feedback", SyncFeedback: &value}
+	case SyncCIFailuresInput:
+		return ToolCall{Type: "sync_ci_failures", SyncCI: &value}
+	case DeepWikiInput:
+		return ToolCall{Type: "query_deepwiki", QueryDeepWiki: &value}
+	default:
+		panic("unreachable recovery action input")
+	}
 }
 
 const RecoveryPlanVersion = "gitcontribute.recovery.v1"
@@ -279,6 +283,7 @@ type FindPrecedentsOutput struct {
 	Items          []BatchItem[PrecedentSet] `json:"items"`
 	Total          int                       `json:"total"`
 	CorpusRevision int64                     `json:"corpus_revision"`
+	Provenance     CorpusReadProvenance      `json:"provenance"`
 }
 
 // PrecedentSet reports both scored results and bounded candidate coverage.
@@ -493,18 +498,48 @@ type IndexRepositoriesInput struct {
 // indexed commit. The resource URI is canonical; callers must consume it with
 // MCP resources/read rather than reconstructing a larger payload from fields.
 type CodeIndexArtifact struct {
-	Kind           string         `json:"kind"`
-	ID             string         `json:"id"`
-	Repository     RepositoryRef  `json:"repository"`
-	CommitSHA      string         `json:"commit_sha"`
-	CorpusRevision int64          `json:"corpus_revision"`
-	ManifestID     string         `json:"manifest_id"`
-	ManifestSHA256 string         `json:"manifest_sha256"`
-	FileCount      NonNegativeInt `json:"file_count"`
-	TrackedEntries NonNegativeInt `json:"tracked_entries"`
-	Truncated      bool           `json:"truncated"`
-	ResourceURI    string         `json:"resource_uri"`
-	FollowUp       *JobFollowUp   `json:"follow_up"`
+	Kind           string                    `json:"kind"`
+	ID             string                    `json:"id"`
+	Repository     RepositoryRef             `json:"repository"`
+	CommitSHA      string                    `json:"commit_sha"`
+	CorpusRevision int64                     `json:"corpus_revision"`
+	ManifestID     string                    `json:"manifest_id"`
+	ManifestSHA256 string                    `json:"manifest_sha256"`
+	SnapshotToken  string                    `json:"snapshot_token"`
+	CoverageKnown  bool                      `json:"coverage_known"`
+	Manifest       CodeIndexManifestOutput   `json:"manifest"`
+	SchemaVersion  string                    `json:"schema_version"`
+	TotalBytes     NonNegativeInt            `json:"total_bytes"`
+	Documents      []CodeIndexDocumentOutput `json:"documents"`
+	CreatedAt      string                    `json:"created_at"`
+	Provenance     map[string]string         `json:"provenance"`
+	FileCount      NonNegativeInt            `json:"file_count"`
+	TrackedEntries NonNegativeInt            `json:"tracked_entries"`
+	Truncated      bool                      `json:"truncated"`
+	ResourceURI    string                    `json:"resource_uri"`
+	FollowUp       *JobFollowUp              `json:"follow_up"`
+}
+
+type CodeIndexDocumentOutput struct {
+	Path     string         `json:"path"`
+	SHA256   string         `json:"sha256"`
+	Bytes    NonNegativeInt `json:"bytes"`
+	Language string         `json:"language,omitempty"`
+}
+
+type CodeIndexManifestOutput struct {
+	FormatVersion      string `json:"format_version"`
+	CoverageKnown      bool   `json:"coverage_known"`
+	TrackedEntries     int    `json:"tracked_entries"`
+	IndexedFiles       int    `json:"indexed_files"`
+	SkippedInvalidPath int    `json:"skipped_invalid_path"`
+	SkippedExcluded    int    `json:"skipped_excluded"`
+	SkippedNonRegular  int    `json:"skipped_non_regular"`
+	SkippedOversize    int    `json:"skipped_oversize"`
+	SkippedTotalBudget int    `json:"skipped_total_budget"`
+	SkippedNonText     int    `json:"skipped_non_text"`
+	SkippedFileLimit   int    `json:"skipped_file_limit"`
+	Truncated          bool   `json:"truncated"`
 }
 
 // MergeConflictInput names two already-fetched revisions in a managed workspace.

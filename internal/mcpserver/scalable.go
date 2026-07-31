@@ -22,7 +22,7 @@ const serverInstructions = "Use advertised GitContribute tools for durable, sour
 	"Use corpus.get_thread_facets for bounded stored facet coverage and resources/read for larger facet payloads; repository, thread, and facet gaps provide the exact ordered synchronization route. " +
 	"To inspect a returned resource, ask the host to perform MCP resources/read with this server and the exact URI; in Codex, call read_mcp_resource. Treat resource URIs as opaque identifiers and never shorten, pluralize, or reconstruct them. " +
 	"Missing or truncated coverage is unknown, not negative evidence; use each recovery plan's ordered typed calls and retry only retryable batch items. " +
-	"Canonical source-audit route: coverage -> explicit sync -> jobs.get -> offline reread -> duplicate checks -> live verification -> receipt attachment -> evidence/draft handoff. Corpus reads are offline, synchronization is bounded and explicit, missing coverage is unknown, and every returned resource URI must be consumed through MCP resources/read. " +
+	"Canonical source-audit route: coverage -> ensure_coverage -> jobs.get -> snapshot-bound offline reread -> duplicate checks -> live verification -> receipt attachment -> evidence/draft handoff. Read workflow.get_source_audit_contract for machine-readable transitions. Corpus reads are offline, synchronization is bounded and explicit, missing coverage is unknown, and every returned resource URI must be consumed through MCP resources/read. " +
 	"Only advertised tools are available. GitContribute never mutates GitHub."
 
 // RepositoryRef identifies one GitHub repository without implying that it has
@@ -115,6 +115,12 @@ const serverInstructions = "Use advertised GitContribute tools for durable, sour
 
 func (s *Server) registerScalable() {
 	readOnly := readOnlyAnnotations()
+	addCatalogTool(s, catalogTool[mcpcontract.GetSourceAuditWorkflowInput, mcpcontract.SourceAuditWorkflow]{
+		name: mcpcontract.ToolGetSourceAuditWorkflow, title: "Get canonical source-audit workflow",
+		description: "Return the machine-readable source-audit state machine, including token requirements, allowed transitions, retryability, side-effect authority, and incomplete semantics.",
+		annotations: readOnly, input: inputSchema[mcpcontract.GetSourceAuditWorkflowInput](noSchemaCustomization),
+		output: outputSchema[mcpcontract.SourceAuditWorkflow]("Canonical source-audit workflow contract."), handler: s.getSourceAuditWorkflow,
+	})
 	addCatalogTool(s, catalogTool[mcpcontract.GetRepositoriesInput, mcpcontract.GetRepositoriesOutput]{name: mcpcontract.ToolGetRepositories, title: "Get stored repositories in one batch", description: "Read metadata, coverage, and dossier availability for up to 100 stored repositories. Use for comparison before reading dossier resources. Missing metadata includes a sync action. Offline.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.GetRepositoriesInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "repositories", 1, 100)
 		setMinimum(sc, "corpus_revision", 0)
@@ -185,6 +191,12 @@ func (s *Server) registerScalable() {
 		setRange(sc, "max_requests", float64(repositorycontext.RequestCost()), 1000)
 		setDefault(sc, "max_requests", 1000)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a repository-context synchronization job."), handler: s.syncRepositoryContext})
+	addCatalogTool(s, catalogTool[mcpcontract.EnsureCoverageInput, mcpcontract.JobReference]{name: mcpcontract.ToolEnsureCoverage, title: "Ensure bounded corpus coverage", description: "Run one durable bounded workflow that bootstraps repository context, synchronizes headers, hydrates selected exact-thread facets, verifies coverage, and creates an immutable snapshot handoff. This explicitly authorizes the described GitHub reads and local writes.", annotations: networkReadAnnotations(), supportedBy: supports[CoverageOperator], input: inputSchema[mcpcontract.EnsureCoverageInput](func(sc *schemaBuilder) {
+		setArrayBounds(sc, "facets", 0, 10)
+		setRange(sc, "max_requests", 1, 1000)
+		setRange(sc, "max_pages", 1, 100)
+		setRange(sc, "limit_per_repository", 1, 1000)
+	}), output: outputSchema[mcpcontract.JobReference]("Reference to a durable coverage workflow."), handler: s.ensureCoverage})
 	addCatalogTool(s, catalogTool[mcpcontract.SyncThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncThreads, title: "Sync GitHub thread headers in one batch", description: "Fetch and persist GitHub issue or pull-request headers for up to 50 repositories or 100 exact threads. Use exact mode for known numbers and repository mode for discovery. Fetches no metadata, policy files, comments, reviews, checks, or code.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncThreadsInput](func(sc *schemaBuilder) {
 		setEnum(sc, "selection", "repositories", "threads")
 		property(sc, "repositories").MaxItems = jsonschema.Ptr(50)
@@ -332,6 +344,10 @@ func (s *Server) registerScalable() {
 	}), output: outputSchema[mcpcontract.DeepWikiOutput]("Derived DeepWiki response with provenance."), handler: s.deepWiki})
 }
 
+func (s *Server) getSourceAuditWorkflow(_ context.Context, _ *mcp.CallToolRequest, _ mcpcontract.GetSourceAuditWorkflowInput) (*mcp.CallToolResult, mcpcontract.SourceAuditWorkflow, error) {
+	return nil, mcpcontract.CanonicalSourceAuditWorkflow(), nil
+}
+
 func (s *Server) scalableReader() (ScalableReader, error) {
 	r, ok := s.reader.(ScalableReader)
 	if !ok {
@@ -431,7 +447,7 @@ func (s *Server) getJobs(ctx context.Context, _ *mcp.CallToolRequest, in mcpcont
 						item.Recovery = &mcpcontract.RecoveryPlan{
 							Version: mcpcontract.RecoveryPlanVersion, Reason: "blocked",
 							Message: "Read the detailed typed artifact and follow-up references.",
-							Then:    []mcpcontract.ToolCall{{Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{id}, ResponseFormat: "detailed"}}},
+							Then:    []mcpcontract.ToolCall{mcpcontract.RecoveryAction(mcpcontract.GetJobsInput{IDs: []string{id}, ResponseFormat: "detailed"})},
 						}
 					}
 				}
@@ -480,6 +496,15 @@ func (s *Server) syncRepositoryContext(ctx context.Context, _ *mcp.CallToolReque
 		return nil, mcpcontract.JobReference{}, errors.New("repository context sync is not available")
 	}
 	out, err := op.SyncRepositoryContext(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) ensureCoverage(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.EnsureCoverageInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
+	op, ok := s.reader.(CoverageOperator)
+	if !ok {
+		return nil, mcpcontract.JobReference{}, errors.New("coverage workflow is not available")
+	}
+	out, err := op.EnsureCoverage(ctx, in)
 	return nil, out, err
 }
 

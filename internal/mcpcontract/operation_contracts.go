@@ -13,11 +13,12 @@ type SearchRepositoriesInput struct {
 
 // SearchRepositoriesOutput contains one page of repository matches.
 type SearchRepositoriesOutput struct {
-	Query          string             `json:"query"`
-	Total          int                `json:"total"`
-	Matches        []RepositoryOutput `json:"matches"`
-	NextCursor     string             `json:"next_cursor,omitempty"`
-	CorpusRevision int64              `json:"corpus_revision"`
+	Query          string               `json:"query"`
+	Total          int                  `json:"total"`
+	Matches        []RepositoryOutput   `json:"matches"`
+	NextCursor     string               `json:"next_cursor,omitempty"`
+	CorpusRevision int64                `json:"corpus_revision"`
+	Provenance     CorpusReadProvenance `json:"provenance"`
 }
 
 // ExplainMatchInput identifies an exact stored result and its original query.
@@ -82,13 +83,35 @@ type JobArtifactFailure struct {
 	RetryAfterMS NonNegativeInt  `json:"retry_after_ms,omitempty"`
 }
 
+// ResourceReadAction identifies one exact resource handoff.
+type ResourceReadAction struct {
+	URI string `json:"uri"`
+}
+
+type SnapshotReadAction struct {
+	SnapshotToken string `json:"snapshot_token"`
+}
+
+// FollowUpAction is a discriminated union of valid post-job transitions. Each
+// variant owns its arguments; callers never reconstruct a generic argument bag
+// from prose.
+type FollowUpAction struct {
+	Type                 string                         `json:"type"`
+	PollJob              *GetJobsInput                  `json:"poll_job,omitempty"`
+	ReadResource         *ResourceReadAction            `json:"read_resource,omitempty"`
+	ReadSnapshot         *SnapshotReadAction            `json:"read_snapshot,omitempty"`
+	InspectCommitChanges *InspectCommitChangesInput     `json:"inspect_commit_changes,omitempty"`
+	GetRepositories      *GetRepositoriesInput          `json:"get_repositories,omitempty"`
+	GetThreads           *GetThreadsInput               `json:"get_threads,omitempty"`
+	GetThreadFacets      *GetThreadFacetsInput          `json:"get_thread_facets,omitempty"`
+	ListPortfolio        *ListPullRequestPortfolioInput `json:"list_pull_request_portfolio,omitempty"`
+}
+
 // JobFollowUp points to the typed read plane for a job's durable result.
 type JobFollowUp struct {
-	Tool         string             `json:"tool,omitempty" jsonschema:"Outcome-oriented tool to use next"`
-	Arguments    *ToolCallArguments `json:"arguments,omitempty" jsonschema:"Typed arguments for the follow-up tool"`
-	ResourceURI  string             `json:"resource_uri,omitempty" jsonschema:"MCP resource URI to read next"`
-	RetryAfterMS NonNegativeInt     `json:"retry_after_ms,omitempty" jsonschema:"Minimum delay before attempting this follow-up"`
-	Reason       string             `json:"reason" jsonschema:"Why this follow-up is appropriate"`
+	Action       FollowUpAction `json:"action"`
+	RetryAfterMS NonNegativeInt `json:"retry_after_ms,omitempty" jsonschema:"Minimum delay before attempting this follow-up"`
+	Reason       string         `json:"reason" jsonschema:"Why this follow-up is appropriate"`
 }
 
 // GetJobOutput reports durable state and structured progress for a job. Stored
@@ -257,14 +280,19 @@ type AttachValidationReceiptInput struct {
 }
 
 type ExternalValidationReceiptOutput struct {
-	RunID           string `json:"run_id"`
-	DefinitionID    string `json:"definition_id"`
-	InvestigationID string `json:"investigation_id"`
-	Kind            string `json:"kind"`
-	Classification  string `json:"classification"`
-	ReceiptSHA256   string `json:"receipt_sha256"`
-	Producer        string `json:"producer"`
-	Incomplete      bool   `json:"incomplete"`
+	RunID           string   `json:"run_id"`
+	DefinitionID    string   `json:"definition_id"`
+	InvestigationID string   `json:"investigation_id"`
+	Kind            string   `json:"kind"`
+	Classification  string   `json:"classification"`
+	ReceiptSHA256   string   `json:"receipt_sha256"`
+	Producer        string   `json:"producer"`
+	Provider        string   `json:"provider,omitempty"`
+	ExternalRunID   string   `json:"external_run_id,omitempty"`
+	SourceRevision  string   `json:"source_revision,omitempty"`
+	ArtifactSHA256  string   `json:"artifact_sha256,omitempty"`
+	Limitations     []string `json:"limitations,omitempty"`
+	Incomplete      bool     `json:"incomplete"`
 }
 
 // DefineValidationInput records a bounded validation command without executing it.

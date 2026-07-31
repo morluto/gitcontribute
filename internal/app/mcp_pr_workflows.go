@@ -134,7 +134,7 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 			item.Status = "retryable"
 			item.Code = "feedback_coverage_incomplete"
 			item.Message = "one or more feedback channels reached max_items_per_channel"
-			item.Recovery = recoveryPlan("facet_incomplete", item.Message, mcpcontract.ToolCall{Tool: mcpcontract.ToolSyncPullRequestFeedback, Arguments: &mcpcontract.ToolCallArguments{PullRequests: []mcpcontract.ThreadRef{ref}, Channels: append([]string(nil), in.Channels...), ThreadState: in.ThreadState, MaxItemsPerChannel: in.MaxItemsPerChannel * 2, MaxRequests: in.MaxRequests}})
+			item.Recovery = recoveryPlan("facet_incomplete", item.Message, mcpcontract.RecoveryAction(mcpcontract.SyncPullRequestFeedbackInput{PullRequests: []mcpcontract.ThreadRef{ref}, Channels: append([]string(nil), in.Channels...), ThreadState: in.ThreadState, MaxItemsPerChannel: in.MaxItemsPerChannel * 2, MaxRequests: in.MaxRequests}))
 			item.HeadSHA = snapshot.HeadSHA
 			out.BatchStatus = "partial"
 		} else {
@@ -289,7 +289,7 @@ func (r *MCPReader) syncCIFailures(ctx context.Context, in mcpcontract.SyncCIFai
 				item.Status = "retryable"
 				item.Code = "ci_coverage_incomplete"
 				item.Message = "one or more CI collections reached a configured item bound"
-				item.Recovery = recoveryPlan("facet_incomplete", item.Message, mcpcontract.ToolCall{Tool: mcpcontract.ToolSyncCIFailures, Arguments: &mcpcontract.ToolCallArguments{PullRequests: []mcpcontract.ThreadRef{ref}, Logs: in.Logs, MaxRunsPerPR: in.MaxRunsPerPR, MaxJobsPerRun: in.MaxJobsPerRun, MaxLogBytesPerJob: in.MaxLogBytesPerJob, MaxRequests: in.MaxRequests}})
+				item.Recovery = recoveryPlan("facet_incomplete", item.Message, mcpcontract.RecoveryAction(mcpcontract.SyncCIFailuresInput{PullRequests: []mcpcontract.ThreadRef{ref}, Logs: in.Logs, MaxRunsPerPR: in.MaxRunsPerPR, MaxJobsPerRun: in.MaxJobsPerRun, MaxLogBytesPerJob: in.MaxLogBytesPerJob, MaxRequests: in.MaxRequests}))
 				item.HeadSHA = snapshot.HeadSHA
 				out.BatchStatus = "partial"
 			} else {
@@ -377,8 +377,10 @@ func workflowFailure(ref mcpcontract.ThreadRef, err error, tool string) pullRequ
 }
 
 func workflowRetryCall(tool string, ref mcpcontract.ThreadRef) mcpcontract.ToolCall {
-	args := &mcpcontract.ToolCallArguments{PullRequests: []mcpcontract.ThreadRef{ref}, MaxRequests: 1000}
-	return mcpcontract.ToolCall{Tool: tool, Arguments: args}
+	if tool == mcpcontract.ToolSyncCIFailures {
+		return mcpcontract.RecoveryAction(mcpcontract.SyncCIFailuresInput{PullRequests: []mcpcontract.ThreadRef{ref}, MaxRequests: 1000})
+	}
+	return mcpcontract.RecoveryAction(mcpcontract.SyncPullRequestFeedbackInput{PullRequests: []mcpcontract.ThreadRef{ref}, MaxRequests: 1000})
 }
 
 func pullRequestKey(ref mcpcontract.ThreadRef) string {

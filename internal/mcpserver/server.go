@@ -62,6 +62,10 @@ type GitHubOperator interface {
 	SyncPortfolio(context.Context, mcpcontract.SyncPortfolioInput) (mcpcontract.JobReference, error)
 }
 
+type CoverageOperator interface {
+	EnsureCoverage(context.Context, mcpcontract.EnsureCoverageInput) (mcpcontract.JobReference, error)
+}
+
 type PullRequestFeedbackOperator interface {
 	SyncPullRequestFeedback(context.Context, mcpcontract.SyncPullRequestFeedbackInput) (mcpcontract.JobReference, error)
 }
@@ -103,7 +107,11 @@ type CodeIndexer interface {
 // CodeIndexReader exposes one immutable indexed-commit handoff through the
 // resource plane. It is intentionally separate from the acquisition writer.
 type CodeIndexReader interface {
-	CodeIndexArtifact(context.Context, string, string, string) (mcpcontract.CodeIndexArtifact, error)
+	CodeIndexArtifact(context.Context, string) (mcpcontract.CodeIndexArtifact, error)
+}
+
+type SnapshotReader interface {
+	ReadSnapshot(context.Context, string) (mcpcontract.CorpusSnapshotArtifact, error)
 }
 
 // MergeConflictReader performs local, non-mutating Git comparisons.
@@ -328,7 +336,7 @@ func (s *Server) register() {
 		description: "Read offline facet coverage for up to 100 repository or exact-thread targets with ordered item-level outcomes.",
 		annotations: readOnly, input: inputSchema[mcpcontract.GetCoverageInput](func(sc *schemaBuilder) {
 			setArrayBounds(sc, "targets", 1, 100)
-			configureCoverageTargetSchema(sc)
+			configureCoverageTargetFields(sc)
 			setMinimum(sc, "corpus_revision", 0)
 		}),
 		output: outputSchema[mcpcontract.GetCoverageOutput]("Ordered local repository or thread facet coverage."), handler: s.getCoverage,
@@ -398,14 +406,14 @@ func (s *Server) findNeighbors(ctx context.Context, _ *mcp.CallToolRequest, in m
 func (s *Server) getCoverage(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.GetCoverageInput) (*mcp.CallToolResult, mcpcontract.GetCoverageOutput, error) {
 	if len(in.Targets) < 1 || len(in.Targets) > 100 {
 		return nil, mcpcontract.GetCoverageOutput{}, mcpcontract.InvalidArgument("targets", "must contain 1 to 100 items", map[string]any{
-			"targets": []map[string]string{{"owner": "acme", "repo": "rocket"}},
+			"targets": []any{map[string]any{"type": "repository", "repository": map[string]string{"owner": "acme", "repo": "rocket"}}},
 		})
 	}
 	for i, target := range in.Targets {
-		repositoryLevel := target.Kind == "" && target.Number == 0
-		exactThread := (target.Kind == "issue" || target.Kind == "pull_request") && target.Number > 0
+		repositoryLevel := target.Type == mcpcontract.CoverageTargetRepository && target.Thread == nil
+		exactThread := target.Type == mcpcontract.CoverageTargetExactThread && target.Thread != nil && (target.Thread.Kind == "issue" || target.Thread.Kind == "pull_request") && target.Thread.Number > 0
 		if !repositoryLevel && !exactThread {
-			return nil, mcpcontract.GetCoverageOutput{}, mcpcontract.InvalidArgument(fmt.Sprintf("targets[%d]", i), "must contain owner/repo alone or owner/repo/kind/positive number", map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 42})
+			return nil, mcpcontract.GetCoverageOutput{}, mcpcontract.InvalidArgument(fmt.Sprintf("targets[%d]", i), "must be a valid repository or exact_thread variant", map[string]any{"type": "exact_thread", "repository": map[string]string{"owner": "acme", "repo": "rocket"}, "thread": map[string]any{"kind": "issue", "number": 42}})
 		}
 	}
 	out, err := s.reader.GetCoverage(ctx, in)
