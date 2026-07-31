@@ -31,9 +31,14 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpcontract.FindCluster
 	if err != nil {
 		return mcpcontract.FindClustersOutput{}, err
 	}
+	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	if err != nil {
+		return mcpcontract.FindClustersOutput{}, err
+	}
 	out := mcpcontract.FindClustersOutput{
-		Status: "complete",
-		Items:  make([]mcpcontract.BatchItem[mcpcontract.ClusterSetOutput], len(in.Targets)),
+		Status:         "complete",
+		Items:          make([]mcpcontract.BatchItem[mcpcontract.ClusterSetOutput], len(in.Targets)),
+		CorpusRevision: revision,
 	}
 	seen := make(map[string]struct{}, len(in.Targets))
 	for i, target := range in.Targets {
@@ -69,6 +74,9 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpcontract.FindCluster
 			out.Status = "partial"
 		}
 		out.Items[i] = item
+	}
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return mcpcontract.FindClustersOutput{}, err
 	}
 	return out, nil
 }
@@ -166,6 +174,15 @@ func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpcontract.FindNeighb
 		Status: "complete",
 		Items:  make([]mcpcontract.BatchItem[mcpcontract.NeighborSetOutput], len(in.Threads)),
 	}
+	c, err := r.openReadOnlyCorpus(ctx)
+	if err != nil {
+		return mcpcontract.FindNeighborsOutput{}, err
+	}
+	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	if err != nil {
+		return mcpcontract.FindNeighborsOutput{}, err
+	}
+	out.CorpusRevision = revision
 	seen := make(map[string]struct{}, len(in.Threads))
 	for i, thread := range in.Threads {
 		key := fmt.Sprintf("%s/%s:%s#%d", thread.Owner, thread.Repo, thread.Kind, thread.Number)
@@ -210,6 +227,9 @@ func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpcontract.FindNeighb
 			out.Status = "partial"
 		}
 		out.Items[i] = item
+	}
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return mcpcontract.FindNeighborsOutput{}, err
 	}
 	return out, nil
 }

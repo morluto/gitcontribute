@@ -42,9 +42,16 @@ func (r *MCPReader) Manifest(ctx context.Context, in mcpcontract.ManifestInput) 
 	if err != nil {
 		return mcpcontract.ManifestOutput{}, err
 	}
+	revision, err := beginCorpusRead(ctx, c, nil)
+	if err != nil {
+		return mcpcontract.ManifestOutput{}, err
+	}
 	statement, err := c.GetContributionManifest(ctx, in.ID)
 	if err != nil {
 		return mcpcontract.ManifestOutput{}, err
 	}
-	return manifestStatementToMCP(statement), nil
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return mcpcontract.ManifestOutput{}, err
+	}
+	return manifestStatementToMCP(statement, revision), nil
 }

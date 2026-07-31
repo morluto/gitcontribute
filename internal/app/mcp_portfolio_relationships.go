@@ -25,7 +25,11 @@ func (r *MCPReader) FindPortfolioOverlaps(ctx context.Context, in mcpcontract.Fi
 	if err != nil {
 		return mcpcontract.FindPortfolioOverlapsOutput{}, err
 	}
-	out := mcpcontract.FindPortfolioOverlapsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.PortfolioOverlapOutput], len(in.Candidates))}
+	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	if err != nil {
+		return mcpcontract.FindPortfolioOverlapsOutput{}, err
+	}
+	out := mcpcontract.FindPortfolioOverlapsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.PortfolioOverlapOutput], len(in.Candidates)), CorpusRevision: revision}
 	candidates, candidateIndexes := collectPortfolioCandidates(in.Candidates, &out)
 	pullRequests := append([]mcpcontract.ThreadRef(nil), in.PullRequests...)
 	for i := range pullRequests {
@@ -38,6 +42,9 @@ func (r *MCPReader) FindPortfolioOverlaps(ctx context.Context, in mcpcontract.Fi
 		return mcpcontract.FindPortfolioOverlapsOutput{}, err
 	}
 	if len(candidates) == 0 {
+		if err := finishCorpusRead(ctx, c, revision); err != nil {
+			return mcpcontract.FindPortfolioOverlapsOutput{}, err
+		}
 		return out, nil
 	}
 	if len(prIDs) == 0 {
@@ -45,6 +52,9 @@ func (r *MCPReader) FindPortfolioOverlaps(ctx context.Context, in mcpcontract.Fi
 			out.Items[index] = mcpcontract.BatchItem[mcpcontract.PortfolioOverlapOutput]{Key: in.Candidates[index].Kind + ":" + in.Candidates[index].Ref, Status: "unavailable", Reason: "thread_not_indexed", Message: "none of the requested pull requests are available in the local corpus", Recovery: recoveryPlan("thread_not_indexed", "Sync the exact authored pull requests, then retry this comparison.", syncPullRequestCalls(pullRequests)...)}
 		}
 		out.Status = "partial"
+		if err := finishCorpusRead(ctx, c, revision); err != nil {
+			return mcpcontract.FindPortfolioOverlapsOutput{}, err
+		}
 		return out, nil
 	}
 	results, err := c.FindPortfolioOverlaps(ctx, candidates, prIDs)
@@ -63,6 +73,9 @@ func (r *MCPReader) FindPortfolioOverlaps(ctx context.Context, in mcpcontract.Fi
 			batch.Status, batch.Reason, batch.Recovery = "unavailable", "candidate_signal_unavailable", recoveryPlan("candidate_signal_unavailable", "Sync pull-request status and record candidate overlap signals before retrying.", syncPullRequestCalls(pullRequests)...)
 		}
 		out.Items[i] = batch
+	}
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return mcpcontract.FindPortfolioOverlapsOutput{}, err
 	}
 	return out, nil
 }

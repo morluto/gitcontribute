@@ -29,7 +29,11 @@ func (r *MCPReader) GetThreadFacets(ctx context.Context, in mcpcontract.GetThrea
 	if err != nil {
 		return mcpcontract.GetThreadFacetsOutput{}, err
 	}
-	out := mcpcontract.GetThreadFacetsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.ThreadFacetsOutput], len(in.Threads))}
+	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	if err != nil {
+		return mcpcontract.GetThreadFacetsOutput{}, err
+	}
+	out := mcpcontract.GetThreadFacetsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.ThreadFacetsOutput], len(in.Threads)), CorpusRevision: revision}
 	repositoryKeys := make([]corpus.RepositoryKey, 0, len(in.Threads))
 	for _, input := range in.Threads {
 		if (domain.RepoRef{Owner: input.Owner, Repo: input.Repo}).Validate() == nil && input.Number > 0 {
@@ -111,6 +115,9 @@ func (r *MCPReader) GetThreadFacets(ctx context.Context, in mcpcontract.GetThrea
 		}
 		item.Value = &value
 		out.Items[i] = item
+	}
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return mcpcontract.GetThreadFacetsOutput{}, err
 	}
 	return out, nil
 }

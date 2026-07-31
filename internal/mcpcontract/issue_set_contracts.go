@@ -8,6 +8,7 @@ type PrepareIssueSetInput struct {
 	IssueNumbers   []int  `json:"issue_numbers" jsonschema:"One to 20 distinct positive issue numbers"`
 	PrecedentLimit int    `json:"precedent_limit,omitempty" jsonschema:"Maximum accepted examples per issue from 1 to 10"`
 	ResponseFormat string `json:"response_format,omitempty" jsonschema:"concise omits issue bodies and detailed relation evidence; detailed includes them"`
+	CorpusRevision *int64 `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
 }
 
 // IssueSetGap identifies evidence that is absent or incomplete and gives the
@@ -103,4 +104,5 @@ type PrepareIssueSetOutput struct {
 	RelationshipConsidered int                                `json:"relationship_considered"`
 	Truncated              bool                               `json:"truncated"`
 	RecoveryPlans          []RecoveryPlan                     `json:"recovery_plans,omitempty"`
+	CorpusRevision         int64                              `json:"corpus_revision"`
 }

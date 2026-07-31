@@ -25,8 +25,9 @@ const manifestSnapshotAttempts = 3
 
 // ManifestOptions selects optional local workspace and exact stored PR inputs.
 type ManifestOptions struct {
-	WorkspaceID string
-	PullRequest *ManifestPullRequest
+	WorkspaceID    string
+	PullRequest    *ManifestPullRequest
+	CorpusRevision *int64
 }
 
 // ManifestPullRequest identifies one exact stored pull request.
@@ -43,6 +44,13 @@ func (s *Service) ContributionManifest(ctx context.Context, opportunityID string
 		return nil, err
 	}
 	for attempt := 0; attempt < manifestSnapshotAttempts; attempt++ {
+		revision, err := c.CorpusRevision(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if opts.CorpusRevision != nil && *opts.CorpusRevision != revision {
+			return nil, &corpus.StaleCorpusRevisionError{Expected: *opts.CorpusRevision, Current: revision}
+		}
 		watch, err := c.BeginChangeWatch(ctx)
 		if err != nil {
 			return nil, err
@@ -59,6 +67,12 @@ func (s *Service) ContributionManifest(ctx context.Context, opportunityID string
 		}
 		if !unchanged {
 			continue
+		}
+		if err := c.RequireCorpusRevision(ctx, revision); err != nil {
+			if opts.CorpusRevision == nil && corpus.IsStaleCorpusRevision(err) {
+				continue
+			}
+			return nil, err
 		}
 		if err := validateManifestReferences(statement.Predicate); err != nil {
 			return nil, err

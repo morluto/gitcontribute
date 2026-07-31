@@ -33,16 +33,24 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 	if err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
 	}
+	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	if err != nil {
+		return mcpcontract.PrepareIssueSetOutput{}, err
+	}
 	out := mcpcontract.PrepareIssueSetOutput{
 		Status: "complete", Owner: ref.Owner, Repo: ref.Repo, ResponseFormat: in.ResponseFormat,
-		Items:    make([]mcpcontract.BatchItem[mcpcontract.PreparedIssueEvidence], len(in.IssueNumbers)),
-		Coverage: []mcpcontract.FacetCoverageOutput{},
+		Items:          make([]mcpcontract.BatchItem[mcpcontract.PreparedIssueEvidence], len(in.IssueNumbers)),
+		Coverage:       []mcpcontract.FacetCoverageOutput{},
+		CorpusRevision: revision,
 	}
 	stored, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
 	if err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
 	}
 	if stored == nil {
+		if err := finishCorpusRead(ctx, c, revision); err != nil {
+			return mcpcontract.PrepareIssueSetOutput{}, err
+		}
 		return unavailableIssueSet(in, out), nil
 	}
 	threadsCoverage, err := c.GetCoverage(ctx, stored.ID, nil, "threads")
@@ -120,7 +128,9 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 		out.Status, out.Truncated = "partial", true
 	}
 
-	precedents, err := r.FindPrecedents(ctx, issueSetPrecedentInput(in))
+	precedentInput := issueSetPrecedentInput(in)
+	precedentInput.CorpusRevision = &revision
+	precedents, err := r.FindPrecedents(ctx, precedentInput)
 	if err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
 	}
@@ -172,6 +182,9 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 			out.Status, out.Truncated = "partial", true
 		}
 	}
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return mcpcontract.PrepareIssueSetOutput{}, err
+	}
 	return out, nil
 }
 
@@ -222,7 +235,7 @@ func issueSetPrecedentInput(in mcpcontract.PrepareIssueSetInput) mcpcontract.Fin
 	for i, number := range in.IssueNumbers {
 		threads[i] = mcpcontract.ThreadRef{Owner: in.Owner, Repo: in.Repo, Kind: corpus.ThreadKindIssue, Number: number}
 	}
-	return mcpcontract.FindPrecedentsInput{Threads: threads, Limit: 100}
+	return mcpcontract.FindPrecedentsInput{Threads: threads, Limit: 100, CorpusRevision: in.CorpusRevision}
 }
 
 func prepareOneIssue(

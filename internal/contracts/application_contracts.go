@@ -306,6 +306,8 @@ type SearchOptions struct {
 	Lens          string
 	Sort          string
 	MatchMode     string
+	// CorpusRevision pins this read to one product-owned corpus state.
+	CorpusRevision *int64
 }
 
 // InitResult is the result of initializing a local corpus.
@@ -350,17 +352,18 @@ type AcquisitionService interface {
 }
 
 type AcquisitionResult struct {
-	Repo          RepoRef            `json:"repo"`
-	Remote        string             `json:"remote"`
-	DefaultBranch string             `json:"default_branch"`
-	CommitSHA     string             `json:"commit_sha"`
-	Files         int                `json:"files"`
-	Bytes         int                `json:"bytes"`
-	Indexed       bool               `json:"indexed"`
-	Inserted      bool               `json:"inserted"`
-	AcquiredAt    string             `json:"acquired_at"`
-	Message       string             `json:"message"`
-	IndexManifest codeindex.Manifest `json:"index_manifest"`
+	Repo           RepoRef            `json:"repo"`
+	Remote         string             `json:"remote"`
+	DefaultBranch  string             `json:"default_branch"`
+	CommitSHA      string             `json:"commit_sha"`
+	Files          int                `json:"files"`
+	Bytes          int                `json:"bytes"`
+	Indexed        bool               `json:"indexed"`
+	Inserted       bool               `json:"inserted"`
+	AcquiredAt     string             `json:"acquired_at"`
+	Message        string             `json:"message"`
+	IndexManifest  codeindex.Manifest `json:"index_manifest"`
+	CorpusRevision int64              `json:"corpus_revision"`
 }
 
 // HealthService exposes deterministic offline repository health metrics.

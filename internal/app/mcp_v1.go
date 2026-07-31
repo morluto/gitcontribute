@@ -31,24 +31,25 @@ func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpcontract.Searc
 	}
 
 	res, err := r.searchCorpus(ctx, in.Query, contracts.SearchOptions{
-		Kind:   "repos",
-		Repo:   repoFilter,
-		Limit:  in.Limit,
-		Cursor: in.Cursor,
-		Sort:   in.Sort,
+		Kind:           "repos",
+		Repo:           repoFilter,
+		Limit:          in.Limit,
+		Cursor:         in.Cursor,
+		Sort:           in.Sort,
+		CorpusRevision: in.CorpusRevision,
 	})
 	if err != nil {
 		return mcpcontract.SearchRepositoriesOutput{}, err
 	}
 	if len(res.Matches) == 0 {
-		return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: []mcpcontract.RepositoryOutput{}, NextCursor: res.NextCursor}, nil
+		return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: []mcpcontract.RepositoryOutput{}, NextCursor: res.NextCursor, CorpusRevision: res.CorpusRevision}, nil
 	}
 
 	refs := make([]mcpcontract.RepositoryRef, len(res.Matches))
 	for i, m := range res.Matches {
 		refs[i] = mcpcontract.RepositoryRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo}
 	}
-	batch, err := r.GetRepositories(ctx, mcpcontract.GetRepositoriesInput{Repositories: refs})
+	batch, err := r.GetRepositories(ctx, mcpcontract.GetRepositoriesInput{Repositories: refs, CorpusRevision: &res.CorpusRevision})
 	if err != nil {
 		return mcpcontract.SearchRepositoriesOutput{}, err
 	}
@@ -58,7 +59,7 @@ func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpcontract.Searc
 			matches = append(matches, *item.Value)
 		}
 	}
-	return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: matches, NextCursor: res.NextCursor}, nil
+	return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: matches, NextCursor: res.NextCursor, CorpusRevision: res.CorpusRevision}, nil
 }
 
 // ThreadByNumber reads an issue or pull request by repository and number only.
@@ -71,6 +72,10 @@ func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpcontract.ThreadByN
 		return mcpcontract.ThreadOutput{}, errors.New("number must be positive")
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
+	if err != nil {
+		return mcpcontract.ThreadOutput{}, err
+	}
+	revision, err := beginCorpusRead(ctx, c, nil)
 	if err != nil {
 		return mcpcontract.ThreadOutput{}, err
 	}
@@ -91,6 +96,10 @@ func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpcontract.ThreadByN
 	out := corpusThreadToMCPOutput(thread)
 	out.Owner = in.Owner
 	out.Repo = in.Repo
+	out.CorpusRevision = revision
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return mcpcontract.ThreadOutput{}, err
+	}
 	return out, nil
 }
 
@@ -741,20 +750,43 @@ func draftArtifactToMCP(d *contribution.DraftArtifact) mcpcontract.DraftOutput {
 
 // ExportManifest assembles a bounded local contribution evidence statement.
 func (r *MCPReader) ExportManifest(ctx context.Context, in mcpcontract.ExportManifestInput) (mcpcontract.ManifestOutput, error) {
+	if in.CorpusRevision != nil && *in.CorpusRevision < 0 {
+		return mcpcontract.ManifestOutput{}, mcpcontract.InvalidArgument("corpus_revision", "must be non-negative", map[string]any{"corpus_revision": 0})
+	}
 	opts := ManifestOptions{WorkspaceID: strings.TrimSpace(in.WorkspaceID)}
 	if in.PullRequest != nil {
 		opts.PullRequest = &ManifestPullRequest{Owner: strings.TrimSpace(in.PullRequest.Owner), Repo: strings.TrimSpace(in.PullRequest.Repo), Number: in.PullRequest.Number}
 	}
+	opts.CorpusRevision = in.CorpusRevision
 	statement, err := r.ContributionManifest(ctx, in.OpportunityID, opts)
 	if err != nil {
 		return mcpcontract.ManifestOutput{}, err
 	}
-	return manifestStatementToMCP(statement), nil
+	revision, err := r.publishedManifestRevision(ctx)
+	if err != nil {
+		return mcpcontract.ManifestOutput{}, err
+	}
+	return manifestStatementToMCP(statement, revision), nil
 }
 
-func manifestStatementToMCP(statement *manifest.Statement) mcpcontract.ManifestOutput {
+func (r *MCPReader) publishedManifestRevision(ctx context.Context) (int64, error) {
+	c, err := r.openReadOnlyCorpus(ctx)
+	if err != nil {
+		return 0, err
+	}
+	revision, err := beginCorpusRead(ctx, c, nil)
+	if err != nil {
+		return 0, err
+	}
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return 0, err
+	}
+	return revision, nil
+}
+
+func manifestStatementToMCP(statement *manifest.Statement, revision int64) mcpcontract.ManifestOutput {
 	return mcpcontract.ManifestOutput{
 		ManifestID: statement.Predicate.ManifestID, ContentSHA256: statement.Predicate.ContentSHA256,
-		SchemaVersion: statement.Predicate.SchemaVersion, Status: statement.Predicate.Status, Statement: *statement,
+		SchemaVersion: statement.Predicate.SchemaVersion, Status: statement.Predicate.Status, CorpusRevision: revision, Statement: *statement,
 	}
 }
