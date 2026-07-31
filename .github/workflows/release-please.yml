@@ -3,10 +3,17 @@ name: Release Please
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing tag to publish
+        required: true
+        type: string
 
 jobs:
   release-please:
     name: Create release PR
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -22,10 +29,14 @@ jobs:
   publish-release:
     name: Publish release
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    if: >-
+      always() &&
+      (github.event_name == 'workflow_dispatch' ||
+      (needs.release-please.result == 'success' &&
+      needs.release-please.outputs.release_created == 'true'))
     permissions:
       contents: write
       id-token: write
     uses: ./.github/workflows/release.yml
     with:
-      release_tag: ${{ needs.release-please.outputs.tag_name }}
+      release_tag: ${{ inputs.release_tag || needs.release-please.outputs.tag_name }}
