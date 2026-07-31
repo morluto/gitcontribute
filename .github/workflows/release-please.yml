@@ -40,3 +40,4 @@ jobs:
     uses: ./.github/workflows/release.yml
     with:
       release_tag: ${{ inputs.release_tag || needs.release-please.outputs.tag_name }}
+      publish_github_release: ${{ github.event_name == 'push' }}
