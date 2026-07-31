@@ -239,10 +239,9 @@ func (r *MCPReader) Dossier(ctx context.Context, in mcpcontract.RepoInput) (mcpc
 		return mcpcontract.DossierOutput{}, mcpcontract.Unavailable(
 			"repository_not_indexed",
 			fmt.Sprintf("Repository %s is not present in the local corpus.", ref),
-			mcpcontract.SuggestedAction{
-				Tool:   mcpcontract.ToolSyncRepositoryContext,
-				Reason: "Persist repository metadata before requesting local derived artifacts.",
-				Arguments: &mcpcontract.SuggestedActionArguments{
+			mcpcontract.ToolCall{
+				Tool: mcpcontract.ToolSyncRepositoryContext,
+				Arguments: &mcpcontract.ToolCallArguments{
 					Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
 				},
 			},
@@ -256,10 +255,9 @@ func (r *MCPReader) Dossier(ctx context.Context, in mcpcontract.RepoInput) (mcpc
 		return mcpcontract.DossierOutput{}, mcpcontract.Unavailable(
 			"dossier_not_persisted",
 			fmt.Sprintf("No persisted dossier exists for %s.", ref),
-			mcpcontract.SuggestedAction{
-				Tool:   mcpcontract.ToolGetRepositories,
-				Reason: "Read available repository metadata without creating local state.",
-				Arguments: &mcpcontract.SuggestedActionArguments{
+			mcpcontract.ToolCall{
+				Tool: mcpcontract.ToolGetRepositories,
+				Arguments: &mcpcontract.ToolCallArguments{
 					Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
 				},
 			},
@@ -622,9 +620,12 @@ func (r *MCPReader) GetCoverage(ctx context.Context, in mcpcontract.GetCoverageI
 			out.Status = "partial"
 		} else if reason != "" {
 			item.Status, item.Reason = "unavailable", reason
-			if reason == "not_indexed" {
+			if reason == "repository_not_indexed" {
 				item.Message = "target is not present in the local corpus"
-				item.NextAction = "Synchronize the repository or thread explicitly, then retry this item."
+				item.Recovery = recoveryPlan(reason, item.Message, syncRepositoryContextCall(target.Owner, target.Repo))
+			} else if reason == "thread_not_indexed" {
+				item.Message = "target is not present in the local corpus"
+				item.Recovery = recoveryPlan(reason, item.Message, syncThreadCall(mcpcontract.ThreadRef{Owner: target.Owner, Repo: target.Repo, Kind: target.Kind, Number: target.Number}))
 			} else {
 				item.Message = "owner/repo and optional kind/number must identify a repository or exact thread"
 			}
@@ -661,7 +662,7 @@ func readCoverageTarget(ctx context.Context, c *corpus.Corpus, target mcpcontrac
 		return mcpcontract.CoverageOutput{}, "", fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil {
-		return mcpcontract.CoverageOutput{}, "not_indexed", nil
+		return mcpcontract.CoverageOutput{}, "repository_not_indexed", nil
 	}
 	var threadID *int64
 	asOf := repo.SourceUpdatedAt
@@ -671,7 +672,7 @@ func readCoverageTarget(ctx context.Context, c *corpus.Corpus, target mcpcontrac
 			return mcpcontract.CoverageOutput{}, "", fmt.Errorf("get thread: %w", err)
 		}
 		if thread == nil {
-			return mcpcontract.CoverageOutput{}, "not_indexed", nil
+			return mcpcontract.CoverageOutput{}, "thread_not_indexed", nil
 		}
 		threadID = &thread.ID
 		asOf = thread.SourceUpdatedAt

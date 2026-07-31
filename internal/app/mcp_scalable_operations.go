@@ -103,6 +103,7 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpcontract.SyncThrea
 	type task struct {
 		key          string
 		ref          contracts.RepoRef
+		kind         string
 		numbers      []int
 		inputIndexes []int
 		maxRequests  int
@@ -115,11 +116,15 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpcontract.SyncThrea
 	} else {
 		grouped := make(map[string]int)
 		for inputIndex, thread := range in.Threads {
-			key := thread.Owner + "/" + thread.Repo
+			kind := thread.Kind
+			if kind == "" {
+				kind = "both"
+			}
+			key := thread.Owner + "/" + thread.Repo + "\x00" + kind
 			index, ok := grouped[key]
 			if !ok {
 				grouped[key] = len(tasks)
-				tasks = append(tasks, task{key: key, ref: contracts.RepoRef{Owner: thread.Owner, Repo: thread.Repo}})
+				tasks = append(tasks, task{key: thread.Owner + "/" + thread.Repo + "/" + kind, kind: kind, ref: contracts.RepoRef{Owner: thread.Owner, Repo: thread.Repo}})
 				index = len(tasks) - 1
 			}
 			tasks[index].numbers = append(tasks[index].numbers, thread.Number)
@@ -205,7 +210,11 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpcontract.SyncThrea
 			defer wg.Done()
 			for index := range jobs {
 				current := tasks[index]
-				opts := SyncOptions{Kind: kind, State: state, Since: since, Numbers: current.numbers, MaxItems: in.LimitPerRepository, MaxPages: maxPages, MaxRequests: current.maxRequests}
+				currentKind := kind
+				if in.Selection == "threads" {
+					currentKind = current.kind
+				}
+				opts := SyncOptions{Kind: currentKind, State: state, Since: since, Numbers: current.numbers, MaxItems: in.LimitPerRepository, MaxPages: maxPages, MaxRequests: current.maxRequests}
 				if len(current.numbers) > 0 {
 					opts.State = "all"
 					opts.Since = time.Time{}
@@ -244,7 +253,7 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpcontract.SyncThrea
 				delete(item, "requests")
 				delete(item, "updated")
 				thread := in.Threads[inputIndex]
-				item["key"] = fmt.Sprintf("%s/%s#%d", thread.Owner, thread.Repo, thread.Number)
+				item["key"] = threadRefKey(thread)
 				results[inputIndex] = item
 			}
 		}
@@ -327,7 +336,7 @@ func queuedJobReference(id, kind, message string) mcpcontract.JobReference {
 	return mcpcontract.JobReference{
 		ID: id, Ref: "job:" + id, Kind: kind, Status: "queued", Message: message, PollAfterMS: 1000,
 		FollowUp: &mcpcontract.JobFollowUp{
-			Tool: mcpcontract.ToolGetJob, Reason: "Poll this job ID after the suggested delay.",
+			Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{id}}, Reason: "Poll this job ID after the suggested delay.",
 		},
 	}
 }
@@ -481,8 +490,8 @@ func (s *Service) hydrateThreadsBatch(ctx context.Context, in mcpcontract.Hydrat
 			defer wg.Done()
 			for index := range jobs {
 				current := in.Threads[index]
-				key := fmt.Sprintf("%s/%s#%d", current.Owner, current.Repo, current.Number)
-				res, err := s.Hydrate(ctx, contracts.RepoRef{Owner: current.Owner, Repo: current.Repo}, current.Number, contracts.HydrateOptions{Facets: in.Facets, MaxPages: in.MaxPages})
+				key := threadRefKey(current)
+				res, err := s.Hydrate(ctx, contracts.RepoRef{Owner: current.Owner, Repo: current.Repo}, current.Number, contracts.HydrateOptions{Kind: current.Kind, Facets: in.Facets, MaxPages: in.MaxPages})
 				if err != nil {
 					status, reason, message, retry := githubBatchError(err)
 					results[index] = map[string]any{"key": key, "status": status, "reason": reason, "message": message, "retry_after_ms": retry}
@@ -675,7 +684,8 @@ func (r *MCPReader) DeepWiki(ctx context.Context, in mcpcontract.DeepWikiInput) 
 	}
 	out := mcpcontract.DeepWikiOutput{Status: "complete", Provider: "deepwiki", Action: in.Action, Repositories: repositories, Question: in.Question, Result: res.Text, SourceURL: res.SourceURL, RetrievedAt: formatTime(r.now()), Provenance: "derived_external"}
 	if !res.Available {
-		out.Status, out.Reason, out.NextAction = "unavailable", "not_indexed_or_unavailable", "Use GitHub metadata, stored corpus data, or explicit code acquisition instead."
+		out.Status, out.Reason = "unavailable", "blocked"
+		out.Recovery = recoveryPlan("blocked", "Use GitHub metadata, stored corpus data, or explicit code acquisition instead.")
 		return out, nil
 	}
 	if len(out.Result) > maxBytes {
@@ -683,9 +693,9 @@ func (r *MCPReader) DeepWiki(ctx context.Context, in mcpcontract.DeepWikiInput) 
 		out.Truncated = true
 		out.Reason = "output_limit"
 		if in.Action == "contents" {
-			out.NextAction = "Call structure, then ask a focused question about the relevant section. Increase max_output_bytes only when the focused read is still incomplete."
+			out.Recovery = recoveryPlan("blocked", "Call structure, then ask a focused question about the relevant section. Increase max_output_bytes only when the focused read is still incomplete.", mcpcontract.ToolCall{Tool: mcpcontract.ToolQueryDeepWiki, Arguments: &mcpcontract.ToolCallArguments{Action: "structure", Repository: in.Repository}})
 		} else {
-			out.NextAction = "Narrow the question or repository set. Increase max_output_bytes only when the focused read is still incomplete."
+			out.Recovery = recoveryPlan("blocked", "Narrow the question or repository set. Increase max_output_bytes only when the focused read is still incomplete.")
 		}
 	}
 	return out, nil
@@ -706,9 +716,9 @@ func rejectDuplicateRepositoryRefs(inputs []mcpcontract.RepositoryRef) error {
 func rejectDuplicateThreadRefs(inputs []mcpcontract.ThreadRef) error {
 	seen := make(map[string]struct{}, len(inputs))
 	for _, input := range inputs {
-		key := strings.ToLower(fmt.Sprintf("%s\x00%s\x00%d", input.Owner, input.Repo, input.Number))
+		key := strings.ToLower(fmt.Sprintf("%s\x00%s\x00%s\x00%d", input.Owner, input.Repo, input.Kind, input.Number))
 		if _, ok := seen[key]; ok {
-			return mcpcontract.InvalidArgument("threads", fmt.Sprintf("duplicate thread %s/%s#%d", input.Owner, input.Repo, input.Number), nil)
+			return mcpcontract.InvalidArgument("threads", fmt.Sprintf("duplicate thread %s/%s/%s#%d", input.Owner, input.Repo, input.Kind, input.Number), nil)
 		}
 		seen[key] = struct{}{}
 	}

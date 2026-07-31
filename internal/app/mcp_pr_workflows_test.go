@@ -199,7 +199,7 @@ func TestFeedbackResourceUsesPublicChannelsAndPreservesThreadSelection(t *testin
 func TestWorkflowFailurePreservesRetryableGitHubClassification(t *testing.T) {
 	ref := mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Number: 7}
 	item := workflowFailure(ref, &github.TransientError{Cause: errors.New("head changed")}, mcpcontract.ToolSyncCIFailures)
-	if item.Status != "retryable" || item.Code != "transient" || item.RetryAfterMS == 0 || item.NextAction == "" {
+	if item.Status != "retryable" || item.Code != "transient" || item.RetryAfterMS == 0 || item.Recovery == nil || len(item.Recovery.Then) != 1 {
 		t.Fatalf("item = %+v", item)
 	}
 }

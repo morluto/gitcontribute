@@ -338,12 +338,12 @@ func TestMCPReaderLocalReads(t *testing.T) {
 
 	_, err = reader.Dossier(ctx, mcpcontract.RepoInput{Owner: "acme", Repo: "rocket"})
 	var dossierErr *mcpcontract.ToolError
-	if !errors.As(err, &dossierErr) || dossierErr.Code != "dossier_not_persisted" || len(dossierErr.SuggestedActions) != 1 || dossierErr.SuggestedActions[0].Tool != mcpcontract.ToolGetRepositories {
+	if !errors.As(err, &dossierErr) || dossierErr.Code != "dossier_not_persisted" || dossierErr.Recovery == nil || len(dossierErr.Recovery.Then) != 1 || dossierErr.Recovery.Then[0].Tool != mcpcontract.ToolGetRepositories {
 		t.Fatalf("MCP dossier before build error = %+v", err)
 	}
 	_, err = reader.Dossier(ctx, mcpcontract.RepoInput{Owner: "acme", Repo: "missing"})
 	var repositoryErr *mcpcontract.ToolError
-	if !errors.As(err, &repositoryErr) || repositoryErr.Code != "repository_not_indexed" || len(repositoryErr.SuggestedActions) != 1 || repositoryErr.SuggestedActions[0].Tool != mcpcontract.ToolSyncRepositoryContext {
+	if !errors.As(err, &repositoryErr) || repositoryErr.Code != "repository_not_indexed" || repositoryErr.Recovery == nil || len(repositoryErr.Recovery.Then) != 1 || repositoryErr.Recovery.Then[0].Tool != mcpcontract.ToolSyncRepositoryContext {
 		t.Fatalf("MCP dossier for missing repository error = %+v", err)
 	}
 	if _, err := svc.BuildRepositoryDossier(ctx, contracts.RepoRef{Owner: "acme", Repo: "rocket"}); err != nil {

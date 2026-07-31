@@ -54,9 +54,9 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 		out.Coverage = []mcpcontract.FacetCoverageOutput{{Facet: "threads", Status: "unknown"}}
 		out.Gaps = append(out.Gaps, mcpcontract.IssueSetGap{
 			Code: "relationship_population_unknown", Facet: "threads", Status: "unknown",
-			Message: "repository thread coverage is not recorded, so the stored pull-request population may be incomplete", NextAction: action,
+			Message: "repository thread coverage is not recorded, so the stored pull-request population may be incomplete", Recovery: recoveryPlan("coverage_stale", "Complete the stored pull-request population used for related-work analysis.", action),
 		})
-		out.SuggestedActions = append(out.SuggestedActions, action)
+		out.RecoveryPlans = append(out.RecoveryPlans, *recoveryPlan("coverage_stale", "Complete the stored pull-request population used for related-work analysis.", action))
 		out.Status = "partial"
 	} else {
 		status := "complete"
@@ -65,9 +65,9 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 			action := repositoryPullRequestSyncAction(ref)
 			out.Gaps = append(out.Gaps, mcpcontract.IssueSetGap{
 				Code: "relationship_population_incomplete", Facet: "threads", Status: "partial",
-				Message: "repository thread coverage is incomplete, so the stored pull-request population is not exhaustive", NextAction: action,
+				Message: "repository thread coverage is incomplete, so the stored pull-request population is not exhaustive", Recovery: recoveryPlan("facet_incomplete", "Complete the stored pull-request population used for related-work analysis.", action),
 			})
-			out.SuggestedActions = append(out.SuggestedActions, action)
+			out.RecoveryPlans = append(out.RecoveryPlans, *recoveryPlan("facet_incomplete", "Complete the stored pull-request population used for related-work analysis.", action))
 			out.Status = "partial"
 		}
 		out.Coverage = []mcpcontract.FacetCoverageOutput{{
@@ -135,16 +135,16 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 
 	evaluatedAt := r.now()
 	for i, number := range in.IssueNumbers {
-		key := fmt.Sprintf("%s/%s#%d", ref.Owner, ref.Repo, number)
+		key := threadRefKey(mcpcontract.ThreadRef{Owner: ref.Owner, Repo: ref.Repo, Kind: corpus.ThreadKindIssue, Number: number})
 		item := mcpcontract.BatchItem[mcpcontract.PreparedIssueEvidence]{Key: key, Status: "complete"}
 		issue, ok := issuesByNumber[number]
 		if !ok {
-			item.Status, item.Reason = "unavailable", "issue_not_indexed"
+			item.Status, item.Reason = "unavailable", "thread_not_indexed"
 			item.Message = "issue is not present in the local corpus"
-			item.NextAction = "Call github.sync_threads for this exact issue."
+			item.Recovery = recoveryPlan("thread_not_indexed", item.Message, issueSyncAction(ref, number))
 			out.Items[i] = item
 			out.Status = "partial"
-			out.SuggestedActions = append(out.SuggestedActions, issueSyncAction(ref, number))
+			out.RecoveryPlans = append(out.RecoveryPlans, *recoveryPlan("thread_not_indexed", item.Message, issueSyncAction(ref, number)))
 			continue
 		}
 		value, actions, partial, err := prepareOneIssue(
@@ -164,7 +164,7 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 		}
 		item.Value = &value
 		out.Items[i] = item
-		out.SuggestedActions = append(out.SuggestedActions, actions...)
+		out.RecoveryPlans = append(out.RecoveryPlans, actions...)
 		if value.RelatedWorkTruncated {
 			out.Truncated = true
 		}
@@ -208,11 +208,11 @@ func unavailableIssueSet(in mcpcontract.PrepareIssueSetInput, out mcpcontract.Pr
 	out.Status = "partial"
 	for i, number := range in.IssueNumbers {
 		out.Items[i] = mcpcontract.BatchItem[mcpcontract.PreparedIssueEvidence]{
-			Key: fmt.Sprintf("%s/%s#%d", in.Owner, in.Repo, number), Status: "unavailable",
+			Key: threadRefKey(mcpcontract.ThreadRef{Owner: in.Owner, Repo: in.Repo, Kind: corpus.ThreadKindIssue, Number: number}), Status: "unavailable",
 			Reason: "repository_not_indexed", Message: "repository is not present in the local corpus",
-			NextAction: "Call github.sync_threads for this exact issue.",
+			Recovery: recoveryPlan("repository_not_indexed", "Synchronize the repository, then retry this exact issue.", syncRepositoryContextCall(in.Owner, in.Repo), issueSyncAction(domain.RepoRef{Owner: in.Owner, Repo: in.Repo}, number)),
 		}
-		out.SuggestedActions = append(out.SuggestedActions, issueSyncAction(domain.RepoRef{Owner: in.Owner, Repo: in.Repo}, number))
+		out.RecoveryPlans = append(out.RecoveryPlans, *recoveryPlan("repository_not_indexed", "Synchronize the repository, then retry this exact issue.", syncRepositoryContextCall(in.Owner, in.Repo), issueSyncAction(domain.RepoRef{Owner: in.Owner, Repo: in.Repo}, number)))
 	}
 	return out
 }
@@ -240,7 +240,7 @@ func prepareOneIssue(
 	relationshipPopulationComplete bool,
 	relationshipPopulationFresh bool,
 	evaluatedAt time.Time,
-) (mcpcontract.PreparedIssueEvidence, []mcpcontract.SuggestedAction, bool, error) {
+) (mcpcontract.PreparedIssueEvidence, []mcpcontract.RecoveryPlan, bool, error) {
 	value := mcpcontract.PreparedIssueEvidence{
 		Number: issue.Number, Title: issue.Title, State: issue.State, StateReason: issue.StateReason,
 		Labels: append([]string(nil), issue.Labels...), BodyStatus: "unknown",
@@ -251,15 +251,15 @@ func prepareOneIssue(
 			RequiresConfirmation: true, Basis: "The caller explicitly included this issue; the implementation relationship has not been validated.",
 		},
 	}
-	actions := []mcpcontract.SuggestedAction{}
+	actions := []mcpcontract.RecoveryPlan{}
 	partial := false
 	if !relationshipPopulationFresh {
 		action := repositoryPullRequestSyncAction(ref)
 		value.Gaps = append(value.Gaps, mcpcontract.IssueSetGap{
 			Code: "relationship_coverage_stale", Facet: "threads", Status: "unknown",
-			Message: "repository relationship coverage predates the issue observation", NextAction: action,
+			Message: "repository relationship coverage predates the issue observation", Recovery: recoveryPlan("coverage_stale", "Repository relationship coverage predates the issue observation.", action),
 		})
-		actions, partial = append(actions, action), true
+		actions, partial = append(actions, *recoveryPlan("coverage_stale", "Repository relationship coverage predates the issue observation.", action)), true
 		relationshipPopulationComplete = false
 	}
 	relationshipEvidenceComplete := issue.Body != ""
@@ -272,9 +272,9 @@ func prepareOneIssue(
 		action := issueSyncAction(ref, issue.Number)
 		value.Gaps = append(value.Gaps, mcpcontract.IssueSetGap{
 			Code: "body_unknown", Facet: "body", Status: "unknown",
-			Message: "the corpus does not distinguish a known-empty body from a body that was not captured", NextAction: action,
+			Message: "the corpus does not distinguish a known-empty body from a body that was not captured", Recovery: recoveryPlan("facet_not_observed", "Fetch the exact issue header and body into the local corpus.", action),
 		})
-		actions, partial = append(actions, action), true
+		actions, partial = append(actions, *recoveryPlan("facet_not_observed", "Fetch the exact issue header and body into the local corpus.", action)), true
 	}
 
 	for _, facet := range []string{FacetIssueComments, FacetIssueTimeline} {
@@ -288,9 +288,9 @@ func prepareOneIssue(
 			action := issueHydrateAction(ref, issue.Number, facet)
 			value.Gaps = append(value.Gaps, mcpcontract.IssueSetGap{
 				Code: "facet_missing", Facet: facet, Status: "unknown",
-				Message: "no coverage observation is stored for this facet", NextAction: action,
+				Message: "no coverage observation is stored for this facet", Recovery: recoveryPlan("facet_not_observed", "Complete the missing issue evidence facet.", action),
 			})
-			actions, partial = append(actions, action), true
+			actions, partial = append(actions, *recoveryPlan("facet_not_observed", "Complete the missing issue evidence facet.", action)), true
 			continue
 		}
 		status := "complete"
@@ -305,9 +305,9 @@ func prepareOneIssue(
 			action := issueHydrateAction(ref, issue.Number, facet)
 			value.Gaps = append(value.Gaps, mcpcontract.IssueSetGap{
 				Code: "facet_incomplete", Facet: facet, Status: "partial",
-				Message: "stored facet coverage is incomplete", NextAction: action,
+				Message: "stored facet coverage is incomplete", Recovery: recoveryPlan("facet_incomplete", "Complete the missing issue evidence facet.", action),
 			})
-			actions, partial = append(actions, action), true
+			actions, partial = append(actions, *recoveryPlan("facet_incomplete", "Complete the missing issue evidence facet.", action)), true
 		}
 	}
 
@@ -344,9 +344,9 @@ func prepareOneIssue(
 		action := repositoryHistorySyncAction(ref)
 		value.Gaps = append(value.Gaps, mcpcontract.IssueSetGap{
 			Code: "precedent_evidence_unavailable", Facet: "precedents", Status: "unknown",
-			Message: "historical precedent evidence is unavailable for this issue", NextAction: action,
+			Message: "historical precedent evidence is unavailable for this issue", Recovery: recoveryPlan("coverage_stale", "Fetch closed issue and pull-request headers used for historical precedent analysis.", action),
 		})
-		actions, partial = append(actions, action), true
+		actions, partial = append(actions, *recoveryPlan("coverage_stale", "Fetch closed issue and pull-request headers used for historical precedent analysis.", action)), true
 	} else {
 		for _, match := range precedents.Value.Matches {
 			if match.Kind == corpus.ThreadKindPullRequest && match.MergedAt != "" {
@@ -365,7 +365,7 @@ func issueContributionDisposition(issue mcpcontract.PreparedIssueEvidence) mcpco
 	unknown := func(reasons ...string) mcpcontract.ContributionDisposition {
 		return mcpcontract.ContributionDisposition{
 			Status: "unknown", Confidence: "low", Unknowns: reasons,
-			NextAction: "Complete the listed evidence gaps, then prepare this exact issue set again.",
+			Recovery: recoveryPlan("blocked", "Complete the listed evidence gaps, then prepare this exact issue set again."),
 		}
 	}
 	issueRef := fmt.Sprintf("issue:#%d", issue.Number)
@@ -375,7 +375,7 @@ func issueContributionDisposition(issue mcpcontract.PreparedIssueEvidence) mcpco
 	}) {
 		return mcpcontract.ContributionDisposition{
 			Status: "blocked_by_repository_policy", Confidence: "high", EvidenceRefs: []string{issueRef},
-			NextAction: "Do not create an implementation workspace unless a maintainer reopens or redirects the issue.",
+			Recovery: recoveryPlan("blocked", "Do not create an implementation workspace unless a maintainer reopens or redirects the issue."),
 		}
 	}
 	var mergedClosing, openClosing, closedUnmerged []mcpcontract.IssueSetRelatedWork
@@ -398,7 +398,7 @@ func issueContributionDisposition(issue mcpcontract.PreparedIssueEvidence) mcpco
 	if len(mergedClosing) > 0 {
 		return mcpcontract.ContributionDisposition{
 			Status: "already_resolved_upstream", Confidence: "high", EvidenceRefs: relatedWorkRefs(mergedClosing),
-			NextAction: "Verify the released behavior before considering any follow-up contribution.",
+			Recovery: recoveryPlan("blocked", "Verify the released behavior before considering any follow-up contribution."),
 		}
 	}
 	if len(missingMerge) > 0 {
@@ -410,7 +410,7 @@ func issueContributionDisposition(issue mcpcontract.PreparedIssueEvidence) mcpco
 	if len(openClosing) > 0 {
 		return mcpcontract.ContributionDisposition{
 			Status: "active_competing_work", Confidence: "high", EvidenceRefs: relatedWorkRefs(openClosing),
-			NextAction: "Coordinate with the active pull request before creating another implementation workspace.",
+			Recovery: recoveryPlan("blocked", "Coordinate with the active pull request before creating another implementation workspace."),
 		}
 	}
 	if len(closedUnmerged) > 0 {
@@ -419,7 +419,7 @@ func issueContributionDisposition(issue mcpcontract.PreparedIssueEvidence) mcpco
 		}
 		return mcpcontract.ContributionDisposition{
 			Status: "needs_maintainer_alignment", Confidence: "medium", EvidenceRefs: relatedWorkRefs(closedUnmerged),
-			NextAction: "Confirm the desired semantics and acceptable approach with maintainers before coding.",
+			Recovery: recoveryPlan("blocked", "Confirm the desired semantics and acceptable approach with maintainers before coding."),
 		}
 	}
 	if !strings.EqualFold(issue.State, "open") {
@@ -427,7 +427,7 @@ func issueContributionDisposition(issue mcpcontract.PreparedIssueEvidence) mcpco
 	}
 	return mcpcontract.ContributionDisposition{
 		Status: "ready_to_investigate", Confidence: "medium", EvidenceRefs: []string{issueRef},
-		NextAction: "Investigate the current behavior and contribution fit before creating an implementation workspace.",
+		Recovery: recoveryPlan("blocked", "Investigate the current behavior and contribution fit before creating an implementation workspace."),
 	}
 }
 
@@ -488,30 +488,30 @@ func preparedIssueSourceAsOf(value mcpcontract.PreparedIssueEvidence) string {
 	return latest
 }
 
-func issueSyncAction(ref domain.RepoRef, number int) mcpcontract.SuggestedAction {
-	return mcpcontract.SuggestedAction{
-		Tool: mcpcontract.ToolSyncThreads, Reason: "Fetch the exact issue header and body into the local corpus.",
-		Arguments: &mcpcontract.SuggestedActionArguments{
+func issueSyncAction(ref domain.RepoRef, number int) mcpcontract.ToolCall {
+	return mcpcontract.ToolCall{
+		Tool: mcpcontract.ToolSyncThreads,
+		Arguments: &mcpcontract.ToolCallArguments{
 			Selection: "threads",
 			Threads:   []mcpcontract.ThreadRef{{Owner: ref.Owner, Repo: ref.Repo, Kind: corpus.ThreadKindIssue, Number: number}},
 		},
 	}
 }
 
-func issueHydrateAction(ref domain.RepoRef, number int, facet string) mcpcontract.SuggestedAction {
-	return mcpcontract.SuggestedAction{
-		Tool: mcpcontract.ToolHydrateThreads, Reason: "Complete the missing issue evidence facet.",
-		Arguments: &mcpcontract.SuggestedActionArguments{
+func issueHydrateAction(ref domain.RepoRef, number int, facet string) mcpcontract.ToolCall {
+	return mcpcontract.ToolCall{
+		Tool: mcpcontract.ToolHydrateThreads,
+		Arguments: &mcpcontract.ToolCallArguments{
 			Threads: []mcpcontract.ThreadRef{{Owner: ref.Owner, Repo: ref.Repo, Kind: corpus.ThreadKindIssue, Number: number}},
 			Facets:  []string{facet},
 		},
 	}
 }
 
-func repositoryPullRequestSyncAction(ref domain.RepoRef) mcpcontract.SuggestedAction {
-	return mcpcontract.SuggestedAction{
-		Tool: mcpcontract.ToolSyncThreads, Reason: "Complete the stored pull-request population used for related-work analysis.",
-		Arguments: &mcpcontract.SuggestedActionArguments{
+func repositoryPullRequestSyncAction(ref domain.RepoRef) mcpcontract.ToolCall {
+	return mcpcontract.ToolCall{
+		Tool: mcpcontract.ToolSyncThreads,
+		Arguments: &mcpcontract.ToolCallArguments{
 			Selection:    "repositories",
 			Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
 			Kind:         corpus.ThreadKindPullRequest,
@@ -520,10 +520,10 @@ func repositoryPullRequestSyncAction(ref domain.RepoRef) mcpcontract.SuggestedAc
 	}
 }
 
-func repositoryHistorySyncAction(ref domain.RepoRef) mcpcontract.SuggestedAction {
-	return mcpcontract.SuggestedAction{
-		Tool: mcpcontract.ToolSyncThreads, Reason: "Fetch closed issue and pull-request headers used for historical precedent analysis.",
-		Arguments: &mcpcontract.SuggestedActionArguments{
+func repositoryHistorySyncAction(ref domain.RepoRef) mcpcontract.ToolCall {
+	return mcpcontract.ToolCall{
+		Tool: mcpcontract.ToolSyncThreads,
+		Arguments: &mcpcontract.ToolCallArguments{
 			Selection:    "repositories",
 			Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
 			Kind:         "both",

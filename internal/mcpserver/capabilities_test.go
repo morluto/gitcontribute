@@ -39,6 +39,9 @@ func (*fakeOptionalCapabilities) GetRepositories(_ context.Context, in mcpcontra
 func (*fakeOptionalCapabilities) GetThreads(context.Context, mcpcontract.GetThreadsInput) (mcpcontract.GetThreadsOutput, error) {
 	return mcpcontract.GetThreadsOutput{Status: "complete"}, nil
 }
+func (*fakeOptionalCapabilities) GetThreadFacets(context.Context, mcpcontract.GetThreadFacetsInput) (mcpcontract.GetThreadFacetsOutput, error) {
+	return mcpcontract.GetThreadFacetsOutput{Status: "complete"}, nil
+}
 func (f *fakeOptionalCapabilities) RankOpportunities(context.Context, mcpcontract.RankOpportunitiesInput) (mcpcontract.RankOpportunitiesOutput, error) {
 	score := 87
 	if f.base.radarScore != 0 {
@@ -130,6 +133,8 @@ type completeTestReader struct {
 	mcpcontract.Reader
 	NeighborReader
 	ScalableReader
+	ThreadFacetReader
+	threadFacetResourceReader
 	IssueSetReader
 	PortfolioReader
 	GitHubOperator
@@ -154,7 +159,7 @@ type completeTestReader struct {
 func completeFakeReader(base *fakeReader) mcpcontract.Reader {
 	optional := &fakeOptionalCapabilities{base: base}
 	return completeTestReader{
-		Reader: base, NeighborReader: optional, ScalableReader: optional, IssueSetReader: optional,
+		Reader: base, NeighborReader: optional, ScalableReader: optional, ThreadFacetReader: optional, threadFacetResourceReader: base, IssueSetReader: optional,
 		PortfolioReader: optional, GitHubOperator: optional, PullRequestFeedbackOperator: optional, CIFailureOperator: optional,
 		FixPatternOperator: optional, FixPatternReader: base, CodeIndexer: optional,
 		MergeConflictReader: optional, ResearchReader: optional,

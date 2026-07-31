@@ -28,24 +28,49 @@ type SearchGitHubRepositoriesInput struct {
 	ResponseFormat string   `json:"response_format,omitempty" jsonschema:"concise or detailed"`
 }
 
-// SuggestedAction describes a non-mandatory follow-up with reusable arguments.
-type SuggestedAction struct {
-	Tool      string                    `json:"tool"`
-	Reason    string                    `json:"reason"`
-	Arguments *SuggestedActionArguments `json:"arguments,omitempty"`
+// RecoveryPlan is the only model-visible recovery shape. Versioning keeps the
+// contract explicit while Then preserves the order in which calls are made.
+type RecoveryPlan struct {
+	Version string     `json:"version"`
+	Reason  string     `json:"reason"`
+	Message string     `json:"message"`
+	Then    []ToolCall `json:"then,omitempty"`
 }
 
-// SuggestedActionArguments is the bounded union of reusable follow-up
-// selections returned by GitContribute tools.
-type SuggestedActionArguments struct {
-	IDs          []string        `json:"ids,omitempty"`
-	Selection    string          `json:"selection,omitempty"`
-	Repositories []RepositoryRef `json:"repositories,omitempty"`
-	Threads      []ThreadRef     `json:"threads,omitempty"`
-	Facets       []string        `json:"facets,omitempty"`
-	Kind         string          `json:"kind,omitempty"`
-	State        string          `json:"state,omitempty"`
+// ToolCall is one typed, replayable MCP call in a recovery plan.
+type ToolCall struct {
+	Tool      string             `json:"tool"`
+	Arguments *ToolCallArguments `json:"arguments,omitempty"`
 }
+
+// ToolCallArguments is the bounded typed argument union used by advertised
+// recovery calls. Fields are intentionally limited to canonical MCP inputs.
+type ToolCallArguments struct {
+	IDs                []string        `json:"ids,omitempty"`
+	Selection          string          `json:"selection,omitempty"`
+	Repositories       []RepositoryRef `json:"repositories,omitempty"`
+	Threads            []ThreadRef     `json:"threads,omitempty"`
+	PullRequests       []ThreadRef     `json:"pull_requests,omitempty"`
+	Facets             []string        `json:"facets,omitempty"`
+	Kind               string          `json:"kind,omitempty"`
+	State              string          `json:"state,omitempty"`
+	MaxPages           int             `json:"max_pages,omitempty"`
+	MaxRequests        int             `json:"max_requests,omitempty"`
+	LimitPerRepository int             `json:"limit_per_repository,omitempty"`
+	ResponseFormat     string          `json:"response_format,omitempty"`
+	Channels           []string        `json:"channels,omitempty"`
+	ThreadState        string          `json:"thread_state,omitempty"`
+	Logs               string          `json:"logs,omitempty"`
+	MaxItemsPerChannel int             `json:"max_items_per_channel,omitempty"`
+	MaxRunsPerPR       int             `json:"max_runs_per_pr,omitempty"`
+	MaxJobsPerRun      int             `json:"max_jobs_per_run,omitempty"`
+	MaxLogBytesPerJob  int             `json:"max_log_bytes_per_job,omitempty"`
+	Action             string          `json:"action,omitempty"`
+	Repository         string          `json:"repository,omitempty"`
+	Question           string          `json:"question,omitempty"`
+}
+
+const RecoveryPlanVersion = "gitcontribute.recovery.v1"
 
 // SearchWarning explains a request-specific limitation and how to improve it.
 type SearchWarning struct {
@@ -78,17 +103,17 @@ type RepositorySearchMatch struct {
 
 // SearchGitHubRepositoriesOutput contains search results and completeness metadata.
 type SearchGitHubRepositoriesOutput struct {
-	Status           string                             `json:"status"`
-	Query            string                             `json:"query"`
-	Interpretation   string                             `json:"interpretation"`
-	ResponseFormat   string                             `json:"response_format"`
-	Page             int                                `json:"page"`
-	NextPage         int                                `json:"next_page,omitempty"`
-	Total            int                                `json:"total"`
-	Incomplete       bool                               `json:"incomplete"`
-	Items            []BatchItem[RepositorySearchMatch] `json:"items"`
-	Warnings         []SearchWarning                    `json:"warnings,omitempty"`
-	SuggestedActions []SuggestedAction                  `json:"suggested_actions,omitempty"`
+	Status         string                             `json:"status"`
+	Query          string                             `json:"query"`
+	Interpretation string                             `json:"interpretation"`
+	ResponseFormat string                             `json:"response_format"`
+	Page           int                                `json:"page"`
+	NextPage       int                                `json:"next_page,omitempty"`
+	Total          int                                `json:"total"`
+	Incomplete     bool                               `json:"incomplete"`
+	Items          []BatchItem[RepositorySearchMatch] `json:"items"`
+	Warnings       []SearchWarning                    `json:"warnings,omitempty"`
+	RecoveryPlans  []RecoveryPlan                     `json:"recovery_plans,omitempty"`
 }
 
 // RepositoryRef identifies one GitHub repository without implying that it has
@@ -117,7 +142,7 @@ type BatchItem[T any] struct {
 	Reason       string          `json:"reason,omitempty"`
 	Message      string          `json:"message,omitempty"`
 	RetryAfterMS NonNegativeInt  `json:"retry_after_ms,omitempty"`
-	NextAction   string          `json:"next_action,omitempty"`
+	Recovery     *RecoveryPlan   `json:"recovery,omitempty"`
 }
 
 // GetRepositoriesInput selects repositories for a bounded corpus read.
@@ -127,10 +152,10 @@ type GetRepositoriesInput struct {
 
 // RepositoryMetadataOutput describes the coverage of repository metadata.
 type RepositoryMetadataOutput struct {
-	Status          string `json:"status"`
-	ObservedAt      string `json:"observed_at,omitempty"`
-	SourceUpdatedAt string `json:"source_updated_at,omitempty"`
-	NextAction      string `json:"next_action,omitempty"`
+	Status          string        `json:"status"`
+	ObservedAt      string        `json:"observed_at,omitempty"`
+	SourceUpdatedAt string        `json:"source_updated_at,omitempty"`
+	Recovery        *RecoveryPlan `json:"recovery,omitempty"`
 }
 
 // TypedRepositoryOutput contains repository facts with explicit metadata coverage.
@@ -172,6 +197,40 @@ type GetThreadsInput struct {
 type GetThreadsOutput struct {
 	Status string                    `json:"batch_status"`
 	Items  []BatchItem[ThreadOutput] `json:"items"`
+}
+
+// GetThreadFacetsInput selects bounded offline facet metadata for exact
+// threads. Payloads larger than a compact result are read through the returned
+// resource URI.
+type GetThreadFacetsInput struct {
+	Threads []ThreadRef `json:"threads" jsonschema:"One to 100 exact thread identities"`
+	Facets  []string    `json:"facets" jsonschema:"One to 10 stored facet names"`
+}
+
+// ThreadFacetOutput describes one stored facet and its canonical resource.
+type ThreadFacetOutput struct {
+	Facet            string         `json:"facet"`
+	Status           string         `json:"status"`
+	Complete         bool           `json:"complete"`
+	ObservationCount NonNegativeInt `json:"observation_count"`
+	SourceUpdatedAt  string         `json:"source_updated_at,omitempty"`
+	ResourceURI      string         `json:"resource_uri"`
+	Recovery         *RecoveryPlan  `json:"recovery,omitempty"`
+}
+
+// ThreadFacetsOutput contains bounded facet metadata for one exact thread.
+type ThreadFacetsOutput struct {
+	Owner  string              `json:"owner"`
+	Repo   string              `json:"repo"`
+	Kind   string              `json:"kind"`
+	Number int                 `json:"number"`
+	Facets []ThreadFacetOutput `json:"facets"`
+}
+
+// GetThreadFacetsOutput preserves exact-thread input order and item failures.
+type GetThreadFacetsOutput struct {
+	Status string                          `json:"batch_status"`
+	Items  []BatchItem[ThreadFacetsOutput] `json:"items"`
 }
 
 // FindPrecedentsInput selects source threads for offline analogue discovery.
@@ -455,18 +514,18 @@ type DeepWikiInput struct {
 // DeepWikiOutput labels provider prose as derived external content and reports
 // provider-level unavailability without persisting the response.
 type DeepWikiOutput struct {
-	Status       string   `json:"status"`
-	Provider     string   `json:"provider"`
-	Action       string   `json:"action"`
-	Repositories []string `json:"repositories"`
-	Question     string   `json:"question,omitempty"`
-	Result       string   `json:"result,omitempty"`
-	SourceURL    string   `json:"source_url,omitempty"`
-	RetrievedAt  string   `json:"retrieved_at"`
-	Provenance   string   `json:"provenance"`
-	Truncated    bool     `json:"truncated"`
-	Reason       string   `json:"reason,omitempty"`
-	NextAction   string   `json:"next_action,omitempty"`
+	Status       string        `json:"status"`
+	Provider     string        `json:"provider"`
+	Action       string        `json:"action"`
+	Repositories []string      `json:"repositories"`
+	Question     string        `json:"question,omitempty"`
+	Result       string        `json:"result,omitempty"`
+	SourceURL    string        `json:"source_url,omitempty"`
+	RetrievedAt  string        `json:"retrieved_at"`
+	Provenance   string        `json:"provenance"`
+	Truncated    bool          `json:"truncated"`
+	Reason       string        `json:"reason,omitempty"`
+	Recovery     *RecoveryPlan `json:"recovery,omitempty"`
 }
 
 // ErrNotFound lets readers distinguish absent corpus objects from failures.

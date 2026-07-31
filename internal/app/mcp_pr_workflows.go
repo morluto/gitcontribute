@@ -27,7 +27,7 @@ type pullRequestWorkflowItem struct {
 	ResourceURI  string                      `json:"resource_uri,omitempty"`
 	Code         string                      `json:"code,omitempty"`
 	Message      string                      `json:"message,omitempty"`
-	NextAction   string                      `json:"next_action,omitempty"`
+	Recovery     *mcpcontract.RecoveryPlan   `json:"recovery,omitempty"`
 	RetryAfterMS int                         `json:"retry_after_ms,omitempty"`
 }
 
@@ -108,6 +108,9 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 	budget := github.NewRequestBudget(in.MaxRequests)
 	out := pullRequestWorkflowResult{BatchStatus: "complete", Items: make([]pullRequestWorkflowItem, len(in.PullRequests))}
 	for index, ref := range in.PullRequests {
+		if ref.Kind == "" {
+			ref.Kind = corpus.ThreadKindPullRequest
+		}
 		item := pullRequestWorkflowItem{Key: pullRequestKey(ref), Status: "complete"}
 		snapshot, readErr := feedbackReader.GetPullRequestFeedback(ctx, ref.Owner, ref.Repo, ref.Number, github.PullRequestFeedbackOptions{
 			Channels: in.Channels, ThreadState: in.ThreadState, MaxItemsPerChannel: in.MaxItemsPerChannel,
@@ -131,7 +134,7 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 			item.Status = "retryable"
 			item.Code = "feedback_coverage_incomplete"
 			item.Message = "one or more feedback channels reached max_items_per_channel"
-			item.NextAction = "Retry only this pull request with a larger max_items_per_channel bound."
+			item.Recovery = recoveryPlan("facet_incomplete", item.Message, mcpcontract.ToolCall{Tool: mcpcontract.ToolSyncPullRequestFeedback, Arguments: &mcpcontract.ToolCallArguments{PullRequests: []mcpcontract.ThreadRef{ref}, Channels: append([]string(nil), in.Channels...), ThreadState: in.ThreadState, MaxItemsPerChannel: in.MaxItemsPerChannel * 2, MaxRequests: in.MaxRequests}})
 			item.HeadSHA = snapshot.HeadSHA
 			out.BatchStatus = "partial"
 		} else {
@@ -255,6 +258,9 @@ func (r *MCPReader) syncCIFailures(ctx context.Context, in mcpcontract.SyncCIFai
 	budget := github.NewRequestBudget(in.MaxRequests)
 	out := pullRequestWorkflowResult{BatchStatus: "complete", Items: make([]pullRequestWorkflowItem, len(in.PullRequests))}
 	for index, ref := range in.PullRequests {
+		if ref.Kind == "" {
+			ref.Kind = corpus.ThreadKindPullRequest
+		}
 		item := pullRequestWorkflowItem{Key: pullRequestKey(ref), Status: "complete"}
 		snapshot, readErr := ciReader.GetPullRequestCI(ctx, ref.Owner, ref.Repo, ref.Number, github.CIFailureOptions{
 			MaxRuns: in.MaxRunsPerPR, MaxJobsPerRun: in.MaxJobsPerRun, MaxLogBytes: in.MaxLogBytesPerJob, Logs: in.Logs,
@@ -283,7 +289,7 @@ func (r *MCPReader) syncCIFailures(ctx context.Context, in mcpcontract.SyncCIFai
 				item.Status = "retryable"
 				item.Code = "ci_coverage_incomplete"
 				item.Message = "one or more CI collections reached a configured item bound"
-				item.NextAction = "Retry only this pull request with larger run or job bounds."
+				item.Recovery = recoveryPlan("facet_incomplete", item.Message, mcpcontract.ToolCall{Tool: mcpcontract.ToolSyncCIFailures, Arguments: &mcpcontract.ToolCallArguments{PullRequests: []mcpcontract.ThreadRef{ref}, Logs: in.Logs, MaxRunsPerPR: in.MaxRunsPerPR, MaxJobsPerRun: in.MaxJobsPerRun, MaxLogBytesPerJob: in.MaxLogBytesPerJob, MaxRequests: in.MaxRequests}})
 				item.HeadSHA = snapshot.HeadSHA
 				out.BatchStatus = "partial"
 			} else {
@@ -329,7 +335,10 @@ func (r *MCPReader) persistPullRequestWorkflowFacet(ctx context.Context, ref mcp
 		}
 		return err
 	}
-	thread, err := c.GetThreadByNumber(ctx, repo.ID, ref.Number)
+	if ref.Kind == "" {
+		ref.Kind = corpus.ThreadKindPullRequest
+	}
+	thread, err := c.GetThread(ctx, repo.ID, ref.Kind, ref.Number)
 	if err != nil || thread == nil {
 		if err == nil {
 			err = errors.New("pull request is not stored")
@@ -353,7 +362,7 @@ func workflowFailure(ref mcpcontract.ThreadRef, err error, tool string) pullRequ
 	if errors.Is(err, github.ErrRequestBudgetExhausted) {
 		return pullRequestWorkflowItem{
 			Key: pullRequestKey(ref), Status: "retryable", Code: "request_budget_exhausted", Message: err.Error(),
-			NextAction: "Retry only this pull request with " + tool + " and a sufficient max_requests bound.",
+			Recovery: recoveryPlan("request_budget_exhausted", err.Error(), workflowRetryCall(tool, ref)),
 		}
 	}
 	status, code, message, retryAfterMS := githubBatchError(err)
@@ -362,13 +371,18 @@ func workflowFailure(ref mcpcontract.ThreadRef, err error, tool string) pullRequ
 		Message: message, RetryAfterMS: retryAfterMS,
 	}
 	if status == "retryable" {
-		item.NextAction = "Retry only this pull request with " + tool + " and a sufficient max_requests bound."
+		item.Recovery = recoveryPlan(code, message, workflowRetryCall(tool, ref))
 	}
 	return item
 }
 
+func workflowRetryCall(tool string, ref mcpcontract.ThreadRef) mcpcontract.ToolCall {
+	args := &mcpcontract.ToolCallArguments{PullRequests: []mcpcontract.ThreadRef{ref}, MaxRequests: 1000}
+	return mcpcontract.ToolCall{Tool: tool, Arguments: args}
+}
+
 func pullRequestKey(ref mcpcontract.ThreadRef) string {
-	return fmt.Sprintf("%s/%s#%d", ref.Owner, ref.Repo, ref.Number)
+	return threadRefKey(ref)
 }
 
 func allWorkflowItemsFailed(items []pullRequestWorkflowItem) bool {

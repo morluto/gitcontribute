@@ -68,7 +68,10 @@ func (r *MCPReader) SyncPortfolio(ctx context.Context, in mcpcontract.SyncPortfo
 		if in.Selection == "explicit" {
 			references := make([]string, len(in.PullRequests))
 			for i, ref := range in.PullRequests {
-				references[i] = fmt.Sprintf("%s/%s#%d", ref.Owner, ref.Repo, ref.Number)
+				if ref.Kind == "" {
+					ref.Kind = "pull_request"
+				}
+				references[i] = threadRefKey(ref)
 			}
 			refreshed := 0
 			failures := make([]pullRequestStatusFailure, 0)

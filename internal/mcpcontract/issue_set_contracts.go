@@ -13,11 +13,11 @@ type PrepareIssueSetInput struct {
 // IssueSetGap identifies evidence that is absent or incomplete and gives the
 // exact bounded recovery call without treating the absence as negative proof.
 type IssueSetGap struct {
-	Code       string          `json:"code"`
-	Facet      string          `json:"facet"`
-	Status     string          `json:"status"`
-	Message    string          `json:"message"`
-	NextAction SuggestedAction `json:"next_action"`
+	Code     string        `json:"code"`
+	Facet    string        `json:"facet"`
+	Status   string        `json:"status"`
+	Message  string        `json:"message"`
+	Recovery *RecoveryPlan `json:"recovery"`
 }
 
 // IssueSetRelatedWork is one corpus-supported issue, pull request, or external
@@ -58,11 +58,11 @@ type IssueSetLinkageCandidate struct {
 // ContributionDisposition is a conservative, evidence-backed recommendation
 // made before an implementation workspace is created.
 type ContributionDisposition struct {
-	Status       string   `json:"status"`
-	Confidence   string   `json:"confidence"`
-	EvidenceRefs []string `json:"evidence_refs,omitempty"`
-	Unknowns     []string `json:"unknowns,omitempty"`
-	NextAction   string   `json:"next_action"`
+	Status       string        `json:"status"`
+	Confidence   string        `json:"confidence"`
+	EvidenceRefs []string      `json:"evidence_refs,omitempty"`
+	Unknowns     []string      `json:"unknowns,omitempty"`
+	Recovery     *RecoveryPlan `json:"recovery,omitempty"`
 }
 
 // PreparedIssueEvidence contains stored facts and bounded derived evidence for
@@ -102,5 +102,5 @@ type PrepareIssueSetOutput struct {
 	RelationshipPopulation int                                `json:"relationship_population"`
 	RelationshipConsidered int                                `json:"relationship_considered"`
 	Truncated              bool                               `json:"truncated"`
-	SuggestedActions       []SuggestedAction                  `json:"suggested_actions,omitempty"`
+	RecoveryPlans          []RecoveryPlan                     `json:"recovery_plans,omitempty"`
 }

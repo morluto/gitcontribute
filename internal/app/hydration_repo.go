@@ -112,6 +112,7 @@ func (s *Service) HydrateRepository(ctx context.Context, repo contracts.RepoRef,
 		}
 
 		hr, err := s.HydrateThread(ctx, repo, t.Number, HydrateOptions{
+			Kind:     t.Kind,
 			Facets:   facets,
 			MaxPages: maxPages,
 		})

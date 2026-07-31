@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/facets"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
@@ -217,6 +218,9 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 	assertSchemaValue(t, tools[mcpcontract.ToolSearchThreads].InputSchema, []string{"properties", "kind", "enum"}, []any{"issue", "pull_request"})
 	assertSchemaValue(t, tools[mcpcontract.ToolSearchThreads].InputSchema, []string{"properties", "limit", "default"}, float64(20))
 	assertSchemaValue(t, tools[mcpcontract.ToolSearchThreads].InputSchema, []string{"properties", "limit", "maximum"}, float64(100))
+	assertSchemaValue(t, tools[mcpcontract.ToolGetThreadFacets].InputSchema, []string{"properties", "threads", "maxItems"}, float64(100))
+	assertSchemaValue(t, tools[mcpcontract.ToolGetThreadFacets].InputSchema, []string{"properties", "facets", "maxItems"}, float64(10))
+	assertSchemaValue(t, tools[mcpcontract.ToolGetThreadFacets].InputSchema, []string{"properties", "facets", "items", "enum"}, facets.AllNames())
 	assertSchemaValue(t, tools[mcpcontract.ToolHydrateThreads].InputSchema, []string{"properties", "max_pages", "default"}, float64(3))
 	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].InputSchema, []string{"required"}, []any{"repositories"})
 	assertSchemaValue(t, tools[mcpcontract.ToolCreateWorkspace].InputSchema, []string{"required"}, []any{"investigation_id"})
@@ -332,7 +336,8 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 		{"Run a repeat stress validation group with concurrency and telemetry", mcpcontract.ToolRunValidation},
 		{"Stop a running durable job", mcpcontract.ToolCancelJob},
 		{"Poll several durable jobs together with structured progress", mcpcontract.ToolGetJob},
-		{"Read stored facet coverage for several exact threads", mcpcontract.ToolGetCoverage},
+		{"Read stored facet coverage for several exact threads", mcpcontract.ToolGetThreadFacets},
+		{"Read repository and thread coverage across several targets", mcpcontract.ToolGetCoverage},
 		{"Compare contribution candidates with my authored pull requests for overlap", mcpcontract.ToolFindPortfolioOverlaps},
 		{"Link an authored pull request to a local opportunity", mcpcontract.ToolLinkPullRequest},
 		{"Rebuild and persist the repository dossier from the local corpus", mcpcontract.ToolBuildRepositoryDossier},

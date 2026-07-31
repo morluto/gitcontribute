@@ -53,11 +53,20 @@ func (*fakeReader) CIJobLogResource(context.Context, string, string, int, int64)
 	return map[string]any{"schema_version": "gitcontribute.ci-job-log.v1", "body": "failure"}, nil
 }
 
+func (*fakeReader) GetThreadFacets(_ context.Context, in mcpcontract.GetThreadFacetsInput) (mcpcontract.GetThreadFacetsOutput, error) {
+	return mcpcontract.GetThreadFacetsOutput{Status: "complete"}, nil
+}
+
+func (*fakeReader) ThreadFacetResource(context.Context, string, string, string, int, string) (map[string]any, error) {
+	return map[string]any{"schema_version": "gitcontribute.thread-facet.v1"}, nil
+}
+
 func TestPullRequestWorkflowResourcesAreReadable(t *testing.T) {
 	server := &Server{reader: &fakeReader{}}
 	tests := []struct {
 		uri, version string
 	}{
+		{"gitcontribute://thread/acme/project/pull_request/7/facet/pr_details", "gitcontribute.thread-facet.v1"},
 		{"gitcontribute://pull-request-feedback/acme/project/7", "gitcontribute.pull-request-feedback.v1"},
 		{"gitcontribute://ci-failure-report/acme/project/7", "gitcontribute.ci-failure-report.v1"},
 		{"gitcontribute://ci-job-log/acme/project/7/31", "gitcontribute.ci-job-log.v1"},
@@ -772,6 +781,7 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		templates[template.URITemplate] = true
 	}
 	for _, uriTemplate := range []string{
+		"gitcontribute://thread/{owner}/{repo}/{kind}/{number}/facet/{facet}",
 		"gitcontribute://concern/{id}",
 		"gitcontribute://draft/{id}/{revision}",
 		"gitcontribute://manifest/{id}",

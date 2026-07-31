@@ -24,6 +24,7 @@ func TestServerInstructionsContainRoutingPhrases(t *testing.T) {
 		"explicit network reads",
 		"concern to investigation to hypothesis to opportunity to workspace to draft",
 		"poll advertised job tools in batches",
+		"recovery plan's ordered typed calls",
 		"perform MCP resources/read",
 		"in Codex, call read_mcp_resource",
 		"exact URI",
