@@ -17,25 +17,25 @@ import (
 
 // SearchThreadsInput describes an offline issue and pull-request search page.
 type SearchThreadsInput struct {
-	Query          string   `json:"query" jsonschema:"Thread full-text query"`
-	Owner          string   `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo           string   `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Kind           string   `json:"kind,omitempty" jsonschema:"Optional thread kind: issue or pull_request"`
-	State          string   `json:"state,omitempty" jsonschema:"Optional open or closed state"`
-	StateReason    string   `json:"state_reason,omitempty" jsonschema:"Optional GitHub completed or not_planned state reason"`
-	Merged         *bool    `json:"merged,omitempty" jsonschema:"Optional pull request merged state"`
-	Author         string   `json:"author,omitempty" jsonschema:"Optional author login"`
-	Association    string   `json:"author_association,omitempty" jsonschema:"Optional GitHub author association"`
-	Assignee       string   `json:"assignee,omitempty" jsonschema:"Optional assignee login"`
-	Labels         []string `json:"labels,omitempty" jsonschema:"Labels that must all be present"`
-	UpdatedAfter   string   `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound"`
-	UpdatedBefore  string   `json:"updated_before,omitempty" jsonschema:"Optional RFC 3339 upper bound"`
-	Limit          int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-	Cursor         string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
-	Sort           string   `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
-	MatchMode      string   `json:"match_mode,omitempty" jsonschema:"Term matching: all requires every term; any requires at least one term"`
-	View           string   `json:"view,omitempty" jsonschema:"compact omits full bodies and returns bounded excerpts; full includes stored bodies"`
-	CorpusRevision *int64   `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
+	Query         string   `json:"query" jsonschema:"Thread full-text query"`
+	Owner         string   `json:"owner,omitempty" jsonschema:"Optional repository owner"`
+	Repo          string   `json:"repo,omitempty" jsonschema:"Optional repository name"`
+	Kind          string   `json:"kind,omitempty" jsonschema:"Optional thread kind: issue or pull_request"`
+	State         string   `json:"state,omitempty" jsonschema:"Optional open or closed state"`
+	StateReason   string   `json:"state_reason,omitempty" jsonschema:"Optional GitHub completed or not_planned state reason"`
+	Merged        *bool    `json:"merged,omitempty" jsonschema:"Optional pull request merged state"`
+	Author        string   `json:"author,omitempty" jsonschema:"Optional author login"`
+	Association   string   `json:"author_association,omitempty" jsonschema:"Optional GitHub author association"`
+	Assignee      string   `json:"assignee,omitempty" jsonschema:"Optional assignee login"`
+	Labels        []string `json:"labels,omitempty" jsonschema:"Labels that must all be present"`
+	UpdatedAfter  string   `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound"`
+	UpdatedBefore string   `json:"updated_before,omitempty" jsonschema:"Optional RFC 3339 upper bound"`
+	Limit         int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Cursor        string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
+	Sort          string   `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
+	MatchMode     string   `json:"match_mode,omitempty" jsonschema:"Term matching: all requires every term; any requires at least one term"`
+	View          string   `json:"view,omitempty" jsonschema:"compact omits full bodies and returns bounded excerpts; full includes stored bodies"`
+	SnapshotToken string   `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token"`
 }
 
 // ExplainMatchInput identifies an exact stored result and its original query.
@@ -80,7 +80,6 @@ func (s *Server) registerV1() {
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 			setEnum(schema, "sort", "relevance", "updated")
-			setMinimum(schema, "corpus_revision", 0)
 		}), output: outputSchema[mcpcontract.SearchRepositoriesOutput]("One page of stored repository matches."), handler: s.searchRepositories,
 	})
 	addCatalogTool(s, catalogTool[SearchThreadsInput, mcpcontract.SearchOutput]{
@@ -95,7 +94,6 @@ func (s *Server) registerV1() {
 			setDefault(schema, "match_mode", "all")
 			setEnum(schema, "view", "compact", "full")
 			setDefault(schema, "view", "compact")
-			setMinimum(schema, "corpus_revision", 0)
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 		}), output: outputSchema[mcpcontract.SearchOutput]("One page of stored issue and pull-request matches."), handler: s.searchThreads,
@@ -212,9 +210,7 @@ func (s *Server) registerV1() {
 	addCatalogTool(s, catalogTool[mcpcontract.ExportManifestInput, mcpcontract.DurableArtifactReference]{
 		name: mcpcontract.ToolExportManifest, title: "Export contribution evidence manifest",
 		description: "Generate and persist a deterministic local evidence manifest from SQLite and an optional managed workspace snapshot. It may run non-mutating Git commands but never contacts GitHub; sync exact GitHub facets separately before export.",
-		annotations: localWrite, supportedBy: supports[Operator], input: inputSchema[mcpcontract.ExportManifestInput](func(sc *schemaBuilder) {
-			setMinimum(sc, "corpus_revision", 0)
-		}),
+		annotations: localWrite, supportedBy: supports[Operator], input: inputSchema[mcpcontract.ExportManifestInput](nil),
 		output: outputSchema[mcpcontract.DurableArtifactReference]("Compact reference to the persisted contribution evidence manifest."), handler: s.exportManifest,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.CancelJobInput, mcpcontract.GetJobsOutput]{

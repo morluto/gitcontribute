@@ -3,7 +3,8 @@
 GitContribute evaluates its MCP surface with realistic, scripted tool calls
 through the same in-memory client/server boundary used by consumers. The
 required suite is deterministic: it does not call a language model, access
-GitHub, execute repository code, or depend on wall-clock timing.
+GitHub, or execute repository code. Latency is recorded for comparison, but
+never controls pass/fail.
 
 ## What the suite measures
 
@@ -12,7 +13,10 @@ Each scenario records the tool, arguments, result status, and compact metrics:
 - task completion at the protocol-contract level;
 - tool-call and tool-error counts;
 - invalid-argument errors;
+- retry count and elapsed latency for each multi-step workflow;
+- exact opaque resource-read handoffs;
 - structured response bytes as a context-pressure proxy;
+- a deterministic context-token estimate derived from serialized responses;
 - durable-job polling calls.
 
 Schema checks inspect the serialized MCP catalog. They require an object input
@@ -21,10 +25,12 @@ client may render as an opaque or `unknown` type.
 
 ## Interpretation limits
 
-Scripted calls can reveal protocol burden, response size, ambiguous validation,
-and polling sequences. They cannot establish whether a model will select the
-right tool, recover from an error, or benefit from a search preset. Do not call
-these metrics token counts or model success rates.
+Scripted calls can reveal protocol burden, response size, recovery sequencing,
+and ambiguous validation. They cannot establish whether a model will select
+the right tool, recover from an error, or benefit from a search preset. The
+context-token estimate is a stable serialization proxy, not a claim about any
+model tokenizer; local elapsed latency is likewise not a service SLO. Do not
+call these metrics model success rates.
 
 Changes that consolidate jobs or add opinionated presets should additionally
 be supported by repeated model-backed or human-agent traces. Such evaluations
@@ -39,6 +45,14 @@ candidate only `v5/public.json` and the seeded MCP server. Keep the semantic
 oracle outside its filesystem and context. A separate reviewer scores semantic
 correctness and side-effect correctness before comparing tool calls, context
 tokens, or latency.
+
+The held-out `v5/heldout.json` fixture exercises bounded coverage recovery,
+stale-token recovery, exact resource handoffs, and audit-only fix-pattern
+preview. `TestAgentEvalHeldOutWorkflowMetrics` runs those scenarios through
+the public MCP boundary and logs task success, calls, errors, retries, latency,
+response bytes, and the context-token estimate. Its oracle is the test's
+contract-level assertion; it is intentionally not presented as a model-backed
+benchmark.
 
 Use the same model, sampling settings, corpus fixture revision, catalog
 condition, and read-only mode for baseline/candidate comparisons. Save

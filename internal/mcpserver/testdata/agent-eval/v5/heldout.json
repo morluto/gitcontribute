@@ -1,0 +1,32 @@
+{
+  "version": "agent-tool-eval.heldout.v1",
+  "fixture_revision": "workflow-recovery-v1",
+  "scenarios": [
+    {
+      "id": "missing_coverage_recovery",
+      "prompt": "Find the missing exact-thread coverage, request only the bounded synchronization needed for that gap, and poll the returned job without repeating unrelated reads."
+    },
+    {
+      "id": "stale_snapshot_recovery",
+      "prompt": "When an offline read rejects a stale snapshot token, preserve the error classification and request a fresh coverage result rather than retrying the stale read."
+    },
+    {
+      "id": "exact_resource_handoff",
+      "prompt": "Create the local concern, then read the exact opaque resource URI returned by the producer without reconstructing or shortening it."
+    },
+    {
+      "id": "audit_only_fix_pattern_preview",
+      "prompt": "Preview stored fix patterns for audit purposes and verify that the response is explicitly non-persistent and carries its read identity."
+    }
+  ],
+  "measured_metrics": [
+    "task_success",
+    "tool_calls",
+    "resource_reads",
+    "tool_errors",
+    "retries",
+    "latency_ms",
+    "response_bytes",
+    "context_token_estimate"
+  ]
+}

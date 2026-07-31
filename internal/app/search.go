@@ -54,12 +54,13 @@ type searchMatch struct {
 }
 
 type searchResult struct {
-	Query             string
-	Total             int
-	Matches           []searchMatch
-	NextCursor        string
-	UnknownMergeCount int
-	CorpusRevision    int64
+	Query                string
+	Total                int
+	Matches              []searchMatch
+	NextCursor           string
+	UnknownMergeCount    int
+	SnapshotToken        string
+	ObservationWatermark int64
 }
 
 const maxLensCandidates = 1000
@@ -76,7 +77,7 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts contracts
 	if err != nil {
 		return searchResult{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, opts.CorpusRevision)
+	revision, err := beginCorpusRead(ctx, c, opts.SnapshotToken)
 	if err != nil {
 		return searchResult{}, err
 	}
@@ -144,7 +145,8 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts contracts
 	if err := finishCorpusRead(ctx, c, revision); err != nil {
 		return searchResult{}, err
 	}
-	result.CorpusRevision = revision
+	result.SnapshotToken = snapshotIdentity(opts.SnapshotToken, revision)
+	result.ObservationWatermark = revision
 	return result, nil
 }
 
@@ -726,14 +728,15 @@ func (s *Service) Search(ctx context.Context, query string, opts contracts.Searc
 		}
 	}
 	return &contracts.SearchResult{
-		Query:             query,
-		Kind:              opts.Kind,
-		Repo:              opts.Repo,
-		Limit:             opts.Limit,
-		Total:             res.Total,
-		Matches:           matches,
-		NextCursor:        res.NextCursor,
-		UnknownMergeCount: res.UnknownMergeCount,
-		CorpusRevision:    res.CorpusRevision,
+		Query:                query,
+		Kind:                 opts.Kind,
+		Repo:                 opts.Repo,
+		Limit:                opts.Limit,
+		Total:                res.Total,
+		Matches:              matches,
+		NextCursor:           res.NextCursor,
+		UnknownMergeCount:    res.UnknownMergeCount,
+		SnapshotToken:        res.SnapshotToken,
+		ObservationWatermark: res.ObservationWatermark,
 	}, nil
 }

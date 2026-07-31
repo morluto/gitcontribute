@@ -448,7 +448,7 @@ func (s *Service) indexRepositoriesBatch(ctx context.Context, in mcpcontract.Ind
 					results[index] = map[string]any{"key": key, "status": "failed", "reason": "acquisition_or_index_failed", "message": err.Error(), "retry_after_ms": 0}
 					continue
 				}
-				results[index] = map[string]any{"key": key, "status": "complete", "commit_sha": result.CommitSHA, "files": result.Files, "bytes": result.Bytes, "inserted": result.Inserted, "corpus_revision": result.CorpusRevision, "index_manifest": result.IndexManifest, "artifact_digest": result.ArtifactDigest, "manifest_digest": result.ManifestDigest, "snapshot_token": result.SnapshotToken}
+				results[index] = map[string]any{"key": key, "status": "complete", "commit_sha": result.CommitSHA, "files": result.Files, "bytes": result.Bytes, "inserted": result.Inserted, "snapshot_token": result.SnapshotToken, "index_manifest": result.IndexManifest, "artifact_digest": result.ArtifactDigest, "manifest_digest": result.ManifestDigest}
 			}
 		}()
 	}
@@ -472,26 +472,21 @@ func (s *Service) indexRepositoriesBatch(ctx context.Context, in mcpcontract.Ind
 			status = "partial"
 		}
 	}
-	var corpusRevision int64
-	if completed > 0 {
-		c, err := s.openCorpus(ctx)
-		if err != nil {
-			return nil, err
+	// Each completed acquisition owns its immutable artifact token. Do not
+	// replace those scoped identities with a mutable database watermark.
+	snapshotToken := ""
+	for _, result := range results {
+		if result["status"] != "complete" {
+			continue
 		}
-		corpusRevision, err = c.CorpusRevision(ctx)
-		if err != nil {
-			return nil, err
-		}
-		for _, result := range results {
-			if result["status"] == "complete" {
-				result["corpus_revision"] = corpusRevision
-			}
+		if token, ok := result["snapshot_token"].(string); ok && snapshotToken == "" {
+			snapshotToken = token
 		}
 	}
 	if err := report("repository_indexing", jobProgressCounts(len(in.Repositories), len(in.Repositories))); err != nil {
 		return nil, err
 	}
-	return map[string]any{"status": status, "items": results, "completed": completed, "total": len(in.Repositories), "corpus_revision": corpusRevision}, nil
+	return map[string]any{"status": status, "items": results, "completed": completed, "total": len(in.Repositories), "snapshot_token": snapshotToken}, nil
 }
 
 func syncThreadRefsToMCP(values []contracts.SyncThreadRef) []mcpcontract.ThreadRef {

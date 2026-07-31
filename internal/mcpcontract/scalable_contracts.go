@@ -162,8 +162,8 @@ type BatchItem[T any] struct {
 
 // GetRepositoriesInput selects repositories for a bounded corpus read.
 type GetRepositoriesInput struct {
-	Repositories   []RepositoryRef `json:"repositories" jsonschema:"One to 100 repository identities"`
-	CorpusRevision *int64          `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
+	Repositories  []RepositoryRef `json:"repositories" jsonschema:"One to 100 repository identities"`
+	SnapshotToken string          `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
 }
 
 // RepositoryMetadataOutput describes the coverage of repository metadata.
@@ -199,32 +199,32 @@ type TypedRepositoryOutput struct {
 // GetRepositoriesOutput preserves repository input order and represents
 // unobserved metadata with nullable facts instead of false zero values.
 type GetRepositoriesOutput struct {
-	Status         string                             `json:"batch_status"`
-	Items          []BatchItem[TypedRepositoryOutput] `json:"items"`
-	CorpusRevision int64                              `json:"corpus_revision"`
+	Status        string                             `json:"batch_status"`
+	Items         []BatchItem[TypedRepositoryOutput] `json:"items"`
+	SnapshotToken string                             `json:"snapshot_token"`
 }
 
 // GetThreadsInput selects exact threads and the desired response view.
 type GetThreadsInput struct {
-	Threads        []ThreadRef `json:"threads" jsonschema:"One to 100 exact thread identities"`
-	View           string      `json:"view,omitempty" jsonschema:"compact or full; compact omits bodies"`
-	CorpusRevision *int64      `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
+	Threads       []ThreadRef `json:"threads" jsonschema:"One to 100 exact thread identities"`
+	View          string      `json:"view,omitempty" jsonschema:"compact or full; compact omits bodies"`
+	SnapshotToken string      `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
 }
 
 // GetThreadsOutput preserves exact-thread input order and item-level failures.
 type GetThreadsOutput struct {
-	Status         string                    `json:"batch_status"`
-	Items          []BatchItem[ThreadOutput] `json:"items"`
-	CorpusRevision int64                     `json:"corpus_revision"`
+	Status        string                    `json:"batch_status"`
+	Items         []BatchItem[ThreadOutput] `json:"items"`
+	SnapshotToken string                    `json:"snapshot_token"`
 }
 
 // GetThreadFacetsInput selects bounded offline facet metadata for exact
 // threads. Payloads larger than a compact result are read through the returned
 // resource URI.
 type GetThreadFacetsInput struct {
-	Threads        []ThreadRef `json:"threads" jsonschema:"One to 100 exact thread identities"`
-	Facets         []string    `json:"facets" jsonschema:"One to 10 stored facet names"`
-	CorpusRevision *int64      `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
+	Threads       []ThreadRef `json:"threads" jsonschema:"One to 100 exact thread identities"`
+	Facets        []string    `json:"facets" jsonschema:"One to 10 stored facet names"`
+	SnapshotToken string      `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
 }
 
 // ThreadFacetOutput describes one stored facet and its canonical resource.
@@ -249,16 +249,16 @@ type ThreadFacetsOutput struct {
 
 // GetThreadFacetsOutput preserves exact-thread input order and item failures.
 type GetThreadFacetsOutput struct {
-	Status         string                          `json:"batch_status"`
-	Items          []BatchItem[ThreadFacetsOutput] `json:"items"`
-	CorpusRevision int64                           `json:"corpus_revision"`
+	Status        string                          `json:"batch_status"`
+	Items         []BatchItem[ThreadFacetsOutput] `json:"items"`
+	SnapshotToken string                          `json:"snapshot_token"`
 }
 
 // FindPrecedentsInput selects source threads for offline analogue discovery.
 type FindPrecedentsInput struct {
-	Threads        []ThreadRef `json:"threads" jsonschema:"One to 20 source threads"`
-	Limit          int         `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-	CorpusRevision *int64      `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
+	Threads       []ThreadRef `json:"threads" jsonschema:"One to 20 source threads"`
+	Limit         int         `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	SnapshotToken string      `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
 }
 
 // PrecedentOutput describes one stored thread analogous to a source thread.
@@ -279,11 +279,11 @@ type PrecedentOutput struct {
 // FindPrecedentsOutput returns stored closed or merged analogues for each
 // source thread; it does not perform a network read.
 type FindPrecedentsOutput struct {
-	Status         string                    `json:"status"`
-	Items          []BatchItem[PrecedentSet] `json:"items"`
-	Total          int                       `json:"total"`
-	CorpusRevision int64                     `json:"corpus_revision"`
-	Provenance     CorpusReadProvenance      `json:"provenance"`
+	Status        string                    `json:"status"`
+	Items         []BatchItem[PrecedentSet] `json:"items"`
+	Total         int                       `json:"total"`
+	SnapshotToken string                    `json:"snapshot_token"`
+	Provenance    CorpusReadProvenance      `json:"provenance"`
 }
 
 // PrecedentSet reports both scored results and bounded candidate coverage.
@@ -371,11 +371,11 @@ type SyncCIFailuresInput struct {
 
 // ListPullRequestPortfolioInput filters and bounds the stored pull-request portfolio.
 type ListPullRequestPortfolioInput struct {
-	Authors        []string `json:"authors,omitempty" jsonschema:"Zero or one author login"`
-	State          string   `json:"state,omitempty" jsonschema:"open, closed, or all"`
-	Limit          int      `json:"limit,omitempty" jsonschema:"Maximum pull requests from 1 to 100; defaults to 20"`
-	View           string   `json:"view,omitempty" jsonschema:"compact or full; defaults to compact"`
-	CorpusRevision *int64   `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
+	Authors       []string `json:"authors,omitempty" jsonschema:"Zero or one author login"`
+	State         string   `json:"state,omitempty" jsonschema:"open, closed, or all"`
+	Limit         int      `json:"limit,omitempty" jsonschema:"Maximum pull requests from 1 to 100; defaults to 20"`
+	View          string   `json:"view,omitempty" jsonschema:"compact or full; defaults to compact"`
+	SnapshotToken string   `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
 }
 
 // PullRequestPortfolioItem contains source-backed PR facts and a deterministic
@@ -414,14 +414,14 @@ type PullRequestPortfolioItem struct {
 
 // ListPullRequestPortfolioOutput contains a deterministic portfolio projection.
 type ListPullRequestPortfolioOutput struct {
-	Status         string                     `json:"status"`
-	View           string                     `json:"view"`
-	RuleVersion    string                     `json:"rule_version"`
-	GeneratedAt    string                     `json:"generated_at"`
-	PullRequests   []PullRequestPortfolioItem `json:"pull_requests"`
-	Total          int                        `json:"total"`
-	Truncated      bool                       `json:"truncated"`
-	CorpusRevision int64                      `json:"corpus_revision"`
+	Status        string                     `json:"status"`
+	View          string                     `json:"view"`
+	RuleVersion   string                     `json:"rule_version"`
+	GeneratedAt   string                     `json:"generated_at"`
+	PullRequests  []PullRequestPortfolioItem `json:"pull_requests"`
+	Total         int                        `json:"total"`
+	Truncated     bool                       `json:"truncated"`
+	SnapshotToken string                     `json:"snapshot_token"`
 }
 
 // PortfolioSubjectInput identifies local candidate state for offline overlap analysis.
@@ -432,9 +432,9 @@ type PortfolioSubjectInput struct {
 
 // FindPortfolioOverlapsInput compares candidates with exact stored authored PRs.
 type FindPortfolioOverlapsInput struct {
-	Candidates     []PortfolioSubjectInput `json:"candidates" jsonschema:"One to 50 local candidate subjects"`
-	PullRequests   []ThreadRef             `json:"pull_requests" jsonschema:"One to 100 exact authored pull requests"`
-	CorpusRevision *int64                  `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
+	Candidates    []PortfolioSubjectInput `json:"candidates" jsonschema:"One to 50 local candidate subjects"`
+	PullRequests  []ThreadRef             `json:"pull_requests" jsonschema:"One to 100 exact authored pull requests"`
+	SnapshotToken string                  `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
 }
 
 // PortfolioOverlapEvidenceOutput is one exact observed overlap reason.
@@ -461,9 +461,9 @@ type PortfolioOverlapOutput struct {
 
 // FindPortfolioOverlapsOutput preserves candidate input order.
 type FindPortfolioOverlapsOutput struct {
-	Status         string                              `json:"status"`
-	Items          []BatchItem[PortfolioOverlapOutput] `json:"items"`
-	CorpusRevision int64                               `json:"corpus_revision"`
+	Status        string                              `json:"status"`
+	Items         []BatchItem[PortfolioOverlapOutput] `json:"items"`
+	SnapshotToken string                              `json:"snapshot_token"`
 }
 
 // LinkPullRequestInput explicitly associates a stored PR with local workflow state.
@@ -502,7 +502,6 @@ type CodeIndexArtifact struct {
 	ID             string                    `json:"id"`
 	Repository     RepositoryRef             `json:"repository"`
 	CommitSHA      string                    `json:"commit_sha"`
-	CorpusRevision int64                     `json:"corpus_revision"`
 	ManifestID     string                    `json:"manifest_id"`
 	ManifestSHA256 string                    `json:"manifest_sha256"`
 	SnapshotToken  string                    `json:"snapshot_token"`

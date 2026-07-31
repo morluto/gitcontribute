@@ -244,13 +244,14 @@ type SearchMatch struct {
 
 // SearchResult is the result of a local corpus search.
 type SearchResult struct {
-	Query             string        `json:"query"`
-	Kind              string        `json:"kind"`
-	Repo              string        `json:"repo,omitempty"`
-	Limit             int           `json:"limit"`
-	Total             int           `json:"total"`
-	Matches           []SearchMatch `json:"matches"`
-	NextCursor        string        `json:"next_cursor,omitempty"`
-	UnknownMergeCount int           `json:"unknown_merge_count,omitempty"`
-	CorpusRevision    int64         `json:"corpus_revision"`
+	Query                string        `json:"query"`
+	Kind                 string        `json:"kind"`
+	Repo                 string        `json:"repo,omitempty"`
+	Limit                int           `json:"limit"`
+	Total                int           `json:"total"`
+	Matches              []SearchMatch `json:"matches"`
+	NextCursor           string        `json:"next_cursor,omitempty"`
+	UnknownMergeCount    int           `json:"unknown_merge_count,omitempty"`
+	SnapshotToken        string        `json:"snapshot_token"`
+	ObservationWatermark int64         `json:"observation_watermark"`
 }

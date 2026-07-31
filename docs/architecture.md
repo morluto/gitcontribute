@@ -454,7 +454,7 @@ existing open pair on repeated or concurrent requests; later thread projections
 do not rewrite that baseline, and a closed investigation releases the origin
 for a deliberate new start.
 
-Evidence freshness is a read-time assessment over stored corpus revisions, not
+Evidence freshness is a read-time assessment over stored observations, not
 another persisted evidence relation. Source-backed evidence can record the
 repository, thread, facet, or guidance revision it used; readers compare those
 recorded revisions with the current winning local projections and return

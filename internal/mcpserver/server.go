@@ -297,7 +297,6 @@ func (s *Server) register() {
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 			requireTogether(schema, "owner", "repo")
-			setMinimum(schema, "corpus_revision", 0)
 		}), output: outputSchema[mcpcontract.SearchCodeOutput]("One page of stored code matches."), handler: s.searchCode,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.FindClustersInput, mcpcontract.FindClustersOutput]{
@@ -307,7 +306,6 @@ func (s *Server) register() {
 			setArrayBounds(schema, "targets", 1, 20)
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
-			setMinimum(schema, "corpus_revision", 0)
 			if target := schema.schema.Defs["ClusterTarget"]; target != nil {
 				targetSchema := &schemaBuilder{schema: target, err: schema.err}
 				setEnum(targetSchema, "kind", "issue", "pull_request")
@@ -323,7 +321,6 @@ func (s *Server) register() {
 			setArrayBounds(schema, "threads", 1, 20)
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 10)
-			setMinimum(schema, "corpus_revision", 0)
 			if thread := schema.schema.Defs["ThreadRef"]; thread != nil {
 				threadSchema := &schemaBuilder{schema: thread, err: schema.err}
 				setEnum(threadSchema, "kind", "issue", "pull_request")
@@ -337,7 +334,6 @@ func (s *Server) register() {
 		annotations: readOnly, input: inputSchema[mcpcontract.GetCoverageInput](func(sc *schemaBuilder) {
 			setArrayBounds(sc, "targets", 1, 100)
 			configureCoverageTargetFields(sc)
-			setMinimum(sc, "corpus_revision", 0)
 		}),
 		output: outputSchema[mcpcontract.GetCoverageOutput]("Ordered local repository or thread facet coverage."), handler: s.getCoverage,
 	})

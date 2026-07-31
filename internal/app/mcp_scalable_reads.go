@@ -27,11 +27,11 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 	if err != nil {
 		return mcpcontract.GetRepositoriesOutput{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
 	if err != nil {
 		return mcpcontract.GetRepositoriesOutput{}, err
 	}
-	out := mcpcontract.GetRepositoriesOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput], len(in.Repositories)), CorpusRevision: revision}
+	out := mcpcontract.GetRepositoriesOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput], len(in.Repositories)), SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
 	repositoryKeys := make([]corpus.RepositoryKey, 0, len(in.Repositories))
 	for _, input := range in.Repositories {
 		ref := domain.RepoRef{Owner: input.Owner, Repo: input.Repo}
@@ -134,11 +134,11 @@ func (r *MCPReader) GetThreads(ctx context.Context, in mcpcontract.GetThreadsInp
 	if err != nil {
 		return mcpcontract.GetThreadsOutput{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
 	if err != nil {
 		return mcpcontract.GetThreadsOutput{}, err
 	}
-	out := mcpcontract.GetThreadsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.ThreadOutput], len(in.Threads)), CorpusRevision: revision}
+	out := mcpcontract.GetThreadsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.ThreadOutput], len(in.Threads)), SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
 	repositoryKeys := make([]corpus.RepositoryKey, 0, len(in.Threads))
 	for _, input := range in.Threads {
 		ref := domain.RepoRef{Owner: input.Owner, Repo: input.Repo}
@@ -189,7 +189,7 @@ func (r *MCPReader) GetThreads(ctx context.Context, in mcpcontract.GetThreadsInp
 		}
 		value := corpusThreadToMCPOutput(thread)
 		value.Owner, value.Repo = ref.Owner, ref.Repo
-		value.CorpusRevision = revision
+		value.SnapshotToken = snapshotIdentity(in.SnapshotToken, revision)
 		if in.View == "compact" {
 			value.Body = ""
 		}
@@ -272,7 +272,7 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
 	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
@@ -289,7 +289,7 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
-	out := mcpcontract.ListPullRequestPortfolioOutput{Status: "complete", View: in.View, RuleVersion: "portfolio.v2", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpcontract.PullRequestPortfolioItem, 0, len(page.PullRequests)), Total: page.Total, Truncated: page.Truncated, CorpusRevision: revision}
+	out := mcpcontract.ListPullRequestPortfolioOutput{Status: "complete", View: in.View, RuleVersion: "portfolio.v2", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpcontract.PullRequestPortfolioItem, 0, len(page.PullRequests)), Total: page.Total, Truncated: page.Truncated, SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
 	for _, storedPR := range page.PullRequests {
 		item, err := portfolioItem(storedPR, r.now(), readSet, format)
 		if err != nil {
@@ -614,15 +614,15 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpcontract.RankOp
 	if err != nil {
 		return mcpcontract.RankOpportunitiesOutput{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
 	if err != nil {
 		return mcpcontract.RankOpportunitiesOutput{}, err
 	}
 	out := mcpcontract.RankOpportunitiesOutput{
 		Status: "complete", GeneratedAt: formatTime(evaluationTime),
-		Candidates:     make([]mcpcontract.OpportunityCandidateOutput, 0, in.Limit),
-		Repositories:   make([]mcpcontract.BatchItem[mcpcontract.RepositoryOpportunitySummaryOutput], len(in.Repositories)),
-		CorpusRevision: revision,
+		Candidates:    make([]mcpcontract.OpportunityCandidateOutput, 0, in.Limit),
+		Repositories:  make([]mcpcontract.BatchItem[mcpcontract.RepositoryOpportunitySummaryOutput], len(in.Repositories)),
+		SnapshotToken: snapshotIdentity(in.SnapshotToken, revision),
 	}
 	var candidates []mcpcontract.OpportunityCandidateOutput
 	for i, input := range in.Repositories {

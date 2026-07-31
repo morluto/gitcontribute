@@ -33,15 +33,15 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 	if err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
 	if err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
 	}
 	out := mcpcontract.PrepareIssueSetOutput{
 		Status: "complete", Owner: ref.Owner, Repo: ref.Repo, ResponseFormat: in.ResponseFormat,
-		Items:          make([]mcpcontract.BatchItem[mcpcontract.PreparedIssueEvidence], len(in.IssueNumbers)),
-		Coverage:       []mcpcontract.FacetCoverageOutput{},
-		CorpusRevision: revision,
+		Items:         make([]mcpcontract.BatchItem[mcpcontract.PreparedIssueEvidence], len(in.IssueNumbers)),
+		Coverage:      []mcpcontract.FacetCoverageOutput{},
+		SnapshotToken: snapshotIdentity(in.SnapshotToken, revision),
 	}
 	stored, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
 	if err != nil {
@@ -129,7 +129,10 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 	}
 
 	precedentInput := issueSetPrecedentInput(in)
-	precedentInput.CorpusRevision = &revision
+	// Reuse only a caller-supplied durable token. The response token for an
+	// unpinned read is an ephemeral result identity and cannot be resolved by a
+	// nested read.
+	precedentInput.SnapshotToken = in.SnapshotToken
 	precedents, err := r.FindPrecedents(ctx, precedentInput)
 	if err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
@@ -235,7 +238,7 @@ func issueSetPrecedentInput(in mcpcontract.PrepareIssueSetInput) mcpcontract.Fin
 	for i, number := range in.IssueNumbers {
 		threads[i] = mcpcontract.ThreadRef{Owner: in.Owner, Repo: in.Repo, Kind: corpus.ThreadKindIssue, Number: number}
 	}
-	return mcpcontract.FindPrecedentsInput{Threads: threads, Limit: 100, CorpusRevision: in.CorpusRevision}
+	return mcpcontract.FindPrecedentsInput{Threads: threads, Limit: 100, SnapshotToken: in.SnapshotToken}
 }
 
 func prepareOneIssue(

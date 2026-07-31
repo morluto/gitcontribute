@@ -37,7 +37,7 @@ func (r *MCPReader) SearchCode(ctx context.Context, in mcpcontract.SearchCodeInp
 	if err != nil {
 		return mcpcontract.SearchCodeOutput{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
 	if err != nil {
 		return mcpcontract.SearchCodeOutput{}, err
 	}
@@ -84,5 +84,5 @@ func (r *MCPReader) SearchCode(ctx context.Context, in mcpcontract.SearchCodeInp
 	if err != nil {
 		return mcpcontract.SearchCodeOutput{}, err
 	}
-	return mcpcontract.SearchCodeOutput{Query: in.Query, Total: page.Total, Matches: out, Coverage: coverage, NextCursor: page.NextCursor, CorpusRevision: revision, Provenance: provenance}, nil
+	return mcpcontract.SearchCodeOutput{Query: in.Query, Total: page.Total, Matches: out, Coverage: coverage, NextCursor: page.NextCursor, SnapshotToken: snapshotIdentity(in.SnapshotToken, revision), Provenance: provenance}, nil
 }

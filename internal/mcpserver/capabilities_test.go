@@ -142,6 +142,7 @@ type completeTestReader struct {
 	CIFailureOperator
 	FixPatternOperator
 	FixPatternReader
+	FixPatternPreviewReader
 	CodeIndexer
 	MergeConflictReader
 	CommitPlannerReader

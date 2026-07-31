@@ -91,7 +91,7 @@ Catalog byte measurements are regression proxies, not model evidence. The v5
 fixture under `internal/mcpserver/testdata/agent-eval/v5` records the unified
 catalog decision and compares eager loading with host-native tool search. Each
 condition requires at least three trials with frozen model, sampling settings,
-catalog, corpus revision, permissions, prompt, and token budget.
+catalog, snapshot token, permissions, prompt, and token budget.
 
 Semantic correctness and side-effect correctness are gates. Only afterward may
 invalid calls, redundant calls, result tokens, latency, and recovery success be

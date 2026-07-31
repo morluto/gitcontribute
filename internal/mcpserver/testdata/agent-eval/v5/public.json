@@ -10,7 +10,7 @@
     "model",
     "sampling_settings",
     "catalog_fingerprint",
-    "corpus_revision",
+    "snapshot_token",
     "permissions",
     "task_prompt",
     "token_budget"

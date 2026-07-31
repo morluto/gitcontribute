@@ -53,9 +53,6 @@ func (s *Server) exportManifest(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if in.PullRequest != nil && (strings.TrimSpace(in.PullRequest.Owner) == "" || strings.TrimSpace(in.PullRequest.Repo) == "" || in.PullRequest.Number <= 0) {
 		return nil, mcpcontract.DurableArtifactReference{}, mcpcontract.InvalidArgument("pull_request", "owner, repo, and a positive number are required", map[string]any{"owner": "acme", "repo": "rocket", "number": 42})
 	}
-	if in.CorpusRevision != nil && *in.CorpusRevision < 0 {
-		return nil, mcpcontract.DurableArtifactReference{}, mcpcontract.InvalidArgument("corpus_revision", "must be non-negative", map[string]any{"corpus_revision": 0})
-	}
 	operator, ok := s.reader.(Operator)
 	if !ok {
 		return nil, mcpcontract.DurableArtifactReference{}, errors.New("manifest export is not available")

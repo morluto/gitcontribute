@@ -15,7 +15,7 @@ func (s *Service) ThreadResearchBrief(ctx context.Context, ref research.ThreadRe
 	if err != nil {
 		return nil, err
 	}
-	revision, err := beginCorpusRead(ctx, c, nil)
+	revision, err := beginCorpusRead(ctx, c, "")
 	if err != nil {
 		return nil, err
 	}

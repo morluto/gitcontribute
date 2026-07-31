@@ -25,11 +25,11 @@ func (r *MCPReader) FindPortfolioOverlaps(ctx context.Context, in mcpcontract.Fi
 	if err != nil {
 		return mcpcontract.FindPortfolioOverlapsOutput{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
 	if err != nil {
 		return mcpcontract.FindPortfolioOverlapsOutput{}, err
 	}
-	out := mcpcontract.FindPortfolioOverlapsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.PortfolioOverlapOutput], len(in.Candidates)), CorpusRevision: revision}
+	out := mcpcontract.FindPortfolioOverlapsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.PortfolioOverlapOutput], len(in.Candidates)), SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
 	candidates, candidateIndexes := collectPortfolioCandidates(in.Candidates, &out)
 	pullRequests := append([]mcpcontract.ThreadRef(nil), in.PullRequests...)
 	for i := range pullRequests {

@@ -31,14 +31,14 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpcontract.FindCluster
 	if err != nil {
 		return mcpcontract.FindClustersOutput{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
 	if err != nil {
 		return mcpcontract.FindClustersOutput{}, err
 	}
 	out := mcpcontract.FindClustersOutput{
-		Status:         "complete",
-		Items:          make([]mcpcontract.BatchItem[mcpcontract.ClusterSetOutput], len(in.Targets)),
-		CorpusRevision: revision,
+		Status:        "complete",
+		Items:         make([]mcpcontract.BatchItem[mcpcontract.ClusterSetOutput], len(in.Targets)),
+		SnapshotToken: snapshotIdentity(in.SnapshotToken, revision),
 	}
 	seen := make(map[string]struct{}, len(in.Targets))
 	for i, target := range in.Targets {
@@ -178,11 +178,11 @@ func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpcontract.FindNeighb
 	if err != nil {
 		return mcpcontract.FindNeighborsOutput{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
 	if err != nil {
 		return mcpcontract.FindNeighborsOutput{}, err
 	}
-	out.CorpusRevision = revision
+	out.SnapshotToken = snapshotIdentity(in.SnapshotToken, revision)
 	seen := make(map[string]struct{}, len(in.Threads))
 	for i, thread := range in.Threads {
 		key := fmt.Sprintf("%s/%s:%s#%d", thread.Owner, thread.Repo, thread.Kind, thread.Number)

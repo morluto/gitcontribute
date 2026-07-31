@@ -135,14 +135,14 @@ func TestPortfolioFollowUpUsesPortfolioReadArguments(t *testing.T) {
 	}
 }
 
-func TestIndexJobPreservesFailuresAndBindsCompletedArtifactsToFinalRevision(t *testing.T) {
+func TestIndexJobPreservesFailuresAndBindsCompletedArtifactsToSnapshot(t *testing.T) {
 	t.Parallel()
 	job := &contracts.JobResult{
 		Kind: "index_repositories", Status: "succeeded",
-		Result: `{"status":"partial","corpus_revision":42,"items":[{"key":"acme/rocket","status":"complete","commit_sha":"sha","corpus_revision":40,"artifact_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","manifest_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","snapshot_token":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","index_manifest":{"format_version":"v1","indexed_files":2}},{"key":"acme/missing","status":"failed","reason":"acquisition_or_index_failed","message":"checkout failed","retry_after_ms":1000}]}`,
+		Result: `{"status":"partial","snapshot_token":"ephemeral:2","items":[{"key":"acme/rocket","status":"complete","commit_sha":"sha","snapshot_token":"ephemeral:1","artifact_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","manifest_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","index_manifest":{"format_version":"v1","indexed_files":2}},{"key":"acme/missing","status":"failed","reason":"acquisition_or_index_failed","message":"checkout failed","retry_after_ms":1000}]}`,
 	}
 	artifacts, _ := jobArtifactsAndFollowUp(job, 2)
-	if len(artifacts) != 2 || artifacts[0].CodeIndex == nil || artifacts[0].CodeIndex.CorpusRevision != 42 {
+	if len(artifacts) != 2 || artifacts[0].CodeIndex == nil || artifacts[0].CodeIndex.SnapshotToken != "ephemeral:2" {
 		t.Fatalf("index artifacts = %+v", artifacts)
 	}
 	failures := artifacts[1].Failures
