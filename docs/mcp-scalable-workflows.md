@@ -14,7 +14,7 @@ github.search_repositories -> corpus.get_repositories
 github.sync_repository_context -> jobs.get -> corpus.get_repositories
 research.query_deepwiki
 github.sync_threads -> jobs.get -> corpus.rank_contribution_candidates
-github.sync_thread_facets -> jobs.get -> corpus.get_threads
+github.sync_thread_facets -> jobs.get -> corpus.get_thread_facets
 corpus.find_precedents -> workflow.find_related_work
 workflow.prepare_issue_set
 ```
@@ -180,7 +180,7 @@ Batch outputs preserve input order. Each item has one of these statuses:
 
 - `complete`: use the value;
 - `retryable`: retry that item after `retry_after_ms` when present;
-- `unavailable`: follow `next_action` or acquire the missing facet explicitly;
+- `unavailable`: follow the typed `recovery` plan or acquire the missing facet explicitly;
 - `failed`: fix the input or local failure before retrying.
 
 A durable job can succeed while its result is `partial`: job success means the
@@ -188,7 +188,13 @@ bounded operation completed and recorded every item outcome. Poll concurrent
 jobs together with vectorized `jobs.get`, then retry only retryable items. Never
 interpret absent coverage as a zero, a passing check, or a lack of competing
 work. New job references carry a semantic `job:<id>` reference,
-`poll_after_ms`, and a machine-readable suggested `jobs.get` call.
+`poll_after_ms`, and a typed `jobs.get` follow-up with its job ID.
+
+Facet synchronization completes on the same offline read plane: use
+`corpus.get_thread_facets` for bounded coverage metadata and follow each
+returned `resource_uri` through MCP `resources/read` for the persisted facet
+observations. A missing repository, thread, or facet returns a versioned
+`recovery` plan whose `then` calls are ordered and carry typed arguments.
 
 Repository and dossier absence have different recovery paths:
 
