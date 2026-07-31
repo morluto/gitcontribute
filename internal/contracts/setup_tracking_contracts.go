@@ -137,14 +137,22 @@ type SetupReport struct {
 }
 
 // SyncResult reports the outcome of syncing a repository.
+type SyncThreadRef struct {
+	Owner  string `json:"owner"`
+	Repo   string `json:"repo"`
+	Kind   string `json:"kind"`
+	Number int    `json:"number"`
+}
+
 type SyncResult struct {
-	Repo            RepoRef `json:"repo"`
-	Updated         int     `json:"updated"`
-	Requests        int     `json:"requests"`
-	PlannedRequests int     `json:"planned_requests"`
-	RequestBudget   int     `json:"request_budget"`
-	Capped          bool    `json:"request_capped"`
-	Message         string  `json:"message"`
+	Repo            RepoRef         `json:"repo"`
+	Threads         []SyncThreadRef `json:"threads,omitempty"`
+	Updated         int             `json:"updated"`
+	Requests        int             `json:"requests"`
+	PlannedRequests int             `json:"planned_requests"`
+	RequestBudget   int             `json:"request_budget"`
+	Capped          bool            `json:"request_capped"`
+	Message         string          `json:"message"`
 }
 
 // SyncPlanResult is the conservative request ceiling computed before a sync

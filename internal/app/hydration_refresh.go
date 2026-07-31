@@ -48,6 +48,8 @@ func (s *Service) refreshHydrationThreadHeader(ctx context.Context, repo contrac
 	writer := &syncThreadWriter{
 		ctx:          ctx,
 		corpus:       c,
+		owner:        ref.Owner,
+		repo:         ref.Repo,
 		repositoryID: repository.ID,
 		kind:         kind,
 	}

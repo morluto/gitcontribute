@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -172,6 +173,27 @@ func TestPreviewRepositoryFixPatternsIsReadOnlyAndNeverHydrates(t *testing.T) {
 	}
 	if afterRevision != beforeRevision || len(afterJobs) != len(beforeJobs) {
 		t.Fatalf("preview mutated corpus: revision %d -> %d, jobs %d -> %d", beforeRevision, afterRevision, len(beforeJobs), len(afterJobs))
+	}
+}
+
+func TestGetFixPatternReportRejectsLegacyUnboundArtifact(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	job, err := svc.corpus.CreateJob(ctx, "mine_repository_fix_patterns", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.StartJob(ctx, job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.TransitionJob(ctx, job.ID, corpus.JobStatusRunning, corpus.JobStatusSucceeded, `{"status":"complete","persisted":true}`, ""); err != nil {
+		t.Fatal(err)
+	}
+	_, err = (&MCPReader{svc}).GetFixPatternReport(ctx, job.ID)
+	var toolErr *mcpcontract.ToolError
+	if !errors.As(err, &toolErr) || toolErr.Code != "legacy_artifact" {
+		t.Fatalf("legacy report error = %v", err)
 	}
 }
 

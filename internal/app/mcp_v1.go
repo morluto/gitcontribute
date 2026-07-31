@@ -758,30 +758,18 @@ func (r *MCPReader) ExportManifest(ctx context.Context, in mcpcontract.ExportMan
 		opts.PullRequest = &ManifestPullRequest{Owner: strings.TrimSpace(in.PullRequest.Owner), Repo: strings.TrimSpace(in.PullRequest.Repo), Number: in.PullRequest.Number}
 	}
 	opts.CorpusRevision = in.CorpusRevision
-	statement, err := r.ContributionManifest(ctx, in.OpportunityID, opts)
+	statement, revision, err := r.contributionManifestWithRevision(ctx, in.OpportunityID, opts)
 	if err != nil {
-		return mcpcontract.ManifestOutput{}, err
-	}
-	revision, err := r.publishedManifestRevision(ctx)
-	if err != nil {
+		var stale *corpus.StaleCorpusRevisionError
+		if errors.As(err, &stale) {
+			return mcpcontract.ManifestOutput{}, mcpcontract.Unavailable(
+				"corpus_revision_stale",
+				fmt.Sprintf("requested corpus revision %d is no longer current; current revision is %d; reread after an explicit sync", stale.Expected, stale.Current),
+			)
+		}
 		return mcpcontract.ManifestOutput{}, err
 	}
 	return manifestStatementToMCP(statement, revision), nil
-}
-
-func (r *MCPReader) publishedManifestRevision(ctx context.Context) (int64, error) {
-	c, err := r.openReadOnlyCorpus(ctx)
-	if err != nil {
-		return 0, err
-	}
-	revision, err := beginCorpusRead(ctx, c, nil)
-	if err != nil {
-		return 0, err
-	}
-	if err := finishCorpusRead(ctx, c, revision); err != nil {
-		return 0, err
-	}
-	return revision, nil
 }
 
 func manifestStatementToMCP(statement *manifest.Statement, revision int64) mcpcontract.ManifestOutput {

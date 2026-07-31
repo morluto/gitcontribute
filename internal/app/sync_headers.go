@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
@@ -40,6 +41,7 @@ func syncRepositoryHeader(ctx context.Context, c *corpus.Corpus, reader github.R
 type syncThreadSelection struct {
 	updated         int
 	requests        int
+	threads         []contracts.SyncThreadRef
 	sourceUpdatedAt time.Time
 	complete        bool
 	requestCapped   bool
@@ -48,14 +50,17 @@ type syncThreadSelection struct {
 type syncThreadWriter struct {
 	ctx             context.Context
 	corpus          *corpus.Corpus
+	owner           string
+	repo            string
 	repositoryID    int64
 	kind            string
+	threads         []contracts.SyncThreadRef
 	updated         int
 	sourceUpdatedAt time.Time
 }
 
 func syncThreadHeaderSelection(ctx context.Context, c *corpus.Corpus, reader github.Reader, ref domain.RepoRef, repoID int64, sourceUpdatedAt time.Time, opts SyncOptions, provided []github.Issue, budget *syncRequestBudget) (syncThreadSelection, error) {
-	writer := &syncThreadWriter{ctx: ctx, corpus: c, repositoryID: repoID, kind: opts.Kind, sourceUpdatedAt: sourceUpdatedAt}
+	writer := &syncThreadWriter{ctx: ctx, corpus: c, owner: ref.Owner, repo: ref.Repo, repositoryID: repoID, kind: opts.Kind, sourceUpdatedAt: sourceUpdatedAt}
 	if provided != nil {
 		if err := writer.storeAll(provided); err != nil {
 			return syncThreadSelection{}, err
@@ -90,6 +95,7 @@ func (w *syncThreadWriter) store(issue github.Issue) error {
 		return err
 	}
 	thread.RepositoryID = w.repositoryID
+	w.threads = append(w.threads, contracts.SyncThreadRef{Owner: w.owner, Repo: w.repo, Kind: thread.Kind, Number: thread.Number})
 	if _, err := corpus.RetryBusyValue(w.ctx, func(ctx context.Context) (*corpus.Thread, error) {
 		return w.corpus.UpsertThread(ctx, thread, payload)
 	}); err != nil {
@@ -104,7 +110,7 @@ func (w *syncThreadWriter) store(issue github.Issue) error {
 
 func (w *syncThreadWriter) result(requests int, complete, requestCapped bool) syncThreadSelection {
 	return syncThreadSelection{
-		updated: w.updated, requests: requests, sourceUpdatedAt: w.sourceUpdatedAt,
+		updated: w.updated, requests: requests, threads: append([]contracts.SyncThreadRef(nil), w.threads...), sourceUpdatedAt: w.sourceUpdatedAt,
 		complete: complete, requestCapped: requestCapped,
 	}
 }

@@ -194,23 +194,59 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 		count := total
 		var result struct {
 			Items []struct {
-				Key string `json:"key"`
+				Key        string                  `json:"key"`
+				Status     string                  `json:"status"`
+				Reason     string                  `json:"reason"`
+				Message    string                  `json:"message"`
+				RetryAfter int                     `json:"retry_after_ms"`
+				Threads    []mcpcontract.ThreadRef `json:"threads"`
 			} `json:"items"`
 		}
 		if json.Unmarshal([]byte(job.Result), &result) == nil && result.Items != nil {
 			count = len(result.Items)
 		}
 		references := make([]string, 0, min(len(result.Items), 100))
+		threadRefs := make([]mcpcontract.ThreadRef, 0, min(len(result.Items), 100))
+		failures := make([]mcpcontract.JobArtifactFailure, 0, min(len(result.Items), 100))
 		for _, item := range result.Items {
-			if item.Key != "" && len(references) < 100 {
+			partialThreadBatch := kind == "thread_batch" && item.Status == "partial"
+			if item.Status != "complete" && !partialThreadBatch {
+				if len(failures) < 100 {
+					failures = append(failures, mcpcontract.JobArtifactFailure{
+						Reference: item.Key, Status: mcpcontract.BatchItemStatus(item.Status), Reason: item.Reason,
+						Message: item.Message, RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfter),
+					})
+				}
+				continue
+			}
+			if kind == "thread_batch" && len(item.Threads) > 0 {
+				for _, ref := range item.Threads {
+					if len(threadRefs) < 100 {
+						threadRefs = append(threadRefs, ref)
+						references = append(references, threadRefKey(ref))
+					}
+				}
+			} else if item.Key != "" && len(references) < 100 {
 				references = append(references, item.Key)
 			}
 		}
 		value := mcpcontract.NonNegativeInt(count)
 		follow := followUp(tool, "", reason)
-		follow.Arguments = jobFollowUpArguments(job)
+		switch kind {
+		case "repository_batch":
+			var request mcpcontract.SyncRepositoryContextInput
+			if json.Unmarshal([]byte(job.Request), &request) == nil {
+				follow.Arguments = &mcpcontract.ToolCallArguments{Repositories: append([]mcpcontract.RepositoryRef(nil), request.Repositories...)}
+			}
+		case "thread_batch":
+			if len(threadRefs) == 0 {
+				follow = nil
+			} else {
+				follow.Arguments = &mcpcontract.ToolCallArguments{Threads: threadRefs}
+			}
+		}
 		return []mcpcontract.JobArtifactReference{{
-			Kind: kind, Count: &value, References: references, ReferencesTruncated: len(result.Items) > len(references),
+			Kind: kind, Count: &value, References: references, ReferencesTruncated: len(result.Items) > len(references), Failures: failures,
 		}}, follow
 	}
 	switch job.Kind {
@@ -261,6 +297,7 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 		return facetBatchArtifact(refs, request.Facets)
 	case jobKindSyncPullRequestPortfolio:
 		var result struct {
+			Login        string   `json:"login"`
 			PullRequests []string `json:"pull_requests"`
 			Refreshed    int      `json:"refreshed"`
 			Failures     []struct {
@@ -280,8 +317,10 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 					Message: failure.Message, RetryAfterMS: mcpcontract.NonNegativeInt(failure.RetryAfterMS),
 				}
 			}
+			var request mcpcontract.SyncPortfolioInput
+			_ = json.Unmarshal([]byte(job.Request), &request)
 			follow := followUp(mcpcontract.ToolListPullRequestPortfolio, "", "Read these refreshed pull requests from the offline portfolio.")
-			follow.Arguments = jobFollowUpArguments(job)
+			follow.Arguments = portfolioReadFollowUpArguments(request, result.Login, result.PullRequests)
 			return []mcpcontract.JobArtifactReference{{
 				Kind: "pull_request_batch", Count: &value, References: append([]string(nil), result.PullRequests...), Failures: failures,
 			}}, follow
@@ -290,10 +329,9 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 		var result pullRequestWorkflowResult
 		if json.Unmarshal([]byte(job.Result), &result) == nil {
 			kind := "pull_request_feedback"
-			tool := mcpcontract.ToolSyncPullRequestFeedback
 			reason := "Read the persisted feedback snapshots through their resource links."
 			if job.Kind == "sync_ci_failures" {
-				kind, tool = "ci_failure_report", mcpcontract.ToolSyncCIFailures
+				kind = "ci_failure_report"
 				reason = "Read the persisted CI reports and bounded job logs through their resource links."
 			}
 			artifact := mcpcontract.JobArtifactReference{Kind: kind}
@@ -325,15 +363,21 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 			}
 			count := mcpcontract.NonNegativeInt(len(artifact.References))
 			artifact.Count = &count
-			follow := followUp(tool, "", reason)
-			follow.Arguments = jobFollowUpArguments(job)
+			var follow *mcpcontract.JobFollowUp
+			if len(artifact.References) > 0 {
+				follow = followUp("", artifact.References[0], reason)
+			}
 			return []mcpcontract.JobArtifactReference{artifact}, follow
 		}
 	case "index_repositories":
 		var result struct {
-			Items []struct {
+			CorpusRevision int64 `json:"corpus_revision"`
+			Items          []struct {
 				Key            string             `json:"key"`
 				Status         string             `json:"status"`
+				Reason         string             `json:"reason"`
+				Message        string             `json:"message"`
+				RetryAfterMS   int                `json:"retry_after_ms"`
 				CommitSHA      string             `json:"commit_sha"`
 				CorpusRevision int64              `json:"corpus_revision"`
 				IndexManifest  codeindex.Manifest `json:"index_manifest"`
@@ -341,21 +385,44 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 		}
 		if json.Unmarshal([]byte(job.Result), &result) == nil {
 			artifacts := make([]mcpcontract.JobArtifactReference, 0, len(result.Items))
+			completedRefs := make([]string, 0, min(len(result.Items), 100))
+			failures := make([]mcpcontract.JobArtifactFailure, 0, min(len(result.Items), 100))
 			for _, item := range result.Items {
-				if item.Status != "complete" || item.CommitSHA == "" {
+				if item.Status != "complete" {
+					if len(failures) < 100 {
+						failures = append(failures, mcpcontract.JobArtifactFailure{Reference: item.Key, Status: mcpcontract.BatchItemStatus(item.Status), Reason: item.Reason, Message: item.Message, RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfterMS)})
+					}
+					continue
+				}
+				if item.CommitSHA == "" {
 					continue
 				}
 				owner, repo, ok := strings.Cut(item.Key, "/")
 				if !ok || owner == "" || repo == "" {
 					continue
 				}
-				artifact := codeIndexArtifact(domain.RepoRef{Owner: owner, Repo: repo}, item.CommitSHA, item.IndexManifest, item.CorpusRevision)
+				revision := item.CorpusRevision
+				if result.CorpusRevision != 0 {
+					revision = result.CorpusRevision
+				}
+				artifact := codeIndexArtifact(domain.RepoRef{Owner: owner, Repo: repo}, item.CommitSHA, item.IndexManifest, revision)
 				artifacts = append(artifacts, mcpcontract.JobArtifactReference{Kind: artifact.Kind, ID: artifact.ID, URI: artifact.ResourceURI, CodeIndex: &artifact})
+				if len(completedRefs) < 100 {
+					completedRefs = append(completedRefs, item.Key)
+				}
+			}
+			if len(failures) > 0 {
+				count := mcpcontract.NonNegativeInt(len(completedRefs))
+				artifacts = append(artifacts, mcpcontract.JobArtifactReference{Kind: "repository_batch", Count: &count, References: completedRefs, ReferencesTruncated: len(result.Items) > len(completedRefs), Failures: failures})
 			}
 			var follow *mcpcontract.JobFollowUp
-			if len(artifacts) > 0 {
-				artifact := artifacts[0].CodeIndex
+			for _, reference := range artifacts {
+				if reference.CodeIndex == nil {
+					continue
+				}
+				artifact := reference.CodeIndex
 				follow = &mcpcontract.JobFollowUp{ResourceURI: artifact.ResourceURI, Arguments: artifact.FollowUp.Arguments, Reason: "Read the exact indexed-commit artifact through MCP resources/read."}
+				break
 			}
 			return artifacts, follow
 		}
@@ -363,45 +430,23 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 	return nil, nil
 }
 
-func jobFollowUpArguments(job *contracts.JobResult) *mcpcontract.ToolCallArguments {
-	switch job.Kind {
-	case "sync_repository_context":
-		var request mcpcontract.SyncRepositoryContextInput
-		if json.Unmarshal([]byte(job.Request), &request) == nil {
-			return &mcpcontract.ToolCallArguments{Repositories: append([]mcpcontract.RepositoryRef(nil), request.Repositories...), MaxRequests: request.MaxRequests}
+func portfolioReadFollowUpArguments(request mcpcontract.SyncPortfolioInput, login string, references []string) *mcpcontract.ToolCallArguments {
+	limit := request.Limit
+	state := request.State
+	if request.Selection == "authored" {
+		if login != "" {
+			return &mcpcontract.ToolCallArguments{Authors: []string{login}, State: state, Limit: limit, View: "compact"}
 		}
-	case "sync_threads":
-		var request mcpcontract.SyncThreadsInput
-		if json.Unmarshal([]byte(job.Request), &request) == nil {
-			return &mcpcontract.ToolCallArguments{Selection: request.Selection, Repositories: append([]mcpcontract.RepositoryRef(nil), request.Repositories...), Threads: append([]mcpcontract.ThreadRef(nil), request.Threads...), Kind: request.Kind, State: request.State, UpdatedAfter: request.UpdatedAfter, MaxRequests: request.MaxRequests, LimitPerRepository: request.LimitPerRepository}
-		}
-	case "index_repositories":
-		var request mcpcontract.IndexRepositoriesInput
-		if json.Unmarshal([]byte(job.Request), &request) == nil {
-			return &mcpcontract.ToolCallArguments{Repositories: indexRepositoriesToRefs(request.Repositories)}
-		}
-	case jobKindSyncThreadFacets:
-		var request mcpcontract.HydrateThreadsInput
-		if json.Unmarshal([]byte(job.Request), &request) == nil {
-			return &mcpcontract.ToolCallArguments{Threads: append([]mcpcontract.ThreadRef(nil), request.Threads...), Facets: append([]string(nil), request.Facets...), MaxPages: request.MaxPages}
-		}
-	case jobKindSyncPullRequestPortfolio:
-		var request mcpcontract.SyncPortfolioInput
-		if json.Unmarshal([]byte(job.Request), &request) == nil {
-			return &mcpcontract.ToolCallArguments{Selection: request.Selection, PullRequests: append([]mcpcontract.ThreadRef(nil), request.PullRequests...), State: request.State, UpdatedAfter: request.UpdatedAfter, MaxRequests: request.DiscoveryMaxRequests, MaxPages: request.StatusMaxPages}
-		}
-	case "sync_pull_request_feedback":
-		var request mcpcontract.SyncPullRequestFeedbackInput
-		if json.Unmarshal([]byte(job.Request), &request) == nil {
-			return &mcpcontract.ToolCallArguments{PullRequests: append([]mcpcontract.ThreadRef(nil), request.PullRequests...), Channels: append([]string(nil), request.Channels...), ThreadState: request.ThreadState, MaxItemsPerChannel: request.MaxItemsPerChannel, MaxRequests: request.MaxRequests}
-		}
-	case "sync_ci_failures":
-		var request mcpcontract.SyncCIFailuresInput
-		if json.Unmarshal([]byte(job.Request), &request) == nil {
-			return &mcpcontract.ToolCallArguments{PullRequests: append([]mcpcontract.ThreadRef(nil), request.PullRequests...), Logs: request.Logs, MaxRunsPerPR: request.MaxRunsPerPR, MaxJobsPerRun: request.MaxJobsPerRun, MaxLogBytesPerJob: request.MaxLogBytesPerJob, MaxRequests: request.MaxRequests}
+	} else {
+		state = "all"
+		if limit == 0 || limit > len(references) {
+			limit = len(references)
 		}
 	}
-	return &mcpcontract.ToolCallArguments{}
+	if limit == 0 {
+		limit = 20
+	}
+	return &mcpcontract.ToolCallArguments{State: state, Limit: limit, View: "compact"}
 }
 
 func facetBatchArtifact(refs []mcpcontract.ThreadRef, facetNames []string) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
@@ -412,14 +457,6 @@ func facetBatchArtifact(refs []mcpcontract.ThreadRef, facetNames []string) ([]mc
 		Reason:    "Read the synchronized facet coverage and canonical facet resources from the offline corpus.",
 	}
 	return []mcpcontract.JobArtifactReference{{Kind: "thread_facet_batch", Count: &value, References: threadRefKeys(refs)}}, follow
-}
-
-func indexRepositoriesToRefs(values []mcpcontract.IndexRepositoryInput) []mcpcontract.RepositoryRef {
-	refs := make([]mcpcontract.RepositoryRef, 0, len(values))
-	for _, value := range values {
-		refs = append(refs, mcpcontract.RepositoryRef{Owner: value.Owner, Repo: value.Repo})
-	}
-	return refs
 }
 
 func threadRefKeys(refs []mcpcontract.ThreadRef) []string {

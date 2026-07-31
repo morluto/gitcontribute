@@ -73,6 +73,9 @@ type ToolCallArguments struct {
 	MaxLogBytesPerJob  int             `json:"max_log_bytes_per_job,omitempty"`
 	Action             string          `json:"action,omitempty"`
 	Repository         string          `json:"repository,omitempty"`
+	Authors            []string        `json:"authors,omitempty"`
+	Limit              int             `json:"limit,omitempty"`
+	View               string          `json:"view,omitempty"`
 	Question           string          `json:"question,omitempty"`
 	UpdatedAfter       string          `json:"updated_after,omitempty"`
 	UpdatedBefore      string          `json:"updated_before,omitempty"`
