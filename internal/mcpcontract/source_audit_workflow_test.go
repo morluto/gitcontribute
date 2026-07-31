@@ -4,7 +4,7 @@ import "testing"
 
 func TestCanonicalSourceAuditWorkflowTransitionsAndAuthorities(t *testing.T) {
 	wf := CanonicalSourceAuditWorkflow()
-	if wf.Version != SourceAuditWorkflowVersion || len(wf.Transitions) != 8 {
+	if wf.Version != SourceAuditWorkflowVersion || len(wf.Transitions) != 9 {
 		t.Fatalf("workflow = %+v", wf)
 	}
 	for i, transition := range wf.Transitions {

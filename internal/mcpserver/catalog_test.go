@@ -221,6 +221,12 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 	assertSchemaValue(t, tools[mcpcontract.ToolGetThreadFacets].InputSchema, []string{"properties", "threads", "maxItems"}, float64(100))
 	assertSchemaValue(t, tools[mcpcontract.ToolGetThreadFacets].InputSchema, []string{"properties", "facets", "maxItems"}, float64(10))
 	assertSchemaValue(t, tools[mcpcontract.ToolGetThreadFacets].InputSchema, []string{"properties", "facets", "items", "enum"}, facets.AllNames())
+	if !strings.Contains(tools[mcpcontract.ToolGetCoverage].Description, "typed recovery action") {
+		t.Fatalf("coverage description does not expose recovery routing: %q", tools[mcpcontract.ToolGetCoverage].Description)
+	}
+	if !strings.Contains(tools[mcpcontract.ToolSyncThreads].Description, "poll jobs.get and reread") {
+		t.Fatalf("thread sync description does not expose the follow-up route: %q", tools[mcpcontract.ToolSyncThreads].Description)
+	}
 	assertSchemaValue(t, tools[mcpcontract.ToolHydrateThreads].InputSchema, []string{"properties", "max_pages", "default"}, float64(3))
 	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].InputSchema, []string{"required"}, []any{"repositories"})
 	assertSchemaValue(t, tools[mcpcontract.ToolCreateWorkspace].InputSchema, []string{"required"}, []any{"investigation_id"})

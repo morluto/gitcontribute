@@ -100,7 +100,7 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		}
 		tools[tool.Name] = tool
 	}
-	for _, name := range []string{mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolRankThreads, mcpcontract.ToolFindPrecedents, mcpcontract.ToolSyncPortfolio, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolSyncRepositoryContext, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads, mcpcontract.ToolQueryDeepWiki, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCheckMergeConflicts} {
+	for _, name := range []string{mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolRankThreads, mcpcontract.ToolFindPrecedents, mcpcontract.ToolSyncPortfolio, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolSyncRepositoryContext, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads, mcpcontract.ToolEnsureCoverage, mcpcontract.ToolGetSourceAuditWorkflow, mcpcontract.ToolQueryDeepWiki, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCheckMergeConflicts} {
 		if tools[name] == nil {
 			t.Errorf("tools/list missing %s", name)
 		}
@@ -330,6 +330,73 @@ func TestMCPStdioEnsureCoverageBootstrapsAndReturnsSnapshot(t *testing.T) {
 	if err != nil || len(resource.Contents) != 1 {
 		t.Fatalf("read coverage snapshot %q: %+v, %v", value.Artifacts[0].URI, resource, err)
 	}
+}
+
+func TestMCPStdioCoverageRecoveryFollowsReturnedAction(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	home := t.TempDir()
+	seedMCPStdioEmptyCorpus(ctx, t, home)
+	githubServer := newMCPGitHubServer(t)
+	defer githubServer.Close()
+	command := exec.Command(os.Args[0], "-test.run=^TestMCPStdioHelper$")
+	command.Env = append(os.Environ(), mcpE2EHomeEnv+"="+home, mcpE2EGitHubEnv+"="+githubServer.URL+"/")
+	client := mcp.NewClient(&mcp.Implementation{Name: "gitcontribute-e2e", Version: "test"}, nil)
+	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: command}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	before := callMCPTool[mcpcontract.GetCoverageOutput](ctx, t, session, mcpcontract.ToolGetCoverage, map[string]any{
+		"targets": []any{map[string]any{
+			"type": "exact_thread", "repository": map[string]any{"owner": "lab", "repo": "project"},
+			"thread": map[string]any{"kind": "pull_request", "number": 7},
+		}},
+	})
+	if before.Status != "partial" || len(before.Items) != 1 || before.Items[0].Recovery == nil || len(before.Items[0].Recovery.Then) != 1 {
+		t.Fatalf("initial coverage recovery = %+v", before)
+	}
+	name, arguments := replayMCPRecoveryAction(t, before.Items[0].Recovery.Then[0])
+	job := callMCPTool[mcpcontract.JobReference](ctx, t, session, name, arguments)
+	waitMCPJob(ctx, t, session, job.ID)
+
+	threads := callMCPTool[mcpcontract.GetThreadsOutput](ctx, t, session, mcpcontract.ToolGetThreads, map[string]any{
+		"threads": []any{map[string]any{"owner": "lab", "repo": "project", "kind": "pull_request", "number": 7}},
+		"view":    "full",
+	})
+	if threads.Status != "complete" || len(threads.Items) != 1 || threads.Items[0].Value == nil || threads.Items[0].Value.Title != "Fix cache lifecycle" || threads.Items[0].Value.Body != "Make cleanup deterministic" {
+		t.Fatalf("synchronized thread reread = %+v", threads)
+	}
+}
+
+func replayMCPRecoveryAction(t *testing.T, action mcpcontract.ToolCall) (string, map[string]any) {
+	t.Helper()
+	var name string
+	var value any
+	switch action.Type {
+	case "ensure_coverage":
+		name, value = mcpcontract.ToolEnsureCoverage, action.EnsureCoverage
+	case "sync_threads":
+		name, value = mcpcontract.ToolSyncThreads, action.SyncThreads
+	case "hydrate_threads":
+		name, value = mcpcontract.ToolHydrateThreads, action.HydrateThreads
+	default:
+		t.Fatalf("unsupported recovery action in integration test: %q", action.Type)
+	}
+	if value == nil {
+		t.Fatalf("recovery action %q has no typed input", action.Type)
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var arguments map[string]any
+	if err := json.Unmarshal(data, &arguments); err != nil {
+		t.Fatal(err)
+	}
+	return name, arguments
 }
 
 func seedMCPStdioCorpus(ctx context.Context, t *testing.T, home string) {

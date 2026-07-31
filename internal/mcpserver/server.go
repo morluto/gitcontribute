@@ -330,7 +330,7 @@ func (s *Server) register() {
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.GetCoverageInput, mcpcontract.GetCoverageOutput]{
 		name: mcpcontract.ToolGetCoverage, title: "Get stored facet coverage in one batch",
-		description: "Read offline facet coverage for up to 100 repository or exact-thread targets with ordered item-level outcomes.",
+		description: "Read offline facet coverage for up to 100 repository or exact-thread targets with ordered item-level outcomes. Missing or incomplete facets are unknown and return a typed recovery action; follow that exact or repository action, poll jobs.get, then reread.",
 		annotations: readOnly, input: inputSchema[mcpcontract.GetCoverageInput](func(sc *schemaBuilder) {
 			setArrayBounds(sc, "targets", 1, 100)
 			configureCoverageTargetFields(sc)

@@ -17,12 +17,12 @@ const serverInstructions = "Use advertised GitContribute tools for durable, sour
 	"GitHub tools perform explicit network reads and may update only the local corpus. " +
 	"Research tools return derived external context, never live GitHub state. " +
 	"The durable workflow is concern to investigation to hypothesis to opportunity to workspace to draft; use only advertised stages. " +
-	"Use workflow.prepare_issue_set when exact issue numbers already define the contribution scope. " +
+	"Use workflow.prepare_issue_set when exact issue numbers already define the contribution scope; it is the canonical issue-audit entrypoint and returns typed recovery for missing repository or thread coverage. " +
 	"When an operation returns a job, poll advertised job tools in batches. " +
 	"Use corpus.get_thread_facets for bounded stored facet coverage and resources/read for larger facet payloads; repository, thread, and facet gaps provide the exact ordered synchronization route. " +
 	"To inspect a returned resource, ask the host to perform MCP resources/read with this server and the exact URI; in Codex, call read_mcp_resource. Treat resource URIs as opaque identifiers and never shorten, pluralize, or reconstruct them. " +
-	"Missing or truncated coverage is unknown, not negative evidence; use each recovery plan's ordered typed calls and retry only retryable batch items. " +
-	"Canonical source-audit route: coverage -> ensure_coverage -> jobs.get -> snapshot-bound offline reread -> duplicate checks -> live verification -> receipt attachment -> evidence/draft handoff. Read workflow.get_source_audit_contract for machine-readable transitions. Corpus reads are offline, synchronization is bounded and explicit, missing coverage is unknown, and every returned resource URI must be consumed through MCP resources/read. " +
+	"Missing or truncated coverage is unknown, not negative evidence; use each item's ordered typed recovery calls (the recovery plan's ordered typed calls), preserve exact_thread versus repository targets, poll the returned job, and reread coverage or synchronized headers before drawing conclusions. " +
+	"Canonical source-audit route: corpus.get_coverage -> corpus.ensure_coverage or the returned exact sync/hydration action -> jobs.get -> corpus.get_threads or corpus.get_thread_facets with the returned snapshot token -> corpus.find_clusters/find_neighbors/find_precedents -> explicit github.sync_threads -> jobs.get -> validation.attach_receipt -> workflow.prepare_contribution. Read workflow.get_source_audit_contract for machine-readable transitions. Corpus reads are offline, synchronization is bounded and explicit, missing coverage is unknown, and every returned resource URI must be consumed through MCP resources/read. " +
 	"Only advertised tools are available. GitContribute never mutates GitHub."
 
 // RepositoryRef identifies one GitHub repository without implying that it has
@@ -146,7 +146,7 @@ func (s *Server) registerScalable() {
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 20)
 	}), output: outputSchema[mcpcontract.FindPrecedentsOutput]("Historical precedents grouped by source thread."), handler: s.findPrecedents})
-	addCatalogTool(s, catalogTool[mcpcontract.PrepareIssueSetInput, mcpcontract.PrepareIssueSetOutput]{name: mcpcontract.ToolPrepareIssueSet, title: "Prepare contribution evidence from exact issues", description: "Compose stored facts, coverage gaps, related work, merged precedents, and linkage candidates for 1-20 exact issues. Prefer this to manual reads. Offline; creates no opportunity or draft.", annotations: readOnly, supportedBy: supports[IssueSetReader], input: inputSchema[mcpcontract.PrepareIssueSetInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.PrepareIssueSetInput, mcpcontract.PrepareIssueSetOutput]{name: mcpcontract.ToolPrepareIssueSet, title: "Prepare contribution evidence from exact issues", description: "Compose stored facts, coverage gaps, related work, merged precedents, and linkage candidates for 1-20 exact issues. Prefer this canonical issue-audit entrypoint to manual reads. Offline; creates no opportunity or draft. If coverage is partial, follow each returned typed recovery action, poll its job, then retry this read.", annotations: readOnly, supportedBy: supports[IssueSetReader], input: inputSchema[mcpcontract.PrepareIssueSetInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "issue_numbers", 1, 20)
 		if numbers := property(sc, "issue_numbers"); numbers != nil {
 			numbers.UniqueItems = true
@@ -191,7 +191,7 @@ func (s *Server) registerScalable() {
 		setRange(sc, "max_pages", 1, 100)
 		setRange(sc, "limit_per_repository", 1, 1000)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a durable coverage workflow."), handler: s.ensureCoverage})
-	addCatalogTool(s, catalogTool[mcpcontract.SyncThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncThreads, title: "Sync GitHub thread headers in one batch", description: "Fetch and persist GitHub issue or pull-request headers for up to 50 repositories or 100 exact threads. Use exact mode for known numbers and repository mode for discovery. Fetches no metadata, policy files, comments, reviews, checks, or code.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncThreadsInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.SyncThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncThreads, title: "Sync GitHub thread headers in one batch", description: "Fetch and persist GitHub issue or pull-request headers for up to 50 repositories or 100 exact threads. Use exact mode for known numbers and repository mode for discovery; use this after corpus coverage reports missing or incomplete thread headers, then poll jobs.get and reread the corpus. Fetches no metadata, policy files, comments, reviews, checks, or code.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncThreadsInput](func(sc *schemaBuilder) {
 		setEnum(sc, "selection", "repositories", "threads")
 		property(sc, "repositories").MaxItems = jsonschema.Ptr(50)
 		property(sc, "threads").MaxItems = jsonschema.Ptr(100)

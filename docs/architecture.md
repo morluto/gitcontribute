@@ -289,8 +289,9 @@ The canonical source-audit workflow is a machine-readable contract exposed by
 `workflow.get_source_audit_contract`:
 
 ```text
-coverage -> ensure_coverage -> jobs.get -> snapshot-bound offline reread
-         -> duplicate checks -> explicit live verification
+corpus.get_coverage -> typed exact/repository recovery -> jobs.get
+         -> corpus.get_threads/get_thread_facets -> duplicate checks
+         -> explicit github.sync_threads -> jobs.get
          -> receipt attachment -> evidence/draft handoff
 ```
 

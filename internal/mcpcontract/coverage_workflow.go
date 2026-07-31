@@ -1,7 +1,7 @@
 package mcpcontract
 
 type EnsureCoverageInput struct {
-	Target             CoverageTarget `json:"target"`
+	Target             CoverageTarget `json:"target" jsonschema:"Repository or exact-thread coverage target to seed and verify"`
 	Facets             []string       `json:"facets,omitempty" jsonschema:"Selected facet names required by the caller"`
 	MaxRequests        int            `json:"max_requests,omitempty" jsonschema:"Maximum GitHub requests from 1 to 1000"`
 	MaxPages           int            `json:"max_pages,omitempty" jsonschema:"Maximum pages per selected facet from 1 to 100"`

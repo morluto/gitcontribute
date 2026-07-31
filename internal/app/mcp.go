@@ -12,6 +12,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
+	"github.com/morluto/gitcontribute/internal/facets"
 	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/investigation"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
@@ -641,7 +642,15 @@ func (r *MCPReader) GetCoverage(ctx context.Context, in mcpcontract.GetCoverageI
 			}
 			out.Status = "partial"
 		} else {
+			value = withExpectedCoverageFacets(target, value)
 			item.Value = &value
+			if coverageNeedsRecovery(value) {
+				item.Status = "retryable"
+				item.Reason = "coverage_incomplete"
+				item.Message = "one or more required coverage facets are missing or incomplete"
+				item.Recovery = coverageRecoveryPlan(target, value)
+				out.Status = "partial"
+			}
 		}
 		out.Items[i] = item
 	}
@@ -735,6 +744,91 @@ func readCoverageTarget(ctx context.Context, c *corpus.Corpus, target mcpcontrac
 		})
 	}
 	return out, "", nil
+}
+
+func withExpectedCoverageFacets(target mcpcontract.CoverageTarget, value mcpcontract.CoverageOutput) mcpcontract.CoverageOutput {
+	byFacet := make(map[string]struct{}, len(value.Facets))
+	for _, facet := range value.Facets {
+		byFacet[facet.Facet] = struct{}{}
+	}
+	for _, name := range coverageFacetNames(target) {
+		if _, ok := byFacet[name]; ok {
+			continue
+		}
+		value.Facets = append(value.Facets, mcpcontract.FacetCoverageOutput{Facet: name, Status: "unknown"})
+	}
+	return value
+}
+
+func coverageFacetNames(target mcpcontract.CoverageTarget) []string {
+	if target.Type == mcpcontract.CoverageTargetRepository {
+		return []string{"metadata", "threads", FacetContributionGuidance}
+	}
+	if target.Thread == nil {
+		return nil
+	}
+	return facets.DefaultFor(target.Thread.Kind)
+}
+
+func coverageNeedsRecovery(value mcpcontract.CoverageOutput) bool {
+	if len(value.Facets) == 0 {
+		return true
+	}
+	for _, facet := range value.Facets {
+		if !facet.Complete {
+			return true
+		}
+	}
+	return false
+}
+
+func coverageRecoveryPlan(target mcpcontract.CoverageTarget, value mcpcontract.CoverageOutput) *mcpcontract.RecoveryPlan {
+	message := "Refresh the missing or incomplete coverage facets, then reread corpus.get_coverage."
+	if target.Type == mcpcontract.CoverageTargetRepository {
+		return recoveryPlan("coverage_incomplete", message, mcpcontract.RecoveryAction(mcpcontract.EnsureCoverageInput{Target: target}))
+	}
+	if target.Thread == nil {
+		return recoveryPlan("coverage_incomplete", message, mcpcontract.RecoveryAction(mcpcontract.EnsureCoverageInput{Target: target}))
+	}
+
+	ref := mcpcontract.ThreadRef{Owner: target.Repository.Owner, Repo: target.Repository.Repo, Kind: target.Thread.Kind, Number: target.Thread.Number}
+	selectable := make(map[string]struct{}, len(facets.SelectableFor(target.Thread.Kind)))
+	for _, name := range facets.SelectableFor(target.Thread.Kind) {
+		selectable[name] = struct{}{}
+	}
+	known := make(map[string]struct{}, len(facets.AllNames()))
+	for _, name := range facets.AllNames() {
+		known[name] = struct{}{}
+	}
+	selected := make([]string, 0, len(value.Facets))
+	var additional []mcpcontract.ToolCall
+	needsEnsure := false
+	for _, facet := range value.Facets {
+		if facet.Complete {
+			continue
+		}
+		if _, ok := selectable[facet.Facet]; ok {
+			selected = append(selected, facet.Facet)
+			continue
+		}
+		if _, ok := known[facet.Facet]; ok {
+			additional = append(additional, syncFacetCall(ref, facet.Facet))
+			continue
+		}
+		needsEnsure = true
+	}
+	if len(selected) > 0 {
+		calls := []mcpcontract.ToolCall{syncThreadFacetsCall(ref, selected)}
+		calls = append(calls, additional...)
+		if needsEnsure {
+			calls = append(calls, mcpcontract.RecoveryAction(mcpcontract.EnsureCoverageInput{Target: target}))
+		}
+		return recoveryPlan("coverage_incomplete", message, calls...)
+	}
+	if len(additional) > 0 && !needsEnsure {
+		return recoveryPlan("coverage_incomplete", message, additional...)
+	}
+	return recoveryPlan("coverage_incomplete", message, mcpcontract.RecoveryAction(mcpcontract.EnsureCoverageInput{Target: target}))
 }
 
 // Lens reads a saved lens definition from the local corpus.

@@ -124,7 +124,9 @@ work. Tell me what you checked and identify any missing coverage.
 ```
 
 Incomplete coverage is reported instead of being treated as proof that no
-competing work exists.
+competing work exists. In the MCP workflow, follow the returned typed recovery
+action, poll the durable job, and reread the affected exact thread or
+repository before drawing that conclusion.
 
 ### 4. Validate a change
 

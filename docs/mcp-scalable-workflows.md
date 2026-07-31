@@ -227,13 +227,19 @@ Reading the dossier resource again cannot resolve either state.
 Use this order when producing a source-backed audit or contribution handoff:
 
 ```text
-coverage -> ensure_coverage -> jobs.get -> snapshot-bound offline reread -> duplicate checks -> live verification -> receipt attachment -> evidence/draft handoff
+corpus.get_coverage -> typed exact/repository recovery -> jobs.get
+         -> snapshot-bound offline reread -> duplicate checks
+         -> explicit live verification -> jobs.get -> receipt attachment
+         -> evidence/draft handoff
 ```
 
 Start with `corpus.get_coverage` and treat missing or incomplete coverage as
-unknown. If current evidence is required, choose a bounded explicit GitHub
-sync, poll it with `jobs.get`, and then perform the offline reread. Use the
-reread's returned `snapshot_token` for duplicate checks over that same state.
+unknown. Follow the item-level typed recovery action it returns: use
+`corpus.ensure_coverage` for repository bootstrap or broad target recovery,
+`github.sync_threads` for exact or repository header recovery, and
+`github.sync_thread_facets` for selected child facets. Poll the returned job
+with `jobs.get`, then perform the offline reread. Use the reread's returned
+`snapshot_token` for duplicate checks over that same state.
 Perform live verification after local evidence selection, attach a producer-neutral
 validation receipt, and hand the exact resource and any returned revision
 references to the evidence or draft workflow. Resources that do not expose a

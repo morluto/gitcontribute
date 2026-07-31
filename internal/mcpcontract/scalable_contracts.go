@@ -148,8 +148,9 @@ type ThreadRef struct {
 }
 
 // BatchItem reports the outcome for one input-derived key while preserving
-// input order. Value is present for complete items; recovery fields explain
-// retryable, unavailable, or failed items without failing unrelated work.
+// input order. Value may be present for readable but incomplete items;
+// recovery fields explain retryable, unavailable, or failed outcomes without
+// failing unrelated work.
 type BatchItem[T any] struct {
 	Key          string          `json:"key"`
 	Status       BatchItemStatus `json:"item_status"`

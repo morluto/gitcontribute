@@ -34,26 +34,34 @@ telemetry.
 For a complete source audit, the canonical route is:
 
 ```text
-coverage -> ensure_coverage -> jobs.get -> snapshot-bound offline reread -> duplicate checks -> live verification -> receipt attachment -> evidence/draft handoff
+corpus.get_coverage -> typed exact/repository recovery -> jobs.get
+  -> snapshot-bound offline reread -> duplicate checks
+  -> explicit live verification -> jobs.get -> receipt attachment
+  -> evidence/draft handoff
 ```
 
 Coverage reads are offline and missing coverage is unknown. Synchronization is
-always an explicit bounded operation; after `jobs.get`, perform the offline
-reread and reuse its returned `snapshot_token` for any composed duplicate
-checks. Use exact resource URIs only through MCP `resources/read` before attaching
-receipts or handing evidence to a draft workflow.
+always an explicit bounded operation. If `corpus.get_coverage` or
+`workflow.prepare_issue_set` returns incomplete coverage, follow its item-level
+typed recovery action, preserving exact-thread versus repository scope. Poll
+the returned job, perform the offline reread, and reuse its returned
+`snapshot_token` for any composed duplicate checks. Use exact resource URIs
+only through MCP `resources/read` before attaching receipts or handing evidence
+to a draft workflow.
 
 Canonical MCP composition:
 
 1. Use `workflow.prepare_issue_set` for supplied exact issues. It returns
    stored facts, per-thread coverage gaps, related work, merged precedents, and
-   linkage candidates without network access.
+   linkage candidates without network access. When its result is partial,
+   replay the returned recovery action, poll the job, and retry the same read.
 2. For an exact pull request or fields not covered by that aggregate, use
    `corpus.get_threads` with `response_format=detailed`.
 3. Read repository guidance or a persisted dossier only when the task needs
    repository-wide context. Do not treat missing coverage as a negative result.
-4. Perform a bounded GitHub sync only when current live state is required, wait
-   for its durable job, and then repeat the relevant offline read.
+4. Perform a bounded GitHub sync only when current live state is required or
+   when returned coverage recovery requests it, wait for its durable job, and
+   then repeat the relevant offline read.
 
 Decision: **compose**. `workflow.prepare_issue_set` already removes the
 error-prone issue fan-out while preserving coverage and provenance. A second

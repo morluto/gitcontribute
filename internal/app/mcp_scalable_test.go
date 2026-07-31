@@ -196,14 +196,20 @@ func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
 	if out.Status != "partial" || len(out.Items) != 4 {
 		t.Fatalf("coverage batch = %+v", out)
 	}
-	if out.Items[0].Key != "acme/rocket" || out.Items[0].Value == nil || out.Items[0].Value.Facets[0].Facet != "metadata" {
+	if out.Items[0].Key != "acme/rocket" || out.Items[0].Status != "retryable" || out.Items[0].Reason != "coverage_incomplete" || out.Items[0].Value == nil || out.Items[0].Value.Facets[0].Facet != "metadata" {
 		t.Fatalf("repository coverage = %+v", out.Items[0])
+	}
+	if out.Items[0].Recovery == nil || len(out.Items[0].Recovery.Then) != 1 || out.Items[0].Recovery.Then[0].Type != "ensure_coverage" {
+		t.Fatalf("repository coverage recovery = %+v", out.Items[0].Recovery)
 	}
 	if out.Items[1].Key != "acme/missing" || out.Items[1].Status != "unavailable" || out.Items[1].Reason != "repository_not_indexed" {
 		t.Fatalf("missing coverage = %+v", out.Items[1])
 	}
-	if out.Items[2].Value == nil || out.Items[2].Value.Kind != "issue" || out.Items[2].Value.Number != 7 || out.Items[2].Value.Facets[0].Status != "incomplete" {
+	if out.Items[2].Status != "retryable" || out.Items[2].Value == nil || out.Items[2].Value.Kind != "issue" || out.Items[2].Value.Number != 7 || out.Items[2].Value.Facets[0].Status != "incomplete" {
 		t.Fatalf("thread coverage = %+v", out.Items[2])
+	}
+	if out.Items[2].Recovery == nil || len(out.Items[2].Recovery.Then) == 0 || out.Items[2].Recovery.Then[0].Type != "hydrate_threads" {
+		t.Fatalf("thread coverage recovery = %+v", out.Items[2].Recovery)
 	}
 	if out.Items[3].Status != "unavailable" || out.Items[3].Reason != "invalid_reference" {
 		t.Fatalf("invalid coverage target = %+v", out.Items[3])

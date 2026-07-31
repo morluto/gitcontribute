@@ -38,6 +38,35 @@ func TestServerInstructionsContainRoutingPhrases(t *testing.T) {
 	}
 }
 
+func TestSourceAuditContractUsesAdvertisedOperations(t *testing.T) {
+	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	defer closeSessions()
+
+	tools := make(map[string]bool)
+	for tool, err := range client.Tools(context.Background(), nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		tools[tool.Name] = true
+	}
+	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: mcpcontract.ToolGetSourceAuditWorkflow, Arguments: map[string]any{}})
+	if err != nil || result == nil || result.IsError {
+		t.Fatalf("source-audit contract call failed: result=%+v err=%v", result, err)
+	}
+	var workflow mcpcontract.SourceAuditWorkflow
+	data, err := json.Marshal(result.StructuredContent)
+	if err != nil || json.Unmarshal(data, &workflow) != nil {
+		t.Fatalf("decode source-audit contract: result=%#v err=%v", result.StructuredContent, err)
+	}
+	for _, transition := range workflow.Transitions {
+		for _, operation := range append([]string{transition.Operation}, transition.AllowedNextActions...) {
+			if !tools[operation] {
+				t.Errorf("source-audit transition %q references unadvertised operation %q", transition.ID, operation)
+			}
+		}
+	}
+}
+
 func TestDurableToolResultsIncludeSDKResourceLinks(t *testing.T) {
 	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
 	defer closeSessions()

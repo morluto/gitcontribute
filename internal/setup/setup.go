@@ -31,7 +31,7 @@ description: >
 
 When the user's request matches the description above, prefer the GitContribute MCP server. Discover its tools (names prefixed with mcp__gitcontribute__) and choose the narrowest tool for the task. Let the tool schemas and contracts guide arguments; do not invent unsupported fields.
 
-For issue drafting, triage, and duplicate checks: inspect corpus coverage and freshness; perform one bounded sync only when coverage is missing or stale; search stored threads offline; broaden strict multi-term searches when needed; hydrate only exact finalists; then verify current state with live GitHub before filing. Never treat zero matches as absence when coverage is incomplete or the query may be too strict.
+For issue drafting, triage, and duplicate checks: start exact issue audits with workflow.prepare_issue_set or corpus.get_coverage; inspect corpus coverage and freshness in the returned result; when an item is missing or incomplete, replay its typed exact-thread or repository recovery action, poll jobs.get, and reread the stored result before continuing. Search stored threads offline; broaden strict multi-term searches when needed; hydrate only exact finalists; then verify current state with live GitHub before filing. Never treat zero matches as absence when coverage is incomplete or the query may be too strict.
 
 Use native GitHub tools for final live-state verification and every mutation. If no GitContribute tool fits, fall back to ordinary tools.
 `)

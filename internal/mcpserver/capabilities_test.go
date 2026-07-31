@@ -16,6 +16,9 @@ type fakeOptionalCapabilities struct {
 func (*fakeOptionalCapabilities) FindNeighbors(context.Context, mcpcontract.FindNeighborsInput) (mcpcontract.FindNeighborsOutput, error) {
 	return mcpcontract.FindNeighborsOutput{}, nil
 }
+func (*fakeOptionalCapabilities) EnsureCoverage(context.Context, mcpcontract.EnsureCoverageInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-coverage", Kind: "ensure_coverage", Status: "queued"}, nil
+}
 func (*fakeOptionalCapabilities) GetRepositories(_ context.Context, in mcpcontract.GetRepositoriesInput) (mcpcontract.GetRepositoriesOutput, error) {
 	items := make([]mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput], len(in.Repositories))
 	for i, repository := range in.Repositories {
@@ -36,8 +39,13 @@ func (*fakeOptionalCapabilities) GetRepositories(_ context.Context, in mcpcontra
 	}
 	return mcpcontract.GetRepositoriesOutput{Status: "complete", Items: items}, nil
 }
-func (*fakeOptionalCapabilities) GetThreads(context.Context, mcpcontract.GetThreadsInput) (mcpcontract.GetThreadsOutput, error) {
-	return mcpcontract.GetThreadsOutput{Status: "complete"}, nil
+func (*fakeOptionalCapabilities) GetThreads(_ context.Context, in mcpcontract.GetThreadsInput) (mcpcontract.GetThreadsOutput, error) {
+	items := make([]mcpcontract.BatchItem[mcpcontract.ThreadOutput], len(in.Threads))
+	for i, thread := range in.Threads {
+		value := mcpcontract.ThreadOutput{Owner: thread.Owner, Repo: thread.Repo, Kind: thread.Kind, Number: thread.Number, State: "open", Title: "synchronized header", Body: "synchronized body"}
+		items[i] = mcpcontract.BatchItem[mcpcontract.ThreadOutput]{Key: thread.Owner + "/" + thread.Repo, Status: "complete", Value: &value}
+	}
+	return mcpcontract.GetThreadsOutput{Status: "complete", Items: items}, nil
 }
 func (*fakeOptionalCapabilities) GetThreadFacets(context.Context, mcpcontract.GetThreadFacetsInput) (mcpcontract.GetThreadFacetsOutput, error) {
 	return mcpcontract.GetThreadFacetsOutput{Status: "complete"}, nil
@@ -75,6 +83,9 @@ func (f *fakeOptionalCapabilities) GetJobs(ctx context.Context, in mcpcontract.G
 		job, err := f.base.GetJob(ctx, mcpcontract.GetJobInput{ID: id})
 		if err != nil {
 			return mcpcontract.GetJobsOutput{}, err
+		}
+		if id == "job-threads" {
+			job.ExecutionState, job.Outcome, job.Status = "terminal", "succeeded", "succeeded"
 		}
 		items[i] = mcpcontract.BatchItem[mcpcontract.GetJobOutput]{Key: id, Status: "complete", Value: &job}
 	}
@@ -138,6 +149,7 @@ type completeTestReader struct {
 	IssueSetReader
 	PortfolioReader
 	GitHubOperator
+	CoverageOperator
 	PullRequestFeedbackOperator
 	CIFailureOperator
 	FixPatternOperator
@@ -162,6 +174,7 @@ func completeFakeReader(base *fakeReader) mcpcontract.Reader {
 	return completeTestReader{
 		Reader: base, NeighborReader: optional, ScalableReader: optional, ThreadFacetReader: optional, threadFacetResourceReader: base, IssueSetReader: optional,
 		PortfolioReader: optional, GitHubOperator: optional, PullRequestFeedbackOperator: optional, CIFailureOperator: optional,
+		CoverageOperator:   optional,
 		FixPatternOperator: optional, FixPatternReader: base, CodeIndexer: optional,
 		MergeConflictReader: optional, ResearchReader: optional,
 		CommitPlannerReader: base,

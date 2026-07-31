@@ -67,6 +67,16 @@ func (r *heldOutReader) GetCoverage(ctx context.Context, in mcpcontract.GetCover
 			continue
 		}
 		out.Items[i].Value.Facets = []mcpcontract.FacetCoverageOutput{{Facet: "metadata", Complete: false, Status: "unknown", UpdatedAt: "2026-07-17T00:00:00Z"}}
+		out.Items[i].Status = "retryable"
+		out.Items[i].Reason = "coverage_incomplete"
+		out.Items[i].Message = "one or more required coverage facets are missing or incomplete"
+		out.Items[i].Recovery = &mcpcontract.RecoveryPlan{
+			Version: mcpcontract.RecoveryPlanVersion, Reason: "coverage_incomplete",
+			Message: "Refresh the missing or incomplete coverage facets, then reread corpus.get_coverage.",
+			Then: []mcpcontract.ToolCall{mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{
+				Selection: "threads", Threads: []mcpcontract.ThreadRef{{Owner: "acme", Repo: "heldout", Kind: "pull_request", Number: 19}},
+			})},
+		}
 	}
 	return out, nil
 }
@@ -86,6 +96,7 @@ func connectHeldOut(t *testing.T, base *heldOutReader) (*mcp.ClientSession, func
 		Reader: base, NeighborReader: optional, ScalableReader: optional, ThreadFacetReader: optional,
 		threadFacetResourceReader: base.fakeReader, IssueSetReader: optional,
 		PortfolioReader: optional, GitHubOperator: optional, PullRequestFeedbackOperator: optional,
+		CoverageOperator:  optional,
 		CIFailureOperator: optional, FixPatternOperator: optional, FixPatternReader: base.fakeReader,
 		FixPatternPreviewReader: base, CodeIndexer: optional, MergeConflictReader: optional,
 		ResearchReader: optional, CommitPlannerReader: base.fakeReader, PortfolioOperator: optional,
@@ -178,10 +189,10 @@ func runHeldOutOracle(t *testing.T, scenario string, run *heldOutRun) bool {
 		if !decodeHeldOut(coverage.StructuredContent, &before) || len(before.Items) != 1 || before.Items[0].Value == nil || before.Items[0].Value.Facets[0].Complete {
 			return false
 		}
-		job := run.tool(t, mcpcontract.ToolSyncThreads, map[string]any{
-			"selection": "repositories", "repositories": []any{map[string]any{"owner": "acme", "repo": "heldout"}},
-			"kind": "pull_request", "state": "all", "max_requests": 2,
-		})
+		if before.Items[0].Recovery == nil || len(before.Items[0].Recovery.Then) != 1 {
+			return false
+		}
+		job := replayHeldOutRecovery(t, run, before.Items[0].Recovery.Then[0])
 		if job == nil || job.IsError {
 			return false
 		}
@@ -191,7 +202,14 @@ func runHeldOutOracle(t *testing.T, scenario string, run *heldOutRun) bool {
 		}
 		firstPoll := run.tool(t, mcpcontract.ToolGetJob, map[string]any{"ids": []any{reference.ID}, "response_format": "concise"})
 		secondPoll := run.tool(t, mcpcontract.ToolGetJob, map[string]any{"ids": []any{reference.ID}, "response_format": "detailed"})
-		return firstPoll != nil && secondPoll != nil && !firstPoll.IsError && !secondPoll.IsError
+		threads := run.tool(t, mcpcontract.ToolGetThreads, map[string]any{
+			"threads": []any{map[string]any{"owner": "acme", "repo": "heldout", "kind": "pull_request", "number": 19}},
+			"view":    "full",
+		})
+		var reread mcpcontract.GetThreadsOutput
+		return firstPoll != nil && secondPoll != nil && threads != nil && !firstPoll.IsError && !secondPoll.IsError && !threads.IsError &&
+			decodeHeldOut(threads.StructuredContent, &reread) && len(reread.Items) == 1 && reread.Items[0].Value != nil &&
+			reread.Items[0].Value.Body == "synchronized body"
 
 	case "stale_snapshot_recovery":
 		stale := run.tool(t, mcpcontract.ToolSearchThreads, map[string]any{"query": "stall", "snapshot_token": "stale-token"})
@@ -234,6 +252,52 @@ func runHeldOutOracle(t *testing.T, scenario string, run *heldOutRun) bool {
 	}
 	t.Fatalf("unknown held-out scenario %q", scenario)
 	return false
+}
+
+func replayHeldOutRecovery(t *testing.T, run *heldOutRun, action mcpcontract.ToolCall) *mcp.CallToolResult {
+	t.Helper()
+	name, input, ok := heldOutRecoveryCall(action)
+	if !ok {
+		return nil
+	}
+	return run.tool(t, name, input)
+}
+
+func heldOutRecoveryCall(action mcpcontract.ToolCall) (string, map[string]any, bool) {
+	var name string
+	var value any
+	switch action.Type {
+	case "poll_job":
+		name, value = mcpcontract.ToolGetJob, action.PollJob
+	case "get_repositories":
+		name, value = mcpcontract.ToolGetRepositories, action.GetRepositories
+	case "ensure_coverage":
+		name, value = mcpcontract.ToolEnsureCoverage, action.EnsureCoverage
+	case "sync_repository_context":
+		name, value = mcpcontract.ToolSyncRepositoryContext, action.SyncRepositoryContext
+	case "sync_threads":
+		name, value = mcpcontract.ToolSyncThreads, action.SyncThreads
+	case "hydrate_threads":
+		name, value = mcpcontract.ToolHydrateThreads, action.HydrateThreads
+	case "sync_portfolio":
+		name, value = mcpcontract.ToolSyncPortfolio, action.SyncPortfolio
+	case "sync_pull_request_feedback":
+		name, value = mcpcontract.ToolSyncPullRequestFeedback, action.SyncFeedback
+	case "sync_ci_failures":
+		name, value = mcpcontract.ToolSyncCIFailures, action.SyncCI
+	case "query_deepwiki":
+		name, value = mcpcontract.ToolQueryDeepWiki, action.QueryDeepWiki
+	default:
+		return "", nil, false
+	}
+	if value == nil {
+		return "", nil, false
+	}
+	var input map[string]any
+	if !decodeHeldOut(value, &input) {
+		return "", nil, false
+	}
+	return name, input, true
 }
 
 func (r *heldOutRun) tool(t *testing.T, name string, args map[string]any) *mcp.CallToolResult {
