@@ -59,7 +59,7 @@ func TestAgentEvalV5UnifiedCatalogDecisionFixtures(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
-		"model", "sampling_settings", "catalog_fingerprint", "corpus_revision",
+		"model", "sampling_settings", "catalog_fingerprint", "snapshot_token",
 		"permissions", "task_prompt", "token_budget",
 	} {
 		if !containsString(public.ControlledVariables, required) {
