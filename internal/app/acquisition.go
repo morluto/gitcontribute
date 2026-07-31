@@ -64,18 +64,23 @@ func (s *Service) Acquire(ctx context.Context, repo contracts.RepoRef, remote st
 		if confirmedCommit != acq.CommitSHA {
 			return nil, fmt.Errorf("acquired checkout changed before snapshot reuse: commit %q", confirmedCommit)
 		}
+		revision, err := c.CorpusRevision(ctx)
+		if err != nil {
+			return nil, err
+		}
 		return &contracts.AcquisitionResult{
-			Repo:          repo,
-			Remote:        acq.Remote,
-			DefaultBranch: acq.DefaultBranch,
-			CommitSHA:     acq.CommitSHA,
-			Files:         existing.Manifest.IndexedFiles,
-			Bytes:         existing.TotalBytes,
-			Indexed:       true,
-			Inserted:      false,
-			AcquiredAt:    formatTime(acq.AcquiredAt),
-			Message:       "acquired; snapshot already indexed",
-			IndexManifest: existing.Manifest,
+			Repo:           repo,
+			Remote:         acq.Remote,
+			DefaultBranch:  acq.DefaultBranch,
+			CommitSHA:      acq.CommitSHA,
+			Files:          existing.Manifest.IndexedFiles,
+			Bytes:          existing.TotalBytes,
+			Indexed:        true,
+			Inserted:       false,
+			AcquiredAt:     formatTime(acq.AcquiredAt),
+			Message:        "acquired; snapshot already indexed",
+			IndexManifest:  existing.Manifest,
+			CorpusRevision: revision,
 		}, nil
 	}
 
@@ -87,6 +92,10 @@ func (s *Service) Acquire(ctx context.Context, repo contracts.RepoRef, remote st
 	if err != nil {
 		return nil, fmt.Errorf("store code snapshot: %w", err)
 	}
+	revision, err := c.CorpusRevision(ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	message := "acquired and indexed"
 	if !inserted {
@@ -94,16 +103,17 @@ func (s *Service) Acquire(ctx context.Context, repo contracts.RepoRef, remote st
 	}
 
 	return &contracts.AcquisitionResult{
-		Repo:          repo,
-		Remote:        acq.Remote,
-		DefaultBranch: acq.DefaultBranch,
-		CommitSHA:     acq.CommitSHA,
-		Files:         len(snapshot.Documents),
-		Bytes:         snapshot.TotalBytes,
-		Indexed:       true,
-		Inserted:      inserted,
-		AcquiredAt:    formatTime(acq.AcquiredAt),
-		Message:       message,
-		IndexManifest: snapshot.Manifest,
+		Repo:           repo,
+		Remote:         acq.Remote,
+		DefaultBranch:  acq.DefaultBranch,
+		CommitSHA:      acq.CommitSHA,
+		Files:          len(snapshot.Documents),
+		Bytes:          snapshot.TotalBytes,
+		Indexed:        true,
+		Inserted:       inserted,
+		AcquiredAt:     formatTime(acq.AcquiredAt),
+		Message:        message,
+		IndexManifest:  snapshot.Manifest,
+		CorpusRevision: revision,
 	}, nil
 }

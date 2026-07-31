@@ -31,6 +31,12 @@ func (s *Server) registerResourceTemplates() {
 			name:     "Fix-pattern report", description: "Typed repository contribution-pattern report produced by a durable workflow",
 		})
 	}
+	if _, ok := s.reader.(CodeIndexReader); ok {
+		templates = append(templates, resourceTemplateDefinition{
+			template: "gitcontribute://code-index/{owner}/{repo}/{commit_sha}",
+			name:     "Code-index artifact", description: "Revision-bound indexed repository commit manifest",
+		})
+	}
 	if _, ok := s.reader.(concernResourceReader); ok {
 		templates = append(templates, resourceTemplateDefinition{
 			template: "gitcontribute://concern/{id}",
