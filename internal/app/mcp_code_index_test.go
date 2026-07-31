@@ -24,18 +24,26 @@ func TestCodeIndexArtifactsRemainDistinctAcrossCommitsAndExposeResourceHandoff(t
 		}
 	}
 	reader := &MCPReader{Service: svc}
-	a, err := reader.CodeIndexArtifact(ctx, ref.Owner, ref.Repo, "commit-a")
+	aRecord, err := svc.corpus.LatestCodeIndexArtifact(ctx, ref, "commit-a")
+	if err != nil || aRecord == nil {
+		t.Fatalf("first artifact record = %+v, %v", aRecord, err)
+	}
+	bRecord, err := svc.corpus.LatestCodeIndexArtifact(ctx, ref, "commit-b")
+	if err != nil || bRecord == nil {
+		t.Fatalf("second artifact record = %+v, %v", bRecord, err)
+	}
+	a, err := reader.CodeIndexArtifact(ctx, aRecord.Digest)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := reader.CodeIndexArtifact(ctx, ref.Owner, ref.Repo, "commit-b")
+	b, err := reader.CodeIndexArtifact(ctx, bRecord.Digest)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a.ID == b.ID || a.ManifestID == b.ManifestID || a.ResourceURI == b.ResourceURI || a.CommitSHA == b.CommitSHA {
 		t.Fatalf("commit identities collapsed: a=%+v b=%+v", a, b)
 	}
-	if a.ResourceURI != "gitcontribute://code-index/owner/repo/commit-a" || a.FollowUp == nil || a.FollowUp.ResourceURI != a.ResourceURI || a.FollowUp.Arguments.Repository != "owner/repo" || a.FollowUp.Arguments.Commit != "commit-a" {
+	if a.ResourceURI != "gitcontribute://artifact/code-index/"+aRecord.Digest || a.FollowUp == nil || a.FollowUp.Action.ReadResource == nil || a.FollowUp.Action.ReadResource.URI != a.ResourceURI {
 		t.Fatalf("resource handoff = %+v", a)
 	}
 	if a.Kind != "code_index" || a.FileCount != mcpcontract.NonNegativeInt(1) || a.TrackedEntries != mcpcontract.NonNegativeInt(1) || a.ManifestSHA256 == "" {

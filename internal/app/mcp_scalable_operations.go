@@ -341,7 +341,7 @@ func queuedJobReference(id, kind, message string) mcpcontract.JobReference {
 	return mcpcontract.JobReference{
 		ID: id, Ref: "job:" + id, Kind: kind, Status: "queued", Message: message, PollAfterMS: 1000,
 		FollowUp: &mcpcontract.JobFollowUp{
-			Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{id}}, RetryAfterMS: 1000, Reason: "Poll this job ID after the suggested delay.",
+			Action: mcpcontract.FollowUpAction{Type: "poll_job", PollJob: &mcpcontract.GetJobsInput{IDs: []string{id}}}, RetryAfterMS: 1000, Reason: "Poll this job ID after the suggested delay.",
 		},
 	}
 }
@@ -448,7 +448,7 @@ func (s *Service) indexRepositoriesBatch(ctx context.Context, in mcpcontract.Ind
 					results[index] = map[string]any{"key": key, "status": "failed", "reason": "acquisition_or_index_failed", "message": err.Error(), "retry_after_ms": 0}
 					continue
 				}
-				results[index] = map[string]any{"key": key, "status": "complete", "commit_sha": result.CommitSHA, "files": result.Files, "bytes": result.Bytes, "inserted": result.Inserted, "corpus_revision": result.CorpusRevision, "index_manifest": result.IndexManifest}
+				results[index] = map[string]any{"key": key, "status": "complete", "commit_sha": result.CommitSHA, "files": result.Files, "bytes": result.Bytes, "inserted": result.Inserted, "corpus_revision": result.CorpusRevision, "index_manifest": result.IndexManifest, "artifact_digest": result.ArtifactDigest, "manifest_digest": result.ManifestDigest, "snapshot_token": result.SnapshotToken}
 			}
 		}()
 	}
@@ -722,7 +722,7 @@ func (r *MCPReader) DeepWiki(ctx context.Context, in mcpcontract.DeepWikiInput) 
 		out.Truncated = true
 		out.Reason = "output_limit"
 		if in.Action == "contents" {
-			out.Recovery = recoveryPlan("blocked", "Call structure, then ask a focused question about the relevant section. Increase max_output_bytes only when the focused read is still incomplete.", mcpcontract.ToolCall{Tool: mcpcontract.ToolQueryDeepWiki, Arguments: &mcpcontract.ToolCallArguments{Action: "structure", Repository: in.Repository}})
+			out.Recovery = recoveryPlan("blocked", "Call structure, then ask a focused question about the relevant section. Increase max_output_bytes only when the focused read is still incomplete.", mcpcontract.RecoveryAction(mcpcontract.DeepWikiInput{Action: "structure", Repository: in.Repository}))
 		} else {
 			out.Recovery = recoveryPlan("blocked", "Narrow the question or repository set. Increase max_output_bytes only when the focused read is still incomplete.")
 		}

@@ -125,6 +125,9 @@ func TestThreadResearchBriefUsesOnlyStoredEvidence(t *testing.T) {
 	if err := brief.ValidateProvenance(); err != nil {
 		t.Fatalf("provenance: %v", err)
 	}
+	if brief.Provenance.SnapshotToken == "" || brief.Provenance.Durable || brief.Provenance.QueryDigestSHA256 == "" {
+		t.Fatalf("brief read provenance: %+v", brief.Provenance)
+	}
 	if brief.Target.Ref != "issue:owner/repo#1" || brief.Target.Kind != "issue" || brief.SchemaVersion != research.SchemaVersion {
 		t.Fatalf("target = %+v", brief.Target)
 	}

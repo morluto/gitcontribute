@@ -364,6 +364,9 @@ type AcquisitionResult struct {
 	Message        string             `json:"message"`
 	IndexManifest  codeindex.Manifest `json:"index_manifest"`
 	CorpusRevision int64              `json:"corpus_revision"`
+	ArtifactDigest string             `json:"artifact_digest"`
+	ManifestDigest string             `json:"manifest_digest"`
+	SnapshotToken  string             `json:"snapshot_token"`
 }
 
 // HealthService exposes deterministic offline repository health metrics.

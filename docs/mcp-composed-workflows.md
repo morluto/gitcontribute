@@ -34,12 +34,12 @@ telemetry.
 For a complete source audit, the canonical route is:
 
 ```text
-coverage -> explicit sync -> jobs.get -> offline reread -> duplicate checks -> live verification -> receipt attachment -> evidence/draft handoff
+coverage -> ensure_coverage -> jobs.get -> snapshot-bound offline reread -> duplicate checks -> live verification -> receipt attachment -> evidence/draft handoff
 ```
 
 Coverage reads are offline and missing coverage is unknown. Synchronization is
 always an explicit bounded operation; after `jobs.get`, perform the offline
-reread and reuse its returned `corpus_revision` for any composed duplicate
+reread and reuse its returned `snapshot_token` for any composed duplicate
 checks. Use exact resource URIs only through MCP `resources/read` before attaching
 receipts or handing evidence to a draft workflow.
 

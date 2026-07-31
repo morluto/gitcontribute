@@ -289,11 +289,46 @@ func assertExactThreadJobItems(t *testing.T, jobs mcpcontract.GetJobsOutput, wan
 	if value.ExecutionState != "terminal" || value.Outcome != "succeeded" || len(value.Artifacts) != 1 ||
 		value.Artifacts[0].Kind != "thread_batch" || value.Artifacts[0].Count == nil ||
 		int(*value.Artifacts[0].Count) != len(wantKeys) ||
-		value.FollowUp == nil || value.FollowUp.Tool != mcpcontract.ToolGetThreads {
+		value.FollowUp == nil || value.FollowUp.Action.Type != "get_threads" {
 		t.Fatalf("typed thread job summary = %+v", value)
 	}
 	if !slices.Equal(value.Artifacts[0].References, wantKeys) {
 		t.Fatalf("typed thread job references = %v, want %v", value.Artifacts[0].References, wantKeys)
+	}
+}
+
+func TestMCPStdioEnsureCoverageBootstrapsAndReturnsSnapshot(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	home := t.TempDir()
+	seedMCPStdioEmptyCorpus(ctx, t, home)
+	githubServer := newMCPGitHubServer(t)
+	defer githubServer.Close()
+	command := exec.Command(os.Args[0], "-test.run=^TestMCPStdioHelper$")
+	command.Env = append(os.Environ(), mcpE2EHomeEnv+"="+home, mcpE2EGitHubEnv+"="+githubServer.URL+"/")
+	client := mcp.NewClient(&mcp.Implementation{Name: "gitcontribute-e2e", Version: "test"}, nil)
+	session, err := client.Connect(ctx, &mcp.CommandTransport{Command: command}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	job := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolEnsureCoverage, map[string]any{
+		"target": map[string]any{"type": "exact_thread", "repository": map[string]any{"owner": "lab", "repo": "project"}, "thread": map[string]any{"kind": "pull_request", "number": 7}},
+		"facets": []any{"pr_details"}, "max_requests": 20, "max_pages": 1,
+	})
+	waitMCPJob(ctx, t, session, job.ID)
+	detailed := callMCPTool[mcpcontract.GetJobsOutput](ctx, t, session, mcpcontract.ToolGetJob, map[string]any{"ids": []string{job.ID}, "response_format": "detailed"})
+	if len(detailed.Items) != 1 || detailed.Items[0].Value == nil {
+		t.Fatalf("coverage job = %+v", detailed)
+	}
+	value := detailed.Items[0].Value
+	if value.Outcome != "succeeded" || len(value.Artifacts) != 1 || value.Artifacts[0].Kind != "corpus_snapshot" || value.Artifacts[0].URI == "" {
+		t.Fatalf("coverage handoff = %+v", value)
+	}
+	resource, err := session.ReadResource(ctx, &mcp.ReadResourceParams{URI: value.Artifacts[0].URI})
+	if err != nil || len(resource.Contents) != 1 {
+		t.Fatalf("read coverage snapshot %q: %+v, %v", value.Artifacts[0].URI, resource, err)
 	}
 }
 

@@ -58,6 +58,7 @@ product-owned types, errors, or constants.
 | Global CLI installation | explicit setup `--mode cli` or `--mode both` | npm registry dependent | yes | `npm` only | no |
 | Setup verification | all applied setup modes | no | no | `git --version` | no |
 | GitHub read | sync, crawl, hydrate | yes | yes | no | no |
+| Coverage workflow | explicit `corpus.ensure_coverage` | yes, bounded | yes | no | no |
 | DeepWiki external read | public repository structure, contents, questions | yes | no | no | no |
 | Git acquisition | acquire, workspace create | remote-dependent | yes | `git` only | no |
 | Local merge check | compare already-fetched revisions | no | no | `git` only | no |
@@ -283,6 +284,46 @@ idempotent with open-world access, while reads that also persist projections
 remain write operations. Catalog changes require realistic multi-call agent
 evaluations, including held-out queries, tool-call count, errors, latency, and
 context size; scripted schema checks alone do not establish good tool choice.
+
+The canonical source-audit workflow is a machine-readable contract exposed by
+`workflow.get_source_audit_contract`:
+
+```text
+coverage -> ensure_coverage -> jobs.get -> snapshot-bound offline reread
+         -> duplicate checks -> explicit live verification
+         -> receipt attachment -> evidence/draft handoff
+```
+
+Each transition declares its required token, result type, allowed next
+actions, retryability, side-effect authority, and incomplete semantics.
+Post-job handoffs use a discriminated `FollowUpAction`; generic tool argument
+bags and arguments reconstructed from prose are not part of the contract.
+
+`corpus.ensure_coverage` is the explicit network-authorized recovery boundary.
+It durably owns repository bootstrap, thread-header synchronization, selected
+facet hydration, coverage verification, and immutable snapshot creation.
+Ordinary coverage and corpus reads remain offline.
+
+### Immutable read identity
+
+Reusable research reads use scoped `CorpusSnapshotToken` records rather than a
+global revision alone. Tokens bind scope, observation watermark, source
+manifest, derived versions, completeness, provenance, and an immutable payload
+digest. Resolution fails closed with `snapshot_unavailable` or
+`snapshot_expired`; current mutable projections are never substituted.
+
+Read-only search, precedent, coverage, code-search, fix-pattern preview, and
+research-brief responses also bind their query digest to an observation
+watermark. Because these operations have no local-write capability, their
+`ephemeral:` identities are explicitly non-durable and report completeness,
+truncation, and unknown coverage inline. A caller that needs reuse across calls
+must cross the explicit `corpus.ensure_coverage` write boundary and use the
+resulting durable snapshot token.
+
+Code indexes are separate immutable artifact records addressed as
+`gitcontribute://artifact/code-index/<artifact-digest>`. Re-indexing an
+unchanged source commit emits a new artifact identity and does not mutate old
+resource payloads. See [ADR 0005](adr/0005-immutable-snapshot-and-artifact-identity.md).
 
 ## GitHub transport
 

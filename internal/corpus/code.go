@@ -2,7 +2,9 @@ package corpus
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,6 +41,49 @@ type CodeSearchPage struct {
 	Snapshots  []CodeSnapshotInfo
 	NextCursor string
 	Total      int
+}
+
+const codeIndexArtifactSchema = "gitcontribute.code-index-artifact.v1"
+
+// CodeIndexArtifactRecord is an immutable, digest-addressed index handoff.
+// ManifestJSON is self-contained and never rereads the mutable latest
+// projection when the artifact is consumed.
+type CodeIndexArtifactRecord struct {
+	Digest         string
+	Repo           domain.RepoRef
+	CommitSHA      string
+	ManifestSHA256 string
+	ManifestJSON   string
+	SnapshotToken  string
+	CorpusRevision int64
+	CoverageKnown  bool
+	IndexedFiles   int
+	TrackedEntries int
+	Truncated      bool
+	SchemaVersion  string
+	Provenance     map[string]string
+	IndexManifest  codeindex.Manifest
+	TotalBytes     int
+	Documents      []CodeIndexArtifactDocument
+	CreatedAt      time.Time
+}
+
+type CodeIndexArtifactDocument struct {
+	Path     string `json:"path"`
+	SHA256   string `json:"sha256"`
+	Bytes    int    `json:"bytes"`
+	Language string `json:"language,omitempty"`
+}
+
+type artifactManifest struct {
+	SchemaVersion string                      `json:"schema_version"`
+	Repository    string                      `json:"repository"`
+	CommitSHA     string                      `json:"commit_sha"`
+	Index         codeindex.Manifest          `json:"index"`
+	TotalBytes    int                         `json:"total_bytes"`
+	Documents     []CodeIndexArtifactDocument `json:"documents"`
+	CreatedAt     string                      `json:"created_at"`
+	Provenance    map[string]string           `json:"provenance"`
 }
 
 // StoreCodeSnapshot atomically stores one complete code snapshot. Replaying the
@@ -95,6 +140,9 @@ func (c *Corpus) storeCodeSnapshot(ctx context.Context, ref domain.RepoRef, snap
 		if err != nil {
 			return 0, false, 0, err
 		}
+		if _, err := storeCodeIndexArtifact(ctx, tx, existing, ref, snapshot, revision); err != nil {
+			return 0, false, 0, err
+		}
 		if err := tx.Commit(); err != nil {
 			return 0, false, 0, fmt.Errorf("commit replaced code snapshot: %w", err)
 		}
@@ -121,10 +169,64 @@ func (c *Corpus) storeCodeSnapshot(ctx context.Context, ref domain.RepoRef, snap
 	if err != nil {
 		return 0, false, 0, err
 	}
+	if _, err := storeCodeIndexArtifact(ctx, tx, snapshotID, ref, snapshot, revision); err != nil {
+		return 0, false, 0, err
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, false, 0, fmt.Errorf("commit code snapshot: %w", err)
 	}
 	return snapshotID, true, revision, nil
+}
+
+func storeCodeIndexArtifact(ctx context.Context, tx *sql.Tx, snapshotID int64, ref domain.RepoRef, snapshot codeindex.Snapshot, revision int64) (CodeIndexArtifactRecord, error) {
+	createdAt := time.Now().UTC()
+	documents := make([]CodeIndexArtifactDocument, 0, len(snapshot.Documents))
+	for _, document := range snapshot.Documents {
+		digest := sha256.Sum256([]byte(document.Content))
+		documents = append(documents, CodeIndexArtifactDocument{Path: document.Path, SHA256: hex.EncodeToString(digest[:]), Bytes: document.Bytes, Language: document.LanguageHint})
+	}
+	manifest := artifactManifest{
+		SchemaVersion: codeIndexArtifactSchema, Repository: ref.String(), CommitSHA: snapshot.Commit,
+		Index: snapshot.Manifest, TotalBytes: snapshot.TotalBytes, Documents: documents,
+		CreatedAt: createdAt.Format(time.RFC3339Nano), Provenance: map[string]string{"producer": "gitcontribute", "operation": "code.index"},
+	}
+	manifestBytes, err := json.Marshal(manifest)
+	if err != nil {
+		return CodeIndexArtifactRecord{}, fmt.Errorf("encode immutable code index manifest: %w", err)
+	}
+	manifestHash := sha256.Sum256(manifestBytes)
+	manifestDigest := hex.EncodeToString(manifestHash[:])
+	artifactHash := sha256.Sum256(append([]byte("code-index\x00"), manifestBytes...))
+	artifactDigest := hex.EncodeToString(artifactHash[:])
+	scopeJSON, _ := json.Marshal(map[string]any{"repository": ref.String(), "commit_sha": snapshot.Commit, "artifact_digest": artifactDigest})
+	completenessJSON, _ := json.Marshal(map[string]any{"coverage_known": snapshot.Manifest.CoverageKnown, "truncated": snapshot.Manifest.Truncated})
+	provenanceJSON, _ := json.Marshal(manifest.Provenance)
+	tokenHash := sha256.Sum256(append([]byte(ReadSnapshotContractVersion+"\x00"), scopeJSON...))
+	snapshotToken := hex.EncodeToString(tokenHash[:])
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO code_index_artifacts
+		(digest, snapshot_id, repo_owner, repo_name, commit_sha, manifest_sha256, manifest_json, snapshot_token, corpus_revision, coverage_known, indexed_files, tracked_entries, truncated, schema_version, provenance, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, artifactDigest, snapshotID, ref.Owner, ref.Repo, snapshot.Commit, manifestDigest, string(manifestBytes), snapshotToken, revision, snapshot.Manifest.CoverageKnown, snapshot.Manifest.IndexedFiles, snapshot.Manifest.TrackedEntries, snapshot.Manifest.Truncated, codeIndexArtifactSchema, string(provenanceJSON), encodeTime(createdAt)); err != nil {
+		return CodeIndexArtifactRecord{}, fmt.Errorf("store immutable code index artifact: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO corpus_snapshot_tokens
+		(token, contract_version, observation_watermark, scope_json, source_manifest_sha256, derived_versions_json, completeness_json, provenance_json, artifact_kind, artifact_digest, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'code_index', ?, ?)
+	`, snapshotToken, ReadSnapshotContractVersion, revision, string(scopeJSON), manifestDigest, `{"code_index":"`+codeindex.FormatVersion+`"}`, string(completenessJSON), string(provenanceJSON), artifactDigest, encodeTime(createdAt)); err != nil {
+		return CodeIndexArtifactRecord{}, fmt.Errorf("store corpus snapshot token: %w", err)
+	}
+	return CodeIndexArtifactRecord{
+		Digest: artifactDigest, Repo: ref, CommitSHA: snapshot.Commit,
+		ManifestSHA256: manifestDigest, ManifestJSON: string(manifestBytes),
+		SnapshotToken: snapshotToken, CorpusRevision: revision,
+		CoverageKnown: snapshot.Manifest.CoverageKnown, IndexedFiles: snapshot.Manifest.IndexedFiles,
+		TrackedEntries: snapshot.Manifest.TrackedEntries, Truncated: snapshot.Manifest.Truncated,
+		SchemaVersion: codeIndexArtifactSchema, Provenance: manifest.Provenance,
+		IndexManifest: snapshot.Manifest, TotalBytes: snapshot.TotalBytes,
+		Documents: documents, CreatedAt: createdAt,
+	}, nil
 }
 
 func transactionCorpusRevision(ctx context.Context, tx *sql.Tx) (int64, error) {
@@ -184,6 +286,78 @@ func (c *Corpus) CodeSnapshot(ctx context.Context, ref domain.RepoRef, commit st
 		WHERE repo_owner = ? AND repo_name = ? AND commit_sha = ?
 		LIMIT 1
 	`, ref.Owner, ref.Repo, commit), ref)
+}
+
+// CodeIndexArtifact resolves one immutable artifact by its content digest.
+// It never falls back to a repository's current code projection.
+func (c *Corpus) CodeIndexArtifact(ctx context.Context, digest string) (*CodeIndexArtifactRecord, error) {
+	if len(digest) != sha256.Size*2 {
+		return nil, errors.New("code index artifact digest must be a SHA-256 hex digest")
+	}
+	return scanCodeIndexArtifact(c.db.QueryRowContext(ctx, `
+		SELECT repo_owner, repo_name, commit_sha, manifest_sha256, manifest_json,
+		       snapshot_token, corpus_revision, coverage_known, indexed_files,
+		       tracked_entries, truncated, schema_version, provenance, created_at
+		FROM code_index_artifacts WHERE digest = ?
+	`, digest), digest)
+}
+
+// LatestCodeIndexArtifact returns the most recently created immutable artifact
+// for an exact repository commit.
+func (c *Corpus) LatestCodeIndexArtifact(ctx context.Context, ref domain.RepoRef, commit string) (*CodeIndexArtifactRecord, error) {
+	if err := ref.Validate(); err != nil {
+		return nil, err
+	}
+	return scanCodeIndexArtifact(c.db.QueryRowContext(ctx, `
+		SELECT digest, repo_owner, repo_name, commit_sha, manifest_sha256, manifest_json,
+		       snapshot_token, corpus_revision, coverage_known, indexed_files,
+		       tracked_entries, truncated, schema_version, provenance, created_at
+		FROM code_index_artifacts
+		WHERE repo_owner = ? AND repo_name = ? AND commit_sha = ?
+		ORDER BY created_at DESC, digest DESC LIMIT 1
+	`, ref.Owner, ref.Repo, commit), "")
+}
+
+func scanCodeIndexArtifact(row *sql.Row, expectedDigest string) (*CodeIndexArtifactRecord, error) {
+	var record CodeIndexArtifactRecord
+	var created int64
+	var coverageKnown, truncated bool
+	var provenance string
+	if expectedDigest == "" {
+		if err := row.Scan(&record.Digest, &record.Repo.Owner, &record.Repo.Repo, &record.CommitSHA, &record.ManifestSHA256, &record.ManifestJSON, &record.SnapshotToken, &record.CorpusRevision, &coverageKnown, &record.IndexedFiles, &record.TrackedEntries, &truncated, &record.SchemaVersion, &provenance, &created); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("read code index artifact: %w", err)
+		}
+	} else {
+		record.Digest = expectedDigest
+		if err := row.Scan(&record.Repo.Owner, &record.Repo.Repo, &record.CommitSHA, &record.ManifestSHA256, &record.ManifestJSON, &record.SnapshotToken, &record.CorpusRevision, &coverageKnown, &record.IndexedFiles, &record.TrackedEntries, &truncated, &record.SchemaVersion, &provenance, &created); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("read code index artifact: %w", err)
+		}
+	}
+	record.CoverageKnown, record.Truncated, record.CreatedAt = coverageKnown, truncated, scanTime(created)
+	if err := json.Unmarshal([]byte(provenance), &record.Provenance); err != nil {
+		return nil, fmt.Errorf("decode code index artifact provenance: %w", err)
+	}
+	var completeManifest artifactManifest
+	if err := json.Unmarshal([]byte(record.ManifestJSON), &completeManifest); err != nil {
+		return nil, fmt.Errorf("decode code index artifact manifest: %w", err)
+	}
+	record.IndexManifest = completeManifest.Index
+	record.TotalBytes, record.Documents = completeManifest.TotalBytes, completeManifest.Documents
+	manifestHash := sha256.Sum256([]byte(record.ManifestJSON))
+	if hex.EncodeToString(manifestHash[:]) != record.ManifestSHA256 {
+		return nil, errors.New("code index artifact manifest digest mismatch")
+	}
+	artifactHash := sha256.Sum256(append([]byte("code-index\x00"), []byte(record.ManifestJSON)...))
+	if hex.EncodeToString(artifactHash[:]) != record.Digest {
+		return nil, errors.New("code index artifact digest mismatch")
+	}
+	return &record, nil
 }
 
 type codeSnapshotQueryer interface {

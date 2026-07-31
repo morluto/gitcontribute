@@ -414,7 +414,7 @@ func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
 		t.Fatalf("neighbor batch = %+v", neighbors)
 	}
 
-	cov, err := reader.GetCoverage(ctx, mcpcontract.GetCoverageInput{Targets: []mcpcontract.CoverageTarget{{Owner: "owner", Repo: "repo"}}})
+	cov, err := reader.GetCoverage(ctx, mcpcontract.GetCoverageInput{Targets: []mcpcontract.CoverageTarget{{Type: mcpcontract.CoverageTargetRepository, Repository: mcpcontract.RepositoryRef{Owner: "owner", Repo: "repo"}}}})
 	if err != nil {
 		t.Fatalf("get coverage: %v", err)
 	}

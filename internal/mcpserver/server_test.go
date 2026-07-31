@@ -221,8 +221,11 @@ func (*fakeReader) FindClusters(_ context.Context, in mcpcontract.FindClustersIn
 func (*fakeReader) GetCoverage(_ context.Context, in mcpcontract.GetCoverageInput) (mcpcontract.GetCoverageOutput, error) {
 	items := make([]mcpcontract.BatchItem[mcpcontract.CoverageOutput], len(in.Targets))
 	for i, target := range in.Targets {
-		value := mcpcontract.CoverageOutput{Owner: target.Owner, Repo: target.Repo, Kind: target.Kind, Number: target.Number, AsOf: "2026-07-17T00:00:00Z", Facets: []mcpcontract.FacetCoverageOutput{{Facet: "metadata", Complete: true, Status: "fresh", UpdatedAt: "2026-07-17T00:00:00Z"}}}
-		items[i] = mcpcontract.BatchItem[mcpcontract.CoverageOutput]{Key: target.Owner + "/" + target.Repo, Status: "complete", Value: &value}
+		value := mcpcontract.CoverageOutput{Owner: target.Repository.Owner, Repo: target.Repository.Repo, AsOf: "2026-07-17T00:00:00Z", Facets: []mcpcontract.FacetCoverageOutput{{Facet: "metadata", Complete: true, Status: "fresh", UpdatedAt: "2026-07-17T00:00:00Z"}}}
+		if target.Thread != nil {
+			value.Kind, value.Number = target.Thread.Kind, target.Thread.Number
+		}
+		items[i] = mcpcontract.BatchItem[mcpcontract.CoverageOutput]{Key: target.Repository.Owner + "/" + target.Repository.Repo, Status: "complete", Value: &value}
 	}
 	return mcpcontract.GetCoverageOutput{Status: "complete", Items: items}, nil
 }
@@ -279,7 +282,7 @@ func (*fakeReader) BuildRepositoryDossier(_ context.Context, in mcpcontract.Buil
 	id := "job-dossier-" + in.Owner + "-" + in.Repo
 	return mcpcontract.JobReference{
 		ID: id, Ref: "job:" + id, Kind: "build_repository_dossier", Status: "queued", PollAfterMS: 1000,
-		FollowUp: &mcpcontract.JobFollowUp{Tool: mcpcontract.ToolGetJob, Reason: "Poll this durable job ID."},
+		FollowUp: &mcpcontract.JobFollowUp{Action: mcpcontract.FollowUpAction{Type: "poll_job", PollJob: &mcpcontract.GetJobsInput{IDs: []string{"job-1"}}}, Reason: "Poll this durable job ID."},
 	}, nil
 }
 
@@ -452,7 +455,7 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 	}{
 		{mcpcontract.ToolSearchCode, map[string]any{"query": "main"}, 1},
 		{mcpcontract.ToolFindClusters, map[string]any{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket"}}}, 1},
-		{mcpcontract.ToolGetCoverage, map[string]any{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket"}}}, -1},
+		{mcpcontract.ToolGetCoverage, map[string]any{"targets": []any{map[string]any{"type": "repository", "repository": map[string]any{"owner": "acme", "repo": "rocket"}}}}, -1},
 	}
 	for _, tt := range tests {
 		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{

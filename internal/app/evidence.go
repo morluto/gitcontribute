@@ -303,6 +303,21 @@ func (s *Service) AttachValidationReceipt(ctx context.Context, receipt contracts
 	if err != nil {
 		return nil, err
 	}
+	relation := evidence.RelationSupporting
+	if receipt.Incomplete || receipt.Classification == string(evidence.RunClassificationError) || receipt.Classification == string(evidence.RunClassificationCancelled) {
+		relation = evidence.RelationInconclusive
+	}
+	evidenceType := evidence.EvidenceTypeManualObservation
+	if receipt.Provider != "" || strings.Contains(strings.ToLower(receipt.Producer), "profiler") {
+		evidenceType = evidence.EvidenceTypeProfiler
+	}
+	if err := evidence.NewService(c, nil).CreateEvidence(ctx, &evidence.Evidence{
+		ID: "external-evidence-" + receipt.ReceiptSHA256, InvestigationID: receipt.InvestigationID,
+		OpportunityID: receipt.OpportunityID, ValidationRunID: run.ID, Type: evidenceType, Relation: relation,
+		Description: "External validation receipt from " + receipt.Producer, CreatedAt: receipt.CompletedAt,
+	}); err != nil {
+		return nil, fmt.Errorf("attach external receipt evidence: %w", err)
+	}
 	return validationRunResult(run), nil
 }
 

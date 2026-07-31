@@ -34,6 +34,11 @@ func (r *MCPReader) AttachValidationReceipt(ctx context.Context, in mcpcontract.
 	if result.External != nil {
 		out.ReceiptSHA256 = result.External.ReceiptSHA256
 		out.Producer = result.External.Producer
+		out.Provider = result.External.Provider
+		out.ExternalRunID = result.External.ExternalRunID
+		out.SourceRevision = result.External.Revision
+		out.ArtifactSHA256 = result.External.ArtifactSHA256
+		out.Limitations = append([]string(nil), result.External.Limitations...)
 		out.Incomplete = result.External.Incomplete
 	}
 	return out, nil

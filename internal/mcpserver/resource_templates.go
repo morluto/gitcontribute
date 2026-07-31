@@ -33,8 +33,14 @@ func (s *Server) registerResourceTemplates() {
 	}
 	if _, ok := s.reader.(CodeIndexReader); ok {
 		templates = append(templates, resourceTemplateDefinition{
-			template: "gitcontribute://code-index/{owner}/{repo}/{commit_sha}",
-			name:     "Code-index artifact", description: "Revision-bound indexed repository commit manifest",
+			template: "gitcontribute://artifact/code-index/{artifact_digest}",
+			name:     "Code-index artifact", description: "Immutable digest-bound indexed repository commit manifest",
+		})
+	}
+	if _, ok := s.reader.(SnapshotReader); ok {
+		templates = append(templates, resourceTemplateDefinition{
+			template: "gitcontribute://snapshot/{snapshot_token}",
+			name:     "Corpus snapshot", description: "Immutable scoped offline read artifact",
 		})
 	}
 	if _, ok := s.reader.(concernResourceReader); ok {

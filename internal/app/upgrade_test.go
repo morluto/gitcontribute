@@ -770,3 +770,10 @@ func joinCalls(calls [][]string) string {
 	}
 	return strings.Join(parts, "; ")
 }
+
+func TestRunNPMCommandRejectsEmptyArgumentsWithoutExecution(t *testing.T) {
+	t.Parallel()
+	if _, err := runNPMCommand(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "unsupported npm arguments") {
+		t.Fatalf("empty npm arguments error = %v", err)
+	}
+}

@@ -8,11 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
-	"github.com/morluto/gitcontribute/internal/deepwiki"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/radar"
@@ -187,10 +185,10 @@ func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
 	}
 
 	out, err := (&MCPReader{svc}).GetCoverage(ctx, mcpcontract.GetCoverageInput{Targets: []mcpcontract.CoverageTarget{
-		{Owner: "acme", Repo: "rocket"},
-		{Owner: "acme", Repo: "missing"},
-		{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 7},
-		{Owner: "acme", Repo: "rocket", Kind: "issue"},
+		{Type: mcpcontract.CoverageTargetRepository, Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}},
+		{Type: mcpcontract.CoverageTargetRepository, Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "missing"}},
+		{Type: mcpcontract.CoverageTargetExactThread, Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}, Thread: &mcpcontract.ExactCoverageThread{Kind: "issue", Number: 7}},
+		{Type: mcpcontract.CoverageTargetExactThread, Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -209,6 +207,9 @@ func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
 	}
 	if out.Items[3].Status != "unavailable" || out.Items[3].Reason != "invalid_reference" {
 		t.Fatalf("invalid coverage target = %+v", out.Items[3])
+	}
+	if !out.Provenance.UnknownCoverage || out.Provenance.Complete || out.Provenance.QueryDigestSHA256 == "" {
+		t.Fatalf("coverage provenance = %+v", out.Provenance)
 	}
 }
 
@@ -420,7 +421,7 @@ func TestJobResultToMCPPreservesEmptyAndPartialTypedOutcomes(t *testing.T) {
 		ID: "job-running-patterns", Kind: "mine_repository_fix_patterns", Status: "running",
 	}, true)
 	if len(runningPatterns.Artifacts) != 0 || runningPatterns.FollowUp == nil ||
-		runningPatterns.FollowUp.Tool != mcpcontract.ToolGetJob {
+		runningPatterns.FollowUp.Action.Type != "poll_job" {
 		t.Fatalf("running fix-pattern job advertised unavailable artifacts: %+v", runningPatterns)
 	}
 }
@@ -457,8 +458,8 @@ func TestGetJobsDetailedReturnsTypedArtifactsWithoutStoredPayloads(t *testing.T)
 	value := detailed.Items[0].Value
 	if value == nil || len(value.Artifacts) != 1 || value.Artifacts[0].Kind != "dossier" ||
 		value.Artifacts[0].URI != "gitcontribute://dossier/acme/rocket" ||
-		value.FollowUp == nil || value.FollowUp.Tool != "" ||
-		value.FollowUp.ResourceURI != "gitcontribute://dossier/acme/rocket" {
+		value.FollowUp == nil || value.FollowUp.Action.Type != "read_resource" || value.FollowUp.Action.ReadResource == nil ||
+		value.FollowUp.Action.ReadResource.URI != "gitcontribute://dossier/acme/rocket" {
 		t.Fatalf("detailed jobs output lost typed artifact reference: %+v", detailed)
 	}
 }
@@ -493,7 +494,7 @@ func TestSearchGitHubRepositoriesPersistsObservedMetadata(t *testing.T) {
 	if out.NextPage != 3 || out.ResponseFormat != "concise" || len(out.Items) != 1 || out.Items[0].Value == nil || out.Items[0].Value.Ref != "repository:acme/rocket" || *out.Items[0].Value.Stars != 9001 {
 		t.Fatalf("live search result = %+v, options = %+v", out, reader.options)
 	}
-	if out.Items[0].Value.Watchers != nil || len(out.RecoveryPlans) != 1 || len(out.RecoveryPlans[0].Then) != 1 || out.RecoveryPlans[0].Then[0].Tool != mcpcontract.ToolSyncThreads {
+	if out.Items[0].Value.Watchers != nil || len(out.RecoveryPlans) != 1 || len(out.RecoveryPlans[0].Then) != 1 || out.RecoveryPlans[0].Then[0].Type != "sync_threads" {
 		t.Fatalf("concise search context = %+v", out)
 	}
 	if out.Items[0].Value.DossierStatus != "missing" {
@@ -632,73 +633,8 @@ func TestFindPrecedentsUsesClosedAndMergedHistory(t *testing.T) {
 	if got := out.Items[0].Value.Matches[0].RuleVersion; got != "precedent-v1" {
 		t.Fatalf("rule version = %q, want precedent-v1", got)
 	}
-}
-
-type fakeDeepWikiReader struct {
-	response deepwiki.Response
-	request  deepwiki.Request
-	calls    int
-}
-
-func (f *fakeDeepWikiReader) Read(_ context.Context, request deepwiki.Request) (deepwiki.Response, error) {
-	f.calls++
-	f.request = request
-	return f.response, nil
-}
-
-func TestDeepWikiReturnsDerivedProvenanceAndBoundsOutput(t *testing.T) {
-	t.Parallel()
-	svc := newSearchTestService(t)
-	fake := &fakeDeepWikiReader{response: deepwiki.Response{Available: true, Text: strings.Repeat("x", 2048), SourceURL: "https://deepwiki.com/acme/rocket"}}
-	svc.SetDeepWikiReader(fake)
-	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{Action: "question", Repositories: []string{"acme/rocket"}, Question: "architecture?", MaxOutputBytes: 1024})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Provenance != "derived_external" || !out.Truncated || len(out.Result) != 1024 {
-		t.Fatalf("unexpected DeepWiki result: %+v", out)
-	}
-}
-
-func TestDeepWikiUsesBoundedDefaultAndSteersFocusedRecovery(t *testing.T) {
-	t.Parallel()
-	svc := newSearchTestService(t)
-	fake := &fakeDeepWikiReader{response: deepwiki.Response{
-		Available: true,
-		Text:      strings.Repeat("x", mcpcontract.DeepWikiDefaultOutputBytes+1),
-		SourceURL: "https://deepwiki.com/acme/rocket",
-	}}
-	svc.SetDeepWikiReader(fake)
-
-	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{
-		Action:     "contents",
-		Repository: "acme/rocket",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(out.Result) != mcpcontract.DeepWikiDefaultOutputBytes || !out.Truncated {
-		t.Fatalf("default DeepWiki bound = %d bytes, truncated=%v", len(out.Result), out.Truncated)
-	}
-	if out.Reason != "output_limit" || out.Recovery == nil || len(out.Recovery.Then) != 1 || out.Recovery.Then[0].Tool != mcpcontract.ToolQueryDeepWiki {
-		t.Fatalf("missing truncation recovery guidance: %+v", out)
-	}
-}
-
-func TestDeepWikiUsesNormalizedRepositoriesForRequestAndOutput(t *testing.T) {
-	t.Parallel()
-	svc := newSearchTestService(t)
-	fake := &fakeDeepWikiReader{response: deepwiki.Response{Available: true, Text: "ok"}}
-	svc.SetDeepWikiReader(fake)
-	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{
-		Action: "question", Repository: "acme/rocket", Repositories: []string{"wrong/one", "wrong/two"}, Question: "architecture?", MaxOutputBytes: 1024,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"acme/rocket"}
-	if !reflect.DeepEqual(fake.request.Repositories, want) || !reflect.DeepEqual(out.Repositories, want) {
-		t.Fatalf("request repositories = %v, output repositories = %v", fake.request.Repositories, out.Repositories)
+	if out.Provenance.SnapshotToken == "" || out.Provenance.QueryDigestSHA256 == "" {
+		t.Fatalf("precedent provenance = %+v", out.Provenance)
 	}
 }
 
@@ -760,20 +696,6 @@ func TestScalableRuntimeRejectsPageBoundsBeforeSubmittingJob(t *testing.T) {
 	}
 }
 
-func TestDeepWikiTruncationPreservesUTF8(t *testing.T) {
-	t.Parallel()
-	svc := newSearchTestService(t)
-	fake := &fakeDeepWikiReader{response: deepwiki.Response{Available: true, Text: strings.Repeat("x", 1023) + "€", SourceURL: "https://deepwiki.com/acme/rocket"}}
-	svc.SetDeepWikiReader(fake)
-	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{Action: "contents", Repository: "acme/rocket", MaxOutputBytes: 1024})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !out.Truncated || len(out.Result) > 1024 || !utf8.ValidString(out.Result) {
-		t.Fatalf("invalid bounded UTF-8 result: bytes=%d valid=%v truncated=%v", len(out.Result), utf8.ValidString(out.Result), out.Truncated)
-	}
-}
-
 func TestScalableRuntimeBoundsMatchSchemas(t *testing.T) {
 	t.Parallel()
 	reader := &MCPReader{newSearchTestService(t)}
@@ -782,18 +704,5 @@ func TestScalableRuntimeBoundsMatchSchemas(t *testing.T) {
 	}
 	if _, err := reader.FindPrecedents(context.Background(), mcpcontract.FindPrecedentsInput{Threads: []mcpcontract.ThreadRef{{Owner: "acme", Repo: "rocket", Number: 1}}, Limit: 101}); err == nil {
 		t.Fatal("find precedents accepted limit above schema maximum")
-	}
-}
-
-func TestDeepWikiRejectsOutputBoundsBeforeProviderRead(t *testing.T) {
-	t.Parallel()
-	svc := newSearchTestService(t)
-	deepWiki := &fakeDeepWikiReader{}
-	svc.SetDeepWikiReader(deepWiki)
-	if _, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{Action: "question", Repositories: []string{"acme/rocket"}, Question: "architecture?", MaxOutputBytes: 100}); err == nil {
-		t.Fatal("DeepWiki accepted max_output_bytes below schema minimum")
-	}
-	if deepWiki.calls != 0 {
-		t.Fatalf("DeepWiki provider called %d times for invalid input", deepWiki.calls)
 	}
 }

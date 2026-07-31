@@ -130,16 +130,17 @@ type ThreadOutput struct {
 
 // SearchOutput contains one page of offline thread matches.
 type SearchOutput struct {
-	Query               string         `json:"query"`
-	QueryInterpretation string         `json:"query_interpretation"`
-	MatchMode           string         `json:"match_mode"`
-	View                string         `json:"view"`
-	Matches             []ThreadOutput `json:"matches"`
-	Total               int            `json:"total"`
-	NextCursor          string         `json:"next_cursor,omitempty"`
-	UnknownMergeCount   int            `json:"unknown_merge_count,omitempty"`
-	Suggestion          string         `json:"suggestion,omitempty"`
-	CorpusRevision      int64          `json:"corpus_revision"`
+	Query               string               `json:"query"`
+	QueryInterpretation string               `json:"query_interpretation"`
+	MatchMode           string               `json:"match_mode"`
+	View                string               `json:"view"`
+	Matches             []ThreadOutput       `json:"matches"`
+	Total               int                  `json:"total"`
+	NextCursor          string               `json:"next_cursor,omitempty"`
+	UnknownMergeCount   int                  `json:"unknown_merge_count,omitempty"`
+	Suggestion          string               `json:"suggestion,omitempty"`
+	CorpusRevision      int64                `json:"corpus_revision"`
+	Provenance          CorpusReadProvenance `json:"provenance"`
 }
 
 // DossierOutput contains a persisted repository dossier snapshot.
@@ -195,6 +196,22 @@ type SourceRef struct {
 	AsOf       string `json:"as_of,omitempty" jsonschema:"As-of timestamp"`
 }
 
+// CorpusReadProvenance binds an offline result to the exact query and source
+// observation it used. Transaction-bound identities are deliberately marked
+// non-durable; callers that need cross-call reuse must request a persisted
+// snapshot rather than treating a mutable projection as historical evidence.
+type CorpusReadProvenance struct {
+	SnapshotToken        string      `json:"snapshot_token"`
+	Durable              bool        `json:"durable"`
+	ObservationWatermark int64       `json:"observation_watermark"`
+	QueryDigestSHA256    string      `json:"query_digest_sha256"`
+	Complete             bool        `json:"complete"`
+	Truncated            bool        `json:"truncated"`
+	UnknownCoverage      bool        `json:"unknown_coverage"`
+	Limitations          []string    `json:"limitations,omitempty"`
+	ExternalContext      []SourceRef `json:"external_context,omitempty"`
+}
+
 // SearchCodeInput describes an offline code search page.
 type SearchCodeInput struct {
 	Query          string `json:"query" jsonschema:"Code search query"`
@@ -238,6 +255,7 @@ type SearchCodeOutput struct {
 	Coverage       []CodeIndexCoverageOutput `json:"coverage,omitempty"`
 	NextCursor     string                    `json:"next_cursor,omitempty"`
 	CorpusRevision int64                     `json:"corpus_revision"`
+	Provenance     CorpusReadProvenance      `json:"provenance"`
 }
 
 // InvestigationInput selects an investigation and bounds nested hypotheses.
@@ -413,13 +431,24 @@ type FindClustersOutput struct {
 	CorpusRevision int64                         `json:"corpus_revision"`
 }
 
-// CoverageTarget selects repository-level coverage or, when kind and number
-// are both present, coverage for one exact stored thread.
+type CoverageTargetKind string
+
+const (
+	CoverageTargetRepository  CoverageTargetKind = "repository"
+	CoverageTargetExactThread CoverageTargetKind = "exact_thread"
+)
+
+type ExactCoverageThread struct {
+	Kind   string `json:"kind" jsonschema:"Thread kind: issue or pull_request"`
+	Number int    `json:"number" jsonschema:"Positive issue or pull request number"`
+}
+
+// CoverageTarget is an explicit discriminated target. Thread is required only
+// for exact_thread and forbidden for repository.
 type CoverageTarget struct {
-	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
-	Kind   string `json:"kind,omitempty" jsonschema:"Optional thread kind: issue or pull_request"`
-	Number int    `json:"number,omitempty" jsonschema:"Optional positive issue or pull request number"`
+	Type       CoverageTargetKind   `json:"type" jsonschema:"Target variant: repository or exact_thread"`
+	Repository RepositoryRef        `json:"repository"`
+	Thread     *ExactCoverageThread `json:"thread,omitempty"`
 }
 
 // GetCoverageInput selects bounded repository or thread facet coverage reads.
@@ -452,6 +481,7 @@ type GetCoverageOutput struct {
 	Status         string                      `json:"status"`
 	Items          []BatchItem[CoverageOutput] `json:"items"`
 	CorpusRevision int64                       `json:"corpus_revision"`
+	Provenance     CorpusReadProvenance        `json:"provenance"`
 }
 
 // LensInput selects a saved lens by name.

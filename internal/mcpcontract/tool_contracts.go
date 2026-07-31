@@ -54,6 +54,8 @@ const (
 	ToolFindClusters                 = "corpus.find_clusters"
 	ToolFindNeighbors                = "corpus.find_neighbors"
 	ToolGetCoverage                  = "corpus.get_coverage"
+	ToolEnsureCoverage               = "corpus.ensure_coverage"
+	ToolGetSourceAuditWorkflow       = "workflow.get_source_audit_contract"
 	ToolBuildRepositoryDossier       = "workflow.build_repository_dossier"
 	ToolMineRepositoryFixPatterns    = "workflow.mine_repository_fix_patterns"
 	ToolPreviewRepositoryFixPatterns = "corpus.preview_fix_patterns"

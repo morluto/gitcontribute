@@ -235,7 +235,7 @@ func (r *MCPReader) GetJobs(ctx context.Context, in mcpcontract.GetJobsInput) (m
 		} else {
 			job := jobResultToMCP(ptr(jobResult(stored)), in.ResponseFormat == "detailed")
 			if in.ResponseFormat == "concise" && (job.Status == "succeeded" || job.Status == "failed" || job.Status == "cancelled") {
-				item.Recovery = recoveryPlan("blocked", "Read the detailed typed artifact and follow-up references.", mcpcontract.ToolCall{Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{id}, ResponseFormat: "detailed"}})
+				item.Recovery = recoveryPlan("blocked", "Read the detailed typed artifact and follow-up references.", mcpcontract.RecoveryAction(mcpcontract.GetJobsInput{IDs: []string{id}, ResponseFormat: "detailed"}))
 			}
 			item.Value = &job
 		}
@@ -631,7 +631,7 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpcontract.RankOp
 		report, err := r.contributionRadarAt(ctx, contracts.RadarOptions{Repo: contracts.RepoRef{Owner: input.Owner, Repo: input.Repo}, Limit: in.MaxResultsPerRepository}, evaluationTime)
 		if err != nil {
 			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", err.Error()
-			item.Recovery = recoveryPlan(item.Reason, item.Message, syncRepositoryContextCall(input.Owner, input.Repo), mcpcontract.ToolCall{Tool: mcpcontract.ToolSyncThreads, Arguments: &mcpcontract.ToolCallArguments{Selection: "repositories", Repositories: []mcpcontract.RepositoryRef{{Owner: input.Owner, Repo: input.Repo}}, Kind: "issue", State: "open"}})
+			item.Recovery = recoveryPlan(item.Reason, item.Message, syncRepositoryContextCall(input.Owner, input.Repo), mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{Selection: "repositories", Repositories: []mcpcontract.RepositoryRef{{Owner: input.Owner, Repo: input.Repo}}, Kind: "issue", State: "open"}))
 			out.Repositories[i] = item
 			out.Status = "partial"
 			continue

@@ -115,14 +115,22 @@ type FixPatternHydrationFailure struct {
 // FixPatternReport is persisted as the typed result of a durable pattern
 // mining job and is readable through an MCP resource.
 type FixPatternReport struct {
-	Status         FixPatternReportStatus       `json:"status"`
-	Repository     RepositoryRef                `json:"repository"`
-	TimeWindow     FixPatternTimeWindow         `json:"time_window"`
-	GeneratedAt    string                       `json:"generated_at"`
-	Coverage       FixPatternCoverage           `json:"coverage"`
-	Clusters       []FixPatternCluster          `json:"clusters"`
-	Failures       []FixPatternHydrationFailure `json:"failures,omitempty"`
-	Limitations    []string                     `json:"limitations,omitempty"`
-	Persisted      bool                         `json:"persisted"`
-	CorpusRevision int64                        `json:"corpus_revision"`
+	Status                    FixPatternReportStatus       `json:"status"`
+	Repository                RepositoryRef                `json:"repository"`
+	TimeWindow                FixPatternTimeWindow         `json:"time_window"`
+	GeneratedAt               string                       `json:"generated_at"`
+	Coverage                  FixPatternCoverage           `json:"coverage"`
+	Clusters                  []FixPatternCluster          `json:"clusters"`
+	Failures                  []FixPatternHydrationFailure `json:"failures,omitempty"`
+	Limitations               []string                     `json:"limitations,omitempty"`
+	Persisted                 bool                         `json:"persisted"`
+	CorpusRevision            int64                        `json:"corpus_revision"`
+	SnapshotToken             string                       `json:"snapshot_token"`
+	ArtifactDigest            string                       `json:"artifact_digest,omitempty"`
+	ObservationWatermark      int64                        `json:"observation_watermark"`
+	QueryDigestSHA256         string                       `json:"query_digest_sha256"`
+	Complete                  bool                         `json:"complete"`
+	Truncated                 bool                         `json:"truncated"`
+	UnknownCoverage           bool                         `json:"unknown_coverage"`
+	ExternalContextProvenance []string                     `json:"external_context_provenance,omitempty"`
 }

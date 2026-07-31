@@ -74,5 +74,15 @@ func (r *MCPReader) SearchCode(ctx context.Context, in mcpcontract.SearchCodeInp
 	if err := finishCorpusRead(ctx, c, revision); err != nil {
 		return mcpcontract.SearchCodeOutput{}, err
 	}
-	return mcpcontract.SearchCodeOutput{Query: in.Query, Total: page.Total, Matches: out, Coverage: coverage, NextCursor: page.NextCursor, CorpusRevision: revision}, nil
+	truncated := page.NextCursor != ""
+	unknownCoverage := false
+	for _, entry := range coverage {
+		truncated = truncated || entry.Truncated
+		unknownCoverage = unknownCoverage || entry.Status != "indexed"
+	}
+	provenance, err := offlineReadProvenance("code_search", revision, in, !truncated && !unknownCoverage, truncated, unknownCoverage)
+	if err != nil {
+		return mcpcontract.SearchCodeOutput{}, err
+	}
+	return mcpcontract.SearchCodeOutput{Query: in.Query, Total: page.Total, Matches: out, Coverage: coverage, NextCursor: page.NextCursor, CorpusRevision: revision, Provenance: provenance}, nil
 }

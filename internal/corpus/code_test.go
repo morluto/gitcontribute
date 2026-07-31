@@ -103,6 +103,38 @@ func TestCodeSnapshotsAreAtomicDeduplicatedAndSearchLatest(t *testing.T) {
 	}
 }
 
+func TestReindexSameCommitPreservesOldArtifactIdentity(t *testing.T) {
+	t.Parallel()
+	c, _ := openTestCorpus(t)
+	ctx := context.Background()
+	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	first := codeindex.Snapshot{RepoPath: "/repo", Commit: "same", CreatedAt: time.Unix(1, 0), Documents: []codeindex.Document{{Path: "a.go", Content: "first", Bytes: 5}}, TotalBytes: 5, Manifest: codeindex.Manifest{FormatVersion: codeindex.FormatVersion, CoverageKnown: true, TrackedEntries: 1, IndexedFiles: 1}}
+	if _, _, err := c.StoreCodeSnapshot(ctx, ref, first); err != nil {
+		t.Fatal(err)
+	}
+	old, err := c.LatestCodeIndexArtifact(ctx, ref, "same")
+	if err != nil || old == nil {
+		t.Fatalf("old artifact = %+v, %v", old, err)
+	}
+	second := first
+	second.Documents = []codeindex.Document{{Path: "b.go", Content: "second", Bytes: 6}}
+	second.TotalBytes = 6
+	if _, _, err := c.StoreCodeSnapshot(ctx, ref, second); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := c.LatestCodeIndexArtifact(ctx, ref, "same")
+	if err != nil || latest == nil {
+		t.Fatalf("latest artifact = %+v, %v", latest, err)
+	}
+	if old.Digest == latest.Digest || old.ManifestSHA256 == latest.ManifestSHA256 {
+		t.Fatalf("reindex reused immutable identity: old=%+v latest=%+v", old, latest)
+	}
+	reread, err := c.CodeIndexArtifact(ctx, old.Digest)
+	if err != nil || reread == nil || reread.ManifestJSON != old.ManifestJSON {
+		t.Fatalf("old artifact changed: reread=%+v err=%v", reread, err)
+	}
+}
+
 func TestStoreCodeSnapshotWithRevisionBindsWriteToCommittedIdentity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

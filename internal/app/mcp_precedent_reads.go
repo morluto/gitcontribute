@@ -109,6 +109,19 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpcontract.FindPrece
 	if err := finishCorpusRead(ctx, c, revision); err != nil {
 		return mcpcontract.FindPrecedentsOutput{}, err
 	}
+	truncated := false
+	unknownCoverage := out.Status != "complete"
+	for _, item := range out.Items {
+		if item.Value == nil {
+			unknownCoverage = true
+			continue
+		}
+		truncated = truncated || item.Value.Truncated
+	}
+	out.Provenance, err = offlineReadProvenance("precedent_search", revision, in, !truncated && !unknownCoverage, truncated, unknownCoverage)
+	if err != nil {
+		return mcpcontract.FindPrecedentsOutput{}, err
+	}
 	return out, nil
 }
 

@@ -321,11 +321,27 @@ type Sections struct {
 
 // Brief is a deterministic human/agent research package.
 type Brief struct {
-	SchemaVersion string    `json:"schema_version"`
-	GeneratedAt   time.Time `json:"generated_at"`
-	SourceAsOf    time.Time `json:"source_as_of"`
-	Target        Target    `json:"target"`
-	Sections      Sections  `json:"sections"`
+	SchemaVersion string         `json:"schema_version"`
+	GeneratedAt   time.Time      `json:"generated_at"`
+	SourceAsOf    time.Time      `json:"source_as_of"`
+	Target        Target         `json:"target"`
+	Sections      Sections       `json:"sections"`
+	Provenance    ReadProvenance `json:"provenance"`
+}
+
+// ReadProvenance binds a brief to its exact offline input and observation.
+// Brief generation is read-only, so the identity is transaction-bound rather
+// than a durable snapshot resource.
+type ReadProvenance struct {
+	SnapshotToken        string      `json:"snapshot_token"`
+	Durable              bool        `json:"durable"`
+	ObservationWatermark int64       `json:"observation_watermark"`
+	QueryDigestSHA256    string      `json:"query_digest_sha256"`
+	Complete             bool        `json:"complete"`
+	Truncated            bool        `json:"truncated"`
+	UnknownCoverage      bool        `json:"unknown_coverage"`
+	Limitations          []string    `json:"limitations,omitempty"`
+	ExternalContext      []SourceRef `json:"external_context,omitempty"`
 }
 
 // ValidateProvenance verifies the core contract for all fixed sections.

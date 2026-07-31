@@ -502,45 +502,33 @@ func preparedIssueSourceAsOf(value mcpcontract.PreparedIssueEvidence) string {
 }
 
 func issueSyncAction(ref domain.RepoRef, number int) mcpcontract.ToolCall {
-	return mcpcontract.ToolCall{
-		Tool: mcpcontract.ToolSyncThreads,
-		Arguments: &mcpcontract.ToolCallArguments{
-			Selection: "threads",
-			Threads:   []mcpcontract.ThreadRef{{Owner: ref.Owner, Repo: ref.Repo, Kind: corpus.ThreadKindIssue, Number: number}},
-		},
-	}
+	return mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{
+		Selection: "threads",
+		Threads:   []mcpcontract.ThreadRef{{Owner: ref.Owner, Repo: ref.Repo, Kind: corpus.ThreadKindIssue, Number: number}},
+	})
 }
 
 func issueHydrateAction(ref domain.RepoRef, number int, facet string) mcpcontract.ToolCall {
-	return mcpcontract.ToolCall{
-		Tool: mcpcontract.ToolHydrateThreads,
-		Arguments: &mcpcontract.ToolCallArguments{
-			Threads: []mcpcontract.ThreadRef{{Owner: ref.Owner, Repo: ref.Repo, Kind: corpus.ThreadKindIssue, Number: number}},
-			Facets:  []string{facet},
-		},
-	}
+	return mcpcontract.RecoveryAction(mcpcontract.HydrateThreadsInput{
+		Threads: []mcpcontract.ThreadRef{{Owner: ref.Owner, Repo: ref.Repo, Kind: corpus.ThreadKindIssue, Number: number}},
+		Facets:  []string{facet},
+	})
 }
 
 func repositoryPullRequestSyncAction(ref domain.RepoRef) mcpcontract.ToolCall {
-	return mcpcontract.ToolCall{
-		Tool: mcpcontract.ToolSyncThreads,
-		Arguments: &mcpcontract.ToolCallArguments{
-			Selection:    "repositories",
-			Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
-			Kind:         corpus.ThreadKindPullRequest,
-			State:        "all",
-		},
-	}
+	return mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{
+		Selection:    "repositories",
+		Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
+		Kind:         corpus.ThreadKindPullRequest,
+		State:        "all",
+	})
 }
 
 func repositoryHistorySyncAction(ref domain.RepoRef) mcpcontract.ToolCall {
-	return mcpcontract.ToolCall{
-		Tool: mcpcontract.ToolSyncThreads,
-		Arguments: &mcpcontract.ToolCallArguments{
-			Selection:    "repositories",
-			Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
-			Kind:         "both",
-			State:        "closed",
-		},
-	}
+	return mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{
+		Selection:    "repositories",
+		Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
+		Kind:         "both",
+		State:        "closed",
+	})
 }

@@ -98,6 +98,71 @@ func TestConfigSavePermissions(t *testing.T) {
 	if fi.Mode().Perm() != 0600 {
 		t.Fatalf("config file permissions = %o, want 0600", fi.Mode().Perm())
 	}
+	dirInfo, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("stat config directory: %v", err)
+	}
+	if dirInfo.Mode().Perm() != 0700 {
+		t.Fatalf("config directory permissions = %o, want 0700", dirInfo.Mode().Perm())
+	}
+}
+
+func TestConfigSaveRepairsExistingDirectoryPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix permissions not applicable on Windows")
+	}
+	dir := filepath.Join(t.TempDir(), "config")
+	if err := os.Mkdir(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "config.toml")
+	if err := Save(path, Default()); err != nil {
+		t.Fatalf("Save error: %v", err)
+	}
+	if err := Save(path, Default()); err != nil {
+		t.Fatalf("repeated Save error: %v", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0700 {
+		t.Fatalf("config directory permissions = %o, want 0700", info.Mode().Perm())
+	}
+}
+
+func TestConfigSaveRejectsSymlinkDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behavior differs on Windows")
+	}
+	root := t.TempDir()
+	realDir := filepath.Join(root, "real")
+	if err := os.Mkdir(realDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "config")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(filepath.Join(link, "config.toml"), Default()); err == nil || !strings.Contains(err.Error(), "must not be a symlink") {
+		t.Fatalf("Save error = %v, want symlink rejection", err)
+	}
+}
+
+func TestConfigSaveFailsWhenDirectoryPathIsAFile(t *testing.T) {
+	root := t.TempDir()
+	blocked := filepath.Join(root, "config")
+	if err := os.WriteFile(blocked, []byte("not a directory"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err := Save(filepath.Join(blocked, "config.toml"), Default())
+	if err == nil {
+		t.Fatal("Save unexpectedly succeeded through a non-directory path")
+	}
+	contents, readErr := os.ReadFile(blocked)
+	if readErr != nil || string(contents) != "not a directory" {
+		t.Fatalf("failed save changed blocking file: %q, %v", contents, readErr)
+	}
 }
 
 func TestConfigUnknownFieldsRejected(t *testing.T) {
