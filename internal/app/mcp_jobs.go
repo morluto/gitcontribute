@@ -256,7 +256,7 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 		var request mcpcontract.HydrateThreadsInput
 		_ = json.Unmarshal([]byte(job.Request), &request)
 		refs := append([]mcpcontract.ThreadRef(nil), request.Threads...)
-		return facetBatchArtifact(job, refs, request.Facets)
+		return facetBatchArtifact(refs, request.Facets)
 	case jobKindSyncPullRequestPortfolio:
 		var result struct {
 			PullRequests []string `json:"pull_requests"`
@@ -350,7 +350,7 @@ func jobFollowUpArguments(job *contracts.JobResult) *mcpcontract.ToolCallArgumen
 	return nil
 }
 
-func facetBatchArtifact(job *contracts.JobResult, refs []mcpcontract.ThreadRef, facetNames []string) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
+func facetBatchArtifact(refs []mcpcontract.ThreadRef, facetNames []string) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
 	value := mcpcontract.NonNegativeInt(len(refs))
 	follow := &mcpcontract.JobFollowUp{
 		Tool:      mcpcontract.ToolGetThreadFacets,

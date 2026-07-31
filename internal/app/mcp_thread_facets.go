@@ -101,9 +101,10 @@ func (r *MCPReader) GetThreadFacets(ctx context.Context, in mcpcontract.GetThrea
 			if batch, ok := observations[key]; ok {
 				entry.ObservationCount = mcpcontract.NonNegativeInt(len(batch.Observations))
 			}
-			if entry.Status == "not_observed" {
+			switch entry.Status {
+			case "not_observed":
 				entry.Recovery = recoveryPlan("facet_not_observed", "Synchronize this facet, then read its coverage again.", syncFacetCall(input, facet))
-			} else if entry.Status == "incomplete" {
+			case "incomplete":
 				entry.Recovery = recoveryPlan("facet_incomplete", "Synchronize this facet again to complete its bounded observation set.", syncFacetCall(input, facet))
 			}
 			value.Facets = append(value.Facets, entry)
@@ -146,22 +147,24 @@ func (r *MCPReader) ThreadFacetResource(ctx context.Context, owner, repo, kind s
 	if err != nil {
 		return nil, err
 	}
+	observationValues := make([]any, 0, len(observations))
 	out := map[string]any{
 		"schema_version": "gitcontribute.thread-facet.v1",
 		"owner":          owner, "repo": repo, "kind": thread.Kind, "number": number, "facet": facet,
-		"observations": make([]any, 0, len(observations)),
+		"observations": observationValues,
 	}
 	for _, observation := range observations {
 		var payload any
 		if err := json.Unmarshal([]byte(observation.Payload), &payload); err != nil {
 			return nil, fmt.Errorf("decode %s observation: %w", facet, err)
 		}
-		out["observations"] = append(out["observations"].([]any), map[string]any{
+		observationValues = append(observationValues, map[string]any{
 			"source_updated_at":    formatTime(observation.SourceUpdatedAt),
 			"observation_sequence": observation.ObservationSequence,
 			"payload":              payload,
 		})
 	}
+	out["observations"] = observationValues
 	if coverage != nil {
 		out["coverage"] = map[string]any{"complete": coverage.Complete, "source_updated_at": formatTime(coverage.SourceUpdatedAt)}
 	}

@@ -62,7 +62,7 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpcontract.FindCluster
 			out.Status = "partial"
 		case errors.Is(err, errThreadNotFound):
 			item.Status, item.Reason, item.Message = "unavailable", "thread_not_indexed", err.Error()
-			item.Recovery = recoveryPlan("thread_not_indexed", err.Error(), syncThreadCall(mcpcontract.ThreadRef{Owner: target.Owner, Repo: target.Repo, Kind: target.Kind, Number: target.Number}))
+			item.Recovery = recoveryPlan("thread_not_indexed", err.Error(), syncThreadCall(mcpcontract.ThreadRef(target)))
 			out.Status = "partial"
 		default:
 			item.Status, item.Reason, item.Message = "failed", "read_failed", err.Error()

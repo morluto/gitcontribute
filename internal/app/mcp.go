@@ -620,14 +620,14 @@ func (r *MCPReader) GetCoverage(ctx context.Context, in mcpcontract.GetCoverageI
 			out.Status = "partial"
 		} else if reason != "" {
 			item.Status, item.Reason = "unavailable", reason
-			if reason == "repository_not_indexed" {
+			item.Message = "owner/repo and optional kind/number must identify a repository or exact thread"
+			switch reason {
+			case "repository_not_indexed":
 				item.Message = "target is not present in the local corpus"
 				item.Recovery = recoveryPlan(reason, item.Message, syncRepositoryContextCall(target.Owner, target.Repo))
-			} else if reason == "thread_not_indexed" {
+			case "thread_not_indexed":
 				item.Message = "target is not present in the local corpus"
-				item.Recovery = recoveryPlan(reason, item.Message, syncThreadCall(mcpcontract.ThreadRef{Owner: target.Owner, Repo: target.Repo, Kind: target.Kind, Number: target.Number}))
-			} else {
-				item.Message = "owner/repo and optional kind/number must identify a repository or exact thread"
+				item.Recovery = recoveryPlan(reason, item.Message, syncThreadCall(mcpcontract.ThreadRef(target)))
 			}
 			out.Status = "partial"
 		} else {
