@@ -280,7 +280,7 @@ func (s *Server) registerScalable() {
 		setDefault(sc, "status_max_pages", 3)
 		configureSyncPortfolioModes(sc)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a pull-request portfolio synchronization job."), handler: s.syncPortfolio})
-	addCatalogTool(s, catalogTool[mcpcontract.SyncPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPullRequestFeedback, title: "Synchronize pull-request feedback", description: "Fetch independently covered issue comments, submitted reviews, inline comments, and review-thread topology for 1-50 exact pull requests under one total request budget.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackOperator], input: inputSchema[mcpcontract.SyncPullRequestFeedbackInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.SyncPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPullRequestFeedback, title: "Synchronize pull-request feedback", description: "Fetch and persist selected issue comments, submitted reviews, inline comments, and review-conversation topology for 1-50 exact pull requests under one total request budget. Creates or refreshes only the local repository and pull-request identities required by those targets; it does not fetch repository guidance or other pull requests. Returns item-level coverage and durable feedback resources.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackOperator], input: inputSchema[mcpcontract.SyncPullRequestFeedbackInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "pull_requests", 1, 50)
 		constrainPullRequestRefs(sc, "pull_requests")
 		setArrayBounds(sc, "channels", 1, 4)

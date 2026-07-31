@@ -55,7 +55,7 @@ func TestGetPullRequestFeedbackPreservesChannelsAndThreadState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if requests != 5 || got.HeadSHA != "head-7" || len(got.IssueComments) != 1 || len(got.Reviews) != 1 || len(got.InlineComments) != 1 || len(got.ReviewThreads) != 1 {
+	if requests != 5 || got.HeadSHA != "head-7" || got.Header.Number != 7 || got.Header.HeadSHA != "head-7" || got.Header.UpdatedAt.IsZero() || len(got.IssueComments) != 1 || len(got.Reviews) != 1 || len(got.InlineComments) != 1 || len(got.ReviewThreads) != 1 {
 		t.Fatalf("requests=%d feedback=%+v", requests, got)
 	}
 	thread := got.ReviewThreads[0]

@@ -64,6 +64,132 @@ func TestIncompletePullRequestFacetPreservesLastCompleteObservation(t *testing.T
 	}
 }
 
+func TestFeedbackSyncSeedsMissingRepositoryAndPullRequest(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	t.Cleanup(func() { _ = svc.Close() })
+	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+	svc.SetGitHubReader(&boundedWorkflowReader{
+		feedback: github.PullRequestFeedback{
+			Header: github.PullRequestDetails{
+				Number: 7, State: "open", Title: "new title", Body: "body",
+				Author: "alice", CreatedAt: now.Add(-time.Hour), UpdatedAt: now,
+				HeadSHA: "head-7",
+			},
+			HeadSHA: "head-7", SourceUpdatedAt: now,
+			IssueComments: []github.FeedbackComment{{ID: 10, Body: "comment"}},
+			Coverage: map[string]github.FeedbackCoverage{
+				"issue_comments": {Complete: true, Fetched: 1, Total: 1},
+			},
+		},
+	})
+	reader := &MCPReader{Service: svc}
+	ref := mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7}
+	result, err := reader.syncPullRequestFeedback(ctx, mcpcontract.SyncPullRequestFeedbackInput{
+		PullRequests: []mcpcontract.ThreadRef{ref}, Channels: []string{"issue_comments"}, MaxRequests: 10,
+	}, func(string, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.BatchStatus != "complete" || len(result.Items) != 1 || result.Items[0].Status != "complete" {
+		t.Fatalf("feedback result = %+v", result)
+	}
+
+	repo, err := svc.corpus.GetRepository(ctx, "acme", "rocket")
+	if err != nil || repo == nil {
+		t.Fatalf("stored repository = %v, %+v", err, repo)
+	}
+	thread, err := svc.corpus.GetThread(ctx, repo.ID, corpus.ThreadKindPullRequest, 7)
+	if err != nil || thread == nil {
+		t.Fatalf("stored pull request = %v, %+v", err, thread)
+	}
+	if thread.Title != "new title" || thread.State != "open" || thread.StateReason != "" {
+		t.Fatalf("stored pull-request header = %+v", thread)
+	}
+	resource, err := reader.PullRequestFeedbackResource(ctx, "acme", "rocket", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resource["number"] != 7 || result.Items[0].ResourceURI == "" {
+		t.Fatalf("feedback resource/result = %+v / %+v", resource, result)
+	}
+}
+
+func TestFeedbackSyncPreservesExistingRepositoryAndPullRequestFields(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	t.Cleanup(func() { _ = svc.Close() })
+	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
+		Owner: "acme", Name: "rocket", Description: "existing metadata", SourceUpdatedAt: now,
+	}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
+		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7,
+		State: "open", StateReason: "completed", Title: "old title", SourceUpdatedAt: now,
+	}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	svc.SetGitHubReader(&boundedWorkflowReader{
+		feedback: github.PullRequestFeedback{
+			Header: github.PullRequestDetails{
+				Number: 7, State: "open", Title: "new title", UpdatedAt: now.Add(time.Hour),
+				HeadSHA: "head-7",
+			},
+			HeadSHA: "head-7", SourceUpdatedAt: now.Add(time.Hour),
+			Coverage: map[string]github.FeedbackCoverage{
+				"issue_comments": {Complete: true},
+			},
+		},
+	})
+	reader := &MCPReader{Service: svc}
+	ref := mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7}
+	result, err := reader.syncPullRequestFeedback(ctx, mcpcontract.SyncPullRequestFeedbackInput{
+		PullRequests: []mcpcontract.ThreadRef{ref}, Channels: []string{"issue_comments"}, MaxRequests: 10,
+	}, func(string, string) error { return nil })
+	if err != nil || result.BatchStatus != "complete" {
+		t.Fatalf("feedback result = %v, %+v", err, result)
+	}
+
+	gotRepo, err := svc.corpus.GetRepository(ctx, "acme", "rocket")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotThread, err := svc.corpus.GetThread(ctx, gotRepo.ID, corpus.ThreadKindPullRequest, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRepo.Description != "existing metadata" || gotThread.Title != "new title" || gotThread.StateReason != "completed" {
+		t.Fatalf("richer fields were not preserved: repo=%+v thread=%+v", gotRepo, gotThread)
+	}
+}
+
+func TestFeedbackSyncReportsStructuredPersistenceFailure(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	t.Cleanup(func() { _ = svc.Close() })
+	svc.SetGitHubReader(&boundedWorkflowReader{
+		feedback: github.PullRequestFeedback{
+			HeadSHA: "head-7", Coverage: map[string]github.FeedbackCoverage{
+				"issue_comments": {Complete: true},
+			},
+		},
+	})
+	reader := &MCPReader{Service: svc}
+	ref := mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7}
+	result, err := reader.syncPullRequestFeedback(ctx, mcpcontract.SyncPullRequestFeedbackInput{
+		PullRequests: []mcpcontract.ThreadRef{ref}, Channels: []string{"issue_comments"}, MaxRequests: 10,
+	}, func(string, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.BatchStatus != "failed" || result.Items[0].Status != "failed" || result.Items[0].Code != "repository_identity_unavailable" {
+		t.Fatalf("feedback persistence failure = %+v", result)
+	}
+}
+
 func TestBoundedWorkflowSnapshotsReturnRetryablePartialItems(t *testing.T) {
 	ctx := context.Background()
 	svc := newLocalService(t)

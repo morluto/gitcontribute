@@ -94,6 +94,11 @@ type FeedbackThread struct {
 }
 
 type PullRequestFeedback struct {
+	// Header is the PR response already fetched before the child feedback
+	// channels. It is used by the application layer to seed the local identity
+	// required by the persisted feedback facets and is not part of the facet
+	// payload itself.
+	Header          PullRequestDetails          `json:"-"`
 	HeadSHA         string                      `json:"head_sha"`
 	SourceUpdatedAt time.Time                   `json:"source_updated_at"`
 	ThreadState     string                      `json:"thread_state,omitempty"`
@@ -119,6 +124,7 @@ func (c *Client) GetPullRequestFeedback(ctx context.Context, owner, repo string,
 	}
 	out.HeadSHA = pr.GetHead().GetSHA()
 	out.SourceUpdatedAt = pr.GetUpdatedAt().Time
+	out.Header = convertPullRequestDetails(pr)
 	for _, channel := range opts.Channels {
 		var err error
 		switch channel {

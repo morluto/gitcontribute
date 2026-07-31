@@ -136,7 +136,10 @@ func jobExecution(job *contracts.JobResult) (mcpcontract.JobExecutionState, mcpc
 	case "running":
 		return "running", ""
 	case "succeeded":
-		if jobResultStatus(job) == "partial" {
+		switch jobResultStatus(job) {
+		case "failed":
+			return "terminal", "failed"
+		case "partial":
 			return "terminal", "partial"
 		}
 		return "terminal", "succeeded"
@@ -152,7 +155,10 @@ func jobExecution(job *contracts.JobResult) (mcpcontract.JobExecutionState, mcpc
 func jobSummary(job *contracts.JobResult, completed, total int) string {
 	switch job.Status {
 	case "succeeded":
-		if jobResultStatus(job) == "partial" {
+		switch jobResultStatus(job) {
+		case "failed":
+			return job.Kind + " failed with no usable item outcomes"
+		case "partial":
 			return job.Kind + " completed with partial item outcomes"
 		}
 		return job.Kind + " completed successfully"

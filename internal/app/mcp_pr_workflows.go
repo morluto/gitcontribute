@@ -20,6 +20,11 @@ const (
 	facetPRCIReport               = "pr_ci_report"
 )
 
+var (
+	errFeedbackRepositoryNotStored  = errors.New("repository is not stored")
+	errFeedbackPullRequestNotStored = errors.New("pull request is not stored")
+)
+
 type pullRequestWorkflowItem struct {
 	Key          string                      `json:"key"`
 	Status       mcpcontract.BatchItemStatus `json:"item_status"`
@@ -116,6 +121,21 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 			Channels: in.Channels, ThreadState: in.ThreadState, MaxItemsPerChannel: in.MaxItemsPerChannel,
 		}, budget)
 		snapshot.ThreadState = in.ThreadState
+		item.HeadSHA = snapshot.HeadSHA
+		if snapshot.Header.Number > 0 {
+			code, persistErr := r.persistPullRequestIdentity(ctx, ref, snapshot.Header, snapshot.SourceUpdatedAt)
+			if persistErr != nil {
+				failure := feedbackPersistenceFailure(ref, code, persistErr.Error())
+				failure.HeadSHA = item.HeadSHA
+				item = failure
+				out.BatchStatus = "partial"
+				out.Items[index] = item
+				if err := report("pull_request_feedback", jobProgressCounts(index+1, len(in.PullRequests))); err != nil {
+					return pullRequestWorkflowResult{}, err
+				}
+				continue
+			}
+		}
 		if readErr != nil {
 			var persistErr error
 			if len(snapshot.Coverage) > 0 {
@@ -128,7 +148,7 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 			}
 			out.BatchStatus = "partial"
 		} else if err := r.persistPullRequestFeedback(ctx, ref, snapshot, in.Channels); err != nil {
-			item.Status, item.Code, item.Message = "failed", "persist_feedback_failed", err.Error()
+			item = feedbackPersistenceFailure(ref, feedbackPersistenceFailureCode(err), err.Error())
 			out.BatchStatus = "partial"
 		} else if !feedbackSnapshotComplete(snapshot, in.Channels) {
 			item.Status = "retryable"
@@ -151,6 +171,90 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 		out.BatchStatus = "failed"
 	}
 	return out, nil
+}
+
+// persistPullRequestIdentity stores only the repository and exact PR identity
+// needed by the feedback facets. It deliberately does not refresh repository
+// metadata or unrelated thread headers.
+func (r *MCPReader) persistPullRequestIdentity(ctx context.Context, ref mcpcontract.ThreadRef, header github.PullRequestDetails, sourceUpdatedAt time.Time) (string, error) {
+	if header.Number != ref.Number || header.Number < 1 {
+		return "pull_request_header_unavailable", fmt.Errorf("GitHub feedback did not return pull request %s", pullRequestKey(ref))
+	}
+	if header.UpdatedAt.IsZero() {
+		header.UpdatedAt = sourceUpdatedAt
+	}
+	c, err := r.openCorpus(ctx)
+	if err != nil {
+		return "persistence_retryable", err
+	}
+	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	if err != nil {
+		return "persistence_retryable", fmt.Errorf("get repository identity: %w", err)
+	}
+	if repo == nil {
+		payload, marshalErr := json.Marshal(map[string]string{
+			"source": "pull_request_feedback_identity", "owner": ref.Owner, "repo": ref.Repo,
+		})
+		if marshalErr != nil {
+			return "persistence_retryable", marshalErr
+		}
+		repo, err = corpus.RetryBusyValue(ctx, func(ctx context.Context) (*corpus.Repository, error) {
+			return c.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner, Name: ref.Repo}, string(payload))
+		})
+		if err != nil {
+			return "persistence_retryable", fmt.Errorf("upsert repository identity: %w", err)
+		}
+	}
+
+	thread := threadFromPullRequestDetails(header, repo.ID)
+	existing, err := c.GetThread(ctx, repo.ID, corpus.ThreadKindPullRequest, ref.Number)
+	if err != nil {
+		return "persistence_retryable", fmt.Errorf("get pull request identity: %w", err)
+	}
+	if existing != nil {
+		// The feedback header does not carry GitHub's state reason. Keep that
+		// richer observation instead of replacing it with an empty value.
+		thread.StateReason = existing.StateReason
+	}
+	payload, err := json.Marshal(header)
+	if err != nil {
+		return "persistence_retryable", fmt.Errorf("marshal pull request identity: %w", err)
+	}
+	if _, err := corpus.RetryBusyValue(ctx, func(ctx context.Context) (*corpus.Thread, error) {
+		return c.UpsertThread(ctx, thread, string(payload))
+	}); err != nil {
+		return "persistence_retryable", fmt.Errorf("upsert pull request identity: %w", err)
+	}
+	return "", nil
+}
+
+func threadFromPullRequestDetails(header github.PullRequestDetails, repositoryID int64) corpus.Thread {
+	thread := corpus.Thread{
+		RepositoryID:      repositoryID,
+		Kind:              corpus.ThreadKindPullRequest,
+		Number:            header.Number,
+		State:             header.State,
+		Title:             header.Title,
+		Body:              header.Body,
+		Author:            header.Author,
+		AuthorAssociation: header.AuthorAssociation,
+		Labels:            header.Labels,
+		Assignees:         header.Assignees,
+		Draft:             header.Draft,
+		Locked:            header.Locked,
+		Milestone:         header.Milestone,
+		Merged:            header.Merged,
+		MergedKnown:       true,
+		SourceCreatedAt:   header.CreatedAt,
+		SourceUpdatedAt:   header.UpdatedAt,
+	}
+	if header.ClosedAt != nil {
+		thread.ClosedAt = *header.ClosedAt
+	}
+	if header.MergedAt != nil {
+		thread.MergedAt = *header.MergedAt
+	}
+	return thread
 }
 
 func coveredFeedbackChannels(requested []string, coverage map[string]github.FeedbackCoverage) []string {
@@ -331,7 +435,7 @@ func (r *MCPReader) persistPullRequestWorkflowFacet(ctx context.Context, ref mcp
 	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
 	if err != nil || repo == nil {
 		if err == nil {
-			err = errors.New("repository is not stored")
+			err = errFeedbackRepositoryNotStored
 		}
 		return err
 	}
@@ -341,7 +445,7 @@ func (r *MCPReader) persistPullRequestWorkflowFacet(ctx context.Context, ref mcp
 	thread, err := c.GetThread(ctx, repo.ID, ref.Kind, ref.Number)
 	if err != nil || thread == nil {
 		if err == nil {
-			err = errors.New("pull request is not stored")
+			err = errFeedbackPullRequestNotStored
 		}
 		return err
 	}
@@ -356,6 +460,27 @@ func (r *MCPReader) persistPullRequestWorkflowFacet(ctx context.Context, ref mcp
 		return err
 	}
 	return c.ApplyFacetObservationSet(ctx, repo.ID, &thread.ID, facet, sourceUpdatedAt, []corpus.FacetObservationInput{{SourceUpdatedAt: sourceUpdatedAt, Payload: string(payload)}}, complete, 0)
+}
+
+func feedbackPersistenceFailureCode(err error) string {
+	switch {
+	case errors.Is(err, errFeedbackRepositoryNotStored):
+		return "repository_identity_unavailable"
+	case errors.Is(err, errFeedbackPullRequestNotStored):
+		return "pull_request_header_unavailable"
+	default:
+		return "persistence_retryable"
+	}
+}
+
+func feedbackPersistenceFailure(ref mcpcontract.ThreadRef, code, message string) pullRequestWorkflowItem {
+	item := pullRequestWorkflowItem{Key: pullRequestKey(ref), Status: "failed", Code: code, Message: message}
+	if code == "persistence_retryable" {
+		item.Status = "retryable"
+		item.RetryAfterMS = 1000
+		item.Recovery = recoveryPlan(code, message, workflowRetryCall(mcpcontract.ToolSyncPullRequestFeedback, ref))
+	}
+	return item
 }
 
 func workflowFailure(ref mcpcontract.ThreadRef, err error, tool string) pullRequestWorkflowItem {

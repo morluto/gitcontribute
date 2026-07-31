@@ -349,7 +349,9 @@ type SyncPortfolioInput struct {
 }
 
 // SyncPullRequestFeedbackInput refreshes distinct human feedback channels for
-// exact pull requests without conflating absent coverage with no feedback.
+// exact pull requests without conflating absent coverage with no feedback. The
+// operation also persists the local repository and pull-request identities
+// required by those exact facet writes; it does not require prior broad sync.
 type SyncPullRequestFeedbackInput struct {
 	PullRequests       []ThreadRef `json:"pull_requests" jsonschema:"One to 50 exact pull requests"`
 	ThreadState        string      `json:"thread_state,omitempty" jsonschema:"Review threads to return: unresolved or all"`
