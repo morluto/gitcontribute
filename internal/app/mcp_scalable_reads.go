@@ -15,7 +15,6 @@ import (
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/radar"
-	"github.com/morluto/gitcontribute/internal/ranking"
 )
 
 // GetRepositories performs an offline, input-ordered corpus read and clears
