@@ -128,6 +128,53 @@ func TestMineRepositoryFixPatternsHydratesOnlyUnknownFinalists(t *testing.T) {
 	}
 }
 
+func TestPreviewRepositoryFixPatternsIsReadOnlyAndNeverHydrates(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	now := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	repo, err := svc.corpus.ApplyRepositoryObservation(ctx, "owner", "repo", "R_1", now, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
+		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed",
+		Title: "Fix numeric drift", Body: "Numeric drift reproduction", SourceUpdatedAt: now,
+	}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	beforeRevision, err := svc.corpus.CorpusRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeJobs, err := svc.corpus.ListJobs(ctx, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := (&MCPReader{Service: svc}).PreviewRepositoryFixPatterns(ctx, mcpcontract.PreviewRepositoryFixPatternsInput{
+		Repository:      mcpcontract.RepositoryRef{Owner: "owner", Repo: "repo"},
+		TimeWindow:      mcpcontract.FixPatternTimeWindow{UpdatedAfter: now.Add(-time.Hour).Format(time.RFC3339)},
+		SymptomTaxonomy: []mcpcontract.FixPatternSymptom{{Name: "drift", Terms: []string{"drift"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Persisted || report.CorpusRevision != beforeRevision || report.Coverage.SelectedForHydration != 0 || report.Coverage.Hydrated != 0 {
+		t.Fatalf("preview report = %+v", report)
+	}
+	afterRevision, err := svc.corpus.CorpusRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterJobs, err := svc.corpus.ListJobs(ctx, "", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterRevision != beforeRevision || len(afterJobs) != len(beforeJobs) {
+		t.Fatalf("preview mutated corpus: revision %d -> %d, jobs %d -> %d", beforeRevision, afterRevision, len(beforeJobs), len(afterJobs))
+	}
+}
+
 func TestNormalizeFixPatternInputRejectsInvalidWindow(t *testing.T) {
 	t.Parallel()
 	for _, window := range []mcpcontract.FixPatternTimeWindow{

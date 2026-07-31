@@ -38,12 +38,32 @@ func (r *MCPReader) MineRepositoryFixPatterns(ctx context.Context, in mcpcontrac
 		return mcpcontract.JobReference{}, err
 	}
 	id, err := r.submitJob(ctx, "mine_repository_fix_patterns", normalized, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.mineRepositoryFixPatterns(ctx, normalized, report)
+		return r.analyzeFixPatterns(ctx, normalized, report, false)
 	})
 	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
 	return queuedJobReference(id, "mine_repository_fix_patterns", "repository fix-pattern mining job started"), nil
+}
+
+// PreviewRepositoryFixPatterns performs the same bounded corpus analysis as
+// the durable workflow while keeping the entire operation read-only. Preview
+// deliberately disables hydration: it is an offline planning read, not a
+// hidden synchronization request.
+func (r *MCPReader) PreviewRepositoryFixPatterns(ctx context.Context, in mcpcontract.PreviewRepositoryFixPatternsInput) (mcpcontract.FixPatternReport, error) {
+	normalized, err := normalizeFixPatternInput(mcpcontract.MineRepositoryFixPatternsInput(in))
+	if err != nil {
+		return mcpcontract.FixPatternReport{}, err
+	}
+	zero := 0
+	normalized.HydrationLimit = &zero
+	return r.analyzeFixPatterns(ctx, normalized, nil, true)
+}
+
+// mineRepositoryFixPatterns remains the executor-local entry point used by
+// focused tests and the durable job adapter.
+func (r *MCPReader) mineRepositoryFixPatterns(ctx context.Context, in mcpcontract.MineRepositoryFixPatternsInput, progress func(string, string) error) (mcpcontract.FixPatternReport, error) {
+	return r.analyzeFixPatterns(ctx, in, progress, false)
 }
 
 // GetFixPatternReport reads the typed terminal result of a pattern-mining job.
@@ -62,6 +82,7 @@ func (r *MCPReader) GetFixPatternReport(ctx context.Context, id string) (mcpcont
 	if err := json.Unmarshal([]byte(job.Result), &report); err != nil {
 		return mcpcontract.FixPatternReport{}, fmt.Errorf("decode fix-pattern report: %w", err)
 	}
+	report.Persisted = true
 	return report, nil
 }
 
@@ -151,10 +172,23 @@ func normalizeFixPatternInput(in mcpcontract.MineRepositoryFixPatternsInput) (mc
 	return in, nil
 }
 
-func (r *MCPReader) mineRepositoryFixPatterns(ctx context.Context, in mcpcontract.MineRepositoryFixPatternsInput, progress func(string, string) error) (mcpcontract.FixPatternReport, error) {
-	c, err := r.openCorpus(ctx)
+func (r *MCPReader) analyzeFixPatterns(ctx context.Context, in mcpcontract.MineRepositoryFixPatternsInput, progress func(string, string) error, readOnly bool) (mcpcontract.FixPatternReport, error) {
+	var c *corpus.Corpus
+	var err error
+	if readOnly {
+		c, err = r.openReadOnlyCorpus(ctx)
+	} else {
+		c, err = r.openCorpus(ctx)
+	}
 	if err != nil {
 		return mcpcontract.FixPatternReport{}, err
+	}
+	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	if err != nil {
+		return mcpcontract.FixPatternReport{}, err
+	}
+	if progress == nil {
+		progress = func(string, string) error { return nil }
 	}
 	repo, err := c.GetRepository(ctx, in.Repository.Owner, in.Repository.Repo)
 	if err != nil {
@@ -220,7 +254,7 @@ func (r *MCPReader) mineRepositoryFixPatterns(ctx context.Context, in mcpcontrac
 	}
 
 	hydrated, failures := 0, make([]mcpcontract.FixPatternHydrationFailure, 0)
-	if len(hydrationRefs) > 0 {
+	if !readOnly && len(hydrationRefs) > 0 {
 		raw, err := r.hydrateThreadsBatch(ctx, mcpcontract.HydrateThreadsInput{
 			Threads: hydrationRefs, Facets: []string{FacetPRDetails}, MaxPages: 1,
 		}, progress)
@@ -299,6 +333,18 @@ func (r *MCPReader) mineRepositoryFixPatterns(ctx context.Context, in mcpcontrac
 	if candidateTruncated {
 		limitations = append(limitations, "At least one symptom category exceeded candidate_limit; coverage is truncated.")
 	}
+	if !readOnly {
+		// Hydration is an explicit local mutation of the corpus. The report is
+		// bound to the post-hydration revision, while the final check still
+		// rejects concurrent changes during composition.
+		revision, err = c.CorpusRevision(ctx)
+		if err != nil {
+			return mcpcontract.FixPatternReport{}, err
+		}
+	}
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return mcpcontract.FixPatternReport{}, err
+	}
 	return mcpcontract.FixPatternReport{
 		Status: status, Repository: in.Repository, TimeWindow: in.TimeWindow,
 		GeneratedAt: r.now().Format(time.RFC3339),
@@ -308,7 +354,7 @@ func (r *MCPReader) mineRepositoryFixPatterns(ctx context.Context, in mcpcontrac
 			Hydrated: mcpcontract.NonNegativeInt(hydrated), HydrationFailed: mcpcontract.NonNegativeInt(len(failures)),
 			UnknownAfter: mcpcontract.NonNegativeInt(countUnknownCandidates(candidates)), CandidateTruncated: candidateTruncated,
 		},
-		Clusters: reportClusters, Failures: failures, Limitations: limitations,
+		Clusters: reportClusters, Failures: failures, Limitations: limitations, Persisted: !readOnly, CorpusRevision: revision,
 	}, nil
 }
 

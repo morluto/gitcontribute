@@ -336,7 +336,7 @@ func queuedJobReference(id, kind, message string) mcpcontract.JobReference {
 	return mcpcontract.JobReference{
 		ID: id, Ref: "job:" + id, Kind: kind, Status: "queued", Message: message, PollAfterMS: 1000,
 		FollowUp: &mcpcontract.JobFollowUp{
-			Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{id}}, Reason: "Poll this job ID after the suggested delay.",
+			Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{id}}, RetryAfterMS: 1000, Reason: "Poll this job ID after the suggested delay.",
 		},
 	}
 }
@@ -443,7 +443,7 @@ func (s *Service) indexRepositoriesBatch(ctx context.Context, in mcpcontract.Ind
 					results[index] = map[string]any{"key": key, "status": "failed", "reason": "acquisition_or_index_failed", "message": err.Error()}
 					continue
 				}
-				results[index] = map[string]any{"key": key, "status": "complete", "commit_sha": result.CommitSHA, "files": result.Files, "bytes": result.Bytes, "inserted": result.Inserted, "index_manifest": result.IndexManifest}
+				results[index] = map[string]any{"key": key, "status": "complete", "commit_sha": result.CommitSHA, "files": result.Files, "bytes": result.Bytes, "inserted": result.Inserted, "corpus_revision": result.CorpusRevision, "index_manifest": result.IndexManifest}
 			}
 		}()
 	}

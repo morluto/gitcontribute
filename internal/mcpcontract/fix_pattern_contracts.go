@@ -48,7 +48,12 @@ type MineRepositoryFixPatternsInput struct {
 	CandidateLimit      int                  `json:"candidate_limit,omitempty" jsonschema:"Maximum stored candidates examined per symptom from 1 to 100"`
 	HydrationLimit      *int                 `json:"hydration_limit,omitempty" jsonschema:"Maximum unknown-state pull requests refreshed from GitHub from 0 to 100; defaults to 25"`
 	RepresentativeLimit int                  `json:"representative_limit,omitempty" jsonschema:"Maximum examples returned per symptom from 1 to 20"`
+	CorpusRevision      *int64               `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
 }
+
+// PreviewRepositoryFixPatternsInput is the read-only counterpart to the
+// durable mining operation. It never creates a job or persists a report.
+type PreviewRepositoryFixPatternsInput MineRepositoryFixPatternsInput
 
 // FixPatternOutcomeCounts preserves unknown state rather than treating it as
 // unmerged.
@@ -110,12 +115,14 @@ type FixPatternHydrationFailure struct {
 // FixPatternReport is persisted as the typed result of a durable pattern
 // mining job and is readable through an MCP resource.
 type FixPatternReport struct {
-	Status      FixPatternReportStatus       `json:"status"`
-	Repository  RepositoryRef                `json:"repository"`
-	TimeWindow  FixPatternTimeWindow         `json:"time_window"`
-	GeneratedAt string                       `json:"generated_at"`
-	Coverage    FixPatternCoverage           `json:"coverage"`
-	Clusters    []FixPatternCluster          `json:"clusters"`
-	Failures    []FixPatternHydrationFailure `json:"failures,omitempty"`
-	Limitations []string                     `json:"limitations,omitempty"`
+	Status         FixPatternReportStatus       `json:"status"`
+	Repository     RepositoryRef                `json:"repository"`
+	TimeWindow     FixPatternTimeWindow         `json:"time_window"`
+	GeneratedAt    string                       `json:"generated_at"`
+	Coverage       FixPatternCoverage           `json:"coverage"`
+	Clusters       []FixPatternCluster          `json:"clusters"`
+	Failures       []FixPatternHydrationFailure `json:"failures,omitempty"`
+	Limitations    []string                     `json:"limitations,omitempty"`
+	Persisted      bool                         `json:"persisted"`
+	CorpusRevision int64                        `json:"corpus_revision"`
 }

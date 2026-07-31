@@ -399,6 +399,42 @@ func TestInvalidToolCallEvaluation(t *testing.T) {
 	}
 }
 
+func TestCoverageTargetSchemaAcceptsRepositoryAndExactThreadOnly(t *testing.T) {
+	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	defer closeSessions()
+
+	valid := []map[string]any{
+		{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket"}}},
+		{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket", "kind": "pull_request", "number": 7}}},
+	}
+	for _, args := range valid {
+		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: mcpcontract.ToolGetCoverage, Arguments: args})
+		if err != nil || result == nil || result.IsError {
+			message := ""
+			if result != nil && len(result.Content) > 0 {
+				if content, ok := result.Content[0].(*mcp.TextContent); ok {
+					message = content.Text
+				}
+			}
+			t.Fatalf("valid coverage target was rejected: args=%#v err=%v message=%q", args, err, message)
+		}
+	}
+
+	invalid := []map[string]any{
+		{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue"}}},
+		{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket", "number": 7}}},
+		{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket", "kind": "discussion", "number": 7}}},
+		{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 0}}},
+		{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 7, "extra": true}}},
+	}
+	for _, args := range invalid {
+		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: mcpcontract.ToolGetCoverage, Arguments: args})
+		if err == nil && result != nil && !result.IsError {
+			t.Errorf("invalid coverage target was accepted: %#v", args)
+		}
+	}
+}
+
 func TestFixPatternWorkflowSchemaRejectsInvalidNestedInputBeforeHandler(t *testing.T) {
 	base := &fakeReader{searchStarted: make(chan struct{})}
 	optional := &fakeOptionalCapabilities{base: base}
