@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -997,6 +998,10 @@ func readRepositoryImport(reader io.Reader) ([]string, error) {
 }
 
 func parseRepositoryImportJSON(data []byte) ([]string, error) {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 {
+		return nil, errors.New("repository import is empty")
+	}
 	var items []json.RawMessage
 	if data[0] == '[' {
 		if err := json.Unmarshal(data, &items); err != nil {
