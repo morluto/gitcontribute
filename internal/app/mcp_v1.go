@@ -31,29 +31,29 @@ func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpcontract.Searc
 	}
 
 	res, err := r.searchCorpus(ctx, in.Query, contracts.SearchOptions{
-		Kind:           "repos",
-		Repo:           repoFilter,
-		Limit:          in.Limit,
-		Cursor:         in.Cursor,
-		Sort:           in.Sort,
-		CorpusRevision: in.CorpusRevision,
+		Kind:          "repos",
+		Repo:          repoFilter,
+		Limit:         in.Limit,
+		Cursor:        in.Cursor,
+		Sort:          in.Sort,
+		SnapshotToken: in.SnapshotToken,
 	})
 	if err != nil {
 		return mcpcontract.SearchRepositoriesOutput{}, err
 	}
 	if len(res.Matches) == 0 {
-		provenance, err := offlineReadProvenance("repository_search", res.CorpusRevision, in, res.NextCursor == "", res.NextCursor != "", true)
+		provenance, err := offlineReadProvenance("repository_search", res.ObservationWatermark, in, res.NextCursor == "", res.NextCursor != "", true)
 		if err != nil {
 			return mcpcontract.SearchRepositoriesOutput{}, err
 		}
-		return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: []mcpcontract.RepositoryOutput{}, NextCursor: res.NextCursor, CorpusRevision: res.CorpusRevision, Provenance: provenance}, nil
+		return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: []mcpcontract.RepositoryOutput{}, NextCursor: res.NextCursor, SnapshotToken: res.SnapshotToken, Provenance: provenance}, nil
 	}
 
 	refs := make([]mcpcontract.RepositoryRef, len(res.Matches))
 	for i, m := range res.Matches {
 		refs[i] = mcpcontract.RepositoryRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo}
 	}
-	batch, err := r.GetRepositories(ctx, mcpcontract.GetRepositoriesInput{Repositories: refs, CorpusRevision: &res.CorpusRevision})
+	batch, err := r.GetRepositories(ctx, mcpcontract.GetRepositoriesInput{Repositories: refs, SnapshotToken: in.SnapshotToken})
 	if err != nil {
 		return mcpcontract.SearchRepositoriesOutput{}, err
 	}
@@ -63,11 +63,11 @@ func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpcontract.Searc
 			matches = append(matches, *item.Value)
 		}
 	}
-	provenance, err := offlineReadProvenance("repository_search", res.CorpusRevision, in, res.NextCursor == "", res.NextCursor != "", true)
+	provenance, err := offlineReadProvenance("repository_search", res.ObservationWatermark, in, res.NextCursor == "", res.NextCursor != "", true)
 	if err != nil {
 		return mcpcontract.SearchRepositoriesOutput{}, err
 	}
-	return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: matches, NextCursor: res.NextCursor, CorpusRevision: res.CorpusRevision, Provenance: provenance}, nil
+	return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: matches, NextCursor: res.NextCursor, SnapshotToken: res.SnapshotToken, Provenance: provenance}, nil
 }
 
 // ThreadByNumber reads an issue or pull request by repository and number only.
@@ -83,7 +83,7 @@ func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpcontract.ThreadByN
 	if err != nil {
 		return mcpcontract.ThreadOutput{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, nil)
+	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
 	if err != nil {
 		return mcpcontract.ThreadOutput{}, err
 	}
@@ -104,7 +104,7 @@ func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpcontract.ThreadByN
 	out := corpusThreadToMCPOutput(thread)
 	out.Owner = in.Owner
 	out.Repo = in.Repo
-	out.CorpusRevision = revision
+	out.SnapshotToken = snapshotIdentity(in.SnapshotToken, revision)
 	if err := finishCorpusRead(ctx, c, revision); err != nil {
 		return mcpcontract.ThreadOutput{}, err
 	}
@@ -758,31 +758,28 @@ func draftArtifactToMCP(d *contribution.DraftArtifact) mcpcontract.DraftOutput {
 
 // ExportManifest assembles a bounded local contribution evidence statement.
 func (r *MCPReader) ExportManifest(ctx context.Context, in mcpcontract.ExportManifestInput) (mcpcontract.ManifestOutput, error) {
-	if in.CorpusRevision != nil && *in.CorpusRevision < 0 {
-		return mcpcontract.ManifestOutput{}, mcpcontract.InvalidArgument("corpus_revision", "must be non-negative", map[string]any{"corpus_revision": 0})
-	}
 	opts := ManifestOptions{WorkspaceID: strings.TrimSpace(in.WorkspaceID)}
 	if in.PullRequest != nil {
 		opts.PullRequest = &ManifestPullRequest{Owner: strings.TrimSpace(in.PullRequest.Owner), Repo: strings.TrimSpace(in.PullRequest.Repo), Number: in.PullRequest.Number}
 	}
-	opts.CorpusRevision = in.CorpusRevision
+	opts.SnapshotToken = in.SnapshotToken
 	statement, revision, err := r.contributionManifestWithRevision(ctx, in.OpportunityID, opts)
 	if err != nil {
 		var stale *corpus.StaleCorpusRevisionError
 		if errors.As(err, &stale) {
 			return mcpcontract.ManifestOutput{}, mcpcontract.Unavailable(
-				"corpus_revision_stale",
-				fmt.Sprintf("requested corpus revision %d is no longer current; current revision is %d; reread after an explicit sync", stale.Expected, stale.Current),
+				"snapshot_expired",
+				fmt.Sprintf("snapshot watermark is no longer current; expected %d, current %d", stale.Expected, stale.Current),
 			)
 		}
 		return mcpcontract.ManifestOutput{}, err
 	}
-	return manifestStatementToMCP(statement, revision), nil
+	return manifestStatementToMCP(statement, snapshotIdentity(in.SnapshotToken, revision)), nil
 }
 
-func manifestStatementToMCP(statement *manifest.Statement, revision int64) mcpcontract.ManifestOutput {
+func manifestStatementToMCP(statement *manifest.Statement, snapshotToken string) mcpcontract.ManifestOutput {
 	return mcpcontract.ManifestOutput{
 		ManifestID: statement.Predicate.ManifestID, ContentSHA256: statement.Predicate.ContentSHA256,
-		SchemaVersion: statement.Predicate.SchemaVersion, Status: statement.Predicate.Status, CorpusRevision: revision, Statement: *statement,
+		SchemaVersion: statement.Predicate.SchemaVersion, Status: statement.Predicate.Status, SnapshotToken: snapshotToken, Statement: *statement,
 	}
 }

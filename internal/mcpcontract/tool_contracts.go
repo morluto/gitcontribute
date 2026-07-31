@@ -394,10 +394,10 @@ type PublishedDraftVerificationOutput struct {
 
 // ExportManifestInput selects bounded local evidence for one contribution manifest.
 type ExportManifestInput struct {
-	OpportunityID  string                    `json:"opportunity_id" jsonschema:"Opportunity ID"`
-	WorkspaceID    string                    `json:"workspace_id,omitempty" jsonschema:"Managed workspace ID to bind"`
-	PullRequest    *ManifestPullRequestInput `json:"pull_request,omitempty" jsonschema:"Exact stored pull request to include"`
-	CorpusRevision *int64                    `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin for the source evidence"`
+	OpportunityID string                    `json:"opportunity_id" jsonschema:"Opportunity ID"`
+	WorkspaceID   string                    `json:"workspace_id,omitempty" jsonschema:"Managed workspace ID to bind"`
+	PullRequest   *ManifestPullRequestInput `json:"pull_request,omitempty" jsonschema:"Exact stored pull request to include"`
+	SnapshotToken string                    `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token for the source evidence"`
 }
 
 // ManifestPullRequestInput identifies one exact stored pull request.
@@ -409,12 +409,12 @@ type ManifestPullRequestInput struct {
 
 // ManifestOutput returns the stable identity and full in-toto-shaped statement.
 type ManifestOutput struct {
-	ManifestID     string             `json:"manifest_id" jsonschema:"Stable sha256-prefixed manifest ID"`
-	ContentSHA256  string             `json:"content_sha256" jsonschema:"Hex SHA-256 of stable manifest content"`
-	SchemaVersion  string             `json:"schema_version" jsonschema:"Contribution manifest predicate schema version"`
-	Status         string             `json:"status" jsonschema:"Overall completeness status"`
-	CorpusRevision int64              `json:"corpus_revision" jsonschema:"Corpus revision observed when this manifest was published or read"`
-	Statement      manifest.Statement `json:"statement" jsonschema:"Typed in-toto-shaped evidence statement owned by GitContribute"`
+	ManifestID    string             `json:"manifest_id" jsonschema:"Stable sha256-prefixed manifest ID"`
+	ContentSHA256 string             `json:"content_sha256" jsonschema:"Hex SHA-256 of stable manifest content"`
+	SchemaVersion string             `json:"schema_version" jsonschema:"Contribution manifest predicate schema version"`
+	Status        string             `json:"status" jsonschema:"Overall completeness status"`
+	SnapshotToken string             `json:"snapshot_token" jsonschema:"Immutable corpus snapshot token observed when this manifest was published or read"`
+	Statement     manifest.Statement `json:"statement" jsonschema:"Typed in-toto-shaped evidence statement owned by GitContribute"`
 }
 
 // EvidenceInput filters and bounds stored evidence.
@@ -469,7 +469,7 @@ type RankOpportunitiesInput struct {
 	Repositories            []RepositoryRef `json:"repositories" jsonschema:"Required 1-50 stored repositories"`
 	Limit                   int             `json:"limit,omitempty" jsonschema:"Result bound from 1-100"`
 	MaxResultsPerRepository int             `json:"max_results_per_repository,omitempty" jsonschema:"Per-repository bound from 1-100"`
-	CorpusRevision          *int64          `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
+	SnapshotToken           string          `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token"`
 }
 
 // OpportunityCandidateOutput describes one ranked contribution candidate.
@@ -505,13 +505,13 @@ type RepositoryOpportunitySummaryOutput struct {
 // RankOpportunitiesOutput combines deterministic cross-repository ranking with
 // per-repository coverage or availability results.
 type RankOpportunitiesOutput struct {
-	Status         string                                          `json:"status"`
-	Candidates     []OpportunityCandidateOutput                    `json:"candidates"`
-	Repositories   []BatchItem[RepositoryOpportunitySummaryOutput] `json:"repositories"`
-	GeneratedAt    string                                          `json:"generated_at"`
-	Total          int                                             `json:"total"`
-	Truncated      bool                                            `json:"truncated"`
-	CorpusRevision int64                                           `json:"corpus_revision"`
+	Status        string                                          `json:"status"`
+	Candidates    []OpportunityCandidateOutput                    `json:"candidates"`
+	Repositories  []BatchItem[RepositoryOpportunitySummaryOutput] `json:"repositories"`
+	GeneratedAt   string                                          `json:"generated_at"`
+	Total         int                                             `json:"total"`
+	Truncated     bool                                            `json:"truncated"`
+	SnapshotToken string                                          `json:"snapshot_token"`
 }
 
 // ReadinessInput selects a contribution opportunity readiness report.

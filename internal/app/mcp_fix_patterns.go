@@ -100,15 +100,15 @@ func (r *MCPReader) GetFixPatternReport(ctx context.Context, id string) (mcpcont
 		return mcpcontract.FixPatternReport{}, fmt.Errorf("decode fix-pattern report: %w", err)
 	}
 	var identity struct {
-		CorpusRevision *int64 `json:"corpus_revision"`
+		SnapshotToken string `json:"snapshot_token"`
 	}
 	if err := json.Unmarshal([]byte(job.Result), &identity); err != nil {
 		return mcpcontract.FixPatternReport{}, fmt.Errorf("decode fix-pattern report identity: %w", err)
 	}
-	if identity.CorpusRevision == nil {
+	if identity.SnapshotToken == "" {
 		return mcpcontract.FixPatternReport{}, mcpcontract.Unavailable(
 			"legacy_artifact",
-			"this persisted fix-pattern report predates corpus revision binding; rerun the fix-pattern workflow to regenerate it",
+			"this persisted fix-pattern report predates immutable snapshot binding; rerun the fix-pattern workflow to regenerate it",
 		)
 	}
 	report.Persisted = true
@@ -271,7 +271,7 @@ func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.M
 	if err != nil {
 		return mcpcontract.FixPatternReport{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
 	if err != nil {
 		return mcpcontract.FixPatternReport{}, err
 	}
@@ -328,7 +328,7 @@ func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.M
 				})
 			}
 		}
-		revision, err = beginCorpusRead(ctx, c, nil)
+		revision, err = beginCorpusRead(ctx, c, "")
 		if err != nil {
 			return mcpcontract.FixPatternReport{}, err
 		}
@@ -402,12 +402,12 @@ func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.M
 			Hydrated: mcpcontract.NonNegativeInt(hydrated), HydrationFailed: mcpcontract.NonNegativeInt(len(failures)),
 			UnknownAfter: mcpcontract.NonNegativeInt(countUnknownCandidates(candidates)), CandidateTruncated: analysis.candidateTruncated,
 		},
-		Clusters: reportClusters, Failures: failures, Limitations: limitations, Persisted: operation == fixPatternWorkflow, CorpusRevision: revision,
+		Clusters: reportClusters, Failures: failures, Limitations: limitations, Persisted: operation == fixPatternWorkflow, SnapshotToken: snapshotIdentity(in.SnapshotToken, revision),
 		ObservationWatermark: revision, QueryDigestSHA256: hex.EncodeToString(queryHash[:]),
 		Complete: status == "complete", Truncated: analysis.candidateTruncated, UnknownCoverage: countUnknownCandidates(candidates) > 0,
 	}
 	if operation == fixPatternWorkflow {
-		snapshot, err := c.MaterializeReadSnapshot(ctx, corpus.SnapshotMaterialization{Kind: "fix_pattern_report", Scope: in.Repository, SourceManifest: map[string]any{"corpus_revision": revision, "query_digest": report.QueryDigestSHA256}, DerivedVersions: map[string]string{"fix_patterns": "v1"}, Completeness: map[string]bool{"complete": report.Complete, "truncated": report.Truncated, "unknown_coverage": report.UnknownCoverage}, Provenance: map[string]string{"producer": "gitcontribute", "operation": "workflow.mine_repository_fix_patterns"}, Payload: report})
+		snapshot, err := c.MaterializeReadSnapshot(ctx, corpus.SnapshotMaterialization{Kind: "fix_pattern_report", Scope: in.Repository, SourceManifest: map[string]any{"observation_watermark": revision, "query_digest": report.QueryDigestSHA256}, DerivedVersions: map[string]string{"fix_patterns": "v1"}, Completeness: map[string]bool{"complete": report.Complete, "truncated": report.Truncated, "unknown_coverage": report.UnknownCoverage}, Provenance: map[string]string{"producer": "gitcontribute", "operation": "workflow.mine_repository_fix_patterns"}, Payload: report})
 		if err != nil {
 			return mcpcontract.FixPatternReport{}, err
 		}

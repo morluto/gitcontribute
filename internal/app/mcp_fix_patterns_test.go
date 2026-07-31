@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -160,7 +161,7 @@ func TestPreviewRepositoryFixPatternsIsReadOnlyAndNeverHydrates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Persisted || report.CorpusRevision != beforeRevision || report.Coverage.SelectedForHydration != 0 || report.Coverage.Hydrated != 0 {
+	if report.Persisted || !strings.HasPrefix(report.SnapshotToken, "ephemeral:") || report.Coverage.SelectedForHydration != 0 || report.Coverage.Hydrated != 0 {
 		t.Fatalf("preview report = %+v", report)
 	}
 	afterRevision, err := svc.corpus.CorpusRevision(ctx)

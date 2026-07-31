@@ -306,8 +306,8 @@ type SearchOptions struct {
 	Lens          string
 	Sort          string
 	MatchMode     string
-	// CorpusRevision pins this read to one product-owned corpus state.
-	CorpusRevision *int64
+	// SnapshotToken pins this read to one product-owned corpus state.
+	SnapshotToken string
 }
 
 // InitResult is the result of initializing a local corpus.
@@ -363,7 +363,6 @@ type AcquisitionResult struct {
 	AcquiredAt     string             `json:"acquired_at"`
 	Message        string             `json:"message"`
 	IndexManifest  codeindex.Manifest `json:"index_manifest"`
-	CorpusRevision int64              `json:"corpus_revision"`
 	ArtifactDigest string             `json:"artifact_digest"`
 	ManifestDigest string             `json:"manifest_digest"`
 	SnapshotToken  string             `json:"snapshot_token"`

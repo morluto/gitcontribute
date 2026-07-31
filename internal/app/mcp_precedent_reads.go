@@ -32,7 +32,7 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpcontract.FindPrece
 	if err != nil {
 		return mcpcontract.FindPrecedentsOutput{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
 	if err != nil {
 		return mcpcontract.FindPrecedentsOutput{}, err
 	}
@@ -57,7 +57,7 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpcontract.FindPrece
 		}
 		preparedByRepo[precedent.RepositoryKey(snapshot.Repository)] = prepared
 	}
-	out := mcpcontract.FindPrecedentsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.PrecedentSet], len(in.Threads)), CorpusRevision: revision}
+	out := mcpcontract.FindPrecedentsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.PrecedentSet], len(in.Threads)), SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
 	for i, input := range in.Threads {
 		if err := ctx.Err(); err != nil {
 			return mcpcontract.FindPrecedentsOutput{}, err

@@ -242,7 +242,7 @@ Larger persisted payloads are always read with MCP `resources/read` using the
 exact opaque URI returned by the tool.
 
 Completed code-index jobs return a typed artifact containing repository, commit
-SHA, corpus revision, manifest identity and digest, file/truncation counts, and
+SHA, snapshot token, manifest identity and digest, file/truncation counts, and
 an exact `gitcontribute://artifact/code-index/<artifact-digest>` resource. Consume that URI through
 `resources/read`; do not infer an artifact identity from a repository name
 alone.

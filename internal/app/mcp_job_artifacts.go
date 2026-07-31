@@ -275,7 +275,6 @@ type indexJobItem struct {
 	Message        string             `json:"message"`
 	RetryAfterMS   int                `json:"retry_after_ms"`
 	CommitSHA      string             `json:"commit_sha"`
-	CorpusRevision int64              `json:"corpus_revision"`
 	IndexManifest  codeindex.Manifest `json:"index_manifest"`
 	ArtifactDigest string             `json:"artifact_digest"`
 	ManifestDigest string             `json:"manifest_digest"`
@@ -283,8 +282,8 @@ type indexJobItem struct {
 }
 
 type indexJobResult struct {
-	CorpusRevision int64          `json:"corpus_revision"`
-	Items          []indexJobItem `json:"items"`
+	SnapshotToken string         `json:"snapshot_token"`
+	Items         []indexJobItem `json:"items"`
 }
 
 func indexRepositoriesJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
@@ -317,11 +316,11 @@ func indexRepositoriesJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobAr
 		}
 		artifact := mcpcontract.CodeIndexArtifact{Kind: "code_index", ID: "code-index:" + item.ArtifactDigest,
 			Repository: mcpcontract.RepositoryRef{Owner: owner, Repo: repo}, CommitSHA: item.CommitSHA,
-			CorpusRevision: item.CorpusRevision, SnapshotToken: item.SnapshotToken,
+			SnapshotToken:  item.SnapshotToken,
 			ManifestSHA256: item.ManifestDigest, ResourceURI: "gitcontribute://artifact/code-index/" + item.ArtifactDigest}
 		artifact.FollowUp = resourceFollowUp(artifact.ResourceURI, "Read this exact digest-bound artifact through MCP resources/read.")
-		if result.CorpusRevision != 0 {
-			artifact.CorpusRevision = result.CorpusRevision
+		if result.SnapshotToken != "" {
+			artifact.SnapshotToken = result.SnapshotToken
 		}
 		artifacts = append(artifacts, mcpcontract.JobArtifactReference{Kind: artifact.Kind, ID: artifact.ID, URI: artifact.ResourceURI, CodeIndex: &artifact})
 		if len(completedRefs) < 100 {

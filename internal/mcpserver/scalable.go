@@ -123,19 +123,16 @@ func (s *Server) registerScalable() {
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.GetRepositoriesInput, mcpcontract.GetRepositoriesOutput]{name: mcpcontract.ToolGetRepositories, title: "Get stored repositories in one batch", description: "Read metadata, coverage, and dossier availability for up to 100 stored repositories. Use for comparison before reading dossier resources. Missing metadata includes a sync action. Offline.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.GetRepositoriesInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "repositories", 1, 100)
-		setMinimum(sc, "corpus_revision", 0)
 	}), output: outputSchema[mcpcontract.GetRepositoriesOutput]("Ordered repository batch with item-level status and dossier availability."), handler: s.getRepositories})
 	addCatalogTool(s, catalogTool[mcpcontract.GetThreadsInput, mcpcontract.GetThreadsOutput]{name: mcpcontract.ToolGetThreads, title: "Get stored threads in one batch", description: "Read exact stored issue or pull-request headers and optional complete bodies for up to 100 inputs. Choose compact for triage and full for finalist body reads; this tool is offline.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.GetThreadsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 100)
 		setEnum(sc, "view", "compact", "full")
 		setDefault(sc, "view", "compact")
-		setMinimum(sc, "corpus_revision", 0)
 	}), output: outputSchema[mcpcontract.GetThreadsOutput]("Ordered stored-thread batch with item-level status."), handler: s.getThreads})
 	addCatalogTool(s, catalogTool[mcpcontract.GetThreadFacetsInput, mcpcontract.GetThreadFacetsOutput]{name: mcpcontract.ToolGetThreadFacets, title: "Get facet coverage in one batch", description: "Read bounded offline coverage metadata and exact resource URIs for up to 100 thread facet selections. Use resources/read for persisted facet observations; this never contacts GitHub.", annotations: readOnly, supportedBy: supports[ThreadFacetReader], input: inputSchema[mcpcontract.GetThreadFacetsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 100)
 		setArrayBounds(sc, "facets", 1, 10)
 		setArrayEnum(sc, "facets", facets.AllNames()...)
-		setMinimum(sc, "corpus_revision", 0)
 	}), output: outputSchema[mcpcontract.GetThreadFacetsOutput]("Ordered stored-facet metadata with canonical resource links."), handler: s.getThreadFacets})
 	addCatalogTool(s, catalogTool[mcpcontract.RankOpportunitiesInput, mcpcontract.RankOpportunitiesOutput]{name: mcpcontract.ToolRankThreads, title: "Rank stored threads for contribution", description: "Rank open issues across 1-50 required stored repositories. This bounded offline result reports truncation and never persists opportunities.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.RankOpportunitiesInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "repositories", 1, 50)
@@ -143,13 +140,11 @@ func (s *Server) registerScalable() {
 		setDefault(sc, "limit", 20)
 		setRange(sc, "max_results_per_repository", 1, 100)
 		setDefault(sc, "max_results_per_repository", 10)
-		setMinimum(sc, "corpus_revision", 0)
 	}), output: outputSchema[mcpcontract.RankOpportunitiesOutput]("Bounded cross-repository Radar ranking."), handler: s.rankOpportunities})
 	addCatalogTool(s, catalogTool[mcpcontract.FindPrecedentsInput, mcpcontract.FindPrecedentsOutput]{name: mcpcontract.ToolFindPrecedents, title: "Find historical issue and pull-request precedents", description: "Find similar closed issues and pull requests for up to 20 source threads, including completed, not-planned, duplicate, and merged evidence. This is an offline historical read, not a current opportunity search.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.FindPrecedentsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 20)
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 20)
-		setMinimum(sc, "corpus_revision", 0)
 	}), output: outputSchema[mcpcontract.FindPrecedentsOutput]("Historical precedents grouped by source thread."), handler: s.findPrecedents})
 	addCatalogTool(s, catalogTool[mcpcontract.PrepareIssueSetInput, mcpcontract.PrepareIssueSetOutput]{name: mcpcontract.ToolPrepareIssueSet, title: "Prepare contribution evidence from exact issues", description: "Compose stored facts, coverage gaps, related work, merged precedents, and linkage candidates for 1-20 exact issues. Prefer this to manual reads. Offline; creates no opportunity or draft.", annotations: readOnly, supportedBy: supports[IssueSetReader], input: inputSchema[mcpcontract.PrepareIssueSetInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "issue_numbers", 1, 20)
@@ -163,7 +158,6 @@ func (s *Server) registerScalable() {
 		setDefault(sc, "precedent_limit", 3)
 		setEnum(sc, "response_format", "concise", "detailed")
 		setDefault(sc, "response_format", "concise")
-		setMinimum(sc, "corpus_revision", 0)
 	}), output: outputSchema[mcpcontract.PrepareIssueSetOutput]("Contribution-facing evidence for an exact stored issue set."), handler: s.prepareIssueSet})
 	addCatalogTool(s, catalogTool[mcpcontract.GetJobsInput, mcpcontract.GetJobsOutput]{name: mcpcontract.ToolGetJob, title: "Get durable jobs in one batch", description: "Poll up to 100 jobs with execution state, terminal outcome, progress, and artifact links. Use concise while polling and detailed after completion. Offline; executor blobs stay hidden.", annotations: readOnly, input: inputSchema[mcpcontract.GetJobsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "ids", 1, 100)
@@ -229,7 +223,6 @@ func (s *Server) registerScalable() {
 			setDefault(sc, "hydration_limit", mcpcontract.DefaultFixPatternHydrationLimit)
 			setRange(sc, "representative_limit", 1, 20)
 			setDefault(sc, "representative_limit", mcpcontract.DefaultFixPatternRepresentativeLimit)
-			setMinimum(sc, "corpus_revision", 0)
 			symptoms := property(sc, "symptom_taxonomy")
 			if symptoms != nil && symptoms.Items != nil {
 				name := symptoms.Items.Properties["name"]
@@ -262,7 +255,7 @@ func (s *Server) registerScalable() {
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.PreviewRepositoryFixPatternsInput, mcpcontract.FixPatternReport]{
 		name: mcpcontract.ToolPreviewRepositoryFixPatterns, title: "Preview repository fix patterns",
-		description: "Analyze bounded stored pull-request patterns without network access, hydration, jobs, artifacts, or persistence. The result is explicitly marked persisted=false and includes its corpus revision.",
+		description: "Analyze bounded stored pull-request patterns without network access, hydration, jobs, artifacts, or persistence. The result is explicitly marked persisted=false and includes its snapshot token.",
 		annotations: readOnly, supportedBy: supports[FixPatternPreviewReader],
 		input: inputSchema[mcpcontract.PreviewRepositoryFixPatternsInput](func(sc *schemaBuilder) {
 			setArrayBounds(sc, "symptom_taxonomy", 1, 12)
@@ -273,7 +266,6 @@ func (s *Server) registerScalable() {
 			setConst(sc, "hydration_limit", 0)
 			setRange(sc, "representative_limit", 1, 20)
 			setDefault(sc, "representative_limit", mcpcontract.DefaultFixPatternRepresentativeLimit)
-			setMinimum(sc, "corpus_revision", 0)
 		}),
 		output: outputSchema[mcpcontract.FixPatternReport]("Bounded offline fix-pattern analysis; never persisted."), handler: s.previewRepositoryFixPatterns,
 	})
@@ -314,7 +306,6 @@ func (s *Server) registerScalable() {
 		setDefault(sc, "limit", 20)
 		setEnum(sc, "view", "compact", "full")
 		setDefault(sc, "view", "compact")
-		setMinimum(sc, "corpus_revision", 0)
 	}), output: outputSchema[mcpcontract.ListPullRequestPortfolioOutput]("Offline pull-request portfolio with explainable attention states."), handler: s.listPullRequestPortfolio})
 	addCatalogTool(s, catalogTool[mcpcontract.FindPortfolioOverlapsInput, mcpcontract.FindPortfolioOverlapsOutput]{name: mcpcontract.ToolFindPortfolioOverlaps, title: "Find overlaps with authored pull requests", description: "Compare up to 50 local candidates with 100 stored authored pull requests using complete changed-path, linked-issue, and opportunity-similarity observations. This offline read returns unknown instead of claiming no overlap when coverage is missing.", annotations: readOnly, supportedBy: supports[PortfolioReader], input: inputSchema[mcpcontract.FindPortfolioOverlapsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "candidates", 1, 50)
@@ -322,7 +313,6 @@ func (s *Server) registerScalable() {
 		if candidate := sc.schema.Defs["PortfolioSubjectInput"]; candidate != nil {
 			setEnum(&schemaBuilder{schema: candidate, err: sc.err}, "kind", "opportunity", "workspace", "pull_request")
 		}
-		setMinimum(sc, "corpus_revision", 0)
 	}), output: outputSchema[mcpcontract.FindPortfolioOverlapsOutput]("Ordered source-backed portfolio overlap results."), handler: s.findPortfolioOverlaps})
 	addCatalogTool(s, catalogTool[mcpcontract.LinkPullRequestInput, mcpcontract.LinkPullRequestOutput]{name: mcpcontract.ToolLinkPullRequest, title: "Link a pull request to local contribution work", description: "Idempotently link one stored authored pull request to an existing local opportunity, managed workspace, or both. This writes only local workflow state and never changes GitHub.", annotations: localWriteAnnotations(true), supportedBy: supports[PortfolioOperator], input: inputSchema[mcpcontract.LinkPullRequestInput](func(sc *schemaBuilder) {
 		sc.schema.AnyOf = []*jsonschema.Schema{{Required: []string{"opportunity_id"}}, {Required: []string{"workspace_id"}}}

@@ -48,16 +48,18 @@ type Reader interface {
 
 // RepoInput identifies a repository for an MCP operation.
 type RepoInput struct {
-	Owner string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo  string `json:"repo" jsonschema:"GitHub repository name"`
+	Owner         string `json:"owner" jsonschema:"GitHub repository owner"`
+	Repo          string `json:"repo" jsonschema:"GitHub repository name"`
+	SnapshotToken string `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token"`
 }
 
 // ThreadInput identifies an issue or pull request for an MCP operation.
 type ThreadInput struct {
-	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
-	Kind   string `json:"kind" jsonschema:"Thread kind: issue or pull_request"`
-	Number int    `json:"number" jsonschema:"GitHub issue or pull request number"`
+	Owner         string `json:"owner" jsonschema:"GitHub repository owner"`
+	Repo          string `json:"repo" jsonschema:"GitHub repository name"`
+	Kind          string `json:"kind" jsonschema:"Thread kind: issue or pull_request"`
+	Number        int    `json:"number" jsonschema:"GitHub issue or pull request number"`
+	SnapshotToken string `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token"`
 }
 
 // ConcernInput identifies one persisted local concern.
@@ -73,30 +75,31 @@ type DraftInput struct {
 
 // ManifestInput identifies one persisted contribution evidence manifest.
 type ManifestInput struct {
-	ID string `json:"id" jsonschema:"Manifest ID"`
+	ID            string `json:"id" jsonschema:"Manifest ID"`
+	SnapshotToken string `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token"`
 }
 
 // SearchInput describes an offline thread search page.
 type SearchInput struct {
-	Query          string   `json:"query" jsonschema:"Full-text query"`
-	Owner          string   `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo           string   `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Kind           string   `json:"kind,omitempty" jsonschema:"Optional thread kind"`
-	State          string   `json:"state,omitempty"`
-	StateReason    string   `json:"state_reason,omitempty"`
-	Merged         *bool    `json:"merged,omitempty"`
-	Author         string   `json:"author,omitempty"`
-	Association    string   `json:"author_association,omitempty"`
-	Assignee       string   `json:"assignee,omitempty"`
-	Labels         []string `json:"labels,omitempty"`
-	UpdatedAfter   string   `json:"updated_after,omitempty"`
-	UpdatedBefore  string   `json:"updated_before,omitempty"`
-	Limit          int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-	Cursor         string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
-	Sort           string   `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
-	MatchMode      string   `json:"match_mode,omitempty" jsonschema:"Term matching: all requires every term; any requires at least one term"`
-	View           string   `json:"view,omitempty" jsonschema:"compact omits full bodies and keeps bounded excerpts; full includes stored bodies"`
-	CorpusRevision *int64   `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
+	Query         string   `json:"query" jsonschema:"Full-text query"`
+	Owner         string   `json:"owner,omitempty" jsonschema:"Optional repository owner"`
+	Repo          string   `json:"repo,omitempty" jsonschema:"Optional repository name"`
+	Kind          string   `json:"kind,omitempty" jsonschema:"Optional thread kind"`
+	State         string   `json:"state,omitempty"`
+	StateReason   string   `json:"state_reason,omitempty"`
+	Merged        *bool    `json:"merged,omitempty"`
+	Author        string   `json:"author,omitempty"`
+	Association   string   `json:"author_association,omitempty"`
+	Assignee      string   `json:"assignee,omitempty"`
+	Labels        []string `json:"labels,omitempty"`
+	UpdatedAfter  string   `json:"updated_after,omitempty"`
+	UpdatedBefore string   `json:"updated_before,omitempty"`
+	Limit         int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Cursor        string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
+	Sort          string   `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
+	MatchMode     string   `json:"match_mode,omitempty" jsonschema:"Term matching: all requires every term; any requires at least one term"`
+	View          string   `json:"view,omitempty" jsonschema:"compact omits full bodies and keeps bounded excerpts; full includes stored bodies"`
+	SnapshotToken string   `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
 }
 
 // RepositoryOutput is the stable MCP representation of a repository.
@@ -125,7 +128,7 @@ type ThreadOutput struct {
 	MatchExcerpt      string   `json:"match_excerpt,omitempty"`
 	MatchTruncated    bool     `json:"match_truncated,omitempty" jsonschema:"Whether the per-thread hydrated search document was bounded"`
 	MatchUpdatedAt    string   `json:"match_updated_at,omitempty"`
-	CorpusRevision    int64    `json:"corpus_revision"`
+	SnapshotToken     string   `json:"snapshot_token"`
 }
 
 // SearchOutput contains one page of offline thread matches.
@@ -139,7 +142,7 @@ type SearchOutput struct {
 	NextCursor          string               `json:"next_cursor,omitempty"`
 	UnknownMergeCount   int                  `json:"unknown_merge_count,omitempty"`
 	Suggestion          string               `json:"suggestion,omitempty"`
-	CorpusRevision      int64                `json:"corpus_revision"`
+	SnapshotToken       string               `json:"snapshot_token"`
 	Provenance          CorpusReadProvenance `json:"provenance"`
 }
 
@@ -214,12 +217,12 @@ type CorpusReadProvenance struct {
 
 // SearchCodeInput describes an offline code search page.
 type SearchCodeInput struct {
-	Query          string `json:"query" jsonschema:"Code search query"`
-	Owner          string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo           string `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Limit          int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-	Cursor         string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
-	CorpusRevision *int64 `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
+	Query         string `json:"query" jsonschema:"Code search query"`
+	Owner         string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
+	Repo          string `json:"repo,omitempty" jsonschema:"Optional repository name"`
+	Limit         int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Cursor        string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
+	SnapshotToken string `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
 }
 
 // CodeMatchOutput identifies one stored code match.
@@ -249,13 +252,13 @@ type CodeIndexCoverageOutput struct {
 
 // SearchCodeOutput contains one page of offline code matches.
 type SearchCodeOutput struct {
-	Query          string                    `json:"query"`
-	Total          int                       `json:"total"`
-	Matches        []CodeMatchOutput         `json:"matches"`
-	Coverage       []CodeIndexCoverageOutput `json:"coverage,omitempty"`
-	NextCursor     string                    `json:"next_cursor,omitempty"`
-	CorpusRevision int64                     `json:"corpus_revision"`
-	Provenance     CorpusReadProvenance      `json:"provenance"`
+	Query         string                    `json:"query"`
+	Total         int                       `json:"total"`
+	Matches       []CodeMatchOutput         `json:"matches"`
+	Coverage      []CodeIndexCoverageOutput `json:"coverage,omitempty"`
+	NextCursor    string                    `json:"next_cursor,omitempty"`
+	SnapshotToken string                    `json:"snapshot_token"`
+	Provenance    CorpusReadProvenance      `json:"provenance"`
 }
 
 // InvestigationInput selects an investigation and bounds nested hypotheses.
@@ -351,16 +354,16 @@ type ClusterTarget struct {
 
 // FindClustersInput selects up to 20 repositories or exact cluster members.
 type FindClustersInput struct {
-	Targets        []ClusterTarget `json:"targets" jsonschema:"One to 20 repository or exact-member targets"`
-	Limit          int             `json:"limit,omitempty" jsonschema:"Maximum clusters per target from 1 to 100"`
-	CorpusRevision *int64          `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
+	Targets       []ClusterTarget `json:"targets" jsonschema:"One to 20 repository or exact-member targets"`
+	Limit         int             `json:"limit,omitempty" jsonschema:"Maximum clusters per target from 1 to 100"`
+	SnapshotToken string          `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
 }
 
 // FindNeighborsInput selects source threads and bounds similar-thread results.
 type FindNeighborsInput struct {
-	Threads        []ThreadRef `json:"threads" jsonschema:"One to 20 exact source threads"`
-	Limit          int         `json:"limit,omitempty" jsonschema:"Maximum neighbors per source thread from 1 to 100"`
-	CorpusRevision *int64      `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
+	Threads       []ThreadRef `json:"threads" jsonschema:"One to 20 exact source threads"`
+	Limit         int         `json:"limit,omitempty" jsonschema:"Maximum neighbors per source thread from 1 to 100"`
+	SnapshotToken string      `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
 }
 
 // NeighborOutput describes one similar stored thread and its score.
@@ -387,9 +390,9 @@ type NeighborSetOutput struct {
 
 // FindNeighborsOutput preserves source-thread order and isolates item failures.
 type FindNeighborsOutput struct {
-	Status         string                         `json:"status"`
-	Items          []BatchItem[NeighborSetOutput] `json:"items"`
-	CorpusRevision int64                          `json:"corpus_revision"`
+	Status        string                         `json:"status"`
+	Items         []BatchItem[NeighborSetOutput] `json:"items"`
+	SnapshotToken string                         `json:"snapshot_token"`
 }
 
 // ClusterMemberOutput describes one member of a duplicate cluster.
@@ -426,9 +429,9 @@ type ClusterSetOutput struct {
 
 // FindClustersOutput preserves target order and isolates item failures.
 type FindClustersOutput struct {
-	Status         string                        `json:"status"`
-	Items          []BatchItem[ClusterSetOutput] `json:"items"`
-	CorpusRevision int64                         `json:"corpus_revision"`
+	Status        string                        `json:"status"`
+	Items         []BatchItem[ClusterSetOutput] `json:"items"`
+	SnapshotToken string                        `json:"snapshot_token"`
 }
 
 type CoverageTargetKind string
@@ -453,8 +456,8 @@ type CoverageTarget struct {
 
 // GetCoverageInput selects bounded repository or thread facet coverage reads.
 type GetCoverageInput struct {
-	Targets        []CoverageTarget `json:"targets" jsonschema:"One to 100 repository or exact-thread targets"`
-	CorpusRevision *int64           `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
+	Targets       []CoverageTarget `json:"targets" jsonschema:"One to 100 repository or exact-thread targets"`
+	SnapshotToken string           `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
 }
 
 // FacetCoverageOutput reports completeness and freshness for one facet.
@@ -478,10 +481,10 @@ type CoverageOutput struct {
 // GetCoverageOutput preserves target order and isolates missing or invalid
 // targets without failing unrelated coverage reads.
 type GetCoverageOutput struct {
-	Status         string                      `json:"status"`
-	Items          []BatchItem[CoverageOutput] `json:"items"`
-	CorpusRevision int64                       `json:"corpus_revision"`
-	Provenance     CorpusReadProvenance        `json:"provenance"`
+	Status        string                      `json:"status"`
+	Items         []BatchItem[CoverageOutput] `json:"items"`
+	SnapshotToken string                      `json:"snapshot_token"`
+	Provenance    CorpusReadProvenance        `json:"provenance"`
 }
 
 // LensInput selects a saved lens by name.

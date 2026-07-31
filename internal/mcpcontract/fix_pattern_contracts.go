@@ -48,7 +48,7 @@ type MineRepositoryFixPatternsInput struct {
 	CandidateLimit      int                  `json:"candidate_limit,omitempty" jsonschema:"Maximum stored candidates examined per symptom from 1 to 100"`
 	HydrationLimit      *int                 `json:"hydration_limit,omitempty" jsonschema:"Maximum unknown-state pull requests refreshed from GitHub from 0 to 100; defaults to 25"`
 	RepresentativeLimit int                  `json:"representative_limit,omitempty" jsonschema:"Maximum examples returned per symptom from 1 to 20"`
-	CorpusRevision      *int64               `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
+	SnapshotToken       string               `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token"`
 }
 
 // PreviewRepositoryFixPatternsInput is the read-only counterpart to the
@@ -124,7 +124,6 @@ type FixPatternReport struct {
 	Failures                  []FixPatternHydrationFailure `json:"failures,omitempty"`
 	Limitations               []string                     `json:"limitations,omitempty"`
 	Persisted                 bool                         `json:"persisted"`
-	CorpusRevision            int64                        `json:"corpus_revision"`
 	SnapshotToken             string                       `json:"snapshot_token"`
 	ArtifactDigest            string                       `json:"artifact_digest,omitempty"`
 	ObservationWatermark      int64                        `json:"observation_watermark"`

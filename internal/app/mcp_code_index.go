@@ -37,9 +37,9 @@ func codeIndexArtifact(record corpus.CodeIndexArtifactRecord) mcpcontract.CodeIn
 	return mcpcontract.CodeIndexArtifact{
 		Kind: "code_index", ID: "code-index:" + record.Digest,
 		Repository: mcpcontract.RepositoryRef{Owner: record.Repo.Owner, Repo: record.Repo.Repo},
-		CommitSHA:  record.CommitSHA, CorpusRevision: record.CorpusRevision,
+		CommitSHA:  record.CommitSHA, SnapshotToken: record.SnapshotToken,
 		ManifestID: "code-index-manifest:" + record.ManifestSHA256, ManifestSHA256: record.ManifestSHA256,
-		SnapshotToken: record.SnapshotToken, CoverageKnown: record.CoverageKnown,
+		CoverageKnown: record.CoverageKnown,
 		Manifest:      mcpcontract.CodeIndexManifestOutput{FormatVersion: record.IndexManifest.FormatVersion, CoverageKnown: record.IndexManifest.CoverageKnown, TrackedEntries: record.IndexManifest.TrackedEntries, IndexedFiles: record.IndexManifest.IndexedFiles, SkippedInvalidPath: record.IndexManifest.SkippedInvalidPath, SkippedExcluded: record.IndexManifest.SkippedExcluded, SkippedNonRegular: record.IndexManifest.SkippedNonRegular, SkippedOversize: record.IndexManifest.SkippedOversize, SkippedTotalBudget: record.IndexManifest.SkippedTotalBudget, SkippedNonText: record.IndexManifest.SkippedNonText, SkippedFileLimit: record.IndexManifest.SkippedFileLimit, Truncated: record.IndexManifest.Truncated},
 		SchemaVersion: record.SchemaVersion, TotalBytes: mcpcontract.NonNegativeInt(record.TotalBytes), Documents: documents,
 		CreatedAt: record.CreatedAt.Format(time.RFC3339Nano), Provenance: maps.Clone(record.Provenance),

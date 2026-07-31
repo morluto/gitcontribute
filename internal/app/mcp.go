@@ -87,7 +87,7 @@ func (r *MCPReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcp
 		Limit:  in.Limit,
 		Cursor: in.Cursor,
 		Sort:   in.Sort, MatchMode: in.MatchMode,
-		CorpusRevision: in.CorpusRevision,
+		SnapshotToken: in.SnapshotToken,
 	})
 	if err != nil {
 		return mcpcontract.SearchOutput{}, err
@@ -117,7 +117,7 @@ func (r *MCPReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcp
 			MatchSource:    m.MatchSource,
 			MatchExcerpt:   m.MatchExcerpt,
 			MatchTruncated: m.MatchTruncated,
-			CorpusRevision: res.CorpusRevision,
+			SnapshotToken:  res.SnapshotToken,
 		}
 		if in.View == "full" {
 			matches[i].Body = m.Body
@@ -134,9 +134,9 @@ func (r *MCPReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcp
 		Query: in.Query, QueryInterpretation: strings.Join(strings.Fields(in.Query), separator),
 		MatchMode: in.MatchMode, View: in.View, Total: res.Total, Matches: matches, NextCursor: res.NextCursor,
 		UnknownMergeCount: res.UnknownMergeCount,
-		CorpusRevision:    res.CorpusRevision,
+		SnapshotToken:     res.SnapshotToken,
 	}
-	provenance, err := offlineReadProvenance("thread_search", res.CorpusRevision, in, res.NextCursor == "", res.NextCursor != "", true)
+	provenance, err := offlineReadProvenance("thread_search", res.ObservationWatermark, in, res.NextCursor == "", res.NextCursor != "", true)
 	if err != nil {
 		return mcpcontract.SearchOutput{}, err
 	}
@@ -183,7 +183,7 @@ func (r *MCPReader) Thread(ctx context.Context, in mcpcontract.ThreadInput) (mcp
 	if err != nil {
 		return mcpcontract.ThreadOutput{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, nil)
+	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
 	if err != nil {
 		return mcpcontract.ThreadOutput{}, err
 	}
@@ -204,7 +204,7 @@ func (r *MCPReader) Thread(ctx context.Context, in mcpcontract.ThreadInput) (mcp
 	out := corpusThreadToMCPOutput(thread)
 	out.Owner = in.Owner
 	out.Repo = in.Repo
-	out.CorpusRevision = revision
+	out.SnapshotToken = snapshotIdentity(in.SnapshotToken, revision)
 	if err := finishCorpusRead(ctx, c, revision); err != nil {
 		return mcpcontract.ThreadOutput{}, err
 	}
@@ -609,11 +609,11 @@ func (r *MCPReader) GetCoverage(ctx context.Context, in mcpcontract.GetCoverageI
 	if err != nil {
 		return mcpcontract.GetCoverageOutput{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
 	if err != nil {
 		return mcpcontract.GetCoverageOutput{}, err
 	}
-	out := mcpcontract.GetCoverageOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.CoverageOutput], len(in.Targets)), CorpusRevision: revision}
+	out := mcpcontract.GetCoverageOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.CoverageOutput], len(in.Targets)), SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
 	for i, target := range in.Targets {
 		if err := ctx.Err(); err != nil {
 			return out, err

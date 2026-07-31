@@ -2,23 +2,23 @@ package mcpcontract
 
 // SearchRepositoriesInput describes an offline repository search page.
 type SearchRepositoriesInput struct {
-	Query          string `json:"query,omitempty" jsonschema:"Repository full-text query"`
-	Owner          string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo           string `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Limit          int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-	Cursor         string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
-	Sort           string `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
-	CorpusRevision *int64 `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
+	Query         string `json:"query,omitempty" jsonschema:"Repository full-text query"`
+	Owner         string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
+	Repo          string `json:"repo,omitempty" jsonschema:"Optional repository name"`
+	Limit         int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Cursor        string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
+	Sort          string `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
+	SnapshotToken string `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
 }
 
 // SearchRepositoriesOutput contains one page of repository matches.
 type SearchRepositoriesOutput struct {
-	Query          string               `json:"query"`
-	Total          int                  `json:"total"`
-	Matches        []RepositoryOutput   `json:"matches"`
-	NextCursor     string               `json:"next_cursor,omitempty"`
-	CorpusRevision int64                `json:"corpus_revision"`
-	Provenance     CorpusReadProvenance `json:"provenance"`
+	Query         string               `json:"query"`
+	Total         int                  `json:"total"`
+	Matches       []RepositoryOutput   `json:"matches"`
+	NextCursor    string               `json:"next_cursor,omitempty"`
+	SnapshotToken string               `json:"snapshot_token"`
+	Provenance    CorpusReadProvenance `json:"provenance"`
 }
 
 // ExplainMatchInput identifies an exact stored result and its original query.
@@ -140,9 +140,10 @@ type GetJobOutput struct {
 
 // ThreadByNumberInput identifies a stored issue or pull request by number.
 type ThreadByNumberInput struct {
-	Owner  string `json:"owner"`
-	Repo   string `json:"repo"`
-	Number int    `json:"number"`
+	Owner         string `json:"owner"`
+	Repo          string `json:"repo"`
+	Number        int    `json:"number"`
+	SnapshotToken string `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token"`
 }
 
 // JobReference is returned by long-running tools that submit durable jobs.

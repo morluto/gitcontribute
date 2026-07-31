@@ -42,7 +42,7 @@ func (r *MCPReader) Manifest(ctx context.Context, in mcpcontract.ManifestInput) 
 	if err != nil {
 		return mcpcontract.ManifestOutput{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, nil)
+	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
 	if err != nil {
 		return mcpcontract.ManifestOutput{}, err
 	}
@@ -53,5 +53,5 @@ func (r *MCPReader) Manifest(ctx context.Context, in mcpcontract.ManifestInput) 
 	if err := finishCorpusRead(ctx, c, revision); err != nil {
 		return mcpcontract.ManifestOutput{}, err
 	}
-	return manifestStatementToMCP(statement, revision), nil
+	return manifestStatementToMCP(statement, snapshotIdentity(in.SnapshotToken, revision)), nil
 }
