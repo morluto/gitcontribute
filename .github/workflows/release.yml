@@ -7,12 +7,22 @@ on:
         description: Tag to build and publish
         required: true
         type: string
+      publish_github_release:
+        description: Publish the GitHub release and its assets
+        required: false
+        default: true
+        type: boolean
   workflow_dispatch:
     inputs:
       release_tag:
         description: Existing tag to build and publish
         required: true
         type: string
+      publish_github_release:
+        description: Publish the GitHub release and its assets
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -104,6 +114,7 @@ jobs:
   goreleaser:
     name: Build and release
     needs: validate
+    if: inputs.publish_github_release
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -130,6 +141,11 @@ jobs:
   publish-npm:
     name: Publish npm package
     needs: [validate, build-npm-binaries, goreleaser]
+    if: >-
+      always() &&
+      needs.validate.result == 'success' &&
+      needs.build-npm-binaries.result == 'success' &&
+      (needs.goreleaser.result == 'success' || needs.goreleaser.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: npm
@@ -205,6 +221,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [goreleaser, publish-npm]
+    if: >-
+      always() &&
+      needs.goreleaser.result == 'success' &&
+      needs.publish-npm.result == 'success'
     permissions:
       contents: write
     steps:
