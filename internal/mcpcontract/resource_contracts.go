@@ -48,9 +48,8 @@ type Reader interface {
 
 // RepoInput identifies a repository for an MCP operation.
 type RepoInput struct {
-	Owner         string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo          string `json:"repo" jsonschema:"GitHub repository name"`
-	SnapshotToken string `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token"`
+	Owner string `json:"owner" jsonschema:"GitHub repository owner"`
+	Repo  string `json:"repo" jsonschema:"GitHub repository name"`
 }
 
 // ThreadInput identifies an issue or pull request for an MCP operation.

@@ -26,15 +26,15 @@ type heldOutFixture struct {
 }
 
 type heldOutMetric struct {
-	Scenario             string `json:"scenario"`
-	Success              bool   `json:"task_success"`
-	ToolCalls            int    `json:"tool_calls"`
-	ResourceReads        int    `json:"resource_reads"`
-	ToolErrors           int    `json:"tool_errors"`
-	Retries              int    `json:"retries"`
-	LatencyMS            int64  `json:"latency_ms"`
-	ResponseBytes        int    `json:"response_bytes"`
-	ContextTokenEstimate int    `json:"context_token_estimate"`
+	Scenario             string  `json:"scenario"`
+	Success              bool    `json:"task_success"`
+	ToolCalls            int     `json:"tool_calls"`
+	ResourceReads        int     `json:"resource_reads"`
+	ToolErrors           int     `json:"tool_errors"`
+	Retries              int     `json:"retries"`
+	LatencyMS            float64 `json:"latency_ms"`
+	ResponseBytes        int     `json:"response_bytes"`
+	ContextTokenEstimate int     `json:"context_token_estimate"`
 }
 
 type heldOutRun struct {
@@ -142,9 +142,9 @@ func TestAgentEvalHeldOutWorkflowMetrics(t *testing.T) {
 			run := &heldOutRun{client: client, seen: make(map[string]int)}
 			started := time.Now()
 			success := runHeldOutOracle(t, scenario.ID, run)
-			elapsed := time.Since(started).Milliseconds()
-			if elapsed < 1 {
-				elapsed = 1
+			elapsed := float64(time.Since(started).Microseconds()) / 1000
+			if elapsed <= 0 {
+				elapsed = 0.001
 			}
 			metric := heldOutMetric{
 				Scenario: scenario.ID, Success: success, ToolCalls: len(run.calls),
@@ -153,7 +153,7 @@ func TestAgentEvalHeldOutWorkflowMetrics(t *testing.T) {
 				LatencyMS: elapsed, ResponseBytes: run.responseBytes,
 				ContextTokenEstimate: (run.responseBytes + 3) / 4,
 			}
-			if !metric.Success || metric.ToolCalls == 0 || metric.ResourceReads < 0 || metric.LatencyMS < 1 || metric.ContextTokenEstimate == 0 {
+			if !metric.Success || metric.ToolCalls == 0 || metric.ResourceReads < 0 || metric.LatencyMS <= 0 || metric.ContextTokenEstimate == 0 {
 				t.Fatalf("held-out metric failed: %+v", metric)
 			}
 			t.Logf("held-out metric: %s", marshalHeldOutMetric(metric))
