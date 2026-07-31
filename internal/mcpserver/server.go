@@ -30,6 +30,11 @@ type ScalableReader interface {
 	GetJobs(context.Context, mcpcontract.GetJobsInput) (mcpcontract.GetJobsOutput, error)
 }
 
+// ThreadFacetReader exposes the bounded offline facet metadata surface.
+type ThreadFacetReader interface {
+	GetThreadFacets(context.Context, mcpcontract.GetThreadFacetsInput) (mcpcontract.GetThreadFacetsOutput, error)
+}
+
 // IssueSetReader prepares bounded contribution evidence from exact stored
 // issues without requiring or creating durable workflow state.
 type IssueSetReader interface {

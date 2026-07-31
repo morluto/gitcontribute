@@ -81,9 +81,10 @@ type JobArtifactFailure struct {
 
 // JobFollowUp points to the typed read plane for a job's durable result.
 type JobFollowUp struct {
-	Tool        string `json:"tool,omitempty" jsonschema:"Outcome-oriented tool to use next"`
-	ResourceURI string `json:"resource_uri,omitempty" jsonschema:"MCP resource URI to read next"`
-	Reason      string `json:"reason" jsonschema:"Why this follow-up is appropriate"`
+	Tool        string             `json:"tool,omitempty" jsonschema:"Outcome-oriented tool to use next"`
+	Arguments   *ToolCallArguments `json:"arguments,omitempty" jsonschema:"Typed arguments for the follow-up tool"`
+	ResourceURI string             `json:"resource_uri,omitempty" jsonschema:"MCP resource URI to read next"`
+	Reason      string             `json:"reason" jsonschema:"Why this follow-up is appropriate"`
 }
 
 // GetJobOutput reports durable state and structured progress for a job. Stored

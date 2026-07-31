@@ -66,8 +66,8 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 		}
 		repo := repositories[corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo}]
 		if repo == nil {
-			item.Status, item.Reason, item.Message = "unavailable", "not_indexed", "repository is not present in the local corpus"
-			item.NextAction = "Call github.sync_repository_context for this repository."
+			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", "repository is not present in the local corpus"
+			item.Recovery = recoveryPlan(item.Reason, item.Message, syncRepositoryContextCall(input.Owner, input.Repo))
 			out.Items[i] = item
 			out.Status = "partial"
 			continue
@@ -80,7 +80,7 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 		}
 		coverage := coverageByRepository[corpus.RepositoryFacetKey{RepositoryID: repo.ID, Facet: "metadata"}]
 		if coverage == nil {
-			value.Metadata = mcpcontract.RepositoryMetadataOutput{Status: "missing", NextAction: "Call github.sync_repository_context for this repository."}
+			value.Metadata = mcpcontract.RepositoryMetadataOutput{Status: "missing", Recovery: recoveryPlan("facet_not_observed", "repository metadata is not observed", syncRepositoryContextCall(input.Owner, input.Repo))}
 			clearRepositoryFacts(&value)
 		} else {
 			status := "complete"
@@ -154,7 +154,7 @@ func (r *MCPReader) GetThreads(ctx context.Context, in mcpcontract.GetThreadsInp
 		return mcpcontract.GetThreadsOutput{}, err
 	}
 	for i, input := range in.Threads {
-		key := fmt.Sprintf("%s/%s#%d", input.Owner, input.Repo, input.Number)
+		key := threadRefKey(input)
 		item := mcpcontract.BatchItem[mcpcontract.ThreadOutput]{Key: key, Status: "complete"}
 		ref := domain.RepoRef{Owner: input.Owner, Repo: input.Repo}
 		if err := ref.Validate(); err != nil || input.Number < 1 {
@@ -166,14 +166,15 @@ func (r *MCPReader) GetThreads(ctx context.Context, in mcpcontract.GetThreadsInp
 		repo := repositories[corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo}]
 		if repo == nil {
 			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", "repository is not present in the local corpus"
+			item.Recovery = recoveryPlan(item.Reason, item.Message, syncRepositoryContextCall(input.Owner, input.Repo))
 			out.Items[i] = item
 			out.Status = "partial"
 			continue
 		}
 		thread := threads[corpus.ThreadKey{RepositoryID: repo.ID, Kind: input.Kind, Number: input.Number}]
 		if thread == nil {
-			item.Status, item.Reason, item.Message = "unavailable", "not_indexed", "thread is not present in the local corpus"
-			item.NextAction = "Call github.sync_threads in thread selection mode with this exact reference."
+			item.Status, item.Reason, item.Message = "unavailable", "thread_not_indexed", "thread is not present in the local corpus"
+			item.Recovery = recoveryPlan(item.Reason, item.Message, syncThreadCall(input))
 			out.Items[i] = item
 			out.Status = "partial"
 			continue
@@ -222,7 +223,7 @@ func (r *MCPReader) GetJobs(ctx context.Context, in mcpcontract.GetJobsInput) (m
 		} else {
 			job := jobResultToMCP(ptr(jobResult(stored)), in.ResponseFormat == "detailed")
 			if in.ResponseFormat == "concise" && (job.Status == "succeeded" || job.Status == "failed" || job.Status == "cancelled") {
-				item.NextAction = "Call jobs.get with response_format=detailed to read typed artifact and follow-up references."
+				item.Recovery = recoveryPlan("blocked", "Read the detailed typed artifact and follow-up references.", mcpcontract.ToolCall{Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{id}, ResponseFormat: "detailed"}})
 			}
 			item.Value = &job
 		}
@@ -601,8 +602,8 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpcontract.RankOp
 		item := mcpcontract.BatchItem[mcpcontract.RepositoryOpportunitySummaryOutput]{Key: key, Status: "complete"}
 		report, err := r.contributionRadarAt(ctx, contracts.RadarOptions{Repo: contracts.RepoRef{Owner: input.Owner, Repo: input.Repo}, Limit: in.MaxResultsPerRepository}, evaluationTime)
 		if err != nil {
-			item.Status, item.Reason, item.Message = "unavailable", "not_indexed", err.Error()
-			item.NextAction = "Sync repository metadata and open issue headers before ranking."
+			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", err.Error()
+			item.Recovery = recoveryPlan(item.Reason, item.Message, syncRepositoryContextCall(input.Owner, input.Repo), mcpcontract.ToolCall{Tool: mcpcontract.ToolSyncThreads, Arguments: &mcpcontract.ToolCallArguments{Selection: "repositories", Repositories: []mcpcontract.RepositoryRef{{Owner: input.Owner, Repo: input.Repo}}, Kind: "issue", State: "open"}})
 			out.Repositories[i] = item
 			out.Status = "partial"
 			continue
@@ -720,7 +721,7 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpcontract.FindPrece
 		if err := ctx.Err(); err != nil {
 			return mcpcontract.FindPrecedentsOutput{}, err
 		}
-		key := fmt.Sprintf("%s/%s#%d", input.Owner, input.Repo, input.Number)
+		key := threadRefKey(input)
 		item := mcpcontract.BatchItem[mcpcontract.PrecedentSet]{Key: key, Status: "complete"}
 		repoKey := precedent.RepositoryKey(refs[i].Repository)
 		snapshot := snapshotsByRepo[repoKey]

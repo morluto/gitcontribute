@@ -27,7 +27,7 @@ func TestFindPortfolioOverlapsIsolatesInvalidCandidatesAndMissingPullRequests(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Status != "partial" || len(out.Items) != 2 || out.Items[0].Status != "failed" || out.Items[1].Status != "retryable" || out.Items[1].Reason != "comparison_set_incomplete" {
+	if out.Status != "partial" || len(out.Items) != 2 || out.Items[0].Status != "failed" || out.Items[1].Status != "retryable" || out.Items[1].Reason != "thread_not_indexed" {
 		t.Fatalf("overlap batch = %+v", out)
 	}
 }

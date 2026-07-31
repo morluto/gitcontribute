@@ -86,7 +86,7 @@ func TestPrepareIssueSetComposesStoredEvidenceWithoutClaimingClosure(t *testing.
 	if value.Linkage.Relation != "related" || !value.Linkage.RequiresConfirmation {
 		t.Fatalf("linkage = %+v", value.Linkage)
 	}
-	if len(value.Gaps) != 1 || value.Gaps[0].Facet != FacetIssueTimeline || value.Gaps[0].NextAction.Tool != mcpcontract.ToolHydrateThreads {
+	if len(value.Gaps) != 1 || value.Gaps[0].Facet != FacetIssueTimeline || value.Gaps[0].Recovery == nil || len(value.Gaps[0].Recovery.Then) != 1 || value.Gaps[0].Recovery.Then[0].Tool != mcpcontract.ToolHydrateThreads {
 		t.Fatalf("gaps = %+v", value.Gaps)
 	}
 	detailed, err := (&MCPReader{svc}).PrepareIssueSet(ctx, mcpcontract.PrepareIssueSetInput{
@@ -123,18 +123,18 @@ func TestPrepareIssueSetPreservesUnknownAndExactRecovery(t *testing.T) {
 	if out.Status != "partial" || len(out.Items) != 2 {
 		t.Fatalf("result = %+v", out)
 	}
-	if len(out.Gaps) != 1 || out.Gaps[0].Code != "relationship_population_unknown" || out.Gaps[0].NextAction.Tool != mcpcontract.ToolSyncThreads {
+	if len(out.Gaps) != 1 || out.Gaps[0].Code != "relationship_population_unknown" || out.Gaps[0].Recovery == nil || len(out.Gaps[0].Recovery.Then) != 1 || out.Gaps[0].Recovery.Then[0].Tool != mcpcontract.ToolSyncThreads {
 		t.Fatalf("relationship gaps = %+v", out.Gaps)
 	}
 	if got := out.Items[0].Value; got == nil || got.BodyStatus != "unknown" || len(got.Gaps) != 3 {
 		t.Fatalf("known issue = %+v", got)
 	}
 	missing := out.Items[1]
-	if missing.Status != "unavailable" || missing.Reason != "issue_not_indexed" || missing.NextAction != "Call github.sync_threads for this exact issue." {
+	if missing.Status != "unavailable" || missing.Reason != "thread_not_indexed" || missing.Recovery == nil || len(missing.Recovery.Then) != 1 || missing.Recovery.Then[0].Tool != mcpcontract.ToolSyncThreads {
 		t.Fatalf("missing issue = %+v", missing)
 	}
-	if len(out.SuggestedActions) == 0 || out.SuggestedActions[0].Tool != mcpcontract.ToolSyncThreads {
-		t.Fatalf("suggested actions = %+v", out.SuggestedActions)
+	if len(out.RecoveryPlans) == 0 || len(out.RecoveryPlans[0].Then) != 1 || out.RecoveryPlans[0].Then[0].Tool != mcpcontract.ToolSyncThreads {
+		t.Fatalf("recovery plans = %+v", out.RecoveryPlans)
 	}
 }
 

@@ -53,6 +53,27 @@ func TestGetJobOutputHidesLegacyStatusFromModelVisibleJSON(t *testing.T) {
 	}
 }
 
+func TestRecoveryPlanUsesVersionedTypedCallsOnTheWire(t *testing.T) {
+	t.Parallel()
+	value := mcpcontract.BatchItem[struct{}]{
+		Key: "acme/rocket/pull_request#7", Status: "unavailable",
+		Recovery: &mcpcontract.RecoveryPlan{
+			Version: mcpcontract.RecoveryPlanVersion, Reason: "thread_not_indexed", Message: "sync the exact thread",
+			Then: []mcpcontract.ToolCall{{Tool: mcpcontract.ToolSyncThreads, Arguments: &mcpcontract.ToolCallArguments{
+				Selection: "threads", Threads: []mcpcontract.ThreadRef{{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7}},
+			}}},
+		},
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(data)
+	if strings.Contains(encoded, "next_action") || !strings.Contains(encoded, `"version":"`+mcpcontract.RecoveryPlanVersion+`"`) || !strings.Contains(encoded, `"tool":"github.sync_threads"`) || !strings.Contains(encoded, `"kind":"pull_request"`) {
+		t.Fatalf("recovery wire contract = %s", encoded)
+	}
+}
+
 func TestRemovedJobKindsDoNotExposeCompatibilityArtifacts(t *testing.T) {
 	t.Parallel()
 	for _, kind := range []string{"sync_portfolio", "sync_authored_pull_requests", "sync_pull_request_status", "hydrate_threads"} {

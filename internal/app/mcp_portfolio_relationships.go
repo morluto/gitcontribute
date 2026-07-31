@@ -27,7 +27,13 @@ func (r *MCPReader) FindPortfolioOverlaps(ctx context.Context, in mcpcontract.Fi
 	}
 	out := mcpcontract.FindPortfolioOverlapsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.PortfolioOverlapOutput], len(in.Candidates))}
 	candidates, candidateIndexes := collectPortfolioCandidates(in.Candidates, &out)
-	prIDs, missingPullRequests, err := resolvePortfolioPullRequests(ctx, c, in.PullRequests)
+	pullRequests := append([]mcpcontract.ThreadRef(nil), in.PullRequests...)
+	for i := range pullRequests {
+		if pullRequests[i].Kind == "" {
+			pullRequests[i].Kind = corpus.ThreadKindPullRequest
+		}
+	}
+	prIDs, missingPullRequests, err := resolvePortfolioPullRequests(ctx, c, pullRequests)
 	if err != nil {
 		return mcpcontract.FindPortfolioOverlapsOutput{}, err
 	}
@@ -36,7 +42,7 @@ func (r *MCPReader) FindPortfolioOverlaps(ctx context.Context, in mcpcontract.Fi
 	}
 	if len(prIDs) == 0 {
 		for _, index := range candidateIndexes {
-			out.Items[index] = mcpcontract.BatchItem[mcpcontract.PortfolioOverlapOutput]{Key: in.Candidates[index].Kind + ":" + in.Candidates[index].Ref, Status: "unavailable", Reason: "pull_requests_not_stored", Message: "none of the requested pull requests are available in the local corpus", NextAction: "Sync the exact authored pull requests, then retry this comparison."}
+			out.Items[index] = mcpcontract.BatchItem[mcpcontract.PortfolioOverlapOutput]{Key: in.Candidates[index].Kind + ":" + in.Candidates[index].Ref, Status: "unavailable", Reason: "thread_not_indexed", Message: "none of the requested pull requests are available in the local corpus", Recovery: recoveryPlan("thread_not_indexed", "Sync the exact authored pull requests, then retry this comparison.", syncPullRequestCalls(pullRequests)...)}
 		}
 		out.Status = "partial"
 		return out, nil
@@ -51,10 +57,10 @@ func (r *MCPReader) FindPortfolioOverlaps(ctx context.Context, in mcpcontract.Fi
 		batch := mcpcontract.BatchItem[mcpcontract.PortfolioOverlapOutput]{Key: result.Candidate.Kind + ":" + result.Candidate.Ref, Status: "complete", Value: &value}
 		if missingPullRequests {
 			out.Status = "partial"
-			batch.Status, batch.Reason, batch.NextAction = "retryable", "comparison_set_incomplete", "Sync the missing pull requests, then retry this comparison."
+			batch.Status, batch.Reason, batch.Recovery = "retryable", "thread_not_indexed", recoveryPlan("thread_not_indexed", "Sync the missing pull requests, then retry this comparison.", syncPullRequestCalls(pullRequests)...)
 		} else if result.Status == "unknown" {
 			out.Status = "partial"
-			batch.Status, batch.Reason, batch.NextAction = "unavailable", "coverage_missing", "Sync pull-request status and record candidate overlap signals before retrying."
+			batch.Status, batch.Reason, batch.Recovery = "unavailable", "candidate_signal_unavailable", recoveryPlan("candidate_signal_unavailable", "Sync pull-request status and record candidate overlap signals before retrying.", syncPullRequestCalls(pullRequests)...)
 		}
 		out.Items[i] = batch
 	}
@@ -89,11 +95,11 @@ func resolvePortfolioPullRequests(ctx context.Context, c *corpus.Corpus, refs []
 			missing = true
 			continue
 		}
-		thread, err := c.GetThreadByNumber(ctx, repo.ID, ref.Number)
+		thread, err := c.GetThread(ctx, repo.ID, ref.Kind, ref.Number)
 		if err != nil {
 			return nil, false, err
 		}
-		if thread == nil || thread.Kind != corpus.ThreadKindPullRequest {
+		if thread == nil {
 			missing = true
 			continue
 		}
@@ -159,11 +165,14 @@ func resolveStoredPullRequest(ctx context.Context, c *corpus.Corpus, ref mcpcont
 	if repo == nil {
 		return nil, fmt.Errorf("repository %s/%s is not stored", ref.Owner, ref.Repo)
 	}
-	thread, err := c.GetThreadByNumber(ctx, repo.ID, ref.Number)
+	if ref.Kind == "" {
+		ref.Kind = corpus.ThreadKindPullRequest
+	}
+	thread, err := c.GetThread(ctx, repo.ID, ref.Kind, ref.Number)
 	if err != nil {
 		return nil, err
 	}
-	if thread == nil || thread.Kind != corpus.ThreadKindPullRequest {
+	if thread == nil {
 		return nil, fmt.Errorf("pull request %s/%s#%d is not stored", ref.Owner, ref.Repo, ref.Number)
 	}
 	return thread, nil

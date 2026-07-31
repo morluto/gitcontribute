@@ -55,6 +55,8 @@ type HydratedFacet struct {
 
 // HydrateOptions controls selective thread hydration.
 type HydrateOptions struct {
+	// Kind selects the exact issue or pull request when a number is ambiguous.
+	Kind string
 	// Facets lists the facets to retrieve. An empty list hydrates all facets
 	// applicable to the thread kind.
 	Facets []string
@@ -110,7 +112,16 @@ func (s *Service) HydrateThread(ctx context.Context, repo contracts.RepoRef, num
 		return nil, hydrateErr
 	}
 
-	thread, err := c.GetThreadByNumber(ctx, repoProjection.ID, number)
+	var thread *corpus.Thread
+	if opts.Kind == "" {
+		thread, err = c.GetThreadByNumber(ctx, repoProjection.ID, number)
+	} else {
+		if opts.Kind != corpus.ThreadKindIssue && opts.Kind != corpus.ThreadKindPullRequest {
+			hydrateErr = fmt.Errorf("thread kind must be issue or pull_request")
+			return nil, hydrateErr
+		}
+		thread, err = c.GetThread(ctx, repoProjection.ID, opts.Kind, number)
+	}
 	if err != nil {
 		hydrateErr = fmt.Errorf("get thread: %w", err)
 		return nil, hydrateErr

@@ -86,6 +86,7 @@ type ArchiveSyncOptions struct {
 
 // HydrateOptions selects bounded child facets for one stored thread.
 type HydrateOptions struct {
+	Kind     string
 	Facets   []string
 	MaxPages int
 }

@@ -1,7 +1,7 @@
 # MCP tool redesign
 
-GitContribute targets `github.com/modelcontextprotocol/go-sdk`
-`v1.7.0-pre.3` and negotiates MCP `2026-07-28`. The server continues to
+GitContribute targets `github.com/modelcontextprotocol/go-sdk` `v1.7.0` and
+negotiates MCP `2026-07-28`. The server continues to
 register generic SDK tools so the SDK owns input decoding and output-schema
 validation at the protocol boundary.
 

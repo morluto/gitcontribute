@@ -58,11 +58,11 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpcontract.FindCluster
 			item.Value = &value
 		case errors.Is(err, errRepositoryNotFound):
 			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", err.Error()
-			item.NextAction = "Call github.sync_repository_context for this repository."
+			item.Recovery = recoveryPlan("repository_not_indexed", err.Error(), syncRepositoryContextCall(target.Owner, target.Repo))
 			out.Status = "partial"
 		case errors.Is(err, errThreadNotFound):
 			item.Status, item.Reason, item.Message = "unavailable", "thread_not_indexed", err.Error()
-			item.NextAction = "Call github.sync_threads for this exact thread."
+			item.Recovery = recoveryPlan("thread_not_indexed", err.Error(), syncThreadCall(mcpcontract.ThreadRef(target)))
 			out.Status = "partial"
 		default:
 			item.Status, item.Reason, item.Message = "failed", "read_failed", err.Error()
@@ -199,11 +199,11 @@ func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpcontract.FindNeighb
 			item.Value = &value
 		case errors.Is(err, errRepositoryNotFound):
 			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", err.Error()
-			item.NextAction = "Call github.sync_repository_context for this repository."
+			item.Recovery = recoveryPlan("repository_not_indexed", err.Error(), syncRepositoryContextCall(thread.Owner, thread.Repo))
 			out.Status = "partial"
 		case errors.Is(err, errThreadNotFound):
 			item.Status, item.Reason, item.Message = "unavailable", "thread_not_indexed", err.Error()
-			item.NextAction = "Call github.sync_threads for this exact thread."
+			item.Recovery = recoveryPlan("thread_not_indexed", err.Error(), syncThreadCall(mcpcontract.ThreadRef{Owner: thread.Owner, Repo: thread.Repo, Kind: thread.Kind, Number: thread.Number}))
 			out.Status = "partial"
 		default:
 			item.Status, item.Reason, item.Message = "failed", "read_failed", err.Error()

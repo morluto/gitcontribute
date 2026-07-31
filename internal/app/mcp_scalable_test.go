@@ -201,7 +201,7 @@ func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
 	if out.Items[0].Key != "acme/rocket" || out.Items[0].Value == nil || out.Items[0].Value.Facets[0].Facet != "metadata" {
 		t.Fatalf("repository coverage = %+v", out.Items[0])
 	}
-	if out.Items[1].Key != "acme/missing" || out.Items[1].Status != "unavailable" || out.Items[1].Reason != "not_indexed" {
+	if out.Items[1].Key != "acme/missing" || out.Items[1].Status != "unavailable" || out.Items[1].Reason != "repository_not_indexed" {
 		t.Fatalf("missing coverage = %+v", out.Items[1])
 	}
 	if out.Items[2].Value == nil || out.Items[2].Value.Kind != "issue" || out.Items[2].Value.Number != 7 || out.Items[2].Value.Facets[0].Status != "incomplete" {
@@ -355,7 +355,7 @@ func assertCancelJobsOutput(t *testing.T, out mcpcontract.GetJobsOutput, queuedI
 	if out.Items[1].Status != "unavailable" || out.Items[1].Reason != "not_found" {
 		t.Fatalf("missing cancellation = %+v", out.Items[1])
 	}
-	if out.Items[2].Value == nil || out.Items[2].Value.Status != "running" || !out.Items[2].Value.CancellationRequested || out.Items[2].Value.RetryAfterMS != 1000 || out.Items[2].NextAction == "" {
+	if out.Items[2].Value == nil || out.Items[2].Value.Status != "running" || !out.Items[2].Value.CancellationRequested || out.Items[2].Value.RetryAfterMS != 1000 || out.Items[2].Recovery == nil || len(out.Items[2].Recovery.Then) != 1 {
 		t.Fatalf("running cancellation = %+v", out.Items[2])
 	}
 	if out.Items[3].Status != "unavailable" || out.Items[3].Reason != "terminal" {
@@ -447,7 +447,7 @@ func TestGetJobsDetailedReturnsTypedArtifactsWithoutStoredPayloads(t *testing.T)
 	if len(concise.Items) != 1 || concise.Items[0].Value == nil || len(concise.Items[0].Value.Artifacts) != 0 {
 		t.Fatalf("concise jobs output should remain a bounded state summary: %+v", concise)
 	}
-	if concise.Items[0].NextAction == "" {
+	if concise.Items[0].Recovery == nil || len(concise.Items[0].Recovery.Then) != 1 {
 		t.Fatalf("default concise terminal result lacks detailed recovery hint: %+v", concise)
 	}
 	detailed, err := reader.GetJobs(ctx, mcpcontract.GetJobsInput{IDs: []string{job.ID}, ResponseFormat: "detailed"})
@@ -493,7 +493,7 @@ func TestSearchGitHubRepositoriesPersistsObservedMetadata(t *testing.T) {
 	if out.NextPage != 3 || out.ResponseFormat != "concise" || len(out.Items) != 1 || out.Items[0].Value == nil || out.Items[0].Value.Ref != "repository:acme/rocket" || *out.Items[0].Value.Stars != 9001 {
 		t.Fatalf("live search result = %+v, options = %+v", out, reader.options)
 	}
-	if out.Items[0].Value.Watchers != nil || len(out.SuggestedActions) != 1 || out.SuggestedActions[0].Tool != mcpcontract.ToolSyncThreads {
+	if out.Items[0].Value.Watchers != nil || len(out.RecoveryPlans) != 1 || len(out.RecoveryPlans[0].Then) != 1 || out.RecoveryPlans[0].Then[0].Tool != mcpcontract.ToolSyncThreads {
 		t.Fatalf("concise search context = %+v", out)
 	}
 	if out.Items[0].Value.DossierStatus != "missing" {
@@ -680,7 +680,7 @@ func TestDeepWikiUsesBoundedDefaultAndSteersFocusedRecovery(t *testing.T) {
 	if len(out.Result) != mcpcontract.DeepWikiDefaultOutputBytes || !out.Truncated {
 		t.Fatalf("default DeepWiki bound = %d bytes, truncated=%v", len(out.Result), out.Truncated)
 	}
-	if out.Reason != "output_limit" || !strings.Contains(out.NextAction, "Call structure") || !strings.Contains(out.NextAction, "focused question") {
+	if out.Reason != "output_limit" || out.Recovery == nil || len(out.Recovery.Then) != 1 || out.Recovery.Then[0].Tool != mcpcontract.ToolQueryDeepWiki {
 		t.Fatalf("missing truncation recovery guidance: %+v", out)
 	}
 }
@@ -709,6 +709,9 @@ func TestScalableBatchInputsRejectDuplicatesInsteadOfDroppingOutcomes(t *testing
 	}
 	if err := rejectDuplicateThreadRefs([]mcpcontract.ThreadRef{{Owner: "one", Repo: "repo", Number: 1}, {Owner: "one", Repo: "repo", Number: 1}}); err == nil {
 		t.Fatal("duplicate threads were silently accepted")
+	}
+	if err := rejectDuplicateThreadRefs([]mcpcontract.ThreadRef{{Owner: "one", Repo: "repo", Kind: "issue", Number: 1}, {Owner: "one", Repo: "repo", Kind: "pull_request", Number: 1}}); err != nil {
+		t.Fatalf("issue and pull request with the same number were conflated: %v", err)
 	}
 	if err := rejectDuplicateIndexRepositoryInputs([]mcpcontract.IndexRepositoryInput{{Owner: "one", Repo: "repo", Remote: "first"}, {Owner: "one", Repo: "repo", Remote: "second"}}); err == nil {
 		t.Fatal("conflicting repository remotes were silently accepted")

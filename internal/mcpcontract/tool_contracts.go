@@ -8,12 +8,12 @@ import (
 
 // ToolError is the stable, actionable shape for agent-correctable requests.
 type ToolError struct {
-	Code             string            `json:"code"`
-	Message          string            `json:"message"`
-	Field            string            `json:"path,omitempty"`
-	Retryable        bool              `json:"retryable"`
-	Example          map[string]any    `json:"example,omitempty"`
-	SuggestedActions []SuggestedAction `json:"suggested_actions,omitempty"`
+	Code      string         `json:"code"`
+	Message   string         `json:"message"`
+	Field     string         `json:"path,omitempty"`
+	Retryable bool           `json:"retryable"`
+	Example   map[string]any `json:"example,omitempty"`
+	Recovery  *RecoveryPlan  `json:"recovery,omitempty"`
 }
 
 func (e *ToolError) Error() string {
@@ -32,12 +32,10 @@ func InvalidArgument(field, message string, example map[string]any) error {
 // Unavailable reports an agent-readable terminal state with explicit recovery
 // actions. It is used when retrying the same read cannot make the object
 // available without a distinct acquisition or build step.
-func Unavailable(code, message string, actions ...SuggestedAction) error {
+func Unavailable(code, message string, actions ...ToolCall) error {
 	return &ToolError{
-		Code:             code,
-		Message:          message,
-		Retryable:        false,
-		SuggestedActions: append([]SuggestedAction(nil), actions...),
+		Code: code, Message: message, Retryable: false,
+		Recovery: &RecoveryPlan{Version: RecoveryPlanVersion, Reason: code, Message: message, Then: append([]ToolCall(nil), actions...)},
 	}
 }
 
@@ -48,6 +46,7 @@ const (
 	ToolSearchCode                = "corpus.search_code"
 	ToolGetRepositories           = "corpus.get_repositories"
 	ToolGetThreads                = "corpus.get_threads"
+	ToolGetThreadFacets           = "corpus.get_thread_facets"
 	ToolRankThreads               = "corpus.rank_contribution_candidates"
 	ToolFindPrecedents            = "corpus.find_precedents"
 	ToolPrepareIssueSet           = "workflow.prepare_issue_set"

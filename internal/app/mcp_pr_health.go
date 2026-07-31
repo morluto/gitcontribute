@@ -61,8 +61,11 @@ func (s *Service) syncPullRequestStatusBatch(ctx context.Context, in pullRequest
 		} else {
 			status = "partial"
 			ref := in.PullRequests[index]
+			if ref.Kind == "" {
+				ref.Kind = corpus.ThreadKindPullRequest
+			}
 			failure := pullRequestStatusFailure{
-				Reference: fmt.Sprintf("%s/%s#%d", ref.Owner, ref.Repo, ref.Number),
+				Reference: threadRefKey(ref),
 				Status:    stringMapValue(item, "status"),
 				Reason:    stringMapValue(item, "reason"),
 				Message:   stringMapValue(item, "message"),
@@ -101,11 +104,14 @@ func stringMapValue(item map[string]any, key string) string {
 }
 
 func (s *Service) syncOnePullRequestStatus(ctx context.Context, ref mcpcontract.ThreadRef, maxPages int) map[string]any {
-	key := fmt.Sprintf("%s/%s#%d", ref.Owner, ref.Repo, ref.Number)
 	if ref.Number <= 0 {
-		return map[string]any{"key": key, "status": "failed", "reason": "invalid_reference", "message": "pull request number must be positive"}
+		return map[string]any{"key": threadRefKey(ref), "status": "failed", "reason": "invalid_reference", "message": "pull request number must be positive"}
 	}
-	hydrated, err := s.HydrateThread(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, ref.Number, HydrateOptions{Facets: []string{FacetPRDetails, FacetPRReviews}, MaxPages: maxPages})
+	if ref.Kind == "" {
+		ref.Kind = corpus.ThreadKindPullRequest
+	}
+	key := threadRefKey(ref)
+	hydrated, err := s.HydrateThread(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, ref.Number, HydrateOptions{Kind: ref.Kind, Facets: []string{FacetPRDetails, FacetPRReviews}, MaxPages: maxPages})
 	if err != nil {
 		status, reason, message, retry := githubBatchError(err)
 		return map[string]any{"key": key, "status": status, "reason": reason, "message": message, "retry_after_ms": retry}
@@ -116,7 +122,7 @@ func (s *Service) syncOnePullRequestStatus(ctx context.Context, ref mcpcontract.
 	}
 	statusReader, ok := reader.(github.PullRequestStatusReader)
 	if !ok {
-		return map[string]any{"key": key, "status": "unavailable", "reason": "status_adapter_unavailable", "next_action": "Configure a GitHub reader with pull-request status support."}
+		return map[string]any{"key": key, "status": "unavailable", "reason": "blocked", "message": "Configure a GitHub reader with pull-request status support.", "recovery": recoveryPlan("blocked", "Configure a GitHub reader with pull-request status support.")}
 	}
 	baselines, err := s.pullRequestHealthBaselines(ctx, ref)
 	if err != nil {
@@ -141,7 +147,7 @@ func (s *Service) syncOnePullRequestStatus(ctx context.Context, ref mcpcontract.
 	item := map[string]any{"key": key, "status": itemStatus, "facets": facets, "head_sha": remote.HeadSHA}
 	if itemStatus == "retryable" {
 		item["reason"] = "facet_incomplete"
-		item["next_action"] = "Retry github.sync_pull_request_portfolio in explicit mode for this pull request."
+		item["recovery"] = recoveryPlan("facet_incomplete", "Retry this pull request in explicit mode to complete its facets.", syncPullRequestCalls([]mcpcontract.ThreadRef{ref})...)
 	}
 	return item
 }
@@ -158,7 +164,7 @@ func (s *Service) persistPullRequestHealth(ctx context.Context, ref mcpcontract.
 		}
 		return nil, err
 	}
-	thread, err := c.GetThreadByNumber(ctx, repo.ID, ref.Number)
+	thread, err := c.GetThread(ctx, repo.ID, ref.Kind, ref.Number)
 	if err != nil || thread == nil {
 		if err == nil {
 			err = errors.New("pull request is not stored")
@@ -177,9 +183,9 @@ func (s *Service) persistPullRequestHealth(ctx context.Context, ref mcpcontract.
 		{name: FacetPRClosingIssues, value: remote.ClosingIssues.Items, coverage: remote.ClosingIssues.Coverage},
 		{name: FacetPRFiles, value: remote.Files.Items, coverage: remote.Files.Coverage},
 	}
-	results := hydratedHealthResults(hydrated)
+	results := hydratedHealthResults(hydrated, mcpcontract.ThreadRef{Owner: repo.Owner, Repo: repo.Name, Kind: thread.Kind, Number: thread.Number})
 	for _, target := range targets {
-		result, err := persistOneHealthFacet(ctx, c, *repo, *thread, sourceUpdatedAt, target, baselines[target.name], remote)
+		result, err := persistOneHealthFacet(ctx, c, *repo, *thread, ref, sourceUpdatedAt, target, baselines[target.name], remote)
 		if err != nil {
 			return nil, err
 		}
@@ -188,20 +194,20 @@ func (s *Service) persistPullRequestHealth(ctx context.Context, ref mcpcontract.
 	return results, nil
 }
 
-func hydratedHealthResults(facets []HydratedFacet) []map[string]any {
+func hydratedHealthResults(facets []HydratedFacet, ref mcpcontract.ThreadRef) []map[string]any {
 	results := make([]map[string]any, 0, len(facets))
 	for _, facet := range facets {
 		result := map[string]any{"facet": facet.Facet, "status": "complete", "complete": facet.Complete, "fetched": facet.Count, "pages": facet.Pages}
 		if !facet.Complete {
 			result["status"] = "retryable"
-			result["next_action"] = "Retry this pull request with a larger max_pages bound."
+			result["recovery"] = recoveryPlan("facet_incomplete", "Retry this pull request with a larger max_pages bound.", syncPullRequestCalls([]mcpcontract.ThreadRef{ref})...)
 		}
 		results = append(results, result)
 	}
 	return results
 }
 
-func persistOneHealthFacet(ctx context.Context, c *corpus.Corpus, repo corpus.Repository, thread corpus.Thread, sourceUpdatedAt time.Time, target healthFacet, baseline int64, remote github.PullRequestStatus) (map[string]any, error) {
+func persistOneHealthFacet(ctx context.Context, c *corpus.Corpus, repo corpus.Repository, thread corpus.Thread, ref mcpcontract.ThreadRef, sourceUpdatedAt time.Time, target healthFacet, baseline int64, remote github.PullRequestStatus) (map[string]any, error) {
 	applied, err := persistHealthFacet(ctx, c, repo.ID, thread.ID, sourceUpdatedAt, target, baseline)
 	if err != nil {
 		return nil, err
@@ -214,15 +220,15 @@ func persistOneHealthFacet(ctx context.Context, c *corpus.Corpus, repo corpus.Re
 	result := map[string]any{"facet": target.name, "complete": target.coverage.Complete, "fetched": target.coverage.Fetched, "total": target.coverage.Total, "status": "complete"}
 	if !applied {
 		result["status"], result["complete"] = "retryable", false
-		result["next_action"] = "A concurrent refresh advanced this facet; retry for a coherent snapshot."
+		result["recovery"] = recoveryPlan("coverage_stale", "A concurrent refresh advanced this facet; retry for a coherent snapshot.", syncPullRequestCalls([]mcpcontract.ThreadRef{ref})...)
 	}
 	if target.name == FacetPRMergeState && !remote.MergeState.MergeableKnown {
 		result["status"] = "retryable"
-		result["next_action"] = "Retry after GitHub finishes computing mergeability."
+		result["recovery"] = recoveryPlan("facet_incomplete", "Retry after GitHub finishes computing mergeability.", syncPullRequestCalls([]mcpcontract.ThreadRef{ref})...)
 	}
 	if !target.coverage.Complete {
 		result["status"] = "retryable"
-		result["next_action"] = "Retry this pull request to complete the facet after the current cursor."
+		result["recovery"] = recoveryPlan("facet_incomplete", "Retry this pull request to complete the facet after the current cursor.", syncPullRequestCalls([]mcpcontract.ThreadRef{ref})...)
 	}
 	return result, nil
 }
@@ -301,7 +307,10 @@ func (s *Service) pullRequestHealthBaselines(ctx context.Context, ref mcpcontrac
 		}
 		return nil, err
 	}
-	thread, err := c.GetThreadByNumber(ctx, repo.ID, ref.Number)
+	if ref.Kind == "" {
+		ref.Kind = corpus.ThreadKindPullRequest
+	}
+	thread, err := c.GetThread(ctx, repo.ID, ref.Kind, ref.Number)
 	if err != nil || thread == nil {
 		if err == nil {
 			err = errors.New("pull request is not stored")

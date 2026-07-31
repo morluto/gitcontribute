@@ -19,8 +19,9 @@ const serverInstructions = "Use advertised GitContribute tools for durable, sour
 	"The durable workflow is concern to investigation to hypothesis to opportunity to workspace to draft; use only advertised stages. " +
 	"Use workflow.prepare_issue_set when exact issue numbers already define the contribution scope. " +
 	"When an operation returns a job, poll advertised job tools in batches. " +
+	"Use corpus.get_thread_facets for bounded stored facet coverage and resources/read for larger facet payloads; repository, thread, and facet gaps provide the exact ordered synchronization route. " +
 	"To inspect a returned resource, ask the host to perform MCP resources/read with this server and the exact URI; in Codex, call read_mcp_resource. Treat resource URIs as opaque identifiers and never shorten, pluralize, or reconstruct them. " +
-	"Missing or truncated coverage is unknown, not negative evidence; retry only retryable batch items. " +
+	"Missing or truncated coverage is unknown, not negative evidence; use each recovery plan's ordered typed calls and retry only retryable batch items. " +
 	"Only advertised tools are available. GitContribute never mutates GitHub."
 
 // RepositoryRef identifies one GitHub repository without implying that it has
@@ -114,11 +115,16 @@ const serverInstructions = "Use advertised GitContribute tools for durable, sour
 func (s *Server) registerScalable() {
 	readOnly := readOnlyAnnotations()
 	addCatalogTool(s, catalogTool[mcpcontract.GetRepositoriesInput, mcpcontract.GetRepositoriesOutput]{name: mcpcontract.ToolGetRepositories, title: "Get stored repositories in one batch", description: "Read metadata, coverage, and dossier availability for up to 100 stored repositories. Use for comparison before reading dossier resources. Missing metadata includes a sync action. Offline.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.GetRepositoriesInput](func(sc *schemaBuilder) { setArrayBounds(sc, "repositories", 1, 100) }), output: outputSchema[mcpcontract.GetRepositoriesOutput]("Ordered repository batch with item-level status and dossier availability."), handler: s.getRepositories})
-	addCatalogTool(s, catalogTool[mcpcontract.GetThreadsInput, mcpcontract.GetThreadsOutput]{name: mcpcontract.ToolGetThreads, title: "Get stored threads in one batch", description: "Read up to 100 exact stored issues or pull requests in input order. Choose compact for triage and full only for finalists; this tool is offline.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.GetThreadsInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.GetThreadsInput, mcpcontract.GetThreadsOutput]{name: mcpcontract.ToolGetThreads, title: "Get stored threads in one batch", description: "Read exact stored issue or pull-request headers and optional complete bodies for up to 100 inputs. Choose compact for triage and full for finalist body reads; this tool is offline.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.GetThreadsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 100)
 		setEnum(sc, "view", "compact", "full")
 		setDefault(sc, "view", "compact")
 	}), output: outputSchema[mcpcontract.GetThreadsOutput]("Ordered stored-thread batch with item-level status."), handler: s.getThreads})
+	addCatalogTool(s, catalogTool[mcpcontract.GetThreadFacetsInput, mcpcontract.GetThreadFacetsOutput]{name: mcpcontract.ToolGetThreadFacets, title: "Get facet coverage in one batch", description: "Read bounded offline coverage metadata and exact resource URIs for up to 100 thread facet selections. Use resources/read for persisted facet observations; this never contacts GitHub.", annotations: readOnly, supportedBy: supports[ThreadFacetReader], input: inputSchema[mcpcontract.GetThreadFacetsInput](func(sc *schemaBuilder) {
+		setArrayBounds(sc, "threads", 1, 100)
+		setArrayBounds(sc, "facets", 1, 10)
+		setArrayEnum(sc, "facets", facets.AllNames()...)
+	}), output: outputSchema[mcpcontract.GetThreadFacetsOutput]("Ordered stored-facet metadata with canonical resource links."), handler: s.getThreadFacets})
 	addCatalogTool(s, catalogTool[mcpcontract.RankOpportunitiesInput, mcpcontract.RankOpportunitiesOutput]{name: mcpcontract.ToolRankThreads, title: "Rank stored threads for contribution", description: "Rank open issues across 1-50 required stored repositories. This bounded offline result reports truncation and never persists opportunities.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.RankOpportunitiesInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "repositories", 1, 50)
 		setRange(sc, "limit", 1, 100)
@@ -181,7 +187,7 @@ func (s *Server) registerScalable() {
 		setDefault(sc, "max_requests", 1000)
 		configureSyncThreadModes(sc)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded thread-header synchronization job."), handler: s.syncThreads})
-	addCatalogTool(s, catalogTool[mcpcontract.HydrateThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolHydrateThreads, title: "Synchronize selected GitHub thread details", description: "Fetch selected GitHub child data for up to 100 known issues or pull requests. Use after ranking finalists. Do not use to inspect existing corpus coverage; corpus.get_coverage is the offline coverage read.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.HydrateThreadsInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.HydrateThreadsInput, mcpcontract.JobReference]{name: mcpcontract.ToolHydrateThreads, title: "Synchronize selected GitHub thread details", description: "Fetch selected GitHub child data for up to 100 known issues or pull requests. Use after ranking finalists. Do not use to inspect existing corpus coverage; corpus.get_thread_facets is the offline facet read and resources/read is the large-payload surface.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.HydrateThreadsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 100)
 		setArrayBounds(sc, "facets", 1, 5)
 		setArrayEnum(sc, "facets", facets.SelectableNames()...)
@@ -328,6 +334,19 @@ func (s *Server) getThreads(ctx context.Context, _ *mcp.CallToolRequest, in mcpc
 	out, err := r.GetThreads(ctx, in)
 	return nil, out, err
 }
+func (s *Server) getThreadFacets(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.GetThreadFacetsInput) (*mcp.CallToolResult, mcpcontract.GetThreadFacetsOutput, error) {
+	for _, thread := range in.Threads {
+		if err := validateThreadRef(thread, false); err != nil {
+			return nil, mcpcontract.GetThreadFacetsOutput{}, err
+		}
+	}
+	r, ok := s.reader.(ThreadFacetReader)
+	if !ok {
+		return nil, mcpcontract.GetThreadFacetsOutput{}, errors.New("thread facet reads are not available")
+	}
+	out, err := r.GetThreadFacets(ctx, in)
+	return nil, out, err
+}
 func (s *Server) rankOpportunities(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.RankOpportunitiesInput) (*mcp.CallToolResult, mcpcontract.RankOpportunitiesOutput, error) {
 	if in.Limit == 0 {
 		in.Limit = 20
@@ -380,7 +399,11 @@ func (s *Server) getJobs(ctx context.Context, _ *mcp.CallToolRequest, in mcpcont
 				normalizeJobExecution(&job)
 				if in.ResponseFormat == "concise" {
 					if job.Status == "succeeded" || job.Status == "failed" || job.Status == "cancelled" {
-						item.NextAction = "Call jobs.get with response_format=detailed to read typed artifact and follow-up references."
+						item.Recovery = &mcpcontract.RecoveryPlan{
+							Version: mcpcontract.RecoveryPlanVersion, Reason: "blocked",
+							Message: "Read the detailed typed artifact and follow-up references.",
+							Then:    []mcpcontract.ToolCall{{Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{id}, ResponseFormat: "detailed"}}},
+						}
 					}
 				}
 				item.Value = &job
@@ -453,7 +476,7 @@ func (s *Server) searchGitHubRepositories(ctx context.Context, _ *mcp.CallToolRe
 	}
 	out, err := op.SearchGitHubRepositories(ctx, in)
 	if s.readOnly {
-		out.SuggestedActions = nil
+		out.RecoveryPlans = nil
 	}
 	return nil, out, err
 }

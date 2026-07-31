@@ -34,6 +34,10 @@ type pullRequestWorkflowResourceReader interface {
 	CIJobLogResource(context.Context, string, string, int, int64) (map[string]any, error)
 }
 
+type threadFacetResourceReader interface {
+	ThreadFacetResource(context.Context, string, string, string, int, string) (map[string]any, error)
+}
+
 func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 	uri := req.Params.URI
 	u, err := url.Parse(uri)
@@ -76,6 +80,9 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 	case "dossier":
 		return s.readDossierResource(ctx, req)
 	case "thread":
+		if len(req.parts) == 6 && req.parts[4] == "facet" {
+			return s.readThreadFacetResource(ctx, req)
+		}
 		return s.readTypedThreadResource(ctx, req)
 	case "investigation":
 		return s.readInvestigationResource(ctx, req)
@@ -106,6 +113,18 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 	default:
 		return nil, mcp.ResourceNotFoundError(req.uri)
 	}
+}
+
+func (s *Server) readThreadFacetResource(ctx context.Context, req resourceRequest) (map[string]any, error) {
+	reader, ok := s.reader.(threadFacetResourceReader)
+	if !ok || len(req.parts) != 6 || req.parts[4] != "facet" {
+		return nil, mcp.ResourceNotFoundError(req.uri)
+	}
+	number, valid := positivePathNumber(req.parts[3])
+	if !valid || strings.TrimSpace(req.parts[2]) == "" || strings.TrimSpace(req.parts[5]) == "" {
+		return nil, mcp.ResourceNotFoundError(req.uri)
+	}
+	return reader.ThreadFacetResource(ctx, req.parts[0], req.parts[1], req.parts[2], number, req.parts[5])
 }
 
 func (s *Server) readPullRequestFeedbackResource(ctx context.Context, req resourceRequest) (map[string]any, error) {

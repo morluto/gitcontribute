@@ -134,9 +134,9 @@ func addRepositorySearchAction(out *mcpcontract.SearchGitHubRepositoriesOutput, 
 	for _, remote := range items {
 		repositories = append(repositories, mcpcontract.RepositoryRef{Owner: remote.Owner, Repo: remote.Name})
 	}
-	out.SuggestedActions = []mcpcontract.SuggestedAction{{
-		Tool: mcpcontract.ToolSyncThreads, Reason: "Fetch open issue headers only for repositories selected from these metadata results.",
-		Arguments: &mcpcontract.SuggestedActionArguments{Selection: "repositories", Repositories: repositories, State: "open"},
+	out.RecoveryPlans = []mcpcontract.RecoveryPlan{{
+		Version: mcpcontract.RecoveryPlanVersion, Reason: "coverage_stale", Message: "Fetch open issue headers only for repositories selected from these metadata results.",
+		Then: []mcpcontract.ToolCall{{Tool: mcpcontract.ToolSyncThreads, Arguments: &mcpcontract.ToolCallArguments{Selection: "repositories", Repositories: repositories, State: "open"}}},
 	}}
 }
 

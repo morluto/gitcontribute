@@ -218,7 +218,7 @@ func TestMCPStdioExactThreadSyncFlow(t *testing.T) {
 		detailed := callMCPTool[mcpcontract.GetJobsOutput](ctx, t, session, mcpcontract.ToolGetJob, map[string]any{
 			"ids": []string{job.ID}, "response_format": "detailed",
 		})
-		assertExactThreadJobItems(t, detailed, []string{"lab/project#8", "lab/project#7"})
+		assertExactThreadJobItems(t, detailed, []string{"lab/project/issue#8", "lab/project/pull_request#7"})
 	}
 	inspection, err := New(config.NewPaths(&config.Env{Home: home}), "e2e", nil)
 	if err != nil {

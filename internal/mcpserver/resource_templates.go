@@ -19,6 +19,12 @@ func (s *Server) registerResourceTemplates() {
 		{"gitcontribute://readiness/{opportunity_id}", "Readiness", "Local contribution readiness report"},
 		{"gitcontribute://lens/{name}", "Lens", "Saved lens definition"},
 	}
+	if _, ok := s.reader.(threadFacetResourceReader); ok {
+		templates = append(templates, resourceTemplateDefinition{
+			template: "gitcontribute://thread/{owner}/{repo}/{kind}/{number}/facet/{facet}",
+			name:     "Thread facet", description: "Persisted local thread facet payload",
+		})
+	}
 	if _, ok := s.reader.(FixPatternReader); ok {
 		templates = append(templates, resourceTemplateDefinition{
 			template: "gitcontribute://fix-pattern-report/{job_id}",

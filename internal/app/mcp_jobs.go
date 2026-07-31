@@ -89,7 +89,7 @@ func jobResultItem(item mcpcontract.BatchItem[mcpcontract.GetJobOutput], job *co
 	value := jobResultToMCP(job, true)
 	item.Value = &value
 	if value.Status == "running" {
-		item.NextAction = "Poll jobs.get until this job reaches a terminal state."
+		item.Recovery = recoveryPlan("blocked", "Poll jobs.get until this job reaches a terminal state.", mcpcontract.ToolCall{Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{value.ID}}})
 	}
 	return item
 }
@@ -122,7 +122,7 @@ func jobResultToMCP(job *contracts.JobResult, includeDetails bool) mcpcontract.G
 			out.Artifacts, out.FollowUp = jobArtifactsAndFollowUp(job, total)
 		case "queued", "running":
 			out.FollowUp = &mcpcontract.JobFollowUp{
-				Tool: mcpcontract.ToolGetJob, Reason: "Poll this job until execution_state is terminal.",
+				Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{job.ID}}, Reason: "Poll this job until execution_state is terminal.",
 			}
 		}
 	}
@@ -205,9 +205,11 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 			}
 		}
 		value := mcpcontract.NonNegativeInt(count)
+		follow := followUp(tool, "", reason)
+		follow.Arguments = jobFollowUpArguments(job)
 		return []mcpcontract.JobArtifactReference{{
 			Kind: kind, Count: &value, References: references, ReferencesTruncated: len(result.Items) > len(references),
-		}}, followUp(tool, "", reason)
+		}}, follow
 	}
 	switch job.Kind {
 	case "mine_repository_fix_patterns":
@@ -248,8 +250,13 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 		}
 	case "sync_repository_context":
 		return batch("repository_batch", mcpcontract.ToolGetRepositories, "Read synchronized repository facts and coverage from the offline corpus.")
-	case "sync_threads", jobKindSyncThreadFacets:
+	case "sync_threads":
 		return batch("thread_batch", mcpcontract.ToolGetThreads, "Read synchronized thread facts and coverage from the offline corpus.")
+	case jobKindSyncThreadFacets:
+		var request mcpcontract.HydrateThreadsInput
+		_ = json.Unmarshal([]byte(job.Request), &request)
+		refs := append([]mcpcontract.ThreadRef(nil), request.Threads...)
+		return facetBatchArtifact(refs, request.Facets)
 	case jobKindSyncPullRequestPortfolio:
 		var result struct {
 			PullRequests []string `json:"pull_requests"`
@@ -322,6 +329,53 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 	return nil, nil
 }
 
+func jobFollowUpArguments(job *contracts.JobResult) *mcpcontract.ToolCallArguments {
+	switch job.Kind {
+	case "sync_repository_context":
+		var request mcpcontract.SyncRepositoryContextInput
+		if json.Unmarshal([]byte(job.Request), &request) == nil {
+			return &mcpcontract.ToolCallArguments{Repositories: append([]mcpcontract.RepositoryRef(nil), request.Repositories...)}
+		}
+	case "sync_threads":
+		var request mcpcontract.SyncThreadsInput
+		if json.Unmarshal([]byte(job.Request), &request) == nil {
+			return &mcpcontract.ToolCallArguments{Selection: request.Selection, Repositories: append([]mcpcontract.RepositoryRef(nil), request.Repositories...), Threads: append([]mcpcontract.ThreadRef(nil), request.Threads...), Kind: request.Kind, State: request.State}
+		}
+	case "index_repositories":
+		var request mcpcontract.IndexRepositoriesInput
+		if json.Unmarshal([]byte(job.Request), &request) == nil {
+			return &mcpcontract.ToolCallArguments{Repositories: indexRepositoriesToRefs(request.Repositories)}
+		}
+	}
+	return nil
+}
+
+func facetBatchArtifact(refs []mcpcontract.ThreadRef, facetNames []string) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
+	value := mcpcontract.NonNegativeInt(len(refs))
+	follow := &mcpcontract.JobFollowUp{
+		Tool:      mcpcontract.ToolGetThreadFacets,
+		Arguments: &mcpcontract.ToolCallArguments{Threads: refs, Facets: append([]string(nil), facetNames...)},
+		Reason:    "Read the synchronized facet coverage and canonical facet resources from the offline corpus.",
+	}
+	return []mcpcontract.JobArtifactReference{{Kind: "thread_facet_batch", Count: &value, References: threadRefKeys(refs)}}, follow
+}
+
+func indexRepositoriesToRefs(values []mcpcontract.IndexRepositoryInput) []mcpcontract.RepositoryRef {
+	refs := make([]mcpcontract.RepositoryRef, 0, len(values))
+	for _, value := range values {
+		refs = append(refs, mcpcontract.RepositoryRef{Owner: value.Owner, Repo: value.Repo})
+	}
+	return refs
+}
+
+func threadRefKeys(refs []mcpcontract.ThreadRef) []string {
+	keys := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		keys = append(keys, threadRefKey(ref))
+	}
+	return keys
+}
+
 func decodeJobProgress(job *contracts.JobResult) (string, int, int) {
 	phase := strings.TrimSpace(job.Progress)
 	var counts struct {
@@ -330,20 +384,6 @@ func decodeJobProgress(job *contracts.JobResult) (string, int, int) {
 	}
 	if json.Unmarshal([]byte(job.Statistics), &counts) == nil && counts.TotalItems >= 0 && counts.CompletedItems >= 0 {
 		return phase, counts.CompletedItems, counts.TotalItems
-	}
-	// Older durable rows used percentages and key=value statistics. Keep them
-	// readable while exposing only the structured MCP contract.
-	if strings.HasSuffix(phase, "%") {
-		phase = job.Kind
-	}
-	for _, field := range strings.Fields(job.Statistics) {
-		var n int
-		if _, err := fmt.Sscanf(field, "completed=%d", &n); err == nil {
-			counts.CompletedItems = n
-		}
-		if _, err := fmt.Sscanf(field, "total=%d", &n); err == nil {
-			counts.TotalItems = n
-		}
 	}
 	return phase, counts.CompletedItems, counts.TotalItems
 }
