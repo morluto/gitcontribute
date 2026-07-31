@@ -79,7 +79,7 @@ func Save(path string, cfg *Config) error {
 	}
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := ensurePrivateDirectory(dir); err != nil {
 		return fmt.Errorf("create config directory: %w", err)
 	}
 
@@ -119,6 +119,39 @@ func Save(path string, cfg *Config) error {
 		return fmt.Errorf("rename temp config file: %w", err)
 	}
 	cleanup = false
+	return nil
+}
+
+// ensurePrivateDirectory owns the security contract for directories that may
+// contain configuration. MkdirAll does not repair the mode of an existing
+// directory, so inspect and tighten it explicitly before creating a file.
+func ensurePrivateDirectory(dir string) error {
+	info, err := os.Lstat(dir)
+	switch {
+	case err == nil:
+		if info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("configuration directory must not be a symlink")
+		}
+		if !info.IsDir() {
+			return errors.New("configuration path is not a directory")
+		}
+	case errors.Is(err, os.ErrNotExist):
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return err
+		}
+		info, err = os.Lstat(dir)
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return errors.New("configuration directory changed while it was created")
+		}
+	case err != nil:
+		return err
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		return fmt.Errorf("set private directory permissions: %w", err)
+	}
 	return nil
 }
 

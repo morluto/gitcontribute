@@ -187,10 +187,6 @@ func (s *Service) loadConfig(save bool) (*config.Config, error) {
 		return nil, fmt.Errorf("validate config: %w", err)
 	}
 	if save && !exists {
-		dir := filepath.Dir(cfgFile)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return nil, err
-		}
 		if err := config.Save(cfgFile, cfg); err != nil {
 			return nil, fmt.Errorf("save config: %w", err)
 		}
