@@ -37,6 +37,10 @@ func (r *MCPReader) SearchCode(ctx context.Context, in mcpcontract.SearchCodeInp
 	if err != nil {
 		return mcpcontract.SearchCodeOutput{}, err
 	}
+	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	if err != nil {
+		return mcpcontract.SearchCodeOutput{}, err
+	}
 	page, err := c.SearchCodeWithOptions(ctx, in.Query, corpus.CodeSearchOptions{Ref: ref, Limit: in.Limit, Cursor: in.Cursor})
 	if err != nil {
 		return mcpcontract.SearchCodeOutput{}, fmt.Errorf("search code: %w", err)
@@ -67,5 +71,8 @@ func (r *MCPReader) SearchCode(ctx context.Context, in mcpcontract.SearchCodeInp
 			Snippet: boundedText(match.Content, 2000), Bytes: match.Bytes,
 		}
 	}
-	return mcpcontract.SearchCodeOutput{Query: in.Query, Total: page.Total, Matches: out, Coverage: coverage, NextCursor: page.NextCursor}, nil
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return mcpcontract.SearchCodeOutput{}, err
+	}
+	return mcpcontract.SearchCodeOutput{Query: in.Query, Total: page.Total, Matches: out, Coverage: coverage, NextCursor: page.NextCursor, CorpusRevision: revision}, nil
 }

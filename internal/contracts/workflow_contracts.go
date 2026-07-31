@@ -252,4 +252,5 @@ type SearchResult struct {
 	Matches           []SearchMatch `json:"matches"`
 	NextCursor        string        `json:"next_cursor,omitempty"`
 	UnknownMergeCount int           `json:"unknown_merge_count,omitempty"`
+	CorpusRevision    int64         `json:"corpus_revision"`
 }

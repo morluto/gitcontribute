@@ -220,6 +220,56 @@ func setConst(schema *schemaBuilder, name string, value any) {
 	}
 }
 
+// configureCoverageTargetSchema makes repository-level and exact-thread
+// coverage two disjoint object shapes. Go's zero values cannot express whether
+// an optional number was omitted, so the wire schema must carry that contract.
+func configureCoverageTargetSchema(builder *schemaBuilder) {
+	target := builder.schema.Defs["CoverageTarget"]
+	if target == nil {
+		targets := property(builder, "targets")
+		if targets != nil {
+			target = targets.Items
+		}
+	}
+	if target == nil {
+		*builder.err = fmt.Errorf("MCP schema definition %q not found", "CoverageTarget")
+		return
+	}
+	cloneObject := func() *jsonschema.Schema {
+		clone := *target
+		clone.OneOf = nil
+		clone.Required = nil
+		clone.Properties = make(map[string]*jsonschema.Schema, len(target.Properties))
+		for name, propertySchema := range target.Properties {
+			propertyClone := *propertySchema
+			if propertySchema.Enum != nil {
+				propertyClone.Enum = append([]any(nil), propertySchema.Enum...)
+			}
+			clone.Properties[name] = &propertyClone
+		}
+		clone.AdditionalProperties = &jsonschema.Schema{Not: &jsonschema.Schema{}}
+		return &clone
+	}
+	base := cloneObject()
+	base.Required = []string{"owner", "repo"}
+	delete(base.Properties, "kind")
+	delete(base.Properties, "number")
+
+	exact := cloneObject()
+	exact.Required = []string{"owner", "repo", "kind", "number"}
+	if kind := exact.Properties["kind"]; kind != nil {
+		kind.Enum = []any{"issue", "pull_request"}
+	}
+	if number := exact.Properties["number"]; number != nil {
+		number.Minimum = jsonschema.Ptr(1.0)
+	}
+
+	target.OneOf = []*jsonschema.Schema{base, exact}
+	target.Required = nil
+	target.Properties = nil
+	target.AdditionalProperties = nil
+}
+
 func requireTogether(builder *schemaBuilder, names ...string) {
 	schema := builder.schema
 	if schema.DependentRequired == nil {

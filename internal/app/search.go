@@ -59,6 +59,7 @@ type searchResult struct {
 	Matches           []searchMatch
 	NextCursor        string
 	UnknownMergeCount int
+	CorpusRevision    int64
 }
 
 const maxLensCandidates = 1000
@@ -75,61 +76,76 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts contracts
 	if err != nil {
 		return searchResult{}, err
 	}
+	revision, err := beginCorpusRead(ctx, c, opts.CorpusRevision)
+	if err != nil {
+		return searchResult{}, err
+	}
 	now := s.now()
 
+	var result searchResult
 	if opts.Lens != "" {
 		if opts.Cursor != "" {
 			return searchResult{}, errors.New("cursor pagination cannot be combined with --lens because lens ranking is not cursor-stable")
 		}
-		return s.searchWithLens(ctx, c, query, opts, now)
-	}
-
-	repoID, repoRef, err := s.resolveRepoFilter(ctx, c, opts)
-	if err != nil {
-		return searchResult{}, err
-	}
-
-	switch opts.Kind {
-	case "repos":
-		if opts.Repo != "" {
-			if opts.Cursor != "" {
-				return searchResult{}, errors.New("cursor pagination is not supported for exact repository search")
-			}
-			ref, err := s.parseRepoRef(opts.Repo)
-			if err != nil {
-				return searchResult{}, err
-			}
-			return s.searchRepositoryExact(ctx, c, query, ref)
-		}
-		return s.searchRepositories(ctx, c, query, opts.Limit, opts.Cursor, opts.Sort)
-	case "code":
-		ref, err := s.parseRepoRef(opts.Repo)
+		result, err = s.searchWithLens(ctx, c, query, opts, now)
+	} else {
+		var repoID int64
+		var repoRef domain.RepoRef
+		repoID, repoRef, err = s.resolveRepoFilter(ctx, c, opts)
 		if err != nil {
 			return searchResult{}, err
 		}
-		return s.searchCode(ctx, c, query, ref, opts.Limit, opts.Cursor)
-	case "all":
-		return searchResult{}, errors.New("combined search is not supported because FTS ranks from different indexes are not comparable; choose repos, threads, issues, prs, or code")
-	default:
-		kind := ""
 		switch opts.Kind {
-		case "issue", "issues":
-			kind = corpus.ThreadKindIssue
-		case "pr", "prs", "pull_request":
-			kind = corpus.ThreadKindPullRequest
-		case "threads", "":
-			kind = ""
+		case "repos":
+			if opts.Repo != "" {
+				if opts.Cursor != "" {
+					return searchResult{}, errors.New("cursor pagination is not supported for exact repository search")
+				}
+				ref, parseErr := s.parseRepoRef(opts.Repo)
+				if parseErr != nil {
+					return searchResult{}, parseErr
+				}
+				result, err = s.searchRepositoryExact(ctx, c, query, ref)
+			} else {
+				result, err = s.searchRepositories(ctx, c, query, opts.Limit, opts.Cursor, opts.Sort)
+			}
+		case "code":
+			ref, parseErr := s.parseRepoRef(opts.Repo)
+			if parseErr != nil {
+				return searchResult{}, parseErr
+			}
+			result, err = s.searchCode(ctx, c, query, ref, opts.Limit, opts.Cursor)
+		case "all":
+			return searchResult{}, errors.New("combined search is not supported because FTS ranks from different indexes are not comparable; choose repos, threads, issues, prs, or code")
 		default:
-			return searchResult{}, fmt.Errorf("unsupported search kind %q", opts.Kind)
+			kind := ""
+			switch opts.Kind {
+			case "issue", "issues":
+				kind = corpus.ThreadKindIssue
+			case "pr", "prs", "pull_request":
+				kind = corpus.ThreadKindPullRequest
+			case "threads", "":
+				kind = ""
+			default:
+				return searchResult{}, fmt.Errorf("unsupported search kind %q", opts.Kind)
+			}
+			if repoRef != (domain.RepoRef{}) && repoID == 0 {
+				result = searchResult{Query: query, Total: 0, Matches: nil}
+			} else if query == "" {
+				result = searchResult{Query: query, Total: 0, Matches: nil}
+			} else {
+				result, err = s.searchThreads(ctx, c, query, repoID, repoRef, kind, opts)
+			}
 		}
-		if repoRef != (domain.RepoRef{}) && repoID == 0 {
-			return searchResult{Query: query, Total: 0, Matches: nil}, nil
-		}
-		if query == "" {
-			return searchResult{Query: query, Total: 0, Matches: nil}, nil
-		}
-		return s.searchThreads(ctx, c, query, repoID, repoRef, kind, opts)
 	}
+	if err != nil {
+		return searchResult{}, err
+	}
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return searchResult{}, err
+	}
+	result.CorpusRevision = revision
+	return result, nil
 }
 
 func (s *Service) parseRepoRef(repo string) (domain.RepoRef, error) {
@@ -718,5 +734,6 @@ func (s *Service) Search(ctx context.Context, query string, opts contracts.Searc
 		Matches:           matches,
 		NextCursor:        res.NextCursor,
 		UnknownMergeCount: res.UnknownMergeCount,
+		CorpusRevision:    res.CorpusRevision,
 	}, nil
 }

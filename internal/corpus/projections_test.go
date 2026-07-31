@@ -110,6 +110,10 @@ func TestRebuildThreadSearchProjectionIsAtomicAndSetsState(t *testing.T) {
 	if before.RowCount != 1 {
 		t.Fatalf("incremental row count = %d, want 1", before.RowCount)
 	}
+	beforeRevision, err := c.CorpusRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	state, err := c.RebuildThreadSearchProjection(ctx)
 	requireProjectionSetup(t, "rebuild threads_fts", err)
@@ -121,6 +125,13 @@ func TestRebuildThreadSearchProjectionIsAtomicAndSetsState(t *testing.T) {
 	}
 	if state.RefreshedAt.IsZero() {
 		t.Fatal("refreshed_at is zero after rebuild")
+	}
+	afterRevision, err := c.CorpusRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterRevision <= beforeRevision {
+		t.Fatalf("explicit projection rebuild did not advance corpus revision: before=%d after=%d", beforeRevision, afterRevision)
 	}
 
 	results, err := c.SearchThreads(ctx, "searchable", 10)

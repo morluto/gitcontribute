@@ -229,7 +229,7 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpcontract.SyncThrea
 				if res.Capped {
 					status = "partial"
 				}
-				taskResults[index] = map[string]any{"key": current.key, "status": status, "updated": res.Updated, "requests": res.Requests, "request_capped": res.Capped, "message": res.Message}
+				taskResults[index] = map[string]any{"key": current.key, "status": status, "updated": res.Updated, "requests": res.Requests, "request_capped": res.Capped, "message": res.Message, "threads": syncThreadRefsToMCP(res.Threads)}
 			}
 		}()
 	}
@@ -254,6 +254,11 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpcontract.SyncThrea
 				delete(item, "updated")
 				thread := in.Threads[inputIndex]
 				item["key"] = threadRefKey(thread)
+				if resolved, ok := taskResults[taskIndex]["threads"].([]mcpcontract.ThreadRef); ok {
+					item["threads"] = resolved
+				} else {
+					item["threads"] = []mcpcontract.ThreadRef{thread}
+				}
 				results[inputIndex] = item
 			}
 		}
@@ -336,7 +341,7 @@ func queuedJobReference(id, kind, message string) mcpcontract.JobReference {
 	return mcpcontract.JobReference{
 		ID: id, Ref: "job:" + id, Kind: kind, Status: "queued", Message: message, PollAfterMS: 1000,
 		FollowUp: &mcpcontract.JobFollowUp{
-			Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{id}}, Reason: "Poll this job ID after the suggested delay.",
+			Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{id}}, RetryAfterMS: 1000, Reason: "Poll this job ID after the suggested delay.",
 		},
 	}
 }
@@ -440,10 +445,10 @@ func (s *Service) indexRepositoriesBatch(ctx context.Context, in mcpcontract.Ind
 				key := current.Owner + "/" + current.Repo
 				result, err := s.Acquire(ctx, contracts.RepoRef{Owner: current.Owner, Repo: current.Repo}, current.Remote)
 				if err != nil {
-					results[index] = map[string]any{"key": key, "status": "failed", "reason": "acquisition_or_index_failed", "message": err.Error()}
+					results[index] = map[string]any{"key": key, "status": "failed", "reason": "acquisition_or_index_failed", "message": err.Error(), "retry_after_ms": 0}
 					continue
 				}
-				results[index] = map[string]any{"key": key, "status": "complete", "commit_sha": result.CommitSHA, "files": result.Files, "bytes": result.Bytes, "inserted": result.Inserted, "index_manifest": result.IndexManifest}
+				results[index] = map[string]any{"key": key, "status": "complete", "commit_sha": result.CommitSHA, "files": result.Files, "bytes": result.Bytes, "inserted": result.Inserted, "corpus_revision": result.CorpusRevision, "index_manifest": result.IndexManifest}
 			}
 		}()
 	}
@@ -467,10 +472,34 @@ func (s *Service) indexRepositoriesBatch(ctx context.Context, in mcpcontract.Ind
 			status = "partial"
 		}
 	}
+	var corpusRevision int64
+	if completed > 0 {
+		c, err := s.openCorpus(ctx)
+		if err != nil {
+			return nil, err
+		}
+		corpusRevision, err = c.CorpusRevision(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, result := range results {
+			if result["status"] == "complete" {
+				result["corpus_revision"] = corpusRevision
+			}
+		}
+	}
 	if err := report("repository_indexing", jobProgressCounts(len(in.Repositories), len(in.Repositories))); err != nil {
 		return nil, err
 	}
-	return map[string]any{"status": status, "items": results, "completed": completed, "total": len(in.Repositories)}, nil
+	return map[string]any{"status": status, "items": results, "completed": completed, "total": len(in.Repositories), "corpus_revision": corpusRevision}, nil
+}
+
+func syncThreadRefsToMCP(values []contracts.SyncThreadRef) []mcpcontract.ThreadRef {
+	refs := make([]mcpcontract.ThreadRef, 0, len(values))
+	for _, value := range values {
+		refs = append(refs, mcpcontract.ThreadRef{Owner: value.Owner, Repo: value.Repo, Kind: value.Kind, Number: value.Number})
+	}
+	return refs
 }
 
 func (s *Service) hydrateThreadsBatch(ctx context.Context, in mcpcontract.HydrateThreadsInput, report func(string, string) error) (map[string]any, error) {

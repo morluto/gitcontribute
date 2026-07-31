@@ -2,20 +2,22 @@ package mcpcontract
 
 // SearchRepositoriesInput describes an offline repository search page.
 type SearchRepositoriesInput struct {
-	Query  string `json:"query,omitempty" jsonschema:"Repository full-text query"`
-	Owner  string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo   string `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-	Cursor string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
-	Sort   string `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
+	Query          string `json:"query,omitempty" jsonschema:"Repository full-text query"`
+	Owner          string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
+	Repo           string `json:"repo,omitempty" jsonschema:"Optional repository name"`
+	Limit          int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Cursor         string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
+	Sort           string `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
+	CorpusRevision *int64 `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
 }
 
 // SearchRepositoriesOutput contains one page of repository matches.
 type SearchRepositoriesOutput struct {
-	Query      string             `json:"query"`
-	Total      int                `json:"total"`
-	Matches    []RepositoryOutput `json:"matches"`
-	NextCursor string             `json:"next_cursor,omitempty"`
+	Query          string             `json:"query"`
+	Total          int                `json:"total"`
+	Matches        []RepositoryOutput `json:"matches"`
+	NextCursor     string             `json:"next_cursor,omitempty"`
+	CorpusRevision int64              `json:"corpus_revision"`
 }
 
 // ExplainMatchInput identifies an exact stored result and its original query.
@@ -67,6 +69,7 @@ type JobArtifactReference struct {
 	References          []string             `json:"references,omitempty" jsonschema:"Bounded exact repository, thread, or pull-request references produced by the job"`
 	ReferencesTruncated bool                 `json:"references_truncated,omitempty" jsonschema:"Whether more exact references exist than this bounded response includes"`
 	Failures            []JobArtifactFailure `json:"failures,omitempty" jsonschema:"Bounded per-reference outcomes that require retry or recovery"`
+	CodeIndex           *CodeIndexArtifact   `json:"code_index,omitempty" jsonschema:"Revision-bound indexed-commit artifact"`
 }
 
 // JobArtifactFailure preserves one actionable item-level outcome without
@@ -81,10 +84,11 @@ type JobArtifactFailure struct {
 
 // JobFollowUp points to the typed read plane for a job's durable result.
 type JobFollowUp struct {
-	Tool        string             `json:"tool,omitempty" jsonschema:"Outcome-oriented tool to use next"`
-	Arguments   *ToolCallArguments `json:"arguments,omitempty" jsonschema:"Typed arguments for the follow-up tool"`
-	ResourceURI string             `json:"resource_uri,omitempty" jsonschema:"MCP resource URI to read next"`
-	Reason      string             `json:"reason" jsonschema:"Why this follow-up is appropriate"`
+	Tool         string             `json:"tool,omitempty" jsonschema:"Outcome-oriented tool to use next"`
+	Arguments    *ToolCallArguments `json:"arguments,omitempty" jsonschema:"Typed arguments for the follow-up tool"`
+	ResourceURI  string             `json:"resource_uri,omitempty" jsonschema:"MCP resource URI to read next"`
+	RetryAfterMS NonNegativeInt     `json:"retry_after_ms,omitempty" jsonschema:"Minimum delay before attempting this follow-up"`
+	Reason       string             `json:"reason" jsonschema:"Why this follow-up is appropriate"`
 }
 
 // GetJobOutput reports durable state and structured progress for a job. Stored

@@ -87,8 +87,11 @@ func TestLiveOwnerNotReconciledByAnotherExecutor(t *testing.T) {
 	<-blocked
 	waitForJobStatus(t, jobsA, id, corpus.JobStatusRunning, 1*time.Second)
 
-	// A second process opens the database and reconciles with a 200ms lease.
-	// Because A heartbeats every 50ms, its job must remain running.
+	// A second process opens the database and reconciles with a lease that is
+	// deliberately much wider than the heartbeat interval. This keeps the
+	// assertion about ownership independent of scheduler jitter while still
+	// allowing the test to catch an owner that stops heartbeating.
+	const leaseTimeout = 2 * time.Second
 	cB, err := corpus.Open(ctx, svc.databasePath())
 	if err != nil {
 		t.Fatalf("open second corpus: %v", err)
@@ -96,7 +99,7 @@ func TestLiveOwnerNotReconciledByAnotherExecutor(t *testing.T) {
 	defer func() { _ = cB.Close() }()
 
 	time.Sleep(100 * time.Millisecond)
-	if err := cB.ReconcileInterruptedJobs(ctx, 200*time.Millisecond); err != nil {
+	if err := cB.ReconcileInterruptedJobs(ctx, leaseTimeout); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 

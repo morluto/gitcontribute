@@ -1,0 +1,338 @@
+package app
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/morluto/gitcontribute/internal/codeindex"
+	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
+)
+
+func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
+	switch job.Kind {
+	case "mine_repository_fix_patterns":
+		return fixPatternJobArtifact(job)
+	case "build_repository_dossier":
+		return dossierJobArtifact(job)
+	case "create_workspace":
+		return workspaceJobArtifact(job)
+	case "run_validation":
+		return validationJobArtifact(job, "validation_run")
+	case "run_validation_group":
+		return validationJobArtifact(job, "validation_group")
+	case "sync_repository_context":
+		return repositoryBatchJobArtifact(job, total)
+	case "sync_threads":
+		return threadBatchJobArtifact(job, total)
+	case jobKindSyncThreadFacets:
+		return threadFacetJobArtifact(job)
+	case jobKindSyncPullRequestPortfolio:
+		return portfolioJobArtifact(job)
+	case "sync_pull_request_feedback", "sync_ci_failures":
+		return pullRequestWorkflowJobArtifact(job)
+	case "index_repositories":
+		return indexRepositoriesJobArtifact(job)
+	default:
+		return nil, nil
+	}
+}
+
+func resourceFollowUp(uri, reason string) *mcpcontract.JobFollowUp {
+	return &mcpcontract.JobFollowUp{ResourceURI: uri, Arguments: &mcpcontract.ToolCallArguments{}, Reason: reason}
+}
+
+func fixPatternJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
+	uri := "gitcontribute://fix-pattern-report/" + job.ID
+	return []mcpcontract.JobArtifactReference{{Kind: "fix_pattern_report", ID: job.ID, URI: uri}},
+		resourceFollowUp(uri, "Read the persisted typed fix-pattern report.")
+}
+
+func dossierJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
+	var request struct {
+		Owner string `json:"owner"`
+		Repo  string `json:"repo"`
+	}
+	if json.Unmarshal([]byte(job.Request), &request) != nil || request.Owner == "" || request.Repo == "" {
+		return nil, nil
+	}
+	uri := fmt.Sprintf("gitcontribute://dossier/%s/%s", request.Owner, request.Repo)
+	return []mcpcontract.JobArtifactReference{{Kind: "dossier", ID: request.Owner + "/" + request.Repo, URI: uri}},
+		resourceFollowUp(uri, "Read the persisted typed dossier resource.")
+}
+
+func workspaceJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
+	var result struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal([]byte(job.Result), &result) != nil || result.ID == "" {
+		return nil, nil
+	}
+	return []mcpcontract.JobArtifactReference{{Kind: "workspace", ID: result.ID}},
+		&mcpcontract.JobFollowUp{
+			Tool:      mcpcontract.ToolInspectCommitChanges,
+			Arguments: &mcpcontract.ToolCallArguments{WorkspaceID: result.ID},
+			Reason:    "Inspect the managed workspace before planning commits.",
+		}
+}
+
+func validationJobArtifact(job *contracts.JobResult, kind string) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
+	var result struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal([]byte(job.Result), &result) != nil || result.ID == "" {
+		return nil, nil
+	}
+	return []mcpcontract.JobArtifactReference{{Kind: kind, ID: result.ID}}, nil
+}
+
+type syncBatchItem struct {
+	Key        string                  `json:"key"`
+	Status     string                  `json:"status"`
+	Reason     string                  `json:"reason"`
+	Message    string                  `json:"message"`
+	RetryAfter int                     `json:"retry_after_ms"`
+	Threads    []mcpcontract.ThreadRef `json:"threads"`
+}
+
+type syncBatchResult struct {
+	Items []syncBatchItem `json:"items"`
+}
+
+func decodeSyncBatchResult(job *contracts.JobResult, total int) (syncBatchResult, int) {
+	var result syncBatchResult
+	count := total
+	if json.Unmarshal([]byte(job.Result), &result) == nil && result.Items != nil {
+		count = len(result.Items)
+	}
+	return result, count
+}
+
+func syncBatchReferences(result syncBatchResult, includeThreads bool) ([]string, []mcpcontract.ThreadRef, []mcpcontract.JobArtifactFailure) {
+	references := make([]string, 0, min(len(result.Items), 100))
+	threadRefs := make([]mcpcontract.ThreadRef, 0, min(len(result.Items), 100))
+	failures := make([]mcpcontract.JobArtifactFailure, 0, min(len(result.Items), 100))
+	for _, item := range result.Items {
+		partialThreadBatch := includeThreads && item.Status == "partial"
+		if item.Status != "complete" && !partialThreadBatch {
+			if len(failures) < 100 {
+				failures = append(failures, mcpcontract.JobArtifactFailure{
+					Reference: item.Key, Status: mcpcontract.BatchItemStatus(item.Status), Reason: item.Reason,
+					Message: item.Message, RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfter),
+				})
+			}
+			continue
+		}
+		if includeThreads && len(item.Threads) > 0 {
+			for _, ref := range item.Threads {
+				if len(threadRefs) >= 100 {
+					break
+				}
+				threadRefs = append(threadRefs, ref)
+				references = append(references, threadRefKey(ref))
+			}
+			continue
+		}
+		if item.Key != "" && len(references) < 100 {
+			references = append(references, item.Key)
+		}
+	}
+	return references, threadRefs, failures
+}
+
+func repositoryBatchJobArtifact(job *contracts.JobResult, total int) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
+	result, count := decodeSyncBatchResult(job, total)
+	references, _, failures := syncBatchReferences(result, false)
+	value := mcpcontract.NonNegativeInt(count)
+	follow := &mcpcontract.JobFollowUp{
+		Tool:      mcpcontract.ToolGetRepositories,
+		Arguments: &mcpcontract.ToolCallArguments{},
+		Reason:    "Read synchronized repository facts and coverage from the offline corpus.",
+	}
+	var request mcpcontract.SyncRepositoryContextInput
+	if json.Unmarshal([]byte(job.Request), &request) == nil {
+		follow.Arguments.Repositories = append([]mcpcontract.RepositoryRef(nil), request.Repositories...)
+	}
+	return []mcpcontract.JobArtifactReference{{
+		Kind: "repository_batch", Count: &value, References: references,
+		ReferencesTruncated: len(result.Items) > len(references), Failures: failures,
+	}}, follow
+}
+
+func threadBatchJobArtifact(job *contracts.JobResult, total int) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
+	result, count := decodeSyncBatchResult(job, total)
+	references, threadRefs, failures := syncBatchReferences(result, true)
+	value := mcpcontract.NonNegativeInt(count)
+	var follow *mcpcontract.JobFollowUp
+	if len(threadRefs) > 0 {
+		follow = &mcpcontract.JobFollowUp{
+			Tool:      mcpcontract.ToolGetThreads,
+			Arguments: &mcpcontract.ToolCallArguments{Threads: threadRefs},
+			Reason:    "Read synchronized thread facts and coverage from the offline corpus.",
+		}
+	}
+	return []mcpcontract.JobArtifactReference{{
+		Kind: "thread_batch", Count: &value, References: references,
+		ReferencesTruncated: len(result.Items) > len(references), Failures: failures,
+	}}, follow
+}
+
+func threadFacetJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
+	var request mcpcontract.HydrateThreadsInput
+	_ = json.Unmarshal([]byte(job.Request), &request)
+	return facetBatchArtifact(append([]mcpcontract.ThreadRef(nil), request.Threads...), request.Facets)
+}
+
+func portfolioJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
+	var result struct {
+		Login        string   `json:"login"`
+		PullRequests []string `json:"pull_requests"`
+		Refreshed    int      `json:"refreshed"`
+		Failures     []struct {
+			Reference    string `json:"reference"`
+			Status       string `json:"status"`
+			Reason       string `json:"reason"`
+			Message      string `json:"message"`
+			RetryAfterMS int    `json:"retry_after_ms"`
+		} `json:"failures"`
+	}
+	if json.Unmarshal([]byte(job.Result), &result) != nil {
+		return nil, nil
+	}
+	value := mcpcontract.NonNegativeInt(result.Refreshed)
+	failures := make([]mcpcontract.JobArtifactFailure, len(result.Failures))
+	for i, failure := range result.Failures {
+		failures[i] = mcpcontract.JobArtifactFailure{
+			Reference: failure.Reference, Status: mcpcontract.BatchItemStatus(failure.Status), Reason: failure.Reason,
+			Message: failure.Message, RetryAfterMS: mcpcontract.NonNegativeInt(failure.RetryAfterMS),
+		}
+	}
+	var request mcpcontract.SyncPortfolioInput
+	_ = json.Unmarshal([]byte(job.Request), &request)
+	follow := &mcpcontract.JobFollowUp{
+		Tool:      mcpcontract.ToolListPullRequestPortfolio,
+		Arguments: portfolioReadFollowUpArguments(request, result.Login, result.PullRequests),
+		Reason:    "Read these refreshed pull requests from the offline portfolio.",
+	}
+	return []mcpcontract.JobArtifactReference{{
+		Kind: "pull_request_batch", Count: &value, References: append([]string(nil), result.PullRequests...), Failures: failures,
+	}}, follow
+}
+
+func pullRequestWorkflowJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
+	var result pullRequestWorkflowResult
+	if json.Unmarshal([]byte(job.Result), &result) != nil {
+		return nil, nil
+	}
+	kind, reason, resourceKind := "pull_request_feedback", "Read the persisted feedback snapshots through their resource links.", "pull-request-feedback"
+	if job.Kind == "sync_ci_failures" {
+		kind, reason, resourceKind = "ci_failure_report", "Read the persisted CI reports and bounded job logs through their resource links.", "ci-failure-report"
+	}
+	artifact := mcpcontract.JobArtifactReference{Kind: kind}
+	if len(result.Items) == 0 {
+		var request struct {
+			PullRequests []mcpcontract.ThreadRef `json:"pull_requests"`
+		}
+		if json.Unmarshal([]byte(job.Request), &request) == nil {
+			for _, ref := range request.PullRequests {
+				artifact.References = append(artifact.References, fmt.Sprintf(
+					"gitcontribute://%s/%s/%s/%d", resourceKind, ref.Owner, ref.Repo, ref.Number,
+				))
+			}
+		}
+	}
+	for _, item := range result.Items {
+		if item.Status == "complete" {
+			artifact.References = append(artifact.References, item.ResourceURI)
+			continue
+		}
+		artifact.Failures = append(artifact.Failures, mcpcontract.JobArtifactFailure{
+			Reference: item.Key, Status: item.Status, Reason: item.Code, Message: item.Message,
+			RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfterMS),
+		})
+	}
+	count := mcpcontract.NonNegativeInt(len(artifact.References))
+	artifact.Count = &count
+	var follow *mcpcontract.JobFollowUp
+	if len(artifact.References) > 0 {
+		follow = resourceFollowUp(artifact.References[0], reason)
+	}
+	return []mcpcontract.JobArtifactReference{artifact}, follow
+}
+
+type indexJobItem struct {
+	Key            string             `json:"key"`
+	Status         string             `json:"status"`
+	Reason         string             `json:"reason"`
+	Message        string             `json:"message"`
+	RetryAfterMS   int                `json:"retry_after_ms"`
+	CommitSHA      string             `json:"commit_sha"`
+	CorpusRevision int64              `json:"corpus_revision"`
+	IndexManifest  codeindex.Manifest `json:"index_manifest"`
+}
+
+type indexJobResult struct {
+	CorpusRevision int64          `json:"corpus_revision"`
+	Items          []indexJobItem `json:"items"`
+}
+
+func indexRepositoriesJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
+	var result indexJobResult
+	if json.Unmarshal([]byte(job.Result), &result) != nil {
+		return nil, nil
+	}
+	artifacts := make([]mcpcontract.JobArtifactReference, 0, len(result.Items))
+	completedRefs := make([]string, 0, min(len(result.Items), 100))
+	failures := make([]mcpcontract.JobArtifactFailure, 0, min(len(result.Items), 100))
+	for _, item := range result.Items {
+		if item.Status != "complete" {
+			if len(failures) < 100 {
+				failures = append(failures, mcpcontract.JobArtifactFailure{
+					Reference: item.Key, Status: mcpcontract.BatchItemStatus(item.Status), Reason: item.Reason,
+					Message: item.Message, RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfterMS),
+				})
+			}
+			continue
+		}
+		if item.CommitSHA == "" {
+			continue
+		}
+		owner, repo, ok := strings.Cut(item.Key, "/")
+		if !ok || owner == "" || repo == "" {
+			continue
+		}
+		revision := item.CorpusRevision
+		if result.CorpusRevision != 0 {
+			revision = result.CorpusRevision
+		}
+		artifact := codeIndexArtifact(domain.RepoRef{Owner: owner, Repo: repo}, item.CommitSHA, item.IndexManifest, revision)
+		artifacts = append(artifacts, mcpcontract.JobArtifactReference{Kind: artifact.Kind, ID: artifact.ID, URI: artifact.ResourceURI, CodeIndex: &artifact})
+		if len(completedRefs) < 100 {
+			completedRefs = append(completedRefs, item.Key)
+		}
+	}
+	if len(failures) > 0 {
+		count := mcpcontract.NonNegativeInt(len(completedRefs))
+		artifacts = append(artifacts, mcpcontract.JobArtifactReference{
+			Kind: "repository_batch", Count: &count, References: completedRefs,
+			ReferencesTruncated: len(result.Items) > len(completedRefs), Failures: failures,
+		})
+	}
+	return artifacts, firstCodeIndexFollowUp(artifacts)
+}
+
+func firstCodeIndexFollowUp(artifacts []mcpcontract.JobArtifactReference) *mcpcontract.JobFollowUp {
+	for _, reference := range artifacts {
+		if reference.CodeIndex == nil {
+			continue
+		}
+		artifact := reference.CodeIndex
+		return &mcpcontract.JobFollowUp{
+			ResourceURI: artifact.ResourceURI, Arguments: artifact.FollowUp.Arguments,
+			Reason: "Read the exact indexed-commit artifact through MCP resources/read.",
+		}
+	}
+	return nil
+}

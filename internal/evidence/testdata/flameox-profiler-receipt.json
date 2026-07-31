@@ -1,0 +1,23 @@
+{
+  "schema_version": "gitcontribute.external-validation.v1",
+  "producer": "flameox-profiler",
+  "receipt_sha256": "a541de95f7d102abb6b18d3d123f4c281b749946c167f1b927e4c749e3fc6fb9",
+  "validation_id": "validation-flameox-profiler-001",
+  "investigation_id": "investigation-source-audit",
+  "kind": "base",
+  "repository": "acme/rocket",
+  "revision": "0123456789abcdef0123456789abcdef01234567",
+  "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "provider": "flameox",
+  "external_run_id": "flameox-run-20260731-001",
+  "argv": ["flameox", "profile", "--format", "receipt"],
+  "working_dir": "workspace",
+  "environment": {"PROFILE_MODE": "deterministic"},
+  "artifacts": {"profile.json": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+  "started_at": "2026-07-31T01:02:03Z",
+  "completed_at": "2026-07-31T01:02:13Z",
+  "exit_code": 0,
+  "classification": "passing",
+  "limitations": ["Profiler output is incomplete because kernel counters were unavailable."],
+  "incomplete": true
+}

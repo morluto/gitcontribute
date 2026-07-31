@@ -87,6 +87,7 @@ func (r *MCPReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcp
 		Limit:  in.Limit,
 		Cursor: in.Cursor,
 		Sort:   in.Sort, MatchMode: in.MatchMode,
+		CorpusRevision: in.CorpusRevision,
 	})
 	if err != nil {
 		return mcpcontract.SearchOutput{}, err
@@ -116,6 +117,7 @@ func (r *MCPReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcp
 			MatchSource:    m.MatchSource,
 			MatchExcerpt:   m.MatchExcerpt,
 			MatchTruncated: m.MatchTruncated,
+			CorpusRevision: res.CorpusRevision,
 		}
 		if in.View == "full" {
 			matches[i].Body = m.Body
@@ -132,6 +134,7 @@ func (r *MCPReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcp
 		Query: in.Query, QueryInterpretation: strings.Join(strings.Fields(in.Query), separator),
 		MatchMode: in.MatchMode, View: in.View, Total: res.Total, Matches: matches, NextCursor: res.NextCursor,
 		UnknownMergeCount: res.UnknownMergeCount,
+		CorpusRevision:    res.CorpusRevision,
 	}
 	if out.UnknownMergeCount > 0 {
 		out.Suggestion = "Some otherwise-matching pull requests have unknown merge state. Repeat without the merged filter to identify finalists, then hydrate pr_details before inferring absence."
@@ -175,6 +178,10 @@ func (r *MCPReader) Thread(ctx context.Context, in mcpcontract.ThreadInput) (mcp
 	if err != nil {
 		return mcpcontract.ThreadOutput{}, err
 	}
+	revision, err := beginCorpusRead(ctx, c, nil)
+	if err != nil {
+		return mcpcontract.ThreadOutput{}, err
+	}
 	repo, err := c.GetRepository(ctx, in.Owner, in.Repo)
 	if err != nil {
 		return mcpcontract.ThreadOutput{}, fmt.Errorf("get repository: %w", err)
@@ -192,6 +199,10 @@ func (r *MCPReader) Thread(ctx context.Context, in mcpcontract.ThreadInput) (mcp
 	out := corpusThreadToMCPOutput(thread)
 	out.Owner = in.Owner
 	out.Repo = in.Repo
+	out.CorpusRevision = revision
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return mcpcontract.ThreadOutput{}, err
+	}
 	return out, nil
 }
 
@@ -603,7 +614,11 @@ func (r *MCPReader) GetCoverage(ctx context.Context, in mcpcontract.GetCoverageI
 	if err != nil {
 		return mcpcontract.GetCoverageOutput{}, err
 	}
-	out := mcpcontract.GetCoverageOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.CoverageOutput], len(in.Targets))}
+	revision, err := beginCorpusRead(ctx, c, in.CorpusRevision)
+	if err != nil {
+		return mcpcontract.GetCoverageOutput{}, err
+	}
+	out := mcpcontract.GetCoverageOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.CoverageOutput], len(in.Targets)), CorpusRevision: revision}
 	for i, target := range in.Targets {
 		if err := ctx.Err(); err != nil {
 			return out, err
@@ -635,6 +650,9 @@ func (r *MCPReader) GetCoverage(ctx context.Context, in mcpcontract.GetCoverageI
 		}
 		out.Items[i] = item
 	}
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return mcpcontract.GetCoverageOutput{}, err
+	}
 	return out, nil
 }
 
@@ -653,8 +671,14 @@ func readCoverageTarget(ctx context.Context, c *corpus.Corpus, target mcpcontrac
 	if err := ref.Validate(); err != nil {
 		return mcpcontract.CoverageOutput{}, "invalid_reference", fmt.Errorf("%w: %w", errInvalidCoverageTarget, err)
 	}
-	isThread := target.Kind != "" || target.Number != 0
-	if isThread && ((target.Kind != "issue" && target.Kind != "pull_request") || target.Number < 1) {
+	isThread, valid := (target.Kind != "" || target.Number != 0), false
+	switch {
+	case target.Kind == "" && target.Number == 0:
+		valid = true
+	case target.Kind == "issue" || target.Kind == "pull_request":
+		valid = target.Number > 0
+	}
+	if !valid {
 		return mcpcontract.CoverageOutput{}, "invalid_reference", errInvalidCoverageTarget
 	}
 	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)

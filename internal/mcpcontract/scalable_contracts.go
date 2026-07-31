@@ -47,6 +47,12 @@ type ToolCall struct {
 // recovery calls. Fields are intentionally limited to canonical MCP inputs.
 type ToolCallArguments struct {
 	IDs                []string        `json:"ids,omitempty"`
+	Query              string          `json:"query,omitempty"`
+	Owner              string          `json:"owner,omitempty"`
+	Repo               string          `json:"repo,omitempty"`
+	Commit             string          `json:"commit,omitempty"`
+	CorpusRevision     *int64          `json:"corpus_revision,omitempty"`
+	WorkspaceID        string          `json:"workspace_id,omitempty"`
 	Selection          string          `json:"selection,omitempty"`
 	Repositories       []RepositoryRef `json:"repositories,omitempty"`
 	Threads            []ThreadRef     `json:"threads,omitempty"`
@@ -67,7 +73,12 @@ type ToolCallArguments struct {
 	MaxLogBytesPerJob  int             `json:"max_log_bytes_per_job,omitempty"`
 	Action             string          `json:"action,omitempty"`
 	Repository         string          `json:"repository,omitempty"`
+	Authors            []string        `json:"authors,omitempty"`
+	Limit              int             `json:"limit,omitempty"`
+	View               string          `json:"view,omitempty"`
 	Question           string          `json:"question,omitempty"`
+	UpdatedAfter       string          `json:"updated_after,omitempty"`
+	UpdatedBefore      string          `json:"updated_before,omitempty"`
 }
 
 const RecoveryPlanVersion = "gitcontribute.recovery.v1"
@@ -147,7 +158,8 @@ type BatchItem[T any] struct {
 
 // GetRepositoriesInput selects repositories for a bounded corpus read.
 type GetRepositoriesInput struct {
-	Repositories []RepositoryRef `json:"repositories" jsonschema:"One to 100 repository identities"`
+	Repositories   []RepositoryRef `json:"repositories" jsonschema:"One to 100 repository identities"`
+	CorpusRevision *int64          `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
 }
 
 // RepositoryMetadataOutput describes the coverage of repository metadata.
@@ -183,28 +195,32 @@ type TypedRepositoryOutput struct {
 // GetRepositoriesOutput preserves repository input order and represents
 // unobserved metadata with nullable facts instead of false zero values.
 type GetRepositoriesOutput struct {
-	Status string                             `json:"batch_status"`
-	Items  []BatchItem[TypedRepositoryOutput] `json:"items"`
+	Status         string                             `json:"batch_status"`
+	Items          []BatchItem[TypedRepositoryOutput] `json:"items"`
+	CorpusRevision int64                              `json:"corpus_revision"`
 }
 
 // GetThreadsInput selects exact threads and the desired response view.
 type GetThreadsInput struct {
-	Threads []ThreadRef `json:"threads" jsonschema:"One to 100 exact thread identities"`
-	View    string      `json:"view,omitempty" jsonschema:"compact or full; compact omits bodies"`
+	Threads        []ThreadRef `json:"threads" jsonschema:"One to 100 exact thread identities"`
+	View           string      `json:"view,omitempty" jsonschema:"compact or full; compact omits bodies"`
+	CorpusRevision *int64      `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
 }
 
 // GetThreadsOutput preserves exact-thread input order and item-level failures.
 type GetThreadsOutput struct {
-	Status string                    `json:"batch_status"`
-	Items  []BatchItem[ThreadOutput] `json:"items"`
+	Status         string                    `json:"batch_status"`
+	Items          []BatchItem[ThreadOutput] `json:"items"`
+	CorpusRevision int64                     `json:"corpus_revision"`
 }
 
 // GetThreadFacetsInput selects bounded offline facet metadata for exact
 // threads. Payloads larger than a compact result are read through the returned
 // resource URI.
 type GetThreadFacetsInput struct {
-	Threads []ThreadRef `json:"threads" jsonschema:"One to 100 exact thread identities"`
-	Facets  []string    `json:"facets" jsonschema:"One to 10 stored facet names"`
+	Threads        []ThreadRef `json:"threads" jsonschema:"One to 100 exact thread identities"`
+	Facets         []string    `json:"facets" jsonschema:"One to 10 stored facet names"`
+	CorpusRevision *int64      `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
 }
 
 // ThreadFacetOutput describes one stored facet and its canonical resource.
@@ -229,14 +245,16 @@ type ThreadFacetsOutput struct {
 
 // GetThreadFacetsOutput preserves exact-thread input order and item failures.
 type GetThreadFacetsOutput struct {
-	Status string                          `json:"batch_status"`
-	Items  []BatchItem[ThreadFacetsOutput] `json:"items"`
+	Status         string                          `json:"batch_status"`
+	Items          []BatchItem[ThreadFacetsOutput] `json:"items"`
+	CorpusRevision int64                           `json:"corpus_revision"`
 }
 
 // FindPrecedentsInput selects source threads for offline analogue discovery.
 type FindPrecedentsInput struct {
-	Threads []ThreadRef `json:"threads" jsonschema:"One to 20 source threads"`
-	Limit   int         `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Threads        []ThreadRef `json:"threads" jsonschema:"One to 20 source threads"`
+	Limit          int         `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	CorpusRevision *int64      `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
 }
 
 // PrecedentOutput describes one stored thread analogous to a source thread.
@@ -257,9 +275,10 @@ type PrecedentOutput struct {
 // FindPrecedentsOutput returns stored closed or merged analogues for each
 // source thread; it does not perform a network read.
 type FindPrecedentsOutput struct {
-	Status string                    `json:"status"`
-	Items  []BatchItem[PrecedentSet] `json:"items"`
-	Total  int                       `json:"total"`
+	Status         string                    `json:"status"`
+	Items          []BatchItem[PrecedentSet] `json:"items"`
+	Total          int                       `json:"total"`
+	CorpusRevision int64                     `json:"corpus_revision"`
 }
 
 // PrecedentSet reports both scored results and bounded candidate coverage.
@@ -347,10 +366,11 @@ type SyncCIFailuresInput struct {
 
 // ListPullRequestPortfolioInput filters and bounds the stored pull-request portfolio.
 type ListPullRequestPortfolioInput struct {
-	Authors []string `json:"authors,omitempty" jsonschema:"Zero or one author login"`
-	State   string   `json:"state,omitempty" jsonschema:"open, closed, or all"`
-	Limit   int      `json:"limit,omitempty" jsonschema:"Maximum pull requests from 1 to 100; defaults to 20"`
-	View    string   `json:"view,omitempty" jsonschema:"compact or full; defaults to compact"`
+	Authors        []string `json:"authors,omitempty" jsonschema:"Zero or one author login"`
+	State          string   `json:"state,omitempty" jsonschema:"open, closed, or all"`
+	Limit          int      `json:"limit,omitempty" jsonschema:"Maximum pull requests from 1 to 100; defaults to 20"`
+	View           string   `json:"view,omitempty" jsonschema:"compact or full; defaults to compact"`
+	CorpusRevision *int64   `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
 }
 
 // PullRequestPortfolioItem contains source-backed PR facts and a deterministic
@@ -389,13 +409,14 @@ type PullRequestPortfolioItem struct {
 
 // ListPullRequestPortfolioOutput contains a deterministic portfolio projection.
 type ListPullRequestPortfolioOutput struct {
-	Status       string                     `json:"status"`
-	View         string                     `json:"view"`
-	RuleVersion  string                     `json:"rule_version"`
-	GeneratedAt  string                     `json:"generated_at"`
-	PullRequests []PullRequestPortfolioItem `json:"pull_requests"`
-	Total        int                        `json:"total"`
-	Truncated    bool                       `json:"truncated"`
+	Status         string                     `json:"status"`
+	View           string                     `json:"view"`
+	RuleVersion    string                     `json:"rule_version"`
+	GeneratedAt    string                     `json:"generated_at"`
+	PullRequests   []PullRequestPortfolioItem `json:"pull_requests"`
+	Total          int                        `json:"total"`
+	Truncated      bool                       `json:"truncated"`
+	CorpusRevision int64                      `json:"corpus_revision"`
 }
 
 // PortfolioSubjectInput identifies local candidate state for offline overlap analysis.
@@ -406,8 +427,9 @@ type PortfolioSubjectInput struct {
 
 // FindPortfolioOverlapsInput compares candidates with exact stored authored PRs.
 type FindPortfolioOverlapsInput struct {
-	Candidates   []PortfolioSubjectInput `json:"candidates" jsonschema:"One to 50 local candidate subjects"`
-	PullRequests []ThreadRef             `json:"pull_requests" jsonschema:"One to 100 exact authored pull requests"`
+	Candidates     []PortfolioSubjectInput `json:"candidates" jsonschema:"One to 50 local candidate subjects"`
+	PullRequests   []ThreadRef             `json:"pull_requests" jsonschema:"One to 100 exact authored pull requests"`
+	CorpusRevision *int64                  `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
 }
 
 // PortfolioOverlapEvidenceOutput is one exact observed overlap reason.
@@ -434,8 +456,9 @@ type PortfolioOverlapOutput struct {
 
 // FindPortfolioOverlapsOutput preserves candidate input order.
 type FindPortfolioOverlapsOutput struct {
-	Status string                              `json:"status"`
-	Items  []BatchItem[PortfolioOverlapOutput] `json:"items"`
+	Status         string                              `json:"status"`
+	Items          []BatchItem[PortfolioOverlapOutput] `json:"items"`
+	CorpusRevision int64                               `json:"corpus_revision"`
 }
 
 // LinkPullRequestInput explicitly associates a stored PR with local workflow state.
@@ -464,6 +487,24 @@ type IndexRepositoryInput struct {
 // IndexRepositoriesInput selects repositories for bounded asynchronous indexing.
 type IndexRepositoriesInput struct {
 	Repositories []IndexRepositoryInput `json:"repositories" jsonschema:"One to 10 repositories to acquire and index"`
+}
+
+// CodeIndexArtifact is the typed, revision-bound handoff for one immutable
+// indexed commit. The resource URI is canonical; callers must consume it with
+// MCP resources/read rather than reconstructing a larger payload from fields.
+type CodeIndexArtifact struct {
+	Kind           string         `json:"kind"`
+	ID             string         `json:"id"`
+	Repository     RepositoryRef  `json:"repository"`
+	CommitSHA      string         `json:"commit_sha"`
+	CorpusRevision int64          `json:"corpus_revision"`
+	ManifestID     string         `json:"manifest_id"`
+	ManifestSHA256 string         `json:"manifest_sha256"`
+	FileCount      NonNegativeInt `json:"file_count"`
+	TrackedEntries NonNegativeInt `json:"tracked_entries"`
+	Truncated      bool           `json:"truncated"`
+	ResourceURI    string         `json:"resource_uri"`
+	FollowUp       *JobFollowUp   `json:"follow_up"`
 }
 
 // MergeConflictInput names two already-fetched revisions in a managed workspace.

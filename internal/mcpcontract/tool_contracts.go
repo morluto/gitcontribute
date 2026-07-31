@@ -41,51 +41,52 @@ func Unavailable(code, message string, actions ...ToolCall) error {
 
 // Canonical MCP tool names group operations by capability and side-effect boundary.
 const (
-	ToolSearchRepositories        = "corpus.search_repositories"
-	ToolSearchThreads             = "corpus.search_threads"
-	ToolSearchCode                = "corpus.search_code"
-	ToolGetRepositories           = "corpus.get_repositories"
-	ToolGetThreads                = "corpus.get_threads"
-	ToolGetThreadFacets           = "corpus.get_thread_facets"
-	ToolRankThreads               = "corpus.rank_contribution_candidates"
-	ToolFindPrecedents            = "corpus.find_precedents"
-	ToolPrepareIssueSet           = "workflow.prepare_issue_set"
-	ToolExplainMatch              = "corpus.explain_match"
-	ToolFindClusters              = "corpus.find_clusters"
-	ToolFindNeighbors             = "corpus.find_neighbors"
-	ToolGetCoverage               = "corpus.get_coverage"
-	ToolBuildRepositoryDossier    = "workflow.build_repository_dossier"
-	ToolMineRepositoryFixPatterns = "workflow.mine_repository_fix_patterns"
-	ToolGetJob                    = "jobs.get"
-	ToolCancelJob                 = "jobs.cancel"
-	ToolSearchGitHubRepositories  = "github.search_repositories"
-	ToolSyncRepositoryContext     = "github.sync_repository_context"
-	ToolSyncThreads               = "github.sync_threads"
-	ToolHydrateThreads            = "github.sync_thread_facets"
-	ToolSyncPortfolio             = "github.sync_pull_request_portfolio"
-	ToolSyncPullRequestFeedback   = "github.sync_pull_request_feedback"
-	ToolSyncCIFailures            = "github.sync_ci_failures"
-	ToolListPullRequestPortfolio  = "corpus.list_pull_requests"
-	ToolFindPortfolioOverlaps     = "corpus.find_pull_request_overlaps"
-	ToolIndexRepositories         = "code.index_repositories"
-	ToolPreparePullRequests       = "workspace.prepare_pull_requests"
-	ToolCheckMergeConflicts       = "workspace.check_merge_conflicts"
-	ToolInspectCommitChanges      = "workspace.inspect_commit_changes"
-	ToolPlanSemanticCommits       = "workspace.plan_semantic_commits"
-	ToolQueryDeepWiki             = "research.query_deepwiki"
-	ToolCreateWorkspace           = "workspace.create"
-	ToolAdoptWorkspace            = "workspace.adopt"
-	ToolDefineValidation          = "validation.define"
-	ToolRunValidation             = "validation.run"
-	ToolAttachValidationReceipt   = "validation.attach_receipt"
-	ToolStartInvestigation        = "workflow.start_investigation"
-	ToolRecordHypothesis          = "workflow.record_hypothesis"
-	ToolFindRelatedWork           = "workflow.find_related_work"
-	ToolPromoteOpportunity        = "workflow.promote_opportunity"
-	ToolPrepareContribution       = "workflow.prepare_contribution"
-	ToolVerifyPublishedDraft      = "workflow.verify_published_draft"
-	ToolExportManifest            = "workflow.export_manifest"
-	ToolLinkPullRequest           = "workflow.link_pull_request"
+	ToolSearchRepositories           = "corpus.search_repositories"
+	ToolSearchThreads                = "corpus.search_threads"
+	ToolSearchCode                   = "corpus.search_code"
+	ToolGetRepositories              = "corpus.get_repositories"
+	ToolGetThreads                   = "corpus.get_threads"
+	ToolGetThreadFacets              = "corpus.get_thread_facets"
+	ToolRankThreads                  = "corpus.rank_contribution_candidates"
+	ToolFindPrecedents               = "corpus.find_precedents"
+	ToolPrepareIssueSet              = "workflow.prepare_issue_set"
+	ToolExplainMatch                 = "corpus.explain_match"
+	ToolFindClusters                 = "corpus.find_clusters"
+	ToolFindNeighbors                = "corpus.find_neighbors"
+	ToolGetCoverage                  = "corpus.get_coverage"
+	ToolBuildRepositoryDossier       = "workflow.build_repository_dossier"
+	ToolMineRepositoryFixPatterns    = "workflow.mine_repository_fix_patterns"
+	ToolPreviewRepositoryFixPatterns = "corpus.preview_fix_patterns"
+	ToolGetJob                       = "jobs.get"
+	ToolCancelJob                    = "jobs.cancel"
+	ToolSearchGitHubRepositories     = "github.search_repositories"
+	ToolSyncRepositoryContext        = "github.sync_repository_context"
+	ToolSyncThreads                  = "github.sync_threads"
+	ToolHydrateThreads               = "github.sync_thread_facets"
+	ToolSyncPortfolio                = "github.sync_pull_request_portfolio"
+	ToolSyncPullRequestFeedback      = "github.sync_pull_request_feedback"
+	ToolSyncCIFailures               = "github.sync_ci_failures"
+	ToolListPullRequestPortfolio     = "corpus.list_pull_requests"
+	ToolFindPortfolioOverlaps        = "corpus.find_pull_request_overlaps"
+	ToolIndexRepositories            = "code.index_repositories"
+	ToolPreparePullRequests          = "workspace.prepare_pull_requests"
+	ToolCheckMergeConflicts          = "workspace.check_merge_conflicts"
+	ToolInspectCommitChanges         = "workspace.inspect_commit_changes"
+	ToolPlanSemanticCommits          = "workspace.plan_semantic_commits"
+	ToolQueryDeepWiki                = "research.query_deepwiki"
+	ToolCreateWorkspace              = "workspace.create"
+	ToolAdoptWorkspace               = "workspace.adopt"
+	ToolDefineValidation             = "validation.define"
+	ToolRunValidation                = "validation.run"
+	ToolAttachValidationReceipt      = "validation.attach_receipt"
+	ToolStartInvestigation           = "workflow.start_investigation"
+	ToolRecordHypothesis             = "workflow.record_hypothesis"
+	ToolFindRelatedWork              = "workflow.find_related_work"
+	ToolPromoteOpportunity           = "workflow.promote_opportunity"
+	ToolPrepareContribution          = "workflow.prepare_contribution"
+	ToolVerifyPublishedDraft         = "workflow.verify_published_draft"
+	ToolExportManifest               = "workflow.export_manifest"
+	ToolLinkPullRequest              = "workflow.link_pull_request"
 )
 
 // InspectCommitChangesInput selects one managed workspace.
@@ -391,9 +392,10 @@ type PublishedDraftVerificationOutput struct {
 
 // ExportManifestInput selects bounded local evidence for one contribution manifest.
 type ExportManifestInput struct {
-	OpportunityID string                    `json:"opportunity_id" jsonschema:"Opportunity ID"`
-	WorkspaceID   string                    `json:"workspace_id,omitempty" jsonschema:"Managed workspace ID to bind"`
-	PullRequest   *ManifestPullRequestInput `json:"pull_request,omitempty" jsonschema:"Exact stored pull request to include"`
+	OpportunityID  string                    `json:"opportunity_id" jsonschema:"Opportunity ID"`
+	WorkspaceID    string                    `json:"workspace_id,omitempty" jsonschema:"Managed workspace ID to bind"`
+	PullRequest    *ManifestPullRequestInput `json:"pull_request,omitempty" jsonschema:"Exact stored pull request to include"`
+	CorpusRevision *int64                    `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin for the source evidence"`
 }
 
 // ManifestPullRequestInput identifies one exact stored pull request.
@@ -405,11 +407,12 @@ type ManifestPullRequestInput struct {
 
 // ManifestOutput returns the stable identity and full in-toto-shaped statement.
 type ManifestOutput struct {
-	ManifestID    string             `json:"manifest_id" jsonschema:"Stable sha256-prefixed manifest ID"`
-	ContentSHA256 string             `json:"content_sha256" jsonschema:"Hex SHA-256 of stable manifest content"`
-	SchemaVersion string             `json:"schema_version" jsonschema:"Contribution manifest predicate schema version"`
-	Status        string             `json:"status" jsonschema:"Overall completeness status"`
-	Statement     manifest.Statement `json:"statement" jsonschema:"Typed in-toto-shaped evidence statement owned by GitContribute"`
+	ManifestID     string             `json:"manifest_id" jsonschema:"Stable sha256-prefixed manifest ID"`
+	ContentSHA256  string             `json:"content_sha256" jsonschema:"Hex SHA-256 of stable manifest content"`
+	SchemaVersion  string             `json:"schema_version" jsonschema:"Contribution manifest predicate schema version"`
+	Status         string             `json:"status" jsonschema:"Overall completeness status"`
+	CorpusRevision int64              `json:"corpus_revision" jsonschema:"Corpus revision observed when this manifest was published or read"`
+	Statement      manifest.Statement `json:"statement" jsonschema:"Typed in-toto-shaped evidence statement owned by GitContribute"`
 }
 
 // EvidenceInput filters and bounds stored evidence.
@@ -464,6 +467,7 @@ type RankOpportunitiesInput struct {
 	Repositories            []RepositoryRef `json:"repositories" jsonschema:"Required 1-50 stored repositories"`
 	Limit                   int             `json:"limit,omitempty" jsonschema:"Result bound from 1-100"`
 	MaxResultsPerRepository int             `json:"max_results_per_repository,omitempty" jsonschema:"Per-repository bound from 1-100"`
+	CorpusRevision          *int64          `json:"corpus_revision,omitempty" jsonschema:"Optional corpus revision pin from a previous offline read"`
 }
 
 // OpportunityCandidateOutput describes one ranked contribution candidate.
@@ -499,12 +503,13 @@ type RepositoryOpportunitySummaryOutput struct {
 // RankOpportunitiesOutput combines deterministic cross-repository ranking with
 // per-repository coverage or availability results.
 type RankOpportunitiesOutput struct {
-	Status       string                                          `json:"status"`
-	Candidates   []OpportunityCandidateOutput                    `json:"candidates"`
-	Repositories []BatchItem[RepositoryOpportunitySummaryOutput] `json:"repositories"`
-	GeneratedAt  string                                          `json:"generated_at"`
-	Total        int                                             `json:"total"`
-	Truncated    bool                                            `json:"truncated"`
+	Status         string                                          `json:"status"`
+	Candidates     []OpportunityCandidateOutput                    `json:"candidates"`
+	Repositories   []BatchItem[RepositoryOpportunitySummaryOutput] `json:"repositories"`
+	GeneratedAt    string                                          `json:"generated_at"`
+	Total          int                                             `json:"total"`
+	Truncated      bool                                            `json:"truncated"`
+	CorpusRevision int64                                           `json:"corpus_revision"`
 }
 
 // ReadinessInput selects a contribution opportunity readiness report.

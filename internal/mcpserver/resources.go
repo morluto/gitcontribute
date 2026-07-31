@@ -110,9 +110,22 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 		return s.readCIFailureResource(ctx, req)
 	case "ci-job-log":
 		return s.readCIJobLogResource(ctx, req)
+	case "code-index":
+		return s.readCodeIndexResource(ctx, req)
 	default:
 		return nil, mcp.ResourceNotFoundError(req.uri)
 	}
+}
+
+func (s *Server) readCodeIndexResource(ctx context.Context, req resourceRequest) (mcpcontract.CodeIndexArtifact, error) {
+	if len(req.parts) != 3 || strings.TrimSpace(req.parts[0]) == "" || strings.TrimSpace(req.parts[1]) == "" || strings.TrimSpace(req.parts[2]) == "" {
+		return mcpcontract.CodeIndexArtifact{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	reader, ok := s.reader.(CodeIndexReader)
+	if !ok {
+		return mcpcontract.CodeIndexArtifact{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	return reader.CodeIndexArtifact(ctx, req.parts[0], req.parts[1], req.parts[2])
 }
 
 func (s *Server) readThreadFacetResource(ctx context.Context, req resourceRequest) (map[string]any, error) {

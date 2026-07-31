@@ -55,7 +55,7 @@ func (s *Service) syncProvidedThreadHeaders(ctx context.Context, repo contracts.
 		}
 	}()
 	writer := &syncThreadWriter{
-		ctx: ctx, corpus: c, repositoryID: stored.ID, kind: "pull_request", sourceUpdatedAt: sourceUpdatedAt,
+		ctx: ctx, corpus: c, owner: ref.Owner, repo: ref.Repo, repositoryID: stored.ID, kind: "pull_request", sourceUpdatedAt: sourceUpdatedAt,
 	}
 	if err := writer.storeAll(issues); err != nil {
 		return nil, err
@@ -67,7 +67,7 @@ func (s *Service) syncProvidedThreadHeaders(ctx context.Context, repo contracts.
 		return nil, err
 	}
 	return &contracts.SyncResult{
-		Repo: repo, Updated: writer.updated, Requests: 0, PlannedRequests: 0, RequestBudget: 0,
+		Repo: repo, Threads: writer.threads, Updated: writer.updated, Requests: 0, PlannedRequests: 0, RequestBudget: 0,
 		Message: fmt.Sprintf("stored %d provided thread headers", writer.updated),
 	}, nil
 }
@@ -132,7 +132,7 @@ func (s *Service) syncThreadHeaders(ctx context.Context, repo contracts.RepoRef,
 		return nil, err
 	}
 	return &contracts.SyncResult{
-		Repo: repo, Updated: selection.updated, Requests: budget.used, PlannedRequests: plan.plannedRequests,
+		Repo: repo, Threads: selection.threads, Updated: selection.updated, Requests: budget.used, PlannedRequests: plan.plannedRequests,
 		RequestBudget: syncOpts.MaxRequests, Capped: requestCapped,
 		Message: fmt.Sprintf("fetched %d thread headers across %d thread requests", selection.updated, selection.requests),
 	}, nil

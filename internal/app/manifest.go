@@ -25,8 +25,9 @@ const manifestSnapshotAttempts = 3
 
 // ManifestOptions selects optional local workspace and exact stored PR inputs.
 type ManifestOptions struct {
-	WorkspaceID string
-	PullRequest *ManifestPullRequest
+	WorkspaceID    string
+	PullRequest    *ManifestPullRequest
+	CorpusRevision *int64
 }
 
 // ManifestPullRequest identifies one exact stored pull request.
@@ -38,30 +39,52 @@ type ManifestPullRequest struct {
 
 // ContributionManifest assembles and persists one bounded local evidence statement.
 func (s *Service) ContributionManifest(ctx context.Context, opportunityID string, opts ManifestOptions) (*manifest.Statement, error) {
+	statement, _, err := s.contributionManifestWithRevision(ctx, opportunityID, opts)
+	return statement, err
+}
+
+// contributionManifestWithRevision returns the revision validated while the
+// statement was assembled. Persisting the statement advances the corpus, so a
+// later standalone revision read would identify the write rather than the
+// evidence selected by this manifest.
+func (s *Service) contributionManifestWithRevision(ctx context.Context, opportunityID string, opts ManifestOptions) (*manifest.Statement, int64, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	for attempt := 0; attempt < manifestSnapshotAttempts; attempt++ {
+		revision, err := c.CorpusRevision(ctx)
+		if err != nil {
+			return nil, 0, err
+		}
+		if opts.CorpusRevision != nil && *opts.CorpusRevision != revision {
+			return nil, 0, &corpus.StaleCorpusRevisionError{Expected: *opts.CorpusRevision, Current: revision}
+		}
 		watch, err := c.BeginChangeWatch(ctx)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		statement, err := s.assembleContributionManifest(ctx, c, opportunityID, opts)
 		if err != nil {
 			_ = watch.Close()
-			return nil, err
+			return nil, 0, err
 		}
 		unchanged, watchErr := watch.Unchanged(ctx)
 		closeErr := watch.Close()
 		if watchErr != nil || closeErr != nil {
-			return nil, errors.Join(watchErr, closeErr)
+			return nil, 0, errors.Join(watchErr, closeErr)
 		}
 		if !unchanged {
 			continue
 		}
+		if err := c.RequireCorpusRevision(ctx, revision); err != nil {
+			if opts.CorpusRevision == nil && corpus.IsStaleCorpusRevision(err) {
+				continue
+			}
+			return nil, 0, err
+		}
 		if err := validateManifestReferences(statement.Predicate); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		pullRequestRef := ""
 		if statement.Predicate.PullRequest != nil {
@@ -69,11 +92,11 @@ func (s *Service) ContributionManifest(ctx context.Context, opportunityID string
 			pullRequestRef = fmt.Sprintf("%s/%s#%d", pr.Owner, pr.Repo, pr.Number)
 		}
 		if err := c.SaveContributionManifest(ctx, statement, opts.WorkspaceID, pullRequestRef); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
-		return statement, nil
+		return statement, revision, nil
 	}
-	return nil, errors.New("corpus changed while assembling contribution manifest; retry")
+	return nil, 0, errors.New("corpus changed while assembling contribution manifest; retry")
 }
 
 func (s *Service) assembleContributionManifest(ctx context.Context, c *corpus.Corpus, opportunityID string, opts ManifestOptions) (*manifest.Statement, error) {

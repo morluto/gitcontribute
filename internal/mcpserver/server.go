@@ -82,6 +82,12 @@ type FixPatternReader interface {
 	GetFixPatternReport(context.Context, string) (mcpcontract.FixPatternReport, error)
 }
 
+// FixPatternPreviewReader exposes bounded analytical fix-pattern reads without
+// job creation, hydration, persistence, or network access.
+type FixPatternPreviewReader interface {
+	PreviewRepositoryFixPatterns(context.Context, mcpcontract.PreviewRepositoryFixPatternsInput) (mcpcontract.FixPatternReport, error)
+}
+
 // FixPatternWorkflow keeps submission and persisted report retrieval together
 // so an advertised workflow never returns an unreadable resource link.
 type FixPatternWorkflow interface {
@@ -92,6 +98,12 @@ type FixPatternWorkflow interface {
 // CodeIndexer safely acquires and indexes repository code.
 type CodeIndexer interface {
 	IndexRepositories(context.Context, mcpcontract.IndexRepositoriesInput) (mcpcontract.JobReference, error)
+}
+
+// CodeIndexReader exposes one immutable indexed-commit handoff through the
+// resource plane. It is intentionally separate from the acquisition writer.
+type CodeIndexReader interface {
+	CodeIndexArtifact(context.Context, string, string, string) (mcpcontract.CodeIndexArtifact, error)
 }
 
 // MergeConflictReader performs local, non-mutating Git comparisons.
@@ -277,6 +289,7 @@ func (s *Server) register() {
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
 			requireTogether(schema, "owner", "repo")
+			setMinimum(schema, "corpus_revision", 0)
 		}), output: outputSchema[mcpcontract.SearchCodeOutput]("One page of stored code matches."), handler: s.searchCode,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.FindClustersInput, mcpcontract.FindClustersOutput]{
@@ -286,6 +299,7 @@ func (s *Server) register() {
 			setArrayBounds(schema, "targets", 1, 20)
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
+			setMinimum(schema, "corpus_revision", 0)
 			if target := schema.schema.Defs["ClusterTarget"]; target != nil {
 				targetSchema := &schemaBuilder{schema: target, err: schema.err}
 				setEnum(targetSchema, "kind", "issue", "pull_request")
@@ -301,6 +315,7 @@ func (s *Server) register() {
 			setArrayBounds(schema, "threads", 1, 20)
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 10)
+			setMinimum(schema, "corpus_revision", 0)
 			if thread := schema.schema.Defs["ThreadRef"]; thread != nil {
 				threadSchema := &schemaBuilder{schema: thread, err: schema.err}
 				setEnum(threadSchema, "kind", "issue", "pull_request")
@@ -311,7 +326,11 @@ func (s *Server) register() {
 	addCatalogTool(s, catalogTool[mcpcontract.GetCoverageInput, mcpcontract.GetCoverageOutput]{
 		name: mcpcontract.ToolGetCoverage, title: "Get stored facet coverage in one batch",
 		description: "Read offline facet coverage for up to 100 repository or exact-thread targets with ordered item-level outcomes.",
-		annotations: readOnly, input: inputSchema[mcpcontract.GetCoverageInput](func(sc *schemaBuilder) { setArrayBounds(sc, "targets", 1, 100) }),
+		annotations: readOnly, input: inputSchema[mcpcontract.GetCoverageInput](func(sc *schemaBuilder) {
+			setArrayBounds(sc, "targets", 1, 100)
+			configureCoverageTargetSchema(sc)
+			setMinimum(sc, "corpus_revision", 0)
+		}),
 		output: outputSchema[mcpcontract.GetCoverageOutput]("Ordered local repository or thread facet coverage."), handler: s.getCoverage,
 	})
 	s.registerResourceTemplates()
@@ -381,6 +400,13 @@ func (s *Server) getCoverage(ctx context.Context, _ *mcp.CallToolRequest, in mcp
 		return nil, mcpcontract.GetCoverageOutput{}, mcpcontract.InvalidArgument("targets", "must contain 1 to 100 items", map[string]any{
 			"targets": []map[string]string{{"owner": "acme", "repo": "rocket"}},
 		})
+	}
+	for i, target := range in.Targets {
+		repositoryLevel := target.Kind == "" && target.Number == 0
+		exactThread := (target.Kind == "issue" || target.Kind == "pull_request") && target.Number > 0
+		if !repositoryLevel && !exactThread {
+			return nil, mcpcontract.GetCoverageOutput{}, mcpcontract.InvalidArgument(fmt.Sprintf("targets[%d]", i), "must contain owner/repo alone or owner/repo/kind/positive number", map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 42})
+		}
 	}
 	out, err := s.reader.GetCoverage(ctx, in)
 	return nil, out, err

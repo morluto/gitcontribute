@@ -15,7 +15,7 @@ github.sync_repository_context -> jobs.get -> corpus.get_repositories
 research.query_deepwiki
 github.sync_threads -> jobs.get -> corpus.rank_contribution_candidates
 github.sync_thread_facets -> jobs.get -> corpus.get_thread_facets
-corpus.find_precedents -> workflow.find_related_work
+corpus.find_precedents
 workflow.prepare_issue_set
 ```
 
@@ -58,6 +58,13 @@ explicit `raw_query` field; there is no deprecated alias.
 - `corpus.find_clusters` and `corpus.find_neighbors` accept up to 20 repository
   or source-thread targets respectively. Their ordered item results isolate
   missing or invalid targets instead of forcing scalar retry loops.
+- Revision-bound offline reads return a `corpus_revision`. The revision-bearing
+  search, coverage, precedent, cluster, neighbor, portfolio, code, and issue-set
+  surfaces accept that value as a pin for a composed follow-up read. A stale pin
+  is an unavailable result; reread only after an explicit, bounded
+  synchronization job. Other point reads and durable resources may omit a
+  revision, so do not infer that they share a snapshot unless their contract
+  returns and accepts the pin. Reads never refresh the corpus implicitly.
 - `corpus.rank_contribution_candidates` requires one to 50 repositories. Its derived ranking is
   intentionally non-paginated; inspect `total` and `truncated`, then raise the
   limit or narrow the repository set when more candidates are needed. Per-repo
@@ -92,8 +99,9 @@ categories over an explicit observation window. It searches the local corpus
 first, refreshes only a bounded set of finalists whose merge outcome is
 unknown, and persists a typed report. `candidate_limit`, `hydration_limit`, and
 `representative_limit` bound search, network work, and returned context
-independently. Set `hydration_limit: 0` to request a strictly offline analysis;
-otherwise the workflow performs GitHub reads and idempotent local writes.
+independently. The durable operation always creates a job and persists its
+report. Use `corpus.preview_fix_patterns` when the analysis must be strictly
+offline and must create no job, artifact, hydration, or local write.
 
 Coverage reports candidate matches, unique pull requests, unknown outcomes
 before and after hydration, hydration failures, and candidate truncation.
@@ -105,6 +113,11 @@ relationship. A similar closed PR is never promoted to accepted-fix evidence.
 Relationship and proof-style labels are bounded lexical projections, so the
 report preserves their supporting phrase and states that similarity is not
 causal proof.
+
+For an analysis that must not create a job, artifact, hydration, or write, use
+`corpus.preview_fix_patterns`. It returns `persisted: false`, zero hydration,
+and the captured `corpus_revision`. The durable operation remains the path for
+persisted reports.
 
 ## Exact issue-set preparation
 
@@ -207,6 +220,31 @@ Repository and dossier absence have different recovery paths:
   is actually required.
 
 Reading the dossier resource again cannot resolve either state.
+
+## Canonical source audit
+
+Use this order when producing a source-backed audit or contribution handoff:
+
+```text
+coverage -> explicit sync -> jobs.get -> offline reread -> duplicate checks -> live verification -> receipt attachment -> evidence/draft handoff
+```
+
+Start with `corpus.get_coverage` and treat missing or incomplete coverage as
+unknown. If current evidence is required, choose a bounded explicit GitHub
+sync, poll it with `jobs.get`, and then perform the offline reread. Use the
+reread's returned `corpus_revision` for duplicate checks over that same state.
+Perform live verification after local evidence selection, attach a producer-neutral
+validation receipt, and hand the exact resource and any returned revision
+references to the evidence or draft workflow. Resources that do not expose a
+revision are point-in-time reads and should be reread after an explicit sync.
+Larger persisted payloads are always read with MCP `resources/read` using the
+exact opaque URI returned by the tool.
+
+Completed code-index jobs return a typed artifact containing repository, commit
+SHA, corpus revision, manifest identity and digest, file/truncation counts, and
+an exact `gitcontribute://code-index/...` resource. Consume that URI through
+`resources/read`; do not infer an artifact identity from a repository name
+alone.
 
 `corpus.get_coverage` accepts up to 100 ordered repository or exact-thread
 targets. `jobs.cancel` accepts up to 100 IDs and returns isolated item outcomes;

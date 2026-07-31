@@ -122,7 +122,7 @@ func jobResultToMCP(job *contracts.JobResult, includeDetails bool) mcpcontract.G
 			out.Artifacts, out.FollowUp = jobArtifactsAndFollowUp(job, total)
 		case "queued", "running":
 			out.FollowUp = &mcpcontract.JobFollowUp{
-				Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{job.ID}}, Reason: "Poll this job until execution_state is terminal.",
+				Tool: mcpcontract.ToolGetJob, Arguments: &mcpcontract.ToolCallArguments{IDs: []string{job.ID}}, RetryAfterMS: mcpcontract.NonNegativeInt(retryAfter), Reason: "Poll this job until execution_state is terminal.",
 			}
 		}
 	}
@@ -184,170 +184,23 @@ func jobResultStatus(job *contracts.JobResult) string {
 	return result.Status
 }
 
-func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
-	followUp := func(tool, uri, reason string) *mcpcontract.JobFollowUp {
-		return &mcpcontract.JobFollowUp{Tool: tool, ResourceURI: uri, Reason: reason}
-	}
-	batch := func(kind, tool, reason string) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
-		count := total
-		var result struct {
-			Items []struct {
-				Key string `json:"key"`
-			} `json:"items"`
+func portfolioReadFollowUpArguments(request mcpcontract.SyncPortfolioInput, login string, references []string) *mcpcontract.ToolCallArguments {
+	limit := request.Limit
+	state := request.State
+	if request.Selection == "authored" {
+		if login != "" {
+			return &mcpcontract.ToolCallArguments{Authors: []string{login}, State: state, Limit: limit, View: "compact"}
 		}
-		if json.Unmarshal([]byte(job.Result), &result) == nil && result.Items != nil {
-			count = len(result.Items)
-		}
-		references := make([]string, 0, min(len(result.Items), 100))
-		for _, item := range result.Items {
-			if item.Key != "" && len(references) < 100 {
-				references = append(references, item.Key)
-			}
-		}
-		value := mcpcontract.NonNegativeInt(count)
-		follow := followUp(tool, "", reason)
-		follow.Arguments = jobFollowUpArguments(job)
-		return []mcpcontract.JobArtifactReference{{
-			Kind: kind, Count: &value, References: references, ReferencesTruncated: len(result.Items) > len(references),
-		}}, follow
-	}
-	switch job.Kind {
-	case "mine_repository_fix_patterns":
-		uri := "gitcontribute://fix-pattern-report/" + job.ID
-		return []mcpcontract.JobArtifactReference{{Kind: "fix_pattern_report", ID: job.ID, URI: uri}},
-			followUp("", uri, "Read the persisted typed fix-pattern report.")
-	case "build_repository_dossier":
-		var request struct {
-			Owner string `json:"owner"`
-			Repo  string `json:"repo"`
-		}
-		if json.Unmarshal([]byte(job.Request), &request) == nil && request.Owner != "" && request.Repo != "" {
-			uri := fmt.Sprintf("gitcontribute://dossier/%s/%s", request.Owner, request.Repo)
-			return []mcpcontract.JobArtifactReference{{Kind: "dossier", ID: request.Owner + "/" + request.Repo, URI: uri}},
-				followUp("", uri, "Read the persisted typed dossier resource.")
-		}
-	case "create_workspace":
-		var result struct {
-			ID string `json:"id"`
-		}
-		if json.Unmarshal([]byte(job.Result), &result) == nil && result.ID != "" {
-			return []mcpcontract.JobArtifactReference{{Kind: "workspace", ID: result.ID}},
-				followUp(mcpcontract.ToolInspectCommitChanges, "", "Inspect the managed workspace before planning commits.")
-		}
-	case "run_validation":
-		var result struct {
-			ID string `json:"id"`
-		}
-		if json.Unmarshal([]byte(job.Result), &result) == nil && result.ID != "" {
-			return []mcpcontract.JobArtifactReference{{Kind: "validation_run", ID: result.ID}}, nil
-		}
-	case "run_validation_group":
-		var result struct {
-			ID string `json:"id"`
-		}
-		if json.Unmarshal([]byte(job.Result), &result) == nil && result.ID != "" {
-			return []mcpcontract.JobArtifactReference{{Kind: "validation_group", ID: result.ID}}, nil
-		}
-	case "sync_repository_context":
-		return batch("repository_batch", mcpcontract.ToolGetRepositories, "Read synchronized repository facts and coverage from the offline corpus.")
-	case "sync_threads":
-		return batch("thread_batch", mcpcontract.ToolGetThreads, "Read synchronized thread facts and coverage from the offline corpus.")
-	case jobKindSyncThreadFacets:
-		var request mcpcontract.HydrateThreadsInput
-		_ = json.Unmarshal([]byte(job.Request), &request)
-		refs := append([]mcpcontract.ThreadRef(nil), request.Threads...)
-		return facetBatchArtifact(refs, request.Facets)
-	case jobKindSyncPullRequestPortfolio:
-		var result struct {
-			PullRequests []string `json:"pull_requests"`
-			Refreshed    int      `json:"refreshed"`
-			Failures     []struct {
-				Reference    string `json:"reference"`
-				Status       string `json:"status"`
-				Reason       string `json:"reason"`
-				Message      string `json:"message"`
-				RetryAfterMS int    `json:"retry_after_ms"`
-			} `json:"failures"`
-		}
-		if json.Unmarshal([]byte(job.Result), &result) == nil {
-			value := mcpcontract.NonNegativeInt(result.Refreshed)
-			failures := make([]mcpcontract.JobArtifactFailure, len(result.Failures))
-			for i, failure := range result.Failures {
-				failures[i] = mcpcontract.JobArtifactFailure{
-					Reference: failure.Reference, Status: mcpcontract.BatchItemStatus(failure.Status), Reason: failure.Reason,
-					Message: failure.Message, RetryAfterMS: mcpcontract.NonNegativeInt(failure.RetryAfterMS),
-				}
-			}
-			return []mcpcontract.JobArtifactReference{{
-				Kind: "pull_request_batch", Count: &value, References: append([]string(nil), result.PullRequests...), Failures: failures,
-			}}, followUp(mcpcontract.ToolListPullRequestPortfolio, "", "Read these refreshed pull requests from the offline portfolio.")
-		}
-	case "sync_pull_request_feedback", "sync_ci_failures":
-		var result pullRequestWorkflowResult
-		if json.Unmarshal([]byte(job.Result), &result) == nil {
-			kind := "pull_request_feedback"
-			tool := mcpcontract.ToolSyncPullRequestFeedback
-			reason := "Read the persisted feedback snapshots through their resource links."
-			if job.Kind == "sync_ci_failures" {
-				kind, tool = "ci_failure_report", mcpcontract.ToolSyncCIFailures
-				reason = "Read the persisted CI reports and bounded job logs through their resource links."
-			}
-			artifact := mcpcontract.JobArtifactReference{Kind: kind}
-			if len(result.Items) == 0 {
-				var request struct {
-					PullRequests []mcpcontract.ThreadRef `json:"pull_requests"`
-				}
-				if json.Unmarshal([]byte(job.Request), &request) == nil {
-					for _, ref := range request.PullRequests {
-						resourceKind := "pull-request-feedback"
-						if job.Kind == "sync_ci_failures" {
-							resourceKind = "ci-failure-report"
-						}
-						artifact.References = append(artifact.References, fmt.Sprintf(
-							"gitcontribute://%s/%s/%s/%d", resourceKind, ref.Owner, ref.Repo, ref.Number,
-						))
-					}
-				}
-			}
-			for _, item := range result.Items {
-				if item.Status == "complete" {
-					artifact.References = append(artifact.References, item.ResourceURI)
-					continue
-				}
-				artifact.Failures = append(artifact.Failures, mcpcontract.JobArtifactFailure{
-					Reference: item.Key, Status: item.Status, Reason: item.Code, Message: item.Message,
-					RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfterMS),
-				})
-			}
-			count := mcpcontract.NonNegativeInt(len(artifact.References))
-			artifact.Count = &count
-			return []mcpcontract.JobArtifactReference{artifact}, followUp(tool, "", reason)
-		}
-	case "index_repositories":
-		return batch("code_index", mcpcontract.ToolSearchCode, "Search the locally indexed code corpus.")
-	}
-	return nil, nil
-}
-
-func jobFollowUpArguments(job *contracts.JobResult) *mcpcontract.ToolCallArguments {
-	switch job.Kind {
-	case "sync_repository_context":
-		var request mcpcontract.SyncRepositoryContextInput
-		if json.Unmarshal([]byte(job.Request), &request) == nil {
-			return &mcpcontract.ToolCallArguments{Repositories: append([]mcpcontract.RepositoryRef(nil), request.Repositories...)}
-		}
-	case "sync_threads":
-		var request mcpcontract.SyncThreadsInput
-		if json.Unmarshal([]byte(job.Request), &request) == nil {
-			return &mcpcontract.ToolCallArguments{Selection: request.Selection, Repositories: append([]mcpcontract.RepositoryRef(nil), request.Repositories...), Threads: append([]mcpcontract.ThreadRef(nil), request.Threads...), Kind: request.Kind, State: request.State}
-		}
-	case "index_repositories":
-		var request mcpcontract.IndexRepositoriesInput
-		if json.Unmarshal([]byte(job.Request), &request) == nil {
-			return &mcpcontract.ToolCallArguments{Repositories: indexRepositoriesToRefs(request.Repositories)}
+	} else {
+		state = "all"
+		if limit == 0 || limit > len(references) {
+			limit = len(references)
 		}
 	}
-	return nil
+	if limit == 0 {
+		limit = 20
+	}
+	return &mcpcontract.ToolCallArguments{State: state, Limit: limit, View: "compact"}
 }
 
 func facetBatchArtifact(refs []mcpcontract.ThreadRef, facetNames []string) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
@@ -358,14 +211,6 @@ func facetBatchArtifact(refs []mcpcontract.ThreadRef, facetNames []string) ([]mc
 		Reason:    "Read the synchronized facet coverage and canonical facet resources from the offline corpus.",
 	}
 	return []mcpcontract.JobArtifactReference{{Kind: "thread_facet_batch", Count: &value, References: threadRefKeys(refs)}}, follow
-}
-
-func indexRepositoriesToRefs(values []mcpcontract.IndexRepositoryInput) []mcpcontract.RepositoryRef {
-	refs := make([]mcpcontract.RepositoryRef, 0, len(values))
-	for _, value := range values {
-		refs = append(refs, mcpcontract.RepositoryRef{Owner: value.Owner, Repo: value.Repo})
-	}
-	return refs
 }
 
 func threadRefKeys(refs []mcpcontract.ThreadRef) []string {
