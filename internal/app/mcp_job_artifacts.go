@@ -7,7 +7,6 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/contracts"
-	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
@@ -35,13 +34,24 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 		return pullRequestWorkflowJobArtifact(job)
 	case "index_repositories":
 		return indexRepositoriesJobArtifact(job)
+	case jobKindEnsureCoverage:
+		return ensureCoverageJobArtifact(job)
 	default:
 		return nil, nil
 	}
 }
 
+func ensureCoverageJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
+	var result mcpcontract.EnsureCoverageJobResult
+	if json.Unmarshal([]byte(job.Result), &result) != nil || result.SnapshotToken == "" || result.ArtifactDigest == "" {
+		return nil, nil
+	}
+	uri := "gitcontribute://snapshot/" + result.SnapshotToken
+	return []mcpcontract.JobArtifactReference{{Kind: "corpus_snapshot", ID: result.ArtifactDigest, URI: uri}}, resourceFollowUp(uri, "Read the immutable snapshot produced by the coverage workflow.")
+}
+
 func resourceFollowUp(uri, reason string) *mcpcontract.JobFollowUp {
-	return &mcpcontract.JobFollowUp{ResourceURI: uri, Arguments: &mcpcontract.ToolCallArguments{}, Reason: reason}
+	return &mcpcontract.JobFollowUp{Action: mcpcontract.FollowUpAction{Type: "read_resource", ReadResource: &mcpcontract.ResourceReadAction{URI: uri}}, Reason: reason}
 }
 
 func fixPatternJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
@@ -72,9 +82,8 @@ func workspaceJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactRe
 	}
 	return []mcpcontract.JobArtifactReference{{Kind: "workspace", ID: result.ID}},
 		&mcpcontract.JobFollowUp{
-			Tool:      mcpcontract.ToolInspectCommitChanges,
-			Arguments: &mcpcontract.ToolCallArguments{WorkspaceID: result.ID},
-			Reason:    "Inspect the managed workspace before planning commits.",
+			Action: mcpcontract.FollowUpAction{Type: "inspect_commit_changes", InspectCommitChanges: &mcpcontract.InspectCommitChangesInput{WorkspaceID: result.ID}},
+			Reason: "Inspect the managed workspace before planning commits.",
 		}
 }
 
@@ -147,13 +156,12 @@ func repositoryBatchJobArtifact(job *contracts.JobResult, total int) ([]mcpcontr
 	references, _, failures := syncBatchReferences(result, false)
 	value := mcpcontract.NonNegativeInt(count)
 	follow := &mcpcontract.JobFollowUp{
-		Tool:      mcpcontract.ToolGetRepositories,
-		Arguments: &mcpcontract.ToolCallArguments{},
-		Reason:    "Read synchronized repository facts and coverage from the offline corpus.",
+		Action: mcpcontract.FollowUpAction{Type: "get_repositories", GetRepositories: &mcpcontract.GetRepositoriesInput{}},
+		Reason: "Read synchronized repository facts and coverage from the offline corpus.",
 	}
 	var request mcpcontract.SyncRepositoryContextInput
 	if json.Unmarshal([]byte(job.Request), &request) == nil {
-		follow.Arguments.Repositories = append([]mcpcontract.RepositoryRef(nil), request.Repositories...)
+		follow.Action.GetRepositories.Repositories = append([]mcpcontract.RepositoryRef(nil), request.Repositories...)
 	}
 	return []mcpcontract.JobArtifactReference{{
 		Kind: "repository_batch", Count: &value, References: references,
@@ -168,9 +176,8 @@ func threadBatchJobArtifact(job *contracts.JobResult, total int) ([]mcpcontract.
 	var follow *mcpcontract.JobFollowUp
 	if len(threadRefs) > 0 {
 		follow = &mcpcontract.JobFollowUp{
-			Tool:      mcpcontract.ToolGetThreads,
-			Arguments: &mcpcontract.ToolCallArguments{Threads: threadRefs},
-			Reason:    "Read synchronized thread facts and coverage from the offline corpus.",
+			Action: mcpcontract.FollowUpAction{Type: "get_threads", GetThreads: &mcpcontract.GetThreadsInput{Threads: threadRefs}},
+			Reason: "Read synchronized thread facts and coverage from the offline corpus.",
 		}
 	}
 	return []mcpcontract.JobArtifactReference{{
@@ -212,9 +219,8 @@ func portfolioJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactRe
 	var request mcpcontract.SyncPortfolioInput
 	_ = json.Unmarshal([]byte(job.Request), &request)
 	follow := &mcpcontract.JobFollowUp{
-		Tool:      mcpcontract.ToolListPullRequestPortfolio,
-		Arguments: portfolioReadFollowUpArguments(request, result.Login, result.PullRequests),
-		Reason:    "Read these refreshed pull requests from the offline portfolio.",
+		Action: mcpcontract.FollowUpAction{Type: "list_pull_request_portfolio", ListPortfolio: portfolioReadFollowUpArguments(request, result.Login, result.PullRequests)},
+		Reason: "Read these refreshed pull requests from the offline portfolio.",
 	}
 	return []mcpcontract.JobArtifactReference{{
 		Kind: "pull_request_batch", Count: &value, References: append([]string(nil), result.PullRequests...), Failures: failures,
@@ -271,6 +277,9 @@ type indexJobItem struct {
 	CommitSHA      string             `json:"commit_sha"`
 	CorpusRevision int64              `json:"corpus_revision"`
 	IndexManifest  codeindex.Manifest `json:"index_manifest"`
+	ArtifactDigest string             `json:"artifact_digest"`
+	ManifestDigest string             `json:"manifest_digest"`
+	SnapshotToken  string             `json:"snapshot_token"`
 }
 
 type indexJobResult struct {
@@ -303,11 +312,17 @@ func indexRepositoriesJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobAr
 		if !ok || owner == "" || repo == "" {
 			continue
 		}
-		revision := item.CorpusRevision
-		if result.CorpusRevision != 0 {
-			revision = result.CorpusRevision
+		if item.ArtifactDigest == "" {
+			continue
 		}
-		artifact := codeIndexArtifact(domain.RepoRef{Owner: owner, Repo: repo}, item.CommitSHA, item.IndexManifest, revision)
+		artifact := mcpcontract.CodeIndexArtifact{Kind: "code_index", ID: "code-index:" + item.ArtifactDigest,
+			Repository: mcpcontract.RepositoryRef{Owner: owner, Repo: repo}, CommitSHA: item.CommitSHA,
+			CorpusRevision: item.CorpusRevision, SnapshotToken: item.SnapshotToken,
+			ManifestSHA256: item.ManifestDigest, ResourceURI: "gitcontribute://artifact/code-index/" + item.ArtifactDigest}
+		artifact.FollowUp = resourceFollowUp(artifact.ResourceURI, "Read this exact digest-bound artifact through MCP resources/read.")
+		if result.CorpusRevision != 0 {
+			artifact.CorpusRevision = result.CorpusRevision
+		}
 		artifacts = append(artifacts, mcpcontract.JobArtifactReference{Kind: artifact.Kind, ID: artifact.ID, URI: artifact.ResourceURI, CodeIndex: &artifact})
 		if len(completedRefs) < 100 {
 			completedRefs = append(completedRefs, item.Key)
@@ -330,7 +345,7 @@ func firstCodeIndexFollowUp(artifacts []mcpcontract.JobArtifactReference) *mcpco
 		}
 		artifact := reference.CodeIndex
 		return &mcpcontract.JobFollowUp{
-			ResourceURI: artifact.ResourceURI, Arguments: artifact.FollowUp.Arguments,
+			Action: mcpcontract.FollowUpAction{Type: "read_resource", ReadResource: &mcpcontract.ResourceReadAction{URI: artifact.ResourceURI}},
 			Reason: "Read the exact indexed-commit artifact through MCP resources/read.",
 		}
 	}

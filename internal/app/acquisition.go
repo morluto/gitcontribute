@@ -68,6 +68,10 @@ func (s *Service) Acquire(ctx context.Context, repo contracts.RepoRef, remote st
 		if err != nil {
 			return nil, err
 		}
+		artifact, err := c.LatestCodeIndexArtifact(ctx, ref, acq.CommitSHA)
+		if err != nil || artifact == nil {
+			return nil, fmt.Errorf("resolve immutable code-index artifact: %w", err)
+		}
 		return &contracts.AcquisitionResult{
 			Repo:           repo,
 			Remote:         acq.Remote,
@@ -81,6 +85,9 @@ func (s *Service) Acquire(ctx context.Context, repo contracts.RepoRef, remote st
 			Message:        "acquired; snapshot already indexed",
 			IndexManifest:  existing.Manifest,
 			CorpusRevision: revision,
+			ArtifactDigest: artifact.Digest,
+			ManifestDigest: artifact.ManifestSHA256,
+			SnapshotToken:  artifact.SnapshotToken,
 		}, nil
 	}
 
@@ -91,6 +98,10 @@ func (s *Service) Acquire(ctx context.Context, repo contracts.RepoRef, remote st
 	_, inserted, revision, err := c.StoreCodeSnapshotWithRevision(ctx, ref, snapshot)
 	if err != nil {
 		return nil, fmt.Errorf("store code snapshot: %w", err)
+	}
+	artifact, err := c.LatestCodeIndexArtifact(ctx, ref, snapshot.Commit)
+	if err != nil || artifact == nil {
+		return nil, fmt.Errorf("resolve immutable code-index artifact: %w", err)
 	}
 
 	message := "acquired and indexed"
@@ -111,5 +122,8 @@ func (s *Service) Acquire(ctx context.Context, repo contracts.RepoRef, remote st
 		Message:        message,
 		IndexManifest:  snapshot.Manifest,
 		CorpusRevision: revision,
+		ArtifactDigest: artifact.Digest,
+		ManifestDigest: artifact.ManifestSHA256,
+		SnapshotToken:  artifact.SnapshotToken,
 	}, nil
 }
