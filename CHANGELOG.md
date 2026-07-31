@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.17.0](https://github.com/morluto/gitcontribute/compare/v0.16.0...v0.17.0) (2026-07-31)
+
+
+### Features
+
+* **corpus:** bind offline reads to corpus revisions ([6e75235](https://github.com/morluto/gitcontribute/commit/6e7523533a213ae7dbc4827bb36caaf97f3c9136))
+* **corpus:** persist immutable snapshot and index identities ([d1f41e0](https://github.com/morluto/gitcontribute/commit/d1f41e0aedff074bdb6ea290ccebfc1283ae666b))
+* **index:** expose revision-bound code-index artifacts and receipt fixture ([1b17bea](https://github.com/morluto/gitcontribute/commit/1b17beadab28020a57fba5be382feb9256cc3b2f))
+* **mcp:** add typed recovery and coverage workflows ([b37336f](https://github.com/morluto/gitcontribute/commit/b37336f0bce479822040c54f79d79d4baae31f39))
+* **mcp:** adopt typed recovery and facet resources ([8b96251](https://github.com/morluto/gitcontribute/commit/8b962512ca1c1472ae739ab0290cc4daf4648713))
+* **mcp:** bind offline workflows to corpus revisions ([d40f7e9](https://github.com/morluto/gitcontribute/commit/d40f7e91e9ad97e083b2b1d35a7ea830f642f488))
+* **mcp:** complete typed recovery and read-only fix-pattern contracts ([3092e8f](https://github.com/morluto/gitcontribute/commit/3092e8f7f5d7065a636352222b940c7fe25db961))
+* **research:** bind analysis and evidence to provenance ([b73d284](https://github.com/morluto/gitcontribute/commit/b73d2844911695356126a55319bc466629493b1a))
+
+
+### Bug Fixes
+
+* **app:** remove stale reader import ([848af83](https://github.com/morluto/gitcontribute/commit/848af8331653ac26121d69a367109c8b1c9d973b))
+* **cli:** validate repository import boundaries ([170b2fe](https://github.com/morluto/gitcontribute/commit/170b2fe604ddd092aa0bd25d7e4895c905c6378d))
+* **config:** enforce private configuration directories ([49299bb](https://github.com/morluto/gitcontribute/commit/49299bbbc4500afba840684ed33b0e5e7e822904))
+* **corpus:** bind snapshot writes to committed revisions ([fbdf05a](https://github.com/morluto/gitcontribute/commit/fbdf05aef28136f64e9f63ef4f687d4bca48f3cf))
+* **mcp:** complete revision-bound workflow handoffs ([5f83881](https://github.com/morluto/gitcontribute/commit/5f83881b0f0ddc6e5398c9915fce34f36d671b59))
+* **mcp:** expose executable coverage recovery ([4f82564](https://github.com/morluto/gitcontribute/commit/4f82564978429b4682cc4e67f703ee832a07737d))
+* **mcp:** satisfy lint in recovery and facet paths ([20e4add](https://github.com/morluto/gitcontribute/commit/20e4add906d6476b30399c7ebf3fc478457eaebe))
+* **mcp:** self-seed exact pull request feedback sync ([281ec17](https://github.com/morluto/gitcontribute/commit/281ec1747e7d5cd429d00f0ac289483a3d06bb72))
+* **release:** allow manual tag publishing ([96e8162](https://github.com/morluto/gitcontribute/commit/96e8162cbb7a59f34b9fd75eedc75802585d4472))
+* **release:** allow manual tag publishing ([92d6418](https://github.com/morluto/gitcontribute/commit/92d6418ef7d2b21ded6434be6b401a13309d49ca))
+* **release:** skip existing assets during tag recovery ([bdb6e23](https://github.com/morluto/gitcontribute/commit/bdb6e233187a2789fe007367978c6c745d331346))
+* **release:** skip existing assets during tag recovery ([64902a2](https://github.com/morluto/gitcontribute/commit/64902a2147b991be8586d2bdaf49601197a0f774))
+* **release:** use npm trusted publishing ([73e6348](https://github.com/morluto/gitcontribute/commit/73e634859b18d9c0ec26fddcb66f9b81ada3ac6c))
+* **release:** use npm trusted publishing ([b32a535](https://github.com/morluto/gitcontribute/commit/b32a5357c2b83ec8d5a938505c7e4d02e94f8269))
+* tighten snapshot token boundaries and eval timing ([4b4c45d](https://github.com/morluto/gitcontribute/commit/4b4c45d35e8a169c0d06ed7ceda3e60f2884aee1))
+
 ## [0.16.0](https://github.com/morluto/gitcontribute/compare/v0.15.0...v0.16.0) (2026-07-30)
 
 
