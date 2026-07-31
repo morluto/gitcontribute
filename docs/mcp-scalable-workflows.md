@@ -58,13 +58,14 @@ explicit `raw_query` field; there is no deprecated alias.
 - `corpus.find_clusters` and `corpus.find_neighbors` accept up to 20 repository
   or source-thread targets respectively. Their ordered item results isolate
   missing or invalid targets instead of forcing scalar retry loops.
-- Revision-bound offline reads return a `corpus_revision`. The revision-bearing
-  search, coverage, precedent, cluster, neighbor, portfolio, code, and issue-set
-  surfaces accept that value as a pin for a composed follow-up read. A stale pin
-  is an unavailable result; reread only after an explicit, bounded
-  synchronization job. Other point reads and durable resources may omit a
-  revision, so do not infer that they share a snapshot unless their contract
-  returns and accepts the pin. Reads never refresh the corpus implicitly.
+- Search, coverage, precedent, code-search, fix-pattern, and research-brief
+  results carry a query digest, observation watermark, completeness,
+  truncation, and unknown-coverage status. Read-only operations return an
+  `ephemeral:` transaction-bound identity and state that it is not reusable.
+  Call `corpus.ensure_coverage` when a composed workflow needs a durable
+  `snapshot_token`; reading that token either returns its immutable payload or
+  fails with a typed unavailable result. Reads never refresh the corpus or
+  silently substitute current projections.
 - `corpus.rank_contribution_candidates` requires one to 50 repositories. Its derived ranking is
   intentionally non-paginated; inspect `total` and `truncated`, then raise the
   limit or narrow the repository set when more candidates are needed. Per-repo
@@ -116,7 +117,7 @@ causal proof.
 
 For an analysis that must not create a job, artifact, hydration, or write, use
 `corpus.preview_fix_patterns`. It returns `persisted: false`, zero hydration,
-and the captured `corpus_revision`. The durable operation remains the path for
+and the captured snapshot identity. The durable operation remains the path for
 persisted reports.
 
 ## Exact issue-set preparation
@@ -226,13 +227,13 @@ Reading the dossier resource again cannot resolve either state.
 Use this order when producing a source-backed audit or contribution handoff:
 
 ```text
-coverage -> explicit sync -> jobs.get -> offline reread -> duplicate checks -> live verification -> receipt attachment -> evidence/draft handoff
+coverage -> ensure_coverage -> jobs.get -> snapshot-bound offline reread -> duplicate checks -> live verification -> receipt attachment -> evidence/draft handoff
 ```
 
 Start with `corpus.get_coverage` and treat missing or incomplete coverage as
 unknown. If current evidence is required, choose a bounded explicit GitHub
 sync, poll it with `jobs.get`, and then perform the offline reread. Use the
-reread's returned `corpus_revision` for duplicate checks over that same state.
+reread's returned `snapshot_token` for duplicate checks over that same state.
 Perform live verification after local evidence selection, attach a producer-neutral
 validation receipt, and hand the exact resource and any returned revision
 references to the evidence or draft workflow. Resources that do not expose a
@@ -242,7 +243,7 @@ exact opaque URI returned by the tool.
 
 Completed code-index jobs return a typed artifact containing repository, commit
 SHA, corpus revision, manifest identity and digest, file/truncation counts, and
-an exact `gitcontribute://code-index/...` resource. Consume that URI through
+an exact `gitcontribute://artifact/code-index/<artifact-digest>` resource. Consume that URI through
 `resources/read`; do not infer an artifact identity from a repository name
 alone.
 

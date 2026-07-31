@@ -54,6 +54,9 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	if len(out.Coverage) != 1 || out.Coverage[0].Repo != "owner/repo" || out.Coverage[0].Status != "indexed" || !out.Coverage[0].Truncated || out.Coverage[0].IndexedFiles != 1 || out.Coverage[0].SkippedFiles != 2 {
 		t.Fatalf("unexpected code coverage: %+v", out.Coverage)
 	}
+	if !out.Provenance.Truncated || out.Provenance.Complete || out.Provenance.QueryDigestSHA256 == "" {
+		t.Fatalf("unexpected code-search provenance: %+v", out.Provenance)
+	}
 	missing, err := reader.SearchCode(ctx, mcpcontract.SearchCodeInput{Owner: "owner", Repo: "repo", Query: "doesNotExist", Limit: 10})
 	if err != nil {
 		t.Fatal(err)

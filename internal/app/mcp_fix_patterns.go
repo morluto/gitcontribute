@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +39,13 @@ type fixPatternClassification struct {
 	superseded   bool
 }
 
+type fixPatternOperation string
+
+const (
+	fixPatternPreview  fixPatternOperation = "preview"
+	fixPatternWorkflow fixPatternOperation = "workflow"
+)
+
 // MineRepositoryFixPatterns submits one bounded GitHub-read/local-write
 // workflow. It searches stored candidates first and hydrates only finalists
 // whose merge outcome is unknown.
@@ -46,7 +55,7 @@ func (r *MCPReader) MineRepositoryFixPatterns(ctx context.Context, in mcpcontrac
 		return mcpcontract.JobReference{}, err
 	}
 	id, err := r.submitJob(ctx, "mine_repository_fix_patterns", normalized, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.analyzeFixPatterns(ctx, normalized, report, false)
+		return r.runFixPatternOperation(ctx, normalized, report, fixPatternWorkflow)
 	})
 	if err != nil {
 		return mcpcontract.JobReference{}, err
@@ -65,13 +74,13 @@ func (r *MCPReader) PreviewRepositoryFixPatterns(ctx context.Context, in mcpcont
 	}
 	zero := 0
 	normalized.HydrationLimit = &zero
-	return r.analyzeFixPatterns(ctx, normalized, nil, true)
+	return r.runFixPatternOperation(ctx, normalized, nil, fixPatternPreview)
 }
 
 // mineRepositoryFixPatterns remains the executor-local entry point used by
 // focused tests and the durable job adapter.
 func (r *MCPReader) mineRepositoryFixPatterns(ctx context.Context, in mcpcontract.MineRepositoryFixPatternsInput, progress func(string, string) error) (mcpcontract.FixPatternReport, error) {
-	return r.analyzeFixPatterns(ctx, in, progress, false)
+	return r.runFixPatternOperation(ctx, in, progress, fixPatternWorkflow)
 }
 
 // GetFixPatternReport reads the typed terminal result of a pattern-mining job.
@@ -251,10 +260,10 @@ func selectFixPatternHydration(a fixPatternAnalysis, in mcpcontract.MineReposito
 	return refs
 }
 
-func (r *MCPReader) analyzeFixPatterns(ctx context.Context, in mcpcontract.MineRepositoryFixPatternsInput, progress func(string, string) error, readOnly bool) (mcpcontract.FixPatternReport, error) {
+func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.MineRepositoryFixPatternsInput, progress func(string, string) error, operation fixPatternOperation) (mcpcontract.FixPatternReport, error) {
 	var c *corpus.Corpus
 	var err error
-	if readOnly {
+	if operation == fixPatternPreview {
 		c, err = r.openReadOnlyCorpus(ctx)
 	} else {
 		c, err = r.openCorpus(ctx)
@@ -288,7 +297,7 @@ func (r *MCPReader) analyzeFixPatterns(ctx context.Context, in mcpcontract.MineR
 	hydrationRefs := selectFixPatternHydration(analysis, in)
 
 	hydrated, failures := 0, make([]mcpcontract.FixPatternHydrationFailure, 0)
-	if !readOnly && len(hydrationRefs) > 0 {
+	if operation == fixPatternWorkflow && len(hydrationRefs) > 0 {
 		// Validate the candidate read before making the workflow's deliberate
 		// corpus mutation. The report is then assembled again from the
 		// post-hydration state, rather than comparing the current revision with
@@ -382,7 +391,9 @@ func (r *MCPReader) analyzeFixPatterns(ctx context.Context, in mcpcontract.MineR
 	if err := finishCorpusRead(ctx, c, revision); err != nil {
 		return mcpcontract.FixPatternReport{}, err
 	}
-	return mcpcontract.FixPatternReport{
+	inputBytes, _ := json.Marshal(in)
+	queryHash := sha256.Sum256(inputBytes)
+	report := mcpcontract.FixPatternReport{
 		Status: status, Repository: in.Repository, TimeWindow: in.TimeWindow,
 		GeneratedAt: r.now().Format(time.RFC3339),
 		Coverage: mcpcontract.FixPatternCoverage{
@@ -391,8 +402,22 @@ func (r *MCPReader) analyzeFixPatterns(ctx context.Context, in mcpcontract.MineR
 			Hydrated: mcpcontract.NonNegativeInt(hydrated), HydrationFailed: mcpcontract.NonNegativeInt(len(failures)),
 			UnknownAfter: mcpcontract.NonNegativeInt(countUnknownCandidates(candidates)), CandidateTruncated: analysis.candidateTruncated,
 		},
-		Clusters: reportClusters, Failures: failures, Limitations: limitations, Persisted: !readOnly, CorpusRevision: revision,
-	}, nil
+		Clusters: reportClusters, Failures: failures, Limitations: limitations, Persisted: operation == fixPatternWorkflow, CorpusRevision: revision,
+		ObservationWatermark: revision, QueryDigestSHA256: hex.EncodeToString(queryHash[:]),
+		Complete: status == "complete", Truncated: analysis.candidateTruncated, UnknownCoverage: countUnknownCandidates(candidates) > 0,
+	}
+	if operation == fixPatternWorkflow {
+		snapshot, err := c.MaterializeReadSnapshot(ctx, corpus.SnapshotMaterialization{Kind: "fix_pattern_report", Scope: in.Repository, SourceManifest: map[string]any{"corpus_revision": revision, "query_digest": report.QueryDigestSHA256}, DerivedVersions: map[string]string{"fix_patterns": "v1"}, Completeness: map[string]bool{"complete": report.Complete, "truncated": report.Truncated, "unknown_coverage": report.UnknownCoverage}, Provenance: map[string]string{"producer": "gitcontribute", "operation": "workflow.mine_repository_fix_patterns"}, Payload: report})
+		if err != nil {
+			return mcpcontract.FixPatternReport{}, err
+		}
+		report.SnapshotToken, report.ArtifactDigest = snapshot.Token, snapshot.ArtifactDigest
+	} else {
+		tokenHash := sha256.Sum256([]byte(fmt.Sprintf("offline-fix-pattern\x00%d\x00%s", revision, report.QueryDigestSHA256)))
+		report.SnapshotToken = "ephemeral:" + hex.EncodeToString(tokenHash[:])
+		report.Limitations = append(report.Limitations, "Preview snapshot identity is transaction-bound and is not a durable resource token because preview performs no local writes.")
+	}
+	return report, nil
 }
 
 func countUnknownCandidates(candidates map[int64]*fixPatternCandidate) int {

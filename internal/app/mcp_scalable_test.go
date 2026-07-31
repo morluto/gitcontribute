@@ -187,10 +187,10 @@ func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
 	}
 
 	out, err := (&MCPReader{svc}).GetCoverage(ctx, mcpcontract.GetCoverageInput{Targets: []mcpcontract.CoverageTarget{
-		{Owner: "acme", Repo: "rocket"},
-		{Owner: "acme", Repo: "missing"},
-		{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 7},
-		{Owner: "acme", Repo: "rocket", Kind: "issue"},
+		{Type: mcpcontract.CoverageTargetRepository, Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}},
+		{Type: mcpcontract.CoverageTargetRepository, Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "missing"}},
+		{Type: mcpcontract.CoverageTargetExactThread, Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}, Thread: &mcpcontract.ExactCoverageThread{Kind: "issue", Number: 7}},
+		{Type: mcpcontract.CoverageTargetExactThread, Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}},
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -209,6 +209,9 @@ func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
 	}
 	if out.Items[3].Status != "unavailable" || out.Items[3].Reason != "invalid_reference" {
 		t.Fatalf("invalid coverage target = %+v", out.Items[3])
+	}
+	if !out.Provenance.UnknownCoverage || out.Provenance.Complete || out.Provenance.QueryDigestSHA256 == "" {
+		t.Fatalf("coverage provenance = %+v", out.Provenance)
 	}
 }
 
@@ -420,7 +423,7 @@ func TestJobResultToMCPPreservesEmptyAndPartialTypedOutcomes(t *testing.T) {
 		ID: "job-running-patterns", Kind: "mine_repository_fix_patterns", Status: "running",
 	}, true)
 	if len(runningPatterns.Artifacts) != 0 || runningPatterns.FollowUp == nil ||
-		runningPatterns.FollowUp.Tool != mcpcontract.ToolGetJob {
+		runningPatterns.FollowUp.Action.Type != "poll_job" {
 		t.Fatalf("running fix-pattern job advertised unavailable artifacts: %+v", runningPatterns)
 	}
 }
@@ -457,8 +460,8 @@ func TestGetJobsDetailedReturnsTypedArtifactsWithoutStoredPayloads(t *testing.T)
 	value := detailed.Items[0].Value
 	if value == nil || len(value.Artifacts) != 1 || value.Artifacts[0].Kind != "dossier" ||
 		value.Artifacts[0].URI != "gitcontribute://dossier/acme/rocket" ||
-		value.FollowUp == nil || value.FollowUp.Tool != "" ||
-		value.FollowUp.ResourceURI != "gitcontribute://dossier/acme/rocket" {
+		value.FollowUp == nil || value.FollowUp.Action.Type != "read_resource" || value.FollowUp.Action.ReadResource == nil ||
+		value.FollowUp.Action.ReadResource.URI != "gitcontribute://dossier/acme/rocket" {
 		t.Fatalf("detailed jobs output lost typed artifact reference: %+v", detailed)
 	}
 }
@@ -493,7 +496,7 @@ func TestSearchGitHubRepositoriesPersistsObservedMetadata(t *testing.T) {
 	if out.NextPage != 3 || out.ResponseFormat != "concise" || len(out.Items) != 1 || out.Items[0].Value == nil || out.Items[0].Value.Ref != "repository:acme/rocket" || *out.Items[0].Value.Stars != 9001 {
 		t.Fatalf("live search result = %+v, options = %+v", out, reader.options)
 	}
-	if out.Items[0].Value.Watchers != nil || len(out.RecoveryPlans) != 1 || len(out.RecoveryPlans[0].Then) != 1 || out.RecoveryPlans[0].Then[0].Tool != mcpcontract.ToolSyncThreads {
+	if out.Items[0].Value.Watchers != nil || len(out.RecoveryPlans) != 1 || len(out.RecoveryPlans[0].Then) != 1 || out.RecoveryPlans[0].Then[0].Type != "sync_threads" {
 		t.Fatalf("concise search context = %+v", out)
 	}
 	if out.Items[0].Value.DossierStatus != "missing" {
@@ -632,6 +635,9 @@ func TestFindPrecedentsUsesClosedAndMergedHistory(t *testing.T) {
 	if got := out.Items[0].Value.Matches[0].RuleVersion; got != "precedent-v1" {
 		t.Fatalf("rule version = %q, want precedent-v1", got)
 	}
+	if out.Provenance.SnapshotToken == "" || out.Provenance.QueryDigestSHA256 == "" {
+		t.Fatalf("precedent provenance = %+v", out.Provenance)
+	}
 }
 
 type fakeDeepWikiReader struct {
@@ -680,7 +686,7 @@ func TestDeepWikiUsesBoundedDefaultAndSteersFocusedRecovery(t *testing.T) {
 	if len(out.Result) != mcpcontract.DeepWikiDefaultOutputBytes || !out.Truncated {
 		t.Fatalf("default DeepWiki bound = %d bytes, truncated=%v", len(out.Result), out.Truncated)
 	}
-	if out.Reason != "output_limit" || out.Recovery == nil || len(out.Recovery.Then) != 1 || out.Recovery.Then[0].Tool != mcpcontract.ToolQueryDeepWiki {
+	if out.Reason != "output_limit" || out.Recovery == nil || len(out.Recovery.Then) != 1 || out.Recovery.Then[0].Type != "query_deepwiki" {
 		t.Fatalf("missing truncation recovery guidance: %+v", out)
 	}
 }
