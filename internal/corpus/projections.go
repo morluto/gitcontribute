@@ -270,6 +270,13 @@ func (c *Corpus) executeSearchProjectionRebuild(ctx context.Context, name, versi
 		sourceRevision, contentHash, string(ProjectionAttemptSucceeded), encodeTime(started), encodeTime(now)); err != nil {
 		return ProjectionState{}, fmt.Errorf("update %s state: %w", name, err)
 	}
+	// projection_states is operational metadata and its migration deliberately
+	// removes the generic revision triggers. A completed explicit rebuild still
+	// changes the read surface, so advance the product-owned identity in the
+	// same transaction as the rebuilt index and state.
+	if _, err := tx.ExecContext(ctx, `UPDATE corpus_state SET revision = revision + 1 WHERE id = 1`); err != nil {
+		return ProjectionState{}, fmt.Errorf("advance corpus revision after %s rebuild: %w", name, err)
+	}
 
 	if err := tx.Commit(); err != nil {
 		return ProjectionState{}, fmt.Errorf("commit %s rebuild: %w", name, err)

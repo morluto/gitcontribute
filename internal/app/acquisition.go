@@ -88,13 +88,9 @@ func (s *Service) Acquire(ctx context.Context, repo contracts.RepoRef, remote st
 	if err != nil {
 		return nil, fmt.Errorf("index acquired checkout: %w", err)
 	}
-	_, inserted, err := c.StoreCodeSnapshot(ctx, ref, snapshot)
+	_, inserted, revision, err := c.StoreCodeSnapshotWithRevision(ctx, ref, snapshot)
 	if err != nil {
 		return nil, fmt.Errorf("store code snapshot: %w", err)
-	}
-	revision, err := c.CorpusRevision(ctx)
-	if err != nil {
-		return nil, err
 	}
 
 	message := "acquired and indexed"

@@ -45,65 +45,94 @@ type CodeSearchPage struct {
 // same repository commit replaces its documents and coverage metadata without
 // changing its ordering relative to other commits.
 func (c *Corpus) StoreCodeSnapshot(ctx context.Context, ref domain.RepoRef, snapshot codeindex.Snapshot) (int64, bool, error) {
+	id, inserted, _, err := c.storeCodeSnapshot(ctx, ref, snapshot)
+	return id, inserted, err
+}
+
+// StoreCodeSnapshotWithRevision is the acquisition boundary for callers that
+// publish a read handoff with the write. The revision is read before the
+// transaction commits, after all snapshot triggers have fired, so cancellation
+// cannot leave a durable snapshot without its identity.
+func (c *Corpus) StoreCodeSnapshotWithRevision(ctx context.Context, ref domain.RepoRef, snapshot codeindex.Snapshot) (int64, bool, int64, error) {
+	return c.storeCodeSnapshot(ctx, ref, snapshot)
+}
+
+func (c *Corpus) storeCodeSnapshot(ctx context.Context, ref domain.RepoRef, snapshot codeindex.Snapshot) (int64, bool, int64, error) {
 	if err := ref.Validate(); err != nil {
-		return 0, false, err
+		return 0, false, 0, err
 	}
 	if snapshot.Commit == "" {
-		return 0, false, errors.New("code snapshot commit is required")
+		return 0, false, 0, errors.New("code snapshot commit is required")
 	}
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, false, fmt.Errorf("begin code snapshot: %w", err)
+		return 0, false, 0, fmt.Errorf("begin code snapshot: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	manifest, err := json.Marshal(snapshot.Manifest)
 	if err != nil {
-		return 0, false, fmt.Errorf("encode code index manifest: %w", err)
+		return 0, false, 0, fmt.Errorf("encode code index manifest: %w", err)
 	}
 	var existing int64
 	err = tx.QueryRowContext(ctx, `
 		SELECT id FROM code_snapshots WHERE repo_owner=? AND repo_name=? AND commit_sha=?
-	`, ref.Owner, ref.Repo, snapshot.Commit).Scan(&existing)
+		`, ref.Owner, ref.Repo, snapshot.Commit).Scan(&existing)
 	if err == nil {
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE code_snapshots
 			SET repo_path = ?, total_bytes = ?, manifest_json = ?
 			WHERE id = ?
 		`, snapshot.RepoPath, snapshot.TotalBytes, string(manifest), existing); err != nil {
-			return 0, false, fmt.Errorf("update code snapshot: %w", err)
+			return 0, false, 0, fmt.Errorf("update code snapshot: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM code_documents WHERE snapshot_id = ?`, existing); err != nil {
-			return 0, false, fmt.Errorf("replace code snapshot documents: %w", err)
+			return 0, false, 0, fmt.Errorf("replace code snapshot documents: %w", err)
 		}
 		if err := storeCodeDocuments(ctx, tx, existing, snapshot.Documents); err != nil {
-			return 0, false, err
+			return 0, false, 0, err
+		}
+		revision, err := transactionCorpusRevision(ctx, tx)
+		if err != nil {
+			return 0, false, 0, err
 		}
 		if err := tx.Commit(); err != nil {
-			return 0, false, fmt.Errorf("commit replaced code snapshot: %w", err)
+			return 0, false, 0, fmt.Errorf("commit replaced code snapshot: %w", err)
 		}
-		return existing, false, nil
+		return existing, false, revision, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, false, fmt.Errorf("find code snapshot: %w", err)
+		return 0, false, 0, fmt.Errorf("find code snapshot: %w", err)
 	}
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO code_snapshots (repo_owner, repo_name, repo_path, commit_sha, total_bytes, created_at, manifest_json)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, ref.Owner, ref.Repo, snapshot.RepoPath, snapshot.Commit, snapshot.TotalBytes, encodeTime(snapshot.CreatedAt), string(manifest))
 	if err != nil {
-		return 0, false, fmt.Errorf("insert code snapshot: %w", err)
+		return 0, false, 0, fmt.Errorf("insert code snapshot: %w", err)
 	}
 	snapshotID, err := result.LastInsertId()
 	if err != nil {
-		return 0, false, fmt.Errorf("read code snapshot id: %w", err)
+		return 0, false, 0, fmt.Errorf("read code snapshot id: %w", err)
 	}
 	if err := storeCodeDocuments(ctx, tx, snapshotID, snapshot.Documents); err != nil {
-		return 0, false, err
+		return 0, false, 0, err
+	}
+	revision, err := transactionCorpusRevision(ctx, tx)
+	if err != nil {
+		return 0, false, 0, err
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, false, fmt.Errorf("commit code snapshot: %w", err)
+		return 0, false, 0, fmt.Errorf("commit code snapshot: %w", err)
 	}
-	return snapshotID, true, nil
+	return snapshotID, true, revision, nil
+}
+
+func transactionCorpusRevision(ctx context.Context, tx *sql.Tx) (int64, error) {
+	var revision int64
+	if err := tx.QueryRowContext(ctx, `SELECT revision FROM corpus_state WHERE id = 1`).Scan(&revision); err != nil {
+		return 0, fmt.Errorf("read committed corpus revision: %w", err)
+	}
+	return revision, nil
 }
 
 func storeCodeDocuments(ctx context.Context, tx *sql.Tx, snapshotID int64, documents []codeindex.Document) error {

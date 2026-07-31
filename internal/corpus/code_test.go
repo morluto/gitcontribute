@@ -103,6 +103,30 @@ func TestCodeSnapshotsAreAtomicDeduplicatedAndSearchLatest(t *testing.T) {
 	}
 }
 
+func TestStoreCodeSnapshotWithRevisionBindsWriteToCommittedIdentity(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	before, err := c.CorpusRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, revision, err := c.StoreCodeSnapshotWithRevision(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, codeindex.Snapshot{
+		RepoPath: "/repo", Commit: "commit", CreatedAt: time.Unix(1, 0),
+		Documents: []codeindex.Document{{Path: "main.go", Content: "package main", Bytes: 12}}, TotalBytes: 12,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := c.CorpusRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revision != after || after <= before {
+		t.Fatalf("stored revision = %d, current=%d, before=%d", revision, after, before)
+	}
+}
+
 func TestCodeSearchWeightsPathAndReturnsBoundedSnippet(t *testing.T) {
 	t.Parallel()
 	c, _ := openTestCorpus(t)
