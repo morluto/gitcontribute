@@ -24,7 +24,11 @@ func TestInspectPathReadsBranchHeadAndRemotesWithoutMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Path != path || got.Branch != "feature" || got.HeadSHA == "" {
+	expectedPath, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Path != expectedPath || got.Branch != "feature" || got.HeadSHA == "" {
 		t.Fatalf("inspection = %+v", got)
 	}
 	if len(got.Remotes["origin"]) != 1 || got.Remotes["origin"][0] != "https://github.com/fork/project.git" {

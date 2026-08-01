@@ -92,7 +92,11 @@ func TestPreflightContributionRoutesExistingAuthoredPRAndLocalWorktree(t *testin
 	if out.Existing.Issue != 1086 || out.Existing.PullRequest != 1088 || out.Existing.Head != "morluto:fix/n01-mask-cu-seqlens-v2" {
 		t.Fatalf("existing = %+v", out.Existing)
 	}
-	if len(out.LocalMatches) != 1 || out.LocalMatches[0].Path != worktree || out.LocalMatches[0].Branch != "fix/n01-mask-cu-seqlens-v2" {
+	expectedWorktree, err := filepath.EvalSymlinks(worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.LocalMatches) != 1 || out.LocalMatches[0].Path != expectedWorktree || out.LocalMatches[0].Branch != "fix/n01-mask-cu-seqlens-v2" {
 		t.Fatalf("local matches = %+v", out.LocalMatches)
 	}
 	if reader.searchOptions.RepositoryOwner != "fla-org" || reader.searchOptions.RepositoryName != "flash-linear-attention" {
