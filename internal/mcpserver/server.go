@@ -92,6 +92,17 @@ type PullRequestFeedbackOperator interface {
 	SyncPullRequestFeedback(context.Context, mcpcontract.SyncPullRequestFeedbackInput) (mcpcontract.JobReference, error)
 }
 
+// PullRequestFeedbackIndexer owns an explicit repository-wide network read
+// that writes only local observations and rebuildable projections.
+type PullRequestFeedbackIndexer interface {
+	IndexPullRequestFeedback(context.Context, mcpcontract.IndexPullRequestFeedbackInput) (mcpcontract.JobReference, error)
+}
+
+// PullRequestFeedbackSearcher is an offline corpus-only feedback query.
+type PullRequestFeedbackSearcher interface {
+	SearchPullRequestFeedback(context.Context, mcpcontract.SearchPullRequestFeedbackInput) (mcpcontract.SearchPullRequestFeedbackOutput, error)
+}
+
 type CIFailureOperator interface {
 	SyncCIFailures(context.Context, mcpcontract.SyncCIFailuresInput) (mcpcontract.JobReference, error)
 }

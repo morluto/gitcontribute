@@ -151,3 +151,19 @@ func TestIndexJobPreservesFailuresAndBindsCompletedArtifactsToSnapshot(t *testin
 		t.Fatalf("index failures = %+v", failures)
 	}
 }
+
+func TestPullRequestFeedbackIndexJobOffersOfflineSearchFollowUp(t *testing.T) {
+	t.Parallel()
+	job := &contracts.JobResult{
+		Kind: jobKindIndexPullRequestFeedback, Status: "succeeded",
+		Request: `{"repository":{"owner":"acme","repo":"rocket"}}`,
+		Result:  `{"status":"partial","discovery_status":"partial","items":[{"key":"acme/rocket/pull_request#7","item_status":"complete"}],"recovery":{"version":"recovery.v1","reason":"feedback_discovery_incomplete","message":"continue"}}`,
+	}
+	artifacts, follow := jobArtifactsAndFollowUp(job, 1)
+	if len(artifacts) != 1 || artifacts[0].Kind != "pull_request_feedback_index" || artifacts[0].DiscoveryStatus != "partial" || follow == nil {
+		t.Fatalf("feedback index artifact = %+v follow=%+v", artifacts, follow)
+	}
+	if follow.Action.Type != "search_pull_request_feedback" || follow.Action.SearchFeedback == nil || follow.Action.SearchFeedback.Repository.Owner != "acme" || follow.Action.SearchFeedback.Repository.Repo != "rocket" {
+		t.Fatalf("feedback index follow-up = %+v", follow)
+	}
+}

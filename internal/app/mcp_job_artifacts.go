@@ -32,6 +32,8 @@ func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract
 		return portfolioJobArtifact(job)
 	case "sync_pull_request_feedback", "sync_ci_failures":
 		return pullRequestWorkflowJobArtifact(job)
+	case jobKindIndexPullRequestFeedback:
+		return pullRequestFeedbackIndexJobArtifact(job)
 	case "index_repositories":
 		return indexRepositoriesJobArtifact(job)
 	case jobKindEnsureCoverage:
@@ -283,6 +285,34 @@ func pullRequestWorkflowJobArtifact(job *contracts.JobResult) ([]mcpcontract.Job
 		follow = resourceFollowUp(artifact.References[0], reason)
 	}
 	return []mcpcontract.JobArtifactReference{artifact}, follow
+}
+
+func pullRequestFeedbackIndexJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
+	var result pullRequestFeedbackIndexResult
+	if json.Unmarshal([]byte(job.Result), &result) != nil {
+		return nil, nil
+	}
+	var request mcpcontract.IndexPullRequestFeedbackInput
+	if json.Unmarshal([]byte(job.Request), &request) != nil {
+		return nil, nil
+	}
+	refs := make([]string, 0, len(result.Items))
+	failures := make([]mcpcontract.JobArtifactFailure, 0, len(result.Items))
+	for _, item := range result.Items {
+		if item.Status == "complete" {
+			refs = append(refs, item.Key)
+			continue
+		}
+		failures = append(failures, mcpcontract.JobArtifactFailure{Reference: item.Key, Status: item.Status, Reason: item.Code, Message: item.Message, RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfterMS)})
+	}
+	artifact := mcpcontract.JobArtifactReference{Kind: "pull_request_feedback_index", Count: ptrNonNegative(len(refs)), References: refs, ReferencesTruncated: len(result.Items) > len(refs), Failures: failures, Status: result.Status, DiscoveryStatus: result.DiscoveryStatus, Recovery: result.Recovery}
+	follow := &mcpcontract.JobFollowUp{Action: mcpcontract.FollowUpAction{Type: "search_pull_request_feedback", SearchFeedback: &mcpcontract.SearchPullRequestFeedbackInput{Repository: request.Repository}}, Reason: "Search the indexed pull-request feedback through the offline corpus."}
+	return []mcpcontract.JobArtifactReference{artifact}, follow
+}
+
+func ptrNonNegative(value int) *mcpcontract.NonNegativeInt {
+	out := mcpcontract.NonNegativeInt(value)
+	return &out
 }
 
 type indexJobItem struct {

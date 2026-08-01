@@ -83,7 +83,7 @@ func (s *Server) registerResourceTemplates() {
 		templates = append(templates,
 			resourceTemplateDefinition{
 				template: "gitcontribute://pull-request-feedback/{owner}/{repo}/{number}",
-				name:     "Pull-request feedback", description: "Persisted feedback channels with independent coverage",
+				name:     "Pull-request feedback", description: "Canonical persisted issue comments, reviews, inline comments, and review-thread topology with independent coverage",
 			},
 			resourceTemplateDefinition{
 				template: "gitcontribute://ci-failure-report/{owner}/{repo}/{number}",

@@ -58,6 +58,13 @@ type AuthoredPullRequestSearcher interface {
 	SearchAuthoredPullRequests(context.Context, AuthoredPullRequestSearchOptions) (AuthoredPullRequestSearchResult, error)
 }
 
+// PullRequestIndexer lists every pull-request marker in one repository. It is
+// intentionally separate from Reader so callers can require repository-wide,
+// resumable discovery without widening unrelated GitHub adapters.
+type PullRequestIndexer interface {
+	ListPullRequests(context.Context, string, string, PullRequestListOptions) (ListResult[Issue], error)
+}
+
 // PullRequestStatusReader reads bounded, source-backed PR health facets.
 type PullRequestStatusReader interface {
 	GetPullRequestStatus(context.Context, string, string, int, PullRequestStatusOptions) (PullRequestStatus, error)
@@ -262,6 +269,27 @@ func (c *Client) ListIssues(ctx context.Context, owner, name string, opts ListIs
 		Page:  pageInfo(resp),
 		Rate:  rateInfo(resp.Rate),
 	}, nil
+}
+
+// ListPullRequests reads one provider page of pull requests in a repository.
+// GitHub exposes these through the repository issue list; filtering here keeps
+// provider pagination intact while the application receives only PR markers.
+func (c *Client) ListPullRequests(ctx context.Context, owner, name string, opts PullRequestListOptions) (ListResult[Issue], error) {
+	result, err := c.ListIssues(ctx, owner, name, ListIssueOptions{
+		State: opts.State, Sort: opts.Sort, Direction: opts.Direction,
+		PageOptions: opts.PageOptions,
+	})
+	if err != nil {
+		return ListResult[Issue]{}, err
+	}
+	pullRequests := make([]Issue, 0, len(result.Items))
+	for _, item := range result.Items {
+		if item.Kind == ThreadKindPullRequest {
+			pullRequests = append(pullRequests, item)
+		}
+	}
+	result.Items = pullRequests
+	return result, nil
 }
 
 // GetIssue reads one issue or pull-request marker by number.
