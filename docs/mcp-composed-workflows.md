@@ -119,6 +119,15 @@ search; GitContribute does not reproduce that host machinery. Focused catalog
 projections exist only inside the evaluation harness and are not a user-facing
 configuration surface.
 
+`workflow.get_catalog_contract` is the canonical parity check for a live
+connection. It returns the running version, post-registration catalog mode,
+tool count, deterministic catalog fingerprint, and explicit availability of
+the repository-wide feedback index, exact-PR feedback sync, and offline
+feedback search. A setup or upgrade changes the installed registration only;
+the client must start a fresh MCP connection before it can observe the new
+catalog. A read-only server reports that restricted mode explicitly instead of
+making its missing network tools look like an installation failure.
+
 The v5 evaluation compares unified eager and unified host-search conditions.
 Serialized definition bytes are a deterministic catalog-cost proxy, not a
 model-token or selection-accuracy claim. Token claims require the exact host

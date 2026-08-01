@@ -84,7 +84,7 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[SearchThreadsInput, mcpcontract.SearchOutput]{
 		name: mcpcontract.ToolSearchThreads, title: "Search stored issues and pull requests",
-		description: "Search stored issue and PR titles, labels, bodies, and hydrated text. All terms are required by default; use match_mode=any for broader recall. Compact output is bounded, and local coverage is never proof of absence without the returned typed recovery action. Read finalists with corpus.get_threads and hydrate only missing facets. Offline.",
+		description: "Search stored issue and pull-request titles, labels, bodies, and hydrated text when the question is about the thread itself. This is not a comment-level feedback search: for reviewer-author, inline-anchor, review-state, or resolved/unresolved audits, use corpus.search_pull_request_feedback after github.index_pull_request_feedback. All terms are required by default; use match_mode=any for broader recall. Compact output is bounded, and local coverage is never proof of absence without the returned typed recovery action. Read finalists with corpus.get_threads and hydrate only missing facets. Offline.",
 		annotations: readOnly, input: inputSchema[SearchThreadsInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 			setEnum(schema, "state", "open", "closed")

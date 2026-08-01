@@ -57,6 +57,7 @@ const (
 	ToolGetCoverage                  = "corpus.get_coverage"
 	ToolEnsureCoverage               = "corpus.ensure_coverage"
 	ToolGetSourceAuditWorkflow       = "workflow.get_source_audit_contract"
+	ToolGetCatalogContract           = "workflow.get_catalog_contract"
 	ToolBuildRepositoryDossier       = "workflow.build_repository_dossier"
 	ToolMineRepositoryFixPatterns    = "workflow.mine_repository_fix_patterns"
 	ToolPreviewRepositoryFixPatterns = "corpus.preview_fix_patterns"

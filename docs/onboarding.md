@@ -187,6 +187,12 @@ required diagnostic failure. `upgrade --check` reports it as
 rollback-safe activation, preserves each durable executable path, and reports
 the clients that must restart.
 
+After any setup or upgrade that changes an MCP registration, verify the fresh
+session with `workflow.get_catalog_contract`. Compare its server version,
+catalog mode, fingerprint, and feedback-route flags with `tools/list`; an
+existing client session can continue serving the previous catalog until it is
+restarted.
+
 MCP-only setup does not install a command on `PATH`. Run its upgrade checks
 through the current package explicitly:
 

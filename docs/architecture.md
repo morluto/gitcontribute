@@ -159,6 +159,14 @@ search reports discovery and facet coverage separately from match count and
 returns the exact index, feedback-sync, or PR-details recovery action needed
 to resolve an unknown. Search never performs network access.
 
+The live MCP server exposes `workflow.get_catalog_contract` as a read-only
+catalog-parity contract. It reports the running version, whether the server is
+in `all` or `read_only` mode, a deterministic fingerprint of the registered
+`tools/list` definitions, and explicit availability of each feedback route.
+This makes a stale registration distinguishable from an intentionally
+restricted catalog. Clients must create a fresh MCP connection after setup,
+upgrade, or registration changes before comparing the contract.
+
 Thread resolution remains outside this read/index workflow. A future mutation
 must accept exact repository, PR, and thread identifiers plus the expected head
 SHA and must be separately authorized; indexing never auto-resolves a thread.
@@ -302,6 +310,14 @@ used only by controlled tool-selection evaluations. The catalog keeps
 code/workspace execution, external derived research, diagnostics, portfolio,
 and advanced similarity as separately annotated capabilities rather than
 separate user-configured profiles.
+
+Feedback routing is intentional: use
+`github.index_pull_request_feedback -> jobs.get ->
+corpus.search_pull_request_feedback` for repository-wide comment audits, and
+`github.sync_pull_request_feedback -> jobs.get` when exact PR numbers are
+already known. `corpus.search_threads` remains the generic offline text search
+for issue or pull-request records; it is not the comment-level feedback
+projection.
 
 Tool inputs are strict and bounded, output distinguishes total population from
 returned/truncated items, and errors state how the caller can recover. MCP SDK

@@ -15,6 +15,7 @@ import (
 const serverInstructions = "Use advertised GitContribute tools for durable, source-backed repository research and contribution tracking. " +
 	"Prefer corpus tools for offline reads; they never refresh data implicitly. " +
 	"GitHub tools perform explicit network reads and may update only the local corpus. " +
+	"Use workflow.get_catalog_contract when catalog parity is in doubt; it reports the running build version, post-registration catalog fingerprint, and whether the canonical pull-request feedback route is advertised. After an upgrade or registration change, create a fresh MCP connection before comparing the contract. " +
 	"Research tools return derived external context, never live GitHub state. " +
 	"The durable workflow is concern to investigation to hypothesis to opportunity to workspace to draft; use only advertised stages. " +
 	"Use workflow.prepare_issue_set when exact issue numbers already define the contribution scope; it is the canonical issue-audit entrypoint and returns typed recovery for missing repository or thread coverage. " +
@@ -116,14 +117,24 @@ const serverInstructions = "Use advertised GitContribute tools for durable, sour
 // DeepWikiOutput labels provider prose as derived external content and reports
 // provider-level unavailability without persisting the response.
 
-func (s *Server) registerScalable() {
-	readOnly := readOnlyAnnotations()
+func (s *Server) registerCatalogContract(annotations *mcp.ToolAnnotations) {
+	addCatalogTool(s, catalogTool[mcpcontract.GetCatalogContractInput, mcpcontract.CatalogContract]{
+		name: mcpcontract.ToolGetCatalogContract, title: "Check MCP catalog parity",
+		description: "Use this read-only diagnostic when a client may be connected to an old, restricted, or stale GitContribute registration. Returns the running server version, actual post-registration catalog fingerprint, tool count, and whether repository-wide feedback indexing, exact-PR feedback sync, and offline feedback search are advertised. It performs no network or corpus read; after an upgrade, create a fresh MCP connection and compare this contract with tools/list.",
+		annotations: annotations, input: inputSchema[mcpcontract.GetCatalogContractInput](noSchemaCustomization),
+		output: outputSchema[mcpcontract.CatalogContract]("Runtime MCP catalog parity and canonical feedback-route availability."), handler: s.getCatalogContract,
+	})
 	addCatalogTool(s, catalogTool[mcpcontract.GetSourceAuditWorkflowInput, mcpcontract.SourceAuditWorkflow]{
 		name: mcpcontract.ToolGetSourceAuditWorkflow, title: "Get canonical source-audit workflow",
 		description: "Return the machine-readable source-audit state machine, including token requirements, allowed transitions, retryability, side-effect authority, and incomplete semantics.",
-		annotations: readOnly, input: inputSchema[mcpcontract.GetSourceAuditWorkflowInput](noSchemaCustomization),
+		annotations: annotations, input: inputSchema[mcpcontract.GetSourceAuditWorkflowInput](noSchemaCustomization),
 		output: outputSchema[mcpcontract.SourceAuditWorkflow]("Canonical source-audit workflow contract."), handler: s.getSourceAuditWorkflow,
 	})
+}
+
+func (s *Server) registerScalable() {
+	readOnly := readOnlyAnnotations()
+	s.registerCatalogContract(readOnly)
 	addCatalogTool(s, catalogTool[mcpcontract.GetRepositoriesInput, mcpcontract.GetRepositoriesOutput]{name: mcpcontract.ToolGetRepositories, title: "Get stored repositories in one batch", description: "Read metadata, coverage, and dossier availability for up to 100 stored repositories. Use for comparison before reading dossier resources. Missing metadata includes a sync action. Offline.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.GetRepositoriesInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "repositories", 1, 100)
 	}), output: outputSchema[mcpcontract.GetRepositoriesOutput]("Ordered repository batch with item-level status and dossier availability."), handler: s.getRepositories})
@@ -296,7 +307,7 @@ func (s *Server) registerScalable() {
 			setArrayBounds(candidateBuilder, "changed_files", 0, 200)
 		}
 	}), output: outputSchema[mcpcontract.ContributionPreflightOutput]("Bounded contribution routing decision with explicit live coverage."), handler: s.preflightContribution})
-	addCatalogTool(s, catalogTool[mcpcontract.SyncPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPullRequestFeedback, title: "Synchronize pull-request feedback", description: "Fetch and persist selected issue comments, submitted reviews, inline comments, and review-conversation topology for 1-50 exact pull requests under one total request budget. Creates or refreshes only the local repository and pull-request identities required by those targets; it does not fetch repository guidance or other pull requests. Returns item-level coverage and durable feedback resources.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackOperator], input: inputSchema[mcpcontract.SyncPullRequestFeedbackInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.SyncPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPullRequestFeedback, title: "Synchronize feedback for exact pull requests", description: "Use this when the pull-request numbers are already known and you need current issue comments, submitted reviews, inline comments, or review-thread topology for 1-50 exact pull requests. It performs bounded GitHub network reads and writes only local corpus observations; it never mutates GitHub and does not discover other PRs. Poll jobs.get, then read the returned feedback resources; for repository-wide author or state audits, use github.index_pull_request_feedback instead.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackOperator], input: inputSchema[mcpcontract.SyncPullRequestFeedbackInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "pull_requests", 1, 50)
 		constrainPullRequestRefs(sc, "pull_requests")
 		setArrayBounds(sc, "channels", 1, 4)
@@ -306,7 +317,7 @@ func (s *Server) registerScalable() {
 		setRange(sc, "max_items_per_channel", 1, 1000)
 		setRange(sc, "max_requests", 1, 1000)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded pull-request feedback job."), handler: s.syncPullRequestFeedback})
-	addCatalogTool(s, catalogTool[mcpcontract.IndexPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolIndexPullRequestFeedback, title: "Find every repository feedback comment by exact author", description: "Discover every reachable pull request in one repository with state=all, then synchronize issue comments, submitted reviews, inline comments, and review-thread topology into the local corpus. Use this bounded resumable route to find every comment by an exact reviewer login; poll jobs.get, then use corpus.search_pull_request_feedback with feedback_author. Missing or partial coverage is never absence.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackIndexer], input: inputSchema[mcpcontract.IndexPullRequestFeedbackInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.IndexPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolIndexPullRequestFeedback, title: "Find every repository feedback comment by exact author", description: "Use this for repository-wide audits such as finding every pull-request comment written by a reviewer or bot. It discovers every reachable PR with state=all, then performs bounded GitHub reads and writes only local feedback observations; it never mutates GitHub. Poll jobs.get, then call corpus.search_pull_request_feedback with the exact feedback_author login. Missing, truncated, or partial discovery is unknown, not absence; follow the returned recovery action and retry the offline search.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackIndexer], input: inputSchema[mcpcontract.IndexPullRequestFeedbackInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "channels", 1, 4)
 		setArrayEnum(sc, "channels", "issue_comments", "submitted_reviews", "inline_comments", "review_threads")
 		property(sc, "channels").UniqueItems = true
@@ -333,7 +344,7 @@ func (s *Server) registerScalable() {
 		setEnum(sc, "view", "compact", "full")
 		setDefault(sc, "view", "compact")
 	}), output: outputSchema[mcpcontract.ListPullRequestPortfolioOutput]("Offline pull-request portfolio with explainable attention states."), handler: s.listPullRequestPortfolio})
-	addCatalogTool(s, catalogTool[mcpcontract.SearchPullRequestFeedbackInput, mcpcontract.SearchPullRequestFeedbackOutput]{name: mcpcontract.ToolSearchPullRequestFeedback, title: "Search exact pull-request comments by commenter login", description: "Search the offline repository feedback projection by exact feedback_author login, pull-request author, PR state, merge state, resolution, channel, text, dates, and deterministic sort. Use feedback_author for author audits; text searches bodies only. Matches preserve exact comment and thread identities, anchors, reply links, review state, and resolution state. Empty results with incomplete discovery or facets return partial/unknown coverage and typed recovery; this tool never contacts GitHub. Use after github.index_pull_request_feedback and jobs.get.", annotations: readOnly, supportedBy: supports[PullRequestFeedbackSearcher], input: inputSchema[mcpcontract.SearchPullRequestFeedbackInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.SearchPullRequestFeedbackInput, mcpcontract.SearchPullRequestFeedbackOutput]{name: mcpcontract.ToolSearchPullRequestFeedback, title: "Search exact pull-request comments by commenter login", description: "Use this offline search after github.index_pull_request_feedback and jobs.get when you need exact feedback_author, PR state, merge state, channel, resolution, review-state, anchor, date, or body filters. It reads only the local normalized feedback projection and never contacts GitHub or writes corpus state. Matches preserve exact comment and thread identities; incomplete discovery or facets return partial/unknown coverage with a typed recovery action, not a false empty result.", annotations: readOnly, supportedBy: supports[PullRequestFeedbackSearcher], input: inputSchema[mcpcontract.SearchPullRequestFeedbackInput](func(sc *schemaBuilder) {
 		setEnum(sc, "state", "open", "closed", "all")
 		setEnum(sc, "merged", "true", "false", "unknown", "any")
 		setEnum(sc, "thread_state", "resolved", "unresolved", "all")
@@ -371,6 +382,26 @@ func (s *Server) registerScalable() {
 
 func (s *Server) getSourceAuditWorkflow(_ context.Context, _ *mcp.CallToolRequest, _ mcpcontract.GetSourceAuditWorkflowInput) (*mcp.CallToolResult, mcpcontract.SourceAuditWorkflow, error) {
 	return nil, mcpcontract.CanonicalSourceAuditWorkflow(), nil
+}
+
+func (s *Server) getCatalogContract(_ context.Context, _ *mcp.CallToolRequest, _ mcpcontract.GetCatalogContractInput) (*mcp.CallToolResult, mcpcontract.CatalogContract, error) {
+	_, indexAdvertised := s.catalogTools[mcpcontract.ToolIndexPullRequestFeedback]
+	_, syncAdvertised := s.catalogTools[mcpcontract.ToolSyncPullRequestFeedback]
+	_, searchAdvertised := s.catalogTools[mcpcontract.ToolSearchPullRequestFeedback]
+	mode := "all"
+	if s.readOnly {
+		mode = "read_only"
+	}
+	return nil, mcpcontract.CatalogContract{
+		SchemaVersion: mcpcontract.CatalogContractVersion, ServerName: "gitcontribute", ServerVersion: s.version,
+		CatalogMode: mode, CatalogFingerprint: s.catalogFingerprint(), ToolCount: len(s.catalogTools),
+		PullRequestFeedback: mcpcontract.CatalogRoute{
+			IndexTool: mcpcontract.ToolIndexPullRequestFeedback, SyncTool: mcpcontract.ToolSyncPullRequestFeedback, SearchTool: mcpcontract.ToolSearchPullRequestFeedback,
+			IndexAdvertised: indexAdvertised, SyncAdvertised: syncAdvertised, SearchAdvertised: searchAdvertised,
+			CanonicalAsyncChain:       []string{mcpcontract.ToolIndexPullRequestFeedback, mcpcontract.ToolGetJob, mcpcontract.ToolSearchPullRequestFeedback},
+			GenericTextSearchBoundary: "corpus.search_threads searches issue and pull-request text; use corpus.search_pull_request_feedback for comment-level author, channel, anchor, review-state, or resolution audits.",
+		},
+	}, nil
 }
 
 func (s *Server) scalableReader() (ScalableReader, error) {

@@ -2,8 +2,12 @@ package mcpserver
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -283,6 +287,8 @@ type Server struct {
 	server          *mcp.Server
 	registrationErr error
 	readOnly        bool
+	version         string
+	catalogTools    map[string][]byte
 }
 
 // New constructs an MCP server with the unified catalog.
@@ -300,8 +306,10 @@ func newServer(reader mcpcontract.Reader, version string, readOnly bool) (*Serve
 		version = "dev"
 	}
 	s := &Server{
-		reader:   reader,
-		readOnly: readOnly,
+		reader:       reader,
+		readOnly:     readOnly,
+		version:      version,
+		catalogTools: make(map[string][]byte),
 		server: mcp.NewServer(&mcp.Implementation{
 			Name:    "gitcontribute",
 			Version: version,
@@ -312,6 +320,33 @@ func newServer(reader mcpcontract.Reader, version string, readOnly bool) (*Serve
 		return nil, s.registrationErr
 	}
 	return s, nil
+}
+
+func (s *Server) recordCatalogTool(tool *mcp.Tool) {
+	if s.catalogTools == nil {
+		s.catalogTools = make(map[string][]byte)
+	}
+	payload, err := json.Marshal(tool)
+	if err != nil {
+		return
+	}
+	s.catalogTools[tool.Name] = payload
+}
+
+func (s *Server) catalogFingerprint() string {
+	names := make([]string, 0, len(s.catalogTools))
+	for name := range s.catalogTools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	hash := sha256.New()
+	for _, name := range names {
+		_, _ = hash.Write([]byte(name))
+		_, _ = hash.Write([]byte{0})
+		_, _ = hash.Write(s.catalogTools[name])
+		_, _ = hash.Write([]byte{0})
+	}
+	return hex.EncodeToString(hash.Sum(nil))
 }
 
 func (s *Server) recordRegistrationError(tool, direction string, err error) {

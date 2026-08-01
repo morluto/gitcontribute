@@ -32,14 +32,16 @@ func addCatalogTool[In, Out any](server *Server, tool catalogTool[In, Out]) {
 		server.recordRegistrationError(tool.name, "output", tool.output.err)
 		return
 	}
-	mcp.AddTool(server.server, &mcp.Tool{
+	mcpTool := &mcp.Tool{
 		Name:         tool.name,
 		Title:        tool.title,
 		Description:  tool.description,
 		Annotations:  tool.annotations,
 		InputSchema:  tool.input.schema,
 		OutputSchema: tool.output.schema,
-	}, structuredToolErrors(tool.handler))
+	}
+	server.recordCatalogTool(mcpTool)
+	mcp.AddTool(server.server, mcpTool, structuredToolErrors(tool.handler))
 }
 
 func supports[T any](reader mcpcontract.Reader) bool {

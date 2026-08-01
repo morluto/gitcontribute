@@ -22,6 +22,8 @@ func TestServerInstructionsContainRoutingPhrases(t *testing.T) {
 		"Prefer corpus tools for offline reads",
 		"never refresh data implicitly",
 		"explicit network reads",
+		"workflow.get_catalog_contract",
+		"fresh MCP connection",
 		"concern to investigation to hypothesis to opportunity to workspace to draft",
 		"poll advertised job tools in batches",
 		"recovery plan's ordered typed calls",
@@ -37,6 +39,107 @@ func TestServerInstructionsContainRoutingPhrases(t *testing.T) {
 	} {
 		if !strings.Contains(init.Instructions, phrase) {
 			t.Errorf("instructions missing routing phrase %q:\n%s", phrase, init.Instructions)
+		}
+	}
+}
+
+func TestCatalogContractMatchesAdvertisedFeedbackRoute(t *testing.T) {
+	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	defer closeSessions()
+
+	tools := make(map[string]bool)
+	for tool, err := range client.Tools(context.Background(), nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		tools[tool.Name] = true
+	}
+	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: mcpcontract.ToolGetCatalogContract, Arguments: map[string]any{}})
+	if err != nil || result == nil || result.IsError {
+		t.Fatalf("catalog contract call failed: result=%+v err=%v", result, err)
+	}
+	var contract mcpcontract.CatalogContract
+	data, err := json.Marshal(result.StructuredContent)
+	if err != nil || json.Unmarshal(data, &contract) != nil {
+		t.Fatalf("decode catalog contract: result=%#v err=%v", result.StructuredContent, err)
+	}
+	if contract.SchemaVersion != mcpcontract.CatalogContractVersion || contract.ServerName != "gitcontribute" || contract.ServerVersion != "test" || contract.CatalogMode != "all" || contract.CatalogFingerprint == "" || contract.ToolCount != len(tools) {
+		t.Fatalf("catalog contract identity = %+v, advertised tools=%d", contract, len(tools))
+	}
+	route := contract.PullRequestFeedback
+	if !route.IndexAdvertised || !route.SyncAdvertised || !route.SearchAdvertised || len(route.CanonicalAsyncChain) != 3 || route.CanonicalAsyncChain[0] != mcpcontract.ToolIndexPullRequestFeedback || route.CanonicalAsyncChain[1] != mcpcontract.ToolGetJob || route.CanonicalAsyncChain[2] != mcpcontract.ToolSearchPullRequestFeedback {
+		t.Fatalf("feedback route = %+v", route)
+	}
+	for _, name := range []string{route.IndexTool, route.SyncTool, route.SearchTool} {
+		if !tools[name] {
+			t.Errorf("catalog contract names unadvertised tool %q", name)
+		}
+	}
+}
+
+func TestCatalogContractExplainsReadOnlyFeedbackFiltering(t *testing.T) {
+	client, closeSessions := connectServer(t, &fakeReader{searchStarted: make(chan struct{})}, true)
+	defer closeSessions()
+
+	tools := make(map[string]*mcp.Tool)
+	for tool, err := range client.Tools(context.Background(), nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		tools[tool.Name] = tool
+	}
+	catalog := callCatalogContract(t, client)
+	if catalog.CatalogMode != "read_only" || catalog.ToolCount != len(tools) {
+		t.Fatalf("read-only catalog contract = %+v, tools = %d", catalog, len(tools))
+	}
+	route := catalog.PullRequestFeedback
+	if route.IndexAdvertised || route.SyncAdvertised || !route.SearchAdvertised {
+		t.Fatalf("read-only feedback route = %+v", route)
+	}
+}
+
+func callCatalogContract(t *testing.T, client *mcp.ClientSession) mcpcontract.CatalogContract {
+	t.Helper()
+	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: mcpcontract.ToolGetCatalogContract, Arguments: map[string]any{}})
+	if err != nil || result == nil || result.IsError {
+		t.Fatalf("catalog contract call failed: result=%+v err=%v", result, err)
+	}
+	var catalog mcpcontract.CatalogContract
+	data, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		t.Fatal(err)
+	}
+	return catalog
+}
+
+func TestFeedbackToolDescriptionsDeclareRoutingBoundaries(t *testing.T) {
+	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	defer closeSessions()
+	tools := make(map[string]*mcp.Tool)
+	for tool, err := range client.Tools(context.Background(), nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		tools[tool.Name] = tool
+	}
+	cases := map[string][]string{
+		mcpcontract.ToolIndexPullRequestFeedback:  {"repository-wide audits", "bounded GitHub reads", "Poll jobs.get", mcpcontract.ToolSearchPullRequestFeedback, "never mutates GitHub"},
+		mcpcontract.ToolSyncPullRequestFeedback:   {"exact pull requests", "bounded GitHub network reads", "Poll jobs.get", mcpcontract.ToolIndexPullRequestFeedback, "never mutates GitHub"},
+		mcpcontract.ToolSearchPullRequestFeedback: {"offline search", "after github.index_pull_request_feedback and jobs.get", "never contacts GitHub", "partial/unknown coverage"},
+		mcpcontract.ToolSearchThreads:             {"not a comment-level feedback search", mcpcontract.ToolSearchPullRequestFeedback},
+	}
+	for name, phrases := range cases {
+		tool := tools[name]
+		if tool == nil {
+			t.Fatalf("missing tool %q", name)
+		}
+		for _, phrase := range phrases {
+			if !strings.Contains(tool.Description, phrase) {
+				t.Errorf("tool %q description missing %q: %s", name, phrase, tool.Description)
+			}
 		}
 	}
 }

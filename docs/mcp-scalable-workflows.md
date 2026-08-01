@@ -22,6 +22,16 @@ workflow.prepare_issue_set
 github.index_pull_request_feedback -> jobs.get -> corpus.search_pull_request_feedback
 ```
 
+When a client appears to be using an older or restricted registration, call
+`workflow.get_catalog_contract`. It is a read-only diagnostic that reports the
+running server version, `catalog_mode`, deterministic `catalog_fingerprint`,
+tool count, and the three advertised pull-request feedback route tools. Compare
+those values with `tools/list`; after setup, upgrade, or registration changes,
+create a fresh MCP connection so the client is not reusing an older server
+process. In `read_only` mode, the feedback index and exact-PR sync are
+intentionally absent while offline search remains available when its reader is
+supported.
+
 - `github.search_repositories` runs one bounded live search and persists the
   returned repository metadata. Prefer structured filters so GitContribute can
   validate and explain the query; reserve `raw_query` for unsupported GitHub

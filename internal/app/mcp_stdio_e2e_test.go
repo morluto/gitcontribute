@@ -100,10 +100,17 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		}
 		tools[tool.Name] = tool
 	}
-	for _, name := range []string{mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolRankThreads, mcpcontract.ToolFindPrecedents, mcpcontract.ToolSyncPortfolio, mcpcontract.ToolPreflightContribution, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolSearchGitHubThreads, mcpcontract.ToolReadSourceFiles, mcpcontract.ToolSearchCodeBatch, mcpcontract.ToolSyncRepositoryContext, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads, mcpcontract.ToolEnsureCoverage, mcpcontract.ToolGetSourceAuditWorkflow, mcpcontract.ToolQueryDeepWiki, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCheckMergeConflicts} {
+	for _, name := range []string{mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolRankThreads, mcpcontract.ToolFindPrecedents, mcpcontract.ToolSyncPortfolio, mcpcontract.ToolPreflightContribution, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolSearchGitHubThreads, mcpcontract.ToolReadSourceFiles, mcpcontract.ToolSearchCodeBatch, mcpcontract.ToolSyncRepositoryContext, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads, mcpcontract.ToolEnsureCoverage, mcpcontract.ToolGetSourceAuditWorkflow, mcpcontract.ToolGetCatalogContract, mcpcontract.ToolQueryDeepWiki, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCheckMergeConflicts, mcpcontract.ToolIndexPullRequestFeedback, mcpcontract.ToolSyncPullRequestFeedback, mcpcontract.ToolSearchPullRequestFeedback} {
 		if tools[name] == nil {
 			t.Errorf("tools/list missing %s", name)
 		}
+	}
+	catalog := callMCPTool[mcpcontract.CatalogContract](ctx, t, session, mcpcontract.ToolGetCatalogContract, map[string]any{})
+	if catalog.ServerName != "gitcontribute" || catalog.ServerVersion != initialized.ServerInfo.Version || catalog.CatalogMode != "all" || catalog.ToolCount != len(tools) || catalog.CatalogFingerprint == "" {
+		t.Fatalf("catalog contract does not describe the live tools/list: %+v", catalog)
+	}
+	if !catalog.PullRequestFeedback.IndexAdvertised || !catalog.PullRequestFeedback.SyncAdvertised || !catalog.PullRequestFeedback.SearchAdvertised {
+		t.Fatalf("catalog contract omitted feedback route: %+v", catalog.PullRequestFeedback)
 	}
 
 	contextJob := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolSyncRepositoryContext, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}}})
