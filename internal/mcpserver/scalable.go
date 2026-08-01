@@ -136,7 +136,7 @@ func (s *Server) registerScalable() {
 		setArrayBounds(sc, "facets", 1, 10)
 		setArrayEnum(sc, "facets", facets.AllNames()...)
 	}), output: outputSchema[mcpcontract.GetThreadFacetsOutput]("Ordered stored-facet metadata with canonical resource links."), handler: s.getThreadFacets})
-	addCatalogTool(s, catalogTool[mcpcontract.RankOpportunitiesInput, mcpcontract.RankOpportunitiesOutput]{name: mcpcontract.ToolRankThreads, title: "Rank stored threads for contribution", description: "Rank open issues across 1-50 required stored repositories. This bounded offline result reports truncation and never persists opportunities.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.RankOpportunitiesInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.RankOpportunitiesInput, mcpcontract.RankOpportunitiesOutput]{name: mcpcontract.ToolRankThreads, title: "Rank stored threads for contribution", description: "Rank open issues across 1-50 required stored repositories. Bounded or population-capped results include typed sync-and-rerank recovery; this operation never persists opportunities.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.RankOpportunitiesInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "repositories", 1, 50)
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 20)
@@ -272,7 +272,7 @@ func (s *Server) registerScalable() {
 		}),
 		output: outputSchema[mcpcontract.FixPatternReport]("Bounded offline fix-pattern analysis; never persisted."), handler: s.previewRepositoryFixPatterns,
 	})
-	addCatalogTool(s, catalogTool[mcpcontract.SyncPortfolioInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPortfolio, title: "Synchronize a pull-request portfolio", description: "Use for an authored portfolio or 1-100 exact pull requests. Refreshes PR details, merge state, checks, review state, unresolved threads, merge queue, files, and closing issues in one durable job.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncPortfolioInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.SyncPortfolioInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPortfolio, title: "Synchronize a pull-request portfolio", description: "Use selection=authored with state, updated_after, limit, discovery_max_requests, and status_max_pages for bounded identity discovery, or selection=explicit with 1-100 exact pull_requests. Refreshes PR details, merge state, checks, review state, unresolved threads, merge queue, files, and closing issues in one durable job; incomplete discovery is surfaced with a typed retry action.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncPortfolioInput](func(sc *schemaBuilder) {
 		setEnum(sc, "selection", "authored", "explicit")
 		setArrayBounds(sc, "pull_requests", 1, 100)
 		constrainPullRequestRefs(sc, "pull_requests")
@@ -314,7 +314,7 @@ func (s *Server) registerScalable() {
 		setRange(sc, "max_log_bytes_per_job", 1024, 1048576)
 		setRange(sc, "max_requests", 1, 1000)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded CI diagnostics job."), handler: s.syncCIFailures})
-	addCatalogTool(s, catalogTool[mcpcontract.ListPullRequestPortfolioInput, mcpcontract.ListPullRequestPortfolioOutput]{name: mcpcontract.ToolListPullRequestPortfolio, title: "List pull requests that need contributor attention", description: "List stored authored pull requests with deterministic attention from lifecycle, checks, review conversations, merge state, queue, and freshness. This offline read reports incomplete facets as unknown; sync authored PRs and health when stale.", annotations: readOnly, supportedBy: supports[PortfolioReader], input: inputSchema[mcpcontract.ListPullRequestPortfolioInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.ListPullRequestPortfolioInput, mcpcontract.ListPullRequestPortfolioOutput]{name: mcpcontract.ToolListPullRequestPortfolio, title: "List pull requests that need contributor attention", description: "List stored authored pull requests with deterministic attention from lifecycle, checks, review conversations, merge state, queue, and freshness. This offline read reports incomplete facets as unknown; each incomplete item includes an exact typed sync_portfolio recovery action, and truncated pages include a typed next-page action.", annotations: readOnly, supportedBy: supports[PortfolioReader], input: inputSchema[mcpcontract.ListPullRequestPortfolioInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "authors", 0, 1)
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit", 1, 100)

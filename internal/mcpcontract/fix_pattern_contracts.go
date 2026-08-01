@@ -132,4 +132,5 @@ type FixPatternReport struct {
 	Truncated                 bool                         `json:"truncated"`
 	UnknownCoverage           bool                         `json:"unknown_coverage"`
 	ExternalContextProvenance []string                     `json:"external_context_provenance,omitempty"`
+	Recovery                  *RecoveryPlan                `json:"recovery,omitempty"`
 }

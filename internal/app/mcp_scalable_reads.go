@@ -87,8 +87,15 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 			status := "complete"
 			if !coverage.Complete {
 				status = "partial"
+				item.Status, item.Reason, item.Message = "partial", "facet_incomplete", "repository metadata coverage is incomplete"
+				item.Recovery = recoveryPlan("facet_incomplete", "Repository metadata coverage is incomplete; refresh this exact repository before relying on its absence or facts.", syncRepositoryContextCall(input.Owner, input.Repo))
+				out.Status = "partial"
 			}
-			value.Metadata = mcpcontract.RepositoryMetadataOutput{Status: status, ObservedAt: formatTime(coverage.UpdatedAt), SourceUpdatedAt: formatTime(coverage.SourceUpdatedAt)}
+			metadata := mcpcontract.RepositoryMetadataOutput{Status: status, ObservedAt: formatTime(coverage.UpdatedAt), SourceUpdatedAt: formatTime(coverage.SourceUpdatedAt)}
+			if !coverage.Complete {
+				metadata.Recovery = recoveryPlan("facet_incomplete", "Repository metadata coverage is incomplete; refresh this exact repository before relying on its absence or facts.", syncRepositoryContextCall(input.Owner, input.Repo))
+			}
+			value.Metadata = metadata
 		}
 		item.Value = &value
 		out.Items[i] = item
@@ -297,11 +304,17 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 		}
 		if item.StatusCoverage != "complete" {
 			out.Status = "partial"
+			item.Recovery = recoveryPlan("portfolio_facet_incomplete", "Refresh the incomplete pull-request health facets, then reread this exact portfolio item.", syncPullRequestCalls([]mcpcontract.ThreadRef{{Owner: item.Owner, Repo: item.Repo, Kind: "pull_request", Number: item.Number}})...)
 		}
 		out.PullRequests = append(out.PullRequests, item)
 	}
 	if err := finishCorpusRead(ctx, c, revision); err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
+	}
+	if out.Truncated {
+		out.Status = "partial"
+		nextLimit := min(100, max(in.Limit*2, in.Limit+1))
+		out.Recovery = recoveryPlan("portfolio_truncated", "The portfolio page is bounded. Read the next larger page before treating the returned set as exhaustive.", mcpcontract.RecoveryAction(mcpcontract.ListPullRequestPortfolioInput{Authors: append([]string(nil), in.Authors...), State: in.State, Limit: nextLimit, View: in.View, SnapshotToken: in.SnapshotToken}))
 	}
 	return out, nil
 }
@@ -641,6 +654,12 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpcontract.RankOp
 			Returned: len(report.Candidates), Truncated: len(report.Candidates) < report.CandidatePopulation,
 			PopulationCapped: report.PopulationCapped,
 		}
+		if summary.Truncated || summary.PopulationCapped {
+			item.Status, item.Reason, item.Message = "partial", "ranking_population_truncated", "the repository ranking population exceeded the requested bound"
+			out.Status = "partial"
+			nextLimit := min(100, max(in.MaxResultsPerRepository*2, in.MaxResultsPerRepository+1))
+			summary.Recovery = recoveryPlan("ranking_population_truncated", "The repository ranking population was bounded. Refresh issue headers, then rerun with a larger per-repository result bound before treating the ranking as exhaustive.", mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{Selection: "repositories", Repositories: []mcpcontract.RepositoryRef{{Owner: input.Owner, Repo: input.Repo}}, Kind: "issue", State: "open"}), mcpcontract.RecoveryAction(mcpcontract.RankOpportunitiesInput{Repositories: []mcpcontract.RepositoryRef{{Owner: input.Owner, Repo: input.Repo}}, Limit: in.Limit, MaxResultsPerRepository: nextLimit}))
+		}
 		out.Total += report.CandidatePopulation
 		out.Truncated = out.Truncated || summary.Truncated || summary.PopulationCapped
 		item.Value = &summary
@@ -663,6 +682,10 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpcontract.RankOp
 	out.Candidates = append(out.Candidates, candidates[:end]...)
 	for i := range out.Candidates {
 		out.Candidates[i].Rank = i + 1
+	}
+	if out.Truncated {
+		nextLimit := min(100, max(in.Limit*2, in.Limit+1))
+		out.Recovery = recoveryPlan("ranking_truncated", "The cross-repository ranking is bounded. Refresh issue headers, then rerun with a larger result limit before treating the returned candidates as exhaustive.", mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{Selection: "repositories", Repositories: append([]mcpcontract.RepositoryRef(nil), in.Repositories...), Kind: "issue", State: "open"}), mcpcontract.RecoveryAction(mcpcontract.RankOpportunitiesInput{Repositories: append([]mcpcontract.RepositoryRef(nil), in.Repositories...), Limit: nextLimit, MaxResultsPerRepository: in.MaxResultsPerRepository}))
 	}
 	if err := finishCorpusRead(ctx, c, revision); err != nil {
 		return mcpcontract.RankOpportunitiesOutput{}, err

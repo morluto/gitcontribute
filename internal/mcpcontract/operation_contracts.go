@@ -16,8 +16,11 @@ type SearchRepositoriesOutput struct {
 	Query         string               `json:"query"`
 	Total         int                  `json:"total"`
 	Matches       []RepositoryOutput   `json:"matches"`
+	Incomplete    bool                 `json:"incomplete" jsonschema:"Whether the local result or nested repository reads are incomplete"`
+	Missing       []RepositoryRef      `json:"missing,omitempty" jsonschema:"Repository matches whose local projection was unavailable"`
 	NextCursor    string               `json:"next_cursor,omitempty"`
 	SnapshotToken string               `json:"snapshot_token"`
+	Recovery      *RecoveryPlan        `json:"recovery,omitempty"`
 	Provenance    CorpusReadProvenance `json:"provenance"`
 }
 
@@ -71,6 +74,11 @@ type JobArtifactReference struct {
 	ReferencesTruncated bool                 `json:"references_truncated,omitempty" jsonschema:"Whether more exact references exist than this bounded response includes"`
 	Failures            []JobArtifactFailure `json:"failures,omitempty" jsonschema:"Bounded per-reference outcomes that require retry or recovery"`
 	CodeIndex           *CodeIndexArtifact   `json:"code_index,omitempty" jsonschema:"Revision-bound indexed-commit artifact"`
+	Status              string               `json:"status,omitempty" jsonschema:"Artifact completeness status"`
+	DiscoveryStatus     string               `json:"discovery_status,omitempty"`
+	SearchIncomplete    bool                 `json:"search_incomplete,omitempty"`
+	RequestCapped       bool                 `json:"request_capped,omitempty"`
+	Recovery            *RecoveryPlan        `json:"recovery,omitempty"`
 }
 
 // JobArtifactFailure preserves one actionable item-level outcome without
@@ -222,6 +230,8 @@ type CheckCollisionsInput CheckDuplicatesInput
 
 // CheckOutput contains evidence-backed duplicate or collision findings.
 type CheckOutput struct {
+	Status         string         `json:"status" jsonschema:"complete, unavailable, or partial"`
+	Coverage       string         `json:"coverage" jsonschema:"complete or unknown; unknown coverage is not evidence of absence"`
 	Target         string         `json:"target"`
 	ID             string         `json:"id"`
 	Repo           string         `json:"repo,omitempty"`
@@ -230,6 +240,8 @@ type CheckOutput struct {
 	Findings       []EvidenceItem `json:"findings,omitempty"`
 	SourceRevision string         `json:"source_revision,omitempty"`
 	Limit          int            `json:"limit"`
+	Truncated      bool           `json:"truncated"`
+	Recovery       *RecoveryPlan  `json:"recovery,omitempty"`
 }
 
 // FindRelatedWorkInput selects one workflow target and related-work populations.

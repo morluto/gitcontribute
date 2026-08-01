@@ -52,6 +52,9 @@ func TestPullRequestPortfolioDerivesConflictAndPreservesUnknownCoverage(t *testi
 	if byNumber[unknown.Number].Attention != "unknown" || byNumber[unknown.Number].StatusCoverage != "missing" {
 		t.Fatalf("unknown coverage collapsed: %+v", byNumber[unknown.Number])
 	}
+	if byNumber[unknown.Number].Recovery == nil || len(byNumber[unknown.Number].Recovery.Then) == 0 || byNumber[unknown.Number].Recovery.Then[0].Type != "sync_portfolio" {
+		t.Fatalf("unknown portfolio recovery = %+v", byNumber[unknown.Number].Recovery)
+	}
 	concise, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Authors: []string{"alice"}, State: "open", Limit: 10})
 	if err != nil {
 		t.Fatal(err)

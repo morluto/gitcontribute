@@ -141,6 +141,7 @@ type SearchOutput struct {
 	NextCursor          string               `json:"next_cursor,omitempty"`
 	UnknownMergeCount   int                  `json:"unknown_merge_count,omitempty"`
 	Suggestion          string               `json:"suggestion,omitempty"`
+	Recovery            *RecoveryPlan        `json:"recovery,omitempty"`
 	SnapshotToken       string               `json:"snapshot_token"`
 	Provenance          CorpusReadProvenance `json:"provenance"`
 }
@@ -203,15 +204,16 @@ type SourceRef struct {
 // non-durable; callers that need cross-call reuse must request a persisted
 // snapshot rather than treating a mutable projection as historical evidence.
 type CorpusReadProvenance struct {
-	SnapshotToken        string      `json:"snapshot_token"`
-	Durable              bool        `json:"durable"`
-	ObservationWatermark int64       `json:"observation_watermark"`
-	QueryDigestSHA256    string      `json:"query_digest_sha256"`
-	Complete             bool        `json:"complete"`
-	Truncated            bool        `json:"truncated"`
-	UnknownCoverage      bool        `json:"unknown_coverage"`
-	Limitations          []string    `json:"limitations,omitempty"`
-	ExternalContext      []SourceRef `json:"external_context,omitempty"`
+	SnapshotToken        string        `json:"snapshot_token"`
+	Durable              bool          `json:"durable"`
+	ObservationWatermark int64         `json:"observation_watermark"`
+	QueryDigestSHA256    string        `json:"query_digest_sha256"`
+	Complete             bool          `json:"complete"`
+	Truncated            bool          `json:"truncated"`
+	UnknownCoverage      bool          `json:"unknown_coverage"`
+	Limitations          []string      `json:"limitations,omitempty"`
+	ExternalContext      []SourceRef   `json:"external_context,omitempty"`
+	Recovery             *RecoveryPlan `json:"recovery,omitempty"`
 }
 
 // SearchCodeInput describes an offline code search page.
@@ -237,16 +239,17 @@ type CodeMatchOutput struct {
 
 // CodeIndexCoverageOutput reports one selected snapshot's indexing coverage.
 type CodeIndexCoverageOutput struct {
-	Repo           string `json:"repo"`
-	Status         string `json:"status" jsonschema:"Index coverage state"`
-	Commit         string `json:"commit"`
-	Truncated      bool   `json:"truncated" jsonschema:"Whether index limits omitted files"`
-	IndexedFiles   int    `json:"indexed_files" jsonschema:"Files indexed in this snapshot"`
-	TrackedEntries int    `json:"tracked_entries" jsonschema:"Tracked tree entries considered"`
-	SkippedFiles   int    `json:"skipped_files" jsonschema:"Entries omitted by policy or limits"`
-	SkippedPolicy  int    `json:"skipped_policy" jsonschema:"Invalid, excluded, or non-regular entries"`
-	SkippedLimits  int    `json:"skipped_limits" jsonschema:"Entries omitted by file-size, total-size, or file-count bounds"`
-	SkippedNonText int    `json:"skipped_non_text" jsonschema:"Entries omitted because content was binary or invalid UTF-8"`
+	Repo           string        `json:"repo"`
+	Status         string        `json:"status" jsonschema:"Index coverage state"`
+	Commit         string        `json:"commit"`
+	Truncated      bool          `json:"truncated" jsonschema:"Whether index limits omitted files"`
+	IndexedFiles   int           `json:"indexed_files" jsonschema:"Files indexed in this snapshot"`
+	TrackedEntries int           `json:"tracked_entries" jsonschema:"Tracked tree entries considered"`
+	SkippedFiles   int           `json:"skipped_files" jsonschema:"Entries omitted by policy or limits"`
+	SkippedPolicy  int           `json:"skipped_policy" jsonschema:"Invalid, excluded, or non-regular entries"`
+	SkippedLimits  int           `json:"skipped_limits" jsonschema:"Entries omitted by file-size, total-size, or file-count bounds"`
+	SkippedNonText int           `json:"skipped_non_text" jsonschema:"Entries omitted because content was binary or invalid UTF-8"`
+	Recovery       *RecoveryPlan `json:"recovery,omitempty" jsonschema:"Typed action to acquire or re-index missing or incomplete code coverage"`
 }
 
 // SearchCodeOutput contains one page of offline code matches.
@@ -257,6 +260,7 @@ type SearchCodeOutput struct {
 	Coverage      []CodeIndexCoverageOutput `json:"coverage,omitempty"`
 	NextCursor    string                    `json:"next_cursor,omitempty"`
 	SnapshotToken string                    `json:"snapshot_token"`
+	Recovery      *RecoveryPlan             `json:"recovery,omitempty"`
 	Provenance    CorpusReadProvenance      `json:"provenance"`
 }
 
@@ -424,6 +428,7 @@ type ClusterSetOutput struct {
 	Total       int                    `json:"total"`
 	Clusters    []ClusterOutput        `json:"clusters"`
 	Truncated   bool                   `json:"truncated" jsonschema:"Whether more clusters matched"`
+	Recovery    *RecoveryPlan          `json:"recovery,omitempty"`
 }
 
 // FindClustersOutput preserves target order and isolates item failures.

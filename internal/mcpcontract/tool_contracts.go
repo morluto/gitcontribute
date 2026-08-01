@@ -219,6 +219,7 @@ type ListConcernsInput struct {
 	Status string `json:"status,omitempty" jsonschema:"Optional concern status"`
 	Query  string `json:"query,omitempty" jsonschema:"Literal full-text search query"`
 	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
+	Offset int    `json:"offset,omitempty" jsonschema:"Number of matching concerns to skip for pagination"`
 }
 
 // UpdateConcernInput replaces explicitly supplied editable fields.
@@ -316,10 +317,13 @@ type ConcernSummaryOutput struct {
 
 // ConcernListOutput contains one bounded offline result set.
 type ConcernListOutput struct {
-	Concerns  []ConcernSummaryOutput `json:"concerns" jsonschema:"Bounded concern summaries with resource URIs"`
-	Limit     int                    `json:"limit" jsonschema:"Effective result limit"`
-	Total     int                    `json:"total" jsonschema:"Total matching concerns"`
-	Truncated bool                   `json:"truncated" jsonschema:"Whether more matching concerns exist"`
+	Concerns   []ConcernSummaryOutput `json:"concerns" jsonschema:"Bounded concern summaries with resource URIs"`
+	Limit      int                    `json:"limit" jsonschema:"Effective result limit"`
+	Total      int                    `json:"total" jsonschema:"Total matching concerns"`
+	Truncated  bool                   `json:"truncated" jsonschema:"Whether more matching concerns exist"`
+	Offset     int                    `json:"offset"`
+	NextOffset int                    `json:"next_offset,omitempty"`
+	Recovery   *RecoveryPlan          `json:"recovery,omitempty"`
 }
 
 // PrepareContributionInput renders a local issue or pull-request draft.
@@ -498,12 +502,13 @@ type OpportunityCandidateOutput struct {
 
 // RepositoryOpportunitySummaryOutput reports ranking coverage for one repository.
 type RepositoryOpportunitySummaryOutput struct {
-	Repo             string `json:"repo"`
-	TotalOpenIssues  int    `json:"total_open_issues"`
-	Considered       int    `json:"considered"`
-	Returned         int    `json:"returned"`
-	Truncated        bool   `json:"truncated"`
-	PopulationCapped bool   `json:"population_capped"`
+	Repo             string        `json:"repo"`
+	TotalOpenIssues  int           `json:"total_open_issues"`
+	Considered       int           `json:"considered"`
+	Returned         int           `json:"returned"`
+	Truncated        bool          `json:"truncated"`
+	PopulationCapped bool          `json:"population_capped"`
+	Recovery         *RecoveryPlan `json:"recovery,omitempty"`
 }
 
 // RankOpportunitiesOutput combines deterministic cross-repository ranking with
@@ -516,6 +521,7 @@ type RankOpportunitiesOutput struct {
 	Total         int                                             `json:"total"`
 	Truncated     bool                                            `json:"truncated"`
 	SnapshotToken string                                          `json:"snapshot_token"`
+	Recovery      *RecoveryPlan                                   `json:"recovery,omitempty"`
 }
 
 // ReadinessInput selects a contribution opportunity readiness report.

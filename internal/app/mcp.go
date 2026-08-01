@@ -142,6 +142,10 @@ func (r *MCPReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcp
 		return mcpcontract.SearchOutput{}, err
 	}
 	out.Provenance = provenance
+	if provenance.UnknownCoverage {
+		out.Recovery = localThreadSearchRecovery(in)
+		out.Provenance.Recovery = out.Recovery
+	}
 	if out.UnknownMergeCount > 0 {
 		out.Suggestion = "Some otherwise-matching pull requests have unknown merge state. Repeat without the merged filter to identify finalists, then hydrate pr_details before inferring absence."
 	} else if out.Total == 0 && in.MatchMode == "all" && len(strings.Fields(in.Query)) > 1 {

@@ -98,6 +98,40 @@ func TestConcernListReportsMatchingPopulation(t *testing.T) {
 	}
 }
 
+func TestMCPConcernListProvidesNextOffsetRecovery(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newLocalService(t)
+	defer func() { _ = svc.Close() }()
+	for _, title := range []string{"first", "second", "third"} {
+		if _, err := svc.CreateConcern(ctx, contracts.ConcernCreateOptions{
+			Repo: contracts.RepoRef{Owner: "owner", Repo: "repo"}, CommitSHA: "abc", Title: title, ProblemStatement: "paged",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	reader := &MCPReader{svc}
+	page, err := reader.ListConcerns(ctx, mcpcontract.ListConcernsInput{Owner: "owner", Repo: "repo", Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Offset != 0 || page.NextOffset != 2 || !page.Truncated || page.Recovery == nil || len(page.Recovery.Then) != 1 || page.Recovery.Then[0].Type != "list_concerns" {
+		t.Fatalf("first concern page = %+v", page)
+	}
+	if next := page.Recovery.Then[0].ListConcerns; next == nil || next.Offset != 2 || next.Limit != 2 {
+		t.Fatalf("next concern action = %+v", page.Recovery)
+	}
+
+	last, err := reader.ListConcerns(ctx, mcpcontract.ListConcernsInput{Owner: "owner", Repo: "repo", Limit: 2, Offset: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last.Offset != 2 || last.NextOffset != 0 || last.Truncated || last.Recovery != nil || len(last.Concerns) != 1 {
+		t.Fatalf("last concern page = %+v", last)
+	}
+}
+
 func TestConcernFreshnessIsDerivedFromCurrentCorpus(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

@@ -322,7 +322,7 @@ func (s *Server) register() {
 	readOnly := readOnlyAnnotations()
 	addCatalogTool(s, catalogTool[mcpcontract.SearchCodeInput, mcpcontract.SearchCodeOutput]{
 		name: mcpcontract.ToolSearchCode, title: "Search stored code",
-		description: "Search indexed code and return bounded snippets plus selected-snapshot coverage, including for zero scoped matches. Optional owner/repo scope; offline.",
+		description: "Search indexed code and return bounded snippets plus selected-snapshot coverage, including for zero scoped matches. Missing, unknown, or truncated indexes include an exact typed code.index_repositories recovery action, while additional result pages include a typed cursor action. Optional owner/repo scope; offline.",
 		annotations: readOnly, input: inputSchema[mcpcontract.SearchCodeInput](func(schema *schemaBuilder) {
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
@@ -355,7 +355,7 @@ func (s *Server) register() {
 				setMinimum(targetSchema, "number", 1)
 				requireTogether(targetSchema, "kind", "number")
 			}
-		}), output: outputSchema[mcpcontract.FindClustersOutput]("Ordered stored duplicate-cluster results."), handler: s.findClusters,
+		}), output: outputSchema[mcpcontract.FindClustersOutput]("Ordered stored duplicate-cluster results with typed larger-limit recovery for truncated populations."), handler: s.findClusters,
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.FindNeighborsInput, mcpcontract.FindNeighborsOutput]{
 		name: mcpcontract.ToolFindNeighbors, title: "Find similar threads in one batch",

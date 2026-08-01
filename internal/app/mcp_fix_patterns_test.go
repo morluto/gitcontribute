@@ -55,6 +55,9 @@ func TestMineRepositoryFixPatternsSeparatesAcceptedFixesFromSimilarity(t *testin
 	if report.Status != "partial" || report.Coverage.UniqueCandidates != 5 || report.Coverage.UnknownBefore != 1 || report.Coverage.UnknownAfter != 1 {
 		t.Fatalf("coverage = %+v, status = %q", report.Coverage, report.Status)
 	}
+	if report.Recovery == nil || len(report.Recovery.Then) != 1 || report.Recovery.Then[0].Type != "mine_repository_fix_patterns" {
+		t.Fatalf("fix-pattern recovery = %+v", report.Recovery)
+	}
 	if len(report.Clusters) != 1 || len(report.Clusters[0].Examples) != 5 {
 		t.Fatalf("clusters = %+v", report.Clusters)
 	}
