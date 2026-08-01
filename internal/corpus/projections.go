@@ -97,6 +97,28 @@ func (c *Corpus) RequireProjection(ctx context.Context, name, version string) er
 	return nil
 }
 
+// RequireFreshProjection verifies both the durable projection state and the
+// current source identity. A rebuild may leave the last successful index
+// readable while it is running, but a changed source must never be presented
+// as a complete search snapshot.
+func (c *Corpus) RequireFreshProjection(ctx context.Context, name, version string) error {
+	if err := c.RequireProjection(ctx, name, version); err != nil {
+		return err
+	}
+	state, err := c.GetProjectionState(ctx, name)
+	if err != nil {
+		return fmt.Errorf("%w: %s: %w", ErrProjectionStale, name, err)
+	}
+	_, contentHash, err := c.projectionSourceIdentity(ctx, c.db, name)
+	if err != nil {
+		return fmt.Errorf("%w: %s source: %w", ErrProjectionStale, name, err)
+	}
+	if state.ContentHash != contentHash {
+		return fmt.Errorf("%w: %s source changed since last rebuild", ErrProjectionStale, name)
+	}
+	return nil
+}
+
 // GetProjectionState returns the durable state for one derived projection.
 func (c *Corpus) GetProjectionState(ctx context.Context, name string) (ProjectionState, error) {
 	var state ProjectionState
@@ -315,7 +337,10 @@ func (c *Corpus) projectionSourceIdentity(ctx context.Context, q projectionSourc
 	case ProjectionNameCodeDocumentsFTS:
 		query = `SELECT id, path, content FROM code_documents ORDER BY id`
 	case ProjectionNamePullRequestFeedbackFTS:
-		query = `SELECT id, channel || char(10) || author, body || char(10) || path FROM pull_request_feedback_projection ORDER BY id`
+		// Feedback observations are the canonical source. The normalized rows
+		// are the replaceable child snapshot and therefore cannot identify their
+		// own freshness.
+		query = `SELECT id, facet || char(10) || CAST(source_updated_at AS TEXT), payload FROM facet_observations WHERE facet IN ('pr_feedback_issue_comments', 'pr_feedback_reviews', 'pr_feedback_inline_comments', 'pr_feedback_review_threads') ORDER BY id`
 	default:
 		return "", "", fmt.Errorf("unknown search projection %q", name)
 	}

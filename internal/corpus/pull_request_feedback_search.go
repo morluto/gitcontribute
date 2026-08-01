@@ -98,7 +98,7 @@ func (c *Corpus) SearchPullRequestFeedback(ctx context.Context, filter FeedbackS
 	if filter.Channel != "" && !validFeedbackChannel(filter.Channel) {
 		return FeedbackSearchPage{}, fmt.Errorf("unsupported feedback channel %q", filter.Channel)
 	}
-	if err := c.RequireProjection(ctx, ProjectionNamePullRequestFeedbackFTS, ProjectionVersionPullRequestFeedbackFTS); err != nil {
+	if err := c.RequireFreshProjection(ctx, ProjectionNamePullRequestFeedbackFTS, ProjectionVersionPullRequestFeedbackFTS); err != nil {
 		return FeedbackSearchPage{}, err
 	}
 	filterKeyBytes, _ := json.Marshal(feedbackSearchFilterKey{
@@ -114,7 +114,7 @@ func (c *Corpus) SearchPullRequestFeedback(ctx context.Context, filter FeedbackS
 		return FeedbackSearchPage{}, err
 	}
 
-	where, args, ftsQuery := feedbackSearchWhere(filter)
+	where, args, ftsQuery := feedbackSearchWhere(filter, true)
 	joinFTS := ""
 	if ftsQuery != "" {
 		joinFTS = " JOIN pull_request_feedback_fts ON pull_request_feedback_fts.rowid = p.id"
@@ -152,12 +152,34 @@ func (c *Corpus) SearchPullRequestFeedback(ctx context.Context, filter FeedbackS
 		return FeedbackSearchPage{}, fmt.Errorf("count pull-request feedback: %w", err)
 	}
 	page := FeedbackSearchPage{Items: items, Total: total}
+	if filter.Merged == "true" || filter.Merged == "false" {
+		unknownWhere, unknownArgs, unknownFTSQuery := feedbackSearchWhere(filter, false)
+		unknownWhere += " AND t.merged_known = 0"
+		if unknownFTSQuery != "" {
+			unknownArgs = append([]any{unknownFTSQuery}, unknownArgs...)
+		}
+		unknownRows, err := tx.QueryContext(ctx, `SELECT DISTINCT t.number`+from+unknownWhere+` ORDER BY t.number ASC LIMIT 50`, unknownArgs...)
+		if err != nil {
+			return FeedbackSearchPage{}, fmt.Errorf("find unknown pull-request merge states: %w", err)
+		}
+		defer func() { _ = unknownRows.Close() }()
+		for unknownRows.Next() {
+			var number int
+			if err := unknownRows.Scan(&number); err != nil {
+				return FeedbackSearchPage{}, fmt.Errorf("scan unknown pull-request merge state: %w", err)
+			}
+			page.UnknownMergePullRequests = append(page.UnknownMergePullRequests, number)
+		}
+		if err := unknownRows.Err(); err != nil {
+			return FeedbackSearchPage{}, fmt.Errorf("iterate unknown pull-request merge states: %w", err)
+		}
+	}
 	if len(items) > filter.Limit {
 		page.Items = items[:filter.Limit]
 		page.NextCursor = encodeFeedbackCursor(feedbackSearchCursor{Scope: "pull_request_feedback", Filter: string(filterKeyBytes), Offset: offset + filter.Limit})
 		page.Truncated = true
 	}
-	page.Coverage, err = c.feedbackCoverageTx(ctx, tx, filter.RepositoryID, filter.Channel)
+	page.Coverage, err = c.feedbackCoverageTx(ctx, tx, filter.RepositoryID, filter.Channel, filter.ThreadState)
 	if err != nil {
 		return FeedbackSearchPage{}, err
 	}
@@ -171,7 +193,7 @@ func validFeedbackChannel(value string) bool {
 	return feedbackFacetForChannel(value) != ""
 }
 
-func feedbackSearchWhere(filter FeedbackSearchFilter) (string, []any, string) {
+func feedbackSearchWhere(filter FeedbackSearchFilter, applyMerge bool) (string, []any, string) {
 	where := " WHERE 1=1"
 	args := make([]any, 0, 12)
 	if filter.RepositoryID != 0 {
@@ -190,13 +212,15 @@ func feedbackSearchWhere(filter FeedbackSearchFilter) (string, []any, string) {
 		where += " AND t.state = ?"
 		args = append(args, filter.State)
 	}
-	switch filter.Merged {
-	case "true":
-		where += " AND t.merged_known = 1 AND t.merged = 1"
-	case "false":
-		where += " AND t.merged_known = 1 AND t.merged = 0"
-	case "unknown":
-		where += " AND t.merged_known = 0"
+	if applyMerge {
+		switch filter.Merged {
+		case "true":
+			where += " AND t.merged_known = 1 AND t.merged = 1"
+		case "false":
+			where += " AND t.merged_known = 1 AND t.merged = 0"
+		case "unknown":
+			where += " AND t.merged_known = 0"
+		}
 	}
 	if filter.ThreadState == "resolved" {
 		where += " AND p.resolved_known = 1 AND p.resolved = 1"

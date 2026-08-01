@@ -2,6 +2,7 @@ package corpus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -43,6 +44,12 @@ func TestPullRequestFeedbackProjectionRebuildAndSearch(t *testing.T) {
 	}
 	if len(page.Items) != 1 || page.Items[0].FeedbackID != "11" || page.Items[0].PullRequestNumber != 7 || page.Items[0].PullRequestMerged != true || page.Coverage.Status != "complete" {
 		t.Fatalf("feedback page = %+v", page)
+	}
+	if err := c.ApplyFacetObservationSet(ctx, repo.ID, &pr.ID, feedbackFacetIssueComments, now.Add(time.Hour), []FacetObservationInput{{SourceUpdatedAt: now.Add(time.Hour), Payload: completePayload(`[{"id":12,"author":"alice","body":"new feedback"}]`)}}, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.SearchPullRequestFeedback(ctx, FeedbackSearchFilter{RepositoryID: repo.ID, Limit: 10}); !errors.Is(err, ErrProjectionStale) {
+		t.Fatalf("search after raw feedback replacement error = %v, want ErrProjectionStale", err)
 	}
 }
 
@@ -87,6 +94,94 @@ func TestPullRequestFeedbackIncompleteRefreshPreservesCompleteProjection(t *test
 	}
 	if len(page.Items) != 1 || page.Items[0].Body != "old review" || page.Coverage.Status != "partial" || page.Coverage.IncompletePRs != 1 {
 		t.Fatalf("preserved feedback page = %+v", page)
+	}
+}
+
+func TestPullRequestFeedbackCoverageRespectsThreadSelection(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	now := time.Date(2026, 7, 31, 11, 0, 0, 0, time.UTC)
+	repo, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "rocket", SourceUpdatedAt: now}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr, err := c.UpsertThread(ctx, Thread{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 9, State: "open", SourceUpdatedAt: now}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	threadPayload := `{"selection":"unresolved","coverage":{"complete":true},"items":[{"id":"thread-9","resolved":false,"comments":[{"id":909,"author":"reviewer","body":"unresolved feedback"}]}]}`
+	if err := c.ApplyFacetObservationSet(ctx, repo.ID, &pr.ID, feedbackFacetReviewThreads, now, []FacetObservationInput{{SourceUpdatedAt: now, Payload: threadPayload}}, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, facet := range []string{feedbackFacetIssueComments, feedbackFacetReviews, feedbackFacetInlineComments} {
+		if err := c.ApplyFacetObservationSet(ctx, repo.ID, &pr.ID, facet, now, []FacetObservationInput{{SourceUpdatedAt: now, Payload: `{"coverage":{"complete":true},"items":[]}`}}, true, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := c.UpsertFeedbackDiscovery(ctx, FeedbackDiscovery{RepositoryID: repo.ID, State: "all", NextPage: 1, Complete: true, DiscoveredPullRequests: 1, Channels: feedbackChannels, ThreadState: "unresolved", SourceUpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.RebuildPullRequestFeedbackProjection(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	unresolved, err := c.SearchPullRequestFeedback(ctx, FeedbackSearchFilter{RepositoryID: repo.ID, Channel: "review_threads", ThreadState: "unresolved", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unresolved.Items) != 1 || unresolved.Coverage.Status != "complete" {
+		t.Fatalf("unresolved search = %+v", unresolved)
+	}
+
+	all, err := c.SearchPullRequestFeedback(ctx, FeedbackSearchFilter{RepositoryID: repo.ID, Channel: "review_threads", ThreadState: "all", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all.Coverage.Status != "partial" || all.Coverage.IncompletePRs != 1 {
+		t.Fatalf("all-thread coverage = %+v", all.Coverage)
+	}
+
+	resolved, err := c.SearchPullRequestFeedback(ctx, FeedbackSearchFilter{RepositoryID: repo.ID, Channel: "review_threads", ThreadState: "resolved", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resolved.Items) != 0 || resolved.Coverage.Status != "partial" || resolved.Coverage.IncompletePRs != 1 {
+		t.Fatalf("resolved-thread coverage = %+v", resolved)
+	}
+}
+
+func TestFeedbackDiscoveryDoesNotRegressCheckpoint(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	first := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
+	repo, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "checkpoint", SourceUpdatedAt: first}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.UpsertFeedbackDiscovery(ctx, FeedbackDiscovery{RepositoryID: repo.ID, Generation: 1, State: "all", NextPage: 4, Channels: feedbackChannels, ThreadState: "all", SourceUpdatedAt: first}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.UpsertFeedbackDiscovery(ctx, FeedbackDiscovery{RepositoryID: repo.ID, Generation: 1, State: "all", NextPage: 2, Complete: true, Channels: feedbackChannels, ThreadState: "all", SourceUpdatedAt: first.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.GetFeedbackDiscovery(ctx, repo.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Generation != 1 || got.NextPage != 4 || got.Complete {
+		t.Fatalf("discovery checkpoint = %+v, want page 4 incomplete", got)
+	}
+	if err := c.UpsertFeedbackDiscovery(ctx, FeedbackDiscovery{RepositoryID: repo.ID, Generation: 2, State: "all", NextPage: 1, Complete: true, Channels: feedbackChannels, ThreadState: "all", SourceUpdatedAt: first.Add(2 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = c.GetFeedbackDiscovery(ctx, repo.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Generation != 2 || got.NextPage != 1 || !got.Complete {
+		t.Fatalf("new discovery generation = %+v, want page 1 complete", got)
 	}
 }
 
@@ -165,6 +260,13 @@ func TestPullRequestFeedbackFiltersSortingAndContinuation(t *testing.T) {
 	}
 	if len(filtered.Items) != 1 || filtered.Items[0].Channel != "review_threads" || !filtered.Items[0].ResolvedKnown || !filtered.Items[0].Resolved {
 		t.Fatalf("filtered feedback = %+v", filtered)
+	}
+	unknown, err := c.SearchPullRequestFeedback(ctx, FeedbackSearchFilter{RepositoryID: repo.ID, Merged: "true", Text: "latency discussion", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unknown.Items) != 0 || len(unknown.UnknownMergePullRequests) != 1 || unknown.UnknownMergePullRequests[0] != 1 {
+		t.Fatalf("unknown merge candidates = %+v", unknown)
 	}
 	resolved, err := c.SearchPullRequestFeedback(ctx, FeedbackSearchFilter{RepositoryID: repo.ID, Channel: "review_threads", ThreadState: "resolved", Limit: 10})
 	if err != nil {

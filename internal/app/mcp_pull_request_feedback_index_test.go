@@ -12,10 +12,13 @@ import (
 
 type feedbackIndexTestReader struct {
 	panicRadarReader
-	pages map[int]github.ListResult[github.Issue]
+	pages      map[int]github.ListResult[github.Issue]
+	perPage    []int
+	withThread bool
 }
 
 func (r *feedbackIndexTestReader) ListPullRequests(_ context.Context, _, _ string, opts github.PullRequestListOptions) (github.ListResult[github.Issue], error) {
+	r.perPage = append(r.perPage, opts.PerPage)
 	return r.pages[opts.Page], nil
 }
 
@@ -26,12 +29,17 @@ func (r *feedbackIndexTestReader) GetPullRequestFeedback(_ context.Context, _, _
 		coverage[channel] = github.FeedbackCoverage{Complete: true, Fetched: 1, Total: 1}
 	}
 	head := fmt.Sprintf("head-%d", number)
+	threads := []github.FeedbackThread(nil)
+	if r.withThread {
+		threads = []github.FeedbackThread{{ID: "thread-2", Resolved: false, Comments: []github.FeedbackComment{{ID: 202, Author: "reviewer", Body: "thread feedback", CreatedAt: now, UpdatedAt: now}}}}
+	}
 	return github.PullRequestFeedback{
 		Header:          github.PullRequestDetails{Number: number, State: map[int]string{1: "open", 2: "closed"}[number], Author: map[int]string{1: "alice", 2: "bob"}[number], CreatedAt: now.Add(-time.Hour), UpdatedAt: now, Merged: number == 2, HeadSHA: head},
 		HeadSHA:         head,
 		SourceUpdatedAt: now,
 		ThreadState:     opts.ThreadState,
 		IssueComments:   []github.FeedbackComment{{ID: int64(number), Author: "reviewer", Body: "please address latency", CreatedAt: now, UpdatedAt: now}},
+		ReviewThreads:   threads,
 		Coverage:        coverage,
 	}, nil
 }
@@ -40,10 +48,11 @@ func TestPullRequestFeedbackIndexResumesDiscoveryAndBuildsOfflineProjection(t *t
 	ctx := context.Background()
 	svc := newLocalService(t)
 	t.Cleanup(func() { _ = svc.Close() })
-	svc.SetGitHubReader(&feedbackIndexTestReader{pages: map[int]github.ListResult[github.Issue]{
+	githubReader := &feedbackIndexTestReader{pages: map[int]github.ListResult[github.Issue]{
 		1: {Items: []github.Issue{{Number: 1, Kind: github.ThreadKindPullRequest}}, Page: github.PageInfo{Page: 1, NextPage: 2, HasNext: true}},
 		2: {Items: []github.Issue{{Number: 2, Kind: github.ThreadKindPullRequest}}, Page: github.PageInfo{Page: 2, HasNext: false}},
-	}})
+	}}
+	svc.SetGitHubReader(githubReader)
 	reader := &MCPReader{Service: svc}
 	in := mcpcontract.IndexPullRequestFeedbackInput{
 		Repository:         mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"},
@@ -78,6 +87,9 @@ func TestPullRequestFeedbackIndexResumesDiscoveryAndBuildsOfflineProjection(t *t
 	if second.Status != "complete" || second.PullRequests != 1 {
 		t.Fatalf("resumed index result = %+v", second)
 	}
+	if len(githubReader.perPage) != 2 || githubReader.perPage[0] != feedbackDiscoveryPageSize || githubReader.perPage[1] != feedbackDiscoveryPageSize {
+		t.Fatalf("discovery page sizes = %v, want stable size %d", githubReader.perPage, feedbackDiscoveryPageSize)
+	}
 	discovery, err = svc.corpus.GetFeedbackDiscovery(ctx, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -94,5 +106,31 @@ func TestPullRequestFeedbackIndexResumesDiscoveryAndBuildsOfflineProjection(t *t
 	}
 	if result.Status != "complete" || result.Coverage != "complete" || result.Total != 1 || len(result.Matches) != 1 || result.Matches[0].PullRequest.Number != 2 {
 		t.Fatalf("offline feedback search = %+v", result)
+	}
+}
+
+func TestPullRequestFeedbackSearchKeepsThreadResourceReadable(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	t.Cleanup(func() { _ = svc.Close() })
+	reader := &feedbackIndexTestReader{withThread: true, pages: map[int]github.ListResult[github.Issue]{
+		1: {Items: []github.Issue{{Number: 2, Kind: github.ThreadKindPullRequest}}, Page: github.PageInfo{Page: 1, HasNext: false}},
+	}}
+	svc.SetGitHubReader(reader)
+	appReader := &MCPReader{Service: svc}
+	if _, err := appReader.indexPullRequestFeedback(ctx, mcpcontract.IndexPullRequestFeedbackInput{
+		Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}, Channels: []string{"review_threads"}, ThreadState: "all",
+		MaxPullRequests: 10, MaxItemsPerChannel: 10, MaxPages: 10, MaxRequests: 20,
+	}, func(string, string) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	result, err := appReader.SearchPullRequestFeedback(ctx, mcpcontract.SearchPullRequestFeedbackInput{
+		Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}, Channel: "review_threads", Limit: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Matches) != 1 || result.Matches[0].ThreadID == "" || result.Matches[0].ThreadReference != "gitcontribute://pull-request-feedback/acme/rocket/2" {
+		t.Fatalf("thread resource match = %+v", result.Matches)
 	}
 }

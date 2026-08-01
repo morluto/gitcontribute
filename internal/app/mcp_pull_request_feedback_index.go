@@ -15,6 +15,8 @@ import (
 
 const jobKindIndexPullRequestFeedback = "index_pull_request_feedback"
 
+const feedbackDiscoveryPageSize = 100
+
 type pullRequestFeedbackIndexItem struct {
 	Key           string                      `json:"key"`
 	Status        mcpcontract.BatchItemStatus `json:"item_status"`
@@ -127,7 +129,11 @@ func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract
 		return pullRequestFeedbackIndexResult{}, err
 	}
 	if discovery == nil || discovery.Complete || !sameFeedbackSelection(discovery.Channels, in.Channels) || discovery.ThreadState != in.ThreadState {
-		discovery = &corpus.FeedbackDiscovery{RepositoryID: repo.ID, State: "all", NextPage: 1, Channels: append([]string(nil), in.Channels...), ThreadState: in.ThreadState}
+		generation := int64(1)
+		if discovery != nil {
+			generation = discovery.Generation + 1
+		}
+		discovery = &corpus.FeedbackDiscovery{RepositoryID: repo.ID, Generation: generation, State: "all", NextPage: 1, Channels: append([]string(nil), in.Channels...), ThreadState: in.ThreadState}
 	} else {
 		discovery.Channels = append([]string(nil), in.Channels...)
 		discovery.ThreadState = in.ThreadState
@@ -147,7 +153,7 @@ func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract
 			stopReason = "request_budget_exhausted"
 			break
 		}
-		listed, listErr := indexer.ListPullRequests(ctx, in.Repository.Owner, in.Repository.Repo, github.PullRequestListOptions{State: "all", Sort: "updated", Direction: "desc", PageOptions: github.PageOptions{Page: page, PerPage: min(100, in.MaxPullRequests-processed)}})
+		listed, listErr := indexer.ListPullRequests(ctx, in.Repository.Owner, in.Repository.Repo, github.PullRequestListOptions{State: "all", Sort: "updated", Direction: "desc", PageOptions: github.PageOptions{Page: page, PerPage: feedbackDiscoveryPageSize}})
 		if listErr != nil {
 			stopReason = classifyIndexError(listErr)
 			break

@@ -89,9 +89,6 @@ func (r *MCPReader) SearchPullRequestFeedback(ctx context.Context, in mcpcontrac
 		pr := mcpcontract.ThreadRef{Owner: ref.Owner, Repo: ref.Repo, Kind: "pull_request", Number: item.PullRequestNumber}
 		prReference := fmt.Sprintf("%s/%s#%d", ref.Owner, ref.Repo, item.PullRequestNumber)
 		threadReference := fmt.Sprintf("gitcontribute://pull-request-feedback/%s/%s/%d", ref.Owner, ref.Repo, item.PullRequestNumber)
-		if item.ThreadExternalID != "" {
-			threadReference += "/thread/" + url.PathEscape(item.ThreadExternalID)
-		}
 		out.Matches = append(out.Matches, mcpcontract.PullRequestFeedbackMatch{
 			Repository: in.Repository, PullRequest: pr, PullRequestReference: prReference,
 			PullRequestAuthor: item.PullRequestAuthor, PullRequestState: item.PullRequestState, Merged: merged,
@@ -103,11 +100,13 @@ func (r *MCPReader) SearchPullRequestFeedback(ctx context.Context, in mcpcontrac
 			UpdatedAt: formatTime(item.UpdatedAt), HeadSHA: item.HeadSHA, SourceObservationID: item.SourceObservationID,
 		})
 	}
-	unknownMergeState := false
-	for _, item := range page.Items {
-		if !item.PullRequestMergedKnown {
-			unknownMergeState = true
-			break
+	unknownMergeState := len(page.UnknownMergePullRequests) > 0
+	if !unknownMergeState {
+		for _, item := range page.Items {
+			if !item.PullRequestMergedKnown {
+				unknownMergeState = true
+				break
+			}
 		}
 	}
 	if page.Coverage.Status != "complete" || unknownMergeState {
@@ -152,16 +151,19 @@ func feedbackSearchRecovery(ctx context.Context, c *corpus.Corpus, repositoryID 
 		if threadState == "" {
 			threadState = "all"
 		}
-		threads, err := c.ListPullRequestsWithIncompleteFeedback(ctx, repositoryID, channels, 50)
+		threads, err := c.ListPullRequestsWithIncompleteFeedback(ctx, repositoryID, channels, threadState, 50)
 		if err == nil && len(threads) > 0 {
 			refs := make([]mcpcontract.ThreadRef, 0, len(threads))
 			for _, thread := range threads {
 				refs = append(refs, mcpcontract.ThreadRef{Owner: ref.Owner, Repo: ref.Repo, Kind: "pull_request", Number: thread.Number})
 			}
-			return recoveryPlan("feedback_facet_incomplete", "Some pull-request feedback facets are incomplete; retry the exact feedback synchronization, then reread this search.", mcpcontract.RecoveryAction(mcpcontract.SyncPullRequestFeedbackInput{PullRequests: refs, Channels: channels, ThreadState: threadState, MaxItemsPerChannel: 1000, MaxRequests: 1000}))
+			return recoveryPlan("feedback_facet_incomplete", "Some pull-request feedback facets are incomplete; retry the exact feedback synchronization, then reread this search.", mcpcontract.RecoveryAction(mcpcontract.SyncPullRequestFeedbackInput{PullRequests: refs, Channels: channels, ThreadState: "all", MaxItemsPerChannel: 1000, MaxRequests: 1000}))
 		}
 	}
-	unknown := make([]mcpcontract.ThreadRef, 0, len(page.Items))
+	unknown := make([]mcpcontract.ThreadRef, 0, len(page.UnknownMergePullRequests)+len(page.Items))
+	for _, number := range page.UnknownMergePullRequests {
+		unknown = append(unknown, mcpcontract.ThreadRef{Owner: ref.Owner, Repo: ref.Repo, Kind: "pull_request", Number: number})
+	}
 	for _, item := range page.Items {
 		if item.PullRequestMergedKnown {
 			continue

@@ -46,6 +46,7 @@ func feedbackChannelForFacet(facet string) string {
 // stops a job so a retry can safely replay that page without losing items.
 type FeedbackDiscovery struct {
 	RepositoryID           int64
+	Generation             int64
 	State                  string
 	NextPage               int
 	Complete               bool
@@ -111,11 +112,12 @@ type FeedbackSearchFilter struct {
 }
 
 type FeedbackSearchPage struct {
-	Items      []PullRequestFeedbackProjection
-	Total      int
-	NextCursor string
-	Truncated  bool
-	Coverage   FeedbackCoverageSummary
+	Items                    []PullRequestFeedbackProjection
+	UnknownMergePullRequests []int
+	Total                    int
+	NextCursor               string
+	Truncated                bool
+	Coverage                 FeedbackCoverageSummary
 }
 
 type FeedbackCoverageSummary struct {

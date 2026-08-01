@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
@@ -327,5 +328,28 @@ func TestWorkflowFailurePreservesRetryableGitHubClassification(t *testing.T) {
 	item := workflowFailure(ref, &github.TransientError{Cause: errors.New("head changed")}, mcpcontract.ToolSyncCIFailures)
 	if item.Status != "retryable" || item.Code != "transient" || item.RetryAfterMS == 0 || item.Recovery == nil || len(item.Recovery.Then) != 1 {
 		t.Fatalf("item = %+v", item)
+	}
+}
+
+func TestFeedbackSearchRecoveryRefreshesAllThreadState(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	t.Cleanup(func() { _ = svc.Close() })
+	now := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket", SourceUpdatedAt: now}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7, State: "open", SourceUpdatedAt: now}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.UpsertFeedbackDiscovery(ctx, corpus.FeedbackDiscovery{RepositoryID: repo.ID, Generation: 1, Complete: true, Channels: []string{"issue_comments"}, ThreadState: "all", SourceUpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	plan := feedbackSearchRecovery(ctx, svc.corpus, repo.ID, domain.RepoRef{Owner: "acme", Repo: "rocket"}, mcpcontract.SearchPullRequestFeedbackInput{
+		Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}, Channel: "issue_comments", ThreadState: "resolved",
+	}, corpus.FeedbackSearchPage{Coverage: corpus.FeedbackCoverageSummary{Status: "partial", DiscoveryComplete: true, IncompletePRs: 1}})
+	if plan == nil || len(plan.Then) != 1 || plan.Then[0].SyncFeedback == nil || plan.Then[0].SyncFeedback.ThreadState != "all" {
+		t.Fatalf("feedback recovery plan = %+v", plan)
 	}
 }
