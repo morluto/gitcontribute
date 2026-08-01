@@ -12,6 +12,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/managedbinary"
 	clientsetup "github.com/morluto/gitcontribute/internal/setup"
 )
 
@@ -235,6 +236,60 @@ func TestSetupMCPOnlyReusesMatchingManagedBinary(t *testing.T) {
 		}
 	}
 	t.Fatalf("runtime step missing: %+v", report)
+}
+
+func TestSetupRejectsStaleBootstrapWhenNewerPrivateRuntimeExists(t *testing.T) {
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home, Vars: map[string]string{
+		"HOME": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"), "XDG_DATA_HOME": filepath.Join(home, "data"),
+	}})
+	svc, err := New(paths, "0.15.0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	dataDir, err := paths.DataDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	newer, err := managedbinary.Destination(dataDir, "0.16.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(newer), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newer, []byte("release-0.16.0"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeCodexConfig(t, home, newer)
+	before, err := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: filepath.Join(home, "npm-cache", "gitcontribute"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.HasFailures() {
+		t.Fatalf("stale bootstrap setup unexpectedly succeeded: %+v", report)
+	}
+	for _, step := range report.Steps {
+		if step.Name == "mcp-runtime" {
+			if step.Status != "failed" || !strings.Contains(step.Message, "npx --yes gitcontribute@latest setup") {
+				t.Fatalf("runtime step = %+v", step)
+			}
+			got, readErr := os.ReadFile(filepath.Join(home, ".codex", "config.toml"))
+			if readErr != nil || !slices.Equal(got, before) {
+				t.Fatalf("registration changed after stale bootstrap setup: err=%v got=%s", readErr, got)
+			}
+			return
+		}
+	}
+	t.Fatalf("runtime step missing: %+v", report.Steps)
 }
 
 func TestSetupBothRegistersTheInstalledCLIWithoutASecondRuntime(t *testing.T) {

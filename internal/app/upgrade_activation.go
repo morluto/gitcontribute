@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 
@@ -99,7 +100,23 @@ func (s *Service) activatePrivateRuntime(ctx context.Context, report *contracts.
 	}
 
 	target := report.Latest
+	if target == "" {
+		target = report.Current
+	}
+	dataDir, err := s.paths.DataDir()
+	if err != nil {
+		s.setPrivateActivationFailure(report, len(clients), err)
+		return
+	}
+	destination, err := managedbinary.Destination(dataDir, target)
+	if err != nil {
+		s.setPrivateActivationFailure(report, len(clients), err)
+		return
+	}
 	candidate := details.executable
+	if _, statErr := os.Stat(destination); statErr == nil {
+		candidate = destination
+	}
 	if candidate == "" {
 		stage := upgradeStage(report, "activation")
 		stage.Status = "target_runtime_unavailable"
@@ -122,7 +139,14 @@ func (s *Service) activatePrivateRuntime(ctx context.Context, report *contracts.
 		return
 	}
 	if normalizeVersion(contract.Version) != normalizeVersion(target) {
-		s.setPrivateActivationFailure(report, len(clients), fmt.Errorf("staged executable reports version %s, not target %s", contract.Version, target))
+		message := fmt.Errorf("staged executable reports version %s, not target %s", contract.Version, target)
+		if details.context == "npx" {
+			message = fmt.Errorf("npx bootstrap reports version %s and cannot activate target %s; run `npx --yes gitcontribute@latest setup`", contract.Version, target)
+		}
+		s.setPrivateActivationFailure(report, len(clients), message)
+		if details.context == "npx" {
+			report.Action = message.Error()
+		}
 		return
 	}
 	if contract.SupportedSchemaVersion <= 0 {
@@ -172,16 +196,6 @@ func (s *Service) activatePrivateRuntime(ctx context.Context, report *contracts.
 		}
 	}
 
-	dataDir, err := s.paths.DataDir()
-	if err != nil {
-		s.setPrivateActivationFailure(report, len(clients), err)
-		return
-	}
-	destination, err := managedbinary.Destination(dataDir, target)
-	if err != nil {
-		s.setPrivateActivationFailure(report, len(clients), err)
-		return
-	}
 	if _, err := managedbinary.Install(candidate, destination); err != nil {
 		s.setPrivateActivationFailure(report, len(clients), fmt.Errorf("stage private MCP runtime: %w", err))
 		return
@@ -258,7 +272,11 @@ func (s *Service) repairStaleRegistrations(ctx context.Context, report *contract
 	}
 
 	for _, client := range setupClients {
-		configured, err := inspectConfiguredClient(s.paths.HomeDir(), client, report.Current, report.Latest)
+		target := report.Latest
+		if target == "" {
+			target = report.Current
+		}
+		configured, err := inspectConfiguredClient(s.paths.HomeDir(), client, target)
 		if err != nil || configured.Status == "stale" || configured.Status == "failed" || configured.Status == "not_configured" {
 			stage := upgradeStage(report, "activation")
 			stage.Status = "failed"
@@ -331,7 +349,7 @@ func (s *Service) verifyPrivateActivation(ctx context.Context, report *contracts
 		return err
 	}
 	for _, client := range clients {
-		configured, err := inspectConfiguredClient(s.paths.HomeDir(), client, target, target)
+		configured, err := inspectConfiguredClient(s.paths.HomeDir(), client, target)
 		if err != nil {
 			return fmt.Errorf("verify %s registration: %w", client, err)
 		}

@@ -3,10 +3,41 @@ package managedbinary
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestListReturnsUsableVersionedRuntimesInSemanticOrder(t *testing.T) {
+	dataDir := t.TempDir()
+	for _, version := range []string{"1.10.0", "1.2.0", "1.2.0-rc.1", "ignored"} {
+		path, err := Destination(dataDir, version)
+		if err != nil {
+			if version == "ignored" {
+				if err := os.MkdirAll(filepath.Join(dataDir, "bin", version), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				continue
+			}
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(version), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	runtimes, err := List(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string{runtimes[0].Version, runtimes[1].Version, runtimes[2].Version}; !reflect.DeepEqual(got, []string{"1.2.0-rc.1", "1.2.0", "1.10.0"}) {
+		t.Fatalf("versions = %v", got)
+	}
+}
 
 func TestDestinationUsesSafeVersionedPath(t *testing.T) {
 	destination, err := Destination(filepath.Join("data", "gitcontribute"), "v1.2.3-beta.1+build.7")

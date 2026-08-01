@@ -155,7 +155,7 @@ function runScriptPTY(command, input, env) {
   });
 }
 
-async function packCurrentPlatform(workspace) {
+async function packCurrentPlatform(workspace, version = packageVersion) {
   const platform = platforms[`${process.platform}-${process.arch}`];
   assert.ok(platform, `unsupported test platform ${process.platform}-${process.arch}`);
 
@@ -165,17 +165,23 @@ async function packCurrentPlatform(workspace) {
   for (const path of ["package.json", "README.md", "LICENSE", "npm/platforms.json", "npm/bin/gitcontribute.cjs"]) {
     const target = join(staging, path);
     await mkdir(dirname(target), { recursive: true });
-    await copyFile(join(root, path), target);
+    if (path === "package.json" && version !== packageVersion) {
+      const packageJSON = JSON.parse(await readFile(join(root, path), "utf8"));
+      packageJSON.version = version;
+      await writeFile(target, `${JSON.stringify(packageJSON, null, 2)}\n`);
+    } else {
+      await copyFile(join(root, path), target);
+    }
   }
 
   const executable = join(nativeDir, platform.binary);
-  run("go", ["build", "-ldflags", `-X main.version=${packageVersion}`, "-o", executable, "./cmd/gitcontribute"], { cwd: root });
+  run("go", ["build", "-ldflags", `-X main.version=${version}`, "-o", executable, "./cmd/gitcontribute"], { cwd: root });
   if (process.platform !== "win32") await chmod(executable, 0o755);
 
   const packs = join(workspace, "packs");
-  await mkdir(packs);
+  await mkdir(packs, { recursive: true });
   run("npm", ["pack", "--silent", "--pack-destination", packs], { cwd: staging });
-  return join(packs, `gitcontribute-${packageVersion}.tgz`);
+  return join(packs, `gitcontribute-${version}.tgz`);
 }
 
 async function createFakeGlobalNPM(workspace) {
@@ -209,20 +215,46 @@ process.exit(2);
   return { fakeBin, globalPrefix, npmLog };
 }
 
-async function startRegistry(latestVersion) {
+async function startRegistry(latestVersion, tarballs = {}) {
   const requests = [];
   const server = createServer((request, response) => {
     requests.push({ method: request.method, url: request.url });
     if (request.method === "GET" && request.url === "/gitcontribute") {
       response.setHeader("content-type", "application/json");
+      const latest = {
+        name: "gitcontribute",
+        version: latestVersion,
+        bin: { gitcontribute: "npm/bin/gitcontribute.cjs" },
+      };
+      if (tarballs[latestVersion]) {
+        latest.dist = { tarball: `http://127.0.0.1:${server.address().port}/gitcontribute-${latestVersion}.tgz` };
+      }
       response.end(
         JSON.stringify({
           _id: "gitcontribute",
           name: "gitcontribute",
           "dist-tags": { latest: latestVersion },
-          versions: { [latestVersion]: { name: "gitcontribute", version: latestVersion } },
+          versions: { [latestVersion]: latest },
         })
       );
+      return;
+    }
+    const tarballPrefix = "/gitcontribute-";
+    if (request.method === "GET" && request.url?.startsWith(tarballPrefix) && request.url.endsWith(".tgz")) {
+      const version = request.url.slice(tarballPrefix.length, -4);
+      const tarball = tarballs[version];
+      if (!tarball) {
+        response.statusCode = 404;
+        response.end();
+        return;
+      }
+      readFile(tarball).then((data) => {
+        response.setHeader("content-type", "application/octet-stream");
+        response.end(data);
+      }).catch(() => {
+        response.statusCode = 500;
+        response.end();
+      });
       return;
     }
     response.statusCode = 404;
@@ -366,6 +398,109 @@ test("npx upgrade activates the latest private MCP runtime without global instal
     await assert.rejects(readFile(join(globalPrefix, "lib", "node_modules", "gitcontribute", "package.json")));
   } finally {
     await registry.close();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("npx setup refuses a stale bootstrap without replacing a newer active MCP runtime", { skip: process.platform === "win32" }, async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-stale-bootstrap-e2e-"));
+  const oldVersion = "0.18.0";
+  let registry;
+  try {
+    const oldTarball = await packCurrentPlatform(workspace, oldVersion);
+    const latestTarball = await packCurrentPlatform(workspace, packageVersion);
+    registry = await startRegistry(packageVersion, { [packageVersion]: latestTarball });
+
+    const oldRunner = join(workspace, "old-runner");
+    run("npm", ["install", "--prefix", oldRunner, "--ignore-scripts", "--no-audit", "--no-fund", oldTarball]);
+    const latestRunner = join(workspace, "latest-runner");
+    run("npm", ["install", "--prefix", latestRunner, "--ignore-scripts", "--no-audit", "--no-fund", latestTarball]);
+
+    const home = join(workspace, "home");
+    await mkdir(join(home, ".codex"), { recursive: true });
+    const platform = platforms[`${process.platform}-${process.arch}`];
+    const packagedLatest = join(latestRunner, "node_modules", "gitcontribute", "npm", "bin", "native", platform.target, platform.binary);
+    const dataDir = process.platform === "darwin"
+      ? join(home, "Library", "Application Support", "gitcontribute", "Data")
+      : join(home, ".local", "share", "gitcontribute");
+    const managed = join(dataDir, "bin", packageVersion, "gitcontribute");
+    await mkdir(dirname(managed), { recursive: true });
+    await copyFile(packagedLatest, managed);
+    if (process.platform !== "win32") await chmod(managed, 0o755);
+    const configPath = join(home, ".codex", "config.toml");
+    const config = `[mcp_servers.gitcontribute]\ncommand = ${JSON.stringify(managed)}\nargs = ["mcp", "serve", "--transport=stdio"]\n`;
+    await writeFile(configPath, config);
+    const before = await readFile(configPath, "utf8");
+
+    const baseEnv = {
+      ...process.env,
+      HOME: home,
+      XDG_CONFIG_HOME: join(home, ".config"),
+      XDG_DATA_HOME: join(home, ".local", "share"),
+      XDG_CACHE_HOME: join(home, ".cache"),
+      XDG_STATE_HOME: join(home, ".local", "state"),
+      npm_config_audit: "false",
+      npm_config_fund: "false",
+      npm_config_update_notifier: "false",
+      npm_config_offline: "true",
+    };
+    const stale = await runAsync(
+      "npx",
+      ["--yes", "gitcontribute", "setup", "--mode", "mcp", "--codex", "--token-source", "none", "--yes", "--json"],
+      { cwd: oldRunner, env: baseEnv }
+    );
+    assert.notEqual(stale.status, 0, stale.stdout);
+    const staleReport = JSON.parse(stale.stdout);
+    const staleStep = staleReport.steps.find((step) => step.name === "mcp-runtime");
+    assert.equal(staleStep.status, "failed");
+    assert.match(staleStep.message, /newer private MCP runtime/);
+    assert.match(staleStep.message, /npx --yes gitcontribute@latest setup/);
+    assert.equal(await readFile(configPath, "utf8"), before);
+    assert.equal((await readFile(managed)).length, (await readFile(packagedLatest)).length);
+
+    const latestCwd = join(workspace, "latest-cwd");
+    await mkdir(latestCwd);
+    const latest = await runAsync(
+      "npx",
+      ["--yes", "gitcontribute@latest", "setup", "--mode", "mcp", "--codex", "--token-source", "none", "--yes", "--json"],
+      {
+        cwd: latestCwd,
+        env: {
+          ...baseEnv,
+          npm_config_offline: "false",
+          npm_config_registry: registry.url,
+          npm_config_cache: join(workspace, "latest-cache"),
+        },
+      }
+    );
+    assert.equal(latest.status, 0, `${latest.stderr}\n${latest.stdout}`);
+    const latestReport = JSON.parse(latest.stdout);
+    assert.ok(latestReport.steps.some((step) => step.name === "mcp-runtime" && step.status === "already installed"));
+    assert.equal(await readFile(configPath, "utf8"), before);
+
+    const mcp = startMCPStdio(managed, baseEnv);
+    try {
+      const initialized = await mcp.request(1, "initialize", {
+        protocolVersion: "2025-11-25",
+        capabilities: {},
+        clientInfo: { name: "gitcontribute-stale-bootstrap-e2e", version: "1" },
+      });
+      assert.equal(initialized.result.serverInfo.version, packageVersion);
+      mcp.notify("notifications/initialized", {});
+      const tools = await mcp.request(2, "tools/list", {});
+      assert.ok(tools.result.tools.some((tool) => tool.name === "workflow.get_catalog_contract"));
+      assert.ok(tools.result.tools.some((tool) => tool.name === "github.index_pull_request_feedback"));
+      const contract = await mcp.request(3, "tools/call", {
+        name: "workflow.get_catalog_contract",
+        arguments: {},
+      });
+      assert.equal(contract.result.structuredContent.server_version, packageVersion);
+      assert.equal(contract.result.structuredContent.catalog_mode, "all");
+    } finally {
+      await mcp.close();
+    }
+  } finally {
+    if (registry) await registry.close();
     await rm(workspace, { recursive: true, force: true });
   }
 });

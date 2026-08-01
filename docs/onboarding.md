@@ -187,6 +187,15 @@ required diagnostic failure. `upgrade --check` reports it as
 rollback-safe activation, preserves each durable executable path, and reports
 the clients that must restart.
 
+The same checks compare versioned private runtimes with the configured
+launcher. If a newer managed runtime is present while a client still points to
+an older one, `doctor` reports the mismatch and `upgrade --check` identifies
+the affected client. A successful activation updates the durable absolute path
+and reports the exact clients that must restart. If an npx bootstrap is older
+than the requested target, activation preserves the previous registration and
+prints the explicit recovery command `npx --yes gitcontribute@latest setup`;
+setup never replaces a newer managed runtime with an older cached bootstrap.
+
 After any setup or upgrade that changes an MCP registration, verify the fresh
 session with `workflow.get_catalog_contract`. Compare its server version,
 catalog mode, fingerprint, and feedback-route flags with `tools/list`; an

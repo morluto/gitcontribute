@@ -15,6 +15,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/github"
+	"github.com/morluto/gitcontribute/internal/managedbinary"
 )
 
 type failingAuthSource struct{ err error }
@@ -321,6 +322,50 @@ func TestDoctorRejectsStaleMCPRegistration(t *testing.T) {
 	for _, check := range result.Checks {
 		if check.Name == "mcp_codex" {
 			if !check.Required || check.Status != "error" || !strings.Contains(check.Message, "gitcontribute setup") {
+				t.Fatalf("mcp check = %+v", check)
+			}
+			return
+		}
+	}
+	t.Fatalf("mcp_codex check missing: %+v", result.Checks)
+}
+
+func TestDoctorReportsOlderRegistrationWhenNewerPrivateRuntimeIsInstalled(t *testing.T) {
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home})
+	svc, err := New(paths, "0.16.0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	if _, err := svc.Init(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	dataDir, err := paths.DataDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []string{"0.15.0", "0.16.0"} {
+		path, err := managedbinary.Destination(dataDir, version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(version), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeCodexConfig(t, home, filepath.Join(dataDir, "bin", "0.15.0", "gitcontribute"))
+
+	result, err := svc.Doctor(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, check := range result.Checks {
+		if check.Name == "mcp_codex" {
+			if check.Status != "error" || !strings.Contains(check.Message, "older than installed runtime 0.16.0") || !strings.Contains(check.Message, "restart") {
 				t.Fatalf("mcp check = %+v", check)
 			}
 			return

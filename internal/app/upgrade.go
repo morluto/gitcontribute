@@ -299,6 +299,11 @@ func compareVersions(current, target string) versionDisposition {
 	}
 }
 
+func isNewerVersion(current, target string) bool {
+	disposition := compareVersions(current, target)
+	return disposition == versionUpgrade || disposition == versionPrerelease
+}
+
 func reportVersionDisposition(report *contracts.UpgradeReport) versionDisposition {
 	current := report.Current
 	if report.Context == "global-npm" || report.Context == "project-npm" {
@@ -467,6 +472,18 @@ func (s *Service) privateRuntimeStage(current, latest string) contracts.UpgradeS
 	}
 	stage.Path = path
 	stage.Version = current
+	runtimes, err := managedbinary.List(dataDir)
+	if err != nil {
+		stage.Status = "failed"
+		stage.Message = err.Error()
+		return stage
+	}
+	if newest, ok := newestRuntime(runtimes); ok && isNewerVersion(current, newest.Version) {
+		stage.Status = "newer_installed"
+		stage.Target = newest.Version
+		stage.Message = fmt.Sprintf("private MCP runtime %s is installed at %s; current bootstrap is %s", newest.Version, newest.Path, current)
+		return stage
+	}
 	_, statErr := os.Stat(path)
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
@@ -498,6 +515,21 @@ func (s *Service) privateRuntimeStage(current, latest string) contracts.UpgradeS
 	return stage
 }
 
+func newestRuntime(runtimes []managedbinary.InstalledRuntime) (managedbinary.InstalledRuntime, bool) {
+	if len(runtimes) == 0 {
+		return managedbinary.InstalledRuntime{}, false
+	}
+	return runtimes[len(runtimes)-1], true
+}
+
+func (s *Service) installedPrivateRuntimes() ([]managedbinary.InstalledRuntime, error) {
+	dataDir, err := s.paths.DataDir()
+	if err != nil {
+		return nil, err
+	}
+	return managedbinary.List(dataDir)
+}
+
 func (s *Service) configuredRuntimesStage(ctx context.Context, current, latest string) ([]contracts.UpgradeConfiguredClient, contracts.UpgradeStage, error) {
 	stage := contracts.UpgradeStage{Name: "configured-runtime"}
 	if err := ctx.Err(); err != nil {
@@ -513,12 +545,25 @@ func (s *Service) configuredRuntimesStage(ctx context.Context, current, latest s
 		return nil, stage, nil
 	}
 	var clients []contracts.UpgradeConfiguredClient
+	runtimes, err := s.installedPrivateRuntimes()
+	if err != nil {
+		stage.Status = "failed"
+		stage.Message = err.Error()
+		return nil, stage, err
+	}
+	target := current
+	if isNewerVersion(target, latest) {
+		target = latest
+	}
+	if newest, ok := newestRuntime(runtimes); ok && isNewerVersion(target, newest.Version) {
+		target = newest.Version
+	}
 	registered := 0
 	outdated := 0
 	stale := 0
 	failed := 0
 	for _, client := range clientsetup.AllClients {
-		c, err := inspectConfiguredClient(home, client, current, latest)
+		c, err := inspectConfiguredClient(home, client, target)
 		if err != nil {
 			c = contracts.UpgradeConfiguredClient{Name: string(client), Status: "failed", Message: err.Error()}
 		}
@@ -556,7 +601,7 @@ func (s *Service) configuredRuntimesStage(ctx context.Context, current, latest s
 	return clients, stage, nil
 }
 
-func inspectConfiguredClient(home string, client clientsetup.Client, current, latest string) (contracts.UpgradeConfiguredClient, error) {
+func inspectConfiguredClient(home string, client clientsetup.Client, target string) (contracts.UpgradeConfiguredClient, error) {
 	result := contracts.UpgradeConfiguredClient{Name: string(client)}
 	inspection, err := clientsetup.InspectRegistration(client, home)
 	if err != nil {
@@ -569,10 +614,6 @@ func inspectConfiguredClient(home string, client clientsetup.Client, current, la
 	}
 	command := inspection.Launcher.Command
 	version := runtimeVersionFromPath(command)
-	target := current
-	if disposition := compareVersions(current, latest); disposition == versionUpgrade || disposition == versionPrerelease {
-		target = latest
-	}
 	result.Path = command
 	result.Version = version
 	if inspection.Status == clientsetup.RegistrationStale {
@@ -589,7 +630,7 @@ func inspectConfiguredClient(home string, client clientsetup.Client, current, la
 	case versionDowngrade:
 		result.Status = "newer"
 	case versionUnavailable, versionInvalid:
-		if compareVersions(version, current) == versionCurrent {
+		if compareVersions(version, target) == versionCurrent {
 			result.Status = "current"
 		} else {
 			result.Status = "configured"

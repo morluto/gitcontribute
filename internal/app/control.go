@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"sort"
@@ -16,6 +17,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/github"
+	"github.com/morluto/gitcontribute/internal/managedbinary"
 	clientsetup "github.com/morluto/gitcontribute/internal/setup"
 )
 
@@ -281,7 +283,8 @@ func (s *Service) doctor(ctx context.Context) (*contracts.DoctorResult, error) {
 					"",
 				)
 			default:
-				add("mcp_"+string(client), true, nil, "GitContribute MCP registration uses the canonical launcher")
+				parityErr := s.managedRuntimeRegistrationError(inspection)
+				add("mcp_"+string(client), true, parityErr, "GitContribute MCP registration uses the current private runtime")
 			}
 			if client == clientsetup.Codex {
 				present, _, skillErr := clientsetup.CodexSkillInstalled(home)
@@ -301,6 +304,44 @@ func (s *Service) doctor(ctx context.Context) (*contracts.DoctorResult, error) {
 		}
 	}
 	return &contracts.DoctorResult{Healthy: healthy, Checks: checks}, nil
+}
+
+func (s *Service) managedRuntimeRegistrationError(inspection clientsetup.RegistrationInspection) error {
+	dataDir, err := s.paths.DataDir()
+	if err != nil {
+		return err
+	}
+	managedRoot := filepath.Join(dataDir, "bin")
+	relative, err := filepath.Rel(managedRoot, filepath.Clean(inspection.Launcher.Command))
+	if err != nil {
+		return err
+	}
+	if relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	configuredVersion := filepath.Dir(relative)
+	if configuredVersion == "." || strings.Contains(configuredVersion, string(filepath.Separator)) || filepath.Base(relative) != filepath.Base(inspection.Launcher.Command) {
+		return nil
+	}
+	managedPath, err := managedbinary.Destination(dataDir, configuredVersion)
+	if err != nil {
+		return err
+	}
+	if filepath.Clean(managedPath) != filepath.Clean(inspection.Launcher.Command) {
+		return nil
+	}
+	if _, err := os.Stat(inspection.Launcher.Command); err != nil {
+		return fmt.Errorf("configured private MCP runtime %s is unavailable; run gitcontribute setup to repair the registration", inspection.Launcher.Command)
+	}
+	runtimes, err := s.installedPrivateRuntimes()
+	if err != nil {
+		return err
+	}
+	newest, ok := newestRuntime(runtimes)
+	if !ok || !isNewerVersion(configuredVersion, newest.Version) {
+		return nil
+	}
+	return fmt.Errorf("configured private MCP runtime %s is older than installed runtime %s at %s; run gitcontribute setup to activate it, then restart the configured MCP client", configuredVersion, newest.Version, newest.Path)
 }
 
 func (s *Service) persistedConfig(path string) (*config.Config, error) {

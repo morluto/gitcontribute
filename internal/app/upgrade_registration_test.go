@@ -9,7 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/managedbinary"
 )
 
 func TestUpgradeCheckReportsStaleRegistration(t *testing.T) {
@@ -89,6 +91,62 @@ func TestUpgradeYesRepairsStaleRegistrationAndRequiresRestart(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `args = ["mcp", "serve", "--transport=stdio"]`) {
 		t.Fatalf("registration was not repaired:\n%s", data)
+	}
+}
+
+func TestUpgradeCheckReportsInstalledNewerRuntimeAndOlderRegistration(t *testing.T) {
+	originalCmd := upgradeCommand
+	originalExec := osExecutable
+	t.Cleanup(func() {
+		upgradeCommand = originalCmd
+		osExecutable = originalExec
+	})
+	upgradeCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if name == "npm" && reflect.DeepEqual(args, []string{"view", "gitcontribute", "version"}) {
+			return []byte("0.16.0\n"), nil
+		}
+		t.Fatalf("unexpected command: %s %v", name, args)
+		return nil, nil
+	}
+	osExecutable = func() (string, error) { return "/opt/gitcontribute", nil }
+
+	home := t.TempDir()
+	paths := config.NewPaths(&config.Env{Home: home})
+	dataDir, err := paths.DataDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []string{"0.15.0", "0.16.0"} {
+		path, err := managedbinary.Destination(dataDir, version)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(version), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeCodexConfig(t, home, filepath.Join(dataDir, "bin", "0.15.0", "gitcontribute"))
+	svc := testService(t, home, "0.15.0", "")
+
+	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Check: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertStage(t, report, "private-mcp-runtime", "newer_installed")
+	private := stageByName(report, "private-mcp-runtime")
+	if private.Target != "0.16.0" {
+		t.Fatalf("private runtime target = %q", private.Target)
+	}
+	if report.ConfiguredClients[0].Status != "outdated" || report.ConfiguredClients[0].Version != "0.15.0" {
+		t.Fatalf("configured client = %+v", report.ConfiguredClients[0])
+	}
+	assertStage(t, report, "configured-runtime", "restart_required")
+	assertStage(t, report, "activation", "setup_required")
+	if !reflect.DeepEqual(report.RestartClients, []string{"codex"}) {
+		t.Fatalf("restart clients = %v", report.RestartClients)
 	}
 }
 

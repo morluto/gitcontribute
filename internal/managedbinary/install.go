@@ -10,10 +10,19 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
+
+	"golang.org/x/mod/semver"
 )
 
 var runtimeVersion = regexp.MustCompile(`^(dev|[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$`)
+
+// InstalledRuntime identifies one usable versioned private executable.
+type InstalledRuntime struct {
+	Version string
+	Path    string
+}
 
 // Destination returns the versioned private executable path under dataDir.
 func Destination(dataDir, version string) (string, error) {
@@ -26,6 +35,57 @@ func Destination(dataDir, version string) (string, error) {
 		name += ".exe"
 	}
 	return filepath.Join(dataDir, "bin", version, name), nil
+}
+
+// List returns usable versioned private runtimes under dataDir. Missing data
+// directories are treated as an empty installation; malformed or non-regular
+// entries are ignored so one abandoned directory cannot hide valid runtimes.
+func List(dataDir string) ([]InstalledRuntime, error) {
+	entries, err := os.ReadDir(filepath.Join(dataDir, "bin"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list managed runtimes: %w", err)
+	}
+	runtimes := make([]InstalledRuntime, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() || !runtimeVersion.MatchString(entry.Name()) {
+			continue
+		}
+		path, err := Destination(dataDir, entry.Name())
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("inspect managed runtime %s: %w", entry.Name(), err)
+		}
+		if !info.Mode().IsRegular() || (runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0) {
+			continue
+		}
+		runtimes = append(runtimes, InstalledRuntime{Version: entry.Name(), Path: path})
+	}
+	sort.Slice(runtimes, func(i, j int) bool {
+		return compareRuntimeVersions(runtimes[i].Version, runtimes[j].Version) < 0
+	})
+	return runtimes, nil
+}
+
+func compareRuntimeVersions(left, right string) int {
+	if left == "dev" {
+		if right == "dev" {
+			return 0
+		}
+		return -1
+	}
+	if right == "dev" {
+		return 1
+	}
+	return semver.Compare("v"+left, "v"+right)
 }
 
 // Install atomically copies source to destination as an executable file. It

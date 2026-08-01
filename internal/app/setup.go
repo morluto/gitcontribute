@@ -48,7 +48,7 @@ func (s *Service) setup(ctx context.Context, opts contracts.SetupOptions, observ
 		return run.report, err
 	}
 	if err := run.setupRuntime(); err != nil {
-		return nil, err
+		return run.report, err
 	}
 	if run.report.HasFailures() {
 		return run.report, nil
@@ -232,6 +232,19 @@ func (r *setupRun) setupRuntime() error {
 
 func (r *setupRun) installManagedRuntime() error {
 	step := contracts.SetupStep{Name: "mcp-runtime", Path: r.managedRuntime, Status: "installed"}
+	newer, found, err := r.newerManagedRuntime()
+	if err != nil {
+		step.Status = "failed"
+		step.Message = err.Error()
+		r.report.Steps = append(r.report.Steps, step)
+		return err
+	}
+	if found {
+		step.Status = "failed"
+		step.Message = fmt.Sprintf("newer private MCP runtime %s is already installed at %s; this bootstrap is %s; no changes were made; run `npx --yes gitcontribute@latest setup`", newer.Version, newer.Path, normalizeVersion(r.opts.Version))
+		r.report.Steps = append(r.report.Steps, step)
+		return nil
+	}
 	if r.opts.DryRun {
 		step.Status = "would install"
 		r.report.Steps = append(r.report.Steps, step)
@@ -257,6 +270,24 @@ func (r *setupRun) installManagedRuntime() error {
 	r.report.Steps = append(r.report.Steps, step)
 	setupCompleted(r.observer, step)
 	return nil
+}
+
+func (r *setupRun) newerManagedRuntime() (managedbinary.InstalledRuntime, bool, error) {
+	dataDir, err := r.service.paths.DataDir()
+	if err != nil {
+		return managedbinary.InstalledRuntime{}, false, err
+	}
+	runtimes, err := managedbinary.List(dataDir)
+	if err != nil {
+		return managedbinary.InstalledRuntime{}, false, err
+	}
+	requested := normalizeVersion(r.opts.Version)
+	for i := range runtimes {
+		if isNewerVersion(requested, runtimes[i].Version) {
+			return runtimes[i], true, nil
+		}
+	}
+	return managedbinary.InstalledRuntime{}, false, nil
 }
 
 func (r *setupRun) configure() {
