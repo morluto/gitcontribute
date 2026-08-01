@@ -143,7 +143,7 @@ func (s *Server) registerScalable() {
 		setRange(sc, "max_results_per_repository", 1, 100)
 		setDefault(sc, "max_results_per_repository", 10)
 	}), output: outputSchema[mcpcontract.RankOpportunitiesOutput]("Bounded cross-repository Radar ranking."), handler: s.rankOpportunities})
-	addCatalogTool(s, catalogTool[mcpcontract.FindPrecedentsInput, mcpcontract.FindPrecedentsOutput]{name: mcpcontract.ToolFindPrecedents, title: "Find historical issue and pull-request precedents", description: "Find similar closed issues and pull requests for up to 20 source threads, including completed, not-planned, duplicate, and merged evidence. This is an offline historical read, not a current opportunity search.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.FindPrecedentsInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.FindPrecedentsInput, mcpcontract.FindPrecedentsOutput]{name: mcpcontract.ToolFindPrecedents, title: "Find historical issue and pull-request precedents", description: "Find similar closed issues and pull requests for up to 20 source threads, including completed, not-planned, duplicate, and merged evidence. This is an offline historical read, not a current opportunity search. Missing or incomplete repository history returns item-level ensure_coverage recovery; poll jobs.get and retry before treating the result as exhaustive.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.FindPrecedentsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 20)
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 20)

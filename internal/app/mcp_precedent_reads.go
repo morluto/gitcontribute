@@ -68,6 +68,8 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpcontract.FindPrece
 		snapshot := snapshotsByRepo[repoKey]
 		if !snapshot.Available {
 			item.Status, item.Reason = "unavailable", "repository_not_indexed"
+			item.Message = "repository history is not present in the local corpus"
+			item.Recovery = precedentRecoveryPlan(input, item.Reason)
 			out.Items[i] = item
 			out.Status = "partial"
 			continue
@@ -75,6 +77,8 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpcontract.FindPrece
 		source, ok := snapshot.Sources[input.Number]
 		if !ok {
 			item.Status, item.Reason = "unavailable", "thread_not_indexed"
+			item.Message = "source thread is not present in the local corpus"
+			item.Recovery = precedentRecoveryPlan(input, item.Reason)
 			out.Items[i] = item
 			out.Status = "partial"
 			continue
@@ -102,6 +106,12 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpcontract.FindPrece
 		item.Value = &mcpcontract.PrecedentSet{Matches: precedents, Population: snapshot.ClosedTotal, Considered: len(snapshot.Closed), Truncated: snapshot.ClosedTruncated || len(precedents) < qualifying}
 		if item.Value.Truncated {
 			out.Status = "partial"
+			if snapshot.ClosedTruncated {
+				item.Status = "retryable"
+				item.Reason = "history_incomplete"
+				item.Message = "stored closed issue and pull-request history is incomplete; synchronize coverage before treating these precedents as exhaustive"
+				item.Recovery = precedentRecoveryPlan(input, item.Reason)
+			}
 		}
 		out.Total += len(precedents)
 		out.Items[i] = item
@@ -123,6 +133,20 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpcontract.FindPrece
 		return mcpcontract.FindPrecedentsOutput{}, err
 	}
 	return out, nil
+}
+
+func precedentRecoveryPlan(ref mcpcontract.ThreadRef, reason string) *mcpcontract.RecoveryPlan {
+	return recoveryPlan(
+		reason,
+		"Synchronize repository history with corpus.ensure_coverage, poll jobs.get until it completes, then retry corpus.find_precedents.",
+		mcpcontract.RecoveryAction(mcpcontract.EnsureCoverageInput{
+			Target: mcpcontract.CoverageTarget{
+				Type:       mcpcontract.CoverageTargetRepository,
+				Repository: mcpcontract.RepositoryRef{Owner: ref.Owner, Repo: ref.Repo},
+			},
+			LimitPerRepository: 1000,
+		}),
+	)
 }
 
 type preparedPrecedent struct {

@@ -644,6 +644,34 @@ func TestFindPrecedentsUsesClosedAndMergedHistory(t *testing.T) {
 	}
 }
 
+func TestFindPrecedentsReturnsRecoveryForMissingHistory(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket"}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	out, err := (&MCPReader{svc}).FindPrecedents(ctx, mcpcontract.FindPrecedentsInput{Threads: []mcpcontract.ThreadRef{
+		{Owner: "acme", Repo: "missing", Number: 1},
+		{Owner: "acme", Repo: "rocket", Number: 2},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "partial" || len(out.Items) != 2 {
+		t.Fatalf("precedent recovery output = %+v", out)
+	}
+	for _, item := range out.Items {
+		if item.Status != "unavailable" || item.Recovery == nil || len(item.Recovery.Then) != 1 || item.Recovery.Then[0].Type != "ensure_coverage" {
+			t.Fatalf("missing precedent recovery = %+v", item)
+		}
+		ensure := item.Recovery.Then[0].EnsureCoverage
+		if ensure == nil || ensure.Target.Type != mcpcontract.CoverageTargetRepository || ensure.Target.Repository.Owner != "acme" || ensure.LimitPerRepository != 1000 {
+			t.Fatalf("precedent ensure-coverage target = %+v", ensure)
+		}
+	}
+}
+
 func TestScalableBatchInputsRejectDuplicatesInsteadOfDroppingOutcomes(t *testing.T) {
 	t.Parallel()
 	if err := rejectDuplicateRepositoryRefs([]mcpcontract.RepositoryRef{{Owner: "one", Repo: "repo"}, {Owner: "ONE", Repo: "repo"}}); err == nil {
