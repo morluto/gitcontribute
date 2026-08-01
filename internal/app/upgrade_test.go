@@ -773,7 +773,7 @@ func joinCalls(calls [][]string) string {
 
 func TestRunNPMCommandRejectsEmptyArgumentsWithoutExecution(t *testing.T) {
 	t.Parallel()
-	if _, err := runNPMCommand(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "unsupported npm arguments") {
+	if _, err := runNPMCommand(context.Background(), nil); err == nil || err.Error() != "missing npm arguments" {
 		t.Fatalf("empty npm arguments error = %v", err)
 	}
 }

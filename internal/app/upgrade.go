@@ -34,6 +34,10 @@ var (
 )
 
 func runNPMCommand(ctx context.Context, args []string) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, errors.New("missing npm arguments")
+	}
+
 	var command *exec.Cmd
 	switch {
 	case len(args) == 3 && args[0] == "view" && args[1] == "gitcontribute" && args[2] == "version":
