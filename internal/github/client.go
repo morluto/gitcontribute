@@ -197,6 +197,9 @@ func (c *Client) GetAuthenticatedIdentity(ctx context.Context) (Identity, RateIn
 // login and preserves GitHub's incomplete-results signal.
 func (c *Client) SearchAuthoredPullRequests(ctx context.Context, opts AuthoredPullRequestSearchOptions) (AuthoredPullRequestSearchResult, error) {
 	query := "is:pr author:" + opts.Login
+	if opts.RepositoryOwner != "" && opts.RepositoryName != "" {
+		query += " repo:" + opts.RepositoryOwner + "/" + opts.RepositoryName
+	}
 	if opts.State != "" && opts.State != "all" {
 		query += " is:" + opts.State
 	}
@@ -601,10 +604,14 @@ func convertPullRequestDetails(pr *gh.PullRequest) PullRequestDetails {
 	if pr == nil {
 		return PullRequestDetails{}
 	}
-	headRef, headSHA := "", ""
+	headRef, headSHA, headOwner, headRepo := "", "", "", ""
 	if pr.Head != nil {
 		headRef = pr.Head.GetRef()
 		headSHA = pr.Head.GetSHA()
+		if pr.Head.Repo != nil {
+			headOwner = userLogin(pr.Head.Repo.Owner)
+			headRepo = pr.Head.Repo.GetName()
+		}
 	}
 	baseRef, baseSHA := "", ""
 	if pr.Base != nil {
@@ -634,6 +641,8 @@ func convertPullRequestDetails(pr *gh.PullRequest) PullRequestDetails {
 		MergeCommitSHA:    pr.GetMergeCommitSHA(),
 		HeadRef:           headRef,
 		HeadSHA:           headSHA,
+		HeadOwner:         headOwner,
+		HeadRepo:          headRepo,
 		BaseRef:           baseRef,
 		BaseSHA:           baseSHA,
 		CommentsCount:     pr.GetComments(),
