@@ -62,6 +62,22 @@ type GitHubOperator interface {
 	SyncPortfolio(context.Context, mcpcontract.SyncPortfolioInput) (mcpcontract.JobReference, error)
 }
 
+// GitHubAcquisitionOperator exposes synchronous, explicitly bounded live
+// GitHub acquisition that writes only local corpus observations and artifacts.
+// It is separate from GitHubOperator so older adapters can retain their
+// existing capability set while the new acquisition tools are adopted.
+type GitHubAcquisitionOperator interface {
+	SearchGitHubThreads(context.Context, mcpcontract.SearchGitHubThreadsInput) (mcpcontract.SearchGitHubThreadsOutput, error)
+	ReadSourceFiles(context.Context, mcpcontract.ReadSourceFilesInput) (mcpcontract.ReadSourceFilesOutput, error)
+}
+
+// CodeSearchBatchReader exposes one bounded offline batch over a shared code
+// snapshot scope. It remains separate from Reader so existing local readers
+// can retain the single-query compatibility tool.
+type CodeSearchBatchReader interface {
+	SearchCodeBatch(context.Context, mcpcontract.SearchCodeBatchInput) (mcpcontract.SearchCodeBatchOutput, error)
+}
+
 type CoverageOperator interface {
 	EnsureCoverage(context.Context, mcpcontract.EnsureCoverageInput) (mcpcontract.JobReference, error)
 }
@@ -108,6 +124,14 @@ type CodeIndexer interface {
 // resource plane. It is intentionally separate from the acquisition writer.
 type CodeIndexReader interface {
 	CodeIndexArtifact(context.Context, string) (mcpcontract.CodeIndexArtifact, error)
+}
+
+type GitHubThreadSearchArtifactReader interface {
+	ReadGitHubThreadSearchArtifact(context.Context, string) (mcpcontract.GitHubThreadSearchArtifact, error)
+}
+
+type SourceBundleArtifactReader interface {
+	ReadSourceBundleArtifact(context.Context, string) (mcpcontract.SourceBundleArtifact, error)
 }
 
 type SnapshotReader interface {
@@ -299,6 +323,19 @@ func (s *Server) register() {
 			requireTogether(schema, "owner", "repo")
 		}), output: outputSchema[mcpcontract.SearchCodeOutput]("One page of stored code matches."), handler: s.searchCode,
 	})
+	addCatalogTool(s, catalogTool[mcpcontract.SearchCodeBatchInput, mcpcontract.SearchCodeBatchOutput]{
+		name:        mcpcontract.ToolSearchCodeBatch,
+		title:       "Search stored code in one batch",
+		description: "Run up to 20 ordered code searches against one shared immutable local corpus revision. This is offline, performs no GitHub fallback or mutation, and preserves each query's coverage and truncation semantics; corpus.search_code remains available for one query.",
+		annotations: readOnly, supportedBy: supports[CodeSearchBatchReader],
+		input: inputSchema[mcpcontract.SearchCodeBatchInput](func(sc *schemaBuilder) {
+			requireTogether(sc, "owner", "repo")
+			setArrayBounds(sc, "queries", 1, 20)
+			setRange(sc, "limit", 1, 100)
+			setDefault(sc, "limit", 20)
+		}),
+		output: outputSchema[mcpcontract.SearchCodeBatchOutput]("Ordered offline code-search results over one shared corpus revision."), handler: s.searchCodeBatch,
+	})
 	addCatalogTool(s, catalogTool[mcpcontract.FindClustersInput, mcpcontract.FindClustersOutput]{
 		name: mcpcontract.ToolFindClusters, title: "Find duplicate clusters in one batch",
 		description: "Read stored duplicate clusters for up to 20 repository or exact-member targets in input order. This does not recompute similarity; use " + mcpcontract.ToolFindNeighbors + " for transient nearest-thread scoring. Offline.",
@@ -360,6 +397,27 @@ func (s *Server) searchCode(ctx context.Context, _ *mcp.CallToolRequest, in mcpc
 		return nil, mcpcontract.SearchCodeOutput{}, mcpcontract.InvalidArgument("owner", "owner and repo must be provided together", map[string]any{"owner": "acme", "repo": "synth"})
 	}
 	out, err := s.reader.SearchCode(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) searchCodeBatch(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SearchCodeBatchInput) (*mcp.CallToolResult, mcpcontract.SearchCodeBatchOutput, error) {
+	if len(in.Queries) < 1 || len(in.Queries) > 20 {
+		return nil, mcpcontract.SearchCodeBatchOutput{}, mcpcontract.InvalidArgument("queries", "must contain 1 to 20 items", map[string]any{"queries": []string{"MIDI", "latency"}})
+	}
+	if in.Limit == 0 {
+		in.Limit = 20
+	}
+	if in.Limit < 1 || in.Limit > 100 {
+		return nil, mcpcontract.SearchCodeBatchOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
+	}
+	if in.Owner == "" || in.Repo == "" {
+		return nil, mcpcontract.SearchCodeBatchOutput{}, mcpcontract.InvalidArgument("owner", "owner and repo are required", map[string]any{"owner": "acme", "repo": "synth"})
+	}
+	reader, ok := s.reader.(CodeSearchBatchReader)
+	if !ok {
+		return nil, mcpcontract.SearchCodeBatchOutput{}, errors.New("batched offline code search is not available")
+	}
+	out, err := reader.SearchCodeBatch(ctx, in)
 	return nil, out, err
 }
 

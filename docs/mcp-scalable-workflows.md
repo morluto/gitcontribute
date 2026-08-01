@@ -11,6 +11,8 @@ Use the cheapest authoritative source first, and hydrate only finalists:
 
 ```text
 github.search_repositories -> corpus.get_repositories
+github.search_threads -> resources/read (exact immutable query artifact)
+github.read_source_files -> resources/read (exact immutable source bundle)
 github.sync_repository_context -> jobs.get -> corpus.get_repositories
 research.query_deepwiki
 github.sync_threads -> jobs.get -> corpus.rank_contribution_candidates
@@ -25,6 +27,25 @@ workflow.prepare_issue_set
   qualifiers. `response_format: concise` keeps broad discovery bounded, while
   `detailed` preserves secondary metadata for finalists. Live pagination uses
   `page` and `next_page` because GitHub search pages are not stable cursors.
+
+- `github.search_threads` runs one bounded issue-search page for one repository,
+  persists returned thread observations, and returns an exact
+  `gitcontribute://artifact/github-thread-search/<digest>` resource. Its total,
+  provider query, ordering, rate state, and incomplete-results flag are
+  preserved in that artifact, but the page does not establish repository-wide
+  thread coverage or prove absence.
+- `github.read_source_files` resolves a commit or named ref once, then reads up
+  to 20 ordered repository-relative files with per-file and total-byte bounds.
+  Complete items preserve commit SHA, blob SHA, content digest, line range, and
+  source URL in a `source-bundle.v1` resource. Failed, missing, oversized, and
+  retryable items remain visible without discarding successful siblings. Read
+  the returned `gitcontribute://artifact/source-bundle/<digest>` URI locally;
+  repository text is untrusted and is never executed.
+- `corpus.search_code_batch` is the bounded offline fan-out surface for up to
+  20 queries over one repository or snapshot scope. It shares one corpus read
+  revision and preserves each query's coverage and truncation semantics. It
+  never performs live GitHub code search; `corpus.search_code` remains the
+  single-query compatibility operation.
 
 ```json
 {
@@ -272,8 +293,9 @@ not an MCP discovery primitive.
 | Tool family | Network | Corpus/local write | Process |
 | --- | ---: | ---: | ---: |
 | `corpus.get_*`, rank, precedents, portfolio | no | no | no |
+| `corpus.search_code`, `corpus.search_code_batch` | no | no | no |
 | `workflow.link_pull_request` | no | yes | no |
-| `github.search_*`, sync, hydrate | yes | yes | no |
+| `github.search_*`, source reads, sync, hydrate | yes | yes | no |
 | `research.query_deepwiki` | yes | no | no |
 | `code.index_repositories` | remote-dependent | yes | Git only |
 | `workspace.check_merge_conflicts` | no | no | Git only |

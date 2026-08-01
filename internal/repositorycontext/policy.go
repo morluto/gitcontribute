@@ -22,7 +22,8 @@ func GuidancePaths() []string {
 	return slices.Clone(guidancePaths)
 }
 
-// RequestCost is one metadata request plus every fixed guidance-path probe.
+// RequestCost is one metadata request, one ref-resolution request, plus every
+// fixed guidance-path probe.
 func RequestCost() int {
-	return 1 + len(guidancePaths)
+	return 2 + len(guidancePaths)
 }

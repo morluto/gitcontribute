@@ -41,9 +41,24 @@ func syncRepositoryGuidance(
 	runID int64,
 	budget *syncRequestBudget,
 ) error {
-	fileReader, ok := reader.(github.RepositoryFileReader)
+	resolver, ok := reader.(github.RepositoryRefResolver)
 	if !ok {
-		return errors.New("GitHub reader does not support repository contribution-guidance reads")
+		return errors.New("GitHub reader does not support repository ref resolution for contribution guidance")
+	}
+	fileReader, ok := reader.(github.RepositoryFileAtResolvedRefReader)
+	if !ok {
+		return errors.New("GitHub reader does not support contribution-guidance reads at a resolved ref")
+	}
+	requestedRef := repo.DefaultBranch
+	if strings.TrimSpace(requestedRef) == "" {
+		requestedRef = "HEAD"
+	}
+	if err := budget.take(); err != nil {
+		return err
+	}
+	resolution, _, err := resolver.ResolveRepositoryRef(ctx, ref.Owner, ref.Repo, requestedRef)
+	if err != nil {
+		return fmt.Errorf("resolve contribution guidance ref %q: %w", requestedRef, err)
 	}
 
 	pages := make([]corpus.FacetObservationInput, 0, len(contributionGuidancePaths))
@@ -54,7 +69,7 @@ func syncRepositoryGuidance(
 		if err := budget.take(); err != nil {
 			return err
 		}
-		file, _, err := fileReader.GetRepositoryFile(ctx, ref.Owner, ref.Repo, path)
+		file, _, err := fileReader.GetRepositoryFileAtResolvedRef(ctx, ref.Owner, ref.Repo, path, resolution)
 		if err != nil {
 			var notFound *github.NotFoundError
 			if errors.As(err, &notFound) {
@@ -109,7 +124,7 @@ func renderContributionGuidance(documents []storedGuidanceDocument) (string, []d
 	for _, document := range documents {
 		sections = append(sections, fmt.Sprintf("## %s\n\n%s", document.File.Path, strings.TrimSpace(document.File.Content)))
 		refs = append(refs, domain.SourceRef{
-			Source: "github:rest", URL: document.File.HTMLURL, CommitSHA: document.File.SHA,
+			Source: "github:rest", URL: document.File.HTMLURL, CommitSHA: document.File.CommitSHA,
 			ObservedAt: document.ObservedAt, AsOf: document.AsOf,
 		})
 	}

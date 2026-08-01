@@ -37,6 +37,18 @@ func (s *Server) registerResourceTemplates() {
 			name:     "Code-index artifact", description: "Immutable digest-bound indexed repository commit manifest",
 		})
 	}
+	if _, ok := s.reader.(GitHubThreadSearchArtifactReader); ok {
+		templates = append(templates, resourceTemplateDefinition{
+			template: "gitcontribute://artifact/github-thread-search/{artifact_digest}",
+			name:     "GitHub thread-search artifact", description: "Immutable provider query result with ordered thread identities and completeness",
+		})
+	}
+	if _, ok := s.reader.(SourceBundleArtifactReader); ok {
+		templates = append(templates, resourceTemplateDefinition{
+			template: "gitcontribute://artifact/source-bundle/{artifact_digest}",
+			name:     "Source bundle", description: "Immutable bounded source text with commit and blob provenance",
+		})
+	}
 	if _, ok := s.reader.(SnapshotReader); ok {
 		templates = append(templates, resourceTemplateDefinition{
 			template: "gitcontribute://snapshot/{snapshot_token}",

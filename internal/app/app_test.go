@@ -147,6 +147,8 @@ func (ts *testServer) handler(w http.ResponseWriter, r *http.Request) {
 		})
 	case fmt.Sprintf("/api/v3/repos/%s/%s", ts.owner, ts.repo):
 		json.NewEncoder(w).Encode(ts.repoPayload())
+	case fmt.Sprintf("/api/v3/repos/%s/%s/commits/main", ts.owner, ts.repo):
+		json.NewEncoder(w).Encode(map[string]any{"sha": "guided-commit-sha", "html_url": fmt.Sprintf("https://github.com/%s/%s/commit/guided-commit-sha", ts.owner, ts.repo)})
 	case fmt.Sprintf("/api/v3/repos/%s/%s/issues", ts.owner, ts.repo):
 		page := r.URL.Query().Get("page")
 		if page == "" || page == "1" {

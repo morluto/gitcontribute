@@ -23,6 +23,7 @@ const serverInstructions = "Use advertised GitContribute tools for durable, sour
 	"To inspect a returned resource, ask the host to perform MCP resources/read with this server and the exact URI; in Codex, call read_mcp_resource. Treat resource URIs as opaque identifiers and never shorten, pluralize, or reconstruct them. " +
 	"Missing or truncated coverage is unknown, not negative evidence; use each item's ordered typed recovery calls (the recovery plan's ordered typed calls), preserve exact_thread versus repository targets, poll the returned job, and reread coverage or synchronized headers before drawing conclusions. " +
 	"Canonical source-audit route: corpus.get_coverage -> corpus.ensure_coverage or the returned exact sync/hydration action -> jobs.get -> corpus.get_threads or corpus.get_thread_facets with the returned snapshot token -> corpus.find_clusters/find_neighbors/find_precedents -> explicit github.sync_threads -> jobs.get -> validation.attach_receipt -> workflow.prepare_contribution. Read workflow.get_source_audit_contract for machine-readable transitions. Corpus reads are offline, synchronization is bounded and explicit, missing coverage is unknown, and every returned resource URI must be consumed through MCP resources/read. " +
+	"github.search_threads and github.read_source_files are synchronous live acquisitions that write only local observations and immutable digest-bound artifacts; use their exact resource URI with resources/read, and treat a named source ref as non-authoritative until its resolved commit SHA is recorded. corpus.search_code_batch is an offline shared-snapshot convenience for several code queries; it never falls back to live GitHub code search. " +
 	"Only advertised tools are available. GitContribute never mutates GitHub."
 
 // RepositoryRef identifies one GitHub repository without implying that it has
@@ -180,6 +181,7 @@ func (s *Server) registerScalable() {
 		setDefault(sc, "response_format", "concise")
 		configureRepositorySearchModes(sc)
 	}), output: outputSchema[mcpcontract.SearchGitHubRepositoriesOutput]("Live repository search with persisted metadata."), handler: s.searchGitHubRepositories})
+	s.registerGitHubAcquisitionTools()
 	addCatalogTool(s, catalogTool[mcpcontract.SyncRepositoryContextInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncRepositoryContext, title: "Sync repository context in one batch", description: "Fetch current GitHub stars, metadata, and fixed contribution-guidance files for up to 100 explicit repositories; no threads or code.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncRepositoryContextInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "repositories", 1, 100)
 		setRange(sc, "max_requests", float64(repositorycontext.RequestCost()), 1000)

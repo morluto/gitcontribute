@@ -26,6 +26,14 @@ func (*authoredHeaderReader) GetRepositoryFile(_ context.Context, _, _, path str
 	return github.RepositoryFile{}, github.RateInfo{}, &github.NotFoundError{Resource: path}
 }
 
+func (*authoredHeaderReader) ResolveRepositoryRef(_ context.Context, _, _, requested string) (github.RefResolution, github.RateInfo, error) {
+	return github.RefResolution{RequestedRef: requested, ResolvedRef: "repo-commit", CommitSHA: "repo-commit"}, github.RateInfo{}, nil
+}
+
+func (*authoredHeaderReader) GetRepositoryFileAtResolvedRef(_ context.Context, _, _, path string, _ github.RefResolution) (github.RepositoryFile, github.RateInfo, error) {
+	return github.RepositoryFile{}, github.RateInfo{}, &github.NotFoundError{Resource: path}
+}
+
 func (r *authoredHeaderReader) ListIssues(context.Context, string, string, github.ListIssueOptions) (github.ListResult[github.Issue], error) {
 	r.listRequests++
 	return github.ListResult[github.Issue]{}, errors.New("unexpected issue list")

@@ -152,3 +152,57 @@ func (c *Corpus) ResolveReadSnapshot(ctx context.Context, token string) (ReadSna
 	}
 	return out, nil
 }
+
+// ResolveReadArtifact reads one immutable digest-bound artifact without
+// consulting a mutable projection. It is the resource-plane counterpart to
+// MaterializeReadSnapshot for artifacts whose producer returns a digest URI.
+func (c *Corpus) ResolveReadArtifact(ctx context.Context, kind, digest string) (ReadSnapshotArtifact, error) {
+	if kind == "" {
+		return ReadSnapshotArtifact{}, fmt.Errorf("%w: artifact kind is required", ErrSnapshotUnavailable)
+	}
+	if len(digest) != sha256.Size*2 {
+		return ReadSnapshotArtifact{}, fmt.Errorf("%w: artifact digest is not a SHA-256 hex digest", ErrSnapshotUnavailable)
+	}
+	if _, err := hex.DecodeString(digest); err != nil {
+		return ReadSnapshotArtifact{}, fmt.Errorf("%w: artifact digest is not hexadecimal", ErrSnapshotUnavailable)
+	}
+	var payload string
+	var created int64
+	if err := c.db.QueryRowContext(ctx, `
+		SELECT payload_json, created_at
+		FROM corpus_read_artifacts
+		WHERE kind = ? AND digest = ?
+	`, kind, digest).Scan(&payload, &created); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ReadSnapshotArtifact{}, fmt.Errorf("%w: %s/%s", ErrSnapshotUnavailable, kind, digest)
+		}
+		return ReadSnapshotArtifact{}, fmt.Errorf("resolve read artifact: %w", err)
+	}
+	artifactHash := sha256.Sum256(append([]byte(kind+"\x00"), []byte(payload)...))
+	if hex.EncodeToString(artifactHash[:]) != digest {
+		return ReadSnapshotArtifact{}, fmt.Errorf("%w: artifact digest mismatch", ErrSnapshotUnavailable)
+	}
+
+	out := ReadSnapshotArtifact{ArtifactKind: kind, ArtifactDigest: digest, Payload: json.RawMessage(payload), CreatedAt: scanTime(created)}
+	var token, contract, scope, sourceDigest, derived, complete, provenance string
+	var watermark, tokenCreated int64
+	if err := c.db.QueryRowContext(ctx, `
+		SELECT token, contract_version, observation_watermark, scope_json,
+		       source_manifest_sha256, derived_versions_json, completeness_json,
+		       provenance_json, created_at
+		FROM corpus_snapshot_tokens
+		WHERE artifact_kind = ? AND artifact_digest = ?
+		ORDER BY created_at DESC, token DESC
+		LIMIT 1
+	`, kind, digest).Scan(&token, &contract, &watermark, &scope, &sourceDigest, &derived, &complete, &provenance, &tokenCreated); err == nil {
+		out.Token, out.ContractVersion, out.ObservationWatermark = token, contract, watermark
+		out.Scope, out.SourceManifestSHA256 = json.RawMessage(scope), sourceDigest
+		out.DerivedVersions, out.Completeness, out.Provenance = json.RawMessage(derived), json.RawMessage(complete), json.RawMessage(provenance)
+		if tokenCreated > 0 {
+			out.CreatedAt = scanTime(tokenCreated)
+		}
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return ReadSnapshotArtifact{}, fmt.Errorf("resolve read artifact metadata: %w", err)
+	}
+	return out, nil
+}

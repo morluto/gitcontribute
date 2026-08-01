@@ -57,7 +57,7 @@ product-owned types, errors, or constants.
 | Private MCP runtime installation | explicit setup `--mode mcp` | no | yes | no | no |
 | Global CLI installation | explicit setup `--mode cli` or `--mode both` | npm registry dependent | yes | `npm` only | no |
 | Setup verification | all applied setup modes | no | no | `git --version` | no |
-| GitHub read | sync, crawl, hydrate | yes | yes | no | no |
+| GitHub read | sync, crawl, hydrate, bounded search/source acquisition | yes | yes | no | no |
 | Coverage workflow | explicit `corpus.ensure_coverage` | yes, bounded | yes | no | no |
 | DeepWiki external read | public repository structure, contents, questions | yes | no | no | no |
 | Git acquisition | acquire, workspace create | remote-dependent | yes | `git` only | no |
@@ -325,6 +325,34 @@ Code indexes are separate immutable artifact records addressed as
 `gitcontribute://artifact/code-index/<artifact-digest>`. Re-indexing an
 unchanged source commit emits a new artifact identity and does not mutate old
 resource payloads. See [ADR 0005](adr/0005-immutable-snapshot-and-artifact-identity.md).
+
+### Live acquisition and corpus artifacts
+
+Explicit live acquisition follows one direction:
+
+```text
+live GitHub request
+  -> adapter conversion with provider provenance
+  -> local observations and/or immutable digest-bound artifact
+  -> compact MCP result plus opaque resource URI
+  -> local resources/read
+```
+
+`github.search_threads` persists the returned issue or pull-request
+observations and an exact `github-thread-search.v1` result artifact. A search
+page never advances repository-wide thread coverage and an empty page is not
+proof that no matching live thread exists. `github.read_source_files` resolves
+one named ref to a commit, reads bounded repository-relative files in input
+order, and stores a `source-bundle.v1` artifact. Commit SHA is the authoritative
+revision; GitHub blob SHA remains a separate file identity. Source content is
+untrusted text and is never merged into thread facets or code-index snapshots.
+
+The two artifact resource families are
+`gitcontribute://artifact/github-thread-search/<digest>` and
+`gitcontribute://artifact/source-bundle/<digest>`. Their resource readers open
+the local corpus only and verify the digest before decoding the typed payload.
+The live operations have network-read/local-write annotations; the resource
+reads are offline and immutable.
 
 ## GitHub transport
 
