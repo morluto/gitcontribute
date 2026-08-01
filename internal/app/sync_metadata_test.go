@@ -27,6 +27,14 @@ func (*threadMetadataReader) GetRepositoryFile(_ context.Context, _, _, path str
 	return github.RepositoryFile{}, github.RateInfo{}, &github.NotFoundError{Resource: path}
 }
 
+func (*threadMetadataReader) ResolveRepositoryRef(_ context.Context, _, _, requested string) (github.RefResolution, github.RateInfo, error) {
+	return github.RefResolution{RequestedRef: requested, ResolvedRef: "repo-commit", CommitSHA: "repo-commit"}, github.RateInfo{}, nil
+}
+
+func (*threadMetadataReader) GetRepositoryFileAtResolvedRef(_ context.Context, _, _, path string, _ github.RefResolution) (github.RepositoryFile, github.RateInfo, error) {
+	return github.RepositoryFile{}, github.RateInfo{}, &github.NotFoundError{Resource: path}
+}
+
 func (f *threadMetadataReader) ListIssueComments(ctx context.Context, owner, name string, issueNumber int, opts github.PageOptions) (github.ListResult[github.IssueComment], error) {
 	return github.ListResult[github.IssueComment]{}, nil
 }

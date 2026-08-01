@@ -111,11 +111,20 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 	case "ci-job-log":
 		return s.readCIJobLogResource(ctx, req)
 	case "artifact":
-		if len(req.parts) != 2 || req.parts[0] != "code-index" {
+		if len(req.parts) != 2 {
 			return nil, mcp.ResourceNotFoundError(req.uri)
 		}
-		req.parts = req.parts[1:]
-		return s.readCodeIndexResource(ctx, req)
+		switch req.parts[0] {
+		case "code-index":
+			req.parts = req.parts[1:]
+			return s.readCodeIndexResource(ctx, req)
+		case "github-thread-search":
+			return s.readGitHubThreadSearchResource(ctx, req)
+		case "source-bundle":
+			return s.readSourceBundleResource(ctx, req)
+		default:
+			return nil, mcp.ResourceNotFoundError(req.uri)
+		}
 	case "snapshot":
 		if len(req.parts) != 1 || strings.TrimSpace(req.parts[0]) == "" {
 			return nil, mcp.ResourceNotFoundError(req.uri)
@@ -139,6 +148,28 @@ func (s *Server) readCodeIndexResource(ctx context.Context, req resourceRequest)
 		return mcpcontract.CodeIndexArtifact{}, mcp.ResourceNotFoundError(req.uri)
 	}
 	return reader.CodeIndexArtifact(ctx, req.parts[0])
+}
+
+func (s *Server) readGitHubThreadSearchResource(ctx context.Context, req resourceRequest) (mcpcontract.GitHubThreadSearchArtifact, error) {
+	if len(req.parts) != 2 || strings.TrimSpace(req.parts[1]) == "" {
+		return mcpcontract.GitHubThreadSearchArtifact{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	reader, ok := s.reader.(GitHubThreadSearchArtifactReader)
+	if !ok {
+		return mcpcontract.GitHubThreadSearchArtifact{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	return reader.ReadGitHubThreadSearchArtifact(ctx, req.parts[1])
+}
+
+func (s *Server) readSourceBundleResource(ctx context.Context, req resourceRequest) (mcpcontract.SourceBundleArtifact, error) {
+	if len(req.parts) != 2 || strings.TrimSpace(req.parts[1]) == "" {
+		return mcpcontract.SourceBundleArtifact{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	reader, ok := s.reader.(SourceBundleArtifactReader)
+	if !ok {
+		return mcpcontract.SourceBundleArtifact{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	return reader.ReadSourceBundleArtifact(ctx, req.parts[1])
 }
 
 func (s *Server) readThreadFacetResource(ctx context.Context, req resourceRequest) (map[string]any, error) {

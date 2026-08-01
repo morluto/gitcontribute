@@ -24,9 +24,12 @@ func TestRepositoryContextSyncPersistsSourceBackedContributionGuidance(t *testin
 	base := &testServer{owner: "octocat", repo: "guided"}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v3/repos/octocat/guided/contents/.github/CONTRIBUTING.md" {
+			if got := r.URL.Query().Get("ref"); got != "guided-commit-sha" {
+				t.Errorf("guidance content ref = %q, want guided-commit-sha", got)
+			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{
-				"type": "file", "path": ".github/CONTRIBUTING.md", "sha": "policy-sha",
+				"type": "file", "path": ".github/CONTRIBUTING.md", "sha": "policy-blob-sha",
 				"html_url": "https://github.com/octocat/guided/blob/main/.github/CONTRIBUTING.md",
 				"encoding": "base64", "content": base64.StdEncoding.EncodeToString([]byte(guidance)),
 			})
@@ -50,7 +53,7 @@ func TestRepositoryContextSyncPersistsSourceBackedContributionGuidance(t *testin
 	if !strings.Contains(text, "## .github/CONTRIBUTING.md") || !strings.Contains(text, guidance) {
 		t.Fatalf("guidance = %q", text)
 	}
-	if len(refs) != 1 || refs[0].CommitSHA != "policy-sha" || refs[0].URL == "" {
+	if len(refs) != 1 || refs[0].CommitSHA != "guided-commit-sha" || refs[0].URL == "" {
 		t.Fatalf("refs = %+v", refs)
 	}
 
@@ -81,7 +84,7 @@ func TestRadarClassifiesStoredPolicyAndNaturalLanguageClaimOffline(t *testing.T)
 		t.Fatal(err)
 	}
 	file := github.RepositoryFile{
-		Path: ".github/CONTRIBUTING.md", SHA: "policy-sha",
+		Path: ".github/CONTRIBUTING.md", BlobSHA: "policy-blob-sha", CommitSHA: "guided-commit-sha",
 		HTMLURL: "https://github.com/owner/repo/blob/main/.github/CONTRIBUTING.md",
 		Content: "We accept pull requests for issues labelled help wanted.",
 	}
@@ -128,6 +131,17 @@ type interruptedGuidanceReader struct {
 func (interruptedGuidanceReader) GetRepositoryFile(_ context.Context, _, _, path string) (github.RepositoryFile, github.RateInfo, error) {
 	if path == contributionGuidancePaths[0] {
 		return github.RepositoryFile{Path: path, Content: "new guidance"}, github.RateInfo{}, nil
+	}
+	return github.RepositoryFile{}, github.RateInfo{}, errors.New("interrupted guidance retrieval")
+}
+
+func (interruptedGuidanceReader) ResolveRepositoryRef(_ context.Context, _, _, requested string) (github.RefResolution, github.RateInfo, error) {
+	return github.RefResolution{RequestedRef: requested, ResolvedRef: "new-commit", CommitSHA: "new-commit"}, github.RateInfo{}, nil
+}
+
+func (interruptedGuidanceReader) GetRepositoryFileAtResolvedRef(_ context.Context, _, _, path string, resolution github.RefResolution) (github.RepositoryFile, github.RateInfo, error) {
+	if path == contributionGuidancePaths[0] {
+		return github.RepositoryFile{Path: path, BlobSHA: "new-blob", CommitSHA: resolution.CommitSHA, Content: "new guidance"}, github.RateInfo{}, nil
 	}
 	return github.RepositoryFile{}, github.RateInfo{}, errors.New("interrupted guidance retrieval")
 }

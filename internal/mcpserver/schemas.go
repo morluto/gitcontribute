@@ -56,6 +56,11 @@ func inferredSchema[T any]() schemaDefinition {
 				Description: "Per-item batch outcome.",
 				Enum:        []any{"complete", "retryable", "unavailable", "failed"},
 			},
+			reflect.TypeFor[mcpcontract.SourceFileStatus](): {
+				Type:        "string",
+				Description: "Bounded source-file outcome.",
+				Enum:        []any{"complete", "not_found", "too_large", "retryable", "unavailable", "failed"},
+			},
 			reflect.TypeFor[mcpcontract.JobStatus](): {
 				Type:        "string",
 				Description: "Durable job lifecycle status.",

@@ -31,6 +31,9 @@ func TestServerInstructionsContainRoutingPhrases(t *testing.T) {
 		"never shorten, pluralize, or reconstruct them",
 		"Only advertised tools are available",
 		"never mutates GitHub",
+		"github.search_threads",
+		"github.read_source_files",
+		"corpus.search_code_batch",
 	} {
 		if !strings.Contains(init.Instructions, phrase) {
 			t.Errorf("instructions missing routing phrase %q:\n%s", phrase, init.Instructions)

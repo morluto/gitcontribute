@@ -48,3 +48,30 @@ func TestReadSnapshotRejectsInconsistentArtifact(t *testing.T) {
 		t.Fatalf("tampered snapshot error = %v", err)
 	}
 }
+
+func TestResolveReadArtifactUsesExactKindAndDigestWithoutProjectionFallback(t *testing.T) {
+	t.Parallel()
+	c, _ := openTestCorpus(t)
+	ctx := context.Background()
+	want, err := c.MaterializeReadSnapshot(ctx, SnapshotMaterialization{
+		Kind: "source-bundle.v1", Scope: "acme/rocket", SourceManifest: "manifest",
+		DerivedVersions: map[string]string{"source_bundle": "v1"}, Completeness: map[string]bool{"complete": true},
+		Provenance: map[string]string{"provider": "github"}, Payload: map[string]any{"commit_sha": "abc", "items": []string{"README.md"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := c.ResolveReadArtifact(ctx, "source-bundle.v1", want.ArtifactDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ArtifactKind != want.ArtifactKind || got.ArtifactDigest != want.ArtifactDigest || string(got.Payload) != string(want.Payload) || got.Token != want.Token {
+		t.Fatalf("artifact = %+v, want %+v", got, want)
+	}
+	if _, err := c.ResolveReadArtifact(ctx, "source-bundle.v1", "missing"); !errors.Is(err, ErrSnapshotUnavailable) {
+		t.Fatalf("malformed artifact error = %v", err)
+	}
+	if _, err := c.ResolveReadArtifact(ctx, "other-kind", want.ArtifactDigest); !errors.Is(err, ErrSnapshotUnavailable) {
+		t.Fatalf("wrong-kind artifact error = %v", err)
+	}
+}
