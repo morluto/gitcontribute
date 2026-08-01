@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
@@ -15,6 +16,20 @@ function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: "utf8", ...options });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return result;
+}
+
+function runAsync(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { ...options, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => (stdout += chunk));
+    child.stderr.on("data", (chunk) => (stderr += chunk));
+    child.on("error", reject);
+    child.on("close", (status, signal) => resolve({ status, signal, stdout, stderr }));
+  });
 }
 
 function shellQuote(value) {
@@ -129,6 +144,78 @@ process.exit(2);
   await chmod(fakeNPM, 0o755);
   return { fakeBin, globalPrefix, npmLog };
 }
+
+async function startRegistry(latestVersion) {
+  const requests = [];
+  const server = createServer((request, response) => {
+    requests.push({ method: request.method, url: request.url });
+    if (request.method === "GET" && request.url === "/gitcontribute") {
+      response.setHeader("content-type", "application/json");
+      response.end(
+        JSON.stringify({
+          _id: "gitcontribute",
+          name: "gitcontribute",
+          "dist-tags": { latest: latestVersion },
+          versions: { [latestVersion]: { name: "gitcontribute", version: latestVersion } },
+        })
+      );
+      return;
+    }
+    response.statusCode = 404;
+    response.end();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  return {
+    requests,
+    url: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+  };
+}
+
+test("npx upgrade completes without installing a persistent package", { skip: process.platform === "win32" }, async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-upgrade-e2e-"));
+  const registry = await startRegistry("9.9.9");
+  try {
+    const tarball = await packCurrentPlatform(workspace);
+    const runner = join(workspace, "runner");
+    run("npm", ["install", "--prefix", runner, "--ignore-scripts", "--no-audit", "--no-fund", tarball]);
+
+    const home = join(workspace, "home");
+    await mkdir(home);
+    const result = await runAsync(
+      "npx",
+      ["--yes", "gitcontribute", "upgrade", "--yes", "--json"],
+      {
+        cwd: runner,
+        env: {
+          ...process.env,
+          HOME: home,
+          XDG_CONFIG_HOME: join(home, ".config"),
+          XDG_DATA_HOME: join(home, ".local", "share"),
+          XDG_CACHE_HOME: join(home, ".cache"),
+          XDG_STATE_HOME: join(home, ".local", "state"),
+          npm_config_registry: registry.url,
+          npm_config_audit: "false",
+          npm_config_fund: "false",
+          npm_config_update_notifier: "false",
+        },
+      }
+    );
+    assert.equal(result.status, 0, `${result.stderr || result.stdout}\nREGISTRY REQUESTS:\n${JSON.stringify(registry.requests)}`);
+
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.context, "npx");
+    assert.equal(report.status, "npx");
+    assert.equal(report.latest, "9.9.9");
+    assert.ok(report.stages.some((stage) => stage.name === "installation" && stage.status === "npx"));
+    assert.deepEqual(registry.requests, [{ method: "GET", url: "/gitcontribute" }]);
+  } finally {
+    await registry.close();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
 
 test("packaged setup can install the CLI without configuring MCP", { skip: process.platform === "win32" }, async () => {
   const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-setup-e2e-"));
