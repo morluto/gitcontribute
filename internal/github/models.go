@@ -342,6 +342,15 @@ type ListIssueOptions struct {
 	PageOptions
 }
 
+// PullRequestListOptions selects one bounded repository-wide pull-request
+// discovery page. State=all is required by repository feedback indexing.
+type PullRequestListOptions struct {
+	State     string
+	Sort      string
+	Direction string
+	PageOptions
+}
+
 // RepositorySearchOptions controls one GitHub repository search page.
 type RepositorySearchOptions struct {
 	Query string

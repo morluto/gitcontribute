@@ -104,15 +104,16 @@ type SnapshotReadAction struct {
 // variant owns its arguments; callers never reconstruct a generic argument bag
 // from prose.
 type FollowUpAction struct {
-	Type                 string                         `json:"type"`
-	PollJob              *GetJobsInput                  `json:"poll_job,omitempty"`
-	ReadResource         *ResourceReadAction            `json:"read_resource,omitempty"`
-	ReadSnapshot         *SnapshotReadAction            `json:"read_snapshot,omitempty"`
-	InspectCommitChanges *InspectCommitChangesInput     `json:"inspect_commit_changes,omitempty"`
-	GetRepositories      *GetRepositoriesInput          `json:"get_repositories,omitempty"`
-	GetThreads           *GetThreadsInput               `json:"get_threads,omitempty"`
-	GetThreadFacets      *GetThreadFacetsInput          `json:"get_thread_facets,omitempty"`
-	ListPortfolio        *ListPullRequestPortfolioInput `json:"list_pull_request_portfolio,omitempty"`
+	Type                 string                          `json:"type"`
+	PollJob              *GetJobsInput                   `json:"poll_job,omitempty"`
+	ReadResource         *ResourceReadAction             `json:"read_resource,omitempty"`
+	ReadSnapshot         *SnapshotReadAction             `json:"read_snapshot,omitempty"`
+	InspectCommitChanges *InspectCommitChangesInput      `json:"inspect_commit_changes,omitempty"`
+	GetRepositories      *GetRepositoriesInput           `json:"get_repositories,omitempty"`
+	GetThreads           *GetThreadsInput                `json:"get_threads,omitempty"`
+	GetThreadFacets      *GetThreadFacetsInput           `json:"get_thread_facets,omitempty"`
+	ListPortfolio        *ListPullRequestPortfolioInput  `json:"list_pull_request_portfolio,omitempty"`
+	SearchFeedback       *SearchPullRequestFeedbackInput `json:"search_pull_request_feedback,omitempty"`
 }
 
 // JobFollowUp points to the typed read plane for a job's durable result.

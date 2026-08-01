@@ -48,6 +48,7 @@ type ToolCall struct {
 	HydrateThreads        *HydrateThreadsInput               `json:"hydrate_threads,omitempty"`
 	SyncPortfolio         *SyncPortfolioInput                `json:"sync_portfolio,omitempty"`
 	SyncFeedback          *SyncPullRequestFeedbackInput      `json:"sync_pull_request_feedback,omitempty"`
+	IndexFeedback         *IndexPullRequestFeedbackInput     `json:"index_pull_request_feedback,omitempty"`
 	SyncCI                *SyncCIFailuresInput               `json:"sync_ci_failures,omitempty"`
 	QueryDeepWiki         *DeepWikiInput                     `json:"query_deepwiki,omitempty"`
 	IndexRepositories     *IndexRepositoriesInput            `json:"index_repositories,omitempty"`
@@ -68,7 +69,7 @@ type ToolCall struct {
 }
 
 type recoveryActionInput interface {
-	GetJobsInput | GetRepositoriesInput | EnsureCoverageInput | SyncRepositoryContextInput | SyncThreadsInput | HydrateThreadsInput | SyncPortfolioInput | SyncPullRequestFeedbackInput | SyncCIFailuresInput | DeepWikiInput | IndexRepositoriesInput | FindClustersInput | FindNeighborsInput | RankOpportunitiesInput | MineRepositoryFixPatternsInput | PreviewRepositoryFixPatternsInput | SearchGitHubRepositoriesInput | SearchGitHubThreadsInput | SearchCodeInput | ReadSourceFilesInput | InspectCommitChangesInput | CheckMergeConflictsInput | FindRelatedWorkInput | ListConcernsInput | ListPullRequestPortfolioInput
+	GetJobsInput | GetRepositoriesInput | EnsureCoverageInput | SyncRepositoryContextInput | SyncThreadsInput | HydrateThreadsInput | SyncPortfolioInput | SyncPullRequestFeedbackInput | IndexPullRequestFeedbackInput | SyncCIFailuresInput | DeepWikiInput | IndexRepositoriesInput | FindClustersInput | FindNeighborsInput | RankOpportunitiesInput | MineRepositoryFixPatternsInput | PreviewRepositoryFixPatternsInput | SearchGitHubRepositoriesInput | SearchGitHubThreadsInput | SearchCodeInput | ReadSourceFilesInput | InspectCommitChangesInput | CheckMergeConflictsInput | FindRelatedWorkInput | ListConcernsInput | ListPullRequestPortfolioInput
 }
 
 // RecoveryAction derives the action discriminator from a concrete input type,
@@ -91,6 +92,8 @@ func RecoveryAction[T recoveryActionInput](input T) ToolCall {
 		return ToolCall{Type: "sync_portfolio", SyncPortfolio: &value}
 	case SyncPullRequestFeedbackInput:
 		return ToolCall{Type: "sync_pull_request_feedback", SyncFeedback: &value}
+	case IndexPullRequestFeedbackInput:
+		return ToolCall{Type: "index_pull_request_feedback", IndexFeedback: &value}
 	case SyncCIFailuresInput:
 		return ToolCall{Type: "sync_ci_failures", SyncCI: &value}
 	case DeepWikiInput:
@@ -460,18 +463,6 @@ type RelatedContributionThread struct {
 	Title  string `json:"title"`
 	Author string `json:"author,omitempty"`
 	URL    string `json:"url,omitempty"`
-}
-
-// SyncPullRequestFeedbackInput refreshes distinct human feedback channels for
-// exact pull requests without conflating absent coverage with no feedback. The
-// operation also persists the local repository and pull-request identities
-// required by those exact facet writes; it does not require prior broad sync.
-type SyncPullRequestFeedbackInput struct {
-	PullRequests       []ThreadRef `json:"pull_requests" jsonschema:"One to 50 exact pull requests"`
-	ThreadState        string      `json:"thread_state,omitempty" jsonschema:"Review threads to return: unresolved or all"`
-	Channels           []string    `json:"channels" jsonschema:"One or more of issue_comments, submitted_reviews, inline_comments, review_threads"`
-	MaxItemsPerChannel int         `json:"max_items_per_channel,omitempty" jsonschema:"Maximum items per requested channel from 1 to 1000"`
-	MaxRequests        int         `json:"max_requests,omitempty" jsonschema:"Maximum total GitHub requests from 1 to 1000"`
 }
 
 // SyncCIFailuresInput refreshes normalized CI observations for exact pull

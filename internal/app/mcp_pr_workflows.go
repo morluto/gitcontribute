@@ -166,6 +166,13 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 			return pullRequestWorkflowResult{}, err
 		}
 	}
+	projectionCorpus, err := r.openCorpus(ctx)
+	if err != nil {
+		return pullRequestWorkflowResult{}, err
+	}
+	if _, err := projectionCorpus.RebuildPullRequestFeedbackProjection(ctx); err != nil {
+		return pullRequestWorkflowResult{}, fmt.Errorf("rebuild pull-request feedback projection: %w", err)
+	}
 	out.Requests = budget.Completed()
 	if out.BatchStatus == "partial" && allWorkflowItemsFailed(out.Items) {
 		out.BatchStatus = "failed"

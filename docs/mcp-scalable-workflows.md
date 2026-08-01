@@ -19,6 +19,7 @@ github.sync_threads -> jobs.get -> corpus.rank_contribution_candidates
 github.sync_thread_facets -> jobs.get -> corpus.get_thread_facets
 corpus.find_precedents
 workflow.prepare_issue_set
+github.index_pull_request_feedback -> jobs.get -> corpus.search_pull_request_feedback
 ```
 
 - `github.search_repositories` runs one bounded live search and persists the
@@ -105,6 +106,18 @@ explicit `raw_query` field; there is no deprecated alias.
 - Pull-request headers do not contain merge outcomes. Until `pr_details` is
   hydrated, a closed PR's `merged` value is omitted and outcome-sensitive
   offline reads report it as unknown rather than closed-unmerged.
+- `github.index_pull_request_feedback` is the repository-scoped feedback path.
+  It walks every reachable PR with `state=all` under explicit page, request,
+  and item bounds, persists its next discovery page, then reuses the exact PR
+  feedback adapter for issue comments, submitted reviews, inline comments, and
+  review-thread topology. Poll the returned job and use
+  `corpus.search_pull_request_feedback` for offline author/state/merge/
+  resolution/text/date filtering. An empty result with incomplete discovery or
+  facets is `partial`/`unknown`, not absence; follow its typed recovery plan.
+  Matching rows include exact PR, thread, comment, source-observation, and
+  `gitcontribute://pull-request-feedback/...` references. Pagination uses an
+  opaque cursor scoped to the complete query; pass a durable snapshot token
+  when the caller needs the pages pinned to one corpus revision.
 
 ### Repository fix-pattern mining
 

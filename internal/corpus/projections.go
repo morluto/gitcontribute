@@ -15,18 +15,20 @@ import (
 
 // Product-owned names for derived SQLite search projections.
 const (
-	ProjectionNameThreadsFTS           = "threads_fts"
-	ProjectionNameRepositoriesFTS      = "repositories_fts"
-	ProjectionNameFacetObservationsFTS = "facet_observations_fts"
-	ProjectionNameCodeDocumentsFTS     = "code_documents_fts"
+	ProjectionNameThreadsFTS             = "threads_fts"
+	ProjectionNameRepositoriesFTS        = "repositories_fts"
+	ProjectionNameFacetObservationsFTS   = "facet_observations_fts"
+	ProjectionNameCodeDocumentsFTS       = "code_documents_fts"
+	ProjectionNamePullRequestFeedbackFTS = "pull_request_feedback_fts"
 )
 
 // Product-owned versions for derived SQLite search projections.
 const (
-	ProjectionVersionThreadsFTS           = "threads-fts-v3"
-	ProjectionVersionRepositoriesFTS      = "repositories-fts-v1"
-	ProjectionVersionFacetObservationsFTS = "facet-observations-fts-v1"
-	ProjectionVersionCodeDocumentsFTS     = "code-documents-fts-v1"
+	ProjectionVersionThreadsFTS             = "threads-fts-v3"
+	ProjectionVersionRepositoriesFTS        = "repositories-fts-v1"
+	ProjectionVersionFacetObservationsFTS   = "facet-observations-fts-v1"
+	ProjectionVersionCodeDocumentsFTS       = "code-documents-fts-v1"
+	ProjectionVersionPullRequestFeedbackFTS = "pull-request-feedback-fts-v1"
 )
 
 // ProjectionStatus describes the durability state of a derived projection.
@@ -91,6 +93,28 @@ func (c *Corpus) RequireProjection(ctx context.Context, name, version string) er
 	if state.Version != version || state.RefreshedAt.IsZero() ||
 		(state.Status != ProjectionStatusCurrent && state.Status != ProjectionStatusBuilding && state.Status != ProjectionStatusFailed) {
 		return fmt.Errorf("%w: %s is %s at version %s; expected current version %s", ErrProjectionStale, name, state.Status, state.Version, version)
+	}
+	return nil
+}
+
+// RequireFreshProjection verifies both the durable projection state and the
+// current source identity. A rebuild may leave the last successful index
+// readable while it is running, but a changed source must never be presented
+// as a complete search snapshot.
+func (c *Corpus) RequireFreshProjection(ctx context.Context, name, version string) error {
+	if err := c.RequireProjection(ctx, name, version); err != nil {
+		return err
+	}
+	state, err := c.GetProjectionState(ctx, name)
+	if err != nil {
+		return fmt.Errorf("%w: %s: %w", ErrProjectionStale, name, err)
+	}
+	_, contentHash, err := c.projectionSourceIdentity(ctx, c.db, name)
+	if err != nil {
+		return fmt.Errorf("%w: %s source: %w", ErrProjectionStale, name, err)
+	}
+	if state.ContentHash != contentHash {
+		return fmt.Errorf("%w: %s source changed since last rebuild", ErrProjectionStale, name)
 	}
 	return nil
 }
@@ -312,6 +336,11 @@ func (c *Corpus) projectionSourceIdentity(ctx context.Context, q projectionSourc
 		query = `SELECT id, COALESCE(search_text, ''), '' FROM facet_observations ORDER BY id`
 	case ProjectionNameCodeDocumentsFTS:
 		query = `SELECT id, path, content FROM code_documents ORDER BY id`
+	case ProjectionNamePullRequestFeedbackFTS:
+		// Feedback observations are the canonical source. The normalized rows
+		// are the replaceable child snapshot and therefore cannot identify their
+		// own freshness.
+		query = `SELECT id, facet || char(10) || CAST(source_updated_at AS TEXT), payload FROM facet_observations WHERE facet IN ('pr_feedback_issue_comments', 'pr_feedback_reviews', 'pr_feedback_inline_comments', 'pr_feedback_review_threads') ORDER BY id`
 	default:
 		return "", "", fmt.Errorf("unknown search projection %q", name)
 	}
@@ -348,7 +377,7 @@ func writeProjectionHashField(h hash.Hash, value string) {
 }
 
 func isSearchProjection(name string) bool {
-	return name == ProjectionNameThreadsFTS || name == ProjectionNameRepositoriesFTS || name == ProjectionNameFacetObservationsFTS || name == ProjectionNameCodeDocumentsFTS
+	return name == ProjectionNameThreadsFTS || name == ProjectionNameRepositoriesFTS || name == ProjectionNameFacetObservationsFTS || name == ProjectionNameCodeDocumentsFTS || name == ProjectionNamePullRequestFeedbackFTS
 }
 
 func setProjectionTimes(state *ProjectionState, refreshed, attemptStarted, attemptFinished sql.NullInt64) {

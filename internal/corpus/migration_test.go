@@ -26,6 +26,7 @@ func TestBaselineMigrationCreatesCurrentSchema(t *testing.T) {
 		"concerns", "concern_links", "concerns_fts",
 		"validation_run_groups",
 		"code_index_artifacts", "corpus_snapshot_tokens", "corpus_read_artifacts",
+		"pull_request_feedback_discovery", "pull_request_feedback_projection", "pull_request_feedback_fts",
 	} {
 		if !migrationTableExists(ctx, t, c.db, table) {
 			t.Fatalf("table %s missing after baseline migration", table)
