@@ -336,7 +336,8 @@ func installMessage(context string) string {
 
 func discoverInstallation(ctx context.Context) installDetails {
 	if os.Getenv("npm_command") == "exec" || os.Getenv("npm_lifecycle_event") == "npx" {
-		return installDetails{context: "npx"}
+		executable, _ := osExecutable()
+		return installDetails{context: "npx", executable: executable}
 	}
 	executable, err := osExecutable()
 	if err != nil {
