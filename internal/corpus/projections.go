@@ -15,18 +15,20 @@ import (
 
 // Product-owned names for derived SQLite search projections.
 const (
-	ProjectionNameThreadsFTS           = "threads_fts"
-	ProjectionNameRepositoriesFTS      = "repositories_fts"
-	ProjectionNameFacetObservationsFTS = "facet_observations_fts"
-	ProjectionNameCodeDocumentsFTS     = "code_documents_fts"
+	ProjectionNameThreadsFTS             = "threads_fts"
+	ProjectionNameRepositoriesFTS        = "repositories_fts"
+	ProjectionNameFacetObservationsFTS   = "facet_observations_fts"
+	ProjectionNameCodeDocumentsFTS       = "code_documents_fts"
+	ProjectionNamePullRequestFeedbackFTS = "pull_request_feedback_fts"
 )
 
 // Product-owned versions for derived SQLite search projections.
 const (
-	ProjectionVersionThreadsFTS           = "threads-fts-v3"
-	ProjectionVersionRepositoriesFTS      = "repositories-fts-v1"
-	ProjectionVersionFacetObservationsFTS = "facet-observations-fts-v1"
-	ProjectionVersionCodeDocumentsFTS     = "code-documents-fts-v1"
+	ProjectionVersionThreadsFTS             = "threads-fts-v3"
+	ProjectionVersionRepositoriesFTS        = "repositories-fts-v1"
+	ProjectionVersionFacetObservationsFTS   = "facet-observations-fts-v1"
+	ProjectionVersionCodeDocumentsFTS       = "code-documents-fts-v1"
+	ProjectionVersionPullRequestFeedbackFTS = "pull-request-feedback-fts-v1"
 )
 
 // ProjectionStatus describes the durability state of a derived projection.
@@ -312,6 +314,8 @@ func (c *Corpus) projectionSourceIdentity(ctx context.Context, q projectionSourc
 		query = `SELECT id, COALESCE(search_text, ''), '' FROM facet_observations ORDER BY id`
 	case ProjectionNameCodeDocumentsFTS:
 		query = `SELECT id, path, content FROM code_documents ORDER BY id`
+	case ProjectionNamePullRequestFeedbackFTS:
+		query = `SELECT id, channel || char(10) || author, body || char(10) || path FROM pull_request_feedback_projection ORDER BY id`
 	default:
 		return "", "", fmt.Errorf("unknown search projection %q", name)
 	}
@@ -348,7 +352,7 @@ func writeProjectionHashField(h hash.Hash, value string) {
 }
 
 func isSearchProjection(name string) bool {
-	return name == ProjectionNameThreadsFTS || name == ProjectionNameRepositoriesFTS || name == ProjectionNameFacetObservationsFTS || name == ProjectionNameCodeDocumentsFTS
+	return name == ProjectionNameThreadsFTS || name == ProjectionNameRepositoriesFTS || name == ProjectionNameFacetObservationsFTS || name == ProjectionNameCodeDocumentsFTS || name == ProjectionNamePullRequestFeedbackFTS
 }
 
 func setProjectionTimes(state *ProjectionState, refreshed, attemptStarted, attemptFinished sql.NullInt64) {

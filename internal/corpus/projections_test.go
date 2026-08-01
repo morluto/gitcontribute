@@ -35,10 +35,10 @@ func TestProjectionStatesSeededByOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list projection states: %v", err)
 	}
-	if len(states) != 4 {
-		t.Fatalf("projection states = %d, want 4", len(states))
+	if len(states) != 5 {
+		t.Fatalf("projection states = %d, want 5", len(states))
 	}
-	if states[0].Name != ProjectionNameCodeDocumentsFTS || states[1].Name != ProjectionNameFacetObservationsFTS || states[2].Name != ProjectionNameRepositoriesFTS || states[3].Name != ProjectionNameThreadsFTS {
+	if states[0].Name != ProjectionNameCodeDocumentsFTS || states[1].Name != ProjectionNameFacetObservationsFTS || states[2].Name != ProjectionNamePullRequestFeedbackFTS || states[3].Name != ProjectionNameRepositoriesFTS || states[4].Name != ProjectionNameThreadsFTS {
 		t.Fatalf("projection states order = %v", states)
 	}
 }
