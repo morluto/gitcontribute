@@ -23,27 +23,49 @@ func TestExecRunnerCancellationKillsProcessGroup(t *testing.T) {
 	}
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "child.pid")
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	result, err := NewExecRunner().Run(ctx, RunRequest{
-		Args: []string{sh, "-c", "sleep 30 & child=$!; echo $child > child.pid; wait"},
-		Dir:  dir,
-	})
-	if err != nil {
-		t.Fatal(err)
+	type runOutcome struct {
+		result *RunResult
+		err    error
 	}
+	done := make(chan runOutcome, 1)
+	go func() {
+		result, err := NewExecRunner().Run(ctx, RunRequest{
+			Args: []string{sh, "-c", "sleep 30 & child=$!; echo $child > child.pid; wait"},
+			Dir:  dir,
+		})
+		done <- runOutcome{result: result, err: err}
+	}()
+
+	var rawPID []byte
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		rawPID, err = os.ReadFile(pidFile)
+		if err == nil && strings.TrimSpace(string(rawPID)) != "" {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			outcome := <-done
+			t.Fatalf("child pid was not recorded before cancellation: err=%v run_err=%v", err, outcome.err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	outcome := <-done
+	if outcome.err != nil {
+		t.Fatal(outcome.err)
+	}
+	result := outcome.result
 	if result.Classification != RunClassificationCancelled {
 		t.Fatalf("classification = %q, want cancelled", result.Classification)
-	}
-	rawPID, err := os.ReadFile(pidFile)
-	if err != nil {
-		t.Fatalf("read child pid: %v", err)
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(rawPID)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(time.Second)
+	deadline = time.Now().Add(time.Second)
 	for {
 		err = syscall.Kill(pid, 0)
 		if errors.Is(err, syscall.ESRCH) {
