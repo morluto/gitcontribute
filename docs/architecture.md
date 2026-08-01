@@ -137,6 +137,31 @@ topology as independently covered channels. CI observations bind checks and
 statuses to the pull request's observed head SHA. An unsupported log request
 fails before submission rather than producing fabricated log coverage.
 
+Repository-wide feedback indexing is a separate bounded workflow:
+
+```text
+github.index_pull_request_feedback
+  -> jobs.get
+  -> corpus.search_pull_request_feedback
+  -> gitcontribute://pull-request-feedback/{owner}/{repo}/{number}
+```
+
+The index job enumerates provider pull-request pages with `state=all` and
+stores its next page, request count, item bound, and completeness in a
+repository-scoped discovery checkpoint. Each discovered PR is then passed
+through the exact feedback adapter, so open, closed, and merged PRs retain
+their observed head SHA, merge state, channel coverage, and raw facet payloads.
+The normalized `pull_request_feedback_fts` projection is rebuildable from
+complete raw observations; a newer incomplete or stale observation can advance
+coverage without replacing the previous complete child snapshot. Offline
+search reports discovery and facet coverage separately from match count and
+returns the exact index, feedback-sync, or PR-details recovery action needed
+to resolve an unknown. Search never performs network access.
+
+Thread resolution remains outside this read/index workflow. A future mutation
+must accept exact repository, PR, and thread identifiers plus the expected head
+SHA and must be separately authorized; indexing never auto-resolves a thread.
+
 Portfolio relationships and derived resolution records are local product
 contracts. Their normalized snapshots carry rule versions and exact source
 observation references. Explicit timeline events may produce a resolution;
