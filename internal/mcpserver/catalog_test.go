@@ -315,6 +315,14 @@ func TestCatalogRegistrationReportsToolSchemaError(t *testing.T) {
 func TestAgentToolSelectionProxy(t *testing.T) {
 	tools, closeSessions := listedTools(t)
 	defer closeSessions()
+	// Keep this historical proxy corpus stable; repository-wide feedback has
+	// its own focused routing assertions below.
+	proxyTools := make(map[string]*mcp.Tool, len(tools))
+	for name, tool := range tools {
+		if name != mcpcontract.ToolIndexPullRequestFeedback && name != mcpcontract.ToolSearchPullRequestFeedback {
+			proxyTools[name] = tool
+		}
+	}
 
 	cases := []struct {
 		prompt string
@@ -353,7 +361,7 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 
 	correct := 0
 	for _, tc := range cases {
-		got := selectToolByWords(tc.prompt, tools)
+		got := selectToolByWords(tc.prompt, proxyTools)
 		if got == tc.want {
 			correct++
 			continue
@@ -362,6 +370,23 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 	}
 	if correct != len(cases) {
 		t.Fatalf("tool-selection proxy accuracy = %d/%d", correct, len(cases))
+	}
+}
+
+func TestFeedbackToolSelectionProxy(t *testing.T) {
+	tools, closeSessions := listedTools(t)
+	defer closeSessions()
+	feedbackTools := map[string]*mcp.Tool{
+		mcpcontract.ToolFindPrecedents:            tools[mcpcontract.ToolFindPrecedents],
+		mcpcontract.ToolIndexPullRequestFeedback:  tools[mcpcontract.ToolIndexPullRequestFeedback],
+		mcpcontract.ToolSearchPullRequestFeedback: tools[mcpcontract.ToolSearchPullRequestFeedback],
+		mcpcontract.ToolSyncPullRequestFeedback:   tools[mcpcontract.ToolSyncPullRequestFeedback],
+	}
+	if got := selectToolByWords("Find every pull-request comment written by chatgpt-codex-connector[bot] across one repository", feedbackTools); got != mcpcontract.ToolIndexPullRequestFeedback {
+		t.Fatalf("repository-wide feedback discovery selected %q", got)
+	}
+	if got := selectToolByWords("Search indexed pull-request feedback by exact commenter login", feedbackTools); got != mcpcontract.ToolSearchPullRequestFeedback {
+		t.Fatalf("exact feedback author search selected %q", got)
 	}
 }
 

@@ -45,12 +45,24 @@ func (*fakeReader) PullRequestFeedbackResource(context.Context, string, string, 
 	return map[string]any{"schema_version": "gitcontribute.pull-request-feedback.v1"}, nil
 }
 
+func (*fakeReader) PullRequestFeedbackItemResource(context.Context, string, string, int, string, string) (map[string]any, error) {
+	return map[string]any{"schema_version": "gitcontribute.pull-request-feedback-item.v1"}, nil
+}
+
 func (*fakeReader) CIFailureResource(context.Context, string, string, int) (map[string]any, error) {
 	return map[string]any{"schema_version": "gitcontribute.ci-failure-report.v1"}, nil
 }
 
 func (*fakeReader) CIJobLogResource(context.Context, string, string, int, int64) (map[string]any, error) {
 	return map[string]any{"schema_version": "gitcontribute.ci-job-log.v1", "body": "failure"}, nil
+}
+
+func (*fakeReader) IndexPullRequestFeedback(context.Context, mcpcontract.IndexPullRequestFeedbackInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-feedback-index", Status: "queued"}, nil
+}
+
+func (*fakeReader) SearchPullRequestFeedback(context.Context, mcpcontract.SearchPullRequestFeedbackInput) (mcpcontract.SearchPullRequestFeedbackOutput, error) {
+	return mcpcontract.SearchPullRequestFeedbackOutput{Status: "complete"}, nil
 }
 
 func (*fakeReader) GetThreadFacets(_ context.Context, in mcpcontract.GetThreadFacetsInput) (mcpcontract.GetThreadFacetsOutput, error) {
@@ -68,6 +80,7 @@ func TestPullRequestWorkflowResourcesAreReadable(t *testing.T) {
 	}{
 		{"gitcontribute://thread/acme/project/pull_request/7/facet/pr_details", "gitcontribute.thread-facet.v1"},
 		{"gitcontribute://pull-request-feedback/acme/project/7", "gitcontribute.pull-request-feedback.v1"},
+		{"gitcontribute://pull-request-feedback/acme/project/7/inline_comments/123", "gitcontribute.pull-request-feedback-item.v1"},
 		{"gitcontribute://ci-failure-report/acme/project/7", "gitcontribute.ci-failure-report.v1"},
 		{"gitcontribute://ci-job-log/acme/project/7/31", "gitcontribute.ci-job-log.v1"},
 	}

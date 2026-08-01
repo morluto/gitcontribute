@@ -130,7 +130,14 @@ func TestPullRequestFeedbackSearchKeepsThreadResourceReadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Matches) != 1 || result.Matches[0].ThreadID == "" || result.Matches[0].ThreadReference != "gitcontribute://pull-request-feedback/acme/rocket/2" {
+	if len(result.Matches) != 1 || result.Matches[0].ThreadID == "" || result.Matches[0].ThreadReference != "gitcontribute://pull-request-feedback/acme/rocket/2" || result.Matches[0].CommentReference != "gitcontribute://pull-request-feedback/acme/rocket/2/review_threads/202" {
 		t.Fatalf("thread resource match = %+v", result.Matches)
+	}
+	item, err := appReader.PullRequestFeedbackItemResource(ctx, "acme", "rocket", 2, "review_threads", "202")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item["schema_version"] != "gitcontribute.pull-request-feedback-item.v1" || item["feedback_id"] != "202" || item["thread_id"] != "thread-2" || item["resolved"] != false || item["resolution_state"] != "unresolved" {
+		t.Fatalf("exact feedback resource = %+v", item)
 	}
 }

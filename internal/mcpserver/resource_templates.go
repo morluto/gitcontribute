@@ -86,6 +86,10 @@ func (s *Server) registerResourceTemplates() {
 				name:     "Pull-request feedback", description: "Canonical persisted issue comments, reviews, inline comments, and review-thread topology with independent coverage",
 			},
 			resourceTemplateDefinition{
+				template: "gitcontribute://pull-request-feedback/{owner}/{repo}/{number}/{channel}/{feedback_id}",
+				name:     "Pull-request feedback item", description: "Exact persisted feedback identity, author, channel, thread, anchor, and resolution state",
+			},
+			resourceTemplateDefinition{
 				template: "gitcontribute://ci-failure-report/{owner}/{repo}/{number}",
 				name:     "CI failure report", description: "Persisted statuses, checks, workflow runs, and jobs",
 			},

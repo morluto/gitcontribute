@@ -30,6 +30,7 @@ type workspaceResourceReader interface {
 
 type pullRequestWorkflowResourceReader interface {
 	PullRequestFeedbackResource(context.Context, string, string, int) (map[string]any, error)
+	PullRequestFeedbackItemResource(context.Context, string, string, int, string, string) (map[string]any, error)
 	CIFailureResource(context.Context, string, string, int) (map[string]any, error)
 	CIJobLogResource(context.Context, string, string, int, int64) (map[string]any, error)
 }
@@ -186,11 +187,28 @@ func (s *Server) readThreadFacetResource(ctx context.Context, req resourceReques
 
 func (s *Server) readPullRequestFeedbackResource(ctx context.Context, req resourceRequest) (map[string]any, error) {
 	reader, ok := s.reader.(pullRequestWorkflowResourceReader)
-	number, valid := pullRequestResourceNumber(req.parts)
-	if !ok || !valid {
+	if !ok || len(req.parts) < 3 || len(req.parts) > 5 || strings.TrimSpace(req.parts[0]) == "" || strings.TrimSpace(req.parts[1]) == "" {
 		return nil, mcp.ResourceNotFoundError(req.uri)
 	}
-	return reader.PullRequestFeedbackResource(ctx, req.parts[0], req.parts[1], number)
+	number, valid := positivePathNumber(req.parts[2])
+	if !valid {
+		return nil, mcp.ResourceNotFoundError(req.uri)
+	}
+	if len(req.parts) == 3 {
+		return reader.PullRequestFeedbackResource(ctx, req.parts[0], req.parts[1], number)
+	}
+	if len(req.parts) != 5 || strings.TrimSpace(req.parts[3]) == "" || strings.TrimSpace(req.parts[4]) == "" {
+		return nil, mcp.ResourceNotFoundError(req.uri)
+	}
+	channel, err := url.PathUnescape(req.parts[3])
+	if err != nil {
+		return nil, mcp.ResourceNotFoundError(req.uri)
+	}
+	feedbackID, err := url.PathUnescape(req.parts[4])
+	if err != nil {
+		return nil, mcp.ResourceNotFoundError(req.uri)
+	}
+	return reader.PullRequestFeedbackItemResource(ctx, req.parts[0], req.parts[1], number, channel, feedbackID)
 }
 
 func (s *Server) readCIFailureResource(ctx context.Context, req resourceRequest) (map[string]any, error) {

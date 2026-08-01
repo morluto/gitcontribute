@@ -104,10 +104,10 @@ func (c *Corpus) RebuildPullRequestFeedbackProjection(ctx context.Context) (Proj
 }
 
 type normalizedFeedbackItem struct {
-	FeedbackID, ThreadExternalID, Author, Body, Path, CommitOID, HeadSHA string
-	Line, StartLine                                                      *int
-	CreatedAt, UpdatedAt                                                 time.Time
-	ResolvedKnown, Resolved, Outdated                                    bool
+	FeedbackID, FeedbackNodeID, ThreadExternalID, InReplyToID, Author, Body, Path, Side, StartSide, CommitOID, ReviewState, ResolvedBy, HeadSHA string
+	Line, StartLine                                                                                                                             *int
+	CreatedAt, UpdatedAt                                                                                                                        time.Time
+	ResolvedKnown, Resolved, Outdated                                                                                                           bool
 }
 
 type feedbackPayloadEnvelope struct {
@@ -117,17 +117,20 @@ type feedbackPayloadEnvelope struct {
 }
 
 type feedbackCommentJSON struct {
-	ID        int64     `json:"id"`
-	NodeID    string    `json:"node_id"`
-	Author    string    `json:"author"`
-	Body      string    `json:"body"`
-	Path      string    `json:"path"`
-	Line      *int      `json:"line"`
-	StartLine *int      `json:"start_line"`
-	CommitOID string    `json:"commit_oid"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Outdated  bool      `json:"outdated"`
+	ID          int64     `json:"id"`
+	NodeID      string    `json:"node_id"`
+	Author      string    `json:"author"`
+	Body        string    `json:"body"`
+	Path        string    `json:"path"`
+	Line        *int      `json:"line"`
+	StartLine   *int      `json:"start_line"`
+	Side        string    `json:"side"`
+	StartSide   string    `json:"start_side"`
+	CommitOID   string    `json:"commit_oid"`
+	InReplyToID int64     `json:"in_reply_to_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Outdated    bool      `json:"outdated"`
 }
 
 type feedbackReviewJSON struct {
@@ -141,13 +144,14 @@ type feedbackReviewJSON struct {
 }
 
 type feedbackThreadJSON struct {
-	ID        string                `json:"id"`
-	Resolved  bool                  `json:"resolved"`
-	Outdated  bool                  `json:"outdated"`
-	Path      string                `json:"path"`
-	Line      *int                  `json:"line"`
-	StartLine *int                  `json:"start_line"`
-	Comments  []feedbackCommentJSON `json:"comments"`
+	ID         string                `json:"id"`
+	Resolved   bool                  `json:"resolved"`
+	ResolvedBy string                `json:"resolved_by"`
+	Outdated   bool                  `json:"outdated"`
+	Path       string                `json:"path"`
+	Line       *int                  `json:"line"`
+	StartLine  *int                  `json:"start_line"`
+	Comments   []feedbackCommentJSON `json:"comments"`
 }
 
 func normalizeFeedbackPayload(facet, payload string) ([]normalizedFeedbackItem, bool, error) {
@@ -181,7 +185,11 @@ func normalizeFeedbackPayload(facet, payload string) ([]normalizedFeedbackItem, 
 			if id == "" {
 				id = fmt.Sprintf("item:%d", index)
 			}
-			out = append(out, normalizedFeedbackItem{FeedbackID: id, Author: value.Author, Body: value.Body, Path: value.Path, Line: value.Line, StartLine: value.StartLine, CommitOID: value.CommitOID, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt, Outdated: value.Outdated, HeadSHA: envelope.HeadSHA})
+			inReplyTo := ""
+			if value.InReplyToID != 0 {
+				inReplyTo = strconv.FormatInt(value.InReplyToID, 10)
+			}
+			out = append(out, normalizedFeedbackItem{FeedbackID: id, FeedbackNodeID: value.NodeID, InReplyToID: inReplyTo, Author: value.Author, Body: value.Body, Path: value.Path, Line: value.Line, StartLine: value.StartLine, Side: value.Side, StartSide: value.StartSide, CommitOID: value.CommitOID, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt, Outdated: value.Outdated, HeadSHA: envelope.HeadSHA})
 		}
 	case feedbackFacetReviews:
 		var values []feedbackReviewJSON
@@ -196,7 +204,7 @@ func normalizeFeedbackPayload(facet, payload string) ([]normalizedFeedbackItem, 
 			if id == "" {
 				id = fmt.Sprintf("item:%d", index)
 			}
-			out = append(out, normalizedFeedbackItem{FeedbackID: id, Author: value.Author, Body: value.Body, CommitOID: value.CommitOID, CreatedAt: value.SubmittedAt, UpdatedAt: value.SubmittedAt, HeadSHA: envelope.HeadSHA})
+			out = append(out, normalizedFeedbackItem{FeedbackID: id, FeedbackNodeID: value.NodeID, Author: value.Author, Body: value.Body, CommitOID: value.CommitOID, ReviewState: value.State, CreatedAt: value.SubmittedAt, UpdatedAt: value.SubmittedAt, HeadSHA: envelope.HeadSHA})
 		}
 	case feedbackFacetReviewThreads:
 		var values []feedbackThreadJSON
@@ -205,7 +213,7 @@ func normalizeFeedbackPayload(facet, payload string) ([]normalizedFeedbackItem, 
 		}
 		for _, thread := range values {
 			if len(thread.Comments) == 0 {
-				out = append(out, normalizedFeedbackItem{FeedbackID: "thread:" + thread.ID, ThreadExternalID: thread.ID, Path: thread.Path, Line: thread.Line, StartLine: thread.StartLine, ResolvedKnown: true, Resolved: thread.Resolved, Outdated: thread.Outdated, HeadSHA: envelope.HeadSHA})
+				out = append(out, normalizedFeedbackItem{FeedbackID: "thread:" + thread.ID, ThreadExternalID: thread.ID, Path: thread.Path, Line: thread.Line, StartLine: thread.StartLine, ResolvedKnown: true, Resolved: thread.Resolved, ResolvedBy: thread.ResolvedBy, Outdated: thread.Outdated, HeadSHA: envelope.HeadSHA})
 				continue
 			}
 			for index, comment := range thread.Comments {
@@ -227,7 +235,11 @@ func normalizeFeedbackPayload(facet, payload string) ([]normalizedFeedbackItem, 
 				if startLine == nil {
 					startLine = thread.StartLine
 				}
-				out = append(out, normalizedFeedbackItem{FeedbackID: id, ThreadExternalID: thread.ID, Author: comment.Author, Body: comment.Body, Path: path, Line: line, StartLine: startLine, CommitOID: comment.CommitOID, CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt, ResolvedKnown: true, Resolved: thread.Resolved, Outdated: thread.Outdated || comment.Outdated, HeadSHA: envelope.HeadSHA})
+				inReplyTo := ""
+				if comment.InReplyToID != 0 {
+					inReplyTo = strconv.FormatInt(comment.InReplyToID, 10)
+				}
+				out = append(out, normalizedFeedbackItem{FeedbackID: id, FeedbackNodeID: comment.NodeID, ThreadExternalID: thread.ID, InReplyToID: inReplyTo, Author: comment.Author, Body: comment.Body, Path: path, Line: line, StartLine: startLine, Side: comment.Side, StartSide: comment.StartSide, CommitOID: comment.CommitOID, CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt, ResolvedKnown: true, Resolved: thread.Resolved, ResolvedBy: thread.ResolvedBy, Outdated: thread.Outdated || comment.Outdated, HeadSHA: envelope.HeadSHA})
 			}
 		}
 	default:
@@ -250,20 +262,20 @@ func insertFeedbackProjection(ctx context.Context, tx *sql.Tx, repositoryID, thr
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO pull_request_feedback_projection
-		    (repository_id, thread_id, channel, feedback_id, thread_external_id, author, body, path, line, start_line,
-		     commit_oid, created_at, updated_at, resolved_known, resolved, outdated, head_sha, source_updated_at,
+		    (repository_id, thread_id, channel, feedback_id, feedback_node_id, thread_external_id, in_reply_to_id, author, body, path, line, start_line,
+		     side, start_side, commit_oid, review_state, created_at, updated_at, resolved_known, resolved, resolved_by, outdated, head_sha, source_updated_at,
 		     source_observation_sequence, source_observation_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(repository_id, thread_id, channel, feedback_id, author) DO UPDATE SET
-		    thread_external_id=excluded.thread_external_id, body=excluded.body, path=excluded.path,
-		    line=excluded.line, start_line=excluded.start_line, commit_oid=excluded.commit_oid,
+		    feedback_node_id=excluded.feedback_node_id, thread_external_id=excluded.thread_external_id, in_reply_to_id=excluded.in_reply_to_id, body=excluded.body, path=excluded.path,
+		    line=excluded.line, start_line=excluded.start_line, side=excluded.side, start_side=excluded.start_side, commit_oid=excluded.commit_oid, review_state=excluded.review_state,
 		    created_at=excluded.created_at, updated_at=excluded.updated_at, resolved_known=excluded.resolved_known,
-		    resolved=excluded.resolved, outdated=excluded.outdated, head_sha=excluded.head_sha,
+		    resolved=excluded.resolved, resolved_by=excluded.resolved_by, outdated=excluded.outdated, head_sha=excluded.head_sha,
 		    source_updated_at=excluded.source_updated_at, source_observation_sequence=excluded.source_observation_sequence,
 		    source_observation_id=excluded.source_observation_id
-	`, repositoryID, threadID, channel, item.FeedbackID, item.ThreadExternalID, item.Author, item.Body, item.Path,
-		line, startLine, item.CommitOID, encodeTime(item.CreatedAt), encodeTime(item.UpdatedAt), boolToInt(item.ResolvedKnown),
-		boolToInt(item.Resolved), boolToInt(item.Outdated), item.HeadSHA, source, sequence, observationID); err != nil {
+	`, repositoryID, threadID, channel, item.FeedbackID, item.FeedbackNodeID, item.ThreadExternalID, item.InReplyToID, item.Author, item.Body, item.Path,
+		line, startLine, item.Side, item.StartSide, item.CommitOID, item.ReviewState, encodeTime(item.CreatedAt), encodeTime(item.UpdatedAt), boolToInt(item.ResolvedKnown),
+		boolToInt(item.Resolved), item.ResolvedBy, boolToInt(item.Outdated), item.HeadSHA, source, sequence, observationID); err != nil {
 		return fmt.Errorf("insert feedback projection item: %w", err)
 	}
 	return nil

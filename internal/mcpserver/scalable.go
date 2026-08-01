@@ -20,7 +20,7 @@ const serverInstructions = "Use advertised GitContribute tools for durable, sour
 	"Use workflow.prepare_issue_set when exact issue numbers already define the contribution scope; it is the canonical issue-audit entrypoint and returns typed recovery for missing repository or thread coverage. " +
 	"When an operation returns a job, poll advertised job tools in batches. " +
 	"Use corpus.get_thread_facets for bounded stored facet coverage and resources/read for larger facet payloads; repository, thread, and facet gaps provide the exact ordered synchronization route. " +
-	"For repository-wide pull-request feedback use github.index_pull_request_feedback -> jobs.get -> corpus.search_pull_request_feedback; the index is resumable and missing feedback is unknown until discovery and exact facets are complete. " +
+	"For every pull-request comment written by a named reviewer across one repository, never use github.sync_portfolio or corpus.search_threads: use github.index_pull_request_feedback with state=all channels, poll jobs.get, then use corpus.search_pull_request_feedback with the exact feedback_author login (text is body search only); missing feedback is unknown until discovery and exact facets are complete. " +
 	"To inspect a returned resource, ask the host to perform MCP resources/read with this server and the exact URI; in Codex, call read_mcp_resource. Treat resource URIs as opaque identifiers and never shorten, pluralize, or reconstruct them. " +
 	"Missing or truncated coverage is unknown, not negative evidence; use each item's ordered typed recovery calls (the recovery plan's ordered typed calls), preserve exact_thread versus repository targets, poll the returned job, and reread coverage or synchronized headers before drawing conclusions. " +
 	"Canonical source-audit route: corpus.get_coverage -> corpus.ensure_coverage or the returned exact sync/hydration action -> jobs.get -> corpus.get_threads or corpus.get_thread_facets with the returned snapshot token -> corpus.find_clusters/find_neighbors/find_precedents -> explicit github.sync_threads -> jobs.get -> validation.attach_receipt -> workflow.prepare_contribution. Read workflow.get_source_audit_contract for machine-readable transitions. Corpus reads are offline, synchronization is bounded and explicit, missing coverage is unknown, and every returned resource URI must be consumed through MCP resources/read. " +
@@ -273,7 +273,7 @@ func (s *Server) registerScalable() {
 		}),
 		output: outputSchema[mcpcontract.FixPatternReport]("Bounded offline fix-pattern analysis; never persisted."), handler: s.previewRepositoryFixPatterns,
 	})
-	addCatalogTool(s, catalogTool[mcpcontract.SyncPortfolioInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPortfolio, title: "Synchronize a pull-request portfolio", description: "Use selection=authored with state, updated_after, limit, discovery_max_requests, and status_max_pages for bounded identity discovery, or selection=explicit with 1-100 exact pull_requests. Refreshes PR details, merge state, checks, review state, unresolved threads, merge queue, files, and closing issues in one durable job; incomplete discovery is surfaced with a typed retry action.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncPortfolioInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.SyncPortfolioInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPortfolio, title: "Synchronize a pull-request portfolio", description: "selection is required: use authored only for the authenticated user's PR portfolio, or explicit with 1-100 exact pull_requests. This tool is not repository-wide comment discovery; for all feedback by a reviewer use github.index_pull_request_feedback, jobs.get, and corpus.search_pull_request_feedback with feedback_author. Refreshes PR details, merge state, checks, review state, unresolved threads, merge queue, files, and closing issues in one durable job; incomplete discovery is surfaced with a typed retry action.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncPortfolioInput](func(sc *schemaBuilder) {
 		setEnum(sc, "selection", "authored", "explicit")
 		setArrayBounds(sc, "pull_requests", 1, 100)
 		constrainPullRequestRefs(sc, "pull_requests")
@@ -306,7 +306,7 @@ func (s *Server) registerScalable() {
 		setRange(sc, "max_items_per_channel", 1, 1000)
 		setRange(sc, "max_requests", 1, 1000)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded pull-request feedback job."), handler: s.syncPullRequestFeedback})
-	addCatalogTool(s, catalogTool[mcpcontract.IndexPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolIndexPullRequestFeedback, title: "Index repository pull-request feedback", description: "Discover every reachable pull request in one repository with state=all, then synchronize issue comments, submitted reviews, inline comments, and review-thread topology into the local corpus. Work is resumable across provider pages and explicit request/item bounds; poll jobs.get, then use corpus.search_pull_request_feedback. Missing or partial coverage is never absence.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackIndexer], input: inputSchema[mcpcontract.IndexPullRequestFeedbackInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.IndexPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolIndexPullRequestFeedback, title: "Find every repository feedback comment by exact author", description: "Discover every reachable pull request in one repository with state=all, then synchronize issue comments, submitted reviews, inline comments, and review-thread topology into the local corpus. Use this bounded resumable route to find every comment by an exact reviewer login; poll jobs.get, then use corpus.search_pull_request_feedback with feedback_author. Missing or partial coverage is never absence.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackIndexer], input: inputSchema[mcpcontract.IndexPullRequestFeedbackInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "channels", 1, 4)
 		setArrayEnum(sc, "channels", "issue_comments", "submitted_reviews", "inline_comments", "review_threads")
 		property(sc, "channels").UniqueItems = true
@@ -333,7 +333,7 @@ func (s *Server) registerScalable() {
 		setEnum(sc, "view", "compact", "full")
 		setDefault(sc, "view", "compact")
 	}), output: outputSchema[mcpcontract.ListPullRequestPortfolioOutput]("Offline pull-request portfolio with explainable attention states."), handler: s.listPullRequestPortfolio})
-	addCatalogTool(s, catalogTool[mcpcontract.SearchPullRequestFeedbackInput, mcpcontract.SearchPullRequestFeedbackOutput]{name: mcpcontract.ToolSearchPullRequestFeedback, title: "Search indexed pull-request feedback", description: "Search the offline repository feedback projection by feedback author, pull-request author, PR state, merge state, resolution, channel, text, dates, and deterministic sort. Empty results with incomplete discovery or facets return partial/unknown coverage and typed recovery; this tool never contacts GitHub. Use after github.index_pull_request_feedback and jobs.get.", annotations: readOnly, supportedBy: supports[PullRequestFeedbackSearcher], input: inputSchema[mcpcontract.SearchPullRequestFeedbackInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.SearchPullRequestFeedbackInput, mcpcontract.SearchPullRequestFeedbackOutput]{name: mcpcontract.ToolSearchPullRequestFeedback, title: "Search exact pull-request comments by commenter login", description: "Search the offline repository feedback projection by exact feedback_author login, pull-request author, PR state, merge state, resolution, channel, text, dates, and deterministic sort. Use feedback_author for author audits; text searches bodies only. Matches preserve exact comment and thread identities, anchors, reply links, review state, and resolution state. Empty results with incomplete discovery or facets return partial/unknown coverage and typed recovery; this tool never contacts GitHub. Use after github.index_pull_request_feedback and jobs.get.", annotations: readOnly, supportedBy: supports[PullRequestFeedbackSearcher], input: inputSchema[mcpcontract.SearchPullRequestFeedbackInput](func(sc *schemaBuilder) {
 		setEnum(sc, "state", "open", "closed", "all")
 		setEnum(sc, "merged", "true", "false", "unknown", "any")
 		setEnum(sc, "thread_state", "resolved", "unresolved", "all")
@@ -622,9 +622,6 @@ func (s *Server) previewRepositoryFixPatterns(ctx context.Context, _ *mcp.CallTo
 	return nil, out, err
 }
 func (s *Server) syncPortfolio(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SyncPortfolioInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
-	if in.Selection == "" {
-		in.Selection = "authored"
-	}
 	if in.Selection == "authored" && in.State == "" {
 		in.State = "open"
 	}

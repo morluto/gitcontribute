@@ -106,16 +106,22 @@ explicit `raw_query` field; there is no deprecated alias.
 - Pull-request headers do not contain merge outcomes. Until `pr_details` is
   hydrated, a closed PR's `merged` value is omitted and outcome-sensitive
   offline reads report it as unknown rather than closed-unmerged.
-- `github.index_pull_request_feedback` is the repository-scoped feedback path.
+- `github.index_pull_request_feedback` is the repository-scoped feedback path
+  for audits such as “find every comment written by this reviewer.” Do not use
+  `github.sync_portfolio` (which is user-scoped when explicitly run in
+  `authored` mode) or full-text `corpus.search_threads` for that question.
   It walks every reachable PR with `state=all` under explicit page, request,
   and item bounds, persists its next discovery page, then reuses the exact PR
   feedback adapter for issue comments, submitted reviews, inline comments, and
   review-thread topology. Poll the returned job and use
-  `corpus.search_pull_request_feedback` for offline author/state/merge/
+  `corpus.search_pull_request_feedback` with the exact `feedback_author` login
+  for offline author/state/merge/
   resolution/text/date filtering. An empty result with incomplete discovery or
   facets is `partial`/`unknown`, not absence; follow its typed recovery plan.
-  Matching rows include exact PR, thread, comment, source-observation, and
-  `gitcontribute://pull-request-feedback/...` references. Pagination uses an
+  Matching rows include exact PR, thread, comment, author, reply, anchor,
+  review-state, resolution, source-observation, and readable child
+  `gitcontribute://pull-request-feedback/{owner}/{repo}/{number}/{channel}/{feedback_id}`
+  references. Pagination uses an
   opaque cursor scoped to the complete query; pass a durable snapshot token
   when the caller needs the pages pinned to one corpus revision.
 

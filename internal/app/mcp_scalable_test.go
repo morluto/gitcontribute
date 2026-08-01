@@ -698,6 +698,9 @@ func TestScalableBatchInputsRejectDuplicatesInsteadOfDroppingOutcomes(t *testing
 func TestPullRequestWorkflowsRejectMalformedReferencesBeforeSubmission(t *testing.T) {
 	t.Parallel()
 	reader := &MCPReader{newSearchTestService(t)}
+	if _, err := reader.SyncPortfolio(context.Background(), mcpcontract.SyncPortfolioInput{}); err == nil || !strings.Contains(err.Error(), "selection is required") {
+		t.Fatalf("missing portfolio selection error = %v", err)
+	}
 	for _, ref := range []mcpcontract.ThreadRef{
 		{Owner: " ", Repo: "rocket", Number: 1},
 		{Owner: "acme", Repo: " ", Number: 1},

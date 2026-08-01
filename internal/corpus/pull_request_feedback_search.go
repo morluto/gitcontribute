@@ -127,8 +127,8 @@ func (c *Corpus) SearchPullRequestFeedback(ctx context.Context, filter FeedbackS
 		direction = "DESC"
 	}
 	statement := `SELECT p.id, p.repository_id, p.thread_id, t.number, t.author, t.state, t.merged, t.merged_known,
-		p.channel, p.feedback_id, p.thread_external_id, p.author, p.body, p.path, p.line, p.start_line, p.commit_oid,
-		p.created_at, p.updated_at, p.resolved_known, p.resolved, p.outdated, p.head_sha, p.source_updated_at,
+		p.channel, p.feedback_id, p.feedback_node_id, p.thread_external_id, p.in_reply_to_id, p.author, p.body, p.path, p.line, p.start_line, p.side, p.start_side, p.commit_oid, p.review_state,
+		p.created_at, p.updated_at, p.resolved_known, p.resolved, p.resolved_by, p.outdated, p.head_sha, p.source_updated_at,
 		p.source_observation_sequence, p.source_observation_id` + from + where + ` ORDER BY ` + orderExpr + ` ` + direction + `, p.id ` + direction + ` LIMIT ? OFFSET ?`
 	queryArgs := append([]any(nil), args...)
 	queryArgs = append(queryArgs, filter.Limit+1, offset)
@@ -187,6 +187,34 @@ func (c *Corpus) SearchPullRequestFeedback(ctx context.Context, filter FeedbackS
 		return FeedbackSearchPage{}, fmt.Errorf("commit feedback search: %w", err)
 	}
 	return page, nil
+}
+
+// GetPullRequestFeedbackItem returns one exact normalized feedback record.
+// It is an offline read over the same projection used by search; callers do
+// not need to parse a raw facet payload to follow a search match.
+func (c *Corpus) GetPullRequestFeedbackItem(ctx context.Context, repositoryID int64, number int, channel, feedbackID string) (*PullRequestFeedbackProjection, error) {
+	if err := c.RequireFreshProjection(ctx, ProjectionNamePullRequestFeedbackFTS, ProjectionVersionPullRequestFeedbackFTS); err != nil {
+		return nil, err
+	}
+	rows, err := c.db.QueryContext(ctx, `SELECT p.id, p.repository_id, p.thread_id, t.number, t.author, t.state, t.merged, t.merged_known,
+		p.channel, p.feedback_id, p.feedback_node_id, p.thread_external_id, p.in_reply_to_id, p.author, p.body, p.path, p.line, p.start_line, p.side, p.start_side, p.commit_oid, p.review_state,
+		p.created_at, p.updated_at, p.resolved_known, p.resolved, p.resolved_by, p.outdated, p.head_sha, p.source_updated_at,
+		p.source_observation_sequence, p.source_observation_id
+		FROM pull_request_feedback_projection p JOIN threads t ON t.id = p.thread_id
+		WHERE p.repository_id = ? AND t.number = ? AND p.channel = ? AND p.feedback_id = ?
+		ORDER BY p.id LIMIT 1`, repositoryID, number, channel, feedbackID)
+	if err != nil {
+		return nil, fmt.Errorf("get pull-request feedback item: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	items, err := scanFeedbackProjectionRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return &items[0], nil
 }
 
 func validFeedbackChannel(value string) bool {
@@ -281,7 +309,7 @@ func scanFeedbackProjectionRows(rows *sql.Rows) ([]PullRequestFeedbackProjection
 		var prMerged, prMergedKnown int
 		var line, startLine sql.NullInt64
 		var created, updated, resolvedKnown, resolved, outdated, source, sequence int64
-		if err := rows.Scan(&item.ID, &item.RepositoryID, &item.ThreadID, &number, &prAuthor, &state, &prMerged, &prMergedKnown, &item.Channel, &item.FeedbackID, &item.ThreadExternalID, &item.Author, &item.Body, &item.Path, &line, &startLine, &item.CommitOID, &created, &updated, &resolvedKnown, &resolved, &outdated, &item.HeadSHA, &source, &sequence, &item.SourceObservationID); err != nil {
+		if err := rows.Scan(&item.ID, &item.RepositoryID, &item.ThreadID, &number, &prAuthor, &state, &prMerged, &prMergedKnown, &item.Channel, &item.FeedbackID, &item.FeedbackNodeID, &item.ThreadExternalID, &item.InReplyToID, &item.Author, &item.Body, &item.Path, &line, &startLine, &item.Side, &item.StartSide, &item.CommitOID, &item.ReviewState, &created, &updated, &resolvedKnown, &resolved, &item.ResolvedBy, &outdated, &item.HeadSHA, &source, &sequence, &item.SourceObservationID); err != nil {
 			return nil, fmt.Errorf("scan feedback search row: %w", err)
 		}
 		item.PullRequestNumber, item.PullRequestAuthor, item.PullRequestState = number, prAuthor, state

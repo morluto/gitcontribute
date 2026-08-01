@@ -13,7 +13,7 @@ import (
 // by the active credential and refreshes health for the resulting stored set.
 func (r *MCPReader) SyncPortfolio(ctx context.Context, in mcpcontract.SyncPortfolioInput) (mcpcontract.JobReference, error) {
 	if in.Selection == "" {
-		in.Selection = "authored"
+		return mcpcontract.JobReference{}, errors.New("selection is required: choose authored or explicit")
 	}
 	if in.Selection != "authored" && in.Selection != "explicit" {
 		return mcpcontract.JobReference{}, errors.New("selection must be authored or explicit")

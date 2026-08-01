@@ -142,8 +142,9 @@ Repository-wide feedback indexing is a separate bounded workflow:
 ```text
 github.index_pull_request_feedback
   -> jobs.get
-  -> corpus.search_pull_request_feedback
+  -> corpus.search_pull_request_feedback(feedback_author=exact_login)
   -> gitcontribute://pull-request-feedback/{owner}/{repo}/{number}
+  -> gitcontribute://pull-request-feedback/{owner}/{repo}/{number}/{channel}/{feedback_id}
 ```
 
 The index job enumerates provider pull-request pages with `state=all` and

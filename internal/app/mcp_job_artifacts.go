@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/morluto/gitcontribute/internal/codeindex"
@@ -227,14 +228,26 @@ func portfolioJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactRe
 	var recovery *mcpcontract.RecoveryPlan
 	if result.Status != "complete" || result.SearchIncomplete || result.RequestCapped || result.DiscoveryStatus != "complete" {
 		next := request
-		if next.Selection == "" {
+		// Older authored jobs predate the required discriminator. Infer that
+		// legacy shape only when the stored result proves it was an authored
+		// discovery. When that proof is absent, recover the exact references
+		// already present in the result rather than selecting the current user.
+		if next.Selection == "" && result.Login != "" {
 			next.Selection = "authored"
 		}
-		if next.Selection == "authored" {
+		if next.Selection == "" {
+			next.PullRequests = portfolioResultRefs(result.PullRequests)
+			if len(next.PullRequests) > 0 {
+				next.Selection = "explicit"
+			}
+		}
+		if next.Selection != "" && next.Selection == "authored" {
 			next.DiscoveryMaxRequests = min(1000, max(next.DiscoveryMaxRequests*2, max(next.DiscoveryMaxRequests+1, 2)))
 			next.Limit = min(100, max(next.Limit*2, max(next.Limit+1, 20)))
 		}
-		recovery = recoveryPlan("portfolio_discovery_incomplete", "Portfolio discovery was incomplete or bounded. Repeat synchronization with the returned larger discovery bound, then reread the portfolio.", mcpcontract.RecoveryAction(next))
+		if next.Selection != "" {
+			recovery = recoveryPlan("portfolio_discovery_incomplete", "Portfolio discovery was incomplete or bounded. Repeat synchronization with the returned larger discovery bound, then reread the portfolio.", mcpcontract.RecoveryAction(next))
+		}
 	}
 	follow := &mcpcontract.JobFollowUp{
 		Action: mcpcontract.FollowUpAction{Type: "list_pull_request_portfolio", ListPortfolio: portfolioReadFollowUpArguments(request, result.Login, result.PullRequests)},
@@ -244,6 +257,27 @@ func portfolioJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactRe
 		Kind: "pull_request_batch", Count: &value, References: append([]string(nil), result.PullRequests...), Failures: failures,
 		Status: result.Status, DiscoveryStatus: result.DiscoveryStatus, SearchIncomplete: result.SearchIncomplete, RequestCapped: result.RequestCapped, Recovery: recovery,
 	}}, follow
+}
+
+func portfolioResultRefs(values []string) []mcpcontract.ThreadRef {
+	refs := make([]mcpcontract.ThreadRef, 0, len(values))
+	for _, value := range values {
+		marker := strings.LastIndex(value, "#")
+		if marker <= 0 || marker == len(value)-1 {
+			continue
+		}
+		number, err := strconv.Atoi(value[marker+1:])
+		if err != nil || number <= 0 {
+			continue
+		}
+		fullName := value[:marker]
+		slash := strings.IndexByte(fullName, '/')
+		if slash <= 0 || slash == len(fullName)-1 {
+			continue
+		}
+		refs = append(refs, mcpcontract.ThreadRef{Owner: fullName[:slash], Repo: fullName[slash+1:], Kind: "pull_request", Number: number})
+	}
+	return refs
 }
 
 func pullRequestWorkflowJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {

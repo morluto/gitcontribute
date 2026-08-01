@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
@@ -59,6 +60,77 @@ func (r *MCPReader) PullRequestFeedbackResource(ctx context.Context, owner, repo
 	}
 	if len(channels) == 0 {
 		return nil, failure.NotFound(errors.New("pull-request feedback is not stored"))
+	}
+	return out, nil
+}
+
+// PullRequestFeedbackItemResource returns the exact normalized record named by
+// a search match. The root feedback resource remains the canonical raw facet
+// view; this child resource is the compact, identity-preserving follow-up.
+func (r *MCPReader) PullRequestFeedbackItemResource(ctx context.Context, owner, repo string, number int, channel, feedbackID string) (map[string]any, error) {
+	c, err := r.openReadOnlyCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	storedRepo, err := c.GetRepository(ctx, owner, repo)
+	if err != nil || storedRepo == nil {
+		if err == nil {
+			err = failure.NotFound(errors.New("repository is not stored"))
+		}
+		return nil, err
+	}
+	item, err := c.GetPullRequestFeedbackItem(ctx, storedRepo.ID, number, channel, feedbackID)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil {
+		return nil, failure.NotFound(fmt.Errorf("pull-request feedback item %s is not stored", feedbackID))
+	}
+	merged := any(nil)
+	if item.PullRequestMergedKnown {
+		merged = item.PullRequestMerged
+	}
+	resolved := any(nil)
+	resolutionState := "unknown"
+	if item.ResolvedKnown {
+		resolved = item.Resolved
+		if item.Resolved {
+			resolutionState = "resolved"
+		} else {
+			resolutionState = "unresolved"
+		}
+	}
+	facet := map[string]string{
+		"issue_comments":    facetPRFeedbackIssueComments,
+		"submitted_reviews": facetPRFeedbackReviews,
+		"inline_comments":   facetPRFeedbackInlineComments,
+		"review_threads":    facetPRFeedbackReviewThreads,
+	}[channel]
+	if facet == "" {
+		return nil, failure.NotFound(fmt.Errorf("unknown pull-request feedback channel %q", channel))
+	}
+	coverage, err := c.GetCoverage(ctx, storedRepo.ID, &item.ThreadID, facet)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]any{
+		"schema_version": "gitcontribute.pull-request-feedback-item.v1",
+		"owner":          owner, "repo": repo, "number": number, "channel": channel,
+		"feedback_id": item.FeedbackID, "feedback_node_id": item.FeedbackNodeID,
+		"thread_id": item.ThreadExternalID, "in_reply_to_id": item.InReplyToID,
+		"feedback_author": item.Author, "review_state": item.ReviewState,
+		"body": item.Body, "path": item.Path, "line": item.Line, "start_line": item.StartLine,
+		"side": item.Side, "start_side": item.StartSide, "commit_oid": item.CommitOID,
+		"outdated": item.Outdated, "resolved": resolved, "resolution_state": resolutionState, "resolved_by": item.ResolvedBy,
+		"created_at": formatTime(item.CreatedAt), "updated_at": formatTime(item.UpdatedAt),
+		"head_sha": item.HeadSHA, "source_observation_id": item.SourceObservationID,
+		"pull_request": map[string]any{
+			"owner": owner, "repo": repo, "number": item.PullRequestNumber,
+			"author": item.PullRequestAuthor, "state": item.PullRequestState, "merged": merged,
+		},
+	}
+	if coverage != nil {
+		out["effective_coverage"] = map[string]any{"complete": coverage.Complete, "source_updated_at": formatTime(coverage.SourceUpdatedAt)}
 	}
 	return out, nil
 }

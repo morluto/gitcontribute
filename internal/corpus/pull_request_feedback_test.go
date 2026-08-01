@@ -27,10 +27,14 @@ func TestPullRequestFeedbackProjectionRebuildAndSearch(t *testing.T) {
 	if err := c.ApplyFacetObservationSet(ctx, repo.ID, &pr.ID, feedbackFacetIssueComments, now, []FacetObservationInput{{SourceUpdatedAt: now, Payload: completePayload(`[{"id":11,"author":"alice","body":"please fix latency","created_at":"2026-07-31T10:01:00Z","updated_at":"2026-07-31T10:02:00Z"}]`)}}, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	for _, facet := range []string{feedbackFacetReviews, feedbackFacetInlineComments, feedbackFacetReviewThreads} {
-		if err := c.ApplyFacetObservationSet(ctx, repo.ID, &pr.ID, facet, now, []FacetObservationInput{{SourceUpdatedAt: now, Payload: completePayload(`[]`)}}, true, 0); err != nil {
-			t.Fatal(err)
-		}
+	if err := c.ApplyFacetObservationSet(ctx, repo.ID, &pr.ID, feedbackFacetReviews, now, []FacetObservationInput{{SourceUpdatedAt: now, Payload: completePayload(`[{"id":12,"node_id":"PRR_node","author":"reviewer","body":"review body","state":"CHANGES_REQUESTED","submitted_at":"2026-07-31T10:03:00Z"}]`)}}, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ApplyFacetObservationSet(ctx, repo.ID, &pr.ID, feedbackFacetInlineComments, now, []FacetObservationInput{{SourceUpdatedAt: now, Payload: completePayload(`[{"id":13,"node_id":"PRC_node","in_reply_to_id":11,"author":"reviewer","body":"inline body","path":"main.go","line":9,"start_line":7,"side":"RIGHT","start_side":"RIGHT","created_at":"2026-07-31T10:04:00Z"}]`)}}, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ApplyFacetObservationSet(ctx, repo.ID, &pr.ID, feedbackFacetReviewThreads, now, []FacetObservationInput{{SourceUpdatedAt: now, Payload: completePayload(`[{"id":"thread-7","resolved":true,"resolved_by":"maintainer","path":"main.go","line":12,"comments":[{"id":14,"node_id":"PRT_node","in_reply_to_id":13,"author":"reviewer","body":"thread body","created_at":"2026-07-31T10:05:00Z"}]}]`)}}, true, 0); err != nil {
+		t.Fatal(err)
 	}
 	if err := c.UpsertFeedbackDiscovery(ctx, FeedbackDiscovery{RepositoryID: repo.ID, State: "all", NextPage: 1, Complete: true, DiscoveredPullRequests: 1, Channels: feedbackChannels, ThreadState: "all", SourceUpdatedAt: now}); err != nil {
 		t.Fatal(err)
@@ -44,6 +48,26 @@ func TestPullRequestFeedbackProjectionRebuildAndSearch(t *testing.T) {
 	}
 	if len(page.Items) != 1 || page.Items[0].FeedbackID != "11" || page.Items[0].PullRequestNumber != 7 || page.Items[0].PullRequestMerged != true || page.Coverage.Status != "complete" {
 		t.Fatalf("feedback page = %+v", page)
+	}
+	exact, err := c.SearchPullRequestFeedback(ctx, FeedbackSearchFilter{RepositoryID: repo.ID, FeedbackAuthor: "reviewer", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exact.Items) != 3 {
+		t.Fatalf("exact author feedback = %+v", exact.Items)
+	}
+	byChannel := make(map[string]PullRequestFeedbackProjection, len(exact.Items))
+	for _, item := range exact.Items {
+		byChannel[item.Channel] = item
+	}
+	if byChannel["submitted_reviews"].FeedbackNodeID != "PRR_node" || byChannel["submitted_reviews"].ReviewState != "CHANGES_REQUESTED" {
+		t.Fatalf("review identity/state = %+v", byChannel["submitted_reviews"])
+	}
+	if byChannel["inline_comments"].FeedbackNodeID != "PRC_node" || byChannel["inline_comments"].InReplyToID != "11" || byChannel["inline_comments"].Side != "RIGHT" || byChannel["inline_comments"].StartLine == nil || *byChannel["inline_comments"].StartLine != 7 {
+		t.Fatalf("inline identity/anchor = %+v", byChannel["inline_comments"])
+	}
+	if byChannel["review_threads"].ThreadExternalID != "thread-7" || byChannel["review_threads"].ResolvedBy != "maintainer" || byChannel["review_threads"].InReplyToID != "13" {
+		t.Fatalf("thread identity/state = %+v", byChannel["review_threads"])
 	}
 	if err := c.ApplyFacetObservationSet(ctx, repo.ID, &pr.ID, feedbackFacetIssueComments, now.Add(time.Hour), []FacetObservationInput{{SourceUpdatedAt: now.Add(time.Hour), Payload: completePayload(`[{"id":12,"author":"alice","body":"new feedback"}]`)}}, true, 0); err != nil {
 		t.Fatal(err)

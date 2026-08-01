@@ -56,16 +56,23 @@ type PullRequestFeedbackMatch struct {
 	Merged               *bool         `json:"merged,omitempty"`
 	Channel              string        `json:"channel"`
 	FeedbackID           string        `json:"feedback_id"`
+	FeedbackNodeID       string        `json:"feedback_node_id,omitempty"`
 	ThreadID             string        `json:"thread_id,omitempty"`
 	ThreadReference      string        `json:"thread_reference,omitempty"`
 	CommentReference     string        `json:"comment_reference,omitempty"`
+	InReplyToID          string        `json:"in_reply_to_id,omitempty"`
 	FeedbackAuthor       string        `json:"feedback_author,omitempty"`
+	ReviewState          string        `json:"review_state,omitempty"`
 	Body                 string        `json:"body,omitempty"`
 	Path                 string        `json:"path,omitempty"`
 	Line                 *int          `json:"line,omitempty"`
 	StartLine            *int          `json:"start_line,omitempty"`
+	Side                 string        `json:"side,omitempty"`
+	StartSide            string        `json:"start_side,omitempty"`
 	Outdated             bool          `json:"outdated"`
 	Resolved             *bool         `json:"resolved,omitempty"`
+	ResolutionState      string        `json:"resolution_state" jsonschema:"Resolution state: resolved, unresolved, or unknown"`
+	ResolvedBy           string        `json:"resolved_by,omitempty"`
 	CreatedAt            string        `json:"created_at,omitempty"`
 	UpdatedAt            string        `json:"updated_at,omitempty"`
 	HeadSHA              string        `json:"head_sha,omitempty"`

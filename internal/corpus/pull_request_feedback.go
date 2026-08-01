@@ -73,17 +73,23 @@ type PullRequestFeedbackProjection struct {
 	PullRequestMerged         bool
 	Channel                   string
 	FeedbackID                string
+	FeedbackNodeID            string
 	ThreadExternalID          string
+	InReplyToID               string
 	Author                    string
 	Body                      string
 	Path                      string
 	Line                      *int
 	StartLine                 *int
+	Side                      string
+	StartSide                 string
 	CommitOID                 string
+	ReviewState               string
 	CreatedAt                 time.Time
 	UpdatedAt                 time.Time
 	ResolvedKnown             bool
 	Resolved                  bool
+	ResolvedBy                string
 	Outdated                  bool
 	HeadSHA                   string
 	SourceUpdatedAt           time.Time

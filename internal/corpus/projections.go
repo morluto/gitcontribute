@@ -28,7 +28,7 @@ const (
 	ProjectionVersionRepositoriesFTS        = "repositories-fts-v1"
 	ProjectionVersionFacetObservationsFTS   = "facet-observations-fts-v1"
 	ProjectionVersionCodeDocumentsFTS       = "code-documents-fts-v1"
-	ProjectionVersionPullRequestFeedbackFTS = "pull-request-feedback-fts-v1"
+	ProjectionVersionPullRequestFeedbackFTS = "pull-request-feedback-fts-v2"
 )
 
 // ProjectionStatus describes the durability state of a derived projection.

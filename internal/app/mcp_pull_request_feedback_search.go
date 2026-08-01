@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"time"
+	"unicode/utf8"
 
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -82,9 +83,15 @@ func (r *MCPReader) SearchPullRequestFeedback(ctx context.Context, in mcpcontrac
 			merged = &value
 		}
 		resolved := (*bool)(nil)
+		resolutionState := "unknown"
 		if item.ResolvedKnown {
 			value := item.Resolved
 			resolved = &value
+			if value {
+				resolutionState = "resolved"
+			} else {
+				resolutionState = "unresolved"
+			}
 		}
 		pr := mcpcontract.ThreadRef{Owner: ref.Owner, Repo: ref.Repo, Kind: "pull_request", Number: item.PullRequestNumber}
 		prReference := fmt.Sprintf("%s/%s#%d", ref.Owner, ref.Repo, item.PullRequestNumber)
@@ -92,11 +99,11 @@ func (r *MCPReader) SearchPullRequestFeedback(ctx context.Context, in mcpcontrac
 		out.Matches = append(out.Matches, mcpcontract.PullRequestFeedbackMatch{
 			Repository: in.Repository, PullRequest: pr, PullRequestReference: prReference,
 			PullRequestAuthor: item.PullRequestAuthor, PullRequestState: item.PullRequestState, Merged: merged,
-			Channel: item.Channel, FeedbackID: item.FeedbackID, ThreadID: item.ThreadExternalID,
+			Channel: item.Channel, FeedbackID: item.FeedbackID, FeedbackNodeID: item.FeedbackNodeID, ThreadID: item.ThreadExternalID,
 			ThreadReference:  threadReference,
-			CommentReference: fmt.Sprintf("%s/%s#%d/%s/%s", ref.Owner, ref.Repo, item.PullRequestNumber, url.PathEscape(item.Channel), url.PathEscape(item.FeedbackID)),
-			FeedbackAuthor:   item.Author, Body: compactFeedbackBody(item.Body), Path: item.Path, Line: item.Line,
-			StartLine: item.StartLine, Outdated: item.Outdated, Resolved: resolved, CreatedAt: formatTime(item.CreatedAt),
+			CommentReference: fmt.Sprintf("gitcontribute://pull-request-feedback/%s/%s/%d/%s/%s", ref.Owner, ref.Repo, item.PullRequestNumber, url.PathEscape(item.Channel), url.PathEscape(item.FeedbackID)),
+			InReplyToID:      item.InReplyToID, FeedbackAuthor: item.Author, ReviewState: item.ReviewState, Body: compactFeedbackBody(item.Body), Path: item.Path, Line: item.Line,
+			StartLine: item.StartLine, Side: item.Side, StartSide: item.StartSide, Outdated: item.Outdated, Resolved: resolved, ResolutionState: resolutionState, ResolvedBy: item.ResolvedBy, CreatedAt: formatTime(item.CreatedAt),
 			UpdatedAt: formatTime(item.UpdatedAt), HeadSHA: item.HeadSHA, SourceObservationID: item.SourceObservationID,
 		})
 	}
@@ -135,7 +142,11 @@ func compactFeedbackBody(value string) string {
 	if len(value) <= max {
 		return value
 	}
-	return value[:max] + " …"
+	end := max
+	for end > 0 && !utf8.ValidString(value[:end]) {
+		end--
+	}
+	return value[:end] + " …"
 }
 
 func feedbackSearchRecovery(ctx context.Context, c *corpus.Corpus, repositoryID int64, ref domain.RepoRef, in mcpcontract.SearchPullRequestFeedbackInput, page corpus.FeedbackSearchPage) *mcpcontract.RecoveryPlan {

@@ -123,6 +123,12 @@ func (*fakeOptionalCapabilities) SyncPortfolio(context.Context, mcpcontract.Sync
 func (*fakeOptionalCapabilities) SyncPullRequestFeedback(context.Context, mcpcontract.SyncPullRequestFeedbackInput) (mcpcontract.JobReference, error) {
 	return mcpcontract.JobReference{ID: "job-feedback", Kind: "sync_pull_request_feedback", Status: "queued"}, nil
 }
+func (*fakeOptionalCapabilities) IndexPullRequestFeedback(context.Context, mcpcontract.IndexPullRequestFeedbackInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-feedback-index", Kind: "index_pull_request_feedback", Status: "queued"}, nil
+}
+func (*fakeOptionalCapabilities) SearchPullRequestFeedback(context.Context, mcpcontract.SearchPullRequestFeedbackInput) (mcpcontract.SearchPullRequestFeedbackOutput, error) {
+	return mcpcontract.SearchPullRequestFeedbackOutput{Status: "complete"}, nil
+}
 func (*fakeOptionalCapabilities) SyncCIFailures(context.Context, mcpcontract.SyncCIFailuresInput) (mcpcontract.JobReference, error) {
 	return mcpcontract.JobReference{ID: "job-ci", Kind: "sync_ci_failures", Status: "queued"}, nil
 }
@@ -151,6 +157,8 @@ type completeTestReader struct {
 	GitHubOperator
 	CoverageOperator
 	PullRequestFeedbackOperator
+	PullRequestFeedbackIndexer
+	PullRequestFeedbackSearcher
 	CIFailureOperator
 	FixPatternOperator
 	FixPatternReader
@@ -173,7 +181,7 @@ func completeFakeReader(base *fakeReader) mcpcontract.Reader {
 	optional := &fakeOptionalCapabilities{base: base}
 	return completeTestReader{
 		Reader: base, NeighborReader: optional, ScalableReader: optional, ThreadFacetReader: optional, threadFacetResourceReader: base, IssueSetReader: optional,
-		PortfolioReader: optional, GitHubOperator: optional, PullRequestFeedbackOperator: optional, CIFailureOperator: optional,
+		PortfolioReader: optional, GitHubOperator: optional, PullRequestFeedbackOperator: optional, PullRequestFeedbackIndexer: optional, PullRequestFeedbackSearcher: optional, CIFailureOperator: optional,
 		CoverageOperator:   optional,
 		FixPatternOperator: optional, FixPatternReader: base, CodeIndexer: optional,
 		MergeConflictReader: optional, ResearchReader: optional,
