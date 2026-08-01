@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.19.0](https://github.com/morluto/gitcontribute/compare/v0.18.0...v0.19.0) (2026-08-01)
+
+
+### Features
+
+* **corpus:** add pull-request feedback projections ([d1a5c10](https://github.com/morluto/gitcontribute/commit/d1a5c109f26e2c812ceab9ac426d31359219cadf))
+* **mcp:** add contribution preflight ([96dba80](https://github.com/morluto/gitcontribute/commit/96dba80ce1494ad9cc8e9ab4a60727b6f7544ff5))
+* **mcp:** add contribution preflight for authored pull requests ([2eb11ee](https://github.com/morluto/gitcontribute/commit/2eb11ee9e5a97333151b54c24bf215d1744a7d0e))
+* **mcp:** expose pull-request feedback indexing and search ([3fa4235](https://github.com/morluto/gitcontribute/commit/3fa4235b38c479340218793ed62a5e384396e98b))
+* **mcp:** index and search repository pull-request feedback ([02616c8](https://github.com/morluto/gitcontribute/commit/02616c8700cd85d01a67063075dc2c39a71c56ca))
+
+
+### Bug Fixes
+
+* **corpus:** expose precedent history recovery ([d3a8e9d](https://github.com/morluto/gitcontribute/commit/d3a8e9dcb0996daa39d715eb56c14e800cc6806b))
+* **corpus:** preserve pull-request feedback coverage ([925874b](https://github.com/morluto/gitcontribute/commit/925874b7d6f3a115c7cc1f1c7047ae7ecbc1a4a1))
+* **mcp:** add typed recovery for incomplete reads ([3823689](https://github.com/morluto/gitcontribute/commit/3823689443949f6857e59ba74580df699f761149))
+* **mcp:** provide typed recovery for incomplete reads ([b6e6b78](https://github.com/morluto/gitcontribute/commit/b6e6b78e77a946c2a367708698c92cb8f6dbfa45))
+* **tests:** compare canonical worktree paths ([e98ccbd](https://github.com/morluto/gitcontribute/commit/e98ccbd40c36518a0bea4583ce0a767bf5175a80))
+* **upgrade:** retain npx executable for activation ([39218f7](https://github.com/morluto/gitcontribute/commit/39218f79b0e1bae6ff63ba62acd9894e52a1db99))
+
 ## [0.18.0](https://github.com/morluto/gitcontribute/compare/v0.17.0...v0.18.0) (2026-08-01)
 
 
