@@ -32,6 +32,70 @@ function runAsync(command, args, options = {}) {
   });
 }
 
+function startMCPStdio(command, env) {
+  const child = spawn(command, ["mcp", "serve", "--transport=stdio"], {
+    env,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let buffer = "";
+  const pending = new Map();
+  const rejectPending = (error) => {
+    for (const waiter of pending.values()) waiter.reject(error);
+    pending.clear();
+  };
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  child.stdout.on("data", (chunk) => {
+    buffer += chunk;
+    let newline;
+    while ((newline = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (!line) continue;
+      let message;
+      try {
+        message = JSON.parse(line);
+      } catch (error) {
+        rejectPending(new Error(`invalid MCP response: ${error.message}: ${line}`));
+        return;
+      }
+      const waiter = pending.get(message.id);
+      if (waiter) {
+        pending.delete(message.id);
+        waiter.resolve(message);
+      }
+    }
+  });
+  child.stderr.on("data", () => {});
+  child.on("error", rejectPending);
+  child.on("close", (status, signal) => {
+    rejectPending(new Error(`MCP process exited before response (status=${status}, signal=${signal})`));
+  });
+  return {
+    request(id, method, params) {
+      const response = new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+      return response;
+    },
+    notify(method, params) {
+      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
+    },
+    close() {
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          child.kill("SIGTERM");
+          resolve();
+        }, 2_000);
+        child.once("close", () => {
+          clearTimeout(timer);
+          resolve();
+        });
+        child.stdin.end();
+      });
+    },
+  };
+}
+
 function shellQuote(value) {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
@@ -211,6 +275,95 @@ test("npx upgrade completes without installing a persistent package", { skip: pr
     assert.equal(report.latest, "9.9.9");
     assert.ok(report.stages.some((stage) => stage.name === "installation" && stage.status === "npx"));
     assert.deepEqual(registry.requests, [{ method: "GET", url: "/gitcontribute" }]);
+  } finally {
+    await registry.close();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("npx upgrade activates the latest private MCP runtime without global installation", { skip: process.platform === "win32" }, async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-upgrade-activation-e2e-"));
+  const registry = await startRegistry(packageVersion);
+  try {
+    const tarball = await packCurrentPlatform(workspace);
+    const runner = join(workspace, "runner");
+    run("npm", ["install", "--prefix", runner, "--ignore-scripts", "--no-audit", "--no-fund", tarball]);
+
+    const home = join(workspace, "home");
+    const oldRuntime = join(home, ".local", "share", "gitcontribute", "bin", "0.17.0", "gitcontribute");
+    await mkdir(join(home, ".codex"), { recursive: true });
+    await writeFile(
+      join(home, ".codex", "config.toml"),
+      `[mcp_servers.gitcontribute]\ncommand = ${JSON.stringify(oldRuntime)}\nargs = ["mcp", "serve", "--transport=stdio"]\n`
+    );
+
+    const globalPrefix = join(workspace, "global");
+    const result = await runAsync(
+      "npx",
+      ["--yes", "gitcontribute", "upgrade", "--yes", "--json"],
+      {
+        cwd: runner,
+        env: {
+          ...process.env,
+          HOME: home,
+          XDG_CONFIG_HOME: join(home, ".config"),
+          XDG_DATA_HOME: join(home, ".local", "share"),
+          XDG_CACHE_HOME: join(home, ".cache"),
+          XDG_STATE_HOME: join(home, ".local", "state"),
+          npm_config_registry: registry.url,
+          npm_config_prefix: globalPrefix,
+          npm_config_audit: "false",
+          npm_config_fund: "false",
+          npm_config_update_notifier: "false",
+        },
+      }
+    );
+    assert.equal(result.status, 0, `${result.stderr || result.stdout}\nREGISTRY REQUESTS:\n${JSON.stringify(registry.requests)}`);
+
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.context, "npx");
+    assert.equal(report.current, packageVersion);
+    assert.equal(report.latest, packageVersion);
+    assert.equal(report.status, "restart required");
+    assert.ok(report.stages.some((stage) => stage.name === "private-mcp-runtime" && stage.status === "verified"));
+    assert.ok(report.stages.some((stage) => stage.name === "configured-runtime" && stage.status === "activated"));
+    assert.ok(report.stages.some((stage) => stage.name === "activation" && stage.status === "restart_required"));
+    assert.deepEqual(report.restart_clients, ["codex"]);
+
+    const dataDir = process.platform === "darwin"
+      ? join(home, "Library", "Application Support", "gitcontribute", "Data")
+      : join(home, ".local", "share", "gitcontribute");
+    const managed = join(dataDir, "bin", packageVersion, "gitcontribute");
+    const codex = await readFile(join(home, ".codex", "config.toml"), "utf8");
+    assert.ok(codex.includes(`command = ${JSON.stringify(managed)}`));
+    assert.doesNotMatch(codex, /0\.17\.0|npx|npm-cache/);
+    const metadata = run(managed, ["metadata", "--json"], { env: { ...process.env, HOME: home } });
+    assert.equal(JSON.parse(metadata.stdout).version, packageVersion);
+
+    const mcp = startMCPStdio(managed, {
+      ...process.env,
+      HOME: home,
+      XDG_CONFIG_HOME: join(home, ".config"),
+      XDG_DATA_HOME: join(home, ".local", "share"),
+      XDG_CACHE_HOME: join(home, ".cache"),
+      XDG_STATE_HOME: join(home, ".local", "state"),
+    });
+    try {
+      const initialized = await mcp.request(1, "initialize", {
+        protocolVersion: "2025-11-25",
+        capabilities: {},
+        clientInfo: { name: "gitcontribute-upgrade-e2e", version: "1" },
+      });
+      assert.equal(initialized.result.serverInfo.name, "gitcontribute");
+      assert.equal(initialized.result.protocolVersion, "2025-11-25");
+      mcp.notify("notifications/initialized", {});
+      const tools = await mcp.request(2, "tools/list", {});
+      assert.ok(tools.result.tools.some((tool) => tool.name === "corpus.search_code"));
+    } finally {
+      await mcp.close();
+    }
+    assert.deepEqual(registry.requests, [{ method: "GET", url: "/gitcontribute" }]);
+    await assert.rejects(readFile(join(globalPrefix, "lib", "node_modules", "gitcontribute", "package.json")));
   } finally {
     await registry.close();
     await rm(workspace, { recursive: true, force: true });
