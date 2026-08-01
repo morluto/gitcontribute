@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.18.0](https://github.com/morluto/gitcontribute/compare/v0.17.0...v0.18.0) (2026-08-01)
+
+
+### Features
+
+* **mcp:** add corpus-backed GitHub search and source artifacts ([43cbd8f](https://github.com/morluto/gitcontribute/commit/43cbd8f134edaa0e0d8767cbf70ab6af6668f96b))
+* **mcp:** add corpus-backed GitHub search and source artifacts ([ff6e440](https://github.com/morluto/gitcontribute/commit/ff6e4406245ca9b3db9816dff2651e0238978179))
+
+
+### Bug Fixes
+
+* **upgrade:** guard empty npm command arguments ([3b5104f](https://github.com/morluto/gitcontribute/commit/3b5104f1785b5ee3c1cba14962a57517f555dd64))
+
 ## [0.17.0](https://github.com/morluto/gitcontribute/compare/v0.16.0...v0.17.0) (2026-07-31)
 
 
