@@ -220,6 +220,7 @@ type ConcernListOptions struct {
 	Status string
 	Query  string
 	Limit  int
+	Offset int
 }
 
 // ConcernLinkOptions identifies one explicit relationship.

@@ -128,6 +128,17 @@ func (r *MCPReader) persistGitHubThreadSearch(ctx context.Context, in mcpcontrac
 		out.Status = "partial"
 		artifact.Completeness.Status = "partial"
 	}
+	if hasNextPage {
+		next := in
+		next.Page = out.NextPage
+		out.RecoveryPlans = append(out.RecoveryPlans, *recoveryPlan("github_search_next_page", "More provider results exist. Request the returned next page before treating this page as exhaustive.", mcpcontract.RecoveryAction(next)))
+	}
+	if result.Incomplete {
+		retry := in
+		retry.Limit = min(100, max(in.Limit*2, in.Limit+1))
+		out.RecoveryPlans = append(out.RecoveryPlans, *recoveryPlan("github_search_incomplete", "GitHub marked this search page incomplete. Replay the exact search with a larger page bound, then narrow the query if it remains incomplete.", mcpcontract.RecoveryAction(retry)))
+	}
+	artifact.RecoveryPlans = append([]mcpcontract.RecoveryPlan(nil), out.RecoveryPlans...)
 
 	repo, err := ensureSearchRepository(ctx, c, in.Owner, in.Repo)
 	if err != nil {
@@ -302,6 +313,9 @@ func (r *MCPReader) persistSourceBundle(ctx context.Context, in mcpcontract.Read
 		if item.RetryAfter > 0 {
 			artifactItem.RetryAfterMS = mcpcontract.NonNegativeInt(item.RetryAfter.Milliseconds())
 		}
+		if item.Status == "too_large" || item.Status == "retryable" {
+			artifactItem.Recovery = sourceFileRecovery(in, item.Request, item.Status)
+		}
 		artifact.Items[i] = artifactItem
 		compact := artifactItem
 		if compact.Value != nil {
@@ -335,6 +349,17 @@ func (r *MCPReader) persistSourceBundle(ctx context.Context, in mcpcontract.Read
 	out.ArtifactDigest = snapshot.ArtifactDigest
 	out.ResourceURI = "gitcontribute://artifact/source-bundle/" + snapshot.ArtifactDigest
 	return out, nil
+}
+
+func sourceFileRecovery(in mcpcontract.ReadSourceFilesInput, request github.SourceFileRequest, status string) *mcpcontract.RecoveryPlan {
+	next := in
+	next.Files = []mcpcontract.SourceFileRequest{{Path: request.Path, StartLine: request.StartLine, EndLine: request.EndLine}}
+	if status == "too_large" {
+		next.PerFileBytes = min(1024*1024, max(in.PerFileBytes*2, in.PerFileBytes+1))
+		next.TotalBytes = min(4*1024*1024, max(in.TotalBytes*2, in.TotalBytes+1))
+		return recoveryPlan("source_file_too_large", "The selected file exceeded the current byte bound. Retry this exact file with the returned larger bounds or narrow its line range.", mcpcontract.RecoveryAction(next))
+	}
+	return recoveryPlan("source_file_retryable", "The provider returned a retryable source-file outcome. Replay this exact file request after the returned retry delay.", mcpcontract.RecoveryAction(next))
 }
 
 // ReadSourceBundleArtifact is a local-only typed resource reader.

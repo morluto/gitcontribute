@@ -378,6 +378,7 @@ func (r *MCPReader) CheckMergeConflicts(ctx context.Context, in mcpcontract.Chec
 				ws, err := c.GetWorkspace(ctx, current.WorkspaceID)
 				if err != nil {
 					item.Status, item.Reason, item.Message = "failed", "workspace_not_found", err.Error()
+					item.Recovery = recoveryPlan("workspace_not_found", "Inspect or recreate the managed workspace, then retry this exact comparison.", mcpcontract.RecoveryAction(mcpcontract.InspectCommitChangesInput{WorkspaceID: current.WorkspaceID}), mcpcontract.RecoveryAction(mcpcontract.CheckMergeConflictsInput{Comparisons: []mcpcontract.MergeConflictInput{current}}))
 					out.Items[index] = item
 					continue
 				}
@@ -390,12 +391,14 @@ func (r *MCPReader) CheckMergeConflicts(ctx context.Context, in mcpcontract.Chec
 				item.Key = current.WorkspaceID + ":" + current.BaseOID + ".." + current.HeadOID
 				if current.BaseOID == "" || current.HeadOID == "" {
 					item.Status, item.Reason, item.Message = "unavailable", "missing_objects", "workspace does not record both base and head OIDs"
+					item.Recovery = recoveryPlan("missing_objects", item.Message, mcpcontract.RecoveryAction(mcpcontract.InspectCommitChangesInput{WorkspaceID: current.WorkspaceID}), mcpcontract.RecoveryAction(mcpcontract.CheckMergeConflictsInput{Comparisons: []mcpcontract.MergeConflictInput{current}}))
 					out.Items[index] = item
 					continue
 				}
 				result, err := manager.CheckMergeWorkspace(ctx, ws, current.BaseOID, current.HeadOID)
 				if err != nil {
 					item.Status, item.Reason, item.Message = "failed", "merge_check_failed", err.Error()
+					item.Recovery = recoveryPlan("merge_check_failed", "Retry the same comparison after inspecting the managed workspace state.", mcpcontract.RecoveryAction(mcpcontract.InspectCommitChangesInput{WorkspaceID: current.WorkspaceID}), mcpcontract.RecoveryAction(mcpcontract.CheckMergeConflictsInput{Comparisons: []mcpcontract.MergeConflictInput{current}}))
 					out.Items[index] = item
 					continue
 				}

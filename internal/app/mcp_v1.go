@@ -11,64 +11,12 @@ import (
 	"github.com/morluto/gitcontribute/internal/contribution"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
-	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/failure"
 	"github.com/morluto/gitcontribute/internal/investigation"
 	"github.com/morluto/gitcontribute/internal/manifest"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/research"
 )
-
-// SearchRepositories performs a local-only repository search.
-func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpcontract.SearchRepositoriesInput) (mcpcontract.SearchRepositoriesOutput, error) {
-	repoRef := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
-	repoFilter := ""
-	if in.Owner != "" || in.Repo != "" {
-		if err := repoRef.Validate(); err != nil {
-			return mcpcontract.SearchRepositoriesOutput{}, err
-		}
-		repoFilter = repoRef.String()
-	}
-
-	res, err := r.searchCorpus(ctx, in.Query, contracts.SearchOptions{
-		Kind:          "repos",
-		Repo:          repoFilter,
-		Limit:         in.Limit,
-		Cursor:        in.Cursor,
-		Sort:          in.Sort,
-		SnapshotToken: in.SnapshotToken,
-	})
-	if err != nil {
-		return mcpcontract.SearchRepositoriesOutput{}, err
-	}
-	if len(res.Matches) == 0 {
-		provenance, err := offlineReadProvenance("repository_search", res.ObservationWatermark, in, res.NextCursor == "", res.NextCursor != "", true)
-		if err != nil {
-			return mcpcontract.SearchRepositoriesOutput{}, err
-		}
-		return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: []mcpcontract.RepositoryOutput{}, NextCursor: res.NextCursor, SnapshotToken: res.SnapshotToken, Provenance: provenance}, nil
-	}
-
-	refs := make([]mcpcontract.RepositoryRef, len(res.Matches))
-	for i, m := range res.Matches {
-		refs[i] = mcpcontract.RepositoryRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo}
-	}
-	batch, err := r.GetRepositories(ctx, mcpcontract.GetRepositoriesInput{Repositories: refs, SnapshotToken: in.SnapshotToken})
-	if err != nil {
-		return mcpcontract.SearchRepositoriesOutput{}, err
-	}
-	matches := make([]mcpcontract.RepositoryOutput, 0, len(batch.Items))
-	for _, item := range batch.Items {
-		if item.Value != nil {
-			matches = append(matches, *item.Value)
-		}
-	}
-	provenance, err := offlineReadProvenance("repository_search", res.ObservationWatermark, in, res.NextCursor == "", res.NextCursor != "", true)
-	if err != nil {
-		return mcpcontract.SearchRepositoriesOutput{}, err
-	}
-	return mcpcontract.SearchRepositoriesOutput{Query: in.Query, Total: res.Total, Matches: matches, NextCursor: res.NextCursor, SnapshotToken: res.SnapshotToken, Provenance: provenance}, nil
-}
 
 // ThreadByNumber reads an issue or pull request by repository and number only.
 func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpcontract.ThreadByNumberInput) (mcpcontract.ThreadOutput, error) {
@@ -449,85 +397,6 @@ func parseTime(s string) (time.Time, error) {
 		return time.Time{}, nil
 	}
 	return time.Parse(time.RFC3339, s)
-}
-
-// CheckDuplicates finds duplicate-candidate threads for a hypothesis or opportunity.
-func (r *MCPReader) CheckDuplicates(ctx context.Context, in mcpcontract.CheckDuplicatesInput) (mcpcontract.CheckOutput, error) {
-	var result *contracts.DuplicateCheckResult
-	var err error
-	switch in.Target {
-	case "hypothesis":
-		result, err = r.CheckHypothesisDuplicates(ctx, in.ID, in.Limit)
-	case "opportunity":
-		result, err = r.CheckOpportunityDuplicates(ctx, in.ID, in.Limit)
-	default:
-		return mcpcontract.CheckOutput{}, fmt.Errorf("unknown target %q", in.Target)
-	}
-	if err != nil {
-		return mcpcontract.CheckOutput{}, err
-	}
-	return duplicateCheckResultToMCP(in.Target, in.ID, result), nil
-}
-
-// CheckCollisions finds open pull request collisions for a hypothesis or opportunity.
-func (r *MCPReader) CheckCollisions(ctx context.Context, in mcpcontract.CheckCollisionsInput) (mcpcontract.CheckOutput, error) {
-	var result *contracts.CollisionCheckResult
-	var err error
-	switch in.Target {
-	case "hypothesis":
-		result, err = r.CheckHypothesisCollisions(ctx, in.ID, in.Limit)
-	case "opportunity":
-		result, err = r.CheckOpportunityCollisions(ctx, in.ID, in.Limit)
-	default:
-		return mcpcontract.CheckOutput{}, fmt.Errorf("unknown target %q", in.Target)
-	}
-	if err != nil {
-		return mcpcontract.CheckOutput{}, err
-	}
-	return collisionCheckResultToMCP(in.Target, in.ID, result), nil
-}
-
-func duplicateCheckResultToMCP(target, id string, result *contracts.DuplicateCheckResult) mcpcontract.CheckOutput {
-	return mcpcontract.CheckOutput{
-		Target:         target,
-		ID:             id,
-		Repo:           result.Repo.String(),
-		Query:          result.Query,
-		Total:          result.Total,
-		Findings:       evidenceToMCPItems(result.Findings),
-		SourceRevision: result.SourceRevision,
-		Limit:          result.Limit,
-	}
-}
-
-func collisionCheckResultToMCP(target, id string, result *contracts.CollisionCheckResult) mcpcontract.CheckOutput {
-	findings := make([]evidence.Evidence, len(result.Findings))
-	copy(findings, result.Findings)
-	return mcpcontract.CheckOutput{
-		Target:         target,
-		ID:             id,
-		Repo:           result.Repo.String(),
-		Query:          result.Query,
-		Total:          result.Total,
-		Findings:       evidenceToMCPItems(findings),
-		SourceRevision: result.SourceRevision,
-		Limit:          result.Limit,
-	}
-}
-
-func evidenceToMCPItems(items []evidence.Evidence) []mcpcontract.EvidenceItem {
-	out := make([]mcpcontract.EvidenceItem, len(items))
-	for i, e := range items {
-		out[i] = mcpcontract.EvidenceItem{
-			ID:          e.ID,
-			Type:        string(e.Type),
-			Relation:    string(e.Relation),
-			Description: e.Description,
-			SourceRefs:  sourceRefsToMCP(e.SourceRefs),
-			CreatedAt:   formatTime(e.CreatedAt),
-		}
-	}
-	return out
 }
 
 // PromoteOpportunity promotes a hypothesis to an opportunity.

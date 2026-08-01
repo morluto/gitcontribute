@@ -64,12 +64,18 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	if len(missing.Matches) != 0 || len(missing.Coverage) != 1 || missing.Coverage[0].Status != "indexed" || !missing.Coverage[0].Truncated {
 		t.Fatalf("zero-match search lost index coverage: %+v", missing)
 	}
+	if missing.Recovery == nil || len(missing.Recovery.Then) != 1 || missing.Recovery.Then[0].Type != "index_repositories" || missing.Coverage[0].Recovery == nil {
+		t.Fatalf("truncated code search recovery = %+v", missing)
+	}
 	unindexed, err := reader.SearchCode(ctx, mcpcontract.SearchCodeInput{Owner: "owner", Repo: "unindexed", Query: "anything", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(unindexed.Coverage) != 1 || unindexed.Coverage[0].Status != "missing" {
 		t.Fatalf("unindexed repository coverage = %+v", unindexed.Coverage)
+	}
+	if unindexed.Recovery == nil || unindexed.Recovery.Then[0].Type != "index_repositories" {
+		t.Fatalf("unindexed code search recovery = %+v", unindexed.Recovery)
 	}
 	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, domain.RepoRef{Owner: "owner", Repo: "legacy"}, codeindex.Snapshot{
 		RepoPath: "/legacy", Commit: "old123", CreatedAt: time.Now().UTC(),
@@ -82,6 +88,9 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	}
 	if len(legacy.Coverage) != 1 || legacy.Coverage[0].Status != "indexed_coverage_unknown" {
 		t.Fatalf("legacy snapshot coverage = %+v", legacy.Coverage)
+	}
+	if legacy.Recovery == nil || legacy.Recovery.Then[0].Type != "index_repositories" {
+		t.Fatalf("legacy code search recovery = %+v", legacy.Recovery)
 	}
 }
 
@@ -121,6 +130,27 @@ func TestMCPReaderRepositorySearchDoesNotFallBackFromMissingExactRepository(t *t
 	}
 	if blank.Total != 1 || len(blank.Matches) != 1 {
 		t.Fatalf("blank exact repository search = %+v", blank)
+	}
+}
+
+func TestMCPReaderRepositorySearchPreservesIncompleteNestedProjection(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "owner", Name: "partial", Description: "partial searchable"}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.corpus.AdvanceFacet(ctx, repo.ID, nil, "metadata", time.Now().UTC(), false, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := (&MCPReader{svc}).SearchRepositories(ctx, mcpcontract.SearchRepositoriesInput{Query: "partial", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Matches) != 1 || !out.Incomplete || out.Recovery == nil || len(out.Recovery.Then) != 1 || out.Recovery.Then[0].Type != "sync_repository_context" {
+		t.Fatalf("incomplete nested repository result = %+v", out)
 	}
 }
 

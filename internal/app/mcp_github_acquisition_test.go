@@ -74,6 +74,9 @@ func TestMCPReaderSearchGitHubThreadsPersistsArtifactWithoutFullCoverage(t *test
 	if searchCalls != 1 || out.Status != "partial" || out.NextPage != 2 || out.Total != 4 || out.Coverage != "repository_thread_coverage_incomplete" || out.ArtifactDigest == "" {
 		t.Fatalf("search output = %+v", out)
 	}
+	if len(out.RecoveryPlans) != 1 || out.RecoveryPlans[0].Then[0].Type != "search_github_threads" || out.RecoveryPlans[0].Then[0].SearchGitHubThreads == nil || out.RecoveryPlans[0].Then[0].SearchGitHubThreads.Page != 2 {
+		t.Fatalf("search recovery plans = %+v", out.RecoveryPlans)
+	}
 	if len(out.Items) != 1 || out.Items[0].Value == nil || out.Items[0].Value.Owner != "acme" || out.Items[0].Value.Number != 9 {
 		t.Fatalf("search items = %+v", out.Items)
 	}
@@ -181,6 +184,9 @@ func TestMCPReaderSearchCodeBatchUsesOneOfflineRevisionAndPreservesQueryOrder(t 
 	}
 	if out.Status != "partial" || len(out.Items) != 2 || out.Items[0].Key != "parser" || out.Items[1].Key != "func" || out.SnapshotToken == "" {
 		t.Fatalf("batch output = %+v", out)
+	}
+	if out.Recovery == nil || len(out.Recovery.Then) != 1 || out.Recovery.Then[0].Type != "search_code" {
+		t.Fatalf("batch page recovery = %+v", out.Recovery)
 	}
 	for i, item := range out.Items {
 		if item.Status != "complete" || item.Value == nil || item.Value.SnapshotToken != out.SnapshotToken || item.Value.Provenance.SnapshotToken == "" {

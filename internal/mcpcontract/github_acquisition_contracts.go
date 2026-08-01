@@ -48,6 +48,7 @@ type SearchGitHubThreadsOutput struct {
 	ObservedAt     string                    `json:"observed_at"`
 	ArtifactDigest string                    `json:"artifact_digest"`
 	ResourceURI    string                    `json:"resource_uri"`
+	RecoveryPlans  []RecoveryPlan            `json:"recovery_plans,omitempty"`
 }
 
 // GitHubThreadSearchArtifact is the immutable github-thread-search.v1
@@ -72,6 +73,7 @@ type GitHubThreadSearchArtifact struct {
 	Rate          GitHubRateOutput                 `json:"rate"`
 	Items         []GitHubThreadSearchArtifactItem `json:"items"`
 	Completeness  GitHubThreadSearchCompleteness   `json:"completeness"`
+	RecoveryPlans []RecoveryPlan                   `json:"recovery_plans,omitempty"`
 	Provenance    GitHubAcquisitionProvenance      `json:"provenance"`
 	CreatedAt     string                           `json:"created_at"`
 }
@@ -153,6 +155,7 @@ type SourceFileBatchItem struct {
 	Reason       string            `json:"reason,omitempty"`
 	Message      string            `json:"message,omitempty"`
 	RetryAfterMS NonNegativeInt    `json:"retry_after_ms,omitempty"`
+	Recovery     *RecoveryPlan     `json:"recovery,omitempty"`
 }
 
 type ReadSourceFilesOutput struct {
@@ -215,5 +218,6 @@ type SearchCodeBatchOutput struct {
 	Repository    RepositoryRef                 `json:"repository,omitempty"`
 	Items         []BatchItem[SearchCodeOutput] `json:"items"`
 	SnapshotToken string                        `json:"snapshot_token"`
+	Recovery      *RecoveryPlan                 `json:"recovery,omitempty"`
 	Provenance    CorpusReadProvenance          `json:"provenance"`
 }

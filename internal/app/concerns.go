@@ -60,16 +60,17 @@ func (s *Service) ListConcerns(ctx context.Context, opts contracts.ConcernListOp
 		return nil, err
 	}
 	page, err := svc.List(ctx, concern.Filter{
-		Repo: domain.RepoRef{Owner: opts.Repo.Owner, Repo: opts.Repo.Repo}, Status: concern.Status(opts.Status), Query: opts.Query, Limit: opts.Limit,
+		Repo: domain.RepoRef{Owner: opts.Repo.Owner, Repo: opts.Repo.Repo}, Status: concern.Status(opts.Status), Query: opts.Query, Limit: opts.Limit, Offset: opts.Offset,
 	})
 	if err != nil {
 		return nil, mapConcernError(err)
 	}
+	truncated := opts.Offset < page.Total && len(page.Concerns) < page.Total-opts.Offset
 	result := &contracts.ConcernListResult{
 		Concerns:  make([]contracts.ConcernResult, 0, len(page.Concerns)),
 		Limit:     page.Limit,
 		Total:     page.Total,
-		Truncated: page.Total > len(page.Concerns),
+		Truncated: truncated,
 	}
 	for _, item := range page.Concerns {
 		converted, err := s.concernResult(ctx, item)

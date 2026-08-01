@@ -69,6 +69,9 @@ func (s *Service) List(ctx context.Context, filter Filter) (*ListResult, error) 
 	if filter.Limit > maxListLimit {
 		return nil, errors.New("concern list limit cannot exceed 100")
 	}
+	if filter.Offset < 0 {
+		return nil, errors.New("concern list offset cannot be negative")
+	}
 	if filter.Status != "" && !validStatus(filter.Status) {
 		return nil, ErrInvalidStatus
 	}

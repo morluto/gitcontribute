@@ -60,6 +60,12 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpcontract.FindCluster
 		value, err := findClustersTarget(ctx, c, target, in.Limit)
 		switch {
 		case err == nil:
+			if value.Truncated {
+				item.Status, item.Reason, item.Message = "partial", "cluster_truncated", "the stored cluster population exceeded the requested bound"
+				out.Status = "partial"
+				nextLimit := min(100, max(in.Limit*2, in.Limit+1))
+				value.Recovery = recoveryPlan("cluster_truncated", "The stored cluster population exceeded this bound. Request a larger cluster limit before treating the returned clusters as exhaustive.", mcpcontract.RecoveryAction(mcpcontract.FindClustersInput{Targets: []mcpcontract.ClusterTarget{target}, Limit: nextLimit, SnapshotToken: in.SnapshotToken}))
+			}
 			item.Value = &value
 		case errors.Is(err, errRepositoryNotFound):
 			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", err.Error()

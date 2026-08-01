@@ -33,7 +33,7 @@ func (r *MCPReader) CreateConcern(ctx context.Context, in mcpcontract.CreateConc
 // ListConcerns implements the MCP offline concern-read capability.
 func (r *MCPReader) ListConcerns(ctx context.Context, in mcpcontract.ListConcernsInput) (mcpcontract.ConcernListOutput, error) {
 	result, err := r.Service.ListConcerns(ctx, contracts.ConcernListOptions{
-		Repo: contracts.RepoRef{Owner: in.Owner, Repo: in.Repo}, Status: in.Status, Query: in.Query, Limit: in.Limit,
+		Repo: contracts.RepoRef{Owner: in.Owner, Repo: in.Repo}, Status: in.Status, Query: in.Query, Limit: in.Limit, Offset: in.Offset,
 	})
 	if err != nil {
 		return mcpcontract.ConcernListOutput{}, err
@@ -43,6 +43,11 @@ func (r *MCPReader) ListConcerns(ctx context.Context, in mcpcontract.ListConcern
 		Limit:     result.Limit,
 		Total:     result.Total,
 		Truncated: result.Truncated,
+		Offset:    in.Offset,
+	}
+	if result.Truncated {
+		out.NextOffset = in.Offset + result.Limit
+		out.Recovery = recoveryPlan("concerns_truncated", "Read the next concern page with the returned offset.", mcpcontract.RecoveryAction(mcpcontract.ListConcernsInput{Owner: in.Owner, Repo: in.Repo, Status: in.Status, Query: in.Query, Limit: result.Limit, Offset: out.NextOffset}))
 	}
 	for index := range result.Concerns {
 		value := &result.Concerns[index]

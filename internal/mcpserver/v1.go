@@ -75,7 +75,7 @@ func (s *Server) registerV1() {
 	localWrite := localWriteAnnotations(false)
 	addCatalogTool(s, catalogTool[mcpcontract.SearchRepositoriesInput, mcpcontract.SearchRepositoriesOutput]{
 		name: mcpcontract.ToolSearchRepositories, title: "Search stored repositories",
-		description: "Search stored repository names, topics, and descriptions. Supports relevance or updated order; never contacts GitHub.",
+		description: "Search stored repository names, topics, and descriptions. Results expose incomplete local coverage and an exact typed recovery action; use it before inferring absence. Supports relevance or updated order; never contacts GitHub.",
 		annotations: readOnly, input: inputSchema[mcpcontract.SearchRepositoriesInput](func(schema *schemaBuilder) {
 			setRange(schema, "limit", 1, 100)
 			setDefault(schema, "limit", 20)
@@ -84,7 +84,7 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[SearchThreadsInput, mcpcontract.SearchOutput]{
 		name: mcpcontract.ToolSearchThreads, title: "Search stored issues and pull requests",
-		description: "Search stored issue and PR titles, labels, bodies, and hydrated text. All terms are required by default; use match_mode=any for broader recall. Compact output is bounded. Read finalists with corpus.get_threads and hydrate only missing facets. Offline.",
+		description: "Search stored issue and PR titles, labels, bodies, and hydrated text. All terms are required by default; use match_mode=any for broader recall. Compact output is bounded, and local coverage is never proof of absence without the returned typed recovery action. Read finalists with corpus.get_threads and hydrate only missing facets. Offline.",
 		annotations: readOnly, input: inputSchema[SearchThreadsInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 			setEnum(schema, "state", "open", "closed")
@@ -154,7 +154,7 @@ func (s *Server) registerV1() {
 	})
 	addCatalogTool(s, catalogTool[mcpcontract.FindRelatedWorkInput, mcpcontract.FindRelatedWorkOutput]{
 		name: mcpcontract.ToolFindRelatedWork, title: "Find related issues and open pull requests",
-		description: "Search the local corpus for duplicate issues and pull requests, open pull requests that may compete or conflict, or both for one hypothesis or opportunity. Returns each requested population separately; this records no evidence, tests no Git merge conflicts, and performs no network access.",
+		description: "Search the local corpus for duplicate issues and pull requests, open pull requests that may compete or conflict, or both for one hypothesis or opportunity. Returns status, coverage, truncation, and exact typed recovery actions when the repository is absent or the bounded result is not exhaustive; this records no evidence, tests no Git merge conflicts, and performs no network access.",
 		annotations: readOnly, supportedBy: supports[Operator], input: inputSchema[mcpcontract.FindRelatedWorkInput](func(schema *schemaBuilder) {
 			setEnum(schema, "target", "hypothesis", "opportunity")
 			setArrayBounds(schema, "kinds", 1, 2)

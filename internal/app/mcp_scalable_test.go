@@ -46,6 +46,9 @@ func TestRankOpportunitiesReportsBoundedNonPaginatedTruncation(t *testing.T) {
 	if bounded.Total != 5 || len(bounded.Candidates) != 2 || !bounded.Truncated {
 		t.Fatalf("bounded radar result = %+v", bounded)
 	}
+	if bounded.Recovery == nil || len(bounded.Recovery.Then) != 2 || bounded.Recovery.Then[0].Type != "sync_threads" || bounded.Recovery.Then[1].Type != "rank_opportunities" {
+		t.Fatalf("bounded radar recovery = %+v", bounded.Recovery)
+	}
 	if summary := bounded.Repositories[0].Value; summary == nil || summary.Considered != 5 || summary.Returned != 5 || summary.Truncated || summary.PopulationCapped {
 		t.Fatalf("bounded repository summary = %+v", summary)
 	}
@@ -60,6 +63,9 @@ func TestRankOpportunitiesReportsBoundedNonPaginatedTruncation(t *testing.T) {
 	}
 	if summary := perRepositoryBound.Repositories[0].Value; summary == nil || summary.Considered != 5 || summary.Returned != 3 || !summary.Truncated {
 		t.Fatalf("per-repository bounded summary = %+v", summary)
+	}
+	if summary := perRepositoryBound.Repositories[0].Value; summary == nil || summary.Recovery == nil || len(summary.Recovery.Then) != 2 {
+		t.Fatalf("per-repository recovery = %+v", summary)
 	}
 	full, err := reader.RankOpportunities(ctx, mcpcontract.RankOpportunitiesInput{
 		Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, Limit: 100, MaxResultsPerRepository: 5,
@@ -409,7 +415,8 @@ func TestJobResultToMCPPreservesEmptyAndPartialTypedOutcomes(t *testing.T) {
 	}, true)
 	if !strings.Contains(partial.Summary, "partial") || len(partial.Artifacts) != 1 ||
 		!reflect.DeepEqual(partial.Artifacts[0].References, []string{"acme/rocket#7"}) ||
-		len(partial.Artifacts[0].Failures) != 1 || partial.Artifacts[0].Failures[0].Reason != "facet_incomplete" {
+		len(partial.Artifacts[0].Failures) != 1 || partial.Artifacts[0].Failures[0].Reason != "facet_incomplete" ||
+		partial.Artifacts[0].Recovery == nil || len(partial.Artifacts[0].Recovery.Then) != 1 || partial.Artifacts[0].Recovery.Then[0].Type != "sync_portfolio" {
 		t.Fatalf("partial portfolio outcome = %+v", partial)
 	}
 
@@ -641,6 +648,34 @@ func TestFindPrecedentsUsesClosedAndMergedHistory(t *testing.T) {
 	}
 	if out.Provenance.SnapshotToken == "" || out.Provenance.QueryDigestSHA256 == "" {
 		t.Fatalf("precedent provenance = %+v", out.Provenance)
+	}
+}
+
+func TestFindPrecedentsReturnsRecoveryForMissingHistory(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket"}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	out, err := (&MCPReader{svc}).FindPrecedents(ctx, mcpcontract.FindPrecedentsInput{Threads: []mcpcontract.ThreadRef{
+		{Owner: "acme", Repo: "missing", Number: 1},
+		{Owner: "acme", Repo: "rocket", Number: 2},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "partial" || len(out.Items) != 2 {
+		t.Fatalf("precedent recovery output = %+v", out)
+	}
+	for _, item := range out.Items {
+		if item.Status != "unavailable" || item.Recovery == nil || len(item.Recovery.Then) != 1 || item.Recovery.Then[0].Type != "ensure_coverage" {
+			t.Fatalf("missing precedent recovery = %+v", item)
+		}
+		ensure := item.Recovery.Then[0].EnsureCoverage
+		if ensure == nil || ensure.Target.Type != mcpcontract.CoverageTargetRepository || ensure.Target.Repository.Owner != "acme" || ensure.LimitPerRepository != 1000 {
+			t.Fatalf("precedent ensure-coverage target = %+v", ensure)
+		}
 	}
 }
 

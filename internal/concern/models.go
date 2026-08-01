@@ -100,4 +100,5 @@ type Filter struct {
 	Status Status
 	Query  string
 	Limit  int
+	Offset int
 }

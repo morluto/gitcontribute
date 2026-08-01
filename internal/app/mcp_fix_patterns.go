@@ -388,6 +388,22 @@ func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.M
 	if analysis.candidateTruncated {
 		limitations = append(limitations, "At least one symptom category exceeded candidate_limit; coverage is truncated.")
 	}
+	var recovery *mcpcontract.RecoveryPlan
+	if analysis.candidateTruncated || countUnknownCandidates(candidates) > 0 || len(failures) > 0 {
+		next := in
+		if analysis.candidateTruncated {
+			next.CandidateLimit = min(100, max(in.CandidateLimit*2, in.CandidateLimit+1))
+		}
+		if next.HydrationLimit != nil && (*next.HydrationLimit > 0 || countUnknownCandidates(candidates) > 0) {
+			value := min(100, max(*next.HydrationLimit*2, *next.HydrationLimit+1))
+			next.HydrationLimit = &value
+		}
+		if operation == fixPatternPreview && countUnknownCandidates(candidates) == 0 && len(failures) == 0 {
+			recovery = recoveryPlan("fix_pattern_candidates_truncated", "The candidate population exceeded candidate_limit. Rerun the read-only preview with a larger candidate_limit.", mcpcontract.RecoveryAction(mcpcontract.PreviewRepositoryFixPatternsInput(next)))
+		} else {
+			recovery = recoveryPlan("fix_pattern_coverage_incomplete", "The report retained unknown or bounded candidate outcomes. Rerun the workflow with the returned larger bounds to hydrate and recompute the report.", mcpcontract.RecoveryAction(next))
+		}
+	}
 	if err := finishCorpusRead(ctx, c, revision); err != nil {
 		return mcpcontract.FixPatternReport{}, err
 	}
@@ -404,7 +420,7 @@ func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.M
 		},
 		Clusters: reportClusters, Failures: failures, Limitations: limitations, Persisted: operation == fixPatternWorkflow, SnapshotToken: snapshotIdentity(in.SnapshotToken, revision),
 		ObservationWatermark: revision, QueryDigestSHA256: hex.EncodeToString(queryHash[:]),
-		Complete: status == "complete", Truncated: analysis.candidateTruncated, UnknownCoverage: countUnknownCandidates(candidates) > 0,
+		Complete: status == "complete", Truncated: analysis.candidateTruncated, UnknownCoverage: countUnknownCandidates(candidates) > 0, Recovery: recovery,
 	}
 	if operation == fixPatternWorkflow {
 		snapshot, err := c.MaterializeReadSnapshot(ctx, corpus.SnapshotMaterialization{Kind: "fix_pattern_report", Scope: in.Repository, SourceManifest: map[string]any{"observation_watermark": revision, "query_digest": report.QueryDigestSHA256}, DerivedVersions: map[string]string{"fix_patterns": "v1"}, Completeness: map[string]bool{"complete": report.Complete, "truncated": report.Truncated, "unknown_coverage": report.UnknownCoverage}, Provenance: map[string]string{"producer": "gitcontribute", "operation": "workflow.mine_repository_fix_patterns"}, Payload: report})

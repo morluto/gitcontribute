@@ -194,10 +194,14 @@ func threadFacetJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifact
 
 func portfolioJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
 	var result struct {
-		Login        string   `json:"login"`
-		PullRequests []string `json:"pull_requests"`
-		Refreshed    int      `json:"refreshed"`
-		Failures     []struct {
+		Status           string   `json:"status"`
+		Login            string   `json:"login"`
+		PullRequests     []string `json:"pull_requests"`
+		Refreshed        int      `json:"refreshed"`
+		DiscoveryStatus  string   `json:"discovery_status"`
+		SearchIncomplete bool     `json:"search_incomplete"`
+		RequestCapped    bool     `json:"request_capped"`
+		Failures         []struct {
 			Reference    string `json:"reference"`
 			Status       string `json:"status"`
 			Reason       string `json:"reason"`
@@ -218,12 +222,25 @@ func portfolioJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactRe
 	}
 	var request mcpcontract.SyncPortfolioInput
 	_ = json.Unmarshal([]byte(job.Request), &request)
+	var recovery *mcpcontract.RecoveryPlan
+	if result.Status != "complete" || result.SearchIncomplete || result.RequestCapped || result.DiscoveryStatus != "complete" {
+		next := request
+		if next.Selection == "" {
+			next.Selection = "authored"
+		}
+		if next.Selection == "authored" {
+			next.DiscoveryMaxRequests = min(1000, max(next.DiscoveryMaxRequests*2, max(next.DiscoveryMaxRequests+1, 2)))
+			next.Limit = min(100, max(next.Limit*2, max(next.Limit+1, 20)))
+		}
+		recovery = recoveryPlan("portfolio_discovery_incomplete", "Portfolio discovery was incomplete or bounded. Repeat synchronization with the returned larger discovery bound, then reread the portfolio.", mcpcontract.RecoveryAction(next))
+	}
 	follow := &mcpcontract.JobFollowUp{
 		Action: mcpcontract.FollowUpAction{Type: "list_pull_request_portfolio", ListPortfolio: portfolioReadFollowUpArguments(request, result.Login, result.PullRequests)},
 		Reason: "Read these refreshed pull requests from the offline portfolio.",
 	}
 	return []mcpcontract.JobArtifactReference{{
 		Kind: "pull_request_batch", Count: &value, References: append([]string(nil), result.PullRequests...), Failures: failures,
+		Status: result.Status, DiscoveryStatus: result.DiscoveryStatus, SearchIncomplete: result.SearchIncomplete, RequestCapped: result.RequestCapped, Recovery: recovery,
 	}}, follow
 }
 

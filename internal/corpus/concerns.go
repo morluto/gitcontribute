@@ -140,12 +140,12 @@ func (c *Corpus) ListConcerns(ctx context.Context, filter concern.Filter) (_ *co
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) `+from+` WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("count concerns: %w", err)
 	}
-	args = append(args, filter.Limit)
+	args = append(args, filter.Limit, filter.Offset)
 	rows, err := tx.QueryContext(ctx, `
 		WITH bounded AS (
 			SELECT c.id, c.payload, c.updated_at, `+rank+` AS rank
 			`+from+` WHERE `+strings.Join(where, " AND ")+`
-			ORDER BY rank, c.updated_at DESC, c.id LIMIT ?
+			ORDER BY rank, c.updated_at DESC, c.id LIMIT ? OFFSET ?
 		)
 		SELECT b.payload,
 		       l.kind, l.target_type, l.target_id, l.note, l.created_at

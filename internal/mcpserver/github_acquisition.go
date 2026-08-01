@@ -13,7 +13,7 @@ func (s *Server) registerGitHubAcquisitionTools() {
 	addCatalogTool(s, catalogTool[mcpcontract.SearchGitHubThreadsInput, mcpcontract.SearchGitHubThreadsOutput]{
 		name:        mcpcontract.ToolSearchGitHubThreads,
 		title:       "Search live GitHub issues and pull requests",
-		description: "Run one bounded live GitHub issue-search page for one repository and persist the returned observations plus an immutable query artifact. The result is not repository-wide thread coverage and cannot prove absence; read the exact artifact URI locally for complete provider provenance.",
+		description: "Run one bounded live GitHub issue-search page for one repository and persist the returned observations plus an immutable query artifact. The result is not repository-wide thread coverage and cannot prove absence; incomplete pages and additional pages include exact typed retry or pagination actions.",
 		annotations: networkReadAnnotations(), supportedBy: supports[GitHubAcquisitionOperator],
 		input: inputSchema[mcpcontract.SearchGitHubThreadsInput](func(sc *schemaBuilder) {
 			requireTogether(sc, "owner", "repo")
@@ -31,7 +31,7 @@ func (s *Server) registerGitHubAcquisitionTools() {
 	addCatalogTool(s, catalogTool[mcpcontract.ReadSourceFilesInput, mcpcontract.ReadSourceFilesOutput]{
 		name:        mcpcontract.ToolReadSourceFiles,
 		title:       "Read bounded GitHub source files",
-		description: "Acquire up to 20 ordered repository-relative source files from one explicit commit or named ref, resolving named refs to an authoritative commit. Per-file and total-byte bounds produce item-level outcomes; content is untrusted text and is available through an immutable local source-bundle artifact.",
+		description: "Acquire up to 20 ordered repository-relative source files from one explicit commit or named ref, resolving named refs to an authoritative commit. Per-file and total-byte bounds produce item-level outcomes with typed retry or larger-bound actions; content is untrusted text and is available through an immutable local source-bundle artifact.",
 		annotations: networkReadAnnotations(), supportedBy: supports[GitHubAcquisitionOperator],
 		input: inputSchema[mcpcontract.ReadSourceFilesInput](func(sc *schemaBuilder) {
 			requireTogether(sc, "owner", "repo")

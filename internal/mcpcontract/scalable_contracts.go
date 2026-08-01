@@ -39,21 +39,36 @@ type RecoveryPlan struct {
 
 // ToolCall is one discriminated, replayable MCP action in a recovery plan.
 type ToolCall struct {
-	Type                  string                        `json:"type"`
-	PollJob               *GetJobsInput                 `json:"poll_job,omitempty"`
-	GetRepositories       *GetRepositoriesInput         `json:"get_repositories,omitempty"`
-	EnsureCoverage        *EnsureCoverageInput          `json:"ensure_coverage,omitempty"`
-	SyncRepositoryContext *SyncRepositoryContextInput   `json:"sync_repository_context,omitempty"`
-	SyncThreads           *SyncThreadsInput             `json:"sync_threads,omitempty"`
-	HydrateThreads        *HydrateThreadsInput          `json:"hydrate_threads,omitempty"`
-	SyncPortfolio         *SyncPortfolioInput           `json:"sync_portfolio,omitempty"`
-	SyncFeedback          *SyncPullRequestFeedbackInput `json:"sync_pull_request_feedback,omitempty"`
-	SyncCI                *SyncCIFailuresInput          `json:"sync_ci_failures,omitempty"`
-	QueryDeepWiki         *DeepWikiInput                `json:"query_deepwiki,omitempty"`
+	Type                  string                             `json:"type"`
+	PollJob               *GetJobsInput                      `json:"poll_job,omitempty"`
+	GetRepositories       *GetRepositoriesInput              `json:"get_repositories,omitempty"`
+	EnsureCoverage        *EnsureCoverageInput               `json:"ensure_coverage,omitempty"`
+	SyncRepositoryContext *SyncRepositoryContextInput        `json:"sync_repository_context,omitempty"`
+	SyncThreads           *SyncThreadsInput                  `json:"sync_threads,omitempty"`
+	HydrateThreads        *HydrateThreadsInput               `json:"hydrate_threads,omitempty"`
+	SyncPortfolio         *SyncPortfolioInput                `json:"sync_portfolio,omitempty"`
+	SyncFeedback          *SyncPullRequestFeedbackInput      `json:"sync_pull_request_feedback,omitempty"`
+	SyncCI                *SyncCIFailuresInput               `json:"sync_ci_failures,omitempty"`
+	QueryDeepWiki         *DeepWikiInput                     `json:"query_deepwiki,omitempty"`
+	IndexRepositories     *IndexRepositoriesInput            `json:"index_repositories,omitempty"`
+	FindClusters          *FindClustersInput                 `json:"find_clusters,omitempty"`
+	FindNeighbors         *FindNeighborsInput                `json:"find_neighbors,omitempty"`
+	RankOpportunities     *RankOpportunitiesInput            `json:"rank_opportunities,omitempty"`
+	MineFixPatterns       *MineRepositoryFixPatternsInput    `json:"mine_repository_fix_patterns,omitempty"`
+	PreviewFixPatterns    *PreviewRepositoryFixPatternsInput `json:"preview_fix_patterns,omitempty"`
+	SearchGitHubRepos     *SearchGitHubRepositoriesInput     `json:"search_github_repositories,omitempty"`
+	SearchGitHubThreads   *SearchGitHubThreadsInput          `json:"search_github_threads,omitempty"`
+	SearchCode            *SearchCodeInput                   `json:"search_code,omitempty"`
+	ReadSourceFiles       *ReadSourceFilesInput              `json:"read_source_files,omitempty"`
+	InspectCommitChanges  *InspectCommitChangesInput         `json:"inspect_commit_changes,omitempty"`
+	CheckMergeConflicts   *CheckMergeConflictsInput          `json:"check_merge_conflicts,omitempty"`
+	FindRelatedWork       *FindRelatedWorkInput              `json:"find_related_work,omitempty"`
+	ListConcerns          *ListConcernsInput                 `json:"list_concerns,omitempty"`
+	ListPortfolio         *ListPullRequestPortfolioInput     `json:"list_pull_request_portfolio,omitempty"`
 }
 
 type recoveryActionInput interface {
-	GetJobsInput | GetRepositoriesInput | EnsureCoverageInput | SyncRepositoryContextInput | SyncThreadsInput | HydrateThreadsInput | SyncPortfolioInput | SyncPullRequestFeedbackInput | SyncCIFailuresInput | DeepWikiInput
+	GetJobsInput | GetRepositoriesInput | EnsureCoverageInput | SyncRepositoryContextInput | SyncThreadsInput | HydrateThreadsInput | SyncPortfolioInput | SyncPullRequestFeedbackInput | SyncCIFailuresInput | DeepWikiInput | IndexRepositoriesInput | FindClustersInput | FindNeighborsInput | RankOpportunitiesInput | MineRepositoryFixPatternsInput | PreviewRepositoryFixPatternsInput | SearchGitHubRepositoriesInput | SearchGitHubThreadsInput | SearchCodeInput | ReadSourceFilesInput | InspectCommitChangesInput | CheckMergeConflictsInput | FindRelatedWorkInput | ListConcernsInput | ListPullRequestPortfolioInput
 }
 
 // RecoveryAction derives the action discriminator from a concrete input type,
@@ -80,6 +95,36 @@ func RecoveryAction[T recoveryActionInput](input T) ToolCall {
 		return ToolCall{Type: "sync_ci_failures", SyncCI: &value}
 	case DeepWikiInput:
 		return ToolCall{Type: "query_deepwiki", QueryDeepWiki: &value}
+	case IndexRepositoriesInput:
+		return ToolCall{Type: "index_repositories", IndexRepositories: &value}
+	case FindClustersInput:
+		return ToolCall{Type: "find_clusters", FindClusters: &value}
+	case FindNeighborsInput:
+		return ToolCall{Type: "find_neighbors", FindNeighbors: &value}
+	case RankOpportunitiesInput:
+		return ToolCall{Type: "rank_opportunities", RankOpportunities: &value}
+	case MineRepositoryFixPatternsInput:
+		return ToolCall{Type: "mine_repository_fix_patterns", MineFixPatterns: &value}
+	case PreviewRepositoryFixPatternsInput:
+		return ToolCall{Type: "preview_fix_patterns", PreviewFixPatterns: &value}
+	case SearchGitHubRepositoriesInput:
+		return ToolCall{Type: "search_github_repositories", SearchGitHubRepos: &value}
+	case SearchGitHubThreadsInput:
+		return ToolCall{Type: "search_github_threads", SearchGitHubThreads: &value}
+	case SearchCodeInput:
+		return ToolCall{Type: "search_code", SearchCode: &value}
+	case ReadSourceFilesInput:
+		return ToolCall{Type: "read_source_files", ReadSourceFiles: &value}
+	case InspectCommitChangesInput:
+		return ToolCall{Type: "inspect_commit_changes", InspectCommitChanges: &value}
+	case CheckMergeConflictsInput:
+		return ToolCall{Type: "check_merge_conflicts", CheckMergeConflicts: &value}
+	case FindRelatedWorkInput:
+		return ToolCall{Type: "find_related_work", FindRelatedWork: &value}
+	case ListConcernsInput:
+		return ToolCall{Type: "list_concerns", ListConcerns: &value}
+	case ListPullRequestPortfolioInput:
+		return ToolCall{Type: "list_pull_request_portfolio", ListPortfolio: &value}
 	default:
 		panic("unreachable recovery action input")
 	}
@@ -481,6 +526,7 @@ type PullRequestPortfolioItem struct {
 	Facets                  []FacetCoverageOutput `json:"facets,omitempty"`
 	SourceUpdatedAt         string                `json:"source_updated_at"`
 	StatusObservedAt        string                `json:"status_observed_at,omitempty"`
+	Recovery                *RecoveryPlan         `json:"recovery,omitempty"`
 }
 
 // ListPullRequestPortfolioOutput contains a deterministic portfolio projection.
@@ -493,6 +539,7 @@ type ListPullRequestPortfolioOutput struct {
 	Total         int                        `json:"total"`
 	Truncated     bool                       `json:"truncated"`
 	SnapshotToken string                     `json:"snapshot_token"`
+	Recovery      *RecoveryPlan              `json:"recovery,omitempty"`
 }
 
 // PortfolioSubjectInput identifies local candidate state for offline overlap analysis.
