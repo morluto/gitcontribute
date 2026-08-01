@@ -53,6 +53,12 @@ type PortfolioOperator interface {
 	LinkPullRequest(context.Context, mcpcontract.LinkPullRequestInput) (mcpcontract.LinkPullRequestOutput, error)
 }
 
+// ContributionPreflightReader performs a bounded live read plus local
+// worktree inspection without creating or mutating workflow state.
+type ContributionPreflightReader interface {
+	PreflightContribution(context.Context, mcpcontract.ContributionPreflightInput) (mcpcontract.ContributionPreflightOutput, error)
+}
+
 // GitHubOperator exposes bounded GitHub reads that update only the local corpus.
 type GitHubOperator interface {
 	SearchGitHubRepositories(context.Context, mcpcontract.SearchGitHubRepositoriesInput) (mcpcontract.SearchGitHubRepositoriesOutput, error)

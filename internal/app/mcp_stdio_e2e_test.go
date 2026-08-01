@@ -100,7 +100,7 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		}
 		tools[tool.Name] = tool
 	}
-	for _, name := range []string{mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolRankThreads, mcpcontract.ToolFindPrecedents, mcpcontract.ToolSyncPortfolio, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolSearchGitHubThreads, mcpcontract.ToolReadSourceFiles, mcpcontract.ToolSearchCodeBatch, mcpcontract.ToolSyncRepositoryContext, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads, mcpcontract.ToolEnsureCoverage, mcpcontract.ToolGetSourceAuditWorkflow, mcpcontract.ToolQueryDeepWiki, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCheckMergeConflicts} {
+	for _, name := range []string{mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolRankThreads, mcpcontract.ToolFindPrecedents, mcpcontract.ToolSyncPortfolio, mcpcontract.ToolPreflightContribution, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolSearchGitHubThreads, mcpcontract.ToolReadSourceFiles, mcpcontract.ToolSearchCodeBatch, mcpcontract.ToolSyncRepositoryContext, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads, mcpcontract.ToolEnsureCoverage, mcpcontract.ToolGetSourceAuditWorkflow, mcpcontract.ToolQueryDeepWiki, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCheckMergeConflicts} {
 		if tools[name] == nil {
 			t.Errorf("tools/list missing %s", name)
 		}

@@ -24,6 +24,7 @@ const serverInstructions = "Use advertised GitContribute tools for durable, sour
 	"Missing or truncated coverage is unknown, not negative evidence; use each item's ordered typed recovery calls (the recovery plan's ordered typed calls), preserve exact_thread versus repository targets, poll the returned job, and reread coverage or synchronized headers before drawing conclusions. " +
 	"Canonical source-audit route: corpus.get_coverage -> corpus.ensure_coverage or the returned exact sync/hydration action -> jobs.get -> corpus.get_threads or corpus.get_thread_facets with the returned snapshot token -> corpus.find_clusters/find_neighbors/find_precedents -> explicit github.sync_threads -> jobs.get -> validation.attach_receipt -> workflow.prepare_contribution. Read workflow.get_source_audit_contract for machine-readable transitions. Corpus reads are offline, synchronization is bounded and explicit, missing coverage is unknown, and every returned resource URI must be consumed through MCP resources/read. " +
 	"github.search_threads and github.read_source_files are synchronous live acquisitions that write only local observations and immutable digest-bound artifacts; use their exact resource URI with resources/read, and treat a named source ref as non-authoritative until its resolved commit SHA is recorded. corpus.search_code_batch is an offline shared-snapshot convenience for several code queries; it never falls back to live GitHub code search. " +
+	"Before creating a contribution opportunity or workspace, use workflow.preflight_contribution to check current authored pull requests and optional local worktrees; it returns coverage_unknown when absence is not proven. " +
 	"Only advertised tools are available. GitContribute never mutates GitHub."
 
 // RepositoryRef identifies one GitHub repository without implying that it has
@@ -282,6 +283,18 @@ func (s *Server) registerScalable() {
 		setDefault(sc, "status_max_pages", 3)
 		configureSyncPortfolioModes(sc)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a pull-request portfolio synchronization job."), handler: s.syncPortfolio})
+	addCatalogTool(s, catalogTool[mcpcontract.ContributionPreflightInput, mcpcontract.ContributionPreflightOutput]{name: mcpcontract.ToolPreflightContribution, title: "Preflight an existing contribution", description: "Before creating local contribution work, resolve the authenticated identity, search bounded open authored pull requests and related repository threads, and inspect optional local worktrees. Returns existing_pr, new_work only after live absence is verified, or coverage_unknown when identity, search, or local inspection is incomplete. Read-only; creates no GitHub or workflow state.", annotations: preflightAnnotations(), supportedBy: supports[ContributionPreflightReader], input: inputSchema[mcpcontract.ContributionPreflightInput](func(sc *schemaBuilder) {
+		setRange(sc, "limit", 1, 100)
+		setDefault(sc, "limit", 20)
+		setRange(sc, "max_requests", 2, 1000)
+		setDefault(sc, "max_requests", 100)
+		setArrayBounds(sc, "workspace_paths", 0, 20)
+		if candidate := sc.schema.Defs["ContributionPreflightCandidate"]; candidate != nil {
+			candidateBuilder := &schemaBuilder{schema: candidate, err: sc.err}
+			setMinimum(candidateBuilder, "issue_number", 1)
+			setArrayBounds(candidateBuilder, "changed_files", 0, 200)
+		}
+	}), output: outputSchema[mcpcontract.ContributionPreflightOutput]("Bounded contribution routing decision with explicit live coverage."), handler: s.preflightContribution})
 	addCatalogTool(s, catalogTool[mcpcontract.SyncPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPullRequestFeedback, title: "Synchronize pull-request feedback", description: "Fetch and persist selected issue comments, submitted reviews, inline comments, and review-conversation topology for 1-50 exact pull requests under one total request budget. Creates or refreshes only the local repository and pull-request identities required by those targets; it does not fetch repository guidance or other pull requests. Returns item-level coverage and durable feedback resources.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackOperator], input: inputSchema[mcpcontract.SyncPullRequestFeedbackInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "pull_requests", 1, 50)
 		constrainPullRequestRefs(sc, "pull_requests")

@@ -343,7 +343,7 @@ func TestPullRequestDetails(t *testing.T) {
 			"draft":         false,
 			"merged":        false,
 			"user":          map[string]any{"login": "bob"},
-			"head":          map[string]any{"ref": "feature-branch", "sha": "abc123"},
+			"head":          map[string]any{"ref": "feature-branch", "sha": "abc123", "repo": map[string]any{"name": "hello-world", "owner": map[string]any{"login": "fork"}}},
 			"base":          map[string]any{"ref": "main", "sha": "def456"},
 			"commits":       3,
 			"additions":     10,
@@ -364,6 +364,9 @@ func TestPullRequestDetails(t *testing.T) {
 	}
 	if pr.HeadSHA != "abc123" || pr.BaseSHA != "def456" {
 		t.Errorf("unexpected head/base SHAs: %+v", pr)
+	}
+	if pr.HeadOwner != "fork" || pr.HeadRepo != "hello-world" {
+		t.Errorf("unexpected head repository: %+v", pr)
 	}
 }
 

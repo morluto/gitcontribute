@@ -88,6 +88,29 @@ loss of comparison semantics that would justify another process-capable tool.
 Reconsider only if controlled traces show recurring client mistakes or a
 material call/payload reduction that preserves authorization and proof.
 
+## Contribution preflight
+
+```text
+workflow.preflight_contribution
+```
+
+Contribution preflight is the narrow exception to the portfolio composition
+above. It is a read-only, bounded routing operation for the point before an
+opportunity or workspace exists. It resolves the authenticated identity,
+searches only the target repository for open authored pull requests, performs
+one bounded related issue/PR search, and inspects explicitly supplied local Git
+worktree paths without adopting or changing them. The operation returns
+`existing_pr` when an authored PR matches a title, branch, commit, or inspected
+worktree; it returns `new_work` only when every required live search and local
+inspection completed; otherwise it returns `coverage_unknown` with reasons and
+the next action needed to retry.
+
+This contract closes the pre-candidate gap without duplicating portfolio
+storage or local workflow links. It does not create jobs, write the corpus,
+create worktrees, or mutate GitHub. The regression fixtures cover an existing
+authored PR with a matching local branch, unavailable identity, and a verified
+unrelated candidate.
+
 ## Unified catalog
 
 The managed server advertises the unified `all` catalog. Current Codex and

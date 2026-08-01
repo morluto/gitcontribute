@@ -76,3 +76,27 @@ func (s *Server) linkPullRequest(ctx context.Context, _ *mcp.CallToolRequest, in
 	out, err := operator.LinkPullRequest(ctx, in)
 	return nil, out, err
 }
+
+func (s *Server) preflightContribution(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.ContributionPreflightInput) (*mcp.CallToolResult, mcpcontract.ContributionPreflightOutput, error) {
+	if err := validateThreadRef(mcpcontract.ThreadRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo, Number: 1}, true); err != nil {
+		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("repository", "owner and repo are required", map[string]any{"owner": "acme", "repo": "rocket"})
+	}
+	if strings.TrimSpace(in.Candidate.Title) == "" && strings.TrimSpace(in.Candidate.Query) == "" && strings.TrimSpace(in.Candidate.Body) == "" && in.Candidate.IssueNumber < 1 && strings.TrimSpace(in.Candidate.HeadRef) == "" && strings.TrimSpace(in.Candidate.HeadSHA) == "" && len(in.Candidate.ChangedFiles) == 0 && len(in.WorkspacePaths) == 0 {
+		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("candidate", "candidate or workspace_paths must provide title, query, body, issue_number, head_ref, head_sha, or changed_files", nil)
+	}
+	if in.Candidate.IssueNumber < 0 {
+		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("candidate.issue_number", "issue_number must be positive when provided", map[string]any{"issue_number": 1})
+	}
+	if in.Limit < 0 || in.Limit > 100 {
+		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("limit", "limit must be between 1 and 100 when provided", map[string]any{"limit": 20})
+	}
+	if in.MaxRequests < 0 || in.MaxRequests > 1000 || (in.MaxRequests > 0 && in.MaxRequests < 2) {
+		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("max_requests", "max_requests must be between 2 and 1000 when provided", map[string]any{"max_requests": 100})
+	}
+	reader, ok := s.reader.(ContributionPreflightReader)
+	if !ok {
+		return nil, mcpcontract.ContributionPreflightOutput{}, errors.New("contribution preflight is not available")
+	}
+	out, err := reader.PreflightContribution(ctx, in)
+	return nil, out, err
+}

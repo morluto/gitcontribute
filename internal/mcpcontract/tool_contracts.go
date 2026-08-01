@@ -69,6 +69,7 @@ const (
 	ToolSyncThreads                  = "github.sync_threads"
 	ToolHydrateThreads               = "github.sync_thread_facets"
 	ToolSyncPortfolio                = "github.sync_pull_request_portfolio"
+	ToolPreflightContribution        = "workflow.preflight_contribution"
 	ToolSyncPullRequestFeedback      = "github.sync_pull_request_feedback"
 	ToolSyncCIFailures               = "github.sync_ci_failures"
 	ToolListPullRequestPortfolio     = "corpus.list_pull_requests"

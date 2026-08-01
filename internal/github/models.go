@@ -75,9 +75,11 @@ type Identity struct {
 // AuthoredPullRequestSearchOptions selects one bounded authored-PR search page.
 // UpdatedAfter is translated to GitHub Search's UTC date-granularity qualifier.
 type AuthoredPullRequestSearchOptions struct {
-	Login        string
-	State        string
-	UpdatedAfter time.Time
+	Login           string
+	RepositoryOwner string
+	RepositoryName  string
+	State           string
+	UpdatedAfter    time.Time
 	PageOptions
 }
 
@@ -143,6 +145,8 @@ type PullRequestDetails struct {
 	MergeCommitSHA    string
 	HeadRef           string
 	HeadSHA           string
+	HeadOwner         string
+	HeadRepo          string
 	BaseRef           string
 	BaseSHA           string
 	CommentsCount     int
