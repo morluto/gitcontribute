@@ -133,6 +133,8 @@ func TestClassifyNPMExecutableDistinguishesProjectAndGlobalInstalls(t *testing.T
 }
 
 func TestUpgradeReportsInspectableStagesForGlobalNPM(t *testing.T) {
+	t.Setenv("npm_command", "")
+	t.Setenv("npm_lifecycle_event", "")
 	originalCmd := upgradeCommand
 	originalExec := osExecutable
 	t.Cleanup(func() {
@@ -190,6 +192,8 @@ func TestUpgradeReportsInspectableStagesForGlobalNPM(t *testing.T) {
 }
 
 func TestUpgradeGlobalNPMInstallsLatest(t *testing.T) {
+	t.Setenv("npm_command", "")
+	t.Setenv("npm_lifecycle_event", "")
 	originalCmd := upgradeCommand
 	originalExec := osExecutable
 	originalGOOS := upgradeGOOS
@@ -249,6 +253,8 @@ func TestUpgradeGlobalNPMInstallsLatest(t *testing.T) {
 }
 
 func TestUpgradeWindowsGlobalNPMDoesNotInstall(t *testing.T) {
+	t.Setenv("npm_command", "")
+	t.Setenv("npm_lifecycle_event", "")
 	originalCmd := upgradeCommand
 	originalExec := osExecutable
 	originalGOOS := upgradeGOOS
@@ -304,6 +310,8 @@ func TestUpgradeWindowsGlobalNPMDoesNotInstall(t *testing.T) {
 }
 
 func TestUpgradeProjectNPMReportsManualUpdate(t *testing.T) {
+	t.Setenv("npm_command", "")
+	t.Setenv("npm_lifecycle_event", "")
 	originalCmd := upgradeCommand
 	originalExec := osExecutable
 	t.Cleanup(func() {
@@ -419,6 +427,8 @@ func TestUpgradeConfiguredRuntimeOutdated(t *testing.T) {
 }
 
 func TestUpgradeCombinedInstallActivatesPrivateRuntimeFromInstalledPackage(t *testing.T) {
+	t.Setenv("npm_command", "")
+	t.Setenv("npm_lifecycle_event", "")
 	originalCmd := upgradeCommand
 	originalExec := osExecutable
 	originalGOOS := upgradeGOOS
@@ -673,6 +683,8 @@ func setRuntimeContractOutput(t *testing.T, output string) {
 
 func setupUpgradeActivationTest(t *testing.T, currentVersion, targetVersion, candidateVersion string) (home, source, configPath string, want []byte, svc *Service) {
 	t.Helper()
+	t.Setenv("npm_command", "")
+	t.Setenv("npm_lifecycle_event", "")
 	originalCmd := upgradeCommand
 	originalExec := osExecutable
 	t.Cleanup(func() {

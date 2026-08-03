@@ -173,6 +173,8 @@ func TestUpgradeRejectsDestinationRuntimeContractDisagreementBeforeRegistration(
 }
 
 func TestUpgradeRejectsMismatchedPostInstallNPMVersion(t *testing.T) {
+	t.Setenv("npm_command", "")
+	t.Setenv("npm_lifecycle_event", "")
 	originalCmd := upgradeCommand
 	originalExec := osExecutable
 	originalGOOS := upgradeGOOS
