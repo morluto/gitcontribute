@@ -93,15 +93,6 @@ func (f *fakeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-func newGetRequest(t *testing.T, rawurl string) *http.Request {
-	t.Helper()
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, rawurl, nil)
-	if err != nil {
-		t.Fatalf("new request: %v", err)
-	}
-	return req
-}
-
 func TestRetryTransportRetries5xx(t *testing.T) {
 	ft := &fakeTransport{
 		results: []fakeResult{
