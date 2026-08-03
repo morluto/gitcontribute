@@ -21,14 +21,14 @@ const testRepo = "hello-world"
 
 type noopLimiter struct{}
 
-func (noopLimiter) WaitN(ctx context.Context, n int) error { return nil }
+func (noopLimiter) WaitN(_ context.Context, n int) error { return nil }
 
 type countingLimiter struct {
 	calls int
 	err   error
 }
 
-func (l *countingLimiter) WaitN(ctx context.Context, n int) error {
+func (l *countingLimiter) WaitN(_ context.Context, n int) error {
 	l.calls++
 	return l.err
 }
@@ -509,7 +509,7 @@ func TestPermanentAccessErrorsAreTyped(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(tt.status)
 				writeJSON(w, map[string]any{"message": tt.name})
 			}))
@@ -673,7 +673,7 @@ type fakeRunner struct {
 	err error
 }
 
-func (f fakeRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+func (f fakeRunner) Run(_ context.Context, name string, args ...string) (string, error) {
 	return f.out, f.err
 }
 

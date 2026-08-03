@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -123,7 +124,8 @@ func TestStructuredCancellationIsNotRetryable(t *testing.T) {
 		return nil, struct{}{}, context.Canceled
 	})
 	_, _, err := handler(context.Background(), nil, struct{}{})
-	toolErr, ok := err.(*mcpcontract.ToolError)
+	toolErr := &mcpcontract.ToolError{}
+	ok := errors.As(err, &toolErr)
 	if !ok || toolErr.Code != "cancelled" || toolErr.Retryable {
 		t.Fatalf("cancellation error = %#v", err)
 	}
@@ -140,12 +142,12 @@ func TestReadOnlyModeFiltersEverySideEffectingTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer serverSession.Close()
+	defer func() { _ = serverSession.Close() }()
 	clientSession, err := client.Connect(context.Background(), t2, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer clientSession.Close()
+	defer func() { _ = clientSession.Close() }()
 	for tool, err := range clientSession.Tools(context.Background(), nil) {
 		if err != nil {
 			t.Fatal(err)
@@ -168,12 +170,12 @@ func TestUnsupportedOptionalCapabilitiesAreNotAdvertised(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer serverSession.Close()
+	defer func() { _ = serverSession.Close() }()
 	clientSession, err := client.Connect(context.Background(), t2, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer clientSession.Close()
+	defer func() { _ = clientSession.Close() }()
 	names := map[string]bool{}
 	for tool, err := range clientSession.Tools(context.Background(), nil) {
 		if err != nil {

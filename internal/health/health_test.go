@@ -24,6 +24,7 @@ func openTestCorpus(t *testing.T) *corpus.Corpus {
 	return c
 }
 
+//nolint:revive // test helpers keep *testing.T first for readable failure locations.
 func upsertThread(t *testing.T, ctx context.Context, c *corpus.Corpus, repoID int64, thread corpus.Thread, authorAssoc string) *corpus.Thread {
 	t.Helper()
 	payload, err := json.Marshal(github.Issue{Author: thread.Author, AuthorAssociation: authorAssoc})
@@ -39,6 +40,7 @@ func upsertThread(t *testing.T, ctx context.Context, c *corpus.Corpus, repoID in
 	return out
 }
 
+//nolint:revive // test helpers keep *testing.T first for readable failure locations.
 func applyFacet(t *testing.T, ctx context.Context, c *corpus.Corpus, repoID, threadID int64, facet string, sourceUpdated time.Time, payload any, complete bool) {
 	t.Helper()
 	var pages []corpus.FacetObservationInput

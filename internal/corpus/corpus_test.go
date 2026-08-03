@@ -15,18 +15,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-func openTestCorpus(t *testing.T) (*Corpus, string) {
-	t.Helper()
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "corpus.db")
-	c, err := Open(ctx, path)
-	if err != nil {
-		t.Fatalf("open corpus: %v", err)
-	}
-	t.Cleanup(func() { _ = c.Close() })
-	return c, path
-}
-
 func TestMigrationLoggerFatalfRecordsError(t *testing.T) {
 	t.Parallel()
 	logger := &migrationLogger{}
@@ -95,7 +83,7 @@ func TestOpenReopensPathAfterInitializationLeaseHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	repo, err := c.GetRepository(ctx, "owner", "replacement")
 	if err != nil {
 		t.Fatal(err)
@@ -240,7 +228,7 @@ func TestOpenRejectsEmptyDatabaseOwnedByAnotherApplication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var applicationID int
 	if err := db.QueryRowContext(ctx, `PRAGMA application_id`).Scan(&applicationID); err != nil {
 		t.Fatal(err)
@@ -274,7 +262,7 @@ func TestOpenRejectsUnmarkedEmptyMigrationTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var tableCount int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'repositories'`).Scan(&tableCount); err != nil {
 		t.Fatal(err)
@@ -306,7 +294,7 @@ func TestOpenRetriesMarkedInterruptedInitialization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("retry Open: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	current, target, err := c.SchemaVersions(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -330,7 +318,7 @@ func TestCheckWriteAccessReportsContentionImmediatelyAndRestoresTimeout(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		t.Fatal(err)
 	}

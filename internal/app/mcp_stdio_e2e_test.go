@@ -33,7 +33,7 @@ func TestMCPStdioHelper(t *testing.T) {
 	if home == "" {
 		t.Skip("stdio helper subprocess only")
 	}
-	svc, err := New(config.NewPaths(&config.Env{Home: home}), "e2e", nil)
+	svc, err := NewWithContext(context.Background(), config.NewPaths(&config.Env{Home: home}), "e2e", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,8 +173,11 @@ func TestMCPStdioPullRequestPortfolioFlow(t *testing.T) {
 		t.Fatalf("portfolio = %+v, sync job = %+v", portfolio, syncResult)
 	}
 	pr := portfolio.PullRequests[0]
-	if pr.Ref != "lab/project#7" || pr.Attention != "approved" || pr.ReviewDecision != "approved" || pr.Mergeable == nil || !*pr.Mergeable {
+	if pr.Ref != "lab/project#7" || pr.ReviewDecision != "approved" || pr.Mergeable == nil || !*pr.Mergeable {
 		t.Fatalf("portfolio PR = %+v", pr)
+	}
+	if pr.Attention != "stale" {
+		t.Fatalf("portfolio attention = %q, want stale independently of approval and mergeability", pr.Attention)
 	}
 	if pr.HeadSHA != "head123" || pr.BaseSHA != "base123" || pr.StatusCoverage != "complete" {
 		t.Fatalf("portfolio status coverage = %+v", pr)
@@ -400,7 +403,7 @@ func replayMCPRecoveryAction(t *testing.T, action mcpcontract.ToolCall) (string,
 
 func seedMCPStdioCorpus(ctx context.Context, t *testing.T, home string) {
 	t.Helper()
-	svc, err := New(config.NewPaths(&config.Env{Home: home}), "e2e", nil)
+	svc, err := NewWithContext(ctx, config.NewPaths(&config.Env{Home: home}), "e2e", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +436,7 @@ func seedMCPStdioCorpus(ctx context.Context, t *testing.T, home string) {
 
 func seedMCPStdioEmptyCorpus(ctx context.Context, t *testing.T, home string) {
 	t.Helper()
-	svc, err := New(config.NewPaths(&config.Env{Home: home}), "e2e", nil)
+	svc, err := NewWithContext(ctx, config.NewPaths(&config.Env{Home: home}), "e2e", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,6 +451,7 @@ func newMCPGitHubServer(t *testing.T) *httptest.Server {
 	now := time.Now().UTC()
 	timestamps := map[string]string{
 		"2026-07-18T22:00:00Z": now.Add(-30 * time.Minute).Format(time.RFC3339),
+		"2026-07-01T20:00:00Z": now.Add(-15 * 24 * time.Hour).Format(time.RFC3339),
 		"2026-07-18T21:05:00Z": now.Add(-55 * time.Minute).Format(time.RFC3339),
 		"2026-07-18T21:00:00Z": now.Add(-time.Hour).Format(time.RFC3339),
 		"2026-07-18T20:00:00Z": now.Add(-2 * time.Hour).Format(time.RFC3339),
@@ -494,7 +498,7 @@ func newMCPGitHubServer(t *testing.T) *httptest.Server {
 				"pushed_at": "2026-07-18T19:00:00Z"
 			}`))
 		case strings.HasSuffix(r.URL.Path, "/repos/lab/project"):
-			_, _ = w.Write([]byte(`{"id":202,"node_id":"R_project","name":"project","full_name":"lab/project","owner":{"login":"lab"},"default_branch":"main","language":"Go","updated_at":"2026-07-18T20:00:00Z"}`))
+			_, _ = w.Write([]byte(`{"id":202,"node_id":"R_project","name":"project","full_name":"lab/project","owner":{"login":"lab"},"default_branch":"main","language":"Go","updated_at":"2026-07-01T20:00:00Z"}`))
 		case strings.HasSuffix(r.URL.Path, "/user"):
 			_, _ = w.Write([]byte(`{"login":"morluto","id":99,"node_id":"U_99"}`))
 		case strings.HasSuffix(r.URL.Path, "/search/issues"):
@@ -507,7 +511,7 @@ func newMCPGitHubServer(t *testing.T) *httptest.Server {
 					"repository_url":"https://api.github.test/repos/lab/project",
 					"html_url":"https://github.com/lab/project/pull/7",
 					"pull_request":{"url":"https://api.github.test/repos/lab/project/pulls/7","html_url":"https://github.com/lab/project/pull/7"},
-					"created_at":"2026-07-15T10:00:00Z","updated_at":"2026-07-18T20:00:00Z"
+					"created_at":"2026-07-15T10:00:00Z","updated_at":"2026-07-01T20:00:00Z"
 				}]
 			}`))
 		case strings.HasSuffix(r.URL.Path, "/repos/lab/project/issues/7"):
@@ -517,7 +521,7 @@ func newMCPGitHubServer(t *testing.T) *httptest.Server {
 				"repository_url":"https://api.github.test/repos/lab/project",
 				"html_url":"https://github.com/lab/project/pull/7",
 				"pull_request":{"url":"https://api.github.test/repos/lab/project/pulls/7","html_url":"https://github.com/lab/project/pull/7"},
-				"created_at":"2026-07-15T10:00:00Z","updated_at":"2026-07-18T20:00:00Z"
+				"created_at":"2026-07-15T10:00:00Z","updated_at":"2026-07-01T20:00:00Z"
 			}`))
 		case strings.HasSuffix(r.URL.Path, "/repos/lab/project/issues/8"):
 			_, _ = w.Write([]byte(`{
@@ -525,7 +529,7 @@ func newMCPGitHubServer(t *testing.T) *httptest.Server {
 				"body":"Keep refresh scope narrow","user":{"login":"morluto"},
 				"repository_url":"https://api.github.test/repos/lab/project",
 				"html_url":"https://github.com/lab/project/issues/8",
-				"created_at":"2026-07-15T10:00:00Z","updated_at":"2026-07-18T20:00:00Z"
+				"created_at":"2026-07-15T10:00:00Z","updated_at":"2026-07-01T20:00:00Z"
 			}`))
 		case strings.HasSuffix(r.URL.Path, "/repos/lab/project/pulls/7/reviews"):
 			_, _ = w.Write([]byte(`[{"id":701,"node_id":"R_701","state":"APPROVED","user":{"login":"reviewer"},"commit_id":"head123","submitted_at":"2026-07-18T21:00:00Z"}]`))
@@ -544,7 +548,7 @@ func newMCPGitHubServer(t *testing.T) *httptest.Server {
 				"id":700,"node_id":"PR_7","number":7,"state":"open","title":"Fix cache lifecycle",
 				"body":"Make cleanup deterministic","user":{"login":"morluto"},"draft":false,"merged":false,"mergeable":true,
 				"head":{"ref":"fix/cache","sha":"head123"},"base":{"ref":"main","sha":"base123"},
-				"created_at":"2026-07-15T10:00:00Z","updated_at":"2026-07-18T20:00:00Z"
+				"created_at":"2026-07-15T10:00:00Z","updated_at":"2026-07-01T20:00:00Z"
 			}`))
 		default:
 			http.NotFound(w, r)

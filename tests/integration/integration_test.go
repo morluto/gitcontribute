@@ -24,7 +24,7 @@ func TestInitAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create application service: %v", err)
 	}
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	result, err := svc.Init(context.Background())
 	if err != nil {
@@ -53,7 +53,7 @@ func TestMetadataConfirmsVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create application service: %v", err)
 	}
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	metadata, err := svc.Metadata(context.Background())
 	if err != nil {
@@ -77,7 +77,7 @@ func TestDoctorWithoutCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create application service: %v", err)
 	}
-	defer svc.Close()
+	defer func() { _ = svc.Close() }()
 
 	result, err := svc.Doctor(context.Background())
 	if err != nil {

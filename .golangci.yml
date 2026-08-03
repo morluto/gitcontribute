@@ -90,25 +90,6 @@ linters:
       - LICENSES
       - third_party$
     rules:
-      - path: _test\.go$
-        linters:
-          - funlen
-          - gocognit
-          - dupl
-          - errcheck
-          - noctx
-          - contextcheck
-          - gosec
-          - errname
-          - errorlint
-          - bodyclose
-          - cyclop
-          - nilnil
-          - perfsprint
-          - prealloc
-          - revive
-          - staticcheck
-          - unconvert
       # These boundaries intentionally create/close context-owning services;
       # contextcheck cannot model their lifecycle contracts.
       - path: ^cmd/gitcontribute/main\.go$|^internal/app/(app|discovery|hydration|jobs)\.go$
@@ -133,3 +114,104 @@ linters:
       - path: ^internal/corpus/(frontier|jobs|tracking)\.go$
         linters:
           - sqlclosecheck
+      # These tests intentionally model raw RoundTripper responses and use
+      # repeated status-specific fixtures; the production transport owns the
+      # response lifecycle and the duplicated fixtures keep each rate-limit
+      # contract readable.
+      - path: ^internal/github/(retry|retry_replay)_test\.go$
+        linters:
+          - bodyclose
+          - dupl
+          - noctx
+      # MCP subprocess fixtures own their service lifetime inside the test
+      # process and deliberately use the convenience constructor.
+      - path: ^internal/app/mcp_stdio_e2e_test\.go$
+        linters:
+          - contextcheck
+      # These test helpers intentionally use the project convenience
+      # constructor and close services at the test boundary.
+      - path: ^internal/app/read_boundary_test\.go$
+        linters:
+          - contextcheck
+      # These are subprocess and filesystem boundary harnesses. Their command
+      # paths and permissions are test-controlled, while the production
+      # adapters remain subject to the security linters.
+      - path: ^internal/app/mcp_stdio_e2e_test\.go$|^internal/app/tui_capture_test\.go$|^internal/app/app_test\.go$|^internal/acquire/acquire_test\.go$|^internal/codeindex/codeindex_test\.go$|^internal/workspace/workspace_test\.go$|^internal/corpus/lifecycle_test\.go$|^internal/app/setup_verification_test\.go$|^internal/managedbinary/install_test\.go$|^internal/tui/snapshot_test\.go$
+        linters:
+          - gosec
+          - noctx
+      # These compact fakes and HTTP fixtures intentionally omit unrelated
+      # arguments or return zero values for capabilities under test elsewhere.
+      - path: ^internal/app/hydration_test\.go$|^internal/app/job_executor_reconciliation_test\.go$|^internal/discovery/gharchive_fetcher_test\.go$|^internal/discovery/search_test\.go$|^internal/github/client_test\.go$|^internal/tui/tui_test\.go$
+        linters:
+          - revive
+          - errcheck
+          - dupl
+      - path: ^internal/app/job_executor_test\.go$|^internal/github/retry_test\.go$
+        linters:
+          - revive
+      - path: ^internal/app/job_executor_test\.go$|^internal/cli/cli_test\.go$
+        linters:
+          - nilnil
+      # These local test servers and teardown-only writes are intentionally
+      # best effort; their assertions cover the observable operation.
+      - path: ^internal/app/app_test\.go$|^internal/app/control_test\.go$|^internal/app/corpus_lifecycle_test\.go$|^internal/app/discovery_test\.go$|^internal/app/mcp_stdio_e2e_test\.go$|^internal/app/setup_verification_test\.go$|^internal/buflimit/buflimit_test\.go$|^internal/cli/setup_prompt_internal_test\.go$|^internal/corpus/lifecycle_test\.go$|^internal/corpus/tracking_test\.go$|^internal/discovery/gharchive_fetcher_test\.go$|^internal/discovery/gharchive_test\.go$|^internal/github/pull_request_workflows_test\.go$|^internal/log/log_test\.go$
+        linters:
+          - errcheck
+      # These test handlers and nested JSON assertions are fixture plumbing;
+      # their surrounding behavior is asserted by the test cases.
+      - path: ^internal/app/guidance_test\.go$|^internal/app/mcp_github_acquisition_test\.go$|^internal/app/read_boundary_test\.go$|^internal/app/setup_test\.go$|^internal/tracking/sanitize_test\.go$
+        linters:
+          - errcheck
+      - path: ^internal/app/commitplan_test\.go$|^internal/app/control_test\.go$|^internal/tui/snapshot_test\.go$
+        linters:
+          - gosec
+      - path: ^internal/app/setup_test\.go$|^internal/buflimit/buflimit_test\.go$|^internal/cli/surfaces_test\.go$|^internal/discovery/gharchive_fetcher_test\.go$|^internal/log/log_test\.go$
+        linters:
+          - gosec
+      - path: ^internal/app/tui_test\.go$|^internal/tui/actions_test\.go$
+        linters:
+          - errcheck
+      - path: ^internal/tui/snapshot_test\.go$
+        linters:
+          - errcheck
+      - path: ^internal/cli/extended_test\.go$
+        linters:
+          - revive
+      - path: ^internal/app/sync_metadata_test\.go$
+        linters:
+          - revive
+      # These final fixture-only writes use executable or world-readable
+      # permissions to emulate installed artifacts and serialized outputs.
+      - path: ^internal/app/discovery_test\.go$|^internal/app/surfaces_test\.go$|^internal/app/upgrade_activation_test\.go$|^internal/app/upgrade_registration_test\.go$|^internal/github/client_test\.go$
+        linters:
+          - gosec
+      # Type assertions in these protocol fixtures are the assertions under
+      # test; failure is reported by the surrounding test assertion.
+      - path: ^cmd/gitcontribute/main_test\.go$|^internal/mcpserver/server_test\.go$|^internal/setup/setup_test\.go$
+        linters:
+          - errcheck
+      - path: ^internal/app/guidance_test\.go$|^internal/app/upgrade_setup_test\.go$|^internal/app/upgrade_test\.go$|^internal/corpus/tracking_test\.go$
+        linters:
+          - gosec
+      - path: ^internal/cli/surfaces_test\.go$
+        linters:
+          - revive
+      - path: ^internal/app/mcp_pr_workflows_test\.go$|^internal/app/mcp_thread_facets_test\.go$
+        linters:
+          - errcheck
+      - path: ^internal/app/mcp_github_acquisition_test\.go$
+        linters:
+          - gosec
+      - path: ^internal/cli/cli_test\.go$
+        linters:
+          - revive
+      - path: ^internal/app/surfaces_test\.go$
+        linters:
+          - errcheck
+      - path: ^internal/discovery/gharchive_test\.go$
+        linters:
+          - gosec
+      - path: ^internal/app/upgrade_test\.go$|^internal/evidence/mcp_runner_test\.go$
+        linters:
+          - noctx

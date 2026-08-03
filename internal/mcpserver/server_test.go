@@ -65,7 +65,7 @@ func (*fakeReader) SearchPullRequestFeedback(context.Context, mcpcontract.Search
 	return mcpcontract.SearchPullRequestFeedbackOutput{Status: "complete"}, nil
 }
 
-func (*fakeReader) GetThreadFacets(_ context.Context, in mcpcontract.GetThreadFacetsInput) (mcpcontract.GetThreadFacetsOutput, error) {
+func (*fakeReader) GetThreadFacets(_ context.Context, _ mcpcontract.GetThreadFacetsInput) (mcpcontract.GetThreadFacetsOutput, error) {
 	return mcpcontract.GetThreadFacetsOutput{Status: "complete"}, nil
 }
 
@@ -391,7 +391,7 @@ func (*fakeReader) Draft(_ context.Context, in mcpcontract.DraftInput) (mcpcontr
 	return mcpcontract.DraftOutput{ID: in.ID, Revision: in.Revision, OpportunityID: "opp-1", Kind: "issue", Title: "draft", Body: "body"}, nil
 }
 
-func (f *fakeReader) AttachValidationReceipt(_ context.Context, in mcpcontract.AttachValidationReceiptInput) (mcpcontract.ExternalValidationReceiptOutput, error) {
+func (f *fakeReader) AttachValidationReceipt(_ context.Context, _ mcpcontract.AttachValidationReceiptInput) (mcpcontract.ExternalValidationReceiptOutput, error) {
 	f.recordCall("attach_validation_receipt")
 	return mcpcontract.ExternalValidationReceiptOutput{RunID: "external-run", ReceiptSHA256: "digest"}, nil
 }
@@ -401,7 +401,7 @@ func (f *fakeReader) VerifyPublishedDraft(_ context.Context, in mcpcontract.Veri
 	return mcpcontract.PublishedDraftVerificationOutput{Status: "exact_match", DraftID: in.DraftID, Revision: in.Revision}, nil
 }
 
-func (*fakeReader) ExportManifest(_ context.Context, in mcpcontract.ExportManifestInput) (mcpcontract.ManifestOutput, error) {
+func (*fakeReader) ExportManifest(_ context.Context, _ mcpcontract.ExportManifestInput) (mcpcontract.ManifestOutput, error) {
 	return mcpcontract.ManifestOutput{ManifestID: "sha256:test", ContentSHA256: "test", SchemaVersion: "contribution-evidence.v1", Status: "incomplete"}, nil
 }
 
