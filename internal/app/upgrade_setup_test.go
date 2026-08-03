@@ -49,8 +49,8 @@ func TestUpgradeActivatesPrivateMCPRuntimeFromTargetRelease(t *testing.T) {
 }
 
 func TestUpgradeNpxActivatesPrivateMCPRuntimeFromLatestRelease(t *testing.T) {
-	t.Setenv("npm_command", "exec")
 	home, _, _, _, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.4")
+	t.Setenv("npm_command", "exec")
 	setRuntimeContract(t, "1.2.4", 1)
 
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
@@ -121,8 +121,8 @@ func TestUpgradeActivatesAlreadyInstalledTargetRuntime(t *testing.T) {
 }
 
 func TestUpgradeNpxStaleBootstrapReportsExplicitLatestRecovery(t *testing.T) {
-	t.Setenv("npm_command", "exec")
 	_, _, configPath, want, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.3")
+	t.Setenv("npm_command", "exec")
 	setRuntimeContract(t, "1.2.3", 1)
 
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
