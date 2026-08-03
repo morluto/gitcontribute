@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestBaselineMigrationCreatesCurrentSchema(t *testing.T) {
@@ -27,6 +28,10 @@ func TestBaselineMigrationCreatesCurrentSchema(t *testing.T) {
 		"validation_run_groups",
 		"code_index_artifacts", "corpus_snapshot_tokens", "corpus_read_artifacts",
 		"pull_request_feedback_discovery", "pull_request_feedback_projection", "pull_request_feedback_fts",
+		"actors", "actor_aliases", "actor_observations", "actor_profiles", "actor_social_accounts",
+		"actor_organization_memberships", "actor_pinned_items", "actor_repository_affiliations",
+		"actor_contribution_periods", "actor_contribution_days", "actor_contribution_items",
+		"actor_repository_contribution_totals", "actors_fts",
 	} {
 		if !migrationTableExists(ctx, t, c.db, table) {
 			t.Fatalf("table %s missing after baseline migration", table)
@@ -44,6 +49,40 @@ func TestBaselineMigrationCreatesCurrentSchema(t *testing.T) {
 	}
 	if !migrationColumnExists(ctx, t, c.db, "projection_states", "content_hash") {
 		t.Fatal("projection_states.content_hash missing after baseline migration")
+	}
+}
+
+func TestActorMigrationDeduplicatesExistingLoginsCaseInsensitively(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	provider, logger, err := c.migrationProvider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.Down(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := logger.Err(); err != nil {
+		t.Fatal(err)
+	}
+	for _, owner := range []string{"Mona", "mona"} {
+		if _, err := c.ApplyRepositoryObservation(ctx, owner, "repo-"+owner, "", time.Unix(1, 0).UTC(), `{}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := provider.UpTo(ctx, 14); err != nil {
+		t.Fatal(err)
+	}
+	if err := logger.Err(); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM actors WHERE lower(current_login)='mona'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("case-insensitive actor count = %d, want 1", count)
 	}
 }
 
