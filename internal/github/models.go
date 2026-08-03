@@ -2,6 +2,133 @@ package github
 
 import "time"
 
+// Actor is a domain-neutral GitHub account profile. Nullable fields preserve
+// provider omission and visibility instead of manufacturing zero values.
+type Actor struct {
+	Login              string
+	ID                 int64
+	NodeID             string
+	Kind               string
+	AvatarURL          *string
+	Name               *string
+	Bio                *string
+	Company            *string
+	Location           *string
+	WebsiteURL         *string
+	PublicEmail        *string
+	TwitterUsername    *string
+	Hireable           *bool
+	Followers          *int
+	Following          *int
+	PublicRepositories *int
+	PublicGists        *int
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
+type UserSearchOptions struct {
+	Query   string
+	Sort    string
+	Order   string
+	Page    int
+	PerPage int
+}
+
+type UserSearchResult struct {
+	Total      int
+	Incomplete bool
+	Items      []Actor
+	Page       PageInfo
+	Rate       RateInfo
+}
+
+type UserRepositoryOptions struct {
+	Relationship string
+	Sort         string
+	Direction    string
+	After        string
+	PageOptions
+}
+
+type CursorPageOptions struct {
+	First int
+	After string
+}
+
+type SocialAccount struct {
+	Provider    string
+	URL         string
+	DisplayName string
+}
+
+type OrganizationIdentity struct {
+	NodeID    string
+	Login     string
+	AvatarURL string
+}
+
+type PinnedItem struct {
+	Kind            string
+	NodeID          string
+	Name            string
+	RepositoryOwner string
+	Rank            int
+}
+
+type PinnedItemsResult struct {
+	Items        []PinnedItem
+	ShowcaseKind string
+	Coverage     FacetCoverage
+	Rate         RateInfo
+}
+
+type UserContributionOptions struct {
+	From               time.Time
+	To                 time.Time
+	OrganizationNodeID string
+	MaxRepositories    int
+}
+
+type ContributionDay struct {
+	Date  string
+	Count int
+	Level string
+}
+
+type UserContribution struct {
+	Kind                string
+	OccurredAt          time.Time
+	RepositoryNodeID    string
+	RepositoryNameOwner string
+	TargetNodeID        string
+	TargetURL           string
+	Restricted          bool
+	Count               int
+}
+
+type RepositoryContributionTotal struct {
+	RepositoryNodeID    string
+	RepositoryNameOwner string
+	Kind                string
+	Count               int
+}
+
+type UserContributionCollection struct {
+	StartedAt               time.Time
+	EndedAt                 time.Time
+	TotalCommits            int
+	TotalIssues             int
+	TotalPullRequests       int
+	TotalPullRequestReviews int
+	TotalRepositories       int
+	RestrictedContributions int
+	Days                    []ContributionDay
+	Items                   []UserContribution
+	RepositoryTotals        []RepositoryContributionTotal
+	Complete                bool
+	Rate                    RateInfo
+}
+
 // ThreadKind classifies an issue-list entry.
 type ThreadKind string
 
@@ -308,6 +435,7 @@ type PageInfo struct {
 	HasPrev   bool
 	HasFirst  bool
 	HasLast   bool
+	EndCursor string
 }
 
 // RateInfo carries rate-limit metadata from the response headers.
