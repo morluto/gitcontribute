@@ -199,7 +199,10 @@ func (c *Corpus) ApplyActorIdentityObservation(ctx context.Context, provider, lo
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE actors SET actor_key=?, node_id=NULLIF(?,''), database_id=?, kind=?, current_login=?,
-		 observation_sequence=?, updated_at=? WHERE id=?
+		 observation_sequence=?, updated_at=?
+		WHERE id=? AND NOT EXISTS (
+		 SELECT 1 FROM actor_profiles WHERE actor_id=actors.id
+		)
 	`, actorKey(provider, nodeID, login), nodeID, databaseID, kind, login, sequence, encodeTime(observedAt), actorID); err != nil {
 		return Actor{}, fmt.Errorf("advance actor identity: %w", err)
 	}

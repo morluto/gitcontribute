@@ -60,22 +60,18 @@ func (c *Corpus) GetActorContributionCoverage(ctx context.Context, actorID int64
 		return nil, nil
 	}
 	var coverage ActorFacetCoverage
-	var complete bool
 	var sourceUpdated, observedAt int64
 	err := c.db.QueryRowContext(ctx, `
-		SELECT complete, source_updated_at, observation_sequence, observed_at, authorization_scope
+		SELECT source_updated_at, observation_sequence, observed_at, authorization_scope
 		FROM actor_contribution_periods
-		WHERE actor_id=? AND organization_node_id=? AND period_start<=? AND period_end>=?
+		WHERE actor_id=? AND organization_node_id=? AND period_start<=? AND period_end>=? AND complete=1
 		ORDER BY (period_end-period_start) ASC, source_updated_at DESC, observation_sequence DESC LIMIT 1
-	`, actorID, organizationNodeID, encodeTime(from), encodeTime(to)).Scan(&complete, &sourceUpdated, &coverage.ObservationSequence, &observedAt, &coverage.AuthorizationScope)
+	`, actorID, organizationNodeID, encodeTime(from), encodeTime(to)).Scan(&sourceUpdated, &coverage.ObservationSequence, &observedAt, &coverage.AuthorizationScope)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get actor contribution coverage: %w", err)
-	}
-	if !complete {
-		return nil, nil
 	}
 	coverage.Facet = "contributions"
 	coverage.Complete = true

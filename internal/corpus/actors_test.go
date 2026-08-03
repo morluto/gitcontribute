@@ -107,6 +107,31 @@ func TestActorObservationDoesNotMergeReusedLoginAcrossNodeIDs(t *testing.T) {
 	}
 }
 
+func TestActorIdentityObservationDoesNotReplaceHydratedProjection(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	profileDatabaseID := int64(1)
+	profile, err := c.ApplyActorProfileObservation(ctx, ActorProfileObservation{
+		Provider: "github", Login: "new-login", NodeID: "U_1", DatabaseID: &profileDatabaseID, Kind: "user",
+		SourceUpdatedAt: time.Unix(20, 0).UTC(), ObservedAt: time.Unix(21, 0).UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stubDatabaseID := int64(2)
+	if _, err := c.ApplyActorIdentityObservation(ctx, "github", "old-login", "U_1", &stubDatabaseID, "bot", "public", time.Unix(22, 0).UTC(), nil); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := c.GetActorByID(ctx, profile.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored == nil || stored.Login != "new-login" || stored.Kind != "user" || stored.DatabaseID == nil || *stored.DatabaseID != profileDatabaseID || stored.ObservationSequence != profile.ObservationSequence {
+		t.Fatalf("identity stub replaced hydrated projection: profile=%+v stored=%+v", profile, stored)
+	}
+}
+
 func TestIncompleteContributionPeriodMaterializesUntilCompleteSnapshotExists(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -248,6 +273,36 @@ func TestActorContributionSearchBindsCursorToFilters(t *testing.T) {
 	}
 	if organizationCovered == nil {
 		t.Fatal("organization-scoped period was not recognized as covered")
+	}
+}
+
+func TestActorContributionCoveragePrefersCompleteContainingPeriod(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	actor, err := c.ApplyActorIdentityObservation(ctx, "github", "alice", "U_alice", nil, "user", "public", time.Unix(1, 0).UTC(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := c.ApplyActorContributionPeriod(ctx, ActorContributionPeriodInput{
+		ActorID: actor.ID, From: from, To: from.Add(48 * time.Hour), Complete: true,
+		ObservedAt: from.Add(50 * time.Hour), SourceUpdatedAt: from.Add(49 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ApplyActorContributionPeriod(ctx, ActorContributionPeriodInput{
+		ActorID: actor.ID, From: from.Add(12 * time.Hour), To: from.Add(36 * time.Hour), Complete: false,
+		ObservedAt: from.Add(37 * time.Hour), SourceUpdatedAt: from.Add(36 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	coverage, err := c.GetActorContributionCoverage(ctx, actor.ID, "", from.Add(18*time.Hour), from.Add(30*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if coverage == nil || !coverage.Complete || !coverage.SourceUpdatedAt.Equal(from.Add(49*time.Hour)) {
+		t.Fatalf("complete containing period was masked by incomplete period: %+v", coverage)
 	}
 }
 
