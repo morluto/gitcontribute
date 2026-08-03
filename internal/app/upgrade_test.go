@@ -28,6 +28,7 @@ func TestUpgradeNpxDoesNotInstallGlobalPackage(t *testing.T) {
 		return []byte("1.2.4\n"), nil
 	}
 	t.Setenv("npm_command", "exec")
+	t.Setenv("npm_lifecycle_event", "npx")
 	svc := &Service{version: "1.2.3", paths: config.NewPaths(&config.Env{Home: t.TempDir()})}
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
@@ -133,6 +134,8 @@ func TestClassifyNPMExecutableDistinguishesProjectAndGlobalInstalls(t *testing.T
 }
 
 func TestUpgradeReportsInspectableStagesForGlobalNPM(t *testing.T) {
+	t.Setenv("npm_command", "")
+	t.Setenv("npm_lifecycle_event", "")
 	originalCmd := upgradeCommand
 	originalExec := osExecutable
 	t.Cleanup(func() {
@@ -190,6 +193,8 @@ func TestUpgradeReportsInspectableStagesForGlobalNPM(t *testing.T) {
 }
 
 func TestUpgradeGlobalNPMInstallsLatest(t *testing.T) {
+	t.Setenv("npm_command", "")
+	t.Setenv("npm_lifecycle_event", "")
 	originalCmd := upgradeCommand
 	originalExec := osExecutable
 	originalGOOS := upgradeGOOS
@@ -249,6 +254,8 @@ func TestUpgradeGlobalNPMInstallsLatest(t *testing.T) {
 }
 
 func TestUpgradeWindowsGlobalNPMDoesNotInstall(t *testing.T) {
+	t.Setenv("npm_command", "")
+	t.Setenv("npm_lifecycle_event", "")
 	originalCmd := upgradeCommand
 	originalExec := osExecutable
 	originalGOOS := upgradeGOOS
@@ -304,6 +311,8 @@ func TestUpgradeWindowsGlobalNPMDoesNotInstall(t *testing.T) {
 }
 
 func TestUpgradeProjectNPMReportsManualUpdate(t *testing.T) {
+	t.Setenv("npm_command", "")
+	t.Setenv("npm_lifecycle_event", "")
 	originalCmd := upgradeCommand
 	originalExec := osExecutable
 	t.Cleanup(func() {
@@ -419,6 +428,8 @@ func TestUpgradeConfiguredRuntimeOutdated(t *testing.T) {
 }
 
 func TestUpgradeCombinedInstallActivatesPrivateRuntimeFromInstalledPackage(t *testing.T) {
+	t.Setenv("npm_command", "")
+	t.Setenv("npm_lifecycle_event", "")
 	originalCmd := upgradeCommand
 	originalExec := osExecutable
 	originalGOOS := upgradeGOOS
@@ -512,7 +523,7 @@ func TestUpgradeCorpusSchemaMigrationRequired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("DELETE FROM goose_db_version"); err != nil {
+	if _, err := db.ExecContext(context.Background(), "DELETE FROM goose_db_version"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec("INSERT INTO goose_db_version (id, version_id, is_applied, tstamp) VALUES (1, ?, 1, CURRENT_TIMESTAMP)", target-1); err != nil {
@@ -673,6 +684,8 @@ func setRuntimeContractOutput(t *testing.T, output string) {
 
 func setupUpgradeActivationTest(t *testing.T, currentVersion, targetVersion, candidateVersion string) (home, source, configPath string, want []byte, svc *Service) {
 	t.Helper()
+	t.Setenv("npm_command", "")
+	t.Setenv("npm_lifecycle_event", "")
 	originalCmd := upgradeCommand
 	originalExec := osExecutable
 	t.Cleanup(func() {

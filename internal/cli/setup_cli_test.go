@@ -234,7 +234,7 @@ func TestSetupDoesNotStartWizardWhenPromptOutputIsRedirected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer redirected.Close()
+	defer func() { _ = redirected.Close() }()
 
 	var stdout bytes.Buffer
 	c := cli.New(&fakeService{}, &fakeMCPRunner{}, &stdout, redirected)
@@ -251,7 +251,7 @@ func TestSetupDoesNotAskForConsentWhenPlanOutputIsRedirected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer redirected.Close()
+	defer func() { _ = redirected.Close() }()
 
 	var stderr bytes.Buffer
 	c := cli.New(&fakeService{}, &fakeMCPRunner{}, redirected, &stderr)

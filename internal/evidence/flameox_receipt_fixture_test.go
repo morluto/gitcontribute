@@ -2,6 +2,7 @@ package evidence
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"encoding/hex"
 	"encoding/json"
@@ -73,7 +74,7 @@ func TestFlameoxProfilerReceiptFixtureRejectsMalformedAndUnknownFields(t *testin
 	if _, err := DigestExternalReceipt(receipt); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (&Service{}).AttachExternalReceipt(nil, receipt); err == nil {
+	if _, err := (&Service{}).AttachExternalReceipt(context.Background(), receipt); err == nil {
 		t.Fatal("wrong artifact digest was accepted")
 	}
 }

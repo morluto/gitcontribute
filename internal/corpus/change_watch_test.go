@@ -14,7 +14,7 @@ func TestChangeWatchDetectsCommitFromCorpusConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer watch.Close()
+	defer func() { _ = watch.Close() }()
 	if unchanged, err := watch.Unchanged(ctx); err != nil || !unchanged {
 		t.Fatalf("new watch = (%v, %v)", unchanged, err)
 	}

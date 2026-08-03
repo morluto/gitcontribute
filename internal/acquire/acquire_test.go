@@ -218,7 +218,7 @@ func TestWriteMetadataAtomicallyWithPrivatePermissions(t *testing.T) {
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"--no-pager"}, args...)...)
+	cmd := exec.CommandContext(context.Background(), "git", append([]string{"--no-pager"}, args...)...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",
@@ -295,7 +295,7 @@ func TestAcquireMirrorLockCancelsWhileHeld(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("failed to hold test lock: ok=%v err=%v", ok, err)
 	}
-	defer fl.Close()
+	defer func() { _ = fl.Close() }()
 
 	mgr, err := NewManager(root, nil)
 	if err != nil {

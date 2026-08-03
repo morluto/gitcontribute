@@ -2,6 +2,7 @@ package github
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"strings"
@@ -23,7 +24,7 @@ func TestRetryTransportRetriesExplicitGraphQLReadAndRecreatesBody(t *testing.T) 
 			Sleeper:     (&fakeSleeper{}).Sleep,
 		},
 	}
-	req, err := http.NewRequest(http.MethodPost, "http://example.com/graphql", bytes.NewBufferString(`{"query":"query ReadOnly { viewer { login } }"}`))
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, "http://example.com/graphql", bytes.NewBufferString(`{"query":"query ReadOnly { viewer { login } }"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,6 +33,7 @@ func TestRetryTransportRetriesExplicitGraphQLReadAndRecreatesBody(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK || ft.index != 2 {
 		t.Fatalf("GraphQL retry status=%d attempts=%d", resp.StatusCode, ft.index)
 	}

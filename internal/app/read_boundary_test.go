@@ -98,7 +98,7 @@ func TestPublicCorpusReadsDoNotCreateDatabase(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			svc, err := New(config.NewPaths(&config.Env{Home: t.TempDir()}), "test", nil)
+			svc, err := NewWithContext(ctx, config.NewPaths(&config.Env{Home: t.TempDir()}), "test", nil)
 			if err != nil {
 				t.Fatal(err)
 			}

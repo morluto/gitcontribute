@@ -347,7 +347,7 @@ func TestBeginReconcileTransactionPreservesConnectionBusyTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	var before int
 	if err := conn.QueryRowContext(ctx, `PRAGMA busy_timeout`).Scan(&before); err != nil {
@@ -375,13 +375,13 @@ func TestBeginReconcileTransactionRetriesBusyWriter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer other.Close()
+	defer func() { _ = other.Close() }()
 
 	blocker, err := c.db.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer blocker.Close()
+	defer func() { _ = blocker.Close() }()
 	if _, err := blocker.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		t.Fatalf("begin blocker transaction: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestBeginReconcileTransactionRetriesBusyWriter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if _, err := conn.ExecContext(ctx, "PRAGMA busy_timeout = 1"); err != nil {
 		t.Fatalf("set short busy timeout: %v", err)
 	}

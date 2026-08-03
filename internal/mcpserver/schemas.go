@@ -3,7 +3,9 @@ package mcpserver
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
+	"sync"
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
@@ -14,99 +16,121 @@ type schemaDefinition struct {
 	err    error
 }
 
+type schemaCacheEntry struct {
+	once       sync.Once
+	definition schemaDefinition
+}
+
 type schemaBuilder struct {
 	schema *jsonschema.Schema
 	err    *error
 }
 
+// schemaCache caches the reflection-based schema for each Go type so
+// repeated tool registration does not re-run jsonschema.For on every call.
+// The Once also makes concurrent construction single-flight and retains
+// reflection errors, rather than allowing every caller to repeat the failed
+// computation. Callers that customize a schema must clone before mutating it.
+var schemaCache sync.Map // map[reflect.Type]*schemaCacheEntry
+
 func inferredSchema[T any]() schemaDefinition {
-	schema, err := jsonschema.For[T](&jsonschema.ForOptions{
-		TypeSchemas: map[reflect.Type]*jsonschema.Schema{
-			reflect.TypeFor[mcpcontract.Probability](): {
-				Type:        "number",
-				Description: "Numeric confidence from 0 to 1.",
-				Minimum:     jsonschema.Ptr(0.0),
-				Maximum:     jsonschema.Ptr(1.0),
-			},
-			reflect.TypeFor[mcpcontract.SimilarityScore](): {
-				Type:        "number",
-				Description: "Normalized similarity score from 0 to 1.",
-				Minimum:     jsonschema.Ptr(0.0),
-				Maximum:     jsonschema.Ptr(1.0),
-			},
-			reflect.TypeFor[mcpcontract.RadarScore](): {
-				Type:        "integer",
-				Description: "Deterministic Contribution Radar score from 0 to 100.",
-				Minimum:     jsonschema.Ptr(0.0),
-				Maximum:     jsonschema.Ptr(100.0),
-			},
-			reflect.TypeFor[mcpcontract.ProgressPercent](): {
-				Type:        "integer",
-				Description: "Integer completion percentage from 0 to 100.",
-				Minimum:     jsonschema.Ptr(0.0),
-				Maximum:     jsonschema.Ptr(100.0),
-			},
-			reflect.TypeFor[mcpcontract.NonNegativeInt](): {
-				Type:        "integer",
-				Description: "Non-negative integer count or delay.",
-				Minimum:     jsonschema.Ptr(0.0),
-			},
-			reflect.TypeFor[mcpcontract.BatchItemStatus](): {
-				Type:        "string",
-				Description: "Per-item batch outcome.",
-				Enum:        []any{"complete", "retryable", "unavailable", "failed"},
-			},
-			reflect.TypeFor[mcpcontract.SourceFileStatus](): {
-				Type:        "string",
-				Description: "Bounded source-file outcome.",
-				Enum:        []any{"complete", "not_found", "too_large", "retryable", "unavailable", "failed"},
-			},
-			reflect.TypeFor[mcpcontract.JobStatus](): {
-				Type:        "string",
-				Description: "Durable job lifecycle status.",
-				Enum:        []any{"queued", "running", "succeeded", "failed", "cancelled"},
-			},
-			reflect.TypeFor[mcpcontract.JobExecutionState](): {
-				Type:        "string",
-				Description: "Whether a durable job is queued, running, or terminal.",
-				Enum:        []any{"queued", "running", "terminal"},
-			},
-			reflect.TypeFor[mcpcontract.JobOutcome](): {
-				Type:        "string",
-				Description: "Terminal job outcome; omitted until execution is terminal.",
-				Enum:        []any{"succeeded", "partial", "failed", "cancelled"},
-			},
-			reflect.TypeFor[mcpcontract.FixPatternOutcome](): {
-				Type:        "string",
-				Description: "Pull-request outcome; merged state comes from GitHub and superseded requires an explicit replacement relationship.",
-				Enum:        []any{"merged", "closed_unmerged", "superseded", "open", "unknown"},
-			},
-			reflect.TypeFor[mcpcontract.FixPatternRelationship](): {
-				Type:        "string",
-				Description: "Evidence connecting a pull request to an issue.",
-				Enum:        []any{"closes", "references", "explicit_replacement", "similarity_only"},
-			},
-			reflect.TypeFor[mcpcontract.FixPatternReportStatus](): {
-				Type:        "string",
-				Description: "Whether the bounded report is complete or retains coverage limits or failures.",
-				Enum:        []any{"complete", "partial"},
-			},
-			reflect.TypeFor[mcpcontract.FixPatternProofStyle](): {
-				Type:        "string",
-				Description: "Evidence style detected in stored pull-request text.",
-				Enum:        []any{"regression_test", "reproduction", "benchmark", "before_after", "screenshot"},
-			},
-			reflect.TypeFor[mcpcontract.FixPatternRelatedKind](): {
-				Type:        "string",
-				Description: "Stored thread kind of a related target.",
-				Enum:        []any{"issue", "pull_request"},
-			},
-		},
-	})
-	if err != nil {
-		return schemaDefinition{err: fmt.Errorf("infer MCP schema: %w", err)}
+	key := reflect.TypeFor[T]()
+	entry, _ := schemaCache.LoadOrStore(key, &schemaCacheEntry{})
+	cached, ok := entry.(*schemaCacheEntry)
+	if !ok {
+		panic("MCP schema cache contains an invalid entry")
 	}
-	return schemaDefinition{schema: schema}
+	cached.once.Do(func() {
+		schema, err := jsonschema.For[T](&jsonschema.ForOptions{
+			TypeSchemas: map[reflect.Type]*jsonschema.Schema{
+				reflect.TypeFor[mcpcontract.Probability](): {
+					Type:        "number",
+					Description: "Numeric confidence from 0 to 1.",
+					Minimum:     jsonschema.Ptr(0.0),
+					Maximum:     jsonschema.Ptr(1.0),
+				},
+				reflect.TypeFor[mcpcontract.SimilarityScore](): {
+					Type:        "number",
+					Description: "Normalized similarity score from 0 to 1.",
+					Minimum:     jsonschema.Ptr(0.0),
+					Maximum:     jsonschema.Ptr(1.0),
+				},
+				reflect.TypeFor[mcpcontract.RadarScore](): {
+					Type:        "integer",
+					Description: "Deterministic Contribution Radar score from 0 to 100.",
+					Minimum:     jsonschema.Ptr(0.0),
+					Maximum:     jsonschema.Ptr(100.0),
+				},
+				reflect.TypeFor[mcpcontract.ProgressPercent](): {
+					Type:        "integer",
+					Description: "Integer completion percentage from 0 to 100.",
+					Minimum:     jsonschema.Ptr(0.0),
+					Maximum:     jsonschema.Ptr(100.0),
+				},
+				reflect.TypeFor[mcpcontract.NonNegativeInt](): {
+					Type:        "integer",
+					Description: "Non-negative integer count or delay.",
+					Minimum:     jsonschema.Ptr(0.0),
+				},
+				reflect.TypeFor[mcpcontract.BatchItemStatus](): {
+					Type:        "string",
+					Description: "Per-item batch outcome.",
+					Enum:        []any{"complete", "retryable", "unavailable", "failed"},
+				},
+				reflect.TypeFor[mcpcontract.SourceFileStatus](): {
+					Type:        "string",
+					Description: "Bounded source-file outcome.",
+					Enum:        []any{"complete", "not_found", "too_large", "retryable", "unavailable", "failed"},
+				},
+				reflect.TypeFor[mcpcontract.JobStatus](): {
+					Type:        "string",
+					Description: "Durable job lifecycle status.",
+					Enum:        []any{"queued", "running", "succeeded", "failed", "cancelled"},
+				},
+				reflect.TypeFor[mcpcontract.JobExecutionState](): {
+					Type:        "string",
+					Description: "Whether a durable job is queued, running, or terminal.",
+					Enum:        []any{"queued", "running", "terminal"},
+				},
+				reflect.TypeFor[mcpcontract.JobOutcome](): {
+					Type:        "string",
+					Description: "Terminal job outcome; omitted until execution is terminal.",
+					Enum:        []any{"succeeded", "partial", "failed", "cancelled"},
+				},
+				reflect.TypeFor[mcpcontract.FixPatternOutcome](): {
+					Type:        "string",
+					Description: "Pull-request outcome; merged state comes from GitHub and superseded requires an explicit replacement relationship.",
+					Enum:        []any{"merged", "closed_unmerged", "superseded", "open", "unknown"},
+				},
+				reflect.TypeFor[mcpcontract.FixPatternRelationship](): {
+					Type:        "string",
+					Description: "Evidence connecting a pull request to an issue.",
+					Enum:        []any{"closes", "references", "explicit_replacement", "similarity_only"},
+				},
+				reflect.TypeFor[mcpcontract.FixPatternReportStatus](): {
+					Type:        "string",
+					Description: "Whether the bounded report is complete or retains coverage limits or failures.",
+					Enum:        []any{"complete", "partial"},
+				},
+				reflect.TypeFor[mcpcontract.FixPatternProofStyle](): {
+					Type:        "string",
+					Description: "Evidence style detected in stored pull-request text.",
+					Enum:        []any{"regression_test", "reproduction", "benchmark", "before_after", "screenshot"},
+				},
+				reflect.TypeFor[mcpcontract.FixPatternRelatedKind](): {
+					Type:        "string",
+					Description: "Stored thread kind of a related target.",
+					Enum:        []any{"issue", "pull_request"},
+				},
+			},
+		})
+		if err != nil {
+			cached.definition.err = fmt.Errorf("infer MCP schema: %w", err)
+			return
+		}
+		cached.definition.schema = schema
+	})
+	return cached.definition
 }
 
 func inputSchema[T any](customize func(*schemaBuilder)) schemaDefinition {
@@ -114,21 +138,104 @@ func inputSchema[T any](customize func(*schemaBuilder)) schemaDefinition {
 	if definition.err != nil {
 		return definition
 	}
+	// Clone the cached schema before mutating so the cached instance
+	// is not corrupted for other callers.  The customize function
+	// mutates properties on the schema (ranges, defaults, enums).
+	clone := cloneSchemaTree(definition.schema)
 	var buildErr error
-	builder := &schemaBuilder{schema: definition.schema, err: &buildErr}
+	builder := &schemaBuilder{schema: clone, err: &buildErr}
 	if customize != nil {
 		customize(builder)
 	}
-	definition.err = buildErr
-	return definition
+	return schemaDefinition{schema: clone, err: buildErr}
 }
 
 func outputSchema[T any](description string) schemaDefinition {
 	definition := inferredSchema[T]()
-	if definition.err == nil {
-		definition.schema.Description = description
+	if definition.err != nil {
+		return definition
 	}
-	return definition
+	// Clone the cached schema before mutating Description so the
+	// cached instance is not corrupted for other callers.
+	clone := cloneSchemaTree(definition.schema)
+	clone.Description = description
+	return schemaDefinition{schema: clone}
+}
+
+// cloneSchemaTree copies the complete mutable schema tree. jsonschema's
+// CloneSchemas copies nested schemas, but intentionally leaves non-schema
+// maps and slices shallow. Customizers update maps such as
+// DependentRequired, so those values must not be shared between registrations.
+func cloneSchemaTree(schema *jsonschema.Schema) *jsonschema.Schema {
+	clone := schema.CloneSchemas()
+	seen := make(map[*jsonschema.Schema]bool)
+	var copyMutable func(*jsonschema.Schema)
+	copyMutable = func(current *jsonschema.Schema) {
+		if current == nil || seen[current] {
+			return
+		}
+		seen[current] = true
+		current.Types = append([]string(nil), current.Types...)
+		current.Enum = append([]any(nil), current.Enum...)
+		current.Examples = append([]any(nil), current.Examples...)
+		current.Default = append([]byte(nil), current.Default...)
+		current.Required = append([]string(nil), current.Required...)
+		current.PropertyOrder = append([]string(nil), current.PropertyOrder...)
+		if current.Vocabulary != nil {
+			current.Vocabulary = maps.Clone(current.Vocabulary)
+		}
+		if current.DependencyStrings != nil {
+			current.DependencyStrings = cloneStringSlices(current.DependencyStrings)
+		}
+		if current.DependentRequired != nil {
+			current.DependentRequired = cloneStringSlices(current.DependentRequired)
+		}
+		for _, child := range schemaChildren(current) {
+			copyMutable(child)
+		}
+	}
+	copyMutable(clone)
+	return clone
+}
+
+func cloneStringSlices(values map[string][]string) map[string][]string {
+	clone := make(map[string][]string, len(values))
+	for key, value := range values {
+		clone[key] = append([]string(nil), value...)
+	}
+	return clone
+}
+
+func schemaChildren(schema *jsonschema.Schema) []*jsonschema.Schema {
+	children := make([]*jsonschema.Schema, 0)
+	for _, child := range schema.Defs {
+		children = append(children, child)
+	}
+	for _, child := range schema.Definitions {
+		children = append(children, child)
+	}
+	for _, child := range schema.DependencySchemas {
+		children = append(children, child)
+	}
+	children = append(children, schema.PrefixItems...)
+	children = append(children, schema.Items, schema.AdditionalItems, schema.Contains, schema.UnevaluatedItems)
+	for _, child := range schema.Properties {
+		children = append(children, child)
+	}
+	for _, child := range schema.PatternProperties {
+		children = append(children, child)
+	}
+	children = append(children, schema.AdditionalProperties, schema.PropertyNames, schema.UnevaluatedProperties)
+	children = append(children, schema.AllOf...)
+	children = append(children, schema.AnyOf...)
+	children = append(children, schema.OneOf...)
+	children = append(children, schema.Not, schema.If, schema.Then, schema.Else)
+	for _, child := range schema.DependentSchemas {
+		children = append(children, child)
+	}
+	children = append(children, schema.ContentSchema)
+	children = append(children, schema.ItemsArray...)
+	return children
 }
 
 func property(builder *schemaBuilder, name string) *jsonschema.Schema {

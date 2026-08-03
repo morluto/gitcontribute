@@ -94,10 +94,10 @@ func TestSetupFailsFastForUnmarkedCorpusInDryRunAndRealModes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("CREATE TABLE goose_db_version (id INTEGER PRIMARY KEY, version_id INTEGER)"); err != nil {
+	if _, err := db.ExecContext(context.Background(), "CREATE TABLE goose_db_version (id INTEGER PRIMARY KEY, version_id INTEGER)"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("INSERT INTO goose_db_version (id, version_id) VALUES (1, 9999)"); err != nil {
+	if _, err := db.ExecContext(context.Background(), "INSERT INTO goose_db_version (id, version_id) VALUES (1, 9999)"); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
