@@ -243,6 +243,11 @@ Add `--read-only` to remove tools that permit local writes or execution. See
 [Scalable MCP workflows](docs/mcp-scalable-workflows.md) for the tool sequence,
 coverage model, partial-result recovery, and side-effect boundaries.
 
+GitHub users are stored as first-class actors. Live discovery records identity
+only; profile, social-account, organization, pinned-item, repository, and
+contribution facts are synchronized independently. See the
+[actor corpus](docs/actor-corpus.md) for the data and freshness model.
+
 ## Side-effect boundaries
 
 GitContribute separates corpus reads, GitHub reads, local writes, process
@@ -268,6 +273,7 @@ See [Architecture](docs/architecture.md) for the complete boundary definitions.
 
 - [Onboarding and configuration](docs/onboarding.md)
 - [Scalable MCP workflows](docs/mcp-scalable-workflows.md)
+- [Actor corpus](docs/actor-corpus.md)
 - [Architecture and side-effect boundaries](docs/architecture.md)
 - [Operational runbooks](docs/runbooks.md)
 - [Security policy](SECURITY.md)

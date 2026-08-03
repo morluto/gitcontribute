@@ -1,349 +1,164 @@
-# Scalable MCP workflows
+# Composing MCP tools at scale
 
-GitContribute exposes bounded, vectorized primitives: each tool owns one
-side-effect boundary but can process a collection. This keeps agents from
-building slow N+1 loops while preserving explicit control over network access,
-local writes, and process execution.
+GitContribute exposes bounded primitives that agents can compose without
+building scalar N+1 loops. Each tool owns one side-effect boundary: offline
+corpus read, explicit GitHub acquisition, local state write, Git process, or
+authorized validation process.
 
-## Repository research
+## Ground rules
 
-Use the cheapest authoritative source first, and hydrate only finalists:
+- Corpus reads never contact GitHub or refresh data implicitly.
+- GitHub reads are explicit, bounded, rate-limited, and may write only local
+  observations and projections.
+- Missing, stale, paginated, or truncated coverage is unknown, not evidence of
+  absence.
+- Durable jobs must reach a terminal state through `jobs.get` before their
+  observations are treated as current.
+- Resource URIs are opaque. Read the exact returned URI with MCP
+  `resources/read` rather than reconstructing it.
+- No MCP tool mutates GitHub or executes repository-controlled code.
+
+## Repository and thread research
+
+Discovery and hydration stay separate:
 
 ```text
 github.search_repositories -> corpus.get_repositories
-github.search_threads -> resources/read (exact immutable query artifact)
-github.read_source_files -> resources/read (exact immutable source bundle)
+github.search_threads -> resources/read (immutable search artifact)
 github.sync_repository_context -> jobs.get -> corpus.get_repositories
-research.query_deepwiki
-github.sync_threads -> jobs.get -> corpus.rank_contribution_candidates
+github.sync_threads -> jobs.get -> corpus.get_threads
 github.sync_thread_facets -> jobs.get -> corpus.get_thread_facets
-corpus.find_precedents
-workflow.prepare_issue_set
-github.index_pull_request_feedback -> jobs.get -> corpus.search_pull_request_feedback
+corpus.find_clusters | corpus.find_neighbors | corpus.find_precedents
 ```
 
-When a client appears to be using an older or restricted registration, call
-`workflow.get_catalog_contract`. It is a read-only diagnostic that reports the
-running server version, `catalog_mode`, deterministic `catalog_fingerprint`,
-tool count, and the three advertised pull-request feedback route tools. Compare
-those values with `tools/list`; after setup, upgrade, or registration changes,
-create a fresh MCP connection so the client is not reusing an older server
-process. In `read_only` mode, the feedback index and exact-PR sync are
-intentionally absent while offline search remains available when its reader is
-supported.
+`github.search_repositories` and `github.search_threads` return one bounded
+live page. Search pages do not prove repository-wide absence. Repository and
+thread synchronization records coverage separately from stored row counts.
+Thread headers do not contain every pull-request fact; comments, reviews,
+merge details, checks, files, and other children require explicit facets.
 
-- `github.search_repositories` runs one bounded live search and persists the
-  returned repository metadata. Prefer structured filters so GitContribute can
-  validate and explain the query; reserve `raw_query` for unsupported GitHub
-  qualifiers. `response_format: concise` keeps broad discovery bounded, while
-  `detailed` preserves secondary metadata for finalists. Live pagination uses
-  `page` and `next_page` because GitHub search pages are not stable cursors.
+`github.read_source_files` resolves a ref once and reads up to 20 ordered
+repository-relative files with per-file and total-byte limits. Its immutable
+source-bundle resource records the resolved commit and blob provenance.
 
-- `github.search_threads` runs one bounded issue-search page for one repository,
-  persists returned thread observations, and returns an exact
-  `gitcontribute://artifact/github-thread-search/<digest>` resource. Its total,
-  provider query, ordering, rate state, and incomplete-results flag are
-  preserved in that artifact, but the page does not establish repository-wide
-  thread coverage or prove absence.
-- `github.read_source_files` resolves a commit or named ref once, then reads up
-  to 20 ordered repository-relative files with per-file and total-byte bounds.
-  Complete items preserve commit SHA, blob SHA, content digest, line range, and
-  source URL in a `source-bundle.v1` resource. Failed, missing, oversized, and
-  retryable items remain visible without discarding successful siblings. Read
-  the returned `gitcontribute://artifact/source-bundle/<digest>` URI locally;
-  repository text is untrusted and is never executed.
-- `corpus.search_code_batch` is the bounded offline fan-out surface for up to
-  20 queries over one repository or snapshot scope. It shares one corpus read
-  revision and preserves each query's coverage and truncation semantics. It
-  never performs live GitHub code search; `corpus.search_code` remains the
-  single-query compatibility operation.
+`corpus.search_code` accepts up to 20 queries over one repository or snapshot
+scope. Every query uses the same offline corpus revision. It never falls back
+to live GitHub code search.
 
-```json
-{
-  "text": "inference",
-  "match_fields": ["name", "description"],
-  "topics": ["cuda"],
-  "language": "Python",
-  "stars_min": 200,
-  "pushed_after": "2026-06-15",
-  "archived": false,
-  "fork": false,
-  "response_format": "concise"
-}
-```
+## Actor and contributor research
 
-Search responses return the compiled provider `query`, a short interpretation,
-request-specific warnings, semantic `repository:owner/name` references, and a
-non-mandatory suggested thread-sync call. Advanced provider syntax uses the
-explicit `raw_query` field; there is no deprecated alias.
-- `github.sync_repository_context` fetches and persists metadata and fixed
-  contribution-guidance files for explicit repository identities. Use
-  it to recover a `repository_not_indexed` result, then poll the returned job
-  before reading the repository again.
-- `corpus.get_repositories` returns stored metadata plus `dossier_status` and
-  `dossier_as_of` for up to 100 repositories. Use that batch to compare
-  candidates and dossier availability; load a full persisted dossier only for
-  a known finalist through `gitcontribute://dossier/{owner}/{repo}`.
-- `corpus.get_repositories`, `corpus.get_threads`, `corpus.find_clusters`,
-  `corpus.find_neighbors`, `corpus.rank_contribution_candidates`, and
-  `corpus.find_precedents` are offline.
-- `corpus.find_clusters` and `corpus.find_neighbors` accept up to 20 repository
-  or source-thread targets respectively. Their ordered item results isolate
-  missing or invalid targets instead of forcing scalar retry loops.
-- Search, coverage, precedent, code-search, fix-pattern, and research-brief
-  results carry a query digest, observation watermark, completeness,
-  truncation, and unknown-coverage status. Read-only operations return an
-  `ephemeral:` transaction-bound identity and state that it is not reusable.
-  Call `corpus.ensure_coverage` when a composed workflow needs a durable
-  `snapshot_token`; reading that token either returns its immutable payload or
-  fails with a typed unavailable result. Reads never refresh the corpus or
-  silently substitute current projections.
-- `corpus.rank_contribution_candidates` requires one to 50 repositories. Its derived ranking is
-  intentionally non-paginated; inspect `total` and `truncated`, then raise the
-  limit or narrow the repository set when more candidates are needed. Per-repo
-  summaries distinguish the evaluated population, returned candidates, and an
-  internal population cap.
-- `research.query_deepwiki` is an optional public external read. Its prose is
-  untrusted derived context, is not persisted, and is not authority for live
-  GitHub state.
-- `github.sync_threads` stores issue or pull-request headers. Child comments
-  and reviews require explicit `github.sync_thread_facets` facets.
-- `github.sync_thread_facets` refreshes each selected thread header before fetching
-  child facets, so exact finalists do not inherit stale header coverage. The
-  repository metadata must already exist locally, and each item's `requests`
-  count includes its one exact-header request. Successful items report
-  `header_refreshed: true`.
-- Pull-request headers do not contain merge outcomes. Until `pr_details` is
-  hydrated, a closed PR's `merged` value is omitted and outcome-sensitive
-  offline reads report it as unknown rather than closed-unmerged.
-- `github.index_pull_request_feedback` is the repository-scoped feedback path
-  for audits such as “find every comment written by this reviewer.” Do not use
-  `github.sync_portfolio` (which is user-scoped when explicitly run in
-  `authored` mode) or full-text `corpus.search_threads` for that question.
-  It walks every reachable PR with `state=all` under explicit page, request,
-  and item bounds, persists its next discovery page, then reuses the exact PR
-  feedback adapter for issue comments, submitted reviews, inline comments, and
-  review-thread topology. Poll the returned job and use
-  `corpus.search_pull_request_feedback` with the exact `feedback_author` login
-  for offline author/state/merge/
-  resolution/text/date filtering. An empty result with incomplete discovery or
-  facets is `partial`/`unknown`, not absence; follow its typed recovery plan.
-  Matching rows include exact PR, thread, comment, author, reply, anchor,
-  review-state, resolution, source-observation, and readable child
-  `gitcontribute://pull-request-feedback/{owner}/{repo}/{number}/{channel}/{feedback_id}`
-  references. Pagination uses an
-  opaque cursor scoped to the complete query; pass a durable snapshot token
-  when the caller needs the pages pinned to one corpus revision.
-
-### Repository fix-pattern mining
-
-The unified catalog exposes the trace-backed aggregate:
+User search deliberately stores identity stubs instead of hydrating every
+result:
 
 ```text
-workflow.mine_repository_fix_patterns
-  -> jobs.get
-  -> gitcontribute://fix-pattern-report/{job_id}
+github.search_users
+  -> corpus.search_actors
+  -> github.sync_users (selected identities only)
+  -> github.sync_user_* (selected facets only)
+  -> corpus.get_actors | corpus.get_actor_facets
 ```
 
-Use it to summarize how one stored repository handled caller-defined symptom
-categories over an explicit observation window. It searches the local corpus
-first, refreshes only a bounded set of finalists whose merge outcome is
-unknown, and persists a typed report. `candidate_limit`, `hydration_limit`, and
-`representative_limit` bound search, network work, and returned context
-independently. The durable operation always creates a job and persists its
-report. Use `corpus.preview_fix_patterns` when the analysis must be strictly
-offline and must create no job, artifact, hydration, or local write.
+Available facet acquisitions are social accounts, organizations, pinned or
+showcase items, repositories, and contribution periods. Each has independent
+request, page, or item bounds and independent coverage. Repository facts retain
+the explicit `owned`, `affiliated`, or `contributed` relationship.
 
-Coverage reports candidate matches, unique pull requests, unknown outcomes
-before and after hydration, hydration failures, and candidate truncation.
-Merged, closed-unmerged, superseded, open, and unknown remain separate
-outcomes. Only closed PRs with unknown merge state consume the hydration
-budget. An example is marked `accepted_fix` only when refreshed state confirms
-it was merged and stored pull-request text contains an explicit closing
-relationship. A similar closed PR is never promoted to accepted-fix evidence.
-Relationship and proof-style labels are bounded lexical projections, so the
-report preserves their supporting phrase and states that similarity is not
-causal proof.
-
-For an analysis that must not create a job, artifact, hydration, or write, use
-`corpus.preview_fix_patterns`. It returns `persisted: false`, zero hydration,
-and the captured snapshot identity. The durable operation remains the path for
-persisted reports.
-
-## Exact issue-set preparation
-
-Use `workflow.prepare_issue_set` when the contribution is already scoped by
-known issue numbers and creating opportunities would add no useful state:
-
-```json
-{
-  "owner": "acme",
-  "repo": "rocket",
-  "issue_numbers": [7, 11, 14],
-  "precedent_limit": 3,
-  "response_format": "concise"
-}
-```
-
-The tool is an offline read. It composes exact issue facts, body and
-comment/timeline coverage, related open and closed work, merge-confirmed
-precedents, duplicate-cluster evidence, and precise sync or hydration recovery
-calls. It does not render a draft, create an opportunity, inspect a workspace
-diff, or claim that an implementation satisfies an issue. Linkage therefore
-defaults to `related` and always requires caller confirmation before choosing
-`Closes`, `Advances`, or `Related`.
-
-Repository `threads` coverage qualifies the related-work population. When that
-coverage is absent or incomplete, the result remains partial and suggests an
-explicit all-state pull-request sync instead of treating the stored count as
-exhaustive.
-
-`concise` omits issue bodies and detailed relationship evidence and returns at
-most five related-work records per issue. `related_work_total` distinguishes
-that response shortening from missing corpus evidence. When an upstream bound
-prevents an exhaustive count, `related_work_total_known` is false and the count
-is a lower bound. `related_work_truncated` says explicitly that records or
-evidence were omitted. Empty stored bodies are reported as unknown because the
-current corpus projection cannot distinguish a known-empty body from a body
-that was not captured.
-
-## Pull-request portfolio
+Contribution research composes an explicit acquisition period with an offline
+query:
 
 ```text
-github.sync_pull_request_portfolio(selection=authored) -> jobs.get
--> corpus.list_pull_requests
--> corpus.find_pull_request_overlaps
+github.sync_user_contributions -> jobs.get
+  -> corpus.search_contributions
 ```
 
-The status adapter stores REST pull-request details and reviews plus typed,
-independently covered GraphQL snapshots for checks, unresolved review threads,
-detailed merge state, merge queue, closing issues, and changed files. The
-offline portfolio derives deterministic attention states only from complete
-facets. A null or still-computing mergeability value remains unknown.
+The offline query filters by actor, repository, contribution kind, source, organization scope, and
+time. Its cursor binds those filters and cannot be reused for a different
+query. Restricted GitHub activity remains an aggregate unless GitHub discloses
+an item. See [Actor corpus](actor-corpus.md) for the SQLite mapping and
+freshness semantics.
 
-`corpus.find_pull_request_overlaps` compares up to 50 stored candidates with
-authored pull requests using complete normalized changed-path, linked-issue,
-and stored opportunity-similarity evidence. It returns `unknown` unless every
-required facet is complete; it never performs network access. Use
-`workflow.link_pull_request` to record an explicit local PR association with an
-opportunity or workspace. That local write does not mutate GitHub.
+## Pull-request feedback and CI
 
-Issue timeline hydration is an explicit, opt-in `issue_timeline` facet. Complete
-timeline observations may create versioned resolution records with exact source
-observation references. Closing-issue observations remain relationship evidence
-until completion is independently observed. Similar prose is not resolution
-evidence.
-
-`workspace.check_merge_conflicts` is different from GitHub mergeability. It runs
-a non-mutating Git comparison between already-fetched object IDs in a managed
-workspace. It never fetches refs or modifies an index or worktree.
-
-## Partial results and recovery
-
-Batch outputs preserve input order. Each item has one of these statuses:
-
-- `complete`: use the value;
-- `retryable`: retry that item after `retry_after_ms` when present;
-- `unavailable`: follow the typed `recovery` plan or acquire the missing facet explicitly;
-- `failed`: fix the input or local failure before retrying.
-
-A durable job can succeed while its result is `partial`: job success means the
-bounded operation completed and recorded every item outcome. Poll concurrent
-jobs together with vectorized `jobs.get`, then retry only retryable items. Never
-interpret absent coverage as a zero, a passing check, or a lack of competing
-work. New job references carry a semantic `job:<id>` reference,
-`poll_after_ms`, and a typed `jobs.get` follow-up with its job ID.
-
-Facet synchronization completes on the same offline read plane: use
-`corpus.get_thread_facets` for bounded coverage metadata and follow each
-returned `resource_uri` through MCP `resources/read` for the persisted facet
-observations. A missing repository, thread, or facet returns a versioned
-`recovery` plan whose `then` calls are ordered and carry typed arguments.
-
-Repository and dossier absence have different recovery paths:
-
-- `repository_not_indexed` means no local repository projection exists. Call
-  `github.sync_repository_context`, poll the job with `jobs.get`, and then
-  retry the offline read.
-- `dossier_not_persisted` means the repository exists locally but has no saved
-  dossier. Use `corpus.get_repositories` for metadata and dossier availability;
-  call `workflow.build_repository_dossier` only when creating that local artifact
-  is actually required.
-
-Reading the dossier resource again cannot resolve either state.
-
-## Canonical source audit
-
-Use this order when producing a source-backed audit or contribution handoff:
+Repository-wide feedback indexing is the route for questions such as “find
+every comment by this reviewer”:
 
 ```text
-corpus.get_coverage -> typed exact/repository recovery -> jobs.get
-         -> snapshot-bound offline reread -> duplicate checks
-         -> explicit live verification -> jobs.get -> receipt attachment
-         -> evidence/draft handoff
+github.index_pull_request_feedback(state=all) -> jobs.get
+  -> corpus.search_pull_request_feedback(feedback_author=exact_login)
+  -> resources/read
 ```
 
-Start with `corpus.get_coverage` and treat missing or incomplete coverage as
-unknown. Follow the item-level typed recovery action it returns: use
-`corpus.ensure_coverage` for repository bootstrap or broad target recovery,
-`github.sync_threads` for exact or repository header recovery, and
-`github.sync_thread_facets` for selected child facets. Poll the returned job
-with `jobs.get`, then perform the offline reread. Use the reread's returned
-`snapshot_token` for duplicate checks over that same state.
-Perform live verification after local evidence selection, attach a producer-neutral
-validation receipt, and hand the exact resource and any returned revision
-references to the evidence or draft workflow. Resources that do not expose a
-revision are point-in-time reads and should be reread after an explicit sync.
-Larger persisted payloads are always read with MCP `resources/read` using the
-exact opaque URI returned by the tool.
+The index records discovery coverage and then acquires issue comments,
+submitted reviews, inline comments, and review-thread topology. Body text and
+author are separate filters. An empty result is unknown until both discovery
+and requested feedback-channel coverage are complete.
 
-Completed code-index jobs return a typed artifact containing repository, commit
-SHA, snapshot token, manifest identity and digest, file/truncation counts, and
-an exact `gitcontribute://artifact/code-index/<artifact-digest>` resource. Consume that URI through
-`resources/read`; do not infer an artifact identity from a repository name
-alone.
+Exact PR refresh uses `github.sync_pull_request_feedback`. CI uses
+`github.sync_pull_request_ci`; checks and statuses are bound to the observed
+head SHA. Offline authored-PR reads use `corpus.search_pull_requests`, and
+overlap analysis uses `corpus.find_pull_request_overlaps`.
 
-`corpus.get_coverage` accepts up to 100 ordered repository or exact-thread
-targets. `jobs.cancel` accepts up to 100 IDs and returns isolated item outcomes;
-repeating cancellation is safe. `jobs.get` exposes structured phase and item
-counts rather than requiring clients to parse event prose.
+## Jobs, partial results, and recovery
 
-The MCP catalog does not advertise scalar compatibility aliases or duplicate
-durable-artifact getters. Read dossiers, investigations, opportunities,
-evidence, readiness reports, workflows, and lenses through their
-`gitcontribute://` resources. Use one-item arrays with
-`corpus.get_repositories`, `corpus.get_threads`,
-`github.sync_threads`, `github.sync_thread_facets`, and `jobs.get` when only one
-target is needed. Configured recurring-source crawls remain a CLI/TUI workflow,
-not an MCP discovery primitive.
+A durable job may succeed with a partial result. Job success means the bounded
+operation ran to completion and recorded every item outcome; it does not turn
+retryable or unavailable items into complete facts. Poll several IDs together
+with `jobs.get`, then retry only the affected inputs.
 
-## Side-effect boundaries
+Per-item results distinguish:
 
-| Tool family | Network | Corpus/local write | Process |
+- `complete`: the requested bounded observation was stored;
+- `retryable`: rate limiting or a transient provider failure permits retry;
+- `unavailable`: the identity, authorization, or provider capability is not
+  available;
+- `failed`: a non-retryable request or persistence error occurred.
+
+Coverage carries observation time, source time, authorization scope, and
+completeness. The caller chooses a task-appropriate freshness threshold; the
+server does not claim that one age limit suits discovery, review cleanup, and
+historical research equally.
+
+## Canonical resources
+
+Detailed persisted payloads use the `gitcontribute://` resource namespace.
+Examples include thread facets, pull-request feedback, immutable source and
+code-index artifacts, actors, investigations, opportunities, evidence,
+manifests, drafts, concerns, and workspaces. The catalog does not advertise
+dossier or fix-pattern workflow resources.
+
+## Breaking name changes
+
+| Previous name | Canonical name |
+| --- | --- |
+| `corpus.search_code_batch` | `corpus.search_code` |
+| `corpus.list_pull_requests` | `corpus.search_pull_requests` |
+| `github.sync_ci_failures` | `github.sync_pull_request_ci` |
+
+Ranking, issue-set preparation, dossier, fix-pattern, preflight, related-work,
+scalar code-search, and DeepWiki workflow tools are not advertised. Agents
+should select the underlying acquisition and corpus facts that match the task.
+
+## Side-effect matrix
+
+| Tool family | Network | Local write | Process |
 | --- | ---: | ---: | ---: |
-| `corpus.get_*`, rank, precedents, portfolio | no | no | no |
-| `corpus.search_code`, `corpus.search_code_batch` | no | no | no |
-| `workflow.link_pull_request` | no | yes | no |
-| `github.search_*`, source reads, sync, hydrate | yes | yes | no |
-| `research.query_deepwiki` | yes | no | no |
+| `corpus.*` | no | no | no |
+| `github.search_*`, `github.sync_*`, source reads | yes | observations only | no |
+| `jobs.get`, `jobs.cancel` | no | cancel only | no |
+| local workflow state | no | yes | no |
 | `code.index_repositories` | remote-dependent | yes | Git only |
-| `workspace.check_merge_conflicts` | no | no | Git only |
+| `workspace.*` Git operations | remote-dependent | yes | Git only |
+| `validation.run` | no by default | yes | explicit command |
 
-No tool in these workflows mutates GitHub or executes repository-controlled
-code.
+## Verification
 
-## End-to-end verification
-
-Run the real stdio protocol tests with:
+The stdio integration tests exercise a real MCP subprocess, catalog discovery,
+durable job polling, offline rereads, portfolio synchronization, and resource
+handoffs:
 
 ```sh
 go test ./internal/app -run '^TestMCPStdio(ScalableResearch|PullRequestPortfolio)Flow$' -count=1
 ```
 
-The tests launch the application as an MCP subprocess, use a real file-backed
-SQLite corpus, and route the real GitHub HTTP adapter to a controlled test
-server. They cover initialization and tool discovery, repository-context synchronization,
-offline batch reads, ranking, precedents, authored-PR discovery, status
-hydration, portfolio classification, vectorized durable-job polling, and a
-protocol-visible invalid hydration request. They do not contact live GitHub or
-DeepWiki and do not run repository code.
+Run `make verify` before a pull request for uncached tests, changed-code lint,
+module tidiness, generated-output verification, and documentation validation.

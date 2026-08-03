@@ -1,98 +1,96 @@
-# MCP tool redesign
+# MCP tool design
 
 GitContribute targets `github.com/modelcontextprotocol/go-sdk` `v1.7.0` and
-negotiates MCP `2026-07-28`. The server continues to
-register generic SDK tools so the SDK owns input decoding and output-schema
-validation at the protocol boundary.
+negotiates MCP `2026-07-28`. Typed Go input and output values own protocol
+semantics. The SDK performs input decoding and output-schema validation; schema
+customization adds bounds, enums, defaults, and discriminated `oneOf` branches
+without a parallel decoder.
 
-## Contract ownership
+## Facts before workflows
 
-Schema semantics live with their Go values. Probability, similarity, radar
-score, progress, non-negative counts, batch status, and job status are reusable
-typed schema values. A field named `score`, `confidence`, `status`, `kind`, or
-`result` never receives semantics from its JSON name alone.
+The public catalog exposes atomic, composable facts:
 
-Multi-mode tools keep an object root and compose draft-2020-12 schema nodes
-over SDK-inferred Go structs. `oneOf`, `required`, `not`,
-`dependentRequired`, bounds, defaults, and constants express protocol shape.
-Handlers retain checks for repository existence, authorization, lifecycle
-legality, RFC 3339 values, and stored-state consistency. There is no parallel
-JSON decoder or validator.
+- `corpus.*` operations are offline reads and never refresh implicitly;
+- `github.*` operations are explicit, bounded network reads that may update
+  only the local corpus;
+- `jobs.*` controls durable work;
+- resource URIs are the canonical detailed read plane for persisted payloads;
+- workspace and validation tools retain their separate local-write and process
+  boundaries.
 
-## Response and side-effect boundaries
+Tool descriptions state what a call reads or writes, its bounds, and what
+unknown or incomplete output means. They do not prescribe an agent workflow.
+Missing, paginated, truncated, stale, unauthorized, and unavailable facts stay
+distinct from an observed empty value.
 
-`jobs.get` returns bounded status, progress, typed artifact references, and a
-suggested follow-up; it does not expose stored request or result blobs.
-Repository dossiers, repository projections, and manifest statements are
-typed. DeepWiki defaults to 32 KiB and directs truncated reads toward structure
-or a focused question before a larger response.
+Batch inputs remain useful when every item has the same capability boundary.
+They preserve input order and isolate per-item failures. Actor results use a
+small item contract rather than embedding the catalog-wide recovery union in
+every output schema.
 
-Tool results link durable concerns, dossiers, investigations, opportunities,
-evidence, readiness reports, immutable draft revisions, contribution manifests,
-and job artifacts with SDK-native resource links. Resources are the canonical
-detailed read plane for durable artifacts; the catalog does not duplicate them
-as scalar tools. Producers return compact typed references so clients follow
-the exact resource URI instead of consuming duplicate structured output.
-Recording a hypothesis returns its parent investigation reference because the
-investigation resource is the canonical aggregate that contains hypotheses.
-Bounded searches, rankings, and multi-object reads remain tools because they are
-queries rather than durable-artifact representations.
-Clients must support MCP `resources/read`; Codex exposes that operation as
-`read_mcp_resource`. GitContribute does not provide a parallel generic read
-tool or scalar artifact fallback.
+## Actor primitives
 
-Validation receipts remain ordinary tool results. They are small execution
-classifications needed immediately by the caller, so replacing them with a
-second read would add ceremony without reducing a material payload. Workspaces
-also remain operational tool results: their lifecycle is coupled to host
-filesystem and process capabilities, and their public representation
-intentionally omits host paths. Neither is an independently browsable durable
-artifact today; revisit that boundary only when a concrete cross-session read
-workflow needs it.
+`github.search_users` persists one bounded page of identity observations. It
+does not fan out into profile reads. Exact profile and child facts use separate
+tools:
 
-The catalog preserves offline reads, network reads, local writes, process
-execution, and external mutation as separate capabilities. The unified catalog
-exposes the complete concern lifecycle rather than a partial subset. The
-dossier build operation is named `workflow.build_repository_dossier` because
-it writes local state.
+```text
+github.sync_users
+github.sync_user_social_accounts
+github.sync_user_organizations
+github.sync_user_pinned_items
+github.sync_user_repositories
+github.sync_user_contributions
+```
 
-## Consolidation decisions
+Selectors are a discriminated union: exactly one login or GitHub node ID.
+Repository synchronization requires an explicit `owned`, `affiliated`, or
+`contributed` relationship. Contribution synchronization requires an explicit
+period no longer than one year. Pages, items, repositories, and total requests
+are bounded in the input schema.
 
-Exact issue preparation remains the aggregate `workflow.prepare_issue_set`.
-Durable submission and polling, validation definition and authorized
-execution, and commit inspection and planning remain separate because each
-boundary permits meaningful agent judgment or authorization.
+Offline consumers compose `corpus.search_actors`, `corpus.get_actors`,
+`corpus.get_actor_facets`, and `corpus.search_contributions`. Results expose
+observation and source timestamps, authorization scope, completeness, snapshot
+identity, and opaque actor resource URIs. See [Actor corpus](actor-corpus.md).
 
-Live repository search includes local dossier availability. The catalog offers
-`github.sync_pull_request_portfolio`, a bounded durable job with authored and
-explicit selection modes. Authenticated identity, authored discovery, and
-exact status refresh are internal phases and are not advertised as recovery
-primitives. Feedback and CI use the separate
-`github.sync_pull_request_feedback` and `github.sync_ci_failures` jobs so their
-coverage and retry behavior remain visible.
+## Resources and structured output
 
-The catalog offers
-`workflow.mine_repository_fix_patterns`. It consolidates the observed
-search-select-hydrate-rescan loop while preserving the real durable-job,
-network-read, and local-write boundaries. The triggering agent trace found 587
-otherwise matching pull requests with unknown merge state, then required 26
-exact hydrations to recover 21 confirmed merged examples; one persistence step
-also encountered `SQLITE_BUSY`. The aggregate therefore hydrates only bounded
-unknown-state finalists, reports unknowns before and after hydration, and
-separates confirmed merged fixes from merely similar closed work.
+Small query results remain structured tool output. Larger or durable payloads
+are read with MCP `resources/read` using the exact URI returned by a tool.
+Actor resources use:
 
-DeepWiki retains one tool with three discriminated modes. Host-native tool
-search is the capability-discovery mechanism; the server does not mutate its
-catalog or add a custom discovery meta-tool.
+```text
+gitcontribute://actor/{actor_id}
+gitcontribute://actor/{actor_id}/facet/{facet}
+```
 
-## Evidence gate
+Facet resources contain the stored typed payload and its provenance; reading a
+resource never contacts GitHub. Job results expose structured progress and
+artifact references rather than raw request or result blobs.
 
-Catalog byte measurements are regression proxies, not model evidence. The v5
-fixture under `internal/mcpserver/testdata/agent-eval/v5` records the unified
-catalog decision and compares eager loading with host-native tool search. Each
-condition requires at least three trials with frozen model, sampling settings,
-catalog, snapshot token, permissions, prompt, and token budget.
+## Breaking catalog changes
 
-Semantic correctness and side-effect correctness are gates. Only afterward may
-invalid calls, redundant calls, result tokens, latency, and recovery success be
-compared. The fixture does not claim that model trials have run.
+The facts-first catalog removes overlapping workflow-shaped operations for
+ranking candidates, preparing issue sets, building dossiers, mining or
+previewing fix patterns, contribution preflight, related-work discovery, and
+DeepWiki reads. Their component corpus, GitHub, resource, workspace, and
+validation capabilities remain independently selectable where applicable.
+
+Canonical names changed as follows:
+
+| Previous name | Canonical name |
+| --- | --- |
+| `corpus.search_code_batch` | `corpus.search_code` |
+| `corpus.list_pull_requests` | `corpus.search_pull_requests` |
+| `github.sync_ci_failures` | `github.sync_pull_request_ci` |
+
+There is no scalar code-search compatibility alias. The canonical code search
+accepts several bounded queries over one shared offline snapshot.
+
+## Side effects
+
+MCP annotations reflect the actual capability boundary. Corpus reads are
+read-only and idempotent. GitHub reads are open-world operations that persist
+local observations. Local workflow writes, Git acquisition, and validation
+execution remain separate. GitContribute exposes no GitHub mutation tool.
