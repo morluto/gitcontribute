@@ -345,6 +345,7 @@ func TestDoctorReportsOlderRegistrationWhenNewerPrivateRuntimeIsInstalled(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	var registeredPath string
 	for _, version := range []string{"0.15.0", "0.16.0"} {
 		path, err := managedbinary.Destination(dataDir, version)
 		if err != nil {
@@ -356,8 +357,11 @@ func TestDoctorReportsOlderRegistrationWhenNewerPrivateRuntimeIsInstalled(t *tes
 		if err := os.WriteFile(path, []byte(version), 0o755); err != nil {
 			t.Fatal(err)
 		}
+		if version == "0.15.0" {
+			registeredPath = path
+		}
 	}
-	writeCodexConfig(t, home, filepath.Join(dataDir, "bin", "0.15.0", "gitcontribute"))
+	writeCodexConfig(t, home, registeredPath)
 
 	result, err := svc.Doctor(context.Background())
 	if err != nil {
