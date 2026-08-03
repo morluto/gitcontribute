@@ -12,21 +12,13 @@ import (
 	"github.com/morluto/gitcontribute/internal/repositorycontext"
 )
 
-const serverInstructions = "Use advertised GitContribute tools for durable, source-backed repository research and contribution tracking. " +
-	"Prefer corpus tools for offline reads; they never refresh data implicitly. " +
-	"GitHub tools perform explicit network reads and may update only the local corpus. " +
-	"Use workflow.get_catalog_contract when catalog parity is in doubt; it reports the running build version, post-registration catalog fingerprint, and whether the canonical pull-request feedback route is advertised. After an upgrade or registration change, create a fresh MCP connection before comparing the contract. " +
-	"Research tools return derived external context, never live GitHub state. " +
-	"The durable workflow is concern to investigation to hypothesis to opportunity to workspace to draft; use only advertised stages. " +
-	"Use workflow.prepare_issue_set when exact issue numbers already define the contribution scope; it is the canonical issue-audit entrypoint and returns typed recovery for missing repository or thread coverage. " +
-	"When an operation returns a job, poll advertised job tools in batches. " +
-	"Use corpus.get_thread_facets for bounded stored facet coverage and resources/read for larger facet payloads; repository, thread, and facet gaps provide the exact ordered synchronization route. " +
-	"For every pull-request comment written by a named reviewer across one repository, never use github.sync_portfolio or corpus.search_threads: use github.index_pull_request_feedback with state=all channels, poll jobs.get, then use corpus.search_pull_request_feedback with the exact feedback_author login (text is body search only); missing feedback is unknown until discovery and exact facets are complete. " +
-	"To inspect a returned resource, ask the host to perform MCP resources/read with this server and the exact URI; in Codex, call read_mcp_resource. Treat resource URIs as opaque identifiers and never shorten, pluralize, or reconstruct them. " +
-	"Missing or truncated coverage is unknown, not negative evidence; use each item's ordered typed recovery calls (the recovery plan's ordered typed calls), preserve exact_thread versus repository targets, poll the returned job, and reread coverage or synchronized headers before drawing conclusions. " +
-	"Canonical source-audit route: corpus.get_coverage -> corpus.ensure_coverage or the returned exact sync/hydration action -> jobs.get -> corpus.get_threads or corpus.get_thread_facets with the returned snapshot token -> corpus.find_clusters/find_neighbors/find_precedents -> explicit github.sync_threads -> jobs.get -> validation.attach_receipt -> workflow.prepare_contribution. Read workflow.get_source_audit_contract for machine-readable transitions. Corpus reads are offline, synchronization is bounded and explicit, missing coverage is unknown, and every returned resource URI must be consumed through MCP resources/read. " +
-	"github.search_threads and github.read_source_files are synchronous live acquisitions that write only local observations and immutable digest-bound artifacts; use their exact resource URI with resources/read, and treat a named source ref as non-authoritative until its resolved commit SHA is recorded. corpus.search_code_batch is an offline shared-snapshot convenience for several code queries; it never falls back to live GitHub code search. " +
-	"Before creating a contribution opportunity or workspace, use workflow.preflight_contribution to check current authored pull requests and optional local worktrees; it returns coverage_unknown when absence is not proven. " +
+const serverInstructions = "GitContribute exposes source-backed GitHub facts. " +
+	"corpus.* tools are offline reads and never refresh implicitly; github.* tools are explicit bounded network reads that may update only the local corpus. " +
+	"Coverage is part of the result: missing, stale, paginated, or truncated observations are unknown rather than negative evidence. " +
+	"Tools returning a job require polling through jobs.get before rereading the corpus. " +
+	"Use exact returned resource URIs with MCP resources/read; treat them as opaque. " +
+	"github.index_pull_request_feedback plus corpus.search_pull_request_feedback is the repository-wide route for comments and reviews filtered by author. " +
+	"github.search_users discovers identities; the github.sync_user_* tools independently acquire profile, social, organization, pinned, repository, and contribution facets. " +
 	"Only advertised tools are available. GitContribute never mutates GitHub."
 
 // RepositoryRef identifies one GitHub repository without implying that it has

@@ -81,6 +81,23 @@ type GitHubAcquisitionOperator interface {
 	ReadSourceFiles(context.Context, mcpcontract.ReadSourceFilesInput) (mcpcontract.ReadSourceFilesOutput, error)
 }
 
+type GitHubActorOperator interface {
+	SearchGitHubUsers(context.Context, mcpcontract.SearchGitHubUsersInput) (mcpcontract.SearchGitHubUsersOutput, error)
+	SyncUsers(context.Context, mcpcontract.SyncUsersInput) (mcpcontract.JobReference, error)
+	SyncUserSocialAccounts(context.Context, mcpcontract.SyncUserFacetInput) (mcpcontract.JobReference, error)
+	SyncUserOrganizations(context.Context, mcpcontract.SyncUserFacetInput) (mcpcontract.JobReference, error)
+	SyncUserPinnedItems(context.Context, mcpcontract.SyncUserPinnedItemsInput) (mcpcontract.JobReference, error)
+	SyncUserRepositories(context.Context, mcpcontract.SyncUserRepositoriesInput) (mcpcontract.JobReference, error)
+	SyncUserContributions(context.Context, mcpcontract.SyncUserContributionsInput) (mcpcontract.JobReference, error)
+}
+
+type ActorReader interface {
+	SearchActors(context.Context, mcpcontract.SearchActorsInput) (mcpcontract.SearchActorsOutput, error)
+	GetActors(context.Context, mcpcontract.GetActorsInput) (mcpcontract.GetActorsOutput, error)
+	GetActorFacets(context.Context, mcpcontract.GetActorFacetsInput) (mcpcontract.GetActorFacetsOutput, error)
+	SearchContributions(context.Context, mcpcontract.SearchContributionsInput) (mcpcontract.SearchContributionsOutput, error)
+}
+
 // CodeSearchBatchReader exposes one bounded offline batch over a shared code
 // snapshot scope. It remains separate from Reader so existing local readers
 // can retain the single-query compatibility tool.
@@ -427,6 +444,7 @@ func (s *Server) register() {
 		output: outputSchema[mcpcontract.GetCoverageOutput]("Ordered local repository or thread facet coverage."), handler: s.getCoverage,
 	})
 	s.registerResourceTemplates()
+	s.registerActorTools()
 	s.registerContributionPrompts()
 	s.registerV1()
 	s.registerScalable()

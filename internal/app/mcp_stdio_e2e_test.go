@@ -84,8 +84,8 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		t.Fatalf("initialize result = %+v", initialized)
 	}
 	for _, phrase := range []string{
-		"Prefer corpus tools for offline reads", "never refresh data implicitly", "explicit network reads",
-		"poll advertised job tools in batches", "Missing or truncated coverage is unknown",
+		"corpus.* tools are offline reads", "never refresh implicitly", "explicit bounded network reads",
+		"polling through jobs.get", "observations are unknown rather than negative evidence",
 		"Only advertised tools are available", "never mutates GitHub",
 	} {
 		if !strings.Contains(initialized.Instructions, phrase) {
@@ -100,7 +100,7 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		}
 		tools[tool.Name] = tool
 	}
-	for _, name := range []string{mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolRankThreads, mcpcontract.ToolFindPrecedents, mcpcontract.ToolSyncPortfolio, mcpcontract.ToolPreflightContribution, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolSearchGitHubThreads, mcpcontract.ToolReadSourceFiles, mcpcontract.ToolSearchCodeBatch, mcpcontract.ToolSyncRepositoryContext, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads, mcpcontract.ToolEnsureCoverage, mcpcontract.ToolGetSourceAuditWorkflow, mcpcontract.ToolGetCatalogContract, mcpcontract.ToolQueryDeepWiki, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCheckMergeConflicts, mcpcontract.ToolIndexPullRequestFeedback, mcpcontract.ToolSyncPullRequestFeedback, mcpcontract.ToolSearchPullRequestFeedback} {
+	for _, name := range []string{mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolFindPrecedents, mcpcontract.ToolSyncPortfolio, mcpcontract.ToolListPullRequestPortfolio, mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolSearchGitHubThreads, mcpcontract.ToolReadSourceFiles, mcpcontract.ToolSearchCodeBatch, mcpcontract.ToolSyncRepositoryContext, mcpcontract.ToolSyncThreads, mcpcontract.ToolHydrateThreads, mcpcontract.ToolEnsureCoverage, mcpcontract.ToolGetSourceAuditWorkflow, mcpcontract.ToolGetCatalogContract, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCheckMergeConflicts, mcpcontract.ToolIndexPullRequestFeedback, mcpcontract.ToolSyncPullRequestFeedback, mcpcontract.ToolSearchPullRequestFeedback} {
 		if tools[name] == nil {
 			t.Errorf("tools/list missing %s", name)
 		}
@@ -129,11 +129,6 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 		t.Fatalf("compact thread batch = %+v", threads)
 	}
 
-	ranked := callMCPTool[mcpcontract.RankOpportunitiesOutput](ctx, t, session, mcpcontract.ToolRankThreads, map[string]any{"repositories": []any{map[string]any{"owner": "acme", "repo": "observed"}}, "limit": 10, "max_results_per_repository": 10})
-	if len(ranked.Candidates) == 0 || ranked.Candidates[0].Number != 1 {
-		t.Fatalf("ranked opportunities = %+v", ranked)
-	}
-
 	precedents := callMCPTool[mcpcontract.FindPrecedentsOutput](ctx, t, session, mcpcontract.ToolFindPrecedents, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "observed", "number": 1}}, "limit": 10})
 	if precedents.Total == 0 || precedents.Items[0].Value == nil || precedents.Items[0].Value.Matches[0].Ref != "acme/observed#2" {
 		t.Fatalf("precedents = %+v", precedents)
@@ -143,9 +138,6 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 	if len(portfolio.PullRequests) != 1 || portfolio.PullRequests[0].Attention != "unknown" {
 		t.Fatalf("portfolio = %+v", portfolio)
 	}
-
-	job := callMCPTool[mcpcontract.JobReference](ctx, t, session, mcpcontract.ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "observed"})
-	waitMCPJob(ctx, t, session, job.ID)
 
 	invalid, err := session.CallTool(ctx, &mcp.CallToolParams{Name: mcpcontract.ToolHydrateThreads, Arguments: map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "observed", "number": 1}}, "facets": []any{}}})
 	if err != nil {
@@ -453,7 +445,17 @@ func seedMCPStdioEmptyCorpus(ctx context.Context, t *testing.T, home string) {
 
 func newMCPGitHubServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	now := time.Now().UTC()
+	timestamps := map[string]string{
+		"2026-07-18T22:00:00Z": now.Add(-30 * time.Minute).Format(time.RFC3339),
+		"2026-07-18T21:05:00Z": now.Add(-55 * time.Minute).Format(time.RFC3339),
+		"2026-07-18T21:00:00Z": now.Add(-time.Hour).Format(time.RFC3339),
+		"2026-07-18T20:00:00Z": now.Add(-2 * time.Hour).Format(time.RFC3339),
+		"2026-07-18T19:00:00Z": now.Add(-3 * time.Hour).Format(time.RFC3339),
+		"2026-07-15T10:00:00Z": now.Add(-72 * time.Hour).Format(time.RFC3339),
+	}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w = &relativeTimestampWriter{ResponseWriter: w, replacements: timestamps}
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/graphql") {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"data":{"repository":{"pullRequest":{
@@ -548,6 +550,19 @@ func newMCPGitHubServer(t *testing.T) *httptest.Server {
 			http.NotFound(w, r)
 		}
 	}))
+}
+
+type relativeTimestampWriter struct {
+	http.ResponseWriter
+	replacements map[string]string
+}
+
+func (w *relativeTimestampWriter) Write(payload []byte) (int, error) {
+	text := string(payload)
+	for fixed, relative := range w.replacements {
+		text = strings.ReplaceAll(text, fixed, relative)
+	}
+	return w.ResponseWriter.Write([]byte(text))
 }
 
 func waitMCPJob(ctx context.Context, t *testing.T, session *mcp.ClientSession, id string) mcpcontract.GetJobOutput {

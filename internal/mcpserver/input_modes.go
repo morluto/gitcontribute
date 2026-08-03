@@ -1,6 +1,10 @@
 package mcpserver
 
-import "github.com/google/jsonschema-go/jsonschema"
+import (
+	"strings"
+
+	"github.com/google/jsonschema-go/jsonschema"
+)
 
 const nonWhitespacePattern = `.*\S.*`
 
@@ -177,6 +181,37 @@ func schemaMode(discriminator, value string, required, forbidden []string) *json
 		schema.Not = schemaRequiringAny(forbidden...)
 	}
 	return schema
+}
+
+func configureActorSelectorModes(builder *schemaBuilder) {
+	actor := builder.schema.Defs["ActorSelector"]
+	if actor == nil {
+		for name, candidate := range builder.schema.Defs {
+			if strings.HasSuffix(name, "ActorSelector") {
+				actor = candidate
+				break
+			}
+		}
+	}
+	if actor == nil {
+		if users := builder.schema.Properties["users"]; users != nil {
+			actor = users.Items
+		}
+	}
+	if actor == nil {
+		return
+	}
+	login := schemaMode("type", "login", []string{"login"}, []string{"node_id"})
+	login.ID = "urn:gitcontribute:actor-selector:login"
+	node := schemaMode("type", "node_id", []string{"node_id"}, []string{"login"})
+	node.ID = "urn:gitcontribute:actor-selector:node-id"
+	actor.OneOf = []*jsonschema.Schema{login, node}
+	for _, field := range []string{"login", "node_id"} {
+		if value := actor.Properties[field]; value != nil {
+			value.MinLength = jsonschema.Ptr(1)
+			value.Pattern = nonWhitespacePattern
+		}
+	}
 }
 
 func schemaRequiringAny(fields ...string) *jsonschema.Schema {

@@ -201,8 +201,8 @@ func TestOptionalCapabilitiesAreAdvertisedIndependently(t *testing.T) {
 	tools, closeSessions := listedToolsFromReader(t, reader)
 	defer closeSessions()
 
-	if tools[mcpcontract.ToolQueryDeepWiki] == nil {
-		t.Fatal("supported research tool was not advertised")
+	if tools[mcpcontract.ToolQueryDeepWiki] != nil {
+		t.Fatal("removed derived-research workflow was advertised")
 	}
 	for _, name := range []string{mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCheckMergeConflicts, mcpcontract.ToolListPullRequestPortfolio} {
 		if tools[name] != nil {
@@ -228,14 +228,8 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 		t.Fatalf("thread sync description does not expose the follow-up route: %q", tools[mcpcontract.ToolSyncThreads].Description)
 	}
 	assertSchemaValue(t, tools[mcpcontract.ToolHydrateThreads].InputSchema, []string{"properties", "max_pages", "default"}, float64(3))
-	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].InputSchema, []string{"required"}, []any{"repositories"})
 	assertSchemaValue(t, tools[mcpcontract.ToolCreateWorkspace].InputSchema, []string{"required"}, []any{"investigation_id"})
 	assertSchemaValue(t, tools[mcpcontract.ToolAdoptWorkspace].InputSchema, []string{"required"}, []any{"investigation_id", "path", "base_ref"})
-	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].OutputSchema, []string{"properties", "total", "type"}, "integer")
-	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].OutputSchema, []string{"properties", "truncated", "type"}, "boolean")
-	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].OutputSchema, []string{"properties", "candidates", "items", "properties", "score", "minimum"}, float64(0))
-	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].OutputSchema, []string{"properties", "candidates", "items", "properties", "score", "maximum"}, float64(100))
-	assertSchemaValue(t, tools[mcpcontract.ToolRankThreads].OutputSchema, []string{"properties", "candidates", "items", "properties", "confidence", "type"}, "string")
 	assertSchemaValue(t, tools[mcpcontract.ToolFindPrecedents].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "matches", "items", "properties", "score", "maximum"}, float64(1))
 	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "item_status", "enum"}, []any{"complete", "retryable", "unavailable", "failed"})
 	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "execution_state", "enum"}, []any{"queued", "running", "terminal"})
@@ -275,6 +269,33 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 		if strings.TrimSpace(stringValue(output["description"])) == "" {
 			t.Errorf("tool %q output schema has no root description", name)
 		}
+	}
+}
+
+func TestActorSelectorSchemaIsDiscriminated(t *testing.T) {
+	definition := inputSchema[mcpcontract.SyncUsersInput](func(builder *schemaBuilder) {
+		configureActorSelectorModes(builder)
+	})
+	if definition.err != nil {
+		t.Fatal(definition.err)
+	}
+	actor := definition.schema.Defs["ActorSelector"]
+	if actor == nil {
+		for name, candidate := range definition.schema.Defs {
+			if strings.HasSuffix(name, "ActorSelector") {
+				actor = candidate
+				break
+			}
+		}
+	}
+	if actor == nil {
+		actor = definition.schema.Properties["users"].Items
+	}
+	if actor == nil || len(actor.OneOf) != 2 {
+		t.Fatalf("actor selector schema = %+v defs=%d users=%+v", actor, len(definition.schema.Defs), definition.schema.Properties["users"])
+	}
+	if actor.OneOf[0].ID != "urn:gitcontribute:actor-selector:login" || actor.OneOf[1].ID != "urn:gitcontribute:actor-selector:node-id" {
+		t.Fatalf("actor selector modes = %+v", actor.OneOf)
 	}
 }
 
@@ -335,11 +356,7 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 		{"Read the complete stored body of pull request 42", mcpcontract.ToolGetThreads},
 		{"Refresh issue and pull request thread headers for selected repositories from GitHub", mcpcontract.ToolSyncThreads},
 		{"Fetch comments and reviews for one stored pull request from GitHub", mcpcontract.ToolSyncPullRequestFeedback},
-		{"Rank stored open issues for contribution across selected repositories", mcpcontract.ToolRankThreads},
 		{"Find similar completed and rejected historical work for this issue", mcpcontract.ToolFindPrecedents},
-		{"Prepare contribution evidence and linkage guidance for fourteen exact issues", mcpcontract.ToolPrepareIssueSet},
-		{"Ask DeepWiki to compare the architecture of three public repositories", mcpcontract.ToolQueryDeepWiki},
-		{"Refresh mergeability, checks, queue state, and changed files for my selected pull requests", mcpcontract.ToolSyncPortfolio},
 		{"List my stored pull requests that need contributor attention", mcpcontract.ToolListPullRequestPortfolio},
 		{"Acquire and index code for several repositories", mcpcontract.ToolIndexRepositories},
 		{"Check actual Git merge conflicts between fetched revisions", mcpcontract.ToolCheckMergeConflicts},
@@ -354,9 +371,6 @@ func TestAgentToolSelectionProxy(t *testing.T) {
 		{"Read repository and thread coverage across several targets", mcpcontract.ToolGetCoverage},
 		{"Compare contribution candidates with my authored pull requests for overlap", mcpcontract.ToolFindPortfolioOverlaps},
 		{"Link an authored pull request to a local opportunity", mcpcontract.ToolLinkPullRequest},
-		{"Rebuild and persist the repository dossier from the local corpus", mcpcontract.ToolBuildRepositoryDossier},
-		{"Find open pull requests that might conflict with this opportunity", mcpcontract.ToolFindRelatedWork},
-		{"Find issues that may duplicate this hypothesis", mcpcontract.ToolFindRelatedWork},
 	}
 
 	correct := 0
@@ -466,64 +480,10 @@ func TestCoverageTargetSchemaAcceptsRepositoryAndExactThreadOnly(t *testing.T) {
 }
 
 func TestFixPatternWorkflowSchemaRejectsInvalidNestedInputBeforeHandler(t *testing.T) {
-	base := &fakeReader{searchStarted: make(chan struct{})}
-	optional := &fakeOptionalCapabilities{base: base}
-	reader := struct {
-		mcpcontract.Reader
-		FixPatternOperator
-		FixPatternReader
-	}{Reader: base, FixPatternOperator: optional, FixPatternReader: base}
-	client, closeSessions := connect(t, reader)
+	tools, closeSessions := listedTools(t)
 	defer closeSessions()
-
-	invalidCalls := []map[string]any{
-		{
-			"repository":       map[string]any{"owner": "acme", "repo": "rocket"},
-			"time_window":      map[string]any{"updated_after": "2026-07-01T00:00:00Z"},
-			"symptom_taxonomy": []any{map[string]any{"name": "numeric drift", "terms": []any{}}},
-		},
-		{
-			"repository":       map[string]any{"owner": "acme", "repo": "rocket"},
-			"time_window":      map[string]any{"updated_after": "2026-07-01T00:00:00Z"},
-			"symptom_taxonomy": []any{map[string]any{"name": " ", "terms": []any{"drift"}}},
-		},
-		{
-			"repository":       map[string]any{"owner": "acme", "repo": "rocket"},
-			"time_window":      map[string]any{"updated_after": "2026-07-01T00:00:00Z"},
-			"symptom_taxonomy": []any{map[string]any{"name": "drift", "terms": []any{"drift"}}},
-			"merge_outcomes":   []any{"merged", "merged"},
-		},
-	}
-	for _, invalid := range invalidCalls {
-		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
-			Name: mcpcontract.ToolMineRepositoryFixPatterns, Arguments: invalid,
-		})
-		if err == nil && result != nil && !result.IsError {
-			t.Fatalf("invalid workflow input was accepted: %#v", invalid)
-		}
-	}
-	if optional.fixPatternCalls != 0 {
-		t.Fatalf("handler calls = %d, want 0", optional.fixPatternCalls)
-	}
-
-	valid := map[string]any{
-		"repository":       map[string]any{"owner": "acme", "repo": "rocket"},
-		"time_window":      map[string]any{"updated_after": "2026-07-01T00:00:00Z"},
-		"symptom_taxonomy": []any{map[string]any{"name": "numeric drift", "terms": []any{"wrong result", "numeric drift"}}},
-		"hydration_limit":  0,
-	}
-	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: mcpcontract.ToolMineRepositoryFixPatterns, Arguments: valid,
-	})
-	if err != nil || result == nil || result.IsError {
-		t.Fatalf("valid call result = %+v, err = %v", result, err)
-	}
-	structured, ok := result.StructuredContent.(map[string]any)
-	if !ok || structured["id"] != "job-fix-patterns" {
-		t.Fatalf("structured content = %#v", result.StructuredContent)
-	}
-	if optional.fixPatternCalls != 1 || optional.lastFixPatternRequest.HydrationLimit == nil || *optional.lastFixPatternRequest.HydrationLimit != 0 {
-		t.Fatalf("handler state = calls %d, input %+v", optional.fixPatternCalls, optional.lastFixPatternRequest)
+	if tools[mcpcontract.ToolMineRepositoryFixPatterns] != nil {
+		t.Fatal("removed fix-pattern workflow was advertised")
 	}
 }
 

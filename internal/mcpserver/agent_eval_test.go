@@ -125,15 +125,6 @@ func TestAgentEvalScriptedCurrentContracts(t *testing.T) {
 		}
 	})
 
-	t.Run("exact issue-set preparation is one offline aggregate call", func(t *testing.T) {
-		result := callAgentEvalTool(t, client, mcpcontract.ToolPrepareIssueSet, map[string]any{
-			"owner": "acme", "repo": "rocket", "issue_numbers": []int{7, 11, 14},
-		})
-		if result.IsError || result.StructuredContent == nil {
-			t.Fatalf("issue-set result = %+v; content = %q", result, agentEvalResultText(result))
-		}
-	})
-
 	t.Run("repository and dossier availability is one offline batch", func(t *testing.T) {
 		result := callAgentEvalTool(t, client, mcpcontract.ToolGetRepositories, map[string]any{
 			"repositories": []map[string]any{
@@ -181,25 +172,6 @@ func TestAgentEvalScriptedCurrentContracts(t *testing.T) {
 			if !strings.Contains(message, "github-search-raw-query") || !strings.Contains(message, "github-search-structured") {
 				t.Fatalf("schema error does not identify the rejected modes: %q", message)
 			}
-		}
-	})
-
-	t.Run("durable operation exposes a pollable job", func(t *testing.T) {
-		started := callAgentEvalTool(t, client, mcpcontract.ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"})
-		payload, err := json.Marshal(started.StructuredContent)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var job mcpcontract.JobReference
-		if err := json.Unmarshal(payload, &job); err != nil {
-			t.Fatal(err)
-		}
-		if job.ID == "" || job.Ref != "job:"+job.ID || job.Status == "" || job.PollAfterMS < 1 || job.FollowUp == nil || job.FollowUp.Action.Type != "poll_job" {
-			t.Fatalf("job reference is not pollable: %+v", job)
-		}
-		polled := callAgentEvalTool(t, client, mcpcontract.ToolGetJob, map[string]any{"ids": []string{job.ID}})
-		if polled.IsError || polled.StructuredContent == nil {
-			t.Fatalf("poll result = %+v", polled)
 		}
 	})
 }
