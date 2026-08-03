@@ -12,7 +12,6 @@ func (s *Server) registerResourceTemplates() {
 	templates := []resourceTemplateDefinition{
 		{"gitcontribute://repository/{owner}/{repo}", "Repository", "Local repository record"},
 		{"gitcontribute://thread/{owner}/{repo}/{kind}/{number}", "Thread", "Local issue or pull request"},
-		{"gitcontribute://dossier/{owner}/{repo}", "Dossier", "Local source-backed repository dossier"},
 		{"gitcontribute://investigation/{id}", "Investigation", "Local investigation workspace"},
 		{"gitcontribute://opportunity/{id}", "Opportunity", "Local contribution opportunity"},
 		{"gitcontribute://evidence/{scope}/{id}", "Evidence", "Local evidence for an investigation or opportunity"},
@@ -25,11 +24,11 @@ func (s *Server) registerResourceTemplates() {
 			name:     "Thread facet", description: "Persisted local thread facet payload",
 		})
 	}
-	if _, ok := s.reader.(FixPatternReader); ok {
-		templates = append(templates, resourceTemplateDefinition{
-			template: "gitcontribute://fix-pattern-report/{job_id}",
-			name:     "Fix-pattern report", description: "Typed repository contribution-pattern report produced by a durable workflow",
-		})
+	if _, ok := s.reader.(actorResourceReader); ok {
+		templates = append(templates,
+			resourceTemplateDefinition{template: "gitcontribute://actor/{actor_id}", name: "Actor", description: "Current stored GitHub actor identity and profile coverage"},
+			resourceTemplateDefinition{template: "gitcontribute://actor/{actor_id}/facet/{facet}", name: "Actor facet", description: "Stored actor facet coverage without implicit refresh"},
+		)
 	}
 	if _, ok := s.reader.(CodeIndexReader); ok {
 		templates = append(templates, resourceTemplateDefinition{

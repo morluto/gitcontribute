@@ -86,10 +86,9 @@ contracts include:
 - preserving semantic references across concise and detailed responses;
 - returning stable, duplicate-free pagination;
 - avoiding poll suggestions for terminal jobs.
-- comparing `workflow.mine_repository_fix_patterns` with manual
-  search/select/hydrate loops on a repository where closed PR headers have
-  unknown merge state; score confirmed merged, closed-unmerged, superseded,
-  open, and unknown outcomes separately.
+- comparing bounded atomic search/select/hydrate loops on a repository where
+  closed PR headers have unknown merge state; score confirmed merged,
+  closed-unmerged, superseded, open, and unknown outcomes separately.
 
 Run the focused suite with:
 

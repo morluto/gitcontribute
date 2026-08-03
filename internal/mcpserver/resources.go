@@ -39,6 +39,10 @@ type threadFacetResourceReader interface {
 	ThreadFacetResource(context.Context, string, string, string, int, string) (map[string]any, error)
 }
 
+type actorResourceReader interface {
+	ActorResource(context.Context, string, string) (any, error)
+}
+
 func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 	uri := req.Params.URI
 	u, err := url.Parse(uri)
@@ -78,13 +82,13 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 	switch req.host {
 	case "repository":
 		return s.readRepositoryResource(ctx, req)
-	case "dossier":
-		return s.readDossierResource(ctx, req)
 	case "thread":
 		if len(req.parts) == 6 && req.parts[4] == "facet" {
 			return s.readThreadFacetResource(ctx, req)
 		}
 		return s.readTypedThreadResource(ctx, req)
+	case "actor":
+		return s.readActorResource(ctx, req)
 	case "investigation":
 		return s.readInvestigationResource(ctx, req)
 	case "opportunity":
@@ -95,8 +99,6 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 		return s.readReadinessResource(ctx, req)
 	case "lens":
 		return s.readLensResource(ctx, req)
-	case "fix-pattern-report":
-		return s.readFixPatternReportResource(ctx, req)
 	case "concern":
 		return s.readConcernResource(ctx, req)
 	case "draft":
@@ -138,6 +140,25 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 	default:
 		return nil, mcp.ResourceNotFoundError(req.uri)
 	}
+}
+
+func (s *Server) readActorResource(ctx context.Context, req resourceRequest) (any, error) {
+	reader, ok := s.reader.(actorResourceReader)
+	if !ok || (len(req.parts) != 1 && (len(req.parts) != 3 || req.parts[1] != "facet")) || strings.TrimSpace(req.parts[0]) == "" {
+		return nil, mcp.ResourceNotFoundError(req.uri)
+	}
+	actorID, err := url.PathUnescape(req.parts[0])
+	if err != nil {
+		return nil, mcp.ResourceNotFoundError(req.uri)
+	}
+	facet := ""
+	if len(req.parts) == 3 {
+		facet, err = url.PathUnescape(req.parts[2])
+		if err != nil || strings.TrimSpace(facet) == "" {
+			return nil, mcp.ResourceNotFoundError(req.uri)
+		}
+	}
+	return reader.ActorResource(ctx, actorID, facet)
 }
 
 func (s *Server) readCodeIndexResource(ctx context.Context, req resourceRequest) (mcpcontract.CodeIndexArtifact, error) {
@@ -288,29 +309,11 @@ func (s *Server) readManifestResource(ctx context.Context, req resourceRequest) 
 	return reader.Manifest(ctx, mcpcontract.ManifestInput{ID: req.parts[0]})
 }
 
-func (s *Server) readFixPatternReportResource(ctx context.Context, req resourceRequest) (mcpcontract.FixPatternReport, error) {
-	if len(req.parts) != 1 {
-		return mcpcontract.FixPatternReport{}, mcp.ResourceNotFoundError(req.uri)
-	}
-	reader, ok := s.reader.(FixPatternReader)
-	if !ok {
-		return mcpcontract.FixPatternReport{}, mcp.ResourceNotFoundError(req.uri)
-	}
-	return reader.GetFixPatternReport(ctx, req.parts[0])
-}
-
 func (s *Server) readRepositoryResource(ctx context.Context, req resourceRequest) (mcpcontract.RepositoryOutput, error) {
 	if len(req.parts) != 2 {
 		return mcpcontract.RepositoryOutput{}, mcp.ResourceNotFoundError(req.uri)
 	}
 	return s.reader.Repository(ctx, mcpcontract.RepoInput{Owner: req.parts[0], Repo: req.parts[1]})
-}
-
-func (s *Server) readDossierResource(ctx context.Context, req resourceRequest) (mcpcontract.DossierOutput, error) {
-	if len(req.parts) != 2 {
-		return mcpcontract.DossierOutput{}, mcp.ResourceNotFoundError(req.uri)
-	}
-	return s.reader.Dossier(ctx, mcpcontract.RepoInput{Owner: req.parts[0], Repo: req.parts[1]})
 }
 
 func (s *Server) readTypedThreadResource(ctx context.Context, req resourceRequest) (mcpcontract.ThreadOutput, error) {

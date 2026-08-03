@@ -466,7 +466,6 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 		args      map[string]any
 		wantTotal int
 	}{
-		{mcpcontract.ToolSearchCode, map[string]any{"query": "main"}, 1},
 		{mcpcontract.ToolFindClusters, map[string]any{"targets": []any{map[string]any{"owner": "acme", "repo": "rocket"}}}, 1},
 		{mcpcontract.ToolGetCoverage, map[string]any{"targets": []any{map[string]any{"type": "repository", "repository": map[string]any{"owner": "acme", "repo": "rocket"}}}}, -1},
 	}
@@ -548,7 +547,6 @@ func TestInvestigationOpportunityEvidenceResources(t *testing.T) {
 		"gitcontribute://evidence/investigation/inv-1",
 		"gitcontribute://evidence/opportunity/opp-1",
 		"gitcontribute://readiness/opp-1",
-		"gitcontribute://fix-pattern-report/job-fix-patterns",
 	}
 	for _, uri := range cases {
 		result, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: uri})
@@ -575,7 +573,7 @@ func TestFixPatternResourceTemplateTracksReaderCapability(t *testing.T) {
 		reader mcpcontract.Reader
 		want   bool
 	}{
-		{name: "supported", reader: base, want: true},
+		{name: "supported", reader: base, want: false},
 		{name: "unsupported", reader: struct{ mcpcontract.Reader }{Reader: base}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -715,10 +713,9 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 
 	for _, name := range []string{
 		mcpcontract.ToolSearchRepositories, mcpcontract.ToolSearchThreads, mcpcontract.ToolExplainMatch, mcpcontract.ToolGetJob,
-		mcpcontract.ToolBuildRepositoryDossier,
 		mcpcontract.ToolCreateWorkspace, mcpcontract.ToolAdoptWorkspace, mcpcontract.ToolRunValidation,
 		mcpcontract.ToolStartInvestigation, mcpcontract.ToolRecordHypothesis,
-		mcpcontract.ToolFindRelatedWork, mcpcontract.ToolPromoteOpportunity, mcpcontract.ToolDefineValidation,
+		mcpcontract.ToolPromoteOpportunity, mcpcontract.ToolDefineValidation,
 		mcpcontract.ToolPrepareContribution, mcpcontract.ToolCancelJob,
 	} {
 		if tools[name] == nil {
@@ -749,13 +746,11 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		name string
 		args map[string]any
 	}{
-		{mcpcontract.ToolBuildRepositoryDossier, map[string]any{"owner": "acme", "repo": "rocket"}},
 		{mcpcontract.ToolCreateWorkspace, map[string]any{"investigation_id": "inv-1"}},
 		{mcpcontract.ToolAdoptWorkspace, map[string]any{"investigation_id": "inv-1", "path": "/tmp/worktree", "base_ref": "main", "name": "external"}},
 		{mcpcontract.ToolRunValidation, map[string]any{"id": "val-1", "target": "both", "run_count": 3, "execute": true}},
 		{mcpcontract.ToolStartInvestigation, map[string]any{"owner": "acme", "repo": "rocket", "commit_sha": "abc123"}},
 		{mcpcontract.ToolRecordHypothesis, map[string]any{"investigation_id": "inv-1", "title": "leak", "description": "memory leak", "category": "bug"}},
-		{mcpcontract.ToolFindRelatedWork, map[string]any{"target": "hypothesis", "id": "hyp-1", "kinds": []string{"duplicates"}}},
 		{mcpcontract.ToolPromoteOpportunity, map[string]any{"hypothesis_id": "hyp-1", "problem_statement": "leak", "scope": "small", "impact": "high", "expected_effort": "1h", "confidence": 0.8}},
 		{mcpcontract.ToolDefineValidation, map[string]any{"investigation_id": "inv-1", "kind": "test", "command": "go test ./...", "workspace_id": "ws-1"}},
 		{mcpcontract.ToolPrepareContribution, map[string]any{"opportunity_id": "opp-1", "kind": "issue"}},

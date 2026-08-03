@@ -238,17 +238,12 @@ func runHeldOutOracle(t *testing.T, scenario string, run *heldOutRun) bool {
 		return err == nil && resource != nil && len(resource.Contents) > 0
 
 	case "audit_only_fix_pattern_preview":
-		result := run.tool(t, mcpcontract.ToolPreviewRepositoryFixPatterns, map[string]any{
-			"repository":       map[string]any{"owner": "acme", "repo": "heldout"},
-			"time_window":      map[string]any{"updated_after": "2026-01-01T00:00:00Z"},
-			"symptom_taxonomy": []any{map[string]any{"name": "stall", "terms": []string{"stall"}}},
-			"candidate_limit":  10, "representative_limit": 2,
-		})
+		result := run.tool(t, mcpcontract.ToolSearchThreads, map[string]any{"owner": "acme", "repo": "heldout", "query": "stall", "limit": 10})
 		if result == nil || result.IsError {
 			return false
 		}
-		var report mcpcontract.FixPatternReport
-		return decodeHeldOut(result.StructuredContent, &report) && !report.Persisted && report.SnapshotToken != ""
+		var search mcpcontract.SearchOutput
+		return decodeHeldOut(result.StructuredContent, &search)
 	}
 	t.Fatalf("unknown held-out scenario %q", scenario)
 	return false

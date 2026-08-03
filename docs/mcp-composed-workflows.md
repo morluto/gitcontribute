@@ -41,32 +41,31 @@ corpus.get_coverage -> typed exact/repository recovery -> jobs.get
 ```
 
 Coverage reads are offline and missing coverage is unknown. Synchronization is
-always an explicit bounded operation. If `corpus.get_coverage` or
-`workflow.prepare_issue_set` returns incomplete coverage, follow its item-level
-typed recovery action, preserving exact-thread versus repository scope. Poll
-the returned job, perform the offline reread, and reuse its returned
-`snapshot_token` for any composed duplicate checks. Use exact resource URIs
-only through MCP `resources/read` before attaching receipts or handing evidence
-to a draft workflow.
+always an explicit bounded operation. If `corpus.get_coverage`, an exact thread
+read, or a facet read returns incomplete coverage, follow its item-level typed
+recovery action while preserving exact-thread versus repository scope. Poll the
+returned job, perform the offline reread, and reuse its returned
+`snapshot_token` for composed duplicate checks. Use exact resource URIs only
+through MCP `resources/read` before attaching receipts or handing evidence to a
+draft workflow.
 
 Canonical MCP composition:
 
-1. Use `workflow.prepare_issue_set` for supplied exact issues. It returns
-   stored facts, per-thread coverage gaps, related work, merged precedents, and
-   linkage candidates without network access. When its result is partial,
-   replay the returned recovery action, poll the job, and retry the same read.
-2. For an exact pull request or fields not covered by that aggregate, use
-   `corpus.get_threads` with `response_format=detailed`.
-3. Read repository guidance or a persisted dossier only when the task needs
-   repository-wide context. Do not treat missing coverage as a negative result.
+1. Use `corpus.get_threads` for supplied exact issues or pull requests and
+   `corpus.get_thread_facets` for selected child coverage.
+2. Use `corpus.find_clusters`, `corpus.find_neighbors`, and
+   `corpus.find_precedents` only for the duplicate or historical evidence the
+   task needs.
+3. Read repository guidance only when the task needs repository-wide context.
+   Do not treat missing coverage as a negative result.
 4. Perform a bounded GitHub sync only when current live state is required or
    when returned coverage recovery requests it, wait for its durable job, and
    then repeat the relevant offline read.
 
-Decision: **compose**. `workflow.prepare_issue_set` already removes the
-error-prone issue fan-out while preserving coverage and provenance. A second
-general “research brief” MCP operation would overlap it and the exact-thread
-read without demonstrated semantic benefit.
+Decision: **compose**. The facts-first catalog removed the aggregate issue-set
+operation. Exact reads and bounded duplicate primitives make coverage and
+selection visible to the calling agent without granting another workflow tool
+authority over the sequence.
 
 ## Base and candidate validation comparison
 
@@ -88,28 +87,19 @@ loss of comparison semantics that would justify another process-capable tool.
 Reconsider only if controlled traces show recurring client mistakes or a
 material call/payload reduction that preserves authorization and proof.
 
-## Contribution preflight
+## Contribution collision checks
 
 ```text
-workflow.preflight_contribution
+github.search_threads (bounded current work)
+github.sync_pull_request_portfolio(selection=authored) -> jobs.get
+corpus.search_pull_requests | corpus.find_pull_request_overlaps
+workspace.check_merge_conflicts (only after explicit acquisition)
 ```
 
-Contribution preflight is the narrow exception to the portfolio composition
-above. It is a read-only, bounded routing operation for the point before an
-opportunity or workspace exists. It resolves the authenticated identity,
-searches only the target repository for open authored pull requests, performs
-one bounded related issue/PR search, and inspects explicitly supplied local Git
-worktree paths without adopting or changing them. The operation returns
-`existing_pr` when an authored PR matches a title, branch, commit, or inspected
-worktree; it returns `new_work` only when every required live search and local
-inspection completed; otherwise it returns `coverage_unknown` with reasons and
-the next action needed to retry.
-
-This contract closes the pre-candidate gap without duplicating portfolio
-storage or local workflow links. It does not create jobs, write the corpus,
-create worktrees, or mutate GitHub. The regression fixtures cover an existing
-authored PR with a matching local branch, unavailable identity, and a verified
-unrelated candidate.
+Decision: **compose**. The catalog no longer exposes a preflight workflow that
+decides whether an agent should start work. Agents select the current-work,
+portfolio, overlap, or Git comparison facts appropriate to the task. Unknown
+discovery or facet coverage prevents a “no competing work” conclusion.
 
 ## Unified catalog
 

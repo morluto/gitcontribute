@@ -19,23 +19,16 @@ func TestServerInstructionsContainRoutingPhrases(t *testing.T) {
 		t.Fatal("missing initialize result")
 	}
 	for _, phrase := range []string{
-		"Prefer corpus tools for offline reads",
-		"never refresh data implicitly",
-		"explicit network reads",
-		"workflow.get_catalog_contract",
-		"fresh MCP connection",
-		"concern to investigation to hypothesis to opportunity to workspace to draft",
-		"poll advertised job tools in batches",
-		"recovery plan's ordered typed calls",
-		"perform MCP resources/read",
-		"in Codex, call read_mcp_resource",
-		"exact URI",
-		"never shorten, pluralize, or reconstruct them",
+		"corpus.* tools are offline reads",
+		"never refresh implicitly",
+		"explicit bounded network reads",
+		"missing, stale, paginated, or truncated observations are unknown",
+		"polling through jobs.get",
+		"exact returned resource URIs",
+		"github.search_users",
+		"github.sync_user_*",
 		"Only advertised tools are available",
 		"never mutates GitHub",
-		"github.search_threads",
-		"github.read_source_files",
-		"corpus.search_code_batch",
 	} {
 		if !strings.Contains(init.Instructions, phrase) {
 			t.Errorf("instructions missing routing phrase %q:\n%s", phrase, init.Instructions)
@@ -429,9 +422,8 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 		tools[tool.Name] = tool
 	}
 	for _, name := range []string{
-		mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads, mcpcontract.ToolSearchCode,
+		mcpcontract.ToolGetRepositories, mcpcontract.ToolGetThreads,
 		mcpcontract.ToolFindClusters, mcpcontract.ToolFindNeighbors, mcpcontract.ToolGetCoverage,
-		mcpcontract.ToolQueryDeepWiki,
 	} {
 		tool := tools[name]
 		if tool == nil {
@@ -474,52 +466,18 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 }
 
 func TestRankOpportunitiesAcceptsPercentageScoreAndCategoricalConfidence(t *testing.T) {
-	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
+	tools, closeSessions := listedTools(t)
 	defer closeSessions()
-
-	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: mcpcontract.ToolRankThreads,
-		Arguments: map[string]any{
-			"repositories": []map[string]any{{"owner": "acme", "repo": "rocket"}},
-		},
-	})
-	if err != nil {
-		t.Fatalf("call rank opportunities: %v", err)
-	}
-	if result.IsError {
-		t.Fatalf("rank opportunities returned tool error: %+v", result.Content)
-	}
-	payload, err := json.Marshal(result.StructuredContent)
-	if err != nil {
-		t.Fatalf("marshal structured content: %v", err)
-	}
-	var out mcpcontract.RankOpportunitiesOutput
-	if err := json.Unmarshal(payload, &out); err != nil {
-		t.Fatalf("decode structured content: %v", err)
-	}
-	if len(out.Candidates) != 1 || out.Candidates[0].Score != 87 || out.Candidates[0].Confidence != "medium" {
-		t.Fatalf("rank opportunities output = %+v", out)
+	if tools[mcpcontract.ToolRankThreads] != nil {
+		t.Fatal("removed ranking workflow was advertised")
 	}
 }
 
 func TestRankOpportunitiesRejectsOutOfRangeOutputAtProtocolBoundary(t *testing.T) {
-	client, closeSessions := connect(t, &fakeReader{
-		searchStarted: make(chan struct{}),
-		radarScore:    101,
-	})
+	tools, closeSessions := listedTools(t)
 	defer closeSessions()
-
-	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: mcpcontract.ToolRankThreads,
-		Arguments: map[string]any{
-			"repositories": []map[string]any{{"owner": "acme", "repo": "rocket"}},
-		},
-	})
-	if err == nil {
-		t.Fatalf("rank opportunities accepted out-of-range score: %+v", result)
-	}
-	if !strings.Contains(err.Error(), "validating tool output") || !strings.Contains(err.Error(), "greater than 100") {
-		t.Fatalf("rank opportunities error = %v, want SDK output validation error", err)
+	if tools[mcpcontract.ToolRankThreads] != nil {
+		t.Fatal("removed ranking workflow was advertised")
 	}
 }
 
@@ -538,9 +496,6 @@ func TestMultiModeSchemasAcceptEveryBranch(t *testing.T) {
 		{"repository search structured", mcpcontract.ToolSearchGitHubRepositories, "search_github_repositories", map[string]any{"text": "cuda"}},
 		{"sync repository threads", mcpcontract.ToolSyncThreads, "sync_threads", map[string]any{"selection": "repositories", "repositories": []map[string]any{{"owner": "acme", "repo": "rocket"}}}},
 		{"sync exact threads", mcpcontract.ToolSyncThreads, "sync_threads", map[string]any{"selection": "threads", "threads": []map[string]any{{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 7}}}},
-		{"DeepWiki structure", mcpcontract.ToolQueryDeepWiki, "deepwiki", map[string]any{"action": "structure", "repository": "acme/rocket"}},
-		{"DeepWiki contents", mcpcontract.ToolQueryDeepWiki, "deepwiki", map[string]any{"action": "contents", "repository": "acme/rocket"}},
-		{"DeepWiki question", mcpcontract.ToolQueryDeepWiki, "deepwiki", map[string]any{"action": "question", "repositories": []string{"acme/rocket"}, "question": "Where is ranking implemented?"}},
 		{"issue draft", mcpcontract.ToolPrepareContribution, "prepare_contribution", map[string]any{"opportunity_id": "opp-1", "kind": "issue"}},
 		{"pull request draft", mcpcontract.ToolPrepareContribution, "prepare_contribution", map[string]any{"opportunity_id": "opp-1", "kind": "pull_request", "workspace_id": "ws-1", "approach": "Implement the fix."}},
 		{"commit investigation", mcpcontract.ToolStartInvestigation, "start_investigation", map[string]any{"owner": "acme", "repo": "rocket", "commit_sha": "abc123"}},
@@ -583,9 +538,6 @@ func TestMultiModeSchemasRejectCrossModeFieldsBeforeHandler(t *testing.T) {
 		{"repository search", mcpcontract.ToolSearchGitHubRepositories, "search_github_repositories", "github-search-", map[string]any{"raw_query": "topic:cuda", "language": "Go"}},
 		{"sync threads", mcpcontract.ToolSyncThreads, "sync_threads", "sync-threads-", map[string]any{"selection": "threads", "threads": []map[string]any{{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 7}}, "repositories": []map[string]any{{"owner": "acme", "repo": "rocket"}}}},
 		{"sync portfolio", mcpcontract.ToolSyncPortfolio, "sync_portfolio", "sync-pull-request-portfolio-", map[string]any{"selection": "explicit", "pull_requests": []map[string]any{{"owner": "acme", "repo": "rocket", "kind": "pull_request", "number": 7}}, "state": "open"}},
-		{"DeepWiki", mcpcontract.ToolQueryDeepWiki, "deepwiki", "deepwiki-", map[string]any{"action": "question", "repository": "acme/rocket", "repositories": []string{"acme/rocket"}, "question": "Where is ranking?"}},
-		{"DeepWiki blank repository", mcpcontract.ToolQueryDeepWiki, "deepwiki", "deepwiki-contents", map[string]any{"action": "contents", "repository": " \t "}},
-		{"DeepWiki blank question", mcpcontract.ToolQueryDeepWiki, "deepwiki", "deepwiki-question", map[string]any{"action": "question", "repositories": []string{"acme/rocket"}, "question": " \t "}},
 		{"issue draft", mcpcontract.ToolPrepareContribution, "prepare_contribution", "contribution-draft-", map[string]any{"opportunity_id": "opp-1", "kind": "issue", "workspace_id": "ws-1"}},
 		{"investigation", mcpcontract.ToolStartInvestigation, "start_investigation", "investigation-", map[string]any{"owner": "acme", "repo": "rocket", "commit_sha": "abc123", "number": 7}},
 		{"concern", ToolCreateConcern, "create_concern", "concern-", map[string]any{"owner": "acme", "repo": "rocket", "commit_sha": "abc123", "workspace_id": "ws-1", "title": "race", "problem_statement": "state can race", "confidence": 0.5}},

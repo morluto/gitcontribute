@@ -89,6 +89,24 @@ The corpus separates source history from convenient current state:
 - **Facet coverage** records whether a facet fetch completed and the source
   revision it represents.
 
+GitHub actors are first-class projections rather than denormalized author
+strings. A stable provider node ID is the preferred identity; observed logins
+are aliases, so a rename does not split one contributor into two profiles.
+Profile fields remain nullable because absence may mean undisclosed,
+unauthorized, or not acquired. Social accounts, public organizations, pinned
+items, repository relationships, and contribution periods are independent
+facets with their own observation time, source time, authorization scope, and
+completeness. A child table is replaced only after its complete bounded fetch;
+an incomplete observation advances coverage without destroying the last
+complete projection.
+
+Actor acquisition is deliberately atomic. `github.search_users` stores only
+identity observations. Exact `github.sync_users` profile reads and the
+`github.sync_user_*` facet tools perform no implicit fan-out into one another.
+`corpus.search_actors`, `corpus.get_actors`, `corpus.get_actor_facets`, and
+`corpus.search_contributions` are offline and snapshot-bound. See
+`docs/actor-corpus.md` for the typed provider-to-SQLite mapping.
+
 An explicit repository-context sync checks a fixed, bounded set of conventional
 `CONTRIBUTING.md` and AI-policy paths. Found text is stored as an untrusted
 repository-level `contribution_guidance` facet with exact file provenance.

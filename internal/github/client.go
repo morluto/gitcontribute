@@ -3,7 +3,9 @@ package github
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -74,6 +76,7 @@ type PullRequestStatusReader interface {
 type Client struct {
 	gh             *gh.Client
 	downloadClient *http.Client
+	graphQLURL     string
 }
 
 // Config controls how the GitHub client is constructed.
@@ -147,7 +150,25 @@ func NewClient(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{gh: ghc, downloadClient: &downloadClient}, nil
+	graphQLURL, err := githubGraphQLURL(cfg.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{gh: ghc, downloadClient: &downloadClient, graphQLURL: graphQLURL}, nil
+}
+
+func githubGraphQLURL(base string) (string, error) {
+	u, err := url.Parse(base)
+	if err != nil {
+		return "", fmt.Errorf("parse GitHub base URL for GraphQL: %w", err)
+	}
+	if strings.EqualFold(u.Hostname(), "api.github.com") {
+		u.Path = "/graphql"
+	} else {
+		u.Path = strings.TrimSuffix(strings.TrimSuffix(u.Path, "/"), "/api/v3") + "/api/graphql"
+	}
+	u.RawQuery, u.Fragment = "", ""
+	return u.String(), nil
 }
 
 // GetRepository reads repository metadata and the response rate-limit state.

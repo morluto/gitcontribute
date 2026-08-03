@@ -224,7 +224,7 @@ func TestListCorpusInventoryCombinesSchemaRepositoriesAndProjections(t *testing.
 	if result.Schema == nil || result.Schema.State != "current" || len(result.Repositories) != 1 || result.Repositories[0].Repo != "owner/repo" {
 		t.Fatalf("inventory = %+v", result)
 	}
-	if len(result.Projections) != 5 || result.DatabaseBytes == 0 || result.SizeAttribution == "" {
+	if len(result.Projections) != 6 || result.DatabaseBytes == 0 || result.SizeAttribution == "" {
 		t.Fatalf("inventory metadata = %+v", result)
 	}
 }
