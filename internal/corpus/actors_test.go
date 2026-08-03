@@ -58,6 +58,79 @@ func TestActorProfileObservationReconcilesLoginToNodeIDAndPreservesNewerProjecti
 	}
 }
 
+func TestActorObservationDoesNotMergeReusedLoginAcrossNodeIDs(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	otherProvider, err := c.ApplyActorIdentityObservation(ctx, "gitlab", "mona", "GL_1", nil, "user", "public", time.Unix(1, 0).UTC(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := c.ApplyActorIdentityObservation(ctx, "github", "mona", "U_1", nil, "user", "public", time.Unix(1, 0).UTC(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := c.ApplyActorIdentityObservation(ctx, "github", "mona", "U_2", nil, "user", "public", time.Unix(2, 0).UTC(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ID == second.ID || first.NodeID != "U_1" || second.NodeID != "U_2" {
+		t.Fatalf("reused login identities merged: first=%+v second=%+v", first, second)
+	}
+	byFirstNode, err := c.GetActor(ctx, "U_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byLogin, err := c.GetActor(ctx, "mona")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byFirstNode == nil || byFirstNode.ID != first.ID || byLogin == nil || byLogin.ID != second.ID {
+		t.Fatalf("reused login lookup: first node=%+v current login=%+v", byFirstNode, byLogin)
+	}
+	if _, err := c.ApplyActorIdentityObservation(ctx, "github", "mona", "U_1", nil, "user", "public", time.Unix(1, 0).UTC(), nil); err != nil {
+		t.Fatal(err)
+	}
+	byLogin, err = c.GetActor(ctx, "mona")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byLogin == nil || byLogin.ID != second.ID {
+		t.Fatalf("delayed older observation reclaimed reused login: %+v", byLogin)
+	}
+	var otherProviderAliasActive bool
+	if err := c.db.QueryRowContext(ctx, `SELECT active FROM actor_aliases WHERE actor_id=? AND normalized_login='mona'`, otherProvider.ID).Scan(&otherProviderAliasActive); err != nil {
+		t.Fatal(err)
+	}
+	if !otherProviderAliasActive {
+		t.Fatal("reusing a GitHub login deactivated the same alias for another provider")
+	}
+}
+
+func TestIncompleteContributionPeriodMaterializesUntilCompleteSnapshotExists(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	actor, err := c.ApplyActorIdentityObservation(ctx, "github", "alice", "U_alice", nil, "user", "public", time.Unix(1, 0).UTC(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := c.ApplyActorContributionPeriod(ctx, ActorContributionPeriodInput{
+		ActorID: actor.ID, From: from, To: from.Add(24 * time.Hour), Complete: false,
+		ObservedAt: from.Add(25 * time.Hour), SourceUpdatedAt: from.Add(24 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var complete bool
+	if err := c.db.QueryRowContext(ctx, `SELECT complete FROM actor_contribution_periods WHERE actor_id=?`, actor.ID).Scan(&complete); err != nil {
+		t.Fatal(err)
+	}
+	if complete {
+		t.Fatal("incomplete contribution period was materialized as complete")
+	}
+}
+
 func TestSearchActorsReturnsNullableProfilesAndBoundedCursor(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -155,12 +228,19 @@ func TestActorContributionSearchBindsCursorToFilters(t *testing.T) {
 	if err := c.ApplyActorContributionPeriod(ctx, ActorContributionPeriodInput{ActorID: actor.ID, From: from, To: from.Add(24 * time.Hour), Complete: false, ObservedAt: from.Add(27 * time.Hour), SourceUpdatedAt: from.Add(24 * time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	partial, err := c.GetActorContributionCoverage(ctx, actor.ID, "", from.Add(time.Hour), from.Add(12*time.Hour))
+	retained, err := c.GetActorContributionCoverage(ctx, actor.ID, "", from.Add(time.Hour), from.Add(12*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if partial != nil {
-		t.Fatalf("partial refresh retained complete coverage: %+v", partial)
+	if retained == nil || !retained.Complete {
+		t.Fatalf("partial refresh replaced complete coverage: %+v", retained)
+	}
+	pageAfterPartial, err := c.SearchActorContributions(ctx, ContributionSearchOptions{ActorRefs: []string{"alice"}, Sort: "occurred_at", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pageAfterPartial.Total != 2 {
+		t.Fatalf("partial refresh replaced complete contribution items: %+v", pageAfterPartial)
 	}
 	organizationCovered, err := c.GetActorContributionCoverage(ctx, actor.ID, "O_acme", from.Add(time.Hour), from.Add(12*time.Hour))
 	if err != nil {

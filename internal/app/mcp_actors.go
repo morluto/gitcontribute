@@ -233,6 +233,9 @@ func (r *MCPReader) SearchActors(ctx context.Context, in mcpcontract.SearchActor
 	for _, actor := range page.Actors {
 		out.Items = append(out.Items, actorOutput(actor))
 	}
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return mcpcontract.SearchActorsOutput{}, err
+	}
 	return out, nil
 }
 
@@ -266,6 +269,9 @@ func (r *MCPReader) GetActors(ctx context.Context, in mcpcontract.GetActorsInput
 			item.Value = &value
 		}
 		out.Items[index] = item
+	}
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return mcpcontract.GetActorsOutput{}, err
 	}
 	return out, nil
 }
@@ -339,6 +345,9 @@ func (r *MCPReader) GetActorFacets(ctx context.Context, in mcpcontract.GetActorF
 		}
 		item.Value = &value
 		out.Items[index] = item
+	}
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return mcpcontract.GetActorFacetsOutput{}, err
 	}
 	return out, nil
 }

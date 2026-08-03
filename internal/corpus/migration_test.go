@@ -37,6 +37,19 @@ func TestBaselineMigrationCreatesCurrentSchema(t *testing.T) {
 			t.Fatalf("table %s missing after baseline migration", table)
 		}
 	}
+	for _, table := range []string{
+		"actors", "actor_aliases", "actor_observations", "actor_profiles", "actor_social_accounts",
+		"actor_organization_memberships", "actor_pinned_items", "actor_repository_affiliations",
+		"actor_contribution_periods", "actor_contribution_days", "actor_contribution_items",
+		"actor_repository_contribution_totals",
+	} {
+		for _, suffix := range []string{"ai", "au", "ad"} {
+			trigger := "corpus_revision_" + table + "_" + suffix
+			if !migrationTriggerExists(ctx, t, c.db, trigger) {
+				t.Fatalf("trigger %s missing after baseline migration", trigger)
+			}
+		}
+	}
 
 	for _, col := range []string{"merged_known", "author_association", "assignees", "draft", "locked", "state_reason", "milestone"} {
 		if !migrationColumnExists(ctx, t, c.db, "threads", col) {
@@ -60,8 +73,10 @@ func TestActorMigrationDeduplicatesExistingLoginsCaseInsensitively(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.Down(ctx); err != nil {
-		t.Fatal(err)
+	for range 2 {
+		if _, err := provider.Down(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := logger.Err(); err != nil {
 		t.Fatal(err)
@@ -100,6 +115,15 @@ func migrationColumnExists(ctx context.Context, t *testing.T, db *sql.DB, table,
 	var found int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name=?`, table, column).Scan(&found); err != nil {
 		t.Fatalf("query migration column %s.%s: %v", table, column, err)
+	}
+	return found == 1
+}
+
+func migrationTriggerExists(ctx context.Context, t *testing.T, db *sql.DB, trigger string) bool {
+	t.Helper()
+	var found int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=?`, trigger).Scan(&found); err != nil {
+		t.Fatalf("query migration trigger %s: %v", trigger, err)
 	}
 	return found == 1
 }

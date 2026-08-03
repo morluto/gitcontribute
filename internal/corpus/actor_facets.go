@@ -163,12 +163,13 @@ func (c *Corpus) ApplyActorContributionPeriod(ctx context.Context, input ActorCo
 	if _, err := tx.ExecContext(ctx, `INSERT INTO actor_observations(actor_id,facet,source_updated_at,observation_sequence,observed_at,complete,authorization_scope,payload) VALUES(?, 'contributions', ?, ?, ?, ?, ?, ?)`, input.ActorID, encodeTime(input.SourceUpdatedAt), sequence, encodeTime(input.ObservedAt), boolToInt(input.Complete), input.AuthorizationScope, string(payload)); err != nil {
 		return err
 	}
+	var existingComplete bool
 	var existingSource, existingSequence int64
-	err = tx.QueryRowContext(ctx, `SELECT source_updated_at,observation_sequence FROM actor_contribution_periods WHERE actor_id=? AND period_start=? AND period_end=? AND organization_node_id=? AND authorization_scope=?`, input.ActorID, encodeTime(input.From), encodeTime(input.To), input.OrganizationNodeID, input.AuthorizationScope).Scan(&existingSource, &existingSequence)
+	err = tx.QueryRowContext(ctx, `SELECT complete,source_updated_at,observation_sequence FROM actor_contribution_periods WHERE actor_id=? AND period_start=? AND period_end=? AND organization_node_id=? AND authorization_scope=?`, input.ActorID, encodeTime(input.From), encodeTime(input.To), input.OrganizationNodeID, input.AuthorizationScope).Scan(&existingComplete, &existingSource, &existingSequence)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	if err == nil && !orderingNewer(encodeTime(input.SourceUpdatedAt), sequence, existingSource, existingSequence) {
+	if err == nil && (!orderingNewer(encodeTime(input.SourceUpdatedAt), sequence, existingSource, existingSequence) || (!input.Complete && existingComplete)) {
 		return tx.Commit()
 	}
 	var periodID int64
@@ -303,7 +304,7 @@ func (c *Corpus) SearchActorContributions(ctx context.Context, opts Contribution
 		for i := range opts.ActorRefs {
 			placeholders[i] = "?"
 		}
-		where += ` AND (a.actor_key IN (` + strings.Join(placeholders, ",") + `) OR a.node_id IN (` + strings.Join(placeholders, ",") + `) OR a.id IN (SELECT actor_id FROM actor_aliases WHERE normalized_login IN (` + strings.Join(placeholders, ",") + `)))`
+		where += ` AND (a.actor_key IN (` + strings.Join(placeholders, ",") + `) OR a.node_id IN (` + strings.Join(placeholders, ",") + `) OR a.id IN (SELECT actor_id FROM actor_aliases WHERE active=1 AND normalized_login IN (` + strings.Join(placeholders, ",") + `)))`
 		for _, ref := range opts.ActorRefs {
 			args = append(args, strings.TrimSpace(ref))
 		}

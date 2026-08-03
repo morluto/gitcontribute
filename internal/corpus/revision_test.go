@@ -63,3 +63,23 @@ func TestCorpusRevisionIsMonotonicAndDetectsStaleReads(t *testing.T) {
 		t.Fatalf("job cancellation changed corpus revision from %d to %d", current, unchanged)
 	}
 }
+
+func TestActorWritesAdvanceCorpusRevision(t *testing.T) {
+	t.Parallel()
+	c, _ := openTestCorpus(t)
+	ctx := context.Background()
+	before, err := c.CorpusRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ApplyActorIdentityObservation(ctx, "github", "mona", "U_1", nil, "user", "public", time.Unix(1, 0).UTC(), nil); err != nil {
+		t.Fatal(err)
+	}
+	after, err := c.CorpusRevision(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after <= before {
+		t.Fatalf("actor write left corpus revision at %d, want greater than %d", after, before)
+	}
+}

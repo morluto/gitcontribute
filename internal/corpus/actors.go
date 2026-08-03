@@ -203,11 +203,7 @@ func (c *Corpus) ApplyActorIdentityObservation(ctx context.Context, provider, lo
 	`, actorKey(provider, nodeID, login), nodeID, databaseID, kind, login, sequence, encodeTime(observedAt), actorID); err != nil {
 		return Actor{}, fmt.Errorf("advance actor identity: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO actor_aliases (actor_id, login, normalized_login, active, first_observed_at, last_observed_at)
-		VALUES (?, ?, ?, 1, ?, ?)
-		ON CONFLICT(actor_id, normalized_login) DO UPDATE SET login=excluded.login, active=1, last_observed_at=excluded.last_observed_at
-	`, actorID, login, normalizeLogin(login), encodeTime(observedAt), encodeTime(observedAt)); err != nil {
+	if err := activateActorAlias(ctx, tx, actorID, provider, login, nodeID, encodeTime(observedAt)); err != nil {
 		return Actor{}, fmt.Errorf("upsert actor identity alias: %w", err)
 	}
 	if err := refreshActorFTS(ctx, tx, actorID); err != nil {
@@ -313,12 +309,7 @@ func (c *Corpus) ApplyActorProfileObservation(ctx context.Context, input ActorPr
 		encodeTime(profile.ObservedAt), profile.AuthorizationScope); err != nil {
 		return Actor{}, fmt.Errorf("advance actor profile: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO actor_aliases (actor_id, login, normalized_login, active, first_observed_at, last_observed_at)
-		VALUES (?, ?, ?, 1, ?, ?)
-		ON CONFLICT(actor_id, normalized_login) DO UPDATE SET
-		 login=excluded.login, active=1, last_observed_at=excluded.last_observed_at
-	`, actorID, input.Login, normalizeLogin(input.Login), encodeTime(input.ObservedAt), encodeTime(input.ObservedAt)); err != nil {
+	if err := activateActorAlias(ctx, tx, actorID, input.Provider, input.Login, input.NodeID, encodeTime(input.ObservedAt)); err != nil {
 		return Actor{}, fmt.Errorf("upsert actor alias: %w", err)
 	}
 	if err := refreshActorFTS(ctx, tx, actorID); err != nil {
@@ -348,11 +339,14 @@ func resolveActorID(ctx context.Context, tx *sql.Tx, input ActorProfileObservati
 			return 0, fmt.Errorf("resolve actor node id: %w", err)
 		}
 	}
-	err := tx.QueryRowContext(ctx, `
+	aliasQuery := `
 		SELECT a.id FROM actor_aliases aa JOIN actors a ON a.id=aa.actor_id
-		WHERE a.provider=? AND aa.normalized_login=? AND aa.active=1
-		ORDER BY aa.last_observed_at DESC, a.id DESC LIMIT 1
-	`, input.Provider, normalizeLogin(input.Login)).Scan(&id)
+		WHERE a.provider=? AND aa.normalized_login=? AND aa.active=1`
+	if input.NodeID != "" {
+		aliasQuery += ` AND (a.node_id IS NULL OR a.node_id='')`
+	}
+	aliasQuery += ` ORDER BY aa.last_observed_at DESC, a.id DESC LIMIT 1`
+	err := tx.QueryRowContext(ctx, aliasQuery, input.Provider, normalizeLogin(input.Login)).Scan(&id)
 	if err == nil {
 		return id, nil
 	}
@@ -373,6 +367,43 @@ func resolveActorID(ctx context.Context, tx *sql.Tx, input ActorProfileObservati
 		return 0, fmt.Errorf("read actor id: %w", err)
 	}
 	return id, nil
+}
+
+// activateActorAlias keeps a reused login historical on the old node-backed
+// identity while making the newly observed node-backed identity current.
+func activateActorAlias(ctx context.Context, tx *sql.Tx, actorID int64, provider, login, nodeID string, observedAt int64) error {
+	normalized := normalizeLogin(login)
+	active := true
+	if nodeID != "" {
+		var currentObservedAt int64
+		err := tx.QueryRowContext(ctx, `
+			SELECT aa.last_observed_at
+			FROM actor_aliases aa JOIN actors a ON a.id=aa.actor_id
+			WHERE aa.normalized_login=? AND aa.actor_id<>? AND aa.active=1 AND a.provider=?
+			ORDER BY aa.last_observed_at DESC, aa.actor_id DESC LIMIT 1
+		`, normalized, actorID, provider).Scan(&currentObservedAt)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		active = errors.Is(err, sql.ErrNoRows) || observedAt >= currentObservedAt
+		if active {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE actor_aliases SET active=0
+				WHERE normalized_login=? AND actor_id<>?
+				  AND actor_id IN (SELECT id FROM actors WHERE provider=?)
+			`, normalized, actorID, provider); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO actor_aliases (actor_id, login, normalized_login, active, first_observed_at, last_observed_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(actor_id, normalized_login) DO UPDATE SET
+		 login=excluded.login, active=excluded.active,
+		 last_observed_at=MAX(actor_aliases.last_observed_at, excluded.last_observed_at)
+	`, actorID, login, normalized, boolToInt(active), observedAt, observedAt)
+	return err
 }
 
 func actorKey(provider, nodeID, login string) string {

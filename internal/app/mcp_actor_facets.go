@@ -426,6 +426,9 @@ func (r *MCPReader) SearchContributions(ctx context.Context, in mcpcontract.Sear
 		}
 		out.Coverage = append(out.Coverage, mcpcontract.ActorContributionCoverage{ActorID: actor.Key, Facet: coverage})
 	}
+	if err := finishCorpusRead(ctx, c, revision); err != nil {
+		return mcpcontract.SearchContributionsOutput{}, err
+	}
 	return out, nil
 }
 
