@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.0.0](https://github.com/morluto/gitcontribute/compare/v0.19.0...v1.0.0) (2026-08-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** corpus.search_code_batch is now corpus.search_code, corpus.list_pull_requests is now corpus.search_pull_requests, github.sync_ci_failures is now github.sync_pull_request_ci, and prescriptive composite workflow tools are no longer advertised.
+
+### Features
+
+* **corpus:** add first-class actor projections ([b8441f3](https://github.com/morluto/gitcontribute/commit/b8441f3ee4d04b9dfd455137489661123a5a6a08))
+* **github:** add bounded actor acquisition adapters ([e3ab595](https://github.com/morluto/gitcontribute/commit/e3ab59557a14e99de42ea72a8f5f2bf96b89a68a))
+* **mcp:** expose atomic actor tools ([32043b4](https://github.com/morluto/gitcontribute/commit/32043b4e5710df4bf2fa7bff75c1c6822e15f869))
+
+
+### Bug Fixes
+
+* **actors:** preserve identity and snapshot integrity ([8bc7ca5](https://github.com/morluto/gitcontribute/commit/8bc7ca559859995e187cbe71707c2caf3baa8585))
+* **corpus:** preserve authoritative actor projections ([835f4ab](https://github.com/morluto/gitcontribute/commit/835f4abe105a9a99352f0e4f8343c5c16e8b7991))
+* **feedback:** preserve comment identity and require explicit routing ([ca0b7ca](https://github.com/morluto/gitcontribute/commit/ca0b7ca67d43ddcd9677f47995469f87e6a1b7c9))
+* **mcp:** keep private runtime registration aligned ([1556cbe](https://github.com/morluto/gitcontribute/commit/1556cbe552303fde37a91a920a8c5c5c43b3416c))
+* **mcp:** synchronize catalog and feedback routing ([2ed99ea](https://github.com/morluto/gitcontribute/commit/2ed99ea8e45568311d8232218d1bfdd0263d397a))
+
 ## [0.19.0](https://github.com/morluto/gitcontribute/compare/v0.18.0...v0.19.0) (2026-08-01)
 
 
