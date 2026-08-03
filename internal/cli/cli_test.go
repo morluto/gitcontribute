@@ -120,12 +120,14 @@ type fakeService struct {
 
 type coreOnlyService struct{}
 
-func (coreOnlyService) Init(context.Context) (*contracts.InitResult, error) { return nil, nil }
+func (coreOnlyService) Init(context.Context) (*contracts.InitResult, error) {
+	return &contracts.InitResult{}, nil
+}
 func (coreOnlyService) Status(context.Context) (*contracts.StatusResult, error) {
-	return nil, nil
+	return &contracts.StatusResult{}, nil
 }
 func (coreOnlyService) Search(context.Context, string, contracts.SearchOptions) (*contracts.SearchResult, error) {
-	return nil, nil
+	return &contracts.SearchResult{}, nil
 }
 func (coreOnlyService) Dossier(context.Context, contracts.RepoRef) (*contracts.DossierResult, error) {
 	return nil, nil

@@ -690,7 +690,7 @@ func setupAppGitRemote(t *testing.T) (remoteURL, baseSHA, candidateSHA string) {
 
 func runGitApp(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"--no-pager"}, args...)...)
+	cmd := exec.CommandContext(context.Background(), "git", append([]string{"--no-pager"}, args...)...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",

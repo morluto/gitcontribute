@@ -109,7 +109,7 @@ func TestArchiveReaderContextCancellation(t *testing.T) {
 	cancel()
 
 	reader := NewArchiveReader(nil, nil)
-	err := reader.Read(ctx, time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC), bytes.NewReader(gzipLines(eventLine("PushEvent", map[string]any{}))), func(s Signal) error {
+	err := reader.Read(ctx, time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC), bytes.NewReader(gzipLines(eventLine("PushEvent", map[string]any{}))), func(_ Signal) error {
 		return nil
 	})
 	if !errors.Is(err, context.Canceled) {

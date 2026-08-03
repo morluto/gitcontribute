@@ -18,7 +18,7 @@ func TestDossiersMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query tables: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var names []string
 	for rows.Next() {

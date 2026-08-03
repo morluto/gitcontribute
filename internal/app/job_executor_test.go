@@ -271,7 +271,7 @@ func TestJobCancellation(t *testing.T) {
 	}
 
 	blocked := make(chan struct{})
-	id, err := jobs.Submit(ctx, "block", nil, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
+	id, err := jobs.Submit(ctx, "block", nil, func(ctx context.Context, _ func(progress, statistics string) error) (any, error) {
 		close(blocked)
 		<-ctx.Done()
 		return nil, ctx.Err()
@@ -309,7 +309,7 @@ func TestCancelQueuedJob(t *testing.T) {
 	}
 
 	// Delayed function that will never be started before cancel.
-	id, err := jobs.Submit(ctx, "never", nil, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
+	id, err := jobs.Submit(ctx, "never", nil, func(ctx context.Context, _ func(progress, statistics string) error) (any, error) {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -365,7 +365,7 @@ func TestJobExecutorBoundsRunningAndPendingJobs(t *testing.T) {
 	queuedRan := make(chan struct{}, 1)
 	third, err := jobs.Submit(ctx, "third", nil, func(context.Context, func(string, string) error) (any, error) {
 		queuedRan <- struct{}{}
-		return nil, nil
+		return struct{}{}, nil
 	})
 	if err != nil {
 		t.Fatalf("submit third: %v", err)
@@ -539,7 +539,7 @@ func TestRemoteCancellationReleasesQueuedAdmission(t *testing.T) {
 	queuedRan := make(chan struct{}, 1)
 	queued, err := jobs.Submit(ctx, "queued", nil, func(context.Context, func(string, string) error) (any, error) {
 		queuedRan <- struct{}{}
-		return nil, nil
+		return struct{}{}, nil
 	})
 	if err != nil {
 		t.Fatalf("submit queued: %v", err)

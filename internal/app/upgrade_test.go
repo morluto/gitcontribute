@@ -28,6 +28,7 @@ func TestUpgradeNpxDoesNotInstallGlobalPackage(t *testing.T) {
 		return []byte("1.2.4\n"), nil
 	}
 	t.Setenv("npm_command", "exec")
+	t.Setenv("npm_lifecycle_event", "npx")
 	svc := &Service{version: "1.2.3", paths: config.NewPaths(&config.Env{Home: t.TempDir()})}
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
@@ -522,7 +523,7 @@ func TestUpgradeCorpusSchemaMigrationRequired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("DELETE FROM goose_db_version"); err != nil {
+	if _, err := db.ExecContext(context.Background(), "DELETE FROM goose_db_version"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec("INSERT INTO goose_db_version (id, version_id, is_applied, tstamp) VALUES (1, ?, 1, CURRENT_TIMESTAMP)", target-1); err != nil {

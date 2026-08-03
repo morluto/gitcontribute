@@ -40,7 +40,7 @@ func TestOpenReadOnlyReadsCurrentCorpus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer readOnly.Close()
+	defer func() { _ = readOnly.Close() }()
 	if _, err := readOnly.db.ExecContext(ctx, `INSERT INTO repositories (owner, name, created_at, updated_at) VALUES ('owner', 'repo', 1, 1)`); err == nil {
 		t.Fatal("read-only corpus accepted a write")
 	}

@@ -95,7 +95,7 @@ func (f *fakeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 func newGetRequest(t *testing.T, rawurl string) *http.Request {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, rawurl, nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, rawurl, nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -126,6 +126,7 @@ func TestRetryTransportRetries5xx(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -165,6 +166,7 @@ func TestRetryTransportNoRetryOnTerminal4xx(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RoundTrip: %v", err)
 	}
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
@@ -887,7 +889,7 @@ func TestRetryClientPreservesRateLimiterBehavior(t *testing.T) {
 }
 
 func TestRetryClientContextCancel(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
 		t.Error("handler should not be called for cancelled context")
 	}))
 	defer srv.Close()

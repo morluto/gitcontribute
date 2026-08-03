@@ -56,7 +56,7 @@ func TestControlCommands(t *testing.T) {
 		t.Fatalf("metadata output=%q", stdout.String())
 	}
 
-	c, stdout, _ = newTestCLI(svc, nil)
+	c, _, _ = newTestCLI(svc, nil)
 	requireNoErr(t, c.Run(context.Background(), []string{"configure", "--crawl-budget", "25", "--dry-run", "--json"}))
 	if svc.configureOpts.CrawlBudget == nil || *svc.configureOpts.CrawlBudget != 25 || !svc.configureOpts.DryRun {
 		t.Fatalf("configure opts=%+v", svc.configureOpts)

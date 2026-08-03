@@ -33,7 +33,7 @@ func TestMCPStdioHelper(t *testing.T) {
 	if home == "" {
 		t.Skip("stdio helper subprocess only")
 	}
-	svc, err := New(config.NewPaths(&config.Env{Home: home}), "e2e", nil)
+	svc, err := NewWithContext(context.Background(), config.NewPaths(&config.Env{Home: home}), "e2e", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,8 +181,11 @@ func TestMCPStdioPullRequestPortfolioFlow(t *testing.T) {
 		t.Fatalf("portfolio = %+v, sync job = %+v", portfolio, syncResult)
 	}
 	pr := portfolio.PullRequests[0]
-	if pr.Ref != "lab/project#7" || pr.Attention != "approved" || pr.ReviewDecision != "approved" || pr.Mergeable == nil || !*pr.Mergeable {
+	if pr.Ref != "lab/project#7" || pr.ReviewDecision != "approved" || pr.Mergeable == nil || !*pr.Mergeable {
 		t.Fatalf("portfolio PR = %+v", pr)
+	}
+	if pr.Attention != "stale" {
+		t.Fatalf("portfolio attention = %q, want stale independently of approval and mergeability", pr.Attention)
 	}
 	if pr.HeadSHA != "head123" || pr.BaseSHA != "base123" || pr.StatusCoverage != "complete" {
 		t.Fatalf("portfolio status coverage = %+v", pr)
@@ -408,7 +411,7 @@ func replayMCPRecoveryAction(t *testing.T, action mcpcontract.ToolCall) (string,
 
 func seedMCPStdioCorpus(ctx context.Context, t *testing.T, home string) {
 	t.Helper()
-	svc, err := New(config.NewPaths(&config.Env{Home: home}), "e2e", nil)
+	svc, err := NewWithContext(ctx, config.NewPaths(&config.Env{Home: home}), "e2e", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +444,7 @@ func seedMCPStdioCorpus(ctx context.Context, t *testing.T, home string) {
 
 func seedMCPStdioEmptyCorpus(ctx context.Context, t *testing.T, home string) {
 	t.Helper()
-	svc, err := New(config.NewPaths(&config.Env{Home: home}), "e2e", nil)
+	svc, err := NewWithContext(ctx, config.NewPaths(&config.Env{Home: home}), "e2e", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

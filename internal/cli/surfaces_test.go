@@ -355,13 +355,13 @@ func TestLensExplainRequiresRef(t *testing.T) {
 func TestCollectionCreateAddList(t *testing.T) {
 	t.Parallel()
 	svc := &fakeSurfacesService{fakeService: &fakeService{}}
-	c, stdout, _ := newSurfacesCLI(svc)
+	c, _, _ := newSurfacesCLI(svc)
 	requireNoErr(t, c.Run(context.Background(), []string{"collection", "create", "favorites"}))
 	if !svc.createColCalled || svc.lastCreateColName != "favorites" {
 		t.Fatalf("create collection not called: called=%v name=%q", svc.createColCalled, svc.lastCreateColName)
 	}
 
-	c2, stdout, _ := newSurfacesCLI(svc)
+	c2, _, _ := newSurfacesCLI(svc)
 	requireNoErr(t, c2.Run(context.Background(), []string{"collection", "add", "favorites", "repo:o/r", "issue:o/r#1", "pr:o/r#2"}))
 	if !svc.addColCalled || svc.lastAddColName != "favorites" || len(svc.lastAddColMembers) != 3 {
 		t.Fatalf("add collection not called: called=%v name=%q members=%+v", svc.addColCalled, svc.lastAddColName, svc.lastAddColMembers)

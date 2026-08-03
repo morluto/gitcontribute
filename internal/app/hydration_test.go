@@ -41,15 +41,15 @@ func (f *fakeHydrationReader) ListIssueTimeline(_ context.Context, _, _ string, 
 	return github.ListResult[github.IssueTimelineEvent]{Items: f.issueTimelinePages[idx], Page: page}, nil
 }
 
-func (f *fakeHydrationReader) GetRepository(ctx context.Context, owner, name string) (github.Repository, github.RateInfo, error) {
+func (f *fakeHydrationReader) GetRepository(_ context.Context, owner, name string) (github.Repository, github.RateInfo, error) {
 	return github.Repository{Owner: owner, Name: name, NodeID: "R_1", UpdatedAt: time.Now()}, github.RateInfo{}, nil
 }
 
-func (f *fakeHydrationReader) ListIssues(ctx context.Context, owner, name string, opts github.ListIssueOptions) (github.ListResult[github.Issue], error) {
+func (f *fakeHydrationReader) ListIssues(_ context.Context, owner, name string, opts github.ListIssueOptions) (github.ListResult[github.Issue], error) {
 	return github.ListResult[github.Issue]{}, nil
 }
 
-func (f *fakeHydrationReader) ListIssueComments(ctx context.Context, owner, name string, issueNumber int, opts github.PageOptions) (github.ListResult[github.IssueComment], error) {
+func (f *fakeHydrationReader) ListIssueComments(_ context.Context, owner, name string, issueNumber int, opts github.PageOptions) (github.ListResult[github.IssueComment], error) {
 	if f.failWith != nil && f.issueCommentsCalls >= f.failAfterIssueCalls {
 		return github.ListResult[github.IssueComment]{}, f.failWith
 	}
@@ -66,14 +66,14 @@ func (f *fakeHydrationReader) ListIssueComments(ctx context.Context, owner, name
 	return github.ListResult[github.IssueComment]{Items: f.issueCommentsPages[idx], Page: page}, nil
 }
 
-func (f *fakeHydrationReader) GetPullRequestDetails(ctx context.Context, owner, name string, number int) (github.PullRequestDetails, github.RateInfo, error) {
+func (f *fakeHydrationReader) GetPullRequestDetails(_ context.Context, owner, name string, number int) (github.PullRequestDetails, github.RateInfo, error) {
 	if f.failWith != nil {
 		return github.PullRequestDetails{}, github.RateInfo{}, f.failWith
 	}
 	return f.prDetails, github.RateInfo{}, nil
 }
 
-func (f *fakeHydrationReader) ListPullRequestReviews(ctx context.Context, owner, name string, number int, opts github.PageOptions) (github.ListResult[github.Review], error) {
+func (f *fakeHydrationReader) ListPullRequestReviews(_ context.Context, owner, name string, number int, opts github.PageOptions) (github.ListResult[github.Review], error) {
 	if f.failWith != nil && f.prReviewsCalls >= f.failAfterIssueCalls {
 		return github.ListResult[github.Review]{}, f.failWith
 	}
@@ -90,7 +90,7 @@ func (f *fakeHydrationReader) ListPullRequestReviews(ctx context.Context, owner,
 	return github.ListResult[github.Review]{Items: f.prReviewsPages[idx], Page: page}, nil
 }
 
-func (f *fakeHydrationReader) ListPullRequestComments(ctx context.Context, owner, name string, number int, opts github.PageOptions) (github.ListResult[github.ReviewComment], error) {
+func (f *fakeHydrationReader) ListPullRequestComments(_ context.Context, owner, name string, number int, opts github.PageOptions) (github.ListResult[github.ReviewComment], error) {
 	if f.failWith != nil && f.prReviewCommentsCalls >= f.failAfterIssueCalls {
 		return github.ListResult[github.ReviewComment]{}, f.failWith
 	}
@@ -365,7 +365,7 @@ func TestHydrateBoundsPagination(t *testing.T) {
 	repo, thread := seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
 	pages := make([][]github.IssueComment, 10)
 	for i := range pages {
-		pages[i] = []github.IssueComment{{ID: int64(i + 1), UpdatedAt: time.Date(2024, 1, 1, 0, 0, int(i), 0, time.UTC)}}
+		pages[i] = []github.IssueComment{{ID: int64(i + 1), UpdatedAt: time.Date(2024, 1, 1, 0, 0, i, 0, time.UTC)}}
 	}
 	reader := &fakeHydrationReader{issueCommentsPages: pages}
 	svc.SetGitHubReader(reader)

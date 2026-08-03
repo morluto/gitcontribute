@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -54,7 +55,8 @@ func TestGetRepositoryFileClassifiesMissingPath(t *testing.T) {
 	client := newTestClient(t, srv, StaticTokenSource(""))
 
 	_, _, err := client.GetRepositoryFile(context.Background(), testOwner, testRepo, "CONTRIBUTING.md")
-	if _, ok := err.(*NotFoundError); !ok {
+	notFoundError := &NotFoundError{}
+	if !errors.As(err, &notFoundError) {
 		t.Fatalf("error = %T %v, want *NotFoundError", err, err)
 	}
 }

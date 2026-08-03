@@ -35,7 +35,7 @@ func TestJobExecutorCloseCancelsAndWaits(t *testing.T) {
 	}
 
 	started := make(chan struct{})
-	id, err := jobs.Submit(ctx, "block", nil, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
+	id, err := jobs.Submit(ctx, "block", nil, func(ctx context.Context, _ func(progress, statistics string) error) (any, error) {
 		close(started)
 		<-ctx.Done()
 		return nil, ctx.Err()
