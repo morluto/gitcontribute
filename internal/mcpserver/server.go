@@ -218,6 +218,18 @@ type ValidationReceiptOperator interface {
 	AttachValidationReceipt(context.Context, mcpcontract.AttachValidationReceiptInput) (mcpcontract.ExternalValidationReceiptOutput, error)
 }
 
+type ExternalEvidenceImporter interface {
+	ImportExternalEvidenceManifest(context.Context, mcpcontract.ImportExternalEvidenceManifestInput) (mcpcontract.ImportExternalEvidenceManifestOutput, error)
+}
+
+type JUnitReportImporter interface {
+	AttachJUnitReport(context.Context, mcpcontract.AttachJUnitReportInput) (mcpcontract.AttachJUnitReportOutput, error)
+}
+
+type PullRequestCheckWaiter interface {
+	WaitPullRequestChecks(context.Context, mcpcontract.WaitPullRequestChecksInput) (mcpcontract.JobReference, error)
+}
+
 type PublishedDraftVerifier interface {
 	VerifyPublishedDraft(context.Context, mcpcontract.VerifyPublishedDraftInput) (mcpcontract.PublishedDraftVerificationOutput, error)
 }

@@ -269,6 +269,7 @@ type ValidationRun struct {
 	Cleanup                 CleanupResult
 	ExecutionOrigin         string
 	External                *ExternalReceiptProvenance
+	JUnitReport             *JUnitReport
 }
 
 // ExternalReceiptProvenance preserves the trust and source boundary of a
@@ -393,6 +394,24 @@ type Evidence struct {
 	CreatedAt            time.Time
 	ValidationRun        *ValidationRun
 	ValidationDefinition *ValidationDefinition
+	External             *ExternalEvidenceProvenance
+	Measurements         map[string]any
+}
+
+// ExternalEvidenceProvenance keeps producer claims separate from local
+// execution and records the source identity needed for later freshness review.
+type ExternalEvidenceProvenance struct {
+	SchemaVersion  string
+	Producer       string
+	Repository     string
+	Revision       string
+	ArtifactSHA256 string
+	ObservedAt     time.Time
+	Environment    map[string]string
+	Completeness   string
+	Integrity      string
+	Limitations    []string
+	RawSHA256      string
 }
 
 // ComparisonClassification is the result of comparing a base run to a candidate run.

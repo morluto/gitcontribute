@@ -87,6 +87,19 @@ loss of comparison semantics that would justify another process-capable tool.
 Reconsider only if controlled traces show recurring client mistakes or a
 material call/payload reduction that preserves authorization and proof.
 
+For long-running remote checks, use `github.wait_pull_request_checks` with the
+exact repository, pull-request number, and expected head SHA. It returns a
+durable watch job; poll `jobs.get` rather than resubmitting snapshots. The
+watcher coalesces unchanged states, waits through the zero-check registration
+window, returns `superseded` when the head changes, and does not replace a
+complete local health projection after timeout, cancellation, or incomplete
+coverage.
+
+After a local validation run, attach a JUnit artifact with
+`validation.attach_junit_report`. For source-analysis or profiling results,
+use `evidence.import_manifest`; the imported claims retain their producer and
+revision authority and are not treated as GitContribute execution results.
+
 ## Contribution collision checks
 
 ```text

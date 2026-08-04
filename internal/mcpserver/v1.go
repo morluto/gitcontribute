@@ -189,6 +189,31 @@ func (s *Server) registerV1() {
 		input:  inputSchema[mcpcontract.AttachValidationReceiptInput](noSchemaCustomization),
 		output: outputSchema[mcpcontract.ExternalValidationReceiptOutput]("Stored external receipt identity and result."), handler: s.attachValidationReceipt,
 	})
+	addCatalogTool(s, catalogTool[mcpcontract.ImportExternalEvidenceManifestInput, mcpcontract.ImportExternalEvidenceManifestOutput]{
+		name: mcpcontract.ToolImportExternalEvidence, title: "Import external evidence manifest",
+		description: "Validate and persist a bounded source-bound evidence manifest from an analysis producer. The manifest remains external evidence with its repository revision, artifact digest, completeness, limitations, and integrity status; GitContribute does not execute producer content or claim independent verification.",
+		annotations: localWrite, supportedBy: supports[ExternalEvidenceImporter],
+		input:  inputSchema[mcpcontract.ImportExternalEvidenceManifestInput](noSchemaCustomization),
+		output: outputSchema[mcpcontract.ImportExternalEvidenceManifestOutput]("Imported typed external evidence claims and their manifest identity."), handler: s.importExternalEvidenceManifest,
+	})
+	addCatalogTool(s, catalogTool[mcpcontract.AttachJUnitReportInput, mcpcontract.AttachJUnitReportOutput]{
+		name: mcpcontract.ToolAttachJUnitReport, title: "Attach JUnit validation report",
+		description: "Parse and persist a bounded JUnit XML artifact onto an existing validation run. Counts and exact test identities are normalized; malformed or incomplete reports remain explicitly incomplete with a raw artifact digest and never satisfy a passing validation claim.",
+		annotations: localWrite, supportedBy: supports[JUnitReportImporter],
+		input:  inputSchema[mcpcontract.AttachJUnitReportInput](noSchemaCustomization),
+		output: outputSchema[mcpcontract.AttachJUnitReportOutput]("Normalized JUnit report evidence attached to the validation run."), handler: s.attachJUnitReport,
+	})
+	addCatalogTool(s, catalogTool[mcpcontract.WaitPullRequestChecksInput, mcpcontract.JobReference]{
+		name: mcpcontract.ToolWaitPullRequestChecks, title: "Wait for pull-request checks",
+		description: "Watch one exact pull-request head in a bounded durable job. It waits through unchanged check states, returns superseded when the head changes, preserves incomplete coverage as unknown, and only replaces the local health snapshot after a complete terminal observation. Poll jobs.get for the result; this never fetches verbose logs or mutates GitHub.",
+		annotations: networkReadAnnotations(), supportedBy: supports[PullRequestCheckWaiter],
+		input: inputSchema[mcpcontract.WaitPullRequestChecksInput](func(schema *schemaBuilder) {
+			setDefault(schema, "timeout", "30m")
+			setDefault(schema, "poll_interval", "10s")
+			setRange(schema, "max_pages", 1, 100)
+		}),
+		output: outputSchema[mcpcontract.JobReference]("Durable exact-head check-watch job to poll through jobs.get."), handler: s.waitPullRequestChecks,
+	})
 	addCatalogTool(s, catalogTool[mcpcontract.PrepareContributionInput, mcpcontract.DurableArtifactReference]{
 		name: mcpcontract.ToolPrepareContribution, title: "Prepare pull request or issue draft",
 		description: "Render and persist a pull request or issue draft from stored evidence, supplied changes, or a verified workspace diff; it inspects the managed workspace with non-mutating Git when changes are omitted. Never posts or mutates GitHub.",

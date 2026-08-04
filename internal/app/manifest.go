@@ -308,6 +308,13 @@ func buildManifestValidation(definition *evidence.ValidationDefinition, run *evi
 		WorkspaceBindingStatus: run.WorkspaceBindingStatus, ExecutionOrigin: run.ExecutionOrigin,
 		External: run.External, Selected: selected,
 	}
+	if run.JUnitReport != nil {
+		record.JUnitReport = &manifest.JUnitReportRecord{
+			SchemaVersion: run.JUnitReport.SchemaVersion, Name: run.JUnitReport.Name, Counts: run.JUnitReport.Counts,
+			TestCases: append([]evidence.JUnitTestCase(nil), run.JUnitReport.TestCases...), Incomplete: run.JUnitReport.Incomplete,
+			ParseError: run.JUnitReport.ParseError, RawSHA256: run.JUnitReport.RawSHA256,
+		}
+	}
 	record.WorkspaceCompatibility, record.CompatibilityReason = validationWorkspaceCompatibility(run, current)
 	if !selected {
 		return record, nil, nil
@@ -322,6 +329,9 @@ func buildManifestValidation(definition *evidence.ValidationDefinition, run *evi
 	}
 	if definition.Observation != nil && run.ObservationStatus != evidence.ObservationMatched {
 		gaps = append(gaps, manifest.Gap{Code: "validation_observation_unverified", Facet: "validations", Reason: "run " + run.ID + " did not match its expected observation contract"})
+	}
+	if run.JUnitReport != nil && (run.JUnitReport.Incomplete || run.JUnitReport.Counts.Total == 0 || run.JUnitReport.Counts.Passed != run.JUnitReport.Counts.Total) {
+		gaps = append(gaps, manifest.Gap{Code: "validation_structured_report_incomplete_or_red", Facet: "validations", Reason: "run " + run.ID + " has an incomplete or non-passing JUnit report"})
 	}
 	return record, gaps, nil
 }
@@ -398,6 +408,10 @@ func addManifestEvidence(ctx context.Context, c *corpus.Corpus, predicate *manif
 			ValidationRunID: item.ValidationRunID, SourceRefs: append([]domain.SourceRef(nil), item.SourceRefs...),
 			SourceProvenance: append([]evidence.SourceRevision(nil), item.SourceProvenance...),
 			Freshness:        string(assessment.Status), FreshnessReason: assessment.Reason,
+			Measurements: item.Measurements, External: item.External,
+		}
+		if item.External != nil {
+			predicate.Gaps = append(predicate.Gaps, manifest.Gap{Code: "evidence_external_unverified", Facet: "evidence", Reason: "evidence " + item.ID + " remains producer-reported and has not been independently verified by GitContribute"})
 		}
 		predicate.Evidence = append(predicate.Evidence, record)
 		if assessment.Status == evidence.FreshnessStale || assessment.Status == evidence.FreshnessUnknown {

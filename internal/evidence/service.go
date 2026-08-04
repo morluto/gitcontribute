@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"time"
@@ -92,6 +93,25 @@ func (s *Service) RunValidation(ctx context.Context, defID string, kind RunKind)
 		return nil, err
 	}
 	return s.runDefinition(ctx, def, kind, def.Timeout, 0)
+}
+
+// AttachJUnitReport parses and stores a bounded JUnit XML report on an
+// existing validation run. A syntactically incomplete report is persisted so
+// callers can inspect the partial evidence, but the parse error is returned.
+func (s *Service) AttachJUnitReport(ctx context.Context, runID string, input io.Reader, opts JUnitParseOptions) (*ValidationRun, error) {
+	run, err := s.repo.GetValidationRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	report, parseErr := ParseJUnitReport(input, opts)
+	run.JUnitReport = &report
+	if err := s.repo.SaveValidationRun(ctx, run); err != nil {
+		return nil, fmt.Errorf("save JUnit report: %w", err)
+	}
+	if parseErr != nil {
+		return run, parseErr
+	}
+	return run, nil
 }
 
 func (s *Service) runDefinition(ctx context.Context, def *ValidationDefinition, kind RunKind, timeout, sampleInterval time.Duration) (*ValidationRun, error) {

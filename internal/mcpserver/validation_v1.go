@@ -93,3 +93,27 @@ func (s *Server) attachValidationReceipt(ctx context.Context, _ *mcp.CallToolReq
 	out, err := operator.AttachValidationReceipt(ctx, in)
 	return nil, out, err
 }
+
+func (s *Server) importExternalEvidenceManifest(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.ImportExternalEvidenceManifestInput) (*mcp.CallToolResult, mcpcontract.ImportExternalEvidenceManifestOutput, error) {
+	if len(in.ManifestJSON) == 0 || len(in.ManifestJSON) > 2<<20 {
+		return nil, mcpcontract.ImportExternalEvidenceManifestOutput{}, mcpcontract.InvalidArgument("manifest_json", "must contain one manifest no larger than 2 MiB", nil)
+	}
+	operator, ok := s.reader.(ExternalEvidenceImporter)
+	if !ok {
+		return nil, mcpcontract.ImportExternalEvidenceManifestOutput{}, errors.New("external evidence manifest import is unavailable")
+	}
+	out, err := operator.ImportExternalEvidenceManifest(ctx, in)
+	return nil, out, err
+}
+
+func (s *Server) attachJUnitReport(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.AttachJUnitReportInput) (*mcp.CallToolResult, mcpcontract.AttachJUnitReportOutput, error) {
+	if strings.TrimSpace(in.RunID) == "" || len(in.ReportXML) == 0 || len(in.ReportXML) > 2<<20 {
+		return nil, mcpcontract.AttachJUnitReportOutput{}, mcpcontract.InvalidArgument("report_xml", "run_id and one JUnit report no larger than 2 MiB are required", nil)
+	}
+	operator, ok := s.reader.(JUnitReportImporter)
+	if !ok {
+		return nil, mcpcontract.AttachJUnitReportOutput{}, errors.New("JUnit report import is unavailable")
+	}
+	out, err := operator.AttachJUnitReport(ctx, in)
+	return nil, out, err
+}
