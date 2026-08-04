@@ -1,6 +1,7 @@
 {
   "name": "gitcontribute",
   "version": "1.0.0",
+  "mcpName": "io.github.morluto/gitcontribute",
   "description": "Local-first GitHub contribution research workbench",
   "license": "MIT",
   "repository": {

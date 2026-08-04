@@ -231,8 +231,16 @@ One tag version controls the Go binaries and npm package. Release automation:
 5. installs the tarball with `--ignore-scripts` and runs a smoke test;
 6. enforces a 100 MB compressed-package ceiling;
 7. publishes the npm package with provenance;
-8. creates a matching GitHub release.
+8. publishes matching `server.json` metadata to the MCP Registry with GitHub
+   OIDC;
+9. creates a matching GitHub release.
 
 The npm environment must be configured for trusted publishing before the first
-release. Package publication is an external mutation and is performed only by
-the tag-triggered release workflow.
+release. The repository also carries the registry ownership marker
+`io.github.morluto/gitcontribute` in `package.json`; the checked-in
+`server.json` is kept at the package version and the release workflow updates
+both registry version fields from the immutable release tag before publishing.
+MCP Registry publication is an external mutation and is performed only by the
+tag-triggered release workflow. The workflow uses the official
+`mcp-publisher` client and requires no additional registry secret because its
+OIDC permission is scoped to the release job.
