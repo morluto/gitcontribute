@@ -1,5 +1,7 @@
 package mcpcontract
 
+import "time"
+
 // SearchRepositoriesInput describes an offline repository search page.
 type SearchRepositoriesInput struct {
 	Query         string `json:"query,omitempty" jsonschema:"Repository full-text query"`
@@ -293,6 +295,51 @@ type AttachValidationReceiptInput struct {
 	ReceiptJSON string `json:"receipt_json" jsonschema:"External validation receipt JSON using gitcontribute.external-validation.v1; maximum 2 MiB"`
 }
 
+// WaitPullRequestChecksInput bounds a server-owned wait for one exact PR head.
+// It never follows a changed head and does not fetch verbose logs.
+type WaitPullRequestChecksInput struct {
+	Owner           string `json:"owner" jsonschema:"GitHub repository owner"`
+	Repo            string `json:"repo" jsonschema:"GitHub repository name"`
+	Number          int    `json:"number" jsonschema:"Pull request number"`
+	ExpectedHeadSHA string `json:"expected_head_sha" jsonschema:"Exact pull-request head SHA to watch"`
+	Timeout         string `json:"timeout,omitempty" jsonschema:"Maximum wait duration, default 30m"`
+	PollInterval    string `json:"poll_interval,omitempty" jsonschema:"Polling interval, default 10s"`
+	MaxPages        int    `json:"max_pages,omitempty" jsonschema:"Maximum status pages per observation, 1 to 100"`
+	FailFast        bool   `json:"fail_fast,omitempty" jsonschema:"Return when a check fails instead of waiting for every check"`
+}
+
+type PullRequestCheckOutput struct {
+	Kind        string     `json:"kind"`
+	Name        string     `json:"name"`
+	Status      string     `json:"status"`
+	Conclusion  string     `json:"conclusion,omitempty"`
+	DetailsURL  string     `json:"details_url,omitempty"`
+	StartedAt   *time.Time `json:"started_at,omitempty"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+type PullRequestCheckTransition struct {
+	ObservedAt string `json:"observed_at"`
+	Signature  string `json:"signature"`
+	CheckCount int    `json:"check_count"`
+}
+
+type WaitPullRequestChecksOutput struct {
+	Status               string                       `json:"status"`
+	Owner                string                       `json:"owner"`
+	Repo                 string                       `json:"repo"`
+	Number               int                          `json:"number"`
+	ExpectedHeadSHA      string                       `json:"expected_head_sha"`
+	ObservedHeadSHA      string                       `json:"observed_head_sha,omitempty"`
+	Checks               []PullRequestCheckOutput     `json:"checks,omitempty"`
+	Transitions          []PullRequestCheckTransition `json:"transitions,omitempty"`
+	TransitionsTruncated bool                         `json:"transitions_truncated,omitempty"`
+	ObservedAt           string                       `json:"observed_at,omitempty"`
+	Polls                int                          `json:"polls"`
+	Reason               string                       `json:"reason,omitempty"`
+	Persisted            bool                         `json:"persisted"`
+}
+
 type ExternalValidationReceiptOutput struct {
 	RunID           string   `json:"run_id"`
 	DefinitionID    string   `json:"definition_id"`
@@ -307,6 +354,36 @@ type ExternalValidationReceiptOutput struct {
 	ArtifactSHA256  string   `json:"artifact_sha256,omitempty"`
 	Limitations     []string `json:"limitations,omitempty"`
 	Incomplete      bool     `json:"incomplete"`
+}
+
+type ImportExternalEvidenceManifestInput struct {
+	ManifestJSON string `json:"manifest_json" jsonschema:"External evidence manifest JSON using gitcontribute.external-evidence.v1; maximum 2 MiB"`
+}
+
+type ImportExternalEvidenceManifestOutput struct {
+	ManifestSHA256 string `json:"manifest_sha256"`
+	Producer       string `json:"producer"`
+	ClaimCount     int    `json:"claim_count"`
+	Incomplete     bool   `json:"incomplete"`
+}
+
+type AttachJUnitReportInput struct {
+	RunID     string `json:"run_id" jsonschema:"Persisted validation run ID"`
+	ReportXML string `json:"report_xml" jsonschema:"Bounded JUnit XML report, maximum 2 MiB"`
+}
+
+type AttachJUnitReportOutput struct {
+	RunID      string `json:"run_id"`
+	Schema     string `json:"schema"`
+	RawSHA256  string `json:"raw_sha256,omitempty"`
+	Total      int    `json:"total"`
+	Passed     int    `json:"passed"`
+	Failed     int    `json:"failed"`
+	Skipped    int    `json:"skipped"`
+	Errored    int    `json:"errored"`
+	Unknown    int    `json:"unknown"`
+	Incomplete bool   `json:"incomplete"`
+	ParseError string `json:"parse_error,omitempty"`
 }
 
 // DefineValidationInput records a bounded validation command without executing it.

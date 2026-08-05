@@ -50,3 +50,18 @@ test("release matrix is derived from the npm platform manifest", () => {
   assert.equal(matrix.status, 0, matrix.stderr || matrix.stdout);
   assert.deepEqual(JSON.parse(matrix.stdout).include, Object.values(platforms));
 });
+
+test("MCP Registry metadata identifies the published package", async () => {
+  const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
+  const server = JSON.parse(await readFile(join(root, "server.json"), "utf8"));
+  assert.equal(pkg.mcpName, "io.github.morluto/gitcontribute");
+  assert.equal(server.name, pkg.mcpName);
+  assert.equal(server.version, pkg.version);
+  assert.equal(server.repository.url, "https://github.com/morluto/gitcontribute");
+  assert.deepEqual(server.packages, [{
+    registryType: "npm",
+    identifier: pkg.name,
+    version: pkg.version,
+    transport: { type: "stdio" },
+  }]);
+});

@@ -7,10 +7,61 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
+
+func (r *MCPReader) ImportExternalEvidenceManifest(ctx context.Context, in mcpcontract.ImportExternalEvidenceManifestInput) (mcpcontract.ImportExternalEvidenceManifestOutput, error) {
+	decoder := json.NewDecoder(bytes.NewBufferString(in.ManifestJSON))
+	decoder.DisallowUnknownFields()
+	decoder.UseNumber()
+	var input contracts.ExternalEvidenceManifest
+	if err := decoder.Decode(&input); err != nil {
+		return mcpcontract.ImportExternalEvidenceManifestOutput{}, fmt.Errorf("decode external evidence manifest: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return mcpcontract.ImportExternalEvidenceManifestOutput{}, errors.New("external evidence manifest must contain one JSON value")
+	}
+	claims := make([]evidence.ExternalEvidenceClaim, 0, len(input.Claims))
+	for _, claim := range input.Claims {
+		claims = append(claims, evidence.ExternalEvidenceClaim{ID: claim.ID, Type: evidence.EvidenceType(claim.Type), Relation: evidence.Relation(claim.Relation), Description: claim.Description, SourceRefs: append([]string(nil), claim.SourceRefs...), Measurements: claim.Measurements})
+	}
+	result, err := r.application().importExternalEvidenceManifest(ctx, evidence.ExternalEvidenceManifest{
+		SchemaVersion: input.SchemaVersion, Producer: input.Producer, InvestigationID: input.InvestigationID, HypothesisID: input.HypothesisID, OpportunityID: input.OpportunityID,
+		Repository: input.Repository, Revision: input.Revision, ArtifactSHA256: input.ArtifactSHA256, ObservedAt: input.ObservedAt, Environment: input.Environment,
+		Completeness: input.Completeness, Integrity: input.Integrity, Limitations: input.Limitations, Claims: claims, ManifestSHA256: input.ManifestSHA256,
+	})
+	if err != nil {
+		return mcpcontract.ImportExternalEvidenceManifestOutput{}, err
+	}
+	return mcpcontract.ImportExternalEvidenceManifestOutput{ManifestSHA256: result.ManifestSHA256, Producer: result.Producer, ClaimCount: result.ClaimCount, Incomplete: result.Incomplete}, nil
+}
+
+func (r *MCPReader) AttachJUnitReport(ctx context.Context, in mcpcontract.AttachJUnitReportInput) (mcpcontract.AttachJUnitReportOutput, error) {
+	c, err := r.openCorpus(ctx)
+	if err != nil {
+		return mcpcontract.AttachJUnitReportOutput{}, err
+	}
+	runID := strings.TrimSpace(in.RunID)
+	run, parseErr := evidence.NewService(c, evidence.NewExecRunner()).AttachJUnitReport(ctx, runID, strings.NewReader(in.ReportXML), evidence.JUnitParseOptions{})
+	if run == nil {
+		return mcpcontract.AttachJUnitReportOutput{}, parseErr
+	}
+	out := mcpcontract.AttachJUnitReportOutput{RunID: run.ID}
+	if run.JUnitReport != nil {
+		report := run.JUnitReport
+		out.Schema, out.RawSHA256, out.Incomplete, out.ParseError = report.SchemaVersion, report.RawSHA256, report.Incomplete, report.ParseError
+		out.Total, out.Passed, out.Failed, out.Skipped, out.Errored, out.Unknown = report.Counts.Total, report.Counts.Passed, report.Counts.Failed, report.Counts.Skipped, report.Counts.Errored, report.Counts.Unknown
+	}
+	if parseErr != nil && !errors.Is(parseErr, evidence.ErrJUnitReportIncomplete) {
+		return out, parseErr
+	}
+	return out, nil
+}
 
 func (r *MCPReader) AttachValidationReceipt(ctx context.Context, in mcpcontract.AttachValidationReceiptInput) (mcpcontract.ExternalValidationReceiptOutput, error) {
 	decoder := json.NewDecoder(bytes.NewBufferString(in.ReceiptJSON))

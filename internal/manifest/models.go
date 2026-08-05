@@ -107,20 +107,33 @@ type ValidationRecord struct {
 	CompatibilityReason     string                              `json:"compatibility_reason"`
 	ExecutionOrigin         string                              `json:"execution_origin,omitempty"`
 	External                *evidence.ExternalReceiptProvenance `json:"external,omitempty"`
+	JUnitReport             *JUnitReportRecord                  `json:"junit_report,omitempty"`
 	Selected                bool                                `json:"selected_for_completeness"`
+}
+
+type JUnitReportRecord struct {
+	SchemaVersion string                   `json:"schema_version"`
+	Name          string                   `json:"name,omitempty"`
+	Counts        evidence.JUnitCounts     `json:"counts"`
+	TestCases     []evidence.JUnitTestCase `json:"test_cases,omitempty"`
+	Incomplete    bool                     `json:"incomplete"`
+	ParseError    string                   `json:"parse_error,omitempty"`
+	RawSHA256     string                   `json:"raw_sha256"`
 }
 
 // EvidenceRecord captures a stored evidence item and evaluated freshness.
 type EvidenceRecord struct {
-	ID               string                    `json:"id"`
-	Type             string                    `json:"type"`
-	Relation         string                    `json:"relation"`
-	Description      string                    `json:"description"`
-	ValidationRunID  string                    `json:"validation_run_id,omitempty"`
-	SourceRefs       []domain.SourceRef        `json:"source_refs"`
-	SourceProvenance []evidence.SourceRevision `json:"source_provenance"`
-	Freshness        string                    `json:"freshness"`
-	FreshnessReason  string                    `json:"freshness_reason"`
+	ID               string                               `json:"id"`
+	Type             string                               `json:"type"`
+	Relation         string                               `json:"relation"`
+	Description      string                               `json:"description"`
+	ValidationRunID  string                               `json:"validation_run_id,omitempty"`
+	SourceRefs       []domain.SourceRef                   `json:"source_refs"`
+	SourceProvenance []evidence.SourceRevision            `json:"source_provenance"`
+	Freshness        string                               `json:"freshness"`
+	FreshnessReason  string                               `json:"freshness_reason"`
+	Measurements     map[string]any                       `json:"measurements,omitempty"`
+	External         *evidence.ExternalEvidenceProvenance `json:"external,omitempty"`
 }
 
 // ReadinessRecord captures the deterministic readiness rule evaluation.

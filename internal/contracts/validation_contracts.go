@@ -51,6 +51,35 @@ type ExternalValidationReceipt struct {
 	Incomplete      bool              `json:"incomplete,omitempty"`
 }
 
+// ExternalEvidenceManifest is an untrusted, source-bound analysis handoff.
+// It is imported as local evidence without executing producer-controlled data.
+type ExternalEvidenceManifest struct {
+	SchemaVersion   string                  `json:"schema_version"`
+	Producer        string                  `json:"producer"`
+	InvestigationID string                  `json:"investigation_id"`
+	HypothesisID    string                  `json:"hypothesis_id,omitempty"`
+	OpportunityID   string                  `json:"opportunity_id,omitempty"`
+	Repository      string                  `json:"repository"`
+	Revision        string                  `json:"revision"`
+	ArtifactSHA256  string                  `json:"artifact_sha256,omitempty"`
+	ObservedAt      time.Time               `json:"observed_at"`
+	Environment     map[string]string       `json:"environment,omitempty"`
+	Completeness    string                  `json:"completeness"`
+	Integrity       string                  `json:"integrity"`
+	Limitations     []string                `json:"limitations,omitempty"`
+	Claims          []ExternalEvidenceClaim `json:"claims"`
+	ManifestSHA256  string                  `json:"manifest_sha256"`
+}
+
+type ExternalEvidenceClaim struct {
+	ID           string         `json:"id"`
+	Type         string         `json:"type"`
+	Relation     string         `json:"relation"`
+	Description  string         `json:"description"`
+	SourceRefs   []string       `json:"source_refs,omitempty"`
+	Measurements map[string]any `json:"measurements,omitempty"`
+}
+
 // RunValidationOptions carries the run target and explicit host-execution authorization.
 type RunValidationOptions struct {
 	Kind    string
@@ -135,6 +164,28 @@ type ValidationRunResult struct {
 	Cleanup                 ValidationCleanupResult       `json:"cleanup"`
 	ExecutionOrigin         string                        `json:"execution_origin,omitempty"`
 	External                *ExternalValidationProvenance `json:"external,omitempty"`
+	JUnitReport             *JUnitReportResult            `json:"junit_report,omitempty"`
+}
+
+type JUnitReportResult struct {
+	Schema     string                `json:"schema"`
+	RawSHA256  string                `json:"raw_sha256"`
+	Total      int                   `json:"total"`
+	Passed     int                   `json:"passed"`
+	Failed     int                   `json:"failed"`
+	Skipped    int                   `json:"skipped"`
+	Errored    int                   `json:"errored"`
+	Unknown    int                   `json:"unknown"`
+	Incomplete bool                  `json:"incomplete"`
+	ParseError string                `json:"parse_error,omitempty"`
+	TestCases  []JUnitTestCaseResult `json:"test_cases,omitempty"`
+}
+
+type JUnitTestCaseResult struct {
+	ID        string `json:"id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Classname string `json:"classname,omitempty"`
+	Status    string `json:"status"`
 }
 
 type ExternalValidationProvenance struct {

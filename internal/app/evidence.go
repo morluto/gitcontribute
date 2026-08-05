@@ -424,6 +424,14 @@ func (s *Service) RecordEvidence(ctx context.Context, input contracts.RecordEvid
 	return e, nil
 }
 
+func (s *Service) importExternalEvidenceManifest(ctx context.Context, item evidence.ExternalEvidenceManifest) (*evidence.ImportedExternalEvidence, error) {
+	c, err := s.openCorpus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return evidence.NewService(c, evidence.NewExecRunner()).ImportExternalEvidenceManifest(ctx, item)
+}
+
 func validationResult(def *evidence.ValidationDefinition) *contracts.ValidationResult {
 	timeout := ""
 	if def.Timeout > 0 {
@@ -490,6 +498,17 @@ func validationRunResult(run *evidence.ValidationRun) *contracts.ValidationRunRe
 			Provider: run.External.Provider, ExternalRunID: run.External.ExternalRunID, Command: append([]string(nil), run.External.Command...),
 			WorkingDir: run.External.WorkingDir, Environment: run.External.Environment, Artifacts: run.External.Artifacts,
 			Limitations: append([]string(nil), run.External.Limitations...), Incomplete: run.External.Incomplete,
+		}
+	}
+	if run.JUnitReport != nil {
+		report := run.JUnitReport
+		result.JUnitReport = &contracts.JUnitReportResult{
+			Schema: report.SchemaVersion, RawSHA256: report.RawSHA256, Total: report.Counts.Total, Passed: report.Counts.Passed,
+			Failed: report.Counts.Failed, Skipped: report.Counts.Skipped, Errored: report.Counts.Errored, Unknown: report.Counts.Unknown,
+			Incomplete: report.Incomplete, ParseError: report.ParseError,
+		}
+		for _, item := range report.TestCases {
+			result.JUnitReport.TestCases = append(result.JUnitReport.TestCases, contracts.JUnitTestCaseResult{ID: item.ID, Name: item.Name, Classname: item.Classname, Status: string(item.Status)})
 		}
 	}
 	return result
