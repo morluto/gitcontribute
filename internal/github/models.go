@@ -149,6 +149,7 @@ type Repository struct {
 	HTMLURL       string
 	Private       bool
 	Fork          bool
+	Parent        *RepositoryParent
 	Archived      bool
 	IsTemplate    bool
 	Stars         int
@@ -161,6 +162,31 @@ type Repository struct {
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 	PushedAt      *time.Time
+}
+
+// RepositoryParent identifies the upstream repository reported for a fork.
+// It intentionally retains only the identity needed at the application
+// boundary rather than re-exporting the provider's nested repository model.
+type RepositoryParent struct {
+	Owner    string
+	Name     string
+	FullName string
+}
+
+// Branch is the resolved tip of one exact repository branch.
+type Branch struct {
+	Name      string
+	CommitSHA string
+}
+
+// CommitComparison is the bounded ancestry result for two refs in one
+// repository network. Base and head are the requested comparison directions.
+type CommitComparison struct {
+	Status       string
+	BaseSHA      string
+	MergeBaseSHA string
+	AheadBy      int
+	BehindBy     int
 }
 
 // Issue is a domain-neutral view of an issue or pull-request marker from

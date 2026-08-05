@@ -81,6 +81,12 @@ func (s *Server) preflightContribution(ctx context.Context, _ *mcp.CallToolReque
 	if err := validateThreadRef(mcpcontract.ThreadRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo, Number: 1}, true); err != nil {
 		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("repository", "owner and repo are required", map[string]any{"owner": "acme", "repo": "rocket"})
 	}
+	if in.Fork != nil && (strings.TrimSpace(in.Fork.Owner) == "" || strings.TrimSpace(in.Fork.Repo) == "") {
+		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("fork", "owner and repo are required when fork is provided", map[string]any{"owner": "alice", "repo": "rocket"})
+	}
+	if in.Fork != nil && strings.EqualFold(strings.TrimSpace(in.Fork.Owner), strings.TrimSpace(in.Repository.Owner)) && strings.EqualFold(strings.TrimSpace(in.Fork.Repo), strings.TrimSpace(in.Repository.Repo)) {
+		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("fork", "fork must differ from the upstream repository", nil)
+	}
 	if strings.TrimSpace(in.Candidate.Title) == "" && strings.TrimSpace(in.Candidate.Query) == "" && strings.TrimSpace(in.Candidate.Body) == "" && in.Candidate.IssueNumber < 1 && strings.TrimSpace(in.Candidate.HeadRef) == "" && strings.TrimSpace(in.Candidate.HeadSHA) == "" && len(in.Candidate.ChangedFiles) == 0 && len(in.WorkspacePaths) == 0 {
 		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("candidate", "candidate or workspace_paths must provide title, query, body, issue_number, head_ref, head_sha, or changed_files", nil)
 	}

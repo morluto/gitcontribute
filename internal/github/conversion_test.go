@@ -26,3 +26,17 @@ func TestConversionsHandleMissingNestedModels(t *testing.T) {
 		t.Fatalf("review comment = %+v, want empty author", got)
 	}
 }
+
+func TestConvertRepositoryPreservesForkParentIdentity(t *testing.T) {
+	forkName, forkFullName, forkOwner := "fork", "alice/fork", "alice"
+	parentName, parentFullName, parentOwner := "repo", "upstream/repo", "upstream"
+	fork := true
+	got := convertRepository(&gh.Repository{
+		Name: &forkName, FullName: &forkFullName, Fork: &fork,
+		Owner:  &gh.User{Login: &forkOwner},
+		Parent: &gh.Repository{Name: &parentName, FullName: &parentFullName, Owner: &gh.User{Login: &parentOwner}},
+	})
+	if !got.Fork || got.Parent == nil || got.Parent.Owner != "upstream" || got.Parent.Name != "repo" || got.Parent.FullName != "upstream/repo" {
+		t.Fatalf("repository parent = %+v", got)
+	}
+}

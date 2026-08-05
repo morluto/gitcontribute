@@ -114,6 +114,15 @@ decides whether an agent should start work. Agents select the current-work,
 portfolio, overlap, or Git comparison facts appropriate to the task. Unknown
 discovery or facet coverage prevents a “no competing work” conclusion.
 
+`workflow.preflight_contribution` also reports `fork_freshness` when the caller
+supplies a fork or the inspected workspace provides one unambiguous contributor
+remote. The read resolves both default-branch tips and compares them through
+the upstream fork network, preserving merge-base evidence and the current
+contribution branch when available. `current`, `behind`, and `diverged` are
+verified states; an unavailable fork or incomplete comparison remains unknown.
+The check never fetches local refs, synchronizes a fork, force-pushes, or
+mutates GitHub.
+
 ## Unified catalog
 
 The managed server advertises the unified `all` catalog. Current Codex and

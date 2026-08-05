@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/github"
@@ -13,10 +14,43 @@ import (
 type preflightReader struct {
 	github.Reader
 	identityErr   error
+	forkStatus    string
+	forkErr       error
 	authored      github.AuthoredPullRequestSearchResult
 	related       github.ThreadSearchResult
 	details       map[int]github.PullRequestDetails
 	searchOptions github.AuthoredPullRequestSearchOptions
+}
+
+func (r *preflightReader) GetRepository(_ context.Context, owner, repo string) (github.Repository, github.RateInfo, error) {
+	if r.forkErr != nil {
+		return github.Repository{}, github.RateInfo{}, r.forkErr
+	}
+	result := github.Repository{Owner: owner, Name: repo, DefaultBranch: "main"}
+	if !strings.EqualFold(owner, "fla-org") {
+		result.Fork = true
+		result.Parent = &github.RepositoryParent{Owner: "fla-org", Name: "flash-linear-attention", FullName: "fla-org/flash-linear-attention"}
+	}
+	return result, github.RateInfo{}, nil
+}
+
+func (r *preflightReader) GetBranch(_ context.Context, owner, repo, branch string) (github.Branch, github.RateInfo, error) {
+	sha := "upstream-sha"
+	if !strings.EqualFold(owner, "fla-org") || !strings.EqualFold(repo, "flash-linear-attention") {
+		sha = "fork-sha"
+	}
+	return github.Branch{Name: branch, CommitSHA: sha}, github.RateInfo{}, nil
+}
+
+func (r *preflightReader) CompareCommits(_ context.Context, _, _, _, _ string) (github.CommitComparison, github.RateInfo, error) {
+	if r.forkErr != nil {
+		return github.CommitComparison{}, github.RateInfo{}, r.forkErr
+	}
+	status := r.forkStatus
+	if status == "" {
+		status = "identical"
+	}
+	return github.CommitComparison{Status: status, BaseSHA: "upstream-sha", MergeBaseSHA: "merge-base", AheadBy: 0, BehindBy: 0}, github.RateInfo{}, nil
 }
 
 func (r *preflightReader) GetAuthenticatedIdentity(context.Context) (github.Identity, github.RateInfo, error) {
@@ -89,6 +123,9 @@ func TestPreflightContributionRoutesExistingAuthoredPRAndLocalWorktree(t *testin
 	if out.Status != "existing_pr" || out.Coverage != "live_verified" || out.Existing == nil {
 		t.Fatalf("preflight = %+v", out)
 	}
+	if out.ForkFreshness == nil || out.ForkFreshness.Fork.Owner != "morluto" || out.ForkFreshness.Status != "current" {
+		t.Fatalf("inferred fork freshness = %+v", out.ForkFreshness)
+	}
 	if out.Existing.Issue != 1086 || out.Existing.PullRequest != 1088 || out.Existing.Head != "morluto:fix/n01-mask-cu-seqlens-v2" {
 		t.Fatalf("existing = %+v", out.Existing)
 	}
@@ -152,5 +189,67 @@ func TestPreflightContributionReturnsNewWorkOnlyAfterLiveNegativeChecks(t *testi
 	}
 	if out.Status != "new_work" || out.Coverage != "live_verified" || out.NextAction != "create_local_work" {
 		t.Fatalf("negative preflight = %+v", out)
+	}
+}
+
+func TestPreflightContributionReportsForkFreshness(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		providerStatus string
+		wantStatus     string
+		wantCoverage   string
+		wantRisk       bool
+	}{
+		{providerStatus: "identical", wantStatus: "current", wantCoverage: "verified", wantRisk: false},
+		{providerStatus: "behind", wantStatus: "behind", wantCoverage: "verified", wantRisk: true},
+		{providerStatus: "diverged", wantStatus: "diverged", wantCoverage: "verified", wantRisk: true},
+		{providerStatus: "ahead", wantStatus: "diverged", wantCoverage: "verified", wantRisk: true},
+		{providerStatus: "unknown", wantStatus: "unavailable", wantCoverage: "unavailable", wantRisk: false},
+	} {
+		t.Run(test.providerStatus, func(t *testing.T) {
+			t.Parallel()
+			svc := newSearchTestService(t)
+			reader := &preflightReader{forkStatus: test.providerStatus}
+			svc.SetGitHubReader(reader)
+			out, err := (&MCPReader{svc}).PreflightContribution(context.Background(), mcpcontract.ContributionPreflightInput{
+				Repository: mcpcontract.RepositoryRef{Owner: "fla-org", Repo: "flash-linear-attention"},
+				Fork:       &mcpcontract.RepositoryRef{Owner: "morluto", Repo: "flash-linear-attention"},
+				Candidate:  mcpcontract.ContributionPreflightCandidate{Title: "Fix contribution"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.ForkFreshness == nil {
+				t.Fatalf("missing fork freshness: %+v", out)
+			}
+			freshness := out.ForkFreshness
+			if freshness.Status != test.wantStatus || freshness.Coverage != test.wantCoverage || freshness.EffectiveDiffRisk != test.wantRisk {
+				t.Fatalf("fork freshness = %+v", freshness)
+			}
+			if freshness.Coverage == "verified" && (freshness.UpstreamSHA != "upstream-sha" || freshness.ForkSHA != "fork-sha" || freshness.MergeBaseSHA != "merge-base") {
+				t.Fatalf("fork ancestry = %+v", freshness)
+			}
+		})
+	}
+}
+
+func TestPreflightContributionReportsUnavailableForkFreshness(t *testing.T) {
+	t.Parallel()
+	svc := newSearchTestService(t)
+	reader := &preflightReader{forkErr: errors.New("fork unavailable")}
+	svc.SetGitHubReader(reader)
+	out, err := (&MCPReader{svc}).PreflightContribution(context.Background(), mcpcontract.ContributionPreflightInput{
+		Repository: mcpcontract.RepositoryRef{Owner: "fla-org", Repo: "flash-linear-attention"},
+		Fork:       &mcpcontract.RepositoryRef{Owner: "morluto", Repo: "flash-linear-attention"},
+		Candidate:  mcpcontract.ContributionPreflightCandidate{Title: "Fix contribution"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Coverage != "coverage_unknown" || out.ForkFreshness == nil || out.ForkFreshness.Status != "unavailable" {
+		t.Fatalf("unavailable fork freshness = %+v", out)
+	}
+	if len(out.CoverageReasons) == 0 {
+		t.Fatalf("missing coverage reason: %+v", out)
 	}
 }
