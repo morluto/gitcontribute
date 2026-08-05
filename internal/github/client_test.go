@@ -140,6 +140,41 @@ func TestRepositoryLookup(t *testing.T) {
 	}
 }
 
+func TestBranchAndCrossForkComparison(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setRateHeaders(w.Header())
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/repos/octocat/hello-world/branches/main"):
+			writeJSON(w, map[string]any{"name": "main", "commit": map[string]any{"sha": "fork-sha"}})
+		case strings.Contains(r.URL.Path, "/repos/octocat/hello-world/compare/main...fork:main"):
+			writeJSON(w, map[string]any{
+				"status": "behind", "ahead_by": 0, "behind_by": 4,
+				"base_commit":       map[string]any{"sha": "upstream-sha"},
+				"merge_base_commit": map[string]any{"sha": "merge-base"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	client := newTestClient(t, srv, StaticTokenSource(""))
+
+	branch, _, err := client.GetBranch(context.Background(), "octocat", "hello-world", "main")
+	if err != nil {
+		t.Fatalf("GetBranch: %v", err)
+	}
+	if branch.Name != "main" || branch.CommitSHA != "fork-sha" {
+		t.Fatalf("branch = %+v", branch)
+	}
+	comparison, _, err := client.CompareCommits(context.Background(), "octocat", "hello-world", "main", "fork:main")
+	if err != nil {
+		t.Fatalf("CompareCommits: %v", err)
+	}
+	if comparison.Status != "behind" || comparison.BaseSHA != "upstream-sha" || comparison.MergeBaseSHA != "merge-base" || comparison.BehindBy != 4 {
+		t.Fatalf("comparison = %+v", comparison)
+	}
+}
+
 func TestListIssueTimelineConvertsExplicitSourceAndPagination(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v3/repos/octocat/hello-world/issues/7/timeline" || r.URL.Query().Get("page") != "1" {

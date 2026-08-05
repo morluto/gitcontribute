@@ -402,6 +402,7 @@ type SyncPortfolioInput struct {
 // bounded and does not persist its observations.
 type ContributionPreflightInput struct {
 	Repository     RepositoryRef                  `json:"repository" jsonschema:"Repository being considered"`
+	Fork           *RepositoryRef                 `json:"fork,omitempty" jsonschema:"Optional contributor fork; otherwise inferred from an inspected workspace or existing pull request"`
 	Candidate      ContributionPreflightCandidate `json:"candidate" jsonschema:"Candidate title, issue, branch, or change context"`
 	WorkspacePaths []string                       `json:"workspace_paths,omitempty" jsonschema:"Optional local Git worktree roots to inspect"`
 	Limit          int                            `json:"limit,omitempty" jsonschema:"Maximum authored pull requests and related threads to inspect from 1 to 100"`
@@ -430,9 +431,32 @@ type ContributionPreflightOutput struct {
 	Existing        *ExistingContributionOutput `json:"existing,omitempty"`
 	LocalMatches    []LocalContributionMatch    `json:"local_matches,omitempty"`
 	Related         []RelatedContributionThread `json:"related,omitempty"`
+	ForkFreshness   *ForkFreshnessOutput        `json:"fork_freshness,omitempty"`
 	Coverage        string                      `json:"coverage" jsonschema:"live_verified or coverage_unknown"`
 	CoverageReasons []string                    `json:"coverage_reasons,omitempty"`
 	NextAction      string                      `json:"next_action"`
+}
+
+// ForkFreshnessOutput reports whether the contributor fork's default branch
+// can safely serve as the base for the current contribution branch. It is
+// present only when a fork can be identified from the input or live context.
+type ForkFreshnessOutput struct {
+	Status             string        `json:"status" jsonschema:"current, behind, diverged, or unavailable"`
+	Coverage           string        `json:"coverage" jsonschema:"verified or unavailable"`
+	Upstream           RepositoryRef `json:"upstream"`
+	Fork               RepositoryRef `json:"fork"`
+	UpstreamBranch     string        `json:"upstream_branch,omitempty"`
+	ForkBranch         string        `json:"fork_branch,omitempty"`
+	ContributionBranch string        `json:"contribution_branch,omitempty"`
+	ContributionSHA    string        `json:"contribution_sha,omitempty"`
+	UpstreamSHA        string        `json:"upstream_sha,omitempty"`
+	ForkSHA            string        `json:"fork_sha,omitempty"`
+	MergeBaseSHA       string        `json:"merge_base_sha,omitempty"`
+	AheadBy            int           `json:"ahead_by,omitempty"`
+	BehindBy           int           `json:"behind_by,omitempty"`
+	EffectiveDiffRisk  bool          `json:"effective_diff_risk"`
+	Reason             string        `json:"reason,omitempty"`
+	NextAction         string        `json:"next_action"`
 }
 
 // ExistingContributionOutput identifies an authored pull request that may

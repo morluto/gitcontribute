@@ -55,6 +55,17 @@ type IdentityReader interface {
 	GetAuthenticatedIdentity(context.Context) (Identity, RateInfo, error)
 }
 
+// BranchReader reads one exact branch tip without mutating local state.
+type BranchReader interface {
+	GetBranch(context.Context, string, string, string) (Branch, RateInfo, error)
+}
+
+// CommitComparisonReader compares refs in one GitHub repository network and
+// preserves the provider's merge-base evidence.
+type CommitComparisonReader interface {
+	CompareCommits(context.Context, string, string, string, string) (CommitComparison, RateInfo, error)
+}
+
 // AuthoredPullRequestSearcher discovers pull requests authored by one login.
 type AuthoredPullRequestSearcher interface {
 	SearchAuthoredPullRequests(context.Context, AuthoredPullRequestSearchOptions) (AuthoredPullRequestSearchResult, error)
@@ -560,7 +571,7 @@ func convertRepository(r *gh.Repository) Repository {
 	if openIssues == 0 {
 		openIssues = r.GetOpenIssues()
 	}
-	return Repository{
+	result := Repository{
 		ID:            r.GetID(),
 		NodeID:        r.GetNodeID(),
 		Owner:         userLogin(r.Owner),
@@ -584,6 +595,10 @@ func convertRepository(r *gh.Repository) Repository {
 		UpdatedAt:     timeVal(r.UpdatedAt),
 		PushedAt:      timePtr(r.PushedAt),
 	}
+	if parent := r.GetParent(); parent != nil {
+		result.Parent = &RepositoryParent{Owner: userLogin(parent.Owner), Name: parent.GetName(), FullName: parent.GetFullName()}
+	}
+	return result
 }
 
 func convertIssue(i *gh.Issue) Issue {

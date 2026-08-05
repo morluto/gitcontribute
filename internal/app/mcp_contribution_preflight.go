@@ -29,6 +29,16 @@ func (r *MCPReader) PreflightContribution(ctx context.Context, in mcpcontract.Co
 	}
 	in.Repository.Owner = strings.TrimSpace(in.Repository.Owner)
 	in.Repository.Repo = strings.TrimSpace(in.Repository.Repo)
+	if in.Fork != nil {
+		in.Fork.Owner = strings.TrimSpace(in.Fork.Owner)
+		in.Fork.Repo = strings.TrimSpace(in.Fork.Repo)
+		if err := (domain.RepoRef{Owner: in.Fork.Owner, Repo: in.Fork.Repo}).Validate(); err != nil {
+			return mcpcontract.ContributionPreflightOutput{}, fmt.Errorf("validate fork repository: %w", err)
+		}
+		if sameGitHubRepository(in.Fork.Owner, in.Fork.Repo, in.Repository) {
+			return mcpcontract.ContributionPreflightOutput{}, errors.New("fork repository must differ from the upstream repository")
+		}
+	}
 	if in.Limit == 0 {
 		in.Limit = defaultContributionPreflightLimit
 	}
@@ -182,6 +192,16 @@ func (r *MCPReader) PreflightContribution(ctx context.Context, in mcpcontract.Co
 		out.Status = "existing_pr"
 		out.NextAction = "review_or_follow_through"
 	}
+	forkFreshness, forkChecked, forkErr := checkPreflightForkFreshness(ctx, reader, in.Repository, in.Fork, identity.Login, in.Candidate, worktrees, existingMatch(existing), in.MaxRequests, requests)
+	if forkErr != nil {
+		return mcpcontract.ContributionPreflightOutput{}, forkErr
+	}
+	if forkChecked {
+		out.ForkFreshness = &forkFreshness
+		if forkFreshness.Coverage != "verified" {
+			out.CoverageReasons = append(out.CoverageReasons, "fork freshness coverage is unavailable: "+forkFreshness.Reason)
+		}
+	}
 	if len(out.CoverageReasons) == 0 {
 		out.Coverage = "live_verified"
 		if out.Existing == nil {
@@ -190,6 +210,13 @@ func (r *MCPReader) PreflightContribution(ctx context.Context, in mcpcontract.Co
 		}
 	}
 	return out, nil
+}
+
+func existingMatch(existing []preflightExisting) *preflightExisting {
+	if len(existing) == 0 {
+		return nil
+	}
+	return &existing[0]
 }
 
 type preflightExisting struct {
