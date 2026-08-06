@@ -42,7 +42,12 @@ func (m *Manager) checkMerge(ctx context.Context, path, baseOID, headOID string)
 	if err != nil {
 		return MergeCheck{}, err
 	}
-	conflicted := strings.Contains(out, "changed in both") || strings.Contains(out, "<<<<<<<") || strings.Contains(out, "CONFLICT")
+	// Detect conflicts using git's informational messages, not file
+	// content markers. The old merge-tree form prints 'changed in both'
+	// for conflicts; newer git versions print 'CONFLICT'. Checking for
+	// '<<<<<<<' triggers false positives when tracked files contain
+	// that string (e.g. test fixtures or documentation).
+	conflicted := strings.Contains(out, "changed in both") || strings.Contains(out, "CONFLICT")
 	summary := "revisions merge cleanly"
 	if conflicted {
 		summary = "revisions have merge conflicts"
