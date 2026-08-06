@@ -163,6 +163,11 @@ func (m *Manager) gitPath(ctx context.Context, worktree, arg string) (string, er
 func (m *Manager) resolvePathRef(ctx context.Context, path, ref string) (string, error) {
 	out, err := m.git(ctx, path, "rev-parse", "--verify", "--end-of-options", strings.TrimSpace(ref)+"^{commit}")
 	if err != nil {
+		// Preserve context cancellation so callers can distinguish a
+		// genuine "not found" from a cancelled or timed-out operation.
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		return "", ErrNotFound
 	}
 	return strings.TrimSpace(out), nil
