@@ -137,6 +137,16 @@ func (p *SearchPartitioner) partition(ctx context.Context, baseQuery string, sta
 	}
 
 	mid := splitMid(start, end)
+	// Guard against zero-progress splits: for a 1-second window,
+	// splitMid returns start, which would recurse into two duplicate
+	// zero-width unsplittable windows. Emit as unsplittable instead.
+	if !mid.After(start) {
+		*out = append(*out, Window{
+			Query: query, Qualifier: qual, Start: start, End: end,
+			Total: resp.Total, Incomplete: resp.Incomplete, Unsplittable: true,
+		})
+		return nil
+	}
 	if err := p.partition(ctx, baseQuery, start, mid, qual, out); err != nil {
 		return err
 	}
