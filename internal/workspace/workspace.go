@@ -360,6 +360,9 @@ func (m *Manager) Create(ctx context.Context, mirrorName, baseRef, candidateRef,
 	}
 
 	if _, err := m.git(ctx, mi.path, "worktree", "add", "--detach", path, candidateSHA); err != nil {
+		// git worktree add may create a partial directory before
+		// failing. Clean it up so it does not leak on disk.
+		_ = os.RemoveAll(path)
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 
@@ -387,6 +390,11 @@ func (m *Manager) Create(ctx context.Context, mirrorName, baseRef, candidateRef,
 	m.mu.Lock()
 	if _, ok := m.workspaces[name]; ok {
 		m.mu.Unlock()
+		// A concurrent Create won the race. Clean up the worktree we
+		// just created so it does not leak on disk.
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_ = m.cleanupWorktree(cleanupCtx, mi.path, path)
 		return nil, ErrExists
 	}
 	m.workspaces[name] = ws
