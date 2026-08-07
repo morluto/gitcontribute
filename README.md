@@ -2,7 +2,7 @@
 
 # GitContribute
 
-Local research and validation for GitHub contributions.
+Contribution research for agents: check repository guidance, related work, code context, and validation before writing a patch.
 
 [![CI](https://github.com/morluto/gitcontribute/actions/workflows/ci.yml/badge.svg)](https://github.com/morluto/gitcontribute/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/gitcontribute?logo=npm&color=CB3837)](https://www.npmjs.com/package/gitcontribute)
