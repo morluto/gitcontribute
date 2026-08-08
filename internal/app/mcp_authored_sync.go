@@ -60,6 +60,7 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in authoredPullR
 	discovered := 0
 	incomplete := false
 	requestCapped := false
+	boundedByLimit := false
 	for discovered < in.Limit {
 		if requests+1 > in.MaxRequests {
 			requestCapped, incomplete = true, true
@@ -90,7 +91,11 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in authoredPullR
 				break
 			}
 		}
-		if !result.Page.HasNext || discovered >= in.Limit {
+		if discovered >= in.Limit {
+			boundedByLimit = result.Page.HasNext || result.Total > discovered
+			break
+		}
+		if !result.Page.HasNext {
 			break
 		}
 		page = result.Page.NextPage
@@ -141,6 +146,9 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in authoredPullR
 	close(jobs)
 	wg.Wait()
 	status := "complete"
+	if boundedByLimit {
+		status = "partial"
+	}
 	completed := 0
 	for _, result := range results {
 		requests += result.Requests

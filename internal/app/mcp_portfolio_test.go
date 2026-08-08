@@ -148,3 +148,29 @@ func TestPullRequestPortfolioKeepsComputingMergeabilityUnknown(t *testing.T) {
 		t.Fatalf("portfolio = %+v", out)
 	}
 }
+
+func TestPullRequestPortfolioExactSelectionDoesNotSubstituteNewerPullRequests(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	now := time.Unix(1000, 0).UTC()
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket"}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 1, State: "open", Title: "selected", Author: "alice", SourceUpdatedAt: now}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "open", Title: "newer unrelated", Author: "alice", SourceUpdatedAt: now.Add(time.Second)}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{
+		PullRequests: []mcpcontract.ThreadRef{{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "partial" || len(out.PullRequests) != 1 || out.PullRequests[0].Number != 1 || len(out.UnavailablePullRequests) != 0 {
+		t.Fatalf("exact portfolio = %+v", out)
+	}
+}

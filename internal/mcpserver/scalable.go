@@ -335,6 +335,8 @@ func (s *Server) registerScalable() {
 		setDefault(sc, "limit", 20)
 		setEnum(sc, "view", "compact", "full")
 		setDefault(sc, "view", "compact")
+		setArrayBounds(sc, "pull_requests", 1, 100)
+		constrainPullRequestRefs(sc, "pull_requests")
 	}), output: outputSchema[mcpcontract.ListPullRequestPortfolioOutput]("Offline pull-request portfolio with explainable attention states."), handler: s.listPullRequestPortfolio})
 	addCatalogTool(s, catalogTool[mcpcontract.SearchPullRequestFeedbackInput, mcpcontract.SearchPullRequestFeedbackOutput]{name: mcpcontract.ToolSearchPullRequestFeedback, title: "Search exact pull-request comments by commenter login", description: "Use this offline search after github.index_pull_request_feedback and jobs.get when you need exact feedback_author, PR state, merge state, channel, resolution, review-state, anchor, date, or body filters. It reads only the local normalized feedback projection and never contacts GitHub or writes corpus state. Matches preserve exact comment and thread identities; incomplete discovery or facets return partial/unknown coverage with a typed recovery action, not a false empty result.", annotations: readOnly, supportedBy: supports[PullRequestFeedbackSearcher], input: inputSchema[mcpcontract.SearchPullRequestFeedbackInput](func(sc *schemaBuilder) {
 		setEnum(sc, "state", "open", "closed", "all")

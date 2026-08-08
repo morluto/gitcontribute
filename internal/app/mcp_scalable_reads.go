@@ -257,6 +257,20 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 	if len(in.Authors) > 1 {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("authors must contain at most one item")
 	}
+	if len(in.PullRequests) > 0 {
+		if len(in.PullRequests) > 100 {
+			return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("pull_requests must contain at most 100 items")
+		}
+		if len(in.Authors) > 0 || in.State != "" || in.Limit != 0 {
+			return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("pull_requests cannot be combined with authors, state, or limit")
+		}
+		if err := rejectDuplicateThreadRefs(in.PullRequests); err != nil {
+			return mcpcontract.ListPullRequestPortfolioOutput{}, err
+		}
+		if err := validatePullRequestRefs(in.PullRequests, "pull_requests"); err != nil {
+			return mcpcontract.ListPullRequestPortfolioOutput{}, err
+		}
+	}
 	if in.State == "" {
 		in.State = "open"
 	}
@@ -269,10 +283,10 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 	if in.View != "compact" && in.View != "full" {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("view must be compact or full")
 	}
-	if in.Limit == 0 {
+	if in.Limit == 0 && len(in.PullRequests) == 0 {
 		in.Limit = 20
 	}
-	if in.Limit < 1 || in.Limit > 100 {
+	if len(in.PullRequests) == 0 && (in.Limit < 1 || in.Limit > 100) {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("limit must be between 1 and 100")
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
@@ -283,11 +297,7 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
-	author := ""
-	if len(in.Authors) > 0 {
-		author = strings.TrimSpace(in.Authors[0])
-	}
-	page, err := c.ListPullRequestPortfolioPage(ctx, author, in.State, in.Limit)
+	page, unavailable, err := portfolioPage(ctx, c, in)
 	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
@@ -296,7 +306,11 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
-	out := mcpcontract.ListPullRequestPortfolioOutput{Status: "complete", View: in.View, RuleVersion: "portfolio.v2", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpcontract.PullRequestPortfolioItem, 0, len(page.PullRequests)), Total: page.Total, Truncated: page.Truncated, SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
+	out := mcpcontract.ListPullRequestPortfolioOutput{Status: "complete", View: in.View, RuleVersion: "portfolio.v2", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpcontract.PullRequestPortfolioItem, 0, len(page.PullRequests)), Total: page.Total, Truncated: page.Truncated, UnavailablePullRequests: unavailable, SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
+	if len(unavailable) > 0 {
+		out.Status = "partial"
+		out.Recovery = recoveryPlan("portfolio_items_unavailable", "Some exact pull requests are not present in the local corpus. Refresh those exact pull requests, then reread the portfolio.", mcpcontract.RecoveryAction(mcpcontract.SyncPortfolioInput{Selection: "explicit", PullRequests: append([]mcpcontract.ThreadRef(nil), unavailable...)}))
+	}
 	for _, storedPR := range page.PullRequests {
 		item, err := portfolioItem(storedPR, r.now(), readSet, format)
 		if err != nil {
@@ -317,6 +331,51 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 		out.Recovery = recoveryPlan("portfolio_truncated", "The portfolio page is bounded. Read the next larger page before treating the returned set as exhaustive.", mcpcontract.RecoveryAction(mcpcontract.ListPullRequestPortfolioInput{Authors: append([]string(nil), in.Authors...), State: in.State, Limit: nextLimit, View: in.View, SnapshotToken: in.SnapshotToken}))
 	}
 	return out, nil
+}
+
+func portfolioPage(ctx context.Context, c *corpus.Corpus, in mcpcontract.ListPullRequestPortfolioInput) (corpus.PortfolioPage, []mcpcontract.ThreadRef, error) {
+	if len(in.PullRequests) == 0 {
+		author := ""
+		if len(in.Authors) > 0 {
+			author = strings.TrimSpace(in.Authors[0])
+		}
+		page, err := c.ListPullRequestPortfolioPage(ctx, author, in.State, in.Limit)
+		return page, nil, err
+	}
+	repositoryKeys := make([]corpus.RepositoryKey, 0, len(in.PullRequests))
+	for _, ref := range in.PullRequests {
+		repositoryKeys = append(repositoryKeys, corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo})
+	}
+	repositories, err := c.GetRepositoriesBatch(ctx, repositoryKeys)
+	if err != nil {
+		return corpus.PortfolioPage{}, nil, err
+	}
+	threadKeys := make([]corpus.ThreadKey, 0, len(in.PullRequests))
+	for _, ref := range in.PullRequests {
+		if repository := repositories[corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo}]; repository != nil {
+			threadKeys = append(threadKeys, corpus.ThreadKey{RepositoryID: repository.ID, Kind: corpus.ThreadKindPullRequest, Number: ref.Number})
+		}
+	}
+	threads, err := c.GetThreadsBatch(ctx, threadKeys)
+	if err != nil {
+		return corpus.PortfolioPage{}, nil, err
+	}
+	page := corpus.PortfolioPage{PullRequests: make([]corpus.PortfolioPullRequest, 0, len(in.PullRequests)), Total: len(in.PullRequests)}
+	unavailable := make([]mcpcontract.ThreadRef, 0)
+	for _, ref := range in.PullRequests {
+		repository := repositories[corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo}]
+		if repository == nil {
+			unavailable = append(unavailable, ref)
+			continue
+		}
+		thread := threads[corpus.ThreadKey{RepositoryID: repository.ID, Kind: corpus.ThreadKindPullRequest, Number: ref.Number}]
+		if thread == nil {
+			unavailable = append(unavailable, ref)
+			continue
+		}
+		page.PullRequests = append(page.PullRequests, corpus.PortfolioPullRequest{Owner: repository.Owner, Repo: repository.Name, Thread: *thread})
+	}
+	return page, unavailable, nil
 }
 
 type portfolioReadSet struct {

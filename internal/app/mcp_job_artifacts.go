@@ -270,7 +270,7 @@ func portfolioResultRefs(values []string) []mcpcontract.ThreadRef {
 		if err != nil || number <= 0 {
 			continue
 		}
-		fullName := value[:marker]
+		fullName := strings.TrimSuffix(value[:marker], "/pull_request")
 		slash := strings.IndexByte(fullName, '/')
 		if slash <= 0 || slash == len(fullName)-1 {
 			continue

@@ -191,16 +191,14 @@ func jobResultStatus(job *contracts.JobResult) string {
 }
 
 func portfolioReadFollowUpArguments(request mcpcontract.SyncPortfolioInput, login string, references []string) *mcpcontract.ListPullRequestPortfolioInput {
+	if request.Selection == "explicit" {
+		return &mcpcontract.ListPullRequestPortfolioInput{PullRequests: portfolioResultRefs(references), View: "compact"}
+	}
 	limit := request.Limit
 	state := request.State
 	if request.Selection == "authored" {
 		if login != "" {
 			return &mcpcontract.ListPullRequestPortfolioInput{Authors: []string{login}, State: state, Limit: limit, View: "compact"}
-		}
-	} else {
-		state = "all"
-		if limit == 0 || limit > len(references) {
-			limit = len(references)
 		}
 	}
 	if limit == 0 {

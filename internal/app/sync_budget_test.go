@@ -16,6 +16,7 @@ type authoredHeaderReader struct {
 	listRequests     int
 	prDetailRequests int
 	now              time.Time
+	searchResult     github.AuthoredPullRequestSearchResult
 }
 
 func (r *authoredHeaderReader) GetRepository(context.Context, string, string) (github.Repository, github.RateInfo, error) {
@@ -61,10 +62,40 @@ func (*authoredHeaderReader) GetAuthenticatedIdentity(context.Context) (github.I
 }
 
 func (r *authoredHeaderReader) SearchAuthoredPullRequests(context.Context, github.AuthoredPullRequestSearchOptions) (github.AuthoredPullRequestSearchResult, error) {
+	if r.searchResult.Items != nil {
+		return r.searchResult, nil
+	}
 	return github.AuthoredPullRequestSearchResult{Items: []github.Issue{
 		{RepositoryOwner: "owner", RepositoryName: "repo", Kind: github.ThreadKindPullRequest, Number: 2, State: "open", Title: "first", CreatedAt: r.now, UpdatedAt: r.now},
 		{RepositoryOwner: "owner", RepositoryName: "repo", Kind: github.ThreadKindPullRequest, Number: 3, State: "open", Title: "second", CreatedAt: r.now, UpdatedAt: r.now},
 	}}, nil
+}
+
+func TestAuthoredPullRequestSyncReportsItemLimitTruncation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC)
+	svc.SetGitHubReader(&authoredHeaderReader{now: now, searchResult: github.AuthoredPullRequestSearchResult{
+		Items: []github.Issue{{RepositoryOwner: "owner", RepositoryName: "repo", Kind: github.ThreadKindPullRequest, Number: 2, State: "open", Title: "first", CreatedAt: now, UpdatedAt: now}},
+		Total: 2,
+		Page:  github.PageInfo{HasNext: true, NextPage: 2},
+	}})
+	out, err := svc.syncAuthoredPullRequests(ctx, authoredPullRequestSyncOptions{State: "open", Limit: 1, MaxRequests: 20}, func(string, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "partial" || out.SearchIncomplete || out.RequestCapped || len(out.PullRequestTargets) != 1 {
+		t.Fatalf("bounded discovery = %+v", out)
+	}
 }
 
 func TestAuthoredPullRequestSyncReusesSearchHeadersWithoutNPlusOne(t *testing.T) {

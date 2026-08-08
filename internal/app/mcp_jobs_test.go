@@ -136,6 +136,23 @@ func TestPortfolioFollowUpUsesPortfolioReadArguments(t *testing.T) {
 	}
 }
 
+func TestExplicitPortfolioFollowUpPreservesExactReferences(t *testing.T) {
+	t.Parallel()
+	job := &contracts.JobResult{
+		Kind: jobKindSyncPullRequestPortfolio, Status: "succeeded",
+		Request: `{"selection":"explicit","pull_requests":[{"owner":"acme","repo":"rocket","kind":"pull_request","number":7}]}`,
+		Result:  `{"status":"complete","pull_requests":["acme/rocket/pull_request#7"],"refreshed":1,"discovery_status":"complete"}`,
+	}
+	_, follow := jobArtifactsAndFollowUp(job, 1)
+	if follow == nil || follow.Action.ListPortfolio == nil || len(follow.Action.ListPortfolio.PullRequests) != 1 {
+		t.Fatalf("portfolio handoff = %+v", follow)
+	}
+	ref := follow.Action.ListPortfolio.PullRequests[0]
+	if ref.Owner != "acme" || ref.Repo != "rocket" || ref.Kind != "pull_request" || ref.Number != 7 {
+		t.Fatalf("exact portfolio handoff = %+v", ref)
+	}
+}
+
 func TestIndexJobPreservesFailuresAndBindsCompletedArtifactsToSnapshot(t *testing.T) {
 	t.Parallel()
 	job := &contracts.JobResult{

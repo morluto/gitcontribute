@@ -502,11 +502,12 @@ type SyncCIFailuresInput struct {
 
 // ListPullRequestPortfolioInput filters and bounds the stored pull-request portfolio.
 type ListPullRequestPortfolioInput struct {
-	Authors       []string `json:"authors,omitempty" jsonschema:"Zero or one author login"`
-	State         string   `json:"state,omitempty" jsonschema:"open, closed, or all"`
-	Limit         int      `json:"limit,omitempty" jsonschema:"Maximum pull requests from 1 to 100; defaults to 20"`
-	View          string   `json:"view,omitempty" jsonschema:"compact or full; defaults to compact"`
-	SnapshotToken string   `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
+	Authors       []string    `json:"authors,omitempty" jsonschema:"Zero or one author login"`
+	PullRequests  []ThreadRef `json:"pull_requests,omitempty" jsonschema:"One to 100 exact pull requests; cannot be combined with authors, state, or limit"`
+	State         string      `json:"state,omitempty" jsonschema:"open, closed, or all"`
+	Limit         int         `json:"limit,omitempty" jsonschema:"Maximum pull requests from 1 to 100; defaults to 20"`
+	View          string      `json:"view,omitempty" jsonschema:"compact or full; defaults to compact"`
+	SnapshotToken string      `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
 }
 
 // PullRequestPortfolioItem contains source-backed PR facts and a deterministic
@@ -546,15 +547,16 @@ type PullRequestPortfolioItem struct {
 
 // ListPullRequestPortfolioOutput contains a deterministic portfolio projection.
 type ListPullRequestPortfolioOutput struct {
-	Status        string                     `json:"status"`
-	View          string                     `json:"view"`
-	RuleVersion   string                     `json:"rule_version"`
-	GeneratedAt   string                     `json:"generated_at"`
-	PullRequests  []PullRequestPortfolioItem `json:"pull_requests"`
-	Total         int                        `json:"total"`
-	Truncated     bool                       `json:"truncated"`
-	SnapshotToken string                     `json:"snapshot_token"`
-	Recovery      *RecoveryPlan              `json:"recovery,omitempty"`
+	Status                  string                     `json:"status"`
+	View                    string                     `json:"view"`
+	RuleVersion             string                     `json:"rule_version"`
+	GeneratedAt             string                     `json:"generated_at"`
+	PullRequests            []PullRequestPortfolioItem `json:"pull_requests"`
+	Total                   int                        `json:"total"`
+	Truncated               bool                       `json:"truncated"`
+	UnavailablePullRequests []ThreadRef                `json:"unavailable_pull_requests,omitempty"`
+	SnapshotToken           string                     `json:"snapshot_token"`
+	Recovery                *RecoveryPlan              `json:"recovery,omitempty"`
 }
 
 // PortfolioSubjectInput identifies local candidate state for offline overlap analysis.

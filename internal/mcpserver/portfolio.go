@@ -10,10 +10,10 @@ import (
 )
 
 func (s *Server) listPullRequestPortfolio(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.ListPullRequestPortfolioInput) (*mcp.CallToolResult, mcpcontract.ListPullRequestPortfolioOutput, error) {
-	if in.State == "" {
+	if len(in.PullRequests) == 0 && in.State == "" {
 		in.State = "open"
 	}
-	if in.Limit == 0 {
+	if len(in.PullRequests) == 0 && in.Limit == 0 {
 		in.Limit = 20
 	}
 	if in.View == "" {
