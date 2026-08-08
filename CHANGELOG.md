@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/morluto/gitcontribute/compare/v1.1.0...v1.1.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **cli:** guide blocked corpus migration ([be56c9b](https://github.com/morluto/gitcontribute/commit/be56c9b455ffa1023bf8af402a8e4911c13e0e6a))
+
 ## [1.1.0](https://github.com/morluto/gitcontribute/compare/v1.0.0...v1.1.0) (2026-08-08)
 
 
