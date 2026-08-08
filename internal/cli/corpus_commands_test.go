@@ -8,6 +8,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/cli"
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/corpus"
 )
 
 func (f *fakeService) InspectCorpus(context.Context) (*contracts.CorpusInspectionResult, error) {
@@ -97,6 +98,9 @@ func TestCorpusLifecycleCommands(t *testing.T) {
 	if !strings.Contains(stdout.String(), "Migrated corpus schema 24 -> 27") || !strings.Contains(stdout.String(), "/tmp/corpus.bak") {
 		t.Fatalf("migrate output = %q", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "Next: rerun setup to finish configuration.") {
+		t.Fatalf("migration next action = %q", stdout.String())
+	}
 
 	stdout.Reset()
 	requireNoErr(t, c.Run(context.Background(), []string{"corpus", "restore", "/tmp/source.bak", "--yes"}))
@@ -147,6 +151,20 @@ func TestCorpusLifecycleCommands(t *testing.T) {
 	requireNoErr(t, c.Run(context.Background(), []string{"corpus", "rebuild-projection", "threads_fts", "--yes"}))
 	if !strings.Contains(stdout.String(), "Rebuilt projection threads_fts") {
 		t.Fatalf("rebuild projection output = %q", stdout.String())
+	}
+}
+
+func TestCorpusMigrateExplainsBusyCorpusRecovery(t *testing.T) {
+	service := &fakeService{err: &corpus.BusyError{Path: "/tmp/corpus.db", Operation: "back up and migrate corpus"}}
+	c, _, _ := newTestCLI(service, nil)
+	err := c.Run(context.Background(), []string{"corpus", "migrate", "--yes"})
+	if err == nil {
+		t.Fatal("expected migration to fail")
+	}
+	for _, want := range []string{"another GitContribute process is still using the local data", "Quit or restart any coding client using GitContribute", "npx --yes gitcontribute@latest corpus migrate --yes", "No changes were made"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("migration error %q does not contain %q", err, want)
+		}
 	}
 }
 

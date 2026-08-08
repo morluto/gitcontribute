@@ -8,6 +8,9 @@ import (
 )
 
 func renderSetupPlan(report *contracts.SetupReport) string {
+	if step := migrationRequiredSetupStep(report); step != nil {
+		return renderMigrationRequiredSetup(*step, report.Corpus)
+	}
 	var b strings.Builder
 	b.WriteString("Setup plan\n\nReview these changes")
 	for _, step := range report.Steps {
@@ -32,6 +35,29 @@ func renderSetupPlan(report *contracts.SetupReport) string {
 	b.WriteString("\nSafety\n")
 	b.WriteString("  It will not contact GitHub, synchronize repositories, execute repository code,\n")
 	b.WriteString("  or mutate GitHub.")
+	return b.String()
+}
+
+func migrationRequiredSetupStep(report *contracts.SetupReport) *contracts.SetupStep {
+	for i := range report.Steps {
+		step := &report.Steps[i]
+		if step.Name == "corpus" && step.Status == "failed" && strings.Contains(step.Message, "corpus migrate --yes") {
+			return step
+		}
+	}
+	return nil
+}
+
+func renderMigrationRequiredSetup(step contracts.SetupStep, inspection *contracts.CorpusInspectionResult) string {
+	var b strings.Builder
+	b.WriteString("Setup is blocked\n\nYour GitContribute data needs an upgrade.\n")
+	if inspection != nil {
+		fmt.Fprintf(&b, "  Schema: %d → %d\n", inspection.Current, inspection.Target)
+	}
+	if step.Path != "" {
+		fmt.Fprintf(&b, "  Database: %s\n", step.Path)
+	}
+	b.WriteString("\nBefore continuing\n  1. Quit any coding clients using GitContribute.\n  2. Run:\n     npx --yes gitcontribute@latest corpus migrate --yes\n     A verified backup is created automatically.\n  3. Run setup again.\n\nNo setup changes were made.")
 	return b.String()
 }
 

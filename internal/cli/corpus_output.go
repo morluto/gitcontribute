@@ -129,5 +129,6 @@ func corpusMigrationHuman(r *contracts.CorpusMigrationResult) string {
 			fmt.Fprintf(&b, "\n- migration %03d completed: %s", step.Version, step.Name)
 		}
 	}
+	b.WriteString("\nNext: rerun setup to finish configuration.")
 	return b.String()
 }

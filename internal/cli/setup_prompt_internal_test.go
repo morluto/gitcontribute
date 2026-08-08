@@ -387,9 +387,14 @@ func TestRenderSetupPlanIncludesEffectsAndSafetyBoundary(t *testing.T) {
 }
 
 func TestRenderSetupPlanLabelsFailedPreflightAsBlocker(t *testing.T) {
-	report := &contracts.SetupReport{DryRun: true, Steps: []contracts.SetupStep{{Name: "corpus", Status: "failed", Message: "run gitcontribute corpus migrate --yes"}}}
+	report := &contracts.SetupReport{DryRun: true, Corpus: &contracts.CorpusInspectionResult{Path: "/home/test/gitcontribute.db", Current: 8, Target: 15}, Steps: []contracts.SetupStep{{Name: "corpus", Path: "/home/test/gitcontribute.db", Status: "failed", Message: "run gitcontribute corpus migrate --yes"}}}
 	got := renderSetupPlan(report)
-	if !strings.Contains(got, "Status: Blocked") || strings.Contains(got, "Action: failed") {
+	for _, want := range []string{"Setup is blocked", "Schema: 8 → 15", "Quit any coding clients using GitContribute", "npx --yes gitcontribute@latest corpus migrate --yes", "A verified backup is created automatically", "No setup changes were made"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("migration blocker %q does not contain %q", got, want)
+		}
+	}
+	if strings.Contains(got, "Review these changes") || strings.Contains(got, "Process execution") {
 		t.Fatalf("failed preflight plan = %q", got)
 	}
 	if err := setupFailureError(report); !strings.Contains(err.Error(), "Local corpus: run gitcontribute corpus migrate --yes") {

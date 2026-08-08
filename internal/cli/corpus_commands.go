@@ -6,11 +6,14 @@ import (
 	"fmt"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/corpus"
 )
 
 type initCmd struct {
 	JSON bool `name:"json" help:"Print the result as JSON"`
 }
+
+const busyCorpusMigrationMessage = "Migration is blocked because another GitContribute process is still using the local data.\n\nQuit or restart any coding client using GitContribute, then rerun:\n  npx --yes gitcontribute@latest corpus migrate --yes\n\nNo changes were made."
 
 type corpusCmd struct {
 	Inspect           corpusInspectCmd           `cmd:"" help:"Inspect schema compatibility without mutation"`
@@ -151,6 +154,10 @@ func (c *CLI) runCorpusMigrate(ctx context.Context, service contracts.CorpusLife
 	}
 	result, err := service.MigrateCorpus(ctx, contracts.CorpusMigrateOptions{BackupPath: cmd.BackupPath, NoBackup: cmd.NoBackup})
 	if err != nil {
+		var busy *corpus.BusyError
+		if errors.As(err, &busy) {
+			return NewCLIError(ExitGeneral, fmt.Errorf("%s", busyCorpusMigrationMessage))
+		}
 		return c.mapError(err)
 	}
 	return c.render(cmd.JSON, result)
