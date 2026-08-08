@@ -387,6 +387,9 @@ func (m *Manager) resolveDefaultBranch(ctx context.Context, mirrorPath string) (
 				return branch, nil
 			}
 		}
+	} else if ctx.Err() != nil {
+		// Propagate cancellation instead of masking it as ErrNoCommit.
+		return "", ctx.Err()
 	}
 	out, err = m.git(ctx, mirrorPath, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err == nil {
@@ -394,6 +397,8 @@ func (m *Manager) resolveDefaultBranch(ctx context.Context, mirrorPath string) (
 		if branch != "" && branch != "HEAD" {
 			return branch, nil
 		}
+	} else if ctx.Err() != nil {
+		return "", ctx.Err()
 	}
 	return "", ErrNoCommit
 }
@@ -401,6 +406,9 @@ func (m *Manager) resolveDefaultBranch(ctx context.Context, mirrorPath string) (
 func (m *Manager) resolveCommit(ctx context.Context, mirrorPath, branch string) (string, error) {
 	out, err := m.git(ctx, mirrorPath, "rev-parse", "--verify", "refs/heads/"+branch+"^{commit}")
 	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
 		return "", fmt.Errorf("resolve commit for %q: %w", branch, ErrNoCommit)
 	}
 	return strings.TrimSpace(out), nil

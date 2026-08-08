@@ -353,13 +353,20 @@ func (m *Manager) Create(ctx context.Context, mirrorName, baseRef, candidateRef,
 		return nil, fmt.Errorf("create workspaces dir: %w", err)
 	}
 	path := filepath.Join(workDir, name)
-	if _, err := os.Stat(path); err == nil {
-		return nil, ErrExists
-	} else if !os.IsNotExist(err) {
-		return nil, fmt.Errorf("stat workspace path: %w", err)
+	// Atomically reserve the final path before asking Git to populate it. This
+	// both serializes concurrent creators and proves that any later cleanup is
+	// limited to a directory created by this invocation.
+	if err := os.Mkdir(path, 0755); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil, ErrExists
+		}
+		return nil, fmt.Errorf("reserve workspace path: %w", err)
 	}
 
 	if _, err := m.git(ctx, mi.path, "worktree", "add", "--detach", path, candidateSHA); err != nil {
+		// git worktree add may create a partial directory before
+		// failing. Clean it up so it does not leak on disk.
+		_ = os.RemoveAll(path)
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 
@@ -385,10 +392,6 @@ func (m *Manager) Create(ctx context.Context, mirrorName, baseRef, candidateRef,
 	}
 
 	m.mu.Lock()
-	if _, ok := m.workspaces[name]; ok {
-		m.mu.Unlock()
-		return nil, ErrExists
-	}
 	m.workspaces[name] = ws
 	m.mu.Unlock()
 	return ws, nil

@@ -219,3 +219,36 @@ func TestRefreshOverlapCheckpoint(t *testing.T) {
 		t.Fatalf("expected checkpoint %v, got %v", end, cp)
 	}
 }
+
+// TestPartitionZeroProgressSplit proves that a 1-second overflowing window
+// emits exactly one unsplittable window, not two duplicate zero-width ones.
+func TestPartitionZeroProgressSplit(t *testing.T) {
+	calls := 0
+	p := &SearchPartitioner{
+		Searcher: &fakeSearcher{
+			fn: func(ctx context.Context, query string) (SearchResponse, error) {
+				calls++
+				return SearchResponse{Total: 1001}, nil
+			},
+		},
+	}
+	// A 1-second window where the result exceeds the limit.
+	// Before the fix: splitMid returns mid==start, producing two
+	// duplicate unsplittable windows [start,start] and [end,end].
+	// After the fix: exactly one unsplittable window [start,end].
+	start := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(time.Second)
+	windows, err := p.Partition(context.Background(), "language:go", start, end, Created)
+	if err != nil {
+		t.Fatalf("Partition: %v", err)
+	}
+	if len(windows) != 1 {
+		t.Fatalf("expected 1 window for 1-second overflowing range, got %d: %+v", len(windows), windows)
+	}
+	if !windows[0].Unsplittable {
+		t.Fatal("expected window to be unsplittable")
+	}
+	if windows[0].Total != 1001 {
+		t.Fatalf("expected total 1001, got %d", windows[0].Total)
+	}
+}

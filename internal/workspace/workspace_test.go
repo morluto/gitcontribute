@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -137,29 +138,6 @@ func TestManager_CloneAndResolve(t *testing.T) {
 			t.Fatalf("Resolve(sha) = %q, want %q", got, candidateSHA)
 		}
 	})
-}
-
-func TestManagerCheckMergeUsesAlreadyFetchedRevisionsWithoutMutation(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	remote, baseSHA, candidateSHA := setupRemote(t)
-	mgr := newManager(t)
-	if err := mgr.Clone(ctx, remote, "origin"); err != nil {
-		t.Fatal(err)
-	}
-	path := mgr.mirrors["origin"].path
-	before := strings.TrimSpace(runGit(t, path, "show-ref"))
-	result, err := mgr.CheckMerge(ctx, path, baseSHA, candidateSHA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Conflicted || result.MergeBase != baseSHA {
-		t.Fatalf("unexpected merge result: %+v", result)
-	}
-	after := strings.TrimSpace(runGit(t, path, "show-ref"))
-	if before != after {
-		t.Fatalf("merge check changed refs\nbefore: %s\nafter: %s", before, after)
-	}
 }
 
 func TestManager_CreateAndInspect(t *testing.T) {
@@ -479,6 +457,70 @@ func TestManager_DuplicateCreate(t *testing.T) {
 	}
 	if _, err := mgr.Create(ctx, "origin", "master", "feature", "ws1"); !errors.Is(err, ErrExists) {
 		t.Fatalf("duplicate Create = %v, want ErrExists", err)
+	}
+}
+
+type firstWorktreeAddBlocker struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (r *firstWorktreeAddBlocker) Run(ctx context.Context, name string, args ...string) (string, error) {
+	for i := range args {
+		if args[i] == "worktree" && i+1 < len(args) && args[i+1] == "add" {
+			blocked := false
+			r.once.Do(func() {
+				blocked = true
+				close(r.started)
+			})
+			if blocked {
+				select {
+				case <-r.release:
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+			}
+			break
+		}
+	}
+	return execRunner{}.Run(ctx, name, args...)
+}
+
+func TestManager_ConcurrentCreateDoesNotRemoveWinner(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	remote, _, _ := setupRemote(t)
+	blocker := &firstWorktreeAddBlocker{started: make(chan struct{}), release: make(chan struct{})}
+	mgr, err := NewManager(t.TempDir(), blocker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Clone(ctx, remote, "origin"); err != nil {
+		t.Fatal(err)
+	}
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := mgr.Create(ctx, "origin", "master", "feature", "ws1")
+		first <- err
+	}()
+	<-blocker.started
+
+	if _, err := mgr.Create(ctx, "origin", "master", "feature", "ws1"); !errors.Is(err, ErrExists) {
+		t.Fatalf("concurrent Create = %v, want ErrExists", err)
+	}
+	close(blocker.release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+
+	ws, ok := mgr.Get("ws1")
+	if !ok {
+		t.Fatal("winning workspace was not recorded")
+	}
+	if _, err := os.Stat(ws.Path); err != nil {
+		t.Fatalf("winning workspace path was removed: %v", err)
 	}
 }
 

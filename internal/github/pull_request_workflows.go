@@ -181,7 +181,7 @@ func (c *Client) feedbackIssueComments(ctx context.Context, owner, repo string, 
 		}
 		page = resp.NextPage
 	}
-	return items, FeedbackCoverage{Fetched: len(items), Total: len(items) + 1, Reason: "item_limit_reached"}, nil
+	return items, FeedbackCoverage{Fetched: len(items), Total: 0, Reason: "item_limit_reached"}, nil
 }
 
 func (c *Client) feedbackReviews(ctx context.Context, owner, repo string, number, limit int, budget *RequestBudget) ([]FeedbackReview, FeedbackCoverage, error) {
@@ -203,7 +203,7 @@ func (c *Client) feedbackReviews(ctx context.Context, owner, repo string, number
 		}
 		page = resp.NextPage
 	}
-	return items, FeedbackCoverage{Fetched: len(items), Total: len(items) + 1, Reason: "item_limit_reached"}, nil
+	return items, FeedbackCoverage{Fetched: len(items), Total: 0, Reason: "item_limit_reached"}, nil
 }
 
 func (c *Client) feedbackInlineComments(ctx context.Context, owner, repo string, number, limit int, budget *RequestBudget) ([]FeedbackComment, FeedbackCoverage, error) {
@@ -230,7 +230,7 @@ func (c *Client) feedbackInlineComments(ctx context.Context, owner, repo string,
 		}
 		page = resp.NextPage
 	}
-	return items, FeedbackCoverage{Fetched: len(items), Total: len(items) + 1, Reason: "item_limit_reached"}, nil
+	return items, FeedbackCoverage{Fetched: len(items), Total: 0, Reason: "item_limit_reached"}, nil
 }
 
 const pullRequestFeedbackThreadsQuery = `query PullRequestFeedback($owner: String!, $repo: String!, $number: Int!, $first: Int!, $after: String) {
