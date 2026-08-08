@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.1.0](https://github.com/morluto/gitcontribute/compare/v1.0.0...v1.1.0) (2026-08-08)
+
+
+### Features
+
+* **preflight:** detect stale contributor forks ([b7adb53](https://github.com/morluto/gitcontribute/commit/b7adb5370fd0ca6a8aa9b15ffd19260c8a448c45))
+* **preflight:** detect stale contributor forks ([8f05963](https://github.com/morluto/gitcontribute/commit/8f05963fd5a96920d8b04e448c67f9af573a6bca))
+* **release:** publish MCP Registry metadata ([3f4300e](https://github.com/morluto/gitcontribute/commit/3f4300e07e914e8cb94e235bce7bb2d84ab7fb32))
+* **validation:** add structured and source-bound evidence workflows ([ca59e8d](https://github.com/morluto/gitcontribute/commit/ca59e8d14cf9f2ef60152250af205a2aaf29656c))
+
+
+### Bug Fixes
+
+* **cli:** guard upgrade confirmation output ([1df35b7](https://github.com/morluto/gitcontribute/commit/1df35b7fa43970ee9a121070bee57c3343c11f64))
+* critical bug audit - 5 root-cause fixes with regression tests ([092cc99](https://github.com/morluto/gitcontribute/commit/092cc99c62ccb25bfab0e8be045d2446819a29b9))
+* **discovery:** prevent zero-progress split emitting duplicate windows ([cadc77e](https://github.com/morluto/gitcontribute/commit/cadc77e194e3546cd7dfafd454191903c41c2906))
+* **github:** stop fabricating Total in REST feedback pagination ([87a96ad](https://github.com/morluto/gitcontribute/commit/87a96ad88c30d54e64b8501d9f45afbdbab03445))
+* **mcp:** preserve bounded portfolio handoffs ([105c7f7](https://github.com/morluto/gitcontribute/commit/105c7f7b41e1b59b301bbc8d0336a61f35753e40))
+* **workspace:** clean up leaked worktree on concurrent Create race ([dd5661c](https://github.com/morluto/gitcontribute/commit/dd5661ccf9bd0566bd6eec6ecd609a1ca352b39d))
+* **workspace:** preserve concurrent worktrees and merge conflicts ([531756d](https://github.com/morluto/gitcontribute/commit/531756d6c2d8c981e4ef49bb0ae1b6effabf2539))
+* **workspace:** propagate context cancellation in git resolution paths ([b183851](https://github.com/morluto/gitcontribute/commit/b183851a8820421aa468840ebc2e51f58677f2f6))
+* **workspace:** remove false-positive merge conflict from file content ([6682278](https://github.com/morluto/gitcontribute/commit/6682278b038df103800fd05113d6f8a9d18ea7e1))
+
 ## [1.0.0](https://github.com/morluto/gitcontribute/compare/v0.19.0...v1.0.0) (2026-08-03)
 
 
