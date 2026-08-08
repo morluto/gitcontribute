@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -149,6 +150,7 @@ func TestManagerCheckMergeUsesAlreadyFetchedRevisionsWithoutMutation(t *testing.
 	}
 	path := mgr.mirrors["origin"].path
 	before := strings.TrimSpace(runGit(t, path, "show-ref"))
+	beforeObjects := strings.TrimSpace(runGit(t, path, "count-objects", "-v"))
 	result, err := mgr.CheckMerge(ctx, path, baseSHA, candidateSHA)
 	if err != nil {
 		t.Fatal(err)
@@ -159,6 +161,10 @@ func TestManagerCheckMergeUsesAlreadyFetchedRevisionsWithoutMutation(t *testing.
 	after := strings.TrimSpace(runGit(t, path, "show-ref"))
 	if before != after {
 		t.Fatalf("merge check changed refs\nbefore: %s\nafter: %s", before, after)
+	}
+	afterObjects := strings.TrimSpace(runGit(t, path, "count-objects", "-v"))
+	if beforeObjects != afterObjects {
+		t.Fatalf("merge check changed object store\nbefore: %s\nafter: %s", beforeObjects, afterObjects)
 	}
 }
 
@@ -482,6 +488,70 @@ func TestManager_DuplicateCreate(t *testing.T) {
 	}
 }
 
+type firstWorktreeAddBlocker struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (r *firstWorktreeAddBlocker) Run(ctx context.Context, name string, args ...string) (string, error) {
+	for i := range args {
+		if args[i] == "worktree" && i+1 < len(args) && args[i+1] == "add" {
+			blocked := false
+			r.once.Do(func() {
+				blocked = true
+				close(r.started)
+			})
+			if blocked {
+				select {
+				case <-r.release:
+				case <-ctx.Done():
+					return "", ctx.Err()
+				}
+			}
+			break
+		}
+	}
+	return execRunner{}.Run(ctx, name, args...)
+}
+
+func TestManager_ConcurrentCreateDoesNotRemoveWinner(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	remote, _, _ := setupRemote(t)
+	blocker := &firstWorktreeAddBlocker{started: make(chan struct{}), release: make(chan struct{})}
+	mgr, err := NewManager(t.TempDir(), blocker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Clone(ctx, remote, "origin"); err != nil {
+		t.Fatal(err)
+	}
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := mgr.Create(ctx, "origin", "master", "feature", "ws1")
+		first <- err
+	}()
+	<-blocker.started
+
+	if _, err := mgr.Create(ctx, "origin", "master", "feature", "ws1"); !errors.Is(err, ErrExists) {
+		t.Fatalf("concurrent Create = %v, want ErrExists", err)
+	}
+	close(blocker.release)
+	if err := <-first; err != nil {
+		t.Fatal(err)
+	}
+
+	ws, ok := mgr.Get("ws1")
+	if !ok {
+		t.Fatal("winning workspace was not recorded")
+	}
+	if _, err := os.Stat(ws.Path); err != nil {
+		t.Fatalf("winning workspace path was removed: %v", err)
+	}
+}
+
 func TestManager_PathContainment(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -785,5 +855,47 @@ func TestManagerCheckMergeNoFalsePositiveOnConflictMarkerInContent(t *testing.T)
 	}
 	if result.Conflicted {
 		t.Fatalf("false positive: merge reported conflict but branches merge cleanly. Result: %+v", result)
+	}
+}
+
+func TestManagerCheckMergeDetectsAddAddConflict(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	dir := t.TempDir()
+	remote := filepath.Join(dir, "remote.git")
+	runGit(t, "", "init", "--bare", remote)
+
+	src := filepath.Join(dir, "src")
+	runGit(t, "", "clone", remote, src)
+	writeFile(t, filepath.Join(src, "base.txt"), "base")
+	runGit(t, src, "add", ".")
+	runGit(t, src, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "base")
+	runGit(t, src, "push", "origin", "master")
+
+	runGit(t, src, "checkout", "-b", "feature")
+	writeFile(t, filepath.Join(src, "same.txt"), "feature")
+	runGit(t, src, "add", ".")
+	runGit(t, src, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "feature adds same path")
+	runGit(t, src, "push", "origin", "feature")
+
+	runGit(t, src, "checkout", "master")
+	writeFile(t, filepath.Join(src, "same.txt"), "master")
+	runGit(t, src, "add", ".")
+	runGit(t, src, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-m", "master adds same path")
+	runGit(t, src, "push", "origin", "master")
+
+	baseSHA := strings.TrimSpace(runGit(t, src, "rev-parse", "master"))
+	candidateSHA := strings.TrimSpace(runGit(t, src, "rev-parse", "feature"))
+	mgr := newManager(t)
+	if err := mgr.Clone(ctx, remote, "origin"); err != nil {
+		t.Fatal(err)
+	}
+	result, err := mgr.CheckMerge(ctx, mgr.mirrors["origin"].path, baseSHA, candidateSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Conflicted {
+		t.Fatalf("add/add conflict reported clean: %+v", result)
 	}
 }
