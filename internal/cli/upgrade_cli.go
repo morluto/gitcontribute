@@ -14,10 +14,10 @@ func (c *CLI) runUpgrade(ctx context.Context, cmd *upgradeCmd) error {
 		return NewCLIError(ExitNotWired, ErrNotWired)
 	}
 	if !cmd.Check && !cmd.Yes {
-		if !c.interactiveInput() {
-			return NewCLIError(ExitUsage, errors.New("interactive upgrade requires a terminal; pass --check or --yes"))
+		if !c.interactiveInput() || !c.interactiveOutput() || !c.interactivePromptOutput() {
+			return NewCLIError(ExitUsage, errors.New("interactive upgrade requires terminal input and visible output; pass --check or --yes"))
 		}
-		confirmed, err := c.confirmSetup("Install the latest global npm release")
+		confirmed, err := c.confirmSetup("Check npm for the latest GitContribute release and apply an eligible managed update")
 		if err != nil {
 			return NewCLIError(ExitUsage, err)
 		}
