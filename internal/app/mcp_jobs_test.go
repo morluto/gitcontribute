@@ -127,6 +127,28 @@ func TestPortfolioArtifactBoundsPersistedTerminalLists(t *testing.T) {
 	}
 }
 
+func TestPortfolioArtifactOmitsExplicitRecoveryWithoutUsableReferences(t *testing.T) {
+	t.Parallel()
+	result, err := json.Marshal(syncPortfolioResult{
+		Status:       "partial",
+		PullRequests: []string{"malformed"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, _ := portfolioJobArtifact(&contracts.JobResult{
+		Kind:    jobKindSyncPullRequestPortfolio,
+		Request: `{"selection":"explicit","pull_requests":[{"owner":"acme","repo":"rocket","number":7}]}`,
+		Result:  string(result),
+	})
+	if len(artifacts) != 1 {
+		t.Fatalf("artifacts = %+v", artifacts)
+	}
+	if artifacts[0].Recovery != nil {
+		t.Fatalf("recovery without usable references = %+v", artifacts[0].Recovery)
+	}
+}
+
 func TestCodeIndexBatchArtifactDoesNotCallFailuresReferenceTruncation(t *testing.T) {
 	t.Parallel()
 	result, err := json.Marshal(indexJobResult{Items: []indexJobItem{

@@ -265,6 +265,9 @@ func portfolioJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactRe
 			// action schema accepts. Recover only the exact, bounded result set
 			// that this terminal artifact can honestly identify.
 			next.PullRequests = portfolioResultRefs(references)
+			if len(next.PullRequests) == 0 {
+				next.Selection = ""
+			}
 		}
 		if next.Selection != "" && next.Selection == "authored" {
 			next.DiscoveryMaxRequests = min(1000, max(next.DiscoveryMaxRequests*2, max(next.DiscoveryMaxRequests+1, 2)))
