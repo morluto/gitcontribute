@@ -121,3 +121,38 @@ else process.exitCode = 1;
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("publication verification retries transient registry probe failures", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-publication-retry-"));
+  try {
+    const client = join(workspace, "registry-client");
+    const state = join(workspace, "attempts");
+    await writeFile(client, `#!/usr/bin/env node
+const fs = require("node:fs");
+const count = fs.existsSync(process.env.GITCONTRIBUTE_TEST_ATTEMPTS) ? Number(fs.readFileSync(process.env.GITCONTRIBUTE_TEST_ATTEMPTS, "utf8")) : 0;
+fs.writeFileSync(process.env.GITCONTRIBUTE_TEST_ATTEMPTS, String(count + 1));
+if (count === 0) process.exitCode = 1;
+else if (process.argv[2] === "view" && process.argv[4] === "dist-tags.latest") process.stdout.write('"1.2.3"\\n');
+else if (process.argv[2] === "view" && process.argv[3] === "gitcontribute@1.2.3" && process.argv[4] === "version") process.stdout.write('"1.2.3"\\n');
+else if (process.argv[2] === "--yes") process.stdout.write('{"version":"1.2.3"}\\n');
+else process.exitCode = 1;
+`);
+    await chmod(client, 0o755);
+
+    const result = spawnSync(process.execPath, [join(root, "scripts", "verify-npm-publication.mjs"), "1.2.3"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITCONTRIBUTE_NPM_COMMAND: client,
+        GITCONTRIBUTE_NPX_COMMAND: client,
+        GITCONTRIBUTE_NPM_PUBLICATION_ATTEMPTS: "2",
+        GITCONTRIBUTE_NPM_PUBLICATION_DELAY_MS: "1",
+        GITCONTRIBUTE_TEST_ATTEMPTS: state,
+      },
+    });
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(await readFile(state, "utf8"), "4");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});

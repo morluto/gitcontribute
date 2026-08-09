@@ -10,14 +10,20 @@ const npm = process.env.GITCONTRIBUTE_NPM_COMMAND || "npm";
 const npx = process.env.GITCONTRIBUTE_NPX_COMMAND || "npx";
 
 for (let attempt = 1; attempt <= attempts; attempt += 1) {
-  const latest = await output(npm, ["view", "gitcontribute", "dist-tags.latest", "--json", "--prefer-online", `--registry=${registry}`]);
-  const published = await output(npm, ["view", `gitcontribute@${expectedVersion}`, "version", "--json", "--prefer-online", `--registry=${registry}`]);
-  if (jsonString(latest) === expectedVersion && jsonString(published) === expectedVersion) {
-    const metadata = await output(npx, ["--yes", "--prefer-online", "gitcontribute@latest", "metadata", "--json"]);
-    if (JSON.parse(metadata).version === expectedVersion) {
-      console.log(`npm release ${expectedVersion} is publicly discoverable`);
-      process.exit(0);
+  try {
+    const latest = await output(npm, ["view", "gitcontribute", "dist-tags.latest", "--json", "--prefer-online", `--registry=${registry}`]);
+    const published = await output(npm, ["view", `gitcontribute@${expectedVersion}`, "version", "--json", "--prefer-online", `--registry=${registry}`]);
+    if (jsonString(latest) === expectedVersion && jsonString(published) === expectedVersion) {
+      const metadata = await output(npx, ["--yes", "--prefer-online", "gitcontribute@latest", "metadata", "--json"]);
+      if (JSON.parse(metadata).version === expectedVersion) {
+        console.log(`npm release ${expectedVersion} is publicly discoverable`);
+        process.exit(0);
+      }
     }
+  } catch {
+    // Registry propagation and fresh npx resolution are expected to be
+    // transient immediately after publication. The bounded retry loop owns
+    // those probes as one operation.
   }
   if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, delayMS));
 }
