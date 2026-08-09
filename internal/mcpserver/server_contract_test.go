@@ -182,32 +182,33 @@ func TestDurableToolResultsIncludeSDKResourceLinks(t *testing.T) {
 	if result.StructuredContent == nil {
 		t.Fatal("resource-linked tool lost SDK-populated structured content")
 	}
-	if len(result.Content) != 2 {
+	if len(result.Content) != 1 {
 		t.Fatalf("resource-linked content = %+v", result.Content)
 	}
-	instruction, ok := result.Content[0].(*mcp.TextContent)
-	if !ok {
-		t.Fatalf("resource instruction = %#v", result.Content[0])
-	}
-	for _, phrase := range []string{
-		"perform MCP `resources/read` with this server",
-		"in Codex, call `read_mcp_resource`",
-		`exact URI "gitcontribute://investigation/inv-1"`,
-		"copy it verbatim without shortening, pluralizing, or reconstructing it",
-		"Do not substitute structured tool output for the resource read",
-	} {
-		if !strings.Contains(instruction.Text, phrase) {
-			t.Errorf("resource instruction missing %q: %q", phrase, instruction.Text)
-		}
-	}
-	link, ok := result.Content[1].(*mcp.ResourceLink)
+	link, ok := result.Content[0].(*mcp.ResourceLink)
 	if !ok || link.URI != "gitcontribute://investigation/inv-1" || link.MIMEType != "application/json" {
-		t.Fatalf("resource link = %#v", result.Content[1])
+		t.Fatalf("resource link = %#v", result.Content[0])
 	}
 	for _, phrase := range []string{"exact opaque URI unchanged", "do not shorten, pluralize, or reconstruct it"} {
 		if !strings.Contains(link.Description, phrase) {
 			t.Errorf("resource link description missing %q: %q", phrase, link.Description)
 		}
+	}
+}
+
+func TestJobArtifactResultsContainOnlyResourceLinks(t *testing.T) {
+	result := linkedJobResources(mcpcontract.GetJobsOutput{Items: []mcpcontract.BatchItem[mcpcontract.GetJobOutput]{{
+		Key: "job-1",
+		Value: &mcpcontract.GetJobOutput{Kind: "sync_portfolio", Artifacts: []mcpcontract.JobArtifactReference{{
+			Kind: "portfolio", URI: "gitcontribute://artifact/github-thread-search/test",
+		}}},
+	}}})
+	if result == nil || len(result.Content) != 1 {
+		t.Fatalf("job artifact content = %+v", result)
+	}
+	link, ok := result.Content[0].(*mcp.ResourceLink)
+	if !ok || strings.Contains(strings.ToLower(link.Description), "codex") || !strings.Contains(link.Description, "exact opaque URI unchanged") {
+		t.Fatalf("job artifact link = %#v", result.Content[0])
 	}
 }
 
@@ -268,12 +269,12 @@ func TestDurableProducerReferencesRoundTripThroughResources(t *testing.T) {
 			if ref.URI != tt.uri || ref.Kind != tt.kind || ref.ID == "" {
 				t.Fatalf("reference = %+v, want kind=%q uri=%q", ref, tt.kind, tt.uri)
 			}
-			if len(result.Content) != 2 {
+			if len(result.Content) != 1 {
 				t.Fatalf("content = %+v", result.Content)
 			}
-			link, ok := result.Content[1].(*mcp.ResourceLink)
+			link, ok := result.Content[0].(*mcp.ResourceLink)
 			if !ok || link.URI != tt.uri {
-				t.Fatalf("resource link = %#v", result.Content[1])
+				t.Fatalf("resource link = %#v", result.Content[0])
 			}
 			resource, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: tt.uri})
 			if err != nil {
