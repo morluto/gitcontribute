@@ -106,9 +106,17 @@ func (r *MCPReader) GetFixPatternReport(ctx context.Context, id string) (mcpcont
 		return mcpcontract.FixPatternReport{}, fmt.Errorf("decode fix-pattern report identity: %w", err)
 	}
 	if identity.SnapshotToken == "" {
+		var request mcpcontract.MineRepositoryFixPatternsInput
+		var actions []mcpcontract.ToolCall
+		if err := json.Unmarshal([]byte(job.Request), &request); err == nil {
+			if request, err = normalizeFixPatternInput(request); err == nil {
+				actions = append(actions, mcpcontract.RecoveryAction(request))
+			}
+		}
 		return mcpcontract.FixPatternReport{}, mcpcontract.Unavailable(
 			"legacy_artifact",
 			"this persisted fix-pattern report predates immutable snapshot binding; rerun the fix-pattern workflow to regenerate it",
+			actions...,
 		)
 	}
 	report.Persisted = true

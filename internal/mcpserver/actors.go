@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
@@ -164,6 +165,10 @@ func (s *Server) getActorFacets(ctx context.Context, _ *mcp.CallToolRequest, in 
 	return nil, out, err
 }
 func (s *Server) searchGitHubUsers(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SearchGitHubUsersInput) (*mcp.CallToolResult, mcpcontract.SearchGitHubUsersOutput, error) {
+	in.Query = strings.TrimSpace(in.Query)
+	if in.Query == "" {
+		return nil, mcpcontract.SearchGitHubUsersOutput{}, mcpcontract.InvalidArgument("query", "is required", map[string]any{"query": "octocat"})
+	}
 	reader, ok := s.reader.(GitHubActorOperator)
 	if !ok {
 		return nil, mcpcontract.SearchGitHubUsersOutput{}, errors.New("GitHub user search is not available")

@@ -233,7 +233,7 @@ func (c *Client) feedbackInlineComments(ctx context.Context, owner, repo string,
 	return items, FeedbackCoverage{Fetched: len(items), Total: 0, Reason: "item_limit_reached"}, nil
 }
 
-const pullRequestFeedbackThreadsQuery = `query PullRequestFeedback($owner: String!, $repo: String!, $number: Int!, $first: Int!, $after: String) {
+const pullRequestFeedbackThreadsQuery = `query PullRequestFeedback($owner: String!, $repo: String!, $number: Int!, $first: Int!, $after: String, $commentFirst: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       headRefOid
@@ -242,7 +242,7 @@ const pullRequestFeedbackThreadsQuery = `query PullRequestFeedback($owner: Strin
         totalCount
         nodes {
           id isResolved isOutdated path line startLine resolvedBy { login }
-          comments(first: 100) {
+          comments(first: $commentFirst) {
             totalCount
             nodes { id databaseId body createdAt updatedAt path line startLine side startSide outdated commit { oid } author { login } replyTo { databaseId } }
             pageInfo { hasNextPage endCursor }
@@ -324,6 +324,7 @@ func (c *Client) feedbackReviewThreads(ctx context.Context, owner, repo string, 
 	items := make([]FeedbackThread, 0, opts.MaxItemsPerChannel)
 	cursor := ""
 	total := 0
+	comments := 0
 	var head string
 	var updated time.Time
 	for len(items) < opts.MaxItemsPerChannel {
@@ -332,6 +333,7 @@ func (c *Client) feedbackReviewThreads(ctx context.Context, owner, repo string, 
 		}
 		body := graphQLRequest{Query: pullRequestFeedbackThreadsQuery, Variables: map[string]any{
 			"owner": owner, "repo": repo, "number": number, "first": min(100, opts.MaxItemsPerChannel-len(items)), "after": optionalGraphQLCursor(cursor),
+			"commentFirst": 1,
 		}}
 		req, err := c.gh.NewRequest(ctx, http.MethodPost, "graphql", body)
 		if err != nil {
@@ -352,7 +354,9 @@ func (c *Client) feedbackReviewThreads(ctx context.Context, owner, repo string, 
 			return nil, "", time.Time{}, FeedbackCoverage{}, &TransientError{Cause: errors.New("pull request changed while feedback was paged")}
 		}
 		total = pr.Threads.TotalCount
-		for _, node := range pr.Threads.Nodes {
+		first := len(items)
+		sourceIndexes := make([]int, 0, len(pr.Threads.Nodes))
+		for nodeIndex, node := range pr.Threads.Nodes {
 			if opts.ThreadState == "unresolved" && node.IsResolved {
 				continue
 			}
@@ -362,21 +366,35 @@ func (c *Client) feedbackReviewThreads(ctx context.Context, owner, repo string, 
 			}
 			thread := FeedbackThread{ID: node.ID, Resolved: node.IsResolved, ResolvedBy: resolvedBy, Outdated: node.IsOutdated, Path: node.Path, Line: node.Line, StartLine: node.StartLine, TotalCount: node.Comments.TotalCount}
 			thread.Comments = appendFeedbackComments(thread.Comments, node.Comments.Nodes)
-			if node.Comments.PageInfo.HasNextPage {
-				comments, err := c.pageReviewThreadComments(ctx, node.ID, node.Comments.PageInfo.EndCursor, budget)
-				if err != nil {
-					return nil, "", time.Time{}, FeedbackCoverage{}, err
-				}
-				thread.Comments = append(thread.Comments, comments...)
-			}
-			thread.Truncated = len(thread.Comments) < thread.TotalCount
+			comments += len(thread.Comments)
 			items = append(items, thread)
+			sourceIndexes = append(sourceIndexes, nodeIndex)
 			if len(items) == opts.MaxItemsPerChannel {
 				break
 			}
 		}
+		for index := first; index < len(items); index++ {
+			thread := &items[index]
+			if source := pr.Threads.Nodes[sourceIndexes[index-first]]; source.Comments.PageInfo.HasNextPage && thread.TotalCount > len(thread.Comments) && comments < opts.MaxItemsPerChannel {
+				more, truncated, err := c.pageReviewThreadComments(ctx, thread.ID, source.Comments.PageInfo.EndCursor, opts.MaxItemsPerChannel-comments, budget)
+				if err != nil {
+					return nil, "", time.Time{}, FeedbackCoverage{}, err
+				}
+				thread.Comments = append(thread.Comments, more...)
+				comments += len(more)
+				thread.Truncated = truncated
+			}
+			thread.Truncated = thread.Truncated || len(thread.Comments) < thread.TotalCount
+		}
 		if !pr.Threads.PageInfo.HasNextPage {
-			return items, head, updated, FeedbackCoverage{Complete: true, Fetched: len(items), Total: total}, nil
+			coverage := FeedbackCoverage{Complete: true, Fetched: len(items), Total: total}
+			for _, thread := range items {
+				if thread.Truncated {
+					coverage.Complete, coverage.Reason = false, "item_limit_reached"
+					break
+				}
+			}
+			return items, head, updated, coverage, nil
 		}
 		cursor = pr.Threads.PageInfo.EndCursor
 	}
@@ -400,16 +418,16 @@ func appendFeedbackComments(dst []FeedbackComment, comments []feedbackCommentNod
 	return dst
 }
 
-func (c *Client) pageReviewThreadComments(ctx context.Context, id, cursor string, budget *RequestBudget) ([]FeedbackComment, error) {
+func (c *Client) pageReviewThreadComments(ctx context.Context, id, cursor string, limit int, budget *RequestBudget) ([]FeedbackComment, bool, error) {
 	var items []FeedbackComment
-	for {
+	for len(items) < limit {
 		if err := budget.Take(); err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		body := graphQLRequest{Query: reviewThreadCommentsQuery, Variables: map[string]any{"id": id, "first": 100, "after": optionalGraphQLCursor(cursor)}}
+		body := graphQLRequest{Query: reviewThreadCommentsQuery, Variables: map[string]any{"id": id, "first": min(100, limit-len(items)), "after": optionalGraphQLCursor(cursor)}}
 		req, err := c.gh.NewRequest(ctx, http.MethodPost, "graphql", body)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		req = markReplayableRead(req)
 		var envelope struct {
@@ -423,17 +441,18 @@ func (c *Client) pageReviewThreadComments(ctx context.Context, id, cursor string
 			} `json:"errors"`
 		}
 		if _, err := c.gh.Do(req, &envelope); err != nil {
-			return nil, classifyError(err)
+			return nil, false, classifyError(err)
 		}
 		if len(envelope.Errors) > 0 {
-			return nil, fmt.Errorf("github graphql: %s", envelope.Errors[0].Message)
+			return nil, false, fmt.Errorf("github graphql: %s", envelope.Errors[0].Message)
 		}
 		items = appendFeedbackComments(items, envelope.Data.Node.Comments.Nodes)
 		if !envelope.Data.Node.Comments.PageInfo.HasNextPage {
-			return items, nil
+			return items, false, nil
 		}
 		cursor = envelope.Data.Node.Comments.PageInfo.EndCursor
 	}
+	return items, true, nil
 }
 
 type CIFailureOptions struct {

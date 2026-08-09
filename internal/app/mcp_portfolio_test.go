@@ -174,3 +174,18 @@ func TestPullRequestPortfolioExactSelectionDoesNotSubstituteNewerPullRequests(t 
 		t.Fatalf("exact portfolio = %+v", out)
 	}
 }
+
+func TestPullRequestPortfolioRejectsDuplicateDefaultKindReferences(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	_, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{
+		PullRequests: []mcpcontract.ThreadRef{
+			{Owner: "acme", Repo: "rocket", Number: 7},
+			{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected duplicate pull-request references to be rejected")
+	}
+}

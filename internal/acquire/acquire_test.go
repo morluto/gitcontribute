@@ -147,6 +147,58 @@ func TestCleanupWorktreeReturnsGitRemovalFailure(t *testing.T) {
 	}
 }
 
+func TestCloneMirrorReportsFailedStagingCleanup(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX directory modes are not available on Windows")
+	}
+	parent := t.TempDir()
+	cloneErr := errors.New("clone failed")
+	runner := scriptedRunner(func(_ context.Context, _ string, args ...string) (string, error) {
+		for _, arg := range args {
+			if arg != "clone" {
+				continue
+			}
+			tmpPath := filepath.Join(parent, args[len(args)-1])
+			if err := os.Mkdir(tmpPath, 0755); err != nil {
+				return "", err
+			}
+			if err := os.Chmod(parent, 0500); err != nil {
+				return "", err
+			}
+			return "", cloneErr
+		}
+		t.Fatalf("unexpected git invocation: %q", args)
+		return "", nil
+	})
+	m := &Manager{runner: runner}
+
+	err := m.cloneMirror(context.Background(), "https://example.test/owner/repo.git", filepath.Join(parent, "repo.git"))
+	if chmodErr := os.Chmod(parent, 0700); chmodErr != nil {
+		t.Fatal(chmodErr)
+	}
+	if !errors.Is(err, cloneErr) {
+		t.Fatalf("clone error = %v, want clone failure", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "remove clone staging path") {
+		t.Fatalf("clone error omitted staging cleanup failure: %v", err)
+	}
+	entries, readErr := os.ReadDir(parent)
+	if readErr != nil || len(entries) != 1 || !strings.HasPrefix(entries[0].Name(), ".clone-") {
+		t.Fatalf("failed clone staging directory was unexpectedly removed: entries=%v err=%v", entries, readErr)
+	}
+}
+
+func TestExecRunnerRedactsCredentialLikeStderr(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a POSIX shell to produce controlled stderr")
+	}
+	secret := "github_pat_" + strings.Repeat("a", 22)
+	_, err := (execRunner{}).Run(context.Background(), "sh", "-c", "printf '%s\\n' \"token=$1\" >&2; exit 1", "sh", secret)
+	if err == nil || strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), "[REDACTED]") {
+		t.Fatalf("runner error exposed credential-like stderr: %v", err)
+	}
+}
+
 func TestAcquireRejectsCredentialRemoteBeforeSideEffects(t *testing.T) {
 	fixtureUser := strings.Join([]string{"fixture", "user"}, "-")
 	fixturePassword := strings.Join([]string{"fixture", "password"}, "-")

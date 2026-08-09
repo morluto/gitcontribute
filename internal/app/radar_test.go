@@ -372,6 +372,51 @@ func TestContributionRadarUnifiesCommentDependenciesAndTimelineCrossReferences(t
 	}
 }
 
+func TestContributionRadarPreservesRepeatedReferenceEvidence(t *testing.T) {
+	t.Parallel()
+	fixture := newRadarTestFixture(t)
+	if _, err := fixture.svc.corpus.UpsertThread(fixture.ctx, corpus.Thread{
+		RepositoryID: fixture.repoID, Kind: corpus.ThreadKindPullRequest, Number: 10, State: "open",
+		Title: "Related PR", SourceUpdatedAt: fixture.now.Add(-10 * time.Minute),
+	}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	comments, err := json.Marshal([]github.IssueComment{{
+		ID: 20, Body: "This depends on https://github.com/owner/repo/pull/10.",
+		CreatedAt: fixture.now.Add(-20 * time.Minute), UpdatedAt: fixture.now.Add(-19 * time.Minute),
+		HTMLURL: "https://github.com/owner/repo/issues/2#issuecomment-20",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.svc.corpus.ApplyFacetObservationSet(fixture.ctx, fixture.repoID, &fixture.issue2ID, FacetIssueComments, fixture.now.Add(-19*time.Minute), []corpus.FacetObservationInput{{
+		SourceUpdatedAt: fixture.now.Add(-19 * time.Minute), Payload: string(comments),
+	}}, true, 0); err != nil {
+		t.Fatal(err)
+	}
+	timeline, err := json.Marshal([]github.IssueTimelineEvent{{
+		ID: 21, Event: "cross-referenced", SourceOwner: "owner", SourceRepository: "repo",
+		SourceNumber: 10, SourceIsPullRequest: true, CreatedAt: fixture.now.Add(-18 * time.Minute),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.svc.corpus.ApplyFacetObservationSet(fixture.ctx, fixture.repoID, &fixture.issue2ID, FacetIssueTimeline, fixture.now.Add(-18*time.Minute), []corpus.FacetObservationInput{{
+		SourceUpdatedAt: fixture.now.Add(-18 * time.Minute), Payload: string(timeline),
+	}}, true, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := fixture.svc.ContributionRadar(fixture.ctx, contracts.RadarOptions{Repo: contracts.RepoRef{Owner: "owner", Repo: "repo"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := radarRelatedWork(radarCandidate(report, 2), "pull_request:owner/repo#10")
+	if work == nil || work.Relation != relatedwork.RelationDependsOn || !radarRelatedEvidence(*work, "issue_comment") || !radarRelatedEvidence(*work, "issue_timeline") {
+		t.Fatalf("related work = %+v", work)
+	}
+}
+
 func TestNormalizeRadarRelatedWorkReportsEvidenceTruncation(t *testing.T) {
 	t.Parallel()
 	values := make([]radar.RelatedWork, 0, maxRadarEvidencePerRelation+1)

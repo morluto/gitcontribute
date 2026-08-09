@@ -2,6 +2,8 @@ package cli_test
 
 import (
 	"context"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +14,10 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/health"
 )
+
+type failingProgressWriter struct{ err error }
+
+func (w failingProgressWriter) Write([]byte) (int, error) { return 0, w.err }
 
 func TestIndex(t *testing.T) {
 	t.Parallel()
@@ -188,6 +194,21 @@ func TestCrawlDispatchesBoundedOptions(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "7 repositories") || !strings.Contains(stderr.String(), "crawling active-go") {
 		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestCrawlDoesNotDispatchWhenProgressWriteFails(t *testing.T) {
+	t.Parallel()
+	svc := &fakeService{}
+	want := errors.New("broken stderr")
+	c := cli.New(svc, nil, io.Discard, failingProgressWriter{err: want})
+	err := c.Run(context.Background(), []string{"crawl", "active-go"})
+	requireCLIError(t, err, cli.ExitGeneral)
+	if !errors.Is(err, want) {
+		t.Fatalf("crawl error = %v, want %v", err, want)
+	}
+	if svc.crawlCalled {
+		t.Fatal("crawl dispatched after its progress write failed")
 	}
 }
 

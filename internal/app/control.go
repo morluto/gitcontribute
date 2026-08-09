@@ -139,7 +139,8 @@ func (s *Service) ControlStatus(ctx context.Context) (*contracts.ControlStatusRe
 	if err != nil {
 		return nil, err
 	}
-	stats, err := c.ControlStats(ctx, s.now())
+	now := s.now()
+	stats, err := c.ControlStats(ctx, now)
 	if err != nil {
 		return nil, err
 	}
@@ -158,12 +159,17 @@ func (s *Service) ControlStatus(ctx context.Context) (*contracts.ControlStatusRe
 		if resource == "" {
 			resource = "unknown"
 		}
+		stale := observation.ResetAt.IsZero() || !observation.ResetAt.After(now)
 		rateLimits[i] = contracts.RateLimitState{
 			Resource: resource, Limit: observation.Limit, Remaining: observation.Remaining,
 			Used: observation.Used, ResetAt: formatTime(observation.ResetAt),
-			StatusCode: observation.StatusCode, ObservedAt: formatTime(observation.ObservedAt),
+			Stale: stale, StatusCode: observation.StatusCode, ObservedAt: formatTime(observation.ObservedAt),
 		}
-		if observation.Limit > 0 && observation.Remaining == 0 && observation.ResetAt.After(s.now()) {
+		if observation.ResetAt.IsZero() {
+			warnings = append(warnings, fmt.Sprintf("GitHub %s rate limit observation has no reset time; quota is unknown until the next GitHub response", resource))
+		} else if stale {
+			warnings = append(warnings, fmt.Sprintf("GitHub %s rate limit observation expired; quota is unknown until the next GitHub response", resource))
+		} else if observation.Limit > 0 && observation.Remaining == 0 && observation.ResetAt.After(now) {
 			warnings = append(warnings, fmt.Sprintf("GitHub %s rate limit resets at %s", resource, formatTime(observation.ResetAt)))
 		}
 	}
@@ -176,7 +182,7 @@ func (s *Service) ControlStatus(ctx context.Context) (*contracts.ControlStatusRe
 	if stats.ActiveRuns > 0 || stats.ActiveJobs > 0 {
 		warnings = append(warnings, "background work is active")
 	}
-	if !stats.Freshest.IsZero() && s.now().Sub(stats.Freshest) > 7*24*time.Hour {
+	if !stats.Freshest.IsZero() && now.Sub(stats.Freshest) > 7*24*time.Hour {
 		warnings = append(warnings, "freshest GitHub observation is older than 7 days")
 	}
 	return &contracts.ControlStatusResult{

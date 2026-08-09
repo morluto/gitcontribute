@@ -119,6 +119,7 @@ type RateLimitState struct {
 	Remaining  int    `json:"remaining"`
 	Used       int    `json:"used"`
 	ResetAt    string `json:"reset_at,omitempty"`
+	Stale      bool   `json:"stale"`
 	StatusCode int    `json:"status_code"`
 	ObservedAt string `json:"observed_at"`
 }

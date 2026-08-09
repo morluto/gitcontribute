@@ -191,8 +191,24 @@ func jobResultStatus(job *contracts.JobResult) string {
 }
 
 func portfolioReadFollowUpArguments(request mcpcontract.SyncPortfolioInput, login string, references []string) *mcpcontract.ListPullRequestPortfolioInput {
+	if request.Selection == "" {
+		// Legacy portfolio jobs predate the required selection discriminator.
+		// An observed login proves authored discovery; otherwise preserve the
+		// exact result references instead of widening the offline reread.
+		if login != "" {
+			request.Selection = "authored"
+		} else if refs := portfolioResultRefs(references); len(refs) > 0 {
+			return &mcpcontract.ListPullRequestPortfolioInput{PullRequests: refs, View: "compact"}
+		} else {
+			return nil
+		}
+	}
 	if request.Selection == "explicit" {
-		return &mcpcontract.ListPullRequestPortfolioInput{PullRequests: portfolioResultRefs(references), View: "compact"}
+		refs := portfolioResultRefs(references)
+		if len(refs) == 0 {
+			return nil
+		}
+		return &mcpcontract.ListPullRequestPortfolioInput{PullRequests: refs, View: "compact"}
 	}
 	limit := request.Limit
 	state := request.State
@@ -200,11 +216,9 @@ func portfolioReadFollowUpArguments(request mcpcontract.SyncPortfolioInput, logi
 		if login != "" {
 			return &mcpcontract.ListPullRequestPortfolioInput{Authors: []string{login}, State: state, Limit: limit, View: "compact"}
 		}
+		return nil
 	}
-	if limit == 0 {
-		limit = 20
-	}
-	return &mcpcontract.ListPullRequestPortfolioInput{State: state, Limit: limit, View: "compact"}
+	return nil
 }
 
 func facetBatchArtifact(refs []mcpcontract.ThreadRef, facetNames []string) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {

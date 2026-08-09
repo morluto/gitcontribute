@@ -17,6 +17,7 @@ GOTESTSUM ?= $(shell command -v gotestsum 2>/dev/null || printf '%s/bin/gotestsu
 # use more than the historical four-test cap.
 TEST_PARALLELISM ?= 8
 TEST_PACKAGE_PARALLELISM ?= 8
+RACE_TEST_PARALLELISM ?= 4
 INTEGRATION_PARALLELISM ?= 4
 GOTESTSUM_FLAGS ?= --rerun-fails=2 --rerun-fails-max-failures=5
 
@@ -79,12 +80,12 @@ test-uncached:
 test-race:
 	# Keep package-level overlap for cross-package race coverage while bounding
 	# in-process test concurrency for the CPU-heavy SQLite tests.
-	$(GO) test -short -race -p=4 -parallel=2 -timeout 600s ./internal/app ./internal/corpus ./internal/workspace
+	$(GO) test -short -race -p=4 -parallel=$(RACE_TEST_PARALLELISM) -timeout 600s ./internal/app ./internal/corpus ./internal/mcpserver ./internal/workspace
 
 test-race-full:
 	# Keep package-level overlap for cross-package race coverage while bounding
 	# in-process test concurrency for the CPU-heavy SQLite tests.
-	$(GO) test -race -p=4 -parallel=2 -count=1 -timeout 900s ./...
+	$(GO) test -race -p=4 -parallel=$(RACE_TEST_PARALLELISM) -count=1 -timeout 900s ./...
 
 test-verbose:
 	$(GO) test -short -v -p=$(TEST_PACKAGE_PARALLELISM) -parallel=$(TEST_PARALLELISM) -timeout 120s ./...
@@ -143,4 +144,4 @@ test-integration:
 
 check: fmt-check test lint-changed
 
-verify: fmt-check test-uncached lint-full tidy-check generate-check docs-check
+verify: fmt-check vet test-uncached lint-full tidy-check generate-check docs-check

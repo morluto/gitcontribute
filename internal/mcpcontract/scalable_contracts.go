@@ -66,10 +66,11 @@ type ToolCall struct {
 	FindRelatedWork       *FindRelatedWorkInput              `json:"find_related_work,omitempty"`
 	ListConcerns          *ListConcernsInput                 `json:"list_concerns,omitempty"`
 	ListPortfolio         *ListPullRequestPortfolioInput     `json:"list_pull_request_portfolio,omitempty"`
+	ExportManifest        *ExportManifestInput               `json:"export_manifest,omitempty"`
 }
 
 type recoveryActionInput interface {
-	GetJobsInput | GetRepositoriesInput | EnsureCoverageInput | SyncRepositoryContextInput | SyncThreadsInput | HydrateThreadsInput | SyncPortfolioInput | SyncPullRequestFeedbackInput | IndexPullRequestFeedbackInput | SyncCIFailuresInput | DeepWikiInput | IndexRepositoriesInput | FindClustersInput | FindNeighborsInput | RankOpportunitiesInput | MineRepositoryFixPatternsInput | PreviewRepositoryFixPatternsInput | SearchGitHubRepositoriesInput | SearchGitHubThreadsInput | SearchCodeInput | ReadSourceFilesInput | InspectCommitChangesInput | CheckMergeConflictsInput | FindRelatedWorkInput | ListConcernsInput | ListPullRequestPortfolioInput
+	GetJobsInput | GetRepositoriesInput | EnsureCoverageInput | SyncRepositoryContextInput | SyncThreadsInput | HydrateThreadsInput | SyncPortfolioInput | SyncPullRequestFeedbackInput | IndexPullRequestFeedbackInput | SyncCIFailuresInput | DeepWikiInput | IndexRepositoriesInput | FindClustersInput | FindNeighborsInput | RankOpportunitiesInput | MineRepositoryFixPatternsInput | PreviewRepositoryFixPatternsInput | SearchGitHubRepositoriesInput | SearchGitHubThreadsInput | SearchCodeInput | ReadSourceFilesInput | InspectCommitChangesInput | CheckMergeConflictsInput | FindRelatedWorkInput | ListConcernsInput | ListPullRequestPortfolioInput | ExportManifestInput
 }
 
 // RecoveryAction derives the action discriminator from a concrete input type,
@@ -128,6 +129,8 @@ func RecoveryAction[T recoveryActionInput](input T) ToolCall {
 		return ToolCall{Type: "list_concerns", ListConcerns: &value}
 	case ListPullRequestPortfolioInput:
 		return ToolCall{Type: "list_pull_request_portfolio", ListPortfolio: &value}
+	case ExportManifestInput:
+		return ToolCall{Type: "export_manifest", ExportManifest: &value}
 	default:
 		panic("unreachable recovery action input")
 	}

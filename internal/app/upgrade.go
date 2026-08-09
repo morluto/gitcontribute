@@ -442,6 +442,8 @@ func readPackageVersion(root string) string {
 	return normalizeVersion(pkg.Version)
 }
 
+const maxUpgradePackageBytes = 1 << 20
+
 func readUpgradeFile(path string) (_ []byte, err error) {
 	root, err := os.OpenRoot(filepath.Dir(path))
 	if err != nil {
@@ -453,7 +455,14 @@ func readUpgradeFile(path string) (_ []byte, err error) {
 		return nil, err
 	}
 	defer func() { err = errors.Join(err, file.Close()) }()
-	return io.ReadAll(file)
+	data, err := io.ReadAll(io.LimitReader(file, maxUpgradePackageBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxUpgradePackageBytes {
+		return nil, fmt.Errorf("upgrade metadata exceeds %d bytes", maxUpgradePackageBytes)
+	}
+	return data, nil
 }
 
 func (s *Service) privateRuntimeStage(current, latest string) contracts.UpgradeStage {

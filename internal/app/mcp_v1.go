@@ -61,6 +61,7 @@ func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpcontract.ThreadByN
 
 // ExplainMatch explains why a search result matched.
 func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpcontract.ExplainMatchInput) (mcpcontract.ExplainMatchOutput, error) {
+	in.Query = strings.TrimSpace(in.Query)
 	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
 	if err := ref.Validate(); err != nil {
 		return mcpcontract.ExplainMatchOutput{}, err
@@ -639,11 +640,17 @@ func (r *MCPReader) ExportManifest(ctx context.Context, in mcpcontract.ExportMan
 			return mcpcontract.ManifestOutput{}, mcpcontract.Unavailable(
 				"snapshot_expired",
 				fmt.Sprintf("snapshot watermark is no longer current; expected %d, current %d", stale.Expected, stale.Current),
+				manifestSnapshotRecovery(in),
 			)
 		}
 		return mcpcontract.ManifestOutput{}, err
 	}
 	return manifestStatementToMCP(statement, snapshotIdentity(in.SnapshotToken, revision)), nil
+}
+
+func manifestSnapshotRecovery(in mcpcontract.ExportManifestInput) mcpcontract.ToolCall {
+	in.SnapshotToken = ""
+	return mcpcontract.RecoveryAction(in)
 }
 
 func manifestStatementToMCP(statement *manifest.Statement, snapshotToken string) mcpcontract.ManifestOutput {

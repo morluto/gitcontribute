@@ -164,6 +164,18 @@ func TestMCPReaderReadSourceFilesStoresCommitAndBlobProvenanceAndReadsLocally(t 
 	}
 }
 
+func TestValidateReadSourceFilesInputTrimsRef(t *testing.T) {
+	in := mcpcontract.ReadSourceFilesInput{
+		Owner: "acme", Repo: "rocket", Ref: " main ", Files: []mcpcontract.SourceFileRequest{{Path: "README.md"}},
+	}
+	if err := validateReadSourceFilesInput(&in); err != nil {
+		t.Fatal(err)
+	}
+	if in.Ref != "main" {
+		t.Fatalf("ref = %q, want canonical main", in.Ref)
+	}
+}
+
 func TestMCPReaderSearchCodeBatchUsesOneOfflineRevisionAndPreservesQueryOrder(t *testing.T) {
 	ctx := context.Background()
 	svc := newSearchTestService(t)

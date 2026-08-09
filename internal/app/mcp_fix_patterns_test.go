@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -184,7 +185,16 @@ func TestGetFixPatternReportRejectsLegacyUnboundArtifact(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
-	job, err := svc.corpus.CreateJob(ctx, "mine_repository_fix_patterns", `{}`)
+	request := mcpcontract.MineRepositoryFixPatternsInput{
+		Repository:      mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"},
+		TimeWindow:      mcpcontract.FixPatternTimeWindow{UpdatedAfter: "2026-07-01T00:00:00Z"},
+		SymptomTaxonomy: []mcpcontract.FixPatternSymptom{{Name: "drift", Terms: []string{"drift"}}},
+	}
+	requestJSON, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := svc.corpus.CreateJob(ctx, "mine_repository_fix_patterns", string(requestJSON))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,6 +208,9 @@ func TestGetFixPatternReportRejectsLegacyUnboundArtifact(t *testing.T) {
 	var toolErr *mcpcontract.ToolError
 	if !errors.As(err, &toolErr) || toolErr.Code != "legacy_artifact" {
 		t.Fatalf("legacy report error = %v", err)
+	}
+	if toolErr.Recovery == nil || len(toolErr.Recovery.Then) != 1 || toolErr.Recovery.Then[0].MineFixPatterns == nil || toolErr.Recovery.Then[0].MineFixPatterns.Repository != request.Repository {
+		t.Fatalf("legacy report recovery = %+v", toolErr.Recovery)
 	}
 }
 

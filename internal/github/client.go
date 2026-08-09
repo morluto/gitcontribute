@@ -18,6 +18,7 @@ const (
 	DefaultUploadURL         = "https://uploads.github.com/"
 	DefaultRequestsPerSecond = 10.0
 	DefaultBurst             = 20
+	defaultHTTPTimeout       = 30 * time.Second
 )
 
 // Reader is the product-owned read contract for GitHub.
@@ -111,7 +112,7 @@ func NewClient(cfg Config) (*Client, error) {
 		cfg.UploadURL = DefaultUploadURL
 	}
 	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = &http.Client{}
+		cfg.HTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
 	}
 
 	baseTransport := cfg.HTTPClient.Transport

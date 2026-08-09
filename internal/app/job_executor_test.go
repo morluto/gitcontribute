@@ -22,6 +22,21 @@ type faultingJobStore struct {
 	startErr    error
 }
 
+type blockingFinishJobStore struct {
+	jobStore
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingFinishJobStore) TransitionJob(ctx context.Context, id, from, to, result, errStr string) error {
+	if from == corpus.JobStatusRunning {
+		s.once.Do(func() { close(s.entered) })
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return s.jobStore.TransitionJob(ctx, id, from, to, result, errStr)
+}
+
 func (s *faultingJobStore) GetJob(ctx context.Context, id string) (*corpus.Job, error) {
 	s.mu.Lock()
 	if s.failNextGet {
@@ -197,6 +212,90 @@ func TestJobExecutorBoundsConcurrentJobs(t *testing.T) {
 		t.Fatal("second job did not start after slot release")
 	}
 	waitForJobStatus(t, jobs, secondID, corpus.JobStatusSucceeded, 2*time.Second)
+}
+
+func TestJobExecutorCloseCancelsQueuedJobs(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newJobTestService(t)
+	jobs := newJobExecutorOnService(t, svc, jobExecutorConfig{pollInterval: time.Hour, maxConcurrentJobs: 1})
+
+	started := make(chan struct{})
+	firstID, err := jobs.Submit(ctx, "first", nil, func(ctx context.Context, _ func(string, string) error) (any, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	if err != nil {
+		t.Fatalf("submit first: %v", err)
+	}
+	<-started
+
+	queuedRan := make(chan struct{}, 1)
+	queuedID, err := jobs.Submit(ctx, "queued", nil, func(context.Context, func(string, string) error) (any, error) {
+		queuedRan <- struct{}{}
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatalf("submit queued: %v", err)
+	}
+
+	if err := jobs.Close(); err != nil {
+		t.Fatalf("close jobs: %v", err)
+	}
+	select {
+	case <-queuedRan:
+		t.Fatal("queued job started during executor shutdown")
+	default:
+	}
+	for _, id := range []string{firstID, queuedID} {
+		job, err := jobs.Get(ctx, id)
+		if err != nil {
+			t.Fatalf("get %s: %v", id, err)
+		}
+		if job.Status != corpus.JobStatusCancelled {
+			t.Fatalf("job %s status = %q, want cancelled", id, job.Status)
+		}
+	}
+}
+
+func TestJobExecutorCloseBoundsTerminalWriteAfterCancellation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newJobTestService(t)
+	store := &blockingFinishJobStore{jobStore: svc.corpus, entered: make(chan struct{})}
+	jobs, err := newJobExecutorWithConfig(ctx, store, jobExecutorConfig{
+		pollInterval: time.Hour, cleanupTimeout: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("new executor: %v", err)
+	}
+	svc.jobs = jobs
+
+	started := make(chan struct{})
+	if _, err := jobs.Submit(ctx, "blocked-finish", nil, func(context.Context, func(string, string) error) (any, error) {
+		close(started)
+		return "done", nil
+	}); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	<-started
+	select {
+	case <-store.entered:
+	case <-time.After(time.Second):
+		t.Fatal("job did not begin its terminal write")
+	}
+
+	closed := make(chan error, 1)
+	go func() { closed <- jobs.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("close executor: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("close waited indefinitely for a cancelled terminal write")
+	}
 }
 
 func TestJobExecutorRecordsReadErrorAfterExecution(t *testing.T) {

@@ -251,7 +251,8 @@ func validateReadSourceFilesInput(in *mcpcontract.ReadSourceFilesInput) error {
 	if err := (domain.RepoRef{Owner: in.Owner, Repo: in.Repo}).Validate(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(in.Ref) == "" {
+	in.Ref = strings.TrimSpace(in.Ref)
+	if in.Ref == "" {
 		return errors.New("ref is required")
 	}
 	if len(in.Files) < 1 || len(in.Files) > maxSourceFileRequests {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -26,6 +27,17 @@ func runGit(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %v in %q: %v\n%s", args, dir, err, out)
 	}
 	return string(out)
+}
+
+func TestExecRunnerRedactsCredentialLikeStderr(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses a POSIX shell to produce controlled stderr")
+	}
+	secret := "github_pat_" + strings.Repeat("a", 22)
+	_, err := (execRunner{}).Run(context.Background(), "sh", "-c", "printf '%s\\n' \"token=$1\" >&2; exit 1", "sh", secret)
+	if err == nil || strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), "[REDACTED]") {
+		t.Fatalf("runner error exposed credential-like stderr: %v", err)
+	}
 }
 
 func writeFile(t *testing.T, path, content string) {
@@ -170,6 +182,19 @@ func TestManager_CreateAndInspect(t *testing.T) {
 
 	if _, err := os.Stat(ws.Path); err != nil {
 		t.Errorf("workspace path does not exist: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(mgr.root, "mirrors"),
+		filepath.Join(mgr.root, "workspaces"),
+		ws.Path,
+	} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat managed path %q: %v", path, err)
+		}
+		if info.Mode().Perm()&0o027 != 0 {
+			t.Errorf("managed path %q permissions = %04o, want no group write or world access", path, info.Mode().Perm())
+		}
 	}
 
 	mergeBase, err := mgr.MergeBase(ctx, "ws1")
@@ -521,6 +546,55 @@ func TestManager_ConcurrentCreateDoesNotRemoveWinner(t *testing.T) {
 	}
 	if _, err := os.Stat(ws.Path); err != nil {
 		t.Fatalf("winning workspace path was removed: %v", err)
+	}
+}
+
+type failingWorktreeReservationCleanupRunner struct {
+	workspacesDir string
+	err           error
+}
+
+func (r failingWorktreeReservationCleanupRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+	for i := range args {
+		if args[i] == "worktree" && i+1 < len(args) && args[i+1] == "add" {
+			if err := os.Chmod(r.workspacesDir, 0500); err != nil {
+				return "", err
+			}
+			return "", r.err
+		}
+	}
+	return execRunner{}.Run(ctx, name, args...)
+}
+
+func TestManagerCreateReportsFailedReservationCleanup(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	remote, _, _ := setupRemote(t)
+	root := t.TempDir()
+	runnerErr := errors.New("worktree add failed")
+	mgr, err := NewManager(root, failingWorktreeReservationCleanupRunner{
+		workspacesDir: filepath.Join(root, "workspaces"),
+		err:           runnerErr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Clone(ctx, remote, "origin"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = mgr.Create(ctx, "origin", "master", "feature", "reserved")
+	if chmodErr := os.Chmod(filepath.Join(root, "workspaces"), 0755); chmodErr != nil {
+		t.Fatal(chmodErr)
+	}
+	if !errors.Is(err, runnerErr) {
+		t.Fatalf("Create error = %v, want worktree failure", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "remove reserved workspace path") {
+		t.Fatalf("Create error omitted reservation cleanup failure: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "workspaces", "reserved")); statErr != nil {
+		t.Fatalf("failed reservation was unexpectedly removed: %v", statErr)
 	}
 }
 

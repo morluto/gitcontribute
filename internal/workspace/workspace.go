@@ -15,6 +15,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/buflimit"
 	"github.com/morluto/gitcontribute/internal/gitremote"
+	"github.com/morluto/gitcontribute/internal/redaction"
 )
 
 var (
@@ -67,7 +68,7 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) (string,
 		return stdout.String(), buflimit.ErrOutputLimit
 	}
 	if err != nil {
-		return "", fmt.Errorf("exec %s: %w (stderr: %s)", name, err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("exec %s: %w (stderr: %s)", name, err, redaction.String(strings.TrimSpace(stderr.String())))
 	}
 	return stdout.String(), nil
 }
@@ -237,7 +238,7 @@ func (m *Manager) Clone(ctx context.Context, remote, name string) error {
 		return ErrMirrorExists
 	}
 	mirrorsDir := filepath.Join(m.root, "mirrors")
-	if err := os.MkdirAll(mirrorsDir, 0755); err != nil {
+	if err := os.MkdirAll(mirrorsDir, 0750); err != nil {
 		return fmt.Errorf("create mirrors dir: %w", err)
 	}
 	path := filepath.Join(mirrorsDir, name)
@@ -349,14 +350,14 @@ func (m *Manager) Create(ctx context.Context, mirrorName, baseRef, candidateRef,
 	mergeBase = strings.TrimSpace(mergeBase)
 
 	workDir := filepath.Join(m.root, "workspaces")
-	if err := os.MkdirAll(workDir, 0755); err != nil {
+	if err := os.MkdirAll(workDir, 0750); err != nil {
 		return nil, fmt.Errorf("create workspaces dir: %w", err)
 	}
 	path := filepath.Join(workDir, name)
 	// Atomically reserve the final path before asking Git to populate it. This
 	// both serializes concurrent creators and proves that any later cleanup is
 	// limited to a directory created by this invocation.
-	if err := os.Mkdir(path, 0755); err != nil {
+	if err := os.Mkdir(path, 0750); err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return nil, ErrExists
 		}
@@ -365,9 +366,14 @@ func (m *Manager) Create(ctx context.Context, mirrorName, baseRef, candidateRef,
 
 	if _, err := m.git(ctx, mi.path, "worktree", "add", "--detach", path, candidateSHA); err != nil {
 		// git worktree add may create a partial directory before
-		// failing. Clean it up so it does not leak on disk.
-		_ = os.RemoveAll(path)
-		return nil, fmt.Errorf("create worktree: %w", err)
+		// failing. Preserve a cleanup failure so callers know the reserved name
+		// may still need manual recovery instead of seeing a misleadingly simple
+		// Git error.
+		cleanupErr := os.RemoveAll(path)
+		if cleanupErr != nil {
+			cleanupErr = fmt.Errorf("remove reserved workspace path: %w", cleanupErr)
+		}
+		return nil, errors.Join(fmt.Errorf("create worktree: %w", err), cleanupErr)
 	}
 
 	st, err := m.status(ctx, path)

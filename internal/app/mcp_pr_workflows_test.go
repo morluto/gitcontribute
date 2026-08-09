@@ -234,6 +234,9 @@ func TestBoundedWorkflowSnapshotsReturnRetryablePartialItems(t *testing.T) {
 	if feedback.BatchStatus != "partial" || feedback.Items[0].Status != "retryable" || feedback.Items[0].ResourceURI != "" {
 		t.Fatalf("feedback result = %+v", feedback)
 	}
+	if feedback.Items[0].Recovery == nil || len(feedback.Items[0].Recovery.Then) != 1 || feedback.Items[0].Recovery.Then[0].SyncFeedback == nil || feedback.Items[0].Recovery.Then[0].SyncFeedback.MaxItemsPerChannel != 20 {
+		t.Fatalf("feedback recovery = %+v", feedback.Items[0].Recovery)
+	}
 
 	ci, err := reader.syncCIFailures(ctx, mcpcontract.SyncCIFailuresInput{
 		PullRequests: []mcpcontract.ThreadRef{ref}, MaxRunsPerPR: 1, MaxJobsPerRun: 1,
@@ -265,6 +268,18 @@ func TestBoundedWorkflowSnapshotsReturnRetryablePartialItems(t *testing.T) {
 	}
 	if coverage != nil && coverage.Complete {
 		t.Fatalf("CI coverage remained complete after pre-collection budget exhaustion: %+v", coverage)
+	}
+}
+
+func TestFeedbackCoverageRecoveryRespectsAdvertisedItemLimit(t *testing.T) {
+	t.Parallel()
+	ref := mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7}
+	if plan := feedbackCoverageRecovery(ref, mcpcontract.SyncPullRequestFeedbackInput{MaxItemsPerChannel: maxFeedbackItemsPerChannel}, "incomplete"); plan != nil {
+		t.Fatalf("hard-limit recovery = %+v, want nil", plan)
+	}
+	plan := feedbackCoverageRecovery(ref, mcpcontract.SyncPullRequestFeedbackInput{MaxItemsPerChannel: maxFeedbackItemsPerChannel - 1}, "incomplete")
+	if plan == nil || len(plan.Then) != 1 || plan.Then[0].SyncFeedback == nil || plan.Then[0].SyncFeedback.MaxItemsPerChannel != maxFeedbackItemsPerChannel {
+		t.Fatalf("capped recovery = %+v", plan)
 	}
 }
 
@@ -351,5 +366,31 @@ func TestFeedbackSearchRecoveryRefreshesAllThreadState(t *testing.T) {
 	}, corpus.FeedbackSearchPage{Coverage: corpus.FeedbackCoverageSummary{Status: "partial", DiscoveryComplete: true, IncompletePRs: 1}})
 	if plan == nil || len(plan.Then) != 1 || plan.Then[0].SyncFeedback == nil || plan.Then[0].SyncFeedback.ThreadState != "all" {
 		t.Fatalf("feedback recovery plan = %+v", plan)
+	}
+}
+
+func TestFeedbackSearchRecoveryBoundsMergeStateHydration(t *testing.T) {
+	unknown := make([]int, 0, 50)
+	for number := 1; number <= 50; number++ {
+		unknown = append(unknown, number)
+	}
+	items := make([]corpus.PullRequestFeedbackProjection, 0, 100)
+	for number := 51; number <= 150; number++ {
+		items = append(items, corpus.PullRequestFeedbackProjection{PullRequestNumber: number})
+	}
+	plan := feedbackSearchRecovery(context.Background(), nil, 0, domain.RepoRef{Owner: "acme", Repo: "rocket"}, mcpcontract.SearchPullRequestFeedbackInput{}, corpus.FeedbackSearchPage{
+		Coverage:                 corpus.FeedbackCoverageSummary{Status: "complete", DiscoveryComplete: true},
+		UnknownMergePullRequests: unknown,
+		Items:                    items,
+	})
+	if plan == nil || len(plan.Then) != 1 || plan.Then[0].HydrateThreads == nil {
+		t.Fatalf("merge-state recovery plan = %+v", plan)
+	}
+	threads := plan.Then[0].HydrateThreads.Threads
+	if len(threads) != maxFeedbackMergeStateRecoveryThreads {
+		t.Fatalf("recovery thread count = %d, want %d", len(threads), maxFeedbackMergeStateRecoveryThreads)
+	}
+	if threads[0].Number != 1 || threads[len(threads)-1].Number != 100 {
+		t.Fatalf("recovery thread bounds = first %d, last %d; want 1 through 100", threads[0].Number, threads[len(threads)-1].Number)
 	}
 }

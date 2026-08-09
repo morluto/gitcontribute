@@ -49,9 +49,14 @@ func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest)
 	if err != nil {
 		return nil, mcp.ResourceNotFoundError(uri)
 	}
+	escapedPath := u.EscapedPath()
+	parts, valid := resourcePathParts(escapedPath)
+	if !valid || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.HasSuffix(escapedPath, "/") || strings.Contains(strings.TrimPrefix(escapedPath, "/"), "//") {
+		return nil, mcp.ResourceNotFoundError(uri)
+	}
 	value, err := s.readResourceValue(ctx, resourceRequest{
 		uri: uri, scheme: u.Scheme, host: u.Host,
-		parts: strings.Split(strings.Trim(u.Path, "/"), "/"),
+		parts: parts,
 	})
 	if isNotFound(err) {
 		return nil, mcp.ResourceNotFoundError(uri)
@@ -66,6 +71,26 @@ func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest)
 	return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{
 		URI: uri, MIMEType: "application/json", Text: string(payload),
 	}}}, nil
+}
+
+// resourcePathParts preserves escaped path separators inside opaque resource
+// IDs. url.URL.Path is already decoded, so splitting it would turn one
+// percent-escaped ID into multiple routing segments.
+func resourcePathParts(escapedPath string) ([]string, bool) {
+	escapedPath = strings.TrimPrefix(escapedPath, "/")
+	if escapedPath == "" {
+		return nil, false
+	}
+	rawParts := strings.Split(escapedPath, "/")
+	parts := make([]string, len(rawParts))
+	for i, rawPart := range rawParts {
+		part, err := url.PathUnescape(rawPart)
+		if err != nil {
+			return nil, false
+		}
+		parts[i] = part
+	}
+	return parts, true
 }
 
 type resourceRequest struct {
@@ -147,14 +172,11 @@ func (s *Server) readActorResource(ctx context.Context, req resourceRequest) (an
 	if !ok || (len(req.parts) != 1 && (len(req.parts) != 3 || req.parts[1] != "facet")) || strings.TrimSpace(req.parts[0]) == "" {
 		return nil, mcp.ResourceNotFoundError(req.uri)
 	}
-	actorID, err := url.PathUnescape(req.parts[0])
-	if err != nil {
-		return nil, mcp.ResourceNotFoundError(req.uri)
-	}
+	actorID := req.parts[0]
 	facet := ""
 	if len(req.parts) == 3 {
-		facet, err = url.PathUnescape(req.parts[2])
-		if err != nil || strings.TrimSpace(facet) == "" {
+		facet = req.parts[2]
+		if strings.TrimSpace(facet) == "" {
 			return nil, mcp.ResourceNotFoundError(req.uri)
 		}
 	}
@@ -221,14 +243,8 @@ func (s *Server) readPullRequestFeedbackResource(ctx context.Context, req resour
 	if len(req.parts) != 5 || strings.TrimSpace(req.parts[3]) == "" || strings.TrimSpace(req.parts[4]) == "" {
 		return nil, mcp.ResourceNotFoundError(req.uri)
 	}
-	channel, err := url.PathUnescape(req.parts[3])
-	if err != nil {
-		return nil, mcp.ResourceNotFoundError(req.uri)
-	}
-	feedbackID, err := url.PathUnescape(req.parts[4])
-	if err != nil {
-		return nil, mcp.ResourceNotFoundError(req.uri)
-	}
+	channel := req.parts[3]
+	feedbackID := req.parts[4]
 	return reader.PullRequestFeedbackItemResource(ctx, req.parts[0], req.parts[1], number, channel, feedbackID)
 }
 

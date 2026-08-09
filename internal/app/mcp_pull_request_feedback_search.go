@@ -14,6 +14,8 @@ import (
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
+const maxFeedbackMergeStateRecoveryThreads = 100
+
 // SearchPullRequestFeedback is an offline read over the repository feedback
 // projection. Coverage state is returned independently from match count.
 func (r *MCPReader) SearchPullRequestFeedback(ctx context.Context, in mcpcontract.SearchPullRequestFeedbackInput) (mcpcontract.SearchPullRequestFeedbackOutput, error) {
@@ -182,7 +184,11 @@ func feedbackSearchRecovery(ctx context.Context, c *corpus.Corpus, repositoryID 
 		unknown = append(unknown, mcpcontract.ThreadRef{Owner: ref.Owner, Repo: ref.Repo, Kind: "pull_request", Number: item.PullRequestNumber})
 	}
 	if len(unknown) > 0 {
-		return recoveryPlan("merge_state_unknown", "Some matching pull requests have no observed merge state; refresh the exact PR-details facet before filtering on merge state.", mcpcontract.RecoveryAction(mcpcontract.HydrateThreadsInput{Threads: uniqueThreadRefs(unknown), Facets: []string{facets.PRDetails}, MaxPages: 1}))
+		threads := uniqueThreadRefs(unknown)
+		if len(threads) > maxFeedbackMergeStateRecoveryThreads {
+			threads = threads[:maxFeedbackMergeStateRecoveryThreads]
+		}
+		return recoveryPlan("merge_state_unknown", "Some matching pull requests have no observed merge state; refresh the exact PR-details facet before filtering on merge state.", mcpcontract.RecoveryAction(mcpcontract.HydrateThreadsInput{Threads: threads, Facets: []string{facets.PRDetails}, MaxPages: 1}))
 	}
 	return recoveryPlan("feedback_coverage_partial", "Feedback coverage is partial; continue indexing or retry the returned exact synchronization before treating missing feedback as absence.", mcpcontract.RecoveryAction(mcpcontract.IndexPullRequestFeedbackInput{Repository: mcpcontract.RepositoryRef{Owner: ref.Owner, Repo: ref.Repo}}))
 }

@@ -466,6 +466,7 @@ func (s *Server) register() {
 func boolPtr(v bool) *bool { return &v }
 
 func (s *Server) searchCode(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SearchCodeInput) (*mcp.CallToolResult, mcpcontract.SearchCodeOutput, error) {
+	in.Query = strings.TrimSpace(in.Query)
 	if in.Query == "" {
 		return nil, mcpcontract.SearchCodeOutput{}, mcpcontract.InvalidArgument("query", "is required", map[string]any{"query": "MIDI"})
 	}

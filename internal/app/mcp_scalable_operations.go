@@ -636,13 +636,7 @@ func syncRepositoryContextItem(
 	if err != nil {
 		return corpus.Repository{}, err
 	}
-	defer func() {
-		if resultErr != nil {
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer cancel()
-			_ = c.FailRun(cleanupCtx, run.ID, resultErr.Error())
-		}
-	}()
+	defer failRunOnError(ctx, c, run.ID, &resultErr)
 	repo, _, err := syncRepositoryHeader(ctx, c, reader, ref, run.ID, budget)
 	if err != nil {
 		return corpus.Repository{}, err
@@ -769,6 +763,19 @@ func validatePullRequestRefs(inputs []mcpcontract.ThreadRef, path string) error 
 		}
 	}
 	return nil
+}
+
+// canonicalPullRequestRefs makes the optional kind explicit before callers
+// compare references. A blank kind means pull_request for portfolio operations,
+// so it must not create a second identity for the same pull request.
+func canonicalPullRequestRefs(inputs []mcpcontract.ThreadRef) []mcpcontract.ThreadRef {
+	refs := append([]mcpcontract.ThreadRef(nil), inputs...)
+	for i := range refs {
+		if refs[i].Kind == "" {
+			refs[i].Kind = corpus.ThreadKindPullRequest
+		}
+	}
+	return refs
 }
 
 func rejectDuplicateIndexRepositoryInputs(inputs []mcpcontract.IndexRepositoryInput) error {

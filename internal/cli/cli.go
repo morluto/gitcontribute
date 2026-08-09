@@ -66,6 +66,13 @@ func (c *CLI) SetInput(input io.Reader) {
 // tests and alternate accessible frontends.
 func (c *CLI) SetSetupPrompter(prompter SetupPrompter) { c.setupPrompter = prompter }
 
+func (c *CLI) writeProgressf(format string, args ...any) error {
+	if _, err := fmt.Fprintf(c.stderr, format, args...); err != nil {
+		return c.mapError(fmt.Errorf("write progress: %w", err))
+	}
+	return nil
+}
+
 type rootCmd struct {
 	Setup         setupCmd         `cmd:"" help:"Set up GitContribute for MCP, CLI, or both"`
 	Remove        removeCmd        `cmd:"" help:"Remove GitContribute coding-agent integrations"`
@@ -543,8 +550,7 @@ func (c *CLI) runRemoveCommand(ctx context.Context, cmd *removeCmd) error {
 			return NewCLIError(ExitUsage, err)
 		}
 		if !ok {
-			_, _ = fmt.Fprintln(c.stderr, "Removal cancelled; no changes were made.")
-			return nil
+			return c.writeProgressf("Removal cancelled; no changes were made.\n")
 		}
 	}
 	return c.executeSetup(ctx, contracts.SetupOptions{Remove: true, Clients: clients, AllClients: all, DryRun: cmd.DryRun}, cmd.JSON)
@@ -595,7 +601,9 @@ func (c *CLI) promptClients(action string, allowNone bool) ([]string, error) {
 }
 
 func (c *CLI) confirmSetup(prompt string) (bool, error) {
-	_, _ = fmt.Fprintf(c.stderr, "%s? [Y/n]: ", prompt)
+	if _, err := fmt.Fprintf(c.stderr, "%s? [Y/n]: ", prompt); err != nil {
+		return false, fmt.Errorf("write confirmation prompt: %w", err)
+	}
 	line, err := c.promptLine()
 	if err != nil {
 		return false, err
@@ -904,7 +912,9 @@ func (c *CLI) runCrawl(ctx context.Context, cmd *crawlCmd) error {
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(c.stderr, "crawling %s...\n", cmd.Name)
+	if err := c.writeProgressf("crawling %s...\n", cmd.Name); err != nil {
+		return err
+	}
 	result, err := service.Crawl(ctx, cmd.Name, contracts.CrawlOptions{Since: cmd.Since, Budget: cmd.Budget})
 	if err != nil {
 		return c.mapError(err)
@@ -920,7 +930,9 @@ func (c *CLI) runTail(ctx context.Context, cmd *tailCmd) error {
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(c.stderr, "tailing source %s every %s...\n", cmd.Name, cmd.Interval)
+	if err := c.writeProgressf("tailing source %s every %s...\n", cmd.Name, cmd.Interval); err != nil {
+		return err
+	}
 	result, err := service.TailSource(ctx, cmd.Name, contracts.TailOptions{
 		Since: cmd.Since, Budget: cmd.Budget, Interval: cmd.Interval, Once: cmd.Once,
 	})
@@ -944,7 +956,9 @@ func (c *CLI) runInvestigation(ctx context.Context, command string, cmd *investi
 		if err != nil {
 			return err
 		}
-		_, _ = fmt.Fprintf(c.stderr, "starting investigation for %s...\n", repo)
+		if err := c.writeProgressf("starting investigation for %s...\n", repo); err != nil {
+			return err
+		}
 		result, err := service.StartInvestigation(ctx, repo, cmd.Start.Commit, cmd.Start.Lens)
 		if err != nil {
 			return c.mapError(err)
@@ -974,7 +988,9 @@ func (c *CLI) runHypothesis(ctx context.Context, command string, cmd *hypothesis
 	}
 	switch command {
 	case "hypothesis add":
-		_, _ = fmt.Fprintf(c.stderr, "recording hypothesis for investigation %s...\n", cmd.Add.InvestigationID)
+		if err := c.writeProgressf("recording hypothesis for investigation %s...\n", cmd.Add.InvestigationID); err != nil {
+			return err
+		}
 		result, err := service.AddHypothesis(ctx, cmd.Add.InvestigationID, cmd.Add.Title, cmd.Add.Description, cmd.Add.Category)
 		if err != nil {
 			return c.mapError(err)
@@ -1023,7 +1039,9 @@ func (c *CLI) runOpportunity(ctx context.Context, command string, cmd *opportuni
 	}
 	switch command {
 	case "opportunity promote":
-		_, _ = fmt.Fprintf(c.stderr, "promoting hypothesis %s to opportunity...\n", cmd.Promote.HypothesisID)
+		if err := c.writeProgressf("promoting hypothesis %s to opportunity...\n", cmd.Promote.HypothesisID); err != nil {
+			return err
+		}
 		result, err := service.PromoteOpportunity(ctx, cmd.Promote.HypothesisID, cmd.Promote.Problem, cmd.Promote.Scope, cmd.Promote.Impact, cmd.Promote.Effort, cmd.Promote.Confidence)
 		if err != nil {
 			return c.mapError(err)
@@ -1105,7 +1123,9 @@ func (c *CLI) runIndex(ctx context.Context, cmd *indexCmd) error {
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(c.stderr, "indexing %s from %s...\n", repo, cmd.Path)
+	if err := c.writeProgressf("indexing %s from %s...\n", repo, cmd.Path); err != nil {
+		return err
+	}
 	result, err := c.svc.Index(ctx, repo, cmd.Path)
 	if err != nil {
 		return c.mapError(err)
@@ -1122,7 +1142,9 @@ func (c *CLI) runAcquire(ctx context.Context, cmd *acquireCmd) error {
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(c.stderr, "acquiring and indexing %s...\n", repo)
+	if err := c.writeProgressf("acquiring and indexing %s...\n", repo); err != nil {
+		return err
+	}
 	result, err := service.Acquire(ctx, repo, cmd.Remote)
 	if err != nil {
 		return c.mapError(err)
@@ -1131,7 +1153,9 @@ func (c *CLI) runAcquire(ctx context.Context, cmd *acquireCmd) error {
 }
 
 func (c *CLI) runInit(ctx context.Context, cmd *initCmd) error {
-	_, _ = fmt.Fprintln(c.stderr, "initializing...")
+	if err := c.writeProgressf("initializing...\n"); err != nil {
+		return err
+	}
 	res, err := c.svc.Init(ctx)
 	if err != nil {
 		return c.mapError(err)
@@ -1380,8 +1404,7 @@ func (c *CLI) runExport(ctx context.Context, command string, cmd *exportCmd) err
 		if err := os.WriteFile(output, []byte(result.Content), 0600); err != nil {
 			return c.mapError(fmt.Errorf("write export: %w", err))
 		}
-		_, _ = fmt.Fprintf(c.stderr, "wrote %s %s export to %s\n", result.Kind, result.Format, output)
-		return nil
+		return c.writeProgressf("wrote %s %s export to %s\n", result.Kind, result.Format, output)
 	}
 	_, err = io.WriteString(c.stdout, result.Content)
 	if err == nil && !strings.HasSuffix(result.Content, "\n") {
@@ -1450,7 +1473,9 @@ func (c *CLI) runLens(ctx context.Context, command string, cmd *lensCmd) error {
 		if strings.TrimSpace(cmd.Add.Name) == "" {
 			return NewCLIError(ExitUsage, errors.New("lens name is required"))
 		}
-		_, _ = fmt.Fprintf(c.stderr, "saving lens %s...\n", cmd.Add.Name)
+		if err := c.writeProgressf("saving lens %s...\n", cmd.Add.Name); err != nil {
+			return err
+		}
 		res, err := service.AddLens(ctx, cmd.Add.Name, def)
 		if err != nil {
 			return c.mapError(err)
@@ -1503,7 +1528,9 @@ func (c *CLI) runCollection(ctx context.Context, command string, cmd *collection
 	}
 	switch command {
 	case "collection create":
-		_, _ = fmt.Fprintf(c.stderr, "creating collection %s...\n", cmd.Create.Name)
+		if err := c.writeProgressf("creating collection %s...\n", cmd.Create.Name); err != nil {
+			return err
+		}
 		res, err := service.CreateCollection(ctx, cmd.Create.Name)
 		if err != nil {
 			return c.mapError(err)
@@ -1521,7 +1548,9 @@ func (c *CLI) runCollection(ctx context.Context, command string, cmd *collection
 			}
 			members[i] = member
 		}
-		_, _ = fmt.Fprintf(c.stderr, "adding %d member(s) to collection %s...\n", len(members), cmd.Add.Name)
+		if err := c.writeProgressf("adding %d member(s) to collection %s...\n", len(members), cmd.Add.Name); err != nil {
+			return err
+		}
 		res, err := service.AddCollectionMembers(ctx, cmd.Add.Name, members)
 		if err != nil {
 			return c.mapError(err)

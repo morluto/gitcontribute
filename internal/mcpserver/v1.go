@@ -248,6 +248,7 @@ func (s *Server) registerV1() {
 }
 
 func (s *Server) searchRepositories(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SearchRepositoriesInput) (*mcp.CallToolResult, mcpcontract.SearchRepositoriesOutput, error) {
+	in.Query = strings.TrimSpace(in.Query)
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
@@ -265,6 +266,7 @@ func (s *Server) searchRepositories(ctx context.Context, _ *mcp.CallToolRequest,
 }
 
 func (s *Server) searchThreads(ctx context.Context, _ *mcp.CallToolRequest, in SearchThreadsInput) (*mcp.CallToolResult, mcpcontract.SearchOutput, error) {
+	in.Query = strings.TrimSpace(in.Query)
 	if in.Query == "" {
 		return nil, mcpcontract.SearchOutput{}, mcpcontract.InvalidArgument("query", "is required", map[string]any{"query": "music"})
 	}

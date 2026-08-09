@@ -230,7 +230,8 @@ One tag version controls the Go binaries and npm package. Release automation:
 4. verifies the package has no install lifecycle;
 5. installs the tarball with `--ignore-scripts` and runs a smoke test;
 6. enforces a 100 MB compressed-package ceiling;
-7. publishes the npm package with provenance;
+7. publishes the npm package with provenance and waits for its exact version,
+   `latest` tag, and fresh npx metadata invocation to agree;
 8. publishes matching `server.json` metadata to the MCP Registry with GitHub
    OIDC;
 9. creates a matching GitHub release.

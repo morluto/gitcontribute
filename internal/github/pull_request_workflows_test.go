@@ -86,6 +86,48 @@ func TestGetPullRequestFeedbackEnforcesTotalRequestBudget(t *testing.T) {
 	}
 }
 
+func TestGetPullRequestFeedbackCapsNestedReviewThreadComments(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v3/repos/acme/project/pulls/7":
+			writeJSON(w, map[string]any{"updated_at": "2026-07-30T10:00:00Z", "head": map[string]any{"sha": "head-7"}})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v3/graphql":
+			var request struct {
+				Variables map[string]any `json:"variables"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatalf("decode GraphQL request: %v", err)
+			}
+			if request.Variables["commentFirst"] != float64(1) {
+				t.Fatalf("commentFirst = %#v, want 1", request.Variables["commentFirst"])
+			}
+			writeJSON(w, map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{
+				"headRefOid": "head-7", "updatedAt": "2026-07-30T10:00:00Z",
+				"reviewThreads": map[string]any{"totalCount": 2, "pageInfo": map[string]any{"hasNextPage": false}, "nodes": []any{
+					map[string]any{"id": "T1", "comments": map[string]any{"totalCount": 2, "nodes": []any{map[string]any{"id": "C1", "databaseId": 1}}, "pageInfo": map[string]any{"hasNextPage": true, "endCursor": "next"}}},
+					map[string]any{"id": "T2", "comments": map[string]any{"totalCount": 1, "nodes": []any{map[string]any{"id": "C2", "databaseId": 2}}, "pageInfo": map[string]any{"hasNextPage": false}}},
+				}},
+			}}}})
+		default:
+			http.Error(w, r.Method+" "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := newTestClient(t, srv, nil).GetPullRequestFeedback(context.Background(), "acme", "project", 7, PullRequestFeedbackOptions{
+		Channels: []string{"review_threads"}, ThreadState: "all", MaxItemsPerChannel: 2,
+	}, NewRequestBudget(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	coverage := got.Coverage["review_threads"]
+	if requests != 2 || coverage.Complete || coverage.Reason != "item_limit_reached" || len(got.ReviewThreads) != 2 || !got.ReviewThreads[0].Truncated || len(got.ReviewThreads[0].Comments) != 1 || len(got.ReviewThreads[1].Comments) != 1 {
+		t.Fatalf("requests=%d coverage=%+v threads=%+v", requests, coverage, got.ReviewThreads)
+	}
+}
+
 func TestGetPullRequestCINormalizesProvidersAndBoundsLogs(t *testing.T) {
 	var baseURL string
 	logUsedConfiguredTransport := false

@@ -64,6 +64,10 @@ filesystem locks, job ownership, or cancellation:
 make test-race
 ```
 
+The focused race lane defaults to four in-package test slots. On a constrained
+machine, lower only that setting without reducing the package-level race
+coverage, for example `make test-race RACE_TEST_PARALLELISM=2`.
+
 The SQLite driver is pure Go. Keep CGO-disabled compatibility when changing
 storage or build dependencies.
 

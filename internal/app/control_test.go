@@ -233,6 +233,74 @@ func TestControlStatusUsesLocalCorpus(t *testing.T) {
 	}
 }
 
+func TestControlStatusWarnsWhenRateLimitObservationHasExpired(t *testing.T) {
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	if _, err := svc.Init(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.August, 9, 0, 0, 0, 0, time.UTC)
+	svc.SetClock(func() time.Time { return now })
+	c, err := svc.openCorpus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RecordRateLimitObservation(context.Background(), corpus.RateLimitObservation{
+		Attempt: 1, StatusCode: 200, Resource: "core", Limit: 5000, Remaining: 4999,
+		ObservedAt: now.Add(-time.Hour), ResetAt: now.Add(-time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.ControlStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsString(result.Warnings, "GitHub core rate limit observation expired; quota is unknown until the next GitHub response") {
+		t.Fatalf("expired rate-limit observation was not marked unknown: %+v", result)
+	}
+	if len(result.RateLimits) != 1 || !result.RateLimits[0].Stale {
+		t.Fatalf("expired rate-limit state was not marked stale: %+v", result.RateLimits)
+	}
+}
+
+func TestControlStatusWarnsWhenRateLimitObservationHasNoReset(t *testing.T) {
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer svc.Close()
+	if _, err := svc.Init(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c, err := svc.openCorpus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.RecordRateLimitObservation(context.Background(), corpus.RateLimitObservation{
+		Attempt: 1, StatusCode: 200, Resource: "core", Limit: 5000, Remaining: 4999,
+		ObservedAt: time.Date(2026, time.August, 9, 0, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.ControlStatus(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsString(result.Warnings, "GitHub core rate limit observation has no reset time; quota is unknown until the next GitHub response") {
+		t.Fatalf("rate-limit observation without reset was not marked unknown: %+v", result)
+	}
+	if len(result.RateLimits) != 1 || !result.RateLimits[0].Stale {
+		t.Fatalf("rate-limit observation without reset was not marked stale: %+v", result.RateLimits)
+	}
+}
+
 func TestDoctorDoesNotExposeEnvironmentToken(t *testing.T) {
 	secret := strings.Join([]string{"github_pat", "fixture-control-value"}, "_")
 	t.Setenv("GITCONTRIBUTE_TEST_TOKEN", secret)

@@ -49,7 +49,8 @@ func (s *Server) searchGitHubThreads(ctx context.Context, _ *mcp.CallToolRequest
 	if err := validateLiveRepository(in.Owner, in.Repo); err != nil {
 		return nil, mcpcontract.SearchGitHubThreadsOutput{}, err
 	}
-	if strings.TrimSpace(in.Query) == "" {
+	in.Query = strings.TrimSpace(in.Query)
+	if in.Query == "" {
 		return nil, mcpcontract.SearchGitHubThreadsOutput{}, mcpcontract.InvalidArgument("query", "is required", map[string]any{"query": "regression"})
 	}
 	operator, ok := s.reader.(GitHubAcquisitionOperator)

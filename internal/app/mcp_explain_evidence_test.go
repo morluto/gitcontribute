@@ -71,3 +71,24 @@ func TestMCPReaderExplainMatchReturnsMatchingExcerpt(t *testing.T) {
 		t.Fatalf("repository explanation omitted topic match: %q", repoOut.Snippet)
 	}
 }
+
+func TestMCPReaderExplainMatchTreatsWhitespaceQueryAsOmitted(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "owner", Name: "repo"}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open", Title: "exact item", SourceUpdatedAt: time.Unix(1, 0).UTC()}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := svc.MCPReader().ExplainMatch(ctx, mcpcontract.ExplainMatchInput{Owner: "owner", Repo: "repo", Kind: "issue", Number: 1, Query: " \t\n "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Query != "" || out.Reason != "repository present in local corpus" {
+		t.Fatalf("whitespace explanation = %+v", out)
+	}
+}

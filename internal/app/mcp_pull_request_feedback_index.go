@@ -262,7 +262,10 @@ func (r *MCPReader) indexOnePullRequestFeedback(ctx context.Context, feedbackRea
 	}
 	if readErr != nil {
 		if len(snapshot.Coverage) > 0 {
-			_ = r.persistPullRequestFeedback(ctx, ref, snapshot, coveredFeedbackChannels(in.Channels, snapshot.Coverage))
+			if persistErr := r.persistPullRequestFeedback(ctx, ref, snapshot, coveredFeedbackChannels(in.Channels, snapshot.Coverage)); persistErr != nil {
+				item.Status, item.Code, item.Message = "failed", "feedback_persistence_failed", persistErr.Error()
+				return item
+			}
 		}
 		item = pullRequestFeedbackIndexFailure(ref, in, readErr)
 		item.HeadSHA = snapshot.HeadSHA

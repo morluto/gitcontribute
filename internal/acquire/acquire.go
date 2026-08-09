@@ -21,6 +21,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/buflimit"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/gitremote"
+	"github.com/morluto/gitcontribute/internal/redaction"
 )
 
 var (
@@ -135,7 +136,7 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) (string,
 		return stdout.String(), buflimit.ErrOutputLimit
 	}
 	if err != nil {
-		return "", fmt.Errorf("exec %s: %w (stderr: %s)", name, err, strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("exec %s: %w (stderr: %s)", name, err, redaction.String(strings.TrimSpace(stderr.String())))
 	}
 	return stdout.String(), nil
 }
@@ -337,7 +338,7 @@ func (m *Manager) git(ctx context.Context, dir string, args ...string) (string, 
 	return m.runner.Run(ctx, "git", all...)
 }
 
-func (m *Manager) cloneMirror(ctx context.Context, remote, mirrorPath string) error {
+func (m *Manager) cloneMirror(ctx context.Context, remote, mirrorPath string) (resultErr error) {
 	parent := filepath.Dir(mirrorPath)
 	if err := os.MkdirAll(parent, 0700); err != nil {
 		return fmt.Errorf("create mirrors dir: %w", err)
@@ -347,8 +348,16 @@ func (m *Manager) cloneMirror(ctx context.Context, remote, mirrorPath string) er
 	tmpPath := filepath.Join(parent, tmpName)
 
 	defer func() {
-		if _, err := os.Stat(tmpPath); err == nil {
-			_ = os.RemoveAll(tmpPath)
+		_, err := os.Stat(tmpPath)
+		if errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		if err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("inspect clone staging path: %w", err))
+			return
+		}
+		if err := os.RemoveAll(tmpPath); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("remove clone staging path: %w", err))
 		}
 	}()
 

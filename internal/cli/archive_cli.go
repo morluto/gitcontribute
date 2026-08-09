@@ -70,7 +70,9 @@ func (c *CLI) runArchive(ctx context.Context, command string, cmd *archiveCmd) e
 		if err != nil {
 			return NewCLIError(ExitUsage, err)
 		}
-		_, _ = fmt.Fprintf(c.stderr, "hydrating %s#%d...\n", repo, number)
+		if err := c.writeProgressf("hydrating %s#%d...\n", repo, number); err != nil {
+			return err
+		}
 		result, err := service.Hydrate(ctx, repo, number, contracts.HydrateOptions{
 			Facets: splitCSV(cmd.Hydrate.With), MaxPages: cmd.Hydrate.MaxPages,
 		})

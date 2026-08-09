@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -17,6 +18,30 @@ type fakeReader struct {
 	validationInput mcpcontract.RunValidationInput
 	radarScore      int
 	calls           map[string]int
+}
+
+type feedbackResourceCapture struct {
+	*fakeReader
+	channel    string
+	feedbackID string
+}
+
+func (*feedbackResourceCapture) PullRequestFeedbackResource(context.Context, string, string, int) (map[string]any, error) {
+	return nil, errors.New("unexpected pull-request feedback resource")
+}
+
+func (r *feedbackResourceCapture) PullRequestFeedbackItemResource(_ context.Context, _ string, _ string, _ int, channel, feedbackID string) (map[string]any, error) {
+	r.channel = channel
+	r.feedbackID = feedbackID
+	return map[string]any{"schema_version": "gitcontribute.pull-request-feedback-item.v1"}, nil
+}
+
+func (*feedbackResourceCapture) CIFailureResource(context.Context, string, string, int) (map[string]any, error) {
+	return nil, errors.New("unexpected CI failure resource")
+}
+
+func (*feedbackResourceCapture) CIJobLogResource(context.Context, string, string, int, int64) (map[string]any, error) {
+	return nil, errors.New("unexpected CI job log resource")
 }
 
 var _ PublishedDraftVerifier = (*fakeReader)(nil)
@@ -99,6 +124,39 @@ func TestPullRequestWorkflowResourcesAreReadable(t *testing.T) {
 	}
 }
 
+func TestResourcePathPartsPreservesEscapedOpaqueIDs(t *testing.T) {
+	parts, ok := resourcePathParts("/acme/rocket/7/inline_comments/comment%2Fwith%20space")
+	if !ok {
+		t.Fatal("resourcePathParts rejected a valid escaped path")
+	}
+	want := []string{"acme", "rocket", "7", "inline_comments", "comment/with space"}
+	if !slices.Equal(parts, want) {
+		t.Fatalf("resource path parts = %q, want %q", parts, want)
+	}
+}
+
+func TestResourcePathPartsRejectsMalformedEscapes(t *testing.T) {
+	if _, ok := resourcePathParts("/acme/rocket/%zz"); ok {
+		t.Fatal("resourcePathParts accepted a malformed escape")
+	}
+	server := &Server{reader: &fakeReader{}}
+	if _, err := server.readResource(context.Background(), &mcp.ReadResourceRequest{Params: &mcp.ReadResourceParams{URI: "gitcontribute://repository/acme/%zz"}}); err == nil {
+		t.Fatal("malformed resource URI was accepted")
+	}
+}
+
+func TestReadResourceRoutesEscapedFeedbackIDAsOneOpaqueSegment(t *testing.T) {
+	reader := &feedbackResourceCapture{fakeReader: &fakeReader{}}
+	server := &Server{reader: reader}
+	result, err := server.readResource(context.Background(), &mcp.ReadResourceRequest{Params: &mcp.ReadResourceParams{URI: "gitcontribute://pull-request-feedback/acme/rocket/7/inline_comments/comment%2Fwith%20space"}})
+	if err != nil {
+		t.Fatalf("read escaped feedback resource: %v", err)
+	}
+	if len(result.Contents) != 1 || reader.channel != "inline_comments" || reader.feedbackID != "comment/with space" {
+		t.Fatalf("escaped feedback resource routed as channel=%q feedback_id=%q result=%+v", reader.channel, reader.feedbackID, result)
+	}
+}
+
 func (f *fakeReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcpcontract.SearchOutput, error) {
 	if in.Query == "block" {
 		close(f.searchStarted)
@@ -138,6 +196,33 @@ func (*fakeReader) SearchCode(_ context.Context, in mcpcontract.SearchCodeInput)
 			Bytes:    12,
 		}},
 	}, nil
+}
+
+func TestSearchCodeRejectsWhitespaceOnlyQuery(t *testing.T) {
+	server := &Server{reader: &fakeReader{}}
+	_, _, err := server.searchCode(context.Background(), nil, mcpcontract.SearchCodeInput{Query: " \t "})
+	if err == nil {
+		t.Fatal("whitespace-only code search query was accepted")
+	}
+}
+
+func TestSearchThreadsRejectsWhitespaceOnlyQuery(t *testing.T) {
+	server := &Server{reader: &fakeReader{}}
+	_, _, err := server.searchThreads(context.Background(), nil, SearchThreadsInput{Query: " \t "})
+	if err == nil {
+		t.Fatal("whitespace-only thread search query was accepted")
+	}
+}
+
+func TestSearchRepositoriesNormalizesOptionalQuery(t *testing.T) {
+	server := &Server{reader: &fakeReader{}}
+	_, out, err := server.searchRepositories(context.Background(), nil, mcpcontract.SearchRepositoriesInput{Query: " \t "})
+	if err != nil {
+		t.Fatalf("search repositories: %v", err)
+	}
+	if out.Query != "" {
+		t.Fatalf("repository query was not normalized: %q", out.Query)
+	}
 }
 
 func (*fakeReader) Investigation(_ context.Context, in mcpcontract.InvestigationInput) (mcpcontract.InvestigationOutput, error) {
@@ -534,6 +619,18 @@ func TestRepositoryResourceAndNotFound(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected resource-not-found error")
+	}
+
+	for _, uri := range []string{
+		"gitcontribute://repository/acme/rocket?view=full",
+		"gitcontribute://repository/acme/rocket#fragment",
+		"gitcontribute://user@repository/acme/rocket",
+		"gitcontribute://repository/acme/rocket/",
+		"gitcontribute://repository/acme//rocket",
+	} {
+		if _, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: uri}); err == nil {
+			t.Fatalf("non-canonical resource URI %q was accepted", uri)
+		}
 	}
 }
 

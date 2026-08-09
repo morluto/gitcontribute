@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -15,6 +16,18 @@ type feedbackIndexTestReader struct {
 	pages      map[int]github.ListResult[github.Issue]
 	perPage    []int
 	withThread bool
+}
+
+type cancelledPartialFeedbackReader struct {
+	panicRadarReader
+	cancel context.CancelFunc
+}
+
+func (r *cancelledPartialFeedbackReader) GetPullRequestFeedback(_ context.Context, _, _ string, _ int, _ github.PullRequestFeedbackOptions, _ *github.RequestBudget) (github.PullRequestFeedback, error) {
+	r.cancel()
+	return github.PullRequestFeedback{Coverage: map[string]github.FeedbackCoverage{
+		"issue_comments": {Complete: true, Fetched: 1, Total: 1},
+	}}, errors.New("provider interrupted")
 }
 
 func (r *feedbackIndexTestReader) ListPullRequests(_ context.Context, _, _ string, opts github.PullRequestListOptions) (github.ListResult[github.Issue], error) {
@@ -139,5 +152,17 @@ func TestPullRequestFeedbackSearchKeepsThreadResourceReadable(t *testing.T) {
 	}
 	if item["schema_version"] != "gitcontribute.pull-request-feedback-item.v1" || item["feedback_id"] != "202" || item["thread_id"] != "thread-2" || item["resolved"] != false || item["resolution_state"] != "unresolved" {
 		t.Fatalf("exact feedback resource = %+v", item)
+	}
+}
+
+func TestFeedbackIndexReportsPartialSnapshotPersistenceFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc := newLocalService(t)
+	t.Cleanup(func() { _ = svc.Close() })
+	reader := &MCPReader{Service: svc}
+	item := reader.indexOnePullRequestFeedback(ctx, &cancelledPartialFeedbackReader{cancel: cancel}, mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7}, mcpcontract.IndexPullRequestFeedbackInput{Channels: []string{"issue_comments"}}, github.NewRequestBudget(10))
+	if item.Code != "feedback_persistence_failed" {
+		t.Fatalf("partial snapshot persistence failure was hidden: %+v", item)
 	}
 }

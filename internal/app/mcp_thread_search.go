@@ -12,7 +12,7 @@ import (
 
 // Search performs a local-only corpus search through the MCP interface.
 func (r *MCPReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcpcontract.SearchOutput, error) {
-	if in.Query == "" {
+	if strings.TrimSpace(in.Query) == "" {
 		return mcpcontract.SearchOutput{}, errors.New("query is required")
 	}
 	if in.Limit == 0 {

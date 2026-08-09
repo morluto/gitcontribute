@@ -55,7 +55,9 @@ func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) e
 	}
 	switch command {
 	case "prepare issue":
-		_, _ = fmt.Fprintf(c.stderr, "preparing issue draft for opportunity %s...\n", cmd.Issue.OpportunityID)
+		if err := c.writeProgressf("preparing issue draft for opportunity %s...\n", cmd.Issue.OpportunityID); err != nil {
+			return err
+		}
 		result, err := service.PrepareIssue(ctx, cmd.Issue.OpportunityID, contracts.PrepareIssueOptions{
 			Guidance: cmd.Issue.Guidance, Success: cmd.Issue.Success, ManifestID: cmd.Issue.ManifestID,
 		})
@@ -67,7 +69,9 @@ func (c *CLI) runPrepare(ctx context.Context, command string, cmd *prepareCmd) e
 		}
 		return c.render(cmd.Issue.JSON, result)
 	case "prepare pr":
-		_, _ = fmt.Fprintf(c.stderr, "preparing pull request draft for opportunity %s...\n", cmd.PR.OpportunityID)
+		if err := c.writeProgressf("preparing pull request draft for opportunity %s...\n", cmd.PR.OpportunityID); err != nil {
+			return err
+		}
 		result, err := service.PreparePullRequest(ctx, cmd.PR.OpportunityID, contracts.PreparePROptions{
 			WorkspaceID:   cmd.PR.WorkspaceID,
 			Approach:      cmd.PR.Approach,
@@ -120,7 +124,7 @@ func exportDraft(dir string, draft *contracts.DraftResult, allowWarnings bool) e
 			}
 		}
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create draft export directory: %w", err)
 	}
 	metadata, err := json.MarshalIndent(draft, "", "  ")

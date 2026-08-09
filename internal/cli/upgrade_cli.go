@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
 )
@@ -22,8 +23,7 @@ func (c *CLI) runUpgrade(ctx context.Context, cmd *upgradeCmd) error {
 			return NewCLIError(ExitUsage, err)
 		}
 		if !confirmed {
-			_, _ = fmt.Fprintln(c.stderr, "Upgrade cancelled.")
-			return nil
+			return c.writeProgressf("Upgrade cancelled.\n")
 		}
 		cmd.Yes = true
 	}
@@ -34,27 +34,26 @@ func (c *CLI) runUpgrade(ctx context.Context, cmd *upgradeCmd) error {
 	if cmd.JSON {
 		return writeJSON(c.stdout, report)
 	}
-	_, err = fmt.Fprintf(c.stdout, "Upgrade [%s]: %s", report.Context, report.Status)
+	var output strings.Builder
+	fmt.Fprintf(&output, "Upgrade [%s]: %s", report.Context, report.Status)
 	if report.Latest != "" {
-		_, err = fmt.Fprintf(c.stdout, " (current %s, latest %s)", report.Current, report.Latest)
+		fmt.Fprintf(&output, " (current %s, latest %s)", report.Current, report.Latest)
 	}
 	if report.Command != "" {
-		_, err = fmt.Fprintf(c.stdout, "\n%s", report.Command)
+		fmt.Fprintf(&output, "\n%s", report.Command)
 	}
 	for _, stage := range report.Stages {
-		_, err = fmt.Fprintf(c.stdout, "\n- %s: %s", stage.Name, stage.Status)
+		fmt.Fprintf(&output, "\n- %s: %s", stage.Name, stage.Status)
 		if stage.Message != "" {
-			_, err = fmt.Fprintf(c.stdout, " — %s", stage.Message)
+			fmt.Fprintf(&output, " — %s", stage.Message)
 		}
 	}
 	if report.Action != "" {
-		_, err = fmt.Fprintf(c.stdout, "\nNext: %s", report.Action)
+		fmt.Fprintf(&output, "\nNext: %s", report.Action)
 	}
 	if report.Rollback != "" {
-		_, err = fmt.Fprintf(c.stdout, "\nRollback: %s", report.Rollback)
+		fmt.Fprintf(&output, "\nRollback: %s", report.Rollback)
 	}
-	if err == nil {
-		_, err = fmt.Fprintln(c.stdout)
-	}
+	_, err = fmt.Fprintln(c.stdout, output.String())
 	return err
 }

@@ -18,3 +18,10 @@ func TestRecoveryActionOwnsArgumentsForItsDiscriminator(t *testing.T) {
 		t.Fatalf("recovery action = %s (%+v)", encoded, action)
 	}
 }
+
+func TestRecoveryActionSupportsManifestReplay(t *testing.T) {
+	action := RecoveryAction(ExportManifestInput{OpportunityID: "opp-1", WorkspaceID: "ws-1"})
+	if action.Type != "export_manifest" || action.ExportManifest == nil || action.ExportManifest.OpportunityID != "opp-1" {
+		t.Fatalf("manifest recovery action = %+v", action)
+	}
+}
