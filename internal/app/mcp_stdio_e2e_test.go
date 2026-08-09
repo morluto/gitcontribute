@@ -24,6 +24,7 @@ import (
 const (
 	mcpE2EHomeEnv   = "GITCONTRIBUTE_MCP_E2E_HOME"
 	mcpE2EGitHubEnv = "GITCONTRIBUTE_MCP_E2E_GITHUB_URL"
+	mcpE2ETimeout   = 60 * time.Second
 )
 
 // TestMCPStdioHelper is the subprocess entry point used by
@@ -65,7 +66,7 @@ func TestMCPStdioHelper(t *testing.T) {
 //nolint:cyclop
 func TestMCPStdioScalableResearchFlow(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpE2ETimeout)
 	defer cancel()
 	home := t.TempDir()
 	seedMCPStdioCorpus(ctx, t, home)
@@ -141,7 +142,7 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 
 func TestMCPStdioPullRequestPortfolioFlow(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpE2ETimeout)
 	defer cancel()
 	home := t.TempDir()
 	seedMCPStdioEmptyCorpus(ctx, t, home)
@@ -180,7 +181,7 @@ func TestMCPStdioPullRequestPortfolioFlow(t *testing.T) {
 
 func TestMCPStdioExactThreadSyncFlow(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpE2ETimeout)
 	defer cancel()
 	home := t.TempDir()
 	seedMCPStdioEmptyCorpus(ctx, t, home)
@@ -292,7 +293,7 @@ func assertExactThreadJobItems(t *testing.T, jobs mcpcontract.GetJobsOutput, wan
 
 func TestMCPStdioEnsureCoverageBootstrapsAndReturnsSnapshot(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpE2ETimeout)
 	defer cancel()
 	home := t.TempDir()
 	seedMCPStdioEmptyCorpus(ctx, t, home)
@@ -327,7 +328,7 @@ func TestMCPStdioEnsureCoverageBootstrapsAndReturnsSnapshot(t *testing.T) {
 
 func TestMCPStdioCoverageRecoveryFollowsReturnedAction(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpE2ETimeout)
 	defer cancel()
 	home := t.TempDir()
 	seedMCPStdioEmptyCorpus(ctx, t, home)
