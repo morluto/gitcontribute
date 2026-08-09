@@ -253,14 +253,7 @@ func (s *Service) crawlSearchSource(ctx context.Context, c *corpus.Corpus, sourc
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if resultErr == nil {
-			return
-		}
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		_ = c.FailRun(cleanup, run.ID, resultErr.Error())
-	}()
+	defer failRunOnError(ctx, c, run.ID, &resultErr)
 
 	now := s.now().UTC().Truncate(time.Second)
 	start := now.Add(-opts.Since)
@@ -353,14 +346,7 @@ func (s *Service) crawlRepoSource(ctx context.Context, c *corpus.Corpus, source 
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if resultErr == nil {
-			return
-		}
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		_ = c.FailRun(cleanup, run.ID, resultErr.Error())
-	}()
+	defer failRunOnError(ctx, c, run.ID, &resultErr)
 
 	now := s.now().UTC().Truncate(time.Second)
 	processed := 0
@@ -420,14 +406,7 @@ func (s *Service) crawlGHArchiveSource(ctx context.Context, c *corpus.Corpus, so
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if resultErr == nil {
-			return
-		}
-		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		_ = c.FailRun(cleanup, run.ID, resultErr.Error())
-	}()
+	defer failRunOnError(ctx, c, run.ID, &resultErr)
 
 	now := s.now().UTC()
 	startHour, endHour := discovery.ArchiveHourRange(opts.Since, now)

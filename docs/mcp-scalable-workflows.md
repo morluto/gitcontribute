@@ -40,6 +40,9 @@ merge details, checks, files, and other children require explicit facets.
 `github.read_source_files` resolves a ref once and reads up to 20 ordered
 repository-relative files with per-file and total-byte limits. Its immutable
 source-bundle resource records the resolved commit and blob provenance.
+Both live repository acquisitions require `repository: {owner, repo}`. See the
+[v2 migration guide](mcp-v2-migration.md) for request examples; flat owner and
+repo arguments are rejected.
 
 `corpus.search_code` accepts up to 20 queries over one repository or snapshot
 scope. Every query uses the same offline corpus revision. It never falls back
@@ -97,6 +100,8 @@ Exact PR refresh uses `github.sync_pull_request_feedback`. CI uses
 `github.sync_pull_request_ci`; checks and statuses are bound to the observed
 head SHA. Offline authored-PR reads use `corpus.search_pull_requests`, and
 overlap analysis uses `corpus.find_pull_request_overlaps`.
+Use `repository: {owner, repo}` with authored portfolio synchronization or
+offline portfolio reads when the portfolio must be constrained to one project.
 
 ## Jobs, partial results, and recovery
 

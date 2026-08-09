@@ -276,7 +276,7 @@ func (s *Server) registerScalable() {
 		}),
 		output: outputSchema[mcpcontract.FixPatternReport]("Bounded offline fix-pattern analysis; never persisted."), handler: s.previewRepositoryFixPatterns,
 	})
-	addCatalogTool(s, catalogTool[mcpcontract.SyncPortfolioInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPortfolio, title: "Synchronize a pull-request portfolio", description: "selection is required: use authored only for the authenticated user's PR portfolio, or explicit with 1-100 exact pull_requests. This tool is not repository-wide comment discovery; for all feedback by a reviewer use github.index_pull_request_feedback, jobs.get, and corpus.search_pull_request_feedback with feedback_author. Refreshes PR details, merge state, checks, review state, unresolved threads, merge queue, files, and closing issues in one durable job; incomplete discovery is surfaced with a typed retry action.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncPortfolioInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.SyncPortfolioInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPortfolio, title: "Synchronize a pull-request portfolio", description: "selection is required: use authored only for the authenticated user's PR portfolio, optionally scoped to one repository, or explicit with 1-100 exact pull_requests. This tool is not repository-wide comment discovery; for all feedback by a reviewer use github.index_pull_request_feedback, jobs.get, and corpus.search_pull_request_feedback with feedback_author. Refreshes PR details, merge state, checks, review state, unresolved threads, merge queue, files, and closing issues in one durable job; incomplete discovery is surfaced with a typed retry action.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncPortfolioInput](func(sc *schemaBuilder) {
 		setEnum(sc, "selection", "authored", "explicit")
 		setArrayBounds(sc, "pull_requests", 1, 100)
 		constrainPullRequestRefs(sc, "pull_requests")
@@ -328,7 +328,7 @@ func (s *Server) registerScalable() {
 		setRange(sc, "max_log_bytes_per_job", 1024, 1048576)
 		setRange(sc, "max_requests", 1, 1000)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded CI diagnostics job."), handler: s.syncCIFailures})
-	addCatalogTool(s, catalogTool[mcpcontract.ListPullRequestPortfolioInput, mcpcontract.ListPullRequestPortfolioOutput]{name: mcpcontract.ToolListPullRequestPortfolio, title: "List pull requests that need contributor attention", description: "List stored authored pull requests with deterministic attention from lifecycle, checks, review conversations, merge state, queue, and freshness. This offline read reports incomplete facets as unknown; each incomplete item includes an exact typed sync_portfolio recovery action, and truncated pages include a typed next-page action.", annotations: readOnly, supportedBy: supports[PortfolioReader], input: inputSchema[mcpcontract.ListPullRequestPortfolioInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.ListPullRequestPortfolioInput, mcpcontract.ListPullRequestPortfolioOutput]{name: mcpcontract.ToolListPullRequestPortfolio, title: "List pull requests that need contributor attention", description: "List stored authored pull requests, optionally scoped to one repository, with deterministic attention from lifecycle, checks, review conversations, merge state, queue, and freshness. This offline read reports incomplete facets as unknown; each incomplete item includes an exact typed sync_portfolio recovery action, and truncated pages include a typed next-page action.", annotations: readOnly, supportedBy: supports[PortfolioReader], input: inputSchema[mcpcontract.ListPullRequestPortfolioInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "authors", 0, 1)
 		setEnum(sc, "state", "open", "closed", "all")
 		setRange(sc, "limit", 1, 100)
@@ -647,6 +647,14 @@ func (s *Server) previewRepositoryFixPatterns(ctx context.Context, _ *mcp.CallTo
 	return nil, out, err
 }
 func (s *Server) syncPortfolio(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SyncPortfolioInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
+	if in.Repository != nil {
+		if err := validateLiveRepository(*in.Repository); err != nil {
+			return nil, mcpcontract.JobReference{}, err
+		}
+		if in.Selection == "explicit" {
+			return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("repository", "is only valid for authored selection", nil)
+		}
+	}
 	if in.Selection == "authored" && in.State == "" {
 		in.State = "open"
 	}

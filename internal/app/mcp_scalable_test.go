@@ -715,6 +715,21 @@ func TestPullRequestWorkflowsRejectMalformedReferencesBeforeSubmission(t *testin
 	}
 }
 
+func TestSyncPortfolioRejectsDuplicateDefaultKindReferences(t *testing.T) {
+	t.Parallel()
+	reader := &MCPReader{newSearchTestService(t)}
+	_, err := reader.SyncPortfolio(context.Background(), mcpcontract.SyncPortfolioInput{
+		Selection: "explicit",
+		PullRequests: []mcpcontract.ThreadRef{
+			{Owner: "acme", Repo: "rocket", Number: 7},
+			{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected duplicate pull-request references to be rejected")
+	}
+}
+
 func TestScalableRuntimeRejectsPageBoundsBeforeSubmittingJob(t *testing.T) {
 	t.Parallel()
 	reader := &MCPReader{newSearchTestService(t)}

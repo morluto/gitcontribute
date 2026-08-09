@@ -82,6 +82,16 @@ func TestSearchAuthoredPullRequestsBuildsQueryAndExtractsRepository(t *testing.T
 			wantPage:    1,
 			wantPerPage: 50,
 		},
+		{
+			name: "scopes authored discovery before pagination",
+			opts: AuthoredPullRequestSearchOptions{
+				Login: "morluto", RepositoryOwner: "lab", RepositoryName: "runtime", State: "open",
+				PageOptions: PageOptions{Page: 1, PerPage: 1},
+			},
+			wantQuery:   "is:pr author:morluto repo:lab/runtime is:open",
+			wantPage:    1,
+			wantPerPage: 1,
+		},
 	}
 
 	for _, tt := range tests {

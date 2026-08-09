@@ -292,14 +292,26 @@ func radarTimelineReference(event github.IssueTimelineEvent, defaultRepo domain.
 
 func resolveRadarRelatedWork(ctx context.Context, c *corpus.Corpus, raw []rawRadarRelatedWork) ([]radar.RelatedWork, error) {
 	values := make([]radar.RelatedWork, 0, len(raw))
+	resolvedByReference := make(map[string]radar.RelatedWork, len(raw))
 	for _, item := range raw {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		resolved, err := resolveRadarReference(ctx, c, item.reference, item.direction, item.evidence)
-		if err != nil {
-			return nil, err
+		key := radarReferenceKey(item.reference)
+		resolved, ok := resolvedByReference[key]
+		if !ok {
+			var err error
+			resolved, err = resolveRadarReference(ctx, c, item.reference, item.direction, item.evidence)
+			if err != nil {
+				return nil, err
+			}
+			resolvedByReference[key] = resolved
 		}
+		// The resolved thread fields are shared, but every raw observation keeps
+		// its own relationship semantics and source-bound evidence.
+		resolved.Relation = item.reference.Relation
+		resolved.Direction = item.direction
+		resolved.Evidence = []radar.RelatedWorkEvidence{item.evidence}
 		values = append(values, resolved)
 	}
 	return values, nil

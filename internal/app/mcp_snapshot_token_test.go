@@ -51,3 +51,10 @@ func TestSnapshotTokenReadFailsClosedAfterCorpusMutation(t *testing.T) {
 		t.Fatalf("ephemeral snapshot reuse error = %v", err)
 	}
 }
+
+func TestManifestSnapshotRecoveryDropsExpiredToken(t *testing.T) {
+	action := manifestSnapshotRecovery(mcpcontract.ExportManifestInput{OpportunityID: "opp-1", WorkspaceID: "ws-1", SnapshotToken: "snapshot-stale"})
+	if action.Type != "export_manifest" || action.ExportManifest == nil || action.ExportManifest.SnapshotToken != "" || action.ExportManifest.OpportunityID != "opp-1" || action.ExportManifest.WorkspaceID != "ws-1" {
+		t.Fatalf("manifest stale-snapshot recovery = %+v", action)
+	}
+}

@@ -57,7 +57,7 @@ func configureSyncPortfolioModes(builder *schemaBuilder) {
 
 	explicit := schemaMode("selection", "explicit",
 		[]string{"pull_requests"},
-		[]string{"state", "updated_after", "limit", "discovery_max_requests"},
+		[]string{"repository", "state", "updated_after", "limit", "discovery_max_requests"},
 	)
 	explicit.ID = "urn:gitcontribute:mode:sync-pull-request-portfolio-explicit"
 	explicit.Properties["pull_requests"] = &jsonschema.Schema{MinItems: jsonschema.Ptr(1)}

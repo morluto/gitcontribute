@@ -87,7 +87,7 @@ func (s *Service) workspaceReader() (*workspace.Manager, error) {
 }
 
 // CreateWorkspace creates a managed worktree for an investigation.
-func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, opts contracts.WorkspaceCreateOptions) (*contracts.WorkspaceResult, error) {
+func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, opts contracts.WorkspaceCreateOptions) (result *contracts.WorkspaceResult, returnErr error) {
 	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
@@ -141,7 +141,9 @@ func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, o
 		}
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		_ = mgr.Remove(cleanup, ws.Path, true)
+		if err := mgr.Remove(cleanup, ws.Path, true); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("cleanup unpersisted workspace: %w", err))
+		}
 	}()
 
 	ws.InvestigationID = inv.ID

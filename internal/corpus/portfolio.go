@@ -13,8 +13,8 @@ import (
 // state "all" is equivalent to no state filter. The read is bounded and
 // deterministic so callers can build portfolio views without repository-level
 // N+1 queries.
-func (c *Corpus) ListPullRequestPortfolio(ctx context.Context, author, state string, limit int) (_ []PortfolioPullRequest, err error) {
-	page, err := c.ListPullRequestPortfolioPage(ctx, author, state, limit)
+func (c *Corpus) ListPullRequestPortfolio(ctx context.Context, author, state string, repository *RepositoryKey, limit int) (_ []PortfolioPullRequest, err error) {
+	page, err := c.ListPullRequestPortfolioPage(ctx, author, state, repository, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -23,7 +23,7 @@ func (c *Corpus) ListPullRequestPortfolio(ctx context.Context, author, state str
 
 // ListPullRequestPortfolioPage returns a bounded portfolio and the exact
 // matching population so callers never mistake the page size for the total.
-func (c *Corpus) ListPullRequestPortfolioPage(ctx context.Context, author, state string, limit int) (_ PortfolioPage, err error) {
+func (c *Corpus) ListPullRequestPortfolioPage(ctx context.Context, author, state string, repository *RepositoryKey, limit int) (_ PortfolioPage, err error) {
 	if limit <= 0 {
 		limit = 1000
 	}
@@ -48,15 +48,23 @@ func (c *Corpus) ListPullRequestPortfolioPage(ctx context.Context, author, state
 		query += ` AND lower(t.author) = lower(?)`
 		args = append(args, author)
 	}
+	if repository != nil {
+		query += ` AND lower(r.owner) = lower(?) AND lower(r.name) = lower(?)`
+		args = append(args, repository.Owner, repository.Name)
+	}
 	if state != "" && !strings.EqualFold(state, "all") {
 		query += ` AND lower(t.state) = lower(?)`
 		args = append(args, state)
 	}
-	countQuery := `SELECT COUNT(*) FROM threads t WHERE t.kind = ?`
+	countQuery := `SELECT COUNT(*) FROM threads t JOIN repositories r ON r.id = t.repository_id WHERE t.kind = ?`
 	countArgs := []any{ThreadKindPullRequest}
 	if author != "" {
 		countQuery += ` AND lower(t.author) = lower(?)`
 		countArgs = append(countArgs, author)
+	}
+	if repository != nil {
+		countQuery += ` AND lower(r.owner) = lower(?) AND lower(r.name) = lower(?)`
+		countArgs = append(countArgs, repository.Owner, repository.Name)
 	}
 	if state != "" && !strings.EqualFold(state, "all") {
 		countQuery += ` AND lower(t.state) = lower(?)`

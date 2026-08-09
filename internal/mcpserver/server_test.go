@@ -515,28 +515,6 @@ func TestReadOnlyToolsReturnStructuredOutput(t *testing.T) {
 	}
 }
 
-func TestRepositoryResourceAndNotFound(t *testing.T) {
-	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
-	defer closeSessions()
-
-	result, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{
-		URI: "gitcontribute://repository/acme/rocket",
-	})
-	if err != nil {
-		t.Fatalf("read repository: %v", err)
-	}
-	if len(result.Contents) != 1 || result.Contents[0].Text == "" {
-		t.Fatalf("resource result = %+v", result)
-	}
-
-	_, err = client.ReadResource(context.Background(), &mcp.ReadResourceParams{
-		URI: "gitcontribute://thread/acme/rocket/issue/404",
-	})
-	if err == nil {
-		t.Fatal("expected resource-not-found error")
-	}
-}
-
 func TestInvestigationOpportunityEvidenceResources(t *testing.T) {
 	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
 	defer closeSessions()

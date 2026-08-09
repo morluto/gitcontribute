@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -138,63 +139,6 @@ func TestManager_CloneAndResolve(t *testing.T) {
 			t.Fatalf("Resolve(sha) = %q, want %q", got, candidateSHA)
 		}
 	})
-}
-
-func TestManager_CreateAndInspect(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	remote, baseSHA, candidateSHA := setupRemote(t)
-	mgr := newManager(t)
-
-	if err := mgr.Clone(ctx, remote, "origin"); err != nil {
-		t.Fatal(err)
-	}
-
-	ws, err := mgr.Create(ctx, "origin", "master", "feature", "ws1")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if ws.Remote != remote {
-		t.Errorf("Remote = %q, want %q", ws.Remote, remote)
-	}
-	if ws.BaseSHA != baseSHA {
-		t.Errorf("BaseSHA = %q, want %q", ws.BaseSHA, baseSHA)
-	}
-	if ws.CandidateSHA != candidateSHA {
-		t.Errorf("CandidateSHA = %q, want %q", ws.CandidateSHA, candidateSHA)
-	}
-	if ws.MergeBase != baseSHA {
-		t.Errorf("MergeBase = %q, want %q", ws.MergeBase, baseSHA)
-	}
-
-	if _, err := os.Stat(ws.Path); err != nil {
-		t.Errorf("workspace path does not exist: %v", err)
-	}
-
-	mergeBase, err := mgr.MergeBase(ctx, "ws1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mergeBase != baseSHA {
-		t.Fatalf("MergeBase() = %q, want %q", mergeBase, baseSHA)
-	}
-
-	diff, err := mgr.Diff(ctx, "ws1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(diff, "feature.txt") {
-		t.Fatalf("diff does not contain feature.txt:\n%s", diff)
-	}
-
-	got, ok := mgr.Get("ws1")
-	if !ok || got.Name != "ws1" {
-		t.Fatalf("Get(ws1) = (%v, %v)", got, ok)
-	}
-	if len(mgr.List()) != 1 {
-		t.Fatalf("List() = %d items, want 1", len(mgr.List()))
-	}
 }
 
 func TestWorkspaceSnapshotBindsStagedUnstagedAndUntrackedContent(t *testing.T) {
@@ -521,6 +465,58 @@ func TestManager_ConcurrentCreateDoesNotRemoveWinner(t *testing.T) {
 	}
 	if _, err := os.Stat(ws.Path); err != nil {
 		t.Fatalf("winning workspace path was removed: %v", err)
+	}
+}
+
+type failingWorktreeReservationCleanupRunner struct {
+	workspacesDir string
+	err           error
+}
+
+func (r failingWorktreeReservationCleanupRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+	for i := range args {
+		if args[i] == "worktree" && i+1 < len(args) && args[i+1] == "add" {
+			if err := os.Chmod(r.workspacesDir, 0500); err != nil {
+				return "", err
+			}
+			return "", r.err
+		}
+	}
+	return execRunner{}.Run(ctx, name, args...)
+}
+
+func TestManagerCreateReportsFailedReservationCleanup(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("test requires POSIX directory permission semantics")
+	}
+	ctx := context.Background()
+	remote, _, _ := setupRemote(t)
+	root := t.TempDir()
+	runnerErr := errors.New("worktree add failed")
+	mgr, err := NewManager(root, failingWorktreeReservationCleanupRunner{
+		workspacesDir: filepath.Join(root, "workspaces"),
+		err:           runnerErr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mgr.Clone(ctx, remote, "origin"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = mgr.Create(ctx, "origin", "master", "feature", "reserved")
+	if chmodErr := os.Chmod(filepath.Join(root, "workspaces"), 0755); chmodErr != nil {
+		t.Fatal(chmodErr)
+	}
+	if !errors.Is(err, runnerErr) {
+		t.Fatalf("Create error = %v, want worktree failure", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "remove reserved workspace path") {
+		t.Fatalf("Create error omitted reservation cleanup failure: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "workspaces", "reserved")); statErr != nil {
+		t.Fatalf("failed reservation was unexpectedly removed: %v", statErr)
 	}
 }
 

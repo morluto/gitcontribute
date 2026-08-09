@@ -11,6 +11,8 @@ import (
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
+const maxJobArtifactItems = 100
+
 func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
 	switch job.Kind {
 	case "mine_repository_fix_patterns":
@@ -122,24 +124,29 @@ func decodeSyncBatchResult(job *contracts.JobResult, total int) (syncBatchResult
 	return result, count
 }
 
-func syncBatchReferences(result syncBatchResult, includeThreads bool) ([]string, []mcpcontract.ThreadRef, []mcpcontract.JobArtifactFailure) {
-	references := make([]string, 0, min(len(result.Items), 100))
-	threadRefs := make([]mcpcontract.ThreadRef, 0, min(len(result.Items), 100))
-	failures := make([]mcpcontract.JobArtifactFailure, 0, min(len(result.Items), 100))
+func syncBatchReferences(result syncBatchResult, includeThreads bool) ([]string, []mcpcontract.ThreadRef, []mcpcontract.JobArtifactFailure, bool, bool) {
+	references := make([]string, 0, min(len(result.Items), maxJobArtifactItems))
+	threadRefs := make([]mcpcontract.ThreadRef, 0, min(len(result.Items), maxJobArtifactItems))
+	failures := make([]mcpcontract.JobArtifactFailure, 0, min(len(result.Items), maxJobArtifactItems))
+	referencesTruncated := false
+	failuresTruncated := false
 	for _, item := range result.Items {
 		partialThreadBatch := includeThreads && item.Status == "partial"
 		if item.Status != "complete" && !partialThreadBatch {
-			if len(failures) < 100 {
+			if len(failures) < maxJobArtifactItems {
 				failures = append(failures, mcpcontract.JobArtifactFailure{
 					Reference: item.Key, Status: mcpcontract.BatchItemStatus(item.Status), Reason: item.Reason,
 					Message: item.Message, RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfter),
 				})
+			} else {
+				failuresTruncated = true
 			}
 			continue
 		}
 		if includeThreads && len(item.Threads) > 0 {
 			for _, ref := range item.Threads {
-				if len(threadRefs) >= 100 {
+				if len(threadRefs) >= maxJobArtifactItems {
+					referencesTruncated = true
 					break
 				}
 				threadRefs = append(threadRefs, ref)
@@ -147,34 +154,38 @@ func syncBatchReferences(result syncBatchResult, includeThreads bool) ([]string,
 			}
 			continue
 		}
-		if item.Key != "" && len(references) < 100 {
-			references = append(references, item.Key)
+		if item.Key != "" {
+			if len(references) < maxJobArtifactItems {
+				references = append(references, item.Key)
+			} else {
+				referencesTruncated = true
+			}
 		}
 	}
-	return references, threadRefs, failures
+	return references, threadRefs, failures, referencesTruncated, failuresTruncated
 }
 
 func repositoryBatchJobArtifact(job *contracts.JobResult, total int) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
 	result, count := decodeSyncBatchResult(job, total)
-	references, _, failures := syncBatchReferences(result, false)
+	references, _, failures, referencesTruncated, failuresTruncated := syncBatchReferences(result, false)
 	value := mcpcontract.NonNegativeInt(count)
-	follow := &mcpcontract.JobFollowUp{
-		Action: mcpcontract.FollowUpAction{Type: "get_repositories", GetRepositories: &mcpcontract.GetRepositoriesInput{}},
-		Reason: "Read synchronized repository facts and coverage from the offline corpus.",
-	}
 	var request mcpcontract.SyncRepositoryContextInput
-	if json.Unmarshal([]byte(job.Request), &request) == nil {
-		follow.Action.GetRepositories.Repositories = append([]mcpcontract.RepositoryRef(nil), request.Repositories...)
+	var follow *mcpcontract.JobFollowUp
+	if json.Unmarshal([]byte(job.Request), &request) == nil && len(request.Repositories) > 0 {
+		follow = &mcpcontract.JobFollowUp{
+			Action: mcpcontract.FollowUpAction{Type: "get_repositories", GetRepositories: &mcpcontract.GetRepositoriesInput{Repositories: append([]mcpcontract.RepositoryRef(nil), request.Repositories...)}},
+			Reason: "Read synchronized repository facts and coverage from the offline corpus.",
+		}
 	}
 	return []mcpcontract.JobArtifactReference{{
 		Kind: "repository_batch", Count: &value, References: references,
-		ReferencesTruncated: len(result.Items) > len(references), Failures: failures,
+		ReferencesTruncated: referencesTruncated, Failures: failures, FailuresTruncated: failuresTruncated,
 	}}, follow
 }
 
 func threadBatchJobArtifact(job *contracts.JobResult, total int) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
 	result, count := decodeSyncBatchResult(job, total)
-	references, threadRefs, failures := syncBatchReferences(result, true)
+	references, threadRefs, failures, referencesTruncated, failuresTruncated := syncBatchReferences(result, true)
 	value := mcpcontract.NonNegativeInt(count)
 	var follow *mcpcontract.JobFollowUp
 	if len(threadRefs) > 0 {
@@ -185,13 +196,15 @@ func threadBatchJobArtifact(job *contracts.JobResult, total int) ([]mcpcontract.
 	}
 	return []mcpcontract.JobArtifactReference{{
 		Kind: "thread_batch", Count: &value, References: references,
-		ReferencesTruncated: len(result.Items) > len(references), Failures: failures,
+		ReferencesTruncated: referencesTruncated, Failures: failures, FailuresTruncated: failuresTruncated,
 	}}, follow
 }
 
 func threadFacetJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
 	var request mcpcontract.HydrateThreadsInput
-	_ = json.Unmarshal([]byte(job.Request), &request)
+	if json.Unmarshal([]byte(job.Request), &request) != nil || len(request.Threads) == 0 || len(request.Facets) == 0 {
+		return nil, nil
+	}
 	return facetBatchArtifact(append([]mcpcontract.ThreadRef(nil), request.Threads...), request.Facets)
 }
 
@@ -216,12 +229,18 @@ func portfolioJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactRe
 		return nil, nil
 	}
 	value := mcpcontract.NonNegativeInt(result.Refreshed)
-	failures := make([]mcpcontract.JobArtifactFailure, len(result.Failures))
-	for i, failure := range result.Failures {
-		failures[i] = mcpcontract.JobArtifactFailure{
+	references, referencesTruncated := boundedArtifactReferences(result.PullRequests)
+	failures := make([]mcpcontract.JobArtifactFailure, 0, min(len(result.Failures), maxJobArtifactItems))
+	failuresTruncated := false
+	for _, failure := range result.Failures {
+		if len(failures) >= maxJobArtifactItems {
+			failuresTruncated = true
+			continue
+		}
+		failures = append(failures, mcpcontract.JobArtifactFailure{
 			Reference: failure.Reference, Status: mcpcontract.BatchItemStatus(failure.Status), Reason: failure.Reason,
 			Message: failure.Message, RetryAfterMS: mcpcontract.NonNegativeInt(failure.RetryAfterMS),
-		}
+		})
 	}
 	var request mcpcontract.SyncPortfolioInput
 	_ = json.Unmarshal([]byte(job.Request), &request)
@@ -236,9 +255,18 @@ func portfolioJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactRe
 			next.Selection = "authored"
 		}
 		if next.Selection == "" {
-			next.PullRequests = portfolioResultRefs(result.PullRequests)
+			next.PullRequests = portfolioResultRefs(references)
 			if len(next.PullRequests) > 0 {
 				next.Selection = "explicit"
+			}
+		}
+		if next.Selection == "explicit" {
+			// Stored pre-contract jobs can carry a wider request than the current
+			// action schema accepts. Recover only the exact, bounded result set
+			// that this terminal artifact can honestly identify.
+			next.PullRequests = portfolioResultRefs(references)
+			if len(next.PullRequests) == 0 {
+				next.Selection = ""
 			}
 		}
 		if next.Selection != "" && next.Selection == "authored" {
@@ -249,12 +277,15 @@ func portfolioJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactRe
 			recovery = recoveryPlan("portfolio_discovery_incomplete", "Portfolio discovery was incomplete or bounded. Repeat synchronization with the returned larger discovery bound, then reread the portfolio.", mcpcontract.RecoveryAction(next))
 		}
 	}
-	follow := &mcpcontract.JobFollowUp{
-		Action: mcpcontract.FollowUpAction{Type: "list_pull_request_portfolio", ListPortfolio: portfolioReadFollowUpArguments(request, result.Login, result.PullRequests)},
-		Reason: "Read these refreshed pull requests from the offline portfolio.",
+	var follow *mcpcontract.JobFollowUp
+	if arguments := portfolioReadFollowUpArguments(request, result.Login, references); arguments != nil {
+		follow = &mcpcontract.JobFollowUp{
+			Action: mcpcontract.FollowUpAction{Type: "list_pull_request_portfolio", ListPortfolio: arguments},
+			Reason: "Read these refreshed pull requests from the offline portfolio.",
+		}
 	}
 	return []mcpcontract.JobArtifactReference{{
-		Kind: "pull_request_batch", Count: &value, References: append([]string(nil), result.PullRequests...), Failures: failures,
+		Kind: "pull_request_batch", Count: &value, References: references, ReferencesTruncated: referencesTruncated, Failures: failures, FailuresTruncated: failuresTruncated,
 		Status: result.Status, DiscoveryStatus: result.DiscoveryStatus, SearchIncomplete: result.SearchIncomplete, RequestCapped: result.RequestCapped, Recovery: recovery,
 	}}, follow
 }
@@ -290,12 +321,18 @@ func pullRequestWorkflowJobArtifact(job *contracts.JobResult) ([]mcpcontract.Job
 		kind, reason, resourceKind = "ci_failure_report", "Read the persisted CI reports and bounded job logs through their resource links.", "ci-failure-report"
 	}
 	artifact := mcpcontract.JobArtifactReference{Kind: kind}
+	completed := 0
 	if len(result.Items) == 0 {
 		var request struct {
 			PullRequests []mcpcontract.ThreadRef `json:"pull_requests"`
 		}
 		if json.Unmarshal([]byte(job.Request), &request) == nil {
 			for _, ref := range request.PullRequests {
+				completed++
+				if len(artifact.References) >= maxJobArtifactItems {
+					artifact.ReferencesTruncated = true
+					continue
+				}
 				artifact.References = append(artifact.References, fmt.Sprintf(
 					"gitcontribute://%s/%s/%s/%d", resourceKind, ref.Owner, ref.Repo, ref.Number,
 				))
@@ -304,7 +341,16 @@ func pullRequestWorkflowJobArtifact(job *contracts.JobResult) ([]mcpcontract.Job
 	}
 	for _, item := range result.Items {
 		if item.Status == "complete" {
-			artifact.References = append(artifact.References, item.ResourceURI)
+			completed++
+			if len(artifact.References) < maxJobArtifactItems {
+				artifact.References = append(artifact.References, item.ResourceURI)
+			} else {
+				artifact.ReferencesTruncated = true
+			}
+			continue
+		}
+		if len(artifact.Failures) >= maxJobArtifactItems {
+			artifact.FailuresTruncated = true
 			continue
 		}
 		artifact.Failures = append(artifact.Failures, mcpcontract.JobArtifactFailure{
@@ -312,13 +358,20 @@ func pullRequestWorkflowJobArtifact(job *contracts.JobResult) ([]mcpcontract.Job
 			RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfterMS),
 		})
 	}
-	count := mcpcontract.NonNegativeInt(len(artifact.References))
+	count := mcpcontract.NonNegativeInt(completed)
 	artifact.Count = &count
 	var follow *mcpcontract.JobFollowUp
 	if len(artifact.References) > 0 {
 		follow = resourceFollowUp(artifact.References[0], reason)
 	}
 	return []mcpcontract.JobArtifactReference{artifact}, follow
+}
+
+func boundedArtifactReferences(values []string) ([]string, bool) {
+	if len(values) <= maxJobArtifactItems {
+		return append([]string(nil), values...), false
+	}
+	return append([]string(nil), values[:maxJobArtifactItems]...), true
 }
 
 func pullRequestFeedbackIndexJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
@@ -330,16 +383,28 @@ func pullRequestFeedbackIndexJobArtifact(job *contracts.JobResult) ([]mcpcontrac
 	if json.Unmarshal([]byte(job.Request), &request) != nil {
 		return nil, nil
 	}
-	refs := make([]string, 0, len(result.Items))
-	failures := make([]mcpcontract.JobArtifactFailure, 0, len(result.Items))
+	refs := make([]string, 0, min(len(result.Items), maxJobArtifactItems))
+	failures := make([]mcpcontract.JobArtifactFailure, 0, min(len(result.Items), maxJobArtifactItems))
+	completed := 0
+	referencesTruncated := false
+	failuresTruncated := false
 	for _, item := range result.Items {
 		if item.Status == "complete" {
-			refs = append(refs, item.Key)
+			completed++
+			if len(refs) < maxJobArtifactItems {
+				refs = append(refs, item.Key)
+			} else {
+				referencesTruncated = true
+			}
 			continue
 		}
-		failures = append(failures, mcpcontract.JobArtifactFailure{Reference: item.Key, Status: item.Status, Reason: item.Code, Message: item.Message, RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfterMS)})
+		if len(failures) < maxJobArtifactItems {
+			failures = append(failures, mcpcontract.JobArtifactFailure{Reference: item.Key, Status: item.Status, Reason: item.Code, Message: item.Message, RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfterMS)})
+		} else {
+			failuresTruncated = true
+		}
 	}
-	artifact := mcpcontract.JobArtifactReference{Kind: "pull_request_feedback_index", Count: ptrNonNegative(len(refs)), References: refs, ReferencesTruncated: len(result.Items) > len(refs), Failures: failures, Status: result.Status, DiscoveryStatus: result.DiscoveryStatus, Recovery: result.Recovery}
+	artifact := mcpcontract.JobArtifactReference{Kind: "pull_request_feedback_index", Count: ptrNonNegative(completed), References: refs, ReferencesTruncated: referencesTruncated, Failures: failures, FailuresTruncated: failuresTruncated, Status: result.Status, DiscoveryStatus: result.DiscoveryStatus, Recovery: result.Recovery}
 	follow := &mcpcontract.JobFollowUp{Action: mcpcontract.FollowUpAction{Type: "search_pull_request_feedback", SearchFeedback: &mcpcontract.SearchPullRequestFeedbackInput{Repository: request.Repository}}, Reason: "Search the indexed pull-request feedback through the offline corpus."}
 	return []mcpcontract.JobArtifactReference{artifact}, follow
 }
@@ -373,15 +438,20 @@ func indexRepositoriesJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobAr
 		return nil, nil
 	}
 	artifacts := make([]mcpcontract.JobArtifactReference, 0, len(result.Items))
-	completedRefs := make([]string, 0, min(len(result.Items), 100))
-	failures := make([]mcpcontract.JobArtifactFailure, 0, min(len(result.Items), 100))
+	completedRefs := make([]string, 0, min(len(result.Items), maxJobArtifactItems))
+	failures := make([]mcpcontract.JobArtifactFailure, 0, min(len(result.Items), maxJobArtifactItems))
+	completed := 0
+	referencesTruncated := false
+	failuresTruncated := false
 	for _, item := range result.Items {
 		if item.Status != "complete" {
-			if len(failures) < 100 {
+			if len(failures) < maxJobArtifactItems {
 				failures = append(failures, mcpcontract.JobArtifactFailure{
 					Reference: item.Key, Status: mcpcontract.BatchItemStatus(item.Status), Reason: item.Reason,
 					Message: item.Message, RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfterMS),
 				})
+			} else {
+				failuresTruncated = true
 			}
 			continue
 		}
@@ -395,6 +465,7 @@ func indexRepositoriesJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobAr
 		if item.ArtifactDigest == "" {
 			continue
 		}
+		completed++
 		artifact := mcpcontract.CodeIndexArtifact{Kind: "code_index", ID: "code-index:" + item.ArtifactDigest,
 			Repository: mcpcontract.RepositoryRef{Owner: owner, Repo: repo}, CommitSHA: item.CommitSHA,
 			SnapshotToken:  item.SnapshotToken,
@@ -404,15 +475,17 @@ func indexRepositoriesJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobAr
 			artifact.SnapshotToken = result.SnapshotToken
 		}
 		artifacts = append(artifacts, mcpcontract.JobArtifactReference{Kind: artifact.Kind, ID: artifact.ID, URI: artifact.ResourceURI, CodeIndex: &artifact})
-		if len(completedRefs) < 100 {
+		if len(completedRefs) < maxJobArtifactItems {
 			completedRefs = append(completedRefs, item.Key)
+		} else {
+			referencesTruncated = true
 		}
 	}
 	if len(failures) > 0 {
-		count := mcpcontract.NonNegativeInt(len(completedRefs))
+		count := mcpcontract.NonNegativeInt(completed)
 		artifacts = append(artifacts, mcpcontract.JobArtifactReference{
 			Kind: "repository_batch", Count: &count, References: completedRefs,
-			ReferencesTruncated: len(result.Items) > len(completedRefs), Failures: failures,
+			ReferencesTruncated: referencesTruncated, Failures: failures, FailuresTruncated: failuresTruncated,
 		})
 	}
 	return artifacts, firstCodeIndexFollowUp(artifacts)

@@ -131,6 +131,9 @@ func TestMCPReaderRepositorySearchDoesNotFallBackFromMissingExactRepository(t *t
 	if blank.Total != 1 || len(blank.Matches) != 1 {
 		t.Fatalf("blank exact repository search = %+v", blank)
 	}
+	if blank.Query != "" {
+		t.Fatalf("blank query was not normalized: %q", blank.Query)
+	}
 }
 
 func TestMCPReaderRepositorySearchPreservesIncompleteNestedProjection(t *testing.T) {

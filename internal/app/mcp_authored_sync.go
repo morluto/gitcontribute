@@ -14,6 +14,7 @@ import (
 )
 
 type authoredPullRequestSyncOptions struct {
+	Repository   *mcpcontract.RepositoryRef
 	State        string
 	UpdatedAfter string
 	Limit        int
@@ -68,13 +69,21 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in authoredPullR
 		}
 		perPage := min(100, in.Limit-discovered)
 		requests++
-		result, err := searcher.SearchAuthoredPullRequests(ctx, github.AuthoredPullRequestSearchOptions{Login: identity.Login, State: in.State, UpdatedAfter: updatedAfter, PageOptions: github.PageOptions{Page: page, PerPage: perPage}})
+		options := github.AuthoredPullRequestSearchOptions{Login: identity.Login, State: in.State, UpdatedAfter: updatedAfter, PageOptions: github.PageOptions{Page: page, PerPage: perPage}}
+		if in.Repository != nil {
+			options.RepositoryOwner = in.Repository.Owner
+			options.RepositoryName = in.Repository.Repo
+		}
+		result, err := searcher.SearchAuthoredPullRequests(ctx, options)
 		if err != nil {
 			return nil, err
 		}
 		incomplete = incomplete || result.Incomplete
 		for _, pr := range result.Items {
 			if pr.RepositoryOwner == "" || pr.RepositoryName == "" {
+				continue
+			}
+			if in.Repository != nil && (!strings.EqualFold(pr.RepositoryOwner, in.Repository.Owner) || !strings.EqualFold(pr.RepositoryName, in.Repository.Repo)) {
 				continue
 			}
 			key := pr.RepositoryOwner + "/" + pr.RepositoryName

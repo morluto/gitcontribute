@@ -112,7 +112,9 @@ func (c *CLI) runTriage(ctx context.Context, command string, cmd *triageCmd) err
 	}
 	switch command {
 	case "triage record":
-		_, _ = fmt.Fprintf(c.stderr, "recording triage outcome for %s...\n", cmd.Record.Target)
+		if err := c.writeProgressf("recording triage outcome for %s...\n", cmd.Record.Target); err != nil {
+			return err
+		}
 		result, err := service.RecordTriageEvent(ctx, contracts.RecordTriageEventOptions{
 			Target:  cmd.Record.Target,
 			Outcome: cmd.Record.Outcome,
@@ -150,7 +152,9 @@ func (c *CLI) runContribution(ctx context.Context, command string, cmd *contribu
 	}
 	switch command {
 	case "contribution record":
-		_, _ = fmt.Fprintf(c.stderr, "recording contribution for opportunity %s...\n", cmd.Record.OpportunityID)
+		if err := c.writeProgressf("recording contribution for opportunity %s...\n", cmd.Record.OpportunityID); err != nil {
+			return err
+		}
 		result, err := service.RecordContribution(ctx, contracts.RecordContributionOptions{
 			OpportunityID: cmd.Record.OpportunityID,
 			Kind:          cmd.Record.Kind,
@@ -183,7 +187,9 @@ func (c *CLI) runContribution(ctx context.Context, command string, cmd *contribu
 		}
 		return c.render(cmd.Show.JSON, result)
 	case "contribution outcome":
-		_, _ = fmt.Fprintf(c.stderr, "recording outcome %s for contribution %s...\n", cmd.Outcome.Outcome, cmd.Outcome.ContributionID)
+		if err := c.writeProgressf("recording outcome %s for contribution %s...\n", cmd.Outcome.Outcome, cmd.Outcome.ContributionID); err != nil {
+			return err
+		}
 		result, err := service.RecordContributionOutcome(ctx, contracts.RecordContributionOutcomeOptions{
 			ContributionID: cmd.Outcome.ContributionID,
 			Outcome:        cmd.Outcome.Outcome,
@@ -223,7 +229,9 @@ func (c *CLI) runTrackingExport(ctx context.Context, cmd *trackingExportCmd, ser
 	if cmd.Limit <= 0 || cmd.Limit > 100000 {
 		return NewCLIError(ExitUsage, errors.New("limit must be between 1 and 100000"))
 	}
-	_, _ = fmt.Fprintln(c.stderr, "exporting local tracking metadata...")
+	if err := c.writeProgressf("exporting local tracking metadata...\n"); err != nil {
+		return err
+	}
 	result, err := service.ExportLocalMetadata(ctx, contracts.MetadataExportOptions{Limit: cmd.Limit})
 	if err != nil {
 		return c.mapError(err)
@@ -245,7 +253,9 @@ func (c *CLI) runTrackingExport(ctx context.Context, cmd *trackingExportCmd, ser
 		return c.mapError(err)
 	}
 	if len(result.Data) == 0 || result.Data[len(result.Data)-1] != '\n' {
-		_, _ = fmt.Fprintln(c.stdout)
+		if _, err := fmt.Fprintln(c.stdout); err != nil {
+			return c.mapError(err)
+		}
 	}
 	return nil
 }
@@ -255,7 +265,9 @@ func (c *CLI) runTrackingImport(ctx context.Context, cmd *trackingImportCmd, ser
 	if err != nil {
 		return NewCLIError(ExitUsage, err)
 	}
-	_, _ = fmt.Fprintln(c.stderr, "importing local tracking metadata...")
+	if err := c.writeProgressf("importing local tracking metadata...\n"); err != nil {
+		return err
+	}
 	result, err := service.ImportLocalMetadata(ctx, contracts.MetadataImportOptions{Data: data})
 	if err != nil {
 		return c.mapError(err)

@@ -45,6 +45,7 @@ type jobExecutorConfig struct {
 	leaseTimeout      time.Duration
 	heartbeatInterval time.Duration
 	pollInterval      time.Duration
+	cleanupTimeout    time.Duration
 	maxConcurrentJobs int64
 	maxAdmittedJobs   int64
 }
@@ -54,6 +55,7 @@ func defaultJobExecutorConfig() jobExecutorConfig {
 		leaseTimeout:      10 * time.Second,
 		heartbeatInterval: 2 * time.Second,
 		pollInterval:      200 * time.Millisecond,
+		cleanupTimeout:    jobCleanupTimeout,
 		maxConcurrentJobs: 4,
 		maxAdmittedJobs:   256,
 	}
@@ -94,6 +96,9 @@ func newJobExecutorWithConfig(ctx context.Context, c jobStore, cfg jobExecutorCo
 	if cfg.pollInterval <= 0 {
 		cfg.pollInterval = defaultJobExecutorConfig().pollInterval
 	}
+	if cfg.cleanupTimeout <= 0 {
+		cfg.cleanupTimeout = defaultJobExecutorConfig().cleanupTimeout
+	}
 	if cfg.maxConcurrentJobs <= 0 {
 		cfg.maxConcurrentJobs = defaultJobExecutorConfig().maxConcurrentJobs
 	}
@@ -128,7 +133,7 @@ func newJobExecutorWithConfig(ctx context.Context, c jobStore, cfg jobExecutorCo
 	if err := c.ReconcileInterruptedJobs(ctx, cfg.leaseTimeout); err != nil {
 		e.cancel()
 		e.backgroundWG.Wait()
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), jobCleanupTimeout)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.cleanupTimeout)
 		defer cleanupCancel()
 		cleanupErr := c.DeleteJobOwner(cleanupCtx, ownerID)
 		if cleanupErr != nil {
@@ -228,7 +233,7 @@ func (e *JobExecutor) Close() error {
 	e.mu.Unlock()
 
 	e.backgroundWG.Wait()
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(e.rootCtx), jobCleanupTimeout)
+	cleanupCtx, cleanupCancel := e.cleanupContext(e.rootCtx)
 	defer cleanupCancel()
 	return e.corpus.DeleteJobOwner(cleanupCtx, e.ownerID)
 }
@@ -240,6 +245,35 @@ func (e *JobExecutor) releaseAdmission() {
 		e.cond.Broadcast()
 	}
 	e.mu.Unlock()
+}
+
+func (e *JobExecutor) cleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), e.cfg.cleanupTimeout)
+}
+
+// terminalWriteContext keeps a normal terminal write unbounded, but cancels it
+// after the cleanup window once the job is cancelled or the executor closes.
+func (e *JobExecutor) terminalWriteContext(jobCtx context.Context) (context.Context, context.CancelFunc) {
+	writeCtx, cancel := context.WithCancel(context.WithoutCancel(jobCtx))
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-done:
+			return
+		case <-jobCtx.Done():
+		}
+		timer := time.NewTimer(e.cfg.cleanupTimeout)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-timer.C:
+			cancel()
+		}
+	}()
+	return writeCtx, func() {
+		close(done)
+		cancel()
+	}
 }
 
 func (e *JobExecutor) heartbeat() {
@@ -317,9 +351,11 @@ func (e *JobExecutor) run(jobCtx context.Context, id string, cancel context.Canc
 
 	if err := e.slots.Acquire(jobCtx, 1); err != nil {
 		if e.rootCtx.Err() != nil {
+			cleanupCtx, cleanupCancel := e.cleanupContext(jobCtx)
+			defer cleanupCancel()
 			_ = e.corpus.TransitionJob(
-				context.WithoutCancel(jobCtx), id,
-				corpus.JobStatusQueued, corpus.JobStatusFailed, "", "executor closed before start",
+				cleanupCtx, id,
+				corpus.JobStatusQueued, corpus.JobStatusCancelled, "", "executor closed before start",
 			)
 		}
 		return
@@ -329,13 +365,16 @@ func (e *JobExecutor) run(jobCtx context.Context, id string, cancel context.Canc
 	e.mu.Lock()
 	if e.closed {
 		e.mu.Unlock()
-		_ = e.corpus.TransitionJob(context.WithoutCancel(jobCtx), id, corpus.JobStatusQueued, corpus.JobStatusFailed, "", "executor closed before start")
+		cleanupCtx, cleanupCancel := e.cleanupContext(jobCtx)
+		defer cleanupCancel()
+		_ = e.corpus.TransitionJob(cleanupCtx, id, corpus.JobStatusQueued, corpus.JobStatusCancelled, "", "executor closed before start")
 		return
 	}
 	e.mu.Unlock()
 
 	if err := e.corpus.StartJobAs(jobCtx, id, e.ownerID); err != nil {
-		writeCtx := context.WithoutCancel(jobCtx)
+		writeCtx, writeCancel := e.cleanupContext(jobCtx)
+		defer writeCancel()
 		job, getErr := e.corpus.GetJob(writeCtx, id)
 		if getErr != nil {
 			message := errors.Join(err, fmt.Errorf("get job after start failure: %w", getErr)).Error()
@@ -352,14 +391,16 @@ func (e *JobExecutor) run(jobCtx context.Context, id string, cancel context.Canc
 		return
 	}
 
-	_ = e.corpus.RecordJobEvent(context.WithoutCancel(jobCtx), id, "info", "job started")
+	startCtx, startCancel := e.cleanupContext(jobCtx)
+	_ = e.corpus.RecordJobEvent(startCtx, id, "info", "job started")
+	startCancel()
 
 	result, runErr := fn(jobCtx, func(progress, statistics string) error {
 		return e.corpus.UpdateJobProgress(jobCtx, id, progress, statistics)
 	})
 
-	writeCtx := context.WithoutCancel(jobCtx)
-
+	writeCtx, writeCancel := e.terminalWriteContext(jobCtx)
+	defer writeCancel()
 	job, err := e.corpus.GetJob(writeCtx, id)
 	if err != nil {
 		// Best effort: preserve the read error in durable job state.

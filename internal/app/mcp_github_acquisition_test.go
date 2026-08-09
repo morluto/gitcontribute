@@ -67,7 +67,7 @@ func TestMCPReaderSearchGitHubThreadsPersistsArtifactWithoutFullCoverage(t *test
 	now := time.Date(2026, 8, 1, 1, 2, 3, 0, time.UTC)
 	svc.SetClock(func() time.Time { return now })
 	reader := &MCPReader{svc}
-	out, err := reader.SearchGitHubThreads(context.Background(), mcpcontract.SearchGitHubThreadsInput{Owner: "acme", Repo: "rocket", Query: "persist", Kind: "issue", Limit: 2})
+	out, err := reader.SearchGitHubThreads(context.Background(), mcpcontract.SearchGitHubThreadsInput{Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}, Query: "persist", Kind: "issue", Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestMCPReaderReadSourceFilesStoresCommitAndBlobProvenanceAndReadsLocally(t 
 	defer func() { _ = svc.Close() }()
 	reader := &MCPReader{svc}
 	out, err := reader.ReadSourceFiles(context.Background(), mcpcontract.ReadSourceFilesInput{
-		Owner: "acme", Repo: "rocket", Ref: "main", Files: []mcpcontract.SourceFileRequest{{Path: "README.md", StartLine: 2, EndLine: 2}, {Path: "missing.md"}},
+		Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}, Ref: "main", Files: []mcpcontract.SourceFileRequest{{Path: "README.md", StartLine: 2, EndLine: 2}, {Path: "missing.md"}},
 		PerFileBytes: 100, TotalBytes: 100,
 	})
 	if err != nil {
@@ -161,6 +161,18 @@ func TestMCPReaderReadSourceFilesStoresCommitAndBlobProvenanceAndReadsLocally(t 
 	}
 	if artifact.SchemaVersion != sourceBundleArtifactKind || artifact.CommitSHA != "commit-9" || artifact.Items[0].Value == nil || artifact.Items[0].Value.Content != "second\n" || artifact.Items[0].Value.ContentSHA256 == "" || artifact.Items[1].Status != "not_found" {
 		t.Fatalf("source artifact = %+v", artifact)
+	}
+}
+
+func TestValidateReadSourceFilesInputTrimsRef(t *testing.T) {
+	in := mcpcontract.ReadSourceFilesInput{
+		Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}, Ref: " main ", Files: []mcpcontract.SourceFileRequest{{Path: "README.md"}},
+	}
+	if err := validateReadSourceFilesInput(&in); err != nil {
+		t.Fatal(err)
+	}
+	if in.Ref != "main" {
+		t.Fatalf("ref = %q, want canonical main", in.Ref)
 	}
 }
 

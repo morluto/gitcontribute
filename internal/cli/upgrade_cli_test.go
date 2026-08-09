@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -13,14 +14,32 @@ import (
 
 type fakeUpgradeService struct {
 	*fakeService
-	calls int
-	opts  contracts.UpgradeOptions
+	calls  int
+	opts   contracts.UpgradeOptions
+	report *contracts.UpgradeReport
 }
 
 func (s *fakeUpgradeService) Upgrade(_ context.Context, opts contracts.UpgradeOptions) (*contracts.UpgradeReport, error) {
 	s.calls++
 	s.opts = opts
+	if s.report != nil {
+		return s.report, nil
+	}
 	return &contracts.UpgradeReport{}, nil
+}
+
+type failFirstWriter struct {
+	bytes.Buffer
+	err    error
+	writes int
+}
+
+func (w *failFirstWriter) Write(data []byte) (int, error) {
+	w.writes++
+	if w.writes == 1 {
+		return 0, w.err
+	}
+	return w.Buffer.Write(data)
 }
 
 func TestUpgradeDoesNotPromptWhenStandardOutputIsRedirected(t *testing.T) {
@@ -57,5 +76,22 @@ func TestUpgradeConsentDescribesCheckAndEligibleManagedUpdate(t *testing.T) {
 	output := stderr.String()
 	if !strings.Contains(output, "Check npm for the latest GitContribute release and apply an eligible managed update?") || strings.Contains(output, "Install the latest global npm release") {
 		t.Fatalf("consent prompt = %q", output)
+	}
+}
+
+func TestUpgradeDoesNotLoseAnEarlierOutputFailure(t *testing.T) {
+	want := errors.New("broken stdout")
+	service := &fakeUpgradeService{fakeService: &fakeService{}, report: &contracts.UpgradeReport{
+		Context: "managed", Status: "updated", Latest: "1.2.3", Current: "1.2.2", Command: "npm install",
+	}}
+	stdout := &failFirstWriter{err: want}
+	var stderr bytes.Buffer
+	c := cli.New(service, nil, stdout, &stderr)
+	err := c.Run(context.Background(), []string{"upgrade", "--yes"})
+	if !errors.Is(err, want) {
+		t.Fatalf("upgrade error = %v, want %v", err, want)
+	}
+	if stdout.writes != 1 {
+		t.Fatalf("upgrade wrote %d times after output failure, want 1", stdout.writes)
 	}
 }

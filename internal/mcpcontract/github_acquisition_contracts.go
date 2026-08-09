@@ -14,15 +14,14 @@ type GitHubRateOutput struct {
 // The repository is required; live code search is intentionally not part of
 // this operation.
 type SearchGitHubThreadsInput struct {
-	Owner string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo  string `json:"repo" jsonschema:"GitHub repository name"`
-	Query string `json:"query" jsonschema:"User search text or GitHub issue-search qualifiers"`
-	Kind  string `json:"kind,omitempty" jsonschema:"Optional issue or pull_request filter"`
-	State string `json:"state,omitempty" jsonschema:"Optional open, closed, or all state filter"`
-	Sort  string `json:"sort,omitempty" jsonschema:"Optional GitHub issue-search sort: comments, created, updated, or reactions"`
-	Order string `json:"order,omitempty" jsonschema:"Optional asc or desc order"`
-	Page  int    `json:"page,omitempty" jsonschema:"GitHub result page from 1 to 1000"`
-	Limit int    `json:"limit,omitempty" jsonschema:"Results per page from 1 to 100"`
+	Repository RepositoryRef `json:"repository" jsonschema:"GitHub repository scope"`
+	Query      string        `json:"query" jsonschema:"User search text or GitHub issue-search qualifiers"`
+	Kind       string        `json:"kind,omitempty" jsonschema:"Optional issue or pull_request filter"`
+	State      string        `json:"state,omitempty" jsonschema:"Optional open, closed, or all state filter"`
+	Sort       string        `json:"sort,omitempty" jsonschema:"Optional GitHub issue-search sort: comments, created, updated, or reactions"`
+	Order      string        `json:"order,omitempty" jsonschema:"Optional asc or desc order"`
+	Page       int           `json:"page,omitempty" jsonschema:"GitHub result page from 1 to 1000"`
+	Limit      int           `json:"limit,omitempty" jsonschema:"Results per page from 1 to 100"`
 }
 
 // SearchGitHubThreadsOutput is the compact live result. The complete ordered
@@ -114,8 +113,7 @@ type GitHubAcquisitionProvenance struct {
 // ref. Named refs are resolved before content is read and are not authoritative
 // provenance.
 type ReadSourceFilesInput struct {
-	Owner        string              `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo         string              `json:"repo" jsonschema:"GitHub repository name"`
+	Repository   RepositoryRef       `json:"repository" jsonschema:"GitHub repository scope"`
 	Ref          string              `json:"ref" jsonschema:"Commit SHA, branch, or tag; resolved commit is authoritative"`
 	Files        []SourceFileRequest `json:"files" jsonschema:"Ordered repository-relative files with optional inclusive line ranges"`
 	PerFileBytes int                 `json:"per_file_bytes,omitempty" jsonschema:"Maximum decoded bytes per file from 1 to 1048576"`

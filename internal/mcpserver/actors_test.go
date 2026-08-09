@@ -66,3 +66,11 @@ func TestActorCapabilitiesAdvertiseAtomicTools(t *testing.T) {
 		}
 	}
 }
+
+func TestSearchGitHubUsersRejectsWhitespaceOnlyQuery(t *testing.T) {
+	server := &Server{reader: actorCapabilityReader{Reader: &fakeReader{}}}
+	_, _, err := server.searchGitHubUsers(context.Background(), nil, mcpcontract.SearchGitHubUsersInput{Query: " \t "})
+	if err == nil {
+		t.Fatal("whitespace-only GitHub user search query was accepted")
+	}
+}

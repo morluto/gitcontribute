@@ -219,6 +219,15 @@ func TestMCPSearchDefaultsCompactAndOffersFullView(t *testing.T) {
 	}
 }
 
+func TestMCPSearchRejectsWhitespaceOnlyQuery(t *testing.T) {
+	t.Parallel()
+
+	_, err := (&MCPReader{Service: newSearchTestService(t)}).Search(context.Background(), mcpcontract.SearchInput{Query: " \t\n "})
+	if err == nil || err.Error() != "query is required" {
+		t.Fatalf("whitespace query error = %v", err)
+	}
+}
+
 func TestSearchRejectsMalformedCursor(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

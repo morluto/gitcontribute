@@ -2,12 +2,174 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
+
+func TestFeedbackIndexArtifactBoundsReferencesAndKeepsCount(t *testing.T) {
+	t.Parallel()
+	items := make([]pullRequestFeedbackIndexItem, 0, maxJobArtifactItems+1)
+	for number := 1; number <= maxJobArtifactItems+1; number++ {
+		items = append(items, pullRequestFeedbackIndexItem{Key: fmt.Sprintf("acme/rocket/pull_request#%d", number), Status: "complete"})
+	}
+	result, err := json.Marshal(pullRequestFeedbackIndexResult{Status: "complete", DiscoveryStatus: "complete", Items: items})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := json.Marshal(mcpcontract.IndexPullRequestFeedbackInput{Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, _ := pullRequestFeedbackIndexJobArtifact(&contracts.JobResult{Kind: jobKindIndexPullRequestFeedback, Request: string(request), Result: string(result)})
+	if len(artifacts) != 1 {
+		t.Fatalf("artifacts = %+v", artifacts)
+	}
+	artifact := artifacts[0]
+	if artifact.Count == nil || int(*artifact.Count) != maxJobArtifactItems+1 || len(artifact.References) != maxJobArtifactItems || !artifact.ReferencesTruncated {
+		t.Fatalf("bounded feedback-index artifact = %+v", artifact)
+	}
+}
+
+func TestFeedbackIndexArtifactSignalsBoundedFailures(t *testing.T) {
+	t.Parallel()
+	items := make([]pullRequestFeedbackIndexItem, 0, maxJobArtifactItems+1)
+	for number := 1; number <= maxJobArtifactItems+1; number++ {
+		items = append(items, pullRequestFeedbackIndexItem{Key: fmt.Sprintf("acme/rocket/pull_request#%d", number), Status: "failed", Code: "transient", Message: "retry later"})
+	}
+	result, err := json.Marshal(pullRequestFeedbackIndexResult{Status: "partial", DiscoveryStatus: "partial", Items: items})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, err := json.Marshal(mcpcontract.IndexPullRequestFeedbackInput{Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, _ := pullRequestFeedbackIndexJobArtifact(&contracts.JobResult{Kind: jobKindIndexPullRequestFeedback, Request: string(request), Result: string(result)})
+	if len(artifacts) != 1 || len(artifacts[0].Failures) != maxJobArtifactItems || !artifacts[0].FailuresTruncated {
+		t.Fatalf("bounded feedback-index failures = %+v", artifacts)
+	}
+}
+
+func TestRepositoryBatchArtifactDoesNotCallFailuresReferenceTruncation(t *testing.T) {
+	t.Parallel()
+	job := &contracts.JobResult{Kind: "sync_repository_context", Result: `{"items":[{"key":"acme/rocket","status":"complete"},{"key":"acme/missing","status":"failed","reason":"not_found"}]}`}
+	artifacts, _ := repositoryBatchJobArtifact(job, 2)
+	if len(artifacts) != 1 || artifacts[0].ReferencesTruncated || len(artifacts[0].References) != 1 || len(artifacts[0].Failures) != 1 {
+		t.Fatalf("repository batch artifact = %+v", artifacts)
+	}
+}
+
+func TestRepositoryBatchArtifactSignalsBoundedFailures(t *testing.T) {
+	t.Parallel()
+	items := make([]syncBatchItem, maxJobArtifactItems+1)
+	for i := range items {
+		items[i] = syncBatchItem{Key: fmt.Sprintf("acme/repo-%d", i), Status: "failed", Reason: "transient"}
+	}
+	result, err := json.Marshal(syncBatchResult{Items: items})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, _ := repositoryBatchJobArtifact(&contracts.JobResult{Kind: "sync_repository_context", Result: string(result)}, len(items))
+	if len(artifacts) != 1 || len(artifacts[0].Failures) != maxJobArtifactItems || !artifacts[0].FailuresTruncated {
+		t.Fatalf("bounded repository failures = %+v", artifacts)
+	}
+}
+
+func TestWorkflowArtifactBoundsPersistedTerminalLists(t *testing.T) {
+	t.Parallel()
+	items := make([]pullRequestWorkflowItem, 0, 2*maxJobArtifactItems+2)
+	for i := 0; i <= maxJobArtifactItems; i++ {
+		items = append(items, pullRequestWorkflowItem{Key: fmt.Sprintf("acme/rocket/pull_request#%d", i+1), Status: "complete", ResourceURI: fmt.Sprintf("gitcontribute://pull-request-feedback/acme/rocket/%d", i+1)})
+	}
+	for i := 0; i <= maxJobArtifactItems; i++ {
+		items = append(items, pullRequestWorkflowItem{Key: fmt.Sprintf("acme/failed/pull_request#%d", i+1), Status: "failed", Code: "transient"})
+	}
+	result, err := json.Marshal(pullRequestWorkflowResult{BatchStatus: "partial", Items: items})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, _ := pullRequestWorkflowJobArtifact(&contracts.JobResult{Kind: "sync_pull_request_feedback", Result: string(result)})
+	if len(artifacts) != 1 {
+		t.Fatalf("artifacts = %+v", artifacts)
+	}
+	artifact := artifacts[0]
+	if artifact.Count == nil || int(*artifact.Count) != maxJobArtifactItems+1 || len(artifact.References) != maxJobArtifactItems || !artifact.ReferencesTruncated || len(artifact.Failures) != maxJobArtifactItems || !artifact.FailuresTruncated {
+		t.Fatalf("bounded workflow artifact = %+v", artifact)
+	}
+}
+
+func TestPortfolioArtifactBoundsPersistedTerminalLists(t *testing.T) {
+	t.Parallel()
+	refs := make([]string, maxJobArtifactItems+1)
+	failures := make([]pullRequestStatusFailure, maxJobArtifactItems+1)
+	for i := range refs {
+		refs[i] = fmt.Sprintf("acme/rocket/pull_request#%d", i+1)
+		failures[i] = pullRequestStatusFailure{Reference: refs[i], Status: "failed", Reason: "transient"}
+	}
+	result, err := json.Marshal(syncPortfolioResult{Status: "partial", PullRequests: refs, Failures: failures})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, _ := portfolioJobArtifact(&contracts.JobResult{Kind: jobKindSyncPullRequestPortfolio, Request: `{"selection":"explicit"}`, Result: string(result)})
+	if len(artifacts) != 1 {
+		t.Fatalf("artifacts = %+v", artifacts)
+	}
+	artifact := artifacts[0]
+	if len(artifact.References) != maxJobArtifactItems || !artifact.ReferencesTruncated || len(artifact.Failures) != maxJobArtifactItems || !artifact.FailuresTruncated {
+		t.Fatalf("bounded portfolio artifact = %+v", artifact)
+	}
+	if artifact.Recovery == nil || len(artifact.Recovery.Then) != 1 || artifact.Recovery.Then[0].SyncPortfolio == nil || len(artifact.Recovery.Then[0].SyncPortfolio.PullRequests) != maxJobArtifactItems {
+		t.Fatalf("portfolio recovery exceeds bounded artifact scope: %+v", artifact.Recovery)
+	}
+}
+
+func TestPortfolioArtifactOmitsExplicitRecoveryWithoutUsableReferences(t *testing.T) {
+	t.Parallel()
+	result, err := json.Marshal(syncPortfolioResult{
+		Status:       "partial",
+		PullRequests: []string{"malformed"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, _ := portfolioJobArtifact(&contracts.JobResult{
+		Kind:    jobKindSyncPullRequestPortfolio,
+		Request: `{"selection":"explicit","pull_requests":[{"owner":"acme","repo":"rocket","number":7}]}`,
+		Result:  string(result),
+	})
+	if len(artifacts) != 1 {
+		t.Fatalf("artifacts = %+v", artifacts)
+	}
+	if artifacts[0].Recovery != nil {
+		t.Fatalf("recovery without usable references = %+v", artifacts[0].Recovery)
+	}
+}
+
+func TestCodeIndexBatchArtifactDoesNotCallFailuresReferenceTruncation(t *testing.T) {
+	t.Parallel()
+	result, err := json.Marshal(indexJobResult{Items: []indexJobItem{
+		{Key: "acme/rocket", Status: "complete", CommitSHA: "abc123", ArtifactDigest: "artifact"},
+		{Key: "acme/missing", Status: "failed", Reason: "not_found"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifacts, _ := indexRepositoriesJobArtifact(&contracts.JobResult{Kind: "index_repositories", Result: string(result)})
+	for _, artifact := range artifacts {
+		if artifact.Kind != "repository_batch" {
+			continue
+		}
+		if artifact.ReferencesTruncated || len(artifact.References) != 1 || len(artifact.Failures) != 1 {
+			t.Fatalf("code-index batch artifact = %+v", artifact)
+		}
+		return
+	}
+	t.Fatalf("missing code-index batch artifact: %+v", artifacts)
+}
 
 func TestJobExecutionSeparatesRunningStateFromTerminalOutcome(t *testing.T) {
 	t.Parallel()
@@ -124,14 +286,14 @@ func TestPortfolioFollowUpUsesPortfolioReadArguments(t *testing.T) {
 	t.Parallel()
 	job := &contracts.JobResult{
 		Kind: jobKindSyncPullRequestPortfolio, Status: "succeeded",
-		Request: `{"selection":"authored","state":"closed","limit":10}`,
+		Request: `{"selection":"authored","repository":{"owner":"acme","repo":"rocket"},"state":"closed","limit":10}`,
 		Result:  `{"status":"complete","login":"alice","pull_requests":["acme/rocket/pull_request#7"],"refreshed":1}`,
 	}
 	_, follow := jobArtifactsAndFollowUp(job, 1)
 	if follow == nil || follow.Action.Type != "list_pull_request_portfolio" || follow.Action.ListPortfolio == nil {
 		t.Fatalf("portfolio handoff = %+v", follow)
 	}
-	if len(follow.Action.ListPortfolio.Authors) != 1 || follow.Action.ListPortfolio.Authors[0] != "alice" || follow.Action.ListPortfolio.State != "closed" || follow.Action.ListPortfolio.Limit != 10 || follow.Action.ListPortfolio.View != "compact" {
+	if follow.Action.ListPortfolio.Repository == nil || follow.Action.ListPortfolio.Repository.Owner != "acme" || follow.Action.ListPortfolio.Repository.Repo != "rocket" || len(follow.Action.ListPortfolio.Authors) != 1 || follow.Action.ListPortfolio.Authors[0] != "alice" || follow.Action.ListPortfolio.State != "closed" || follow.Action.ListPortfolio.Limit != 10 || follow.Action.ListPortfolio.View != "compact" {
 		t.Fatalf("portfolio follow-up arguments = %+v", follow.Action)
 	}
 }
@@ -150,6 +312,81 @@ func TestExplicitPortfolioFollowUpPreservesExactReferences(t *testing.T) {
 	ref := follow.Action.ListPortfolio.PullRequests[0]
 	if ref.Owner != "acme" || ref.Repo != "rocket" || ref.Kind != "pull_request" || ref.Number != 7 {
 		t.Fatalf("exact portfolio handoff = %+v", ref)
+	}
+}
+
+func TestLegacyAuthoredPortfolioFollowUpUsesObservedLogin(t *testing.T) {
+	t.Parallel()
+	job := &contracts.JobResult{
+		Kind: jobKindSyncPullRequestPortfolio, Status: "succeeded",
+		Request: `{}`,
+		Result:  `{"status":"complete","login":"alice","pull_requests":["acme/rocket/pull_request#7"],"refreshed":1,"discovery_status":"complete"}`,
+	}
+	_, follow := jobArtifactsAndFollowUp(job, 1)
+	if follow == nil || follow.Action.ListPortfolio == nil || len(follow.Action.ListPortfolio.Authors) != 1 || follow.Action.ListPortfolio.Authors[0] != "alice" {
+		t.Fatalf("legacy authored portfolio handoff = %+v", follow)
+	}
+}
+
+func TestLegacyExplicitPortfolioFollowUpPreservesResultReferences(t *testing.T) {
+	t.Parallel()
+	job := &contracts.JobResult{
+		Kind: jobKindSyncPullRequestPortfolio, Status: "succeeded",
+		Request: `{}`,
+		Result:  `{"status":"complete","pull_requests":["acme/rocket/pull_request#7"],"refreshed":1,"discovery_status":"complete"}`,
+	}
+	_, follow := jobArtifactsAndFollowUp(job, 1)
+	if follow == nil || follow.Action.ListPortfolio == nil || len(follow.Action.ListPortfolio.PullRequests) != 1 {
+		t.Fatalf("legacy explicit portfolio handoff = %+v", follow)
+	}
+}
+
+func TestPortfolioFollowUpOmitsUnprovenScope(t *testing.T) {
+	t.Parallel()
+	for _, job := range []*contracts.JobResult{
+		{
+			Kind: jobKindSyncPullRequestPortfolio, Status: "succeeded",
+			Request: `{"selection":"authored","state":"closed","limit":10}`,
+			Result:  `{"status":"complete","pull_requests":["acme/rocket/pull_request#7"],"refreshed":1}`,
+		},
+		{
+			Kind: jobKindSyncPullRequestPortfolio, Status: "succeeded",
+			Request: `{"selection":"explicit","pull_requests":[{"owner":"acme","repo":"rocket","kind":"pull_request","number":7}]}`,
+			Result:  `{"status":"complete","pull_requests":["not-a-pull-request"],"refreshed":1}`,
+		},
+		{
+			Kind: jobKindSyncPullRequestPortfolio, Status: "succeeded",
+			Request: `{}`,
+			Result:  `{"status":"complete","pull_requests":["not-a-pull-request"],"refreshed":1}`,
+		},
+	} {
+		_, follow := jobArtifactsAndFollowUp(job, 1)
+		if follow != nil {
+			t.Fatalf("unproven portfolio scope yielded follow-up = %+v", follow)
+		}
+	}
+}
+
+func TestJobArtifactsOmitFollowUpWhenRequestCannotProveScope(t *testing.T) {
+	t.Parallel()
+	for _, job := range []*contracts.JobResult{
+		{
+			Kind:    "sync_repository_context",
+			Status:  "succeeded",
+			Request: `not-json`,
+			Result:  `{"items":[{"key":"acme/rocket","status":"complete"}]}`,
+		},
+		{
+			Kind:    jobKindSyncThreadFacets,
+			Status:  "succeeded",
+			Request: `not-json`,
+			Result:  `{"status":"complete"}`,
+		},
+	} {
+		_, follow := jobArtifactsAndFollowUp(job, 1)
+		if follow != nil {
+			t.Fatalf("unproven job scope yielded follow-up = %+v", follow)
+		}
 	}
 }
 

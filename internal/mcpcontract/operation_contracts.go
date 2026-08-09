@@ -75,6 +75,7 @@ type JobArtifactReference struct {
 	References          []string             `json:"references,omitempty" jsonschema:"Bounded exact repository, thread, or pull-request references produced by the job"`
 	ReferencesTruncated bool                 `json:"references_truncated,omitempty" jsonschema:"Whether more exact references exist than this bounded response includes"`
 	Failures            []JobArtifactFailure `json:"failures,omitempty" jsonschema:"Bounded per-reference outcomes that require retry or recovery"`
+	FailuresTruncated   bool                 `json:"failures_truncated,omitempty" jsonschema:"Whether more failed outcomes exist than this bounded response includes"`
 	CodeIndex           *CodeIndexArtifact   `json:"code_index,omitempty" jsonschema:"Revision-bound indexed-commit artifact"`
 	Status              string               `json:"status,omitempty" jsonschema:"Artifact completeness status"`
 	DiscoveryStatus     string               `json:"discovery_status,omitempty"`

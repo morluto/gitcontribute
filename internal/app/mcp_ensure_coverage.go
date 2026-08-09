@@ -38,6 +38,12 @@ func (r *MCPReader) EnsureCoverage(ctx context.Context, in mcpcontract.EnsureCov
 	if in.LimitPerRepository < 1 || in.LimitPerRepository > 1000 {
 		return mcpcontract.JobReference{}, errors.New("limit_per_repository must be between 1 and 1000")
 	}
+	if err := validateEnsureCoverageTarget(in.Target); err != nil {
+		return mcpcontract.JobReference{}, err
+	}
+	if in.Target.Type == mcpcontract.CoverageTargetRepository && len(in.Facets) > 0 {
+		return mcpcontract.JobReference{}, errors.New("facets can be selected only for exact-thread coverage")
+	}
 	allowedFacets := make(map[string]struct{})
 	for _, name := range facets.SelectableNames() {
 		allowedFacets[name] = struct{}{}
@@ -51,9 +57,6 @@ func (r *MCPReader) EnsureCoverage(ctx context.Context, in mcpcontract.EnsureCov
 			return mcpcontract.JobReference{}, fmt.Errorf("duplicate facet %q", name)
 		}
 		seenFacets[name] = struct{}{}
-	}
-	if err := validateEnsureCoverageTarget(in.Target); err != nil {
-		return mcpcontract.JobReference{}, err
 	}
 	id, err := r.submitJob(ctx, jobKindEnsureCoverage, in, func(ctx context.Context, report func(string, string) error) (any, error) {
 		return r.ensureCoverage(ctx, in, report)

@@ -277,6 +277,9 @@ func controlStatusHuman(r *contracts.ControlStatusResult) string {
 	for _, rate := range r.RateLimits {
 		fmt.Fprintf(&b, "\nGitHub rate limit %s: %d/%d remaining (observed %s)",
 			rate.Resource, rate.Remaining, rate.Limit, rate.ObservedAt)
+		if rate.Stale {
+			fmt.Fprint(&b, ", stale")
+		}
 		if rate.ResetAt != "" {
 			fmt.Fprintf(&b, ", resets %s", rate.ResetAt)
 		}

@@ -26,6 +26,9 @@ func (r *Runner) Run(ctx context.Context, opts contracts.MCPOptions) error {
 	if opts.Transport != "stdio" {
 		return fmt.Errorf("unsupported mcp transport %q", opts.Transport)
 	}
+	if r == nil || r.service == nil {
+		return fmt.Errorf("mcp service is required")
+	}
 	newServer := mcpserver.New
 	if opts.ReadOnly {
 		newServer = mcpserver.NewReadOnly

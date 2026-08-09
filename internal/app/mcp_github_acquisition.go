@@ -41,7 +41,7 @@ func (r *MCPReader) SearchGitHubThreads(ctx context.Context, in mcpcontract.Sear
 		return mcpcontract.SearchGitHubThreadsOutput{}, errors.New("configured GitHub reader does not support thread search")
 	}
 	result, err := searcher.SearchThreads(ctx, github.ThreadSearchOptions{
-		Owner: in.Owner, Repo: in.Repo, Query: in.Query, Kind: github.ThreadKind(in.Kind), State: in.State,
+		Owner: in.Repository.Owner, Repo: in.Repository.Repo, Query: in.Query, Kind: github.ThreadKind(in.Kind), State: in.State,
 		Sort: in.Sort, Order: in.Order, PageOptions: github.PageOptions{Page: in.Page, PerPage: in.Limit},
 	})
 	if err != nil {
@@ -51,7 +51,7 @@ func (r *MCPReader) SearchGitHubThreads(ctx context.Context, in mcpcontract.Sear
 }
 
 func validateGitHubThreadSearchInput(in *mcpcontract.SearchGitHubThreadsInput) error {
-	if err := (domain.RepoRef{Owner: in.Owner, Repo: in.Repo}).Validate(); err != nil {
+	if err := (domain.RepoRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo}).Validate(); err != nil {
 		return err
 	}
 	in.Query = strings.TrimSpace(in.Query)
@@ -98,7 +98,7 @@ func (r *MCPReader) persistGitHubThreadSearch(ctx context.Context, in mcpcontrac
 	}
 	now := r.now().UTC()
 	out := mcpcontract.SearchGitHubThreadsOutput{
-		Status: "complete", Repository: mcpcontract.RepositoryRef{Owner: in.Owner, Repo: in.Repo}, Query: in.Query,
+		Status: "complete", Repository: in.Repository, Query: in.Query,
 		ProviderQuery: result.Query, Kind: in.Kind, State: in.State, Sort: in.Sort, Order: in.Order,
 		Page: in.Page, Limit: in.Limit, Total: result.Total, Incomplete: result.Incomplete,
 		Rate: githubRateOutput(result.Rate), Coverage: "repository_thread_coverage_incomplete", ObservedAt: formatTime(now),
@@ -140,25 +140,25 @@ func (r *MCPReader) persistGitHubThreadSearch(ctx context.Context, in mcpcontrac
 	}
 	artifact.RecoveryPlans = append([]mcpcontract.RecoveryPlan(nil), out.RecoveryPlans...)
 
-	repo, err := ensureSearchRepository(ctx, c, in.Owner, in.Repo)
+	repo, err := ensureSearchRepository(ctx, c, in.Repository.Owner, in.Repository.Repo)
 	if err != nil {
 		return mcpcontract.SearchGitHubThreadsOutput{}, err
 	}
 	for index, issue := range result.Items {
 		if issue.RepositoryOwner == "" {
-			issue.RepositoryOwner = in.Owner
+			issue.RepositoryOwner = in.Repository.Owner
 		}
 		if issue.RepositoryName == "" {
-			issue.RepositoryName = in.Repo
+			issue.RepositoryName = in.Repository.Repo
 		}
 		item := mcpcontract.BatchItem[mcpcontract.ThreadOutput]{Key: threadSearchItemKey(issue, index), Status: "complete"}
-		if !strings.EqualFold(issue.RepositoryOwner, in.Owner) || !strings.EqualFold(issue.RepositoryName, in.Repo) {
+		if !strings.EqualFold(issue.RepositoryOwner, in.Repository.Owner) || !strings.EqualFold(issue.RepositoryName, in.Repository.Repo) {
 			item.Status = "failed"
 			item.Reason = "repository_scope_mismatch"
-			item.Message = fmt.Sprintf("provider returned %s/%s for requested %s/%s", issue.RepositoryOwner, issue.RepositoryName, in.Owner, in.Repo)
+			item.Message = fmt.Sprintf("provider returned %s/%s for requested %s/%s", issue.RepositoryOwner, issue.RepositoryName, in.Repository.Owner, in.Repository.Repo)
 			out.Status = "partial"
 			out.Items[index] = item
-			artifact.Items[index] = githubThreadSearchArtifactItem(issue, index, in.Owner, in.Repo)
+			artifact.Items[index] = githubThreadSearchArtifactItem(issue, index, in.Repository.Owner, in.Repository.Repo)
 			continue
 		}
 		thread, payload, payloadErr := threadFromIssue(issue)
@@ -178,12 +178,12 @@ func (r *MCPReader) persistGitHubThreadSearch(ctx context.Context, in mcpcontrac
 			out.Status = "partial"
 		}
 		out.Items[index] = item
-		artifact.Items[index] = githubThreadSearchArtifactItem(issue, index, in.Owner, in.Repo)
+		artifact.Items[index] = githubThreadSearchArtifactItem(issue, index, in.Repository.Owner, in.Repository.Repo)
 	}
 
 	snapshot, err := c.MaterializeReadSnapshot(ctx, corpus.SnapshotMaterialization{
 		Kind:            githubThreadSearchArtifactKind,
-		Scope:           map[string]any{"repository": in.Owner + "/" + in.Repo, "query": in.Query, "page": in.Page},
+		Scope:           map[string]any{"repository": in.Repository.Owner + "/" + in.Repository.Repo, "query": in.Query, "page": in.Page},
 		SourceManifest:  map[string]any{"provider_query": result.Query, "item_ids": artifactItemIDs(artifact.Items)},
 		DerivedVersions: map[string]string{"github_thread_search": "v1"},
 		Completeness:    artifact.Completeness,
@@ -240,7 +240,7 @@ func (r *MCPReader) ReadSourceFiles(ctx context.Context, in mcpcontract.ReadSour
 	for i, file := range in.Files {
 		requests[i] = github.SourceFileRequest{Path: file.Path, StartLine: file.StartLine, EndLine: file.EndLine}
 	}
-	result, err := fileReader.ReadSourceFiles(ctx, in.Owner, in.Repo, in.Ref, requests, github.SourceFileReadOptions{PerFileBytes: in.PerFileBytes, TotalBytes: in.TotalBytes})
+	result, err := fileReader.ReadSourceFiles(ctx, in.Repository.Owner, in.Repository.Repo, in.Ref, requests, github.SourceFileReadOptions{PerFileBytes: in.PerFileBytes, TotalBytes: in.TotalBytes})
 	if err != nil {
 		return mcpcontract.ReadSourceFilesOutput{}, err
 	}
@@ -248,10 +248,11 @@ func (r *MCPReader) ReadSourceFiles(ctx context.Context, in mcpcontract.ReadSour
 }
 
 func validateReadSourceFilesInput(in *mcpcontract.ReadSourceFilesInput) error {
-	if err := (domain.RepoRef{Owner: in.Owner, Repo: in.Repo}).Validate(); err != nil {
+	if err := (domain.RepoRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo}).Validate(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(in.Ref) == "" {
+	in.Ref = strings.TrimSpace(in.Ref)
+	if in.Ref == "" {
 		return errors.New("ref is required")
 	}
 	if len(in.Files) < 1 || len(in.Files) > maxSourceFileRequests {
@@ -294,7 +295,7 @@ func (r *MCPReader) persistSourceBundle(ctx context.Context, in mcpcontract.Read
 	}
 	now := r.now().UTC()
 	out := mcpcontract.ReadSourceFilesOutput{
-		Status: "complete", Repository: mcpcontract.RepositoryRef{Owner: in.Owner, Repo: in.Repo},
+		Status: "complete", Repository: in.Repository,
 		RequestedRef: result.Resolution.RequestedRef, ResolvedRef: result.Resolution.ResolvedRef, CommitSHA: result.Resolution.CommitSHA,
 		PerFileBytes: in.PerFileBytes, TotalByteLimit: in.TotalBytes, TotalBytes: result.TotalBytes,
 		Items: make([]mcpcontract.SourceFileBatchItem, len(result.Items)), ObservedAt: formatTime(now), Rate: githubRateOutput(result.Rate),
@@ -338,7 +339,7 @@ func (r *MCPReader) persistSourceBundle(ctx context.Context, in mcpcontract.Read
 	artifact.Completeness.ContentsBounded = true
 	snapshot, err := c.MaterializeReadSnapshot(ctx, corpus.SnapshotMaterialization{
 		Kind:            sourceBundleArtifactKind,
-		Scope:           map[string]any{"repository": in.Owner + "/" + in.Repo, "requested_ref": in.Ref, "paths": sourceBundlePaths(in.Files)},
+		Scope:           map[string]any{"repository": in.Repository.Owner + "/" + in.Repository.Repo, "requested_ref": in.Ref, "paths": sourceBundlePaths(in.Files)},
 		SourceManifest:  map[string]any{"commit_sha": result.Resolution.CommitSHA, "item_statuses": sourceBundleStatuses(result.Items)},
 		DerivedVersions: map[string]string{"source_bundle": "v1"}, Completeness: artifact.Completeness,
 		Provenance: artifact.Provenance, Payload: artifact,

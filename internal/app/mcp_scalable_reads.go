@@ -251,133 +251,6 @@ func (r *MCPReader) GetJobs(ctx context.Context, in mcpcontract.GetJobsInput) (m
 	return out, nil
 }
 
-// ListPullRequestPortfolio performs an offline projection over stored authored
-// PRs and status facets; unsupported health facets remain explicitly unknown.
-func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract.ListPullRequestPortfolioInput) (mcpcontract.ListPullRequestPortfolioOutput, error) {
-	if len(in.Authors) > 1 {
-		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("authors must contain at most one item")
-	}
-	if len(in.PullRequests) > 0 {
-		if len(in.PullRequests) > 100 {
-			return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("pull_requests must contain at most 100 items")
-		}
-		if len(in.Authors) > 0 || in.State != "" || in.Limit != 0 {
-			return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("pull_requests cannot be combined with authors, state, or limit")
-		}
-		if err := rejectDuplicateThreadRefs(in.PullRequests); err != nil {
-			return mcpcontract.ListPullRequestPortfolioOutput{}, err
-		}
-		if err := validatePullRequestRefs(in.PullRequests, "pull_requests"); err != nil {
-			return mcpcontract.ListPullRequestPortfolioOutput{}, err
-		}
-	}
-	if in.State == "" {
-		in.State = "open"
-	}
-	if in.State != "open" && in.State != "closed" && in.State != "all" {
-		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("state must be open, closed, or all")
-	}
-	if in.View == "" {
-		in.View = "compact"
-	}
-	if in.View != "compact" && in.View != "full" {
-		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("view must be compact or full")
-	}
-	if in.Limit == 0 && len(in.PullRequests) == 0 {
-		in.Limit = 20
-	}
-	if len(in.PullRequests) == 0 && (in.Limit < 1 || in.Limit > 100) {
-		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("limit must be between 1 and 100")
-	}
-	c, err := r.openReadOnlyCorpus(ctx)
-	if err != nil {
-		return mcpcontract.ListPullRequestPortfolioOutput{}, err
-	}
-	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
-	if err != nil {
-		return mcpcontract.ListPullRequestPortfolioOutput{}, err
-	}
-	page, unavailable, err := portfolioPage(ctx, c, in)
-	if err != nil {
-		return mcpcontract.ListPullRequestPortfolioOutput{}, err
-	}
-	format := portfolioResponseFormat(map[string]string{"compact": "concise", "full": "detailed"}[in.View])
-	readSet, err := loadPortfolioReadSet(ctx, c, page.PullRequests, format)
-	if err != nil {
-		return mcpcontract.ListPullRequestPortfolioOutput{}, err
-	}
-	out := mcpcontract.ListPullRequestPortfolioOutput{Status: "complete", View: in.View, RuleVersion: "portfolio.v2", GeneratedAt: formatTime(r.now()), PullRequests: make([]mcpcontract.PullRequestPortfolioItem, 0, len(page.PullRequests)), Total: page.Total, Truncated: page.Truncated, UnavailablePullRequests: unavailable, SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
-	if len(unavailable) > 0 {
-		out.Status = "partial"
-		out.Recovery = recoveryPlan("portfolio_items_unavailable", "Some exact pull requests are not present in the local corpus. Refresh those exact pull requests, then reread the portfolio.", mcpcontract.RecoveryAction(mcpcontract.SyncPortfolioInput{Selection: "explicit", PullRequests: append([]mcpcontract.ThreadRef(nil), unavailable...)}))
-	}
-	for _, storedPR := range page.PullRequests {
-		item, err := portfolioItem(storedPR, r.now(), readSet, format)
-		if err != nil {
-			return mcpcontract.ListPullRequestPortfolioOutput{}, err
-		}
-		if item.StatusCoverage != "complete" {
-			out.Status = "partial"
-			item.Recovery = recoveryPlan("portfolio_facet_incomplete", "Refresh the incomplete pull-request health facets, then reread this exact portfolio item.", syncPullRequestCalls([]mcpcontract.ThreadRef{{Owner: item.Owner, Repo: item.Repo, Kind: "pull_request", Number: item.Number}})...)
-		}
-		out.PullRequests = append(out.PullRequests, item)
-	}
-	if err := finishCorpusRead(ctx, c, revision); err != nil {
-		return mcpcontract.ListPullRequestPortfolioOutput{}, err
-	}
-	if out.Truncated {
-		out.Status = "partial"
-		nextLimit := min(100, max(in.Limit*2, in.Limit+1))
-		out.Recovery = recoveryPlan("portfolio_truncated", "The portfolio page is bounded. Read the next larger page before treating the returned set as exhaustive.", mcpcontract.RecoveryAction(mcpcontract.ListPullRequestPortfolioInput{Authors: append([]string(nil), in.Authors...), State: in.State, Limit: nextLimit, View: in.View, SnapshotToken: in.SnapshotToken}))
-	}
-	return out, nil
-}
-
-func portfolioPage(ctx context.Context, c *corpus.Corpus, in mcpcontract.ListPullRequestPortfolioInput) (corpus.PortfolioPage, []mcpcontract.ThreadRef, error) {
-	if len(in.PullRequests) == 0 {
-		author := ""
-		if len(in.Authors) > 0 {
-			author = strings.TrimSpace(in.Authors[0])
-		}
-		page, err := c.ListPullRequestPortfolioPage(ctx, author, in.State, in.Limit)
-		return page, nil, err
-	}
-	repositoryKeys := make([]corpus.RepositoryKey, 0, len(in.PullRequests))
-	for _, ref := range in.PullRequests {
-		repositoryKeys = append(repositoryKeys, corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo})
-	}
-	repositories, err := c.GetRepositoriesBatch(ctx, repositoryKeys)
-	if err != nil {
-		return corpus.PortfolioPage{}, nil, err
-	}
-	threadKeys := make([]corpus.ThreadKey, 0, len(in.PullRequests))
-	for _, ref := range in.PullRequests {
-		if repository := repositories[corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo}]; repository != nil {
-			threadKeys = append(threadKeys, corpus.ThreadKey{RepositoryID: repository.ID, Kind: corpus.ThreadKindPullRequest, Number: ref.Number})
-		}
-	}
-	threads, err := c.GetThreadsBatch(ctx, threadKeys)
-	if err != nil {
-		return corpus.PortfolioPage{}, nil, err
-	}
-	page := corpus.PortfolioPage{PullRequests: make([]corpus.PortfolioPullRequest, 0, len(in.PullRequests)), Total: len(in.PullRequests)}
-	unavailable := make([]mcpcontract.ThreadRef, 0)
-	for _, ref := range in.PullRequests {
-		repository := repositories[corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo}]
-		if repository == nil {
-			unavailable = append(unavailable, ref)
-			continue
-		}
-		thread := threads[corpus.ThreadKey{RepositoryID: repository.ID, Kind: corpus.ThreadKindPullRequest, Number: ref.Number}]
-		if thread == nil {
-			unavailable = append(unavailable, ref)
-			continue
-		}
-		page.PullRequests = append(page.PullRequests, corpus.PortfolioPullRequest{Owner: repository.Owner, Repo: repository.Name, Thread: *thread})
-	}
-	return page, unavailable, nil
-}
-
 type portfolioReadSet struct {
 	coverage     map[corpus.ThreadFacetKey]*corpus.Coverage
 	observations map[corpus.ThreadFacetKey]corpus.FacetObservationBatch
@@ -424,18 +297,35 @@ func loadPortfolioReadSet(ctx context.Context, c *corpus.Corpus, pullRequests []
 	return portfolioReadSet{coverage: coverage, observations: observations}, nil
 }
 
-// The projection deliberately keeps coverage, observation decoding, and the
-// portfolio.v2 classification together so unknown facets cannot become facts.
-//
-//nolint:gocognit,cyclop
 func portfolioItem(stored corpus.PortfolioPullRequest, now time.Time, readSet portfolioReadSet, format portfolioResponseFormat) (mcpcontract.PullRequestPortfolioItem, error) {
 	t := stored.Thread
 	out := mcpcontract.PullRequestPortfolioItem{Ref: fmt.Sprintf("%s/%s#%d", stored.Owner, stored.Repo, t.Number), Owner: stored.Owner, Repo: stored.Repo, Number: t.Number, Title: t.Title, State: t.State, Author: t.Author, Draft: t.Draft, SourceUpdatedAt: formatTime(t.SourceUpdatedAt), StatusCoverage: "missing"}
+	coverage := portfolioCoverage(&out, t.ID, readSet.coverage, format)
+	details, err := applyPortfolioDetails(&out, t.ID, coverage[FacetPRDetails], readSet.observations, format)
+	if err != nil {
+		return out, fmt.Errorf("decode pull-request details for %s: %w", out.Ref, err)
+	}
+	if err := applyPortfolioReviews(&out, t.ID, coverage[FacetPRReviews], readSet.observations); err != nil {
+		return out, fmt.Errorf("decode pull-request reviews for %s: %w", out.Ref, err)
+	}
+	mergeabilityKnown, err := applyPortfolioHealth(&out, t.ID, coverage, readSet.observations)
+	if err != nil {
+		return out, err
+	}
+	if err := applyPortfolioSupplementalDetails(&out, t.ID, coverage, readSet.observations, format); err != nil {
+		return out, err
+	}
+	addPortfolioCoverageReasons(&out, coverage, mergeabilityKnown)
+	setPortfolioAttention(&out, t, details, coverage, mergeabilityKnown, now)
+	return out, nil
+}
+
+func portfolioCoverage(out *mcpcontract.PullRequestPortfolioItem, threadID int64, all map[corpus.ThreadFacetKey]*corpus.Coverage, format portfolioResponseFormat) map[string]*corpus.Coverage {
 	facets := portfolioFacets()
 	coverage := make(map[string]*corpus.Coverage, len(facets))
 	complete, observed := true, 0
 	for _, facet := range facets {
-		cov := readSet.coverage[corpus.ThreadFacetKey{ThreadID: t.ID, Facet: facet}]
+		cov := all[corpus.ThreadFacetKey{ThreadID: threadID, Facet: facet}]
 		coverage[facet] = cov
 		status := "missing"
 		if cov != nil {
@@ -448,11 +338,11 @@ func portfolioItem(stored corpus.PortfolioPullRequest, now time.Time, readSet po
 		if cov == nil || !cov.Complete {
 			complete = false
 		}
-		entry := mcpcontract.FacetCoverageOutput{Facet: facet, Status: status}
-		if cov != nil {
-			entry.Complete, entry.UpdatedAt = cov.Complete, formatTime(cov.UpdatedAt)
-		}
 		if format.includesDetails() {
+			entry := mcpcontract.FacetCoverageOutput{Facet: facet, Status: status}
+			if cov != nil {
+				entry.Complete, entry.UpdatedAt = cov.Complete, formatTime(cov.UpdatedAt)
+			}
 			out.Facets = append(out.Facets, entry)
 		}
 	}
@@ -462,54 +352,66 @@ func portfolioItem(stored corpus.PortfolioPullRequest, now time.Time, readSet po
 	if complete {
 		out.StatusCoverage = "complete"
 	}
-	detailCoverage, reviewCoverage := coverage[FacetPRDetails], coverage[FacetPRReviews]
+	return coverage
+}
+
+func applyPortfolioDetails(out *mcpcontract.PullRequestPortfolioItem, threadID int64, coverage *corpus.Coverage, observations map[corpus.ThreadFacetKey]corpus.FacetObservationBatch, format portfolioResponseFormat) (github.PullRequestDetails, error) {
 	var details github.PullRequestDetails
-	if detailCoverage != nil && detailCoverage.Complete {
-		observedAt, err := decodeLatestFacet(readSet.observations, t.ID, FacetPRDetails, &details)
-		if err != nil {
-			return out, fmt.Errorf("decode pull-request details for %s: %w", out.Ref, err)
-		}
-		out.Mergeable = details.Mergeable
-		if format.includesDetails() {
-			out.HeadRef, out.HeadSHA, out.BaseRef, out.BaseSHA = details.HeadRef, details.HeadSHA, details.BaseRef, details.BaseSHA
-		}
-		out.StatusObservedAt = observedAt
+	if coverage == nil || !coverage.Complete {
+		return details, nil
 	}
-	if reviewCoverage != nil && reviewCoverage.Complete {
-		reviewObservations := readSet.observations[corpus.ThreadFacetKey{ThreadID: t.ID, Facet: FacetPRReviews}].Observations
-		latest := make(map[string]github.Review)
-		for _, observation := range reviewObservations {
-			var reviews []github.Review
-			if err := json.Unmarshal([]byte(observation.Payload), &reviews); err != nil {
-				return out, fmt.Errorf("decode pull-request reviews for %s: %w", out.Ref, err)
-			}
-			for _, review := range reviews {
-				previous, ok := latest[strings.ToLower(review.Author)]
-				if !ok || review.SubmittedAt.After(previous.SubmittedAt) {
-					latest[strings.ToLower(review.Author)] = review
-				}
-			}
+	observedAt, err := decodeLatestFacet(observations, threadID, FacetPRDetails, &details)
+	if err != nil {
+		return details, err
+	}
+	out.Mergeable, out.StatusObservedAt = details.Mergeable, observedAt
+	if format.includesDetails() {
+		out.HeadRef, out.HeadSHA, out.BaseRef, out.BaseSHA = details.HeadRef, details.HeadSHA, details.BaseRef, details.BaseSHA
+	}
+	return details, nil
+}
+
+func applyPortfolioReviews(out *mcpcontract.PullRequestPortfolioItem, threadID int64, coverage *corpus.Coverage, observations map[corpus.ThreadFacetKey]corpus.FacetObservationBatch) error {
+	if coverage == nil || !coverage.Complete {
+		return nil
+	}
+	latest := make(map[string]github.Review)
+	for _, observation := range observations[corpus.ThreadFacetKey{ThreadID: threadID, Facet: FacetPRReviews}].Observations {
+		var reviews []github.Review
+		if err := json.Unmarshal([]byte(observation.Payload), &reviews); err != nil {
+			return err
 		}
-		changes, approved := false, false
-		for _, review := range latest {
-			switch strings.ToUpper(review.State) {
-			case "CHANGES_REQUESTED":
-				changes = true
-			case "APPROVED":
-				approved = true
+		for _, review := range reviews {
+			key := strings.ToLower(review.Author)
+			previous, ok := latest[key]
+			if !ok || review.SubmittedAt.After(previous.SubmittedAt) {
+				latest[key] = review
 			}
-		}
-		if changes {
-			out.ReviewDecision = "changes_requested"
-		} else if approved {
-			out.ReviewDecision = "approved"
 		}
 	}
+	changes, approved := false, false
+	for _, review := range latest {
+		switch strings.ToUpper(review.State) {
+		case "CHANGES_REQUESTED":
+			changes = true
+		case "APPROVED":
+			approved = true
+		}
+	}
+	if changes {
+		out.ReviewDecision = "changes_requested"
+	} else if approved {
+		out.ReviewDecision = "approved"
+	}
+	return nil
+}
+
+func applyPortfolioHealth(out *mcpcontract.PullRequestPortfolioItem, threadID int64, coverage map[string]*corpus.Coverage, observations map[corpus.ThreadFacetKey]corpus.FacetObservationBatch) (bool, error) {
 	mergeabilityKnown := false
 	if cov := coverage[FacetPRMergeState]; cov != nil && cov.Complete {
 		var value github.PullRequestMergeState
-		if _, err := decodeLatestFacet(readSet.observations, t.ID, FacetPRMergeState, &value); err != nil {
-			return out, err
+		if _, err := decodeLatestFacet(observations, threadID, FacetPRMergeState, &value); err != nil {
+			return false, err
 		}
 		out.MergeStateStatus = strings.ToLower(value.MergeStateStatus)
 		if value.MergeableKnown {
@@ -520,16 +422,15 @@ func portfolioItem(stored corpus.PortfolioPullRequest, now time.Time, readSet po
 	}
 	if cov := coverage[FacetPRChecks]; cov != nil && cov.Complete {
 		var checks []github.PullRequestCheck
-		if _, err := decodeLatestFacet(readSet.observations, t.ID, FacetPRChecks, &checks); err != nil {
-			return out, err
+		if _, err := decodeLatestFacet(observations, threadID, FacetPRChecks, &checks); err != nil {
+			return false, err
 		}
-		out.ChecksTotal = len(checks)
-		out.ChecksStatus = classifyChecks(checks)
+		out.ChecksTotal, out.ChecksStatus = len(checks), classifyChecks(checks)
 	}
 	if cov := coverage[FacetPRReviewThreads]; cov != nil && cov.Complete {
 		var threads []github.PullRequestReviewThread
-		if _, err := decodeLatestFacet(readSet.observations, t.ID, FacetPRReviewThreads, &threads); err != nil {
-			return out, err
+		if _, err := decodeLatestFacet(observations, threadID, FacetPRReviewThreads, &threads); err != nil {
+			return false, err
 		}
 		unresolved := 0
 		for _, thread := range threads {
@@ -541,31 +442,42 @@ func portfolioItem(stored corpus.PortfolioPullRequest, now time.Time, readSet po
 	}
 	if cov := coverage[FacetPRMergeQueue]; cov != nil && cov.Complete {
 		var queue *github.PullRequestMergeQueueEntry
-		if _, err := decodeLatestFacet(readSet.observations, t.ID, FacetPRMergeQueue, &queue); err != nil {
-			return out, err
+		if _, err := decodeLatestFacet(observations, threadID, FacetPRMergeQueue, &queue); err != nil {
+			return false, err
 		}
 		if queue != nil {
 			out.MergeQueueState, out.MergeQueuePosition = strings.ToLower(queue.State), queue.Position
 		}
 	}
-	if cov := coverage[FacetPRClosingIssues]; format.includesDetails() && cov != nil && cov.Complete {
+	return mergeabilityKnown, nil
+}
+
+func applyPortfolioSupplementalDetails(out *mcpcontract.PullRequestPortfolioItem, threadID int64, coverage map[string]*corpus.Coverage, observations map[corpus.ThreadFacetKey]corpus.FacetObservationBatch, format portfolioResponseFormat) error {
+	if !format.includesDetails() {
+		return nil
+	}
+	if cov := coverage[FacetPRClosingIssues]; cov != nil && cov.Complete {
 		var issues []github.PullRequestClosingIssue
-		if _, err := decodeLatestFacet(readSet.observations, t.ID, FacetPRClosingIssues, &issues); err != nil {
-			return out, err
+		if _, err := decodeLatestFacet(observations, threadID, FacetPRClosingIssues, &issues); err != nil {
+			return err
 		}
 		for _, issue := range issues {
 			out.ClosingIssues = append(out.ClosingIssues, fmt.Sprintf("%s#%d", issue.RepositoryFullName, issue.Number))
 		}
 	}
-	if cov := coverage[FacetPRFiles]; format.includesDetails() && cov != nil && cov.Complete {
+	if cov := coverage[FacetPRFiles]; cov != nil && cov.Complete {
 		var files []github.PullRequestFile
-		if _, err := decodeLatestFacet(readSet.observations, t.ID, FacetPRFiles, &files); err != nil {
-			return out, err
+		if _, err := decodeLatestFacet(observations, threadID, FacetPRFiles, &files); err != nil {
+			return err
 		}
 		for _, file := range files {
 			out.ChangedFiles = append(out.ChangedFiles, file.Path)
 		}
 	}
+	return nil
+}
+
+func addPortfolioCoverageReasons(out *mcpcontract.PullRequestPortfolioItem, coverage map[string]*corpus.Coverage, mergeabilityKnown bool) {
 	for _, facet := range []string{FacetPRChecks, FacetPRReviewThreads, FacetPRMergeState, FacetPRMergeQueue} {
 		if coverage[facet] == nil || !coverage[facet].Complete {
 			out.Reasons = append(out.Reasons, facet+" coverage is incomplete")
@@ -574,15 +486,19 @@ func portfolioItem(stored corpus.PortfolioPullRequest, now time.Time, readSet po
 	if coverage[FacetPRMergeState] != nil && coverage[FacetPRMergeState].Complete && !mergeabilityKnown {
 		out.Reasons = append(out.Reasons, "GitHub mergeability is still computing")
 	}
-	healthComplete := coverage[FacetPRChecks] != nil && coverage[FacetPRChecks].Complete && coverage[FacetPRReviewThreads] != nil && coverage[FacetPRReviewThreads].Complete && coverage[FacetPRMergeState] != nil && coverage[FacetPRMergeState].Complete && mergeabilityKnown && coverage[FacetPRMergeQueue] != nil && coverage[FacetPRMergeQueue].Complete
+}
+
+func setPortfolioAttention(out *mcpcontract.PullRequestPortfolioItem, thread corpus.Thread, details github.PullRequestDetails, coverage map[string]*corpus.Coverage, mergeabilityKnown bool, now time.Time) {
+	detailCoverage := coverage[FacetPRDetails]
+	healthComplete := completePortfolioHealthCoverage(coverage, mergeabilityKnown)
 	switch {
-	case t.Merged:
+	case thread.Merged:
 		out.Attention = "merged"
 		out.Reasons = append([]string{"pull request is merged"}, out.Reasons...)
-	case t.State == "closed" && t.MergedKnown:
+	case thread.State == "closed" && thread.MergedKnown:
 		out.Attention = "closed_unmerged"
 		out.Reasons = append([]string{"pull request is closed and GitHub reports it was not merged"}, out.Reasons...)
-	case t.State == "closed":
+	case thread.State == "closed":
 		out.Attention = "unknown"
 		out.Reasons = append([]string{"pull request is closed but merge state has not been observed"}, out.Reasons...)
 	case detailCoverage == nil:
@@ -612,7 +528,7 @@ func portfolioItem(stored corpus.PortfolioPullRequest, now time.Time, readSet po
 	case !healthComplete:
 		out.Attention = "unknown"
 		out.Reasons = append([]string{"required pull-request health coverage is incomplete"}, out.Reasons...)
-	case now.Sub(t.SourceUpdatedAt) > 14*24*time.Hour:
+	case now.Sub(thread.SourceUpdatedAt) > 14*24*time.Hour:
 		out.Attention = "stale"
 		out.Reasons = append([]string{"pull request has not been updated for more than 14 days"}, out.Reasons...)
 	case out.ReviewDecision == "approved":
@@ -622,7 +538,15 @@ func portfolioItem(stored corpus.PortfolioPullRequest, now time.Time, readSet po
 		out.Attention = "awaiting_review"
 		out.Reasons = append([]string{"no approval or change request is stored"}, out.Reasons...)
 	}
-	return out, nil
+}
+
+func completePortfolioHealthCoverage(coverage map[string]*corpus.Coverage, mergeabilityKnown bool) bool {
+	for _, facet := range []string{FacetPRChecks, FacetPRReviewThreads, FacetPRMergeState, FacetPRMergeQueue} {
+		if coverage[facet] == nil || !coverage[facet].Complete {
+			return false
+		}
+	}
+	return mergeabilityKnown
 }
 
 func portfolioFacets() []string {

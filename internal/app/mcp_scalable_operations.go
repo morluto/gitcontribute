@@ -636,13 +636,7 @@ func syncRepositoryContextItem(
 	if err != nil {
 		return corpus.Repository{}, err
 	}
-	defer func() {
-		if resultErr != nil {
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer cancel()
-			_ = c.FailRun(cleanupCtx, run.ID, resultErr.Error())
-		}
-	}()
+	defer failRunOnError(ctx, c, run.ID, &resultErr)
 	repo, _, err := syncRepositoryHeader(ctx, c, reader, ref, run.ID, budget)
 	if err != nil {
 		return corpus.Repository{}, err

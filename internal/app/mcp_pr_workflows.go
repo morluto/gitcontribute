@@ -18,6 +18,7 @@ const (
 	facetPRFeedbackInlineComments = "pr_feedback_inline_comments"
 	facetPRFeedbackReviewThreads  = "pr_feedback_review_threads"
 	facetPRCIReport               = "pr_ci_report"
+	maxFeedbackItemsPerChannel    = 1000
 )
 
 var (
@@ -64,7 +65,7 @@ func (r *MCPReader) SyncPullRequestFeedback(ctx context.Context, in mcpcontract.
 	if in.MaxItemsPerChannel == 0 {
 		in.MaxItemsPerChannel = 300
 	}
-	if in.MaxItemsPerChannel < 1 || in.MaxItemsPerChannel > 1000 {
+	if in.MaxItemsPerChannel < 1 || in.MaxItemsPerChannel > maxFeedbackItemsPerChannel {
 		return mcpcontract.JobReference{}, errors.New("max_items_per_channel must be between 1 and 1000")
 	}
 	if in.MaxRequests == 0 {
@@ -154,7 +155,7 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 			item.Status = "retryable"
 			item.Code = "feedback_coverage_incomplete"
 			item.Message = "one or more feedback channels reached max_items_per_channel"
-			item.Recovery = recoveryPlan("facet_incomplete", item.Message, mcpcontract.RecoveryAction(mcpcontract.SyncPullRequestFeedbackInput{PullRequests: []mcpcontract.ThreadRef{ref}, Channels: append([]string(nil), in.Channels...), ThreadState: in.ThreadState, MaxItemsPerChannel: in.MaxItemsPerChannel * 2, MaxRequests: in.MaxRequests}))
+			item.Recovery = feedbackCoverageRecovery(ref, in, item.Message)
 			item.HeadSHA = snapshot.HeadSHA
 			out.BatchStatus = "partial"
 		} else {
@@ -178,6 +179,17 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 		out.BatchStatus = "failed"
 	}
 	return out, nil
+}
+
+func feedbackCoverageRecovery(ref mcpcontract.ThreadRef, in mcpcontract.SyncPullRequestFeedbackInput, message string) *mcpcontract.RecoveryPlan {
+	if in.MaxItemsPerChannel >= maxFeedbackItemsPerChannel {
+		return nil
+	}
+	next := min(maxFeedbackItemsPerChannel, max(in.MaxItemsPerChannel*2, in.MaxItemsPerChannel+1))
+	return recoveryPlan("facet_incomplete", message, mcpcontract.RecoveryAction(mcpcontract.SyncPullRequestFeedbackInput{
+		PullRequests: []mcpcontract.ThreadRef{ref}, Channels: append([]string(nil), in.Channels...), ThreadState: in.ThreadState,
+		MaxItemsPerChannel: next, MaxRequests: in.MaxRequests,
+	}))
 }
 
 // persistPullRequestIdentity stores only the repository and exact PR identity

@@ -11,6 +11,7 @@ import (
 
 // SearchRepositories performs a local-only repository search.
 func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpcontract.SearchRepositoriesInput) (mcpcontract.SearchRepositoriesOutput, error) {
+	in.Query = strings.TrimSpace(in.Query)
 	repoRef := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
 	repoFilter := ""
 	if in.Owner != "" || in.Repo != "" {

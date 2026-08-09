@@ -138,8 +138,9 @@ known zero merge rate remains distinct from an unknown rate.
 
 Pull-request portfolios use the ordinary repository and thread projections.
 `github.sync_pull_request_portfolio` is the only public portfolio producer. Its
-discriminated selection is either authored discovery or an explicit bounded
-set; identity lookup, authored discovery, and scalar status refresh are
+discriminated selection is either authored discovery (optionally scoped to one
+repository) or an explicit bounded set; identity lookup, authored discovery,
+and scalar status refresh are
 internal phases rather than separately advertised operations.
 REST `pr_details` and `pr_reviews` facets are combined with typed GraphQL
 facets for checks, unresolved review threads, detailed merge state, merge queue,
@@ -398,10 +399,11 @@ live GitHub request
   -> local resources/read
 ```
 
-`github.search_threads` persists the returned issue or pull-request
+`github.search_threads` accepts a required nested repository reference and persists the returned issue or pull-request
 observations and an exact `github-thread-search.v1` result artifact. A search
 page never advances repository-wide thread coverage and an empty page is not
-proof that no matching live thread exists. `github.read_source_files` resolves
+proof that no matching live thread exists. `github.read_source_files` accepts
+the same required nested repository reference, resolves
 one named ref to a commit, reads bounded repository-relative files in input
 order, and stores a `source-bundle.v1` artifact. Commit SHA is the authoritative
 revision; GitHub blob SHA remains a separate file identity. Source content is

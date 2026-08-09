@@ -47,13 +47,7 @@ func (s *Service) syncProvidedThreadHeaders(ctx context.Context, repo contracts.
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if resultErr != nil {
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer cancel()
-			_ = c.FailRun(cleanupCtx, run.ID, resultErr.Error())
-		}
-	}()
+	defer failRunOnError(ctx, c, run.ID, &resultErr)
 	writer := &syncThreadWriter{
 		ctx: ctx, corpus: c, owner: ref.Owner, repo: ref.Repo, repositoryID: stored.ID, kind: "pull_request", sourceUpdatedAt: sourceUpdatedAt,
 	}
@@ -105,13 +99,7 @@ func (s *Service) syncThreadHeaders(ctx context.Context, repo contracts.RepoRef,
 	if err != nil {
 		return nil, err
 	}
-	defer func() {
-		if resultErr != nil {
-			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			defer cancel()
-			_ = c.FailRun(cleanupCtx, run.ID, resultErr.Error())
-		}
-	}()
+	defer failRunOnError(ctx, c, run.ID, &resultErr)
 	budget := newSyncRequestBudget(syncOpts.MaxRequests)
 	selection, err := syncThreadHeaderSelection(ctx, c, reader, ref, repoProjection.ID, repoProjection.SourceUpdatedAt, syncOpts, nil, budget)
 	if err != nil {
