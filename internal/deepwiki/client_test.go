@@ -2,15 +2,17 @@ package deepwiki
 
 import (
 	"context"
-	"errors"
-	"reflect"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func TestToolCall(t *testing.T) {
+func TestClientReadRoutesRequests(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name, action, repository, question, wantName string
@@ -24,31 +26,54 @@ func TestToolCall(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			name, args, err := toolCall(Request{Action: tt.action, Repository: tt.repository, Repositories: tt.repositories, Question: tt.question})
-			if err != nil || name != tt.wantName || !reflect.DeepEqual(args, tt.wantArgs) {
-				t.Fatalf("toolCall = %q, %#v, %v; want %q, %#v", name, args, err, tt.wantName, tt.wantArgs)
+			var (
+				mu   sync.Mutex
+				name string
+				args map[string]any
+			)
+			client := newTestClient(t, func(gotName string, gotArgs map[string]any) (*mcp.CallToolResult, error) {
+				mu.Lock()
+				defer mu.Unlock()
+				name, args = gotName, gotArgs
+				return &mcp.CallToolResult{}, nil
+			})
+			if _, err := client.Read(context.Background(), Request{Action: tt.action, Repository: tt.repository, Repositories: tt.repositories, Question: tt.question}); err != nil {
+				t.Fatal(err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			gotArgs, err := json.Marshal(args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantArgs, err := json.Marshal(tt.wantArgs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if name != tt.wantName || string(gotArgs) != string(wantArgs) {
+				t.Fatalf("tool call = %q, %#v; want %q, %#v", name, args, tt.wantName, tt.wantArgs)
 			}
 		})
 	}
 }
 
-func TestToolCallRejectsMissingAndUnsupportedInputs(t *testing.T) {
+func TestClientReadRejectsMissingAndUnsupportedInputs(t *testing.T) {
 	t.Parallel()
 	for _, req := range []Request{{Action: "structure"}, {Action: "contents"}, {Action: "question"}, {Action: "unknown"}} {
-		if _, _, err := toolCall(req); err == nil {
-			t.Fatalf("toolCall(%+v) accepted invalid input", req)
+		if _, err := (&Client{}).Read(context.Background(), req); err == nil {
+			t.Fatalf("Read(%+v) accepted invalid input", req)
 		}
 	}
 }
 
 func TestClientReadMapsResponse(t *testing.T) {
 	t.Parallel()
-	client := &Client{callTool: func(_ context.Context, endpoint, name string, args map[string]any) (*mcp.CallToolResult, error) {
-		if endpoint != DefaultEndpoint || name != "read_wiki_contents" || args["repoName"] != "owner/repo" {
-			t.Fatalf("call = %q, %q, %#v", endpoint, name, args)
+	client := newTestClient(t, func(name string, args map[string]any) (*mcp.CallToolResult, error) {
+		if name != "read_wiki_contents" || args["repoName"] != "owner/repo" {
+			return nil, &unexpectedToolCallError{name: name, args: args}
 		}
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "first"}, &mcp.TextContent{Text: "https://deepwiki.com/owner/repo#topic"}}}, nil
-	}}
+	})
 	got, err := client.Read(context.Background(), Request{Action: "contents", Repository: "owner/repo"})
 	if err != nil {
 		t.Fatal(err)
@@ -60,19 +85,19 @@ func TestClientReadMapsResponse(t *testing.T) {
 
 func TestClientReadHandlesProviderAndTransportFailures(t *testing.T) {
 	t.Parallel()
-	provider := &Client{callTool: func(context.Context, string, string, map[string]any) (*mcp.CallToolResult, error) {
+	provider := newTestClient(t, func(string, map[string]any) (*mcp.CallToolResult, error) {
 		return &mcp.CallToolResult{IsError: true}, nil
-	}}
+	})
 	got, err := provider.Read(context.Background(), Request{Action: "structure", Repository: "owner/repo"})
 	if err != nil || got.Available {
 		t.Fatalf("provider error = %+v, %v", got, err)
 	}
 
-	transport := &Client{callTool: func(context.Context, string, string, map[string]any) (*mcp.CallToolResult, error) {
-		return nil, errors.New("offline")
-	}}
+	transportServer := httptest.NewServer(http.NotFoundHandler())
+	t.Cleanup(transportServer.Close)
+	transport := &Client{Endpoint: transportServer.URL}
 	_, err = transport.Read(context.Background(), Request{Action: "structure", Repository: "owner/repo"})
-	if err == nil || !strings.Contains(err.Error(), "call DeepWiki read_wiki_structure: offline") {
+	if err == nil || !strings.Contains(err.Error(), "call DeepWiki read_wiki_structure:") {
 		t.Fatalf("transport error = %v", err)
 	}
 }
@@ -98,9 +123,9 @@ func TestClientReadClassifiesProviderErrorTextAsUnavailable(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			client := &Client{callTool: func(context.Context, string, string, map[string]any) (*mcp.CallToolResult, error) {
+			client := newTestClient(t, func(string, map[string]any) (*mcp.CallToolResult, error) {
 				return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: tt.text}}}, nil
-			}}
+			})
 			got, err := client.Read(context.Background(), Request{
 				Action:       "question",
 				Repositories: []string{"indexed/repo", "missing/repo"},
@@ -116,9 +141,9 @@ func TestClientReadClassifiesProviderErrorTextAsUnavailable(t *testing.T) {
 func TestClientReadKeepsNormalMultiRepositoryAnswerAvailable(t *testing.T) {
 	t.Parallel()
 	const answer = "indexed/repo and other/repo both organize documentation by subsystem."
-	client := &Client{callTool: func(context.Context, string, string, map[string]any) (*mcp.CallToolResult, error) {
+	client := newTestClient(t, func(string, map[string]any) (*mcp.CallToolResult, error) {
 		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: answer}}}, nil
-	}}
+	})
 	got, err := client.Read(context.Background(), Request{
 		Action:       "question",
 		Repositories: []string{"indexed/repo", "other/repo"},
@@ -131,11 +156,36 @@ func TestClientReadKeepsNormalMultiRepositoryAnswerAvailable(t *testing.T) {
 
 func TestClientReadAcceptsEmptySuccessfulResponse(t *testing.T) {
 	t.Parallel()
-	client := &Client{callTool: func(context.Context, string, string, map[string]any) (*mcp.CallToolResult, error) {
+	client := newTestClient(t, func(string, map[string]any) (*mcp.CallToolResult, error) {
 		return &mcp.CallToolResult{}, nil
-	}}
+	})
 	got, err := client.Read(context.Background(), Request{Action: "structure", Repository: "owner/repo"})
 	if err != nil || !got.Available || got.Text != "" || got.SourceURL != "" {
 		t.Fatalf("empty response = %+v, %v", got, err)
 	}
+}
+
+type unexpectedToolCallError struct {
+	name string
+	args map[string]any
+}
+
+func (e *unexpectedToolCallError) Error() string {
+	return "unexpected DeepWiki tool call " + e.name
+}
+
+func newTestClient(t *testing.T, respond func(string, map[string]any) (*mcp.CallToolResult, error)) *Client {
+	t.Helper()
+	server := mcp.NewServer(&mcp.Implementation{Name: "deepwiki-fixture", Version: "1"}, nil)
+	for _, name := range []string{"read_wiki_structure", "read_wiki_contents", "ask_question"} {
+		mcp.AddTool(server, &mcp.Tool{Name: name}, func(_ context.Context, _ *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, any, error) {
+			result, err := respond(name, args)
+			return result, nil, err
+		})
+	}
+	httpServer := httptest.NewServer(mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+		return server
+	}, &mcp.StreamableHTTPOptions{JSONResponse: true}))
+	t.Cleanup(httpServer.Close)
+	return &Client{Endpoint: httpServer.URL}
 }

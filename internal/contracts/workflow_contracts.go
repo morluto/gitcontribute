@@ -209,12 +209,6 @@ type ReadinessCheck struct {
 	EvaluatedAt  string   `json:"evaluated_at"`
 }
 
-// RuntimeContractService reports only immutable executable compatibility
-// metadata. Implementations must not inspect configuration or the corpus.
-type RuntimeContractService interface {
-	RuntimeContract(ctx context.Context) (*RuntimeContractResult, error)
-}
-
 // RuntimeContractResult is immutable executable compatibility metadata.
 type RuntimeContractResult struct {
 	Name                   string `json:"name"`

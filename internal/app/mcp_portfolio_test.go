@@ -73,7 +73,6 @@ func TestPullRequestPortfolioDerivesConflictAndPreservesUnknownCoverage(t *testi
 	if len(conciseJSON) >= len(detailedJSON) {
 		t.Fatalf("concise portfolio is not smaller: concise=%d detailed=%d", len(conciseJSON), len(detailedJSON))
 	}
-	t.Logf("portfolio response bytes: concise=%d detailed=%d", len(conciseJSON), len(detailedJSON))
 }
 
 func TestPullRequestPortfolioClassifiesClosedUnmerged(t *testing.T) {

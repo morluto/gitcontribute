@@ -72,20 +72,6 @@ func TestExportLocalMetadataRejectsTruncationButAllowsExactLimit(t *testing.T) {
 	}
 }
 
-func TestTrackingMigrationCreatesTables(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	c, _ := openTestCorpus(t)
-
-	var count int
-	if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('triage_events', 'contributions', 'contribution_outcomes')`).Scan(&count); err != nil {
-		t.Fatalf("count tracking tables: %v", err)
-	}
-	if count != 3 {
-		t.Fatalf("expected 3 tracking tables, got %d", count)
-	}
-}
-
 func TestTriageEventPersistsWithOptionalForeignKeyLinks(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

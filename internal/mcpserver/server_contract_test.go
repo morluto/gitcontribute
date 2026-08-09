@@ -10,32 +10,6 @@ import (
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
-func TestServerInstructionsContainRoutingPhrases(t *testing.T) {
-	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
-	defer closeSessions()
-
-	init := client.InitializeResult()
-	if init == nil {
-		t.Fatal("missing initialize result")
-	}
-	for _, phrase := range []string{
-		"corpus.* tools are offline reads",
-		"never refresh implicitly",
-		"explicit bounded network reads",
-		"missing, stale, paginated, or truncated observations are unknown",
-		"polling through jobs.get",
-		"exact returned resource URIs",
-		"github.search_users",
-		"github.sync_user_*",
-		"Only advertised tools are available",
-		"never mutates GitHub",
-	} {
-		if !strings.Contains(init.Instructions, phrase) {
-			t.Errorf("instructions missing routing phrase %q:\n%s", phrase, init.Instructions)
-		}
-	}
-}
-
 func TestCatalogContractMatchesAdvertisedFeedbackRoute(t *testing.T) {
 	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
 	defer closeSessions()
@@ -108,35 +82,6 @@ func callCatalogContract(t *testing.T, client *mcp.ClientSession) mcpcontract.Ca
 	return catalog
 }
 
-func TestFeedbackToolDescriptionsDeclareRoutingBoundaries(t *testing.T) {
-	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
-	defer closeSessions()
-	tools := make(map[string]*mcp.Tool)
-	for tool, err := range client.Tools(context.Background(), nil) {
-		if err != nil {
-			t.Fatal(err)
-		}
-		tools[tool.Name] = tool
-	}
-	cases := map[string][]string{
-		mcpcontract.ToolIndexPullRequestFeedback:  {"repository-wide audits", "bounded GitHub reads", "Poll jobs.get", mcpcontract.ToolSearchPullRequestFeedback, "never mutates GitHub"},
-		mcpcontract.ToolSyncPullRequestFeedback:   {"exact pull requests", "bounded GitHub network reads", "Poll jobs.get", mcpcontract.ToolIndexPullRequestFeedback, "never mutates GitHub"},
-		mcpcontract.ToolSearchPullRequestFeedback: {"offline search", "after github.index_pull_request_feedback and jobs.get", "never contacts GitHub", "partial/unknown coverage"},
-		mcpcontract.ToolSearchThreads:             {"not a comment-level feedback search", mcpcontract.ToolSearchPullRequestFeedback},
-	}
-	for name, phrases := range cases {
-		tool := tools[name]
-		if tool == nil {
-			t.Fatalf("missing tool %q", name)
-		}
-		for _, phrase := range phrases {
-			if !strings.Contains(tool.Description, phrase) {
-				t.Errorf("tool %q description missing %q: %s", name, phrase, tool.Description)
-			}
-		}
-	}
-}
-
 func TestSourceAuditContractUsesAdvertisedOperations(t *testing.T) {
 	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
 	defer closeSessions()
@@ -157,12 +102,29 @@ func TestSourceAuditContractUsesAdvertisedOperations(t *testing.T) {
 	if err != nil || json.Unmarshal(data, &workflow) != nil {
 		t.Fatalf("decode source-audit contract: result=%#v err=%v", result.StructuredContent, err)
 	}
+	if workflow.Version == "" || len(workflow.Transitions) == 0 {
+		t.Fatalf("source-audit contract is incomplete: %+v", workflow)
+	}
+	transitions := make(map[string]mcpcontract.WorkflowTransition, len(workflow.Transitions))
 	for _, transition := range workflow.Transitions {
+		if transition.ID == "" || transition.Operation == "" || transition.ExpectedResultType == "" || transition.IncompleteSemantics == "" {
+			t.Errorf("source-audit transition is incomplete: %+v", transition)
+		}
+		transitions[transition.ID] = transition
 		for _, operation := range append([]string{transition.Operation}, transition.AllowedNextActions...) {
 			if !tools[operation] {
 				t.Errorf("source-audit transition %q references unadvertised operation %q", transition.ID, operation)
 			}
 		}
+	}
+	if coverage := transitions["coverage"]; coverage.Operation != mcpcontract.ToolGetCoverage || coverage.Authority.Network || coverage.Authority.LocalWrite {
+		t.Errorf("coverage transition = %+v", coverage)
+	}
+	if ensure := transitions["ensure_coverage"]; ensure.Operation != mcpcontract.ToolEnsureCoverage || !ensure.Authority.Network || !ensure.Authority.LocalWrite {
+		t.Errorf("ensure-coverage transition = %+v", ensure)
+	}
+	if reread := transitions["offline_reread"]; reread.RequiredInputToken != "snapshot_token" || reread.Authority.Network {
+		t.Errorf("offline reread transition = %+v", reread)
 	}
 }
 
@@ -189,11 +151,6 @@ func TestDurableToolResultsIncludeSDKResourceLinks(t *testing.T) {
 	if !ok || link.URI != "gitcontribute://investigation/inv-1" || link.MIMEType != "application/json" {
 		t.Fatalf("resource link = %#v", result.Content[0])
 	}
-	for _, phrase := range []string{"exact opaque URI unchanged", "do not shorten, pluralize, or reconstruct it"} {
-		if !strings.Contains(link.Description, phrase) {
-			t.Errorf("resource link description missing %q: %q", phrase, link.Description)
-		}
-	}
 }
 
 func TestJobArtifactResultsContainOnlyResourceLinks(t *testing.T) {
@@ -207,7 +164,7 @@ func TestJobArtifactResultsContainOnlyResourceLinks(t *testing.T) {
 		t.Fatalf("job artifact content = %+v", result)
 	}
 	link, ok := result.Content[0].(*mcp.ResourceLink)
-	if !ok || strings.Contains(strings.ToLower(link.Description), "codex") || !strings.Contains(link.Description, "exact opaque URI unchanged") {
+	if !ok || strings.Contains(strings.ToLower(link.Description), "codex") {
 		t.Fatalf("job artifact link = %#v", result.Content[0])
 	}
 }

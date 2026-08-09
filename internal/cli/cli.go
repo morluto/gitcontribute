@@ -77,7 +77,6 @@ type rootCmd struct {
 	Setup         setupCmd         `cmd:"" help:"Set up GitContribute for MCP, CLI, or both"`
 	Remove        removeCmd        `cmd:"" help:"Remove GitContribute coding-agent integrations"`
 	Upgrade       upgradeCmd       `cmd:"" help:"Check for or install the latest release"`
-	Contract      contractCmd      `cmd:"" name:"runtime-contract" help:"Print the executable runtime compatibility contract"`
 	Init          initCmd          `cmd:"" help:"Initialize the local corpus"`
 	Corpus        corpusCmd        `cmd:"" help:"Inspect, back up, or migrate the local corpus"`
 	Configure     configureCmd     `cmd:"" help:"Inspect or update typed configuration"`
@@ -153,8 +152,6 @@ type upgradeCmd struct {
 	Yes   bool `name:"yes" short:"y" help:"Install the latest release without prompting"`
 	JSON  bool `name:"json" help:"Print the result as JSON"`
 }
-
-type contractCmd struct{}
 
 type configureCmd struct {
 	Database         *string `name:"database" help:"Corpus database path"`
