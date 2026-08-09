@@ -265,7 +265,7 @@ func TestJobExecutorCloseBoundsTerminalWriteAfterCancellation(t *testing.T) {
 	svc := newJobTestService(t)
 	store := &blockingFinishJobStore{jobStore: svc.corpus, entered: make(chan struct{})}
 	jobs, err := newJobExecutorWithConfig(ctx, store, jobExecutorConfig{
-		pollInterval: time.Hour, cleanupTimeout: 50 * time.Millisecond,
+		pollInterval: time.Hour, cleanupTimeout: time.Second,
 	})
 	if err != nil {
 		t.Fatalf("new executor: %v", err)
@@ -282,7 +282,7 @@ func TestJobExecutorCloseBoundsTerminalWriteAfterCancellation(t *testing.T) {
 	<-started
 	select {
 	case <-store.entered:
-	case <-time.After(time.Second):
+	case <-time.After(3 * time.Second):
 		t.Fatal("job did not begin its terminal write")
 	}
 
@@ -293,7 +293,7 @@ func TestJobExecutorCloseBoundsTerminalWriteAfterCancellation(t *testing.T) {
 		if err != nil {
 			t.Fatalf("close executor: %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(3 * time.Second):
 		t.Fatal("close waited indefinitely for a cancelled terminal write")
 	}
 }

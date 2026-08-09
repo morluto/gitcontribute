@@ -765,19 +765,6 @@ func validatePullRequestRefs(inputs []mcpcontract.ThreadRef, path string) error 
 	return nil
 }
 
-// canonicalPullRequestRefs makes the optional kind explicit before callers
-// compare references. A blank kind means pull_request for portfolio operations,
-// so it must not create a second identity for the same pull request.
-func canonicalPullRequestRefs(inputs []mcpcontract.ThreadRef) []mcpcontract.ThreadRef {
-	refs := append([]mcpcontract.ThreadRef(nil), inputs...)
-	for i := range refs {
-		if refs[i].Kind == "" {
-			refs[i].Kind = corpus.ThreadKindPullRequest
-		}
-	}
-	return refs
-}
-
 func rejectDuplicateIndexRepositoryInputs(inputs []mcpcontract.IndexRepositoryInput) error {
 	seen := make(map[string]struct{}, len(inputs))
 	for _, input := range inputs {

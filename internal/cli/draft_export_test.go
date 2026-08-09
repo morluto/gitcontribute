@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
@@ -22,7 +23,7 @@ func TestExportDraftPreservesExactBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm()&0o077 != 0 {
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		t.Errorf("draft directory permissions = %04o, want no group or world access", info.Mode().Perm())
 	}
 	for name, want := range map[string]string{"title.txt": draft.Title, "body.md": draft.Body} {

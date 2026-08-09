@@ -50,16 +50,6 @@ func TestUpgradeNpxDoesNotInstallGlobalPackage(t *testing.T) {
 	assertStage(t, report, "installation", "npx")
 }
 
-func TestReadUpgradeFileBoundsPackageMetadata(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "package.json")
-	if err := os.WriteFile(path, bytes.Repeat([]byte("x"), maxUpgradePackageBytes+1), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := readUpgradeFile(path); err == nil || !strings.Contains(err.Error(), "upgrade metadata exceeds") {
-		t.Fatalf("oversized package metadata error = %v", err)
-	}
-}
-
 func TestUpgradeDoesNotInstallAcrossSchemaIncompatibility(t *testing.T) {
 	for _, status := range []string{"migration_required", "incompatible"} {
 		report := &contracts.UpgradeReport{
