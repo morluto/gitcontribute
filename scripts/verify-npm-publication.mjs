@@ -6,6 +6,7 @@ if (!expectedVersion) throw new Error("expected version argument is required");
 const registry = "https://registry.npmjs.org";
 const attempts = positiveInteger("GITCONTRIBUTE_NPM_PUBLICATION_ATTEMPTS", 10, 30);
 const delayMS = positiveInteger("GITCONTRIBUTE_NPM_PUBLICATION_DELAY_MS", 6_000, 60_000);
+const probeTimeoutMS = positiveInteger("GITCONTRIBUTE_NPM_PUBLICATION_PROBE_TIMEOUT_MS", 30_000, 120_000);
 const npm = process.env.GITCONTRIBUTE_NPM_COMMAND || "npm";
 const npx = process.env.GITCONTRIBUTE_NPX_COMMAND || "npx";
 
@@ -50,14 +51,24 @@ function jsonString(value) {
 
 function output(command, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "ignore"] });
     let stdout = "";
+    let forceKill;
+    const timeout = setTimeout(() => {
+      child.kill("SIGTERM");
+      forceKill = setTimeout(() => child.kill("SIGKILL"), 1_000);
+    }, probeTimeoutMS);
+    const finish = (callback, value) => {
+      clearTimeout(timeout);
+      clearTimeout(forceKill);
+      callback(value);
+    };
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk) => (stdout += chunk));
-    child.on("error", reject);
+    child.on("error", (error) => finish(reject, error));
     child.on("close", (code, signal) => {
-      if (code === 0) return resolve(stdout.trim());
-      reject(new Error(`${command} exited with code ${code ?? "null"}${signal ? ` (${signal})` : ""}`));
+      if (code === 0) return finish(resolve, stdout.trim());
+      finish(reject, new Error(`${command} exited with code ${code ?? "null"}${signal ? ` (${signal})` : ""}`));
     });
   });
 }
