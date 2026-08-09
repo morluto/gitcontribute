@@ -9,41 +9,15 @@ import (
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
-var recoverySchemaCache struct {
-	once   sync.Once
-	schema *jsonschema.Schema
-	err    error
-}
-
-var followUpSchemaCache struct {
-	once   sync.Once
-	schema *jsonschema.Schema
-	err    error
-}
-
-func recoveryToolCallSchema() (*jsonschema.Schema, error) {
-	recoverySchemaCache.once.Do(func() {
-		recoverySchemaCache.schema, recoverySchemaCache.err = buildRecoveryToolCallSchema()
-	})
-	if recoverySchemaCache.err != nil {
-		return nil, recoverySchemaCache.err
-	}
-	return recoverySchemaCache.schema.CloneSchemas(), nil
-}
+var recoveryToolCallSchema = sync.OnceValues(buildRecoveryToolCallSchema)
 
 func buildRecoveryToolCallSchema() (*jsonschema.Schema, error) {
 	return buildToolCallSchema(mcpcontract.RecoveryActionPrototypes(), "One replayable recovery action whose discriminator owns exactly one typed input.")
 }
 
-func followUpToolCallSchema() (*jsonschema.Schema, error) {
-	followUpSchemaCache.once.Do(func() {
-		followUpSchemaCache.schema, followUpSchemaCache.err = buildToolCallSchema(mcpcontract.FollowUpActionPrototypes(), "One read or poll action that follows a durable job.")
-	})
-	if followUpSchemaCache.err != nil {
-		return nil, followUpSchemaCache.err
-	}
-	return followUpSchemaCache.schema.CloneSchemas(), nil
-}
+var followUpToolCallSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
+	return buildToolCallSchema(mcpcontract.FollowUpActionPrototypes(), "One read or poll action that follows a durable job.")
+})
 
 func buildToolCallSchema(actions []mcpcontract.ToolCall, description string) (*jsonschema.Schema, error) {
 	root := &jsonschema.Schema{

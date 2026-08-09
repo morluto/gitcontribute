@@ -342,7 +342,12 @@ func newServer(reader mcpcontract.Reader, version string, readOnly bool) (*Serve
 		server: mcp.NewServer(&mcp.Implementation{
 			Name:    "gitcontribute",
 			Version: version,
-		}, &mcp.ServerOptions{Instructions: serverInstructions}),
+		}, &mcp.ServerOptions{
+			Instructions: serverInstructions,
+			// Do not advertise the SDK's historical default logging capability.
+			// Tools, prompts, and resources are inferred from their registrations.
+			Capabilities: &mcp.ServerCapabilities{},
+		}),
 	}
 	s.register()
 	if s.registrationErr != nil {
