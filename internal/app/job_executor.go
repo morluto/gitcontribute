@@ -251,6 +251,31 @@ func (e *JobExecutor) cleanupContext(ctx context.Context) (context.Context, cont
 	return context.WithTimeout(context.WithoutCancel(ctx), e.cfg.cleanupTimeout)
 }
 
+// terminalWriteContext keeps a normal terminal write unbounded, but cancels it
+// after the cleanup window once the job is cancelled or the executor closes.
+func (e *JobExecutor) terminalWriteContext(jobCtx context.Context) (context.Context, context.CancelFunc) {
+	writeCtx, cancel := context.WithCancel(context.WithoutCancel(jobCtx))
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-done:
+			return
+		case <-jobCtx.Done():
+		}
+		timer := time.NewTimer(e.cfg.cleanupTimeout)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-timer.C:
+			cancel()
+		}
+	}()
+	return writeCtx, func() {
+		close(done)
+		cancel()
+	}
+}
+
 func (e *JobExecutor) heartbeat() {
 	defer e.backgroundWG.Done()
 	timer := time.NewTimer(e.cfg.heartbeatInterval)
@@ -374,7 +399,7 @@ func (e *JobExecutor) run(jobCtx context.Context, id string, cancel context.Canc
 		return e.corpus.UpdateJobProgress(jobCtx, id, progress, statistics)
 	})
 
-	writeCtx, writeCancel := e.cleanupContext(jobCtx)
+	writeCtx, writeCancel := e.terminalWriteContext(jobCtx)
 	defer writeCancel()
 	job, err := e.corpus.GetJob(writeCtx, id)
 	if err != nil {
