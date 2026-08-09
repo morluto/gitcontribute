@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.0] (2026-08-09)
+
+### ⚠ BREAKING CHANGES
+
+* **mcp:** `github.search_threads` and `github.read_source_files` now require
+  `repository: {owner, repo}`. Flat `owner` and `repo` request fields are no
+  longer accepted. See [the v2 MCP migration guide](docs/mcp-v2-migration.md).
+
+### Features
+
+* **mcp:** add optional repository scope to authored pull-request portfolios.
+
+### Bug Fixes
+
+* **mcp:** return host-neutral native resource links for durable artifacts.
+
 ## [1.1.0](https://github.com/morluto/gitcontribute/compare/v1.0.0...v1.1.0) (2026-08-08)
 
 
