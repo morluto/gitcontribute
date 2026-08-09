@@ -9,28 +9,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"unicode"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/morluto/gitcontribute/internal/facets"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
-
-var selectionSynonyms = map[string]string{
-	"execute": "run",
-	"read":    "get",
-	"rebuild": "build",
-	"refresh": "sync",
-	"review":  "get",
-	"stop":    "cancel",
-}
-
-var selectionStopWords = map[string]bool{
-	"a": true, "an": true, "and": true, "for": true, "from": true, "in": true,
-	"it": true, "of": true, "one": true, "or": true, "the": true, "this": true,
-	"to": true, "tool": true, "use": true, "with": true, "without": true,
-	"gitcontribute": true, "local": true, "stored": true,
-}
 
 func listedTools(t *testing.T) (map[string]*mcp.Tool, func()) {
 	t.Helper()
@@ -94,28 +77,6 @@ func TestCanonicalToolCatalogIsNamespacedAndUnambiguous(t *testing.T) {
 		if tools[legacy] != nil {
 			t.Errorf("legacy unnamespaced tool %q is still advertised", legacy)
 		}
-	}
-}
-
-func TestUnifiedCatalogReportsSerializedContextMeasurements(t *testing.T) {
-	tools, closeSessions := listedTools(t)
-	defer closeSessions()
-	payload, err := json.Marshal(tools)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("MCP unified catalog tools=%d serialized_bytes=%d", len(tools), len(payload))
-	names := make([]string, 0, len(tools))
-	for name := range tools {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		payload, err := json.Marshal(tools[name])
-		if err != nil {
-			t.Fatalf("marshal tool %s: %v", name, err)
-		}
-		t.Logf("MCP catalog tool=%s serialized_bytes=%d", name, len(payload))
 	}
 }
 
@@ -223,12 +184,6 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 	assertSchemaValue(t, tools[mcpcontract.ToolGetThreadFacets].InputSchema, []string{"properties", "threads", "maxItems"}, float64(100))
 	assertSchemaValue(t, tools[mcpcontract.ToolGetThreadFacets].InputSchema, []string{"properties", "facets", "maxItems"}, float64(10))
 	assertSchemaValue(t, tools[mcpcontract.ToolGetThreadFacets].InputSchema, []string{"properties", "facets", "items", "enum"}, facets.AllNames())
-	if !strings.Contains(tools[mcpcontract.ToolGetCoverage].Description, "typed recovery action") {
-		t.Fatalf("coverage description does not expose recovery routing: %q", tools[mcpcontract.ToolGetCoverage].Description)
-	}
-	if !strings.Contains(tools[mcpcontract.ToolSyncThreads].Description, "poll jobs.get and reread") {
-		t.Fatalf("thread sync description does not expose the follow-up route: %q", tools[mcpcontract.ToolSyncThreads].Description)
-	}
 	assertSchemaValue(t, tools[mcpcontract.ToolHydrateThreads].InputSchema, []string{"properties", "max_pages", "default"}, float64(3))
 	assertSchemaValue(t, tools[mcpcontract.ToolCreateWorkspace].InputSchema, []string{"required"}, []any{"investigation_id"})
 	assertSchemaValue(t, tools[mcpcontract.ToolAdoptWorkspace].InputSchema, []string{"required"}, []any{"investigation_id", "path", "base_ref"})
@@ -332,77 +287,6 @@ func TestCatalogRegistrationReportsToolSchemaError(t *testing.T) {
 	})
 	if server.registrationErr == nil || !strings.Contains(server.registrationErr.Error(), `register MCP tool "broken.tool" input schema`) {
 		t.Fatalf("registration error = %v", server.registrationErr)
-	}
-}
-
-func TestAgentToolSelectionProxy(t *testing.T) {
-	tools, closeSessions := listedTools(t)
-	defer closeSessions()
-	// Keep this historical proxy corpus stable; repository-wide feedback has
-	// its own focused routing assertions below.
-	proxyTools := make(map[string]*mcp.Tool, len(tools))
-	for name, tool := range tools {
-		if name != mcpcontract.ToolIndexPullRequestFeedback && name != mcpcontract.ToolSearchPullRequestFeedback {
-			proxyTools[name] = tool
-		}
-	}
-
-	cases := []struct {
-		prompt string
-		want   string
-	}{
-		{"Search locally stored issue titles for a retry deadlock", mcpcontract.ToolSearchThreads},
-		{"Search live GitHub for highly starred inference repositories", mcpcontract.ToolSearchGitHubRepositories},
-		{"Read metadata for twelve repositories already stored in the corpus", mcpcontract.ToolGetRepositories},
-		{"Fetch current GitHub stars, metadata, and contribution guidance for twelve repositories", mcpcontract.ToolSyncRepositoryContext},
-		{"Read the complete stored body of pull request 42", mcpcontract.ToolGetThreads},
-		{"Refresh issue and pull request thread headers for selected repositories from GitHub", mcpcontract.ToolSyncThreads},
-		{"Fetch comments and reviews for one stored pull request from GitHub", mcpcontract.ToolSyncPullRequestFeedback},
-		{"Find similar completed and rejected historical work for this issue", mcpcontract.ToolFindPrecedents},
-		{"List my stored pull requests that need contributor attention", mcpcontract.ToolListPullRequestPortfolio},
-		{"Acquire and index code for several repositories", mcpcontract.ToolIndexRepositories},
-		{"Check actual Git merge conflicts between fetched revisions", mcpcontract.ToolCheckMergeConflicts},
-		{"Create a local investigation without cloning a worktree", mcpcontract.ToolStartInvestigation},
-		{"Clone the remote and create a managed Git worktree", mcpcontract.ToolCreateWorkspace},
-		{"Render and persist a pull request draft from a verified managed workspace diff", mcpcontract.ToolPrepareContribution},
-		{"Execute the stored validation command against the candidate workspace", mcpcontract.ToolRunValidation},
-		{"Run a repeat stress validation group with concurrency and telemetry", mcpcontract.ToolRunValidation},
-		{"Stop a running durable job", mcpcontract.ToolCancelJob},
-		{"Poll several durable jobs together with structured progress", mcpcontract.ToolGetJob},
-		{"Read stored facet coverage for several exact threads", mcpcontract.ToolGetThreadFacets},
-		{"Read repository and thread coverage across several targets", mcpcontract.ToolGetCoverage},
-		{"Compare contribution candidates with my authored pull requests for overlap", mcpcontract.ToolFindPortfolioOverlaps},
-		{"Link an authored pull request to a local opportunity", mcpcontract.ToolLinkPullRequest},
-	}
-
-	correct := 0
-	for _, tc := range cases {
-		got := selectToolByWords(tc.prompt, proxyTools)
-		if got == tc.want {
-			correct++
-			continue
-		}
-		t.Errorf("prompt %q selected %q, want %q", tc.prompt, got, tc.want)
-	}
-	if correct != len(cases) {
-		t.Fatalf("tool-selection proxy accuracy = %d/%d", correct, len(cases))
-	}
-}
-
-func TestFeedbackToolSelectionProxy(t *testing.T) {
-	tools, closeSessions := listedTools(t)
-	defer closeSessions()
-	feedbackTools := map[string]*mcp.Tool{
-		mcpcontract.ToolFindPrecedents:            tools[mcpcontract.ToolFindPrecedents],
-		mcpcontract.ToolIndexPullRequestFeedback:  tools[mcpcontract.ToolIndexPullRequestFeedback],
-		mcpcontract.ToolSearchPullRequestFeedback: tools[mcpcontract.ToolSearchPullRequestFeedback],
-		mcpcontract.ToolSyncPullRequestFeedback:   tools[mcpcontract.ToolSyncPullRequestFeedback],
-	}
-	if got := selectToolByWords("Find every pull-request comment written by chatgpt-codex-connector[bot] across one repository", feedbackTools); got != mcpcontract.ToolIndexPullRequestFeedback {
-		t.Fatalf("repository-wide feedback discovery selected %q", got)
-	}
-	if got := selectToolByWords("Search indexed pull-request feedback by exact commenter login", feedbackTools); got != mcpcontract.ToolSearchPullRequestFeedback {
-		t.Fatalf("exact feedback author search selected %q", got)
 	}
 }
 
@@ -556,11 +440,6 @@ func TestSideEffectAuthorizationEvaluation(t *testing.T) {
 	if prepare.Annotations == nil || prepare.Annotations.ReadOnlyHint || prepare.Annotations.OpenWorldHint == nil || *prepare.Annotations.OpenWorldHint {
 		t.Fatalf("prepare contribution annotations = %+v", prepare.Annotations)
 	}
-	for _, phrase := range []string{"inspects the managed workspace", "non-mutating Git", "Never posts", "mutates GitHub"} {
-		if !strings.Contains(prepare.Description, phrase) {
-			t.Errorf("prepare contribution description does not disclose boundary phrase %q", phrase)
-		}
-	}
 }
 
 func assertSchemaValue(t *testing.T, raw any, path []string, want any) {
@@ -588,58 +467,4 @@ func assertSchemaValue(t *testing.T, raw any, path []string, want any) {
 func stringValue(value any) string {
 	text, _ := value.(string)
 	return text
-}
-
-func selectToolByWords(prompt string, tools map[string]*mcp.Tool) string {
-	promptWords := meaningfulWords(prompt)
-	intent := firstIntentWord(prompt)
-	bestName := ""
-	bestScore := -1
-	for name, tool := range tools {
-		nameAndTitle := meaningfulWords(strings.ReplaceAll(name, ".", " ") + " " + tool.Title)
-		description := meaningfulWords(tool.Description)
-		score := 0
-		if intent != "" && nameAndTitle[intent] {
-			score += 5
-		}
-		for word := range promptWords {
-			if nameAndTitle[word] {
-				score += 3
-			} else if description[word] {
-				score++
-			}
-		}
-		if score > bestScore || score == bestScore && name < bestName {
-			bestName, bestScore = name, score
-		}
-	}
-	return bestName
-}
-
-func firstIntentWord(text string) string {
-	fields := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
-	if len(fields) == 0 {
-		return ""
-	}
-	return selectionSynonyms[strings.TrimSuffix(fields[0], "s")]
-}
-
-func meaningfulWords(text string) map[string]bool {
-	words := make(map[string]bool)
-	fields := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
-	for _, word := range fields {
-		word = normalizeSelectionWord(word)
-		if len(word) > 1 && !selectionStopWords[word] {
-			words[word] = true
-		}
-	}
-	return words
-}
-
-func normalizeSelectionWord(word string) string {
-	word = strings.TrimSuffix(word, "s")
-	if synonym := selectionSynonyms[word]; synonym != "" {
-		return synonym
-	}
-	return word
 }

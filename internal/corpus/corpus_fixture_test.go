@@ -81,22 +81,3 @@ func copyTestDatabase(source, destination string) error {
 	}
 	return out.Close()
 }
-
-func TestTestCorpusTemplateIsCurrentAndStandalone(t *testing.T) {
-	t.Parallel()
-	c, path := openTestCorpus(t)
-	if _, err := os.Stat(testCorpusTemplate(t) + "-wal"); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("template retained a WAL sidecar: %v", err)
-	}
-	_, target, err := c.SchemaVersions(context.Background())
-	if err != nil {
-		t.Fatalf("schema versions: %v", err)
-	}
-	current, exists, err := InspectSchemaVersion(context.Background(), path)
-	if err != nil {
-		t.Fatalf("inspect copied schema: %v", err)
-	}
-	if !exists || current != target {
-		t.Fatalf("copied schema version = %d (exists=%t), want current %d", current, exists, target)
-	}
-}

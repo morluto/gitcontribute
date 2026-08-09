@@ -40,7 +40,6 @@ type Reader interface {
 // Client calls a public DeepWiki MCP endpoint. An empty Endpoint uses DefaultEndpoint.
 type Client struct {
 	Endpoint string
-	callTool func(context.Context, string, string, map[string]any) (*mcp.CallToolResult, error)
 }
 
 var (
@@ -63,11 +62,7 @@ func (c *Client) Read(ctx context.Context, req Request) (_ Response, err error) 
 	if err != nil {
 		return Response{}, err
 	}
-	callTool := c.callTool
-	if callTool == nil {
-		callTool = callDeepWikiTool
-	}
-	result, err := callTool(ctx, endpoint, name, arguments)
+	result, err := callDeepWikiTool(ctx, endpoint, name, arguments)
 	if err != nil {
 		return Response{}, fmt.Errorf("call DeepWiki %s: %w", name, err)
 	}

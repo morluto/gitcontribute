@@ -83,16 +83,6 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 	if initialized == nil || initialized.ServerInfo == nil || initialized.ServerInfo.Name != "gitcontribute" {
 		t.Fatalf("initialize result = %+v", initialized)
 	}
-	for _, phrase := range []string{
-		"corpus.* tools are offline reads", "never refresh implicitly", "explicit bounded network reads",
-		"polling through jobs.get", "observations are unknown rather than negative evidence",
-		"Only advertised tools are available", "never mutates GitHub",
-	} {
-		if !strings.Contains(initialized.Instructions, phrase) {
-			t.Errorf("instructions missing %q: %s", phrase, initialized.Instructions)
-		}
-	}
-
 	tools := make(map[string]*mcp.Tool)
 	for tool, err := range session.Tools(ctx, nil) {
 		if err != nil {

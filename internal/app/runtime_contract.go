@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"errors"
 	"strings"
 
@@ -26,12 +25,4 @@ func NewRuntimeContract(version string) (*contracts.RuntimeContractResult, error
 		SupportedSchemaLineage: corpus.SupportedSchemaLineage(),
 		SupportedSchemaVersion: schema,
 	}, nil
-}
-
-// RuntimeContract reports immutable executable compatibility metadata.
-func (s *Service) RuntimeContract(ctx context.Context) (*contracts.RuntimeContractResult, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return NewRuntimeContract(s.version)
 }

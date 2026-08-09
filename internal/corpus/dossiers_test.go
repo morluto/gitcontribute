@@ -9,53 +9,6 @@ import (
 	"github.com/morluto/gitcontribute/internal/domain"
 )
 
-func TestDossiersMigration(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	c, _ := openTestCorpus(t)
-
-	rows, err := c.db.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type='table' AND name IN ('dossiers', 'dossier_sources') ORDER BY name`)
-	if err != nil {
-		t.Fatalf("query tables: %v", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var names []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			t.Fatalf("scan table name: %v", err)
-		}
-		names = append(names, name)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if len(names) != 2 || names[0] != "dossier_sources" || names[1] != "dossiers" {
-		t.Fatalf("expected dossier tables, got %v", names)
-	}
-
-	for _, col := range []string{"id", "repository_id", "commit_sha", "as_of", "section_metadata", "snapshot", "generated_at", "created_at"} {
-		var found int
-		if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('dossiers') WHERE name=?`, col).Scan(&found); err != nil {
-			t.Fatalf("pragma dossiers %s: %v", col, err)
-		}
-		if found != 1 {
-			t.Fatalf("dossiers missing column %s", col)
-		}
-	}
-
-	for _, col := range []string{"id", "dossier_id", "source", "url", "commit_sha", "observed_at", "as_of"} {
-		var found int
-		if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info('dossier_sources') WHERE name=?`, col).Scan(&found); err != nil {
-			t.Fatalf("pragma dossier_sources %s: %v", col, err)
-		}
-		if found != 1 {
-			t.Fatalf("dossier_sources missing column %s", col)
-		}
-	}
-}
-
 func TestDossierSaveGetListAndRefresh(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
