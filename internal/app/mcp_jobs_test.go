@@ -264,14 +264,14 @@ func TestPortfolioFollowUpUsesPortfolioReadArguments(t *testing.T) {
 	t.Parallel()
 	job := &contracts.JobResult{
 		Kind: jobKindSyncPullRequestPortfolio, Status: "succeeded",
-		Request: `{"selection":"authored","state":"closed","limit":10}`,
+		Request: `{"selection":"authored","repository":{"owner":"acme","repo":"rocket"},"state":"closed","limit":10}`,
 		Result:  `{"status":"complete","login":"alice","pull_requests":["acme/rocket/pull_request#7"],"refreshed":1}`,
 	}
 	_, follow := jobArtifactsAndFollowUp(job, 1)
 	if follow == nil || follow.Action.Type != "list_pull_request_portfolio" || follow.Action.ListPortfolio == nil {
 		t.Fatalf("portfolio handoff = %+v", follow)
 	}
-	if len(follow.Action.ListPortfolio.Authors) != 1 || follow.Action.ListPortfolio.Authors[0] != "alice" || follow.Action.ListPortfolio.State != "closed" || follow.Action.ListPortfolio.Limit != 10 || follow.Action.ListPortfolio.View != "compact" {
+	if follow.Action.ListPortfolio.Repository == nil || follow.Action.ListPortfolio.Repository.Owner != "acme" || follow.Action.ListPortfolio.Repository.Repo != "rocket" || len(follow.Action.ListPortfolio.Authors) != 1 || follow.Action.ListPortfolio.Authors[0] != "alice" || follow.Action.ListPortfolio.State != "closed" || follow.Action.ListPortfolio.Limit != 10 || follow.Action.ListPortfolio.View != "compact" {
 		t.Fatalf("portfolio follow-up arguments = %+v", follow.Action)
 	}
 }

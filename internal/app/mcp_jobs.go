@@ -214,7 +214,7 @@ func portfolioReadFollowUpArguments(request mcpcontract.SyncPortfolioInput, logi
 	state := request.State
 	if request.Selection == "authored" {
 		if login != "" {
-			return &mcpcontract.ListPullRequestPortfolioInput{Authors: []string{login}, State: state, Limit: limit, View: "compact"}
+			return &mcpcontract.ListPullRequestPortfolioInput{Repository: request.Repository, Authors: []string{login}, State: state, Limit: limit, View: "compact"}
 		}
 		return nil
 	}

@@ -391,13 +391,14 @@ type HydrateThreadsInput struct {
 // health refresh. The primitive sync tools remain available in the portfolio
 // profile for specialized recovery.
 type SyncPortfolioInput struct {
-	Selection            string      `json:"selection" jsonschema:"Selection mode: authored or explicit"`
-	PullRequests         []ThreadRef `json:"pull_requests,omitempty" jsonschema:"One to 100 exact pull requests in explicit mode"`
-	State                string      `json:"state,omitempty" jsonschema:"open, closed, or all; defaults to open"`
-	UpdatedAfter         string      `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound for authored-PR discovery"`
-	Limit                int         `json:"limit,omitempty" jsonschema:"Maximum pull requests to discover and refresh from 1 to 100; defaults to 100"`
-	DiscoveryMaxRequests int         `json:"discovery_max_requests,omitempty" jsonschema:"Maximum GitHub requests for identity and authored-PR discovery from 2 to 1000"`
-	StatusMaxPages       int         `json:"status_max_pages,omitempty" jsonschema:"Maximum pages per pull-request health facet from 1 to 20; defaults to 3"`
+	Selection            string         `json:"selection" jsonschema:"Selection mode: authored or explicit"`
+	Repository           *RepositoryRef `json:"repository,omitempty" jsonschema:"Optional repository scope for authored discovery"`
+	PullRequests         []ThreadRef    `json:"pull_requests,omitempty" jsonschema:"One to 100 exact pull requests in explicit mode"`
+	State                string         `json:"state,omitempty" jsonschema:"open, closed, or all; defaults to open"`
+	UpdatedAfter         string         `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound for authored-PR discovery"`
+	Limit                int            `json:"limit,omitempty" jsonschema:"Maximum pull requests to discover and refresh from 1 to 100; defaults to 100"`
+	DiscoveryMaxRequests int            `json:"discovery_max_requests,omitempty" jsonschema:"Maximum GitHub requests for identity and authored-PR discovery from 2 to 1000"`
+	StatusMaxPages       int            `json:"status_max_pages,omitempty" jsonschema:"Maximum pages per pull-request health facet from 1 to 20; defaults to 3"`
 }
 
 // ContributionPreflightInput describes one prospective contribution before
@@ -505,12 +506,13 @@ type SyncCIFailuresInput struct {
 
 // ListPullRequestPortfolioInput filters and bounds the stored pull-request portfolio.
 type ListPullRequestPortfolioInput struct {
-	Authors       []string    `json:"authors,omitempty" jsonschema:"Zero or one author login"`
-	PullRequests  []ThreadRef `json:"pull_requests,omitempty" jsonschema:"One to 100 exact pull requests; cannot be combined with authors, state, or limit"`
-	State         string      `json:"state,omitempty" jsonschema:"open, closed, or all"`
-	Limit         int         `json:"limit,omitempty" jsonschema:"Maximum pull requests from 1 to 100; defaults to 20"`
-	View          string      `json:"view,omitempty" jsonschema:"compact or full; defaults to compact"`
-	SnapshotToken string      `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
+	Repository    *RepositoryRef `json:"repository,omitempty" jsonschema:"Optional repository scope for authored portfolio reads"`
+	Authors       []string       `json:"authors,omitempty" jsonschema:"Zero or one author login"`
+	PullRequests  []ThreadRef    `json:"pull_requests,omitempty" jsonschema:"One to 100 exact pull requests; cannot be combined with authors, state, or limit"`
+	State         string         `json:"state,omitempty" jsonschema:"open, closed, or all"`
+	Limit         int            `json:"limit,omitempty" jsonschema:"Maximum pull requests from 1 to 100; defaults to 20"`
+	View          string         `json:"view,omitempty" jsonschema:"compact or full; defaults to compact"`
+	SnapshotToken string         `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
 }
 
 // PullRequestPortfolioItem contains source-backed PR facts and a deterministic

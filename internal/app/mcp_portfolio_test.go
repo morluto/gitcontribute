@@ -175,6 +175,44 @@ func TestPullRequestPortfolioExactSelectionDoesNotSubstituteNewerPullRequests(t 
 	}
 }
 
+func TestPullRequestPortfolioRepositoryScopePreservesTotalAndTruncationRecovery(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	now := time.Unix(1000, 0).UTC()
+	selected, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "rocket"}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: "other"}, `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, thread := range []corpus.Thread{
+		{RepositoryID: selected.ID, Kind: corpus.ThreadKindPullRequest, Number: 1, State: "open", Author: "alice", Title: "older selected", SourceUpdatedAt: now},
+		{RepositoryID: selected.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "open", Author: "alice", Title: "newer selected", SourceUpdatedAt: now.Add(time.Second)},
+		{RepositoryID: other.ID, Kind: corpus.ThreadKindPullRequest, Number: 3, State: "open", Author: "alice", Title: "newest other repository", SourceUpdatedAt: now.Add(2 * time.Second)},
+	} {
+		if _, err := svc.corpus.UpsertThread(ctx, thread, `{}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scope := &mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}
+	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Repository: scope, Authors: []string{"alice"}, State: "open", Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Total != 2 || !out.Truncated || len(out.PullRequests) != 1 || out.PullRequests[0].Repo != "rocket" || out.PullRequests[0].Number != 2 {
+		t.Fatalf("scoped portfolio = %+v", out)
+	}
+	if out.Recovery == nil || len(out.Recovery.Then) != 1 || out.Recovery.Then[0].ListPortfolio == nil || out.Recovery.Then[0].ListPortfolio.Repository == nil || *out.Recovery.Then[0].ListPortfolio.Repository != *scope {
+		t.Fatalf("scoped truncation recovery = %+v", out.Recovery)
+	}
+	if _, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Repository: scope, PullRequests: []mcpcontract.ThreadRef{{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 1}}}); err == nil {
+		t.Fatal("explicit portfolio selection accepted repository scope")
+	}
+}
+
 func TestPullRequestPortfolioRejectsDuplicateDefaultKindReferences(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

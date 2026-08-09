@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
@@ -55,10 +57,20 @@ func normalizeExplicitPortfolioInput(in mcpcontract.SyncPortfolioInput) (mcpcont
 	if in.State != "" || in.UpdatedAfter != "" || in.Limit != 0 || in.DiscoveryMaxRequests != 0 {
 		return mcpcontract.SyncPortfolioInput{}, errors.New("state, updated_after, limit, and discovery_max_requests are only valid in authored mode")
 	}
+	if in.Repository != nil {
+		return mcpcontract.SyncPortfolioInput{}, errors.New("repository is only valid in authored mode")
+	}
 	return normalizePortfolioStatusMaxPages(in)
 }
 
 func normalizeAuthoredPortfolioInput(in mcpcontract.SyncPortfolioInput) (mcpcontract.SyncPortfolioInput, error) {
+	if in.Repository != nil {
+		in.Repository.Owner = strings.TrimSpace(in.Repository.Owner)
+		in.Repository.Repo = strings.TrimSpace(in.Repository.Repo)
+		if err := (domain.RepoRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo}).Validate(); err != nil {
+			return mcpcontract.SyncPortfolioInput{}, err
+		}
+	}
 	if in.State == "" {
 		in.State = "open"
 	}
@@ -112,7 +124,7 @@ func (r *MCPReader) syncExplicitPortfolio(ctx context.Context, in mcpcontract.Sy
 
 func (r *MCPReader) syncAuthoredPortfolio(ctx context.Context, in mcpcontract.SyncPortfolioInput, report func(string, string) error) (syncPortfolioResult, error) {
 	discovery, err := r.syncAuthoredPullRequests(ctx, authoredPullRequestSyncOptions{
-		State: in.State, UpdatedAfter: in.UpdatedAfter, Limit: in.Limit, MaxRequests: in.DiscoveryMaxRequests,
+		Repository: in.Repository, State: in.State, UpdatedAfter: in.UpdatedAfter, Limit: in.Limit, MaxRequests: in.DiscoveryMaxRequests,
 	}, report)
 	if err != nil {
 		return syncPortfolioResult{}, err

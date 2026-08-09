@@ -131,7 +131,7 @@ func TestListPullRequestPortfolioFiltersByAuthorAndState(t *testing.T) {
 		}
 	}
 
-	got, err := c.ListPullRequestPortfolio(ctx, "ALICE", "OPEN", 10)
+	got, err := c.ListPullRequestPortfolio(ctx, "ALICE", "OPEN", nil, 10)
 	if err != nil {
 		t.Fatalf("list pull request portfolio: %v", err)
 	}
@@ -142,14 +142,14 @@ func TestListPullRequestPortfolioFiltersByAuthorAndState(t *testing.T) {
 		t.Fatalf("portfolio item = %+v, want owner/repo#1", got[0])
 	}
 
-	got, err = c.ListPullRequestPortfolio(ctx, "alice", "all", 10)
+	got, err = c.ListPullRequestPortfolio(ctx, "alice", "all", nil, 10)
 	if err != nil {
 		t.Fatalf("list pull request portfolio for all states: %v", err)
 	}
 	if len(got) != 2 || got[0].Thread.Number != 2 || got[1].Thread.Number != 1 {
 		t.Fatalf("all-state portfolio = %+v, want #2 then #1", got)
 	}
-	page, err := c.ListPullRequestPortfolioPage(ctx, "alice", "all", 1)
+	page, err := c.ListPullRequestPortfolioPage(ctx, "alice", "all", nil, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestListPullRequestPortfolioUsesDeterministicGlobalOrder(t *testing.T) {
 		}
 	}
 
-	got, err := c.ListPullRequestPortfolio(ctx, "", "", 100)
+	got, err := c.ListPullRequestPortfolio(ctx, "", "", nil, 100)
 	if err != nil {
 		t.Fatalf("list pull request portfolio: %v", err)
 	}

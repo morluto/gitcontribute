@@ -17,6 +17,7 @@ type authoredHeaderReader struct {
 	prDetailRequests int
 	now              time.Time
 	searchResult     github.AuthoredPullRequestSearchResult
+	searchOptions    github.AuthoredPullRequestSearchOptions
 }
 
 func (r *authoredHeaderReader) GetRepository(context.Context, string, string) (github.Repository, github.RateInfo, error) {
@@ -61,7 +62,8 @@ func (*authoredHeaderReader) GetAuthenticatedIdentity(context.Context) (github.I
 	return github.Identity{Login: "contributor", ID: 1}, github.RateInfo{}, nil
 }
 
-func (r *authoredHeaderReader) SearchAuthoredPullRequests(context.Context, github.AuthoredPullRequestSearchOptions) (github.AuthoredPullRequestSearchResult, error) {
+func (r *authoredHeaderReader) SearchAuthoredPullRequests(_ context.Context, options github.AuthoredPullRequestSearchOptions) (github.AuthoredPullRequestSearchResult, error) {
+	r.searchOptions = options
 	if r.searchResult.Items != nil {
 		return r.searchResult, nil
 	}
@@ -69,6 +71,34 @@ func (r *authoredHeaderReader) SearchAuthoredPullRequests(context.Context, githu
 		{RepositoryOwner: "owner", RepositoryName: "repo", Kind: github.ThreadKindPullRequest, Number: 2, State: "open", Title: "first", CreatedAt: r.now, UpdatedAt: r.now},
 		{RepositoryOwner: "owner", RepositoryName: "repo", Kind: github.ThreadKindPullRequest, Number: 3, State: "open", Title: "second", CreatedAt: r.now, UpdatedAt: r.now},
 	}}, nil
+}
+
+func TestAuthoredPullRequestSyncScopesDiscoveryBeforeLimit(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	paths := config.NewPaths(&config.Env{Home: t.TempDir()})
+	svc, err := New(paths, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = svc.Close() }()
+	if _, err := svc.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.August, 8, 0, 0, 0, 0, time.UTC)
+	reader := &authoredHeaderReader{now: now, searchResult: github.AuthoredPullRequestSearchResult{Items: []github.Issue{
+		{RepositoryOwner: "acme", RepositoryName: "other", Kind: github.ThreadKindPullRequest, Number: 9, State: "open", Title: "newer unrelated", UpdatedAt: now.Add(time.Second)},
+		{RepositoryOwner: "acme", RepositoryName: "rocket", Kind: github.ThreadKindPullRequest, Number: 7, State: "open", Title: "selected", UpdatedAt: now},
+	}}}
+	svc.SetGitHubReader(reader)
+	scope := &mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}
+	out, err := svc.syncAuthoredPullRequests(ctx, authoredPullRequestSyncOptions{Repository: scope, State: "open", Limit: 1, MaxRequests: 20}, func(string, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reader.searchOptions.RepositoryOwner != "acme" || reader.searchOptions.RepositoryName != "rocket" || len(out.PullRequestTargets) != 1 || out.PullRequestTargets[0].Repo != "rocket" || out.PullRequestTargets[0].Number != 7 {
+		t.Fatalf("scoped discovery options=%+v result=%+v", reader.searchOptions, out)
+	}
 }
 
 func TestAuthoredPullRequestSyncReportsItemLimitTruncation(t *testing.T) {

@@ -261,14 +261,21 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 		if len(in.PullRequests) > 100 {
 			return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("pull_requests must contain at most 100 items")
 		}
-		if len(in.Authors) > 0 || in.State != "" || in.Limit != 0 {
-			return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("pull_requests cannot be combined with authors, state, or limit")
+		if in.Repository != nil || len(in.Authors) > 0 || in.State != "" || in.Limit != 0 {
+			return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("pull_requests cannot be combined with repository, authors, state, or limit")
 		}
 		in.PullRequests = canonicalPullRequestRefs(in.PullRequests)
 		if err := rejectDuplicateThreadRefs(in.PullRequests); err != nil {
 			return mcpcontract.ListPullRequestPortfolioOutput{}, err
 		}
 		if err := validatePullRequestRefs(in.PullRequests, "pull_requests"); err != nil {
+			return mcpcontract.ListPullRequestPortfolioOutput{}, err
+		}
+	}
+	if in.Repository != nil {
+		in.Repository.Owner = strings.TrimSpace(in.Repository.Owner)
+		in.Repository.Repo = strings.TrimSpace(in.Repository.Repo)
+		if err := (domain.RepoRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo}).Validate(); err != nil {
 			return mcpcontract.ListPullRequestPortfolioOutput{}, err
 		}
 	}
@@ -329,7 +336,7 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 	if out.Truncated {
 		out.Status = "partial"
 		nextLimit := min(100, max(in.Limit*2, in.Limit+1))
-		out.Recovery = recoveryPlan("portfolio_truncated", "The portfolio page is bounded. Read the next larger page before treating the returned set as exhaustive.", mcpcontract.RecoveryAction(mcpcontract.ListPullRequestPortfolioInput{Authors: append([]string(nil), in.Authors...), State: in.State, Limit: nextLimit, View: in.View, SnapshotToken: in.SnapshotToken}))
+		out.Recovery = recoveryPlan("portfolio_truncated", "The portfolio page is bounded. Read the next larger page before treating the returned set as exhaustive.", mcpcontract.RecoveryAction(mcpcontract.ListPullRequestPortfolioInput{Repository: in.Repository, Authors: append([]string(nil), in.Authors...), State: in.State, Limit: nextLimit, View: in.View, SnapshotToken: in.SnapshotToken}))
 	}
 	return out, nil
 }
@@ -340,7 +347,11 @@ func portfolioPage(ctx context.Context, c *corpus.Corpus, in mcpcontract.ListPul
 		if len(in.Authors) > 0 {
 			author = strings.TrimSpace(in.Authors[0])
 		}
-		page, err := c.ListPullRequestPortfolioPage(ctx, author, in.State, in.Limit)
+		var repository *corpus.RepositoryKey
+		if in.Repository != nil {
+			repository = &corpus.RepositoryKey{Owner: in.Repository.Owner, Name: in.Repository.Repo}
+		}
+		page, err := c.ListPullRequestPortfolioPage(ctx, author, in.State, repository, in.Limit)
 		return page, nil, err
 	}
 	repositoryKeys := make([]corpus.RepositoryKey, 0, len(in.PullRequests))

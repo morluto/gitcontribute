@@ -103,8 +103,8 @@ revision authority and are not treated as GitContribute execution results.
 ## Contribution collision checks
 
 ```text
-github.search_threads (bounded current work)
-github.sync_pull_request_portfolio(selection=authored) -> jobs.get
+github.search_threads(repository={owner,repo}, bounded current work)
+github.sync_pull_request_portfolio(selection=authored, repository={owner,repo}) -> jobs.get
 corpus.search_pull_requests | corpus.find_pull_request_overlaps
 workspace.check_merge_conflicts (only after explicit acquisition)
 ```
