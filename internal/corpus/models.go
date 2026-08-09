@@ -1,6 +1,12 @@
 package corpus
 
-import "time"
+import (
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/morluto/gitcontribute/internal/domain"
+)
 
 // Repository is the current projection of a GitHub repository.
 type Repository struct {
@@ -56,9 +62,7 @@ type Thread struct {
 	Locked              bool
 	Milestone           string
 	ClosedAt            time.Time
-	MergedAt            time.Time
-	Merged              bool
-	MergedKnown         bool
+	Merge               domain.MergeStatus
 	SourceCreatedAt     time.Time
 	SourceUpdatedAt     time.Time
 	ObservationSequence int64
@@ -144,13 +148,12 @@ type Coverage struct {
 
 // Run records a crawl, hydration, indexing, or validation attempt.
 type Run struct {
-	ID          int64
-	Kind        string
-	Status      string
-	StartedAt   time.Time
-	CompletedAt *time.Time
-	Stats       string
-	Error       string
+	ID        int64
+	Kind      string
+	State     RunState
+	StartedAt time.Time
+	Stats     string
+	Error     string
 }
 
 // RunEvent is a durable log line emitted during a run.
@@ -162,13 +165,47 @@ type RunEvent struct {
 	RecordedAt time.Time
 }
 
+// RunStatus is a persisted run lifecycle value.
+type RunStatus string
+
 // RunStatus values.
 const (
-	RunStatusRunning   = "running"
-	RunStatusCompleted = "completed"
-	RunStatusPartial   = "partial"
-	RunStatusFailed    = "failed"
+	RunStatusRunning   RunStatus = "running"
+	RunStatusCompleted RunStatus = "completed"
+	RunStatusPartial   RunStatus = "partial"
+	RunStatusFailed    RunStatus = "failed"
 )
+
+// RunState binds a run status to the completion time required by terminal
+// states. Its zero value is invalid.
+type RunState struct {
+	status      RunStatus
+	completedAt time.Time
+}
+
+func parseRunState(status string, completedAt *time.Time) (RunState, error) {
+	parsed := RunStatus(status)
+	switch parsed {
+	case RunStatusRunning:
+		if completedAt != nil {
+			return RunState{}, errors.New("running run cannot have a completion time")
+		}
+		return RunState{status: parsed}, nil
+	case RunStatusCompleted, RunStatusPartial, RunStatusFailed:
+		if completedAt == nil || completedAt.IsZero() {
+			return RunState{}, fmt.Errorf("%s run requires a completion time", parsed)
+		}
+		return RunState{status: parsed, completedAt: *completedAt}, nil
+	default:
+		return RunState{}, fmt.Errorf("unknown run status %q", status)
+	}
+}
+
+func (s RunState) Status() RunStatus { return s.status }
+
+func (s RunState) CompletedAt() (time.Time, bool) {
+	return s.completedAt, !s.completedAt.IsZero()
+}
 
 // JobStatus values for the durable job lifecycle.
 const (
@@ -181,20 +218,76 @@ const (
 
 // Job is a durable, cancellable unit of work.
 type Job struct {
-	ID          string
-	Kind        string
-	Status      string
-	Request     string
-	Result      string
-	Error       string
-	Progress    string
-	Statistics  string
-	CreatedAt   time.Time
-	StartedAt   *time.Time
-	CompletedAt *time.Time
-	UpdatedAt   time.Time
-	CancelledAt *time.Time
+	ID         string
+	Kind       string
+	State      JobState
+	Request    string
+	Result     string
+	Error      string
+	Progress   string
+	Statistics string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
+
+// JobState binds lifecycle timestamps and cancellation requests to the statuses
+// in which they are meaningful. Its zero value is invalid.
+type JobState struct {
+	status      string
+	startedAt   time.Time
+	completedAt time.Time
+	cancelledAt time.Time
+}
+
+func parseJobState(status string, startedAt, completedAt, cancelledAt *time.Time) (JobState, error) {
+	state := JobState{status: status}
+	if startedAt != nil {
+		state.startedAt = *startedAt
+	}
+	if completedAt != nil {
+		state.completedAt = *completedAt
+	}
+	if cancelledAt != nil {
+		state.cancelledAt = *cancelledAt
+	}
+	switch status {
+	case JobStatusQueued:
+		if startedAt != nil || completedAt != nil || cancelledAt != nil {
+			return JobState{}, errors.New("queued job cannot have lifecycle timestamps")
+		}
+	case JobStatusRunning:
+		if startedAt == nil || startedAt.IsZero() {
+			return JobState{}, errors.New("running job requires a start time")
+		}
+		if completedAt != nil {
+			return JobState{}, errors.New("running job cannot have a completion time")
+		}
+	case JobStatusSucceeded, JobStatusFailed:
+		if completedAt == nil || completedAt.IsZero() {
+			return JobState{}, fmt.Errorf("%s job requires a completion time", status)
+		}
+		if cancelledAt != nil {
+			return JobState{}, fmt.Errorf("%s job cannot have a cancellation time", status)
+		}
+	case JobStatusCancelled:
+		if completedAt == nil || completedAt.IsZero() || cancelledAt == nil || cancelledAt.IsZero() {
+			return JobState{}, errors.New("cancelled job requires completion and cancellation times")
+		}
+	default:
+		return JobState{}, fmt.Errorf("unknown job status %q", status)
+	}
+	return state, nil
+}
+
+func (s JobState) Status() string { return s.status }
+
+func (s JobState) StartedAt() (time.Time, bool) { return s.startedAt, !s.startedAt.IsZero() }
+
+func (s JobState) CompletedAt() (time.Time, bool) { return s.completedAt, !s.completedAt.IsZero() }
+
+func (s JobState) CancelledAt() (time.Time, bool) { return s.cancelledAt, !s.cancelledAt.IsZero() }
+
+func (s JobState) CancellationRequested() bool { return !s.cancelledAt.IsZero() }
 
 // JobEvent is a durable log line emitted during a job.
 type JobEvent struct {

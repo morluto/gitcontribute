@@ -74,8 +74,12 @@ func TestMCPReaderSearchGitHubThreadsPersistsArtifactWithoutFullCoverage(t *test
 	if searchCalls != 1 || out.Status != "partial" || out.NextPage != 2 || out.Total != 4 || out.Coverage != "repository_thread_coverage_incomplete" || out.ArtifactDigest == "" {
 		t.Fatalf("search output = %+v", out)
 	}
-	if len(out.RecoveryPlans) != 1 || out.RecoveryPlans[0].Then[0].Type != "search_github_threads" || out.RecoveryPlans[0].Then[0].SearchGitHubThreads == nil || out.RecoveryPlans[0].Then[0].SearchGitHubThreads.Page != 2 {
+	if len(out.RecoveryPlans) != 1 || out.RecoveryPlans[0].Then[0].Type() != "search_github_threads" {
 		t.Fatalf("search recovery plans = %+v", out.RecoveryPlans)
+	}
+	next, ok := mcpcontract.RecoveryInput[mcpcontract.SearchGitHubThreadsInput](out.RecoveryPlans[0].Then[0])
+	if !ok || next.Page != 2 {
+		t.Fatalf("search recovery input = %+v", out.RecoveryPlans)
 	}
 	if len(out.Items) != 1 || out.Items[0].Value == nil || out.Items[0].Value.Owner != "acme" || out.Items[0].Value.Number != 9 {
 		t.Fatalf("search items = %+v", out.Items)
@@ -179,7 +183,7 @@ func TestValidateReadSourceFilesInputTrimsRef(t *testing.T) {
 func TestMCPReaderSearchCodeBatchUsesOneOfflineRevisionAndPreservesQueryOrder(t *testing.T) {
 	ctx := context.Background()
 	svc := newSearchTestService(t)
-	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, domain.RepoRef{Owner: "acme", Repo: "rocket"}, codeindex.Snapshot{
+	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, domain.MustRepoRef("acme", "rocket"), codeindex.Snapshot{
 		RepoPath: "/rocket", Commit: "commit-1", CreatedAt: time.Now().UTC(), TotalBytes: 40,
 		Documents: []codeindex.Document{
 			{Path: "parser.go", Content: "func parser() {}", Bytes: 16, LanguageHint: "go"},
@@ -197,7 +201,7 @@ func TestMCPReaderSearchCodeBatchUsesOneOfflineRevisionAndPreservesQueryOrder(t 
 	if out.Status != "partial" || len(out.Items) != 2 || out.Items[0].Key != "parser" || out.Items[1].Key != "func" || out.SnapshotToken == "" {
 		t.Fatalf("batch output = %+v", out)
 	}
-	if out.Recovery == nil || len(out.Recovery.Then) != 1 || out.Recovery.Then[0].Type != "search_code" {
+	if out.Recovery == nil || len(out.Recovery.Then) != 1 || out.Recovery.Then[0].Type() != "search_code" {
 		t.Fatalf("batch page recovery = %+v", out.Recovery)
 	}
 	for i, item := range out.Items {

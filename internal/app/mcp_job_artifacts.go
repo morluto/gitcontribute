@@ -56,7 +56,7 @@ func ensureCoverageJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtif
 }
 
 func resourceFollowUp(uri, reason string) *mcpcontract.JobFollowUp {
-	return &mcpcontract.JobFollowUp{Action: mcpcontract.FollowUpAction{Type: "read_resource", ReadResource: &mcpcontract.ResourceReadAction{URI: uri}}, Reason: reason}
+	return &mcpcontract.JobFollowUp{Action: mcpcontract.FollowUpActionFor(mcpcontract.ResourceReadAction{URI: uri}), Reason: reason}
 }
 
 func fixPatternJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
@@ -87,7 +87,7 @@ func workspaceJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactRe
 	}
 	return []mcpcontract.JobArtifactReference{{Kind: "workspace", ID: result.ID}},
 		&mcpcontract.JobFollowUp{
-			Action: mcpcontract.FollowUpAction{Type: "inspect_commit_changes", InspectCommitChanges: &mcpcontract.InspectCommitChangesInput{WorkspaceID: result.ID}},
+			Action: mcpcontract.FollowUpActionFor(mcpcontract.InspectCommitChangesInput{WorkspaceID: result.ID}),
 			Reason: "Inspect the managed workspace before planning commits.",
 		}
 }
@@ -173,7 +173,7 @@ func repositoryBatchJobArtifact(job *contracts.JobResult, total int) ([]mcpcontr
 	var follow *mcpcontract.JobFollowUp
 	if json.Unmarshal([]byte(job.Request), &request) == nil && len(request.Repositories) > 0 {
 		follow = &mcpcontract.JobFollowUp{
-			Action: mcpcontract.FollowUpAction{Type: "get_repositories", GetRepositories: &mcpcontract.GetRepositoriesInput{Repositories: append([]mcpcontract.RepositoryRef(nil), request.Repositories...)}},
+			Action: mcpcontract.FollowUpActionFor(mcpcontract.GetRepositoriesInput{Repositories: append([]mcpcontract.RepositoryRef(nil), request.Repositories...)}),
 			Reason: "Read synchronized repository facts and coverage from the offline corpus.",
 		}
 	}
@@ -190,7 +190,7 @@ func threadBatchJobArtifact(job *contracts.JobResult, total int) ([]mcpcontract.
 	var follow *mcpcontract.JobFollowUp
 	if len(threadRefs) > 0 {
 		follow = &mcpcontract.JobFollowUp{
-			Action: mcpcontract.FollowUpAction{Type: "get_threads", GetThreads: &mcpcontract.GetThreadsInput{Threads: threadRefs}},
+			Action: mcpcontract.FollowUpActionFor(mcpcontract.GetThreadsInput{Threads: threadRefs}),
 			Reason: "Read synchronized thread facts and coverage from the offline corpus.",
 		}
 	}
@@ -280,7 +280,7 @@ func portfolioJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactRe
 	var follow *mcpcontract.JobFollowUp
 	if arguments := portfolioReadFollowUpArguments(request, result.Login, references); arguments != nil {
 		follow = &mcpcontract.JobFollowUp{
-			Action: mcpcontract.FollowUpAction{Type: "list_pull_request_portfolio", ListPortfolio: arguments},
+			Action: mcpcontract.FollowUpActionFor(*arguments),
 			Reason: "Read these refreshed pull requests from the offline portfolio.",
 		}
 	}
@@ -405,7 +405,7 @@ func pullRequestFeedbackIndexJobArtifact(job *contracts.JobResult) ([]mcpcontrac
 		}
 	}
 	artifact := mcpcontract.JobArtifactReference{Kind: "pull_request_feedback_index", Count: ptrNonNegative(completed), References: refs, ReferencesTruncated: referencesTruncated, Failures: failures, FailuresTruncated: failuresTruncated, Status: result.Status, DiscoveryStatus: result.DiscoveryStatus, Recovery: result.Recovery}
-	follow := &mcpcontract.JobFollowUp{Action: mcpcontract.FollowUpAction{Type: "search_pull_request_feedback", SearchFeedback: &mcpcontract.SearchPullRequestFeedbackInput{Repository: request.Repository}}, Reason: "Search the indexed pull-request feedback through the offline corpus."}
+	follow := &mcpcontract.JobFollowUp{Action: mcpcontract.FollowUpActionFor(mcpcontract.SearchPullRequestFeedbackInput{Repository: request.Repository}), Reason: "Search the indexed pull-request feedback through the offline corpus."}
 	return []mcpcontract.JobArtifactReference{artifact}, follow
 }
 
@@ -498,7 +498,7 @@ func firstCodeIndexFollowUp(artifacts []mcpcontract.JobArtifactReference) *mcpco
 		}
 		artifact := reference.CodeIndex
 		return &mcpcontract.JobFollowUp{
-			Action: mcpcontract.FollowUpAction{Type: "read_resource", ReadResource: &mcpcontract.ResourceReadAction{URI: artifact.ResourceURI}},
+			Action: mcpcontract.FollowUpActionFor(mcpcontract.ResourceReadAction{URI: artifact.ResourceURI}),
 			Reason: "Read the exact indexed-commit artifact through MCP resources/read.",
 		}
 	}

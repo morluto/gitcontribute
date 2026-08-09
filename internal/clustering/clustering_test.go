@@ -33,8 +33,8 @@ func TestEngineHonorsCancellationBeforeExactWork(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := engine.Cluster(ctx, []clustering.Candidate{
-		{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Kind: "issue", Number: 1, Title: "same"},
-		{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Kind: "issue", Number: 2, Title: "same"},
+		{Repo: domain.MustRepoRef("owner", "repo"), Kind: "issue", Number: 1, Title: "same"},
+		{Repo: domain.MustRepoRef("owner", "repo"), Kind: "issue", Number: 2, Title: "same"},
 	})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cluster error = %v, want context.Canceled", err)
@@ -67,9 +67,9 @@ func TestEngineProducesExplainableSignals(t *testing.T) {
 
 func TestEngineUsesExplicitReferences(t *testing.T) {
 	clusters := clusterCandidates(t, []clustering.Candidate{
-		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 1, Title: "bug", Body: "first"},
-		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 2, Title: "other", Body: "duplicate of #1"},
-		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 3, Title: "unrelated", Body: "nothing"},
+		{Repo: domain.MustRepoRef("o", "r"), Kind: "issue", Number: 1, Title: "bug", Body: "first"},
+		{Repo: domain.MustRepoRef("o", "r"), Kind: "issue", Number: 2, Title: "other", Body: "duplicate of #1"},
+		{Repo: domain.MustRepoRef("o", "r"), Kind: "issue", Number: 3, Title: "unrelated", Body: "nothing"},
 	})
 	if len(clusters) != 1 || len(clusters[0].Members) != 2 || clusters[0].Canonical.Number != 1 {
 		t.Fatalf("explicit-reference cluster = %+v", clusters)
@@ -83,8 +83,8 @@ func TestEngineUsesExplicitReferences(t *testing.T) {
 
 func TestEngineRejectsUnrelatedCandidates(t *testing.T) {
 	clusters := clusterCandidates(t, []clustering.Candidate{
-		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 1, Title: "fix login crash", Body: "crash"},
-		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 2, Title: "add dark mode", Body: "theme"},
+		{Repo: domain.MustRepoRef("o", "r"), Kind: "issue", Number: 1, Title: "fix login crash", Body: "crash"},
+		{Repo: domain.MustRepoRef("o", "r"), Kind: "issue", Number: 2, Title: "add dark mode", Body: "theme"},
 	})
 	if len(clusters) != 0 {
 		t.Fatalf("expected no clusters, got %d", len(clusters))
@@ -92,8 +92,8 @@ func TestEngineRejectsUnrelatedCandidates(t *testing.T) {
 }
 
 func TestStableIDIsDeterministic(t *testing.T) {
-	a := clustering.Candidate{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 1, Title: "duplicate title"}
-	b := clustering.Candidate{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 2, Title: "duplicate title"}
+	a := clustering.Candidate{Repo: domain.MustRepoRef("o", "r"), Kind: "issue", Number: 1, Title: "duplicate title"}
+	b := clustering.Candidate{Repo: domain.MustRepoRef("o", "r"), Kind: "issue", Number: 2, Title: "duplicate title"}
 	first := clusterCandidates(t, []clustering.Candidate{a, b})
 	second := clusterCandidates(t, []clustering.Candidate{b, a})
 	if len(first) != 1 || len(second) != 1 || first[0].StableID != second[0].StableID {
@@ -104,10 +104,10 @@ func TestStableIDIsDeterministic(t *testing.T) {
 func TestEngineReportsPossibleAndScoredPairs(t *testing.T) {
 	engine := defaultEngine(t)
 	result, err := engine.Cluster(context.Background(), []clustering.Candidate{
-		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 1, Title: "fix login crash"},
-		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 2, Title: "fix login crash"},
-		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 3, Title: "different", Body: "duplicate of #1"},
-		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 4, Title: "unrelated"},
+		{Repo: domain.MustRepoRef("o", "r"), Kind: "issue", Number: 1, Title: "fix login crash"},
+		{Repo: domain.MustRepoRef("o", "r"), Kind: "issue", Number: 2, Title: "fix login crash"},
+		{Repo: domain.MustRepoRef("o", "r"), Kind: "issue", Number: 3, Title: "different", Body: "duplicate of #1"},
+		{Repo: domain.MustRepoRef("o", "r"), Kind: "issue", Number: 4, Title: "unrelated"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +132,7 @@ func TestEngineEnforcesWorstCaseComparisonBudget(t *testing.T) {
 }
 
 func TestSourceRevisionIncludesContentButIgnoresLabelOrder(t *testing.T) {
-	base := clustering.Candidate{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Kind: "issue", Number: 1, Title: "title", Body: "original", Labels: []string{"bug", "help wanted"}}
+	base := clustering.Candidate{Repo: domain.MustRepoRef("owner", "repo"), Kind: "issue", Number: 1, Title: "title", Body: "original", Labels: []string{"bug", "help wanted"}}
 	if got := len(clustering.SourceRevision([]clustering.Candidate{base})); got != 64 {
 		t.Fatalf("source revision length = %d, want full SHA-256 hex digest", got)
 	}
@@ -150,8 +150,8 @@ func TestSourceRevisionIncludesContentButIgnoresLabelOrder(t *testing.T) {
 
 func TestDuplicateLabelsDoNotInflateSimilarity(t *testing.T) {
 	clusters := clusterCandidates(t, []clustering.Candidate{
-		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 1, Labels: []string{"bug"}},
-		{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: "issue", Number: 2, Labels: []string{"bug", "bug"}},
+		{Repo: domain.MustRepoRef("o", "r"), Kind: "issue", Number: 1, Labels: []string{"bug"}},
+		{Repo: domain.MustRepoRef("o", "r"), Kind: "issue", Number: 2, Labels: []string{"bug", "bug"}},
 	})
 	if len(clusters) != 0 {
 		t.Fatalf("duplicate labels inflated similarity into %d cluster(s)", len(clusters))

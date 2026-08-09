@@ -1,6 +1,10 @@
 package mcpcontract
 
-import "time"
+import (
+	"errors"
+	"fmt"
+	"time"
+)
 
 // SearchRepositoriesInput describes an offline repository search page.
 type SearchRepositoriesInput struct {
@@ -103,20 +107,43 @@ type SnapshotReadAction struct {
 	SnapshotToken string `json:"snapshot_token"`
 }
 
-// FollowUpAction is a discriminated union of valid post-job transitions. Each
-// variant owns its arguments; callers never reconstruct a generic argument bag
-// from prose.
-type FollowUpAction struct {
-	Type                 string                          `json:"type"`
-	PollJob              *GetJobsInput                   `json:"poll_job,omitempty"`
-	ReadResource         *ResourceReadAction             `json:"read_resource,omitempty"`
-	ReadSnapshot         *SnapshotReadAction             `json:"read_snapshot,omitempty"`
-	InspectCommitChanges *InspectCommitChangesInput      `json:"inspect_commit_changes,omitempty"`
-	GetRepositories      *GetRepositoriesInput           `json:"get_repositories,omitempty"`
-	GetThreads           *GetThreadsInput                `json:"get_threads,omitempty"`
-	GetThreadFacets      *GetThreadFacetsInput           `json:"get_thread_facets,omitempty"`
-	ListPortfolio        *ListPullRequestPortfolioInput  `json:"list_pull_request_portfolio,omitempty"`
-	SearchFeedback       *SearchPullRequestFeedbackInput `json:"search_pull_request_feedback,omitempty"`
+// FollowUpAction is the sealed tool-call union used for post-job transitions.
+// Its concrete wrapper gives encoding/json a parse boundary for interface data.
+type FollowUpAction struct{ call ToolCall }
+
+func (FollowUpAction) isToolCall() {}
+
+func (a FollowUpAction) Type() string {
+	if a.call == nil {
+		return ""
+	}
+	return a.call.Type()
+}
+
+func (a FollowUpAction) Input() any {
+	if a.call == nil {
+		return nil
+	}
+	return a.call.Input()
+}
+
+func (a FollowUpAction) MarshalJSON() ([]byte, error) {
+	if a.call == nil {
+		return nil, errors.New("follow-up action is not parsed")
+	}
+	return a.call.MarshalJSON()
+}
+
+func (a *FollowUpAction) UnmarshalJSON(data []byte) error {
+	call, err := parseRecoveryAction(data)
+	if err != nil {
+		return fmt.Errorf("decode follow-up action: %w", err)
+	}
+	if !isFollowUpAction(call.Input()) {
+		return fmt.Errorf("decode follow-up action: %s is not a post-job read or poll action", call.Type())
+	}
+	a.call = call
+	return nil
 }
 
 // JobFollowUp points to the typed read plane for a job's durable result.

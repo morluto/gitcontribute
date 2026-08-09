@@ -501,7 +501,7 @@ func TestGHArchiveCrawlMalformedArchive(t *testing.T) {
 	}
 	c, _ := svc.openCorpus(ctx)
 	runs, err := c.ListRuns(ctx, 1)
-	if err != nil || len(runs) != 1 || runs[0].Status != corpus.RunStatusFailed {
+	if err != nil || len(runs) != 1 || runs[0].State.Status() != corpus.RunStatusFailed {
 		t.Fatalf("latest run = %+v, err=%v; want failed", runs, err)
 	}
 }
@@ -543,7 +543,7 @@ func TestGHArchiveCrawlFetchFailureContinues(t *testing.T) {
 	}
 	c, _ := svc.openCorpus(ctx)
 	runs, err := c.ListRuns(ctx, 1)
-	if err != nil || len(runs) != 1 || runs[0].Status != corpus.RunStatusPartial {
+	if err != nil || len(runs) != 1 || runs[0].State.Status() != corpus.RunStatusPartial {
 		t.Fatalf("latest run = %+v, err=%v; want partial", runs, err)
 	}
 }
@@ -552,7 +552,7 @@ func TestArchiveMergePreservesNewerProjection(t *testing.T) {
 	t.Parallel()
 	newer := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
 	signal := discovery.Signal{
-		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, RepoID: 42,
+		Repo: domain.MustRepoRef("owner", "repo"), RepoID: 42,
 		ThreadKind: domain.IssueKind, ThreadNumber: 7, ThreadState: domain.ThreadState("closed"),
 		ObservedAt: newer.Add(-time.Hour),
 	}
@@ -561,8 +561,11 @@ func TestArchiveMergePreservesNewerProjection(t *testing.T) {
 		t.Fatalf("repository regressed: %+v", got)
 	}
 	thread := corpus.Thread{ID: 2, RepositoryID: 1, Kind: corpus.ThreadKindIssue, Number: 7, State: "open", Title: "current", SourceUpdatedAt: newer}
-	if got := mergeArchiveThread(signal, 1, &thread); got.State != "open" || got.Title != "current" || !got.SourceUpdatedAt.IsZero() {
+	if got, ok := mergeArchiveThread(signal, 1, &thread); !ok || got.State != "open" || got.Title != "current" || !got.SourceUpdatedAt.IsZero() {
 		t.Fatalf("thread regressed: %+v", got)
+	}
+	if _, ok := mergeArchiveThread(discovery.Signal{ThreadKind: domain.IssueKind, ThreadNumber: 8, Action: "labeled"}, 1, nil); ok {
+		t.Fatal("sparse archive event produced a thread projection without a known state")
 	}
 }
 
@@ -574,15 +577,19 @@ func TestArchiveDiscoveryCannotOutrankCanonicalSync(t *testing.T) {
 	c, _ := svc.openCorpus(ctx)
 
 	signal := discovery.Signal{
-		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, RepoID: 42,
-		ThreadKind: domain.IssueKind, ThreadNumber: 7, ThreadTitle: "sparse archive title",
+		Repo: domain.MustRepoRef("owner", "repo"), RepoID: 42,
+		ThreadKind: domain.IssueKind, ThreadNumber: 7, ThreadState: domain.OpenState, ThreadTitle: "sparse archive title",
 		ObservedAt: time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC),
 	}
 	archiveRepo, err := c.UpsertRepository(ctx, mergeArchiveRepo(signal, nil), `{"source":"archive"}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.UpsertThread(ctx, mergeArchiveThread(signal, archiveRepo.ID, nil), `{"source":"archive"}`); err != nil {
+	archiveThread, ok := mergeArchiveThread(signal, archiveRepo.ID, nil)
+	if !ok {
+		t.Fatal("archive signal with an explicit state was not representable")
+	}
+	if _, err := c.UpsertThread(ctx, archiveThread, `{"source":"archive"}`); err != nil {
 		t.Fatal(err)
 	}
 
@@ -594,7 +601,7 @@ func TestArchiveDiscoveryCannotOutrankCanonicalSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := c.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: canonicalRepo.ID, Kind: corpus.ThreadKindIssue, Number: 7, Title: "canonical title", Body: "canonical body", SourceUpdatedAt: canonicalTime,
+		RepositoryID: canonicalRepo.ID, Kind: corpus.ThreadKindIssue, Number: 7, State: "open", Title: "canonical title", Body: "canonical body", SourceUpdatedAt: canonicalTime,
 	}, `{"source":"github"}`); err != nil {
 		t.Fatal(err)
 	}

@@ -19,8 +19,8 @@ const maxFeedbackMergeStateRecoveryThreads = 100
 // SearchPullRequestFeedback is an offline read over the repository feedback
 // projection. Coverage state is returned independently from match count.
 func (r *MCPReader) SearchPullRequestFeedback(ctx context.Context, in mcpcontract.SearchPullRequestFeedbackInput) (mcpcontract.SearchPullRequestFeedbackOutput, error) {
-	ref := domain.RepoRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(in.Repository.Owner, in.Repository.Repo)
+	if err != nil {
 		return mcpcontract.SearchPullRequestFeedbackOutput{}, err
 	}
 	createdAfter, err := parseFeedbackDate("created_after", in.CreatedAfter)
@@ -53,12 +53,12 @@ func (r *MCPReader) SearchPullRequestFeedback(ctx context.Context, in mcpcontrac
 	if err != nil {
 		return mcpcontract.SearchPullRequestFeedbackOutput{}, err
 	}
-	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return mcpcontract.SearchPullRequestFeedbackOutput{}, err
 	}
 	if repo == nil {
-		return mcpcontract.SearchPullRequestFeedbackOutput{}, mcpcontract.Unavailable("repository_feedback_not_indexed", fmt.Sprintf("No pull-request feedback index exists for %s.", ref), mcpcontract.RecoveryAction(mcpcontract.IndexPullRequestFeedbackInput{Repository: mcpcontract.RepositoryRef{Owner: ref.Owner, Repo: ref.Repo}}))
+		return mcpcontract.SearchPullRequestFeedbackOutput{}, mcpcontract.Unavailable("repository_feedback_not_indexed", fmt.Sprintf("No pull-request feedback index exists for %s.", ref), mcpcontract.RecoveryAction(mcpcontract.IndexPullRequestFeedbackInput{Repository: mcpcontract.RepositoryRef{Owner: ref.Owner(), Repo: ref.Repo()}}))
 	}
 	page, err := c.SearchPullRequestFeedback(ctx, corpus.FeedbackSearchFilter{
 		RepositoryID: repo.ID, FeedbackAuthor: in.FeedbackAuthor, PullRequestAuthor: in.PullRequestAuthor,
@@ -68,7 +68,7 @@ func (r *MCPReader) SearchPullRequestFeedback(ctx context.Context, in mcpcontrac
 	})
 	if err != nil {
 		if errors.Is(err, corpus.ErrProjectionStale) {
-			return mcpcontract.SearchPullRequestFeedbackOutput{}, mcpcontract.Unavailable("feedback_projection_stale", "The normalized feedback projection is missing or stale. Continue the repository feedback index job, then retry this offline search.", mcpcontract.RecoveryAction(mcpcontract.IndexPullRequestFeedbackInput{Repository: mcpcontract.RepositoryRef{Owner: ref.Owner, Repo: ref.Repo}, Channels: []string{"issue_comments", "submitted_reviews", "inline_comments", "review_threads"}, ThreadState: "all"}))
+			return mcpcontract.SearchPullRequestFeedbackOutput{}, mcpcontract.Unavailable("feedback_projection_stale", "The normalized feedback projection is missing or stale. Continue the repository feedback index job, then retry this offline search.", mcpcontract.RecoveryAction(mcpcontract.IndexPullRequestFeedbackInput{Repository: mcpcontract.RepositoryRef{Owner: ref.Owner(), Repo: ref.Repo()}, Channels: []string{"issue_comments", "submitted_reviews", "inline_comments", "review_threads"}, ThreadState: "all"}))
 		}
 		return mcpcontract.SearchPullRequestFeedbackOutput{}, err
 	}
@@ -80,14 +80,13 @@ func (r *MCPReader) SearchPullRequestFeedback(ctx context.Context, in mcpcontrac
 	}
 	for _, item := range page.Items {
 		merged := (*bool)(nil)
-		if item.PullRequestMergedKnown {
-			value := item.PullRequestMerged
+		if item.PullRequestMerge.Known() {
+			value := item.PullRequestMerge.IsMerged()
 			merged = &value
 		}
 		resolved := (*bool)(nil)
 		resolutionState := "unknown"
-		if item.ResolvedKnown {
-			value := item.Resolved
+		if value, known := item.Resolution.Value(); known {
 			resolved = &value
 			if value {
 				resolutionState = "resolved"
@@ -95,15 +94,15 @@ func (r *MCPReader) SearchPullRequestFeedback(ctx context.Context, in mcpcontrac
 				resolutionState = "unresolved"
 			}
 		}
-		pr := mcpcontract.ThreadRef{Owner: ref.Owner, Repo: ref.Repo, Kind: "pull_request", Number: item.PullRequestNumber}
-		prReference := fmt.Sprintf("%s/%s#%d", ref.Owner, ref.Repo, item.PullRequestNumber)
-		threadReference := fmt.Sprintf("gitcontribute://pull-request-feedback/%s/%s/%d", ref.Owner, ref.Repo, item.PullRequestNumber)
+		pr := mcpcontract.ThreadRef{Owner: ref.Owner(), Repo: ref.Repo(), Kind: "pull_request", Number: item.PullRequestNumber}
+		prReference := fmt.Sprintf("%s/%s#%d", ref.Owner(), ref.Repo(), item.PullRequestNumber)
+		threadReference := fmt.Sprintf("gitcontribute://pull-request-feedback/%s/%s/%d", ref.Owner(), ref.Repo(), item.PullRequestNumber)
 		out.Matches = append(out.Matches, mcpcontract.PullRequestFeedbackMatch{
 			Repository: in.Repository, PullRequest: pr, PullRequestReference: prReference,
 			PullRequestAuthor: item.PullRequestAuthor, PullRequestState: item.PullRequestState, Merged: merged,
 			Channel: item.Channel, FeedbackID: item.FeedbackID, FeedbackNodeID: item.FeedbackNodeID, ThreadID: item.ThreadExternalID,
 			ThreadReference:  threadReference,
-			CommentReference: fmt.Sprintf("gitcontribute://pull-request-feedback/%s/%s/%d/%s/%s", ref.Owner, ref.Repo, item.PullRequestNumber, url.PathEscape(item.Channel), url.PathEscape(item.FeedbackID)),
+			CommentReference: fmt.Sprintf("gitcontribute://pull-request-feedback/%s/%s/%d/%s/%s", ref.Owner(), ref.Repo(), item.PullRequestNumber, url.PathEscape(item.Channel), url.PathEscape(item.FeedbackID)),
 			InReplyToID:      item.InReplyToID, FeedbackAuthor: item.Author, ReviewState: item.ReviewState, Body: compactFeedbackBody(item.Body), Path: item.Path, Line: item.Line,
 			StartLine: item.StartLine, Side: item.Side, StartSide: item.StartSide, Outdated: item.Outdated, Resolved: resolved, ResolutionState: resolutionState, ResolvedBy: item.ResolvedBy, CreatedAt: formatTime(item.CreatedAt),
 			UpdatedAt: formatTime(item.UpdatedAt), HeadSHA: item.HeadSHA, SourceObservationID: item.SourceObservationID,
@@ -112,7 +111,7 @@ func (r *MCPReader) SearchPullRequestFeedback(ctx context.Context, in mcpcontrac
 	unknownMergeState := len(page.UnknownMergePullRequests) > 0
 	if !unknownMergeState {
 		for _, item := range page.Items {
-			if !item.PullRequestMergedKnown {
+			if !item.PullRequestMerge.Known() {
 				unknownMergeState = true
 				break
 			}
@@ -153,7 +152,7 @@ func compactFeedbackBody(value string) string {
 
 func feedbackSearchRecovery(ctx context.Context, c *corpus.Corpus, repositoryID int64, ref domain.RepoRef, in mcpcontract.SearchPullRequestFeedbackInput, page corpus.FeedbackSearchPage) *mcpcontract.RecoveryPlan {
 	if !page.Coverage.DiscoveryComplete {
-		return recoveryPlan("feedback_discovery_incomplete", "Discovery is incomplete; continue the repository feedback index job before treating an empty result as absence.", mcpcontract.RecoveryAction(mcpcontract.IndexPullRequestFeedbackInput{Repository: mcpcontract.RepositoryRef{Owner: ref.Owner, Repo: ref.Repo}, Channels: []string{"issue_comments", "submitted_reviews", "inline_comments", "review_threads"}, ThreadState: "all"}))
+		return recoveryPlan("feedback_discovery_incomplete", "Discovery is incomplete; continue the repository feedback index job before treating an empty result as absence.", mcpcontract.RecoveryAction(mcpcontract.IndexPullRequestFeedbackInput{Repository: mcpcontract.RepositoryRef{Owner: ref.Owner(), Repo: ref.Repo()}, Channels: []string{"issue_comments", "submitted_reviews", "inline_comments", "review_threads"}, ThreadState: "all"}))
 	}
 	channels := []string{in.Channel}
 	if in.Channel == "" {
@@ -168,20 +167,20 @@ func feedbackSearchRecovery(ctx context.Context, c *corpus.Corpus, repositoryID 
 		if err == nil && len(threads) > 0 {
 			refs := make([]mcpcontract.ThreadRef, 0, len(threads))
 			for _, thread := range threads {
-				refs = append(refs, mcpcontract.ThreadRef{Owner: ref.Owner, Repo: ref.Repo, Kind: "pull_request", Number: thread.Number})
+				refs = append(refs, mcpcontract.ThreadRef{Owner: ref.Owner(), Repo: ref.Repo(), Kind: "pull_request", Number: thread.Number})
 			}
 			return recoveryPlan("feedback_facet_incomplete", "Some pull-request feedback facets are incomplete; retry the exact feedback synchronization, then reread this search.", mcpcontract.RecoveryAction(mcpcontract.SyncPullRequestFeedbackInput{PullRequests: refs, Channels: channels, ThreadState: "all", MaxItemsPerChannel: 1000, MaxRequests: 1000}))
 		}
 	}
 	unknown := make([]mcpcontract.ThreadRef, 0, len(page.UnknownMergePullRequests)+len(page.Items))
 	for _, number := range page.UnknownMergePullRequests {
-		unknown = append(unknown, mcpcontract.ThreadRef{Owner: ref.Owner, Repo: ref.Repo, Kind: "pull_request", Number: number})
+		unknown = append(unknown, mcpcontract.ThreadRef{Owner: ref.Owner(), Repo: ref.Repo(), Kind: "pull_request", Number: number})
 	}
 	for _, item := range page.Items {
-		if item.PullRequestMergedKnown {
+		if item.PullRequestMerge.Known() {
 			continue
 		}
-		unknown = append(unknown, mcpcontract.ThreadRef{Owner: ref.Owner, Repo: ref.Repo, Kind: "pull_request", Number: item.PullRequestNumber})
+		unknown = append(unknown, mcpcontract.ThreadRef{Owner: ref.Owner(), Repo: ref.Repo(), Kind: "pull_request", Number: item.PullRequestNumber})
 	}
 	if len(unknown) > 0 {
 		threads := uniqueThreadRefs(unknown)
@@ -190,7 +189,7 @@ func feedbackSearchRecovery(ctx context.Context, c *corpus.Corpus, repositoryID 
 		}
 		return recoveryPlan("merge_state_unknown", "Some matching pull requests have no observed merge state; refresh the exact PR-details facet before filtering on merge state.", mcpcontract.RecoveryAction(mcpcontract.HydrateThreadsInput{Threads: threads, Facets: []string{facets.PRDetails}, MaxPages: 1}))
 	}
-	return recoveryPlan("feedback_coverage_partial", "Feedback coverage is partial; continue indexing or retry the returned exact synchronization before treating missing feedback as absence.", mcpcontract.RecoveryAction(mcpcontract.IndexPullRequestFeedbackInput{Repository: mcpcontract.RepositoryRef{Owner: ref.Owner, Repo: ref.Repo}}))
+	return recoveryPlan("feedback_coverage_partial", "Feedback coverage is partial; continue indexing or retry the returned exact synchronization before treating missing feedback as absence.", mcpcontract.RecoveryAction(mcpcontract.IndexPullRequestFeedbackInput{Repository: mcpcontract.RepositoryRef{Owner: ref.Owner(), Repo: ref.Repo()}}))
 }
 
 func uniqueThreadRefs(values []mcpcontract.ThreadRef) []mcpcontract.ThreadRef {

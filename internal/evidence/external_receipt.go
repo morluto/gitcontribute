@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 )
@@ -110,17 +109,6 @@ func (s *Service) AttachExternalReceipt(ctx context.Context, receipt ExternalRec
 		Name: receipt.Producer + " external validation", Kind: "external", Command: append([]string(nil), receipt.Command...),
 		WorkingDir: receipt.WorkingDir, CreatedAt: receipt.StartedAt.UTC(),
 	}
-	existing, err := s.repo.GetValidationDefinition(ctx, definitionID)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return nil, fmt.Errorf("read external validation definition: %w", err)
-	}
-	if existing != nil {
-		if !slices.Equal(existing.Command, definition.Command) {
-			return nil, errors.New("external receipt command differs from the existing validation_id")
-		}
-	} else if err := s.repo.SaveValidationDefinition(ctx, definition); err != nil {
-		return nil, fmt.Errorf("save external validation definition: %w", err)
-	}
 	run := &ValidationRun{
 		ID: "external-run-" + digest, DefinitionID: definitionID, InvestigationID: receipt.InvestigationID,
 		OpportunityID: receipt.OpportunityID, Kind: receipt.Kind, StartedAt: receipt.StartedAt.UTC(),
@@ -135,8 +123,8 @@ func (s *Service) AttachExternalReceipt(ctx context.Context, receipt ExternalRec
 			Limitations: append([]string(nil), receipt.Limitations...), Incomplete: receipt.Incomplete,
 		},
 	}
-	if err := s.repo.SaveValidationRun(ctx, run); err != nil {
-		return nil, fmt.Errorf("save external validation run: %w", err)
+	if err := s.repo.SaveExternalValidation(ctx, definition, run); err != nil {
+		return nil, fmt.Errorf("save external validation: %w", err)
 	}
 	return run, nil
 }

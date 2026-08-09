@@ -12,7 +12,7 @@ func ExtractMemberRefs(text string, defaultRepo domain.RepoRef) []MemberRef {
 	refs := similarity.ExtractRefs(text, defaultRepo)
 	out := make([]MemberRef, len(refs))
 	for i, ref := range refs {
-		out[i] = MemberRef{Owner: ref.Repo.Owner, Repo: ref.Repo.Repo, Kind: string(ref.Kind), Number: ref.Number}
+		out[i] = MemberRef{Owner: ref.Repo.Owner(), Repo: ref.Repo.Repo(), Kind: string(ref.Kind), Number: ref.Number}
 	}
 	return out
 }

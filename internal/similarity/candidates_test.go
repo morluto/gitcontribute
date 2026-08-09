@@ -11,7 +11,7 @@ import (
 
 func TestDuplicateCandidatesKeepEveryQualifyingPair(t *testing.T) {
 	rule := similarity.DefaultDuplicateRule()
-	repo := domain.RepoRef{Owner: "Owner", Repo: "Repo"}
+	repo := domain.MustRepoRef("Owner", "Repo")
 	threads := []similarity.ThreadText{
 		{Ref: similarity.ThreadRef{Repo: repo, Kind: domain.IssueKind, Number: 1}, Title: "login crash"},
 		{Ref: similarity.ThreadRef{Repo: repo, Kind: domain.IssueKind, Number: 2}, Title: "login failure"},
@@ -62,7 +62,7 @@ func FuzzDuplicateCandidatesKeepQualifyingPairs(f *testing.F) {
 		titleA, titleB = boundedText(titleA), boundedText(titleB)
 		bodyA, bodyB = boundedText(bodyA), boundedText(bodyB)
 		rule := similarity.DefaultDuplicateRule()
-		repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
+		repo := domain.MustRepoRef("owner", "repo")
 		prepared := []similarity.PreparedDuplicate{
 			rule.Prepare(similarity.ThreadText{
 				Ref:   similarity.ThreadRef{Repo: repo, Kind: domain.IssueKind, Number: 1},

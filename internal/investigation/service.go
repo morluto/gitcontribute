@@ -26,8 +26,8 @@ func NewService(repo Repository, evidence EvidenceStore) *Service {
 
 // StartInvestigation creates a new investigation for a repository and commit.
 func (s *Service) StartInvestigation(ctx context.Context, repo domain.RepoRef, commitSHA, lens string) (*Investigation, error) {
-	if err := repo.Validate(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidRepo, err)
+	if !repo.IsValid() {
+		return nil, fmt.Errorf("%w: repository reference is not parsed", ErrInvalidRepo)
 	}
 	now := time.Now().UTC()
 	inv := &Investigation{

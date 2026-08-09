@@ -219,7 +219,7 @@ func (s *Service) openCorpus(ctx context.Context) (*corpus.Corpus, error) {
 	if err != nil {
 		return nil, err
 	}
-	if inspection.Exists {
+	if inspection.Exists() {
 		switch inspection.State {
 		case corpus.SchemaMigrationRequired:
 			return nil, &corpus.MigrationRequiredError{Current: inspection.Current, Target: inspection.Target}
@@ -438,7 +438,7 @@ func (s *Service) Init(ctx context.Context) (*contracts.InitResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if inspection.Exists {
+	if inspection.Exists() {
 		switch inspection.State {
 		case corpus.SchemaMigrationRequired:
 			return nil, &corpus.MigrationRequiredError{Current: inspection.Current, Target: inspection.Target}
@@ -645,8 +645,8 @@ func corpusRepoFromGitHub(r github.Repository) corpus.Repository {
 
 // Dossier builds a deterministic, local-corpus-backed repository dossier.
 func (s *Service) Dossier(ctx context.Context, repo contracts.RepoRef) (*contracts.DossierResult, error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 	if _, err := s.openReadOnlyCorpus(ctx); err != nil {

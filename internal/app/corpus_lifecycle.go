@@ -36,7 +36,7 @@ func (s *Service) InventoryCorpus(ctx context.Context, repo string) (*contracts.
 	if err != nil {
 		return nil, err
 	}
-	inv, err := c.Inventory(ctx, ref.Owner, ref.Repo)
+	inv, err := c.Inventory(ctx, ref.Owner(), ref.Repo())
 	if errors.Is(err, corpus.ErrRepositoryNotFound) {
 		return nil, failure.NotFound(fmt.Errorf("repository %s is not stored", repo))
 	}
@@ -81,8 +81,12 @@ func (s *Service) ListCorpusInventory(ctx context.Context) (*contracts.CorpusInv
 		SizeAttribution:         "SQLite database and WAL pages are shared; observation payload and code content bytes are logical measurements, not page allocation",
 	}
 	for i, item := range inv.Repositories {
+		ref, err := domain.NewRepoRef(item.RepoOwner, item.RepoName)
+		if err != nil {
+			return nil, fmt.Errorf("decode inventory repository: %w", err)
+		}
 		result := contracts.CorpusRepositoryInventoryResult{
-			Repo:   domain.RepoRef{Owner: item.RepoOwner, Repo: item.RepoName}.String(),
+			Repo:   ref.String(),
 			Issues: item.Issues, PullRequests: item.PullRequests, Threads: item.Threads,
 			RepositoryObservations: item.RepositoryObservations, ThreadObservations: item.ThreadObservations,
 			FacetObservations: item.FacetObservations, FacetCoverage: item.FacetCoverage,
@@ -132,7 +136,7 @@ func (s *Service) PlanCodePrune(ctx context.Context, repo string, keepLatest int
 	if err != nil {
 		return nil, err
 	}
-	plan, err := c.PlanCodeSnapshotPrune(ctx, domain.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, keepLatest)
+	plan, err := c.PlanCodeSnapshotPrune(ctx, ref, keepLatest)
 	if err != nil {
 		return nil, err
 	}
@@ -149,8 +153,7 @@ func (s *Service) ApplyCodePrune(ctx context.Context, repo string, keepLatest in
 	if err != nil {
 		return nil, err
 	}
-	domainRef := domain.RepoRef{Owner: ref.Owner, Repo: ref.Repo}
-	plan, err := c.PlanCodeSnapshotPrune(ctx, domainRef, keepLatest)
+	plan, err := c.PlanCodeSnapshotPrune(ctx, ref, keepLatest)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +165,7 @@ func (s *Service) ApplyCodePrune(ctx context.Context, repo string, keepLatest in
 			return nil, corpus.ErrCodeSnapshotPrunePlanStale
 		}
 	}
-	result, err := c.ApplyCodeSnapshotPrune(ctx, domainRef, plan)
+	result, err := c.ApplyCodeSnapshotPrune(ctx, ref, plan)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +314,7 @@ func projectionResult(state corpus.ProjectionState) contracts.CorpusProjectionRe
 
 func corpusInspectionResult(inspection corpus.SchemaInspection) *contracts.CorpusInspectionResult {
 	result := &contracts.CorpusInspectionResult{
-		Path: inspection.Path, Exists: inspection.Exists, SizeBytes: inspection.SizeBytes, WALBytes: inspection.WALBytes,
+		Path: inspection.Path, Exists: inspection.Exists(), SizeBytes: inspection.SizeBytes, WALBytes: inspection.WALBytes,
 		State: string(inspection.State), Current: inspection.Current, Target: inspection.Target,
 		Repositories: inspection.Repository, Threads: inspection.Threads,
 		Problem:        inspection.Problem,
@@ -362,7 +365,7 @@ func (s *Service) RestoreCorpus(ctx context.Context, source, safetyBackup string
 	if err := s.releaseCorpusForMigration(); err != nil {
 		return nil, err
 	}
-	if before.Exists {
+	if before.Exists() {
 		if safetyBackup == "" {
 			stamp := s.now().UTC().Format("20060102T150405.000000000Z")
 			safetyBackup = filepath.Join(filepath.Dir(before.Path), fmt.Sprintf("%s.before-restore.%s.bak", filepath.Base(before.Path), stamp))
@@ -422,7 +425,7 @@ func (s *Service) MigrateCorpus(ctx context.Context, opts contracts.CorpusMigrat
 		return nil, err
 	}
 	var destination string
-	if before.Exists && !opts.NoBackup {
+	if before.Exists() && !opts.NoBackup {
 		destination = opts.BackupPath
 		if destination == "" {
 			stamp := s.now().UTC().Format("20060102T150405.000000000Z")

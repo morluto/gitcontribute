@@ -63,12 +63,8 @@ func ParseThreadRef(raw string) (ThreadRef, error) {
 	if idx <= 0 || idx == len(raw)-1 {
 		return ThreadRef{}, fmt.Errorf("invalid thread reference %q: expected OWNER/REPO#NUMBER", raw)
 	}
-	parts := strings.Split(raw[:idx], "/")
-	if len(parts) != 2 {
-		return ThreadRef{}, fmt.Errorf("invalid thread reference %q: expected OWNER/REPO#NUMBER", raw)
-	}
-	repo := domain.RepoRef{Owner: parts[0], Repo: parts[1]}
-	if err := repo.Validate(); err != nil {
+	repo, err := domain.ParseRepoRef(raw[:idx])
+	if err != nil {
 		return ThreadRef{}, fmt.Errorf("invalid thread reference %q: %w", raw, err)
 	}
 	number, err := strconv.Atoi(raw[idx+1:])
@@ -89,8 +85,8 @@ func (r ThreadRef) String() string {
 
 // Validate checks a programmatically constructed thread reference.
 func (r ThreadRef) Validate() error {
-	if err := r.Repo.Validate(); err != nil {
-		return err
+	if !r.Repo.IsValid() {
+		return errors.New("repository reference is not parsed")
 	}
 	if r.Number <= 0 {
 		return errors.New("thread number must be positive")

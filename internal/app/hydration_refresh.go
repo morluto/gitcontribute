@@ -13,8 +13,8 @@ import (
 // child facets. It reuses the sync projection path so hydration cannot derive
 // coverage freshness from a stale or missing local header.
 func (s *Service) refreshHydrationThreadHeader(ctx context.Context, repo contracts.RepoRef, kind string, number int) error {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return err
 	}
 	if number <= 0 {
@@ -31,7 +31,7 @@ func (s *Service) refreshHydrationThreadHeader(ctx context.Context, repo contrac
 	if err != nil {
 		return err
 	}
-	repository, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repository, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return fmt.Errorf("get repository: %w", err)
 	}
@@ -48,8 +48,8 @@ func (s *Service) refreshHydrationThreadHeader(ctx context.Context, repo contrac
 	writer := &syncThreadWriter{
 		ctx:          ctx,
 		corpus:       c,
-		owner:        ref.Owner,
-		repo:         ref.Repo,
+		owner:        ref.Owner(),
+		repo:         ref.Repo(),
 		repositoryID: repository.ID,
 		kind:         kind,
 	}

@@ -38,8 +38,8 @@ func (b ThreadBaseline) OriginKey() string {
 // Validate ensures the baseline can identify both a source thread and one
 // immutable local observation.
 func (b ThreadBaseline) Validate() error {
-	if err := b.Repo.Validate(); err != nil {
-		return fmt.Errorf("%w: %w", ErrInvalidThreadBaseline, err)
+	if !b.Repo.IsValid() {
+		return fmt.Errorf("%w: repository reference is not parsed", ErrInvalidThreadBaseline)
 	}
 	if b.Kind != domain.IssueKind && b.Kind != domain.PullRequestKind {
 		return fmt.Errorf("%w: unsupported thread kind %q", ErrInvalidThreadBaseline, b.Kind)

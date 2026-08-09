@@ -25,8 +25,8 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 	if err := normalizePrepareIssueSetInput(&in); err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
 	}
-	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(in.Owner, in.Repo)
+	if err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
@@ -38,12 +38,12 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 		return mcpcontract.PrepareIssueSetOutput{}, err
 	}
 	out := mcpcontract.PrepareIssueSetOutput{
-		Status: "complete", Owner: ref.Owner, Repo: ref.Repo, ResponseFormat: in.ResponseFormat,
+		Status: "complete", Owner: ref.Owner(), Repo: ref.Repo(), ResponseFormat: in.ResponseFormat,
 		Items:         make([]mcpcontract.BatchItem[mcpcontract.PreparedIssueEvidence], len(in.IssueNumbers)),
 		Coverage:      []mcpcontract.FacetCoverageOutput{},
 		SnapshotToken: snapshotIdentity(in.SnapshotToken, revision),
 	}
-	stored, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	stored, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
 	}
@@ -51,7 +51,7 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 		if err := finishCorpusRead(ctx, c, revision); err != nil {
 			return mcpcontract.PrepareIssueSetOutput{}, err
 		}
-		return unavailableIssueSet(in, out), nil
+		return unavailableIssueSet(in, out, ref), nil
 	}
 	threadsCoverage, err := c.GetCoverage(ctx, stored.ID, nil, "threads")
 	if err != nil {
@@ -148,7 +148,7 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 
 	evaluatedAt := r.now()
 	for i, number := range in.IssueNumbers {
-		key := threadRefKey(mcpcontract.ThreadRef{Owner: ref.Owner, Repo: ref.Repo, Kind: corpus.ThreadKindIssue, Number: number})
+		key := threadRefKey(mcpcontract.ThreadRef{Owner: ref.Owner(), Repo: ref.Repo(), Kind: corpus.ThreadKindIssue, Number: number})
 		item := mcpcontract.BatchItem[mcpcontract.PreparedIssueEvidence]{Key: key, Status: "complete"}
 		issue, ok := issuesByNumber[number]
 		if !ok {
@@ -220,15 +220,15 @@ func normalizePrepareIssueSetInput(in *mcpcontract.PrepareIssueSetInput) error {
 	return nil
 }
 
-func unavailableIssueSet(in mcpcontract.PrepareIssueSetInput, out mcpcontract.PrepareIssueSetOutput) mcpcontract.PrepareIssueSetOutput {
+func unavailableIssueSet(in mcpcontract.PrepareIssueSetInput, out mcpcontract.PrepareIssueSetOutput, ref domain.RepoRef) mcpcontract.PrepareIssueSetOutput {
 	out.Status = "partial"
 	for i, number := range in.IssueNumbers {
 		out.Items[i] = mcpcontract.BatchItem[mcpcontract.PreparedIssueEvidence]{
 			Key: threadRefKey(mcpcontract.ThreadRef{Owner: in.Owner, Repo: in.Repo, Kind: corpus.ThreadKindIssue, Number: number}), Status: "unavailable",
 			Reason: "repository_not_indexed", Message: "repository is not present in the local corpus",
-			Recovery: recoveryPlan("repository_not_indexed", "Synchronize the repository, then retry this exact issue.", syncRepositoryContextCall(in.Owner, in.Repo), issueSyncAction(domain.RepoRef{Owner: in.Owner, Repo: in.Repo}, number)),
+			Recovery: recoveryPlan("repository_not_indexed", "Synchronize the repository, then retry this exact issue.", syncRepositoryContextCall(in.Owner, in.Repo), issueSyncAction(ref, number)),
 		}
-		out.RecoveryPlans = append(out.RecoveryPlans, *recoveryPlan("repository_not_indexed", "Synchronize the repository, then retry this exact issue.", syncRepositoryContextCall(in.Owner, in.Repo), issueSyncAction(domain.RepoRef{Owner: in.Owner, Repo: in.Repo}, number)))
+		out.RecoveryPlans = append(out.RecoveryPlans, *recoveryPlan("repository_not_indexed", "Synchronize the repository, then retry this exact issue.", syncRepositoryContextCall(in.Owner, in.Repo), issueSyncAction(ref, number)))
 	}
 	return out
 }
@@ -470,11 +470,11 @@ func issueSetRelatedWork(work radar.RelatedWork, ref domain.RepoRef, pullRequest
 	}
 	localPullRequestRef := fmt.Sprintf("pull_request:%s#%d", ref, work.Number)
 	if pullRequest, ok := pullRequests[work.Number]; ok && work.Kind == corpus.ThreadKindPullRequest && work.Ref == localPullRequestRef {
-		if pullRequest.MergedKnown {
-			merged := pullRequest.Merged
+		if pullRequest.Merge.Known() {
+			merged := pullRequest.Merge.IsMerged()
 			out.Merged = &merged
 		}
-		out.MergedAt = formatTime(pullRequest.MergedAt)
+		out.MergedAt = formatTime(pullRequest.Merge.MergedAt())
 	}
 	if responseFormat == "detailed" {
 		seen := map[string]struct{}{}
@@ -507,13 +507,13 @@ func preparedIssueSourceAsOf(value mcpcontract.PreparedIssueEvidence) string {
 func issueSyncAction(ref domain.RepoRef, number int) mcpcontract.ToolCall {
 	return mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{
 		Selection: "threads",
-		Threads:   []mcpcontract.ThreadRef{{Owner: ref.Owner, Repo: ref.Repo, Kind: corpus.ThreadKindIssue, Number: number}},
+		Threads:   []mcpcontract.ThreadRef{{Owner: ref.Owner(), Repo: ref.Repo(), Kind: corpus.ThreadKindIssue, Number: number}},
 	})
 }
 
 func issueHydrateAction(ref domain.RepoRef, number int, facet string) mcpcontract.ToolCall {
 	return mcpcontract.RecoveryAction(mcpcontract.HydrateThreadsInput{
-		Threads: []mcpcontract.ThreadRef{{Owner: ref.Owner, Repo: ref.Repo, Kind: corpus.ThreadKindIssue, Number: number}},
+		Threads: []mcpcontract.ThreadRef{{Owner: ref.Owner(), Repo: ref.Repo(), Kind: corpus.ThreadKindIssue, Number: number}},
 		Facets:  []string{facet},
 	})
 }
@@ -521,7 +521,7 @@ func issueHydrateAction(ref domain.RepoRef, number int, facet string) mcpcontrac
 func repositoryPullRequestSyncAction(ref domain.RepoRef) mcpcontract.ToolCall {
 	return mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{
 		Selection:    "repositories",
-		Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
+		Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner(), Repo: ref.Repo()}},
 		Kind:         corpus.ThreadKindPullRequest,
 		State:        "all",
 	})
@@ -530,7 +530,7 @@ func repositoryPullRequestSyncAction(ref domain.RepoRef) mcpcontract.ToolCall {
 func repositoryHistorySyncAction(ref domain.RepoRef) mcpcontract.ToolCall {
 	return mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{
 		Selection:    "repositories",
-		Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
+		Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner(), Repo: ref.Repo()}},
 		Kind:         "both",
 		State:        "closed",
 	})

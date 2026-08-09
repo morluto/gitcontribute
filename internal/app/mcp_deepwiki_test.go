@@ -26,7 +26,7 @@ func (f *fakeDeepWikiReader) Read(_ context.Context, request deepwiki.Request) (
 func TestDeepWikiReturnsDerivedProvenanceAndBoundsOutput(t *testing.T) {
 	t.Parallel()
 	svc := newSearchTestService(t)
-	fake := &fakeDeepWikiReader{response: deepwiki.Response{Available: true, Text: strings.Repeat("x", 2048), SourceURL: "https://deepwiki.com/acme/rocket"}}
+	fake := &fakeDeepWikiReader{response: deepwiki.AvailableResponse(strings.Repeat("x", 2048), "https://deepwiki.com/acme/rocket")}
 	svc.SetDeepWikiReader(fake)
 	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{Action: "question", Repositories: []string{"acme/rocket"}, Question: "architecture?", MaxOutputBytes: 1024})
 	if err != nil {
@@ -40,11 +40,7 @@ func TestDeepWikiReturnsDerivedProvenanceAndBoundsOutput(t *testing.T) {
 func TestDeepWikiUsesBoundedDefaultAndSteersFocusedRecovery(t *testing.T) {
 	t.Parallel()
 	svc := newSearchTestService(t)
-	fake := &fakeDeepWikiReader{response: deepwiki.Response{
-		Available: true,
-		Text:      strings.Repeat("x", mcpcontract.DeepWikiDefaultOutputBytes+1),
-		SourceURL: "https://deepwiki.com/acme/rocket",
-	}}
+	fake := &fakeDeepWikiReader{response: deepwiki.AvailableResponse(strings.Repeat("x", mcpcontract.DeepWikiDefaultOutputBytes+1), "https://deepwiki.com/acme/rocket")}
 	svc.SetDeepWikiReader(fake)
 
 	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{Action: "contents", Repository: "acme/rocket"})
@@ -54,7 +50,7 @@ func TestDeepWikiUsesBoundedDefaultAndSteersFocusedRecovery(t *testing.T) {
 	if len(out.Result) != mcpcontract.DeepWikiDefaultOutputBytes || !out.Truncated {
 		t.Fatalf("default DeepWiki bound = %d bytes, truncated=%v", len(out.Result), out.Truncated)
 	}
-	if out.Reason != "output_limit" || out.Recovery == nil || len(out.Recovery.Then) != 1 || out.Recovery.Then[0].Type != "query_deepwiki" {
+	if out.Reason != "output_limit" || out.Recovery == nil || len(out.Recovery.Then) != 1 || out.Recovery.Then[0].Type() != "query_deepwiki" {
 		t.Fatalf("missing truncation recovery guidance: %+v", out)
 	}
 }
@@ -62,7 +58,7 @@ func TestDeepWikiUsesBoundedDefaultAndSteersFocusedRecovery(t *testing.T) {
 func TestDeepWikiUsesNormalizedRepositoriesForRequestAndOutput(t *testing.T) {
 	t.Parallel()
 	svc := newSearchTestService(t)
-	fake := &fakeDeepWikiReader{response: deepwiki.Response{Available: true, Text: "ok"}}
+	fake := &fakeDeepWikiReader{response: deepwiki.AvailableResponse("ok", "")}
 	svc.SetDeepWikiReader(fake)
 	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{
 		Action: "question", Repository: "acme/rocket", Repositories: []string{"wrong/one", "wrong/two"}, Question: "architecture?", MaxOutputBytes: 1024,
@@ -79,7 +75,7 @@ func TestDeepWikiUsesNormalizedRepositoriesForRequestAndOutput(t *testing.T) {
 func TestDeepWikiTruncationPreservesUTF8(t *testing.T) {
 	t.Parallel()
 	svc := newSearchTestService(t)
-	fake := &fakeDeepWikiReader{response: deepwiki.Response{Available: true, Text: strings.Repeat("x", 1023) + "€", SourceURL: "https://deepwiki.com/acme/rocket"}}
+	fake := &fakeDeepWikiReader{response: deepwiki.AvailableResponse(strings.Repeat("x", 1023)+"€", "https://deepwiki.com/acme/rocket")}
 	svc.SetDeepWikiReader(fake)
 	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{Action: "contents", Repository: "acme/rocket", MaxOutputBytes: 1024})
 	if err != nil {

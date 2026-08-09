@@ -38,15 +38,19 @@ func (c *Corpus) AddClusterOverride(ctx context.Context, clusterID int64, ref cl
 		return err
 	}
 	defer rollbackSQLOnReturn(tx, &err)
-	var repo domain.RepoRef
+	var owner, name string
 	var canonical clustering.MemberRef
 	err = tx.QueryRowContext(ctx, `SELECT repo_owner, repo_name, canonical_kind, canonical_owner, canonical_repo, canonical_number
-		FROM clusters WHERE id=?`, clusterID).Scan(&repo.Owner, &repo.Repo, &canonical.Kind, &canonical.Owner, &canonical.Repo, &canonical.Number)
+		FROM clusters WHERE id=?`, clusterID).Scan(&owner, &name, &canonical.Kind, &canonical.Owner, &canonical.Repo, &canonical.Number)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("cluster %d not found", clusterID)
 	}
 	if err != nil {
 		return err
+	}
+	repo, err := domain.NewRepoRef(owner, name)
+	if err != nil {
+		return fmt.Errorf("decode cluster repository: %w", err)
 	}
 	if action == clustering.OverrideExclude && sameClusterMemberRef(ref, canonical) {
 		return errors.New("cannot exclude the canonical member")
@@ -63,7 +67,7 @@ func (c *Corpus) AddClusterOverride(ctx context.Context, clusterID int64, ref cl
 }
 
 func advanceClusterGovernanceTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRef) error {
-	owner, name := strings.ToLower(repo.Owner), strings.ToLower(repo.Repo)
+	owner, name := strings.ToLower(repo.Owner()), strings.ToLower(repo.Repo())
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cluster_projection_state (repo_owner, repo_name, governance_revision)
 		VALUES (?, ?, 1)
 		ON CONFLICT(repo_owner, repo_name) DO UPDATE SET governance_revision=governance_revision+1`, owner, name); err != nil {

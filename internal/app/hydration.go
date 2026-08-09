@@ -69,8 +69,8 @@ type HydrateOptions struct {
 // cancellation-aware, and records independent facet coverage plus run
 // completion/failure statistics.
 func (s *Service) HydrateThread(ctx context.Context, repo contracts.RepoRef, number int, opts HydrateOptions) (*HydrateResult, error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 	if number <= 0 {
@@ -102,7 +102,7 @@ func (s *Service) HydrateThread(ctx context.Context, repo contracts.RepoRef, num
 		})
 	}()
 
-	repoProjection, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repoProjection, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		hydrateErr = fmt.Errorf("get repository: %w", err)
 		return nil, hydrateErr
@@ -268,7 +268,7 @@ func (f *facetRunner) hydrateIssueTimeline() (HydratedFacet, error) {
 		if err := f.ctx.Err(); err != nil {
 			return HydratedFacet{}, err
 		}
-		res, err := reader.ListIssueTimeline(f.ctx, f.ref.Owner, f.ref.Repo, f.thread.Number, opts)
+		res, err := reader.ListIssueTimeline(f.ctx, f.ref.Owner(), f.ref.Repo(), f.thread.Number, opts)
 		if err != nil {
 			return HydratedFacet{}, err
 		}
@@ -480,7 +480,7 @@ func (f *facetRunner) hydrateIssueComments() (HydratedFacet, error) {
 		facet:          FacetIssueComments,
 		marshalContext: "issue comments",
 		fetch: func(opts github.PageOptions) (github.ListResult[github.IssueComment], error) {
-			return f.reader.ListIssueComments(f.ctx, f.ref.Owner, f.ref.Repo, f.thread.Number, opts)
+			return f.reader.ListIssueComments(f.ctx, f.ref.Owner(), f.ref.Repo(), f.thread.Number, opts)
 		},
 		latest:     latestFromIssueComments,
 		searchText: issueCommentsSearchText,
@@ -492,7 +492,7 @@ func (f *facetRunner) hydratePullRequestDetails() (HydratedFacet, error) {
 	if err != nil {
 		return HydratedFacet{}, err
 	}
-	pr, _, err := f.reader.GetPullRequestDetails(f.ctx, f.ref.Owner, f.ref.Repo, f.thread.Number)
+	pr, _, err := f.reader.GetPullRequestDetails(f.ctx, f.ref.Owner(), f.ref.Repo(), f.thread.Number)
 	if err != nil {
 		return HydratedFacet{}, err
 	}
@@ -517,7 +517,9 @@ func (f *facetRunner) hydratePullRequestDetails() (HydratedFacet, error) {
 		return HydratedFacet{Facet: FacetPRDetails, Count: 1, Pages: 1, Complete: true}, nil
 	}
 	projection := *f.thread
-	projection.State = pr.State
+	if pr.State != "" {
+		projection.State = pr.State
+	}
 	projection.Title = pr.Title
 	projection.Body = pr.Body
 	projection.Draft = pr.Draft
@@ -527,8 +529,11 @@ func (f *facetRunner) hydratePullRequestDetails() (HydratedFacet, error) {
 	projection.Labels = append([]string(nil), pr.Labels...)
 	projection.Assignees = append([]string(nil), pr.Assignees...)
 	projection.Milestone = pr.Milestone
-	projection.Merged = pr.Merged
-	projection.MergedKnown = true
+	merge, err := parseGitHubMergeStatus(pr)
+	if err != nil {
+		return HydratedFacet{}, fmt.Errorf("parse pull-request merge status: %w", err)
+	}
+	projection.Merge = merge
 	projection.SourceUpdatedAt = updatedAt
 	if !pr.CreatedAt.IsZero() {
 		projection.SourceCreatedAt = pr.CreatedAt
@@ -537,11 +542,6 @@ func (f *facetRunner) hydratePullRequestDetails() (HydratedFacet, error) {
 		projection.ClosedAt = *pr.ClosedAt
 	} else {
 		projection.ClosedAt = time.Time{}
-	}
-	if pr.MergedAt != nil {
-		projection.MergedAt = *pr.MergedAt
-	} else {
-		projection.MergedAt = time.Time{}
 	}
 	stored, err := corpus.RetryBusyValue(f.ctx, func(ctx context.Context) (*corpus.Thread, error) {
 		return f.c.UpsertThread(ctx, projection, string(payload))
@@ -559,7 +559,7 @@ func (f *facetRunner) hydratePullRequestReviews() (HydratedFacet, error) {
 		facet:          FacetPRReviews,
 		marshalContext: "pr reviews",
 		fetch: func(opts github.PageOptions) (github.ListResult[github.Review], error) {
-			return f.reader.ListPullRequestReviews(f.ctx, f.ref.Owner, f.ref.Repo, f.thread.Number, opts)
+			return f.reader.ListPullRequestReviews(f.ctx, f.ref.Owner(), f.ref.Repo(), f.thread.Number, opts)
 		},
 		latest:     latestFromReviews,
 		searchText: pullRequestReviewsSearchText,
@@ -571,7 +571,7 @@ func (f *facetRunner) hydratePullRequestReviewComments() (HydratedFacet, error) 
 		facet:          FacetPRReviewComments,
 		marshalContext: "pr review comments",
 		fetch: func(opts github.PageOptions) (github.ListResult[github.ReviewComment], error) {
-			return f.reader.ListPullRequestComments(f.ctx, f.ref.Owner, f.ref.Repo, f.thread.Number, opts)
+			return f.reader.ListPullRequestComments(f.ctx, f.ref.Owner(), f.ref.Repo(), f.thread.Number, opts)
 		},
 		latest:     latestFromReviewComments,
 		searchText: reviewCommentsSearchText,

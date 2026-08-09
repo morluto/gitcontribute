@@ -14,7 +14,7 @@ import (
 )
 
 func (r *MCPReader) SyncUserSocialAccounts(ctx context.Context, in mcpcontract.SyncUserFacetInput) (mcpcontract.JobReference, error) {
-	return r.submitUserFacetJob(ctx, "sync_user_social_accounts", in, func(ctx context.Context, c *corpus.Corpus, reader github.Reader, selector mcpcontract.ActorSelector) (map[string]any, error) {
+	return r.submitUserFacetJob(ctx, "sync_user_social_accounts", in, func(ctx context.Context, c *corpus.Corpus, reader github.Reader, selector parsedActorSelector) (map[string]any, error) {
 		source, ok := reader.(github.UserSocialAccountReader)
 		if !ok {
 			return nil, errors.New("GitHub social-account reads are unavailable")
@@ -50,7 +50,7 @@ func (r *MCPReader) SyncUserSocialAccounts(ctx context.Context, in mcpcontract.S
 }
 
 func (r *MCPReader) SyncUserOrganizations(ctx context.Context, in mcpcontract.SyncUserFacetInput) (mcpcontract.JobReference, error) {
-	return r.submitUserFacetJob(ctx, "sync_user_organizations", in, func(ctx context.Context, c *corpus.Corpus, reader github.Reader, selector mcpcontract.ActorSelector) (map[string]any, error) {
+	return r.submitUserFacetJob(ctx, "sync_user_organizations", in, func(ctx context.Context, c *corpus.Corpus, reader github.Reader, selector parsedActorSelector) (map[string]any, error) {
 		source, ok := reader.(github.UserOrganizationReader)
 		if !ok {
 			return nil, errors.New("GitHub organization reads are unavailable")
@@ -89,9 +89,11 @@ func (r *MCPReader) SyncUserPinnedItems(ctx context.Context, in mcpcontract.Sync
 	if len(in.Users) < 1 || len(in.Users) > 50 {
 		return mcpcontract.JobReference{}, errors.New("users must contain 1 to 50 items")
 	}
-	if err := validateActorSelectors(in.Users); err != nil {
+	selectors, normalized, err := parseActorSelectors(in.Users)
+	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
+	in.Users = normalized
 	if in.Limit == 0 {
 		in.Limit = 6
 	}
@@ -117,7 +119,7 @@ func (r *MCPReader) SyncUserPinnedItems(ctx context.Context, in mcpcontract.Sync
 		if err != nil {
 			return nil, err
 		}
-		return r.runActorFacetItems(ctx, in.Users, "pinned_items", report, func(selector mcpcontract.ActorSelector) (map[string]any, error) {
+		return r.runActorFacetItems(ctx, selectors, "pinned_items", report, func(selector parsedActorSelector) (map[string]any, error) {
 			actor, login, err := storedActorForSelector(ctx, c, selector)
 			if err != nil {
 				return nil, err
@@ -148,9 +150,11 @@ func (r *MCPReader) SyncUserRepositories(ctx context.Context, in mcpcontract.Syn
 	if len(in.Users) < 1 || len(in.Users) > 50 {
 		return mcpcontract.JobReference{}, errors.New("users must contain 1 to 50 items")
 	}
-	if err := validateActorSelectors(in.Users); err != nil {
+	selectors, normalized, err := parseActorSelectors(in.Users)
+	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
+	in.Users = normalized
 	if in.Relationship != "owned" && in.Relationship != "affiliated" && in.Relationship != "contributed" {
 		return mcpcontract.JobReference{}, errors.New("relationship must be owned, affiliated, or contributed")
 	}
@@ -170,7 +174,7 @@ func (r *MCPReader) SyncUserRepositories(ctx context.Context, in mcpcontract.Syn
 		if err != nil {
 			return nil, err
 		}
-		return r.runActorFacetItems(ctx, in.Users, "repositories", report, func(selector mcpcontract.ActorSelector) (map[string]any, error) {
+		return r.runActorFacetItems(ctx, selectors, "repositories", report, func(selector parsedActorSelector) (map[string]any, error) {
 			actor, login, err := storedActorForSelector(ctx, c, selector)
 			if err != nil {
 				return nil, err
@@ -225,9 +229,11 @@ func (r *MCPReader) SyncUserContributions(ctx context.Context, in mcpcontract.Sy
 	if len(in.Users) < 1 || len(in.Users) > 20 {
 		return mcpcontract.JobReference{}, errors.New("users must contain 1 to 20 items")
 	}
-	if err := validateActorSelectors(in.Users); err != nil {
+	selectors, normalized, err := parseActorSelectors(in.Users)
+	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
+	in.Users = normalized
 	from, err := time.Parse(time.RFC3339, in.From)
 	if err != nil {
 		return mcpcontract.JobReference{}, errors.New("from must be RFC 3339")
@@ -264,7 +270,7 @@ func (r *MCPReader) SyncUserContributions(ctx context.Context, in mcpcontract.Sy
 		if err != nil {
 			return nil, err
 		}
-		return r.runActorFacetItems(ctx, in.Users, "contributions", report, func(selector mcpcontract.ActorSelector) (map[string]any, error) {
+		return r.runActorFacetItems(ctx, selectors, "contributions", report, func(selector parsedActorSelector) (map[string]any, error) {
 			actor, login, err := storedActorForSelector(ctx, c, selector)
 			if err != nil {
 				return nil, err
@@ -432,13 +438,15 @@ func (r *MCPReader) SearchContributions(ctx context.Context, in mcpcontract.Sear
 	return out, nil
 }
 
-func (r *MCPReader) submitUserFacetJob(ctx context.Context, kind string, in mcpcontract.SyncUserFacetInput, run func(context.Context, *corpus.Corpus, github.Reader, mcpcontract.ActorSelector) (map[string]any, error)) (mcpcontract.JobReference, error) {
+func (r *MCPReader) submitUserFacetJob(ctx context.Context, kind string, in mcpcontract.SyncUserFacetInput, run func(context.Context, *corpus.Corpus, github.Reader, parsedActorSelector) (map[string]any, error)) (mcpcontract.JobReference, error) {
 	if len(in.Users) < 1 || len(in.Users) > 100 {
 		return mcpcontract.JobReference{}, errors.New("users must contain 1 to 100 items")
 	}
-	if err := validateActorSelectors(in.Users); err != nil {
+	selectors, normalized, err := parseActorSelectors(in.Users)
+	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
+	in.Users = normalized
 	if err := normalizeFacetBounds(&in.MaxPages, &in.MaxItems, &in.MaxRequests, len(in.Users)); err != nil {
 		return mcpcontract.JobReference{}, err
 	}
@@ -451,7 +459,7 @@ func (r *MCPReader) submitUserFacetJob(ctx context.Context, kind string, in mcpc
 		if err != nil {
 			return nil, err
 		}
-		return r.runActorFacetItems(ctx, in.Users, kind, report, func(selector mcpcontract.ActorSelector) (map[string]any, error) { return run(ctx, c, reader, selector) })
+		return r.runActorFacetItems(ctx, selectors, kind, report, func(selector parsedActorSelector) (map[string]any, error) { return run(ctx, c, reader, selector) })
 	})
 	if err != nil {
 		return mcpcontract.JobReference{}, err
@@ -459,7 +467,7 @@ func (r *MCPReader) submitUserFacetJob(ctx context.Context, kind string, in mcpc
 	return queuedJobReference(id, kind, "GitHub actor facet synchronization started"), nil
 }
 
-func (r *MCPReader) runActorFacetItems(ctx context.Context, selectors []mcpcontract.ActorSelector, phase string, report func(string, string) error, run func(mcpcontract.ActorSelector) (map[string]any, error)) (map[string]any, error) {
+func (r *MCPReader) runActorFacetItems(ctx context.Context, selectors []parsedActorSelector, phase string, report func(string, string) error, run func(parsedActorSelector) (map[string]any, error)) (map[string]any, error) {
 	items := make([]map[string]any, len(selectors))
 	complete := 0
 	if err := report(phase, jobProgressCounts(0, len(selectors))); err != nil {
@@ -472,9 +480,9 @@ func (r *MCPReader) runActorFacetItems(ctx context.Context, selectors []mcpcontr
 		value, err := run(selector)
 		if err != nil {
 			itemStatus, reason, message, retry := githubBatchError(err)
-			items[i] = map[string]any{"key": actorSelectorKey(selector), "status": itemStatus, "reason": reason, "message": message, "retry_after_ms": retry}
+			items[i] = map[string]any{"key": selector.key(), "status": itemStatus, "reason": reason, "message": message, "retry_after_ms": retry}
 		} else {
-			value["key"] = actorSelectorKey(selector)
+			value["key"] = selector.key()
 			value["status"] = "complete"
 			items[i] = value
 			complete++
@@ -490,20 +498,6 @@ func (r *MCPReader) runActorFacetItems(ctx context.Context, selectors []mcpcontr
 	return map[string]any{"status": status, "items": items, "completed": complete, "total": len(selectors)}, nil
 }
 
-func storedActorForSelector(ctx context.Context, c *corpus.Corpus, selector mcpcontract.ActorSelector) (*corpus.Actor, string, error) {
-	login, err := resolveActorSelectorLogin(ctx, c, selector)
-	if err != nil {
-		return nil, "", err
-	}
-	actor, err := c.GetActor(ctx, login)
-	if err != nil {
-		return nil, "", err
-	}
-	if actor == nil {
-		return nil, "", fmt.Errorf("actor %q has no stored identity; call github.sync_users first", login)
-	}
-	return actor, login, nil
-}
 func normalizeFacetBounds(maxPages, maxItems, maxRequests *int, userCount int) error {
 	if *maxPages == 0 {
 		*maxPages = 1

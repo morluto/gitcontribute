@@ -54,8 +54,8 @@ func ParseRepoRef(s string) (domain.RepoRef, error) {
 		return domain.RepoRef{}, fmt.Errorf("invalid repo reference %q: expected owner/repo", s)
 	}
 
-	ref := domain.RepoRef{Owner: parts[0], Repo: parts[1]}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(parts[0], parts[1])
+	if err != nil {
 		return domain.RepoRef{}, err
 	}
 	return ref, nil

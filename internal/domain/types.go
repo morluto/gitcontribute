@@ -1,8 +1,11 @@
 package domain
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 	"time"
@@ -10,15 +13,11 @@ import (
 
 // RepoRef identifies a repository by owner and name.
 type RepoRef struct {
-	Owner string
-	Repo  string
+	value string
 }
 
 func (r RepoRef) String() string {
-	if r.Owner == "" && r.Repo == "" {
-		return ""
-	}
-	return r.Owner + "/" + r.Repo
+	return r.value
 }
 
 var (
@@ -28,23 +27,101 @@ var (
 	repoRegex     = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
 )
 
-// Validate checks that the owner and repo are non-empty and syntactically valid.
-func (r RepoRef) Validate() error {
-	if strings.TrimSpace(r.Owner) == "" {
-		return errOwnerEmpty
+// NewRepoRef parses a repository owner and name into a canonical identity.
+func NewRepoRef(owner, repo string) (RepoRef, error) {
+	owner = strings.TrimSpace(owner)
+	repo = strings.TrimSpace(repo)
+	if owner == "" {
+		return RepoRef{}, errOwnerEmpty
 	}
-	if strings.TrimSpace(r.Repo) == "" {
-		return errRepoEmpty
+	if repo == "" {
+		return RepoRef{}, errRepoEmpty
 	}
-	if !ownerRegex.MatchString(r.Owner) {
-		return fmt.Errorf("invalid owner %q", r.Owner)
+	if !ownerRegex.MatchString(owner) {
+		return RepoRef{}, fmt.Errorf("invalid owner %q", owner)
 	}
-	if !repoRegex.MatchString(r.Repo) {
-		return fmt.Errorf("invalid repo %q", r.Repo)
+	if !repoRegex.MatchString(repo) {
+		return RepoRef{}, fmt.Errorf("invalid repo %q", repo)
 	}
-	if r.Repo == "." || r.Repo == ".." || strings.Contains(r.Repo, "..") {
-		return fmt.Errorf("invalid repo %q", r.Repo)
+	if repo == "." || repo == ".." || strings.Contains(repo, "..") {
+		return RepoRef{}, fmt.Errorf("invalid repo %q", repo)
 	}
+	return RepoRef{value: owner + "/" + repo}, nil
+}
+
+// ParseRepoRef parses the canonical owner/repository form.
+func ParseRepoRef(value string) (RepoRef, error) {
+	value = strings.TrimSpace(value)
+	owner, repo, ok := strings.Cut(value, "/")
+	if !ok || strings.Contains(repo, "/") {
+		return RepoRef{}, fmt.Errorf("invalid repository reference %q", value)
+	}
+	return NewRepoRef(owner, repo)
+}
+
+// MustRepoRef returns a parsed repository identity or panics. It is intended
+// for fixed program constants and test fixtures, not boundary input.
+func MustRepoRef(owner, repo string) RepoRef {
+	ref, err := NewRepoRef(owner, repo)
+	if err != nil {
+		panic(err)
+	}
+	return ref
+}
+
+// IsValid reports whether r is a parsed repository identity. The zero value is
+// invalid and can be used where repository identity is optional.
+func (r RepoRef) IsValid() bool { return r.value != "" }
+
+// Equal compares canonical repository identities without exposing their representation.
+func (r RepoRef) Equal(other RepoRef) bool { return r == other }
+
+// Owner returns the repository owner.
+func (r RepoRef) Owner() string {
+	owner, _, _ := strings.Cut(r.value, "/")
+	return owner
+}
+
+// Repo returns the repository name.
+func (r RepoRef) Repo() string {
+	_, repo, _ := strings.Cut(r.value, "/")
+	return repo
+}
+
+type repoRefJSON struct {
+	Owner string
+	Repo  string
+}
+
+// MarshalJSON preserves the object representation used by workflow records.
+func (r RepoRef) MarshalJSON() ([]byte, error) {
+	return json.Marshal(repoRefJSON{Owner: r.Owner(), Repo: r.Repo()})
+}
+
+// UnmarshalJSON reparses workflow data before it enters the domain model.
+func (r *RepoRef) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		*r = RepoRef{}
+		return nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var stored repoRefJSON
+	if err := decoder.Decode(&stored); err != nil {
+		return fmt.Errorf("decode repository reference: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("decode repository reference: expected one JSON value")
+	}
+	if stored.Owner == "" && stored.Repo == "" {
+		*r = RepoRef{}
+		return nil
+	}
+	parsed, err := NewRepoRef(stored.Owner, stored.Repo)
+	if err != nil {
+		return err
+	}
+	*r = parsed
 	return nil
 }
 
@@ -64,12 +141,37 @@ const (
 	ClosedState ThreadState = "closed"
 )
 
+// ParseThreadKind parses the only supported thread variants.
+func ParseThreadKind(value string) (ThreadKind, error) {
+	switch ThreadKind(strings.TrimSpace(value)) {
+	case IssueKind:
+		return IssueKind, nil
+	case PullRequestKind:
+		return PullRequestKind, nil
+	default:
+		return "", fmt.Errorf("unsupported thread kind %q", value)
+	}
+}
+
+// ParseThreadState parses the closed thread lifecycle used by GitHub issues
+// and pull requests.
+func ParseThreadState(value string) (ThreadState, error) {
+	switch ThreadState(strings.TrimSpace(value)) {
+	case OpenState:
+		return OpenState, nil
+	case ClosedState:
+		return ClosedState, nil
+	default:
+		return "", fmt.Errorf("unsupported thread state %q", value)
+	}
+}
+
 // Thread is a product-owned model for an issue or pull request.
 // It carries no vendor-specific API types.
 type Thread struct {
 	ID        int64
 	Repo      RepoRef
-	Kind      ThreadKind
+	Type      ThreadType
 	Number    int
 	Title     string
 	Body      string
@@ -81,9 +183,36 @@ type Thread struct {
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	ClosedAt  time.Time
+}
 
-	// PullRequest is present when Kind is PullRequestKind.
-	PullRequest *PullRequestDetails
+// ThreadType is a parsed issue-or-pull-request variant. Its fields are private
+// so pull-request details cannot be attached to an issue.
+type ThreadType struct {
+	kind               ThreadKind
+	pullRequestDetails PullRequestDetails
+}
+
+// IssueThread returns the issue variant.
+func IssueThread() ThreadType { return ThreadType{kind: IssueKind} }
+
+// PullRequestThread returns a pull-request variant with its observed details.
+func PullRequestThread(details PullRequestDetails) ThreadType {
+	return ThreadType{kind: PullRequestKind, pullRequestDetails: details}
+}
+
+// Kind returns the kind derived from the sealed thread variant.
+func (t Thread) Kind() ThreadKind {
+	return t.Type.kind
+}
+
+// PullRequest returns PR details only for the pull-request variant.
+func (t Thread) PullRequest() (PullRequestDetails, bool) {
+	return t.Type.pullRequestDetails, t.Type.kind == PullRequestKind
+}
+
+// Equal compares parsed thread variants without exposing their representation.
+func (t ThreadType) Equal(other ThreadType) bool {
+	return t.kind == other.kind && t.pullRequestDetails == other.pullRequestDetails
 }
 
 // Comment is a product-owned model for a thread comment.
@@ -96,15 +225,11 @@ type Comment struct {
 
 // PullRequestDetails contains PR-specific facets.
 type PullRequestDetails struct {
-	HeadRef string
-	BaseRef string
-	HeadSHA string
-	BaseSHA string
-	Merged  bool
-	// MergedKnown distinguishes an observed false value from an unavailable
-	// merge state, such as a pull request stored from header-only sync.
-	MergedKnown    bool
-	MergedAt       time.Time
+	HeadRef        string
+	BaseRef        string
+	HeadSHA        string
+	BaseSHA        string
+	Merge          MergeStatus
 	MergeCommitSHA string
 	Additions      int
 	Deletions      int
@@ -114,7 +239,7 @@ type PullRequestDetails struct {
 
 // Repository is a product-owned snapshot of repository metadata and counts.
 type Repository struct {
-	RepoRef
+	Ref                            RepoRef
 	ID                             int64
 	Description                    string
 	Topics                         []string
@@ -137,29 +262,120 @@ type Repository struct {
 	UpdatedAt                      time.Time
 }
 
-// FreshnessStatus describes how current a facet is.
-type FreshnessStatus string
-
-const (
-	Fresh   FreshnessStatus = "fresh"
-	Stale   FreshnessStatus = "stale"
-	Missing FreshnessStatus = "missing"
-)
-
-// Freshness records the observed time and status of a facet.
-type Freshness struct {
-	Status FreshnessStatus
-	AsOf   time.Time
+// repositoryJSON preserves the original flattened repository identity used by
+// persisted dossier snapshots. RepoRef is private in memory, but Owner and Repo
+// remain top-level durable fields.
+type repositoryJSON struct {
+	Owner                          string
+	Repo                           string
+	ID                             int64
+	Description                    string
+	Topics                         []string
+	Languages                      []string
+	License                        string
+	DefaultBranch                  string
+	CommitSHA                      string
+	Archived                       bool
+	Fork                           bool
+	Stars                          int
+	Watchers                       int
+	Forks                          int
+	OpenIssueCount                 int
+	ClosedIssueCount               int
+	OpenPullRequestCount           int
+	MergedPullRequestCount         int
+	ClosedUnmergedPullRequestCount int
+	ClosedPullRequestUnknownCount  int
+	CreatedAt                      time.Time
+	UpdatedAt                      time.Time
 }
 
-// FacetCoverage describes the presence, completeness, and freshness of one facet.
+func (r Repository) MarshalJSON() ([]byte, error) {
+	return json.Marshal(repositoryJSON{
+		Owner: r.Ref.Owner(), Repo: r.Ref.Repo(), ID: r.ID, Description: r.Description,
+		Topics: append([]string(nil), r.Topics...), Languages: append([]string(nil), r.Languages...),
+		License: r.License, DefaultBranch: r.DefaultBranch, CommitSHA: r.CommitSHA,
+		Archived: r.Archived, Fork: r.Fork, Stars: r.Stars, Watchers: r.Watchers, Forks: r.Forks,
+		OpenIssueCount: r.OpenIssueCount, ClosedIssueCount: r.ClosedIssueCount,
+		OpenPullRequestCount: r.OpenPullRequestCount, MergedPullRequestCount: r.MergedPullRequestCount,
+		ClosedUnmergedPullRequestCount: r.ClosedUnmergedPullRequestCount,
+		ClosedPullRequestUnknownCount:  r.ClosedPullRequestUnknownCount,
+		CreatedAt:                      r.CreatedAt, UpdatedAt: r.UpdatedAt,
+	})
+}
+
+func (r *Repository) UnmarshalJSON(data []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var stored repositoryJSON
+	if err := decoder.Decode(&stored); err != nil {
+		return fmt.Errorf("decode repository: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("decode repository: expected one JSON value")
+	}
+	var ref RepoRef
+	if stored.Owner != "" || stored.Repo != "" {
+		parsed, err := NewRepoRef(stored.Owner, stored.Repo)
+		if err != nil {
+			return err
+		}
+		ref = parsed
+	}
+	*r = Repository{
+		Ref: ref, ID: stored.ID, Description: stored.Description,
+		Topics: append([]string(nil), stored.Topics...), Languages: append([]string(nil), stored.Languages...),
+		License: stored.License, DefaultBranch: stored.DefaultBranch, CommitSHA: stored.CommitSHA,
+		Archived: stored.Archived, Fork: stored.Fork, Stars: stored.Stars, Watchers: stored.Watchers, Forks: stored.Forks,
+		OpenIssueCount: stored.OpenIssueCount, ClosedIssueCount: stored.ClosedIssueCount,
+		OpenPullRequestCount: stored.OpenPullRequestCount, MergedPullRequestCount: stored.MergedPullRequestCount,
+		ClosedUnmergedPullRequestCount: stored.ClosedUnmergedPullRequestCount,
+		ClosedPullRequestUnknownCount:  stored.ClosedPullRequestUnknownCount,
+		CreatedAt:                      stored.CreatedAt, UpdatedAt: stored.UpdatedAt,
+	}
+	return nil
+}
+
+// FacetCoverage describes one present repository facet. Missing facets are
+// absent from Coverage.Facets, so presence cannot contradict the observation.
 type FacetCoverage struct {
-	Facet     string
-	Present   bool
-	Complete  bool
-	Freshness Freshness
-	Count     int
+	facet    string
+	complete bool
+	asOf     time.Time
+	count    int
 }
+
+// NewFacetCoverage constructs a present facet observation.
+func NewFacetCoverage(facet string, complete bool, asOf time.Time, count int) (FacetCoverage, error) {
+	facet = strings.TrimSpace(facet)
+	if facet == "" {
+		return FacetCoverage{}, errors.New("coverage facet is required")
+	}
+	if asOf.IsZero() {
+		return FacetCoverage{}, errors.New("coverage as-of time is required")
+	}
+	if count < 0 {
+		return FacetCoverage{}, errors.New("coverage count cannot be negative")
+	}
+	return FacetCoverage{facet: facet, complete: complete, asOf: asOf, count: count}, nil
+}
+
+// MustFacetCoverage constructs static and test fixture coverage.
+func MustFacetCoverage(facet string, complete bool, asOf time.Time, count int) FacetCoverage {
+	coverage, err := NewFacetCoverage(facet, complete, asOf, count)
+	if err != nil {
+		panic(err)
+	}
+	return coverage
+}
+
+func (c FacetCoverage) Facet() string   { return c.facet }
+func (c FacetCoverage) Complete() bool  { return c.complete }
+func (c FacetCoverage) AsOf() time.Time { return c.asOf }
+func (c FacetCoverage) Count() int      { return c.count }
+
+// Equal compares parsed facet observations without exposing their representation.
+func (c FacetCoverage) Equal(other FacetCoverage) bool { return c == other }
 
 // Coverage is a product-owned model for corpus facet coverage and freshness.
 type Coverage struct {

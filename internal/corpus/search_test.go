@@ -217,8 +217,8 @@ func TestSearchThreadsPageDoesNotTreatUnknownMergeStateAsFalse(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, thread := range []Thread{
-		{Kind: ThreadKindPullRequest, Number: 1, State: "closed", Title: "shared term", Merged: true, SourceUpdatedAt: time.Unix(10, 0).UTC()},
-		{Kind: ThreadKindPullRequest, Number: 2, State: "closed", Title: "shared term", MergedKnown: true, SourceUpdatedAt: time.Unix(20, 0).UTC()},
+		{Kind: ThreadKindPullRequest, Number: 1, State: "closed", Title: "shared term", Merge: domain.MergedStatus(time.Time{}), SourceUpdatedAt: time.Unix(10, 0).UTC()},
+		{Kind: ThreadKindPullRequest, Number: 2, State: "closed", Title: "shared term", Merge: domain.UnmergedStatus(), SourceUpdatedAt: time.Unix(20, 0).UTC()},
 		{Kind: ThreadKindPullRequest, Number: 3, State: "closed", Title: "shared term", SourceUpdatedAt: time.Unix(30, 0).UTC()},
 	} {
 		thread.RepositoryID = repo.ID
@@ -238,7 +238,7 @@ func TestSearchThreadsPageDoesNotTreatUnknownMergeStateAsFalse(t *testing.T) {
 
 	if _, err := c.UpsertThread(ctx, Thread{
 		RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 3, State: "closed",
-		Title: "shared term", Merged: true, MergedKnown: true, SourceUpdatedAt: time.Unix(40, 0).UTC(),
+		Title: "shared term", Merge: domain.MergedStatus(time.Time{}), SourceUpdatedAt: time.Unix(40, 0).UTC(),
 	}, `{"Merged":true}`); err != nil {
 		t.Fatal(err)
 	}
@@ -579,7 +579,7 @@ func TestSearchCodePageReturnsNextCursorAndTotal(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 	snapshot := codeindex.Snapshot{
 		RepoPath:   "/repo",
 		Commit:     "abc",
@@ -645,7 +645,7 @@ func TestSearchCodePageMalformedCursorRejected(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 	_, err := c.SearchCodeWithOptions(ctx, "term", CodeSearchOptions{Ref: ref, Limit: 10, Cursor: "invalid"})
 	if err == nil {
 		t.Fatal("expected malformed cursor error")
@@ -656,7 +656,7 @@ func TestSearchCodePageHonorsHardMax(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 	_, err := c.SearchCodeWithOptions(ctx, "term", CodeSearchOptions{Ref: ref, Limit: 101})
 	if err == nil || err.Error() != "code search limit cannot exceed 100" {
 		t.Fatalf("unexpected error = %v", err)

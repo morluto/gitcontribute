@@ -31,12 +31,12 @@ func (s *Service) MCPReader() mcpcontract.Reader { return &MCPReader{s} }
 
 // Repository reads a repository projection from the local corpus.
 func (r *MCPReader) Repository(ctx context.Context, in mcpcontract.RepoInput) (mcpcontract.RepositoryOutput, error) {
-	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(in.Owner, in.Repo)
+	if err != nil {
 		return mcpcontract.RepositoryOutput{}, err
 	}
 	batch, err := r.GetRepositories(ctx, mcpcontract.GetRepositoriesInput{
-		Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}},
+		Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner(), Repo: ref.Repo()}},
 	})
 	if err != nil {
 		return mcpcontract.RepositoryOutput{}, err
@@ -49,8 +49,8 @@ func (r *MCPReader) Repository(ctx context.Context, in mcpcontract.RepoInput) (m
 
 // Thread reads one issue or pull request from the local corpus.
 func (r *MCPReader) Thread(ctx context.Context, in mcpcontract.ThreadInput) (mcpcontract.ThreadOutput, error) {
-	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(in.Owner, in.Repo)
+	if err != nil {
 		return mcpcontract.ThreadOutput{}, err
 	}
 	if in.Kind != "issue" && in.Kind != "pull_request" {
@@ -67,7 +67,7 @@ func (r *MCPReader) Thread(ctx context.Context, in mcpcontract.ThreadInput) (mcp
 	if err != nil {
 		return mcpcontract.ThreadOutput{}, err
 	}
-	repo, err := c.GetRepository(ctx, in.Owner, in.Repo)
+	repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return mcpcontract.ThreadOutput{}, fmt.Errorf("get repository: %w", err)
 	}
@@ -82,8 +82,8 @@ func (r *MCPReader) Thread(ctx context.Context, in mcpcontract.ThreadInput) (mcp
 		return mcpcontract.ThreadOutput{}, failure.NotFound(nil)
 	}
 	out := corpusThreadToMCPOutput(thread)
-	out.Owner = in.Owner
-	out.Repo = in.Repo
+	out.Owner = ref.Owner()
+	out.Repo = ref.Repo()
 	out.SnapshotToken = snapshotIdentity(in.SnapshotToken, revision)
 	if err := finishCorpusRead(ctx, c, revision); err != nil {
 		return mcpcontract.ThreadOutput{}, err
@@ -105,7 +105,7 @@ func corpusThreadToMCPOutput(t *corpus.Thread) mcpcontract.ThreadOutput {
 		AuthorAssociation: t.AuthorAssociation,
 		Labels:            t.Labels,
 		Assignees:         t.Assignees,
-		Draft:             t.Draft, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.MergedAt), Merged: knownMergePointer(t.Merged, t.MergedKnown),
+		Draft:             t.Draft, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.Merge.MergedAt()), Merged: knownMergePointer(t.Merge.IsMerged(), t.Merge.Known()),
 		UpdatedAt: formatTime(t.SourceUpdatedAt),
 	}
 }
@@ -119,15 +119,15 @@ func knownMergePointer(merged, known bool) *bool {
 
 // Dossier returns the latest persisted source-backed repository dossier.
 func (r *MCPReader) Dossier(ctx context.Context, in mcpcontract.RepoInput) (mcpcontract.DossierOutput, error) {
-	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(in.Owner, in.Repo)
+	if err != nil {
 		return mcpcontract.DossierOutput{}, err
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpcontract.DossierOutput{}, err
 	}
-	repository, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repository, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return mcpcontract.DossierOutput{}, err
 	}
@@ -135,10 +135,10 @@ func (r *MCPReader) Dossier(ctx context.Context, in mcpcontract.RepoInput) (mcpc
 		return mcpcontract.DossierOutput{}, mcpcontract.Unavailable(
 			"repository_not_indexed",
 			fmt.Sprintf("Repository %s is not present in the local corpus.", ref),
-			mcpcontract.RecoveryAction(mcpcontract.SyncRepositoryContextInput{Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}}}),
+			mcpcontract.RecoveryAction(mcpcontract.SyncRepositoryContextInput{Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner(), Repo: ref.Repo()}}}),
 		)
 	}
-	record, sources, err := c.GetDossier(ctx, ref.Owner, ref.Repo)
+	record, sources, err := c.GetDossier(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return mcpcontract.DossierOutput{}, fmt.Errorf("get dossier: %w", err)
 	}
@@ -146,7 +146,7 @@ func (r *MCPReader) Dossier(ctx context.Context, in mcpcontract.RepoInput) (mcpc
 		return mcpcontract.DossierOutput{}, mcpcontract.Unavailable(
 			"dossier_not_persisted",
 			fmt.Sprintf("No persisted dossier exists for %s.", ref),
-			mcpcontract.RecoveryAction(mcpcontract.GetRepositoriesInput{Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner, Repo: ref.Repo}}}),
+			mcpcontract.RecoveryAction(mcpcontract.GetRepositoriesInput{Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner(), Repo: ref.Repo()}}}),
 		)
 	}
 	d, err := dossierFromRecord(record, sources)
@@ -203,8 +203,8 @@ func (r *MCPReader) Investigation(ctx context.Context, in mcpcontract.Investigat
 	}
 	return mcpcontract.InvestigationOutput{
 		ID:              inv.ID,
-		Owner:           inv.Repo.Owner,
-		Repo:            inv.Repo.Repo,
+		Owner:           inv.Repo.Owner(),
+		Repo:            inv.Repo.Repo(),
 		CommitSHA:       inv.CommitSHA,
 		Lens:            inv.Lens,
 		Status:          string(inv.Status),
@@ -415,7 +415,7 @@ func dossierToMCPOutput(d *domain.Dossier) mcpcontract.DossierOutput {
 			d.ClosedPullRequestUnknownCount > len(d.RecentClosedUnknownPullRequests) ||
 			d.OpenIssueCount+d.ClosedIssueCount > len(d.RecentIssues)
 	return mcpcontract.DossierOutput{
-		Owner: d.Repo.Owner, Repo: d.Repo.Repo, AsOf: d.AsOf.Format(time.RFC3339),
+		Owner: d.Repo.Owner(), Repo: d.Repo.Repo(), AsOf: d.AsOf.Format(time.RFC3339),
 		RecentItemsLimit: mcpcontract.NonNegativeInt(recentLimit), RecentItemsTruncated: recentTruncated,
 		Sections: mcpcontract.DossierSections{
 			Description: d.Repository.Description, Language: firstLanguage(d.Repository.Languages),
@@ -500,7 +500,15 @@ func (r *MCPReader) GetCoverage(ctx context.Context, in mcpcontract.GetCoverageI
 		}
 		key := coverageTargetKey(target)
 		item := mcpcontract.BatchItem[mcpcontract.CoverageOutput]{Key: key, Status: "complete"}
-		value, reason, err := readCoverageTarget(ctx, c, target)
+		parsed, normalized, parseErr := parseCoverageTarget(target)
+		var value mcpcontract.CoverageOutput
+		var reason string
+		if parseErr == nil {
+			target, item.Key = normalized, parsed.key()
+			value, reason, err = readParsedCoverageTarget(ctx, c, parsed)
+		} else {
+			err = parseErr
+		}
 		if errors.Is(err, errInvalidCoverageTarget) {
 			item.Status, item.Reason = "unavailable", "invalid_reference"
 			item.Message = "owner/repo and optional kind/number must identify a repository or exact thread"
@@ -521,13 +529,13 @@ func (r *MCPReader) GetCoverage(ctx context.Context, in mcpcontract.GetCoverageI
 			}
 			out.Status = "partial"
 		} else {
-			value = withExpectedCoverageFacets(target, value)
+			value = withExpectedCoverageFacets(parsed, value)
 			item.Value = &value
 			if coverageNeedsRecovery(value) {
 				item.Status = "retryable"
 				item.Reason = "coverage_incomplete"
 				item.Message = "one or more required coverage facets are missing or incomplete"
-				item.Recovery = coverageRecoveryPlan(target, value)
+				item.Recovery = coverageRecoveryPlan(parsed, value)
 				out.Status = "partial"
 			}
 		}
@@ -566,19 +574,16 @@ func coverageTargetKey(target mcpcontract.CoverageTarget) string {
 var errInvalidCoverageTarget = errors.New("invalid coverage target")
 
 func readCoverageTarget(ctx context.Context, c *corpus.Corpus, target mcpcontract.CoverageTarget) (mcpcontract.CoverageOutput, string, error) {
-	ref := domain.RepoRef{Owner: target.Repository.Owner, Repo: target.Repository.Repo}
-	if err := ref.Validate(); err != nil {
-		return mcpcontract.CoverageOutput{}, "invalid_reference", fmt.Errorf("%w: %w", errInvalidCoverageTarget, err)
+	parsed, _, err := parseCoverageTarget(target)
+	if err != nil {
+		return mcpcontract.CoverageOutput{}, "invalid_reference", err
 	}
-	isThread := target.Type == mcpcontract.CoverageTargetExactThread
-	valid := target.Type == mcpcontract.CoverageTargetRepository && target.Thread == nil
-	if isThread && target.Thread != nil {
-		valid = (target.Thread.Kind == "issue" || target.Thread.Kind == "pull_request") && target.Thread.Number > 0
-	}
-	if !valid {
-		return mcpcontract.CoverageOutput{}, "invalid_reference", errInvalidCoverageTarget
-	}
-	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	return readParsedCoverageTarget(ctx, c, parsed)
+}
+
+func readParsedCoverageTarget(ctx context.Context, c *corpus.Corpus, target parsedCoverageTarget) (mcpcontract.CoverageOutput, string, error) {
+	ref := target.repository()
+	repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return mcpcontract.CoverageOutput{}, "", fmt.Errorf("get repository: %w", err)
 	}
@@ -587,8 +592,9 @@ func readCoverageTarget(ctx context.Context, c *corpus.Corpus, target mcpcontrac
 	}
 	var threadID *int64
 	asOf := repo.SourceUpdatedAt
+	kind, number, isThread := target.thread()
 	if isThread {
-		thread, err := c.GetThread(ctx, repo.ID, target.Thread.Kind, target.Thread.Number)
+		thread, err := c.GetThread(ctx, repo.ID, string(kind), number)
 		if err != nil {
 			return mcpcontract.CoverageOutput{}, "", fmt.Errorf("get thread: %w", err)
 		}
@@ -602,9 +608,9 @@ func readCoverageTarget(ctx context.Context, c *corpus.Corpus, target mcpcontrac
 	if err != nil {
 		return mcpcontract.CoverageOutput{}, "", fmt.Errorf("list coverage: %w", err)
 	}
-	out := mcpcontract.CoverageOutput{Owner: target.Repository.Owner, Repo: target.Repository.Repo, AsOf: formatTime(asOf), Facets: make([]mcpcontract.FacetCoverageOutput, 0, len(covs))}
-	if target.Thread != nil {
-		out.Kind, out.Number = target.Thread.Kind, target.Thread.Number
+	out := mcpcontract.CoverageOutput{Owner: ref.Owner(), Repo: ref.Repo(), AsOf: formatTime(asOf), Facets: make([]mcpcontract.FacetCoverageOutput, 0, len(covs))}
+	if isThread {
+		out.Kind, out.Number = string(kind), number
 	}
 	for _, cov := range covs {
 		if cov.SourceUpdatedAt.After(asOf) {
@@ -625,28 +631,18 @@ func readCoverageTarget(ctx context.Context, c *corpus.Corpus, target mcpcontrac
 	return out, "", nil
 }
 
-func withExpectedCoverageFacets(target mcpcontract.CoverageTarget, value mcpcontract.CoverageOutput) mcpcontract.CoverageOutput {
+func withExpectedCoverageFacets(target parsedCoverageTarget, value mcpcontract.CoverageOutput) mcpcontract.CoverageOutput {
 	byFacet := make(map[string]struct{}, len(value.Facets))
 	for _, facet := range value.Facets {
 		byFacet[facet.Facet] = struct{}{}
 	}
-	for _, name := range coverageFacetNames(target) {
+	for _, name := range target.expectedFacets() {
 		if _, ok := byFacet[name]; ok {
 			continue
 		}
 		value.Facets = append(value.Facets, mcpcontract.FacetCoverageOutput{Facet: name, Status: "unknown"})
 	}
 	return value
-}
-
-func coverageFacetNames(target mcpcontract.CoverageTarget) []string {
-	if target.Type == mcpcontract.CoverageTargetRepository {
-		return []string{"metadata", "threads", FacetContributionGuidance}
-	}
-	if target.Thread == nil {
-		return nil
-	}
-	return facets.DefaultFor(target.Thread.Kind)
 }
 
 func coverageNeedsRecovery(value mcpcontract.CoverageOutput) bool {
@@ -661,18 +657,17 @@ func coverageNeedsRecovery(value mcpcontract.CoverageOutput) bool {
 	return false
 }
 
-func coverageRecoveryPlan(target mcpcontract.CoverageTarget, value mcpcontract.CoverageOutput) *mcpcontract.RecoveryPlan {
+func coverageRecoveryPlan(target parsedCoverageTarget, value mcpcontract.CoverageOutput) *mcpcontract.RecoveryPlan {
 	message := "Refresh the missing or incomplete coverage facets, then reread corpus.get_coverage."
-	if target.Type == mcpcontract.CoverageTargetRepository {
-		return recoveryPlan("coverage_incomplete", message, mcpcontract.RecoveryAction(mcpcontract.EnsureCoverageInput{Target: target}))
-	}
-	if target.Thread == nil {
-		return recoveryPlan("coverage_incomplete", message, mcpcontract.RecoveryAction(mcpcontract.EnsureCoverageInput{Target: target}))
+	kind, number, exactThread := target.thread()
+	if !exactThread {
+		return recoveryPlan("coverage_incomplete", message, mcpcontract.RecoveryAction(mcpcontract.EnsureCoverageInput{Target: target.wire()}))
 	}
 
-	ref := mcpcontract.ThreadRef{Owner: target.Repository.Owner, Repo: target.Repository.Repo, Kind: target.Thread.Kind, Number: target.Thread.Number}
-	selectable := make(map[string]struct{}, len(facets.SelectableFor(target.Thread.Kind)))
-	for _, name := range facets.SelectableFor(target.Thread.Kind) {
+	repo := target.repository()
+	ref := mcpcontract.ThreadRef{Owner: repo.Owner(), Repo: repo.Repo(), Kind: string(kind), Number: number}
+	selectable := make(map[string]struct{}, len(facets.SelectableFor(string(kind))))
+	for _, name := range facets.SelectableFor(string(kind)) {
 		selectable[name] = struct{}{}
 	}
 	known := make(map[string]struct{}, len(facets.AllNames()))
@@ -700,14 +695,14 @@ func coverageRecoveryPlan(target mcpcontract.CoverageTarget, value mcpcontract.C
 		calls := []mcpcontract.ToolCall{syncThreadFacetsCall(ref, selected)}
 		calls = append(calls, additional...)
 		if needsEnsure {
-			calls = append(calls, mcpcontract.RecoveryAction(mcpcontract.EnsureCoverageInput{Target: target}))
+			calls = append(calls, mcpcontract.RecoveryAction(mcpcontract.EnsureCoverageInput{Target: target.wire()}))
 		}
 		return recoveryPlan("coverage_incomplete", message, calls...)
 	}
 	if len(additional) > 0 && !needsEnsure {
 		return recoveryPlan("coverage_incomplete", message, additional...)
 	}
-	return recoveryPlan("coverage_incomplete", message, mcpcontract.RecoveryAction(mcpcontract.EnsureCoverageInput{Target: target}))
+	return recoveryPlan("coverage_incomplete", message, mcpcontract.RecoveryAction(mcpcontract.EnsureCoverageInput{Target: target.wire()}))
 }
 
 // Lens reads a saved lens definition from the local corpus.

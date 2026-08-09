@@ -53,7 +53,7 @@ func TestStartThreadInvestigationRollsBackLateHypothesisFailure(t *testing.T) {
 	c, _ := openTestCorpus(t)
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	existingInvestigation := &investigation.Investigation{
-		ID: "existing", Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Status: investigation.InvestigationOpen,
+		ID: "existing", Repo: domain.MustRepoRef("o", "r"), Status: investigation.InvestigationOpen,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := c.SaveInvestigation(ctx, existingInvestigation); err != nil {
@@ -136,7 +136,7 @@ func TestStartThreadInvestigationRejectsRepositoryMismatch(t *testing.T) {
 	t.Parallel()
 	c, _ := openTestCorpus(t)
 	item, hypothesis := threadInvestigationPair("inv", "hyp", 1, time.Now().UTC())
-	item.Repo = domain.RepoRef{Owner: "other", Repo: "repo"}
+	item.Repo = domain.MustRepoRef("other", "repo")
 	_, _, _, err := c.StartThreadInvestigation(context.Background(), item, hypothesis)
 	if !errors.Is(err, investigation.ErrInvalidThreadBaseline) {
 		t.Fatalf("repository mismatch error = %v", err)
@@ -145,7 +145,7 @@ func TestStartThreadInvestigationRejectsRepositoryMismatch(t *testing.T) {
 
 func threadInvestigationPair(investigationID, hypothesisID string, observationID int64, now time.Time) (*investigation.Investigation, *investigation.Hypothesis) {
 	baseline := &investigation.ThreadBaseline{
-		Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: domain.IssueKind, Number: 1,
+		Repo: domain.MustRepoRef("o", "r"), Kind: domain.IssueKind, Number: 1,
 		ObservationID: observationID, ObservationSequence: observationID,
 		SourceUpdatedAt: now, ObservedAt: now,
 		Source: domain.SourceRef{Source: "github:rest", URL: "https://api.github.com/repos/o/r/issues/1", ObservedAt: now, AsOf: now},

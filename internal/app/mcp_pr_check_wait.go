@@ -41,7 +41,7 @@ func (r *MCPReader) WaitPullRequestChecks(ctx context.Context, in mcpcontract.Wa
 }
 
 func validatePullRequestCheckWaitInput(in *mcpcontract.WaitPullRequestChecksInput) error {
-	if err := (domain.RepoRef{Owner: in.Owner, Repo: in.Repo}).Validate(); err != nil {
+	if _, err := domain.NewRepoRef(in.Owner, in.Repo); err != nil {
 		return err
 	}
 	if in.Number < 1 {

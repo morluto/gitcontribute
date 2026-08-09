@@ -9,10 +9,12 @@ type Repository interface {
 	SaveValidationDefinition(ctx context.Context, d *ValidationDefinition) error
 	GetValidationDefinition(ctx context.Context, id string) (*ValidationDefinition, error)
 	SaveValidationRun(ctx context.Context, r *ValidationRun) error
+	SaveExternalValidation(ctx context.Context, d *ValidationDefinition, r *ValidationRun) error
 	GetValidationRun(ctx context.Context, id string) (*ValidationRun, error)
 	SaveValidationRunGroup(ctx context.Context, group *ValidationRunGroup) error
 	GetValidationRunGroup(ctx context.Context, id string) (*ValidationRunGroup, error)
 	SaveEvidence(ctx context.Context, e *Evidence) error
+	SaveEvidenceBatch(ctx context.Context, evidence []*Evidence) error
 	ListEvidence(ctx context.Context, filter EvidenceFilter) ([]*Evidence, error)
 }
 

@@ -29,21 +29,21 @@ func (r *MCPReader) CodeIndexArtifact(ctx context.Context, digest string) (mcpco
 
 func codeIndexArtifact(record corpus.CodeIndexArtifactRecord) mcpcontract.CodeIndexArtifact {
 	uri := "gitcontribute://artifact/code-index/" + record.Digest
-	followUp := &mcpcontract.JobFollowUp{Action: mcpcontract.FollowUpAction{Type: "read_resource", ReadResource: &mcpcontract.ResourceReadAction{URI: uri}}, Reason: "Read this exact digest-bound artifact through MCP resources/read."}
+	followUp := &mcpcontract.JobFollowUp{Action: mcpcontract.FollowUpActionFor(mcpcontract.ResourceReadAction{URI: uri}), Reason: "Read this exact digest-bound artifact through MCP resources/read."}
 	documents := make([]mcpcontract.CodeIndexDocumentOutput, len(record.Documents))
 	for i, document := range record.Documents {
 		documents[i] = mcpcontract.CodeIndexDocumentOutput{Path: document.Path, SHA256: document.SHA256, Bytes: mcpcontract.NonNegativeInt(document.Bytes), Language: document.Language}
 	}
 	return mcpcontract.CodeIndexArtifact{
 		Kind: "code_index", ID: "code-index:" + record.Digest,
-		Repository: mcpcontract.RepositoryRef{Owner: record.Repo.Owner, Repo: record.Repo.Repo},
+		Repository: mcpcontract.RepositoryRef{Owner: record.Repo.Owner(), Repo: record.Repo.Repo()},
 		CommitSHA:  record.CommitSHA, SnapshotToken: record.SnapshotToken,
 		ManifestID: "code-index-manifest:" + record.ManifestSHA256, ManifestSHA256: record.ManifestSHA256,
-		CoverageKnown: record.CoverageKnown,
+		CoverageKnown: record.IndexManifest.CoverageKnown,
 		Manifest:      mcpcontract.CodeIndexManifestOutput{FormatVersion: record.IndexManifest.FormatVersion, CoverageKnown: record.IndexManifest.CoverageKnown, TrackedEntries: record.IndexManifest.TrackedEntries, IndexedFiles: record.IndexManifest.IndexedFiles, SkippedInvalidPath: record.IndexManifest.SkippedInvalidPath, SkippedExcluded: record.IndexManifest.SkippedExcluded, SkippedNonRegular: record.IndexManifest.SkippedNonRegular, SkippedOversize: record.IndexManifest.SkippedOversize, SkippedTotalBudget: record.IndexManifest.SkippedTotalBudget, SkippedNonText: record.IndexManifest.SkippedNonText, SkippedFileLimit: record.IndexManifest.SkippedFileLimit, Truncated: record.IndexManifest.Truncated},
 		SchemaVersion: record.SchemaVersion, TotalBytes: mcpcontract.NonNegativeInt(record.TotalBytes), Documents: documents,
 		CreatedAt: record.CreatedAt.Format(time.RFC3339Nano), Provenance: maps.Clone(record.Provenance),
-		FileCount: mcpcontract.NonNegativeInt(record.IndexedFiles), TrackedEntries: mcpcontract.NonNegativeInt(record.TrackedEntries),
-		Truncated: record.Truncated, ResourceURI: uri, FollowUp: followUp,
+		FileCount: mcpcontract.NonNegativeInt(record.IndexManifest.IndexedFiles), TrackedEntries: mcpcontract.NonNegativeInt(record.IndexManifest.TrackedEntries),
+		Truncated: record.IndexManifest.Truncated, ResourceURI: uri, FollowUp: followUp,
 	}
 }

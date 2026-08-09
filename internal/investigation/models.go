@@ -1,6 +1,8 @@
 package investigation
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -138,6 +140,115 @@ type Opportunity struct {
 	AuditTrail          []StatusChange
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+}
+
+// ParseStored parses an investigation at the durable JSON boundary.
+func (i *Investigation) ParseStored() error {
+	if i == nil || i.ID == "" || !i.Repo.IsValid() {
+		return errors.New("investigation identity and repository are required")
+	}
+	if i.Status != InvestigationOpen && i.Status != InvestigationClosed {
+		return fmt.Errorf("unsupported investigation status %q", i.Status)
+	}
+	for index, change := range i.AuditTrail {
+		fromValid := validInvestigationStatus(InvestigationStatus(change.From)) || (index == 0 && change.From == "")
+		if !fromValid || !validInvestigationStatus(InvestigationStatus(change.To)) {
+			return fmt.Errorf("investigation audit entry %d has an unsupported status", index)
+		}
+	}
+	return nil
+}
+
+// ParseStored parses a hypothesis at the durable JSON boundary.
+func (h *Hypothesis) ParseStored() error {
+	if h == nil || h.ID == "" || h.InvestigationID == "" {
+		return errors.New("hypothesis identity and investigation are required")
+	}
+	if !ValidCategory(h.Category) {
+		return fmt.Errorf("unsupported hypothesis category %q", h.Category)
+	}
+	switch h.Status {
+	case HypothesisProposed, HypothesisPromoted, HypothesisRejected, HypothesisDeferred, HypothesisSuperseded:
+	default:
+		return fmt.Errorf("unsupported hypothesis status %q", h.Status)
+	}
+	for index, change := range h.AuditTrail {
+		fromValid := validHypothesisStatus(HypothesisStatus(change.From)) || (index == 0 && change.From == "")
+		if !fromValid || !validHypothesisStatus(HypothesisStatus(change.To)) {
+			return fmt.Errorf("hypothesis audit entry %d has an unsupported status", index)
+		}
+	}
+	return nil
+}
+
+// ParseStored parses an opportunity at the durable JSON boundary, including
+// the legacy empty representation of unknown collision state.
+func (o *Opportunity) ParseStored() error {
+	if o == nil || o.ID == "" || o.InvestigationID == "" || o.HypothesisID == "" {
+		return errors.New("opportunity identity, investigation, and hypothesis are required")
+	}
+	if !ValidCategory(o.Category) {
+		return fmt.Errorf("unsupported opportunity category %q", o.Category)
+	}
+	// Empty is the legacy JSON representation of the initial unknown state.
+	if o.CollisionStatus == "" {
+		o.CollisionStatus = CollisionUnknown
+	}
+	switch o.Status {
+	case OpportunityHypothesis, OpportunityReproduced, OpportunityValidated, OpportunityMaintainerAligned,
+		OpportunityImplemented, OpportunitySubmitted, OpportunityMerged, OpportunityRejected,
+		OpportunityDeferred, OpportunitySuperseded:
+	default:
+		return fmt.Errorf("unsupported opportunity status %q", o.Status)
+	}
+	switch o.CollisionStatus {
+	case CollisionUnknown, CollisionNone, CollisionPossible, CollisionConfirmed, CollisionBlocked:
+	default:
+		return fmt.Errorf("unsupported collision status %q", o.CollisionStatus)
+	}
+	for index, change := range o.AuditTrail {
+		initialChange := index == 0 && change.From == "" && validOpportunityStatus(OpportunityStatus(change.To))
+		initialCollisionChange := index == 0 && change.From == "" && validCollisionStatus(CollisionStatus(change.To))
+		lifecycleChange := validOpportunityStatus(OpportunityStatus(change.From)) && validOpportunityStatus(OpportunityStatus(change.To))
+		collisionChange := validCollisionStatus(CollisionStatus(change.From)) && validCollisionStatus(CollisionStatus(change.To))
+		if !initialChange && !initialCollisionChange && !lifecycleChange && !collisionChange {
+			return fmt.Errorf("opportunity audit entry %d has an unsupported status", index)
+		}
+	}
+	return nil
+}
+
+func validInvestigationStatus(status InvestigationStatus) bool {
+	return status == InvestigationOpen || status == InvestigationClosed
+}
+
+func validHypothesisStatus(status HypothesisStatus) bool {
+	switch status {
+	case HypothesisProposed, HypothesisPromoted, HypothesisRejected, HypothesisDeferred, HypothesisSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+func validOpportunityStatus(status OpportunityStatus) bool {
+	switch status {
+	case OpportunityHypothesis, OpportunityReproduced, OpportunityValidated, OpportunityMaintainerAligned,
+		OpportunityImplemented, OpportunitySubmitted, OpportunityMerged, OpportunityRejected,
+		OpportunityDeferred, OpportunitySuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+func validCollisionStatus(status CollisionStatus) bool {
+	switch status {
+	case CollisionUnknown, CollisionNone, CollisionPossible, CollisionConfirmed, CollisionBlocked:
+		return true
+	default:
+		return false
+	}
 }
 
 // SupportingEvidence returns evidence items marked as supporting.

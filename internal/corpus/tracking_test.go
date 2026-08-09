@@ -171,7 +171,7 @@ func TestContributionLifecyclePersists(t *testing.T) {
 	c, _ := openTestCorpus(t)
 
 	invSvc := investigation.NewService(c, c)
-	inv, err := invSvc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, err := invSvc.StartInvestigation(ctx, domain.MustRepoRef("owner", "repo"), "abc", "")
 	if err != nil {
 		t.Fatalf("start investigation: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestExportImportLocalMetadataIsIdempotent(t *testing.T) {
 	c, _ := openTestCorpus(t)
 
 	invSvc := investigation.NewService(c, c)
-	inv, _ := invSvc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, _ := invSvc.StartInvestigation(ctx, domain.MustRepoRef("owner", "repo"), "abc", "")
 	h, _ := invSvc.RecordHypothesis(ctx, inv.ID, "panic", "desc", investigation.CategoryBug, nil)
 	opp, _ := invSvc.PromoteOpportunity(ctx, h.ID, "panic", "parser", "crash", "small", 0.8)
 
@@ -401,7 +401,7 @@ func TestImportLocalMetadataIsAtomicOnReferentialFailure(t *testing.T) {
 	}
 	_ = repo
 
-	inv, err := invSvc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, "sha", "")
+	inv, err := invSvc.StartInvestigation(ctx, domain.MustRepoRef("owner", "repo"), "sha", "")
 	if err != nil {
 		t.Fatalf("start investigation: %v", err)
 	}
@@ -504,7 +504,7 @@ func TestMalformedContributionMetadataIsPropagated(t *testing.T) {
 	c, _ := openTestCorpus(t)
 
 	invSvc := investigation.NewService(c, c)
-	inv, err := invSvc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, "sha", "")
+	inv, err := invSvc.StartInvestigation(ctx, domain.MustRepoRef("owner", "repo"), "sha", "")
 	if err != nil {
 		t.Fatalf("start investigation: %v", err)
 	}

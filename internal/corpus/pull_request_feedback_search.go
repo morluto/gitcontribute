@@ -8,6 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
+
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 type feedbackSearchCursor struct {
@@ -313,10 +316,18 @@ func scanFeedbackProjectionRows(rows *sql.Rows) ([]PullRequestFeedbackProjection
 			return nil, fmt.Errorf("scan feedback search row: %w", err)
 		}
 		item.PullRequestNumber, item.PullRequestAuthor, item.PullRequestState = number, prAuthor, state
-		item.PullRequestMergedKnown, item.PullRequestMerged = prMergedKnown != 0, prMerged != 0
+		merge, err := domain.ParseMergeStatus(prMergedKnown != 0, prMerged != 0, time.Time{})
+		if err != nil {
+			return nil, fmt.Errorf("parse stored pull-request merge status: %w", err)
+		}
+		item.PullRequestMerge = merge
 		item.Line, item.StartLine = nullableInt(line), nullableInt(startLine)
 		item.CreatedAt, item.UpdatedAt = scanTime(created), scanTime(updated)
-		item.ResolvedKnown, item.Resolved, item.Outdated = resolvedKnown != 0, resolved != 0, outdated != 0
+		item.Resolution = domain.UnknownBool()
+		if resolvedKnown != 0 {
+			item.Resolution = domain.ObservedBoolValue(resolved != 0)
+		}
+		item.Outdated = outdated != 0
 		item.SourceUpdatedAt, item.SourceObservationSequence = scanTime(source), sequence
 		out = append(out, item)
 	}

@@ -1,6 +1,11 @@
 package github
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+)
 
 // Actor is a domain-neutral GitHub account profile. Nullable fields preserve
 // provider omission and visibility instead of manufacturing zero values.
@@ -356,8 +361,54 @@ type PullRequestStatus struct {
 // null and UNKNOWN mergeability explicitly unknown rather than negative.
 type PullRequestMergeState struct {
 	MergeStateStatus string
-	Mergeable        string
-	MergeableKnown   bool
+	mergeable        string
+}
+
+// NewPullRequestMergeState parses GitHub's nullable mergeability scalar. A
+// missing, blank, or UNKNOWN value is represented by absence, not a second flag
+// that can contradict the scalar.
+func NewPullRequestMergeState(status string, mergeable *string) PullRequestMergeState {
+	state := PullRequestMergeState{MergeStateStatus: status}
+	if mergeable != nil {
+		state.mergeable = *mergeable
+	}
+	return state
+}
+
+// Mergeability returns GitHub's mergeability enum when it has been computed.
+func (s PullRequestMergeState) Mergeability() (string, bool) {
+	return s.mergeable, s.mergeable != "" && !strings.EqualFold(s.mergeable, "UNKNOWN")
+}
+
+// MarshalJSON preserves the historical observation shape while deriving the
+// compatibility flag from the single canonical value.
+func (s PullRequestMergeState) MarshalJSON() ([]byte, error) {
+	_, known := s.Mergeability()
+	return json.Marshal(struct {
+		MergeStateStatus string
+		Mergeable        string
+		MergeableKnown   bool
+	}{s.MergeStateStatus, s.mergeable, known})
+}
+
+// UnmarshalJSON rejects persisted observations whose redundant compatibility
+// flag disagrees with the mergeability scalar.
+func (s *PullRequestMergeState) UnmarshalJSON(data []byte) error {
+	var wire struct {
+		MergeStateStatus string
+		Mergeable        string
+		MergeableKnown   bool
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	parsed := NewPullRequestMergeState(wire.MergeStateStatus, &wire.Mergeable)
+	_, known := parsed.Mergeability()
+	if known != wire.MergeableKnown {
+		return fmt.Errorf("mergeable_known contradicts mergeable %q", wire.Mergeable)
+	}
+	*s = parsed
+	return nil
 }
 
 // PullRequestMergeQueueEntry describes the PR's current queue entry.

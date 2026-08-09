@@ -31,7 +31,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 
 	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, ref, codeindex.Snapshot{
 		RepoPath:   "/repo",
@@ -43,8 +43,8 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 	}
 
 	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
-		Owner:           ref.Owner,
-		Name:            ref.Repo,
+		Owner:           ref.Owner(),
+		Name:            ref.Repo(),
 		Description:     "A test repo",
 		Language:        "Go",
 		DefaultBranch:   "main",
@@ -69,8 +69,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 		SourceCreatedAt: base,
 		SourceUpdatedAt: base.Add(4 * time.Hour),
 		ClosedAt:        base.Add(2 * time.Hour),
-		MergedAt:        base.Add(2 * time.Hour),
-		Merged:          true,
+		Merge:           domain.MergedStatus(base.Add(2 * time.Hour)),
 	}, prPayload(2, 120, 45)); err != nil {
 		t.Fatalf("upsert merged pr: %v", err)
 	}
@@ -87,8 +86,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 		SourceCreatedAt: base,
 		SourceUpdatedAt: base.Add(3 * time.Hour),
 		ClosedAt:        base.Add(1 * time.Hour),
-		Merged:          false,
-		MergedKnown:     true,
+		Merge:           domain.UnmergedStatus(),
 	}, prPayload(0, 0, 0)); err != nil {
 		t.Fatalf("upsert closed pr: %v", err)
 	}
@@ -121,7 +119,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 		t.Fatalf("upsert issue: %v", err)
 	}
 
-	d, err := svc.BuildRepositoryDossier(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
+	d, err := svc.BuildRepositoryDossier(ctx, contracts.RepoRef{Owner: ref.Owner(), Repo: ref.Repo()})
 	if err != nil {
 		t.Fatalf("build dossier: %v", err)
 	}
@@ -138,7 +136,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 		t.Fatalf("unexpected unknown-merge PRs: count=%d recent=%+v", d.ClosedPullRequestUnknownCount, d.RecentClosedUnknownPullRequests)
 	}
 
-	got, err := svc.GetRepositoryDossier(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
+	got, err := svc.GetRepositoryDossier(ctx, contracts.RepoRef{Owner: ref.Owner(), Repo: ref.Repo()})
 	if err != nil {
 		t.Fatalf("get dossier: %v", err)
 	}
@@ -153,12 +151,12 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 	}
 
 	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
-		Owner: ref.Owner, Name: ref.Repo, Description: "A changed repo", Stars: 99,
+		Owner: ref.Owner(), Name: ref.Repo(), Description: "A changed repo", Stars: 99,
 		SourceUpdatedAt: time.Unix(3000, 0).UTC(),
 	}, `{}`); err != nil {
 		t.Fatalf("update repository after dossier build: %v", err)
 	}
-	mcpDossier, err := svc.MCPReader().Dossier(ctx, mcpcontract.RepoInput{Owner: ref.Owner, Repo: ref.Repo})
+	mcpDossier, err := svc.MCPReader().Dossier(ctx, mcpcontract.RepoInput{Owner: ref.Owner(), Repo: ref.Repo()})
 	if err != nil {
 		t.Fatalf("read persisted MCP dossier: %v", err)
 	}
@@ -166,7 +164,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 		t.Fatalf("MCP dossier stars = %v, want persisted value 10", stars)
 	}
 
-	res, err := svc.Dossier(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo})
+	res, err := svc.Dossier(ctx, contracts.RepoRef{Owner: ref.Owner(), Repo: ref.Repo()})
 	if err != nil {
 		t.Fatalf("dossier summary: %v", err)
 	}
@@ -200,14 +198,14 @@ func TestCorpusReaderDoesNotTruncateRepositoriesAboveOneThousandThreads(t *testi
 	}
 
 	reader := &corpusReader{s: svc}
-	stored, _, err := reader.ReadRepository(ctx, domain.RepoRef{Owner: "owner", Repo: "large"})
+	stored, _, err := reader.ReadRepository(ctx, domain.MustRepoRef("owner", "large"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if stored.OpenIssueCount != 1001 {
 		t.Fatalf("open issue count = %d, want 1001", stored.OpenIssueCount)
 	}
-	threads, _, err := reader.ReadThreads(ctx, domain.RepoRef{Owner: "owner", Repo: "large"}, dossier.ThreadQuery{
+	threads, _, err := reader.ReadThreads(ctx, domain.MustRepoRef("owner", "large"), dossier.ThreadQuery{
 		Kind:  domain.IssueKind,
 		State: domain.OpenState,
 		Limit: 1001,
@@ -233,10 +231,10 @@ func TestExtractSeeds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
-		Owner:           ref.Owner,
-		Name:            ref.Repo,
+		Owner:           ref.Owner(),
+		Name:            ref.Repo(),
 		SourceUpdatedAt: time.Unix(1000, 0).UTC(),
 	}, `{}`)
 	if err != nil {
@@ -256,8 +254,7 @@ func TestExtractSeeds(t *testing.T) {
 		SourceCreatedAt: base,
 		SourceUpdatedAt: base.Add(4 * time.Hour),
 		ClosedAt:        base.Add(2 * time.Hour),
-		MergedAt:        base.Add(2 * time.Hour),
-		Merged:          true,
+		Merge:           domain.MergedStatus(base.Add(2 * time.Hour)),
 	}, prPayload(2, 120, 45)); err != nil {
 		t.Fatalf("upsert merged pr: %v", err)
 	}
@@ -274,8 +271,7 @@ func TestExtractSeeds(t *testing.T) {
 		SourceCreatedAt: base,
 		SourceUpdatedAt: base.Add(3 * time.Hour),
 		ClosedAt:        base.Add(1 * time.Hour),
-		Merged:          false,
-		MergedKnown:     true,
+		Merge:           domain.UnmergedStatus(),
 	}, prPayload(0, 0, 0)); err != nil {
 		t.Fatalf("upsert closed pr: %v", err)
 	}
@@ -316,7 +312,7 @@ func TestExtractSeeds(t *testing.T) {
 		t.Fatalf("upsert not-planned issue: %v", err)
 	}
 
-	seeds, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{})
+	seeds, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner(), Repo: ref.Repo()}, domain.ExtractSeedsOptions{})
 	if err != nil {
 		t.Fatalf("extract seeds: %v", err)
 	}
@@ -364,7 +360,7 @@ func TestExtractSeeds(t *testing.T) {
 		t.Fatalf("not-planned issue polarity/evidence = %+v", notPlanned)
 	}
 
-	contextOnly, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{
+	contextOnly, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner(), Repo: ref.Repo()}, domain.ExtractSeedsOptions{
 		Classes:    []domain.SeedSourceClass{domain.SeedSourceClassIssue},
 		Polarities: []domain.SeedPolarity{domain.SeedPolarityContext},
 		Limit:      10,
@@ -376,7 +372,7 @@ func TestExtractSeeds(t *testing.T) {
 		t.Fatalf("expected open issue context, got %+v", contextOnly)
 	}
 
-	negativeIssues, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{
+	negativeIssues, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner(), Repo: ref.Repo()}, domain.ExtractSeedsOptions{
 		Classes:    []domain.SeedSourceClass{domain.SeedSourceClassIssue},
 		Polarities: []domain.SeedPolarity{domain.SeedPolarityNegative},
 		Limit:      10,
@@ -387,7 +383,7 @@ func TestExtractSeeds(t *testing.T) {
 	if len(negativeIssues) != 1 || negativeIssues[0].Number != 2 {
 		t.Fatalf("expected not-planned issue only, got %+v", negativeIssues)
 	}
-	empty, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{
+	empty, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner(), Repo: ref.Repo()}, domain.ExtractSeedsOptions{
 		Classes:    []domain.SeedSourceClass{domain.SeedSourceClassMergedPR},
 		Polarities: []domain.SeedPolarity{domain.SeedPolarityContext},
 		Limit:      10,
@@ -399,7 +395,7 @@ func TestExtractSeeds(t *testing.T) {
 		t.Fatalf("empty seed selection = %#v, want non-nil empty list", empty)
 	}
 
-	bounded, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Limit: 1})
+	bounded, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner(), Repo: ref.Repo()}, domain.ExtractSeedsOptions{Limit: 1})
 	if err != nil {
 		t.Fatalf("extract bounded: %v", err)
 	}
@@ -407,10 +403,10 @@ func TestExtractSeeds(t *testing.T) {
 		t.Fatalf("expected 1 seed with limit 1, got %d", len(bounded))
 	}
 
-	if _, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Polarities: []domain.SeedPolarity{"invented"}}); err == nil || !strings.Contains(err.Error(), "unknown seed polarity") {
+	if _, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner(), Repo: ref.Repo()}, domain.ExtractSeedsOptions{Polarities: []domain.SeedPolarity{"invented"}}); err == nil || !strings.Contains(err.Error(), "unknown seed polarity") {
 		t.Fatalf("invalid polarity error = %v", err)
 	}
-	if _, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Classes: []domain.SeedSourceClass{"invented"}}); err == nil || !strings.Contains(err.Error(), "unknown seed source class") {
+	if _, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner(), Repo: ref.Repo()}, domain.ExtractSeedsOptions{Classes: []domain.SeedSourceClass{"invented"}}); err == nil || !strings.Contains(err.Error(), "unknown seed source class") {
 		t.Fatalf("invalid source class error = %v", err)
 	}
 }
@@ -426,14 +422,14 @@ func TestSeedPolarityUsesOnlyStructuredOutcomeEvidence(t *testing.T) {
 	}{
 		{
 			name:       "merged PR remains positive despite rejection text",
-			thread:     corpus.Thread{Kind: corpus.ThreadKindPullRequest, State: "closed", Merged: true, Title: "rejected experiment"},
+			thread:     corpus.Thread{Kind: corpus.ThreadKindPullRequest, State: "closed", Merge: domain.MergedStatus(time.Time{}), Title: "rejected experiment"},
 			class:      domain.SeedSourceClassMergedPR,
 			want:       domain.SeedPolarityPositive,
 			wantReason: "GitHub reports this pull request was merged",
 		},
 		{
 			name:       "closed unmerged PR is negative",
-			thread:     corpus.Thread{Kind: corpus.ThreadKindPullRequest, State: "closed", MergedKnown: true},
+			thread:     corpus.Thread{Kind: corpus.ThreadKindPullRequest, State: "closed", Merge: domain.UnmergedStatus()},
 			class:      domain.SeedSourceClassClosedUnmergedPR,
 			want:       domain.SeedPolarityNegative,
 			wantReason: "GitHub reports this pull request was closed without merging",
@@ -491,10 +487,10 @@ func TestExtractSeedsRequiresNoNetwork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
-		Owner:           ref.Owner,
-		Name:            ref.Repo,
+		Owner:           ref.Owner(),
+		Name:            ref.Repo(),
 		SourceUpdatedAt: time.Unix(1000, 0).UTC(),
 	}, `{}`)
 	if err != nil {
@@ -515,7 +511,7 @@ func TestExtractSeedsRequiresNoNetwork(t *testing.T) {
 		t.Fatalf("upsert thread: %v", err)
 	}
 
-	seeds, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, domain.ExtractSeedsOptions{Polarities: []domain.SeedPolarity{domain.SeedPolarityContext}})
+	seeds, err := svc.ExtractSeeds(ctx, contracts.RepoRef{Owner: ref.Owner(), Repo: ref.Repo()}, domain.ExtractSeedsOptions{Polarities: []domain.SeedPolarity{domain.SeedPolarityContext}})
 	if err != nil {
 		t.Fatalf("extract seeds without network reader: %v", err)
 	}

@@ -75,11 +75,6 @@ func (s *Service) List(ctx context.Context, filter Filter) (*ListResult, error) 
 	if filter.Status != "" && !validStatus(filter.Status) {
 		return nil, ErrInvalidStatus
 	}
-	if filter.Repo.Owner != "" || filter.Repo.Repo != "" {
-		if err := filter.Repo.Validate(); err != nil {
-			return nil, err
-		}
-	}
 	return s.repo.ListConcerns(ctx, filter)
 }
 
@@ -142,8 +137,8 @@ func (s *Service) Link(ctx context.Context, id string, link Link) error {
 }
 
 func normalizeConcern(item *Concern) error {
-	if err := item.Repo.Validate(); err != nil {
-		return fmt.Errorf("invalid concern repository: %w", err)
+	if !item.Repo.IsValid() {
+		return errors.New("invalid concern repository: repository reference is not parsed")
 	}
 	item.CommitSHA = strings.TrimSpace(item.CommitSHA)
 	item.WorkspaceID = strings.TrimSpace(item.WorkspaceID)

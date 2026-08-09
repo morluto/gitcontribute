@@ -17,32 +17,32 @@ func TestParseRepoRef(t *testing.T) {
 		{
 			name:  "owner/repo",
 			input: "golang/go",
-			want:  domain.RepoRef{Owner: "golang", Repo: "go"},
+			want:  domain.MustRepoRef("golang", "go"),
 		},
 		{
 			name:  "https url",
 			input: "https://github.com/golang/go",
-			want:  domain.RepoRef{Owner: "golang", Repo: "go"},
+			want:  domain.MustRepoRef("golang", "go"),
 		},
 		{
 			name:  "http url with query",
 			input: "http://github.com/golang/go?tab=readme",
-			want:  domain.RepoRef{Owner: "golang", Repo: "go"},
+			want:  domain.MustRepoRef("golang", "go"),
 		},
 		{
 			name:  "github.com prefix",
 			input: "github.com/golang/go",
-			want:  domain.RepoRef{Owner: "golang", Repo: "go"},
+			want:  domain.MustRepoRef("golang", "go"),
 		},
 		{
 			name:  "git ssh",
 			input: "git@github.com:golang/go.git",
-			want:  domain.RepoRef{Owner: "golang", Repo: "go"},
+			want:  domain.MustRepoRef("golang", "go"),
 		},
 		{
 			name:  "ssh url",
 			input: "ssh://git@github.com/golang/go.git",
-			want:  domain.RepoRef{Owner: "golang", Repo: "go"},
+			want:  domain.MustRepoRef("golang", "go"),
 		},
 		{
 			name:    "empty",
@@ -82,7 +82,7 @@ func TestParseRepoRef(t *testing.T) {
 		{
 			name:  "uppercase git suffix",
 			input: "https://github.com/golang/go.GIT",
-			want:  domain.RepoRef{Owner: "golang", Repo: "go"},
+			want:  domain.MustRepoRef("golang", "go"),
 		},
 	}
 

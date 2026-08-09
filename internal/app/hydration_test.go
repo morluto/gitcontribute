@@ -11,6 +11,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 )
 
@@ -271,7 +272,7 @@ func TestHydratePullRequestFacets(t *testing.T) {
 		}
 	}
 	projected, err := c.GetThread(ctx, repo.ID, corpus.ThreadKindPullRequest, thread.Number)
-	if err != nil || projected == nil || !projected.MergedKnown || projected.Merged {
+	if err != nil || projected == nil || !projected.Merge.Known() || projected.Merge.IsMerged() {
 		t.Fatalf("projected PR merge state = %+v, %v", projected, err)
 	}
 	for query, source := range map[string]string{"architectural approval": FacetPRReviews, "nit": FacetPRReviewComments} {
@@ -289,9 +290,7 @@ func TestHydratePullRequestDetailsDoesNotProjectStaleSnapshot(t *testing.T) {
 	defer func() { _ = svc.Close() }()
 
 	repo, thread := seedRepoAndThread(t, svc, corpus.ThreadKindPullRequest, 2)
-	thread.Merged = true
-	thread.MergedKnown = true
-	thread.MergedAt = thread.SourceUpdatedAt
+	thread.Merge = domain.MergedStatus(thread.SourceUpdatedAt)
 	stored, err := svc.corpus.UpsertThread(ctx, *thread, `{"Merged":true}`)
 	if err != nil {
 		t.Fatalf("store known projection: %v", err)
@@ -317,7 +316,7 @@ func TestHydratePullRequestDetailsDoesNotProjectStaleSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if projected == nil || !projected.MergedKnown || !projected.Merged || !projected.MergedAt.Equal(stored.MergedAt) {
+	if projected == nil || !projected.Merge.Known() || !projected.Merge.IsMerged() || !projected.Merge.MergedAt().Equal(stored.Merge.MergedAt()) {
 		t.Fatalf("stale detail response replaced known projection: %+v", projected)
 	}
 	observations, err := svc.corpus.ListFacetObservations(ctx, repo.ID, &stored.ID, FacetPRDetails)
@@ -499,8 +498,8 @@ func TestHydrateRecordsRunFailure(t *testing.T) {
 	for _, r := range runs {
 		if r.Kind == "hydrate" {
 			found = true
-			if r.Status != corpus.RunStatusFailed {
-				t.Fatalf("run status = %q, want failed", r.Status)
+			if r.State.Status() != corpus.RunStatusFailed {
+				t.Fatalf("run status = %q, want failed", r.State.Status())
 			}
 		}
 	}

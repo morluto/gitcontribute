@@ -187,8 +187,8 @@ func (s *Service) workspaceDiff(ctx context.Context, workspaceID string, inv *in
 		return "", err
 	}
 	if inv == nil || ws.InvestigationID != inv.ID ||
-		!strings.EqualFold(ws.RepoOwner, inv.Repo.Owner) ||
-		!strings.EqualFold(ws.RepoName, inv.Repo.Repo) {
+		!strings.EqualFold(ws.RepoOwner, inv.Repo.Owner()) ||
+		!strings.EqualFold(ws.RepoName, inv.Repo.Repo()) {
 		return "", errors.New("workspace does not belong to the opportunity investigation and repository")
 	}
 	mgr, err := s.workspaceReader()
@@ -228,7 +228,7 @@ func (s *Service) PrepareReviewReport(ctx context.Context, input contracts.Prepa
 		}
 		report.OpportunityStatus = string(opp.Status)
 		report.CollisionStatus = string(opp.CollisionStatus)
-		report.Repo = contracts.RepoRef{Owner: inv.Repo.Owner, Repo: inv.Repo.Repo}
+		report.Repo = contracts.RepoRef{Owner: inv.Repo.Owner(), Repo: inv.Repo.Repo()}
 
 		opportunityEvidence, err = s.evidenceForOpportunity(ctx, input.OpportunityID)
 		if err != nil {
@@ -253,8 +253,8 @@ func (s *Service) PrepareReviewReport(ctx context.Context, input contracts.Prepa
 			return nil, mapWorkspaceError(err)
 		}
 		if inv != nil && (ws.InvestigationID != inv.ID ||
-			!strings.EqualFold(ws.RepoOwner, inv.Repo.Owner) ||
-			!strings.EqualFold(ws.RepoName, inv.Repo.Repo)) {
+			!strings.EqualFold(ws.RepoOwner, inv.Repo.Owner()) ||
+			!strings.EqualFold(ws.RepoName, inv.Repo.Repo())) {
 			return nil, errors.New("workspace does not belong to the opportunity investigation and repository")
 		}
 		diff, err := s.WorkspaceDiff(ctx, input.WorkspaceID)

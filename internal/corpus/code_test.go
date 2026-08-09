@@ -14,7 +14,7 @@ func TestCodeSnapshotsAreAtomicDeduplicatedAndSearchLatest(t *testing.T) {
 	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 	first := codeindex.Snapshot{RepoPath: "/repo", Commit: "first", CreatedAt: time.Unix(100, 0), Documents: []codeindex.Document{{Path: "old.go", Content: "legacy needle", Bytes: 13, LanguageHint: "go"}}, TotalBytes: 13}
 	firstID, inserted, err := c.StoreCodeSnapshot(ctx, ref, first)
 	if err != nil || !inserted {
@@ -107,7 +107,7 @@ func TestReindexSameCommitPreservesOldArtifactIdentity(t *testing.T) {
 	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 	first := codeindex.Snapshot{RepoPath: "/repo", Commit: "same", CreatedAt: time.Unix(1, 0), Documents: []codeindex.Document{{Path: "a.go", Content: "first", Bytes: 5}}, TotalBytes: 5, Manifest: codeindex.Manifest{FormatVersion: codeindex.FormatVersion, CoverageKnown: true, TrackedEntries: 1, IndexedFiles: 1}}
 	if _, _, err := c.StoreCodeSnapshot(ctx, ref, first); err != nil {
 		t.Fatal(err)
@@ -135,6 +135,31 @@ func TestReindexSameCommitPreservesOldArtifactIdentity(t *testing.T) {
 	}
 }
 
+func TestCodeIndexArtifactRejectsProjectionThatContradictsManifest(t *testing.T) {
+	t.Parallel()
+	c, _ := openTestCorpus(t)
+	ctx := context.Background()
+	ref := domain.MustRepoRef("owner", "repo")
+	snapshot := codeindex.Snapshot{
+		RepoPath: "/repo", Commit: "same", CreatedAt: time.Unix(1, 0),
+		Documents: []codeindex.Document{{Path: "a.go", Content: "first", Bytes: 5}}, TotalBytes: 5,
+		Manifest: codeindex.Manifest{FormatVersion: codeindex.FormatVersion, CoverageKnown: true, TrackedEntries: 1, IndexedFiles: 1},
+	}
+	if _, _, err := c.StoreCodeSnapshot(ctx, ref, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := c.LatestCodeIndexArtifact(ctx, ref, "same")
+	if err != nil || artifact == nil {
+		t.Fatalf("artifact = %+v, %v", artifact, err)
+	}
+	if _, err := c.db.ExecContext(ctx, `UPDATE code_index_artifacts SET indexed_files=2 WHERE digest=?`, artifact.Digest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.CodeIndexArtifact(ctx, artifact.Digest); err == nil || !strings.Contains(err.Error(), "contradicts digest-bound manifest") {
+		t.Fatalf("contradictory projection error = %v", err)
+	}
+}
+
 func TestStoreCodeSnapshotWithRevisionBindsWriteToCommittedIdentity(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -143,7 +168,7 @@ func TestStoreCodeSnapshotWithRevisionBindsWriteToCommittedIdentity(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, revision, err := c.StoreCodeSnapshotWithRevision(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, codeindex.Snapshot{
+	_, _, revision, err := c.StoreCodeSnapshotWithRevision(ctx, domain.MustRepoRef("owner", "repo"), codeindex.Snapshot{
 		RepoPath: "/repo", Commit: "commit", CreatedAt: time.Unix(1, 0),
 		Documents: []codeindex.Document{{Path: "main.go", Content: "package main", Bytes: 12}}, TotalBytes: 12,
 	})
@@ -163,7 +188,7 @@ func TestCodeSearchWeightsPathAndReturnsBoundedSnippet(t *testing.T) {
 	t.Parallel()
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 	longContent := "music " + strings.Repeat("padding ", 500)
 	snapshot := codeindex.Snapshot{
 		RepoPath: "/repo", Commit: "abc", CreatedAt: time.Unix(100, 0),

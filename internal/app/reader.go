@@ -27,7 +27,7 @@ func (r *corpusReader) ReadRepository(ctx context.Context, ref domain.RepoRef) (
 	if err != nil {
 		return domain.Repository{}, nil, err
 	}
-	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return domain.Repository{}, nil, fmt.Errorf("get repository: %w", err)
 	}
@@ -68,7 +68,7 @@ func (r *corpusReader) ReadThreads(ctx context.Context, ref domain.RepoRef, q do
 	if err != nil {
 		return nil, nil, err
 	}
-	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return nil, nil, fmt.Errorf("get repository: %w", err)
 	}
@@ -106,7 +106,7 @@ func (r *corpusReader) ReadCoverage(ctx context.Context, ref domain.RepoRef) (do
 	if err != nil {
 		return domain.Coverage{}, err
 	}
-	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return domain.Coverage{}, fmt.Errorf("get repository: %w", err)
 	}
@@ -125,17 +125,11 @@ func (r *corpusReader) ReadCoverage(ctx context.Context, ref domain.RepoRef) (do
 		if cov.SourceUpdatedAt.After(asOf) {
 			asOf = cov.SourceUpdatedAt
 		}
-		status := domain.Fresh
-		if !cov.Complete {
-			status = domain.Stale
+		facet, err := domain.NewFacetCoverage(cov.Facet, cov.Complete, cov.SourceUpdatedAt, 0)
+		if err != nil {
+			return domain.Coverage{}, fmt.Errorf("parse %s coverage: %w", cov.Facet, err)
 		}
-		facets = append(facets, domain.FacetCoverage{
-			Facet:     cov.Facet,
-			Present:   true,
-			Complete:  cov.Complete,
-			Freshness: domain.Freshness{Status: status, AsOf: cov.SourceUpdatedAt},
-			Count:     0,
-		})
+		facets = append(facets, facet)
 	}
 	if asOf.IsZero() {
 		asOf = time.Now().UTC()
@@ -148,7 +142,7 @@ func (r *corpusReader) ReadContributionGuidance(ctx context.Context, ref domain.
 	if err != nil {
 		return "", nil, err
 	}
-	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return "", nil, fmt.Errorf("get repository: %w", err)
 	}
@@ -165,7 +159,7 @@ func (r *corpusReader) ReadContributionGuidance(ctx context.Context, ref domain.
 
 func corpusRepoToDomain(ref domain.RepoRef, repo *corpus.Repository) domain.Repository {
 	dr := domain.Repository{
-		RepoRef:       ref,
+		Ref:           ref,
 		ID:            repo.ID,
 		Description:   repo.Description,
 		Topics:        repo.Topics,
@@ -186,10 +180,14 @@ func corpusRepoToDomain(ref domain.RepoRef, repo *corpus.Repository) domain.Repo
 }
 
 func corpusThreadToDomain(ref domain.RepoRef, t corpus.Thread) domain.Thread {
+	typeVariant := domain.IssueThread()
+	if t.Kind == corpus.ThreadKindPullRequest {
+		typeVariant = domain.PullRequestThread(domain.PullRequestDetails{Merge: t.Merge})
+	}
 	dt := domain.Thread{
 		Repo:      ref,
 		ID:        t.ID,
-		Kind:      domain.ThreadKind(t.Kind),
+		Type:      typeVariant,
 		Number:    t.Number,
 		Title:     t.Title,
 		Body:      t.Body,
@@ -199,13 +197,6 @@ func corpusThreadToDomain(ref domain.RepoRef, t corpus.Thread) domain.Thread {
 		CreatedAt: t.SourceCreatedAt,
 		UpdatedAt: t.SourceUpdatedAt,
 		ClosedAt:  t.ClosedAt,
-	}
-	if t.Kind == corpus.ThreadKindPullRequest {
-		dt.PullRequest = &domain.PullRequestDetails{
-			Merged:      t.Merged,
-			MergedKnown: t.MergedKnown,
-			MergedAt:    t.MergedAt,
-		}
 	}
 	return dt
 }
@@ -220,7 +211,7 @@ func firstLanguage(languages []string) string {
 func coverageNames(cov domain.Coverage) []string {
 	out := make([]string, 0, len(cov.Facets))
 	for _, f := range cov.Facets {
-		out = append(out, f.Facet)
+		out = append(out, f.Facet())
 	}
 	return out
 }

@@ -15,8 +15,8 @@ import (
 
 // StartInvestigation creates a new investigation scoped to a repository.
 func (s *Service) StartInvestigation(ctx context.Context, repo contracts.RepoRef, commitSHA, lens string) (*contracts.InvestigationResult, error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 	invSvc, err := s.writeInvestigationSvc(ctx)
@@ -285,7 +285,7 @@ func (s *Service) readInvestigationSvc(ctx context.Context) (*investigation.Serv
 
 func investigationResult(inv *investigation.Investigation) *contracts.InvestigationResult {
 	return &contracts.InvestigationResult{
-		ID: inv.ID, Repo: contracts.RepoRef{Owner: inv.Repo.Owner, Repo: inv.Repo.Repo},
+		ID: inv.ID, Repo: contracts.RepoRef{Owner: inv.Repo.Owner(), Repo: inv.Repo.Repo()},
 		CommitSHA: inv.CommitSHA, Lens: inv.Lens, Status: string(inv.Status),
 		ThreadBaseline: threadBaselineResult(inv.ThreadBaseline), SeedHypothesisID: inv.SeedHypothesisID,
 		AuditTrail: workflowAuditResults(inv.AuditTrail),

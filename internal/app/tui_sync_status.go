@@ -127,11 +127,11 @@ func buildTUISyncStatus(
 			continue
 		}
 		summary := syncRunSummary(*run)
-		switch run.Status {
+		switch run.State.Status() {
 		case corpus.RunStatusFailed, corpus.RunStatusPartial:
 			status = "partial"
 			item.Assessment.Risks = append(item.Assessment.Risks, tuicontract.Fact{
-				Code: "sync_" + run.Status, Summary: summary,
+				Code: "sync_" + string(run.State.Status()), Summary: summary,
 			})
 		case corpus.RunStatusRunning:
 			if status == "complete" {
@@ -156,7 +156,7 @@ func containsTUIFacet(facets []string, want string) bool {
 }
 
 func syncRunSummary(run corpus.Run) string {
-	summary := fmt.Sprintf("%s run %d is %s", run.Kind, run.ID, run.Status)
+	summary := fmt.Sprintf("%s run %d is %s", run.Kind, run.ID, run.State.Status())
 	if message := boundedTUIMessage(run.Error, 160); message != "" {
 		summary += ": " + message
 	}

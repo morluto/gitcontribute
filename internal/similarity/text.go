@@ -81,7 +81,11 @@ func ExtractRefs(text string, defaultRepo domain.RepoRef) []ThreadRef {
 		if owner == "" || repo == "" || number == 0 {
 			return
 		}
-		seen[ThreadRef{Repo: domain.RepoRef{Owner: owner, Repo: repo}, Kind: kind, Number: number}] = struct{}{}
+		ref, err := domain.NewRepoRef(owner, repo)
+		if err != nil {
+			return
+		}
+		seen[ThreadRef{Repo: ref, Kind: kind, Number: number}] = struct{}{}
 	}
 	for _, match := range repoIssueRefPattern.FindAllStringSubmatch(text, -1) {
 		number, err := strconv.Atoi(match[3])
@@ -106,7 +110,7 @@ func ExtractRefs(text string, defaultRepo domain.RepoRef) []ThreadRef {
 		if err != nil {
 			continue
 		}
-		add(strings.ToLower(defaultRepo.Owner), strings.ToLower(defaultRepo.Repo), "", number)
+		add(strings.ToLower(defaultRepo.Owner()), strings.ToLower(defaultRepo.Repo()), "", number)
 	}
 	out := make([]ThreadRef, 0, len(seen))
 	for ref := range seen {

@@ -7,7 +7,7 @@ import (
 )
 
 func TestRepositoryKeyNormalizesOwnerAndRepository(t *testing.T) {
-	got := RepositoryKey(domain.RepoRef{Owner: "Morluto", Repo: "GitContribute"})
+	got := RepositoryKey(domain.MustRepoRef("Morluto", "GitContribute"))
 	if got != "morluto/gitcontribute" {
 		t.Fatalf("repository key = %q", got)
 	}

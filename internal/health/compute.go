@@ -35,6 +35,10 @@ func Compute(ctx context.Context, c *corpus.Corpus, repoID int64, opts Options) 
 	if repo == nil {
 		return nil, fmt.Errorf("repository not found")
 	}
+	repoRef, err := domain.NewRepoRef(repo.Owner, repo.Name)
+	if err != nil {
+		return nil, fmt.Errorf("decode repository identity: %w", err)
+	}
 
 	threads, err := c.ListThreads(ctx, repoID, "", threadListLimit)
 	if err != nil {
@@ -68,7 +72,7 @@ func Compute(ctx context.Context, c *corpus.Corpus, repoID int64, opts Options) 
 	}
 
 	report := &Report{
-		Repo:        domain.RepoRef{Owner: repo.Owner, Repo: repo.Name},
+		Repo:        repoRef,
 		GeneratedAt: now,
 		Window:      window,
 		Repository: RepositoryMetrics{
@@ -169,10 +173,10 @@ func countThreads(threads []corpus.Thread, window Window, incomplete bool) (Issu
 			prMetrics.SampleSize++
 			if t.State == "open" {
 				prMetrics.Open++
-			} else if !t.MergedKnown {
+			} else if !t.Merge.Known() {
 				prMetrics.ClosedUnknownMerge++
 				missingMergeState = true
-			} else if t.Merged {
+			} else if t.Merge.IsMerged() {
 				prMetrics.Merged++
 			} else {
 				prMetrics.ClosedUnmerged++
@@ -239,9 +243,9 @@ func computeExternalMetrics(threads []corpus.Thread, start, end time.Time) Exter
 		switch {
 		case t.State == "open":
 			out.Open++
-		case !t.MergedKnown:
+		case !t.Merge.Known():
 			out.ClosedUnknownMerge++
-		case t.Merged:
+		case t.Merge.IsMerged():
 			out.Merged++
 		default:
 			out.ClosedUnmerged++

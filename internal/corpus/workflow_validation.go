@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/contribution"
@@ -65,7 +66,7 @@ func (c *Corpus) FindRelated(ctx context.Context, ref domain.RepoRef, category i
 	rows, err := c.db.QueryContext(ctx, `
 		SELECT h.payload FROM hypotheses h JOIN investigations i ON i.id=h.investigation_id
 		WHERE i.repo_owner=? AND i.repo_name=? AND (?='' OR h.category=?) ORDER BY h.created_at
-	`, ref.Owner, ref.Repo, category, category)
+	`, ref.Owner(), ref.Repo(), category, category)
 	if err != nil {
 		return nil, fmt.Errorf("find related investigations: %w", err)
 	}
@@ -87,6 +88,10 @@ func (c *Corpus) FindRelated(ctx context.Context, ref domain.RepoRef, category i
 
 // SaveValidationDefinition persists a validation plan without executing it.
 func (c *Corpus) SaveValidationDefinition(ctx context.Context, item *evidence.ValidationDefinition) error {
+	return saveValidationDefinition(ctx, c.db, item)
+}
+
+func saveValidationDefinition(ctx context.Context, db dbExecer, item *evidence.ValidationDefinition) error {
 	if item == nil || item.ID == "" {
 		return errors.New("validation definition id is required")
 	}
@@ -94,7 +99,7 @@ func (c *Corpus) SaveValidationDefinition(ctx context.Context, item *evidence.Va
 	if err != nil {
 		return err
 	}
-	_, err = c.db.ExecContext(ctx, `
+	_, err = db.ExecContext(ctx, `
 		INSERT INTO validation_definitions (id, investigation_id, hypothesis_id, opportunity_id, payload, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET investigation_id=excluded.investigation_id,
@@ -134,6 +139,10 @@ func (c *Corpus) ListValidationDefinitions(ctx context.Context, opportunityID st
 
 // SaveValidationRun persists the bounded result of an authorized validation execution.
 func (c *Corpus) SaveValidationRun(ctx context.Context, item *evidence.ValidationRun) error {
+	return saveValidationRun(ctx, c.db, item)
+}
+
+func saveValidationRun(ctx context.Context, db dbExecer, item *evidence.ValidationRun) error {
 	if item == nil || item.ID == "" {
 		return errors.New("validation run id is required")
 	}
@@ -141,7 +150,7 @@ func (c *Corpus) SaveValidationRun(ctx context.Context, item *evidence.Validatio
 	if err != nil {
 		return err
 	}
-	_, err = c.db.ExecContext(ctx, `
+	_, err = db.ExecContext(ctx, `
 		INSERT INTO validation_runs (id, definition_id, investigation_id, hypothesis_id, opportunity_id, kind, classification, payload, started_at, completed_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET definition_id=excluded.definition_id,
@@ -151,6 +160,47 @@ func (c *Corpus) SaveValidationRun(ctx context.Context, item *evidence.Validatio
 	`, item.ID, item.DefinitionID, item.InvestigationID, item.HypothesisID, item.OpportunityID, item.Kind, item.Classification, payload, encodeTime(item.StartedAt), encodeTime(item.CompletedAt))
 	if err != nil {
 		return fmt.Errorf("save validation run: %w", err)
+	}
+	return nil
+}
+
+// SaveExternalValidation atomically stores the synthetic definition and its
+// externally produced run so neither record can survive alone.
+func (c *Corpus) SaveExternalValidation(ctx context.Context, definition *evidence.ValidationDefinition, run *evidence.ValidationRun) (err error) {
+	if definition == nil || definition.ID == "" || run == nil || run.ID == "" {
+		return errors.New("external validation definition and run identities are required")
+	}
+	if run.DefinitionID != definition.ID {
+		return errors.New("external validation run must reference the supplied definition")
+	}
+	tx, err := c.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin external validation save: %w", err)
+	}
+	defer rollbackSQLOnReturn(tx, &err)
+	var existingPayload string
+	err = tx.QueryRowContext(ctx, `SELECT payload FROM validation_definitions WHERE id=?`, definition.ID).Scan(&existingPayload)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if err := saveValidationDefinition(ctx, tx, definition); err != nil {
+			return err
+		}
+	case err != nil:
+		return fmt.Errorf("read external validation definition: %w", err)
+	default:
+		var existing evidence.ValidationDefinition
+		if err := unmarshalWorkflow(existingPayload, &existing); err != nil {
+			return err
+		}
+		if !slices.Equal(existing.Command, definition.Command) {
+			return errors.New("external receipt command differs from the existing validation_id")
+		}
+	}
+	if err := saveValidationRun(ctx, tx, run); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit external validation save: %w", err)
 	}
 	return nil
 }

@@ -24,7 +24,7 @@ func TestCommitClusterProjectionRejectsChangedSource(t *testing.T) {
 	if _, err := c.UpsertThread(ctx, thread, `{}`); err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.RepoRef{Owner: "acme", Repo: "rocket"}
+	ref := domain.MustRepoRef("acme", "rocket")
 	maxCandidates := clustering.DefaultComparisonBudget().MaxCandidates()
 	snapshot, err := c.LoadClusterRefreshSnapshot(ctx, ref, maxCandidates)
 	if err != nil {
@@ -56,7 +56,7 @@ func TestConcurrentIdenticalEmptyProjectionHasOneCurrentRun(t *testing.T) {
 	if _, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "empty"}, `{}`); err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.RepoRef{Owner: "acme", Repo: "empty"}
+	ref := domain.MustRepoRef("acme", "empty")
 	maxCandidates := clustering.DefaultComparisonBudget().MaxCandidates()
 	snapshot, err := c.LoadClusterRefreshSnapshot(ctx, ref, maxCandidates)
 	if err != nil {
@@ -107,7 +107,7 @@ func TestCommitClusterProjectionRejectsMissingRuleVersion(t *testing.T) {
 	if _, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "empty"}, `{}`); err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.RepoRef{Owner: "acme", Repo: "empty"}
+	ref := domain.MustRepoRef("acme", "empty")
 	maxCandidates := clustering.DefaultComparisonBudget().MaxCandidates()
 	snapshot, err := c.LoadClusterRefreshSnapshot(ctx, ref, maxCandidates)
 	if err != nil {
@@ -137,7 +137,7 @@ func TestCommitClusterProjectionRejectsMissingSourceRevision(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
-	ref := domain.RepoRef{Owner: "acme", Repo: "rocket"}
+	ref := domain.MustRepoRef("acme", "rocket")
 
 	_, err := c.CommitClusterProjection(ctx, clusterprojection.Commit{
 		Repo:          ref,
@@ -155,7 +155,7 @@ func TestCommitClusterProjectionRejectsInvalidCandidateBound(t *testing.T) {
 	c, _ := openTestCorpus(t)
 
 	_, err := c.CommitClusterProjection(ctx, clusterprojection.Commit{
-		Repo:           domain.RepoRef{Owner: "acme", Repo: "rocket"},
+		Repo:           domain.MustRepoRef("acme", "rocket"),
 		ExpectedSource: "revision",
 		RuleVersion:    similarity.DuplicateV1,
 	})
@@ -170,12 +170,12 @@ func TestCommitClusterProjectionRejectsInvalidRepository(t *testing.T) {
 	c, _ := openTestCorpus(t)
 
 	_, err := c.CommitClusterProjection(ctx, clusterprojection.Commit{
-		Repo:           domain.RepoRef{Owner: "acme"},
+		Repo:           domain.RepoRef{},
 		ExpectedSource: "revision",
 		RuleVersion:    similarity.DuplicateV1,
 		MaxCandidates:  clustering.DefaultComparisonBudget().MaxCandidates(),
 	})
-	if err == nil || err.Error() != "repo is required" {
+	if err == nil || err.Error() != "cluster repository is required" {
 		t.Fatalf("commit error = %v, want invalid repository", err)
 	}
 }
@@ -187,7 +187,7 @@ func TestCommitClusterProjectionRejectsClusterFromDifferentSource(t *testing.T) 
 	if _, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "rocket"}, `{}`); err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.RepoRef{Owner: "acme", Repo: "rocket"}
+	ref := domain.MustRepoRef("acme", "rocket")
 	maxCandidates := clustering.DefaultComparisonBudget().MaxCandidates()
 	snapshot, err := c.LoadClusterRefreshSnapshot(ctx, ref, maxCandidates)
 	if err != nil {
@@ -222,7 +222,7 @@ func TestCommitClusterProjectionRejectsClusterWithoutStableIdentity(t *testing.T
 	if _, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "rocket"}, `{}`); err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.RepoRef{Owner: "acme", Repo: "rocket"}
+	ref := domain.MustRepoRef("acme", "rocket")
 	maxCandidates := clustering.DefaultComparisonBudget().MaxCandidates()
 	snapshot, err := c.LoadClusterRefreshSnapshot(ctx, ref, maxCandidates)
 	if err != nil {
@@ -249,7 +249,7 @@ func TestCommitClusterProjectionRejectsClusterFromDifferentRepository(t *testing
 	if _, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "rocket"}, `{}`); err != nil {
 		t.Fatal(err)
 	}
-	ref := domain.RepoRef{Owner: "acme", Repo: "rocket"}
+	ref := domain.MustRepoRef("acme", "rocket")
 	maxCandidates := clustering.DefaultComparisonBudget().MaxCandidates()
 	snapshot, err := c.LoadClusterRefreshSnapshot(ctx, ref, maxCandidates)
 	if err != nil {
@@ -264,7 +264,7 @@ func TestCommitClusterProjectionRejectsClusterFromDifferentRepository(t *testing
 		MaxCandidates:      maxCandidates,
 		Clusters: []clustering.Cluster{{
 			StableID: "cluster-1",
-			Repo:     domain.RepoRef{Owner: "other", Repo: "repo"},
+			Repo:     domain.MustRepoRef("other", "repo"),
 			Revision: snapshot.SourceRevision,
 		}},
 	})

@@ -1,7 +1,6 @@
 package github
 
 import (
-	"strings"
 	"time"
 )
 
@@ -125,15 +124,9 @@ type pullRequestFileDTO struct {
 }
 
 func convertPullRequestStatus(dto pullRequestStatusDTO) PullRequestStatus {
-	mergeable := ""
-	known := false
-	if dto.Mergeable != nil {
-		mergeable = *dto.Mergeable
-		known = mergeable != "" && !strings.EqualFold(mergeable, "UNKNOWN")
-	}
 	result := PullRequestStatus{
 		NodeID: dto.ID, HeadSHA: dto.HeadRefOID, SourceUpdatedAt: dto.UpdatedAt,
-		MergeState:         PullRequestMergeState{MergeStateStatus: dto.MergeStateStatus, Mergeable: mergeable, MergeableKnown: known},
+		MergeState:         NewPullRequestMergeState(dto.MergeStateStatus, dto.Mergeable),
 		MergeStateCoverage: scalarCoverage(), MergeQueueCoverage: scalarCoverage(),
 	}
 	if dto.MergeQueueEntry != nil {

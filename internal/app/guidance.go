@@ -56,7 +56,7 @@ func syncRepositoryGuidance(
 	if err := budget.take(); err != nil {
 		return err
 	}
-	resolution, _, err := resolver.ResolveRepositoryRef(ctx, ref.Owner, ref.Repo, requestedRef)
+	resolution, _, err := resolver.ResolveRepositoryRef(ctx, ref.Owner(), ref.Repo(), requestedRef)
 	if err != nil {
 		return fmt.Errorf("resolve contribution guidance ref %q: %w", requestedRef, err)
 	}
@@ -69,7 +69,7 @@ func syncRepositoryGuidance(
 		if err := budget.take(); err != nil {
 			return err
 		}
-		file, _, err := fileReader.GetRepositoryFileAtResolvedRef(ctx, ref.Owner, ref.Repo, path, resolution)
+		file, _, err := fileReader.GetRepositoryFileAtResolvedRef(ctx, ref.Owner(), ref.Repo(), path, resolution)
 		if err != nil {
 			var notFound *github.NotFoundError
 			if errors.As(err, &notFound) {

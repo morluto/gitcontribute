@@ -97,7 +97,7 @@ func orderDossier(d *domain.Dossier) {
 		return a.CommitSHA < b.CommitSHA
 	})
 	sort.SliceStable(d.Coverage.Facets, func(i, j int) bool {
-		return d.Coverage.Facets[i].Facet < d.Coverage.Facets[j].Facet
+		return d.Coverage.Facets[i].Facet() < d.Coverage.Facets[j].Facet()
 	})
 	sortThreads(d.RecentMergedPullRequests)
 	sortThreads(d.RecentOpenPullRequests)
@@ -184,9 +184,13 @@ func writeDossierMarkdown(w io.Writer, d *domain.Dossier) error {
 		fmt.Fprintln(&b, "_No coverage recorded._")
 	} else {
 		for _, f := range d.Coverage.Facets {
-			fmt.Fprintf(&b, "- **%s:** present=%v, complete=%v, freshness=%s, as_of=%s", f.Facet, f.Present, f.Complete, f.Freshness.Status, formatTime(f.Freshness.AsOf))
-			if f.Count > 0 {
-				fmt.Fprintf(&b, ", count=%d", f.Count)
+			freshness := "stale"
+			if f.Complete() {
+				freshness = "fresh"
+			}
+			fmt.Fprintf(&b, "- **%s:** present=true, complete=%v, freshness=%s, as_of=%s", f.Facet(), f.Complete(), freshness, formatTime(f.AsOf()))
+			if f.Count() > 0 {
+				fmt.Fprintf(&b, ", count=%d", f.Count())
 			}
 			fmt.Fprintln(&b)
 		}

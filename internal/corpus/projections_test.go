@@ -310,7 +310,7 @@ func TestRebuildCodeSearchProjectionIsAtomicAndSetsState(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 	snapshot := codeindex.Snapshot{
 		RepoPath:   "/repo",
 		Commit:     "abc",

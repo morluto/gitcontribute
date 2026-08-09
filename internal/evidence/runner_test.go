@@ -161,7 +161,8 @@ func TestExecRunnerCapturesProcessTreeTelemetryAndCleanup(t *testing.T) {
 	if res.Process.PID <= 0 || res.Process.CreateTimeUnixMilli <= 0 {
 		t.Fatalf("process identity = %+v", res.Process)
 	}
-	if res.Resources.Provider != "gopsutil/v4" || res.Resources.SampleCount == 0 || res.Resources.PeakChildCount.Value == nil || *res.Resources.PeakChildCount.Value < 1 {
+	peakChildren, peakChildrenAvailable := res.Resources.PeakChildCount.Value()
+	if res.Resources.Provider != "gopsutil/v4" || res.Resources.SampleCount == 0 || !peakChildrenAvailable || peakChildren < 1 {
 		t.Fatalf("telemetry = %+v", res.Resources)
 	}
 	if (res.Cleanup.Status != "clean" && res.Cleanup.Status != "unavailable") || len(res.Cleanup.Survivors) != 0 {
@@ -175,7 +176,7 @@ func TestExecRunnerCapturesProcessTreeTelemetryAndCleanup(t *testing.T) {
 func TestUnavailableMetricIsNotEncodedAsZero(t *testing.T) {
 	t.Parallel()
 	metric := metricInt64(0, errors.New("unsupported platform metric"))
-	if metric.Value != nil || metric.UnavailableReason == "" {
+	if _, available := metric.Value(); available || metric.UnavailableReason() == "" {
 		t.Fatalf("metric = %+v", metric)
 	}
 }

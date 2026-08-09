@@ -29,9 +29,7 @@ type searchMatch struct {
 	Assignees         []string
 	Draft             bool
 	ClosedAt          time.Time
-	MergedAt          time.Time
-	Merged            bool
-	MergedKnown       bool
+	Merge             domain.MergeStatus
 	Description       string
 	DefaultBranch     string
 	Language          string
@@ -154,12 +152,8 @@ func (s *Service) parseRepoRef(repo string) (domain.RepoRef, error) {
 	if repo == "" {
 		return domain.RepoRef{}, nil
 	}
-	parts := strings.Split(repo, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return domain.RepoRef{}, fmt.Errorf("invalid repository filter %q", repo)
-	}
-	ref := domain.RepoRef{Owner: parts[0], Repo: parts[1]}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.ParseRepoRef(repo)
+	if err != nil {
 		return domain.RepoRef{}, fmt.Errorf("invalid repository filter %q: %w", repo, err)
 	}
 	return ref, nil
@@ -173,7 +167,7 @@ func (s *Service) resolveRepoFilter(ctx context.Context, c *corpus.Corpus, opts 
 	if err != nil {
 		return 0, domain.RepoRef{}, err
 	}
-	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return 0, domain.RepoRef{}, err
 	}
@@ -225,7 +219,10 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 		}
 		coverage := mergeCoverageNames(repositoryCoverage, threadCoverage)
 
-		ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Name}
+		ref, err := domain.NewRepoRef(repo.Owner, repo.Name)
+		if err != nil {
+			return searchResult{}, fmt.Errorf("parse stored repository: %w", err)
+		}
 		m := searchMatch{
 			Repo:              ref,
 			Kind:              t.Kind,
@@ -238,7 +235,7 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 			AuthorAssociation: t.AuthorAssociation,
 			Labels:            t.Labels,
 			Assignees:         t.Assignees,
-			Draft:             t.Draft, ClosedAt: t.ClosedAt, MergedAt: t.MergedAt, Merged: t.Merged, MergedKnown: t.MergedKnown,
+			Draft:             t.Draft, ClosedAt: t.ClosedAt, Merge: t.Merge,
 			Language:  repo.Language,
 			Archived:  repo.Archived,
 			Stars:     repo.Stars,
@@ -285,7 +282,10 @@ func (s *Service) searchRepositories(ctx context.Context, c *corpus.Corpus, quer
 			}
 			coverageCache[r.ID] = coverage
 		}
-		m := repositorySearchMatch(r, coverage)
+		m, err := repositorySearchMatch(r, coverage)
+		if err != nil {
+			return searchResult{}, err
+		}
 		matches = append(matches, m)
 	}
 
@@ -298,7 +298,7 @@ func (s *Service) searchRepositories(ctx context.Context, c *corpus.Corpus, quer
 }
 
 func (s *Service) searchRepositoryExact(ctx context.Context, c *corpus.Corpus, query string, ref domain.RepoRef) (searchResult, error) {
-	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return searchResult{}, err
 	}
@@ -321,15 +321,21 @@ func (s *Service) searchRepositoryExact(ctx context.Context, c *corpus.Corpus, q
 	if err != nil {
 		return searchResult{}, err
 	}
-	match := repositorySearchMatch(*repo, coverage)
+	match, err := repositorySearchMatch(*repo, coverage)
+	if err != nil {
+		return searchResult{}, err
+	}
 	if hasQuery {
 		match.Score = bm25Score(rank)
 	}
 	return searchResult{Query: query, Total: 1, Matches: []searchMatch{match}}, nil
 }
 
-func repositorySearchMatch(r corpus.Repository, coverage []string) searchMatch {
-	ref := domain.RepoRef{Owner: r.Owner, Repo: r.Name}
+func repositorySearchMatch(r corpus.Repository, coverage []string) (searchMatch, error) {
+	ref, err := domain.NewRepoRef(r.Owner, r.Name)
+	if err != nil {
+		return searchMatch{}, fmt.Errorf("parse stored repository: %w", err)
+	}
 	m := searchMatch{
 		Repo: ref, Kind: "repo", Title: ref.String(), Body: r.Description,
 		URL: fmt.Sprintf("https://github.com/%s", ref), Description: r.Description,
@@ -339,7 +345,7 @@ func repositorySearchMatch(r corpus.Repository, coverage []string) searchMatch {
 		UpdatedAt: r.SourceUpdatedAt, Freshness: r.SourceUpdatedAt, Coverage: coverage,
 	}
 	m.Score = bm25Score(r.Rank)
-	return m
+	return m, nil
 }
 
 func (s *Service) searchCode(ctx context.Context, c *corpus.Corpus, query string, ref domain.RepoRef, limit int, cursor string) (searchResult, error) {
@@ -365,7 +371,7 @@ func (s *Service) searchCode(ctx context.Context, c *corpus.Corpus, query string
 		}
 		repo, ok := repoCache[match.Repo]
 		if !ok {
-			repo, err = c.GetRepository(ctx, match.Repo.Owner, match.Repo.Repo)
+			repo, err = c.GetRepository(ctx, match.Repo.Owner(), match.Repo.Repo())
 			if err != nil {
 				return searchResult{}, err
 			}
@@ -448,7 +454,7 @@ func (s *Service) collectLensMatches(ctx context.Context, c *corpus.Corpus, quer
 			return nil, err
 		}
 		repoRef = ref
-		repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+		repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 		if err != nil {
 			return nil, err
 		}
@@ -711,7 +717,7 @@ func (s *Service) Search(ctx context.Context, query string, opts contracts.Searc
 	for i, m := range res.Matches {
 		matches[i] = contracts.SearchMatch{
 			Kind:           m.Kind,
-			Repo:           contracts.RepoRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo},
+			Repo:           contracts.RepoRef{Owner: m.Repo.Owner(), Repo: m.Repo.Repo()},
 			Title:          m.Title,
 			Number:         m.Number,
 			State:          m.State,

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 func TestPullRequestFeedbackProjectionRebuildAndSearch(t *testing.T) {
@@ -17,7 +19,7 @@ func TestPullRequestFeedbackProjectionRebuildAndSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pr, err := c.UpsertThread(ctx, Thread{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 7, State: "closed", Author: "submitter", Merged: true, MergedKnown: true, SourceUpdatedAt: now}, `{}`)
+	pr, err := c.UpsertThread(ctx, Thread{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 7, State: "closed", Author: "submitter", Merge: domain.MergedStatus(time.Time{}), SourceUpdatedAt: now}, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +48,7 @@ func TestPullRequestFeedbackProjectionRebuildAndSearch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(page.Items) != 1 || page.Items[0].FeedbackID != "11" || page.Items[0].PullRequestNumber != 7 || page.Items[0].PullRequestMerged != true || page.Coverage.Status != "complete" {
+	if len(page.Items) != 1 || page.Items[0].FeedbackID != "11" || page.Items[0].PullRequestNumber != 7 || !page.Items[0].PullRequestMerge.IsMerged() || page.Coverage.Status != "complete" {
 		t.Fatalf("feedback page = %+v", page)
 	}
 	exact, err := c.SearchPullRequestFeedback(ctx, FeedbackSearchFilter{RepositoryID: repo.ID, FeedbackAuthor: "reviewer", Limit: 10})
@@ -234,7 +236,14 @@ func TestPullRequestFeedbackFiltersSortingAndContinuation(t *testing.T) {
 	}
 	for index, value := range cases {
 		at := now.Add(time.Duration(index) * time.Minute)
-		thread, err := c.UpsertThread(ctx, Thread{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: value.number, State: value.state, Author: fmt.Sprintf("pr-author-%d", value.number), MergedKnown: value.mergedKnown, Merged: value.merged, SourceUpdatedAt: at}, `{}`)
+		merge := domain.UnknownMergeStatus()
+		if value.mergedKnown {
+			merge = domain.UnmergedStatus()
+			if value.merged {
+				merge = domain.MergedStatus(time.Time{})
+			}
+		}
+		thread, err := c.UpsertThread(ctx, Thread{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: value.number, State: value.state, Author: fmt.Sprintf("pr-author-%d", value.number), Merge: merge, SourceUpdatedAt: at}, `{}`)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -282,7 +291,11 @@ func TestPullRequestFeedbackFiltersSortingAndContinuation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(filtered.Items) != 1 || filtered.Items[0].Channel != "review_threads" || !filtered.Items[0].ResolvedKnown || !filtered.Items[0].Resolved {
+	if len(filtered.Items) != 1 {
+		t.Fatalf("filtered feedback = %+v", filtered)
+	}
+	resolved, known := filtered.Items[0].Resolution.Value()
+	if filtered.Items[0].Channel != "review_threads" || !known || !resolved {
 		t.Fatalf("filtered feedback = %+v", filtered)
 	}
 	unknown, err := c.SearchPullRequestFeedback(ctx, FeedbackSearchFilter{RepositoryID: repo.ID, Merged: "true", Text: "latency discussion", Limit: 10})
@@ -292,11 +305,11 @@ func TestPullRequestFeedbackFiltersSortingAndContinuation(t *testing.T) {
 	if len(unknown.Items) != 0 || len(unknown.UnknownMergePullRequests) != 1 || unknown.UnknownMergePullRequests[0] != 1 {
 		t.Fatalf("unknown merge candidates = %+v", unknown)
 	}
-	resolved, err := c.SearchPullRequestFeedback(ctx, FeedbackSearchFilter{RepositoryID: repo.ID, Channel: "review_threads", ThreadState: "resolved", Limit: 10})
+	resolvedPage, err := c.SearchPullRequestFeedback(ctx, FeedbackSearchFilter{RepositoryID: repo.ID, Channel: "review_threads", ThreadState: "resolved", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(resolved.Items) != 1 || resolved.Items[0].ThreadExternalID != "thread-3" {
-		t.Fatalf("resolved feedback = %+v", resolved)
+	if len(resolvedPage.Items) != 1 || resolvedPage.Items[0].ThreadExternalID != "thread-3" {
+		t.Fatalf("resolved feedback = %+v", resolvedPage)
 	}
 }

@@ -10,8 +10,8 @@ import (
 
 // Index records a bounded immutable code snapshot from a clean local checkout.
 func (s *Service) Index(ctx context.Context, repo contracts.RepoRef, path string) (*contracts.IndexResult, error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 	repoPath, commit, err := codeindex.Probe(ctx, path)

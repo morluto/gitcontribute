@@ -30,11 +30,11 @@ type ThreadRef struct {
 
 // Less reports the canonical ordering of thread references.
 func (r ThreadRef) Less(other ThreadRef) bool {
-	leftOwner, rightOwner := strings.ToLower(r.Repo.Owner), strings.ToLower(other.Repo.Owner)
+	leftOwner, rightOwner := strings.ToLower(r.Repo.Owner()), strings.ToLower(other.Repo.Owner())
 	if leftOwner != rightOwner {
 		return leftOwner < rightOwner
 	}
-	leftRepo, rightRepo := strings.ToLower(r.Repo.Repo), strings.ToLower(other.Repo.Repo)
+	leftRepo, rightRepo := strings.ToLower(r.Repo.Repo()), strings.ToLower(other.Repo.Repo())
 	if leftRepo != rightRepo {
 		return leftRepo < rightRepo
 	}
@@ -173,7 +173,7 @@ func (DuplicateRule) signals(a, b PreparedDuplicate) DuplicateSignals {
 
 func references(refs []ThreadRef, candidate ThreadRef) bool {
 	for _, ref := range refs {
-		if ref.Number == candidate.Number && strings.EqualFold(ref.Repo.Owner, candidate.Repo.Owner) && strings.EqualFold(ref.Repo.Repo, candidate.Repo.Repo) && (ref.Kind == "" || ref.Kind == candidate.Kind) {
+		if ref.Number == candidate.Number && strings.EqualFold(ref.Repo.Owner(), candidate.Repo.Owner()) && strings.EqualFold(ref.Repo.Repo(), candidate.Repo.Repo()) && (ref.Kind == "" || ref.Kind == candidate.Kind) {
 			return true
 		}
 	}

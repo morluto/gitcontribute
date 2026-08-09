@@ -205,7 +205,7 @@ func (s *Service) resolveRepoLensTarget(ctx context.Context, c *corpus.Corpus, r
 	if err != nil {
 		return searchMatch{}, "", err
 	}
-	repo, err := c.GetRepository(ctx, repoRef.Owner, repoRef.Repo)
+	repo, err := c.GetRepository(ctx, repoRef.Owner(), repoRef.Repo())
 	if err != nil {
 		return searchMatch{}, "", err
 	}
@@ -213,7 +213,7 @@ func (s *Service) resolveRepoLensTarget(ctx context.Context, c *corpus.Corpus, r
 		return searchMatch{}, "", failure.NotFound(fmt.Errorf("repository %q not found", repoRef))
 	}
 	return searchMatch{
-		Repo:      domain.RepoRef{Owner: repo.Owner, Repo: repo.Name},
+		Repo:      repoRef,
 		Kind:      "repo",
 		Title:     repoRef.String(),
 		Body:      repo.Description,
@@ -233,7 +233,7 @@ func (s *Service) resolveThreadLensTarget(ctx context.Context, c *corpus.Corpus,
 	if err != nil {
 		return searchMatch{}, "", err
 	}
-	repo, err := c.GetRepository(ctx, repoRef.Owner, repoRef.Repo)
+	repo, err := c.GetRepository(ctx, repoRef.Owner(), repoRef.Repo())
 	if err != nil {
 		return searchMatch{}, "", err
 	}
@@ -253,7 +253,7 @@ func (s *Service) resolveThreadLensTarget(ctx context.Context, c *corpus.Corpus,
 	}
 
 	m := searchMatch{
-		Repo:        domain.RepoRef{Owner: repo.Owner, Repo: repo.Name},
+		Repo:        repoRef,
 		Kind:        thread.Kind,
 		Number:      thread.Number,
 		State:       thread.State,
@@ -265,9 +265,7 @@ func (s *Service) resolveThreadLensTarget(ctx context.Context, c *corpus.Corpus,
 		Assignees:   thread.Assignees,
 		Draft:       thread.Draft,
 		ClosedAt:    thread.ClosedAt,
-		MergedAt:    thread.MergedAt,
-		Merged:      thread.Merged,
-		MergedKnown: thread.MergedKnown,
+		Merge:       thread.Merge,
 		Language:    repo.Language,
 		Archived:    repo.Archived,
 		Stars:       repo.Stars,
@@ -275,7 +273,7 @@ func (s *Service) resolveThreadLensTarget(ctx context.Context, c *corpus.Corpus,
 		Forks:       repo.Forks,
 		UpdatedAt:   thread.SourceUpdatedAt,
 		Freshness:   thread.SourceUpdatedAt,
-		URL:         threadURL(domain.RepoRef{Owner: repo.Owner, Repo: repo.Name}, thread.Kind, thread.Number),
+		URL:         threadURL(repoRef, thread.Kind, thread.Number),
 	}
 	if thread.Kind == corpus.ThreadKindPullRequest {
 		return m, "prs", nil
@@ -288,9 +286,12 @@ func (s *Service) resolveCodeLensTarget(ctx context.Context, c *corpus.Corpus, r
 	if len(parts) < 3 {
 		return searchMatch{}, "", fmt.Errorf("invalid code reference %q: expected owner/repo/path", ref)
 	}
-	repoRef := domain.RepoRef{Owner: parts[0], Repo: parts[1]}
+	repoRef, err := domain.NewRepoRef(parts[0], parts[1])
+	if err != nil {
+		return searchMatch{}, "", fmt.Errorf("invalid code reference %q: %w", ref, err)
+	}
 	path := parts[2]
-	repo, err := c.GetRepository(ctx, repoRef.Owner, repoRef.Repo)
+	repo, err := c.GetRepository(ctx, repoRef.Owner(), repoRef.Repo())
 	if err != nil {
 		return searchMatch{}, "", err
 	}
@@ -323,12 +324,8 @@ func (s *Service) resolveCodeLensTarget(ctx context.Context, c *corpus.Corpus, r
 }
 
 func parseRepoRef(ref string) (domain.RepoRef, error) {
-	parts := strings.Split(ref, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return domain.RepoRef{}, fmt.Errorf("invalid repository reference %q", ref)
-	}
-	r := domain.RepoRef{Owner: parts[0], Repo: parts[1]}
-	if err := r.Validate(); err != nil {
+	r, err := domain.ParseRepoRef(ref)
+	if err != nil {
 		return domain.RepoRef{}, fmt.Errorf("invalid repository reference %q: %w", ref, err)
 	}
 	return r, nil
@@ -364,7 +361,7 @@ func buildLensExplainResult(record *corpus.LensRecord, found lens.Result, match 
 
 	result.Candidate = contracts.LensExplainCandidate{
 		Kind:      match.Kind,
-		Repo:      contracts.RepoRef{Owner: match.Repo.Owner, Repo: match.Repo.Repo},
+		Repo:      contracts.RepoRef{Owner: match.Repo.Owner(), Repo: match.Repo.Repo()},
 		Number:    match.Number,
 		Title:     match.Title,
 		State:     match.State,

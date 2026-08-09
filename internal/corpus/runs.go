@@ -27,29 +27,18 @@ func (c *Corpus) StartRun(ctx context.Context, kind string) (*Run, error) {
 
 // GetRun returns a run record by id.
 func (c *Corpus) GetRun(ctx context.Context, id int64) (*Run, error) {
-	var r Run
-	var completed sql.NullInt64
-	var started int64
-	var stats, errStr sql.NullString
-	err := c.db.QueryRowContext(ctx, `
+	r, err := scanRun(c.db.QueryRowContext(ctx, `
 		SELECT id, kind, status, started_at, completed_at, stats, error
 		FROM runs
 		WHERE id = ?
-	`, id).Scan(&r.ID, &r.Kind, &r.Status, &started, &completed, &stats, &errStr)
+	`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get run: %w", err)
 	}
-	r.StartedAt = scanTime(started)
-	if completed.Valid {
-		t := scanTime(completed.Int64)
-		r.CompletedAt = &t
-	}
-	r.Stats = stats.String
-	r.Error = errStr.String
-	return &r, nil
+	return r, nil
 }
 
 // FinishRun marks a run as completed with optional statistics.
@@ -58,13 +47,13 @@ func (c *Corpus) FinishRun(ctx context.Context, id int64, stats string) error {
 	res, err := c.db.ExecContext(ctx, `
 		UPDATE runs
 		SET status = ?, completed_at = ?, stats = ?
-		WHERE id = ?
-	`, RunStatusCompleted, now, stats, id)
+		WHERE id = ? AND status = ? AND completed_at IS NULL
+	`, RunStatusCompleted, now, stats, id, RunStatusRunning)
 	if err != nil {
 		return fmt.Errorf("finish run: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("run %d not found", id)
+		return fmt.Errorf("run %d is not running", id)
 	}
 	return nil
 }
@@ -76,13 +65,13 @@ func (c *Corpus) FinishRunPartial(ctx context.Context, id int64, stats, message 
 	res, err := c.db.ExecContext(ctx, `
 		UPDATE runs
 		SET status = ?, completed_at = ?, stats = ?, error = ?
-		WHERE id = ?
-	`, RunStatusPartial, now, stats, message, id)
+		WHERE id = ? AND status = ? AND completed_at IS NULL
+	`, RunStatusPartial, now, stats, message, id, RunStatusRunning)
 	if err != nil {
 		return fmt.Errorf("finish partial run: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("run %d not found", id)
+		return fmt.Errorf("run %d is not running", id)
 	}
 	return nil
 }
@@ -93,13 +82,13 @@ func (c *Corpus) FailRun(ctx context.Context, id int64, message string) error {
 	res, err := c.db.ExecContext(ctx, `
 		UPDATE runs
 		SET status = ?, completed_at = ?, error = ?
-		WHERE id = ?
-	`, RunStatusFailed, now, message, id)
+		WHERE id = ? AND status = ? AND completed_at IS NULL
+	`, RunStatusFailed, now, message, id, RunStatusRunning)
 	if err != nil {
 		return fmt.Errorf("fail run: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("run %d not found", id)
+		return fmt.Errorf("run %d is not running", id)
 	}
 	return nil
 }
@@ -137,23 +126,38 @@ func (c *Corpus) ListRuns(ctx context.Context, limit int) ([]Run, error) {
 
 	var out []Run
 	for rows.Next() {
-		var r Run
-		var completed sql.NullInt64
-		var started int64
-		var stats, errStr sql.NullString
-		if err := rows.Scan(&r.ID, &r.Kind, &r.Status, &started, &completed, &stats, &errStr); err != nil {
+		r, err := scanRun(rows)
+		if err != nil {
 			return nil, err
 		}
-		r.StartedAt = scanTime(started)
-		if completed.Valid {
-			t := scanTime(completed.Int64)
-			r.CompletedAt = &t
-		}
-		r.Stats = stats.String
-		r.Error = errStr.String
-		out = append(out, r)
+		out = append(out, *r)
 	}
 	return out, rows.Err()
+}
+
+func scanRun(row rowScanner) (*Run, error) {
+	var run Run
+	var status string
+	var completed sql.NullInt64
+	var started int64
+	var stats, errStr sql.NullString
+	if err := row.Scan(&run.ID, &run.Kind, &status, &started, &completed, &stats, &errStr); err != nil {
+		return nil, err
+	}
+	var completedAt *time.Time
+	if completed.Valid {
+		value := scanTime(completed.Int64)
+		completedAt = &value
+	}
+	state, err := parseRunState(status, completedAt)
+	if err != nil {
+		return nil, fmt.Errorf("parse stored run state: %w", err)
+	}
+	run.State = state
+	run.StartedAt = scanTime(started)
+	run.Stats = stats.String
+	run.Error = errStr.String
+	return &run, nil
 }
 
 // ListRunEvents returns events for a run in chronological order.

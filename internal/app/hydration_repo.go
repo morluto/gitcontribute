@@ -23,8 +23,8 @@ type HydrateRepositoryOptions struct {
 // HydrateRepository hydrates selected facets for threads in a repository.
 // It is explicit, bounded, cancellation-aware, and aggregates per-thread results.
 func (s *Service) HydrateRepository(ctx context.Context, repo contracts.RepoRef, opts HydrateRepositoryOptions) (*HydrateResult, error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 
@@ -33,7 +33,7 @@ func (s *Service) HydrateRepository(ctx context.Context, repo contracts.RepoRef,
 		return nil, err
 	}
 
-	repoProjection, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repoProjection, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return nil, fmt.Errorf("get repository: %w", err)
 	}

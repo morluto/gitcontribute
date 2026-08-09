@@ -559,8 +559,8 @@ func TestCodeLensUsesSnapshotTimeForFreshnessFilter(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
-	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner, Name: ref.Repo}, `{}`); err != nil {
+	ref := domain.MustRepoRef("owner", "repo")
+	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner(), Name: ref.Repo()}, `{}`); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()

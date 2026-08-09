@@ -379,8 +379,8 @@ type CodeSnapshotPrunePlan struct {
 // PlanCodeSnapshotPrune returns a dry-run plan that would keep the latest N
 // derived code snapshots for a repository and delete the rest.
 func (c *Corpus) PlanCodeSnapshotPrune(ctx context.Context, ref domain.RepoRef, keepLatest int) (*CodeSnapshotPrunePlan, error) {
-	if err := ref.Validate(); err != nil {
-		return nil, err
+	if !ref.IsValid() {
+		return nil, errors.New("repository reference is not parsed")
 	}
 	if keepLatest < 0 {
 		return nil, errors.New("keepLatest cannot be negative")
@@ -426,8 +426,8 @@ func (c *Corpus) ApplyCodeSnapshotPrune(ctx context.Context, ref domain.RepoRef,
 	if plan == nil {
 		return nil, errors.New("prune plan is required")
 	}
-	if err := ref.Validate(); err != nil {
-		return nil, err
+	if !ref.IsValid() {
+		return nil, errors.New("repository reference is not parsed")
 	}
 	if plan.Ref != ref {
 		return nil, fmt.Errorf("prune plan scope %q does not match repository %q", plan.Ref, ref)
@@ -482,7 +482,7 @@ func (c *Corpus) listCodeSnapshotRetentionRefs(ctx context.Context, ref domain.R
 		FROM code_snapshots
 		WHERE repo_owner = ? AND repo_name = ?
 		ORDER BY created_at DESC, id DESC
-	`, ref.Owner, ref.Repo)
+	`, ref.Owner(), ref.Repo())
 	if err != nil {
 		return nil, fmt.Errorf("list code snapshots for prune: %w", err)
 	}
@@ -496,7 +496,7 @@ func listCodeSnapshotRetentionRefsTx(ctx context.Context, tx *sql.Tx, ref domain
 		FROM code_snapshots
 		WHERE repo_owner = ? AND repo_name = ?
 		ORDER BY created_at DESC, id DESC
-	`, ref.Owner, ref.Repo)
+	`, ref.Owner(), ref.Repo())
 	if err != nil {
 		return nil, fmt.Errorf("list code snapshots for prune: %w", err)
 	}

@@ -188,7 +188,7 @@ func validateRestoreArtifact(ctx context.Context, source string, manifest Backup
 	if err != nil {
 		return fmt.Errorf("inspect restore source: %w", err)
 	}
-	if !inspection.Exists {
+	if !inspection.Exists() {
 		return errors.New("restore source does not contain a corpus")
 	}
 	if inspection.Current != manifest.SourceSchema {

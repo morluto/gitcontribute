@@ -20,7 +20,7 @@ import (
 func TestStartInvestigationFromThreadPreservesExactBaselineAndReusesOpenPair(t *testing.T) {
 	t.Parallel()
 	fixture := newResearchFixture(t)
-	ref := research.ThreadRef{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Kind: domain.IssueKind, Number: 1}
+	ref := research.ThreadRef{Repo: domain.MustRepoRef("owner", "repo"), Kind: domain.IssueKind, Number: 1}
 	thread, err := fixture.svc.corpus.GetThreadByNumber(fixture.ctx, fixture.repoID, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestStartInvestigationFromThreadBoundsDescription(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := fixture.svc.StartInvestigationFromThread(fixture.ctx, research.ThreadRef{
-		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Number: 1,
+		Repo: domain.MustRepoRef("owner", "repo"), Number: 1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestStartInvestigationFromPullRequestUsesResolvedKind(t *testing.T) {
 	t.Parallel()
 	fixture := newResearchFixture(t)
 	result, err := fixture.svc.StartInvestigationFromThread(fixture.ctx, research.ThreadRef{
-		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Number: 9,
+		Repo: domain.MustRepoRef("owner", "repo"), Number: 9,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -122,7 +122,7 @@ func TestMCPStartInvestigationFromStoredThreadCreatesBaselineHypothesis(t *testi
 func TestStartInvestigationFromThreadErrorsAndCancellation(t *testing.T) {
 	t.Parallel()
 	fixture := newResearchFixture(t)
-	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	repo := domain.MustRepoRef("owner", "repo")
 	_, err := fixture.svc.StartInvestigationFromThread(fixture.ctx, research.ThreadRef{Repo: repo, Kind: domain.IssueKind, Number: 9})
 	if !failure.Is(err, failure.KindNotFound) || !errors.Is(err, research.ErrThreadKindMismatch) {
 		t.Fatalf("kind mismatch error = %v", err)
@@ -132,7 +132,7 @@ func TestStartInvestigationFromThreadErrorsAndCancellation(t *testing.T) {
 		t.Fatalf("missing thread error = %v", err)
 	}
 	_, err = fixture.svc.StartInvestigationFromThread(fixture.ctx, research.ThreadRef{
-		Repo: domain.RepoRef{Owner: "other", Repo: "repo"}, Number: 1,
+		Repo: domain.MustRepoRef("other", "repo"), Number: 1,
 	})
 	if !failure.Is(err, failure.KindNotFound) {
 		t.Fatalf("repository isolation error = %v", err)

@@ -52,7 +52,6 @@ type MigrationStep struct {
 // SchemaInspection is a read-only migration plan input.
 type SchemaInspection struct {
 	Path                      string
-	Exists                    bool
 	SizeBytes                 int64
 	WALBytes                  int64
 	State                     SchemaState
@@ -66,6 +65,17 @@ type SchemaInspection struct {
 	RequiredDiskBytes         uint64
 	AvailableDiskBytes        uint64
 	ProjectionRebuildRequired bool
+}
+
+// Exists is derived from the compatibility state so corpus presence cannot
+// disagree with the inspection result.
+func (i SchemaInspection) Exists() bool {
+	switch i.State {
+	case SchemaCurrent, SchemaMigrationRequired, SchemaNewer, SchemaIncompatible, SchemaDamaged:
+		return true
+	default:
+		return false
+	}
 }
 
 // MigrationProgress reports stable step boundaries. SQL migration internals
@@ -197,7 +207,6 @@ func InspectSchema(ctx context.Context, path string) (result SchemaInspection, r
 	if err != nil {
 		return result, fmt.Errorf("inspect corpus file: %w", err)
 	}
-	result.Exists = true
 	result.SizeBytes = info.Size()
 	if walInfo, statErr := os.Stat(filePath + "-wal"); statErr == nil {
 		result.WALBytes = walInfo.Size()

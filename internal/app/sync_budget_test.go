@@ -213,10 +213,14 @@ func TestSyncThreadsBatchReportsMissingRepositoryWithoutNetworkAccess(t *testing
 		t.Fatal(err)
 	}
 	defer func() { _ = svc.Close() }()
-	out, err := svc.syncThreadsBatch(context.Background(), mcpcontract.SyncThreadsInput{
+	request, _, err := parseSyncThreadsInput(mcpcontract.SyncThreadsInput{
 		Selection: "repositories", Repositories: []mcpcontract.RepositoryRef{{Owner: "owner", Repo: "repo"}},
 		LimitPerRepository: 100, MaxRequests: 1,
-	}, func(string, string) error { return nil })
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := svc.syncThreadsBatch(context.Background(), request, func(string, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,15 +238,18 @@ func TestSyncThreadsBatchThreadTotalCountsRequestedThreads(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = svc.Close() }()
-	out, err := svc.syncThreadsBatch(context.Background(), mcpcontract.SyncThreadsInput{
+	request, _, err := parseSyncThreadsInput(mcpcontract.SyncThreadsInput{
 		Selection: "threads",
 		Threads: []mcpcontract.ThreadRef{
 			{Owner: "owner", Repo: "repo", Number: 1},
 			{Owner: "owner", Repo: "repo", Number: 2},
 		},
-		LimitPerRepository: 100,
-		MaxRequests:        1,
-	}, func(string, string) error { return nil })
+		MaxRequests: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := svc.syncThreadsBatch(context.Background(), request, func(string, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}

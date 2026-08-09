@@ -62,11 +62,11 @@ func (r *MCPReader) checkRelatedWork(ctx context.Context, target, id string, lim
 	}
 	message := fmt.Sprintf("The repository is absent from the local corpus, so an empty %s result would not be evidence of absence.", kind)
 	if !indexed {
-		return unavailableRelatedWorkOutput(target, id, repo, limit, "repository_not_indexed", message, syncRepositoryContextCall(repo.Owner, repo.Repo)), nil
+		return unavailableRelatedWorkOutput(target, id, repo, limit, "repository_not_indexed", message, syncRepositoryContextCall(repo.Owner(), repo.Repo())), nil
 	}
 	result, err := run()
 	if errors.Is(err, errRepositoryNotFound) {
-		return unavailableRelatedWorkOutput(target, id, repo, limit, "repository_not_indexed", message, syncRepositoryContextCall(repo.Owner, repo.Repo)), nil
+		return unavailableRelatedWorkOutput(target, id, repo, limit, "repository_not_indexed", message, syncRepositoryContextCall(repo.Owner(), repo.Repo())), nil
 	}
 	return result, err
 }
@@ -162,7 +162,7 @@ func (r *MCPReader) relatedWorkRepositoryIndexed(ctx context.Context, repo domai
 	if err != nil {
 		return false, err
 	}
-	stored, err := c.GetRepository(ctx, repo.Owner, repo.Repo)
+	stored, err := c.GetRepository(ctx, repo.Owner(), repo.Repo())
 	if err != nil {
 		return false, err
 	}

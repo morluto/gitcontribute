@@ -45,7 +45,10 @@ func (s *Service) Load(ctx context.Context) (tuicontract.Data, error) {
 		Windows:      make(map[string]tuicontract.Window),
 	}
 	for _, repo := range repos {
-		ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Name}
+		ref, err := domain.NewRepoRef(repo.Owner, repo.Name)
+		if err != nil {
+			return tuicontract.Data{}, fmt.Errorf("parse stored repository: %w", err)
+		}
 		coverage, err := c.ListCoverage(ctx, repo.ID, nil)
 		if err != nil {
 			return tuicontract.Data{}, err

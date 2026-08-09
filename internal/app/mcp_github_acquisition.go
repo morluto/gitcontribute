@@ -51,7 +51,7 @@ func (r *MCPReader) SearchGitHubThreads(ctx context.Context, in mcpcontract.Sear
 }
 
 func validateGitHubThreadSearchInput(in *mcpcontract.SearchGitHubThreadsInput) error {
-	if err := (domain.RepoRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo}).Validate(); err != nil {
+	if _, err := domain.NewRepoRef(in.Repository.Owner, in.Repository.Repo); err != nil {
 		return err
 	}
 	in.Query = strings.TrimSpace(in.Query)
@@ -248,7 +248,7 @@ func (r *MCPReader) ReadSourceFiles(ctx context.Context, in mcpcontract.ReadSour
 }
 
 func validateReadSourceFilesInput(in *mcpcontract.ReadSourceFilesInput) error {
-	if err := (domain.RepoRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo}).Validate(); err != nil {
+	if _, err := domain.NewRepoRef(in.Repository.Owner, in.Repository.Repo); err != nil {
 		return err
 	}
 	in.Ref = strings.TrimSpace(in.Ref)

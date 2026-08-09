@@ -9,6 +9,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/health"
 )
@@ -78,8 +79,7 @@ func TestRepositoryHealth(t *testing.T) {
 		AuthorAssociation: "OWNER",
 		SourceCreatedAt:   now.Add(-12 * 24 * time.Hour),
 		SourceUpdatedAt:   now.Add(-3 * 24 * time.Hour),
-		MergedAt:          now.Add(-3 * 24 * time.Hour),
-		Merged:            true,
+		Merge:             domain.MergedStatus(now.Add(-3 * 24 * time.Hour)),
 	}, map[string]string{"Author": "owner1", "AuthorAssociation": "OWNER"})
 	if err != nil {
 		t.Fatalf("upsert merged pr: %v", err)

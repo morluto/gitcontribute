@@ -70,19 +70,19 @@ func (s *Service) CancelJob(ctx context.Context, id string) (*contracts.JobResul
 
 func jobResult(job *corpus.Job) contracts.JobResult {
 	result := contracts.JobResult{
-		ID: job.ID, Kind: job.Kind, Status: job.Status, Request: job.Request,
+		ID: job.ID, Kind: job.Kind, Status: job.State.Status(), Request: job.Request,
 		Result: job.Result, Error: job.Error, Progress: job.Progress,
 		Statistics: job.Statistics, CreatedAt: formatTime(job.CreatedAt),
-		Cancellation: job.CancelledAt != nil,
+		Cancellation: job.State.CancellationRequested(),
 	}
-	if job.StartedAt != nil {
-		result.StartedAt = formatTime(*job.StartedAt)
+	if startedAt, ok := job.State.StartedAt(); ok {
+		result.StartedAt = formatTime(startedAt)
 	}
-	if job.CompletedAt != nil {
-		result.CompletedAt = formatTime(*job.CompletedAt)
+	if completedAt, ok := job.State.CompletedAt(); ok {
+		result.CompletedAt = formatTime(completedAt)
 	}
-	if job.CancelledAt != nil {
-		result.CancelledAt = formatTime(*job.CancelledAt)
+	if cancelledAt, ok := job.State.CancelledAt(); ok {
+		result.CancelledAt = formatTime(cancelledAt)
 	}
 	return result
 }

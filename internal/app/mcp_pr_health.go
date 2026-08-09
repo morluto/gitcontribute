@@ -222,7 +222,7 @@ func persistOneHealthFacet(ctx context.Context, c *corpus.Corpus, repo corpus.Re
 		result["status"], result["complete"] = "retryable", false
 		result["recovery"] = recoveryPlan("coverage_stale", "A concurrent refresh advanced this facet; retry for a coherent snapshot.", syncPullRequestCalls([]mcpcontract.ThreadRef{ref})...)
 	}
-	if target.name == FacetPRMergeState && !remote.MergeState.MergeableKnown {
+	if _, known := remote.MergeState.Mergeability(); target.name == FacetPRMergeState && !known {
 		result["status"] = "retryable"
 		result["recovery"] = recoveryPlan("facet_incomplete", "Retry after GitHub finishes computing mergeability.", syncPullRequestCalls([]mcpcontract.ThreadRef{ref})...)
 	}

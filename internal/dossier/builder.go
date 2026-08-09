@@ -27,13 +27,13 @@ func NewBuilder(reader Reader, recentLimit int) *Builder {
 	return &Builder{reader: reader, recentLimit: recentLimit}
 }
 
-// Build constructs a Dossier for ref. It validates the repo reference, reads
+// Build constructs a Dossier for a parsed ref, reads
 // repository metadata, contribution guidance, coverage, and threads, then
 // deterministically selects and orders recent items. No LLM summarization is
 // performed.
 func (b *Builder) Build(ctx context.Context, ref domain.RepoRef) (*domain.Dossier, error) {
-	if err := ref.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid repo reference: %w", err)
+	if !ref.IsValid() {
+		return nil, fmt.Errorf("invalid repo reference: repository reference is not parsed")
 	}
 
 	repo, repoRefs, err := b.reader.ReadRepository(ctx, ref)
@@ -124,9 +124,10 @@ func (b *Builder) readIssues(ctx context.Context, ref domain.RepoRef) ([]domain.
 
 func partitionClosedPullRequests(threads []domain.Thread) (merged, unmerged, unknown []domain.Thread) {
 	for _, thread := range threads {
-		if thread.PullRequest == nil || !thread.PullRequest.MergedKnown {
+		pullRequest, ok := thread.PullRequest()
+		if !ok || !pullRequest.Merge.Known() {
 			unknown = append(unknown, thread)
-		} else if thread.PullRequest.Merged {
+		} else if pullRequest.Merge.IsMerged() {
 			merged = append(merged, thread)
 		} else {
 			unmerged = append(unmerged, thread)
@@ -156,8 +157,8 @@ func toDossierThreads(threads []domain.Thread, limit int) []domain.DossierThread
 			ClosedAt:  t.ClosedAt,
 			Labels:    append([]string(nil), t.Labels...),
 		}
-		if t.PullRequest != nil {
-			dt.MergedAt = t.PullRequest.MergedAt
+		if pullRequest, ok := t.PullRequest(); ok {
+			dt.MergedAt = pullRequest.Merge.MergedAt()
 		}
 		out[i] = dt
 	}

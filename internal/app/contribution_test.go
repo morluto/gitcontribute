@@ -15,7 +15,7 @@ func TestLoadOpportunityEvidenceIncludesMatchedValidationObservation(t *testing.
 	ctx := fixture.ctx
 	svc := fixture.svc
 	started, err := svc.StartInvestigationFromThread(ctx, research.ThreadRef{
-		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Kind: domain.IssueKind, Number: 1,
+		Repo: domain.MustRepoRef("owner", "repo"), Kind: domain.IssueKind, Number: 1,
 	})
 	if err != nil {
 		t.Fatalf("start investigation: %v", err)
@@ -33,13 +33,20 @@ func TestLoadOpportunityEvidenceIncludesMatchedValidationObservation(t *testing.
 	if err := svc.corpus.SaveValidationDefinition(ctx, def); err != nil {
 		t.Fatalf("save definition: %v", err)
 	}
+	expected, err := evidence.ParseExpectedObservation(evidence.ExpectedObservationSpec{
+		Name: "undersized buffer", Source: evidence.ObservationStdout,
+		Matcher: evidence.ObservationExact, Pattern: "!buffer<3>", Occurrence: evidence.ObservationPresent,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	run := &evidence.ValidationRun{
 		ID: "run", DefinitionID: def.ID, InvestigationID: started.Investigation.ID,
 		HypothesisID: started.Hypothesis.ID, OpportunityID: opp.ID,
 		Kind: evidence.RunKindBase, Classification: evidence.RunClassificationFailing,
 		ObservationStatus: evidence.ObservationMatched,
 		Observations: []evidence.ObservationResult{{
-			ExpectedObservation: evidence.ExpectedObservation{Name: "undersized buffer"},
+			ExpectedObservation: expected,
 			Status:              evidence.ObservationMatched, Excerpt: "!buffer<3>",
 		}},
 		StartedAt: now, CompletedAt: now,

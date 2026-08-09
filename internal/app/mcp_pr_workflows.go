@@ -44,12 +44,11 @@ type pullRequestWorkflowResult struct {
 }
 
 func (r *MCPReader) SyncPullRequestFeedback(ctx context.Context, in mcpcontract.SyncPullRequestFeedbackInput) (mcpcontract.JobReference, error) {
-	if err := rejectDuplicateThreadRefs(in.PullRequests); err != nil {
+	refs, err := parsePullRequestRefs(in.PullRequests, "pull_requests")
+	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
-	if err := validatePullRequestRefs(in.PullRequests, "pull_requests"); err != nil {
-		return mcpcontract.JobReference{}, err
-	}
+	in.PullRequests = refs
 	if len(in.PullRequests) < 1 || len(in.PullRequests) > 50 {
 		return mcpcontract.JobReference{}, errors.New("pull_requests must contain 1 to 50 items")
 	}
@@ -225,12 +224,18 @@ func (r *MCPReader) persistPullRequestIdentity(ctx context.Context, ref mcpcontr
 		}
 	}
 
-	thread := threadFromPullRequestDetails(header, repo.ID)
+	thread, err := threadFromPullRequestDetails(header, repo.ID)
+	if err != nil {
+		return "pull_request_header_unavailable", err
+	}
 	existing, err := c.GetThread(ctx, repo.ID, corpus.ThreadKindPullRequest, ref.Number)
 	if err != nil {
 		return "persistence_retryable", fmt.Errorf("get pull request identity: %w", err)
 	}
 	if existing != nil {
+		if thread.State == "" {
+			thread.State = existing.State
+		}
 		// The feedback header does not carry GitHub's state reason. Keep that
 		// richer observation instead of replacing it with an empty value.
 		thread.StateReason = existing.StateReason
@@ -247,7 +252,11 @@ func (r *MCPReader) persistPullRequestIdentity(ctx context.Context, ref mcpcontr
 	return "", nil
 }
 
-func threadFromPullRequestDetails(header github.PullRequestDetails, repositoryID int64) corpus.Thread {
+func threadFromPullRequestDetails(header github.PullRequestDetails, repositoryID int64) (corpus.Thread, error) {
+	merge, err := parseGitHubMergeStatus(header)
+	if err != nil {
+		return corpus.Thread{}, fmt.Errorf("parse pull-request merge status: %w", err)
+	}
 	thread := corpus.Thread{
 		RepositoryID:      repositoryID,
 		Kind:              corpus.ThreadKindPullRequest,
@@ -262,18 +271,14 @@ func threadFromPullRequestDetails(header github.PullRequestDetails, repositoryID
 		Draft:             header.Draft,
 		Locked:            header.Locked,
 		Milestone:         header.Milestone,
-		Merged:            header.Merged,
-		MergedKnown:       true,
+		Merge:             merge,
 		SourceCreatedAt:   header.CreatedAt,
 		SourceUpdatedAt:   header.UpdatedAt,
 	}
 	if header.ClosedAt != nil {
 		thread.ClosedAt = *header.ClosedAt
 	}
-	if header.MergedAt != nil {
-		thread.MergedAt = *header.MergedAt
-	}
-	return thread
+	return thread, nil
 }
 
 func coveredFeedbackChannels(requested []string, coverage map[string]github.FeedbackCoverage) []string {
@@ -324,12 +329,11 @@ func (r *MCPReader) persistPullRequestFeedback(ctx context.Context, ref mcpcontr
 }
 
 func (r *MCPReader) SyncCIFailures(ctx context.Context, in mcpcontract.SyncCIFailuresInput) (mcpcontract.JobReference, error) {
-	if err := rejectDuplicateThreadRefs(in.PullRequests); err != nil {
+	refs, err := parsePullRequestRefs(in.PullRequests, "pull_requests")
+	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
-	if err := validatePullRequestRefs(in.PullRequests, "pull_requests"); err != nil {
-		return mcpcontract.JobReference{}, err
-	}
+	in.PullRequests = refs
 	if len(in.PullRequests) < 1 || len(in.PullRequests) > 20 {
 		return mcpcontract.JobReference{}, errors.New("pull_requests must contain 1 to 20 items")
 	}

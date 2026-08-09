@@ -16,7 +16,7 @@ import (
 type authoredPullRequestSyncOptions struct {
 	Repository   *mcpcontract.RepositoryRef
 	State        string
-	UpdatedAfter string
+	UpdatedAfter time.Time
 	Limit        int
 	MaxRequests  int
 }
@@ -46,13 +46,6 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in authoredPullR
 	if err != nil {
 		return nil, err
 	}
-	var updatedAfter time.Time
-	if in.UpdatedAfter != "" {
-		updatedAfter, err = time.Parse(time.RFC3339, in.UpdatedAfter)
-		if err != nil {
-			return nil, errors.New("updated_after must be RFC 3339")
-		}
-	}
 	page := 1
 	byRepo := make(map[string][]github.Issue)
 	order := make([]string, 0)
@@ -69,7 +62,7 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in authoredPullR
 		}
 		perPage := min(100, in.Limit-discovered)
 		requests++
-		options := github.AuthoredPullRequestSearchOptions{Login: identity.Login, State: in.State, UpdatedAfter: updatedAfter, PageOptions: github.PageOptions{Page: page, PerPage: perPage}}
+		options := github.AuthoredPullRequestSearchOptions{Login: identity.Login, State: in.State, UpdatedAfter: in.UpdatedAfter, PageOptions: github.PageOptions{Page: page, PerPage: perPage}}
 		if in.Repository != nil {
 			options.RepositoryOwner = in.Repository.Owner
 			options.RepositoryName = in.Repository.Repo

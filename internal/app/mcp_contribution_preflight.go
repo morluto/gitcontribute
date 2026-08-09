@@ -24,17 +24,19 @@ const (
 // described by workflow.preflight_contribution. Unlike portfolio sync, it does
 // not write observations, create jobs, create worktrees, or adopt paths.
 func (r *MCPReader) PreflightContribution(ctx context.Context, in mcpcontract.ContributionPreflightInput) (mcpcontract.ContributionPreflightOutput, error) {
-	if err := (domain.RepoRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo}).Validate(); err != nil {
+	repository, err := domain.NewRepoRef(in.Repository.Owner, in.Repository.Repo)
+	if err != nil {
 		return mcpcontract.ContributionPreflightOutput{}, err
 	}
-	in.Repository.Owner = strings.TrimSpace(in.Repository.Owner)
-	in.Repository.Repo = strings.TrimSpace(in.Repository.Repo)
+	in.Repository.Owner = repository.Owner()
+	in.Repository.Repo = repository.Repo()
 	if in.Fork != nil {
-		in.Fork.Owner = strings.TrimSpace(in.Fork.Owner)
-		in.Fork.Repo = strings.TrimSpace(in.Fork.Repo)
-		if err := (domain.RepoRef{Owner: in.Fork.Owner, Repo: in.Fork.Repo}).Validate(); err != nil {
+		fork, err := domain.NewRepoRef(in.Fork.Owner, in.Fork.Repo)
+		if err != nil {
 			return mcpcontract.ContributionPreflightOutput{}, fmt.Errorf("validate fork repository: %w", err)
 		}
+		in.Fork.Owner = fork.Owner()
+		in.Fork.Repo = fork.Repo()
 		if sameGitHubRepository(in.Fork.Owner, in.Fork.Repo, in.Repository) {
 			return mcpcontract.ContributionPreflightOutput{}, errors.New("fork repository must differ from the upstream repository")
 		}

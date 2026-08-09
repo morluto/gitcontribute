@@ -295,7 +295,7 @@ func (*fakeReader) BuildRepositoryDossier(_ context.Context, in mcpcontract.Buil
 	id := "job-dossier-" + in.Owner + "-" + in.Repo
 	return mcpcontract.JobReference{
 		ID: id, Ref: "job:" + id, Kind: "build_repository_dossier", Status: "queued", PollAfterMS: 1000,
-		FollowUp: &mcpcontract.JobFollowUp{Action: mcpcontract.FollowUpAction{Type: "poll_job", PollJob: &mcpcontract.GetJobsInput{IDs: []string{"job-1"}}}, Reason: "Poll this durable job ID."},
+		FollowUp: &mcpcontract.JobFollowUp{Action: mcpcontract.FollowUpActionFor(mcpcontract.GetJobsInput{IDs: []string{"job-1"}}), Reason: "Poll this durable job ID."},
 	}, nil
 }
 

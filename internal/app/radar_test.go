@@ -24,7 +24,7 @@ import (
 func TestRadarDuplicateClusterCapUsesProjectionMetadata(t *testing.T) {
 	t.Parallel()
 	clusters := make([]clustering.Cluster, 1000)
-	_, capped := radarDuplicateClusterFacts(domain.RepoRef{Owner: "owner", Repo: "repo"}, clusterprojection.List{
+	_, capped := radarDuplicateClusterFacts(domain.MustRepoRef("owner", "repo"), clusterprojection.List{
 		Clusters:  clusters,
 		Total:     len(clusters),
 		Truncated: false,
@@ -32,7 +32,7 @@ func TestRadarDuplicateClusterCapUsesProjectionMetadata(t *testing.T) {
 	if capped {
 		t.Fatal("exactly 1000 complete clusters reported as capped")
 	}
-	_, capped = radarDuplicateClusterFacts(domain.RepoRef{Owner: "owner", Repo: "repo"}, clusterprojection.List{
+	_, capped = radarDuplicateClusterFacts(domain.MustRepoRef("owner", "repo"), clusterprojection.List{
 		Clusters:  clusters,
 		Total:     len(clusters) + 1,
 		Truncated: true,
@@ -253,8 +253,8 @@ func TestContributionRadarReadsStoredDuplicateCluster(t *testing.T) {
 func TestRadarPullRequestClosingReferenceIsPrecise(t *testing.T) {
 	t.Parallel()
 	fixture := newRadarTestFixture(t)
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
-	stored, err := fixture.svc.corpus.GetRepository(fixture.ctx, ref.Owner, ref.Repo)
+	ref := domain.MustRepoRef("owner", "repo")
+	stored, err := fixture.svc.corpus.GetRepository(fixture.ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,6 +417,20 @@ func TestContributionRadarPreservesRepeatedReferenceEvidence(t *testing.T) {
 	}
 }
 
+func TestRadarTimelineReferenceFallsBackForPartialSourceIdentity(t *testing.T) {
+	t.Parallel()
+	defaultRepo := domain.MustRepoRef("owner", "repo")
+	for _, event := range []github.IssueTimelineEvent{
+		{Event: "cross-referenced", SourceOwner: "partial", SourceNumber: 7},
+		{Event: "cross-referenced", SourceRepository: "partial", SourceNumber: 7},
+	} {
+		ref, ok := radarTimelineReference(event, defaultRepo)
+		if !ok || ref.Repo != defaultRepo || ref.Number != 7 {
+			t.Fatalf("partial source identity = %+v, %t", ref, ok)
+		}
+	}
+}
+
 func TestNormalizeRadarRelatedWorkReportsEvidenceTruncation(t *testing.T) {
 	t.Parallel()
 	values := make([]radar.RelatedWork, 0, maxRadarEvidencePerRelation+1)
@@ -434,7 +448,7 @@ func TestNormalizeRadarRelatedWorkReportsEvidenceTruncation(t *testing.T) {
 
 func TestRadarWorkAccumulatorKeepsStrongLateRelationshipsWithinBound(t *testing.T) {
 	t.Parallel()
-	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	repo := domain.MustRepoRef("owner", "repo")
 	accumulator := newRadarWorkAccumulator(repo, 1)
 	for number := 2; number < 2+maxRadarRelatedWork; number++ {
 		accumulator.append(relatedwork.Reference{

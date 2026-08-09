@@ -20,7 +20,10 @@ func (s *Service) RepositoryContextSync(ctx context.Context, repo contracts.Repo
 	if err != nil {
 		return nil, err
 	}
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
+		return nil, err
+	}
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -56,7 +59,7 @@ func (s *Service) PlanRepositoryContextSync(_ context.Context, repo contracts.Re
 }
 
 func planRepositoryContextSync(repo contracts.RepoRef, maxRequests int) (*contracts.SyncPlanResult, error) {
-	if err := (domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}).Validate(); err != nil {
+	if _, err := domain.NewRepoRef(repo.Owner, repo.Repo); err != nil {
 		return nil, err
 	}
 	required := repositorycontext.RequestCost()
@@ -86,8 +89,8 @@ func (s *Service) ArchiveSync(ctx context.Context, repo contracts.RepoRef, opts 
 // PlanArchiveSync computes the conservative request ceiling before resolving a
 // GitHub reader or opening the corpus.
 func (s *Service) PlanArchiveSync(_ context.Context, repo contracts.RepoRef, opts contracts.ArchiveSyncOptions) (*contracts.SyncPlanResult, error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	_, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 	if opts.Since < 0 {
@@ -131,15 +134,15 @@ func (s *Service) Hydrate(ctx context.Context, repo contracts.RepoRef, number in
 
 // Coverage returns repository-level facet coverage without network access.
 func (s *Service) Coverage(ctx context.Context, repo contracts.RepoRef) (*contracts.CoverageResult, error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
-	stored, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	stored, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return nil, err
 	}
@@ -176,15 +179,15 @@ func (s *Service) ArchiveThreads(ctx context.Context, repo contracts.RepoRef, ki
 	if state != "" && state != "all" && state != "open" && state != "closed" {
 		return nil, fmt.Errorf("unsupported thread state %q", state)
 	}
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
-	stored, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	stored, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return nil, err
 	}
@@ -238,10 +241,10 @@ func (s *Service) RunHistory(ctx context.Context, limit int) (*contracts.RunList
 	out := &contracts.RunListResult{Runs: make([]contracts.RunResult, len(runs))}
 	for i, run := range runs {
 		out.Runs[i] = contracts.RunResult{
-			ID: run.ID, Kind: run.Kind, Status: run.Status, StartedAt: formatTime(run.StartedAt), Stats: run.Stats, Error: run.Error,
+			ID: run.ID, Kind: run.Kind, Status: string(run.State.Status()), StartedAt: formatTime(run.StartedAt), Stats: run.Stats, Error: run.Error,
 		}
-		if run.CompletedAt != nil {
-			out.Runs[i].CompletedAt = formatTime(*run.CompletedAt)
+		if completedAt, ok := run.State.CompletedAt(); ok {
+			out.Runs[i].CompletedAt = formatTime(completedAt)
 		}
 	}
 	return out, nil
@@ -268,8 +271,8 @@ func (s *Service) NeighborQuery(ctx context.Context, repo contracts.RepoRef, kin
 
 // ExportDossier builds and renders a deterministic redacted dossier bundle.
 func (s *Service) ExportDossier(ctx context.Context, repo contracts.RepoRef, format string) (*contracts.ExportResult, error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 	if _, err := s.openReadOnlyCorpus(ctx); err != nil {

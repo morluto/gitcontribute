@@ -200,10 +200,10 @@ func (c *Corpus) StartJobAs(ctx context.Context, id, ownerID string) error {
 		if job == nil {
 			return errors.New("job not found")
 		}
-		if isTerminalJobStatus(job.Status) {
-			return fmt.Errorf("job is already %s", job.Status)
+		if isTerminalJobStatus(job.State.Status()) {
+			return fmt.Errorf("job is already %s", job.State.Status())
 		}
-		if job.CancelledAt != nil && !job.CancelledAt.IsZero() {
+		if job.State.CancellationRequested() {
 			return ErrJobCancelled
 		}
 		return fmt.Errorf("job is not queued")
@@ -225,6 +225,7 @@ func (c *Corpus) TransitionJob(ctx context.Context, id, from, to, result, errStr
 	res, dbErr := c.db.ExecContext(ctx, `
 		UPDATE jobs
 		SET status = ?, result = ?, error = ?, completed_at = ?, updated_at = ?,
+		    cancelled_at = CASE WHEN ? = ? THEN COALESCE(cancelled_at, ?) ELSE cancelled_at END,
 		    owner_id = CASE
 		        WHEN ? = ? OR ? = ? OR ? = ?
 		        THEN NULL
@@ -232,6 +233,7 @@ func (c *Corpus) TransitionJob(ctx context.Context, id, from, to, result, errStr
 		    END
 		WHERE id = ? AND status = ? AND (COALESCE(cancelled_at, 0) = 0 OR ? = ?)
 	`, to, result, errStr, encodeTime(now), encodeTime(now),
+		to, JobStatusCancelled, encodeTime(now),
 		to, JobStatusSucceeded, to, JobStatusFailed, to, JobStatusCancelled,
 		id, from, to, JobStatusCancelled)
 	if dbErr != nil {
@@ -249,10 +251,10 @@ func (c *Corpus) TransitionJob(ctx context.Context, id, from, to, result, errStr
 		if job == nil {
 			return errors.New("job not found")
 		}
-		if job.Status != from {
-			return fmt.Errorf("job status is %s, expected %s", job.Status, from)
+		if job.State.Status() != from {
+			return fmt.Errorf("job status is %s, expected %s", job.State.Status(), from)
 		}
-		if job.CancelledAt != nil && !job.CancelledAt.IsZero() && to != JobStatusCancelled {
+		if job.State.CancellationRequested() && to != JobStatusCancelled {
 			return ErrJobCancelled
 		}
 		return errors.New("transition not applied")
@@ -283,10 +285,10 @@ func (c *Corpus) UpdateJobProgress(ctx context.Context, id, progress, statistics
 		if job == nil {
 			return errors.New("job not found")
 		}
-		if isTerminalJobStatus(job.Status) {
-			return fmt.Errorf("job is already %s", job.Status)
+		if isTerminalJobStatus(job.State.Status()) {
+			return fmt.Errorf("job is already %s", job.State.Status())
 		}
-		if job.CancelledAt != nil && !job.CancelledAt.IsZero() {
+		if job.State.CancellationRequested() {
 			return ErrJobCancelled
 		}
 		return errors.New("job is not running")
@@ -329,10 +331,10 @@ func (c *Corpus) RequestJobCancellation(ctx context.Context, id string) error {
 		if job == nil {
 			return errors.New("job not found")
 		}
-		if isTerminalJobStatus(job.Status) {
-			return fmt.Errorf("job is already %s", job.Status)
+		if isTerminalJobStatus(job.State.Status()) {
+			return fmt.Errorf("job is already %s", job.State.Status())
 		}
-		return fmt.Errorf("cannot cancel job in status %s", job.Status)
+		return fmt.Errorf("cannot cancel job in status %s", job.State.Status())
 	}
 	return nil
 }
@@ -501,7 +503,8 @@ func scanJob(row rowScanner) (*Job, error) {
 	var created, updated int64
 	var started, completed, cancelled sql.NullInt64
 	var result, errStr, progress, stats sql.NullString
-	err := row.Scan(&j.ID, &j.Kind, &j.Status, &j.Request, &result, &errStr,
+	var status string
+	err := row.Scan(&j.ID, &j.Kind, &status, &j.Request, &result, &errStr,
 		&progress, &stats, &created, &started, &completed, &updated, &cancelled)
 	if err != nil {
 		return nil, err
@@ -512,19 +515,23 @@ func scanJob(row rowScanner) (*Job, error) {
 	j.Statistics = stats.String
 	j.CreatedAt = scanTime(created)
 	j.UpdatedAt = scanTime(updated)
-	if started.Valid {
-		t := scanTime(started.Int64)
-		j.StartedAt = &t
+	startedAt := nullableJobTime(started)
+	completedAt := nullableJobTime(completed)
+	cancelledAt := nullableJobTime(cancelled)
+	state, err := parseJobState(status, startedAt, completedAt, cancelledAt)
+	if err != nil {
+		return nil, fmt.Errorf("parse stored job state: %w", err)
 	}
-	if completed.Valid {
-		t := scanTime(completed.Int64)
-		j.CompletedAt = &t
-	}
-	if cancelled.Valid && cancelled.Int64 != 0 {
-		t := scanTime(cancelled.Int64)
-		j.CancelledAt = &t
-	}
+	j.State = state
 	return &j, nil
+}
+
+func nullableJobTime(value sql.NullInt64) *time.Time {
+	if !value.Valid || value.Int64 == 0 {
+		return nil
+	}
+	parsed := scanTime(value.Int64)
+	return &parsed
 }
 
 func isTerminalJobStatus(status string) bool {

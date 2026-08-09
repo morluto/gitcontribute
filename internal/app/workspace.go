@@ -57,10 +57,10 @@ func (s *Service) AdoptWorkspace(ctx context.Context, investigationID string, op
 	if err != nil {
 		return nil, fmt.Errorf("identify origin repository: %w", err)
 	}
-	if !strings.EqualFold(identity.Host, "github.com") || !strings.EqualFold(identity.Owner, inv.Repo.Owner) || !strings.EqualFold(identity.Repo, inv.Repo.Repo) {
-		return nil, fmt.Errorf("origin repository %s/%s does not match investigation repository %s/%s", identity.Owner, identity.Repo, inv.Repo.Owner, inv.Repo.Repo)
+	if !strings.EqualFold(identity.Host, "github.com") || !strings.EqualFold(identity.Owner, inv.Repo.Owner()) || !strings.EqualFold(identity.Repo, inv.Repo.Repo()) {
+		return nil, fmt.Errorf("origin repository %s/%s does not match investigation repository %s/%s", identity.Owner, identity.Repo, inv.Repo.Owner(), inv.Repo.Repo())
 	}
-	ws.InvestigationID, ws.RepoOwner, ws.RepoName = inv.ID, inv.Repo.Owner, inv.Repo.Repo
+	ws.InvestigationID, ws.RepoOwner, ws.RepoName = inv.ID, inv.Repo.Owner(), inv.Repo.Repo()
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -99,7 +99,7 @@ func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, o
 
 	remote := strings.TrimSpace(opts.Remote)
 	if remote == "" {
-		remote = fmt.Sprintf("https://github.com/%s/%s.git", inv.Repo.Owner, inv.Repo.Repo)
+		remote = fmt.Sprintf("https://github.com/%s/%s.git", inv.Repo.Owner(), inv.Repo.Repo())
 	}
 
 	baseRef := strings.TrimSpace(opts.BaseRef)
@@ -125,7 +125,7 @@ func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, o
 		return nil, err
 	}
 
-	mirrorName := mirrorNameFor(inv.Repo.Owner, inv.Repo.Repo, remote)
+	mirrorName := mirrorNameFor(inv.Repo.Owner(), inv.Repo.Repo(), remote)
 	if err := mgr.Clone(ctx, remote, mirrorName); err != nil {
 		return nil, fmt.Errorf("clone repository: %w", err)
 	}
@@ -147,8 +147,8 @@ func (s *Service) CreateWorkspace(ctx context.Context, investigationID string, o
 	}()
 
 	ws.InvestigationID = inv.ID
-	ws.RepoOwner = inv.Repo.Owner
-	ws.RepoName = inv.Repo.Repo
+	ws.RepoOwner = inv.Repo.Owner()
+	ws.RepoName = inv.Repo.Repo()
 
 	c, err := s.openCorpus(ctx)
 	if err != nil {

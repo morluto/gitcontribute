@@ -21,11 +21,11 @@ func TestGetThreadFacetsIsOfflineAndReturnsCanonicalResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issue, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 7, Title: "issue"}, `{}`)
+	issue, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 7, State: "open", Title: "issue"}, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pullRequest, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7, Title: "pull request"}, `{}`)
+	pullRequest, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7, State: "open", Title: "pull request"}, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestGetThreadFacetsIsOfflineAndReturnsCanonicalResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if missing.Items[0].Value == nil || missing.Items[0].Value.Facets[0].Status != "not_observed" || missing.Items[0].Value.Facets[0].Recovery == nil || missing.Items[0].Value.Facets[0].Recovery.Reason != "facet_not_observed" || missing.Items[0].Value.Facets[0].Recovery.Then[0].Type != "hydrate_threads" {
+	if missing.Items[0].Value == nil || missing.Items[0].Value.Facets[0].Status != "not_observed" || missing.Items[0].Value.Facets[0].Recovery == nil || missing.Items[0].Value.Facets[0].Recovery.Reason != "facet_not_observed" || missing.Items[0].Value.Facets[0].Recovery.Then[0].Type() != "hydrate_threads" {
 		t.Fatalf("missing facet recovery = %+v", missing.Items[0])
 	}
 
@@ -93,10 +93,11 @@ func TestFacetJobFollowUpReadsFacetSurface(t *testing.T) {
 		Result:  `{"status":"complete","items":[]}`,
 	}
 	artifacts, follow := jobArtifactsAndFollowUp(job, 1)
-	if len(artifacts) != 1 || artifacts[0].Kind != "thread_facet_batch" || follow == nil || follow.Action.Type != "get_thread_facets" || follow.Action.GetThreadFacets == nil {
+	arguments, ok := mcpcontract.RecoveryInput[mcpcontract.GetThreadFacetsInput](follow.Action)
+	if len(artifacts) != 1 || artifacts[0].Kind != "thread_facet_batch" || follow == nil || follow.Action.Type() != "get_thread_facets" || !ok {
 		t.Fatalf("facet job result = artifacts:%+v follow:%+v", artifacts, follow)
 	}
-	if len(follow.Action.GetThreadFacets.Threads) != 1 || follow.Action.GetThreadFacets.Threads[0].Kind != "pull_request" || len(follow.Action.GetThreadFacets.Facets) != 1 || follow.Action.GetThreadFacets.Facets[0] != "pr_details" {
+	if len(arguments.Threads) != 1 || arguments.Threads[0].Kind != "pull_request" || len(arguments.Facets) != 1 || arguments.Facets[0] != "pr_details" {
 		t.Fatalf("facet follow-up arguments = %+v", follow.Action)
 	}
 }

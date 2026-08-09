@@ -71,8 +71,8 @@ func (s *Service) DefineValidation(ctx context.Context, d *ValidationDefinition)
 		return err
 	}
 	d.Env = env
-	if err := validateObservationContract(d.Observation); err != nil {
-		return err
+	if d.Observation != nil && d.Observation.intent == "" {
+		return fmt.Errorf("%w: contract was not parsed", ErrInvalidObservation)
 	}
 	if d.ID == "" {
 		d.ID = uuid.NewString()

@@ -18,6 +18,24 @@ func (c *Corpus) SaveEvidence(ctx context.Context, item *evidence.Evidence) erro
 	return nil
 }
 
+// SaveEvidenceBatch atomically stores one validated manifest's claims.
+func (c *Corpus) SaveEvidenceBatch(ctx context.Context, items []*evidence.Evidence) (err error) {
+	tx, err := c.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin evidence batch: %w", err)
+	}
+	defer rollbackSQLOnReturn(tx, &err)
+	for i, item := range items {
+		if err := c.saveEvidenceTx(ctx, tx, item); err != nil {
+			return fmt.Errorf("save evidence batch item %d: %w", i, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit evidence batch: %w", err)
+	}
+	return nil
+}
+
 func (c *Corpus) saveEvidenceTx(ctx context.Context, db dbExecer, item *evidence.Evidence) error {
 	payload, provenance, err := evidenceStorage(item)
 	if err != nil {

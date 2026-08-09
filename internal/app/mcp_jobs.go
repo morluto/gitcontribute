@@ -122,7 +122,7 @@ func jobResultToMCP(job *contracts.JobResult, includeDetails bool) mcpcontract.G
 			out.Artifacts, out.FollowUp = jobArtifactsAndFollowUp(job, total)
 		case "queued", "running":
 			out.FollowUp = &mcpcontract.JobFollowUp{
-				Action: mcpcontract.FollowUpAction{Type: "poll_job", PollJob: &mcpcontract.GetJobsInput{IDs: []string{job.ID}}}, RetryAfterMS: mcpcontract.NonNegativeInt(retryAfter), Reason: "Poll this job until execution_state is terminal.",
+				Action: mcpcontract.FollowUpActionFor(mcpcontract.GetJobsInput{IDs: []string{job.ID}}), RetryAfterMS: mcpcontract.NonNegativeInt(retryAfter), Reason: "Poll this job until execution_state is terminal.",
 			}
 		}
 	}
@@ -224,7 +224,7 @@ func portfolioReadFollowUpArguments(request mcpcontract.SyncPortfolioInput, logi
 func facetBatchArtifact(refs []mcpcontract.ThreadRef, facetNames []string) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
 	value := mcpcontract.NonNegativeInt(len(refs))
 	follow := &mcpcontract.JobFollowUp{
-		Action: mcpcontract.FollowUpAction{Type: "get_thread_facets", GetThreadFacets: &mcpcontract.GetThreadFacetsInput{Threads: refs, Facets: append([]string(nil), facetNames...)}},
+		Action: mcpcontract.FollowUpActionFor(mcpcontract.GetThreadFacetsInput{Threads: refs, Facets: append([]string(nil), facetNames...)}),
 		Reason: "Read the synchronized facet coverage and canonical facet resources from the offline corpus.",
 	}
 	return []mcpcontract.JobArtifactReference{{Kind: "thread_facet_batch", Count: &value, References: threadRefKeys(refs)}}, follow

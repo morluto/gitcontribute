@@ -630,9 +630,9 @@ func setupRepoRef(value string) (contracts.RepoRef, error) {
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return contracts.RepoRef{}, fmt.Errorf("repository must be OWNER/REPO")
 	}
-	ref := contracts.RepoRef{Owner: parts[0], Repo: strings.TrimSuffix(parts[1], ".git")}
-	if err := (domain.RepoRef{Owner: ref.Owner, Repo: ref.Repo}).Validate(); err != nil {
+	parsed, err := domain.NewRepoRef(parts[0], strings.TrimSuffix(parts[1], ".git"))
+	if err != nil {
 		return contracts.RepoRef{}, err
 	}
-	return ref, nil
+	return contracts.RepoRef{Owner: parsed.Owner(), Repo: parsed.Repo()}, nil
 }

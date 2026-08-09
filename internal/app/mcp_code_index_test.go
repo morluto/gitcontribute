@@ -14,7 +14,7 @@ func TestCodeIndexArtifactsRemainDistinctAcrossCommitsAndExposeResourceHandoff(t
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 	for _, snapshot := range []codeindex.Snapshot{
 		{RepoPath: "/repo", Commit: "commit-a", CreatedAt: time.Unix(1, 0), TotalBytes: 5, Documents: []codeindex.Document{{Path: "a.go", Content: "alpha", Bytes: 5}}, Manifest: codeindex.Manifest{CoverageKnown: true, TrackedEntries: 1, IndexedFiles: 1}},
 		{RepoPath: "/repo", Commit: "commit-b", CreatedAt: time.Unix(2, 0), TotalBytes: 4, Documents: []codeindex.Document{{Path: "b.go", Content: "beta", Bytes: 4}}, Manifest: codeindex.Manifest{CoverageKnown: true, TrackedEntries: 1, IndexedFiles: 1}},
@@ -43,7 +43,8 @@ func TestCodeIndexArtifactsRemainDistinctAcrossCommitsAndExposeResourceHandoff(t
 	if a.ID == b.ID || a.ManifestID == b.ManifestID || a.ResourceURI == b.ResourceURI || a.CommitSHA == b.CommitSHA {
 		t.Fatalf("commit identities collapsed: a=%+v b=%+v", a, b)
 	}
-	if a.ResourceURI != "gitcontribute://artifact/code-index/"+aRecord.Digest || a.FollowUp == nil || a.FollowUp.Action.ReadResource == nil || a.FollowUp.Action.ReadResource.URI != a.ResourceURI {
+	read, ok := mcpcontract.RecoveryInput[mcpcontract.ResourceReadAction](a.FollowUp.Action)
+	if a.ResourceURI != "gitcontribute://artifact/code-index/"+aRecord.Digest || a.FollowUp == nil || !ok || read.URI != a.ResourceURI {
 		t.Fatalf("resource handoff = %+v", a)
 	}
 	if a.Kind != "code_index" || a.FileCount != mcpcontract.NonNegativeInt(1) || a.TrackedEntries != mcpcontract.NonNegativeInt(1) || a.ManifestSHA256 == "" {

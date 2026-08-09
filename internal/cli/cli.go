@@ -720,7 +720,7 @@ func (c *CLI) parseRepoSourceArgs(cmd sourceAddReposCmd) ([]contracts.RepoRef, s
 		if err != nil {
 			return nil, "", err
 		}
-		ref := contracts.RepoRef{Owner: dr.Owner, Repo: dr.Repo}
+		ref := contracts.RepoRef{Owner: dr.Owner(), Repo: dr.Repo()}
 		key := strings.ToLower(ref.String())
 		if _, exists := seen[key]; exists {
 			continue

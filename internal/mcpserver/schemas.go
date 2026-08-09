@@ -41,8 +41,20 @@ func inferredSchema[T any]() schemaDefinition {
 		panic("MCP schema cache contains an invalid entry")
 	}
 	cached.once.Do(func() {
+		toolCallSchema, err := recoveryToolCallSchema()
+		if err != nil {
+			cached.definition.err = fmt.Errorf("infer recovery tool-call schema: %w", err)
+			return
+		}
+		followUpSchema, err := followUpToolCallSchema()
+		if err != nil {
+			cached.definition.err = fmt.Errorf("infer follow-up action schema: %w", err)
+			return
+		}
 		schema, err := jsonschema.For[T](&jsonschema.ForOptions{
 			TypeSchemas: map[reflect.Type]*jsonschema.Schema{
+				reflect.TypeFor[mcpcontract.ToolCall]():       toolCallSchema,
+				reflect.TypeFor[mcpcontract.FollowUpAction](): followUpSchema,
 				reflect.TypeFor[mcpcontract.Probability](): {
 					Type:        "number",
 					Description: "Numeric confidence from 0 to 1.",

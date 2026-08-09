@@ -9,7 +9,7 @@ import (
 
 func TestDuplicateV1ExplainsExplicitReference(t *testing.T) {
 	rule := similarity.DefaultDuplicateRule()
-	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	repo := domain.MustRepoRef("owner", "repo")
 	a := rule.Prepare(similarity.ThreadText{
 		Ref:   similarity.ThreadRef{Repo: repo, Kind: domain.IssueKind, Number: 1},
 		Title: "bug",

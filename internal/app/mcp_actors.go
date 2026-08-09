@@ -86,11 +86,13 @@ func (r *MCPReader) SyncUsers(ctx context.Context, in mcpcontract.SyncUsersInput
 	if in.MaxRequests < len(in.Users) || in.MaxRequests > 100 {
 		return mcpcontract.JobReference{}, errors.New("max_requests must admit every user and cannot exceed 100")
 	}
-	if err := validateActorSelectors(in.Users); err != nil {
+	selectors, normalized, err := parseActorSelectors(in.Users)
+	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
+	in.Users = normalized
 	id, err := r.submitJob(ctx, "sync_users", in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.syncUsers(ctx, in, report)
+		return r.syncUsers(ctx, selectors, report)
 	})
 	if err != nil {
 		return mcpcontract.JobReference{}, err
@@ -98,7 +100,7 @@ func (r *MCPReader) SyncUsers(ctx context.Context, in mcpcontract.SyncUsersInput
 	return queuedJobReference(id, "sync_users", "GitHub user profile synchronization started"), nil
 }
 
-func (r *MCPReader) syncUsers(ctx context.Context, in mcpcontract.SyncUsersInput, report func(string, string) error) (map[string]any, error) {
+func (r *MCPReader) syncUsers(ctx context.Context, selectors []parsedActorSelector, report func(string, string) error) (map[string]any, error) {
 	reader, err := r.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
 	if err != nil {
 		return nil, err
@@ -111,19 +113,19 @@ func (r *MCPReader) syncUsers(ctx context.Context, in mcpcontract.SyncUsersInput
 	if err != nil {
 		return nil, err
 	}
-	items := make([]map[string]any, len(in.Users))
+	items := make([]map[string]any, len(selectors))
 	complete := 0
-	if err := report("profiles", jobProgressCounts(0, len(in.Users))); err != nil {
+	if err := report("profiles", jobProgressCounts(0, len(selectors))); err != nil {
 		return nil, err
 	}
-	for index, selector := range in.Users {
+	for index, selector := range selectors {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		login, resolveErr := resolveActorSelectorLogin(ctx, c, selector)
+		login, resolveErr := selector.resolveLogin(ctx, c)
 		if resolveErr != nil {
-			items[index] = map[string]any{"key": actorSelectorKey(selector), "status": "unavailable", "reason": "actor_login_unknown", "message": resolveErr.Error()}
-			if err := report("profiles", jobProgressCounts(index+1, len(in.Users))); err != nil {
+			items[index] = map[string]any{"key": selector.key(), "status": "unavailable", "reason": "actor_login_unknown", "message": resolveErr.Error()}
+			if err := report("profiles", jobProgressCounts(index+1, len(selectors))); err != nil {
 				return nil, err
 			}
 			continue
@@ -131,8 +133,8 @@ func (r *MCPReader) syncUsers(ctx context.Context, in mcpcontract.SyncUsersInput
 		actor, _, readErr := profiles.GetUser(ctx, login)
 		if readErr != nil {
 			itemStatus, reason, message, retry := githubBatchError(readErr)
-			items[index] = map[string]any{"key": actorSelectorKey(selector), "status": itemStatus, "reason": reason, "message": message, "retry_after_ms": retry}
-			if err := report("profiles", jobProgressCounts(index+1, len(in.Users))); err != nil {
+			items[index] = map[string]any{"key": selector.key(), "status": itemStatus, "reason": reason, "message": message, "retry_after_ms": retry}
+			if err := report("profiles", jobProgressCounts(index+1, len(selectors))); err != nil {
 				return nil, err
 			}
 			continue
@@ -147,63 +149,17 @@ func (r *MCPReader) syncUsers(ctx context.Context, in mcpcontract.SyncUsersInput
 		if persistErr != nil {
 			return nil, persistErr
 		}
-		items[index] = map[string]any{"key": actorSelectorKey(selector), "status": "complete", "actor_id": stored.Key, "login": stored.Login}
+		items[index] = map[string]any{"key": selector.key(), "status": "complete", "actor_id": stored.Key, "login": stored.Login}
 		complete++
-		if err := report("profiles", jobProgressCounts(index+1, len(in.Users))); err != nil {
+		if err := report("profiles", jobProgressCounts(index+1, len(selectors))); err != nil {
 			return nil, err
 		}
 	}
 	status := "complete"
-	if complete != len(in.Users) {
+	if complete != len(selectors) {
 		status = "partial"
 	}
-	return map[string]any{"status": status, "items": items, "completed": complete, "total": len(in.Users)}, nil
-}
-
-func validateActorSelectors(selectors []mcpcontract.ActorSelector) error {
-	seen := make(map[string]struct{}, len(selectors))
-	for _, selector := range selectors {
-		key := actorSelectorKey(selector)
-		switch selector.Type {
-		case "login":
-			if strings.TrimSpace(selector.Login) == "" || selector.NodeID != "" {
-				return errors.New("login selectors require login and forbid node_id")
-			}
-		case "node_id":
-			if strings.TrimSpace(selector.NodeID) == "" || selector.Login != "" {
-				return errors.New("node_id selectors require node_id and forbid login")
-			}
-		default:
-			return errors.New("actor selector type must be login or node_id")
-		}
-		if _, ok := seen[key]; ok {
-			return fmt.Errorf("duplicate actor selector %q", key)
-		}
-		seen[key] = struct{}{}
-	}
-	return nil
-}
-
-func actorSelectorKey(selector mcpcontract.ActorSelector) string {
-	if selector.Type == "node_id" {
-		return strings.TrimSpace(selector.NodeID)
-	}
-	return strings.ToLower(strings.TrimSpace(selector.Login))
-}
-
-func resolveActorSelectorLogin(ctx context.Context, c *corpus.Corpus, selector mcpcontract.ActorSelector) (string, error) {
-	if selector.Type == "login" {
-		return strings.TrimSpace(selector.Login), nil
-	}
-	nodeID := strings.TrimSpace(selector.NodeID)
-	actor, err := c.GetActor(ctx, nodeID)
-	if err != nil {
-		return "", err
-	}
-	if actor == nil || actor.Login == "" {
-		return "", fmt.Errorf("node ID %q is not stored; search or sync by login first", nodeID)
-	}
-	return actor.Login, nil
+	return map[string]any{"status": status, "items": items, "completed": complete, "total": len(selectors)}, nil
 }
 
 func normalizeActorKind(kind string) string {

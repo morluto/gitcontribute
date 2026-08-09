@@ -285,7 +285,7 @@ func TestContributionGuidanceDoesNotClaimUnfetchedSource(t *testing.T) {
 	if _, err := svc.RepositoryContextSync(ctx, contracts.RepoRef{Owner: "octocat", Repo: "test"}, 0); err != nil {
 		t.Fatal(err)
 	}
-	guidance, refs, err := (&corpusReader{s: svc}).ReadContributionGuidance(ctx, domain.RepoRef{Owner: "octocat", Repo: "test"})
+	guidance, refs, err := (&corpusReader{s: svc}).ReadContributionGuidance(ctx, domain.MustRepoRef("octocat", "test"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,12 +340,12 @@ func TestMCPReaderLocalReads(t *testing.T) {
 
 	_, err = reader.Dossier(ctx, mcpcontract.RepoInput{Owner: "acme", Repo: "rocket"})
 	var dossierErr *mcpcontract.ToolError
-	if !errors.As(err, &dossierErr) || dossierErr.Code != "dossier_not_persisted" || dossierErr.Recovery == nil || len(dossierErr.Recovery.Then) != 1 || dossierErr.Recovery.Then[0].Type != "get_repositories" {
+	if !errors.As(err, &dossierErr) || dossierErr.Code != "dossier_not_persisted" || dossierErr.Recovery == nil || len(dossierErr.Recovery.Then) != 1 || dossierErr.Recovery.Then[0].Type() != "get_repositories" {
 		t.Fatalf("MCP dossier before build error = %+v", err)
 	}
 	_, err = reader.Dossier(ctx, mcpcontract.RepoInput{Owner: "acme", Repo: "missing"})
 	var repositoryErr *mcpcontract.ToolError
-	if !errors.As(err, &repositoryErr) || repositoryErr.Code != "repository_not_indexed" || repositoryErr.Recovery == nil || len(repositoryErr.Recovery.Then) != 1 || repositoryErr.Recovery.Then[0].Type != "sync_repository_context" {
+	if !errors.As(err, &repositoryErr) || repositoryErr.Code != "repository_not_indexed" || repositoryErr.Recovery == nil || len(repositoryErr.Recovery.Then) != 1 || repositoryErr.Recovery.Then[0].Type() != "sync_repository_context" {
 		t.Fatalf("MCP dossier for missing repository error = %+v", err)
 	}
 	if _, err := svc.BuildRepositoryDossier(ctx, contracts.RepoRef{Owner: "acme", Repo: "rocket"}); err != nil {
@@ -392,7 +392,7 @@ func TestSearchCodeUsesStoredSnapshotWithoutNetwork(t *testing.T) {
 	if _, err := svc.Init(ctx); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = svc.corpus.StoreCodeSnapshot(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, codeindex.Snapshot{
+	_, _, err = svc.corpus.StoreCodeSnapshot(ctx, domain.MustRepoRef("owner", "repo"), codeindex.Snapshot{
 		RepoPath: "/repo", Commit: "abc", CreatedAt: time.Now(), TotalBytes: 20,
 		Documents: []codeindex.Document{{Path: "parser.go", Content: "func searchableParser() {}", Bytes: 25, LanguageHint: "go"}},
 	})

@@ -264,14 +264,14 @@ func (s *samplerState) survivors(ctx context.Context) []ProcessIdentity {
 
 func metricInt64(value int64, err error) Int64Metric {
 	if err != nil {
-		return Int64Metric{UnavailableReason: err.Error()}
+		return UnavailableInt64Metric(err.Error())
 	}
-	return Int64Metric{Value: &value}
+	return AvailableInt64Metric(value)
 }
 
 func metricUint64(value uint64, err error) Uint64Metric {
 	if err != nil {
-		return Uint64Metric{UnavailableReason: err.Error()}
+		return UnavailableUint64Metric(err.Error())
 	}
-	return Uint64Metric{Value: &value}
+	return AvailableUint64Metric(value)
 }

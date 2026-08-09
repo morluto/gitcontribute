@@ -79,8 +79,8 @@ func (s *Service) AddRepoSource(ctx context.Context, name string, refs []contrac
 	}
 	domainRefs := make([]domain.RepoRef, len(refs))
 	for i, ref := range refs {
-		r := domain.RepoRef{Owner: ref.Owner, Repo: ref.Repo}
-		if err := r.Validate(); err != nil {
+		r, err := domain.NewRepoRef(ref.Owner, ref.Repo)
+		if err != nil {
 			return nil, fmt.Errorf("invalid repository %s: %w", ref, err)
 		}
 		domainRefs[i] = r
@@ -362,8 +362,8 @@ func (s *Service) crawlRepoSource(ctx context.Context, c *corpus.Corpus, source 
 			return nil, err
 		}
 		repo := corpus.Repository{
-			Owner: ref.Owner,
-			Name:  ref.Repo,
+			Owner: ref.Owner(),
+			Name:  ref.Repo(),
 			// Explicit sources have no network freshness; use a zero
 			// source_updated_at so canonical GitHub syncs always win.
 			SourceUpdatedAt: time.Time{},
@@ -372,8 +372,8 @@ func (s *Service) crawlRepoSource(ctx context.Context, c *corpus.Corpus, source 
 			return nil, err
 		}
 		if _, _, err := c.EnqueueFrontierItem(ctx, corpus.FrontierItem{
-			WorkKey:     fmt.Sprintf("repository:%s/%s:threads", ref.Owner, ref.Repo),
-			SubjectKind: "repository", Owner: ref.Owner, Repo: ref.Repo, Facet: "threads",
+			WorkKey:     fmt.Sprintf("repository:%s/%s:threads", ref.Owner(), ref.Repo()),
+			SubjectKind: "repository", Owner: ref.Owner(), Repo: ref.Repo(), Facet: "threads",
 			Priority: 10, Reason: "explicit source " + source.Name, Source: source.Name,
 		}); err != nil {
 			return nil, err
@@ -568,14 +568,14 @@ func (s *Service) flushArchiveHour(ctx context.Context, c *corpus.Corpus, source
 		repoRefs = append(repoRefs, ref)
 	}
 	sort.Slice(repoRefs, func(i, j int) bool {
-		if repoRefs[i].Owner != repoRefs[j].Owner {
-			return repoRefs[i].Owner < repoRefs[j].Owner
+		if repoRefs[i].Owner() != repoRefs[j].Owner() {
+			return repoRefs[i].Owner() < repoRefs[j].Owner()
 		}
-		return repoRefs[i].Repo < repoRefs[j].Repo
+		return repoRefs[i].Repo() < repoRefs[j].Repo()
 	})
 	for _, ref := range repoRefs {
 		sig := hourSigs.repoSigs[ref]
-		existing, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+		existing, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 		if err != nil {
 			return err
 		}
@@ -591,8 +591,8 @@ func (s *Service) flushArchiveHour(ctx context.Context, c *corpus.Corpus, source
 		repoIDByRef[ref] = upserted.ID
 		repoSeen[ref] = struct{}{}
 		_, _, err = c.EnqueueFrontierItem(ctx, corpus.FrontierItem{
-			WorkKey:     fmt.Sprintf("repository:%s/%s:threads", ref.Owner, ref.Repo),
-			SubjectKind: "repository", Owner: ref.Owner, Repo: ref.Repo, Facet: "threads",
+			WorkKey:     fmt.Sprintf("repository:%s/%s:threads", ref.Owner(), ref.Repo()),
+			SubjectKind: "repository", Owner: ref.Owner(), Repo: ref.Repo(), Facet: "threads",
 			Priority: 10, Reason: "discovered by " + source.Name, Source: source.Name,
 		})
 		if err != nil {
@@ -606,10 +606,10 @@ func (s *Service) flushArchiveHour(ctx context.Context, c *corpus.Corpus, source
 	}
 	sort.Slice(threadKeys, func(i, j int) bool {
 		if threadKeys[i].ref != threadKeys[j].ref {
-			if threadKeys[i].ref.Owner != threadKeys[j].ref.Owner {
-				return threadKeys[i].ref.Owner < threadKeys[j].ref.Owner
+			if threadKeys[i].ref.Owner() != threadKeys[j].ref.Owner() {
+				return threadKeys[i].ref.Owner() < threadKeys[j].ref.Owner()
 			}
-			return threadKeys[i].ref.Repo < threadKeys[j].ref.Repo
+			return threadKeys[i].ref.Repo() < threadKeys[j].ref.Repo()
 		}
 		if threadKeys[i].kind != threadKeys[j].kind {
 			return threadKeys[i].kind < threadKeys[j].kind
@@ -620,13 +620,16 @@ func (s *Service) flushArchiveHour(ctx context.Context, c *corpus.Corpus, source
 		sig := hourSigs.threadSigs[key]
 		repoID, ok := repoIDByRef[key.ref]
 		if !ok {
-			return fmt.Errorf("missing repository id for thread %s/%s#%d", key.ref.Owner, key.ref.Repo, key.number)
+			return fmt.Errorf("missing repository id for thread %s#%d", key.ref, key.number)
 		}
 		existing, err := c.GetThread(ctx, repoID, key.kind, key.number)
 		if err != nil {
 			return err
 		}
-		thread := mergeArchiveThread(sig, repoID, existing)
+		thread, representable := mergeArchiveThread(sig, repoID, existing)
+		if !representable {
+			continue
+		}
 		payload, err := json.Marshal(sig)
 		if err != nil {
 			return err
@@ -641,8 +644,8 @@ func (s *Service) flushArchiveHour(ctx context.Context, c *corpus.Corpus, source
 
 func mergeArchiveRepo(sig discovery.Signal, existing *corpus.Repository) corpus.Repository {
 	r := corpus.Repository{
-		Owner:      sig.Repo.Owner,
-		Name:       sig.Repo.Repo,
+		Owner:      sig.Repo.Owner(),
+		Name:       sig.Repo.Repo(),
 		ExternalID: fmt.Sprintf("%d", sig.RepoID),
 	}
 	if existing == nil {
@@ -661,7 +664,7 @@ func mergeArchiveRepo(sig discovery.Signal, existing *corpus.Repository) corpus.
 	return r
 }
 
-func mergeArchiveThread(sig discovery.Signal, repoID int64, existing *corpus.Thread) corpus.Thread {
+func mergeArchiveThread(sig discovery.Signal, repoID int64, existing *corpus.Thread) (corpus.Thread, bool) {
 	t := corpus.Thread{
 		RepositoryID: repoID,
 		Kind:         string(sig.ThreadKind),
@@ -671,7 +674,7 @@ func mergeArchiveThread(sig discovery.Signal, repoID int64, existing *corpus.Thr
 		if !existing.SourceUpdatedAt.IsZero() {
 			t = *existing
 			t.SourceUpdatedAt = time.Time{}
-			return t
+			return t, true
 		}
 		t = *existing
 		t.RepositoryID = repoID
@@ -680,6 +683,16 @@ func mergeArchiveThread(sig discovery.Signal, repoID int64, existing *corpus.Thr
 	}
 	if sig.ThreadState != "" {
 		t.State = string(sig.ThreadState)
+	} else if t.State == "" {
+		switch strings.ToLower(sig.Action) {
+		case "opened", "reopened":
+			t.State = string(domain.OpenState)
+		case "closed":
+			t.State = string(domain.ClosedState)
+		}
+	}
+	if t.State == "" {
+		return corpus.Thread{}, false
 	}
 	if sig.ThreadTitle != "" {
 		t.Title = sig.ThreadTitle
@@ -688,10 +701,10 @@ func mergeArchiveThread(sig discovery.Signal, repoID int64, existing *corpus.Thr
 		t.Author = sig.ThreadAuthor
 	}
 	if sig.ThreadKind == domain.PullRequestKind && sig.Merged {
-		t.Merged = true
+		t.Merge = domain.MergedStatus(time.Time{})
 	}
 	t.SourceUpdatedAt = time.Time{}
-	return t
+	return t, true
 }
 
 type budgetedRepositorySearch struct {

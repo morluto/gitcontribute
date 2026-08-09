@@ -260,36 +260,32 @@ func replayHeldOutRecovery(t *testing.T, run *heldOutRun, action mcpcontract.Too
 
 func heldOutRecoveryCall(action mcpcontract.ToolCall) (string, map[string]any, bool) {
 	var name string
-	var value any
-	switch action.Type {
+	switch action.Type() {
 	case "poll_job":
-		name, value = mcpcontract.ToolGetJob, action.PollJob
+		name = mcpcontract.ToolGetJob
 	case "get_repositories":
-		name, value = mcpcontract.ToolGetRepositories, action.GetRepositories
+		name = mcpcontract.ToolGetRepositories
 	case "ensure_coverage":
-		name, value = mcpcontract.ToolEnsureCoverage, action.EnsureCoverage
+		name = mcpcontract.ToolEnsureCoverage
 	case "sync_repository_context":
-		name, value = mcpcontract.ToolSyncRepositoryContext, action.SyncRepositoryContext
+		name = mcpcontract.ToolSyncRepositoryContext
 	case "sync_threads":
-		name, value = mcpcontract.ToolSyncThreads, action.SyncThreads
+		name = mcpcontract.ToolSyncThreads
 	case "hydrate_threads":
-		name, value = mcpcontract.ToolHydrateThreads, action.HydrateThreads
+		name = mcpcontract.ToolHydrateThreads
 	case "sync_portfolio":
-		name, value = mcpcontract.ToolSyncPortfolio, action.SyncPortfolio
+		name = mcpcontract.ToolSyncPortfolio
 	case "sync_pull_request_feedback":
-		name, value = mcpcontract.ToolSyncPullRequestFeedback, action.SyncFeedback
+		name = mcpcontract.ToolSyncPullRequestFeedback
 	case "sync_ci_failures":
-		name, value = mcpcontract.ToolSyncCIFailures, action.SyncCI
+		name = mcpcontract.ToolSyncCIFailures
 	case "query_deepwiki":
-		name, value = mcpcontract.ToolQueryDeepWiki, action.QueryDeepWiki
+		name = mcpcontract.ToolQueryDeepWiki
 	default:
 		return "", nil, false
 	}
-	if value == nil {
-		return "", nil, false
-	}
 	var input map[string]any
-	if !decodeHeldOut(value, &input) {
+	if !decodeHeldOut(action.Input(), &input) {
 		return "", nil, false
 	}
 	return name, input, true

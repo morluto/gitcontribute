@@ -13,8 +13,8 @@ import (
 )
 
 func (s *Service) syncProvidedThreadHeaders(ctx context.Context, repo contracts.RepoRef, issues []github.Issue) (_ *contracts.SyncResult, resultErr error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 	c, err := s.openCorpus(ctx)
@@ -27,17 +27,17 @@ func (s *Service) syncProvidedThreadHeaders(ctx context.Context, repo contracts.
 			sourceUpdatedAt = issue.UpdatedAt
 		}
 	}
-	stored, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	stored, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return nil, err
 	}
 	if stored == nil {
-		payload, err := json.Marshal(map[string]any{"source": "authored_pull_request_search", "owner": ref.Owner, "repo": ref.Repo})
+		payload, err := json.Marshal(map[string]any{"source": "authored_pull_request_search", "owner": ref.Owner(), "repo": ref.Repo()})
 		if err != nil {
 			return nil, err
 		}
 		stored, err = c.UpsertRepository(ctx, corpus.Repository{
-			Owner: ref.Owner, Name: ref.Repo,
+			Owner: ref.Owner(), Name: ref.Repo(),
 		}, string(payload))
 		if err != nil {
 			return nil, fmt.Errorf("store authored repository identity: %w", err)
@@ -49,7 +49,7 @@ func (s *Service) syncProvidedThreadHeaders(ctx context.Context, repo contracts.
 	}
 	defer failRunOnError(ctx, c, run.ID, &resultErr)
 	writer := &syncThreadWriter{
-		ctx: ctx, corpus: c, owner: ref.Owner, repo: ref.Repo, repositoryID: stored.ID, kind: "pull_request", sourceUpdatedAt: sourceUpdatedAt,
+		ctx: ctx, corpus: c, owner: ref.Owner(), repo: ref.Repo(), repositoryID: stored.ID, kind: "pull_request", sourceUpdatedAt: sourceUpdatedAt,
 	}
 	if err := writer.storeAll(issues); err != nil {
 		return nil, err
@@ -67,12 +67,11 @@ func (s *Service) syncProvidedThreadHeaders(ctx context.Context, repo contracts.
 }
 
 func (s *Service) syncThreadHeaders(ctx context.Context, repo contracts.RepoRef, syncOpts SyncOptions) (_ *contracts.SyncResult, resultErr error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 	var plan syncRequestPlan
-	var err error
 	syncOpts, plan, err = planThreadSyncOptions(syncOpts)
 	if err != nil {
 		return nil, err
@@ -81,7 +80,7 @@ func (s *Service) syncThreadHeaders(ctx context.Context, repo contracts.RepoRef,
 	if err != nil {
 		return nil, err
 	}
-	repoProjection, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repoProjection, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return nil, fmt.Errorf("get repository: %w", err)
 	}

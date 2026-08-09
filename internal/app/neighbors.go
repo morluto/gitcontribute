@@ -46,7 +46,7 @@ func (s *Service) Neighbors(ctx context.Context, repo contracts.RepoRef, kind st
 		return nil, err
 	}
 
-	repository, err := c.GetRepository(ctx, dref.Owner, dref.Repo)
+	repository, err := c.GetRepository(ctx, dref.Owner(), dref.Repo())
 	if err != nil {
 		return nil, err
 	}
@@ -67,13 +67,13 @@ func (s *Service) Neighbors(ctx context.Context, repo contracts.RepoRef, kind st
 		return nil, err
 	}
 
-	queryCand := candidateFromThread(*repository, *query)
+	queryCand := candidateFromThread(dref, *query)
 	candidates := make([]clustering.Candidate, 0, len(threads))
 	for _, t := range threads {
 		if t.ID == query.ID {
 			continue
 		}
-		candidates = append(candidates, candidateFromThread(*repository, t))
+		candidates = append(candidates, candidateFromThread(dref, t))
 	}
 
 	scored, err := clustering.Neighbors(ctx, queryCand, candidates, limit)
@@ -118,7 +118,7 @@ func (s *Service) DuplicateCandidates(ctx context.Context, repo contracts.RepoRe
 		return nil, err
 	}
 
-	repository, err := c.GetRepository(ctx, dref.Owner, dref.Repo)
+	repository, err := c.GetRepository(ctx, dref.Owner(), dref.Repo())
 	if err != nil {
 		return nil, err
 	}
@@ -195,8 +195,8 @@ func (s *Service) DuplicateCandidates(ctx context.Context, repo contracts.RepoRe
 }
 
 func validateThreadQuery(repo contracts.RepoRef, kind string, number int) (clustering.MemberRef, domain.RepoRef, error) {
-	dref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := dref.Validate(); err != nil {
+	dref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return clustering.MemberRef{}, dref, err
 	}
 
@@ -209,8 +209,8 @@ func validateThreadQuery(repo contracts.RepoRef, kind string, number int) (clust
 	}
 
 	return clustering.MemberRef{
-		Owner:  dref.Owner,
-		Repo:   dref.Repo,
+		Owner:  dref.Owner(),
+		Repo:   dref.Repo(),
 		Kind:   normalized,
 		Number: number,
 	}, dref, nil
@@ -226,10 +226,10 @@ func normalizeThreadKind(kind string) (string, error) {
 	return "", fmt.Errorf("unsupported thread kind %q", kind)
 }
 
-func candidateFromThread(repo corpus.Repository, t corpus.Thread) clustering.Candidate {
+func candidateFromThread(repo domain.RepoRef, t corpus.Thread) clustering.Candidate {
 	return clustering.Candidate{
 		ThreadID:  t.ID,
-		Repo:      domain.RepoRef{Owner: repo.Owner, Repo: repo.Name},
+		Repo:      repo,
 		Kind:      t.Kind,
 		Number:    t.Number,
 		State:     t.State,
@@ -315,8 +315,8 @@ func (s *Service) PullRequestCollisions(ctx context.Context, repo contracts.Repo
 	if number <= 0 {
 		return nil, errors.New("pull request number must be positive")
 	}
-	dref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := dref.Validate(); err != nil {
+	dref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 
@@ -325,7 +325,7 @@ func (s *Service) PullRequestCollisions(ctx context.Context, repo contracts.Repo
 		return nil, err
 	}
 
-	repository, err := c.GetRepository(ctx, dref.Owner, dref.Repo)
+	repository, err := c.GetRepository(ctx, dref.Owner(), dref.Repo())
 	if err != nil {
 		return nil, err
 	}
@@ -357,7 +357,7 @@ func (s *Service) PullRequestCollisions(ctx context.Context, repo contracts.Repo
 		return nil, err
 	}
 
-	queryCand := candidateFromThread(*repository, *query)
+	queryCand := candidateFromThread(dref, *query)
 	all := []clustering.Candidate{queryCand}
 	var collisions []PullRequestCollision
 
@@ -365,7 +365,7 @@ func (s *Service) PullRequestCollisions(ctx context.Context, repo contracts.Repo
 		if t.Number == number {
 			continue
 		}
-		all = append(all, candidateFromThread(*repository, t))
+		all = append(all, candidateFromThread(dref, t))
 
 		otherPayload, err := latestThreadObservationPayload(ctx, c, t.ID)
 		if err != nil {
@@ -428,8 +428,8 @@ func collisionScore(repo domain.RepoRef, queryBase string, queryRefs []clusterin
 	}
 
 	otherRefs := clustering.ExtractMemberRefs(other.Title+"\n"+other.Body, repo)
-	queryRef := clustering.MemberRef{Owner: repo.Owner, Repo: repo.Repo, Kind: query.Kind, Number: query.Number}
-	otherRef := clustering.MemberRef{Owner: repo.Owner, Repo: repo.Repo, Kind: other.Kind, Number: other.Number}
+	queryRef := clustering.MemberRef{Owner: repo.Owner(), Repo: repo.Repo(), Kind: query.Kind, Number: query.Number}
+	otherRef := clustering.MemberRef{Owner: repo.Owner(), Repo: repo.Repo(), Kind: other.Kind, Number: other.Number}
 
 	if referencesThread(otherRefs, queryRef) {
 		score += explicitRefWeight
@@ -638,8 +638,8 @@ func (s *Service) collisionsForQuery(ctx context.Context, inv *investigation.Inv
 }
 
 func (s *Service) findSimilarThreads(ctx context.Context, repo domain.RepoRef, query clustering.Candidate, kind string, onlyOpen bool, limit int) ([]clustering.Neighbor, string, int, error) {
-	if err := repo.Validate(); err != nil {
-		return nil, "", 0, err
+	if !repo.IsValid() {
+		return nil, "", 0, errors.New("repository is required")
 	}
 	limit, err := normalizeSimilarityLimit(limit)
 	if err != nil {
@@ -649,7 +649,7 @@ func (s *Service) findSimilarThreads(ctx context.Context, repo domain.RepoRef, q
 	if err != nil {
 		return nil, "", 0, err
 	}
-	repository, err := c.GetRepository(ctx, repo.Owner, repo.Repo)
+	repository, err := c.GetRepository(ctx, repo.Owner(), repo.Repo())
 	if err != nil {
 		return nil, "", 0, err
 	}
@@ -668,7 +668,7 @@ func (s *Service) findSimilarThreads(ctx context.Context, repo domain.RepoRef, q
 	}
 	candidates := make([]clustering.Candidate, 0, len(threads))
 	for _, t := range threads {
-		candidates = append(candidates, candidateFromThread(*repository, t))
+		candidates = append(candidates, candidateFromThread(repo, t))
 	}
 	all := append([]clustering.Candidate{query}, candidates...)
 	neighbors, err := clustering.Neighbors(ctx, query, candidates, limit)

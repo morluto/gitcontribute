@@ -7,7 +7,7 @@ import (
 )
 
 func TestExtractClassifiesRelationshipsAndExcludesQuotedCode(t *testing.T) {
-	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	repo := domain.MustRepoRef("owner", "repo")
 	refs := Extract("Fixes #1. Based on owner/repo#2. Blocks https://github.com/owner/repo/issues/3.\n> Fixes #4\n``Fixes #5``\n```\nFixes #6\n```", repo)
 	if len(refs) != 3 {
 		t.Fatalf("references = %+v", refs)
@@ -21,7 +21,7 @@ func TestExtractClassifiesRelationshipsAndExcludesQuotedCode(t *testing.T) {
 }
 
 func TestExtractUsesStrongestRelationAndPreservesExplicitKind(t *testing.T) {
-	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	repo := domain.MustRepoRef("owner", "repo")
 	refs := Extract("See https://github.com/owner/repo/pull/7; this depends on https://github.com/owner/repo/pull/7 and fixes https://github.com/owner/repo/pull/7.", repo)
 	if len(refs) != 1 {
 		t.Fatalf("references = %+v", refs)
@@ -37,7 +37,7 @@ func TestExtractUsesStrongestRelationAndPreservesExplicitKind(t *testing.T) {
 }
 
 func TestExtractRequiresMatchingFenceAndCodeSpanDelimiters(t *testing.T) {
-	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	repo := domain.MustRepoRef("owner", "repo")
 	text := "```go\nFixes #1\n~~~\nFixes #2\n```\n" +
 		"`Fixes\n#3`\n" +
 		"`` Fixes #4 ` still code ``\n" +
@@ -49,7 +49,7 @@ func TestExtractRequiresMatchingFenceAndCodeSpanDelimiters(t *testing.T) {
 }
 
 func TestExtractHandlesTildeFenceAndUnmatchedBacktickAsProse(t *testing.T) {
-	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	repo := domain.MustRepoRef("owner", "repo")
 	refs := Extract("~~~text\nFixes #1\n~~~~\nAn unmatched ` does not hide Fixes #2", repo)
 	if len(refs) != 1 || refs[0].Number != 2 || refs[0].Relation != RelationClaimsToClose {
 		t.Fatalf("references = %+v", refs)
@@ -57,7 +57,7 @@ func TestExtractHandlesTildeFenceAndUnmatchedBacktickAsProse(t *testing.T) {
 }
 
 func TestExtractClassifiesReplacementDirectionAndEvidence(t *testing.T) {
-	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	repo := domain.MustRepoRef("owner", "repo")
 	refs := Extract("Superseded by: #8. Replaces owner/repo#3.", repo)
 	if len(refs) != 2 {
 		t.Fatalf("references = %+v", refs)

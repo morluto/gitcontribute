@@ -91,7 +91,7 @@ func newResearchFixture(t *testing.T) researchFixture {
 	}}, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, codeindex.Snapshot{
+	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, domain.MustRepoRef("owner", "repo"), codeindex.Snapshot{
 		RepoPath: "/repo", Commit: "abc123", CreatedAt: now.Add(-30 * time.Minute), TotalBytes: 64,
 		Documents: []codeindex.Document{{
 			Path: "internal/parser/retry.go", Content: "func retryParserWithCancellation() {}", Bytes: 41, LanguageHint: "go",
@@ -110,7 +110,7 @@ func TestThreadResearchBriefUsesOnlyStoredEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	brief, err := fixture.svc.ThreadResearchBrief(fixture.ctx, research.ThreadRef{
-		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Number: 1,
+		Repo: domain.MustRepoRef("owner", "repo"), Number: 1,
 	})
 	if err != nil {
 		t.Fatalf("thread research brief: %v", err)
@@ -155,7 +155,7 @@ func TestThreadResearchBriefUsesOnlyStoredEvidence(t *testing.T) {
 func TestThreadResearchBriefPRCoverageAndErrors(t *testing.T) {
 	t.Parallel()
 	fixture := newResearchFixture(t)
-	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	repo := domain.MustRepoRef("owner", "repo")
 	brief, err := fixture.svc.ThreadResearchBrief(fixture.ctx, research.ThreadRef{Repo: repo, Kind: domain.PullRequestKind, Number: 9})
 	if err != nil {
 		t.Fatalf("PR brief: %v", err)
@@ -202,7 +202,7 @@ func TestThreadResearchBriefBoundsStoredFacetPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	brief, err := fixture.svc.ThreadResearchBrief(fixture.ctx, research.ThreadRef{
-		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Kind: domain.IssueKind, Number: 1,
+		Repo: domain.MustRepoRef("owner", "repo"), Kind: domain.IssueKind, Number: 1,
 	})
 	if err != nil {
 		t.Fatal(err)

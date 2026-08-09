@@ -13,6 +13,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/repositorycontext"
 )
 
@@ -279,7 +280,7 @@ func TestSyncDoesNotHydratePullRequestDetails(t *testing.T) {
 	if err != nil || pr == nil {
 		t.Fatalf("stored PR = %+v, %v", pr, err)
 	}
-	if pr.MergedKnown {
+	if pr.Merge.Known() {
 		t.Fatalf("header-only PR unexpectedly has known merge state: %+v", pr)
 	}
 	coverage, err := c.GetCoverage(context.Background(), repo.ID, &pr.ID, FacetPRDetails)
@@ -314,8 +315,7 @@ func TestSyncPreservesPreviouslyObservedPullRequestMergeState(t *testing.T) {
 	if err != nil || pr == nil {
 		t.Fatalf("stored PR = %+v, %v", pr, err)
 	}
-	pr.Merged = true
-	pr.MergedAt = pr.SourceUpdatedAt
+	pr.Merge = domain.MergedStatus(pr.SourceUpdatedAt)
 	if _, err := c.UpsertThread(ctx, *pr, `{"source":"previous-pr-details"}`); err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,7 @@ func TestSyncPreservesPreviouslyObservedPullRequestMergeState(t *testing.T) {
 		t.Fatal(err)
 	}
 	pr, err = c.GetThread(ctx, repo.ID, "pull_request", 2)
-	if err != nil || pr == nil || !pr.MergedKnown || !pr.Merged || pr.MergedAt.IsZero() {
+	if err != nil || pr == nil || !pr.Merge.Known() || !pr.Merge.IsMerged() || pr.Merge.MergedAt().IsZero() {
 		t.Fatalf("merge state after header sync = %+v, %v", pr, err)
 	}
 }

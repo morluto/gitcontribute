@@ -11,6 +11,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/radar"
@@ -46,7 +47,7 @@ func TestRankOpportunitiesReportsBoundedNonPaginatedTruncation(t *testing.T) {
 	if bounded.Total != 5 || len(bounded.Candidates) != 2 || !bounded.Truncated {
 		t.Fatalf("bounded radar result = %+v", bounded)
 	}
-	if bounded.Recovery == nil || len(bounded.Recovery.Then) != 2 || bounded.Recovery.Then[0].Type != "sync_threads" || bounded.Recovery.Then[1].Type != "rank_opportunities" {
+	if bounded.Recovery == nil || len(bounded.Recovery.Then) != 2 || bounded.Recovery.Then[0].Type() != "sync_threads" || bounded.Recovery.Then[1].Type() != "rank_opportunities" {
 		t.Fatalf("bounded radar recovery = %+v", bounded.Recovery)
 	}
 	if summary := bounded.Repositories[0].Value; summary == nil || summary.Considered != 5 || summary.Returned != 5 || summary.Truncated || summary.PopulationCapped {
@@ -205,7 +206,7 @@ func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
 	if out.Items[0].Key != "acme/rocket" || out.Items[0].Status != "retryable" || out.Items[0].Reason != "coverage_incomplete" || out.Items[0].Value == nil || out.Items[0].Value.Facets[0].Facet != "metadata" {
 		t.Fatalf("repository coverage = %+v", out.Items[0])
 	}
-	if out.Items[0].Recovery == nil || len(out.Items[0].Recovery.Then) != 1 || out.Items[0].Recovery.Then[0].Type != "ensure_coverage" {
+	if out.Items[0].Recovery == nil || len(out.Items[0].Recovery.Then) != 1 || out.Items[0].Recovery.Then[0].Type() != "ensure_coverage" {
 		t.Fatalf("repository coverage recovery = %+v", out.Items[0].Recovery)
 	}
 	if out.Items[1].Key != "acme/missing" || out.Items[1].Status != "unavailable" || out.Items[1].Reason != "repository_not_indexed" {
@@ -214,7 +215,7 @@ func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
 	if out.Items[2].Status != "retryable" || out.Items[2].Value == nil || out.Items[2].Value.Kind != "issue" || out.Items[2].Value.Number != 7 || out.Items[2].Value.Facets[0].Status != "incomplete" {
 		t.Fatalf("thread coverage = %+v", out.Items[2])
 	}
-	if out.Items[2].Recovery == nil || len(out.Items[2].Recovery.Then) == 0 || out.Items[2].Recovery.Then[0].Type != "hydrate_threads" {
+	if out.Items[2].Recovery == nil || len(out.Items[2].Recovery.Then) == 0 || out.Items[2].Recovery.Then[0].Type() != "hydrate_threads" {
 		t.Fatalf("thread coverage recovery = %+v", out.Items[2].Recovery)
 	}
 	if out.Items[3].Status != "unavailable" || out.Items[3].Reason != "invalid_reference" {
@@ -235,7 +236,7 @@ func TestGetThreadsPreservesUnknownAndObservedFalseMergeState(t *testing.T) {
 	}
 	for _, thread := range []corpus.Thread{
 		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 1, State: "closed", Title: "unknown", SourceUpdatedAt: time.Unix(1, 0).UTC()},
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "observed false", MergedKnown: true, SourceUpdatedAt: time.Unix(2, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "observed false", Merge: domain.UnmergedStatus(), SourceUpdatedAt: time.Unix(2, 0).UTC()},
 	} {
 		if _, err := svc.corpus.UpsertThread(ctx, thread, `{}`); err != nil {
 			t.Fatal(err)
@@ -416,7 +417,7 @@ func TestJobResultToMCPPreservesEmptyAndPartialTypedOutcomes(t *testing.T) {
 	if !strings.Contains(partial.Summary, "partial") || len(partial.Artifacts) != 1 ||
 		!reflect.DeepEqual(partial.Artifacts[0].References, []string{"acme/rocket#7"}) ||
 		len(partial.Artifacts[0].Failures) != 1 || partial.Artifacts[0].Failures[0].Reason != "facet_incomplete" ||
-		partial.Artifacts[0].Recovery == nil || len(partial.Artifacts[0].Recovery.Then) != 1 || partial.Artifacts[0].Recovery.Then[0].Type != "sync_portfolio" {
+		partial.Artifacts[0].Recovery == nil || len(partial.Artifacts[0].Recovery.Then) != 1 || partial.Artifacts[0].Recovery.Then[0].Type() != "sync_portfolio" {
 		t.Fatalf("partial portfolio outcome = %+v", partial)
 	}
 
@@ -434,7 +435,7 @@ func TestJobResultToMCPPreservesEmptyAndPartialTypedOutcomes(t *testing.T) {
 		ID: "job-running-patterns", Kind: "mine_repository_fix_patterns", Status: "running",
 	}, true)
 	if len(runningPatterns.Artifacts) != 0 || runningPatterns.FollowUp == nil ||
-		runningPatterns.FollowUp.Action.Type != "poll_job" {
+		runningPatterns.FollowUp.Action.Type() != "poll_job" {
 		t.Fatalf("running fix-pattern job advertised unavailable artifacts: %+v", runningPatterns)
 	}
 }
@@ -470,10 +471,12 @@ func TestGetJobsDetailedReturnsTypedArtifactsWithoutStoredPayloads(t *testing.T)
 	}
 	value := detailed.Items[0].Value
 	if value == nil || len(value.Artifacts) != 1 || value.Artifacts[0].Kind != "dossier" ||
-		value.Artifacts[0].URI != "gitcontribute://dossier/acme/rocket" ||
-		value.FollowUp == nil || value.FollowUp.Action.Type != "read_resource" || value.FollowUp.Action.ReadResource == nil ||
-		value.FollowUp.Action.ReadResource.URI != "gitcontribute://dossier/acme/rocket" {
+		value.Artifacts[0].URI != "gitcontribute://dossier/acme/rocket" || value.FollowUp == nil {
 		t.Fatalf("detailed jobs output lost typed artifact reference: %+v", detailed)
+	}
+	read, ok := mcpcontract.RecoveryInput[mcpcontract.ResourceReadAction](value.FollowUp.Action)
+	if value.FollowUp.Action.Type() != "read_resource" || !ok || read.URI != "gitcontribute://dossier/acme/rocket" {
+		t.Fatalf("detailed jobs output lost typed follow-up: %+v", detailed)
 	}
 }
 
@@ -507,7 +510,7 @@ func TestSearchGitHubRepositoriesPersistsObservedMetadata(t *testing.T) {
 	if out.NextPage != 3 || out.ResponseFormat != "concise" || len(out.Items) != 1 || out.Items[0].Value == nil || out.Items[0].Value.Ref != "repository:acme/rocket" || *out.Items[0].Value.Stars != 9001 {
 		t.Fatalf("live search result = %+v, options = %+v", out, reader.options)
 	}
-	if out.Items[0].Value.Watchers != nil || len(out.RecoveryPlans) != 1 || len(out.RecoveryPlans[0].Then) != 1 || out.RecoveryPlans[0].Then[0].Type != "sync_threads" {
+	if out.Items[0].Value.Watchers != nil || len(out.RecoveryPlans) != 1 || len(out.RecoveryPlans[0].Then) != 1 || out.RecoveryPlans[0].Then[0].Type() != "sync_threads" {
 		t.Fatalf("concise search context = %+v", out)
 	}
 	if out.Items[0].Value.DossierStatus != "missing" {
@@ -625,7 +628,7 @@ func TestFindPrecedentsUsesClosedAndMergedHistory(t *testing.T) {
 	}
 	threads := []corpus.Thread{
 		{RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open", Title: "cache path ignores configured root", Body: "compiled cache artifacts use tmp", SourceUpdatedAt: time.Unix(30, 0).UTC()},
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "honor configured cache root", Body: "move compiled cache artifacts out of tmp", Merged: true, MergedAt: time.Unix(20, 0).UTC(), ClosedAt: time.Unix(20, 0).UTC(), SourceUpdatedAt: time.Unix(20, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "honor configured cache root", Body: "move compiled cache artifacts out of tmp", Merge: domain.MergedStatus(time.Unix(20, 0).UTC()), ClosedAt: time.Unix(20, 0).UTC(), SourceUpdatedAt: time.Unix(20, 0).UTC()},
 		{RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 3, State: "open", Title: "unrelated typo", Body: "docs", SourceUpdatedAt: time.Unix(10, 0).UTC()},
 	}
 	for _, thread := range threads {
@@ -669,11 +672,11 @@ func TestFindPrecedentsReturnsRecoveryForMissingHistory(t *testing.T) {
 		t.Fatalf("precedent recovery output = %+v", out)
 	}
 	for _, item := range out.Items {
-		if item.Status != "unavailable" || item.Recovery == nil || len(item.Recovery.Then) != 1 || item.Recovery.Then[0].Type != "ensure_coverage" {
+		if item.Status != "unavailable" || item.Recovery == nil || len(item.Recovery.Then) != 1 || item.Recovery.Then[0].Type() != "ensure_coverage" {
 			t.Fatalf("missing precedent recovery = %+v", item)
 		}
-		ensure := item.Recovery.Then[0].EnsureCoverage
-		if ensure == nil || ensure.Target.Type != mcpcontract.CoverageTargetRepository || ensure.Target.Repository.Owner != "acme" || ensure.LimitPerRepository != 1000 {
+		ensure, ok := mcpcontract.RecoveryInput[mcpcontract.EnsureCoverageInput](item.Recovery.Then[0])
+		if !ok || ensure.Target.Type != mcpcontract.CoverageTargetRepository || ensure.Target.Repository.Owner != "acme" || ensure.LimitPerRepository != 1000 {
 			t.Fatalf("precedent ensure-coverage target = %+v", ensure)
 		}
 	}
@@ -727,6 +730,80 @@ func TestSyncPortfolioRejectsDuplicateDefaultKindReferences(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected duplicate pull-request references to be rejected")
+	}
+}
+
+func TestParsedSyncInputsRejectDuplicatesAfterCanonicalization(t *testing.T) {
+	t.Parallel()
+	if _, _, err := parseSyncThreadsInput(mcpcontract.SyncThreadsInput{
+		Selection: "repositories",
+		Repositories: []mcpcontract.RepositoryRef{
+			{Owner: "acme", Repo: "rocket"},
+			{Owner: " ACME ", Repo: " rocket "},
+		},
+	}); err == nil {
+		t.Fatal("repository duplicates created by canonicalization were accepted")
+	}
+	if _, _, err := parseSyncPortfolioInput(mcpcontract.SyncPortfolioInput{
+		Selection: "explicit",
+		PullRequests: []mcpcontract.ThreadRef{
+			{Owner: "acme", Repo: "rocket", Number: 7},
+			{Owner: " ACME ", Repo: " rocket ", Kind: " pull_request ", Number: 7},
+		},
+	}); err == nil {
+		t.Fatal("pull-request duplicates created by canonicalization were accepted")
+	}
+}
+
+func TestSyncInputsRejectFieldsFromTheOtherSelectionVariant(t *testing.T) {
+	t.Parallel()
+	repository := mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}
+	thread := mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7}
+	threadCases := []mcpcontract.SyncThreadsInput{
+		{Selection: "repositories", Repositories: []mcpcontract.RepositoryRef{repository}, Threads: []mcpcontract.ThreadRef{thread}},
+		{Selection: "threads", Threads: []mcpcontract.ThreadRef{thread}, Repositories: []mcpcontract.RepositoryRef{repository}},
+		{Selection: "threads", Threads: []mcpcontract.ThreadRef{thread}, State: "open"},
+		{Selection: "threads", Threads: []mcpcontract.ThreadRef{thread}, LimitPerRepository: 1},
+	}
+	for _, input := range threadCases {
+		if _, _, err := parseSyncThreadsInput(input); err == nil {
+			t.Fatalf("parseSyncThreadsInput accepted mixed variants: %+v", input)
+		}
+	}
+	portfolioCases := []mcpcontract.SyncPortfolioInput{
+		{Selection: "authored", PullRequests: []mcpcontract.ThreadRef{thread}},
+		{Selection: "explicit", PullRequests: []mcpcontract.ThreadRef{thread}, Repository: &repository},
+		{Selection: "explicit", PullRequests: []mcpcontract.ThreadRef{thread}, State: "open"},
+	}
+	for _, input := range portfolioCases {
+		if _, _, err := parseSyncPortfolioInput(input); err == nil {
+			t.Fatalf("parseSyncPortfolioInput accepted mixed variants: %+v", input)
+		}
+	}
+}
+
+func TestParsedSyncInputsOwnCanonicalCopies(t *testing.T) {
+	t.Parallel()
+	repositories := []mcpcontract.RepositoryRef{{Owner: " acme ", Repo: " rocket "}}
+	request, normalized, err := parseSyncThreadsInput(mcpcontract.SyncThreadsInput{Selection: "repositories", Repositories: repositories})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repositories[0] = mcpcontract.RepositoryRef{Owner: "changed", Repo: "changed"}
+	selection, ok := request.selection.(repositoryThreadSelection)
+	if !ok || selection.repositories[0].Owner != "acme" || normalized.Repositories[0].Repo != "rocket" {
+		t.Fatalf("parsed repository selection = %+v, normalized = %+v", request.selection, normalized)
+	}
+
+	inputRepository := &mcpcontract.RepositoryRef{Owner: " acme ", Repo: " rocket "}
+	portfolio, normalizedPortfolio, err := parseSyncPortfolioInput(mcpcontract.SyncPortfolioInput{Selection: "authored", Repository: inputRepository})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputRepository.Owner = "changed"
+	authored, ok := portfolio.selection.(authoredPortfolioSelection)
+	if !ok || authored.repository.Owner != "acme" || normalizedPortfolio.Repository.Owner != "acme" {
+		t.Fatalf("parsed authored selection = %+v, normalized = %+v", portfolio.selection, normalizedPortfolio)
 	}
 }
 

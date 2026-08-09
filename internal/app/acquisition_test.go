@@ -83,7 +83,7 @@ func TestAcquireSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open corpus: %v", err)
 	}
-	snap, err := c.LatestCodeSnapshot(ctx, domain.RepoRef{Owner: "testowner", Repo: "testrepo"})
+	snap, err := c.LatestCodeSnapshot(ctx, domain.MustRepoRef("testowner", "testrepo"))
 	if err != nil {
 		t.Fatalf("latest snapshot: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestAcquireRepeatFetch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open corpus: %v", err)
 	}
-	snap, err := c.LatestCodeSnapshot(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"})
+	snap, err := c.LatestCodeSnapshot(ctx, domain.MustRepoRef("owner", "repo"))
 	if err != nil {
 		t.Fatalf("latest snapshot: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestAcquireUnchangedCommitReusesCurrentSnapshot(t *testing.T) {
 		},
 	}
 	if _, _, err := svc.corpus.StoreCodeSnapshot(
-		ctx, domain.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, replacement,
+		ctx, domain.MustRepoRef(ref.Owner, ref.Repo), replacement,
 	); err != nil {
 		t.Fatalf("replace snapshot: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestAcquireUnchangedCommitReusesCurrentSnapshot(t *testing.T) {
 		t.Fatalf("second acquire = %+v", second)
 	}
 	matches, err := svc.corpus.SearchCode(
-		ctx, "sentinel", domain.RepoRef{Owner: ref.Owner, Repo: ref.Repo}, 10,
+		ctx, "sentinel", domain.MustRepoRef(ref.Owner, ref.Repo), 10,
 	)
 	if err != nil {
 		t.Fatalf("search preserved snapshot: %v", err)

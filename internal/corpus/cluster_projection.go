@@ -18,8 +18,8 @@ import (
 // ListClusterProjection reads cluster headers and all returned children from a
 // single read-only SQLite snapshot using two statements.
 func (c *Corpus) ListClusterProjection(ctx context.Context, repo domain.RepoRef, state clustering.ClusterState, limit int) (result clusterprojection.List, err error) {
-	if err := repo.Validate(); err != nil {
-		return clusterprojection.List{}, err
+	if !repo.IsValid() {
+		return clusterprojection.List{}, errors.New("repository reference is not parsed")
 	}
 	if limit < 1 || limit > 1000 {
 		return clusterprojection.List{}, errors.New("cluster list limit must be between 1 and 1000")
@@ -36,7 +36,7 @@ func (c *Corpus) ListClusterProjection(ctx context.Context, repo domain.RepoRef,
 	query := `SELECT id, stable_id, state, canonical_kind, canonical_owner, canonical_repo, canonical_number,
 		source_revision, source_window_start, source_window_end, created_at, updated_at
 		FROM clusters WHERE repo_owner=? AND repo_name=?`
-	args := []any{strings.ToLower(repo.Owner), strings.ToLower(repo.Repo)}
+	args := []any{strings.ToLower(repo.Owner()), strings.ToLower(repo.Repo())}
 	if state == "" {
 		query += ` AND state != ?`
 		args = append(args, string(clustering.ClusterRetired))
@@ -45,7 +45,7 @@ func (c *Corpus) ListClusterProjection(ctx context.Context, repo domain.RepoRef,
 		args = append(args, string(state))
 	}
 	countQuery := `SELECT COUNT(*) FROM clusters WHERE repo_owner=? AND repo_name=?`
-	countArgs := []any{strings.ToLower(repo.Owner), strings.ToLower(repo.Repo)}
+	countArgs := []any{strings.ToLower(repo.Owner()), strings.ToLower(repo.Repo())}
 	if state == "" {
 		countQuery += ` AND state != ?`
 		countArgs = append(countArgs, string(clustering.ClusterRetired))
@@ -155,8 +155,8 @@ func (c *Corpus) GetClusterProjectionForMember(ctx context.Context, ref clusteri
 // GetClusterProjectionForMemberWithIdentity reads the current included cluster
 // containing ref together with the projection identity that produced it.
 func (c *Corpus) GetClusterProjectionForMemberWithIdentity(ctx context.Context, ref clustering.MemberRef) (result clusterprojection.List, err error) {
-	repo := domain.RepoRef{Owner: ref.Owner, Repo: ref.Repo}
-	if err := repo.Validate(); err != nil {
+	repo, err := domain.NewRepoRef(ref.Owner, ref.Repo)
+	if err != nil {
 		return clusterprojection.List{}, err
 	}
 	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
@@ -224,8 +224,8 @@ func (c *Corpus) getClusterProjection(ctx context.Context, predicate string, arg
 // LoadClusterRefreshSnapshot reads every input needed by a refresh from one
 // SQLite snapshot and closes the transaction before CPU-heavy pair evaluation.
 func (c *Corpus) LoadClusterRefreshSnapshot(ctx context.Context, repo domain.RepoRef, maxCandidates int) (result clusterprojection.RefreshSnapshot, err error) {
-	if err := repo.Validate(); err != nil {
-		return clusterprojection.RefreshSnapshot{}, err
+	if !repo.IsValid() {
+		return clusterprojection.RefreshSnapshot{}, errors.New("repository reference is not parsed")
 	}
 	if maxCandidates < 1 {
 		return clusterprojection.RefreshSnapshot{}, errors.New("max candidates must be positive")
@@ -282,7 +282,7 @@ func loadClusterCandidatesTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRe
 		WHERE r.owner = ? AND r.name = ?
 		ORDER BY t.source_updated_at DESC, t.number DESC
 		LIMIT ?
-	`, repo.Owner, repo.Repo, maxCandidates+1)
+	`, repo.Owner(), repo.Repo(), maxCandidates+1)
 	if err != nil {
 		return nil, fmt.Errorf("load cluster candidates: %w", err)
 	}
@@ -334,7 +334,7 @@ func loadProjectionStateTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRef)
 		FROM cluster_projection_state AS state
 		LEFT JOIN cluster_runs AS run ON run.id=state.current_run_id
 		WHERE state.repo_owner=? AND state.repo_name=?
-	`, strings.ToLower(repo.Owner), strings.ToLower(repo.Repo)).Scan(&runID, &source, &currentGovernance, &projectionGovernance, &rule)
+	`, strings.ToLower(repo.Owner()), strings.ToLower(repo.Repo())).Scan(&runID, &source, &currentGovernance, &projectionGovernance, &rule)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, 0, nil
 	}
@@ -357,7 +357,7 @@ func loadProjectionClustersTx(ctx context.Context, tx *sql.Tx, repo domain.RepoR
 		       source_revision, source_window_start, source_window_end, created_at, updated_at
 		FROM clusters WHERE repo_owner=? AND repo_name=?
 		ORDER BY canonical_kind, canonical_owner, canonical_repo, canonical_number, stable_id
-	`, strings.ToLower(repo.Owner), strings.ToLower(repo.Repo))
+	`, strings.ToLower(repo.Owner()), strings.ToLower(repo.Repo()))
 	if err != nil {
 		return nil, err
 	}
@@ -386,15 +386,23 @@ type projectionScanner interface{ Scan(...any) error }
 
 func scanProjectionCluster(scanner projectionScanner, cluster *clustering.Cluster, includeRepo bool) error {
 	var state string
+	var owner, repo string
 	var windowStart, windowEnd, created, updated int64
 	destinations := []any{&cluster.ID, &cluster.StableID, &state, &cluster.Canonical.Kind, &cluster.Canonical.Owner, &cluster.Canonical.Repo, &cluster.Canonical.Number, &cluster.Revision, &windowStart, &windowEnd, &created, &updated}
 	if includeRepo {
-		destinations = append(destinations, &cluster.Repo.Owner, &cluster.Repo.Repo)
+		destinations = append(destinations, &owner, &repo)
 	}
 	if err := scanner.Scan(destinations...); err != nil {
 		return err
 	}
 	cluster.State = clustering.ClusterState(state)
+	if includeRepo {
+		parsed, err := domain.NewRepoRef(owner, repo)
+		if err != nil {
+			return fmt.Errorf("decode cluster repository: %w", err)
+		}
+		cluster.Repo = parsed
+	}
 	cluster.WindowStart, cluster.WindowEnd = scanTime(windowStart), scanTime(windowEnd)
 	cluster.CreatedAt, cluster.UpdatedAt = scanTime(created), scanTime(updated)
 	return nil
@@ -436,7 +444,7 @@ func loadProjectionMembersTx(ctx context.Context, tx *sql.Tx, clusters []cluster
 func loadProjectionOverridesTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRef, byStable map[string][]clustering.MembershipOverride) (err error) {
 	rows, err := tx.QueryContext(ctx, `SELECT c.stable_id, o.id, o.cluster_id, o.kind, o.owner, o.repo, o.number, o.action, o.reason, o.created_at
 		FROM cluster_overrides o JOIN clusters c ON c.id=o.cluster_id
-		WHERE c.repo_owner=? AND c.repo_name=? ORDER BY o.id`, strings.ToLower(repo.Owner), strings.ToLower(repo.Repo))
+		WHERE c.repo_owner=? AND c.repo_name=? ORDER BY o.id`, strings.ToLower(repo.Owner()), strings.ToLower(repo.Repo()))
 	if err != nil {
 		return err
 	}
@@ -480,8 +488,8 @@ func (c *Corpus) CommitClusterProjection(ctx context.Context, commit clusterproj
 }
 
 func validateClusterProjectionCommit(commit clusterprojection.Commit) error {
-	if err := commit.Repo.Validate(); err != nil {
-		return err
+	if !commit.Repo.IsValid() {
+		return errors.New("cluster repository is required")
 	}
 	if commit.RuleVersion == "" {
 		return errors.New("cluster rule version is required")
@@ -496,7 +504,7 @@ func validateClusterProjectionCommit(commit clusterprojection.Commit) error {
 		if strings.TrimSpace(cluster.StableID) == "" {
 			return errors.New("cluster stable id is required")
 		}
-		if !strings.EqualFold(cluster.Repo.Owner, commit.Repo.Owner) || !strings.EqualFold(cluster.Repo.Repo, commit.Repo.Repo) {
+		if !strings.EqualFold(cluster.Repo.Owner(), commit.Repo.Owner()) || !strings.EqualFold(cluster.Repo.Repo(), commit.Repo.Repo()) {
 			return fmt.Errorf("cluster %q repository does not match commit", cluster.StableID)
 		}
 		if cluster.Revision != commit.ExpectedSource {
@@ -507,7 +515,7 @@ func validateClusterProjectionCommit(commit clusterprojection.Commit) error {
 }
 
 func commitClusterProjectionTx(ctx context.Context, tx *sql.Tx, commit clusterprojection.Commit) (clusterprojection.CommitResult, error) {
-	owner, name := strings.ToLower(commit.Repo.Owner), strings.ToLower(commit.Repo.Repo)
+	owner, name := strings.ToLower(commit.Repo.Owner()), strings.ToLower(commit.Repo.Repo())
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cluster_projection_state (repo_owner, repo_name, governance_revision)
 		VALUES (?, ?, 0) ON CONFLICT(repo_owner, repo_name) DO NOTHING`, owner, name); err != nil {
 		return clusterprojection.CommitResult{}, err
@@ -637,7 +645,7 @@ func (s *projectionStatements) persistCluster(ctx context.Context, repo domain.R
 		}
 	}
 	if cluster.ID == 0 {
-		result, err := s.insertCluster.ExecContext(ctx, cluster.StableID, strings.ToLower(repo.Owner), strings.ToLower(repo.Repo), string(cluster.State), cluster.Canonical.Kind, cluster.Canonical.Owner, cluster.Canonical.Repo, cluster.Canonical.Number, cluster.Revision, encodeTime(cluster.WindowStart), encodeTime(cluster.WindowEnd), encodeTime(cluster.CreatedAt), encodeTime(now))
+		result, err := s.insertCluster.ExecContext(ctx, cluster.StableID, strings.ToLower(repo.Owner()), strings.ToLower(repo.Repo()), string(cluster.State), cluster.Canonical.Kind, cluster.Canonical.Owner, cluster.Canonical.Repo, cluster.Canonical.Number, cluster.Revision, encodeTime(cluster.WindowStart), encodeTime(cluster.WindowEnd), encodeTime(cluster.CreatedAt), encodeTime(now))
 		if err != nil {
 			return 0, err
 		}
@@ -666,7 +674,7 @@ func (s *projectionStatements) persistCluster(ctx context.Context, repo domain.R
 }
 
 func retireMissingProjectionClusters(ctx context.Context, tx *sql.Tx, deleteMembers *sql.Stmt, repo domain.RepoRef, active map[string]struct{}, now time.Time) (writes int, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id, stable_id FROM clusters WHERE repo_owner=? AND repo_name=? AND state != ?`, strings.ToLower(repo.Owner), strings.ToLower(repo.Repo), string(clustering.ClusterRetired))
+	rows, err := tx.QueryContext(ctx, `SELECT id, stable_id FROM clusters WHERE repo_owner=? AND repo_name=? AND state != ?`, strings.ToLower(repo.Owner()), strings.ToLower(repo.Repo()), string(clustering.ClusterRetired))
 	if err != nil {
 		return 0, err
 	}

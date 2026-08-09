@@ -51,8 +51,8 @@ type Candidate struct {
 // Ref returns the member identity for the candidate.
 func (c Candidate) Ref() MemberRef {
 	return MemberRef{
-		Owner:  c.Repo.Owner,
-		Repo:   c.Repo.Repo,
+		Owner:  c.Repo.Owner(),
+		Repo:   c.Repo.Repo(),
 		Kind:   c.Kind,
 		Number: c.Number,
 	}

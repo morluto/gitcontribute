@@ -3,6 +3,8 @@
 package concern
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -101,4 +103,38 @@ type Filter struct {
 	Query  string
 	Limit  int
 	Offset int
+}
+
+// ParseStored rejects malformed durable records before they enter concern
+// workflows. Creation and transition validation remain owned by Service.
+func (c *Concern) ParseStored() error {
+	if c == nil || c.ID == "" || !c.Repo.IsValid() {
+		return errors.New("concern identity and repository are required")
+	}
+	if !validStatus(c.Status) {
+		return fmt.Errorf("unsupported concern status %q", c.Status)
+	}
+	for i, change := range c.AuditTrail {
+		if !validStatus(change.From) || !validStatus(change.To) {
+			return fmt.Errorf("concern audit entry %d has an unsupported status", i)
+		}
+	}
+	if c.Status == StatusPromoted && c.Promotion == nil {
+		return errors.New("promoted concern is missing promotion identity")
+	}
+	if c.Promotion != nil {
+		switch c.Promotion.Kind {
+		case "investigation":
+			if c.Promotion.InvestigationID == "" || c.Promotion.HypothesisID == "" || c.Promotion.OpportunityID != "" {
+				return errors.New("invalid investigation promotion identity")
+			}
+		case "opportunity":
+			if c.Promotion.InvestigationID == "" || c.Promotion.HypothesisID == "" || c.Promotion.OpportunityID == "" {
+				return errors.New("invalid opportunity promotion identity")
+			}
+		default:
+			return fmt.Errorf("unsupported concern promotion kind %q", c.Promotion.Kind)
+		}
+	}
+	return nil
 }

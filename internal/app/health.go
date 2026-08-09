@@ -19,8 +19,8 @@ func (s *Service) RepositoryHealth(ctx context.Context, repo contracts.RepoRef) 
 // RepositoryHealthWithOptions returns a deterministic repository health report
 // using the provided analysis window and stale threshold.
 func (s *Service) RepositoryHealthWithOptions(ctx context.Context, repo contracts.RepoRef, opts health.Options) (*health.Report, error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 
@@ -29,7 +29,7 @@ func (s *Service) RepositoryHealthWithOptions(ctx context.Context, repo contract
 		return nil, err
 	}
 
-	repoProjection, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repoProjection, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return nil, fmt.Errorf("get repository: %w", err)
 	}

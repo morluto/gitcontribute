@@ -24,13 +24,29 @@ type Request struct {
 	Question     string
 }
 
-// Response contains untrusted derived prose. Available is false for a
-// provider-level tool error; transport and protocol failures are returned as errors.
+type responseState uint8
+
+const (
+	responseUnavailable responseState = iota
+	responseAvailable
+)
+
+// Response contains untrusted derived prose. Its private state keeps provider
+// unavailability distinct from a successful response; transport and protocol
+// failures are returned as errors.
 type Response struct {
-	Text      string
-	SourceURL string
-	Available bool
+	state     responseState
+	text      string
+	sourceURL string
 }
+
+func UnavailableResponse(text string) Response { return Response{text: text} }
+func AvailableResponse(text, sourceURL string) Response {
+	return Response{state: responseAvailable, text: text, sourceURL: sourceURL}
+}
+func (r Response) Available() bool   { return r.state == responseAvailable }
+func (r Response) Text() string      { return r.text }
+func (r Response) SourceURL() string { return r.sourceURL }
 
 // Reader performs an external DeepWiki read without writing to the local corpus.
 type Reader interface {
@@ -67,7 +83,7 @@ func (c *Client) Read(ctx context.Context, req Request) (_ Response, err error) 
 		return Response{}, fmt.Errorf("call DeepWiki %s: %w", name, err)
 	}
 	if result.IsError {
-		return Response{Available: false}, nil
+		return UnavailableResponse(""), nil
 	}
 	var textParts []string
 	for _, item := range result.Content {
@@ -76,11 +92,10 @@ func (c *Client) Read(ctx context.Context, req Request) (_ Response, err error) 
 		}
 	}
 	text := strings.Join(textParts, "\n")
-	response := Response{Text: text, SourceURL: sourceURLPattern.FindString(text), Available: true}
 	if isProviderErrorText(text) {
-		response.Available = false
+		return UnavailableResponse(text), nil
 	}
-	return response, nil
+	return AvailableResponse(text, sourceURLPattern.FindString(text)), nil
 }
 
 func isProviderErrorText(text string) bool {

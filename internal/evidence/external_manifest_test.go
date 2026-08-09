@@ -53,3 +53,18 @@ func TestImportExternalEvidenceManifestRejectsDigestAndInvalidIntegrity(t *testi
 		t.Fatal("unsigned manifest accepted")
 	}
 }
+
+func TestExternalEvidenceManifestRejectsDuplicateClaimIdentity(t *testing.T) {
+	item := ExternalEvidenceManifest{
+		SchemaVersion: ExternalEvidenceManifestSchemaV1, Producer: "tool", InvestigationID: "inv",
+		Repository: "octo/project", Revision: "abc", ObservedAt: time.Now().UTC(),
+		Completeness: "complete", Integrity: "verified",
+		Claims: []ExternalEvidenceClaim{
+			{ID: "same", Type: EvidenceTypeStaticAnalysis, Relation: RelationSupporting, Description: "first"},
+			{ID: "same", Type: EvidenceTypeManualObservation, Relation: RelationInconclusive, Description: "second"},
+		},
+	}
+	if err := validateExternalEvidenceManifest(item); err == nil {
+		t.Fatal("duplicate claim identity was accepted")
+	}
+}
