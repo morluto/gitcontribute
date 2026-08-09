@@ -47,7 +47,7 @@ func TestInspectMissingCorpusHasNoFilesystemSideEffects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inspection.Exists || inspection.State != SchemaMissing {
+	if inspection.Exists() || inspection.State != SchemaMissing {
 		t.Fatalf("inspection = %+v", inspection)
 	}
 	for _, candidate := range []string{path, path + ".lock"} {

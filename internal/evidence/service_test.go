@@ -3,6 +3,7 @@ package evidence
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -48,6 +49,29 @@ func (r *fakeRepo) GetValidationDefinition(_ context.Context, id string) (*Valid
 func (r *fakeRepo) SaveValidationRun(_ context.Context, run *ValidationRun) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.runs[run.ID] = run
+	return nil
+}
+
+func (r *fakeRepo) SaveEvidenceBatch(_ context.Context, items []*Evidence) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, item := range items {
+		r.evidence[item.ID] = item
+	}
+	return nil
+}
+
+func (r *fakeRepo) SaveExternalValidation(_ context.Context, definition *ValidationDefinition, run *ValidationRun) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if run.DefinitionID != definition.ID {
+		return errors.New("external validation run must reference the supplied definition")
+	}
+	if existing, ok := r.defs[definition.ID]; ok && !slices.Equal(existing.Command, definition.Command) {
+		return errors.New("external receipt command differs from the existing validation_id")
+	}
+	r.defs[definition.ID] = definition
 	r.runs[run.ID] = run
 	return nil
 }

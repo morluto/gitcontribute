@@ -53,35 +53,39 @@ func (c *Corpus) LoadPrecedentRepositories(ctx context.Context, refs []precedent
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		snapshot := precedent.RepositorySnapshot{Repository: request.ref, Sources: make(map[int]precedent.Thread)}
 		var repositoryID int64
-		err = tx.QueryRowContext(ctx, `SELECT id FROM repositories WHERE owner=? AND name=?`, request.ref.Owner, request.ref.Repo).Scan(&repositoryID)
+		err = tx.QueryRowContext(ctx, `SELECT id FROM repositories WHERE owner=? AND name=?`, request.ref.Owner(), request.ref.Repo()).Scan(&repositoryID)
 		if errors.Is(err, sql.ErrNoRows) {
-			out = append(out, snapshot)
+			out = append(out, precedent.MissingRepositorySnapshot(request.ref))
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
-		snapshot.Available = true
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM threads WHERE repository_id=? AND state='closed'`, repositoryID).Scan(&snapshot.ClosedTotal); err != nil {
+		var closedTotal int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM threads WHERE repository_id=? AND state='closed'`, repositoryID).Scan(&closedTotal); err != nil {
 			return nil, err
 		}
 		sources, err := loadThreadsByNumbersTx(ctx, tx, repositoryID, request.numbers)
 		if err != nil {
 			return nil, err
 		}
+		sourceByNumber := make(map[int]precedent.Thread, len(sources))
 		for _, source := range sources {
-			snapshot.Sources[source.Number] = precedentThread(source)
+			sourceByNumber[source.Number] = precedentThread(source)
 		}
 		closed, err := loadClosedPrecedentsTx(ctx, tx, repositoryID, closedLimit)
 		if err != nil {
 			return nil, err
 		}
+		closedThreads := make([]precedent.Thread, 0, len(closed))
 		for _, candidate := range closed {
-			snapshot.Closed = append(snapshot.Closed, precedentThread(candidate))
+			closedThreads = append(closedThreads, precedentThread(candidate))
 		}
-		snapshot.ClosedTruncated = len(snapshot.Closed) < snapshot.ClosedTotal
+		snapshot, err := precedent.AvailableRepositorySnapshot(request.ref, sourceByNumber, closedThreads, closedTotal)
+		if err != nil {
+			return nil, fmt.Errorf("parse precedent snapshot: %w", err)
+		}
 		out = append(out, snapshot)
 	}
 	if err := tx.Commit(); err != nil {
@@ -139,7 +143,6 @@ func precedentThread(thread Thread) precedent.Thread {
 		Body:        thread.Body,
 		Labels:      append([]string(nil), thread.Labels...),
 		ClosedAt:    thread.ClosedAt,
-		MergedAt:    thread.MergedAt,
-		Merged:      thread.Merged,
+		Merge:       thread.Merge,
 	}
 }

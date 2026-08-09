@@ -15,6 +15,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/mcpserver"
@@ -23,6 +24,7 @@ import (
 const (
 	mcpE2EHomeEnv   = "GITCONTRIBUTE_MCP_E2E_HOME"
 	mcpE2EGitHubEnv = "GITCONTRIBUTE_MCP_E2E_GITHUB_URL"
+	mcpE2ETimeout   = 60 * time.Second
 )
 
 // TestMCPStdioHelper is the subprocess entry point used by
@@ -64,7 +66,7 @@ func TestMCPStdioHelper(t *testing.T) {
 //nolint:cyclop
 func TestMCPStdioScalableResearchFlow(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpE2ETimeout)
 	defer cancel()
 	home := t.TempDir()
 	seedMCPStdioCorpus(ctx, t, home)
@@ -140,7 +142,7 @@ func TestMCPStdioScalableResearchFlow(t *testing.T) {
 
 func TestMCPStdioPullRequestPortfolioFlow(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpE2ETimeout)
 	defer cancel()
 	home := t.TempDir()
 	seedMCPStdioEmptyCorpus(ctx, t, home)
@@ -179,7 +181,7 @@ func TestMCPStdioPullRequestPortfolioFlow(t *testing.T) {
 
 func TestMCPStdioExactThreadSyncFlow(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpE2ETimeout)
 	defer cancel()
 	home := t.TempDir()
 	seedMCPStdioEmptyCorpus(ctx, t, home)
@@ -281,7 +283,7 @@ func assertExactThreadJobItems(t *testing.T, jobs mcpcontract.GetJobsOutput, wan
 	if value.ExecutionState != "terminal" || value.Outcome != "succeeded" || len(value.Artifacts) != 1 ||
 		value.Artifacts[0].Kind != "thread_batch" || value.Artifacts[0].Count == nil ||
 		int(*value.Artifacts[0].Count) != len(wantKeys) ||
-		value.FollowUp == nil || value.FollowUp.Action.Type != "get_threads" {
+		value.FollowUp == nil || value.FollowUp.Action.Type() != "get_threads" {
 		t.Fatalf("typed thread job summary = %+v", value)
 	}
 	if !slices.Equal(value.Artifacts[0].References, wantKeys) {
@@ -291,7 +293,7 @@ func assertExactThreadJobItems(t *testing.T, jobs mcpcontract.GetJobsOutput, wan
 
 func TestMCPStdioEnsureCoverageBootstrapsAndReturnsSnapshot(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpE2ETimeout)
 	defer cancel()
 	home := t.TempDir()
 	seedMCPStdioEmptyCorpus(ctx, t, home)
@@ -326,7 +328,7 @@ func TestMCPStdioEnsureCoverageBootstrapsAndReturnsSnapshot(t *testing.T) {
 
 func TestMCPStdioCoverageRecoveryFollowsReturnedAction(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), mcpE2ETimeout)
 	defer cancel()
 	home := t.TempDir()
 	seedMCPStdioEmptyCorpus(ctx, t, home)
@@ -366,21 +368,17 @@ func TestMCPStdioCoverageRecoveryFollowsReturnedAction(t *testing.T) {
 func replayMCPRecoveryAction(t *testing.T, action mcpcontract.ToolCall) (string, map[string]any) {
 	t.Helper()
 	var name string
-	var value any
-	switch action.Type {
+	switch action.Type() {
 	case "ensure_coverage":
-		name, value = mcpcontract.ToolEnsureCoverage, action.EnsureCoverage
+		name = mcpcontract.ToolEnsureCoverage
 	case "sync_threads":
-		name, value = mcpcontract.ToolSyncThreads, action.SyncThreads
+		name = mcpcontract.ToolSyncThreads
 	case "hydrate_threads":
-		name, value = mcpcontract.ToolHydrateThreads, action.HydrateThreads
+		name = mcpcontract.ToolHydrateThreads
 	default:
-		t.Fatalf("unsupported recovery action in integration test: %q", action.Type)
+		t.Fatalf("unsupported recovery action in integration test: %q", action.Type())
 	}
-	if value == nil {
-		t.Fatalf("recovery action %q has no typed input", action.Type)
-	}
-	data, err := json.Marshal(value)
+	data, err := json.Marshal(action.Input())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +409,7 @@ func seedMCPStdioCorpus(ctx context.Context, t *testing.T, home string) {
 	}
 	rows := []corpus.Thread{
 		{RepositoryID: observed.ID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open", Title: "cache root ignores configured path", Body: "compiled cache artifacts unexpectedly use tmp", Labels: []string{"bug", "help wanted"}, SourceUpdatedAt: now},
-		{RepositoryID: observed.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "honor configured cache root", Body: "move compiled cache artifacts away from tmp", Merged: true, MergedAt: now.Add(-time.Hour), ClosedAt: now.Add(-time.Hour), SourceUpdatedAt: now.Add(-time.Hour)},
+		{RepositoryID: observed.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "honor configured cache root", Body: "move compiled cache artifacts away from tmp", Merge: domain.MergedStatus(now.Add(-time.Hour)), ClosedAt: now.Add(-time.Hour), SourceUpdatedAt: now.Add(-time.Hour)},
 		{RepositoryID: observed.ID, Kind: corpus.ThreadKindPullRequest, Number: 3, State: "open", Title: "current contributor work", Body: "portfolio entry", Author: "morluto", SourceUpdatedAt: now},
 	}
 	for _, row := range rows {

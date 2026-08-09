@@ -30,15 +30,15 @@ func (s *Service) ContributionRadar(ctx context.Context, opts contracts.RadarOpt
 // contributionRadarAt lets one cross-repository ranking use a single scoring
 // instant while keeping the public CLI service contract small.
 func (s *Service) contributionRadarAt(ctx context.Context, opts contracts.RadarOptions, evaluationTime time.Time) (*radar.Report, error) {
-	ref := domain.RepoRef{Owner: opts.Repo.Owner, Repo: opts.Repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(opts.Repo.Owner, opts.Repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
-	stored, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	stored, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +209,7 @@ func radarDuplicateClusterFacts(ref domain.RepoRef, projection clusterprojection
 			continue
 		}
 		for _, member := range cluster.Members {
-			if !member.Included || member.Ref.Kind != corpus.ThreadKindIssue || !strings.EqualFold(member.Ref.Owner, ref.Owner) || !strings.EqualFold(member.Ref.Repo, ref.Repo) {
+			if !member.Included || member.Ref.Kind != corpus.ThreadKindIssue || !strings.EqualFold(member.Ref.Owner, ref.Owner()) || !strings.EqualFold(member.Ref.Repo, ref.Repo()) {
 				continue
 			}
 			fact := &radar.DuplicateCluster{

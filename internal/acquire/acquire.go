@@ -168,8 +168,8 @@ func NewManager(root string, runner runner) (*Manager, error) {
 // clean checkout at the resolved default branch. The returned Acquisition
 // records remote URL, default branch, commit SHA, and acquisition time.
 func (m *Manager) Acquire(ctx context.Context, owner, repo, remote string) (*Acquisition, error) {
-	ref := domain.RepoRef{Owner: owner, Repo: repo}
-	if err := ref.Validate(); err != nil {
+	_, err := domain.NewRepoRef(owner, repo)
+	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidRepo, err)
 	}
 	if err := validateRemote(remote); err != nil {

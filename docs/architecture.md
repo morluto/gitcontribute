@@ -346,6 +346,12 @@ remain write operations. Catalog changes require realistic multi-call agent
 evaluations, including held-out queries, tool-call count, errors, latency, and
 context size; scripted schema checks alone do not establish good tool choice.
 
+Recovery-plan actions are sealed variants. The concrete input type derives the
+action discriminator, the output schema advertises the variants with `oneOf`,
+and decoding rejects unknown, mismatched, or multiple payloads. Application
+code therefore receives a typed action rather than validating a discriminator
+against a nullable argument bag.
+
 The canonical source-audit workflow is a machine-readable contract exposed by
 `workflow.get_source_audit_contract`:
 
@@ -430,6 +436,42 @@ rate capacity. Only replayable reads are retried. Backoff honors GitHub rate
 headers, is bounded, observes context cancellation, and redacts URL userinfo
 before retry metadata is persisted.
 
+Repository identities are parsed at input, provider, and persistence
+boundaries into a private, comparable `domain.RepoRef`. Interior code cannot
+construct an owner without a repository name, carry whitespace, or bypass the
+owner and repository grammar; it receives a parsed identity and uses explicit
+accessors. The zero value is reserved for optional scope and must be tested
+with `IsValid`. JSON decoding reparses the identity, and larger domain records
+hold it in named fields so its codec cannot be promoted over the enclosing
+record.
+
+Pull-request merge knowledge is likewise a parsed `domain.MergeStatus`, not
+independent `merged`, `merged_known`, and `merged_at` fields. Constructors make
+unknown, observed-unmerged, and observed-merged outcomes explicit. SQLite and
+GitHub adapter reads reject contradictions such as an unknown outcome marked
+merged or an unmerged outcome with a merge timestamp; interior code cannot
+create those combinations. The relational schema keeps scalar columns for
+querying, but rows are reparsed before they enter application models.
+
+Durable run and job lifecycles are read through private state values that bind
+statuses to their timestamps. Running work cannot be completed, queued jobs
+cannot already be started, terminal work requires a completion time, and only
+cancelled or cancellation-requested jobs carry a cancellation time. Terminal
+run transitions are conditional on the stored running state, while job
+transitions update the status and required timestamps atomically. Corrupt or
+unknown persisted combinations fail at the corpus boundary.
+
+JSON inputs that express alternatives remain wire-compatible discriminated
+objects, but they are parsed before any durable job is submitted. Thread sync
+becomes either repository discovery with repository-only filters or an exact
+thread set. Portfolio sync becomes either authored discovery or an explicit
+pull-request set. Actor identity becomes either a canonical login or a node ID,
+and coverage becomes either a repository target or an exact typed thread.
+Workers receive these private variants rather than the original field bags, so
+mode-specific fields cannot be silently ignored and identity strings are
+canonicalized before duplicate detection. The normalized wire form, not the
+caller's mutable slices or pointers, is what the durable job records.
+
 ## Acquisition and workspaces
 
 Acquisition and workspace packages invoke `git` directly with prompts, hooks,
@@ -453,6 +495,30 @@ host paths. The application resolves each ID and verifies that it belongs to
 the selected investigation before persisting executable state. The explicit
 CLI remains a local-user interface and may accept a directly supplied path.
 
+Observation definitions cross command and MCP boundaries as untrusted specs.
+The application parses a complete base-and-candidate contract before it enters
+the evidence service. Parsed observations have a private representation: their
+source and artifact-path relationship is established once, default occurrence
+is normalized, and regular expressions are compiled once for execution.
+Persistence decodes through the same parser, so malformed stored contracts do
+not re-enter the trusted model. Execution therefore consumes parsed values and
+does not repeat structural validation or regular-expression compilation.
+
+Durable workflow JSON is parsed again on read. Concern, investigation,
+hypothesis, opportunity, validation, and evidence discriminators cannot enter
+application logic as unchecked strings; legacy empty states are canonicalized
+only where their historical meaning is unambiguous. Telemetry metrics decode as
+either an available value or an unavailable reason and reject payloads claiming
+both. External validation receipts atomically store their synthetic definition
+and run, while external evidence manifests atomically store the complete claim
+set. A failed import therefore leaves no orphan definition or partial manifest.
+
+Bulk local-metadata and collection inputs are fully parsed before writable
+corpus access. Collection references are stored in canonical repository,
+thread, or UUID form, and malformed later members cannot follow earlier writes.
+Thread projections similarly parse kind, lifecycle state, repository key,
+and number before a transaction begins and again when SQLite rows are read.
+
 ## Search and analysis
 
 Search uses the local SQLite corpus and FTS5 indexes; agents query bounded
@@ -467,6 +533,14 @@ matches, so absence can be separated from a missing or truncated index.
 Snapshots created before manifests were introduced report
 `indexed_coverage_unknown`; their zero skip counts are never presented as proof
 of complete coverage.
+
+Repository coverage uses collection membership to represent presence: a
+returned `domain.FacetCoverage` is necessarily present, while a missing facet is
+absent from the collection. Its private constructor binds the facet name,
+observation time, completeness, and non-negative count. Immutable code-index
+artifacts similarly use their digest-bound manifest as the sole in-memory
+authority; duplicated query columns are checked against that manifest while
+decoding and discarded rather than exposed as a second source of truth.
 
 Title, labels, body, and hydrated evidence are materialized into one search
 document per thread and ranked by one BM25 invocation. Ranks from the legacy

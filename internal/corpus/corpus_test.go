@@ -650,8 +650,8 @@ func TestInterruptedAndFailedRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start run: %v", err)
 	}
-	if run.Status != RunStatusRunning {
-		t.Fatalf("run status = %q, want running", run.Status)
+	if run.State.Status() != RunStatusRunning {
+		t.Fatalf("run status = %q, want running", run.State.Status())
 	}
 
 	if err := c.RecordRunEvent(ctx, run.ID, "warn", "interrupted by signal"); err != nil {
@@ -665,13 +665,13 @@ func TestInterruptedAndFailedRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if run.Status != RunStatusFailed {
-		t.Fatalf("run status = %q, want failed", run.Status)
+	if run.State.Status() != RunStatusFailed {
+		t.Fatalf("run status = %q, want failed", run.State.Status())
 	}
 	if run.Error != "interrupted by signal" {
 		t.Fatalf("run error = %q, want %q", run.Error, "interrupted by signal")
 	}
-	if run.CompletedAt == nil {
+	if _, ok := run.State.CompletedAt(); !ok {
 		t.Fatal("run completed_at is nil")
 	}
 
@@ -787,13 +787,13 @@ func TestRunCompletionAndStats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get run: %v", err)
 	}
-	if run.Status != RunStatusCompleted {
-		t.Fatalf("run status = %q, want completed", run.Status)
+	if run.State.Status() != RunStatusCompleted {
+		t.Fatalf("run status = %q, want completed", run.State.Status())
 	}
 	if run.Stats != `{"pages":3,"items":42}` {
 		t.Fatalf("run stats = %q", run.Stats)
 	}
-	if run.CompletedAt == nil {
+	if _, ok := run.State.CompletedAt(); !ok {
 		t.Fatal("run completed_at is nil")
 	}
 }

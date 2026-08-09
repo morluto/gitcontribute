@@ -302,7 +302,10 @@ func compareValidationAggregates(aggregates []ValidationAggregate) *ValidationGr
 }
 
 func resourcesUnavailable(resources ResourceTelemetry) bool {
-	return resources.CPUTimeMillis.Value == nil || resources.PeakRSSBytes.Value == nil || resources.PeakChildCount.Value == nil
+	_, cpuAvailable := resources.CPUTimeMillis.Value()
+	_, memoryAvailable := resources.PeakRSSBytes.Value()
+	_, childrenAvailable := resources.PeakChildCount.Value()
+	return !cpuAvailable || !memoryAvailable || !childrenAvailable
 }
 
 func validationConfigurationDigest(def *ValidationDefinition) (string, error) {

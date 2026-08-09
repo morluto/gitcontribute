@@ -38,6 +38,13 @@ func (s *Service) DefineValidation(ctx context.Context, investigationID string, 
 	if opts.WorkspaceID == "" && opts.BaseWorkspaceID == "" && opts.CandidateWorkspaceID == "" && opts.WorkingDir == "" && (opts.BaseWorkingDir == "" || opts.CandidateDir == "") {
 		return nil, errors.New("validation working directory is required")
 	}
+	var observation *evidence.ObservationContract
+	if opts.Observation != nil {
+		observation, err = observationContractToEvidence(*opts.Observation)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	c, err := s.openCorpus(ctx)
 	if err != nil {
@@ -46,7 +53,6 @@ func (s *Service) DefineValidation(ctx context.Context, investigationID string, 
 	if err := s.resolveValidationWorkspaces(ctx, c, inv.ID, &opts); err != nil {
 		return nil, err
 	}
-
 	def := &evidence.ValidationDefinition{
 		InvestigationID:      inv.ID,
 		Name:                 opts.Kind,
@@ -61,7 +67,7 @@ func (s *Service) DefineValidation(ctx context.Context, investigationID string, 
 		Env:                  opts.Env,
 		Timeout:              opts.Timeout,
 		MaxOutputBytes:       opts.MaxOutputBytes,
-		Observation:          observationContractToEvidence(opts.Observation),
+		Observation:          observation,
 		Protocol:             evidence.ValidationProtocol(opts.Protocol),
 		ReadinessTimeout:     opts.ReadinessTimeout,
 	}
@@ -563,9 +569,9 @@ func validationProcessIdentity(value evidence.ProcessIdentity) contracts.Validat
 func validationResources(value evidence.ResourceTelemetry) contracts.ValidationResourceTelemetry {
 	return contracts.ValidationResourceTelemetry{
 		Provider: value.Provider, Platform: value.Platform, SampleInterval: value.SampleInterval.String(), SampleCount: value.SampleCount,
-		CPUTimeMillis:              contracts.ValidationInt64Metric{Value: value.CPUTimeMillis.Value, UnavailableReason: value.CPUTimeMillis.UnavailableReason},
-		PeakRSSBytes:               contracts.ValidationUint64Metric{Value: value.PeakRSSBytes.Value, UnavailableReason: value.PeakRSSBytes.UnavailableReason},
-		PeakChildCount:             contracts.ValidationInt64Metric{Value: value.PeakChildCount.Value, UnavailableReason: value.PeakChildCount.UnavailableReason},
+		CPUTimeMillis:              contracts.ValidationInt64Metric{Value: value.CPUTimeMillis.ValuePointer(), UnavailableReason: value.CPUTimeMillis.UnavailableReason()},
+		PeakRSSBytes:               contracts.ValidationUint64Metric{Value: value.PeakRSSBytes.ValuePointer(), UnavailableReason: value.PeakRSSBytes.UnavailableReason()},
+		PeakChildCount:             contracts.ValidationInt64Metric{Value: value.PeakChildCount.ValuePointer(), UnavailableReason: value.PeakChildCount.UnavailableReason()},
 		SamplerOverheadNanoseconds: value.SamplerOverheadNanoseconds,
 	}
 }
@@ -578,21 +584,22 @@ func validationCleanup(value evidence.CleanupResult) contracts.ValidationCleanup
 	return result
 }
 
-func observationContractToEvidence(contract *contracts.ValidationObservationContract) *evidence.ObservationContract {
-	if contract == nil {
-		return nil
-	}
-	return &evidence.ObservationContract{
+func observationContractToEvidence(contract contracts.ValidationObservationContract) (*evidence.ObservationContract, error) {
+	parsed, err := evidence.ParseObservationContract(evidence.ObservationContractSpec{
 		Intent:    contract.Intent,
-		Base:      expectedObservationsToEvidence(contract.Base),
-		Candidate: expectedObservationsToEvidence(contract.Candidate),
+		Base:      expectedObservationSpecs(contract.Base),
+		Candidate: expectedObservationSpecs(contract.Candidate),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("parse observation contract: %w", err)
 	}
+	return parsed, nil
 }
 
-func expectedObservationsToEvidence(items []contracts.ValidationExpectedObservation) []evidence.ExpectedObservation {
-	out := make([]evidence.ExpectedObservation, len(items))
+func expectedObservationSpecs(items []contracts.ValidationExpectedObservation) []evidence.ExpectedObservationSpec {
+	out := make([]evidence.ExpectedObservationSpec, len(items))
 	for i, item := range items {
-		out[i] = evidence.ExpectedObservation{
+		out[i] = evidence.ExpectedObservationSpec{
 			Name: item.Name, Source: evidence.ObservationSource(item.Source),
 			Matcher: evidence.ObservationMatcher(item.Matcher), Pattern: item.Pattern,
 			Occurrence: evidence.ObservationOccurrence(item.Occurrence),
@@ -607,18 +614,19 @@ func observationContractToCLI(contract *evidence.ObservationContract) *contracts
 		return nil
 	}
 	return &contracts.ValidationObservationContract{
-		Intent:    contract.Intent,
-		Base:      expectedObservationsToCLI(contract.Base),
-		Candidate: expectedObservationsToCLI(contract.Candidate),
+		Intent:    contract.Intent(),
+		Base:      expectedObservationsToCLI(contract.Base()),
+		Candidate: expectedObservationsToCLI(contract.Candidate()),
 	}
 }
 
 func expectedObservationsToCLI(items []evidence.ExpectedObservation) []contracts.ValidationExpectedObservation {
 	out := make([]contracts.ValidationExpectedObservation, len(items))
 	for i, item := range items {
+		spec := item.Spec()
 		out[i] = contracts.ValidationExpectedObservation{
-			Name: item.Name, Source: string(item.Source), Matcher: string(item.Matcher),
-			Pattern: item.Pattern, Occurrence: string(item.Occurrence), Path: item.Path,
+			Name: spec.Name, Source: string(spec.Source), Matcher: string(spec.Matcher),
+			Pattern: spec.Pattern, Occurrence: string(spec.Occurrence), Path: spec.Path,
 		}
 	}
 	return out

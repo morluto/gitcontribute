@@ -55,9 +55,9 @@ func (r *corpusReader) ReadResearchThread(ctx context.Context, requested researc
 		Ref: resolved, Title: thread.Title, Body: thread.Body, Author: thread.Author,
 		AuthorAssociation: thread.AuthorAssociation, State: thread.State, StateReason: thread.StateReason,
 		Labels: append([]string{}, thread.Labels...), Assignees: append([]string{}, thread.Assignees...),
-		Draft: thread.Draft, Locked: thread.Locked, Milestone: thread.Milestone, Merged: thread.Merged, MergedKnown: thread.MergedKnown,
+		Draft: thread.Draft, Locked: thread.Locked, Milestone: thread.Milestone, Merge: thread.Merge,
 		CreatedAt: thread.SourceCreatedAt, UpdatedAt: thread.SourceUpdatedAt, ClosedAt: thread.ClosedAt,
-		MergedAt: thread.MergedAt, Source: source,
+		Source: source,
 	}}
 
 	for _, facet := range researchFacets(storedKind) {
@@ -71,8 +71,7 @@ func (r *corpusReader) ReadResearchThread(ctx context.Context, requested researc
 				evidence.Truncated = true
 				truncated = true
 			}
-			coverage.Truncated = truncated
-			evidence.Coverage = append(evidence.Coverage, coverage)
+			evidence.Coverage = append(evidence.Coverage, coverage.WithTruncated(truncated))
 			evidence.Truncated = evidence.Truncated || truncated
 			continue
 		}
@@ -81,8 +80,7 @@ func (r *corpusReader) ReadResearchThread(ctx context.Context, requested researc
 			truncated = true
 		}
 		evidence.Discussion = append(evidence.Discussion, items...)
-		coverage.Truncated = truncated
-		evidence.Coverage = append(evidence.Coverage, coverage)
+		evidence.Coverage = append(evidence.Coverage, coverage.WithTruncated(truncated))
 		evidence.Truncated = evidence.Truncated || truncated
 	}
 	sort.SliceStable(evidence.Discussion, func(i, j int) bool {
@@ -144,7 +142,7 @@ func appendExplicitResearchRelations(ctx context.Context, c *corpus.Corpus, expl
 
 func appendClusterResearchRelations(ctx context.Context, c *corpus.Corpus, ref research.ThreadRef, result *research.RelationshipEvidence) error {
 	cluster, err := c.GetClusterProjectionForMember(ctx, clustering.MemberRef{
-		Owner: ref.Repo.Owner, Repo: ref.Repo.Repo, Kind: string(ref.Kind), Number: ref.Number,
+		Owner: ref.Repo.Owner(), Repo: ref.Repo.Repo(), Kind: string(ref.Kind), Number: ref.Number,
 	})
 	if err != nil {
 		return fmt.Errorf("get duplicate cluster: %w", err)
@@ -227,16 +225,15 @@ func (r *corpusReader) ReadResearchCode(ctx context.Context, repo domain.RepoRef
 	if err != nil {
 		return research.CodeEvidence{}, fmt.Errorf("latest code snapshot: %w", err)
 	}
-	result := research.CodeEvidence{Queries: append([]string{}, terms...), Hits: []research.CodeHit{}}
 	if snapshot == nil {
-		return result, nil
+		return research.MissingCodeEvidence(terms), nil
 	}
-	result.Present = true
-	result.CommitSHA = snapshot.CommitSHA
-	result.Source = research.SourceRef{
+	source := research.SourceRef{
 		Source: "local:code-index", URL: fmt.Sprintf("https://github.com/%s/tree/%s", repo, snapshot.CommitSHA),
 		CommitSHA: snapshot.CommitSHA, ObservedAt: snapshot.CreatedAt, AsOf: snapshot.CreatedAt,
 	}
+	hits := []research.CodeHit{}
+	truncated := false
 	seen := map[string]struct{}{}
 	for _, term := range terms {
 		matches, err := c.SearchCode(ctx, term, repo, researchCodeHitsPerTerm)
@@ -244,7 +241,7 @@ func (r *corpusReader) ReadResearchCode(ctx context.Context, repo domain.RepoRef
 			return research.CodeEvidence{}, fmt.Errorf("search code for %q: %w", term, err)
 		}
 		if len(matches) == researchCodeHitsPerTerm {
-			result.Truncated = true
+			truncated = true
 		}
 		for _, match := range matches {
 			if _, ok := seen[match.Path]; ok {
@@ -255,24 +252,28 @@ func (r *corpusReader) ReadResearchCode(ctx context.Context, repo domain.RepoRef
 				Source: "local:code-index", URL: fmt.Sprintf("https://github.com/%s/blob/%s/%s", repo, match.Commit, match.Path),
 				CommitSHA: match.Commit, ObservedAt: match.SnapshotCreatedAt, AsOf: match.SnapshotCreatedAt,
 			}
-			result.Hits = append(result.Hits, research.CodeHit{
+			hits = append(hits, research.CodeHit{
 				Path: match.Path, Language: match.Language, CommitSHA: match.Commit, MatchedTerm: term, Source: source,
 			})
-			if len(result.Hits) == maxResearchCodeHits {
-				result.Truncated = true
+			if len(hits) == maxResearchCodeHits {
+				truncated = true
 				break
 			}
 		}
-		if len(result.Hits) == maxResearchCodeHits {
+		if len(hits) == maxResearchCodeHits {
 			break
 		}
 	}
-	sort.Slice(result.Hits, func(i, j int) bool {
-		if result.Hits[i].Path != result.Hits[j].Path {
-			return result.Hits[i].Path < result.Hits[j].Path
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].Path != hits[j].Path {
+			return hits[i].Path < hits[j].Path
 		}
-		return result.Hits[i].MatchedTerm < result.Hits[j].MatchedTerm
+		return hits[i].MatchedTerm < hits[j].MatchedTerm
 	})
+	result, err := research.ObservedCodeEvidence(snapshot.CommitSHA, terms, hits, source, truncated)
+	if err != nil {
+		return research.CodeEvidence{}, fmt.Errorf("parse code evidence: %w", err)
+	}
 	return result, nil
 }
 
@@ -296,8 +297,8 @@ func (r *corpusReader) ReadResearchHealth(ctx context.Context, repo domain.RepoR
 	source := research.SourceRef{
 		Source: "local:health", URL: "local://health/" + repo.String(), ObservedAt: report.GeneratedAt, AsOf: healthAsOf,
 	}
-	return research.HealthEvidence{
-		Available: true, Archived: report.Repository.Archived, OpenIssues: report.Issues.Open,
+	result, err := research.ObservedHealthEvidence(research.HealthMetrics{
+		Archived: report.Repository.Archived, OpenIssues: report.Issues.Open,
 		OpenPullRequests: report.PullRequests.Open, ExternalPRMergeRate: report.External.MergeRate,
 		ExternalPRSampleSize:           report.External.SampleSize,
 		IssueResponseMedianHours:       report.Response.Issues.Median,
@@ -305,8 +306,11 @@ func (r *corpusReader) ReadResearchHealth(ctx context.Context, repo domain.RepoR
 		IssueResponseSampleSize:        report.Response.Issues.SampleSize,
 		PullRequestResponseSampleSize:  report.Response.PullRequests.SampleSize,
 		ThreadSampleSize:               report.Coverage.ThreadsSampleSize, ThreadsTruncated: report.Coverage.ThreadsTruncated,
-		Sources: []research.SourceRef{source}, UnknownReason: researchHealthCoverageReason(report),
-	}, nil
+	}, []research.SourceRef{source}, researchHealthCoverageReason(report))
+	if err != nil {
+		return research.HealthEvidence{}, fmt.Errorf("parse health evidence: %w", err)
+	}
+	return result, nil
 }
 
 func researchHealthCoverageReason(report *health.Report) string {
@@ -339,7 +343,7 @@ func (r *corpusReader) researchCorpusRepo(ctx context.Context, ref domain.RepoRe
 	if err != nil {
 		return nil, nil, err
 	}
-	repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return nil, nil, fmt.Errorf("get repository: %w", err)
 	}
@@ -374,7 +378,8 @@ func readResearchFacet(ctx context.Context, c *corpus.Corpus, repoID, threadID i
 		return research.FacetCoverage{}, nil, false, fmt.Errorf("get %s coverage: %w", facet, err)
 	}
 	if coverage == nil {
-		return research.FacetCoverage{Facet: facet}, nil, false, nil
+		missing, err := research.MissingFacetCoverage(facet)
+		return missing, nil, false, err
 	}
 	source := research.SourceRef{
 		Source: "github:rest", URL: researchFacetURL(ref, facet), ObservedAt: coverage.UpdatedAt, AsOf: coverage.SourceUpdatedAt,
@@ -405,9 +410,11 @@ func readResearchFacet(ctx context.Context, c *corpus.Corpus, repoID, threadID i
 	if facet == FacetPRDetails && len(observations) > 0 {
 		count = 1
 	}
-	return research.FacetCoverage{
-		Facet: facet, Present: true, Complete: coverage.Complete, AsOf: coverage.SourceUpdatedAt, Count: count, Source: source,
-	}, items, truncated, nil
+	parsed, err := research.ObservedFacetCoverage(facet, coverage.Complete, coverage.SourceUpdatedAt, count, source)
+	if err != nil {
+		return research.FacetCoverage{}, nil, false, fmt.Errorf("parse %s coverage: %w", facet, err)
+	}
+	return parsed, items, truncated, nil
 }
 
 func decodeResearchFacet(observation corpus.FacetObservation, ref research.ThreadRef, facet string) ([]research.DiscussionItem, error) {
@@ -493,7 +500,7 @@ func researchFacetURL(ref research.ThreadRef, facet string) string {
 func resolveResearchReference(ctx context.Context, c *corpus.Corpus, candidate research.Reference) (research.RelatedThread, error) {
 	kind := candidate.Kind
 	state, title := "", ""
-	repo, err := c.GetRepository(ctx, candidate.Repo.Owner, candidate.Repo.Repo)
+	repo, err := c.GetRepository(ctx, candidate.Repo.Owner(), candidate.Repo.Repo())
 	if err != nil {
 		return research.RelatedThread{}, fmt.Errorf("resolve referenced repository: %w", err)
 	}
@@ -524,7 +531,7 @@ func researchReferenceURL(ref research.ThreadRef) string {
 
 func researchTextReferences(text string, target research.ThreadRef) bool {
 	for _, ref := range clustering.ExtractMemberRefs(text, target.Repo) {
-		if strings.EqualFold(ref.Owner, target.Repo.Owner) && strings.EqualFold(ref.Repo, target.Repo.Repo) && ref.Number == target.Number {
+		if strings.EqualFold(ref.Owner, target.Repo.Owner()) && strings.EqualFold(ref.Repo, target.Repo.Repo()) && ref.Number == target.Number {
 			return true
 		}
 	}
@@ -604,7 +611,7 @@ func normalizeResearchSources(values []research.SourceRef) []research.SourceRef 
 }
 
 func researchMemberIsTarget(member clustering.MemberRef, target research.ThreadRef) bool {
-	return strings.EqualFold(member.Owner, target.Repo.Owner) && strings.EqualFold(member.Repo, target.Repo.Repo) && member.Kind == string(target.Kind) && member.Number == target.Number
+	return strings.EqualFold(member.Owner, target.Repo.Owner()) && strings.EqualFold(member.Repo, target.Repo.Repo()) && member.Kind == string(target.Kind) && member.Number == target.Number
 }
 
 func researchClusterRef(ref clustering.MemberRef) string {

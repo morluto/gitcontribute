@@ -22,8 +22,8 @@ func TestCreateAndGetJob(t *testing.T) {
 	if job.ID == "" {
 		t.Fatal("job id is empty")
 	}
-	if job.Status != JobStatusQueued {
-		t.Fatalf("status = %q, want %q", job.Status, JobStatusQueued)
+	if job.State.Status() != JobStatusQueued {
+		t.Fatalf("status = %q, want %q", job.State.Status(), JobStatusQueued)
 	}
 	if job.Request != `{"repo":"owner/repo"}` {
 		t.Fatalf("request = %q", job.Request)
@@ -35,6 +35,26 @@ func TestCreateAndGetJob(t *testing.T) {
 	}
 	if got == nil || got.ID != job.ID {
 		t.Fatalf("job not found: %+v", got)
+	}
+}
+
+func TestJobStateRejectsContradictoryLifecycle(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(1, 0).UTC()
+	for _, test := range []struct {
+		status                        string
+		started, completed, cancelled *time.Time
+	}{
+		{status: JobStatusQueued, started: &now},
+		{status: JobStatusRunning},
+		{status: JobStatusRunning, started: &now, completed: &now},
+		{status: JobStatusSucceeded, completed: &now, cancelled: &now},
+		{status: JobStatusCancelled, completed: &now},
+		{status: "invented", completed: &now},
+	} {
+		if _, err := parseJobState(test.status, test.started, test.completed, test.cancelled); err == nil {
+			t.Fatalf("parseJobState(%q) succeeded", test.status)
+		}
 	}
 }
 
@@ -65,7 +85,7 @@ func TestGetJobsBatchCanSkipPayloadBlobs(t *testing.T) {
 	if len(summary) != 2 || summary["missing"] != nil {
 		t.Fatalf("summary jobs = %+v", summary)
 	}
-	if summary[first.ID].Request != "" || summary[first.ID].Result != "" || summary[first.ID].Status != JobStatusSucceeded {
+	if summary[first.ID].Request != "" || summary[first.ID].Result != "" || summary[first.ID].State.Status() != JobStatusSucceeded {
 		t.Fatalf("summary loaded payload or lost status: %+v", summary[first.ID])
 	}
 	detailed, err := c.GetJobsBatch(ctx, ids, true)
@@ -141,7 +161,7 @@ func TestJobStatusTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if job.Status != JobStatusRunning || job.StartedAt == nil || job.StartedAt.IsZero() {
+	if _, started := job.State.StartedAt(); job.State.Status() != JobStatusRunning || !started {
 		t.Fatalf("job not running: %+v", job)
 	}
 
@@ -157,7 +177,7 @@ func TestJobStatusTransitions(t *testing.T) {
 		t.Fatalf("complete job: %v", err)
 	}
 	job, _ = c.GetJob(ctx, job.ID)
-	if job.Status != JobStatusSucceeded || job.Result != `{"done":true}` || job.CompletedAt == nil {
+	if _, completed := job.State.CompletedAt(); job.State.Status() != JobStatusSucceeded || job.Result != `{"done":true}` || !completed {
 		t.Fatalf("job not succeeded: %+v", job)
 	}
 
@@ -189,7 +209,9 @@ func TestJobCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if job.Status != JobStatusCancelled || job.CompletedAt == nil || job.CancelledAt == nil {
+	_, completed := job.State.CompletedAt()
+	_, cancelled := job.State.CancelledAt()
+	if job.State.Status() != JobStatusCancelled || !completed || !cancelled {
 		t.Fatalf("queued job not cancelled: %+v", job)
 	}
 
@@ -208,10 +230,10 @@ func TestJobCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if job.Status != JobStatusRunning {
-		t.Fatalf("status = %q, want %q", job.Status, JobStatusRunning)
+	if job.State.Status() != JobStatusRunning {
+		t.Fatalf("status = %q, want %q", job.State.Status(), JobStatusRunning)
 	}
-	if job.CancelledAt == nil || job.CancelledAt.IsZero() {
+	if _, ok := job.State.CancelledAt(); !ok {
 		t.Fatal("cancelled_at not set")
 	}
 
@@ -321,13 +343,13 @@ func TestReconcileInterruptedJobs(t *testing.T) {
 	}
 
 	plain, _ = c.GetJob(ctx, plain.ID)
-	if plain.Status != JobStatusFailed || plain.Error != "interrupted by restart" {
-		t.Fatalf("plain job status = %q, error = %q", plain.Status, plain.Error)
+	if plain.State.Status() != JobStatusFailed || plain.Error != "interrupted by restart" {
+		t.Fatalf("plain job status = %q, error = %q", plain.State.Status(), plain.Error)
 	}
 
 	cancelled, _ = c.GetJob(ctx, cancelled.ID)
-	if cancelled.Status != JobStatusCancelled {
-		t.Fatalf("cancelled job status = %q, want %q", cancelled.Status, JobStatusCancelled)
+	if cancelled.State.Status() != JobStatusCancelled {
+		t.Fatalf("cancelled job status = %q, want %q", cancelled.State.Status(), JobStatusCancelled)
 	}
 
 	events, err := c.ListJobEvents(ctx, plain.ID)
@@ -578,13 +600,13 @@ func TestReconcileRespectsLiveOwners(t *testing.T) {
 	}
 
 	liveJob, _ = c.GetJob(ctx, liveJob.ID)
-	if liveJob.Status != JobStatusRunning {
-		t.Fatalf("live job reconciled: status=%q", liveJob.Status)
+	if liveJob.State.Status() != JobStatusRunning {
+		t.Fatalf("live job reconciled: status=%q", liveJob.State.Status())
 	}
 
 	staleJob, _ = c.GetJob(ctx, staleJob.ID)
-	if staleJob.Status != JobStatusCancelled {
-		t.Fatalf("stale job status = %q, want cancelled", staleJob.Status)
+	if staleJob.State.Status() != JobStatusCancelled {
+		t.Fatalf("stale job status = %q, want cancelled", staleJob.State.Status())
 	}
 	if staleJob.Error != "interrupted by restart (cancellation requested)" {
 		t.Fatalf("stale job error = %q", staleJob.Error)

@@ -15,7 +15,7 @@ func TestStartFromThreadCreatesAuditedIdempotentPair(t *testing.T) {
 	service := NewService(repo, &fakeEvidenceStore{})
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	baseline := ThreadBaseline{
-		Repo: domain.RepoRef{Owner: "Owner", Repo: "Repo"}, Kind: domain.IssueKind, Number: 42,
+		Repo: domain.MustRepoRef("Owner", "Repo"), Kind: domain.IssueKind, Number: 42,
 		ObservationID: 7, ObservationSequence: 3, SourceUpdatedAt: now.Add(-time.Hour), ObservedAt: now,
 		Source: domain.SourceRef{Source: "github:rest", URL: "https://api.github.com/repos/Owner/Repo/issues/42", ObservedAt: now, AsOf: now.Add(-time.Hour)},
 	}
@@ -57,7 +57,7 @@ func TestStartFromThreadRejectsInvalidBaselineAndCancellation(t *testing.T) {
 	cancel()
 	_, err = service.StartFromThread(ctx, StartFromThreadInput{
 		Baseline: ThreadBaseline{
-			Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Kind: domain.IssueKind, Number: 1,
+			Repo: domain.MustRepoRef("o", "r"), Kind: domain.IssueKind, Number: 1,
 			ObservationID: 1, ObservationSequence: 1,
 			Source: domain.SourceRef{Source: "github:rest", URL: "https://api.github.com/repos/o/r/issues/1"},
 		},

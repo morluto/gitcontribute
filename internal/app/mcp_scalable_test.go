@@ -11,6 +11,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/radar"
@@ -46,7 +47,7 @@ func TestRankOpportunitiesReportsBoundedNonPaginatedTruncation(t *testing.T) {
 	if bounded.Total != 5 || len(bounded.Candidates) != 2 || !bounded.Truncated {
 		t.Fatalf("bounded radar result = %+v", bounded)
 	}
-	if bounded.Recovery == nil || len(bounded.Recovery.Then) != 2 || bounded.Recovery.Then[0].Type != "sync_threads" || bounded.Recovery.Then[1].Type != "rank_opportunities" {
+	if bounded.Recovery == nil || len(bounded.Recovery.Then) != 2 || bounded.Recovery.Then[0].Type() != "sync_threads" || bounded.Recovery.Then[1].Type() != "rank_opportunities" {
 		t.Fatalf("bounded radar recovery = %+v", bounded.Recovery)
 	}
 	if summary := bounded.Repositories[0].Value; summary == nil || summary.Considered != 5 || summary.Returned != 5 || summary.Truncated || summary.PopulationCapped {
@@ -205,7 +206,7 @@ func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
 	if out.Items[0].Key != "acme/rocket" || out.Items[0].Status != "retryable" || out.Items[0].Reason != "coverage_incomplete" || out.Items[0].Value == nil || out.Items[0].Value.Facets[0].Facet != "metadata" {
 		t.Fatalf("repository coverage = %+v", out.Items[0])
 	}
-	if out.Items[0].Recovery == nil || len(out.Items[0].Recovery.Then) != 1 || out.Items[0].Recovery.Then[0].Type != "ensure_coverage" {
+	if out.Items[0].Recovery == nil || len(out.Items[0].Recovery.Then) != 1 || out.Items[0].Recovery.Then[0].Type() != "ensure_coverage" {
 		t.Fatalf("repository coverage recovery = %+v", out.Items[0].Recovery)
 	}
 	if out.Items[1].Key != "acme/missing" || out.Items[1].Status != "unavailable" || out.Items[1].Reason != "repository_not_indexed" {
@@ -214,7 +215,7 @@ func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
 	if out.Items[2].Status != "retryable" || out.Items[2].Value == nil || out.Items[2].Value.Kind != "issue" || out.Items[2].Value.Number != 7 || out.Items[2].Value.Facets[0].Status != "incomplete" {
 		t.Fatalf("thread coverage = %+v", out.Items[2])
 	}
-	if out.Items[2].Recovery == nil || len(out.Items[2].Recovery.Then) == 0 || out.Items[2].Recovery.Then[0].Type != "hydrate_threads" {
+	if out.Items[2].Recovery == nil || len(out.Items[2].Recovery.Then) == 0 || out.Items[2].Recovery.Then[0].Type() != "hydrate_threads" {
 		t.Fatalf("thread coverage recovery = %+v", out.Items[2].Recovery)
 	}
 	if out.Items[3].Status != "unavailable" || out.Items[3].Reason != "invalid_reference" {
@@ -235,7 +236,7 @@ func TestGetThreadsPreservesUnknownAndObservedFalseMergeState(t *testing.T) {
 	}
 	for _, thread := range []corpus.Thread{
 		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 1, State: "closed", Title: "unknown", SourceUpdatedAt: time.Unix(1, 0).UTC()},
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "observed false", MergedKnown: true, SourceUpdatedAt: time.Unix(2, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "observed false", Merge: domain.UnmergedStatus(), SourceUpdatedAt: time.Unix(2, 0).UTC()},
 	} {
 		if _, err := svc.corpus.UpsertThread(ctx, thread, `{}`); err != nil {
 			t.Fatal(err)
@@ -416,7 +417,7 @@ func TestJobResultToMCPPreservesEmptyAndPartialTypedOutcomes(t *testing.T) {
 	if !strings.Contains(partial.Summary, "partial") || len(partial.Artifacts) != 1 ||
 		!reflect.DeepEqual(partial.Artifacts[0].References, []string{"acme/rocket#7"}) ||
 		len(partial.Artifacts[0].Failures) != 1 || partial.Artifacts[0].Failures[0].Reason != "facet_incomplete" ||
-		partial.Artifacts[0].Recovery == nil || len(partial.Artifacts[0].Recovery.Then) != 1 || partial.Artifacts[0].Recovery.Then[0].Type != "sync_portfolio" {
+		partial.Artifacts[0].Recovery == nil || len(partial.Artifacts[0].Recovery.Then) != 1 || partial.Artifacts[0].Recovery.Then[0].Type() != "sync_portfolio" {
 		t.Fatalf("partial portfolio outcome = %+v", partial)
 	}
 
@@ -434,7 +435,7 @@ func TestJobResultToMCPPreservesEmptyAndPartialTypedOutcomes(t *testing.T) {
 		ID: "job-running-patterns", Kind: "mine_repository_fix_patterns", Status: "running",
 	}, true)
 	if len(runningPatterns.Artifacts) != 0 || runningPatterns.FollowUp == nil ||
-		runningPatterns.FollowUp.Action.Type != "poll_job" {
+		runningPatterns.FollowUp.Action.Type() != "poll_job" {
 		t.Fatalf("running fix-pattern job advertised unavailable artifacts: %+v", runningPatterns)
 	}
 }
@@ -470,10 +471,12 @@ func TestGetJobsDetailedReturnsTypedArtifactsWithoutStoredPayloads(t *testing.T)
 	}
 	value := detailed.Items[0].Value
 	if value == nil || len(value.Artifacts) != 1 || value.Artifacts[0].Kind != "dossier" ||
-		value.Artifacts[0].URI != "gitcontribute://dossier/acme/rocket" ||
-		value.FollowUp == nil || value.FollowUp.Action.Type != "read_resource" || value.FollowUp.Action.ReadResource == nil ||
-		value.FollowUp.Action.ReadResource.URI != "gitcontribute://dossier/acme/rocket" {
+		value.Artifacts[0].URI != "gitcontribute://dossier/acme/rocket" || value.FollowUp == nil {
 		t.Fatalf("detailed jobs output lost typed artifact reference: %+v", detailed)
+	}
+	read, ok := mcpcontract.RecoveryInput[mcpcontract.ResourceReadAction](value.FollowUp.Action)
+	if value.FollowUp.Action.Type() != "read_resource" || !ok || read.URI != "gitcontribute://dossier/acme/rocket" {
+		t.Fatalf("detailed jobs output lost typed follow-up: %+v", detailed)
 	}
 }
 
@@ -507,7 +510,7 @@ func TestSearchGitHubRepositoriesPersistsObservedMetadata(t *testing.T) {
 	if out.NextPage != 3 || out.ResponseFormat != "concise" || len(out.Items) != 1 || out.Items[0].Value == nil || out.Items[0].Value.Ref != "repository:acme/rocket" || *out.Items[0].Value.Stars != 9001 {
 		t.Fatalf("live search result = %+v, options = %+v", out, reader.options)
 	}
-	if out.Items[0].Value.Watchers != nil || len(out.RecoveryPlans) != 1 || len(out.RecoveryPlans[0].Then) != 1 || out.RecoveryPlans[0].Then[0].Type != "sync_threads" {
+	if out.Items[0].Value.Watchers != nil || len(out.RecoveryPlans) != 1 || len(out.RecoveryPlans[0].Then) != 1 || out.RecoveryPlans[0].Then[0].Type() != "sync_threads" {
 		t.Fatalf("concise search context = %+v", out)
 	}
 	if out.Items[0].Value.DossierStatus != "missing" {
@@ -625,7 +628,7 @@ func TestFindPrecedentsUsesClosedAndMergedHistory(t *testing.T) {
 	}
 	threads := []corpus.Thread{
 		{RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open", Title: "cache path ignores configured root", Body: "compiled cache artifacts use tmp", SourceUpdatedAt: time.Unix(30, 0).UTC()},
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "honor configured cache root", Body: "move compiled cache artifacts out of tmp", Merged: true, MergedAt: time.Unix(20, 0).UTC(), ClosedAt: time.Unix(20, 0).UTC(), SourceUpdatedAt: time.Unix(20, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "honor configured cache root", Body: "move compiled cache artifacts out of tmp", Merge: domain.MergedStatus(time.Unix(20, 0).UTC()), ClosedAt: time.Unix(20, 0).UTC(), SourceUpdatedAt: time.Unix(20, 0).UTC()},
 		{RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 3, State: "open", Title: "unrelated typo", Body: "docs", SourceUpdatedAt: time.Unix(10, 0).UTC()},
 	}
 	for _, thread := range threads {
@@ -669,99 +672,12 @@ func TestFindPrecedentsReturnsRecoveryForMissingHistory(t *testing.T) {
 		t.Fatalf("precedent recovery output = %+v", out)
 	}
 	for _, item := range out.Items {
-		if item.Status != "unavailable" || item.Recovery == nil || len(item.Recovery.Then) != 1 || item.Recovery.Then[0].Type != "ensure_coverage" {
+		if item.Status != "unavailable" || item.Recovery == nil || len(item.Recovery.Then) != 1 || item.Recovery.Then[0].Type() != "ensure_coverage" {
 			t.Fatalf("missing precedent recovery = %+v", item)
 		}
-		ensure := item.Recovery.Then[0].EnsureCoverage
-		if ensure == nil || ensure.Target.Type != mcpcontract.CoverageTargetRepository || ensure.Target.Repository.Owner != "acme" || ensure.LimitPerRepository != 1000 {
+		ensure, ok := mcpcontract.RecoveryInput[mcpcontract.EnsureCoverageInput](item.Recovery.Then[0])
+		if !ok || ensure.Target.Type != mcpcontract.CoverageTargetRepository || ensure.Target.Repository.Owner != "acme" || ensure.LimitPerRepository != 1000 {
 			t.Fatalf("precedent ensure-coverage target = %+v", ensure)
 		}
-	}
-}
-
-func TestScalableBatchInputsRejectDuplicatesInsteadOfDroppingOutcomes(t *testing.T) {
-	t.Parallel()
-	if err := rejectDuplicateRepositoryRefs([]mcpcontract.RepositoryRef{{Owner: "one", Repo: "repo"}, {Owner: "ONE", Repo: "repo"}}); err == nil {
-		t.Fatal("duplicate repositories were silently accepted")
-	}
-	if err := rejectDuplicateThreadRefs([]mcpcontract.ThreadRef{{Owner: "one", Repo: "repo", Number: 1}, {Owner: "one", Repo: "repo", Number: 1}}); err == nil {
-		t.Fatal("duplicate threads were silently accepted")
-	}
-	if err := rejectDuplicateThreadRefs([]mcpcontract.ThreadRef{{Owner: "one", Repo: "repo", Kind: "issue", Number: 1}, {Owner: "one", Repo: "repo", Kind: "pull_request", Number: 1}}); err != nil {
-		t.Fatalf("issue and pull request with the same number were conflated: %v", err)
-	}
-	if err := rejectDuplicateIndexRepositoryInputs([]mcpcontract.IndexRepositoryInput{{Owner: "one", Repo: "repo", Remote: "first"}, {Owner: "one", Repo: "repo", Remote: "second"}}); err == nil {
-		t.Fatal("conflicting repository remotes were silently accepted")
-	}
-}
-
-func TestPullRequestWorkflowsRejectMalformedReferencesBeforeSubmission(t *testing.T) {
-	t.Parallel()
-	reader := &MCPReader{newSearchTestService(t)}
-	if _, err := reader.SyncPortfolio(context.Background(), mcpcontract.SyncPortfolioInput{}); err == nil || !strings.Contains(err.Error(), "selection is required") {
-		t.Fatalf("missing portfolio selection error = %v", err)
-	}
-	for _, ref := range []mcpcontract.ThreadRef{
-		{Owner: " ", Repo: "rocket", Number: 1},
-		{Owner: "acme", Repo: " ", Number: 1},
-		{Owner: "acme", Repo: "rocket", Number: 0},
-		{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 1},
-	} {
-		if _, err := reader.SyncPortfolio(context.Background(), mcpcontract.SyncPortfolioInput{
-			Selection: "explicit", PullRequests: []mcpcontract.ThreadRef{ref},
-		}); err == nil {
-			t.Fatalf("SyncPortfolio accepted malformed pull request %+v", ref)
-		}
-	}
-}
-
-func TestSyncPortfolioRejectsDuplicateDefaultKindReferences(t *testing.T) {
-	t.Parallel()
-	reader := &MCPReader{newSearchTestService(t)}
-	_, err := reader.SyncPortfolio(context.Background(), mcpcontract.SyncPortfolioInput{
-		Selection: "explicit",
-		PullRequests: []mcpcontract.ThreadRef{
-			{Owner: "acme", Repo: "rocket", Number: 7},
-			{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7},
-		},
-	})
-	if err == nil {
-		t.Fatal("expected duplicate pull-request references to be rejected")
-	}
-}
-
-func TestScalableRuntimeRejectsPageBoundsBeforeSubmittingJob(t *testing.T) {
-	t.Parallel()
-	reader := &MCPReader{newSearchTestService(t)}
-	ctx := context.Background()
-	thread := mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Number: 1}
-	for _, maxPages := range []int{-1, 101} {
-		if _, err := reader.HydrateThreads(ctx, mcpcontract.HydrateThreadsInput{Threads: []mcpcontract.ThreadRef{thread}, Facets: []string{"issue_comments"}, MaxPages: maxPages}); err == nil {
-			t.Fatalf("HydrateThreads accepted max_pages=%d", maxPages)
-		}
-	}
-	for _, maxPages := range []int{-1, 21} {
-		if _, err := reader.SyncPortfolio(ctx, mcpcontract.SyncPortfolioInput{Selection: "explicit", PullRequests: []mcpcontract.ThreadRef{thread}, StatusMaxPages: maxPages}); err == nil {
-			t.Fatalf("SyncPortfolio accepted status_max_pages=%d", maxPages)
-		}
-	}
-	for _, limit := range []int{-1, 1001} {
-		if _, err := reader.SyncThreads(ctx, mcpcontract.SyncThreadsInput{Selection: "repositories", Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, LimitPerRepository: limit}); err == nil {
-			t.Fatalf("SyncThreads accepted limit_per_repository=%d", limit)
-		}
-	}
-	if _, err := reader.SyncPortfolio(ctx, mcpcontract.SyncPortfolioInput{Selection: "authored", Limit: 1, DiscoveryMaxRequests: 1}); err == nil {
-		t.Fatal("SyncPortfolio accepted a budget that cannot fund identity and discovery")
-	}
-}
-
-func TestScalableRuntimeBoundsMatchSchemas(t *testing.T) {
-	t.Parallel()
-	reader := &MCPReader{newSearchTestService(t)}
-	if _, err := reader.RankOpportunities(context.Background(), mcpcontract.RankOpportunitiesInput{Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, Limit: 101}); err == nil {
-		t.Fatal("rank opportunities accepted limit above schema maximum")
-	}
-	if _, err := reader.FindPrecedents(context.Background(), mcpcontract.FindPrecedentsInput{Threads: []mcpcontract.ThreadRef{{Owner: "acme", Repo: "rocket", Number: 1}}, Limit: 101}); err == nil {
-		t.Fatal("find precedents accepted limit above schema maximum")
 	}
 }

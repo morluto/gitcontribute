@@ -32,6 +32,11 @@ func unmarshalWorkflow(payload string, value any) error {
 	if err := json.Unmarshal([]byte(payload), value); err != nil {
 		return fmt.Errorf("decode workflow record: %w", err)
 	}
+	if record, ok := value.(interface{ ParseStored() error }); ok {
+		if err := record.ParseStored(); err != nil {
+			return fmt.Errorf("parse workflow record: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -187,7 +192,7 @@ func (c *Corpus) SaveInvestigation(ctx context.Context, item *investigation.Inve
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (id) DO UPDATE SET repo_owner=excluded.repo_owner, repo_name=excluded.repo_name,
 			status=excluded.status, origin_key=excluded.origin_key, payload=excluded.payload, updated_at=excluded.updated_at
-	`, item.ID, item.Repo.Owner, item.Repo.Repo, item.Status, investigationOriginKey(item), payload, encodeTime(item.CreatedAt), encodeTime(item.UpdatedAt))
+	`, item.ID, item.Repo.Owner(), item.Repo.Repo(), item.Status, investigationOriginKey(item), payload, encodeTime(item.CreatedAt), encodeTime(item.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("save investigation: %w", err)
 	}

@@ -38,7 +38,11 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpcontract.FindPrece
 	}
 	refs := make([]precedent.SourceRef, len(in.Threads))
 	for i, input := range in.Threads {
-		refs[i] = precedent.SourceRef{Repository: domain.RepoRef{Owner: input.Owner, Repo: input.Repo}, Number: input.Number}
+		ref, err := domain.NewRepoRef(input.Owner, input.Repo)
+		if err != nil {
+			return mcpcontract.FindPrecedentsOutput{}, fmt.Errorf("threads[%d]: %w", i, err)
+		}
+		refs[i] = precedent.SourceRef{Repository: ref, Number: input.Number}
 	}
 	snapshots, err := c.LoadPrecedentRepositories(ctx, refs, 2000)
 	if err != nil {
@@ -66,7 +70,7 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpcontract.FindPrece
 		item := mcpcontract.BatchItem[mcpcontract.PrecedentSet]{Key: key, Status: "complete"}
 		repoKey := precedent.RepositoryKey(refs[i].Repository)
 		snapshot := snapshotsByRepo[repoKey]
-		if !snapshot.Available {
+		if !snapshot.Available() {
 			item.Status, item.Reason = "unavailable", "repository_not_indexed"
 			item.Message = "repository history is not present in the local corpus"
 			item.Recovery = precedentRecoveryPlan(input, item.Reason)
@@ -163,7 +167,7 @@ func betterPrecedent(a, b mcpcontract.PrecedentOutput) bool {
 
 func precedentToMCP(source, owner, repo string, t precedent.Thread, score float64) mcpcontract.PrecedentOutput {
 	reasons := []string{"similar stored title or body"}
-	if t.Merged {
+	if t.Merge.IsMerged() {
 		reasons = append(reasons, "pull request merged")
 	}
 	if t.StateReason != "" {
@@ -175,5 +179,5 @@ func precedentToMCP(source, owner, repo string, t precedent.Thread, score float6
 			reasons = append(reasons, "label: "+label)
 		}
 	}
-	return mcpcontract.PrecedentOutput{Source: source, Ref: fmt.Sprintf("%s/%s#%d", owner, repo, t.Number), Kind: t.Kind, State: t.State, StateReason: t.StateReason, Title: t.Title, Score: mcpcontract.SimilarityScore(score), RuleVersion: similarity.PrecedentV1, Reasons: reasons, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.MergedAt)}
+	return mcpcontract.PrecedentOutput{Source: source, Ref: fmt.Sprintf("%s/%s#%d", owner, repo, t.Number), Kind: t.Kind, State: t.State, StateReason: t.StateReason, Title: t.Title, Score: mcpcontract.SimilarityScore(score), RuleVersion: similarity.PrecedentV1, Reasons: reasons, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.Merge.MergedAt())}
 }

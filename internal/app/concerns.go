@@ -33,8 +33,12 @@ func (s *Service) readConcernService(ctx context.Context) (*concern.Service, err
 
 // CreateConcern records one local concern without external access.
 func (s *Service) CreateConcern(ctx context.Context, opts contracts.ConcernCreateOptions) (*contracts.ConcernResult, error) {
+	ref, err := domain.NewRepoRef(opts.Repo.Owner, opts.Repo.Repo)
+	if err != nil {
+		return nil, err
+	}
 	return s.createConcern(ctx, &concern.Concern{
-		Repo: domain.RepoRef{Owner: opts.Repo.Owner, Repo: opts.Repo.Repo}, CommitSHA: opts.CommitSHA, WorkspaceID: opts.WorkspaceID,
+		Repo: ref, CommitSHA: opts.CommitSHA, WorkspaceID: opts.WorkspaceID,
 		Title: opts.Title, ProblemStatement: opts.ProblemStatement, SuspectedOwner: opts.SuspectedOwner,
 		Confidence: opts.Confidence, Unknowns: opts.Unknowns, SuccessCriterion: opts.SuccessCriterion,
 		Notes: opts.Notes, EvidenceIDs: opts.EvidenceIDs,
@@ -55,12 +59,16 @@ func (s *Service) createConcern(ctx context.Context, input *concern.Concern) (*c
 
 // ListConcerns performs a bounded offline concern list or search.
 func (s *Service) ListConcerns(ctx context.Context, opts contracts.ConcernListOptions) (*contracts.ConcernListResult, error) {
+	ref, err := optionalRepoRef(opts.Repo.Owner, opts.Repo.Repo)
+	if err != nil {
+		return nil, err
+	}
 	svc, err := s.readConcernService(ctx)
 	if err != nil {
 		return nil, err
 	}
 	page, err := svc.List(ctx, concern.Filter{
-		Repo: domain.RepoRef{Owner: opts.Repo.Owner, Repo: opts.Repo.Repo}, Status: concern.Status(opts.Status), Query: opts.Query, Limit: opts.Limit, Offset: opts.Offset,
+		Repo: ref, Status: concern.Status(opts.Status), Query: opts.Query, Limit: opts.Limit, Offset: opts.Offset,
 	})
 	if err != nil {
 		return nil, mapConcernError(err)
@@ -225,7 +233,7 @@ func (s *Service) concernResult(ctx context.Context, item *concern.Concern) (*co
 		}
 	}
 	result := &contracts.ConcernResult{
-		ID: item.ID, Repo: contracts.RepoRef{Owner: item.Repo.Owner, Repo: item.Repo.Repo}, CommitSHA: item.CommitSHA, WorkspaceID: item.WorkspaceID,
+		ID: item.ID, Repo: contracts.RepoRef{Owner: item.Repo.Owner(), Repo: item.Repo.Repo()}, CommitSHA: item.CommitSHA, WorkspaceID: item.WorkspaceID,
 		Title: item.Title, ProblemStatement: item.ProblemStatement, SuspectedOwner: item.SuspectedOwner, Confidence: item.Confidence,
 		Unknowns: append([]string(nil), item.Unknowns...), SuccessCriterion: item.SuccessCriterion, Notes: item.Notes,
 		EvidenceIDs: append([]string(nil), item.EvidenceIDs...), SourceRefCount: len(item.SourceRefs), Freshness: string(freshness.Status),

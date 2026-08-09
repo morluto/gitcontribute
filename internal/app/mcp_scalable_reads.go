@@ -34,9 +34,8 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 	out := mcpcontract.GetRepositoriesOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput], len(in.Repositories)), SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
 	repositoryKeys := make([]corpus.RepositoryKey, 0, len(in.Repositories))
 	for _, input := range in.Repositories {
-		ref := domain.RepoRef{Owner: input.Owner, Repo: input.Repo}
-		if ref.Validate() == nil {
-			repositoryKeys = append(repositoryKeys, corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo})
+		if ref, err := domain.NewRepoRef(input.Owner, input.Repo); err == nil {
+			repositoryKeys = append(repositoryKeys, corpus.RepositoryKey{Owner: ref.Owner(), Name: ref.Repo()})
 		}
 	}
 	repositories, err := c.GetRepositoriesBatch(ctx, repositoryKeys)
@@ -58,14 +57,14 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 	for i, input := range in.Repositories {
 		key := input.Owner + "/" + input.Repo
 		item := mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput]{Key: key, Status: "complete"}
-		ref := domain.RepoRef{Owner: input.Owner, Repo: input.Repo}
-		if err := ref.Validate(); err != nil {
+		ref, err := domain.NewRepoRef(input.Owner, input.Repo)
+		if err != nil {
 			item.Status, item.Reason, item.Message = "failed", "invalid_reference", err.Error()
 			out.Items[i] = item
 			out.Status = "partial"
 			continue
 		}
-		repo := repositories[corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo}]
+		repo := repositories[corpus.RepositoryKey{Owner: ref.Owner(), Name: ref.Repo()}]
 		if repo == nil {
 			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", "repository is not present in the local corpus"
 			item.Recovery = recoveryPlan(item.Reason, item.Message, syncRepositoryContextCall(input.Owner, input.Repo))
@@ -148,9 +147,8 @@ func (r *MCPReader) GetThreads(ctx context.Context, in mcpcontract.GetThreadsInp
 	out := mcpcontract.GetThreadsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.ThreadOutput], len(in.Threads)), SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
 	repositoryKeys := make([]corpus.RepositoryKey, 0, len(in.Threads))
 	for _, input := range in.Threads {
-		ref := domain.RepoRef{Owner: input.Owner, Repo: input.Repo}
-		if ref.Validate() == nil && input.Number > 0 {
-			repositoryKeys = append(repositoryKeys, corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo})
+		if ref, err := domain.NewRepoRef(input.Owner, input.Repo); err == nil && input.Number > 0 {
+			repositoryKeys = append(repositoryKeys, corpus.RepositoryKey{Owner: ref.Owner(), Name: ref.Repo()})
 		}
 	}
 	repositories, err := c.GetRepositoriesBatch(ctx, repositoryKeys)
@@ -159,7 +157,11 @@ func (r *MCPReader) GetThreads(ctx context.Context, in mcpcontract.GetThreadsInp
 	}
 	threadKeys := make([]corpus.ThreadKey, 0, len(in.Threads))
 	for _, input := range in.Threads {
-		repo := repositories[corpus.RepositoryKey{Owner: input.Owner, Name: input.Repo}]
+		ref, parseErr := domain.NewRepoRef(input.Owner, input.Repo)
+		if parseErr != nil {
+			continue
+		}
+		repo := repositories[corpus.RepositoryKey{Owner: ref.Owner(), Name: ref.Repo()}]
 		if repo != nil && input.Number > 0 {
 			threadKeys = append(threadKeys, corpus.ThreadKey{RepositoryID: repo.ID, Kind: input.Kind, Number: input.Number})
 		}
@@ -171,14 +173,14 @@ func (r *MCPReader) GetThreads(ctx context.Context, in mcpcontract.GetThreadsInp
 	for i, input := range in.Threads {
 		key := threadRefKey(input)
 		item := mcpcontract.BatchItem[mcpcontract.ThreadOutput]{Key: key, Status: "complete"}
-		ref := domain.RepoRef{Owner: input.Owner, Repo: input.Repo}
-		if err := ref.Validate(); err != nil || input.Number < 1 {
+		ref, err := domain.NewRepoRef(input.Owner, input.Repo)
+		if err != nil || input.Number < 1 {
 			item.Status, item.Reason, item.Message = "failed", "invalid_reference", "invalid thread reference"
 			out.Items[i] = item
 			out.Status = "partial"
 			continue
 		}
-		repo := repositories[corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo}]
+		repo := repositories[corpus.RepositoryKey{Owner: ref.Owner(), Name: ref.Repo()}]
 		if repo == nil {
 			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", "repository is not present in the local corpus"
 			item.Recovery = recoveryPlan(item.Reason, item.Message, syncRepositoryContextCall(input.Owner, input.Repo))
@@ -195,7 +197,7 @@ func (r *MCPReader) GetThreads(ctx context.Context, in mcpcontract.GetThreadsInp
 			continue
 		}
 		value := corpusThreadToMCPOutput(thread)
-		value.Owner, value.Repo = ref.Owner, ref.Repo
+		value.Owner, value.Repo = ref.Owner(), ref.Repo()
 		value.SnapshotToken = snapshotIdentity(in.SnapshotToken, revision)
 		if in.View == "compact" {
 			value.Body = ""
@@ -414,9 +416,9 @@ func applyPortfolioHealth(out *mcpcontract.PullRequestPortfolioItem, threadID in
 			return false, err
 		}
 		out.MergeStateStatus = strings.ToLower(value.MergeStateStatus)
-		if value.MergeableKnown {
+		if mergeability, known := value.Mergeability(); known {
 			mergeabilityKnown = true
-			mergeable := strings.EqualFold(value.Mergeable, "MERGEABLE")
+			mergeable := strings.EqualFold(mergeability, "MERGEABLE")
 			out.Mergeable = &mergeable
 		}
 	}
@@ -492,10 +494,10 @@ func setPortfolioAttention(out *mcpcontract.PullRequestPortfolioItem, thread cor
 	detailCoverage := coverage[FacetPRDetails]
 	healthComplete := completePortfolioHealthCoverage(coverage, mergeabilityKnown)
 	switch {
-	case thread.Merged:
+	case thread.Merge.IsMerged():
 		out.Attention = "merged"
 		out.Reasons = append([]string{"pull request is merged"}, out.Reasons...)
-	case thread.State == "closed" && thread.MergedKnown:
+	case thread.State == "closed" && thread.Merge.Known():
 		out.Attention = "closed_unmerged"
 		out.Reasons = append([]string{"pull request is closed and GitHub reports it was not merged"}, out.Reasons...)
 	case thread.State == "closed":

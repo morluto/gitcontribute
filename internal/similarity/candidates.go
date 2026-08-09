@@ -138,8 +138,8 @@ type threadRefKey struct {
 
 func duplicateThreadRefKey(ref ThreadRef) threadRefKey {
 	return threadRefKey{
-		owner: strings.ToLower(ref.Repo.Owner),
-		repo:  strings.ToLower(ref.Repo.Repo),
+		owner: strings.ToLower(ref.Repo.Owner()),
+		repo:  strings.ToLower(ref.Repo.Repo()),
 		kind:  ref.Kind, number: ref.Number,
 	}
 }

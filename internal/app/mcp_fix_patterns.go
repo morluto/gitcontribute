@@ -124,10 +124,12 @@ func (r *MCPReader) GetFixPatternReport(ctx context.Context, id string) (mcpcont
 }
 
 func normalizeFixPatternInput(in mcpcontract.MineRepositoryFixPatternsInput) (mcpcontract.MineRepositoryFixPatternsInput, error) {
-	ref := domain.RepoRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(in.Repository.Owner, in.Repository.Repo)
+	if err != nil {
 		return in, err
 	}
+	in.Repository.Owner = ref.Owner()
+	in.Repository.Repo = ref.Repo()
 	after, err := time.Parse(time.RFC3339, in.TimeWindow.UpdatedAfter)
 	if err != nil {
 		return in, errors.New("time_window.updated_after must be RFC 3339")
@@ -269,8 +271,11 @@ func selectFixPatternHydration(a fixPatternAnalysis, in mcpcontract.MineReposito
 }
 
 func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.MineRepositoryFixPatternsInput, progress func(string, string) error, operation fixPatternOperation) (mcpcontract.FixPatternReport, error) {
+	repoRef, err := domain.NewRepoRef(in.Repository.Owner, in.Repository.Repo)
+	if err != nil {
+		return mcpcontract.FixPatternReport{}, err
+	}
 	var c *corpus.Corpus
-	var err error
 	if operation == fixPatternPreview {
 		c, err = r.openReadOnlyCorpus(ctx)
 	} else {
@@ -367,7 +372,7 @@ func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.M
 			if candidates[id].unknownBefore {
 				cluster.UnknownBefore++
 			}
-			classification := classifyFixPattern(thread, in.Repository)
+			classification := classifyFixPattern(thread, repoRef)
 			outcome := fixPatternOutcome(thread, classification.superseded)
 			incrementFixPatternOutcome(&cluster.Outcomes, outcome)
 			if outcome == "unknown" {
@@ -455,16 +460,16 @@ func countUnknownCandidates(candidates map[int64]*fixPatternCandidate) int {
 }
 
 func needsMergeHydration(thread corpus.Thread) bool {
-	return thread.State == "closed" && !thread.MergedKnown
+	return thread.State == "closed" && !thread.Merge.Known()
 }
 
 func fixPatternOutcome(thread corpus.Thread, superseded bool) mcpcontract.FixPatternOutcome {
 	switch {
-	case thread.MergedKnown && thread.Merged:
+	case thread.Merge.IsMerged():
 		return "merged"
 	case thread.State != "closed":
 		return "open"
-	case !thread.MergedKnown:
+	case !thread.Merge.Known():
 		return "unknown"
 	case superseded:
 		return "superseded"
@@ -515,8 +520,8 @@ func buildFixPatternExample(ctx context.Context, c *corpus.Corpus, repoID int64,
 	return example
 }
 
-func classifyFixPattern(thread corpus.Thread, repository mcpcontract.RepositoryRef) fixPatternClassification {
-	refs := relatedwork.Extract(thread.Body, domain.RepoRef{Owner: repository.Owner, Repo: repository.Repo})
+func classifyFixPattern(thread corpus.Thread, repository domain.RepoRef) fixPatternClassification {
+	refs := relatedwork.Extract(thread.Body, repository)
 	classification := fixPatternClassification{relationship: "similarity_only"}
 	bestPriority := 0
 	for _, ref := range refs {
@@ -529,7 +534,7 @@ func classifyFixPattern(thread corpus.Thread, repository mcpcontract.RepositoryR
 		}
 		bestPriority = priority
 		classification.related = &mcpcontract.ThreadRef{
-			Owner: ref.Repo.Owner, Repo: ref.Repo.Repo, Kind: string(ref.Kind), Number: ref.Number,
+			Owner: ref.Repo.Owner(), Repo: ref.Repo.Repo(), Kind: string(ref.Kind), Number: ref.Number,
 		}
 		classification.evidence = ref.Evidence
 		switch ref.Relation {

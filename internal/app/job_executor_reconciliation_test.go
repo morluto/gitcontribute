@@ -58,8 +58,8 @@ func TestStartupReconciliation(t *testing.T) {
 	if reconciled == nil {
 		t.Fatal("reconciled job not found")
 	}
-	if reconciled.Status != corpus.JobStatusFailed {
-		t.Fatalf("status = %q, want %q", reconciled.Status, corpus.JobStatusFailed)
+	if reconciled.State.Status() != corpus.JobStatusFailed {
+		t.Fatalf("status = %q, want %q", reconciled.State.Status(), corpus.JobStatusFailed)
 	}
 	if reconciled.Error != "interrupted by restart" {
 		t.Fatalf("error = %q, want %q", reconciled.Error, "interrupted by restart")
@@ -107,8 +107,8 @@ func TestLiveOwnerNotReconciledByAnotherExecutor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get job: %v", err)
 	}
-	if job.Status != corpus.JobStatusRunning {
-		t.Fatalf("live job was reconciled: status=%q", job.Status)
+	if job.State.Status() != corpus.JobStatusRunning {
+		t.Fatalf("live job was reconciled: status=%q", job.State.Status())
 	}
 }
 
@@ -156,8 +156,8 @@ func TestAbandonedOwnerReconciledByNewExecutor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get job: %v", err)
 	}
-	if job.Status != corpus.JobStatusFailed {
-		t.Fatalf("abandoned job status = %q, want %q", job.Status, corpus.JobStatusFailed)
+	if job.State.Status() != corpus.JobStatusFailed {
+		t.Fatalf("abandoned job status = %q, want %q", job.State.Status(), corpus.JobStatusFailed)
 	}
 	if job.Error != "interrupted by restart" {
 		t.Fatalf("abandoned job error = %q", job.Error)
@@ -218,8 +218,8 @@ func TestReadOnlyCorpusOpenDoesNotReconcileJobs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get job: %v", err)
 	}
-	if j.Status != corpus.JobStatusRunning {
-		t.Fatalf("read-only open reconciled job: status=%q", j.Status)
+	if j.State.Status() != corpus.JobStatusRunning {
+		t.Fatalf("read-only open reconciled job: status=%q", j.State.Status())
 	}
 }
 
@@ -269,7 +269,7 @@ func TestReconcileConcurrentWithHeartbeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get job: %v", err)
 	}
-	if job.Status != corpus.JobStatusRunning {
-		t.Fatalf("live job was reconciled during concurrent heartbeat: status=%q", job.Status)
+	if job.State.Status() != corpus.JobStatusRunning {
+		t.Fatalf("live job was reconciled during concurrent heartbeat: status=%q", job.State.Status())
 	}
 }

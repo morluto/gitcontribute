@@ -15,7 +15,7 @@ func TestCodeSnapshotPruneRejectsStalePlan(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 	for i, commit := range []string{"one", "two"} {
 		snapshot := codeindex.Snapshot{RepoPath: "/repo", Commit: commit, CreatedAt: time.Unix(int64(i+1), 0), TotalBytes: 1, Documents: []codeindex.Document{{Path: commit, Content: commit, Bytes: 1}}}
 		if _, _, err := c.StoreCodeSnapshot(ctx, ref, snapshot); err != nil {
@@ -41,7 +41,7 @@ func TestRepositoryInventoryCountsAndSizes(t *testing.T) {
 	ctx := context.Background()
 
 	owner, name := "owner", "repo"
-	ref := domain.RepoRef{Owner: owner, Repo: name}
+	ref := domain.MustRepoRef(owner, name)
 
 	repo, err := c.ApplyRepositoryObservation(ctx, owner, name, "1", time.Unix(1, 0).UTC(), `{}`)
 	requireInventorySetup(t, "apply repository", err)
@@ -172,7 +172,7 @@ func TestListInventoryAggregatesEveryRepositoryScopeAndFreshness(t *testing.T) {
 	if _, err := c.db.ExecContext(ctx, `UPDATE facet_observations SET observed_at = ?`, encodeTime(time.Unix(30, 0).UTC())); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := c.StoreCodeSnapshot(ctx, domain.RepoRef{Owner: "code", Repo: "only"}, codeindex.Snapshot{
+	if _, _, err := c.StoreCodeSnapshot(ctx, domain.MustRepoRef("code", "only"), codeindex.Snapshot{
 		RepoPath: "/code", Commit: "abc", CreatedAt: time.Unix(40, 0).UTC(), TotalBytes: 7,
 		Documents: []codeindex.Document{{Path: "main.go", Content: "package", Bytes: 7}},
 	}); err != nil {
@@ -207,7 +207,7 @@ func TestCodeSnapshotPrunePreservesLatestN(t *testing.T) {
 	ctx := context.Background()
 
 	owner, name := "owner", "repo"
-	ref := domain.RepoRef{Owner: owner, Repo: name}
+	ref := domain.MustRepoRef(owner, name)
 
 	repo, err := c.ApplyRepositoryObservation(ctx, owner, name, "1", time.Unix(1, 0).UTC(), `{}`)
 	requireInventorySetup(t, "apply repository", err)
@@ -297,7 +297,7 @@ func TestCodeSnapshotPruneRequiresExactRepoScope(t *testing.T) {
 	c, _ := openTestCorpus(t)
 	ctx := context.Background()
 
-	refA := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	refA := domain.MustRepoRef("owner", "repo")
 	first := codeindex.Snapshot{
 		RepoPath: "/repo", Commit: "first", CreatedAt: time.Unix(100, 0).UTC(), TotalBytes: 13,
 		Documents: []codeindex.Document{{Path: "a.go", Content: "needle", Bytes: 13, LanguageHint: "go"}},
@@ -311,7 +311,7 @@ func TestCodeSnapshotPruneRequiresExactRepoScope(t *testing.T) {
 		t.Fatalf("plan: %v", err)
 	}
 
-	refB := domain.RepoRef{Owner: "other", Repo: "repo"}
+	refB := domain.MustRepoRef("other", "repo")
 	if _, err := c.ApplyCodeSnapshotPrune(ctx, refB, plan); err == nil || !strings.Contains(err.Error(), "scope") {
 		t.Fatalf("apply with mismatched scope should fail, got: %v", err)
 	}

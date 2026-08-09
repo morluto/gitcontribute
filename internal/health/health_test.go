@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 )
 
@@ -136,8 +137,7 @@ func TestComputeHealthMetrics(t *testing.T) {
 		Author:          "owner1",
 		SourceCreatedAt: now.Add(-12 * 24 * time.Hour),
 		SourceUpdatedAt: now.Add(-3 * 24 * time.Hour),
-		MergedAt:        now.Add(-3 * 24 * time.Hour),
-		Merged:          true,
+		Merge:           domain.MergedStatus(now.Add(-3 * 24 * time.Hour)),
 	}, "OWNER")
 
 	_ = upsertThread(t, ctx, c, repo.ID, corpus.Thread{
@@ -149,7 +149,7 @@ func TestComputeHealthMetrics(t *testing.T) {
 		SourceCreatedAt: now.Add(-8 * 24 * time.Hour),
 		SourceUpdatedAt: now.Add(-2 * 24 * time.Hour),
 		ClosedAt:        now.Add(-2 * 24 * time.Hour),
-		MergedKnown:     true,
+		Merge:           domain.UnmergedStatus(),
 	}, "NONE")
 
 	_ = upsertThread(t, ctx, c, repo.ID, corpus.Thread{
@@ -267,7 +267,7 @@ func TestExternalMergeRateRequiresObservedOutcome(t *testing.T) {
 		{
 			name: "known zero is preserved",
 			threads: []corpus.Thread{{
-				Kind: corpus.ThreadKindPullRequest, State: "closed", AuthorAssociation: "NONE", SourceCreatedAt: now, MergedKnown: true,
+				Kind: corpus.ThreadKindPullRequest, State: "closed", AuthorAssociation: "NONE", SourceCreatedAt: now, Merge: domain.UnmergedStatus(),
 			}},
 			wantRate:     float64Pointer(0),
 			wantCoverage: "complete",
@@ -275,7 +275,7 @@ func TestExternalMergeRateRequiresObservedOutcome(t *testing.T) {
 		{
 			name: "known one is preserved",
 			threads: []corpus.Thread{{
-				Kind: corpus.ThreadKindPullRequest, State: "closed", AuthorAssociation: "NONE", SourceCreatedAt: now, MergedKnown: true, Merged: true,
+				Kind: corpus.ThreadKindPullRequest, State: "closed", AuthorAssociation: "NONE", SourceCreatedAt: now, Merge: domain.MergedStatus(time.Time{}),
 			}},
 			wantRate:     float64Pointer(1),
 			wantCoverage: "complete",

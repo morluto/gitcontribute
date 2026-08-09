@@ -383,10 +383,10 @@ func (e *JobExecutor) run(jobCtx context.Context, id string, cancel context.Canc
 			_ = e.corpus.TransitionJob(writeCtx, id, corpus.JobStatusQueued, corpus.JobStatusFailed, "", message)
 			return
 		}
-		if job != nil && !isTerminalJobStatus(job.Status) {
+		if job != nil && !isTerminalJobStatus(job.State.Status()) {
 			// Best effort: preserve the original start error in durable job state.
 			//nolint:errcheck
-			_ = e.corpus.TransitionJob(writeCtx, id, job.Status, corpus.JobStatusFailed, "", err.Error())
+			_ = e.corpus.TransitionJob(writeCtx, id, job.State.Status(), corpus.JobStatusFailed, "", err.Error())
 		}
 		return
 	}
@@ -408,7 +408,7 @@ func (e *JobExecutor) run(jobCtx context.Context, id string, cancel context.Canc
 		_ = e.finishJob(writeCtx, id, corpus.JobStatusFailed, "", fmt.Errorf("get job after execution: %w", err).Error())
 		return
 	}
-	if job != nil && job.CancelledAt != nil && !job.CancelledAt.IsZero() {
+	if job != nil && job.State.CancellationRequested() {
 		_ = e.finishJob(writeCtx, id, corpus.JobStatusCancelled, "", "cancelled by request")
 		return
 	}

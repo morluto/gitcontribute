@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/corpus"
-	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/facets"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/repositorycontext"
@@ -38,10 +37,13 @@ func (r *MCPReader) EnsureCoverage(ctx context.Context, in mcpcontract.EnsureCov
 	if in.LimitPerRepository < 1 || in.LimitPerRepository > 1000 {
 		return mcpcontract.JobReference{}, errors.New("limit_per_repository must be between 1 and 1000")
 	}
-	if err := validateEnsureCoverageTarget(in.Target); err != nil {
+	target, normalizedTarget, err := parseCoverageTarget(in.Target)
+	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
-	if in.Target.Type == mcpcontract.CoverageTargetRepository && len(in.Facets) > 0 {
+	in.Target = normalizedTarget
+	_, _, exactThread := target.thread()
+	if !exactThread && len(in.Facets) > 0 {
 		return mcpcontract.JobReference{}, errors.New("facets can be selected only for exact-thread coverage")
 	}
 	allowedFacets := make(map[string]struct{})
@@ -59,25 +61,12 @@ func (r *MCPReader) EnsureCoverage(ctx context.Context, in mcpcontract.EnsureCov
 		seenFacets[name] = struct{}{}
 	}
 	id, err := r.submitJob(ctx, jobKindEnsureCoverage, in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.ensureCoverage(ctx, in, report)
+		return r.ensureCoverage(ctx, in, target, report)
 	})
 	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
 	return queuedJobReference(id, jobKindEnsureCoverage, "coverage workflow started"), nil
-}
-
-func validateEnsureCoverageTarget(target mcpcontract.CoverageTarget) error {
-	if err := (domain.RepoRef{Owner: target.Repository.Owner, Repo: target.Repository.Repo}).Validate(); err != nil {
-		return err
-	}
-	if target.Type == mcpcontract.CoverageTargetRepository && target.Thread == nil {
-		return nil
-	}
-	if target.Type == mcpcontract.CoverageTargetExactThread && target.Thread != nil && (target.Thread.Kind == "issue" || target.Thread.Kind == "pull_request") && target.Thread.Number > 0 {
-		return nil
-	}
-	return errInvalidCoverageTarget
 }
 
 func (r *MCPReader) ReadSnapshot(ctx context.Context, token string) (mcpcontract.CorpusSnapshotArtifact, error) {
@@ -125,12 +114,12 @@ func (r *MCPReader) ReadSnapshot(ctx context.Context, token string) (mcpcontract
 	}, nil
 }
 
-func (r *MCPReader) ensureCoverage(ctx context.Context, in mcpcontract.EnsureCoverageInput, report func(string, string) error) (mcpcontract.EnsureCoverageJobResult, error) {
+func (r *MCPReader) ensureCoverage(ctx context.Context, in mcpcontract.EnsureCoverageInput, target parsedCoverageTarget, report func(string, string) error) (mcpcontract.EnsureCoverageJobResult, error) {
 	c, err := r.openCorpus(ctx)
 	if err != nil {
 		return mcpcontract.EnsureCoverageJobResult{}, err
 	}
-	before, reason, err := readCoverageTarget(ctx, c, in.Target)
+	before, reason, err := readParsedCoverageTarget(ctx, c, target)
 	if err != nil {
 		return mcpcontract.EnsureCoverageJobResult{}, err
 	}
@@ -139,7 +128,8 @@ func (r *MCPReader) ensureCoverage(ctx context.Context, in mcpcontract.EnsureCov
 		result.CoverageBefore = &before
 	}
 	remaining := in.MaxRequests
-	repo := in.Target.Repository
+	repoRef := target.repository()
+	repo := mcpcontract.RepositoryRef{Owner: repoRef.Owner(), Repo: repoRef.Repo()}
 	stage := func(name, status, message string) {
 		result.CompletedStages = append(result.CompletedStages, name)
 		result.StageOutcomes = append(result.StageOutcomes, mcpcontract.CoverageStageOutcome{Stage: name, Status: status, Message: message})
@@ -161,20 +151,25 @@ func (r *MCPReader) ensureCoverage(ctx context.Context, in mcpcontract.EnsureCov
 		stage("repository_context", "skipped", "repository identity already present")
 	}
 	headerRequests := 1
-	if in.Target.Type == mcpcontract.CoverageTargetRepository {
+	kind, number, exactThread := target.thread()
+	if !exactThread {
 		headerRequests = 2 * ((in.LimitPerRepository + 99) / 100)
 	}
 	if remaining < headerRequests {
 		return result, errors.New("max_requests exhausted before thread synchronization")
 	}
 	threadInput := mcpcontract.SyncThreadsInput{MaxRequests: headerRequests}
-	if in.Target.Type == mcpcontract.CoverageTargetExactThread {
+	if exactThread {
 		threadInput.Selection = "threads"
-		threadInput.Threads = []mcpcontract.ThreadRef{{Owner: repo.Owner, Repo: repo.Repo, Kind: in.Target.Thread.Kind, Number: in.Target.Thread.Number}}
+		threadInput.Threads = []mcpcontract.ThreadRef{{Owner: repo.Owner, Repo: repo.Repo, Kind: string(kind), Number: number}}
 	} else {
 		threadInput.Selection, threadInput.Repositories, threadInput.Kind, threadInput.State, threadInput.LimitPerRepository = "repositories", []mcpcontract.RepositoryRef{repo}, "both", "all", in.LimitPerRepository
 	}
-	threadResult, err := r.syncThreadsBatch(ctx, threadInput, report)
+	threadRequest, _, err := parseSyncThreadsInput(threadInput)
+	if err != nil {
+		return result, err
+	}
+	threadResult, err := r.syncThreadsBatch(ctx, threadRequest, report)
 	if err != nil {
 		return result, err
 	}
@@ -184,7 +179,7 @@ func (r *MCPReader) ensureCoverage(ctx context.Context, in mcpcontract.EnsureCov
 		result.Status, result.Incomplete = "partial", true
 	}
 	stage("thread_headers", threadStatus, "thread headers synchronized after repository bootstrap")
-	if in.Target.Type == mcpcontract.CoverageTargetExactThread && len(in.Facets) > 0 {
+	if exactThread && len(in.Facets) > 0 {
 		pages := in.MaxPages
 		if bound := remaining / len(in.Facets); bound < pages {
 			pages = bound
@@ -204,7 +199,7 @@ func (r *MCPReader) ensureCoverage(ctx context.Context, in mcpcontract.EnsureCov
 	} else {
 		stage("selected_facets", "skipped", "no exact-thread facets requested")
 	}
-	after, afterReason, err := readCoverageTarget(ctx, c, in.Target)
+	after, afterReason, err := readParsedCoverageTarget(ctx, c, target)
 	if err != nil {
 		return result, err
 	}
@@ -218,12 +213,12 @@ func (r *MCPReader) ensureCoverage(ctx context.Context, in mcpcontract.EnsureCov
 		result.Status = "partial"
 	}
 	stage("coverage_verification", result.Status, afterReason)
-	snapshot, err := c.MaterializeReadSnapshot(ctx, corpus.SnapshotMaterialization{Kind: "coverage", Scope: in.Target, SourceManifest: after, DerivedVersions: map[string]string{"coverage": "v1"}, Completeness: map[string]bool{"unknown": result.Unknown, "incomplete": result.Incomplete}, Provenance: map[string]any{"producer": "gitcontribute", "workflow": jobKindEnsureCoverage}, Payload: after})
+	snapshot, err := c.MaterializeReadSnapshot(ctx, corpus.SnapshotMaterialization{Kind: "coverage", Scope: target.wire(), SourceManifest: after, DerivedVersions: map[string]string{"coverage": "v1"}, Completeness: map[string]bool{"unknown": result.Unknown, "incomplete": result.Incomplete}, Provenance: map[string]any{"producer": "gitcontribute", "workflow": jobKindEnsureCoverage}, Payload: after})
 	if err != nil {
 		return result, err
 	}
 	result.SnapshotToken, result.ArtifactDigest = snapshot.Token, snapshot.ArtifactDigest
-	result.NextAction = mcpcontract.FollowUpAction{Type: "read_snapshot", ReadSnapshot: &mcpcontract.SnapshotReadAction{SnapshotToken: snapshot.Token}}
+	result.NextAction = mcpcontract.FollowUpActionFor(mcpcontract.SnapshotReadAction{SnapshotToken: snapshot.Token})
 	stage("snapshot_materialization", "complete", "immutable coverage snapshot created")
 	return result, nil
 }

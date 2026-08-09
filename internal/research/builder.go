@@ -160,9 +160,9 @@ func assembleBrief(in assemblyInput) *Brief {
 	allSources = append(allSources, in.repoSources...)
 	allSources = append(allSources, in.guidanceSources...)
 	allSources = append(allSources, in.relations.Sources...)
-	allSources = append(allSources, in.health.Sources...)
-	if in.code.Present {
-		allSources = append(allSources, in.code.Source)
+	allSources = append(allSources, in.health.Sources()...)
+	if in.code.Present() {
+		allSources = append(allSources, in.code.Source())
 	}
 	brief.SourceAsOf = latestSourceTime(allSources)
 	return brief
@@ -170,14 +170,15 @@ func assembleBrief(in assemblyInput) *Brief {
 
 func buildCurrentState(t ThreadSnapshot) CurrentStateSection {
 	var merged *bool
-	if t.MergedKnown {
-		merged = &t.Merged
+	if t.Merge.Known() {
+		value := t.Merge.IsMerged()
+		merged = &value
 	}
 	return CurrentStateSection{
 		SectionMeta: sourceMeta([]SourceRef{t.Source}, ""),
 		State:       t.State, StateReason: t.StateReason, Draft: t.Draft, Locked: t.Locked,
 		Merged: merged, Labels: cleanSorted(t.Labels), Milestone: t.Milestone,
-		CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt, ClosedAt: t.ClosedAt, MergedAt: t.MergedAt,
+		CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt, ClosedAt: t.ClosedAt, MergedAt: t.Merge.MergedAt(),
 	}
 }
 
@@ -289,7 +290,7 @@ func buildTimeline(e ThreadEvidence, gap string) TimelineSection {
 	add(t.CreatedAt, "created", t.Author, "thread created", t.Source)
 	add(t.UpdatedAt, "updated", "", "thread source updated", t.Source)
 	add(t.ClosedAt, "closed", "", "thread closed", t.Source)
-	add(t.MergedAt, "merged", "", "pull request merged", t.Source)
+	add(t.Merge.MergedAt(), "merged", "", "pull request merged", t.Source)
 	discussion := append([]DiscussionItem{}, e.Discussion...)
 	sort.SliceStable(discussion, func(i, j int) bool {
 		left, right := eventTime(discussion[i]), eventTime(discussion[j])
@@ -356,19 +357,19 @@ func buildPullRequests(e RelationshipEvidence) PullRequestSection {
 }
 
 func buildCode(e CodeEvidence) CodeSection {
-	if !e.Present {
+	if !e.Present() {
 		return CodeSection{
 			SectionMeta: sourceMeta(nil, "repository has no local code snapshot"),
-			Queries:     cleanSorted(e.Queries), Hits: []CodeHit{},
+			Queries:     cleanSorted(e.Queries()), Hits: []CodeHit{},
 		}
 	}
 	unknown := ""
-	if e.Truncated {
+	if e.Truncated() {
 		unknown = "code matches reached the per-brief bound"
 	}
 	return CodeSection{
-		SectionMeta: sourceMeta([]SourceRef{e.Source}, unknown), CommitSHA: e.CommitSHA,
-		Queries: cleanSorted(e.Queries), Hits: append([]CodeHit{}, e.Hits...), Truncated: e.Truncated,
+		SectionMeta: sourceMeta([]SourceRef{e.Source()}, unknown), CommitSHA: e.CommitSHA(),
+		Queries: cleanSorted(e.Queries()), Hits: e.Hits(), Truncated: e.Truncated(),
 	}
 }
 
@@ -380,24 +381,24 @@ func buildGuidance(text string, sources []SourceRef) GuidanceSection {
 }
 
 func buildHealth(e HealthEvidence) HealthSection {
+	metrics, available := e.Metrics()
+	if !available {
+		return HealthSection{SectionMeta: sourceMeta(nil, nonEmpty(e.UnknownReason(), "repository health is unavailable"))}
+	}
 	section := HealthSection{
-		Archived: e.Archived, OpenIssues: e.OpenIssues, OpenPullRequests: e.OpenPullRequests,
-		ExternalPRMergeRate: e.ExternalPRMergeRate, ExternalPRSampleSize: e.ExternalPRSampleSize,
-		IssueResponseMedianHours:       e.IssueResponseMedianHours,
-		PullRequestResponseMedianHours: e.PullRequestResponseMedianHours,
-		IssueResponseSampleSize:        e.IssueResponseSampleSize,
-		PullRequestResponseSampleSize:  e.PullRequestResponseSampleSize,
-		ThreadSampleSize:               e.ThreadSampleSize, ThreadsTruncated: e.ThreadsTruncated,
+		Archived: metrics.Archived, OpenIssues: metrics.OpenIssues, OpenPullRequests: metrics.OpenPullRequests,
+		ExternalPRMergeRate: metrics.ExternalPRMergeRate, ExternalPRSampleSize: metrics.ExternalPRSampleSize,
+		IssueResponseMedianHours:       metrics.IssueResponseMedianHours,
+		PullRequestResponseMedianHours: metrics.PullRequestResponseMedianHours,
+		IssueResponseSampleSize:        metrics.IssueResponseSampleSize,
+		PullRequestResponseSampleSize:  metrics.PullRequestResponseSampleSize,
+		ThreadSampleSize:               metrics.ThreadSampleSize, ThreadsTruncated: metrics.ThreadsTruncated,
 	}
-	if !e.Available {
-		section.SectionMeta = sourceMeta(e.Sources, nonEmpty(e.UnknownReason, "repository health is unavailable"))
-		return section
-	}
-	unknown := e.UnknownReason
-	if e.ThreadsTruncated {
+	unknown := e.UnknownReason()
+	if metrics.ThreadsTruncated {
 		unknown = joinReasons(unknown, "health metrics use a bounded thread population")
 	}
-	section.SectionMeta = sourceMeta(e.Sources, unknown)
+	section.SectionMeta = sourceMeta(e.Sources(), unknown)
 	return section
 }
 
@@ -406,13 +407,13 @@ func buildCoverage(in assemblyInput, discussionGap string) CoverageSection {
 	gaps := []string{}
 	repoFacets := map[string]domain.FacetCoverage{}
 	for _, facet := range in.repoCoverage.Facets {
-		repoFacets[facet.Facet] = facet
+		repoFacets[facet.Facet()] = facet
 		facts = append(facts, CoverageFact{
-			Scope: "repository", Facet: facet.Facet, Present: facet.Present, Complete: facet.Complete,
-			AsOf: facet.Freshness.AsOf, Count: facet.Count,
+			Scope: "repository", Facet: facet.Facet(), Present: true, Complete: facet.Complete(),
+			AsOf: facet.AsOf(), Count: facet.Count(),
 		})
-		if !facet.Present || !facet.Complete {
-			gaps = append(gaps, "repository:"+facet.Facet)
+		if !facet.Complete() {
+			gaps = append(gaps, "repository:"+facet.Facet())
 		}
 	}
 	for _, required := range []string{"metadata", "threads"} {
@@ -423,18 +424,19 @@ func buildCoverage(in assemblyInput, discussionGap string) CoverageSection {
 	}
 	for _, facet := range in.thread.Coverage {
 		facts = append(facts, CoverageFact{
-			Scope: "thread", Facet: facet.Facet, Present: facet.Present, Complete: facet.Complete,
-			Truncated: facet.Truncated, AsOf: facet.AsOf, Count: facet.Count,
+			Scope: "thread", Facet: facet.Facet(), Present: facet.Present(), Complete: facet.Complete(),
+			Truncated: facet.Truncated(), AsOf: facet.AsOf(), Count: facet.Count(),
 		})
-		if !facet.Present || !facet.Complete || facet.Truncated {
-			gaps = append(gaps, "thread:"+facet.Facet)
+		if !facet.Complete() {
+			gaps = append(gaps, "thread:"+facet.Facet())
 		}
 	}
+	codePresent := in.code.Present()
 	facts = append(facts, CoverageFact{
-		Scope: "repository", Facet: "code_index", Present: in.code.Present, Complete: in.code.Present,
-		AsOf: in.code.Source.AsOf, Count: len(in.code.Hits),
+		Scope: "repository", Facet: "code_index", Present: codePresent, Complete: codePresent,
+		AsOf: in.code.Source().AsOf, Count: len(in.code.Hits()),
 	})
-	if !in.code.Present {
+	if !codePresent {
 		gaps = append(gaps, "repository:code_index")
 	}
 	guidancePresent := strings.TrimSpace(in.guidance) != "" && len(in.guidanceSources) > 0
@@ -451,8 +453,8 @@ func buildCoverage(in assemblyInput, discussionGap string) CoverageSection {
 	gaps = cleanSorted(gaps)
 	sources := append([]SourceRef{}, in.repoSources...)
 	sources = append(sources, discussionSources(in.thread)...)
-	if in.code.Present {
-		sources = append(sources, in.code.Source)
+	if codePresent {
+		sources = append(sources, in.code.Source())
 	}
 	sources = append(sources, in.guidanceSources...)
 	unknown := discussionGap
@@ -467,8 +469,8 @@ func buildNext(in assemblyInput, discussionGap string) NextSection {
 	commands := []NextCommand{}
 	missingFacets := []string{}
 	for _, facet := range in.thread.Coverage {
-		if !facet.Present || !facet.Complete {
-			missingFacets = append(missingFacets, facet.Facet)
+		if !facet.Complete() {
+			missingFacets = append(missingFacets, facet.Facet())
 		}
 	}
 	if len(missingFacets) > 0 {
@@ -480,7 +482,7 @@ func buildNext(in assemblyInput, discussionGap string) NextSection {
 	for _, required := range []string{"metadata", "threads"} {
 		covered := false
 		for _, facet := range in.repoCoverage.Facets {
-			if facet.Facet == required && facet.Present && facet.Complete {
+			if facet.Facet() == required && facet.Complete() {
 				covered = true
 				break
 			}
@@ -493,7 +495,7 @@ func buildNext(in assemblyInput, discussionGap string) NextSection {
 			break
 		}
 	}
-	if !in.code.Present {
+	if !in.code.Present() {
 		commands = append(commands, NextCommand{Reason: "index a clean local checkout for code hits", Command: "gitcontribute index " + ref.Repo.String() + " ."})
 	}
 	if in.relations.PullRequestCapped || in.relations.DuplicateCapped {
@@ -526,10 +528,10 @@ func extractReferences(e ThreadEvidence) []Reference {
 	out := []Reference{}
 	for _, input := range inputs {
 		for _, ref := range relatedwork.Extract(input.text, e.Thread.Ref.Repo) {
-			if strings.EqualFold(ref.Repo.Owner, e.Thread.Ref.Repo.Owner) && strings.EqualFold(ref.Repo.Repo, e.Thread.Ref.Repo.Repo) && ref.Number == e.Thread.Ref.Number {
+			if strings.EqualFold(ref.Repo.Owner(), e.Thread.Ref.Repo.Owner()) && strings.EqualFold(ref.Repo.Repo(), e.Thread.Ref.Repo.Repo()) && ref.Number == e.Thread.Ref.Number {
 				continue
 			}
-			key := strings.ToLower(fmt.Sprintf("%s/%s:%s#%d", ref.Repo.Owner, ref.Repo.Repo, ref.Kind, ref.Number))
+			key := strings.ToLower(fmt.Sprintf("%s/%s:%s#%d", ref.Repo.Owner(), ref.Repo.Repo(), ref.Kind, ref.Number))
 			if _, ok := seen[key]; ok {
 				continue
 			}
@@ -585,14 +587,14 @@ func discussionCoverageGap(kind domain.ThreadKind, coverage []FacetCoverage) str
 	required := facets.DefaultFor(string(kind))
 	byFacet := map[string]FacetCoverage{}
 	for _, item := range coverage {
-		byFacet[item.Facet] = item
+		byFacet[item.Facet()] = item
 	}
 	gaps := []string{}
 	for _, facet := range required {
 		item, ok := byFacet[facet]
-		if !ok || !item.Present {
+		if !ok || !item.Present() {
 			gaps = append(gaps, facet+" not hydrated")
-		} else if !item.Complete {
+		} else if !item.Complete() {
 			gaps = append(gaps, facet+" incomplete")
 		}
 	}
@@ -602,8 +604,8 @@ func discussionCoverageGap(kind domain.ThreadKind, coverage []FacetCoverage) str
 func discussionSources(e ThreadEvidence) []SourceRef {
 	out := []SourceRef{e.Thread.Source}
 	for _, facet := range e.Coverage {
-		if facet.Present {
-			out = append(out, facet.Source)
+		if facet.Present() {
+			out = append(out, facet.Source())
 		}
 	}
 	for _, item := range e.Discussion {

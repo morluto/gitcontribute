@@ -31,7 +31,7 @@ func (s *Service) StartInvestigationFromThread(ctx context.Context, requested re
 	if err != nil {
 		return nil, err
 	}
-	repo, err := c.GetRepository(ctx, requested.Repo.Owner, requested.Repo.Repo)
+	repo, err := c.GetRepository(ctx, requested.Repo.Owner(), requested.Repo.Repo())
 	if err != nil {
 		return nil, fmt.Errorf("get thread investigation repository: %w", err)
 	}

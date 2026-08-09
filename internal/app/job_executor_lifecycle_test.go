@@ -67,8 +67,8 @@ func TestJobExecutorCloseCancelsAndWaits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get after close: %v", err)
 	}
-	if job.Status != corpus.JobStatusCancelled {
-		t.Fatalf("status = %q, want %q", job.Status, corpus.JobStatusCancelled)
+	if job.State.Status() != corpus.JobStatusCancelled {
+		t.Fatalf("status = %q, want %q", job.State.Status(), corpus.JobStatusCancelled)
 	}
 }
 

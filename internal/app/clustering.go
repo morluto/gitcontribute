@@ -18,7 +18,10 @@ import (
 // ListClusters reads the current stored duplicate-candidate projection. It does
 // not compute or write cluster state.
 func (s *Service) ListClusters(ctx context.Context, repo contracts.RepoRef, limit int) (*contracts.ClusterListResult, error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateClusterList(ref, limit); err != nil {
 		return nil, err
 	}
@@ -36,8 +39,8 @@ func (s *Service) ListClusters(ctx context.Context, repo contracts.RepoRef, limi
 // RefreshClusters explicitly computes and persists the duplicate-candidate
 // projection for a repository.
 func (s *Service) RefreshClusters(ctx context.Context, repo contracts.RepoRef) (*contracts.ClusterRefreshResult, error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 	c, err := s.openCorpus(ctx)
@@ -97,8 +100,8 @@ func clusterRefreshToCLI(repo contracts.RepoRef, disposition string, identity cl
 }
 
 func validateClusterList(ref domain.RepoRef, limit int) error {
-	if err := ref.Validate(); err != nil {
-		return err
+	if !ref.IsValid() {
+		return errors.New("repository reference is not parsed")
 	}
 	if limit < 1 || limit > 1000 {
 		return errors.New("cluster limit must be between 1 and 1000")

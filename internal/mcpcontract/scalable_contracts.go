@@ -2,7 +2,6 @@ package mcpcontract
 
 import (
 	"github.com/morluto/gitcontribute/internal/failure"
-
 	"github.com/morluto/gitcontribute/internal/similarity"
 )
 
@@ -27,116 +26,6 @@ type SearchGitHubRepositoriesInput struct {
 	Page           int      `json:"page,omitempty" jsonschema:"Result page within GitHub's 1,000-result cap"`
 	ResponseFormat string   `json:"response_format,omitempty" jsonschema:"concise or detailed"`
 }
-
-// RecoveryPlan is the only model-visible recovery shape. Versioning keeps the
-// contract explicit while Then preserves the order in which calls are made.
-type RecoveryPlan struct {
-	Version string     `json:"version"`
-	Reason  string     `json:"reason"`
-	Message string     `json:"message"`
-	Then    []ToolCall `json:"then,omitempty"`
-}
-
-// ToolCall is one discriminated, replayable MCP action in a recovery plan.
-type ToolCall struct {
-	Type                  string                             `json:"type"`
-	PollJob               *GetJobsInput                      `json:"poll_job,omitempty"`
-	GetRepositories       *GetRepositoriesInput              `json:"get_repositories,omitempty"`
-	EnsureCoverage        *EnsureCoverageInput               `json:"ensure_coverage,omitempty"`
-	SyncRepositoryContext *SyncRepositoryContextInput        `json:"sync_repository_context,omitempty"`
-	SyncThreads           *SyncThreadsInput                  `json:"sync_threads,omitempty"`
-	HydrateThreads        *HydrateThreadsInput               `json:"hydrate_threads,omitempty"`
-	SyncPortfolio         *SyncPortfolioInput                `json:"sync_portfolio,omitempty"`
-	SyncFeedback          *SyncPullRequestFeedbackInput      `json:"sync_pull_request_feedback,omitempty"`
-	IndexFeedback         *IndexPullRequestFeedbackInput     `json:"index_pull_request_feedback,omitempty"`
-	SyncCI                *SyncCIFailuresInput               `json:"sync_ci_failures,omitempty"`
-	QueryDeepWiki         *DeepWikiInput                     `json:"query_deepwiki,omitempty"`
-	IndexRepositories     *IndexRepositoriesInput            `json:"index_repositories,omitempty"`
-	FindClusters          *FindClustersInput                 `json:"find_clusters,omitempty"`
-	FindNeighbors         *FindNeighborsInput                `json:"find_neighbors,omitempty"`
-	RankOpportunities     *RankOpportunitiesInput            `json:"rank_opportunities,omitempty"`
-	MineFixPatterns       *MineRepositoryFixPatternsInput    `json:"mine_repository_fix_patterns,omitempty"`
-	PreviewFixPatterns    *PreviewRepositoryFixPatternsInput `json:"preview_fix_patterns,omitempty"`
-	SearchGitHubRepos     *SearchGitHubRepositoriesInput     `json:"search_github_repositories,omitempty"`
-	SearchGitHubThreads   *SearchGitHubThreadsInput          `json:"search_github_threads,omitempty"`
-	SearchCode            *SearchCodeInput                   `json:"search_code,omitempty"`
-	ReadSourceFiles       *ReadSourceFilesInput              `json:"read_source_files,omitempty"`
-	InspectCommitChanges  *InspectCommitChangesInput         `json:"inspect_commit_changes,omitempty"`
-	CheckMergeConflicts   *CheckMergeConflictsInput          `json:"check_merge_conflicts,omitempty"`
-	FindRelatedWork       *FindRelatedWorkInput              `json:"find_related_work,omitempty"`
-	ListConcerns          *ListConcernsInput                 `json:"list_concerns,omitempty"`
-	ListPortfolio         *ListPullRequestPortfolioInput     `json:"list_pull_request_portfolio,omitempty"`
-	ExportManifest        *ExportManifestInput               `json:"export_manifest,omitempty"`
-}
-
-type recoveryActionInput interface {
-	GetJobsInput | GetRepositoriesInput | EnsureCoverageInput | SyncRepositoryContextInput | SyncThreadsInput | HydrateThreadsInput | SyncPortfolioInput | SyncPullRequestFeedbackInput | IndexPullRequestFeedbackInput | SyncCIFailuresInput | DeepWikiInput | IndexRepositoriesInput | FindClustersInput | FindNeighborsInput | RankOpportunitiesInput | MineRepositoryFixPatternsInput | PreviewRepositoryFixPatternsInput | SearchGitHubRepositoriesInput | SearchGitHubThreadsInput | SearchCodeInput | ReadSourceFilesInput | InspectCommitChangesInput | CheckMergeConflictsInput | FindRelatedWorkInput | ListConcernsInput | ListPullRequestPortfolioInput | ExportManifestInput
-}
-
-// RecoveryAction derives the action discriminator from a concrete input type,
-// making incompatible tool/argument combinations unrepresentable.
-func RecoveryAction[T recoveryActionInput](input T) ToolCall {
-	switch value := any(input).(type) {
-	case GetJobsInput:
-		return ToolCall{Type: "poll_job", PollJob: &value}
-	case GetRepositoriesInput:
-		return ToolCall{Type: "get_repositories", GetRepositories: &value}
-	case EnsureCoverageInput:
-		return ToolCall{Type: "ensure_coverage", EnsureCoverage: &value}
-	case SyncRepositoryContextInput:
-		return ToolCall{Type: "sync_repository_context", SyncRepositoryContext: &value}
-	case SyncThreadsInput:
-		return ToolCall{Type: "sync_threads", SyncThreads: &value}
-	case HydrateThreadsInput:
-		return ToolCall{Type: "hydrate_threads", HydrateThreads: &value}
-	case SyncPortfolioInput:
-		return ToolCall{Type: "sync_portfolio", SyncPortfolio: &value}
-	case SyncPullRequestFeedbackInput:
-		return ToolCall{Type: "sync_pull_request_feedback", SyncFeedback: &value}
-	case IndexPullRequestFeedbackInput:
-		return ToolCall{Type: "index_pull_request_feedback", IndexFeedback: &value}
-	case SyncCIFailuresInput:
-		return ToolCall{Type: "sync_ci_failures", SyncCI: &value}
-	case DeepWikiInput:
-		return ToolCall{Type: "query_deepwiki", QueryDeepWiki: &value}
-	case IndexRepositoriesInput:
-		return ToolCall{Type: "index_repositories", IndexRepositories: &value}
-	case FindClustersInput:
-		return ToolCall{Type: "find_clusters", FindClusters: &value}
-	case FindNeighborsInput:
-		return ToolCall{Type: "find_neighbors", FindNeighbors: &value}
-	case RankOpportunitiesInput:
-		return ToolCall{Type: "rank_opportunities", RankOpportunities: &value}
-	case MineRepositoryFixPatternsInput:
-		return ToolCall{Type: "mine_repository_fix_patterns", MineFixPatterns: &value}
-	case PreviewRepositoryFixPatternsInput:
-		return ToolCall{Type: "preview_fix_patterns", PreviewFixPatterns: &value}
-	case SearchGitHubRepositoriesInput:
-		return ToolCall{Type: "search_github_repositories", SearchGitHubRepos: &value}
-	case SearchGitHubThreadsInput:
-		return ToolCall{Type: "search_github_threads", SearchGitHubThreads: &value}
-	case SearchCodeInput:
-		return ToolCall{Type: "search_code", SearchCode: &value}
-	case ReadSourceFilesInput:
-		return ToolCall{Type: "read_source_files", ReadSourceFiles: &value}
-	case InspectCommitChangesInput:
-		return ToolCall{Type: "inspect_commit_changes", InspectCommitChanges: &value}
-	case CheckMergeConflictsInput:
-		return ToolCall{Type: "check_merge_conflicts", CheckMergeConflicts: &value}
-	case FindRelatedWorkInput:
-		return ToolCall{Type: "find_related_work", FindRelatedWork: &value}
-	case ListConcernsInput:
-		return ToolCall{Type: "list_concerns", ListConcerns: &value}
-	case ListPullRequestPortfolioInput:
-		return ToolCall{Type: "list_pull_request_portfolio", ListPortfolio: &value}
-	case ExportManifestInput:
-		return ToolCall{Type: "export_manifest", ExportManifest: &value}
-	default:
-		panic("unreachable recovery action input")
-	}
-}
-
-const RecoveryPlanVersion = "gitcontribute.recovery.v1"
 
 // SearchWarning explains a request-specific limitation and how to improve it.
 type SearchWarning struct {

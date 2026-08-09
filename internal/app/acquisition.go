@@ -17,13 +17,13 @@ import (
 // resolved remote URL/default branch/commit SHA/acquired time, and indexes the
 // clean checkout into the corpus. It does not execute repository code.
 func (s *Service) Acquire(ctx context.Context, repo contracts.RepoRef, remote string) (result *contracts.AcquisitionResult, returnErr error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 	remote = strings.TrimSpace(remote)
 	if remote == "" {
-		remote = fmt.Sprintf("https://github.com/%s/%s.git", ref.Owner, ref.Repo)
+		remote = fmt.Sprintf("https://github.com/%s/%s.git", ref.Owner(), ref.Repo())
 	}
 
 	cacheRoot, err := s.paths.AcquisitionCacheDir()
@@ -36,7 +36,7 @@ func (s *Service) Acquire(ctx context.Context, repo contracts.RepoRef, remote st
 		return nil, fmt.Errorf("create acquisition manager: %w", err)
 	}
 
-	acq, err := mgr.Acquire(ctx, ref.Owner, ref.Repo, remote)
+	acq, err := mgr.Acquire(ctx, ref.Owner(), ref.Repo(), remote)
 	if err != nil {
 		return nil, fmt.Errorf("acquire %s: %w", ref, err)
 	}

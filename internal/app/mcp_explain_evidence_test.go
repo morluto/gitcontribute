@@ -16,9 +16,9 @@ func TestMCPReaderExplainMatchReturnsMatchingExcerpt(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{
-		Owner: ref.Owner, Name: ref.Repo, Description: "unrelated description",
+		Owner: ref.Owner(), Name: ref.Repo(), Description: "unrelated description",
 		Topics: []string{"synthwave"}, SourceUpdatedAt: time.Unix(1, 0).UTC(),
 	}, `{}`)
 	if err != nil {
@@ -42,7 +42,7 @@ func TestMCPReaderExplainMatchReturnsMatchingExcerpt(t *testing.T) {
 
 	reader := svc.MCPReader()
 	threadOut, err := reader.ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
-		Owner: ref.Owner, Repo: ref.Repo, Kind: "issue", Number: thread.Number, Query: "deepthreadneedle",
+		Owner: ref.Owner(), Repo: ref.Repo(), Kind: "issue", Number: thread.Number, Query: "deepthreadneedle",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +52,7 @@ func TestMCPReaderExplainMatchReturnsMatchingExcerpt(t *testing.T) {
 	}
 
 	codeOut, err := reader.ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
-		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Path: "deep.go", Commit: "abc123", Query: "deepcodeneedle",
+		Owner: ref.Owner(), Repo: ref.Repo(), Kind: "code", Path: "deep.go", Commit: "abc123", Query: "deepcodeneedle",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +62,7 @@ func TestMCPReaderExplainMatchReturnsMatchingExcerpt(t *testing.T) {
 	}
 
 	repoOut, err := reader.ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
-		Owner: ref.Owner, Repo: ref.Repo, Kind: "repo", Query: "synthwave",
+		Owner: ref.Owner(), Repo: ref.Repo(), Kind: "repo", Query: "synthwave",
 	})
 	if err != nil {
 		t.Fatal(err)

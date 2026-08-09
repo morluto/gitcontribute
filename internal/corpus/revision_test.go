@@ -21,7 +21,7 @@ func TestCorpusRevisionIsMonotonicAndDetectsStaleReads(t *testing.T) {
 	if initial != 0 {
 		t.Fatalf("initial corpus revision = %d, want 0", initial)
 	}
-	if _, _, err := c.StoreCodeSnapshot(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, codeindex.Snapshot{
+	if _, _, err := c.StoreCodeSnapshot(ctx, domain.MustRepoRef("owner", "repo"), codeindex.Snapshot{
 		RepoPath: "/repo", Commit: "first", CreatedAt: time.Unix(1, 0),
 		Documents: []codeindex.Document{{Path: "main.go", Content: "package main", Bytes: 12}},
 	}); err != nil {

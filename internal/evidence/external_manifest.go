@@ -107,6 +107,7 @@ func (s *Service) ImportExternalEvidenceManifest(ctx context.Context, item Exter
 		return nil, fmt.Errorf("external evidence manifest digest mismatch: got %q want %q", item.ManifestSHA256, digest)
 	}
 	firstEvidenceID := ""
+	items := make([]*Evidence, 0, len(item.Claims))
 	for _, claim := range item.Claims {
 		claimDigest, err := DigestExternalEvidenceClaim(digest, claim)
 		if err != nil {
@@ -122,9 +123,10 @@ func (s *Service) ImportExternalEvidenceManifest(ctx context.Context, item Exter
 		if firstEvidenceID == "" {
 			firstEvidenceID = e.ID
 		}
-		if err := s.repo.SaveEvidence(ctx, e); err != nil {
-			return nil, fmt.Errorf("save imported external evidence %q: %w", claim.ID, err)
-		}
+		items = append(items, e)
+	}
+	if err := s.repo.SaveEvidenceBatch(ctx, items); err != nil {
+		return nil, fmt.Errorf("save imported external evidence: %w", err)
 	}
 	return &ImportedExternalEvidence{EvidenceID: firstEvidenceID, Producer: item.Producer, ManifestSHA256: digest, ClaimCount: len(item.Claims), Incomplete: item.Completeness != "complete" || item.Integrity != "verified"}, nil
 }
@@ -189,10 +191,16 @@ func validateExternalEvidenceManifest(item ExternalEvidenceManifest) error {
 	if err != nil || len(payload) > maxExternalEvidenceManifestBytes {
 		return fmt.Errorf("external evidence manifest exceeds %d bytes", maxExternalEvidenceManifestBytes)
 	}
+	claimIDs := make(map[string]struct{}, len(item.Claims))
 	for _, claim := range item.Claims {
 		if strings.TrimSpace(claim.ID) == "" || strings.TrimSpace(claim.Description) == "" {
 			return errors.New("external evidence claims require id and description")
 		}
+		claimID := strings.TrimSpace(claim.ID)
+		if _, duplicate := claimIDs[claimID]; duplicate {
+			return fmt.Errorf("duplicate external evidence claim id %q", claimID)
+		}
+		claimIDs[claimID] = struct{}{}
 		switch claim.Type {
 		case EvidenceTypeBaseFailingRegression, EvidenceTypeCandidatePassingRegression, EvidenceTypeMinimalReproduction, EvidenceTypeBenchmark, EvidenceTypeProfiler, EvidenceTypeInvariantViolation, EvidenceTypeCompatibilityMatrix, EvidenceTypeStaticAnalysis, EvidenceTypeManualObservation, EvidenceTypeGitHubSource:
 		default:

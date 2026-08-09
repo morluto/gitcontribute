@@ -187,7 +187,7 @@ func (r SourceRevision) Validate() error {
 
 // Validate checks the shape required by each subject kind.
 func (s SourceSubject) Validate() error {
-	if err := (domain.RepoRef{Owner: s.Owner, Repo: s.Repo}).Validate(); err != nil {
+	if _, err := domain.NewRepoRef(s.Owner, s.Repo); err != nil {
 		return fmt.Errorf("invalid source repository: %w", err)
 	}
 	threadScoped := s.ThreadKind != "" || s.Number != 0

@@ -129,7 +129,7 @@ func (r *readinessEvaluator) evaluate() ([]contracts.ReadinessCheck, error) {
 }
 
 func (r *readinessEvaluator) load() error {
-	repo, err := r.corpus.GetRepository(r.ctx, r.inv.Repo.Owner, r.inv.Repo.Repo)
+	repo, err := r.corpus.GetRepository(r.ctx, r.inv.Repo.Owner(), r.inv.Repo.Repo())
 	if err != nil {
 		return fmt.Errorf("read readiness repository: %w", err)
 	}

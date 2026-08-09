@@ -27,7 +27,7 @@ func evidenceItemResult(ctx context.Context, c *corpus.Corpus, item *evidence.Ev
 func sourceRevisionFromThreadBaseline(baseline investigation.ThreadBaseline) evidence.SourceRevision {
 	return evidence.SourceRevision{
 		Subject: evidence.SourceSubject{
-			Kind: evidence.SourceSubjectThread, Owner: baseline.Repo.Owner, Repo: baseline.Repo.Repo,
+			Kind: evidence.SourceSubjectThread, Owner: baseline.Repo.Owner(), Repo: baseline.Repo.Repo(),
 			ThreadKind: string(baseline.Kind), Number: baseline.Number,
 		},
 		SourceUpdatedAt:     baseline.SourceUpdatedAt,

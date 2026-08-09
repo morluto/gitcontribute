@@ -1,6 +1,10 @@
 package corpus
 
-import "time"
+import (
+	"time"
+
+	"github.com/morluto/gitcontribute/internal/domain"
+)
 
 const (
 	feedbackFacetIssueComments  = "pr_feedback_issue_comments"
@@ -69,8 +73,7 @@ type PullRequestFeedbackProjection struct {
 	PullRequestNumber         int
 	PullRequestAuthor         string
 	PullRequestState          string
-	PullRequestMergedKnown    bool
-	PullRequestMerged         bool
+	PullRequestMerge          domain.MergeStatus
 	Channel                   string
 	FeedbackID                string
 	FeedbackNodeID            string
@@ -87,8 +90,7 @@ type PullRequestFeedbackProjection struct {
 	ReviewState               string
 	CreatedAt                 time.Time
 	UpdatedAt                 time.Time
-	ResolvedKnown             bool
-	Resolved                  bool
+	Resolution                domain.ObservedBool
 	ResolvedBy                string
 	Outdated                  bool
 	HeadSHA                   string

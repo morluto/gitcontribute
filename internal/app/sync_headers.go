@@ -17,7 +17,7 @@ func syncRepositoryHeader(ctx context.Context, c *corpus.Corpus, reader github.R
 	if err := budget.take(); err != nil {
 		return corpus.Repository{}, time.Time{}, err
 	}
-	ghRepo, _, err := reader.GetRepository(ctx, ref.Owner, ref.Repo)
+	ghRepo, _, err := reader.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return corpus.Repository{}, time.Time{}, fmt.Errorf("get repository: %w", err)
 	}
@@ -60,7 +60,7 @@ type syncThreadWriter struct {
 }
 
 func syncThreadHeaderSelection(ctx context.Context, c *corpus.Corpus, reader github.Reader, ref domain.RepoRef, repoID int64, sourceUpdatedAt time.Time, opts SyncOptions, provided []github.Issue, budget *syncRequestBudget) (syncThreadSelection, error) {
-	writer := &syncThreadWriter{ctx: ctx, corpus: c, owner: ref.Owner, repo: ref.Repo, repositoryID: repoID, kind: opts.Kind, sourceUpdatedAt: sourceUpdatedAt}
+	writer := &syncThreadWriter{ctx: ctx, corpus: c, owner: ref.Owner(), repo: ref.Repo(), repositoryID: repoID, kind: opts.Kind, sourceUpdatedAt: sourceUpdatedAt}
 	if provided != nil {
 		if err := writer.storeAll(provided); err != nil {
 			return syncThreadSelection{}, err
@@ -128,7 +128,7 @@ func syncExactThreadHeaders(ctx context.Context, reader github.Reader, ref domai
 		if err := budget.take(); err != nil {
 			return requests, err
 		}
-		issue, _, err := getter.GetIssue(ctx, ref.Owner, ref.Repo, number)
+		issue, _, err := getter.GetIssue(ctx, ref.Owner(), ref.Repo(), number)
 		if err != nil {
 			return requests, fmt.Errorf("get thread %d: %w", number, err)
 		}
@@ -158,7 +158,7 @@ func syncListedThreadHeaders(ctx context.Context, reader github.Reader, ref doma
 		if err := budget.take(); err != nil {
 			return syncThreadSelection{}, err
 		}
-		res, err := reader.ListIssues(ctx, ref.Owner, ref.Repo, listOpts)
+		res, err := reader.ListIssues(ctx, ref.Owner(), ref.Repo(), listOpts)
 		if err != nil {
 			return syncThreadSelection{}, fmt.Errorf("list issues page %d: %w", listOpts.Page, err)
 		}

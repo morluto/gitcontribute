@@ -279,9 +279,13 @@ func radarTimelineReference(event github.IssueTimelineEvent, defaultRepo domain.
 	if event.Event != "cross-referenced" || event.SourceNumber <= 0 {
 		return relatedwork.Reference{}, false
 	}
-	sourceRepo := domain.RepoRef{Owner: event.SourceOwner, Repo: event.SourceRepository}
-	if sourceRepo.Owner == "" || sourceRepo.Repo == "" {
-		sourceRepo = defaultRepo
+	sourceRepo := defaultRepo
+	if event.SourceOwner != "" && event.SourceRepository != "" {
+		parsed, err := domain.NewRepoRef(event.SourceOwner, event.SourceRepository)
+		if err != nil {
+			return relatedwork.Reference{}, false
+		}
+		sourceRepo = parsed
 	}
 	kind := domain.ThreadKind("")
 	if event.SourceIsPullRequest {
@@ -321,7 +325,7 @@ func resolveRadarReference(ctx context.Context, c *corpus.Corpus, reference rela
 	kind := reference.Kind
 	state, title := "", ""
 	sourceUpdatedAt := time.Time{}
-	storedRepo, err := c.GetRepository(ctx, reference.Repo.Owner, reference.Repo.Repo)
+	storedRepo, err := c.GetRepository(ctx, reference.Repo.Owner(), reference.Repo.Repo())
 	if err != nil {
 		return radar.RelatedWork{}, fmt.Errorf("resolve related repository: %w", err)
 	}
@@ -428,7 +432,7 @@ func normalizeRadarRelationshipEvidence(values []radar.RelatedWorkEvidence) []ra
 }
 
 func radarReferenceKey(value relatedwork.Reference) string {
-	return strings.ToLower(fmt.Sprintf("%s/%s:%s#%d", value.Repo.Owner, value.Repo.Repo, value.Kind, value.Number))
+	return strings.ToLower(fmt.Sprintf("%s/%s:%s#%d", value.Repo.Owner(), value.Repo.Repo(), value.Kind, value.Number))
 }
 
 func radarRawEvidenceCount(values []rawRadarRelatedWork, key string) int {
@@ -442,5 +446,5 @@ func radarRawEvidenceCount(values []rawRadarRelatedWork, key string) int {
 }
 
 func sameRepo(left, right domain.RepoRef) bool {
-	return strings.EqualFold(left.Owner, right.Owner) && strings.EqualFold(left.Repo, right.Repo)
+	return strings.EqualFold(left.Owner(), right.Owner()) && strings.EqualFold(left.Repo(), right.Repo())
 }

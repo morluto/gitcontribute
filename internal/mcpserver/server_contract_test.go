@@ -343,6 +343,17 @@ func TestServerNegotiates20260728AndReturnsCompleteToolResults(t *testing.T) {
 	if got, want := init.ProtocolVersion, "2026-07-28"; got != want {
 		t.Fatalf("protocol version = %q, want %q", got, want)
 	}
+	capabilitiesJSON, err := json.Marshal(init.Capabilities)
+	if err != nil {
+		t.Fatalf("marshal negotiated capabilities: %v", err)
+	}
+	var capabilities map[string]json.RawMessage
+	if err := json.Unmarshal(capabilitiesJSON, &capabilities); err != nil {
+		t.Fatalf("decode negotiated capabilities: %v", err)
+	}
+	if _, advertised := capabilities["logging"]; advertised {
+		t.Fatalf("logging capability advertised in %s", capabilitiesJSON)
+	}
 
 	result, err := client.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: mcpcontract.ToolSearchThreads, Arguments: map[string]any{"query": "stall"},

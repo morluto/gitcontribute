@@ -66,7 +66,7 @@ func TestConcernLifecycleAndLinks(t *testing.T) {
 	repo := newMemoryRepository()
 	svc := NewService(repo)
 	item, err := svc.Create(context.Background(), &Concern{
-		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, CommitSHA: "abc",
+		Repo: domain.MustRepoRef("owner", "repo"), CommitSHA: "abc",
 		Title: " flaky test ", ProblemStatement: " fails intermittently ", Confidence: 0.4,
 		Unknowns: []string{" timing ", "timing"},
 	})
@@ -103,7 +103,7 @@ func TestConcernLifecycleAndLinks(t *testing.T) {
 func TestConcernRejectsUnsafeOrUnboundedInput(t *testing.T) {
 	t.Parallel()
 	svc := NewService(newMemoryRepository())
-	base := &Concern{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, CommitSHA: "abc", Title: "title", ProblemStatement: "problem"}
+	base := &Concern{Repo: domain.MustRepoRef("o", "r"), CommitSHA: "abc", Title: "title", ProblemStatement: "problem"}
 	badConfidence := *base
 	badConfidence.Confidence = 2
 	if _, err := svc.Create(context.Background(), &badConfidence); err == nil {

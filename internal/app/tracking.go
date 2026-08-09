@@ -176,23 +176,19 @@ func (s *Service) ExportLocalMetadata(ctx context.Context, opts contracts.Metada
 // ImportLocalMetadata imports a bounded JSON bundle of local tracking metadata
 // idempotently.
 func (s *Service) ImportLocalMetadata(ctx context.Context, opts contracts.MetadataImportOptions) (*contracts.MetadataImportResult, error) {
+	bundle, err := tracking.ParseBundle(opts.Data)
+	if err != nil {
+		return nil, err
+	}
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var bundle tracking.Bundle
-	if err := json.Unmarshal(opts.Data, &bundle); err != nil {
-		return nil, fmt.Errorf("parse local metadata: %w", err)
-	}
-	if err := tracking.NewService(c).ImportLocalMetadata(ctx, &bundle); err != nil {
-		return nil, err
-	}
-	version, err := tracking.ResolveBundleVersion(&bundle)
-	if err != nil {
+	if err := tracking.NewService(c).ImportLocalMetadata(ctx, bundle); err != nil {
 		return nil, err
 	}
 	return &contracts.MetadataImportResult{
-		SchemaVersion:        version,
+		SchemaVersion:        bundle.SchemaVersion,
 		TriageEvents:         len(bundle.TriageEvents),
 		Contributions:        len(bundle.Contributions),
 		ContributionOutcomes: len(bundle.ContributionOutcomes),

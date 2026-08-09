@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
@@ -24,10 +25,10 @@ func TestMineRepositoryFixPatternsSeparatesAcceptedFixesFromSimilarity(t *testin
 	}
 	for _, thread := range []corpus.Thread{
 		{RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open", Title: "Numeric drift on RDNA", Body: "split cumsum produces the wrong result", SourceUpdatedAt: now},
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "Restrict barrier conversion to CDNA", Body: "Fixes #1.\n\nRegression test covers numeric drift.", Merged: true, MergedKnown: true, SourceUpdatedAt: now.Add(time.Hour)},
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 3, State: "closed", Title: "Try a different barrier lowering", Body: "Similar numeric drift was observed, with a reproduction.", MergedKnown: true, SourceUpdatedAt: now.Add(2 * time.Hour)},
+		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "Restrict barrier conversion to CDNA", Body: "Fixes #1.\n\nRegression test covers numeric drift.", Merge: domain.MergedStatus(time.Time{}), SourceUpdatedAt: now.Add(time.Hour)},
+		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 3, State: "closed", Title: "Try a different barrier lowering", Body: "Similar numeric drift was observed, with a reproduction.", Merge: domain.UnmergedStatus(), SourceUpdatedAt: now.Add(2 * time.Hour)},
 		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 4, State: "closed", Title: "Investigate numeric drift", Body: "Numeric drift investigation.", SourceUpdatedAt: now.Add(3 * time.Hour)},
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 5, State: "closed", Title: "Earlier numeric drift attempt", Body: "Numeric drift attempt. Superseded by #2.", MergedKnown: true, SourceUpdatedAt: now.Add(3 * time.Hour)},
+		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 5, State: "closed", Title: "Earlier numeric drift attempt", Body: "Numeric drift attempt. Superseded by #2.", Merge: domain.UnmergedStatus(), SourceUpdatedAt: now.Add(3 * time.Hour)},
 		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 6, State: "open", Title: "New numeric drift approach", Body: "Numeric drift work remains open.", SourceUpdatedAt: now.Add(3 * time.Hour)},
 	} {
 		if _, err := svc.corpus.UpsertThread(ctx, thread, `{}`); err != nil {
@@ -56,7 +57,7 @@ func TestMineRepositoryFixPatternsSeparatesAcceptedFixesFromSimilarity(t *testin
 	if report.Status != "partial" || report.Coverage.UniqueCandidates != 5 || report.Coverage.UnknownBefore != 1 || report.Coverage.UnknownAfter != 1 {
 		t.Fatalf("coverage = %+v, status = %q", report.Coverage, report.Status)
 	}
-	if report.Recovery == nil || len(report.Recovery.Then) != 1 || report.Recovery.Then[0].Type != "mine_repository_fix_patterns" {
+	if report.Recovery == nil || len(report.Recovery.Then) != 1 || report.Recovery.Then[0].Type() != "mine_repository_fix_patterns" {
 		t.Fatalf("fix-pattern recovery = %+v", report.Recovery)
 	}
 	if len(report.Clusters) != 1 || len(report.Clusters[0].Examples) != 5 {
@@ -209,7 +210,11 @@ func TestGetFixPatternReportRejectsLegacyUnboundArtifact(t *testing.T) {
 	if !errors.As(err, &toolErr) || toolErr.Code != "legacy_artifact" {
 		t.Fatalf("legacy report error = %v", err)
 	}
-	if toolErr.Recovery == nil || len(toolErr.Recovery.Then) != 1 || toolErr.Recovery.Then[0].MineFixPatterns == nil || toolErr.Recovery.Then[0].MineFixPatterns.Repository != request.Repository {
+	if toolErr.Recovery == nil || len(toolErr.Recovery.Then) != 1 {
+		t.Fatalf("legacy report recovery = %+v", toolErr.Recovery)
+	}
+	next, ok := mcpcontract.RecoveryInput[mcpcontract.MineRepositoryFixPatternsInput](toolErr.Recovery.Then[0])
+	if !ok || next.Repository != request.Repository {
 		t.Fatalf("legacy report recovery = %+v", toolErr.Recovery)
 	}
 }

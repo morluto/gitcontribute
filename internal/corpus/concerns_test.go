@@ -2,6 +2,7 @@ package corpus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -22,7 +23,7 @@ func TestConcernPersistenceSearchAndLinks(t *testing.T) {
 	defer func() { _ = c.Close() }()
 	svc := concern.NewService(c)
 	first, err := svc.Create(ctx, &concern.Concern{
-		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, CommitSHA: "abc",
+		Repo: domain.MustRepoRef("owner", "repo"), CommitSHA: "abc",
 		Title: "flaky MCP test", ProblemStatement: "transport occasionally stalls", Confidence: 0.5,
 		Unknowns: []string{"scheduler timing"}, SuccessCriterion: "100 repeated runs pass",
 	})
@@ -30,7 +31,7 @@ func TestConcernPersistenceSearchAndLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := svc.Create(ctx, &concern.Concern{
-		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, CommitSHA: "def",
+		Repo: domain.MustRepoRef("owner", "repo"), CommitSHA: "def",
 		Title: "live read boundary", ProblemStatement: "offline read may contact network", Confidence: 0.7,
 	})
 	if err != nil {
@@ -39,7 +40,7 @@ func TestConcernPersistenceSearchAndLinks(t *testing.T) {
 	if err := svc.Link(ctx, first.ID, concern.Link{Kind: concern.LinkRelated, TargetType: "concern", TargetID: second.ID, Note: "same adapter"}); err != nil {
 		t.Fatal(err)
 	}
-	page, err := svc.List(ctx, concern.Filter{Repo: domain.RepoRef{Owner: "OWNER", Repo: "REPO"}, Query: "scheduler", Limit: 10})
+	page, err := svc.List(ctx, concern.Filter{Repo: domain.MustRepoRef("OWNER", "REPO"), Query: "scheduler", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,6 +56,18 @@ func TestConcernPersistenceSearchAndLinks(t *testing.T) {
 	}
 }
 
+func TestDecodeConcernRejectsInvalidLifecycleState(t *testing.T) {
+	payload, err := json.Marshal(&concern.Concern{
+		ID: "concern", Repo: domain.MustRepoRef("owner", "repo"), Status: "impossible",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodeConcern(string(payload)); err == nil {
+		t.Fatal("invalid durable concern status was accepted")
+	}
+}
+
 func TestPromoteConcernIsAtomic(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -65,7 +78,7 @@ func TestPromoteConcernIsAtomic(t *testing.T) {
 	defer func() { _ = c.Close() }()
 	svc := concern.NewService(c)
 	item, err := svc.Create(ctx, &concern.Concern{
-		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, CommitSHA: "abc",
+		Repo: domain.MustRepoRef("owner", "repo"), CommitSHA: "abc",
 		Title: "flaky test", ProblemStatement: "fails intermittently", Confidence: 0.6,
 		EvidenceIDs: []string{"evidence-1"},
 	})
@@ -111,7 +124,7 @@ func TestConcernSearchTreatsFTSOperatorsLiterally(t *testing.T) {
 	defer func() { _ = c.Close() }()
 	svc := concern.NewService(c)
 	if _, err := svc.Create(ctx, &concern.Concern{
-		Repo: domain.RepoRef{Owner: "o", Repo: "r"}, CommitSHA: "abc",
+		Repo: domain.MustRepoRef("o", "r"), CommitSHA: "abc",
 		Title: "OR token", ProblemStatement: "literal operator", Confidence: 0.1,
 	}); err != nil {
 		t.Fatal(err)

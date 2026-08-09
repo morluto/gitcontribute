@@ -41,7 +41,7 @@ func (c *Corpus) StartThreadInvestigation(ctx context.Context, item *investigati
 		INSERT OR IGNORE INTO investigations
 			(id, repo_owner, repo_name, status, origin_key, payload, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, item.ID, item.Repo.Owner, item.Repo.Repo, item.Status, originKey,
+	`, item.ID, item.Repo.Owner(), item.Repo.Repo(), item.Status, originKey,
 		investigationPayload, encodeTime(item.CreatedAt), encodeTime(item.UpdatedAt))
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("insert thread investigation: %w", err)
@@ -78,7 +78,7 @@ func validateThreadInvestigationPair(item *investigation.Investigation, hypothes
 	if err := item.ThreadBaseline.Validate(); err != nil {
 		return err
 	}
-	if !strings.EqualFold(item.Repo.Owner, item.ThreadBaseline.Repo.Owner) || !strings.EqualFold(item.Repo.Repo, item.ThreadBaseline.Repo.Repo) {
+	if !strings.EqualFold(item.Repo.Owner(), item.ThreadBaseline.Repo.Owner()) || !strings.EqualFold(item.Repo.Repo(), item.ThreadBaseline.Repo.Repo()) {
 		return fmt.Errorf("%w: investigation repository does not match its thread", investigation.ErrInvalidThreadBaseline)
 	}
 	if item.Status != investigation.InvestigationOpen {

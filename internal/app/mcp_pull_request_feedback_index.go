@@ -44,10 +44,12 @@ type pullRequestFeedbackIndexResult struct {
 // feedback job. Repeating the same repository resumes its stored provider
 // page when the previous run was bounded or interrupted.
 func (r *MCPReader) IndexPullRequestFeedback(ctx context.Context, in mcpcontract.IndexPullRequestFeedbackInput) (mcpcontract.JobReference, error) {
-	ref := domain.RepoRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(in.Repository.Owner, in.Repository.Repo)
+	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
+	in.Repository.Owner = ref.Owner()
+	in.Repository.Repo = ref.Repo()
 	if len(in.Channels) == 0 {
 		in.Channels = []string{"issue_comments", "submitted_reviews", "inline_comments", "review_threads"}
 	}

@@ -22,7 +22,7 @@ func TestContributionManifestPersistsAndSelectsLatest(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	svc := investigation.NewService(c, c)
-	inv, err := svc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, "sha", "")
+	inv, err := svc.StartInvestigation(ctx, domain.MustRepoRef("owner", "repo"), "sha", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +69,113 @@ func TestContributionManifestPersistsAndSelectsLatest(t *testing.T) {
 	}
 }
 
+func TestUnmarshalWorkflowRejectsInvalidLifecycleDiscriminators(t *testing.T) {
+	ref := domain.MustRepoRef("owner", "repo")
+	tests := []struct {
+		name   string
+		value  any
+		target func() any
+	}{
+		{
+			name:   "investigation status",
+			value:  &investigation.Investigation{ID: "inv", Repo: ref, Status: "impossible"},
+			target: func() any { return &investigation.Investigation{} },
+		},
+		{
+			name:   "hypothesis category",
+			value:  &investigation.Hypothesis{ID: "hyp", InvestigationID: "inv", Category: "impossible", Status: investigation.HypothesisProposed},
+			target: func() any { return &investigation.Hypothesis{} },
+		},
+		{
+			name:   "opportunity collision",
+			value:  &investigation.Opportunity{ID: "opp", InvestigationID: "inv", HypothesisID: "hyp", Category: investigation.CategoryBug, Status: investigation.OpportunityHypothesis, CollisionStatus: "impossible"},
+			target: func() any { return &investigation.Opportunity{} },
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			payload, err := marshalWorkflow(testCase.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := unmarshalWorkflow(payload, testCase.target()); err == nil {
+				t.Fatal("invalid durable discriminator was accepted")
+			}
+		})
+	}
+}
+
+func TestSaveExternalValidationRollsBackDefinitionWhenRunFails(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	definition := &evidence.ValidationDefinition{ID: "external-definition", CreatedAt: time.Now().UTC()}
+	run := &evidence.ValidationRun{
+		ID: "external-run", DefinitionID: "different-definition", Kind: evidence.RunKindCandidate,
+		Classification: evidence.RunClassificationPassing, ObservationStatus: evidence.ObservationNotEvaluated,
+	}
+	if err := c.SaveExternalValidation(ctx, definition, run); err == nil {
+		t.Fatal("expected invalid run foreign key to fail")
+	}
+	if _, err := c.GetValidationDefinition(ctx, definition.ID); !errors.Is(err, evidence.ErrNotFound) {
+		t.Fatalf("definition survived failed atomic save: %v", err)
+	}
+}
+
+func TestSaveExternalValidationRejectsMismatchedExistingDefinition(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	paired := &evidence.ValidationDefinition{ID: "paired-definition", CreatedAt: time.Now().UTC()}
+	other := &evidence.ValidationDefinition{ID: "other-definition", CreatedAt: time.Now().UTC()}
+	if err := c.SaveValidationDefinition(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	run := &evidence.ValidationRun{
+		ID: "external-run", DefinitionID: other.ID, Kind: evidence.RunKindCandidate,
+		Classification: evidence.RunClassificationPassing, ObservationStatus: evidence.ObservationNotEvaluated,
+	}
+	if err := c.SaveExternalValidation(ctx, paired, run); err == nil {
+		t.Fatal("external validation accepted a run for a different definition")
+	}
+	if _, err := c.GetValidationDefinition(ctx, paired.ID); !errors.Is(err, evidence.ErrNotFound) {
+		t.Fatalf("paired definition survived rejected save: %v", err)
+	}
+}
+
+func TestOpportunityStoredParserAcceptsLegacyInitialCollisionAudit(t *testing.T) {
+	item := &investigation.Opportunity{
+		ID: "opp", InvestigationID: "inv", HypothesisID: "hyp", Category: investigation.CategoryBug,
+		Status: investigation.OpportunityHypothesis, CollisionStatus: investigation.CollisionPossible,
+		AuditTrail: []investigation.StatusChange{{From: "", To: string(investigation.CollisionPossible)}},
+	}
+	payload, err := marshalWorkflow(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded investigation.Opportunity
+	if err := unmarshalWorkflow(payload, &decoded); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSaveEvidenceBatchRollsBackEarlierItemsOnFailure(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	first := &evidence.Evidence{
+		ID: "first", Type: evidence.EvidenceTypeManualObservation,
+		Relation: evidence.RelationSupporting, Description: "first claim",
+	}
+	if err := c.SaveEvidenceBatch(ctx, []*evidence.Evidence{first, nil}); err == nil {
+		t.Fatal("expected invalid batch item to fail")
+	}
+	items, err := c.ListEvidence(ctx, evidence.EvidenceFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("evidence survived failed batch: %+v", items)
+	}
+}
+
 func TestContributionWorkflowPersistsAcrossReopen(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -78,7 +185,7 @@ func TestContributionWorkflowPersistsAcrossReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	invService := investigation.NewService(c, c)
-	inv, err := invService.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc123", "go")
+	inv, err := invService.StartInvestigation(ctx, domain.MustRepoRef("owner", "repo"), "abc123", "go")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +238,7 @@ func TestFindRelatedUsesRepositoryAndCategory(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	svc := investigation.NewService(c, c)
-	inv, _ := svc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, "sha", "")
+	inv, _ := svc.StartInvestigation(ctx, domain.MustRepoRef("owner", "repo"), "sha", "")
 	_, err := svc.RecordHypothesis(ctx, inv.ID, "bug", "description", investigation.CategoryBug, []domain.SourceRef{{Source: "issue", URL: "https://github.com/owner/repo/issues/2"}})
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +247,7 @@ func TestFindRelatedUsesRepositoryAndCategory(t *testing.T) {
 	if err != nil || len(related) != 1 {
 		t.Fatalf("FindRelated = (%+v, %v)", related, err)
 	}
-	other, err := c.FindRelated(ctx, domain.RepoRef{Owner: "other", Repo: "repo"}, investigation.CategoryBug)
+	other, err := c.FindRelated(ctx, domain.MustRepoRef("other", "repo"), investigation.CategoryBug)
 	if err != nil || len(other) != 0 {
 		t.Fatalf("other FindRelated = (%+v, %v)", other, err)
 	}
@@ -151,7 +258,7 @@ func TestPromoteHypothesisRollsBackOnOpportunityConflict(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	svc := investigation.NewService(c, c)
-	inv, err := svc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, "sha", "")
+	inv, err := svc.StartInvestigation(ctx, domain.MustRepoRef("owner", "repo"), "sha", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +300,7 @@ func TestPromoteHypothesisRejectsStaleConcurrentPromotion(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	svc := investigation.NewService(c, c)
-	inv, _ := svc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, "sha", "")
+	inv, _ := svc.StartInvestigation(ctx, domain.MustRepoRef("owner", "repo"), "sha", "")
 	hypothesis, _ := svc.RecordHypothesis(ctx, inv.ID, "race", "description", investigation.CategoryBug, nil)
 	stale := *hypothesis
 	if _, err := svc.PromoteOpportunity(ctx, hypothesis.ID, "first problem", "scope", "impact", "small", 0.8); err != nil {
@@ -222,11 +329,11 @@ func TestInvestigationAndOpportunityListQueries(t *testing.T) {
 	c, _ := openTestCorpus(t)
 	svc := investigation.NewService(c, c)
 
-	invA, err := svc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "a"}, "sha-a", "")
+	invA, err := svc.StartInvestigation(ctx, domain.MustRepoRef("owner", "a"), "sha-a", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	invB, err := svc.StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "b"}, "sha-b", "")
+	invB, err := svc.StartInvestigation(ctx, domain.MustRepoRef("owner", "b"), "sha-b", "")
 	if err != nil {
 		t.Fatal(err)
 	}

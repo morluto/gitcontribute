@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 // ErrThreadObservationRevisionNotFound reports a projection revision whose
@@ -185,8 +187,11 @@ func (c *Corpus) ApplyThreadObservation(ctx context.Context, repoID int64, kind 
 // UpsertThread records a thread observation and updates the projection with
 // all fields when the source ordering is newer.
 func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string) (*Thread, error) {
-	if thread.Kind == ThreadKindPullRequest && (thread.Merged || !thread.MergedAt.IsZero()) {
-		thread.MergedKnown = true
+	if err := parseThreadProjection(&thread); err != nil {
+		return nil, err
+	}
+	if thread.Kind != ThreadKindPullRequest && thread.Merge.Known() {
+		return nil, errors.New("only pull requests can have merge status")
 	}
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -208,8 +213,8 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 		closed.Valid = true
 	}
 	merged := sql.NullInt64{}
-	if !thread.MergedAt.IsZero() {
-		merged.Int64 = encodeTime(thread.MergedAt)
+	if !thread.Merge.MergedAt().IsZero() {
+		merged.Int64 = encodeTime(thread.Merge.MergedAt())
 		merged.Valid = true
 	}
 	assignees := deterministicAssignees(thread.Assignees)
@@ -222,7 +227,7 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 		res, err := tx.ExecContext(ctx, `
 			INSERT INTO threads (repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone, source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged, merged_known)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`, thread.RepositoryID, thread.Kind, thread.Number, thread.State, thread.StateReason, thread.Title, thread.Body, thread.Author, thread.AuthorAssociation, joinLabels(thread.Labels), joinLabels(assignees), boolToInt(thread.Draft), boolToInt(thread.Locked), thread.Milestone, sourceCreated, srcSec, seq, now, now, closed, merged, boolToInt(thread.Merged), boolToInt(thread.MergedKnown))
+		`, thread.RepositoryID, thread.Kind, thread.Number, thread.State, thread.StateReason, thread.Title, thread.Body, thread.Author, thread.AuthorAssociation, joinLabels(thread.Labels), joinLabels(assignees), boolToInt(thread.Draft), boolToInt(thread.Locked), thread.Milestone, sourceCreated, srcSec, seq, now, now, closed, merged, boolToInt(thread.Merge.IsMerged()), boolToInt(thread.Merge.Known()))
 		if err != nil {
 			return nil, fmt.Errorf("insert thread: %w", err)
 		}
@@ -256,7 +261,7 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 			    merged_known = CASE WHEN ? = 1 THEN 1 ELSE merged_known END
 			WHERE id = ?
 			  AND (source_updated_at < ? OR (source_updated_at = ? AND observation_sequence < ?))
-		`, thread.State, thread.StateReason, thread.Title, thread.Body, thread.Author, thread.AuthorAssociation, joinLabels(thread.Labels), joinLabels(assignees), boolToInt(thread.Draft), boolToInt(thread.Locked), thread.Milestone, sourceCreated, srcSec, seq, now, closed, boolToInt(thread.MergedKnown), merged, boolToInt(thread.MergedKnown), boolToInt(thread.Merged), boolToInt(thread.MergedKnown), threadID, srcSec, srcSec, seq); err != nil {
+		`, thread.State, thread.StateReason, thread.Title, thread.Body, thread.Author, thread.AuthorAssociation, joinLabels(thread.Labels), joinLabels(assignees), boolToInt(thread.Draft), boolToInt(thread.Locked), thread.Milestone, sourceCreated, srcSec, seq, now, closed, boolToInt(thread.Merge.Known()), merged, boolToInt(thread.Merge.Known()), boolToInt(thread.Merge.IsMerged()), boolToInt(thread.Merge.Known()), threadID, srcSec, srcSec, seq); err != nil {
 			return nil, fmt.Errorf("update thread projection: %w", err)
 		}
 	}
@@ -598,10 +603,34 @@ func scanThread(row rowScanner) (*Thread, error) {
 	thread.CreatedAt = scanTime(created)
 	thread.UpdatedAt = scanTime(updated)
 	thread.ClosedAt = scanTime(closed.Int64)
-	thread.MergedAt = scanTime(mergedAt.Int64)
-	thread.Merged = merged != 0
-	thread.MergedKnown = mergedKnown != 0
+	if err := parseThreadProjection(&thread); err != nil {
+		return nil, fmt.Errorf("parse stored thread: %w", err)
+	}
+	merge, err := domain.ParseMergeStatus(mergedKnown != 0, merged != 0, scanTime(mergedAt.Int64))
+	if err != nil {
+		return nil, fmt.Errorf("parse stored merge status: %w", err)
+	}
+	thread.Merge = merge
 	return &thread, nil
+}
+
+func parseThreadProjection(thread *Thread) error {
+	if thread == nil {
+		return errors.New("thread is required")
+	}
+	kind, err := domain.ParseThreadKind(thread.Kind)
+	if err != nil {
+		return err
+	}
+	state, err := domain.ParseThreadState(thread.State)
+	if err != nil {
+		return err
+	}
+	if thread.RepositoryID <= 0 || thread.Number <= 0 {
+		return errors.New("thread repository and positive number are required")
+	}
+	thread.Kind, thread.State = string(kind), string(state)
+	return nil
 }
 
 func boolToInt(v bool) int {

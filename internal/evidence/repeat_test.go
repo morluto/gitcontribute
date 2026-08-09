@@ -58,10 +58,9 @@ func runResult(classification RunClassification) *RunResult {
 	if classification == RunClassificationFailing {
 		exitCode = 1
 	}
-	zero64, zeroU64 := int64(0), uint64(0)
 	return &RunResult{
 		ExitCode: exitCode, Classification: classification, StartedAt: now, CompletedAt: now,
-		Resources: ResourceTelemetry{CPUTimeMillis: Int64Metric{Value: &zero64}, PeakRSSBytes: Uint64Metric{Value: &zeroU64}, PeakChildCount: Int64Metric{Value: &zero64}},
+		Resources: ResourceTelemetry{CPUTimeMillis: AvailableInt64Metric(0), PeakRSSBytes: AvailableUint64Metric(0), PeakChildCount: AvailableInt64Metric(0)},
 		Cleanup:   CleanupResult{Status: "clean"},
 	}
 }
@@ -115,11 +114,11 @@ func TestRunValidationGroupCancellationReturnsPartialResults(t *testing.T) {
 
 func TestRunValidationGroupComparisonRejectsUnrelatedCandidateError(t *testing.T) {
 	t.Parallel()
-	contract := &ObservationContract{
+	contract := mustObservationContract(t, ObservationContractSpec{
 		Intent:    "candidate removes expected symptom",
-		Base:      []ExpectedObservation{{Name: "symptom", Source: ObservationStderr, Matcher: ObservationExact, Pattern: "expected symptom", Occurrence: ObservationPresent}},
-		Candidate: []ExpectedObservation{{Name: "symptom absent", Source: ObservationStderr, Matcher: ObservationExact, Pattern: "expected symptom", Occurrence: ObservationAbsent}},
-	}
+		Base:      []ExpectedObservationSpec{{Name: "symptom", Source: ObservationStderr, Matcher: ObservationExact, Pattern: "expected symptom", Occurrence: ObservationPresent}},
+		Candidate: []ExpectedObservationSpec{{Name: "symptom absent", Source: ObservationStderr, Matcher: ObservationExact, Pattern: "expected symptom", Occurrence: ObservationAbsent}},
+	})
 	base := runResult(RunClassificationFailing)
 	base.Stderr = "expected symptom"
 	candidate := runResult(RunClassificationError)

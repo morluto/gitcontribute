@@ -280,7 +280,7 @@ func SourceRevision(candidates []Candidate) string {
 		}
 		sort.Strings(labels)
 		lines[i] = fmt.Sprintf("%q/%q:%q#%d thread=%d created=%d updated=%d state=%q title=%q body=%q author=%q labels=%q",
-			strings.ToLower(c.Repo.Owner), strings.ToLower(c.Repo.Repo), strings.ToLower(c.Kind), c.Number,
+			strings.ToLower(c.Repo.Owner()), strings.ToLower(c.Repo.Repo()), strings.ToLower(c.Kind), c.Number,
 			c.ThreadID, c.CreatedAt.UnixNano(), c.UpdatedAt.UnixNano(), c.State, c.Title, c.Body, c.Author, labels)
 	}
 	sort.Strings(lines)

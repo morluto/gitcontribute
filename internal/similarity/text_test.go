@@ -22,7 +22,7 @@ func TestTokensNormalizeAndFilterStopWords(t *testing.T) {
 }
 
 func TestExtractRefsRecognizesGitHubThreadSyntax(t *testing.T) {
-	repo := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	repo := domain.MustRepoRef("owner", "repo")
 	for _, tc := range []struct {
 		input string
 		want  int

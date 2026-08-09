@@ -78,7 +78,7 @@ func TestClientReadMapsResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Available || got.Text != "first\nhttps://deepwiki.com/owner/repo#topic" || got.SourceURL != "https://deepwiki.com/owner/repo#topic" {
+	if !got.Available() || got.Text() != "first\nhttps://deepwiki.com/owner/repo#topic" || got.SourceURL() != "https://deepwiki.com/owner/repo#topic" {
 		t.Fatalf("response = %+v", got)
 	}
 }
@@ -89,7 +89,7 @@ func TestClientReadHandlesProviderAndTransportFailures(t *testing.T) {
 		return &mcp.CallToolResult{IsError: true}, nil
 	})
 	got, err := provider.Read(context.Background(), Request{Action: "structure", Repository: "owner/repo"})
-	if err != nil || got.Available {
+	if err != nil || got.Available() {
 		t.Fatalf("provider error = %+v, %v", got, err)
 	}
 
@@ -131,7 +131,7 @@ func TestClientReadClassifiesProviderErrorTextAsUnavailable(t *testing.T) {
 				Repositories: []string{"indexed/repo", "missing/repo"},
 				Question:     "Compare them.",
 			})
-			if err != nil || got.Available || got.Text != tt.text {
+			if err != nil || got.Available() || got.Text() != tt.text {
 				t.Fatalf("provider error text = %+v, %v", got, err)
 			}
 		})
@@ -149,7 +149,7 @@ func TestClientReadKeepsNormalMultiRepositoryAnswerAvailable(t *testing.T) {
 		Repositories: []string{"indexed/repo", "other/repo"},
 		Question:     "Compare them.",
 	})
-	if err != nil || !got.Available || got.Text != answer {
+	if err != nil || !got.Available() || got.Text() != answer {
 		t.Fatalf("normal answer = %+v, %v", got, err)
 	}
 }
@@ -160,7 +160,7 @@ func TestClientReadAcceptsEmptySuccessfulResponse(t *testing.T) {
 		return &mcp.CallToolResult{}, nil
 	})
 	got, err := client.Read(context.Background(), Request{Action: "structure", Repository: "owner/repo"})
-	if err != nil || !got.Available || got.Text != "" || got.SourceURL != "" {
+	if err != nil || !got.Available() || got.Text() != "" || got.SourceURL() != "" {
 		t.Fatalf("empty response = %+v, %v", got, err)
 	}
 }

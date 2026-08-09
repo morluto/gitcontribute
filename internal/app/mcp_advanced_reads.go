@@ -88,8 +88,11 @@ func (r *MCPReader) FindClusters(ctx context.Context, in mcpcontract.FindCluster
 }
 
 func findClustersTarget(ctx context.Context, c *corpus.Corpus, target mcpcontract.ClusterTarget, limit int) (mcpcontract.ClusterSetOutput, error) {
-	ref := domain.RepoRef{Owner: target.Owner, Repo: target.Repo}
-	repository, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	ref, err := domain.NewRepoRef(target.Owner, target.Repo)
+	if err != nil {
+		return mcpcontract.ClusterSetOutput{}, err
+	}
+	repository, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return mcpcontract.ClusterSetOutput{}, err
 	}
@@ -139,7 +142,7 @@ func findClustersTarget(ctx context.Context, c *corpus.Corpus, target mcpcontrac
 }
 
 func validateClusterTarget(target mcpcontract.ClusterTarget) error {
-	if err := (domain.RepoRef{Owner: target.Owner, Repo: target.Repo}).Validate(); err != nil {
+	if _, err := domain.NewRepoRef(target.Owner, target.Repo); err != nil {
 		return err
 	}
 	if (target.Kind == "") != (target.Number == 0) {
@@ -241,7 +244,7 @@ func (r *MCPReader) FindNeighbors(ctx context.Context, in mcpcontract.FindNeighb
 }
 
 func validateSimilarityThread(thread mcpcontract.ThreadRef) error {
-	if err := (domain.RepoRef{Owner: thread.Owner, Repo: thread.Repo}).Validate(); err != nil {
+	if _, err := domain.NewRepoRef(thread.Owner, thread.Repo); err != nil {
 		return err
 	}
 	if thread.Kind != "issue" && thread.Kind != "pull_request" {

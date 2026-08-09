@@ -28,15 +28,15 @@ type threadKey struct {
 }
 
 func (f *fakeReader) ReadRepository(_ context.Context, ref domain.RepoRef) (domain.Repository, []domain.SourceRef, error) {
-	if err := ref.Validate(); err != nil {
-		return domain.Repository{}, nil, err
+	if !ref.IsValid() {
+		return domain.Repository{}, nil, errors.New("repository reference is not parsed")
 	}
 	return f.repo, f.repoRefs, nil
 }
 
 func (f *fakeReader) ReadThreads(_ context.Context, ref domain.RepoRef, q ThreadQuery) ([]domain.Thread, []domain.SourceRef, error) {
-	if err := ref.Validate(); err != nil {
-		return nil, nil, err
+	if !ref.IsValid() {
+		return nil, nil, errors.New("repository reference is not parsed")
 	}
 	merged := "*"
 	if q.Merged != nil {
@@ -56,15 +56,15 @@ func (f *fakeReader) ReadThreads(_ context.Context, ref domain.RepoRef, q Thread
 }
 
 func (f *fakeReader) ReadCoverage(_ context.Context, ref domain.RepoRef) (domain.Coverage, error) {
-	if err := ref.Validate(); err != nil {
-		return domain.Coverage{}, err
+	if !ref.IsValid() {
+		return domain.Coverage{}, errors.New("repository reference is not parsed")
 	}
 	return f.coverage, nil
 }
 
 func (f *fakeReader) ReadContributionGuidance(_ context.Context, ref domain.RepoRef) (string, []domain.SourceRef, error) {
-	if err := ref.Validate(); err != nil {
-		return "", nil, err
+	if !ref.IsValid() {
+		return "", nil, errors.New("repository reference is not parsed")
 	}
 	return f.guidance, f.guidanceRefs, nil
 }
@@ -73,16 +73,16 @@ var now = time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 
 func TestBuilderValidation(t *testing.T) {
 	b := NewBuilder(&fakeReader{}, 5)
-	_, err := b.Build(context.Background(), domain.RepoRef{Owner: "", Repo: "go"})
+	_, err := b.Build(context.Background(), domain.RepoRef{})
 	if err == nil {
 		t.Fatal("expected validation error for empty owner")
 	}
 }
 
 func TestBuilderBuild(t *testing.T) {
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 	repo := domain.Repository{
-		RepoRef:                        ref,
+		Ref:                            ref,
 		CommitSHA:                      "abc123",
 		Description:                    "A test repository",
 		OpenIssueCount:                 3,
@@ -95,8 +95,8 @@ func TestBuilderBuild(t *testing.T) {
 	coverage := domain.Coverage{
 		AsOf: now,
 		Facets: []domain.FacetCoverage{
-			{Facet: "metadata", Present: true, Complete: true, Freshness: domain.Freshness{Status: domain.Fresh, AsOf: now}},
-			{Facet: "threads", Present: true, Complete: false, Freshness: domain.Freshness{Status: domain.Stale, AsOf: now.Add(-time.Hour)}},
+			domain.MustFacetCoverage("metadata", true, now, 0),
+			domain.MustFacetCoverage("threads", false, now.Add(-time.Hour), 0),
 		},
 	}
 	guidance := "Please open an issue first."
@@ -106,22 +106,22 @@ func TestBuilderBuild(t *testing.T) {
 
 	// Return threads unsorted to exercise stable ordering in the builder.
 	mergedPRs := []domain.Thread{
-		{Repo: ref, Kind: domain.PullRequestKind, Number: 9, Title: "Second merged", State: domain.ClosedState, UpdatedAt: now.Add(-2 * time.Hour), CreatedAt: now.Add(-10 * time.Hour), PullRequest: &domain.PullRequestDetails{Merged: true, MergedKnown: true, MergedAt: now.Add(-3 * time.Hour)}},
-		{Repo: ref, Kind: domain.PullRequestKind, Number: 5, Title: "First merged", State: domain.ClosedState, UpdatedAt: now.Add(-time.Hour), CreatedAt: now.Add(-12 * time.Hour), PullRequest: &domain.PullRequestDetails{Merged: true, MergedKnown: true, MergedAt: now.Add(-2 * time.Hour)}},
+		{Repo: ref, Type: domain.PullRequestThread(domain.PullRequestDetails{Merge: domain.MergedStatus(now.Add(-3 * time.Hour))}), Number: 9, Title: "Second merged", State: domain.ClosedState, UpdatedAt: now.Add(-2 * time.Hour), CreatedAt: now.Add(-10 * time.Hour)},
+		{Repo: ref, Type: domain.PullRequestThread(domain.PullRequestDetails{Merge: domain.MergedStatus(now.Add(-2 * time.Hour))}), Number: 5, Title: "First merged", State: domain.ClosedState, UpdatedAt: now.Add(-time.Hour), CreatedAt: now.Add(-12 * time.Hour)},
 	}
 	openPRs := []domain.Thread{
-		{Repo: ref, Kind: domain.PullRequestKind, Number: 11, Title: "Open PR", State: domain.OpenState, UpdatedAt: now, CreatedAt: now.Add(-time.Hour)},
+		{Repo: ref, Type: domain.PullRequestThread(domain.PullRequestDetails{}), Number: 11, Title: "Open PR", State: domain.OpenState, UpdatedAt: now, CreatedAt: now.Add(-time.Hour)},
 	}
 	closedUnmergedPRs := []domain.Thread{
-		{Repo: ref, Kind: domain.PullRequestKind, Number: 3, Title: "Closed unmerged", State: domain.ClosedState, UpdatedAt: now.Add(-3 * time.Hour), CreatedAt: now.Add(-20 * time.Hour), PullRequest: &domain.PullRequestDetails{MergedKnown: true}},
+		{Repo: ref, Type: domain.PullRequestThread(domain.PullRequestDetails{Merge: domain.UnmergedStatus()}), Number: 3, Title: "Closed unmerged", State: domain.ClosedState, UpdatedAt: now.Add(-3 * time.Hour), CreatedAt: now.Add(-20 * time.Hour)},
 	}
 	unknownMergePRs := []domain.Thread{
-		{Repo: ref, Kind: domain.PullRequestKind, Number: 4, Title: "Closed with unknown merge state", State: domain.ClosedState, UpdatedAt: now.Add(-4 * time.Hour), CreatedAt: now.Add(-21 * time.Hour), PullRequest: &domain.PullRequestDetails{}},
+		{Repo: ref, Type: domain.PullRequestThread(domain.PullRequestDetails{}), Number: 4, Title: "Closed with unknown merge state", State: domain.ClosedState, UpdatedAt: now.Add(-4 * time.Hour), CreatedAt: now.Add(-21 * time.Hour)},
 	}
 	closedPRs := append(append(append([]domain.Thread{}, mergedPRs...), closedUnmergedPRs...), unknownMergePRs...)
 	issues := []domain.Thread{
-		{Repo: ref, Kind: domain.IssueKind, Number: 42, Title: "Recent issue", State: domain.OpenState, UpdatedAt: now.Add(-30 * time.Minute), CreatedAt: now.Add(-2 * time.Hour)},
-		{Repo: ref, Kind: domain.IssueKind, Number: 7, Title: "Old issue", State: domain.ClosedState, UpdatedAt: now.Add(-4 * time.Hour), CreatedAt: now.Add(-24 * time.Hour)},
+		{Repo: ref, Type: domain.IssueThread(), Number: 42, Title: "Recent issue", State: domain.OpenState, UpdatedAt: now.Add(-30 * time.Minute), CreatedAt: now.Add(-2 * time.Hour)},
+		{Repo: ref, Type: domain.IssueThread(), Number: 7, Title: "Old issue", State: domain.ClosedState, UpdatedAt: now.Add(-4 * time.Hour), CreatedAt: now.Add(-24 * time.Hour)},
 	}
 
 	fr := &fakeReader{
@@ -217,15 +217,15 @@ func TestBuilderBuild(t *testing.T) {
 }
 
 func TestBuilderDeterministicSorting(t *testing.T) {
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
-	repo := domain.Repository{RepoRef: ref}
+	ref := domain.MustRepoRef("owner", "repo")
+	repo := domain.Repository{Ref: ref}
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	// Threads with identical UpdatedAt must be ordered by CreatedAt, number, title.
 	threads := []domain.Thread{
-		{Repo: ref, Kind: domain.IssueKind, Number: 3, Title: "C", State: domain.OpenState, UpdatedAt: base, CreatedAt: base},
-		{Repo: ref, Kind: domain.IssueKind, Number: 1, Title: "A", State: domain.OpenState, UpdatedAt: base, CreatedAt: base},
-		{Repo: ref, Kind: domain.IssueKind, Number: 2, Title: "B", State: domain.OpenState, UpdatedAt: base, CreatedAt: base},
+		{Repo: ref, Type: domain.IssueThread(), Number: 3, Title: "C", State: domain.OpenState, UpdatedAt: base, CreatedAt: base},
+		{Repo: ref, Type: domain.IssueThread(), Number: 1, Title: "A", State: domain.OpenState, UpdatedAt: base, CreatedAt: base},
+		{Repo: ref, Type: domain.IssueThread(), Number: 2, Title: "B", State: domain.OpenState, UpdatedAt: base, CreatedAt: base},
 	}
 
 	fr := &fakeReader{
@@ -253,9 +253,9 @@ func TestBuilderDeterministicSorting(t *testing.T) {
 }
 
 func TestBuilderReaderError(t *testing.T) {
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 	fr := &fakeReader{
-		repo: domain.Repository{RepoRef: ref},
+		repo: domain.Repository{Ref: ref},
 	}
 	fr.threads = nil // not relevant
 

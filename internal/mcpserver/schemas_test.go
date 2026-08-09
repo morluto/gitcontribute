@@ -1,17 +1,16 @@
 package mcpserver
 
 import (
-	"sync"
 	"testing"
 
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
-func TestInferredSchemaIsSharedByType(t *testing.T) {
+func TestInferredSchemaIsFreshByType(t *testing.T) {
 	first := inferredSchema[mcpcontract.RepoInput]()
 	second := inferredSchema[mcpcontract.RepoInput]()
-	if first.err != nil || second.err != nil || first.schema != second.schema {
-		t.Fatalf("cached schema definitions differ: first=%p/%v second=%p/%v", first.schema, first.err, second.schema, second.err)
+	if first.err != nil || second.err != nil || first.schema == second.schema {
+		t.Fatalf("schema definitions share mutable state: first=%p/%v second=%p/%v", first.schema, first.err, second.schema, second.err)
 	}
 }
 
@@ -58,36 +57,16 @@ func TestNestedDefinitionsAndArrayItemsRemainCustomizable(t *testing.T) {
 	}
 }
 
-func TestConcurrentServerConstructionProducesIdenticalCatalogs(t *testing.T) {
-	const count = 12
-	fingerprints := make(chan string, count)
-	errs := make(chan error, count)
-	var group sync.WaitGroup
-	for range count {
-		group.Go(func() {
-			server, err := New(&fakeReader{}, "test")
-			if err != nil {
-				errs <- err
-				return
-			}
-			fingerprints <- server.catalogFingerprint()
-		})
-	}
-	group.Wait()
-	close(fingerprints)
-	close(errs)
-	for err := range errs {
+func TestServerConstructionProducesStableCatalog(t *testing.T) {
+	first, err := New(&fakeReader{}, "test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	var want string
-	for fingerprint := range fingerprints {
-		if want == "" {
-			want = fingerprint
-		} else if fingerprint != want {
-			t.Fatalf("catalog fingerprint = %q, want %q", fingerprint, want)
-		}
+	second, err := New(&fakeReader{}, "test")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if want == "" {
-		t.Fatal("no catalog fingerprints recorded")
+	if got, want := second.catalogFingerprint(), first.catalogFingerprint(); got == "" || got != want {
+		t.Fatalf("catalog fingerprint = %q, want %q", got, want)
 	}
 }

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 // SearchFilter scopes a thread keyword search.
@@ -400,6 +402,9 @@ func scanThreadsWithRank(rows *sql.Rows) ([]Thread, error) {
 		if err := rows.Scan(&rank, &t.ID, &t.RepositoryID, &t.Kind, &t.Number, &t.State, &stateReason, &t.Title, &body, &author, &authorAssociation, &labels, &assignees, &draft, &locked, &milestone, &sourceCreated, &src, &t.ObservationSequence, &created, &updated, &closed, &mergedAt, &merged, &mergedKnown, &t.MatchSource, &t.MatchExcerpt, &matchUpdated, &matchTruncated); err != nil {
 			return nil, err
 		}
+		if err := parseThreadProjection(&t); err != nil {
+			return nil, fmt.Errorf("parse stored search thread: %w", err)
+		}
 		t.Body = body.String
 		t.StateReason = stateReason.String
 		t.Author = author.String
@@ -416,9 +421,11 @@ func scanThreadsWithRank(rows *sql.Rows) ([]Thread, error) {
 		t.MatchUpdatedAt = scanTime(matchUpdated)
 		t.MatchTruncated = matchTruncated != 0
 		t.ClosedAt = scanTime(closed.Int64)
-		t.MergedAt = scanTime(mergedAt.Int64)
-		t.Merged = merged != 0
-		t.MergedKnown = mergedKnown != 0
+		merge, err := domain.ParseMergeStatus(mergedKnown != 0, merged != 0, scanTime(mergedAt.Int64))
+		if err != nil {
+			return nil, fmt.Errorf("parse stored merge status: %w", err)
+		}
+		t.Merge = merge
 		t.Rank = rank
 		out = append(out, t)
 	}

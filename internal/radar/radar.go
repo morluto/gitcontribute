@@ -191,8 +191,8 @@ type Report struct {
 // Rank scores a bounded set of local issue snapshots. Missing coverage is
 // represented as unknown and never silently converted into a penalty.
 func Rank(repo RepositorySnapshot, issues []IssueSnapshot, opts Options) (*Report, error) {
-	if err := repo.Repo.Validate(); err != nil {
-		return nil, err
+	if !repo.Repo.IsValid() {
+		return nil, errors.New("repository reference is not parsed")
 	}
 	if opts.Limit == 0 {
 		opts.Limit = DefaultLimit

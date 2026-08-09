@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 func TestListThreadsFilteredAppliesStateBeforeLimit(t *testing.T) {
@@ -74,6 +75,32 @@ func TestListThreadsFilteredAppliesStateBeforeLimit(t *testing.T) {
 	}
 }
 
+func TestUpsertThreadRejectsUnknownKindAndStateBeforeWrite(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, thread := range map[string]Thread{
+		"kind":  {RepositoryID: repo.ID, Kind: "discussion", Number: 1, State: "open"},
+		"state": {RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 1, State: "draft"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := c.UpsertThread(ctx, thread, `{}`); err == nil {
+				t.Fatal("invalid thread projection was accepted")
+			}
+		})
+	}
+	threads, err := c.ListThreads(ctx, repo.ID, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(threads) != 0 {
+		t.Fatalf("invalid thread projection was written: %+v", threads)
+	}
+}
+
 func TestListThreadsByStateAndMergeIgnoresMergedOutsidePullRequests(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -85,8 +112,8 @@ func TestListThreadsByStateAndMergeIgnoresMergedOutsidePullRequests(t *testing.T
 	merged := true
 	for _, thread := range []Thread{
 		{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 1, State: "open", Title: "issue", SourceUpdatedAt: time.Unix(3, 0).UTC()},
-		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 2, State: "closed", Title: "merged", Merged: true, MergedKnown: true, SourceUpdatedAt: time.Unix(2, 0).UTC()},
-		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 3, State: "closed", Title: "unmerged", MergedKnown: true, SourceUpdatedAt: time.Unix(1, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 2, State: "closed", Title: "merged", Merge: domain.MergedStatus(time.Time{}), SourceUpdatedAt: time.Unix(2, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 3, State: "closed", Title: "unmerged", Merge: domain.UnmergedStatus(), SourceUpdatedAt: time.Unix(1, 0).UTC()},
 	} {
 		if _, err := c.UpsertThread(ctx, thread, `{}`); err != nil {
 			t.Fatal(err)
@@ -295,13 +322,12 @@ func TestUpsertThreadUnknownMergeStateDoesNotEraseKnownState(t *testing.T) {
 	mergedAt := at.Add(-time.Hour)
 	known, err := c.UpsertThread(ctx, Thread{
 		RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 1,
-		State: "closed", Title: "details", Merged: true, MergedKnown: true,
-		MergedAt: mergedAt, SourceUpdatedAt: at,
+		State: "closed", Title: "details", Merge: domain.MergedStatus(mergedAt), SourceUpdatedAt: at,
 	}, `{"Merged":true}`)
 	if err != nil {
 		t.Fatalf("upsert known details: %v", err)
 	}
-	if !known.MergedKnown || !known.Merged {
+	if !known.Merge.Known() || !known.Merge.IsMerged() {
 		t.Fatalf("known projection = %+v", known)
 	}
 
@@ -312,19 +338,19 @@ func TestUpsertThreadUnknownMergeStateDoesNotEraseKnownState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upsert header-only observation: %v", err)
 	}
-	if got.Title != "newer header" || !got.MergedKnown || !got.Merged || !got.MergedAt.Equal(mergedAt) {
+	if got.Title != "newer header" || !got.Merge.Known() || !got.Merge.IsMerged() || !got.Merge.MergedAt().Equal(mergedAt) {
 		t.Fatalf("header sync erased explicit merge state: %+v", got)
 	}
 
 	got, err = c.UpsertThread(ctx, Thread{
 		RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 1,
-		State: "closed", Title: "observed false", MergedKnown: true,
+		State: "closed", Title: "observed false", Merge: domain.UnmergedStatus(),
 		SourceUpdatedAt: at.Add(2 * time.Second),
 	}, `{"Merged":false}`)
 	if err != nil {
 		t.Fatalf("upsert observed false details: %v", err)
 	}
-	if !got.MergedKnown || got.Merged || !got.MergedAt.IsZero() {
+	if !got.Merge.Known() || got.Merge.IsMerged() || !got.Merge.MergedAt().IsZero() {
 		t.Fatalf("explicit false did not replace projection: %+v", got)
 	}
 }

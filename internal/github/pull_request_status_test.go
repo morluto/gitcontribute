@@ -51,7 +51,8 @@ func TestGetPullRequestStatusConvertsHealthAndReportsPartialCoverage(t *testing.
 	if request.Variables["first"] != float64(maxPullRequestStatusPageSize) {
 		t.Errorf("first = %#v, want %d", request.Variables["first"], maxPullRequestStatusPageSize)
 	}
-	if result.HeadSHA != "abc123" || result.MergeState.MergeStateStatus != "BLOCKED" || !result.MergeState.MergeableKnown {
+	_, mergeabilityKnown := result.MergeState.Mergeability()
+	if result.HeadSHA != "abc123" || result.MergeState.MergeStateStatus != "BLOCKED" || !mergeabilityKnown {
 		t.Errorf("status identity/merge = %+v", result)
 	}
 	if result.MergeQueue == nil || result.MergeQueue.Position != 3 || result.MergeQueue.EstimatedTimeToMergeSeconds == nil || *result.MergeQueue.EstimatedTimeToMergeSeconds != 90000 {
@@ -164,7 +165,7 @@ func TestGetPullRequestStatusKeepsNullAndUnknownMergeabilityUnknown(t *testing.T
 			if err != nil {
 				t.Fatalf("GetPullRequestStatus: %v", err)
 			}
-			if result.MergeState.MergeableKnown {
+			if _, known := result.MergeState.Mergeability(); known {
 				t.Errorf("mergeability = %+v, want unknown", result.MergeState)
 			}
 			if !result.MergeStateCoverage.Complete {

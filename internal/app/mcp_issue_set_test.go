@@ -32,18 +32,17 @@ func TestPrepareIssueSetComposesStoredEvidenceWithoutClaimingClosure(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	merged := true
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
 		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 21, State: "closed",
 		Title: "Avoid duplicate cache work in readers", Body: "This advances #7 by caching repository reads.",
-		Merged: merged, MergedKnown: true, MergedAt: now.Add(-time.Hour), SourceUpdatedAt: now.Add(-time.Hour),
+		Merge: domain.MergedStatus(now.Add(-time.Hour)), SourceUpdatedAt: now.Add(-time.Hour),
 	}, `{}`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
 		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 22, State: "closed",
 		Title: "Avoid duplicate cache work", Body: "Cache identical requests once.",
-		MergedKnown: true, SourceUpdatedAt: now.Add(-30 * time.Minute),
+		Merge: domain.UnmergedStatus(), SourceUpdatedAt: now.Add(-30 * time.Minute),
 	}, `{}`); err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +85,7 @@ func TestPrepareIssueSetComposesStoredEvidenceWithoutClaimingClosure(t *testing.
 	if value.Linkage.Relation != "related" || !value.Linkage.RequiresConfirmation {
 		t.Fatalf("linkage = %+v", value.Linkage)
 	}
-	if len(value.Gaps) != 1 || value.Gaps[0].Facet != FacetIssueTimeline || value.Gaps[0].Recovery == nil || len(value.Gaps[0].Recovery.Then) != 1 || value.Gaps[0].Recovery.Then[0].Type != "hydrate_threads" {
+	if len(value.Gaps) != 1 || value.Gaps[0].Facet != FacetIssueTimeline || value.Gaps[0].Recovery == nil || len(value.Gaps[0].Recovery.Then) != 1 || value.Gaps[0].Recovery.Then[0].Type() != "hydrate_threads" {
 		t.Fatalf("gaps = %+v", value.Gaps)
 	}
 	detailed, err := (&MCPReader{svc}).PrepareIssueSet(ctx, mcpcontract.PrepareIssueSetInput{
@@ -123,17 +122,17 @@ func TestPrepareIssueSetPreservesUnknownAndExactRecovery(t *testing.T) {
 	if out.Status != "partial" || len(out.Items) != 2 {
 		t.Fatalf("result = %+v", out)
 	}
-	if len(out.Gaps) != 1 || out.Gaps[0].Code != "relationship_population_unknown" || out.Gaps[0].Recovery == nil || len(out.Gaps[0].Recovery.Then) != 1 || out.Gaps[0].Recovery.Then[0].Type != "sync_threads" {
+	if len(out.Gaps) != 1 || out.Gaps[0].Code != "relationship_population_unknown" || out.Gaps[0].Recovery == nil || len(out.Gaps[0].Recovery.Then) != 1 || out.Gaps[0].Recovery.Then[0].Type() != "sync_threads" {
 		t.Fatalf("relationship gaps = %+v", out.Gaps)
 	}
 	if got := out.Items[0].Value; got == nil || got.BodyStatus != "unknown" || len(got.Gaps) != 3 {
 		t.Fatalf("known issue = %+v", got)
 	}
 	missing := out.Items[1]
-	if missing.Status != "unavailable" || missing.Reason != "thread_not_indexed" || missing.Recovery == nil || len(missing.Recovery.Then) != 1 || missing.Recovery.Then[0].Type != "sync_threads" {
+	if missing.Status != "unavailable" || missing.Reason != "thread_not_indexed" || missing.Recovery == nil || len(missing.Recovery.Then) != 1 || missing.Recovery.Then[0].Type() != "sync_threads" {
 		t.Fatalf("missing issue = %+v", missing)
 	}
-	if len(out.RecoveryPlans) == 0 || len(out.RecoveryPlans[0].Then) != 1 || out.RecoveryPlans[0].Then[0].Type != "sync_threads" {
+	if len(out.RecoveryPlans) == 0 || len(out.RecoveryPlans[0].Then) != 1 || out.RecoveryPlans[0].Then[0].Type() != "sync_threads" {
 		t.Fatalf("recovery plans = %+v", out.RecoveryPlans)
 	}
 }
@@ -213,8 +212,8 @@ func TestIssueSetRelatedWorkDoesNotBorrowMergeStateAcrossRepositories(t *testing
 	t.Parallel()
 	out := issueSetRelatedWork(
 		radar.RelatedWork{Ref: "pull_request:other/repo#21", Kind: corpus.ThreadKindPullRequest, Number: 21},
-		domain.RepoRef{Owner: "acme", Repo: "rocket"},
-		map[int]corpus.Thread{21: {Number: 21, Merged: true, MergedKnown: true}},
+		domain.MustRepoRef("acme", "rocket"),
+		map[int]corpus.Thread{21: {Number: 21, Merge: domain.MergedStatus(time.Time{})}},
 		"concise",
 	)
 	if out.Merged != nil || out.MergedAt != "" {

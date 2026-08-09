@@ -109,14 +109,14 @@ func (s *Service) assembleContributionManifest(ctx context.Context, c *corpus.Co
 	now := s.now().UTC()
 	predicate := manifest.Predicate{
 		GeneratedAt: now,
-		Repository:  manifest.RepositoryIdentity{Owner: inv.Repo.Owner, Repo: inv.Repo.Repo, CommitSHA: inv.CommitSHA},
+		Repository:  manifest.RepositoryIdentity{Owner: inv.Repo.Owner(), Repo: inv.Repo.Repo(), CommitSHA: inv.CommitSHA},
 		Opportunity: manifest.OpportunityRecord{
 			ID: opp.ID, InvestigationID: opp.InvestigationID, HypothesisID: opp.HypothesisID,
 			ProblemStatement: opp.ProblemStatement, Scope: opp.Scope, Impact: opp.Impact,
 			Status: string(opp.Status), SourceRefs: append([]domain.SourceRef(nil), opp.SourceRefs...),
 		},
 	}
-	if err := s.addManifestWorkspace(ctx, c, inv.ID, inv.Repo.Owner, inv.Repo.Repo, opts.WorkspaceID, &predicate); err != nil {
+	if err := s.addManifestWorkspace(ctx, c, inv.ID, inv.Repo.Owner(), inv.Repo.Repo(), opts.WorkspaceID, &predicate); err != nil {
 		return nil, err
 	}
 	if err := addManifestValidations(ctx, c, &predicate); err != nil {
@@ -129,7 +129,7 @@ func (s *Service) assembleContributionManifest(ctx context.Context, c *corpus.Co
 		return nil, err
 	}
 	if opts.PullRequest != nil {
-		_, err = s.addManifestPullRequest(ctx, c, inv.Repo.Owner, inv.Repo.Repo, *opts.PullRequest, now, &predicate)
+		_, err = s.addManifestPullRequest(ctx, c, inv.Repo.Owner(), inv.Repo.Repo(), *opts.PullRequest, now, &predicate)
 		if err != nil {
 			return nil, err
 		}

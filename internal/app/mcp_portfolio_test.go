@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
@@ -52,7 +53,7 @@ func TestPullRequestPortfolioDerivesConflictAndPreservesUnknownCoverage(t *testi
 	if byNumber[unknown.Number].Attention != "unknown" || byNumber[unknown.Number].StatusCoverage != "missing" {
 		t.Fatalf("unknown coverage collapsed: %+v", byNumber[unknown.Number])
 	}
-	if byNumber[unknown.Number].Recovery == nil || len(byNumber[unknown.Number].Recovery.Then) == 0 || byNumber[unknown.Number].Recovery.Then[0].Type != "sync_portfolio" {
+	if byNumber[unknown.Number].Recovery == nil || len(byNumber[unknown.Number].Recovery.Then) == 0 || byNumber[unknown.Number].Recovery.Then[0].Type() != "sync_portfolio" {
 		t.Fatalf("unknown portfolio recovery = %+v", byNumber[unknown.Number].Recovery)
 	}
 	concise, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Authors: []string{"alice"}, State: "open", Limit: 10})
@@ -85,7 +86,7 @@ func TestPullRequestPortfolioClassifiesClosedUnmerged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 9, State: "closed", Title: "abandoned change", Author: "alice", MergedKnown: true, SourceUpdatedAt: now}, `{}`)
+	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 9, State: "closed", Title: "abandoned change", Author: "alice", Merge: domain.UnmergedStatus(), SourceUpdatedAt: now}, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,10 +124,11 @@ func TestPullRequestPortfolioKeepsComputingMergeabilityUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	unknownMergeability := "UNKNOWN"
 	values := map[string]any{
 		FacetPRDetails:       github.PullRequestDetails{Number: 10, UpdatedAt: now},
 		FacetPRReviews:       []github.Review{},
-		FacetPRMergeState:    github.PullRequestMergeState{MergeStateStatus: "UNKNOWN", Mergeable: "UNKNOWN", MergeableKnown: false},
+		FacetPRMergeState:    github.NewPullRequestMergeState("UNKNOWN", &unknownMergeability),
 		FacetPRMergeQueue:    (*github.PullRequestMergeQueueEntry)(nil),
 		FacetPRChecks:        []github.PullRequestCheck{},
 		FacetPRReviewThreads: []github.PullRequestReviewThread{},
@@ -204,7 +206,11 @@ func TestPullRequestPortfolioRepositoryScopePreservesTotalAndTruncationRecovery(
 	if out.Total != 2 || !out.Truncated || len(out.PullRequests) != 1 || out.PullRequests[0].Repo != "rocket" || out.PullRequests[0].Number != 2 {
 		t.Fatalf("scoped portfolio = %+v", out)
 	}
-	if out.Recovery == nil || len(out.Recovery.Then) != 1 || out.Recovery.Then[0].ListPortfolio == nil || out.Recovery.Then[0].ListPortfolio.Repository == nil || *out.Recovery.Then[0].ListPortfolio.Repository != *scope {
+	if out.Recovery == nil || len(out.Recovery.Then) != 1 {
+		t.Fatalf("scoped truncation recovery = %+v", out.Recovery)
+	}
+	next, ok := mcpcontract.RecoveryInput[mcpcontract.ListPullRequestPortfolioInput](out.Recovery.Then[0])
+	if !ok || next.Repository == nil || *next.Repository != *scope {
 		t.Fatalf("scoped truncation recovery = %+v", out.Recovery)
 	}
 	if _, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{Repository: scope, PullRequests: []mcpcontract.ThreadRef{{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 1}}}); err == nil {

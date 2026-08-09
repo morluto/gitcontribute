@@ -116,10 +116,10 @@ func TestMCPConcernListProvidesNextOffsetRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if page.Offset != 0 || page.NextOffset != 2 || !page.Truncated || page.Recovery == nil || len(page.Recovery.Then) != 1 || page.Recovery.Then[0].Type != "list_concerns" {
+	if page.Offset != 0 || page.NextOffset != 2 || !page.Truncated || page.Recovery == nil || len(page.Recovery.Then) != 1 || page.Recovery.Then[0].Type() != "list_concerns" {
 		t.Fatalf("first concern page = %+v", page)
 	}
-	if next := page.Recovery.Then[0].ListConcerns; next == nil || next.Offset != 2 || next.Limit != 2 {
+	if next, ok := mcpcontract.RecoveryInput[mcpcontract.ListConcernsInput](page.Recovery.Then[0]); !ok || next.Offset != 2 || next.Limit != 2 {
 		t.Fatalf("next concern action = %+v", page.Recovery)
 	}
 
@@ -149,7 +149,7 @@ func TestConcernFreshnessIsDerivedFromCurrentCorpus(t *testing.T) {
 		t.Fatal(err)
 	}
 	created, err := svc.createConcern(ctx, &concern.Concern{
-		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, CommitSHA: "abc", Title: "metadata", ProblemStatement: "may be stale",
+		Repo: domain.MustRepoRef("owner", "repo"), CommitSHA: "abc", Title: "metadata", ProblemStatement: "may be stale",
 		Confidence: 0.2, SourceProvenance: []evidence.SourceRevision{*revision},
 	})
 	if err != nil || created.Freshness != "fresh" {

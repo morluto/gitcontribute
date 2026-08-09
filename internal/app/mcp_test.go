@@ -25,7 +25,7 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	svc := newTestService(t, srv)
 	defer func() { _ = svc.Close() }()
 
-	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, codeindex.Snapshot{
+	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, domain.MustRepoRef("owner", "repo"), codeindex.Snapshot{
 		RepoPath: "/repo", Commit: "abc123", CreatedAt: time.Now().UTC(), TotalBytes: 25,
 		Documents: []codeindex.Document{{Path: "parser.go", Content: "func searchableParser() {}", Bytes: 25, LanguageHint: "go"}},
 		Manifest:  codeindex.Manifest{CoverageKnown: true, TrackedEntries: 3, IndexedFiles: 1, SkippedExcluded: 2, Truncated: true},
@@ -64,7 +64,7 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	if len(missing.Matches) != 0 || len(missing.Coverage) != 1 || missing.Coverage[0].Status != "indexed" || !missing.Coverage[0].Truncated {
 		t.Fatalf("zero-match search lost index coverage: %+v", missing)
 	}
-	if missing.Recovery == nil || len(missing.Recovery.Then) != 1 || missing.Recovery.Then[0].Type != "index_repositories" || missing.Coverage[0].Recovery == nil {
+	if missing.Recovery == nil || len(missing.Recovery.Then) != 1 || missing.Recovery.Then[0].Type() != "index_repositories" || missing.Coverage[0].Recovery == nil {
 		t.Fatalf("truncated code search recovery = %+v", missing)
 	}
 	unindexed, err := reader.SearchCode(ctx, mcpcontract.SearchCodeInput{Owner: "owner", Repo: "unindexed", Query: "anything", Limit: 10})
@@ -74,10 +74,10 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	if len(unindexed.Coverage) != 1 || unindexed.Coverage[0].Status != "missing" {
 		t.Fatalf("unindexed repository coverage = %+v", unindexed.Coverage)
 	}
-	if unindexed.Recovery == nil || unindexed.Recovery.Then[0].Type != "index_repositories" {
+	if unindexed.Recovery == nil || unindexed.Recovery.Then[0].Type() != "index_repositories" {
 		t.Fatalf("unindexed code search recovery = %+v", unindexed.Recovery)
 	}
-	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, domain.RepoRef{Owner: "owner", Repo: "legacy"}, codeindex.Snapshot{
+	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, domain.MustRepoRef("owner", "legacy"), codeindex.Snapshot{
 		RepoPath: "/legacy", Commit: "old123", CreatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	if len(legacy.Coverage) != 1 || legacy.Coverage[0].Status != "indexed_coverage_unknown" {
 		t.Fatalf("legacy snapshot coverage = %+v", legacy.Coverage)
 	}
-	if legacy.Recovery == nil || legacy.Recovery.Then[0].Type != "index_repositories" {
+	if legacy.Recovery == nil || legacy.Recovery.Then[0].Type() != "index_repositories" {
 		t.Fatalf("legacy code search recovery = %+v", legacy.Recovery)
 	}
 }
@@ -152,7 +152,7 @@ func TestMCPReaderRepositorySearchPreservesIncompleteNestedProjection(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(out.Matches) != 1 || !out.Incomplete || out.Recovery == nil || len(out.Recovery.Then) != 1 || out.Recovery.Then[0].Type != "sync_repository_context" {
+	if len(out.Matches) != 1 || !out.Incomplete || out.Recovery == nil || len(out.Recovery.Then) != 1 || out.Recovery.Then[0].Type() != "sync_repository_context" {
 		t.Fatalf("incomplete nested repository result = %+v", out)
 	}
 }
@@ -239,7 +239,7 @@ func TestMCPReaderSearchReportsUnknownMergeState(t *testing.T) {
 	for _, thread := range []corpus.Thread{
 		{
 			RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 1, State: "closed",
-			Title: "shared term", Merged: true, MergedKnown: true, SourceUpdatedAt: time.Unix(10, 0).UTC(),
+			Title: "shared term", Merge: domain.MergedStatus(time.Time{}), SourceUpdatedAt: time.Unix(10, 0).UTC(),
 		},
 		{
 			RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed",
@@ -271,8 +271,8 @@ func TestMCPReaderExplainCodeRejectsDifferentRequestedPath(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
-	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner, Name: ref.Repo}, `{}`); err != nil {
+	ref := domain.MustRepoRef("owner", "repo")
+	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner(), Name: ref.Repo()}, `{}`); err != nil {
 		t.Fatalf("store repository: %v", err)
 	}
 	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, ref, codeindex.Snapshot{
@@ -283,7 +283,7 @@ func TestMCPReaderExplainCodeRejectsDifferentRequestedPath(t *testing.T) {
 	}
 
 	_, err := svc.MCPReader().ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
-		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Query: "searchableParser", Path: "missing.go", Limit: 10,
+		Owner: ref.Owner(), Repo: ref.Repo(), Kind: "code", Query: "searchableParser", Path: "missing.go", Limit: 10,
 	})
 	if !errors.Is(err, mcpcontract.ErrNotFound) {
 		t.Fatalf("explain different path error = %v, want ErrNotFound", err)
@@ -294,8 +294,8 @@ func TestMCPReaderExplainCodeExactPathNotOnFirstSearchPage(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
-	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner, Name: ref.Repo}, `{}`); err != nil {
+	ref := domain.MustRepoRef("owner", "repo")
+	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner(), Name: ref.Repo()}, `{}`); err != nil {
 		t.Fatalf("store repository: %v", err)
 	}
 
@@ -321,7 +321,7 @@ func TestMCPReaderExplainCodeExactPathNotOnFirstSearchPage(t *testing.T) {
 
 	// Confirm the target is not on the first search page.
 	searchOut, err := svc.MCPReader().SearchCode(ctx, mcpcontract.SearchCodeInput{
-		Owner: ref.Owner, Repo: ref.Repo, Query: "searchableParser", Limit: 20,
+		Owner: ref.Owner(), Repo: ref.Repo(), Query: "searchableParser", Limit: 20,
 	})
 	if err != nil {
 		t.Fatalf("search code: %v", err)
@@ -333,7 +333,7 @@ func TestMCPReaderExplainCodeExactPathNotOnFirstSearchPage(t *testing.T) {
 	}
 
 	out, err := svc.MCPReader().ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
-		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Query: "searchableParser", Path: "target.go",
+		Owner: ref.Owner(), Repo: ref.Repo(), Kind: "code", Query: "searchableParser", Path: "target.go",
 	})
 	if err != nil {
 		t.Fatalf("explain match: %v", err)
@@ -347,8 +347,8 @@ func TestMCPReaderExplainCodeRejectsNonMatchingQuery(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
-	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner, Name: ref.Repo}, `{}`); err != nil {
+	ref := domain.MustRepoRef("owner", "repo")
+	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner(), Name: ref.Repo()}, `{}`); err != nil {
 		t.Fatalf("store repository: %v", err)
 	}
 	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, ref, codeindex.Snapshot{
@@ -359,7 +359,7 @@ func TestMCPReaderExplainCodeRejectsNonMatchingQuery(t *testing.T) {
 	}
 
 	_, err := svc.MCPReader().ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
-		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Query: "searchableParser", Path: "parser.go",
+		Owner: ref.Owner(), Repo: ref.Repo(), Kind: "code", Query: "searchableParser", Path: "parser.go",
 	})
 	if !errors.Is(err, mcpcontract.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for non-matching query, got %v", err)
@@ -370,8 +370,8 @@ func TestMCPReaderExplainCodeRejectsWrongCommit(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	svc := newSearchTestService(t)
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
-	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner, Name: ref.Repo}, `{}`); err != nil {
+	ref := domain.MustRepoRef("owner", "repo")
+	if _, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: ref.Owner(), Name: ref.Repo()}, `{}`); err != nil {
 		t.Fatalf("store repository: %v", err)
 	}
 	if _, _, err := svc.corpus.StoreCodeSnapshot(ctx, ref, codeindex.Snapshot{
@@ -382,14 +382,14 @@ func TestMCPReaderExplainCodeRejectsWrongCommit(t *testing.T) {
 	}
 
 	_, err := svc.MCPReader().ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
-		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Path: "parser.go", Commit: "deadbeef",
+		Owner: ref.Owner(), Repo: ref.Repo(), Kind: "code", Path: "parser.go", Commit: "deadbeef",
 	})
 	if !errors.Is(err, mcpcontract.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for wrong commit, got %v", err)
 	}
 
 	out, err := svc.MCPReader().ExplainMatch(ctx, mcpcontract.ExplainMatchInput{
-		Owner: ref.Owner, Repo: ref.Repo, Kind: "code", Path: "parser.go", Commit: "abc123",
+		Owner: ref.Owner(), Repo: ref.Repo(), Kind: "code", Path: "parser.go", Commit: "abc123",
 	})
 	if err != nil {
 		t.Fatalf("explain match: %v", err)
@@ -434,7 +434,7 @@ func TestMCPReaderInvestigationWorkflow(t *testing.T) {
 	invSvc := investigation.NewService(svc.corpus, svc.corpus)
 	evSvc := evidence.NewService(svc.corpus, nil)
 
-	ref := domain.RepoRef{Owner: "owner", Repo: "repo"}
+	ref := domain.MustRepoRef("owner", "repo")
 	inv, err := invSvc.StartInvestigation(ctx, ref, "deadbeef", "")
 	if err != nil {
 		t.Fatalf("start investigation: %v", err)

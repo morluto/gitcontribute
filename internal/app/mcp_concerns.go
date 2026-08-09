@@ -14,12 +14,16 @@ import (
 
 // CreateConcern implements the MCP local concern-write capability.
 func (r *MCPReader) CreateConcern(ctx context.Context, in mcpcontract.CreateConcernInput) (mcpcontract.ConcernOutput, error) {
+	ref, err := domain.NewRepoRef(in.Owner, in.Repo)
+	if err != nil {
+		return mcpcontract.ConcernOutput{}, err
+	}
 	provenance, err := concernSourceProvenance(in.SourceProvenance)
 	if err != nil {
 		return mcpcontract.ConcernOutput{}, err
 	}
 	result, err := r.createConcern(ctx, &concern.Concern{
-		Repo: domain.RepoRef{Owner: in.Owner, Repo: in.Repo}, CommitSHA: in.CommitSHA, WorkspaceID: in.WorkspaceID,
+		Repo: ref, CommitSHA: in.CommitSHA, WorkspaceID: in.WorkspaceID,
 		Title: in.Title, ProblemStatement: in.ProblemStatement, SuspectedOwner: in.SuspectedOwner,
 		Confidence: float64(in.Confidence), Unknowns: in.Unknowns, SuccessCriterion: in.SuccessCriterion,
 		Notes: in.Notes, EvidenceIDs: in.EvidenceIDs, SourceProvenance: provenance,

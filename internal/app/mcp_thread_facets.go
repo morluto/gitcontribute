@@ -36,8 +36,8 @@ func (r *MCPReader) GetThreadFacets(ctx context.Context, in mcpcontract.GetThrea
 	out := mcpcontract.GetThreadFacetsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.ThreadFacetsOutput], len(in.Threads)), SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
 	repositoryKeys := make([]corpus.RepositoryKey, 0, len(in.Threads))
 	for _, input := range in.Threads {
-		if (domain.RepoRef{Owner: input.Owner, Repo: input.Repo}).Validate() == nil && input.Number > 0 {
-			repositoryKeys = append(repositoryKeys, corpus.RepositoryKey{Owner: input.Owner, Name: input.Repo})
+		if ref, err := domain.NewRepoRef(input.Owner, input.Repo); err == nil && input.Number > 0 {
+			repositoryKeys = append(repositoryKeys, corpus.RepositoryKey{Owner: ref.Owner(), Name: ref.Repo()})
 		}
 	}
 	repositories, err := c.GetRepositoriesBatch(ctx, repositoryKeys)
@@ -46,7 +46,11 @@ func (r *MCPReader) GetThreadFacets(ctx context.Context, in mcpcontract.GetThrea
 	}
 	threadKeys := make([]corpus.ThreadKey, 0, len(in.Threads))
 	for _, input := range in.Threads {
-		if repo := repositories[corpus.RepositoryKey{Owner: input.Owner, Name: input.Repo}]; repo != nil && input.Number > 0 {
+		ref, parseErr := domain.NewRepoRef(input.Owner, input.Repo)
+		if parseErr != nil {
+			continue
+		}
+		if repo := repositories[corpus.RepositoryKey{Owner: ref.Owner(), Name: ref.Repo()}]; repo != nil && input.Number > 0 {
 			threadKeys = append(threadKeys, corpus.ThreadKey{RepositoryID: repo.ID, Kind: input.Kind, Number: input.Number})
 		}
 	}
@@ -68,14 +72,14 @@ func (r *MCPReader) GetThreadFacets(ctx context.Context, in mcpcontract.GetThrea
 	}
 	for i, input := range in.Threads {
 		item := mcpcontract.BatchItem[mcpcontract.ThreadFacetsOutput]{Key: threadRefKey(input), Status: "complete"}
-		ref := domain.RepoRef{Owner: input.Owner, Repo: input.Repo}
-		if ref.Validate() != nil || (input.Kind != corpus.ThreadKindIssue && input.Kind != corpus.ThreadKindPullRequest) || input.Number < 1 {
+		ref, parseErr := domain.NewRepoRef(input.Owner, input.Repo)
+		if parseErr != nil || (input.Kind != corpus.ThreadKindIssue && input.Kind != corpus.ThreadKindPullRequest) || input.Number < 1 {
 			item.Status, item.Reason, item.Message = "failed", "blocked", "invalid thread reference"
 			out.Status = "partial"
 			out.Items[i] = item
 			continue
 		}
-		repo := repositories[corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo}]
+		repo := repositories[corpus.RepositoryKey{Owner: ref.Owner(), Name: ref.Repo()}]
 		if repo == nil {
 			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", "repository is not present in the local corpus"
 			item.Recovery = recoveryPlan("repository_not_indexed", item.Message, syncRepositoryContextCall(input.Owner, input.Repo))
@@ -91,10 +95,10 @@ func (r *MCPReader) GetThreadFacets(ctx context.Context, in mcpcontract.GetThrea
 			out.Items[i] = item
 			continue
 		}
-		value := mcpcontract.ThreadFacetsOutput{Owner: ref.Owner, Repo: ref.Repo, Kind: thread.Kind, Number: thread.Number, Facets: make([]mcpcontract.ThreadFacetOutput, 0, len(in.Facets))}
+		value := mcpcontract.ThreadFacetsOutput{Owner: ref.Owner(), Repo: ref.Repo(), Kind: thread.Kind, Number: thread.Number, Facets: make([]mcpcontract.ThreadFacetOutput, 0, len(in.Facets))}
 		for _, facet := range in.Facets {
 			key := corpus.ThreadFacetKey{ThreadID: thread.ID, Facet: facet}
-			entry := mcpcontract.ThreadFacetOutput{Facet: facet, Status: "not_observed", ResourceURI: threadFacetURI(ref.Owner, ref.Repo, thread.Kind, thread.Number, facet)}
+			entry := mcpcontract.ThreadFacetOutput{Facet: facet, Status: "not_observed", ResourceURI: threadFacetURI(ref.Owner(), ref.Repo(), thread.Kind, thread.Number, facet)}
 			if cov := coverage[key]; cov != nil {
 				entry.Complete, entry.SourceUpdatedAt = cov.Complete, formatTime(cov.SourceUpdatedAt)
 				entry.Status = "complete"

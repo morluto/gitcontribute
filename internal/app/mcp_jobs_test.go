@@ -122,7 +122,11 @@ func TestPortfolioArtifactBoundsPersistedTerminalLists(t *testing.T) {
 	if len(artifact.References) != maxJobArtifactItems || !artifact.ReferencesTruncated || len(artifact.Failures) != maxJobArtifactItems || !artifact.FailuresTruncated {
 		t.Fatalf("bounded portfolio artifact = %+v", artifact)
 	}
-	if artifact.Recovery == nil || len(artifact.Recovery.Then) != 1 || artifact.Recovery.Then[0].SyncPortfolio == nil || len(artifact.Recovery.Then[0].SyncPortfolio.PullRequests) != maxJobArtifactItems {
+	if artifact.Recovery == nil || len(artifact.Recovery.Then) != 1 {
+		t.Fatalf("portfolio recovery exceeds bounded artifact scope: %+v", artifact.Recovery)
+	}
+	next, ok := mcpcontract.RecoveryInput[mcpcontract.SyncPortfolioInput](artifact.Recovery.Then[0])
+	if !ok || len(next.PullRequests) != maxJobArtifactItems {
 		t.Fatalf("portfolio recovery exceeds bounded artifact scope: %+v", artifact.Recovery)
 	}
 }
@@ -259,10 +263,11 @@ func TestThreadSyncFollowUpUsesResolvedExactThreads(t *testing.T) {
 		Result:  `{"status":"complete","items":[{"key":"acme/rocket","status":"complete","threads":[{"owner":"acme","repo":"rocket","kind":"pull_request","number":7}]}]}`,
 	}
 	artifacts, follow := jobArtifactsAndFollowUp(job, 1)
-	if len(artifacts) != 1 || follow == nil || follow.Action.Type != "get_threads" || follow.Action.GetThreads == nil {
+	if len(artifacts) != 1 || follow == nil || follow.Action.Type() != "get_threads" {
 		t.Fatalf("thread sync handoff = artifacts:%+v follow:%+v", artifacts, follow)
 	}
-	if len(follow.Action.GetThreads.Threads) != 1 || follow.Action.GetThreads.Threads[0].Kind != "pull_request" || follow.Action.GetThreads.Threads[0].Number != 7 {
+	arguments, ok := mcpcontract.RecoveryInput[mcpcontract.GetThreadsInput](follow.Action)
+	if !ok || len(arguments.Threads) != 1 || arguments.Threads[0].Kind != "pull_request" || arguments.Threads[0].Number != 7 {
 		t.Fatalf("thread sync follow-up arguments = %+v", follow.Action)
 	}
 	if len(artifacts[0].References) != 1 || artifacts[0].References[0] != "acme/rocket/pull_request#7" {
@@ -277,7 +282,11 @@ func TestPersistedWorkflowFollowUpReadsResourceWithoutResubmittingMutation(t *te
 		Result: `{"status":"complete","items":[{"key":"acme/rocket/pull_request#7","item_status":"complete","resource_uri":"gitcontribute://pull-request-feedback/acme/rocket/7"}]}`,
 	}
 	_, follow := jobArtifactsAndFollowUp(job, 1)
-	if follow == nil || follow.Action.Type != "read_resource" || follow.Action.ReadResource == nil || follow.Action.ReadResource.URI != "gitcontribute://pull-request-feedback/acme/rocket/7" {
+	if follow == nil {
+		t.Fatal("resource handoff is nil")
+	}
+	read, ok := mcpcontract.RecoveryInput[mcpcontract.ResourceReadAction](follow.Action)
+	if follow.Action.Type() != "read_resource" || !ok || read.URI != "gitcontribute://pull-request-feedback/acme/rocket/7" {
 		t.Fatalf("resource handoff = %+v", follow)
 	}
 }
@@ -290,10 +299,14 @@ func TestPortfolioFollowUpUsesPortfolioReadArguments(t *testing.T) {
 		Result:  `{"status":"complete","login":"alice","pull_requests":["acme/rocket/pull_request#7"],"refreshed":1}`,
 	}
 	_, follow := jobArtifactsAndFollowUp(job, 1)
-	if follow == nil || follow.Action.Type != "list_pull_request_portfolio" || follow.Action.ListPortfolio == nil {
+	if follow == nil {
+		t.Fatal("portfolio handoff is nil")
+	}
+	arguments, ok := mcpcontract.RecoveryInput[mcpcontract.ListPullRequestPortfolioInput](follow.Action)
+	if follow.Action.Type() != "list_pull_request_portfolio" || !ok {
 		t.Fatalf("portfolio handoff = %+v", follow)
 	}
-	if follow.Action.ListPortfolio.Repository == nil || follow.Action.ListPortfolio.Repository.Owner != "acme" || follow.Action.ListPortfolio.Repository.Repo != "rocket" || len(follow.Action.ListPortfolio.Authors) != 1 || follow.Action.ListPortfolio.Authors[0] != "alice" || follow.Action.ListPortfolio.State != "closed" || follow.Action.ListPortfolio.Limit != 10 || follow.Action.ListPortfolio.View != "compact" {
+	if arguments.Repository == nil || arguments.Repository.Owner != "acme" || arguments.Repository.Repo != "rocket" || len(arguments.Authors) != 1 || arguments.Authors[0] != "alice" || arguments.State != "closed" || arguments.Limit != 10 || arguments.View != "compact" {
 		t.Fatalf("portfolio follow-up arguments = %+v", follow.Action)
 	}
 }
@@ -306,10 +319,14 @@ func TestExplicitPortfolioFollowUpPreservesExactReferences(t *testing.T) {
 		Result:  `{"status":"complete","pull_requests":["acme/rocket/pull_request#7"],"refreshed":1,"discovery_status":"complete"}`,
 	}
 	_, follow := jobArtifactsAndFollowUp(job, 1)
-	if follow == nil || follow.Action.ListPortfolio == nil || len(follow.Action.ListPortfolio.PullRequests) != 1 {
+	if follow == nil {
+		t.Fatal("portfolio handoff is nil")
+	}
+	arguments, ok := mcpcontract.RecoveryInput[mcpcontract.ListPullRequestPortfolioInput](follow.Action)
+	if !ok || len(arguments.PullRequests) != 1 {
 		t.Fatalf("portfolio handoff = %+v", follow)
 	}
-	ref := follow.Action.ListPortfolio.PullRequests[0]
+	ref := arguments.PullRequests[0]
 	if ref.Owner != "acme" || ref.Repo != "rocket" || ref.Kind != "pull_request" || ref.Number != 7 {
 		t.Fatalf("exact portfolio handoff = %+v", ref)
 	}
@@ -323,7 +340,11 @@ func TestLegacyAuthoredPortfolioFollowUpUsesObservedLogin(t *testing.T) {
 		Result:  `{"status":"complete","login":"alice","pull_requests":["acme/rocket/pull_request#7"],"refreshed":1,"discovery_status":"complete"}`,
 	}
 	_, follow := jobArtifactsAndFollowUp(job, 1)
-	if follow == nil || follow.Action.ListPortfolio == nil || len(follow.Action.ListPortfolio.Authors) != 1 || follow.Action.ListPortfolio.Authors[0] != "alice" {
+	if follow == nil {
+		t.Fatal("legacy authored portfolio handoff is nil")
+	}
+	arguments, ok := mcpcontract.RecoveryInput[mcpcontract.ListPullRequestPortfolioInput](follow.Action)
+	if !ok || len(arguments.Authors) != 1 || arguments.Authors[0] != "alice" {
 		t.Fatalf("legacy authored portfolio handoff = %+v", follow)
 	}
 }
@@ -336,7 +357,11 @@ func TestLegacyExplicitPortfolioFollowUpPreservesResultReferences(t *testing.T) 
 		Result:  `{"status":"complete","pull_requests":["acme/rocket/pull_request#7"],"refreshed":1,"discovery_status":"complete"}`,
 	}
 	_, follow := jobArtifactsAndFollowUp(job, 1)
-	if follow == nil || follow.Action.ListPortfolio == nil || len(follow.Action.ListPortfolio.PullRequests) != 1 {
+	if follow == nil {
+		t.Fatal("legacy explicit portfolio handoff is nil")
+	}
+	arguments, ok := mcpcontract.RecoveryInput[mcpcontract.ListPullRequestPortfolioInput](follow.Action)
+	if !ok || len(arguments.PullRequests) != 1 {
 		t.Fatalf("legacy explicit portfolio handoff = %+v", follow)
 	}
 }
@@ -411,13 +436,14 @@ func TestPullRequestFeedbackIndexJobOffersOfflineSearchFollowUp(t *testing.T) {
 	job := &contracts.JobResult{
 		Kind: jobKindIndexPullRequestFeedback, Status: "succeeded",
 		Request: `{"repository":{"owner":"acme","repo":"rocket"}}`,
-		Result:  `{"status":"partial","discovery_status":"partial","items":[{"key":"acme/rocket/pull_request#7","item_status":"complete"}],"recovery":{"version":"recovery.v1","reason":"feedback_discovery_incomplete","message":"continue"}}`,
+		Result:  `{"status":"partial","discovery_status":"partial","items":[{"key":"acme/rocket/pull_request#7","item_status":"complete"}],"recovery":{"version":"gitcontribute.recovery.v1","reason":"feedback_discovery_incomplete","message":"continue"}}`,
 	}
 	artifacts, follow := jobArtifactsAndFollowUp(job, 1)
 	if len(artifacts) != 1 || artifacts[0].Kind != "pull_request_feedback_index" || artifacts[0].DiscoveryStatus != "partial" || follow == nil {
 		t.Fatalf("feedback index artifact = %+v follow=%+v", artifacts, follow)
 	}
-	if follow.Action.Type != "search_pull_request_feedback" || follow.Action.SearchFeedback == nil || follow.Action.SearchFeedback.Repository.Owner != "acme" || follow.Action.SearchFeedback.Repository.Repo != "rocket" {
+	arguments, ok := mcpcontract.RecoveryInput[mcpcontract.SearchPullRequestFeedbackInput](follow.Action)
+	if follow.Action.Type() != "search_pull_request_feedback" || !ok || arguments.Repository.Owner != "acme" || arguments.Repository.Repo != "rocket" {
 		t.Fatalf("feedback index follow-up = %+v", follow)
 	}
 }

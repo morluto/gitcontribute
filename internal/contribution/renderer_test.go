@@ -109,12 +109,19 @@ func TestRenderPullRequest(t *testing.T) {
 
 func TestRenderPullRequestIncludesCompatibleBeforeAfterProof(t *testing.T) {
 	def := &evidence.ValidationDefinition{ID: "def", Command: []string{"go", "test", "./pkg/foo", "-run", "TestRace"}}
+	expected, err := evidence.ParseExpectedObservation(evidence.ExpectedObservationSpec{
+		Name: "race reproduced", Source: evidence.ObservationStderr,
+		Matcher: evidence.ObservationExact, Pattern: "DATA RACE", Occurrence: evidence.ObservationPresent,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	base := &evidence.ValidationRun{
 		ID: "base", DefinitionID: def.ID, Kind: evidence.RunKindBase,
 		Classification: evidence.RunClassificationFailing, ObservationStatus: evidence.ObservationMatched,
 		WorkspaceSnapshotAfter: "base-sha",
 		Observations: []evidence.ObservationResult{{
-			ExpectedObservation: evidence.ExpectedObservation{Name: "race reproduced"},
+			ExpectedObservation: expected,
 			Status:              evidence.ObservationMatched, Excerpt: "DATA RACE",
 		}},
 	}

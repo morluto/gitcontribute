@@ -5,19 +5,18 @@ import (
 	"strings"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
-	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // SearchRepositories performs a local-only repository search.
 func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpcontract.SearchRepositoriesInput) (mcpcontract.SearchRepositoriesOutput, error) {
 	in.Query = strings.TrimSpace(in.Query)
-	repoRef := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
+	repoRef, err := optionalRepoRef(in.Owner, in.Repo)
+	if err != nil {
+		return mcpcontract.SearchRepositoriesOutput{}, err
+	}
 	repoFilter := ""
-	if in.Owner != "" || in.Repo != "" {
-		if err := repoRef.Validate(); err != nil {
-			return mcpcontract.SearchRepositoriesOutput{}, err
-		}
+	if repoRef.IsValid() {
 		repoFilter = repoRef.String()
 	}
 
@@ -44,7 +43,7 @@ func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpcontract.Searc
 
 	refs := make([]mcpcontract.RepositoryRef, len(res.Matches))
 	for i, m := range res.Matches {
-		refs[i] = mcpcontract.RepositoryRef{Owner: m.Repo.Owner, Repo: m.Repo.Repo}
+		refs[i] = mcpcontract.RepositoryRef{Owner: m.Repo.Owner(), Repo: m.Repo.Repo()}
 	}
 	batch, err := r.GetRepositories(ctx, mcpcontract.GetRepositoriesInput{Repositories: refs, SnapshotToken: in.SnapshotToken})
 	if err != nil {

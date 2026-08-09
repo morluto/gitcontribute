@@ -32,8 +32,8 @@ func TestListRunsBounded(t *testing.T) {
 	if runs[0].ID <= runs[1].ID {
 		t.Fatalf("expected runs ordered by descending id, got %d then %d", runs[0].ID, runs[1].ID)
 	}
-	if runs[0].Status != RunStatusCompleted {
-		t.Fatalf("expected completed run, got %s", runs[0].Status)
+	if runs[0].State.Status() != RunStatusCompleted {
+		t.Fatalf("expected completed run, got %s", runs[0].State.Status())
 	}
 
 	all, err := c.ListRuns(ctx, 0)
@@ -42,5 +42,38 @@ func TestListRunsBounded(t *testing.T) {
 	}
 	if len(all) != 3 {
 		t.Fatalf("expected 3 runs, got %d", len(all))
+	}
+}
+
+func TestRunStateRejectsContradictoryLifecycle(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(1, 0).UTC()
+	for _, test := range []struct {
+		status      string
+		completedAt *time.Time
+	}{
+		{status: string(RunStatusRunning), completedAt: &now},
+		{status: string(RunStatusCompleted)},
+		{status: "invented", completedAt: &now},
+	} {
+		if _, err := parseRunState(test.status, test.completedAt); err == nil {
+			t.Fatalf("parseRunState(%q, %v) succeeded", test.status, test.completedAt)
+		}
+	}
+}
+
+func TestRunCannotTransitionAfterCompletion(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	run, err := c.StartRun(ctx, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.FinishRun(ctx, run.ID, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.FailRun(ctx, run.ID, "late failure"); err == nil {
+		t.Fatal("completed run transitioned to failed")
 	}
 }

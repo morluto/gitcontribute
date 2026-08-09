@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 // ListPullRequestPortfolio returns pull requests across all stored
@@ -122,9 +124,14 @@ func scanPullRequestPortfolioRows(rows *sql.Rows) (_ []PortfolioPullRequest, err
 		item.Thread.CreatedAt = scanTime(created)
 		item.Thread.UpdatedAt = scanTime(updated)
 		item.Thread.ClosedAt = scanTime(closed.Int64)
-		item.Thread.MergedAt = scanTime(mergedAt.Int64)
-		item.Thread.Merged = merged != 0
-		item.Thread.MergedKnown = mergedKnown != 0
+		if err := parseThreadProjection(&item.Thread); err != nil {
+			return nil, fmt.Errorf("parse stored portfolio thread: %w", err)
+		}
+		merge, err := domain.ParseMergeStatus(mergedKnown != 0, merged != 0, scanTime(mergedAt.Int64))
+		if err != nil {
+			return nil, fmt.Errorf("parse stored merge status: %w", err)
+		}
+		item.Thread.Merge = merge
 		out = append(out, item)
 	}
 	if err := rows.Err(); err != nil {

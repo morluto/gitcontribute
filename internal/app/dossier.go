@@ -45,8 +45,8 @@ var rejectionLabels = map[string]struct{}{
 // BuildRepositoryDossier builds a deterministic dossier from local corpus data,
 // persists it safely, and returns the result.
 func (s *Service) BuildRepositoryDossier(ctx context.Context, repo contracts.RepoRef) (*domain.Dossier, error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 
@@ -60,7 +60,7 @@ func (s *Service) BuildRepositoryDossier(ctx context.Context, repo contracts.Rep
 		return nil, err
 	}
 
-	repoProjection, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repoProjection, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return nil, fmt.Errorf("get repository: %w", err)
 	}
@@ -88,7 +88,7 @@ func (s *Service) BuildRepositoryDossier(ctx context.Context, repo contracts.Rep
 	}
 
 	generatedAt := s.now()
-	id, inserted, err := c.RefreshDossier(ctx, repoProjection.ID, ref.Owner, ref.Repo, d.CommitSHA, d.AsOf, string(sectionMetaJSON), string(snapshot), generatedAt, d.SourceRefs)
+	id, inserted, err := c.RefreshDossier(ctx, repoProjection.ID, ref.Owner(), ref.Repo(), d.CommitSHA, d.AsOf, string(sectionMetaJSON), string(snapshot), generatedAt, d.SourceRefs)
 	if err != nil {
 		return nil, fmt.Errorf("refresh dossier: %w", err)
 	}
@@ -96,7 +96,7 @@ func (s *Service) BuildRepositoryDossier(ctx context.Context, repo contracts.Rep
 		return d, nil
 	}
 
-	record, sources, err := c.GetDossier(ctx, ref.Owner, ref.Repo)
+	record, sources, err := c.GetDossier(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return nil, fmt.Errorf("get dossier: %w", err)
 	}
@@ -108,8 +108,8 @@ func (s *Service) BuildRepositoryDossier(ctx context.Context, repo contracts.Rep
 
 // GetRepositoryDossier returns the most recently persisted dossier for a repository.
 func (s *Service) GetRepositoryDossier(ctx context.Context, repo contracts.RepoRef) (*domain.Dossier, error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 
@@ -117,7 +117,7 @@ func (s *Service) GetRepositoryDossier(ctx context.Context, repo contracts.RepoR
 	if err != nil {
 		return nil, err
 	}
-	record, sources, err := c.GetDossier(ctx, ref.Owner, ref.Repo)
+	record, sources, err := c.GetDossier(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return nil, fmt.Errorf("get dossier: %w", err)
 	}
@@ -153,8 +153,8 @@ func dossierFromRecord(record *corpus.DossierRecord, sources []corpus.DossierSou
 // positive and negative outcome evidence; issue-only context is opt-in. It
 // performs no network access.
 func (s *Service) ExtractSeeds(ctx context.Context, repo contracts.RepoRef, opts domain.ExtractSeedsOptions) ([]domain.Seed, error) {
-	ref := domain.RepoRef{Owner: repo.Owner, Repo: repo.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
 
@@ -170,7 +170,7 @@ func (s *Service) ExtractSeeds(ctx context.Context, repo contracts.RepoRef, opts
 		return nil, err
 	}
 
-	repoProjection, err := c.GetRepository(ctx, ref.Owner, ref.Repo)
+	repoProjection, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return nil, fmt.Errorf("get repository: %w", err)
 	}
@@ -254,10 +254,10 @@ func selectedSeedPolarities(polarities []domain.SeedPolarity) (map[domain.SeedPo
 func classForThread(t corpus.Thread) (domain.SeedSourceClass, bool) {
 	switch t.Kind {
 	case corpus.ThreadKindPullRequest:
-		if t.Merged {
+		if t.Merge.IsMerged() {
 			return domain.SeedSourceClassMergedPR, true
 		}
-		if t.State == "closed" && t.MergedKnown {
+		if t.State == "closed" && t.Merge.Known() {
 			return domain.SeedSourceClassClosedUnmergedPR, true
 		}
 		return "", false
@@ -302,7 +302,7 @@ func buildSeed(ctx context.Context, c *corpus.Corpus, t corpus.Thread, class dom
 		CreatedAt:      t.SourceCreatedAt,
 		UpdatedAt:      t.SourceUpdatedAt,
 		ClosedAt:       t.ClosedAt,
-		MergedAt:       t.MergedAt,
+		MergedAt:       t.Merge.MergedAt(),
 	}
 
 	prPayload, err := latestPRPayload(ctx, c, t)

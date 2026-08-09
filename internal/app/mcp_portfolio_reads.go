@@ -23,20 +23,19 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 		if in.Repository != nil || len(in.Authors) > 0 || in.State != "" || in.Limit != 0 {
 			return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("pull_requests cannot be combined with repository, authors, state, or limit")
 		}
-		in.PullRequests = canonicalPullRequestRefs(in.PullRequests)
-		if err := rejectDuplicateThreadRefs(in.PullRequests); err != nil {
+		refs, err := parsePullRequestRefs(in.PullRequests, "pull_requests")
+		if err != nil {
 			return mcpcontract.ListPullRequestPortfolioOutput{}, err
 		}
-		if err := validatePullRequestRefs(in.PullRequests, "pull_requests"); err != nil {
-			return mcpcontract.ListPullRequestPortfolioOutput{}, err
-		}
+		in.PullRequests = refs
 	}
 	if in.Repository != nil {
-		in.Repository.Owner = strings.TrimSpace(in.Repository.Owner)
-		in.Repository.Repo = strings.TrimSpace(in.Repository.Repo)
-		if err := (domain.RepoRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo}).Validate(); err != nil {
+		ref, err := domain.NewRepoRef(in.Repository.Owner, in.Repository.Repo)
+		if err != nil {
 			return mcpcontract.ListPullRequestPortfolioOutput{}, err
 		}
+		in.Repository.Owner = ref.Owner()
+		in.Repository.Repo = ref.Repo()
 	}
 	if in.State == "" {
 		in.State = "open"

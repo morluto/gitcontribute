@@ -140,7 +140,7 @@ func resolveTriageLinks(ctx context.Context, c *Corpus, e *tracking.TriageEvent)
 	if e.RepositoryID == nil && e.TargetKind == tracking.TargetRepository {
 		ref, err := parseRepoRef(e.TargetRef)
 		if err == nil {
-			if repo, err := c.GetRepository(ctx, ref.Owner, ref.Repo); err == nil && repo != nil {
+			if repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo()); err == nil && repo != nil {
 				e.RepositoryID = &repo.ID
 			}
 		}
@@ -162,7 +162,7 @@ func resolveTriageLinks(ctx context.Context, c *Corpus, e *tracking.TriageEvent)
 	if e.ThreadID == nil && (e.TargetKind == tracking.TargetIssue || e.TargetKind == tracking.TargetPullRequest || e.TargetKind == tracking.TargetThread) {
 		repoRef, number, ok := parseThreadRef(e.TargetRef)
 		if ok {
-			if repo, err := c.GetRepository(ctx, repoRef.Owner, repoRef.Repo); err == nil && repo != nil {
+			if repo, err := c.GetRepository(ctx, repoRef.Owner(), repoRef.Repo()); err == nil && repo != nil {
 				e.RepositoryID = &repo.ID
 				kind := ""
 				switch e.TargetKind {
@@ -187,15 +187,7 @@ func resolveTriageLinks(ctx context.Context, c *Corpus, e *tracking.TriageEvent)
 }
 
 func parseRepoRef(ref string) (domain.RepoRef, error) {
-	parts := strings.Split(ref, "/")
-	if len(parts) != 2 {
-		return domain.RepoRef{}, fmt.Errorf("invalid repository reference")
-	}
-	r := domain.RepoRef{Owner: strings.TrimSpace(parts[0]), Repo: strings.TrimSpace(parts[1])}
-	if err := r.Validate(); err != nil {
-		return domain.RepoRef{}, err
-	}
-	return r, nil
+	return domain.ParseRepoRef(ref)
 }
 
 func parseThreadRef(ref string) (domain.RepoRef, int, bool) {

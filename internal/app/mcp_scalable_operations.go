@@ -30,7 +30,7 @@ func (r *MCPReader) SyncRepositoryContext(ctx context.Context, in mcpcontract.Sy
 		return mcpcontract.JobReference{}, errors.New("repositories must contain 1 to 100 items")
 	}
 	for _, input := range in.Repositories {
-		if err := (domain.RepoRef{Owner: input.Owner, Repo: input.Repo}).Validate(); err != nil {
+		if _, err := domain.NewRepoRef(input.Owner, input.Repo); err != nil {
 			return mcpcontract.JobReference{}, err
 		}
 	}
@@ -55,39 +55,12 @@ func (r *MCPReader) SyncRepositoryContext(ctx context.Context, in mcpcontract.Sy
 // SyncThreads submits a durable bounded GitHub read for thread headers in
 // repositories that already have local identities.
 func (r *MCPReader) SyncThreads(ctx context.Context, in mcpcontract.SyncThreadsInput) (mcpcontract.JobReference, error) {
-	if in.Selection != "repositories" && in.Selection != "threads" {
-		return mcpcontract.JobReference{}, errors.New("selection must be repositories or threads")
-	}
-	if err := rejectDuplicateRepositoryRefs(in.Repositories); err != nil {
+	request, normalized, err := parseSyncThreadsInput(in)
+	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
-	if err := rejectDuplicateThreadRefs(in.Threads); err != nil {
-		return mcpcontract.JobReference{}, err
-	}
-	if in.Selection == "repositories" && (len(in.Repositories) < 1 || len(in.Repositories) > 50) {
-		return mcpcontract.JobReference{}, errors.New("repositories must contain 1 to 50 items")
-	}
-	if in.Selection == "threads" && (len(in.Threads) < 1 || len(in.Threads) > 100) {
-		return mcpcontract.JobReference{}, errors.New("threads must contain 1 to 100 items")
-	}
-	if in.Selection == "repositories" {
-		if in.LimitPerRepository == 0 {
-			in.LimitPerRepository = 100
-		}
-		if in.LimitPerRepository < 1 || in.LimitPerRepository > 1000 {
-			return mcpcontract.JobReference{}, errors.New("limit_per_repository must be between 1 and 1000")
-		}
-	} else if in.LimitPerRepository != 0 {
-		return mcpcontract.JobReference{}, errors.New("limit_per_repository is only valid in repository selection mode")
-	}
-	if in.MaxRequests == 0 {
-		in.MaxRequests = defaultSyncBatchMaxRequests
-	}
-	if in.MaxRequests < 1 || in.MaxRequests > defaultSyncBatchMaxRequests {
-		return mcpcontract.JobReference{}, fmt.Errorf("max requests must be between 1 and %d", defaultSyncBatchMaxRequests)
-	}
-	id, err := r.submitJob(ctx, "sync_threads", in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.syncThreadsBatch(ctx, in, report)
+	id, err := r.submitJob(ctx, "sync_threads", normalized, func(ctx context.Context, report func(string, string) error) (any, error) {
+		return r.syncThreadsBatch(ctx, request, report)
 	})
 	if err != nil {
 		return mcpcontract.JobReference{}, err
@@ -99,7 +72,7 @@ func (r *MCPReader) SyncThreads(ctx context.Context, in mcpcontract.SyncThreadsI
 // together so cancellation and per-item failures remain consistent.
 //
 //nolint:gocognit
-func (s *Service) syncThreadsBatch(ctx context.Context, in mcpcontract.SyncThreadsInput, report func(string, string) error) (map[string]any, error) {
+func (s *Service) syncThreadsBatch(ctx context.Context, request syncThreadsRequest, report func(string, string) error) (map[string]any, error) {
 	type task struct {
 		key          string
 		ref          contracts.RepoRef
@@ -108,14 +81,24 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpcontract.SyncThrea
 		inputIndexes []int
 		maxRequests  int
 	}
-	var tasks []task
-	if in.Selection == "repositories" {
-		for _, ref := range in.Repositories {
+	var (
+		tasks              []task
+		exactThreads       []mcpcontract.ThreadRef
+		kind               = "both"
+		state              = "all"
+		since              time.Time
+		limitPerRepository int
+	)
+	switch selection := request.selection.(type) {
+	case repositoryThreadSelection:
+		kind, state, since, limitPerRepository = selection.kind, selection.state, selection.updatedAfter, selection.limitPerRepository
+		for _, ref := range selection.repositories {
 			tasks = append(tasks, task{key: ref.Owner + "/" + ref.Repo, ref: contracts.RepoRef{Owner: ref.Owner, Repo: ref.Repo}})
 		}
-	} else {
+	case exactThreadSelection:
+		exactThreads = selection.threads
 		grouped := make(map[string]int)
-		for inputIndex, thread := range in.Threads {
+		for inputIndex, thread := range selection.threads {
 			kind := thread.Kind
 			if kind == "" {
 				kind = "both"
@@ -130,40 +113,26 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpcontract.SyncThrea
 			tasks[index].numbers = append(tasks[index].numbers, thread.Number)
 			tasks[index].inputIndexes = append(tasks[index].inputIndexes, inputIndex)
 		}
+	default:
+		return nil, errors.New("unsupported parsed thread selection")
 	}
 	resultCount := len(tasks)
-	if in.Selection == "threads" {
-		resultCount = len(in.Threads)
+	if exactThreads != nil {
+		resultCount = len(exactThreads)
 	}
 	if err := report("thread_headers", jobProgressCounts(0, resultCount)); err != nil {
 		return nil, err
 	}
-	state := in.State
-	if state == "" {
-		state = "open"
-	}
-	kind := in.Kind
-	if kind == "" {
-		kind = "both"
-	}
 	maxPages := 1
-	if in.LimitPerRepository > 100 {
-		maxPages = (in.LimitPerRepository + 99) / 100
-	}
-	var since time.Time
-	if in.UpdatedAfter != "" {
-		parsed, err := time.Parse(time.RFC3339, in.UpdatedAfter)
-		if err != nil {
-			return nil, errors.New("updated_after must be RFC 3339")
-		}
-		since = parsed
+	if limitPerRepository > 100 {
+		maxPages = (limitPerRepository + 99) / 100
 	}
 	taskResults := make([]map[string]any, len(tasks))
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
-	remainingRequests := in.MaxRequests
+	remainingRequests := request.maxRequests
 	plannedRequests := 0
 	runnable := make([]int, 0, len(tasks))
 	for index := range tasks {
@@ -211,10 +180,10 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpcontract.SyncThrea
 			for index := range jobs {
 				current := tasks[index]
 				currentKind := kind
-				if in.Selection == "threads" {
+				if exactThreads != nil {
 					currentKind = current.kind
 				}
-				opts := SyncOptions{Kind: currentKind, State: state, Since: since, Numbers: current.numbers, MaxItems: in.LimitPerRepository, MaxPages: maxPages, MaxRequests: current.maxRequests}
+				opts := SyncOptions{Kind: currentKind, State: state, Since: since, Numbers: current.numbers, MaxItems: limitPerRepository, MaxPages: maxPages, MaxRequests: current.maxRequests}
 				if len(current.numbers) > 0 {
 					opts.State = "all"
 					opts.Since = time.Time{}
@@ -245,14 +214,14 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpcontract.SyncThrea
 	close(jobs)
 	wg.Wait()
 	results := taskResults
-	if in.Selection == "threads" {
-		results = make([]map[string]any, len(in.Threads))
+	if exactThreads != nil {
+		results = make([]map[string]any, len(exactThreads))
 		for taskIndex, current := range tasks {
 			for _, inputIndex := range current.inputIndexes {
 				item := maps.Clone(taskResults[taskIndex])
 				delete(item, "requests")
 				delete(item, "updated")
-				thread := in.Threads[inputIndex]
+				thread := exactThreads[inputIndex]
 				item["key"] = threadRefKey(thread)
 				if resolved, ok := taskResults[taskIndex]["threads"].([]mcpcontract.ThreadRef); ok {
 					item["threads"] = resolved
@@ -283,7 +252,7 @@ func (s *Service) syncThreadsBatch(ctx context.Context, in mcpcontract.SyncThrea
 	}
 	return map[string]any{
 		"status": status, "items": results, "completed": completed, "total": resultCount,
-		"requests": requests, "request_budget": in.MaxRequests, "planned_requests": plannedRequests,
+		"requests": requests, "request_budget": request.maxRequests, "planned_requests": plannedRequests,
 	}, nil
 }
 
@@ -324,7 +293,7 @@ func (r *MCPReader) IndexRepositories(ctx context.Context, in mcpcontract.IndexR
 		return mcpcontract.JobReference{}, errors.New("repositories must contain 1 to 10 items")
 	}
 	for _, input := range in.Repositories {
-		if err := (domain.RepoRef{Owner: input.Owner, Repo: input.Repo}).Validate(); err != nil {
+		if _, err := domain.NewRepoRef(input.Owner, input.Repo); err != nil {
 			return mcpcontract.JobReference{}, err
 		}
 	}
@@ -341,7 +310,7 @@ func queuedJobReference(id, kind, message string) mcpcontract.JobReference {
 	return mcpcontract.JobReference{
 		ID: id, Ref: "job:" + id, Kind: kind, Status: "queued", Message: message, PollAfterMS: 1000,
 		FollowUp: &mcpcontract.JobFollowUp{
-			Action: mcpcontract.FollowUpAction{Type: "poll_job", PollJob: &mcpcontract.GetJobsInput{IDs: []string{id}}}, RetryAfterMS: 1000, Reason: "Poll this job ID after the suggested delay.",
+			Action: mcpcontract.FollowUpActionFor(mcpcontract.GetJobsInput{IDs: []string{id}}), RetryAfterMS: 1000, Reason: "Poll this job ID after the suggested delay.",
 		},
 	}
 }
@@ -591,7 +560,11 @@ func (s *Service) syncRepositoryContext(ctx context.Context, in mcpcontract.Sync
 		remaining -= required
 		planned += required
 		budget := newSyncRequestBudget(required)
-		ref := domain.RepoRef{Owner: input.Owner, Repo: input.Repo}
+		ref, parseErr := domain.NewRepoRef(input.Owner, input.Repo)
+		if parseErr != nil {
+			results[index] = map[string]any{"key": key, "status": "failed", "reason": "invalid_repository", "message": parseErr.Error()}
+			continue
+		}
 		repo, syncErr := syncRepositoryContextItem(ctx, c, reader, ref, budget)
 		requests += budget.used
 		if syncErr != nil {
@@ -703,8 +676,8 @@ func (r *MCPReader) DeepWiki(ctx context.Context, in mcpcontract.DeepWikiInput) 
 	if err != nil {
 		return mcpcontract.DeepWikiOutput{}, err
 	}
-	out := mcpcontract.DeepWikiOutput{Status: "complete", Provider: "deepwiki", Action: in.Action, Repositories: repositories, Question: in.Question, Result: res.Text, SourceURL: res.SourceURL, RetrievedAt: formatTime(r.now()), Provenance: "derived_external"}
-	if !res.Available {
+	out := mcpcontract.DeepWikiOutput{Status: "complete", Provider: "deepwiki", Action: in.Action, Repositories: repositories, Question: in.Question, Result: res.Text(), SourceURL: res.SourceURL(), RetrievedAt: formatTime(r.now()), Provenance: "derived_external"}
+	if !res.Available() {
 		out.Status, out.Reason = "unavailable", "blocked"
 		out.Recovery = recoveryPlan("blocked", "Use GitHub metadata, stored corpus data, or explicit code acquisition instead.")
 		return out, nil
@@ -742,25 +715,6 @@ func rejectDuplicateThreadRefs(inputs []mcpcontract.ThreadRef) error {
 			return mcpcontract.InvalidArgument("threads", fmt.Sprintf("duplicate thread %s/%s/%s#%d", input.Owner, input.Repo, input.Kind, input.Number), nil)
 		}
 		seen[key] = struct{}{}
-	}
-	return nil
-}
-
-func validatePullRequestRefs(inputs []mcpcontract.ThreadRef, path string) error {
-	for i, input := range inputs {
-		itemPath := fmt.Sprintf("%s[%d]", path, i)
-		if strings.TrimSpace(input.Owner) == "" {
-			return mcpcontract.InvalidArgument(itemPath+".owner", "must not be blank", nil)
-		}
-		if strings.TrimSpace(input.Repo) == "" {
-			return mcpcontract.InvalidArgument(itemPath+".repo", "must not be blank", nil)
-		}
-		if input.Number <= 0 {
-			return mcpcontract.InvalidArgument(itemPath+".number", "must be positive", nil)
-		}
-		if input.Kind != "" && input.Kind != corpus.ThreadKindPullRequest {
-			return mcpcontract.InvalidArgument(itemPath+".kind", "must be pull_request when provided", nil)
-		}
 	}
 	return nil
 }

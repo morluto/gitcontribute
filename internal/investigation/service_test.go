@@ -176,7 +176,7 @@ func (s *fakeEvidenceStore) ListEvidence(_ context.Context, filter evidence.Evid
 
 func TestStartInvestigation(t *testing.T) {
 	svc := NewService(newFakeRepo(), &fakeEvidenceStore{})
-	inv, err := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, err := svc.StartInvestigation(context.Background(), domain.MustRepoRef("owner", "repo"), "abc", "")
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestStartInvestigation(t *testing.T) {
 
 func TestRecordHypothesis(t *testing.T) {
 	svc := NewService(newFakeRepo(), &fakeEvidenceStore{})
-	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, _ := svc.StartInvestigation(context.Background(), domain.MustRepoRef("owner", "repo"), "abc", "")
 	h, err := svc.RecordHypothesis(context.Background(), inv.ID, "race in foo", "data race under load", CategoryBug, []domain.SourceRef{
 		{Source: "github", URL: "https://github.com/owner/repo/issues/1", ObservedAt: time.Now().UTC()},
 	})
@@ -207,7 +207,7 @@ func TestRecordHypothesis(t *testing.T) {
 
 func TestPromoteOpportunity(t *testing.T) {
 	svc := NewService(newFakeRepo(), &fakeEvidenceStore{})
-	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, _ := svc.StartInvestigation(context.Background(), domain.MustRepoRef("owner", "repo"), "abc", "")
 	h, _ := svc.RecordHypothesis(context.Background(), inv.ID, "race", "race desc", CategoryBug, nil)
 
 	o, err := svc.PromoteOpportunity(context.Background(), h.ID, "data race under load", "pkg/foo", "crashes under contention", "small", 0.8)
@@ -225,7 +225,7 @@ func TestPromoteOpportunity(t *testing.T) {
 func TestPromoteOpportunityFailureDoesNotMutateStoredHypothesis(t *testing.T) {
 	repo := &failingPromotionRepo{fakeRepo: newFakeRepo()}
 	svc := NewService(repo, &fakeEvidenceStore{})
-	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, _ := svc.StartInvestigation(context.Background(), domain.MustRepoRef("owner", "repo"), "abc", "")
 	h, _ := svc.RecordHypothesis(context.Background(), inv.ID, "race", "race desc", CategoryBug, nil)
 	if _, err := svc.PromoteOpportunity(context.Background(), h.ID, "problem", "scope", "impact", "small", 0.8); err == nil {
 		t.Fatal("expected promotion failure")
@@ -251,7 +251,7 @@ func TestPromoteOpportunityRejectsInvalidInputs(t *testing.T) {
 
 func TestInvalidOpportunityTransition(t *testing.T) {
 	svc := NewService(newFakeRepo(), &fakeEvidenceStore{})
-	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, _ := svc.StartInvestigation(context.Background(), domain.MustRepoRef("owner", "repo"), "abc", "")
 	h, _ := svc.RecordHypothesis(context.Background(), inv.ID, "race", "race desc", CategoryBug, nil)
 	o, _ := svc.PromoteOpportunity(context.Background(), h.ID, "problem", "scope", "impact", "small", 0.5)
 
@@ -274,7 +274,7 @@ func TestInvalidOpportunityTransition(t *testing.T) {
 
 func TestOpportunityTransitionAuditTrail(t *testing.T) {
 	svc := NewService(newFakeRepo(), &fakeEvidenceStore{})
-	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, _ := svc.StartInvestigation(context.Background(), domain.MustRepoRef("owner", "repo"), "abc", "")
 	h, _ := svc.RecordHypothesis(context.Background(), inv.ID, "race", "race desc", CategoryBug, nil)
 	o, _ := svc.PromoteOpportunity(context.Background(), h.ID, "problem", "scope", "impact", "small", 0.5)
 
@@ -290,7 +290,7 @@ func TestOpportunityTransitionAuditTrail(t *testing.T) {
 
 func TestUpdateCollisionStatusRecordsPreviousValue(t *testing.T) {
 	svc := NewService(newFakeRepo(), &fakeEvidenceStore{})
-	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, _ := svc.StartInvestigation(context.Background(), domain.MustRepoRef("owner", "repo"), "abc", "")
 	h, _ := svc.RecordHypothesis(context.Background(), inv.ID, "race", "race desc", CategoryBug, nil)
 	o, _ := svc.PromoteOpportunity(context.Background(), h.ID, "problem", "scope", "impact", "small", 0.5)
 	updated, err := svc.UpdateCollisionStatus(context.Background(), o.ID, CollisionPossible, "similar open PR")
@@ -308,7 +308,7 @@ func TestContradictingEvidenceBlocksValidation(t *testing.T) {
 	store := &fakeEvidenceStore{}
 	svc := NewService(repo, store)
 
-	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, _ := svc.StartInvestigation(context.Background(), domain.MustRepoRef("owner", "repo"), "abc", "")
 	h, _ := svc.RecordHypothesis(context.Background(), inv.ID, "race", "race desc", CategoryBug, nil)
 	o, _ := svc.PromoteOpportunity(context.Background(), h.ID, "problem", "scope", "impact", "small", 0.5)
 
@@ -363,7 +363,7 @@ func TestSummarizeEvidence(t *testing.T) {
 	store := &fakeEvidenceStore{}
 	svc := NewService(repo, store)
 
-	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, _ := svc.StartInvestigation(context.Background(), domain.MustRepoRef("owner", "repo"), "abc", "")
 	h, _ := svc.RecordHypothesis(context.Background(), inv.ID, "race", "race desc", CategoryBug, nil)
 	o, _ := svc.PromoteOpportunity(context.Background(), h.ID, "problem", "scope", "impact", "small", 0.5)
 
@@ -391,7 +391,7 @@ func TestSummarizeEvidence(t *testing.T) {
 
 func TestCreateHypothesisWithStructuredFields(t *testing.T) {
 	svc := NewService(newFakeRepo(), &fakeEvidenceStore{})
-	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, _ := svc.StartInvestigation(context.Background(), domain.MustRepoRef("owner", "repo"), "abc", "")
 	h, err := svc.CreateHypothesis(context.Background(), inv.ID, CreateHypothesisInput{
 		Title:              "race in parser",
 		Description:        "data race under load",
@@ -422,7 +422,7 @@ func TestCreateHypothesisWithStructuredFields(t *testing.T) {
 
 func TestUpdateHypothesisRecordsRationale(t *testing.T) {
 	svc := NewService(newFakeRepo(), &fakeEvidenceStore{})
-	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, _ := svc.StartInvestigation(context.Background(), domain.MustRepoRef("owner", "repo"), "abc", "")
 	h, _ := svc.CreateHypothesis(context.Background(), inv.ID, CreateHypothesisInput{
 		Title:       "race",
 		Description: "desc",
@@ -447,7 +447,7 @@ func TestUpdateHypothesisRecordsRationale(t *testing.T) {
 
 func TestTransitionHypothesisWithRationale(t *testing.T) {
 	svc := NewService(newFakeRepo(), &fakeEvidenceStore{})
-	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, _ := svc.StartInvestigation(context.Background(), domain.MustRepoRef("owner", "repo"), "abc", "")
 	h, _ := svc.CreateHypothesis(context.Background(), inv.ID, CreateHypothesisInput{Title: "race", Description: "desc", Category: CategoryBug})
 	updated, err := svc.TransitionHypothesis(context.Background(), h.ID, HypothesisRejected, "not reproducible")
 	if err != nil {
@@ -465,7 +465,7 @@ func TestPromoteOpportunityWithInput(t *testing.T) {
 	repo := newFakeRepo()
 	store := &fakeEvidenceStore{}
 	svc := NewService(repo, store)
-	inv, _ := svc.StartInvestigation(context.Background(), domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+	inv, _ := svc.StartInvestigation(context.Background(), domain.MustRepoRef("owner", "repo"), "abc", "")
 	h, _ := svc.CreateHypothesis(context.Background(), inv.ID, CreateHypothesisInput{Title: "race", Description: "desc", Category: CategoryBug})
 	o, err := svc.PromoteOpportunityWithInput(context.Background(), h.ID, PromoteOpportunityInput{
 		ProblemStatement:    "parser panics",

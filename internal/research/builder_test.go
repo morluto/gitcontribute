@@ -24,6 +24,22 @@ type fakeResearchReader struct {
 	health          HealthEvidence
 }
 
+func mustObservedHealthEvidence(metrics HealthMetrics, sources []SourceRef) HealthEvidence {
+	evidence, err := ObservedHealthEvidence(metrics, sources, "")
+	if err != nil {
+		panic(err)
+	}
+	return evidence
+}
+
+func mustObservedFacetCoverage(facet string, complete bool, asOf time.Time, count int, source SourceRef) FacetCoverage {
+	coverage, err := ObservedFacetCoverage(facet, complete, asOf, count, source)
+	if err != nil {
+		panic(err)
+	}
+	return coverage
+}
+
 func (f *fakeResearchReader) ReadRepository(context.Context, domain.RepoRef) (domain.Repository, []domain.SourceRef, error) {
 	return f.repo, f.repoSources, nil
 }
@@ -54,18 +70,18 @@ func (f *fakeResearchReader) ReadResearchHealth(context.Context, domain.RepoRef)
 
 func TestBuilderMakesCoverageAndUnknownsExplicit(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
-	ref := ThreadRef{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Kind: domain.IssueKind, Number: 42}
+	ref := ThreadRef{Repo: domain.MustRepoRef("owner", "repo"), Kind: domain.IssueKind, Number: 42}
 	threadSource := SourceRef{Source: "github:rest", URL: "https://api.github.com/repos/owner/repo/issues/42", ObservedAt: now.Add(-time.Hour), AsOf: now.Add(-2 * time.Hour)}
 	commentSource := SourceRef{Source: "github:rest", URL: "https://github.com/owner/repo/issues/42#issuecomment-1", ObservedAt: now.Add(-30 * time.Minute), AsOf: now.Add(-time.Hour)}
 	localSource := SourceRef{Source: "local:relationships", URL: "local://relationships/owner/repo/42", AsOf: now.Add(-time.Hour)}
 	reader := &fakeResearchReader{
-		repo: domain.Repository{RepoRef: ref.Repo},
+		repo: domain.Repository{Ref: ref.Repo},
 		repoSources: []domain.SourceRef{{
 			Source: "github:rest", URL: "https://api.github.com/repos/owner/repo", ObservedAt: now.Add(-3 * time.Hour), AsOf: now.Add(-4 * time.Hour),
 		}},
 		repoCoverage: domain.Coverage{Facets: []domain.FacetCoverage{
-			{Facet: "metadata", Present: true, Complete: true, Freshness: domain.Freshness{AsOf: now.Add(-4 * time.Hour)}},
-			{Facet: "threads", Present: true, Complete: true, Freshness: domain.Freshness{AsOf: now.Add(-3 * time.Hour)}},
+			domain.MustFacetCoverage("metadata", true, now.Add(-4*time.Hour), 0),
+			domain.MustFacetCoverage("threads", true, now.Add(-3*time.Hour), 0),
 		}},
 		thread: ThreadEvidence{
 			Thread: ThreadSnapshot{
@@ -78,9 +94,9 @@ func TestBuilderMakesCoverageAndUnknownsExplicit(t *testing.T) {
 				ID: 1, Kind: "issue_comment", Body: "Please add a cancellation test; this must stay bounded.",
 				Author: "maintainer", AuthorAssociation: "MEMBER", CreatedAt: now.Add(-time.Hour), Source: commentSource,
 			}},
-			Coverage: []FacetCoverage{{
-				Facet: "issue_comments", Present: true, Complete: false, AsOf: now.Add(-time.Hour), Count: 1, Source: commentSource,
-			}},
+			Coverage: []FacetCoverage{
+				mustObservedFacetCoverage("issue_comments", false, now.Add(-time.Hour), 1, commentSource),
+			},
 		},
 		relations: RelationshipEvidence{
 			DuplicateThreads: []RelatedThread{{
@@ -93,11 +109,10 @@ func TestBuilderMakesCoverageAndUnknownsExplicit(t *testing.T) {
 			}},
 			Sources: []SourceRef{localSource},
 		},
-		code: CodeEvidence{Present: false},
-		health: HealthEvidence{
-			Available: true, OpenIssues: 4, OpenPullRequests: 1, ThreadSampleSize: 5,
-			Sources: []SourceRef{{Source: "local:health", URL: "local://health/owner/repo", AsOf: now.Add(-3 * time.Hour)}},
-		},
+		code: MissingCodeEvidence(nil),
+		health: mustObservedHealthEvidence(HealthMetrics{
+			OpenIssues: 4, OpenPullRequests: 1, ThreadSampleSize: 5,
+		}, []SourceRef{{Source: "local:health", URL: "local://health/owner/repo", AsOf: now.Add(-3 * time.Hour)}}),
 	}
 
 	brief, err := NewBuilder(reader, func() time.Time { return now }).Build(context.Background(), ThreadRef{Repo: ref.Repo, Number: ref.Number})
@@ -183,7 +198,7 @@ func TestParseThreadRef(t *testing.T) {
 func TestBuilderHonorsCancellationAndProvenanceValidation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := NewBuilder(&fakeResearchReader{}, time.Now).Build(ctx, ThreadRef{Repo: domain.RepoRef{Owner: "o", Repo: "r"}, Number: 1})
+	_, err := NewBuilder(&fakeResearchReader{}, time.Now).Build(ctx, ThreadRef{Repo: domain.MustRepoRef("o", "r"), Number: 1})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled build error = %v", err)
 	}

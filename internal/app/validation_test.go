@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,9 +12,26 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/workspace"
 )
+
+func TestObservationContractIsParsedAtApplicationBoundary(t *testing.T) {
+	t.Parallel()
+	_, err := observationContractToEvidence(contracts.ValidationObservationContract{
+		Intent: "observe output",
+		Base: []contracts.ValidationExpectedObservation{{
+			Name: "invalid regexp", Source: "stderr", Matcher: "regexp", Pattern: "[",
+		}},
+		Candidate: []contracts.ValidationExpectedObservation{{
+			Name: "valid", Source: "stdout", Matcher: "exact", Pattern: "ok",
+		}},
+	})
+	if !errors.Is(err, evidence.ErrInvalidObservation) {
+		t.Fatalf("error = %v, want ErrInvalidObservation", err)
+	}
+}
 
 func TestMCPValidationResolvesManagedWorkspaceAndRejectsCrossInvestigation(t *testing.T) {
 	t.Parallel()

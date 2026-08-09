@@ -38,7 +38,7 @@ func (c *Corpus) SaveConcern(ctx context.Context, item *concern.Concern) error {
 			success_criterion=excluded.success_criterion, status=excluded.status,
 			confidence=excluded.confidence, payload=excluded.payload,
 			updated_at=excluded.updated_at
-	`, item.ID, item.Repo.Owner, item.Repo.Repo, item.CommitSHA, item.WorkspaceID,
+	`, item.ID, item.Repo.Owner(), item.Repo.Repo(), item.CommitSHA, item.WorkspaceID,
 		item.Title, item.ProblemStatement, item.SuspectedOwner, strings.Join(item.Unknowns, "\n"),
 		item.SuccessCriterion, item.Status, item.Confidence, payload,
 		encodeTime(item.CreatedAt), encodeTime(item.UpdatedAt))
@@ -68,7 +68,7 @@ func (c *Corpus) UpdateConcern(ctx context.Context, previous, next *concern.Conc
 			problem_statement=?, suspected_owner=?, unknowns=?, success_criterion=?,
 			status=?, confidence=?, payload=?, updated_at=?
 		WHERE id=? AND json_remove(payload, '$.Links')=json_remove(?, '$.Links')
-	`, next.Repo.Owner, next.Repo.Repo, next.CommitSHA, next.WorkspaceID, next.Title,
+	`, next.Repo.Owner(), next.Repo.Repo(), next.CommitSHA, next.WorkspaceID, next.Title,
 		next.ProblemStatement, next.SuspectedOwner, strings.Join(next.Unknowns, "\n"),
 		next.SuccessCriterion, next.Status, next.Confidence, nextPayload,
 		encodeTime(next.UpdatedAt), next.ID, previousPayload)
@@ -118,9 +118,9 @@ func (c *Corpus) ListConcerns(ctx context.Context, filter concern.Filter) (_ *co
 		args = append(args, query)
 		rank = "bm25(concerns_fts, 10.0, 5.0, 2.0, 1.0, 1.0)"
 	}
-	if filter.Repo.Owner != "" {
+	if filter.Repo.IsValid() {
 		where = append(where, "c.repo_owner=? COLLATE NOCASE", "c.repo_name=? COLLATE NOCASE")
-		args = append(args, filter.Repo.Owner, filter.Repo.Repo)
+		args = append(args, filter.Repo.Owner(), filter.Repo.Repo())
 	}
 	if filter.Status != "" {
 		where = append(where, "c.status=?")
@@ -254,6 +254,9 @@ func decodeConcern(payload string) (*concern.Concern, error) {
 	if err := json.Unmarshal([]byte(payload), &item); err != nil {
 		return nil, fmt.Errorf("decode concern: %w", err)
 	}
+	if err := item.ParseStored(); err != nil {
+		return nil, fmt.Errorf("parse concern: %w", err)
+	}
 	return &item, nil
 }
 
@@ -347,7 +350,7 @@ func insertConcernWorkflowTx(ctx context.Context, tx *sql.Tx, inv *investigation
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO investigations (id, repo_owner, repo_name, status, origin_key, payload, created_at, updated_at)
 		VALUES (?, ?, ?, ?, '', ?, ?, ?)
-	`, inv.ID, inv.Repo.Owner, inv.Repo.Repo, inv.Status, invPayload, encodeTime(inv.CreatedAt), encodeTime(inv.UpdatedAt)); err != nil {
+	`, inv.ID, inv.Repo.Owner(), inv.Repo.Repo(), inv.Status, invPayload, encodeTime(inv.CreatedAt), encodeTime(inv.UpdatedAt)); err != nil {
 		return fmt.Errorf("save concern investigation: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `

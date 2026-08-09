@@ -27,7 +27,7 @@ func TestIncompletePullRequestFacetPreservesLastCompleteObservation(t *testing.T
 	}
 	thread, err := stored.UpsertThread(ctx, corpus.Thread{
 		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7,
-		SourceUpdatedAt: completeAt,
+		State: "open", SourceUpdatedAt: completeAt,
 	}, `{}`)
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +201,7 @@ func TestBoundedWorkflowSnapshotsReturnRetryablePartialItems(t *testing.T) {
 		t.Fatal(err)
 	}
 	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7, SourceUpdatedAt: now,
+		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7, State: "open", SourceUpdatedAt: now,
 	}, `{}`)
 	if err != nil {
 		t.Fatal(err)
@@ -234,7 +234,11 @@ func TestBoundedWorkflowSnapshotsReturnRetryablePartialItems(t *testing.T) {
 	if feedback.BatchStatus != "partial" || feedback.Items[0].Status != "retryable" || feedback.Items[0].ResourceURI != "" {
 		t.Fatalf("feedback result = %+v", feedback)
 	}
-	if feedback.Items[0].Recovery == nil || len(feedback.Items[0].Recovery.Then) != 1 || feedback.Items[0].Recovery.Then[0].SyncFeedback == nil || feedback.Items[0].Recovery.Then[0].SyncFeedback.MaxItemsPerChannel != 20 {
+	if feedback.Items[0].Recovery == nil || len(feedback.Items[0].Recovery.Then) != 1 {
+		t.Fatalf("feedback recovery = %+v", feedback.Items[0].Recovery)
+	}
+	nextFeedback, ok := mcpcontract.RecoveryInput[mcpcontract.SyncPullRequestFeedbackInput](feedback.Items[0].Recovery.Then[0])
+	if !ok || nextFeedback.MaxItemsPerChannel != 20 {
 		t.Fatalf("feedback recovery = %+v", feedback.Items[0].Recovery)
 	}
 
@@ -278,7 +282,11 @@ func TestFeedbackCoverageRecoveryRespectsAdvertisedItemLimit(t *testing.T) {
 		t.Fatalf("hard-limit recovery = %+v, want nil", plan)
 	}
 	plan := feedbackCoverageRecovery(ref, mcpcontract.SyncPullRequestFeedbackInput{MaxItemsPerChannel: maxFeedbackItemsPerChannel - 1}, "incomplete")
-	if plan == nil || len(plan.Then) != 1 || plan.Then[0].SyncFeedback == nil || plan.Then[0].SyncFeedback.MaxItemsPerChannel != maxFeedbackItemsPerChannel {
+	if plan == nil || len(plan.Then) != 1 {
+		t.Fatalf("capped recovery = %+v", plan)
+	}
+	nextFeedback, ok := mcpcontract.RecoveryInput[mcpcontract.SyncPullRequestFeedbackInput](plan.Then[0])
+	if !ok || nextFeedback.MaxItemsPerChannel != maxFeedbackItemsPerChannel {
 		t.Fatalf("capped recovery = %+v", plan)
 	}
 }
@@ -308,7 +316,7 @@ func TestFeedbackResourceUsesPublicChannelsAndPreservesThreadSelection(t *testin
 		t.Fatal(err)
 	}
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7, SourceUpdatedAt: now,
+		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7, State: "open", SourceUpdatedAt: now,
 	}, `{}`); err != nil {
 		t.Fatal(err)
 	}
@@ -361,10 +369,14 @@ func TestFeedbackSearchRecoveryRefreshesAllThreadState(t *testing.T) {
 	if err := svc.corpus.UpsertFeedbackDiscovery(ctx, corpus.FeedbackDiscovery{RepositoryID: repo.ID, Generation: 1, Complete: true, Channels: []string{"issue_comments"}, ThreadState: "all", SourceUpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	plan := feedbackSearchRecovery(ctx, svc.corpus, repo.ID, domain.RepoRef{Owner: "acme", Repo: "rocket"}, mcpcontract.SearchPullRequestFeedbackInput{
+	plan := feedbackSearchRecovery(ctx, svc.corpus, repo.ID, domain.MustRepoRef("acme", "rocket"), mcpcontract.SearchPullRequestFeedbackInput{
 		Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}, Channel: "issue_comments", ThreadState: "resolved",
 	}, corpus.FeedbackSearchPage{Coverage: corpus.FeedbackCoverageSummary{Status: "partial", DiscoveryComplete: true, IncompletePRs: 1}})
-	if plan == nil || len(plan.Then) != 1 || plan.Then[0].SyncFeedback == nil || plan.Then[0].SyncFeedback.ThreadState != "all" {
+	if plan == nil || len(plan.Then) != 1 {
+		t.Fatalf("feedback recovery plan = %+v", plan)
+	}
+	nextFeedback, ok := mcpcontract.RecoveryInput[mcpcontract.SyncPullRequestFeedbackInput](plan.Then[0])
+	if !ok || nextFeedback.ThreadState != "all" {
 		t.Fatalf("feedback recovery plan = %+v", plan)
 	}
 }
@@ -378,15 +390,19 @@ func TestFeedbackSearchRecoveryBoundsMergeStateHydration(t *testing.T) {
 	for number := 51; number <= 150; number++ {
 		items = append(items, corpus.PullRequestFeedbackProjection{PullRequestNumber: number})
 	}
-	plan := feedbackSearchRecovery(context.Background(), nil, 0, domain.RepoRef{Owner: "acme", Repo: "rocket"}, mcpcontract.SearchPullRequestFeedbackInput{}, corpus.FeedbackSearchPage{
+	plan := feedbackSearchRecovery(context.Background(), nil, 0, domain.MustRepoRef("acme", "rocket"), mcpcontract.SearchPullRequestFeedbackInput{}, corpus.FeedbackSearchPage{
 		Coverage:                 corpus.FeedbackCoverageSummary{Status: "complete", DiscoveryComplete: true},
 		UnknownMergePullRequests: unknown,
 		Items:                    items,
 	})
-	if plan == nil || len(plan.Then) != 1 || plan.Then[0].HydrateThreads == nil {
+	if plan == nil || len(plan.Then) != 1 {
 		t.Fatalf("merge-state recovery plan = %+v", plan)
 	}
-	threads := plan.Then[0].HydrateThreads.Threads
+	nextHydration, ok := mcpcontract.RecoveryInput[mcpcontract.HydrateThreadsInput](plan.Then[0])
+	if !ok {
+		t.Fatalf("merge-state recovery plan = %+v", plan)
+	}
+	threads := nextHydration.Threads
 	if len(threads) != maxFeedbackMergeStateRecoveryThreads {
 		t.Fatalf("recovery thread count = %d, want %d", len(threads), maxFeedbackMergeStateRecoveryThreads)
 	}

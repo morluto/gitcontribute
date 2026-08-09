@@ -50,8 +50,8 @@ var ErrRepositoryRemovalPlanStale = errors.New("repository removal plan is stale
 
 // PlanRepositoryRemoval previews removal without mutating the corpus.
 func (c *Corpus) PlanRepositoryRemoval(ctx context.Context, ref domain.RepoRef) (plan *RepositoryRemovalPlan, err error) {
-	if err := ref.Validate(); err != nil {
-		return nil, err
+	if !ref.IsValid() {
+		return nil, errors.New("repository reference is not parsed")
 	}
 	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -74,8 +74,8 @@ func (c *Corpus) ApplyRepositoryRemoval(ctx context.Context, ref domain.RepoRef,
 	if plan == nil {
 		return nil, errors.New("repository removal plan is required")
 	}
-	if err := ref.Validate(); err != nil {
-		return nil, err
+	if !ref.IsValid() {
+		return nil, errors.New("repository reference is not parsed")
 	}
 	if plan.Ref != ref {
 		return nil, fmt.Errorf("repository removal plan scope %q does not match repository %q", plan.Ref, ref)
@@ -113,7 +113,7 @@ func planRepositoryRemoval(ctx context.Context, db repositoryRemovalQuerier, ref
 	err := db.QueryRowContext(ctx, `
 		SELECT id
 		FROM repositories WHERE owner = ? AND name = ?
-	`, ref.Owner, ref.Repo).Scan(&plan.RepositoryID)
+	`, ref.Owner(), ref.Repo()).Scan(&plan.RepositoryID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrRepositoryNotFound
 	}
@@ -131,18 +131,18 @@ func planRepositoryRemoval(ctx context.Context, db repositoryRemovalQuerier, ref
 		{&plan.ThreadObservations, `SELECT COUNT(*) FROM thread_observations WHERE thread_id IN (SELECT id FROM threads WHERE repository_id = ?)`, []any{plan.RepositoryID}},
 		{&plan.FacetObservations, `SELECT COUNT(*) FROM facet_observations WHERE repository_id = ?`, []any{plan.RepositoryID}},
 		{&plan.FacetCoverage, `SELECT COUNT(*) FROM facet_coverage WHERE repository_id = ?`, []any{plan.RepositoryID}},
-		{&plan.CodeSnapshots, `SELECT COUNT(*) FROM code_snapshots WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner, ref.Repo}},
-		{&plan.CodeDocuments, `SELECT COUNT(*) FROM code_documents WHERE snapshot_id IN (SELECT id FROM code_snapshots WHERE repo_owner = ? AND repo_name = ?)`, []any{ref.Owner, ref.Repo}},
+		{&plan.CodeSnapshots, `SELECT COUNT(*) FROM code_snapshots WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner(), ref.Repo()}},
+		{&plan.CodeDocuments, `SELECT COUNT(*) FROM code_documents WHERE snapshot_id IN (SELECT id FROM code_snapshots WHERE repo_owner = ? AND repo_name = ?)`, []any{ref.Owner(), ref.Repo()}},
 		{&plan.Dossiers, `SELECT COUNT(*) FROM dossiers WHERE repository_id = ?`, []any{plan.RepositoryID}},
-		{&plan.ClusterRuns, `SELECT COUNT(*) FROM cluster_runs WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner, ref.Repo}},
-		{&plan.Clusters, `SELECT COUNT(*) FROM clusters WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner, ref.Repo}},
-		{&plan.FrontierItems, `SELECT COUNT(*) FROM frontier_items WHERE owner = ? AND repo = ?`, []any{ref.Owner, ref.Repo}},
+		{&plan.ClusterRuns, `SELECT COUNT(*) FROM cluster_runs WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner(), ref.Repo()}},
+		{&plan.Clusters, `SELECT COUNT(*) FROM clusters WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner(), ref.Repo()}},
+		{&plan.FrontierItems, `SELECT COUNT(*) FROM frontier_items WHERE owner = ? AND repo = ?`, []any{ref.Owner(), ref.Repo()}},
 		{&plan.DetachedTriageEvents, `SELECT COUNT(*) FROM triage_events WHERE repository_id = ? OR thread_id IN (SELECT id FROM threads WHERE repository_id = ?)`, []any{plan.RepositoryID, plan.RepositoryID}},
 		{&plan.RemovedPortfolioLinks, `SELECT COUNT(*) FROM portfolio_links WHERE pull_request_thread_id IN (SELECT id FROM threads WHERE repository_id = ?)`, []any{plan.RepositoryID}},
 		{&plan.RemovedResolutionRecords, `SELECT COUNT(*) FROM resolution_records WHERE thread_id IN (SELECT id FROM threads WHERE repository_id = ?)`, []any{plan.RepositoryID}},
 		{&plan.RemovedSignalSnapshots, `SELECT COUNT(*) FROM portfolio_signal_snapshots WHERE subject_kind = ? AND CAST(subject_ref AS INTEGER) IN (SELECT id FROM threads WHERE repository_id = ?)`, []any{PortfolioSubjectPullRequest, plan.RepositoryID}},
 		{&plan.DetachedClusterMembers, `SELECT COUNT(*) FROM cluster_members WHERE thread_id IN (SELECT id FROM threads WHERE repository_id = ?)`, []any{plan.RepositoryID}},
-		{&plan.PreservedInvestigations, `SELECT COUNT(*) FROM investigations WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner, ref.Repo}},
+		{&plan.PreservedInvestigations, `SELECT COUNT(*) FROM investigations WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner(), ref.Repo()}},
 		{&plan.PreservedCrossRepoReferences, `
 			SELECT COUNT(*)
 			FROM portfolio_links link
@@ -158,7 +158,7 @@ func planRepositoryRemoval(ctx context.Context, db repositoryRemovalQuerier, ref
 					WHERE investigation.repo_owner = ? AND investigation.repo_name = ?
 				)
 			)
-		`, []any{plan.RepositoryID, ref.Owner, ref.Repo, ref.Owner, ref.Repo}},
+		`, []any{plan.RepositoryID, ref.Owner(), ref.Repo(), ref.Owner(), ref.Repo()}},
 	}
 	for _, count := range counts {
 		if err := db.QueryRowContext(ctx, count.query, count.args...).Scan(count.destination); err != nil {
@@ -180,24 +180,24 @@ func planRepositoryRemoval(ctx context.Context, db repositoryRemovalQuerier, ref
 		{"thread observations", `SELECT * FROM thread_observations WHERE thread_id IN (SELECT id FROM threads WHERE repository_id = ?) ORDER BY id`, []any{plan.RepositoryID}},
 		{"facet observations", `SELECT * FROM facet_observations WHERE repository_id = ? ORDER BY id`, []any{plan.RepositoryID}},
 		{"facet coverage", `SELECT * FROM facet_coverage WHERE repository_id = ? ORDER BY id`, []any{plan.RepositoryID}},
-		{"code snapshots", `SELECT * FROM code_snapshots WHERE repo_owner = ? AND repo_name = ? ORDER BY id`, []any{ref.Owner, ref.Repo}},
-		{"code documents", `SELECT * FROM code_documents WHERE snapshot_id IN (SELECT id FROM code_snapshots WHERE repo_owner = ? AND repo_name = ?) ORDER BY id`, []any{ref.Owner, ref.Repo}},
+		{"code snapshots", `SELECT * FROM code_snapshots WHERE repo_owner = ? AND repo_name = ? ORDER BY id`, []any{ref.Owner(), ref.Repo()}},
+		{"code documents", `SELECT * FROM code_documents WHERE snapshot_id IN (SELECT id FROM code_snapshots WHERE repo_owner = ? AND repo_name = ?) ORDER BY id`, []any{ref.Owner(), ref.Repo()}},
 		{"dossiers", `SELECT * FROM dossiers WHERE repository_id = ? ORDER BY id`, []any{plan.RepositoryID}},
 		{"dossier sources", `SELECT * FROM dossier_sources WHERE dossier_id IN (SELECT id FROM dossiers WHERE repository_id = ?) ORDER BY id`, []any{plan.RepositoryID}},
-		{"cluster runs", `SELECT * FROM cluster_runs WHERE repo_owner = ? AND repo_name = ? ORDER BY id`, []any{ref.Owner, ref.Repo}},
-		{"clusters", `SELECT * FROM clusters WHERE repo_owner = ? AND repo_name = ? ORDER BY id`, []any{ref.Owner, ref.Repo}},
-		{"cluster members", `SELECT * FROM cluster_members WHERE cluster_id IN (SELECT id FROM clusters WHERE repo_owner = ? AND repo_name = ?) OR thread_id IN (SELECT id FROM threads WHERE repository_id = ?) ORDER BY id`, []any{ref.Owner, ref.Repo, plan.RepositoryID}},
-		{"cluster overrides", `SELECT * FROM cluster_overrides WHERE cluster_id IN (SELECT id FROM clusters WHERE repo_owner = ? AND repo_name = ?) OR target_cluster_id IN (SELECT id FROM clusters WHERE repo_owner = ? AND repo_name = ?) ORDER BY id`, []any{ref.Owner, ref.Repo, ref.Owner, ref.Repo}},
-		{"cluster projection", `SELECT * FROM cluster_projection_state WHERE repo_owner = ? AND repo_name = ? ORDER BY repo_owner, repo_name`, []any{ref.Owner, ref.Repo}},
-		{"frontier items", `SELECT * FROM frontier_items WHERE owner = ? AND repo = ? ORDER BY id`, []any{ref.Owner, ref.Repo}},
+		{"cluster runs", `SELECT * FROM cluster_runs WHERE repo_owner = ? AND repo_name = ? ORDER BY id`, []any{ref.Owner(), ref.Repo()}},
+		{"clusters", `SELECT * FROM clusters WHERE repo_owner = ? AND repo_name = ? ORDER BY id`, []any{ref.Owner(), ref.Repo()}},
+		{"cluster members", `SELECT * FROM cluster_members WHERE cluster_id IN (SELECT id FROM clusters WHERE repo_owner = ? AND repo_name = ?) OR thread_id IN (SELECT id FROM threads WHERE repository_id = ?) ORDER BY id`, []any{ref.Owner(), ref.Repo(), plan.RepositoryID}},
+		{"cluster overrides", `SELECT * FROM cluster_overrides WHERE cluster_id IN (SELECT id FROM clusters WHERE repo_owner = ? AND repo_name = ?) OR target_cluster_id IN (SELECT id FROM clusters WHERE repo_owner = ? AND repo_name = ?) ORDER BY id`, []any{ref.Owner(), ref.Repo(), ref.Owner(), ref.Repo()}},
+		{"cluster projection", `SELECT * FROM cluster_projection_state WHERE repo_owner = ? AND repo_name = ? ORDER BY repo_owner, repo_name`, []any{ref.Owner(), ref.Repo()}},
+		{"frontier items", `SELECT * FROM frontier_items WHERE owner = ? AND repo = ? ORDER BY id`, []any{ref.Owner(), ref.Repo()}},
 		{"triage events", `SELECT * FROM triage_events WHERE repository_id = ? OR thread_id IN (SELECT id FROM threads WHERE repository_id = ?) ORDER BY id`, []any{plan.RepositoryID, plan.RepositoryID}},
-		{"portfolio links", `SELECT * FROM portfolio_links WHERE pull_request_thread_id IN (SELECT id FROM threads WHERE repository_id = ?) OR opportunity_id IN (SELECT id FROM opportunities WHERE investigation_id IN (SELECT id FROM investigations WHERE repo_owner = ? AND repo_name = ?)) OR workspace_id IN (SELECT id FROM workspaces WHERE investigation_id IN (SELECT id FROM investigations WHERE repo_owner = ? AND repo_name = ?)) ORDER BY id`, []any{plan.RepositoryID, ref.Owner, ref.Repo, ref.Owner, ref.Repo}},
+		{"portfolio links", `SELECT * FROM portfolio_links WHERE pull_request_thread_id IN (SELECT id FROM threads WHERE repository_id = ?) OR opportunity_id IN (SELECT id FROM opportunities WHERE investigation_id IN (SELECT id FROM investigations WHERE repo_owner = ? AND repo_name = ?)) OR workspace_id IN (SELECT id FROM workspaces WHERE investigation_id IN (SELECT id FROM investigations WHERE repo_owner = ? AND repo_name = ?)) ORDER BY id`, []any{plan.RepositoryID, ref.Owner(), ref.Repo(), ref.Owner(), ref.Repo()}},
 		{"signal snapshots", `SELECT * FROM portfolio_signal_snapshots WHERE subject_kind = ? AND CAST(subject_ref AS INTEGER) IN (SELECT id FROM threads WHERE repository_id = ?) ORDER BY id`, []any{PortfolioSubjectPullRequest, plan.RepositoryID}},
 		{"signals", `SELECT * FROM portfolio_signals WHERE snapshot_id IN (SELECT id FROM portfolio_signal_snapshots WHERE subject_kind = ? AND CAST(subject_ref AS INTEGER) IN (SELECT id FROM threads WHERE repository_id = ?)) ORDER BY snapshot_id, position`, []any{PortfolioSubjectPullRequest, plan.RepositoryID}},
 		{"signal projections", `SELECT * FROM portfolio_signal_projections WHERE subject_kind = ? AND CAST(subject_ref AS INTEGER) IN (SELECT id FROM threads WHERE repository_id = ?) ORDER BY subject_kind, subject_ref, facet`, []any{PortfolioSubjectPullRequest, plan.RepositoryID}},
 		{"resolution records", `SELECT * FROM resolution_records WHERE thread_id IN (SELECT id FROM threads WHERE repository_id = ?) ORDER BY id`, []any{plan.RepositoryID}},
 		{"resolution projections", `SELECT * FROM resolution_projections WHERE thread_id IN (SELECT id FROM threads WHERE repository_id = ?) ORDER BY thread_id`, []any{plan.RepositoryID}},
-		{"investigations", `SELECT * FROM investigations WHERE repo_owner = ? AND repo_name = ? ORDER BY id`, []any{ref.Owner, ref.Repo}},
+		{"investigations", `SELECT * FROM investigations WHERE repo_owner = ? AND repo_name = ? ORDER BY id`, []any{ref.Owner(), ref.Repo()}},
 	}
 	digest := sha256.New()
 	for _, fingerprint := range fingerprintQueries {
@@ -266,11 +266,11 @@ func deleteRepositoryScope(ctx context.Context, tx *sql.Tx, plan *RepositoryRemo
 	}{
 		{"detach cross-repository cluster members", `UPDATE cluster_members SET thread_id = NULL WHERE thread_id IN (SELECT id FROM threads WHERE repository_id = ?)`, []any{repoID}},
 		{"delete pull-request signal snapshots", `DELETE FROM portfolio_signal_snapshots WHERE subject_kind = ? AND CAST(subject_ref AS INTEGER) IN (SELECT id FROM threads WHERE repository_id = ?)`, []any{PortfolioSubjectPullRequest, repoID}},
-		{"delete cluster projection state", `DELETE FROM cluster_projection_state WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner, ref.Repo}},
-		{"delete repository clusters", `DELETE FROM clusters WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner, ref.Repo}},
-		{"delete repository cluster runs", `DELETE FROM cluster_runs WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner, ref.Repo}},
-		{"delete code snapshots", `DELETE FROM code_snapshots WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner, ref.Repo}},
-		{"delete frontier items", `DELETE FROM frontier_items WHERE owner = ? AND repo = ?`, []any{ref.Owner, ref.Repo}},
+		{"delete cluster projection state", `DELETE FROM cluster_projection_state WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner(), ref.Repo()}},
+		{"delete repository clusters", `DELETE FROM clusters WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner(), ref.Repo()}},
+		{"delete repository cluster runs", `DELETE FROM cluster_runs WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner(), ref.Repo()}},
+		{"delete code snapshots", `DELETE FROM code_snapshots WHERE repo_owner = ? AND repo_name = ?`, []any{ref.Owner(), ref.Repo()}},
+		{"delete frontier items", `DELETE FROM frontier_items WHERE owner = ? AND repo = ?`, []any{ref.Owner(), ref.Repo()}},
 		{"delete facet observations", `DELETE FROM facet_observations WHERE repository_id = ?`, []any{repoID}},
 		{"delete facet coverage", `DELETE FROM facet_coverage WHERE repository_id = ?`, []any{repoID}},
 		{"delete thread observations", `DELETE FROM thread_observations WHERE thread_id IN (SELECT id FROM threads WHERE repository_id = ?)`, []any{repoID}},

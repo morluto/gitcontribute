@@ -57,15 +57,9 @@ func validateSearchCodeInput(in *mcpcontract.SearchCodeInput) (domain.RepoRef, e
 	if in.Limit < 1 || in.Limit > 100 {
 		return domain.RepoRef{}, errors.New("limit must be between 1 and 100")
 	}
-	var ref domain.RepoRef
-	if in.Owner != "" || in.Repo != "" {
-		if (in.Owner == "") != (in.Repo == "") {
-			return domain.RepoRef{}, errors.New("owner and repo must be provided together")
-		}
-		ref = domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
-		if err := ref.Validate(); err != nil {
-			return domain.RepoRef{}, err
-		}
+	ref, err := optionalRepoRef(in.Owner, in.Repo)
+	if err != nil {
+		return domain.RepoRef{}, err
 	}
 	return ref, nil
 }
@@ -175,8 +169,8 @@ func (r *MCPReader) SearchCodeBatch(ctx context.Context, in mcpcontract.SearchCo
 	if in.Owner == "" || in.Repo == "" {
 		return mcpcontract.SearchCodeBatchOutput{}, errors.New("owner and repo are required")
 	}
-	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(in.Owner, in.Repo)
+	if err != nil {
 		return mcpcontract.SearchCodeBatchOutput{}, err
 	}
 	queries := make([]string, len(in.Queries))

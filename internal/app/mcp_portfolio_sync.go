@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -14,12 +13,12 @@ import (
 // SyncPortfolio submits one bounded job that discovers pull requests authored
 // by the active credential and refreshes health for the resulting stored set.
 func (r *MCPReader) SyncPortfolio(ctx context.Context, in mcpcontract.SyncPortfolioInput) (mcpcontract.JobReference, error) {
-	in, err := normalizeSyncPortfolioInput(in)
+	request, normalized, err := parseSyncPortfolioInput(in)
 	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
-	id, err := r.submitJob(ctx, jobKindSyncPullRequestPortfolio, in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.runPortfolioSync(ctx, in, report)
+	id, err := r.submitJob(ctx, jobKindSyncPullRequestPortfolio, normalized, func(ctx context.Context, report func(string, string) error) (any, error) {
+		return r.runPortfolioSync(ctx, request, report)
 	})
 	if err != nil {
 		return mcpcontract.JobReference{}, err
@@ -27,109 +26,148 @@ func (r *MCPReader) SyncPortfolio(ctx context.Context, in mcpcontract.SyncPortfo
 	return queuedJobReference(id, jobKindSyncPullRequestPortfolio, "portfolio synchronization job started"), nil
 }
 
-func normalizeSyncPortfolioInput(in mcpcontract.SyncPortfolioInput) (mcpcontract.SyncPortfolioInput, error) {
+type syncPortfolioRequest struct {
+	selection      syncPortfolioSelection
+	statusMaxPages int
+}
+
+type syncPortfolioSelection interface {
+	isSyncPortfolioSelection()
+}
+
+type explicitPortfolioSelection struct {
+	pullRequests []mcpcontract.ThreadRef
+}
+
+func (explicitPortfolioSelection) isSyncPortfolioSelection() {}
+
+type authoredPortfolioSelection struct {
+	repository   *mcpcontract.RepositoryRef
+	state        string
+	updatedAfter time.Time
+	limit        int
+	maxRequests  int
+}
+
+func (authoredPortfolioSelection) isSyncPortfolioSelection() {}
+
+func parseSyncPortfolioInput(in mcpcontract.SyncPortfolioInput) (syncPortfolioRequest, mcpcontract.SyncPortfolioInput, error) {
 	if in.Selection == "" {
-		return mcpcontract.SyncPortfolioInput{}, errors.New("selection is required: choose authored or explicit")
+		return syncPortfolioRequest{}, mcpcontract.SyncPortfolioInput{}, errors.New("selection is required: choose authored or explicit")
 	}
 	if in.Selection != "authored" && in.Selection != "explicit" {
-		return mcpcontract.SyncPortfolioInput{}, errors.New("selection must be authored or explicit")
+		return syncPortfolioRequest{}, mcpcontract.SyncPortfolioInput{}, errors.New("selection must be authored or explicit")
+	}
+	if in.StatusMaxPages == 0 {
+		in.StatusMaxPages = 3
+	}
+	if in.StatusMaxPages < 1 || in.StatusMaxPages > 20 {
+		return syncPortfolioRequest{}, mcpcontract.SyncPortfolioInput{}, errors.New("status_max_pages must be between 1 and 20")
 	}
 	if in.Selection == "explicit" {
-		return normalizeExplicitPortfolioInput(in)
+		selection, normalized, err := parseExplicitPortfolioSelection(in)
+		if err != nil {
+			return syncPortfolioRequest{}, mcpcontract.SyncPortfolioInput{}, err
+		}
+		return syncPortfolioRequest{selection: selection, statusMaxPages: in.StatusMaxPages}, normalized, nil
 	}
 	if len(in.PullRequests) > 0 {
-		return mcpcontract.SyncPortfolioInput{}, errors.New("pull_requests is only valid in explicit mode")
+		return syncPortfolioRequest{}, mcpcontract.SyncPortfolioInput{}, errors.New("pull_requests is only valid in explicit mode")
 	}
-	return normalizeAuthoredPortfolioInput(in)
+	selection, normalized, err := parseAuthoredPortfolioSelection(in)
+	if err != nil {
+		return syncPortfolioRequest{}, mcpcontract.SyncPortfolioInput{}, err
+	}
+	return syncPortfolioRequest{selection: selection, statusMaxPages: in.StatusMaxPages}, normalized, nil
 }
 
-func normalizeExplicitPortfolioInput(in mcpcontract.SyncPortfolioInput) (mcpcontract.SyncPortfolioInput, error) {
+func parseExplicitPortfolioSelection(in mcpcontract.SyncPortfolioInput) (explicitPortfolioSelection, mcpcontract.SyncPortfolioInput, error) {
 	if len(in.PullRequests) < 1 || len(in.PullRequests) > 100 {
-		return mcpcontract.SyncPortfolioInput{}, errors.New("pull_requests must contain 1 to 100 items in explicit mode")
+		return explicitPortfolioSelection{}, mcpcontract.SyncPortfolioInput{}, errors.New("pull_requests must contain 1 to 100 items in explicit mode")
 	}
-	in.PullRequests = canonicalPullRequestRefs(in.PullRequests)
-	if err := rejectDuplicateThreadRefs(in.PullRequests); err != nil {
-		return mcpcontract.SyncPortfolioInput{}, err
+	refs, err := parsePullRequestRefs(in.PullRequests, "pull_requests")
+	if err != nil {
+		return explicitPortfolioSelection{}, mcpcontract.SyncPortfolioInput{}, err
 	}
-	if err := validatePullRequestRefs(in.PullRequests, "pull_requests"); err != nil {
-		return mcpcontract.SyncPortfolioInput{}, err
-	}
+	in.PullRequests = refs
 	if in.State != "" || in.UpdatedAfter != "" || in.Limit != 0 || in.DiscoveryMaxRequests != 0 {
-		return mcpcontract.SyncPortfolioInput{}, errors.New("state, updated_after, limit, and discovery_max_requests are only valid in authored mode")
+		return explicitPortfolioSelection{}, mcpcontract.SyncPortfolioInput{}, errors.New("state, updated_after, limit, and discovery_max_requests are only valid in authored mode")
 	}
 	if in.Repository != nil {
-		return mcpcontract.SyncPortfolioInput{}, errors.New("repository is only valid in authored mode")
+		return explicitPortfolioSelection{}, mcpcontract.SyncPortfolioInput{}, errors.New("repository is only valid in authored mode")
 	}
-	return normalizePortfolioStatusMaxPages(in)
+	return explicitPortfolioSelection{pullRequests: append([]mcpcontract.ThreadRef(nil), in.PullRequests...)}, in, nil
 }
 
-func normalizeAuthoredPortfolioInput(in mcpcontract.SyncPortfolioInput) (mcpcontract.SyncPortfolioInput, error) {
+func parseAuthoredPortfolioSelection(in mcpcontract.SyncPortfolioInput) (authoredPortfolioSelection, mcpcontract.SyncPortfolioInput, error) {
 	if in.Repository != nil {
-		in.Repository.Owner = strings.TrimSpace(in.Repository.Owner)
-		in.Repository.Repo = strings.TrimSpace(in.Repository.Repo)
-		if err := (domain.RepoRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo}).Validate(); err != nil {
-			return mcpcontract.SyncPortfolioInput{}, err
+		ref, err := domain.NewRepoRef(in.Repository.Owner, in.Repository.Repo)
+		if err != nil {
+			return authoredPortfolioSelection{}, mcpcontract.SyncPortfolioInput{}, err
 		}
+		in.Repository = &mcpcontract.RepositoryRef{Owner: ref.Owner(), Repo: ref.Repo()}
 	}
 	if in.State == "" {
 		in.State = "open"
 	}
 	if in.State != "open" && in.State != "closed" && in.State != "all" {
-		return mcpcontract.SyncPortfolioInput{}, errors.New("state must be open, closed, or all")
+		return authoredPortfolioSelection{}, mcpcontract.SyncPortfolioInput{}, errors.New("state must be open, closed, or all")
 	}
+	var updatedAfter time.Time
 	if in.UpdatedAfter != "" {
-		if _, err := time.Parse(time.RFC3339, in.UpdatedAfter); err != nil {
-			return mcpcontract.SyncPortfolioInput{}, errors.New("updated_after must be RFC 3339")
+		parsed, err := time.Parse(time.RFC3339, in.UpdatedAfter)
+		if err != nil {
+			return authoredPortfolioSelection{}, mcpcontract.SyncPortfolioInput{}, errors.New("updated_after must be RFC 3339")
 		}
+		updatedAfter = parsed
 	}
 	if in.Limit == 0 {
 		in.Limit = 100
 	}
 	if in.Limit < 1 || in.Limit > 100 {
-		return mcpcontract.SyncPortfolioInput{}, errors.New("limit must be between 1 and 100")
+		return authoredPortfolioSelection{}, mcpcontract.SyncPortfolioInput{}, errors.New("limit must be between 1 and 100")
 	}
 	if in.DiscoveryMaxRequests == 0 {
 		in.DiscoveryMaxRequests = defaultSyncBatchMaxRequests
 	}
 	if in.DiscoveryMaxRequests < 2 || in.DiscoveryMaxRequests > defaultSyncBatchMaxRequests {
-		return mcpcontract.SyncPortfolioInput{}, fmt.Errorf("discovery_max_requests must be between 2 and %d", defaultSyncBatchMaxRequests)
+		return authoredPortfolioSelection{}, mcpcontract.SyncPortfolioInput{}, fmt.Errorf("discovery_max_requests must be between 2 and %d", defaultSyncBatchMaxRequests)
 	}
-	return normalizePortfolioStatusMaxPages(in)
+	var repository *mcpcontract.RepositoryRef
+	if in.Repository != nil {
+		copy := *in.Repository
+		repository = &copy
+	}
+	return authoredPortfolioSelection{repository: repository, state: in.State, updatedAfter: updatedAfter, limit: in.Limit, maxRequests: in.DiscoveryMaxRequests}, in, nil
 }
 
-func normalizePortfolioStatusMaxPages(in mcpcontract.SyncPortfolioInput) (mcpcontract.SyncPortfolioInput, error) {
-	if in.StatusMaxPages == 0 {
-		in.StatusMaxPages = 3
+func (r *MCPReader) runPortfolioSync(ctx context.Context, request syncPortfolioRequest, report func(string, string) error) (syncPortfolioResult, error) {
+	switch selection := request.selection.(type) {
+	case explicitPortfolioSelection:
+		return r.syncExplicitPortfolio(ctx, selection, request.statusMaxPages, report)
+	case authoredPortfolioSelection:
+		return r.syncAuthoredPortfolio(ctx, selection, request.statusMaxPages, report)
+	default:
+		return syncPortfolioResult{}, errors.New("unsupported parsed portfolio selection")
 	}
-	if in.StatusMaxPages < 1 || in.StatusMaxPages > 20 {
-		return mcpcontract.SyncPortfolioInput{}, errors.New("status_max_pages must be between 1 and 20")
-	}
-	return in, nil
 }
 
-func (r *MCPReader) runPortfolioSync(ctx context.Context, in mcpcontract.SyncPortfolioInput, report func(string, string) error) (syncPortfolioResult, error) {
-	if in.Selection == "explicit" {
-		return r.syncExplicitPortfolio(ctx, in, report)
-	}
-	return r.syncAuthoredPortfolio(ctx, in, report)
-}
-
-func (r *MCPReader) syncExplicitPortfolio(ctx context.Context, in mcpcontract.SyncPortfolioInput, report func(string, string) error) (syncPortfolioResult, error) {
-	refreshed, failures, status, err := r.syncPortfolioStatusBatches(ctx, in.PullRequests, in.StatusMaxPages, report)
+func (r *MCPReader) syncExplicitPortfolio(ctx context.Context, selection explicitPortfolioSelection, statusMaxPages int, report func(string, string) error) (syncPortfolioResult, error) {
+	refreshed, failures, status, err := r.syncPortfolioStatusBatches(ctx, selection.pullRequests, statusMaxPages, report)
 	if err != nil {
 		return syncPortfolioResult{}, err
 	}
-	return syncPortfolioResult{Status: status, Discovered: len(in.PullRequests), Refreshed: refreshed, PullRequests: threadRefKeys(in.PullRequests), Failures: failures, DiscoveryStatus: "complete"}, nil
+	return syncPortfolioResult{Status: status, Discovered: len(selection.pullRequests), Refreshed: refreshed, PullRequests: threadRefKeys(selection.pullRequests), Failures: failures, DiscoveryStatus: "complete"}, nil
 }
 
-func (r *MCPReader) syncAuthoredPortfolio(ctx context.Context, in mcpcontract.SyncPortfolioInput, report func(string, string) error) (syncPortfolioResult, error) {
+func (r *MCPReader) syncAuthoredPortfolio(ctx context.Context, selection authoredPortfolioSelection, statusMaxPages int, report func(string, string) error) (syncPortfolioResult, error) {
 	discovery, err := r.syncAuthoredPullRequests(ctx, authoredPullRequestSyncOptions{
-		Repository: in.Repository, State: in.State, UpdatedAfter: in.UpdatedAfter, Limit: in.Limit, MaxRequests: in.DiscoveryMaxRequests,
+		Repository: selection.repository, State: selection.state, UpdatedAfter: selection.updatedAfter, Limit: selection.limit, MaxRequests: selection.maxRequests,
 	}, report)
 	if err != nil {
 		return syncPortfolioResult{}, err
 	}
-	refreshed, failures, status, err := r.syncPortfolioStatusBatches(ctx, discovery.PullRequestTargets, in.StatusMaxPages, report)
+	refreshed, failures, status, err := r.syncPortfolioStatusBatches(ctx, discovery.PullRequestTargets, statusMaxPages, report)
 	if err != nil {
 		return syncPortfolioResult{}, err
 	}

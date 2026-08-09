@@ -14,7 +14,7 @@ import (
 func TestRankOrdersEligibilityAndExplainsScore(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	repo := RepositorySnapshot{
-		Repo:           domain.RepoRef{Owner: "owner", Repo: "repo"},
+		Repo:           domain.MustRepoRef("owner", "repo"),
 		SourceUpdated:  now.Add(-time.Hour),
 		GuidanceStatus: "available",
 		Coverage: []Coverage{
@@ -77,7 +77,7 @@ func TestMissingCoverageIsUnknownNotPenalty(t *testing.T) {
 		Number: 1, State: "open", Title: "Issue", Body: "Description",
 		SourceUpdated: now.Add(-24 * time.Hour), URL: "https://github.com/owner/repo/issues/1",
 	}
-	repo := RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, GuidanceStatus: "available"}
+	repo := RepositorySnapshot{Repo: domain.MustRepoRef("owner", "repo"), GuidanceStatus: "available"}
 	missing, err := Rank(repo, []IssueSnapshot{base}, Options{Now: now})
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +131,7 @@ func TestMissingCoverageIsUnknownNotPenalty(t *testing.T) {
 func TestClosingPullRequestBlocksCandidate(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	report, err := Rank(
-		RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}},
+		RepositorySnapshot{Repo: domain.MustRepoRef("owner", "repo")},
 		[]IssueSnapshot{{
 			Number: 7, State: "open", Title: "Bug", Body: "Description", SourceUpdated: now,
 			URL:                "https://github.com/owner/repo/issues/7",
@@ -151,7 +151,7 @@ func TestClosingPullRequestBlocksCandidate(t *testing.T) {
 func TestOpenDependencyRequiresCoordinationWithoutBecomingBlocker(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	report, err := Rank(
-		RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, GuidanceStatus: "available", Coverage: []Coverage{
+		RepositorySnapshot{Repo: domain.MustRepoRef("owner", "repo"), GuidanceStatus: "available", Coverage: []Coverage{
 			{Facet: "metadata", Present: true, Complete: true}, {Facet: "threads", Present: true, Complete: true},
 		}},
 		[]IssueSnapshot{{
@@ -177,7 +177,7 @@ func TestOpenDependencyRequiresCoordinationWithoutBecomingBlocker(t *testing.T) 
 func TestCappedRelatedWorkPreventsReadyToCodeClaim(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	report, err := Rank(
-		RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, GuidanceStatus: "available", Coverage: []Coverage{
+		RepositorySnapshot{Repo: domain.MustRepoRef("owner", "repo"), GuidanceStatus: "available", Coverage: []Coverage{
 			{Facet: "metadata", Present: true, Complete: true}, {Facet: "threads", Present: true, Complete: true},
 		}},
 		[]IssueSnapshot{{Number: 7, State: "open", Title: "Bug", Body: "Description", SourceUpdated: now,
@@ -196,7 +196,7 @@ func TestCappedRelatedWorkPreventsReadyToCodeClaim(t *testing.T) {
 func TestUnknownRelatedPullRequestStatePreventsReadyToCodeClaim(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	report, err := Rank(
-		RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, GuidanceStatus: "available", Coverage: []Coverage{
+		RepositorySnapshot{Repo: domain.MustRepoRef("owner", "repo"), GuidanceStatus: "available", Coverage: []Coverage{
 			{Facet: "metadata", Present: true, Complete: true}, {Facet: "threads", Present: true, Complete: true},
 		}},
 		[]IssueSnapshot{{Number: 7, State: "open", Title: "Bug", Body: "Description", SourceUpdated: now,
@@ -220,7 +220,7 @@ func TestUnknownRelatedPullRequestStatePreventsReadyToCodeClaim(t *testing.T) {
 func TestClosedRelatedPullRequestIsBackgroundOnly(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	report, err := Rank(
-		RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, GuidanceStatus: "available", Coverage: []Coverage{
+		RepositorySnapshot{Repo: domain.MustRepoRef("owner", "repo"), GuidanceStatus: "available", Coverage: []Coverage{
 			{Facet: "metadata", Present: true, Complete: true}, {Facet: "threads", Present: true, Complete: true},
 		}},
 		[]IssueSnapshot{{Number: 7, State: "open", Title: "Bug", Body: "Description", SourceUpdated: now,
@@ -241,7 +241,7 @@ func TestClosedRelatedPullRequestIsBackgroundOnly(t *testing.T) {
 
 func TestRankUsesStableFinalTieBreakAndLimit(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
-	repo := RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}}
+	repo := RepositorySnapshot{Repo: domain.MustRepoRef("owner", "repo")}
 	issues := []IssueSnapshot{
 		{Number: 8, State: "open", Title: "Same", Body: "Same", SourceUpdated: now},
 		{Number: 2, State: "open", Title: "Same", Body: "Same", SourceUpdated: now},
@@ -260,7 +260,7 @@ func TestRankUsesStableFinalTieBreakAndLimit(t *testing.T) {
 
 func TestRankRejectsUnsafeLimit(t *testing.T) {
 	_, err := Rank(
-		RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}},
+		RepositorySnapshot{Repo: domain.MustRepoRef("owner", "repo")},
 		nil,
 		Options{Limit: MaxLimit + 1, Now: time.Now()},
 	)
@@ -278,7 +278,7 @@ func TestRankReturnsMaximumBoundedPopulation(t *testing.T) {
 		}
 	}
 	report, err := Rank(
-		RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}},
+		RepositorySnapshot{Repo: domain.MustRepoRef("owner", "repo")},
 		issues,
 		Options{Limit: MaxLimit, Now: now, TotalOpenIssues: MaxLimit},
 	)
@@ -293,7 +293,7 @@ func TestRankReturnsMaximumBoundedPopulation(t *testing.T) {
 func TestObjectiveStateUsesBlockersNotScore(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	report, err := Rank(
-		RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, Archived: true},
+		RepositorySnapshot{Repo: domain.MustRepoRef("owner", "repo"), Archived: true},
 		[]IssueSnapshot{{Number: 1, State: "closed", Title: "Finished", SourceUpdated: now}},
 		Options{Now: now},
 	)
@@ -312,7 +312,7 @@ func TestObjectiveStateUsesBlockersNotScore(t *testing.T) {
 func TestRankReportsBoundedEvidenceScans(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	report, err := Rank(
-		RepositorySnapshot{Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, GuidanceStatus: "available"},
+		RepositorySnapshot{Repo: domain.MustRepoRef("owner", "repo"), GuidanceStatus: "available"},
 		nil,
 		Options{Now: now, PopulationCapped: true, LinkedPullRequestScanCapped: true, DuplicateClusterScanCapped: true},
 	)
@@ -337,7 +337,7 @@ func TestCappedCollisionEvidenceCannotClaimEligibility(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	report, err := Rank(
 		RepositorySnapshot{
-			Repo: domain.RepoRef{Owner: "owner", Repo: "repo"},
+			Repo: domain.MustRepoRef("owner", "repo"),
 			Coverage: []Coverage{
 				{Facet: "metadata", Present: true, Complete: true},
 				{Facet: "threads", Present: true, Complete: true},

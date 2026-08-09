@@ -215,7 +215,7 @@ func writeProofRun(b *strings.Builder, label string, run *evidence.ValidationRun
 	b.WriteString(")\n")
 	for _, observation := range run.Observations {
 		if observation.Status == evidence.ObservationMatched && observation.Excerpt != "" {
-			fmt.Fprintf(b, "    - %s: %s\n", observation.Name, boundedText(observation.Excerpt, 240))
+			fmt.Fprintf(b, "    - %s: %s\n", observation.Name(), boundedText(observation.Excerpt, 240))
 		}
 	}
 }

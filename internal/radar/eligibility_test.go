@@ -199,7 +199,7 @@ func TestAIPolicyIsAnExplicitGate(t *testing.T) {
 
 func completeEligibilityRepo(now time.Time) RepositorySnapshot {
 	return RepositorySnapshot{
-		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"}, SourceUpdated: now,
+		Repo: domain.MustRepoRef("owner", "repo"), SourceUpdated: now,
 		GuidanceStatus: "available", Guidance: []GuidanceDocument{{
 			Path: "CONTRIBUTING.md", Content: "Contributions are welcome.", URL: "https://github.com/owner/repo/blob/main/CONTRIBUTING.md",
 		}},

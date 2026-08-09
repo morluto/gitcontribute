@@ -15,19 +15,27 @@ func TestValidationObservationPayloadRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	now := time.Now().UTC()
-	inv, err := investigation.NewService(c, c).StartInvestigation(ctx, domain.RepoRef{Owner: "owner", Repo: "repo"}, "abc123", "")
+	inv, err := investigation.NewService(c, c).StartInvestigation(ctx, domain.MustRepoRef("owner", "repo"), "abc123", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation, err := evidence.ParseObservationContract(evidence.ObservationContractSpec{
+		Intent: "observe artifact",
+		Base: []evidence.ExpectedObservationSpec{{
+			Name: "generated before", Source: evidence.ObservationArtifact, Path: "out.txt",
+			Matcher: evidence.ObservationExact, Pattern: "broken", Occurrence: evidence.ObservationPresent,
+		}},
+		Candidate: []evidence.ExpectedObservationSpec{{
+			Name: "generated", Source: evidence.ObservationArtifact, Path: "out.txt",
+			Matcher: evidence.ObservationExact, Pattern: "fixed", Occurrence: evidence.ObservationPresent,
+		}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	definition := &evidence.ValidationDefinition{
 		ID: "definition", InvestigationID: inv.ID, Command: []string{"test"}, WorkingDir: "/tmp", CreatedAt: now,
-		Observation: &evidence.ObservationContract{
-			Intent: "observe artifact",
-			Candidate: []evidence.ExpectedObservation{{
-				Name: "generated", Source: evidence.ObservationArtifact, Path: "out.txt",
-				Matcher: evidence.ObservationExact, Pattern: "fixed", Occurrence: evidence.ObservationPresent,
-			}},
-		},
+		Observation: observation,
 	}
 	if err := c.SaveValidationDefinition(ctx, definition); err != nil {
 		t.Fatalf("save definition: %v", err)
@@ -37,7 +45,7 @@ func TestValidationObservationPayloadRoundTrip(t *testing.T) {
 		Classification:    evidence.RunClassificationPassing,
 		ObservationStatus: evidence.ObservationMatched,
 		Observations: []evidence.ObservationResult{{
-			ExpectedObservation: definition.Observation.Candidate[0],
+			ExpectedObservation: definition.Observation.Candidate()[0],
 			Status:              evidence.ObservationMatched, Excerpt: "fixed",
 		}},
 		StartedAt: now, CompletedAt: now,
@@ -50,7 +58,7 @@ func TestValidationObservationPayloadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get definition: %v", err)
 	}
-	if gotDefinition.Observation == nil || gotDefinition.Observation.Candidate[0].Path != "out.txt" {
+	if gotDefinition.Observation == nil || gotDefinition.Observation.Candidate()[0].Spec().Path != "out.txt" {
 		t.Fatalf("definition observation = %#v", gotDefinition.Observation)
 	}
 	gotRun, err := c.GetValidationRun(ctx, run.ID)

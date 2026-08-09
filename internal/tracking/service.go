@@ -1,9 +1,12 @@
 package tracking
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -150,6 +153,32 @@ func (s *Service) ExportLocalMetadata(ctx context.Context, opts ExportOptions) (
 
 // ImportLocalMetadata imports a bounded bundle idempotently.
 func (s *Service) ImportLocalMetadata(ctx context.Context, bundle *Bundle) error {
+	if err := ValidateBundle(bundle); err != nil {
+		return err
+	}
+	return s.repo.ImportLocalMetadata(ctx, bundle)
+}
+
+// ParseBundle parses and validates the complete import before the caller opens
+// or mutates a corpus.
+func ParseBundle(data []byte) (*Bundle, error) {
+	var bundle Bundle
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&bundle); err != nil {
+		return nil, fmt.Errorf("parse local metadata: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, errors.New("parse local metadata: expected one JSON value")
+	}
+	if err := ValidateBundle(&bundle); err != nil {
+		return nil, err
+	}
+	return &bundle, nil
+}
+
+// ValidateBundle validates every record before an import transaction begins.
+func ValidateBundle(bundle *Bundle) error {
 	if bundle == nil {
 		return errors.New("bundle is required")
 	}
@@ -203,7 +232,7 @@ func (s *Service) ImportLocalMetadata(ctx context.Context, bundle *Bundle) error
 			return fmt.Errorf("evidence %q: %w", item.ID, err)
 		}
 	}
-	return s.repo.ImportLocalMetadata(ctx, bundle)
+	return nil
 }
 
 // ResolveBundleVersion rejects any bundle that does not declare the current

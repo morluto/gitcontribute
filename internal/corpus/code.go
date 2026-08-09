@@ -56,10 +56,6 @@ type CodeIndexArtifactRecord struct {
 	ManifestJSON   string
 	SnapshotToken  string
 	CorpusRevision int64
-	CoverageKnown  bool
-	IndexedFiles   int
-	TrackedEntries int
-	Truncated      bool
 	SchemaVersion  string
 	Provenance     map[string]string
 	IndexManifest  codeindex.Manifest
@@ -103,8 +99,8 @@ func (c *Corpus) StoreCodeSnapshotWithRevision(ctx context.Context, ref domain.R
 }
 
 func (c *Corpus) storeCodeSnapshot(ctx context.Context, ref domain.RepoRef, snapshot codeindex.Snapshot) (int64, bool, int64, error) {
-	if err := ref.Validate(); err != nil {
-		return 0, false, 0, err
+	if !ref.IsValid() {
+		return 0, false, 0, errors.New("repository reference is not parsed")
 	}
 	if snapshot.Commit == "" {
 		return 0, false, 0, errors.New("code snapshot commit is required")
@@ -121,7 +117,7 @@ func (c *Corpus) storeCodeSnapshot(ctx context.Context, ref domain.RepoRef, snap
 	var existing int64
 	err = tx.QueryRowContext(ctx, `
 		SELECT id FROM code_snapshots WHERE repo_owner=? AND repo_name=? AND commit_sha=?
-		`, ref.Owner, ref.Repo, snapshot.Commit).Scan(&existing)
+		`, ref.Owner(), ref.Repo(), snapshot.Commit).Scan(&existing)
 	if err == nil {
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE code_snapshots
@@ -154,7 +150,7 @@ func (c *Corpus) storeCodeSnapshot(ctx context.Context, ref domain.RepoRef, snap
 	result, err := tx.ExecContext(ctx, `
 		INSERT INTO code_snapshots (repo_owner, repo_name, repo_path, commit_sha, total_bytes, created_at, manifest_json)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, ref.Owner, ref.Repo, snapshot.RepoPath, snapshot.Commit, snapshot.TotalBytes, encodeTime(snapshot.CreatedAt), string(manifest))
+	`, ref.Owner(), ref.Repo(), snapshot.RepoPath, snapshot.Commit, snapshot.TotalBytes, encodeTime(snapshot.CreatedAt), string(manifest))
 	if err != nil {
 		return 0, false, 0, fmt.Errorf("insert code snapshot: %w", err)
 	}
@@ -207,7 +203,7 @@ func storeCodeIndexArtifact(ctx context.Context, tx *sql.Tx, snapshotID int64, r
 		INSERT INTO code_index_artifacts
 		(digest, snapshot_id, repo_owner, repo_name, commit_sha, manifest_sha256, manifest_json, snapshot_token, corpus_revision, coverage_known, indexed_files, tracked_entries, truncated, schema_version, provenance, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, artifactDigest, snapshotID, ref.Owner, ref.Repo, snapshot.Commit, manifestDigest, string(manifestBytes), snapshotToken, revision, snapshot.Manifest.CoverageKnown, snapshot.Manifest.IndexedFiles, snapshot.Manifest.TrackedEntries, snapshot.Manifest.Truncated, codeIndexArtifactSchema, string(provenanceJSON), encodeTime(createdAt)); err != nil {
+	`, artifactDigest, snapshotID, ref.Owner(), ref.Repo(), snapshot.Commit, manifestDigest, string(manifestBytes), snapshotToken, revision, snapshot.Manifest.CoverageKnown, snapshot.Manifest.IndexedFiles, snapshot.Manifest.TrackedEntries, snapshot.Manifest.Truncated, codeIndexArtifactSchema, string(provenanceJSON), encodeTime(createdAt)); err != nil {
 		return CodeIndexArtifactRecord{}, fmt.Errorf("store immutable code index artifact: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -221,8 +217,6 @@ func storeCodeIndexArtifact(ctx context.Context, tx *sql.Tx, snapshotID int64, r
 		Digest: artifactDigest, Repo: ref, CommitSHA: snapshot.Commit,
 		ManifestSHA256: manifestDigest, ManifestJSON: string(manifestBytes),
 		SnapshotToken: snapshotToken, CorpusRevision: revision,
-		CoverageKnown: snapshot.Manifest.CoverageKnown, IndexedFiles: snapshot.Manifest.IndexedFiles,
-		TrackedEntries: snapshot.Manifest.TrackedEntries, Truncated: snapshot.Manifest.Truncated,
 		SchemaVersion: codeIndexArtifactSchema, Provenance: manifest.Provenance,
 		IndexManifest: snapshot.Manifest, TotalBytes: snapshot.TotalBytes,
 		Documents: documents, CreatedAt: createdAt,
@@ -274,8 +268,8 @@ func (c *Corpus) LatestCodeSnapshot(ctx context.Context, ref domain.RepoRef) (*C
 
 // CodeSnapshot returns the stored snapshot for an exact repository commit.
 func (c *Corpus) CodeSnapshot(ctx context.Context, ref domain.RepoRef, commit string) (*CodeSnapshotInfo, error) {
-	if err := ref.Validate(); err != nil {
-		return nil, err
+	if !ref.IsValid() {
+		return nil, errors.New("repository reference is not parsed")
 	}
 	if commit == "" {
 		return nil, errors.New("code snapshot commit is required")
@@ -285,7 +279,7 @@ func (c *Corpus) CodeSnapshot(ctx context.Context, ref domain.RepoRef, commit st
 		FROM code_snapshots
 		WHERE repo_owner = ? AND repo_name = ? AND commit_sha = ?
 		LIMIT 1
-	`, ref.Owner, ref.Repo, commit), ref)
+	`, ref.Owner(), ref.Repo(), commit), ref)
 }
 
 // CodeIndexArtifact resolves one immutable artifact by its content digest.
@@ -305,8 +299,8 @@ func (c *Corpus) CodeIndexArtifact(ctx context.Context, digest string) (*CodeInd
 // LatestCodeIndexArtifact returns the most recently created immutable artifact
 // for an exact repository commit.
 func (c *Corpus) LatestCodeIndexArtifact(ctx context.Context, ref domain.RepoRef, commit string) (*CodeIndexArtifactRecord, error) {
-	if err := ref.Validate(); err != nil {
-		return nil, err
+	if !ref.IsValid() {
+		return nil, errors.New("repository reference is not parsed")
 	}
 	return scanCodeIndexArtifact(c.db.QueryRowContext(ctx, `
 		SELECT digest, repo_owner, repo_name, commit_sha, manifest_sha256, manifest_json,
@@ -315,16 +309,18 @@ func (c *Corpus) LatestCodeIndexArtifact(ctx context.Context, ref domain.RepoRef
 		FROM code_index_artifacts
 		WHERE repo_owner = ? AND repo_name = ? AND commit_sha = ?
 		ORDER BY created_at DESC, digest DESC LIMIT 1
-	`, ref.Owner, ref.Repo, commit), "")
+	`, ref.Owner(), ref.Repo(), commit), "")
 }
 
 func scanCodeIndexArtifact(row *sql.Row, expectedDigest string) (*CodeIndexArtifactRecord, error) {
 	var record CodeIndexArtifactRecord
+	var owner, repo string
 	var created int64
 	var coverageKnown, truncated bool
+	var indexedFiles, trackedEntries int
 	var provenance string
 	if expectedDigest == "" {
-		if err := row.Scan(&record.Digest, &record.Repo.Owner, &record.Repo.Repo, &record.CommitSHA, &record.ManifestSHA256, &record.ManifestJSON, &record.SnapshotToken, &record.CorpusRevision, &coverageKnown, &record.IndexedFiles, &record.TrackedEntries, &truncated, &record.SchemaVersion, &provenance, &created); err != nil {
+		if err := row.Scan(&record.Digest, &owner, &repo, &record.CommitSHA, &record.ManifestSHA256, &record.ManifestJSON, &record.SnapshotToken, &record.CorpusRevision, &coverageKnown, &indexedFiles, &trackedEntries, &truncated, &record.SchemaVersion, &provenance, &created); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, nil
 			}
@@ -332,14 +328,19 @@ func scanCodeIndexArtifact(row *sql.Row, expectedDigest string) (*CodeIndexArtif
 		}
 	} else {
 		record.Digest = expectedDigest
-		if err := row.Scan(&record.Repo.Owner, &record.Repo.Repo, &record.CommitSHA, &record.ManifestSHA256, &record.ManifestJSON, &record.SnapshotToken, &record.CorpusRevision, &coverageKnown, &record.IndexedFiles, &record.TrackedEntries, &truncated, &record.SchemaVersion, &provenance, &created); err != nil {
+		if err := row.Scan(&owner, &repo, &record.CommitSHA, &record.ManifestSHA256, &record.ManifestJSON, &record.SnapshotToken, &record.CorpusRevision, &coverageKnown, &indexedFiles, &trackedEntries, &truncated, &record.SchemaVersion, &provenance, &created); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("read code index artifact: %w", err)
 		}
 	}
-	record.CoverageKnown, record.Truncated, record.CreatedAt = coverageKnown, truncated, scanTime(created)
+	parsed, err := domain.NewRepoRef(owner, repo)
+	if err != nil {
+		return nil, fmt.Errorf("decode code index artifact repository: %w", err)
+	}
+	record.Repo = parsed
+	record.CreatedAt = scanTime(created)
 	if err := json.Unmarshal([]byte(provenance), &record.Provenance); err != nil {
 		return nil, fmt.Errorf("decode code index artifact provenance: %w", err)
 	}
@@ -349,6 +350,9 @@ func scanCodeIndexArtifact(row *sql.Row, expectedDigest string) (*CodeIndexArtif
 	}
 	record.IndexManifest = completeManifest.Index
 	record.TotalBytes, record.Documents = completeManifest.TotalBytes, completeManifest.Documents
+	if record.IndexManifest.CoverageKnown != coverageKnown || record.IndexManifest.IndexedFiles != indexedFiles || record.IndexManifest.TrackedEntries != trackedEntries || record.IndexManifest.Truncated != truncated {
+		return nil, errors.New("code index artifact projection contradicts digest-bound manifest")
+	}
 	manifestHash := sha256.Sum256([]byte(record.ManifestJSON))
 	if hex.EncodeToString(manifestHash[:]) != record.ManifestSHA256 {
 		return nil, errors.New("code index artifact manifest digest mismatch")
@@ -371,7 +375,7 @@ func latestCodeSnapshot(ctx context.Context, queryer codeSnapshotQueryer, ref do
 		WHERE repo_owner = ? AND repo_name = ?
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1
-	`, ref.Owner, ref.Repo), ref)
+	`, ref.Owner(), ref.Repo()), ref)
 }
 
 func scanCodeSnapshot(row *sql.Row, ref domain.RepoRef) (*CodeSnapshotInfo, error) {
@@ -473,8 +477,8 @@ func (c *Corpus) prepareCodeSearch(ctx context.Context, query string, opts CodeS
 		return opts, "", "", nil, err
 	}
 	if opts.Ref != (domain.RepoRef{}) {
-		if err := opts.Ref.Validate(); err != nil {
-			return opts, "", "", nil, err
+		if !opts.Ref.IsValid() {
+			return opts, "", "", nil, errors.New("repository reference is not parsed")
 		}
 	}
 	repo := opts.Ref.String()
@@ -496,7 +500,7 @@ func codeSearchStatement(ftsQuery string, opts CodeSearchOptions, cursor *search
 	args := []any{ftsQuery}
 	if opts.Ref != (domain.RepoRef{}) {
 		statement += ` AND s.repo_owner = ? AND s.repo_name = ?`
-		args = append(args, opts.Ref.Owner, opts.Ref.Repo)
+		args = append(args, opts.Ref.Owner(), opts.Ref.Repo())
 	}
 	if cursor != nil {
 		statement += ` AND (bm25(code_documents_fts, 5.0, 1.0) > ? OR (bm25(code_documents_fts, 5.0, 1.0) = ? AND d.id > ?))`
@@ -510,11 +514,17 @@ func scanCodeSearchMatches(rows *sql.Rows) ([]CodeMatch, error) {
 	var matches []CodeMatch
 	for rows.Next() {
 		var match CodeMatch
+		var owner, repo string
 		var createdAt int64
-		if err := rows.Scan(&match.Rank, &match.DocID, &match.Repo.Owner, &match.Repo.Repo, &match.Commit,
+		if err := rows.Scan(&match.Rank, &match.DocID, &owner, &repo, &match.Commit,
 			&match.Path, &match.Content, &match.Bytes, &match.Language, &match.SnapshotID, &createdAt); err != nil {
 			return nil, err
 		}
+		parsed, err := domain.NewRepoRef(owner, repo)
+		if err != nil {
+			return nil, fmt.Errorf("decode code search repository: %w", err)
+		}
+		match.Repo = parsed
 		match.SnapshotCreatedAt = scanTime(createdAt)
 		matches = append(matches, match)
 	}
@@ -565,7 +575,7 @@ func (c *Corpus) latestCodeSnapshotID(ctx context.Context, ref domain.RepoRef) (
 		WHERE repo_owner = ? AND repo_name = ?
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1
-	`, ref.Owner, ref.Repo).Scan(&id)
+	`, ref.Owner(), ref.Repo()).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}
@@ -586,13 +596,14 @@ func (c *Corpus) GetCodeDocument(ctx context.Context, ref domain.RepoRef, path s
 		return nil, nil
 	}
 	var match CodeMatch
+	var owner, repo string
 	var createdAt int64
 	err = c.db.QueryRowContext(ctx, `
 		SELECT d.id, s.repo_owner, s.repo_name, s.commit_sha, d.path, d.content, d.bytes, d.language, s.id, s.created_at
 		FROM code_documents d
 		JOIN code_snapshots s ON s.id = d.snapshot_id
 		WHERE d.snapshot_id = ? AND d.path = ?
-	`, snapshotID, path).Scan(&match.DocID, &match.Repo.Owner, &match.Repo.Repo, &match.Commit,
+	`, snapshotID, path).Scan(&match.DocID, &owner, &repo, &match.Commit,
 		&match.Path, &match.Content, &match.Bytes, &match.Language, &match.SnapshotID, &createdAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
@@ -600,6 +611,11 @@ func (c *Corpus) GetCodeDocument(ctx context.Context, ref domain.RepoRef, path s
 	if err != nil {
 		return nil, fmt.Errorf("get code document: %w", err)
 	}
+	parsed, err := domain.NewRepoRef(owner, repo)
+	if err != nil {
+		return nil, fmt.Errorf("decode code document repository: %w", err)
+	}
+	match.Repo = parsed
 	match.SnapshotCreatedAt = scanTime(createdAt)
 	return &match, nil
 }
@@ -630,11 +646,17 @@ func (c *Corpus) ListCodeDocuments(ctx context.Context, ref domain.RepoRef) ([]C
 	var out []CodeMatch
 	for rows.Next() {
 		var match CodeMatch
+		var owner, repo string
 		var createdAt int64
-		if err := rows.Scan(&match.DocID, &match.Repo.Owner, &match.Repo.Repo, &match.Commit,
+		if err := rows.Scan(&match.DocID, &owner, &repo, &match.Commit,
 			&match.Path, &match.Content, &match.Bytes, &match.Language, &match.SnapshotID, &createdAt); err != nil {
 			return nil, err
 		}
+		parsed, err := domain.NewRepoRef(owner, repo)
+		if err != nil {
+			return nil, fmt.Errorf("decode code document repository: %w", err)
+		}
+		match.Repo = parsed
 		match.SnapshotCreatedAt = scanTime(createdAt)
 		out = append(out, match)
 	}
@@ -652,9 +674,9 @@ func countCodeMatches(ctx context.Context, queryer codeSnapshotQueryer, ftsQuery
 		              WHERE newest.repo_owner = s.repo_owner AND newest.repo_name = s.repo_name
 		              ORDER BY newest.created_at DESC, newest.id DESC LIMIT 1)`
 	args := []any{ftsQuery}
-	if ref.Owner != "" || ref.Repo != "" {
+	if ref.Owner() != "" || ref.Repo() != "" {
 		statement += ` AND s.repo_owner = ? AND s.repo_name = ?`
-		args = append(args, ref.Owner, ref.Repo)
+		args = append(args, ref.Owner(), ref.Repo())
 	}
 	var total int
 	if err := queryer.QueryRowContext(ctx, statement, args...).Scan(&total); err != nil {

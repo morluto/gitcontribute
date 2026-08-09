@@ -40,16 +40,17 @@ func (s *Service) AddCollectionMembers(ctx context.Context, name string, members
 		return nil, errors.New("at least one member is required")
 	}
 
+	cm := make([]corpus.CollectionMember, len(members))
+	for i, m := range members {
+		parsed, err := parseCollectionMember(m)
+		if err != nil {
+			return nil, fmt.Errorf("member %d: %w", i+1, err)
+		}
+		cm[i] = parsed
+	}
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
-	}
-	cm := make([]corpus.CollectionMember, len(members))
-	for i, m := range members {
-		if err := validateCollectionMember(m); err != nil {
-			return nil, fmt.Errorf("member %d: %w", i+1, err)
-		}
-		cm[i] = corpus.CollectionMember{Kind: m.Kind, Ref: m.Ref}
 	}
 	if err := c.AddCollectionMembers(ctx, name, cm); err != nil {
 		return nil, fmt.Errorf("add collection members: %w", err)
@@ -65,51 +66,53 @@ func (s *Service) AddCollectionMembers(ctx context.Context, name string, members
 	return collectionResult(col), nil
 }
 
-func validateCollectionMember(member contracts.CollectionMember) error {
+func parseCollectionMember(member contracts.CollectionMember) (corpus.CollectionMember, error) {
 	kind := strings.TrimSpace(member.Kind)
 	ref := strings.TrimSpace(member.Ref)
 	if ref == "" {
-		return errors.New("collection member reference is required")
+		return corpus.CollectionMember{}, errors.New("collection member reference is required")
 	}
 	switch kind {
 	case "repository":
-		return validateCollectionRepoRef(ref)
+		parsed, err := domain.ParseRepoRef(ref)
+		if err != nil {
+			return corpus.CollectionMember{}, err
+		}
+		return corpus.CollectionMember{Kind: kind, Ref: parsed.String()}, nil
 	case "issue", "pull_request", "thread":
-		return validateCollectionThreadRef(kind, ref)
+		parsed, err := parseCollectionThreadRef(kind, ref)
+		if err != nil {
+			return corpus.CollectionMember{}, err
+		}
+		return corpus.CollectionMember{Kind: kind, Ref: parsed}, nil
 	case "opportunity", "investigation":
 		if len(ref) > 64 {
-			return fmt.Errorf("invalid %s reference %q: exceeds 64 bytes", kind, ref)
+			return corpus.CollectionMember{}, fmt.Errorf("invalid %s reference %q: exceeds 64 bytes", kind, ref)
 		}
-		if _, err := uuid.Parse(ref); err != nil {
-			return fmt.Errorf("invalid %s reference %q: expected durable id", kind, ref)
+		id, err := uuid.Parse(ref)
+		if err != nil {
+			return corpus.CollectionMember{}, fmt.Errorf("invalid %s reference %q: expected durable id", kind, ref)
 		}
-		return nil
+		return corpus.CollectionMember{Kind: kind, Ref: id.String()}, nil
 	default:
-		return fmt.Errorf("unsupported collection member kind %q", kind)
+		return corpus.CollectionMember{}, fmt.Errorf("unsupported collection member kind %q", kind)
 	}
 }
 
-func validateCollectionThreadRef(kind, ref string) error {
+func parseCollectionThreadRef(kind, ref string) (string, error) {
 	if strings.Count(ref, "#") != 1 {
-		return fmt.Errorf("invalid %s reference %q: expected OWNER/REPO#NUMBER", kind, ref)
+		return "", fmt.Errorf("invalid %s reference %q: expected OWNER/REPO#NUMBER", kind, ref)
 	}
 	repoRef, numberText, _ := strings.Cut(ref, "#")
-	if err := validateCollectionRepoRef(repoRef); err != nil {
-		return fmt.Errorf("invalid %s reference %q: %w", kind, ref, err)
+	parsedRepo, err := domain.ParseRepoRef(repoRef)
+	if err != nil {
+		return "", fmt.Errorf("invalid %s reference %q: %w", kind, ref, err)
 	}
 	number, err := strconv.Atoi(strings.TrimSpace(numberText))
 	if err != nil || number <= 0 {
-		return fmt.Errorf("invalid %s reference %q: expected positive number", kind, ref)
+		return "", fmt.Errorf("invalid %s reference %q: expected positive number", kind, ref)
 	}
-	return nil
-}
-
-func validateCollectionRepoRef(ref string) error {
-	if strings.Count(ref, "/") != 1 {
-		return fmt.Errorf("invalid repository reference %q", ref)
-	}
-	owner, repo, _ := strings.Cut(ref, "/")
-	return (domain.RepoRef{Owner: strings.TrimSpace(owner), Repo: strings.TrimSpace(repo)}).Validate()
+	return fmt.Sprintf("%s#%d", parsedRepo, number), nil
 }
 
 // ListCollections returns all named collections.

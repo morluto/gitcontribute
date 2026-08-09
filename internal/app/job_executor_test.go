@@ -100,7 +100,7 @@ func waitForJobStatus(t *testing.T, jobs *JobExecutor, id, want string, timeout 
 		if job == nil {
 			t.Fatal("job not found")
 		}
-		if job.Status == want {
+		if job.State.Status() == want {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -117,7 +117,7 @@ func waitForCorpusJobStatus(t *testing.T, c *corpus.Corpus, id, want string, tim
 		if err != nil {
 			t.Fatalf("get job: %v", err)
 		}
-		if job != nil && job.Status == want {
+		if job != nil && job.State.Status() == want {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -200,8 +200,8 @@ func TestJobExecutorBoundsConcurrentJobs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Status != corpus.JobStatusQueued {
-		t.Fatalf("waiting job status = %q, want queued", second.Status)
+	if second.State.Status() != corpus.JobStatusQueued {
+		t.Fatalf("waiting job status = %q, want queued", second.State.Status())
 	}
 
 	close(releaseFirst)
@@ -253,8 +253,8 @@ func TestJobExecutorCloseCancelsQueuedJobs(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get %s: %v", id, err)
 		}
-		if job.Status != corpus.JobStatusCancelled {
-			t.Fatalf("job %s status = %q, want cancelled", id, job.Status)
+		if job.State.Status() != corpus.JobStatusCancelled {
+			t.Fatalf("job %s status = %q, want cancelled", id, job.State.Status())
 		}
 	}
 }
@@ -390,8 +390,8 @@ func TestJobCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if job.Status != corpus.JobStatusCancelled {
-		t.Fatalf("status = %q, want %q", job.Status, corpus.JobStatusCancelled)
+	if job.State.Status() != corpus.JobStatusCancelled {
+		t.Fatalf("status = %q, want %q", job.State.Status(), corpus.JobStatusCancelled)
 	}
 	if job.Error == "" {
 		t.Fatal("cancelled job has no error message")

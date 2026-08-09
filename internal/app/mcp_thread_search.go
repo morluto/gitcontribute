@@ -81,8 +81,8 @@ func (r *MCPReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcp
 			updatedAt = m.UpdatedAt.Format(time.RFC3339)
 		}
 		matches[i] = mcpcontract.ThreadOutput{
-			Owner:             m.Repo.Owner,
-			Repo:              m.Repo.Repo,
+			Owner:             m.Repo.Owner(),
+			Repo:              m.Repo.Repo(),
 			Kind:              m.Kind,
 			Number:            m.Number,
 			State:             m.State,
@@ -93,7 +93,7 @@ func (r *MCPReader) Search(ctx context.Context, in mcpcontract.SearchInput) (mcp
 			AuthorAssociation: m.AuthorAssociation,
 			Labels:            m.Labels,
 			Assignees:         m.Assignees,
-			Draft:             m.Draft, ClosedAt: formatTime(m.ClosedAt), MergedAt: formatTime(m.MergedAt), Merged: knownMergePointer(m.Merged, m.MergedKnown),
+			Draft:             m.Draft, ClosedAt: formatTime(m.ClosedAt), MergedAt: formatTime(m.Merge.MergedAt()), Merged: knownMergePointer(m.Merge.IsMerged(), m.Merge.Known()),
 			UpdatedAt:      updatedAt,
 			MatchSource:    m.MatchSource,
 			MatchExcerpt:   m.MatchExcerpt,

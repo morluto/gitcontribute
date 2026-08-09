@@ -20,10 +20,10 @@ func TestMCPThreadAndRepositorySearchExposeCoverageRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("thread search: %v", err)
 	}
-	if !threads.Provenance.UnknownCoverage || threads.Recovery == nil || len(threads.Recovery.Then) != 1 || threads.Recovery.Then[0].Type != "ensure_coverage" {
+	if !threads.Provenance.UnknownCoverage || threads.Recovery == nil || len(threads.Recovery.Then) != 1 || threads.Recovery.Then[0].Type() != "ensure_coverage" {
 		t.Fatalf("thread search recovery = %+v", threads)
 	}
-	if got := threads.Recovery.Then[0].EnsureCoverage; got == nil || got.Target.Repository.Owner != "owner" || got.Target.Repository.Repo != "repo" {
+	if got, ok := mcpcontract.RecoveryInput[mcpcontract.EnsureCoverageInput](threads.Recovery.Then[0]); !ok || got.Target.Repository.Owner != "owner" || got.Target.Repository.Repo != "repo" {
 		t.Fatalf("thread recovery target = %+v", got)
 	}
 
@@ -31,7 +31,7 @@ func TestMCPThreadAndRepositorySearchExposeCoverageRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unscoped code search: %v", err)
 	}
-	if !code.Provenance.UnknownCoverage || code.Recovery == nil || len(code.Recovery.Then) != 1 || code.Recovery.Then[0].Type != "search_github_repositories" {
+	if !code.Provenance.UnknownCoverage || code.Recovery == nil || len(code.Recovery.Then) != 1 || code.Recovery.Then[0].Type() != "search_github_repositories" {
 		t.Fatalf("unscoped code recovery = %+v", code)
 	}
 
@@ -39,7 +39,7 @@ func TestMCPThreadAndRepositorySearchExposeCoverageRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repository search: %v", err)
 	}
-	if !repositories.Incomplete || repositories.Recovery == nil || len(repositories.Recovery.Then) != 1 || repositories.Recovery.Then[0].Type != "sync_repository_context" {
+	if !repositories.Incomplete || repositories.Recovery == nil || len(repositories.Recovery.Then) != 1 || repositories.Recovery.Then[0].Type() != "sync_repository_context" {
 		t.Fatalf("repository search recovery = %+v", repositories)
 	}
 }
@@ -74,11 +74,11 @@ func TestMCPRelatedWorkDoesNotTreatAbsentRepositoryAsNoFindings(t *testing.T) {
 
 func assertRelatedWorkRecovery(t *testing.T, output mcpcontract.CheckOutput, kind string) {
 	t.Helper()
-	if output.Status != "unavailable" || output.Coverage != "unknown" || output.Total != 0 || output.Recovery == nil || len(output.Recovery.Then) != 1 || output.Recovery.Then[0].Type != "sync_repository_context" {
+	if output.Status != "unavailable" || output.Coverage != "unknown" || output.Total != 0 || output.Recovery == nil || len(output.Recovery.Then) != 1 || output.Recovery.Then[0].Type() != "sync_repository_context" {
 		t.Fatalf("%s output = %+v", kind, output)
 	}
-	action := output.Recovery.Then[0].SyncRepositoryContext
-	if action == nil || len(action.Repositories) != 1 || action.Repositories[0].Owner != "owner" || action.Repositories[0].Repo != "absent" {
+	action, ok := mcpcontract.RecoveryInput[mcpcontract.SyncRepositoryContextInput](output.Recovery.Then[0])
+	if !ok || len(action.Repositories) != 1 || action.Repositories[0].Owner != "owner" || action.Repositories[0].Repo != "absent" {
 		t.Fatalf("%s recovery = %+v", kind, output.Recovery)
 	}
 }

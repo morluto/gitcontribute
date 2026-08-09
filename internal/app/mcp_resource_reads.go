@@ -87,14 +87,14 @@ func (r *MCPReader) PullRequestFeedbackItemResource(ctx context.Context, owner, 
 		return nil, failure.NotFound(fmt.Errorf("pull-request feedback item %s is not stored", feedbackID))
 	}
 	merged := any(nil)
-	if item.PullRequestMergedKnown {
-		merged = item.PullRequestMerged
+	if value, known := item.PullRequestMerge.IsMerged(), item.PullRequestMerge.Known(); known {
+		merged = value
 	}
 	resolved := any(nil)
 	resolutionState := "unknown"
-	if item.ResolvedKnown {
-		resolved = item.Resolved
-		if item.Resolved {
+	if value, known := item.Resolution.Value(); known {
+		resolved = value
+		if value {
 			resolutionState = "resolved"
 		} else {
 			resolutionState = "unresolved"

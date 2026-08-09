@@ -12,12 +12,17 @@ import (
 
 var now = time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
 
+var (
+	syntheticGitHubTokenA = "ghp_" + strings.Repeat("1", 36)
+	syntheticGitHubTokenB = "ghp_" + strings.Repeat("0", 36)
+)
+
 func sampleDossier() *domain.Dossier {
 	return &domain.Dossier{
-		Repo: domain.RepoRef{Owner: "owner", Repo: "repo"},
+		Repo: domain.MustRepoRef("owner", "repo"),
 		Repository: domain.Repository{
-			RepoRef:       domain.RepoRef{Owner: "owner", Repo: "repo"},
-			Description:   "token=ghp_123456789012345678901234567890123456 secret=keep-quiet A test repository with Authorization: Bearer ghp_000000000000000000000000000000000000",
+			Ref:           domain.MustRepoRef("owner", "repo"),
+			Description:   "token=" + syntheticGitHubTokenA + " secret=keep-quiet A test repository with Authorization: Bearer " + syntheticGitHubTokenB,
 			Languages:     []string{"Go"},
 			DefaultBranch: "main",
 			License:       "MIT",
@@ -40,8 +45,8 @@ func sampleDossier() *domain.Dossier {
 		Coverage: domain.Coverage{
 			AsOf: now,
 			Facets: []domain.FacetCoverage{
-				{Facet: "threads", Present: true, Complete: false, Freshness: domain.Freshness{Status: domain.Stale, AsOf: now.Add(-time.Hour)}},
-				{Facet: "metadata", Present: true, Complete: true, Freshness: domain.Freshness{Status: domain.Fresh, AsOf: now}},
+				domain.MustFacetCoverage("threads", false, now.Add(-time.Hour), 0),
+				domain.MustFacetCoverage("metadata", true, now, 0),
 			},
 		},
 		RecentMergedPullRequests: []domain.DossierThread{
@@ -67,7 +72,7 @@ func sampleEvidence() *contracts.EvidenceResult {
 		Evidence: []contracts.EvidenceItem{
 			{
 				ID: "ev-2", Type: "manual_observation", Relation: "supporting",
-				Description:     " observed with Authorization: token ghp_000000000000000000000000000000000000",
+				Description:     " observed with Authorization: token " + syntheticGitHubTokenB,
 				ValidationRunID: "run-1", OpportunityID: "opp-1", Freshness: "not_applicable",
 				FreshnessReason: "local evidence has no corpus source revision", CreatedAt: now.Format(time.RFC3339),
 			},
@@ -177,7 +182,7 @@ func TestDossierRedaction(t *testing.T) {
 		t.Fatalf("export: %v", err)
 	}
 	out := buf.String()
-	if strings.Contains(out, "ghp_123456789012345678901234567890123456") {
+	if strings.Contains(out, syntheticGitHubTokenA) {
 		t.Fatalf("GitHub token was not redacted in JSON output")
 	}
 	if strings.Contains(out, "hunter2") {
@@ -186,7 +191,7 @@ func TestDossierRedaction(t *testing.T) {
 	if !strings.Contains(out, "[REDACTED]") {
 		t.Fatalf("expected [REDACTED] placeholder in JSON output")
 	}
-	if strings.Contains(out, "ghp_000000000000000000000000000000000000") {
+	if strings.Contains(out, syntheticGitHubTokenB) {
 		t.Fatalf("second GitHub token was not redacted in JSON output")
 	}
 
@@ -211,7 +216,7 @@ func TestEvidenceRedaction(t *testing.T) {
 		t.Fatalf("export: %v", err)
 	}
 	out := buf.String()
-	if strings.Contains(out, "ghp_000000000000000000000000000000000000") {
+	if strings.Contains(out, syntheticGitHubTokenB) {
 		t.Fatalf("GitHub token in evidence description was not redacted")
 	}
 	if strings.Contains(out, "supersecret") {

@@ -20,8 +20,8 @@ import (
 
 // ThreadByNumber reads an issue or pull request by repository and number only.
 func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpcontract.ThreadByNumberInput) (mcpcontract.ThreadOutput, error) {
-	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(in.Owner, in.Repo)
+	if err != nil {
 		return mcpcontract.ThreadOutput{}, err
 	}
 	if in.Number < 1 {
@@ -35,7 +35,7 @@ func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpcontract.ThreadByN
 	if err != nil {
 		return mcpcontract.ThreadOutput{}, err
 	}
-	repo, err := c.GetRepository(ctx, in.Owner, in.Repo)
+	repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return mcpcontract.ThreadOutput{}, fmt.Errorf("get repository: %w", err)
 	}
@@ -50,8 +50,8 @@ func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpcontract.ThreadByN
 		return mcpcontract.ThreadOutput{}, failure.NotFound(nil)
 	}
 	out := corpusThreadToMCPOutput(thread)
-	out.Owner = in.Owner
-	out.Repo = in.Repo
+	out.Owner = ref.Owner()
+	out.Repo = ref.Repo()
 	out.SnapshotToken = snapshotIdentity(in.SnapshotToken, revision)
 	if err := finishCorpusRead(ctx, c, revision); err != nil {
 		return mcpcontract.ThreadOutput{}, err
@@ -62,8 +62,8 @@ func (r *MCPReader) ThreadByNumber(ctx context.Context, in mcpcontract.ThreadByN
 // ExplainMatch explains why a search result matched.
 func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpcontract.ExplainMatchInput) (mcpcontract.ExplainMatchOutput, error) {
 	in.Query = strings.TrimSpace(in.Query)
-	ref := domain.RepoRef{Owner: in.Owner, Repo: in.Repo}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.NewRepoRef(in.Owner, in.Repo)
+	if err != nil {
 		return mcpcontract.ExplainMatchOutput{}, err
 	}
 
@@ -71,7 +71,7 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpcontract.ExplainMatc
 	if err != nil {
 		return mcpcontract.ExplainMatchOutput{}, err
 	}
-	repo, err := c.GetRepository(ctx, in.Owner, in.Repo)
+	repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
 		return mcpcontract.ExplainMatchOutput{}, fmt.Errorf("get repository: %w", err)
 	}
@@ -294,9 +294,13 @@ func (r *MCPReader) AdoptWorkspace(ctx context.Context, in mcpcontract.AdoptWork
 // RunValidation submits a durable validation run.
 // StartInvestigation creates a new investigation workspace.
 func (r *MCPReader) StartInvestigation(ctx context.Context, in mcpcontract.StartInvestigationInput) (mcpcontract.InvestigationOutput, error) {
+	ref, err := domain.NewRepoRef(in.Owner, in.Repo)
+	if err != nil {
+		return mcpcontract.InvestigationOutput{}, err
+	}
 	if in.Number > 0 {
 		res, err := r.StartInvestigationFromThread(ctx, research.ThreadRef{
-			Repo: domain.RepoRef{Owner: in.Owner, Repo: in.Repo}, Kind: domain.ThreadKind(in.Kind), Number: in.Number,
+			Repo: ref, Kind: domain.ThreadKind(in.Kind), Number: in.Number,
 		})
 		if err != nil {
 			return mcpcontract.InvestigationOutput{}, err
@@ -306,7 +310,7 @@ func (r *MCPReader) StartInvestigation(ctx context.Context, in mcpcontract.Start
 		out.Hypotheses = []mcpcontract.HypothesisSummary{{ID: res.Hypothesis.ID, Title: res.Hypothesis.Title, Category: res.Hypothesis.Category}}
 		return out, nil
 	}
-	res, err := r.application().StartInvestigation(ctx, contracts.RepoRef{Owner: in.Owner, Repo: in.Repo}, in.CommitSHA, in.Lens)
+	res, err := r.application().StartInvestigation(ctx, contracts.RepoRef{Owner: ref.Owner(), Repo: ref.Repo()}, in.CommitSHA, in.Lens)
 	if err != nil {
 		return mcpcontract.InvestigationOutput{}, err
 	}

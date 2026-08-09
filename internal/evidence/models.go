@@ -2,6 +2,10 @@ package evidence
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"regexp"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -99,16 +103,105 @@ type RunPhases struct {
 	ShutdownCheckedAt time.Time
 }
 
-// Int64Metric represents a sampled value. Nil means unavailable, never zero.
+// Int64Metric is either a sampled value or an unavailable reason. Its private
+// representation prevents both claims from being populated simultaneously.
 type Int64Metric struct {
+	value             *int64
+	unavailableReason string
+}
+
+// Uint64Metric is either a sampled unsigned value or an unavailable reason.
+type Uint64Metric struct {
+	value             *uint64
+	unavailableReason string
+}
+
+func AvailableInt64Metric(value int64) Int64Metric { return Int64Metric{value: &value} }
+func UnavailableInt64Metric(reason string) Int64Metric {
+	return Int64Metric{unavailableReason: reason}
+}
+func (m Int64Metric) Value() (int64, bool) {
+	if m.value == nil {
+		return 0, false
+	}
+	return *m.value, true
+}
+func (m Int64Metric) ValuePointer() *int64 {
+	if m.value == nil {
+		return nil
+	}
+	value := *m.value
+	return &value
+}
+func (m Int64Metric) UnavailableReason() string { return m.unavailableReason }
+
+func AvailableUint64Metric(value uint64) Uint64Metric { return Uint64Metric{value: &value} }
+func UnavailableUint64Metric(reason string) Uint64Metric {
+	return Uint64Metric{unavailableReason: reason}
+}
+func (m Uint64Metric) Value() (uint64, bool) {
+	if m.value == nil {
+		return 0, false
+	}
+	return *m.value, true
+}
+func (m Uint64Metric) ValuePointer() *uint64 {
+	if m.value == nil {
+		return nil
+	}
+	value := *m.value
+	return &value
+}
+func (m Uint64Metric) UnavailableReason() string { return m.unavailableReason }
+
+type int64MetricJSON struct {
 	Value             *int64
 	UnavailableReason string
 }
 
-// Uint64Metric represents a sampled unsigned value.
-type Uint64Metric struct {
+func (m Int64Metric) MarshalJSON() ([]byte, error) {
+	return json.Marshal(int64MetricJSON{Value: m.ValuePointer(), UnavailableReason: m.unavailableReason})
+}
+
+func (m *Int64Metric) UnmarshalJSON(data []byte) error {
+	var stored int64MetricJSON
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return err
+	}
+	if stored.Value != nil && stored.UnavailableReason != "" {
+		return errors.New("int64 metric cannot be both available and unavailable")
+	}
+	if stored.Value != nil {
+		*m = AvailableInt64Metric(*stored.Value)
+	} else {
+		*m = UnavailableInt64Metric(stored.UnavailableReason)
+	}
+	return nil
+}
+
+type uint64MetricJSON struct {
 	Value             *uint64
 	UnavailableReason string
+}
+
+func (m Uint64Metric) MarshalJSON() ([]byte, error) {
+	return json.Marshal(uint64MetricJSON{Value: m.ValuePointer(), UnavailableReason: m.unavailableReason})
+}
+
+func (m *Uint64Metric) UnmarshalJSON(data []byte) error {
+	var stored uint64MetricJSON
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return err
+	}
+	if stored.Value != nil && stored.UnavailableReason != "" {
+		return errors.New("uint64 metric cannot be both available and unavailable")
+	}
+	if stored.Value != nil {
+		*m = AvailableUint64Metric(*stored.Value)
+	} else {
+		*m = UnavailableUint64Metric(stored.UnavailableReason)
+	}
+	return nil
 }
 
 // ResourceTelemetry contains bounded process-tree high-water marks.
@@ -169,8 +262,9 @@ const (
 	ObservationAbsent ObservationOccurrence = "absent"
 )
 
-// ExpectedObservation is one bounded assertion over captured output.
-type ExpectedObservation struct {
+// ExpectedObservationSpec is the untrusted representation parsed at command,
+// protocol, and storage boundaries.
+type ExpectedObservationSpec struct {
 	Name       string
 	Source     ObservationSource
 	Matcher    ObservationMatcher
@@ -179,11 +273,33 @@ type ExpectedObservation struct {
 	Path       string
 }
 
-// ObservationContract ties validation output to the intended proof.
-type ObservationContract struct {
+// ExpectedObservation is one parsed, bounded assertion over captured output.
+// Its representation is private so execution never receives an unknown source,
+// an invalid matcher, or an artifact observation without a safe relative path.
+type ExpectedObservation struct {
+	name       string
+	source     ObservationSource
+	matcher    ObservationMatcher
+	pattern    string
+	occurrence ObservationOccurrence
+	path       string
+	compiled   *regexp.Regexp
+}
+
+// ObservationContractSpec is the untrusted representation of a proof contract.
+type ObservationContractSpec struct {
 	Intent    string
-	Base      []ExpectedObservation
-	Candidate []ExpectedObservation
+	Base      []ExpectedObservationSpec
+	Candidate []ExpectedObservationSpec
+}
+
+// ObservationContract ties validation output to the intended proof. Contracts
+// can only be populated by ParseObservationContract or JSON decoding, both of
+// which establish the same invariants.
+type ObservationContract struct {
+	intent    string
+	base      []ExpectedObservation
+	candidate []ExpectedObservation
 }
 
 // ObservationStatus is the aggregate outcome of a run's output assertions.
@@ -431,4 +547,141 @@ type ComparisonResult struct {
 	Candidate      *ValidationRun
 	Classification ComparisonClassification
 	Explanation    string
+}
+
+// ParseStored parses validation-definition discriminators after
+// durable JSON decoding.
+func (d *ValidationDefinition) ParseStored() error {
+	if d == nil || d.ID == "" {
+		return errors.New("validation definition ID is required")
+	}
+	if d.Protocol != "" && d.Protocol != ValidationProtocolMCPStdio {
+		return fmt.Errorf("unsupported validation protocol %q", d.Protocol)
+	}
+	if d.Observation != nil && d.Observation.intent == "" {
+		return errors.New("stored observation contract was not parsed")
+	}
+	return nil
+}
+
+// ParseStored parses validation-run outcomes after durable JSON
+// decoding.
+func (r *ValidationRun) ParseStored() error {
+	if r == nil || r.ID == "" || r.DefinitionID == "" {
+		return errors.New("validation run identity is required")
+	}
+	if !validRunKind(r.Kind) {
+		return fmt.Errorf("unsupported validation run kind %q", r.Kind)
+	}
+	if !validRunClassification(r.Classification) {
+		return fmt.Errorf("unsupported validation run classification %q", r.Classification)
+	}
+	// Empty is the legacy representation of a run with no observation contract.
+	if r.ObservationStatus == "" {
+		r.ObservationStatus = ObservationNotEvaluated
+	}
+	if !validObservationStatus(r.ObservationStatus) {
+		return fmt.Errorf("unsupported observation status %q", r.ObservationStatus)
+	}
+	return nil
+}
+
+// ParseStored parses repeat-run classifications after durable JSON
+// decoding.
+func (g *ValidationRunGroup) ParseStored() error {
+	if g == nil || g.ID == "" || g.DefinitionID == "" {
+		return errors.New("validation run group identity is required")
+	}
+	if !validRunGroupClassification(g.Classification) {
+		return fmt.Errorf("unsupported validation group classification %q", g.Classification)
+	}
+	for i := range g.Attempts {
+		attempt := &g.Attempts[i]
+		if attempt.ObservationStatus == "" {
+			attempt.ObservationStatus = ObservationNotEvaluated
+		}
+		if !validRunKind(attempt.Kind) || !validRunClassification(attempt.Classification) || !validObservationStatus(attempt.ObservationStatus) {
+			return fmt.Errorf("validation attempt %d has an unsupported discriminator", i)
+		}
+	}
+	for i, aggregate := range g.Aggregates {
+		if !validRunKind(aggregate.Kind) || !validRunGroupClassification(aggregate.Classification) {
+			return fmt.Errorf("validation aggregate %d has an unsupported discriminator", i)
+		}
+	}
+	if g.Comparison != nil && !validComparisonClassification(g.Comparison.Classification) {
+		return fmt.Errorf("unsupported validation comparison %q", g.Comparison.Classification)
+	}
+	return nil
+}
+
+// ParseStored parses evidence type and relation claims after
+// durable JSON decoding.
+func (e *Evidence) ParseStored() error {
+	if e == nil || e.ID == "" {
+		return errors.New("evidence ID is required")
+	}
+	if !isValidEvidenceType(e.Type) {
+		return fmt.Errorf("unsupported evidence type %q", e.Type)
+	}
+	if !isValidRelation(e.Relation) {
+		return fmt.Errorf("unsupported evidence relation %q", e.Relation)
+	}
+	if e.ValidationDefinition != nil {
+		if err := e.ValidationDefinition.ParseStored(); err != nil {
+			return fmt.Errorf("embedded validation definition: %w", err)
+		}
+	}
+	if e.ValidationRun != nil {
+		if err := e.ValidationRun.ParseStored(); err != nil {
+			return fmt.Errorf("embedded validation run: %w", err)
+		}
+	}
+	if e.External != nil {
+		if e.External.Completeness != "complete" && e.External.Completeness != "incomplete" && e.External.Completeness != "unknown" {
+			return fmt.Errorf("unsupported external evidence completeness %q", e.External.Completeness)
+		}
+		if e.External.Integrity != "verified" && e.External.Integrity != "unverified" {
+			return fmt.Errorf("unsupported external evidence integrity %q", e.External.Integrity)
+		}
+	}
+	return nil
+}
+
+func validRunKind(kind RunKind) bool { return kind == RunKindBase || kind == RunKindCandidate }
+
+func validRunClassification(classification RunClassification) bool {
+	switch classification {
+	case RunClassificationPassing, RunClassificationFailing, RunClassificationError, RunClassificationCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func validObservationStatus(status ObservationStatus) bool {
+	switch status {
+	case ObservationNotEvaluated, ObservationMatched, ObservationMismatched:
+		return true
+	default:
+		return false
+	}
+}
+
+func validRunGroupClassification(classification RunGroupClassification) bool {
+	switch classification {
+	case RunGroupStablePass, RunGroupStableFail, RunGroupFlaky, RunGroupInconclusive, RunGroupCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+func validComparisonClassification(classification ComparisonClassification) bool {
+	switch classification {
+	case ComparisonFixed, ComparisonNotFixed, ComparisonRegression, ComparisonNoDifference, ComparisonInconclusive:
+		return true
+	default:
+		return false
+	}
 }

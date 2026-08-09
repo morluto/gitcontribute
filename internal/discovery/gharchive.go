@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -462,12 +461,8 @@ func mapState(state string) domain.ThreadState {
 }
 
 func parseRepoRef(name string) (domain.RepoRef, bool) {
-	parts := strings.Split(name, "/")
-	if len(parts) != 2 {
-		return domain.RepoRef{}, false
-	}
-	ref := domain.RepoRef{Owner: parts[0], Repo: parts[1]}
-	if err := ref.Validate(); err != nil {
+	ref, err := domain.ParseRepoRef(name)
+	if err != nil {
 		return domain.RepoRef{}, false
 	}
 	return ref, true
