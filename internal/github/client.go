@@ -111,13 +111,17 @@ func NewClient(cfg Config) (*Client, error) {
 	if cfg.UploadURL == "" {
 		cfg.UploadURL = DefaultUploadURL
 	}
+	useDefaultAttemptTimeout := cfg.HTTPClient == nil
 	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = &http.Client{Timeout: defaultHTTPTimeout}
+		cfg.HTTPClient = &http.Client{}
 	}
 
 	baseTransport := cfg.HTTPClient.Transport
 	if baseTransport == nil {
 		baseTransport = http.DefaultTransport
+	}
+	if useDefaultAttemptTimeout {
+		baseTransport = &attemptTimeoutTransport{Base: baseTransport, Timeout: defaultHTTPTimeout}
 	}
 
 	limiter := cfg.Limiter

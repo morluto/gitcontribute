@@ -6,13 +6,17 @@ import (
 	"time"
 )
 
-func TestNewClientUsesBoundedDefaultHTTPTimeout(t *testing.T) {
+func TestNewClientUsesBoundedDefaultAttemptTimeout(t *testing.T) {
 	client, err := NewClient(Config{})
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	if client.downloadClient.Timeout != defaultHTTPTimeout {
-		t.Fatalf("default HTTP timeout = %s, want %s", client.downloadClient.Timeout, defaultHTTPTimeout)
+	if client.downloadClient.Timeout != 0 {
+		t.Fatalf("default client timeout = %s, want no whole-request timeout", client.downloadClient.Timeout)
+	}
+	transport, ok := client.downloadClient.Transport.(*attemptTimeoutTransport)
+	if !ok || transport.Timeout != defaultHTTPTimeout {
+		t.Fatalf("default download transport = %#v, want %s per attempt", client.downloadClient.Transport, defaultHTTPTimeout)
 	}
 }
 
