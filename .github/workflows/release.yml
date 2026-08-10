@@ -205,7 +205,8 @@ jobs:
               }
             });
           ' <<<"$metadata"
-      - name: Publish npm package
+      - id: publish
+        name: Publish npm package
         run: npm publish --provenance --access public
       - name: Verify npm publication is publicly discoverable
         shell: bash
@@ -213,6 +214,7 @@ jobs:
           VERSION: ${{ inputs.release_tag || github.ref_name }}
         run: node scripts/verify-npm-publication.mjs "${VERSION#v}"
       - name: Attach npm package to GitHub release
+        if: always() && steps.publish.outcome == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}

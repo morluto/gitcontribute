@@ -84,7 +84,7 @@ test("release verifies npm discovery before publishing MCP Registry metadata", a
   assert.match(workflow, /node scripts\/verify-npm-publication\.mjs/);
 });
 
-test("publication verification requires the public latest tag and a fresh npx runtime", async () => {
+test("publication verification requires the public latest tag and a resolvable version", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "gitcontribute-publication-check-"));
   try {
     const client = join(workspace, "registry-client");
@@ -95,7 +95,6 @@ const args = process.argv.slice(2);
 fs.appendFileSync(process.env.GITCONTRIBUTE_TEST_CALL_LOG, JSON.stringify(args) + "\\n");
 if (args[0] === "view" && args[2] === "dist-tags.latest") process.stdout.write('"1.2.3"\\n');
 else if (args[0] === "view" && args[1] === "gitcontribute@1.2.3" && args[2] === "version") process.stdout.write('"1.2.3"\\n');
-else if (args[0] === "--yes") process.stdout.write('{"version":"1.2.3"}\\n');
 else process.exitCode = 1;
 `);
     await chmod(client, 0o755);
@@ -105,7 +104,6 @@ else process.exitCode = 1;
       env: {
         ...process.env,
         GITCONTRIBUTE_NPM_COMMAND: client,
-        GITCONTRIBUTE_NPX_COMMAND: client,
         GITCONTRIBUTE_NPM_PUBLICATION_ATTEMPTS: "1",
         GITCONTRIBUTE_TEST_CALL_LOG: log,
       },
@@ -115,7 +113,6 @@ else process.exitCode = 1;
     assert.deepEqual(calls, [
       ["view", "gitcontribute", "dist-tags.latest", "--json", "--prefer-online", "--registry=https://registry.npmjs.org"],
       ["view", "gitcontribute@1.2.3", "version", "--json", "--prefer-online", "--registry=https://registry.npmjs.org"],
-      ["--yes", "--prefer-online", "gitcontribute@latest", "metadata", "--json"],
     ]);
   } finally {
     await rm(workspace, { recursive: true, force: true });
@@ -134,7 +131,6 @@ fs.writeFileSync(process.env.GITCONTRIBUTE_TEST_ATTEMPTS, String(count + 1));
 if (count === 0) process.exitCode = 1;
 else if (process.argv[2] === "view" && process.argv[4] === "dist-tags.latest") process.stdout.write('"1.2.3"\\n');
 else if (process.argv[2] === "view" && process.argv[3] === "gitcontribute@1.2.3" && process.argv[4] === "version") process.stdout.write('"1.2.3"\\n');
-else if (process.argv[2] === "--yes") process.stdout.write('{"version":"1.2.3"}\\n');
 else process.exitCode = 1;
 `);
     await chmod(client, 0o755);
@@ -144,14 +140,13 @@ else process.exitCode = 1;
       env: {
         ...process.env,
         GITCONTRIBUTE_NPM_COMMAND: client,
-        GITCONTRIBUTE_NPX_COMMAND: client,
         GITCONTRIBUTE_NPM_PUBLICATION_ATTEMPTS: "2",
         GITCONTRIBUTE_NPM_PUBLICATION_DELAY_MS: "1",
         GITCONTRIBUTE_TEST_ATTEMPTS: state,
       },
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.equal(await readFile(state, "utf8"), "4");
+    assert.equal(await readFile(state, "utf8"), "3");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
@@ -169,7 +164,6 @@ fs.writeFileSync(process.env.GITCONTRIBUTE_TEST_ATTEMPTS, String(count + 1));
 if (count === 0) setInterval(() => {}, 1_000);
 else if (process.argv[2] === "view" && process.argv[4] === "dist-tags.latest") process.stdout.write('"1.2.3"\\n');
 else if (process.argv[2] === "view" && process.argv[3] === "gitcontribute@1.2.3" && process.argv[4] === "version") process.stdout.write('"1.2.3"\\n');
-else if (process.argv[2] === "--yes") process.stdout.write('{"version":"1.2.3"}\\n');
 else process.exitCode = 1;
 `);
     await chmod(client, 0o755);
@@ -179,7 +173,6 @@ else process.exitCode = 1;
       env: {
         ...process.env,
         GITCONTRIBUTE_NPM_COMMAND: client,
-        GITCONTRIBUTE_NPX_COMMAND: client,
         GITCONTRIBUTE_NPM_PUBLICATION_ATTEMPTS: "2",
         GITCONTRIBUTE_NPM_PUBLICATION_DELAY_MS: "1",
         GITCONTRIBUTE_NPM_PUBLICATION_PROBE_TIMEOUT_MS: "500",
@@ -187,7 +180,7 @@ else process.exitCode = 1;
       },
     });
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.equal(await readFile(state, "utf8"), "4");
+    assert.equal(await readFile(state, "utf8"), "3");
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
