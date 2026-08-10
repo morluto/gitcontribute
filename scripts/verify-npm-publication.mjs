@@ -3,28 +3,29 @@ import { spawn } from "node:child_process";
 const expectedVersion = process.argv[2];
 if (!expectedVersion) throw new Error("expected version argument is required");
 
+// Public discoverability is a registry-metadata property: the version must be
+// resolvable and the `latest` dist-tag must point at it. The published binary
+// is already smoke-tested earlier in the release job via the local tarball, so
+// re-resolving `@latest` through npx here would only re-download the native
+// tarball to re-confirm metadata that `npm view` already proves. That extra
+// round-trip was the flaky straggler that failed the 3.0.0 release.
 const registry = "https://registry.npmjs.org";
-const attempts = positiveInteger("GITCONTRIBUTE_NPM_PUBLICATION_ATTEMPTS", 10, 30);
-const delayMS = positiveInteger("GITCONTRIBUTE_NPM_PUBLICATION_DELAY_MS", 6_000, 60_000);
+const attempts = positiveInteger("GITCONTRIBUTE_NPM_PUBLICATION_ATTEMPTS", 30, 60);
+const delayMS = positiveInteger("GITCONTRIBUTE_NPM_PUBLICATION_DELAY_MS", 5_000, 60_000);
 const probeTimeoutMS = positiveInteger("GITCONTRIBUTE_NPM_PUBLICATION_PROBE_TIMEOUT_MS", 30_000, 120_000);
 const npm = process.env.GITCONTRIBUTE_NPM_COMMAND || "npm";
-const npx = process.env.GITCONTRIBUTE_NPX_COMMAND || "npx";
 
 for (let attempt = 1; attempt <= attempts; attempt += 1) {
   try {
     const latest = await output(npm, ["view", "gitcontribute", "dist-tags.latest", "--json", "--prefer-online", `--registry=${registry}`]);
     const published = await output(npm, ["view", `gitcontribute@${expectedVersion}`, "version", "--json", "--prefer-online", `--registry=${registry}`]);
     if (jsonString(latest) === expectedVersion && jsonString(published) === expectedVersion) {
-      const metadata = await output(npx, ["--yes", "--prefer-online", "gitcontribute@latest", "metadata", "--json"]);
-      if (JSON.parse(metadata).version === expectedVersion) {
-        console.log(`npm release ${expectedVersion} is publicly discoverable`);
-        process.exit(0);
-      }
+      console.log(`npm release ${expectedVersion} is publicly discoverable`);
+      process.exit(0);
     }
   } catch {
-    // Registry propagation and fresh npx resolution are expected to be
-    // transient immediately after publication. The bounded retry loop owns
-    // those probes as one operation.
+    // Registry propagation is expected to be transient immediately after
+    // publication. The bounded retry loop owns those probes as one operation.
   }
   if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, delayMS));
 }
