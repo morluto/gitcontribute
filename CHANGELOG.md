@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.0.1](https://github.com/morluto/gitcontribute/compare/v3.0.0...v3.0.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* **release:** stop gating npm discovery on redundant npx round-trip ([b710e0f](https://github.com/morluto/gitcontribute/commit/b710e0f42a0b14d71dd410bebd9fbf5bf763b24a))
+* **release:** stop gating npm discovery on redundant npx round-trip ([95c3c84](https://github.com/morluto/gitcontribute/commit/95c3c8467da5c957f8f8088531e1a934bdf92cb0))
+
 ## [3.0.0](https://github.com/morluto/gitcontribute/compare/v2.0.0...v3.0.0) (2026-08-09)
 
 
