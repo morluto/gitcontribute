@@ -15,6 +15,7 @@ import (
 	"github.com/alecthomas/kong"
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/discovery"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/lens"
 
 	gitlog "github.com/morluto/gitcontribute/internal/log"
@@ -53,18 +54,6 @@ func (c *CLI) SetLogger(logger *slog.Logger) {
 
 // SetTUIRunner wires the optional terminal UI adapter.
 func (c *CLI) SetTUIRunner(runner contracts.TUIRunner) { c.tui = runner }
-
-// SetInput replaces stdin for commands that explicitly import from "-".
-func (c *CLI) SetInput(input io.Reader) {
-	if input == nil {
-		input = strings.NewReader("")
-	}
-	c.stdin = input
-}
-
-// SetSetupPrompter replaces the interactive setup adapter. It is intended for
-// tests and alternate accessible frontends.
-func (c *CLI) SetSetupPrompter(prompter SetupPrompter) { c.setupPrompter = prompter }
 
 func (c *CLI) writeProgressf(format string, args ...any) error {
 	if _, err := fmt.Fprintf(c.stderr, format, args...); err != nil {
@@ -758,9 +747,11 @@ func parseGHArchiveEvents(events string) ([]string, error) {
 		if p == "" {
 			continue
 		}
-		if !discovery.IsKnownEventType(p) {
+		eventType, err := discovery.ParseEventType(p)
+		if err != nil {
 			return nil, fmt.Errorf("unknown GH Archive event type %q", p)
 		}
+		p = string(eventType)
 		if _, ok := seen[p]; ok {
 			continue
 		}
@@ -1117,9 +1108,11 @@ func (c *CLI) runSearch(ctx context.Context, command string, cmd *searchCmd) err
 		return NewCLIError(ExitUsage, fmt.Errorf("limit must be between 1 and %d", maxSearchLimit))
 	}
 	if opts.Repo != "" {
-		if _, err := parseRepo(opts.Repo); err != nil {
+		repo, err := parseRepo(opts.Repo)
+		if err != nil {
 			return NewCLIError(ExitUsage, fmt.Errorf("invalid --repo value: %w", err))
 		}
+		opts.Repo = repo.Owner + "/" + repo.Repo
 	}
 	if selected.UpdatedAfter != "" {
 		updatedAfter, err := time.Parse(time.RFC3339, selected.UpdatedAfter)
@@ -1177,11 +1170,11 @@ func (c *CLI) mapError(err error) error {
 }
 
 func parseRepo(s string) (contracts.RepoRef, error) {
-	parts := strings.Split(s, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+	ref, err := domain.ParseRepoRef(s)
+	if err != nil {
 		return contracts.RepoRef{}, NewCLIError(ExitUsage, fmt.Errorf("invalid repository %q: expected OWNER/REPO", s))
 	}
-	return contracts.RepoRef{Owner: parts[0], Repo: parts[1]}, nil
+	return contracts.RepoRef{Owner: ref.Owner(), Repo: ref.Repo()}, nil
 }
 
 func (c *CLI) runCoverage(ctx context.Context, cmd *coverageCmd) error {
@@ -1462,28 +1455,34 @@ func parseCollectionMember(raw string) (contracts.CollectionMember, error) {
 	}
 
 	if kind == "repository" {
-		if _, err := parseRepo(ref); err != nil {
+		parsed, err := parseRepo(ref)
+		if err != nil {
 			return contracts.CollectionMember{}, fmt.Errorf("invalid repository reference %q", ref)
 		}
+		ref = parsed.Owner + "/" + parsed.Repo
 	} else {
-		if err := parseCollectionThreadRef(ref); err != nil {
+		parsed, err := parseCollectionThreadRef(ref)
+		if err != nil {
 			return contracts.CollectionMember{}, err
 		}
+		ref = parsed
 	}
 
 	return contracts.CollectionMember{Kind: kind, Ref: ref}, nil
 }
 
-func parseCollectionThreadRef(ref string) error {
+func parseCollectionThreadRef(ref string) (string, error) {
 	parts := strings.Split(ref, "#")
 	if len(parts) != 2 {
-		return fmt.Errorf("invalid thread reference %q: expected OWNER/REPO#NUMBER", ref)
+		return "", fmt.Errorf("invalid thread reference %q: expected OWNER/REPO#NUMBER", ref)
 	}
-	if _, err := parseRepo(parts[0]); err != nil {
-		return fmt.Errorf("invalid thread reference %q: expected OWNER/REPO#NUMBER", ref)
+	repository, err := parseRepo(parts[0])
+	if err != nil {
+		return "", fmt.Errorf("invalid thread reference %q: expected OWNER/REPO#NUMBER", ref)
 	}
-	if n, err := strconv.Atoi(strings.TrimSpace(parts[1])); err != nil || n <= 0 {
-		return fmt.Errorf("invalid thread reference %q: expected positive number", ref)
+	number, err := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil || number <= 0 {
+		return "", fmt.Errorf("invalid thread reference %q: expected positive number", ref)
 	}
-	return nil
+	return fmt.Sprintf("%s/%s#%d", repository.Owner, repository.Repo, number), nil
 }

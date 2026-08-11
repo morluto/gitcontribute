@@ -54,6 +54,28 @@ func TestGetProjectionStateMissing(t *testing.T) {
 	}
 }
 
+func TestProjectionReadsRejectCorruptLifecycleValues(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+
+	if _, err := c.db.ExecContext(ctx, `UPDATE projection_states SET status='invented' WHERE name=?`, ProjectionNameThreadsFTS); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.GetProjectionState(ctx, ProjectionNameThreadsFTS); err == nil {
+		t.Fatal("projection read accepted an invalid stored status")
+	}
+	if _, err := c.ListProjectionStates(ctx); err == nil {
+		t.Fatal("projection list accepted an invalid stored status")
+	}
+	if _, err := c.db.ExecContext(ctx, `UPDATE projection_states SET status=?, attempt_status='invented' WHERE name=?`, ProjectionStatusCurrent, ProjectionNameThreadsFTS); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.GetProjectionState(ctx, ProjectionNameThreadsFTS); err == nil {
+		t.Fatal("projection read accepted an invalid stored attempt status")
+	}
+}
+
 func TestGetProjectionStateReportsKnownAbsentProjection(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -100,7 +122,7 @@ func TestRebuildThreadSearchProjectionIsAtomicAndSetsState(t *testing.T) {
 
 	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "id", time.Unix(1, 0).UTC(), `{}`)
 	requireProjectionSetup(t, "apply repository", err)
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "searchable title", "body text", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "searchable title", "body text", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
 		t.Fatalf("apply thread: %v", err)
 	}
 
@@ -152,7 +174,7 @@ func TestRebuildThreadSearchProjectionIsAtomicAndSetsState(t *testing.T) {
 	if state.SourceRevision == "" || state.ContentHash == "" || state.AttemptStatus != ProjectionAttemptSucceeded || state.AttemptFinishedAt.IsZero() {
 		t.Fatalf("rebuild metadata = %+v", state)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "updated title", "body text", "a", time.Unix(3, 0).UTC(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "updated title", "body text", "a", time.Unix(3, 0).UTC(), `{}`); err != nil {
 		t.Fatalf("update thread source: %v", err)
 	}
 	changed, err := c.GetProjectionState(ctx, ProjectionNameThreadsFTS)
@@ -184,7 +206,7 @@ func TestBuildingAndFailedAttemptKeepLastCompleteProjectionReadable(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "durable result", "body", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "durable result", "body", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
 		t.Fatal(err)
 	}
 	complete, err := c.RebuildThreadSearchProjection(ctx)
@@ -221,7 +243,7 @@ func TestFailedRebuildRollsBackIndexAndPreservesLastCompleteMetadata(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "preserved result", "body", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "preserved result", "body", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
 		t.Fatal(err)
 	}
 	complete, err := c.RebuildThreadSearchProjection(ctx)
@@ -270,7 +292,7 @@ func TestCancelledRebuildPreservesLastCompleteProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "cancel-safe result", "body", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "cancel-safe result", "body", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
 		t.Fatal(err)
 	}
 	complete, err := c.RebuildThreadSearchProjection(ctx)
@@ -336,7 +358,7 @@ func TestRebuildCodeSearchProjectionIsAtomicAndSetsState(t *testing.T) {
 		t.Fatalf("row_count = %d, want 2", state.RowCount)
 	}
 
-	page, err := c.SearchCodeWithOptions(ctx, "term", CodeSearchOptions{Ref: ref, Limit: 10})
+	page, err := c.SearchCodeWithOptions(ctx, "term", CodeSearchOptions{Ref: ref, Page: mustSearchPage(t, 10)})
 	if err != nil {
 		t.Fatalf("search code: %v", err)
 	}
@@ -354,7 +376,7 @@ func TestSearchDoesNotSilentlyRebuildProjections(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply repository: %v", err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "rebuild term", "body", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "rebuild term", "body", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
 		t.Fatalf("apply thread: %v", err)
 	}
 
@@ -406,7 +428,7 @@ func TestRebuildThreadSearchProjectionRestoresClearedIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply repository: %v", err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "lost term", "body", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "lost term", "body", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
 		t.Fatalf("apply thread: %v", err)
 	}
 

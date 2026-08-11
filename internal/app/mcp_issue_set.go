@@ -12,6 +12,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/radar"
+	"github.com/morluto/gitcontribute/internal/relatedwork"
 )
 
 const (
@@ -19,29 +20,35 @@ const (
 	conciseIssueSetRelatedLimit   = 5
 )
 
+type prepareIssueSetRequest struct {
+	repository     domain.RepoRef
+	issueNumbers   []int
+	precedentLimit int
+	format         responseFormat
+	snapshotToken  string
+}
+
 // PrepareIssueSet composes contribution-facing evidence for exact stored
 // issues. It opens only the read-only corpus and never creates workflow state.
 func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareIssueSetInput) (mcpcontract.PrepareIssueSetOutput, error) {
-	if err := normalizePrepareIssueSetInput(&in); err != nil {
-		return mcpcontract.PrepareIssueSetOutput{}, err
-	}
-	ref, err := domain.NewRepoRef(in.Owner, in.Repo)
+	request, err := parsePrepareIssueSetInput(in)
 	if err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
 	}
+	ref := request.repository
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
+	revision, err := beginCorpusRead(ctx, c, request.snapshotToken)
 	if err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
 	}
 	out := mcpcontract.PrepareIssueSetOutput{
-		Status: "complete", Owner: ref.Owner(), Repo: ref.Repo(), ResponseFormat: in.ResponseFormat,
-		Items:         make([]mcpcontract.BatchItem[mcpcontract.PreparedIssueEvidence], len(in.IssueNumbers)),
+		Status: "complete", Owner: ref.Owner(), Repo: ref.Repo(), ResponseFormat: request.format.String(),
+		Items:         make([]mcpcontract.BatchItem[mcpcontract.PreparedIssueEvidence], len(request.issueNumbers)),
 		Coverage:      []mcpcontract.FacetCoverageOutput{},
-		SnapshotToken: snapshotIdentity(in.SnapshotToken, revision),
+		SnapshotToken: snapshotIdentity(request.snapshotToken, revision),
 	}
 	stored, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
@@ -51,7 +58,7 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 		if err := finishCorpusRead(ctx, c, revision); err != nil {
 			return mcpcontract.PrepareIssueSetOutput{}, err
 		}
-		return unavailableIssueSet(in, out, ref), nil
+		return unavailableIssueSet(request, out), nil
 	}
 	threadsCoverage, err := c.GetCoverage(ctx, stored.ID, nil, "threads")
 	if err != nil {
@@ -84,10 +91,10 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 		out.SourceAsOf = formatTime(threadsCoverage.SourceUpdatedAt)
 	}
 
-	issues := make([]corpus.Thread, 0, len(in.IssueNumbers))
-	issuesByNumber := make(map[int]corpus.Thread, len(in.IssueNumbers))
-	for _, number := range in.IssueNumbers {
-		issue, err := c.GetThread(ctx, stored.ID, corpus.ThreadKindIssue, number)
+	issues := make([]corpus.Thread, 0, len(request.issueNumbers))
+	issuesByNumber := make(map[int]corpus.Thread, len(request.issueNumbers))
+	for _, number := range request.issueNumbers {
+		issue, err := c.GetThread(ctx, stored.ID, domain.IssueKind, number)
 		if err != nil {
 			return mcpcontract.PrepareIssueSetOutput{}, err
 		}
@@ -97,11 +104,11 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 		}
 	}
 
-	pullRequests, err := c.ListThreadsFiltered(ctx, stored.ID, corpus.ThreadKindPullRequest, "all", radarPullRequestPopulation)
+	pullRequests, err := c.ListThreadsFiltered(ctx, stored.ID, corpus.PullRequestThreadKind(), corpus.AnyThreadState(), radarPullRequestPopulation)
 	if err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
 	}
-	pullRequestTotal, err := c.CountThreadsFiltered(ctx, stored.ID, corpus.ThreadKindPullRequest, "all")
+	pullRequestTotal, err := c.CountThreadsFiltered(ctx, stored.ID, corpus.PullRequestThreadKind(), corpus.AnyThreadState())
 	if err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
 	}
@@ -112,7 +119,7 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 	if out.Truncated {
 		out.Status = "partial"
 	}
-	relatedByIssue, projectedCapped, err := radarPullRequestRelatedWork(ctx, c, stored, ref, issues, pullRequests, "all")
+	relatedByIssue, projectedCapped, err := radarPullRequestRelatedWork(ctx, c, stored, ref, issues, pullRequests, corpus.AnyThreadState())
 	if err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
 	}
@@ -128,11 +135,11 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 		out.Status, out.Truncated = "partial", true
 	}
 
-	precedentInput := issueSetPrecedentInput(in)
+	precedentInput := issueSetPrecedentInput(request)
 	// Reuse only a caller-supplied durable token. The response token for an
 	// unpinned read is an ephemeral result identity and cannot be resolved by a
 	// nested read.
-	precedentInput.SnapshotToken = in.SnapshotToken
+	precedentInput.SnapshotToken = request.snapshotToken
 	precedents, err := r.FindPrecedents(ctx, precedentInput)
 	if err != nil {
 		return mcpcontract.PrepareIssueSetOutput{}, err
@@ -147,8 +154,8 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 	}
 
 	evaluatedAt := r.now()
-	for i, number := range in.IssueNumbers {
-		key := threadRefKey(mcpcontract.ThreadRef{Owner: ref.Owner(), Repo: ref.Repo(), Kind: corpus.ThreadKindIssue, Number: number})
+	for i, number := range request.issueNumbers {
+		key := threadRefKey(mcpcontract.ThreadRef{Owner: ref.Owner(), Repo: ref.Repo(), Kind: string(domain.IssueKind), Number: number})
 		item := mcpcontract.BatchItem[mcpcontract.PreparedIssueEvidence]{Key: key, Status: "complete"}
 		issue, ok := issuesByNumber[number]
 		if !ok {
@@ -162,7 +169,7 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 		}
 		value, actions, partial, err := prepareOneIssue(
 			ctx, c, stored, ref, issue, relatedByIssue[number], pullRequestsByNumber, duplicatesByIssue[number],
-			precedents.Items[i], in.ResponseFormat, in.PrecedentLimit,
+			precedents.Items[i], request.format, request.precedentLimit,
 			threadsCoverage != nil && threadsCoverage.Complete && !relationshipScanCapped && pullRequestBodiesAvailable,
 			threadsCoverage == nil || !threadsCoverage.SourceUpdatedAt.Before(issue.SourceUpdatedAt), evaluatedAt,
 		)
@@ -191,17 +198,17 @@ func (r *MCPReader) PrepareIssueSet(ctx context.Context, in mcpcontract.PrepareI
 	return out, nil
 }
 
-func normalizePrepareIssueSetInput(in *mcpcontract.PrepareIssueSetInput) error {
+func parsePrepareIssueSetInput(in mcpcontract.PrepareIssueSetInput) (prepareIssueSetRequest, error) {
 	if len(in.IssueNumbers) < 1 || len(in.IssueNumbers) > 20 {
-		return errors.New("issue_numbers must contain 1 to 20 items")
+		return prepareIssueSetRequest{}, errors.New("issue_numbers must contain 1 to 20 items")
 	}
 	seen := make(map[int]struct{}, len(in.IssueNumbers))
 	for _, number := range in.IssueNumbers {
 		if number < 1 {
-			return errors.New("issue_numbers must contain only positive numbers")
+			return prepareIssueSetRequest{}, errors.New("issue_numbers must contain only positive numbers")
 		}
 		if _, ok := seen[number]; ok {
-			return fmt.Errorf("issue_numbers contains duplicate #%d", number)
+			return prepareIssueSetRequest{}, fmt.Errorf("issue_numbers contains duplicate #%d", number)
 		}
 		seen[number] = struct{}{}
 	}
@@ -209,36 +216,41 @@ func normalizePrepareIssueSetInput(in *mcpcontract.PrepareIssueSetInput) error {
 		in.PrecedentLimit = defaultIssueSetPrecedentLimit
 	}
 	if in.PrecedentLimit < 1 || in.PrecedentLimit > 10 {
-		return errors.New("precedent_limit must be between 1 and 10")
+		return prepareIssueSetRequest{}, errors.New("precedent_limit must be between 1 and 10")
 	}
-	if in.ResponseFormat == "" {
-		in.ResponseFormat = "concise"
+	format, err := parseResponseFormat(in.ResponseFormat)
+	if err != nil {
+		return prepareIssueSetRequest{}, err
 	}
-	if in.ResponseFormat != "concise" && in.ResponseFormat != "detailed" {
-		return errors.New("response_format must be concise or detailed")
+	repository, err := domain.NewRepoRef(in.Owner, in.Repo)
+	if err != nil {
+		return prepareIssueSetRequest{}, err
 	}
-	return nil
+	return prepareIssueSetRequest{
+		repository: repository, issueNumbers: append([]int(nil), in.IssueNumbers...),
+		precedentLimit: in.PrecedentLimit, format: format, snapshotToken: in.SnapshotToken,
+	}, nil
 }
 
-func unavailableIssueSet(in mcpcontract.PrepareIssueSetInput, out mcpcontract.PrepareIssueSetOutput, ref domain.RepoRef) mcpcontract.PrepareIssueSetOutput {
+func unavailableIssueSet(request prepareIssueSetRequest, out mcpcontract.PrepareIssueSetOutput) mcpcontract.PrepareIssueSetOutput {
 	out.Status = "partial"
-	for i, number := range in.IssueNumbers {
+	for i, number := range request.issueNumbers {
 		out.Items[i] = mcpcontract.BatchItem[mcpcontract.PreparedIssueEvidence]{
-			Key: threadRefKey(mcpcontract.ThreadRef{Owner: in.Owner, Repo: in.Repo, Kind: corpus.ThreadKindIssue, Number: number}), Status: "unavailable",
+			Key: threadRefKey(mcpcontract.ThreadRef{Owner: request.repository.Owner(), Repo: request.repository.Repo(), Kind: string(domain.IssueKind), Number: number}), Status: "unavailable",
 			Reason: "repository_not_indexed", Message: "repository is not present in the local corpus",
-			Recovery: recoveryPlan("repository_not_indexed", "Synchronize the repository, then retry this exact issue.", syncRepositoryContextCall(in.Owner, in.Repo), issueSyncAction(ref, number)),
+			Recovery: recoveryPlan("repository_not_indexed", "Synchronize the repository, then retry this exact issue.", syncRepositoryContextCall(request.repository.Owner(), request.repository.Repo()), issueSyncAction(request.repository, number)),
 		}
-		out.RecoveryPlans = append(out.RecoveryPlans, *recoveryPlan("repository_not_indexed", "Synchronize the repository, then retry this exact issue.", syncRepositoryContextCall(in.Owner, in.Repo), issueSyncAction(ref, number)))
+		out.RecoveryPlans = append(out.RecoveryPlans, *recoveryPlan("repository_not_indexed", "Synchronize the repository, then retry this exact issue.", syncRepositoryContextCall(request.repository.Owner(), request.repository.Repo()), issueSyncAction(request.repository, number)))
 	}
 	return out
 }
 
-func issueSetPrecedentInput(in mcpcontract.PrepareIssueSetInput) mcpcontract.FindPrecedentsInput {
-	threads := make([]mcpcontract.ThreadRef, len(in.IssueNumbers))
-	for i, number := range in.IssueNumbers {
-		threads[i] = mcpcontract.ThreadRef{Owner: in.Owner, Repo: in.Repo, Kind: corpus.ThreadKindIssue, Number: number}
+func issueSetPrecedentInput(request prepareIssueSetRequest) mcpcontract.FindPrecedentsInput {
+	threads := make([]mcpcontract.ThreadRef, len(request.issueNumbers))
+	for i, number := range request.issueNumbers {
+		threads[i] = mcpcontract.ThreadRef{Owner: request.repository.Owner(), Repo: request.repository.Repo(), Kind: string(domain.IssueKind), Number: number}
 	}
-	return mcpcontract.FindPrecedentsInput{Threads: threads, Limit: 100, SnapshotToken: in.SnapshotToken}
+	return mcpcontract.FindPrecedentsInput{Threads: threads, Limit: 100, SnapshotToken: request.snapshotToken}
 }
 
 func prepareOneIssue(
@@ -251,14 +263,14 @@ func prepareOneIssue(
 	pullRequests map[int]corpus.Thread,
 	duplicate *radar.DuplicateCluster,
 	precedents mcpcontract.BatchItem[mcpcontract.PrecedentSet],
-	responseFormat string,
+	format responseFormat,
 	precedentLimit int,
 	relationshipPopulationComplete bool,
 	relationshipPopulationFresh bool,
 	evaluatedAt time.Time,
 ) (mcpcontract.PreparedIssueEvidence, []mcpcontract.RecoveryPlan, bool, error) {
 	value := mcpcontract.PreparedIssueEvidence{
-		Number: issue.Number, Title: issue.Title, State: issue.State, StateReason: issue.StateReason,
+		Number: issue.Number, Title: issue.Title, State: string(issue.State), StateReason: issue.StateReason,
 		Labels: append([]string(nil), issue.Labels...), BodyStatus: "unknown",
 		SourceUpdatedAt: formatTime(issue.SourceUpdatedAt), Coverage: []mcpcontract.FacetCoverageOutput{},
 		RelatedWork: []mcpcontract.IssueSetRelatedWork{}, AcceptedExamples: []mcpcontract.PrecedentOutput{},
@@ -281,7 +293,7 @@ func prepareOneIssue(
 	relationshipEvidenceComplete := issue.Body != ""
 	if issue.Body != "" {
 		value.BodyStatus = "available"
-		if responseFormat == "detailed" {
+		if format.includesDetails() {
 			value.Body = issue.Body
 		}
 	} else {
@@ -337,15 +349,15 @@ func prepareOneIssue(
 	value.RelatedWorkTotal = relatedTotal
 	value.RelatedWorkTotalKnown = relationshipPopulationComplete && relationshipEvidenceComplete && !relatedCapped
 	limit := len(combined)
-	if responseFormat == "concise" && limit > conciseIssueSetRelatedLimit {
+	if !format.includesDetails() && limit > conciseIssueSetRelatedLimit {
 		limit = conciseIssueSetRelatedLimit
 	}
 	conciseEvidenceOmitted := false
 	for _, work := range combined[:limit] {
-		if responseFormat == "concise" && len(work.Evidence) > 0 {
+		if !format.includesDetails() && len(work.Evidence) > 0 {
 			conciseEvidenceOmitted = true
 		}
-		value.RelatedWork = append(value.RelatedWork, issueSetRelatedWork(work, ref, pullRequests, responseFormat))
+		value.RelatedWork = append(value.RelatedWork, issueSetRelatedWork(work, ref, pullRequests, format))
 	}
 	value.RelatedWorkTruncated = relatedCapped || recordsCapped || evidenceCapped || conciseEvidenceOmitted || limit < len(combined)
 	if relatedCapped || recordsCapped || evidenceCapped {
@@ -365,7 +377,7 @@ func prepareOneIssue(
 		actions, partial = append(actions, *recoveryPlan("coverage_stale", "Fetch closed issue and pull-request headers used for historical precedent analysis.", action)), true
 	} else {
 		for _, match := range precedents.Value.Matches {
-			if match.Kind == corpus.ThreadKindPullRequest && match.MergedAt != "" {
+			if match.Kind == string(domain.PullRequestKind) && match.MergedAt != "" {
 				value.AcceptedExamples = append(value.AcceptedExamples, match)
 				if len(value.AcceptedExamples) == precedentLimit {
 					break
@@ -397,7 +409,7 @@ func issueContributionDisposition(issue mcpcontract.PreparedIssueEvidence) mcpco
 	var mergedClosing, openClosing, closedUnmerged []mcpcontract.IssueSetRelatedWork
 	var missingMerge []string
 	for _, work := range issue.RelatedWork {
-		if work.Kind != corpus.ThreadKindPullRequest || work.Relation != "claims_to_close" || work.Direction != "inbound" {
+		if work.Kind != string(domain.PullRequestKind) || work.Relation != string(relatedwork.RelationClaimsToClose) || work.Direction != string(radar.RelatedWorkInbound) {
 			continue
 		}
 		switch {
@@ -462,21 +474,21 @@ func hasCompleteIssueFacet(values []mcpcontract.FacetCoverageOutput, facet strin
 	})
 }
 
-func issueSetRelatedWork(work radar.RelatedWork, ref domain.RepoRef, pullRequests map[int]corpus.Thread, responseFormat string) mcpcontract.IssueSetRelatedWork {
+func issueSetRelatedWork(work radar.RelatedWork, ref domain.RepoRef, pullRequests map[int]corpus.Thread, format responseFormat) mcpcontract.IssueSetRelatedWork {
 	out := mcpcontract.IssueSetRelatedWork{
 		Ref: work.Ref, Kind: work.Kind, Number: work.Number, Title: work.Title, State: work.State,
-		Relation: work.Relation, Direction: work.Direction, URL: work.URL,
+		Relation: string(work.Relation), Direction: string(work.Direction), URL: work.URL,
 		SourceUpdatedAt: formatTime(work.SourceUpdatedAt),
 	}
 	localPullRequestRef := fmt.Sprintf("pull_request:%s#%d", ref, work.Number)
-	if pullRequest, ok := pullRequests[work.Number]; ok && work.Kind == corpus.ThreadKindPullRequest && work.Ref == localPullRequestRef {
+	if pullRequest, ok := pullRequests[work.Number]; ok && work.Kind == string(domain.PullRequestKind) && work.Ref == localPullRequestRef {
 		if pullRequest.Merge.Known() {
 			merged := pullRequest.Merge.IsMerged()
 			out.Merged = &merged
 		}
 		out.MergedAt = formatTime(pullRequest.Merge.MergedAt())
 	}
-	if responseFormat == "detailed" {
+	if format.includesDetails() {
 		seen := map[string]struct{}{}
 		for _, evidence := range work.Evidence {
 			if _, ok := seen[evidence.Kind]; ok {
@@ -507,13 +519,13 @@ func preparedIssueSourceAsOf(value mcpcontract.PreparedIssueEvidence) string {
 func issueSyncAction(ref domain.RepoRef, number int) mcpcontract.ToolCall {
 	return mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{
 		Selection: "threads",
-		Threads:   []mcpcontract.ThreadRef{{Owner: ref.Owner(), Repo: ref.Repo(), Kind: corpus.ThreadKindIssue, Number: number}},
+		Threads:   []mcpcontract.ThreadRef{{Owner: ref.Owner(), Repo: ref.Repo(), Kind: string(domain.IssueKind), Number: number}},
 	})
 }
 
 func issueHydrateAction(ref domain.RepoRef, number int, facet string) mcpcontract.ToolCall {
 	return mcpcontract.RecoveryAction(mcpcontract.HydrateThreadsInput{
-		Threads: []mcpcontract.ThreadRef{{Owner: ref.Owner(), Repo: ref.Repo(), Kind: corpus.ThreadKindIssue, Number: number}},
+		Threads: []mcpcontract.ThreadRef{{Owner: ref.Owner(), Repo: ref.Repo(), Kind: string(domain.IssueKind), Number: number}},
 		Facets:  []string{facet},
 	})
 }
@@ -522,7 +534,7 @@ func repositoryPullRequestSyncAction(ref domain.RepoRef) mcpcontract.ToolCall {
 	return mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{
 		Selection:    "repositories",
 		Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner(), Repo: ref.Repo()}},
-		Kind:         corpus.ThreadKindPullRequest,
+		Kind:         string(domain.PullRequestKind),
 		State:        "all",
 	})
 }

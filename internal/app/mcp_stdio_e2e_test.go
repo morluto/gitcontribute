@@ -408,9 +408,9 @@ func seedMCPStdioCorpus(ctx context.Context, t *testing.T, home string) {
 		t.Fatal(err)
 	}
 	rows := []corpus.Thread{
-		{RepositoryID: observed.ID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open", Title: "cache root ignores configured path", Body: "compiled cache artifacts unexpectedly use tmp", Labels: []string{"bug", "help wanted"}, SourceUpdatedAt: now},
-		{RepositoryID: observed.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "honor configured cache root", Body: "move compiled cache artifacts away from tmp", Merge: domain.MergedStatus(now.Add(-time.Hour)), ClosedAt: now.Add(-time.Hour), SourceUpdatedAt: now.Add(-time.Hour)},
-		{RepositoryID: observed.ID, Kind: corpus.ThreadKindPullRequest, Number: 3, State: "open", Title: "current contributor work", Body: "portfolio entry", Author: "morluto", SourceUpdatedAt: now},
+		{RepositoryID: observed.ID, Kind: domain.IssueKind, Number: 1, State: "open", Title: "cache root ignores configured path", Body: "compiled cache artifacts unexpectedly use tmp", Labels: []string{"bug", "help wanted"}, SourceUpdatedAt: now},
+		{RepositoryID: observed.ID, Kind: domain.PullRequestKind, Number: 2, State: "closed", Title: "honor configured cache root", Body: "move compiled cache artifacts away from tmp", Merge: domain.MergedStatus(now.Add(-time.Hour)), ClosedAt: now.Add(-time.Hour), SourceUpdatedAt: now.Add(-time.Hour)},
+		{RepositoryID: observed.ID, Kind: domain.PullRequestKind, Number: 3, State: "open", Title: "current contributor work", Body: "portfolio entry", Author: "morluto", SourceUpdatedAt: now},
 	}
 	for _, row := range rows {
 		if _, err := svc.corpus.UpsertThread(ctx, row, `{}`); err != nil {

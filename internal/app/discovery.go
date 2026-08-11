@@ -60,7 +60,7 @@ func (s *Service) AddSearchSource(ctx context.Context, name, query string) (*con
 		return nil, err
 	}
 	stored, err := c.SaveDiscoverySource(ctx, corpus.DiscoverySource{
-		Name: name, Kind: "search", Definition: string(definition), Enabled: true,
+		Name: name, Kind: corpus.DiscoverySourceSearch, Definition: string(definition), Enabled: true,
 	})
 	if err != nil {
 		return nil, err
@@ -94,7 +94,7 @@ func (s *Service) AddRepoSource(ctx context.Context, name string, refs []contrac
 		return nil, err
 	}
 	stored, err := c.SaveDiscoverySource(ctx, corpus.DiscoverySource{
-		Name: name, Kind: "repos", Definition: string(definition), Enabled: true,
+		Name: name, Kind: corpus.DiscoverySourceRepos, Definition: string(definition), Enabled: true,
 	})
 	if err != nil {
 		return nil, err
@@ -108,12 +108,15 @@ func (s *Service) AddGHArchiveSource(ctx context.Context, name string, events []
 	if err := validateSourceName(name); err != nil {
 		return nil, err
 	}
-	for _, ev := range events {
-		if !discovery.IsKnownEventType(ev) {
+	parsedEvents := make([]string, len(events))
+	for i, ev := range events {
+		eventType, err := discovery.ParseEventType(ev)
+		if err != nil {
 			return nil, fmt.Errorf("unknown GH Archive event type %q", ev)
 		}
+		parsedEvents[i] = string(eventType)
 	}
-	definition, err := json.Marshal(ghArchiveSourceDefinition{Events: events})
+	definition, err := json.Marshal(ghArchiveSourceDefinition{Events: parsedEvents})
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +125,7 @@ func (s *Service) AddGHArchiveSource(ctx context.Context, name string, events []
 		return nil, err
 	}
 	stored, err := c.SaveDiscoverySource(ctx, corpus.DiscoverySource{
-		Name: name, Kind: "gharchive", Definition: string(definition), Enabled: true,
+		Name: name, Kind: corpus.DiscoverySourceGHArchive, Definition: string(definition), Enabled: true,
 	})
 	if err != nil {
 		return nil, err
@@ -169,7 +172,7 @@ func (s *Service) ListSources(ctx context.Context) (*contracts.SourceListResult,
 
 func sourceResult(source *corpus.DiscoverySource) *contracts.SourceResult {
 	return &contracts.SourceResult{
-		Name: source.Name, Kind: source.Kind, Definition: source.Definition, Enabled: source.Enabled,
+		Name: source.Name, Kind: string(source.Kind), Definition: source.Definition, Enabled: source.Enabled,
 	}
 }
 
@@ -194,11 +197,11 @@ func (s *Service) Crawl(ctx context.Context, name string, opts contracts.CrawlOp
 		return nil, fmt.Errorf("discovery source %q not found or disabled", name)
 	}
 	switch source.Kind {
-	case "search":
+	case corpus.DiscoverySourceSearch:
 		return s.crawlSearchSource(ctx, c, source, opts)
-	case "repos":
+	case corpus.DiscoverySourceRepos:
 		return s.crawlRepoSource(ctx, c, source, opts)
-	case "gharchive":
+	case corpus.DiscoverySourceGHArchive:
 		return s.crawlGHArchiveSource(ctx, c, source, opts)
 	default:
 		return nil, fmt.Errorf("source %q has unsupported kind %q", name, source.Kind)
@@ -308,14 +311,6 @@ func (s *Service) crawlSearchSource(ctx context.Context, c *corpus.Corpus, sourc
 				if err != nil {
 					return nil, err
 				}
-				_, _, err = c.EnqueueFrontierItem(ctx, corpus.FrontierItem{
-					WorkKey:     fmt.Sprintf("repository:%s/%s:threads", repo.Owner, repo.Name),
-					SubjectKind: "repository", Owner: repo.Owner, Repo: repo.Name, Facet: "threads",
-					Priority: 10, Reason: "discovered by " + source.Name, Source: source.Name,
-				})
-				if err != nil {
-					return nil, err
-				}
 				discovered++
 			}
 		}
@@ -371,13 +366,6 @@ func (s *Service) crawlRepoSource(ctx context.Context, c *corpus.Corpus, source 
 		if _, err := c.UpsertRepository(ctx, repo, string(payload)); err != nil {
 			return nil, err
 		}
-		if _, _, err := c.EnqueueFrontierItem(ctx, corpus.FrontierItem{
-			WorkKey:     fmt.Sprintf("repository:%s/%s:threads", ref.Owner(), ref.Repo()),
-			SubjectKind: "repository", Owner: ref.Owner(), Repo: ref.Repo(), Facet: "threads",
-			Priority: 10, Reason: "explicit source " + source.Name, Source: source.Name,
-		}); err != nil {
-			return nil, err
-		}
 		processed++
 	}
 
@@ -401,6 +389,11 @@ func (s *Service) crawlGHArchiveSource(ctx context.Context, c *corpus.Corpus, so
 	if err := json.Unmarshal([]byte(source.Definition), &definition); err != nil {
 		return nil, fmt.Errorf("decode source %q: %w", source.Name, err)
 	}
+	reader, err := discovery.NewArchiveReader(definition.Events, nil)
+	if err != nil {
+		return nil, fmt.Errorf("decode source %q event selection: %w", source.Name, err)
+	}
+	reader.MaxTotalBytes = 1 << 30 // 1 GiB decompressed per hour
 
 	run, err := c.StartRun(ctx, "crawl")
 	if err != nil {
@@ -410,8 +403,6 @@ func (s *Service) crawlGHArchiveSource(ctx context.Context, c *corpus.Corpus, so
 
 	now := s.now().UTC()
 	startHour, endHour := discovery.ArchiveHourRange(opts.Since, now)
-	reader := discovery.NewArchiveReader(definition.Events, nil)
-	reader.MaxTotalBytes = 1 << 30 // 1 GiB decompressed per hour
 
 	fetcher := s.getArchiveFetcher()
 
@@ -453,7 +444,7 @@ func (s *Service) crawlGHArchiveSource(ctx context.Context, c *corpus.Corpus, so
 			stats.events++
 			hourSigs.repoSigs[sig.Repo] = sig
 			if sig.ThreadNumber > 0 {
-				k := archiveThreadKey{ref: sig.Repo, kind: string(sig.ThreadKind), number: sig.ThreadNumber}
+				k := archiveThreadKey{ref: sig.Repo, kind: sig.ThreadKind, number: sig.ThreadNumber}
 				hourSigs.threadSigs[k] = sig
 			}
 			return nil
@@ -465,7 +456,7 @@ func (s *Service) crawlGHArchiveSource(ctx context.Context, c *corpus.Corpus, so
 			continue
 		}
 
-		if err := s.flushArchiveHour(ctx, c, source, hourSigs, repoSeen, threadSeen, repoIDByRef); err != nil {
+		if err := s.flushArchiveHour(ctx, c, hourSigs, repoSeen, threadSeen, repoIDByRef); err != nil {
 			return nil, err
 		}
 		if err := c.MarkImported(ctx, key); err != nil {
@@ -478,15 +469,19 @@ func (s *Service) crawlGHArchiveSource(ctx context.Context, c *corpus.Corpus, so
 	stats.repositories = len(repoSeen)
 	stats.threads = len(threadSeen)
 
-	statsJSON, _ := json.Marshal(map[string]any{
-		"hours":        stats.hours(),
-		"events":       stats.events,
-		"repositories": stats.repositories,
-		"threads":      stats.threads,
-		"requests":     stats.requests,
-		"imported":     stats.imported,
-		"skipped":      stats.skipped,
-		"failures":     stats.failures,
+	statsJSON, _ := json.Marshal(struct {
+		Hours        int `json:"hours"`
+		Events       int `json:"events"`
+		Repositories int `json:"repositories"`
+		Threads      int `json:"threads"`
+		Requests     int `json:"requests"`
+		Imported     int `json:"imported"`
+		Skipped      int `json:"skipped"`
+		Failures     int `json:"failures"`
+	}{
+		Hours: stats.hours(), Events: stats.events, Repositories: stats.repositories,
+		Threads: stats.threads, Requests: stats.requests, Imported: stats.imported,
+		Skipped: stats.skipped, Failures: stats.failures,
 	})
 	if stats.failures == 0 {
 		if err := c.FinishRun(ctx, run.ID, string(statsJSON)); err != nil {
@@ -529,7 +524,7 @@ type archiveHourSigs struct {
 
 type archiveThreadKey struct {
 	ref    domain.RepoRef
-	kind   string
+	kind   domain.ThreadKind
 	number int
 }
 
@@ -561,7 +556,7 @@ func (g *ghArchiveStats) advanceCheckpoint(hour time.Time) {
 	}
 }
 
-func (s *Service) flushArchiveHour(ctx context.Context, c *corpus.Corpus, source *corpus.DiscoverySource, hourSigs archiveHourSigs, repoSeen map[domain.RepoRef]struct{}, threadSeen map[archiveThreadKey]struct{}, repoIDByRef map[domain.RepoRef]int64) error {
+func (s *Service) flushArchiveHour(ctx context.Context, c *corpus.Corpus, hourSigs archiveHourSigs, repoSeen map[domain.RepoRef]struct{}, threadSeen map[archiveThreadKey]struct{}, repoIDByRef map[domain.RepoRef]int64) error {
 	// Upsert repositories in deterministic order so tests are stable.
 	repoRefs := make([]domain.RepoRef, 0, len(hourSigs.repoSigs))
 	for ref := range hourSigs.repoSigs {
@@ -590,14 +585,6 @@ func (s *Service) flushArchiveHour(ctx context.Context, c *corpus.Corpus, source
 		}
 		repoIDByRef[ref] = upserted.ID
 		repoSeen[ref] = struct{}{}
-		_, _, err = c.EnqueueFrontierItem(ctx, corpus.FrontierItem{
-			WorkKey:     fmt.Sprintf("repository:%s/%s:threads", ref.Owner(), ref.Repo()),
-			SubjectKind: "repository", Owner: ref.Owner(), Repo: ref.Repo(), Facet: "threads",
-			Priority: 10, Reason: "discovered by " + source.Name, Source: source.Name,
-		})
-		if err != nil {
-			return err
-		}
 	}
 
 	threadKeys := make([]archiveThreadKey, 0, len(hourSigs.threadSigs))
@@ -667,7 +654,7 @@ func mergeArchiveRepo(sig discovery.Signal, existing *corpus.Repository) corpus.
 func mergeArchiveThread(sig discovery.Signal, repoID int64, existing *corpus.Thread) (corpus.Thread, bool) {
 	t := corpus.Thread{
 		RepositoryID: repoID,
-		Kind:         string(sig.ThreadKind),
+		Kind:         sig.ThreadKind,
 		Number:       sig.ThreadNumber,
 	}
 	if existing != nil {
@@ -678,17 +665,17 @@ func mergeArchiveThread(sig discovery.Signal, repoID int64, existing *corpus.Thr
 		}
 		t = *existing
 		t.RepositoryID = repoID
-		t.Kind = string(sig.ThreadKind)
+		t.Kind = sig.ThreadKind
 		t.Number = sig.ThreadNumber
 	}
 	if sig.ThreadState != "" {
-		t.State = string(sig.ThreadState)
+		t.State = sig.ThreadState
 	} else if t.State == "" {
 		switch strings.ToLower(sig.Action) {
 		case "opened", "reopened":
-			t.State = string(domain.OpenState)
+			t.State = domain.OpenState
 		case "closed":
-			t.State = string(domain.ClosedState)
+			t.State = domain.ClosedState
 		}
 	}
 	if t.State == "" {
@@ -730,6 +717,3 @@ func (s *budgetedRepositorySearch) page(ctx context.Context, query string, page,
 		Query: query, PageOptions: github.PageOptions{Page: page, PerPage: perPage},
 	})
 }
-
-// Ensure the fetcher interface is satisfied by the injected type.
-var _ discovery.ArchiveFetcher = (*discovery.ArchiveClient)(nil)

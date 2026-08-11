@@ -12,11 +12,11 @@ type RepositoryKey struct {
 	Name  string
 }
 
-// ThreadKey identifies a thread projection in a batch result. An empty Kind
-// requests the thread regardless of whether it is an issue or pull request.
+// ThreadKey identifies a thread projection in a batch result. Kind explicitly
+// represents either an exact issue/pull-request kind or both kinds.
 type ThreadKey struct {
 	RepositoryID int64
-	Kind         string
+	Kind         ThreadKindFilter
 	Number       int
 }
 
@@ -119,12 +119,12 @@ func (c *Corpus) GetThreadsBatch(ctx context.Context, keys []ThreadKey) (map[Thr
 	clauses := make([]string, len(keys))
 	args := make([]any, 0, len(keys)*3)
 	for i, key := range keys {
-		if key.Kind == "" {
+		if key.Kind.IsAny() {
 			clauses[i] = "(repository_id = ? AND number = ?)"
 			args = append(args, key.RepositoryID, key.Number)
 		} else {
 			clauses[i] = "(repository_id = ? AND kind = ? AND number = ?)"
-			args = append(args, key.RepositoryID, key.Kind, key.Number)
+			args = append(args, key.RepositoryID, key.Kind.String(), key.Number)
 		}
 	}
 	rows, err := c.db.QueryContext(ctx, `
@@ -148,11 +148,11 @@ func (c *Corpus) GetThreadsBatch(ctx context.Context, keys []ThreadKey) (map[Thr
 	}
 	for i := range threads {
 		thread := &threads[i]
-		exact := ThreadKey{RepositoryID: thread.RepositoryID, Kind: thread.Kind, Number: thread.Number}
+		exact := ThreadKey{RepositoryID: thread.RepositoryID, Kind: ThreadKindFilter{kind: thread.Kind}, Number: thread.Number}
 		if _, ok := requested[exact]; ok {
 			out[exact] = thread
 		}
-		anyKind := ThreadKey{RepositoryID: thread.RepositoryID, Number: thread.Number}
+		anyKind := ThreadKey{RepositoryID: thread.RepositoryID, Kind: AnyThreadKind(), Number: thread.Number}
 		if _, ok := requested[anyKind]; ok {
 			out[anyKind] = thread
 		}

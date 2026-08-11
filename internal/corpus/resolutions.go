@@ -34,7 +34,7 @@ func (c *Corpus) SaveResolutionRecord(ctx context.Context, record ResolutionReco
 		return nil, errors.New("resolution thread, kind, rule version, source time, and observation refs are required")
 	}
 	for _, ref := range record.SourceObservationRefs {
-		if strings.TrimSpace(ref.Kind) == "" || ref.ID <= 0 {
+		if !ref.valid() {
 			return nil, errors.New("invalid resolution source observation reference")
 		}
 	}

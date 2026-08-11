@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
@@ -24,16 +25,17 @@ func evidenceItemResult(ctx context.Context, c *corpus.Corpus, item *evidence.Ev
 	}, nil
 }
 
-func sourceRevisionFromThreadBaseline(baseline investigation.ThreadBaseline) evidence.SourceRevision {
+func sourceRevisionFromThreadBaseline(baseline investigation.ThreadBaseline) (evidence.SourceRevision, error) {
+	subject, err := evidence.NewThreadSourceSubject(baseline.Repo, baseline.Kind, baseline.Number)
+	if err != nil {
+		return evidence.SourceRevision{}, fmt.Errorf("parse thread baseline source: %w", err)
+	}
 	return evidence.SourceRevision{
-		Subject: evidence.SourceSubject{
-			Kind: evidence.SourceSubjectThread, Owner: baseline.Repo.Owner(), Repo: baseline.Repo.Repo(),
-			ThreadKind: string(baseline.Kind), Number: baseline.Number,
-		},
+		Subject:             subject,
 		SourceUpdatedAt:     baseline.SourceUpdatedAt,
 		ObservationSequence: baseline.ObservationSequence,
 		ObservedAt:          baseline.ObservedAt,
-	}
+	}, nil
 }
 
 func evidenceSourceRevisionResults(values []evidence.SourceRevision) []contracts.EvidenceSourceRevisionResult {
@@ -42,10 +44,12 @@ func evidenceSourceRevisionResults(values []evidence.SourceRevision) []contracts
 	}
 	result := make([]contracts.EvidenceSourceRevisionResult, len(values))
 	for i, value := range values {
+		repository := value.Subject.Repository()
+		threadKind, number, _ := value.Subject.Thread()
 		result[i] = contracts.EvidenceSourceRevisionResult{
 			Subject: contracts.EvidenceSourceSubjectResult{
-				Kind: string(value.Subject.Kind), Owner: value.Subject.Owner, Repo: value.Subject.Repo,
-				ThreadKind: value.Subject.ThreadKind, Number: value.Subject.Number, Facet: value.Subject.Facet,
+				Kind: value.Subject.Kind().String(), Owner: repository.Owner(), Repo: repository.Repo(),
+				ThreadKind: string(threadKind), Number: number, Facet: value.Subject.Facet(),
 			},
 			SourceUpdatedAt:     formatTime(value.SourceUpdatedAt),
 			ObservationSequence: value.ObservationSequence,

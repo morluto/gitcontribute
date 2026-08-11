@@ -4,6 +4,7 @@
 package research
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -31,6 +32,21 @@ const (
 	// StatusUnknown means the corpus cannot support a claim for the section.
 	StatusUnknown SectionStatus = "unknown"
 )
+
+// ParseSectionStatus converts stored or boundary text into one supported
+// section-coverage state.
+func ParseSectionStatus(value string) (SectionStatus, error) {
+	switch SectionStatus(strings.TrimSpace(value)) {
+	case StatusAvailable:
+		return StatusAvailable, nil
+	case StatusPartial:
+		return StatusPartial, nil
+	case StatusUnknown:
+		return StatusUnknown, nil
+	default:
+		return "", fmt.Errorf("unsupported research section status %q", value)
+	}
+}
 
 // ThreadRef is a validated issue or pull-request reference. Kind may be empty
 // when the input used OWNER/REPO#NUMBER and the corpus must resolve it.
@@ -271,6 +287,43 @@ type HealthSection struct {
 
 // CoverageFact records one repository, thread, or local-index coverage fact.
 type CoverageFact struct {
+	Scope string    `json:"scope"`
+	Facet string    `json:"facet"`
+	AsOf  time.Time `json:"as_of,omitempty"`
+	Count int       `json:"count"`
+	state coverageFactState
+}
+
+type coverageFactState uint8
+
+const (
+	coverageFactMissing coverageFactState = iota
+	coverageFactPresent
+	coverageFactComplete
+	coverageFactTruncated
+)
+
+func missingCoverageFact(scope, facet string) CoverageFact {
+	return CoverageFact{Scope: scope, Facet: facet, state: coverageFactMissing}
+}
+
+func observedCoverageFact(scope, facet string, complete, truncated bool, asOf time.Time, count int) CoverageFact {
+	state := coverageFactPresent
+	if complete {
+		state = coverageFactComplete
+	} else if truncated {
+		state = coverageFactTruncated
+	}
+	return CoverageFact{Scope: scope, Facet: facet, AsOf: asOf, Count: count, state: state}
+}
+
+func (f CoverageFact) Present() bool { return f.state != coverageFactMissing }
+
+func (f CoverageFact) Complete() bool { return f.state == coverageFactComplete }
+
+func (f CoverageFact) Truncated() bool { return f.state == coverageFactTruncated }
+
+type coverageFactJSON struct {
 	Scope     string    `json:"scope"`
 	Facet     string    `json:"facet"`
 	Present   bool      `json:"present"`
@@ -278,6 +331,35 @@ type CoverageFact struct {
 	Truncated bool      `json:"truncated"`
 	AsOf      time.Time `json:"as_of,omitempty"`
 	Count     int       `json:"count"`
+}
+
+func (f CoverageFact) MarshalJSON() ([]byte, error) {
+	return json.Marshal(coverageFactJSON{
+		Scope: f.Scope, Facet: f.Facet, Present: f.Present(), Complete: f.Complete(),
+		Truncated: f.Truncated(), AsOf: f.AsOf, Count: f.Count,
+	})
+}
+
+func (f *CoverageFact) UnmarshalJSON(data []byte) error {
+	var raw coverageFactJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.Complete && (!raw.Present || raw.Truncated) {
+		return errors.New("complete coverage must be present and cannot be truncated")
+	}
+	if raw.Truncated && !raw.Present {
+		return errors.New("truncated coverage must be present")
+	}
+	if !raw.Present && (!raw.AsOf.IsZero() || raw.Count != 0) {
+		return errors.New("missing coverage cannot carry an observation time or count")
+	}
+	if raw.Present {
+		*f = observedCoverageFact(raw.Scope, raw.Facet, raw.Complete, raw.Truncated, raw.AsOf, raw.Count)
+	} else {
+		*f = missingCoverageFact(raw.Scope, raw.Facet)
+	}
+	return nil
 }
 
 // CoverageSection makes missing and partial inputs inspectable.
@@ -333,11 +415,69 @@ type ReadProvenance struct {
 	Durable              bool        `json:"durable"`
 	ObservationWatermark int64       `json:"observation_watermark"`
 	QueryDigestSHA256    string      `json:"query_digest_sha256"`
+	Limitations          []string    `json:"limitations,omitempty"`
+	ExternalContext      []SourceRef `json:"external_context,omitempty"`
+	coverage             readProvenanceCoverage
+}
+
+type readProvenanceCoverage struct {
+	known     bool
+	truncated bool
+	unknown   bool
+}
+
+func NewReadProvenance(snapshotToken string, durable bool, observationWatermark int64, queryDigest string, truncated, unknownCoverage bool) ReadProvenance {
+	return ReadProvenance{
+		SnapshotToken: snapshotToken, Durable: durable,
+		ObservationWatermark: observationWatermark, QueryDigestSHA256: queryDigest,
+		coverage: readProvenanceCoverage{known: true, truncated: truncated, unknown: unknownCoverage},
+	}
+}
+
+func (p ReadProvenance) Complete() bool {
+	return p.coverage.known && !p.coverage.truncated && !p.coverage.unknown
+}
+
+func (p ReadProvenance) Truncated() bool { return p.coverage.truncated }
+
+func (p ReadProvenance) UnknownCoverage() bool { return p.coverage.unknown }
+
+type readProvenanceJSON struct {
+	SnapshotToken        string      `json:"snapshot_token"`
+	Durable              bool        `json:"durable"`
+	ObservationWatermark int64       `json:"observation_watermark"`
+	QueryDigestSHA256    string      `json:"query_digest_sha256"`
 	Complete             bool        `json:"complete"`
 	Truncated            bool        `json:"truncated"`
 	UnknownCoverage      bool        `json:"unknown_coverage"`
 	Limitations          []string    `json:"limitations,omitempty"`
 	ExternalContext      []SourceRef `json:"external_context,omitempty"`
+}
+
+func (p ReadProvenance) MarshalJSON() ([]byte, error) {
+	return json.Marshal(readProvenanceJSON{
+		SnapshotToken: p.SnapshotToken, Durable: p.Durable,
+		ObservationWatermark: p.ObservationWatermark, QueryDigestSHA256: p.QueryDigestSHA256,
+		Complete: p.Complete(), Truncated: p.Truncated(), UnknownCoverage: p.UnknownCoverage(),
+		Limitations: p.Limitations, ExternalContext: p.ExternalContext,
+	})
+}
+
+func (p *ReadProvenance) UnmarshalJSON(data []byte) error {
+	var raw readProvenanceJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.Complete && (raw.Truncated || raw.UnknownCoverage) {
+		return errors.New("complete research provenance cannot be truncated or have unknown coverage")
+	}
+	parsed := NewReadProvenance(raw.SnapshotToken, raw.Durable, raw.ObservationWatermark, raw.QueryDigestSHA256, raw.Truncated, raw.UnknownCoverage)
+	if !raw.Complete && !raw.Truncated && !raw.UnknownCoverage {
+		parsed.coverage.known = false
+	}
+	parsed.Limitations, parsed.ExternalContext = raw.Limitations, raw.ExternalContext
+	*p = parsed
+	return nil
 }
 
 // ValidateProvenance verifies the core contract for all fixed sections.
@@ -363,11 +503,25 @@ func (b *Brief) ValidateProvenance() error {
 		{"next_commands", b.Sections.Next.SectionMeta},
 	}
 	for _, section := range sections {
-		if section.meta.Status == "" {
-			return fmt.Errorf("section %s has no status", section.name)
+		status, err := ParseSectionStatus(string(section.meta.Status))
+		if err != nil {
+			return fmt.Errorf("section %s: %w", section.name, err)
 		}
-		if len(section.meta.Sources) == 0 && section.meta.UnknownReason == "" {
-			return fmt.Errorf("section %s has neither source nor unknown reason", section.name)
+		hasSources := len(section.meta.Sources) > 0
+		hasUnknownReason := strings.TrimSpace(section.meta.UnknownReason) != ""
+		switch status {
+		case StatusAvailable:
+			if !hasSources || hasUnknownReason {
+				return fmt.Errorf("section %s available status requires sources and no unknown reason", section.name)
+			}
+		case StatusPartial:
+			if !hasSources || !hasUnknownReason {
+				return fmt.Errorf("section %s partial status requires sources and an unknown reason", section.name)
+			}
+		case StatusUnknown:
+			if hasSources || !hasUnknownReason {
+				return fmt.Errorf("section %s unknown status requires no sources and an unknown reason", section.name)
+			}
 		}
 	}
 	return nil

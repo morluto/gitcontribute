@@ -25,7 +25,7 @@ func TestMCPReaderExplainMatchReturnsMatchingExcerpt(t *testing.T) {
 		t.Fatal(err)
 	}
 	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open",
+		RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1, State: "open",
 		Title: "ordinary title", Body: strings.Repeat("padding ", 400) + "deepthreadneedle",
 		SourceUpdatedAt: time.Unix(2, 0).UTC(),
 	}, `{}`)
@@ -80,7 +80,7 @@ func TestMCPReaderExplainMatchTreatsWhitespaceQueryAsOmitted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open", Title: "exact item", SourceUpdatedAt: time.Unix(1, 0).UTC()}, `{}`); err != nil {
+	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1, State: "open", Title: "exact item", SourceUpdatedAt: time.Unix(1, 0).UTC()}, `{}`); err != nil {
 		t.Fatal(err)
 	}
 

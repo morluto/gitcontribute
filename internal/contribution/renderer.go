@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 )
 
@@ -61,7 +62,7 @@ func (r *Renderer) RenderIssue(in IssueInput) (*IssueDraft, error) {
 		RenderedAt:    time.Now().UTC(),
 		ManifestID:    in.ManifestID,
 	}
-	populateDraftIdentity(&draft.DraftIdentity, in.Repo.String(), "issue", draft.Title, draft.Body, in.Evidence)
+	populateDraftIdentity(&draft.DraftIdentity, in.Repo.String(), domain.IssueKind, draft.Title, draft.Body, in.Evidence)
 	draft.Warnings = append(draft.Warnings, ValidateRequiredTemplateSections([]byte(draft.Body), []byte(in.Guidance))...)
 	return draft, nil
 }
@@ -110,7 +111,7 @@ func (r *Renderer) RenderPullRequest(in PullRequestInput) (*PullRequestDraft, er
 		RenderedAt:    time.Now().UTC(),
 		ManifestID:    in.ManifestID,
 	}
-	populateDraftIdentity(&draft.DraftIdentity, in.Repo.String(), "pull_request", draft.Title, draft.Body, in.Evidence)
+	populateDraftIdentity(&draft.DraftIdentity, in.Repo.String(), domain.PullRequestKind, draft.Title, draft.Body, in.Evidence)
 	draft.Warnings = append(draft.Warnings, ValidateRequiredTemplateSections([]byte(draft.Body), []byte(in.Guidance))...)
 	return draft, nil
 }
@@ -202,14 +203,14 @@ func writeProofRun(b *strings.Builder, label string, run *evidence.ValidationRun
 	if identity == "" {
 		identity = run.WorkspaceSnapshotBefore
 	}
-	if run.ExecutionOrigin == "external" && run.External != nil {
+	if run.ExecutionOrigin == evidence.ExecutionOriginExternal && run.External != nil {
 		identity = run.External.Repository + "@" + run.External.Revision + " artifact " + run.External.ArtifactSHA256
 	}
 	fmt.Fprintf(b, "  - %s: %s (exit %d", label, run.Classification, run.ExitCode)
 	if identity != "" {
 		fmt.Fprintf(b, ", source `%s`", boundedText(identity, 160))
 	}
-	if run.ExecutionOrigin == "external" && run.External != nil {
+	if run.ExecutionOrigin == evidence.ExecutionOriginExternal && run.External != nil {
 		fmt.Fprintf(b, ", external receipt `%s` from %s", run.External.ReceiptSHA256, run.External.Producer)
 	}
 	b.WriteString(")\n")

@@ -27,6 +27,15 @@ const (
 	EvidenceTypeGitHubSource               EvidenceType = "github_source"
 )
 
+// ParseEvidenceType converts an exact boundary value into a supported evidence type.
+func ParseEvidenceType(value string) (EvidenceType, error) {
+	typeValue := EvidenceType(value)
+	if !isValidEvidenceType(typeValue) {
+		return "", fmt.Errorf("%w: %q", ErrInvalidEvidenceType, value)
+	}
+	return typeValue, nil
+}
+
 // Relation describes how the evidence affects a hypothesis or opportunity.
 type Relation string
 
@@ -38,6 +47,15 @@ const (
 	RelationInvalid       Relation = "invalid"
 )
 
+// ParseRelation converts an exact boundary value into a supported evidence relation.
+func ParseRelation(value string) (Relation, error) {
+	relation := Relation(value)
+	if !isValidRelation(relation) {
+		return "", fmt.Errorf("%w: %q", ErrInvalidRelation, value)
+	}
+	return relation, nil
+}
+
 // RunKind distinguishes a validation run against the base or candidate branch.
 type RunKind string
 
@@ -45,6 +63,15 @@ const (
 	RunKindBase      RunKind = "base"
 	RunKindCandidate RunKind = "candidate"
 )
+
+// ParseRunKind converts an exact boundary value into a supported validation target.
+func ParseRunKind(value string) (RunKind, error) {
+	kind := RunKind(value)
+	if !validRunKind(kind) {
+		return "", ErrMissingRunKind
+	}
+	return kind, nil
+}
 
 // RunClassification is the high-level outcome of a single validation run.
 type RunClassification string
@@ -56,6 +83,15 @@ const (
 	RunClassificationCancelled RunClassification = "cancelled"
 )
 
+// ParseRunClassification converts an exact boundary value into a supported run outcome.
+func ParseRunClassification(value string) (RunClassification, error) {
+	classification := RunClassification(value)
+	if !validRunClassification(classification) {
+		return "", fmt.Errorf("unsupported external run classification %q", value)
+	}
+	return classification, nil
+}
+
 // RunRequest is a shell-free command execution request.
 type RunRequest struct {
 	Args             []string
@@ -65,6 +101,18 @@ type RunRequest struct {
 	SampleInterval   time.Duration
 	ReadinessTimeout time.Duration
 }
+
+// ValidationPhase identifies a process or protocol boundary associated with a
+// failure or timeout. Empty means no such phase was recorded.
+type ValidationPhase string
+
+const (
+	ValidationPhaseNone      ValidationPhase = ""
+	ValidationPhaseStartup   ValidationPhase = "startup"
+	ValidationPhaseReadiness ValidationPhase = "readiness"
+	ValidationPhaseExecution ValidationPhase = "execution"
+	ValidationPhaseShutdown  ValidationPhase = "shutdown"
+)
 
 // RunResult is the captured output of one command execution.
 type RunResult struct {
@@ -78,8 +126,8 @@ type RunResult struct {
 	Classification RunClassification
 	Process        ProcessIdentity
 	Phases         RunPhases
-	TimeoutPhase   string
-	FailurePhase   string
+	TimeoutPhase   ValidationPhase
+	FailurePhase   ValidationPhase
 	Resources      ResourceTelemetry
 	Cleanup        CleanupResult
 }
@@ -218,8 +266,17 @@ type ResourceTelemetry struct {
 
 // CleanupResult records whether sampled descendants survived the shutdown
 // boundary. Survivors are matched by PID and creation time.
+type CleanupStatus string
+
+const (
+	CleanupUnknown     CleanupStatus = ""
+	CleanupClean       CleanupStatus = "clean"
+	CleanupFailed      CleanupStatus = "failed"
+	CleanupUnavailable CleanupStatus = "unavailable"
+)
+
 type CleanupResult struct {
-	Status    string
+	Status    CleanupStatus
 	Reason    string
 	Survivors []ProcessIdentity
 	CheckedAt time.Time
@@ -375,18 +432,41 @@ type ValidationRun struct {
 	Observations            []ObservationResult
 	WorkspaceSnapshotBefore string
 	WorkspaceSnapshotAfter  string
-	WorkspaceBindingStatus  string
+	WorkspaceBindingStatus  WorkspaceBindingStatus
 	WorkspaceBindingReason  string
 	Process                 ProcessIdentity
 	Phases                  RunPhases
-	TimeoutPhase            string
-	FailurePhase            string
+	TimeoutPhase            ValidationPhase
+	FailurePhase            ValidationPhase
 	Resources               ResourceTelemetry
 	Cleanup                 CleanupResult
-	ExecutionOrigin         string
+	ExecutionOrigin         ExecutionOrigin
 	External                *ExternalReceiptProvenance
 	JUnitReport             *JUnitReport
 }
+
+// WorkspaceBindingStatus describes whether a locally executed run remained
+// bound to the same managed workspace identity.
+type WorkspaceBindingStatus string
+
+const (
+	WorkspaceBindingUnknown      WorkspaceBindingStatus = ""
+	WorkspaceBindingUnavailable  WorkspaceBindingStatus = "unavailable"
+	WorkspaceBindingIncomplete   WorkspaceBindingStatus = "incomplete"
+	WorkspaceBindingChanged      WorkspaceBindingStatus = "changed"
+	WorkspaceBindingBound        WorkspaceBindingStatus = "bound"
+	WorkspaceBindingStale        WorkspaceBindingStatus = "stale"
+	WorkspaceBindingIncompatible WorkspaceBindingStatus = "incompatible"
+)
+
+// ExecutionOrigin distinguishes local execution from imported observations.
+// Empty is the durable representation of a locally executed run.
+type ExecutionOrigin string
+
+const (
+	ExecutionOriginLocal    ExecutionOrigin = ""
+	ExecutionOriginExternal ExecutionOrigin = "external"
+)
 
 // ExternalReceiptProvenance preserves the trust and source boundary of a
 // validation observation produced outside GitContribute.
@@ -445,8 +525,8 @@ type ValidationAttempt struct {
 	ExitCode          int
 	Classification    RunClassification
 	ObservationStatus ObservationStatus
-	TimeoutPhase      string
-	FailurePhase      string
+	TimeoutPhase      ValidationPhase
+	FailurePhase      ValidationPhase
 	Error             string
 	Process           ProcessIdentity
 	Phases            RunPhases
@@ -464,8 +544,18 @@ type ValidationAggregate struct {
 	Inconclusive           int
 	Cancelled              int
 	Classification         RunGroupClassification
-	ResourceClassification string
+	ResourceClassification ResourceClassification
 }
+
+// ResourceClassification summarizes whether repeat-run resource evidence is usable.
+type ResourceClassification string
+
+const (
+	ResourceUnknown       ResourceClassification = ""
+	ResourceAvailable     ResourceClassification = "available"
+	ResourceCleanupFailed ResourceClassification = "cleanup_failed"
+	ResourceInconclusive  ResourceClassification = "inconclusive"
+)
 
 // ValidationGroupComparison compares stable base and candidate aggregates.
 type ValidationGroupComparison struct {
@@ -524,8 +614,8 @@ type ExternalEvidenceProvenance struct {
 	ArtifactSHA256 string
 	ObservedAt     time.Time
 	Environment    map[string]string
-	Completeness   string
-	Integrity      string
+	Completeness   ExternalEvidenceCompleteness
+	Integrity      ExternalEvidenceIntegrity
 	Limitations    []string
 	RawSHA256      string
 }
@@ -583,6 +673,23 @@ func (r *ValidationRun) ParseStored() error {
 	if !validObservationStatus(r.ObservationStatus) {
 		return fmt.Errorf("unsupported observation status %q", r.ObservationStatus)
 	}
+	if !validWorkspaceBindingStatus(r.WorkspaceBindingStatus) {
+		return fmt.Errorf("unsupported workspace binding status %q", r.WorkspaceBindingStatus)
+	}
+	if !validExecutionOrigin(r.ExecutionOrigin) {
+		return fmt.Errorf("unsupported execution origin %q", r.ExecutionOrigin)
+	}
+	if !validCleanupStatus(r.Cleanup.Status) {
+		return fmt.Errorf("unsupported cleanup status %q", r.Cleanup.Status)
+	}
+	if !validValidationPhase(r.TimeoutPhase) || !validValidationPhase(r.FailurePhase) {
+		return errors.New("validation run has an unsupported failure or timeout phase")
+	}
+	if r.JUnitReport != nil {
+		if err := r.JUnitReport.ParseStored(); err != nil {
+			return fmt.Errorf("stored JUnit report: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -600,12 +707,12 @@ func (g *ValidationRunGroup) ParseStored() error {
 		if attempt.ObservationStatus == "" {
 			attempt.ObservationStatus = ObservationNotEvaluated
 		}
-		if !validRunKind(attempt.Kind) || !validRunClassification(attempt.Classification) || !validObservationStatus(attempt.ObservationStatus) {
+		if !validRunKind(attempt.Kind) || !validRunClassification(attempt.Classification) || !validObservationStatus(attempt.ObservationStatus) || !validCleanupStatus(attempt.Cleanup.Status) || !validValidationPhase(attempt.TimeoutPhase) || !validValidationPhase(attempt.FailurePhase) {
 			return fmt.Errorf("validation attempt %d has an unsupported discriminator", i)
 		}
 	}
 	for i, aggregate := range g.Aggregates {
-		if !validRunKind(aggregate.Kind) || !validRunGroupClassification(aggregate.Classification) {
+		if !validRunKind(aggregate.Kind) || !validRunGroupClassification(aggregate.Classification) || !validResourceClassification(aggregate.ResourceClassification) {
 			return fmt.Errorf("validation aggregate %d has an unsupported discriminator", i)
 		}
 	}
@@ -638,10 +745,10 @@ func (e *Evidence) ParseStored() error {
 		}
 	}
 	if e.External != nil {
-		if e.External.Completeness != "complete" && e.External.Completeness != "incomplete" && e.External.Completeness != "unknown" {
+		if _, err := ParseExternalEvidenceCompleteness(string(e.External.Completeness)); err != nil {
 			return fmt.Errorf("unsupported external evidence completeness %q", e.External.Completeness)
 		}
-		if e.External.Integrity != "verified" && e.External.Integrity != "unverified" {
+		if e.External.Integrity != ExternalEvidenceVerified && e.External.Integrity != ExternalEvidenceUnverified {
 			return fmt.Errorf("unsupported external evidence integrity %q", e.External.Integrity)
 		}
 	}
@@ -662,6 +769,47 @@ func validRunClassification(classification RunClassification) bool {
 func validObservationStatus(status ObservationStatus) bool {
 	switch status {
 	case ObservationNotEvaluated, ObservationMatched, ObservationMismatched:
+		return true
+	default:
+		return false
+	}
+}
+
+func validCleanupStatus(status CleanupStatus) bool {
+	switch status {
+	case CleanupUnknown, CleanupClean, CleanupFailed, CleanupUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+func validValidationPhase(phase ValidationPhase) bool {
+	switch phase {
+	case ValidationPhaseNone, ValidationPhaseStartup, ValidationPhaseReadiness, ValidationPhaseExecution, ValidationPhaseShutdown:
+		return true
+	default:
+		return false
+	}
+}
+
+func validWorkspaceBindingStatus(status WorkspaceBindingStatus) bool {
+	switch status {
+	case WorkspaceBindingUnknown, WorkspaceBindingUnavailable, WorkspaceBindingIncomplete,
+		WorkspaceBindingChanged, WorkspaceBindingBound, WorkspaceBindingStale, WorkspaceBindingIncompatible:
+		return true
+	default:
+		return false
+	}
+}
+
+func validExecutionOrigin(origin ExecutionOrigin) bool {
+	return origin == ExecutionOriginLocal || origin == ExecutionOriginExternal
+}
+
+func validResourceClassification(classification ResourceClassification) bool {
+	switch classification {
+	case ResourceUnknown, ResourceAvailable, ResourceCleanupFailed, ResourceInconclusive:
 		return true
 	default:
 		return false

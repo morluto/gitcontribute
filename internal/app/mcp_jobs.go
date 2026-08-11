@@ -23,7 +23,7 @@ func (r *MCPReader) GetJob(ctx context.Context, in mcpcontract.GetJobInput) (mcp
 	if err != nil {
 		return mcpcontract.GetJobOutput{}, err
 	}
-	return jobResultToMCP(job, true), nil
+	return jobResultToMCP(job, detailedResponse), nil
 }
 
 // CancelJobs requests bounded cancellation in input order. Missing and terminal
@@ -86,7 +86,7 @@ func (r *MCPReader) cancelJobItem(ctx context.Context, inputID string) mcpcontra
 }
 
 func jobResultItem(item mcpcontract.BatchItem[mcpcontract.GetJobOutput], job *contracts.JobResult) mcpcontract.BatchItem[mcpcontract.GetJobOutput] {
-	value := jobResultToMCP(job, true)
+	value := jobResultToMCP(job, detailedResponse)
 	item.Value = &value
 	if value.Status == "running" {
 		item.Recovery = recoveryPlan("blocked", "Poll jobs.get until this job reaches a terminal state.", mcpcontract.RecoveryAction(mcpcontract.GetJobsInput{IDs: []string{value.ID}}))
@@ -94,7 +94,7 @@ func jobResultItem(item mcpcontract.BatchItem[mcpcontract.GetJobOutput], job *co
 	return item
 }
 
-func jobResultToMCP(job *contracts.JobResult, includeDetails bool) mcpcontract.GetJobOutput {
+func jobResultToMCP(job *contracts.JobResult, format responseFormat) mcpcontract.GetJobOutput {
 	phase, completed, total := decodeJobProgress(job)
 	percent := 0
 	if total > 0 {
@@ -116,7 +116,7 @@ func jobResultToMCP(job *contracts.JobResult, includeDetails bool) mcpcontract.G
 	}
 	out.ExecutionState, out.Outcome = jobExecution(job)
 	out.Summary = jobSummary(job, completed, total)
-	if includeDetails {
+	if format.includesDetails() {
 		switch job.Status {
 		case "succeeded":
 			out.Artifacts, out.FollowUp = jobArtifactsAndFollowUp(job, total)
@@ -132,23 +132,23 @@ func jobResultToMCP(job *contracts.JobResult, includeDetails bool) mcpcontract.G
 func jobExecution(job *contracts.JobResult) (mcpcontract.JobExecutionState, mcpcontract.JobOutcome) {
 	switch job.Status {
 	case "queued":
-		return "queued", ""
+		return mcpcontract.JobExecutionQueued, ""
 	case "running":
-		return "running", ""
+		return mcpcontract.JobExecutionRunning, ""
 	case "succeeded":
 		switch jobResultStatus(job) {
 		case "failed":
-			return "terminal", "failed"
+			return mcpcontract.JobExecutionTerminal, mcpcontract.JobOutcomeFailed
 		case "partial":
-			return "terminal", "partial"
+			return mcpcontract.JobExecutionTerminal, mcpcontract.JobOutcomePartial
 		}
-		return "terminal", "succeeded"
+		return mcpcontract.JobExecutionTerminal, mcpcontract.JobOutcomeSucceeded
 	case "failed":
-		return "terminal", "failed"
+		return mcpcontract.JobExecutionTerminal, mcpcontract.JobOutcomeFailed
 	case "cancelled":
-		return "terminal", "cancelled"
+		return mcpcontract.JobExecutionTerminal, mcpcontract.JobOutcomeCancelled
 	default:
-		return "running", ""
+		return mcpcontract.JobExecutionRunning, ""
 	}
 }
 

@@ -116,7 +116,7 @@ func TestOpportunityReadinessReportsPassWarnBlockUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := fixture.svc.corpus.UpsertThread(fixture.ctx, corpus.Thread{
-		RepositoryID: fixture.repoID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open",
+		RepositoryID: fixture.repoID, Kind: domain.IssueKind, Number: 1, State: "open",
 		Title: "Retry parser cancellation updated", Body: thread.Body, Author: thread.Author,
 		AuthorAssociation: thread.AuthorAssociation, Labels: thread.Labels,
 		SourceCreatedAt: thread.SourceCreatedAt, SourceUpdatedAt: fixture.now.Add(time.Hour),

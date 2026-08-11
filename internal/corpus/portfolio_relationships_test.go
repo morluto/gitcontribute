@@ -2,11 +2,60 @@ package corpus
 
 import (
 	"context"
-	"strconv"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/morluto/gitcontribute/internal/domain"
 )
+
+func TestPortfolioSubjectCanonicalizesBoundaryIdentity(t *testing.T) {
+	t.Parallel()
+	subject, err := ParsePortfolioSubject(" pull_request ", " 001 ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subject.Kind() != PortfolioSubjectPullRequest || subject.Ref() != "1" {
+		t.Fatalf("subject = %s:%s", subject.Kind(), subject.Ref())
+	}
+	encoded, err := json.Marshal(subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(encoded) != `{"kind":"pull_request","ref":"1"}` {
+		t.Fatalf("encoded subject = %s", encoded)
+	}
+	var decoded PortfolioSubject
+	if err := json.Unmarshal([]byte(`{"kind":"opportunity","ref":" opp-1 "}`), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Kind() != PortfolioSubjectOpportunity || decoded.Ref() != "opp-1" {
+		t.Fatalf("decoded subject = %s:%s", decoded.Kind(), decoded.Ref())
+	}
+	if _, err := ParsePortfolioSubject(PortfolioSubjectPullRequest, "0"); err == nil {
+		t.Fatal("expected invalid pull-request identity to be rejected")
+	}
+}
+
+func TestPortfolioSignalVariantsRejectMixedRepresentations(t *testing.T) {
+	t.Parallel()
+	pathSignal, err := NewPortfolioFilePathSignal(` internal\store\record.go `)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pathSignal.Kind() != PortfolioSignalFilePath || pathSignal.Value() != "internal/store/record.go" {
+		t.Fatalf("path signal = %s:%s", pathSignal.Kind(), pathSignal.Value())
+	}
+	var mixed PortfolioSignal
+	if err := json.Unmarshal([]byte(`{"kind":"file_path","value":"main.go","target_kind":"pull_request","target_ref":"1"}`), &mixed); err == nil {
+		t.Fatal("expected mixed scalar and target signal to be rejected")
+	}
+	opportunity := mustPortfolioSubject(t, PortfolioSubjectOpportunity, "opp-1")
+	if _, err := NewPortfolioOpportunitySimilaritySignal(opportunity, 0.8); err == nil {
+		t.Fatal("expected similarity target outside the pull-request domain to be rejected")
+	}
+}
 
 func TestPortfolioLinksAreExplicitAndDeterministic(t *testing.T) {
 	t.Parallel()
@@ -38,11 +87,11 @@ func TestPortfolioLinksAreExplicitAndDeterministic(t *testing.T) {
 	if len(links) != 1 || links[0].PullRequestThreadID != prID || links[0].OpportunityID != "opp-1" || links[0].WorkspaceID != "ws-1" {
 		t.Fatalf("links = %#v", links)
 	}
-	results, err := c.FindPortfolioOverlaps(ctx, []PortfolioSubject{{Kind: PortfolioSubjectOpportunity, Ref: "opp-1"}}, []int64{prID})
+	results, err := c.FindPortfolioOverlaps(ctx, []PortfolioSubject{mustPortfolioSubject(t, PortfolioSubjectOpportunity, "opp-1")}, []int64{prID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 1 || results[0].Status != "overlap" || len(results[0].Matches) != 1 || results[0].Matches[0].Evidence[0].Kind != "explicit_link" {
+	if len(results) != 1 || results[0].Status() != "overlap" || len(results[0].Matches) != 1 || results[0].Matches[0].Evidence[0].Kind != "explicit_link" {
 		t.Fatalf("explicit link overlap = %#v", results)
 	}
 }
@@ -53,9 +102,9 @@ func TestPortfolioSignalsRejectMissingSourceObservation(t *testing.T) {
 	c, _ := openTestCorpus(t)
 	prID := insertPortfolioFixture(t, ctx, c)
 	_, err := c.ReplacePortfolioSignals(ctx, PortfolioSignalSnapshot{
-		Subject: PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(prID, 10)}, Facet: PortfolioFacetChangedFiles,
-		Signals: []PortfolioSignal{{Kind: PortfolioSignalFilePath, Value: "main.go"}}, SourceUpdatedAt: time.Unix(300, 0).UTC(),
-		SourceObservationRefs: []ObservationRef{{Kind: "facet", ID: 999999}},
+		Subject: mustPullRequestPortfolioSubject(t, prID), Facet: PortfolioFacetChangedFiles,
+		Signals: []PortfolioSignal{mustPortfolioFilePathSignal(t, "main.go")}, SourceUpdatedAt: time.Unix(300, 0).UTC(),
+		SourceObservationRefs: []ObservationRef{mustObservationRef(t, "facet", 999999)},
 	})
 	if err == nil || !strings.Contains(err.Error(), "does not exist") {
 		t.Fatalf("missing observation error = %v", err)
@@ -67,25 +116,25 @@ func TestFindPortfolioOverlapsUsesOnlyCoveredObservedSignals(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	prID := insertPortfolioFixture(t, ctx, c)
-	pr := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(prID, 10)}
-	candidate := PortfolioSubject{Kind: PortfolioSubjectOpportunity, Ref: "opp-1"}
-	unknown := PortfolioSubject{Kind: PortfolioSubjectOpportunity, Ref: "opp-missing"}
+	pr := mustPullRequestPortfolioSubject(t, prID)
+	candidate := mustPortfolioSubject(t, PortfolioSubjectOpportunity, "opp-1")
+	unknown := mustPortfolioSubject(t, PortfolioSubjectOpportunity, "opp-missing")
 	newer := time.Unix(300, 0).UTC()
 
 	replacePortfolioFixture(t, ctx, c, candidate, PortfolioFacetChangedFiles, newer,
-		PortfolioSignal{Kind: PortfolioSignalFilePath, Value: `internal\\store\\record.go`})
+		mustPortfolioFilePathSignal(t, `internal\\store\\record.go`))
 	replacePortfolioFixture(t, ctx, c, candidate, PortfolioFacetLinkedIssues, newer,
-		PortfolioSignal{Kind: PortfolioSignalLinkedIssue, Value: "owner/repo#7"})
+		mustPortfolioLinkedIssueSignal(t, "owner/repo#7"))
 	replacePortfolioFixture(t, ctx, c, candidate, PortfolioFacetOpportunitySimilarity, newer,
-		PortfolioSignal{Kind: PortfolioSignalOpportunitySimilarity, TargetKind: PortfolioSubjectPullRequest, TargetRef: pr.Ref, Score: 0.86})
+		mustPortfolioSimilaritySignal(t, pr, 0.86))
 	replacePortfolioFixture(t, ctx, c, pr, PortfolioFacetChangedFiles, newer,
-		PortfolioSignal{Kind: PortfolioSignalFilePath, Value: "internal/store/record.go"})
+		mustPortfolioFilePathSignal(t, "internal/store/record.go"))
 	replacePortfolioFixture(t, ctx, c, pr, PortfolioFacetLinkedIssues, newer)
 
 	// The stale snapshot remains immutable history but cannot replace the newer
 	// path projection used by offline overlap reads.
 	replacePortfolioFixture(t, ctx, c, candidate, PortfolioFacetChangedFiles, newer.Add(-time.Hour),
-		PortfolioSignal{Kind: PortfolioSignalFilePath, Value: "unrelated.go"})
+		mustPortfolioFilePathSignal(t, "unrelated.go"))
 
 	results, err := c.FindPortfolioOverlaps(ctx, []PortfolioSubject{candidate, unknown}, []int64{prID})
 	if err != nil {
@@ -94,19 +143,19 @@ func TestFindPortfolioOverlapsUsesOnlyCoveredObservedSignals(t *testing.T) {
 	if len(results) != 2 || results[0].Candidate != candidate || results[1].Candidate != unknown {
 		t.Fatalf("input ordering not preserved: %#v", results)
 	}
-	if results[0].Status != "overlap" || len(results[0].Matches) != 1 {
+	if results[0].Status() != "overlap" || len(results[0].Matches) != 1 {
 		t.Fatalf("covered overlap = %#v", results[0])
 	}
 	evidence := results[0].Matches[0].Evidence
 	if len(evidence) != 2 || evidence[0].Kind != PortfolioSignalFilePath || evidence[0].Value != "internal/store/record.go" || evidence[1].Kind != PortfolioSignalOpportunitySimilarity {
 		t.Fatalf("overlap evidence = %#v", evidence)
 	}
-	if results[1].Status != "unknown" || results[1].Coverage["candidate.changed_files"] != "missing" {
+	if results[1].Status() != "unknown" || results[1].Coverage()["candidate.changed_files"] != "missing" {
 		t.Fatalf("missing coverage converted to no-overlap: %#v", results[1])
 	}
 
 	var snapshots int
-	if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM portfolio_signal_snapshots WHERE subject_kind=? AND subject_ref=? AND facet=?`, candidate.Kind, candidate.Ref, PortfolioFacetChangedFiles).Scan(&snapshots); err != nil {
+	if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM portfolio_signal_snapshots WHERE subject_kind=? AND subject_ref=? AND facet=?`, candidate.Kind(), candidate.Ref(), PortfolioFacetChangedFiles).Scan(&snapshots); err != nil {
 		t.Fatalf("count signal snapshots: %v", err)
 	}
 	if snapshots != 2 {
@@ -119,8 +168,8 @@ func TestFindPortfolioOverlapsRequiresCompleteNegativeCoverage(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	prID := insertPortfolioFixture(t, ctx, c)
-	pr := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(prID, 10)}
-	candidate := PortfolioSubject{Kind: PortfolioSubjectOpportunity, Ref: "opp-1"}
+	pr := mustPullRequestPortfolioSubject(t, prID)
+	candidate := mustPortfolioSubject(t, PortfolioSubjectOpportunity, "opp-1")
 	at := time.Unix(300, 0).UTC()
 	for _, facet := range portfolioFacets {
 		replacePortfolioFixture(t, ctx, c, candidate, facet, at)
@@ -132,7 +181,7 @@ func TestFindPortfolioOverlapsRequiresCompleteNegativeCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("find portfolio overlaps: %v", err)
 	}
-	if results[0].Status != "no_overlap" {
+	if results[0].Status() != "no_overlap" {
 		t.Fatalf("fully covered negative = %#v", results[0])
 	}
 }
@@ -146,12 +195,12 @@ func TestFindPortfolioOverlapsPullRequestNegativeDoesNotRequireSimilarityFacet(t
 	if err := c.db.QueryRowContext(ctx, `SELECT repository_id FROM threads WHERE id=?`, firstID).Scan(&repositoryID); err != nil {
 		t.Fatal(err)
 	}
-	second, err := c.ApplyThreadObservation(ctx, repositoryID, ThreadKindPullRequest, 4, "open", "second PR", "body", "author", time.Unix(201, 0).UTC(), `{}`)
+	second, err := c.ApplyThreadObservation(ctx, repositoryID, domain.PullRequestKind, 4, "open", "second PR", "body", "author", time.Unix(201, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(firstID, 10)}
-	secondSubject := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(second.ID, 10)}
+	first := mustPullRequestPortfolioSubject(t, firstID)
+	secondSubject := mustPullRequestPortfolioSubject(t, second.ID)
 	for _, subject := range []PortfolioSubject{first, secondSubject} {
 		replacePortfolioFixture(t, ctx, c, subject, PortfolioFacetChangedFiles, time.Unix(300, 0).UTC())
 		replacePortfolioFixture(t, ctx, c, subject, PortfolioFacetLinkedIssues, time.Unix(300, 0).UTC())
@@ -160,7 +209,7 @@ func TestFindPortfolioOverlapsPullRequestNegativeDoesNotRequireSimilarityFacet(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(results) != 1 || results[0].Status != "no_overlap" {
+	if len(results) != 1 || results[0].Status() != "no_overlap" {
 		t.Fatalf("pull-request no-overlap = %#v", results)
 	}
 }
@@ -174,17 +223,17 @@ func TestListPullRequestIssueLinksDistinguishesCoveredEmptyAndBoundsPopulation(t
 	if err := c.db.QueryRowContext(ctx, `SELECT repository_id FROM threads WHERE id=?`, firstID).Scan(&repoID); err != nil {
 		t.Fatal(err)
 	}
-	second, err := c.ApplyThreadObservation(ctx, repoID, ThreadKindPullRequest, 4, "open", "newer", "body", "author", time.Unix(201, 0).UTC(), `{}`)
+	second, err := c.ApplyThreadObservation(ctx, repoID, domain.PullRequestKind, 4, "open", "newer", "body", "author", time.Unix(201, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(firstID, 10)}
-	secondSubject := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(second.ID, 10)}
+	first := mustPullRequestPortfolioSubject(t, firstID)
+	secondSubject := mustPullRequestPortfolioSubject(t, second.ID)
 	replacePortfolioFixture(t, ctx, c, first, PortfolioFacetLinkedIssues, time.Unix(300, 0).UTC(),
-		PortfolioSignal{Kind: PortfolioSignalLinkedIssue, Value: "owner/repo#7"})
+		mustPortfolioLinkedIssueSignal(t, "owner/repo#7"))
 	replacePortfolioFixture(t, ctx, c, secondSubject, PortfolioFacetLinkedIssues, time.Unix(301, 0).UTC())
 
-	links, capped, err := c.ListPullRequestIssueLinks(ctx, repoID, "open", 2)
+	links, capped, err := c.ListPullRequestIssueLinks(ctx, repoID, OpenThreadState(), 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +243,7 @@ func TestListPullRequestIssueLinksDistinguishesCoveredEmptyAndBoundsPopulation(t
 	if links[1].Number != 3 || !links[1].Covered || len(links[1].LinkedIssues) != 1 || links[1].LinkedIssues[0] != "owner/repo#7" {
 		t.Fatalf("linked projection = %+v", links[1])
 	}
-	bounded, capped, err := c.ListPullRequestIssueLinks(ctx, repoID, "open", 1)
+	bounded, capped, err := c.ListPullRequestIssueLinks(ctx, repoID, OpenThreadState(), 1)
 	if err != nil || !capped || len(bounded) != 1 || bounded[0].Number != 4 {
 		t.Fatalf("bounded = %+v, capped=%v, err=%v", bounded, capped, err)
 	}
@@ -209,10 +258,64 @@ func replacePortfolioFixture(t *testing.T, ctx context.Context, c *Corpus, subje
 	}
 	if _, err := c.ReplacePortfolioSignals(ctx, PortfolioSignalSnapshot{
 		Subject: subject, Facet: facet, Signals: signals, SourceUpdatedAt: at,
-		SourceObservationRefs: []ObservationRef{{Kind: "thread", ID: observationID}},
+		SourceObservationRefs: []ObservationRef{mustObservationRef(t, "thread", observationID)},
 	}); err != nil {
-		t.Fatalf("replace %s/%s signals: %v", subject.Ref, facet, err)
+		t.Fatalf("replace %s/%s signals: %v", subject.Ref(), facet, err)
 	}
+}
+
+func mustPortfolioSubject(t *testing.T, kind, ref string) PortfolioSubject {
+	t.Helper()
+	subject, err := ParsePortfolioSubject(kind, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return subject
+}
+
+func mustPullRequestPortfolioSubject(t *testing.T, threadID int64) PortfolioSubject {
+	t.Helper()
+	subject, err := NewPullRequestPortfolioSubject(threadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return subject
+}
+
+func mustPortfolioFilePathSignal(t *testing.T, value string) PortfolioSignal {
+	t.Helper()
+	signal, err := NewPortfolioFilePathSignal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signal
+}
+
+func mustPortfolioLinkedIssueSignal(t *testing.T, value string) PortfolioSignal {
+	t.Helper()
+	signal, err := NewPortfolioLinkedIssueSignal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signal
+}
+
+func mustPortfolioSimilaritySignal(t *testing.T, target PortfolioSubject, score float64) PortfolioSignal {
+	t.Helper()
+	signal, err := NewPortfolioOpportunitySimilaritySignal(target, score)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signal
+}
+
+func mustObservationRef(t *testing.T, kind string, id int64) ObservationRef {
+	t.Helper()
+	ref, err := ParseObservationRef(kind, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ref
 }
 
 //nolint:revive // Test helpers conventionally put *testing.T first.
@@ -222,7 +325,7 @@ func insertPortfolioFixture(t *testing.T, ctx context.Context, c *Corpus) int64 
 	if err != nil {
 		t.Fatalf("insert repository: %v", err)
 	}
-	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindPullRequest, 3, "open", "PR", "body", "author", time.Unix(200, 0).UTC(), `{}`)
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, domain.PullRequestKind, 3, "open", "PR", "body", "author", time.Unix(200, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatalf("insert pull request: %v", err)
 	}

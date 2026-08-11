@@ -450,56 +450,35 @@ func TestRestoreUsesVerifiedSnapshotWhenSourceChangesDuringCopy(t *testing.T) {
 	}
 }
 
-func TestRestoreReportsCommittedResultWhenSnapshotCleanupFails(t *testing.T) {
-	ctx := context.Background()
+func TestFinalizeCommittedRestorePreservesResultWhenSnapshotCleanupFails(t *testing.T) {
 	dir := t.TempDir()
-	source := filepath.Join(dir, "source.db")
-	backupPath := filepath.Join(dir, "source.backup.db")
 	destination := filepath.Join(dir, "destination.db")
-	c, err := Open(ctx, source)
-	if err != nil {
+	wantContent := []byte("published restore")
+	if err := os.WriteFile(destination, wantContent, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ApplyRepositoryObservation(ctx, "owner", "committed", "external", time.Unix(1, 0), `{}`); err != nil {
+	snapshotPath := filepath.Join(dir, "snapshot")
+	if err := os.Mkdir(snapshotPath, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Backup(ctx, source, backupPath, nil); err != nil {
+	if err := os.WriteFile(filepath.Join(snapshotPath, "still-owned"), []byte("private"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	wantCleanupErr := errors.New("injected snapshot cleanup failure")
-	originalRemove := removeRestoreSnapshot
-	removeRestoreSnapshot = func(string) error { return wantCleanupErr }
-	t.Cleanup(func() { removeRestoreSnapshot = originalRemove })
-	result, err := Restore(ctx, backupPath, destination, nil)
+	result, err := finalizeCommittedRestore(destination, snapshotPath)
 	var committedErr *PostCommitCleanupError
-	if !errors.As(err, &committedErr) || !errors.Is(err, wantCleanupErr) {
+	if !errors.As(err, &committedErr) {
 		t.Fatalf("Restore error = %v, want committed cleanup error", err)
 	}
 	if result.Path != destination || result.SizeBytes == 0 || result.SHA256 == "" {
 		t.Fatalf("committed restore result = %+v", result)
 	}
-	restored, err := OpenReadOnly(ctx, destination)
+	gotContent, err := os.ReadFile(destination)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer restored.Close()
-	repo, err := restored.GetRepository(ctx, "owner", "committed")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if repo == nil {
-		t.Fatal("restore cleanup failure obscured an uncommitted destination")
-	}
-	matches, err := filepath.Glob(filepath.Join(dir, ".gitcontribute-restore-source-*.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(matches) != 0 {
-		t.Fatalf("deferred cleanup left source snapshots: %v", matches)
+	if !bytes.Equal(gotContent, wantContent) {
+		t.Fatalf("published restore changed after cleanup failure: %q", gotContent)
 	}
 }
 

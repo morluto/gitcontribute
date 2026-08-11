@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -87,8 +88,79 @@ const (
 	OwnershipExternal Ownership = "external"
 )
 
+func parseOwnership(value Ownership) (Ownership, error) {
+	switch Ownership(strings.ToLower(strings.TrimSpace(string(value)))) {
+	case "", OwnershipManaged:
+		// Empty ownership predates explicit external-worktree adoption and is
+		// therefore the legacy representation of a managed workspace.
+		return OwnershipManaged, nil
+	case OwnershipExternal:
+		return OwnershipExternal, nil
+	default:
+		return "", fmt.Errorf("unsupported workspace ownership %q", value)
+	}
+}
+
 // Workspace is a product-owned record for a Git worktree.
 type Workspace struct {
+	Name            string
+	InvestigationID string
+	RepoOwner       string
+	RepoName        string
+	Path            string
+	Remote          string
+	BaseSHA         string
+	CandidateSHA    string
+	MergeBase       string
+	Ownership       Ownership
+	GitDir          string
+	GitCommonDir    string
+	CreatedAt       time.Time
+
+	mirror  string
+	changes workspaceChangeState
+}
+
+// workspaceChangeState is the only valid relationship between dirty and
+// untracked workspace observations.
+type workspaceChangeState uint8
+
+const (
+	workspaceClean workspaceChangeState = iota
+	workspaceDirty
+	workspaceDirtyWithUntracked
+)
+
+func parseWorkspaceChangeState(dirty, hasUntracked bool) (workspaceChangeState, error) {
+	switch {
+	case !dirty && hasUntracked:
+		return workspaceClean, errors.New("a workspace with untracked files cannot be clean")
+	case hasUntracked:
+		return workspaceDirtyWithUntracked, nil
+	case dirty:
+		return workspaceDirty, nil
+	default:
+		return workspaceClean, nil
+	}
+}
+
+// SetChanges replaces the observed change state after parsing it.
+func (w *Workspace) SetChanges(dirty, hasUntracked bool) error {
+	state, err := parseWorkspaceChangeState(dirty, hasUntracked)
+	if err != nil {
+		return err
+	}
+	w.changes = state
+	return nil
+}
+
+// Dirty reports whether tracked or untracked changes were observed.
+func (w Workspace) Dirty() bool { return w.changes != workspaceClean }
+
+// HasUntracked reports whether untracked, non-ignored files were observed.
+func (w Workspace) HasUntracked() bool { return w.changes == workspaceDirtyWithUntracked }
+
+type workspaceJSON struct {
 	Name            string
 	InvestigationID string
 	RepoOwner       string
@@ -104,8 +176,44 @@ type Workspace struct {
 	GitDir          string
 	GitCommonDir    string
 	CreatedAt       time.Time
+}
 
-	mirror string
+// MarshalJSON preserves the durable workspace payload while deriving its
+// compatibility booleans from one change state.
+func (w Workspace) MarshalJSON() ([]byte, error) {
+	ownership, err := parseOwnership(w.Ownership)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(workspaceJSON{
+		Name: w.Name, InvestigationID: w.InvestigationID, RepoOwner: w.RepoOwner, RepoName: w.RepoName,
+		Path: w.Path, Remote: w.Remote, BaseSHA: w.BaseSHA, CandidateSHA: w.CandidateSHA, MergeBase: w.MergeBase,
+		Dirty: w.Dirty(), HasUntracked: w.HasUntracked(), Ownership: ownership,
+		GitDir: w.GitDir, GitCommonDir: w.GitCommonDir, CreatedAt: w.CreatedAt,
+	})
+}
+
+// UnmarshalJSON parses the durable compatibility booleans once.
+func (w *Workspace) UnmarshalJSON(data []byte) error {
+	var raw workspaceJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	changes, err := parseWorkspaceChangeState(raw.Dirty, raw.HasUntracked)
+	if err != nil {
+		return err
+	}
+	ownership, err := parseOwnership(raw.Ownership)
+	if err != nil {
+		return err
+	}
+	*w = Workspace{
+		Name: raw.Name, InvestigationID: raw.InvestigationID, RepoOwner: raw.RepoOwner, RepoName: raw.RepoName,
+		Path: raw.Path, Remote: raw.Remote, BaseSHA: raw.BaseSHA, CandidateSHA: raw.CandidateSHA, MergeBase: raw.MergeBase,
+		Ownership: ownership, GitDir: raw.GitDir, GitCommonDir: raw.GitCommonDir, CreatedAt: raw.CreatedAt,
+		changes: changes,
+	}
+	return nil
 }
 
 // AdoptOptions identifies an existing worktree without granting ownership of
@@ -391,10 +499,12 @@ func (m *Manager) Create(ctx context.Context, mirrorName, baseRef, candidateRef,
 		BaseSHA:      baseSHA,
 		CandidateSHA: candidateSHA,
 		MergeBase:    mergeBase,
-		Dirty:        st.Dirty,
 		Ownership:    OwnershipManaged,
 		CreatedAt:    time.Now().UTC(),
 		mirror:       mi.name,
+	}
+	if err := ws.SetChanges(st.Dirty, false); err != nil {
+		return nil, err
 	}
 
 	m.mu.Lock()
@@ -456,14 +566,24 @@ func (m *Manager) Status(ctx context.Context, name string) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
+	hasUntracked, err := m.hasUntracked(ctx, ws.Path)
+	if err != nil {
+		return Status{}, err
+	}
 	m.mu.Lock()
-	ws.Dirty = st.Dirty
+	err = ws.SetChanges(st.Dirty, hasUntracked)
 	m.mu.Unlock()
+	if err != nil {
+		return Status{}, err
+	}
 	return st, nil
 }
 
 func (m *Manager) status(ctx context.Context, path string) (Status, error) {
-	out, err := m.git(ctx, path, "status", "--porcelain")
+	// Do not inherit status.showUntrackedFiles from repository configuration:
+	// SetChanges treats an untracked-only worktree as dirty, and hasUntracked
+	// independently observes those files below.
+	out, err := m.git(ctx, path, "status", "--porcelain", "--untracked-files=normal")
 	if errors.Is(err, buflimit.ErrOutputLimit) {
 		return Status{Dirty: true}, nil
 	}

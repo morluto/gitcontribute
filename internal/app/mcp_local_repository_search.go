@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
@@ -10,29 +11,33 @@ import (
 
 // SearchRepositories performs a local-only repository search.
 func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpcontract.SearchRepositoriesInput) (mcpcontract.SearchRepositoriesOutput, error) {
-	in.Query = strings.TrimSpace(in.Query)
 	repoRef, err := optionalRepoRef(in.Owner, in.Repo)
 	if err != nil {
 		return mcpcontract.SearchRepositoriesOutput{}, err
 	}
-	repoFilter := ""
-	if repoRef.IsValid() {
-		repoFilter = repoRef.String()
-	}
-
-	res, err := r.searchCorpus(ctx, in.Query, contracts.SearchOptions{
+	request, err := parseSearchRequest(in.Query, contracts.SearchOptions{
 		Kind:          "repos",
-		Repo:          repoFilter,
 		Limit:         in.Limit,
 		Cursor:        in.Cursor,
 		Sort:          in.Sort,
 		SnapshotToken: in.SnapshotToken,
-	})
+	}, repoRef)
+	if err != nil {
+		return mcpcontract.SearchRepositoriesOutput{}, err
+	}
+	repositoryRequest, ok := request.(repositorySearchRequest)
+	if !ok {
+		return mcpcontract.SearchRepositoriesOutput{}, errors.New("repository search parser returned another operation")
+	}
+	in.Query = request.read().query
+	in.Limit = request.read().page.Limit()
+	in.Sort = repositoryRequest.order.String()
+	res, err := r.searchCorpus(ctx, request)
 	if err != nil {
 		return mcpcontract.SearchRepositoriesOutput{}, err
 	}
 	if len(res.Matches) == 0 {
-		provenance, err := offlineReadProvenance("repository_search", res.ObservationWatermark, in, res.NextCursor == "", res.NextCursor != "", true)
+		provenance, err := offlineReadProvenance("repository_search", res.ObservationWatermark, in, res.NextCursor != "", true)
 		if err != nil {
 			return mcpcontract.SearchRepositoriesOutput{}, err
 		}
@@ -61,11 +66,11 @@ func (r *MCPReader) SearchRepositories(ctx context.Context, in mcpcontract.Searc
 			}
 		}
 	}
-	provenance, err := offlineReadProvenance("repository_search", res.ObservationWatermark, in, res.NextCursor == "", res.NextCursor != "", true)
+	provenance, err := offlineReadProvenance("repository_search", res.ObservationWatermark, in, res.NextCursor != "", true)
 	if err != nil {
 		return mcpcontract.SearchRepositoriesOutput{}, err
 	}
-	incomplete := len(missing) > 0 || batch.Status != "complete" || provenance.UnknownCoverage
+	incomplete := len(missing) > 0 || batch.Status != "complete" || provenance.UnknownCoverage()
 	var recovery *mcpcontract.RecoveryPlan
 	if len(missing) > 0 {
 		calls := make([]mcpcontract.ToolCall, 0, len(missing))

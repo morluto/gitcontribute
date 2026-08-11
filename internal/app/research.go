@@ -24,17 +24,16 @@ func (s *Service) ThreadResearchBrief(ctx context.Context, ref research.ThreadRe
 		if err := finishCorpusRead(ctx, c, revision); err != nil {
 			return nil, err
 		}
-		complete, truncated, unknownCoverage := researchBriefCompleteness(brief)
-		provenance, err := offlineReadProvenance("research_brief", revision, ref, complete, truncated, unknownCoverage)
+		truncated, unknownCoverage := researchBriefCompleteness(brief)
+		provenance, err := offlineReadProvenance("research_brief", revision, ref, truncated, unknownCoverage)
 		if err != nil {
 			return nil, err
 		}
-		brief.Provenance = research.ReadProvenance{
-			SnapshotToken: provenance.SnapshotToken, Durable: provenance.Durable,
-			ObservationWatermark: provenance.ObservationWatermark, QueryDigestSHA256: provenance.QueryDigestSHA256,
-			Complete: provenance.Complete, Truncated: provenance.Truncated, UnknownCoverage: provenance.UnknownCoverage,
-			Limitations: append([]string(nil), provenance.Limitations...),
-		}
+		brief.Provenance = research.NewReadProvenance(
+			provenance.SnapshotToken, provenance.Durable, provenance.ObservationWatermark,
+			provenance.QueryDigestSHA256, provenance.Truncated(), provenance.UnknownCoverage(),
+		)
+		brief.Provenance.Limitations = append([]string(nil), provenance.Limitations...)
 		return brief, nil
 	}
 	if errors.Is(err, errRepositoryNotFound) || errors.Is(err, research.ErrThreadNotFound) || errors.Is(err, research.ErrThreadKindMismatch) {
@@ -43,27 +42,23 @@ func (s *Service) ThreadResearchBrief(ctx context.Context, ref research.ThreadRe
 	return nil, err
 }
 
-func researchBriefCompleteness(brief *research.Brief) (complete, truncated, unknownCoverage bool) {
+func researchBriefCompleteness(brief *research.Brief) (truncated, unknownCoverage bool) {
 	statuses := []research.SectionStatus{
 		brief.Sections.CurrentState.Status, brief.Sections.Problem.Status, brief.Sections.Acceptance.Status,
 		brief.Sections.Participants.Status, brief.Sections.Timeline.Status, brief.Sections.Duplicates.Status,
 		brief.Sections.PullRequests.Status, brief.Sections.Code.Status, brief.Sections.Guidance.Status,
 		brief.Sections.Health.Status, brief.Sections.Coverage.Status, brief.Sections.Next.Status,
 	}
-	complete = true
 	for _, status := range statuses {
 		switch status {
 		case research.StatusAvailable:
 		case research.StatusPartial:
-			complete = false
 			truncated = true
 		case research.StatusUnknown:
-			complete = false
 			unknownCoverage = true
 		default:
-			complete = false
 			unknownCoverage = true
 		}
 	}
-	return complete, truncated, unknownCoverage
+	return truncated, unknownCoverage
 }

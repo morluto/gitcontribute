@@ -17,11 +17,14 @@ func TestSnapshotTokenReadFailsClosedAfterCorpusMutation(t *testing.T) {
 	if _, err := svc.corpus.ApplyRepositoryObservation(ctx, "acme", "rocket", "repo-1", time.Unix(1, 0).UTC(), `{}`); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := svc.corpus.MaterializeReadSnapshot(ctx, corpus.SnapshotMaterialization{
-		Kind: "thread_search", Scope: "acme/rocket", SourceManifest: map[string]int64{"observation_watermark": 1},
-		DerivedVersions: map[string]string{"search": "v1"}, Completeness: map[string]bool{"complete": true},
-		Provenance: map[string]string{"producer": "test"}, Payload: map[string]any{"query": "rocket"},
-	})
+	materialization, err := corpus.NewSnapshotMaterialization(
+		"thread_search", "acme/rocket", map[string]int64{"observation_watermark": 1}, map[string]string{"search": "v1"},
+		map[string]bool{"complete": true}, map[string]string{"producer": "test"}, map[string]any{"query": "rocket"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := svc.corpus.MaterializeReadSnapshot(ctx, materialization)
 	if err != nil {
 		t.Fatal(err)
 	}

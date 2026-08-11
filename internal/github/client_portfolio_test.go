@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 func TestGetAuthenticatedIdentity(t *testing.T) {
@@ -161,7 +162,7 @@ func TestSearchAuthoredPullRequestsBuildsQueryAndExtractsRepository(t *testing.T
 			if item.RepositoryOwner != "lab" || item.RepositoryName != "runtime" {
 				t.Errorf("repository = %q/%q, want lab/runtime", item.RepositoryOwner, item.RepositoryName)
 			}
-			if item.Kind != ThreadKindPullRequest || item.Number != 42 {
+			if item.Kind != domain.PullRequestKind || item.Number != 42 {
 				t.Errorf("item = kind %q number %d, want pull_request #42", item.Kind, item.Number)
 			}
 		})

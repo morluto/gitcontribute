@@ -120,10 +120,14 @@ func (s *Server) listConcerns(ctx context.Context, _ *mcp.CallToolRequest, in mc
 }
 
 func (s *Server) createConcern(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.CreateConcernInput) (*mcp.CallToolResult, mcpcontract.DurableArtifactReference, error) {
-	if err := validateRepo(mcpcontract.RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
+	owner, repo, err := normalizeRepository(in.Owner, in.Repo)
+	if err != nil {
 		return nil, mcpcontract.DurableArtifactReference{}, err
 	}
-	if strings.TrimSpace(in.CommitSHA) == "" && strings.TrimSpace(in.WorkspaceID) == "" {
+	in.Owner, in.Repo = owner, repo
+	in.CommitSHA = strings.TrimSpace(in.CommitSHA)
+	in.WorkspaceID = strings.TrimSpace(in.WorkspaceID)
+	if in.CommitSHA == "" && in.WorkspaceID == "" {
 		return nil, mcpcontract.DurableArtifactReference{}, mcpcontract.InvalidArgument("commit_sha", "commit_sha or workspace_id is required", map[string]any{"commit_sha": "<sha>"})
 	}
 	operator, ok := s.reader.(ConcernOperator)

@@ -22,7 +22,7 @@ func TestUpgradeBlocksActivationWhenTargetSchemaExceedsCorpus(t *testing.T) {
 	home, _, configPath, want, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.4")
 	dbPath := filepath.Join(home, "gitcontribute.db")
 	svc.cfg.Database = dbPath
-	setRuntimeContract(t, "1.2.4", 999)
+	setRuntimeContract(t, svc, "1.2.4", 999)
 
 	db, err := corpus.Open(context.Background(), dbPath)
 	if err != nil {
@@ -53,7 +53,7 @@ func TestUpgradeBlocksActivationWhenTargetSchemaExceedsCorpus(t *testing.T) {
 
 func TestUpgradeBlocksActivationWithInvalidRuntimeContract(t *testing.T) {
 	_, _, configPath, want, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.4")
-	setRuntimeContractOutput(t, "not-json")
+	setRuntimeContractOutput(t, svc, "not-json")
 
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
@@ -96,7 +96,7 @@ func TestUpgradeReportsTargetRuntimeUnavailableWhenNoStagedExecutable(t *testing
 
 func TestUpgradeBlocksActivationWithTrailingRuntimeContract(t *testing.T) {
 	_, _, configPath, want, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.4")
-	setRuntimeContractOutput(t, `{"name":"gitcontribute","version":"1.2.4","supported_schema_version":1}{"unexpected":"second value"}`)
+	setRuntimeContractOutput(t, svc, `{"name":"gitcontribute","version":"1.2.4","supported_schema_version":1}{"unexpected":"second value"}`)
 
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
@@ -117,14 +117,12 @@ func TestUpgradeBlocksActivationWithTrailingRuntimeContract(t *testing.T) {
 }
 
 func TestReadRuntimeContractAcceptsUnknownFields(t *testing.T) {
-	original := runtimeContractCommand
-	t.Cleanup(func() { runtimeContractCommand = original })
 	var gotPath string
-	runtimeContractCommand = func(_ context.Context, path string) ([]byte, error) {
+	command := func(_ context.Context, path string) ([]byte, error) {
 		gotPath = path
 		return []byte(`{"name":"gitcontribute","version":"1.2.4","supported_schema_lineage":"gitcontribute-canonical-v1","supported_schema_version":28,"future_field":{"enabled":true}}`), nil
 	}
-	contract, err := readRuntimeContract(context.Background(), "/release/candidate")
+	contract, err := readRuntimeContract(context.Background(), command, "/release/candidate")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,17 +141,15 @@ func TestUpgradeRejectsDestinationRuntimeContractDisagreementBeforeRegistration(
 	if err != nil {
 		t.Fatal(err)
 	}
-	original := runtimeContractCommand
-	t.Cleanup(func() { runtimeContractCommand = original })
 	var paths []string
-	runtimeContractCommand = func(_ context.Context, path string) ([]byte, error) {
+	svc.stubRuntimeContract(func(_ context.Context, path string) ([]byte, error) {
 		paths = append(paths, path)
 		schema := 1
 		if filepath.Clean(path) == filepath.Clean(destination) {
 			schema = 2
 		}
 		return []byte(fmt.Sprintf(`{"name":"gitcontribute","version":"1.2.4","supported_schema_lineage":"gitcontribute-canonical-v1","supported_schema_version":%d}`, schema)), nil
-	}
+	})
 
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
@@ -175,15 +171,6 @@ func TestUpgradeRejectsDestinationRuntimeContractDisagreementBeforeRegistration(
 func TestUpgradeRejectsMismatchedPostInstallNPMVersion(t *testing.T) {
 	t.Setenv("npm_command", "")
 	t.Setenv("npm_lifecycle_event", "")
-	originalCmd := upgradeCommand
-	originalExec := osExecutable
-	originalGOOS := upgradeGOOS
-	t.Cleanup(func() {
-		upgradeCommand = originalCmd
-		osExecutable = originalExec
-		upgradeGOOS = originalGOOS
-	})
-	upgradeGOOS = "linux"
 
 	home := t.TempDir()
 	globalRoot := filepath.Join(home, "global", "lib", "node_modules")
@@ -197,8 +184,7 @@ func TestUpgradeRejectsMismatchedPostInstallNPMVersion(t *testing.T) {
 	}
 	writePackageJSON(t, pkgRoot, "1.2.3")
 
-	osExecutable = func() (string, error) { return exe, nil }
-	upgradeCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+	command := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		switch {
 		case name == "npm" && len(args) >= 2 && args[0] == "root" && args[1] == "--global":
 			return []byte(globalRoot + "\n"), nil
@@ -213,6 +199,9 @@ func TestUpgradeRejectsMismatchedPostInstallNPMVersion(t *testing.T) {
 	}
 
 	svc := testService(t, home, "1.2.3", "")
+	svc.stubExecutable(func() (string, error) { return exe, nil })
+	svc.stubUpgradeCommand(command)
+	svc.stubUpgradePlatform("linux")
 	_, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err == nil {
 		t.Fatal("expected error when installed npm version does not match target")
@@ -224,7 +213,7 @@ func TestUpgradeRejectsMismatchedPostInstallNPMVersion(t *testing.T) {
 
 func TestUpgradeBlocksActivationWhenRuntimeContractLacksSupportedSchema(t *testing.T) {
 	_, _, configPath, want, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.4")
-	setRuntimeContractOutput(t, `{"name":"gitcontribute","version":"1.2.4"}`)
+	setRuntimeContractOutput(t, svc, `{"name":"gitcontribute","version":"1.2.4"}`)
 
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {

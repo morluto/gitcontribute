@@ -80,7 +80,7 @@ func (r *MCPStdioRunner) Run(ctx context.Context, req RunRequest) (*RunResult, e
 			phases.ShutdownStartedAt = time.Now().UTC()
 			closer = nil
 		}
-		return finishProtocolResult(ctx, cmd, sampler, started, phases, stderr, newBoundedWriter(int(outputLimit)), err, "readiness", readinessTimedOut, closer), nil
+		return finishProtocolResult(ctx, cmd, sampler, started, phases, stderr, newBoundedWriter(int(outputLimit)), err, ValidationPhaseReadiness, readinessTimedOut, closer), nil
 	}
 	phases.InitializedAt = time.Now().UTC()
 	phases.FirstResponseAt = phases.InitializedAt
@@ -93,24 +93,24 @@ func (r *MCPStdioRunner) Run(ctx context.Context, req RunRequest) (*RunResult, e
 	if encodeErr := json.NewEncoder(stdout).Encode(tools); encodeErr != nil && listErr == nil {
 		listErr = fmt.Errorf("encode tools/list response: %w", encodeErr)
 	}
-	return finishProtocolResult(ctx, cmd, sampler, started, phases, stderr, stdout, listErr, "execution", errors.Is(ctx.Err(), context.DeadlineExceeded), session), nil
+	return finishProtocolResult(ctx, cmd, sampler, started, phases, stderr, stdout, listErr, ValidationPhaseExecution, errors.Is(ctx.Err(), context.DeadlineExceeded), session), nil
 }
 
 func protocolStartResult(ctx context.Context, started time.Time, phases RunPhases, stderr *boundedWriter, runErr error) *RunResult {
 	completed := time.Now().UTC()
-	timeoutPhase := ""
+	timeoutPhase := ValidationPhaseNone
 	classification := RunClassificationError
 	if ctx.Err() != nil {
 		classification = RunClassificationCancelled
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			timeoutPhase = "startup"
+			timeoutPhase = ValidationPhaseStartup
 		}
 	}
 	return &RunResult{
 		ExitCode: -1, Stderr: stderr.String(), Truncated: stderr.Overflow(), StartedAt: started,
 		CompletedAt: completed, Error: runErr.Error(), Classification: classification,
-		Phases: phases, TimeoutPhase: timeoutPhase, FailurePhase: "startup",
-		Cleanup: CleanupResult{Status: "unavailable", Reason: "process did not start", CheckedAt: completed},
+		Phases: phases, TimeoutPhase: timeoutPhase, FailurePhase: ValidationPhaseStartup,
+		Cleanup: CleanupResult{Status: CleanupUnavailable, Reason: "process did not start", CheckedAt: completed},
 	}
 }
 
@@ -123,13 +123,13 @@ func finishProtocolResult(
 	stderr *boundedWriter,
 	stdout *boundedWriter,
 	runErr error,
-	errorPhase string,
+	errorPhase ValidationPhase,
 	timedOut bool,
 	closer protocolCloser,
 ) *RunResult {
 	phases.ExecutionEndedAt = time.Now().UTC()
-	failurePhase := ""
-	timeoutPhase := ""
+	failurePhase := ValidationPhaseNone
+	timeoutPhase := ValidationPhaseNone
 	classification := RunClassificationPassing
 	if runErr != nil {
 		classification = RunClassificationError
@@ -149,11 +149,11 @@ func finishProtocolResult(
 	if closeErr != nil && runErr == nil && !isExpectedMCPShutdownError(closeErr) {
 		runErr = fmt.Errorf("close MCP session: %w", closeErr)
 		classification = RunClassificationError
-		failurePhase = "shutdown"
+		failurePhase = ValidationPhaseShutdown
 	}
 	if shutdownTimedOut {
-		failurePhase = "shutdown"
-		timeoutPhase = "shutdown"
+		failurePhase = ValidationPhaseShutdown
+		timeoutPhase = ValidationPhaseShutdown
 		classification = RunClassificationCancelled
 	}
 	sampled := sampler.finish()

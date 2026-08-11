@@ -56,9 +56,11 @@ func (s *Server) registerCommitPlanning() {
 }
 
 func (s *Server) inspectCommitChanges(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.InspectCommitChangesInput) (*mcp.CallToolResult, mcpcontract.CommitInventoryOutput, error) {
-	if strings.TrimSpace(in.WorkspaceID) == "" {
-		return nil, mcpcontract.CommitInventoryOutput{}, mcpcontract.InvalidArgument("workspace_id", "is required", nil)
+	workspaceID, err := normalizeID("workspace_id", in.WorkspaceID)
+	if err != nil {
+		return nil, mcpcontract.CommitInventoryOutput{}, err
 	}
+	in.WorkspaceID = workspaceID
 	reader, ok := s.reader.(CommitPlannerReader)
 	if !ok {
 		return nil, mcpcontract.CommitInventoryOutput{}, errors.New("semantic commit planning is not available")
@@ -68,7 +70,13 @@ func (s *Server) inspectCommitChanges(ctx context.Context, _ *mcp.CallToolReques
 }
 
 func (s *Server) planSemanticCommits(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.PlanSemanticCommitsInput) (*mcp.CallToolResult, mcpcontract.SemanticCommitPlanOutput, error) {
-	if strings.TrimSpace(in.WorkspaceID) == "" || strings.TrimSpace(in.ExpectedInventorySHA256) == "" {
+	workspaceID, err := normalizeID("workspace_id", in.WorkspaceID)
+	if err != nil {
+		return nil, mcpcontract.SemanticCommitPlanOutput{}, err
+	}
+	in.WorkspaceID = workspaceID
+	in.ExpectedInventorySHA256 = strings.TrimSpace(in.ExpectedInventorySHA256)
+	if in.ExpectedInventorySHA256 == "" {
 		return nil, mcpcontract.SemanticCommitPlanOutput{}, mcpcontract.InvalidArgument("expected_inventory_sha256", "workspace_id and expected_inventory_sha256 are required", nil)
 	}
 	reader, ok := s.reader.(CommitPlannerReader)

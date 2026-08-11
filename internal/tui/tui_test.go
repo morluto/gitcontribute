@@ -154,7 +154,7 @@ func TestInitLoadsData(t *testing.T) {
 	fake := &fakeReader{data: sampleData()}
 	m := loadModel(t, fake)
 
-	if !m.loaded {
+	if m.loadState != corpusLoaded {
 		t.Fatal("expected model to be loaded")
 	}
 	if fake.loadCount != 1 {
@@ -322,7 +322,7 @@ func TestKeyboardHelp(t *testing.T) {
 	model, _ = m.Update(keyPress('?'))
 	m = model.(Model)
 
-	if !m.help {
+	if m.overlay != overlayHelp {
 		t.Fatal("expected help to be visible")
 	}
 
@@ -352,14 +352,14 @@ func TestSearchExitAndDetailClose(t *testing.T) {
 	// open search
 	model, _ := m.Update(keyPress('/'))
 	m = model.(Model)
-	if !m.searching {
+	if m.overlay != overlaySearch {
 		t.Fatal("expected search to be active")
 	}
 
 	// close search
 	model, _ = m.Update(keyPress(tea.KeyEsc))
 	m = model.(Model)
-	if m.searching {
+	if m.overlay == overlaySearch {
 		t.Fatal("expected search to be inactive")
 	}
 
@@ -424,7 +424,7 @@ func TestCandidateEnterOpensResearchBriefAtEveryResponsiveSize(t *testing.T) {
 			m = model.(Model)
 			model, _ = m.Update(keyPress(tea.KeyEnter))
 			m = model.(Model)
-			if !m.briefOpen || !strings.Contains(m.View().Content, "RESEARCH BRIEF") {
+			if m.overlay != overlayBrief || !strings.Contains(m.View().Content, "RESEARCH BRIEF") {
 				t.Fatalf("candidate Enter did not open the brief at %dx%d:\n%s", size.width, size.height, m.View().Content)
 			}
 		})
@@ -525,7 +525,7 @@ func TestDetailShowsSelectedItemsPrimaryContextualAction(t *testing.T) {
 	data := sampleData()
 	data.Candidates[0].Actions = []tuicontract.Action{{
 		ID: "start_investigation", Label: "Start investigation",
-		Capability: tuicontract.CapabilityLocalWrite, RequiresConfirmation: true,
+		Capability: tuicontract.CapabilityLocalWrite,
 	}}
 	data.Hypotheses[0].Actions = []tuicontract.Action{{
 		ID: "check_duplicates", Label: "Check duplicates",
@@ -548,7 +548,7 @@ func TestDetailKeepsPrimaryActionVisibleWhenEvidenceOverflows(t *testing.T) {
 	data := sampleData()
 	data.Candidates[0].Actions = []tuicontract.Action{{
 		ID: "start_investigation", Label: "Start investigation",
-		Capability: tuicontract.CapabilityLocalWrite, RequiresConfirmation: true,
+		Capability: tuicontract.CapabilityLocalWrite,
 	}}
 	data.Candidates[0].Assessment = &tuicontract.Assessment{}
 	for i := 0; i < 20; i++ {
@@ -629,7 +629,7 @@ func TestWorkbenchNeverExceedsTerminalViewport(t *testing.T) {
 
 			m.actionProvider = &fakeActionProvider{actions: []tuicontract.Action{{
 				ID: "start", Label: "Start investigation", Description: "Create local records.",
-				Capability: tuicontract.CapabilityLocalWrite, RequiresConfirmation: true,
+				Capability: tuicontract.CapabilityLocalWrite,
 			}}}
 			model, cmd := m.Update(keyPress('a'))
 			m = model.(Model)

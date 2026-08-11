@@ -147,11 +147,11 @@ type GetActorsInput struct {
 // ActorBatchItem is intentionally small: actor reads report item state without
 // embedding the catalog-wide workflow recovery union in every result schema.
 type ActorBatchItem[T any] struct {
-	Key     string `json:"key"`
-	Status  string `json:"item_status" jsonschema:"complete, retryable, unavailable, or failed"`
-	Reason  string `json:"reason,omitempty"`
-	Message string `json:"message,omitempty"`
-	Value   *T     `json:"value,omitempty"`
+	Key     string          `json:"key"`
+	Status  BatchItemStatus `json:"item_status" jsonschema:"complete, retryable, unavailable, or failed"`
+	Reason  string          `json:"reason,omitempty"`
+	Message string          `json:"message,omitempty"`
+	Value   *T              `json:"value,omitempty"`
 }
 
 type GetActorsOutput struct {

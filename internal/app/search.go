@@ -15,9 +15,44 @@ import (
 	"github.com/morluto/gitcontribute/internal/lens"
 )
 
+type searchMatchKind uint8
+
+const (
+	searchRepositoryMatch searchMatchKind = iota + 1
+	searchIssueMatch
+	searchPullRequestMatch
+	searchCodeMatch
+)
+
+func searchMatchKindForThread(kind domain.ThreadKind) (searchMatchKind, error) {
+	switch kind {
+	case domain.IssueKind:
+		return searchIssueMatch, nil
+	case domain.PullRequestKind:
+		return searchPullRequestMatch, nil
+	default:
+		return 0, fmt.Errorf("unsupported stored thread kind %q", kind)
+	}
+}
+
+func (k searchMatchKind) String() string {
+	switch k {
+	case searchRepositoryMatch:
+		return "repo"
+	case searchIssueMatch:
+		return string(domain.IssueKind)
+	case searchPullRequestMatch:
+		return string(domain.PullRequestKind)
+	case searchCodeMatch:
+		return "code"
+	default:
+		return ""
+	}
+}
+
 type searchMatch struct {
 	Repo              domain.RepoRef
-	Kind              string
+	Kind              searchMatchKind
 	Number            int
 	State             string
 	StateReason       string
@@ -30,17 +65,11 @@ type searchMatch struct {
 	Draft             bool
 	ClosedAt          time.Time
 	Merge             domain.MergeStatus
-	Description       string
-	DefaultBranch     string
 	Language          string
-	License           string
-	Topics            []string
 	Archived          bool
-	Fork              bool
 	Stars             int
 	Watchers          int
 	Forks             int
-	OpenIssues        int
 	UpdatedAt         time.Time
 	URL               string
 	Score             float64
@@ -63,79 +92,44 @@ type searchResult struct {
 
 const maxLensCandidates = 1000
 
-func (s *Service) searchCorpus(ctx context.Context, query string, opts contracts.SearchOptions) (searchResult, error) {
-	if opts.Limit <= 0 {
-		opts.Limit = 20
-	}
-	if opts.Limit > 100 {
-		return searchResult{}, errors.New("search limit cannot exceed 100")
-	}
-
+func (s *Service) searchCorpus(ctx context.Context, request parsedSearchRequest) (searchResult, error) {
+	read := request.read()
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return searchResult{}, err
 	}
-	revision, err := beginCorpusRead(ctx, c, opts.SnapshotToken)
+	revision, err := beginCorpusRead(ctx, c, read.snapshotToken)
 	if err != nil {
 		return searchResult{}, err
 	}
 	now := s.now()
 
 	var result searchResult
-	if opts.Lens != "" {
-		if opts.Cursor != "" {
-			return searchResult{}, errors.New("cursor pagination cannot be combined with --lens because lens ranking is not cursor-stable")
+	switch parsed := request.(type) {
+	case repositorySearchRequest:
+		if parsed.repo.IsValid() {
+			result, err = s.searchRepositoryExact(ctx, c, read.query, parsed.repo)
+		} else {
+			result, err = s.searchRepositories(ctx, c, read.query, read.page, parsed.order)
 		}
-		result, err = s.searchWithLens(ctx, c, query, opts, now)
-	} else {
-		var repoID int64
-		var repoRef domain.RepoRef
-		repoID, repoRef, err = s.resolveRepoFilter(ctx, c, opts)
+	case codeSearchRequest:
+		result, err = s.searchCode(ctx, c, read.query, parsed.repo, read.page)
+	case threadSearchRequest:
+		var scope corpus.ThreadRepositoryScope
+		var found bool
+		scope, found, err = s.resolveSearchRepository(ctx, c, parsed.repo)
 		if err != nil {
 			return searchResult{}, err
 		}
-		switch opts.Kind {
-		case "repos":
-			if opts.Repo != "" {
-				if opts.Cursor != "" {
-					return searchResult{}, errors.New("cursor pagination is not supported for exact repository search")
-				}
-				ref, parseErr := s.parseRepoRef(opts.Repo)
-				if parseErr != nil {
-					return searchResult{}, parseErr
-				}
-				result, err = s.searchRepositoryExact(ctx, c, query, ref)
-			} else {
-				result, err = s.searchRepositories(ctx, c, query, opts.Limit, opts.Cursor, opts.Sort)
-			}
-		case "code":
-			ref, parseErr := s.parseRepoRef(opts.Repo)
-			if parseErr != nil {
-				return searchResult{}, parseErr
-			}
-			result, err = s.searchCode(ctx, c, query, ref, opts.Limit, opts.Cursor)
-		case "all":
-			return searchResult{}, errors.New("combined search is not supported because FTS ranks from different indexes are not comparable; choose repos, threads, issues, prs, or code")
-		default:
-			kind := ""
-			switch opts.Kind {
-			case "issue", "issues":
-				kind = corpus.ThreadKindIssue
-			case "pr", "prs", "pull_request":
-				kind = corpus.ThreadKindPullRequest
-			case "threads", "":
-				kind = ""
-			default:
-				return searchResult{}, fmt.Errorf("unsupported search kind %q", opts.Kind)
-			}
-			if repoRef != (domain.RepoRef{}) && repoID == 0 {
-				result = searchResult{Query: query, Total: 0, Matches: nil}
-			} else if query == "" {
-				result = searchResult{Query: query, Total: 0, Matches: nil}
-			} else {
-				result, err = s.searchThreads(ctx, c, query, repoID, repoRef, kind, opts)
-			}
+		if !found || read.query == "" {
+			result = searchResult{Query: read.query, Matches: nil}
+		} else {
+			result, err = s.searchThreads(ctx, c, read.query, scope, parsed.criteria, read.page)
 		}
+	case lensSearchRequest:
+		result, err = s.searchWithLens(ctx, c, parsed, now)
+	default:
+		return searchResult{}, errors.New("invalid parsed search request")
 	}
 	if err != nil {
 		return searchResult{}, err
@@ -143,46 +137,35 @@ func (s *Service) searchCorpus(ctx context.Context, query string, opts contracts
 	if err := finishCorpusRead(ctx, c, revision); err != nil {
 		return searchResult{}, err
 	}
-	result.SnapshotToken = snapshotIdentity(opts.SnapshotToken, revision)
+	result.SnapshotToken = snapshotIdentity(read.snapshotToken, revision)
 	result.ObservationWatermark = revision
 	return result, nil
 }
 
-func (s *Service) parseRepoRef(repo string) (domain.RepoRef, error) {
-	if repo == "" {
-		return domain.RepoRef{}, nil
-	}
-	ref, err := domain.ParseRepoRef(repo)
-	if err != nil {
-		return domain.RepoRef{}, fmt.Errorf("invalid repository filter %q: %w", repo, err)
-	}
-	return ref, nil
-}
-
-func (s *Service) resolveRepoFilter(ctx context.Context, c *corpus.Corpus, opts contracts.SearchOptions) (int64, domain.RepoRef, error) {
-	if opts.Repo == "" || opts.Kind == "code" || opts.Kind == "all" || opts.Kind == "repos" {
-		return 0, domain.RepoRef{}, nil
-	}
-	ref, err := s.parseRepoRef(opts.Repo)
-	if err != nil {
-		return 0, domain.RepoRef{}, err
+func (s *Service) resolveSearchRepository(ctx context.Context, c *corpus.Corpus, ref domain.RepoRef) (corpus.ThreadRepositoryScope, bool, error) {
+	if !ref.IsValid() {
+		return corpus.AllThreadRepositories(), true, nil
 	}
 	repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
 	if err != nil {
-		return 0, domain.RepoRef{}, err
+		return corpus.ThreadRepositoryScope{}, false, err
 	}
 	if repo == nil {
-		return 0, ref, nil
+		return corpus.ThreadRepositoryScope{}, false, nil
 	}
-	return repo.ID, ref, nil
+	scope, err := corpus.NewThreadRepositoryScope(ref, repo.ID)
+	if err != nil {
+		return corpus.ThreadRepositoryScope{}, false, err
+	}
+	return scope, true, nil
 }
 
-func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query string, repoID int64, ref domain.RepoRef, kind string, opts contracts.SearchOptions) (searchResult, error) {
+func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query string, scope corpus.ThreadRepositoryScope, criteria threadSearchCriteria, pageRequest corpus.SearchPage) (searchResult, error) {
 	filter := corpus.SearchFilter{
-		RepoID: repoID, Repo: ref.String(), Kind: kind, State: opts.State, StateReason: opts.StateReason, Merged: opts.Merged, Author: opts.Author,
-		Association: opts.Association, Assignee: opts.Assignee,
-		Labels: opts.Labels, UpdatedAfter: opts.UpdatedAfter, UpdatedBefore: opts.UpdatedBefore, Limit: opts.Limit, Cursor: opts.Cursor,
-		Sort: opts.Sort, MatchMode: opts.MatchMode,
+		Repository: scope, Kind: criteria.kind.corpusThreadKind(), State: criteria.state, StateReason: criteria.stateReason, Merge: criteria.merge, Author: criteria.author,
+		Association: criteria.association, Assignee: criteria.assignee,
+		Labels: criteria.labels, UpdatedAfter: criteria.updatedAfter, UpdatedBefore: criteria.updatedBefore, Page: pageRequest,
+		Order: criteria.order, TermMatch: criteria.match,
 	}
 	page, err := c.SearchThreadsPage(ctx, query, filter)
 	if err != nil {
@@ -223,11 +206,15 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 		if err != nil {
 			return searchResult{}, fmt.Errorf("parse stored repository: %w", err)
 		}
+		kind, err := searchMatchKindForThread(t.Kind)
+		if err != nil {
+			return searchResult{}, err
+		}
 		m := searchMatch{
 			Repo:              ref,
-			Kind:              t.Kind,
+			Kind:              kind,
 			Number:            t.Number,
-			State:             t.State,
+			State:             string(t.State),
 			StateReason:       t.StateReason,
 			Title:             t.Title,
 			Body:              t.Body,
@@ -235,16 +222,18 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 			AuthorAssociation: t.AuthorAssociation,
 			Labels:            t.Labels,
 			Assignees:         t.Assignees,
-			Draft:             t.Draft, ClosedAt: t.ClosedAt, Merge: t.Merge,
-			Language:  repo.Language,
-			Archived:  repo.Archived,
-			Stars:     repo.Stars,
-			Watchers:  repo.Watchers,
-			Forks:     repo.Forks,
-			UpdatedAt: t.SourceUpdatedAt,
-			URL:       threadURL(ref, t.Kind, t.Number),
-			Freshness: t.SourceUpdatedAt,
-			Coverage:  coverage,
+			Draft:             t.Draft,
+			ClosedAt:          t.ClosedAt,
+			Merge:             t.Merge,
+			Language:          repo.Language,
+			Archived:          repo.Archived,
+			Stars:             repo.Stars,
+			Watchers:          repo.Watchers,
+			Forks:             repo.Forks,
+			UpdatedAt:         t.SourceUpdatedAt,
+			URL:               threadURL(ref, t.Kind, t.Number),
+			Freshness:         t.SourceUpdatedAt,
+			Coverage:          coverage,
 		}
 		m.MatchSource = t.MatchSource
 		m.MatchExcerpt = t.MatchExcerpt
@@ -265,8 +254,8 @@ func (s *Service) searchThreads(ctx context.Context, c *corpus.Corpus, query str
 	}, nil
 }
 
-func (s *Service) searchRepositories(ctx context.Context, c *corpus.Corpus, query string, limit int, cursor, sort string) (searchResult, error) {
-	page, err := c.ListRepositoriesWithOptions(ctx, query, corpus.RepositorySearchOptions{Limit: limit, Cursor: cursor, Sort: sort})
+func (s *Service) searchRepositories(ctx context.Context, c *corpus.Corpus, query string, pageRequest corpus.SearchPage, order corpus.SearchOrder) (searchResult, error) {
+	page, err := c.ListRepositoriesWithOptions(ctx, query, corpus.RepositorySearchOptions{Page: pageRequest, Order: order})
 	if err != nil {
 		return searchResult{}, fmt.Errorf("list repositories: %w", err)
 	}
@@ -337,19 +326,17 @@ func repositorySearchMatch(r corpus.Repository, coverage []string) (searchMatch,
 		return searchMatch{}, fmt.Errorf("parse stored repository: %w", err)
 	}
 	m := searchMatch{
-		Repo: ref, Kind: "repo", Title: ref.String(), Body: r.Description,
-		URL: fmt.Sprintf("https://github.com/%s", ref), Description: r.Description,
-		DefaultBranch: r.DefaultBranch, Language: r.Language, License: r.License,
-		Topics: r.Topics, Archived: r.Archived, Fork: r.Fork, Stars: r.Stars,
-		Watchers: r.Watchers, Forks: r.Forks, OpenIssues: r.OpenIssues,
+		Repo: ref, Kind: searchRepositoryMatch, Title: ref.String(), Body: r.Description,
+		URL: fmt.Sprintf("https://github.com/%s", ref), Language: r.Language,
+		Archived: r.Archived, Stars: r.Stars, Watchers: r.Watchers, Forks: r.Forks,
 		UpdatedAt: r.SourceUpdatedAt, Freshness: r.SourceUpdatedAt, Coverage: coverage,
 	}
 	m.Score = bm25Score(r.Rank)
 	return m, nil
 }
 
-func (s *Service) searchCode(ctx context.Context, c *corpus.Corpus, query string, ref domain.RepoRef, limit int, cursor string) (searchResult, error) {
-	page, err := c.SearchCodeWithOptions(ctx, query, corpus.CodeSearchOptions{Ref: ref, Limit: limit, Cursor: cursor})
+func (s *Service) searchCode(ctx context.Context, c *corpus.Corpus, query string, ref domain.RepoRef, pageRequest corpus.SearchPage) (searchResult, error) {
+	page, err := c.SearchCodeWithOptions(ctx, query, corpus.CodeSearchOptions{Ref: ref, Page: pageRequest})
 	if err != nil {
 		return searchResult{}, err
 	}
@@ -360,7 +347,7 @@ func (s *Service) searchCode(ctx context.Context, c *corpus.Corpus, query string
 		coverage := []string{"code"}
 		m := searchMatch{
 			Repo:      match.Repo,
-			Kind:      "code",
+			Kind:      searchCodeMatch,
 			Title:     match.Path,
 			Body:      match.Content,
 			URL:       fmt.Sprintf("https://github.com/%s/blob/%s/%s", match.Repo, match.Commit, match.Path),
@@ -395,16 +382,17 @@ func (s *Service) searchCode(ctx context.Context, c *corpus.Corpus, query string
 	}, nil
 }
 
-func (s *Service) searchWithLens(ctx context.Context, c *corpus.Corpus, query string, opts contracts.SearchOptions, now time.Time) (searchResult, error) {
-	lensRecord, err := c.GetLens(ctx, opts.Lens)
+func (s *Service) searchWithLens(ctx context.Context, c *corpus.Corpus, request lensSearchRequest, now time.Time) (searchResult, error) {
+	read := request.read()
+	lensRecord, err := c.GetLens(ctx, request.lens)
 	if err != nil {
 		return searchResult{}, fmt.Errorf("load lens: %w", err)
 	}
 	if lensRecord == nil {
-		return searchResult{}, failure.NotFound(fmt.Errorf("lens %q not found", opts.Lens))
+		return searchResult{}, failure.NotFound(fmt.Errorf("lens %q not found", request.lens))
 	}
 	def := lensRecord.Definition
-	matches, err := s.collectLensMatches(ctx, c, query, opts, now)
+	matches, err := s.collectLensMatches(ctx, c, read.query, request.selection)
 	if err != nil {
 		return searchResult{}, err
 	}
@@ -423,10 +411,7 @@ func (s *Service) searchWithLens(ctx context.Context, c *corpus.Corpus, query st
 	}
 
 	totalEligible := len(results)
-	limit := opts.Limit
-	if limit <= 0 {
-		limit = 20
-	}
+	limit := read.page.Limit()
 	if limit > len(results) {
 		limit = len(results)
 	}
@@ -441,108 +426,64 @@ func (s *Service) searchWithLens(ctx context.Context, c *corpus.Corpus, query st
 		m.Score = roundScore(r.Score)
 		out = append(out, m)
 	}
-	return searchResult{Query: query, Total: totalEligible, Matches: out, NextCursor: ""}, nil
+	return searchResult{Query: read.query, Total: totalEligible, Matches: out, NextCursor: ""}, nil
 }
 
-func (s *Service) collectLensMatches(ctx context.Context, c *corpus.Corpus, query string, opts contracts.SearchOptions, now time.Time) ([]searchMatch, error) {
-	var err error
-	var repoRef domain.RepoRef
-	var repoID int64
-	if opts.Repo != "" {
-		ref, err := s.parseRepoRef(opts.Repo)
-		if err != nil {
-			return nil, err
-		}
-		repoRef = ref
-		repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
-		if err != nil {
-			return nil, err
-		}
-		if repo == nil {
-			return []searchMatch{}, nil
-		}
-		repoID = repo.ID
+func (s *Service) collectLensMatches(ctx context.Context, c *corpus.Corpus, query string, selection lensSearchSelection) ([]searchMatch, error) {
+	repoRef := selection.repository()
+	scope, found, err := s.resolveSearchRepository(ctx, c, repoRef)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return []searchMatch{}, nil
 	}
 
-	var matches []searchMatch
-	switch opts.Kind {
-	case "repos":
-		if repoRef == (domain.RepoRef{}) {
-			matches, err = s.collectRepositoryMatches(ctx, c, query, opts)
-		} else {
-			var result searchResult
-			result, err = s.searchRepositoryExact(ctx, c, query, repoRef)
-			matches = result.Matches
+	switch selected := selection.(type) {
+	case repositoryLensSelection:
+		if repoRef.IsValid() {
+			result, err := s.searchRepositoryExact(ctx, c, query, repoRef)
+			return result.Matches, err
 		}
-	case "code":
-		matches, err = s.collectCodeMatches(ctx, c, query, repoRef, opts)
-	case "all":
-		threadMatches, err := s.collectThreadMatches(ctx, c, query, repoID, repoRef, "", opts, now)
+		return s.collectRepositoryMatches(ctx, c, query)
+	case codeLensSelection:
+		return s.collectCodeMatches(ctx, c, query, repoRef)
+	case threadLensSelection:
+		return s.collectThreadMatches(ctx, c, query, scope, selected.criteria)
+	case allLensSelection:
+		threadMatches, err := s.collectThreadMatches(ctx, c, query, scope, selected.criteria)
 		if err != nil {
 			return nil, err
 		}
 		var repoMatches []searchMatch
-		if repoRef == (domain.RepoRef{}) {
-			repoMatches, err = s.collectRepositoryMatches(ctx, c, query, opts)
-		} else {
-			var result searchResult
-			result, err = s.searchRepositoryExact(ctx, c, query, repoRef)
+		if repoRef.IsValid() {
+			result, searchErr := s.searchRepositoryExact(ctx, c, query, repoRef)
+			if searchErr != nil {
+				return nil, searchErr
+			}
 			repoMatches = result.Matches
-		}
-		if err != nil {
-			return nil, err
-		}
-		codeMatches, err := s.collectCodeMatches(ctx, c, query, repoRef, opts)
-		if err != nil {
-			return nil, err
-		}
-		matches = append(threadMatches, repoMatches...)
-		matches = append(matches, codeMatches...)
-	default:
-		kind := threadKindFromSearchKind(opts.Kind)
-		if kind == "" && opts.Kind != "" && opts.Kind != "threads" {
-			return nil, fmt.Errorf("unsupported search kind %q", opts.Kind)
-		}
-		matches, err = s.collectThreadMatches(ctx, c, query, repoID, repoRef, kind, opts, now)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if repoRef != (domain.RepoRef{}) {
-		filtered := matches[:0]
-		for _, match := range matches {
-			if match.Repo == repoRef {
-				filtered = append(filtered, match)
+		} else {
+			repoMatches, err = s.collectRepositoryMatches(ctx, c, query)
+			if err != nil {
+				return nil, err
 			}
 		}
-		matches = filtered
-	}
-
-	return matches, nil
-}
-
-func threadKindFromSearchKind(kind string) string {
-	switch kind {
-	case "issue", "issues":
-		return corpus.ThreadKindIssue
-	case "pr", "prs", "pull_request":
-		return corpus.ThreadKindPullRequest
-	case "threads", "":
-		return ""
+		codeMatches, err := s.collectCodeMatches(ctx, c, query, repoRef)
+		if err != nil {
+			return nil, err
+		}
+		matches := append(threadMatches, repoMatches...)
+		return append(matches, codeMatches...), nil
 	default:
-		return ""
+		return nil, errors.New("invalid parsed lens selection")
 	}
 }
 
-func (s *Service) collectThreadMatches(ctx context.Context, c *corpus.Corpus, query string, repoID int64, ref domain.RepoRef, kind string, opts contracts.SearchOptions, _ time.Time) ([]searchMatch, error) {
+func (s *Service) collectThreadMatches(ctx context.Context, c *corpus.Corpus, query string, scope corpus.ThreadRepositoryScope, criteria threadSearchCriteria) ([]searchMatch, error) {
 	var out []searchMatch
 	cursor := ""
 	for len(out) < maxLensCandidates {
-		collectOpts := opts
-		collectOpts.Limit = 100
-		collectOpts.Cursor = cursor
-		collectOpts.Lens = ""
-		res, err := s.searchThreads(ctx, c, query, repoID, ref, kind, collectOpts)
+		res, err := s.searchThreads(ctx, c, query, scope, criteria, corpus.MaximumSearchPage().WithCursor(cursor))
 		if err != nil {
 			return nil, err
 		}
@@ -558,11 +499,11 @@ func (s *Service) collectThreadMatches(ctx context.Context, c *corpus.Corpus, qu
 	return out, nil
 }
 
-func (s *Service) collectRepositoryMatches(ctx context.Context, c *corpus.Corpus, query string, opts contracts.SearchOptions) ([]searchMatch, error) {
+func (s *Service) collectRepositoryMatches(ctx context.Context, c *corpus.Corpus, query string) ([]searchMatch, error) {
 	var out []searchMatch
 	cursor := ""
 	for len(out) < maxLensCandidates {
-		res, err := s.searchRepositories(ctx, c, query, 100, cursor, opts.Sort)
+		res, err := s.searchRepositories(ctx, c, query, corpus.MaximumSearchPage().WithCursor(cursor), corpus.RelevanceSearchOrder())
 		if err != nil {
 			return nil, err
 		}
@@ -578,11 +519,11 @@ func (s *Service) collectRepositoryMatches(ctx context.Context, c *corpus.Corpus
 	return out, nil
 }
 
-func (s *Service) collectCodeMatches(ctx context.Context, c *corpus.Corpus, query string, ref domain.RepoRef, _ contracts.SearchOptions) ([]searchMatch, error) {
+func (s *Service) collectCodeMatches(ctx context.Context, c *corpus.Corpus, query string, ref domain.RepoRef) ([]searchMatch, error) {
 	var out []searchMatch
 	cursor := ""
 	for len(out) < maxLensCandidates {
-		res, err := s.searchCode(ctx, c, query, ref, 100, cursor)
+		res, err := s.searchCode(ctx, c, query, ref, corpus.MaximumSearchPage().WithCursor(cursor))
 		if err != nil {
 			return nil, err
 		}
@@ -601,23 +542,23 @@ func (s *Service) collectCodeMatches(ctx context.Context, c *corpus.Corpus, quer
 func candidateFromMatch(m searchMatch, now time.Time) lens.Candidate {
 	id := m.Repo.String()
 	switch m.Kind {
-	case corpus.ThreadKindIssue, corpus.ThreadKindPullRequest:
+	case searchIssueMatch, searchPullRequestMatch:
 		id = fmt.Sprintf("%s#%d", m.Repo, m.Number)
-	case "code":
+	case searchCodeMatch:
 		id = fmt.Sprintf("%s/%s", m.Repo, m.Title)
 	}
 
 	cand := lens.Candidate{
 		ID:         id,
 		Repository: m.Repo.String(),
-		Kind:       m.Kind,
+		Kind:       m.Kind.String(),
 		State:      m.State,
 		Language:   m.Language,
 		Archived:   m.Archived,
 		Stars:      m.Stars,
 		UpdatedAt:  m.UpdatedAt,
 	}
-	if m.Kind == corpus.ThreadKindIssue || m.Kind == corpus.ThreadKindPullRequest {
+	if m.Kind == searchIssueMatch || m.Kind == searchPullRequestMatch {
 		cand.Assigned = len(m.Assignees) > 0
 	}
 	cand.Signals = candidateSignals(m, now)
@@ -693,9 +634,9 @@ func boundedText(value string, maxRunes int) string {
 	return string(runes[:maxRunes]) + "…"
 }
 
-func threadURL(ref domain.RepoRef, kind string, number int) string {
+func threadURL(ref domain.RepoRef, kind domain.ThreadKind, number int) string {
 	path := "issues"
-	if kind == corpus.ThreadKindPullRequest {
+	if kind == domain.PullRequestKind {
 		path = "pull"
 	}
 	return fmt.Sprintf("https://github.com/%s/%s/%d", ref, path, number)
@@ -703,20 +644,18 @@ func threadURL(ref domain.RepoRef, kind string, number int) string {
 
 // Search performs a local-only corpus search and supports repo and kind filters.
 func (s *Service) Search(ctx context.Context, query string, opts contracts.SearchOptions) (*contracts.SearchResult, error) {
-	if opts.Limit <= 0 {
-		opts.Limit = 20
+	request, err := parseServiceSearchRequest(query, opts)
+	if err != nil {
+		return nil, err
 	}
-	if opts.Limit > 100 {
-		return nil, errors.New("search limit cannot exceed 100")
-	}
-	res, err := s.searchCorpus(ctx, query, opts)
+	res, err := s.searchCorpus(ctx, request)
 	if err != nil {
 		return nil, err
 	}
 	matches := make([]contracts.SearchMatch, len(res.Matches))
 	for i, m := range res.Matches {
 		matches[i] = contracts.SearchMatch{
-			Kind:           m.Kind,
+			Kind:           m.Kind.String(),
 			Repo:           contracts.RepoRef{Owner: m.Repo.Owner(), Repo: m.Repo.Repo()},
 			Title:          m.Title,
 			Number:         m.Number,
@@ -734,10 +673,10 @@ func (s *Service) Search(ctx context.Context, query string, opts contracts.Searc
 		}
 	}
 	return &contracts.SearchResult{
-		Query:                query,
-		Kind:                 opts.Kind,
-		Repo:                 opts.Repo,
-		Limit:                opts.Limit,
+		Query:                request.read().query,
+		Kind:                 request.kind().String(),
+		Repo:                 request.repository().String(),
+		Limit:                request.read().page.Limit(),
 		Total:                res.Total,
 		Matches:              matches,
 		NextCursor:           res.NextCursor,

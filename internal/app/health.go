@@ -10,12 +10,6 @@ import (
 	"github.com/morluto/gitcontribute/internal/health"
 )
 
-// RepositoryHealth returns a deterministic repository health report derived from
-// already stored corpus facts. It performs no network access.
-func (s *Service) RepositoryHealth(ctx context.Context, repo contracts.RepoRef) (*health.Report, error) {
-	return s.RepositoryHealthWithOptions(ctx, repo, health.Options{})
-}
-
 // RepositoryHealthWithOptions returns a deterministic repository health report
 // using the provided analysis window and stale threshold.
 func (s *Service) RepositoryHealthWithOptions(ctx context.Context, repo contracts.RepoRef, opts health.Options) (*health.Report, error) {

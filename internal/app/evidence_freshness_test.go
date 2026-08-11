@@ -33,8 +33,10 @@ func TestEvidenceFreshnessFromThreadInvestigationBaseline(t *testing.T) {
 	if len(recorded.SourceRefs) != 1 || len(recorded.SourceProvenance) != 1 {
 		t.Fatalf("baseline source was not inherited: %+v", recorded)
 	}
-	if got := recorded.SourceProvenance[0]; got.Subject.Kind != evidence.SourceSubjectThread ||
-		got.Subject.ThreadKind != string(domain.IssueKind) || got.Subject.Number != 1 ||
+	got := recorded.SourceProvenance[0]
+	threadKind, number, threadScoped := got.Subject.Thread()
+	if got.Subject.Kind() != evidence.SourceSubjectThread ||
+		!threadScoped || threadKind != domain.IssueKind || number != 1 ||
 		got.ObservationSequence != started.Investigation.ThreadBaseline.ObservationSequence {
 		t.Fatalf("unexpected inherited provenance: %+v", got)
 	}
@@ -56,7 +58,7 @@ func TestEvidenceFreshnessFromThreadInvestigationBaseline(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := fixture.svc.corpus.UpsertThread(fixture.ctx, corpus.Thread{
-		RepositoryID: fixture.repoID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open",
+		RepositoryID: fixture.repoID, Kind: domain.IssueKind, Number: 1, State: "open",
 		Title: "Retry parser cancellation updated", Body: thread.Body, Author: thread.Author,
 		AuthorAssociation: thread.AuthorAssociation, Labels: thread.Labels,
 		SourceCreatedAt: thread.SourceCreatedAt, SourceUpdatedAt: fixture.now.Add(time.Hour),

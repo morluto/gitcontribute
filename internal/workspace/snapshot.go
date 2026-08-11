@@ -32,12 +32,45 @@ type ContentDigest struct {
 }
 
 // UntrackedResource identifies one untracked path and its content when bounded.
+type UntrackedResourceKind string
+
+const (
+	UntrackedFile        UntrackedResourceKind = "file"
+	UntrackedSymlink     UntrackedResourceKind = "symlink"
+	UntrackedUnsupported UntrackedResourceKind = "unsupported"
+)
+
+func parseUntrackedResourceKind(value UntrackedResourceKind) (UntrackedResourceKind, error) {
+	switch UntrackedResourceKind(strings.ToLower(strings.TrimSpace(string(value)))) {
+	case UntrackedFile:
+		return UntrackedFile, nil
+	case UntrackedSymlink:
+		return UntrackedSymlink, nil
+	case UntrackedUnsupported:
+		return UntrackedUnsupported, nil
+	default:
+		return "", fmt.Errorf("unsupported untracked resource kind %q", value)
+	}
+}
+
+func parseUntrackedResources(values []UntrackedResource) ([]UntrackedResource, error) {
+	parsed := append([]UntrackedResource(nil), values...)
+	for i := range parsed {
+		kind, err := parseUntrackedResourceKind(parsed[i].Kind)
+		if err != nil {
+			return nil, err
+		}
+		parsed[i].Kind = kind
+	}
+	return parsed, nil
+}
+
 type UntrackedResource struct {
-	Path   string `json:"path"`
-	Kind   string `json:"kind"`
-	Mode   uint32 `json:"mode"`
-	SHA256 string `json:"sha256,omitempty"`
-	Bytes  int64  `json:"bytes,omitempty"`
+	Path   string                `json:"path"`
+	Kind   UntrackedResourceKind `json:"kind"`
+	Mode   uint32                `json:"mode"`
+	SHA256 string                `json:"sha256,omitempty"`
+	Bytes  int64                 `json:"bytes,omitempty"`
 }
 
 // SubmoduleIdentity binds the index and checked-out identities of a submodule.
@@ -63,8 +96,32 @@ type SnapshotGap struct {
 
 // Snapshot is a deterministic composite identity for a managed worktree.
 type Snapshot struct {
+	Version      string              `json:"version"`
+	Ownership    Ownership           `json:"ownership"`
+	BaseSHA      string              `json:"base_sha,omitempty"`
+	HeadSHA      string              `json:"head_sha"`
+	MergeBase    string              `json:"merge_base,omitempty"`
+	Staged       ContentDigest       `json:"staged"`
+	Unstaged     ContentDigest       `json:"unstaged"`
+	Untracked    []UntrackedResource `json:"untracked"`
+	Submodules   []SubmoduleIdentity `json:"submodules"`
+	ChangedFiles []string            `json:"changed_files"`
+	Commits      []CommitSummary     `json:"commits"`
+	CommitTotal  int                 `json:"commit_total"`
+	Gaps         []SnapshotGap       `json:"gaps"`
+	SHA256       string              `json:"sha256"`
+}
+
+// Complete reports whether every candidate-content source was bound into the
+// snapshot. Gaps are the authoritative representation.
+func (s Snapshot) Complete() bool { return len(s.Gaps) == 0 }
+
+// CommitsTruncated reports whether the bounded commit summaries omit entries.
+func (s Snapshot) CommitsTruncated() bool { return s.CommitTotal > len(s.Commits) }
+
+type snapshotJSON struct {
 	Version          string              `json:"version"`
-	Ownership        string              `json:"ownership"`
+	Ownership        Ownership           `json:"ownership"`
 	BaseSHA          string              `json:"base_sha,omitempty"`
 	HeadSHA          string              `json:"head_sha"`
 	MergeBase        string              `json:"merge_base,omitempty"`
@@ -81,13 +138,61 @@ type Snapshot struct {
 	SHA256           string              `json:"sha256"`
 }
 
+// MarshalJSON preserves the public snapshot contract while deriving redundant
+// completeness flags from their authoritative data.
+func (s Snapshot) MarshalJSON() ([]byte, error) {
+	ownership, err := parseOwnership(s.Ownership)
+	if err != nil {
+		return nil, err
+	}
+	untracked, err := parseUntrackedResources(s.Untracked)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(snapshotJSON{
+		Version: s.Version, Ownership: ownership, BaseSHA: s.BaseSHA, HeadSHA: s.HeadSHA, MergeBase: s.MergeBase,
+		Staged: s.Staged, Unstaged: s.Unstaged, Untracked: untracked, Submodules: s.Submodules,
+		ChangedFiles: s.ChangedFiles, Commits: s.Commits, CommitTotal: s.CommitTotal,
+		CommitsTruncated: s.CommitsTruncated(), Complete: s.Complete(), Gaps: s.Gaps, SHA256: s.SHA256,
+	})
+}
+
+// UnmarshalJSON rejects snapshot flags that contradict their authoritative
+// commit totals or explicit gaps.
+func (s *Snapshot) UnmarshalJSON(data []byte) error {
+	var raw snapshotJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.CommitsTruncated != (raw.CommitTotal > len(raw.Commits)) {
+		return errors.New("workspace snapshot commit truncation contradicts its commit population")
+	}
+	if raw.Complete != (len(raw.Gaps) == 0) {
+		return errors.New("workspace snapshot completeness contradicts its explicit gaps")
+	}
+	ownership, err := parseOwnership(raw.Ownership)
+	if err != nil {
+		return err
+	}
+	untracked, err := parseUntrackedResources(raw.Untracked)
+	if err != nil {
+		return err
+	}
+	*s = Snapshot{
+		Version: raw.Version, Ownership: ownership, BaseSHA: raw.BaseSHA, HeadSHA: raw.HeadSHA, MergeBase: raw.MergeBase,
+		Staged: raw.Staged, Unstaged: raw.Unstaged, Untracked: untracked, Submodules: raw.Submodules,
+		ChangedFiles: raw.ChangedFiles, Commits: raw.Commits, CommitTotal: raw.CommitTotal, Gaps: raw.Gaps, SHA256: raw.SHA256,
+	}
+	return nil
+}
+
 // SnapshotByPath derives a bounded, no-hook identity for a managed worktree.
 func (m *Manager) SnapshotByPath(ctx context.Context, path, baseSHA, mergeBase string) (Snapshot, error) {
 	managed, err := m.managedPath(path)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	snapshot := Snapshot{Version: WorkspaceSnapshotVersion, Ownership: "managed", BaseSHA: strings.TrimSpace(baseSHA), MergeBase: strings.TrimSpace(mergeBase), Complete: true}
+	snapshot := Snapshot{Version: WorkspaceSnapshotVersion, Ownership: OwnershipManaged, BaseSHA: strings.TrimSpace(baseSHA), MergeBase: strings.TrimSpace(mergeBase)}
 	if snapshot.HeadSHA, err = trimmedGit(m.git(ctx, managed, "rev-parse", "HEAD")); err != nil {
 		return Snapshot{}, fmt.Errorf("resolve workspace HEAD: %w", err)
 	}
@@ -119,7 +224,6 @@ func (m *Manager) SnapshotByPath(ctx context.Context, path, baseSHA, mergeBase s
 		}
 		return snapshot.Gaps[i].Path < snapshot.Gaps[j].Path
 	})
-	snapshot.Complete = len(snapshot.Gaps) == 0
 	snapshot.SHA256, err = snapshotDigest(snapshot)
 	if err != nil {
 		return Snapshot{}, err
@@ -164,7 +268,7 @@ func (m *Manager) addUntrackedSnapshot(ctx context.Context, managed string, snap
 		entry := UntrackedResource{Path: gitPath, Mode: uint32(info.Mode().Perm()), Bytes: info.Size()}
 		switch {
 		case info.Mode().IsRegular():
-			entry.Kind = "file"
+			entry.Kind = UntrackedFile
 			if info.Size() > maxSnapshotFileBytes || total+info.Size() > maxSnapshotTotalBytes {
 				snapshot.Gaps = append(snapshot.Gaps, SnapshotGap{Code: "untracked_content_omitted", Path: gitPath, Reason: "content exceeds the snapshot byte bound"})
 				break
@@ -176,7 +280,7 @@ func (m *Manager) addUntrackedSnapshot(ctx context.Context, managed string, snap
 			}
 			entry.SHA256, entry.Bytes, total = digest, bytesRead, total+bytesRead
 		case info.Mode()&os.ModeSymlink != 0:
-			entry.Kind = "symlink"
+			entry.Kind = UntrackedSymlink
 			target, err := root.Readlink(localPath)
 			if err != nil {
 				snapshot.Gaps = append(snapshot.Gaps, SnapshotGap{Code: "untracked_symlink_unavailable", Path: gitPath, Reason: err.Error()})
@@ -185,7 +289,7 @@ func (m *Manager) addUntrackedSnapshot(ctx context.Context, managed string, snap
 			entry.SHA256 = digestBytes([]byte(target))
 			entry.Bytes = int64(len(target))
 		default:
-			entry.Kind = "unsupported"
+			entry.Kind = UntrackedUnsupported
 			snapshot.Gaps = append(snapshot.Gaps, SnapshotGap{Code: "untracked_type_unsupported", Path: gitPath, Reason: info.Mode().String()})
 		}
 		snapshot.Untracked = append(snapshot.Untracked, entry)
@@ -264,8 +368,7 @@ func (m *Manager) addCommitSnapshot(ctx context.Context, managed string, snapsho
 	for i := 0; i < len(parts); i += 2 {
 		snapshot.Commits = append(snapshot.Commits, CommitSummary{SHA: parts[i], Subject: parts[i+1]})
 	}
-	snapshot.CommitsTruncated = snapshot.CommitTotal > len(snapshot.Commits)
-	if snapshot.CommitsTruncated {
+	if snapshot.CommitsTruncated() {
 		snapshot.Gaps = append(snapshot.Gaps, SnapshotGap{Code: "commits_truncated", Reason: fmt.Sprintf("%d commits exceed the %d-commit metadata bound", snapshot.CommitTotal, maxSnapshotCommits)})
 	}
 	return nil

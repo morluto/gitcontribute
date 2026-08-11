@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -22,7 +24,7 @@ var (
 	validClosing        = regexp.MustCompile(`(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:[\w.-]+/[\w.-]+)?#\d+\b`)
 )
 
-func populateDraftIdentity(identity *DraftIdentity, repo, kind, title, body string, all []*evidence.Evidence) {
+func populateDraftIdentity(identity *DraftIdentity, repo string, kind domain.ThreadKind, title, body string, all []*evidence.Evidence) {
 	identity.ID = uuid.NewString()
 	identity.Repository = repo
 	identity.Kind = kind
@@ -42,11 +44,65 @@ func populateDraftIdentity(identity *DraftIdentity, repo, kind, title, body stri
 
 // EnsureDraftIdentity binds exact bytes for callers that construct drafts
 // directly rather than through Renderer.
-func EnsureDraftIdentity(identity *DraftIdentity, repo, kind, title, body string) {
+func EnsureDraftIdentity(identity *DraftIdentity, repo string, kind domain.ThreadKind, title, body string) {
 	if identity.ID != "" {
 		return
 	}
 	populateDraftIdentity(identity, repo, kind, title, body, nil)
+}
+
+// ParseStored validates and canonicalizes a persisted issue draft.
+func (d *IssueDraft) ParseStored() error {
+	if d == nil {
+		return fmt.Errorf("issue draft is required")
+	}
+	return d.parseStored(domain.IssueKind, d.Title, d.Body)
+}
+
+// ParseStored validates and canonicalizes a persisted pull-request draft.
+func (d *PullRequestDraft) ParseStored() error {
+	if d == nil {
+		return fmt.Errorf("pull request draft is required")
+	}
+	return d.parseStored(domain.PullRequestKind, d.Title, d.Body)
+}
+
+func (d *DraftIdentity) parseStored(expected domain.ThreadKind, title, body string) error {
+	if d.ID == "" || d.Revision < 1 {
+		return fmt.Errorf("draft id and positive revision are required")
+	}
+	kind, err := domain.ParseThreadKind(string(d.Kind))
+	if err != nil {
+		return err
+	}
+	if kind != expected {
+		return fmt.Errorf("stored %s draft has kind %q", expected, d.Kind)
+	}
+	d.Kind = kind
+	if d.TitleBytes != len([]byte(title)) || d.BodyBytes != len([]byte(body)) ||
+		d.TitleSHA256 != sha256Text(title) || d.BodySHA256 != sha256Text(body) {
+		return fmt.Errorf("stored draft byte identity does not match its content")
+	}
+	for index := range d.Warnings {
+		severity, err := ParseDraftDiagnosticSeverity(string(d.Warnings[index].Severity))
+		if err != nil {
+			return err
+		}
+		d.Warnings[index].Severity = severity
+	}
+	return nil
+}
+
+// ParseDraftDiagnosticSeverity parses a durable draft diagnostic severity.
+func ParseDraftDiagnosticSeverity(value string) (DraftDiagnosticSeverity, error) {
+	switch DraftDiagnosticSeverity(value) {
+	case DraftDiagnosticError:
+		return DraftDiagnosticError, nil
+	case DraftDiagnosticWarning:
+		return DraftDiagnosticWarning, nil
+	default:
+		return "", fmt.Errorf("unsupported draft diagnostic severity %q", value)
+	}
 }
 
 func sha256Text(value string) string {
@@ -59,7 +115,7 @@ func sha256Text(value string) string {
 func ValidateDraftBytes(title, body []byte) []DraftDiagnostic {
 	var out []DraftDiagnostic
 	if !utf8.Valid(title) || !utf8.Valid(body) {
-		return []DraftDiagnostic{{Code: "invalid_utf8", Severity: "error", Message: "title and body must be valid UTF-8"}}
+		return []DraftDiagnostic{{Code: "invalid_utf8", Severity: DraftDiagnosticError, Message: "title and body must be valid UTF-8"}}
 	}
 	document := goldmark.DefaultParser().Parse(text.NewReader(body))
 	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
@@ -74,22 +130,22 @@ func ValidateDraftBytes(title, body []byte) []DraftDiagnostic {
 		value := segment.Value(body)
 		if at := bytes.Index(value, []byte(`\n`)); at >= 0 {
 			out = append(out, DraftDiagnostic{
-				Code: "literal_escaped_newline", Severity: "warning",
+				Code: "literal_escaped_newline", Severity: DraftDiagnosticWarning,
 				Message: "literal \\\\n appears in a prose region", ByteOffset: segment.Start + at,
 			})
 		}
 		return ast.WalkContinue, nil
 	})
 	if offset := unmatchedFenceOffset(body); offset >= 0 {
-		out = append(out, DraftDiagnostic{Code: "unterminated_fence", Severity: "error", Message: "fenced code block is unterminated", ByteOffset: offset})
+		out = append(out, DraftDiagnostic{Code: "unterminated_fence", Severity: DraftDiagnosticError, Message: "fenced code block is unterminated", ByteOffset: offset})
 	}
 	if match := templatePlaceholder.FindIndex(body); match != nil {
-		out = append(out, DraftDiagnostic{Code: "unresolved_placeholder", Severity: "error", Message: "unresolved template placeholder", ByteOffset: match[0]})
+		out = append(out, DraftDiagnostic{Code: "unresolved_placeholder", Severity: DraftDiagnosticError, Message: "unresolved template placeholder", ByteOffset: match[0]})
 	}
 	for _, line := range bytes.Split(body, []byte{'\n'}) {
 		if closingCandidate.Match(line) && !validClosing.Match(line) {
 			offset := bytes.Index(body, line)
-			out = append(out, DraftDiagnostic{Code: "malformed_closing_reference", Severity: "error", Message: "malformed GitHub closing reference", ByteOffset: offset})
+			out = append(out, DraftDiagnostic{Code: "malformed_closing_reference", Severity: DraftDiagnosticError, Message: "malformed GitHub closing reference", ByteOffset: offset})
 			break
 		}
 	}
@@ -113,7 +169,7 @@ func ValidateRequiredTemplateSections(body, guidance []byte) []DraftDiagnostic {
 	for heading := range required {
 		if _, ok := present[heading]; !ok {
 			out = append(out, DraftDiagnostic{
-				Code: "required_template_section_missing", Severity: "error",
+				Code: "required_template_section_missing", Severity: DraftDiagnosticError,
 				Message: "required repository template section is absent: " + heading,
 			})
 		}

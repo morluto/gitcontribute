@@ -8,17 +8,14 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 const (
-	facetPRFeedbackIssueComments  = "pr_feedback_issue_comments"
-	facetPRFeedbackReviews        = "pr_feedback_reviews"
-	facetPRFeedbackInlineComments = "pr_feedback_inline_comments"
-	facetPRFeedbackReviewThreads  = "pr_feedback_review_threads"
-	facetPRCIReport               = "pr_ci_report"
-	maxFeedbackItemsPerChannel    = 1000
+	facetPRCIReport            = "pr_ci_report"
+	maxFeedbackItemsPerChannel = 1000
 )
 
 var (
@@ -38,7 +35,7 @@ type pullRequestWorkflowItem struct {
 }
 
 type pullRequestWorkflowResult struct {
-	BatchStatus string                    `json:"batch_status"`
+	BatchStatus batchOperationStatus      `json:"batch_status"`
 	Items       []pullRequestWorkflowItem `json:"items"`
 	Requests    int                       `json:"requests"`
 }
@@ -55,12 +52,11 @@ func (r *MCPReader) SyncPullRequestFeedback(ctx context.Context, in mcpcontract.
 	if in.ThreadState == "" {
 		in.ThreadState = "unresolved"
 	}
-	if in.ThreadState != "unresolved" && in.ThreadState != "all" {
-		return mcpcontract.JobReference{}, errors.New("thread_state must be unresolved or all")
-	}
-	if err := validateFeedbackChannels(in.Channels); err != nil {
+	selection, err := corpus.ParseFeedbackSelection(in.Channels, in.ThreadState)
+	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
+	in.Channels, in.ThreadState = selection.Channels(), selection.ThreadState()
 	if in.MaxItemsPerChannel == 0 {
 		in.MaxItemsPerChannel = 300
 	}
@@ -74,7 +70,7 @@ func (r *MCPReader) SyncPullRequestFeedback(ctx context.Context, in mcpcontract.
 		return mcpcontract.JobReference{}, errors.New("max_requests must be between 1 and 1000")
 	}
 	id, err := r.submitJob(ctx, "sync_pull_request_feedback", in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.syncPullRequestFeedback(ctx, in, report)
+		return r.syncPullRequestFeedback(ctx, in, selection, report)
 	})
 	if err != nil {
 		return mcpcontract.JobReference{}, err
@@ -82,26 +78,8 @@ func (r *MCPReader) SyncPullRequestFeedback(ctx context.Context, in mcpcontract.
 	return queuedJobReference(id, "sync_pull_request_feedback", "pull-request feedback synchronization job started"), nil
 }
 
-func validateFeedbackChannels(channels []string) error {
-	if len(channels) < 1 || len(channels) > 4 {
-		return errors.New("channels must contain 1 to 4 items")
-	}
-	seen := make(map[string]struct{}, len(channels))
-	for _, channel := range channels {
-		switch channel {
-		case "issue_comments", "submitted_reviews", "inline_comments", "review_threads":
-		default:
-			return fmt.Errorf("unsupported feedback channel %q", channel)
-		}
-		if _, ok := seen[channel]; ok {
-			return fmt.Errorf("duplicate feedback channel %q", channel)
-		}
-		seen[channel] = struct{}{}
-	}
-	return nil
-}
-
-func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.SyncPullRequestFeedbackInput, report func(string, string) error) (pullRequestWorkflowResult, error) {
+func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.SyncPullRequestFeedbackInput, selection corpus.FeedbackSelection, report func(string, string) error) (pullRequestWorkflowResult, error) {
+	in.Channels, in.ThreadState = selection.Channels(), selection.ThreadState()
 	reader, err := r.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
 	if err != nil {
 		return pullRequestWorkflowResult{}, err
@@ -111,16 +89,17 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 		return pullRequestWorkflowResult{}, errors.New("GitHub reader does not support pull-request feedback")
 	}
 	budget := github.NewRequestBudget(in.MaxRequests)
-	out := pullRequestWorkflowResult{BatchStatus: "complete", Items: make([]pullRequestWorkflowItem, len(in.PullRequests))}
+	channels, providerChannels, threadState := selection.ChannelValues(), selection.Channels(), selection.ThreadState()
+	out := pullRequestWorkflowResult{BatchStatus: batchOperationComplete, Items: make([]pullRequestWorkflowItem, len(in.PullRequests))}
 	for index, ref := range in.PullRequests {
 		if ref.Kind == "" {
-			ref.Kind = corpus.ThreadKindPullRequest
+			ref.Kind = string(domain.PullRequestKind)
 		}
-		item := pullRequestWorkflowItem{Key: pullRequestKey(ref), Status: "complete"}
+		item := pullRequestWorkflowItem{Key: pullRequestKey(ref), Status: mcpcontract.BatchItemComplete}
 		snapshot, readErr := feedbackReader.GetPullRequestFeedback(ctx, ref.Owner, ref.Repo, ref.Number, github.PullRequestFeedbackOptions{
-			Channels: in.Channels, ThreadState: in.ThreadState, MaxItemsPerChannel: in.MaxItemsPerChannel,
+			Channels: providerChannels, ThreadState: threadState, MaxItemsPerChannel: in.MaxItemsPerChannel,
 		}, budget)
-		snapshot.ThreadState = in.ThreadState
+		snapshot.ThreadState = threadState
 		item.HeadSHA = snapshot.HeadSHA
 		if snapshot.Header.Number > 0 {
 			code, persistErr := r.persistPullRequestIdentity(ctx, ref, snapshot.Header, snapshot.SourceUpdatedAt)
@@ -128,7 +107,7 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 				failure := feedbackPersistenceFailure(ref, code, persistErr.Error())
 				failure.HeadSHA = item.HeadSHA
 				item = failure
-				out.BatchStatus = "partial"
+				out.BatchStatus = batchOperationPartial
 				out.Items[index] = item
 				if err := report("pull_request_feedback", jobProgressCounts(index+1, len(in.PullRequests))); err != nil {
 					return pullRequestWorkflowResult{}, err
@@ -139,24 +118,24 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 		if readErr != nil {
 			var persistErr error
 			if len(snapshot.Coverage) > 0 {
-				persistErr = r.persistPullRequestFeedback(ctx, ref, snapshot, coveredFeedbackChannels(in.Channels, snapshot.Coverage))
+				persistErr = r.persistPullRequestFeedback(ctx, ref, snapshot, coveredFeedbackChannels(channels, snapshot.Coverage))
 			}
 			if persistErr != nil {
 				item.Status, item.Code, item.Message = "failed", "persist_partial_feedback_failed", persistErr.Error()
 			} else {
 				item = workflowFailure(ref, readErr, mcpcontract.ToolSyncPullRequestFeedback)
 			}
-			out.BatchStatus = "partial"
-		} else if err := r.persistPullRequestFeedback(ctx, ref, snapshot, in.Channels); err != nil {
+			out.BatchStatus = batchOperationPartial
+		} else if err := r.persistPullRequestFeedback(ctx, ref, snapshot, channels); err != nil {
 			item = feedbackPersistenceFailure(ref, feedbackPersistenceFailureCode(err), err.Error())
-			out.BatchStatus = "partial"
-		} else if !feedbackSnapshotComplete(snapshot, in.Channels) {
+			out.BatchStatus = batchOperationPartial
+		} else if !feedbackSnapshotComplete(snapshot, channels) {
 			item.Status = "retryable"
 			item.Code = "feedback_coverage_incomplete"
 			item.Message = "one or more feedback channels reached max_items_per_channel"
 			item.Recovery = feedbackCoverageRecovery(ref, in, item.Message)
 			item.HeadSHA = snapshot.HeadSHA
-			out.BatchStatus = "partial"
+			out.BatchStatus = batchOperationPartial
 		} else {
 			item.HeadSHA = snapshot.HeadSHA
 			item.ResourceURI = fmt.Sprintf("gitcontribute://pull-request-feedback/%s/%s/%d", ref.Owner, ref.Repo, ref.Number)
@@ -174,8 +153,8 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 		return pullRequestWorkflowResult{}, fmt.Errorf("rebuild pull-request feedback projection: %w", err)
 	}
 	out.Requests = budget.Completed()
-	if out.BatchStatus == "partial" && allWorkflowItemsFailed(out.Items) {
-		out.BatchStatus = "failed"
+	if out.BatchStatus == batchOperationPartial && allWorkflowItemsFailed(out.Items) {
+		out.BatchStatus = batchOperationFailed
 	}
 	return out, nil
 }
@@ -228,7 +207,7 @@ func (r *MCPReader) persistPullRequestIdentity(ctx context.Context, ref mcpcontr
 	if err != nil {
 		return "pull_request_header_unavailable", err
 	}
-	existing, err := c.GetThread(ctx, repo.ID, corpus.ThreadKindPullRequest, ref.Number)
+	existing, err := c.GetThread(ctx, repo.ID, domain.PullRequestKind, ref.Number)
 	if err != nil {
 		return "persistence_retryable", fmt.Errorf("get pull request identity: %w", err)
 	}
@@ -257,11 +236,15 @@ func threadFromPullRequestDetails(header github.PullRequestDetails, repositoryID
 	if err != nil {
 		return corpus.Thread{}, fmt.Errorf("parse pull-request merge status: %w", err)
 	}
+	state, err := domain.ParseThreadState(header.State)
+	if err != nil {
+		return corpus.Thread{}, fmt.Errorf("parse pull-request state: %w", err)
+	}
 	thread := corpus.Thread{
 		RepositoryID:      repositoryID,
-		Kind:              corpus.ThreadKindPullRequest,
+		Kind:              domain.PullRequestKind,
 		Number:            header.Number,
-		State:             header.State,
+		State:             state,
 		Title:             header.Title,
 		Body:              header.Body,
 		Author:            header.Author,
@@ -281,51 +264,82 @@ func threadFromPullRequestDetails(header github.PullRequestDetails, repositoryID
 	return thread, nil
 }
 
-func coveredFeedbackChannels(requested []string, coverage map[string]github.FeedbackCoverage) []string {
-	channels := make([]string, 0, len(requested))
+func coveredFeedbackChannels(requested []corpus.FeedbackChannel, coverage map[string]github.FeedbackCoverage) []corpus.FeedbackChannel {
+	channels := make([]corpus.FeedbackChannel, 0, len(requested))
 	for _, channel := range requested {
-		if _, ok := coverage[channel]; ok {
+		if _, ok := coverage[channel.String()]; ok {
 			channels = append(channels, channel)
 		}
 	}
 	return channels
 }
 
-func feedbackSnapshotComplete(snapshot github.PullRequestFeedback, channels []string) bool {
+func feedbackSnapshotComplete(snapshot github.PullRequestFeedback, channels []corpus.FeedbackChannel) bool {
 	for _, channel := range channels {
-		if !snapshot.Coverage[channel].Complete {
+		if !snapshot.Coverage[channel.String()].Complete {
 			return false
 		}
 	}
 	return true
 }
 
-func (r *MCPReader) persistPullRequestFeedback(ctx context.Context, ref mcpcontract.ThreadRef, snapshot github.PullRequestFeedback, channels []string) error {
-	values := map[string]any{
-		"issue_comments":    snapshot.IssueComments,
-		"submitted_reviews": snapshot.Reviews,
-		"inline_comments":   snapshot.InlineComments,
-		"review_threads":    snapshot.ReviewThreads,
-	}
-	facets := map[string]string{
-		"issue_comments": facetPRFeedbackIssueComments, "submitted_reviews": facetPRFeedbackReviews,
-		"inline_comments": facetPRFeedbackInlineComments, "review_threads": facetPRFeedbackReviewThreads,
-	}
+func (r *MCPReader) persistPullRequestFeedback(ctx context.Context, ref mcpcontract.ThreadRef, snapshot github.PullRequestFeedback, channels []corpus.FeedbackChannel) error {
 	for _, channel := range channels {
-		payload := struct {
-			HeadSHA   string                  `json:"head_sha"`
-			Coverage  github.FeedbackCoverage `json:"coverage"`
-			Selection string                  `json:"selection,omitempty"`
-			Items     any                     `json:"items"`
-		}{HeadSHA: snapshot.HeadSHA, Coverage: snapshot.Coverage[channel], Items: values[channel]}
-		if channel == "review_threads" {
-			payload.Selection = snapshot.ThreadState
+		facet, update, err := feedbackWorkflowFacet(snapshot, channel)
+		if err != nil {
+			return err
 		}
-		if err := r.persistPullRequestWorkflowFacet(ctx, ref, facets[channel], snapshot.SourceUpdatedAt, payload, snapshot.Coverage[channel].Complete); err != nil {
+		if err := r.persistPullRequestWorkflowFacet(ctx, ref, facet, snapshot.SourceUpdatedAt, update); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+type workflowFacetUpdate struct {
+	payload json.RawMessage
+}
+
+func incompleteWorkflowFacetUpdate() workflowFacetUpdate { return workflowFacetUpdate{} }
+
+func completeWorkflowFacetUpdate[T any](value T) (workflowFacetUpdate, error) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return workflowFacetUpdate{}, err
+	}
+	return workflowFacetUpdate{payload: payload}, nil
+}
+
+func feedbackWorkflowFacetUpdate[T any](snapshot github.PullRequestFeedback, coverage github.FeedbackCoverage, selection string, items []T) (workflowFacetUpdate, error) {
+	if !coverage.Complete {
+		return incompleteWorkflowFacetUpdate(), nil
+	}
+	return completeWorkflowFacetUpdate(struct {
+		HeadSHA   string                  `json:"head_sha"`
+		Coverage  github.FeedbackCoverage `json:"coverage"`
+		Selection string                  `json:"selection,omitempty"`
+		Items     []T                     `json:"items"`
+	}{HeadSHA: snapshot.HeadSHA, Coverage: coverage, Selection: selection, Items: items})
+}
+
+func feedbackWorkflowFacet(snapshot github.PullRequestFeedback, channel corpus.FeedbackChannel) (string, workflowFacetUpdate, error) {
+	coverage := snapshot.Coverage[channel.String()]
+	switch channel {
+	case corpus.FeedbackIssueComments:
+		update, err := feedbackWorkflowFacetUpdate(snapshot, coverage, "", snapshot.IssueComments)
+		return channel.Facet(), update, err
+	case corpus.FeedbackSubmittedReviews:
+		update, err := feedbackWorkflowFacetUpdate(snapshot, coverage, "", snapshot.Reviews)
+		return channel.Facet(), update, err
+	case corpus.FeedbackInlineComments:
+		update, err := feedbackWorkflowFacetUpdate(snapshot, coverage, "", snapshot.InlineComments)
+		return channel.Facet(), update, err
+	case corpus.FeedbackReviewThreads:
+		update, err := feedbackWorkflowFacetUpdate(snapshot, coverage, snapshot.ThreadState, snapshot.ReviewThreads)
+		return channel.Facet(), update, err
+	default:
+		return "", workflowFacetUpdate{}, fmt.Errorf("unsupported parsed feedback channel %d", channel)
+	}
 }
 
 func (r *MCPReader) SyncCIFailures(ctx context.Context, in mcpcontract.SyncCIFailuresInput) (mcpcontract.JobReference, error) {
@@ -383,12 +397,12 @@ func (r *MCPReader) syncCIFailures(ctx context.Context, in mcpcontract.SyncCIFai
 		return pullRequestWorkflowResult{}, errors.New("GitHub reader does not support CI diagnostics")
 	}
 	budget := github.NewRequestBudget(in.MaxRequests)
-	out := pullRequestWorkflowResult{BatchStatus: "complete", Items: make([]pullRequestWorkflowItem, len(in.PullRequests))}
+	out := pullRequestWorkflowResult{BatchStatus: batchOperationComplete, Items: make([]pullRequestWorkflowItem, len(in.PullRequests))}
 	for index, ref := range in.PullRequests {
 		if ref.Kind == "" {
-			ref.Kind = corpus.ThreadKindPullRequest
+			ref.Kind = string(domain.PullRequestKind)
 		}
-		item := pullRequestWorkflowItem{Key: pullRequestKey(ref), Status: "complete"}
+		item := pullRequestWorkflowItem{Key: pullRequestKey(ref), Status: mcpcontract.BatchItemComplete}
 		snapshot, readErr := ciReader.GetPullRequestCI(ctx, ref.Owner, ref.Repo, ref.Number, github.CIFailureOptions{
 			MaxRuns: in.MaxRunsPerPR, MaxJobsPerRun: in.MaxJobsPerRun, MaxLogBytes: in.MaxLogBytesPerJob, Logs: in.Logs,
 		}, budget)
@@ -399,26 +413,34 @@ func (r *MCPReader) syncCIFailures(ctx context.Context, in mcpcontract.SyncCIFai
 			// facet in that case so an older complete report is not presented as
 			// current after an unsuccessful refresh.
 			if snapshot.HeadSHA != "" {
-				persistErr = r.persistPullRequestWorkflowFacet(ctx, ref, facetPRCIReport, snapshot.SourceUpdatedAt, snapshot, false)
+				persistErr = r.persistPullRequestWorkflowFacet(ctx, ref, facetPRCIReport, snapshot.SourceUpdatedAt, incompleteWorkflowFacetUpdate())
 			}
 			if persistErr != nil {
 				item.Status, item.Code, item.Message = "failed", "persist_partial_ci_failed", persistErr.Error()
 			} else {
 				item = workflowFailure(ref, readErr, mcpcontract.ToolSyncCIFailures)
 			}
-			out.BatchStatus = "partial"
+			out.BatchStatus = batchOperationPartial
 		} else {
 			complete := ciSnapshotComplete(snapshot)
-			if err := r.persistPullRequestWorkflowFacet(ctx, ref, facetPRCIReport, snapshot.SourceUpdatedAt, snapshot, complete); err != nil {
-				item.Status, item.Code, item.Message = "failed", "persist_ci_failed", err.Error()
-				out.BatchStatus = "partial"
+			update := incompleteWorkflowFacetUpdate()
+			var persistErr error
+			if complete {
+				update, persistErr = completeWorkflowFacetUpdate(snapshot)
+			}
+			if persistErr == nil {
+				persistErr = r.persistPullRequestWorkflowFacet(ctx, ref, facetPRCIReport, snapshot.SourceUpdatedAt, update)
+			}
+			if persistErr != nil {
+				item.Status, item.Code, item.Message = "failed", "persist_ci_failed", persistErr.Error()
+				out.BatchStatus = batchOperationPartial
 			} else if !complete {
 				item.Status = "retryable"
 				item.Code = "ci_coverage_incomplete"
 				item.Message = "one or more CI collections reached a configured item bound"
 				item.Recovery = recoveryPlan("facet_incomplete", item.Message, mcpcontract.RecoveryAction(mcpcontract.SyncCIFailuresInput{PullRequests: []mcpcontract.ThreadRef{ref}, Logs: in.Logs, MaxRunsPerPR: in.MaxRunsPerPR, MaxJobsPerRun: in.MaxJobsPerRun, MaxLogBytesPerJob: in.MaxLogBytesPerJob, MaxRequests: in.MaxRequests}))
 				item.HeadSHA = snapshot.HeadSHA
-				out.BatchStatus = "partial"
+				out.BatchStatus = batchOperationPartial
 			} else {
 				item.HeadSHA = snapshot.HeadSHA
 				item.ResourceURI = fmt.Sprintf("gitcontribute://ci-failure-report/%s/%s/%d", ref.Owner, ref.Repo, ref.Number)
@@ -430,8 +452,8 @@ func (r *MCPReader) syncCIFailures(ctx context.Context, in mcpcontract.SyncCIFai
 		}
 	}
 	out.Requests = budget.Completed()
-	if out.BatchStatus == "partial" && allWorkflowItemsFailed(out.Items) {
-		out.BatchStatus = "failed"
+	if out.BatchStatus == batchOperationPartial && allWorkflowItemsFailed(out.Items) {
+		out.BatchStatus = batchOperationFailed
 	}
 	return out, nil
 }
@@ -450,7 +472,7 @@ func ciSnapshotComplete(snapshot github.PullRequestCI) bool {
 	return true
 }
 
-func (r *MCPReader) persistPullRequestWorkflowFacet(ctx context.Context, ref mcpcontract.ThreadRef, facet string, sourceUpdatedAt time.Time, value any, complete bool) error {
+func (r *MCPReader) persistPullRequestWorkflowFacet(ctx context.Context, ref mcpcontract.ThreadRef, facet string, sourceUpdatedAt time.Time, update workflowFacetUpdate) error {
 	c, err := r.openCorpus(ctx)
 	if err != nil {
 		return err
@@ -463,9 +485,9 @@ func (r *MCPReader) persistPullRequestWorkflowFacet(ctx context.Context, ref mcp
 		return err
 	}
 	if ref.Kind == "" {
-		ref.Kind = corpus.ThreadKindPullRequest
+		ref.Kind = string(domain.PullRequestKind)
 	}
-	thread, err := c.GetThread(ctx, repo.ID, ref.Kind, ref.Number)
+	thread, err := c.GetThread(ctx, repo.ID, domain.PullRequestKind, ref.Number)
 	if err != nil || thread == nil {
 		if err == nil {
 			err = errFeedbackPullRequestNotStored
@@ -475,14 +497,10 @@ func (r *MCPReader) persistPullRequestWorkflowFacet(ctx context.Context, ref mcp
 	if sourceUpdatedAt.IsZero() {
 		sourceUpdatedAt = thread.SourceUpdatedAt
 	}
-	if !complete {
+	if update.payload == nil {
 		return c.AdvanceFacet(ctx, repo.ID, &thread.ID, facet, sourceUpdatedAt, false, 0)
 	}
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	return c.ApplyFacetObservationSet(ctx, repo.ID, &thread.ID, facet, sourceUpdatedAt, []corpus.FacetObservationInput{{SourceUpdatedAt: sourceUpdatedAt, Payload: string(payload)}}, complete, 0)
+	return c.ApplyFacetObservationSet(ctx, repo.ID, &thread.ID, facet, sourceUpdatedAt, []corpus.FacetObservationInput{{SourceUpdatedAt: sourceUpdatedAt, Payload: string(update.payload)}}, true, 0)
 }
 
 func feedbackPersistenceFailureCode(err error) string {
@@ -515,10 +533,10 @@ func workflowFailure(ref mcpcontract.ThreadRef, err error, tool string) pullRequ
 	}
 	status, code, message, retryAfterMS := githubBatchError(err)
 	item := pullRequestWorkflowItem{
-		Key: pullRequestKey(ref), Status: mcpcontract.BatchItemStatus(status), Code: code,
+		Key: pullRequestKey(ref), Status: status, Code: code,
 		Message: message, RetryAfterMS: retryAfterMS,
 	}
-	if status == "retryable" {
+	if status == mcpcontract.BatchItemRetryable {
 		item.Recovery = recoveryPlan(code, message, workflowRetryCall(tool, ref))
 	}
 	return item
@@ -537,7 +555,7 @@ func pullRequestKey(ref mcpcontract.ThreadRef) string {
 
 func allWorkflowItemsFailed(items []pullRequestWorkflowItem) bool {
 	for _, item := range items {
-		if item.Status == "complete" || item.Status == "retryable" {
+		if item.Status == mcpcontract.BatchItemComplete || item.Status == mcpcontract.BatchItemRetryable {
 			return false
 		}
 	}

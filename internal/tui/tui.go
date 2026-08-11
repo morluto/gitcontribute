@@ -34,7 +34,7 @@ type viewSpec struct {
 	key   string
 }
 
-var viewSpecs = []viewSpec{
+var viewSpecs = [...]viewSpec{
 	{viewDiscover, "CONTRIBUTIONS", "Discover", "candidates"},
 	{viewResearch, "CONTRIBUTIONS", "Research", "hypotheses"},
 	{viewActive, "CONTRIBUTIONS", "Active", "investigations"},
@@ -47,14 +47,6 @@ var viewSpecs = []viewSpec{
 	{viewRelatedWork, "SOURCES", "Related work", "clusters"},
 }
 
-var viewOrder = func() []view {
-	out := make([]view, 0, len(viewSpecs))
-	for _, spec := range viewSpecs {
-		out = append(out, spec.view)
-	}
-	return out
-}()
-
 type paneFocus int
 
 const (
@@ -63,13 +55,46 @@ const (
 	focusDetail
 )
 
+type corpusLoadState uint8
+
+const (
+	corpusLoadIdle corpusLoadState = iota
+	corpusLoading
+	corpusLoaded
+	corpusLoadFailed
+)
+
+type overlay uint8
+
+const (
+	overlayNone overlay = iota
+	overlaySearch
+	overlayHelp
+	overlayBrief
+	overlayActions
+	overlayResult
+)
+
+type briefState uint8
+
+const (
+	briefReady briefState = iota
+	briefLoading
+	briefFailed
+)
+
+type actionState uint8
+
+const (
+	actionsReady actionState = iota
+	actionsLoading
+	actionConfirming
+	actionExecuting
+	actionFailed
+)
+
 // Option customizes a Model.
 type Option func(*Model)
-
-// WithSize sets the initial terminal size.
-func WithSize(w, h int) Option {
-	return func(m *Model) { m.width, m.height = w, h }
-}
 
 // WithActionProvider registers typed contextual application operations.
 // Loading, navigation, filtering, and detail inspection remain local.
@@ -92,8 +117,7 @@ type Model struct {
 
 	view      view
 	focus     paneFocus
-	loading   bool
-	loaded    bool
+	loadState corpusLoadState
 	err       error
 	items     map[view][]tuicontract.Item
 	windows   map[view]tuicontract.Window
@@ -103,29 +127,23 @@ type Model struct {
 	detailTop int
 
 	search        textinput.Model
-	searching     bool
-	help          bool
-	briefOpen     bool
+	overlay       overlay
 	briefTop      int
 	briefProvider tuicontract.BriefProvider
-	briefLoading  bool
+	briefState    briefState
 	briefErr      error
 	briefItem     tuicontract.Item
 	brief         tuicontract.ResearchBrief
 
-	actionMsg       string
-	actionProvider  tuicontract.ActionProvider
-	actionOpen      bool
-	actionLoading   bool
-	actionExecuting bool
-	actionConfirm   bool
-	actionErr       error
-	actionItem      tuicontract.Item
-	actions         []tuicontract.Action
-	actionCursor    int
-	resultOpen      bool
-	resultTop       int
-	actionResult    tuicontract.ActionResult
+	actionMsg      string
+	actionProvider tuicontract.ActionProvider
+	actionState    actionState
+	actionErr      error
+	actionItem     tuicontract.Item
+	actions        []tuicontract.Action
+	actionCursor   int
+	resultTop      int
+	actionResult   tuicontract.ActionResult
 }
 
 // New creates a Model for the given reader and lifecycle context.
@@ -235,9 +253,10 @@ func (m *Model) switchView(next view) {
 	m.cursor = 0
 	m.listStart = 0
 	m.detailTop = 0
-	m.briefOpen = false
+	if m.overlay == overlayBrief || m.overlay == overlayResult {
+		m.overlay = overlayNone
+	}
 	m.briefTop = 0
-	m.resultOpen = false
 	m.resultTop = 0
 	m.actionMsg = ""
 	m.applyFilter()
@@ -263,18 +282,18 @@ func (m *Model) focusActionTarget(target *tuicontract.ActionTarget) {
 }
 
 func (m *Model) nextView() {
-	for i, current := range viewOrder {
-		if current == m.view {
-			m.switchView(viewOrder[(i+1)%len(viewOrder)])
+	for i, spec := range viewSpecs {
+		if spec.view == m.view {
+			m.switchView(viewSpecs[(i+1)%len(viewSpecs)].view)
 			return
 		}
 	}
 }
 
 func (m *Model) prevView() {
-	for i, current := range viewOrder {
-		if current == m.view {
-			m.switchView(viewOrder[(i-1+len(viewOrder))%len(viewOrder)])
+	for i, spec := range viewSpecs {
+		if spec.view == m.view {
+			m.switchView(viewSpecs[(i-1+len(viewSpecs))%len(viewSpecs)].view)
 			return
 		}
 	}
@@ -309,16 +328,17 @@ func (m Model) openActions() (Model, tea.Cmd) {
 	if !ok || m.actionProvider == nil {
 		return m, nil
 	}
-	m.actionOpen = true
-	m.actionLoading = true
-	m.actionExecuting = false
-	m.actionConfirm = false
+	m.overlay = overlayActions
+	m.actionState = actionsLoading
 	m.actionErr = nil
 	m.actionItem = item
 	m.actions = nil
 	m.actionCursor = 0
 	return m, func() tea.Msg {
 		actions, err := m.actionProvider.Actions(m.ctx, item)
+		if err == nil {
+			actions, err = tuicontract.ParseActions(actions)
+		}
 		return actionsLoadedMsg{actions: actions, err: err}
 	}
 }
@@ -327,13 +347,16 @@ func (m Model) retryActionDiscovery() (Model, tea.Cmd) {
 	if m.actionProvider == nil || m.actionItem.Kind == "" {
 		return m, nil
 	}
-	m.actionLoading = true
+	m.actionState = actionsLoading
 	m.actionErr = nil
 	m.actions = nil
 	m.actionCursor = 0
 	item := m.actionItem
 	return m, func() tea.Msg {
 		actions, err := m.actionProvider.Actions(m.ctx, item)
+		if err == nil {
+			actions, err = tuicontract.ParseActions(actions)
+		}
 		return actionsLoadedMsg{actions: actions, err: err}
 	}
 }
@@ -350,8 +373,7 @@ func (m Model) executeSelectedAction() (Model, tea.Cmd) {
 	if !ok || m.actionProvider == nil {
 		return m, nil
 	}
-	m.actionExecuting = true
-	m.actionConfirm = false
+	m.actionState = actionExecuting
 	m.actionErr = nil
 	request := tuicontract.ActionRequest{ActionID: action.ID, Item: m.actionItem}
 	return m, func() tea.Msg {
@@ -361,15 +383,16 @@ func (m Model) executeSelectedAction() (Model, tea.Cmd) {
 }
 
 func (m Model) openBrief(item tuicontract.Item) (Model, tea.Cmd) {
-	m.briefOpen = true
+	m.overlay = overlayBrief
 	m.briefTop = 0
 	m.briefErr = nil
+	m.briefState = briefReady
 	m.briefItem = item
 	m.brief = tuicontract.ResearchBrief{}
 	if m.briefProvider == nil {
 		return m, nil
 	}
-	m.briefLoading = true
+	m.briefState = briefLoading
 	return m, func() tea.Msg {
 		brief, err := m.briefProvider.ResearchBrief(m.ctx, item)
 		return briefLoadedMsg{itemRef: item.Ref, brief: brief, err: err}

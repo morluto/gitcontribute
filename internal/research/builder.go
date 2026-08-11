@@ -408,39 +408,42 @@ func buildCoverage(in assemblyInput, discussionGap string) CoverageSection {
 	repoFacets := map[string]domain.FacetCoverage{}
 	for _, facet := range in.repoCoverage.Facets {
 		repoFacets[facet.Facet()] = facet
-		facts = append(facts, CoverageFact{
-			Scope: "repository", Facet: facet.Facet(), Present: true, Complete: facet.Complete(),
-			AsOf: facet.AsOf(), Count: facet.Count(),
-		})
+		facts = append(facts, observedCoverageFact("repository", facet.Facet(), facet.Complete(), false, facet.AsOf(), facet.Count()))
 		if !facet.Complete() {
 			gaps = append(gaps, "repository:"+facet.Facet())
 		}
 	}
 	for _, required := range []string{"metadata", "threads"} {
 		if _, ok := repoFacets[required]; !ok {
-			facts = append(facts, CoverageFact{Scope: "repository", Facet: required})
+			facts = append(facts, missingCoverageFact("repository", required))
 			gaps = append(gaps, "repository:"+required)
 		}
 	}
 	for _, facet := range in.thread.Coverage {
-		facts = append(facts, CoverageFact{
-			Scope: "thread", Facet: facet.Facet(), Present: facet.Present(), Complete: facet.Complete(),
-			Truncated: facet.Truncated(), AsOf: facet.AsOf(), Count: facet.Count(),
-		})
+		if facet.Present() {
+			facts = append(facts, observedCoverageFact("thread", facet.Facet(), facet.Complete(), facet.Truncated(), facet.AsOf(), facet.Count()))
+		} else {
+			facts = append(facts, missingCoverageFact("thread", facet.Facet()))
+		}
 		if !facet.Complete() {
 			gaps = append(gaps, "thread:"+facet.Facet())
 		}
 	}
 	codePresent := in.code.Present()
-	facts = append(facts, CoverageFact{
-		Scope: "repository", Facet: "code_index", Present: codePresent, Complete: codePresent,
-		AsOf: in.code.Source().AsOf, Count: len(in.code.Hits()),
-	})
+	if codePresent {
+		facts = append(facts, observedCoverageFact("repository", "code_index", true, false, in.code.Source().AsOf, len(in.code.Hits())))
+	} else {
+		facts = append(facts, missingCoverageFact("repository", "code_index"))
+	}
 	if !codePresent {
 		gaps = append(gaps, "repository:code_index")
 	}
 	guidancePresent := strings.TrimSpace(in.guidance) != "" && len(in.guidanceSources) > 0
-	facts = append(facts, CoverageFact{Scope: "repository", Facet: "contribution_guidance", Present: guidancePresent, Complete: guidancePresent})
+	if guidancePresent {
+		facts = append(facts, observedCoverageFact("repository", "contribution_guidance", true, false, time.Time{}, 0))
+	} else {
+		facts = append(facts, missingCoverageFact("repository", "contribution_guidance"))
+	}
 	if !guidancePresent {
 		gaps = append(gaps, "repository:contribution_guidance")
 	}
@@ -584,7 +587,7 @@ func codeTerms(title string, labels []string) []string {
 }
 
 func discussionCoverageGap(kind domain.ThreadKind, coverage []FacetCoverage) string {
-	required := facets.DefaultFor(string(kind))
+	required := facets.DefaultFor(kind)
 	byFacet := map[string]FacetCoverage{}
 	for _, item := range coverage {
 		byFacet[item.Facet()] = item

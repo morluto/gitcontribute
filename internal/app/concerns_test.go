@@ -144,7 +144,11 @@ func TestConcernFreshnessIsDerivedFromCurrentCorpus(t *testing.T) {
 	if _, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "R1", time.Unix(10, 0).UTC(), `{}`); err != nil {
 		t.Fatal(err)
 	}
-	revision, err := c.CurrentSourceRevision(ctx, evidence.SourceSubject{Kind: evidence.SourceSubjectRepository, Owner: "owner", Repo: "repo"})
+	subject, err := evidence.NewRepositorySourceSubject(domain.MustRepoRef("owner", "repo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	revision, err := c.CurrentSourceRevision(ctx, subject)
 	if err != nil {
 		t.Fatal(err)
 	}

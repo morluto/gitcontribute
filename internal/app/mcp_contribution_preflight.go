@@ -20,6 +20,52 @@ const (
 	defaultContributionPreflightMaxRequests = 100
 )
 
+type preflightCandidate struct {
+	title            string
+	query            string
+	body             string
+	issueNumber      int
+	headRef          string
+	headSHA          string
+	changedFileCount int
+}
+
+func parsePreflightCandidate(input mcpcontract.ContributionPreflightCandidate) (preflightCandidate, error) {
+	if input.IssueNumber < 0 {
+		return preflightCandidate{}, errors.New("candidate issue_number must be positive when provided")
+	}
+	return preflightCandidate{
+		title: strings.TrimSpace(input.Title), query: strings.TrimSpace(input.Query), body: strings.TrimSpace(input.Body),
+		issueNumber: input.IssueNumber, headRef: strings.TrimSpace(input.HeadRef), headSHA: strings.TrimSpace(input.HeadSHA),
+		changedFileCount: len(input.ChangedFiles),
+	}, nil
+}
+
+func (c preflightCandidate) hasInputContext(workspacePathCount int) bool {
+	return c.title != "" || c.query != "" || c.body != "" || c.issueNumber > 0 ||
+		c.headRef != "" || c.headSHA != "" || c.changedFileCount > 0 || workspacePathCount > 0
+}
+
+func (c preflightCandidate) hasComparableIdentity(worktrees []workspace.LocalWorktree) bool {
+	return c.title != "" || c.query != "" || c.body != "" || c.issueNumber > 0 ||
+		c.headRef != "" || c.headSHA != "" || len(worktrees) > 0
+}
+
+func (c preflightCandidate) searchQuery() string {
+	switch {
+	case c.query != "":
+		return c.query
+	case c.title != "":
+		return c.title
+	case c.headRef != "":
+		return c.headRef
+	case len(c.body) > 200:
+		return c.body[:200]
+	default:
+		return c.body
+	}
+}
+
 // PreflightContribution performs the bounded, side-effect-free routing check
 // described by workflow.preflight_contribution. Unlike portfolio sync, it does
 // not write observations, create jobs, create worktrees, or adopt paths.
@@ -41,6 +87,10 @@ func (r *MCPReader) PreflightContribution(ctx context.Context, in mcpcontract.Co
 			return mcpcontract.ContributionPreflightOutput{}, errors.New("fork repository must differ from the upstream repository")
 		}
 	}
+	candidate, err := parsePreflightCandidate(in.Candidate)
+	if err != nil {
+		return mcpcontract.ContributionPreflightOutput{}, err
+	}
 	if in.Limit == 0 {
 		in.Limit = defaultContributionPreflightLimit
 	}
@@ -53,10 +103,7 @@ func (r *MCPReader) PreflightContribution(ctx context.Context, in mcpcontract.Co
 	if in.MaxRequests < 2 || in.MaxRequests > 1000 {
 		return mcpcontract.ContributionPreflightOutput{}, errors.New("max_requests must be between 2 and 1000")
 	}
-	if in.Candidate.IssueNumber < 0 {
-		return mcpcontract.ContributionPreflightOutput{}, errors.New("candidate issue_number must be positive when provided")
-	}
-	if !preflightHasInputContext(in.Candidate, in.WorkspacePaths) {
+	if !candidate.hasInputContext(len(in.WorkspacePaths)) {
 		return mcpcontract.ContributionPreflightOutput{}, errors.New("candidate or workspace_paths must provide contribution context")
 	}
 
@@ -93,7 +140,7 @@ func (r *MCPReader) PreflightContribution(ctx context.Context, in mcpcontract.Co
 		return out, nil
 	}
 	out.Identity = identity.Login
-	if !preflightHasComparableIdentity(in.Candidate, worktrees) {
+	if !candidate.hasComparableIdentity(worktrees) {
 		out.CoverageReasons = append(out.CoverageReasons, "candidate has no comparable title, branch, commit, issue, or inspected worktree identity")
 	}
 
@@ -124,7 +171,7 @@ func (r *MCPReader) PreflightContribution(ctx context.Context, in mcpcontract.Co
 	}
 
 	threadSearcher, hasThreadSearch := reader.(github.ThreadSearcher)
-	query := preflightSearchQuery(in.Candidate)
+	query := candidate.searchQuery()
 	if !hasThreadSearch {
 		out.CoverageReasons = append(out.CoverageReasons, "configured GitHub reader does not support related-thread search")
 	} else if requests >= in.MaxRequests {
@@ -151,7 +198,7 @@ func (r *MCPReader) PreflightContribution(ctx context.Context, in mcpcontract.Co
 	detailsReader := reader
 	existing := make([]preflightExisting, 0)
 	for _, marker := range authored.Items {
-		if !sameRepository(marker.RepositoryOwner, marker.RepositoryName, in.Repository) || marker.Kind != github.ThreadKindPullRequest {
+		if !sameRepository(marker.RepositoryOwner, marker.RepositoryName, in.Repository) || marker.Kind != domain.PullRequestKind {
 			continue
 		}
 		if requests >= in.MaxRequests {
@@ -167,16 +214,16 @@ func (r *MCPReader) PreflightContribution(ctx context.Context, in mcpcontract.Co
 			out.CoverageReasons = append(out.CoverageReasons, fmt.Sprintf("pull-request #%d details could not be inspected", marker.Number))
 			continue
 		}
-		if preflightMatchesCandidate(in.Candidate, marker, details, worktrees) {
+		if preflightMatchesCandidate(candidate, marker, details, worktrees) {
 			existing = append(existing, preflightExisting{marker: marker, details: details})
 		}
 	}
 	if len(existing) > 0 {
 		sort.Slice(existing, func(i, j int) bool { return existing[i].marker.Number < existing[j].marker.Number })
 		match := existing[0]
-		issue := in.Candidate.IssueNumber
+		issue := candidate.issueNumber
 		if issue == 0 {
-			issue = relatedIssueNumber(out.Related, in.Candidate)
+			issue = relatedIssueNumber(out.Related, candidate)
 		}
 		headOwner := match.details.HeadOwner
 		if headOwner == "" {
@@ -194,7 +241,7 @@ func (r *MCPReader) PreflightContribution(ctx context.Context, in mcpcontract.Co
 		out.Status = "existing_pr"
 		out.NextAction = "review_or_follow_through"
 	}
-	forkFreshness, forkChecked, forkErr := checkPreflightForkFreshness(ctx, reader, in.Repository, in.Fork, identity.Login, in.Candidate, worktrees, existingMatch(existing), in.MaxRequests, requests)
+	forkFreshness, forkChecked, forkErr := checkPreflightForkFreshness(ctx, reader, in.Repository, in.Fork, identity.Login, candidate, worktrees, existingMatch(existing), in.MaxRequests, requests)
 	if forkErr != nil {
 		return mcpcontract.ContributionPreflightOutput{}, forkErr
 	}
@@ -253,35 +300,6 @@ func inspectPreflightWorktrees(ctx context.Context, paths []string) ([]workspace
 	return inspected, reasons
 }
 
-func preflightSearchQuery(candidate mcpcontract.ContributionPreflightCandidate) string {
-	if query := strings.TrimSpace(candidate.Query); query != "" {
-		return query
-	}
-	if title := strings.TrimSpace(candidate.Title); title != "" {
-		return title
-	}
-	if branch := strings.TrimSpace(candidate.HeadRef); branch != "" {
-		return branch
-	}
-	if body := strings.TrimSpace(candidate.Body); body != "" {
-		if len(body) > 200 {
-			return body[:200]
-		}
-		return body
-	}
-	return ""
-}
-
-func preflightHasComparableIdentity(candidate mcpcontract.ContributionPreflightCandidate, worktrees []workspace.LocalWorktree) bool {
-	return strings.TrimSpace(candidate.Title) != "" || strings.TrimSpace(candidate.Query) != "" || strings.TrimSpace(candidate.Body) != "" ||
-		candidate.IssueNumber > 0 || strings.TrimSpace(candidate.HeadRef) != "" || strings.TrimSpace(candidate.HeadSHA) != "" || len(worktrees) > 0
-}
-
-func preflightHasInputContext(candidate mcpcontract.ContributionPreflightCandidate, paths []string) bool {
-	return strings.TrimSpace(candidate.Title) != "" || strings.TrimSpace(candidate.Query) != "" || strings.TrimSpace(candidate.Body) != "" ||
-		candidate.IssueNumber > 0 || strings.TrimSpace(candidate.HeadRef) != "" || strings.TrimSpace(candidate.HeadSHA) != "" || len(candidate.ChangedFiles) > 0 || len(paths) > 0
-}
-
 func relatedThreadOutputs(items []github.Issue) []mcpcontract.RelatedContributionThread {
 	out := make([]mcpcontract.RelatedContributionThread, 0, len(items))
 	for _, item := range items {
@@ -290,23 +308,23 @@ func relatedThreadOutputs(items []github.Issue) []mcpcontract.RelatedContributio
 	return out
 }
 
-func relatedIssueNumber(items []mcpcontract.RelatedContributionThread, candidate mcpcontract.ContributionPreflightCandidate) int {
+func relatedIssueNumber(items []mcpcontract.RelatedContributionThread, candidate preflightCandidate) int {
 	for _, item := range items {
-		if item.Kind == string(github.ThreadKindIssue) && textSimilarity(candidate, item.Title) >= 0.5 {
+		if item.Kind == string(domain.IssueKind) && textSimilarity(candidate, item.Title) >= 0.5 {
 			return item.Number
 		}
 	}
 	return 0
 }
 
-func preflightMatchesCandidate(candidate mcpcontract.ContributionPreflightCandidate, marker github.Issue, details github.PullRequestDetails, worktrees []workspace.LocalWorktree) bool {
-	if candidate.IssueNumber > 0 && marker.Number == candidate.IssueNumber {
+func preflightMatchesCandidate(candidate preflightCandidate, marker github.Issue, details github.PullRequestDetails, worktrees []workspace.LocalWorktree) bool {
+	if candidate.issueNumber > 0 && marker.Number == candidate.issueNumber {
 		return true
 	}
-	if candidate.HeadSHA != "" && strings.EqualFold(strings.TrimSpace(candidate.HeadSHA), strings.TrimSpace(details.HeadSHA)) {
+	if candidate.headSHA != "" && strings.EqualFold(candidate.headSHA, strings.TrimSpace(details.HeadSHA)) {
 		return true
 	}
-	if candidate.HeadRef != "" && strings.EqualFold(strings.TrimSpace(candidate.HeadRef), strings.TrimSpace(details.HeadRef)) {
+	if candidate.headRef != "" && strings.EqualFold(candidate.headRef, strings.TrimSpace(details.HeadRef)) {
 		return true
 	}
 	for _, worktree := range worktrees {
@@ -345,13 +363,13 @@ func localMatchOutputs(worktrees []workspace.LocalWorktree, existing []preflight
 	return out
 }
 
-func textSimilarity(candidate mcpcontract.ContributionPreflightCandidate, other string) float64 {
-	left := candidate.Query
-	if strings.TrimSpace(left) == "" {
-		left = candidate.Title
+func textSimilarity(candidate preflightCandidate, other string) float64 {
+	left := candidate.query
+	if left == "" {
+		left = candidate.title
 	}
-	if strings.TrimSpace(left) == "" {
-		left = candidate.Body
+	if left == "" {
+		left = candidate.body
 	}
 	leftTokens := preflightTokens(left)
 	rightTokens := preflightTokens(other)

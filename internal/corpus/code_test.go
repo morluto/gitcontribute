@@ -94,7 +94,7 @@ func TestCodeSnapshotsAreAtomicDeduplicatedAndSearchLatest(t *testing.T) {
 	if len(matches) != 1 || matches[0].Commit != "second" || matches[0].Path != "new.go" {
 		t.Fatalf("matches = %+v", matches)
 	}
-	page, err := c.SearchCodeWithOptions(ctx, "needle", CodeSearchOptions{Ref: ref, Limit: 10})
+	page, err := c.SearchCodeWithOptions(ctx, "needle", CodeSearchOptions{Ref: ref, Page: mustSearchPage(t, 10)})
 	if err != nil {
 		t.Fatal(err)
 	}

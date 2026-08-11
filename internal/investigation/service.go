@@ -103,7 +103,7 @@ func (s *Service) CreateHypothesis(ctx context.Context, investigationID string, 
 	if title == "" {
 		return nil, ErrMissingTitle
 	}
-	if !ValidCategory(in.Category) {
+	if !validCategory(in.Category) {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidCategory, in.Category)
 	}
 	if _, err := s.repo.GetInvestigation(ctx, investigationID); err != nil {
@@ -140,7 +140,7 @@ func (s *Service) UpdateHypothesis(ctx context.Context, id string, in UpdateHypo
 	if title == "" {
 		return nil, ErrMissingTitle
 	}
-	if !ValidCategory(in.Category) {
+	if !validCategory(in.Category) {
 		return nil, fmt.Errorf("%w: %q", ErrInvalidCategory, in.Category)
 	}
 	h, err := s.repo.GetHypothesis(ctx, id)
@@ -339,7 +339,11 @@ func (s *Service) SetOpportunityStatus(ctx context.Context, id string, to Opport
 	if err := o.Transition(to, rationale); err != nil {
 		return nil, err
 	}
-	if err := s.repo.UpdateOpportunity(ctx, &previous, o, advancing); err != nil {
+	constraint := OpportunityUpdateUnconditional
+	if advancing {
+		constraint = OpportunityUpdateWithoutContradictingEvidence
+	}
+	if err := s.repo.UpdateOpportunity(ctx, &previous, o, constraint); err != nil {
 		return nil, err
 	}
 	return o, nil
@@ -416,29 +420,10 @@ func (s *Service) UpdateCollisionStatus(ctx context.Context, id string, status C
 		At:        now,
 	})
 	o.UpdatedAt = now
-	if err := s.repo.UpdateOpportunity(ctx, &stored, o, false); err != nil {
+	if err := s.repo.UpdateOpportunity(ctx, &stored, o, OpportunityUpdateUnconditional); err != nil {
 		return nil, err
 	}
 	return o, nil
-}
-
-// CheckDuplicates returns source references for known related work in the same repository.
-func (s *Service) CheckDuplicates(ctx context.Context, investigationID string) ([]domain.SourceRef, error) {
-	inv, err := s.repo.GetInvestigation(ctx, investigationID)
-	if err != nil {
-		return nil, err
-	}
-	return s.repo.FindRelated(ctx, inv.Repo, "")
-}
-
-// ValidCategory reports whether c is a supported contribution category.
-func ValidCategory(c Category) bool {
-	switch c {
-	case CategoryBug, CategoryPerformance, CategoryArchitecture, CategoryTesting,
-		CategoryDocumentation, CategoryMaintenance, CategoryCompatibility, CategorySecurity, CategoryOther:
-		return true
-	}
-	return false
 }
 
 func isAdvancingStatus(status OpportunityStatus) bool {

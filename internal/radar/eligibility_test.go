@@ -204,9 +204,9 @@ func completeEligibilityRepo(now time.Time) RepositorySnapshot {
 			Path: "CONTRIBUTING.md", Content: "Contributions are welcome.", URL: "https://github.com/owner/repo/blob/main/CONTRIBUTING.md",
 		}},
 		Coverage: []Coverage{
-			{Facet: "metadata", Scope: "repository", Present: true, Complete: true, AsOf: now},
-			{Facet: "threads", Scope: "repository", Present: true, Complete: true, AsOf: now},
-			{Facet: "contribution_guidance", Scope: "repository", Present: true, Complete: true, AsOf: now},
+			{Facet: "metadata", Scope: "repository", Complete: true, AsOf: now},
+			{Facet: "threads", Scope: "repository", Complete: true, AsOf: now},
+			{Facet: "contribution_guidance", Scope: "repository", Complete: true, AsOf: now},
 		},
 	}
 }
@@ -215,7 +215,7 @@ func completeEligibilityIssue(now time.Time, number int, labels []string, commen
 	return IssueSnapshot{
 		Number: number, State: "open", Title: "Focused bug", Body: "Steps to reproduce. Expected behavior differs from actual behavior.",
 		Labels: labels, SourceUpdated: now, URL: "https://github.com/owner/repo/issues/1", Discussion: SummarizeDiscussion(comments, now),
-		Coverage: []Coverage{{Facet: "issue_comments", Scope: "thread", Present: true, Complete: true, AsOf: now}},
+		Coverage: []Coverage{{Facet: "issue_comments", Scope: "thread", Complete: true, AsOf: now}},
 	}
 }
 

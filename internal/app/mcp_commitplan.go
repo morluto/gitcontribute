@@ -41,7 +41,7 @@ func commitInventoryToMCP(inventory commitplan.Inventory) mcpcontract.CommitInve
 	out := mcpcontract.CommitInventoryOutput{SourcePatchSHA256: inventory.SourcePatchSHA256, InventorySHA256: inventory.InventorySHA256}
 	for _, unit := range inventory.Units {
 		out.Units = append(out.Units, mcpcontract.CommitUnitOutput{
-			ID: unit.ID, Kind: unit.Kind, Path: unit.Path, OldPath: unit.OldPath, Operation: unit.Operation,
+			ID: unit.ID, Kind: string(unit.Kind), Path: unit.Path, OldPath: unit.OldPath, Operation: string(unit.Operation),
 			OldStart: unit.OldStart, OldLines: unit.OldLines, NewStart: unit.NewStart, NewLines: unit.NewLines,
 			Patch: unit.Patch, ContentSHA256: unit.ContentHash, Generated: unit.Generated, WhitespaceOnly: unit.WhitespaceOnly,
 		})

@@ -40,11 +40,11 @@ func Compute(ctx context.Context, c *corpus.Corpus, repoID int64, opts Options) 
 		return nil, fmt.Errorf("decode repository identity: %w", err)
 	}
 
-	threads, err := c.ListThreads(ctx, repoID, "", threadListLimit)
+	threads, err := c.ListThreads(ctx, repoID, corpus.AnyThreadKind(), threadListLimit)
 	if err != nil {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
-	threadTotal, err := c.CountThreadsFiltered(ctx, repoID, "", "")
+	threadTotal, err := c.CountThreadsFiltered(ctx, repoID, corpus.AnyThreadKind(), corpus.AnyThreadState())
 	if err != nil {
 		return nil, fmt.Errorf("count threads: %w", err)
 	}
@@ -87,13 +87,7 @@ func Compute(ctx context.Context, c *corpus.Corpus, repoID int64, opts Options) 
 			License:       repo.License,
 			Coverage:      "repository",
 		},
-		Coverage: CoverageSummary{
-			ThreadsLimit:         threadListLimit,
-			ThreadsComplete:      threadsComplete,
-			ThreadsTruncated:     threadsIncomplete,
-			ThreadsSampleSize:    len(threads),
-			RepositoryProjection: true,
-		},
+		Coverage: newCoverageSummary(threadListLimit, len(threads), threadsComplete, true),
 	}
 
 	issueMetrics, prMetrics := countThreads(threads, window, threadsIncomplete)
@@ -151,9 +145,9 @@ func countThreads(threads []corpus.Thread, window Window, incomplete bool) (Issu
 	for _, t := range threads {
 		if t.SourceCreatedAt.IsZero() {
 			switch t.Kind {
-			case corpus.ThreadKindIssue:
+			case domain.IssueKind:
 				missingIssueCreated = true
-			case corpus.ThreadKindPullRequest:
+			case domain.PullRequestKind:
 				missingPRCreated = true
 			}
 			continue
@@ -162,14 +156,14 @@ func countThreads(threads []corpus.Thread, window Window, incomplete bool) (Issu
 			continue
 		}
 		switch t.Kind {
-		case corpus.ThreadKindIssue:
+		case domain.IssueKind:
 			issueMetrics.SampleSize++
 			if t.State == "open" {
 				issueMetrics.Open++
 			} else {
 				issueMetrics.Closed++
 			}
-		case corpus.ThreadKindPullRequest:
+		case domain.PullRequestKind:
 			prMetrics.SampleSize++
 			if t.State == "open" {
 				prMetrics.Open++
@@ -220,7 +214,7 @@ func computeExternalMetrics(threads []corpus.Thread, start, end time.Time) Exter
 	out := ExternalContributorMetrics{}
 	var unknown, known int
 	for _, t := range threads {
-		if t.Kind != corpus.ThreadKindPullRequest {
+		if t.Kind != domain.PullRequestKind {
 			continue
 		}
 		if !t.SourceCreatedAt.IsZero() && !withinWindow(t.SourceCreatedAt, start, end) {
@@ -303,7 +297,7 @@ func computeCongestion(threads []corpus.Thread, now time.Time, window Window) Co
 	bucketCounts := make([]int, len(buckets))
 	var missingCreated int
 	for _, t := range threads {
-		if t.Kind != corpus.ThreadKindPullRequest || t.State != "open" {
+		if t.Kind != domain.PullRequestKind || t.State != "open" {
 			continue
 		}
 		out.OpenPRs++
@@ -354,7 +348,7 @@ func computeStaleSignals(ctx context.Context, c *corpus.Corpus, threads []corpus
 		Threshold: threshold.Hours(),
 	}
 	for _, t := range threads {
-		if t.Kind != corpus.ThreadKindPullRequest || t.State != "open" {
+		if t.Kind != domain.PullRequestKind || t.State != "open" {
 			continue
 		}
 		out.SampleSize++
@@ -416,13 +410,13 @@ func latestActivity(ctx context.Context, c *corpus.Corpus, t corpus.Thread) (tim
 
 func computeResponseTimes(ctx context.Context, c *corpus.Corpus, threads []corpus.Thread, start, end time.Time, window Window) (ResponseTimeDistributions, error) {
 	out := ResponseTimeDistributions{}
-	issueSamples, issueCoverage, err := responseSamples(ctx, c, threads, start, end, corpus.ThreadKindIssue)
+	issueSamples, issueCoverage, err := responseSamples(ctx, c, threads, start, end, domain.IssueKind)
 	if err != nil {
 		return out, err
 	}
 	out.Issues = buildResponseMetric(issueSamples, window, issueCoverage, facets.IssueComments)
 
-	prSamples, prCoverage, err := responseSamples(ctx, c, threads, start, end, corpus.ThreadKindPullRequest)
+	prSamples, prCoverage, err := responseSamples(ctx, c, threads, start, end, domain.PullRequestKind)
 	if err != nil {
 		return out, err
 	}
@@ -430,7 +424,7 @@ func computeResponseTimes(ctx context.Context, c *corpus.Corpus, threads []corpu
 	return out, nil
 }
 
-func responseSamples(ctx context.Context, c *corpus.Corpus, threads []corpus.Thread, start, end time.Time, kind string) ([]float64, string, error) {
+func responseSamples(ctx context.Context, c *corpus.Corpus, threads []corpus.Thread, start, end time.Time, kind domain.ThreadKind) ([]float64, string, error) {
 	var samples []float64
 	var withFacets, withoutFacets, noCreated int
 	for _, t := range threads {
@@ -470,8 +464,8 @@ func responseSamples(ctx context.Context, c *corpus.Corpus, threads []corpus.Thr
 	return samples, coverage, nil
 }
 
-func responseFacets(kind string) []string {
-	if kind == corpus.ThreadKindPullRequest {
+func responseFacets(kind domain.ThreadKind) []string {
+	if kind == domain.PullRequestKind {
 		return []string{facetIssueComments, facetPRReviews, facetPRReviewComments}
 	}
 	return []string{facetIssueComments}

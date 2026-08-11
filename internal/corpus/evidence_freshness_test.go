@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 )
 
@@ -21,11 +22,14 @@ func TestEvidenceThreadFreshnessAndProvenancePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 42, "open", "bug", "body", "alice", time.Unix(20, 0).UTC(), `{}`)
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 42, "open", "bug", "body", "alice", time.Unix(20, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	subject := evidence.SourceSubject{Kind: evidence.SourceSubjectThread, Owner: "owner", Repo: "repo", ThreadKind: ThreadKindIssue, Number: 42}
+	subject, err := evidence.NewThreadSourceSubject(domain.MustRepoRef("owner", "repo"), domain.IssueKind, 42)
+	if err != nil {
+		t.Fatal(err)
+	}
 	revision, err := c.CurrentSourceRevision(ctx, subject)
 	if err != nil || revision == nil {
 		t.Fatalf("CurrentSourceRevision = (%+v, %v)", revision, err)
@@ -60,7 +64,7 @@ func TestEvidenceThreadFreshnessAndProvenancePersistence(t *testing.T) {
 	}
 
 	// The same source timestamp with a later local observation sequence wins.
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 42, "open", "updated bug", "body", "alice", time.Unix(20, 0).UTC(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 42, "open", "updated bug", "body", "alice", time.Unix(20, 0).UTC(), `{}`); err != nil {
 		t.Fatal(err)
 	}
 	freshness, err = evaluator.Evaluate(ctx, items[0])
@@ -74,14 +78,15 @@ func TestEvidenceFacetFreshnessIgnoresUnrelatedFacet(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	repo, _ := c.ApplyRepositoryObservation(ctx, "owner", "repo", "R1", time.Unix(10, 0).UTC(), `{}`)
-	thread, _ := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "bug", "", "alice", time.Unix(20, 0).UTC(), `{}`)
+	thread, _ := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "bug", "", "alice", time.Unix(20, 0).UTC(), `{}`)
 	threadID := thread.ID
 	commentsAt := time.Unix(30, 0).UTC()
 	if err := c.ApplyFacetObservationSet(ctx, repo.ID, &threadID, "issue_comments", commentsAt, []FacetObservationInput{{SourceUpdatedAt: commentsAt, Payload: `{}`}}, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	subject := evidence.SourceSubject{
-		Kind: evidence.SourceSubjectFacet, Owner: "owner", Repo: "repo", ThreadKind: ThreadKindIssue, Number: 1, Facet: "issue_comments",
+	subject, err := evidence.ParseSourceSubject("facet", "owner", "repo", string(domain.IssueKind), 1, "issue_comments")
+	if err != nil {
+		t.Fatal(err)
 	}
 	recorded, err := c.CurrentSourceRevision(ctx, subject)
 	if err != nil || recorded == nil {
@@ -112,10 +117,14 @@ func TestEvidenceFreshnessMissingRevisionIsUnknownAndReadOnly(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
+	subject, err := evidence.NewRepositorySourceSubject(domain.MustRepoRef("missing", "repo"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	item := &evidence.Evidence{
 		Type: evidence.EvidenceTypeGitHubSource,
 		SourceProvenance: []evidence.SourceRevision{{
-			Subject:         evidence.SourceSubject{Kind: evidence.SourceSubjectRepository, Owner: "missing", Repo: "repo"},
+			Subject:         subject,
 			SourceUpdatedAt: time.Unix(10, 0).UTC(), ObservationSequence: 1, ObservedAt: time.Unix(11, 0).UTC(),
 		}},
 	}

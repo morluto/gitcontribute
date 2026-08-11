@@ -45,11 +45,11 @@ func TestJobStateRejectsContradictoryLifecycle(t *testing.T) {
 		status                        string
 		started, completed, cancelled *time.Time
 	}{
-		{status: JobStatusQueued, started: &now},
-		{status: JobStatusRunning},
-		{status: JobStatusRunning, started: &now, completed: &now},
-		{status: JobStatusSucceeded, completed: &now, cancelled: &now},
-		{status: JobStatusCancelled, completed: &now},
+		{status: JobStatusQueued.String(), started: &now},
+		{status: JobStatusRunning.String()},
+		{status: JobStatusRunning.String(), started: &now, completed: &now},
+		{status: JobStatusSucceeded.String(), completed: &now, cancelled: &now},
+		{status: JobStatusCancelled.String(), completed: &now},
 		{status: "invented", completed: &now},
 	} {
 		if _, err := parseJobState(test.status, test.started, test.completed, test.cancelled); err == nil {
@@ -73,12 +73,12 @@ func TestGetJobsBatchCanSkipPayloadBlobs(t *testing.T) {
 	if err := c.StartJob(ctx, first.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.TransitionJob(ctx, first.ID, JobStatusRunning, JobStatusSucceeded, `{"large":"result"}`, ""); err != nil {
+	if err := c.TransitionJob(ctx, first.ID, JobRunningToSucceeded, `{"large":"result"}`, ""); err != nil {
 		t.Fatal(err)
 	}
 
 	ids := []string{second.ID, "missing", first.ID}
-	summary, err := c.GetJobsBatch(ctx, ids, false)
+	summary, err := c.GetJobSummariesBatch(ctx, ids)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,14 +88,14 @@ func TestGetJobsBatchCanSkipPayloadBlobs(t *testing.T) {
 	if summary[first.ID].Request != "" || summary[first.ID].Result != "" || summary[first.ID].State.Status() != JobStatusSucceeded {
 		t.Fatalf("summary loaded payload or lost status: %+v", summary[first.ID])
 	}
-	detailed, err := c.GetJobsBatch(ctx, ids, true)
+	detailed, err := c.GetJobsBatch(ctx, ids)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if detailed[first.ID].Request != `{"large":"request"}` || detailed[first.ID].Result != `{"large":"result"}` {
 		t.Fatalf("detailed payload = %+v", detailed[first.ID])
 	}
-	if _, err := c.GetJobsBatch(ctx, make([]string, maxBatchReadItems+1), false); err == nil {
+	if _, err := c.GetJobSummariesBatch(ctx, make([]string, maxBatchReadItems+1)); err == nil {
 		t.Fatal("job batch accepted an oversized ID set")
 	}
 }
@@ -173,7 +173,7 @@ func TestJobStatusTransitions(t *testing.T) {
 		t.Fatalf("progress/statistics mismatch: %+v", job)
 	}
 
-	if err := c.TransitionJob(ctx, job.ID, JobStatusRunning, JobStatusSucceeded, `{"done":true}`, ""); err != nil {
+	if err := c.TransitionJob(ctx, job.ID, JobRunningToSucceeded, `{"done":true}`, ""); err != nil {
 		t.Fatalf("complete job: %v", err)
 	}
 	job, _ = c.GetJob(ctx, job.ID)
@@ -185,7 +185,7 @@ func TestJobStatusTransitions(t *testing.T) {
 	if err := c.StartJob(ctx, job.ID); err == nil {
 		t.Fatal("expected error starting completed job")
 	}
-	if err := c.TransitionJob(ctx, job.ID, JobStatusRunning, JobStatusFailed, "", "nope"); err == nil {
+	if err := c.TransitionJob(ctx, job.ID, JobRunningToFailed, "", "nope"); err == nil {
 		t.Fatal("expected error transitioning completed job")
 	}
 	if err := c.UpdateJobProgress(ctx, job.ID, "100%", "{}"); err == nil {
@@ -238,10 +238,10 @@ func TestJobCancellation(t *testing.T) {
 	}
 
 	// Completing a cancelled job as succeeded is blocked; cancelled is allowed.
-	if err := c.TransitionJob(ctx, running.ID, JobStatusRunning, JobStatusSucceeded, "", ""); err == nil {
+	if err := c.TransitionJob(ctx, running.ID, JobRunningToSucceeded, "", ""); err == nil {
 		t.Fatal("expected error completing cancelled job as succeeded")
 	}
-	if err := c.TransitionJob(ctx, running.ID, JobStatusRunning, JobStatusCancelled, "", "user cancelled"); err != nil {
+	if err := c.TransitionJob(ctx, running.ID, JobRunningToCancelled, "", "user cancelled"); err != nil {
 		t.Fatalf("complete as cancelled: %v", err)
 	}
 
@@ -481,7 +481,7 @@ func TestConcurrentReadWhileJobRunning(t *testing.T) {
 	}
 
 	// Complete the job to leave a clean state.
-	if err := c.TransitionJob(ctx, job.ID, JobStatusRunning, JobStatusSucceeded, "", ""); err != nil {
+	if err := c.TransitionJob(ctx, job.ID, JobRunningToSucceeded, "", ""); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -629,7 +629,7 @@ func TestRequestJobCancellationRowsAffected(t *testing.T) {
 	if err := c.StartJob(ctx, job.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.TransitionJob(ctx, job.ID, JobStatusRunning, JobStatusSucceeded, "", ""); err != nil {
+	if err := c.TransitionJob(ctx, job.ID, JobRunningToSucceeded, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.RequestJobCancellation(ctx, job.ID); err == nil {
@@ -642,7 +642,7 @@ func TestZeroRowTransitionPropagatesGetJobError(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 
-	corrupt := func(id, status string) {
+	corrupt := func(id string, status JobStatus) {
 		t.Helper()
 		if _, err := c.db.ExecContext(ctx, `UPDATE jobs SET status = ?, created_at = 'corrupt' WHERE id = ?`, status, id); err != nil {
 			t.Fatalf("corrupt job: %v", err)
@@ -676,7 +676,7 @@ func TestZeroRowTransitionPropagatesGetJobError(t *testing.T) {
 		t.Fatal(err)
 	}
 	corrupt(transition.ID, JobStatusSucceeded)
-	if err := c.TransitionJob(ctx, transition.ID, JobStatusRunning, JobStatusFailed, "", ""); err == nil {
+	if err := c.TransitionJob(ctx, transition.ID, JobRunningToFailed, "", ""); err == nil {
 		t.Fatal("expected error transitioning corrupt completed job")
 	} else if strings.Contains(err.Error(), "job not found") {
 		t.Fatalf("expected GetJob error to be propagated, got: %v", err)

@@ -1,6 +1,10 @@
 package github
 
-import "time"
+import (
+	"time"
+
+	"github.com/morluto/gitcontribute/internal/domain"
+)
 
 // RefResolution records the provider ref supplied by a caller and the commit
 // that GitHub resolved it to. CommitSHA is the authoritative source revision;
@@ -37,11 +41,24 @@ type SourceFileReadOptions struct {
 	TotalBytes   int
 }
 
+// SourceFileReadStatus is the closed set of adapter outcomes for one bounded
+// repository-content read.
+type SourceFileReadStatus string
+
+const (
+	SourceFileReadComplete    SourceFileReadStatus = "complete"
+	SourceFileReadNotFound    SourceFileReadStatus = "not_found"
+	SourceFileReadTooLarge    SourceFileReadStatus = "too_large"
+	SourceFileReadRetryable   SourceFileReadStatus = "retryable"
+	SourceFileReadUnavailable SourceFileReadStatus = "unavailable"
+	SourceFileReadFailed      SourceFileReadStatus = "failed"
+)
+
 // SourceFileReadItem is one ordered adapter-level content outcome. Content is
 // populated only for complete reads; callers may persist the item unchanged.
 type SourceFileReadItem struct {
 	Request    SourceFileRequest
-	Status     string
+	Status     SourceFileReadStatus
 	File       RepositoryFile
 	StartLine  int
 	EndLine    int
@@ -66,7 +83,7 @@ type ThreadSearchOptions struct {
 	Owner string
 	Repo  string
 	Query string
-	Kind  ThreadKind
+	Kind  domain.ThreadKind
 	State string
 	Sort  string
 	Order string

@@ -68,10 +68,10 @@ func (m Model) renderResearchBrief(width, height int) string {
 	if item.Ref == "" {
 		return panel(errorStyle.Render("Research brief unavailable\n\nThe selected candidate is no longer visible."), width, height, true)
 	}
-	if m.briefLoading {
+	if m.briefState == briefLoading {
 		return panel("Loading stored research brief…\n\n"+dimStyle.Render("Offline · no corpus writes"), width, height, true)
 	}
-	if m.briefErr != nil {
+	if m.briefState == briefFailed {
 		lines := []string{
 			errorStyle.Render("Research brief unavailable"),
 			"",
@@ -199,12 +199,12 @@ func (m Model) renderActions(width, height int) string {
 		dimStyle.Render(truncate(displayRef(m.actionItem.Ref)+" · "+m.actionItem.Title, contentWidth)),
 		"",
 	}
-	switch {
-	case m.actionLoading:
+	switch m.actionState {
+	case actionsLoading:
 		lines = append(lines, "Loading available actions…")
-	case m.actionExecuting:
+	case actionExecuting:
 		lines = append(lines, "Running action…")
-	case m.actionErr != nil:
+	case actionFailed:
 		action, selected := m.selectedAction()
 		label := action.Label
 		recovery := "Press Enter to retry this action."
@@ -222,7 +222,7 @@ func (m Model) renderActions(width, height int) string {
 			recovery,
 			"Press Esc to return to the workbench.",
 		)
-	case m.actionConfirm:
+	case actionConfirming:
 		action, _ := m.selectedAction()
 		lines = append(lines,
 			warningStyle.Render("Confirm local write"),

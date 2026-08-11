@@ -113,7 +113,7 @@ func (s *Service) assembleContributionManifest(ctx context.Context, c *corpus.Co
 		Opportunity: manifest.OpportunityRecord{
 			ID: opp.ID, InvestigationID: opp.InvestigationID, HypothesisID: opp.HypothesisID,
 			ProblemStatement: opp.ProblemStatement, Scope: opp.Scope, Impact: opp.Impact,
-			Status: string(opp.Status), SourceRefs: append([]domain.SourceRef(nil), opp.SourceRefs...),
+			Status: opp.Status, SourceRefs: append([]domain.SourceRef(nil), opp.SourceRefs...),
 		},
 	}
 	if err := s.addManifestWorkspace(ctx, c, inv.ID, inv.Repo.Owner(), inv.Repo.Repo(), opts.WorkspaceID, &predicate); err != nil {
@@ -134,14 +134,10 @@ func (s *Service) assembleContributionManifest(ctx context.Context, c *corpus.Co
 			return nil, err
 		}
 	} else {
-		predicate.Completeness = append(predicate.Completeness, manifest.CompletenessFacet{Facet: "pull_request", Status: "not_requested", Reason: "no exact pull request was selected"})
+		predicate.Completeness = append(predicate.Completeness, manifest.CompletenessFacet{Facet: "pull_request", Status: manifest.CompletenessNotRequested, Reason: "no exact pull request was selected"})
 	}
 	if err := addManifestDrafts(ctx, c, opp.ID, &predicate); err != nil {
 		return nil, err
-	}
-	predicate.Status = "complete"
-	if len(predicate.Gaps) > 0 {
-		predicate.Status = "incomplete"
 	}
 	sortManifestPredicate(&predicate)
 	statement, err := manifest.Finalize(predicate)
@@ -206,7 +202,7 @@ func (s *Service) ExportManifest(ctx context.Context, opportunityID string, opts
 
 func (s *Service) addManifestWorkspace(ctx context.Context, c *corpus.Corpus, investigationID, owner, repo, workspaceID string, predicate *manifest.Predicate) error {
 	if workspaceID == "" {
-		predicate.Completeness = append(predicate.Completeness, manifest.CompletenessFacet{Facet: "workspace", Status: "not_requested", Reason: "no workspace was selected"})
+		predicate.Completeness = append(predicate.Completeness, manifest.CompletenessFacet{Facet: "workspace", Status: manifest.CompletenessNotRequested, Reason: "no workspace was selected"})
 		return nil
 	}
 	item, err := c.GetWorkspace(ctx, workspaceID)
@@ -225,9 +221,9 @@ func (s *Service) addManifestWorkspace(ctx context.Context, c *corpus.Corpus, in
 		return fmt.Errorf("snapshot workspace %q: %w", workspaceID, err)
 	}
 	predicate.Workspace = &snapshot
-	status, reason := "complete", "workspace content is fully digest-bound"
-	if !snapshot.Complete {
-		status, reason = "incomplete", "workspace snapshot has explicitly unbound content"
+	status, reason := manifest.CompletenessComplete, "workspace content is fully digest-bound"
+	if !snapshot.Complete() {
+		status, reason = manifest.CompletenessIncomplete, "workspace snapshot has explicitly unbound content"
 		for _, gap := range snapshot.Gaps {
 			predicate.Gaps = append(predicate.Gaps, manifest.Gap{Code: gap.Code, Facet: "workspace", Reason: gap.Reason})
 		}
@@ -270,15 +266,15 @@ func addManifestValidations(ctx context.Context, c *corpus.Corpus, predicate *ma
 			predicate.Gaps = append(predicate.Gaps, manifest.Gap{Code: "validation_run_missing", Facet: "validations", Reason: "definition " + definition.ID + " has no stored run"})
 		}
 	}
-	status, reason := "complete", "all stored validation runs have compatible workspace bindings and observations"
+	status, reason := manifest.CompletenessComplete, "all stored validation runs have compatible workspace bindings and observations"
 	if len(definitions) == 0 {
-		status, reason = "unknown", "no validation definitions are stored"
+		status, reason = manifest.CompletenessUnknown, "no validation definitions are stored"
 		predicate.Gaps = append(predicate.Gaps, manifest.Gap{Code: "validations_missing", Facet: "validations", Reason: reason})
 	} else if len(runs) == 0 {
-		status, reason = "unknown", "no validation runs are stored"
+		status, reason = manifest.CompletenessUnknown, "no validation runs are stored"
 		predicate.Gaps = append(predicate.Gaps, manifest.Gap{Code: "validations_missing", Facet: "validations", Reason: reason})
 	} else if hasManifestGap(predicate.Gaps, "validations") {
-		status, reason = "incomplete", "one or more validation claims are stale, unknown, or unverified"
+		status, reason = manifest.CompletenessIncomplete, "one or more validation claims are stale, unknown, or unverified"
 	}
 	predicate.Completeness = append(predicate.Completeness, manifest.CompletenessFacet{Facet: "validations", Status: status, Reason: reason})
 	return nil
@@ -299,10 +295,10 @@ func buildManifestValidation(definition *evidence.ValidationDefinition, run *evi
 		return manifest.ValidationRecord{}, nil, err
 	}
 	record := manifest.ValidationRecord{
-		DefinitionID: definition.ID, RunID: run.ID, Kind: string(run.Kind), Command: append([]string(nil), definition.Command...),
+		DefinitionID: definition.ID, RunID: run.ID, Kind: run.Kind, Command: append([]string(nil), definition.Command...),
 		CommandSHA256: commandDigest, ExecutionContractSHA256: executionDigest, EnvironmentAllowlist: append([]string(nil), definition.Env...),
 		Timeout: definition.Timeout.String(), MaxOutputBytes: definition.MaxOutputBytes, Observation: definition.Observation,
-		Classification: string(run.Classification), ObservationStatus: string(run.ObservationStatus),
+		Classification: run.Classification, ObservationStatus: run.ObservationStatus,
 		Observations: append([]evidence.ObservationResult(nil), run.Observations...), StartedAt: run.StartedAt, CompletedAt: run.CompletedAt,
 		WorkspaceSnapshotBefore: run.WorkspaceSnapshotBefore, WorkspaceSnapshotAfter: run.WorkspaceSnapshotAfter,
 		WorkspaceBindingStatus: run.WorkspaceBindingStatus, ExecutionOrigin: run.ExecutionOrigin,
@@ -367,14 +363,14 @@ type validationExecutionContract struct {
 }
 
 func validationWorkspaceCompatibility(run *evidence.ValidationRun, current *workspace.Snapshot) (string, string) {
-	if run.ExecutionOrigin == "external" {
+	if run.ExecutionOrigin == evidence.ExecutionOriginExternal {
 		if run.External == nil || run.External.Incomplete {
 			return "unknown", "external validation receipt identity is missing or producer-declared incomplete"
 		}
 		return "external_unverified", "receipt identity is preserved, but GitContribute did not execute or independently verify it"
 	}
-	if run.WorkspaceBindingStatus != "bound" {
-		status := run.WorkspaceBindingStatus
+	if run.WorkspaceBindingStatus != evidence.WorkspaceBindingBound {
+		status := string(run.WorkspaceBindingStatus)
 		if status == "" {
 			status = "unknown"
 		}
@@ -404,10 +400,10 @@ func addManifestEvidence(ctx context.Context, c *corpus.Corpus, predicate *manif
 			return err
 		}
 		record := manifest.EvidenceRecord{
-			ID: item.ID, Type: string(item.Type), Relation: string(item.Relation), Description: item.Description,
+			ID: item.ID, Type: item.Type, Relation: item.Relation, Description: item.Description,
 			ValidationRunID: item.ValidationRunID, SourceRefs: append([]domain.SourceRef(nil), item.SourceRefs...),
 			SourceProvenance: append([]evidence.SourceRevision(nil), item.SourceProvenance...),
-			Freshness:        string(assessment.Status), FreshnessReason: assessment.Reason,
+			Freshness:        assessment.Status, FreshnessReason: assessment.Reason,
 			Measurements: item.Measurements, External: item.External,
 		}
 		if item.External != nil {
@@ -418,12 +414,12 @@ func addManifestEvidence(ctx context.Context, c *corpus.Corpus, predicate *manif
 			predicate.Gaps = append(predicate.Gaps, manifest.Gap{Code: "evidence_" + string(assessment.Status), Facet: "evidence", Reason: "evidence " + item.ID + ": " + assessment.Reason})
 		}
 	}
-	status, reason := "complete", "all evidence is fresh or local-only"
+	status, reason := manifest.CompletenessComplete, "all evidence is fresh or local-only"
 	if len(items) == 0 {
-		status, reason = "unknown", "no evidence is scoped to the opportunity"
+		status, reason = manifest.CompletenessUnknown, "no evidence is scoped to the opportunity"
 		predicate.Gaps = append(predicate.Gaps, manifest.Gap{Code: "evidence_missing", Facet: "evidence", Reason: reason})
 	} else if hasManifestGap(predicate.Gaps, "evidence") {
-		status, reason = "incomplete", "some evidence is stale or has unknown freshness"
+		status, reason = manifest.CompletenessIncomplete, "some evidence is stale or has unknown freshness"
 	}
 	predicate.Completeness = append(predicate.Completeness, manifest.CompletenessFacet{Facet: "evidence", Status: status, Reason: reason})
 	return nil
@@ -444,9 +440,9 @@ func (s *Service) addManifestReadiness(ctx context.Context, opportunityID string
 			predicate.Gaps = append(predicate.Gaps, manifest.Gap{Code: "readiness_" + check.Status, Facet: "readiness", Reason: check.RuleID + ": " + check.Summary})
 		}
 	}
-	status, reason := "complete", "readiness has no blocking or unknown checks"
+	status, reason := manifest.CompletenessComplete, "readiness has no blocking or unknown checks"
 	if hasManifestGap(predicate.Gaps, "readiness") {
-		status, reason = "incomplete", "readiness includes blocking or unknown checks"
+		status, reason = manifest.CompletenessIncomplete, "readiness includes blocking or unknown checks"
 	}
 	predicate.Completeness = append(predicate.Completeness, manifest.CompletenessFacet{Facet: "readiness", Status: status, Reason: reason})
 	return nil
@@ -460,16 +456,16 @@ func (s *Service) addManifestPullRequest(ctx context.Context, c *corpus.Corpus, 
 	if err != nil {
 		return "", err
 	}
-	thread, err := c.GetThread(ctx, storedRepo.ID, corpus.ThreadKindPullRequest, selector.Number)
+	thread, err := c.GetThread(ctx, storedRepo.ID, domain.PullRequestKind, selector.Number)
 	if err != nil {
 		return "", err
 	}
 	stored := corpus.PortfolioPullRequest{Owner: storedRepo.Owner, Repo: storedRepo.Name, Thread: *thread}
-	readSet, err := loadPortfolioReadSet(ctx, c, []corpus.PortfolioPullRequest{stored}, portfolioDetailed)
+	readSet, err := loadPortfolioReadSet(ctx, c, []corpus.PortfolioPullRequest{stored}, detailedResponse)
 	if err != nil {
 		return "", err
 	}
-	item, err := portfolioItem(stored, now, readSet, portfolioDetailed)
+	item, err := portfolioItem(stored, now, readSet, detailedResponse)
 	if err != nil {
 		return "", err
 	}
@@ -477,7 +473,7 @@ func (s *Service) addManifestPullRequest(ctx context.Context, c *corpus.Corpus, 
 		return "", fmt.Errorf("%w: pull request head %s differs from workspace head %s", manifest.ErrIdentityMismatch, item.HeadSHA, predicate.Workspace.HeadSHA)
 	}
 	record := manifest.PullRequestRecord{
-		Owner: item.Owner, Repo: item.Repo, Number: item.Number, State: item.State,
+		Owner: item.Owner, Repo: item.Repo, Number: item.Number, State: thread.State,
 		HeadSHA: item.HeadSHA, BaseSHA: item.BaseSHA, ChecksStatus: item.ChecksStatus,
 		ReviewDecision: item.ReviewDecision, UnresolvedReviewThreads: item.UnresolvedReviewThreads,
 		MergeStateStatus: item.MergeStateStatus, MergeQueueState: item.MergeQueueState,
@@ -504,9 +500,9 @@ func (s *Service) addManifestPullRequest(ctx context.Context, c *corpus.Corpus, 
 		}
 	}
 	predicate.PullRequest = &record
-	status, reason := "complete", "all requested pull-request health facets are complete and current"
+	status, reason := manifest.CompletenessComplete, "all requested pull-request health facets are complete and current"
 	if !complete {
-		status, reason = "incomplete", "one or more pull-request health facets are missing, stale, or incomplete"
+		status, reason = manifest.CompletenessIncomplete, "one or more pull-request health facets are missing, stale, or incomplete"
 	}
 	predicate.Completeness = append(predicate.Completeness, manifest.CompletenessFacet{Facet: "pull_request", Status: status, Reason: reason})
 	return fmt.Sprintf("%s/%s#%d", item.Owner, item.Repo, item.Number), nil
@@ -514,12 +510,12 @@ func (s *Service) addManifestPullRequest(ctx context.Context, c *corpus.Corpus, 
 
 func addManifestDrafts(ctx context.Context, c *corpus.Corpus, opportunityID string, predicate *manifest.Predicate) error {
 	if draft, err := c.GetIssueDraft(ctx, opportunityID); err == nil {
-		predicate.Drafts = append(predicate.Drafts, manifest.DraftRecord{Kind: "issue", Title: draft.Title, RenderedAt: draft.RenderedAt, ManifestID: draft.ManifestID})
+		predicate.Drafts = append(predicate.Drafts, manifest.DraftRecord{Kind: domain.IssueKind, Title: draft.Title, RenderedAt: draft.RenderedAt, ManifestID: draft.ManifestID})
 	} else if !errors.Is(err, contribution.ErrNotFound) {
 		return err
 	}
 	if draft, err := c.GetPullRequestDraft(ctx, opportunityID); err == nil {
-		predicate.Drafts = append(predicate.Drafts, manifest.DraftRecord{Kind: "pull_request", Title: draft.Title, RenderedAt: draft.RenderedAt, ManifestID: draft.ManifestID})
+		predicate.Drafts = append(predicate.Drafts, manifest.DraftRecord{Kind: domain.PullRequestKind, Title: draft.Title, RenderedAt: draft.RenderedAt, ManifestID: draft.ManifestID})
 	} else if !errors.Is(err, contribution.ErrNotFound) {
 		return err
 	}

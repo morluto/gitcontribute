@@ -15,20 +15,40 @@ type UntrackedFile struct {
 }
 
 // Unit is the smallest assignable file or hunk change.
+type UnitKind string
+
+const (
+	FileUnit      UnitKind = "file"
+	HunkUnit      UnitKind = "hunk"
+	UntrackedUnit UnitKind = "untracked"
+)
+
+type FileOperation string
+
+const (
+	OperationModify FileOperation = "modify"
+	OperationAdd    FileOperation = "add"
+	OperationDelete FileOperation = "delete"
+	OperationRename FileOperation = "rename"
+	OperationCopy   FileOperation = "copy"
+	OperationBinary FileOperation = "binary"
+	OperationMode   FileOperation = "mode"
+)
+
 type Unit struct {
-	ID             string `json:"id"`
-	Kind           string `json:"kind"`
-	Path           string `json:"path"`
-	OldPath        string `json:"old_path,omitempty"`
-	Operation      string `json:"operation"`
-	OldStart       int32  `json:"old_start,omitempty"`
-	OldLines       int32  `json:"old_lines,omitempty"`
-	NewStart       int32  `json:"new_start,omitempty"`
-	NewLines       int32  `json:"new_lines,omitempty"`
-	Patch          string `json:"patch,omitempty"`
-	ContentHash    string `json:"content_sha256"`
-	Generated      bool   `json:"generated"`
-	WhitespaceOnly bool   `json:"whitespace_only"`
+	ID             string        `json:"id"`
+	Kind           UnitKind      `json:"kind"`
+	Path           string        `json:"path"`
+	OldPath        string        `json:"old_path,omitempty"`
+	Operation      FileOperation `json:"operation"`
+	OldStart       int32         `json:"old_start,omitempty"`
+	OldLines       int32         `json:"old_lines,omitempty"`
+	NewStart       int32         `json:"new_start,omitempty"`
+	NewLines       int32         `json:"new_lines,omitempty"`
+	Patch          string        `json:"patch,omitempty"`
+	ContentHash    string        `json:"content_sha256"`
+	Generated      bool          `json:"generated"`
+	WhitespaceOnly bool          `json:"whitespace_only"`
 }
 
 // Warning describes a condition requiring human or agent judgment.

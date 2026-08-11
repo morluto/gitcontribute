@@ -7,6 +7,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
 	"github.com/morluto/gitcontribute/internal/investigation"
 )
@@ -36,7 +37,7 @@ func TestDuplicateAndCollisionChecks(t *testing.T) {
 	now := time.Now().UTC()
 	if _, err := c.UpsertThread(ctx, corpus.Thread{
 		RepositoryID:    repo.ID,
-		Kind:            corpus.ThreadKindIssue,
+		Kind:            domain.IssueKind,
 		Number:          1,
 		State:           "open",
 		Title:           "race in parser",
@@ -49,7 +50,7 @@ func TestDuplicateAndCollisionChecks(t *testing.T) {
 	}
 	if _, err := c.UpsertThread(ctx, corpus.Thread{
 		RepositoryID:    repo.ID,
-		Kind:            corpus.ThreadKindPullRequest,
+		Kind:            domain.PullRequestKind,
 		Number:          2,
 		State:           "open",
 		Title:           "fix race in parser",
@@ -84,6 +85,17 @@ func TestDuplicateAndCollisionChecks(t *testing.T) {
 	if _, err := svc.CheckHypothesisDuplicates(ctx, h.ID, maxResultLimit+1); err == nil {
 		t.Fatal("oversized duplicate limit was accepted")
 	}
+	opportunity, err := svc.PromoteOpportunity(ctx, h.ID, "data race under load", "parser", "panic", "small", 0.8)
+	if err != nil {
+		t.Fatalf("promote opportunity: %v", err)
+	}
+	opportunityDuplicates, err := svc.CheckOpportunityDuplicates(ctx, "  "+opportunity.ID+"  ", 0)
+	if err != nil {
+		t.Fatalf("check opportunity duplicates: %v", err)
+	}
+	if opportunityDuplicates.OpportunityID != opportunity.ID || opportunityDuplicates.HypothesisID != "" {
+		t.Fatalf("opportunity duplicate identity = %+v", opportunityDuplicates)
+	}
 
 	coll, err := svc.CheckHypothesisCollisions(ctx, h.ID, 0)
 	if err != nil {
@@ -96,5 +108,12 @@ func TestDuplicateAndCollisionChecks(t *testing.T) {
 		if f.Relation != evidence.RelationContradicting {
 			t.Fatalf("collision finding should be contradicting, got %q", f.Relation)
 		}
+	}
+	opportunityCollisions, err := svc.CheckOpportunityCollisions(ctx, opportunity.ID, 0)
+	if err != nil {
+		t.Fatalf("check opportunity collisions: %v", err)
+	}
+	if opportunityCollisions.OpportunityID != opportunity.ID || opportunityCollisions.HypothesisID != h.ID {
+		t.Fatalf("opportunity collision identity = %+v", opportunityCollisions)
 	}
 }

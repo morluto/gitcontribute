@@ -34,24 +34,27 @@ func (r *MCPReader) GetThreadFacets(ctx context.Context, in mcpcontract.GetThrea
 		return mcpcontract.GetThreadFacetsOutput{}, err
 	}
 	out := mcpcontract.GetThreadFacetsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.ThreadFacetsOutput], len(in.Threads)), SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
+	parsed := make([]*parsedThreadReference, len(in.Threads))
 	repositoryKeys := make([]corpus.RepositoryKey, 0, len(in.Threads))
-	for _, input := range in.Threads {
-		if ref, err := domain.NewRepoRef(input.Owner, input.Repo); err == nil && input.Number > 0 {
-			repositoryKeys = append(repositoryKeys, corpus.RepositoryKey{Owner: ref.Owner(), Name: ref.Repo()})
+	for i, input := range in.Threads {
+		ref, parseErr := parseThreadReference(input)
+		if parseErr != nil {
+			continue
 		}
+		parsed[i] = &ref
+		repositoryKeys = append(repositoryKeys, ref.repositoryKey())
 	}
 	repositories, err := c.GetRepositoriesBatch(ctx, repositoryKeys)
 	if err != nil {
 		return mcpcontract.GetThreadFacetsOutput{}, err
 	}
 	threadKeys := make([]corpus.ThreadKey, 0, len(in.Threads))
-	for _, input := range in.Threads {
-		ref, parseErr := domain.NewRepoRef(input.Owner, input.Repo)
-		if parseErr != nil {
+	for _, ref := range parsed {
+		if ref == nil {
 			continue
 		}
-		if repo := repositories[corpus.RepositoryKey{Owner: ref.Owner(), Name: ref.Repo()}]; repo != nil && input.Number > 0 {
-			threadKeys = append(threadKeys, corpus.ThreadKey{RepositoryID: repo.ID, Kind: input.Kind, Number: input.Number})
+		if repo := repositories[ref.repositoryKey()]; repo != nil {
+			threadKeys = append(threadKeys, ref.threadKey(repo.ID))
 		}
 	}
 	threads, err := c.GetThreadsBatch(ctx, threadKeys)
@@ -72,33 +75,35 @@ func (r *MCPReader) GetThreadFacets(ctx context.Context, in mcpcontract.GetThrea
 	}
 	for i, input := range in.Threads {
 		item := mcpcontract.BatchItem[mcpcontract.ThreadFacetsOutput]{Key: threadRefKey(input), Status: "complete"}
-		ref, parseErr := domain.NewRepoRef(input.Owner, input.Repo)
-		if parseErr != nil || (input.Kind != corpus.ThreadKindIssue && input.Kind != corpus.ThreadKindPullRequest) || input.Number < 1 {
+		if parsed[i] == nil {
 			item.Status, item.Reason, item.Message = "failed", "blocked", "invalid thread reference"
 			out.Status = "partial"
 			out.Items[i] = item
 			continue
 		}
-		repo := repositories[corpus.RepositoryKey{Owner: ref.Owner(), Name: ref.Repo()}]
+		ref := *parsed[i]
+		wire := ref.wire()
+		item.Key = threadRefKey(wire)
+		repo := repositories[ref.repositoryKey()]
 		if repo == nil {
 			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", "repository is not present in the local corpus"
-			item.Recovery = recoveryPlan("repository_not_indexed", item.Message, syncRepositoryContextCall(input.Owner, input.Repo))
+			item.Recovery = recoveryPlan("repository_not_indexed", item.Message, syncRepositoryContextCall(ref.repository.Owner(), ref.repository.Repo()))
 			out.Status = "partial"
 			out.Items[i] = item
 			continue
 		}
-		thread := threads[corpus.ThreadKey{RepositoryID: repo.ID, Kind: input.Kind, Number: input.Number}]
+		thread := threads[ref.threadKey(repo.ID)]
 		if thread == nil {
 			item.Status, item.Reason, item.Message = "unavailable", "thread_not_indexed", "thread is not present in the local corpus"
-			item.Recovery = recoveryPlan("thread_not_indexed", item.Message, syncThreadCall(input))
+			item.Recovery = recoveryPlan("thread_not_indexed", item.Message, syncThreadCall(wire))
 			out.Status = "partial"
 			out.Items[i] = item
 			continue
 		}
-		value := mcpcontract.ThreadFacetsOutput{Owner: ref.Owner(), Repo: ref.Repo(), Kind: thread.Kind, Number: thread.Number, Facets: make([]mcpcontract.ThreadFacetOutput, 0, len(in.Facets))}
+		value := mcpcontract.ThreadFacetsOutput{Owner: ref.repository.Owner(), Repo: ref.repository.Repo(), Kind: string(thread.Kind), Number: thread.Number, Facets: make([]mcpcontract.ThreadFacetOutput, 0, len(in.Facets))}
 		for _, facet := range in.Facets {
 			key := corpus.ThreadFacetKey{ThreadID: thread.ID, Facet: facet}
-			entry := mcpcontract.ThreadFacetOutput{Facet: facet, Status: "not_observed", ResourceURI: threadFacetURI(ref.Owner(), ref.Repo(), thread.Kind, thread.Number, facet)}
+			entry := mcpcontract.ThreadFacetOutput{Facet: facet, Status: "not_observed", ResourceURI: threadFacetURI(ref.repository.Owner(), ref.repository.Repo(), string(thread.Kind), thread.Number, facet)}
 			if cov := coverage[key]; cov != nil {
 				entry.Complete, entry.SourceUpdatedAt = cov.Complete, formatTime(cov.SourceUpdatedAt)
 				entry.Status = "complete"
@@ -128,56 +133,55 @@ func (r *MCPReader) GetThreadFacets(ctx context.Context, in mcpcontract.GetThrea
 
 // ThreadFacetResource is the canonical offline payload read for one stored
 // facet. Resource reads are intentionally separate from bounded tool output.
-func (r *MCPReader) ThreadFacetResource(ctx context.Context, owner, repo, kind string, number int, facet string) (map[string]any, error) {
+func (r *MCPReader) ThreadFacetResource(ctx context.Context, owner, repo, kind string, number int, facet string) (mcpcontract.ThreadFacetResource, error) {
 	if err := validateFacetNames([]string{facet}); err != nil {
-		return nil, err
+		return mcpcontract.ThreadFacetResource{}, err
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return nil, err
+		return mcpcontract.ThreadFacetResource{}, err
 	}
 	storedRepo, err := c.GetRepository(ctx, owner, repo)
 	if err != nil || storedRepo == nil {
 		if err == nil {
 			err = errors.New("repository is not stored")
 		}
-		return nil, err
+		return mcpcontract.ThreadFacetResource{}, err
 	}
-	thread, err := c.GetThread(ctx, storedRepo.ID, kind, number)
+	parsedKind, err := domain.ParseThreadKind(kind)
+	if err != nil {
+		return mcpcontract.ThreadFacetResource{}, err
+	}
+	thread, err := c.GetThread(ctx, storedRepo.ID, parsedKind, number)
 	if err != nil || thread == nil {
 		if err == nil {
 			err = errors.New("thread is not stored")
 		}
-		return nil, err
+		return mcpcontract.ThreadFacetResource{}, err
 	}
 	observations, _, err := c.ListFacetObservationsBounded(ctx, storedRepo.ID, &thread.ID, facet, 1000)
 	if err != nil {
-		return nil, err
+		return mcpcontract.ThreadFacetResource{}, err
 	}
 	coverage, err := c.GetCoverage(ctx, storedRepo.ID, &thread.ID, facet)
 	if err != nil {
-		return nil, err
+		return mcpcontract.ThreadFacetResource{}, err
 	}
-	observationValues := make([]any, 0, len(observations))
-	out := map[string]any{
-		"schema_version": "gitcontribute.thread-facet.v1",
-		"owner":          owner, "repo": repo, "kind": thread.Kind, "number": number, "facet": facet,
-		"observations": observationValues,
+	out := mcpcontract.ThreadFacetResource{
+		SchemaVersion: "gitcontribute.thread-facet.v1", Owner: owner, Repo: repo, Kind: string(thread.Kind), Number: number, Facet: facet,
+		Observations: make([]mcpcontract.ThreadFacetObservationResource, 0, len(observations)),
 	}
 	for _, observation := range observations {
-		var payload any
-		if err := json.Unmarshal([]byte(observation.Payload), &payload); err != nil {
-			return nil, fmt.Errorf("decode %s observation: %w", facet, err)
+		payload := json.RawMessage(observation.Payload)
+		if !json.Valid(payload) {
+			return mcpcontract.ThreadFacetResource{}, fmt.Errorf("decode %s observation: invalid JSON", facet)
 		}
-		observationValues = append(observationValues, map[string]any{
-			"source_updated_at":    formatTime(observation.SourceUpdatedAt),
-			"observation_sequence": observation.ObservationSequence,
-			"payload":              payload,
+		out.Observations = append(out.Observations, mcpcontract.ThreadFacetObservationResource{
+			SourceUpdatedAt: formatTime(observation.SourceUpdatedAt), ObservationSequence: observation.ObservationSequence, Payload: payload,
 		})
 	}
-	out["observations"] = observationValues
 	if coverage != nil {
-		out["coverage"] = map[string]any{"complete": coverage.Complete, "source_updated_at": formatTime(coverage.SourceUpdatedAt)}
+		out.Coverage = &mcpcontract.ResourceCoverage{Complete: coverage.Complete, SourceUpdatedAt: formatTime(coverage.SourceUpdatedAt)}
 	}
 	return out, nil
 }

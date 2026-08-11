@@ -24,6 +24,14 @@ type fakeResearchReader struct {
 	health          HealthEvidence
 }
 
+func mustDomainFacetCoverage(facet string, complete bool, asOf time.Time, count int) domain.FacetCoverage {
+	coverage, err := domain.NewFacetCoverage(facet, complete, asOf, count)
+	if err != nil {
+		panic(err)
+	}
+	return coverage
+}
+
 func mustObservedHealthEvidence(metrics HealthMetrics, sources []SourceRef) HealthEvidence {
 	evidence, err := ObservedHealthEvidence(metrics, sources, "")
 	if err != nil {
@@ -80,8 +88,8 @@ func TestBuilderMakesCoverageAndUnknownsExplicit(t *testing.T) {
 			Source: "github:rest", URL: "https://api.github.com/repos/owner/repo", ObservedAt: now.Add(-3 * time.Hour), AsOf: now.Add(-4 * time.Hour),
 		}},
 		repoCoverage: domain.Coverage{Facets: []domain.FacetCoverage{
-			domain.MustFacetCoverage("metadata", true, now.Add(-4*time.Hour), 0),
-			domain.MustFacetCoverage("threads", true, now.Add(-3*time.Hour), 0),
+			mustDomainFacetCoverage("metadata", true, now.Add(-4*time.Hour), 0),
+			mustDomainFacetCoverage("threads", true, now.Add(-3*time.Hour), 0),
 		}},
 		thread: ThreadEvidence{
 			Thread: ThreadSnapshot{

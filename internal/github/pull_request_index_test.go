@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"testing"
+
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 func TestListPullRequestsUsesAllStatePaginationAndFiltersIssueMarkers(t *testing.T) {
@@ -41,7 +43,7 @@ func TestListPullRequestsUsesAllStatePaginationAndFiltersIssueMarkers(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Items) != 1 || got.Items[0].Number != 7 || got.Items[0].Kind != ThreadKindPullRequest {
+	if len(got.Items) != 1 || got.Items[0].Number != 7 || got.Items[0].Kind != domain.PullRequestKind {
 		t.Fatalf("page one pull requests = %+v", got.Items)
 	}
 	if !got.Page.HasNext || got.Page.NextPage != 2 || len(pages) != 1 || pages[0] != 1 {

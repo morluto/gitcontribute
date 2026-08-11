@@ -133,7 +133,7 @@ func (c *Corpus) readThreadInventoryAggregates(ctx context.Context, byRef map[st
 		FROM repositories r
 		LEFT JOIN threads t ON t.repository_id = r.id
 		GROUP BY r.id, r.owner, r.name
-	`, ThreadKindIssue, ThreadKindPullRequest)
+	`, domain.IssueKind, domain.PullRequestKind)
 	if err != nil {
 		return fmt.Errorf("inventory aggregate threads: %w", err)
 	}
@@ -266,7 +266,7 @@ func (c *Corpus) Inventory(ctx context.Context, owner, name string) (*Repository
 			COALESCE(SUM(CASE WHEN kind = ? THEN 1 ELSE 0 END), 0),
 			COUNT(*)
 		FROM threads WHERE repository_id = ?
-	`, ThreadKindIssue, ThreadKindPullRequest, repoID).Scan(&inv.Issues, &inv.PullRequests, &inv.Threads); err != nil {
+	`, domain.IssueKind, domain.PullRequestKind, repoID).Scan(&inv.Issues, &inv.PullRequests, &inv.Threads); err != nil {
 		return nil, fmt.Errorf("inventory count threads: %w", err)
 	}
 

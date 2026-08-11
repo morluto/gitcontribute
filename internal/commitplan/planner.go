@@ -63,7 +63,7 @@ func Inspect(ctx context.Context, snapshot Snapshot) (Inventory, error) {
 		if path == "" || objectID == "" {
 			return Inventory{}, errors.New("untracked path and object ID are required")
 		}
-		unit := newUnit("untracked", path, "", "add", []byte(path+"\x00"+objectID))
+		unit := newUnit(UntrackedUnit, path, "", OperationAdd, []byte(path+"\x00"+objectID))
 		unit.ContentHash = objectID
 		unit.Generated = generatedPath(path)
 		result.Units = append(result.Units, unit)
@@ -105,8 +105,8 @@ func fileUnits(file *diff.FileDiff) ([]Unit, []Warning, error) {
 	generated := generatedPath(path)
 	var units []Unit
 	metadata := strings.Join(file.Extended, "\n") + "\n" + file.OrigName + "\n" + file.NewName
-	if operation != "modify" || len(file.Hunks) == 0 {
-		unit := newUnit("file", path, oldPath, operation, []byte(metadata))
+	if operation != OperationModify || len(file.Hunks) == 0 {
+		unit := newUnit(FileUnit, path, oldPath, operation, []byte(metadata))
 		unit.Generated = generated
 		units = append(units, unit)
 	}
@@ -115,8 +115,8 @@ func fileUnits(file *diff.FileDiff) ([]Unit, []Warning, error) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("render hunk for %s: %w", path, err)
 		}
-		identity := []byte(path + "\x00" + oldPath + "\x00" + operation + "\x00" + string(printed))
-		unit := newUnit("hunk", path, oldPath, operation, identity)
+		identity := []byte(path + "\x00" + oldPath + "\x00" + string(operation) + "\x00" + string(printed))
+		unit := newUnit(HunkUnit, path, oldPath, operation, identity)
 		unit.OldStart, unit.OldLines = hunk.OrigStartLine, hunk.OrigLines
 		unit.NewStart, unit.NewLines = hunk.NewStartLine, hunk.NewLines
 		unit.Patch = string(printed)
@@ -128,8 +128,8 @@ func fileUnits(file *diff.FileDiff) ([]Unit, []Warning, error) {
 	if generated {
 		warnings = append(warnings, Warning{Code: "generated_file", Message: "generated or snapshot file needs regeneration ownership", Path: path})
 	}
-	if operation == "rename" || operation == "copy" {
-		warnings = append(warnings, Warning{Code: operation, Message: operation + " metadata is an indivisible file unit", Path: path})
+	if operation == OperationRename || operation == OperationCopy {
+		warnings = append(warnings, Warning{Code: string(operation), Message: string(operation) + " metadata is an indivisible file unit", Path: path})
 	}
 	if binaryFile(file) {
 		warnings = append(warnings, Warning{Code: "binary_file", Message: "binary change is one indivisible file unit", Path: path})
@@ -142,9 +142,9 @@ func fileUnits(file *diff.FileDiff) ([]Unit, []Warning, error) {
 	return units, warnings, nil
 }
 
-func newUnit(kind, path, oldPath, operation string, identity []byte) Unit {
+func newUnit(kind UnitKind, path, oldPath string, operation FileOperation, identity []byte) Unit {
 	hash := digest(identity)
-	return Unit{ID: kind + ":" + hash, Kind: kind, Path: path, OldPath: oldPath, Operation: operation, ContentHash: hash}
+	return Unit{ID: string(kind) + ":" + hash, Kind: kind, Path: path, OldPath: oldPath, Operation: operation, ContentHash: hash}
 }
 
 func cleanDiffPath(path string) string {
@@ -158,23 +158,23 @@ func cleanDiffPath(path string) string {
 	return path
 }
 
-func fileOperation(file *diff.FileDiff) string {
+func fileOperation(file *diff.FileDiff) FileOperation {
 	extended := strings.Join(file.Extended, "\n")
 	switch {
 	case strings.Contains(extended, "rename from "):
-		return "rename"
+		return OperationRename
 	case strings.Contains(extended, "copy from "):
-		return "copy"
+		return OperationCopy
 	case file.OrigName == "/dev/null" || strings.Contains(extended, "new file mode "):
-		return "add"
+		return OperationAdd
 	case file.NewName == "/dev/null" || strings.Contains(extended, "deleted file mode "):
-		return "delete"
+		return OperationDelete
 	case binaryFile(file):
-		return "binary"
+		return OperationBinary
 	case strings.Contains(extended, "old mode ") && strings.Contains(extended, "new mode "):
-		return "mode"
+		return OperationMode
 	default:
-		return "modify"
+		return OperationModify
 	}
 }
 

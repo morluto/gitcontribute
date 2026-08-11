@@ -23,6 +23,25 @@ const (
 	maxJUnitParseErrorBytes   = 512
 )
 
+// ParseJUnitTestStatus converts a durable testcase outcome into the normalized
+// status vocabulary.
+func ParseJUnitTestStatus(value string) (JUnitTestStatus, error) {
+	switch JUnitTestStatus(value) {
+	case JUnitTestPassed:
+		return JUnitTestPassed, nil
+	case JUnitTestFailed:
+		return JUnitTestFailed, nil
+	case JUnitTestSkipped:
+		return JUnitTestSkipped, nil
+	case JUnitTestErrored:
+		return JUnitTestErrored, nil
+	case JUnitTestUnknown:
+		return JUnitTestUnknown, nil
+	default:
+		return "", fmt.Errorf("unsupported JUnit testcase status %q", value)
+	}
+}
+
 var (
 	ErrJUnitReportTooLarge   = errors.New("evidence: JUnit report exceeds the input bound")
 	ErrJUnitTestCaseLimit    = errors.New("evidence: JUnit report exceeds the test-case bound")
@@ -81,6 +100,58 @@ type JUnitReport struct {
 	ParseError    string
 	RawXML        string
 	RawSHA256     string
+}
+
+// ValidateSummary verifies the portable structured report independently of
+// whether the raw XML accompanies it.
+func (r *JUnitReport) ValidateSummary() error {
+	if r == nil {
+		return errors.New("JUnit report is required")
+	}
+	if r.SchemaVersion != JUnitReportSchemaV1 {
+		return fmt.Errorf("unsupported JUnit report schema %q", r.SchemaVersion)
+	}
+	if r.Incomplete != (r.ParseError != "") {
+		return errors.New("JUnit incomplete state contradicts its parse diagnostic")
+	}
+	if r.Counts.Total < 0 || r.Counts.Passed < 0 || r.Counts.Failed < 0 || r.Counts.Skipped < 0 || r.Counts.Errored < 0 || r.Counts.Unknown < 0 {
+		return errors.New("JUnit counts cannot be negative")
+	}
+	derived := JUnitCounts{}
+	for i := range r.TestCases {
+		status, err := ParseJUnitTestStatus(string(r.TestCases[i].Status))
+		if err != nil {
+			return fmt.Errorf("JUnit testcase %d: %w", i, err)
+		}
+		r.TestCases[i].Status = status
+		addJUnitTestCase(&derived, status)
+	}
+	if derived != r.Counts || r.Counts.Total != len(r.TestCases) {
+		return errors.New("JUnit counts do not match testcase outcomes")
+	}
+	if r.RawSHA256 != "" {
+		digest, err := hex.DecodeString(r.RawSHA256)
+		if err != nil || len(digest) != sha256.Size {
+			return errors.New("JUnit raw digest must be a 64-character hexadecimal SHA-256")
+		}
+	}
+	return nil
+}
+
+// ParseStored validates a durable report and verifies its raw content identity
+// when the XML is present.
+func (r *JUnitReport) ParseStored() error {
+	if err := r.ValidateSummary(); err != nil {
+		return err
+	}
+	if r.RawXML == "" {
+		return nil
+	}
+	digest := sha256.Sum256([]byte(r.RawXML))
+	if r.RawSHA256 != hex.EncodeToString(digest[:]) {
+		return errors.New("JUnit raw digest does not match its XML")
+	}
+	return nil
 }
 
 type junitSuiteFrame struct {

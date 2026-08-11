@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 // Actor is a domain-neutral GitHub account profile. Nullable fields preserve
@@ -101,7 +103,7 @@ type ContributionDay struct {
 }
 
 type UserContribution struct {
-	Kind                string
+	Kind                domain.ContributionKind
 	OccurredAt          time.Time
 	RepositoryNodeID    string
 	RepositoryNameOwner string
@@ -114,7 +116,7 @@ type UserContribution struct {
 type RepositoryContributionTotal struct {
 	RepositoryNodeID    string
 	RepositoryNameOwner string
-	Kind                string
+	Kind                domain.ContributionKind
 	Count               int
 }
 
@@ -133,14 +135,6 @@ type UserContributionCollection struct {
 	Complete                bool
 	Rate                    RateInfo
 }
-
-// ThreadKind classifies an issue-list entry.
-type ThreadKind string
-
-const (
-	ThreadKindIssue       ThreadKind = "issue"
-	ThreadKindPullRequest ThreadKind = "pull_request"
-)
 
 // Repository is a domain-neutral view of a GitHub repository.
 type Repository struct {
@@ -202,7 +196,7 @@ type Issue struct {
 	ID                int64
 	NodeID            string
 	Number            int
-	Kind              ThreadKind
+	Kind              domain.ThreadKind
 	Title             string
 	Body              string
 	State             string

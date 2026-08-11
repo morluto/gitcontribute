@@ -30,8 +30,8 @@ type pullRequestFeedbackIndexItem struct {
 }
 
 type pullRequestFeedbackIndexResult struct {
-	Status          string                         `json:"status"`
-	DiscoveryStatus string                         `json:"discovery_status"`
+	Status          batchOperationStatus           `json:"status"`
+	DiscoveryStatus batchOperationStatus           `json:"discovery_status"`
 	NextPage        int                            `json:"next_page,omitempty"`
 	PullRequests    int                            `json:"pull_requests"`
 	FeedbackItems   int                            `json:"feedback_items"`
@@ -51,17 +51,16 @@ func (r *MCPReader) IndexPullRequestFeedback(ctx context.Context, in mcpcontract
 	in.Repository.Owner = ref.Owner()
 	in.Repository.Repo = ref.Repo()
 	if len(in.Channels) == 0 {
-		in.Channels = []string{"issue_comments", "submitted_reviews", "inline_comments", "review_threads"}
-	}
-	if err := validateFeedbackChannels(in.Channels); err != nil {
-		return mcpcontract.JobReference{}, err
+		in.Channels = corpus.AllFeedbackSelection().Channels()
 	}
 	if in.ThreadState == "" {
 		in.ThreadState = "all"
 	}
-	if in.ThreadState != "all" && in.ThreadState != "unresolved" {
-		return mcpcontract.JobReference{}, errors.New("thread_state must be unresolved or all")
+	selection, err := corpus.ParseFeedbackSelection(in.Channels, in.ThreadState)
+	if err != nil {
+		return mcpcontract.JobReference{}, err
 	}
+	in.Channels, in.ThreadState = selection.Channels(), selection.ThreadState()
 	if in.MaxPullRequests == 0 {
 		in.MaxPullRequests = 1000
 	}
@@ -87,7 +86,7 @@ func (r *MCPReader) IndexPullRequestFeedback(ctx context.Context, in mcpcontract
 		return mcpcontract.JobReference{}, errors.New("max_requests must be between 1 and 1000")
 	}
 	id, err := r.submitJob(ctx, jobKindIndexPullRequestFeedback, in, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.indexPullRequestFeedback(ctx, in, report)
+		return r.indexPullRequestFeedback(ctx, in, selection, report)
 	})
 	if err != nil {
 		return mcpcontract.JobReference{}, err
@@ -95,7 +94,8 @@ func (r *MCPReader) IndexPullRequestFeedback(ctx context.Context, in mcpcontract
 	return queuedJobReference(id, jobKindIndexPullRequestFeedback, "repository pull-request feedback indexing job started"), nil
 }
 
-func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract.IndexPullRequestFeedbackInput, report func(string, string) error) (pullRequestFeedbackIndexResult, error) {
+func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract.IndexPullRequestFeedbackInput, selection corpus.FeedbackSelection, report func(string, string) error) (pullRequestFeedbackIndexResult, error) {
+	in.Channels, in.ThreadState = selection.Channels(), selection.ThreadState()
 	reader, err := r.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
 	if err != nil {
 		return pullRequestFeedbackIndexResult{}, err
@@ -130,21 +130,20 @@ func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract
 	if err != nil {
 		return pullRequestFeedbackIndexResult{}, err
 	}
-	if discovery == nil || discovery.Complete || !sameFeedbackSelection(discovery.Channels, in.Channels) || discovery.ThreadState != in.ThreadState {
+	if discovery == nil || discovery.IsComplete() || !discovery.Selection.Equal(selection) {
 		generation := int64(1)
 		if discovery != nil {
 			generation = discovery.Generation + 1
 		}
-		discovery = &corpus.FeedbackDiscovery{RepositoryID: repo.ID, Generation: generation, State: "all", NextPage: 1, Channels: append([]string(nil), in.Channels...), ThreadState: in.ThreadState}
+		discovery = &corpus.FeedbackDiscovery{RepositoryID: repo.ID, Generation: generation, NextPage: 1, Selection: selection}
 	} else {
-		discovery.Channels = append([]string(nil), in.Channels...)
-		discovery.ThreadState = in.ThreadState
+		discovery.Selection = selection
 	}
 	if discovery.NextPage < 1 {
 		discovery.NextPage = 1
 	}
 	budget := github.NewRequestBudget(in.MaxRequests)
-	result := pullRequestFeedbackIndexResult{Status: "complete", DiscoveryStatus: "complete", Items: make([]pullRequestFeedbackIndexItem, 0, in.MaxPullRequests)}
+	result := pullRequestFeedbackIndexResult{Status: batchOperationComplete, DiscoveryStatus: batchOperationComplete, Items: make([]pullRequestFeedbackIndexItem, 0, in.MaxPullRequests)}
 	page := discovery.NextPage
 	initialRequests := discovery.Requests
 	pages := 0
@@ -166,17 +165,17 @@ func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract
 				stopReason = "pull_request_item_bound"
 				break
 			}
-			if issue.Kind != github.ThreadKindPullRequest || issue.Number < 1 {
+			if issue.Kind != domain.PullRequestKind || issue.Number < 1 {
 				continue
 			}
 			processed++
 			ref := mcpcontract.ThreadRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo, Kind: "pull_request", Number: issue.Number}
-			item := r.indexOnePullRequestFeedback(ctx, feedbackReader, ref, in, budget)
+			item := r.indexOnePullRequestFeedback(ctx, feedbackReader, ref, in, selection, budget)
 			result.Items = append(result.Items, item)
 			result.PullRequests++
 			result.FeedbackItems += item.FeedbackItems
-			if item.Status != "complete" {
-				result.Status = "partial"
+			if item.Status != mcpcontract.BatchItemComplete {
+				result.Status = batchOperationPartial
 			}
 			if err := report("pull_request_feedback", jobProgressCounts(result.PullRequests, in.MaxPullRequests)); err != nil {
 				return pullRequestFeedbackIndexResult{}, err
@@ -190,16 +189,16 @@ func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract
 			break
 		}
 		if !listed.Page.HasNext {
-			discovery.NextPage, discovery.Complete, discovery.Truncated = page, true, false
+			discovery.NextPage, discovery.State = page, corpus.FeedbackDiscoveryComplete
 			break
 		}
 		page = listed.Page.NextPage
-		discovery.NextPage, discovery.Complete, discovery.Truncated = page, false, true
+		discovery.NextPage, discovery.State = page, corpus.FeedbackDiscoveryTruncated
 		if pages >= in.MaxPages {
 			stopReason = "discovery_page_bound"
 			break
 		}
-		discovery.DiscoveredPullRequests, err = c.CountThreadsFiltered(ctx, repo.ID, corpus.ThreadKindPullRequest, "")
+		discovery.DiscoveredPullRequests, err = c.CountThreadsFiltered(ctx, repo.ID, corpus.PullRequestThreadKind(), corpus.AnyThreadState())
 		if err != nil {
 			return pullRequestFeedbackIndexResult{}, err
 		}
@@ -211,12 +210,12 @@ func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract
 		}
 	}
 	if stopReason != "" {
-		result.Status, result.DiscoveryStatus = "partial", "partial"
-		discovery.Complete, discovery.Truncated, discovery.LastError = false, true, stopReason
+		result.Status, result.DiscoveryStatus = batchOperationPartial, batchOperationPartial
+		discovery.State, discovery.LastError = corpus.FeedbackDiscoveryTruncated, stopReason
 		result.NextPage = discovery.NextPage
 		result.Recovery = mcpcontractRecoveryIndex(in)
-	} else if !discovery.Complete {
-		result.Status, result.DiscoveryStatus = "partial", "partial"
+	} else if !discovery.IsComplete() {
+		result.Status, result.DiscoveryStatus = batchOperationPartial, batchOperationPartial
 		result.NextPage = discovery.NextPage
 		result.Recovery = mcpcontractRecoveryIndex(in)
 	}
@@ -228,12 +227,12 @@ func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract
 			}
 		}
 	}
-	discovery.DiscoveredPullRequests, err = c.CountThreadsFiltered(ctx, repo.ID, corpus.ThreadKindPullRequest, "")
+	discovery.DiscoveredPullRequests, err = c.CountThreadsFiltered(ctx, repo.ID, corpus.PullRequestThreadKind(), corpus.AnyThreadState())
 	if err != nil {
 		return pullRequestFeedbackIndexResult{}, err
 	}
 	discovery.Requests = initialRequests + budget.Completed()
-	if result.Status == "complete" {
+	if result.Status == batchOperationComplete {
 		discovery.LastError = ""
 	}
 	discovery.SourceUpdatedAt = time.Now().UTC()
@@ -248,8 +247,9 @@ func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract
 	return result, nil
 }
 
-func (r *MCPReader) indexOnePullRequestFeedback(ctx context.Context, feedbackReader github.PullRequestFeedbackReader, ref mcpcontract.ThreadRef, in mcpcontract.IndexPullRequestFeedbackInput, budget *github.RequestBudget) pullRequestFeedbackIndexItem {
-	item := pullRequestFeedbackIndexItem{Key: pullRequestKey(ref), Status: "complete"}
+func (r *MCPReader) indexOnePullRequestFeedback(ctx context.Context, feedbackReader github.PullRequestFeedbackReader, ref mcpcontract.ThreadRef, in mcpcontract.IndexPullRequestFeedbackInput, selection corpus.FeedbackSelection, budget *github.RequestBudget) pullRequestFeedbackIndexItem {
+	item := pullRequestFeedbackIndexItem{Key: pullRequestKey(ref), Status: mcpcontract.BatchItemComplete}
+	channels := selection.ChannelValues()
 	snapshot, readErr := feedbackReader.GetPullRequestFeedback(ctx, ref.Owner, ref.Repo, ref.Number, github.PullRequestFeedbackOptions{Channels: in.Channels, ThreadState: in.ThreadState, MaxItemsPerChannel: in.MaxItemsPerChannel}, budget)
 	item.FeedbackItems = len(snapshot.IssueComments) + len(snapshot.Reviews) + len(snapshot.InlineComments)
 	for _, thread := range snapshot.ReviewThreads {
@@ -264,7 +264,7 @@ func (r *MCPReader) indexOnePullRequestFeedback(ctx context.Context, feedbackRea
 	}
 	if readErr != nil {
 		if len(snapshot.Coverage) > 0 {
-			if persistErr := r.persistPullRequestFeedback(ctx, ref, snapshot, coveredFeedbackChannels(in.Channels, snapshot.Coverage)); persistErr != nil {
+			if persistErr := r.persistPullRequestFeedback(ctx, ref, snapshot, coveredFeedbackChannels(channels, snapshot.Coverage)); persistErr != nil {
 				item.Status, item.Code, item.Message = "failed", "feedback_persistence_failed", persistErr.Error()
 				return item
 			}
@@ -277,11 +277,11 @@ func (r *MCPReader) indexOnePullRequestFeedback(ctx context.Context, feedbackRea
 		}
 		return item
 	}
-	if err := r.persistPullRequestFeedback(ctx, ref, snapshot, in.Channels); err != nil {
+	if err := r.persistPullRequestFeedback(ctx, ref, snapshot, channels); err != nil {
 		item.Status, item.Code, item.Message = "failed", "feedback_persistence_failed", err.Error()
 		return item
 	}
-	if !feedbackSnapshotComplete(snapshot, in.Channels) {
+	if !feedbackSnapshotComplete(snapshot, channels) {
 		item.Status, item.Code, item.Message = "retryable", "feedback_coverage_incomplete", "one or more feedback channels reached an item bound"
 		item.Recovery = mcpcontractRecoveryExact(ref, in)
 		return item
@@ -296,22 +296,6 @@ func pullRequestFeedbackIndexFailure(ref mcpcontract.ThreadRef, in mcpcontract.I
 		item.Status, item.Code, item.Recovery, item.RetryAfterMS = "retryable", "request_or_provider_retryable", mcpcontractRecoveryExact(ref, in), 1000
 	}
 	return item
-}
-
-func sameFeedbackSelection(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	seen := make(map[string]struct{}, len(left))
-	for _, value := range left {
-		seen[value] = struct{}{}
-	}
-	for _, value := range right {
-		if _, ok := seen[value]; !ok {
-			return false
-		}
-	}
-	return true
 }
 
 func isRetryableGitHubError(err error) bool {

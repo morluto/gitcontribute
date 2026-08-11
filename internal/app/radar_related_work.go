@@ -23,11 +23,11 @@ const (
 
 type rawRadarRelatedWork struct {
 	reference relatedwork.Reference
-	direction string
+	direction radar.RelatedWorkDirection
 	evidence  radar.RelatedWorkEvidence
 }
 
-func radarPullRequestRelatedWork(ctx context.Context, c *corpus.Corpus, stored *corpus.Repository, ref domain.RepoRef, issues, pullRequests []corpus.Thread, state string) (map[int][]radar.RelatedWork, bool, error) {
+func radarPullRequestRelatedWork(ctx context.Context, c *corpus.Corpus, stored *corpus.Repository, ref domain.RepoRef, issues, pullRequests []corpus.Thread, state corpus.ThreadStateFilter) (map[int][]radar.RelatedWork, bool, error) {
 	issueNumbers := make(map[int]struct{}, len(issues))
 	for _, issue := range issues {
 		issueNumbers[issue.Number] = struct{}{}
@@ -103,12 +103,12 @@ func radarReferenceTargetsIssue(linked relatedwork.Reference, ref domain.RepoRef
 	return ok
 }
 
-func radarPullRequestWork(ref domain.RepoRef, pullRequest corpus.Thread, relation, evidenceKind string, sourceAsOf time.Time) radar.RelatedWork {
-	url := threadURL(ref, string(domain.PullRequestKind), pullRequest.Number)
+func radarPullRequestWork(ref domain.RepoRef, pullRequest corpus.Thread, relation relatedwork.Relation, evidenceKind string, sourceAsOf time.Time) radar.RelatedWork {
+	url := threadURL(ref, domain.PullRequestKind, pullRequest.Number)
 	return radar.RelatedWork{
 		Ref: fmt.Sprintf("pull_request:%s#%d", ref, pullRequest.Number), Kind: string(domain.PullRequestKind),
-		Number: pullRequest.Number, Title: pullRequest.Title, State: pullRequest.State,
-		Relation: relation, Direction: "inbound", URL: url,
+		Number: pullRequest.Number, Title: pullRequest.Title, State: string(pullRequest.State),
+		Relation: relation, Direction: radar.RelatedWorkInbound, URL: url,
 		Evidence:        []radar.RelatedWorkEvidence{{Kind: evidenceKind, SourceURL: url, SourceAsOf: sourceAsOf}},
 		SourceUpdatedAt: pullRequest.SourceUpdatedAt,
 	}
@@ -129,17 +129,17 @@ func newRadarWorkAccumulator(repo domain.RepoRef, targetNumber int) *radarWorkAc
 	}
 }
 
-func (a *radarWorkAccumulator) appendText(text, direction, evidenceKind, sourceURL string, sourceAsOf time.Time) {
+func (a *radarWorkAccumulator) appendText(text string, direction radar.RelatedWorkDirection, evidenceKind, sourceURL string, sourceAsOf time.Time) {
 	for _, reference := range relatedwork.Extract(text, a.repo) {
 		a.append(reference, direction, radar.RelatedWorkEvidence{Kind: evidenceKind, SourceURL: sourceURL, SourceAsOf: sourceAsOf})
 	}
 }
 
-func (a *radarWorkAccumulator) append(reference relatedwork.Reference, direction string, evidence radar.RelatedWorkEvidence) {
+func (a *radarWorkAccumulator) append(reference relatedwork.Reference, direction radar.RelatedWorkDirection, evidence radar.RelatedWorkEvidence) {
 	if sameRepo(reference.Repo, a.repo) && reference.Number == a.targetNumber {
 		return
 	}
-	if direction == "outbound" && reference.Relation == relatedwork.RelationClaimsToClose {
+	if direction == radar.RelatedWorkOutbound && reference.Relation == relatedwork.RelationClaimsToClose {
 		reference.Relation = relatedwork.RelationExplicitReference
 	}
 	key := radarReferenceKey(reference)
@@ -190,9 +190,9 @@ func radarReferencePreferred(reference relatedwork.Reference, key string, otherP
 }
 
 func radarIssueDiscussionAndRelatedWork(ctx context.Context, c *corpus.Corpus, stored *corpus.Repository, issue corpus.Thread, ref domain.RepoRef, now time.Time) (radar.DiscussionSummary, []radar.RelatedWork, bool, error) {
-	issueURL := threadURL(ref, string(domain.IssueKind), issue.Number)
+	issueURL := threadURL(ref, domain.IssueKind, issue.Number)
 	accumulator := newRadarWorkAccumulator(ref, issue.Number)
-	accumulator.appendText(issue.Title+"\n"+issue.Body, "outbound", "issue_text", issueURL, issue.SourceUpdatedAt)
+	accumulator.appendText(issue.Title+"\n"+issue.Body, radar.RelatedWorkOutbound, "issue_text", issueURL, issue.SourceUpdatedAt)
 	comments, err := readRadarIssueComments(ctx, c, stored.ID, issue.ID, accumulator)
 	if err != nil {
 		return radar.DiscussionSummary{}, nil, false, err
@@ -237,7 +237,7 @@ func readRadarIssueComments(ctx context.Context, c *corpus.Corpus, repoID, issue
 			if sourceAsOf.IsZero() {
 				sourceAsOf = comment.CreatedAt
 			}
-			accumulator.appendText(comment.Body, "outbound", "issue_comment", comment.HTMLURL, sourceAsOf)
+			accumulator.appendText(comment.Body, radar.RelatedWorkOutbound, "issue_comment", comment.HTMLURL, sourceAsOf)
 		}
 	}
 	return comments, nil
@@ -267,7 +267,7 @@ func readRadarIssueTimeline(ctx context.Context, c *corpus.Corpus, repoID, issue
 			if !ok {
 				continue
 			}
-			accumulator.append(reference, "inbound", radar.RelatedWorkEvidence{
+			accumulator.append(reference, radar.RelatedWorkInbound, radar.RelatedWorkEvidence{
 				Kind: FacetIssueTimeline, SourceURL: issueURL, SourceAsOf: observation.SourceUpdatedAt,
 			})
 		}
@@ -321,7 +321,7 @@ func resolveRadarRelatedWork(ctx context.Context, c *corpus.Corpus, raw []rawRad
 	return values, nil
 }
 
-func resolveRadarReference(ctx context.Context, c *corpus.Corpus, reference relatedwork.Reference, direction string, evidence radar.RelatedWorkEvidence) (radar.RelatedWork, error) {
+func resolveRadarReference(ctx context.Context, c *corpus.Corpus, reference relatedwork.Reference, direction radar.RelatedWorkDirection, evidence radar.RelatedWorkEvidence) (radar.RelatedWork, error) {
 	kind := reference.Kind
 	state, title := "", ""
 	sourceUpdatedAt := time.Time{}
@@ -335,8 +335,8 @@ func resolveRadarReference(ctx context.Context, c *corpus.Corpus, reference rela
 			return radar.RelatedWork{}, fmt.Errorf("resolve related thread: %w", err)
 		}
 		if thread != nil {
-			kind = domain.ThreadKind(thread.Kind)
-			state, title, sourceUpdatedAt = thread.State, thread.Title, thread.SourceUpdatedAt
+			kind = thread.Kind
+			state, title, sourceUpdatedAt = string(thread.State), thread.Title, thread.SourceUpdatedAt
 		}
 	}
 	kindName := string(kind)
@@ -346,7 +346,7 @@ func resolveRadarReference(ctx context.Context, c *corpus.Corpus, reference rela
 	return radar.RelatedWork{
 		Ref: fmt.Sprintf("%s:%s#%d", kindName, reference.Repo, reference.Number), Kind: kindName,
 		Number: reference.Number, Title: title, State: state, Relation: reference.Relation, Direction: direction,
-		URL: threadURL(reference.Repo, string(kind), reference.Number), Evidence: []radar.RelatedWorkEvidence{evidence}, SourceUpdatedAt: sourceUpdatedAt,
+		URL: threadURL(reference.Repo, kind, reference.Number), Evidence: []radar.RelatedWorkEvidence{evidence}, SourceUpdatedAt: sourceUpdatedAt,
 	}, nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/clusterprojection"
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/lens"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
@@ -25,19 +27,19 @@ func seedRepoAndThreads(t *testing.T, c *corpus.Corpus) {
 	}
 
 	threads := []struct {
-		kind   string
+		kind   domain.ThreadKind
 		number int
 		title  string
 		body   string
 		author string
 		labels []string
 	}{
-		{corpus.ThreadKindIssue, 1, "fix login crash", "login crashes on startup", "alice", []string{"bug"}},
-		{corpus.ThreadKindIssue, 2, "login crash on startup", "the login page crashes", "alice", []string{"bug"}},
-		{corpus.ThreadKindIssue, 3, "unrelated feature", "add dark mode", "bob", nil},
-		{corpus.ThreadKindIssue, 4, "fix login crash", "duplicate of #1", "alice", []string{"bug"}},
-		{corpus.ThreadKindIssue, 5, "api network timeout", "requests time out", "carol", []string{"bug"}},
-		{corpus.ThreadKindIssue, 6, "timeout in api requests", "network timeout", "carol", []string{"bug"}},
+		{domain.IssueKind, 1, "fix login crash", "login crashes on startup", "alice", []string{"bug"}},
+		{domain.IssueKind, 2, "login crash on startup", "the login page crashes", "alice", []string{"bug"}},
+		{domain.IssueKind, 3, "unrelated feature", "add dark mode", "bob", nil},
+		{domain.IssueKind, 4, "fix login crash", "duplicate of #1", "alice", []string{"bug"}},
+		{domain.IssueKind, 5, "api network timeout", "requests time out", "carol", []string{"bug"}},
+		{domain.IssueKind, 6, "timeout in api requests", "network timeout", "carol", []string{"bug"}},
 	}
 
 	base := time.Unix(1000, 0).UTC()
@@ -360,7 +362,7 @@ func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
 	reader := svc.MCPReader()
 	clusters, err := reader.FindClusters(ctx, mcpcontract.FindClustersInput{
 		Targets: []mcpcontract.ClusterTarget{
-			{Owner: "owner", Repo: "repo"},
+			{Owner: " owner ", Repo: " repo "},
 			{Owner: "owner", Repo: "missing"},
 		},
 		Limit: 10,
@@ -370,6 +372,9 @@ func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
 	}
 	if clusters.Status != "partial" || len(clusters.Items) != 2 || clusters.Items[0].Value == nil || clusters.Items[1].Reason != "repository_not_indexed" {
 		t.Fatalf("cluster batch = %+v", clusters)
+	}
+	if clusters.Items[0].Key != "owner/repo" || clusters.Items[0].Value.Owner != "owner" || clusters.Items[0].Value.Repo != "repo" {
+		t.Fatalf("canonical cluster target = %+v", clusters.Items[0])
 	}
 	clusterSet := clusters.Items[0].Value
 	if clusterSet.Total == 0 {
@@ -393,7 +398,7 @@ func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
 	}
 	member := clusterSet.Clusters[0].Canonical
 	containing, err := reader.FindClusters(ctx, mcpcontract.FindClustersInput{
-		Targets: []mcpcontract.ClusterTarget{{Owner: "owner", Repo: "repo", Kind: member.Kind, Number: member.Number}},
+		Targets: []mcpcontract.ClusterTarget{{Owner: " owner ", Repo: " repo ", Kind: " " + member.Kind + " ", Number: member.Number}},
 		Limit:   10,
 	})
 	if err != nil || len(containing.Items) != 1 || containing.Items[0].Value == nil || containing.Items[0].Value.Total != 1 || len(containing.Items[0].Value.Clusters) != 1 || containing.Items[0].Value.Clusters[0].StableID != clusterSet.Clusters[0].StableID {
@@ -402,7 +407,7 @@ func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
 
 	neighbors, err := reader.(*MCPReader).FindNeighbors(ctx, mcpcontract.FindNeighborsInput{
 		Threads: []mcpcontract.ThreadRef{
-			{Owner: "owner", Repo: "repo", Kind: member.Kind, Number: member.Number},
+			{Owner: " owner ", Repo: " repo ", Kind: " " + member.Kind + " ", Number: member.Number},
 			{Owner: "owner", Repo: "missing", Kind: "issue", Number: 1},
 		},
 		Limit: 5,
@@ -412,6 +417,9 @@ func TestMCPReaderFindClustersAndCoverage(t *testing.T) {
 	}
 	if neighbors.Status != "partial" || len(neighbors.Items) != 2 || neighbors.Items[0].Value == nil || neighbors.Items[1].Reason != "repository_not_indexed" {
 		t.Fatalf("neighbor batch = %+v", neighbors)
+	}
+	if neighbors.Items[0].Value.Owner != "owner" || neighbors.Items[0].Value.Repo != "repo" || strings.Contains(neighbors.Items[0].Key, " ") {
+		t.Fatalf("canonical neighbor target = %+v", neighbors.Items[0])
 	}
 
 	cov, err := reader.GetCoverage(ctx, mcpcontract.GetCoverageInput{Targets: []mcpcontract.CoverageTarget{{Type: mcpcontract.CoverageTargetRepository, Repository: mcpcontract.RepositoryRef{Owner: "owner", Repo: "repo"}}}})

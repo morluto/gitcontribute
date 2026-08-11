@@ -156,3 +156,17 @@ func TestParseThreadKindAndStateRejectUnknownVariants(t *testing.T) {
 		t.Fatal("unknown thread state was accepted")
 	}
 }
+
+func TestParseContributionKindCanonicalizesOpenVocabulary(t *testing.T) {
+	t.Parallel()
+	kind, err := ParseContributionKind(" Future_Category ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind.String() != "future_category" {
+		t.Fatalf("contribution kind = %q, want future_category", kind)
+	}
+	if _, err := ParseContributionKind(" \t "); err == nil {
+		t.Fatal("empty contribution kind was accepted")
+	}
+}

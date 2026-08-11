@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 const (
@@ -51,15 +53,179 @@ var portfolioFacets = []string{
 // local portfolio or resolution fact. Kind is product-owned (for example,
 // thread or facet) and ID is the corresponding corpus observation identity.
 type ObservationRef struct {
-	Kind string `json:"kind"`
-	ID   int64  `json:"id"`
+	kind observationRefKind
+	id   int64
+}
+
+type observationRefKind uint8
+
+const (
+	threadObservationRef observationRefKind = iota + 1
+	facetObservationRef
+	portfolioLinkObservationRef
+)
+
+func ParseObservationRef(kind string, id int64) (ObservationRef, error) {
+	if id <= 0 {
+		return ObservationRef{}, errors.New("observation reference id must be positive")
+	}
+	switch strings.TrimSpace(kind) {
+	case "thread":
+		return ObservationRef{kind: threadObservationRef, id: id}, nil
+	case "facet":
+		return ObservationRef{kind: facetObservationRef, id: id}, nil
+	case "portfolio_link":
+		return ObservationRef{kind: portfolioLinkObservationRef, id: id}, nil
+	default:
+		return ObservationRef{}, errors.New("unknown observation reference kind")
+	}
+}
+
+func NewThreadObservationRef(id int64) (ObservationRef, error) {
+	return ParseObservationRef("thread", id)
+}
+
+func NewFacetObservationRef(id int64) (ObservationRef, error) {
+	return ParseObservationRef("facet", id)
+}
+
+func newPortfolioLinkObservationRef(id int64) (ObservationRef, error) {
+	return ParseObservationRef("portfolio_link", id)
+}
+
+func (r ObservationRef) Kind() string {
+	switch r.kind {
+	case threadObservationRef:
+		return "thread"
+	case facetObservationRef:
+		return "facet"
+	case portfolioLinkObservationRef:
+		return "portfolio_link"
+	default:
+		return ""
+	}
+}
+
+func (r ObservationRef) ID() int64 { return r.id }
+
+func (r ObservationRef) valid() bool { return r.Kind() != "" && r.id > 0 }
+
+func (r ObservationRef) MarshalJSON() ([]byte, error) {
+	if !r.valid() {
+		return nil, errors.New("invalid observation reference")
+	}
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+		ID   int64  `json:"id"`
+	}{Kind: r.Kind(), ID: r.ID()})
+}
+
+func (r *ObservationRef) UnmarshalJSON(data []byte) error {
+	var input struct {
+		Kind string `json:"kind"`
+		ID   int64  `json:"id"`
+	}
+	if err := json.Unmarshal(data, &input); err != nil {
+		return err
+	}
+	parsed, err := ParseObservationRef(input.Kind, input.ID)
+	if err != nil {
+		return err
+	}
+	*r = parsed
+	return nil
 }
 
 // PortfolioSubject is a stable local identity. Pull-request references are
-// decimal corpus thread IDs; opportunity and workspace references are IDs.
+// canonical decimal corpus thread IDs; opportunity and workspace references
+// are trimmed local IDs. Construct subjects with ParsePortfolioSubject or
+// NewPullRequestPortfolioSubject so storage and comparison share one identity.
 type PortfolioSubject struct {
-	Kind string `json:"kind"`
-	Ref  string `json:"ref"`
+	kind portfolioSubjectKind
+	ref  string
+}
+
+type portfolioSubjectKind uint8
+
+const (
+	portfolioPullRequestSubject portfolioSubjectKind = iota + 1
+	portfolioOpportunitySubject
+	portfolioWorkspaceSubject
+)
+
+// ParsePortfolioSubject consumes the transport/storage spelling for one local
+// portfolio identity and returns its canonical representation.
+func ParsePortfolioSubject(kind, ref string) (PortfolioSubject, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return PortfolioSubject{}, errors.New("portfolio subject reference is required")
+	}
+	switch strings.TrimSpace(kind) {
+	case PortfolioSubjectPullRequest:
+		id, err := strconv.ParseInt(ref, 10, 64)
+		if err != nil || id <= 0 {
+			return PortfolioSubject{}, errors.New("pull request subject reference must be a positive corpus thread id")
+		}
+		return PortfolioSubject{kind: portfolioPullRequestSubject, ref: strconv.FormatInt(id, 10)}, nil
+	case PortfolioSubjectOpportunity:
+		return PortfolioSubject{kind: portfolioOpportunitySubject, ref: ref}, nil
+	case PortfolioSubjectWorkspace:
+		return PortfolioSubject{kind: portfolioWorkspaceSubject, ref: ref}, nil
+	default:
+		return PortfolioSubject{}, errors.New("unknown portfolio subject kind")
+	}
+}
+
+// NewPullRequestPortfolioSubject constructs an identity from an authoritative
+// corpus thread ID without a string round trip at the call site.
+func NewPullRequestPortfolioSubject(threadID int64) (PortfolioSubject, error) {
+	if threadID <= 0 {
+		return PortfolioSubject{}, errors.New("pull request subject reference must be a positive corpus thread id")
+	}
+	return PortfolioSubject{kind: portfolioPullRequestSubject, ref: strconv.FormatInt(threadID, 10)}, nil
+}
+
+func (s PortfolioSubject) Kind() string {
+	switch s.kind {
+	case portfolioPullRequestSubject:
+		return PortfolioSubjectPullRequest
+	case portfolioOpportunitySubject:
+		return PortfolioSubjectOpportunity
+	case portfolioWorkspaceSubject:
+		return PortfolioSubjectWorkspace
+	default:
+		return ""
+	}
+}
+
+func (s PortfolioSubject) Ref() string { return s.ref }
+
+func (s PortfolioSubject) valid() bool { return s.Kind() != "" && s.ref != "" }
+
+func (s PortfolioSubject) MarshalJSON() ([]byte, error) {
+	if !s.valid() {
+		return nil, errors.New("invalid portfolio subject")
+	}
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+		Ref  string `json:"ref"`
+	}{Kind: s.Kind(), Ref: s.Ref()})
+}
+
+func (s *PortfolioSubject) UnmarshalJSON(data []byte) error {
+	var input struct {
+		Kind string `json:"kind"`
+		Ref  string `json:"ref"`
+	}
+	if err := json.Unmarshal(data, &input); err != nil {
+		return err
+	}
+	parsed, err := ParsePortfolioSubject(input.Kind, input.Ref)
+	if err != nil {
+		return err
+	}
+	*s = parsed
+	return nil
 }
 
 // PortfolioLink explicitly associates an authored PR with local workflow
@@ -72,14 +238,128 @@ type PortfolioLink struct {
 	CreatedAt           time.Time `json:"created_at"`
 }
 
-// PortfolioSignal is one normalized overlap input. Similarity signals name a
-// target subject and carry a score; path and linked-issue signals use Value.
+// PortfolioSignal is one normalized overlap input. Constructors seal the
+// scalar path/issue variants apart from scored pull-request similarity.
 type PortfolioSignal struct {
-	Kind       string  `json:"kind"`
-	Value      string  `json:"value"`
-	TargetKind string  `json:"target_kind,omitempty"`
-	TargetRef  string  `json:"target_ref,omitempty"`
-	Score      float64 `json:"score,omitempty"`
+	kind   portfolioSignalKind
+	value  string
+	target PortfolioSubject
+	score  float64
+}
+
+type portfolioSignalKind uint8
+
+const (
+	portfolioFilePathSignal portfolioSignalKind = iota + 1
+	portfolioLinkedIssueSignal
+	portfolioOpportunitySimilaritySignal
+)
+
+func NewPortfolioFilePathSignal(value string) (PortfolioSignal, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return PortfolioSignal{}, errors.New("portfolio signal value is required")
+	}
+	value = path.Clean(strings.ReplaceAll(value, `\`, "/"))
+	return PortfolioSignal{kind: portfolioFilePathSignal, value: value}, nil
+}
+
+func NewPortfolioLinkedIssueSignal(value string) (PortfolioSignal, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return PortfolioSignal{}, errors.New("portfolio signal value is required")
+	}
+	return PortfolioSignal{kind: portfolioLinkedIssueSignal, value: value}, nil
+}
+
+func NewPortfolioOpportunitySimilaritySignal(target PortfolioSubject, score float64) (PortfolioSignal, error) {
+	if target.Kind() != PortfolioSubjectPullRequest || !(score >= 0 && score <= 1) {
+		return PortfolioSignal{}, errors.New("opportunity similarity requires a pull request target and score between zero and one")
+	}
+	return PortfolioSignal{kind: portfolioOpportunitySimilaritySignal, target: target, score: score}, nil
+}
+
+func (s PortfolioSignal) Kind() string {
+	switch s.kind {
+	case portfolioFilePathSignal:
+		return PortfolioSignalFilePath
+	case portfolioLinkedIssueSignal:
+		return PortfolioSignalLinkedIssue
+	case portfolioOpportunitySimilaritySignal:
+		return PortfolioSignalOpportunitySimilarity
+	default:
+		return ""
+	}
+}
+
+func (s PortfolioSignal) Value() string { return s.value }
+
+func (s PortfolioSignal) Target() (PortfolioSubject, bool) {
+	return s.target, s.kind == portfolioOpportunitySimilaritySignal
+}
+
+func (s PortfolioSignal) Score() float64 { return s.score }
+
+func parsePortfolioSignal(kind, value, targetKind, targetRef string, score float64) (PortfolioSignal, error) {
+	switch strings.TrimSpace(kind) {
+	case PortfolioSignalFilePath:
+		if strings.TrimSpace(targetKind) != "" || strings.TrimSpace(targetRef) != "" || score != 0 {
+			return PortfolioSignal{}, errors.New("file path signal cannot carry a target or score")
+		}
+		return NewPortfolioFilePathSignal(value)
+	case PortfolioSignalLinkedIssue:
+		if strings.TrimSpace(targetKind) != "" || strings.TrimSpace(targetRef) != "" || score != 0 {
+			return PortfolioSignal{}, errors.New("linked issue signal cannot carry a target or score")
+		}
+		return NewPortfolioLinkedIssueSignal(value)
+	case PortfolioSignalOpportunitySimilarity:
+		if strings.TrimSpace(value) != "" {
+			return PortfolioSignal{}, errors.New("opportunity similarity signal cannot carry a scalar value")
+		}
+		target, err := ParsePortfolioSubject(targetKind, targetRef)
+		if err != nil {
+			return PortfolioSignal{}, err
+		}
+		return NewPortfolioOpportunitySimilaritySignal(target, score)
+	default:
+		return PortfolioSignal{}, errors.New("unknown portfolio signal kind")
+	}
+}
+
+func (s PortfolioSignal) MarshalJSON() ([]byte, error) {
+	if s.Kind() == "" {
+		return nil, errors.New("invalid portfolio signal")
+	}
+	output := struct {
+		Kind       string  `json:"kind"`
+		Value      string  `json:"value"`
+		TargetKind string  `json:"target_kind,omitempty"`
+		TargetRef  string  `json:"target_ref,omitempty"`
+		Score      float64 `json:"score,omitempty"`
+	}{Kind: s.Kind(), Value: s.Value(), Score: s.Score()}
+	if target, ok := s.Target(); ok {
+		output.TargetKind, output.TargetRef = target.Kind(), target.Ref()
+	}
+	return json.Marshal(output)
+}
+
+func (s *PortfolioSignal) UnmarshalJSON(data []byte) error {
+	var input struct {
+		Kind       string  `json:"kind"`
+		Value      string  `json:"value"`
+		TargetKind string  `json:"target_kind"`
+		TargetRef  string  `json:"target_ref"`
+		Score      float64 `json:"score"`
+	}
+	if err := json.Unmarshal(data, &input); err != nil {
+		return err
+	}
+	parsed, err := parsePortfolioSignal(input.Kind, input.Value, input.TargetKind, input.TargetRef, input.Score)
+	if err != nil {
+		return err
+	}
+	*s = parsed
+	return nil
 }
 
 // PortfolioSignalSnapshot is one complete, immutable facet replacement.
@@ -124,10 +404,51 @@ type PortfolioOverlapMatch struct {
 // no_overlap, or unknown. A no_overlap result requires complete coverage of
 // every overlap facet for both the candidate and every compared PR.
 type PortfolioOverlapResult struct {
-	Candidate PortfolioSubject        `json:"candidate"`
-	Status    string                  `json:"status"`
-	Coverage  map[string]string       `json:"coverage"`
-	Matches   []PortfolioOverlapMatch `json:"matches"`
+	Candidate PortfolioSubject
+	status    portfolioOverlapStatus
+	coverage  map[string]bool
+	Matches   []PortfolioOverlapMatch
+}
+
+type portfolioOverlapStatus uint8
+
+const (
+	portfolioOverlapUnknown portfolioOverlapStatus = iota + 1
+	portfolioOverlapFound
+	portfolioNoOverlap
+)
+
+func (s portfolioOverlapStatus) String() string {
+	switch s {
+	case portfolioOverlapUnknown:
+		return "unknown"
+	case portfolioOverlapFound:
+		return "overlap"
+	case portfolioNoOverlap:
+		return "no_overlap"
+	default:
+		return ""
+	}
+}
+
+// Status returns the stable wire representation of the computed outcome.
+func (r PortfolioOverlapResult) Status() string { return r.status.String() }
+
+// Unknown reports whether incomplete facet coverage prevents a negative result.
+func (r PortfolioOverlapResult) Unknown() bool { return r.status == portfolioOverlapUnknown }
+
+// Coverage returns the stable wire representation of each required facet's
+// observed completeness.
+func (r PortfolioOverlapResult) Coverage() map[string]string {
+	coverage := make(map[string]string, len(r.coverage))
+	for facet, complete := range r.coverage {
+		if complete {
+			coverage[facet] = "complete"
+		} else {
+			coverage[facet] = "missing"
+		}
+	}
+	return coverage
 }
 
 // SavePortfolioLink idempotently records an explicit local workflow link.
@@ -139,7 +460,7 @@ func (c *Corpus) SavePortfolioLink(ctx context.Context, link PortfolioLink) (*Po
 	if err := c.db.QueryRowContext(ctx, `SELECT kind FROM threads WHERE id=?`, link.PullRequestThreadID).Scan(&kind); err != nil {
 		return nil, fmt.Errorf("resolve portfolio pull request: %w", err)
 	}
-	if kind != ThreadKindPullRequest {
+	if kind != string(domain.PullRequestKind) {
 		return nil, errors.New("portfolio link thread is not a pull request")
 	}
 	if link.CreatedAt.IsZero() {
@@ -230,7 +551,7 @@ func (c *Corpus) ReplacePortfolioSignals(ctx context.Context, snapshot Portfolio
 		INSERT INTO portfolio_signal_snapshots
 			(subject_kind, subject_ref, facet, source_updated_at, observation_sequence, source_observation_refs, observed_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, snapshot.Subject.Kind, snapshot.Subject.Ref, snapshot.Facet, encodeTime(snapshot.SourceUpdatedAt), snapshot.ObservationSequence, string(refs), encodeTime(snapshot.ObservedAt))
+	`, snapshot.Subject.Kind(), snapshot.Subject.Ref(), snapshot.Facet, encodeTime(snapshot.SourceUpdatedAt), snapshot.ObservationSequence, string(refs), encodeTime(snapshot.ObservedAt))
 	if err != nil {
 		return nil, fmt.Errorf("insert portfolio signal snapshot: %w", err)
 	}
@@ -238,11 +559,16 @@ func (c *Corpus) ReplacePortfolioSignals(ctx context.Context, snapshot Portfolio
 	if err != nil {
 		return nil, fmt.Errorf("read portfolio signal snapshot id: %w", err)
 	}
-	for position, signal := range canonicalPortfolioSignals(snapshot.Signals) {
+	snapshot.Signals = canonicalPortfolioSignals(snapshot.Signals)
+	for position, signal := range snapshot.Signals {
+		targetKind, targetRef := "", ""
+		if target, ok := signal.Target(); ok {
+			targetKind, targetRef = target.Kind(), target.Ref()
+		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO portfolio_signals (snapshot_id, position, kind, value, target_kind, target_ref, score)
 			VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?)
-		`, snapshot.ID, position, signal.Kind, signal.Value, signal.TargetKind, signal.TargetRef, signal.Score); err != nil {
+		`, snapshot.ID, position, signal.Kind(), signal.Value(), targetKind, targetRef, signal.Score()); err != nil {
 			return nil, fmt.Errorf("insert portfolio signal: %w", err)
 		}
 	}
@@ -257,7 +583,7 @@ func (c *Corpus) ReplacePortfolioSignals(ctx context.Context, snapshot Portfolio
 		WHERE portfolio_signal_projections.source_updated_at < excluded.source_updated_at
 		   OR (portfolio_signal_projections.source_updated_at = excluded.source_updated_at
 		       AND portfolio_signal_projections.observation_sequence < excluded.observation_sequence)
-	`, snapshot.Subject.Kind, snapshot.Subject.Ref, snapshot.Facet, snapshot.ID, encodeTime(snapshot.SourceUpdatedAt), snapshot.ObservationSequence); err != nil {
+	`, snapshot.Subject.Kind(), snapshot.Subject.Ref(), snapshot.Facet, snapshot.ID, encodeTime(snapshot.SourceUpdatedAt), snapshot.ObservationSequence); err != nil {
 		return nil, fmt.Errorf("advance portfolio signal projection: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -270,19 +596,19 @@ func validateObservationRefsTx(ctx context.Context, tx *sql.Tx, refs []Observati
 	for _, ref := range refs {
 		var exists int
 		var err error
-		switch ref.Kind {
+		switch ref.Kind() {
 		case "thread":
-			err = tx.QueryRowContext(ctx, `SELECT 1 FROM thread_observations WHERE id=?`, ref.ID).Scan(&exists)
+			err = tx.QueryRowContext(ctx, `SELECT 1 FROM thread_observations WHERE id=?`, ref.ID()).Scan(&exists)
 		case "facet":
-			err = tx.QueryRowContext(ctx, `SELECT 1 FROM facet_observations WHERE id=?`, ref.ID).Scan(&exists)
+			err = tx.QueryRowContext(ctx, `SELECT 1 FROM facet_observations WHERE id=?`, ref.ID()).Scan(&exists)
 		default:
-			return fmt.Errorf("unsupported source observation kind %q", ref.Kind)
+			return fmt.Errorf("unsupported source observation kind %q", ref.Kind())
 		}
 		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("source observation %s:%d does not exist", ref.Kind, ref.ID)
+			return fmt.Errorf("source observation %s:%d does not exist", ref.Kind(), ref.ID())
 		}
 		if err != nil {
-			return fmt.Errorf("validate source observation %s:%d: %w", ref.Kind, ref.ID, err)
+			return fmt.Errorf("validate source observation %s:%d: %w", ref.Kind(), ref.ID(), err)
 		}
 	}
 	return nil
@@ -304,36 +630,20 @@ func validatePortfolioSnapshot(snapshot PortfolioSignalSnapshot) error {
 		return errors.New("portfolio signal source time and observation refs are required")
 	}
 	for _, ref := range snapshot.SourceObservationRefs {
-		if strings.TrimSpace(ref.Kind) == "" || ref.ID <= 0 {
+		if !ref.valid() {
 			return errors.New("invalid portfolio source observation reference")
 		}
 	}
 	for _, signal := range snapshot.Signals {
-		if signal.Kind != wantKind {
-			return fmt.Errorf("signal kind %q does not belong to facet %q", signal.Kind, snapshot.Facet)
-		}
-		if strings.TrimSpace(signal.Value) == "" && signal.Kind != PortfolioSignalOpportunitySimilarity {
-			return errors.New("portfolio signal value is required")
-		}
-		if signal.Kind == PortfolioSignalOpportunitySimilarity && (signal.TargetKind != PortfolioSubjectPullRequest || signal.TargetRef == "" || signal.Score < 0 || signal.Score > 1) {
-			return errors.New("opportunity similarity requires a pull request target and score between zero and one")
+		if signal.Kind() != wantKind {
+			return fmt.Errorf("signal kind %q does not belong to facet %q", signal.Kind(), snapshot.Facet)
 		}
 	}
 	return nil
 }
 
 func validatePortfolioSubject(subject PortfolioSubject) error {
-	if strings.TrimSpace(subject.Ref) == "" {
-		return errors.New("portfolio subject reference is required")
-	}
-	switch subject.Kind {
-	case PortfolioSubjectPullRequest:
-		id, err := strconv.ParseInt(subject.Ref, 10, 64)
-		if err != nil || id <= 0 {
-			return errors.New("pull request subject reference must be a positive corpus thread id")
-		}
-	case PortfolioSubjectOpportunity, PortfolioSubjectWorkspace:
-	default:
+	if !subject.valid() {
 		return errors.New("unknown portfolio subject kind")
 	}
 	return nil
@@ -341,27 +651,23 @@ func validatePortfolioSubject(subject PortfolioSubject) error {
 
 func canonicalPortfolioSignals(signals []PortfolioSignal) []PortfolioSignal {
 	out := append([]PortfolioSignal(nil), signals...)
-	for i := range out {
-		out[i].Value = strings.TrimSpace(out[i].Value)
-		if out[i].Kind == PortfolioSignalFilePath {
-			out[i].Value = path.Clean(strings.ReplaceAll(out[i].Value, `\`, "/"))
-		}
-	}
 	sort.SliceStable(out, func(i, j int) bool {
 		a, b := out[i], out[j]
-		if a.Kind != b.Kind {
-			return a.Kind < b.Kind
+		if a.Kind() != b.Kind() {
+			return a.Kind() < b.Kind()
 		}
-		if a.Value != b.Value {
-			return a.Value < b.Value
+		if a.Value() != b.Value() {
+			return a.Value() < b.Value()
 		}
-		if a.TargetKind != b.TargetKind {
-			return a.TargetKind < b.TargetKind
+		aTarget, _ := a.Target()
+		bTarget, _ := b.Target()
+		if aTarget.Kind() != bTarget.Kind() {
+			return aTarget.Kind() < bTarget.Kind()
 		}
-		if a.TargetRef != b.TargetRef {
-			return a.TargetRef < b.TargetRef
+		if aTarget.Ref() != bTarget.Ref() {
+			return aTarget.Ref() < bTarget.Ref()
 		}
-		return a.Score < b.Score
+		return a.Score() < b.Score()
 	})
 	return out
 }
@@ -379,7 +685,7 @@ func (c *Corpus) projectedSignals(ctx context.Context, subject PortfolioSubject,
 		FROM portfolio_signal_projections p
 		JOIN portfolio_signal_snapshots s ON s.id=p.snapshot_id
 		WHERE p.subject_kind=? AND p.subject_ref=? AND p.facet=?
-	`, subject.Kind, subject.Ref, facet).Scan(&refs)
+	`, subject.Kind(), subject.Ref(), facet).Scan(&refs)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, nil
 	}
@@ -396,7 +702,7 @@ func (c *Corpus) projectedSignals(ctx context.Context, subject PortfolioSubject,
 		JOIN portfolio_signals s ON s.snapshot_id=p.snapshot_id
 		WHERE p.subject_kind=? AND p.subject_ref=? AND p.facet=?
 		ORDER BY s.position
-	`, subject.Kind, subject.Ref, facet)
+	`, subject.Kind(), subject.Ref(), facet)
 	if err != nil {
 		return projectedPortfolioSignals{}, err
 	}
@@ -407,9 +713,14 @@ func (c *Corpus) projectedSignals(ctx context.Context, subject PortfolioSubject,
 		}
 	}()
 	for rows.Next() {
-		var signal PortfolioSignal
-		if err := rows.Scan(&signal.Kind, &signal.Value, &signal.TargetKind, &signal.TargetRef, &signal.Score); err != nil {
+		var kind, value, targetKind, targetRef string
+		var score float64
+		if err := rows.Scan(&kind, &value, &targetKind, &targetRef, &score); err != nil {
 			return out, err
+		}
+		signal, err := parsePortfolioSignal(kind, value, targetKind, targetRef, score)
+		if err != nil {
+			return out, fmt.Errorf("parse stored portfolio signal: %w", err)
 		}
 		out.signals = append(out.signals, signal)
 	}
@@ -422,7 +733,7 @@ func (c *Corpus) projectedSignals(ctx context.Context, subject PortfolioSubject,
 // ListPullRequestIssueLinks returns a bounded, deterministic offline view of
 // authoritative closing-issue relationships for stored pull requests. It
 // performs one corpus query and preserves selected-thread ordering.
-func (c *Corpus) ListPullRequestIssueLinks(ctx context.Context, repoID int64, state string, limit int) (out []PullRequestIssueLinks, capped bool, err error) {
+func (c *Corpus) ListPullRequestIssueLinks(ctx context.Context, repoID int64, state ThreadStateFilter, limit int) (out []PullRequestIssueLinks, capped bool, err error) {
 	if repoID <= 0 {
 		return nil, false, errors.New("repository id must be positive")
 	}
@@ -430,10 +741,10 @@ func (c *Corpus) ListPullRequestIssueLinks(ctx context.Context, repoID int64, st
 		return nil, false, errors.New("pull request issue-link limit must be between 1 and 10000")
 	}
 	stateFilter := ""
-	args := []any{repoID, ThreadKindPullRequest}
-	if state != "" && state != "all" {
+	args := []any{repoID, domain.PullRequestKind}
+	if !state.IsAny() {
 		stateFilter = " AND state = ?"
-		args = append(args, state)
+		args = append(args, state.String())
 	}
 	args = append(args, limit+1, PortfolioSubjectPullRequest, PortfolioFacetLinkedIssues)
 	rows, err := c.db.QueryContext(ctx, `
@@ -526,8 +837,8 @@ func (c *Corpus) findCandidateOverlaps(ctx context.Context, candidate PortfolioS
 	if err := validatePortfolioSubject(candidate); err != nil {
 		return PortfolioOverlapResult{}, err
 	}
-	result := PortfolioOverlapResult{Candidate: candidate, Status: "unknown", Coverage: make(map[string]string)}
-	candidateFacets, allCovered, err := c.loadCandidateFacets(ctx, candidate, result.Coverage)
+	result := PortfolioOverlapResult{Candidate: candidate, status: portfolioOverlapUnknown, coverage: make(map[string]bool)}
+	candidateFacets, allCovered, err := c.loadCandidateFacets(ctx, candidate, result.coverage)
 	if err != nil {
 		return PortfolioOverlapResult{}, err
 	}
@@ -539,14 +850,14 @@ func (c *Corpus) findCandidateOverlaps(ctx context.Context, candidate PortfolioS
 		allCovered = allCovered && covered
 	}
 	if len(result.Matches) > 0 {
-		result.Status = "overlap"
+		result.status = portfolioOverlapFound
 	} else if allCovered {
-		result.Status = "no_overlap"
+		result.status = portfolioNoOverlap
 	}
 	return result, nil
 }
 
-func (c *Corpus) loadCandidateFacets(ctx context.Context, candidate PortfolioSubject, coverage map[string]string) (map[string]projectedPortfolioSignals, bool, error) {
+func (c *Corpus) loadCandidateFacets(ctx context.Context, candidate PortfolioSubject, coverage map[string]bool) (map[string]projectedPortfolioSignals, bool, error) {
 	facets := make(map[string]projectedPortfolioSignals)
 	allCovered := true
 	for _, facet := range requiredPortfolioFacets(candidate) {
@@ -555,14 +866,17 @@ func (c *Corpus) loadCandidateFacets(ctx context.Context, candidate PortfolioSub
 			return nil, false, err
 		}
 		facets[facet] = projected
-		coverage["candidate."+facet] = coverageStatus(projected.covered)
+		coverage["candidate."+facet] = projected.covered
 		allCovered = allCovered && projected.covered
 	}
 	return facets, allCovered, nil
 }
 
 func (c *Corpus) comparePortfolioPullRequest(ctx context.Context, candidate PortfolioSubject, candidateFacets map[string]projectedPortfolioSignals, prID int64, result *PortfolioOverlapResult) (bool, error) {
-	pr := PortfolioSubject{Kind: PortfolioSubjectPullRequest, Ref: strconv.FormatInt(prID, 10)}
+	pr, err := NewPullRequestPortfolioSubject(prID)
+	if err != nil {
+		return false, err
+	}
 	evidence, err := c.explicitPortfolioEvidence(ctx, candidate, prID)
 	if err != nil {
 		return false, err
@@ -573,7 +887,7 @@ func (c *Corpus) comparePortfolioPullRequest(ctx context.Context, candidate Port
 		if err != nil {
 			return false, err
 		}
-		result.Coverage["pull_request."+pr.Ref+"."+facet] = coverageStatus(projected.covered)
+		result.coverage["pull_request."+pr.Ref()+"."+facet] = projected.covered
 		allCovered = allCovered && projected.covered
 		evidence = append(evidence, overlapEvidence(candidate, pr, candidateFacets[facet], projected)...)
 	}
@@ -591,15 +905,8 @@ func (c *Corpus) comparePortfolioPullRequest(ctx context.Context, candidate Port
 	return allCovered, nil
 }
 
-func coverageStatus(covered bool) string {
-	if covered {
-		return "complete"
-	}
-	return "missing"
-}
-
 func requiredPortfolioFacets(subject PortfolioSubject) []string {
-	if subject.Kind == PortfolioSubjectPullRequest {
+	if subject.Kind() == PortfolioSubjectPullRequest {
 		return []string{PortfolioFacetChangedFiles, PortfolioFacetLinkedIssues}
 	}
 	return portfolioFacets
@@ -607,7 +914,7 @@ func requiredPortfolioFacets(subject PortfolioSubject) []string {
 
 func (c *Corpus) explicitPortfolioLink(ctx context.Context, candidate PortfolioSubject, pullRequestThreadID int64) (*PortfolioOverlapEvidence, error) {
 	column := ""
-	switch candidate.Kind {
+	switch candidate.Kind() {
 	case PortfolioSubjectOpportunity:
 		column = "opportunity_id"
 	case PortfolioSubjectWorkspace:
@@ -616,14 +923,18 @@ func (c *Corpus) explicitPortfolioLink(ctx context.Context, candidate PortfolioS
 		return nil, errPortfolioLinkNotApplicable
 	}
 	var linkID int64
-	err := c.db.QueryRowContext(ctx, `SELECT id FROM portfolio_links WHERE pull_request_thread_id=? AND `+column+`=? ORDER BY id LIMIT 1`, pullRequestThreadID, candidate.Ref).Scan(&linkID)
+	err := c.db.QueryRowContext(ctx, `SELECT id FROM portfolio_links WHERE pull_request_thread_id=? AND `+column+`=? ORDER BY id LIMIT 1`, pullRequestThreadID, candidate.Ref()).Scan(&linkID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errPortfolioLinkNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read explicit portfolio link: %w", err)
 	}
-	return &PortfolioOverlapEvidence{Kind: "explicit_link", Value: candidate.Ref + "->" + strconv.FormatInt(pullRequestThreadID, 10), SourceObservationRefs: []ObservationRef{{Kind: "portfolio_link", ID: linkID}}}, nil
+	ref, err := newPortfolioLinkObservationRef(linkID)
+	if err != nil {
+		return nil, err
+	}
+	return &PortfolioOverlapEvidence{Kind: "explicit_link", Value: candidate.Ref() + "->" + strconv.FormatInt(pullRequestThreadID, 10), SourceObservationRefs: []ObservationRef{ref}}, nil
 }
 
 func (c *Corpus) explicitPortfolioEvidence(ctx context.Context, candidate PortfolioSubject, pullRequestThreadID int64) ([]PortfolioOverlapEvidence, error) {
@@ -641,23 +952,19 @@ func overlapEvidence(candidate, pr PortfolioSubject, candidateSignals, prSignals
 	var out []PortfolioOverlapEvidence
 	values := make(map[string]struct{}, len(prSignals.signals))
 	for _, signal := range prSignals.signals {
-		values[signal.Kind+"\x00"+signal.Value] = struct{}{}
+		values[signal.Kind()+"\x00"+signal.Value()] = struct{}{}
 	}
 	for _, signal := range candidateSignals.signals {
-		switch signal.Kind {
+		switch signal.Kind() {
 		case PortfolioSignalFilePath, PortfolioSignalLinkedIssue:
-			if _, ok := values[signal.Kind+"\x00"+signal.Value]; ok {
-				out = append(out, PortfolioOverlapEvidence{Kind: signal.Kind, Value: signal.Value, SourceObservationRefs: mergeObservationRefs(candidateSignals.refs, prSignals.refs)})
+			if _, ok := values[signal.Kind()+"\x00"+signal.Value()]; ok {
+				out = append(out, PortfolioOverlapEvidence{Kind: signal.Kind(), Value: signal.Value(), SourceObservationRefs: mergeObservationRefs(candidateSignals.refs, prSignals.refs)})
 			}
 		case PortfolioSignalOpportunitySimilarity:
-			if signal.TargetKind == pr.Kind && signal.TargetRef == pr.Ref {
-				out = append(out, PortfolioOverlapEvidence{Kind: signal.Kind, Value: candidate.Ref + "->" + pr.Ref, Score: signal.Score, SourceObservationRefs: candidateSignals.refs})
+			target, _ := signal.Target()
+			if target == pr {
+				out = append(out, PortfolioOverlapEvidence{Kind: signal.Kind(), Value: candidate.Ref() + "->" + pr.Ref(), Score: signal.Score(), SourceObservationRefs: candidateSignals.refs})
 			}
-		}
-	}
-	for _, signal := range prSignals.signals {
-		if signal.Kind == PortfolioSignalOpportunitySimilarity && signal.TargetKind == candidate.Kind && signal.TargetRef == candidate.Ref {
-			out = append(out, PortfolioOverlapEvidence{Kind: signal.Kind, Value: pr.Ref + "->" + candidate.Ref, Score: signal.Score, SourceObservationRefs: prSignals.refs})
 		}
 	}
 	return out
@@ -676,10 +983,10 @@ func mergeObservationRefs(first, second []ObservationRef) []ObservationRef {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].Kind != out[j].Kind {
-			return out[i].Kind < out[j].Kind
+		if out[i].Kind() != out[j].Kind() {
+			return out[i].Kind() < out[j].Kind()
 		}
-		return out[i].ID < out[j].ID
+		return out[i].ID() < out[j].ID()
 	})
 	return out
 }

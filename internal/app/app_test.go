@@ -199,7 +199,7 @@ func newTestService(t *testing.T, srv *httptest.Server) *Service {
 	return svc
 }
 
-func TestDiscoveryCrawlPersistsRepositoryFrontierAndCheckpoint(t *testing.T) {
+func TestDiscoveryCrawlPersistsRepositoryAndCheckpoint(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	srv, tracked := newTrackedTestServer("octocat", "discovered")
@@ -242,13 +242,6 @@ func TestDiscoveryCrawlPersistsRepositoryFrontierAndCheckpoint(t *testing.T) {
 	}
 	if repo == nil || repo.ExternalID != "R_123" {
 		t.Fatalf("repository = %+v", repo)
-	}
-	frontier, err := c.GetFrontierItem(ctx, "repository:octocat/discovered:threads")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if frontier == nil || frontier.Source != "active-go" {
-		t.Fatalf("frontier = %+v", frontier)
 	}
 	checkpoint, exists, err := c.GetTime(ctx, "source:active-go")
 	if err != nil || !exists || checkpoint.IsZero() {

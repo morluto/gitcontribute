@@ -13,6 +13,84 @@ import (
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
+type actorProfileOutcome interface{ actorProfileOutcome() }
+
+type actorProfileSuccess struct {
+	actorID string
+	login   string
+}
+
+func (actorProfileSuccess) actorProfileOutcome() {}
+
+type actorProfileResolutionFailure struct {
+	reason  string
+	message string
+}
+
+func (actorProfileResolutionFailure) actorProfileOutcome() {}
+
+type actorProfileRequestFailure struct {
+	status       mcpcontract.BatchItemStatus
+	reason       string
+	message      string
+	retryAfterMS int
+}
+
+func (actorProfileRequestFailure) actorProfileOutcome() {}
+
+type actorProfileItem struct {
+	key     string
+	outcome actorProfileOutcome
+}
+
+func successfulActorProfileItem(key, actorID, login string) actorProfileItem {
+	return actorProfileItem{key: key, outcome: actorProfileSuccess{actorID: actorID, login: login}}
+}
+
+func unresolvedActorProfileItem(key, reason, message string) actorProfileItem {
+	return actorProfileItem{key: key, outcome: actorProfileResolutionFailure{reason: reason, message: message}}
+}
+
+func failedActorProfileItem(key string, status mcpcontract.BatchItemStatus, reason, message string, retryAfterMS int) actorProfileItem {
+	return actorProfileItem{key: key, outcome: actorProfileRequestFailure{status: status, reason: reason, message: message, retryAfterMS: retryAfterMS}}
+}
+
+func (i actorProfileItem) MarshalJSON() ([]byte, error) {
+	switch outcome := i.outcome.(type) {
+	case actorProfileSuccess:
+		return json.Marshal(struct {
+			Key     string                      `json:"key"`
+			Status  mcpcontract.BatchItemStatus `json:"status"`
+			ActorID string                      `json:"actor_id"`
+			Login   string                      `json:"login"`
+		}{i.key, mcpcontract.BatchItemComplete, outcome.actorID, outcome.login})
+	case actorProfileResolutionFailure:
+		return json.Marshal(struct {
+			Key     string                      `json:"key"`
+			Status  mcpcontract.BatchItemStatus `json:"status"`
+			Reason  string                      `json:"reason"`
+			Message string                      `json:"message"`
+		}{i.key, mcpcontract.BatchItemUnavailable, outcome.reason, outcome.message})
+	case actorProfileRequestFailure:
+		if outcome.status == "" || outcome.status == mcpcontract.BatchItemComplete || outcome.status == mcpcontract.BatchItemPartial {
+			return nil, errors.New("actor profile failure has a non-failure status")
+		}
+		return json.Marshal(struct {
+			Key          string                      `json:"key"`
+			Status       mcpcontract.BatchItemStatus `json:"status"`
+			Reason       string                      `json:"reason"`
+			Message      string                      `json:"message"`
+			RetryAfterMS int                         `json:"retry_after_ms"`
+		}{i.key, outcome.status, outcome.reason, outcome.message, outcome.retryAfterMS})
+	default:
+		return nil, errors.New("actor profile item has no supported outcome")
+	}
+}
+
+type actorProfileBatchResult struct {
+	batchOperationSummary[actorProfileItem]
+}
+
 // SearchGitHubUsers performs one bounded live discovery page and persists only
 // identity observations; it never expands the result into N profile reads.
 func (r *MCPReader) SearchGitHubUsers(ctx context.Context, in mcpcontract.SearchGitHubUsersInput) (mcpcontract.SearchGitHubUsersOutput, error) {
@@ -100,7 +178,7 @@ func (r *MCPReader) SyncUsers(ctx context.Context, in mcpcontract.SyncUsersInput
 	return queuedJobReference(id, "sync_users", "GitHub user profile synchronization started"), nil
 }
 
-func (r *MCPReader) syncUsers(ctx context.Context, selectors []parsedActorSelector, report func(string, string) error) (map[string]any, error) {
+func (r *MCPReader) syncUsers(ctx context.Context, selectors []parsedActorSelector, report func(string, string) error) (*actorProfileBatchResult, error) {
 	reader, err := r.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
 	if err != nil {
 		return nil, err
@@ -113,7 +191,7 @@ func (r *MCPReader) syncUsers(ctx context.Context, selectors []parsedActorSelect
 	if err != nil {
 		return nil, err
 	}
-	items := make([]map[string]any, len(selectors))
+	items := make([]actorProfileItem, len(selectors))
 	complete := 0
 	if err := report("profiles", jobProgressCounts(0, len(selectors))); err != nil {
 		return nil, err
@@ -124,7 +202,7 @@ func (r *MCPReader) syncUsers(ctx context.Context, selectors []parsedActorSelect
 		}
 		login, resolveErr := selector.resolveLogin(ctx, c)
 		if resolveErr != nil {
-			items[index] = map[string]any{"key": selector.key(), "status": "unavailable", "reason": "actor_login_unknown", "message": resolveErr.Error()}
+			items[index] = unresolvedActorProfileItem(selector.key(), "actor_login_unknown", resolveErr.Error())
 			if err := report("profiles", jobProgressCounts(index+1, len(selectors))); err != nil {
 				return nil, err
 			}
@@ -133,7 +211,7 @@ func (r *MCPReader) syncUsers(ctx context.Context, selectors []parsedActorSelect
 		actor, _, readErr := profiles.GetUser(ctx, login)
 		if readErr != nil {
 			itemStatus, reason, message, retry := githubBatchError(readErr)
-			items[index] = map[string]any{"key": selector.key(), "status": itemStatus, "reason": reason, "message": message, "retry_after_ms": retry}
+			items[index] = failedActorProfileItem(selector.key(), itemStatus, reason, message, retry)
 			if err := report("profiles", jobProgressCounts(index+1, len(selectors))); err != nil {
 				return nil, err
 			}
@@ -149,17 +227,19 @@ func (r *MCPReader) syncUsers(ctx context.Context, selectors []parsedActorSelect
 		if persistErr != nil {
 			return nil, persistErr
 		}
-		items[index] = map[string]any{"key": selector.key(), "status": "complete", "actor_id": stored.Key, "login": stored.Login}
+		items[index] = successfulActorProfileItem(selector.key(), stored.Key, stored.Login)
 		complete++
 		if err := report("profiles", jobProgressCounts(index+1, len(selectors))); err != nil {
 			return nil, err
 		}
 	}
-	status := "complete"
+	status := batchOperationComplete
 	if complete != len(selectors) {
-		status = "partial"
+		status = batchOperationPartial
 	}
-	return map[string]any{"status": status, "items": items, "completed": complete, "total": len(selectors)}, nil
+	return &actorProfileBatchResult{batchOperationSummary: batchOperationSummary[actorProfileItem]{
+		Status: status, Items: items, Completed: complete, Total: len(selectors),
+	}}, nil
 }
 
 func normalizeActorKind(kind string) string {
@@ -173,6 +253,10 @@ func normalizeActorKind(kind string) string {
 
 // SearchActors is a local-only actor search.
 func (r *MCPReader) SearchActors(ctx context.Context, in mcpcontract.SearchActorsInput) (mcpcontract.SearchActorsOutput, error) {
+	request, err := corpus.ParseActorSearch(corpus.ActorSearchInput{Query: in.Query, Kinds: in.Kinds, Sort: in.Sort, Limit: in.Limit, Cursor: in.Cursor})
+	if err != nil {
+		return mcpcontract.SearchActorsOutput{}, err
+	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpcontract.SearchActorsOutput{}, err
@@ -181,7 +265,7 @@ func (r *MCPReader) SearchActors(ctx context.Context, in mcpcontract.SearchActor
 	if err != nil {
 		return mcpcontract.SearchActorsOutput{}, err
 	}
-	page, err := c.SearchActors(ctx, corpus.ActorSearchOptions{Query: in.Query, Kinds: in.Kinds, Sort: in.Sort, Limit: in.Limit, Cursor: in.Cursor})
+	page, err := c.SearchActors(ctx, request)
 	if err != nil {
 		return mcpcontract.SearchActorsOutput{}, err
 	}
@@ -210,14 +294,14 @@ func (r *MCPReader) GetActors(ctx context.Context, in mcpcontract.GetActorsInput
 	}
 	out := mcpcontract.GetActorsOutput{Items: make([]mcpcontract.ActorBatchItem[mcpcontract.ActorOutput], len(in.Actors)), SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
 	for index, ref := range in.Actors {
-		item := mcpcontract.ActorBatchItem[mcpcontract.ActorOutput]{Key: ref, Status: "complete"}
+		item := mcpcontract.ActorBatchItem[mcpcontract.ActorOutput]{Key: ref, Status: mcpcontract.BatchItemComplete}
 		actor, readErr := c.GetActor(ctx, ref)
 		if readErr != nil {
-			item.Status = "failed"
+			item.Status = mcpcontract.BatchItemFailed
 			item.Reason = "actor_read_failed"
 			item.Message = readErr.Error()
 		} else if actor == nil {
-			item.Status = "unavailable"
+			item.Status = mcpcontract.BatchItemUnavailable
 			item.Reason = "actor_not_indexed"
 			item.Message = "actor is not present in the local corpus"
 		} else {
@@ -256,17 +340,17 @@ func (r *MCPReader) GetActorFacets(ctx context.Context, in mcpcontract.GetActorF
 	}
 	out := mcpcontract.GetActorFacetsOutput{Items: make([]mcpcontract.ActorBatchItem[mcpcontract.ActorFacetReferenceOutput], len(in.Actors)), SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
 	for index, ref := range in.Actors {
-		item := mcpcontract.ActorBatchItem[mcpcontract.ActorFacetReferenceOutput]{Key: ref, Status: "complete"}
+		item := mcpcontract.ActorBatchItem[mcpcontract.ActorFacetReferenceOutput]{Key: ref, Status: mcpcontract.BatchItemComplete}
 		actor, readErr := c.GetActor(ctx, ref)
 		if readErr != nil {
-			item.Status = "failed"
+			item.Status = mcpcontract.BatchItemFailed
 			item.Reason = "actor_read_failed"
 			item.Message = readErr.Error()
 			out.Items[index] = item
 			continue
 		}
 		if actor == nil {
-			item.Status = "unavailable"
+			item.Status = mcpcontract.BatchItemUnavailable
 			item.Reason = "actor_not_indexed"
 			item.Message = "actor is not present in the local corpus"
 			out.Items[index] = item
@@ -280,7 +364,10 @@ func (r *MCPReader) GetActorFacets(ctx context.Context, in mcpcontract.GetActorF
 		for _, facet := range in.Facets {
 			coverage := mcpcontract.ActorCoverageOutput{Facet: facet, Status: "unknown", Reason: "facet_not_synchronized"}
 			if stored, ok := coverageByFacet[facet]; ok {
-				coverage.Status = map[bool]string{true: "complete", false: "truncated"}[stored.Complete]
+				coverage.Status = "truncated"
+				if stored.Complete {
+					coverage.Status = "complete"
+				}
 				coverage.ObservedAt = formatTime(stored.ObservedAt)
 				coverage.SourceUpdatedAt = formatTime(stored.SourceUpdatedAt)
 				coverage.AuthorizationScope = stored.AuthorizationScope
@@ -294,7 +381,7 @@ func (r *MCPReader) GetActorFacets(ctx context.Context, in mcpcontract.GetActorF
 			value.Facets = append(value.Facets, coverage)
 			value.URIs = append(value.URIs, "gitcontribute://actor/"+url.PathEscape(actor.Key)+"/facet/"+url.PathEscape(facet))
 			if coverage.Status != "complete" {
-				item.Status = "unavailable"
+				item.Status = mcpcontract.BatchItemUnavailable
 				item.Reason = "actor_facet_unknown"
 				item.Message = "one or more requested actor facets are not completely synchronized"
 			}
@@ -308,34 +395,53 @@ func (r *MCPReader) GetActorFacets(ctx context.Context, in mcpcontract.GetActorF
 	return out, nil
 }
 
-// ActorResource returns the canonical stored actor view without refreshing it.
-func (r *MCPReader) ActorResource(ctx context.Context, ref, facet string) (any, error) {
+// ActorProfileResource returns the canonical stored actor view without
+// refreshing it.
+func (r *MCPReader) ActorProfileResource(ctx context.Context, ref string) (mcpcontract.ActorOutput, error) {
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return nil, err
+		return mcpcontract.ActorOutput{}, err
 	}
 	actor, err := c.GetActor(ctx, ref)
 	if err != nil {
-		return nil, err
+		return mcpcontract.ActorOutput{}, err
 	}
 	if actor == nil {
-		return nil, mcpcontract.ErrNotFound
+		return mcpcontract.ActorOutput{}, mcpcontract.ErrNotFound
 	}
-	if facet == "" || facet == "profile" {
-		return actorOutput(*actor), nil
+	return actorOutput(*actor), nil
+}
+
+// ActorFacetResource returns one exact stored actor facet without refreshing
+// it or widening its value into an untyped Go representation.
+func (r *MCPReader) ActorFacetResource(ctx context.Context, ref, facet string) (mcpcontract.ActorFacetResource, error) {
+	c, err := r.openReadOnlyCorpus(ctx)
+	if err != nil {
+		return mcpcontract.ActorFacetResource{}, err
+	}
+	actor, err := c.GetActor(ctx, ref)
+	if err != nil {
+		return mcpcontract.ActorFacetResource{}, err
+	}
+	if actor == nil {
+		return mcpcontract.ActorFacetResource{}, mcpcontract.ErrNotFound
 	}
 	observation, err := c.GetActorFacetObservation(ctx, actor.ID, facet)
 	if err != nil {
-		return nil, err
+		return mcpcontract.ActorFacetResource{}, err
 	}
 	if observation == nil {
-		return nil, mcpcontract.ErrNotFound
+		return mcpcontract.ActorFacetResource{}, mcpcontract.ErrNotFound
 	}
-	var value any
-	if err := json.Unmarshal(observation.Payload, &value); err != nil {
-		value = string(observation.Payload)
+	value, err := mcpcontract.NewActorFacetResource(
+		actor.Key, facet, observation.Complete, formatTime(observation.ObservedAt),
+		formatTime(observation.SourceUpdatedAt), observation.AuthorizationScope,
+		observation.Payload,
+	)
+	if err != nil {
+		return mcpcontract.ActorFacetResource{}, fmt.Errorf("decode actor facet %s: %w", facet, err)
 	}
-	return map[string]any{"schema_version": "gitcontribute.actor-facet.v1", "actor_id": actor.Key, "facet": facet, "complete": observation.Complete, "observed_at": formatTime(observation.ObservedAt), "source_updated_at": formatTime(observation.SourceUpdatedAt), "authorization_scope": observation.AuthorizationScope, "value": value}, nil
+	return value, nil
 }
 
 func actorIdentityOutput(actor corpus.Actor) mcpcontract.ActorIdentityOutput {

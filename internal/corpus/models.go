@@ -3,6 +3,7 @@ package corpus
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -48,9 +49,9 @@ type RepositoryObservation struct {
 type Thread struct {
 	ID                  int64
 	RepositoryID        int64
-	Kind                string
+	Kind                domain.ThreadKind
 	Number              int
-	State               string
+	State               domain.ThreadState
 	StateReason         string
 	Title               string
 	Body                string
@@ -101,12 +102,6 @@ type PortfolioPage struct {
 	Total        int
 	Truncated    bool
 }
-
-// ThreadKind names the thread types stored by the corpus.
-const (
-	ThreadKindIssue       = "issue"
-	ThreadKindPullRequest = "pull_request"
-)
 
 // ThreadObservation is an immutable snapshot received from a source.
 type ThreadObservation struct {
@@ -207,14 +202,87 @@ func (s RunState) CompletedAt() (time.Time, bool) {
 	return s.completedAt, !s.completedAt.IsZero()
 }
 
+// JobStatus is a parsed durable job lifecycle value. The zero value means no
+// status filter; it is never a persisted job state.
+type JobStatus string
+
 // JobStatus values for the durable job lifecycle.
 const (
-	JobStatusQueued    = "queued"
-	JobStatusRunning   = "running"
-	JobStatusSucceeded = "succeeded"
-	JobStatusFailed    = "failed"
-	JobStatusCancelled = "cancelled"
+	JobStatusQueued    JobStatus = "queued"
+	JobStatusRunning   JobStatus = "running"
+	JobStatusSucceeded JobStatus = "succeeded"
+	JobStatusFailed    JobStatus = "failed"
+	JobStatusCancelled JobStatus = "cancelled"
 )
+
+// ParseJobStatus parses a persisted or boundary job status.
+func ParseJobStatus(value string) (JobStatus, error) {
+	status := JobStatus(strings.TrimSpace(value))
+	switch status {
+	case JobStatusQueued, JobStatusRunning, JobStatusSucceeded, JobStatusFailed, JobStatusCancelled:
+		return status, nil
+	default:
+		return "", fmt.Errorf("unknown job status %q", value)
+	}
+}
+
+// ParseJobStatusFilter parses an optional boundary filter. Its zero value
+// selects jobs in every status.
+func ParseJobStatusFilter(value string) (JobStatus, error) {
+	if strings.TrimSpace(value) == "" {
+		return "", nil
+	}
+	return ParseJobStatus(value)
+}
+
+// String returns the stable persisted and boundary spelling.
+func (s JobStatus) String() string { return string(s) }
+
+// Terminal reports whether no further lifecycle transition is valid.
+func (s JobStatus) Terminal() bool {
+	return s == JobStatusSucceeded || s == JobStatusFailed || s == JobStatusCancelled
+}
+
+// JobTransition is one structurally valid durable lifecycle transition.
+type JobTransition uint8
+
+// Valid transitions performed by TransitionJob. Queued-to-running is owned by
+// StartJobAs because it also claims an executor owner.
+const (
+	JobQueuedToCancelled JobTransition = iota + 1
+	JobQueuedToFailed
+	JobRunningToSucceeded
+	JobRunningToFailed
+	JobRunningToCancelled
+)
+
+// From returns the required current status, or the zero value for an invalid
+// transition representation.
+func (t JobTransition) From() JobStatus {
+	switch t {
+	case JobQueuedToCancelled, JobQueuedToFailed:
+		return JobStatusQueued
+	case JobRunningToSucceeded, JobRunningToFailed, JobRunningToCancelled:
+		return JobStatusRunning
+	default:
+		return ""
+	}
+}
+
+// To returns the terminal target status, or the zero value for an invalid
+// transition representation.
+func (t JobTransition) To() JobStatus {
+	switch t {
+	case JobQueuedToCancelled, JobRunningToCancelled:
+		return JobStatusCancelled
+	case JobQueuedToFailed, JobRunningToFailed:
+		return JobStatusFailed
+	case JobRunningToSucceeded:
+		return JobStatusSucceeded
+	default:
+		return ""
+	}
+}
 
 // Job is a durable, cancellable unit of work.
 type Job struct {
@@ -233,14 +301,18 @@ type Job struct {
 // JobState binds lifecycle timestamps and cancellation requests to the statuses
 // in which they are meaningful. Its zero value is invalid.
 type JobState struct {
-	status      string
+	status      JobStatus
 	startedAt   time.Time
 	completedAt time.Time
 	cancelledAt time.Time
 }
 
 func parseJobState(status string, startedAt, completedAt, cancelledAt *time.Time) (JobState, error) {
-	state := JobState{status: status}
+	parsed, err := ParseJobStatus(status)
+	if err != nil {
+		return JobState{}, err
+	}
+	state := JobState{status: parsed}
 	if startedAt != nil {
 		state.startedAt = *startedAt
 	}
@@ -250,7 +322,7 @@ func parseJobState(status string, startedAt, completedAt, cancelledAt *time.Time
 	if cancelledAt != nil {
 		state.cancelledAt = *cancelledAt
 	}
-	switch status {
+	switch parsed {
 	case JobStatusQueued:
 		if startedAt != nil || completedAt != nil || cancelledAt != nil {
 			return JobState{}, errors.New("queued job cannot have lifecycle timestamps")
@@ -264,22 +336,20 @@ func parseJobState(status string, startedAt, completedAt, cancelledAt *time.Time
 		}
 	case JobStatusSucceeded, JobStatusFailed:
 		if completedAt == nil || completedAt.IsZero() {
-			return JobState{}, fmt.Errorf("%s job requires a completion time", status)
+			return JobState{}, fmt.Errorf("%s job requires a completion time", parsed)
 		}
 		if cancelledAt != nil {
-			return JobState{}, fmt.Errorf("%s job cannot have a cancellation time", status)
+			return JobState{}, fmt.Errorf("%s job cannot have a cancellation time", parsed)
 		}
 	case JobStatusCancelled:
 		if completedAt == nil || completedAt.IsZero() || cancelledAt == nil || cancelledAt.IsZero() {
 			return JobState{}, errors.New("cancelled job requires completion and cancellation times")
 		}
-	default:
-		return JobState{}, fmt.Errorf("unknown job status %q", status)
 	}
 	return state, nil
 }
 
-func (s JobState) Status() string { return s.status }
+func (s JobState) Status() JobStatus { return s.status }
 
 func (s JobState) StartedAt() (time.Time, bool) { return s.startedAt, !s.startedAt.IsZero() }
 

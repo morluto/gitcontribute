@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
@@ -20,6 +21,7 @@ type preflightReader struct {
 	related       github.ThreadSearchResult
 	details       map[int]github.PullRequestDetails
 	searchOptions github.AuthoredPullRequestSearchOptions
+	threadSearch  github.ThreadSearchOptions
 }
 
 func (r *preflightReader) GetRepository(_ context.Context, owner, repo string) (github.Repository, github.RateInfo, error) {
@@ -65,7 +67,8 @@ func (r *preflightReader) SearchAuthoredPullRequests(_ context.Context, opts git
 	return r.authored, nil
 }
 
-func (r *preflightReader) SearchThreads(context.Context, github.ThreadSearchOptions) (github.ThreadSearchResult, error) {
+func (r *preflightReader) SearchThreads(_ context.Context, opts github.ThreadSearchOptions) (github.ThreadSearchResult, error) {
+	r.threadSearch = opts
 	return r.related, nil
 }
 
@@ -95,12 +98,12 @@ func TestPreflightContributionRoutesExistingAuthoredPRAndLocalWorktree(t *testin
 
 	reader := &preflightReader{
 		authored: github.AuthoredPullRequestSearchResult{Items: []github.Issue{{
-			RepositoryOwner: "fla-org", RepositoryName: "flash-linear-attention", Kind: github.ThreadKindPullRequest,
+			RepositoryOwner: "fla-org", RepositoryName: "flash-linear-attention", Kind: domain.PullRequestKind,
 			Number: 1088, Title: "Fix n01 mask cu seqlens v2", Author: "morluto",
 		}}, Total: 1},
 		related: github.ThreadSearchResult{Items: []github.Issue{
-			{RepositoryOwner: "fla-org", RepositoryName: "flash-linear-attention", Kind: github.ThreadKindIssue, Number: 1086, Title: "Fix n01 mask cu seqlens v2"},
-			{RepositoryOwner: "fla-org", RepositoryName: "flash-linear-attention", Kind: github.ThreadKindPullRequest, Number: 1088, Title: "Fix n01 mask cu seqlens v2"},
+			{RepositoryOwner: "fla-org", RepositoryName: "flash-linear-attention", Kind: domain.IssueKind, Number: 1086, Title: "Fix n01 mask cu seqlens v2"},
+			{RepositoryOwner: "fla-org", RepositoryName: "flash-linear-attention", Kind: domain.PullRequestKind, Number: 1088, Title: "Fix n01 mask cu seqlens v2"},
 		}, Total: 2},
 		details: map[int]github.PullRequestDetails{1088: {
 			Number: 1088, HeadRef: "fix/n01-mask-cu-seqlens-v2", HeadSHA: headSHA,
@@ -189,6 +192,29 @@ func TestPreflightContributionReturnsNewWorkOnlyAfterLiveNegativeChecks(t *testi
 	}
 	if out.Status != "new_work" || out.Coverage != "live_verified" || out.NextAction != "create_local_work" {
 		t.Fatalf("negative preflight = %+v", out)
+	}
+}
+
+func TestPreflightContributionCanonicalizesCandidateBeforeLiveReads(t *testing.T) {
+	t.Parallel()
+	svc := newSearchTestService(t)
+	reader := &preflightReader{}
+	svc.SetGitHubReader(reader)
+	out, err := (&MCPReader{svc}).PreflightContribution(context.Background(), mcpcontract.ContributionPreflightInput{
+		Repository: mcpcontract.RepositoryRef{Owner: "fla-org", Repo: "flash-linear-attention"},
+		Fork:       &mcpcontract.RepositoryRef{Owner: "morluto", Repo: "flash-linear-attention"},
+		Candidate: mcpcontract.ContributionPreflightCandidate{
+			Query: "  focused duplicate search  ", HeadRef: "  fix/candidate  ", HeadSHA: "  abc123  ",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reader.threadSearch.Query != "focused duplicate search" {
+		t.Fatalf("related-thread query = %q", reader.threadSearch.Query)
+	}
+	if out.ForkFreshness == nil || out.ForkFreshness.ContributionBranch != "fix/candidate" || out.ForkFreshness.ContributionSHA != "abc123" {
+		t.Fatalf("fork contribution identity = %+v", out.ForkFreshness)
 	}
 }
 

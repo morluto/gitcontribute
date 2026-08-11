@@ -9,12 +9,12 @@ import (
 )
 
 func TestTokensNormalizeAndFilterStopWords(t *testing.T) {
-	got := similarity.Tokens("Hello, World! 123", true)
+	got := similarity.Tokens("Hello, World! 123")
 	want := []string{"123", "hello", "world"}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Fatalf("tokens mismatch (-want +got):\n%s", diff)
 	}
-	for _, token := range similarity.Tokens("the quick brown fox", true) {
+	for _, token := range similarity.Tokens("the quick brown fox") {
 		if token == "the" {
 			t.Fatal("stop word found in tokens")
 		}

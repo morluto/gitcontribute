@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 func TestSearchThreadsPreservesProviderQueryFiltersPaginationAndRate(t *testing.T) {
@@ -41,7 +43,7 @@ func TestSearchThreadsPreservesProviderQueryFiltersPaginationAndRate(t *testing.
 
 	client := newTestClient(t, srv, StaticTokenSource(""))
 	result, err := client.SearchThreads(context.Background(), ThreadSearchOptions{
-		Owner: testOwner, Repo: testRepo, Query: "needle", Kind: ThreadKindPullRequest, State: "open", Sort: "updated", Order: "asc",
+		Owner: testOwner, Repo: testRepo, Query: "needle", Kind: domain.PullRequestKind, State: "open", Sort: "updated", Order: "asc",
 		PageOptions: PageOptions{Page: 2, PerPage: 3},
 	})
 	if err != nil {
@@ -50,7 +52,7 @@ func TestSearchThreadsPreservesProviderQueryFiltersPaginationAndRate(t *testing.
 	if result.Total != 12 || !result.Incomplete || !result.Page.HasNext || result.Page.NextPage != 3 || len(result.Items) != 1 {
 		t.Fatalf("result = %+v", result)
 	}
-	if result.Items[0].Kind != ThreadKindPullRequest || result.Items[0].RepositoryOwner != testOwner || result.Items[0].RepositoryName != testRepo {
+	if result.Items[0].Kind != domain.PullRequestKind || result.Items[0].RepositoryOwner != testOwner || result.Items[0].RepositoryName != testRepo {
 		t.Fatalf("item = %+v", result.Items[0])
 	}
 	if result.Rate.Limit != 5000 || result.Rate.Remaining != 4999 {

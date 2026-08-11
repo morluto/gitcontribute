@@ -29,7 +29,7 @@ func TestManagerAdoptExternalWorktreeWithoutMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ws.Ownership != OwnershipExternal || ws.BaseSHA != baseSHA || ws.CandidateSHA != candidateSHA || !ws.Dirty || !ws.HasUntracked {
+	if ws.Ownership != OwnershipExternal || ws.BaseSHA != baseSHA || ws.CandidateSHA != candidateSHA || !ws.Dirty() || !ws.HasUntracked() {
 		t.Fatalf("unexpected adopted workspace: %+v", ws)
 	}
 	if err := mgr.ValidateWorkspace(ctx, ws); err != nil {

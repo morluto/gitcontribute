@@ -7,6 +7,21 @@ import (
 	"github.com/morluto/gitcontribute/internal/evidence"
 )
 
+// OpportunityUpdateConstraint selects the evidence predicate that must still
+// hold when an optimistic opportunity update is serialized.
+type OpportunityUpdateConstraint uint8
+
+const (
+	OpportunityUpdateUnconditional OpportunityUpdateConstraint = iota
+	OpportunityUpdateWithoutContradictingEvidence
+)
+
+// BlocksContradictingEvidence reports whether the serialized update must fail
+// when contradicting evidence exists.
+func (c OpportunityUpdateConstraint) BlocksContradictingEvidence() bool {
+	return c == OpportunityUpdateWithoutContradictingEvidence
+}
+
 // Repository is a narrow persistence boundary for investigations, hypotheses,
 // and opportunities. Concrete stores live outside this package.
 type Repository interface {
@@ -19,7 +34,7 @@ type Repository interface {
 	GetHypothesis(ctx context.Context, id string) (*Hypothesis, error)
 	ListHypotheses(ctx context.Context, investigationID string) ([]*Hypothesis, error)
 	SaveOpportunity(ctx context.Context, o *Opportunity) error
-	UpdateOpportunity(ctx context.Context, previous, next *Opportunity, blockContradicting bool) error
+	UpdateOpportunity(ctx context.Context, previous, next *Opportunity, constraint OpportunityUpdateConstraint) error
 	PromoteHypothesisWithEvidence(ctx context.Context, h *Hypothesis, o *Opportunity, e *evidence.Evidence) error
 	GetOpportunity(ctx context.Context, id string) (*Opportunity, error)
 	ListOpportunities(ctx context.Context, investigationID string) ([]*Opportunity, error)

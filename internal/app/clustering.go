@@ -29,7 +29,7 @@ func (s *Service) ListClusters(ctx context.Context, repo contracts.RepoRef, limi
 	if err != nil {
 		return nil, err
 	}
-	projection, err := c.ListClusterProjection(ctx, ref, clustering.ClusterState(""), limit)
+	projection, err := c.ListClusterProjection(ctx, ref, "", limit)
 	if err != nil {
 		return nil, fmt.Errorf("list clusters: %w", err)
 	}
@@ -163,12 +163,12 @@ func clusterToCLI(cl clustering.Cluster, memberLimit int) *contracts.ClusterResu
 				break
 			}
 			members = append(members, contracts.ClusterMember{
-				Kind:     m.Ref.Kind,
+				Kind:     string(m.Ref.Kind),
 				Owner:    m.Ref.Owner,
 				Repo:     m.Ref.Repo,
 				Number:   m.Ref.Number,
 				Title:    m.Title,
-				State:    m.State,
+				State:    string(m.State),
 				Score:    m.Score,
 				Reason:   m.Reason,
 				Included: m.Included,
@@ -178,7 +178,7 @@ func clusterToCLI(cl clustering.Cluster, memberLimit int) *contracts.ClusterResu
 	return &contracts.ClusterResult{
 		StableID:    cl.StableID,
 		State:       string(cl.State),
-		Canonical:   contracts.ClusterMember{Kind: cl.Canonical.Kind, Owner: cl.Canonical.Owner, Repo: cl.Canonical.Repo, Number: cl.Canonical.Number},
+		Canonical:   contracts.ClusterMember{Kind: string(cl.Canonical.Kind), Owner: cl.Canonical.Owner, Repo: cl.Canonical.Repo, Number: cl.Canonical.Number},
 		MemberCount: len(cl.Members),
 		Members:     members,
 	}

@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 type ActorSocialAccount struct{ Provider, URL, DisplayName string }
@@ -28,7 +28,7 @@ type ActorContributionDay struct {
 	Level string
 }
 type ActorContributionItem struct {
-	Kind                    string
+	Kind                    domain.ContributionKind
 	OccurredAt              time.Time
 	RepositoryID            *int64
 	TargetNodeID, TargetURL string
@@ -37,7 +37,7 @@ type ActorContributionItem struct {
 }
 type ActorRepositoryContributionTotal struct {
 	RepositoryID int64
-	Kind         string
+	Kind         domain.ContributionKind
 	Count        int
 }
 type ActorContributionPeriodInput struct {
@@ -147,6 +147,11 @@ func (c *Corpus) ApplyActorContributionPeriod(ctx context.Context, input ActorCo
 	if len(payload) == 0 {
 		payload = []byte(`{}`)
 	}
+	var err error
+	payload, err = parseJSONPayload("actor contribution observation", payload)
+	if err != nil {
+		return err
+	}
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -191,12 +196,20 @@ func (c *Corpus) ApplyActorContributionPeriod(ctx context.Context, input ActorCo
 		}
 	}
 	for _, item := range input.Items {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO actor_contribution_items(period_id,contribution_kind,occurred_at,repository_id,target_node_id,target_url,restricted,count) VALUES(?,?,?,?,?,?,?,?)`, periodID, item.Kind, encodeTime(item.OccurredAt), item.RepositoryID, item.TargetNodeID, item.TargetURL, boolToInt(item.Restricted), item.Count); err != nil {
+		kind, err := domain.ParseContributionKind(item.Kind.String())
+		if err != nil {
+			return fmt.Errorf("parse contribution item kind: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO actor_contribution_items(period_id,contribution_kind,occurred_at,repository_id,target_node_id,target_url,restricted,count) VALUES(?,?,?,?,?,?,?,?)`, periodID, kind.String(), encodeTime(item.OccurredAt), item.RepositoryID, item.TargetNodeID, item.TargetURL, boolToInt(item.Restricted), item.Count); err != nil {
 			return err
 		}
 	}
 	for _, total := range input.RepositoryTotals {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO actor_repository_contribution_totals(period_id,repository_id,contribution_kind,contribution_count) VALUES(?,?,?,?)`, periodID, total.RepositoryID, total.Kind, total.Count); err != nil {
+		kind, err := domain.ParseContributionKind(total.Kind.String())
+		if err != nil {
+			return fmt.Errorf("parse repository contribution total kind: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO actor_repository_contribution_totals(period_id,repository_id,contribution_kind,contribution_count) VALUES(?,?,?,?)`, periodID, total.RepositoryID, kind.String(), total.Count); err != nil {
 			return err
 		}
 	}
@@ -212,6 +225,11 @@ func (c *Corpus) applyActorFacetSet(ctx context.Context, actorID int64, facet st
 	}
 	if len(raw) == 0 {
 		raw = []byte(`{}`)
+	}
+	var err error
+	raw, err = parseJSONPayload("actor facet observation", raw)
+	if err != nil {
+		return err
 	}
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -243,18 +261,9 @@ func orderingNewer(source, sequence, currentSource, currentSequence int64) bool 
 	return source > currentSource || (source == currentSource && sequence > currentSequence)
 }
 
-type ContributionSearchOptions struct {
-	ActorRefs          []string
-	RepositoryRefs     []string
-	Kinds              []string
-	OrganizationNodeID string
-	From, To           time.Time
-	Sort, Order        string
-	Limit              int
-	Cursor             string
-}
 type ContributionSearchItem struct {
-	ActorKey, Login, Kind                  string
+	ActorKey, Login                        string
+	Kind                                   domain.ContributionKind
 	OccurredAt                             time.Time
 	RepositoryRef, TargetNodeID, TargetURL string
 	Restricted                             bool
@@ -266,79 +275,61 @@ type ContributionSearchPage struct {
 	NextCursor string
 }
 
-func (c *Corpus) SearchActorContributions(ctx context.Context, opts ContributionSearchOptions) (ContributionSearchPage, error) {
-	if opts.Limit == 0 {
-		opts.Limit = 20
-	}
-	if opts.Limit < 1 || opts.Limit > 100 {
-		return ContributionSearchPage{}, errors.New("contribution search limit must be 1 to 100")
-	}
-	if opts.Sort == "" {
-		opts.Sort = "occurred_at"
-	}
-	if opts.Order == "" {
-		opts.Order = "desc"
-	}
-	if opts.Sort != "occurred_at" && opts.Sort != "repository" && opts.Sort != "type" {
-		return ContributionSearchPage{}, errors.New("unsupported contribution sort")
-	}
-	if opts.Order != "asc" && opts.Order != "desc" {
-		return ContributionSearchPage{}, errors.New("contribution order must be asc or desc")
-	}
+func (c *Corpus) SearchActorContributions(ctx context.Context, request ContributionSearchRequest) (ContributionSearchPage, error) {
 	offset := 0
-	if opts.Cursor != "" {
-		cursor, err := decodeCursor(opts.Cursor)
-		if err != nil || cursor.Scope != "actor_contributions" || cursor.Filter != contributionFilterKey(opts) {
+	if request.page.Cursor() != "" {
+		cursor, err := decodeCursor(request.page.Cursor())
+		if err != nil || cursor.Scope != "actor_contributions" || cursor.Filter != request.filterKey() {
 			return ContributionSearchPage{}, errors.New("invalid contribution cursor")
 		}
 		offset = int(cursor.ID)
 	}
 	where := " WHERE p.organization_node_id=?"
-	args := []any{opts.OrganizationNodeID}
-	if len(opts.ActorRefs) > 0 {
-		placeholders := make([]string, len(opts.ActorRefs))
-		for i := range opts.ActorRefs {
+	args := []any{request.organizationNodeID}
+	if len(request.actorRefs) > 0 {
+		placeholders := make([]string, len(request.actorRefs))
+		for i := range request.actorRefs {
 			placeholders[i] = "?"
 		}
 		where += ` AND (a.actor_key IN (` + strings.Join(placeholders, ",") + `) OR a.node_id IN (` + strings.Join(placeholders, ",") + `) OR a.id IN (SELECT actor_id FROM actor_aliases WHERE active=1 AND normalized_login IN (` + strings.Join(placeholders, ",") + `)))`
-		for _, ref := range opts.ActorRefs {
-			args = append(args, strings.TrimSpace(ref))
+		for _, ref := range request.actorRefs {
+			args = append(args, ref.String())
 		}
-		for _, ref := range opts.ActorRefs {
-			args = append(args, strings.TrimSpace(ref))
+		for _, ref := range request.actorRefs {
+			args = append(args, ref.String())
 		}
-		for _, ref := range opts.ActorRefs {
-			args = append(args, normalizeLogin(ref))
+		for _, ref := range request.actorRefs {
+			args = append(args, normalizeLogin(ref.String()))
 		}
 	}
-	if len(opts.Kinds) > 0 {
-		p := make([]string, len(opts.Kinds))
-		for i, kind := range opts.Kinds {
+	if len(request.kinds) > 0 {
+		p := make([]string, len(request.kinds))
+		for i, kind := range request.kinds {
 			p[i] = "?"
-			args = append(args, kind)
+			args = append(args, kind.String())
 		}
 		where += ` AND i.contribution_kind IN (` + strings.Join(p, ",") + `)`
 	}
-	if len(opts.RepositoryRefs) > 0 {
-		p := make([]string, len(opts.RepositoryRefs))
-		for i, ref := range opts.RepositoryRefs {
+	if len(request.repositories) > 0 {
+		p := make([]string, len(request.repositories))
+		for i, ref := range request.repositories {
 			p[i] = "?"
-			args = append(args, strings.ToLower(strings.TrimSpace(ref)))
+			args = append(args, strings.ToLower(ref.String()))
 		}
 		where += ` AND lower(COALESCE(r.owner||'/'||r.name,'')) IN (` + strings.Join(p, ",") + `)`
 	}
-	if !opts.From.IsZero() {
+	if !request.from.IsZero() {
 		where += ` AND i.occurred_at>=?`
-		args = append(args, encodeTime(opts.From))
+		args = append(args, encodeTime(request.from))
 	}
-	if !opts.To.IsZero() {
+	if !request.to.IsZero() {
 		where += ` AND i.occurred_at<?`
-		args = append(args, encodeTime(opts.To))
+		args = append(args, encodeTime(request.to))
 	}
-	orderExpr := map[string]string{"occurred_at": "occurred_at", "repository": "repository_ref", "type": "contribution_kind"}[opts.Sort] + " " + strings.ToUpper(opts.Order) + ", actor_key, contribution_kind, repository_ref, target_node_id, target_url, restricted, contribution_count"
+	orderExpr := request.sort.expression() + " " + request.order.sqlDirection() + ", actor_key, contribution_kind, repository_ref, target_node_id, target_url, restricted, contribution_count"
 	base := ` FROM actor_contribution_items i JOIN actor_contribution_periods p ON p.id=i.period_id JOIN actors a ON a.id=p.actor_id LEFT JOIN repositories r ON r.id=i.repository_id` + where
 	projection := `SELECT DISTINCT a.actor_key AS actor_key,a.current_login AS current_login,i.contribution_kind AS contribution_kind,i.occurred_at AS occurred_at,COALESCE(r.owner||'/'||r.name,'') AS repository_ref,i.target_node_id AS target_node_id,i.target_url AS target_url,i.restricted AS restricted,i.count AS contribution_count` + base
-	rows, err := c.db.QueryContext(ctx, `SELECT actor_key,current_login,contribution_kind,occurred_at,repository_ref,target_node_id,target_url,restricted,contribution_count FROM (`+projection+`) ORDER BY `+orderExpr+` LIMIT ? OFFSET ?`, append(args, opts.Limit+1, offset)...)
+	rows, err := c.db.QueryContext(ctx, `SELECT actor_key,current_login,contribution_kind,occurred_at,repository_ref,target_node_id,target_url,restricted,contribution_count FROM (`+projection+`) ORDER BY `+orderExpr+` LIMIT ? OFFSET ?`, append(args, request.page.Limit()+1, offset)...)
 	if err != nil {
 		return ContributionSearchPage{}, err
 	}
@@ -346,38 +337,28 @@ func (c *Corpus) SearchActorContributions(ctx context.Context, opts Contribution
 	page := ContributionSearchPage{}
 	for rows.Next() {
 		var item ContributionSearchItem
+		var kind string
 		var occurred int64
-		if err := rows.Scan(&item.ActorKey, &item.Login, &item.Kind, &occurred, &item.RepositoryRef, &item.TargetNodeID, &item.TargetURL, &item.Restricted, &item.Count); err != nil {
+		if err := rows.Scan(&item.ActorKey, &item.Login, &kind, &occurred, &item.RepositoryRef, &item.TargetNodeID, &item.TargetURL, &item.Restricted, &item.Count); err != nil {
 			return page, err
 		}
+		parsedKind, err := domain.ParseContributionKind(kind)
+		if err != nil {
+			return page, fmt.Errorf("parse stored contribution kind: %w", err)
+		}
+		item.Kind = parsedKind
 		item.OccurredAt = scanTime(occurred)
 		page.Items = append(page.Items, item)
 	}
 	if err := rows.Err(); err != nil {
 		return page, err
 	}
-	if len(page.Items) > opts.Limit {
-		page.Items = page.Items[:opts.Limit]
-		page.NextCursor = encodeCursor(searchCursor{Scope: "actor_contributions", Filter: contributionFilterKey(opts), ID: int64(offset + opts.Limit)})
+	if len(page.Items) > request.page.Limit() {
+		page.Items = page.Items[:request.page.Limit()]
+		page.NextCursor = encodeCursor(searchCursor{Scope: "actor_contributions", Filter: request.filterKey(), ID: int64(offset + request.page.Limit())})
 	}
 	if err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+projection+`)`, args...).Scan(&page.Total); err != nil {
 		return page, err
 	}
 	return page, nil
-}
-
-func contributionFilterKey(opts ContributionSearchOptions) string {
-	actors := append([]string(nil), opts.ActorRefs...)
-	repositories := append([]string(nil), opts.RepositoryRefs...)
-	kinds := append([]string(nil), opts.Kinds...)
-	for i := range actors {
-		actors[i] = normalizeLogin(actors[i])
-	}
-	for i := range repositories {
-		repositories[i] = strings.ToLower(strings.TrimSpace(repositories[i]))
-	}
-	slices.Sort(actors)
-	slices.Sort(repositories)
-	slices.Sort(kinds)
-	return strings.Join([]string{opts.Sort, opts.Order, opts.OrganizationNodeID, strings.Join(actors, ","), strings.Join(repositories, ","), strings.Join(kinds, ","), strconv.FormatInt(encodeTime(opts.From), 10), strconv.FormatInt(encodeTime(opts.To), 10)}, "|")
 }

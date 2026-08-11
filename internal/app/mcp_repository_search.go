@@ -12,14 +12,86 @@ import (
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
+type repositorySearchSort uint8
+
+const (
+	repositorySearchBestMatch repositorySearchSort = iota
+	repositorySearchStars
+	repositorySearchForks
+	repositorySearchHelpWanted
+	repositorySearchUpdated
+)
+
+func parseRepositorySearchSort(value string) (repositorySearchSort, error) {
+	switch strings.TrimSpace(value) {
+	case "":
+		return repositorySearchBestMatch, nil
+	case "stars":
+		return repositorySearchStars, nil
+	case "forks":
+		return repositorySearchForks, nil
+	case "help-wanted-issues":
+		return repositorySearchHelpWanted, nil
+	case "updated":
+		return repositorySearchUpdated, nil
+	default:
+		return 0, errors.New("unsupported repository search sort")
+	}
+}
+
+func (s repositorySearchSort) String() string {
+	return [...]string{"", "stars", "forks", "help-wanted-issues", "updated"}[s]
+}
+
+type githubRepositorySearchRequest struct {
+	query          string
+	interpretation string
+	warnings       []mcpcontract.SearchWarning
+	sort           repositorySearchSort
+	order          githubSearchOrder
+	page           githubSearchPage
+	format         responseFormat
+}
+
+func parseRepositorySearchInput(in mcpcontract.SearchGitHubRepositoriesInput) (githubRepositorySearchRequest, error) {
+	query, interpretation, warnings, err := compileRepositorySearch(in)
+	if err != nil {
+		return githubRepositorySearchRequest{}, err
+	}
+	page, pageProblem := parseGitHubSearchPage(in.Limit, in.Page)
+	if pageProblem == githubSearchLimitInvalid {
+		return githubRepositorySearchRequest{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
+	}
+	sortMode, err := parseRepositorySearchSort(in.Sort)
+	if err != nil {
+		return githubRepositorySearchRequest{}, mcpcontract.InvalidArgument("sort", "must be stars, forks, help-wanted-issues, or updated", map[string]any{"sort": "stars"})
+	}
+	order, err := parseGitHubSearchOrder(in.Order, githubSearchOrderUnspecified)
+	if err != nil {
+		return githubRepositorySearchRequest{}, mcpcontract.InvalidArgument("order", "must be asc or desc", map[string]any{"order": "desc"})
+	}
+	if pageProblem == githubSearchPageInvalid {
+		limit := in.Limit
+		if limit == 0 {
+			limit = 20
+		}
+		return githubRepositorySearchRequest{}, mcpcontract.InvalidArgument("page", "must keep the requested result offset below GitHub's 1,000-result cap", map[string]any{"page": 1, "limit": limit})
+	}
+	format, err := parseResponseFormat(in.ResponseFormat)
+	if err != nil {
+		return githubRepositorySearchRequest{}, mcpcontract.InvalidArgument("response_format", "must be concise or detailed; use concise for discovery and detailed for finalist inspection", map[string]any{"response_format": "concise"})
+	}
+	return githubRepositorySearchRequest{
+		query: query, interpretation: interpretation, warnings: append([]mcpcontract.SearchWarning(nil), warnings...),
+		sort: sortMode, order: order, page: page, format: format,
+	}, nil
+}
+
 // SearchGitHubRepositories performs one bounded live repository search and
 // persists the returned metadata observations without fetching thread data.
 func (r *MCPReader) SearchGitHubRepositories(ctx context.Context, in mcpcontract.SearchGitHubRepositoriesInput) (mcpcontract.SearchGitHubRepositoriesOutput, error) {
-	query, interpretation, warnings, err := compileRepositorySearch(in)
+	request, err := parseRepositorySearchInput(in)
 	if err != nil {
-		return mcpcontract.SearchGitHubRepositoriesOutput{}, err
-	}
-	if err := normalizeRepositorySearchPage(&in); err != nil {
 		return mcpcontract.SearchGitHubRepositoriesOutput{}, err
 	}
 	reader, err := r.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
@@ -30,47 +102,22 @@ func (r *MCPReader) SearchGitHubRepositories(ctx context.Context, in mcpcontract
 	if !ok {
 		return mcpcontract.SearchGitHubRepositoriesOutput{}, errors.New("configured GitHub reader does not support repository search")
 	}
-	result, err := searcher.SearchRepositories(ctx, github.RepositorySearchOptions{Query: query, Sort: in.Sort, Order: in.Order, PageOptions: github.PageOptions{Page: in.Page, PerPage: in.Limit}})
+	result, err := searcher.SearchRepositories(ctx, github.RepositorySearchOptions{
+		Query: request.query, Sort: request.sort.String(), Order: request.order.String(),
+		PageOptions: github.PageOptions{Page: request.page.number, PerPage: request.page.limit},
+	})
 	if err != nil {
 		return mcpcontract.SearchGitHubRepositoriesOutput{}, err
 	}
-	return r.persistRepositorySearch(ctx, in, query, interpretation, warnings, result)
+	return r.persistRepositorySearch(ctx, request, result)
 }
 
-func normalizeRepositorySearchPage(in *mcpcontract.SearchGitHubRepositoriesInput) error {
-	if in.Limit == 0 {
-		in.Limit = 20
-	}
-	if in.Limit < 1 || in.Limit > 100 {
-		return mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
-	}
-	if in.Sort != "" && in.Sort != "stars" && in.Sort != "forks" && in.Sort != "help-wanted-issues" && in.Sort != "updated" {
-		return mcpcontract.InvalidArgument("sort", "must be stars, forks, help-wanted-issues, or updated", map[string]any{"sort": "stars"})
-	}
-	if in.Order != "" && in.Order != "asc" && in.Order != "desc" {
-		return mcpcontract.InvalidArgument("order", "must be asc or desc", map[string]any{"order": "desc"})
-	}
-	if in.Page == 0 {
-		in.Page = 1
-	}
-	if in.Page < 1 || in.Page > 1000 || (in.Page-1)*in.Limit >= 1000 {
-		return mcpcontract.InvalidArgument("page", "must keep the requested result offset below GitHub's 1,000-result cap", map[string]any{"page": 1, "limit": in.Limit})
-	}
-	if in.ResponseFormat == "" {
-		in.ResponseFormat = "concise"
-	}
-	if in.ResponseFormat != "concise" && in.ResponseFormat != "detailed" {
-		return mcpcontract.InvalidArgument("response_format", "must be concise or detailed; use concise for discovery and detailed for finalist inspection", map[string]any{"response_format": "concise"})
-	}
-	return nil
-}
-
-func (r *MCPReader) persistRepositorySearch(ctx context.Context, in mcpcontract.SearchGitHubRepositoriesInput, query, interpretation string, warnings []mcpcontract.SearchWarning, result github.RepositorySearchResult) (mcpcontract.SearchGitHubRepositoriesOutput, error) {
+func (r *MCPReader) persistRepositorySearch(ctx context.Context, request githubRepositorySearchRequest, result github.RepositorySearchResult) (mcpcontract.SearchGitHubRepositoriesOutput, error) {
 	c, err := r.openCorpus(ctx)
 	if err != nil {
 		return mcpcontract.SearchGitHubRepositoriesOutput{}, err
 	}
-	out := repositorySearchOutput(in, query, interpretation, warnings, result)
+	out := repositorySearchOutput(request, result)
 	observedAt := r.now()
 	repositoryIDs := make([]int64, 0, len(result.Items))
 	for i, remote := range result.Items {
@@ -87,7 +134,7 @@ func (r *MCPReader) persistRepositorySearch(ctx context.Context, in mcpcontract.
 		}
 		repositoryIDs = append(repositoryIDs, stored.ID)
 		metadata := mcpcontract.RepositoryMetadataOutput{Status: "complete", ObservedAt: formatTime(observedAt), SourceUpdatedAt: formatTime(remote.UpdatedAt)}
-		value := liveRepositorySearchMatch(remote, metadata, in.ResponseFormat)
+		value := liveRepositorySearchMatch(remote, metadata, request.format)
 		value.DossierStatus = "missing"
 		out.Items[i] = mcpcontract.BatchItem[mcpcontract.RepositorySearchMatch]{Key: remote.Owner + "/" + remote.Name, Status: "complete", Value: &value}
 	}
@@ -105,12 +152,12 @@ func (r *MCPReader) persistRepositorySearch(ctx context.Context, in mcpcontract.
 	return out, nil
 }
 
-func repositorySearchOutput(in mcpcontract.SearchGitHubRepositoriesInput, query, interpretation string, warnings []mcpcontract.SearchWarning, result github.RepositorySearchResult) mcpcontract.SearchGitHubRepositoriesOutput {
-	out := mcpcontract.SearchGitHubRepositoriesOutput{Status: "complete", Query: query, Interpretation: interpretation, ResponseFormat: in.ResponseFormat, Page: in.Page, Total: result.Total, Incomplete: result.Incomplete, Warnings: warnings, Items: make([]mcpcontract.BatchItem[mcpcontract.RepositorySearchMatch], len(result.Items))}
+func repositorySearchOutput(request githubRepositorySearchRequest, result github.RepositorySearchResult) mcpcontract.SearchGitHubRepositoriesOutput {
+	out := mcpcontract.SearchGitHubRepositoriesOutput{Status: "complete", Query: request.query, Interpretation: request.interpretation, ResponseFormat: request.format.String(), Page: request.page.number, Total: result.Total, Incomplete: result.Incomplete, Warnings: append([]mcpcontract.SearchWarning(nil), request.warnings...), Items: make([]mcpcontract.BatchItem[mcpcontract.RepositorySearchMatch], len(result.Items))}
 	if result.Page.HasNext {
 		out.NextPage = result.Page.NextPage
-	} else if in.Page*in.Limit < result.Total && in.Page*in.Limit < 1000 {
-		out.NextPage = in.Page + 1
+	} else if request.page.number*request.page.limit < result.Total && request.page.number*request.page.limit < 1000 {
+		out.NextPage = request.page.number + 1
 	}
 	if result.Incomplete {
 		out.Status = "partial"
@@ -140,12 +187,12 @@ func addRepositorySearchAction(out *mcpcontract.SearchGitHubRepositoriesOutput, 
 	}}
 }
 
-func liveRepositorySearchMatch(remote github.Repository, metadata mcpcontract.RepositoryMetadataOutput, format string) mcpcontract.RepositorySearchMatch {
+func liveRepositorySearchMatch(remote github.Repository, metadata mcpcontract.RepositoryMetadataOutput, format responseFormat) mcpcontract.RepositorySearchMatch {
 	match := mcpcontract.RepositorySearchMatch{Ref: "repository:" + remote.Owner + "/" + remote.Name, Owner: remote.Owner, Repo: remote.Name, Description: ptr(remote.Description), Language: ptr(remote.Language), Stars: ptr(remote.Stars), Metadata: metadata}
 	if remote.PushedAt != nil {
 		match.PushedAt = formatTime(*remote.PushedAt)
 	}
-	if format == "detailed" {
+	if format.includesDetails() {
 		match.DefaultBranch = ptr(remote.DefaultBranch)
 		match.License = ptr(remote.License)
 		match.Topics = append([]string(nil), remote.Topics...)
@@ -159,33 +206,23 @@ func liveRepositorySearchMatch(remote github.Repository, metadata mcpcontract.Re
 }
 
 func compileRepositorySearch(in mcpcontract.SearchGitHubRepositoriesInput) (string, string, []mcpcontract.SearchWarning, error) {
-	query, mode, warnings, structured, err := repositorySearchMode(in)
-	if err != nil {
-		return "", "", nil, err
-	}
-	if !structured {
-		if strings.Contains(strings.ToLower(query), "in:readme") {
-			warnings = append(warnings, readmeSearchWarning())
-		}
-		return query, "Search using " + mode + ".", warnings, nil
-	}
-	query, structuredWarnings, err := compileStructuredRepositorySearch(in)
-	return query, "Search using structured repository filters.", append(warnings, structuredWarnings...), err
-}
-
-func repositorySearchMode(in mcpcontract.SearchGitHubRepositoriesInput) (string, string, []mcpcontract.SearchWarning, bool, error) {
 	raw := strings.TrimSpace(in.RawQuery)
 	structured := hasStructuredRepositorySearch(in)
 	if raw != "" && structured {
-		return "", "", nil, false, mcpcontract.InvalidArgument("raw_query", "cannot be combined with structured filters; choose one input mode", map[string]any{"raw_query": "is:public language:go stars:>=100"})
+		return "", "", nil, mcpcontract.InvalidArgument("raw_query", "cannot be combined with structured filters; choose one input mode", map[string]any{"raw_query": "is:public language:go stars:>=100"})
 	}
 	if raw == "" && !structured {
-		return "", "", nil, false, mcpcontract.InvalidArgument("text", "provide raw_query or at least one structured filter such as text, topics, language, or pushed_after", map[string]any{"text": "GitHub contribution research", "match_fields": []string{"name", "description"}})
+		return "", "", nil, mcpcontract.InvalidArgument("text", "provide raw_query or at least one structured filter such as text, topics, language, or pushed_after", map[string]any{"text": "GitHub contribution research", "match_fields": []string{"name", "description"}})
 	}
 	if raw != "" {
-		return raw, "advanced raw query", nil, false, nil
+		warnings := []mcpcontract.SearchWarning{}
+		if strings.Contains(strings.ToLower(raw), "in:readme") {
+			warnings = append(warnings, readmeSearchWarning())
+		}
+		return raw, "Search using advanced raw query.", warnings, nil
 	}
-	return "", "", nil, true, nil
+	query, warnings, err := compileStructuredRepositorySearch(in)
+	return query, "Search using structured repository filters.", warnings, err
 }
 
 func hasStructuredRepositorySearch(in mcpcontract.SearchGitHubRepositoriesInput) bool {

@@ -34,45 +34,47 @@ type briefLoadedMsg struct {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case loadMsg:
-		m.loading = true
+		m.loadState = corpusLoading
 		m.err = nil
 		return m, m.loadCmd()
 
 	case loadedMsg:
-		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
-			m.loaded = false
+			m.loadState = corpusLoadFailed
 			m.items = make(map[view][]tuicontract.Item)
 			m.windows = make(map[view]tuicontract.Window)
 			m.filtered = nil
 			return m, nil
 		}
-		m.loaded = true
+		m.loadState = corpusLoaded
 		m.loadData(msg.data)
 		m.applyFilter()
 		return m, nil
 
 	case actionsLoadedMsg:
-		m.actionLoading = false
 		m.actionErr = msg.err
 		m.actions = msg.actions
-		if msg.err == nil && len(msg.actions) == 0 {
-			m.actionOpen = false
+		switch {
+		case msg.err != nil:
+			m.actionState = actionFailed
+		case len(msg.actions) == 0:
+			m.overlay = overlayNone
 			m.actionMsg = "No actions available for this item"
+		default:
+			m.actionState = actionsReady
 		}
 		return m, nil
 
 	case actionCompletedMsg:
-		m.actionExecuting = false
 		if msg.err != nil {
 			m.actionErr = msg.err
+			m.actionState = actionFailed
 			return m, nil
 		}
-		m.actionOpen = false
 		m.actionMsg = msg.result.Message
 		m.actionResult = msg.result
-		m.resultOpen = true
+		m.overlay = overlayResult
 		m.resultTop = 0
 		if msg.result.Reload {
 			return m, m.loadCmd()
@@ -83,9 +85,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.itemRef != m.briefItem.Ref {
 			return m, nil
 		}
-		m.briefLoading = false
 		m.briefErr = msg.err
 		m.brief = msg.brief
+		if msg.err != nil {
+			m.briefState = briefFailed
+		} else {
+			m.briefState = briefReady
+		}
 		return m, nil
 
 	case tea.WindowSizeMsg:
@@ -153,12 +159,13 @@ func splitByStatus(items []tuicontract.Item, status string) (matching, other []t
 }
 
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.resultOpen {
+	switch m.overlay {
+	case overlayResult:
 		switch msg.String() {
 		case "esc", "q":
-			m.resultOpen = false
+			m.overlay = overlayNone
 		case "enter":
-			m.resultOpen = false
+			m.overlay = overlayNone
 			m.focusActionTarget(m.actionResult.Target)
 		case "up", "k":
 			m.resultTop = max(0, m.resultTop-1)
@@ -172,14 +179,13 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.resultTop = 0
 		}
 		return m, nil
-	}
 
-	if m.briefOpen {
+	case overlayBrief:
 		switch msg.String() {
 		case "esc", "q":
-			m.briefOpen = false
+			m.overlay = overlayNone
 		case "enter":
-			if m.briefErr != nil {
+			if m.briefState == briefFailed {
 				return m.openBrief(m.briefItem)
 			}
 		case "up", "k":
@@ -194,16 +200,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.briefTop = 0
 		}
 		return m, nil
-	}
 
-	if m.actionOpen {
+	case overlayActions:
 		return m.handleActionKey(msg)
-	}
 
-	if m.search.Focused() {
+	case overlaySearch:
 		switch msg.String() {
 		case "esc", "enter":
-			m.searching = false
+			m.overlay = overlayNone
 			m.search.Blur()
 			return m, nil
 		case "up":
@@ -217,12 +221,11 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.search, cmd = m.search.Update(msg)
 		m.applyFilter()
 		return m, cmd
-	}
 
-	if m.help {
+	case overlayHelp:
 		switch msg.String() {
 		case "?", "esc", "enter":
-			m.help = false
+			m.overlay = overlayNone
 		}
 		return m, nil
 	}
@@ -250,7 +253,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.nextView()
 		}
 	case "/":
-		m.searching = true
+		m.overlay = overlaySearch
 		m.focus = focusList
 		return m, m.search.Focus()
 	case "up", "k":
@@ -279,16 +282,16 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.focus = focusList
 		}
 	case "?":
-		m.help = true
+		m.overlay = overlayHelp
 	case "a":
 		return m.openActions()
 	default:
 		if len(msg.String()) == 1 {
 			key := msg.String()[0]
 			if key >= '1' && key <= '9' {
-				m.switchView(viewOrder[int(key-'1')])
-			} else if key == '0' && len(viewOrder) >= 10 {
-				m.switchView(viewOrder[9])
+				m.switchView(viewSpecs[int(key-'1')].view)
+			} else if key == '0' && len(viewSpecs) >= 10 {
+				m.switchView(viewSpecs[9].view)
 			}
 		}
 	}
@@ -296,16 +299,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleActionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	if m.actionLoading || m.actionExecuting {
-		if msg.String() == "esc" && m.actionLoading {
-			m.actionOpen = false
+	switch m.actionState {
+	case actionsLoading, actionExecuting:
+		if msg.String() == "esc" && m.actionState == actionsLoading {
+			m.overlay = overlayNone
 		}
 		return m, nil
-	}
-	if m.actionErr != nil {
+
+	case actionFailed:
 		switch msg.String() {
 		case "esc", "q":
-			m.actionOpen = false
+			m.overlay = overlayNone
 		case "enter":
 			if len(m.actions) == 0 {
 				return m.retryActionDiscovery()
@@ -313,19 +317,19 @@ func (m Model) handleActionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.executeSelectedAction()
 		}
 		return m, nil
-	}
-	if m.actionConfirm {
+
+	case actionConfirming:
 		switch msg.String() {
 		case "y", "enter":
 			return m.executeSelectedAction()
 		case "n", "esc":
-			m.actionConfirm = false
+			m.actionState = actionsReady
 		}
 		return m, nil
 	}
 	switch msg.String() {
 	case "esc", "q":
-		m.actionOpen = false
+		m.overlay = overlayNone
 	case "up", "k":
 		m.actionCursor = max(0, m.actionCursor-1)
 	case "down", "j":
@@ -335,8 +339,8 @@ func (m Model) handleActionKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
-		if action.RequiresConfirmation {
-			m.actionConfirm = true
+		if action.RequiresConfirmation() {
+			m.actionState = actionConfirming
 			return m, nil
 		}
 		return m.executeSelectedAction()

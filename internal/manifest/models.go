@@ -11,7 +11,26 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
+	"github.com/morluto/gitcontribute/internal/investigation"
 	"github.com/morluto/gitcontribute/internal/workspace"
+)
+
+// Status is the manifest-wide evidence completeness state.
+type Status string
+
+const (
+	StatusComplete   Status = "complete"
+	StatusIncomplete Status = "incomplete"
+)
+
+// CompletenessStatus is the state of one requested evidence facet.
+type CompletenessStatus string
+
+const (
+	CompletenessComplete     CompletenessStatus = "complete"
+	CompletenessIncomplete   CompletenessStatus = "incomplete"
+	CompletenessUnknown      CompletenessStatus = "unknown"
+	CompletenessNotRequested CompletenessStatus = "not_requested"
 )
 
 // ErrNotFound means no persisted manifest matched the requested identity.
@@ -59,7 +78,7 @@ type Predicate struct {
 	Readiness     ReadinessRecord     `json:"readiness"`
 	PullRequest   *PullRequestRecord  `json:"pull_request,omitempty"`
 	Drafts        []DraftRecord       `json:"drafts"`
-	Status        string              `json:"status"`
+	Status        Status              `json:"status"`
 	Completeness  []CompletenessFacet `json:"completeness"`
 	Gaps          []Gap               `json:"gaps"`
 }
@@ -73,21 +92,21 @@ type RepositoryIdentity struct {
 
 // OpportunityRecord captures the scoped contribution outcome.
 type OpportunityRecord struct {
-	ID               string             `json:"id"`
-	InvestigationID  string             `json:"investigation_id"`
-	HypothesisID     string             `json:"hypothesis_id,omitempty"`
-	ProblemStatement string             `json:"problem_statement"`
-	Scope            string             `json:"scope"`
-	Impact           string             `json:"impact"`
-	Status           string             `json:"status"`
-	SourceRefs       []domain.SourceRef `json:"source_refs"`
+	ID               string                          `json:"id"`
+	InvestigationID  string                          `json:"investigation_id"`
+	HypothesisID     string                          `json:"hypothesis_id,omitempty"`
+	ProblemStatement string                          `json:"problem_statement"`
+	Scope            string                          `json:"scope"`
+	Impact           string                          `json:"impact"`
+	Status           investigation.OpportunityStatus `json:"status"`
+	SourceRefs       []domain.SourceRef              `json:"source_refs"`
 }
 
 // ValidationRecord binds a stored run to its command and candidate identity.
 type ValidationRecord struct {
 	DefinitionID            string                              `json:"definition_id"`
 	RunID                   string                              `json:"run_id"`
-	Kind                    string                              `json:"kind"`
+	Kind                    evidence.RunKind                    `json:"kind"`
 	Command                 []string                            `json:"command"`
 	CommandSHA256           string                              `json:"command_sha256"`
 	ExecutionContractSHA256 string                              `json:"execution_contract_sha256"`
@@ -95,17 +114,17 @@ type ValidationRecord struct {
 	Timeout                 string                              `json:"timeout"`
 	MaxOutputBytes          int64                               `json:"max_output_bytes"`
 	Observation             *evidence.ObservationContract       `json:"observation,omitempty"`
-	Classification          string                              `json:"classification"`
-	ObservationStatus       string                              `json:"observation_status"`
+	Classification          evidence.RunClassification          `json:"classification"`
+	ObservationStatus       evidence.ObservationStatus          `json:"observation_status"`
 	Observations            []evidence.ObservationResult        `json:"observations"`
 	StartedAt               time.Time                           `json:"started_at"`
 	CompletedAt             time.Time                           `json:"completed_at"`
 	WorkspaceSnapshotBefore string                              `json:"workspace_snapshot_before,omitempty"`
 	WorkspaceSnapshotAfter  string                              `json:"workspace_snapshot_after,omitempty"`
-	WorkspaceBindingStatus  string                              `json:"workspace_binding_status"`
+	WorkspaceBindingStatus  evidence.WorkspaceBindingStatus     `json:"workspace_binding_status"`
 	WorkspaceCompatibility  string                              `json:"workspace_compatibility"`
 	CompatibilityReason     string                              `json:"compatibility_reason"`
-	ExecutionOrigin         string                              `json:"execution_origin,omitempty"`
+	ExecutionOrigin         evidence.ExecutionOrigin            `json:"execution_origin,omitempty"`
 	External                *evidence.ExternalReceiptProvenance `json:"external,omitempty"`
 	JUnitReport             *JUnitReportRecord                  `json:"junit_report,omitempty"`
 	Selected                bool                                `json:"selected_for_completeness"`
@@ -124,13 +143,13 @@ type JUnitReportRecord struct {
 // EvidenceRecord captures a stored evidence item and evaluated freshness.
 type EvidenceRecord struct {
 	ID               string                               `json:"id"`
-	Type             string                               `json:"type"`
-	Relation         string                               `json:"relation"`
+	Type             evidence.EvidenceType                `json:"type"`
+	Relation         evidence.Relation                    `json:"relation"`
 	Description      string                               `json:"description"`
 	ValidationRunID  string                               `json:"validation_run_id,omitempty"`
 	SourceRefs       []domain.SourceRef                   `json:"source_refs"`
 	SourceProvenance []evidence.SourceRevision            `json:"source_provenance"`
-	Freshness        string                               `json:"freshness"`
+	Freshness        evidence.FreshnessStatus             `json:"freshness"`
 	FreshnessReason  string                               `json:"freshness_reason"`
 	Measurements     map[string]any                       `json:"measurements,omitempty"`
 	External         *evidence.ExternalEvidenceProvenance `json:"external,omitempty"`
@@ -162,35 +181,35 @@ type FacetStatus struct {
 
 // PullRequestRecord captures explicitly selected, locally stored PR health.
 type PullRequestRecord struct {
-	Owner                   string        `json:"owner"`
-	Repo                    string        `json:"repo"`
-	Number                  int           `json:"number"`
-	State                   string        `json:"state"`
-	HeadSHA                 string        `json:"head_sha,omitempty"`
-	BaseSHA                 string        `json:"base_sha,omitempty"`
-	ChecksStatus            string        `json:"checks_status,omitempty"`
-	ReviewDecision          string        `json:"review_decision,omitempty"`
-	UnresolvedReviewThreads *int          `json:"unresolved_review_threads,omitempty"`
-	MergeStateStatus        string        `json:"merge_state_status,omitempty"`
-	MergeQueueState         string        `json:"merge_queue_state,omitempty"`
-	Attention               string        `json:"attention"`
-	SourceUpdatedAt         string        `json:"source_updated_at"`
-	Facets                  []FacetStatus `json:"facets"`
+	Owner                   string             `json:"owner"`
+	Repo                    string             `json:"repo"`
+	Number                  int                `json:"number"`
+	State                   domain.ThreadState `json:"state"`
+	HeadSHA                 string             `json:"head_sha,omitempty"`
+	BaseSHA                 string             `json:"base_sha,omitempty"`
+	ChecksStatus            string             `json:"checks_status,omitempty"`
+	ReviewDecision          string             `json:"review_decision,omitempty"`
+	UnresolvedReviewThreads *int               `json:"unresolved_review_threads,omitempty"`
+	MergeStateStatus        string             `json:"merge_state_status,omitempty"`
+	MergeQueueState         string             `json:"merge_queue_state,omitempty"`
+	Attention               string             `json:"attention"`
+	SourceUpdatedAt         string             `json:"source_updated_at"`
+	Facets                  []FacetStatus      `json:"facets"`
 }
 
 // DraftRecord identifies a locally prepared contribution draft.
 type DraftRecord struct {
-	Kind       string    `json:"kind"`
-	Title      string    `json:"title"`
-	RenderedAt time.Time `json:"rendered_at"`
-	ManifestID string    `json:"manifest_id,omitempty"`
+	Kind       domain.ThreadKind `json:"kind"`
+	Title      string            `json:"title"`
+	RenderedAt time.Time         `json:"rendered_at"`
+	ManifestID string            `json:"manifest_id,omitempty"`
 }
 
 // CompletenessFacet reports whether one evidence area is usable.
 type CompletenessFacet struct {
-	Facet  string `json:"facet"`
-	Status string `json:"status"`
-	Reason string `json:"reason"`
+	Facet  string             `json:"facet"`
+	Status CompletenessStatus `json:"status"`
+	Reason string             `json:"reason"`
 }
 
 // Gap records evidence that is missing, stale, unknown, or incompatible.
@@ -203,6 +222,7 @@ type Gap struct {
 // Finalize computes the deterministic content identity and in-toto subject.
 func Finalize(predicate Predicate) (Statement, error) {
 	predicate.SchemaVersion = SchemaVersion
+	predicate.Status = statusForGaps(predicate.Gaps)
 	contentDigest, err := predicateIdentityDigest(predicate)
 	if err != nil {
 		return Statement{}, err
@@ -239,6 +259,64 @@ func (s Statement) Validate() error {
 	if s.Predicate.Repository.Owner == "" || s.Predicate.Repository.Repo == "" || s.Predicate.Opportunity.ID == "" {
 		return errors.New("manifest repository and opportunity are required")
 	}
+	if s.Predicate.Status != statusForGaps(s.Predicate.Gaps) {
+		return errors.New("manifest status contradicts its explicit gaps")
+	}
+	if s.Predicate.Opportunity.Status != "" {
+		if _, err := investigation.ParseOpportunityStatus(string(s.Predicate.Opportunity.Status)); err != nil {
+			return fmt.Errorf("manifest opportunity status: %w", err)
+		}
+	}
+	for i, record := range s.Predicate.Validations {
+		run := evidence.ValidationRun{
+			ID: record.RunID, DefinitionID: record.DefinitionID, Kind: record.Kind,
+			Classification: record.Classification, ObservationStatus: record.ObservationStatus,
+			WorkspaceBindingStatus: record.WorkspaceBindingStatus, ExecutionOrigin: record.ExecutionOrigin,
+		}
+		if err := run.ParseStored(); err != nil {
+			return fmt.Errorf("manifest validation %d: %w", i, err)
+		}
+		if record.JUnitReport != nil {
+			report := evidence.JUnitReport{
+				SchemaVersion: record.JUnitReport.SchemaVersion,
+				Name:          record.JUnitReport.Name,
+				Counts:        record.JUnitReport.Counts,
+				TestCases:     append([]evidence.JUnitTestCase(nil), record.JUnitReport.TestCases...),
+				Incomplete:    record.JUnitReport.Incomplete,
+				ParseError:    record.JUnitReport.ParseError,
+				RawSHA256:     record.JUnitReport.RawSHA256,
+			}
+			if err := report.ValidateSummary(); err != nil {
+				return fmt.Errorf("manifest validation %d JUnit report: %w", i, err)
+			}
+		}
+	}
+	for i, record := range s.Predicate.Evidence {
+		item := evidence.Evidence{ID: record.ID, Type: record.Type, Relation: record.Relation}
+		if err := item.ParseStored(); err != nil {
+			return fmt.Errorf("manifest evidence %d: %w", i, err)
+		}
+		if _, err := evidence.ParseFreshnessStatus(string(record.Freshness)); err != nil {
+			return fmt.Errorf("manifest evidence %d: %w", i, err)
+		}
+	}
+	if s.Predicate.PullRequest != nil && s.Predicate.PullRequest.State != "" {
+		if _, err := domain.ParseThreadState(string(s.Predicate.PullRequest.State)); err != nil {
+			return fmt.Errorf("manifest pull request state: %w", err)
+		}
+	}
+	for i, draft := range s.Predicate.Drafts {
+		if _, err := domain.ParseThreadKind(string(draft.Kind)); err != nil {
+			return fmt.Errorf("manifest draft %d: %w", i, err)
+		}
+	}
+	for i, facet := range s.Predicate.Completeness {
+		switch facet.Status {
+		case CompletenessComplete, CompletenessIncomplete, CompletenessUnknown, CompletenessNotRequested:
+		default:
+			return fmt.Errorf("manifest completeness facet %d has unsupported status %q", i, facet.Status)
+		}
+	}
 	wantContent, err := predicateIdentityDigest(s.Predicate)
 	if err != nil {
 		return err
@@ -254,6 +332,13 @@ func (s Statement) Validate() error {
 		return errors.New("manifest subject does not match predicate identity")
 	}
 	return nil
+}
+
+func statusForGaps(gaps []Gap) Status {
+	if len(gaps) == 0 {
+		return StatusComplete
+	}
+	return StatusIncomplete
 }
 
 func predicateIdentityDigest(predicate Predicate) (string, error) {

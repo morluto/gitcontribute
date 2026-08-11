@@ -20,7 +20,7 @@ func TestMCPThreadAndRepositorySearchExposeCoverageRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("thread search: %v", err)
 	}
-	if !threads.Provenance.UnknownCoverage || threads.Recovery == nil || len(threads.Recovery.Then) != 1 || threads.Recovery.Then[0].Type() != "ensure_coverage" {
+	if !threads.Provenance.UnknownCoverage() || threads.Provenance.Complete() || threads.Recovery == nil || len(threads.Recovery.Then) != 1 || threads.Recovery.Then[0].Type() != "ensure_coverage" {
 		t.Fatalf("thread search recovery = %+v", threads)
 	}
 	if got, ok := mcpcontract.RecoveryInput[mcpcontract.EnsureCoverageInput](threads.Recovery.Then[0]); !ok || got.Target.Repository.Owner != "owner" || got.Target.Repository.Repo != "repo" {
@@ -31,7 +31,7 @@ func TestMCPThreadAndRepositorySearchExposeCoverageRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unscoped code search: %v", err)
 	}
-	if !code.Provenance.UnknownCoverage || code.Recovery == nil || len(code.Recovery.Then) != 1 || code.Recovery.Then[0].Type() != "search_github_repositories" {
+	if !code.Provenance.UnknownCoverage() || code.Recovery == nil || len(code.Recovery.Then) != 1 || code.Recovery.Then[0].Type() != "search_github_repositories" {
 		t.Fatalf("unscoped code recovery = %+v", code)
 	}
 
@@ -39,7 +39,7 @@ func TestMCPThreadAndRepositorySearchExposeCoverageRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repository search: %v", err)
 	}
-	if !repositories.Incomplete || repositories.Recovery == nil || len(repositories.Recovery.Then) != 1 || repositories.Recovery.Then[0].Type() != "sync_repository_context" {
+	if !repositories.Incomplete || !repositories.Provenance.UnknownCoverage() || repositories.Provenance.Complete() || repositories.Recovery == nil || len(repositories.Recovery.Then) != 1 || repositories.Recovery.Then[0].Type() != "sync_repository_context" {
 		t.Fatalf("repository search recovery = %+v", repositories)
 	}
 }
@@ -59,11 +59,14 @@ func TestMCPRelatedWorkDoesNotTreatAbsentRepositoryAsNoFindings(t *testing.T) {
 	}
 
 	reader := &MCPReader{svc}
-	duplicates, err := reader.CheckDuplicates(ctx, mcpcontract.CheckDuplicatesInput{Target: "hypothesis", ID: hypothesis.ID, Limit: 10})
+	duplicates, err := reader.CheckDuplicates(ctx, mcpcontract.CheckDuplicatesInput{Target: " Hypothesis ", ID: "  " + hypothesis.ID + "  ", Limit: 10})
 	if err != nil {
 		t.Fatalf("check duplicates: %v", err)
 	}
 	assertRelatedWorkRecovery(t, duplicates, "duplicate")
+	if duplicates.Target != "hypothesis" || duplicates.ID != hypothesis.ID {
+		t.Fatalf("canonical related-work identity = %+v", duplicates)
+	}
 
 	collisions, err := reader.CheckCollisions(ctx, mcpcontract.CheckCollisionsInput{Target: "hypothesis", ID: hypothesis.ID, Limit: 10})
 	if err != nil {

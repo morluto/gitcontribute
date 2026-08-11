@@ -352,8 +352,20 @@ type PullRequestCheckTransition struct {
 	CheckCount int    `json:"check_count"`
 }
 
+// PullRequestCheckWaitStatus identifies one terminal or transient watch state.
+type PullRequestCheckWaitStatus string
+
+const (
+	PullRequestCheckWaiting    PullRequestCheckWaitStatus = "waiting"
+	PullRequestCheckIncomplete PullRequestCheckWaitStatus = "incomplete"
+	PullRequestCheckSucceeded  PullRequestCheckWaitStatus = "succeeded"
+	PullRequestCheckFailed     PullRequestCheckWaitStatus = "failed"
+	PullRequestCheckTimedOut   PullRequestCheckWaitStatus = "timed_out"
+	PullRequestCheckSuperseded PullRequestCheckWaitStatus = "superseded"
+)
+
 type WaitPullRequestChecksOutput struct {
-	Status               string                       `json:"status"`
+	Status               PullRequestCheckWaitStatus   `json:"status"`
 	Owner                string                       `json:"owner"`
 	Repo                 string                       `json:"repo"`
 	Number               int                          `json:"number"`

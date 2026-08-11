@@ -17,7 +17,7 @@ func (c *Corpus) CurrentSourceRevision(ctx context.Context, subject evidence.Sou
 	if err := subject.Validate(); err != nil {
 		return nil, err
 	}
-	switch subject.Kind {
+	switch subject.Kind() {
 	case evidence.SourceSubjectRepository:
 		return c.currentRepositorySourceRevision(ctx, subject)
 	case evidence.SourceSubjectThread:
@@ -25,11 +25,12 @@ func (c *Corpus) CurrentSourceRevision(ctx context.Context, subject evidence.Sou
 	case evidence.SourceSubjectFacet, evidence.SourceSubjectGuidance:
 		return c.currentFacetSourceRevision(ctx, subject)
 	default:
-		return nil, fmt.Errorf("unsupported source subject kind %q", subject.Kind)
+		return nil, errors.New("source subject is not parsed")
 	}
 }
 
 func (c *Corpus) currentRepositorySourceRevision(ctx context.Context, subject evidence.SourceSubject) (*evidence.SourceRevision, error) {
+	repository := subject.Repository()
 	var sourceUpdatedAt, sequence, observedAt int64
 	err := c.db.QueryRowContext(ctx, `
 		SELECT r.source_updated_at, r.observation_sequence,
@@ -38,11 +39,13 @@ func (c *Corpus) currentRepositorySourceRevision(ctx context.Context, subject ev
 		                   AND o.observation_sequence=r.observation_sequence LIMIT 1), r.updated_at)
 		FROM repositories r
 		WHERE r.owner=? COLLATE NOCASE AND r.name=? COLLATE NOCASE
-	`, subject.Owner, subject.Repo).Scan(&sourceUpdatedAt, &sequence, &observedAt)
+	`, repository.Owner(), repository.Repo()).Scan(&sourceUpdatedAt, &sequence, &observedAt)
 	return scannedSourceRevision(subject, sourceUpdatedAt, sequence, observedAt, err)
 }
 
 func (c *Corpus) currentThreadSourceRevision(ctx context.Context, subject evidence.SourceSubject) (*evidence.SourceRevision, error) {
+	repository := subject.Repository()
+	threadKind, number, _ := subject.Thread()
 	var sourceUpdatedAt, sequence, observedAt int64
 	err := c.db.QueryRowContext(ctx, `
 		SELECT t.source_updated_at, t.observation_sequence,
@@ -53,15 +56,16 @@ func (c *Corpus) currentThreadSourceRevision(ctx context.Context, subject eviden
 		JOIN repositories r ON r.id=t.repository_id
 		WHERE r.owner=? COLLATE NOCASE AND r.name=? COLLATE NOCASE
 		  AND t.kind=? AND t.number=?
-	`, subject.Owner, subject.Repo, subject.ThreadKind, subject.Number).Scan(&sourceUpdatedAt, &sequence, &observedAt)
+	`, repository.Owner(), repository.Repo(), threadKind, number).Scan(&sourceUpdatedAt, &sequence, &observedAt)
 	return scannedSourceRevision(subject, sourceUpdatedAt, sequence, observedAt, err)
 }
 
 func (c *Corpus) currentFacetSourceRevision(ctx context.Context, subject evidence.SourceSubject) (*evidence.SourceRevision, error) {
+	repository := subject.Repository()
 	var repoID int64
 	err := c.db.QueryRowContext(ctx, `
 		SELECT id FROM repositories WHERE owner=? COLLATE NOCASE AND name=? COLLATE NOCASE
-	`, subject.Owner, subject.Repo).Scan(&repoID)
+	`, repository.Owner(), repository.Repo()).Scan(&repoID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, evidence.ErrSourceRevisionUnavailable
 	}
@@ -70,11 +74,12 @@ func (c *Corpus) currentFacetSourceRevision(ctx context.Context, subject evidenc
 	}
 
 	var threadID sql.NullInt64
-	if subject.ThreadKind != "" {
+	threadKind, number, threadScoped := subject.Thread()
+	if threadScoped {
 		threadID.Valid = true
 		err = c.db.QueryRowContext(ctx, `
 			SELECT id FROM threads WHERE repository_id=? AND kind=? AND number=?
-		`, repoID, subject.ThreadKind, subject.Number).Scan(&threadID.Int64)
+		`, repoID, threadKind, number).Scan(&threadID.Int64)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, evidence.ErrSourceRevisionUnavailable
 		}
@@ -82,8 +87,8 @@ func (c *Corpus) currentFacetSourceRevision(ctx context.Context, subject evidenc
 			return nil, fmt.Errorf("resolve source thread: %w", err)
 		}
 	}
-	facet := subject.Facet
-	if subject.Kind == evidence.SourceSubjectGuidance {
+	facet := subject.Facet()
+	if subject.Kind() == evidence.SourceSubjectGuidance {
 		facet = evidence.GuidanceFacet
 	}
 	var sourceUpdatedAt, sequence, observedAt int64

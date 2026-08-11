@@ -37,6 +37,44 @@ func TestParseJUnitReportCountsCasesAndPreservesIdentity(t *testing.T) {
 	}
 }
 
+func TestJUnitReportValidationRejectsContradictoryStoredSummary(t *testing.T) {
+	report, err := ParseJUnitReport(strings.NewReader(`<testsuite tests="1"><testcase id="one"/></testsuite>`), JUnitParseOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := report.ParseStored(); err != nil {
+		t.Fatalf("valid stored report: %v", err)
+	}
+
+	tests := map[string]func(*JUnitReport){
+		"schema": func(report *JUnitReport) {
+			report.SchemaVersion = "future"
+		},
+		"incomplete": func(report *JUnitReport) {
+			report.Incomplete = true
+		},
+		"status": func(report *JUnitReport) {
+			report.TestCases[0].Status = JUnitTestStatus("flaky")
+		},
+		"counts": func(report *JUnitReport) {
+			report.Counts.Passed = 0
+		},
+		"digest": func(report *JUnitReport) {
+			report.RawSHA256 = strings.Repeat("a", 64)
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			candidate := report
+			candidate.TestCases = append([]JUnitTestCase(nil), report.TestCases...)
+			mutate(&candidate)
+			if err := candidate.ParseStored(); err == nil {
+				t.Fatal("contradictory stored JUnit report was accepted")
+			}
+		})
+	}
+}
+
 func TestParseJUnitReportMarksMalformedInputIncompleteWithPartialCounts(t *testing.T) {
 	report, err := ParseJUnitReport(strings.NewReader(`<testsuite tests="2"><testcase id="one" name="one"/><testcase id="two"`), JUnitParseOptions{})
 	if err == nil {

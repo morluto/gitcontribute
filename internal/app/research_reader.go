@@ -42,7 +42,7 @@ func (r *corpusReader) ReadResearchThread(ctx context.Context, requested researc
 	if thread == nil {
 		return research.ThreadEvidence{}, fmt.Errorf("%w: %s#%d", research.ErrThreadNotFound, requested.Repo, requested.Number)
 	}
-	storedKind := domain.ThreadKind(thread.Kind)
+	storedKind := thread.Kind
 	if requested.Kind != "" && requested.Kind != storedKind {
 		return research.ThreadEvidence{}, research.KindMismatchError(requested.Kind, storedKind)
 	}
@@ -53,7 +53,7 @@ func (r *corpusReader) ReadResearchThread(ctx context.Context, requested researc
 	}
 	evidence := research.ThreadEvidence{Thread: research.ThreadSnapshot{
 		Ref: resolved, Title: thread.Title, Body: thread.Body, Author: thread.Author,
-		AuthorAssociation: thread.AuthorAssociation, State: thread.State, StateReason: thread.StateReason,
+		AuthorAssociation: thread.AuthorAssociation, State: string(thread.State), StateReason: thread.StateReason,
 		Labels: append([]string{}, thread.Labels...), Assignees: append([]string{}, thread.Assignees...),
 		Draft: thread.Draft, Locked: thread.Locked, Milestone: thread.Milestone, Merge: thread.Merge,
 		CreatedAt: thread.SourceCreatedAt, UpdatedAt: thread.SourceUpdatedAt, ClosedAt: thread.ClosedAt,
@@ -142,7 +142,7 @@ func appendExplicitResearchRelations(ctx context.Context, c *corpus.Corpus, expl
 
 func appendClusterResearchRelations(ctx context.Context, c *corpus.Corpus, ref research.ThreadRef, result *research.RelationshipEvidence) error {
 	cluster, err := c.GetClusterProjectionForMember(ctx, clustering.MemberRef{
-		Owner: ref.Repo.Owner(), Repo: ref.Repo.Repo(), Kind: string(ref.Kind), Number: ref.Number,
+		Owner: ref.Repo.Owner(), Repo: ref.Repo.Repo(), Kind: ref.Kind, Number: ref.Number,
 	})
 	if err != nil {
 		return fmt.Errorf("get duplicate cluster: %w", err)
@@ -162,8 +162,8 @@ func appendClusterResearchRelations(ctx context.Context, c *corpus.Corpus, ref r
 			continue
 		}
 		result.DuplicateThreads = append(result.DuplicateThreads, research.RelatedThread{
-			Ref: researchClusterRef(member.Ref), Kind: member.Ref.Kind, Number: member.Ref.Number,
-			Title: member.Title, State: member.State, Relation: "cluster_candidate",
+			Ref: researchClusterRef(member.Ref), Kind: string(member.Ref.Kind), Number: member.Ref.Number,
+			Title: member.Title, State: string(member.State), Relation: "cluster_candidate",
 			Basis: member.Reason, URL: researchMemberURL(member.Ref), Source: clusterSource,
 		})
 		if len(result.DuplicateThreads) > maxResearchRelatedThreads {
@@ -175,7 +175,7 @@ func appendClusterResearchRelations(ctx context.Context, c *corpus.Corpus, ref r
 }
 
 func appendOpenPRResearchRelations(ctx context.Context, c *corpus.Corpus, storedRepo *corpus.Repository, ref research.ThreadRef, result *research.RelationshipEvidence) error {
-	openPRs, err := c.ListThreadsFiltered(ctx, storedRepo.ID, corpus.ThreadKindPullRequest, "open", maxResearchOpenPRScan+1)
+	openPRs, err := c.ListThreadsFiltered(ctx, storedRepo.ID, corpus.PullRequestThreadKind(), corpus.OpenThreadState(), maxResearchOpenPRScan+1)
 	if err != nil {
 		return fmt.Errorf("list open pull requests: %w", err)
 	}
@@ -205,8 +205,8 @@ func appendOpenPRResearchRelations(ctx context.Context, c *corpus.Corpus, stored
 			ObservedAt: pullRequest.UpdatedAt, AsOf: pullRequest.SourceUpdatedAt,
 		}
 		result.PullRequests = append(result.PullRequests, research.RelatedThread{
-			Ref: fmt.Sprintf("pull_request:%s#%d", ref.Repo, pullRequest.Number), Kind: corpus.ThreadKindPullRequest,
-			Number: pullRequest.Number, Title: pullRequest.Title, State: pullRequest.State,
+			Ref: fmt.Sprintf("pull_request:%s#%d", ref.Repo, pullRequest.Number), Kind: string(domain.PullRequestKind),
+			Number: pullRequest.Number, Title: pullRequest.Title, State: string(pullRequest.State),
 			Relation: relation, Basis: basis, URL: fmt.Sprintf("https://github.com/%s/pull/%d", ref.Repo, pullRequest.Number), Source: source,
 		})
 	}
@@ -287,7 +287,7 @@ func (r *corpusReader) ReadResearchHealth(ctx context.Context, repo domain.RepoR
 		return research.HealthEvidence{}, fmt.Errorf("compute health: %w", err)
 	}
 	healthAsOf := storedRepo.SourceUpdatedAt
-	threads, err := c.ListThreads(ctx, storedRepo.ID, "", 1)
+	threads, err := c.ListThreads(ctx, storedRepo.ID, corpus.AnyThreadKind(), 1)
 	if err != nil {
 		return research.HealthEvidence{}, fmt.Errorf("read health source time: %w", err)
 	}
@@ -305,7 +305,7 @@ func (r *corpusReader) ReadResearchHealth(ctx context.Context, repo domain.RepoR
 		PullRequestResponseMedianHours: report.Response.PullRequests.Median,
 		IssueResponseSampleSize:        report.Response.Issues.SampleSize,
 		PullRequestResponseSampleSize:  report.Response.PullRequests.SampleSize,
-		ThreadSampleSize:               report.Coverage.ThreadsSampleSize, ThreadsTruncated: report.Coverage.ThreadsTruncated,
+		ThreadSampleSize:               report.Coverage.ThreadsSampleSize, ThreadsTruncated: report.Coverage.ThreadsTruncated(),
 	}, []research.SourceRef{source}, researchHealthCoverageReason(report))
 	if err != nil {
 		return research.HealthEvidence{}, fmt.Errorf("parse health evidence: %w", err)
@@ -369,7 +369,7 @@ func researchThreadSource(ctx context.Context, c *corpus.Corpus, ref research.Th
 }
 
 func researchFacets(kind domain.ThreadKind) []string {
-	return facets.DefaultFor(string(kind))
+	return facets.DefaultFor(kind)
 }
 
 func readResearchFacet(ctx context.Context, c *corpus.Corpus, repoID, threadID int64, ref research.ThreadRef, facet string) (research.FacetCoverage, []research.DiscussionItem, bool, error) {
@@ -510,8 +510,8 @@ func resolveResearchReference(ctx context.Context, c *corpus.Corpus, candidate r
 			return research.RelatedThread{}, fmt.Errorf("resolve referenced thread: %w", err)
 		}
 		if thread != nil {
-			kind = domain.ThreadKind(thread.Kind)
-			state, title = thread.State, thread.Title
+			kind = thread.Kind
+			state, title = string(thread.State), thread.Title
 		}
 	}
 	resolved := research.ThreadRef{Repo: candidate.Repo, Kind: kind, Number: candidate.Number}
@@ -611,7 +611,7 @@ func normalizeResearchSources(values []research.SourceRef) []research.SourceRef 
 }
 
 func researchMemberIsTarget(member clustering.MemberRef, target research.ThreadRef) bool {
-	return strings.EqualFold(member.Owner, target.Repo.Owner()) && strings.EqualFold(member.Repo, target.Repo.Repo()) && member.Kind == string(target.Kind) && member.Number == target.Number
+	return strings.EqualFold(member.Owner, target.Repo.Owner()) && strings.EqualFold(member.Repo, target.Repo.Repo()) && member.Kind == target.Kind && member.Number == target.Number
 }
 
 func researchClusterRef(ref clustering.MemberRef) string {
@@ -620,7 +620,7 @@ func researchClusterRef(ref clustering.MemberRef) string {
 
 func researchMemberURL(ref clustering.MemberRef) string {
 	segment := "issues"
-	if ref.Kind == corpus.ThreadKindPullRequest {
+	if ref.Kind == domain.PullRequestKind {
 		segment = "pull"
 	}
 	return fmt.Sprintf("https://github.com/%s/%s/%s/%d", ref.Owner, ref.Repo, segment, ref.Number)

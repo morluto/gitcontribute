@@ -25,8 +25,34 @@ type Config struct {
 // TokenSource describes how to obtain a GitHub token. The token itself is never
 // persisted here.
 type TokenSource struct {
-	Method string `toml:"method"`
-	Key    string `toml:"key,omitempty"`
+	Method TokenSourceMethod `toml:"method"`
+	Key    string            `toml:"key,omitempty"`
+}
+
+// TokenSourceMethod identifies one supported credential resolver.
+type TokenSourceMethod string
+
+const (
+	TokenSourceNone    TokenSourceMethod = "none"
+	TokenSourceEnv     TokenSourceMethod = "env"
+	TokenSourceGHCLI   TokenSourceMethod = "gh-cli"
+	TokenSourceKeyring TokenSourceMethod = "keyring"
+)
+
+// ParseTokenSourceMethod canonicalizes boundary input into a supported method.
+func ParseTokenSourceMethod(value string) (TokenSourceMethod, error) {
+	switch TokenSourceMethod(strings.ToLower(strings.TrimSpace(value))) {
+	case TokenSourceNone:
+		return TokenSourceNone, nil
+	case TokenSourceEnv:
+		return TokenSourceEnv, nil
+	case TokenSourceGHCLI:
+		return TokenSourceGHCLI, nil
+	case TokenSourceKeyring:
+		return TokenSourceKeyring, nil
+	default:
+		return "", fmt.Errorf("invalid token_source method %q", value)
+	}
 }
 
 // Crawl holds crawl budgets and concurrency limits.
@@ -41,7 +67,7 @@ type Crawl struct {
 // are left empty so that ApplyDefaults can resolve them against Paths.
 func Default() *Config {
 	return &Config{
-		TokenSource: TokenSource{Method: "none"},
+		TokenSource: TokenSource{Method: TokenSourceNone},
 		Crawl: Crawl{
 			Budget:      1000,
 			Concurrency: 4,
@@ -58,6 +84,13 @@ func Load(r io.Reader) (*Config, error) {
 	dec := toml.NewDecoder(r).DisallowUnknownFields()
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("decode config: %w", err)
+	}
+	if cfg.TokenSource.Method != "" {
+		method, err := ParseTokenSourceMethod(string(cfg.TokenSource.Method))
+		if err != nil {
+			return nil, err
+		}
+		cfg.TokenSource.Method = method
 	}
 	return &cfg, nil
 }
@@ -162,7 +195,7 @@ func ApplyDefaults(cfg *Config, paths *Paths) error {
 		return errors.New("config is nil")
 	}
 	if cfg.TokenSource.Method == "" {
-		cfg.TokenSource.Method = "none"
+		cfg.TokenSource.Method = TokenSourceNone
 	}
 	if cfg.Crawl.Budget == 0 {
 		cfg.Crawl.Budget = 1000
@@ -200,7 +233,11 @@ func ApplyEnv(cfg *Config, getenv func(string) string) error {
 		cfg.Database = v
 	}
 	if v := getenv("GITCONTRIBUTE_TOKEN_SOURCE_METHOD"); v != "" {
-		cfg.TokenSource.Method = strings.ToLower(v)
+		method, err := ParseTokenSourceMethod(v)
+		if err != nil {
+			return fmt.Errorf("GITCONTRIBUTE_TOKEN_SOURCE_METHOD: %w", err)
+		}
+		cfg.TokenSource.Method = method
 	}
 	if v := getenv("GITCONTRIBUTE_TOKEN_SOURCE_KEY"); v != "" {
 		cfg.TokenSource.Key = v
@@ -241,14 +278,17 @@ func Validate(cfg *Config) error {
 		return errors.New("database path must be set")
 	}
 
-	switch cfg.TokenSource.Method {
-	case "none", "gh-cli":
-	case "env", "keyring":
+	method, err := ParseTokenSourceMethod(string(cfg.TokenSource.Method))
+	if err != nil {
+		return err
+	}
+	cfg.TokenSource.Method = method
+	switch method {
+	case TokenSourceNone, TokenSourceGHCLI:
+	case TokenSourceEnv, TokenSourceKeyring:
 		if strings.TrimSpace(cfg.TokenSource.Key) == "" {
-			return fmt.Errorf("token_source key is required when method is %s", cfg.TokenSource.Method)
+			return fmt.Errorf("token_source key is required when method is %s", method)
 		}
-	default:
-		return fmt.Errorf("invalid token_source method %q", cfg.TokenSource.Method)
 	}
 
 	if cfg.Crawl.Budget <= 0 {

@@ -81,7 +81,7 @@ func TestTriageEventPersistsWithOptionalForeignKeyLinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed repository: %v", err)
 	}
-	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "bug", "body", "alice", time.Unix(2, 0).UTC(), `{}`)
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "bug", "body", "alice", time.Unix(2, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatalf("seed thread: %v", err)
 	}
@@ -163,6 +163,25 @@ func TestTriageEventOrderingIsDeterministic(t *testing.T) {
 			t.Fatalf("events not ordered by source_event_at: %v after %v", events[i], events[i+1])
 		}
 	}
+	if _, err := c.db.ExecContext(ctx, `UPDATE triage_events SET target_kind='invented' WHERE id=?`, ids[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ListTriageEvents(ctx, tracking.TriageEventFilter{}); err == nil {
+		t.Fatal("triage read accepted an invalid stored target kind")
+	}
+}
+
+func TestTriageFiltersRejectUnknownTypedCasts(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	svc := tracking.NewService(c)
+	if _, err := svc.ListTriageEvents(ctx, tracking.TriageEventFilter{TargetKind: tracking.TargetKind("invented")}); err == nil {
+		t.Fatal("unknown target kind filter was treated as an empty result")
+	}
+	if _, err := svc.ListTriageEvents(ctx, tracking.TriageEventFilter{Outcome: tracking.Outcome("invented")}); err == nil {
+		t.Fatal("unknown outcome filter was treated as an empty result")
+	}
 }
 
 func TestContributionLifecyclePersists(t *testing.T) {
@@ -228,6 +247,18 @@ func TestContributionLifecyclePersists(t *testing.T) {
 	if len(outcomes) != 1 || outcomes[0].Outcome != tracking.OutcomeSubmitted {
 		t.Fatalf("unexpected outcomes: %+v", outcomes)
 	}
+	if _, err := c.db.ExecContext(ctx, `UPDATE contribution_outcomes SET outcome='invented' WHERE id=?`, outcome.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ListContributionOutcomes(ctx, contribution.ID); err == nil {
+		t.Fatal("contribution outcome read accepted an invalid stored outcome")
+	}
+	if _, err := c.db.ExecContext(ctx, `UPDATE contribution_outcomes SET outcome=? WHERE id=?`, tracking.OutcomeViewed, outcome.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.ListContributionOutcomes(ctx, contribution.ID); err == nil {
+		t.Fatal("contribution outcome read accepted a triage-only outcome")
+	}
 }
 
 func TestContributionRequiresExistingOpportunity(t *testing.T) {
@@ -257,8 +288,12 @@ func TestExportImportLocalMetadataIsIdempotent(t *testing.T) {
 
 	svc := tracking.NewService(c)
 	repo, _ := c.ApplyRepositoryObservation(ctx, "owner", "repo", "123", time.Unix(1, 0).UTC(), `{}`)
-	c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "bug", "body", "alice", time.Unix(2, 0).UTC(), `{}`)
-	source, err := c.CurrentSourceRevision(ctx, evidence.SourceSubject{Kind: evidence.SourceSubjectRepository, Owner: "owner", Repo: "repo"})
+	c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "bug", "body", "alice", time.Unix(2, 0).UTC(), `{}`)
+	subject, err := evidence.NewRepositorySourceSubject(domain.MustRepoRef("owner", "repo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := c.CurrentSourceRevision(ctx, subject)
 	if err != nil || source == nil {
 		t.Fatalf("current repository source = (%+v, %v)", source, err)
 	}

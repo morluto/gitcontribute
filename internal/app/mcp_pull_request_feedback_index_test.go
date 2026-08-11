@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
@@ -62,8 +63,8 @@ func TestPullRequestFeedbackIndexResumesDiscoveryAndBuildsOfflineProjection(t *t
 	svc := newLocalService(t)
 	t.Cleanup(func() { _ = svc.Close() })
 	githubReader := &feedbackIndexTestReader{pages: map[int]github.ListResult[github.Issue]{
-		1: {Items: []github.Issue{{Number: 1, Kind: github.ThreadKindPullRequest}}, Page: github.PageInfo{Page: 1, NextPage: 2, HasNext: true}},
-		2: {Items: []github.Issue{{Number: 2, Kind: github.ThreadKindPullRequest}}, Page: github.PageInfo{Page: 2, HasNext: false}},
+		1: {Items: []github.Issue{{Number: 1, Kind: domain.PullRequestKind}}, Page: github.PageInfo{Page: 1, NextPage: 2, HasNext: true}},
+		2: {Items: []github.Issue{{Number: 2, Kind: domain.PullRequestKind}}, Page: github.PageInfo{Page: 2, HasNext: false}},
 	}}
 	svc.SetGitHubReader(githubReader)
 	reader := &MCPReader{Service: svc}
@@ -77,7 +78,8 @@ func TestPullRequestFeedbackIndexResumesDiscoveryAndBuildsOfflineProjection(t *t
 		MaxRequests:        20,
 	}
 	report := func(string, string) error { return nil }
-	first, err := reader.indexPullRequestFeedback(ctx, in, report)
+	selection := mustFeedbackSelection(t, in.Channels, in.ThreadState)
+	first, err := reader.indexPullRequestFeedback(ctx, in, selection, report)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,12 +90,12 @@ func TestPullRequestFeedbackIndexResumesDiscoveryAndBuildsOfflineProjection(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if discovery == nil || discovery.Complete || discovery.NextPage != 2 || discovery.DiscoveredPullRequests != 1 {
+	if discovery == nil || discovery.IsComplete() || discovery.NextPage != 2 || discovery.DiscoveredPullRequests != 1 {
 		t.Fatalf("bounded discovery = %+v", discovery)
 	}
 
 	in.MaxPages = 1
-	second, err := reader.indexPullRequestFeedback(ctx, in, report)
+	second, err := reader.indexPullRequestFeedback(ctx, in, selection, report)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +109,7 @@ func TestPullRequestFeedbackIndexResumesDiscoveryAndBuildsOfflineProjection(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if discovery == nil || !discovery.Complete || discovery.DiscoveredPullRequests != 2 {
+	if discovery == nil || !discovery.IsComplete() || discovery.DiscoveredPullRequests != 2 {
 		t.Fatalf("completed discovery = %+v", discovery)
 	}
 
@@ -127,14 +129,15 @@ func TestPullRequestFeedbackSearchKeepsThreadResourceReadable(t *testing.T) {
 	svc := newLocalService(t)
 	t.Cleanup(func() { _ = svc.Close() })
 	reader := &feedbackIndexTestReader{withThread: true, pages: map[int]github.ListResult[github.Issue]{
-		1: {Items: []github.Issue{{Number: 2, Kind: github.ThreadKindPullRequest}}, Page: github.PageInfo{Page: 1, HasNext: false}},
+		1: {Items: []github.Issue{{Number: 2, Kind: domain.PullRequestKind}}, Page: github.PageInfo{Page: 1, HasNext: false}},
 	}}
 	svc.SetGitHubReader(reader)
 	appReader := &MCPReader{Service: svc}
-	if _, err := appReader.indexPullRequestFeedback(ctx, mcpcontract.IndexPullRequestFeedbackInput{
+	indexInput := mcpcontract.IndexPullRequestFeedbackInput{
 		Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}, Channels: []string{"review_threads"}, ThreadState: "all",
 		MaxPullRequests: 10, MaxItemsPerChannel: 10, MaxPages: 10, MaxRequests: 20,
-	}, func(string, string) error { return nil }); err != nil {
+	}
+	if _, err := appReader.indexPullRequestFeedback(ctx, indexInput, mustFeedbackSelection(t, indexInput.Channels, indexInput.ThreadState), func(string, string) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	result, err := appReader.SearchPullRequestFeedback(ctx, mcpcontract.SearchPullRequestFeedbackInput{
@@ -150,7 +153,7 @@ func TestPullRequestFeedbackSearchKeepsThreadResourceReadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item["schema_version"] != "gitcontribute.pull-request-feedback-item.v1" || item["feedback_id"] != "202" || item["thread_id"] != "thread-2" || item["resolved"] != false || item["resolution_state"] != "unresolved" {
+	if item.SchemaVersion != "gitcontribute.pull-request-feedback-item.v1" || item.FeedbackID != "202" || item.ThreadID != "thread-2" || item.Resolved == nil || *item.Resolved || item.ResolutionState != "unresolved" {
 		t.Fatalf("exact feedback resource = %+v", item)
 	}
 }
@@ -161,7 +164,8 @@ func TestFeedbackIndexReportsPartialSnapshotPersistenceFailure(t *testing.T) {
 	svc := newLocalService(t)
 	t.Cleanup(func() { _ = svc.Close() })
 	reader := &MCPReader{Service: svc}
-	item := reader.indexOnePullRequestFeedback(ctx, &cancelledPartialFeedbackReader{cancel: cancel}, mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7}, mcpcontract.IndexPullRequestFeedbackInput{Channels: []string{"issue_comments"}}, github.NewRequestBudget(10))
+	selection := mustFeedbackSelection(t, []string{"issue_comments"}, "all")
+	item := reader.indexOnePullRequestFeedback(ctx, &cancelledPartialFeedbackReader{cancel: cancel}, mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7}, mcpcontract.IndexPullRequestFeedbackInput{Channels: []string{"issue_comments"}}, selection, github.NewRequestBudget(10))
 	if item.Code != "feedback_persistence_failed" {
 		t.Fatalf("partial snapshot persistence failure was hidden: %+v", item)
 	}

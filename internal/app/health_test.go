@@ -43,7 +43,7 @@ func TestRepositoryHealth(t *testing.T) {
 
 	// External open PR with a recent review.
 	openPR, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
-		Kind:              corpus.ThreadKindPullRequest,
+		Kind:              domain.PullRequestKind,
 		Number:            1,
 		State:             "open",
 		Title:             "open pr",
@@ -71,7 +71,7 @@ func TestRepositoryHealth(t *testing.T) {
 
 	// Owner merged PR.
 	_, err = upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
-		Kind:              corpus.ThreadKindPullRequest,
+		Kind:              domain.PullRequestKind,
 		Number:            2,
 		State:             "closed",
 		Title:             "merged pr",
@@ -87,7 +87,7 @@ func TestRepositoryHealth(t *testing.T) {
 
 	// PR with no author-association metadata should not be counted as external.
 	_, err = upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
-		Kind:            corpus.ThreadKindPullRequest,
+		Kind:            domain.PullRequestKind,
 		Number:          3,
 		State:           "open",
 		Title:           "unknown assoc pr",

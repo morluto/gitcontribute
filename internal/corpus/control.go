@@ -9,13 +9,12 @@ import (
 
 // ControlStats is a bounded local snapshot used by status and diagnostics.
 type ControlStats struct {
-	Repositories  int
-	Threads       int
-	Sources       int
-	FrontierReady int
-	ActiveRuns    int
-	ActiveJobs    int
-	Freshest      time.Time
+	Repositories int
+	Threads      int
+	Sources      int
+	ActiveRuns   int
+	ActiveJobs   int
+	Freshest     time.Time
 }
 
 // SchemaVersion returns the applied Goose schema version.
@@ -45,7 +44,7 @@ func (c *Corpus) SchemaVersions(ctx context.Context) (current, target int64, err
 }
 
 // ControlStats returns local counts without triggering refresh or hydration.
-func (c *Corpus) ControlStats(ctx context.Context, now time.Time) (ControlStats, error) {
+func (c *Corpus) ControlStats(ctx context.Context) (ControlStats, error) {
 	var out ControlStats
 	queries := []struct {
 		dst   *int
@@ -55,7 +54,6 @@ func (c *Corpus) ControlStats(ctx context.Context, now time.Time) (ControlStats,
 		{&out.Repositories, `SELECT COUNT(*) FROM repositories`, nil},
 		{&out.Threads, `SELECT COUNT(*) FROM threads`, nil},
 		{&out.Sources, `SELECT COUNT(*) FROM discovery_sources WHERE enabled = 1`, nil},
-		{&out.FrontierReady, `SELECT COUNT(*) FROM frontier_items WHERE state = 'queued' AND earliest_run_at <= ?`, []any{encodeTime(now)}},
 		{&out.ActiveRuns, `SELECT COUNT(*) FROM runs WHERE status = ?`, []any{RunStatusRunning}},
 	}
 	for _, item := range queries {

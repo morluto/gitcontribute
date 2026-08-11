@@ -146,6 +146,15 @@ type SourceFileOutput struct {
 // provider retry or an unexpected decoding failure.
 type SourceFileStatus string
 
+const (
+	SourceFileComplete    SourceFileStatus = "complete"
+	SourceFileNotFound    SourceFileStatus = "not_found"
+	SourceFileTooLarge    SourceFileStatus = "too_large"
+	SourceFileRetryable   SourceFileStatus = "retryable"
+	SourceFileUnavailable SourceFileStatus = "unavailable"
+	SourceFileFailed      SourceFileStatus = "failed"
+)
+
 type SourceFileBatchItem struct {
 	Key          string            `json:"key"`
 	Status       SourceFileStatus  `json:"item_status"`

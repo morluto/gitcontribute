@@ -8,11 +8,16 @@ import (
 	"strings"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 // VerifyPublishedDraft compares one immutable local revision with one
 // explicitly synchronized GitHub thread and never performs a network read.
 func (s *Service) VerifyPublishedDraft(ctx context.Context, in contracts.VerifyPublishedDraftInput) (*contracts.PublishedDraftVerification, error) {
+	kind, err := domain.ParseThreadKind(in.Kind)
+	if err != nil {
+		return nil, err
+	}
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -26,7 +31,7 @@ func (s *Service) VerifyPublishedDraft(ctx context.Context, in contracts.VerifyP
 		PublishedRef:     fmt.Sprintf("%s/%s#%d", in.Owner, in.Repo, in.Number),
 		DraftTitleSHA256: draft.TitleSHA256, DraftBodySHA256: draft.BodySHA256, CoverageStatus: "unknown",
 	}
-	if in.Owner+"/"+in.Repo != draft.Repository || in.Kind != draft.Kind {
+	if in.Owner+"/"+in.Repo != draft.Repository || kind != draft.Kind {
 		out.Reason = "published target identity does not match the stored draft"
 		return out, nil
 	}
@@ -38,7 +43,7 @@ func (s *Service) VerifyPublishedDraft(ctx context.Context, in contracts.VerifyP
 		out.Reason = "repository is not stored; explicitly sync the target thread"
 		return out, nil
 	}
-	thread, err := c.GetThread(ctx, repository.ID, in.Kind, in.Number)
+	thread, err := c.GetThread(ctx, repository.ID, kind, in.Number)
 	if err != nil {
 		return nil, err
 	}

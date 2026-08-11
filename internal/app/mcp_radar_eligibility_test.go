@@ -15,7 +15,7 @@ func TestMCPCrossRepositoryEligibilityOrderMatchesRadar(t *testing.T) {
 		radar.EligibilityBlocked,
 	}
 	for i, eligibility := range ordered {
-		if got := eligibilityRank(string(eligibility)); got != i {
+		if got := eligibilityRank(eligibility); got != i {
 			t.Fatalf("eligibilityRank(%q) = %d, want %d", eligibility, got, i)
 		}
 	}

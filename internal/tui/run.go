@@ -99,15 +99,6 @@ func filterData(data tuicontract.Data, repo string) tuicontract.Data {
 	return data
 }
 
-// Run starts the TUI program with the provided local reader and I/O.
-//
-// It is suitable for later CLI wiring: the caller supplies a context, a
-// Reader, and input/output streams. The TUI loads local data on start and
-// never performs network I/O on its own.
-func Run(ctx context.Context, reader tuicontract.Reader, input io.Reader, output io.Writer) (Model, error) {
-	return run(ctx, reader, nil, nil, input, output)
-}
-
 func run(
 	ctx context.Context,
 	reader tuicontract.Reader,

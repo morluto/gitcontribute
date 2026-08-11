@@ -19,6 +19,162 @@ type fakeReader struct {
 	calls           map[string]int
 }
 
+type canonicalIDReader struct {
+	*fakeReader
+	validation    mcpcontract.DefineValidationInput
+	workspace     mcpcontract.CreateWorkspaceInput
+	verification  mcpcontract.VerifyPublishedDraftInput
+	hypothesis    mcpcontract.RecordHypothesisInput
+	relatedWork   mcpcontract.CheckDuplicatesInput
+	promotion     mcpcontract.PromoteOpportunityInput
+	contribution  mcpcontract.PrepareContributionInput
+	manifest      mcpcontract.ExportManifestInput
+	junit         mcpcontract.AttachJUnitReportInput
+	explanation   mcpcontract.ExplainMatchInput
+	dossier       mcpcontract.BuildRepositoryDossierInput
+	investigation mcpcontract.StartInvestigationInput
+	concern       mcpcontract.CreateConcernInput
+	commitInspect mcpcontract.InspectCommitChangesInput
+	commitPlan    mcpcontract.PlanSemanticCommitsInput
+}
+
+func (r *canonicalIDReader) DefineValidation(_ context.Context, in mcpcontract.DefineValidationInput) (mcpcontract.ValidationOutput, error) {
+	r.validation = in
+	return mcpcontract.ValidationOutput{ID: "val-1", InvestigationID: in.InvestigationID}, nil
+}
+
+func (r *canonicalIDReader) CreateWorkspace(_ context.Context, in mcpcontract.CreateWorkspaceInput) (mcpcontract.JobReference, error) {
+	r.workspace = in
+	return mcpcontract.JobReference{ID: "job-workspace", Status: "queued"}, nil
+}
+
+func (r *canonicalIDReader) VerifyPublishedDraft(_ context.Context, in mcpcontract.VerifyPublishedDraftInput) (mcpcontract.PublishedDraftVerificationOutput, error) {
+	r.verification = in
+	return mcpcontract.PublishedDraftVerificationOutput{Status: "exact_match", DraftID: in.DraftID, Revision: in.Revision}, nil
+}
+
+func (r *canonicalIDReader) RecordHypothesis(_ context.Context, in mcpcontract.RecordHypothesisInput) (mcpcontract.HypothesisOutput, error) {
+	r.hypothesis = in
+	return mcpcontract.HypothesisOutput{ID: "hyp-1", InvestigationID: in.InvestigationID}, nil
+}
+
+func (r *canonicalIDReader) CheckDuplicates(_ context.Context, in mcpcontract.CheckDuplicatesInput) (mcpcontract.CheckOutput, error) {
+	r.relatedWork = in
+	return mcpcontract.CheckOutput{Target: in.Target, ID: in.ID}, nil
+}
+
+func (r *canonicalIDReader) PromoteOpportunity(_ context.Context, in mcpcontract.PromoteOpportunityInput) (mcpcontract.OpportunityOutput, error) {
+	r.promotion = in
+	return mcpcontract.OpportunityOutput{ID: "opp-1", HypothesisID: in.HypothesisID}, nil
+}
+
+func (r *canonicalIDReader) PrepareContribution(_ context.Context, in mcpcontract.PrepareContributionInput) (mcpcontract.DraftOutput, error) {
+	r.contribution = in
+	return mcpcontract.DraftOutput{ID: "draft-1", Revision: 1, OpportunityID: in.OpportunityID}, nil
+}
+
+func (r *canonicalIDReader) ExportManifest(_ context.Context, in mcpcontract.ExportManifestInput) (mcpcontract.ManifestOutput, error) {
+	r.manifest = in
+	return mcpcontract.ManifestOutput{ManifestID: "sha256:test"}, nil
+}
+
+func (r *canonicalIDReader) AttachJUnitReport(_ context.Context, in mcpcontract.AttachJUnitReportInput) (mcpcontract.AttachJUnitReportOutput, error) {
+	r.junit = in
+	return mcpcontract.AttachJUnitReportOutput{RunID: in.RunID}, nil
+}
+
+func (r *canonicalIDReader) ExplainMatch(_ context.Context, in mcpcontract.ExplainMatchInput) (mcpcontract.ExplainMatchOutput, error) {
+	r.explanation = in
+	return mcpcontract.ExplainMatchOutput{Owner: in.Owner, Repo: in.Repo, Kind: in.Kind}, nil
+}
+
+func (r *canonicalIDReader) BuildRepositoryDossier(_ context.Context, in mcpcontract.BuildRepositoryDossierInput) (mcpcontract.JobReference, error) {
+	r.dossier = in
+	return mcpcontract.JobReference{ID: "job-dossier", Status: "queued"}, nil
+}
+
+func (r *canonicalIDReader) StartInvestigation(_ context.Context, in mcpcontract.StartInvestigationInput) (mcpcontract.InvestigationOutput, error) {
+	r.investigation = in
+	return mcpcontract.InvestigationOutput{ID: "inv-1", Owner: in.Owner, Repo: in.Repo}, nil
+}
+
+func (r *canonicalIDReader) CreateConcern(_ context.Context, in mcpcontract.CreateConcernInput) (mcpcontract.ConcernOutput, error) {
+	r.concern = in
+	return mcpcontract.ConcernOutput{ID: "concern-1", Owner: in.Owner, Repo: in.Repo}, nil
+}
+
+func (r *canonicalIDReader) InspectCommitChanges(_ context.Context, in mcpcontract.InspectCommitChangesInput) (mcpcontract.CommitInventoryOutput, error) {
+	r.commitInspect = in
+	return mcpcontract.CommitInventoryOutput{}, nil
+}
+
+func (r *canonicalIDReader) PlanSemanticCommits(_ context.Context, in mcpcontract.PlanSemanticCommitsInput) (mcpcontract.SemanticCommitPlanOutput, error) {
+	r.commitPlan = in
+	return mcpcontract.SemanticCommitPlanOutput{}, nil
+}
+
+type canonicalRepositoryReader struct {
+	*fakeReader
+	threadSearch   mcpcontract.SearchGitHubThreadsInput
+	sourceFiles    mcpcontract.ReadSourceFilesInput
+	portfolio      mcpcontract.SyncPortfolioInput
+	overlaps       mcpcontract.FindPortfolioOverlapsInput
+	checkWait      mcpcontract.WaitPullRequestChecksInput
+	feedbackIndex  mcpcontract.IndexPullRequestFeedbackInput
+	feedbackSearch mcpcontract.SearchPullRequestFeedbackInput
+}
+
+func (r *canonicalRepositoryReader) SearchGitHubThreads(_ context.Context, in mcpcontract.SearchGitHubThreadsInput) (mcpcontract.SearchGitHubThreadsOutput, error) {
+	r.threadSearch = in
+	return mcpcontract.SearchGitHubThreadsOutput{}, nil
+}
+
+func (r *canonicalRepositoryReader) ReadSourceFiles(_ context.Context, in mcpcontract.ReadSourceFilesInput) (mcpcontract.ReadSourceFilesOutput, error) {
+	r.sourceFiles = in
+	return mcpcontract.ReadSourceFilesOutput{}, nil
+}
+
+func (*canonicalRepositoryReader) SyncRepositoryContext(context.Context, mcpcontract.SyncRepositoryContextInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-context", Status: "queued"}, nil
+}
+
+func (*canonicalRepositoryReader) SyncThreads(context.Context, mcpcontract.SyncThreadsInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-threads", Status: "queued"}, nil
+}
+
+func (*canonicalRepositoryReader) HydrateThreads(context.Context, mcpcontract.HydrateThreadsInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-hydrate", Status: "queued"}, nil
+}
+
+func (r *canonicalRepositoryReader) SyncPortfolio(_ context.Context, in mcpcontract.SyncPortfolioInput) (mcpcontract.JobReference, error) {
+	r.portfolio = in
+	return mcpcontract.JobReference{ID: "job-portfolio", Status: "queued"}, nil
+}
+
+func (r *canonicalRepositoryReader) FindPortfolioOverlaps(_ context.Context, in mcpcontract.FindPortfolioOverlapsInput) (mcpcontract.FindPortfolioOverlapsOutput, error) {
+	r.overlaps = in
+	return mcpcontract.FindPortfolioOverlapsOutput{}, nil
+}
+
+func (*canonicalRepositoryReader) ListPullRequestPortfolio(context.Context, mcpcontract.ListPullRequestPortfolioInput) (mcpcontract.ListPullRequestPortfolioOutput, error) {
+	return mcpcontract.ListPullRequestPortfolioOutput{}, nil
+}
+
+func (r *canonicalRepositoryReader) WaitPullRequestChecks(_ context.Context, in mcpcontract.WaitPullRequestChecksInput) (mcpcontract.JobReference, error) {
+	r.checkWait = in
+	return mcpcontract.JobReference{ID: "job-checks", Status: "queued"}, nil
+}
+
+func (r *canonicalRepositoryReader) IndexPullRequestFeedback(_ context.Context, in mcpcontract.IndexPullRequestFeedbackInput) (mcpcontract.JobReference, error) {
+	r.feedbackIndex = in
+	return mcpcontract.JobReference{ID: "job-feedback", Status: "queued"}, nil
+}
+
+func (r *canonicalRepositoryReader) SearchPullRequestFeedback(_ context.Context, in mcpcontract.SearchPullRequestFeedbackInput) (mcpcontract.SearchPullRequestFeedbackOutput, error) {
+	r.feedbackSearch = in
+	return mcpcontract.SearchPullRequestFeedbackOutput{}, nil
+}
+
 var _ PublishedDraftVerifier = (*fakeReader)(nil)
 var _ ValidationReceiptOperator = (*fakeReader)(nil)
 
@@ -41,20 +197,20 @@ func (f *fakeReader) recordCall(name string) {
 var _ WorkspaceCreator = (*fakeReader)(nil)
 var _ WorkspaceAdopter = (*fakeReader)(nil)
 
-func (*fakeReader) PullRequestFeedbackResource(context.Context, string, string, int) (map[string]any, error) {
-	return map[string]any{"schema_version": "gitcontribute.pull-request-feedback.v1"}, nil
+func (*fakeReader) PullRequestFeedbackResource(context.Context, string, string, int) (mcpcontract.PullRequestFeedbackResource, error) {
+	return mcpcontract.PullRequestFeedbackResource{SchemaVersion: "gitcontribute.pull-request-feedback.v1"}, nil
 }
 
-func (*fakeReader) PullRequestFeedbackItemResource(context.Context, string, string, int, string, string) (map[string]any, error) {
-	return map[string]any{"schema_version": "gitcontribute.pull-request-feedback-item.v1"}, nil
+func (*fakeReader) PullRequestFeedbackItemResource(context.Context, string, string, int, string, string) (mcpcontract.PullRequestFeedbackItemResource, error) {
+	return mcpcontract.PullRequestFeedbackItemResource{SchemaVersion: "gitcontribute.pull-request-feedback-item.v1"}, nil
 }
 
-func (*fakeReader) CIFailureResource(context.Context, string, string, int) (map[string]any, error) {
-	return map[string]any{"schema_version": "gitcontribute.ci-failure-report.v1"}, nil
+func (*fakeReader) CIFailureResource(context.Context, string, string, int) (mcpcontract.CIFailureResource, error) {
+	return mcpcontract.NewCIFailureResource(json.RawMessage(`{}`), "acme", "project", 7, nil)
 }
 
-func (*fakeReader) CIJobLogResource(context.Context, string, string, int, int64) (map[string]any, error) {
-	return map[string]any{"schema_version": "gitcontribute.ci-job-log.v1", "body": "failure"}, nil
+func (*fakeReader) CIJobLogResource(context.Context, string, string, int, int64) (mcpcontract.CIJobLogResource, error) {
+	return mcpcontract.NewCIJobLogResource(31, "failure", false)
 }
 
 func (*fakeReader) IndexPullRequestFeedback(context.Context, mcpcontract.IndexPullRequestFeedbackInput) (mcpcontract.JobReference, error) {
@@ -69,8 +225,8 @@ func (*fakeReader) GetThreadFacets(_ context.Context, _ mcpcontract.GetThreadFac
 	return mcpcontract.GetThreadFacetsOutput{Status: "complete"}, nil
 }
 
-func (*fakeReader) ThreadFacetResource(context.Context, string, string, string, int, string) (map[string]any, error) {
-	return map[string]any{"schema_version": "gitcontribute.thread-facet.v1"}, nil
+func (*fakeReader) ThreadFacetResource(context.Context, string, string, string, int, string) (mcpcontract.ThreadFacetResource, error) {
+	return mcpcontract.ThreadFacetResource{SchemaVersion: "gitcontribute.thread-facet.v1"}, nil
 }
 
 func TestPullRequestWorkflowResourcesAreReadable(t *testing.T) {
@@ -93,8 +249,18 @@ func TestPullRequestWorkflowResourcesAreReadable(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", test.uri, err)
 		}
-		if got := value.(map[string]any)["schema_version"]; got != test.version {
-			t.Fatalf("%s schema_version=%v", test.uri, got)
+		payload, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var document struct {
+			SchemaVersion string `json:"schema_version"`
+		}
+		if err := json.Unmarshal(payload, &document); err != nil {
+			t.Fatal(err)
+		}
+		if document.SchemaVersion != test.version {
+			t.Fatalf("%s schema_version=%v", test.uri, document.SchemaVersion)
 		}
 	}
 }
@@ -674,6 +840,146 @@ func TestToolCancellationReachesReader(t *testing.T) {
 	cancel()
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("call error = %v, want context canceled", err)
+	}
+}
+
+func TestWriteBoundariesPassCanonicalIDsToOperators(t *testing.T) {
+	reader := &canonicalIDReader{fakeReader: &fakeReader{}}
+	server := &Server{reader: reader}
+	ctx := context.Background()
+
+	if _, _, err := server.defineValidation(ctx, nil, mcpcontract.DefineValidationInput{InvestigationID: " inv-1 ", Kind: "test", Command: "go test ./..."}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.createWorkspace(ctx, nil, mcpcontract.CreateWorkspaceInput{InvestigationID: " inv-1 "}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.verifyPublishedDraft(ctx, nil, mcpcontract.VerifyPublishedDraftInput{DraftID: " draft-1 ", Revision: 1, Kind: "issue", Number: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.recordHypothesis(ctx, nil, mcpcontract.RecordHypothesisInput{InvestigationID: " inv-1 ", Title: "title", Description: "description", Category: "bug"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.findRelatedWork(ctx, nil, mcpcontract.FindRelatedWorkInput{Target: " HYPOTHESIS ", ID: " hyp-1 ", Kinds: []string{"duplicates"}, Limit: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.promoteOpportunity(ctx, nil, mcpcontract.PromoteOpportunityInput{HypothesisID: " hyp-1 ", ProblemStatement: " problem ", Scope: " scope ", Impact: " impact ", ExpectedEffort: " small "}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.prepareContribution(ctx, nil, mcpcontract.PrepareContributionInput{OpportunityID: " opp-1 ", Kind: "issue"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.prepareContribution(ctx, nil, mcpcontract.PrepareContributionInput{OpportunityID: " opp-2 ", Kind: "pull_request", WorkspaceID: " ws-1 ", Approach: " approach "}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.exportManifest(ctx, nil, mcpcontract.ExportManifestInput{OpportunityID: " opp-1 ", PullRequest: &mcpcontract.ManifestPullRequestInput{Owner: " acme ", Repo: " rocket ", Number: 7}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.attachJUnitReport(ctx, nil, mcpcontract.AttachJUnitReportInput{RunID: " run-1 ", ReportXML: "<testsuite/>"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.explainMatch(ctx, nil, mcpcontract.ExplainMatchInput{Owner: " acme ", Repo: " rocket ", Kind: " code ", Path: " main.go ", Commit: " abc123 "}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.buildRepositoryDossier(ctx, nil, mcpcontract.BuildRepositoryDossierInput{Owner: " acme ", Repo: " rocket "}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.startInvestigation(ctx, nil, mcpcontract.StartInvestigationInput{Owner: " acme ", Repo: " rocket ", CommitSHA: " abc123 ", Lens: " reliability "}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.createConcern(ctx, nil, mcpcontract.CreateConcernInput{Owner: " acme ", Repo: " rocket ", CommitSHA: " abc123 ", Title: "title", ProblemStatement: "problem"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if reader.validation.InvestigationID != "inv-1" || reader.workspace.InvestigationID != "inv-1" || reader.hypothesis.InvestigationID != "inv-1" {
+		t.Fatalf("investigation IDs were not canonical: validation=%q workspace=%q hypothesis=%q", reader.validation.InvestigationID, reader.workspace.InvestigationID, reader.hypothesis.InvestigationID)
+	}
+	if reader.verification.DraftID != "draft-1" || reader.relatedWork.ID != "hyp-1" || reader.relatedWork.Target != "hypothesis" || reader.promotion.HypothesisID != "hyp-1" {
+		t.Fatalf("workflow IDs were not canonical: verification=%q related=%q/%q promotion=%q", reader.verification.DraftID, reader.relatedWork.Target, reader.relatedWork.ID, reader.promotion.HypothesisID)
+	}
+	if reader.promotion.ProblemStatement != "problem" || reader.promotion.Scope != "scope" || reader.promotion.Impact != "impact" || reader.promotion.ExpectedEffort != "small" {
+		t.Fatalf("opportunity fields were not canonical: %+v", reader.promotion)
+	}
+	if reader.contribution.OpportunityID != "opp-2" || reader.contribution.WorkspaceID != "ws-1" || reader.contribution.Approach != "approach" || reader.manifest.OpportunityID != "opp-1" {
+		t.Fatalf("opportunity IDs were not canonical: contribution=%q manifest=%q", reader.contribution.OpportunityID, reader.manifest.OpportunityID)
+	}
+	if reader.manifest.PullRequest == nil || reader.manifest.PullRequest.Owner != "acme" || reader.manifest.PullRequest.Repo != "rocket" || reader.junit.RunID != "run-1" {
+		t.Fatalf("manifest and validation identities were not canonical: manifest=%+v junit=%+v", reader.manifest.PullRequest, reader.junit)
+	}
+	if reader.explanation.Owner != "acme" || reader.explanation.Repo != "rocket" || reader.explanation.Path != "main.go" || reader.explanation.Commit != "abc123" {
+		t.Fatalf("explanation identity was not canonical: %+v", reader.explanation)
+	}
+	if reader.dossier.Owner != "acme" || reader.dossier.Repo != "rocket" || reader.investigation.Owner != "acme" || reader.investigation.Repo != "rocket" || reader.investigation.CommitSHA != "abc123" || reader.investigation.Lens != "reliability" {
+		t.Fatalf("repository workflow identities were not canonical: dossier=%+v investigation=%+v", reader.dossier, reader.investigation)
+	}
+	if reader.concern.Owner != "acme" || reader.concern.Repo != "rocket" || reader.concern.CommitSHA != "abc123" {
+		t.Fatalf("concern identity was not canonical: %+v", reader.concern)
+	}
+}
+
+func TestCommitPlanningBoundariesPassCanonicalInventoryIdentity(t *testing.T) {
+	reader := &canonicalIDReader{fakeReader: &fakeReader{}}
+	server := &Server{reader: reader}
+	ctx := context.Background()
+
+	if _, _, err := server.inspectCommitChanges(ctx, nil, mcpcontract.InspectCommitChangesInput{WorkspaceID: " ws-1 "}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.planSemanticCommits(ctx, nil, mcpcontract.PlanSemanticCommitsInput{WorkspaceID: " ws-1 ", ExpectedInventorySHA256: " inventory-sha "}); err != nil {
+		t.Fatal(err)
+	}
+	if reader.commitInspect.WorkspaceID != "ws-1" || reader.commitPlan.WorkspaceID != "ws-1" || reader.commitPlan.ExpectedInventorySHA256 != "inventory-sha" {
+		t.Fatalf("commit inventory identity was not canonical: inspect=%+v plan=%+v", reader.commitInspect, reader.commitPlan)
+	}
+}
+
+func TestLiveRepositoryBoundariesPassCanonicalReferencesToOperators(t *testing.T) {
+	reader := &canonicalRepositoryReader{fakeReader: &fakeReader{}}
+	server := &Server{reader: reader}
+	ctx := context.Background()
+
+	if _, _, err := server.searchGitHubThreads(ctx, nil, mcpcontract.SearchGitHubThreadsInput{Repository: mcpcontract.RepositoryRef{Owner: " acme ", Repo: " rocket "}, Query: " regression "}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.readSourceFiles(ctx, nil, mcpcontract.ReadSourceFilesInput{Repository: mcpcontract.RepositoryRef{Owner: " acme ", Repo: " rocket "}, Ref: " main ", Files: []mcpcontract.SourceFileRequest{{Path: "README.md"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.syncPortfolio(ctx, nil, mcpcontract.SyncPortfolioInput{Selection: "authored", Repository: &mcpcontract.RepositoryRef{Owner: " acme ", Repo: " rocket "}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.findPortfolioOverlaps(ctx, nil, mcpcontract.FindPortfolioOverlapsInput{
+		Candidates:   []mcpcontract.PortfolioSubjectInput{{Kind: " opportunity ", Ref: " opp-1 "}},
+		PullRequests: []mcpcontract.ThreadRef{{Owner: " acme ", Repo: " rocket ", Number: 7}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.waitPullRequestChecks(ctx, nil, mcpcontract.WaitPullRequestChecksInput{Owner: " acme ", Repo: " rocket ", Number: 7, ExpectedHeadSHA: " abc123 "}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.indexPullRequestFeedback(ctx, nil, mcpcontract.IndexPullRequestFeedbackInput{Repository: mcpcontract.RepositoryRef{Owner: " acme ", Repo: " rocket "}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := server.searchPullRequestFeedback(ctx, nil, mcpcontract.SearchPullRequestFeedbackInput{Repository: mcpcontract.RepositoryRef{Owner: " acme ", Repo: " rocket "}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if reader.threadSearch.Repository.Owner != "acme" || reader.threadSearch.Repository.Repo != "rocket" || reader.threadSearch.Query != "regression" {
+		t.Fatalf("thread-search boundary = %+v", reader.threadSearch)
+	}
+	if reader.sourceFiles.Repository.Owner != "acme" || reader.sourceFiles.Repository.Repo != "rocket" || reader.sourceFiles.Ref != "main" {
+		t.Fatalf("source-file boundary = %+v", reader.sourceFiles)
+	}
+	if reader.portfolio.Repository == nil || reader.portfolio.Repository.Owner != "acme" || reader.portfolio.Repository.Repo != "rocket" {
+		t.Fatalf("portfolio boundary = %+v", reader.portfolio)
+	}
+	if len(reader.overlaps.Candidates) != 1 || reader.overlaps.Candidates[0].Kind != "opportunity" || reader.overlaps.Candidates[0].Ref != "opp-1" || reader.overlaps.PullRequests[0].Owner != "acme" || reader.overlaps.PullRequests[0].Repo != "rocket" {
+		t.Fatalf("portfolio overlap boundary = %+v", reader.overlaps)
+	}
+	if reader.checkWait.Owner != "acme" || reader.checkWait.Repo != "rocket" || reader.checkWait.ExpectedHeadSHA != "abc123" {
+		t.Fatalf("pull-request check boundary = %+v", reader.checkWait)
+	}
+	if reader.feedbackIndex.Repository.Owner != "acme" || reader.feedbackIndex.Repository.Repo != "rocket" || reader.feedbackSearch.Repository.Owner != "acme" || reader.feedbackSearch.Repository.Repo != "rocket" {
+		t.Fatalf("pull-request feedback boundaries: index=%+v search=%+v", reader.feedbackIndex, reader.feedbackSearch)
 	}
 }
 

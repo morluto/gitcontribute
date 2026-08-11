@@ -18,7 +18,7 @@ func TestPortfolioReadRejectsInvalidStoredThreadProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	thread, err := c.UpsertThread(ctx, Thread{
-		RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 1, State: string(domain.OpenState),
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 1, State: domain.OpenState,
 		Title: "invalid projection fixture", SourceCreatedAt: now, SourceUpdatedAt: now,
 	}, `{}`)
 	if err != nil {
@@ -27,7 +27,7 @@ func TestPortfolioReadRejectsInvalidStoredThreadProjection(t *testing.T) {
 	if _, err := c.db.ExecContext(ctx, `UPDATE threads SET state = 'invented' WHERE id = ?`, thread.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ListPullRequestPortfolioPage(ctx, "", "all", nil, 10); err == nil {
+	if _, err := c.ListPullRequestPortfolioPage(ctx, "", AnyThreadState(), nil, 10); err == nil {
 		t.Fatal("portfolio read accepted an invalid stored thread projection")
 	}
 }

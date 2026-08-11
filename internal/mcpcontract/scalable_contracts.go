@@ -115,8 +115,8 @@ type RepositoryMetadataOutput struct {
 	Recovery        *RecoveryPlan `json:"recovery,omitempty"`
 }
 
-// TypedRepositoryOutput contains repository facts with explicit metadata coverage.
-type TypedRepositoryOutput struct {
+// RepositoryOutput contains repository facts with explicit metadata coverage.
+type RepositoryOutput struct {
 	Ref           string                   `json:"ref"`
 	Owner         string                   `json:"owner"`
 	Repo          string                   `json:"repo"`
@@ -140,9 +140,9 @@ type TypedRepositoryOutput struct {
 // GetRepositoriesOutput preserves repository input order and represents
 // unobserved metadata with nullable facts instead of false zero values.
 type GetRepositoriesOutput struct {
-	Status        string                             `json:"batch_status"`
-	Items         []BatchItem[TypedRepositoryOutput] `json:"items"`
-	SnapshotToken string                             `json:"snapshot_token"`
+	Status        string                        `json:"batch_status"`
+	Items         []BatchItem[RepositoryOutput] `json:"items"`
+	SnapshotToken string                        `json:"snapshot_token"`
 }
 
 // GetThreadsInput selects exact threads and the desired response view.

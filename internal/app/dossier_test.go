@@ -59,7 +59,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 	base := time.Unix(2000, 0).UTC()
 	if _, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
 		RepositoryID:    repo.ID,
-		Kind:            corpus.ThreadKindPullRequest,
+		Kind:            domain.PullRequestKind,
 		Number:          10,
 		State:           "closed",
 		Title:           "fix(pkg/parser): resolve crash",
@@ -76,7 +76,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 
 	if _, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
 		RepositoryID:    repo.ID,
-		Kind:            corpus.ThreadKindPullRequest,
+		Kind:            domain.PullRequestKind,
 		Number:          9,
 		State:           "closed",
 		Title:           "feat(ui): add button",
@@ -93,7 +93,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 
 	if _, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
 		RepositoryID:    repo.ID,
-		Kind:            corpus.ThreadKindPullRequest,
+		Kind:            domain.PullRequestKind,
 		Number:          8,
 		State:           "closed",
 		Title:           "header-only closed pull request",
@@ -106,7 +106,7 @@ func TestBuildAndGetRepositoryDossier(t *testing.T) {
 
 	if _, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
 		RepositoryID:    repo.ID,
-		Kind:            corpus.ThreadKindIssue,
+		Kind:            domain.IssueKind,
 		Number:          1,
 		State:           "open",
 		Title:           "parser crashes on empty input",
@@ -187,7 +187,7 @@ func TestCorpusReaderDoesNotTruncateRepositoriesAboveOneThousandThreads(t *testi
 	for number := 1; number <= 1001; number++ {
 		if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
 			RepositoryID:    repo.ID,
-			Kind:            corpus.ThreadKindIssue,
+			Kind:            domain.IssueKind,
 			Number:          number,
 			State:           "open",
 			Title:           fmt.Sprintf("issue %d", number),
@@ -244,7 +244,7 @@ func TestExtractSeeds(t *testing.T) {
 	base := time.Unix(2000, 0).UTC()
 	if _, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
 		RepositoryID:    repo.ID,
-		Kind:            corpus.ThreadKindPullRequest,
+		Kind:            domain.PullRequestKind,
 		Number:          5,
 		State:           "closed",
 		Title:           "fix(pkg/parser): resolve crash",
@@ -261,7 +261,7 @@ func TestExtractSeeds(t *testing.T) {
 
 	if _, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
 		RepositoryID:    repo.ID,
-		Kind:            corpus.ThreadKindPullRequest,
+		Kind:            domain.PullRequestKind,
 		Number:          4,
 		State:           "closed",
 		Title:           "feat(ui): add button",
@@ -276,7 +276,7 @@ func TestExtractSeeds(t *testing.T) {
 		t.Fatalf("upsert closed pr: %v", err)
 	}
 	if _, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 3,
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 3,
 		State: "closed", Title: "header-only closed PR", SourceCreatedAt: base, SourceUpdatedAt: base.Add(2 * time.Hour),
 	}, `{}`); err != nil {
 		t.Fatalf("upsert unknown-merge pr: %v", err)
@@ -284,7 +284,7 @@ func TestExtractSeeds(t *testing.T) {
 
 	if _, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
 		RepositoryID:    repo.ID,
-		Kind:            corpus.ThreadKindIssue,
+		Kind:            domain.IssueKind,
 		Number:          1,
 		State:           "open",
 		Title:           "parser crashes on empty input",
@@ -298,7 +298,7 @@ func TestExtractSeeds(t *testing.T) {
 	}
 	if _, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
 		RepositoryID:    repo.ID,
-		Kind:            corpus.ThreadKindIssue,
+		Kind:            domain.IssueKind,
 		Number:          2,
 		State:           "closed",
 		StateReason:     "not_planned",
@@ -422,42 +422,42 @@ func TestSeedPolarityUsesOnlyStructuredOutcomeEvidence(t *testing.T) {
 	}{
 		{
 			name:       "merged PR remains positive despite rejection text",
-			thread:     corpus.Thread{Kind: corpus.ThreadKindPullRequest, State: "closed", Merge: domain.MergedStatus(time.Time{}), Title: "rejected experiment"},
+			thread:     corpus.Thread{Kind: domain.PullRequestKind, State: "closed", Merge: domain.MergedStatus(time.Time{}), Title: "rejected experiment"},
 			class:      domain.SeedSourceClassMergedPR,
 			want:       domain.SeedPolarityPositive,
 			wantReason: "GitHub reports this pull request was merged",
 		},
 		{
 			name:       "closed unmerged PR is negative",
-			thread:     corpus.Thread{Kind: corpus.ThreadKindPullRequest, State: "closed", Merge: domain.UnmergedStatus()},
+			thread:     corpus.Thread{Kind: domain.PullRequestKind, State: "closed", Merge: domain.UnmergedStatus()},
 			class:      domain.SeedSourceClassClosedUnmergedPR,
 			want:       domain.SeedPolarityNegative,
 			wantReason: "GitHub reports this pull request was closed without merging",
 		},
 		{
 			name:       "issue text cannot imply rejection",
-			thread:     corpus.Thread{Kind: corpus.ThreadKindIssue, State: "closed", StateReason: "completed", Title: "rejected idea", Body: "superseded elsewhere"},
+			thread:     corpus.Thread{Kind: domain.IssueKind, State: "closed", StateReason: "completed", Title: "rejected idea", Body: "superseded elsewhere"},
 			class:      domain.SeedSourceClassIssue,
 			want:       domain.SeedPolarityContext,
 			wantReason: "issue evidence provides problem context, not an implementation outcome",
 		},
 		{
 			name:       "open issue rejection label remains context",
-			thread:     corpus.Thread{Kind: corpus.ThreadKindIssue, State: "open", Labels: []string{"duplicate"}},
+			thread:     corpus.Thread{Kind: domain.IssueKind, State: "open", Labels: []string{"duplicate"}},
 			class:      domain.SeedSourceClassIssue,
 			want:       domain.SeedPolarityContext,
 			wantReason: "issue evidence provides problem context, not an implementation outcome",
 		},
 		{
 			name:       "not planned issue is negative",
-			thread:     corpus.Thread{Kind: corpus.ThreadKindIssue, State: "closed", StateReason: "not_planned"},
+			thread:     corpus.Thread{Kind: domain.IssueKind, State: "closed", StateReason: "not_planned"},
 			class:      domain.SeedSourceClassIssue,
 			want:       domain.SeedPolarityNegative,
 			wantReason: "GitHub reports this issue was closed as not planned",
 		},
 		{
 			name:       "closed duplicate issue is negative",
-			thread:     corpus.Thread{Kind: corpus.ThreadKindIssue, State: "closed", StateReason: "completed", Labels: []string{"Duplicate"}},
+			thread:     corpus.Thread{Kind: domain.IssueKind, State: "closed", StateReason: "completed", Labels: []string{"Duplicate"}},
 			class:      domain.SeedSourceClassIssue,
 			want:       domain.SeedPolarityNegative,
 			wantReason: "closed issue has rejection or supersession label: Duplicate",
@@ -499,7 +499,7 @@ func TestExtractSeedsRequiresNoNetwork(t *testing.T) {
 
 	if _, err := upsertThread(ctx, svc.corpus, repo.ID, corpus.Thread{
 		RepositoryID:    repo.ID,
-		Kind:            corpus.ThreadKindIssue,
+		Kind:            domain.IssueKind,
 		Number:          1,
 		State:           "open",
 		Title:           "a bug",

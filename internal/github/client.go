@@ -11,6 +11,7 @@ import (
 	"time"
 
 	gh "github.com/google/go-github/v89/github"
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 const (
@@ -321,7 +322,7 @@ func (c *Client) ListPullRequests(ctx context.Context, owner, name string, opts 
 	}
 	pullRequests := make([]Issue, 0, len(result.Items))
 	for _, item := range result.Items {
-		if item.Kind == ThreadKindPullRequest {
+		if item.Kind == domain.PullRequestKind {
 			pullRequests = append(pullRequests, item)
 		}
 	}
@@ -610,10 +611,10 @@ func convertIssue(i *gh.Issue) Issue {
 	if i == nil {
 		return Issue{}
 	}
-	kind := ThreadKindIssue
+	kind := domain.IssueKind
 	prURL := ""
 	if i.PullRequestLinks != nil {
-		kind = ThreadKindPullRequest
+		kind = domain.PullRequestKind
 		prURL = i.PullRequestLinks.GetHTMLURL()
 	}
 	owner, repo := repositoryFromAPIURL(i.GetRepositoryURL())

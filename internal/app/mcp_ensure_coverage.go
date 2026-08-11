@@ -2,18 +2,32 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/facets"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/repositorycontext"
 )
 
 const jobKindEnsureCoverage = "ensure_coverage"
+
+type coverageSnapshotVersions struct {
+	Coverage string `json:"coverage"`
+}
+
+type coverageSnapshotCompleteness struct {
+	Unknown    bool `json:"unknown"`
+	Incomplete bool `json:"incomplete"`
+}
+
+type coverageSnapshotProvenance struct {
+	Producer string `json:"producer"`
+	Workflow string `json:"workflow"`
+}
 
 // EnsureCoverage submits one durable workflow that owns repository bootstrap,
 // header synchronization, selected facet hydration, verification, and an
@@ -78,39 +92,12 @@ func (r *MCPReader) ReadSnapshot(ctx context.Context, token string) (mcpcontract
 	if err != nil {
 		return mcpcontract.CorpusSnapshotArtifact{}, err
 	}
-	decode := func(raw json.RawMessage) (any, error) {
-		var out any
-		if err := json.Unmarshal(raw, &out); err != nil {
-			return nil, err
-		}
-		return out, nil
-	}
-	scope, err := decode(value.Scope)
-	if err != nil {
-		return mcpcontract.CorpusSnapshotArtifact{}, fmt.Errorf("decode snapshot scope: %w", err)
-	}
-	derived, err := decode(value.DerivedVersions)
-	if err != nil {
-		return mcpcontract.CorpusSnapshotArtifact{}, fmt.Errorf("decode snapshot derived versions: %w", err)
-	}
-	completeness, err := decode(value.Completeness)
-	if err != nil {
-		return mcpcontract.CorpusSnapshotArtifact{}, fmt.Errorf("decode snapshot completeness: %w", err)
-	}
-	provenance, err := decode(value.Provenance)
-	if err != nil {
-		return mcpcontract.CorpusSnapshotArtifact{}, fmt.Errorf("decode snapshot provenance: %w", err)
-	}
-	payload, err := decode(value.Payload)
-	if err != nil {
-		return mcpcontract.CorpusSnapshotArtifact{}, fmt.Errorf("decode snapshot payload: %w", err)
-	}
 	return mcpcontract.CorpusSnapshotArtifact{
 		SnapshotToken: value.Token, ContractVersion: value.ContractVersion,
-		ObservationWatermark: value.ObservationWatermark, Scope: scope,
-		SourceManifestSHA256: value.SourceManifestSHA256, DerivedVersions: derived,
-		Completeness: completeness, Provenance: provenance, ArtifactKind: value.ArtifactKind,
-		ArtifactDigest: value.ArtifactDigest, Payload: payload, CreatedAt: value.CreatedAt.Format(time.RFC3339Nano),
+		ObservationWatermark: value.ObservationWatermark, Scope: value.Scope,
+		SourceManifestSHA256: value.SourceManifestSHA256, DerivedVersions: value.DerivedVersions,
+		Completeness: value.Completeness, Provenance: value.Provenance, ArtifactKind: value.ArtifactKind,
+		ArtifactDigest: value.ArtifactDigest, Payload: value.Payload, CreatedAt: value.CreatedAt.Format(time.RFC3339Nano),
 	}, nil
 }
 
@@ -142,7 +129,11 @@ func (r *MCPReader) ensureCoverage(ctx context.Context, in mcpcontract.EnsureCov
 		if remaining < cost {
 			return result, fmt.Errorf("max_requests is too small for repository bootstrap: need at least %d", cost)
 		}
-		if _, err := r.syncRepositoryContext(ctx, mcpcontract.SyncRepositoryContextInput{Repositories: []mcpcontract.RepositoryRef{repo}, MaxRequests: cost}, report); err != nil {
+		request, err := newRepositoryContextSyncRequest([]domain.RepoRef{repoRef}, cost)
+		if err != nil {
+			return result, err
+		}
+		if _, err := r.syncRepositoryContext(ctx, request, report); err != nil {
 			return result, err
 		}
 		remaining -= cost
@@ -174,8 +165,8 @@ func (r *MCPReader) ensureCoverage(ctx context.Context, in mcpcontract.EnsureCov
 		return result, err
 	}
 	remaining -= headerRequests
-	threadStatus, _ := threadResult["status"].(string)
-	if threadStatus == "partial" {
+	threadStatus := string(threadResult.Status)
+	if threadResult.Status == batchOperationPartial {
 		result.Status, result.Incomplete = "partial", true
 	}
 	stage("thread_headers", threadStatus, "thread headers synchronized after repository bootstrap")
@@ -191,8 +182,8 @@ func (r *MCPReader) ensureCoverage(ctx context.Context, in mcpcontract.EnsureCov
 		if err != nil {
 			return result, err
 		}
-		facetStatus, _ := facetResult["status"].(string)
-		if facetStatus == "partial" {
+		facetStatus := string(facetResult.Status)
+		if facetResult.Status == batchOperationPartial {
 			result.Status, result.Incomplete = "partial", true
 		}
 		stage("selected_facets", facetStatus, "selected exact-thread facets synchronized")
@@ -213,7 +204,15 @@ func (r *MCPReader) ensureCoverage(ctx context.Context, in mcpcontract.EnsureCov
 		result.Status = "partial"
 	}
 	stage("coverage_verification", result.Status, afterReason)
-	snapshot, err := c.MaterializeReadSnapshot(ctx, corpus.SnapshotMaterialization{Kind: "coverage", Scope: target.wire(), SourceManifest: after, DerivedVersions: map[string]string{"coverage": "v1"}, Completeness: map[string]bool{"unknown": result.Unknown, "incomplete": result.Incomplete}, Provenance: map[string]any{"producer": "gitcontribute", "workflow": jobKindEnsureCoverage}, Payload: after})
+	materialization, err := corpus.NewSnapshotMaterialization(
+		"coverage", target.wire(), after, coverageSnapshotVersions{Coverage: "v1"},
+		coverageSnapshotCompleteness{Unknown: result.Unknown, Incomplete: result.Incomplete},
+		coverageSnapshotProvenance{Producer: "gitcontribute", Workflow: jobKindEnsureCoverage}, after,
+	)
+	if err != nil {
+		return result, err
+	}
+	snapshot, err := c.MaterializeReadSnapshot(ctx, materialization)
 	if err != nil {
 		return result, err
 	}

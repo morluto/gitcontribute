@@ -45,13 +45,13 @@ func TestRepositoryInventoryCountsAndSizes(t *testing.T) {
 
 	repo, err := c.ApplyRepositoryObservation(ctx, owner, name, "1", time.Unix(1, 0).UTC(), `{}`)
 	requireInventorySetup(t, "apply repository", err)
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "issue one", "body", "a", time.Unix(10, 0).UTC(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "issue one", "body", "a", time.Unix(10, 0).UTC(), `{}`); err != nil {
 		t.Fatalf("apply issue 1: %v", err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 2, "open", "issue two", "body", "a", time.Unix(11, 0).UTC(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 2, "open", "issue two", "body", "a", time.Unix(11, 0).UTC(), `{}`); err != nil {
 		t.Fatalf("apply issue 2: %v", err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindPullRequest, 3, "open", "pr one", "body", "a", time.Unix(12, 0).UTC(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.PullRequestKind, 3, "open", "pr one", "body", "a", time.Unix(12, 0).UTC(), `{}`); err != nil {
 		t.Fatalf("apply pr: %v", err)
 	}
 
@@ -151,7 +151,7 @@ func TestListInventoryAggregatesEveryRepositoryScopeAndFreshness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindPullRequest, 1, "open", "pr", "body", "author", time.Unix(20, 0).UTC(), `{"thread":true}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.PullRequestKind, 1, "open", "pr", "body", "author", time.Unix(20, 0).UTC(), `{"thread":true}`); err != nil {
 		t.Fatal(err)
 	}
 	run, err := c.StartRun(ctx, "sync")
@@ -211,7 +211,7 @@ func TestCodeSnapshotPrunePreservesLatestN(t *testing.T) {
 
 	repo, err := c.ApplyRepositoryObservation(ctx, owner, name, "1", time.Unix(1, 0).UTC(), `{}`)
 	requireInventorySetup(t, "apply repository", err)
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "issue", "body", "a", time.Unix(10, 0).UTC(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "issue", "body", "a", time.Unix(10, 0).UTC(), `{}`); err != nil {
 		t.Fatalf("apply issue: %v", err)
 	}
 

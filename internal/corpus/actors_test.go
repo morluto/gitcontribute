@@ -2,9 +2,28 @@ package corpus
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 )
+
+func mustActorSearch(t *testing.T, input ActorSearchInput) ActorSearchRequest {
+	t.Helper()
+	request, err := ParseActorSearch(input)
+	if err != nil {
+		t.Fatalf("parse actor search: %v", err)
+	}
+	return request
+}
+
+func mustContributionSearch(t *testing.T, input ContributionSearchInput) ContributionSearchRequest {
+	t.Helper()
+	request, err := ParseContributionSearch(input)
+	if err != nil {
+		t.Fatalf("parse contribution search: %v", err)
+	}
+	return request
+}
 
 func TestActorProfileObservationReconcilesLoginToNodeIDAndPreservesNewerProjection(t *testing.T) {
 	t.Parallel()
@@ -45,11 +64,11 @@ func TestActorProfileObservationReconcilesLoginToNodeIDAndPreservesNewerProjecti
 	if _, err := c.ApplyActorIdentityObservation(ctx, "github", "mona", "U_1", &one, "user", "public", time.Unix(23, 0).UTC(), nil); err != nil {
 		t.Fatal(err)
 	}
-	machine, err := c.SearchActors(ctx, ActorSearchOptions{Query: "machine", Limit: 10})
+	machine, err := c.SearchActors(ctx, mustActorSearch(t, ActorSearchInput{Query: "machine", Limit: 10}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	gardening, err := c.SearchActors(ctx, ActorSearchOptions{Query: "gardening", Limit: 10})
+	gardening, err := c.SearchActors(ctx, mustActorSearch(t, ActorSearchInput{Query: "gardening", Limit: 10}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,21 +190,21 @@ func TestSearchActorsReturnsNullableProfilesAndBoundedCursor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	page, err := c.SearchActors(ctx, ActorSearchOptions{Query: "machine", Sort: "followers", Limit: 1})
+	page, err := c.SearchActors(ctx, mustActorSearch(t, ActorSearchInput{Query: "machine", Sort: "followers", Limit: 1}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(page.Actors) != 1 || page.Total != 2 || page.NextCursor == "" || page.Actors[0].Login != "alice" {
 		t.Fatalf("first page = %+v", page)
 	}
-	next, err := c.SearchActors(ctx, ActorSearchOptions{Query: "machine", Sort: "followers", Limit: 1, Cursor: page.NextCursor})
+	next, err := c.SearchActors(ctx, mustActorSearch(t, ActorSearchInput{Query: "machine", Sort: "followers", Limit: 1, Cursor: page.NextCursor}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(next.Actors) != 1 || next.Actors[0].Login != "alicia" {
 		t.Fatalf("next page = %+v", next)
 	}
-	if _, err := c.SearchActors(ctx, ActorSearchOptions{Query: "machine", Kinds: []string{"bot"}, Sort: "followers", Limit: 1, Cursor: page.NextCursor}); err == nil {
+	if _, err := c.SearchActors(ctx, mustActorSearch(t, ActorSearchInput{Query: "machine", Kinds: []string{"bot"}, Sort: "followers", Limit: 1, Cursor: page.NextCursor})); err == nil {
 		t.Fatal("actor cursor was accepted with a different kind filter")
 	}
 }
@@ -213,14 +232,14 @@ func TestActorContributionSearchBindsCursorToFilters(t *testing.T) {
 	if err := c.ApplyActorContributionPeriod(ctx, ActorContributionPeriodInput{ActorID: actor.ID, From: from, To: from.Add(24 * time.Hour), OrganizationNodeID: "O_acme", Complete: true, ObservedAt: from.Add(26 * time.Hour), SourceUpdatedAt: from.Add(24 * time.Hour), Items: items}); err != nil {
 		t.Fatal(err)
 	}
-	page, err := c.SearchActorContributions(ctx, ContributionSearchOptions{ActorRefs: []string{"alice"}, RepositoryRefs: []string{"acme/ml"}, Sort: "occurred_at", Limit: 1})
+	page, err := c.SearchActorContributions(ctx, mustContributionSearch(t, ContributionSearchInput{ActorRefs: []string{"alice"}, RepositoryRefs: []string{"acme/ml"}, Sort: "occurred_at", Limit: 1}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(page.Items) != 1 || page.Total != 2 || page.NextCursor == "" || page.Items[0].Kind != "issue" {
 		t.Fatalf("page = %+v", page)
 	}
-	organizationPage, err := c.SearchActorContributions(ctx, ContributionSearchOptions{ActorRefs: []string{"alice"}, OrganizationNodeID: "O_acme", Sort: "occurred_at", Limit: 10})
+	organizationPage, err := c.SearchActorContributions(ctx, mustContributionSearch(t, ContributionSearchInput{ActorRefs: []string{"alice"}, OrganizationNodeID: "O_acme", Sort: "occurred_at", Limit: 10}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +247,7 @@ func TestActorContributionSearchBindsCursorToFilters(t *testing.T) {
 		t.Fatalf("organization-scoped page = %+v", organizationPage)
 	}
 	for _, ref := range []string{actor.Key, actor.NodeID} {
-		exact, err := c.SearchActorContributions(ctx, ContributionSearchOptions{ActorRefs: []string{ref}, Sort: "occurred_at", Limit: 10})
+		exact, err := c.SearchActorContributions(ctx, mustContributionSearch(t, ContributionSearchInput{ActorRefs: []string{ref}, Sort: "occurred_at", Limit: 10}))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -236,7 +255,7 @@ func TestActorContributionSearchBindsCursorToFilters(t *testing.T) {
 			t.Fatalf("actor reference %q returned %+v", ref, exact)
 		}
 	}
-	if _, err := c.SearchActorContributions(ctx, ContributionSearchOptions{ActorRefs: []string{"alice"}, RepositoryRefs: []string{"other/repo"}, Sort: "occurred_at", Limit: 1, Cursor: page.NextCursor}); err == nil {
+	if _, err := c.SearchActorContributions(ctx, mustContributionSearch(t, ContributionSearchInput{ActorRefs: []string{"alice"}, RepositoryRefs: []string{"other/repo"}, Sort: "occurred_at", Limit: 1, Cursor: page.NextCursor})); err == nil {
 		t.Fatal("cursor was accepted with different repository filters")
 	}
 	covered, err := c.GetActorContributionCoverage(ctx, actor.ID, "", from.Add(time.Hour), from.Add(12*time.Hour))
@@ -260,7 +279,7 @@ func TestActorContributionSearchBindsCursorToFilters(t *testing.T) {
 	if retained == nil || !retained.Complete {
 		t.Fatalf("partial refresh replaced complete coverage: %+v", retained)
 	}
-	pageAfterPartial, err := c.SearchActorContributions(ctx, ContributionSearchOptions{ActorRefs: []string{"alice"}, Sort: "occurred_at", Limit: 10})
+	pageAfterPartial, err := c.SearchActorContributions(ctx, mustContributionSearch(t, ContributionSearchInput{ActorRefs: []string{"alice"}, Sort: "occurred_at", Limit: 10}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,6 +292,44 @@ func TestActorContributionSearchBindsCursorToFilters(t *testing.T) {
 	}
 	if organizationCovered == nil {
 		t.Fatal("organization-scoped period was not recognized as covered")
+	}
+}
+
+func TestActorContributionKindsAreParsedAtStorageBoundaries(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	actor, err := c.ApplyActorIdentityObservation(ctx, "github", "alice", "U_alice", nil, "user", "public", time.Unix(1, 0).UTC(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	input := ActorContributionPeriodInput{
+		ActorID: actor.ID, From: from, To: from.Add(24 * time.Hour), Complete: true,
+		ObservedAt: from.Add(25 * time.Hour), SourceUpdatedAt: from.Add(24 * time.Hour),
+		Items: []ActorContributionItem{{Kind: " Future_Category ", OccurredAt: from.Add(time.Hour), Count: 1}},
+	}
+	if err := c.ApplyActorContributionPeriod(ctx, input); err != nil {
+		t.Fatal(err)
+	}
+	page, err := c.SearchActorContributions(ctx, mustContributionSearch(t, ContributionSearchInput{Kinds: []string{"FUTURE_CATEGORY"}, Limit: 10}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Kind.String() != "future_category" {
+		t.Fatalf("canonical contribution page = %+v", page)
+	}
+
+	input.SourceUpdatedAt = input.SourceUpdatedAt.Add(time.Hour)
+	input.Items = []ActorContributionItem{{}}
+	if err := c.ApplyActorContributionPeriod(ctx, input); err == nil {
+		t.Fatal("empty contribution kind was stored")
+	}
+	if _, err := c.db.ExecContext(ctx, `UPDATE actor_contribution_items SET contribution_kind=''`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.SearchActorContributions(ctx, mustContributionSearch(t, ContributionSearchInput{Limit: 10})); err == nil {
+		t.Fatal("corrupt stored contribution kind was accepted")
 	}
 }
 
@@ -324,11 +381,33 @@ func TestActorContributionSearchDeduplicatesOverlappingPeriods(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	page, err := c.SearchActorContributions(ctx, ContributionSearchOptions{ActorRefs: []string{actor.Key}, From: from.Add(time.Hour), To: from.Add(12 * time.Hour), Limit: 10})
+	page, err := c.SearchActorContributions(ctx, mustContributionSearch(t, ContributionSearchInput{ActorRefs: []string{actor.Key}, From: from.Add(time.Hour).Format(time.RFC3339), To: from.Add(12 * time.Hour).Format(time.RFC3339), Limit: 10}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].TargetNodeID != "I_1" {
 		t.Fatalf("overlapping contribution periods = %+v", page)
+	}
+}
+
+func TestActorPersistenceRejectsMalformedObservationJSONBeforeWriting(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	if _, err := c.ApplyActorIdentityObservation(ctx, "github", "broken", "U_broken", nil, "user", "public", time.Unix(1, 0).UTC(), json.RawMessage(`not-json`)); err == nil {
+		t.Fatal("malformed actor identity observation was stored")
+	}
+	actor, err := c.ApplyActorIdentityObservation(ctx, "github", "alice", "U_alice", nil, "user", "public", time.Unix(1, 0).UTC(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ReplaceActorSocialAccounts(ctx, actor.ID, nil, true, time.Unix(2, 0).UTC(), time.Unix(2, 0).UTC(), "public", json.RawMessage(`not-json`)); err == nil {
+		t.Fatal("malformed actor facet observation was stored")
+	}
+	if err := c.ApplyActorContributionPeriod(ctx, ActorContributionPeriodInput{
+		ActorID: actor.ID, From: time.Unix(1, 0).UTC(), To: time.Unix(2, 0).UTC(),
+		Complete: true, RawPayload: json.RawMessage(`not-json`),
+	}); err == nil {
+		t.Fatal("malformed actor contribution observation was stored")
 	}
 }

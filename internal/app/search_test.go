@@ -53,7 +53,7 @@ func TestSearchReturnsNextCursorAndCoverage(t *testing.T) {
 	}
 
 	for i := 1; i <= 5; i++ {
-		if _, err := c.ApplyThreadObservation(ctx, repo.ID, corpus.ThreadKindIssue, i, "open", "term title", "body", "a", time.Unix(int64(i), 0).UTC(), `{}`); err != nil {
+		if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, i, "open", "term title", "body", "a", time.Unix(int64(i), 0).UTC(), `{}`); err != nil {
 			t.Fatalf("apply thread %d: %v", i, err)
 		}
 	}
@@ -126,7 +126,7 @@ func TestSearchUpdatedBeforeBoundsResultsAndBindsCursor(t *testing.T) {
 	base := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	for number := 1; number <= 3; number++ {
 		if _, err := svc.corpus.ApplyThreadObservation(
-			ctx, repo.ID, corpus.ThreadKindIssue, number, "open", "numeric drift", "wrong result", "alice",
+			ctx, repo.ID, domain.IssueKind, number, "open", "numeric drift", "wrong result", "alice",
 			base.Add(time.Duration(number-1)*24*time.Hour), `{}`,
 		); err != nil {
 			t.Fatal(err)
@@ -167,7 +167,7 @@ func TestThreadSearchMergesRepositoryAndThreadCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := svc.corpus.ApplyThreadObservation(ctx, repo.ID, corpus.ThreadKindIssue, 1, "open", "search term", "body", "author", time.Unix(2, 0).UTC(), `{}`)
+	thread, err := svc.corpus.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "search term", "body", "author", time.Unix(2, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestMCPSearchDefaultsCompactAndOffersFullView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.corpus.ApplyThreadObservation(ctx, repo.ID, corpus.ThreadKindIssue, 1, "open", "alpha beta", "full body detail", "author", time.Unix(2, 0).UTC(), `{}`); err != nil {
+	if _, err := svc.corpus.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "alpha beta", "full body detail", "author", time.Unix(2, 0).UTC(), `{}`); err != nil {
 		t.Fatal(err)
 	}
 	reader := &MCPReader{Service: svc}
@@ -258,7 +258,7 @@ func TestSearchAllDoesNotInventCrossIndexRanking(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.corpus.ApplyThreadObservation(ctx, repo.ID, corpus.ThreadKindIssue, 1, "open", "term", "body", "alice", time.Unix(95, 0).UTC(), `{}`); err != nil {
+	if _, err := svc.corpus.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "term", "body", "alice", time.Unix(95, 0).UTC(), `{}`); err != nil {
 		t.Fatal(err)
 	}
 	svc.SetClock(func() time.Time { return time.Unix(100, 0).UTC() })
@@ -274,6 +274,54 @@ func TestSearchHardMaxLimit(t *testing.T) {
 	_, err := svc.Search(ctx, "term", contracts.SearchOptions{Kind: "issues", Limit: 101})
 	if err == nil || err.Error() != "search limit cannot exceed 100" {
 		t.Fatalf("unexpected error = %v", err)
+	}
+}
+
+func TestSearchRejectsContradictoryBoundaryStates(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newSearchTestService(t)
+	merged := true
+	after := time.Unix(20, 0).UTC()
+	before := time.Unix(10, 0).UTC()
+	tests := []struct {
+		name string
+		opts contracts.SearchOptions
+	}{
+		{name: "unknown kind", opts: contracts.SearchOptions{Kind: "discussion"}},
+		{name: "unknown order", opts: contracts.SearchOptions{Kind: "threads", Sort: "popular"}},
+		{name: "unknown term mode", opts: contracts.SearchOptions{Kind: "threads", MatchMode: "phrase"}},
+		{name: "unknown thread state", opts: contracts.SearchOptions{Kind: "threads", State: "draft"}},
+		{name: "unknown close reason", opts: contracts.SearchOptions{Kind: "threads", StateReason: "duplicate"}},
+		{name: "malformed repository", opts: contracts.SearchOptions{Kind: "threads", Repo: "owner/repo/extra"}},
+		{name: "repository with thread state", opts: contracts.SearchOptions{Kind: "repos", State: "open"}},
+		{name: "repository with any-term mode", opts: contracts.SearchOptions{Kind: "repos", MatchMode: "any"}},
+		{name: "code with updated order", opts: contracts.SearchOptions{Kind: "code", Sort: "updated"}},
+		{name: "code with thread author", opts: contracts.SearchOptions{Kind: "code", Author: "alice"}},
+		{name: "issue with merged state", opts: contracts.SearchOptions{Kind: "issue", Merged: &merged}},
+		{name: "open with close reason", opts: contracts.SearchOptions{Kind: "threads", State: "open", StateReason: "completed"}},
+		{name: "reversed update interval", opts: contracts.SearchOptions{Kind: "threads", UpdatedAfter: after, UpdatedBefore: before}},
+		{name: "lens with storage order", opts: contracts.SearchOptions{Kind: "threads", Lens: "ranked", Sort: "updated"}},
+		{name: "exact repository with cursor", opts: contracts.SearchOptions{Kind: "repos", Repo: "owner/repo", Cursor: "cursor"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := svc.Search(ctx, "term", test.opts); err == nil {
+				t.Fatal("search accepted contradictory input")
+			}
+		})
+	}
+}
+
+func TestSearchReturnsCanonicalParsedBoundaryValues(t *testing.T) {
+	t.Parallel()
+	svc := newSearchTestService(t)
+	result, err := svc.Search(context.Background(), " term ", contracts.SearchOptions{Kind: "pull_request"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Query != "term" || result.Kind != "prs" || result.Limit != corpus.DefaultSearchPageSize {
+		t.Fatalf("canonical search result = %+v", result)
 	}
 }
 
@@ -296,7 +344,7 @@ func TestExplainMatchReturnsFactualReasons(t *testing.T) {
 	}
 
 	updated := time.Unix(50, 0).UTC()
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, corpus.ThreadKindIssue, 1, "open", "term title", "body", "a", updated, `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "term title", "body", "a", updated, `{}`); err != nil {
 		t.Fatalf("apply thread: %v", err)
 	}
 
@@ -376,7 +424,7 @@ func seedLensCorpus(t *testing.T, svc *Service) {
 		title  string
 		body   string
 		labels []string
-		state  string
+		state  domain.ThreadState
 	}{
 		{1, "fix login crash", "login crashes on startup", []string{"bug"}, "open"},
 		{2, "login crash on startup", "the login page crashes", nil, "open"},
@@ -388,7 +436,7 @@ func seedLensCorpus(t *testing.T, svc *Service) {
 		updated := base.Add(time.Duration(5-th.number) * time.Hour)
 		if _, err := c.UpsertThread(ctx, corpus.Thread{
 			RepositoryID:    repo.ID,
-			Kind:            corpus.ThreadKindIssue,
+			Kind:            domain.IssueKind,
 			Number:          th.number,
 			State:           th.state,
 			Title:           th.title,
@@ -543,7 +591,7 @@ func TestSearchAllIsRejectedEvenWithRepositoryScope(t *testing.T) {
 			t.Fatal(err)
 		}
 		if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-			RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1,
+			RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1,
 			State: "open", Title: "shared term", SourceUpdatedAt: time.Now().UTC(),
 		}, `{}`); err != nil {
 			t.Fatal(err)

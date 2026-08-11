@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -44,6 +43,8 @@ type Service struct {
 	archiveFetcher  discovery.ArchiveFetcher
 	deepWikiReader  deepwiki.Reader
 	clock           func() time.Time
+	executable      func() (string, error)
+	upgradeEnv      upgradeEnvironment
 	version         string
 	logger          *slog.Logger
 	lifecycleCtx    context.Context
@@ -65,10 +66,11 @@ func NewWithContext(ctx context.Context, paths *config.Paths, version string, lo
 	}
 	lifecycleCtx, cancelLifecycle := context.WithCancel(ctx)
 	s := &Service{
-		paths: paths, version: version, clock: time.Now, logger: logger,
+		paths: paths, version: version, clock: time.Now, executable: os.Executable, logger: logger,
+		upgradeEnv:   productionUpgradeEnvironment(),
 		lifecycleCtx: lifecycleCtx, cancelLifecycle: cancelLifecycle,
 	}
-	if _, err := s.loadConfig(false); err != nil {
+	if _, err := s.loadConfig(); err != nil {
 		cancelLifecycle()
 		return nil, err
 	}
@@ -85,28 +87,6 @@ func (s *Service) now() time.Time {
 	return clock()
 }
 
-// SetClock overrides the time source. It is intended for tests.
-func (s *Service) SetClock(clock func() time.Time) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.clock = clock
-}
-
-// SetGitHubReader overrides the GitHub reader. It is intended for tests.
-func (s *Service) SetGitHubReader(r github.Reader) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.ghReader = r
-}
-
-// SetDeepWikiReader overrides the derived external knowledge reader. It is
-// intended for tests and embedding.
-func (s *Service) SetDeepWikiReader(r deepwiki.Reader) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.deepWikiReader = r
-}
-
 func (s *Service) deepWiki() deepwiki.Reader {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -114,13 +94,6 @@ func (s *Service) deepWiki() deepwiki.Reader {
 		s.deepWikiReader = &deepwiki.Client{}
 	}
 	return s.deepWikiReader
-}
-
-// SetArchiveFetcher overrides the GH Archive fetcher. It is intended for tests.
-func (s *Service) SetArchiveFetcher(f discovery.ArchiveFetcher) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.archiveFetcher = f
 }
 
 func (s *Service) getArchiveFetcher() discovery.ArchiveFetcher {
@@ -159,42 +132,76 @@ func (s *Service) Close() error {
 	return closeErr
 }
 
-func (s *Service) loadConfig(save bool) (*config.Config, error) {
+type configSource uint8
+
+const (
+	defaultConfig configSource = iota
+	storedConfig
+)
+
+type loadedConfig struct {
+	value  *config.Config
+	path   string
+	source configSource
+}
+
+func (s *Service) readConfig() (loadedConfig, error) {
 	cfgFile, err := s.paths.ConfigFile()
 	if err != nil {
-		return nil, err
+		return loadedConfig{}, err
 	}
 	var cfg *config.Config
-	exists := false
+	source := defaultConfig
 	if _, err := os.Stat(cfgFile); err == nil {
 		cfg, err = config.LoadFile(cfgFile)
 		if err != nil {
-			return nil, fmt.Errorf("load config: %w", err)
+			return loadedConfig{}, fmt.Errorf("load config: %w", err)
 		}
-		exists = true
+		source = storedConfig
 	} else if errors.Is(err, os.ErrNotExist) {
 		cfg = config.Default()
 	} else {
-		return nil, fmt.Errorf("inspect config: %w", err)
+		return loadedConfig{}, fmt.Errorf("inspect config: %w", err)
 	}
 	if err := config.ApplyDefaults(cfg, s.paths); err != nil {
-		return nil, err
+		return loadedConfig{}, err
 	}
 	if err := config.ApplyEnv(cfg, os.Getenv); err != nil {
-		return nil, err
+		return loadedConfig{}, err
 	}
 	if err := config.Validate(cfg); err != nil {
-		return nil, fmt.Errorf("validate config: %w", err)
+		return loadedConfig{}, fmt.Errorf("validate config: %w", err)
 	}
-	if save && !exists {
-		if err := config.Save(cfgFile, cfg); err != nil {
-			return nil, fmt.Errorf("save config: %w", err)
-		}
-	}
+	return loadedConfig{value: cfg, path: cfgFile, source: source}, nil
+}
+
+func (s *Service) cacheConfig(cfg *config.Config) {
 	s.mu.Lock()
 	s.cfg = cfg
 	s.mu.Unlock()
-	return cfg, nil
+}
+
+func (s *Service) loadConfig() (*config.Config, error) {
+	loaded, err := s.readConfig()
+	if err != nil {
+		return nil, err
+	}
+	s.cacheConfig(loaded.value)
+	return loaded.value, nil
+}
+
+func (s *Service) loadConfigForInitialization() (*config.Config, error) {
+	loaded, err := s.readConfig()
+	if err != nil {
+		return nil, err
+	}
+	if loaded.source == defaultConfig {
+		if err := config.Save(loaded.path, loaded.value); err != nil {
+			return nil, fmt.Errorf("save config: %w", err)
+		}
+	}
+	s.cacheConfig(loaded.value)
+	return loaded.value, nil
 }
 
 func (s *Service) openCorpus(ctx context.Context) (*corpus.Corpus, error) {
@@ -205,7 +212,7 @@ func (s *Service) openCorpus(ctx context.Context) (*corpus.Corpus, error) {
 		return c, nil
 	}
 	s.mu.Unlock()
-	cfg, err := s.loadConfig(false)
+	cfg, err := s.loadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +263,7 @@ func (s *Service) openReadOnlyCorpus(ctx context.Context) (*corpus.Corpus, error
 		return c, nil
 	}
 	s.mu.Unlock()
-	cfg, err := s.loadConfig(false)
+	cfg, err := s.loadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -378,17 +385,16 @@ func (s *Service) newGitHubReader() (github.Reader, error) {
 }
 
 func tokenSource(cfg *config.Config) github.TokenSource {
-	method := strings.ToLower(cfg.TokenSource.Method)
-	switch method {
-	case "env":
+	switch cfg.TokenSource.Method {
+	case config.TokenSourceEnv:
 		name := cfg.TokenSource.Key
 		if name == "" {
 			name = github.DefaultEnvToken
 		}
 		return github.RequireToken(github.EnvTokenSource(name))
-	case "gh-cli":
-		return github.RequireToken(github.GhCLITokenSource(nil))
-	case "keyring":
+	case config.TokenSourceGHCLI:
+		return github.RequireToken(github.GhCLITokenSource())
+	case config.TokenSourceKeyring:
 		return github.RequireToken(github.KeyringTokenSource(cfg.TokenSource.Key))
 	}
 	return github.StaticTokenSource("")
@@ -427,7 +433,7 @@ func (s *Service) databasePath() string {
 // Init opens or creates the configured corpus and persists a default
 // configuration if one does not already exist.
 func (s *Service) Init(ctx context.Context) (*contracts.InitResult, error) {
-	cfg, err := s.loadConfig(true)
+	cfg, err := s.loadConfigForInitialization()
 	if err != nil {
 		return nil, err
 	}
@@ -473,17 +479,6 @@ func (s *Service) Status(ctx context.Context) (*contracts.StatusResult, error) {
 	}, nil
 }
 
-// SyncOptions bounds and filters an explicit repository synchronization.
-type SyncOptions struct {
-	Kind        string
-	State       string
-	Since       time.Time
-	Numbers     []int
-	MaxItems    int
-	MaxPages    int
-	MaxRequests int
-}
-
 const (
 	defaultSyncMaxRequests = 100
 	maxSyncRequests        = 1000
@@ -513,90 +508,19 @@ func (b *syncRequestBudget) take() error {
 	return nil
 }
 
-type syncRequestPlan struct {
-	threadRequestCeiling int
-	plannedRequests      int
-}
-
-func planThreadSyncOptions(opts SyncOptions) (SyncOptions, syncRequestPlan, error) {
-	normalized, err := normalizeThreadSyncOptions(opts)
-	if err != nil {
-		return SyncOptions{}, syncRequestPlan{}, err
-	}
-	requestCeiling := normalized.MaxPages
-	if len(normalized.Numbers) > 0 {
-		requestCeiling = len(normalized.Numbers)
-		if requestCeiling > normalized.MaxRequests {
-			return SyncOptions{}, syncRequestPlan{}, fmt.Errorf(
-				"exact thread selection requires at least %d requests; max requests is %d",
-				requestCeiling, normalized.MaxRequests,
-			)
-		}
-	} else if requestCeiling > normalized.MaxRequests {
-		requestCeiling = normalized.MaxRequests
-	}
-	return normalized, syncRequestPlan{
-		threadRequestCeiling: requestCeiling,
-		plannedRequests:      requestCeiling,
-	}, nil
-}
-
-func normalizeThreadSyncOptions(opts SyncOptions) (SyncOptions, error) {
-	if opts.Kind == "" {
-		opts.Kind = "both"
-	}
-	if opts.Kind != "issue" && opts.Kind != "pull_request" && opts.Kind != "both" {
-		return SyncOptions{}, errors.New("kind must be issue, pull_request, or both")
-	}
-	if opts.State == "" {
-		opts.State = "all"
-	}
-	if opts.State != "open" && opts.State != "closed" && opts.State != "all" {
-		return SyncOptions{}, fmt.Errorf("state must be open, closed, or all")
-	}
-	if opts.MaxPages <= 0 {
-		opts.MaxPages = 1000
-	}
-	if opts.MaxPages > 1000 {
-		return SyncOptions{}, errors.New("max pages cannot exceed 1000")
-	}
-	if opts.MaxItems < 0 || opts.MaxItems > 1000 {
-		return SyncOptions{}, errors.New("max items must be between 0 and 1000")
-	}
-	if opts.MaxRequests == 0 {
-		opts.MaxRequests = defaultSyncMaxRequests
-	}
-	if opts.MaxRequests < 1 || opts.MaxRequests > maxSyncRequests {
-		return SyncOptions{}, fmt.Errorf("max requests must be between 1 and %d", maxSyncRequests)
-	}
-	if len(opts.Numbers) > 100 {
-		return SyncOptions{}, errors.New("exact thread selection cannot exceed 100 numbers")
-	}
-	if len(opts.Numbers) > 0 && (opts.State != "all" || !opts.Since.IsZero()) {
-		return SyncOptions{}, errors.New("state and since filters cannot be combined with exact thread numbers")
-	}
-	seen := make(map[int]struct{}, len(opts.Numbers))
-	numbers := make([]int, 0, len(opts.Numbers))
-	for _, number := range opts.Numbers {
-		if number <= 0 {
-			return SyncOptions{}, errors.New("thread numbers must be positive")
-		}
-		if _, ok := seen[number]; ok {
-			continue
-		}
-		seen[number] = struct{}{}
-		numbers = append(numbers, number)
-	}
-	sort.Ints(numbers)
-	opts.Numbers = numbers
-	return opts, nil
-}
-
 func threadFromIssue(issue github.Issue) (corpus.Thread, string, error) {
+	kind, err := domain.ParseThreadKind(string(issue.Kind))
+	if err != nil {
+		return corpus.Thread{}, "", err
+	}
+	state, err := domain.ParseThreadState(issue.State)
+	if err != nil {
+		return corpus.Thread{}, "", err
+	}
 	thread := corpus.Thread{
-		Kind:              string(issue.Kind),
+		Kind:              kind,
 		Number:            issue.Number,
-		State:             issue.State,
+		State:             state,
 		StateReason:       issue.StateReason,
 		Title:             issue.Title,
 		Body:              issue.Body,

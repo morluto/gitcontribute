@@ -102,40 +102,72 @@ func validationJobArtifact(job *contracts.JobResult, kind string) ([]mcpcontract
 	return []mcpcontract.JobArtifactReference{{Kind: kind, ID: result.ID}}, nil
 }
 
+func failureBatchItemStatus(s mcpcontract.BatchItemStatus) (mcpcontract.BatchItemStatus, bool) {
+	switch s {
+	case mcpcontract.BatchItemRetryable:
+		return mcpcontract.BatchItemRetryable, true
+	case mcpcontract.BatchItemUnavailable:
+		return mcpcontract.BatchItemUnavailable, true
+	case mcpcontract.BatchItemFailed:
+		return mcpcontract.BatchItemFailed, true
+	default:
+		return "", false
+	}
+}
+
 type syncBatchItem struct {
-	Key        string                  `json:"key"`
-	Status     string                  `json:"status"`
-	Reason     string                  `json:"reason"`
-	Message    string                  `json:"message"`
-	RetryAfter int                     `json:"retry_after_ms"`
-	Threads    []mcpcontract.ThreadRef `json:"threads"`
+	Key        string                      `json:"key"`
+	Status     mcpcontract.BatchItemStatus `json:"status"`
+	Reason     string                      `json:"reason"`
+	Message    string                      `json:"message"`
+	RetryAfter int                         `json:"retry_after_ms"`
+	Threads    []mcpcontract.ThreadRef     `json:"threads"`
 }
 
 type syncBatchResult struct {
 	Items []syncBatchItem `json:"items"`
 }
 
+type syncReferenceShape uint8
+
+const (
+	repositorySyncReferences syncReferenceShape = iota
+	threadSyncReferences
+)
+
 func decodeSyncBatchResult(job *contracts.JobResult, total int) (syncBatchResult, int) {
 	var result syncBatchResult
 	count := total
-	if json.Unmarshal([]byte(job.Result), &result) == nil && result.Items != nil {
-		count = len(result.Items)
+	if err := json.Unmarshal([]byte(job.Result), &result); err != nil || result.Items == nil {
+		return syncBatchResult{}, count
 	}
+	for _, item := range result.Items {
+		if _, err := mcpcontract.ParseBatchItemStatus(string(item.Status)); err != nil {
+			return syncBatchResult{}, count
+		}
+	}
+	count = len(result.Items)
 	return result, count
 }
 
-func syncBatchReferences(result syncBatchResult, includeThreads bool) ([]string, []mcpcontract.ThreadRef, []mcpcontract.JobArtifactFailure, bool, bool) {
+func syncBatchReferences(result syncBatchResult, shape syncReferenceShape) ([]string, []mcpcontract.ThreadRef, []mcpcontract.JobArtifactFailure, bool, bool) {
 	references := make([]string, 0, min(len(result.Items), maxJobArtifactItems))
 	threadRefs := make([]mcpcontract.ThreadRef, 0, min(len(result.Items), maxJobArtifactItems))
 	failures := make([]mcpcontract.JobArtifactFailure, 0, min(len(result.Items), maxJobArtifactItems))
 	referencesTruncated := false
 	failuresTruncated := false
 	for _, item := range result.Items {
-		partialThreadBatch := includeThreads && item.Status == "partial"
-		if item.Status != "complete" && !partialThreadBatch {
+		partialThreadBatch := shape == threadSyncReferences && item.Status == mcpcontract.BatchItemPartial
+		if item.Status != mcpcontract.BatchItemComplete && !partialThreadBatch {
 			if len(failures) < maxJobArtifactItems {
+				status, ok := failureBatchItemStatus(item.Status)
+				if !ok {
+					status = mcpcontract.BatchItemFailed
+					item.Reason = "invalid_stored_status"
+					item.Message = fmt.Sprintf("stored batch item has unsupported status %q", item.Status)
+				}
 				failures = append(failures, mcpcontract.JobArtifactFailure{
-					Reference: item.Key, Status: mcpcontract.BatchItemStatus(item.Status), Reason: item.Reason,
+					Reference: item.Key, Status: status, Reason: item.Reason,
 					Message: item.Message, RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfter),
 				})
 			} else {
@@ -143,7 +175,7 @@ func syncBatchReferences(result syncBatchResult, includeThreads bool) ([]string,
 			}
 			continue
 		}
-		if includeThreads && len(item.Threads) > 0 {
+		if shape == threadSyncReferences && len(item.Threads) > 0 {
 			for _, ref := range item.Threads {
 				if len(threadRefs) >= maxJobArtifactItems {
 					referencesTruncated = true
@@ -167,7 +199,7 @@ func syncBatchReferences(result syncBatchResult, includeThreads bool) ([]string,
 
 func repositoryBatchJobArtifact(job *contracts.JobResult, total int) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
 	result, count := decodeSyncBatchResult(job, total)
-	references, _, failures, referencesTruncated, failuresTruncated := syncBatchReferences(result, false)
+	references, _, failures, referencesTruncated, failuresTruncated := syncBatchReferences(result, repositorySyncReferences)
 	value := mcpcontract.NonNegativeInt(count)
 	var request mcpcontract.SyncRepositoryContextInput
 	var follow *mcpcontract.JobFollowUp
@@ -185,7 +217,7 @@ func repositoryBatchJobArtifact(job *contracts.JobResult, total int) ([]mcpcontr
 
 func threadBatchJobArtifact(job *contracts.JobResult, total int) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
 	result, count := decodeSyncBatchResult(job, total)
-	references, threadRefs, failures, referencesTruncated, failuresTruncated := syncBatchReferences(result, true)
+	references, threadRefs, failures, referencesTruncated, failuresTruncated := syncBatchReferences(result, threadSyncReferences)
 	value := mcpcontract.NonNegativeInt(count)
 	var follow *mcpcontract.JobFollowUp
 	if len(threadRefs) > 0 {
@@ -218,15 +250,20 @@ func portfolioJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactRe
 		SearchIncomplete bool     `json:"search_incomplete"`
 		RequestCapped    bool     `json:"request_capped"`
 		Failures         []struct {
-			Reference    string `json:"reference"`
-			Status       string `json:"status"`
-			Reason       string `json:"reason"`
-			Message      string `json:"message"`
-			RetryAfterMS int    `json:"retry_after_ms"`
+			Reference    string                      `json:"reference"`
+			Status       mcpcontract.BatchItemStatus `json:"status"`
+			Reason       string                      `json:"reason"`
+			Message      string                      `json:"message"`
+			RetryAfterMS int                         `json:"retry_after_ms"`
 		} `json:"failures"`
 	}
 	if json.Unmarshal([]byte(job.Result), &result) != nil {
 		return nil, nil
+	}
+	for _, failure := range result.Failures {
+		if _, err := mcpcontract.ParseBatchItemStatus(string(failure.Status)); err != nil {
+			return nil, nil
+		}
 	}
 	value := mcpcontract.NonNegativeInt(result.Refreshed)
 	references, referencesTruncated := boundedArtifactReferences(result.PullRequests)
@@ -238,7 +275,7 @@ func portfolioJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactRe
 			continue
 		}
 		failures = append(failures, mcpcontract.JobArtifactFailure{
-			Reference: failure.Reference, Status: mcpcontract.BatchItemStatus(failure.Status), Reason: failure.Reason,
+			Reference: failure.Reference, Status: failure.Status, Reason: failure.Reason,
 			Message: failure.Message, RetryAfterMS: mcpcontract.NonNegativeInt(failure.RetryAfterMS),
 		})
 	}
@@ -316,6 +353,11 @@ func pullRequestWorkflowJobArtifact(job *contracts.JobResult) ([]mcpcontract.Job
 	if json.Unmarshal([]byte(job.Result), &result) != nil {
 		return nil, nil
 	}
+	for _, item := range result.Items {
+		if _, err := mcpcontract.ParseBatchItemStatus(string(item.Status)); err != nil {
+			return nil, nil
+		}
+	}
 	kind, reason, resourceKind := "pull_request_feedback", "Read the persisted feedback snapshots through their resource links.", "pull-request-feedback"
 	if job.Kind == "sync_ci_failures" {
 		kind, reason, resourceKind = "ci_failure_report", "Read the persisted CI reports and bounded job logs through their resource links.", "ci-failure-report"
@@ -383,6 +425,11 @@ func pullRequestFeedbackIndexJobArtifact(job *contracts.JobResult) ([]mcpcontrac
 	if json.Unmarshal([]byte(job.Request), &request) != nil {
 		return nil, nil
 	}
+	for _, item := range result.Items {
+		if _, err := mcpcontract.ParseBatchItemStatus(string(item.Status)); err != nil {
+			return nil, nil
+		}
+	}
 	refs := make([]string, 0, min(len(result.Items), maxJobArtifactItems))
 	failures := make([]mcpcontract.JobArtifactFailure, 0, min(len(result.Items), maxJobArtifactItems))
 	completed := 0
@@ -404,7 +451,7 @@ func pullRequestFeedbackIndexJobArtifact(job *contracts.JobResult) ([]mcpcontrac
 			failuresTruncated = true
 		}
 	}
-	artifact := mcpcontract.JobArtifactReference{Kind: "pull_request_feedback_index", Count: ptrNonNegative(completed), References: refs, ReferencesTruncated: referencesTruncated, Failures: failures, FailuresTruncated: failuresTruncated, Status: result.Status, DiscoveryStatus: result.DiscoveryStatus, Recovery: result.Recovery}
+	artifact := mcpcontract.JobArtifactReference{Kind: "pull_request_feedback_index", Count: ptrNonNegative(completed), References: refs, ReferencesTruncated: referencesTruncated, Failures: failures, FailuresTruncated: failuresTruncated, Status: string(result.Status), DiscoveryStatus: string(result.DiscoveryStatus), Recovery: result.Recovery}
 	follow := &mcpcontract.JobFollowUp{Action: mcpcontract.FollowUpActionFor(mcpcontract.SearchPullRequestFeedbackInput{Repository: request.Repository}), Reason: "Search the indexed pull-request feedback through the offline corpus."}
 	return []mcpcontract.JobArtifactReference{artifact}, follow
 }
@@ -415,16 +462,16 @@ func ptrNonNegative(value int) *mcpcontract.NonNegativeInt {
 }
 
 type indexJobItem struct {
-	Key            string             `json:"key"`
-	Status         string             `json:"status"`
-	Reason         string             `json:"reason"`
-	Message        string             `json:"message"`
-	RetryAfterMS   int                `json:"retry_after_ms"`
-	CommitSHA      string             `json:"commit_sha"`
-	IndexManifest  codeindex.Manifest `json:"index_manifest"`
-	ArtifactDigest string             `json:"artifact_digest"`
-	ManifestDigest string             `json:"manifest_digest"`
-	SnapshotToken  string             `json:"snapshot_token"`
+	Key            string                      `json:"key"`
+	Status         mcpcontract.BatchItemStatus `json:"status"`
+	Reason         string                      `json:"reason"`
+	Message        string                      `json:"message"`
+	RetryAfterMS   int                         `json:"retry_after_ms"`
+	CommitSHA      string                      `json:"commit_sha"`
+	IndexManifest  codeindex.Manifest          `json:"index_manifest"`
+	ArtifactDigest string                      `json:"artifact_digest"`
+	ManifestDigest string                      `json:"manifest_digest"`
+	SnapshotToken  string                      `json:"snapshot_token"`
 }
 
 type indexJobResult struct {
@@ -437,6 +484,11 @@ func indexRepositoriesJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobAr
 	if json.Unmarshal([]byte(job.Result), &result) != nil {
 		return nil, nil
 	}
+	for _, item := range result.Items {
+		if _, err := mcpcontract.ParseBatchItemStatus(string(item.Status)); err != nil {
+			return nil, nil
+		}
+	}
 	artifacts := make([]mcpcontract.JobArtifactReference, 0, len(result.Items))
 	completedRefs := make([]string, 0, min(len(result.Items), maxJobArtifactItems))
 	failures := make([]mcpcontract.JobArtifactFailure, 0, min(len(result.Items), maxJobArtifactItems))
@@ -444,10 +496,10 @@ func indexRepositoriesJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobAr
 	referencesTruncated := false
 	failuresTruncated := false
 	for _, item := range result.Items {
-		if item.Status != "complete" {
+		if item.Status != mcpcontract.BatchItemComplete {
 			if len(failures) < maxJobArtifactItems {
 				failures = append(failures, mcpcontract.JobArtifactFailure{
-					Reference: item.Key, Status: mcpcontract.BatchItemStatus(item.Status), Reason: item.Reason,
+					Reference: item.Key, Status: item.Status, Reason: item.Reason,
 					Message: item.Message, RetryAfterMS: mcpcontract.NonNegativeInt(item.RetryAfterMS),
 				})
 			} else {

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
@@ -28,21 +29,26 @@ func (s *Server) listPullRequestPortfolio(ctx context.Context, _ *mcp.CallToolRe
 }
 
 func (s *Server) findPortfolioOverlaps(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.FindPortfolioOverlapsInput) (*mcp.CallToolResult, mcpcontract.FindPortfolioOverlapsOutput, error) {
-	for _, candidate := range in.Candidates {
+	for i := range in.Candidates {
+		candidate := &in.Candidates[i]
+		candidate.Kind = strings.TrimSpace(candidate.Kind)
+		candidate.Ref = strings.TrimSpace(candidate.Ref)
 		if candidate.Kind != "opportunity" && candidate.Kind != "workspace" && candidate.Kind != "pull_request" {
 			return nil, mcpcontract.FindPortfolioOverlapsOutput{}, mcpcontract.InvalidArgument("candidates", "candidate kind must be opportunity, workspace, or pull_request", map[string]any{"candidates": []map[string]string{{"kind": "opportunity", "ref": "<id>"}}})
 		}
-		if strings.TrimSpace(candidate.Ref) == "" {
+		if candidate.Ref == "" {
 			return nil, mcpcontract.FindPortfolioOverlapsOutput{}, mcpcontract.InvalidArgument("candidates", "candidate ref is required", nil)
 		}
 	}
-	for _, pullRequest := range in.PullRequests {
-		if err := validateThreadRef(pullRequest, true); err != nil {
+	for i, pullRequest := range in.PullRequests {
+		normalized, err := normalizeThreadRef(pullRequest, optionalThreadKind)
+		if err != nil {
 			return nil, mcpcontract.FindPortfolioOverlapsOutput{}, err
 		}
-		if pullRequest.Kind != "" && pullRequest.Kind != "pull_request" {
+		if normalized.Kind != "" && normalized.Kind != string(domain.PullRequestKind) {
 			return nil, mcpcontract.FindPortfolioOverlapsOutput{}, mcpcontract.InvalidArgument("pull_requests", "kind must be pull_request when provided", map[string]any{"kind": "pull_request"})
 		}
+		in.PullRequests[i] = normalized
 	}
 	reader, ok := s.reader.(PortfolioReader)
 	if !ok {
@@ -52,20 +58,31 @@ func (s *Server) findPortfolioOverlaps(ctx context.Context, _ *mcp.CallToolReque
 	return nil, out, err
 }
 
-func validateThreadRef(ref mcpcontract.ThreadRef, kindOptional bool) error {
-	if strings.TrimSpace(ref.Owner) == "" || strings.TrimSpace(ref.Repo) == "" {
-		return mcpcontract.InvalidArgument("threads", "owner and repo are required", map[string]any{"owner": "acme", "repo": "rocket", "number": 1})
+type threadKindRequirement uint8
+
+const (
+	optionalThreadKind threadKindRequirement = iota
+	requiredThreadKind
+)
+
+func normalizeThreadRef(ref mcpcontract.ThreadRef, requirement threadKindRequirement) (mcpcontract.ThreadRef, error) {
+	repository, err := domain.NewRepoRef(ref.Owner, ref.Repo)
+	if err != nil {
+		return mcpcontract.ThreadRef{}, mcpcontract.InvalidArgument("threads", "owner and repo are required", map[string]any{"owner": "acme", "repo": "rocket", "number": 1})
 	}
 	if ref.Number < 1 {
-		return mcpcontract.InvalidArgument("threads", "number must be positive", map[string]any{"owner": ref.Owner, "repo": ref.Repo, "number": 1})
+		return mcpcontract.ThreadRef{}, mcpcontract.InvalidArgument("threads", "number must be positive", map[string]any{"owner": repository.Owner(), "repo": repository.Repo(), "number": 1})
 	}
-	if ref.Kind == "" && kindOptional {
-		return nil
+	ref.Owner, ref.Repo, ref.Kind = repository.Owner(), repository.Repo(), strings.TrimSpace(ref.Kind)
+	if ref.Kind == "" && requirement == optionalThreadKind {
+		return ref, nil
 	}
-	if ref.Kind != "issue" && ref.Kind != "pull_request" {
-		return mcpcontract.InvalidArgument("threads", "kind must be issue or pull_request", map[string]any{"kind": "pull_request"})
+	kind, err := domain.ParseThreadKind(ref.Kind)
+	if err != nil {
+		return mcpcontract.ThreadRef{}, mcpcontract.InvalidArgument("threads", "kind must be issue or pull_request", map[string]any{"kind": "pull_request"})
 	}
-	return nil
+	ref.Kind = string(kind)
+	return ref, nil
 }
 
 func (s *Server) linkPullRequest(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.LinkPullRequestInput) (*mcp.CallToolResult, mcpcontract.LinkPullRequestOutput, error) {
@@ -78,14 +95,20 @@ func (s *Server) linkPullRequest(ctx context.Context, _ *mcp.CallToolRequest, in
 }
 
 func (s *Server) preflightContribution(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.ContributionPreflightInput) (*mcp.CallToolResult, mcpcontract.ContributionPreflightOutput, error) {
-	if err := validateThreadRef(mcpcontract.ThreadRef{Owner: in.Repository.Owner, Repo: in.Repository.Repo, Number: 1}, true); err != nil {
+	owner, repo, err := normalizeRepository(in.Repository.Owner, in.Repository.Repo)
+	if err != nil {
 		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("repository", "owner and repo are required", map[string]any{"owner": "acme", "repo": "rocket"})
 	}
-	if in.Fork != nil && (strings.TrimSpace(in.Fork.Owner) == "" || strings.TrimSpace(in.Fork.Repo) == "") {
-		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("fork", "owner and repo are required when fork is provided", map[string]any{"owner": "alice", "repo": "rocket"})
-	}
-	if in.Fork != nil && strings.EqualFold(strings.TrimSpace(in.Fork.Owner), strings.TrimSpace(in.Repository.Owner)) && strings.EqualFold(strings.TrimSpace(in.Fork.Repo), strings.TrimSpace(in.Repository.Repo)) {
-		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("fork", "fork must differ from the upstream repository", nil)
+	in.Repository = mcpcontract.RepositoryRef{Owner: owner, Repo: repo}
+	if in.Fork != nil {
+		forkOwner, forkRepo, forkErr := normalizeRepository(in.Fork.Owner, in.Fork.Repo)
+		if forkErr != nil {
+			return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("fork", "owner and repo are required when fork is provided", map[string]any{"owner": "alice", "repo": "rocket"})
+		}
+		in.Fork = &mcpcontract.RepositoryRef{Owner: forkOwner, Repo: forkRepo}
+		if strings.EqualFold(forkOwner, owner) && strings.EqualFold(forkRepo, repo) {
+			return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("fork", "fork must differ from the upstream repository", nil)
+		}
 	}
 	if strings.TrimSpace(in.Candidate.Title) == "" && strings.TrimSpace(in.Candidate.Query) == "" && strings.TrimSpace(in.Candidate.Body) == "" && in.Candidate.IssueNumber < 1 && strings.TrimSpace(in.Candidate.HeadRef) == "" && strings.TrimSpace(in.Candidate.HeadSHA) == "" && len(in.Candidate.ChangedFiles) == 0 && len(in.WorkspacePaths) == 0 {
 		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("candidate", "candidate or workspace_paths must provide title, query, body, issue_number, head_ref, head_sha, or changed_files", nil)

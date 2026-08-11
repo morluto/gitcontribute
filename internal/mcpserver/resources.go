@@ -29,18 +29,19 @@ type workspaceResourceReader interface {
 }
 
 type pullRequestWorkflowResourceReader interface {
-	PullRequestFeedbackResource(context.Context, string, string, int) (map[string]any, error)
-	PullRequestFeedbackItemResource(context.Context, string, string, int, string, string) (map[string]any, error)
-	CIFailureResource(context.Context, string, string, int) (map[string]any, error)
-	CIJobLogResource(context.Context, string, string, int, int64) (map[string]any, error)
+	PullRequestFeedbackResource(context.Context, string, string, int) (mcpcontract.PullRequestFeedbackResource, error)
+	PullRequestFeedbackItemResource(context.Context, string, string, int, string, string) (mcpcontract.PullRequestFeedbackItemResource, error)
+	CIFailureResource(context.Context, string, string, int) (mcpcontract.CIFailureResource, error)
+	CIJobLogResource(context.Context, string, string, int, int64) (mcpcontract.CIJobLogResource, error)
 }
 
 type threadFacetResourceReader interface {
-	ThreadFacetResource(context.Context, string, string, string, int, string) (map[string]any, error)
+	ThreadFacetResource(context.Context, string, string, string, int, string) (mcpcontract.ThreadFacetResource, error)
 }
 
 type actorResourceReader interface {
-	ActorResource(context.Context, string, string) (any, error)
+	ActorProfileResource(context.Context, string) (mcpcontract.ActorOutput, error)
+	ActorFacetResource(context.Context, string, string) (mcpcontract.ActorFacetResource, error)
 }
 
 func (s *Server) readResource(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
@@ -173,14 +174,14 @@ func (s *Server) readActorResource(ctx context.Context, req resourceRequest) (an
 		return nil, mcp.ResourceNotFoundError(req.uri)
 	}
 	actorID := req.parts[0]
-	facet := ""
-	if len(req.parts) == 3 {
-		facet = req.parts[2]
-		if strings.TrimSpace(facet) == "" {
-			return nil, mcp.ResourceNotFoundError(req.uri)
-		}
+	if len(req.parts) == 1 || req.parts[2] == "profile" {
+		return reader.ActorProfileResource(ctx, actorID)
 	}
-	return reader.ActorResource(ctx, actorID, facet)
+	facet := req.parts[2]
+	if strings.TrimSpace(facet) == "" {
+		return nil, mcp.ResourceNotFoundError(req.uri)
+	}
+	return reader.ActorFacetResource(ctx, actorID, facet)
 }
 
 func (s *Server) readCodeIndexResource(ctx context.Context, req resourceRequest) (mcpcontract.CodeIndexArtifact, error) {
@@ -216,19 +217,19 @@ func (s *Server) readSourceBundleResource(ctx context.Context, req resourceReque
 	return reader.ReadSourceBundleArtifact(ctx, req.parts[1])
 }
 
-func (s *Server) readThreadFacetResource(ctx context.Context, req resourceRequest) (map[string]any, error) {
+func (s *Server) readThreadFacetResource(ctx context.Context, req resourceRequest) (mcpcontract.ThreadFacetResource, error) {
 	reader, ok := s.reader.(threadFacetResourceReader)
 	if !ok || len(req.parts) != 6 || req.parts[4] != "facet" {
-		return nil, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.ThreadFacetResource{}, mcp.ResourceNotFoundError(req.uri)
 	}
 	number, valid := positivePathNumber(req.parts[3])
 	if !valid || strings.TrimSpace(req.parts[2]) == "" || strings.TrimSpace(req.parts[5]) == "" {
-		return nil, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.ThreadFacetResource{}, mcp.ResourceNotFoundError(req.uri)
 	}
 	return reader.ThreadFacetResource(ctx, req.parts[0], req.parts[1], req.parts[2], number, req.parts[5])
 }
 
-func (s *Server) readPullRequestFeedbackResource(ctx context.Context, req resourceRequest) (map[string]any, error) {
+func (s *Server) readPullRequestFeedbackResource(ctx context.Context, req resourceRequest) (any, error) {
 	reader, ok := s.reader.(pullRequestWorkflowResourceReader)
 	if !ok || len(req.parts) < 3 || len(req.parts) > 5 || strings.TrimSpace(req.parts[0]) == "" || strings.TrimSpace(req.parts[1]) == "" {
 		return nil, mcp.ResourceNotFoundError(req.uri)
@@ -248,24 +249,24 @@ func (s *Server) readPullRequestFeedbackResource(ctx context.Context, req resour
 	return reader.PullRequestFeedbackItemResource(ctx, req.parts[0], req.parts[1], number, channel, feedbackID)
 }
 
-func (s *Server) readCIFailureResource(ctx context.Context, req resourceRequest) (map[string]any, error) {
+func (s *Server) readCIFailureResource(ctx context.Context, req resourceRequest) (mcpcontract.CIFailureResource, error) {
 	reader, ok := s.reader.(pullRequestWorkflowResourceReader)
 	number, valid := pullRequestResourceNumber(req.parts)
 	if !ok || !valid {
-		return nil, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.CIFailureResource{}, mcp.ResourceNotFoundError(req.uri)
 	}
 	return reader.CIFailureResource(ctx, req.parts[0], req.parts[1], number)
 }
 
-func (s *Server) readCIJobLogResource(ctx context.Context, req resourceRequest) (map[string]any, error) {
+func (s *Server) readCIJobLogResource(ctx context.Context, req resourceRequest) (mcpcontract.CIJobLogResource, error) {
 	reader, ok := s.reader.(pullRequestWorkflowResourceReader)
 	if !ok || len(req.parts) != 4 {
-		return nil, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.CIJobLogResource{}, mcp.ResourceNotFoundError(req.uri)
 	}
 	number, valid := positivePathNumber(req.parts[2])
 	jobID, jobErr := strconv.ParseInt(req.parts[3], 10, 64)
 	if !valid || jobErr != nil || jobID <= 0 {
-		return nil, mcp.ResourceNotFoundError(req.uri)
+		return mcpcontract.CIJobLogResource{}, mcp.ResourceNotFoundError(req.uri)
 	}
 	return reader.CIJobLogResource(ctx, req.parts[0], req.parts[1], number, jobID)
 }

@@ -78,13 +78,20 @@ func parseCollectionMember(member contracts.CollectionMember) (corpus.Collection
 		if err != nil {
 			return corpus.CollectionMember{}, err
 		}
-		return corpus.CollectionMember{Kind: kind, Ref: parsed.String()}, nil
+		return corpus.NewRepositoryCollectionMember(parsed)
 	case "issue", "pull_request", "thread":
-		parsed, err := parseCollectionThreadRef(kind, ref)
+		repository, number, err := parseCollectionThreadRef(kind, ref)
 		if err != nil {
 			return corpus.CollectionMember{}, err
 		}
-		return corpus.CollectionMember{Kind: kind, Ref: parsed}, nil
+		if kind == "thread" {
+			return corpus.NewAnyThreadCollectionMember(repository, number)
+		}
+		threadKind, err := domain.ParseThreadKind(kind)
+		if err != nil {
+			return corpus.CollectionMember{}, err
+		}
+		return corpus.NewThreadCollectionMember(threadKind, repository, number)
 	case "opportunity", "investigation":
 		if len(ref) > 64 {
 			return corpus.CollectionMember{}, fmt.Errorf("invalid %s reference %q: exceeds 64 bytes", kind, ref)
@@ -93,26 +100,29 @@ func parseCollectionMember(member contracts.CollectionMember) (corpus.Collection
 		if err != nil {
 			return corpus.CollectionMember{}, fmt.Errorf("invalid %s reference %q: expected durable id", kind, ref)
 		}
-		return corpus.CollectionMember{Kind: kind, Ref: id.String()}, nil
+		if kind == "opportunity" {
+			return corpus.NewOpportunityCollectionMember(id.String())
+		}
+		return corpus.NewInvestigationCollectionMember(id.String())
 	default:
 		return corpus.CollectionMember{}, fmt.Errorf("unsupported collection member kind %q", kind)
 	}
 }
 
-func parseCollectionThreadRef(kind, ref string) (string, error) {
+func parseCollectionThreadRef(kind, ref string) (domain.RepoRef, int, error) {
 	if strings.Count(ref, "#") != 1 {
-		return "", fmt.Errorf("invalid %s reference %q: expected OWNER/REPO#NUMBER", kind, ref)
+		return domain.RepoRef{}, 0, fmt.Errorf("invalid %s reference %q: expected OWNER/REPO#NUMBER", kind, ref)
 	}
 	repoRef, numberText, _ := strings.Cut(ref, "#")
 	parsedRepo, err := domain.ParseRepoRef(repoRef)
 	if err != nil {
-		return "", fmt.Errorf("invalid %s reference %q: %w", kind, ref, err)
+		return domain.RepoRef{}, 0, fmt.Errorf("invalid %s reference %q: %w", kind, ref, err)
 	}
 	number, err := strconv.Atoi(strings.TrimSpace(numberText))
 	if err != nil || number <= 0 {
-		return "", fmt.Errorf("invalid %s reference %q: expected positive number", kind, ref)
+		return domain.RepoRef{}, 0, fmt.Errorf("invalid %s reference %q: expected positive number", kind, ref)
 	}
-	return fmt.Sprintf("%s#%d", parsedRepo, number), nil
+	return parsedRepo, number, nil
 }
 
 // ListCollections returns all named collections.

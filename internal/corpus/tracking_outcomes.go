@@ -25,9 +25,17 @@ func (c *Corpus) exportContributionOutcomes(ctx context.Context, db dbQueryer, b
 
 	for rows.Next() {
 		var o tracking.ContributionOutcome
+		var outcome string
 		var sourceEventAt, createdAt int64
-		if err := rows.Scan(&o.ID, &o.ContributionID, &o.Outcome, &o.Reason, &sourceEventAt, &createdAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.ContributionID, &outcome, &o.Reason, &sourceEventAt, &createdAt); err != nil {
 			return err
+		}
+		o.Outcome, err = tracking.ParseOutcome(outcome)
+		if err != nil {
+			return fmt.Errorf("parse stored contribution outcome: %w", err)
+		}
+		if !isStoredContributionOutcome(o.Outcome) {
+			return fmt.Errorf("stored contribution outcome %q is not a contribution lifecycle outcome", outcome)
 		}
 		o.SourceEventAt = scanTime(sourceEventAt)
 		o.CreatedAt = scanTime(createdAt)

@@ -247,7 +247,7 @@ func TestRemovedJobKindsDoNotExposeCompatibilityArtifacts(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			out := jobResultToMCP(&contracts.JobResult{
 				Kind: kind, Status: "succeeded", Result: `{"status":"complete","items":[]}`,
-			}, true)
+			}, detailedResponse)
 			if len(out.Artifacts) != 0 || out.FollowUp != nil {
 				t.Fatalf("removed job kind exposed compatibility output: artifacts=%+v follow_up=%+v", out.Artifacts, out.FollowUp)
 			}
@@ -445,5 +445,30 @@ func TestPullRequestFeedbackIndexJobOffersOfflineSearchFollowUp(t *testing.T) {
 	arguments, ok := mcpcontract.RecoveryInput[mcpcontract.SearchPullRequestFeedbackInput](follow.Action)
 	if follow.Action.Type() != "search_pull_request_feedback" || !ok || arguments.Repository.Owner != "acme" || arguments.Repository.Repo != "rocket" {
 		t.Fatalf("feedback index follow-up = %+v", follow)
+	}
+}
+
+func TestJobArtifactReadersRejectUnsupportedStoredItemStatuses(t *testing.T) {
+	t.Parallel()
+
+	decoded, count := decodeSyncBatchResult(&contracts.JobResult{Result: `{"items":[{"key":"acme/rocket","status":"impossible"}]}`}, 7)
+	if len(decoded.Items) != 0 || count != 7 {
+		t.Fatalf("corrupt sync result = %+v count=%d", decoded, count)
+	}
+
+	if artifacts, _ := portfolioJobArtifact(&contracts.JobResult{Result: `{"failures":[{"reference":"acme/rocket","status":"impossible"}]}`}); len(artifacts) != 0 {
+		t.Fatalf("corrupt portfolio artifacts = %+v", artifacts)
+	}
+	if artifacts, _ := indexRepositoriesJobArtifact(&contracts.JobResult{Result: `{"items":[{"key":"acme/rocket","status":"impossible"}]}`}); len(artifacts) != 0 {
+		t.Fatalf("corrupt index artifacts = %+v", artifacts)
+	}
+	if artifacts, _ := pullRequestWorkflowJobArtifact(&contracts.JobResult{Result: `{"items":[{"key":"acme/rocket/pull_request#1","item_status":"impossible"}]}`}); len(artifacts) != 0 {
+		t.Fatalf("corrupt workflow artifacts = %+v", artifacts)
+	}
+	if artifacts, _ := pullRequestFeedbackIndexJobArtifact(&contracts.JobResult{
+		Request: `{"repository":{"owner":"acme","repo":"rocket"}}`,
+		Result:  `{"items":[{"key":"acme/rocket/pull_request#1","item_status":"impossible"}]}`,
+	}); len(artifacts) != 0 {
+		t.Fatalf("corrupt feedback index artifacts = %+v", artifacts)
 	}
 }

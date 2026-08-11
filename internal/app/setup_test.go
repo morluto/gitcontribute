@@ -29,8 +29,9 @@ func TestSetupInitializesAndRegistersWithoutNetwork(t *testing.T) {
 	}
 	defer svc.Close()
 	packagedExecutable := writeTestExecutable(t, filepath.Join(home, "bin"))
+	svc.stubExecutablePath(packagedExecutable)
 	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
-		Mode: contracts.SetupModeMCP, Clients: []string{"codex", "claude"}, TokenSource: "none", Repository: "morluto/gitcontribute", Executable: packagedExecutable,
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex", "claude"}, TokenSource: "none", Repository: "morluto/gitcontribute",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +48,7 @@ func TestSetupInitializesAndRegistersWithoutNetwork(t *testing.T) {
 	if err != nil || len(sources.Sources) != 1 || sources.Sources[0].Name != "morluto-gitcontribute" {
 		t.Fatalf("sources=%+v err=%v", sources, err)
 	}
-	second, err := svc.Setup(context.Background(), contracts.SetupOptions{Mode: contracts.SetupModeMCP, Clients: []string{"codex", "claude"}, TokenSource: "none", Executable: packagedExecutable})
+	second, err := svc.Setup(context.Background(), contracts.SetupOptions{Mode: contracts.SetupModeMCP, Clients: []string{"codex", "claude"}, TokenSource: "none"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,9 +70,9 @@ func TestSetupRemoveStillUnregistersSelectedMCPClientsWithoutAnAccessMode(t *tes
 		t.Fatal(err)
 	}
 	defer svc.Close()
+	svc.stubExecutablePath(writeTestExecutable(t, filepath.Join(home, "bin")))
 	if _, err := svc.Setup(context.Background(), contracts.SetupOptions{
 		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
-		Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -114,9 +115,10 @@ func TestSetupMCPOnlyInstallsManagedBinaryAndRegistersItsAbsolutePath(t *testing
 	if err := os.WriteFile(source, []byte("packaged-native-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	svc.stubExecutablePath(source)
 
 	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
-		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: source,
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -196,8 +198,9 @@ func TestSetupMCPOnlyReusesMatchingManagedBinary(t *testing.T) {
 	if err := os.WriteFile(source, []byte("packaged-native-binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	svc.stubExecutablePath(source)
 	opts := contracts.SetupOptions{
-		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: source,
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
 	}
 	if _, err := svc.Setup(context.Background(), opts); err != nil {
 		t.Fatal(err)
@@ -268,8 +271,9 @@ func TestSetupRejectsStaleBootstrapWhenNewerPrivateRuntimeExists(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	svc.stubExecutablePath(filepath.Join(home, "npm-cache", "gitcontribute"))
 	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
-		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: filepath.Join(home, "npm-cache", "gitcontribute"),
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -355,10 +359,10 @@ func TestSetupBothDryRunDoesNotPresentTheBootstrapExecutableAsFinalMCPCommand(t 
 	}
 	defer svc.Close()
 	t.Setenv("PATH", "")
+	svc.stubExecutablePath("/temporary/npm-cache/gitcontribute")
 
 	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
 		Mode: contracts.SetupModeBoth, Clients: []string{"codex"}, TokenSource: "none", DryRun: true,
-		Executable: "/temporary/npm-cache/gitcontribute",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -405,10 +409,10 @@ func TestSetupStopsBeforeConfigurationWhenManagedRuntimeCannotBeInstalled(t *tes
 		t.Fatal(err)
 	}
 	defer svc.Close()
+	svc.stubExecutablePath(filepath.Join(home, "missing", "gitcontribute"))
 
 	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
 		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
-		Executable: filepath.Join(home, "missing", "gitcontribute"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -436,7 +440,8 @@ func TestSetupDryRunWritesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer svc.Close()
-	report, err := svc.Setup(context.Background(), contracts.SetupOptions{Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", DryRun: true, Executable: "/bin/gitcontribute"})
+	svc.stubExecutablePath("/bin/gitcontribute")
+	report, err := svc.Setup(context.Background(), contracts.SetupOptions{Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,8 +469,9 @@ func TestSetupDoesNotInferClientMutationFromDetection(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer svc.Close()
+	svc.stubExecutablePath("/bin/gitcontribute")
 
-	_, err = svc.Setup(context.Background(), contracts.SetupOptions{Mode: contracts.SetupModeMCP, TokenSource: "none", Executable: "/bin/gitcontribute"})
+	_, err = svc.Setup(context.Background(), contracts.SetupOptions{Mode: contracts.SetupModeMCP, TokenSource: "none"})
 	if err == nil || !strings.Contains(err.Error(), "no coding-agent targets selected") {
 		t.Fatalf("error = %v", err)
 	}
@@ -549,7 +555,8 @@ func TestSetupRejectsRepositoryBeforeWriting(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer svc.Close()
-	_, err = svc.Setup(context.Background(), contracts.SetupOptions{Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Repository: "not a repository", Executable: "/bin/gitcontribute"})
+	svc.stubExecutablePath("/bin/gitcontribute")
+	_, err = svc.Setup(context.Background(), contracts.SetupOptions{Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Repository: "not a repository"})
 	if err == nil {
 		t.Fatal("setup accepted invalid repository")
 	}
@@ -625,8 +632,9 @@ func TestSetupWithProgressReportsRealApplicationPhases(t *testing.T) {
 	}
 	defer svc.Close()
 	observer := &recordingSetupObserver{}
+	svc.stubExecutablePath(writeTestExecutable(t, filepath.Join(home, "bin")))
 	report, err := svc.SetupWithProgress(context.Background(), contracts.SetupOptions{
-		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
+		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
 	}, observer)
 	if err != nil {
 		t.Fatal(err)
@@ -661,10 +669,10 @@ func TestSetupInstallsAndReportsCodexSkill(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer svc.Close()
+	svc.stubExecutablePath(writeTestExecutable(t, filepath.Join(home, "bin")))
 
 	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
 		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
-		Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
 	})
 	if err != nil {
 		t.Fatal(err)

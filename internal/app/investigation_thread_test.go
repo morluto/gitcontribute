@@ -37,7 +37,7 @@ func TestStartInvestigationFromThreadPreservesExactBaselineAndReusesOpenPair(t *
 	assertThreadStartResult(t, first, thread, observation)
 
 	newer, err := fixture.svc.corpus.UpsertThread(fixture.ctx, corpus.Thread{
-		RepositoryID: fixture.repoID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open",
+		RepositoryID: fixture.repoID, Kind: domain.IssueKind, Number: 1, State: "open",
 		Title: "new title after baseline", Body: "new body after baseline", Author: "alice",
 		SourceCreatedAt: thread.SourceCreatedAt, SourceUpdatedAt: fixture.now.Add(time.Hour),
 	}, `{"revision":"new"}`)

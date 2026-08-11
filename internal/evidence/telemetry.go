@@ -211,9 +211,9 @@ func (s *samplerState) result(parent context.Context) samplerResult {
 		return survivors[i].CreateTimeUnixMilli < survivors[j].CreateTimeUnixMilli
 	})
 	checkedAt := time.Now().UTC()
-	cleanup := CleanupResult{Status: "clean", CheckedAt: checkedAt}
+	cleanup := CleanupResult{Status: CleanupClean, CheckedAt: checkedAt}
 	if len(survivors) > 0 {
-		cleanup.Status, cleanup.Reason, cleanup.Survivors = "failed", "sampled descendants survived shutdown", survivors
+		cleanup.Status, cleanup.Reason, cleanup.Survivors = CleanupFailed, "sampled descendants survived shutdown", survivors
 	}
 	telemetry := ResourceTelemetry{
 		Provider: "gopsutil/v4", Platform: runtime.GOOS + "/" + runtime.GOARCH,
@@ -222,10 +222,10 @@ func (s *samplerState) result(parent context.Context) samplerResult {
 		PeakRSSBytes:   metricUint64(s.peakRSS, unavailableMetricError(s.memoryAvailable, s.memoryErr)),
 		PeakChildCount: metricInt64(s.peakChildren, unavailableMetricError(s.childrenAvailable, s.childrenErr)),
 	}
-	if s.rootCreateAt == 0 && cleanup.Status == "clean" {
-		cleanup.Status, cleanup.Reason = "unavailable", "root process identity was unavailable"
-	} else if s.trackingErr != nil && cleanup.Status == "clean" {
-		cleanup.Status, cleanup.Reason = "unavailable", "process tree tracking incomplete: "+s.trackingErr.Error()
+	if s.rootCreateAt == 0 && cleanup.Status == CleanupClean {
+		cleanup.Status, cleanup.Reason = CleanupUnavailable, "root process identity was unavailable"
+	} else if s.trackingErr != nil && cleanup.Status == CleanupClean {
+		cleanup.Status, cleanup.Reason = CleanupUnavailable, "process tree tracking incomplete: "+s.trackingErr.Error()
 	}
 	return samplerResult{identity: ProcessIdentity{PID: s.rootPID, CreateTimeUnixMilli: s.rootCreateAt}, telemetry: telemetry, cleanup: cleanup}
 }

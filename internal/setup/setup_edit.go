@@ -64,13 +64,13 @@ func ResolveNPMVersion(version string) (string, error) {
 func configureClient(operation Operation, client Client, home string, launcher Launcher, dryRun bool) Result {
 	adapter, err := clientAdapterFor(client)
 	if err != nil {
-		return Result{Client: client, Status: "failed", Error: err.Error()}
+		return Result{Client: client, Status: ChangeFailed, Error: err.Error()}
 	}
 	path := adapter.path(home)
 	status, err := adapter.configure(path, operation, launcher, dryRun)
 	result := Result{Client: client, Path: path, Status: status}
 	if err != nil {
-		result.Status = "failed"
+		result.Status = ChangeFailed
 		result.Error = err.Error()
 	}
 	return result
@@ -92,48 +92,48 @@ func configureCodexSkill(home string, operation Operation, dryRun bool) CodexSki
 	path := CodexSkillPath(home)
 	state, err := inspectCodexSkill(path)
 	if err != nil {
-		return CodexSkillResult{Path: path, Status: "failed", Error: err.Error()}
+		return CodexSkillResult{Path: path, Status: ChangeFailed, Error: err.Error()}
 	}
 	if operation == Remove {
 		if state == codexSkillAbsent || state == codexSkillUnmanaged {
-			return CodexSkillResult{Path: path, Status: "not configured"}
+			return CodexSkillResult{Path: path, Status: ChangeNotConfigured}
 		}
 		if dryRun {
-			return CodexSkillResult{Path: path, Status: "would remove"}
+			return CodexSkillResult{Path: path, Status: ChangeWouldRemove}
 		}
 		if err := os.Remove(path); err != nil {
-			return CodexSkillResult{Path: path, Status: "failed", Error: err.Error()}
+			return CodexSkillResult{Path: path, Status: ChangeFailed, Error: err.Error()}
 		}
 		if err := os.Remove(filepath.Dir(path)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			entries, readErr := os.ReadDir(filepath.Dir(path))
 			if readErr != nil || len(entries) == 0 {
-				return CodexSkillResult{Path: path, Status: "failed", Error: err.Error()}
+				return CodexSkillResult{Path: path, Status: ChangeFailed, Error: err.Error()}
 			}
 		}
-		return CodexSkillResult{Path: path, Status: "removed"}
+		return CodexSkillResult{Path: path, Status: ChangeRemoved}
 	}
 	if state == codexSkillCurrent {
-		return CodexSkillResult{Path: path, Status: "already configured"}
+		return CodexSkillResult{Path: path, Status: ChangeAlreadyConfigured}
 	}
 	if state == codexSkillUnmanaged {
-		return CodexSkillResult{Path: path, Status: "failed", Error: "discovery skill path exists but is not managed by GitContribute"}
+		return CodexSkillResult{Path: path, Status: ChangeFailed, Error: "discovery skill path exists but is not managed by GitContribute"}
 	}
 	if state == codexSkillManagedStale {
 		if dryRun {
-			return CodexSkillResult{Path: path, Status: "would update"}
+			return CodexSkillResult{Path: path, Status: ChangeWouldUpdate}
 		}
 		if err := writeAtomic(path, codexSkillContent); err != nil {
-			return CodexSkillResult{Path: path, Status: "failed", Error: err.Error()}
+			return CodexSkillResult{Path: path, Status: ChangeFailed, Error: err.Error()}
 		}
-		return CodexSkillResult{Path: path, Status: "updated"}
+		return CodexSkillResult{Path: path, Status: ChangeUpdated}
 	}
 	if dryRun {
-		return CodexSkillResult{Path: path, Status: "would configure"}
+		return CodexSkillResult{Path: path, Status: ChangeWouldConfigure}
 	}
 	if err := writeAtomic(path, codexSkillContent); err != nil {
-		return CodexSkillResult{Path: path, Status: "failed", Error: err.Error()}
+		return CodexSkillResult{Path: path, Status: ChangeFailed, Error: err.Error()}
 	}
-	return CodexSkillResult{Path: path, Status: "configured"}
+	return CodexSkillResult{Path: path, Status: ChangeConfigured}
 }
 
 func inspectCodexSkill(path string) (codexSkillState, error) {
@@ -154,59 +154,68 @@ func inspectCodexSkill(path string) (codexSkillState, error) {
 	return codexSkillUnmanaged, nil
 }
 
-func editJSONRegistration(path string, operation Operation, launcher Launcher, dryRun bool) (string, error) {
-	root := map[string]any{}
+func editJSONRegistration(path string, operation Operation, launcher Launcher, dryRun bool) (ChangeStatus, error) {
+	root := jsonObject{}
 	original, err := os.ReadFile(path)
 	if err == nil && len(bytes.TrimSpace(original)) > 0 {
-		if err := json.Unmarshal(original, &root); err != nil {
+		root, err = parseJSONObject(original, "client config")
+		if err != nil {
 			return "", fmt.Errorf("parse %s: %w", path, err)
 		}
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
-	servers, validServers := root["mcpServers"].(map[string]any)
-	if _, exists := root["mcpServers"]; exists && !validServers {
-		return "", fmt.Errorf("%s: mcpServers must be an object", path)
-	}
-	if servers == nil {
-		servers = map[string]any{}
+	servers := jsonObject{}
+	if rawServers, exists := root["mcpServers"]; exists {
+		servers, err = parseJSONObject(rawServers, "mcpServers")
+		if err != nil {
+			return "", fmt.Errorf("%s: mcpServers must be an object", path)
+		}
 	}
 	_, present := servers[serverName]
 	if operation == Remove {
 		if !present {
-			return "not configured", nil
+			return ChangeNotConfigured, nil
 		}
 		delete(servers, serverName)
-		root["mcpServers"] = servers
-		if dryRun {
-			return "would remove", nil
+		root["mcpServers"], err = json.Marshal(servers)
+		if err != nil {
+			return "", err
 		}
-		return "removed", writeJSON(path, root)
+		if dryRun {
+			return ChangeWouldRemove, nil
+		}
+		return ChangeRemoved, writeJSON(path, root)
 	}
-	want := map[string]any{"command": launcher.Command, "args": launcher.Args}
-	if present && equalJSON(servers[serverName], want) {
-		return "already configured", nil
+	if present && exactLauncherEntry(servers[serverName], launcher) {
+		return ChangeAlreadyConfigured, nil
 	}
-	servers[serverName] = want
-	root["mcpServers"] = servers
+	servers[serverName], err = json.Marshal(launcher)
+	if err != nil {
+		return "", err
+	}
+	root["mcpServers"], err = json.Marshal(servers)
+	if err != nil {
+		return "", err
+	}
 	if dryRun {
 		if present {
-			return "would update", nil
+			return ChangeWouldUpdate, nil
 		}
-		return "would configure", nil
+		return ChangeWouldConfigure, nil
 	}
 	if err := writeJSON(path, root); err != nil {
 		return "", err
 	}
 	if present {
-		return "updated", nil
+		return ChangeUpdated, nil
 	}
-	return "configured", nil
+	return ChangeConfigured, nil
 }
 
 var npmVersion = regexp.MustCompile(`^(latest|[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$`)
 
-func editCodex(path string, operation Operation, launcher Launcher, dryRun bool) (string, error) {
+func editCodex(path string, operation Operation, launcher Launcher, dryRun bool) (ChangeStatus, error) {
 	original, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return "", err
@@ -221,20 +230,20 @@ func editCodex(path string, operation Operation, launcher Launcher, dryRun bool)
 	start, end, present := findCodexBlock(text)
 	if operation == Remove {
 		if !present {
-			return "not configured", nil
+			return ChangeNotConfigured, nil
 		}
 		if dryRun {
-			return "would remove", nil
+			return ChangeWouldRemove, nil
 		}
 		updated := strings.TrimSpace(text[:start] + text[end:])
 		if updated != "" {
 			updated += "\n"
 		}
-		return "removed", writeAtomic(path, []byte(updated))
+		return ChangeRemoved, writeAtomic(path, []byte(updated))
 	}
 	block := codexTOMLBlock(launcher)
 	if present && strings.TrimSpace(text[start:end]) == strings.TrimSpace(block) {
-		return "already configured", nil
+		return ChangeAlreadyConfigured, nil
 	}
 	updated := text
 	if present {
@@ -250,17 +259,17 @@ func editCodex(path string, operation Operation, launcher Launcher, dryRun bool)
 	}
 	if dryRun {
 		if present {
-			return "would update", nil
+			return ChangeWouldUpdate, nil
 		}
-		return "would configure", nil
+		return ChangeWouldConfigure, nil
 	}
 	if err := writeAtomic(path, []byte(updated)); err != nil {
 		return "", err
 	}
 	if present {
-		return "updated", nil
+		return ChangeUpdated, nil
 	}
-	return "configured", nil
+	return ChangeConfigured, nil
 }
 
 func findCodexBlock(text string) (int, int, bool) {
@@ -363,12 +372,6 @@ func writeAtomic(path string, data []byte) error {
 	}
 	cleanup = false
 	return nil
-}
-
-func equalJSON(a, b any) bool {
-	aa, _ := json.Marshal(a)
-	bb, _ := json.Marshal(b)
-	return bytes.Equal(aa, bb)
 }
 
 func exists(path string) bool { _, err := os.Stat(path); return err == nil }

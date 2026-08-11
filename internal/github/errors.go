@@ -1,7 +1,6 @@
 package github
 
 import (
-	"errors"
 	"fmt"
 	"time"
 )
@@ -84,9 +83,4 @@ func (e *TransientError) Error() string {
 
 func (e *TransientError) Unwrap() error {
 	return e.Cause
-}
-
-// IsNoToken reports whether err is the sentinel no-token value.
-func IsNoToken(err error) bool {
-	return errors.Is(err, ErrNoToken)
 }

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
@@ -25,9 +24,9 @@ func parsePullRequestRefs(inputs []mcpcontract.ThreadRef, path string) ([]mcpcon
 		}
 		kind := strings.TrimSpace(refs[i].Kind)
 		if kind == "" {
-			kind = corpus.ThreadKindPullRequest
+			kind = string(domain.PullRequestKind)
 		}
-		if kind != corpus.ThreadKindPullRequest {
+		if kind != string(domain.PullRequestKind) {
 			return nil, mcpcontract.InvalidArgument(itemPath+".kind", "must be pull_request when provided", nil)
 		}
 		refs[i] = mcpcontract.ThreadRef{Owner: ref.Owner(), Repo: ref.Repo(), Kind: kind, Number: refs[i].Number}

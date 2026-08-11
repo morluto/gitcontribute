@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 func TestMigrationLoggerFatalfRecordsError(t *testing.T) {
@@ -53,7 +54,7 @@ func TestOpenAndPragmas(t *testing.T) {
 	}
 }
 
-func TestOpenReopensPathAfterInitializationLeaseHandoff(t *testing.T) {
+func TestInitializationLeaseHandoffReopensReplacedPath(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.db")
@@ -70,16 +71,22 @@ func TestOpenReopensPathAfterInitializationLeaseHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	originalHandoff := openLeaseHandoff
-	t.Cleanup(func() { openLeaseHandoff = originalHandoff })
-	openLeaseHandoff = func(path string) error {
-		if path != target {
-			return fmt.Errorf("handoff path = %q, want %q", path, target)
-		}
-		return replaceDatabaseFile(replacement, target)
+	lease, err := acquireCorpusLease(target, exclusiveCorpusLease, "initialize test corpus")
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	c, err := Open(ctx, target)
+	initialized, err := openWritableCorpus(ctx, target, lease, true)
+	if err != nil {
+		_ = lease.release()
+		t.Fatal(err)
+	}
+	if err := releaseInitializedCorpus(initialized, lease); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceDatabaseFile(replacement, target); err != nil {
+		t.Fatal(err)
+	}
+	c, _, err := reopenInitializedCorpus(ctx, target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,7 +414,7 @@ func TestSearchTreatsFTSOperatorsAndQuotesLiterally(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", `fix OR unmatched " quote`, "body", "author", time.Now(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", `fix OR unmatched " quote`, "body", "author", time.Now(), `{}`); err != nil {
 		t.Fatal(err)
 	}
 	for _, query := range []string{"OR", `unmatched "`, "fix"} {
@@ -441,7 +448,7 @@ func TestSourceAndLocalProjectionTimesRemainDistinct(t *testing.T) {
 		t.Fatalf("local projection times reused source clocks: %+v", repo)
 	}
 	thread, err := c.UpsertThread(ctx, Thread{
-		RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 1, State: "open", Title: "title",
+		RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1, State: "open", Title: "title",
 		SourceCreatedAt: sourceCreated, SourceUpdatedAt: sourceUpdated,
 	}, `{}`)
 	if err != nil {
@@ -501,14 +508,14 @@ func TestThreadDelayedObservations(t *testing.T) {
 	newer := time.Unix(2000, 0).UTC()
 	older := time.Unix(1000, 0).UTC()
 
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "first title", "body", "a", newer, `{"comments":0}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "first title", "body", "a", newer, `{"comments":0}`); err != nil {
 		t.Fatalf("apply newer thread observation: %v", err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "stale title", "body", "a", older, `{"comments":0}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "stale title", "body", "a", older, `{"comments":0}`); err != nil {
 		t.Fatalf("apply older thread observation: %v", err)
 	}
 
-	thread, err := c.GetThread(ctx, repo.ID, ThreadKindIssue, 1)
+	thread, err := c.GetThread(ctx, repo.ID, domain.IssueKind, 1)
 	if err != nil {
 		t.Fatalf("get thread: %v", err)
 	}
@@ -538,11 +545,11 @@ func TestThreadObservationReplayIsIdempotent(t *testing.T) {
 	}
 	sourceUpdatedAt := time.Unix(1000, 0).UTC()
 	for range 2 {
-		if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "title", "body", "author", sourceUpdatedAt, `{"id":1}`); err != nil {
+		if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "title", "body", "author", sourceUpdatedAt, `{"id":1}`); err != nil {
 			t.Fatal(err)
 		}
 	}
-	thread, err := c.GetThread(ctx, repo.ID, ThreadKindIssue, 1)
+	thread, err := c.GetThread(ctx, repo.ID, domain.IssueKind, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,14 +573,14 @@ func TestThreadEqualTimestampSequenceOrdering(t *testing.T) {
 	}
 
 	ts := time.Unix(4000, 0).UTC()
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "first", "body", "a", ts, `p1`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "first", "body", "a", ts, `p1`); err != nil {
 		t.Fatalf("apply first thread observation: %v", err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "second", "body", "a", ts, `p2`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "second", "body", "a", ts, `p2`); err != nil {
 		t.Fatalf("apply second thread observation: %v", err)
 	}
 
-	thread, err := c.GetThread(ctx, repo.ID, ThreadKindIssue, 1)
+	thread, err := c.GetThread(ctx, repo.ID, domain.IssueKind, 1)
 	if err != nil {
 		t.Fatalf("get thread: %v", err)
 	}
@@ -594,7 +601,7 @@ func TestIndependentFacetAdvancement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply repository: %v", err)
 	}
-	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindPullRequest, 42, "open", "title", "body", "a", time.Unix(2, 0).UTC(), `{}`)
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, domain.PullRequestKind, 42, "open", "title", "body", "a", time.Unix(2, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatalf("apply thread: %v", err)
 	}
@@ -696,13 +703,13 @@ func TestLocalSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply repository: %v", err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "searchable term", "body text here", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "searchable term", "body text here", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
 		t.Fatalf("apply matching thread: %v", err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 2, "open", "unrelated", "nothing", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 2, "open", "unrelated", "nothing", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
 		t.Fatalf("apply unrelated thread: %v", err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindPullRequest, 3, "open", "another term", "more body", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.PullRequestKind, 3, "open", "another term", "more body", "a", time.Unix(2, 0).UTC(), `{}`); err != nil {
 		t.Fatalf("apply pr thread: %v", err)
 	}
 
@@ -758,7 +765,7 @@ func TestCoverageIsIndependentFromProjections(t *testing.T) {
 		t.Fatalf("metadata coverage mismatch: %+v", cov)
 	}
 
-	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "title", "body", "a", time.Unix(10, 0).UTC(), `{}`)
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "title", "body", "a", time.Unix(10, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatalf("apply thread: %v", err)
 	}
@@ -812,14 +819,14 @@ func TestProjectionIgnoresStaleThreadObservationsBySourceUpdatedAt(t *testing.T)
 	older := time.Unix(1000, 0).UTC()
 
 	// Apply observations out of chronological order.
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "new", "b", "a", newer, `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "new", "b", "a", newer, `{}`); err != nil {
 		t.Fatalf("apply newer: %v", err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "old", "b", "a", older, `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "old", "b", "a", older, `{}`); err != nil {
 		t.Fatalf("apply older: %v", err)
 	}
 
-	thread, err := c.GetThread(ctx, repo.ID, ThreadKindIssue, 1)
+	thread, err := c.GetThread(ctx, repo.ID, domain.IssueKind, 1)
 	if err != nil {
 		t.Fatalf("get thread: %v", err)
 	}

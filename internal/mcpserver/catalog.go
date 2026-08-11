@@ -24,7 +24,7 @@ func addCatalogTool[In, Out any](server *Server, tool catalogTool[In, Out]) {
 	if tool.supportedBy != nil && !tool.supportedBy(server.reader) {
 		return
 	}
-	if server.readOnly && (tool.annotations == nil || !tool.annotations.ReadOnlyHint) {
+	if server.access == readOnlyServerAccess && (tool.annotations == nil || !tool.annotations.ReadOnlyHint) {
 		return
 	}
 	if tool.input.err != nil {

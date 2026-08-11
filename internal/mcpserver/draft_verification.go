@@ -9,9 +9,11 @@ import (
 )
 
 func (s *Server) verifyPublishedDraft(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.VerifyPublishedDraftInput) (*mcp.CallToolResult, mcpcontract.PublishedDraftVerificationOutput, error) {
-	if _, err := normalizeID("draft_id", in.DraftID); err != nil {
+	draftID, err := normalizeID("draft_id", in.DraftID)
+	if err != nil {
 		return nil, mcpcontract.PublishedDraftVerificationOutput{}, err
 	}
+	in.DraftID = draftID
 	if in.Revision < 1 || in.Number < 1 {
 		return nil, mcpcontract.PublishedDraftVerificationOutput{}, mcpcontract.InvalidArgument("revision", "revision and number must be positive", nil)
 	}

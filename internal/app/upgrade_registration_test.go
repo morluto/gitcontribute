@@ -15,25 +15,19 @@ import (
 )
 
 func TestUpgradeCheckReportsStaleRegistration(t *testing.T) {
-	originalCmd := upgradeCommand
-	originalExec := osExecutable
-	t.Cleanup(func() {
-		upgradeCommand = originalCmd
-		osExecutable = originalExec
-	})
-	upgradeCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+	commandStub := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if name == "npm" && reflect.DeepEqual(args, []string{"view", "gitcontribute", "version"}) {
 			return []byte("1.2.3\n"), nil
 		}
 		t.Fatalf("unexpected command: %s %v", name, args)
 		return nil, nil
 	}
-	osExecutable = func() (string, error) { return "/opt/gitcontribute", nil }
-
 	home := t.TempDir()
 	command := filepath.Join(home, "bin", "1.2.3", "gitcontribute")
 	writeStaleCodexConfig(t, home, command)
 	svc := testService(t, home, "1.2.3", "")
+	svc.stubUpgradeCommand(commandStub)
+	svc.stubExecutable(func() (string, error) { return "/opt/gitcontribute", nil })
 
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Check: true})
 	if err != nil {
@@ -53,25 +47,19 @@ func TestUpgradeCheckReportsStaleRegistration(t *testing.T) {
 }
 
 func TestUpgradeYesRepairsStaleRegistrationAndRequiresRestart(t *testing.T) {
-	originalCmd := upgradeCommand
-	originalExec := osExecutable
-	t.Cleanup(func() {
-		upgradeCommand = originalCmd
-		osExecutable = originalExec
-	})
-	upgradeCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+	commandStub := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if name == "npm" && reflect.DeepEqual(args, []string{"view", "gitcontribute", "version"}) {
 			return []byte("1.2.3\n"), nil
 		}
 		t.Fatalf("unexpected command: %s %v", name, args)
 		return nil, nil
 	}
-	osExecutable = func() (string, error) { return "/opt/gitcontribute", nil }
-
 	home := t.TempDir()
 	command := filepath.Join(home, "bin", "1.2.3", "gitcontribute")
 	writeStaleCodexConfig(t, home, command)
 	svc := testService(t, home, "1.2.3", "")
+	svc.stubUpgradeCommand(commandStub)
+	svc.stubExecutable(func() (string, error) { return "/opt/gitcontribute", nil })
 
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
@@ -95,21 +83,13 @@ func TestUpgradeYesRepairsStaleRegistrationAndRequiresRestart(t *testing.T) {
 }
 
 func TestUpgradeCheckReportsInstalledNewerRuntimeAndOlderRegistration(t *testing.T) {
-	originalCmd := upgradeCommand
-	originalExec := osExecutable
-	t.Cleanup(func() {
-		upgradeCommand = originalCmd
-		osExecutable = originalExec
-	})
-	upgradeCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+	commandStub := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if name == "npm" && reflect.DeepEqual(args, []string{"view", "gitcontribute", "version"}) {
 			return []byte("0.16.0\n"), nil
 		}
 		t.Fatalf("unexpected command: %s %v", name, args)
 		return nil, nil
 	}
-	osExecutable = func() (string, error) { return "/opt/gitcontribute", nil }
-
 	home := t.TempDir()
 	paths := config.NewPaths(&config.Env{Home: home})
 	dataDir, err := paths.DataDir()
@@ -130,6 +110,8 @@ func TestUpgradeCheckReportsInstalledNewerRuntimeAndOlderRegistration(t *testing
 	}
 	writeCodexConfig(t, home, filepath.Join(dataDir, "bin", "0.15.0", "gitcontribute"))
 	svc := testService(t, home, "0.15.0", "")
+	svc.stubUpgradeCommand(commandStub)
+	svc.stubExecutable(func() (string, error) { return "/opt/gitcontribute", nil })
 
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Check: true})
 	if err != nil {

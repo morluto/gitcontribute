@@ -50,17 +50,32 @@ type UpgradeOptions struct {
 }
 
 type MetadataResult struct {
-	Name                   string          `json:"name"`
-	Version                string          `json:"version"`
-	GoVersion              string          `json:"go_version"`
-	OS                     string          `json:"os"`
-	Architecture           string          `json:"architecture"`
-	SchemaVersion          int64           `json:"schema_version"`
-	SupportedSchemaVersion int64           `json:"supported_schema_version"`
-	ConfigPath             string          `json:"config_path"`
-	CorpusPath             string          `json:"corpus_path"`
-	Capabilities           []string        `json:"capabilities"`
-	Features               map[string]bool `json:"features"`
+	Name                   string           `json:"name"`
+	Version                string           `json:"version"`
+	GoVersion              string           `json:"go_version"`
+	OS                     string           `json:"os"`
+	Architecture           string           `json:"architecture"`
+	SchemaVersion          int64            `json:"schema_version"`
+	SupportedSchemaVersion int64            `json:"supported_schema_version"`
+	ConfigPath             string           `json:"config_path"`
+	CorpusPath             string           `json:"corpus_path"`
+	Capabilities           []string         `json:"capabilities"`
+	Features               MetadataFeatures `json:"features"`
+}
+
+// MetadataFeatures is the closed feature surface advertised by this build.
+// Capabilities remain the extensible discovery list; these stable keys retain
+// explicit false values for clients that negotiate individual features.
+type MetadataFeatures struct {
+	ContributionRadar     bool `json:"contribution_radar"`
+	ContributionReadiness bool `json:"contribution_readiness"`
+	EvidenceFreshness     bool `json:"evidence_freshness"`
+	GitHubMutations       bool `json:"github_mutations"`
+	MCPStdio              bool `json:"mcp_stdio"`
+	SemanticSearch        bool `json:"semantic_search"`
+	ThreadInvestigation   bool `json:"thread_investigation"`
+	ThreadResearch        bool `json:"thread_research"`
+	ValidationExec        bool `json:"validation_exec"`
 }
 
 // ConfigureOptions uses pointers so callers can distinguish an omitted value
@@ -94,9 +109,11 @@ type ConfigureResult struct {
 }
 
 type ControlCounts struct {
-	Repositories  int `json:"repositories"`
-	Threads       int `json:"threads"`
-	Sources       int `json:"sources"`
+	Repositories int `json:"repositories"`
+	Threads      int `json:"threads"`
+	Sources      int `json:"sources"`
+	// FrontierReady is retained for response compatibility after the unused
+	// crawl frontier was retired. It is always zero.
 	FrontierReady int `json:"frontier_ready"`
 	ActiveRuns    int `json:"active_runs"`
 	ActiveJobs    int `json:"active_jobs"`

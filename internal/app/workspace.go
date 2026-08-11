@@ -181,7 +181,13 @@ func (s *Service) ShowWorkspace(ctx context.Context, id string) (*contracts.Work
 	if err != nil {
 		return nil, fmt.Errorf("read workspace status: %w", err)
 	}
-	ws.Dirty = st.Dirty
+	hasUntracked, err := mgr.HasUntrackedWorkspace(ctx, ws)
+	if err != nil {
+		return nil, fmt.Errorf("read workspace untracked files: %w", err)
+	}
+	if err := ws.SetChanges(st.Dirty, hasUntracked); err != nil {
+		return nil, err
+	}
 
 	return workspaceResult(ws), nil
 }
@@ -308,8 +314,8 @@ func workspaceResult(ws *workspace.Workspace) *contracts.WorkspaceResult {
 		BaseSHA:         ws.BaseSHA,
 		CandidateSHA:    ws.CandidateSHA,
 		MergeBase:       ws.MergeBase,
-		Dirty:           ws.Dirty,
-		HasUntracked:    ws.HasUntracked,
+		Dirty:           ws.Dirty(),
+		HasUntracked:    ws.HasUntracked(),
 		Ownership:       string(ws.Ownership),
 		CreatedAt:       formatTime(ws.CreatedAt),
 	}

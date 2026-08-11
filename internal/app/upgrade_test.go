@@ -20,16 +20,15 @@ import (
 )
 
 func TestUpgradeNpxDoesNotInstallGlobalPackage(t *testing.T) {
-	original := upgradeCommand
-	t.Cleanup(func() { upgradeCommand = original })
 	var calls [][]string
-	upgradeCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+	command := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		calls = append(calls, append([]string{name}, args...))
 		return []byte("1.2.4\n"), nil
 	}
 	t.Setenv("npm_command", "exec")
 	t.Setenv("npm_lifecycle_event", "npx")
 	svc := &Service{version: "1.2.3", paths: config.NewPaths(&config.Env{Home: t.TempDir()})}
+	svc.stubUpgradeCommand(command)
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
@@ -56,17 +55,13 @@ func TestUpgradeDoesNotInstallAcrossSchemaIncompatibility(t *testing.T) {
 			Context: "global-npm", Current: "1.2.3", Latest: "1.2.4",
 			Stages: []contracts.UpgradeStage{{Name: "corpus-schema", Status: status}},
 		}
-		if shouldInstall(report, contracts.UpgradeOptions{Yes: true}) {
+		if shouldInstall(report, upgradeApply, npmInstallAutomatic, installationGlobalNPM) {
 			t.Fatalf("schema status %q authorized installation", status)
 		}
 	}
 }
 
 func TestUpgradeUsesSemanticVersionOrdering(t *testing.T) {
-	originalGOOS := upgradeGOOS
-	t.Cleanup(func() { upgradeGOOS = originalGOOS })
-	upgradeGOOS = "linux"
-
 	tests := []struct {
 		name        string
 		current     string
@@ -88,7 +83,7 @@ func TestUpgradeUsesSemanticVersionOrdering(t *testing.T) {
 			globalRoot := t.TempDir()
 			packageRoot := filepath.Join(globalRoot, "gitcontribute")
 			writePackageJSON(t, packageRoot, tt.current)
-			details := installDetails{context: "global-npm", npmRoot: globalRoot}
+			details := installDetails{kind: installationGlobalNPM, npmRoot: globalRoot}
 			stage := npmLauncherStage(details, tt.current, tt.target)
 			if stage.Status != tt.wantStage {
 				t.Fatalf("npm launcher status = %q, want %q", stage.Status, tt.wantStage)
@@ -102,11 +97,11 @@ func TestUpgradeUsesSemanticVersionOrdering(t *testing.T) {
 					{Name: "corpus-schema", Status: "current"},
 				},
 			}
-			setCommandAndStatus(report)
+			setCommandAndStatus(report, installationGlobalNPM)
 			if report.Status != tt.wantStatus {
 				t.Fatalf("status = %q, want %q", report.Status, tt.wantStatus)
 			}
-			if got := shouldInstall(report, contracts.UpgradeOptions{Yes: true}); got != tt.wantInstall {
+			if got := shouldInstall(report, upgradeApply, npmInstallAutomatic, installationGlobalNPM); got != tt.wantInstall {
 				t.Fatalf("shouldInstall = %t, want %t", got, tt.wantInstall)
 			}
 		})
@@ -116,7 +111,7 @@ func TestUpgradeUsesSemanticVersionOrdering(t *testing.T) {
 func TestDetectInstallContextDefaultsOther(t *testing.T) {
 	t.Setenv("npm_command", "")
 	t.Setenv("npm_lifecycle_event", "")
-	if got := discoverInstallation(context.Background()).context; got == "npx" {
+	if got := discoverInstallation(context.Background(), productionUpgradeEnvironment(), os.Executable).kind; got == installationNPX {
 		t.Fatalf("context = %s", got)
 	}
 }
@@ -125,10 +120,10 @@ func TestClassifyNPMExecutableDistinguishesProjectAndGlobalInstalls(t *testing.T
 	globalRoot := filepath.Join(string(filepath.Separator), "usr", "local", "lib", "node_modules")
 	global := filepath.Join(globalRoot, "gitcontribute", "npm", "bin", "native", "linux-x64", "gitcontribute")
 	project := filepath.Join(string(filepath.Separator), "work", "project", "node_modules", "gitcontribute", "npm", "bin", "native", "linux-x64", "gitcontribute")
-	if got := classifyNPMExecutable(global, globalRoot); got != "global-npm" {
+	if got := installationKindFromExecutable(global, globalRoot); got != installationGlobalNPM {
 		t.Fatalf("global context = %q", got)
 	}
-	if got := classifyNPMExecutable(project, globalRoot); got != "project-npm" {
+	if got := installationKindFromExecutable(project, globalRoot); got != installationProjectNPM {
 		t.Fatalf("project context = %q", got)
 	}
 }
@@ -136,12 +131,6 @@ func TestClassifyNPMExecutableDistinguishesProjectAndGlobalInstalls(t *testing.T
 func TestUpgradeReportsInspectableStagesForGlobalNPM(t *testing.T) {
 	t.Setenv("npm_command", "")
 	t.Setenv("npm_lifecycle_event", "")
-	originalCmd := upgradeCommand
-	originalExec := osExecutable
-	t.Cleanup(func() {
-		upgradeCommand = originalCmd
-		osExecutable = originalExec
-	})
 
 	home := t.TempDir()
 	globalRoot := filepath.Join(home, "global", "lib", "node_modules")
@@ -155,8 +144,7 @@ func TestUpgradeReportsInspectableStagesForGlobalNPM(t *testing.T) {
 	}
 	writePackageJSON(t, pkgRoot, "1.2.3")
 
-	osExecutable = func() (string, error) { return exe, nil }
-	upgradeCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+	command := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if len(args) >= 2 && args[0] == "root" && args[1] == "--global" {
 			return []byte(globalRoot + "\n"), nil
 		}
@@ -168,6 +156,8 @@ func TestUpgradeReportsInspectableStagesForGlobalNPM(t *testing.T) {
 	}
 
 	svc := testService(t, home, "1.2.3", "")
+	svc.stubExecutable(func() (string, error) { return exe, nil })
+	svc.stubUpgradeCommand(command)
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Check: true})
 	if err != nil {
 		t.Fatal(err)
@@ -195,15 +185,6 @@ func TestUpgradeReportsInspectableStagesForGlobalNPM(t *testing.T) {
 func TestUpgradeGlobalNPMInstallsLatest(t *testing.T) {
 	t.Setenv("npm_command", "")
 	t.Setenv("npm_lifecycle_event", "")
-	originalCmd := upgradeCommand
-	originalExec := osExecutable
-	originalGOOS := upgradeGOOS
-	t.Cleanup(func() {
-		upgradeCommand = originalCmd
-		osExecutable = originalExec
-		upgradeGOOS = originalGOOS
-	})
-	upgradeGOOS = "linux"
 
 	home := t.TempDir()
 	globalRoot := filepath.Join(home, "global", "lib", "node_modules")
@@ -217,9 +198,8 @@ func TestUpgradeGlobalNPMInstallsLatest(t *testing.T) {
 	}
 	writePackageJSON(t, pkgRoot, "1.2.3")
 
-	osExecutable = func() (string, error) { return exe, nil }
 	var installArgs []string
-	upgradeCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+	command := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if len(args) >= 2 && args[0] == "root" && args[1] == "--global" {
 			return []byte(globalRoot + "\n"), nil
 		}
@@ -236,6 +216,9 @@ func TestUpgradeGlobalNPMInstallsLatest(t *testing.T) {
 	}
 
 	svc := testService(t, home, "1.2.3", "")
+	svc.stubExecutable(func() (string, error) { return exe, nil })
+	svc.stubUpgradeCommand(command)
+	svc.stubUpgradePlatform("linux")
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
@@ -256,14 +239,6 @@ func TestUpgradeGlobalNPMInstallsLatest(t *testing.T) {
 func TestUpgradeWindowsGlobalNPMDoesNotInstall(t *testing.T) {
 	t.Setenv("npm_command", "")
 	t.Setenv("npm_lifecycle_event", "")
-	originalCmd := upgradeCommand
-	originalExec := osExecutable
-	originalGOOS := upgradeGOOS
-	t.Cleanup(func() {
-		upgradeCommand = originalCmd
-		osExecutable = originalExec
-		upgradeGOOS = originalGOOS
-	})
 
 	home := t.TempDir()
 	globalRoot := filepath.Join(home, "global", "lib", "node_modules")
@@ -277,10 +252,8 @@ func TestUpgradeWindowsGlobalNPMDoesNotInstall(t *testing.T) {
 	}
 	writePackageJSON(t, pkgRoot, "1.2.3")
 
-	osExecutable = func() (string, error) { return exe, nil }
-	upgradeGOOS = "windows"
 	var calls [][]string
-	upgradeCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+	command := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		calls = append(calls, append([]string{name}, args...))
 		if len(args) >= 2 && args[0] == "root" && args[1] == "--global" {
 			return []byte(globalRoot + "\n"), nil
@@ -293,6 +266,9 @@ func TestUpgradeWindowsGlobalNPMDoesNotInstall(t *testing.T) {
 	}
 
 	svc := testService(t, home, "1.2.3", "")
+	svc.stubExecutable(func() (string, error) { return exe, nil })
+	svc.stubUpgradeCommand(command)
+	svc.stubUpgradePlatform("windows")
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
@@ -313,12 +289,6 @@ func TestUpgradeWindowsGlobalNPMDoesNotInstall(t *testing.T) {
 func TestUpgradeProjectNPMReportsManualUpdate(t *testing.T) {
 	t.Setenv("npm_command", "")
 	t.Setenv("npm_lifecycle_event", "")
-	originalCmd := upgradeCommand
-	originalExec := osExecutable
-	t.Cleanup(func() {
-		upgradeCommand = originalCmd
-		osExecutable = originalExec
-	})
 
 	home := t.TempDir()
 	projectRoot := filepath.Join(home, "project")
@@ -332,8 +302,7 @@ func TestUpgradeProjectNPMReportsManualUpdate(t *testing.T) {
 	}
 	writePackageJSON(t, pkgRoot, "1.2.3")
 
-	osExecutable = func() (string, error) { return exe, nil }
-	upgradeCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+	command := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if len(args) >= 2 && args[0] == "root" && args[1] == "--global" {
 			return []byte("/other/global/lib/node_modules\n"), nil
 		}
@@ -345,6 +314,8 @@ func TestUpgradeProjectNPMReportsManualUpdate(t *testing.T) {
 	}
 
 	svc := testService(t, home, "1.2.3", "")
+	svc.stubExecutable(func() (string, error) { return exe, nil })
+	svc.stubUpgradeCommand(command)
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Check: true})
 	if err != nil {
 		t.Fatal(err)
@@ -430,16 +401,6 @@ func TestUpgradeConfiguredRuntimeOutdated(t *testing.T) {
 func TestUpgradeCombinedInstallActivatesPrivateRuntimeFromInstalledPackage(t *testing.T) {
 	t.Setenv("npm_command", "")
 	t.Setenv("npm_lifecycle_event", "")
-	originalCmd := upgradeCommand
-	originalExec := osExecutable
-	originalGOOS := upgradeGOOS
-	t.Cleanup(func() {
-		upgradeCommand = originalCmd
-		osExecutable = originalExec
-		upgradeGOOS = originalGOOS
-	})
-	upgradeGOOS = "linux"
-	setRuntimeContract(t, "1.2.4", 1)
 
 	home := t.TempDir()
 	globalRoot := filepath.Join(home, "global", "lib", "node_modules")
@@ -452,8 +413,7 @@ func TestUpgradeCombinedInstallActivatesPrivateRuntimeFromInstalledPackage(t *te
 		t.Fatal(err)
 	}
 	writePackageJSON(t, pkgRoot, "1.2.3")
-	osExecutable = func() (string, error) { return source, nil }
-	upgradeCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+	command := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		switch {
 		case name == "npm" && len(args) >= 2 && args[0] == "root":
 			return []byte(globalRoot + "\n"), nil
@@ -474,6 +434,10 @@ func TestUpgradeCombinedInstallActivatesPrivateRuntimeFromInstalledPackage(t *te
 	writeCodexConfig(t, home, oldRuntime)
 
 	svc := testService(t, home, "1.2.3", "")
+	svc.stubExecutable(func() (string, error) { return source, nil })
+	svc.stubUpgradeCommand(command)
+	svc.stubUpgradePlatform("linux")
+	setRuntimeContract(t, svc, "1.2.4", 1)
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
@@ -488,7 +452,7 @@ func TestUpgradeCombinedInstallActivatesPrivateRuntimeFromInstalledPackage(t *te
 
 func TestUpgradeOlderUnmanagedBinaryDoesNotChangePrivateRegistration(t *testing.T) {
 	_, _, configPath, want, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.3")
-	setRuntimeContract(t, "1.2.3", 1)
+	setRuntimeContract(t, svc, "1.2.3", 1)
 
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
@@ -583,17 +547,6 @@ func TestUpgradeCorpusSchemaIncompatible(t *testing.T) {
 }
 
 func TestUpgradeRecoversNewerSchemaInCanonicalLineage(t *testing.T) {
-	originalCmd := upgradeCommand
-	originalExec := osExecutable
-	originalContract := runtimeContractCommand
-	originalGOOS := upgradeGOOS
-	t.Cleanup(func() {
-		upgradeCommand = originalCmd
-		osExecutable = originalExec
-		runtimeContractCommand = originalContract
-		upgradeGOOS = originalGOOS
-	})
-	upgradeGOOS = "linux"
 	t.Setenv("npm_command", "")
 	t.Setenv("npm_lifecycle_event", "")
 
@@ -631,8 +584,7 @@ func TestUpgradeRecoversNewerSchemaInCanonicalLineage(t *testing.T) {
 		t.Fatal(err)
 	}
 	writePackageJSON(t, packageRoot, "1.2.3")
-	osExecutable = func() (string, error) { return executable, nil }
-	upgradeCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+	command := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		switch {
 		case name == "npm" && len(args) >= 2 && args[0] == "root" && args[1] == "--global":
 			return []byte(globalRoot + "\n"), nil
@@ -646,7 +598,7 @@ func TestUpgradeRecoversNewerSchemaInCanonicalLineage(t *testing.T) {
 			return nil, nil
 		}
 	}
-	runtimeContractCommand = func(_ context.Context, _ string) ([]byte, error) {
+	contract := func(_ context.Context, _ string) ([]byte, error) {
 		return []byte(fmt.Sprintf(
 			`{"name":"gitcontribute","version":"1.2.4","supported_schema_lineage":%q,"supported_schema_version":%d}`,
 			corpus.SupportedSchemaLineage(), currentSchema+1,
@@ -654,6 +606,10 @@ func TestUpgradeRecoversNewerSchemaInCanonicalLineage(t *testing.T) {
 	}
 
 	svc := testService(t, home, "1.2.3", dbPath)
+	svc.stubExecutable(func() (string, error) { return executable, nil })
+	svc.stubUpgradeCommand(command)
+	svc.stubRuntimeContract(contract)
+	svc.stubUpgradePlatform("linux")
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
 		t.Fatal(err)
@@ -664,36 +620,27 @@ func TestUpgradeRecoversNewerSchemaInCanonicalLineage(t *testing.T) {
 	assertStage(t, report, "corpus-schema", "current")
 }
 
-func setRuntimeContract(t *testing.T, version string, supportedSchema int64) {
+func setRuntimeContract(t *testing.T, svc *Service, version string, supportedSchema int64) {
 	t.Helper()
-	original := runtimeContractCommand
-	t.Cleanup(func() { runtimeContractCommand = original })
-	runtimeContractCommand = func(_ context.Context, _ string) ([]byte, error) {
+	svc.stubRuntimeContract(func(_ context.Context, _ string) ([]byte, error) {
 		return []byte(fmt.Sprintf(`{"name":"gitcontribute","version":%q,"supported_schema_lineage":%q,"supported_schema_version":%d}`, version, corpus.SupportedSchemaLineage(), supportedSchema)), nil
-	}
+	})
 }
 
-func setRuntimeContractOutput(t *testing.T, output string) {
+func setRuntimeContractOutput(t *testing.T, svc *Service, output string) {
 	t.Helper()
-	original := runtimeContractCommand
-	t.Cleanup(func() { runtimeContractCommand = original })
-	runtimeContractCommand = func(_ context.Context, _ string) ([]byte, error) {
+	svc.stubRuntimeContract(func(_ context.Context, _ string) ([]byte, error) {
 		return []byte(output), nil
-	}
+	})
 }
 
 func setupUpgradeActivationTest(t *testing.T, currentVersion, targetVersion, candidateVersion string) (home, source, configPath string, want []byte, svc *Service) {
 	t.Helper()
 	t.Setenv("npm_command", "")
 	t.Setenv("npm_lifecycle_event", "")
-	originalCmd := upgradeCommand
-	originalExec := osExecutable
-	t.Cleanup(func() {
-		upgradeCommand = originalCmd
-		osExecutable = originalExec
-	})
 
 	home = t.TempDir()
+	var executable func() (string, error)
 	if candidateVersion != "" {
 		source = filepath.Join(home, "release", "gitcontribute")
 		if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
@@ -702,11 +649,11 @@ func setupUpgradeActivationTest(t *testing.T, currentVersion, targetVersion, can
 		if err := os.WriteFile(source, []byte("release-"+candidateVersion), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		osExecutable = func() (string, error) { return source, nil }
+		executable = func() (string, error) { return source, nil }
 	} else {
-		osExecutable = func() (string, error) { return "", errors.New("no executable") }
+		executable = func() (string, error) { return "", errors.New("no executable") }
 	}
-	upgradeCommand = func(_ context.Context, name string, args ...string) ([]byte, error) {
+	command := func(_ context.Context, name string, args ...string) ([]byte, error) {
 		if name == "npm" && len(args) >= 2 && args[0] == "view" && args[1] == "gitcontribute" {
 			return []byte(targetVersion + "\n"), nil
 		}
@@ -722,6 +669,8 @@ func setupUpgradeActivationTest(t *testing.T, currentVersion, targetVersion, can
 		t.Fatal(err)
 	}
 	svc = testService(t, home, currentVersion, "")
+	svc.stubExecutable(executable)
+	svc.stubUpgradeCommand(command)
 	return
 }
 
@@ -730,7 +679,7 @@ func testService(t *testing.T, home, version, database string) *Service {
 	paths := config.NewPaths(&config.Env{Home: home})
 	cfg := config.Default()
 	cfg.Database = database
-	return &Service{version: version, paths: paths, cfg: cfg}
+	return &Service{version: version, paths: paths, cfg: cfg, upgradeEnv: productionUpgradeEnvironment()}
 }
 
 func writePackageJSON(t *testing.T, root, version string) {
@@ -784,9 +733,9 @@ func joinCalls(calls [][]string) string {
 	return strings.Join(parts, "; ")
 }
 
-func TestRunNPMCommandRejectsEmptyArgumentsWithoutExecution(t *testing.T) {
+func TestParseNPMVersionRejectsCommandArguments(t *testing.T) {
 	t.Parallel()
-	if _, err := runNPMCommand(context.Background(), nil); err == nil || err.Error() != "missing npm arguments" {
-		t.Fatalf("empty npm arguments error = %v", err)
+	if _, err := parseNPMVersion("1.2.3 --ignore-scripts"); err == nil {
+		t.Fatal("unsafe npm version was accepted")
 	}
 }

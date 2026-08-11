@@ -30,9 +30,8 @@ type CodeMatch struct {
 
 // CodeSearchOptions scopes a paginated code-document keyword search.
 type CodeSearchOptions struct {
-	Ref    domain.RepoRef
-	Limit  int
-	Cursor string
+	Ref  domain.RepoRef
+	Page SearchPage
 }
 
 // CodeSearchPage is a paginated result of a code-document keyword search.
@@ -194,8 +193,15 @@ func storeCodeIndexArtifact(ctx context.Context, tx *sql.Tx, snapshotID int64, r
 	manifestDigest := hex.EncodeToString(manifestHash[:])
 	artifactHash := sha256.Sum256(append([]byte("code-index\x00"), manifestBytes...))
 	artifactDigest := hex.EncodeToString(artifactHash[:])
-	scopeJSON, _ := json.Marshal(map[string]any{"repository": ref.String(), "commit_sha": snapshot.Commit, "artifact_digest": artifactDigest})
-	completenessJSON, _ := json.Marshal(map[string]any{"coverage_known": snapshot.Manifest.CoverageKnown, "truncated": snapshot.Manifest.Truncated})
+	scopeJSON, _ := json.Marshal(struct {
+		Repository     string `json:"repository"`
+		CommitSHA      string `json:"commit_sha"`
+		ArtifactDigest string `json:"artifact_digest"`
+	}{Repository: ref.String(), CommitSHA: snapshot.Commit, ArtifactDigest: artifactDigest})
+	completenessJSON, _ := json.Marshal(struct {
+		CoverageKnown bool `json:"coverage_known"`
+		Truncated     bool `json:"truncated"`
+	}{CoverageKnown: snapshot.Manifest.CoverageKnown, Truncated: snapshot.Manifest.Truncated})
 	provenanceJSON, _ := json.Marshal(manifest.Provenance)
 	tokenHash := sha256.Sum256(append([]byte(ReadSnapshotContractVersion+"\x00"), scopeJSON...))
 	snapshotToken := hex.EncodeToString(tokenHash[:])
@@ -399,7 +405,11 @@ func scanCodeSnapshot(row *sql.Row, ref domain.RepoRef) (*CodeSnapshotInfo, erro
 
 // SearchCode searches only the latest indexed snapshot of each repository.
 func (c *Corpus) SearchCode(ctx context.Context, query string, ref domain.RepoRef, limit int) ([]CodeMatch, error) {
-	page, err := c.SearchCodeWithOptions(ctx, query, CodeSearchOptions{Ref: ref, Limit: limit})
+	request, err := ParseSearchPage(limit, "")
+	if err != nil {
+		return nil, err
+	}
+	page, err := c.SearchCodeWithOptions(ctx, query, CodeSearchOptions{Ref: ref, Page: request})
 	if err != nil {
 		return nil, err
 	}
@@ -431,8 +441,8 @@ func (c *Corpus) SearchCodeWithOptions(ctx context.Context, query string, opts C
 	}
 
 	page := CodeSearchPage{Matches: matches}
-	if len(matches) > opts.Limit {
-		page.Matches = matches[:opts.Limit]
+	if len(matches) > opts.Page.Limit() {
+		page.Matches = matches[:opts.Page.Limit()]
 		last := page.Matches[len(page.Matches)-1]
 		page.NextCursor = encodeCursor(searchCursor{
 			Scope: "code",
@@ -443,7 +453,7 @@ func (c *Corpus) SearchCodeWithOptions(ctx context.Context, query string, opts C
 			ID:    last.DocID,
 		})
 	}
-	if len(matches) > opts.Limit || opts.Cursor != "" {
+	if len(matches) > opts.Page.Limit() || opts.Page.Cursor() != "" {
 		page.Total, err = countCodeMatches(ctx, tx, ftsQuery, opts.Ref)
 		if err != nil {
 			return CodeSearchPage{}, err
@@ -463,12 +473,6 @@ func (c *Corpus) SearchCodeWithOptions(ctx context.Context, query string, opts C
 }
 
 func (c *Corpus) prepareCodeSearch(ctx context.Context, query string, opts CodeSearchOptions) (CodeSearchOptions, string, string, *searchCursor, error) {
-	if opts.Limit <= 0 {
-		opts.Limit = 20
-	}
-	if opts.Limit > 100 {
-		return opts, "", "", nil, errors.New("code search limit cannot exceed 100")
-	}
 	ftsQuery := literalFTSQuery(query)
 	if ftsQuery == "" {
 		return opts, "", "", nil, nil
@@ -482,7 +486,7 @@ func (c *Corpus) prepareCodeSearch(ctx context.Context, query string, opts CodeS
 		}
 	}
 	repo := opts.Ref.String()
-	cursor, err := c.decodeCodeCursor(opts.Cursor, query, repo)
+	cursor, err := c.decodeCodeCursor(opts.Page.Cursor(), query, repo)
 	return opts, ftsQuery, repo, cursor, err
 }
 
@@ -507,7 +511,7 @@ func codeSearchStatement(ftsQuery string, opts CodeSearchOptions, cursor *search
 		args = append(args, cursor.Rank, cursor.Rank, cursor.ID)
 	}
 	statement += ` ORDER BY bm25(code_documents_fts, 5.0, 1.0), d.id LIMIT ?`
-	return statement, append(args, opts.Limit+1)
+	return statement, append(args, opts.Page.Limit()+1)
 }
 
 func scanCodeSearchMatches(rows *sql.Rows) ([]CodeMatch, error) {
@@ -566,8 +570,6 @@ func loadCodeSearchSnapshots(ctx context.Context, tx *sql.Tx, scoped domain.Repo
 	return snapshots, nil
 }
 
-const codeListLimit = 10000
-
 func (c *Corpus) latestCodeSnapshotID(ctx context.Context, ref domain.RepoRef) (int64, error) {
 	var id int64
 	err := c.db.QueryRowContext(ctx, `
@@ -618,49 +620,6 @@ func (c *Corpus) GetCodeDocument(ctx context.Context, ref domain.RepoRef, path s
 	match.Repo = parsed
 	match.SnapshotCreatedAt = scanTime(createdAt)
 	return &match, nil
-}
-
-// ListCodeDocuments returns all documents from the latest snapshot of a
-// repository. Results are bounded to avoid unbounded offline work.
-func (c *Corpus) ListCodeDocuments(ctx context.Context, ref domain.RepoRef) ([]CodeMatch, error) {
-	snapshotID, err := c.latestCodeSnapshotID(ctx, ref)
-	if err != nil {
-		return nil, err
-	}
-	if snapshotID == 0 {
-		return nil, nil
-	}
-	rows, err := c.db.QueryContext(ctx, `
-		SELECT d.id, s.repo_owner, s.repo_name, s.commit_sha, d.path, d.content, d.bytes, d.language, s.id, s.created_at
-		FROM code_documents d
-		JOIN code_snapshots s ON s.id = d.snapshot_id
-		WHERE d.snapshot_id = ?
-		ORDER BY d.path
-		LIMIT ?
-	`, snapshotID, codeListLimit)
-	if err != nil {
-		return nil, fmt.Errorf("list code documents: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var out []CodeMatch
-	for rows.Next() {
-		var match CodeMatch
-		var owner, repo string
-		var createdAt int64
-		if err := rows.Scan(&match.DocID, &owner, &repo, &match.Commit,
-			&match.Path, &match.Content, &match.Bytes, &match.Language, &match.SnapshotID, &createdAt); err != nil {
-			return nil, err
-		}
-		parsed, err := domain.NewRepoRef(owner, repo)
-		if err != nil {
-			return nil, fmt.Errorf("decode code document repository: %w", err)
-		}
-		match.Repo = parsed
-		match.SnapshotCreatedAt = scanTime(createdAt)
-		out = append(out, match)
-	}
-	return out, rows.Err()
 }
 
 func countCodeMatches(ctx context.Context, queryer codeSnapshotQueryer, ftsQuery string, ref domain.RepoRef) (int, error) {

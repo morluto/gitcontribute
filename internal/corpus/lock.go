@@ -24,7 +24,14 @@ type corpusLease struct {
 	lock *flock.Flock
 }
 
-func acquireCorpusLease(path string, exclusive bool, operation string) (*corpusLease, error) {
+type corpusLeaseMode uint8
+
+const (
+	sharedCorpusLease corpusLeaseMode = iota
+	exclusiveCorpusLease
+)
+
+func acquireCorpusLease(path string, mode corpusLeaseMode, operation string) (*corpusLease, error) {
 	lockPath, ok := corpusLockPath(path)
 	if !ok {
 		return &corpusLease{}, nil
@@ -37,10 +44,13 @@ func acquireCorpusLease(path string, exclusive bool, operation string) (*corpusL
 		acquired bool
 		err      error
 	)
-	if exclusive {
+	switch mode {
+	case exclusiveCorpusLease:
 		acquired, err = lock.TryLock()
-	} else {
+	case sharedCorpusLease:
 		acquired, err = lock.TryRLock()
+	default:
+		return nil, errors.New("invalid corpus lease mode")
 	}
 	if err != nil {
 		return nil, fmt.Errorf("acquire corpus lease for %s: %w", operation, err)
@@ -66,17 +76,6 @@ func ensureCorpusLeaseFile(path string) error {
 		return errors.Join(fmt.Errorf("prepare corpus lease: %w", err), root.Close())
 	}
 	return errors.Join(file.Close(), root.Close())
-}
-
-// CheckExclusiveAccess fails fast when another cooperating process holds a
-// corpus lease. It makes no database changes and does not reserve the lease for
-// later work; the mutating operation must acquire it again.
-func CheckExclusiveAccess(path, operation string) error {
-	lease, err := acquireCorpusLease(path, true, operation)
-	if err != nil {
-		return err
-	}
-	return lease.release()
 }
 
 func corpusLockPath(path string) (string, bool) {

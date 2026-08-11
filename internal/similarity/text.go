@@ -44,12 +44,12 @@ func NormalizeText(value string) string {
 }
 
 // Tokens returns sorted unique tokens using the duplicate-v1 normalization policy.
-func Tokens(text string, filterStopWords bool) []string {
-	return TokensLimited(text, filterStopWords, 0)
+func Tokens(text string) []string {
+	return TokensLimited(text, 0)
 }
 
 // TokensLimited returns sorted unique tokens after processing at most maxWords input words.
-func TokensLimited(text string, filterStopWords bool, maxWords int) []string {
+func TokensLimited(text string, maxWords int) []string {
 	fields := strings.Fields(NormalizeText(text))
 	if maxWords > 0 && len(fields) > maxWords {
 		fields = fields[:maxWords]
@@ -59,10 +59,8 @@ func TokensLimited(text string, filterStopWords bool, maxWords int) []string {
 		if len(word) <= 1 {
 			continue
 		}
-		if filterStopWords {
-			if _, excluded := stopWords[word]; excluded {
-				continue
-			}
+		if _, excluded := stopWords[word]; excluded {
+			continue
 		}
 		seen[word] = struct{}{}
 	}

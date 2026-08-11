@@ -25,7 +25,7 @@ func TestPrepareIssueSetComposesStoredEvidenceWithoutClaimingClosure(t *testing.
 		t.Fatal(err)
 	}
 	issue, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 7, State: "open",
+		RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 7, State: "open",
 		Title: "Avoid duplicate cache work", Body: "Cache identical requests once.", Labels: []string{"performance"},
 		SourceUpdatedAt: now.Add(-2 * time.Hour),
 	}, `{}`)
@@ -33,14 +33,14 @@ func TestPrepareIssueSetComposesStoredEvidenceWithoutClaimingClosure(t *testing.
 		t.Fatal(err)
 	}
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 21, State: "closed",
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 21, State: "closed",
 		Title: "Avoid duplicate cache work in readers", Body: "This advances #7 by caching repository reads.",
 		Merge: domain.MergedStatus(now.Add(-time.Hour)), SourceUpdatedAt: now.Add(-time.Hour),
 	}, `{}`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 22, State: "closed",
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 22, State: "closed",
 		Title: "Avoid duplicate cache work", Body: "Cache identical requests once.",
 		Merge: domain.UnmergedStatus(), SourceUpdatedAt: now.Add(-30 * time.Minute),
 	}, `{}`); err != nil {
@@ -108,7 +108,7 @@ func TestPrepareIssueSetPreservesUnknownAndExactRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open", Title: "Body not captured",
+		RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1, State: "open", Title: "Body not captured",
 	}, `{}`); err != nil {
 		t.Fatal(err)
 	}
@@ -172,14 +172,14 @@ func TestPrepareIssueSetKeepsRelatedTotalUnknownForAmbiguousPullRequestBody(t *t
 		t.Fatal(err)
 	}
 	issue, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 7, State: "open",
+		RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 7, State: "open",
 		Title: "Exact issue", Body: "Known issue body.", SourceUpdatedAt: now,
 	}, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 21, State: "open",
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 21, State: "open",
 		Title: "Body may not have been captured", SourceUpdatedAt: now,
 	}, `{}`); err != nil {
 		t.Fatal(err)
@@ -211,10 +211,10 @@ func TestPrepareIssueSetKeepsRelatedTotalUnknownForAmbiguousPullRequestBody(t *t
 func TestIssueSetRelatedWorkDoesNotBorrowMergeStateAcrossRepositories(t *testing.T) {
 	t.Parallel()
 	out := issueSetRelatedWork(
-		radar.RelatedWork{Ref: "pull_request:other/repo#21", Kind: corpus.ThreadKindPullRequest, Number: 21},
+		radar.RelatedWork{Ref: "pull_request:other/repo#21", Kind: string(domain.PullRequestKind), Number: 21},
 		domain.MustRepoRef("acme", "rocket"),
 		map[int]corpus.Thread{21: {Number: 21, Merge: domain.MergedStatus(time.Time{})}},
-		"concise",
+		conciseResponse,
 	)
 	if out.Merged != nil || out.MergedAt != "" {
 		t.Fatalf("external related work borrowed local merge state: %+v", out)

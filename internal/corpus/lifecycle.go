@@ -37,6 +37,20 @@ const (
 	SchemaDamaged SchemaState = "damaged"
 )
 
+// MigrationResumeStrategy describes how an interrupted migration step resumes.
+type MigrationResumeStrategy string
+
+const MigrationRestartStep MigrationResumeStrategy = "restart_step"
+
+// MigrationPhase identifies a stable migration progress boundary.
+type MigrationPhase string
+
+const (
+	MigrationPending   MigrationPhase = "pending"
+	MigrationStarted   MigrationPhase = "started"
+	MigrationCompleted MigrationPhase = "completed"
+)
+
 // MigrationStep describes one embedded schema migration without applying it.
 type MigrationStep struct {
 	Version           int64
@@ -45,7 +59,7 @@ type MigrationStep struct {
 	EstimateAvailable bool
 	Transactional     bool
 	Resumable         bool
-	ResumeStrategy    string
+	ResumeStrategy    MigrationResumeStrategy
 	ProjectionRebuild bool
 }
 
@@ -82,7 +96,7 @@ func (i SchemaInspection) Exists() bool {
 // remain owned by Goose; data-sized migrations should expose their own bounded
 // checkpoints rather than pretending statement-level progress is available.
 type MigrationProgress struct {
-	Phase   string
+	Phase   MigrationPhase
 	Version int64
 	Name    string
 	Current int64
@@ -124,7 +138,7 @@ func backupManifestPath(path string) string { return path + ".manifest.json" }
 // with explicit progress, verifies connection pragmas, and closes it. Callers
 // own consent, backup policy, and activation of any dependent runtime.
 func Migrate(ctx context.Context, path string, observer MigrationObserver) (returnErr error) {
-	lease, err := acquireCorpusLease(path, true, "migrate corpus")
+	lease, err := acquireCorpusLease(path, exclusiveCorpusLease, "migrate corpus")
 	if err != nil {
 		return err
 	}
@@ -136,7 +150,7 @@ func Migrate(ctx context.Context, path string, observer MigrationObserver) (retu
 // safety backup through migration verification. An empty backup destination
 // explicitly opts out of backup creation.
 func MigrateWithBackup(ctx context.Context, path, backupDestination string, observer MigrationObserver) (_ *BackupResult, returnErr error) {
-	lease, err := acquireCorpusLease(path, true, "back up and migrate corpus")
+	lease, err := acquireCorpusLease(path, exclusiveCorpusLease, "back up and migrate corpus")
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +340,7 @@ func annotateMigrationSteps(_ context.Context, _ *sql.DB, steps []MigrationStep)
 		// every version that was already committed.
 		steps[i].Transactional = true
 		steps[i].Resumable = true
-		steps[i].ResumeStrategy = "restart_step"
+		steps[i].ResumeStrategy = MigrationRestartStep
 	}
 	return nil
 }
@@ -412,7 +426,7 @@ func (c *Corpus) ApplyMigrations(ctx context.Context, observer MigrationObserver
 			continue
 		}
 		progress := MigrationProgress{
-			Phase: "started", Version: status.Source.Version,
+			Phase: MigrationStarted, Version: status.Source.Version,
 			Name: status.Source.Path, Current: current, Target: target,
 		}
 		if observer != nil {
@@ -423,7 +437,7 @@ func (c *Corpus) ApplyMigrations(ctx context.Context, observer MigrationObserver
 		}
 		current = status.Source.Version
 		if observer != nil {
-			progress.Phase = "completed"
+			progress.Phase = MigrationCompleted
 			progress.Current = current
 			observer(progress)
 		}
@@ -463,7 +477,7 @@ func Backup(ctx context.Context, source, destination string, observer func(copie
 	if err != nil {
 		return BackupResult{}, err
 	}
-	lease, err := acquireCorpusLease(source, false, "back up corpus")
+	lease, err := acquireCorpusLease(source, sharedCorpusLease, "back up corpus")
 	if err != nil {
 		return BackupResult{}, err
 	}

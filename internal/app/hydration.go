@@ -33,50 +33,22 @@ const (
 
 const maxHydrationPages = 100
 
-// HydrateResult reports the outcome of hydrating a thread.
-type HydrateResult struct {
-	Repo     contracts.RepoRef
-	Number   int
-	Kind     string
-	Facets   []HydratedFacet
-	Pages    int
-	Requests int
-	Capped   bool
-	Message  string
-}
-
-// HydratedFacet reports coverage and counts for one hydrated facet.
-type HydratedFacet struct {
-	Facet    string
-	Count    int
-	Pages    int
-	Complete bool
-}
-
-// HydrateOptions controls selective thread hydration.
-type HydrateOptions struct {
-	// Kind selects the exact issue or pull request when a number is ambiguous.
-	Kind string
-	// Facets lists the facets to retrieve. An empty list hydrates all facets
-	// applicable to the thread kind.
-	Facets []string
-	// MaxPages bounds pagination per facet. Zero defaults to 50.
-	MaxPages int
-}
-
-// HydrateThread fetches the requested facets for an issue or pull request and
-// stores immutable facet observations. It is explicit, bounded, paginated,
-// cancellation-aware, and records independent facet coverage plus run
-// completion/failure statistics.
-func (s *Service) HydrateThread(ctx context.Context, repo contracts.RepoRef, number int, opts HydrateOptions) (*HydrateResult, error) {
-	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+// hydrateStoredThread parses a selective hydration boundary and fetches the
+// requested facets without refreshing the thread header first.
+func (s *Service) hydrateStoredThread(ctx context.Context, repo contracts.RepoRef, number int, input hydrateThreadInput) (*contracts.HydrateResult, error) {
+	target, err := parseHydrationTarget(repo, number, input)
 	if err != nil {
 		return nil, err
 	}
-	if number <= 0 {
-		return nil, errors.New("thread number must be positive")
-	}
+	return s.hydrateThread(ctx, target)
+}
 
+// hydrateThread fetches the requested facets for an issue or pull request and
+// stores immutable facet observations. It is explicit, bounded, paginated,
+// cancellation-aware, and records independent facet coverage plus run
+// completion/failure statistics.
+func (s *Service) hydrateThread(ctx context.Context, target hydrationTarget) (*contracts.HydrateResult, error) {
+	ref, number := target.repository, target.number
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -113,14 +85,10 @@ func (s *Service) HydrateThread(ctx context.Context, repo contracts.RepoRef, num
 	}
 
 	var thread *corpus.Thread
-	if opts.Kind == "" {
+	if !target.kind.specified() {
 		thread, err = c.GetThreadByNumber(ctx, repoProjection.ID, number)
 	} else {
-		if opts.Kind != corpus.ThreadKindIssue && opts.Kind != corpus.ThreadKindPullRequest {
-			hydrateErr = fmt.Errorf("thread kind must be issue or pull_request")
-			return nil, hydrateErr
-		}
-		thread, err = c.GetThread(ctx, repoProjection.ID, opts.Kind, number)
+		thread, err = c.GetThread(ctx, repoProjection.ID, target.kind.value, number)
 	}
 	if err != nil {
 		hydrateErr = fmt.Errorf("get thread: %w", err)
@@ -136,29 +104,20 @@ func (s *Service) HydrateThread(ctx context.Context, repo contracts.RepoRef, num
 		return nil, hydrateErr
 	}
 
-	facets, err := selectFacets(thread.Kind, opts.Facets)
+	selectedFacets, err := target.selection.For(thread.Kind)
 	if err != nil {
 		hydrateErr = err
 		return nil, hydrateErr
 	}
 
-	maxPages := opts.MaxPages
-	if maxPages <= 0 {
-		maxPages = 50
-	}
-	if maxPages > maxHydrationPages {
-		hydrateErr = fmt.Errorf("max pages cannot exceed %d", maxHydrationPages)
-		return nil, hydrateErr
-	}
-
-	result := &HydrateResult{
-		Repo:   repo,
+	result := &contracts.HydrateResult{
+		Repo:   target.wireRepository(),
 		Number: number,
-		Kind:   thread.Kind,
-		Facets: make([]HydratedFacet, 0, len(facets)),
+		Kind:   string(thread.Kind),
+		Facets: make([]contracts.HydratedFacet, 0, len(selectedFacets)),
 	}
 
-	for _, facet := range facets {
+	for _, facet := range selectedFacets {
 		if err := ctx.Err(); err != nil {
 			hydrateErr = err
 			return nil, hydrateErr
@@ -173,11 +132,11 @@ func (s *Service) HydrateThread(ctx context.Context, repo contracts.RepoRef, num
 			repoID:   repoProjection.ID,
 			threadID: thread.ID,
 			runID:    run.ID,
-			maxPages: maxPages,
+			maxPages: target.maxPages,
 		}
 
-		var facetResult HydratedFacet
-		switch facet {
+		var facetResult contracts.HydratedFacet
+		switch facet.String() {
 		case FacetIssueComments:
 			facetResult, err = f.hydrateIssueComments()
 		case FacetPRDetails:
@@ -189,7 +148,7 @@ func (s *Service) HydrateThread(ctx context.Context, repo contracts.RepoRef, num
 		case FacetIssueTimeline:
 			facetResult, err = f.hydrateIssueTimeline()
 		default:
-			hydrateErr = fmt.Errorf("unknown facet %q", facet)
+			hydrateErr = fmt.Errorf("hydration facet %q has no executor", facet)
 			return nil, hydrateErr
 		}
 		if err != nil {
@@ -202,11 +161,11 @@ func (s *Service) HydrateThread(ctx context.Context, repo contracts.RepoRef, num
 		result.Requests += facetResult.Pages
 	}
 
-	statsPayload, _ := json.Marshal(map[string]any{
-		"facets":   len(result.Facets),
-		"pages":    result.Pages,
-		"requests": result.Requests,
-	})
+	statsPayload, _ := json.Marshal(struct {
+		Facets   int `json:"facets"`
+		Pages    int `json:"pages"`
+		Requests int `json:"requests"`
+	}{Facets: len(result.Facets), Pages: result.Pages, Requests: result.Requests})
 	if err := corpus.RetryBusy(ctx, func(ctx context.Context) error {
 		return c.FinishRun(ctx, run.ID, string(statsPayload))
 	}); err != nil {
@@ -218,45 +177,14 @@ func (s *Service) HydrateThread(ctx context.Context, repo contracts.RepoRef, num
 	return result, nil
 }
 
-func selectFacets(kind string, requested []string) ([]string, error) {
-	defaults := facets.DefaultFor(kind)
-	if len(defaults) == 0 {
-		return nil, fmt.Errorf("unknown thread kind %q", kind)
-	}
-
-	if len(requested) == 0 {
-		return defaults, nil
-	}
-	allowed := facets.SelectableFor(kind)
-
-	allowedSet := make(map[string]struct{}, len(allowed))
-	for _, f := range allowed {
-		allowedSet[f] = struct{}{}
-	}
-
-	out := make([]string, 0, len(requested))
-	seen := make(map[string]struct{}, len(requested))
-	for _, f := range requested {
-		if _, ok := allowedSet[f]; !ok {
-			return nil, fmt.Errorf("facet %q is not applicable to %s threads", f, kind)
-		}
-		if _, ok := seen[f]; ok {
-			continue
-		}
-		seen[f] = struct{}{}
-		out = append(out, f)
-	}
-	return out, nil
-}
-
-func (f *facetRunner) hydrateIssueTimeline() (HydratedFacet, error) {
+func (f *facetRunner) hydrateIssueTimeline() (contracts.HydratedFacet, error) {
 	reader, ok := f.reader.(github.IssueTimelineReader)
 	if !ok {
-		return HydratedFacet{}, errors.New("GitHub reader does not support issue timelines")
+		return contracts.HydratedFacet{}, errors.New("GitHub reader does not support issue timelines")
 	}
 	expectedSequence, err := f.facetBaseline(FacetIssueTimeline)
 	if err != nil {
-		return HydratedFacet{}, err
+		return contracts.HydratedFacet{}, err
 	}
 	opts := github.PageOptions{Page: 1, PerPage: 100}
 	var total, pages int
@@ -266,11 +194,11 @@ func (f *facetRunner) hydrateIssueTimeline() (HydratedFacet, error) {
 	var events []github.IssueTimelineEvent
 	for pages < f.maxPages {
 		if err := f.ctx.Err(); err != nil {
-			return HydratedFacet{}, err
+			return contracts.HydratedFacet{}, err
 		}
 		res, err := reader.ListIssueTimeline(f.ctx, f.ref.Owner(), f.ref.Repo(), f.thread.Number, opts)
 		if err != nil {
-			return HydratedFacet{}, err
+			return contracts.HydratedFacet{}, err
 		}
 		pages++
 		pageUpdatedAt := sourceUpdatedAt
@@ -281,7 +209,7 @@ func (f *facetRunner) hydrateIssueTimeline() (HydratedFacet, error) {
 		}
 		payload, err := json.Marshal(res.Items)
 		if err != nil {
-			return HydratedFacet{}, fmt.Errorf("marshal issue timeline: %w", err)
+			return contracts.HydratedFacet{}, fmt.Errorf("marshal issue timeline: %w", err)
 		}
 		pageObservations = append(pageObservations, corpus.FacetObservationInput{
 			SourceUpdatedAt: pageUpdatedAt,
@@ -303,33 +231,33 @@ func (f *facetRunner) hydrateIssueTimeline() (HydratedFacet, error) {
 		if _, err := corpus.RetryBusyValue(f.ctx, func(ctx context.Context) (bool, error) {
 			return f.c.AdvanceFacetCAS(ctx, f.repoID, &f.threadID, FacetIssueTimeline, sourceUpdatedAt, false, f.runID, expectedSequence)
 		}); err != nil {
-			return HydratedFacet{}, err
+			return contracts.HydratedFacet{}, err
 		}
-		return HydratedFacet{Facet: FacetIssueTimeline, Count: total, Pages: pages, Complete: false}, nil
+		return contracts.HydratedFacet{Facet: FacetIssueTimeline, Count: total, Pages: pages, Complete: false}, nil
 	}
 	collapseFacetSearchText(pageObservations)
 	applied, err := corpus.RetryBusyValue(f.ctx, func(ctx context.Context) (bool, error) {
 		return f.c.ApplyFacetObservationSetCAS(ctx, f.repoID, &f.threadID, FacetIssueTimeline, sourceUpdatedAt, pageObservations, true, f.runID, expectedSequence)
 	})
 	if err != nil {
-		return HydratedFacet{}, err
+		return contracts.HydratedFacet{}, err
 	}
 	if !applied {
-		return HydratedFacet{Facet: FacetIssueTimeline, Count: total, Pages: pages, Complete: true}, nil
+		return contracts.HydratedFacet{Facet: FacetIssueTimeline, Count: total, Pages: pages, Complete: true}, nil
 	}
 	coverage, err := f.c.GetCoverage(f.ctx, f.repoID, &f.threadID, FacetIssueTimeline)
 	if err != nil {
-		return HydratedFacet{}, err
+		return contracts.HydratedFacet{}, err
 	}
 	if coverage == nil || !coverage.Complete || !coverage.SourceUpdatedAt.Equal(sourceUpdatedAt.Truncate(time.Second)) {
 		// A newer stored snapshot won the stale-write comparison. Do not attach
 		// this older derivation to that snapshot's observation identities.
-		return HydratedFacet{Facet: FacetIssueTimeline, Count: total, Pages: pages, Complete: true}, nil
+		return contracts.HydratedFacet{Facet: FacetIssueTimeline, Count: total, Pages: pages, Complete: true}, nil
 	}
 	if err := f.persistTimelineResolution(events, sourceUpdatedAt); err != nil {
-		return HydratedFacet{}, err
+		return contracts.HydratedFacet{}, err
 	}
-	return HydratedFacet{Facet: FacetIssueTimeline, Count: total, Pages: pages, Complete: true}, nil
+	return contracts.HydratedFacet{Facet: FacetIssueTimeline, Count: total, Pages: pages, Complete: true}, nil
 }
 
 func (f *facetRunner) persistTimelineResolution(events []github.IssueTimelineEvent, sourceUpdatedAt time.Time) error {
@@ -353,7 +281,11 @@ func (f *facetRunner) persistTimelineResolution(events []github.IssueTimelineEve
 		if err != nil {
 			return err
 		}
-		refs = []corpus.ObservationRef{{Kind: "thread", ID: observation.ID}}
+		ref, err := corpus.NewThreadObservationRef(observation.ID)
+		if err != nil {
+			return err
+		}
+		refs = []corpus.ObservationRef{ref}
 	} else {
 		observations, _, err := f.c.ListFacetObservationsBounded(f.ctx, f.repoID, &f.threadID, FacetIssueTimeline, 100)
 		if err != nil {
@@ -366,7 +298,11 @@ func (f *facetRunner) persistTimelineResolution(events []github.IssueTimelineEve
 			}
 			for _, event := range page {
 				if event.Event == "closed" && event.CommitID == selectedCommit {
-					refs = append(refs, corpus.ObservationRef{Kind: "facet", ID: observation.ID})
+					ref, err := corpus.NewFacetObservationRef(observation.ID)
+					if err != nil {
+						return err
+					}
+					refs = append(refs, ref)
 					break
 				}
 			}
@@ -401,10 +337,10 @@ type paginatedFacetSpec[T any] struct {
 	searchText     func([]T) string
 }
 
-func hydratePaginatedFacet[T any](f *facetRunner, spec paginatedFacetSpec[T]) (HydratedFacet, error) {
+func hydratePaginatedFacet[T any](f *facetRunner, spec paginatedFacetSpec[T]) (contracts.HydratedFacet, error) {
 	expectedSequence, err := f.facetBaseline(spec.facet)
 	if err != nil {
-		return HydratedFacet{}, err
+		return contracts.HydratedFacet{}, err
 	}
 	opts := github.PageOptions{Page: 1, PerPage: 100}
 	var total, pages int
@@ -413,11 +349,11 @@ func hydratePaginatedFacet[T any](f *facetRunner, spec paginatedFacetSpec[T]) (H
 	sourceUpdatedAt := f.thread.SourceUpdatedAt
 	for pages < f.maxPages {
 		if err := f.ctx.Err(); err != nil {
-			return HydratedFacet{}, err
+			return contracts.HydratedFacet{}, err
 		}
 		res, err := spec.fetch(opts)
 		if err != nil {
-			return HydratedFacet{}, err
+			return contracts.HydratedFacet{}, err
 		}
 		pages++
 		pageUpdated := spec.latest(res.Items)
@@ -429,7 +365,7 @@ func hydratePaginatedFacet[T any](f *facetRunner, spec paginatedFacetSpec[T]) (H
 		}
 		payload, err := json.Marshal(res.Items)
 		if err != nil {
-			return HydratedFacet{}, fmt.Errorf("marshal %s: %w", spec.marshalContext, err)
+			return contracts.HydratedFacet{}, fmt.Errorf("marshal %s: %w", spec.marshalContext, err)
 		}
 		pageObservations = append(pageObservations, corpus.FacetObservationInput{
 			SourceUpdatedAt: pageUpdated,
@@ -445,23 +381,23 @@ func hydratePaginatedFacet[T any](f *facetRunner, spec paginatedFacetSpec[T]) (H
 	}
 
 	if err := f.ctx.Err(); err != nil {
-		return HydratedFacet{}, err
+		return contracts.HydratedFacet{}, err
 	}
 	if !complete {
 		if _, err := corpus.RetryBusyValue(f.ctx, func(ctx context.Context) (bool, error) {
 			return f.c.AdvanceFacetCAS(ctx, f.repoID, &f.threadID, spec.facet, sourceUpdatedAt, false, f.runID, expectedSequence)
 		}); err != nil {
-			return HydratedFacet{}, err
+			return contracts.HydratedFacet{}, err
 		}
-		return HydratedFacet{Facet: spec.facet, Count: total, Pages: pages, Complete: false}, nil
+		return contracts.HydratedFacet{Facet: spec.facet, Count: total, Pages: pages, Complete: false}, nil
 	}
 	collapseFacetSearchText(pageObservations)
 	if _, err := corpus.RetryBusyValue(f.ctx, func(ctx context.Context) (bool, error) {
 		return f.c.ApplyFacetObservationSetCAS(ctx, f.repoID, &f.threadID, spec.facet, sourceUpdatedAt, pageObservations, true, f.runID, expectedSequence)
 	}); err != nil {
-		return HydratedFacet{}, err
+		return contracts.HydratedFacet{}, err
 	}
-	return HydratedFacet{Facet: spec.facet, Count: total, Pages: pages, Complete: true}, nil
+	return contracts.HydratedFacet{Facet: spec.facet, Count: total, Pages: pages, Complete: true}, nil
 }
 
 func (f *facetRunner) facetBaseline(facet string) (int64, error) {
@@ -475,7 +411,7 @@ func (f *facetRunner) facetBaseline(facet string) (int64, error) {
 	return coverage.ObservationSequence, nil
 }
 
-func (f *facetRunner) hydrateIssueComments() (HydratedFacet, error) {
+func (f *facetRunner) hydrateIssueComments() (contracts.HydratedFacet, error) {
 	return hydratePaginatedFacet(f, paginatedFacetSpec[github.IssueComment]{
 		facet:          FacetIssueComments,
 		marshalContext: "issue comments",
@@ -487,19 +423,19 @@ func (f *facetRunner) hydrateIssueComments() (HydratedFacet, error) {
 	})
 }
 
-func (f *facetRunner) hydratePullRequestDetails() (HydratedFacet, error) {
+func (f *facetRunner) hydratePullRequestDetails() (contracts.HydratedFacet, error) {
 	expectedSequence, err := f.facetBaseline(FacetPRDetails)
 	if err != nil {
-		return HydratedFacet{}, err
+		return contracts.HydratedFacet{}, err
 	}
 	pr, _, err := f.reader.GetPullRequestDetails(f.ctx, f.ref.Owner(), f.ref.Repo(), f.thread.Number)
 	if err != nil {
-		return HydratedFacet{}, err
+		return contracts.HydratedFacet{}, err
 	}
 
 	payload, err := json.Marshal(pr)
 	if err != nil {
-		return HydratedFacet{}, fmt.Errorf("marshal pr details: %w", err)
+		return contracts.HydratedFacet{}, fmt.Errorf("marshal pr details: %w", err)
 	}
 	updatedAt := pr.UpdatedAt
 	if updatedAt.IsZero() {
@@ -511,14 +447,18 @@ func (f *facetRunner) hydratePullRequestDetails() (HydratedFacet, error) {
 		return f.c.ApplyFacetObservationSetCAS(ctx, f.repoID, &f.threadID, FacetPRDetails, updatedAt, pages, true, f.runID, expectedSequence)
 	})
 	if err != nil {
-		return HydratedFacet{}, err
+		return contracts.HydratedFacet{}, err
 	}
 	if !applied {
-		return HydratedFacet{Facet: FacetPRDetails, Count: 1, Pages: 1, Complete: true}, nil
+		return contracts.HydratedFacet{Facet: FacetPRDetails, Count: 1, Pages: 1, Complete: true}, nil
 	}
 	projection := *f.thread
 	if pr.State != "" {
-		projection.State = pr.State
+		state, err := domain.ParseThreadState(pr.State)
+		if err != nil {
+			return contracts.HydratedFacet{}, fmt.Errorf("parse pull-request state: %w", err)
+		}
+		projection.State = state
 	}
 	projection.Title = pr.Title
 	projection.Body = pr.Body
@@ -531,7 +471,7 @@ func (f *facetRunner) hydratePullRequestDetails() (HydratedFacet, error) {
 	projection.Milestone = pr.Milestone
 	merge, err := parseGitHubMergeStatus(pr)
 	if err != nil {
-		return HydratedFacet{}, fmt.Errorf("parse pull-request merge status: %w", err)
+		return contracts.HydratedFacet{}, fmt.Errorf("parse pull-request merge status: %w", err)
 	}
 	projection.Merge = merge
 	projection.SourceUpdatedAt = updatedAt
@@ -547,14 +487,14 @@ func (f *facetRunner) hydratePullRequestDetails() (HydratedFacet, error) {
 		return f.c.UpsertThread(ctx, projection, string(payload))
 	})
 	if err != nil {
-		return HydratedFacet{}, fmt.Errorf("project pr details: %w", err)
+		return contracts.HydratedFacet{}, fmt.Errorf("project pr details: %w", err)
 	}
 	*f.thread = *stored
 
-	return HydratedFacet{Facet: FacetPRDetails, Count: 1, Pages: 1, Complete: true}, nil
+	return contracts.HydratedFacet{Facet: FacetPRDetails, Count: 1, Pages: 1, Complete: true}, nil
 }
 
-func (f *facetRunner) hydratePullRequestReviews() (HydratedFacet, error) {
+func (f *facetRunner) hydratePullRequestReviews() (contracts.HydratedFacet, error) {
 	return hydratePaginatedFacet(f, paginatedFacetSpec[github.Review]{
 		facet:          FacetPRReviews,
 		marshalContext: "pr reviews",
@@ -566,7 +506,7 @@ func (f *facetRunner) hydratePullRequestReviews() (HydratedFacet, error) {
 	})
 }
 
-func (f *facetRunner) hydratePullRequestReviewComments() (HydratedFacet, error) {
+func (f *facetRunner) hydratePullRequestReviewComments() (contracts.HydratedFacet, error) {
 	return hydratePaginatedFacet(f, paginatedFacetSpec[github.ReviewComment]{
 		facet:          FacetPRReviewComments,
 		marshalContext: "pr review comments",

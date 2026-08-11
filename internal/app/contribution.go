@@ -366,7 +366,7 @@ func draftResult(identity contribution.DraftIdentity, opportunityID, title, body
 		ID:            identity.ID,
 		Revision:      identity.Revision,
 		OpportunityID: opportunityID,
-		Kind:          identity.Kind,
+		Kind:          string(identity.Kind),
 		Repository:    identity.Repository,
 		Title:         title,
 		Body:          body,
@@ -380,7 +380,7 @@ func draftResult(identity contribution.DraftIdentity, opportunityID, title, body
 	}
 	for _, warning := range identity.Warnings {
 		result.Warnings = append(result.Warnings, contracts.DraftDiagnosticResult{
-			Code: warning.Code, Severity: warning.Severity, Message: warning.Message, ByteOffset: warning.ByteOffset,
+			Code: warning.Code, Severity: string(warning.Severity), Message: warning.Message, ByteOffset: warning.ByteOffset,
 		})
 	}
 	return result

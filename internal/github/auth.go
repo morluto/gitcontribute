@@ -27,24 +27,6 @@ var ErrRequiredToken = errors.New("configured GitHub token unavailable")
 // gitcontribute.
 const KeyringService = "gitcontribute"
 
-// CommandRunner abstracts process execution so that tests can inject behavior.
-type CommandRunner interface {
-	Run(ctx context.Context, name string, args ...string) (string, error)
-}
-
-type execRunner struct{}
-
-func (execRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	out, err := cmd.Output()
-	return string(out), err
-}
-
-// DefaultCommandRunner returns the real command runner.
-func DefaultCommandRunner() CommandRunner {
-	return execRunner{}
-}
-
 // StaticTokenSource returns the provided token if it is non-empty.
 func StaticTokenSource(token string) TokenSource {
 	return staticTokenSource(token)
@@ -109,22 +91,21 @@ func (s *keyringTokenSource) Token(ctx context.Context) (string, error) {
 	return token, nil
 }
 
-// GhCLITokenSource resolves a token by running `gh auth token`.
-// Optional args are passed through to `gh` (for example a `--hostname` flag).
-func GhCLITokenSource(runner CommandRunner, args ...string) TokenSource {
-	if runner == nil {
-		runner = DefaultCommandRunner()
-	}
-	return &ghTokenSource{runner: runner, args: args}
+// GhCLITokenSource resolves a token by running the one bounded credential
+// command owned by this adapter: `gh auth token`.
+func GhCLITokenSource() TokenSource {
+	return &ghTokenSource{run: func(ctx context.Context) (string, error) {
+		out, err := exec.CommandContext(ctx, "gh", "auth", "token").Output()
+		return string(out), err
+	}}
 }
 
 type ghTokenSource struct {
-	runner CommandRunner
-	args   []string
+	run func(context.Context) (string, error)
 }
 
 func (s *ghTokenSource) Token(ctx context.Context) (string, error) {
-	out, err := s.runner.Run(ctx, "gh", append([]string{"auth", "token"}, s.args...)...)
+	out, err := s.run(ctx)
 	out = strings.TrimSpace(out)
 	if out == "" {
 		return "", ErrNoToken
@@ -183,16 +164,3 @@ func (s requiredTokenSource) Token(ctx context.Context) (string, error) {
 // DefaultEnvToken is the conventional environment variable name for a
 // GitHub token.
 const DefaultEnvToken = "GITHUB_TOKEN"
-
-// NewTokenSource builds the standard resolution chain: explicit value,
-// environment variable, then `gh auth token`.
-func NewTokenSource(explicit, envVar string, runner CommandRunner) TokenSource {
-	if envVar == "" {
-		envVar = DefaultEnvToken
-	}
-	sources := []TokenSource{StaticTokenSource(explicit), EnvTokenSource(envVar)}
-	if runner != nil {
-		sources = append(sources, GhCLITokenSource(runner))
-	}
-	return ChainTokenSource(sources...)
-}

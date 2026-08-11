@@ -98,7 +98,7 @@ func TestRepositoryRemovalRejectsStalePlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.ApplyThreadObservation(ctx, repoID, ThreadKindIssue, 2, "open", "new", "", "author", time.Unix(3, 0), `{}`); err != nil {
+	if _, err := c.ApplyThreadObservation(ctx, repoID, domain.IssueKind, 2, "open", "new", "", "author", time.Unix(3, 0), `{}`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.ApplyRepositoryRemoval(ctx, ref, plan); !errors.Is(err, ErrRepositoryRemovalPlanStale) {
@@ -162,7 +162,7 @@ func seedRemovalRepository(ctx context.Context, t *testing.T, c *Corpus, ref dom
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, number, "open", ref.String(), "body", "author", time.Unix(int64(number+1), 0), `{}`)
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, number, "open", ref.String(), "body", "author", time.Unix(int64(number+1), 0), `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}

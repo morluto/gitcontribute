@@ -2,6 +2,7 @@ package evidence
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -13,15 +14,31 @@ import (
 
 // SourceSubjectKind identifies the independent corpus projection whose
 // revision an evidence record used.
-type SourceSubjectKind string
+type SourceSubjectKind uint8
 
 // Source subject kinds supported by evidence provenance.
 const (
-	SourceSubjectRepository SourceSubjectKind = "repository"
-	SourceSubjectThread     SourceSubjectKind = "thread"
-	SourceSubjectFacet      SourceSubjectKind = "facet"
-	SourceSubjectGuidance   SourceSubjectKind = "guidance"
+	SourceSubjectRepository SourceSubjectKind = iota + 1
+	SourceSubjectThread
+	SourceSubjectFacet
+	SourceSubjectGuidance
 )
+
+// String returns the stable boundary spelling of a source subject kind.
+func (k SourceSubjectKind) String() string {
+	switch k {
+	case SourceSubjectRepository:
+		return "repository"
+	case SourceSubjectThread:
+		return "thread"
+	case SourceSubjectFacet:
+		return "facet"
+	case SourceSubjectGuidance:
+		return "guidance"
+	default:
+		return ""
+	}
+}
 
 // GuidanceFacet is the repository-level facet used by contribution guidance.
 const GuidanceFacet = "contribution_guidance"
@@ -38,19 +55,148 @@ const (
 	FreshnessNotApplicable FreshnessStatus = "not_applicable"
 )
 
+// ParseFreshnessStatus parses a durable evaluated freshness outcome.
+func ParseFreshnessStatus(value string) (FreshnessStatus, error) {
+	switch FreshnessStatus(value) {
+	case FreshnessFresh:
+		return FreshnessFresh, nil
+	case FreshnessStale:
+		return FreshnessStale, nil
+	case FreshnessUnknown:
+		return FreshnessUnknown, nil
+	case FreshnessNotApplicable:
+		return FreshnessNotApplicable, nil
+	default:
+		return "", fmt.Errorf("unsupported evidence freshness status %q", value)
+	}
+}
+
 // ErrSourceRevisionUnavailable means a reader cannot find the current local
 // projection for a recorded source subject.
 var ErrSourceRevisionUnavailable = errors.New("evidence: source revision unavailable")
 
-// SourceSubject is a vendor-neutral identity for a repository, thread, or
-// independently refreshed facet.
+// SourceSubject is a parsed vendor-neutral identity for exactly one repository,
+// thread, or independently refreshed facet. Its private representation keeps
+// fields belonging to other subject variants out of downstream code.
 type SourceSubject struct {
-	Kind       SourceSubjectKind `json:"kind"`
-	Owner      string            `json:"owner"`
-	Repo       string            `json:"repo"`
-	ThreadKind string            `json:"thread_kind,omitempty"`
-	Number     int               `json:"number,omitempty"`
-	Facet      string            `json:"facet,omitempty"`
+	kind       SourceSubjectKind
+	repository domain.RepoRef
+	threadKind domain.ThreadKind
+	number     int
+	facet      string
+}
+
+type sourceSubjectJSON struct {
+	Kind       string `json:"kind"`
+	Owner      string `json:"owner"`
+	Repo       string `json:"repo"`
+	ThreadKind string `json:"thread_kind,omitempty"`
+	Number     int    `json:"number,omitempty"`
+	Facet      string `json:"facet,omitempty"`
+}
+
+// ParseSourceSubject converts one broad storage or API representation into a
+// canonical source subject. Guidance accepts its historical explicit facet but
+// stores it implicitly so it has only one representation.
+func ParseSourceSubject(kind, owner, repo, threadKind string, number int, facet string) (SourceSubject, error) {
+	repository, err := domain.NewRepoRef(owner, repo)
+	if err != nil {
+		return SourceSubject{}, fmt.Errorf("invalid source repository: %w", err)
+	}
+	threadKind = strings.TrimSpace(threadKind)
+	facet = strings.TrimSpace(facet)
+	threadScoped := threadKind != "" || number != 0
+	var parsedThreadKind domain.ThreadKind
+	if threadScoped {
+		if threadKind == "" || number <= 0 {
+			return SourceSubject{}, errors.New("thread kind and positive number must be provided together")
+		}
+		parsedThreadKind, err = domain.ParseThreadKind(threadKind)
+		if err != nil {
+			return SourceSubject{}, err
+		}
+	}
+
+	var parsedKind SourceSubjectKind
+	switch strings.TrimSpace(kind) {
+	case "repository":
+		parsedKind = SourceSubjectRepository
+		if threadScoped || facet != "" {
+			return SourceSubject{}, errors.New("repository subject cannot include thread or facet fields")
+		}
+	case "thread":
+		parsedKind = SourceSubjectThread
+		if !threadScoped || facet != "" {
+			return SourceSubject{}, errors.New("thread subject requires a thread and no facet")
+		}
+	case "facet":
+		parsedKind = SourceSubjectFacet
+		if facet == "" {
+			return SourceSubject{}, errors.New("facet subject requires a facet name")
+		}
+	case "guidance":
+		parsedKind = SourceSubjectGuidance
+		if threadScoped || (facet != "" && facet != GuidanceFacet) {
+			return SourceSubject{}, errors.New("guidance subject cannot include thread fields or another facet")
+		}
+		facet = ""
+	default:
+		return SourceSubject{}, fmt.Errorf("unsupported source subject kind %q", kind)
+	}
+	return SourceSubject{
+		kind: parsedKind, repository: repository, threadKind: parsedThreadKind,
+		number: number, facet: facet,
+	}, nil
+}
+
+// NewRepositorySourceSubject returns a repository-scoped source subject.
+func NewRepositorySourceSubject(repository domain.RepoRef) (SourceSubject, error) {
+	return ParseSourceSubject("repository", repository.Owner(), repository.Repo(), "", 0, "")
+}
+
+// NewThreadSourceSubject returns a source subject for one issue or pull request.
+func NewThreadSourceSubject(repository domain.RepoRef, kind domain.ThreadKind, number int) (SourceSubject, error) {
+	return ParseSourceSubject("thread", repository.Owner(), repository.Repo(), string(kind), number, "")
+}
+
+// Kind returns the sealed subject variant.
+func (s SourceSubject) Kind() SourceSubjectKind { return s.kind }
+
+// Repository returns the parsed repository identity shared by every variant.
+func (s SourceSubject) Repository() domain.RepoRef { return s.repository }
+
+// Thread returns the subject's thread identity when it is thread-scoped.
+func (s SourceSubject) Thread() (domain.ThreadKind, int, bool) {
+	return s.threadKind, s.number, s.threadKind != ""
+}
+
+// Facet returns the facet name for facet subjects. Guidance has an implied
+// contribution-guidance facet and therefore returns an empty string here.
+func (s SourceSubject) Facet() string { return s.facet }
+
+// MarshalJSON preserves the durable source-provenance object representation.
+func (s SourceSubject) MarshalJSON() ([]byte, error) {
+	if err := s.Validate(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(sourceSubjectJSON{
+		Kind: s.kind.String(), Owner: s.repository.Owner(), Repo: s.repository.Repo(),
+		ThreadKind: string(s.threadKind), Number: s.number, Facet: s.facet,
+	})
+}
+
+// UnmarshalJSON parses durable source provenance before it enters the domain.
+func (s *SourceSubject) UnmarshalJSON(data []byte) error {
+	var raw sourceSubjectJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	parsed, err := ParseSourceSubject(raw.Kind, raw.Owner, raw.Repo, raw.ThreadKind, raw.Number, raw.Facet)
+	if err != nil {
+		return err
+	}
+	*s = parsed
+	return nil
 }
 
 // SourceRevision records the exact winning source order used by evidence.
@@ -147,10 +293,6 @@ func NormalizeSourceRevisions(revisions []SourceRevision) ([]SourceRevision, err
 	out := make([]SourceRevision, len(revisions))
 	seen := make(map[string]struct{}, len(revisions))
 	for i, revision := range revisions {
-		revision.Subject.Owner = strings.TrimSpace(revision.Subject.Owner)
-		revision.Subject.Repo = strings.TrimSpace(revision.Subject.Repo)
-		revision.Subject.ThreadKind = strings.TrimSpace(revision.Subject.ThreadKind)
-		revision.Subject.Facet = strings.TrimSpace(revision.Subject.Facet)
 		if !revision.SourceUpdatedAt.IsZero() {
 			revision.SourceUpdatedAt = revision.SourceUpdatedAt.UTC()
 		}
@@ -185,63 +327,37 @@ func (r SourceRevision) Validate() error {
 	return nil
 }
 
-// Validate checks the shape required by each subject kind.
+// Validate rejects the invalid zero value. Variant-specific fields are parsed
+// together by ParseSourceSubject and cannot be modified independently.
 func (s SourceSubject) Validate() error {
-	if _, err := domain.NewRepoRef(s.Owner, s.Repo); err != nil {
-		return fmt.Errorf("invalid source repository: %w", err)
-	}
-	threadScoped := s.ThreadKind != "" || s.Number != 0
-	if threadScoped && (s.ThreadKind == "" || s.Number <= 0) {
-		return errors.New("thread kind and positive number must be provided together")
-	}
-	if s.ThreadKind != "" && s.ThreadKind != string(domain.IssueKind) && s.ThreadKind != string(domain.PullRequestKind) {
-		return fmt.Errorf("unsupported thread kind %q", s.ThreadKind)
-	}
-	switch s.Kind {
-	case SourceSubjectRepository:
-		if threadScoped || s.Facet != "" {
-			return errors.New("repository subject cannot include thread or facet fields")
-		}
-	case SourceSubjectThread:
-		if !threadScoped || s.Facet != "" {
-			return errors.New("thread subject requires a thread and no facet")
-		}
-	case SourceSubjectFacet:
-		if s.Facet == "" {
-			return errors.New("facet subject requires a facet name")
-		}
-	case SourceSubjectGuidance:
-		if threadScoped || (s.Facet != "" && s.Facet != GuidanceFacet) {
-			return errors.New("guidance subject cannot include thread fields or another facet")
-		}
-	default:
-		return fmt.Errorf("unsupported source subject kind %q", s.Kind)
+	if !s.repository.IsValid() || s.kind.String() == "" {
+		return errors.New("source subject is not parsed")
 	}
 	return nil
 }
 
 // Key returns a stable case-insensitive subject identity.
 func (s SourceSubject) Key() string {
-	return strings.ToLower(fmt.Sprintf("%s:%s/%s:%s:%d:%s", s.Kind, s.Owner, s.Repo, s.ThreadKind, s.Number, s.Facet))
+	return strings.ToLower(fmt.Sprintf("%s:%s:%s:%d:%s", s.kind, s.repository, s.threadKind, s.number, s.facet))
 }
 
 func (s SourceSubject) String() string {
-	repo := s.Owner + "/" + s.Repo
-	thread := fmt.Sprintf("%s:%s#%d", s.ThreadKind, repo, s.Number)
-	switch s.Kind {
+	repo := s.repository.String()
+	thread := fmt.Sprintf("%s:%s#%d", s.threadKind, repo, s.number)
+	switch s.kind {
 	case SourceSubjectRepository:
 		return "repository " + repo
 	case SourceSubjectThread:
 		return "thread " + thread
 	case SourceSubjectFacet:
-		if s.ThreadKind != "" {
-			return fmt.Sprintf("facet %s on %s", s.Facet, thread)
+		if s.threadKind != "" {
+			return fmt.Sprintf("facet %s on %s", s.facet, thread)
 		}
-		return fmt.Sprintf("facet %s on %s", s.Facet, repo)
+		return fmt.Sprintf("facet %s on %s", s.facet, repo)
 	case SourceSubjectGuidance:
 		return "guidance " + repo
 	default:
-		return string(s.Kind) + " " + repo
+		return "invalid source subject"
 	}
 }
 

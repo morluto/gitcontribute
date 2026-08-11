@@ -349,7 +349,7 @@ func (c *Corpus) SaveOpportunity(ctx context.Context, item *investigation.Opport
 // UpdateOpportunity conditionally replaces the exact revision read by the
 // caller. For advancing transitions, the same SQL statement also rejects any
 // contradicting evidence visible when the status write is serialized.
-func (c *Corpus) UpdateOpportunity(ctx context.Context, previous, next *investigation.Opportunity, blockContradicting bool) error {
+func (c *Corpus) UpdateOpportunity(ctx context.Context, previous, next *investigation.Opportunity, constraint investigation.OpportunityUpdateConstraint) error {
 	if previous == nil || next == nil || previous.ID == "" || previous.ID != next.ID {
 		return errors.New("matching opportunity revisions are required")
 	}
@@ -362,7 +362,7 @@ func (c *Corpus) UpdateOpportunity(ctx context.Context, previous, next *investig
 		return err
 	}
 	block := 0
-	if blockContradicting {
+	if constraint.BlocksContradictingEvidence() {
 		block = 1
 	}
 	result, err := c.db.ExecContext(ctx, `
@@ -385,7 +385,7 @@ func (c *Corpus) UpdateOpportunity(ctx context.Context, previous, next *investig
 	if changed == 1 {
 		return nil
 	}
-	if blockContradicting {
+	if constraint.BlocksContradictingEvidence() {
 		var exists int
 		if err := c.db.QueryRowContext(ctx, `
 			SELECT EXISTS(

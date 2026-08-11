@@ -132,7 +132,7 @@ func (r *MCPReader) FindPrecedents(ctx context.Context, in mcpcontract.FindPrece
 		}
 		truncated = truncated || item.Value.Truncated
 	}
-	out.Provenance, err = offlineReadProvenance("precedent_search", revision, in, !truncated && !unknownCoverage, truncated, unknownCoverage)
+	out.Provenance, err = offlineReadProvenance("precedent_search", revision, in, truncated, unknownCoverage)
 	if err != nil {
 		return mcpcontract.FindPrecedentsOutput{}, err
 	}
@@ -179,5 +179,5 @@ func precedentToMCP(source, owner, repo string, t precedent.Thread, score float6
 			reasons = append(reasons, "label: "+label)
 		}
 	}
-	return mcpcontract.PrecedentOutput{Source: source, Ref: fmt.Sprintf("%s/%s#%d", owner, repo, t.Number), Kind: t.Kind, State: t.State, StateReason: t.StateReason, Title: t.Title, Score: mcpcontract.SimilarityScore(score), RuleVersion: similarity.PrecedentV1, Reasons: reasons, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.Merge.MergedAt())}
+	return mcpcontract.PrecedentOutput{Source: source, Ref: fmt.Sprintf("%s/%s#%d", owner, repo, t.Number), Kind: string(t.Kind), State: string(t.State), StateReason: t.StateReason, Title: t.Title, Score: mcpcontract.SimilarityScore(score), RuleVersion: similarity.PrecedentV1, Reasons: reasons, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.Merge.MergedAt())}
 }

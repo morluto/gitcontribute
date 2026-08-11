@@ -76,7 +76,7 @@ func TestRadarClassifiesStoredPolicyAndNaturalLanguageClaimOffline(t *testing.T)
 	}
 
 	issue, err := fixture.svc.corpus.UpsertThread(fixture.ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 3, State: "open",
+		RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 3, State: "open",
 		Title: "Claimed help-wanted work", Body: "Steps to reproduce and expected behavior are documented.",
 		Labels: []string{"help wanted"}, SourceUpdatedAt: fixture.now,
 	}, `{}`)

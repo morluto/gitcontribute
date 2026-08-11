@@ -44,9 +44,11 @@ func (s *Server) registerGitHubAcquisitionTools() {
 }
 
 func (s *Server) searchGitHubThreads(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SearchGitHubThreadsInput) (*mcp.CallToolResult, mcpcontract.SearchGitHubThreadsOutput, error) {
-	if err := validateLiveRepository(in.Repository); err != nil {
+	repository, err := normalizeLiveRepository(in.Repository)
+	if err != nil {
 		return nil, mcpcontract.SearchGitHubThreadsOutput{}, err
 	}
+	in.Repository = repository
 	in.Query = strings.TrimSpace(in.Query)
 	if in.Query == "" {
 		return nil, mcpcontract.SearchGitHubThreadsOutput{}, mcpcontract.InvalidArgument("query", "is required", map[string]any{"query": "regression"})
@@ -66,10 +68,13 @@ func (s *Server) searchGitHubThreads(ctx context.Context, _ *mcp.CallToolRequest
 }
 
 func (s *Server) readSourceFiles(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.ReadSourceFilesInput) (*mcp.CallToolResult, mcpcontract.ReadSourceFilesOutput, error) {
-	if err := validateLiveRepository(in.Repository); err != nil {
+	repository, err := normalizeLiveRepository(in.Repository)
+	if err != nil {
 		return nil, mcpcontract.ReadSourceFilesOutput{}, err
 	}
-	if strings.TrimSpace(in.Ref) == "" {
+	in.Repository = repository
+	in.Ref = strings.TrimSpace(in.Ref)
+	if in.Ref == "" {
 		return nil, mcpcontract.ReadSourceFilesOutput{}, mcpcontract.InvalidArgument("ref", "is required", map[string]any{"ref": "main"})
 	}
 	if len(in.Files) < 1 || len(in.Files) > 20 {
@@ -89,9 +94,11 @@ func (s *Server) readSourceFiles(ctx context.Context, _ *mcp.CallToolRequest, in
 	return linkedResource(out.ResourceURI, "source-bundle", "GitHub source bundle", "Immutable bounded source text persisted in the local corpus."), out, nil
 }
 
-func validateLiveRepository(repository mcpcontract.RepositoryRef) error {
-	if strings.TrimSpace(repository.Owner) == "" || strings.TrimSpace(repository.Repo) == "" {
-		return mcpcontract.InvalidArgument("repository", "owner and repo are required", map[string]any{"owner": "acme", "repo": "rocket"})
+func normalizeLiveRepository(repository mcpcontract.RepositoryRef) (mcpcontract.RepositoryRef, error) {
+	owner, repo, err := normalizeRepository(repository.Owner, repository.Repo)
+	if err != nil {
+		return mcpcontract.RepositoryRef{}, mcpcontract.InvalidArgument("repository", "owner and repo are required", map[string]any{"owner": "acme", "repo": "rocket"})
 	}
-	return nil
+	repository.Owner, repository.Repo = owner, repo
+	return repository, nil
 }

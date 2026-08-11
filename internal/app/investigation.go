@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -62,11 +61,15 @@ func (s *Service) ListInvestigations(ctx context.Context) (*contracts.Investigat
 
 // AddHypothesis records a hypothesis under an investigation.
 func (s *Service) AddHypothesis(ctx context.Context, investigationID, title, description, category string) (*contracts.HypothesisResult, error) {
+	parsedCategory, err := investigation.ParseCategory(category)
+	if err != nil {
+		return nil, err
+	}
 	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
 		return nil, err
 	}
-	h, err := invSvc.RecordHypothesis(ctx, investigationID, title, description, investigation.Category(category), nil)
+	h, err := invSvc.RecordHypothesis(ctx, investigationID, title, description, parsedCategory, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +141,7 @@ func (s *Service) ListOpportunities(ctx context.Context, investigationID string)
 
 // SetOpportunityStatus transitions an opportunity with a recorded rationale.
 func (s *Service) SetOpportunityStatus(ctx context.Context, id, status, rationale string) (*contracts.OpportunityResult, error) {
-	opStatus, err := parseOpportunityStatus(status)
+	opStatus, err := investigation.ParseOpportunityStatus(status)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +208,10 @@ func (s *Service) UpdateHypothesisFields(ctx context.Context, hypothesisID strin
 		input.Description = *opts.Description
 	}
 	if opts.Category != nil {
-		input.Category = investigation.Category(*opts.Category)
+		input.Category, err = investigation.ParseCategory(*opts.Category)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if opts.ExpectedBehavior != nil {
 		input.ExpectedBehavior = *opts.ExpectedBehavior
@@ -227,7 +233,7 @@ func (s *Service) UpdateHypothesisFields(ctx context.Context, hypothesisID strin
 
 // TransitionHypothesis advances a hypothesis through its lifecycle with rationale.
 func (s *Service) TransitionHypothesis(ctx context.Context, hypothesisID, status, rationale string) (*investigation.Hypothesis, error) {
-	hStatus, err := parseHypothesisStatus(status)
+	hStatus, err := investigation.ParseHypothesisStatus(status)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +259,7 @@ func (s *Service) PromoteOpportunityWithInput(ctx context.Context, hypothesisID 
 
 // UpdateOpportunityCollisionStatus explicitly sets the collision status with rationale.
 func (s *Service) UpdateOpportunityCollisionStatus(ctx context.Context, opportunityID, status, rationale string) (*investigation.Opportunity, error) {
-	cStatus, err := parseCollisionStatus(status)
+	cStatus, err := investigation.ParseCollisionStatus(status)
 	if err != nil {
 		return nil, err
 	}
@@ -340,45 +346,4 @@ func mapInvestigationError(err error) error {
 		return failure.NotFound(err)
 	}
 	return err
-}
-
-func parseOpportunityStatus(status string) (investigation.OpportunityStatus, error) {
-	switch investigation.OpportunityStatus(status) {
-	case investigation.OpportunityHypothesis,
-		investigation.OpportunityReproduced,
-		investigation.OpportunityValidated,
-		investigation.OpportunityMaintainerAligned,
-		investigation.OpportunityImplemented,
-		investigation.OpportunitySubmitted,
-		investigation.OpportunityMerged,
-		investigation.OpportunityRejected,
-		investigation.OpportunityDeferred,
-		investigation.OpportunitySuperseded:
-		return investigation.OpportunityStatus(status), nil
-	}
-	return "", fmt.Errorf("invalid opportunity status %q", status)
-}
-
-func parseHypothesisStatus(status string) (investigation.HypothesisStatus, error) {
-	switch investigation.HypothesisStatus(status) {
-	case investigation.HypothesisProposed,
-		investigation.HypothesisPromoted,
-		investigation.HypothesisRejected,
-		investigation.HypothesisDeferred,
-		investigation.HypothesisSuperseded:
-		return investigation.HypothesisStatus(status), nil
-	}
-	return "", fmt.Errorf("invalid hypothesis status %q", status)
-}
-
-func parseCollisionStatus(status string) (investigation.CollisionStatus, error) {
-	switch investigation.CollisionStatus(status) {
-	case investigation.CollisionUnknown,
-		investigation.CollisionNone,
-		investigation.CollisionPossible,
-		investigation.CollisionConfirmed,
-		investigation.CollisionBlocked:
-		return investigation.CollisionStatus(status), nil
-	}
-	return "", fmt.Errorf("invalid collision status %q", status)
 }

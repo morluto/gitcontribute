@@ -32,21 +32,24 @@ func (m Model) View() tea.View {
 	bodyHeight := max(8, height-2)
 
 	var body string
-	switch {
-	case m.resultOpen:
+	switch m.overlay {
+	case overlayResult:
 		body = m.renderActionResult(width, bodyHeight)
-	case m.briefOpen:
+	case overlayBrief:
 		body = m.renderResearchBrief(width, bodyHeight)
-	case m.actionOpen:
+	case overlayActions:
 		body = m.renderActions(width, bodyHeight)
-	case m.help:
+	case overlayHelp:
 		body = m.renderHelp(width, bodyHeight)
-	case m.loading:
-		body = panel("Loading local contribution corpus…", width, bodyHeight, true)
-	case m.err != nil:
-		body = panel(errorStyle.Render("Error · could not open local corpus\n\n"+m.err.Error()), width, bodyHeight, true)
 	default:
-		body = m.renderWorkbench(width, bodyHeight)
+		switch m.loadState {
+		case corpusLoading:
+			body = panel("Loading local contribution corpus…", width, bodyHeight, true)
+		case corpusLoadFailed:
+			body = panel(errorStyle.Render("Error · could not open local corpus\n\n"+m.err.Error()), width, bodyHeight, true)
+		default:
+			body = m.renderWorkbench(width, bodyHeight)
+		}
 	}
 
 	content := strings.Join([]string{
@@ -144,7 +147,7 @@ func (m Model) renderList(width, height int) string {
 	if m.width < wideLayoutMinimum {
 		lines[0] = dimStyle.Render("[ / ] stage  ") + titleLine
 	}
-	if m.searching || strings.TrimSpace(m.search.Value()) != "" {
+	if m.overlay == overlaySearch || strings.TrimSpace(m.search.Value()) != "" {
 		lines = append(lines, m.search.View())
 	} else {
 		lines = append(lines, "")
@@ -292,35 +295,40 @@ func (m Model) renderDetail(width, height int) string {
 
 func (m Model) renderFooter(width int) string {
 	var text string
-	switch {
-	case m.resultOpen:
+	switch m.overlay {
+	case overlayResult:
 		if m.actionResult.Target != nil {
 			text = "enter view result   esc return   ↑↓ scroll"
 		} else {
 			text = "enter return   esc return   ↑↓ scroll"
 		}
-	case m.briefOpen:
-		if m.briefErr != nil {
+	case overlayBrief:
+		if m.briefState == briefFailed {
 			text = "enter retry   esc return"
 		} else {
 			text = "↑↓ scroll   pgup/pgdown page   home top   esc return"
 		}
-	case m.actionOpen && m.actionConfirm:
-		text = "y / enter confirm   n / esc cancel   local corpus only · no GitHub mutation"
-	case m.actionOpen && m.actionErr != nil:
-		text = "enter retry   esc return"
-	case m.actionOpen:
-		text = "↑↓ move   enter run   esc close"
-	case m.help:
+	case overlayActions:
+		switch m.actionState {
+		case actionConfirming:
+			text = "y / enter confirm   n / esc cancel   local corpus only · no GitHub mutation"
+		case actionFailed:
+			text = "enter retry   esc return"
+		default:
+			text = "↑↓ move   enter run   esc close"
+		}
+	case overlayHelp:
 		text = "esc close help"
-	case m.searching:
+	case overlaySearch:
 		text = "type to filter   ↑↓ move   enter apply   esc close"
-	case m.focus == focusDetail:
-		text = "tab focus   ↑↓ scroll   esc back   [ ] stage   / filter   ? help   q quit"
 	default:
-		text = "tab focus   ↑↓ move   enter inspect   [ ] stage   / filter   ? help   q quit"
+		if m.focus == focusDetail {
+			text = "tab focus   ↑↓ scroll   esc back   [ ] stage   / filter   ? help   q quit"
+		} else {
+			text = "tab focus   ↑↓ move   enter inspect   [ ] stage   / filter   ? help   q quit"
+		}
 	}
-	if m.actionProvider != nil && !m.help && !m.searching && !m.actionOpen {
+	if m.actionProvider != nil && m.overlay == overlayNone {
 		text = strings.Replace(text, "   / filter", "   a actions   / filter", 1)
 	}
 	return truncate(dimStyle.Render(text), width)

@@ -15,15 +15,6 @@ import (
 // DefaultEndpoint is DeepWiki's unauthenticated public Streamable HTTP MCP endpoint.
 const DefaultEndpoint = "https://mcp.deepwiki.com/mcp"
 
-// Request selects one public DeepWiki read action. Structure and contents use
-// Repository; question uses Repositories and Question.
-type Request struct {
-	Action       string
-	Repository   string
-	Repositories []string
-	Question     string
-}
-
 type responseState uint8
 
 const (
@@ -128,27 +119,22 @@ func callDeepWikiTool(ctx context.Context, endpoint, name string, arguments map[
 }
 
 func toolCall(req Request) (string, map[string]any, error) {
-	switch req.Action {
-	case "structure":
-		if req.Repository == "" {
-			return "", nil, errors.New("repository is required")
+	if req == nil {
+		return "", nil, errors.New("DeepWiki request is required")
+	}
+	repositories := req.Repositories()
+	switch req.Action() {
+	case Structure:
+		return "read_wiki_structure", map[string]any{"repoName": repositories[0]}, nil
+	case Contents:
+		return "read_wiki_contents", map[string]any{"repoName": repositories[0]}, nil
+	case Question:
+		var repoName any = repositories
+		if len(repositories) == 1 {
+			repoName = repositories[0]
 		}
-		return "read_wiki_structure", map[string]any{"repoName": req.Repository}, nil
-	case "contents":
-		if req.Repository == "" {
-			return "", nil, errors.New("repository is required")
-		}
-		return "read_wiki_contents", map[string]any{"repoName": req.Repository}, nil
-	case "question":
-		if len(req.Repositories) == 0 || req.Question == "" {
-			return "", nil, errors.New("repositories and question are required")
-		}
-		var repoName any = req.Repositories
-		if len(req.Repositories) == 1 {
-			repoName = req.Repositories[0]
-		}
-		return "ask_question", map[string]any{"repoName": repoName, "question": req.Question}, nil
+		return "ask_question", map[string]any{"repoName": repoName, "question": req.Question()}, nil
 	default:
-		return "", nil, fmt.Errorf("unsupported DeepWiki action %q", req.Action)
+		return "", nil, errors.New("invalid parsed DeepWiki request")
 	}
 }

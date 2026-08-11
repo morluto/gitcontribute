@@ -156,7 +156,7 @@ func TestWorkspaceSnapshotBindsStagedUnstagedAndUntrackedContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !initial.Complete || initial.SHA256 == "" || initial.HeadSHA != ws.CandidateSHA || initial.CommitTotal != 1 {
+	if !initial.Complete() || initial.SHA256 == "" || initial.HeadSHA != ws.CandidateSHA || initial.CommitTotal != 1 {
 		t.Fatalf("initial snapshot = %+v", initial)
 	}
 
@@ -199,7 +199,7 @@ func TestWorkspaceSnapshotBindsStagedUnstagedAndUntrackedContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if withIgnored.Complete || !snapshotHasGap(withIgnored.Gaps, "ignored_content_unbound") {
+	if withIgnored.Complete() || !snapshotHasGap(withIgnored.Gaps, "ignored_content_unbound") {
 		t.Fatalf("ignored content was not exposed as incomplete: %+v", withIgnored.Gaps)
 	}
 }
@@ -384,6 +384,30 @@ func TestManager_DirtyState(t *testing.T) {
 
 	if err := mgr.Remove(ctx, ws.Path, true); err != nil {
 		t.Fatalf("Remove(force=true) on dirty workspace = %v", err)
+	}
+}
+
+func TestManager_StatusIgnoresRepositoryUntrackedDisplayPreference(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	remote, _, _ := setupRemote(t)
+	mgr := newManager(t)
+	if err := mgr.Clone(ctx, remote, "origin"); err != nil {
+		t.Fatal(err)
+	}
+	ws, err := mgr.Create(ctx, "origin", "master", "feature", "ws1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, ws.Path, "config", "status.showUntrackedFiles", "no")
+	writeFile(t, filepath.Join(ws.Path, "untracked.txt"), "untracked")
+
+	status, err := mgr.Status(ctx, "ws1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Dirty || !ws.HasUntracked() {
+		t.Fatalf("status = %+v, has untracked = %t; want dirty untracked workspace", status, ws.HasUntracked())
 	}
 }
 

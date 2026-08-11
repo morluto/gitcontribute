@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
@@ -17,7 +18,7 @@ func TestFindPortfolioOverlapsIsolatesInvalidCandidatesAndMissingPullRequests(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 1, State: "open", SourceUpdatedAt: time.Unix(10, 0).UTC()}, `{}`); err != nil {
+	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 1, State: "open", SourceUpdatedAt: time.Unix(10, 0).UTC()}, `{}`); err != nil {
 		t.Fatal(err)
 	}
 	out, err := (&MCPReader{svc}).FindPortfolioOverlaps(ctx, mcpcontract.FindPortfolioOverlapsInput{

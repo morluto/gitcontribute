@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/deepwiki"
 	"github.com/morluto/gitcontribute/internal/facets"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/repositorycontext"
@@ -35,7 +36,7 @@ const serverInstructions = "GitContribute exposes source-backed GitHub facts. " 
 
 // RepositoryMetadataOutput describes the coverage of repository metadata.
 
-// TypedRepositoryOutput contains repository facts with explicit metadata coverage.
+// RepositoryOutput contains repository facts with explicit metadata coverage.
 
 // GetRepositoriesOutput preserves repository input order and represents
 // unobserved metadata with nullable facts instead of false zero values.
@@ -367,7 +368,7 @@ func (s *Server) registerScalable() {
 	addCatalogTool(s, catalogTool[mcpcontract.CheckMergeConflictsInput, mcpcontract.CheckMergeConflictsOutput]{name: mcpcontract.ToolCheckMergeConflicts, title: "Check local Git merge conflicts in one batch", description: "Compare up to 50 fetched OID pairs without fetching or changing repository state.", annotations: processReadAnnotations(), supportedBy: supports[MergeConflictReader], input: inputSchema[mcpcontract.CheckMergeConflictsInput](func(sc *schemaBuilder) { setArrayBounds(sc, "comparisons", 1, 50) }), output: outputSchema[mcpcontract.CheckMergeConflictsOutput]("Ordered local merge-conflict checks."), handler: s.checkMergeConflicts})
 	addCatalogTool(s, catalogTool[mcpcontract.DeepWikiInput, mcpcontract.DeepWikiOutput]{name: mcpcontract.ToolQueryDeepWiki, title: "Query derived repository knowledge from DeepWiki", description: "Query DeepWiki for public repository architecture, contribution rules, testing, and subsystem context. Actions map to its public structure, contents, and question reads. Do not use this for live stars, thread state, checks, reviews, or mergeability.", annotations: externalReadAnnotations(), supportedBy: supports[ResearchReader], input: inputSchema[mcpcontract.DeepWikiInput](func(sc *schemaBuilder) {
 		setEnum(sc, "action", "structure", "contents", "question")
-		setArrayBounds(sc, "repositories", 1, 10)
+		setArrayBounds(sc, "repositories", 1, deepwiki.MaxRepositories)
 		setRange(sc, "max_output_bytes", mcpcontract.DeepWikiMinOutputBytes, mcpcontract.DeepWikiMaxOutputBytes)
 		setDefault(sc, "max_output_bytes", mcpcontract.DeepWikiDefaultOutputBytes)
 		configureDeepWikiModes(sc)
@@ -383,7 +384,7 @@ func (s *Server) getCatalogContract(_ context.Context, _ *mcp.CallToolRequest, _
 	_, syncAdvertised := s.catalogTools[mcpcontract.ToolSyncPullRequestFeedback]
 	_, searchAdvertised := s.catalogTools[mcpcontract.ToolSearchPullRequestFeedback]
 	mode := "all"
-	if s.readOnly {
+	if s.access == readOnlyServerAccess {
 		mode = "read_only"
 	}
 	return nil, mcpcontract.CatalogContract{
@@ -417,10 +418,12 @@ func (s *Server) getThreads(ctx context.Context, _ *mcp.CallToolRequest, in mcpc
 	if in.View == "" {
 		in.View = "compact"
 	}
-	for _, thread := range in.Threads {
-		if err := validateThreadRef(thread, true); err != nil {
+	for i, thread := range in.Threads {
+		normalized, err := normalizeThreadRef(thread, optionalThreadKind)
+		if err != nil {
 			return nil, mcpcontract.GetThreadsOutput{}, err
 		}
+		in.Threads[i] = normalized
 	}
 	r, err := s.scalableReader()
 	if err != nil {
@@ -430,10 +433,12 @@ func (s *Server) getThreads(ctx context.Context, _ *mcp.CallToolRequest, in mcpc
 	return nil, out, err
 }
 func (s *Server) getThreadFacets(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.GetThreadFacetsInput) (*mcp.CallToolResult, mcpcontract.GetThreadFacetsOutput, error) {
-	for _, thread := range in.Threads {
-		if err := validateThreadRef(thread, false); err != nil {
+	for i, thread := range in.Threads {
+		normalized, err := normalizeThreadRef(thread, requiredThreadKind)
+		if err != nil {
 			return nil, mcpcontract.GetThreadFacetsOutput{}, err
 		}
+		in.Threads[i] = normalized
 	}
 	r, ok := s.reader.(ThreadFacetReader)
 	if !ok {
@@ -579,7 +584,7 @@ func (s *Server) searchGitHubRepositories(ctx context.Context, _ *mcp.CallToolRe
 		return nil, mcpcontract.SearchGitHubRepositoriesOutput{}, errors.New("live GitHub repository search is not available")
 	}
 	out, err := op.SearchGitHubRepositories(ctx, in)
-	if s.readOnly {
+	if s.access == readOnlyServerAccess {
 		out.RecoveryPlans = nil
 	}
 	return nil, out, err
@@ -599,10 +604,12 @@ func validateRepositorySearchInput(in mcpcontract.SearchGitHubRepositoriesInput)
 	return nil
 }
 func (s *Server) syncThreads(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SyncThreadsInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
-	for _, thread := range in.Threads {
-		if err := validateThreadRef(thread, false); err != nil {
+	for i, thread := range in.Threads {
+		normalized, err := normalizeThreadRef(thread, requiredThreadKind)
+		if err != nil {
 			return nil, mcpcontract.JobReference{}, err
 		}
+		in.Threads[i] = normalized
 	}
 	if in.Selection == "repositories" && in.LimitPerRepository == 0 {
 		in.LimitPerRepository = 100
@@ -648,9 +655,11 @@ func (s *Server) previewRepositoryFixPatterns(ctx context.Context, _ *mcp.CallTo
 }
 func (s *Server) syncPortfolio(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SyncPortfolioInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
 	if in.Repository != nil {
-		if err := validateLiveRepository(*in.Repository); err != nil {
+		repository, err := normalizeLiveRepository(*in.Repository)
+		if err != nil {
 			return nil, mcpcontract.JobReference{}, err
 		}
+		in.Repository = &repository
 		if in.Selection == "explicit" {
 			return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("repository", "is only valid for authored selection", nil)
 		}
@@ -687,9 +696,11 @@ func (s *Server) syncPullRequestFeedback(ctx context.Context, _ *mcp.CallToolReq
 }
 
 func (s *Server) indexPullRequestFeedback(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.IndexPullRequestFeedbackInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
-	if in.Repository.Owner == "" || in.Repository.Repo == "" {
+	owner, repo, err := normalizeRepository(in.Repository.Owner, in.Repository.Repo)
+	if err != nil {
 		return nil, mcpcontract.JobReference{}, mcpcontract.InvalidArgument("repository", "owner and repo are required", map[string]any{"repository": map[string]string{"owner": "acme", "repo": "rocket"}})
 	}
+	in.Repository = mcpcontract.RepositoryRef{Owner: owner, Repo: repo}
 	op, ok := s.reader.(PullRequestFeedbackIndexer)
 	if !ok {
 		return nil, mcpcontract.JobReference{}, errors.New("repository pull-request feedback indexing is not available")
@@ -699,9 +710,11 @@ func (s *Server) indexPullRequestFeedback(ctx context.Context, _ *mcp.CallToolRe
 }
 
 func (s *Server) searchPullRequestFeedback(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SearchPullRequestFeedbackInput) (*mcp.CallToolResult, mcpcontract.SearchPullRequestFeedbackOutput, error) {
-	if in.Repository.Owner == "" || in.Repository.Repo == "" {
+	owner, repo, err := normalizeRepository(in.Repository.Owner, in.Repository.Repo)
+	if err != nil {
 		return nil, mcpcontract.SearchPullRequestFeedbackOutput{}, mcpcontract.InvalidArgument("repository", "owner and repo are required", map[string]any{"repository": map[string]string{"owner": "acme", "repo": "rocket"}})
 	}
+	in.Repository = mcpcontract.RepositoryRef{Owner: owner, Repo: repo}
 	reader, ok := s.reader.(PullRequestFeedbackSearcher)
 	if !ok {
 		return nil, mcpcontract.SearchPullRequestFeedbackOutput{}, errors.New("offline pull-request feedback search is not available")
@@ -743,13 +756,6 @@ func (s *Server) checkMergeConflicts(ctx context.Context, _ *mcp.CallToolRequest
 	return nil, out, err
 }
 func (s *Server) deepWiki(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.DeepWikiInput) (*mcp.CallToolResult, mcpcontract.DeepWikiOutput, error) {
-	in.Action = strings.TrimSpace(in.Action)
-	if in.MaxOutputBytes == 0 {
-		in.MaxOutputBytes = mcpcontract.DeepWikiDefaultOutputBytes
-	}
-	if in.MaxOutputBytes < mcpcontract.DeepWikiMinOutputBytes || in.MaxOutputBytes > mcpcontract.DeepWikiMaxOutputBytes {
-		return nil, mcpcontract.DeepWikiOutput{}, mcpcontract.InvalidArgument("max_output_bytes", "must be between 1024 and 1048576", map[string]any{"max_output_bytes": mcpcontract.DeepWikiDefaultOutputBytes})
-	}
 	op, ok := s.reader.(ResearchReader)
 	if !ok {
 		return nil, mcpcontract.DeepWikiOutput{}, errors.New("DeepWiki is not available")

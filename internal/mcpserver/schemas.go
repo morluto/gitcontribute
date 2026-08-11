@@ -19,6 +19,23 @@ type schemaBuilder struct {
 	err    *error
 }
 
+// corpusReadProvenanceSchemaShape is the public JSON shape emitted by
+// CorpusReadProvenance. The contract keeps its coverage state private so
+// callers cannot construct contradictory booleans; this adapter shape tells
+// the reflection-based MCP schema generator about the derived wire fields.
+type corpusReadProvenanceSchemaShape struct {
+	SnapshotToken        string                    `json:"snapshot_token"`
+	Durable              bool                      `json:"durable"`
+	ObservationWatermark int64                     `json:"observation_watermark"`
+	QueryDigestSHA256    string                    `json:"query_digest_sha256"`
+	Complete             bool                      `json:"complete"`
+	Truncated            bool                      `json:"truncated"`
+	UnknownCoverage      bool                      `json:"unknown_coverage"`
+	Limitations          []string                  `json:"limitations,omitempty"`
+	ExternalContext      []mcpcontract.SourceRef   `json:"external_context,omitempty"`
+	Recovery             *mcpcontract.RecoveryPlan `json:"recovery,omitempty"`
+}
+
 func inferredSchema[T any]() schemaDefinition {
 	toolCallSchema, err := recoveryToolCallSchema()
 	if err != nil {
@@ -28,91 +45,95 @@ func inferredSchema[T any]() schemaDefinition {
 	if err != nil {
 		return schemaDefinition{err: fmt.Errorf("infer follow-up action schema: %w", err)}
 	}
-	schema, err := jsonschema.For[T](&jsonschema.ForOptions{
-		TypeSchemas: map[reflect.Type]*jsonschema.Schema{
-			reflect.TypeFor[mcpcontract.ToolCall]():       toolCallSchema,
-			reflect.TypeFor[mcpcontract.FollowUpAction](): followUpSchema,
-			reflect.TypeFor[mcpcontract.Probability](): {
-				Type:        "number",
-				Description: "Numeric confidence from 0 to 1.",
-				Minimum:     jsonschema.Ptr(0.0),
-				Maximum:     jsonschema.Ptr(1.0),
-			},
-			reflect.TypeFor[mcpcontract.SimilarityScore](): {
-				Type:        "number",
-				Description: "Normalized similarity score from 0 to 1.",
-				Minimum:     jsonschema.Ptr(0.0),
-				Maximum:     jsonschema.Ptr(1.0),
-			},
-			reflect.TypeFor[mcpcontract.RadarScore](): {
-				Type:        "integer",
-				Description: "Deterministic Contribution Radar score from 0 to 100.",
-				Minimum:     jsonschema.Ptr(0.0),
-				Maximum:     jsonschema.Ptr(100.0),
-			},
-			reflect.TypeFor[mcpcontract.ProgressPercent](): {
-				Type:        "integer",
-				Description: "Integer completion percentage from 0 to 100.",
-				Minimum:     jsonschema.Ptr(0.0),
-				Maximum:     jsonschema.Ptr(100.0),
-			},
-			reflect.TypeFor[mcpcontract.NonNegativeInt](): {
-				Type:        "integer",
-				Description: "Non-negative integer count or delay.",
-				Minimum:     jsonschema.Ptr(0.0),
-			},
-			reflect.TypeFor[mcpcontract.BatchItemStatus](): {
-				Type:        "string",
-				Description: "Per-item batch outcome.",
-				Enum:        []any{"complete", "retryable", "unavailable", "failed"},
-			},
-			reflect.TypeFor[mcpcontract.SourceFileStatus](): {
-				Type:        "string",
-				Description: "Bounded source-file outcome.",
-				Enum:        []any{"complete", "not_found", "too_large", "retryable", "unavailable", "failed"},
-			},
-			reflect.TypeFor[mcpcontract.JobStatus](): {
-				Type:        "string",
-				Description: "Durable job lifecycle status.",
-				Enum:        []any{"queued", "running", "succeeded", "failed", "cancelled"},
-			},
-			reflect.TypeFor[mcpcontract.JobExecutionState](): {
-				Type:        "string",
-				Description: "Whether a durable job is queued, running, or terminal.",
-				Enum:        []any{"queued", "running", "terminal"},
-			},
-			reflect.TypeFor[mcpcontract.JobOutcome](): {
-				Type:        "string",
-				Description: "Terminal job outcome; omitted until execution is terminal.",
-				Enum:        []any{"succeeded", "partial", "failed", "cancelled"},
-			},
-			reflect.TypeFor[mcpcontract.FixPatternOutcome](): {
-				Type:        "string",
-				Description: "Pull-request outcome; merged state comes from GitHub and superseded requires an explicit replacement relationship.",
-				Enum:        []any{"merged", "closed_unmerged", "superseded", "open", "unknown"},
-			},
-			reflect.TypeFor[mcpcontract.FixPatternRelationship](): {
-				Type:        "string",
-				Description: "Evidence connecting a pull request to an issue.",
-				Enum:        []any{"closes", "references", "explicit_replacement", "similarity_only"},
-			},
-			reflect.TypeFor[mcpcontract.FixPatternReportStatus](): {
-				Type:        "string",
-				Description: "Whether the bounded report is complete or retains coverage limits or failures.",
-				Enum:        []any{"complete", "partial"},
-			},
-			reflect.TypeFor[mcpcontract.FixPatternProofStyle](): {
-				Type:        "string",
-				Description: "Evidence style detected in stored pull-request text.",
-				Enum:        []any{"regression_test", "reproduction", "benchmark", "before_after", "screenshot"},
-			},
-			reflect.TypeFor[mcpcontract.FixPatternRelatedKind](): {
-				Type:        "string",
-				Description: "Stored thread kind of a related target.",
-				Enum:        []any{"issue", "pull_request"},
-			},
+	typeSchemas := map[reflect.Type]*jsonschema.Schema{
+		reflect.TypeFor[mcpcontract.ToolCall]():       toolCallSchema,
+		reflect.TypeFor[mcpcontract.FollowUpAction](): followUpSchema,
+		reflect.TypeFor[mcpcontract.Probability](): {
+			Type:        "number",
+			Description: "Numeric confidence from 0 to 1.",
+			Minimum:     jsonschema.Ptr(0.0),
+			Maximum:     jsonschema.Ptr(1.0),
 		},
-	})
+		reflect.TypeFor[mcpcontract.SimilarityScore](): {
+			Type:        "number",
+			Description: "Normalized similarity score from 0 to 1.",
+			Minimum:     jsonschema.Ptr(0.0),
+			Maximum:     jsonschema.Ptr(1.0),
+		},
+		reflect.TypeFor[mcpcontract.RadarScore](): {
+			Type:        "integer",
+			Description: "Deterministic Contribution Radar score from 0 to 100.",
+			Minimum:     jsonschema.Ptr(0.0),
+			Maximum:     jsonschema.Ptr(100.0),
+		},
+		reflect.TypeFor[mcpcontract.ProgressPercent](): {
+			Type:        "integer",
+			Description: "Integer completion percentage from 0 to 100.",
+			Minimum:     jsonschema.Ptr(0.0),
+			Maximum:     jsonschema.Ptr(100.0),
+		},
+		reflect.TypeFor[mcpcontract.NonNegativeInt](): {
+			Type:        "integer",
+			Description: "Non-negative integer count or delay.",
+			Minimum:     jsonschema.Ptr(0.0),
+		},
+		reflect.TypeFor[mcpcontract.BatchItemStatus](): {
+			Type:        "string",
+			Description: "Per-item batch outcome.",
+			Enum:        []any{mcpcontract.BatchItemComplete, mcpcontract.BatchItemRetryable, mcpcontract.BatchItemUnavailable, mcpcontract.BatchItemFailed},
+		},
+		reflect.TypeFor[mcpcontract.SourceFileStatus](): {
+			Type:        "string",
+			Description: "Bounded source-file outcome.",
+			Enum:        []any{mcpcontract.SourceFileComplete, mcpcontract.SourceFileNotFound, mcpcontract.SourceFileTooLarge, mcpcontract.SourceFileRetryable, mcpcontract.SourceFileUnavailable, mcpcontract.SourceFileFailed},
+		},
+		reflect.TypeFor[mcpcontract.JobStatus](): {
+			Type:        "string",
+			Description: "Durable job lifecycle status.",
+			Enum:        []any{mcpcontract.JobStatusQueued, mcpcontract.JobStatusRunning, mcpcontract.JobStatusSucceeded, mcpcontract.JobStatusFailed, mcpcontract.JobStatusCancelled},
+		},
+		reflect.TypeFor[mcpcontract.JobExecutionState](): {
+			Type:        "string",
+			Description: "Whether a durable job is queued, running, or terminal.",
+			Enum:        []any{mcpcontract.JobExecutionQueued, mcpcontract.JobExecutionRunning, mcpcontract.JobExecutionTerminal},
+		},
+		reflect.TypeFor[mcpcontract.JobOutcome](): {
+			Type:        "string",
+			Description: "Terminal job outcome; omitted until execution is terminal.",
+			Enum:        []any{mcpcontract.JobOutcomeSucceeded, mcpcontract.JobOutcomePartial, mcpcontract.JobOutcomeFailed, mcpcontract.JobOutcomeCancelled},
+		},
+		reflect.TypeFor[mcpcontract.FixPatternOutcome](): {
+			Type:        "string",
+			Description: "Pull-request outcome; merged state comes from GitHub and superseded requires an explicit replacement relationship.",
+			Enum:        []any{mcpcontract.FixPatternMerged, mcpcontract.FixPatternClosedUnmerged, mcpcontract.FixPatternSuperseded, mcpcontract.FixPatternOpen, mcpcontract.FixPatternUnknown},
+		},
+		reflect.TypeFor[mcpcontract.FixPatternRelationship](): {
+			Type:        "string",
+			Description: "Evidence connecting a pull request to an issue.",
+			Enum:        []any{mcpcontract.FixPatternCloses, mcpcontract.FixPatternReferences, mcpcontract.FixPatternExplicitReplacement, mcpcontract.FixPatternSimilarityOnly},
+		},
+		reflect.TypeFor[mcpcontract.FixPatternReportStatus](): {
+			Type:        "string",
+			Description: "Whether the bounded report is complete or retains coverage limits or failures.",
+			Enum:        []any{mcpcontract.FixPatternReportComplete, mcpcontract.FixPatternReportPartial},
+		},
+		reflect.TypeFor[mcpcontract.FixPatternProofStyle](): {
+			Type:        "string",
+			Description: "Evidence style detected in stored pull-request text.",
+			Enum:        []any{mcpcontract.FixPatternRegressionTest, mcpcontract.FixPatternReproduction, mcpcontract.FixPatternBenchmark, mcpcontract.FixPatternBeforeAfter, mcpcontract.FixPatternScreenshot},
+		},
+		reflect.TypeFor[mcpcontract.FixPatternRelatedKind](): {
+			Type:        "string",
+			Description: "Stored thread kind of a related target.",
+			Enum:        []any{mcpcontract.FixPatternRelatedIssue, mcpcontract.FixPatternRelatedPullRequest},
+		},
+	}
+	provenanceSchema, err := jsonschema.For[corpusReadProvenanceSchemaShape](&jsonschema.ForOptions{TypeSchemas: typeSchemas})
+	if err != nil {
+		return schemaDefinition{err: fmt.Errorf("infer corpus read provenance schema: %w", err)}
+	}
+	typeSchemas[reflect.TypeFor[mcpcontract.CorpusReadProvenance]()] = provenanceSchema
+	schema, err := jsonschema.For[T](&jsonschema.ForOptions{TypeSchemas: typeSchemas})
 	if err != nil {
 		return schemaDefinition{err: fmt.Errorf("infer MCP schema: %w", err)}
 	}

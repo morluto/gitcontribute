@@ -20,9 +20,9 @@ func (*fakeOptionalCapabilities) EnsureCoverage(context.Context, mcpcontract.Ens
 	return mcpcontract.JobReference{ID: "job-coverage", Kind: "ensure_coverage", Status: "queued"}, nil
 }
 func (*fakeOptionalCapabilities) GetRepositories(_ context.Context, in mcpcontract.GetRepositoriesInput) (mcpcontract.GetRepositoriesOutput, error) {
-	items := make([]mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput], len(in.Repositories))
+	items := make([]mcpcontract.BatchItem[mcpcontract.RepositoryOutput], len(in.Repositories))
 	for i, repository := range in.Repositories {
-		value := mcpcontract.TypedRepositoryOutput{
+		value := mcpcontract.RepositoryOutput{
 			Ref:           "repository:" + repository.Owner + "/" + repository.Repo,
 			Owner:         repository.Owner,
 			Repo:          repository.Repo,
@@ -33,7 +33,7 @@ func (*fakeOptionalCapabilities) GetRepositories(_ context.Context, in mcpcontra
 			value.DossierStatus = "available"
 			value.DossierAsOf = "2026-07-25T00:00:00Z"
 		}
-		items[i] = mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput]{
+		items[i] = mcpcontract.BatchItem[mcpcontract.RepositoryOutput]{
 			Key: repository.Owner + "/" + repository.Repo, Status: "complete", Value: &value,
 		}
 	}

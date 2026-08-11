@@ -45,7 +45,7 @@ func (s *Service) StartInvestigationFromThread(ctx context.Context, requested re
 	if thread == nil {
 		return nil, failure.NotFound(fmt.Errorf("%w: %s#%d", research.ErrThreadNotFound, requested.Repo, requested.Number))
 	}
-	storedKind := domain.ThreadKind(thread.Kind)
+	storedKind := thread.Kind
 	if requested.Kind != "" && requested.Kind != storedKind {
 		return nil, failure.NotFound(research.KindMismatchError(requested.Kind, storedKind))
 	}

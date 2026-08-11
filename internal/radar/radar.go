@@ -3,6 +3,7 @@
 package radar
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -60,9 +61,40 @@ type Unknown struct {
 type Coverage struct {
 	Facet    string    `json:"facet"`
 	Scope    string    `json:"scope"`
-	Present  bool      `json:"present"`
 	Complete bool      `json:"complete"`
 	AsOf     time.Time `json:"as_of,omitempty"`
+}
+
+// MarshalJSON preserves the public presence marker. A Coverage value itself
+// is proof that the facet is present; missing facets are absent from the slice.
+func (c Coverage) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Facet    string    `json:"facet"`
+		Scope    string    `json:"scope"`
+		Present  bool      `json:"present"`
+		Complete bool      `json:"complete"`
+		AsOf     time.Time `json:"as_of,omitempty"`
+	}{Facet: c.Facet, Scope: c.Scope, Present: true, Complete: c.Complete, AsOf: c.AsOf})
+}
+
+// UnmarshalJSON parses the public presence marker into the structural slice
+// representation.
+func (c *Coverage) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Facet    string    `json:"facet"`
+		Scope    string    `json:"scope"`
+		Present  bool      `json:"present"`
+		Complete bool      `json:"complete"`
+		AsOf     time.Time `json:"as_of,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if !raw.Present {
+		return errors.New("absent radar coverage must be omitted rather than encoded as an item")
+	}
+	*c = Coverage{Facet: raw.Facet, Scope: raw.Scope, Complete: raw.Complete, AsOf: raw.AsOf}
+	return nil
 }
 
 // LinkedPullRequest is an open PR that explicitly references an issue.
@@ -704,7 +736,7 @@ func cleanSorted(values []string) []string {
 func coverageState(coverage []Coverage, facet string) (bool, bool) {
 	for _, item := range coverage {
 		if item.Facet == facet {
-			return item.Present, item.Present && item.Complete
+			return true, item.Complete
 		}
 	}
 	return false, false

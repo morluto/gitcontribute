@@ -76,8 +76,15 @@ func (r *corpusReader) ReadThreads(ctx context.Context, ref domain.RepoRef, q do
 		return nil, nil, fmt.Errorf("%w: %s", errRepositoryNotFound, ref)
 	}
 
-	kind := string(q.Kind)
-	threads, err := c.ListThreadsByStateAndMerge(ctx, repo.ID, kind, string(q.State), q.Merged, q.Limit)
+	kind, err := corpus.ParseThreadKindFilter(string(q.Kind))
+	if err != nil {
+		return nil, nil, err
+	}
+	state, err := corpus.ParseThreadStateFilter(string(q.State))
+	if err != nil {
+		return nil, nil, err
+	}
+	threads, err := c.ListThreadsByStateAndMerge(ctx, repo.ID, kind, state, corpus.MergeFilterFromPointer(q.Merged), q.Limit)
 	if err != nil {
 		return nil, nil, fmt.Errorf("list threads: %w", err)
 	}
@@ -181,7 +188,7 @@ func corpusRepoToDomain(ref domain.RepoRef, repo *corpus.Repository) domain.Repo
 
 func corpusThreadToDomain(ref domain.RepoRef, t corpus.Thread) domain.Thread {
 	typeVariant := domain.IssueThread()
-	if t.Kind == corpus.ThreadKindPullRequest {
+	if t.Kind == domain.PullRequestKind {
 		typeVariant = domain.PullRequestThread(domain.PullRequestDetails{Merge: t.Merge})
 	}
 	dt := domain.Thread{
@@ -192,7 +199,7 @@ func corpusThreadToDomain(ref domain.RepoRef, t corpus.Thread) domain.Thread {
 		Title:     t.Title,
 		Body:      t.Body,
 		Author:    t.Author,
-		State:     domain.ThreadState(t.State),
+		State:     t.State,
 		Labels:    t.Labels,
 		CreatedAt: t.SourceCreatedAt,
 		UpdatedAt: t.SourceUpdatedAt,

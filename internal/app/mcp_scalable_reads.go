@@ -31,7 +31,7 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 	if err != nil {
 		return mcpcontract.GetRepositoriesOutput{}, err
 	}
-	out := mcpcontract.GetRepositoriesOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput], len(in.Repositories)), SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
+	out := mcpcontract.GetRepositoriesOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.RepositoryOutput], len(in.Repositories)), SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
 	repositoryKeys := make([]corpus.RepositoryKey, 0, len(in.Repositories))
 	for _, input := range in.Repositories {
 		if ref, err := domain.NewRepoRef(input.Owner, input.Repo); err == nil {
@@ -56,7 +56,7 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 	}
 	for i, input := range in.Repositories {
 		key := input.Owner + "/" + input.Repo
-		item := mcpcontract.BatchItem[mcpcontract.TypedRepositoryOutput]{Key: key, Status: "complete"}
+		item := mcpcontract.BatchItem[mcpcontract.RepositoryOutput]{Key: key, Status: "complete"}
 		ref, err := domain.NewRepoRef(input.Owner, input.Repo)
 		if err != nil {
 			item.Status, item.Reason, item.Message = "failed", "invalid_reference", err.Error()
@@ -72,7 +72,7 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 			out.Status = "partial"
 			continue
 		}
-		value := typedRepository(repo)
+		value := repositoryOutput(repo)
 		value.DossierStatus = "missing"
 		if dossierMetadata, ok := dossiersByRepository[repo.ID]; ok {
 			value.DossierStatus = "available"
@@ -105,11 +105,11 @@ func (r *MCPReader) GetRepositories(ctx context.Context, in mcpcontract.GetRepos
 	return out, nil
 }
 
-func typedRepository(repo *corpus.Repository) mcpcontract.TypedRepositoryOutput {
-	return mcpcontract.TypedRepositoryOutput{Ref: "repository:" + repo.Owner + "/" + repo.Name, Owner: repo.Owner, Repo: repo.Name, UpdatedAt: formatTime(repo.SourceUpdatedAt), Description: ptr(repo.Description), DefaultBranch: ptr(repo.DefaultBranch), Language: ptr(repo.Language), License: ptr(repo.License), Topics: append([]string(nil), repo.Topics...), Stars: ptr(repo.Stars), Watchers: ptr(repo.Watchers), Forks: ptr(repo.Forks), OpenIssues: ptr(repo.OpenIssues), Archived: ptr(repo.Archived), Fork: ptr(repo.Fork)}
+func repositoryOutput(repo *corpus.Repository) mcpcontract.RepositoryOutput {
+	return mcpcontract.RepositoryOutput{Ref: "repository:" + repo.Owner + "/" + repo.Name, Owner: repo.Owner, Repo: repo.Name, UpdatedAt: formatTime(repo.SourceUpdatedAt), Description: ptr(repo.Description), DefaultBranch: ptr(repo.DefaultBranch), Language: ptr(repo.Language), License: ptr(repo.License), Topics: append([]string(nil), repo.Topics...), Stars: ptr(repo.Stars), Watchers: ptr(repo.Watchers), Forks: ptr(repo.Forks), OpenIssues: ptr(repo.OpenIssues), Archived: ptr(repo.Archived), Fork: ptr(repo.Fork)}
 }
 
-func clearRepositoryFacts(v *mcpcontract.TypedRepositoryOutput) {
+func clearRepositoryFacts(v *mcpcontract.RepositoryOutput) {
 	v.Description = nil
 	v.DefaultBranch = nil
 	v.Language = nil
@@ -145,25 +145,28 @@ func (r *MCPReader) GetThreads(ctx context.Context, in mcpcontract.GetThreadsInp
 		return mcpcontract.GetThreadsOutput{}, err
 	}
 	out := mcpcontract.GetThreadsOutput{Status: "complete", Items: make([]mcpcontract.BatchItem[mcpcontract.ThreadOutput], len(in.Threads)), SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
+	parsed := make([]*parsedThreadReference, len(in.Threads))
 	repositoryKeys := make([]corpus.RepositoryKey, 0, len(in.Threads))
-	for _, input := range in.Threads {
-		if ref, err := domain.NewRepoRef(input.Owner, input.Repo); err == nil && input.Number > 0 {
-			repositoryKeys = append(repositoryKeys, corpus.RepositoryKey{Owner: ref.Owner(), Name: ref.Repo()})
+	for i, input := range in.Threads {
+		ref, parseErr := parseThreadReference(input)
+		if parseErr != nil {
+			continue
 		}
+		parsed[i] = &ref
+		repositoryKeys = append(repositoryKeys, ref.repositoryKey())
 	}
 	repositories, err := c.GetRepositoriesBatch(ctx, repositoryKeys)
 	if err != nil {
 		return mcpcontract.GetThreadsOutput{}, err
 	}
 	threadKeys := make([]corpus.ThreadKey, 0, len(in.Threads))
-	for _, input := range in.Threads {
-		ref, parseErr := domain.NewRepoRef(input.Owner, input.Repo)
-		if parseErr != nil {
+	for _, ref := range parsed {
+		if ref == nil {
 			continue
 		}
-		repo := repositories[corpus.RepositoryKey{Owner: ref.Owner(), Name: ref.Repo()}]
-		if repo != nil && input.Number > 0 {
-			threadKeys = append(threadKeys, corpus.ThreadKey{RepositoryID: repo.ID, Kind: input.Kind, Number: input.Number})
+		repo := repositories[ref.repositoryKey()]
+		if repo != nil {
+			threadKeys = append(threadKeys, ref.threadKey(repo.ID))
 		}
 	}
 	threads, err := c.GetThreadsBatch(ctx, threadKeys)
@@ -173,31 +176,33 @@ func (r *MCPReader) GetThreads(ctx context.Context, in mcpcontract.GetThreadsInp
 	for i, input := range in.Threads {
 		key := threadRefKey(input)
 		item := mcpcontract.BatchItem[mcpcontract.ThreadOutput]{Key: key, Status: "complete"}
-		ref, err := domain.NewRepoRef(input.Owner, input.Repo)
-		if err != nil || input.Number < 1 {
+		if parsed[i] == nil {
 			item.Status, item.Reason, item.Message = "failed", "invalid_reference", "invalid thread reference"
 			out.Items[i] = item
 			out.Status = "partial"
 			continue
 		}
-		repo := repositories[corpus.RepositoryKey{Owner: ref.Owner(), Name: ref.Repo()}]
+		ref := *parsed[i]
+		wire := ref.wire()
+		item.Key = threadRefKey(wire)
+		repo := repositories[ref.repositoryKey()]
 		if repo == nil {
 			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", "repository is not present in the local corpus"
-			item.Recovery = recoveryPlan(item.Reason, item.Message, syncRepositoryContextCall(input.Owner, input.Repo))
+			item.Recovery = recoveryPlan(item.Reason, item.Message, syncRepositoryContextCall(ref.repository.Owner(), ref.repository.Repo()))
 			out.Items[i] = item
 			out.Status = "partial"
 			continue
 		}
-		thread := threads[corpus.ThreadKey{RepositoryID: repo.ID, Kind: input.Kind, Number: input.Number}]
+		thread := threads[ref.threadKey(repo.ID)]
 		if thread == nil {
 			item.Status, item.Reason, item.Message = "unavailable", "thread_not_indexed", "thread is not present in the local corpus"
-			item.Recovery = recoveryPlan(item.Reason, item.Message, syncThreadCall(input))
+			item.Recovery = recoveryPlan(item.Reason, item.Message, syncThreadCall(wire))
 			out.Items[i] = item
 			out.Status = "partial"
 			continue
 		}
 		value := corpusThreadToMCPOutput(thread)
-		value.Owner, value.Repo = ref.Owner(), ref.Repo()
+		value.Owner, value.Repo = ref.repository.Owner(), ref.repository.Repo()
 		value.SnapshotToken = snapshotIdentity(in.SnapshotToken, revision)
 		if in.View == "compact" {
 			value.Body = ""
@@ -217,17 +222,20 @@ func (r *MCPReader) GetJobs(ctx context.Context, in mcpcontract.GetJobsInput) (m
 	if len(ids) < 1 || len(ids) > 100 {
 		return mcpcontract.GetJobsOutput{}, errors.New("ids must contain 1 to 100 items")
 	}
-	if in.ResponseFormat == "" {
-		in.ResponseFormat = "concise"
-	}
-	if in.ResponseFormat != "concise" && in.ResponseFormat != "detailed" {
-		return mcpcontract.GetJobsOutput{}, errors.New("response_format must be concise or detailed")
+	format, err := parseResponseFormat(in.ResponseFormat)
+	if err != nil {
+		return mcpcontract.GetJobsOutput{}, err
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpcontract.GetJobsOutput{}, err
 	}
-	storedJobs, err := c.GetJobsBatch(ctx, ids, in.ResponseFormat == "detailed")
+	var storedJobs map[string]*corpus.Job
+	if format.includesDetails() {
+		storedJobs, err = c.GetJobsBatch(ctx, ids)
+	} else {
+		storedJobs, err = c.GetJobSummariesBatch(ctx, ids)
+	}
 	if err != nil {
 		return mcpcontract.GetJobsOutput{}, err
 	}
@@ -242,9 +250,9 @@ func (r *MCPReader) GetJobs(ctx context.Context, in mcpcontract.GetJobsInput) (m
 			item.Status, item.Reason, item.Message = "unavailable", "not_found", "job is not present in the local corpus"
 			out.Status = "partial"
 		} else {
-			job := jobResultToMCP(ptr(jobResult(stored)), in.ResponseFormat == "detailed")
-			if in.ResponseFormat == "concise" && (job.Status == "succeeded" || job.Status == "failed" || job.Status == "cancelled") {
-				item.Recovery = recoveryPlan("blocked", "Read the detailed typed artifact and follow-up references.", mcpcontract.RecoveryAction(mcpcontract.GetJobsInput{IDs: []string{id}, ResponseFormat: "detailed"}))
+			job := jobResultToMCP(ptr(jobResult(stored)), format)
+			if !format.includesDetails() && (job.Status == "succeeded" || job.Status == "failed" || job.Status == "cancelled") {
+				item.Recovery = recoveryPlan("blocked", "Read the detailed typed artifact and follow-up references.", mcpcontract.RecoveryAction(mcpcontract.GetJobsInput{IDs: []string{id}, ResponseFormat: detailedResponse.String()}))
 			}
 			item.Value = &job
 		}
@@ -258,18 +266,7 @@ type portfolioReadSet struct {
 	observations map[corpus.ThreadFacetKey]corpus.FacetObservationBatch
 }
 
-type portfolioResponseFormat string
-
-const (
-	portfolioConcise  portfolioResponseFormat = "concise"
-	portfolioDetailed portfolioResponseFormat = "detailed"
-)
-
-func (f portfolioResponseFormat) includesDetails() bool {
-	return f == portfolioDetailed
-}
-
-func loadPortfolioReadSet(ctx context.Context, c *corpus.Corpus, pullRequests []corpus.PortfolioPullRequest, format portfolioResponseFormat) (portfolioReadSet, error) {
+func loadPortfolioReadSet(ctx context.Context, c *corpus.Corpus, pullRequests []corpus.PortfolioPullRequest, format responseFormat) (portfolioReadSet, error) {
 	threadIDs := make([]int64, 0, len(pullRequests))
 	for _, stored := range pullRequests {
 		threadIDs = append(threadIDs, stored.Thread.ID)
@@ -299,9 +296,9 @@ func loadPortfolioReadSet(ctx context.Context, c *corpus.Corpus, pullRequests []
 	return portfolioReadSet{coverage: coverage, observations: observations}, nil
 }
 
-func portfolioItem(stored corpus.PortfolioPullRequest, now time.Time, readSet portfolioReadSet, format portfolioResponseFormat) (mcpcontract.PullRequestPortfolioItem, error) {
+func portfolioItem(stored corpus.PortfolioPullRequest, now time.Time, readSet portfolioReadSet, format responseFormat) (mcpcontract.PullRequestPortfolioItem, error) {
 	t := stored.Thread
-	out := mcpcontract.PullRequestPortfolioItem{Ref: fmt.Sprintf("%s/%s#%d", stored.Owner, stored.Repo, t.Number), Owner: stored.Owner, Repo: stored.Repo, Number: t.Number, Title: t.Title, State: t.State, Author: t.Author, Draft: t.Draft, SourceUpdatedAt: formatTime(t.SourceUpdatedAt), StatusCoverage: "missing"}
+	out := mcpcontract.PullRequestPortfolioItem{Ref: fmt.Sprintf("%s/%s#%d", stored.Owner, stored.Repo, t.Number), Owner: stored.Owner, Repo: stored.Repo, Number: t.Number, Title: t.Title, State: string(t.State), Author: t.Author, Draft: t.Draft, SourceUpdatedAt: formatTime(t.SourceUpdatedAt), StatusCoverage: "missing"}
 	coverage := portfolioCoverage(&out, t.ID, readSet.coverage, format)
 	details, err := applyPortfolioDetails(&out, t.ID, coverage[FacetPRDetails], readSet.observations, format)
 	if err != nil {
@@ -322,7 +319,7 @@ func portfolioItem(stored corpus.PortfolioPullRequest, now time.Time, readSet po
 	return out, nil
 }
 
-func portfolioCoverage(out *mcpcontract.PullRequestPortfolioItem, threadID int64, all map[corpus.ThreadFacetKey]*corpus.Coverage, format portfolioResponseFormat) map[string]*corpus.Coverage {
+func portfolioCoverage(out *mcpcontract.PullRequestPortfolioItem, threadID int64, all map[corpus.ThreadFacetKey]*corpus.Coverage, format responseFormat) map[string]*corpus.Coverage {
 	facets := portfolioFacets()
 	coverage := make(map[string]*corpus.Coverage, len(facets))
 	complete, observed := true, 0
@@ -357,7 +354,7 @@ func portfolioCoverage(out *mcpcontract.PullRequestPortfolioItem, threadID int64
 	return coverage
 }
 
-func applyPortfolioDetails(out *mcpcontract.PullRequestPortfolioItem, threadID int64, coverage *corpus.Coverage, observations map[corpus.ThreadFacetKey]corpus.FacetObservationBatch, format portfolioResponseFormat) (github.PullRequestDetails, error) {
+func applyPortfolioDetails(out *mcpcontract.PullRequestPortfolioItem, threadID int64, coverage *corpus.Coverage, observations map[corpus.ThreadFacetKey]corpus.FacetObservationBatch, format responseFormat) (github.PullRequestDetails, error) {
 	var details github.PullRequestDetails
 	if coverage == nil || !coverage.Complete {
 		return details, nil
@@ -454,7 +451,7 @@ func applyPortfolioHealth(out *mcpcontract.PullRequestPortfolioItem, threadID in
 	return mergeabilityKnown, nil
 }
 
-func applyPortfolioSupplementalDetails(out *mcpcontract.PullRequestPortfolioItem, threadID int64, coverage map[string]*corpus.Coverage, observations map[corpus.ThreadFacetKey]corpus.FacetObservationBatch, format portfolioResponseFormat) error {
+func applyPortfolioSupplementalDetails(out *mcpcontract.PullRequestPortfolioItem, threadID int64, coverage map[string]*corpus.Coverage, observations map[corpus.ThreadFacetKey]corpus.FacetObservationBatch, format responseFormat) error {
 	if !format.includesDetails() {
 		return nil
 	}
@@ -555,7 +552,7 @@ func portfolioFacets() []string {
 	return []string{FacetPRDetails, FacetPRReviews, FacetPRChecks, FacetPRReviewThreads, FacetPRMergeState, FacetPRMergeQueue, FacetPRClosingIssues, FacetPRFiles}
 }
 
-func decodeLatestFacet(observations map[corpus.ThreadFacetKey]corpus.FacetObservationBatch, threadID int64, facet string, target any) (string, error) {
+func decodeLatestFacet[T any](observations map[corpus.ThreadFacetKey]corpus.FacetObservationBatch, threadID int64, facet string, target *T) (string, error) {
 	batch := observations[corpus.ThreadFacetKey{ThreadID: threadID, Facet: facet}]
 	if len(batch.Observations) == 0 {
 		return "", fmt.Errorf("complete %s coverage has no observation", facet)
@@ -622,7 +619,7 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpcontract.RankOp
 		Repositories:  make([]mcpcontract.BatchItem[mcpcontract.RepositoryOpportunitySummaryOutput], len(in.Repositories)),
 		SnapshotToken: snapshotIdentity(in.SnapshotToken, revision),
 	}
-	var candidates []mcpcontract.OpportunityCandidateOutput
+	var candidates []radar.Candidate
 	for i, input := range in.Repositories {
 		key := input.Owner + "/" + input.Repo
 		item := mcpcontract.BatchItem[mcpcontract.RepositoryOpportunitySummaryOutput]{Key: key, Status: "complete"}
@@ -649,9 +646,7 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpcontract.RankOp
 		out.Truncated = out.Truncated || summary.Truncated || summary.PopulationCapped
 		item.Value = &summary
 		out.Repositories[i] = item
-		for _, candidate := range report.Candidates {
-			candidates = append(candidates, radarCandidateToMCP(candidate))
-		}
+		candidates = append(candidates, report.Candidates...)
 	}
 	sort.SliceStable(candidates, func(i, j int) bool {
 		if candidates[i].Eligibility != candidates[j].Eligibility {
@@ -664,9 +659,10 @@ func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpcontract.RankOp
 	})
 	out.Truncated = out.Truncated || len(candidates) > in.Limit
 	end := min(in.Limit, len(candidates))
-	out.Candidates = append(out.Candidates, candidates[:end]...)
-	for i := range out.Candidates {
-		out.Candidates[i].Rank = i + 1
+	for i, candidate := range candidates[:end] {
+		mapped := radarCandidateToMCP(candidate)
+		mapped.Rank = i + 1
+		out.Candidates = append(out.Candidates, mapped)
 	}
 	if out.Truncated {
 		nextLimit := min(100, max(in.Limit*2, in.Limit+1))
@@ -697,13 +693,13 @@ func radarCandidateToMCP(c radar.Candidate) mcpcontract.OpportunityCandidateOutp
 	}
 	for _, work := range c.RelatedWork {
 		out.RelatedWork = append(out.RelatedWork, mcpcontract.OpportunityRelatedWorkOutput{
-			Ref: work.Ref, Relation: work.Relation, Direction: work.Direction, State: work.State,
+			Ref: work.Ref, Relation: string(work.Relation), Direction: string(work.Direction), State: work.State,
 		})
 	}
 	return out
 }
-func eligibilityRank(v string) int {
-	switch radar.Eligibility(v) {
+func eligibilityRank(v radar.Eligibility) int {
+	switch v {
 	case radar.EligibilityReadyToCode:
 		return 0
 	case radar.EligibilityNeedsDiagnosis:

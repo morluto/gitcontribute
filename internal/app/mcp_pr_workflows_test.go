@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -11,6 +12,15 @@ import (
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
+
+func mustFeedbackSelection(t *testing.T, channels []string, threadState string) corpus.FeedbackSelection {
+	t.Helper()
+	selection, err := corpus.ParseFeedbackSelection(channels, threadState)
+	if err != nil {
+		t.Fatalf("parse feedback selection: %v", err)
+	}
+	return selection
+}
 
 func TestIncompletePullRequestFacetPreservesLastCompleteObservation(t *testing.T) {
 	ctx := context.Background()
@@ -26,7 +36,7 @@ func TestIncompletePullRequestFacetPreservesLastCompleteObservation(t *testing.T
 		t.Fatal(err)
 	}
 	thread, err := stored.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7,
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 7,
 		State: "open", SourceUpdatedAt: completeAt,
 	}, `{}`)
 	if err != nil {
@@ -34,10 +44,14 @@ func TestIncompletePullRequestFacetPreservesLastCompleteObservation(t *testing.T
 	}
 	reader := &MCPReader{Service: svc}
 	ref := mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7}
-	if err := reader.persistPullRequestWorkflowFacet(ctx, ref, facetPRCIReport, completeAt, map[string]string{"head_sha": "complete"}, true); err != nil {
+	completeUpdate, err := completeWorkflowFacetUpdate(map[string]string{"head_sha": "complete"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := reader.persistPullRequestWorkflowFacet(ctx, ref, facetPRCIReport, incompleteAt, map[string]string{"head_sha": "partial"}, false); err != nil {
+	if err := reader.persistPullRequestWorkflowFacet(ctx, ref, facetPRCIReport, completeAt, completeUpdate); err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.persistPullRequestWorkflowFacet(ctx, ref, facetPRCIReport, incompleteAt, incompleteWorkflowFacetUpdate()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -59,9 +73,19 @@ func TestIncompletePullRequestFacetPreservesLastCompleteObservation(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	effective, _ := resource["effective_coverage"].(map[string]any)
-	if complete, _ := effective["complete"].(bool); complete {
-		t.Fatalf("resource effective coverage = %+v, want incomplete", effective)
+	payload, err := json.Marshal(resource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope struct {
+		HeadSHA           string                        `json:"head_sha"`
+		EffectiveCoverage *mcpcontract.ResourceCoverage `json:"effective_coverage"`
+	}
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.HeadSHA != "complete" || envelope.EffectiveCoverage == nil || envelope.EffectiveCoverage.Complete {
+		t.Fatalf("resource = %s, want preserved payload with incomplete effective coverage", payload)
 	}
 }
 
@@ -88,7 +112,7 @@ func TestFeedbackSyncSeedsMissingRepositoryAndPullRequest(t *testing.T) {
 	ref := mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7}
 	result, err := reader.syncPullRequestFeedback(ctx, mcpcontract.SyncPullRequestFeedbackInput{
 		PullRequests: []mcpcontract.ThreadRef{ref}, Channels: []string{"issue_comments"}, MaxRequests: 10,
-	}, func(string, string) error { return nil })
+	}, mustFeedbackSelection(t, []string{"issue_comments"}, "unresolved"), func(string, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +124,7 @@ func TestFeedbackSyncSeedsMissingRepositoryAndPullRequest(t *testing.T) {
 	if err != nil || repo == nil {
 		t.Fatalf("stored repository = %v, %+v", err, repo)
 	}
-	thread, err := svc.corpus.GetThread(ctx, repo.ID, corpus.ThreadKindPullRequest, 7)
+	thread, err := svc.corpus.GetThread(ctx, repo.ID, domain.PullRequestKind, 7)
 	if err != nil || thread == nil {
 		t.Fatalf("stored pull request = %v, %+v", err, thread)
 	}
@@ -111,7 +135,7 @@ func TestFeedbackSyncSeedsMissingRepositoryAndPullRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resource["number"] != 7 || result.Items[0].ResourceURI == "" {
+	if resource.Number != 7 || result.Items[0].ResourceURI == "" {
 		t.Fatalf("feedback resource/result = %+v / %+v", resource, result)
 	}
 }
@@ -128,7 +152,7 @@ func TestFeedbackSyncPreservesExistingRepositoryAndPullRequestFields(t *testing.
 		t.Fatal(err)
 	}
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7,
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 7,
 		State: "open", StateReason: "completed", Title: "old title", SourceUpdatedAt: now,
 	}, `{}`); err != nil {
 		t.Fatal(err)
@@ -149,7 +173,7 @@ func TestFeedbackSyncPreservesExistingRepositoryAndPullRequestFields(t *testing.
 	ref := mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7}
 	result, err := reader.syncPullRequestFeedback(ctx, mcpcontract.SyncPullRequestFeedbackInput{
 		PullRequests: []mcpcontract.ThreadRef{ref}, Channels: []string{"issue_comments"}, MaxRequests: 10,
-	}, func(string, string) error { return nil })
+	}, mustFeedbackSelection(t, []string{"issue_comments"}, "unresolved"), func(string, string) error { return nil })
 	if err != nil || result.BatchStatus != "complete" {
 		t.Fatalf("feedback result = %v, %+v", err, result)
 	}
@@ -158,7 +182,7 @@ func TestFeedbackSyncPreservesExistingRepositoryAndPullRequestFields(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotThread, err := svc.corpus.GetThread(ctx, gotRepo.ID, corpus.ThreadKindPullRequest, 7)
+	gotThread, err := svc.corpus.GetThread(ctx, gotRepo.ID, domain.PullRequestKind, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +206,7 @@ func TestFeedbackSyncReportsStructuredPersistenceFailure(t *testing.T) {
 	ref := mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 7}
 	result, err := reader.syncPullRequestFeedback(ctx, mcpcontract.SyncPullRequestFeedbackInput{
 		PullRequests: []mcpcontract.ThreadRef{ref}, Channels: []string{"issue_comments"}, MaxRequests: 10,
-	}, func(string, string) error { return nil })
+	}, mustFeedbackSelection(t, []string{"issue_comments"}, "unresolved"), func(string, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +225,7 @@ func TestBoundedWorkflowSnapshotsReturnRetryablePartialItems(t *testing.T) {
 		t.Fatal(err)
 	}
 	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7, State: "open", SourceUpdatedAt: now,
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 7, State: "open", SourceUpdatedAt: now,
 	}, `{}`)
 	if err != nil {
 		t.Fatal(err)
@@ -227,7 +251,7 @@ func TestBoundedWorkflowSnapshotsReturnRetryablePartialItems(t *testing.T) {
 	feedback, err := reader.syncPullRequestFeedback(ctx, mcpcontract.SyncPullRequestFeedbackInput{
 		PullRequests: []mcpcontract.ThreadRef{ref}, Channels: []string{"issue_comments", "review_threads"},
 		MaxItemsPerChannel: 10, MaxRequests: 10,
-	}, report)
+	}, mustFeedbackSelection(t, []string{"issue_comments", "review_threads"}, "unresolved"), report)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,7 +340,7 @@ func TestFeedbackResourceUsesPublicChannelsAndPreservesThreadSelection(t *testin
 		t.Fatal(err)
 	}
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7, State: "open", SourceUpdatedAt: now,
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 7, State: "open", SourceUpdatedAt: now,
 	}, `{}`); err != nil {
 		t.Fatal(err)
 	}
@@ -329,20 +353,29 @@ func TestFeedbackResourceUsesPublicChannelsAndPreservesThreadSelection(t *testin
 			"review_threads": {Complete: true},
 		},
 	}
-	if err := reader.persistPullRequestFeedback(ctx, ref, snapshot, []string{"issue_comments", "review_threads"}); err != nil {
+	selection := mustFeedbackSelection(t, []string{"issue_comments", "review_threads"}, "unresolved")
+	if err := reader.persistPullRequestFeedback(ctx, ref, snapshot, selection.ChannelValues()); err != nil {
 		t.Fatal(err)
 	}
 	resource, err := reader.PullRequestFeedbackResource(ctx, "acme", "rocket", 7)
 	if err != nil {
 		t.Fatal(err)
 	}
-	channels := resource["channels"].(map[string]any)
-	if channels["issue_comments"] == nil || channels["review_threads"] == nil || channels[facetPRFeedbackIssueComments] != nil {
-		t.Fatalf("channels = %+v", channels)
+	if resource.Channels.IssueComments == nil || resource.Channels.ReviewThreads == nil || resource.Channels.SubmittedReviews != nil {
+		t.Fatalf("channels = %+v", resource.Channels)
 	}
-	reviewThreads := channels["review_threads"].(map[string]any)
-	if reviewThreads["selection"] != "unresolved" {
-		t.Fatalf("review-thread selection = %v", reviewThreads["selection"])
+	payload, err := json.Marshal(resource.Channels.ReviewThreads)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reviewThreads struct {
+		Selection string `json:"selection"`
+	}
+	if err := json.Unmarshal(payload, &reviewThreads); err != nil {
+		t.Fatal(err)
+	}
+	if reviewThreads.Selection != "unresolved" {
+		t.Fatalf("review-thread selection = %v", reviewThreads.Selection)
 	}
 }
 
@@ -363,15 +396,15 @@ func TestFeedbackSearchRecoveryRefreshesAllThreadState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7, State: "open", SourceUpdatedAt: now}, `{}`); err != nil {
+	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 7, State: "open", SourceUpdatedAt: now}, `{}`); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.corpus.UpsertFeedbackDiscovery(ctx, corpus.FeedbackDiscovery{RepositoryID: repo.ID, Generation: 1, Complete: true, Channels: []string{"issue_comments"}, ThreadState: "all", SourceUpdatedAt: now}); err != nil {
+	if err := svc.corpus.UpsertFeedbackDiscovery(ctx, corpus.FeedbackDiscovery{RepositoryID: repo.ID, Generation: 1, State: corpus.FeedbackDiscoveryComplete, Selection: mustFeedbackSelection(t, []string{"issue_comments"}, "all"), SourceUpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	plan := feedbackSearchRecovery(ctx, svc.corpus, repo.ID, domain.MustRepoRef("acme", "rocket"), mcpcontract.SearchPullRequestFeedbackInput{
 		Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}, Channel: "issue_comments", ThreadState: "resolved",
-	}, corpus.FeedbackSearchPage{Coverage: corpus.FeedbackCoverageSummary{Status: "partial", DiscoveryComplete: true, IncompletePRs: 1}})
+	}, corpus.FeedbackSearchPage{Coverage: corpus.FeedbackCoverageSummary{State: corpus.FeedbackCoveragePartialFacets, IncompletePRs: 1}})
 	if plan == nil || len(plan.Then) != 1 {
 		t.Fatalf("feedback recovery plan = %+v", plan)
 	}
@@ -391,7 +424,7 @@ func TestFeedbackSearchRecoveryBoundsMergeStateHydration(t *testing.T) {
 		items = append(items, corpus.PullRequestFeedbackProjection{PullRequestNumber: number})
 	}
 	plan := feedbackSearchRecovery(context.Background(), nil, 0, domain.MustRepoRef("acme", "rocket"), mcpcontract.SearchPullRequestFeedbackInput{}, corpus.FeedbackSearchPage{
-		Coverage:                 corpus.FeedbackCoverageSummary{Status: "complete", DiscoveryComplete: true},
+		Coverage:                 corpus.FeedbackCoverageSummary{State: corpus.FeedbackCoverageComplete},
 		UnknownMergePullRequests: unknown,
 		Items:                    items,
 	})

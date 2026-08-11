@@ -29,13 +29,13 @@ type jobStore interface {
 	DeleteJobOwner(context.Context, string) error
 	GetJob(context.Context, string) (*corpus.Job, error)
 	HeartbeatJobOwner(context.Context, string, time.Time) error
-	ListJobs(context.Context, string, int) ([]corpus.Job, error)
+	ListJobs(context.Context, corpus.JobStatus, int) ([]corpus.Job, error)
 	RecordJobEvent(context.Context, string, string, string) error
 	RegisterJobOwner(context.Context, string, int, time.Time) error
 	ReconcileInterruptedJobs(context.Context, time.Duration) error
 	RequestJobCancellation(context.Context, string) error
 	StartJobAs(context.Context, string, string) error
-	TransitionJob(context.Context, string, string, string, string, string) error
+	TransitionJob(context.Context, string, corpus.JobTransition, string, string) error
 	UpdateJobProgress(context.Context, string, string, string) error
 }
 
@@ -187,7 +187,7 @@ func (e *JobExecutor) Get(ctx context.Context, id string) (*corpus.Job, error) {
 }
 
 // List returns recent jobs, optionally filtered by status.
-func (e *JobExecutor) List(ctx context.Context, status string, limit int) ([]corpus.Job, error) {
+func (e *JobExecutor) List(ctx context.Context, status corpus.JobStatus, limit int) ([]corpus.Job, error) {
 	return e.corpus.ListJobs(ctx, status, limit)
 }
 
@@ -355,7 +355,7 @@ func (e *JobExecutor) run(jobCtx context.Context, id string, cancel context.Canc
 			defer cleanupCancel()
 			_ = e.corpus.TransitionJob(
 				cleanupCtx, id,
-				corpus.JobStatusQueued, corpus.JobStatusCancelled, "", "executor closed before start",
+				corpus.JobQueuedToCancelled, "", "executor closed before start",
 			)
 		}
 		return
@@ -367,7 +367,7 @@ func (e *JobExecutor) run(jobCtx context.Context, id string, cancel context.Canc
 		e.mu.Unlock()
 		cleanupCtx, cleanupCancel := e.cleanupContext(jobCtx)
 		defer cleanupCancel()
-		_ = e.corpus.TransitionJob(cleanupCtx, id, corpus.JobStatusQueued, corpus.JobStatusCancelled, "", "executor closed before start")
+		_ = e.corpus.TransitionJob(cleanupCtx, id, corpus.JobQueuedToCancelled, "", "executor closed before start")
 		return
 	}
 	e.mu.Unlock()
@@ -380,13 +380,17 @@ func (e *JobExecutor) run(jobCtx context.Context, id string, cancel context.Canc
 			message := errors.Join(err, fmt.Errorf("get job after start failure: %w", getErr)).Error()
 			// Best effort: there is no synchronous caller after the executor goroutine starts.
 			//nolint:errcheck
-			_ = e.corpus.TransitionJob(writeCtx, id, corpus.JobStatusQueued, corpus.JobStatusFailed, "", message)
+			_ = e.corpus.TransitionJob(writeCtx, id, corpus.JobQueuedToFailed, "", message)
 			return
 		}
-		if job != nil && !isTerminalJobStatus(job.State.Status()) {
+		if job != nil && !job.State.Status().Terminal() {
 			// Best effort: preserve the original start error in durable job state.
 			//nolint:errcheck
-			_ = e.corpus.TransitionJob(writeCtx, id, job.State.Status(), corpus.JobStatusFailed, "", err.Error())
+			transition := corpus.JobRunningToFailed
+			if job.State.Status() == corpus.JobStatusQueued {
+				transition = corpus.JobQueuedToFailed
+			}
+			_ = e.corpus.TransitionJob(writeCtx, id, transition, "", err.Error())
 		}
 		return
 	}
@@ -405,49 +409,45 @@ func (e *JobExecutor) run(jobCtx context.Context, id string, cancel context.Canc
 	if err != nil {
 		// Best effort: preserve the read error in durable job state.
 		//nolint:errcheck
-		_ = e.finishJob(writeCtx, id, corpus.JobStatusFailed, "", fmt.Errorf("get job after execution: %w", err).Error())
+		_ = e.finishJob(writeCtx, id, corpus.JobRunningToFailed, "", fmt.Errorf("get job after execution: %w", err).Error())
 		return
 	}
 	if job != nil && job.State.CancellationRequested() {
-		_ = e.finishJob(writeCtx, id, corpus.JobStatusCancelled, "", "cancelled by request")
+		_ = e.finishJob(writeCtx, id, corpus.JobRunningToCancelled, "", "cancelled by request")
 		return
 	}
 
 	if jobCtx.Err() != nil {
-		_ = e.finishJob(writeCtx, id, corpus.JobStatusCancelled, "", jobCtx.Err().Error())
+		_ = e.finishJob(writeCtx, id, corpus.JobRunningToCancelled, "", jobCtx.Err().Error())
 		return
 	}
 
 	if runErr != nil {
-		_ = e.finishJob(writeCtx, id, corpus.JobStatusFailed, "", runErr.Error())
+		_ = e.finishJob(writeCtx, id, corpus.JobRunningToFailed, "", runErr.Error())
 		return
 	}
 
 	resultJSON, marshalErr := json.Marshal(result)
 	if marshalErr != nil {
-		_ = e.finishJob(writeCtx, id, corpus.JobStatusFailed, "", marshalErr.Error())
+		_ = e.finishJob(writeCtx, id, corpus.JobRunningToFailed, "", marshalErr.Error())
 		return
 	}
 
-	if err := e.finishJob(writeCtx, id, corpus.JobStatusSucceeded, string(resultJSON), ""); err != nil {
-		_ = e.finishJob(writeCtx, id, corpus.JobStatusFailed, "", err.Error())
+	if err := e.finishJob(writeCtx, id, corpus.JobRunningToSucceeded, string(resultJSON), ""); err != nil {
+		_ = e.finishJob(writeCtx, id, corpus.JobRunningToFailed, "", err.Error())
 	}
 }
 
-func (e *JobExecutor) finishJob(ctx context.Context, id, status, result, errStr string) error {
-	err := e.corpus.TransitionJob(ctx, id, corpus.JobStatusRunning, status, result, errStr)
+func (e *JobExecutor) finishJob(ctx context.Context, id string, transition corpus.JobTransition, result, errStr string) error {
+	err := e.corpus.TransitionJob(ctx, id, transition, result, errStr)
 	if errors.Is(err, corpus.ErrJobCancelled) {
 		// A cancellation request arrived during completion; finish as cancelled.
-		_ = e.corpus.TransitionJob(ctx, id, corpus.JobStatusRunning, corpus.JobStatusCancelled, "", err.Error())
+		_ = e.corpus.TransitionJob(ctx, id, corpus.JobRunningToCancelled, "", err.Error())
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	_ = e.corpus.RecordJobEvent(ctx, id, "info", "job "+status)
+	_ = e.corpus.RecordJobEvent(ctx, id, "info", "job "+transition.To().String())
 	return nil
-}
-
-func isTerminalJobStatus(status string) bool {
-	return status == corpus.JobStatusSucceeded || status == corpus.JobStatusFailed || status == corpus.JobStatusCancelled
 }

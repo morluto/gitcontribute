@@ -32,7 +32,7 @@ func inconclusiveComparison(base, candidate *ValidationRun, explanation string) 
 }
 
 func incompatibleRunIdentity(base, candidate *ValidationRun) string {
-	if base.ExecutionOrigin == "external" || candidate.ExecutionOrigin == "external" {
+	if base.ExecutionOrigin == ExecutionOriginExternal || candidate.ExecutionOrigin == ExecutionOriginExternal {
 		if base.ExecutionOrigin != candidate.ExecutionOrigin {
 			return "external and locally executed observations cannot establish a confirmatory comparison"
 		}
@@ -52,7 +52,7 @@ func incompatibleRunIdentity(base, candidate *ValidationRun) string {
 		}
 	}
 	for _, run := range []*ValidationRun{base, candidate} {
-		if run.WorkspaceBindingStatus == "stale" || run.WorkspaceBindingStatus == "incompatible" {
+		if run.WorkspaceBindingStatus == WorkspaceBindingStale || run.WorkspaceBindingStatus == WorkspaceBindingIncompatible {
 			return fmt.Sprintf("%s workspace binding is %s", run.Kind, run.WorkspaceBindingStatus)
 		}
 	}

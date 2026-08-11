@@ -164,12 +164,12 @@ func resolveTriageLinks(ctx context.Context, c *Corpus, e *tracking.TriageEvent)
 		if ok {
 			if repo, err := c.GetRepository(ctx, repoRef.Owner(), repoRef.Repo()); err == nil && repo != nil {
 				e.RepositoryID = &repo.ID
-				kind := ""
+				var kind domain.ThreadKind
 				switch e.TargetKind {
 				case tracking.TargetIssue:
-					kind = ThreadKindIssue
+					kind = domain.IssueKind
 				case tracking.TargetPullRequest:
-					kind = ThreadKindPullRequest
+					kind = domain.PullRequestKind
 				}
 				if kind != "" {
 					if thread, err := c.GetThread(ctx, repo.ID, kind, number); err == nil && thread != nil {
@@ -256,16 +256,24 @@ func (c *Corpus) ListTriageEvents(ctx context.Context, filter tracking.TriageEve
 	query := `SELECT id, target_kind, target_ref, outcome, reason, lens, source_event_at, created_at, updated_at, repository_id, thread_id, investigation_id, opportunity_id FROM triage_events WHERE 1=1`
 	var args []any
 	if filter.TargetKind != "" {
+		parsed, err := tracking.ParseTargetKind(string(filter.TargetKind))
+		if err != nil {
+			return nil, fmt.Errorf("parse triage target kind filter: %w", err)
+		}
 		query += ` AND target_kind=?`
-		args = append(args, string(filter.TargetKind))
+		args = append(args, string(parsed))
 	}
 	if filter.TargetRef != "" {
 		query += ` AND target_ref=?`
 		args = append(args, filter.TargetRef)
 	}
 	if filter.Outcome != "" {
+		parsed, err := tracking.ParseOutcome(string(filter.Outcome))
+		if err != nil {
+			return nil, fmt.Errorf("parse triage outcome filter: %w", err)
+		}
 		query += ` AND outcome=?`
-		args = append(args, string(filter.Outcome))
+		args = append(args, string(parsed))
 	}
 	if filter.Lens != "" {
 		query += ` AND lens=?`
@@ -295,12 +303,21 @@ func scanTriageEvent(rows interface {
 	Scan(dest ...any) error
 }) (*tracking.TriageEvent, error) {
 	var e tracking.TriageEvent
+	var targetKind, outcome string
 	var sourceEventAt, createdAt, updatedAt int64
 	var repositoryID, threadID sql.NullInt64
 	var investigationID, opportunityID sql.NullString
-	err := rows.Scan(&e.ID, &e.TargetKind, &e.TargetRef, &e.Outcome, &e.Reason, &e.Lens, &sourceEventAt, &createdAt, &updatedAt, &repositoryID, &threadID, &investigationID, &opportunityID)
+	err := rows.Scan(&e.ID, &targetKind, &e.TargetRef, &outcome, &e.Reason, &e.Lens, &sourceEventAt, &createdAt, &updatedAt, &repositoryID, &threadID, &investigationID, &opportunityID)
 	if err != nil {
 		return nil, err
+	}
+	e.TargetKind, err = tracking.ParseTargetKind(targetKind)
+	if err != nil {
+		return nil, fmt.Errorf("parse stored triage target kind: %w", err)
+	}
+	e.Outcome, err = tracking.ParseOutcome(outcome)
+	if err != nil {
+		return nil, fmt.Errorf("parse stored triage outcome: %w", err)
 	}
 	e.SourceEventAt = scanTime(sourceEventAt)
 	e.CreatedAt = scanTime(createdAt)
@@ -460,9 +477,9 @@ func (c *Corpus) ListContributions(ctx context.Context, filter tracking.Contribu
 		query += ` AND opportunity_id=?`
 		args = append(args, filter.OpportunityID)
 	}
-	if filter.Kind != "" {
+	if !filter.Kind.IsAny() {
 		query += ` AND kind=?`
-		args = append(args, filter.Kind)
+		args = append(args, filter.Kind.String())
 	}
 	query += ` ORDER BY prepared_at, id LIMIT ?`
 	args = append(args, limit)
@@ -490,10 +507,14 @@ func scanContribution(scanner interface {
 	var item tracking.Contribution
 	var preparedAt, createdAt, updatedAt int64
 	var submittedAt sql.NullInt64
-	var payload string
-	err := scanner.Scan(&item.ID, &item.OpportunityID, &item.Kind, &item.Title, &item.Body, &item.Reference, &item.ReferenceURL, &preparedAt, &submittedAt, &createdAt, &updatedAt, &payload)
+	var kind, payload string
+	err := scanner.Scan(&item.ID, &item.OpportunityID, &kind, &item.Title, &item.Body, &item.Reference, &item.ReferenceURL, &preparedAt, &submittedAt, &createdAt, &updatedAt, &payload)
 	if err != nil {
 		return nil, err
+	}
+	item.Kind, err = domain.ParseThreadKind(kind)
+	if err != nil {
+		return nil, fmt.Errorf("parse stored contribution kind: %w", err)
 	}
 	item.PreparedAt = scanTime(preparedAt)
 	item.CreatedAt = scanTime(createdAt)
@@ -603,15 +624,32 @@ func (c *Corpus) ListContributionOutcomes(ctx context.Context, contributionID st
 	var out []*tracking.ContributionOutcome
 	for rows.Next() {
 		var o tracking.ContributionOutcome
+		var outcome string
 		var sourceEventAt, createdAt int64
-		if err := rows.Scan(&o.ID, &o.ContributionID, &o.Outcome, &o.Reason, &sourceEventAt, &createdAt); err != nil {
+		if err := rows.Scan(&o.ID, &o.ContributionID, &outcome, &o.Reason, &sourceEventAt, &createdAt); err != nil {
 			return nil, err
+		}
+		o.Outcome, err = tracking.ParseOutcome(outcome)
+		if err != nil {
+			return nil, fmt.Errorf("parse stored contribution outcome: %w", err)
+		}
+		if !isStoredContributionOutcome(o.Outcome) {
+			return nil, fmt.Errorf("stored contribution outcome %q is not a contribution lifecycle outcome", outcome)
 		}
 		o.SourceEventAt = scanTime(sourceEventAt)
 		o.CreatedAt = scanTime(createdAt)
 		out = append(out, &o)
 	}
 	return out, rows.Err()
+}
+
+func isStoredContributionOutcome(outcome tracking.Outcome) bool {
+	switch outcome {
+	case tracking.OutcomeSubmitted, tracking.OutcomeMerged, tracking.OutcomeRejected, tracking.OutcomeAbandoned:
+		return true
+	default:
+		return false
+	}
 }
 
 // ExportLocalMetadata returns a redacted, deterministic snapshot of tracking
