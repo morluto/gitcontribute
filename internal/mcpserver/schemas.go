@@ -80,7 +80,7 @@ func inferredSchema[T any]() schemaDefinition {
 		reflect.TypeFor[mcpcontract.BatchItemStatus](): {
 			Type:        "string",
 			Description: "Per-item batch outcome.",
-			Enum:        []any{mcpcontract.BatchItemComplete, mcpcontract.BatchItemRetryable, mcpcontract.BatchItemUnavailable, mcpcontract.BatchItemFailed},
+			Enum:        []any{mcpcontract.BatchItemComplete, mcpcontract.BatchItemPartial, mcpcontract.BatchItemRetryable, mcpcontract.BatchItemUnavailable, mcpcontract.BatchItemFailed},
 		},
 		reflect.TypeFor[mcpcontract.SourceFileStatus](): {
 			Type:        "string",

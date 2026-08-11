@@ -188,7 +188,7 @@ func TestToolSchemasExposeMachineReadableContracts(t *testing.T) {
 	assertSchemaValue(t, tools[mcpcontract.ToolCreateWorkspace].InputSchema, []string{"required"}, []any{"investigation_id"})
 	assertSchemaValue(t, tools[mcpcontract.ToolAdoptWorkspace].InputSchema, []string{"required"}, []any{"investigation_id", "path", "base_ref"})
 	assertSchemaValue(t, tools[mcpcontract.ToolFindPrecedents].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "matches", "items", "properties", "score", "maximum"}, float64(1))
-	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "item_status", "enum"}, []any{"complete", "retryable", "unavailable", "failed"})
+	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "item_status", "enum"}, []any{"complete", "partial", "retryable", "unavailable", "failed"})
 	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "execution_state", "enum"}, []any{"queued", "running", "terminal"})
 	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "outcome", "enum"}, []any{"succeeded", "partial", "failed", "cancelled"})
 	assertSchemaValue(t, tools[mcpcontract.ToolGetJob].OutputSchema, []string{"properties", "items", "items", "properties", "value", "properties", "progress_percent", "maximum"}, float64(100))

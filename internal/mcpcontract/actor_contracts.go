@@ -148,7 +148,7 @@ type GetActorsInput struct {
 // embedding the catalog-wide workflow recovery union in every result schema.
 type ActorBatchItem[T any] struct {
 	Key     string          `json:"key"`
-	Status  BatchItemStatus `json:"item_status" jsonschema:"complete, retryable, unavailable, or failed"`
+	Status  BatchItemStatus `json:"item_status" jsonschema:"complete, partial, retryable, unavailable, or failed"`
 	Reason  string          `json:"reason,omitempty"`
 	Message string          `json:"message,omitempty"`
 	Value   *T              `json:"value,omitempty"`
