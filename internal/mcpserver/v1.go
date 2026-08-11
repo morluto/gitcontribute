@@ -15,29 +15,6 @@ import (
 
 // SearchRepositoriesOutput contains one page of repository matches.
 
-// SearchThreadsInput describes an offline issue and pull-request search page.
-type SearchThreadsInput struct {
-	Query         string   `json:"query" jsonschema:"Thread full-text query"`
-	Owner         string   `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo          string   `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Kind          string   `json:"kind,omitempty" jsonschema:"Optional thread kind: issue or pull_request"`
-	State         string   `json:"state,omitempty" jsonschema:"Optional open or closed state"`
-	StateReason   string   `json:"state_reason,omitempty" jsonschema:"Optional GitHub completed or not_planned state reason"`
-	Merged        *bool    `json:"merged,omitempty" jsonschema:"Optional pull request merged state"`
-	Author        string   `json:"author,omitempty" jsonschema:"Optional author login"`
-	Association   string   `json:"author_association,omitempty" jsonschema:"Optional GitHub author association"`
-	Assignee      string   `json:"assignee,omitempty" jsonschema:"Optional assignee login"`
-	Labels        []string `json:"labels,omitempty" jsonschema:"Labels that must all be present"`
-	UpdatedAfter  string   `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound"`
-	UpdatedBefore string   `json:"updated_before,omitempty" jsonschema:"Optional RFC 3339 upper bound"`
-	Limit         int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-	Cursor        string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
-	Sort          string   `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
-	MatchMode     string   `json:"match_mode,omitempty" jsonschema:"Term matching: all requires every term; any requires at least one term"`
-	View          string   `json:"view,omitempty" jsonschema:"compact omits full bodies and returns bounded excerpts; full includes stored bodies"`
-	SnapshotToken string   `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token"`
-}
-
 // ExplainMatchInput identifies an exact stored result and its original query.
 
 // ExplainMatchOutput reports the stored facts that contributed to a match score.
@@ -82,10 +59,10 @@ func (s *Server) registerV1() {
 			setEnum(schema, "sort", "relevance", "updated")
 		}), output: outputSchema[mcpcontract.SearchRepositoriesOutput]("One page of stored repository matches."), handler: s.searchRepositories,
 	})
-	addCatalogTool(s, catalogTool[SearchThreadsInput, mcpcontract.SearchOutput]{
+	addCatalogTool(s, catalogTool[mcpcontract.SearchInput, mcpcontract.SearchOutput]{
 		name: mcpcontract.ToolSearchThreads, title: "Search stored issues and pull requests",
 		description: "Search stored issue and pull-request titles, labels, bodies, and hydrated text when the question is about the thread itself. This is not a comment-level feedback search: for reviewer-author, inline-anchor, review-state, or resolved/unresolved audits, use corpus.search_pull_request_feedback after github.index_pull_request_feedback. All terms are required by default; use match_mode=any for broader recall. Compact output is bounded, and local coverage is never proof of absence without the returned typed recovery action. Read finalists with corpus.get_threads and hydrate only missing facets. Offline.",
-		annotations: readOnly, input: inputSchema[SearchThreadsInput](func(schema *schemaBuilder) {
+		annotations: readOnly, input: inputSchema[mcpcontract.SearchInput](func(schema *schemaBuilder) {
 			setEnum(schema, "kind", "issue", "pull_request")
 			setEnum(schema, "state", "open", "closed")
 			setEnum(schema, "state_reason", "completed", "not_planned")
@@ -265,7 +242,7 @@ func (s *Server) searchRepositories(ctx context.Context, _ *mcp.CallToolRequest,
 	return nil, out, err
 }
 
-func (s *Server) searchThreads(ctx context.Context, _ *mcp.CallToolRequest, in SearchThreadsInput) (*mcp.CallToolResult, mcpcontract.SearchOutput, error) {
+func (s *Server) searchThreads(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SearchInput) (*mcp.CallToolResult, mcpcontract.SearchOutput, error) {
 	in.Query = strings.TrimSpace(in.Query)
 	if in.Query == "" {
 		return nil, mcpcontract.SearchOutput{}, mcpcontract.InvalidArgument("query", "is required", map[string]any{"query": "music"})
@@ -303,15 +280,19 @@ func (s *Server) searchThreads(ctx context.Context, _ *mcp.CallToolRequest, in S
 	if in.View != "compact" && in.View != "full" {
 		return nil, mcpcontract.SearchOutput{}, mcpcontract.InvalidArgument("view", "must be compact or full", map[string]any{"view": "compact"})
 	}
-	searchIn := mcpcontract.SearchInput(in)
-	out, err := s.reader.Search(ctx, searchIn)
+	out, err := s.reader.Search(ctx, in)
 	return nil, out, err
 }
 
 func (s *Server) explainMatch(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.ExplainMatchInput) (*mcp.CallToolResult, mcpcontract.ExplainMatchOutput, error) {
-	if err := validateRepo(mcpcontract.RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
+	owner, repo, err := normalizeRepository(in.Owner, in.Repo)
+	if err != nil {
 		return nil, mcpcontract.ExplainMatchOutput{}, err
 	}
+	in.Owner, in.Repo = owner, repo
+	in.Kind = strings.TrimSpace(in.Kind)
+	in.Path = strings.TrimSpace(in.Path)
+	in.Commit = strings.TrimSpace(in.Commit)
 	if in.Limit == 0 {
 		in.Limit = 20
 	}
@@ -335,9 +316,11 @@ func (s *Server) explainMatch(ctx context.Context, _ *mcp.CallToolRequest, in mc
 }
 
 func (s *Server) buildRepositoryDossier(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.BuildRepositoryDossierInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
-	if err := validateRepo(mcpcontract.RepoInput(in)); err != nil {
+	owner, repo, err := normalizeRepository(in.Owner, in.Repo)
+	if err != nil {
 		return nil, mcpcontract.JobReference{}, err
 	}
+	in.Owner, in.Repo = owner, repo
 	operator, ok := s.reader.(Operator)
 	if !ok {
 		return nil, mcpcontract.JobReference{}, errors.New("dossier build is not available")
@@ -347,10 +330,15 @@ func (s *Server) buildRepositoryDossier(ctx context.Context, _ *mcp.CallToolRequ
 }
 
 func (s *Server) startInvestigation(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.StartInvestigationInput) (*mcp.CallToolResult, mcpcontract.DurableArtifactReference, error) {
-	if err := validateRepo(mcpcontract.RepoInput{Owner: in.Owner, Repo: in.Repo}); err != nil {
+	owner, repo, err := normalizeRepository(in.Owner, in.Repo)
+	if err != nil {
 		return nil, mcpcontract.DurableArtifactReference{}, err
 	}
-	if in.Number <= 0 && strings.TrimSpace(in.CommitSHA) == "" {
+	in.Owner, in.Repo = owner, repo
+	in.CommitSHA = strings.TrimSpace(in.CommitSHA)
+	in.Lens = strings.TrimSpace(in.Lens)
+	in.Kind = strings.TrimSpace(in.Kind)
+	if in.Number <= 0 && in.CommitSHA == "" {
 		return nil, mcpcontract.DurableArtifactReference{}, mcpcontract.InvalidArgument("commit_sha", "provide commit_sha or a positive stored thread number", map[string]any{"commit_sha": "<sha>"})
 	}
 	operator, ok := s.reader.(Operator)
@@ -367,9 +355,11 @@ func (s *Server) startInvestigation(ctx context.Context, _ *mcp.CallToolRequest,
 }
 
 func (s *Server) recordHypothesis(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.RecordHypothesisInput) (*mcp.CallToolResult, mcpcontract.DurableArtifactReference, error) {
-	if _, err := normalizeID("investigation_id", in.InvestigationID); err != nil {
+	investigationID, err := normalizeID("investigation_id", in.InvestigationID)
+	if err != nil {
 		return nil, mcpcontract.DurableArtifactReference{}, err
 	}
+	in.InvestigationID = investigationID
 	in.Title = strings.TrimSpace(in.Title)
 	in.Description = strings.TrimSpace(in.Description)
 	in.Category = strings.TrimSpace(in.Category)
@@ -436,9 +426,11 @@ func (s *Server) findRelatedWork(ctx context.Context, _ *mcp.CallToolRequest, in
 }
 
 func validateCheckInput(in *mcpcontract.CheckDuplicatesInput) error {
-	if _, err := normalizeID("id", in.ID); err != nil {
+	id, err := normalizeID("id", in.ID)
+	if err != nil {
 		return err
 	}
+	in.ID = id
 	in.Target = strings.ToLower(strings.TrimSpace(in.Target))
 	if in.Target != "hypothesis" && in.Target != "opportunity" {
 		return mcpcontract.InvalidArgument("target", "must be hypothesis or opportunity", map[string]any{"target": "hypothesis"})
@@ -447,10 +439,16 @@ func validateCheckInput(in *mcpcontract.CheckDuplicatesInput) error {
 }
 
 func (s *Server) promoteOpportunity(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.PromoteOpportunityInput) (*mcp.CallToolResult, mcpcontract.DurableArtifactReference, error) {
-	if _, err := normalizeID("hypothesis_id", in.HypothesisID); err != nil {
+	hypothesisID, err := normalizeID("hypothesis_id", in.HypothesisID)
+	if err != nil {
 		return nil, mcpcontract.DurableArtifactReference{}, err
 	}
-	if strings.TrimSpace(in.ProblemStatement) == "" || strings.TrimSpace(in.Scope) == "" || strings.TrimSpace(in.Impact) == "" || strings.TrimSpace(in.ExpectedEffort) == "" {
+	in.HypothesisID = hypothesisID
+	in.ProblemStatement = strings.TrimSpace(in.ProblemStatement)
+	in.Scope = strings.TrimSpace(in.Scope)
+	in.Impact = strings.TrimSpace(in.Impact)
+	in.ExpectedEffort = strings.TrimSpace(in.ExpectedEffort)
+	if in.ProblemStatement == "" || in.Scope == "" || in.Impact == "" || in.ExpectedEffort == "" {
 		return nil, mcpcontract.DurableArtifactReference{}, mcpcontract.InvalidArgument("problem_statement", "problem_statement, scope, impact, and expected_effort are required", map[string]any{"problem_statement": "Concrete problem", "scope": "Bounded scope", "impact": "Observed impact", "expected_effort": "small"})
 	}
 	if in.Confidence < 0 || in.Confidence > 1 {

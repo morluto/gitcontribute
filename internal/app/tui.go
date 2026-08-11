@@ -30,7 +30,7 @@ func (s *Service) Load(ctx context.Context) (tuicontract.Data, error) {
 	var repos []corpus.Repository
 	cursor := ""
 	for {
-		page, err := c.ListRepositoriesWithOptions(ctx, "", corpus.RepositorySearchOptions{Limit: maxTUIItems, Cursor: cursor, Sort: "updated"})
+		page, err := c.ListRepositoriesWithOptions(ctx, "", corpus.RepositorySearchOptions{Page: corpus.MaximumSearchPage().WithCursor(cursor), Order: corpus.UpdatedSearchOrder()})
 		if err != nil {
 			return tuicontract.Data{}, err
 		}
@@ -72,22 +72,22 @@ func (s *Service) Load(ctx context.Context) (tuicontract.Data, error) {
 			data.SyncStatuses = append(data.SyncStatuses, syncStatus)
 		}
 
-		threadTotal, err := c.CountThreadsFiltered(ctx, repo.ID, "", "")
+		threadTotal, err := c.CountThreadsFiltered(ctx, repo.ID, corpus.AnyThreadKind(), corpus.AnyThreadState())
 		if err != nil {
 			return tuicontract.Data{}, err
 		}
 		threadWindow := data.Windows["threads"]
 		threadWindow.Total += threadTotal
 		data.Windows["threads"] = threadWindow
-		threads, err := c.ListThreads(ctx, repo.ID, "", maxTUIItems)
+		threads, err := c.ListThreads(ctx, repo.ID, corpus.AnyThreadKind(), maxTUIItems)
 		if err != nil {
 			return tuicontract.Data{}, err
 		}
 		for _, thread := range threads {
 			data.Threads = append(data.Threads, tuicontract.Item{
-				Kind: thread.Kind, ID: fmt.Sprintf("%d", thread.ID), Ref: fmt.Sprintf("%s#%d", ref, thread.Number),
-				Title: thread.Title, Subtitle: thread.State + " by " + thread.Author, Detail: thread.Body,
-				Status: thread.State, Source: threadURL(ref, thread.Kind, thread.Number), AsOf: formatTime(thread.SourceUpdatedAt),
+				Kind: string(thread.Kind), ID: fmt.Sprintf("%d", thread.ID), Ref: fmt.Sprintf("%s#%d", ref, thread.Number),
+				Title: thread.Title, Subtitle: string(thread.State) + " by " + thread.Author, Detail: thread.Body,
+				Status: string(thread.State), Source: threadURL(ref, thread.Kind, thread.Number), AsOf: formatTime(thread.SourceUpdatedAt),
 			})
 		}
 	}
@@ -213,7 +213,7 @@ func (s *Service) Load(ctx context.Context) (tuicontract.Data, error) {
 		}
 		data.Contributions = append(data.Contributions, tuicontract.Item{
 			Kind: "contribution", ID: contribution.ID, Ref: contribution.Reference,
-			Title: contribution.Title, Subtitle: contribution.Kind + " · " + status,
+			Title: contribution.Title, Subtitle: string(contribution.Kind) + " · " + status,
 			Detail: contribution.Body, Status: status, Stage: "submitted",
 			Source: contribution.ReferenceURL, AsOf: formatTime(contribution.UpdatedAt),
 		})
@@ -329,7 +329,7 @@ func radarCandidateItem(candidate radar.Candidate) tuicontract.Item {
 			summary = related.Title
 		}
 		if related.Relation != "" {
-			summary += " · " + strings.ReplaceAll(related.Relation, "_", " ")
+			summary += " · " + strings.ReplaceAll(string(related.Relation), "_", " ")
 		}
 		assessment.Related = append(assessment.Related, tuicontract.Fact{
 			Code: related.Kind, Summary: summary, Source: related.URL,

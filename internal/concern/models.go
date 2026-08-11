@@ -3,8 +3,10 @@
 package concern
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -29,6 +31,14 @@ const (
 	StatusResolved Status = "resolved"
 )
 
+func ParseStatus(value string) (Status, error) {
+	status := Status(strings.TrimSpace(value))
+	if !validStatus(status) {
+		return "", ErrInvalidStatus
+	}
+	return status, nil
+}
+
 // LinkKind describes an explicit, non-inferred relationship.
 type LinkKind string
 
@@ -44,6 +54,14 @@ const (
 	// LinkOpportunity points at a promoted or related opportunity.
 	LinkOpportunity LinkKind = "opportunity"
 )
+
+func ParseLinkKind(value string) (LinkKind, error) {
+	kind := LinkKind(strings.TrimSpace(value))
+	if !validLinkKind(kind) {
+		return "", ErrInvalidLink
+	}
+	return kind, nil
+}
 
 // Link points to another local record or a credential-free repository ref.
 type Link struct {
@@ -64,11 +82,103 @@ type StatusChange struct {
 
 // Promotion preserves the local concern's downstream workflow identity.
 type Promotion struct {
-	Kind            string
-	InvestigationID string
-	HypothesisID    string
-	OpportunityID   string
-	PromotedAt      time.Time
+	kind            promotionKind
+	investigationID string
+	hypothesisID    string
+	opportunityID   string
+	promotedAt      time.Time
+}
+
+type promotionKind uint8
+
+const (
+	investigationPromotion promotionKind = iota + 1
+	opportunityPromotion
+)
+
+func NewInvestigationPromotion(investigationID, hypothesisID string, promotedAt time.Time) (*Promotion, error) {
+	return parsePromotion("investigation", investigationID, hypothesisID, "", promotedAt)
+}
+
+func NewOpportunityPromotion(investigationID, hypothesisID, opportunityID string, promotedAt time.Time) (*Promotion, error) {
+	return parsePromotion("opportunity", investigationID, hypothesisID, opportunityID, promotedAt)
+}
+
+func parsePromotion(kind, investigationID, hypothesisID, opportunityID string, promotedAt time.Time) (*Promotion, error) {
+	investigationID = strings.TrimSpace(investigationID)
+	hypothesisID = strings.TrimSpace(hypothesisID)
+	opportunityID = strings.TrimSpace(opportunityID)
+	if investigationID == "" || hypothesisID == "" {
+		return nil, errors.New("promotion investigation and hypothesis identities are required")
+	}
+	switch strings.TrimSpace(kind) {
+	case "investigation":
+		if opportunityID != "" {
+			return nil, errors.New("investigation promotion cannot carry an opportunity identity")
+		}
+		return &Promotion{kind: investigationPromotion, investigationID: investigationID, hypothesisID: hypothesisID, promotedAt: promotedAt}, nil
+	case "opportunity":
+		if opportunityID == "" {
+			return nil, errors.New("opportunity promotion identity is required")
+		}
+		return &Promotion{kind: opportunityPromotion, investigationID: investigationID, hypothesisID: hypothesisID, opportunityID: opportunityID, promotedAt: promotedAt}, nil
+	default:
+		return nil, fmt.Errorf("unsupported concern promotion kind %q", kind)
+	}
+}
+
+func (p Promotion) Kind() string {
+	if p.kind == opportunityPromotion {
+		return "opportunity"
+	}
+	if p.kind == investigationPromotion {
+		return "investigation"
+	}
+	return ""
+}
+
+func (p Promotion) InvestigationID() string { return p.investigationID }
+func (p Promotion) HypothesisID() string    { return p.hypothesisID }
+func (p Promotion) OpportunityID() string   { return p.opportunityID }
+func (p Promotion) PromotedAt() time.Time   { return p.promotedAt }
+
+func (p Promotion) valid() bool {
+	return p.Kind() != "" && p.investigationID != "" && p.hypothesisID != "" &&
+		(p.kind != opportunityPromotion || p.opportunityID != "") &&
+		(p.kind != investigationPromotion || p.opportunityID == "")
+}
+
+// MarshalJSON retains the pre-sealing durable payload field names.
+func (p Promotion) MarshalJSON() ([]byte, error) {
+	if !p.valid() {
+		return nil, errors.New("invalid concern promotion")
+	}
+	return json.Marshal(struct {
+		Kind            string
+		InvestigationID string
+		HypothesisID    string
+		OpportunityID   string
+		PromotedAt      time.Time
+	}{p.Kind(), p.InvestigationID(), p.HypothesisID(), p.OpportunityID(), p.PromotedAt()})
+}
+
+func (p *Promotion) UnmarshalJSON(data []byte) error {
+	var input struct {
+		Kind            string
+		InvestigationID string
+		HypothesisID    string
+		OpportunityID   string
+		PromotedAt      time.Time
+	}
+	if err := json.Unmarshal(data, &input); err != nil {
+		return err
+	}
+	parsed, err := parsePromotion(input.Kind, input.InvestigationID, input.HypothesisID, input.OpportunityID, input.PromotedAt)
+	if err != nil {
+		return err
+	}
+	*p = *parsed
+	return nil
 }
 
 // Concern is a durable local intake record. WorkspaceID is an opaque corpus
@@ -119,22 +229,16 @@ func (c *Concern) ParseStored() error {
 			return fmt.Errorf("concern audit entry %d has an unsupported status", i)
 		}
 	}
+	for i, link := range c.Links {
+		if !validLinkKind(link.Kind) || strings.TrimSpace(link.TargetType) == "" || strings.TrimSpace(link.TargetID) == "" {
+			return fmt.Errorf("concern link %d is invalid", i)
+		}
+	}
 	if c.Status == StatusPromoted && c.Promotion == nil {
 		return errors.New("promoted concern is missing promotion identity")
 	}
-	if c.Promotion != nil {
-		switch c.Promotion.Kind {
-		case "investigation":
-			if c.Promotion.InvestigationID == "" || c.Promotion.HypothesisID == "" || c.Promotion.OpportunityID != "" {
-				return errors.New("invalid investigation promotion identity")
-			}
-		case "opportunity":
-			if c.Promotion.InvestigationID == "" || c.Promotion.HypothesisID == "" || c.Promotion.OpportunityID == "" {
-				return errors.New("invalid opportunity promotion identity")
-			}
-		default:
-			return fmt.Errorf("unsupported concern promotion kind %q", c.Promotion.Kind)
-		}
+	if c.Promotion != nil && !c.Promotion.valid() {
+		return errors.New("invalid concern promotion identity")
 	}
 	return nil
 }

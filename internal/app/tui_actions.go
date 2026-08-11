@@ -31,7 +31,7 @@ func (s *Service) Actions(_ context.Context, item tuicontract.Item) ([]tuicontra
 		return []tuicontract.Action{{
 			ID: tuiActionStartInvestigation, Label: "Start investigation",
 			Description: "Create or reopen the local investigation and seed hypothesis.",
-			Capability:  tuicontract.CapabilityLocalWrite, RequiresConfirmation: true,
+			Capability:  tuicontract.CapabilityLocalWrite,
 		}}, nil
 	case "hypothesis":
 		return researchActions(), nil
@@ -45,7 +45,7 @@ func (s *Service) Actions(_ context.Context, item tuicontract.Item) ([]tuicontra
 		return []tuicontract.Action{{
 			ID: tuiActionRefreshClusters, Label: "Refresh related-work clusters",
 			Description: "Recompute and persist the local duplicate projection.",
-			Capability:  tuicontract.CapabilityLocalWrite, RequiresConfirmation: true,
+			Capability:  tuicontract.CapabilityLocalWrite,
 		}}, nil
 	default:
 		return nil, nil

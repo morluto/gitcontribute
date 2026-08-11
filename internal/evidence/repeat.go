@@ -85,24 +85,48 @@ func (s *Service) RunValidationGroup(ctx context.Context, defID string, opts Rep
 	return group, nil
 }
 
-func normalizeRepeatOptions(def *ValidationDefinition, opts RepeatValidationOptions) (RepeatValidationOptions, error) {
+// ParseRepeatValidationOptions checks the context-free bounds of a repeat
+// request. Definition-dependent defaults remain owned by normalizeRepeatOptions.
+func ParseRepeatValidationOptions(opts RepeatValidationOptions) (RepeatValidationOptions, error) {
 	if opts.RunCount < 1 || opts.RunCount > maxRepeatRuns {
 		return opts, fmt.Errorf("repeat run count must be between 1 and %d", maxRepeatRuns)
 	}
 	if len(opts.Kinds) == 0 || len(opts.Kinds) > 2 {
 		return opts, errors.New("one or two validation kinds are required")
 	}
-	seen := map[RunKind]bool{}
+	seen := map[RunKind]struct{}{}
 	for _, kind := range opts.Kinds {
-		if (kind != RunKindBase && kind != RunKindCandidate) || seen[kind] {
+		if kind != RunKindBase && kind != RunKindCandidate {
 			return opts, ErrMissingRunKind
 		}
-		seen[kind] = true
+		if _, duplicate := seen[kind]; duplicate {
+			return opts, ErrMissingRunKind
+		}
+		seen[kind] = struct{}{}
 	}
 	total := len(opts.Kinds) * opts.RunCount
 	if opts.Concurrency < 1 || opts.Concurrency > maxRepeatConcurrency || opts.Concurrency > total {
 		return opts, fmt.Errorf("repeat concurrency must be between 1 and %d and no greater than total attempts", maxRepeatConcurrency)
 	}
+	if opts.PerRunTimeout != 0 && (opts.PerRunTimeout < 0 || opts.PerRunTimeout > maxValidationTimeout) {
+		return opts, ErrInvalidTimeout
+	}
+	if opts.SampleInterval != 0 && (opts.SampleInterval < minSampleInterval || opts.SampleInterval > maxSampleInterval) {
+		return opts, fmt.Errorf("sample interval must be between %s and %s", minSampleInterval, maxSampleInterval)
+	}
+	if opts.OverallTimeout != 0 && (opts.OverallTimeout < 0 || opts.OverallTimeout > maxValidationTimeout) {
+		return opts, ErrInvalidTimeout
+	}
+	opts.Kinds = append([]RunKind(nil), opts.Kinds...)
+	return opts, nil
+}
+
+func normalizeRepeatOptions(def *ValidationDefinition, opts RepeatValidationOptions) (RepeatValidationOptions, error) {
+	parsed, err := ParseRepeatValidationOptions(opts)
+	if err != nil {
+		return opts, err
+	}
+	opts = parsed
 	if opts.PerRunTimeout == 0 {
 		opts.PerRunTimeout = def.Timeout
 	}
@@ -116,6 +140,7 @@ func normalizeRepeatOptions(def *ValidationDefinition, opts RepeatValidationOpti
 		return opts, fmt.Errorf("sample interval must be between %s and %s", minSampleInterval, maxSampleInterval)
 	}
 	if opts.OverallTimeout == 0 {
+		total := len(opts.Kinds) * opts.RunCount
 		waves := (total + opts.Concurrency - 1) / opts.Concurrency
 		opts.OverallTimeout = time.Duration(waves) * opts.PerRunTimeout
 	}
@@ -195,16 +220,16 @@ func (s *Service) executeValidationTask(ctx context.Context, def *ValidationDefi
 func aggregateAttempts(attempts []ValidationAttempt, kinds []RunKind, requested int, hasObservations bool) []ValidationAggregate {
 	aggregates := make([]ValidationAggregate, 0, len(kinds))
 	for _, kind := range kinds {
-		aggregate := ValidationAggregate{Kind: kind, Requested: requested, ResourceClassification: "available"}
+		aggregate := ValidationAggregate{Kind: kind, Requested: requested, ResourceClassification: ResourceAvailable}
 		for _, attempt := range attempts {
 			if attempt.Kind != kind {
 				continue
 			}
 			aggregate.Completed++
-			if attempt.Cleanup.Status == "failed" {
-				aggregate.ResourceClassification = "cleanup_failed"
-			} else if aggregate.ResourceClassification == "available" && resourcesUnavailable(attempt.Resources) {
-				aggregate.ResourceClassification = "inconclusive"
+			if attempt.Cleanup.Status == CleanupFailed {
+				aggregate.ResourceClassification = ResourceCleanupFailed
+			} else if aggregate.ResourceClassification == ResourceAvailable && resourcesUnavailable(attempt.Resources) {
+				aggregate.ResourceClassification = ResourceInconclusive
 			}
 			switch semanticAttempt(attempt, hasObservations) {
 			case RunGroupStablePass:

@@ -3,6 +3,7 @@ package corpus
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ func TestCommitClusterProjectionRejectsChangedSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread := Thread{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 1, State: "open", Title: "first", SourceUpdatedAt: time.Unix(1, 0).UTC()}
+	thread := Thread{RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1, State: "open", Title: "first", SourceUpdatedAt: time.Unix(1, 0).UTC()}
 	if _, err := c.UpsertThread(ctx, thread, `{}`); err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +207,7 @@ func TestCommitClusterProjectionRejectsClusterFromDifferentSource(t *testing.T) 
 			Revision: "different-source",
 			State:    clustering.ClusterOpen,
 			Canonical: clustering.MemberRef{
-				Owner: "acme", Repo: "rocket", Kind: ThreadKindIssue, Number: 1,
+				Owner: "acme", Repo: "rocket", Kind: domain.IssueKind, Number: 1,
 			},
 		}},
 	})
@@ -270,5 +271,62 @@ func TestCommitClusterProjectionRejectsClusterFromDifferentRepository(t *testing
 	})
 	if err == nil || err.Error() != `cluster "cluster-1" repository does not match commit` {
 		t.Fatalf("commit error = %v, want cluster repository mismatch", err)
+	}
+}
+
+func TestCommitClusterProjectionRejectsInvalidClusterState(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	if _, err := c.UpsertRepository(ctx, Repository{Owner: "acme", Name: "rocket"}, `{}`); err != nil {
+		t.Fatal(err)
+	}
+	ref := domain.MustRepoRef("acme", "rocket")
+	maxCandidates := clustering.DefaultComparisonBudget().MaxCandidates()
+	snapshot, err := c.LoadClusterRefreshSnapshot(ctx, ref, maxCandidates)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = c.CommitClusterProjection(ctx, clusterprojection.Commit{
+		Repo:               ref,
+		ExpectedSource:     snapshot.SourceRevision,
+		ExpectedGovernance: snapshot.GovernanceRevision,
+		RuleVersion:        similarity.DuplicateV1,
+		MaxCandidates:      maxCandidates,
+		Clusters: []clustering.Cluster{{
+			StableID: "cluster-1",
+			Repo:     ref,
+			Revision: snapshot.SourceRevision,
+			State:    "impossible",
+			Canonical: clustering.MemberRef{
+				Owner: "acme", Repo: "rocket", Kind: domain.IssueKind, Number: 1,
+			},
+		}},
+	})
+	if err == nil || !strings.Contains(err.Error(), `cluster "cluster-1": unsupported cluster state "impossible"`) {
+		t.Fatalf("commit error = %v, want invalid cluster state", err)
+	}
+}
+
+func TestListClusterProjectionRejectsCorruptStoredState(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	ref := domain.MustRepoRef("acme", "rocket")
+	if _, err := c.db.ExecContext(ctx, `
+		INSERT INTO clusters
+			(stable_id, repo_owner, repo_name, state, canonical_kind, canonical_owner,
+			 canonical_repo, canonical_number, source_revision, source_window_start,
+			 source_window_end, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, "cluster-1", ref.Owner(), ref.Repo(), "impossible", domain.IssueKind,
+		ref.Owner(), ref.Repo(), 1, "revision", 1, 1, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := c.ListClusterProjection(ctx, ref, "", 10)
+	if err == nil || !strings.Contains(err.Error(), `decode cluster state: unsupported cluster state "impossible"`) {
+		t.Fatalf("list error = %v, want corrupt cluster state", err)
 	}
 }

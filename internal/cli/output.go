@@ -203,7 +203,7 @@ func writeRadarRelatedWork(b *strings.Builder, values []radar.RelatedWork) {
 	limit := min(len(values), displayLimit)
 	parts := make([]string, 0, limit+1)
 	for _, value := range values[:limit] {
-		part := value.Relation + " " + value.Ref
+		part := string(value.Relation) + " " + value.Ref
 		if value.State != "" {
 			part += " [" + value.State + "]"
 		}

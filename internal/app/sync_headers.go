@@ -53,25 +53,23 @@ type syncThreadWriter struct {
 	owner           string
 	repo            string
 	repositoryID    int64
-	kind            string
+	kind            syncThreadKind
 	threads         []contracts.SyncThreadRef
 	updated         int
 	sourceUpdatedAt time.Time
 }
 
-func syncThreadHeaderSelection(ctx context.Context, c *corpus.Corpus, reader github.Reader, ref domain.RepoRef, repoID int64, sourceUpdatedAt time.Time, opts SyncOptions, provided []github.Issue, budget *syncRequestBudget) (syncThreadSelection, error) {
-	writer := &syncThreadWriter{ctx: ctx, corpus: c, owner: ref.Owner(), repo: ref.Repo(), repositoryID: repoID, kind: opts.Kind, sourceUpdatedAt: sourceUpdatedAt}
-	if provided != nil {
-		if err := writer.storeAll(provided); err != nil {
-			return syncThreadSelection{}, err
-		}
-		return writer.result(0, false, false), nil
-	}
-	if len(opts.Numbers) > 0 {
-		requests, err := syncExactThreadHeaders(ctx, reader, ref, opts.Numbers, budget, writer)
+func syncThreadHeaderSelection(ctx context.Context, c *corpus.Corpus, reader github.Reader, ref domain.RepoRef, repoID int64, sourceUpdatedAt time.Time, request threadSyncRequest, budget *syncRequestBudget) (syncThreadSelection, error) {
+	writer := &syncThreadWriter{ctx: ctx, corpus: c, owner: ref.Owner(), repo: ref.Repo(), repositoryID: repoID, kind: request.kind, sourceUpdatedAt: sourceUpdatedAt}
+	switch selection := request.selection.(type) {
+	case exactThreadSync:
+		requests, err := syncExactThreadHeaders(ctx, reader, ref, selection.numbers, budget, writer)
 		return writer.result(requests, false, false), err
+	case listedThreadSync:
+		return syncListedThreadHeaders(ctx, reader, ref, request.kind, selection, budget, writer)
+	default:
+		panic("unreachable thread sync selection")
 	}
-	return syncListedThreadHeaders(ctx, reader, ref, opts, budget, writer)
 }
 
 func (w *syncThreadWriter) storeAll(issues []github.Issue) error {
@@ -87,7 +85,7 @@ func (w *syncThreadWriter) store(issue github.Issue) error {
 	if err := w.ctx.Err(); err != nil {
 		return err
 	}
-	if w.kind != "both" && string(issue.Kind) != w.kind {
+	if !w.kind.includes(string(issue.Kind)) {
 		return nil
 	}
 	thread, payload, err := threadFromIssue(issue)
@@ -95,7 +93,7 @@ func (w *syncThreadWriter) store(issue github.Issue) error {
 		return err
 	}
 	thread.RepositoryID = w.repositoryID
-	w.threads = append(w.threads, contracts.SyncThreadRef{Owner: w.owner, Repo: w.repo, Kind: thread.Kind, Number: thread.Number})
+	w.threads = append(w.threads, contracts.SyncThreadRef{Owner: w.owner, Repo: w.repo, Kind: string(thread.Kind), Number: thread.Number})
 	if _, err := corpus.RetryBusyValue(w.ctx, func(ctx context.Context) (*corpus.Thread, error) {
 		return w.corpus.UpsertThread(ctx, thread, payload)
 	}); err != nil {
@@ -140,13 +138,13 @@ func syncExactThreadHeaders(ctx context.Context, reader github.Reader, ref domai
 	return requests, nil
 }
 
-func syncListedThreadHeaders(ctx context.Context, reader github.Reader, ref domain.RepoRef, opts SyncOptions, budget *syncRequestBudget, writer *syncThreadWriter) (syncThreadSelection, error) {
+func syncListedThreadHeaders(ctx context.Context, reader github.Reader, ref domain.RepoRef, kind syncThreadKind, selection listedThreadSync, budget *syncRequestBudget, writer *syncThreadWriter) (syncThreadSelection, error) {
 	perPage := 100
-	if opts.MaxItems > 0 {
-		perPage = min(perPage, opts.MaxItems)
+	if selection.maxItems > 0 {
+		perPage = min(perPage, selection.maxItems)
 	}
 	listOpts := github.ListIssueOptions{
-		State: opts.State, Sort: "updated", Direction: "desc", Since: opts.Since,
+		State: selection.state.String(), Sort: "updated", Direction: "desc", Since: selection.since,
 		PageOptions: github.PageOptions{Page: 1, PerPage: perPage},
 	}
 	requests, truncated, requestCapped := 0, false, false
@@ -168,7 +166,7 @@ func syncListedThreadHeaders(ctx context.Context, reader github.Reader, ref doma
 			if err := writer.store(issue); err != nil {
 				return syncThreadSelection{}, err
 			}
-			if opts.MaxItems > 0 && writer.updated >= opts.MaxItems {
+			if selection.maxItems > 0 && writer.updated >= selection.maxItems {
 				truncated = res.Page.HasNext || index < len(res.Items)-1
 				reachedLimit = true
 				break
@@ -180,7 +178,7 @@ func syncListedThreadHeaders(ctx context.Context, reader github.Reader, ref doma
 		if !res.Page.HasNext {
 			break
 		}
-		if requests >= opts.MaxPages {
+		if requests >= selection.maxPages {
 			truncated = true
 			break
 		}
@@ -189,10 +187,10 @@ func syncListedThreadHeaders(ctx context.Context, reader github.Reader, ref doma
 			break
 		}
 		listOpts.Page = res.Page.NextPage
-		if opts.MaxItems > 0 {
-			listOpts.PerPage = min(100, opts.MaxItems-writer.updated)
+		if selection.maxItems > 0 {
+			listOpts.PerPage = min(100, selection.maxItems-writer.updated)
 		}
 	}
-	complete := opts.Kind == "both" && opts.State == "all" && opts.Since.IsZero() && !truncated
+	complete := kind.includesAll() && selection.state.isAll() && selection.since.IsZero() && !truncated
 	return writer.result(requests, complete, requestCapped), nil
 }

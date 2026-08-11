@@ -53,7 +53,8 @@ func (r *MCPReader) Thread(ctx context.Context, in mcpcontract.ThreadInput) (mcp
 	if err != nil {
 		return mcpcontract.ThreadOutput{}, err
 	}
-	if in.Kind != "issue" && in.Kind != "pull_request" {
+	kind, err := domain.ParseThreadKind(in.Kind)
+	if err != nil {
 		return mcpcontract.ThreadOutput{}, errors.New("kind must be issue or pull_request")
 	}
 	if in.Number < 1 {
@@ -74,7 +75,7 @@ func (r *MCPReader) Thread(ctx context.Context, in mcpcontract.ThreadInput) (mcp
 	if repo == nil {
 		return mcpcontract.ThreadOutput{}, failure.NotFound(nil)
 	}
-	thread, err := c.GetThread(ctx, repo.ID, in.Kind, in.Number)
+	thread, err := c.GetThread(ctx, repo.ID, kind, in.Number)
 	if err != nil {
 		return mcpcontract.ThreadOutput{}, fmt.Errorf("get thread: %w", err)
 	}
@@ -95,9 +96,9 @@ func corpusThreadToMCPOutput(t *corpus.Thread) mcpcontract.ThreadOutput {
 	return mcpcontract.ThreadOutput{
 		Owner:             "", // filled by caller
 		Repo:              "",
-		Kind:              t.Kind,
+		Kind:              string(t.Kind),
 		Number:            t.Number,
-		State:             t.State,
+		State:             string(t.State),
 		StateReason:       t.StateReason,
 		Title:             t.Title,
 		Body:              t.Body,
@@ -105,15 +106,16 @@ func corpusThreadToMCPOutput(t *corpus.Thread) mcpcontract.ThreadOutput {
 		AuthorAssociation: t.AuthorAssociation,
 		Labels:            t.Labels,
 		Assignees:         t.Assignees,
-		Draft:             t.Draft, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.Merge.MergedAt()), Merged: knownMergePointer(t.Merge.IsMerged(), t.Merge.Known()),
+		Draft:             t.Draft, ClosedAt: formatTime(t.ClosedAt), MergedAt: formatTime(t.Merge.MergedAt()), Merged: mergeStatusPointer(t.Merge),
 		UpdatedAt: formatTime(t.SourceUpdatedAt),
 	}
 }
 
-func knownMergePointer(merged, known bool) *bool {
-	if !known {
+func mergeStatusPointer(status domain.MergeStatus) *bool {
+	if !status.Known() {
 		return nil
 	}
+	merged := status.IsMerged()
 	return &merged
 }
 
@@ -327,11 +329,17 @@ func (r *MCPReader) Evidence(ctx context.Context, in mcpcontract.EvidenceInput) 
 		return mcpcontract.EvidenceOutput{}, errors.New("exactly one of investigation_id or opportunity_id is required")
 	}
 	if in.InvestigationID != "" {
-		if _, err := normalizeMCPID("investigation_id", in.InvestigationID); err != nil {
+		normalized, err := normalizeMCPID("investigation_id", in.InvestigationID)
+		if err != nil {
 			return mcpcontract.EvidenceOutput{}, err
 		}
-	} else if _, err := normalizeMCPID("opportunity_id", in.OpportunityID); err != nil {
-		return mcpcontract.EvidenceOutput{}, err
+		in.InvestigationID = normalized
+	} else {
+		normalized, err := normalizeMCPID("opportunity_id", in.OpportunityID)
+		if err != nil {
+			return mcpcontract.EvidenceOutput{}, err
+		}
+		in.OpportunityID = normalized
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
@@ -344,10 +352,11 @@ func (r *MCPReader) Evidence(ctx context.Context, in mcpcontract.EvidenceInput) 
 		OpportunityID:   in.OpportunityID,
 	}
 	if in.Relation != "" {
-		if !isValidEvidenceRelation(in.Relation) {
-			return mcpcontract.EvidenceOutput{}, fmt.Errorf("invalid relation %q", in.Relation)
+		relation, err := evidence.ParseRelation(in.Relation)
+		if err != nil {
+			return mcpcontract.EvidenceOutput{}, err
 		}
-		filter.Relation = evidence.Relation(in.Relation)
+		filter.Relation = relation
 	}
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
@@ -388,10 +397,12 @@ func evidenceSourceRevisionsToMCP(values []evidence.SourceRevision) []mcpcontrac
 	}
 	out := make([]mcpcontract.EvidenceSourceRevision, len(values))
 	for i, value := range values {
+		repository := value.Subject.Repository()
+		threadKind, number, _ := value.Subject.Thread()
 		out[i] = mcpcontract.EvidenceSourceRevision{
 			Subject: mcpcontract.EvidenceSourceSubject{
-				Kind: string(value.Subject.Kind), Owner: value.Subject.Owner, Repo: value.Subject.Repo,
-				ThreadKind: value.Subject.ThreadKind, Number: value.Subject.Number, Facet: value.Subject.Facet,
+				Kind: value.Subject.Kind().String(), Owner: repository.Owner(), Repo: repository.Repo(),
+				ThreadKind: string(threadKind), Number: number, Facet: value.Subject.Facet(),
 			},
 			SourceUpdatedAt: formatTime(value.SourceUpdatedAt), ObservationSequence: value.ObservationSequence,
 			ObservedAt: formatTime(value.ObservedAt),
@@ -459,14 +470,6 @@ func sourceRefsToMCP(refs []domain.SourceRef) []mcpcontract.SourceRef {
 		}
 	}
 	return out
-}
-
-func isValidEvidenceRelation(s string) bool {
-	switch evidence.Relation(s) {
-	case evidence.RelationSupporting, evidence.RelationContradicting, evidence.RelationInconclusive, evidence.RelationStale, evidence.RelationInvalid:
-		return true
-	}
-	return false
 }
 
 func normalizeMCPID(field, value string) (string, error) {
@@ -556,7 +559,7 @@ func (r *MCPReader) GetCoverage(ctx context.Context, in mcpcontract.GetCoverageI
 			}
 		}
 	}
-	out.Provenance, err = offlineReadProvenance("coverage", revision, in, !unknownCoverage, false, unknownCoverage)
+	out.Provenance, err = offlineReadProvenance("coverage", revision, in, false, unknownCoverage)
 	if err != nil {
 		return mcpcontract.GetCoverageOutput{}, err
 	}
@@ -594,7 +597,7 @@ func readParsedCoverageTarget(ctx context.Context, c *corpus.Corpus, target pars
 	asOf := repo.SourceUpdatedAt
 	kind, number, isThread := target.thread()
 	if isThread {
-		thread, err := c.GetThread(ctx, repo.ID, string(kind), number)
+		thread, err := c.GetThread(ctx, repo.ID, kind, number)
 		if err != nil {
 			return mcpcontract.CoverageOutput{}, "", fmt.Errorf("get thread: %w", err)
 		}
@@ -666,8 +669,8 @@ func coverageRecoveryPlan(target parsedCoverageTarget, value mcpcontract.Coverag
 
 	repo := target.repository()
 	ref := mcpcontract.ThreadRef{Owner: repo.Owner(), Repo: repo.Repo(), Kind: string(kind), Number: number}
-	selectable := make(map[string]struct{}, len(facets.SelectableFor(string(kind))))
-	for _, name := range facets.SelectableFor(string(kind)) {
+	selectable := make(map[string]struct{}, len(facets.SelectableFor(kind)))
+	for _, name := range facets.SelectableFor(kind) {
 		selectable[name] = struct{}{}
 	}
 	known := make(map[string]struct{}, len(facets.AllNames()))
@@ -738,12 +741,12 @@ func clusterToMCP(cl clustering.Cluster, memberLimit int) mcpcontract.ClusterOut
 			break
 		}
 		members = append(members, mcpcontract.ClusterMemberOutput{
-			Kind:     m.Ref.Kind,
+			Kind:     string(m.Ref.Kind),
 			Owner:    m.Ref.Owner,
 			Repo:     m.Ref.Repo,
 			Number:   m.Ref.Number,
 			Title:    m.Title,
-			State:    m.State,
+			State:    string(m.State),
 			Score:    mcpcontract.SimilarityScore(m.Score),
 			Reason:   m.Reason,
 			Included: m.Included,
@@ -753,7 +756,7 @@ func clusterToMCP(cl clustering.Cluster, memberLimit int) mcpcontract.ClusterOut
 	return mcpcontract.ClusterOutput{
 		StableID:    cl.StableID,
 		State:       string(cl.State),
-		Canonical:   mcpcontract.ClusterMemberOutput{Kind: cl.Canonical.Kind, Owner: cl.Canonical.Owner, Repo: cl.Canonical.Repo, Number: cl.Canonical.Number},
+		Canonical:   mcpcontract.ClusterMemberOutput{Kind: string(cl.Canonical.Kind), Owner: cl.Canonical.Owner, Repo: cl.Canonical.Repo, Number: cl.Canonical.Number},
 		MemberCount: len(cl.Members),
 		Members:     members,
 	}

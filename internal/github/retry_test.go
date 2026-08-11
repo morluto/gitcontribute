@@ -27,12 +27,6 @@ func (c *fakeClock) Now() time.Time {
 	return c.now
 }
 
-func (c *fakeClock) Advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.now = c.now.Add(d)
-}
-
 type fakeSleeper struct {
 	mu    sync.Mutex
 	calls []time.Duration

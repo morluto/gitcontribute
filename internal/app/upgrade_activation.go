@@ -18,12 +18,12 @@ import (
 )
 
 type installDetails struct {
-	context    string
+	kind       installationKind
 	executable string
 	npmRoot    string
 }
 
-func (s *Service) validateNewerCorpusTarget(ctx context.Context, report *contracts.UpgradeReport, candidate, target string) bool {
+func (s *Service) validateNewerCorpusTarget(ctx context.Context, report *contracts.UpgradeReport, candidate, target string, command runtimeContractCommand) bool {
 	fail := func(err error) bool {
 		stage := upgradeStage(report, "activation")
 		stage.Status = "target_validation_failed"
@@ -39,7 +39,7 @@ func (s *Service) validateNewerCorpusTarget(ctx context.Context, report *contrac
 	if err := verifySetupExecutable(candidate); err != nil {
 		return fail(fmt.Errorf("installed target executable is not usable: %w", err))
 	}
-	contract, err := readRuntimeContract(ctx, candidate)
+	contract, err := readRuntimeContract(ctx, command, candidate)
 	if err != nil {
 		return fail(fmt.Errorf("installed target runtime contract is unreadable: %w", err))
 	}
@@ -93,7 +93,7 @@ func (s *Service) validateNewerCorpusTarget(ctx context.Context, report *contrac
 	}
 }
 
-func (s *Service) activatePrivateRuntime(ctx context.Context, report *contracts.UpgradeReport, details installDetails) {
+func (s *Service) activatePrivateRuntime(ctx context.Context, report *contracts.UpgradeReport, details installDetails, command runtimeContractCommand) {
 	clients := outdatedPrivateRuntimeClients(report)
 	if len(clients) == 0 {
 		return
@@ -133,18 +133,18 @@ func (s *Service) activatePrivateRuntime(ctx context.Context, report *contracts.
 		return
 	}
 
-	contract, err := readRuntimeContract(ctx, candidate)
+	contract, err := readRuntimeContract(ctx, command, candidate)
 	if err != nil {
 		s.setPrivateActivationFailure(report, len(clients), fmt.Errorf("runtime contract is unreadable: %w", err))
 		return
 	}
 	if normalizeVersion(contract.Version) != normalizeVersion(target) {
 		message := fmt.Errorf("staged executable reports version %s, not target %s", contract.Version, target)
-		if details.context == "npx" {
+		if details.kind == installationNPX {
 			message = fmt.Errorf("npx bootstrap reports version %s and cannot activate target %s; run `npx --yes gitcontribute@latest setup`", contract.Version, target)
 		}
 		s.setPrivateActivationFailure(report, len(clients), message)
-		if details.context == "npx" {
+		if details.kind == installationNPX {
 			report.Action = message.Error()
 		}
 		return
@@ -204,7 +204,7 @@ func (s *Service) activatePrivateRuntime(ctx context.Context, report *contracts.
 		s.setPrivateActivationFailure(report, len(clients), fmt.Errorf("verify staged private MCP runtime: %w", err))
 		return
 	}
-	destinationContract, err := readRuntimeContract(ctx, destination)
+	destinationContract, err := readRuntimeContract(ctx, command, destination)
 	if err != nil {
 		s.setPrivateActivationFailure(report, len(clients), fmt.Errorf("installed runtime contract is unreadable: %w", err))
 		return
@@ -221,11 +221,12 @@ func (s *Service) activatePrivateRuntime(ctx context.Context, report *contracts.
 }
 
 func (s *Service) activateConfiguredClients(ctx context.Context, report *contracts.UpgradeReport, clients []string, destination, target string) {
-	setupClients := make([]clientsetup.Client, 0, len(clients))
-	for _, name := range clients {
-		setupClients = append(setupClients, clientsetup.Client(name))
+	setupClients, err := clientsetup.ParseClients(clients)
+	if err != nil {
+		s.setPrivateActivationFailure(report, len(clients), fmt.Errorf("parse configured clients: %w", err))
+		return
 	}
-	_, err := clientsetup.ActivateExistingAndVerify(ctx, clientsetup.Options{
+	_, err = clientsetup.ActivateExistingAndVerify(ctx, clientsetup.Options{
 		Clients: setupClients, Home: s.paths.HomeDir(), Executable: destination,
 	}, func() error { return s.verifyPrivateActivation(ctx, report, setupClients, destination, target) })
 	if err != nil {
@@ -257,9 +258,15 @@ func (s *Service) repairStaleRegistrations(ctx context.Context, report *contract
 	if len(clients) == 0 {
 		return
 	}
-	setupClients := make([]clientsetup.Client, 0, len(clients))
-	for _, name := range clients {
-		setupClients = append(setupClients, clientsetup.Client(name))
+	setupClients, err := clientsetup.ParseClients(clients)
+	if err != nil {
+		stage := upgradeStage(report, "activation")
+		stage.Status = "failed"
+		stage.Message = fmt.Sprintf("parse stale MCP registrations: %s", err)
+		setStage(report, stage)
+		report.Status = "registration repair failed"
+		report.Action = "inspect configured client registrations before retrying upgrade"
+		return
 	}
 	if _, err := clientsetup.RepairExisting(ctx, s.paths.HomeDir(), setupClients); err != nil {
 		stage := upgradeStage(report, "activation")
@@ -321,8 +328,8 @@ func (s *Service) repairStaleRegistrations(ctx context.Context, report *contract
 	}
 }
 
-func readRuntimeContract(ctx context.Context, path string) (*contracts.RuntimeContractResult, error) {
-	out, err := runtimeContractCommand(ctx, path)
+func readRuntimeContract(ctx context.Context, command runtimeContractCommand, path string) (*contracts.RuntimeContractResult, error) {
+	out, err := command(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("execute %s runtime-contract: %w", path, err)
 	}

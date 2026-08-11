@@ -29,7 +29,7 @@ func (s *Service) Metadata(ctx context.Context) (*contracts.MetadataResult, erro
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	cfg, err := s.loadConfig(false)
+	cfg, err := s.loadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -80,16 +80,10 @@ func (s *Service) Metadata(ctx context.Context) (*contracts.MetadataResult, erro
 		ConfigPath:             configPath,
 		CorpusPath:             cfg.Database,
 		Capabilities:           capabilities,
-		Features: map[string]bool{
-			"contribution_radar":     true,
-			"contribution_readiness": true,
-			"evidence_freshness":     true,
-			"github_mutations":       false,
-			"mcp_stdio":              true,
-			"semantic_search":        false,
-			"thread_investigation":   true,
-			"thread_research":        true,
-			"validation_exec":        true,
+		Features: contracts.MetadataFeatures{
+			ContributionRadar: true, ContributionReadiness: true,
+			EvidenceFreshness: true, MCPStdio: true,
+			ThreadInvestigation: true, ThreadResearch: true, ValidationExec: true,
 		},
 	}, nil
 }
@@ -109,7 +103,9 @@ func (s *Service) Configure(ctx context.Context, opts contracts.ConfigureOptions
 		return nil, err
 	}
 	before := *cfg
-	applyConfigureOptions(cfg, opts)
+	if err := applyConfigureOptions(cfg, opts); err != nil {
+		return nil, err
+	}
 	if err := config.Validate(cfg); err != nil {
 		return nil, fmt.Errorf("validate configuration: %w", err)
 	}
@@ -125,7 +121,7 @@ func (s *Service) Configure(ctx context.Context, opts contracts.ConfigureOptions
 		if err := config.Save(path, cfg); err != nil {
 			return nil, err
 		}
-		if _, err := s.loadConfig(false); err != nil {
+		if _, err := s.loadConfig(); err != nil {
 			return nil, fmt.Errorf("reload configuration: %w", err)
 		}
 	}
@@ -140,7 +136,7 @@ func (s *Service) ControlStatus(ctx context.Context) (*contracts.ControlStatusRe
 		return nil, err
 	}
 	now := s.now()
-	stats, err := c.ControlStats(ctx, now)
+	stats, err := c.ControlStats(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -176,9 +172,6 @@ func (s *Service) ControlStatus(ctx context.Context) (*contracts.ControlStatusRe
 	if stats.Repositories == 0 {
 		warnings = append(warnings, "corpus has no repositories")
 	}
-	if stats.FrontierReady > 0 {
-		warnings = append(warnings, fmt.Sprintf("%d frontier items are ready", stats.FrontierReady))
-	}
 	if stats.ActiveRuns > 0 || stats.ActiveJobs > 0 {
 		warnings = append(warnings, "background work is active")
 	}
@@ -191,12 +184,11 @@ func (s *Service) ControlStatus(ctx context.Context) (*contracts.ControlStatusRe
 		Version:       s.version,
 		SchemaVersion: version,
 		Counts: contracts.ControlCounts{
-			Repositories:  stats.Repositories,
-			Threads:       stats.Threads,
-			Sources:       stats.Sources,
-			FrontierReady: stats.FrontierReady,
-			ActiveRuns:    stats.ActiveRuns,
-			ActiveJobs:    stats.ActiveJobs,
+			Repositories: stats.Repositories,
+			Threads:      stats.Threads,
+			Sources:      stats.Sources,
+			ActiveRuns:   stats.ActiveRuns,
+			ActiveJobs:   stats.ActiveJobs,
 		},
 		FreshestSource: formatTime(stats.Freshest),
 		RateLimits:     rateLimits,
@@ -227,7 +219,7 @@ func (s *Service) doctor(ctx context.Context) (*contracts.DoctorResult, error) {
 	_, pathErr := s.paths.ConfigFile()
 	var cfg *config.Config
 	if pathErr == nil {
-		cfg, pathErr = s.loadConfig(false)
+		cfg, pathErr = s.loadConfig()
 	}
 	add("config", true, pathErr, "configuration is readable and valid")
 
@@ -372,12 +364,16 @@ func (s *Service) persistedConfig(path string) (*config.Config, error) {
 	return cfg, nil
 }
 
-func applyConfigureOptions(cfg *config.Config, opts contracts.ConfigureOptions) {
+func applyConfigureOptions(cfg *config.Config, opts contracts.ConfigureOptions) error {
 	if opts.Database != nil {
 		cfg.Database = strings.TrimSpace(*opts.Database)
 	}
 	if opts.TokenSource != nil {
-		cfg.TokenSource.Method = strings.ToLower(strings.TrimSpace(*opts.TokenSource))
+		method, err := config.ParseTokenSourceMethod(*opts.TokenSource)
+		if err != nil {
+			return err
+		}
+		cfg.TokenSource.Method = method
 	}
 	if opts.TokenSourceKey != nil {
 		cfg.TokenSource.Key = strings.TrimSpace(*opts.TokenSourceKey)
@@ -394,12 +390,13 @@ func applyConfigureOptions(cfg *config.Config, opts contracts.ConfigureOptions) 
 	if opts.CrawlTimeout != nil {
 		cfg.Crawl.Timeout = strings.TrimSpace(*opts.CrawlTimeout)
 	}
+	return nil
 }
 
 func configResult(cfg *config.Config) contracts.ConfigResult {
 	return contracts.ConfigResult{
 		Database:         cfg.Database,
-		TokenSource:      cfg.TokenSource.Method,
+		TokenSource:      string(cfg.TokenSource.Method),
 		TokenSourceKey:   cfg.TokenSource.Key,
 		CrawlBudget:      cfg.Crawl.Budget,
 		CrawlConcurrency: cfg.Crawl.Concurrency,

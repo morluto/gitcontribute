@@ -11,7 +11,7 @@ import (
 
 const transactionBoundReadLimitation = "transaction-bound identity; request a durable snapshot before reusing this result across calls"
 
-func offlineReadProvenance(kind string, revision int64, input any, complete, truncated, unknownCoverage bool) (mcpcontract.CorpusReadProvenance, error) {
+func offlineReadProvenance(kind string, revision int64, input any, truncated, unknownCoverage bool) (mcpcontract.CorpusReadProvenance, error) {
 	query, err := json.Marshal(input)
 	if err != nil {
 		return mcpcontract.CorpusReadProvenance{}, fmt.Errorf("encode %s provenance input: %w", kind, err)
@@ -27,13 +27,10 @@ func offlineReadProvenance(kind string, revision int64, input any, complete, tru
 		return mcpcontract.CorpusReadProvenance{}, fmt.Errorf("encode %s provenance identity: %w", kind, err)
 	}
 	identityDigest := sha256.Sum256(identity)
-	return mcpcontract.CorpusReadProvenance{
-		SnapshotToken:        "ephemeral:" + hex.EncodeToString(identityDigest[:]),
-		ObservationWatermark: revision,
-		QueryDigestSHA256:    hex.EncodeToString(queryDigest[:]),
-		Complete:             complete,
-		Truncated:            truncated,
-		UnknownCoverage:      unknownCoverage,
-		Limitations:          []string{transactionBoundReadLimitation},
-	}, nil
+	provenance := mcpcontract.NewCorpusReadProvenance(
+		"ephemeral:"+hex.EncodeToString(identityDigest[:]), false, revision,
+		hex.EncodeToString(queryDigest[:]), truncated, unknownCoverage,
+	)
+	provenance.Limitations = []string{transactionBoundReadLimitation}
+	return provenance, nil
 }

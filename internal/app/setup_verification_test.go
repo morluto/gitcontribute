@@ -28,10 +28,10 @@ func TestSetupVerificationDoesNotResolveCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer svc.Close()
+	svc.stubExecutablePath(writeTestExecutable(t, filepath.Join(home, "bin")))
 
 	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
 		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "env", TokenSourceKey: "GITCONTRIBUTE_TEST_MISSING_TOKEN",
-		Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -62,10 +62,10 @@ func TestSetupVerificationReportsFailedRequiredChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer svc.Close()
+	svc.stubExecutablePath(writeTestExecutable(t, filepath.Join(home, "bin")))
 
 	report, err := svc.Setup(context.Background(), contracts.SetupOptions{
 		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
-		Executable: writeTestExecutable(t, filepath.Join(home, "bin")),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -97,8 +97,9 @@ func TestSetupVerificationIgnoresConcurrentWriter(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer svc.Close()
+		svc.stubExecutablePath(executable)
 		report, err := svc.Setup(context.Background(), contracts.SetupOptions{
-			Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: executable,
+			Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -166,7 +167,8 @@ func TestSetupVerificationRejectsMismatchedClientRegistration(t *testing.T) {
 	}
 	defer svc.Close()
 	executable := writeTestExecutable(t, filepath.Join(home, "bin"))
-	opts := contracts.SetupOptions{Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: executable}
+	svc.stubExecutablePath(executable)
+	opts := contracts.SetupOptions{Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none"}
 	if report, err := svc.Setup(context.Background(), opts); err != nil || report.HasFailures() {
 		t.Fatalf("setup = %+v, %v", report, err)
 	}
@@ -222,8 +224,9 @@ func TestSetupReportsRestartOnlyWhenClientRegistrationChanges(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer svc.Close()
+		svc.stubExecutablePath(executable)
 		report, err := svc.Setup(context.Background(), contracts.SetupOptions{
-			Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none", Executable: executable,
+			Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
 		})
 		if err != nil {
 			t.Fatal(err)

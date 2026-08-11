@@ -43,7 +43,7 @@ func (explicitPortfolioSelection) isSyncPortfolioSelection() {}
 
 type authoredPortfolioSelection struct {
 	repository   *mcpcontract.RepositoryRef
-	state        string
+	state        syncThreadState
 	updatedAfter time.Time
 	limit        int
 	maxRequests  int
@@ -110,8 +110,9 @@ func parseAuthoredPortfolioSelection(in mcpcontract.SyncPortfolioInput) (authore
 	if in.State == "" {
 		in.State = "open"
 	}
-	if in.State != "open" && in.State != "closed" && in.State != "all" {
-		return authoredPortfolioSelection{}, mcpcontract.SyncPortfolioInput{}, errors.New("state must be open, closed, or all")
+	state, err := parseSyncThreadState(in.State)
+	if err != nil {
+		return authoredPortfolioSelection{}, mcpcontract.SyncPortfolioInput{}, err
 	}
 	var updatedAfter time.Time
 	if in.UpdatedAfter != "" {
@@ -138,7 +139,7 @@ func parseAuthoredPortfolioSelection(in mcpcontract.SyncPortfolioInput) (authore
 		copy := *in.Repository
 		repository = &copy
 	}
-	return authoredPortfolioSelection{repository: repository, state: in.State, updatedAfter: updatedAfter, limit: in.Limit, maxRequests: in.DiscoveryMaxRequests}, in, nil
+	return authoredPortfolioSelection{repository: repository, state: state, updatedAfter: updatedAfter, limit: in.Limit, maxRequests: in.DiscoveryMaxRequests}, in, nil
 }
 
 func (r *MCPReader) runPortfolioSync(ctx context.Context, request syncPortfolioRequest, report func(string, string) error) (syncPortfolioResult, error) {
@@ -157,7 +158,7 @@ func (r *MCPReader) syncExplicitPortfolio(ctx context.Context, selection explici
 	if err != nil {
 		return syncPortfolioResult{}, err
 	}
-	return syncPortfolioResult{Status: status, Discovered: len(selection.pullRequests), Refreshed: refreshed, PullRequests: threadRefKeys(selection.pullRequests), Failures: failures, DiscoveryStatus: "complete"}, nil
+	return syncPortfolioResult{Status: status, Discovered: len(selection.pullRequests), Refreshed: refreshed, PullRequests: threadRefKeys(selection.pullRequests), Failures: failures, DiscoveryStatus: batchOperationComplete}, nil
 }
 
 func (r *MCPReader) syncAuthoredPortfolio(ctx context.Context, selection authoredPortfolioSelection, statusMaxPages int, report func(string, string) error) (syncPortfolioResult, error) {
@@ -171,16 +172,16 @@ func (r *MCPReader) syncAuthoredPortfolio(ctx context.Context, selection authore
 	if err != nil {
 		return syncPortfolioResult{}, err
 	}
-	if discovery.Status != "complete" || discovery.SearchIncomplete || discovery.RequestCapped {
-		status = "partial"
+	if discovery.Status != batchOperationComplete || discovery.SearchIncomplete || discovery.RequestCapped {
+		status = batchOperationPartial
 	}
 	return syncPortfolioResult{Status: status, Login: discovery.Login, Discovered: discovery.PullRequests, Refreshed: refreshed, PullRequests: append([]string(nil), discovery.PullRequestRefs...), Failures: failures, DiscoveryStatus: discovery.Status, SearchIncomplete: discovery.SearchIncomplete, RequestCapped: discovery.RequestCapped}, nil
 }
 
-func (r *MCPReader) syncPortfolioStatusBatches(ctx context.Context, refs []mcpcontract.ThreadRef, maxPages int, report func(string, string) error) (int, []pullRequestStatusFailure, string, error) {
+func (r *MCPReader) syncPortfolioStatusBatches(ctx context.Context, refs []mcpcontract.ThreadRef, maxPages int, report func(string, string) error) (int, []pullRequestStatusFailure, batchOperationStatus, error) {
 	refreshed := 0
 	failures := make([]pullRequestStatusFailure, 0)
-	status := "complete"
+	status := batchOperationComplete
 	for start := 0; start < len(refs); start += 50 {
 		end := min(start+50, len(refs))
 		batch, err := r.syncPullRequestStatusBatch(ctx, pullRequestStatusBatchInput{PullRequests: refs[start:end], MaxPages: maxPages}, report)
@@ -189,21 +190,21 @@ func (r *MCPReader) syncPortfolioStatusBatches(ctx context.Context, refs []mcpco
 		}
 		refreshed += batch.Completed
 		failures = append(failures, batch.Failures...)
-		if batch.Status != "complete" {
-			status = "partial"
+		if batch.Status != batchOperationComplete {
+			status = batchOperationPartial
 		}
 	}
 	return refreshed, failures, status, nil
 }
 
 type syncPortfolioResult struct {
-	Status           string                     `json:"status"`
+	Status           batchOperationStatus       `json:"status"`
 	Login            string                     `json:"login"`
 	Discovered       int                        `json:"discovered"`
 	Refreshed        int                        `json:"refreshed"`
 	PullRequests     []string                   `json:"pull_requests"`
 	Failures         []pullRequestStatusFailure `json:"failures,omitempty"`
-	DiscoveryStatus  string                     `json:"discovery_status"`
+	DiscoveryStatus  batchOperationStatus       `json:"discovery_status"`
 	SearchIncomplete bool                       `json:"search_incomplete"`
 	RequestCapped    bool                       `json:"request_capped"`
 }

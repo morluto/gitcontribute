@@ -17,6 +17,14 @@ var (
 	syntheticGitHubTokenB = "ghp_" + strings.Repeat("0", 36)
 )
 
+func mustFacetCoverage(facet string, complete bool, asOf time.Time, count int) domain.FacetCoverage {
+	coverage, err := domain.NewFacetCoverage(facet, complete, asOf, count)
+	if err != nil {
+		panic(err)
+	}
+	return coverage
+}
+
 func sampleDossier() *domain.Dossier {
 	return &domain.Dossier{
 		Repo: domain.MustRepoRef("owner", "repo"),
@@ -45,8 +53,8 @@ func sampleDossier() *domain.Dossier {
 		Coverage: domain.Coverage{
 			AsOf: now,
 			Facets: []domain.FacetCoverage{
-				domain.MustFacetCoverage("threads", false, now.Add(-time.Hour), 0),
-				domain.MustFacetCoverage("metadata", true, now, 0),
+				mustFacetCoverage("threads", false, now.Add(-time.Hour), 0),
+				mustFacetCoverage("metadata", true, now, 0),
 			},
 		},
 		RecentMergedPullRequests: []domain.DossierThread{

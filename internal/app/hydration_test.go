@@ -12,6 +12,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
+	"github.com/morluto/gitcontribute/internal/facets"
 	"github.com/morluto/gitcontribute/internal/github"
 )
 
@@ -108,7 +109,7 @@ func (f *fakeHydrationReader) ListPullRequestComments(_ context.Context, owner, 
 	return github.ListResult[github.ReviewComment]{Items: f.prReviewCommentsPages[idx], Page: page}, nil
 }
 
-func seedRepoAndThread(t *testing.T, svc *Service, kind string, number int) (*corpus.Repository, *corpus.Thread) {
+func seedRepoAndThread(t *testing.T, svc *Service, kind domain.ThreadKind, number int) (*corpus.Repository, *corpus.Thread) {
 	t.Helper()
 	ctx := context.Background()
 	c, err := svc.openCorpus(ctx)
@@ -147,7 +148,7 @@ func TestHydrateIssueCommentsPaginatesAndRecordsCoverage(t *testing.T) {
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
 
-	repo, thread := seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	repo, thread := seedRepoAndThread(t, svc, domain.IssueKind, 1)
 	reader := &fakeHydrationReader{
 		issueCommentsPages: [][]github.IssueComment{
 			{
@@ -161,7 +162,7 @@ func TestHydrateIssueCommentsPaginatesAndRecordsCoverage(t *testing.T) {
 	}
 	svc.SetGitHubReader(reader)
 
-	result, err := svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, HydrateOptions{Facets: []string{FacetIssueComments}})
+	result, err := svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, hydrateThreadInput{Facets: []string{FacetIssueComments}})
 	if err != nil {
 		t.Fatalf("hydrate: %v", err)
 	}
@@ -224,7 +225,7 @@ func TestHydratePullRequestFacets(t *testing.T) {
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
 
-	repo, thread := seedRepoAndThread(t, svc, corpus.ThreadKindPullRequest, 2)
+	repo, thread := seedRepoAndThread(t, svc, domain.PullRequestKind, 2)
 	reader := &fakeHydrationReader{
 		issueCommentsPages: [][]github.IssueComment{
 			{{ID: 5, Body: "main conversation", UpdatedAt: time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)}},
@@ -243,11 +244,11 @@ func TestHydratePullRequestFacets(t *testing.T) {
 	}
 	svc.SetGitHubReader(reader)
 
-	result, err := svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 2, HydrateOptions{})
+	result, err := svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 2, hydrateThreadInput{})
 	if err != nil {
 		t.Fatalf("hydrate: %v", err)
 	}
-	if result.Kind != corpus.ThreadKindPullRequest {
+	if result.Kind != string(domain.PullRequestKind) {
 		t.Fatalf("kind = %q, want pull_request", result.Kind)
 	}
 	if len(result.Facets) != 4 {
@@ -271,7 +272,7 @@ func TestHydratePullRequestFacets(t *testing.T) {
 			t.Fatalf("expected complete coverage for %s", facet)
 		}
 	}
-	projected, err := c.GetThread(ctx, repo.ID, corpus.ThreadKindPullRequest, thread.Number)
+	projected, err := c.GetThread(ctx, repo.ID, domain.PullRequestKind, thread.Number)
 	if err != nil || projected == nil || !projected.Merge.Known() || projected.Merge.IsMerged() {
 		t.Fatalf("projected PR merge state = %+v, %v", projected, err)
 	}
@@ -289,7 +290,7 @@ func TestHydratePullRequestDetailsDoesNotProjectStaleSnapshot(t *testing.T) {
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
 
-	repo, thread := seedRepoAndThread(t, svc, corpus.ThreadKindPullRequest, 2)
+	repo, thread := seedRepoAndThread(t, svc, domain.PullRequestKind, 2)
 	thread.Merge = domain.MergedStatus(thread.SourceUpdatedAt)
 	stored, err := svc.corpus.UpsertThread(ctx, *thread, `{"Merged":true}`)
 	if err != nil {
@@ -308,11 +309,11 @@ func TestHydratePullRequestDetailsDoesNotProjectStaleSnapshot(t *testing.T) {
 		Number: 2, Merged: false, UpdatedAt: stored.SourceUpdatedAt.Add(time.Hour),
 	}}
 	svc.SetGitHubReader(reader)
-	if _, err := svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 2, HydrateOptions{Facets: []string{FacetPRDetails}}); err != nil {
+	if _, err := svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 2, hydrateThreadInput{Facets: []string{FacetPRDetails}}); err != nil {
 		t.Fatalf("hydrate stale details: %v", err)
 	}
 
-	projected, err := svc.corpus.GetThread(ctx, repo.ID, corpus.ThreadKindPullRequest, 2)
+	projected, err := svc.corpus.GetThread(ctx, repo.ID, domain.PullRequestKind, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +331,7 @@ func TestHydratePullRequestReviewsAtPageCapPreservesCompleteSnapshot(t *testing.
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
-	repo, thread := seedRepoAndThread(t, svc, corpus.ThreadKindPullRequest, 2)
+	repo, thread := seedRepoAndThread(t, svc, domain.PullRequestKind, 2)
 	at := thread.SourceUpdatedAt
 	oldPayload, _ := json.Marshal([]github.Review{{ID: 1, State: "APPROVED", SubmittedAt: at}})
 	if err := svc.corpus.ApplyFacetObservationSet(ctx, repo.ID, &thread.ID, FacetPRReviews, at, []corpus.FacetObservationInput{{SourceUpdatedAt: at, Payload: string(oldPayload)}}, true, 0); err != nil {
@@ -338,7 +339,7 @@ func TestHydratePullRequestReviewsAtPageCapPreservesCompleteSnapshot(t *testing.
 	}
 	reader := &fakeHydrationReader{prReviewsPages: [][]github.Review{{{ID: 2, State: "COMMENTED", SubmittedAt: at.Add(time.Minute)}}, {{ID: 3, State: "APPROVED", SubmittedAt: at.Add(2 * time.Minute)}}}}
 	svc.SetGitHubReader(reader)
-	result, err := svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 2, HydrateOptions{Facets: []string{FacetPRReviews}, MaxPages: 1})
+	result, err := svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 2, hydrateThreadInput{Facets: []string{FacetPRReviews}, MaxPages: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +362,7 @@ func TestHydrateBoundsPagination(t *testing.T) {
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
 
-	repo, thread := seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	repo, thread := seedRepoAndThread(t, svc, domain.IssueKind, 1)
 	pages := make([][]github.IssueComment, 10)
 	for i := range pages {
 		pages[i] = []github.IssueComment{{ID: int64(i + 1), UpdatedAt: time.Date(2024, 1, 1, 0, 0, i, 0, time.UTC)}}
@@ -369,7 +370,7 @@ func TestHydrateBoundsPagination(t *testing.T) {
 	reader := &fakeHydrationReader{issueCommentsPages: pages}
 	svc.SetGitHubReader(reader)
 
-	result, err := svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, HydrateOptions{Facets: []string{FacetIssueComments}, MaxPages: 3})
+	result, err := svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, hydrateThreadInput{Facets: []string{FacetIssueComments}, MaxPages: 3})
 	if err != nil {
 		t.Fatalf("hydrate: %v", err)
 	}
@@ -395,10 +396,10 @@ func TestHydrateRejectsExcessivePagination(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
-	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	seedRepoAndThread(t, svc, domain.IssueKind, 1)
 	svc.SetGitHubReader(&fakeHydrationReader{})
 
-	_, err := svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, HydrateOptions{MaxPages: maxHydrationPages + 1})
+	_, err := svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, hydrateThreadInput{MaxPages: maxHydrationPages + 1})
 	if err == nil || err.Error() != "max pages cannot exceed 100" {
 		t.Fatalf("expected maximum pagination error, got %v", err)
 	}
@@ -406,9 +407,17 @@ func TestHydrateRejectsExcessivePagination(t *testing.T) {
 
 func TestSelectFacetsDeduplicatesRequestedFacets(t *testing.T) {
 	t.Parallel()
-	got, err := selectFacets(corpus.ThreadKindPullRequest, []string{FacetPRDetails, FacetPRDetails, FacetPRReviews})
+	selection, err := facets.ParseSelection([]string{FacetPRDetails, FacetPRDetails, FacetPRReviews})
+	if err != nil {
+		t.Fatalf("parse facets: %v", err)
+	}
+	names, err := selection.For(domain.PullRequestKind)
 	if err != nil {
 		t.Fatalf("select facets: %v", err)
+	}
+	got := make([]string, len(names))
+	for index, name := range names {
+		got[index] = name.String()
 	}
 	want := []string{FacetPRDetails, FacetPRReviews}
 	if !slices.Equal(got, want) {
@@ -421,7 +430,7 @@ func TestHydrateIssueTimelinePersistsExplicitClosingCommitResolution(t *testing.
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
-	repo, thread := seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	repo, thread := seedRepoAndThread(t, svc, domain.IssueKind, 1)
 	now := thread.SourceUpdatedAt.Add(time.Hour)
 	reader := &fakeHydrationReader{issueTimelinePages: [][]github.IssueTimelineEvent{
 		{{ID: 1, Event: "cross-referenced", CreatedAt: now.Add(-time.Minute), SourceNumber: 9, SourceIsPullRequest: true}},
@@ -429,7 +438,7 @@ func TestHydrateIssueTimelinePersistsExplicitClosingCommitResolution(t *testing.
 	}}
 	svc.SetGitHubReader(reader)
 
-	result, err := svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, HydrateOptions{Facets: []string{FacetIssueTimeline}})
+	result, err := svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, hydrateThreadInput{Facets: []string{FacetIssueTimeline}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -457,7 +466,7 @@ func TestHydrateCancellation(t *testing.T) {
 	t.Parallel()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
-	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	seedRepoAndThread(t, svc, domain.IssueKind, 1)
 
 	reader := &fakeHydrationReader{}
 	svc.SetGitHubReader(reader)
@@ -465,7 +474,7 @@ func TestHydrateCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, HydrateOptions{Facets: []string{FacetIssueComments}})
+	_, err := svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, hydrateThreadInput{Facets: []string{FacetIssueComments}})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
@@ -476,7 +485,7 @@ func TestHydrateRecordsRunFailure(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
-	_, _ = seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	_, _ = seedRepoAndThread(t, svc, domain.IssueKind, 1)
 
 	reader := &fakeHydrationReader{
 		issueCommentsPages: [][]github.IssueComment{{{ID: 1}}},
@@ -484,7 +493,7 @@ func TestHydrateRecordsRunFailure(t *testing.T) {
 	}
 	svc.SetGitHubReader(reader)
 
-	_, err := svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, HydrateOptions{Facets: []string{FacetIssueComments}})
+	_, err := svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, hydrateThreadInput{Facets: []string{FacetIssueComments}})
 	if err == nil || err.Error() != "hydrate issue_comments: injected failure" {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -514,7 +523,7 @@ func TestHydrateRequiresSyncedRepositoryAndThread(t *testing.T) {
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
 
-	_, err := svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, HydrateOptions{})
+	_, err := svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, hydrateThreadInput{})
 	if err == nil || err.Error() != "repository owner/repo has not been synced" {
 		t.Fatalf("expected missing repo error, got %v", err)
 	}
@@ -525,7 +534,7 @@ func TestHydrateRequiresSyncedRepositoryAndThread(t *testing.T) {
 		t.Fatalf("seed repo: %v", err)
 	}
 
-	_, err = svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, HydrateOptions{})
+	_, err = svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, hydrateThreadInput{})
 	if err == nil || err.Error() != "thread owner/repo#1 has not been synced" {
 		t.Fatalf("expected missing thread error, got %v", err)
 	}
@@ -536,12 +545,12 @@ func TestHydrateRejectsInapplicableFacets(t *testing.T) {
 	ctx := context.Background()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
-	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	seedRepoAndThread(t, svc, domain.IssueKind, 1)
 
 	reader := &fakeHydrationReader{}
 	svc.SetGitHubReader(reader)
 
-	_, err := svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, HydrateOptions{Facets: []string{FacetPRDetails}})
+	_, err := svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, hydrateThreadInput{Facets: []string{FacetPRDetails}})
 	if err == nil || err.Error() != `facet "pr_details" is not applicable to issue threads` {
 		t.Fatalf("expected facet error, got %v", err)
 	}
@@ -553,7 +562,7 @@ func TestHydrateIssueCommentsInterruptPage2RetainsOldData(t *testing.T) {
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
 
-	repo, thread := seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	repo, thread := seedRepoAndThread(t, svc, domain.IssueKind, 1)
 
 	oldTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	oldReader := &fakeHydrationReader{
@@ -562,7 +571,7 @@ func TestHydrateIssueCommentsInterruptPage2RetainsOldData(t *testing.T) {
 		},
 	}
 	svc.SetGitHubReader(oldReader)
-	if _, err := svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, HydrateOptions{Facets: []string{FacetIssueComments}}); err != nil {
+	if _, err := svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, hydrateThreadInput{Facets: []string{FacetIssueComments}}); err != nil {
 		t.Fatalf("seed hydrate: %v", err)
 	}
 
@@ -576,7 +585,7 @@ func TestHydrateIssueCommentsInterruptPage2RetainsOldData(t *testing.T) {
 		failWith:            errors.New("page 2 failure"),
 	}
 	svc.SetGitHubReader(newReader)
-	_, err := svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, HydrateOptions{Facets: []string{FacetIssueComments}})
+	_, err := svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, hydrateThreadInput{Facets: []string{FacetIssueComments}})
 	if err == nil || err.Error() != "hydrate issue_comments: page 2 failure" {
 		t.Fatalf("expected page 2 failure, got %v", err)
 	}
@@ -623,7 +632,7 @@ func TestHydrateIssueCommentsSuccessfulReplacement(t *testing.T) {
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
 
-	repo, thread := seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	repo, thread := seedRepoAndThread(t, svc, domain.IssueKind, 1)
 
 	oldTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	oldReader := &fakeHydrationReader{
@@ -632,7 +641,7 @@ func TestHydrateIssueCommentsSuccessfulReplacement(t *testing.T) {
 		},
 	}
 	svc.SetGitHubReader(oldReader)
-	if _, err := svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, HydrateOptions{Facets: []string{FacetIssueComments}}); err != nil {
+	if _, err := svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, hydrateThreadInput{Facets: []string{FacetIssueComments}}); err != nil {
 		t.Fatalf("first hydrate: %v", err)
 	}
 
@@ -644,7 +653,7 @@ func TestHydrateIssueCommentsSuccessfulReplacement(t *testing.T) {
 		},
 	}
 	svc.SetGitHubReader(newReader)
-	result, err := svc.HydrateThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, HydrateOptions{Facets: []string{FacetIssueComments}})
+	result, err := svc.hydrateStoredThread(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, hydrateThreadInput{Facets: []string{FacetIssueComments}})
 	if err != nil {
 		t.Fatalf("second hydrate: %v", err)
 	}
@@ -685,87 +694,5 @@ func TestHydrateIssueCommentsSuccessfulReplacement(t *testing.T) {
 	wantLatest := newTime.Add(24 * time.Hour)
 	if !cov.SourceUpdatedAt.Equal(wantLatest) {
 		t.Fatalf("coverage source updated at = %v, want %v", cov.SourceUpdatedAt, wantLatest)
-	}
-}
-
-func TestHydrateRepositoryExactNumbersAreNotLimitedByList(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	svc := newTestServiceNoNetwork(t)
-	defer func() { _ = svc.Close() }()
-	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
-	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 2)
-	svc.SetGitHubReader(&fakeHydrationReader{issueCommentsPages: [][]github.IssueComment{
-		{{ID: 1, UpdatedAt: time.Now()}},
-	}})
-
-	result, err := svc.HydrateRepository(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, HydrateRepositoryOptions{Numbers: []int{2}})
-	if err != nil {
-		t.Fatalf("hydrate repository: %v", err)
-	}
-	if len(result.Facets) != 1 || result.Facets[0].Facet != FacetIssueComments {
-		t.Fatalf("expected one issue_comments facet, got %+v", result.Facets)
-	}
-}
-
-func TestHydrateRepositoryExactNumberMissingReturnsError(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	svc := newTestServiceNoNetwork(t)
-	defer func() { _ = svc.Close() }()
-	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
-	svc.SetGitHubReader(&fakeHydrationReader{})
-
-	_, err := svc.HydrateRepository(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, HydrateRepositoryOptions{Numbers: []int{99}})
-	if err == nil || !strings.Contains(err.Error(), "has not been synced") {
-		t.Fatalf("expected missing thread error, got %v", err)
-	}
-}
-
-func TestHydrateRepositoryUnknownFacetErrors(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	svc := newTestServiceNoNetwork(t)
-	defer func() { _ = svc.Close() }()
-	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
-	svc.SetGitHubReader(&fakeHydrationReader{})
-
-	_, err := svc.HydrateRepository(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, HydrateRepositoryOptions{Facets: []string{"unknown"}})
-	if err == nil || !strings.Contains(err.Error(), `unknown facet "unknown"`) {
-		t.Fatalf("expected unknown facet error, got %v", err)
-	}
-}
-
-func TestHydrateRepositorySkipsKnownInapplicableFacets(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	svc := newTestServiceNoNetwork(t)
-	defer func() { _ = svc.Close() }()
-	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
-	seedRepoAndThread(t, svc, corpus.ThreadKindPullRequest, 2)
-	svc.SetGitHubReader(&fakeHydrationReader{
-		prDetails: github.PullRequestDetails{Number: 2, Title: "Add feature", UpdatedAt: time.Now()},
-	})
-
-	result, err := svc.HydrateRepository(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, HydrateRepositoryOptions{Facets: []string{FacetPRDetails}})
-	if err != nil {
-		t.Fatalf("hydrate repository: %v", err)
-	}
-	if len(result.Facets) != 1 || result.Facets[0].Facet != FacetPRDetails {
-		t.Fatalf("expected one pr_details facet, got %+v", result.Facets)
-	}
-}
-
-func TestHydrateRepositoryRejectsInvalidExactNumber(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	svc := newTestServiceNoNetwork(t)
-	defer func() { _ = svc.Close() }()
-	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
-	svc.SetGitHubReader(&fakeHydrationReader{})
-
-	_, err := svc.HydrateRepository(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, HydrateRepositoryOptions{Numbers: []int{0}})
-	if err == nil || !strings.Contains(err.Error(), "must be positive") {
-		t.Fatalf("expected invalid thread number error, got %v", err)
 	}
 }

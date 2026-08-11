@@ -17,22 +17,20 @@ import (
 
 // SearchFilter scopes a thread keyword search.
 type SearchFilter struct {
-	RepoID        int64
-	Repo          string
-	Kind          string
-	State         string
-	StateReason   string
-	Merged        *bool
+	Repository    ThreadRepositoryScope
+	Kind          ThreadKindFilter
+	State         ThreadStateFilter
+	StateReason   ThreadStateReason
+	Merge         MergeFilter
 	Author        string
 	Association   string
 	Assignee      string
 	Labels        []string
 	UpdatedAfter  time.Time
 	UpdatedBefore time.Time
-	Limit         int
-	Cursor        string
-	Sort          string
-	MatchMode     string
+	Page          SearchPage
+	Order         SearchOrder
+	TermMatch     TermMatch
 }
 
 // ThreadSearchPage is a paginated result of a thread keyword search.
@@ -91,17 +89,11 @@ func threadSearchArguments(ftsQuery string) []any {
 // It returns matching threads ordered by FTS5 rank and limited to at most limit
 // results. No network access occurs.
 func (c *Corpus) SearchThreads(ctx context.Context, query string, limit int) ([]Thread, error) {
-	page, err := c.SearchThreadsPage(ctx, query, SearchFilter{Limit: limit})
+	request, err := ParseSearchPage(limit, "")
 	if err != nil {
 		return nil, err
 	}
-	return page.Threads, nil
-}
-
-// SearchThreadsWithFilter performs the same search as SearchThreads but
-// supports filtering to a repository and thread kind.
-func (c *Corpus) SearchThreadsWithFilter(ctx context.Context, query string, filter SearchFilter) ([]Thread, error) {
-	page, err := c.SearchThreadsPage(ctx, query, filter)
+	page, err := c.SearchThreadsPage(ctx, query, SearchFilter{Page: request})
 	if err != nil {
 		return nil, err
 	}
@@ -113,26 +105,8 @@ func (c *Corpus) SearchThreadsWithFilter(ctx context.Context, query string, filt
 // ascending, so the same cursor always returns the same next page on an
 // unchanged corpus. No network access occurs.
 func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter SearchFilter) (ThreadSearchPage, error) {
-	if filter.Limit <= 0 {
-		filter.Limit = 20
-	}
-	if filter.Limit > 100 {
-		return ThreadSearchPage{}, errors.New("search limit cannot exceed 100")
-	}
-	if filter.Sort == "" {
-		filter.Sort = "relevance"
-	}
-	if filter.Sort != "relevance" && filter.Sort != "updated" {
-		return ThreadSearchPage{}, errors.New("search sort must be relevance or updated")
-	}
-	if filter.MatchMode == "" {
-		filter.MatchMode = "all"
-	}
-	if filter.MatchMode != "all" && filter.MatchMode != "any" {
-		return ThreadSearchPage{}, errors.New("search match mode must be all or any")
-	}
-
-	ftsQuery := literalFTSQueryMode(query, filter.MatchMode)
+	limit := filter.Page.Limit()
+	ftsQuery := literalFTSQueryMode(query, filter.TermMatch)
 	if ftsQuery == "" {
 		return ThreadSearchPage{}, nil
 	}
@@ -144,7 +118,7 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 	}
 
 	filterKey := threadFilterKey(filter)
-	cursor, err := c.decodeThreadCursor(filter.Cursor, query, filter.Repo, filter.Kind, filterKey)
+	cursor, err := c.decodeThreadCursor(filter.Page.Cursor(), query, filter.Repository.String(), filter.Kind.String(), filterKey)
 	if err != nil {
 		return ThreadSearchPage{}, err
 	}
@@ -157,17 +131,17 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 		JOIN threads t ON t.id = m.thread_id
 		WHERE 1 = 1`
 	args := threadSearchArguments(ftsQuery)
-	if filter.RepoID != 0 {
+	if filter.Repository.IsScoped() {
 		statement += ` AND t.repository_id = ?`
-		args = append(args, filter.RepoID)
+		args = append(args, filter.Repository.ID())
 	}
-	if filter.Kind != "" {
+	if !filter.Kind.IsAny() {
 		statement += ` AND t.kind = ?`
-		args = append(args, filter.Kind)
+		args = append(args, filter.Kind.String())
 	}
 	statement, args = appendThreadMetadataFilters(statement, args, filter)
 	if cursor != nil {
-		if filter.Sort == "updated" {
+		if filter.Order.IsUpdated() {
 			statement += ` AND (t.source_updated_at < ? OR (t.source_updated_at = ? AND t.id < ?))`
 			args = append(args, cursor.UpdatedAt, cursor.UpdatedAt, cursor.ID)
 		} else {
@@ -175,12 +149,12 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 			args = append(args, cursor.Rank, cursor.Rank, cursor.UpdatedAt, cursor.UpdatedAt, cursor.ID)
 		}
 	}
-	if filter.Sort == "updated" {
+	if filter.Order.IsUpdated() {
 		statement += ` ORDER BY t.source_updated_at DESC, t.id DESC LIMIT ?`
 	} else {
 		statement += ` ORDER BY m.rank, t.source_updated_at DESC, t.id LIMIT ?`
 	}
-	args = append(args, filter.Limit+1)
+	args = append(args, limit+1)
 
 	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -204,21 +178,21 @@ func (c *Corpus) SearchThreadsPage(ctx context.Context, query string, filter Sea
 	}
 
 	page := ThreadSearchPage{Threads: threads}
-	if len(threads) > filter.Limit {
-		page.Threads = threads[:filter.Limit]
+	if len(threads) > limit {
+		page.Threads = threads[:limit]
 		last := page.Threads[len(page.Threads)-1]
 		page.NextCursor = encodeCursor(searchCursor{
 			Scope:     "threads",
 			Query:     query,
-			Repo:      filter.Repo,
-			Kind:      filter.Kind,
+			Repo:      filter.Repository.String(),
+			Kind:      filter.Kind.String(),
 			Filter:    filterKey,
 			Rank:      last.Rank,
 			UpdatedAt: encodeTime(last.SourceUpdatedAt),
 			ID:        last.ID,
 		})
 	}
-	if filter.Merged == nil && len(threads) <= filter.Limit && cursor == nil {
+	if filter.Merge.IsAny() && len(threads) <= limit && cursor == nil {
 		page.Total = len(threads)
 	} else {
 		page.Total, page.UnknownMergeCount, err = countThreadMatchSummary(ctx, tx, ftsQuery, filter)
@@ -243,14 +217,14 @@ func countThreadMatchSummary(ctx context.Context, tx *sql.Tx, ftsQuery string, f
 		)
 		SELECT `
 	args := []any{ftsQuery}
-	if filter.Merged == nil {
+	if filter.Merge.IsAny() {
 		statement += `COUNT(*)`
 	} else {
 		statement += `COALESCE(SUM(CASE
 			WHEN t.kind = 'pull_request' AND t.merged_known = 1 AND t.merged = ? THEN 1
 			ELSE 0
 		END), 0)`
-		if *filter.Merged {
+		if filter.Merge.IsMerged() {
 			args = append(args, 1)
 		} else {
 			args = append(args, 0)
@@ -264,21 +238,21 @@ func countThreadMatchSummary(ctx context.Context, tx *sql.Tx, ftsQuery string, f
 		FROM matching_threads m
 		JOIN threads t ON t.id = m.thread_id
 		WHERE 1 = 1`
-	if filter.Merged == nil {
+	if filter.Merge.IsAny() {
 		args = append(args, 0)
 	} else {
 		args = append(args, 1)
 	}
-	if filter.RepoID != 0 {
+	if filter.Repository.IsScoped() {
 		statement += ` AND t.repository_id = ?`
-		args = append(args, filter.RepoID)
+		args = append(args, filter.Repository.ID())
 	}
-	if filter.Kind != "" {
+	if !filter.Kind.IsAny() {
 		statement += ` AND t.kind = ?`
-		args = append(args, filter.Kind)
+		args = append(args, filter.Kind.String())
 	}
 	summaryFilter := filter
-	summaryFilter.Merged = nil
+	summaryFilter.Merge = AnyMergeState()
 	statement, args = appendThreadMetadataFilters(statement, args, summaryFilter)
 	var total, unknownMerge int
 	if err := tx.QueryRowContext(ctx, statement, args...).Scan(&total, &unknownMerge); err != nil {
@@ -331,17 +305,17 @@ func (c *Corpus) decodeThreadCursor(cursor, query, repo, kind, filter string) (*
 }
 
 func appendThreadMetadataFilters(query string, args []any, filter SearchFilter) (string, []any) {
-	if filter.State != "" && filter.State != "all" {
+	if !filter.State.IsAny() {
 		query += ` AND t.state = ?`
-		args = append(args, filter.State)
+		args = append(args, filter.State.String())
 	}
-	if filter.StateReason != "" {
+	if !filter.StateReason.IsAny() {
 		query += ` AND t.state_reason = ?`
-		args = append(args, filter.StateReason)
+		args = append(args, filter.StateReason.String())
 	}
-	if filter.Merged != nil {
+	if !filter.Merge.IsAny() {
 		merged := 0
-		if *filter.Merged {
+		if filter.Merge.IsMerged() {
 			merged = 1
 		}
 		query += ` AND t.merged = ? AND t.merged_known = 1`
@@ -383,8 +357,8 @@ func threadFilterKey(filter SearchFilter) string {
 	}
 	slices.Sort(labels)
 	return strings.Join([]string{
-		strings.ToLower(filter.State), strings.ToLower(filter.StateReason), fmt.Sprint(filter.Merged), strings.ToLower(filter.Author), strings.ToLower(filter.Association), strings.ToLower(filter.Assignee), strings.Join(labels, ","),
-		strconv.FormatInt(encodeTime(filter.UpdatedAfter), 10), strconv.FormatInt(encodeTime(filter.UpdatedBefore), 10), filter.Sort, filter.MatchMode,
+		filter.State.String(), filter.StateReason.String(), filter.Merge.String(), strings.ToLower(filter.Author), strings.ToLower(filter.Association), strings.ToLower(filter.Assignee), strings.Join(labels, ","),
+		strconv.FormatInt(encodeTime(filter.UpdatedAfter), 10), strconv.FormatInt(encodeTime(filter.UpdatedBefore), 10), filter.Order.String(), filter.TermMatch.String(),
 	}, "|")
 }
 
@@ -438,15 +412,15 @@ func scanThreadsWithRank(rows *sql.Rows) ([]Thread, error) {
 // literalFTSQuery treats user input as terms rather than exposing FTS5 query
 // operators. This keeps ordinary punctuation and unmatched quotes searchable.
 func literalFTSQuery(query string) string {
-	return literalFTSQueryMode(query, "all")
+	return literalFTSQueryMode(query, MatchAllTerms())
 }
 
-func literalFTSQueryMode(query, mode string) string {
+func literalFTSQueryMode(query string, mode TermMatch) string {
 	terms := strings.Fields(query)
 	for i, term := range terms {
 		terms[i] = quoteFTSTerm(term)
 	}
-	if mode == "any" {
+	if mode.IsAny() {
 		return strings.Join(terms, " OR ")
 	}
 	return strings.Join(terms, " ")

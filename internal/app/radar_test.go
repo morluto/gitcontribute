@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -79,7 +78,7 @@ func newRadarTestFixture(t *testing.T) radarTestFixture {
 		t.Fatal(err)
 	}
 	issue1, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open",
+		RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1, State: "open",
 		Title: "Focused starter bug", Body: strings.Repeat("Steps to reproduce and expected behavior. ", 8) + "\n- [ ] add a regression test",
 		Labels: []string{"good first issue", "help wanted"}, SourceUpdatedAt: now.Add(-24 * time.Hour),
 	}, `{}`)
@@ -87,14 +86,14 @@ func newRadarTestFixture(t *testing.T) radarTestFixture {
 		t.Fatal(err)
 	}
 	issue2, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 2, State: "open",
+		RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 2, State: "open",
 		Title: "Assigned refactor", Body: "Refactor this package.", Assignees: []string{"alice"}, SourceUpdatedAt: now.Add(-48 * time.Hour),
 	}, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 9, State: "open",
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 9, State: "open",
 		Title: "Implement starter bug", Body: "Fixes #1", SourceUpdatedAt: now.Add(-30 * time.Minute),
 	}, `{}`); err != nil {
 		t.Fatal(err)
@@ -221,7 +220,7 @@ func TestContributionRadarReadsStoredDuplicateCluster(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := fixture.svc.corpus.UpsertThread(fixture.ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 2, State: "open",
+		RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 2, State: "open",
 		Title: "same starter bug", Body: "duplicate of #1", Assignees: []string{"alice"}, SourceUpdatedAt: fixture.now,
 	}, `{}`); err != nil {
 		t.Fatal(err)
@@ -258,14 +257,14 @@ func TestRadarPullRequestClosingReferenceIsPrecise(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issues, err := fixture.svc.corpus.ListThreadsFiltered(fixture.ctx, stored.ID, corpus.ThreadKindIssue, "open", 500)
+	issues, err := fixture.svc.corpus.ListThreadsFiltered(fixture.ctx, stored.ID, corpus.IssueThreadKind(), corpus.OpenThreadState(), 500)
 	if err != nil {
 		t.Fatal(err)
 	}
 	links, _, err := radarPullRequestRelatedWork(fixture.ctx, fixture.svc.corpus, stored, ref, issues, []corpus.Thread{{
-		Kind: corpus.ThreadKindPullRequest, Number: 8, Title: "Handle both reports",
+		Kind: domain.PullRequestKind, Number: 8, Title: "Handle both reports",
 		Body: "Fixes #1 and also discusses #2. Fixes other/project#3.",
-	}}, "open")
+	}}, corpus.OpenThreadState())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +282,7 @@ func TestRadarPullRequestClosingReferenceIsPrecise(t *testing.T) {
 func TestContributionRadarUsesAuthoritativeClosingIssueProjection(t *testing.T) {
 	t.Parallel()
 	fixture := newRadarTestFixture(t)
-	pr, err := fixture.svc.corpus.GetThread(fixture.ctx, fixture.repoID, corpus.ThreadKindPullRequest, 9)
+	pr, err := fixture.svc.corpus.GetThread(fixture.ctx, fixture.repoID, domain.PullRequestKind, 9)
 	if err != nil || pr == nil {
 		t.Fatalf("get PR: %+v, %v", pr, err)
 	}
@@ -297,10 +296,22 @@ func TestContributionRadarUsesAuthoritativeClosingIssueProjection(t *testing.T) 
 	if err != nil || observation == nil {
 		t.Fatalf("latest PR observation: %+v, %v", observation, err)
 	}
+	subject, err := corpus.NewPullRequestPortfolioSubject(pr.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkedIssue, err := corpus.NewPortfolioLinkedIssueSignal("owner/repo#1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceRef, err := corpus.NewThreadObservationRef(observation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := fixture.svc.corpus.ReplacePortfolioSignals(fixture.ctx, corpus.PortfolioSignalSnapshot{
-		Subject: corpus.PortfolioSubject{Kind: corpus.PortfolioSubjectPullRequest, Ref: strconv.FormatInt(pr.ID, 10)},
-		Facet:   corpus.PortfolioFacetLinkedIssues, Signals: []corpus.PortfolioSignal{{Kind: corpus.PortfolioSignalLinkedIssue, Value: "owner/repo#1"}},
-		SourceUpdatedAt: pr.SourceUpdatedAt, SourceObservationRefs: []corpus.ObservationRef{{Kind: "thread", ID: observation.ID}},
+		Subject: subject,
+		Facet:   corpus.PortfolioFacetLinkedIssues, Signals: []corpus.PortfolioSignal{linkedIssue},
+		SourceUpdatedAt: pr.SourceUpdatedAt, SourceObservationRefs: []corpus.ObservationRef{sourceRef},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +332,7 @@ func TestContributionRadarUnifiesCommentDependenciesAndTimelineCrossReferences(t
 	fixture := newRadarTestFixture(t)
 	for _, number := range []int{10, 11} {
 		if _, err := fixture.svc.corpus.UpsertThread(fixture.ctx, corpus.Thread{
-			RepositoryID: fixture.repoID, Kind: corpus.ThreadKindPullRequest, Number: number, State: "open",
+			RepositoryID: fixture.repoID, Kind: domain.PullRequestKind, Number: number, State: "open",
 			Title: fmt.Sprintf("Related PR %d", number), Body: "No issue link in PR text.", SourceUpdatedAt: fixture.now.Add(time.Duration(number) * time.Minute),
 		}, `{}`); err != nil {
 			t.Fatal(err)
@@ -376,7 +387,7 @@ func TestContributionRadarPreservesRepeatedReferenceEvidence(t *testing.T) {
 	t.Parallel()
 	fixture := newRadarTestFixture(t)
 	if _, err := fixture.svc.corpus.UpsertThread(fixture.ctx, corpus.Thread{
-		RepositoryID: fixture.repoID, Kind: corpus.ThreadKindPullRequest, Number: 10, State: "open",
+		RepositoryID: fixture.repoID, Kind: domain.PullRequestKind, Number: 10, State: "open",
 		Title: "Related PR", SourceUpdatedAt: fixture.now.Add(-10 * time.Minute),
 	}, `{}`); err != nil {
 		t.Fatal(err)

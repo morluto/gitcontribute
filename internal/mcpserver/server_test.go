@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 
@@ -17,6 +16,162 @@ type fakeReader struct {
 	validationInput mcpcontract.RunValidationInput
 	radarScore      int
 	calls           map[string]int
+}
+
+type canonicalIDReader struct {
+	*fakeReader
+	validation    mcpcontract.DefineValidationInput
+	workspace     mcpcontract.CreateWorkspaceInput
+	verification  mcpcontract.VerifyPublishedDraftInput
+	hypothesis    mcpcontract.RecordHypothesisInput
+	relatedWork   mcpcontract.CheckDuplicatesInput
+	promotion     mcpcontract.PromoteOpportunityInput
+	contribution  mcpcontract.PrepareContributionInput
+	manifest      mcpcontract.ExportManifestInput
+	junit         mcpcontract.AttachJUnitReportInput
+	explanation   mcpcontract.ExplainMatchInput
+	dossier       mcpcontract.BuildRepositoryDossierInput
+	investigation mcpcontract.StartInvestigationInput
+	concern       mcpcontract.CreateConcernInput
+	commitInspect mcpcontract.InspectCommitChangesInput
+	commitPlan    mcpcontract.PlanSemanticCommitsInput
+}
+
+func (r *canonicalIDReader) DefineValidation(_ context.Context, in mcpcontract.DefineValidationInput) (mcpcontract.ValidationOutput, error) {
+	r.validation = in
+	return mcpcontract.ValidationOutput{ID: "val-1", InvestigationID: in.InvestigationID}, nil
+}
+
+func (r *canonicalIDReader) CreateWorkspace(_ context.Context, in mcpcontract.CreateWorkspaceInput) (mcpcontract.JobReference, error) {
+	r.workspace = in
+	return mcpcontract.JobReference{ID: "job-workspace", Status: "queued"}, nil
+}
+
+func (r *canonicalIDReader) VerifyPublishedDraft(_ context.Context, in mcpcontract.VerifyPublishedDraftInput) (mcpcontract.PublishedDraftVerificationOutput, error) {
+	r.verification = in
+	return mcpcontract.PublishedDraftVerificationOutput{Status: "exact_match", DraftID: in.DraftID, Revision: in.Revision}, nil
+}
+
+func (r *canonicalIDReader) RecordHypothesis(_ context.Context, in mcpcontract.RecordHypothesisInput) (mcpcontract.HypothesisOutput, error) {
+	r.hypothesis = in
+	return mcpcontract.HypothesisOutput{ID: "hyp-1", InvestigationID: in.InvestigationID}, nil
+}
+
+func (r *canonicalIDReader) CheckDuplicates(_ context.Context, in mcpcontract.CheckDuplicatesInput) (mcpcontract.CheckOutput, error) {
+	r.relatedWork = in
+	return mcpcontract.CheckOutput{Target: in.Target, ID: in.ID}, nil
+}
+
+func (r *canonicalIDReader) PromoteOpportunity(_ context.Context, in mcpcontract.PromoteOpportunityInput) (mcpcontract.OpportunityOutput, error) {
+	r.promotion = in
+	return mcpcontract.OpportunityOutput{ID: "opp-1", HypothesisID: in.HypothesisID}, nil
+}
+
+func (r *canonicalIDReader) PrepareContribution(_ context.Context, in mcpcontract.PrepareContributionInput) (mcpcontract.DraftOutput, error) {
+	r.contribution = in
+	return mcpcontract.DraftOutput{ID: "draft-1", Revision: 1, OpportunityID: in.OpportunityID}, nil
+}
+
+func (r *canonicalIDReader) ExportManifest(_ context.Context, in mcpcontract.ExportManifestInput) (mcpcontract.ManifestOutput, error) {
+	r.manifest = in
+	return mcpcontract.ManifestOutput{ManifestID: "sha256:test"}, nil
+}
+
+func (r *canonicalIDReader) AttachJUnitReport(_ context.Context, in mcpcontract.AttachJUnitReportInput) (mcpcontract.AttachJUnitReportOutput, error) {
+	r.junit = in
+	return mcpcontract.AttachJUnitReportOutput{RunID: in.RunID}, nil
+}
+
+func (r *canonicalIDReader) ExplainMatch(_ context.Context, in mcpcontract.ExplainMatchInput) (mcpcontract.ExplainMatchOutput, error) {
+	r.explanation = in
+	return mcpcontract.ExplainMatchOutput{Owner: in.Owner, Repo: in.Repo, Kind: in.Kind}, nil
+}
+
+func (r *canonicalIDReader) BuildRepositoryDossier(_ context.Context, in mcpcontract.BuildRepositoryDossierInput) (mcpcontract.JobReference, error) {
+	r.dossier = in
+	return mcpcontract.JobReference{ID: "job-dossier", Status: "queued"}, nil
+}
+
+func (r *canonicalIDReader) StartInvestigation(_ context.Context, in mcpcontract.StartInvestigationInput) (mcpcontract.InvestigationOutput, error) {
+	r.investigation = in
+	return mcpcontract.InvestigationOutput{ID: "inv-1", Owner: in.Owner, Repo: in.Repo}, nil
+}
+
+func (r *canonicalIDReader) CreateConcern(_ context.Context, in mcpcontract.CreateConcernInput) (mcpcontract.ConcernOutput, error) {
+	r.concern = in
+	return mcpcontract.ConcernOutput{ID: "concern-1", Owner: in.Owner, Repo: in.Repo}, nil
+}
+
+func (r *canonicalIDReader) InspectCommitChanges(_ context.Context, in mcpcontract.InspectCommitChangesInput) (mcpcontract.CommitInventoryOutput, error) {
+	r.commitInspect = in
+	return mcpcontract.CommitInventoryOutput{}, nil
+}
+
+func (r *canonicalIDReader) PlanSemanticCommits(_ context.Context, in mcpcontract.PlanSemanticCommitsInput) (mcpcontract.SemanticCommitPlanOutput, error) {
+	r.commitPlan = in
+	return mcpcontract.SemanticCommitPlanOutput{}, nil
+}
+
+type canonicalRepositoryReader struct {
+	*fakeReader
+	threadSearch   mcpcontract.SearchGitHubThreadsInput
+	sourceFiles    mcpcontract.ReadSourceFilesInput
+	portfolio      mcpcontract.SyncPortfolioInput
+	overlaps       mcpcontract.FindPortfolioOverlapsInput
+	checkWait      mcpcontract.WaitPullRequestChecksInput
+	feedbackIndex  mcpcontract.IndexPullRequestFeedbackInput
+	feedbackSearch mcpcontract.SearchPullRequestFeedbackInput
+}
+
+func (r *canonicalRepositoryReader) SearchGitHubThreads(_ context.Context, in mcpcontract.SearchGitHubThreadsInput) (mcpcontract.SearchGitHubThreadsOutput, error) {
+	r.threadSearch = in
+	return mcpcontract.SearchGitHubThreadsOutput{}, nil
+}
+
+func (r *canonicalRepositoryReader) ReadSourceFiles(_ context.Context, in mcpcontract.ReadSourceFilesInput) (mcpcontract.ReadSourceFilesOutput, error) {
+	r.sourceFiles = in
+	return mcpcontract.ReadSourceFilesOutput{}, nil
+}
+
+func (*canonicalRepositoryReader) SyncRepositoryContext(context.Context, mcpcontract.SyncRepositoryContextInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-context", Status: "queued"}, nil
+}
+
+func (*canonicalRepositoryReader) SyncThreads(context.Context, mcpcontract.SyncThreadsInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-threads", Status: "queued"}, nil
+}
+
+func (*canonicalRepositoryReader) HydrateThreads(context.Context, mcpcontract.HydrateThreadsInput) (mcpcontract.JobReference, error) {
+	return mcpcontract.JobReference{ID: "job-hydrate", Status: "queued"}, nil
+}
+
+func (r *canonicalRepositoryReader) SyncPortfolio(_ context.Context, in mcpcontract.SyncPortfolioInput) (mcpcontract.JobReference, error) {
+	r.portfolio = in
+	return mcpcontract.JobReference{ID: "job-portfolio", Status: "queued"}, nil
+}
+
+func (r *canonicalRepositoryReader) FindPortfolioOverlaps(_ context.Context, in mcpcontract.FindPortfolioOverlapsInput) (mcpcontract.FindPortfolioOverlapsOutput, error) {
+	r.overlaps = in
+	return mcpcontract.FindPortfolioOverlapsOutput{}, nil
+}
+
+func (*canonicalRepositoryReader) ListPullRequestPortfolio(context.Context, mcpcontract.ListPullRequestPortfolioInput) (mcpcontract.ListPullRequestPortfolioOutput, error) {
+	return mcpcontract.ListPullRequestPortfolioOutput{}, nil
+}
+
+func (r *canonicalRepositoryReader) WaitPullRequestChecks(_ context.Context, in mcpcontract.WaitPullRequestChecksInput) (mcpcontract.JobReference, error) {
+	r.checkWait = in
+	return mcpcontract.JobReference{ID: "job-checks", Status: "queued"}, nil
+}
+
+func (r *canonicalRepositoryReader) IndexPullRequestFeedback(_ context.Context, in mcpcontract.IndexPullRequestFeedbackInput) (mcpcontract.JobReference, error) {
+	r.feedbackIndex = in
+	return mcpcontract.JobReference{ID: "job-feedback", Status: "queued"}, nil
+}
+
+func (r *canonicalRepositoryReader) SearchPullRequestFeedback(_ context.Context, in mcpcontract.SearchPullRequestFeedbackInput) (mcpcontract.SearchPullRequestFeedbackOutput, error) {
+	r.feedbackSearch = in
+	return mcpcontract.SearchPullRequestFeedbackOutput{}, nil
 }
 
 var _ PublishedDraftVerifier = (*fakeReader)(nil)
@@ -41,20 +196,20 @@ func (f *fakeReader) recordCall(name string) {
 var _ WorkspaceCreator = (*fakeReader)(nil)
 var _ WorkspaceAdopter = (*fakeReader)(nil)
 
-func (*fakeReader) PullRequestFeedbackResource(context.Context, string, string, int) (map[string]any, error) {
-	return map[string]any{"schema_version": "gitcontribute.pull-request-feedback.v1"}, nil
+func (*fakeReader) PullRequestFeedbackResource(context.Context, string, string, int) (mcpcontract.PullRequestFeedbackResource, error) {
+	return mcpcontract.PullRequestFeedbackResource{SchemaVersion: "gitcontribute.pull-request-feedback.v1"}, nil
 }
 
-func (*fakeReader) PullRequestFeedbackItemResource(context.Context, string, string, int, string, string) (map[string]any, error) {
-	return map[string]any{"schema_version": "gitcontribute.pull-request-feedback-item.v1"}, nil
+func (*fakeReader) PullRequestFeedbackItemResource(context.Context, string, string, int, string, string) (mcpcontract.PullRequestFeedbackItemResource, error) {
+	return mcpcontract.PullRequestFeedbackItemResource{SchemaVersion: "gitcontribute.pull-request-feedback-item.v1"}, nil
 }
 
-func (*fakeReader) CIFailureResource(context.Context, string, string, int) (map[string]any, error) {
-	return map[string]any{"schema_version": "gitcontribute.ci-failure-report.v1"}, nil
+func (*fakeReader) CIFailureResource(context.Context, string, string, int) (mcpcontract.CIFailureResource, error) {
+	return mcpcontract.NewCIFailureResource(json.RawMessage(`{}`), "acme", "project", 7, nil)
 }
 
-func (*fakeReader) CIJobLogResource(context.Context, string, string, int, int64) (map[string]any, error) {
-	return map[string]any{"schema_version": "gitcontribute.ci-job-log.v1", "body": "failure"}, nil
+func (*fakeReader) CIJobLogResource(context.Context, string, string, int, int64) (mcpcontract.CIJobLogResource, error) {
+	return mcpcontract.NewCIJobLogResource(31, "failure", false)
 }
 
 func (*fakeReader) IndexPullRequestFeedback(context.Context, mcpcontract.IndexPullRequestFeedbackInput) (mcpcontract.JobReference, error) {
@@ -69,8 +224,8 @@ func (*fakeReader) GetThreadFacets(_ context.Context, _ mcpcontract.GetThreadFac
 	return mcpcontract.GetThreadFacetsOutput{Status: "complete"}, nil
 }
 
-func (*fakeReader) ThreadFacetResource(context.Context, string, string, string, int, string) (map[string]any, error) {
-	return map[string]any{"schema_version": "gitcontribute.thread-facet.v1"}, nil
+func (*fakeReader) ThreadFacetResource(context.Context, string, string, string, int, string) (mcpcontract.ThreadFacetResource, error) {
+	return mcpcontract.ThreadFacetResource{SchemaVersion: "gitcontribute.thread-facet.v1"}, nil
 }
 
 func TestPullRequestWorkflowResourcesAreReadable(t *testing.T) {
@@ -93,8 +248,18 @@ func TestPullRequestWorkflowResourcesAreReadable(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", test.uri, err)
 		}
-		if got := value.(map[string]any)["schema_version"]; got != test.version {
-			t.Fatalf("%s schema_version=%v", test.uri, got)
+		payload, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var document struct {
+			SchemaVersion string `json:"schema_version"`
+		}
+		if err := json.Unmarshal(payload, &document); err != nil {
+			t.Fatal(err)
+		}
+		if document.SchemaVersion != test.version {
+			t.Fatalf("%s schema_version=%v", test.uri, document.SchemaVersion)
 		}
 	}
 }
@@ -570,213 +735,5 @@ func TestFixPatternResourceTemplateTracksReaderCapability(t *testing.T) {
 				t.Fatalf("fix-pattern resource template advertised = %t, want %t", found, test.want)
 			}
 		})
-	}
-}
-
-func TestContributionWorkflowPrompts(t *testing.T) {
-	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
-	defer closeSessions()
-
-	prompts, err := client.ListPrompts(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("list prompts: %v", err)
-	}
-	names := map[string]bool{}
-	for _, prompt := range prompts.Prompts {
-		names[prompt.Name] = true
-	}
-	for _, name := range []string{
-		"investigate_contribution_candidate",
-		"review_contribution_readiness",
-		"prepare_local_contribution_draft",
-	} {
-		if !names[name] {
-			t.Fatalf("missing prompt %q in %+v", name, prompts.Prompts)
-		}
-	}
-
-	got, err := client.GetPrompt(context.Background(), &mcp.GetPromptParams{
-		Name:      "review_contribution_readiness",
-		Arguments: map[string]string{"opportunity_id": "opp-1"},
-	})
-	if err != nil {
-		t.Fatalf("get prompt: %v", err)
-	}
-	text, ok := got.Messages[0].Content.(*mcp.TextContent)
-	if !ok {
-		t.Fatalf("prompt content = %#v", got.Messages[0].Content)
-	}
-	if !strings.Contains(text.Text, "gitcontribute://readiness/opp-1") ||
-		!strings.Contains(text.Text, "untrusted data") ||
-		!strings.Contains(text.Text, "Do not refresh GitHub") {
-		t.Fatalf("prompt text missing safety/resource guidance:\n%s", text.Text)
-	}
-
-	investigate, err := client.GetPrompt(context.Background(), &mcp.GetPromptParams{
-		Name:      "investigate_contribution_candidate",
-		Arguments: map[string]string{"owner": "acme", "repo": "rocket", "number": "17"},
-	})
-	if err != nil {
-		t.Fatalf("get investigate prompt: %v", err)
-	}
-	investigateText, ok := investigate.Messages[0].Content.(*mcp.TextContent)
-	if !ok {
-		t.Fatalf("investigate prompt content = %#v", investigate.Messages[0].Content)
-	}
-	if strings.Contains(investigateText.Text, "/issue/17") ||
-		!strings.Contains(investigateText.Text, "corpus.get_threads") ||
-		!strings.Contains(investigateText.Text, "acme/rocket#17") {
-		t.Fatalf("investigate prompt hardcodes or fails to resolve thread kind:\n%s", investigateText.Text)
-	}
-
-	_, err = client.GetPrompt(context.Background(), &mcp.GetPromptParams{Name: "review_contribution_readiness"})
-	if err == nil {
-		t.Fatal("expected missing argument error")
-	}
-}
-
-func TestLensResource(t *testing.T) {
-	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
-	defer closeSessions()
-
-	result, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{
-		URI: "gitcontribute://lens/active-go",
-	})
-	if err != nil {
-		t.Fatalf("read lens: %v", err)
-	}
-	if len(result.Contents) != 1 || result.Contents[0].Text == "" {
-		t.Fatalf("resource result = %+v", result)
-	}
-
-	_, err = client.ReadResource(context.Background(), &mcp.ReadResourceParams{
-		URI: "gitcontribute://lens/missing",
-	})
-	if err == nil {
-		t.Fatal("expected resource-not-found error")
-	}
-}
-
-func TestToolCancellationReachesReader(t *testing.T) {
-	fake := &fakeReader{searchStarted: make(chan struct{})}
-	client, closeSessions := connect(t, fake)
-	defer closeSessions()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		_, err := client.CallTool(ctx, &mcp.CallToolParams{
-			Name: mcpcontract.ToolSearchThreads, Arguments: map[string]any{"query": "block"},
-		})
-		done <- err
-	}()
-	<-fake.searchStarted
-	cancel()
-	if err := <-done; !errors.Is(err, context.Canceled) {
-		t.Fatalf("call error = %v, want context canceled", err)
-	}
-}
-
-func TestV1ParityToolsAndResources(t *testing.T) {
-	client, closeSessions := connect(t, &fakeReader{searchStarted: make(chan struct{})})
-	defer closeSessions()
-
-	tools := map[string]*mcp.Tool{}
-	for tool, err := range client.Tools(context.Background(), nil) {
-		if err != nil {
-			t.Fatalf("list tools: %v", err)
-		}
-		tools[tool.Name] = tool
-	}
-
-	for _, name := range []string{
-		mcpcontract.ToolSearchRepositories, mcpcontract.ToolSearchThreads, mcpcontract.ToolExplainMatch, mcpcontract.ToolGetJob,
-		mcpcontract.ToolCreateWorkspace, mcpcontract.ToolAdoptWorkspace, mcpcontract.ToolRunValidation,
-		mcpcontract.ToolStartInvestigation, mcpcontract.ToolRecordHypothesis,
-		mcpcontract.ToolPromoteOpportunity, mcpcontract.ToolDefineValidation,
-		mcpcontract.ToolPrepareContribution, mcpcontract.ToolCancelJob,
-	} {
-		if tools[name] == nil {
-			t.Fatalf("missing v1 tool %q", name)
-		}
-	}
-
-	readTests := []struct {
-		name string
-		args map[string]any
-	}{
-		{mcpcontract.ToolSearchRepositories, map[string]any{"query": "rocket"}},
-		{mcpcontract.ToolSearchThreads, map[string]any{"query": "stall"}},
-		{mcpcontract.ToolExplainMatch, map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 7}},
-		{mcpcontract.ToolGetJob, map[string]any{"ids": []string{"job-1"}}},
-	}
-	for _, tt := range readTests {
-		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})
-		if err != nil || result.IsError {
-			t.Fatalf("call %s: err=%v result=%+v", tt.name, err, result)
-		}
-		if result.StructuredContent == nil {
-			t.Fatalf("%s returned nil structured content", tt.name)
-		}
-	}
-
-	writeTests := []struct {
-		name string
-		args map[string]any
-	}{
-		{mcpcontract.ToolCreateWorkspace, map[string]any{"investigation_id": "inv-1"}},
-		{mcpcontract.ToolAdoptWorkspace, map[string]any{"investigation_id": "inv-1", "path": "/tmp/worktree", "base_ref": "main", "name": "external"}},
-		{mcpcontract.ToolRunValidation, map[string]any{"id": "val-1", "target": "both", "run_count": 3, "execute": true}},
-		{mcpcontract.ToolStartInvestigation, map[string]any{"owner": "acme", "repo": "rocket", "commit_sha": "abc123"}},
-		{mcpcontract.ToolRecordHypothesis, map[string]any{"investigation_id": "inv-1", "title": "leak", "description": "memory leak", "category": "bug"}},
-		{mcpcontract.ToolPromoteOpportunity, map[string]any{"hypothesis_id": "hyp-1", "problem_statement": "leak", "scope": "small", "impact": "high", "expected_effort": "1h", "confidence": 0.8}},
-		{mcpcontract.ToolDefineValidation, map[string]any{"investigation_id": "inv-1", "kind": "test", "command": "go test ./...", "workspace_id": "ws-1"}},
-		{mcpcontract.ToolPrepareContribution, map[string]any{"opportunity_id": "opp-1", "kind": "issue"}},
-		{mcpcontract.ToolCancelJob, map[string]any{"ids": []string{"job-1"}}},
-	}
-	for _, tt := range writeTests {
-		result, err := client.CallTool(context.Background(), &mcp.CallToolParams{Name: tt.name, Arguments: tt.args})
-		if err != nil || result.IsError {
-			t.Fatalf("call %s: err=%v result=%+v", tt.name, err, result)
-		}
-		if result.StructuredContent == nil {
-			t.Fatalf("%s returned nil structured content", tt.name)
-		}
-	}
-
-	_, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: "github-index://repositories/acme/rocket"})
-	if err == nil {
-		t.Fatal("legacy github-index resource should not be routed")
-	}
-	for _, uri := range []string{
-		"gitcontribute://repositories/acme/rocket",
-		"gitcontribute://dossiers/acme/rocket",
-		"gitcontribute://investigations/inv-1",
-		"gitcontribute://workflows/contribution/opp-1",
-		"gitcontribute://lenses/default",
-		"gitcontribute://job/job-1",
-		"gitcontribute://jobs/job-1",
-	} {
-		if _, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: uri}); err == nil {
-			t.Errorf("unadvertised alias %q was routed", uri)
-		}
-	}
-
-	templates := map[string]bool{}
-	for template, err := range client.ResourceTemplates(context.Background(), nil) {
-		if err != nil {
-			t.Fatal(err)
-		}
-		templates[template.URITemplate] = true
-	}
-	for _, uriTemplate := range []string{
-		"gitcontribute://thread/{owner}/{repo}/{kind}/{number}/facet/{facet}",
-		"gitcontribute://concern/{id}",
-		"gitcontribute://draft/{id}/{revision}",
-		"gitcontribute://manifest/{id}",
-	} {
-		if !templates[uriTemplate] {
-			t.Errorf("missing resource template %q", uriTemplate)
-		}
 	}
 }

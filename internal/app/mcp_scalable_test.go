@@ -3,16 +3,15 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/morluto/gitcontribute/internal/codeindex"
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
-	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 	"github.com/morluto/gitcontribute/internal/radar"
 )
@@ -24,6 +23,135 @@ func TestRadarCandidateToMCPPreservesRelatedWorkSemantics(t *testing.T) {
 	}}})
 	if len(out.RelatedWork) != 1 || out.RelatedWork[0].Ref != "pull_request:owner/repo#9" || out.RelatedWork[0].Relation != "depends_on" || out.RelatedWork[0].Direction != "outbound" || out.RelatedWork[0].State != "open" {
 		t.Fatalf("related work = %+v", out.RelatedWork)
+	}
+}
+
+func TestTypedBatchResultsPreserveDurableJSONShapes(t *testing.T) {
+	t.Parallel()
+	threadSync := threadSyncBatchResult{
+		batchOperationSummary: batchOperationSummary[threadSyncItem]{
+			Status: batchOperationPartial,
+			Items: []threadSyncItem{
+				successfulThreadSyncItem("acme/rocket", 3, 2, true, "request budget reached", []mcpcontract.ThreadRef{{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 1}}),
+				failedThreadSyncItem("acme/missing", mcpcontract.BatchItemRetryable, "rate_limited", "wait", 0),
+			},
+			Completed: 0,
+			Total:     2,
+		},
+		Requests: 2, RequestBudget: 3, PlannedRequests: 3,
+	}
+	assertJSONDocumentEqual(t, threadSync, `{
+		"status":"partial","items":[
+			{"key":"acme/rocket","status":"partial","updated":3,"requests":2,"request_capped":true,"message":"request budget reached","threads":[{"owner":"acme","repo":"rocket","kind":"issue","number":1}]},
+			{"key":"acme/missing","status":"retryable","reason":"rate_limited","message":"wait","retry_after_ms":0}
+		],"completed":0,"total":2,"requests":2,"request_budget":3,"planned_requests":3
+	}`)
+
+	exactFailure, err := unavailableThreadSyncItem("acme/rocket/issue", "repository_not_indexed", "missing").forExactThread(
+		"acme/rocket/issue#1", mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Kind: "issue", Number: 1},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertJSONDocumentEqual(t, exactFailure, `{
+		"key":"acme/rocket/issue#1","status":"unavailable","reason":"repository_not_indexed","message":"missing",
+		"threads":[{"owner":"acme","repo":"rocket","kind":"issue","number":1}]
+	}`)
+
+	index := repositoryIndexBatchResult{
+		batchOperationSummary: batchOperationSummary[repositoryIndexItem]{
+			Status: batchOperationPartial,
+			Items: []repositoryIndexItem{
+				successfulRepositoryIndexItem("acme/rocket", contracts.AcquisitionResult{
+					CommitSHA: "abc", Files: 2, Bytes: 3, Inserted: true, SnapshotToken: "snapshot",
+					IndexManifest:  codeindex.Manifest{FormatVersion: "v1", CoverageKnown: true, TrackedEntries: 2, IndexedFiles: 2},
+					ArtifactDigest: "artifact", ManifestDigest: "manifest",
+				}),
+				failedRepositoryIndexItem("acme/missing", "acquisition_or_index_failed", "checkout failed", 0),
+			},
+			Completed: 1,
+			Total:     2,
+		},
+		SnapshotToken: "snapshot",
+	}
+	assertJSONDocumentEqual(t, index, `{
+		"status":"partial","items":[
+			{"key":"acme/rocket","status":"complete","commit_sha":"abc","files":2,"bytes":3,"inserted":true,"snapshot_token":"snapshot",
+			 "index_manifest":{"format_version":"v1","coverage_known":true,"tracked_entries":2,"indexed_files":2,"skipped_invalid_path":0,"skipped_excluded":0,"skipped_non_regular":0,"skipped_oversize":0,"skipped_total_budget":0,"skipped_non_text":0,"skipped_file_limit":0,"truncated":false},
+			 "artifact_digest":"artifact","manifest_digest":"manifest"},
+			{"key":"acme/missing","status":"failed","reason":"acquisition_or_index_failed","message":"checkout failed","retry_after_ms":0}
+		],"completed":1,"total":2,"snapshot_token":"snapshot"
+	}`)
+
+	contextResult := repositoryContextBatchResult{
+		batchOperationSummary: batchOperationSummary[repositoryContextItem]{
+			Status: batchOperationPartial,
+			Items: []repositoryContextItem{
+				successfulRepositoryContextItem("acme/rocket", 2, mcpcontract.RepositoryOutput{Ref: "repository:acme/rocket", Owner: "acme", Repo: "rocket"}),
+				unavailableRepositoryContextItem("acme/missing", "request_budget_exceeded", "budget exhausted"),
+			},
+			Completed: 1,
+			Total:     2,
+		},
+		Requests: 2, RequestBudget: 2, PlannedRequests: 2,
+	}
+	assertJSONDocumentEqual(t, contextResult, `{
+		"status":"partial","items":[
+			{"key":"acme/rocket","status":"complete","requests":2,"repository":{"ref":"repository:acme/rocket","owner":"acme","repo":"rocket","metadata":{"status":""},"dossier_status":"","description":null,"default_branch":null,"language":null,"license":null,"stars":null,"watchers":null,"forks":null,"open_issues":null,"archived":null,"fork":null},"facets":{"metadata":{"status":"complete"},"contribution_guidance":{"status":"complete"}}},
+			{"key":"acme/missing","status":"unavailable","reason":"request_budget_exceeded","message":"budget exhausted"}
+		],"completed":1,"total":2,"requests":2,"request_budget":2,"planned_requests":2
+	}`)
+
+	hydration := threadHydrationBatchResult{
+		Status: batchOperationPartial,
+		Items: []threadHydrationItem{
+			completeThreadHydrationItem("acme/rocket/issue#1", "issue", 2, []contracts.HydratedFacet{{Facet: "comments", Count: 3, Pages: 1, Complete: true}}),
+			failedThreadHydrationItem("acme/rocket/issue#2", mcpcontract.BatchItemRetryable, "rate_limited", "wait", 0),
+		},
+		Completed: 1,
+		Total:     2,
+	}
+	assertJSONDocumentEqual(t, hydration, `{
+		"status":"partial","items":[
+			{"key":"acme/rocket/issue#1","status":"complete","kind":"issue","header_refreshed":true,"requests":2,"facets":[{"facet":"comments","count":3,"pages":1,"complete":true}]},
+			{"key":"acme/rocket/issue#2","status":"retryable","reason":"rate_limited","message":"wait","retry_after_ms":0}
+		],"completed":1,"total":2
+	}`)
+
+	zero := 0
+	pullRequests := pullRequestStatusBatchResult{
+		Status: batchOperationPartial,
+		Items: []pullRequestStatusItem{
+			pullRequestStatusSnapshotItem("acme/rocket/pull_request#1", mcpcontract.BatchItemComplete, "", nil, []pullRequestHealthFacet{}, ""),
+			pullRequestStatusFailureItem("acme/rocket/pull_request#2", mcpcontract.BatchItemRetryable, "rate_limited", "wait", &zero, nil),
+		},
+		Failures:  []pullRequestStatusFailure{{Reference: "acme/rocket/pull_request#2", Status: mcpcontract.BatchItemRetryable, Reason: "rate_limited", Message: "wait"}},
+		Completed: 1,
+		Total:     2,
+	}
+	assertJSONDocumentEqual(t, pullRequests, `{
+		"status":"partial","items":[
+			{"key":"acme/rocket/pull_request#1","status":"complete","facets":[],"head_sha":""},
+			{"key":"acme/rocket/pull_request#2","status":"retryable","reason":"rate_limited","message":"wait","retry_after_ms":0}
+		],"failures":[{"reference":"acme/rocket/pull_request#2","status":"retryable","reason":"rate_limited","message":"wait"}],"completed":1,"total":2
+	}`)
+}
+
+func assertJSONDocumentEqual(t *testing.T, value any, expected string) {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gotDocument, expectedDocument any
+	if err := json.Unmarshal(encoded, &gotDocument); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(expected), &expectedDocument); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotDocument, expectedDocument) {
+		t.Fatalf("JSON = %s, want %s", encoded, expected)
 	}
 }
 
@@ -93,7 +221,7 @@ func seedRadarRepository(ctx context.Context, t *testing.T, svc *Service, name s
 	}
 	for number := 1; number <= candidates; number++ {
 		if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-			RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: number, State: "open",
+			RepositoryID: repo.ID, Kind: domain.IssueKind, Number: number, State: "open",
 			Title: "same-score candidate", SourceUpdatedAt: now.Add(-time.Hour),
 		}, `{}`); err != nil {
 			t.Fatal(err)
@@ -180,7 +308,7 @@ func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 7, State: "open", Title: "bounded coverage", SourceUpdatedAt: time.Unix(20, 0).UTC()}, `{}`)
+	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 7, State: "open", Title: "bounded coverage", SourceUpdatedAt: time.Unix(20, 0).UTC()}, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +349,7 @@ func TestGetCoveragePreservesTargetOrderAndMissingItems(t *testing.T) {
 	if out.Items[3].Status != "unavailable" || out.Items[3].Reason != "invalid_reference" {
 		t.Fatalf("invalid coverage target = %+v", out.Items[3])
 	}
-	if !out.Provenance.UnknownCoverage || out.Provenance.Complete || out.Provenance.QueryDigestSHA256 == "" {
+	if !out.Provenance.UnknownCoverage() || out.Provenance.Complete() || out.Provenance.QueryDigestSHA256 == "" {
 		t.Fatalf("coverage provenance = %+v", out.Provenance)
 	}
 }
@@ -235,21 +363,21 @@ func TestGetThreadsPreservesUnknownAndObservedFalseMergeState(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, thread := range []corpus.Thread{
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 1, State: "closed", Title: "unknown", SourceUpdatedAt: time.Unix(1, 0).UTC()},
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "observed false", Merge: domain.UnmergedStatus(), SourceUpdatedAt: time.Unix(2, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 1, State: "closed", Title: "unknown", SourceUpdatedAt: time.Unix(1, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 2, State: "closed", Title: "observed false", Merge: domain.UnmergedStatus(), SourceUpdatedAt: time.Unix(2, 0).UTC()},
 	} {
 		if _, err := svc.corpus.UpsertThread(ctx, thread, `{}`); err != nil {
 			t.Fatal(err)
 		}
 	}
 	out, err := (&MCPReader{svc}).GetThreads(ctx, mcpcontract.GetThreadsInput{View: "compact", Threads: []mcpcontract.ThreadRef{
-		{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 1},
+		{Owner: " acme ", Repo: " rocket ", Kind: " pull_request ", Number: 1},
 		{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: 2},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.Items[0].Value == nil || out.Items[0].Value.Merged != nil {
+	if out.Items[0].Key != "acme/rocket/pull_request#1" || out.Items[0].Value == nil || out.Items[0].Value.Owner != "acme" || out.Items[0].Value.Repo != "rocket" || out.Items[0].Value.Kind != "pull_request" || out.Items[0].Value.Merged != nil {
 		t.Fatalf("unknown merge output = %+v", out.Items[0])
 	}
 	if out.Items[1].Value == nil || out.Items[1].Value.Merged == nil || *out.Items[1].Value.Merged {
@@ -275,7 +403,7 @@ func TestCancelJobsPreservesOrderAndIsIdempotent(t *testing.T) {
 	if err := svc.corpus.StartJob(ctx, terminal.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.corpus.TransitionJob(ctx, terminal.ID, corpus.JobStatusRunning, corpus.JobStatusSucceeded, `{}`, ""); err != nil {
+	if err := svc.corpus.TransitionJob(ctx, terminal.ID, corpus.JobRunningToSucceeded, `{}`, ""); err != nil {
 		t.Fatal(err)
 	}
 	running, err := svc.corpus.CreateJob(ctx, "sync", `{}`)
@@ -312,7 +440,7 @@ func TestCancelJobsDoesNotExposeOrDependOnMalformedStoredPayload(t *testing.T) {
 	if err := svc.corpus.StartJob(ctx, malformed.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.corpus.TransitionJob(ctx, malformed.ID, corpus.JobStatusRunning, corpus.JobStatusCancelled, "not-json", ""); err != nil {
+	if err := svc.corpus.TransitionJob(ctx, malformed.ID, corpus.JobRunningToCancelled, "not-json", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -385,7 +513,7 @@ func assertCancelJobsOutput(t *testing.T, out mcpcontract.GetJobsOutput, queuedI
 
 func TestJobResultToMCPExposesStructuredDurableProgress(t *testing.T) {
 	t.Parallel()
-	out := jobResultToMCP(&contracts.JobResult{ID: "job-1", Kind: "sync_threads", Status: "running", Request: `{}`, Progress: "thread_headers", Statistics: `{"completed_items":2,"total_items":5}`, CreatedAt: "2026-07-19T00:00:00Z"}, true)
+	out := jobResultToMCP(&contracts.JobResult{ID: "job-1", Kind: "sync_threads", Status: "running", Request: `{}`, Progress: "thread_headers", Statistics: `{"completed_items":2,"total_items":5}`, CreatedAt: "2026-07-19T00:00:00Z"}, detailedResponse)
 	if out.Phase != "thread_headers" || out.CompletedItems != 2 || out.TotalItems != 5 || out.ProgressPercent != 40 || out.RetryAfterMS != 1000 {
 		t.Fatalf("structured progress = %+v", out)
 	}
@@ -404,7 +532,7 @@ func TestJobResultToMCPPreservesEmptyAndPartialTypedOutcomes(t *testing.T) {
 	empty := jobResultToMCP(&contracts.JobResult{
 		ID: "job-empty", Kind: "sync_threads", Status: "succeeded",
 		Result: `{"status":"complete","items":[]}`, CreatedAt: "2026-07-19T00:00:00Z",
-	}, true)
+	}, detailedResponse)
 	if len(empty.Artifacts) != 1 || empty.Artifacts[0].Count == nil || *empty.Artifacts[0].Count != 0 {
 		t.Fatalf("known empty artifact count = %+v", empty.Artifacts)
 	}
@@ -413,7 +541,7 @@ func TestJobResultToMCPPreservesEmptyAndPartialTypedOutcomes(t *testing.T) {
 		ID: "job-partial", Kind: "sync_pull_request_portfolio", Status: "succeeded",
 		Result:    `{"status":"partial","pull_requests":["acme/rocket#7"],"refreshed":0,"failures":[{"reference":"acme/rocket#7","status":"retryable","reason":"facet_incomplete"}]}`,
 		CreatedAt: "2026-07-19T00:00:00Z",
-	}, true)
+	}, detailedResponse)
 	if !strings.Contains(partial.Summary, "partial") || len(partial.Artifacts) != 1 ||
 		!reflect.DeepEqual(partial.Artifacts[0].References, []string{"acme/rocket#7"}) ||
 		len(partial.Artifacts[0].Failures) != 1 || partial.Artifacts[0].Failures[0].Reason != "facet_incomplete" ||
@@ -424,7 +552,7 @@ func TestJobResultToMCPPreservesEmptyAndPartialTypedOutcomes(t *testing.T) {
 	fixPatterns := jobResultToMCP(&contracts.JobResult{
 		ID: "job-patterns", Kind: "mine_repository_fix_patterns", Status: "succeeded",
 		Result: `{"status":"complete","coverage":{"unique_candidates":21}}`, CreatedAt: "2026-07-19T00:00:00Z",
-	}, true)
+	}, detailedResponse)
 	if fixPatterns.ExecutionState != "terminal" || fixPatterns.Outcome != "succeeded" ||
 		len(fixPatterns.Artifacts) != 1 || fixPatterns.Artifacts[0].Kind != "fix_pattern_report" ||
 		fixPatterns.Artifacts[0].URI != "gitcontribute://fix-pattern-report/job-patterns" {
@@ -433,7 +561,7 @@ func TestJobResultToMCPPreservesEmptyAndPartialTypedOutcomes(t *testing.T) {
 
 	runningPatterns := jobResultToMCP(&contracts.JobResult{
 		ID: "job-running-patterns", Kind: "mine_repository_fix_patterns", Status: "running",
-	}, true)
+	}, detailedResponse)
 	if len(runningPatterns.Artifacts) != 0 || runningPatterns.FollowUp == nil ||
 		runningPatterns.FollowUp.Action.Type() != "poll_job" {
 		t.Fatalf("running fix-pattern job advertised unavailable artifacts: %+v", runningPatterns)
@@ -451,7 +579,7 @@ func TestGetJobsDetailedReturnsTypedArtifactsWithoutStoredPayloads(t *testing.T)
 	if err := svc.corpus.StartJob(ctx, job.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.corpus.TransitionJob(ctx, job.ID, corpus.JobStatusRunning, corpus.JobStatusSucceeded, `{"status":"complete"}`, ""); err != nil {
+	if err := svc.corpus.TransitionJob(ctx, job.ID, corpus.JobRunningToSucceeded, `{"status":"complete"}`, ""); err != nil {
 		t.Fatal(err)
 	}
 	reader := &MCPReader{svc}
@@ -480,144 +608,6 @@ func TestGetJobsDetailedReturnsTypedArtifactsWithoutStoredPayloads(t *testing.T)
 	}
 }
 
-type fakeRepositorySearchReader struct {
-	github.Reader
-	result  github.RepositorySearchResult
-	options github.RepositorySearchOptions
-}
-
-func (f *fakeRepositorySearchReader) SearchRepositories(_ context.Context, options github.RepositorySearchOptions) (github.RepositorySearchResult, error) {
-	f.options = options
-	return f.result, nil
-}
-
-func TestSearchGitHubRepositoriesPersistsObservedMetadata(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	svc := newSearchTestService(t)
-	now := time.Unix(1000, 0).UTC()
-	remote := github.Repository{Owner: "acme", Name: "rocket", Description: "fast inference", Stars: 9001, Language: "Go", UpdatedAt: now}
-	reader := &fakeRepositorySearchReader{result: github.RepositorySearchResult{Total: 321, Items: []github.Repository{remote}, Page: github.PageInfo{Page: 2, NextPage: 3, HasNext: true}}}
-	svc.SetGitHubReader(reader)
-
-	out, err := (&MCPReader{svc}).SearchGitHubRepositories(ctx, mcpcontract.SearchGitHubRepositoriesInput{Text: "fast inference", MatchFields: []string{"name", "description"}, Topics: []string{"llm-inference"}, Language: "Go", StarsMin: ptr(200), PushedAfter: "2026-06-15", Archived: ptr(false), Fork: ptr(false), Sort: "stars", Order: "desc", Limit: 12, Page: 2, ResponseFormat: "concise"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reader.options.PerPage != 12 || reader.options.Page != 2 || reader.options.Sort != "stars" || reader.options.Query != `"fast inference" in:name,description topic:llm-inference language:Go stars:>=200 pushed:>=2026-06-15 archived:false fork:false` {
-		t.Fatalf("compiled options = %+v", reader.options)
-	}
-	if out.NextPage != 3 || out.ResponseFormat != "concise" || len(out.Items) != 1 || out.Items[0].Value == nil || out.Items[0].Value.Ref != "repository:acme/rocket" || *out.Items[0].Value.Stars != 9001 {
-		t.Fatalf("live search result = %+v, options = %+v", out, reader.options)
-	}
-	if out.Items[0].Value.Watchers != nil || len(out.RecoveryPlans) != 1 || len(out.RecoveryPlans[0].Then) != 1 || out.RecoveryPlans[0].Then[0].Type() != "sync_threads" {
-		t.Fatalf("concise search context = %+v", out)
-	}
-	if out.Items[0].Value.DossierStatus != "missing" {
-		t.Fatalf("new search result dossier availability = %+v", out.Items[0].Value)
-	}
-	stored, err := (&MCPReader{svc}).GetRepositories(ctx, mcpcontract.GetRepositoriesInput{Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "rocket"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stored.Items[0].Value == nil || stored.Items[0].Value.Metadata.Status != "complete" || *stored.Items[0].Value.Stars != 9001 {
-		t.Fatalf("search metadata was not persisted: %+v", stored)
-	}
-	if _, err := svc.BuildRepositoryDossier(ctx, contracts.RepoRef{Owner: "acme", Repo: "rocket"}); err != nil {
-		t.Fatal(err)
-	}
-	out, err = (&MCPReader{svc}).SearchGitHubRepositories(ctx, mcpcontract.SearchGitHubRepositoriesInput{Text: "fast inference", Limit: 12, Page: 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out.Items[0].Value == nil || out.Items[0].Value.DossierStatus != "available" || out.Items[0].Value.DossierAsOf == "" {
-		t.Fatalf("live search did not report local dossier availability: %+v", out)
-	}
-}
-
-func TestCompileRepositorySearchRejectsAmbiguousAndInvalidInputs(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name string
-		in   mcpcontract.SearchGitHubRepositoriesInput
-	}{
-		{name: "empty", in: mcpcontract.SearchGitHubRepositoriesInput{}},
-		{name: "raw and structured", in: mcpcontract.SearchGitHubRepositoriesInput{RawQuery: "cuda", Language: "Go"}},
-		{name: "unknown match field", in: mcpcontract.SearchGitHubRepositoriesInput{Text: "cuda", MatchFields: []string{"topics"}}},
-		{name: "reversed stars", in: mcpcontract.SearchGitHubRepositoriesInput{Text: "cuda", StarsMin: ptr(20), StarsMax: ptr(10)}},
-		{name: "invalid date", in: mcpcontract.SearchGitHubRepositoriesInput{PushedAfter: "yesterday"}},
-		{name: "reversed dates", in: mcpcontract.SearchGitHubRepositoriesInput{CreatedAfter: "2026-07-01", CreatedBefore: "2026-06-01"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, _, _, err := compileRepositorySearch(tc.in); err == nil {
-				t.Fatal("invalid search was accepted")
-			}
-		})
-	}
-}
-
-func TestCompileRepositorySearchPreservesExplicitZeroStarBound(t *testing.T) {
-	t.Parallel()
-	zero := 0
-	query, _, _, err := compileRepositorySearch(mcpcontract.SearchGitHubRepositoriesInput{StarsMax: &zero})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if query != "stars:<=0" {
-		t.Fatalf("query = %q, want stars:<=0", query)
-	}
-}
-
-func TestRepositorySearchValidationExamplesAreUsable(t *testing.T) {
-	t.Parallel()
-	_, _, _, err := compileRepositorySearch(mcpcontract.SearchGitHubRepositoriesInput{})
-	var toolErr *mcpcontract.ToolError
-	if !errors.As(err, &toolErr) {
-		t.Fatalf("error = %v, want ToolError", err)
-	}
-	if toolErr.Example["text"] != "GitHub contribution research" || !reflect.DeepEqual(toolErr.Example["match_fields"], []string{"name", "description"}) {
-		t.Fatalf("empty-search example = %#v", toolErr.Example)
-	}
-
-	_, _, _, err = compileRepositorySearch(mcpcontract.SearchGitHubRepositoriesInput{RawQuery: "language:go", Language: "Go"})
-	if !errors.As(err, &toolErr) || toolErr.Example["raw_query"] != "is:public language:go stars:>=100" {
-		t.Fatalf("ambiguous-search example = %#v, error=%v", toolErr.Example, err)
-	}
-}
-
-func TestCompileRepositorySearchWarnsAboutRawReadmeQueries(t *testing.T) {
-	t.Parallel()
-	query, interpretation, warnings, err := compileRepositorySearch(mcpcontract.SearchGitHubRepositoriesInput{RawQuery: "attention in:readme"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if query != "attention in:readme" || !strings.Contains(interpretation, "advanced raw query") || len(warnings) != 1 || warnings[0].Code != "broad_readme_match" {
-		t.Fatalf("raw query context = %q %q %+v", query, interpretation, warnings)
-	}
-}
-
-func TestCompileRepositorySearchWarnsAboutStructuredReadmeMatching(t *testing.T) {
-	t.Parallel()
-	query, _, warnings, err := compileRepositorySearch(mcpcontract.SearchGitHubRepositoriesInput{Text: "attention", MatchFields: []string{"name", "readme"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if query != "attention in:name,readme" || len(warnings) != 1 || warnings[0].Code != "broad_readme_match" {
-		t.Fatalf("structured README warning = %q %+v", query, warnings)
-	}
-}
-
-func TestRepositorySearchDetailedFormatPreservesSecondaryFacts(t *testing.T) {
-	t.Parallel()
-	archived := true
-	remote := github.Repository{Owner: "acme", Name: "rocket", Description: "fast", Stars: 42, Watchers: 9, Forks: 3, OpenIssues: 7, Archived: archived, Topics: []string{"cuda"}}
-	match := liveRepositorySearchMatch(remote, mcpcontract.RepositoryMetadataOutput{Status: "complete"}, "detailed")
-	if match.Ref != "repository:acme/rocket" || match.Watchers == nil || *match.Watchers != 9 || match.Archived == nil || !*match.Archived || len(match.Topics) != 1 {
-		t.Fatalf("detailed match = %+v", match)
-	}
-}
-
 func TestFindPrecedentsUsesClosedAndMergedHistory(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -627,9 +617,9 @@ func TestFindPrecedentsUsesClosedAndMergedHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	threads := []corpus.Thread{
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open", Title: "cache path ignores configured root", Body: "compiled cache artifacts use tmp", SourceUpdatedAt: time.Unix(30, 0).UTC()},
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "honor configured cache root", Body: "move compiled cache artifacts out of tmp", Merge: domain.MergedStatus(time.Unix(20, 0).UTC()), ClosedAt: time.Unix(20, 0).UTC(), SourceUpdatedAt: time.Unix(20, 0).UTC()},
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 3, State: "open", Title: "unrelated typo", Body: "docs", SourceUpdatedAt: time.Unix(10, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1, State: "open", Title: "cache path ignores configured root", Body: "compiled cache artifacts use tmp", SourceUpdatedAt: time.Unix(30, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 2, State: "closed", Title: "honor configured cache root", Body: "move compiled cache artifacts out of tmp", Merge: domain.MergedStatus(time.Unix(20, 0).UTC()), ClosedAt: time.Unix(20, 0).UTC(), SourceUpdatedAt: time.Unix(20, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 3, State: "open", Title: "unrelated typo", Body: "docs", SourceUpdatedAt: time.Unix(10, 0).UTC()},
 	}
 	for _, thread := range threads {
 		if _, err := svc.corpus.UpsertThread(ctx, thread, `{}`); err != nil {

@@ -18,8 +18,8 @@ func TestRankOrdersEligibilityAndExplainsScore(t *testing.T) {
 		SourceUpdated:  now.Add(-time.Hour),
 		GuidanceStatus: "available",
 		Coverage: []Coverage{
-			{Facet: "metadata", Present: true, Complete: true, AsOf: now.Add(-time.Hour)},
-			{Facet: "threads", Present: true, Complete: true, AsOf: now.Add(-time.Hour)},
+			{Facet: "metadata", Complete: true, AsOf: now.Add(-time.Hour)},
+			{Facet: "threads", Complete: true, AsOf: now.Add(-time.Hour)},
 		},
 	}
 	report, err := Rank(repo, []IssueSnapshot{
@@ -41,7 +41,7 @@ func TestRankOrdersEligibilityAndExplainsScore(t *testing.T) {
 				Author: "maintainer", AuthorAssociation: "MEMBER", Body: "Thanks for the detailed report.",
 				URL: "https://github.com/owner/repo/issues/1#issuecomment-1", CreatedAt: now.Add(-time.Hour),
 			}}, now),
-			Coverage: []Coverage{{Facet: "issue_comments", Present: true, Complete: true, AsOf: now.Add(-time.Hour)}},
+			Coverage: []Coverage{{Facet: "issue_comments", Complete: true, AsOf: now.Add(-time.Hour)}},
 			URL:      "https://github.com/owner/repo/issues/1",
 		},
 	}, Options{Limit: 10, Now: now, TotalOpenIssues: 3})
@@ -83,12 +83,12 @@ func TestMissingCoverageIsUnknownNotPenalty(t *testing.T) {
 		t.Fatal(err)
 	}
 	completeIssue := base
-	completeIssue.Coverage = []Coverage{{Facet: "issue_comments", Present: true, Complete: true}}
+	completeIssue.Coverage = []Coverage{{Facet: "issue_comments", Complete: true}}
 	completeRepo := repo
 	completeRepo.GuidanceStatus = "available"
 	completeRepo.Coverage = []Coverage{
-		{Facet: "metadata", Present: true, Complete: true},
-		{Facet: "threads", Present: true, Complete: true},
+		{Facet: "metadata", Complete: true},
+		{Facet: "threads", Complete: true},
 	}
 	complete, err := Rank(completeRepo, []IssueSnapshot{completeIssue}, Options{Now: now})
 	if err != nil {
@@ -152,12 +152,12 @@ func TestOpenDependencyRequiresCoordinationWithoutBecomingBlocker(t *testing.T) 
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	report, err := Rank(
 		RepositorySnapshot{Repo: domain.MustRepoRef("owner", "repo"), GuidanceStatus: "available", Coverage: []Coverage{
-			{Facet: "metadata", Present: true, Complete: true}, {Facet: "threads", Present: true, Complete: true},
+			{Facet: "metadata", Complete: true}, {Facet: "threads", Complete: true},
 		}},
 		[]IssueSnapshot{{
 			Number: 7, State: "open", Title: "Bug", Body: "Description", SourceUpdated: now,
 			URL:      "https://github.com/owner/repo/issues/7",
-			Coverage: []Coverage{{Facet: "issue_comments", Present: true, Complete: true}},
+			Coverage: []Coverage{{Facet: "issue_comments", Complete: true}},
 			RelatedWork: []RelatedWork{{
 				Ref: "pull_request:owner/repo#9", Kind: "pull_request", Number: 9, State: "open",
 				Relation: "depends_on", Direction: "outbound", URL: "https://github.com/owner/repo/pull/9", Evidence: []RelatedWorkEvidence{},
@@ -178,10 +178,10 @@ func TestCappedRelatedWorkPreventsReadyToCodeClaim(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	report, err := Rank(
 		RepositorySnapshot{Repo: domain.MustRepoRef("owner", "repo"), GuidanceStatus: "available", Coverage: []Coverage{
-			{Facet: "metadata", Present: true, Complete: true}, {Facet: "threads", Present: true, Complete: true},
+			{Facet: "metadata", Complete: true}, {Facet: "threads", Complete: true},
 		}},
 		[]IssueSnapshot{{Number: 7, State: "open", Title: "Bug", Body: "Description", SourceUpdated: now,
-			Coverage: []Coverage{{Facet: "issue_comments", Present: true, Complete: true}}, RelatedWorkCapped: true}},
+			Coverage: []Coverage{{Facet: "issue_comments", Complete: true}}, RelatedWorkCapped: true}},
 		Options{Now: now},
 	)
 	if err != nil {
@@ -197,10 +197,10 @@ func TestUnknownRelatedPullRequestStatePreventsReadyToCodeClaim(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	report, err := Rank(
 		RepositorySnapshot{Repo: domain.MustRepoRef("owner", "repo"), GuidanceStatus: "available", Coverage: []Coverage{
-			{Facet: "metadata", Present: true, Complete: true}, {Facet: "threads", Present: true, Complete: true},
+			{Facet: "metadata", Complete: true}, {Facet: "threads", Complete: true},
 		}},
 		[]IssueSnapshot{{Number: 7, State: "open", Title: "Bug", Body: "Description", SourceUpdated: now,
-			Coverage: []Coverage{{Facet: "issue_comments", Present: true, Complete: true}}, RelatedWork: []RelatedWork{{
+			Coverage: []Coverage{{Facet: "issue_comments", Complete: true}}, RelatedWork: []RelatedWork{{
 				Ref: "pull_request:owner/repo#9", Kind: "pull_request", Number: 9, Relation: "explicit_reference", Direction: "outbound", Evidence: []RelatedWorkEvidence{},
 			}}}},
 		Options{Now: now},
@@ -221,10 +221,10 @@ func TestClosedRelatedPullRequestIsBackgroundOnly(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	report, err := Rank(
 		RepositorySnapshot{Repo: domain.MustRepoRef("owner", "repo"), GuidanceStatus: "available", Coverage: []Coverage{
-			{Facet: "metadata", Present: true, Complete: true}, {Facet: "threads", Present: true, Complete: true},
+			{Facet: "metadata", Complete: true}, {Facet: "threads", Complete: true},
 		}},
 		[]IssueSnapshot{{Number: 7, State: "open", Title: "Bug", Body: "Description", SourceUpdated: now,
-			Coverage: []Coverage{{Facet: "issue_comments", Present: true, Complete: true}}, RelatedWork: []RelatedWork{{
+			Coverage: []Coverage{{Facet: "issue_comments", Complete: true}}, RelatedWork: []RelatedWork{{
 				Ref: "pull_request:owner/repo#9", Kind: "pull_request", Number: 9, State: "closed",
 				Relation: "claims_to_close", Direction: "inbound", Evidence: []RelatedWorkEvidence{},
 			}}}},
@@ -339,13 +339,13 @@ func TestCappedCollisionEvidenceCannotClaimEligibility(t *testing.T) {
 		RepositorySnapshot{
 			Repo: domain.MustRepoRef("owner", "repo"),
 			Coverage: []Coverage{
-				{Facet: "metadata", Present: true, Complete: true},
-				{Facet: "threads", Present: true, Complete: true},
+				{Facet: "metadata", Complete: true},
+				{Facet: "threads", Complete: true},
 			},
 		},
 		[]IssueSnapshot{{
 			Number: 1, State: "open", Title: "Issue", Body: "Description", SourceUpdated: now,
-			Coverage: []Coverage{{Facet: "issue_comments", Present: true, Complete: true}},
+			Coverage: []Coverage{{Facet: "issue_comments", Complete: true}},
 		}},
 		Options{Now: now, LinkedPullRequestScanCapped: true},
 	)

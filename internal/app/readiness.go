@@ -172,7 +172,7 @@ func (r *readinessEvaluator) targetThreadOpen() (contracts.ReadinessCheck, error
 	if r.repository == nil {
 		return r.check("target_thread_open", readinessUnknown, "Target thread cannot be checked because repository metadata is missing.", []string{r.inv.ThreadBaseline.Ref()}, "Run an explicit sync for the repository."), nil
 	}
-	thread, err := r.corpus.GetThread(r.ctx, r.repository.ID, string(r.inv.ThreadBaseline.Kind), r.inv.ThreadBaseline.Number)
+	thread, err := r.corpus.GetThread(r.ctx, r.repository.ID, r.inv.ThreadBaseline.Kind, r.inv.ThreadBaseline.Number)
 	if err != nil {
 		return contracts.ReadinessCheck{}, fmt.Errorf("read readiness target thread: %w", err)
 	}
@@ -190,9 +190,13 @@ func (r *readinessEvaluator) baselineFresh() (contracts.ReadinessCheck, error) {
 	if r.inv.ThreadBaseline == nil {
 		return r.check("baseline_freshness", readinessUnknown, "No immutable thread baseline is recorded.", nil, "Start from a stored thread or re-check the target manually."), nil
 	}
+	revision, err := sourceRevisionFromThreadBaseline(*r.inv.ThreadBaseline)
+	if err != nil {
+		return contracts.ReadinessCheck{}, err
+	}
 	item := &evidence.Evidence{
 		Type:             evidence.EvidenceTypeGitHubSource,
-		SourceProvenance: []evidence.SourceRevision{sourceRevisionFromThreadBaseline(*r.inv.ThreadBaseline)},
+		SourceProvenance: []evidence.SourceRevision{revision},
 	}
 	freshness, err := evidence.NewFreshnessEvaluator(r.corpus).Evaluate(r.ctx, item)
 	if err != nil {

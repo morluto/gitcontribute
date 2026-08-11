@@ -61,14 +61,36 @@ func TestDeepWikiUsesNormalizedRepositoriesForRequestAndOutput(t *testing.T) {
 	fake := &fakeDeepWikiReader{response: deepwiki.AvailableResponse("ok", "")}
 	svc.SetDeepWikiReader(fake)
 	out, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{
-		Action: "question", Repository: "acme/rocket", Repositories: []string{"wrong/one", "wrong/two"}, Question: "architecture?", MaxOutputBytes: 1024,
+		Action: " question ", Repositories: []string{" acme/rocket ", "acme/booster"}, Question: " architecture? ", MaxOutputBytes: 1024,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"acme/rocket"}
-	if !reflect.DeepEqual(fake.request.Repositories, want) || !reflect.DeepEqual(out.Repositories, want) {
-		t.Fatalf("request repositories = %v, output repositories = %v", fake.request.Repositories, out.Repositories)
+	want := []string{"acme/rocket", "acme/booster"}
+	if !reflect.DeepEqual(fake.request.Repositories(), want) || !reflect.DeepEqual(out.Repositories, want) {
+		t.Fatalf("request repositories = %v, output repositories = %v", fake.request.Repositories(), out.Repositories)
+	}
+	if fake.request.Question() != "architecture?" || out.Question != "architecture?" {
+		t.Fatalf("request question = %q, output question = %q", fake.request.Question(), out.Question)
+	}
+}
+
+func TestDeepWikiRejectsContradictoryModesBeforeProviderRead(t *testing.T) {
+	t.Parallel()
+	svc := newSearchTestService(t)
+	deepWiki := &fakeDeepWikiReader{}
+	svc.SetDeepWikiReader(deepWiki)
+	_, err := (&MCPReader{svc}).DeepWiki(context.Background(), mcpcontract.DeepWikiInput{
+		Action:       "question",
+		Repository:   "acme/rocket",
+		Repositories: []string{"acme/booster"},
+		Question:     "architecture?",
+	})
+	if err == nil {
+		t.Fatal("DeepWiki accepted both repository representations")
+	}
+	if deepWiki.calls != 0 {
+		t.Fatalf("DeepWiki provider called %d times for contradictory input", deepWiki.calls)
 	}
 }
 

@@ -33,7 +33,7 @@ type DraftIdentity struct {
 	ID          string
 	Revision    int
 	Repository  string
-	Kind        string
+	Kind        domain.ThreadKind
 	TitleBytes  int
 	BodyBytes   int
 	TitleSHA256 string
@@ -46,10 +46,18 @@ type DraftIdentity struct {
 // the draft.
 type DraftDiagnostic struct {
 	Code       string
-	Severity   string
+	Severity   DraftDiagnosticSeverity
 	Message    string
 	ByteOffset int
 }
+
+// DraftDiagnosticSeverity distinguishes blocking draft errors from warnings.
+type DraftDiagnosticSeverity string
+
+const (
+	DraftDiagnosticError   DraftDiagnosticSeverity = "error"
+	DraftDiagnosticWarning DraftDiagnosticSeverity = "warning"
+)
 
 // DraftArtifact is the common exact-byte view of an issue or pull-request
 // draft revision.

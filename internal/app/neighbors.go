@@ -7,15 +7,11 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/morluto/gitcontribute/internal/clustering"
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
-	"github.com/morluto/gitcontribute/internal/evidence"
-	"github.com/morluto/gitcontribute/internal/investigation"
 )
 
 const (
@@ -32,11 +28,15 @@ const (
 // query thread. Results include transparent scores, reasons, and the source
 // revision of the candidate population. No network access occurs.
 func (s *Service) Neighbors(ctx context.Context, repo contracts.RepoRef, kind string, number int, limit int) (*NeighborsResult, error) {
-	ref, dref, err := validateThreadQuery(repo, kind, number)
+	target, err := parseSimilarityThread(repo, kind, number)
 	if err != nil {
 		return nil, err
 	}
-	limit, err = normalizeSimilarityLimit(limit)
+	return s.neighborsForThread(ctx, target, limit)
+}
+
+func (s *Service) neighborsForThread(ctx context.Context, target parsedSimilarityThread, limit int) (*NeighborsResult, error) {
+	limit, err := normalizeSimilarityLimit(limit)
 	if err != nil {
 		return nil, err
 	}
@@ -46,34 +46,34 @@ func (s *Service) Neighbors(ctx context.Context, repo contracts.RepoRef, kind st
 		return nil, err
 	}
 
-	repository, err := c.GetRepository(ctx, dref.Owner(), dref.Repo())
+	repository, err := c.GetRepository(ctx, target.repository.Owner(), target.repository.Repo())
 	if err != nil {
 		return nil, err
 	}
 	if repository == nil {
-		return nil, fmt.Errorf("%w: %s", errRepositoryNotFound, dref)
+		return nil, fmt.Errorf("%w: %s", errRepositoryNotFound, target.repository)
 	}
 
-	query, err := c.GetThread(ctx, repository.ID, ref.Kind, ref.Number)
+	query, err := c.GetThread(ctx, repository.ID, target.kind, target.number)
 	if err != nil {
 		return nil, err
 	}
 	if query == nil {
-		return nil, fmt.Errorf("%w: %s", errThreadNotFound, ref.String())
+		return nil, fmt.Errorf("%w: %s", errThreadNotFound, target.member().String())
 	}
 
-	threads, err := c.ListThreads(ctx, repository.ID, "", similarityCandidateLimit(limit))
+	threads, err := c.ListThreads(ctx, repository.ID, corpus.AnyThreadKind(), similarityCandidateLimit(limit))
 	if err != nil {
 		return nil, err
 	}
 
-	queryCand := candidateFromThread(dref, *query)
+	queryCand := candidateFromThread(target.repository, *query)
 	candidates := make([]clustering.Candidate, 0, len(threads))
 	for _, t := range threads {
 		if t.ID == query.ID {
 			continue
 		}
-		candidates = append(candidates, candidateFromThread(dref, t))
+		candidates = append(candidates, candidateFromThread(target.repository, t))
 	}
 
 	scored, err := clustering.Neighbors(ctx, queryCand, candidates, limit)
@@ -91,9 +91,9 @@ func (s *Service) Neighbors(ctx context.Context, repo contracts.RepoRef, kind st
 	}
 
 	return &NeighborsResult{
-		Repo:           dref.String(),
-		Kind:           ref.Kind,
-		Number:         ref.Number,
+		Repo:           target.repository.String(),
+		Kind:           string(target.kind),
+		Number:         target.number,
 		Limit:          limit,
 		Total:          len(neighbors),
 		SourceRevision: clustering.SourceRevision(all),
@@ -108,22 +108,23 @@ func (s *Service) Neighbors(ctx context.Context, repo contracts.RepoRef, kind st
 // member, and source revision. If the thread is not in a cluster, the result
 // is empty.
 func (s *Service) DuplicateCandidates(ctx context.Context, repo contracts.RepoRef, kind string, number int, limit int) (*DuplicateCandidatesResult, error) {
-	ref, dref, err := validateThreadQuery(repo, kind, number)
+	target, err := parseSimilarityThread(repo, kind, number)
 	if err != nil {
 		return nil, err
 	}
+	ref := target.member()
 
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	repository, err := c.GetRepository(ctx, dref.Owner(), dref.Repo())
+	repository, err := c.GetRepository(ctx, target.repository.Owner(), target.repository.Repo())
 	if err != nil {
 		return nil, err
 	}
 	if repository == nil {
-		return nil, fmt.Errorf("%w: %s", errRepositoryNotFound, dref)
+		return nil, fmt.Errorf("%w: %s", errRepositoryNotFound, target.repository)
 	}
 
 	query, err := c.GetThread(ctx, repository.ID, ref.Kind, ref.Number)
@@ -147,8 +148,8 @@ func (s *Service) DuplicateCandidates(ctx context.Context, repo contracts.RepoRe
 	}
 
 	result := &DuplicateCandidatesResult{
-		Repo:           dref.String(),
-		Kind:           ref.Kind,
+		Repo:           target.repository.String(),
+		Kind:           string(ref.Kind),
 		Number:         ref.Number,
 		Limit:          limit,
 		SourceRevision: "",
@@ -163,7 +164,7 @@ func (s *Service) DuplicateCandidates(ctx context.Context, repo contracts.RepoRe
 	result.ClusterID = cluster.ID
 	result.StableID = cluster.StableID
 	result.Canonical = ThreadRef{
-		Kind:   cluster.Canonical.Kind,
+		Kind:   string(cluster.Canonical.Kind),
 		Owner:  cluster.Canonical.Owner,
 		Repo:   cluster.Canonical.Repo,
 		Number: cluster.Canonical.Number,
@@ -175,12 +176,12 @@ func (s *Service) DuplicateCandidates(ctx context.Context, repo contracts.RepoRe
 			continue
 		}
 		result.Candidates = append(result.Candidates, Neighbor{
-			Kind:   m.Ref.Kind,
+			Kind:   string(m.Ref.Kind),
 			Owner:  m.Ref.Owner,
 			Repo:   m.Ref.Repo,
 			Number: m.Ref.Number,
 			Title:  m.Title,
-			State:  m.State,
+			State:  string(m.State),
 			Score:  m.Score,
 			Reason: m.Reason,
 		})
@@ -194,36 +195,42 @@ func (s *Service) DuplicateCandidates(ctx context.Context, repo contracts.RepoRe
 	return result, nil
 }
 
-func validateThreadQuery(repo contracts.RepoRef, kind string, number int) (clustering.MemberRef, domain.RepoRef, error) {
-	dref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+type parsedSimilarityThread struct {
+	repository domain.RepoRef
+	kind       domain.ThreadKind
+	number     int
+}
+
+func parseSimilarityThread(repo contracts.RepoRef, kind string, number int) (parsedSimilarityThread, error) {
+	repository, err := domain.NewRepoRef(repo.Owner, repo.Repo)
 	if err != nil {
-		return clustering.MemberRef{}, dref, err
+		return parsedSimilarityThread{}, err
 	}
 
 	normalized, err := normalizeThreadKind(kind)
 	if err != nil {
-		return clustering.MemberRef{}, dref, err
+		return parsedSimilarityThread{}, err
 	}
 	if number <= 0 {
-		return clustering.MemberRef{}, dref, errors.New("thread number must be positive")
+		return parsedSimilarityThread{}, errors.New("thread number must be positive")
 	}
-
-	return clustering.MemberRef{
-		Owner:  dref.Owner(),
-		Repo:   dref.Repo(),
-		Kind:   normalized,
-		Number: number,
-	}, dref, nil
+	return parsedSimilarityThread{repository: repository, kind: normalized, number: number}, nil
 }
 
-func normalizeThreadKind(kind string) (string, error) {
-	switch strings.ToLower(kind) {
-	case "issue", "issues":
-		return corpus.ThreadKindIssue, nil
-	case "pull_request", "pullrequest", "pr", "pull":
-		return corpus.ThreadKindPullRequest, nil
+func (t parsedSimilarityThread) member() clustering.MemberRef {
+	return clustering.MemberRef{
+		Owner: t.repository.Owner(), Repo: t.repository.Repo(), Kind: t.kind, Number: t.number,
 	}
-	return "", fmt.Errorf("unsupported thread kind %q", kind)
+}
+
+func normalizeThreadKind(kind string) (domain.ThreadKind, error) {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "issue", "issues":
+		return domain.IssueKind, nil
+	case "pull_request", "pullrequest", "pr", "pull":
+		return domain.PullRequestKind, nil
+	}
+	return domain.ThreadKind(""), fmt.Errorf("unsupported thread kind %q", kind)
 }
 
 func candidateFromThread(repo domain.RepoRef, t corpus.Thread) clustering.Candidate {
@@ -244,12 +251,12 @@ func candidateFromThread(repo domain.RepoRef, t corpus.Thread) clustering.Candid
 
 func neighborFromClustering(n clustering.Neighbor) Neighbor {
 	return Neighbor{
-		Kind:   n.Ref.Kind,
+		Kind:   string(n.Ref.Kind),
 		Owner:  n.Ref.Owner,
 		Repo:   n.Ref.Repo,
 		Number: n.Ref.Number,
 		Title:  n.Title,
-		State:  n.State,
+		State:  string(n.State),
 		Score:  n.Score,
 		Reason: n.Reason,
 	}
@@ -278,7 +285,7 @@ func sortNeighborsByScore(n []Neighbor) {
 
 func sameRef(a, b clustering.MemberRef) bool {
 	return a.Number == b.Number &&
-		strings.EqualFold(a.Kind, b.Kind) &&
+		a.Kind == b.Kind &&
 		strings.EqualFold(a.Owner, b.Owner) &&
 		strings.EqualFold(a.Repo, b.Repo)
 }
@@ -333,7 +340,7 @@ func (s *Service) PullRequestCollisions(ctx context.Context, repo contracts.Repo
 		return nil, fmt.Errorf("%w: %s", errRepositoryNotFound, dref)
 	}
 
-	query, err := c.GetThread(ctx, repository.ID, corpus.ThreadKindPullRequest, number)
+	query, err := c.GetThread(ctx, repository.ID, domain.PullRequestKind, number)
 	if err != nil {
 		return nil, err
 	}
@@ -348,11 +355,11 @@ func (s *Service) PullRequestCollisions(ctx context.Context, repo contracts.Repo
 	queryBase := parsePRBaseRef(queryPayload)
 	queryRefs := clustering.ExtractMemberRefs(query.Title+"\n"+query.Body, dref)
 
-	population, err := c.CountThreadsFiltered(ctx, repository.ID, corpus.ThreadKindPullRequest, "open")
+	population, err := c.CountThreadsFiltered(ctx, repository.ID, corpus.PullRequestThreadKind(), corpus.OpenThreadState())
 	if err != nil {
 		return nil, err
 	}
-	prs, err := c.ListThreadsFiltered(ctx, repository.ID, corpus.ThreadKindPullRequest, "open", maxCandidateLimit)
+	prs, err := c.ListThreadsFiltered(ctx, repository.ID, corpus.PullRequestThreadKind(), corpus.OpenThreadState(), maxCandidateLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -461,7 +468,7 @@ func referencesThread(refs []clustering.MemberRef, target clustering.MemberRef) 
 		if !strings.EqualFold(r.Owner, target.Owner) || !strings.EqualFold(r.Repo, target.Repo) {
 			continue
 		}
-		if r.Kind != "" && !strings.EqualFold(r.Kind, target.Kind) {
+		if r.Kind != "" && r.Kind != target.Kind {
 			continue
 		}
 		return true
@@ -506,248 +513,4 @@ func sortPRCollisions(c []PullRequestCollision) {
 		}
 		return c[i].Number < c[j].Number
 	})
-}
-
-// CheckHypothesisDuplicates searches the local corpus for threads similar to
-// a hypothesis, returning each finding as evidence.
-func (s *Service) CheckHypothesisDuplicates(ctx context.Context, hypothesisID string, limit int) (*contracts.DuplicateCheckResult, error) {
-	invSvc, err := s.readInvestigationSvc(ctx)
-	if err != nil {
-		return nil, err
-	}
-	h, err := invSvc.GetHypothesis(ctx, hypothesisID)
-	if err != nil {
-		return nil, mapInvestigationError(err)
-	}
-	inv, err := invSvc.GetInvestigation(ctx, h.InvestigationID)
-	if err != nil {
-		return nil, mapInvestigationError(err)
-	}
-	query := candidateFromHypothesis(h, inv.Repo)
-	neighbors, revision, effectiveLimit, err := s.findSimilarThreads(ctx, inv.Repo, query, "", false, limit)
-	if err != nil {
-		return nil, err
-	}
-	findings := make([]evidence.Evidence, 0, len(neighbors))
-	for _, n := range neighbors {
-		findings = append(findings, evidenceFromNeighbor(n, inv.Repo, inv.ID, h.ID, "", evidence.RelationInconclusive))
-	}
-	return &contracts.DuplicateCheckResult{
-		HypothesisID:   h.ID,
-		Repo:           inv.Repo,
-		Query:          query.Title,
-		Findings:       findings,
-		SourceRevision: revision,
-		Limit:          effectiveLimit,
-		Total:          len(findings),
-	}, nil
-}
-
-// CheckOpportunityDuplicates searches the local corpus for threads similar to
-// an opportunity.
-func (s *Service) CheckOpportunityDuplicates(ctx context.Context, opportunityID string, limit int) (*contracts.DuplicateCheckResult, error) {
-	invSvc, err := s.readInvestigationSvc(ctx)
-	if err != nil {
-		return nil, err
-	}
-	o, err := invSvc.GetOpportunity(ctx, opportunityID)
-	if err != nil {
-		return nil, mapInvestigationError(err)
-	}
-	inv, err := invSvc.GetInvestigation(ctx, o.InvestigationID)
-	if err != nil {
-		return nil, mapInvestigationError(err)
-	}
-	query := candidateFromOpportunity(o, inv.Repo)
-	neighbors, revision, effectiveLimit, err := s.findSimilarThreads(ctx, inv.Repo, query, "", false, limit)
-	if err != nil {
-		return nil, err
-	}
-	findings := make([]evidence.Evidence, 0, len(neighbors))
-	for _, n := range neighbors {
-		findings = append(findings, evidenceFromNeighbor(n, inv.Repo, inv.ID, o.HypothesisID, o.ID, evidence.RelationInconclusive))
-	}
-	return &contracts.DuplicateCheckResult{
-		OpportunityID:  o.ID,
-		Repo:           inv.Repo,
-		Query:          query.Title,
-		Findings:       findings,
-		SourceRevision: revision,
-		Limit:          effectiveLimit,
-		Total:          len(findings),
-	}, nil
-}
-
-// CheckHypothesisCollisions searches the local corpus for open pull requests
-// that may collide with a hypothesis.
-func (s *Service) CheckHypothesisCollisions(ctx context.Context, hypothesisID string, limit int) (*contracts.CollisionCheckResult, error) {
-	invSvc, err := s.readInvestigationSvc(ctx)
-	if err != nil {
-		return nil, err
-	}
-	h, err := invSvc.GetHypothesis(ctx, hypothesisID)
-	if err != nil {
-		return nil, mapInvestigationError(err)
-	}
-	inv, err := invSvc.GetInvestigation(ctx, h.InvestigationID)
-	if err != nil {
-		return nil, mapInvestigationError(err)
-	}
-	query := candidateFromHypothesis(h, inv.Repo)
-	return s.collisionsForQuery(ctx, inv, h.ID, "", query, limit)
-}
-
-// CheckOpportunityCollisions searches the local corpus for open pull requests
-// that may collide with an opportunity.
-func (s *Service) CheckOpportunityCollisions(ctx context.Context, opportunityID string, limit int) (*contracts.CollisionCheckResult, error) {
-	invSvc, err := s.readInvestigationSvc(ctx)
-	if err != nil {
-		return nil, err
-	}
-	o, err := invSvc.GetOpportunity(ctx, opportunityID)
-	if err != nil {
-		return nil, mapInvestigationError(err)
-	}
-	inv, err := invSvc.GetInvestigation(ctx, o.InvestigationID)
-	if err != nil {
-		return nil, mapInvestigationError(err)
-	}
-	query := candidateFromOpportunity(o, inv.Repo)
-	return s.collisionsForQuery(ctx, inv, o.HypothesisID, o.ID, query, limit)
-}
-
-func (s *Service) collisionsForQuery(ctx context.Context, inv *investigation.Investigation, hypothesisID, opportunityID string, query clustering.Candidate, limit int) (*contracts.CollisionCheckResult, error) {
-	neighbors, revision, effectiveLimit, err := s.findSimilarThreads(ctx, inv.Repo, query, corpus.ThreadKindPullRequest, true, limit)
-	if err != nil {
-		return nil, err
-	}
-	findings := make([]evidence.Evidence, 0, len(neighbors))
-	for _, n := range neighbors {
-		findings = append(findings, evidenceFromNeighbor(n, inv.Repo, inv.ID, hypothesisID, opportunityID, evidence.RelationContradicting))
-	}
-	return &contracts.CollisionCheckResult{
-		HypothesisID:   hypothesisID,
-		OpportunityID:  opportunityID,
-		Repo:           inv.Repo,
-		Query:          query.Title,
-		Findings:       findings,
-		SourceRevision: revision,
-		Limit:          effectiveLimit,
-		Total:          len(findings),
-	}, nil
-}
-
-func (s *Service) findSimilarThreads(ctx context.Context, repo domain.RepoRef, query clustering.Candidate, kind string, onlyOpen bool, limit int) ([]clustering.Neighbor, string, int, error) {
-	if !repo.IsValid() {
-		return nil, "", 0, errors.New("repository is required")
-	}
-	limit, err := normalizeSimilarityLimit(limit)
-	if err != nil {
-		return nil, "", 0, err
-	}
-	c, err := s.openReadOnlyCorpus(ctx)
-	if err != nil {
-		return nil, "", 0, err
-	}
-	repository, err := c.GetRepository(ctx, repo.Owner(), repo.Repo())
-	if err != nil {
-		return nil, "", 0, err
-	}
-	if repository == nil {
-		// No local corpus data for this repository; return an empty result without
-		// performing network access.
-		return nil, "", limit, nil
-	}
-	state := ""
-	if onlyOpen {
-		state = "open"
-	}
-	threads, err := c.ListThreadsFiltered(ctx, repository.ID, kind, state, similarityCandidateLimit(limit))
-	if err != nil {
-		return nil, "", 0, err
-	}
-	candidates := make([]clustering.Candidate, 0, len(threads))
-	for _, t := range threads {
-		candidates = append(candidates, candidateFromThread(repo, t))
-	}
-	all := append([]clustering.Candidate{query}, candidates...)
-	neighbors, err := clustering.Neighbors(ctx, query, candidates, limit)
-	if err != nil {
-		return nil, "", 0, err
-	}
-	return neighbors, clustering.SourceRevision(all), limit, nil
-}
-
-func normalizeSimilarityLimit(limit int) (int, error) {
-	if limit <= 0 {
-		return defaultNeighborsLimit, nil
-	}
-	if limit > maxResultLimit {
-		return 0, fmt.Errorf("neighbors limit cannot exceed %d", maxResultLimit)
-	}
-	return limit, nil
-}
-
-func similarityCandidateLimit(limit int) int {
-	return min(maxCandidateLimit, max(minCandidateLimit, limit*candidateLimitFactor))
-}
-
-func candidateFromHypothesis(h *investigation.Hypothesis, repo domain.RepoRef) clustering.Candidate {
-	body := h.Description
-	if h.ExpectedBehavior != "" {
-		body += "\n" + h.ExpectedBehavior
-	}
-	if h.ObservedBehavior != "" {
-		body += "\n" + h.ObservedBehavior
-	}
-	if h.PotentialImpact != "" {
-		body += "\n" + h.PotentialImpact
-	}
-	for _, ref := range h.SourceRefs {
-		if ref.URL != "" {
-			body += "\n" + ref.URL
-		}
-	}
-	for _, link := range h.Links {
-		if link.Ref != "" {
-			body += "\n" + link.Ref
-		}
-	}
-	return clustering.Candidate{Repo: repo, Title: h.Title, Body: body}
-}
-
-func candidateFromOpportunity(o *investigation.Opportunity, repo domain.RepoRef) clustering.Candidate {
-	body := o.ProblemStatement
-	if o.Scope != "" {
-		body += "\n" + o.Scope
-	}
-	if o.Impact != "" {
-		body += "\n" + o.Impact
-	}
-	for _, ref := range o.SourceRefs {
-		if ref.URL != "" {
-			body += "\n" + ref.URL
-		}
-	}
-	return clustering.Candidate{Repo: repo, Title: o.Title, Body: body}
-}
-
-func evidenceFromNeighbor(n clustering.Neighbor, _ domain.RepoRef, investigationID, hypothesisID, opportunityID string, relation evidence.Relation) evidence.Evidence {
-	path := "issues"
-	if strings.EqualFold(n.Ref.Kind, corpus.ThreadKindPullRequest) {
-		path = "pull"
-	}
-	url := fmt.Sprintf("https://github.com/%s/%s/%s/%d", n.Ref.Owner, n.Ref.Repo, path, n.Ref.Number)
-	now := time.Now().UTC()
-	return evidence.Evidence{
-		ID:              uuid.NewString(),
-		InvestigationID: investigationID,
-		HypothesisID:    hypothesisID,
-		OpportunityID:   opportunityID,
-		Type:            evidence.EvidenceTypeGitHubSource,
-		Relation:        relation,
-		Description:     fmt.Sprintf("possible related %s #%d: %s (score %.2f): %s", n.Ref.Kind, n.Ref.Number, n.Title, n.Score, n.Reason),
-		SourceRefs:      []domain.SourceRef{{Source: "local-corpus", URL: url, ObservedAt: now}},
-		CreatedAt:       now,
-	}
 }

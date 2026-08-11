@@ -2,6 +2,7 @@ package clustering
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -11,7 +12,7 @@ import (
 type MemberRef struct {
 	Owner  string
 	Repo   string
-	Kind   string
+	Kind   domain.ThreadKind
 	Number int
 }
 
@@ -37,9 +38,9 @@ func (m MemberRef) Less(other MemberRef) bool {
 type Candidate struct {
 	ThreadID  int64
 	Repo      domain.RepoRef
-	Kind      string
+	Kind      domain.ThreadKind
 	Number    int
-	State     string
+	State     domain.ThreadState
 	Title     string
 	Body      string
 	Author    string
@@ -63,7 +64,7 @@ type Member struct {
 	ThreadID int64
 	Ref      MemberRef
 	Title    string
-	State    string
+	State    domain.ThreadState
 	Score    float64
 	Reason   string
 	Included bool
@@ -79,6 +80,21 @@ const (
 	// longer present in the latest computation.
 	ClusterRetired ClusterState = "retired"
 )
+
+// ParseClusterState converts durable text into a supported cluster lifecycle
+// state.
+func ParseClusterState(value string) (ClusterState, error) {
+	switch ClusterState(strings.TrimSpace(value)) {
+	case ClusterOpen:
+		return ClusterOpen, nil
+	case ClusterClosed:
+		return ClusterClosed, nil
+	case ClusterRetired:
+		return ClusterRetired, nil
+	default:
+		return "", fmt.Errorf("unsupported cluster state %q", value)
+	}
+}
 
 // Cluster is a group of duplicate-candidate threads.
 type Cluster struct {
@@ -103,6 +119,21 @@ const (
 	OverrideExclude      OverrideAction = "exclude"
 	OverrideSetCanonical OverrideAction = "set_canonical"
 )
+
+// ParseOverrideAction converts durable text into a supported local governance
+// decision.
+func ParseOverrideAction(value string) (OverrideAction, error) {
+	switch OverrideAction(strings.TrimSpace(value)) {
+	case OverrideInclude:
+		return OverrideInclude, nil
+	case OverrideExclude:
+		return OverrideExclude, nil
+	case OverrideSetCanonical:
+		return OverrideSetCanonical, nil
+	default:
+		return "", fmt.Errorf("unsupported cluster override action %q", value)
+	}
+}
 
 // MembershipOverride records an explicit local include/exclude/canonical decision.
 type MembershipOverride struct {

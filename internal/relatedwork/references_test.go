@@ -12,7 +12,7 @@ func TestExtractClassifiesRelationshipsAndExcludesQuotedCode(t *testing.T) {
 	if len(refs) != 3 {
 		t.Fatalf("references = %+v", refs)
 	}
-	want := map[int]string{1: RelationClaimsToClose, 2: RelationDependsOn, 3: RelationBlocks}
+	want := map[int]Relation{1: RelationClaimsToClose, 2: RelationDependsOn, 3: RelationBlocks}
 	for _, ref := range refs {
 		if ref.Repo != repo || want[ref.Number] != ref.Relation {
 			t.Fatalf("reference = %+v, want relation %q", ref, want[ref.Number])
@@ -62,7 +62,7 @@ func TestExtractClassifiesReplacementDirectionAndEvidence(t *testing.T) {
 	if len(refs) != 2 {
 		t.Fatalf("references = %+v", refs)
 	}
-	want := map[int]string{3: RelationReplaces, 8: RelationSupersededBy}
+	want := map[int]Relation{3: RelationReplaces, 8: RelationSupersededBy}
 	for _, ref := range refs {
 		if ref.Relation != want[ref.Number] || ref.Evidence == "" {
 			t.Fatalf("reference = %+v, want relation %q with evidence", ref, want[ref.Number])

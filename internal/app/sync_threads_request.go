@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
@@ -24,9 +23,9 @@ type syncThreadsSelection interface {
 }
 
 type repositoryThreadSelection struct {
-	repositories       []mcpcontract.RepositoryRef
-	kind               string
-	state              string
+	repositories       []domain.RepoRef
+	kind               syncThreadKind
+	state              syncThreadState
 	updatedAfter       time.Time
 	limitPerRepository int
 }
@@ -34,10 +33,24 @@ type repositoryThreadSelection struct {
 func (repositoryThreadSelection) isSyncThreadsSelection() {}
 
 type exactThreadSelection struct {
-	threads []mcpcontract.ThreadRef
+	threads []exactThreadTarget
 }
 
 func (exactThreadSelection) isSyncThreadsSelection() {}
+
+type exactThreadTarget struct {
+	repository domain.RepoRef
+	kind       syncThreadKind
+	number     int
+}
+
+func (t exactThreadTarget) wire() mcpcontract.ThreadRef {
+	kind := ""
+	if !t.kind.includesAll() {
+		kind = t.kind.String()
+	}
+	return mcpcontract.ThreadRef{Owner: t.repository.Owner(), Repo: t.repository.Repo(), Kind: kind, Number: t.number}
+}
 
 func parseSyncThreadsInput(in mcpcontract.SyncThreadsInput) (syncThreadsRequest, mcpcontract.SyncThreadsInput, error) {
 	if in.MaxRequests == 0 {
@@ -72,29 +85,31 @@ func parseRepositoryThreadSelection(in mcpcontract.SyncThreadsInput) (repository
 		return repositoryThreadSelection{}, mcpcontract.SyncThreadsInput{}, errors.New("repositories must contain 1 to 50 items")
 	}
 	in.Repositories = append([]mcpcontract.RepositoryRef(nil), in.Repositories...)
+	repositories := make([]domain.RepoRef, len(in.Repositories))
 	for i := range in.Repositories {
 		ref, err := domain.NewRepoRef(in.Repositories[i].Owner, in.Repositories[i].Repo)
 		if err != nil {
 			return repositoryThreadSelection{}, mcpcontract.SyncThreadsInput{}, err
 		}
 		in.Repositories[i] = mcpcontract.RepositoryRef{Owner: ref.Owner(), Repo: ref.Repo()}
+		repositories[i] = ref
 	}
 	if err := rejectDuplicateRepositoryRefs(in.Repositories); err != nil {
 		return repositoryThreadSelection{}, mcpcontract.SyncThreadsInput{}, err
 	}
-	in.Kind = strings.TrimSpace(in.Kind)
-	if in.Kind == "" {
-		in.Kind = "both"
+	kind, err := parseSyncThreadKind(in.Kind)
+	if err != nil {
+		return repositoryThreadSelection{}, mcpcontract.SyncThreadsInput{}, err
 	}
-	if in.Kind != corpus.ThreadKindIssue && in.Kind != corpus.ThreadKindPullRequest && in.Kind != "both" {
-		return repositoryThreadSelection{}, mcpcontract.SyncThreadsInput{}, errors.New("kind must be issue, pull_request, or both")
-	}
+	in.Kind = kind.String()
 	if in.State == "" {
 		in.State = "open"
 	}
-	if in.State != "open" && in.State != "closed" && in.State != "all" {
-		return repositoryThreadSelection{}, mcpcontract.SyncThreadsInput{}, errors.New("state must be open, closed, or all")
+	state, err := parseSyncThreadState(in.State)
+	if err != nil {
+		return repositoryThreadSelection{}, mcpcontract.SyncThreadsInput{}, err
 	}
+	in.State = state.String()
 	var updatedAfter time.Time
 	if in.UpdatedAfter != "" {
 		parsed, err := time.Parse(time.RFC3339, in.UpdatedAfter)
@@ -110,9 +125,9 @@ func parseRepositoryThreadSelection(in mcpcontract.SyncThreadsInput) (repository
 		return repositoryThreadSelection{}, mcpcontract.SyncThreadsInput{}, errors.New("limit_per_repository must be between 1 and 1000")
 	}
 	selection := repositoryThreadSelection{
-		repositories:       append([]mcpcontract.RepositoryRef(nil), in.Repositories...),
-		kind:               in.Kind,
-		state:              in.State,
+		repositories:       repositories,
+		kind:               kind,
+		state:              state,
 		updatedAfter:       updatedAfter,
 		limitPerRepository: in.LimitPerRepository,
 	}
@@ -130,6 +145,7 @@ func parseExactThreadSelection(in mcpcontract.SyncThreadsInput) (exactThreadSele
 		return exactThreadSelection{}, mcpcontract.SyncThreadsInput{}, errors.New("threads must contain 1 to 100 items")
 	}
 	in.Threads = append([]mcpcontract.ThreadRef(nil), in.Threads...)
+	threads := make([]exactThreadTarget, len(in.Threads))
 	for i, thread := range in.Threads {
 		ref, err := domain.NewRepoRef(thread.Owner, thread.Repo)
 		if err != nil {
@@ -138,15 +154,20 @@ func parseExactThreadSelection(in mcpcontract.SyncThreadsInput) (exactThreadSele
 		if thread.Number <= 0 {
 			return exactThreadSelection{}, mcpcontract.SyncThreadsInput{}, mcpcontract.InvalidArgument(fmt.Sprintf("threads[%d].number", i), "must be positive", nil)
 		}
-		kind := strings.TrimSpace(thread.Kind)
-		if kind != "" && kind != corpus.ThreadKindIssue && kind != corpus.ThreadKindPullRequest {
+		kindValue := strings.TrimSpace(thread.Kind)
+		if kindValue == "both" {
+			return exactThreadSelection{}, mcpcontract.SyncThreadsInput{}, mcpcontract.InvalidArgument(fmt.Sprintf("threads[%d].kind", i), "must be issue or pull_request when provided", nil)
+		}
+		kind, err := parseSyncThreadKind(kindValue)
+		if err != nil {
 			return exactThreadSelection{}, mcpcontract.SyncThreadsInput{}, mcpcontract.InvalidArgument(fmt.Sprintf("threads[%d].kind", i), "must be issue or pull_request when provided", nil)
 		}
 		in.Threads[i].Owner, in.Threads[i].Repo = ref.Owner(), ref.Repo()
-		in.Threads[i].Kind = kind
+		in.Threads[i].Kind = kindValue
+		threads[i] = exactThreadTarget{repository: ref, kind: kind, number: thread.Number}
 	}
 	if err := rejectDuplicateThreadRefs(in.Threads); err != nil {
 		return exactThreadSelection{}, mcpcontract.SyncThreadsInput{}, err
 	}
-	return exactThreadSelection{threads: append([]mcpcontract.ThreadRef(nil), in.Threads...)}, in, nil
+	return exactThreadSelection{threads: threads}, in, nil
 }

@@ -81,6 +81,32 @@ func TestDiscoverySourcesAndPartitionsPersist(t *testing.T) {
 	}
 }
 
+func TestDiscoverySourceKindsAreParsedAtStorageBoundaries(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+
+	source, err := c.SaveDiscoverySource(ctx, DiscoverySource{Name: "canonical", Kind: " SEARCH ", Definition: `{}`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.Kind != DiscoverySourceSearch {
+		t.Fatalf("canonical source kind = %q", source.Kind)
+	}
+	if _, err := c.SaveDiscoverySource(ctx, DiscoverySource{Name: "invalid", Kind: "feed"}); err == nil {
+		t.Fatal("unsupported discovery source kind was stored")
+	}
+	if _, err := c.db.ExecContext(ctx, `UPDATE discovery_sources SET kind='feed' WHERE id=?`, source.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.GetDiscoverySource(ctx, source.Name); err == nil {
+		t.Fatal("discovery source read accepted an invalid stored kind")
+	}
+	if _, err := c.ListDiscoverySources(ctx); err == nil {
+		t.Fatal("discovery source list accepted an invalid stored kind")
+	}
+}
+
 func TestDiscoverySourceListExposesHardCapTruncation(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

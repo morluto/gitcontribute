@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"hash"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -22,6 +23,25 @@ const (
 	ProjectionNamePullRequestFeedbackFTS = "pull_request_feedback_fts"
 )
 
+// ParseProjectionStatus converts durable text into a supported projection
+// lifecycle state.
+func ParseProjectionStatus(value string) (ProjectionStatus, error) {
+	switch ProjectionStatus(strings.TrimSpace(value)) {
+	case ProjectionStatusAbsent:
+		return ProjectionStatusAbsent, nil
+	case ProjectionStatusBuilding:
+		return ProjectionStatusBuilding, nil
+	case ProjectionStatusCurrent:
+		return ProjectionStatusCurrent, nil
+	case ProjectionStatusStale:
+		return ProjectionStatusStale, nil
+	case ProjectionStatusFailed:
+		return ProjectionStatusFailed, nil
+	default:
+		return "", fmt.Errorf("unsupported projection status %q", value)
+	}
+}
+
 // Product-owned versions for derived SQLite search projections.
 const (
 	ProjectionVersionThreadsFTS             = "threads-fts-v3"
@@ -30,6 +50,23 @@ const (
 	ProjectionVersionCodeDocumentsFTS       = "code-documents-fts-v1"
 	ProjectionVersionPullRequestFeedbackFTS = "pull-request-feedback-fts-v2"
 )
+
+// ParseProjectionAttemptStatus converts durable text into a supported rebuild
+// attempt state. Empty is the historical representation of no attempt.
+func ParseProjectionAttemptStatus(value string) (ProjectionAttemptStatus, error) {
+	switch ProjectionAttemptStatus(strings.TrimSpace(value)) {
+	case ProjectionAttemptNone:
+		return ProjectionAttemptNone, nil
+	case ProjectionAttemptBuilding:
+		return ProjectionAttemptBuilding, nil
+	case ProjectionAttemptSucceeded:
+		return ProjectionAttemptSucceeded, nil
+	case ProjectionAttemptFailed:
+		return ProjectionAttemptFailed, nil
+	default:
+		return "", fmt.Errorf("unsupported projection attempt status %q", value)
+	}
+}
 
 // ProjectionStatus describes the durability state of a derived projection.
 type ProjectionStatus string
@@ -122,6 +159,7 @@ func (c *Corpus) RequireFreshProjection(ctx context.Context, name, version strin
 // GetProjectionState returns the durable state for one derived projection.
 func (c *Corpus) GetProjectionState(ctx context.Context, name string) (ProjectionState, error) {
 	var state ProjectionState
+	var status, attemptStatus string
 	var refreshed, attemptStarted, attemptFinished sql.NullInt64
 	err := c.db.QueryRowContext(ctx, `
 		SELECT name, version, status, refreshed_at, row_count,
@@ -129,8 +167,8 @@ func (c *Corpus) GetProjectionState(ctx context.Context, name string) (Projectio
 		       attempt_started_at, attempt_finished_at, attempt_error
 		FROM projection_states
 		WHERE name = ?
-	`, name).Scan(&state.Name, &state.Version, &state.Status, &refreshed, &state.RowCount,
-		&state.SourceRevision, &state.ContentHash, &state.AttemptStatus,
+	`, name).Scan(&state.Name, &state.Version, &status, &refreshed, &state.RowCount,
+		&state.SourceRevision, &state.ContentHash, &attemptStatus,
 		&attemptStarted, &attemptFinished, &state.AttemptError)
 	if errors.Is(err, sql.ErrNoRows) {
 		if isSearchProjection(name) {
@@ -138,6 +176,14 @@ func (c *Corpus) GetProjectionState(ctx context.Context, name string) (Projectio
 		}
 		return ProjectionState{}, fmt.Errorf("%w: %s", ErrProjectionNotFound, name)
 	}
+	if err != nil {
+		return ProjectionState{}, fmt.Errorf("get projection state %s: %w", name, err)
+	}
+	state.Status, err = ParseProjectionStatus(status)
+	if err != nil {
+		return ProjectionState{}, fmt.Errorf("get projection state %s: %w", name, err)
+	}
+	state.AttemptStatus, err = ParseProjectionAttemptStatus(attemptStatus)
 	if err != nil {
 		return ProjectionState{}, fmt.Errorf("get projection state %s: %w", name, err)
 	}
@@ -162,11 +208,20 @@ func (c *Corpus) ListProjectionStates(ctx context.Context) (_ []ProjectionState,
 	var out []ProjectionState
 	for rows.Next() {
 		var state ProjectionState
+		var status, attemptStatus string
 		var refreshed, attemptStarted, attemptFinished sql.NullInt64
-		if err := rows.Scan(&state.Name, &state.Version, &state.Status, &refreshed, &state.RowCount,
-			&state.SourceRevision, &state.ContentHash, &state.AttemptStatus,
+		if err := rows.Scan(&state.Name, &state.Version, &status, &refreshed, &state.RowCount,
+			&state.SourceRevision, &state.ContentHash, &attemptStatus,
 			&attemptStarted, &attemptFinished, &state.AttemptError); err != nil {
 			return nil, err
+		}
+		state.Status, err = ParseProjectionStatus(status)
+		if err != nil {
+			return nil, fmt.Errorf("list projection state %s: %w", state.Name, err)
+		}
+		state.AttemptStatus, err = ParseProjectionAttemptStatus(attemptStatus)
+		if err != nil {
+			return nil, fmt.Errorf("list projection state %s: %w", state.Name, err)
 		}
 		setProjectionTimes(&state, refreshed, attemptStarted, attemptFinished)
 		out = append(out, state)
@@ -178,11 +233,6 @@ func (c *Corpus) ListProjectionStates(ctx context.Context) (_ []ProjectionState,
 // advances the durable projection state. It is explicit: search never calls it.
 func (c *Corpus) RebuildThreadSearchProjection(ctx context.Context) (ProjectionState, error) {
 	return c.rebuildSearchProjection(ctx, ProjectionNameThreadsFTS, ProjectionVersionThreadsFTS)
-}
-
-// RebuildRepositorySearchProjection atomically rebuilds repository search.
-func (c *Corpus) RebuildRepositorySearchProjection(ctx context.Context) (ProjectionState, error) {
-	return c.rebuildSearchProjection(ctx, ProjectionNameRepositoriesFTS, ProjectionVersionRepositoriesFTS)
 }
 
 // RebuildCodeSearchProjection atomically rebuilds the code_documents_fts index

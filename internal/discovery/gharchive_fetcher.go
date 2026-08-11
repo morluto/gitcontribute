@@ -36,8 +36,8 @@ type ArchiveFetcher interface {
 	Fetch(ctx context.Context, hour time.Time) (io.ReadCloser, error)
 }
 
-// ArchiveClient is a context-aware, bounded HTTP fetcher for GH Archive.
-type ArchiveClient struct {
+// archiveClient is the product's context-aware, bounded GH Archive fetcher.
+type archiveClient struct {
 	baseURL    string
 	httpClient *http.Client
 	timeout    time.Duration
@@ -46,7 +46,7 @@ type ArchiveClient struct {
 
 // NewArchiveClient returns an ArchiveFetcher with sensible production defaults.
 func NewArchiveClient() ArchiveFetcher {
-	return NewArchiveClientWithOptions(
+	return newArchiveClient(
 		DefaultArchiveBaseURL,
 		&http.Client{Timeout: DefaultArchiveTimeout},
 		DefaultArchiveTimeout,
@@ -54,14 +54,11 @@ func NewArchiveClient() ArchiveFetcher {
 	)
 }
 
-// NewArchiveClientWithOptions returns a fetcher using the supplied parameters.
-// It is intended for tests and advanced configuration; callers should avoid
-// exposing arbitrary base URLs to untrusted input.
-func NewArchiveClientWithOptions(baseURL string, client *http.Client, timeout time.Duration, maxBytes int64) *ArchiveClient {
+func newArchiveClient(baseURL string, client *http.Client, timeout time.Duration, maxBytes int64) *archiveClient {
 	if client == nil {
 		client = &http.Client{Timeout: timeout}
 	}
-	return &ArchiveClient{
+	return &archiveClient{
 		baseURL:    baseURL,
 		httpClient: client,
 		timeout:    timeout,
@@ -72,7 +69,7 @@ func NewArchiveClientWithOptions(baseURL string, client *http.Client, timeout ti
 // Fetch builds the canonical https://data.gharchive.org/YYYY-MM-DD-H.json.gz
 // URL, applies a per-request timeout, checks status and response size, and
 // returns a ReadCloser that enforces maxBytes while streaming.
-func (c *ArchiveClient) Fetch(ctx context.Context, hour time.Time) (io.ReadCloser, error) {
+func (c *archiveClient) Fetch(ctx context.Context, hour time.Time) (io.ReadCloser, error) {
 	hour = hour.UTC()
 	url := fmt.Sprintf("%s/%04d-%02d-%02d-%d.json.gz",
 		c.baseURL, hour.Year(), hour.Month(), hour.Day(), hour.Hour())
@@ -118,6 +115,8 @@ func (c *ArchiveClient) Fetch(ctx context.Context, hour time.Time) (io.ReadClose
 	}
 	return NewLimitedReader(resp.Body, c.maxBytes, closeBody, ErrResponseTooLarge), nil
 }
+
+var _ ArchiveFetcher = (*archiveClient)(nil)
 
 type ownedReadCloser struct {
 	io.Reader

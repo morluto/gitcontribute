@@ -26,14 +26,30 @@ func (r *MCPReader) ImportExternalEvidenceManifest(ctx context.Context, in mcpco
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return mcpcontract.ImportExternalEvidenceManifestOutput{}, errors.New("external evidence manifest must contain one JSON value")
 	}
+	completeness, err := evidence.ParseExternalEvidenceCompleteness(input.Completeness)
+	if err != nil {
+		return mcpcontract.ImportExternalEvidenceManifestOutput{}, err
+	}
+	integrity, err := evidence.ParseExternalEvidenceIntegrity(input.Integrity)
+	if err != nil {
+		return mcpcontract.ImportExternalEvidenceManifestOutput{}, err
+	}
 	claims := make([]evidence.ExternalEvidenceClaim, 0, len(input.Claims))
 	for _, claim := range input.Claims {
-		claims = append(claims, evidence.ExternalEvidenceClaim{ID: claim.ID, Type: evidence.EvidenceType(claim.Type), Relation: evidence.Relation(claim.Relation), Description: claim.Description, SourceRefs: append([]string(nil), claim.SourceRefs...), Measurements: claim.Measurements})
+		evidenceType, err := evidence.ParseEvidenceType(claim.Type)
+		if err != nil {
+			return mcpcontract.ImportExternalEvidenceManifestOutput{}, err
+		}
+		relation, err := evidence.ParseRelation(claim.Relation)
+		if err != nil {
+			return mcpcontract.ImportExternalEvidenceManifestOutput{}, err
+		}
+		claims = append(claims, evidence.ExternalEvidenceClaim{ID: claim.ID, Type: evidenceType, Relation: relation, Description: claim.Description, SourceRefs: append([]string(nil), claim.SourceRefs...), Measurements: claim.Measurements})
 	}
 	result, err := r.application().importExternalEvidenceManifest(ctx, evidence.ExternalEvidenceManifest{
 		SchemaVersion: input.SchemaVersion, Producer: input.Producer, InvestigationID: input.InvestigationID, HypothesisID: input.HypothesisID, OpportunityID: input.OpportunityID,
 		Repository: input.Repository, Revision: input.Revision, ArtifactSHA256: input.ArtifactSHA256, ObservedAt: input.ObservedAt, Environment: input.Environment,
-		Completeness: input.Completeness, Integrity: input.Integrity, Limitations: input.Limitations, Claims: claims, ManifestSHA256: input.ManifestSHA256,
+		Completeness: completeness, Integrity: integrity, Limitations: input.Limitations, Claims: claims, ManifestSHA256: input.ManifestSHA256,
 	})
 	if err != nil {
 		return mcpcontract.ImportExternalEvidenceManifestOutput{}, err

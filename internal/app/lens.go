@@ -126,11 +126,19 @@ func (s *Service) ExplainLens(ctx context.Context, name, ref string, opts contra
 	if kind == "" {
 		kind = inferredKind
 	}
-	matches, err := s.collectLensMatches(ctx, c, query, contracts.SearchOptions{
+	request, err := parseServiceSearchRequest(query, contracts.SearchOptions{
 		Kind: kind, Repo: opts.Repo, State: opts.State, Author: opts.Author,
 		Association: opts.Association, Assignee: opts.Assignee,
-		Labels: opts.Labels, UpdatedAfter: opts.UpdatedAfter,
-	}, now)
+		Labels: opts.Labels, UpdatedAfter: opts.UpdatedAfter, Lens: name,
+	})
+	if err != nil {
+		return nil, err
+	}
+	lensRequest, ok := request.(lensSearchRequest)
+	if !ok {
+		return nil, errors.New("invalid parsed lens explanation search")
+	}
+	matches, err := s.collectLensMatches(ctx, c, query, lensRequest.selection)
 	if err != nil {
 		return nil, err
 	}
@@ -177,14 +185,14 @@ func (s *Service) resolveLensExplainTarget(ctx context.Context, c *corpus.Corpus
 	case "repo":
 		return s.resolveRepoLensTarget(ctx, c, rest)
 	case "issue":
-		return s.resolveThreadLensTarget(ctx, c, rest, corpus.ThreadKindIssue)
+		return s.resolveThreadLensTarget(ctx, c, rest, domain.IssueKind)
 	case "pr", "pull_request":
-		return s.resolveThreadLensTarget(ctx, c, rest, corpus.ThreadKindPullRequest)
+		return s.resolveThreadLensTarget(ctx, c, rest, domain.PullRequestKind)
 	case "code":
 		return s.resolveCodeLensTarget(ctx, c, rest)
 	case "":
 		if strings.Contains(ref, "#") {
-			return s.resolveThreadLensTarget(ctx, c, ref, "")
+			return s.resolveThreadLensTarget(ctx, c, ref, domain.ThreadKind(""))
 		}
 		return s.resolveRepoLensTarget(ctx, c, ref)
 	default:
@@ -214,7 +222,7 @@ func (s *Service) resolveRepoLensTarget(ctx context.Context, c *corpus.Corpus, r
 	}
 	return searchMatch{
 		Repo:      repoRef,
-		Kind:      "repo",
+		Kind:      searchRepositoryMatch,
 		Title:     repoRef.String(),
 		Body:      repo.Description,
 		URL:       fmt.Sprintf("https://github.com/%s", repoRef),
@@ -228,7 +236,7 @@ func (s *Service) resolveRepoLensTarget(ctx context.Context, c *corpus.Corpus, r
 	}, "repos", nil
 }
 
-func (s *Service) resolveThreadLensTarget(ctx context.Context, c *corpus.Corpus, ref, kind string) (searchMatch, string, error) {
+func (s *Service) resolveThreadLensTarget(ctx context.Context, c *corpus.Corpus, ref string, kind domain.ThreadKind) (searchMatch, string, error) {
 	repoRef, number, err := parseThreadRef(ref)
 	if err != nil {
 		return searchMatch{}, "", err
@@ -252,30 +260,35 @@ func (s *Service) resolveThreadLensTarget(ctx context.Context, c *corpus.Corpus,
 		return searchMatch{}, "", fmt.Errorf("thread %q is a %s, not a %s", ref, thread.Kind, kind)
 	}
 
-	m := searchMatch{
-		Repo:        repoRef,
-		Kind:        thread.Kind,
-		Number:      thread.Number,
-		State:       thread.State,
-		StateReason: thread.StateReason,
-		Title:       thread.Title,
-		Body:        thread.Body,
-		Author:      thread.Author,
-		Labels:      thread.Labels,
-		Assignees:   thread.Assignees,
-		Draft:       thread.Draft,
-		ClosedAt:    thread.ClosedAt,
-		Merge:       thread.Merge,
-		Language:    repo.Language,
-		Archived:    repo.Archived,
-		Stars:       repo.Stars,
-		Watchers:    repo.Watchers,
-		Forks:       repo.Forks,
-		UpdatedAt:   thread.SourceUpdatedAt,
-		Freshness:   thread.SourceUpdatedAt,
-		URL:         threadURL(repoRef, thread.Kind, thread.Number),
+	matchKind, err := searchMatchKindForThread(thread.Kind)
+	if err != nil {
+		return searchMatch{}, "", err
 	}
-	if thread.Kind == corpus.ThreadKindPullRequest {
+	m := searchMatch{
+		Repo:              repoRef,
+		Kind:              matchKind,
+		Number:            thread.Number,
+		State:             string(thread.State),
+		StateReason:       thread.StateReason,
+		Title:             thread.Title,
+		Body:              thread.Body,
+		Author:            thread.Author,
+		AuthorAssociation: thread.AuthorAssociation,
+		Labels:            thread.Labels,
+		Assignees:         thread.Assignees,
+		Draft:             thread.Draft,
+		ClosedAt:          thread.ClosedAt,
+		Merge:             thread.Merge,
+		Language:          repo.Language,
+		Archived:          repo.Archived,
+		Stars:             repo.Stars,
+		Watchers:          repo.Watchers,
+		Forks:             repo.Forks,
+		UpdatedAt:         thread.SourceUpdatedAt,
+		Freshness:         thread.SourceUpdatedAt,
+		URL:               threadURL(repoRef, thread.Kind, thread.Number),
+	}
+	if thread.Kind == domain.PullRequestKind {
 		return m, "prs", nil
 	}
 	return m, "issues", nil
@@ -309,7 +322,7 @@ func (s *Service) resolveCodeLensTarget(ctx context.Context, c *corpus.Corpus, r
 
 	return searchMatch{
 		Repo:      repoRef,
-		Kind:      "code",
+		Kind:      searchCodeMatch,
 		Title:     doc.Path,
 		Body:      doc.Content,
 		URL:       fmt.Sprintf("https://github.com/%s/blob/%s/%s", repoRef, doc.Commit, doc.Path),
@@ -360,7 +373,7 @@ func buildLensExplainResult(record *corpus.LensRecord, found lens.Result, match 
 	}
 
 	result.Candidate = contracts.LensExplainCandidate{
-		Kind:      match.Kind,
+		Kind:      match.Kind.String(),
 		Repo:      contracts.RepoRef{Owner: match.Repo.Owner(), Repo: match.Repo.Repo()},
 		Number:    match.Number,
 		Title:     match.Title,

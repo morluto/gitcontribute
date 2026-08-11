@@ -123,11 +123,16 @@ func concernSourceProvenance(values []mcpcontract.EvidenceSourceRevision) ([]evi
 		if err != nil {
 			return nil, fmt.Errorf("source_provenance[%d].observed_at: %w", index, err)
 		}
+		subject, err := evidence.ParseSourceSubject(
+			value.Subject.Kind, value.Subject.Owner, value.Subject.Repo,
+			value.Subject.ThreadKind, value.Subject.Number, value.Subject.Facet,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("source_provenance[%d].subject: %w", index, err)
+		}
 		out[index] = evidence.SourceRevision{
-			Subject: evidence.SourceSubject{
-				Kind: evidence.SourceSubjectKind(value.Subject.Kind), Owner: value.Subject.Owner, Repo: value.Subject.Repo,
-				ThreadKind: value.Subject.ThreadKind, Number: value.Subject.Number, Facet: value.Subject.Facet,
-			}, SourceUpdatedAt: sourceUpdatedAt, ObservationSequence: value.ObservationSequence, ObservedAt: observedAt,
+			Subject: subject, SourceUpdatedAt: sourceUpdatedAt,
+			ObservationSequence: value.ObservationSequence, ObservedAt: observedAt,
 		}
 	}
 	return out, nil

@@ -67,7 +67,7 @@ func TestMCPReaderSearchGitHubThreadsPersistsArtifactWithoutFullCoverage(t *test
 	now := time.Date(2026, 8, 1, 1, 2, 3, 0, time.UTC)
 	svc.SetClock(func() time.Time { return now })
 	reader := &MCPReader{svc}
-	out, err := reader.SearchGitHubThreads(context.Background(), mcpcontract.SearchGitHubThreadsInput{Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}, Query: "persist", Kind: "issue", Limit: 2})
+	out, err := reader.SearchGitHubThreads(context.Background(), mcpcontract.SearchGitHubThreadsInput{Repository: mcpcontract.RepositoryRef{Owner: " acme ", Repo: " rocket "}, Query: " persist ", Kind: " issue ", Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,15 +168,18 @@ func TestMCPReaderReadSourceFilesStoresCommitAndBlobProvenanceAndReadsLocally(t 
 	}
 }
 
-func TestValidateReadSourceFilesInputTrimsRef(t *testing.T) {
-	in := mcpcontract.ReadSourceFilesInput{
-		Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}, Ref: " main ", Files: []mcpcontract.SourceFileRequest{{Path: "README.md"}},
-	}
-	if err := validateReadSourceFilesInput(&in); err != nil {
+func TestParseReadSourceFilesInputOwnsCanonicalBoundary(t *testing.T) {
+	files := []mcpcontract.SourceFileRequest{{Path: " README.md "}}
+	request, err := parseReadSourceFilesInput(mcpcontract.ReadSourceFilesInput{
+		Repository: mcpcontract.RepositoryRef{Owner: " acme ", Repo: " rocket "}, Ref: " main ", Files: files,
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if in.Ref != "main" {
-		t.Fatalf("ref = %q, want canonical main", in.Ref)
+	files[0].Path = "changed.md"
+	canonical := request.canonical()
+	if canonical.Repository.Owner != "acme" || canonical.Repository.Repo != "rocket" || canonical.Ref != "main" || canonical.Files[0].Path != "README.md" {
+		t.Fatalf("canonical source request = %+v", canonical)
 	}
 }
 

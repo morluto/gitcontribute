@@ -19,24 +19,65 @@ const ExternalEvidenceManifestSchemaV1 = "gitcontribute.external-evidence.v1"
 const maxExternalEvidenceManifestBytes = 2 << 20
 const maxExternalEvidenceSharedMetadataBytes = 16 << 10
 
+// ExternalEvidenceCompleteness is the producer's bounded coverage claim.
+type ExternalEvidenceCompleteness string
+
+const (
+	ExternalEvidenceComplete   ExternalEvidenceCompleteness = "complete"
+	ExternalEvidenceIncomplete ExternalEvidenceCompleteness = "incomplete"
+	ExternalEvidenceUnknown    ExternalEvidenceCompleteness = "unknown"
+)
+
+// ParseExternalEvidenceCompleteness converts an exact producer value into a supported claim.
+func ParseExternalEvidenceCompleteness(value string) (ExternalEvidenceCompleteness, error) {
+	completeness := ExternalEvidenceCompleteness(value)
+	switch completeness {
+	case ExternalEvidenceComplete, ExternalEvidenceIncomplete, ExternalEvidenceUnknown:
+		return completeness, nil
+	default:
+		return "", fmt.Errorf("unsupported external evidence completeness %q", value)
+	}
+}
+
+// ExternalEvidenceIntegrity is the producer's integrity claim. Invalid claims
+// parse successfully so import policy can reject them explicitly.
+type ExternalEvidenceIntegrity string
+
+const (
+	ExternalEvidenceVerified   ExternalEvidenceIntegrity = "verified"
+	ExternalEvidenceUnverified ExternalEvidenceIntegrity = "unverified"
+	ExternalEvidenceInvalid    ExternalEvidenceIntegrity = "invalid"
+)
+
+// ParseExternalEvidenceIntegrity converts an exact producer value into a supported claim.
+func ParseExternalEvidenceIntegrity(value string) (ExternalEvidenceIntegrity, error) {
+	integrity := ExternalEvidenceIntegrity(value)
+	switch integrity {
+	case ExternalEvidenceVerified, ExternalEvidenceUnverified, ExternalEvidenceInvalid:
+		return integrity, nil
+	default:
+		return "", fmt.Errorf("unsupported external evidence integrity %q", value)
+	}
+}
+
 // ExternalEvidenceManifest is a bounded, producer-neutral handoff. It is
 // imported as evidence only; no producer command, path, or reference is run.
 type ExternalEvidenceManifest struct {
-	SchemaVersion   string                  `json:"schema_version"`
-	Producer        string                  `json:"producer"`
-	InvestigationID string                  `json:"investigation_id"`
-	HypothesisID    string                  `json:"hypothesis_id,omitempty"`
-	OpportunityID   string                  `json:"opportunity_id,omitempty"`
-	Repository      string                  `json:"repository"`
-	Revision        string                  `json:"revision"`
-	ArtifactSHA256  string                  `json:"artifact_sha256,omitempty"`
-	ObservedAt      time.Time               `json:"observed_at"`
-	Environment     map[string]string       `json:"environment,omitempty"`
-	Completeness    string                  `json:"completeness"`
-	Integrity       string                  `json:"integrity"`
-	Limitations     []string                `json:"limitations,omitempty"`
-	Claims          []ExternalEvidenceClaim `json:"claims"`
-	ManifestSHA256  string                  `json:"manifest_sha256"`
+	SchemaVersion   string                       `json:"schema_version"`
+	Producer        string                       `json:"producer"`
+	InvestigationID string                       `json:"investigation_id"`
+	HypothesisID    string                       `json:"hypothesis_id,omitempty"`
+	OpportunityID   string                       `json:"opportunity_id,omitempty"`
+	Repository      string                       `json:"repository"`
+	Revision        string                       `json:"revision"`
+	ArtifactSHA256  string                       `json:"artifact_sha256,omitempty"`
+	ObservedAt      time.Time                    `json:"observed_at"`
+	Environment     map[string]string            `json:"environment,omitempty"`
+	Completeness    ExternalEvidenceCompleteness `json:"completeness"`
+	Integrity       ExternalEvidenceIntegrity    `json:"integrity"`
+	Limitations     []string                     `json:"limitations,omitempty"`
+	Claims          []ExternalEvidenceClaim      `json:"claims"`
+	ManifestSHA256  string                       `json:"manifest_sha256"`
 }
 
 type ExternalEvidenceClaim struct {
@@ -68,21 +109,21 @@ func DigestExternalEvidenceManifest(item ExternalEvidenceManifest) (string, erro
 func canonicalExternalEvidenceManifest(item ExternalEvidenceManifest) ([]byte, error) {
 	item.ManifestSHA256 = ""
 	canonical := struct {
-		SchemaVersion   string                  `json:"schema_version"`
-		Producer        string                  `json:"producer"`
-		InvestigationID string                  `json:"investigation_id"`
-		HypothesisID    string                  `json:"hypothesis_id,omitempty"`
-		OpportunityID   string                  `json:"opportunity_id,omitempty"`
-		Repository      string                  `json:"repository"`
-		Revision        string                  `json:"revision"`
-		ArtifactSHA256  string                  `json:"artifact_sha256,omitempty"`
-		ObservedAt      string                  `json:"observed_at"`
-		Environment     map[string]string       `json:"environment,omitempty"`
-		Completeness    string                  `json:"completeness"`
-		Integrity       string                  `json:"integrity"`
-		Limitations     []string                `json:"limitations,omitempty"`
-		Claims          []ExternalEvidenceClaim `json:"claims"`
-		ManifestSHA256  string                  `json:"manifest_sha256"`
+		SchemaVersion   string                       `json:"schema_version"`
+		Producer        string                       `json:"producer"`
+		InvestigationID string                       `json:"investigation_id"`
+		HypothesisID    string                       `json:"hypothesis_id,omitempty"`
+		OpportunityID   string                       `json:"opportunity_id,omitempty"`
+		Repository      string                       `json:"repository"`
+		Revision        string                       `json:"revision"`
+		ArtifactSHA256  string                       `json:"artifact_sha256,omitempty"`
+		ObservedAt      string                       `json:"observed_at"`
+		Environment     map[string]string            `json:"environment,omitempty"`
+		Completeness    ExternalEvidenceCompleteness `json:"completeness"`
+		Integrity       ExternalEvidenceIntegrity    `json:"integrity"`
+		Limitations     []string                     `json:"limitations,omitempty"`
+		Claims          []ExternalEvidenceClaim      `json:"claims"`
+		ManifestSHA256  string                       `json:"manifest_sha256"`
 	}{item.SchemaVersion, item.Producer, item.InvestigationID, item.HypothesisID, item.OpportunityID, item.Repository, item.Revision, item.ArtifactSHA256, item.ObservedAt.UTC().Format(time.RFC3339Nano), item.Environment, item.Completeness, item.Integrity, item.Limitations, item.Claims, ""}
 	var payload bytes.Buffer
 	encoder := json.NewEncoder(&payload)
@@ -128,7 +169,7 @@ func (s *Service) ImportExternalEvidenceManifest(ctx context.Context, item Exter
 	if err := s.repo.SaveEvidenceBatch(ctx, items); err != nil {
 		return nil, fmt.Errorf("save imported external evidence: %w", err)
 	}
-	return &ImportedExternalEvidence{EvidenceID: firstEvidenceID, Producer: item.Producer, ManifestSHA256: digest, ClaimCount: len(item.Claims), Incomplete: item.Completeness != "complete" || item.Integrity != "verified"}, nil
+	return &ImportedExternalEvidence{EvidenceID: firstEvidenceID, Producer: item.Producer, ManifestSHA256: digest, ClaimCount: len(item.Claims), Incomplete: item.Completeness != ExternalEvidenceComplete || item.Integrity != ExternalEvidenceVerified}, nil
 }
 
 func externalClaimSourceRefs(refs []string, item ExternalEvidenceManifest) []domain.SourceRef {
@@ -165,13 +206,13 @@ func validateExternalEvidenceManifest(item ExternalEvidenceManifest) error {
 	if item.ObservedAt.IsZero() || len(item.Claims) == 0 || len(item.Claims) > 1000 {
 		return errors.New("external evidence manifest must contain 1 to 1000 claims and an observation time")
 	}
-	if item.Completeness != "complete" && item.Completeness != "incomplete" && item.Completeness != "unknown" {
-		return fmt.Errorf("unsupported external evidence completeness %q", item.Completeness)
+	if _, err := ParseExternalEvidenceCompleteness(string(item.Completeness)); err != nil {
+		return err
 	}
-	if item.Integrity != "verified" && item.Integrity != "unverified" && item.Integrity != "invalid" {
-		return fmt.Errorf("unsupported external evidence integrity %q", item.Integrity)
+	if _, err := ParseExternalEvidenceIntegrity(string(item.Integrity)); err != nil {
+		return err
 	}
-	if item.Integrity == "invalid" {
+	if item.Integrity == ExternalEvidenceInvalid {
 		return errors.New("external evidence manifest with invalid integrity cannot be imported")
 	}
 	if item.ArtifactSHA256 != "" {

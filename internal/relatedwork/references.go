@@ -11,10 +11,13 @@ import (
 	"github.com/morluto/gitcontribute/internal/similarity"
 )
 
+// Relation is a source-backed relationship between two work items.
+type Relation string
+
 const (
 	// RelationExplicitReference is a source-text reference with no stronger
 	// closing, dependency, or blocking phrase.
-	RelationExplicitReference = "explicit_reference"
+	RelationExplicitReference Relation = "explicit_reference"
 	// RelationMentions is an inbound pull-request reference without closing semantics.
 	RelationMentions = "mentions"
 	// RelationClaimsToClose is an explicit closing-keyword or GitHub closing-issue relationship.
@@ -50,7 +53,7 @@ type Reference struct {
 	Repo     domain.RepoRef
 	Kind     domain.ThreadKind
 	Number   int
-	Relation string
+	Relation Relation
 	Evidence string
 }
 
@@ -61,14 +64,14 @@ func Extract(text string, defaultRepo domain.RepoRef) []Reference {
 	text = unquotedMarkdown(text)
 	refs := similarity.ExtractRefs(text, defaultRepo)
 	type relationEvidence struct {
-		relation string
+		relation Relation
 		evidence string
 	}
 	relations := make(map[similarity.ThreadRef]relationEvidence, len(refs))
 	for _, ref := range refs {
 		relations[ref] = relationEvidence{relation: RelationExplicitReference}
 	}
-	applyRelation := func(pattern *regexp.Regexp, relation string) {
+	applyRelation := func(pattern *regexp.Regexp, relation Relation) {
 		for _, match := range pattern.FindAllStringSubmatch(text, -1) {
 			if len(match) < 2 {
 				continue
@@ -107,7 +110,7 @@ func Extract(text string, defaultRepo domain.RepoRef) []Reference {
 }
 
 // Priority orders relationship specificity for deterministic de-duplication.
-func Priority(relation string) int {
+func Priority(relation Relation) int {
 	switch relation {
 	case RelationClaimsToClose:
 		return 8

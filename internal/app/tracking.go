@@ -61,13 +61,17 @@ func (s *Service) ListTriageEvents(ctx context.Context, opts contracts.ListTriag
 // RecordContribution stores prepared or submitted contribution metadata for an
 // opportunity, keeping it separate from live GitHub state.
 func (s *Service) RecordContribution(ctx context.Context, opts contracts.RecordContributionOptions) (*contracts.ContributionResult, error) {
+	kind, err := tracking.ParseContributionKind(opts.Kind)
+	if err != nil {
+		return nil, err
+	}
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
 	item, err := tracking.NewService(c).RecordContribution(ctx, &tracking.Contribution{
 		OpportunityID: opts.OpportunityID,
-		Kind:          normalizeContributionKind(opts.Kind),
+		Kind:          kind,
 		Title:         opts.Title,
 		Body:          opts.Body,
 		Reference:     opts.Reference,
@@ -94,13 +98,17 @@ func (s *Service) GetContribution(ctx context.Context, id string) (*contracts.Co
 
 // ListContributions returns contribution metadata in prepared-at order.
 func (s *Service) ListContributions(ctx context.Context, opts contracts.ListContributionsOptions) (*contracts.ContributionListResult, error) {
+	kind, err := tracking.ParseContributionKindFilter(opts.Kind)
+	if err != nil {
+		return nil, err
+	}
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
 	items, err := tracking.NewService(c).ListContributions(ctx, tracking.ContributionFilter{
 		OpportunityID: opts.OpportunityID,
-		Kind:          normalizeContributionKind(opts.Kind),
+		Kind:          kind,
 		Limit:         opts.Limit,
 	})
 	if err != nil {
@@ -219,15 +227,6 @@ func parseTrackingTarget(raw string) (string, string, error) {
 	return kind, strings.TrimSpace(ref), nil
 }
 
-func normalizeContributionKind(kind string) string {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "pr", "pull_request", "pullrequest":
-		return "pull_request"
-	default:
-		return strings.TrimSpace(kind)
-	}
-}
-
 func triageEventResult(e *tracking.TriageEvent) *contracts.TriageEventResult {
 	if e == nil {
 		return nil
@@ -256,7 +255,7 @@ func contributionResult(c *tracking.Contribution) *contracts.ContributionResult 
 	return &contracts.ContributionResult{
 		ID:            c.ID,
 		OpportunityID: c.OpportunityID,
-		Kind:          c.Kind,
+		Kind:          string(c.Kind),
 		Title:         c.Title,
 		Body:          c.Body,
 		Reference:     c.Reference,

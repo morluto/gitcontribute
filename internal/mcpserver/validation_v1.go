@@ -50,9 +50,11 @@ func (s *Server) runValidation(ctx context.Context, _ *mcp.CallToolRequest, in m
 }
 
 func (s *Server) defineValidation(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.DefineValidationInput) (*mcp.CallToolResult, mcpcontract.ValidationOutput, error) {
-	if _, err := normalizeID("investigation_id", in.InvestigationID); err != nil {
+	investigationID, err := normalizeID("investigation_id", in.InvestigationID)
+	if err != nil {
 		return nil, mcpcontract.ValidationOutput{}, err
 	}
+	in.InvestigationID = investigationID
 	in.Kind = strings.TrimSpace(in.Kind)
 	in.Command = strings.TrimSpace(in.Command)
 	in.WorkspaceID = strings.TrimSpace(in.WorkspaceID)
@@ -107,8 +109,13 @@ func (s *Server) importExternalEvidenceManifest(ctx context.Context, _ *mcp.Call
 }
 
 func (s *Server) attachJUnitReport(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.AttachJUnitReportInput) (*mcp.CallToolResult, mcpcontract.AttachJUnitReportOutput, error) {
-	if strings.TrimSpace(in.RunID) == "" || len(in.ReportXML) == 0 || len(in.ReportXML) > 2<<20 {
-		return nil, mcpcontract.AttachJUnitReportOutput{}, mcpcontract.InvalidArgument("report_xml", "run_id and one JUnit report no larger than 2 MiB are required", nil)
+	runID, err := normalizeID("run_id", in.RunID)
+	if err != nil {
+		return nil, mcpcontract.AttachJUnitReportOutput{}, err
+	}
+	in.RunID = runID
+	if len(in.ReportXML) == 0 || len(in.ReportXML) > 2<<20 {
+		return nil, mcpcontract.AttachJUnitReportOutput{}, mcpcontract.InvalidArgument("report_xml", "one JUnit report no larger than 2 MiB is required", nil)
 	}
 	operator, ok := s.reader.(JUnitReportImporter)
 	if !ok {

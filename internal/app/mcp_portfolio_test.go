@@ -23,11 +23,11 @@ func TestPullRequestPortfolioDerivesConflictAndPreservesUnknownCoverage(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	conflicted, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 1, State: "open", Title: "fix cache", Author: "alice", SourceUpdatedAt: now}, `{}`)
+	conflicted, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 1, State: "open", Title: "fix cache", Author: "alice", SourceUpdatedAt: now}, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	unknown, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "open", Title: "fix parser", Author: "alice", SourceUpdatedAt: now}, `{}`)
+	unknown, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 2, State: "open", Title: "fix parser", Author: "alice", SourceUpdatedAt: now}, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,11 +86,11 @@ func TestPullRequestPortfolioClassifiesClosedUnmerged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 9, State: "closed", Title: "abandoned change", Author: "alice", Merge: domain.UnmergedStatus(), SourceUpdatedAt: now}, `{}`)
+	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 9, State: "closed", Title: "abandoned change", Author: "alice", Merge: domain.UnmergedStatus(), SourceUpdatedAt: now}, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	unknown, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 10, State: "closed", Title: "header only", Author: "alice", SourceUpdatedAt: now}, `{}`)
+	unknown, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 10, State: "closed", Title: "header only", Author: "alice", SourceUpdatedAt: now}, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestPullRequestPortfolioKeepsComputingMergeabilityUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 10, State: "open", Title: "computing", Author: "alice", SourceUpdatedAt: now}, `{}`)
+	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 10, State: "open", Title: "computing", Author: "alice", SourceUpdatedAt: now}, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,10 +159,10 @@ func TestPullRequestPortfolioExactSelectionDoesNotSubstituteNewerPullRequests(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 1, State: "open", Title: "selected", Author: "alice", SourceUpdatedAt: now}, `{}`); err != nil {
+	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 1, State: "open", Title: "selected", Author: "alice", SourceUpdatedAt: now}, `{}`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "open", Title: "newer unrelated", Author: "alice", SourceUpdatedAt: now.Add(time.Second)}, `{}`); err != nil {
+	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 2, State: "open", Title: "newer unrelated", Author: "alice", SourceUpdatedAt: now.Add(time.Second)}, `{}`); err != nil {
 		t.Fatal(err)
 	}
 	out, err := (&MCPReader{svc}).ListPullRequestPortfolio(ctx, mcpcontract.ListPullRequestPortfolioInput{
@@ -190,9 +190,9 @@ func TestPullRequestPortfolioRepositoryScopePreservesTotalAndTruncationRecovery(
 		t.Fatal(err)
 	}
 	for _, thread := range []corpus.Thread{
-		{RepositoryID: selected.ID, Kind: corpus.ThreadKindPullRequest, Number: 1, State: "open", Author: "alice", Title: "older selected", SourceUpdatedAt: now},
-		{RepositoryID: selected.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "open", Author: "alice", Title: "newer selected", SourceUpdatedAt: now.Add(time.Second)},
-		{RepositoryID: other.ID, Kind: corpus.ThreadKindPullRequest, Number: 3, State: "open", Author: "alice", Title: "newest other repository", SourceUpdatedAt: now.Add(2 * time.Second)},
+		{RepositoryID: selected.ID, Kind: domain.PullRequestKind, Number: 1, State: "open", Author: "alice", Title: "older selected", SourceUpdatedAt: now},
+		{RepositoryID: selected.ID, Kind: domain.PullRequestKind, Number: 2, State: "open", Author: "alice", Title: "newer selected", SourceUpdatedAt: now.Add(time.Second)},
+		{RepositoryID: other.ID, Kind: domain.PullRequestKind, Number: 3, State: "open", Author: "alice", Title: "newest other repository", SourceUpdatedAt: now.Add(2 * time.Second)},
 	} {
 		if _, err := svc.corpus.UpsertThread(ctx, thread, `{}`); err != nil {
 			t.Fatal(err)

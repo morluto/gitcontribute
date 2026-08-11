@@ -23,25 +23,6 @@ const defaultMaxEventBytes = 4 << 20
 // exceeds ArchiveReader.MaxTotalBytes.
 var ErrDecompressedTooLarge = errors.New("decompressed archive exceeds size limit")
 
-var knownEventTypes = map[string]bool{
-	string(PushEvent):                     true,
-	string(IssuesEvent):                   true,
-	string(PullRequestEvent):              true,
-	string(IssueCommentEvent):             true,
-	string(PullRequestReviewEvent):        true,
-	string(PullRequestReviewCommentEvent): true,
-	string(ReleaseEvent):                  true,
-	string(WatchEvent):                    true,
-	string(ForkEvent):                     true,
-	string(DiscussionEvent):               true,
-	string(DiscussionCommentEvent):        true,
-}
-
-// IsKnownEventType reports whether t is a recognized GH Archive event type.
-func IsKnownEventType(t string) bool {
-	return knownEventTypes[t]
-}
-
 // ArchiveHourRange returns the inclusive hourly bounds for a --since crawl.
 // The latest complete hour is the hour before the current hour, because the
 // current hour's file may not yet be published.
@@ -73,6 +54,37 @@ const (
 	DiscussionCommentEvent        EventType = "DiscussionCommentEvent"
 )
 
+// ParseEventType converts a raw GH Archive discriminator into one supported
+// event kind.
+func ParseEventType(value string) (EventType, error) {
+	switch EventType(value) {
+	case PushEvent:
+		return PushEvent, nil
+	case IssuesEvent:
+		return IssuesEvent, nil
+	case PullRequestEvent:
+		return PullRequestEvent, nil
+	case IssueCommentEvent:
+		return IssueCommentEvent, nil
+	case PullRequestReviewEvent:
+		return PullRequestReviewEvent, nil
+	case PullRequestReviewCommentEvent:
+		return PullRequestReviewCommentEvent, nil
+	case ReleaseEvent:
+		return ReleaseEvent, nil
+	case WatchEvent:
+		return WatchEvent, nil
+	case ForkEvent:
+		return ForkEvent, nil
+	case DiscussionEvent:
+		return DiscussionEvent, nil
+	case DiscussionCommentEvent:
+		return DiscussionCommentEvent, nil
+	default:
+		return "", fmt.Errorf("unsupported GH Archive event type %q", value)
+	}
+}
+
 // Signal is a normalized, product-owned discovery signal emitted from GH Archive
 // events. Not all fields are populated for every event kind.
 type Signal struct {
@@ -99,7 +111,7 @@ type Signal struct {
 // ArchiveReader streams an hourly GH Archive gzip file line by line, retains
 // only configured event types, and emits normalized repository/thread signals.
 type ArchiveReader struct {
-	Include       map[string]bool
+	include       map[EventType]struct{}
 	Store         CheckpointStore
 	MaxEventBytes int
 	// MaxTotalBytes bounds the total decompressed bytes for an hour. Zero
@@ -109,12 +121,16 @@ type ArchiveReader struct {
 
 // NewArchiveReader creates a reader that retains the given event types. An
 // empty include list retains all events.
-func NewArchiveReader(include []string, store CheckpointStore) *ArchiveReader {
-	m := make(map[string]bool, len(include))
-	for _, t := range include {
-		m[t] = true
+func NewArchiveReader(include []string, store CheckpointStore) (*ArchiveReader, error) {
+	parsed := make(map[EventType]struct{}, len(include))
+	for _, raw := range include {
+		eventType, err := ParseEventType(raw)
+		if err != nil {
+			return nil, err
+		}
+		parsed[eventType] = struct{}{}
 	}
-	return &ArchiveReader{Include: m, Store: store, MaxEventBytes: defaultMaxEventBytes}
+	return &ArchiveReader{include: parsed, Store: store, MaxEventBytes: defaultMaxEventBytes}, nil
 }
 
 // Read decompresses the hourly gzip stream, parses JSON lines, and emits a
@@ -171,11 +187,12 @@ func (r *ArchiveReader) Read(ctx context.Context, hour time.Time, in io.Reader, 
 		if err := json.Unmarshal(line, &ev); err != nil {
 			continue
 		}
-		if !r.shouldInclude(ev.Type) {
+		eventType, err := ParseEventType(ev.Type)
+		if err != nil || !r.shouldInclude(eventType) {
 			continue
 		}
 
-		sig, ok := normalizeEvent(ev, hour)
+		sig, ok := normalizeEvent(ev, hour, eventType)
 		if !ok {
 			continue
 		}
@@ -196,11 +213,12 @@ func (r *ArchiveReader) Read(ctx context.Context, hour time.Time, in io.Reader, 
 	return nil
 }
 
-func (r *ArchiveReader) shouldInclude(t string) bool {
-	if len(r.Include) == 0 {
+func (r *ArchiveReader) shouldInclude(eventType EventType) bool {
+	if len(r.include) == 0 {
 		return true
 	}
-	return r.Include[t]
+	_, ok := r.include[eventType]
+	return ok
 }
 
 // HourKey returns a stable, UTC hour identifier for checkpoint storage.
@@ -277,6 +295,10 @@ type releasePayload struct {
 	} `json:"release"`
 }
 
+type discussionPayload struct {
+	Action string `json:"action"`
+}
+
 type commentPayload struct {
 	Action  string   `json:"action"`
 	Issue   issueObj `json:"issue"`
@@ -308,7 +330,7 @@ type reviewCommentPayload struct {
 	} `json:"comment"`
 }
 
-func normalizeEvent(ev rawEvent, hour time.Time) (Signal, bool) {
+func normalizeEvent(ev rawEvent, hour time.Time, eventType EventType) (Signal, bool) {
 	observed, err := time.Parse(time.RFC3339, ev.CreatedAt)
 	if err != nil {
 		return Signal{}, false
@@ -318,19 +340,18 @@ func normalizeEvent(ev rawEvent, hour time.Time) (Signal, bool) {
 	if !ok {
 		return Signal{}, false
 	}
-
 	sig := Signal{
 		Source:     "gharchive",
 		Hour:       hour.UTC().Truncate(time.Hour),
 		ObservedAt: observed,
-		EventType:  EventType(ev.Type),
+		EventType:  eventType,
 		Repo:       ref,
 		RepoID:     ev.Repo.ID,
 		Actor:      ev.Actor.Login,
 	}
 
-	switch ev.Type {
-	case string(PushEvent):
+	switch eventType {
+	case PushEvent:
 		var p pushPayload
 		if err := json.Unmarshal(ev.Payload, &p); err != nil {
 			return Signal{}, false
@@ -344,7 +365,7 @@ func normalizeEvent(ev rawEvent, hour time.Time) (Signal, bool) {
 		}
 		return sig, true
 
-	case string(IssuesEvent):
+	case IssuesEvent:
 		var p issuePayload
 		if err := json.Unmarshal(ev.Payload, &p); err != nil {
 			return Signal{}, false
@@ -353,7 +374,7 @@ func normalizeEvent(ev rawEvent, hour time.Time) (Signal, bool) {
 		sig.Action = p.Action
 		return sig, true
 
-	case string(PullRequestEvent):
+	case PullRequestEvent:
 		var p pullRequestPayload
 		if err := json.Unmarshal(ev.Payload, &p); err != nil {
 			return Signal{}, false
@@ -366,7 +387,7 @@ func normalizeEvent(ev rawEvent, hour time.Time) (Signal, bool) {
 		sig.Action = p.Action
 		return sig, true
 
-	case string(IssueCommentEvent):
+	case IssueCommentEvent:
 		var p commentPayload
 		if err := json.Unmarshal(ev.Payload, &p); err != nil {
 			return Signal{}, false
@@ -379,7 +400,7 @@ func normalizeEvent(ev rawEvent, hour time.Time) (Signal, bool) {
 		sig.Action = p.Action
 		return sig, true
 
-	case string(PullRequestReviewEvent):
+	case PullRequestReviewEvent:
 		var p reviewPayload
 		if err := json.Unmarshal(ev.Payload, &p); err != nil {
 			return Signal{}, false
@@ -388,7 +409,7 @@ func normalizeEvent(ev rawEvent, hour time.Time) (Signal, bool) {
 		sig.Action = p.Action
 		return sig, true
 
-	case string(PullRequestReviewCommentEvent):
+	case PullRequestReviewCommentEvent:
 		var p reviewCommentPayload
 		if err := json.Unmarshal(ev.Payload, &p); err != nil {
 			return Signal{}, false
@@ -397,7 +418,7 @@ func normalizeEvent(ev rawEvent, hour time.Time) (Signal, bool) {
 		sig.Action = p.Action
 		return sig, true
 
-	case string(WatchEvent):
+	case WatchEvent:
 		var p watchPayload
 		if err := json.Unmarshal(ev.Payload, &p); err != nil {
 			return Signal{}, false
@@ -405,7 +426,7 @@ func normalizeEvent(ev rawEvent, hour time.Time) (Signal, bool) {
 		sig.Action = p.Action
 		return sig, true
 
-	case string(ForkEvent):
+	case ForkEvent:
 		var p forkPayload
 		if err := json.Unmarshal(ev.Payload, &p); err != nil {
 			return Signal{}, false
@@ -414,7 +435,7 @@ func normalizeEvent(ev rawEvent, hour time.Time) (Signal, bool) {
 		_ = p.Forkee.ID
 		return sig, true
 
-	case string(ReleaseEvent):
+	case ReleaseEvent:
 		var p releasePayload
 		if err := json.Unmarshal(ev.Payload, &p); err != nil {
 			return Signal{}, false
@@ -423,14 +444,12 @@ func normalizeEvent(ev rawEvent, hour time.Time) (Signal, bool) {
 		sig.TagName = p.Release.TagName
 		return sig, true
 
-	case string(DiscussionEvent), string(DiscussionCommentEvent):
-		var m map[string]any
-		if err := json.Unmarshal(ev.Payload, &m); err != nil {
+	case DiscussionEvent, DiscussionCommentEvent:
+		var p discussionPayload
+		if err := json.Unmarshal(ev.Payload, &p); err != nil {
 			return Signal{}, false
 		}
-		if a, ok := m["action"].(string); ok {
-			sig.Action = a
-		}
+		sig.Action = p.Action
 		return sig, true
 
 	default:
@@ -443,20 +462,11 @@ func fillIssueSignal(sig *Signal, issue issueObj, kind domain.ThreadKind) {
 	sig.ThreadNumber = issue.Number
 	sig.ThreadTitle = issue.Title
 	sig.ThreadAuthor = issue.User.Login
-	sig.ThreadState = mapState(issue.State)
+	if state, err := domain.ParseThreadState(issue.State); err == nil {
+		sig.ThreadState = state
+	}
 	if kind == domain.PullRequestKind {
 		sig.Merged = issue.Merged
-	}
-}
-
-func mapState(state string) domain.ThreadState {
-	switch state {
-	case "open":
-		return domain.OpenState
-	case "closed":
-		return domain.ClosedState
-	default:
-		return ""
 	}
 }
 

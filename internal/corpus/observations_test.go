@@ -24,7 +24,7 @@ func TestListThreadsFilteredAppliesStateBeforeLimit(t *testing.T) {
 	base := time.Unix(1000, 0).UTC()
 	threads := []struct {
 		number int
-		state  string
+		state  domain.ThreadState
 		when   time.Time
 	}{
 		{1, "closed", base.Add(3 * time.Second)},
@@ -34,7 +34,7 @@ func TestListThreadsFilteredAppliesStateBeforeLimit(t *testing.T) {
 	for _, th := range threads {
 		if _, err := c.UpsertThread(ctx, Thread{
 			RepositoryID:    repo.ID,
-			Kind:            ThreadKindIssue,
+			Kind:            domain.IssueKind,
 			Number:          th.number,
 			State:           th.state,
 			Title:           "title",
@@ -50,7 +50,7 @@ func TestListThreadsFilteredAppliesStateBeforeLimit(t *testing.T) {
 	// A limit of 1 applied before the state filter would return nothing,
 	// because the most recently updated row is closed. Filtering first
 	// should return the most recently updated open thread (#3).
-	listed, err := c.ListThreadsFiltered(ctx, repo.ID, ThreadKindIssue, "open", 1)
+	listed, err := c.ListThreadsFiltered(ctx, repo.ID, IssueThreadKind(), OpenThreadState(), 1)
 	if err != nil {
 		t.Fatalf("list threads filtered: %v", err)
 	}
@@ -59,14 +59,14 @@ func TestListThreadsFilteredAppliesStateBeforeLimit(t *testing.T) {
 	}
 
 	// Limit 2 should still return only the open threads and respect the bound.
-	listed, err = c.ListThreadsFiltered(ctx, repo.ID, ThreadKindIssue, "open", 2)
+	listed, err = c.ListThreadsFiltered(ctx, repo.ID, IssueThreadKind(), OpenThreadState(), 2)
 	if err != nil {
 		t.Fatalf("list threads filtered: %v", err)
 	}
 	if len(listed) != 1 || listed[0].Number != 3 {
 		t.Fatalf("got %+v, want one open thread with number 3", listed)
 	}
-	total, err := c.CountThreadsFiltered(ctx, repo.ID, ThreadKindIssue, "open")
+	total, err := c.CountThreadsFiltered(ctx, repo.ID, IssueThreadKind(), OpenThreadState())
 	if err != nil {
 		t.Fatalf("count threads filtered: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestUpsertThreadRejectsUnknownKindAndStateBeforeWrite(t *testing.T) {
 	}
 	for name, thread := range map[string]Thread{
 		"kind":  {RepositoryID: repo.ID, Kind: "discussion", Number: 1, State: "open"},
-		"state": {RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 1, State: "draft"},
+		"state": {RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1, State: "draft"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := c.UpsertThread(ctx, thread, `{}`); err == nil {
@@ -92,7 +92,7 @@ func TestUpsertThreadRejectsUnknownKindAndStateBeforeWrite(t *testing.T) {
 			}
 		})
 	}
-	threads, err := c.ListThreads(ctx, repo.ID, "", 10)
+	threads, err := c.ListThreads(ctx, repo.ID, AnyThreadKind(), 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,23 +111,23 @@ func TestListThreadsByStateAndMergeIgnoresMergedOutsidePullRequests(t *testing.T
 	}
 	merged := true
 	for _, thread := range []Thread{
-		{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 1, State: "open", Title: "issue", SourceUpdatedAt: time.Unix(3, 0).UTC()},
-		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 2, State: "closed", Title: "merged", Merge: domain.MergedStatus(time.Time{}), SourceUpdatedAt: time.Unix(2, 0).UTC()},
-		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 3, State: "closed", Title: "unmerged", Merge: domain.UnmergedStatus(), SourceUpdatedAt: time.Unix(1, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1, State: "open", Title: "issue", SourceUpdatedAt: time.Unix(3, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 2, State: "closed", Title: "merged", Merge: domain.MergedStatus(time.Time{}), SourceUpdatedAt: time.Unix(2, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 3, State: "closed", Title: "unmerged", Merge: domain.UnmergedStatus(), SourceUpdatedAt: time.Unix(1, 0).UTC()},
 	} {
 		if _, err := c.UpsertThread(ctx, thread, `{}`); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	issues, err := c.ListThreadsByStateAndMerge(ctx, repo.ID, ThreadKindIssue, "open", &merged, 1)
+	issues, err := c.ListThreadsByStateAndMerge(ctx, repo.ID, IssueThreadKind(), OpenThreadState(), MergeFilterFromPointer(&merged), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(issues) != 1 || issues[0].Number != 1 {
 		t.Fatalf("issues = %+v", issues)
 	}
-	pullRequests, err := c.ListThreadsByStateAndMerge(ctx, repo.ID, ThreadKindPullRequest, "closed", &merged, 1)
+	pullRequests, err := c.ListThreadsByStateAndMerge(ctx, repo.ID, PullRequestThreadKind(), ClosedThreadState(), MergeFilterFromPointer(&merged), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,10 +147,10 @@ func TestListPullRequestPortfolioFiltersByAuthorAndState(t *testing.T) {
 	}
 	when := time.Unix(1000, 0).UTC()
 	threads := []Thread{
-		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 1, State: "open", Author: "Alice", Title: "alice open", SourceUpdatedAt: when},
-		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 2, State: "closed", Author: "alice", Title: "alice closed", SourceUpdatedAt: when.Add(time.Second)},
-		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 3, State: "open", Author: "bob", Title: "bob open", SourceUpdatedAt: when.Add(2 * time.Second)},
-		{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 4, State: "open", Author: "alice", Title: "not a pull request", SourceUpdatedAt: when.Add(3 * time.Second)},
+		{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 1, State: "open", Author: "Alice", Title: "alice open", SourceUpdatedAt: when},
+		{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 2, State: "closed", Author: "alice", Title: "alice closed", SourceUpdatedAt: when.Add(time.Second)},
+		{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 3, State: "open", Author: "bob", Title: "bob open", SourceUpdatedAt: when.Add(2 * time.Second)},
+		{RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 4, State: "open", Author: "alice", Title: "not a pull request", SourceUpdatedAt: when.Add(3 * time.Second)},
 	}
 	for _, thread := range threads {
 		if _, err := c.UpsertThread(ctx, thread, `{}`); err != nil {
@@ -158,7 +158,7 @@ func TestListPullRequestPortfolioFiltersByAuthorAndState(t *testing.T) {
 		}
 	}
 
-	got, err := c.ListPullRequestPortfolio(ctx, "ALICE", "OPEN", nil, 10)
+	got, err := c.ListPullRequestPortfolio(ctx, "ALICE", OpenThreadState(), nil, 10)
 	if err != nil {
 		t.Fatalf("list pull request portfolio: %v", err)
 	}
@@ -169,14 +169,14 @@ func TestListPullRequestPortfolioFiltersByAuthorAndState(t *testing.T) {
 		t.Fatalf("portfolio item = %+v, want owner/repo#1", got[0])
 	}
 
-	got, err = c.ListPullRequestPortfolio(ctx, "alice", "all", nil, 10)
+	got, err = c.ListPullRequestPortfolio(ctx, "alice", AnyThreadState(), nil, 10)
 	if err != nil {
 		t.Fatalf("list pull request portfolio for all states: %v", err)
 	}
 	if len(got) != 2 || got[0].Thread.Number != 2 || got[1].Thread.Number != 1 {
 		t.Fatalf("all-state portfolio = %+v, want #2 then #1", got)
 	}
-	page, err := c.ListPullRequestPortfolioPage(ctx, "alice", "all", nil, 1)
+	page, err := c.ListPullRequestPortfolioPage(ctx, "alice", AnyThreadState(), nil, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestListPullRequestPortfolioUsesDeterministicGlobalOrder(t *testing.T) {
 			}
 			if _, err := c.UpsertThread(ctx, Thread{
 				RepositoryID:    repo.ID,
-				Kind:            ThreadKindPullRequest,
+				Kind:            domain.PullRequestKind,
 				Number:          number,
 				State:           "open",
 				Author:          "alice",
@@ -220,7 +220,7 @@ func TestListPullRequestPortfolioUsesDeterministicGlobalOrder(t *testing.T) {
 		}
 	}
 
-	got, err := c.ListPullRequestPortfolio(ctx, "", "", nil, 100)
+	got, err := c.ListPullRequestPortfolio(ctx, "", AnyThreadState(), nil, 100)
 	if err != nil {
 		t.Fatalf("list pull request portfolio: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestUpsertThreadPersistsMetadataAndDeterministicAssignees(t *testing.T) {
 
 	want := Thread{
 		RepositoryID:      repo.ID,
-		Kind:              ThreadKindIssue,
+		Kind:              domain.IssueKind,
 		Number:            1,
 		State:             "open",
 		StateReason:       "completed",
@@ -281,7 +281,7 @@ func TestUpsertThreadPersistsMetadataAndDeterministicAssignees(t *testing.T) {
 		t.Fatalf("upsert mismatch (-want +got):\n%s", diff)
 	}
 
-	fetched, err := c.GetThread(ctx, repo.ID, ThreadKindIssue, 1)
+	fetched, err := c.GetThread(ctx, repo.ID, domain.IssueKind, 1)
 	if err != nil {
 		t.Fatalf("get thread: %v", err)
 	}
@@ -289,7 +289,7 @@ func TestUpsertThreadPersistsMetadataAndDeterministicAssignees(t *testing.T) {
 		t.Fatalf("get thread mismatch (-want +got):\n%s", diff)
 	}
 
-	listed, err := c.ListThreads(ctx, repo.ID, "", 10)
+	listed, err := c.ListThreads(ctx, repo.ID, AnyThreadKind(), 10)
 	if err != nil {
 		t.Fatalf("list threads: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestUpsertThreadUnknownMergeStateDoesNotEraseKnownState(t *testing.T) {
 	at := time.Unix(100, 0).UTC()
 	mergedAt := at.Add(-time.Hour)
 	known, err := c.UpsertThread(ctx, Thread{
-		RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 1,
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 1,
 		State: "closed", Title: "details", Merge: domain.MergedStatus(mergedAt), SourceUpdatedAt: at,
 	}, `{"Merged":true}`)
 	if err != nil {
@@ -332,7 +332,7 @@ func TestUpsertThreadUnknownMergeStateDoesNotEraseKnownState(t *testing.T) {
 	}
 
 	got, err := c.UpsertThread(ctx, Thread{
-		RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 1,
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 1,
 		State: "closed", Title: "newer header", SourceUpdatedAt: at.Add(time.Second),
 	}, `{"Kind":"pull_request"}`)
 	if err != nil {
@@ -343,7 +343,7 @@ func TestUpsertThreadUnknownMergeStateDoesNotEraseKnownState(t *testing.T) {
 	}
 
 	got, err = c.UpsertThread(ctx, Thread{
-		RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 1,
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 1,
 		State: "closed", Title: "observed false", Merge: domain.UnmergedStatus(),
 		SourceUpdatedAt: at.Add(2 * time.Second),
 	}, `{"Merged":false}`)

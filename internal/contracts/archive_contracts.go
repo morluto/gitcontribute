@@ -307,27 +307,29 @@ type CorpusLifecycleService interface {
 
 // CorpusRepositoryRemovalResult describes a repository-removal preview or result.
 type CorpusRepositoryRemovalResult struct {
-	Repo                         string `json:"repo"`
-	DryRun                       bool   `json:"dry_run"`
-	Revision                     string `json:"revision"`
-	RepositoryObservations       int    `json:"repository_observations"`
-	Threads                      int    `json:"threads"`
-	ThreadObservations           int    `json:"thread_observations"`
-	FacetObservations            int    `json:"facet_observations"`
-	FacetCoverage                int    `json:"facet_coverage"`
-	CodeSnapshots                int    `json:"code_snapshots"`
-	CodeDocuments                int    `json:"code_documents"`
-	Dossiers                     int    `json:"dossiers"`
-	ClusterRuns                  int    `json:"cluster_runs"`
-	Clusters                     int    `json:"clusters"`
-	FrontierItems                int    `json:"frontier_items"`
-	DetachedTriageEvents         int    `json:"detached_triage_events"`
-	RemovedPortfolioLinks        int    `json:"removed_portfolio_links"`
-	RemovedResolutionRecords     int    `json:"removed_resolution_records"`
-	RemovedSignalSnapshots       int    `json:"removed_signal_snapshots"`
-	DetachedClusterMembers       int    `json:"detached_cluster_members"`
-	PreservedInvestigations      int    `json:"preserved_investigations"`
-	PreservedCrossRepoReferences int    `json:"preserved_cross_repo_references"`
+	Repo                   string `json:"repo"`
+	DryRun                 bool   `json:"dry_run"`
+	Revision               string `json:"revision"`
+	RepositoryObservations int    `json:"repository_observations"`
+	Threads                int    `json:"threads"`
+	ThreadObservations     int    `json:"thread_observations"`
+	FacetObservations      int    `json:"facet_observations"`
+	FacetCoverage          int    `json:"facet_coverage"`
+	CodeSnapshots          int    `json:"code_snapshots"`
+	CodeDocuments          int    `json:"code_documents"`
+	Dossiers               int    `json:"dossiers"`
+	ClusterRuns            int    `json:"cluster_runs"`
+	Clusters               int    `json:"clusters"`
+	// FrontierItems is retained for response compatibility after the unused
+	// crawl frontier was retired. It is always zero.
+	FrontierItems                int `json:"frontier_items"`
+	DetachedTriageEvents         int `json:"detached_triage_events"`
+	RemovedPortfolioLinks        int `json:"removed_portfolio_links"`
+	RemovedResolutionRecords     int `json:"removed_resolution_records"`
+	RemovedSignalSnapshots       int `json:"removed_signal_snapshots"`
+	DetachedClusterMembers       int `json:"detached_cluster_members"`
+	PreservedInvestigations      int `json:"preserved_investigations"`
+	PreservedCrossRepoReferences int `json:"preserved_cross_repo_references"`
 }
 
 // CorpusProjectionResult describes one derived corpus projection.

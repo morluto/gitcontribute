@@ -57,9 +57,9 @@ func TestApplicationWriteOpenDoesNotMigrateExistingCorpus(t *testing.T) {
 	if err != nil || !exists || version != 0 {
 		t.Fatalf("schema after rejected write open = %d, exists=%v, err=%v", version, exists, err)
 	}
+	second.stubExecutablePath(filepath.Join(home, "missing-runtime"))
 	report, err := second.Setup(ctx, contracts.SetupOptions{
 		Mode: contracts.SetupModeMCP, Clients: []string{"codex"}, TokenSource: "none",
-		Executable: filepath.Join(home, "missing-runtime"),
 	})
 	if err != nil {
 		t.Fatal(err)

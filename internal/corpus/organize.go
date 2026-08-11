@@ -9,16 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/lens"
 )
 
 const (
-	maxSavedNameLength        = 128
-	maxCollectionBatchSize    = 1000
-	maxCollectionRefLength    = 2048
-	lensListLimit             = 1000
-	collectionListLimit       = 1000
-	collectionMemberListLimit = 10000
+	maxSavedNameLength     = 128
+	maxCollectionBatchSize = 1000
+	lensListLimit          = 1000
+	collectionListLimit    = 1000
 )
 
 // LensRecord is a durable, reusable ranking definition.
@@ -53,17 +52,89 @@ type CollectionList struct {
 
 // CollectionMember is one typed stable reference in a collection.
 type CollectionMember struct {
-	Ref     string
-	Kind    string
-	AddedAt time.Time
+	kind collectionMemberKind
+	ref  string
 }
 
-// CollectionMemberList is one bounded, stable page of collection members.
-type CollectionMemberList struct {
-	Members   []CollectionMember
-	Total     int
-	Truncated bool
+type collectionMemberKind uint8
+
+const (
+	collectionRepositoryMember collectionMemberKind = iota + 1
+	collectionIssueMember
+	collectionPullRequestMember
+	collectionThreadMember
+	collectionOpportunityMember
+	collectionInvestigationMember
+)
+
+func NewRepositoryCollectionMember(ref domain.RepoRef) (CollectionMember, error) {
+	if !ref.IsValid() {
+		return CollectionMember{}, errors.New("collection repository reference is not parsed")
+	}
+	return CollectionMember{kind: collectionRepositoryMember, ref: ref.String()}, nil
 }
+
+func NewThreadCollectionMember(kind domain.ThreadKind, ref domain.RepoRef, number int) (CollectionMember, error) {
+	if !ref.IsValid() || number <= 0 {
+		return CollectionMember{}, errors.New("collection thread reference is invalid")
+	}
+	var memberKind collectionMemberKind
+	switch kind {
+	case domain.IssueKind:
+		memberKind = collectionIssueMember
+	case domain.PullRequestKind:
+		memberKind = collectionPullRequestMember
+	default:
+		return CollectionMember{}, errors.New("collection thread kind must be issue or pull_request")
+	}
+	return CollectionMember{kind: memberKind, ref: fmt.Sprintf("%s#%d", ref, number)}, nil
+}
+
+func NewAnyThreadCollectionMember(ref domain.RepoRef, number int) (CollectionMember, error) {
+	if !ref.IsValid() || number <= 0 {
+		return CollectionMember{}, errors.New("collection thread reference is invalid")
+	}
+	return CollectionMember{kind: collectionThreadMember, ref: fmt.Sprintf("%s#%d", ref, number)}, nil
+}
+
+func NewOpportunityCollectionMember(id string) (CollectionMember, error) {
+	return newWorkflowCollectionMember(collectionOpportunityMember, id)
+}
+
+func NewInvestigationCollectionMember(id string) (CollectionMember, error) {
+	return newWorkflowCollectionMember(collectionInvestigationMember, id)
+}
+
+func newWorkflowCollectionMember(kind collectionMemberKind, id string) (CollectionMember, error) {
+	id, err := validateSavedText("collection workflow reference", id, 64)
+	if err != nil {
+		return CollectionMember{}, err
+	}
+	return CollectionMember{kind: kind, ref: id}, nil
+}
+
+func (m CollectionMember) Kind() string {
+	switch m.kind {
+	case collectionRepositoryMember:
+		return "repository"
+	case collectionIssueMember:
+		return "issue"
+	case collectionPullRequestMember:
+		return "pull_request"
+	case collectionThreadMember:
+		return "thread"
+	case collectionOpportunityMember:
+		return "opportunity"
+	case collectionInvestigationMember:
+		return "investigation"
+	default:
+		return ""
+	}
+}
+
+func (m CollectionMember) Ref() string { return m.ref }
+
+func (m CollectionMember) valid() bool { return m.Kind() != "" && m.ref != "" }
 
 // SaveLens creates or replaces a named lens after validating its scoring
 // contract. Existing creation time is retained.
@@ -219,17 +290,10 @@ func (c *Corpus) AddCollectionMembers(ctx context.Context, collectionName string
 	if len(members) > maxCollectionBatchSize {
 		return fmt.Errorf("collection batch exceeds %d members", maxCollectionBatchSize)
 	}
-	validated := make([]CollectionMember, len(members))
-	for i, member := range members {
-		ref, err := validateSavedText("collection reference", member.Ref, maxCollectionRefLength)
-		if err != nil {
-			return err
+	for _, member := range members {
+		if !member.valid() {
+			return errors.New("collection member is not parsed")
 		}
-		kind, err := validateSavedText("collection member kind", member.Kind, maxSavedNameLength)
-		if err != nil {
-			return err
-		}
-		validated[i] = CollectionMember{Ref: ref, Kind: kind}
 	}
 
 	tx, err := c.db.BeginTx(ctx, nil)
@@ -245,11 +309,11 @@ func (c *Corpus) AddCollectionMembers(ctx context.Context, collectionName string
 		return fmt.Errorf("get collection identity: %w", err)
 	}
 	now := encodeTime(time.Now())
-	for _, member := range validated {
+	for _, member := range members {
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO collection_members (collection_id, ref, kind, added_at) VALUES (?, ?, ?, ?)
 			ON CONFLICT (collection_id, kind, ref) DO NOTHING
-		`, collectionID, member.Ref, member.Kind, now); err != nil {
+		`, collectionID, member.Ref(), member.Kind(), now); err != nil {
 			return fmt.Errorf("add collection member: %w", err)
 		}
 	}
@@ -260,39 +324,6 @@ func (c *Corpus) AddCollectionMembers(ctx context.Context, collectionName string
 		return fmt.Errorf("commit collection update: %w", err)
 	}
 	return nil
-}
-
-// ListCollectionMembers returns a bounded member page in stable kind and
-// reference order.
-func (c *Corpus) ListCollectionMembers(ctx context.Context, collectionName string) (CollectionMemberList, error) {
-	name := strings.TrimSpace(collectionName)
-	rows, err := c.db.QueryContext(ctx, `
-		SELECT m.ref, m.kind, m.added_at,
-		       (SELECT COUNT(*) FROM collection_members cm
-		        JOIN collections cc ON cc.id=cm.collection_id WHERE cc.name=?)
-		FROM collection_members m
-		JOIN collections c ON c.id=m.collection_id
-		WHERE c.name=? ORDER BY m.kind, m.ref LIMIT ?
-	`, name, name, collectionMemberListLimit)
-	if err != nil {
-		return CollectionMemberList{}, fmt.Errorf("list collection members: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	var result CollectionMemberList
-	for rows.Next() {
-		var member CollectionMember
-		var addedAt int64
-		if err := rows.Scan(&member.Ref, &member.Kind, &addedAt, &result.Total); err != nil {
-			return CollectionMemberList{}, err
-		}
-		member.AddedAt = scanTime(addedAt)
-		result.Members = append(result.Members, member)
-	}
-	if err := rows.Err(); err != nil {
-		return CollectionMemberList{}, err
-	}
-	result.Truncated = result.Total > len(result.Members)
-	return result, nil
 }
 
 func validateSavedText(field, value string, limit int) (string, error) {

@@ -61,6 +61,14 @@ func TestSyncPortfolioRejectsDuplicateDefaultKindReferences(t *testing.T) {
 
 func TestParsedSyncInputsRejectDuplicatesAfterCanonicalization(t *testing.T) {
 	t.Parallel()
+	if _, _, err := parseRepositoryContextSyncInput(mcpcontract.SyncRepositoryContextInput{
+		Repositories: []mcpcontract.RepositoryRef{
+			{Owner: "acme", Repo: "rocket"},
+			{Owner: " ACME ", Repo: " rocket "},
+		},
+	}); err == nil {
+		t.Fatal("repository-context duplicates created by canonicalization were accepted")
+	}
 	if _, _, err := parseSyncThreadsInput(mcpcontract.SyncThreadsInput{
 		Selection: "repositories",
 		Repositories: []mcpcontract.RepositoryRef{
@@ -117,7 +125,7 @@ func TestParsedSyncInputsOwnCanonicalCopies(t *testing.T) {
 	}
 	repositories[0] = mcpcontract.RepositoryRef{Owner: "changed", Repo: "changed"}
 	selection, ok := request.selection.(repositoryThreadSelection)
-	if !ok || selection.repositories[0].Owner != "acme" || normalized.Repositories[0].Repo != "rocket" {
+	if !ok || selection.repositories[0].Owner() != "acme" || normalized.Repositories[0].Repo != "rocket" {
 		t.Fatalf("parsed repository selection = %+v, normalized = %+v", request.selection, normalized)
 	}
 

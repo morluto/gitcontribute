@@ -54,7 +54,7 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	if len(out.Coverage) != 1 || out.Coverage[0].Repo != "owner/repo" || out.Coverage[0].Status != "indexed" || !out.Coverage[0].Truncated || out.Coverage[0].IndexedFiles != 1 || out.Coverage[0].SkippedFiles != 2 {
 		t.Fatalf("unexpected code coverage: %+v", out.Coverage)
 	}
-	if !out.Provenance.Truncated || out.Provenance.Complete || out.Provenance.QueryDigestSHA256 == "" {
+	if !out.Provenance.Truncated() || out.Provenance.Complete() || out.Provenance.QueryDigestSHA256 == "" {
 		t.Fatalf("unexpected code-search provenance: %+v", out.Provenance)
 	}
 	missing, err := reader.SearchCode(ctx, mcpcontract.SearchCodeInput{Owner: "owner", Repo: "repo", Query: "doesNotExist", Limit: 10})
@@ -168,7 +168,7 @@ func TestMCPReaderExplainRejectsNonMatchingThreadAndRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1,
+		RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1,
 		State: "open", Title: "parser panic", Body: "reproduction",
 		SourceUpdatedAt: time.Now().UTC(),
 	}, `{}`); err != nil {
@@ -194,7 +194,7 @@ func TestMCPReaderSearchAndExplainUseFacetEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	thread, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1,
+		RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1,
 		State: "open", Title: "plain title", Body: "plain body", SourceUpdatedAt: time.Unix(1, 0).UTC(),
 	}, `{}`)
 	if err != nil {
@@ -238,11 +238,11 @@ func TestMCPReaderSearchReportsUnknownMergeState(t *testing.T) {
 	}
 	for _, thread := range []corpus.Thread{
 		{
-			RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 1, State: "closed",
+			RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 1, State: "closed",
 			Title: "shared term", Merge: domain.MergedStatus(time.Time{}), SourceUpdatedAt: time.Unix(10, 0).UTC(),
 		},
 		{
-			RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed",
+			RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 2, State: "closed",
 			Title: "shared term", SourceUpdatedAt: time.Unix(20, 0).UTC(),
 		},
 	} {
@@ -253,7 +253,7 @@ func TestMCPReaderSearchReportsUnknownMergeState(t *testing.T) {
 
 	merged := true
 	out, err := svc.MCPReader().Search(ctx, mcpcontract.SearchInput{
-		Query: "term", Owner: "owner", Repo: "repo", Kind: corpus.ThreadKindPullRequest,
+		Query: "term", Owner: "owner", Repo: "repo", Kind: string(domain.PullRequestKind),
 		State: "closed", Merged: &merged,
 	})
 	if err != nil {
@@ -408,7 +408,7 @@ func TestMCPReaderExplainThreadRejectsDifferentRequestedKind(t *testing.T) {
 		t.Fatalf("store repository: %v", err)
 	}
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 1,
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 1,
 		State: "open", Title: "searchable change", SourceUpdatedAt: time.Now().UTC(),
 	}, `{}`); err != nil {
 		t.Fatalf("store pull request: %v", err)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 func TestApplyFacetObservationSetReplacesWithEmptyCompleteSet(t *testing.T) {
@@ -15,7 +17,7 @@ func TestApplyFacetObservationSetReplacesWithEmptyCompleteSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply repository: %v", err)
 	}
-	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "title", "body", "a", time.Unix(2, 0).UTC(), `{}`)
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "title", "body", "a", time.Unix(2, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatalf("apply thread: %v", err)
 	}
@@ -67,7 +69,7 @@ func TestApplyFacetObservationSetIgnoresStaleEmptySet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply repository: %v", err)
 	}
-	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "title", "body", "a", time.Unix(2, 0).UTC(), `{}`)
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "title", "body", "a", time.Unix(2, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatalf("apply thread: %v", err)
 	}
@@ -110,7 +112,7 @@ func TestListFacetObservationsBoundedPreservesOrderAndReportsMore(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "title", "body", "a", time.Unix(2, 0).UTC(), `{}`)
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "title", "body", "a", time.Unix(2, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,11 +152,11 @@ func TestThreadFacetBatchReadsPreservePerFacetBounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindPullRequest, 1, "open", "first", "", "a", time.Unix(2, 0).UTC(), `{}`)
+	first, err := c.ApplyThreadObservation(ctx, repo.ID, domain.PullRequestKind, 1, "open", "first", "", "a", time.Unix(2, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindPullRequest, 2, "open", "second", "", "a", time.Unix(2, 0).UTC(), `{}`)
+	second, err := c.ApplyThreadObservation(ctx, repo.ID, domain.PullRequestKind, 2, "open", "second", "", "a", time.Unix(2, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +215,7 @@ func TestApplyFacetObservationSetCASRejectsConcurrentEqualClockReplacement(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindPullRequest, 1, "open", "title", "body", "a", time.Unix(2, 0).UTC(), `{}`)
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, domain.PullRequestKind, 1, "open", "title", "body", "a", time.Unix(2, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}

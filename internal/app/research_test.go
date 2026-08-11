@@ -56,7 +56,7 @@ func newResearchFixture(t *testing.T) researchFixture {
 		}
 	}
 	issue, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open",
+		RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1, State: "open",
 		Title: "Retry parser cancellation", Body: "## Expected behavior\n- [ ] cancellation remains bounded\nRelated to #2",
 		Author: "alice", AuthorAssociation: "CONTRIBUTOR", Labels: []string{"bug", "help wanted"},
 		SourceCreatedAt: now.Add(-10 * 24 * time.Hour), SourceUpdatedAt: now.Add(-4 * time.Hour),
@@ -65,14 +65,14 @@ func newResearchFixture(t *testing.T) researchFixture {
 		t.Fatal(err)
 	}
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 2, State: "closed",
+		RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 2, State: "closed",
 		Title: "Older parser report", Author: "bob", SourceCreatedAt: now.Add(-20 * 24 * time.Hour),
 		SourceUpdatedAt: now.Add(-8 * time.Hour),
 	}, `{}`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 9, State: "open",
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 9, State: "open",
 		Title: "Implement retry cancellation", Body: "Fixes #1", Author: "carol", AuthorAssociation: "NONE",
 		SourceCreatedAt: now.Add(-2 * 24 * time.Hour), SourceUpdatedAt: now.Add(-2 * time.Hour),
 	}, `{}`); err != nil {
@@ -212,7 +212,7 @@ func TestThreadResearchBriefBoundsStoredFacetPages(t *testing.T) {
 	}
 	for _, facet := range brief.Sections.Coverage.Facets {
 		if facet.Scope == "thread" && facet.Facet == FacetIssueComments {
-			if !facet.Truncated || facet.Count != maxResearchFacetPages {
+			if !facet.Truncated() || facet.Count != maxResearchFacetPages {
 				t.Fatalf("bounded facet = %+v", facet)
 			}
 			return

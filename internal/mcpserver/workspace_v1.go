@@ -34,9 +34,11 @@ func (s *Server) adoptWorkspace(ctx context.Context, _ *mcp.CallToolRequest, in 
 }
 
 func (s *Server) createWorkspace(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.CreateWorkspaceInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
-	if _, err := normalizeID("investigation_id", in.InvestigationID); err != nil {
+	investigationID, err := normalizeID("investigation_id", in.InvestigationID)
+	if err != nil {
 		return nil, mcpcontract.JobReference{}, err
 	}
+	in.InvestigationID = investigationID
 	in.Remote = strings.TrimSpace(in.Remote)
 	in.BaseRef = strings.TrimSpace(in.BaseRef)
 	in.CandidateRef = strings.TrimSpace(in.CandidateRef)

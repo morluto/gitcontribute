@@ -38,7 +38,7 @@ func TestSyncPassesStateAndSinceAndMarksPartialCoverage(t *testing.T) {
 	defer func() { _ = svc.Close() }()
 	syncRepositoryContextForTest(t, svc, contracts.RepoRef{Owner: "octocat", Repo: "test"})
 	since := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)
-	result, err := svc.syncThreadHeaders(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{
+	result, err := svc.syncThreadHeaders(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, threadSyncInput{
 		State: "open", Since: since, MaxPages: 2,
 	})
 	if err != nil {
@@ -91,7 +91,7 @@ func TestSyncEnforcesExactItemLimit(t *testing.T) {
 	defer func() { _ = svc.Close() }()
 	repo := contracts.RepoRef{Owner: "octocat", Repo: "test"}
 	syncRepositoryContextForTest(t, svc, repo)
-	result, err := svc.syncThreadHeaders(context.Background(), repo, SyncOptions{Kind: "pull_request", MaxItems: 1, MaxPages: 1})
+	result, err := svc.syncThreadHeaders(context.Background(), repo, threadSyncInput{Kind: "pull_request", MaxItems: 1, MaxPages: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestSyncRejectsExactSelectionOverRequestBudgetBeforeIO(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.syncThreadHeaders(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{
+	_, err = svc.syncThreadHeaders(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, threadSyncInput{
 		Numbers: []int{1, 2}, MaxRequests: 1,
 	})
 	if err == nil || !strings.Contains(err.Error(), "exact thread selection requires") {
@@ -384,7 +384,7 @@ func TestSyncRejectsUnboundedPageLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.syncThreadHeaders(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{MaxPages: 1001})
+	_, err = svc.syncThreadHeaders(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, threadSyncInput{MaxPages: 1001})
 	if err == nil {
 		t.Fatal("expected max-pages validation error")
 	}
@@ -393,9 +393,31 @@ func TestSyncRejectsUnboundedPageLimit(t *testing.T) {
 func TestSyncRejectsInvalidRequestBudgets(t *testing.T) {
 	t.Parallel()
 	for _, maxRequests := range []int{-1, maxSyncRequests + 1} {
-		if _, err := normalizeThreadSyncOptions(SyncOptions{MaxRequests: maxRequests}); err == nil {
+		if _, _, err := parseThreadSync(threadSyncInput{MaxRequests: maxRequests}); err == nil {
 			t.Fatalf("max requests %d unexpectedly accepted", maxRequests)
 		}
+	}
+}
+
+func TestThreadSyncParsesDisjointExactAndListedSelections(t *testing.T) {
+	t.Parallel()
+	exactRequest, exactPlan, err := parseThreadSync(threadSyncInput{Kind: " pull_request ", Numbers: []int{3, 1, 3}, MaxRequests: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exact, ok := exactRequest.selection.(exactThreadSync)
+	if !ok || !reflect.DeepEqual(exact.numbers, []int{1, 3}) || exactRequest.kind != syncPullRequests || exactPlan.exactThreads != 2 {
+		t.Fatalf("exact request = %+v, plan = %+v", exactRequest, exactPlan)
+	}
+
+	since := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	listedRequest, listedPlan, err := parseThreadSync(threadSyncInput{State: " open ", Since: since, MaxItems: 7, MaxPages: 9, MaxRequests: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, ok := listedRequest.selection.(listedThreadSync)
+	if !ok || listed.state != syncOpenThreads || !listed.since.Equal(since) || listed.maxItems != 7 || listed.maxPages != 9 || listedPlan.threadRequestCeiling != 4 {
+		t.Fatalf("listed request = %+v, plan = %+v", listedRequest, listedPlan)
 	}
 }
 
@@ -406,7 +428,7 @@ func TestSyncRejectsConflictingExactFilters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.syncThreadHeaders(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, SyncOptions{
+	_, err = svc.syncThreadHeaders(context.Background(), contracts.RepoRef{Owner: "octocat", Repo: "test"}, threadSyncInput{
 		State: "open", Numbers: []int{1},
 	})
 	if err == nil {

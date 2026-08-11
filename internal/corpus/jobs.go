@@ -99,9 +99,26 @@ func (c *Corpus) StoppedJobIDs(ctx context.Context, ids []string) (_ map[string]
 	return stopped, nil
 }
 
-// GetJobsBatch returns jobs keyed by ID in one query. When includePayload is
-// false, request and result blobs are not loaded from SQLite.
-func (c *Corpus) GetJobsBatch(ctx context.Context, ids []string, includePayload bool) (map[string]*Job, error) {
+type jobBatchProjection uint8
+
+const (
+	jobSummaryProjection jobBatchProjection = iota
+	jobDetailedProjection
+)
+
+// GetJobSummariesBatch returns jobs keyed by ID without loading request and
+// result blobs from SQLite.
+func (c *Corpus) GetJobSummariesBatch(ctx context.Context, ids []string) (map[string]*Job, error) {
+	return c.getJobsBatch(ctx, ids, jobSummaryProjection)
+}
+
+// GetJobsBatch returns jobs and their stored request and result payloads keyed
+// by ID in one query.
+func (c *Corpus) GetJobsBatch(ctx context.Context, ids []string) (map[string]*Job, error) {
+	return c.getJobsBatch(ctx, ids, jobDetailedProjection)
+}
+
+func (c *Corpus) getJobsBatch(ctx context.Context, ids []string, projection jobBatchProjection) (map[string]*Job, error) {
 	if len(ids) > maxBatchReadItems {
 		return nil, errors.New("job batch cannot exceed 100 items")
 	}
@@ -109,7 +126,7 @@ func (c *Corpus) GetJobsBatch(ctx context.Context, ids []string, includePayload 
 		return map[string]*Job{}, nil
 	}
 	selection := jobSelect
-	if !includePayload {
+	if projection == jobSummaryProjection {
 		selection = jobSummarySelect
 	}
 	placeholders := sqlPlaceholders(len(ids))
@@ -138,7 +155,7 @@ func (c *Corpus) GetJobsBatch(ctx context.Context, ids []string, includePayload 
 }
 
 // ListJobs returns recent jobs bounded by limit, optionally filtered by status.
-func (c *Corpus) ListJobs(ctx context.Context, status string, limit int) ([]Job, error) {
+func (c *Corpus) ListJobs(ctx context.Context, status JobStatus, limit int) ([]Job, error) {
 	if limit <= 0 {
 		limit = 100
 	}
@@ -200,7 +217,7 @@ func (c *Corpus) StartJobAs(ctx context.Context, id, ownerID string) error {
 		if job == nil {
 			return errors.New("job not found")
 		}
-		if isTerminalJobStatus(job.State.Status()) {
+		if job.State.Status().Terminal() {
 			return fmt.Errorf("job is already %s", job.State.Status())
 		}
 		if job.State.CancellationRequested() {
@@ -211,15 +228,13 @@ func (c *Corpus) StartJobAs(ctx context.Context, id, ownerID string) error {
 	return nil
 }
 
-// TransitionJob performs a safe atomic terminal transition for a job. The
-// current status must match from, and cancellation requests block transitions
-// to non-cancelled terminal states. Terminal transitions clear the owner.
-func (c *Corpus) TransitionJob(ctx context.Context, id, from, to, result, errStr string) error {
-	if !isValidJobTransition(from, to) {
-		return fmt.Errorf("invalid job transition from %s to %s", from, to)
-	}
-	if from == to {
-		return nil
+// TransitionJob performs one structurally valid atomic terminal transition.
+// Cancellation requests block non-cancelled outcomes and every terminal
+// transition clears the executor owner.
+func (c *Corpus) TransitionJob(ctx context.Context, id string, transition JobTransition, result, errStr string) error {
+	from, to := transition.From(), transition.To()
+	if from == "" || to == "" {
+		return fmt.Errorf("invalid job transition %d", transition)
 	}
 	now := time.Now().UTC()
 	res, dbErr := c.db.ExecContext(ctx, `
@@ -285,7 +300,7 @@ func (c *Corpus) UpdateJobProgress(ctx context.Context, id, progress, statistics
 		if job == nil {
 			return errors.New("job not found")
 		}
-		if isTerminalJobStatus(job.State.Status()) {
+		if job.State.Status().Terminal() {
 			return fmt.Errorf("job is already %s", job.State.Status())
 		}
 		if job.State.CancellationRequested() {
@@ -331,7 +346,7 @@ func (c *Corpus) RequestJobCancellation(ctx context.Context, id string) error {
 		if job == nil {
 			return errors.New("job not found")
 		}
-		if isTerminalJobStatus(job.State.Status()) {
+		if job.State.Status().Terminal() {
 			return fmt.Errorf("job is already %s", job.State.Status())
 		}
 		return fmt.Errorf("cannot cancel job in status %s", job.State.Status())
@@ -532,23 +547,6 @@ func nullableJobTime(value sql.NullInt64) *time.Time {
 	}
 	parsed := scanTime(value.Int64)
 	return &parsed
-}
-
-func isTerminalJobStatus(status string) bool {
-	return status == JobStatusSucceeded || status == JobStatusFailed || status == JobStatusCancelled
-}
-
-func isValidJobTransition(from, to string) bool {
-	if isTerminalJobStatus(from) && from != to {
-		return false
-	}
-	switch from {
-	case JobStatusQueued:
-		return to == JobStatusRunning || to == JobStatusCancelled || to == JobStatusFailed
-	case JobStatusRunning:
-		return to == JobStatusSucceeded || to == JobStatusFailed || to == JobStatusCancelled
-	}
-	return false
 }
 
 // RegisterJobOwner records a process owner with an explicit heartbeat time.

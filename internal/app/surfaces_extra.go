@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/exporter"
 	"github.com/morluto/gitcontribute/internal/repositorycontext"
@@ -59,9 +60,11 @@ func (s *Service) PlanRepositoryContextSync(_ context.Context, repo contracts.Re
 }
 
 func planRepositoryContextSync(repo contracts.RepoRef, maxRequests int) (*contracts.SyncPlanResult, error) {
-	if _, err := domain.NewRepoRef(repo.Owner, repo.Repo); err != nil {
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
+	if err != nil {
 		return nil, err
 	}
+	repo = contracts.RepoRef{Owner: ref.Owner(), Repo: ref.Repo()}
 	required := repositorycontext.RequestCost()
 	if maxRequests == 0 {
 		maxRequests = required
@@ -79,11 +82,11 @@ func (s *Service) ArchiveSync(ctx context.Context, repo contracts.RepoRef, opts 
 	if opts.Since < 0 {
 		return nil, errors.New("since duration cannot be negative")
 	}
-	syncOpts := SyncOptions{State: opts.State, Numbers: opts.Numbers, MaxPages: opts.MaxPages, MaxRequests: opts.MaxRequests}
+	syncInput := threadSyncInput{State: opts.State, Numbers: opts.Numbers, MaxPages: opts.MaxPages, MaxRequests: opts.MaxRequests}
 	if opts.Since > 0 {
-		syncOpts.Since = s.now().Add(-opts.Since)
+		syncInput.Since = s.now().Add(-opts.Since)
 	}
-	return s.syncThreadHeaders(ctx, repo, syncOpts)
+	return s.syncThreadHeaders(ctx, repo, syncInput)
 }
 
 // PlanArchiveSync computes the conservative request ceiling before resolving a
@@ -96,40 +99,39 @@ func (s *Service) PlanArchiveSync(_ context.Context, repo contracts.RepoRef, opt
 	if opts.Since < 0 {
 		return nil, errors.New("since duration cannot be negative")
 	}
-	syncOpts := SyncOptions{State: opts.State, Numbers: opts.Numbers, MaxPages: opts.MaxPages, MaxRequests: opts.MaxRequests}
+	syncInput := threadSyncInput{State: opts.State, Numbers: opts.Numbers, MaxPages: opts.MaxPages, MaxRequests: opts.MaxRequests}
 	if opts.Since > 0 {
-		syncOpts.Since = s.now().Add(-opts.Since)
+		syncInput.Since = s.now().Add(-opts.Since)
 	}
-	normalized, plan, err := planThreadSyncOptions(syncOpts)
+	_, plan, err := parseThreadSync(syncInput)
 	if err != nil {
 		return nil, err
 	}
 	return &contracts.SyncPlanResult{
 		Repo: repo, FixedRequests: 0, ThreadRequestCeiling: plan.threadRequestCeiling,
-		PlannedRequests: plan.plannedRequests, RequestBudget: normalized.MaxRequests,
-		MaxPages: normalized.MaxPages, ExactThreads: len(normalized.Numbers),
+		PlannedRequests: plan.plannedRequests, RequestBudget: plan.requestBudget,
+		MaxPages: plan.maxPages, ExactThreads: plan.exactThreads,
 	}, nil
 }
 
 // Hydrate adapts the explicit CLI hydration contract to selective hydration.
 func (s *Service) Hydrate(ctx context.Context, repo contracts.RepoRef, number int, opts contracts.HydrateOptions) (*contracts.HydrateResult, error) {
-	if err := s.refreshHydrationThreadHeader(ctx, repo, opts.Kind, number); err != nil {
-		return nil, fmt.Errorf("refresh thread header: %w", err)
-	}
-	result, err := s.HydrateThread(ctx, repo, number, HydrateOptions{Kind: opts.Kind, Facets: opts.Facets, MaxPages: opts.MaxPages})
+	target, err := parseHydrationTarget(repo, number, hydrateThreadInput{Kind: opts.Kind, Facets: opts.Facets, MaxPages: opts.MaxPages})
 	if err != nil {
 		return nil, err
 	}
-	out := &contracts.HydrateResult{
-		Repo: result.Repo, Number: result.Number, Kind: result.Kind,
-		Pages: result.Pages, Requests: result.Requests + 1,
-		Message: "refreshed thread header and " + result.Message,
-		Facets:  make([]contracts.HydratedFacet, len(result.Facets)),
+	if err := s.refreshHydrationThreadHeader(ctx, target); err != nil {
+		return nil, fmt.Errorf("refresh thread header: %w", err)
 	}
-	for i, facet := range result.Facets {
-		out.Facets[i] = contracts.HydratedFacet{Facet: facet.Facet, Count: facet.Count, Pages: facet.Pages, Complete: facet.Complete}
+	result, err := s.hydrateThread(ctx, target)
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	out := *result
+	out.Requests++
+	out.Message = "refreshed thread header and " + result.Message
+	out.Facets = append([]contracts.HydratedFacet(nil), result.Facets...)
+	return &out, nil
 }
 
 // Coverage returns repository-level facet coverage without network access.
@@ -173,11 +175,13 @@ func (s *Service) ArchiveThreads(ctx context.Context, repo contracts.RepoRef, ki
 	if kind == "all" {
 		kind = ""
 	}
-	if kind != "" && kind != "issue" && kind != "pull_request" {
-		return nil, fmt.Errorf("unsupported thread kind %q", kind)
+	kindFilter, err := corpus.ParseThreadKindFilter(kind)
+	if err != nil {
+		return nil, err
 	}
-	if state != "" && state != "all" && state != "open" && state != "closed" {
-		return nil, fmt.Errorf("unsupported thread state %q", state)
+	stateFilter, err := corpus.ParseThreadStateFilter(state)
+	if err != nil {
+		return nil, err
 	}
 	ref, err := domain.NewRepoRef(repo.Owner, repo.Repo)
 	if err != nil {
@@ -196,7 +200,7 @@ func (s *Service) ArchiveThreads(ctx context.Context, repo contracts.RepoRef, ki
 	}
 	// Apply both kind and state filters at the corpus boundary so the bounded
 	// limit is applied to already-matching rows.
-	threads, err := c.ListThreadsFiltered(ctx, stored.ID, kind, state, limit)
+	threads, err := c.ListThreadsFiltered(ctx, stored.ID, kindFilter, stateFilter, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +208,7 @@ func (s *Service) ArchiveThreads(ctx context.Context, repo contracts.RepoRef, ki
 	var freshest time.Time
 	for _, thread := range threads {
 		out.Threads = append(out.Threads, contracts.ThreadListItem{
-			Kind: thread.Kind, Number: thread.Number, State: thread.State, Title: thread.Title,
+			Kind: string(thread.Kind), Number: thread.Number, State: string(thread.State), Title: thread.Title,
 			Author: thread.Author, Labels: thread.Labels, UpdatedAt: formatTime(thread.SourceUpdatedAt),
 		})
 		if thread.SourceUpdatedAt.After(freshest) {
@@ -252,12 +256,16 @@ func (s *Service) RunHistory(ctx context.Context, limit int) (*contracts.RunList
 
 // NeighborQuery returns transparent local nearest-thread results.
 func (s *Service) NeighborQuery(ctx context.Context, repo contracts.RepoRef, kind string, number, limit int) (*contracts.NeighborListResult, error) {
-	result, err := s.Neighbors(ctx, repo, kind, number, limit)
+	target, err := parseSimilarityThread(repo, kind, number)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.neighborsForThread(ctx, target, limit)
 	if err != nil {
 		return nil, err
 	}
 	out := &contracts.NeighborListResult{
-		Repo: repo, Kind: result.Kind, Number: result.Number, SourceRevision: result.SourceRevision,
+		Repo: contracts.RepoRef{Owner: target.repository.Owner(), Repo: target.repository.Repo()}, Kind: result.Kind, Number: result.Number, SourceRevision: result.SourceRevision,
 		Neighbors: make([]contracts.NeighborResult, len(result.Neighbors)),
 	}
 	for i, neighbor := range result.Neighbors {
@@ -283,11 +291,11 @@ func (s *Service) ExportDossier(ctx context.Context, repo contracts.RepoRef, for
 		return nil, err
 	}
 	var b bytes.Buffer
-	format, err = normalizeExportFormat(format)
+	parsedFormat, err := parseExportFormat(format)
 	if err != nil {
 		return nil, err
 	}
-	if format == "json" {
+	if parsedFormat == exportJSON {
 		err = exporter.ExportDossierJSON(&b, d)
 	} else {
 		err = exporter.ExportDossierMarkdown(&b, d)
@@ -295,7 +303,7 @@ func (s *Service) ExportDossier(ctx context.Context, repo contracts.RepoRef, for
 	if err != nil {
 		return nil, err
 	}
-	return &contracts.ExportResult{Kind: "dossier", Format: format, Content: b.String()}, nil
+	return &contracts.ExportResult{Kind: "dossier", Format: parsedFormat.String(), Content: b.String()}, nil
 }
 
 // ExportEvidence renders a deterministic redacted investigation evidence bundle.
@@ -305,11 +313,11 @@ func (s *Service) ExportEvidence(ctx context.Context, investigationID, format st
 		return nil, err
 	}
 	var b bytes.Buffer
-	format, err = normalizeExportFormat(format)
+	parsedFormat, err := parseExportFormat(format)
 	if err != nil {
 		return nil, err
 	}
-	if format == "json" {
+	if parsedFormat == exportJSON {
 		err = exporter.ExportEvidenceJSON(&b, evidence)
 	} else {
 		err = exporter.ExportEvidenceMarkdown(&b, evidence)
@@ -317,16 +325,34 @@ func (s *Service) ExportEvidence(ctx context.Context, investigationID, format st
 	if err != nil {
 		return nil, err
 	}
-	return &contracts.ExportResult{Kind: "evidence", Format: format, Content: b.String()}, nil
+	return &contracts.ExportResult{Kind: "evidence", Format: parsedFormat.String(), Content: b.String()}, nil
 }
 
-func normalizeExportFormat(format string) (string, error) {
-	format = strings.ToLower(strings.TrimSpace(format))
-	if format == "md" {
-		format = "markdown"
+type exportFormat uint8
+
+const (
+	exportJSON exportFormat = iota + 1
+	exportMarkdown
+)
+
+func parseExportFormat(value string) (exportFormat, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "json":
+		return exportJSON, nil
+	case "md", "markdown":
+		return exportMarkdown, nil
+	default:
+		return 0, errors.New("export format must be json or markdown")
 	}
-	if format != "json" && format != "markdown" {
-		return "", errors.New("export format must be json or markdown")
+}
+
+func (f exportFormat) String() string {
+	switch f {
+	case exportJSON:
+		return "json"
+	case exportMarkdown:
+		return "markdown"
+	default:
+		panic("invalid export format")
 	}
-	return format, nil
 }

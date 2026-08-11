@@ -16,7 +16,7 @@ import (
 
 func TestUpgradeActivatesPrivateMCPRuntimeFromTargetRelease(t *testing.T) {
 	home, _, _, _, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.4")
-	setRuntimeContract(t, "1.2.4", 1)
+	setRuntimeContract(t, svc, "1.2.4", 1)
 
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
@@ -30,7 +30,7 @@ func TestUpgradeActivatesPrivateMCPRuntimeFromTargetRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	launcher, err := clientsetup.ReadCommandFile(clientsetup.Codex, filepath.Join(home, ".codex", "config.toml"))
+	launcher, err := clientsetup.ReadCommand(clientsetup.Codex, home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestUpgradeNpxActivatesPrivateMCPRuntimeFromLatestRelease(t *testing.T) {
 	home, _, _, _, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.4")
 	t.Setenv("npm_command", "exec")
 	t.Setenv("npm_lifecycle_event", "npx")
-	setRuntimeContract(t, "1.2.4", 1)
+	setRuntimeContract(t, svc, "1.2.4", 1)
 
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {
@@ -69,7 +69,7 @@ func TestUpgradeNpxActivatesPrivateMCPRuntimeFromLatestRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	launcher, err := clientsetup.ReadCommandFile(clientsetup.Codex, filepath.Join(home, ".codex", "config.toml"))
+	launcher, err := clientsetup.ReadCommand(clientsetup.Codex, home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestUpgradeNpxActivatesPrivateMCPRuntimeFromLatestRelease(t *testing.T) {
 
 func TestUpgradeActivatesAlreadyInstalledTargetRuntime(t *testing.T) {
 	home, _, _, _, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.3")
-	setRuntimeContract(t, "1.2.4", 1)
+	setRuntimeContract(t, svc, "1.2.4", 1)
 	dataDir, err := svc.paths.DataDir()
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +109,7 @@ func TestUpgradeActivatesAlreadyInstalledTargetRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	launcher, err := clientsetup.ReadCommandFile(clientsetup.Codex, filepath.Join(home, ".codex", "config.toml"))
+	launcher, err := clientsetup.ReadCommand(clientsetup.Codex, home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestUpgradeNpxStaleBootstrapReportsExplicitLatestRecovery(t *testing.T) {
 	_, _, configPath, want, svc := setupUpgradeActivationTest(t, "1.2.3", "1.2.4", "1.2.3")
 	t.Setenv("npm_command", "exec")
 	t.Setenv("npm_lifecycle_event", "npx")
-	setRuntimeContract(t, "1.2.3", 1)
+	setRuntimeContract(t, svc, "1.2.3", 1)
 
 	report, err := svc.Upgrade(context.Background(), contracts.UpgradeOptions{Yes: true})
 	if err != nil {

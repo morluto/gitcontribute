@@ -17,14 +17,14 @@ type gatedFinishJobStore struct {
 	once     sync.Once
 }
 
-func (s *gatedFinishJobStore) TransitionJob(ctx context.Context, id, from, to, result, errStr string) error {
-	if from != corpus.JobStatusRunning {
-		return s.jobStore.TransitionJob(ctx, id, from, to, result, errStr)
+func (s *gatedFinishJobStore) TransitionJob(ctx context.Context, id string, transition corpus.JobTransition, result, errStr string) error {
+	if transition.From() != corpus.JobStatusRunning {
+		return s.jobStore.TransitionJob(ctx, id, transition, result, errStr)
 	}
 	s.once.Do(func() { close(s.entered) })
 	select {
 	case <-s.release:
-		return s.jobStore.TransitionJob(ctx, id, from, to, result, errStr)
+		return s.jobStore.TransitionJob(ctx, id, transition, result, errStr)
 	case <-ctx.Done():
 		close(s.timedOut)
 		return ctx.Err()

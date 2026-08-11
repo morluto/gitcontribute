@@ -50,7 +50,7 @@ func (t threadCoverageTarget) wire() mcpcontract.CoverageTarget {
 func (t threadCoverageTarget) key() string {
 	return fmt.Sprintf("%s/%s#%d", t.repo, t.kind, t.number)
 }
-func (t threadCoverageTarget) expectedFacets() []string { return facets.DefaultFor(string(t.kind)) }
+func (t threadCoverageTarget) expectedFacets() []string { return facets.DefaultFor(t.kind) }
 
 func parseCoverageTarget(input mcpcontract.CoverageTarget) (parsedCoverageTarget, mcpcontract.CoverageTarget, error) {
 	repo, err := domain.NewRepoRef(input.Repository.Owner, input.Repository.Repo)

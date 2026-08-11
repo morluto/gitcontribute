@@ -3,6 +3,7 @@ package investigation
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/domain"
@@ -24,6 +25,15 @@ const (
 	CategoryOther         Category = "other"
 )
 
+// ParseCategory converts boundary text into a supported contribution category.
+func ParseCategory(value string) (Category, error) {
+	category := Category(strings.TrimSpace(value))
+	if !validCategory(category) {
+		return "", fmt.Errorf("%w: %q", ErrInvalidCategory, value)
+	}
+	return category, nil
+}
+
 // HypothesisStatus is the lifecycle of an individual hypothesis.
 type HypothesisStatus string
 
@@ -34,6 +44,15 @@ const (
 	HypothesisDeferred   HypothesisStatus = "deferred"
 	HypothesisSuperseded HypothesisStatus = "superseded"
 )
+
+// ParseHypothesisStatus converts boundary text into a supported hypothesis status.
+func ParseHypothesisStatus(value string) (HypothesisStatus, error) {
+	status := HypothesisStatus(strings.TrimSpace(value))
+	if !validHypothesisStatus(status) {
+		return "", fmt.Errorf("invalid hypothesis status %q", value)
+	}
+	return status, nil
+}
 
 // OpportunityStatus is the lifecycle of an opportunity.
 type OpportunityStatus string
@@ -51,6 +70,15 @@ const (
 	OpportunitySuperseded        OpportunityStatus = "superseded"
 )
 
+// ParseOpportunityStatus converts boundary text into a supported opportunity status.
+func ParseOpportunityStatus(value string) (OpportunityStatus, error) {
+	status := OpportunityStatus(strings.TrimSpace(value))
+	if !validOpportunityStatus(status) {
+		return "", fmt.Errorf("invalid opportunity status %q", value)
+	}
+	return status, nil
+}
+
 // CollisionStatus records whether known competing work exists.
 type CollisionStatus string
 
@@ -61,6 +89,15 @@ const (
 	CollisionConfirmed CollisionStatus = "confirmed"
 	CollisionBlocked   CollisionStatus = "blocked"
 )
+
+// ParseCollisionStatus converts boundary text into a supported collision status.
+func ParseCollisionStatus(value string) (CollisionStatus, error) {
+	status := CollisionStatus(strings.TrimSpace(value))
+	if !validCollisionStatus(status) {
+		return "", fmt.Errorf("invalid collision status %q", value)
+	}
+	return status, nil
+}
 
 // StatusChange records a deliberate lifecycle transition with rationale.
 type StatusChange struct {
@@ -164,7 +201,7 @@ func (h *Hypothesis) ParseStored() error {
 	if h == nil || h.ID == "" || h.InvestigationID == "" {
 		return errors.New("hypothesis identity and investigation are required")
 	}
-	if !ValidCategory(h.Category) {
+	if !validCategory(h.Category) {
 		return fmt.Errorf("unsupported hypothesis category %q", h.Category)
 	}
 	switch h.Status {
@@ -187,7 +224,7 @@ func (o *Opportunity) ParseStored() error {
 	if o == nil || o.ID == "" || o.InvestigationID == "" || o.HypothesisID == "" {
 		return errors.New("opportunity identity, investigation, and hypothesis are required")
 	}
-	if !ValidCategory(o.Category) {
+	if !validCategory(o.Category) {
 		return fmt.Errorf("unsupported opportunity category %q", o.Category)
 	}
 	// Empty is the legacy JSON representation of the initial unknown state.
@@ -220,6 +257,16 @@ func (o *Opportunity) ParseStored() error {
 
 func validInvestigationStatus(status InvestigationStatus) bool {
 	return status == InvestigationOpen || status == InvestigationClosed
+}
+
+func validCategory(category Category) bool {
+	switch category {
+	case CategoryBug, CategoryPerformance, CategoryArchitecture, CategoryTesting,
+		CategoryDocumentation, CategoryMaintenance, CategoryCompatibility, CategorySecurity, CategoryOther:
+		return true
+	default:
+		return false
+	}
 }
 
 func validHypothesisStatus(status HypothesisStatus) bool {

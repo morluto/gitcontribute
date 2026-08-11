@@ -19,8 +19,6 @@ import (
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-var openLeaseHandoff = func(string) error { return nil }
-
 // Corpus is a durable, product-owned SQLite archive for GitHub repositories
 // and threads. It stores immutable observations and separately maintained
 // current projections, runs, coverage facts, and FTS5 search indexes.
@@ -72,7 +70,11 @@ func Open(ctx context.Context, path string) (_ *Corpus, returnErr error) {
 	if err != nil {
 		return nil, err
 	}
-	lease, err := acquireCorpusLease(path, needsInitialization, map[bool]string{true: "initialize corpus", false: "open corpus"}[needsInitialization])
+	leaseMode, operation := sharedCorpusLease, "open corpus"
+	if needsInitialization {
+		leaseMode, operation = exclusiveCorpusLease, "initialize corpus"
+	}
+	lease, err := acquireCorpusLease(path, leaseMode, operation)
 	if err != nil {
 		return nil, err
 	}
@@ -184,18 +186,25 @@ func handoffInitializedCorpus(ctx context.Context, path string, c *Corpus, lease
 	// Do not retain a handle to the inode initialized under the exclusive
 	// lease. Restore may replace the path while this process waits to reacquire
 	// a shared lease, so close first and reopen only after that lease is held.
+	if err := releaseInitializedCorpus(c, lease); err != nil {
+		return nil, lease, err
+	}
+	return reopenInitializedCorpus(ctx, path)
+}
+
+func releaseInitializedCorpus(c *Corpus, lease *corpusLease) error {
 	if err := c.db.Close(); err != nil {
-		return nil, lease, fmt.Errorf("close initialized corpus before lease handoff: %w", err)
+		return fmt.Errorf("close initialized corpus before lease handoff: %w", err)
 	}
 	c.db = nil
 	if err := lease.release(); err != nil {
-		return nil, lease, fmt.Errorf("release migration lease: %w", err)
+		return fmt.Errorf("release migration lease: %w", err)
 	}
-	lease = nil
-	if err := openLeaseHandoff(path); err != nil {
-		return nil, nil, fmt.Errorf("complete corpus lease handoff: %w", err)
-	}
-	lease, err := acquireCorpusLease(path, false, "open corpus")
+	return nil
+}
+
+func reopenInitializedCorpus(ctx context.Context, path string) (*Corpus, *corpusLease, error) {
+	lease, err := acquireCorpusLease(path, sharedCorpusLease, "open corpus")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -203,7 +212,7 @@ func handoffInitializedCorpus(ctx context.Context, path string, c *Corpus, lease
 	if err != nil {
 		return nil, lease, err
 	}
-	c = &Corpus{db: db, lease: lease, watchDSN: corpusWatchDSN(path)}
+	c := &Corpus{db: db, lease: lease, watchDSN: corpusWatchDSN(path)}
 	if err := validateOpenCorpusSchema(ctx, c); err != nil {
 		return nil, lease, errors.Join(err, db.Close())
 	}
@@ -250,7 +259,7 @@ func OpenReadOnly(ctx context.Context, path string) (_ *Corpus, returnErr error)
 	if current > target {
 		return nil, &UnsupportedSchemaError{Current: current, Target: target}
 	}
-	lease, err := acquireCorpusLease(path, false, "open corpus read-only")
+	lease, err := acquireCorpusLease(path, sharedCorpusLease, "open corpus read-only")
 	if err != nil {
 		return nil, err
 	}

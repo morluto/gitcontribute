@@ -11,6 +11,7 @@ import (
 	"time"
 
 	gh "github.com/google/go-github/v89/github"
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 // RepositoryFileReader is the optional exact-file capability used to ingest a
@@ -73,7 +74,7 @@ func sourceLineRange(content string, start, end int) (string, int, int, bool) {
 	return strings.Join(lines[start-1:end], ""), start, end, true
 }
 
-func sourceReadErrorStatus(err error) (string, time.Duration) {
+func sourceReadErrorStatus(err error) (SourceFileReadStatus, time.Duration) {
 	var primary *PrimaryRateLimitError
 	var secondary *SecondaryRateLimitError
 	var transient *TransientError
@@ -81,17 +82,17 @@ func sourceReadErrorStatus(err error) (string, time.Duration) {
 	var denied *AccessDeniedError
 	switch {
 	case errors.As(err, &primary):
-		return "retryable", primary.RetryAfter
+		return SourceFileReadRetryable, primary.RetryAfter
 	case errors.As(err, &secondary):
-		return "retryable", secondary.RetryAfter
+		return SourceFileReadRetryable, secondary.RetryAfter
 	case errors.As(err, &transient):
-		return "retryable", time.Second
+		return SourceFileReadRetryable, time.Second
 	case errors.As(err, &notFound):
-		return "not_found", 0
+		return SourceFileReadNotFound, 0
 	case errors.As(err, &denied):
-		return "unavailable", 0
+		return SourceFileReadUnavailable, 0
 	default:
-		return "failed", 0
+		return SourceFileReadFailed, 0
 	}
 }
 
@@ -178,7 +179,7 @@ func (c *Client) ReadSourceFiles(ctx context.Context, owner, name, requestedRef 
 	}
 	result := SourceFileReadResult{Resolution: resolution, Items: make([]SourceFileReadItem, len(requests)), Rate: rate}
 	for index, request := range requests {
-		item := SourceFileReadItem{Request: request, Status: "failed", StartLine: request.StartLine, EndLine: request.EndLine}
+		item := SourceFileReadItem{Request: request, Status: SourceFileReadFailed, StartLine: request.StartLine, EndLine: request.EndLine}
 		if err := ctx.Err(); err != nil {
 			return SourceFileReadResult{}, err
 		}
@@ -215,7 +216,7 @@ func (c *Client) ReadSourceFiles(ctx context.Context, owner, name, requestedRef 
 		metadata.Content = ""
 		item.File = metadata
 		if len(file.Content) > opts.PerFileBytes {
-			item.Status, item.Bytes, item.Message = "too_large", len(file.Content), fmt.Sprintf("file exceeds %d-byte per-file limit", opts.PerFileBytes)
+			item.Status, item.Bytes, item.Message = SourceFileReadTooLarge, len(file.Content), fmt.Sprintf("file exceeds %d-byte per-file limit", opts.PerFileBytes)
 			contentDigest := sha256.Sum256([]byte(file.Content))
 			item.ContentSHA = hex.EncodeToString(contentDigest[:])
 			result.Items[index] = item
@@ -223,19 +224,19 @@ func (c *Client) ReadSourceFiles(ctx context.Context, owner, name, requestedRef 
 		}
 		content, startLine, endLine, ok := sourceLineRange(file.Content, request.StartLine, request.EndLine)
 		if !ok {
-			item.Status, item.Message = "failed", "requested line range is outside the file"
+			item.Status, item.Message = SourceFileReadFailed, "requested line range is outside the file"
 			result.Items[index] = item
 			continue
 		}
 		if result.TotalBytes+len(content) > opts.TotalBytes {
-			item.Status, item.Bytes, item.Message = "too_large", len(content), fmt.Sprintf("batch exceeds %d-byte total limit", opts.TotalBytes)
+			item.Status, item.Bytes, item.Message = SourceFileReadTooLarge, len(content), fmt.Sprintf("batch exceeds %d-byte total limit", opts.TotalBytes)
 			contentDigest := sha256.Sum256([]byte(content))
 			item.ContentSHA = hex.EncodeToString(contentDigest[:])
 			result.Items[index] = item
 			continue
 		}
 		contentDigest := sha256.Sum256([]byte(content))
-		item.Status, item.File, item.StartLine, item.EndLine, item.Bytes, item.ContentSHA = "complete", file, startLine, endLine, len(content), hex.EncodeToString(contentDigest[:])
+		item.Status, item.File, item.StartLine, item.EndLine, item.Bytes, item.ContentSHA = SourceFileReadComplete, file, startLine, endLine, len(content), hex.EncodeToString(contentDigest[:])
 		item.File.Content = content
 		result.TotalBytes += len(content)
 		result.Items[index] = item
@@ -256,9 +257,9 @@ func (c *Client) SearchThreads(ctx context.Context, opts ThreadSearchOptions) (T
 		queryParts = append(queryParts, text)
 	}
 	switch opts.Kind {
-	case ThreadKindIssue:
+	case domain.IssueKind:
 		queryParts = append(queryParts, "is:issue")
-	case ThreadKindPullRequest:
+	case domain.PullRequestKind:
 		queryParts = append(queryParts, "is:pr")
 	case "":
 	default:

@@ -15,11 +15,15 @@ func jobProgressCounts(completed, total int) string {
 
 // ListJobs returns bounded durable jobs for CLI and MCP adapters.
 func (s *Service) ListJobs(ctx context.Context, status string, limit int) (*contracts.JobListResult, error) {
+	statusFilter, err := corpus.ParseJobStatusFilter(status)
+	if err != nil {
+		return nil, err
+	}
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
-	items, err := c.ListJobs(ctx, status, limit)
+	items, err := c.ListJobs(ctx, statusFilter, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +74,7 @@ func (s *Service) CancelJob(ctx context.Context, id string) (*contracts.JobResul
 
 func jobResult(job *corpus.Job) contracts.JobResult {
 	result := contracts.JobResult{
-		ID: job.ID, Kind: job.Kind, Status: job.State.Status(), Request: job.Request,
+		ID: job.ID, Kind: job.Kind, Status: job.State.Status().String(), Request: job.Request,
 		Result: job.Result, Error: job.Error, Progress: job.Progress,
 		Statistics: job.Statistics, CreatedAt: formatTime(job.CreatedAt),
 		Cancellation: job.State.CancellationRequested(),

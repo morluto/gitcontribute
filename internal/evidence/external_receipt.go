@@ -114,7 +114,7 @@ func (s *Service) AttachExternalReceipt(ctx context.Context, receipt ExternalRec
 		OpportunityID: receipt.OpportunityID, Kind: receipt.Kind, StartedAt: receipt.StartedAt.UTC(),
 		CompletedAt: receipt.CompletedAt.UTC(), ExitCode: receipt.ExitCode, Stdout: receipt.Stdout,
 		Stderr: receipt.Stderr, Truncated: receipt.Truncated, Classification: receipt.Classification,
-		ObservationStatus: ObservationNotEvaluated, ExecutionOrigin: "external",
+		ObservationStatus: ObservationNotEvaluated, ExecutionOrigin: ExecutionOriginExternal,
 		External: &ExternalReceiptProvenance{
 			SchemaVersion: receipt.SchemaVersion, Producer: receipt.Producer, ValidationID: receipt.ValidationID, ReceiptSHA256: digest,
 			Repository: receipt.Repository, Revision: receipt.Revision, ArtifactSHA256: receipt.ArtifactSHA256,

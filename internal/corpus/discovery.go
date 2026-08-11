@@ -5,14 +5,40 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
+
+// DiscoverySourceKind identifies the schema of one durable source
+// definition.
+type DiscoverySourceKind string
+
+const (
+	DiscoverySourceSearch    DiscoverySourceKind = "search"
+	DiscoverySourceRepos     DiscoverySourceKind = "repos"
+	DiscoverySourceGHArchive DiscoverySourceKind = "gharchive"
+)
+
+// ParseDiscoverySourceKind converts storage or boundary text into a supported
+// source variant.
+func ParseDiscoverySourceKind(value string) (DiscoverySourceKind, error) {
+	switch DiscoverySourceKind(strings.ToLower(strings.TrimSpace(value))) {
+	case DiscoverySourceSearch:
+		return DiscoverySourceSearch, nil
+	case DiscoverySourceRepos:
+		return DiscoverySourceRepos, nil
+	case DiscoverySourceGHArchive:
+		return DiscoverySourceGHArchive, nil
+	default:
+		return "", fmt.Errorf("unsupported discovery source kind %q", value)
+	}
+}
 
 // DiscoverySource is one durable repository-discovery definition.
 type DiscoverySource struct {
 	ID         int64
 	Name       string
-	Kind       string
+	Kind       DiscoverySourceKind
 	Definition string
 	Enabled    bool
 	CreatedAt  time.Time
@@ -37,11 +63,16 @@ type SourcePartition struct {
 
 // SaveDiscoverySource creates or updates a named source definition.
 func (c *Corpus) SaveDiscoverySource(ctx context.Context, source DiscoverySource) (*DiscoverySource, error) {
-	if source.Name == "" || source.Kind == "" {
+	if source.Name == "" {
 		return nil, errors.New("discovery source name and kind are required")
 	}
+	kind, err := ParseDiscoverySourceKind(string(source.Kind))
+	if err != nil {
+		return nil, err
+	}
+	source.Kind = kind
 	now := encodeTime(time.Now())
-	_, err := c.db.ExecContext(ctx, `
+	_, err = c.db.ExecContext(ctx, `
 		INSERT INTO discovery_sources (name, kind, definition, enabled, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (name) DO UPDATE SET kind=excluded.kind, definition=excluded.definition,
@@ -56,15 +87,20 @@ func (c *Corpus) SaveDiscoverySource(ctx context.Context, source DiscoverySource
 // GetDiscoverySource returns a named source or nil.
 func (c *Corpus) GetDiscoverySource(ctx context.Context, name string) (*DiscoverySource, error) {
 	var source DiscoverySource
+	var kind string
 	var enabled int
 	var created, updated int64
 	err := c.db.QueryRowContext(ctx, `
 		SELECT id, name, kind, definition, enabled, created_at, updated_at
 		FROM discovery_sources WHERE name=?
-	`, name).Scan(&source.ID, &source.Name, &source.Kind, &source.Definition, &enabled, &created, &updated)
+	`, name).Scan(&source.ID, &source.Name, &kind, &source.Definition, &enabled, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
+	if err != nil {
+		return nil, fmt.Errorf("get discovery source: %w", err)
+	}
+	source.Kind, err = ParseDiscoverySourceKind(kind)
 	if err != nil {
 		return nil, fmt.Errorf("get discovery source: %w", err)
 	}
@@ -97,10 +133,15 @@ func (c *Corpus) ListDiscoverySources(ctx context.Context) (DiscoverySourceList,
 	var result DiscoverySourceList
 	for rows.Next() {
 		var source DiscoverySource
+		var kind string
 		var enabled int
 		var created, updated int64
-		if err := rows.Scan(&source.ID, &source.Name, &source.Kind, &source.Definition, &enabled, &created, &updated, &result.Total); err != nil {
+		if err := rows.Scan(&source.ID, &source.Name, &kind, &source.Definition, &enabled, &created, &updated, &result.Total); err != nil {
 			return DiscoverySourceList{}, err
+		}
+		source.Kind, err = ParseDiscoverySourceKind(kind)
+		if err != nil {
+			return DiscoverySourceList{}, fmt.Errorf("list discovery sources: %w", err)
 		}
 		source.Enabled = enabled != 0
 		source.CreatedAt = scanTime(created)

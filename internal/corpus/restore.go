@@ -15,8 +15,6 @@ import (
 	"strings"
 )
 
-var removeRestoreSnapshot = removeFile
-
 // PostCommitCleanupError indicates that restore committed successfully but a
 // private staging artifact could not be cleaned up.
 type PostCommitCleanupError struct {
@@ -44,7 +42,7 @@ func Restore(ctx context.Context, source, destination string, observer func(copi
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 		return BackupResult{}, fmt.Errorf("create restore directory: %w", err)
 	}
-	lease, err := acquireCorpusLease(destination, true, "restore corpus")
+	lease, err := acquireCorpusLease(destination, exclusiveCorpusLease, "restore corpus")
 	if err != nil {
 		return BackupResult{}, err
 	}
@@ -74,7 +72,7 @@ func RestoreWithSafetyBackup(ctx context.Context, source, destination, safetyDes
 	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
 		return nil, BackupResult{}, fmt.Errorf("create restore directory: %w", err)
 	}
-	lease, err := acquireCorpusLease(destination, true, "back up and restore corpus")
+	lease, err := acquireCorpusLease(destination, exclusiveCorpusLease, "back up and restore corpus")
 	if err != nil {
 		return nil, BackupResult{}, err
 	}
@@ -142,14 +140,22 @@ func restoreWithLease(ctx context.Context, source, destination string, observer 
 		return BackupResult{}, fmt.Errorf("publish restored corpus: %w", err)
 	}
 	cleanup = false
+	result, err := finalizeCommittedRestore(destination, snapshotPath)
+	if err != nil {
+		return result, err
+	}
+	snapshotCleanup = false
+	return result, nil
+}
+
+func finalizeCommittedRestore(destination, snapshotPath string) (BackupResult, error) {
 	result, err := summarizeSQLiteFile(destination)
 	if err != nil {
 		return BackupResult{Path: destination}, &PostCommitCleanupError{Err: fmt.Errorf("summarize restored corpus: %w", err)}
 	}
-	if err := removeRestoreSnapshot(snapshotPath); err != nil {
+	if err := removeFile(snapshotPath); err != nil {
 		return result, &PostCommitCleanupError{Err: fmt.Errorf("remove restore source snapshot: %w", err)}
 	}
-	snapshotCleanup = false
 	return result, nil
 }
 

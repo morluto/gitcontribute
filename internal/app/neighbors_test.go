@@ -11,6 +11,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 func newNeighborService(t *testing.T) *Service {
@@ -37,14 +38,14 @@ func seedRepoForNeighbors(t *testing.T, c *corpus.Corpus) *corpus.Repository {
 	return repo
 }
 
-func seedPullRequestForNeighbors(t *testing.T, c *corpus.Corpus, repoID int64, number int, title, body, author, state, baseRef string) *corpus.Thread {
+func seedPullRequestForNeighbors(t *testing.T, c *corpus.Corpus, repoID int64, number int, title, body, author string, state domain.ThreadState, baseRef string) *corpus.Thread {
 	t.Helper()
 	ctx := context.Background()
 	updated := time.Unix(int64(number)*1000, 0).UTC()
 	payload := fmt.Sprintf(`{"BaseRef":"%s","HeadRef":"feature-%d","Title":"%s","Body":"%s","Author":"%s"}`, baseRef, number, title, body, author)
 	thread, err := c.UpsertThread(ctx, corpus.Thread{
 		RepositoryID:    repoID,
-		Kind:            corpus.ThreadKindPullRequest,
+		Kind:            domain.PullRequestKind,
 		Number:          number,
 		State:           state,
 		Title:           title,
@@ -65,7 +66,7 @@ func seedIssueForNeighbors(t *testing.T, c *corpus.Corpus, repoID int64, number 
 	updated := time.Unix(int64(number)*1000, 0).UTC()
 	thread, err := c.UpsertThread(ctx, corpus.Thread{
 		RepositoryID:    repoID,
-		Kind:            corpus.ThreadKindIssue,
+		Kind:            domain.IssueKind,
 		Number:          number,
 		State:           "open",
 		Title:           title,

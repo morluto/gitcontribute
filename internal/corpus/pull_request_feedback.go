@@ -13,17 +13,15 @@ const (
 	feedbackFacetReviewThreads  = "pr_feedback_review_threads"
 )
 
-var feedbackChannels = []string{"issue_comments", "submitted_reviews", "inline_comments", "review_threads"}
-
-func feedbackFacetForChannel(channel string) string {
+func feedbackFacet(channel FeedbackChannel) string {
 	switch channel {
-	case "issue_comments":
+	case FeedbackIssueComments:
 		return feedbackFacetIssueComments
-	case "submitted_reviews":
+	case FeedbackSubmittedReviews:
 		return feedbackFacetReviews
-	case "inline_comments":
+	case FeedbackInlineComments:
 		return feedbackFacetInlineComments
-	case "review_threads":
+	case FeedbackReviewThreads:
 		return feedbackFacetReviewThreads
 	default:
 		return ""
@@ -51,17 +49,34 @@ func feedbackChannelForFacet(facet string) string {
 type FeedbackDiscovery struct {
 	RepositoryID           int64
 	Generation             int64
-	State                  string
 	NextPage               int
-	Complete               bool
-	Truncated              bool
+	State                  FeedbackDiscoveryState
 	DiscoveredPullRequests int
 	Requests               int
-	Channels               []string
-	ThreadState            string
+	Selection              FeedbackSelection
 	LastError              string
 	SourceUpdatedAt        time.Time
 	UpdatedAt              time.Time
+}
+
+// FeedbackDiscoveryState is the mutually exclusive state of repository-wide
+// pull-request discovery.
+type FeedbackDiscoveryState string
+
+const (
+	FeedbackDiscoveryPending   FeedbackDiscoveryState = ""
+	FeedbackDiscoveryComplete  FeedbackDiscoveryState = "complete"
+	FeedbackDiscoveryTruncated FeedbackDiscoveryState = "truncated"
+)
+
+// IsComplete reports whether repository-wide discovery reached its last page.
+func (d FeedbackDiscovery) IsComplete() bool { return d.State == FeedbackDiscoveryComplete }
+
+// IsTruncated reports whether discovery stopped with a resumable next page.
+func (d FeedbackDiscovery) IsTruncated() bool { return d.State == FeedbackDiscoveryTruncated }
+
+func (s FeedbackDiscoveryState) valid() bool {
+	return s == FeedbackDiscoveryPending || s == FeedbackDiscoveryComplete || s == FeedbackDiscoveryTruncated
 }
 
 // PullRequestFeedbackProjection is one normalized, queryable feedback item.
@@ -99,26 +114,6 @@ type PullRequestFeedbackProjection struct {
 	SourceObservationSequence int64
 }
 
-// FeedbackSearchFilter scopes an offline normalized feedback search.
-type FeedbackSearchFilter struct {
-	RepositoryID      int64
-	FeedbackAuthor    string
-	PullRequestAuthor string
-	State             string
-	Merged            string
-	ThreadState       string
-	Channel           string
-	Text              string
-	CreatedAfter      time.Time
-	CreatedBefore     time.Time
-	UpdatedAfter      time.Time
-	UpdatedBefore     time.Time
-	Sort              string
-	Order             string
-	Limit             int
-	Cursor            string
-}
-
 type FeedbackSearchPage struct {
 	Items                    []PullRequestFeedbackProjection
 	UnknownMergePullRequests []int
@@ -128,10 +123,42 @@ type FeedbackSearchPage struct {
 	Coverage                 FeedbackCoverageSummary
 }
 
+// FeedbackCoverageState is the complete set of valid relationships between
+// repository discovery and per-pull-request facet coverage.
+type FeedbackCoverageState uint8
+
+const (
+	FeedbackCoverageUnknown FeedbackCoverageState = iota
+	FeedbackCoveragePartialDiscovery
+	FeedbackCoveragePartialFacets
+	FeedbackCoverageComplete
+)
+
 type FeedbackCoverageSummary struct {
-	Status            string
-	DiscoveryComplete bool
+	State             FeedbackCoverageState
 	IncompletePRs     int
 	TotalPullRequests int
 	Channels          []string
 }
+
+// Status returns the stable wire status derived from the coverage state.
+func (c FeedbackCoverageSummary) Status() string {
+	switch c.State {
+	case FeedbackCoverageComplete:
+		return "complete"
+	case FeedbackCoveragePartialDiscovery, FeedbackCoveragePartialFacets:
+		return "partial"
+	default:
+		return "unknown"
+	}
+}
+
+// DiscoveryComplete reports whether repository discovery covers the requested
+// channel and thread-state selection.
+func (c FeedbackCoverageSummary) DiscoveryComplete() bool {
+	return c.State == FeedbackCoveragePartialFacets || c.State == FeedbackCoverageComplete
+}
+
+// Complete reports whether both discovery and every requested facet are
+// complete.
+func (c FeedbackCoverageSummary) Complete() bool { return c.State == FeedbackCoverageComplete }

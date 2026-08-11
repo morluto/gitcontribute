@@ -43,11 +43,6 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo, clock: time.Now}
 }
 
-// SetClock overrides the time source. It is intended for tests.
-func (s *Service) SetClock(clock func() time.Time) {
-	s.clock = clock
-}
-
 // RecordTriageEvent stores a local triage decision after validating it.
 func (s *Service) RecordTriageEvent(ctx context.Context, e *TriageEvent) (*TriageEvent, error) {
 	if e == nil {
@@ -252,10 +247,11 @@ func validateContribution(c *Contribution) error {
 	if c.OpportunityID == "" {
 		return errors.New("contribution opportunity id is required")
 	}
-	c.Kind = strings.TrimSpace(c.Kind)
-	if c.Kind != "issue" && c.Kind != "pull_request" {
-		return fmt.Errorf("unsupported contribution kind %q", c.Kind)
+	kind, err := ParseContributionKind(string(c.Kind))
+	if err != nil {
+		return err
 	}
+	c.Kind = kind
 	c.Title = strings.TrimSpace(c.Title)
 	if c.Title == "" {
 		return errors.New("contribution title is required")
@@ -268,9 +264,11 @@ func validateContributionOutcome(o *ContributionOutcome) error {
 	if o.ContributionID == "" {
 		return errors.New("contribution id is required")
 	}
-	if !isContributionOutcome(o.Outcome) {
+	parsed, err := ParseOutcome(string(o.Outcome))
+	if err != nil || !isContributionOutcome(parsed) {
 		return fmt.Errorf("invalid contribution outcome %q", o.Outcome)
 	}
+	o.Outcome = parsed
 	return nil
 }
 
@@ -286,32 +284,16 @@ func validateTriageEvent(e *TriageEvent) error {
 	if e.TargetRef == "" {
 		return errors.New("triage target reference is required")
 	}
-	if !isValidTargetKind(e.TargetKind) {
-		return fmt.Errorf("unsupported triage target kind %q", e.TargetKind)
+	targetKind, err := ParseTargetKind(string(e.TargetKind))
+	if err != nil {
+		return err
 	}
-	if !isValidOutcome(e.Outcome) {
-		return fmt.Errorf("unsupported triage outcome %q", e.Outcome)
+	outcome, err := ParseOutcome(string(e.Outcome))
+	if err != nil {
+		return err
 	}
+	e.TargetKind, e.Outcome = targetKind, outcome
 	return nil
-}
-
-func isValidTargetKind(k TargetKind) bool {
-	switch k {
-	case TargetRepository, TargetIssue, TargetPullRequest, TargetThread,
-		TargetOpportunity, TargetInvestigation:
-		return true
-	}
-	return false
-}
-
-func isValidOutcome(o Outcome) bool {
-	switch o {
-	case OutcomeViewed, OutcomeIgnored, OutcomeSaved, OutcomeInvestigated,
-		OutcomeImplemented, OutcomeSubmitted, OutcomeMerged, OutcomeRejected,
-		OutcomeAbandoned:
-		return true
-	}
-	return false
 }
 
 func isContributionOutcome(o Outcome) bool {

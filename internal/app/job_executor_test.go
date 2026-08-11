@@ -28,13 +28,13 @@ type blockingFinishJobStore struct {
 	once    sync.Once
 }
 
-func (s *blockingFinishJobStore) TransitionJob(ctx context.Context, id, from, to, result, errStr string) error {
-	if from == corpus.JobStatusRunning {
+func (s *blockingFinishJobStore) TransitionJob(ctx context.Context, id string, transition corpus.JobTransition, result, errStr string) error {
+	if transition.From() == corpus.JobStatusRunning {
 		s.once.Do(func() { close(s.entered) })
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	return s.jobStore.TransitionJob(ctx, id, from, to, result, errStr)
+	return s.jobStore.TransitionJob(ctx, id, transition, result, errStr)
 }
 
 func (s *faultingJobStore) GetJob(ctx context.Context, id string) (*corpus.Job, error) {
@@ -88,7 +88,7 @@ func newJobExecutorOnService(t *testing.T, svc *Service, cfg jobExecutorConfig) 
 	return jobs
 }
 
-func waitForJobStatus(t *testing.T, jobs *JobExecutor, id, want string, timeout time.Duration) {
+func waitForJobStatus(t *testing.T, jobs *JobExecutor, id string, want corpus.JobStatus, timeout time.Duration) {
 	t.Helper()
 	ctx := context.Background()
 	deadline := time.Now().Add(timeout)
@@ -108,7 +108,7 @@ func waitForJobStatus(t *testing.T, jobs *JobExecutor, id, want string, timeout 
 	t.Fatalf("job did not reach status %q within %s", want, timeout)
 }
 
-func waitForCorpusJobStatus(t *testing.T, c *corpus.Corpus, id, want string, timeout time.Duration) {
+func waitForCorpusJobStatus(t *testing.T, c *corpus.Corpus, id string, want corpus.JobStatus, timeout time.Duration) {
 	t.Helper()
 	ctx := context.Background()
 	deadline := time.Now().Add(timeout)

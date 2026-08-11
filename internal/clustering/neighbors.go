@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/ranking"
 	"github.com/morluto/gitcontribute/internal/similarity"
 )
@@ -13,7 +14,7 @@ type Neighbor struct {
 	ThreadID int64
 	Ref      MemberRef
 	Title    string
-	State    string
+	State    domain.ThreadState
 	Score    float64
 	Reason   string
 }

@@ -15,7 +15,7 @@ func TestLocalWriteActionRequiresConfirmation(t *testing.T) {
 	actions := &fakeActionProvider{
 		actions: []tuicontract.Action{{
 			ID: "start", Label: "Start investigation", Description: "Create local records.",
-			Capability: tuicontract.CapabilityLocalWrite, RequiresConfirmation: true,
+			Capability: tuicontract.CapabilityLocalWrite,
 		}},
 		result: tuicontract.ActionResult{Message: "Started investigation", Reload: true},
 	}
@@ -36,7 +36,7 @@ func TestLocalWriteActionRequiresConfirmation(t *testing.T) {
 
 	model, cmd = m.Update(keyPress(tea.KeyEnter))
 	m = model.(Model)
-	if cmd != nil || !m.actionConfirm || actions.executeCount != 0 {
+	if cmd != nil || m.actionState != actionConfirming || actions.executeCount != 0 {
 		t.Fatal("local write must wait for confirmation")
 	}
 	if !strings.Contains(m.View().Content, "No network access or GitHub mutation") {
@@ -75,7 +75,7 @@ func TestOfflineReadActionRunsWithoutConfirmation(t *testing.T) {
 	m = model.(Model)
 	model, cmd = m.Update(keyPress(tea.KeyEnter))
 	m = model.(Model)
-	if cmd == nil || m.actionConfirm {
+	if cmd == nil || m.actionState == actionConfirming {
 		t.Fatal("offline read should execute without confirmation")
 	}
 	model, reload := m.Update(cmd())
@@ -138,7 +138,7 @@ func TestActionResultCanOpenCreatedWorkflowItemAfterReload(t *testing.T) {
 	data := sampleData()
 	data.Candidates[0].Actions = []tuicontract.Action{{
 		ID: "start", Label: "Start investigation",
-		Capability: tuicontract.CapabilityLocalWrite, RequiresConfirmation: true,
+		Capability: tuicontract.CapabilityLocalWrite,
 	}}
 	provider := &fakeActionProvider{
 		actions: data.Candidates[0].Actions,
@@ -162,7 +162,7 @@ func TestActionResultCanOpenCreatedWorkflowItemAfterReload(t *testing.T) {
 	m = model.(Model)
 	model, reload := m.Update(cmd())
 	m = model.(Model)
-	if reload == nil || !m.resultOpen {
+	if reload == nil || m.overlay != overlayResult {
 		t.Fatal("successful local write must show its result while reloading")
 	}
 	model, _ = m.Update(reload())
@@ -181,7 +181,7 @@ func TestActionPaletteNavigationCancellationAndErrors(t *testing.T) {
 		m := loadModel(t, &fakeReader{data: sampleData()})
 		model, cmd := m.Update(keyPress('a'))
 		m = model.(Model)
-		if cmd != nil || m.actionOpen {
+		if cmd != nil || m.overlay == overlayActions {
 			t.Fatal("action key must be inert without an application provider")
 		}
 	})
@@ -193,8 +193,8 @@ func TestActionPaletteNavigationCancellationAndErrors(t *testing.T) {
 		m = model.(Model)
 		model, _ = m.Update(cmd())
 		m = model.(Model)
-		if m.actionOpen || m.actionMsg != "No actions available for this item" {
-			t.Fatalf("empty action outcome = open:%v message:%q", m.actionOpen, m.actionMsg)
+		if m.overlay == overlayActions || m.actionMsg != "No actions available for this item" {
+			t.Fatalf("empty action outcome = overlay:%v message:%q", m.overlay, m.actionMsg)
 		}
 	})
 
@@ -225,7 +225,7 @@ func TestActionPaletteNavigationCancellationAndErrors(t *testing.T) {
 
 	t.Run("cancel confirmation", func(t *testing.T) {
 		provider := &fakeActionProvider{actions: []tuicontract.Action{{
-			ID: "write", Label: "Write", Capability: tuicontract.CapabilityLocalWrite, RequiresConfirmation: true,
+			ID: "write", Label: "Write", Capability: tuicontract.CapabilityLocalWrite,
 		}}}
 		m := loadModel(t, &fakeReader{data: sampleData()})
 		m.actionProvider = provider
@@ -237,12 +237,12 @@ func TestActionPaletteNavigationCancellationAndErrors(t *testing.T) {
 		m = model.(Model)
 		model, _ = m.Update(keyPress('n'))
 		m = model.(Model)
-		if m.actionConfirm || !m.actionOpen || provider.executeCount != 0 {
+		if m.actionState == actionConfirming || m.overlay != overlayActions || provider.executeCount != 0 {
 			t.Fatal("cancel must return to the palette without executing")
 		}
 		model, _ = m.Update(keyPress(tea.KeyEsc))
 		m = model.(Model)
-		if m.actionOpen {
+		if m.overlay == overlayActions {
 			t.Fatal("escape must close the action palette")
 		}
 	})
@@ -255,7 +255,7 @@ func TestActionPaletteNavigationCancellationAndErrors(t *testing.T) {
 		m = model.(Model)
 		model, _ = m.Update(cmd())
 		m = model.(Model)
-		if !m.actionOpen || !strings.Contains(m.View().Content, "ACTION FAILED") {
+		if m.overlay != overlayActions || !strings.Contains(m.View().Content, "ACTION FAILED") {
 			t.Fatalf("expected visible discovery failure, got:\n%s", m.View().Content)
 		}
 		provider.actionsErr = nil
@@ -264,7 +264,7 @@ func TestActionPaletteNavigationCancellationAndErrors(t *testing.T) {
 		}}
 		model, cmd = m.Update(keyPress(tea.KeyEnter))
 		m = model.(Model)
-		if cmd == nil || !m.actionLoading {
+		if cmd == nil || m.actionState != actionsLoading {
 			t.Fatal("Enter must retry failed action discovery")
 		}
 		model, _ = m.Update(cmd())
@@ -291,7 +291,7 @@ func TestActionPaletteNavigationCancellationAndErrors(t *testing.T) {
 		model, _ = m.Update(cmd())
 		m = model.(Model)
 		for _, want := range []string{"ACTION FAILED", "Check duplicates", "context canceled", "Recovery", "Enter"} {
-			if !m.actionOpen || !strings.Contains(m.View().Content, want) {
+			if m.overlay != overlayActions || !strings.Contains(m.View().Content, want) {
 				t.Fatalf("expected visible execution failure containing %q, got:\n%s", want, m.View().Content)
 			}
 		}
@@ -300,7 +300,7 @@ func TestActionPaletteNavigationCancellationAndErrors(t *testing.T) {
 		m = model.(Model)
 		model, _ = m.Update(cmd())
 		m = model.(Model)
-		if !m.resultOpen || !strings.Contains(m.View().Content, "Duplicate check complete") {
+		if m.overlay != overlayResult || !strings.Contains(m.View().Content, "Duplicate check complete") {
 			t.Fatalf("expected visible execution failure, got:\n%s", m.View().Content)
 		}
 	})

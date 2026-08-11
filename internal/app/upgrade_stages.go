@@ -48,7 +48,7 @@ func (s *Service) schemaStage(ctx context.Context) contracts.UpgradeStage {
 	return stage
 }
 
-func activationStage(report *contracts.UpgradeReport, opts contracts.UpgradeOptions) contracts.UpgradeStage {
+func activationStage(report *contracts.UpgradeReport, intent upgradeIntent, policy npmInstallPolicy, kind installationKind) contracts.UpgradeStage {
 	stage := contracts.UpgradeStage{Name: "activation"}
 	switch stageStatus(report, "corpus-schema") {
 	case "migration_required":
@@ -76,7 +76,7 @@ func activationStage(report *contracts.UpgradeReport, opts contracts.UpgradeOpti
 	}
 	if clients := staleRegistrationClients(report); len(clients) > 0 {
 		stage.Status = "repair_required"
-		if opts.Yes {
+		if intent == upgradeApply {
 			stage.Status = "repair_pending"
 			stage.Message = "repair stale MCP registrations, then restart the configured MCP clients (quit and reopen each one)"
 		} else {
@@ -85,18 +85,18 @@ func activationStage(report *contracts.UpgradeReport, opts contracts.UpgradeOpti
 		report.Action = stage.Message
 		return stage
 	}
-	switch report.Context {
-	case "npx":
+	switch kind {
+	case installationNPX:
 		stage.Status = "not_required"
 		stage.Message = "npx resolves versions on demand; no activation needed"
-	case "other":
+	case installationOther:
 		stage.Status = "manual"
 		stage.Message = "installation method is not managed automatically"
-	case "project-npm":
+	case installationProjectNPM:
 		stage.Status = "manual"
 		stage.Message = "project npm installation; update with npm install --save-dev"
-	case "global-npm":
-		switch reportVersionDisposition(report) {
+	case installationGlobalNPM:
+		switch reportVersionDisposition(report, kind) {
 		case versionUnavailable:
 			stage.Status = "awaiting_confirmation"
 			stage.Message = "pass --check or --yes to evaluate the latest release"
@@ -110,9 +110,9 @@ func activationStage(report *contracts.UpgradeReport, opts contracts.UpgradeOpti
 			stage.Status = "manual"
 			stage.Message = "installed and registry versions cannot be compared safely"
 		case versionUpgrade, versionPrerelease:
-			switch {
-			case opts.Yes:
-				if upgradeGOOS == "windows" {
+			switch intent {
+			case upgradeApply:
+				if policy == npmInstallAfterExit {
 					stage.Status = "manual"
 					stage.Message = "close running GitContribute processes, then run the displayed command"
 				} else {
@@ -120,9 +120,9 @@ func activationStage(report *contracts.UpgradeReport, opts contracts.UpgradeOpti
 					stage.Message = "install the latest release, then restart the configured MCP clients (quit and reopen each one)"
 					report.RestartClients = registeredClients(report)
 				}
-			case opts.Check:
+			case upgradeCheck:
 				stage.Status = "review"
-				if reportVersionDisposition(report) == versionPrerelease {
+				if reportVersionDisposition(report, kind) == versionPrerelease {
 					stage.Message = "a newer prerelease is available; pass --yes to install"
 				} else {
 					stage.Message = "latest release is available; pass --yes to install"
@@ -188,16 +188,16 @@ func registeredClients(report *contracts.UpgradeReport) []string {
 	return names
 }
 
-func rollbackStage(report *contracts.UpgradeReport) contracts.UpgradeStage {
+func rollbackStage(report *contracts.UpgradeReport, kind installationKind) contracts.UpgradeStage {
 	stage := contracts.UpgradeStage{Name: "rollback"}
-	switch report.Context {
-	case "npx":
+	switch kind {
+	case installationNPX:
 		stage.Status = "not_applicable"
 		stage.Message = "no persistent installation to roll back"
-	case "global-npm":
+	case installationGlobalNPM:
 		stage.Status = "limited"
 		stage.Message = "npm global installs cannot be rolled back automatically; reinstall the previous version with npm if needed"
-	case "project-npm":
+	case installationProjectNPM:
 		stage.Status = "manual"
 		stage.Message = "roll back by reinstalling the previous version in the project"
 	default:

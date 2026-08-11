@@ -38,6 +38,22 @@ func eventLine(t string, payload map[string]any) []byte {
 	return b
 }
 
+func mustArchiveReader(t *testing.T, include []string, store CheckpointStore) *ArchiveReader {
+	t.Helper()
+	reader, err := NewArchiveReader(include, store)
+	if err != nil {
+		t.Fatalf("NewArchiveReader: %v", err)
+	}
+	return reader
+}
+
+func TestNewArchiveReaderRejectsUnknownEventType(t *testing.T) {
+	reader, err := NewArchiveReader([]string{"UnknownEvent"}, nil)
+	if err == nil {
+		t.Fatalf("NewArchiveReader() = %v, want unsupported event error", reader)
+	}
+}
+
 func TestArchiveReaderSkipsMalformedLines(t *testing.T) {
 	lines := [][]byte{
 		eventLine("PushEvent", map[string]any{"ref": "refs/heads/main", "head": "abc", "size": 1}),
@@ -45,7 +61,7 @@ func TestArchiveReaderSkipsMalformedLines(t *testing.T) {
 		[]byte(`{"type":"IssuesEvent",`),
 		[]byte(""),
 	}
-	reader := NewArchiveReader(nil, nil)
+	reader := mustArchiveReader(t, nil, nil)
 	var got []Signal
 	err := reader.Read(context.Background(), time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC), bytes.NewReader(gzipLines(lines...)), func(s Signal) error {
 		got = append(got, s)
@@ -68,7 +84,7 @@ func TestArchiveReaderFiltersEventTypes(t *testing.T) {
 		eventLine("IssuesEvent", map[string]any{"action": "opened", "issue": map[string]any{"number": 1, "title": "x", "state": "open", "user": map[string]any{"login": "u"}}}),
 		eventLine("WatchEvent", map[string]any{"action": "started"}),
 	}
-	reader := NewArchiveReader([]string{"IssuesEvent", "PullRequestEvent"}, nil)
+	reader := mustArchiveReader(t, []string{"IssuesEvent", "PullRequestEvent"}, nil)
 	var got []Signal
 	err := reader.Read(context.Background(), time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC), bytes.NewReader(gzipLines(lines...)), func(s Signal) error {
 		got = append(got, s)
@@ -90,7 +106,7 @@ func TestArchiveReaderDuplicateHour(t *testing.T) {
 	hour := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
 	_ = store.MarkImported(context.Background(), HourKey(hour))
 
-	reader := NewArchiveReader(nil, store)
+	reader := mustArchiveReader(t, nil, store)
 	var got []Signal
 	err := reader.Read(context.Background(), hour, bytes.NewReader(gzipLines(eventLine("PushEvent", map[string]any{}))), func(s Signal) error {
 		got = append(got, s)
@@ -108,7 +124,7 @@ func TestArchiveReaderContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	reader := NewArchiveReader(nil, nil)
+	reader := mustArchiveReader(t, nil, nil)
 	err := reader.Read(ctx, time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC), bytes.NewReader(gzipLines(eventLine("PushEvent", map[string]any{}))), func(_ Signal) error {
 		return nil
 	})
@@ -135,7 +151,7 @@ func TestArchiveReaderRepresentativeEvents(t *testing.T) {
 			"issue": map[string]any{
 				"number": 42,
 				"title":  "A bug",
-				"state":  "open",
+				"state":  " open ",
 				"user":   map[string]any{"login": "bob"},
 			},
 		}),
@@ -153,7 +169,7 @@ func TestArchiveReaderRepresentativeEvents(t *testing.T) {
 		eventLine("ForkEvent", map[string]any{"forkee": map[string]any{"full_name": "forker/repo", "id": 99}}),
 	}
 
-	reader := NewArchiveReader(nil, nil)
+	reader := mustArchiveReader(t, nil, nil)
 	var got []Signal
 	err := reader.Read(context.Background(), hour, bytes.NewReader(gzipLines(lines...)), func(s Signal) error {
 		got = append(got, s)
@@ -200,7 +216,7 @@ func TestHourKey(t *testing.T) {
 }
 
 func TestArchiveReaderBoundsEventLines(t *testing.T) {
-	reader := NewArchiveReader(nil, nil)
+	reader := mustArchiveReader(t, nil, nil)
 	reader.MaxEventBytes = 128
 	line := eventLine("PushEvent", map[string]any{"head": strings.Repeat("a", 256)})
 	err := reader.Read(context.Background(), time.Now(), bytes.NewReader(gzipLines(line)), func(Signal) error { return nil })
@@ -230,7 +246,7 @@ func TestArchiveReaderRejectsDecompressionBomb(t *testing.T) {
 	gw.Write(uncompressed.Bytes())
 	gw.Close()
 
-	reader := NewArchiveReader(nil, nil)
+	reader := mustArchiveReader(t, nil, nil)
 	reader.MaxTotalBytes = 256
 	var count int
 	err := reader.Read(context.Background(), time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC), bytes.NewReader(gz.Bytes()), func(Signal) error {
@@ -252,7 +268,7 @@ func TestArchiveReaderSkipsMalformedAndUnknownEvents(t *testing.T) {
 	malformed := []byte(`this is not json`)
 	incomplete := []byte(`{"type":"IssuesEvent",`)
 
-	reader := NewArchiveReader(nil, nil)
+	reader := mustArchiveReader(t, nil, nil)
 	var got []Signal
 	err := reader.Read(context.Background(), hour, bytes.NewReader(gzipLines(valid, unknown, malformed, incomplete)), func(s Signal) error {
 		got = append(got, s)

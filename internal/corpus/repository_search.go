@@ -10,9 +10,8 @@ import (
 
 // RepositorySearchOptions scopes a paginated repository search.
 type RepositorySearchOptions struct {
-	Limit  int
-	Cursor string
-	Sort   string
+	Page  SearchPage
+	Order SearchOrder
 }
 
 // RepositorySearchPage is a paginated result of a repository keyword search.
@@ -25,7 +24,11 @@ type RepositorySearchPage struct {
 // ListRepositories returns repositories matching an optional name query.
 // An empty query lists all repositories ordered by most recently updated.
 func (c *Corpus) ListRepositories(ctx context.Context, query string, limit int) ([]Repository, error) {
-	page, err := c.ListRepositoriesWithOptions(ctx, query, RepositorySearchOptions{Limit: limit})
+	request, err := ParseSearchPage(limit, "")
+	if err != nil {
+		return nil, err
+	}
+	page, err := c.ListRepositoriesWithOptions(ctx, query, RepositorySearchOptions{Page: request})
 	if err != nil {
 		return nil, err
 	}
@@ -53,15 +56,15 @@ func (c *Corpus) ListRepositoriesWithOptions(ctx context.Context, query string, 
 	}
 
 	page := RepositorySearchPage{Repositories: out}
-	if len(out) > opts.Limit {
-		page.Repositories = out[:opts.Limit]
+	if len(out) > opts.Page.Limit() {
+		page.Repositories = out[:opts.Page.Limit()]
 		last := page.Repositories[len(page.Repositories)-1]
 		page.NextCursor = encodeCursor(searchCursor{
-			Scope: "repos", Query: ftsQuery, Kind: "repo", Filter: opts.Sort,
+			Scope: "repos", Query: ftsQuery, Kind: "repo", Filter: opts.Order.String(),
 			Rank: last.Rank, UpdatedAt: encodeTime(last.SourceUpdatedAt), ID: last.ID,
 		})
 	}
-	if len(out) > opts.Limit || opts.Cursor != "" {
+	if len(out) > opts.Page.Limit() || opts.Page.Cursor() != "" {
 		page.Total, err = c.countRepositories(ctx, ftsQuery)
 		if err != nil {
 			return RepositorySearchPage{}, err
@@ -73,25 +76,13 @@ func (c *Corpus) ListRepositoriesWithOptions(ctx context.Context, query string, 
 }
 
 func (c *Corpus) prepareRepositorySearch(ctx context.Context, query string, opts RepositorySearchOptions) (RepositorySearchOptions, string, *searchCursor, error) {
-	if opts.Limit <= 0 {
-		opts.Limit = 20
-	}
-	if opts.Limit > 100 {
-		return opts, "", nil, errors.New("repository list limit cannot exceed 100")
-	}
-	if opts.Sort == "" {
-		opts.Sort = "relevance"
-	}
-	if opts.Sort != "relevance" && opts.Sort != "updated" {
-		return opts, "", nil, errors.New("repository sort must be relevance or updated")
-	}
 	ftsQuery := repositoryFTSQuery(query)
 	if ftsQuery != "" {
 		if err := c.RequireProjection(ctx, ProjectionNameRepositoriesFTS, ProjectionVersionRepositoriesFTS); err != nil {
 			return opts, "", nil, err
 		}
 	}
-	cursor, err := c.decodeRepoCursor(opts.Cursor, ftsQuery, opts.Sort)
+	cursor, err := c.decodeRepoCursor(opts.Page.Cursor(), ftsQuery, opts.Order.String())
 	return opts, ftsQuery, cursor, err
 }
 
@@ -112,7 +103,7 @@ func repositorySearchStatement(ftsQuery string, opts RepositorySearchOptions, cu
 		} else {
 			where += ` AND `
 		}
-		if ftsQuery != "" && opts.Sort == "relevance" {
+		if ftsQuery != "" && !opts.Order.IsUpdated() {
 			where += `(` + rankSelect + ` > ? OR (` + rankSelect + ` = ? AND (repositories.source_updated_at < ? OR (repositories.source_updated_at = ? AND repositories.id > ?))))`
 			args = append(args, cursor.Rank, cursor.Rank, cursor.UpdatedAt, cursor.UpdatedAt, cursor.ID)
 		} else {
@@ -124,9 +115,9 @@ func repositorySearchStatement(ftsQuery string, opts RepositorySearchOptions, cu
 		SELECT ` + rankSelect + `, repositories.id, repositories.owner, repositories.name, repositories.external_id, repositories.description, repositories.default_branch, repositories.language, repositories.license, repositories.topics, repositories.stars, repositories.watchers, repositories.forks, repositories.open_issues, repositories.archived, repositories.fork, repositories.source_created_at, repositories.source_updated_at, repositories.observation_sequence, repositories.created_at, repositories.updated_at
 		` + from + `
 		` + where + `
-		ORDER BY ` + repositoryOrder(ftsQuery, opts.Sort) + `
+		ORDER BY ` + repositoryOrder(ftsQuery, opts.Order) + `
 		LIMIT ?`
-	return statement, append(args, opts.Limit+1)
+	return statement, append(args, opts.Page.Limit()+1)
 }
 
 func scanRepositorySearchRows(rows *sql.Rows) ([]Repository, error) {
@@ -151,8 +142,8 @@ func scanRepositorySearchRows(rows *sql.Rows) ([]Repository, error) {
 	return out, rows.Err()
 }
 
-func repositoryOrder(ftsQuery, sort string) string {
-	if ftsQuery != "" && sort == "relevance" {
+func repositoryOrder(ftsQuery string, order SearchOrder) string {
+	if ftsQuery != "" && !order.IsUpdated() {
 		return "bm25(repositories_fts, 10.0, 10.0, 5.0, 2.0), repositories.source_updated_at DESC, repositories.id"
 	}
 	return "repositories.source_updated_at DESC, repositories.id DESC"

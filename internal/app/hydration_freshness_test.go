@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
-	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
@@ -28,7 +28,7 @@ func TestHydrateRefreshesStaleThreadHeaderBeforeEmptyFacet(t *testing.T) {
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
 
-	repo, thread := seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 223)
+	repo, thread := seedRepoAndThread(t, svc, domain.IssueKind, 223)
 	current := thread.SourceUpdatedAt.Add(24 * time.Hour)
 	reader := &exactHydrationReader{
 		fakeHydrationReader: &fakeHydrationReader{issueCommentsPages: [][]github.IssueComment{{}}},
@@ -36,7 +36,7 @@ func TestHydrateRefreshesStaleThreadHeaderBeforeEmptyFacet(t *testing.T) {
 			RepositoryOwner: "owner",
 			RepositoryName:  "repo",
 			Number:          223,
-			Kind:            corpus.ThreadKindIssue,
+			Kind:            domain.IssueKind,
 			State:           "open",
 			Title:           "current title",
 			UpdatedAt:       current,
@@ -73,7 +73,7 @@ func TestHydrateFetchesMissingExactThreadHeader(t *testing.T) {
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
 
-	repo, _ := seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	repo, _ := seedRepoAndThread(t, svc, domain.IssueKind, 1)
 	current := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
 	reader := &exactHydrationReader{
 		fakeHydrationReader: &fakeHydrationReader{issueCommentsPages: [][]github.IssueComment{{}}},
@@ -81,7 +81,7 @@ func TestHydrateFetchesMissingExactThreadHeader(t *testing.T) {
 			RepositoryOwner: "owner",
 			RepositoryName:  "repo",
 			Number:          224,
-			Kind:            corpus.ThreadKindIssue,
+			Kind:            domain.IssueKind,
 			State:           "open",
 			Title:           "new issue",
 			UpdatedAt:       current,
@@ -109,12 +109,12 @@ func TestHydrateThreadsReportsHeaderRefresh(t *testing.T) {
 	t.Parallel()
 	svc := newTestServiceNoNetwork(t)
 	defer func() { _ = svc.Close() }()
-	seedRepoAndThread(t, svc, corpus.ThreadKindIssue, 1)
+	seedRepoAndThread(t, svc, domain.IssueKind, 1)
 	svc.SetGitHubReader(&exactHydrationReader{
 		fakeHydrationReader: &fakeHydrationReader{issueCommentsPages: [][]github.IssueComment{{}}},
 		header: github.Issue{
 			RepositoryOwner: "owner", RepositoryName: "repo", Number: 224,
-			Kind: corpus.ThreadKindIssue, State: "open", Title: "new issue",
+			Kind: domain.IssueKind, State: "open", Title: "new issue",
 			UpdatedAt: time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC),
 		},
 	})
@@ -126,8 +126,8 @@ func TestHydrateThreadsReportsHeaderRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, ok := out["items"].([]map[string]any)
-	if !ok || len(items) != 1 || items[0]["header_refreshed"] != true || items[0]["requests"] != 2 {
+	items := out.Items
+	if len(items) != 1 || items[0].success == nil || items[0].success.requests != 2 {
 		t.Fatalf("hydration result = %+v", out)
 	}
 }

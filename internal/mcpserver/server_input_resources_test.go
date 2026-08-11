@@ -50,22 +50,22 @@ type feedbackResourceCapture struct {
 	feedbackID string
 }
 
-func (*feedbackResourceCapture) PullRequestFeedbackResource(context.Context, string, string, int) (map[string]any, error) {
-	return nil, errors.New("unexpected pull-request feedback resource")
+func (*feedbackResourceCapture) PullRequestFeedbackResource(context.Context, string, string, int) (mcpcontract.PullRequestFeedbackResource, error) {
+	return mcpcontract.PullRequestFeedbackResource{}, errors.New("unexpected pull-request feedback resource")
 }
 
-func (r *feedbackResourceCapture) PullRequestFeedbackItemResource(_ context.Context, _ string, _ string, _ int, channel, feedbackID string) (map[string]any, error) {
+func (r *feedbackResourceCapture) PullRequestFeedbackItemResource(_ context.Context, _ string, _ string, _ int, channel, feedbackID string) (mcpcontract.PullRequestFeedbackItemResource, error) {
 	r.channel = channel
 	r.feedbackID = feedbackID
-	return map[string]any{"schema_version": "gitcontribute.pull-request-feedback-item.v1"}, nil
+	return mcpcontract.PullRequestFeedbackItemResource{SchemaVersion: "gitcontribute.pull-request-feedback-item.v1"}, nil
 }
 
-func (*feedbackResourceCapture) CIFailureResource(context.Context, string, string, int) (map[string]any, error) {
-	return nil, errors.New("unexpected CI failure resource")
+func (*feedbackResourceCapture) CIFailureResource(context.Context, string, string, int) (mcpcontract.CIFailureResource, error) {
+	return mcpcontract.CIFailureResource{}, errors.New("unexpected CI failure resource")
 }
 
-func (*feedbackResourceCapture) CIJobLogResource(context.Context, string, string, int, int64) (map[string]any, error) {
-	return nil, errors.New("unexpected CI job log resource")
+func (*feedbackResourceCapture) CIJobLogResource(context.Context, string, string, int, int64) (mcpcontract.CIJobLogResource, error) {
+	return mcpcontract.CIJobLogResource{}, errors.New("unexpected CI job log resource")
 }
 
 func TestResourcePathPartsPreservesEscapedOpaqueIDs(t *testing.T) {
@@ -111,7 +111,7 @@ func TestSearchCodeRejectsWhitespaceOnlyQuery(t *testing.T) {
 
 func TestSearchThreadsRejectsWhitespaceOnlyQuery(t *testing.T) {
 	server := &Server{reader: &fakeReader{}}
-	_, _, err := server.searchThreads(context.Background(), nil, SearchThreadsInput{Query: " \t "})
+	_, _, err := server.searchThreads(context.Background(), nil, mcpcontract.SearchInput{Query: " \t "})
 	if err == nil {
 		t.Fatal("whitespace-only thread search query was accepted")
 	}

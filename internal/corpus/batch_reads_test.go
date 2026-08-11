@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 func TestBatchReadsReturnRequestedRepositoriesThreadsAndCoverage(t *testing.T) {
@@ -21,7 +23,7 @@ func TestBatchReadsReturnRequestedRepositoriesThreadsAndCoverage(t *testing.T) {
 		t.Fatal(err)
 	}
 	thread, err := c.UpsertThread(ctx, Thread{
-		RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 7,
+		RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 7,
 		State: "open", Title: "batch me", Body: "body", SourceUpdatedAt: now,
 	}, `{}`)
 	if err != nil {
@@ -52,22 +54,22 @@ func TestBatchReadsReturnRequestedRepositoriesThreadsAndCoverage(t *testing.T) {
 	}
 
 	threads, err := c.GetThreadsBatch(ctx, []ThreadKey{
-		{RepositoryID: repo.ID, Number: 7},
-		{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 7},
-		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 7},
+		{RepositoryID: repo.ID, Kind: AnyThreadKind(), Number: 7},
+		{RepositoryID: repo.ID, Kind: IssueThreadKind(), Number: 7},
+		{RepositoryID: repo.ID, Kind: PullRequestThreadKind(), Number: 7},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, key := range []ThreadKey{
-		{RepositoryID: repo.ID, Number: 7},
-		{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 7},
+		{RepositoryID: repo.ID, Kind: AnyThreadKind(), Number: 7},
+		{RepositoryID: repo.ID, Kind: IssueThreadKind(), Number: 7},
 	} {
 		if got := threads[key]; got == nil || got.ID != thread.ID {
 			t.Fatalf("thread %v = %+v", key, got)
 		}
 	}
-	if threads[ThreadKey{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 7}] != nil {
+	if threads[ThreadKey{RepositoryID: repo.ID, Kind: PullRequestThreadKind(), Number: 7}] != nil {
 		t.Fatal("unexpected pull request result")
 	}
 

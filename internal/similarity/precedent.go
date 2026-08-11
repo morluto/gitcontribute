@@ -11,9 +11,6 @@ type PrecedentRule struct{}
 // DefaultPrecedentRule returns the supported precedent-v1 scoring policy.
 func DefaultPrecedentRule() PrecedentRule { return PrecedentRule{} }
 
-// Version identifies the exact precedent scoring semantics.
-func (PrecedentRule) Version() RuleVersion { return PrecedentV1 }
-
 // PreparedLexical is an immutable precedent-v1 token set.
 type PreparedLexical struct {
 	tokens map[string]struct{}

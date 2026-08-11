@@ -15,7 +15,7 @@ import (
 
 // InspectCorpus reports corpus compatibility without mutation.
 func (s *Service) InspectCorpus(ctx context.Context) (*contracts.CorpusInspectionResult, error) {
-	cfg, err := s.loadConfig(false)
+	cfg, err := s.loadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +244,7 @@ func repositoryRemovalResult(plan *corpus.RepositoryRemovalPlan, dryRun bool) *c
 		ThreadObservations: plan.ThreadObservations, FacetObservations: plan.FacetObservations,
 		FacetCoverage: plan.FacetCoverage, CodeSnapshots: plan.CodeSnapshots,
 		CodeDocuments: plan.CodeDocuments, Dossiers: plan.Dossiers, ClusterRuns: plan.ClusterRuns,
-		Clusters: plan.Clusters, FrontierItems: plan.FrontierItems,
+		Clusters:             plan.Clusters,
 		DetachedTriageEvents: plan.DetachedTriageEvents, RemovedPortfolioLinks: plan.RemovedPortfolioLinks,
 		RemovedResolutionRecords: plan.RemovedResolutionRecords, RemovedSignalSnapshots: plan.RemovedSignalSnapshots,
 		DetachedClusterMembers:       plan.DetachedClusterMembers,
@@ -324,9 +324,9 @@ func corpusInspectionResult(inspection corpus.SchemaInspection) *contracts.Corpu
 	}
 	for _, step := range inspection.Pending {
 		result.Pending = append(result.Pending, contracts.CorpusMigrationStep{
-			Version: step.Version, Name: step.Name, Phase: "pending", AffectedRows: step.AffectedRows,
+			Version: step.Version, Name: step.Name, Phase: string(corpus.MigrationPending), AffectedRows: step.AffectedRows,
 			EstimateAvailable: step.EstimateAvailable, Transactional: step.Transactional,
-			Resumable: step.Resumable, ResumeStrategy: step.ResumeStrategy, ProjectionRebuild: step.ProjectionRebuild,
+			Resumable: step.Resumable, ResumeStrategy: string(step.ResumeStrategy), ProjectionRebuild: step.ProjectionRebuild,
 		})
 	}
 	return result
@@ -334,7 +334,7 @@ func corpusInspectionResult(inspection corpus.SchemaInspection) *contracts.Corpu
 
 // BackupCorpus creates a verified online backup at destination.
 func (s *Service) BackupCorpus(ctx context.Context, destination string) (*contracts.CorpusBackupResult, error) {
-	cfg, err := s.loadConfig(false)
+	cfg, err := s.loadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -350,7 +350,7 @@ func (s *Service) BackupCorpus(ctx context.Context, destination string) (*contra
 
 // RestoreCorpus replaces the corpus from a verified backup after safety backup.
 func (s *Service) RestoreCorpus(ctx context.Context, source, safetyBackup string) (*contracts.CorpusRestoreResult, error) {
-	cfg, err := s.loadConfig(false)
+	cfg, err := s.loadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -399,7 +399,7 @@ func (s *Service) RestoreCorpus(ctx context.Context, source, safetyBackup string
 
 // MigrateCorpus explicitly applies pending schema migrations with backup policy.
 func (s *Service) MigrateCorpus(ctx context.Context, opts contracts.CorpusMigrateOptions) (*contracts.CorpusMigrationResult, error) {
-	cfg, err := s.loadConfig(false)
+	cfg, err := s.loadConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -433,7 +433,7 @@ func (s *Service) MigrateCorpus(ctx context.Context, opts contracts.CorpusMigrat
 		}
 	}
 	backup, err := corpus.MigrateWithBackup(ctx, cfg.Database, destination, func(progress corpus.MigrationProgress) {
-		report.Steps = append(report.Steps, contracts.CorpusMigrationStep{Version: progress.Version, Name: progress.Name, Phase: progress.Phase})
+		report.Steps = append(report.Steps, contracts.CorpusMigrationStep{Version: progress.Version, Name: progress.Name, Phase: string(progress.Phase)})
 	})
 	if backup != nil {
 		report.Backup = corpusBackupResult(*backup)

@@ -13,6 +13,19 @@ import (
 	"github.com/morluto/gitcontribute/internal/domain"
 )
 
+func mustSearchPage(t *testing.T, limit int, cursor ...string) SearchPage {
+	t.Helper()
+	value := ""
+	if len(cursor) > 0 {
+		value = cursor[0]
+	}
+	page, err := ParseSearchPage(limit, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return page
+}
+
 func TestSearchThreadsPageReturnsNextCursorAndTotal(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -25,12 +38,12 @@ func TestSearchThreadsPageReturnsNextCursorAndTotal(t *testing.T) {
 
 	for i := 1; i <= 5; i++ {
 		title := "shared term"
-		if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, i, "open", title, "body", "a", time.Unix(int64(i), 0).UTC(), `{}`); err != nil {
+		if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, i, "open", title, "body", "a", time.Unix(int64(i), 0).UTC(), `{}`); err != nil {
 			t.Fatalf("apply thread %d: %v", i, err)
 		}
 	}
 
-	first, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Limit: 2})
+	first, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Page: mustSearchPage(t, 2)})
 	if err != nil {
 		t.Fatalf("first page: %v", err)
 	}
@@ -44,7 +57,7 @@ func TestSearchThreadsPageReturnsNextCursorAndTotal(t *testing.T) {
 		t.Fatal("first page next_cursor is empty")
 	}
 
-	second, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Limit: 2, Cursor: first.NextCursor})
+	second, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Page: mustSearchPage(t, 2, first.NextCursor)})
 	if err != nil {
 		t.Fatalf("second page: %v", err)
 	}
@@ -55,7 +68,7 @@ func TestSearchThreadsPageReturnsNextCursorAndTotal(t *testing.T) {
 		t.Fatalf("second page total = %d, want 5", second.Total)
 	}
 
-	third, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Limit: 2, Cursor: second.NextCursor})
+	third, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Page: mustSearchPage(t, 2, second.NextCursor)})
 	if err != nil {
 		t.Fatalf("third page: %v", err)
 	}
@@ -89,7 +102,7 @@ func TestSearchThreadsPageMalformedCursorRejected(t *testing.T) {
 	c, _ := openTestCorpus(t)
 
 	for _, cursor := range []string{"not-base64", "e30=", encodeCursor(searchCursor{Scope: "code"})} {
-		_, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Limit: 10, Cursor: cursor})
+		_, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Page: mustSearchPage(t, 10, cursor)})
 		if err == nil {
 			t.Fatalf("cursor %q should be rejected", cursor)
 		}
@@ -105,20 +118,20 @@ func TestSearchThreadsPageSupportsAnyTermModeAndBindsCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	for number, title := range []string{"alpha only", "beta only", "alpha beta"} {
-		if _, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, number+1, "open", title, "", "a", time.Unix(int64(number+2), 0).UTC(), `{}`); err != nil {
+		if _, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, number+1, "open", title, "", "a", time.Unix(int64(number+2), 0).UTC(), `{}`); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	all, err := c.SearchThreadsPage(ctx, "alpha beta", SearchFilter{Limit: 10, MatchMode: "all"})
+	all, err := c.SearchThreadsPage(ctx, "alpha beta", SearchFilter{Page: mustSearchPage(t, 10)})
 	if err != nil || all.Total != 1 {
 		t.Fatalf("all-term search = (%+v, %v)", all, err)
 	}
-	any, err := c.SearchThreadsPage(ctx, "alpha beta", SearchFilter{Limit: 1, MatchMode: "any"})
+	any, err := c.SearchThreadsPage(ctx, "alpha beta", SearchFilter{Page: mustSearchPage(t, 1), TermMatch: MatchAnyTerm()})
 	if err != nil || any.Total != 3 || any.NextCursor == "" {
 		t.Fatalf("any-term search = (%+v, %v)", any, err)
 	}
-	if _, err := c.SearchThreadsPage(ctx, "alpha beta", SearchFilter{Limit: 1, MatchMode: "all", Cursor: any.NextCursor}); err == nil {
+	if _, err := c.SearchThreadsPage(ctx, "alpha beta", SearchFilter{Page: mustSearchPage(t, 1, any.NextCursor)}); err == nil {
 		t.Fatal("cursor created for any-term search was accepted by all-term search")
 	}
 }
@@ -127,7 +140,7 @@ func TestSearchThreadsPageHonorsHardMax(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
-	_, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Limit: 101})
+	_, err := c.SearchThreads(ctx, "term", 101)
 	if err == nil || err.Error() != "search limit cannot exceed 100" {
 		t.Fatalf("unexpected error = %v", err)
 	}
@@ -142,9 +155,9 @@ func TestSearchThreadsWeightsTitleLabelsAndSupportsNewestSort(t *testing.T) {
 		t.Fatal(err)
 	}
 	threads := []Thread{
-		{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 1, State: "open", Title: "music playback fails", Body: "short", SourceUpdatedAt: time.Unix(100, 0).UTC()},
-		{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 2, State: "open", Title: "unrelated request", Body: "music music music music", SourceUpdatedAt: time.Unix(300, 0).UTC()},
-		{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 3, State: "open", Title: "label-only request", Labels: []string{"music"}, SourceUpdatedAt: time.Unix(200, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1, State: "open", Title: "music playback fails", Body: "short", SourceUpdatedAt: time.Unix(100, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 2, State: "open", Title: "unrelated request", Body: "music music music music", SourceUpdatedAt: time.Unix(300, 0).UTC()},
+		{RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 3, State: "open", Title: "label-only request", Labels: []string{"music"}, SourceUpdatedAt: time.Unix(200, 0).UTC()},
 	}
 	for _, thread := range threads {
 		thread.SourceCreatedAt = thread.SourceUpdatedAt
@@ -153,7 +166,7 @@ func TestSearchThreadsWeightsTitleLabelsAndSupportsNewestSort(t *testing.T) {
 		}
 	}
 
-	relevance, err := c.SearchThreadsPage(ctx, "music", SearchFilter{Limit: 10})
+	relevance, err := c.SearchThreadsPage(ctx, "music", SearchFilter{Page: mustSearchPage(t, 10)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +174,7 @@ func TestSearchThreadsWeightsTitleLabelsAndSupportsNewestSort(t *testing.T) {
 		t.Fatalf("weighted relevance order = %+v", relevance.Threads)
 	}
 
-	newest, err := c.SearchThreadsPage(ctx, "music", SearchFilter{Limit: 10, Sort: "updated"})
+	newest, err := c.SearchThreadsPage(ctx, "music", SearchFilter{Page: mustSearchPage(t, 10), Order: UpdatedSearchOrder()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,9 +192,9 @@ func TestSearchThreadsPageAppliesMetadataFiltersAndBindsCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, thread := range []Thread{
-		{Kind: ThreadKindIssue, Number: 1, State: "open", Title: "shared term", Author: "Alice", Labels: []string{"bug", "help wanted"}, SourceUpdatedAt: time.Unix(100, 0).UTC()},
-		{Kind: ThreadKindIssue, Number: 2, State: "closed", Title: "shared term", Author: "alice", Labels: []string{"bug"}, SourceUpdatedAt: time.Unix(200, 0).UTC()},
-		{Kind: ThreadKindIssue, Number: 3, State: "open", Title: "shared term", Author: "bob", Labels: []string{"bug"}, SourceUpdatedAt: time.Unix(300, 0).UTC()},
+		{Kind: domain.IssueKind, Number: 1, State: "open", Title: "shared term", Author: "Alice", Labels: []string{"bug", "help wanted"}, SourceUpdatedAt: time.Unix(100, 0).UTC()},
+		{Kind: domain.IssueKind, Number: 2, State: "closed", Title: "shared term", Author: "alice", Labels: []string{"bug"}, SourceUpdatedAt: time.Unix(200, 0).UTC()},
+		{Kind: domain.IssueKind, Number: 3, State: "open", Title: "shared term", Author: "bob", Labels: []string{"bug"}, SourceUpdatedAt: time.Unix(300, 0).UTC()},
 	} {
 		thread.RepositoryID = repo.ID
 		thread.SourceCreatedAt = thread.SourceUpdatedAt
@@ -189,7 +202,7 @@ func TestSearchThreadsPageAppliesMetadataFiltersAndBindsCursor(t *testing.T) {
 			t.Fatalf("seed thread %d: %v", i, err)
 		}
 	}
-	filter := SearchFilter{State: "open", Labels: []string{"bug"}, UpdatedAfter: time.Unix(50, 0).UTC(), Limit: 1}
+	filter := SearchFilter{State: OpenThreadState(), Labels: []string{"bug"}, UpdatedAfter: time.Unix(50, 0).UTC(), Page: mustSearchPage(t, 1)}
 	page, err := c.SearchThreadsPage(ctx, "term", filter)
 	if err != nil {
 		t.Fatalf("search: %v", err)
@@ -197,12 +210,12 @@ func TestSearchThreadsPageAppliesMetadataFiltersAndBindsCursor(t *testing.T) {
 	if len(page.Threads) != 1 || page.Threads[0].Number != 3 || page.Total != 2 || page.NextCursor == "" {
 		t.Fatalf("page = %+v", page)
 	}
-	filter.Cursor = page.NextCursor
+	filter.Page = filter.Page.WithCursor(page.NextCursor)
 	filter.Author = "bob"
 	if _, err := c.SearchThreadsPage(ctx, "term", filter); err == nil {
 		t.Fatal("cursor should be rejected when metadata filters change")
 	}
-	authorPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Author: "ALICE", Limit: 10})
+	authorPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Author: "ALICE", Page: mustSearchPage(t, 10)})
 	if err != nil || len(authorPage.Threads) != 2 {
 		t.Fatalf("case-insensitive author filter = %+v, err=%v", authorPage, err)
 	}
@@ -217,9 +230,9 @@ func TestSearchThreadsPageDoesNotTreatUnknownMergeStateAsFalse(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, thread := range []Thread{
-		{Kind: ThreadKindPullRequest, Number: 1, State: "closed", Title: "shared term", Merge: domain.MergedStatus(time.Time{}), SourceUpdatedAt: time.Unix(10, 0).UTC()},
-		{Kind: ThreadKindPullRequest, Number: 2, State: "closed", Title: "shared term", Merge: domain.UnmergedStatus(), SourceUpdatedAt: time.Unix(20, 0).UTC()},
-		{Kind: ThreadKindPullRequest, Number: 3, State: "closed", Title: "shared term", SourceUpdatedAt: time.Unix(30, 0).UTC()},
+		{Kind: domain.PullRequestKind, Number: 1, State: "closed", Title: "shared term", Merge: domain.MergedStatus(time.Time{}), SourceUpdatedAt: time.Unix(10, 0).UTC()},
+		{Kind: domain.PullRequestKind, Number: 2, State: "closed", Title: "shared term", Merge: domain.UnmergedStatus(), SourceUpdatedAt: time.Unix(20, 0).UTC()},
+		{Kind: domain.PullRequestKind, Number: 3, State: "closed", Title: "shared term", SourceUpdatedAt: time.Unix(30, 0).UTC()},
 	} {
 		thread.RepositoryID = repo.ID
 		if _, err := c.UpsertThread(ctx, thread, `{}`); err != nil {
@@ -227,24 +240,35 @@ func TestSearchThreadsPageDoesNotTreatUnknownMergeStateAsFalse(t *testing.T) {
 		}
 	}
 	merged, unmerged := true, false
-	mergedPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Merged: &merged, Limit: 10})
+	mergedPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Merge: MergeFilterFromPointer(&merged), Page: mustSearchPage(t, 10)})
 	if err != nil || len(mergedPage.Threads) != 1 || mergedPage.Threads[0].Number != 1 || mergedPage.UnknownMergeCount != 1 {
 		t.Fatalf("merged page = %+v, %v", mergedPage, err)
 	}
-	unmergedPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Merged: &unmerged, Limit: 10})
+	unmergedPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Merge: MergeFilterFromPointer(&unmerged), Page: mustSearchPage(t, 10)})
 	if err != nil || len(unmergedPage.Threads) != 1 || unmergedPage.Threads[0].Number != 2 || unmergedPage.UnknownMergeCount != 1 {
 		t.Fatalf("unmerged page = %+v, %v", unmergedPage, err)
 	}
 
 	if _, err := c.UpsertThread(ctx, Thread{
-		RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 3, State: "closed",
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 3, State: "closed",
 		Title: "shared term", Merge: domain.MergedStatus(time.Time{}), SourceUpdatedAt: time.Unix(40, 0).UTC(),
 	}, `{"Merged":true}`); err != nil {
 		t.Fatal(err)
 	}
-	hydratedPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Merged: &merged, Limit: 10})
+	hydratedPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Merge: MergeFilterFromPointer(&merged), Page: mustSearchPage(t, 10)})
 	if err != nil || len(hydratedPage.Threads) != 2 || hydratedPage.UnknownMergeCount != 0 {
 		t.Fatalf("hydrated page = %+v, %v", hydratedPage, err)
+	}
+	first, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Merge: MergeFilterFromPointer(&merged), Page: mustSearchPage(t, 1)})
+	if err != nil || first.NextCursor == "" {
+		t.Fatalf("first merged page = %+v, %v", first, err)
+	}
+	sameMergedFilter := true
+	second, err := c.SearchThreadsPage(ctx, "term", SearchFilter{
+		Merge: MergeFilterFromPointer(&sameMergedFilter), Page: mustSearchPage(t, 1, first.NextCursor),
+	})
+	if err != nil || len(second.Threads) != 1 || second.Threads[0].ID == first.Threads[0].ID {
+		t.Fatalf("second merged page = %+v, %v", second, err)
 	}
 }
 
@@ -252,7 +276,7 @@ func TestSearchThreadsPageIncludesAtomicFacetEvidence(t *testing.T) {
 	t.Parallel()
 	ctx, c, thread, newer := seedFacetSearch(t)
 
-	page, err := c.SearchThreadsPage(ctx, "transport invariant", SearchFilter{Limit: 10})
+	page, err := c.SearchThreadsPage(ctx, "transport invariant", SearchFilter{Page: mustSearchPage(t, 10)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +286,7 @@ func TestSearchThreadsPageIncludesAtomicFacetEvidence(t *testing.T) {
 	if page.Threads[0].MatchSource != "issue_comments" || !strings.Contains(page.Threads[0].MatchExcerpt, "transport") {
 		t.Fatalf("facet match evidence = %+v", page.Threads[0])
 	}
-	duplicatePage, err := c.SearchThreadsPage(ctx, "plain", SearchFilter{Limit: 10})
+	duplicatePage, err := c.SearchThreadsPage(ctx, "plain", SearchFilter{Page: mustSearchPage(t, 10)})
 	if err != nil || duplicatePage.Total != 1 || len(duplicatePage.Threads) != 1 {
 		t.Fatalf("thread/facet duplicate search = %+v, err=%v", duplicatePage, err)
 	}
@@ -282,7 +306,7 @@ func TestSearchableFacetReplacementHonorsSourceOrdering(t *testing.T) {
 	if err := c.ApplyFacetObservationSet(ctx, thread.RepositoryID, &thread.ID, "issue_comments", older, []FacetObservationInput{{SourceUpdatedAt: older, Payload: `[]`, SearchText: "stale replacement"}}, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	page, err := c.SearchThreadsPage(ctx, "transport invariant", SearchFilter{Limit: 10})
+	page, err := c.SearchThreadsPage(ctx, "transport invariant", SearchFilter{Page: mustSearchPage(t, 10)})
 	if err != nil || len(page.Threads) != 1 {
 		t.Fatalf("stale replacement changed search projection: page=%+v err=%v", page, err)
 	}
@@ -291,11 +315,11 @@ func TestSearchableFacetReplacementHonorsSourceOrdering(t *testing.T) {
 	if err := c.ApplyFacetObservationSet(ctx, thread.RepositoryID, &thread.ID, "issue_comments", latest, []FacetObservationInput{{SourceUpdatedAt: latest, Payload: `[]`, SearchText: "replacement evidence"}}, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	oldPage, err := c.SearchThreadsPage(ctx, "transport", SearchFilter{Limit: 10})
+	oldPage, err := c.SearchThreadsPage(ctx, "transport", SearchFilter{Page: mustSearchPage(t, 10)})
 	if err != nil || len(oldPage.Threads) != 0 {
 		t.Fatalf("old facet term remains searchable: page=%+v err=%v", oldPage, err)
 	}
-	newPage, err := c.SearchThreadsPage(ctx, "replacement", SearchFilter{Limit: 10})
+	newPage, err := c.SearchThreadsPage(ctx, "replacement", SearchFilter{Page: mustSearchPage(t, 10)})
 	if err != nil || len(newPage.Threads) != 1 {
 		t.Fatalf("replacement facet term missing: page=%+v err=%v", newPage, err)
 	}
@@ -303,7 +327,7 @@ func TestSearchableFacetReplacementHonorsSourceOrdering(t *testing.T) {
 	if err := c.ApplyFacetObservationSet(ctx, thread.RepositoryID, &thread.ID, "issue_comments", time.Unix(40, 0).UTC(), nil, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	emptyPage, err := c.SearchThreadsPage(ctx, "replacement", SearchFilter{Limit: 10})
+	emptyPage, err := c.SearchThreadsPage(ctx, "replacement", SearchFilter{Page: mustSearchPage(t, 10)})
 	if err != nil || len(emptyPage.Threads) != 0 {
 		t.Fatalf("empty facet replacement remains searchable: page=%+v err=%v", emptyPage, err)
 	}
@@ -317,7 +341,7 @@ func TestThreadSearchReportsBoundedHydratedDocument(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "titlematch", "plain", "a", time.Unix(2, 0).UTC(), `{}`)
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "titlematch", "plain", "a", time.Unix(2, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,15 +349,15 @@ func TestThreadSearchReportsBoundedHydratedDocument(t *testing.T) {
 	if err := c.ApplyFacetObservationSet(ctx, repo.ID, &thread.ID, "issue_comments", time.Unix(3, 0).UTC(), []FacetObservationInput{{SourceUpdatedAt: time.Unix(3, 0).UTC(), SearchText: searchText}}, true, 0); err != nil {
 		t.Fatal(err)
 	}
-	page, err := c.SearchThreadsPage(ctx, "insideboundary", SearchFilter{Limit: 10})
+	page, err := c.SearchThreadsPage(ctx, "insideboundary", SearchFilter{Page: mustSearchPage(t, 10)})
 	if err != nil || len(page.Threads) != 1 || !page.Threads[0].MatchTruncated || page.Threads[0].MatchSource != "hydrated_facets" {
 		t.Fatalf("bounded search page = %+v, err=%v", page, err)
 	}
-	titlePage, err := c.SearchThreadsPage(ctx, "titlematch", SearchFilter{Limit: 10})
+	titlePage, err := c.SearchThreadsPage(ctx, "titlematch", SearchFilter{Page: mustSearchPage(t, 10)})
 	if err != nil || len(titlePage.Threads) != 1 || titlePage.Threads[0].MatchSource != "thread" {
 		t.Fatalf("truncated facet must not replace title attribution: page=%+v err=%v", titlePage, err)
 	}
-	omitted, err := c.SearchThreadsPage(ctx, "outsideboundary", SearchFilter{Limit: 10})
+	omitted, err := c.SearchThreadsPage(ctx, "outsideboundary", SearchFilter{Page: mustSearchPage(t, 10)})
 	if err != nil || omitted.Total != 0 {
 		t.Fatalf("omitted suffix search = %+v, err=%v", omitted, err)
 	}
@@ -347,7 +371,7 @@ func seedFacetSearch(t *testing.T) (context.Context, *Corpus, *Thread, time.Time
 	if err != nil {
 		t.Fatal(err)
 	}
-	thread, err := c.ApplyThreadObservation(ctx, repo.ID, ThreadKindIssue, 1, "open", "plain title", "plain body", "a", time.Unix(2, 0).UTC(), `{}`)
+	thread, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "plain title", "plain body", "a", time.Unix(2, 0).UTC(), `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,9 +399,9 @@ func TestSearchThreadsPageFiltersByAssociationAndAssignee(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, thread := range []Thread{
-		{Kind: ThreadKindIssue, Number: 1, State: "open", Title: "shared term", Author: "Alice", AuthorAssociation: "OWNER", Assignees: []string{"alice"}, SourceUpdatedAt: time.Unix(100, 0).UTC()},
-		{Kind: ThreadKindIssue, Number: 2, State: "open", Title: "shared term", Author: "bob", AuthorAssociation: "CONTRIBUTOR", Assignees: []string{"alice", "bob"}, SourceUpdatedAt: time.Unix(200, 0).UTC()},
-		{Kind: ThreadKindIssue, Number: 3, State: "open", Title: "shared term", Author: "charlie", AuthorAssociation: "NONE", Assignees: []string{"bob"}, SourceUpdatedAt: time.Unix(300, 0).UTC()},
+		{Kind: domain.IssueKind, Number: 1, State: "open", Title: "shared term", Author: "Alice", AuthorAssociation: "OWNER", Assignees: []string{"alice"}, SourceUpdatedAt: time.Unix(100, 0).UTC()},
+		{Kind: domain.IssueKind, Number: 2, State: "open", Title: "shared term", Author: "bob", AuthorAssociation: "CONTRIBUTOR", Assignees: []string{"alice", "bob"}, SourceUpdatedAt: time.Unix(200, 0).UTC()},
+		{Kind: domain.IssueKind, Number: 3, State: "open", Title: "shared term", Author: "charlie", AuthorAssociation: "NONE", Assignees: []string{"bob"}, SourceUpdatedAt: time.Unix(300, 0).UTC()},
 	} {
 		thread.RepositoryID = repo.ID
 		thread.SourceCreatedAt = thread.SourceUpdatedAt
@@ -386,12 +410,12 @@ func TestSearchThreadsPageFiltersByAssociationAndAssignee(t *testing.T) {
 		}
 	}
 
-	assocPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Association: "owner", Limit: 10})
+	assocPage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Association: "owner", Page: mustSearchPage(t, 10)})
 	if err != nil || len(assocPage.Threads) != 1 || assocPage.Threads[0].Number != 1 {
 		t.Fatalf("association filter = %+v, err=%v", assocPage, err)
 	}
 
-	assigneePage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Assignee: "ALICE", Limit: 10})
+	assigneePage, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Assignee: "ALICE", Page: mustSearchPage(t, 10)})
 	if err != nil || len(assigneePage.Threads) != 2 {
 		t.Fatalf("assignee filter = %+v, err=%v", assigneePage, err)
 	}
@@ -401,7 +425,7 @@ func TestSearchThreadsPageFiltersByAssociationAndAssignee(t *testing.T) {
 		}
 	}
 
-	combined, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Association: "contributor", Assignee: "bob", Limit: 10})
+	combined, err := c.SearchThreadsPage(ctx, "term", SearchFilter{Association: "contributor", Assignee: "bob", Page: mustSearchPage(t, 10)})
 	if err != nil || len(combined.Threads) != 1 || combined.Threads[0].Number != 2 {
 		t.Fatalf("combined filter = %+v, err=%v", combined, err)
 	}
@@ -419,7 +443,7 @@ func TestListRepositoriesPageReturnsNextCursorAndTotal(t *testing.T) {
 		}
 	}
 
-	first, err := c.ListRepositoriesWithOptions(ctx, "", RepositorySearchOptions{Limit: 2})
+	first, err := c.ListRepositoriesWithOptions(ctx, "", RepositorySearchOptions{Page: mustSearchPage(t, 2)})
 	if err != nil {
 		t.Fatalf("first page: %v", err)
 	}
@@ -432,12 +456,12 @@ func TestListRepositoriesPageReturnsNextCursorAndTotal(t *testing.T) {
 	if first.NextCursor == "" {
 		t.Fatal("first page next_cursor is empty")
 	}
-	blank, err := c.ListRepositoriesWithOptions(ctx, " \t ", RepositorySearchOptions{Limit: 10})
+	blank, err := c.ListRepositoriesWithOptions(ctx, " \t ", RepositorySearchOptions{Page: mustSearchPage(t, 10)})
 	if err != nil || len(blank.Repositories) != 5 {
 		t.Fatalf("whitespace-only query = %+v, err=%v", blank, err)
 	}
 
-	second, err := c.ListRepositoriesWithOptions(ctx, "", RepositorySearchOptions{Limit: 2, Cursor: first.NextCursor})
+	second, err := c.ListRepositoriesWithOptions(ctx, "", RepositorySearchOptions{Page: mustSearchPage(t, 2, first.NextCursor)})
 	if err != nil {
 		t.Fatalf("second page: %v", err)
 	}
@@ -445,7 +469,7 @@ func TestListRepositoriesPageReturnsNextCursorAndTotal(t *testing.T) {
 		t.Fatalf("second page repositories = %d, want 2", len(second.Repositories))
 	}
 
-	third, err := c.ListRepositoriesWithOptions(ctx, "", RepositorySearchOptions{Limit: 2, Cursor: second.NextCursor})
+	third, err := c.ListRepositoriesWithOptions(ctx, "", RepositorySearchOptions{Page: mustSearchPage(t, 2, second.NextCursor)})
 	if err != nil {
 		t.Fatalf("third page: %v", err)
 	}
@@ -481,7 +505,7 @@ func TestListRepositoriesQueryWithCursorParenthesizesOR(t *testing.T) {
 		t.Fatalf("seed description match 2: %v", err)
 	}
 
-	first, err := c.ListRepositoriesWithOptions(ctx, "match", RepositorySearchOptions{Limit: 1})
+	first, err := c.ListRepositoriesWithOptions(ctx, "match", RepositorySearchOptions{Page: mustSearchPage(t, 1)})
 	if err != nil {
 		t.Fatalf("first page: %v", err)
 	}
@@ -489,7 +513,7 @@ func TestListRepositoriesQueryWithCursorParenthesizesOR(t *testing.T) {
 		t.Fatalf("first page = %+v", first.Repositories)
 	}
 
-	second, err := c.ListRepositoriesWithOptions(ctx, "match", RepositorySearchOptions{Limit: 2, Cursor: first.NextCursor})
+	second, err := c.ListRepositoriesWithOptions(ctx, "match", RepositorySearchOptions{Page: mustSearchPage(t, 2, first.NextCursor)})
 	if err != nil {
 		t.Fatalf("second page: %v", err)
 	}
@@ -507,7 +531,7 @@ func TestListRepositoriesPageMalformedCursorRejected(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
-	_, err := c.ListRepositoriesWithOptions(ctx, "", RepositorySearchOptions{Limit: 10, Cursor: "bad-cursor"})
+	_, err := c.ListRepositoriesWithOptions(ctx, "", RepositorySearchOptions{Page: mustSearchPage(t, 10, "bad-cursor")})
 	if err == nil {
 		t.Fatal("expected malformed cursor error")
 	}
@@ -517,8 +541,8 @@ func TestListRepositoriesPageHonorsHardMax(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
-	_, err := c.ListRepositoriesWithOptions(ctx, "", RepositorySearchOptions{Limit: 101})
-	if err == nil || err.Error() != "repository list limit cannot exceed 100" {
+	_, err := c.ListRepositories(ctx, "", 101)
+	if err == nil || err.Error() != "search limit cannot exceed 100" {
 		t.Fatalf("unexpected error = %v", err)
 	}
 }
@@ -538,7 +562,7 @@ func TestRepositorySearchWeightsNameTopicsDescriptionAndSupportsNewestSort(t *te
 		}
 	}
 
-	relevance, err := c.ListRepositoriesWithOptions(ctx, "music", RepositorySearchOptions{Limit: 10})
+	relevance, err := c.ListRepositoriesWithOptions(ctx, "music", RepositorySearchOptions{Page: mustSearchPage(t, 10)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -546,7 +570,7 @@ func TestRepositorySearchWeightsNameTopicsDescriptionAndSupportsNewestSort(t *te
 		t.Fatalf("weighted repository order = %v", got)
 	}
 
-	newest, err := c.ListRepositoriesWithOptions(ctx, "music", RepositorySearchOptions{Limit: 10, Sort: "updated"})
+	newest, err := c.ListRepositoriesWithOptions(ctx, "music", RepositorySearchOptions{Page: mustSearchPage(t, 10), Order: UpdatedSearchOrder()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,7 +590,7 @@ func TestRepositorySearchMatchesCanonicalSlug(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page, err := c.ListRepositoriesWithOptions(ctx, "acme/rocket", RepositorySearchOptions{Limit: 10})
+	page, err := c.ListRepositoriesWithOptions(ctx, "acme/rocket", RepositorySearchOptions{Page: mustSearchPage(t, 10)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -595,7 +619,7 @@ func TestSearchCodePageReturnsNextCursorAndTotal(t *testing.T) {
 		t.Fatalf("store snapshot: %v", err)
 	}
 
-	first, err := c.SearchCodeWithOptions(ctx, "term", CodeSearchOptions{Ref: ref, Limit: 2})
+	first, err := c.SearchCodeWithOptions(ctx, "term", CodeSearchOptions{Ref: ref, Page: mustSearchPage(t, 2)})
 	if err != nil {
 		t.Fatalf("first page: %v", err)
 	}
@@ -609,7 +633,7 @@ func TestSearchCodePageReturnsNextCursorAndTotal(t *testing.T) {
 		t.Fatal("first page next_cursor is empty")
 	}
 
-	second, err := c.SearchCodeWithOptions(ctx, "term", CodeSearchOptions{Ref: ref, Limit: 2, Cursor: first.NextCursor})
+	second, err := c.SearchCodeWithOptions(ctx, "term", CodeSearchOptions{Ref: ref, Page: mustSearchPage(t, 2, first.NextCursor)})
 	if err != nil {
 		t.Fatalf("second page: %v", err)
 	}
@@ -646,7 +670,7 @@ func TestSearchCodePageMalformedCursorRejected(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	ref := domain.MustRepoRef("owner", "repo")
-	_, err := c.SearchCodeWithOptions(ctx, "term", CodeSearchOptions{Ref: ref, Limit: 10, Cursor: "invalid"})
+	_, err := c.SearchCodeWithOptions(ctx, "term", CodeSearchOptions{Ref: ref, Page: mustSearchPage(t, 10, "invalid")})
 	if err == nil {
 		t.Fatal("expected malformed cursor error")
 	}
@@ -657,8 +681,8 @@ func TestSearchCodePageHonorsHardMax(t *testing.T) {
 	ctx := context.Background()
 	c, _ := openTestCorpus(t)
 	ref := domain.MustRepoRef("owner", "repo")
-	_, err := c.SearchCodeWithOptions(ctx, "term", CodeSearchOptions{Ref: ref, Limit: 101})
-	if err == nil || err.Error() != "code search limit cannot exceed 100" {
+	_, err := c.SearchCode(ctx, "term", ref, 101)
+	if err == nil || err.Error() != "search limit cannot exceed 100" {
 		t.Fatalf("unexpected error = %v", err)
 	}
 }

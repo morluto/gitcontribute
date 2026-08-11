@@ -91,10 +91,6 @@ type SetupOptions struct {
 	// Version is the release used for persistent CLI or private MCP runtime
 	// installation. Empty values inherit the running service version.
 	Version string
-	// Executable is the packaged native program copied for MCP-only setup. It is
-	// injectable so installation behavior can be tested without copying the test
-	// process itself.
-	Executable string
 }
 
 // SetupStep describes one independently observable setup effect. Status is a

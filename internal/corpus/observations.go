@@ -170,7 +170,7 @@ func (c *Corpus) ListRepositoryObservations(ctx context.Context, repoID int64) (
 
 // ApplyThreadObservation records an immutable thread observation and updates
 // the current projection only when the new observation wins the ordering.
-func (c *Corpus) ApplyThreadObservation(ctx context.Context, repoID int64, kind string, number int, state, title, body, author string, sourceUpdatedAt time.Time, payload string) (*Thread, error) {
+func (c *Corpus) ApplyThreadObservation(ctx context.Context, repoID int64, kind domain.ThreadKind, number int, state domain.ThreadState, title, body, author string, sourceUpdatedAt time.Time, payload string) (*Thread, error) {
 	thread := Thread{
 		RepositoryID:    repoID,
 		Kind:            kind,
@@ -190,7 +190,7 @@ func (c *Corpus) UpsertThread(ctx context.Context, thread Thread, payload string
 	if err := parseThreadProjection(&thread); err != nil {
 		return nil, err
 	}
-	if thread.Kind != ThreadKindPullRequest && thread.Merge.Known() {
+	if thread.Kind != domain.PullRequestKind && thread.Merge.Known() {
 		return nil, errors.New("only pull requests can have merge status")
 	}
 	tx, err := c.db.BeginTx(ctx, nil)
@@ -303,7 +303,7 @@ func (c *Corpus) GetThreadByNumber(ctx context.Context, repoID int64, number int
 
 // GetThread returns the current projection of a thread, or nil if it has not
 // been observed.
-func (c *Corpus) GetThread(ctx context.Context, repoID int64, kind string, number int) (*Thread, error) {
+func (c *Corpus) GetThread(ctx context.Context, repoID int64, kind domain.ThreadKind, number int) (*Thread, error) {
 	thread, err := scanThread(c.db.QueryRowContext(ctx, `
 		SELECT id, repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone,
 		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged, merged_known
@@ -321,7 +321,7 @@ func (c *Corpus) GetThread(ctx context.Context, repoID int64, kind string, numbe
 
 // ListThreads returns threads for a repository, optionally filtered by kind,
 // ordered by source update time descending and then number descending.
-func (c *Corpus) ListThreads(ctx context.Context, repoID int64, kind string, limit int) ([]Thread, error) {
+func (c *Corpus) ListThreads(ctx context.Context, repoID int64, kind ThreadKindFilter, limit int) ([]Thread, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
@@ -334,9 +334,9 @@ func (c *Corpus) ListThreads(ctx context.Context, repoID int64, kind string, lim
 		FROM threads
 		WHERE repository_id = ?`
 	args := []any{repoID}
-	if kind != "" {
+	if !kind.IsAny() {
 		sql += ` AND kind = ?`
-		args = append(args, kind)
+		args = append(args, kind.String())
 	}
 	sql += ` ORDER BY source_updated_at DESC, number DESC`
 	sql += ` LIMIT ?`
@@ -355,7 +355,7 @@ func (c *Corpus) ListThreads(ctx context.Context, repoID int64, kind string, lim
 // kind and state, ordered by source update time descending and then number
 // descending. Filtering happens at the corpus boundary before any limit is
 // applied, so bounded callers do not silently drop matching rows.
-func (c *Corpus) ListThreadsFiltered(ctx context.Context, repoID int64, kind, state string, limit int) ([]Thread, error) {
+func (c *Corpus) ListThreadsFiltered(ctx context.Context, repoID int64, kind ThreadKindFilter, state ThreadStateFilter, limit int) ([]Thread, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
@@ -368,13 +368,13 @@ func (c *Corpus) ListThreadsFiltered(ctx context.Context, repoID int64, kind, st
 		FROM threads
 		WHERE repository_id = ?`
 	args := []any{repoID}
-	if kind != "" {
+	if !kind.IsAny() {
 		sql += ` AND kind = ?`
-		args = append(args, kind)
+		args = append(args, kind.String())
 	}
-	if state != "" && state != "all" {
+	if !state.IsAny() {
 		sql += ` AND state = ?`
-		args = append(args, state)
+		args = append(args, state.String())
 	}
 	sql += ` ORDER BY source_updated_at DESC, number DESC`
 	sql += ` LIMIT ?`
@@ -391,16 +391,16 @@ func (c *Corpus) ListThreadsFiltered(ctx context.Context, repoID int64, kind, st
 
 // CountThreadsFiltered counts threads after applying the same kind and state
 // predicates as ListThreadsFiltered.
-func (c *Corpus) CountThreadsFiltered(ctx context.Context, repoID int64, kind, state string) (int, error) {
+func (c *Corpus) CountThreadsFiltered(ctx context.Context, repoID int64, kind ThreadKindFilter, state ThreadStateFilter) (int, error) {
 	query := `SELECT COUNT(*) FROM threads WHERE repository_id = ?`
 	args := []any{repoID}
-	if kind != "" {
+	if !kind.IsAny() {
 		query += ` AND kind = ?`
-		args = append(args, kind)
+		args = append(args, kind.String())
 	}
-	if state != "" && state != "all" {
+	if !state.IsAny() {
 		query += ` AND state = ?`
-		args = append(args, state)
+		args = append(args, state.String())
 	}
 	var total int
 	if err := c.db.QueryRowContext(ctx, query, args...).Scan(&total); err != nil {
@@ -433,8 +433,8 @@ func (c *Corpus) CountRepositoryThreads(ctx context.Context, repoID int64) (Repo
 			COALESCE(SUM(CASE WHEN kind = ? AND state = 'closed' AND merged_known = 0 THEN 1 ELSE 0 END), 0)
 		FROM threads
 		WHERE repository_id = ?
-	`, ThreadKindIssue, ThreadKindIssue, ThreadKindPullRequest, ThreadKindPullRequest,
-		ThreadKindPullRequest, ThreadKindPullRequest, repoID).Scan(
+	`, domain.IssueKind, domain.IssueKind, domain.PullRequestKind, domain.PullRequestKind,
+		domain.PullRequestKind, domain.PullRequestKind, repoID).Scan(
 		&counts.OpenIssues,
 		&counts.ClosedIssues,
 		&counts.OpenPullRequests,
@@ -450,24 +450,30 @@ func (c *Corpus) CountRepositoryThreads(ctx context.Context, repoID int64) (Repo
 
 // ListThreadsByStateAndMerge returns every matching thread when limit is
 // non-positive. Positive limits apply after all predicates.
-func (c *Corpus) ListThreadsByStateAndMerge(ctx context.Context, repoID int64, kind, state string, merged *bool, limit int) (_ []Thread, returnErr error) {
+func (c *Corpus) ListThreadsByStateAndMerge(ctx context.Context, repoID int64, kind ThreadKindFilter, state ThreadStateFilter, merge MergeFilter, limit int) (_ []Thread, returnErr error) {
 	query := `
 		SELECT id, repository_id, kind, number, state, state_reason, title, body, author, author_association, labels, assignees, draft, locked, milestone,
 		       source_created_at, source_updated_at, observation_sequence, created_at, updated_at, closed_at, merged_at, merged, merged_known
 		FROM threads
 		WHERE repository_id = ?`
 	args := []any{repoID}
-	if kind != "" {
+	if !kind.IsAny() {
 		query += ` AND kind = ?`
-		args = append(args, kind)
+		args = append(args, kind.String())
 	}
-	if state != "" && state != "all" {
+	if !state.IsAny() {
 		query += ` AND state = ?`
-		args = append(args, state)
+		args = append(args, state.String())
 	}
-	if merged != nil && kind == ThreadKindPullRequest {
-		query += ` AND merged_known = 1 AND merged = ?`
-		args = append(args, *merged)
+	if !merge.IsAny() && kind.String() == string(domain.PullRequestKind) {
+		switch {
+		case merge.IsMerged():
+			query += ` AND merged_known = 1 AND merged = 1`
+		case merge.IsUnmerged():
+			query += ` AND merged_known = 1 AND merged = 0`
+		case merge.IsUnknown():
+			query += ` AND merged_known = 0`
+		}
 	}
 	query += ` ORDER BY source_updated_at DESC, number DESC`
 	if limit > 0 {
@@ -618,18 +624,18 @@ func parseThreadProjection(thread *Thread) error {
 	if thread == nil {
 		return errors.New("thread is required")
 	}
-	kind, err := domain.ParseThreadKind(thread.Kind)
+	kind, err := domain.ParseThreadKind(string(thread.Kind))
 	if err != nil {
 		return err
 	}
-	state, err := domain.ParseThreadState(thread.State)
+	state, err := domain.ParseThreadState(string(thread.State))
 	if err != nil {
 		return err
 	}
 	if thread.RepositoryID <= 0 || thread.Number <= 0 {
 		return errors.New("thread repository and positive number are required")
 	}
-	thread.Kind, thread.State = string(kind), string(state)
+	thread.Kind, thread.State = kind, state
 	return nil
 }
 

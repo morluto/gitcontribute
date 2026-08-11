@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -13,8 +12,121 @@ import (
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
+type actorFacetSuccess interface{ actorFacetSuccess() }
+
+type actorFacetCountSuccess struct {
+	actorID  string
+	login    string
+	items    int
+	complete bool
+}
+
+func (actorFacetCountSuccess) actorFacetSuccess() {}
+
+type actorPinnedItemsSuccess struct {
+	actorFacetCountSuccess
+	showcaseKind string
+}
+
+type actorRepositoriesSuccess struct {
+	actorFacetCountSuccess
+	relationship string
+}
+
+type actorContributionsSuccess struct {
+	actorFacetCountSuccess
+	from string
+	to   string
+}
+
+type actorFacetFailure struct {
+	status       mcpcontract.BatchItemStatus
+	reason       string
+	message      string
+	retryAfterMS int
+}
+
+type actorFacetItem struct {
+	key     string
+	success actorFacetSuccess
+	failure *actorFacetFailure
+}
+
+type actorFacetCountJSON struct {
+	ActorID  string `json:"actor_id"`
+	Login    string `json:"login"`
+	Items    int    `json:"items"`
+	Complete bool   `json:"complete"`
+}
+
+func (s actorFacetCountSuccess) jsonFields() actorFacetCountJSON {
+	return actorFacetCountJSON{ActorID: s.actorID, Login: s.login, Items: s.items, Complete: s.complete}
+}
+
+func successfulActorFacetItem(key string, success actorFacetSuccess) actorFacetItem {
+	return actorFacetItem{key: key, success: success}
+}
+
+func failedActorFacetItem(key string, status mcpcontract.BatchItemStatus, reason, message string, retryAfterMS int) actorFacetItem {
+	return actorFacetItem{key: key, failure: &actorFacetFailure{status: status, reason: reason, message: message, retryAfterMS: retryAfterMS}}
+}
+
+func (i actorFacetItem) MarshalJSON() ([]byte, error) {
+	if i.success != nil && i.failure == nil {
+		switch success := i.success.(type) {
+		case actorFacetCountSuccess:
+			return json.Marshal(struct {
+				Key    string                      `json:"key"`
+				Status mcpcontract.BatchItemStatus `json:"status"`
+				actorFacetCountJSON
+			}{i.key, mcpcontract.BatchItemComplete, success.jsonFields()})
+		case actorPinnedItemsSuccess:
+			return json.Marshal(struct {
+				Key    string                      `json:"key"`
+				Status mcpcontract.BatchItemStatus `json:"status"`
+				actorFacetCountJSON
+				ShowcaseKind string `json:"showcase_kind"`
+			}{i.key, mcpcontract.BatchItemComplete, success.jsonFields(), success.showcaseKind})
+		case actorRepositoriesSuccess:
+			return json.Marshal(struct {
+				Key    string                      `json:"key"`
+				Status mcpcontract.BatchItemStatus `json:"status"`
+				actorFacetCountJSON
+				Relationship string `json:"relationship"`
+			}{i.key, mcpcontract.BatchItemComplete, success.jsonFields(), success.relationship})
+		case actorContributionsSuccess:
+			return json.Marshal(struct {
+				Key    string                      `json:"key"`
+				Status mcpcontract.BatchItemStatus `json:"status"`
+				actorFacetCountJSON
+				From string `json:"from"`
+				To   string `json:"to"`
+			}{i.key, mcpcontract.BatchItemComplete, success.jsonFields(), success.from, success.to})
+		default:
+			return nil, errors.New("actor facet item has an unsupported success outcome")
+		}
+	}
+	if i.success == nil && i.failure != nil {
+		if i.failure.status == "" || i.failure.status == mcpcontract.BatchItemComplete || i.failure.status == mcpcontract.BatchItemPartial {
+			return nil, errors.New("actor facet failure has a non-failure status")
+		}
+		return json.Marshal(struct {
+			Key          string                      `json:"key"`
+			Status       mcpcontract.BatchItemStatus `json:"status"`
+			Reason       string                      `json:"reason"`
+			Message      string                      `json:"message"`
+			RetryAfterMS int                         `json:"retry_after_ms"`
+		}{i.key, i.failure.status, i.failure.reason, i.failure.message, i.failure.retryAfterMS})
+	}
+	return nil, errors.New("actor facet item has no single outcome")
+}
+
+type actorFacetBatchResult struct {
+	batchOperationSummary[actorFacetItem]
+}
+
 func (r *MCPReader) SyncUserSocialAccounts(ctx context.Context, in mcpcontract.SyncUserFacetInput) (mcpcontract.JobReference, error) {
-	return r.submitUserFacetJob(ctx, "sync_user_social_accounts", in, func(ctx context.Context, c *corpus.Corpus, reader github.Reader, selector parsedActorSelector) (map[string]any, error) {
+	return r.submitUserFacetJob(ctx, "sync_user_social_accounts", in, func(ctx context.Context, c *corpus.Corpus, reader github.Reader, selector parsedActorSelector) (actorFacetSuccess, error) {
 		source, ok := reader.(github.UserSocialAccountReader)
 		if !ok {
 			return nil, errors.New("GitHub social-account reads are unavailable")
@@ -45,12 +157,12 @@ func (r *MCPReader) SyncUserSocialAccounts(ctx context.Context, in mcpcontract.S
 		if err := c.ReplaceActorSocialAccounts(ctx, actor.ID, items, complete, observed, observed, "public", raw); err != nil {
 			return nil, err
 		}
-		return map[string]any{"actor_id": actor.Key, "login": login, "items": len(items), "complete": complete}, nil
+		return actorFacetCountSuccess{actorID: actor.Key, login: login, items: len(items), complete: complete}, nil
 	})
 }
 
 func (r *MCPReader) SyncUserOrganizations(ctx context.Context, in mcpcontract.SyncUserFacetInput) (mcpcontract.JobReference, error) {
-	return r.submitUserFacetJob(ctx, "sync_user_organizations", in, func(ctx context.Context, c *corpus.Corpus, reader github.Reader, selector parsedActorSelector) (map[string]any, error) {
+	return r.submitUserFacetJob(ctx, "sync_user_organizations", in, func(ctx context.Context, c *corpus.Corpus, reader github.Reader, selector parsedActorSelector) (actorFacetSuccess, error) {
 		source, ok := reader.(github.UserOrganizationReader)
 		if !ok {
 			return nil, errors.New("GitHub organization reads are unavailable")
@@ -81,7 +193,7 @@ func (r *MCPReader) SyncUserOrganizations(ctx context.Context, in mcpcontract.Sy
 		if err := c.ReplaceActorOrganizations(ctx, actor.ID, items, complete, observed, observed, "public", raw); err != nil {
 			return nil, err
 		}
-		return map[string]any{"actor_id": actor.Key, "login": login, "items": len(items), "complete": complete}, nil
+		return actorFacetCountSuccess{actorID: actor.Key, login: login, items: len(items), complete: complete}, nil
 	})
 }
 
@@ -119,7 +231,7 @@ func (r *MCPReader) SyncUserPinnedItems(ctx context.Context, in mcpcontract.Sync
 		if err != nil {
 			return nil, err
 		}
-		return r.runActorFacetItems(ctx, selectors, "pinned_items", report, func(selector parsedActorSelector) (map[string]any, error) {
+		return r.runActorFacetItems(ctx, selectors, "pinned_items", report, func(selector parsedActorSelector) (actorFacetSuccess, error) {
 			actor, login, err := storedActorForSelector(ctx, c, selector)
 			if err != nil {
 				return nil, err
@@ -137,7 +249,10 @@ func (r *MCPReader) SyncUserPinnedItems(ctx context.Context, in mcpcontract.Sync
 			if err := c.ReplaceActorPinnedItems(ctx, actor.ID, items, result.Coverage.Complete, observed, observed, "public", raw); err != nil {
 				return nil, err
 			}
-			return map[string]any{"actor_id": actor.Key, "login": login, "items": len(items), "showcase_kind": result.ShowcaseKind, "complete": result.Coverage.Complete}, nil
+			return actorPinnedItemsSuccess{
+				actorFacetCountSuccess: actorFacetCountSuccess{actorID: actor.Key, login: login, items: len(items), complete: result.Coverage.Complete},
+				showcaseKind:           result.ShowcaseKind,
+			}, nil
 		})
 	})
 	if err != nil {
@@ -174,7 +289,7 @@ func (r *MCPReader) SyncUserRepositories(ctx context.Context, in mcpcontract.Syn
 		if err != nil {
 			return nil, err
 		}
-		return r.runActorFacetItems(ctx, selectors, "repositories", report, func(selector parsedActorSelector) (map[string]any, error) {
+		return r.runActorFacetItems(ctx, selectors, "repositories", report, func(selector parsedActorSelector) (actorFacetSuccess, error) {
 			actor, login, err := storedActorForSelector(ctx, c, selector)
 			if err != nil {
 				return nil, err
@@ -212,7 +327,10 @@ func (r *MCPReader) SyncUserRepositories(ctx context.Context, in mcpcontract.Syn
 			if err := c.ReplaceActorRepositoryAffiliations(ctx, actor.ID, in.Relationship, affiliations, complete, observed, observed, "public", raw); err != nil {
 				return nil, err
 			}
-			return map[string]any{"actor_id": actor.Key, "login": login, "items": len(repositories), "complete": complete, "relationship": in.Relationship}, nil
+			return actorRepositoriesSuccess{
+				actorFacetCountSuccess: actorFacetCountSuccess{actorID: actor.Key, login: login, items: len(repositories), complete: complete},
+				relationship:           in.Relationship,
+			}, nil
 		})
 	})
 	if err != nil {
@@ -270,7 +388,7 @@ func (r *MCPReader) SyncUserContributions(ctx context.Context, in mcpcontract.Sy
 		if err != nil {
 			return nil, err
 		}
-		return r.runActorFacetItems(ctx, selectors, "contributions", report, func(selector parsedActorSelector) (map[string]any, error) {
+		return r.runActorFacetItems(ctx, selectors, "contributions", report, func(selector parsedActorSelector) (actorFacetSuccess, error) {
 			actor, login, err := storedActorForSelector(ctx, c, selector)
 			if err != nil {
 				return nil, err
@@ -331,7 +449,11 @@ func (r *MCPReader) SyncUserContributions(ctx context.Context, in mcpcontract.Sy
 			if err := c.ApplyActorContributionPeriod(ctx, corpus.ActorContributionPeriodInput{ActorID: actor.ID, From: from, To: to, OrganizationNodeID: in.OrganizationNodeID, AuthorizationScope: "viewer", TotalCommits: intPointer(result.TotalCommits), TotalIssues: intPointer(result.TotalIssues), TotalPullRequests: intPointer(result.TotalPullRequests), TotalPullRequestReviews: intPointer(result.TotalPullRequestReviews), TotalRepositories: intPointer(result.TotalRepositories), RestrictedContributions: intPointer(result.RestrictedContributions), Complete: result.Complete, ObservedAt: r.now().UTC(), SourceUpdatedAt: result.EndedAt, Days: days, Items: items, RepositoryTotals: totals, RawPayload: raw}); err != nil {
 				return nil, err
 			}
-			return map[string]any{"actor_id": actor.Key, "login": login, "items": len(items), "complete": result.Complete, "from": in.From, "to": in.To}, nil
+			return actorContributionsSuccess{
+				actorFacetCountSuccess: actorFacetCountSuccess{actorID: actor.Key, login: login, items: len(items), complete: result.Complete},
+				from:                   in.From,
+				to:                     in.To,
+			}, nil
 		})
 	})
 	if err != nil {
@@ -342,43 +464,21 @@ func (r *MCPReader) SyncUserContributions(ctx context.Context, in mcpcontract.Sy
 
 // SearchContributions reads contribution observations from the local corpus.
 func (r *MCPReader) SearchContributions(ctx context.Context, in mcpcontract.SearchContributionsInput) (mcpcontract.SearchContributionsOutput, error) {
-	if len(in.Actors) > 100 || len(in.Repositories) > 100 || len(in.Kinds) > 20 {
-		return mcpcontract.SearchContributionsOutput{}, errors.New("actors and repositories are limited to 100 items; kinds is limited to 20")
-	}
-	if in.Source == "" {
-		in.Source = "github_profile"
-	}
-	if in.Source != "github_profile" {
-		return mcpcontract.SearchContributionsOutput{}, errors.New("source must be github_profile; corpus_observation is not yet an indexed contribution source")
-	}
-	parseBound := func(name, value string) (time.Time, error) {
-		if value == "" {
-			return time.Time{}, nil
-		}
-		parsed, err := time.Parse(time.RFC3339, value)
-		if err != nil {
-			return time.Time{}, fmt.Errorf("%s must be RFC 3339", name)
-		}
-		return parsed, nil
-	}
-	from, err := parseBound("from", in.From)
-	if err != nil {
-		return mcpcontract.SearchContributionsOutput{}, err
-	}
-	to, err := parseBound("to", in.To)
-	if err != nil {
-		return mcpcontract.SearchContributionsOutput{}, err
-	}
-	if !from.IsZero() && !to.IsZero() && !to.After(from) {
-		return mcpcontract.SearchContributionsOutput{}, errors.New("to must be after from")
-	}
 	repositories := make([]string, len(in.Repositories))
 	for i, repository := range in.Repositories {
-		if strings.TrimSpace(repository.Owner) == "" || strings.TrimSpace(repository.Repo) == "" {
-			return mcpcontract.SearchContributionsOutput{}, fmt.Errorf("repositories[%d] requires owner and repo", i)
-		}
 		repositories[i] = repository.Owner + "/" + repository.Repo
 	}
+	request, err := corpus.ParseContributionSearch(corpus.ContributionSearchInput{
+		ActorRefs: in.Actors, RepositoryRefs: repositories, Kinds: in.Kinds, Source: in.Source,
+		OrganizationNodeID: in.OrganizationNodeID, From: in.From, To: in.To,
+		Sort: in.Sort, Order: in.Order, Limit: in.Limit, Cursor: in.Cursor,
+	})
+	if err != nil {
+		return mcpcontract.SearchContributionsOutput{}, err
+	}
+	from, to := request.From(), request.To()
+	periodFrom, periodTo := request.FromString(), request.ToString()
+	organizationNodeID := request.OrganizationNodeID()
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
 		return mcpcontract.SearchContributionsOutput{}, err
@@ -387,15 +487,15 @@ func (r *MCPReader) SearchContributions(ctx context.Context, in mcpcontract.Sear
 	if err != nil {
 		return mcpcontract.SearchContributionsOutput{}, err
 	}
-	page, err := c.SearchActorContributions(ctx, corpus.ContributionSearchOptions{ActorRefs: in.Actors, RepositoryRefs: repositories, Kinds: in.Kinds, OrganizationNodeID: in.OrganizationNodeID, From: from, To: to, Sort: in.Sort, Order: in.Order, Limit: in.Limit, Cursor: in.Cursor})
+	page, err := c.SearchActorContributions(ctx, request)
 	if err != nil {
 		return mcpcontract.SearchContributionsOutput{}, err
 	}
 	out := mcpcontract.SearchContributionsOutput{Items: make([]mcpcontract.ContributionOutput, len(page.Items)), Total: page.Total, NextCursor: page.NextCursor, SnapshotToken: snapshotIdentity(in.SnapshotToken, revision)}
 	for i, item := range page.Items {
-		out.Items[i] = mcpcontract.ContributionOutput{ActorID: item.ActorKey, Login: item.Login, Kind: item.Kind, Source: "github_profile", OccurredAt: formatTime(item.OccurredAt), RepositoryRef: item.RepositoryRef, TargetNodeID: item.TargetNodeID, TargetURL: item.TargetURL, Restricted: item.Restricted, Count: item.Count}
+		out.Items[i] = mcpcontract.ContributionOutput{ActorID: item.ActorKey, Login: item.Login, Kind: item.Kind.String(), Source: "github_profile", OccurredAt: formatTime(item.OccurredAt), RepositoryRef: item.RepositoryRef, TargetNodeID: item.TargetNodeID, TargetURL: item.TargetURL, Restricted: item.Restricted, Count: item.Count}
 	}
-	coverageActors := in.Actors
+	coverageActors := request.ActorReferences()
 	if len(coverageActors) == 0 {
 		seen := map[string]bool{}
 		for _, item := range page.Items {
@@ -408,20 +508,20 @@ func (r *MCPReader) SearchContributions(ctx context.Context, in mcpcontract.Sear
 	for _, ref := range coverageActors {
 		actor, readErr := c.GetActor(ctx, ref)
 		if readErr != nil {
-			out.Coverage = append(out.Coverage, mcpcontract.ActorContributionCoverage{ActorID: ref, Facet: mcpcontract.ActorCoverageOutput{Facet: "contributions", Status: "unknown", Reason: "actor_read_failed", PeriodFrom: in.From, PeriodTo: in.To, OrganizationNodeID: in.OrganizationNodeID}})
+			out.Coverage = append(out.Coverage, mcpcontract.ActorContributionCoverage{ActorID: ref, Facet: mcpcontract.ActorCoverageOutput{Facet: "contributions", Status: "unknown", Reason: "actor_read_failed", PeriodFrom: periodFrom, PeriodTo: periodTo, OrganizationNodeID: organizationNodeID}})
 			continue
 		}
 		if actor == nil {
-			out.Coverage = append(out.Coverage, mcpcontract.ActorContributionCoverage{ActorID: ref, Facet: mcpcontract.ActorCoverageOutput{Facet: "contributions", Status: "unknown", Reason: "actor_not_indexed", PeriodFrom: in.From, PeriodTo: in.To, OrganizationNodeID: in.OrganizationNodeID}})
+			out.Coverage = append(out.Coverage, mcpcontract.ActorContributionCoverage{ActorID: ref, Facet: mcpcontract.ActorCoverageOutput{Facet: "contributions", Status: "unknown", Reason: "actor_not_indexed", PeriodFrom: periodFrom, PeriodTo: periodTo, OrganizationNodeID: organizationNodeID}})
 			continue
 		}
-		stored, readErr := c.GetActorContributionCoverage(ctx, actor.ID, in.OrganizationNodeID, from, to)
+		stored, readErr := c.GetActorContributionCoverage(ctx, actor.ID, organizationNodeID, from, to)
 		if readErr != nil {
 			return mcpcontract.SearchContributionsOutput{}, readErr
 		}
 		coverage := mcpcontract.ActorCoverageOutput{Facet: "contributions", Status: "unknown", Reason: "facet_not_synchronized"}
-		coverage.PeriodFrom, coverage.PeriodTo = in.From, in.To
-		coverage.OrganizationNodeID = in.OrganizationNodeID
+		coverage.PeriodFrom, coverage.PeriodTo = periodFrom, periodTo
+		coverage.OrganizationNodeID = organizationNodeID
 		if from.IsZero() || to.IsZero() {
 			coverage.Reason = "bounded_period_required"
 		} else if stored != nil {
@@ -438,7 +538,7 @@ func (r *MCPReader) SearchContributions(ctx context.Context, in mcpcontract.Sear
 	return out, nil
 }
 
-func (r *MCPReader) submitUserFacetJob(ctx context.Context, kind string, in mcpcontract.SyncUserFacetInput, run func(context.Context, *corpus.Corpus, github.Reader, parsedActorSelector) (map[string]any, error)) (mcpcontract.JobReference, error) {
+func (r *MCPReader) submitUserFacetJob(ctx context.Context, kind string, in mcpcontract.SyncUserFacetInput, run func(context.Context, *corpus.Corpus, github.Reader, parsedActorSelector) (actorFacetSuccess, error)) (mcpcontract.JobReference, error) {
 	if len(in.Users) < 1 || len(in.Users) > 100 {
 		return mcpcontract.JobReference{}, errors.New("users must contain 1 to 100 items")
 	}
@@ -459,7 +559,7 @@ func (r *MCPReader) submitUserFacetJob(ctx context.Context, kind string, in mcpc
 		if err != nil {
 			return nil, err
 		}
-		return r.runActorFacetItems(ctx, selectors, kind, report, func(selector parsedActorSelector) (map[string]any, error) { return run(ctx, c, reader, selector) })
+		return r.runActorFacetItems(ctx, selectors, kind, report, func(selector parsedActorSelector) (actorFacetSuccess, error) { return run(ctx, c, reader, selector) })
 	})
 	if err != nil {
 		return mcpcontract.JobReference{}, err
@@ -467,8 +567,8 @@ func (r *MCPReader) submitUserFacetJob(ctx context.Context, kind string, in mcpc
 	return queuedJobReference(id, kind, "GitHub actor facet synchronization started"), nil
 }
 
-func (r *MCPReader) runActorFacetItems(ctx context.Context, selectors []parsedActorSelector, phase string, report func(string, string) error, run func(parsedActorSelector) (map[string]any, error)) (map[string]any, error) {
-	items := make([]map[string]any, len(selectors))
+func (r *MCPReader) runActorFacetItems(ctx context.Context, selectors []parsedActorSelector, phase string, report func(string, string) error, run func(parsedActorSelector) (actorFacetSuccess, error)) (*actorFacetBatchResult, error) {
+	items := make([]actorFacetItem, len(selectors))
 	complete := 0
 	if err := report(phase, jobProgressCounts(0, len(selectors))); err != nil {
 		return nil, err
@@ -480,22 +580,22 @@ func (r *MCPReader) runActorFacetItems(ctx context.Context, selectors []parsedAc
 		value, err := run(selector)
 		if err != nil {
 			itemStatus, reason, message, retry := githubBatchError(err)
-			items[i] = map[string]any{"key": selector.key(), "status": itemStatus, "reason": reason, "message": message, "retry_after_ms": retry}
+			items[i] = failedActorFacetItem(selector.key(), itemStatus, reason, message, retry)
 		} else {
-			value["key"] = selector.key()
-			value["status"] = "complete"
-			items[i] = value
+			items[i] = successfulActorFacetItem(selector.key(), value)
 			complete++
 		}
 		if err := report(phase, jobProgressCounts(i+1, len(selectors))); err != nil {
 			return nil, err
 		}
 	}
-	status := "complete"
+	status := batchOperationComplete
 	if complete != len(selectors) {
-		status = "partial"
+		status = batchOperationPartial
 	}
-	return map[string]any{"status": status, "items": items, "completed": complete, "total": len(selectors)}, nil
+	return &actorFacetBatchResult{batchOperationSummary: batchOperationSummary[actorFacetItem]{
+		Status: status, Items: items, Completed: complete, Total: len(selectors),
+	}}, nil
 }
 
 func normalizeFacetBounds(maxPages, maxItems, maxRequests *int, userCount int) error {

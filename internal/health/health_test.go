@@ -84,7 +84,7 @@ func TestComputeHealthMetrics(t *testing.T) {
 	applyRepositoryFacet(ctx, t, c, repo.ID, facetThreads, now, true)
 
 	openIssue := upsertThread(t, ctx, c, repo.ID, corpus.Thread{
-		Kind:            corpus.ThreadKindIssue,
+		Kind:            domain.IssueKind,
 		Number:          1,
 		State:           "open",
 		Title:           "open issue",
@@ -94,7 +94,7 @@ func TestComputeHealthMetrics(t *testing.T) {
 	}, "NONE")
 
 	closedIssue := upsertThread(t, ctx, c, repo.ID, corpus.Thread{
-		Kind:            corpus.ThreadKindIssue,
+		Kind:            domain.IssueKind,
 		Number:          2,
 		State:           "closed",
 		Title:           "closed issue",
@@ -105,12 +105,12 @@ func TestComputeHealthMetrics(t *testing.T) {
 	}, "CONTRIBUTOR")
 
 	_ = upsertThread(t, ctx, c, repo.ID, corpus.Thread{
-		Kind: corpus.ThreadKindIssue, Number: 3, State: "closed", Title: "outside window",
+		Kind: domain.IssueKind, Number: 3, State: "closed", Title: "outside window",
 		Author: "old", SourceCreatedAt: now.Add(-60 * 24 * time.Hour), SourceUpdatedAt: now.Add(-50 * 24 * time.Hour),
 	}, "CONTRIBUTOR")
 
 	openPR := upsertThread(t, ctx, c, repo.ID, corpus.Thread{
-		Kind:            corpus.ThreadKindPullRequest,
+		Kind:            domain.PullRequestKind,
 		Number:          10,
 		State:           "open",
 		Title:           "open pr",
@@ -120,7 +120,7 @@ func TestComputeHealthMetrics(t *testing.T) {
 	}, "NONE")
 
 	_ = upsertThread(t, ctx, c, repo.ID, corpus.Thread{
-		Kind:            corpus.ThreadKindPullRequest,
+		Kind:            domain.PullRequestKind,
 		Number:          11,
 		State:           "open",
 		Title:           "stale pr",
@@ -130,7 +130,7 @@ func TestComputeHealthMetrics(t *testing.T) {
 	}, "FIRST_TIMER")
 
 	_ = upsertThread(t, ctx, c, repo.ID, corpus.Thread{
-		Kind:            corpus.ThreadKindPullRequest,
+		Kind:            domain.PullRequestKind,
 		Number:          12,
 		State:           "closed",
 		Title:           "merged pr",
@@ -141,7 +141,7 @@ func TestComputeHealthMetrics(t *testing.T) {
 	}, "OWNER")
 
 	_ = upsertThread(t, ctx, c, repo.ID, corpus.Thread{
-		Kind:            corpus.ThreadKindPullRequest,
+		Kind:            domain.PullRequestKind,
 		Number:          13,
 		State:           "closed",
 		Title:           "closed pr",
@@ -153,7 +153,7 @@ func TestComputeHealthMetrics(t *testing.T) {
 	}, "NONE")
 
 	_ = upsertThread(t, ctx, c, repo.ID, corpus.Thread{
-		Kind:            corpus.ThreadKindPullRequest,
+		Kind:            domain.PullRequestKind,
 		Number:          14,
 		State:           "closed",
 		Title:           "header-only closed pr",
@@ -246,28 +246,28 @@ func TestExternalMergeRateRequiresObservedOutcome(t *testing.T) {
 		{
 			name: "open only is unknown",
 			threads: []corpus.Thread{{
-				Kind: corpus.ThreadKindPullRequest, State: "open", AuthorAssociation: "NONE", SourceCreatedAt: now,
+				Kind: domain.PullRequestKind, State: "open", AuthorAssociation: "NONE", SourceCreatedAt: now,
 			}},
 			wantCoverage: "partial (no observed closed external PR outcomes)",
 		},
 		{
 			name: "no external pull requests is missing",
 			threads: []corpus.Thread{{
-				Kind: corpus.ThreadKindPullRequest, State: "open", AuthorAssociation: "MEMBER", SourceCreatedAt: now,
+				Kind: domain.PullRequestKind, State: "open", AuthorAssociation: "MEMBER", SourceCreatedAt: now,
 			}},
 			wantCoverage: "missing (no external PRs in window)",
 		},
 		{
 			name: "unknown closed outcome stays unknown",
 			threads: []corpus.Thread{{
-				Kind: corpus.ThreadKindPullRequest, State: "closed", AuthorAssociation: "NONE", SourceCreatedAt: now,
+				Kind: domain.PullRequestKind, State: "closed", AuthorAssociation: "NONE", SourceCreatedAt: now,
 			}},
 			wantCoverage: "partial (some closed PRs lack an observed merge state)",
 		},
 		{
 			name: "known zero is preserved",
 			threads: []corpus.Thread{{
-				Kind: corpus.ThreadKindPullRequest, State: "closed", AuthorAssociation: "NONE", SourceCreatedAt: now, Merge: domain.UnmergedStatus(),
+				Kind: domain.PullRequestKind, State: "closed", AuthorAssociation: "NONE", SourceCreatedAt: now, Merge: domain.UnmergedStatus(),
 			}},
 			wantRate:     float64Pointer(0),
 			wantCoverage: "complete",
@@ -275,7 +275,7 @@ func TestExternalMergeRateRequiresObservedOutcome(t *testing.T) {
 		{
 			name: "known one is preserved",
 			threads: []corpus.Thread{{
-				Kind: corpus.ThreadKindPullRequest, State: "closed", AuthorAssociation: "NONE", SourceCreatedAt: now, Merge: domain.MergedStatus(time.Time{}),
+				Kind: domain.PullRequestKind, State: "closed", AuthorAssociation: "NONE", SourceCreatedAt: now, Merge: domain.MergedStatus(time.Time{}),
 			}},
 			wantRate:     float64Pointer(1),
 			wantCoverage: "complete",
@@ -305,10 +305,10 @@ func TestComputeHonorsRepositoryThreadCoverage(t *testing.T) {
 		t.Fatalf("upsert repository: %v", err)
 	}
 	upsertThread(t, ctx, c, repo.ID, corpus.Thread{
-		Kind: corpus.ThreadKindIssue, Number: 1, State: "open", SourceCreatedAt: now.Add(-time.Hour), SourceUpdatedAt: now,
+		Kind: domain.IssueKind, Number: 1, State: "open", SourceCreatedAt: now.Add(-time.Hour), SourceUpdatedAt: now,
 	}, "NONE")
 	upsertThread(t, ctx, c, repo.ID, corpus.Thread{
-		Kind: corpus.ThreadKindPullRequest, Number: 2, State: "open", SourceCreatedAt: now.Add(-time.Hour), SourceUpdatedAt: now,
+		Kind: domain.PullRequestKind, Number: 2, State: "open", SourceCreatedAt: now.Add(-time.Hour), SourceUpdatedAt: now,
 	}, "NONE")
 	applyRepositoryFacet(ctx, t, c, repo.ID, facetThreads, now, false)
 
@@ -317,7 +317,7 @@ func TestComputeHonorsRepositoryThreadCoverage(t *testing.T) {
 		t.Fatalf("compute partial health: %v", err)
 	}
 	const wantPartial = "partial (repository thread coverage is incomplete)"
-	if partial.Issues.Coverage != wantPartial || partial.PullRequests.Coverage != wantPartial || partial.Coverage.ThreadsComplete || !partial.Coverage.ThreadsTruncated {
+	if partial.Issues.Coverage != wantPartial || partial.PullRequests.Coverage != wantPartial || partial.Coverage.ThreadsComplete() || !partial.Coverage.ThreadsTruncated() {
 		t.Fatalf("incomplete repository coverage not propagated: %+v", partial)
 	}
 
@@ -326,7 +326,7 @@ func TestComputeHonorsRepositoryThreadCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compute complete health: %v", err)
 	}
-	if complete.Issues.Coverage != "complete" || complete.PullRequests.Coverage != "complete" || !complete.Coverage.ThreadsComplete || complete.Coverage.ThreadsTruncated {
+	if complete.Issues.Coverage != "complete" || complete.PullRequests.Coverage != "complete" || !complete.Coverage.ThreadsComplete() || complete.Coverage.ThreadsTruncated() {
 		t.Fatalf("complete repository coverage not propagated: %+v", complete)
 	}
 	if complete.External.MergeRate != nil || complete.External.Coverage != "partial (no observed closed external PR outcomes)" {
@@ -338,6 +338,13 @@ func TestComputeHonorsRepositoryThreadCoverage(t *testing.T) {
 	}
 	if !strings.Contains(string(payload), `"merge_rate":null`) || !strings.Contains(string(payload), `"threads_complete":true`) {
 		t.Fatalf("health JSON does not preserve coverage semantics: %s", payload)
+	}
+}
+
+func TestCoverageSummaryRejectsContradictoryThreadFlags(t *testing.T) {
+	var coverage CoverageSummary
+	if err := json.Unmarshal([]byte(`{"threads_complete":true,"threads_truncated":true}`), &coverage); err == nil {
+		t.Fatal("contradictory thread coverage flags were accepted")
 	}
 }
 
@@ -364,7 +371,7 @@ func TestResponseRequiredFacetCoverage(t *testing.T) {
 	}
 
 	issue := upsertThread(t, ctx, c, repo.ID, corpus.Thread{
-		Kind:            corpus.ThreadKindIssue,
+		Kind:            domain.IssueKind,
 		Number:          1,
 		State:           "open",
 		Title:           "issue",
@@ -447,7 +454,7 @@ func TestResponsePullRequestPartialFacetCoverage(t *testing.T) {
 	}
 
 	pr := upsertThread(t, ctx, c, repo.ID, corpus.Thread{
-		Kind:            corpus.ThreadKindPullRequest,
+		Kind:            domain.PullRequestKind,
 		Number:          1,
 		State:           "open",
 		Title:           "pr",
@@ -518,7 +525,7 @@ func TestResponseSelfCommentCaseInsensitive(t *testing.T) {
 	}
 
 	issue := upsertThread(t, ctx, c, repo.ID, corpus.Thread{
-		Kind:            corpus.ThreadKindIssue,
+		Kind:            domain.IssueKind,
 		Number:          1,
 		State:           "open",
 		Title:           "issue",
@@ -554,7 +561,7 @@ func TestResponseSelfCommentCaseInsensitive(t *testing.T) {
 
 	// PR reviews should also ignore same-login self-comments with different case.
 	pr := upsertThread(t, ctx, c, repo.ID, corpus.Thread{
-		Kind:            corpus.ThreadKindPullRequest,
+		Kind:            domain.PullRequestKind,
 		Number:          2,
 		State:           "open",
 		Title:           "pr",

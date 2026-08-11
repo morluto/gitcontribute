@@ -78,12 +78,16 @@ func (m *Manager) Adopt(ctx context.Context, opts AdoptOptions) (*Workspace, err
 	if err != nil {
 		return nil, err
 	}
-	return &Workspace{
+	workspace := &Workspace{
 		Name: opts.Name, Path: canonical, Remote: remote,
 		BaseSHA: baseSHA, CandidateSHA: candidateSHA, MergeBase: strings.TrimSpace(mergeBase),
-		Dirty: status.Dirty, HasUntracked: hasUntracked, Ownership: OwnershipExternal,
-		GitDir: gitDir, GitCommonDir: commonDir, CreatedAt: time.Now().UTC(),
-	}, nil
+		Ownership: OwnershipExternal,
+		GitDir:    gitDir, GitCommonDir: commonDir, CreatedAt: time.Now().UTC(),
+	}
+	if err := workspace.SetChanges(status.Dirty, hasUntracked); err != nil {
+		return nil, err
+	}
+	return workspace, nil
 }
 
 type worktreeRecord struct {

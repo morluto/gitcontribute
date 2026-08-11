@@ -24,6 +24,13 @@ func (c *Corpus) ListClusterProjection(ctx context.Context, repo domain.RepoRef,
 	if limit < 1 || limit > 1000 {
 		return clusterprojection.List{}, errors.New("cluster list limit must be between 1 and 1000")
 	}
+	if state != "" {
+		parsed, err := clustering.ParseClusterState(string(state))
+		if err != nil {
+			return clusterprojection.List{}, err
+		}
+		state = parsed
+	}
 	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return clusterprojection.List{}, err
@@ -294,10 +301,19 @@ func loadClusterCandidatesTx(ctx context.Context, tx *sql.Tx, repo domain.RepoRe
 	out := make([]clustering.Candidate, 0, maxCandidates)
 	for rows.Next() {
 		var candidate clustering.Candidate
+		var kind, state string
 		var labels sql.NullString
 		var created, updated int64
-		if err := rows.Scan(&candidate.ThreadID, &candidate.Kind, &candidate.Number, &candidate.State, &candidate.Title, &candidate.Body, &candidate.Author, &labels, &created, &updated); err != nil {
+		if err := rows.Scan(&candidate.ThreadID, &kind, &candidate.Number, &state, &candidate.Title, &candidate.Body, &candidate.Author, &labels, &created, &updated); err != nil {
 			return nil, err
+		}
+		candidate.Kind, err = domain.ParseThreadKind(kind)
+		if err != nil {
+			return nil, fmt.Errorf("decode cluster candidate kind: %w", err)
+		}
+		candidate.State, err = domain.ParseThreadState(state)
+		if err != nil {
+			return nil, fmt.Errorf("decode cluster candidate state: %w", err)
 		}
 		candidate.Repo = repo
 		candidate.Labels = splitLabels(labels.String)
@@ -385,17 +401,28 @@ func scanProjectionClusters(rows *sql.Rows, repo domain.RepoRef) ([]clustering.C
 type projectionScanner interface{ Scan(...any) error }
 
 func scanProjectionCluster(scanner projectionScanner, cluster *clustering.Cluster, includeRepo bool) error {
-	var state string
+	var state, canonicalKind string
 	var owner, repo string
 	var windowStart, windowEnd, created, updated int64
-	destinations := []any{&cluster.ID, &cluster.StableID, &state, &cluster.Canonical.Kind, &cluster.Canonical.Owner, &cluster.Canonical.Repo, &cluster.Canonical.Number, &cluster.Revision, &windowStart, &windowEnd, &created, &updated}
+	destinations := []any{&cluster.ID, &cluster.StableID, &state, &canonicalKind, &cluster.Canonical.Owner, &cluster.Canonical.Repo, &cluster.Canonical.Number, &cluster.Revision, &windowStart, &windowEnd, &created, &updated}
 	if includeRepo {
 		destinations = append(destinations, &owner, &repo)
 	}
 	if err := scanner.Scan(destinations...); err != nil {
 		return err
 	}
-	cluster.State = clustering.ClusterState(state)
+	parsedState, err := clustering.ParseClusterState(state)
+	if err != nil {
+		return fmt.Errorf("decode cluster state: %w", err)
+	}
+	cluster.State = parsedState
+	cluster.Canonical.Kind, err = domain.ParseThreadKind(canonicalKind)
+	if err != nil {
+		return fmt.Errorf("decode cluster canonical member: %w", err)
+	}
+	if err := validateClusterMemberRef(cluster.Canonical); err != nil {
+		return fmt.Errorf("decode cluster canonical member: %w", err)
+	}
 	if includeRepo {
 		parsed, err := domain.NewRepoRef(owner, repo)
 		if err != nil {
@@ -430,10 +457,22 @@ func loadProjectionMembersTx(ctx context.Context, tx *sql.Tx, clusters []cluster
 	for rows.Next() {
 		var clusterID int64
 		var member clustering.Member
+		var kind, state string
 		var threadID sql.NullInt64
 		var included int
-		if err := rows.Scan(&clusterID, &threadID, &member.Ref.Kind, &member.Ref.Owner, &member.Ref.Repo, &member.Ref.Number, &member.Title, &member.State, &member.Score, &member.Reason, &included); err != nil {
+		if err := rows.Scan(&clusterID, &threadID, &kind, &member.Ref.Owner, &member.Ref.Repo, &member.Ref.Number, &member.Title, &state, &member.Score, &member.Reason, &included); err != nil {
 			return err
+		}
+		member.Ref.Kind, err = domain.ParseThreadKind(kind)
+		if err != nil {
+			return fmt.Errorf("decode cluster member kind: %w", err)
+		}
+		member.State, err = domain.ParseThreadState(state)
+		if err != nil {
+			return fmt.Errorf("decode cluster member state: %w", err)
+		}
+		if err := validateClusterMemberRef(member.Ref); err != nil {
+			return fmt.Errorf("decode cluster member: %w", err)
 		}
 		member.ThreadID, member.Included = threadID.Int64, included != 0
 		byID[clusterID].Members = append(byID[clusterID].Members, member)
@@ -454,13 +493,23 @@ func loadProjectionOverridesTx(ctx context.Context, tx *sql.Tx, repo domain.Repo
 		}
 	}()
 	for rows.Next() {
-		var stableID, action string
+		var stableID, kind, action string
 		var override clustering.MembershipOverride
 		var created int64
-		if err := rows.Scan(&stableID, &override.ID, &override.ClusterID, &override.Ref.Kind, &override.Ref.Owner, &override.Ref.Repo, &override.Ref.Number, &action, &override.Reason, &created); err != nil {
+		if err := rows.Scan(&stableID, &override.ID, &override.ClusterID, &kind, &override.Ref.Owner, &override.Ref.Repo, &override.Ref.Number, &action, &override.Reason, &created); err != nil {
 			return err
 		}
-		override.Action = clustering.OverrideAction(action)
+		override.Ref.Kind, err = domain.ParseThreadKind(kind)
+		if err != nil {
+			return fmt.Errorf("decode cluster override member: %w", err)
+		}
+		if err := validateClusterMemberRef(override.Ref); err != nil {
+			return fmt.Errorf("decode cluster override member: %w", err)
+		}
+		override.Action, err = clustering.ParseOverrideAction(action)
+		if err != nil {
+			return fmt.Errorf("decode cluster override: %w", err)
+		}
 		override.CreatedAt = scanTime(created)
 		byStable[stableID] = append(byStable[stableID], override)
 	}
@@ -509,6 +558,20 @@ func validateClusterProjectionCommit(commit clusterprojection.Commit) error {
 		}
 		if cluster.Revision != commit.ExpectedSource {
 			return fmt.Errorf("cluster %q source revision does not match commit", cluster.StableID)
+		}
+		if _, err := clustering.ParseClusterState(string(cluster.State)); err != nil {
+			return fmt.Errorf("cluster %q: %w", cluster.StableID, err)
+		}
+		if err := validateClusterMemberRef(cluster.Canonical); err != nil {
+			return fmt.Errorf("cluster %q canonical member: %w", cluster.StableID, err)
+		}
+		for i, member := range cluster.Members {
+			if err := validateClusterMemberRef(member.Ref); err != nil {
+				return fmt.Errorf("cluster %q member %d: %w", cluster.StableID, i, err)
+			}
+			if _, err := domain.ParseThreadState(string(member.State)); err != nil {
+				return fmt.Errorf("cluster %q member %d: %w", cluster.StableID, i, err)
+			}
 		}
 	}
 	return nil

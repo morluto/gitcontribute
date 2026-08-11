@@ -115,13 +115,6 @@ func TestAddRepoSourceAndCrawl(t *testing.T) {
 		if r == nil {
 			t.Fatalf("missing repository %s/%s", ownerRepo.owner, ownerRepo.repo)
 		}
-		item, err := c.GetFrontierItem(ctx, fmt.Sprintf("repository:%s/%s:threads", ownerRepo.owner, ownerRepo.repo))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if item == nil {
-			t.Fatalf("missing frontier for %s/%s", ownerRepo.owner, ownerRepo.repo)
-		}
 	}
 }
 
@@ -278,20 +271,13 @@ func TestAddGHArchiveSourceAndCrawl(t *testing.T) {
 		t.Fatal("missing repository from archive")
 	}
 	for _, n := range []int{1, 2} {
-		thread, err := c.GetThread(ctx, r.ID, corpus.ThreadKindIssue, n)
+		thread, err := c.GetThread(ctx, r.ID, domain.IssueKind, n)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if thread == nil {
 			t.Fatalf("missing thread %d", n)
 		}
-	}
-	frontier, err := c.GetFrontierItem(ctx, "repository:owner/repo:threads")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if frontier == nil {
-		t.Fatal("missing frontier item")
 	}
 }
 
@@ -506,6 +492,39 @@ func TestGHArchiveCrawlMalformedArchive(t *testing.T) {
 	}
 }
 
+func TestGHArchiveCrawlRejectsInvalidStoredEventSelectionBeforeStartingRun(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	svc := newTestServiceNoNetwork(t)
+	defer func() { _ = svc.Close() }()
+
+	c, err := svc.openCorpus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.SaveDiscoverySource(ctx, corpus.DiscoverySource{
+		Name:       "invalid-events",
+		Kind:       corpus.DiscoverySourceGHArchive,
+		Definition: `{"events":["UnknownEvent"]}`,
+		Enabled:    true,
+	})
+	if err != nil {
+		t.Fatalf("save source: %v", err)
+	}
+
+	_, err = svc.Crawl(ctx, "invalid-events", contracts.CrawlOptions{Since: time.Hour, Budget: 1})
+	if err == nil || !strings.Contains(err.Error(), `unsupported GH Archive event type "UnknownEvent"`) {
+		t.Fatalf("Crawl() error = %v, want invalid stored event selection", err)
+	}
+	runs, err := c.ListRuns(ctx, 1)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("runs = %+v, want no lifecycle record for an invalid source definition", runs)
+	}
+}
+
 func TestGHArchiveCrawlFetchFailureContinues(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -560,7 +579,7 @@ func TestArchiveMergePreservesNewerProjection(t *testing.T) {
 	if got := mergeArchiveRepo(signal, &repo); got.Description != "current" || !got.SourceUpdatedAt.IsZero() {
 		t.Fatalf("repository regressed: %+v", got)
 	}
-	thread := corpus.Thread{ID: 2, RepositoryID: 1, Kind: corpus.ThreadKindIssue, Number: 7, State: "open", Title: "current", SourceUpdatedAt: newer}
+	thread := corpus.Thread{ID: 2, RepositoryID: 1, Kind: domain.IssueKind, Number: 7, State: "open", Title: "current", SourceUpdatedAt: newer}
 	if got, ok := mergeArchiveThread(signal, 1, &thread); !ok || got.State != "open" || got.Title != "current" || !got.SourceUpdatedAt.IsZero() {
 		t.Fatalf("thread regressed: %+v", got)
 	}
@@ -601,7 +620,7 @@ func TestArchiveDiscoveryCannotOutrankCanonicalSync(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := c.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: canonicalRepo.ID, Kind: corpus.ThreadKindIssue, Number: 7, State: "open", Title: "canonical title", Body: "canonical body", SourceUpdatedAt: canonicalTime,
+		RepositoryID: canonicalRepo.ID, Kind: domain.IssueKind, Number: 7, State: "open", Title: "canonical title", Body: "canonical body", SourceUpdatedAt: canonicalTime,
 	}, `{"source":"github"}`); err != nil {
 		t.Fatal(err)
 	}
@@ -610,7 +629,7 @@ func TestArchiveDiscoveryCannotOutrankCanonicalSync(t *testing.T) {
 	if gotRepo.Description != "canonical metadata" || gotRepo.Stars != 99 {
 		t.Fatalf("canonical repository did not win: %+v", gotRepo)
 	}
-	gotThread, _ := c.GetThread(ctx, canonicalRepo.ID, corpus.ThreadKindIssue, 7)
+	gotThread, _ := c.GetThread(ctx, canonicalRepo.ID, domain.IssueKind, 7)
 	if gotThread.Title != "canonical title" || gotThread.Body != "canonical body" {
 		t.Fatalf("canonical thread did not win: %+v", gotThread)
 	}

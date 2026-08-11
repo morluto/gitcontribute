@@ -67,9 +67,14 @@ func (s *Service) ListConcerns(ctx context.Context, opts contracts.ConcernListOp
 	if err != nil {
 		return nil, err
 	}
-	page, err := svc.List(ctx, concern.Filter{
-		Repo: ref, Status: concern.Status(opts.Status), Query: opts.Query, Limit: opts.Limit, Offset: opts.Offset,
-	})
+	var status concern.Status
+	if strings.TrimSpace(opts.Status) != "" {
+		status, err = concern.ParseStatus(opts.Status)
+		if err != nil {
+			return nil, mapConcernError(err)
+		}
+	}
+	page, err := svc.List(ctx, concern.Filter{Repo: ref, Status: status, Query: opts.Query, Limit: opts.Limit, Offset: opts.Offset})
 	if err != nil {
 		return nil, mapConcernError(err)
 	}
@@ -150,7 +155,11 @@ func (s *Service) SetConcernStatus(ctx context.Context, id, status, rationale st
 	if err != nil {
 		return nil, err
 	}
-	item, err := svc.SetStatus(ctx, id, concern.Status(strings.TrimSpace(status)), rationale)
+	next, err := concern.ParseStatus(status)
+	if err != nil {
+		return nil, mapConcernError(err)
+	}
+	item, err := svc.SetStatus(ctx, id, next, rationale)
 	if err != nil {
 		return nil, mapConcernError(err)
 	}
@@ -163,7 +172,11 @@ func (s *Service) LinkConcern(ctx context.Context, id string, opts contracts.Con
 	if err != nil {
 		return nil, err
 	}
-	if err := svc.Link(ctx, id, concern.Link{Kind: concern.LinkKind(opts.Kind), TargetType: opts.TargetType, TargetID: opts.TargetID, Note: opts.Note}); err != nil {
+	kind, err := concern.ParseLinkKind(opts.Kind)
+	if err != nil {
+		return nil, mapConcernError(err)
+	}
+	if err := svc.Link(ctx, id, concern.Link{Kind: kind, TargetType: opts.TargetType, TargetID: opts.TargetID, Note: opts.Note}); err != nil {
 		return nil, mapConcernError(err)
 	}
 	return s.ShowConcern(ctx, id)
@@ -179,9 +192,9 @@ func (s *Service) PromoteConcern(ctx context.Context, id string, opts contracts.
 	if err != nil {
 		return nil, mapConcernError(err)
 	}
-	category := investigation.Category(strings.TrimSpace(opts.Category))
-	if !investigation.ValidCategory(category) {
-		return nil, investigation.ErrInvalidCategory
+	category, err := investigation.ParseCategory(opts.Category)
+	if err != nil {
+		return nil, err
 	}
 	kind := strings.TrimSpace(opts.Kind)
 	if kind != "investigation" && kind != "opportunity" {
@@ -243,7 +256,7 @@ func (s *Service) concernResult(ctx context.Context, item *concern.Concern) (*co
 		result.Links = append(result.Links, contracts.ConcernLinkResult{Kind: string(link.Kind), TargetType: link.TargetType, TargetID: link.TargetID, Note: link.Note})
 	}
 	if item.Promotion != nil {
-		result.Promotion = &contracts.ConcernPromotionResult{Kind: item.Promotion.Kind, InvestigationID: item.Promotion.InvestigationID, HypothesisID: item.Promotion.HypothesisID, OpportunityID: item.Promotion.OpportunityID}
+		result.Promotion = &contracts.ConcernPromotionResult{Kind: item.Promotion.Kind(), InvestigationID: item.Promotion.InvestigationID(), HypothesisID: item.Promotion.HypothesisID(), OpportunityID: item.Promotion.OpportunityID()}
 	}
 	return result, nil
 }

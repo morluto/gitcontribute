@@ -15,7 +15,7 @@ import (
 
 type authoredPullRequestSyncOptions struct {
 	Repository   *mcpcontract.RepositoryRef
-	State        string
+	State        syncThreadState
 	UpdatedAfter time.Time
 	Limit        int
 	MaxRequests  int
@@ -62,7 +62,7 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in authoredPullR
 		}
 		perPage := min(100, in.Limit-discovered)
 		requests++
-		options := github.AuthoredPullRequestSearchOptions{Login: identity.Login, State: in.State, UpdatedAfter: in.UpdatedAfter, PageOptions: github.PageOptions{Page: page, PerPage: perPage}}
+		options := github.AuthoredPullRequestSearchOptions{Login: identity.Login, State: in.State.String(), UpdatedAfter: in.UpdatedAfter, PageOptions: github.PageOptions{Page: page, PerPage: perPage}}
 		if in.Repository != nil {
 			options.RepositoryOwner = in.Repository.Owner
 			options.RepositoryName = in.Repository.Repo
@@ -132,7 +132,7 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in authoredPullR
 					results[index] = authoredRepositorySyncResult{Key: current.key, Status: status, Reason: reason, Message: message, RetryAfterMS: retry}
 					continue
 				}
-				results[index] = authoredRepositorySyncResult{Key: current.key, Status: "complete", Updated: res.Updated, Requests: res.Requests}
+				results[index] = authoredRepositorySyncResult{Key: current.key, Status: mcpcontract.BatchItemComplete, Updated: res.Updated, Requests: res.Requests}
 			}
 		}()
 	}
@@ -147,17 +147,17 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in authoredPullR
 	}
 	close(jobs)
 	wg.Wait()
-	status := "complete"
+	status := batchOperationComplete
 	if boundedByLimit {
-		status = "partial"
+		status = batchOperationPartial
 	}
 	completed := 0
 	for _, result := range results {
 		requests += result.Requests
-		if result.Status == "complete" {
+		if result.Status == mcpcontract.BatchItemComplete {
 			completed++
 		} else {
-			status = "partial"
+			status = batchOperationPartial
 		}
 	}
 	if err := report("authored_pull_request_headers", jobProgressCounts(len(tasks), len(tasks))); err != nil {
@@ -172,7 +172,7 @@ func (s *Service) syncAuthoredPullRequests(ctx context.Context, in authoredPullR
 }
 
 type authoredPullRequestSyncResult struct {
-	Status             string                         `json:"status"`
+	Status             batchOperationStatus           `json:"status"`
 	Login              string                         `json:"login"`
 	PullRequests       int                            `json:"pull_requests"`
 	PullRequestRefs    []string                       `json:"pull_request_refs"`
@@ -186,11 +186,11 @@ type authoredPullRequestSyncResult struct {
 }
 
 type authoredRepositorySyncResult struct {
-	Key          string `json:"key"`
-	Status       string `json:"status"`
-	Reason       string `json:"reason,omitempty"`
-	Message      string `json:"message,omitempty"`
-	RetryAfterMS int    `json:"retry_after_ms,omitempty"`
-	Updated      int    `json:"updated,omitempty"`
-	Requests     int    `json:"requests,omitempty"`
+	Key          string                      `json:"key"`
+	Status       mcpcontract.BatchItemStatus `json:"status"`
+	Reason       string                      `json:"reason,omitempty"`
+	Message      string                      `json:"message,omitempty"`
+	RetryAfterMS int                         `json:"retry_after_ms,omitempty"`
+	Updated      int                         `json:"updated,omitempty"`
+	Requests     int                         `json:"requests,omitempty"`
 }

@@ -166,6 +166,30 @@ func ParseThreadState(value string) (ThreadState, error) {
 	}
 }
 
+// ContributionKind identifies one GitHub contribution category. The
+// vocabulary is intentionally open because GitHub may add categories, while
+// the representation is still parsed so empty or non-canonical values cannot
+// enter stored contribution records.
+type ContributionKind string
+
+const (
+	CommitContributionKind            ContributionKind = "commit"
+	IssueContributionKind             ContributionKind = "issue"
+	PullRequestContributionKind       ContributionKind = "pull_request"
+	PullRequestReviewContributionKind ContributionKind = "pull_request_review"
+	RepositoryContributionKind        ContributionKind = "repository"
+)
+
+func ParseContributionKind(value string) (ContributionKind, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return "", errors.New("contribution kind is required")
+	}
+	return ContributionKind(value), nil
+}
+
+func (k ContributionKind) String() string { return string(k) }
+
 // Thread is a product-owned model for an issue or pull request.
 // It carries no vendor-specific API types.
 type Thread struct {
@@ -225,16 +249,7 @@ type Comment struct {
 
 // PullRequestDetails contains PR-specific facets.
 type PullRequestDetails struct {
-	HeadRef        string
-	BaseRef        string
-	HeadSHA        string
-	BaseSHA        string
-	Merge          MergeStatus
-	MergeCommitSHA string
-	Additions      int
-	Deletions      int
-	ChangedFiles   int
-	CIStatus       string
+	Merge MergeStatus
 }
 
 // Repository is a product-owned snapshot of repository metadata and counts.
@@ -358,15 +373,6 @@ func NewFacetCoverage(facet string, complete bool, asOf time.Time, count int) (F
 		return FacetCoverage{}, errors.New("coverage count cannot be negative")
 	}
 	return FacetCoverage{facet: facet, complete: complete, asOf: asOf, count: count}, nil
-}
-
-// MustFacetCoverage constructs static and test fixture coverage.
-func MustFacetCoverage(facet string, complete bool, asOf time.Time, count int) FacetCoverage {
-	coverage, err := NewFacetCoverage(facet, complete, asOf, count)
-	if err != nil {
-		panic(err)
-	}
-	return coverage
 }
 
 func (c FacetCoverage) Facet() string   { return c.facet }

@@ -27,7 +27,7 @@ func checkPreflightForkFreshness(
 	upstream mcpcontract.RepositoryRef,
 	fork *mcpcontract.RepositoryRef,
 	identity string,
-	candidate mcpcontract.ContributionPreflightCandidate,
+	candidate preflightCandidate,
 	worktrees []workspace.LocalWorktree,
 	existing *preflightExisting,
 	maxRequests int,
@@ -128,12 +128,12 @@ func resolvePreflightFork(
 	upstream mcpcontract.RepositoryRef,
 	explicit *mcpcontract.RepositoryRef,
 	identity string,
-	candidate mcpcontract.ContributionPreflightCandidate,
+	candidate preflightCandidate,
 	worktrees []workspace.LocalWorktree,
 	existing *preflightExisting,
 ) (*preflightForkContext, bool, string) {
 	if explicit != nil {
-		return &preflightForkContext{ref: *explicit, branch: strings.TrimSpace(candidate.HeadRef), sha: strings.TrimSpace(candidate.HeadSHA)}, true, ""
+		return &preflightForkContext{ref: *explicit, branch: candidate.headRef, sha: candidate.headSHA}, true, ""
 	}
 	if existing != nil && existing.details.HeadOwner != "" && existing.details.HeadRepo != "" && !sameGitHubRepository(existing.details.HeadOwner, existing.details.HeadRepo, upstream) {
 		return &preflightForkContext{
@@ -162,11 +162,11 @@ func resolvePreflightFork(
 				}
 				seen[key] = struct{}{}
 				branch, sha := worktree.Branch, worktree.HeadSHA
-				if candidate.HeadRef != "" {
-					branch = candidate.HeadRef
+				if candidate.headRef != "" {
+					branch = candidate.headRef
 				}
-				if candidate.HeadSHA != "" {
-					sha = candidate.HeadSHA
+				if candidate.headSHA != "" {
+					sha = candidate.headSHA
 				}
 				candidates = append(candidates, preflightForkContext{ref: ref, branch: branch, sha: sha})
 			}

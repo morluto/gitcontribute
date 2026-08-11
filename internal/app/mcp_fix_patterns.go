@@ -39,23 +39,78 @@ type fixPatternClassification struct {
 	superseded   bool
 }
 
-type fixPatternOperation string
+type fixPatternSymptom struct {
+	name  string
+	terms []string
+}
+
+type fixPatternWindow struct {
+	after  time.Time
+	before *time.Time
+}
+
+func (w fixPatternWindow) beforeTime() time.Time {
+	if w.before == nil {
+		return time.Time{}
+	}
+	return *w.before
+}
+
+type fixPatternRequest struct {
+	canonical           mcpcontract.MineRepositoryFixPatternsInput
+	repository          domain.RepoRef
+	window              fixPatternWindow
+	symptoms            []fixPatternSymptom
+	wantedOutcomes      map[mcpcontract.FixPatternOutcome]struct{}
+	candidatePage       corpus.SearchPage
+	hydrationLimit      int
+	representativeLimit int
+}
+
+func (r fixPatternRequest) withHydrationLimit(limit int) fixPatternRequest {
+	r.hydrationLimit = limit
+	r.canonical.HydrationLimit = new(int)
+	*r.canonical.HydrationLimit = limit
+	return r
+}
+
+type fixPatternOperation uint8
 
 const (
-	fixPatternPreview  fixPatternOperation = "preview"
-	fixPatternWorkflow fixPatternOperation = "workflow"
+	fixPatternPreview fixPatternOperation = iota
+	fixPatternWorkflow
 )
+
+type fixPatternSnapshotSource struct {
+	ObservationWatermark int64  `json:"observation_watermark"`
+	QueryDigest          string `json:"query_digest"`
+}
+
+type fixPatternSnapshotVersions struct {
+	FixPatterns string `json:"fix_patterns"`
+}
+
+type fixPatternSnapshotCompleteness struct {
+	Complete        bool `json:"complete"`
+	Truncated       bool `json:"truncated"`
+	UnknownCoverage bool `json:"unknown_coverage"`
+}
+
+type fixPatternSnapshotProvenance struct {
+	Producer  string `json:"producer"`
+	Operation string `json:"operation"`
+}
 
 // MineRepositoryFixPatterns submits one bounded GitHub-read/local-write
 // workflow. It searches stored candidates first and hydrates only finalists
 // whose merge outcome is unknown.
 func (r *MCPReader) MineRepositoryFixPatterns(ctx context.Context, in mcpcontract.MineRepositoryFixPatternsInput) (mcpcontract.JobReference, error) {
-	normalized, err := normalizeFixPatternInput(in)
+	request, normalized, err := parseFixPatternInput(in)
 	if err != nil {
 		return mcpcontract.JobReference{}, err
 	}
 	id, err := r.submitJob(ctx, "mine_repository_fix_patterns", normalized, func(ctx context.Context, report func(string, string) error) (any, error) {
-		return r.runFixPatternOperation(ctx, normalized, report, fixPatternWorkflow)
+		return r.runFixPatternOperation(ctx, request, report, fixPatternWorkflow)
 	})
 	if err != nil {
 		return mcpcontract.JobReference{}, err
@@ -68,19 +123,11 @@ func (r *MCPReader) MineRepositoryFixPatterns(ctx context.Context, in mcpcontrac
 // deliberately disables hydration: it is an offline planning read, not a
 // hidden synchronization request.
 func (r *MCPReader) PreviewRepositoryFixPatterns(ctx context.Context, in mcpcontract.PreviewRepositoryFixPatternsInput) (mcpcontract.FixPatternReport, error) {
-	normalized, err := normalizeFixPatternInput(mcpcontract.MineRepositoryFixPatternsInput(in))
+	request, _, err := parseFixPatternInput(mcpcontract.MineRepositoryFixPatternsInput(in))
 	if err != nil {
 		return mcpcontract.FixPatternReport{}, err
 	}
-	zero := 0
-	normalized.HydrationLimit = &zero
-	return r.runFixPatternOperation(ctx, normalized, nil, fixPatternPreview)
-}
-
-// mineRepositoryFixPatterns remains the executor-local entry point used by
-// focused tests and the durable job adapter.
-func (r *MCPReader) mineRepositoryFixPatterns(ctx context.Context, in mcpcontract.MineRepositoryFixPatternsInput, progress func(string, string) error) (mcpcontract.FixPatternReport, error) {
-	return r.runFixPatternOperation(ctx, in, progress, fixPatternWorkflow)
+	return r.runFixPatternOperation(ctx, request.withHydrationLimit(0), nil, fixPatternPreview)
 }
 
 // GetFixPatternReport reads the typed terminal result of a pattern-mining job.
@@ -92,7 +139,7 @@ func (r *MCPReader) GetFixPatternReport(ctx context.Context, id string) (mcpcont
 	if job.Kind != "mine_repository_fix_patterns" {
 		return mcpcontract.FixPatternReport{}, failure.NotFound(fmt.Errorf("job %s is not a fix-pattern report", id))
 	}
-	if job.Status != corpus.JobStatusSucceeded {
+	if job.Status != corpus.JobStatusSucceeded.String() {
 		return mcpcontract.FixPatternReport{}, errors.New("fix-pattern report is not available until the job succeeds")
 	}
 	var report mcpcontract.FixPatternReport
@@ -109,8 +156,8 @@ func (r *MCPReader) GetFixPatternReport(ctx context.Context, id string) (mcpcont
 		var request mcpcontract.MineRepositoryFixPatternsInput
 		var actions []mcpcontract.ToolCall
 		if err := json.Unmarshal([]byte(job.Request), &request); err == nil {
-			if request, err = normalizeFixPatternInput(request); err == nil {
-				actions = append(actions, mcpcontract.RecoveryAction(request))
+			if _, canonical, parseErr := parseFixPatternInput(request); parseErr == nil {
+				actions = append(actions, mcpcontract.RecoveryAction(canonical))
 			}
 		}
 		return mcpcontract.FixPatternReport{}, mcpcontract.Unavailable(
@@ -119,120 +166,143 @@ func (r *MCPReader) GetFixPatternReport(ctx context.Context, id string) (mcpcont
 			actions...,
 		)
 	}
+	if err := report.Validate(); err != nil {
+		return mcpcontract.FixPatternReport{}, fmt.Errorf("parse fix-pattern report: %w", err)
+	}
 	report.Persisted = true
 	return report, nil
 }
 
-func normalizeFixPatternInput(in mcpcontract.MineRepositoryFixPatternsInput) (mcpcontract.MineRepositoryFixPatternsInput, error) {
+func parseFixPatternInput(in mcpcontract.MineRepositoryFixPatternsInput) (fixPatternRequest, mcpcontract.MineRepositoryFixPatternsInput, error) {
 	ref, err := domain.NewRepoRef(in.Repository.Owner, in.Repository.Repo)
 	if err != nil {
-		return in, err
+		return fixPatternRequest{}, in, err
 	}
 	in.Repository.Owner = ref.Owner()
 	in.Repository.Repo = ref.Repo()
 	after, err := time.Parse(time.RFC3339, in.TimeWindow.UpdatedAfter)
 	if err != nil {
-		return in, errors.New("time_window.updated_after must be RFC 3339")
+		return fixPatternRequest{}, in, errors.New("time_window.updated_after must be RFC 3339")
 	}
+	var before *time.Time
 	if in.TimeWindow.UpdatedBefore != "" {
-		before, err := time.Parse(time.RFC3339, in.TimeWindow.UpdatedBefore)
+		parsed, err := time.Parse(time.RFC3339, in.TimeWindow.UpdatedBefore)
 		if err != nil {
-			return in, errors.New("time_window.updated_before must be RFC 3339")
+			return fixPatternRequest{}, in, errors.New("time_window.updated_before must be RFC 3339")
 		}
-		if before.Before(after) {
-			return in, errors.New("time_window.updated_before must not be earlier than updated_after")
+		if parsed.Before(after) {
+			return fixPatternRequest{}, in, errors.New("time_window.updated_before must not be earlier than updated_after")
 		}
+		before = &parsed
 	}
 	if len(in.SymptomTaxonomy) < 1 || len(in.SymptomTaxonomy) > 12 {
-		return in, errors.New("symptom_taxonomy must contain 1 to 12 categories")
+		return fixPatternRequest{}, in, errors.New("symptom_taxonomy must contain 1 to 12 categories")
 	}
+	canonicalSymptoms := make([]mcpcontract.FixPatternSymptom, len(in.SymptomTaxonomy))
+	parsedSymptoms := make([]fixPatternSymptom, len(in.SymptomTaxonomy))
 	seenNames := make(map[string]struct{}, len(in.SymptomTaxonomy))
 	for i := range in.SymptomTaxonomy {
-		symptom := &in.SymptomTaxonomy[i]
+		symptom := in.SymptomTaxonomy[i]
 		symptom.Name = strings.TrimSpace(symptom.Name)
 		if symptom.Name == "" {
-			return in, fmt.Errorf("symptom_taxonomy[%d].name is required", i)
+			return fixPatternRequest{}, in, fmt.Errorf("symptom_taxonomy[%d].name is required", i)
 		}
 		key := strings.ToLower(symptom.Name)
 		if _, exists := seenNames[key]; exists {
-			return in, fmt.Errorf("symptom_taxonomy[%d].name duplicates %q", i, symptom.Name)
+			return fixPatternRequest{}, in, fmt.Errorf("symptom_taxonomy[%d].name duplicates %q", i, symptom.Name)
 		}
 		seenNames[key] = struct{}{}
 		if len(symptom.Terms) < 1 || len(symptom.Terms) > 12 {
-			return in, fmt.Errorf("symptom_taxonomy[%d].terms must contain 1 to 12 values", i)
+			return fixPatternRequest{}, in, fmt.Errorf("symptom_taxonomy[%d].terms must contain 1 to 12 values", i)
 		}
+		terms := make([]string, len(symptom.Terms))
 		seenTerms := make(map[string]struct{}, len(symptom.Terms))
-		for j := range symptom.Terms {
-			symptom.Terms[j] = strings.TrimSpace(symptom.Terms[j])
-			if symptom.Terms[j] == "" {
-				return in, fmt.Errorf("symptom_taxonomy[%d].terms[%d] must not be empty", i, j)
+		for j, value := range symptom.Terms {
+			terms[j] = strings.TrimSpace(value)
+			if terms[j] == "" {
+				return fixPatternRequest{}, in, fmt.Errorf("symptom_taxonomy[%d].terms[%d] must not be empty", i, j)
 			}
-			key := strings.ToLower(symptom.Terms[j])
+			key := strings.ToLower(terms[j])
 			if _, exists := seenTerms[key]; exists {
-				return in, fmt.Errorf("symptom_taxonomy[%d].terms contains duplicate %q", i, symptom.Terms[j])
+				return fixPatternRequest{}, in, fmt.Errorf("symptom_taxonomy[%d].terms contains duplicate %q", i, terms[j])
 			}
 			seenTerms[key] = struct{}{}
 		}
+		canonicalSymptoms[i] = mcpcontract.FixPatternSymptom{Name: symptom.Name, Terms: append([]string(nil), terms...)}
+		parsedSymptoms[i] = fixPatternSymptom{name: symptom.Name, terms: terms}
 	}
+	in.SymptomTaxonomy = canonicalSymptoms
 	if in.CandidateLimit == 0 {
 		in.CandidateLimit = mcpcontract.DefaultFixPatternCandidateLimit
 	}
 	if in.CandidateLimit < 1 || in.CandidateLimit > 100 {
-		return in, errors.New("candidate_limit must be between 1 and 100")
+		return fixPatternRequest{}, in, errors.New("candidate_limit must be between 1 and 100")
 	}
-	if in.HydrationLimit == nil {
-		value := mcpcontract.DefaultFixPatternHydrationLimit
-		in.HydrationLimit = &value
+	hydrationLimit := mcpcontract.DefaultFixPatternHydrationLimit
+	if in.HydrationLimit != nil {
+		hydrationLimit = *in.HydrationLimit
 	}
-	if *in.HydrationLimit < 0 || *in.HydrationLimit > 100 {
-		return in, errors.New("hydration_limit must be between 0 and 100")
+	if hydrationLimit < 0 || hydrationLimit > 100 {
+		return fixPatternRequest{}, in, errors.New("hydration_limit must be between 0 and 100")
 	}
+	in.HydrationLimit = &hydrationLimit
 	if in.RepresentativeLimit == 0 {
 		in.RepresentativeLimit = mcpcontract.DefaultFixPatternRepresentativeLimit
 	}
 	if in.RepresentativeLimit < 1 || in.RepresentativeLimit > 20 {
-		return in, errors.New("representative_limit must be between 1 and 20")
+		return fixPatternRequest{}, in, errors.New("representative_limit must be between 1 and 20")
 	}
 	if len(in.MergeOutcomes) == 0 {
-		in.MergeOutcomes = []mcpcontract.FixPatternOutcome{"merged"}
+		in.MergeOutcomes = []mcpcontract.FixPatternOutcome{mcpcontract.FixPatternMerged}
 	}
 	seenOutcomes := make(map[mcpcontract.FixPatternOutcome]struct{}, len(in.MergeOutcomes))
 	for _, outcome := range in.MergeOutcomes {
 		switch outcome {
-		case "merged", "closed_unmerged", "superseded", "open", "unknown":
+		case mcpcontract.FixPatternMerged, mcpcontract.FixPatternClosedUnmerged, mcpcontract.FixPatternSuperseded, mcpcontract.FixPatternOpen, mcpcontract.FixPatternUnknown:
 		default:
-			return in, fmt.Errorf("unsupported merge outcome %q", outcome)
+			return fixPatternRequest{}, in, fmt.Errorf("unsupported merge outcome %q", outcome)
 		}
 		if _, exists := seenOutcomes[outcome]; exists {
-			return in, fmt.Errorf("duplicate merge outcome %q", outcome)
+			return fixPatternRequest{}, in, fmt.Errorf("duplicate merge outcome %q", outcome)
 		}
 		seenOutcomes[outcome] = struct{}{}
 	}
-	return in, nil
+	in.MergeOutcomes = append([]mcpcontract.FixPatternOutcome(nil), in.MergeOutcomes...)
+	page, err := corpus.ParseSearchPage(in.CandidateLimit, "")
+	if err != nil {
+		return fixPatternRequest{}, in, err
+	}
+	return fixPatternRequest{
+		canonical: in, repository: ref, window: fixPatternWindow{after: after, before: before}, symptoms: parsedSymptoms,
+		wantedOutcomes: seenOutcomes, candidatePage: page, hydrationLimit: hydrationLimit, representativeLimit: in.RepresentativeLimit,
+	}, in, nil
 }
 
-func collectFixPatternCandidates(ctx context.Context, c *corpus.Corpus, repo *corpus.Repository, in mcpcontract.MineRepositoryFixPatternsInput, progress func(string, string) error) (fixPatternAnalysis, error) {
+func collectFixPatternCandidates(ctx context.Context, c *corpus.Corpus, repo *corpus.Repository, request fixPatternRequest, progress func(string, string) error) (fixPatternAnalysis, error) {
 	a := fixPatternAnalysis{
-		clusters:   make([][]int64, len(in.SymptomTaxonomy)),
+		clusters:   make([][]int64, len(request.symptoms)),
 		candidates: make(map[int64]*fixPatternCandidate),
 		orderedIDs: make([]int64, 0),
 	}
-	after, _ := time.Parse(time.RFC3339, in.TimeWindow.UpdatedAfter)
-	var before time.Time
-	if in.TimeWindow.UpdatedBefore != "" {
-		before, _ = time.Parse(time.RFC3339, in.TimeWindow.UpdatedBefore)
+	ref, err := domain.NewRepoRef(repo.Owner, repo.Name)
+	if err != nil {
+		return fixPatternAnalysis{}, fmt.Errorf("parse stored repository: %w", err)
 	}
-	if err := progress("candidate_search", jobProgressCounts(0, len(in.SymptomTaxonomy))); err != nil {
+	repositoryScope, err := corpus.NewThreadRepositoryScope(ref, repo.ID)
+	if err != nil {
 		return fixPatternAnalysis{}, err
 	}
-	for symptomIndex, symptom := range in.SymptomTaxonomy {
-		page, err := c.SearchThreadsPage(ctx, strings.Join(symptom.Terms, " "), corpus.SearchFilter{
-			RepoID: repo.ID, Repo: in.Repository.Owner + "/" + in.Repository.Repo,
-			Kind: corpus.ThreadKindPullRequest, UpdatedAfter: after, UpdatedBefore: before,
-			Limit: in.CandidateLimit, Sort: "relevance", MatchMode: "any",
+	if err := progress("candidate_search", jobProgressCounts(0, len(request.symptoms))); err != nil {
+		return fixPatternAnalysis{}, err
+	}
+	for symptomIndex, symptom := range request.symptoms {
+		page, err := c.SearchThreadsPage(ctx, strings.Join(symptom.terms, " "), corpus.SearchFilter{
+			Repository: repositoryScope,
+			Kind:       corpus.PullRequestThreadKind(), UpdatedAfter: request.window.after, UpdatedBefore: request.window.beforeTime(),
+			Page: request.candidatePage, TermMatch: corpus.MatchAnyTerm(),
 		})
 		if err != nil {
-			return fixPatternAnalysis{}, fmt.Errorf("search symptom %q: %w", symptom.Name, err)
+			return fixPatternAnalysis{}, fmt.Errorf("search symptom %q: %w", symptom.name, err)
 		}
 		a.candidateMatches += page.Total
 		a.candidateTruncated = a.candidateTruncated || page.Total > len(page.Threads)
@@ -248,33 +318,32 @@ func collectFixPatternCandidates(ctx context.Context, c *corpus.Corpus, repo *co
 				a.clusters[symptomIndex] = append(a.clusters[symptomIndex], thread.ID)
 			}
 		}
-		if err := progress("candidate_search", jobProgressCounts(symptomIndex+1, len(in.SymptomTaxonomy))); err != nil {
+		if err := progress("candidate_search", jobProgressCounts(symptomIndex+1, len(request.symptoms))); err != nil {
 			return fixPatternAnalysis{}, err
 		}
 	}
 	return a, nil
 }
 
-func selectFixPatternHydration(a fixPatternAnalysis, in mcpcontract.MineRepositoryFixPatternsInput) []mcpcontract.ThreadRef {
+func selectFixPatternHydration(a fixPatternAnalysis, request fixPatternRequest) []mcpcontract.ThreadRef {
 	unknown := countUnknownCandidates(a.candidates)
-	refs := make([]mcpcontract.ThreadRef, 0, min(*in.HydrationLimit, unknown))
+	refs := make([]mcpcontract.ThreadRef, 0, min(request.hydrationLimit, unknown))
 	for _, id := range a.orderedIDs {
 		candidate := a.candidates[id]
-		if !needsMergeHydration(candidate.thread) || len(refs) >= *in.HydrationLimit {
+		if !needsMergeHydration(candidate.thread) || len(refs) >= request.hydrationLimit {
 			continue
 		}
 		refs = append(refs, mcpcontract.ThreadRef{
-			Owner: in.Repository.Owner, Repo: in.Repository.Repo, Kind: "pull_request", Number: candidate.thread.Number,
+			Owner: request.repository.Owner(), Repo: request.repository.Repo(), Kind: "pull_request", Number: candidate.thread.Number,
 		})
 	}
 	return refs
 }
 
-func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.MineRepositoryFixPatternsInput, progress func(string, string) error, operation fixPatternOperation) (mcpcontract.FixPatternReport, error) {
-	repoRef, err := domain.NewRepoRef(in.Repository.Owner, in.Repository.Repo)
-	if err != nil {
-		return mcpcontract.FixPatternReport{}, err
-	}
+func (r *MCPReader) runFixPatternOperation(ctx context.Context, request fixPatternRequest, progress func(string, string) error, operation fixPatternOperation) (mcpcontract.FixPatternReport, error) {
+	in := request.canonical
+	repoRef := request.repository
+	var err error
 	var c *corpus.Corpus
 	if operation == fixPatternPreview {
 		c, err = r.openReadOnlyCorpus(ctx)
@@ -291,14 +360,14 @@ func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.M
 	if progress == nil {
 		progress = func(string, string) error { return nil }
 	}
-	repo, err := c.GetRepository(ctx, in.Repository.Owner, in.Repository.Repo)
+	repo, err := c.GetRepository(ctx, repoRef.Owner(), repoRef.Repo())
 	if err != nil {
 		return mcpcontract.FixPatternReport{}, err
 	}
 	if repo == nil {
-		return mcpcontract.FixPatternReport{}, fmt.Errorf("repository %s/%s has not been synced", in.Repository.Owner, in.Repository.Repo)
+		return mcpcontract.FixPatternReport{}, fmt.Errorf("repository %s has not been synced", repoRef)
 	}
-	analysis, err := collectFixPatternCandidates(ctx, c, repo, in, progress)
+	analysis, err := collectFixPatternCandidates(ctx, c, repo, request, progress)
 	if err != nil {
 		return mcpcontract.FixPatternReport{}, err
 	}
@@ -307,7 +376,7 @@ func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.M
 	for id, candidate := range analysis.candidates {
 		unknownBeforeByID[id] = candidate.unknownBefore
 	}
-	hydrationRefs := selectFixPatternHydration(analysis, in)
+	hydrationRefs := selectFixPatternHydration(analysis, request)
 
 	hydrated, failures := 0, make([]mcpcontract.FixPatternHydrationFailure, 0)
 	if operation == fixPatternWorkflow && len(hydrationRefs) > 0 {
@@ -324,17 +393,17 @@ func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.M
 		if err != nil {
 			return mcpcontract.FixPatternReport{}, err
 		}
-		items, _ := raw["items"].([]map[string]any)
+		items := raw.Items
 		for i, ref := range hydrationRefs {
-			if i < len(items) && items[i]["status"] == "complete" {
+			if i < len(items) && items[i].Status() == mcpcontract.BatchItemComplete {
 				hydrated++
 			} else {
 				reason, message := "hydration_failed", "pull-request details were not refreshed"
 				retryable := false
 				if i < len(items) {
-					reason, _ = items[i]["reason"].(string)
-					message, _ = items[i]["message"].(string)
-					retryable = items[i]["status"] == "retryable"
+					reason = items[i].Reason()
+					message = items[i].Message()
+					retryable = items[i].Status() == mcpcontract.BatchItemRetryable
 				}
 				failures = append(failures, mcpcontract.FixPatternHydrationFailure{
 					PullRequest: ref, Reason: reason, Message: message, Retryable: retryable,
@@ -345,7 +414,7 @@ func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.M
 		if err != nil {
 			return mcpcontract.FixPatternReport{}, err
 		}
-		analysis, err = collectFixPatternCandidates(ctx, c, repo, in, progress)
+		analysis, err = collectFixPatternCandidates(ctx, c, repo, request, progress)
 		if err != nil {
 			return mcpcontract.FixPatternReport{}, err
 		}
@@ -357,14 +426,10 @@ func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.M
 	}
 	candidates := analysis.candidates
 
-	wantedOutcomes := make(map[mcpcontract.FixPatternOutcome]struct{}, len(in.MergeOutcomes))
-	for _, outcome := range in.MergeOutcomes {
-		wantedOutcomes[outcome] = struct{}{}
-	}
-	reportClusters := make([]mcpcontract.FixPatternCluster, len(in.SymptomTaxonomy))
-	for i, symptom := range in.SymptomTaxonomy {
+	reportClusters := make([]mcpcontract.FixPatternCluster, len(request.symptoms))
+	for i, symptom := range request.symptoms {
 		cluster := mcpcontract.FixPatternCluster{
-			Name: symptom.Name, Terms: append([]string(nil), symptom.Terms...),
+			Name: symptom.name, Terms: append([]string(nil), symptom.terms...),
 			CandidateCount: mcpcontract.NonNegativeInt(len(analysis.clusters[i])),
 		}
 		for _, id := range analysis.clusters[i] {
@@ -378,10 +443,10 @@ func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.M
 			if outcome == "unknown" {
 				cluster.UnknownAfter++
 			}
-			if _, wanted := wantedOutcomes[outcome]; !wanted {
+			if _, wanted := request.wantedOutcomes[outcome]; !wanted {
 				continue
 			}
-			if len(cluster.Examples) >= in.RepresentativeLimit {
+			if len(cluster.Examples) >= request.representativeLimit {
 				cluster.ExamplesTruncated = true
 				continue
 			}
@@ -390,9 +455,9 @@ func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.M
 		reportClusters[i] = cluster
 	}
 
-	status := mcpcontract.FixPatternReportStatus("complete")
+	status := mcpcontract.FixPatternReportComplete
 	if len(failures) > 0 || analysis.candidateTruncated || countUnknownCandidates(candidates) > 0 {
-		status = "partial"
+		status = mcpcontract.FixPatternReportPartial
 	}
 	limitations := []string{
 		"Similarity-only examples are candidates, not proof that a pull request fixed a related issue.",
@@ -433,10 +498,23 @@ func (r *MCPReader) runFixPatternOperation(ctx context.Context, in mcpcontract.M
 		},
 		Clusters: reportClusters, Failures: failures, Limitations: limitations, Persisted: operation == fixPatternWorkflow, SnapshotToken: snapshotIdentity(in.SnapshotToken, revision),
 		ObservationWatermark: revision, QueryDigestSHA256: hex.EncodeToString(queryHash[:]),
-		Complete: status == "complete", Truncated: analysis.candidateTruncated, UnknownCoverage: countUnknownCandidates(candidates) > 0, Recovery: recovery,
+		Complete: status == mcpcontract.FixPatternReportComplete, Truncated: analysis.candidateTruncated, UnknownCoverage: countUnknownCandidates(candidates) > 0, Recovery: recovery,
+	}
+	if err := report.Validate(); err != nil {
+		return mcpcontract.FixPatternReport{}, err
 	}
 	if operation == fixPatternWorkflow {
-		snapshot, err := c.MaterializeReadSnapshot(ctx, corpus.SnapshotMaterialization{Kind: "fix_pattern_report", Scope: in.Repository, SourceManifest: map[string]any{"observation_watermark": revision, "query_digest": report.QueryDigestSHA256}, DerivedVersions: map[string]string{"fix_patterns": "v1"}, Completeness: map[string]bool{"complete": report.Complete, "truncated": report.Truncated, "unknown_coverage": report.UnknownCoverage}, Provenance: map[string]string{"producer": "gitcontribute", "operation": "workflow.mine_repository_fix_patterns"}, Payload: report})
+		materialization, err := corpus.NewSnapshotMaterialization(
+			"fix_pattern_report", in.Repository,
+			fixPatternSnapshotSource{ObservationWatermark: revision, QueryDigest: report.QueryDigestSHA256},
+			fixPatternSnapshotVersions{FixPatterns: "v1"},
+			fixPatternSnapshotCompleteness{Complete: report.Complete, Truncated: report.Truncated, UnknownCoverage: report.UnknownCoverage},
+			fixPatternSnapshotProvenance{Producer: "gitcontribute", Operation: "workflow.mine_repository_fix_patterns"}, report,
+		)
+		if err != nil {
+			return mcpcontract.FixPatternReport{}, err
+		}
+		snapshot, err := c.MaterializeReadSnapshot(ctx, materialization)
 		if err != nil {
 			return mcpcontract.FixPatternReport{}, err
 		}
@@ -466,29 +544,29 @@ func needsMergeHydration(thread corpus.Thread) bool {
 func fixPatternOutcome(thread corpus.Thread, superseded bool) mcpcontract.FixPatternOutcome {
 	switch {
 	case thread.Merge.IsMerged():
-		return "merged"
+		return mcpcontract.FixPatternMerged
 	case thread.State != "closed":
-		return "open"
+		return mcpcontract.FixPatternOpen
 	case !thread.Merge.Known():
-		return "unknown"
+		return mcpcontract.FixPatternUnknown
 	case superseded:
-		return "superseded"
+		return mcpcontract.FixPatternSuperseded
 	default:
-		return "closed_unmerged"
+		return mcpcontract.FixPatternClosedUnmerged
 	}
 }
 
 func incrementFixPatternOutcome(counts *mcpcontract.FixPatternOutcomeCounts, outcome mcpcontract.FixPatternOutcome) {
 	switch outcome {
-	case "merged":
+	case mcpcontract.FixPatternMerged:
 		counts.Merged++
-	case "closed_unmerged":
+	case mcpcontract.FixPatternClosedUnmerged:
 		counts.ClosedUnmerged++
-	case "superseded":
+	case mcpcontract.FixPatternSuperseded:
 		counts.Superseded++
-	case "open":
+	case mcpcontract.FixPatternOpen:
 		counts.Open++
-	case "unknown":
+	case mcpcontract.FixPatternUnknown:
 		counts.Unknown++
 	}
 }
@@ -497,7 +575,7 @@ func buildFixPatternExample(ctx context.Context, c *corpus.Corpus, repoID int64,
 	example := mcpcontract.FixPatternExample{
 		PullRequest: mcpcontract.ThreadRef{Owner: repository.Owner, Repo: repository.Repo, Kind: "pull_request", Number: thread.Number},
 		Title:       thread.Title, Outcome: outcome, Relationship: classification.relationship, RelationshipEvidence: classification.evidence,
-		AcceptedFix: outcome == "merged" && classification.relationship == "closes",
+		AcceptedFix: outcome == mcpcontract.FixPatternMerged && classification.relationship == mcpcontract.FixPatternCloses,
 		ProofStyles: detectProofStyles(thread.Body), UpdatedAt: thread.SourceUpdatedAt.Format(time.RFC3339),
 	}
 	if classification.related != nil {
@@ -514,7 +592,7 @@ func buildFixPatternExample(ctx context.Context, c *corpus.Corpus, repoID int64,
 		related, err := c.GetThreadByNumber(ctx, relatedRepoID, classification.related.Number)
 		if err == nil && related != nil {
 			example.RelatedKind = mcpcontract.FixPatternRelatedKind(related.Kind)
-			example.RelatedThread.Kind = related.Kind
+			example.RelatedThread.Kind = string(related.Kind)
 		}
 	}
 	return example
@@ -522,7 +600,7 @@ func buildFixPatternExample(ctx context.Context, c *corpus.Corpus, repoID int64,
 
 func classifyFixPattern(thread corpus.Thread, repository domain.RepoRef) fixPatternClassification {
 	refs := relatedwork.Extract(thread.Body, repository)
-	classification := fixPatternClassification{relationship: "similarity_only"}
+	classification := fixPatternClassification{relationship: mcpcontract.FixPatternSimilarityOnly}
 	bestPriority := 0
 	for _, ref := range refs {
 		if ref.Relation == relatedwork.RelationSupersededBy {
@@ -539,11 +617,11 @@ func classifyFixPattern(thread corpus.Thread, repository domain.RepoRef) fixPatt
 		classification.evidence = ref.Evidence
 		switch ref.Relation {
 		case relatedwork.RelationClaimsToClose:
-			classification.relationship = "closes"
+			classification.relationship = mcpcontract.FixPatternCloses
 		case relatedwork.RelationReplaces, relatedwork.RelationSupersededBy:
-			classification.relationship = "explicit_replacement"
+			classification.relationship = mcpcontract.FixPatternExplicitReplacement
 		default:
-			classification.relationship = "references"
+			classification.relationship = mcpcontract.FixPatternReferences
 		}
 	}
 	return classification
@@ -556,11 +634,11 @@ func detectProofStyles(body string) []mcpcontract.FixPatternProofStyle {
 		name  mcpcontract.FixPatternProofStyle
 		terms []string
 	}{
-		{name: "regression_test", terms: []string{"regression test", "unit test", "test coverage"}},
-		{name: "reproduction", terms: []string{"reproducer", "reproduction", "repro case"}},
-		{name: "benchmark", terms: []string{"benchmark", "throughput", "latency"}},
-		{name: "before_after", terms: []string{"before and after", "before/after"}},
-		{name: "screenshot", terms: []string{"screenshot"}},
+		{name: mcpcontract.FixPatternRegressionTest, terms: []string{"regression test", "unit test", "test coverage"}},
+		{name: mcpcontract.FixPatternReproduction, terms: []string{"reproducer", "reproduction", "repro case"}},
+		{name: mcpcontract.FixPatternBenchmark, terms: []string{"benchmark", "throughput", "latency"}},
+		{name: mcpcontract.FixPatternBeforeAfter, terms: []string{"before and after", "before/after"}},
+		{name: mcpcontract.FixPatternScreenshot, terms: []string{"screenshot"}},
 	} {
 		if slices.ContainsFunc(candidate.terms, func(term string) bool { return strings.Contains(lower, term) }) {
 			styles = append(styles, candidate.name)

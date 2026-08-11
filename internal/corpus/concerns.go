@@ -20,6 +20,9 @@ func (c *Corpus) SaveConcern(ctx context.Context, item *concern.Concern) error {
 	if item == nil || item.ID == "" {
 		return errors.New("concern id is required")
 	}
+	if err := item.ParseStored(); err != nil {
+		return fmt.Errorf("parse concern: %w", err)
+	}
 	payload, err := json.Marshal(item)
 	if err != nil {
 		return fmt.Errorf("marshal concern: %w", err)
@@ -108,6 +111,13 @@ func (c *Corpus) GetConcern(ctx context.Context, id string) (*concern.Concern, e
 
 // ListConcerns performs a bounded offline FTS5 search or updated-order list.
 func (c *Corpus) ListConcerns(ctx context.Context, filter concern.Filter) (_ *concern.ListResult, err error) {
+	if filter.Status != "" {
+		parsed, parseErr := concern.ParseStatus(string(filter.Status))
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		filter.Status = parsed
+	}
 	query := literalFTSQuery(filter.Query)
 	from, where := "FROM concerns c", []string{"1=1"}
 	args := make([]any, 0, 4)
@@ -181,8 +191,15 @@ func (c *Corpus) ListConcerns(ctx context.Context, filter concern.Filter) (_ *co
 			current = item
 		}
 		if kind.Valid {
+			linkKind, err := concern.ParseLinkKind(kind.String)
+			if err != nil {
+				return nil, fmt.Errorf("parse concern link: %w", err)
+			}
+			if strings.TrimSpace(targetType.String) == "" || strings.TrimSpace(targetID.String) == "" {
+				return nil, errors.New("parse concern link: target type and identity are required")
+			}
 			current.Links = append(current.Links, concern.Link{
-				Kind:       concern.LinkKind(kind.String),
+				Kind:       linkKind,
 				TargetType: targetType.String,
 				TargetID:   targetID.String,
 				Note:       note.String,
@@ -204,6 +221,15 @@ func (c *Corpus) ListConcerns(ctx context.Context, filter concern.Filter) (_ *co
 
 // AddConcernLink idempotently stores one typed relationship.
 func (c *Corpus) AddConcernLink(ctx context.Context, id string, link concern.Link) error {
+	kind, err := concern.ParseLinkKind(string(link.Kind))
+	if err != nil {
+		return err
+	}
+	link.Kind = kind
+	link.TargetType, link.TargetID = strings.TrimSpace(link.TargetType), strings.TrimSpace(link.TargetID)
+	if link.TargetType == "" || link.TargetID == "" {
+		return errors.New("concern link target type and identity are required")
+	}
 	result, err := c.db.ExecContext(ctx, `
 		INSERT INTO concern_links (concern_id, kind, target_type, target_id, note, created_at)
 		SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM concerns WHERE id=?)
@@ -239,9 +265,17 @@ func (c *Corpus) listConcernLinks(ctx context.Context, id string) (links []conce
 	}()
 	for rows.Next() {
 		var link concern.Link
+		var kind string
 		var createdAt int64
-		if err := rows.Scan(&link.Kind, &link.TargetType, &link.TargetID, &link.Note, &createdAt); err != nil {
+		if err := rows.Scan(&kind, &link.TargetType, &link.TargetID, &link.Note, &createdAt); err != nil {
 			return nil, err
+		}
+		link.Kind, err = concern.ParseLinkKind(kind)
+		if err != nil {
+			return nil, fmt.Errorf("parse concern link: %w", err)
+		}
+		if strings.TrimSpace(link.TargetType) == "" || strings.TrimSpace(link.TargetID) == "" {
+			return nil, errors.New("parse concern link: target type and identity are required")
 		}
 		link.CreatedAt = scanTime(createdAt)
 		links = append(links, link)
@@ -297,13 +331,19 @@ func (c *Corpus) promoteConcernTx(ctx context.Context, tx *sql.Tx, id string, in
 	if err := insertConcernWorkflowTx(ctx, tx, inv, hypothesis, opportunity); err != nil {
 		return err
 	}
-	promotion := &concern.Promotion{Kind: "investigation", InvestigationID: inv.ID, HypothesisID: hypothesis.ID, PromotedAt: inv.CreatedAt}
+	promotion, err := concern.NewInvestigationPromotion(inv.ID, hypothesis.ID, inv.CreatedAt)
+	if err != nil {
+		return err
+	}
 	if opportunity != nil {
-		promotion.Kind, promotion.OpportunityID = "opportunity", opportunity.ID
+		promotion, err = concern.NewOpportunityPromotion(inv.ID, hypothesis.ID, opportunity.ID, inv.CreatedAt)
+		if err != nil {
+			return err
+		}
 	}
 	previous := item.Status
 	item.Status, item.Promotion, item.UpdatedAt = concern.StatusPromoted, promotion, inv.CreatedAt
-	item.AuditTrail = append(item.AuditTrail, concern.StatusChange{From: previous, To: concern.StatusPromoted, Rationale: "promoted to " + promotion.Kind, At: inv.CreatedAt})
+	item.AuditTrail = append(item.AuditTrail, concern.StatusChange{From: previous, To: concern.StatusPromoted, Rationale: "promoted to " + promotion.Kind(), At: inv.CreatedAt})
 	updatedPayload, err := json.Marshal(item)
 	if err != nil {
 		return fmt.Errorf("marshal promoted concern: %w", err)

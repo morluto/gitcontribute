@@ -1,5 +1,7 @@
 package mcpcontract
 
+import "encoding/json"
+
 type EnsureCoverageInput struct {
 	Target             CoverageTarget `json:"target" jsonschema:"Repository or exact-thread coverage target to seed and verify"`
 	Facets             []string       `json:"facets,omitempty" jsonschema:"Selected facet names required by the caller"`
@@ -31,16 +33,16 @@ type EnsureCoverageJobResult struct {
 }
 
 type CorpusSnapshotArtifact struct {
-	SnapshotToken        string `json:"snapshot_token"`
-	ContractVersion      string `json:"contract_version"`
-	ObservationWatermark int64  `json:"observation_watermark"`
-	Scope                any    `json:"scope"`
-	SourceManifestSHA256 string `json:"source_manifest_sha256"`
-	DerivedVersions      any    `json:"derived_versions"`
-	Completeness         any    `json:"completeness"`
-	Provenance           any    `json:"provenance"`
-	ArtifactKind         string `json:"artifact_kind"`
-	ArtifactDigest       string `json:"artifact_digest"`
-	Payload              any    `json:"payload"`
-	CreatedAt            string `json:"created_at"`
+	SnapshotToken        string          `json:"snapshot_token"`
+	ContractVersion      string          `json:"contract_version"`
+	ObservationWatermark int64           `json:"observation_watermark"`
+	Scope                json.RawMessage `json:"scope"`
+	SourceManifestSHA256 string          `json:"source_manifest_sha256"`
+	DerivedVersions      json.RawMessage `json:"derived_versions"`
+	Completeness         json.RawMessage `json:"completeness"`
+	Provenance           json.RawMessage `json:"provenance"`
+	ArtifactKind         string          `json:"artifact_kind"`
+	ArtifactDigest       string          `json:"artifact_digest"`
+	Payload              json.RawMessage `json:"payload"`
+	CreatedAt            string          `json:"created_at"`
 }

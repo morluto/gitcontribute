@@ -20,9 +20,9 @@ type SourceRef struct {
 // Thread is the stored thread data needed by precedent scoring and output.
 type Thread struct {
 	ID          int64
-	Kind        string
+	Kind        domain.ThreadKind
 	Number      int
-	State       string
+	State       domain.ThreadState
 	StateReason string
 	Title       string
 	Body        string

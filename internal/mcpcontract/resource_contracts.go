@@ -1,10 +1,10 @@
 package mcpcontract
 
 import (
+	"bytes"
 	"context"
-
-	"github.com/morluto/gitcontribute/internal/lens"
-	"github.com/morluto/gitcontribute/internal/similarity"
+	"encoding/json"
+	"errors"
 )
 
 // WorkspaceResource is the canonical host-path-free representation of a
@@ -22,6 +22,303 @@ type WorkspaceResource struct {
 	Dirty           bool   `json:"dirty"`
 	HasUntracked    bool   `json:"has_untracked"`
 	CreatedAt       string `json:"created_at"`
+}
+
+// ResourceCoverage records the effective completeness of one stored resource.
+type ResourceCoverage struct {
+	Complete        bool   `json:"complete"`
+	SourceUpdatedAt string `json:"source_updated_at"`
+}
+
+// ThreadFacetObservationResource preserves one immutable facet observation
+// while leaving its facet-specific payload as validated JSON.
+type ThreadFacetObservationResource struct {
+	SourceUpdatedAt     string          `json:"source_updated_at"`
+	ObservationSequence int64           `json:"observation_sequence"`
+	Payload             json.RawMessage `json:"payload"`
+}
+
+// ThreadFacetResource is the canonical offline payload for one stored facet.
+type ThreadFacetResource struct {
+	SchemaVersion string                           `json:"schema_version"`
+	Owner         string                           `json:"owner"`
+	Repo          string                           `json:"repo"`
+	Kind          string                           `json:"kind"`
+	Number        int                              `json:"number"`
+	Facet         string                           `json:"facet"`
+	Observations  []ThreadFacetObservationResource `json:"observations"`
+	Coverage      *ResourceCoverage                `json:"coverage,omitempty"`
+}
+
+// ActorFacetResource is one parsed stored actor facet. The facet-specific value
+// remains JSON, but invalid durable payloads cannot be represented as a
+// successful resource.
+type ActorFacetResource struct {
+	actorID            string
+	facet              string
+	complete           bool
+	observedAt         string
+	sourceUpdatedAt    string
+	authorizationScope string
+	value              json.RawMessage
+}
+
+func NewActorFacetResource(actorID, facet string, complete bool, observedAt, sourceUpdatedAt, authorizationScope string, value json.RawMessage) (ActorFacetResource, error) {
+	if actorID == "" || facet == "" {
+		return ActorFacetResource{}, errors.New("actor ID and facet are required")
+	}
+	if !json.Valid(value) {
+		return ActorFacetResource{}, errors.New("actor facet value must be valid JSON")
+	}
+	return ActorFacetResource{
+		actorID: actorID, facet: facet, complete: complete,
+		observedAt: observedAt, sourceUpdatedAt: sourceUpdatedAt,
+		authorizationScope: authorizationScope,
+		value:              append(json.RawMessage(nil), value...),
+	}, nil
+}
+
+func (r ActorFacetResource) MarshalJSON() ([]byte, error) {
+	if r.actorID == "" || r.facet == "" || !json.Valid(r.value) {
+		return nil, errors.New("actor facet resource is not parsed")
+	}
+	return json.Marshal(struct {
+		SchemaVersion      string          `json:"schema_version"`
+		ActorID            string          `json:"actor_id"`
+		Facet              string          `json:"facet"`
+		Complete           bool            `json:"complete"`
+		ObservedAt         string          `json:"observed_at"`
+		SourceUpdatedAt    string          `json:"source_updated_at"`
+		AuthorizationScope string          `json:"authorization_scope"`
+		Value              json.RawMessage `json:"value"`
+	}{
+		SchemaVersion: "gitcontribute.actor-facet.v1", ActorID: r.actorID,
+		Facet: r.facet, Complete: r.complete, ObservedAt: r.observedAt,
+		SourceUpdatedAt: r.sourceUpdatedAt, AuthorizationScope: r.authorizationScope,
+		Value: r.value,
+	})
+}
+
+// PullRequestFeedbackPullRequestResource identifies the parent pull request
+// and preserves an unknown merge state as JSON null.
+type PullRequestFeedbackPullRequestResource struct {
+	Owner  string `json:"owner"`
+	Repo   string `json:"repo"`
+	Number int    `json:"number"`
+	Author string `json:"author"`
+	State  string `json:"state"`
+	Merged *bool  `json:"merged"`
+}
+
+// PullRequestFeedbackItemResource is the exact normalized feedback record
+// named by a search match.
+type PullRequestFeedbackItemResource struct {
+	SchemaVersion       string                                 `json:"schema_version"`
+	Owner               string                                 `json:"owner"`
+	Repo                string                                 `json:"repo"`
+	Number              int                                    `json:"number"`
+	Channel             string                                 `json:"channel"`
+	FeedbackID          string                                 `json:"feedback_id"`
+	FeedbackNodeID      string                                 `json:"feedback_node_id"`
+	ThreadID            string                                 `json:"thread_id"`
+	InReplyToID         string                                 `json:"in_reply_to_id"`
+	FeedbackAuthor      string                                 `json:"feedback_author"`
+	ReviewState         string                                 `json:"review_state"`
+	Body                string                                 `json:"body"`
+	Path                string                                 `json:"path"`
+	Line                *int                                   `json:"line"`
+	StartLine           *int                                   `json:"start_line"`
+	Side                string                                 `json:"side"`
+	StartSide           string                                 `json:"start_side"`
+	CommitOID           string                                 `json:"commit_oid"`
+	Outdated            bool                                   `json:"outdated"`
+	Resolved            *bool                                  `json:"resolved"`
+	ResolutionState     string                                 `json:"resolution_state"`
+	ResolvedBy          string                                 `json:"resolved_by"`
+	CreatedAt           string                                 `json:"created_at"`
+	UpdatedAt           string                                 `json:"updated_at"`
+	HeadSHA             string                                 `json:"head_sha"`
+	SourceObservationID int64                                  `json:"source_observation_id"`
+	PullRequest         PullRequestFeedbackPullRequestResource `json:"pull_request"`
+	EffectiveCoverage   *ResourceCoverage                      `json:"effective_coverage,omitempty"`
+}
+
+// StoredFacetResource is one validated JSON object from durable facet storage
+// plus effective corpus coverage. The payload remains facet-specific, while
+// the reserved coverage key has one authoritative representation.
+type StoredFacetResource struct {
+	payload  json.RawMessage
+	coverage *ResourceCoverage
+}
+
+func NewStoredFacetResource(payload json.RawMessage, coverage *ResourceCoverage) (StoredFacetResource, error) {
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, payload); err != nil {
+		return StoredFacetResource{}, err
+	}
+	encoded := json.RawMessage(compact.Bytes())
+	if len(encoded) < 2 || encoded[0] != '{' || encoded[len(encoded)-1] != '}' {
+		return StoredFacetResource{}, errors.New("stored facet payload must be a JSON object")
+	}
+	var reserved struct {
+		EffectiveCoverage json.RawMessage `json:"effective_coverage"`
+	}
+	if err := json.Unmarshal(encoded, &reserved); err != nil {
+		return StoredFacetResource{}, errors.New("stored facet payload must be a JSON object")
+	}
+	if reserved.EffectiveCoverage != nil {
+		return StoredFacetResource{}, errors.New("stored facet payload owns reserved effective_coverage key")
+	}
+	return StoredFacetResource{payload: encoded, coverage: coverage}, nil
+}
+
+func (r StoredFacetResource) MarshalJSON() ([]byte, error) {
+	if len(r.payload) < 2 || r.payload[0] != '{' || r.payload[len(r.payload)-1] != '}' {
+		return nil, errors.New("stored facet resource is not parsed")
+	}
+	if r.coverage == nil {
+		return append([]byte(nil), r.payload...), nil
+	}
+	coverage, err := json.Marshal(r.coverage)
+	if err != nil {
+		return nil, err
+	}
+	return mergeJSONObject(r.payload, jsonObjectField{name: "effective_coverage", value: coverage})
+}
+
+type jsonObjectField struct {
+	name  string
+	value json.RawMessage
+}
+
+func mergeJSONObject(payload json.RawMessage, fields ...jsonObjectField) ([]byte, error) {
+	if len(payload) < 2 || payload[0] != '{' || payload[len(payload)-1] != '}' {
+		return nil, errors.New("resource payload is not a parsed JSON object")
+	}
+	out := append([]byte(nil), payload[:len(payload)-1]...)
+	hasFields := len(payload) > 2
+	for _, field := range fields {
+		if hasFields {
+			out = append(out, ',')
+		}
+		name, err := json.Marshal(field.name)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, name...)
+		out = append(out, ':')
+		out = append(out, field.value...)
+		hasFields = true
+	}
+	out = append(out, '}')
+	return out, nil
+}
+
+// PullRequestFeedbackChannelsResource names the four closed feedback facets.
+type PullRequestFeedbackChannelsResource struct {
+	IssueComments    *StoredFacetResource `json:"issue_comments,omitempty"`
+	SubmittedReviews *StoredFacetResource `json:"submitted_reviews,omitempty"`
+	InlineComments   *StoredFacetResource `json:"inline_comments,omitempty"`
+	ReviewThreads    *StoredFacetResource `json:"review_threads,omitempty"`
+}
+
+// PullRequestFeedbackResource is the canonical raw-facet view for one pull
+// request. Missing channels are omitted rather than represented as empty data.
+type PullRequestFeedbackResource struct {
+	SchemaVersion string                              `json:"schema_version"`
+	Owner         string                              `json:"owner"`
+	Repo          string                              `json:"repo"`
+	Number        int                                 `json:"number"`
+	Channels      PullRequestFeedbackChannelsResource `json:"channels"`
+}
+
+// CIFailureResource augments the stored CI snapshot without decoding and
+// re-encoding its provider-shaped body, preserving missing and nullable keys.
+type CIFailureResource struct {
+	payload       json.RawMessage
+	schemaVersion string
+	owner         string
+	repo          string
+	number        int
+	coverage      *ResourceCoverage
+}
+
+func NewCIFailureResource(payload json.RawMessage, owner, repo string, number int, coverage *ResourceCoverage) (CIFailureResource, error) {
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, payload); err != nil {
+		return CIFailureResource{}, err
+	}
+	encoded := json.RawMessage(compact.Bytes())
+	if len(encoded) < 2 || encoded[0] != '{' || encoded[len(encoded)-1] != '}' {
+		return CIFailureResource{}, errors.New("stored CI payload must be a JSON object")
+	}
+	var reserved struct {
+		SchemaVersion     json.RawMessage `json:"schema_version"`
+		Owner             json.RawMessage `json:"owner"`
+		Repo              json.RawMessage `json:"repo"`
+		Number            json.RawMessage `json:"number"`
+		EffectiveCoverage json.RawMessage `json:"effective_coverage"`
+	}
+	if err := json.Unmarshal(encoded, &reserved); err != nil {
+		return CIFailureResource{}, errors.New("stored CI payload must be a JSON object")
+	}
+	if reserved.SchemaVersion != nil || reserved.Owner != nil || reserved.Repo != nil || reserved.Number != nil || reserved.EffectiveCoverage != nil {
+		return CIFailureResource{}, errors.New("stored CI payload owns reserved resource envelope keys")
+	}
+	return CIFailureResource{payload: encoded, schemaVersion: "gitcontribute.ci-failure-report.v1", owner: owner, repo: repo, number: number, coverage: coverage}, nil
+}
+
+func (r CIFailureResource) MarshalJSON() ([]byte, error) {
+	if r.schemaVersion == "" {
+		return nil, errors.New("CI failure resource is not parsed")
+	}
+	schemaVersion, _ := json.Marshal(r.schemaVersion)
+	owner, _ := json.Marshal(r.owner)
+	repo, _ := json.Marshal(r.repo)
+	number, _ := json.Marshal(r.number)
+	fields := []jsonObjectField{
+		{name: "schema_version", value: schemaVersion}, {name: "owner", value: owner},
+		{name: "repo", value: repo}, {name: "number", value: number},
+	}
+	if r.coverage != nil {
+		coverage, err := json.Marshal(r.coverage)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, jsonObjectField{name: "effective_coverage", value: coverage})
+	}
+	return mergeJSONObject(r.payload, fields...)
+}
+
+// CIJobLogResource is one parsed, exact stored workflow-job log.
+type CIJobLogResource struct {
+	jobID     int64
+	body      string
+	truncated bool
+}
+
+func NewCIJobLogResource(jobID int64, body string, truncated bool) (CIJobLogResource, error) {
+	if jobID <= 0 {
+		return CIJobLogResource{}, errors.New("CI job log ID must be positive")
+	}
+	return CIJobLogResource{jobID: jobID, body: body, truncated: truncated}, nil
+}
+
+func (r CIJobLogResource) MarshalJSON() ([]byte, error) {
+	if r.jobID <= 0 {
+		return nil, errors.New("CI job log resource is not parsed")
+	}
+	return json.Marshal(struct {
+		SchemaVersion string `json:"schema_version"`
+		JobID         int64  `json:"job_id"`
+		Body          string `json:"body"`
+		Truncated     bool   `json:"truncated"`
+	}{
+		SchemaVersion: "gitcontribute.ci-job-log.v1",
+		JobID:         r.jobID,
+		Body:          r.body,
+		Truncated:     r.truncated,
+	})
 }
 
 // Reader is the local, read-only application boundary exposed through MCP.
@@ -80,29 +377,26 @@ type ManifestInput struct {
 
 // SearchInput describes an offline thread search page.
 type SearchInput struct {
-	Query         string   `json:"query" jsonschema:"Full-text query"`
+	Query         string   `json:"query" jsonschema:"Thread full-text query"`
 	Owner         string   `json:"owner,omitempty" jsonschema:"Optional repository owner"`
 	Repo          string   `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Kind          string   `json:"kind,omitempty" jsonschema:"Optional thread kind"`
-	State         string   `json:"state,omitempty"`
-	StateReason   string   `json:"state_reason,omitempty"`
-	Merged        *bool    `json:"merged,omitempty"`
-	Author        string   `json:"author,omitempty"`
-	Association   string   `json:"author_association,omitempty"`
-	Assignee      string   `json:"assignee,omitempty"`
-	Labels        []string `json:"labels,omitempty"`
-	UpdatedAfter  string   `json:"updated_after,omitempty"`
-	UpdatedBefore string   `json:"updated_before,omitempty"`
+	Kind          string   `json:"kind,omitempty" jsonschema:"Optional thread kind: issue or pull_request"`
+	State         string   `json:"state,omitempty" jsonschema:"Optional open or closed state"`
+	StateReason   string   `json:"state_reason,omitempty" jsonschema:"Optional GitHub completed or not_planned state reason"`
+	Merged        *bool    `json:"merged,omitempty" jsonschema:"Optional pull request merged state"`
+	Author        string   `json:"author,omitempty" jsonschema:"Optional author login"`
+	Association   string   `json:"author_association,omitempty" jsonschema:"Optional GitHub author association"`
+	Assignee      string   `json:"assignee,omitempty" jsonschema:"Optional assignee login"`
+	Labels        []string `json:"labels,omitempty" jsonschema:"Labels that must all be present"`
+	UpdatedAfter  string   `json:"updated_after,omitempty" jsonschema:"Optional RFC 3339 lower bound"`
+	UpdatedBefore string   `json:"updated_before,omitempty" jsonschema:"Optional RFC 3339 upper bound"`
 	Limit         int      `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
 	Cursor        string   `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
 	Sort          string   `json:"sort,omitempty" jsonschema:"Order: relevance or updated"`
 	MatchMode     string   `json:"match_mode,omitempty" jsonschema:"Term matching: all requires every term; any requires at least one term"`
-	View          string   `json:"view,omitempty" jsonschema:"compact omits full bodies and keeps bounded excerpts; full includes stored bodies"`
-	SnapshotToken string   `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
+	View          string   `json:"view,omitempty" jsonschema:"compact omits full bodies and returns bounded excerpts; full includes stored bodies"`
+	SnapshotToken string   `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token"`
 }
-
-// RepositoryOutput is the stable MCP representation of a repository.
-type RepositoryOutput = TypedRepositoryOutput
 
 // ThreadOutput is the stable MCP representation of an issue or pull request.
 type ThreadOutput struct {
@@ -208,12 +502,72 @@ type CorpusReadProvenance struct {
 	Durable              bool          `json:"durable"`
 	ObservationWatermark int64         `json:"observation_watermark"`
 	QueryDigestSHA256    string        `json:"query_digest_sha256"`
+	Limitations          []string      `json:"limitations,omitempty"`
+	ExternalContext      []SourceRef   `json:"external_context,omitempty"`
+	Recovery             *RecoveryPlan `json:"recovery,omitempty"`
+	coverage             corpusReadCoverage
+}
+
+type corpusReadCoverage struct {
+	known     bool
+	truncated bool
+	unknown   bool
+}
+
+// NewCorpusReadProvenance constructs one coverage-consistent read identity.
+func NewCorpusReadProvenance(snapshotToken string, durable bool, observationWatermark int64, queryDigest string, truncated, unknownCoverage bool) CorpusReadProvenance {
+	return CorpusReadProvenance{
+		SnapshotToken: snapshotToken, Durable: durable,
+		ObservationWatermark: observationWatermark, QueryDigestSHA256: queryDigest,
+		coverage: corpusReadCoverage{known: true, truncated: truncated, unknown: unknownCoverage},
+	}
+}
+
+func (p CorpusReadProvenance) Complete() bool {
+	return p.coverage.known && !p.coverage.truncated && !p.coverage.unknown
+}
+
+func (p CorpusReadProvenance) Truncated() bool { return p.coverage.truncated }
+
+func (p CorpusReadProvenance) UnknownCoverage() bool { return p.coverage.unknown }
+
+type corpusReadProvenanceJSON struct {
+	SnapshotToken        string        `json:"snapshot_token"`
+	Durable              bool          `json:"durable"`
+	ObservationWatermark int64         `json:"observation_watermark"`
+	QueryDigestSHA256    string        `json:"query_digest_sha256"`
 	Complete             bool          `json:"complete"`
 	Truncated            bool          `json:"truncated"`
 	UnknownCoverage      bool          `json:"unknown_coverage"`
 	Limitations          []string      `json:"limitations,omitempty"`
 	ExternalContext      []SourceRef   `json:"external_context,omitempty"`
 	Recovery             *RecoveryPlan `json:"recovery,omitempty"`
+}
+
+func (p CorpusReadProvenance) MarshalJSON() ([]byte, error) {
+	return json.Marshal(corpusReadProvenanceJSON{
+		SnapshotToken: p.SnapshotToken, Durable: p.Durable,
+		ObservationWatermark: p.ObservationWatermark, QueryDigestSHA256: p.QueryDigestSHA256,
+		Complete: p.Complete(), Truncated: p.Truncated(), UnknownCoverage: p.UnknownCoverage(),
+		Limitations: p.Limitations, ExternalContext: p.ExternalContext, Recovery: p.Recovery,
+	})
+}
+
+func (p *CorpusReadProvenance) UnmarshalJSON(data []byte) error {
+	var raw corpusReadProvenanceJSON
+	if err := decodeStrictJSON(data, &raw); err != nil {
+		return err
+	}
+	if raw.Complete && (raw.Truncated || raw.UnknownCoverage) {
+		return errors.New("complete corpus read provenance cannot be truncated or have unknown coverage")
+	}
+	parsed := NewCorpusReadProvenance(raw.SnapshotToken, raw.Durable, raw.ObservationWatermark, raw.QueryDigestSHA256, raw.Truncated, raw.UnknownCoverage)
+	if !raw.Complete && !raw.Truncated && !raw.UnknownCoverage {
+		parsed.coverage.known = false
+	}
+	parsed.Limitations, parsed.ExternalContext, parsed.Recovery = raw.Limitations, raw.ExternalContext, raw.Recovery
+	*p = parsed
+	return nil
 }
 
 // SearchCodeInput describes an offline code search page.
@@ -345,161 +699,4 @@ type OpportunityOutput struct {
 	Status              string      `json:"status"`
 	CreatedAt           string      `json:"created_at"`
 	UpdatedAt           string      `json:"updated_at"`
-}
-
-// ClusterTarget selects one repository or one exact cluster member.
-type ClusterTarget struct {
-	Owner  string `json:"owner" jsonschema:"GitHub repository owner"`
-	Repo   string `json:"repo" jsonschema:"GitHub repository name"`
-	Kind   string `json:"kind,omitempty" jsonschema:"Optional member kind: issue or pull_request"`
-	Number int    `json:"number,omitempty" jsonschema:"Optional positive member number"`
-}
-
-// FindClustersInput selects up to 20 repositories or exact cluster members.
-type FindClustersInput struct {
-	Targets       []ClusterTarget `json:"targets" jsonschema:"One to 20 repository or exact-member targets"`
-	Limit         int             `json:"limit,omitempty" jsonschema:"Maximum clusters per target from 1 to 100"`
-	SnapshotToken string          `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
-}
-
-// FindNeighborsInput selects source threads and bounds similar-thread results.
-type FindNeighborsInput struct {
-	Threads       []ThreadRef `json:"threads" jsonschema:"One to 20 exact source threads"`
-	Limit         int         `json:"limit,omitempty" jsonschema:"Maximum neighbors per source thread from 1 to 100"`
-	SnapshotToken string      `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
-}
-
-// NeighborOutput describes one similar stored thread and its score.
-type NeighborOutput struct {
-	Kind   string          `json:"kind"`
-	Owner  string          `json:"owner"`
-	Repo   string          `json:"repo"`
-	Number int             `json:"number"`
-	Title  string          `json:"title"`
-	State  string          `json:"state"`
-	Score  SimilarityScore `json:"score"`
-	Reason string          `json:"reason"`
-}
-
-// NeighborSetOutput contains deterministic neighbors for one stored thread.
-type NeighborSetOutput struct {
-	Owner          string           `json:"owner"`
-	Repo           string           `json:"repo"`
-	Kind           string           `json:"kind"`
-	Number         int              `json:"number"`
-	SourceRevision string           `json:"source_revision"`
-	Neighbors      []NeighborOutput `json:"neighbors"`
-}
-
-// FindNeighborsOutput preserves source-thread order and isolates item failures.
-type FindNeighborsOutput struct {
-	Status        string                         `json:"status"`
-	Items         []BatchItem[NeighborSetOutput] `json:"items"`
-	SnapshotToken string                         `json:"snapshot_token"`
-}
-
-// ClusterMemberOutput describes one member of a duplicate cluster.
-type ClusterMemberOutput struct {
-	Kind     string          `json:"kind"`
-	Owner    string          `json:"owner"`
-	Repo     string          `json:"repo"`
-	Number   int             `json:"number"`
-	Title    string          `json:"title,omitempty"`
-	State    string          `json:"state,omitempty"`
-	Score    SimilarityScore `json:"score"`
-	Reason   string          `json:"reason"`
-	Included bool            `json:"included"`
-}
-
-// ClusterOutput contains a stable duplicate cluster and its canonical member.
-type ClusterOutput struct {
-	StableID    string                `json:"stable_id"`
-	State       string                `json:"state"`
-	Canonical   ClusterMemberOutput   `json:"canonical"`
-	MemberCount int                   `json:"member_count"`
-	Members     []ClusterMemberOutput `json:"members,omitempty"`
-}
-
-// ClusterSetOutput contains duplicate clusters for one repository target.
-type ClusterSetOutput struct {
-	Owner       string                 `json:"owner"`
-	Repo        string                 `json:"repo"`
-	RuleVersion similarity.RuleVersion `json:"rule_version,omitempty"`
-	Total       int                    `json:"total"`
-	Clusters    []ClusterOutput        `json:"clusters"`
-	Truncated   bool                   `json:"truncated" jsonschema:"Whether more clusters matched"`
-	Recovery    *RecoveryPlan          `json:"recovery,omitempty"`
-}
-
-// FindClustersOutput preserves target order and isolates item failures.
-type FindClustersOutput struct {
-	Status        string                        `json:"status"`
-	Items         []BatchItem[ClusterSetOutput] `json:"items"`
-	SnapshotToken string                        `json:"snapshot_token"`
-}
-
-type CoverageTargetKind string
-
-const (
-	CoverageTargetRepository  CoverageTargetKind = "repository"
-	CoverageTargetExactThread CoverageTargetKind = "exact_thread"
-)
-
-type ExactCoverageThread struct {
-	Kind   string `json:"kind" jsonschema:"Thread kind: issue or pull_request"`
-	Number int    `json:"number" jsonschema:"Positive issue or pull request number"`
-}
-
-// CoverageTarget is an explicit discriminated target. Thread is required only
-// for exact_thread and forbidden for repository.
-type CoverageTarget struct {
-	Type       CoverageTargetKind   `json:"type" jsonschema:"Target variant: repository or exact_thread"`
-	Repository RepositoryRef        `json:"repository"`
-	Thread     *ExactCoverageThread `json:"thread,omitempty"`
-}
-
-// GetCoverageInput selects bounded repository or thread facet coverage reads.
-type GetCoverageInput struct {
-	Targets       []CoverageTarget `json:"targets" jsonschema:"One to 100 repository or exact-thread targets"`
-	SnapshotToken string           `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
-}
-
-// FacetCoverageOutput reports completeness and freshness for one facet.
-type FacetCoverageOutput struct {
-	Facet     string `json:"facet"`
-	Complete  bool   `json:"complete"`
-	Status    string `json:"status"`
-	UpdatedAt string `json:"updated_at"`
-}
-
-// CoverageOutput reports all known coverage for one repository or thread.
-type CoverageOutput struct {
-	Owner  string                `json:"owner"`
-	Repo   string                `json:"repo"`
-	Kind   string                `json:"kind,omitempty"`
-	Number int                   `json:"number,omitempty"`
-	AsOf   string                `json:"as_of"`
-	Facets []FacetCoverageOutput `json:"facets"`
-}
-
-// GetCoverageOutput preserves target order and isolates missing or invalid
-// targets without failing unrelated coverage reads.
-type GetCoverageOutput struct {
-	Status        string                      `json:"status"`
-	Items         []BatchItem[CoverageOutput] `json:"items"`
-	SnapshotToken string                      `json:"snapshot_token"`
-	Provenance    CorpusReadProvenance        `json:"provenance"`
-}
-
-// LensInput selects a saved lens by name.
-type LensInput struct {
-	Name string `json:"name" jsonschema:"Lens name"`
-}
-
-// LensOutput contains a saved lens definition and timestamps.
-type LensOutput struct {
-	Name       string          `json:"name"`
-	Definition lens.Definition `json:"definition"`
-	CreatedAt  string          `json:"created_at"`
-	UpdatedAt  string          `json:"updated_at"`
 }

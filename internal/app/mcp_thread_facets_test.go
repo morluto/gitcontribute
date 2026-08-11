@@ -8,6 +8,7 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
@@ -21,11 +22,11 @@ func TestGetThreadFacetsIsOfflineAndReturnsCanonicalResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issue, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 7, State: "open", Title: "issue"}, `{}`)
+	issue, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 7, State: "open", Title: "issue"}, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pullRequest, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 7, State: "open", Title: "pull request"}, `{}`)
+	pullRequest, err := svc.corpus.UpsertThread(ctx, corpus.Thread{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 7, State: "open", Title: "pull request"}, `{}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,8 +40,8 @@ func TestGetThreadFacetsIsOfflineAndReturnsCanonicalResources(t *testing.T) {
 	reader := &MCPReader{svc}
 	out, err := reader.GetThreadFacets(ctx, mcpcontract.GetThreadFacetsInput{
 		Threads: []mcpcontract.ThreadRef{
-			{Owner: "acme", Repo: "rocket", Kind: corpus.ThreadKindIssue, Number: 7},
-			{Owner: "acme", Repo: "rocket", Kind: corpus.ThreadKindPullRequest, Number: 7},
+			{Owner: " acme ", Repo: " rocket ", Kind: " issue ", Number: 7},
+			{Owner: "acme", Repo: "rocket", Kind: string(domain.PullRequestKind), Number: 7},
 		},
 		Facets: []string{FacetIssueComments},
 	})
@@ -50,7 +51,10 @@ func TestGetThreadFacetsIsOfflineAndReturnsCanonicalResources(t *testing.T) {
 	if out.Status != "complete" || len(out.Items) != 2 || out.Items[0].Value == nil || out.Items[1].Value == nil {
 		t.Fatalf("facet batch = %+v", out)
 	}
-	if out.Items[0].Value.Kind != corpus.ThreadKindIssue || out.Items[1].Value.Kind != corpus.ThreadKindPullRequest {
+	if out.Items[0].Key != "acme/rocket/issue#7" || out.Items[0].Value.Owner != "acme" || out.Items[0].Value.Repo != "rocket" {
+		t.Fatalf("canonical issue reference = %+v", out.Items[0])
+	}
+	if out.Items[0].Value.Kind != string(domain.IssueKind) || out.Items[1].Value.Kind != string(domain.PullRequestKind) {
 		t.Fatalf("kind preservation = %+v", out.Items)
 	}
 	if out.Items[0].Value.Facets[0].ObservationCount != 1 || out.Items[0].Value.Facets[0].ResourceURI != "gitcontribute://thread/acme/rocket/issue/7/facet/issue_comments" {
@@ -61,7 +65,7 @@ func TestGetThreadFacetsIsOfflineAndReturnsCanonicalResources(t *testing.T) {
 	}
 
 	missing, err := reader.GetThreadFacets(ctx, mcpcontract.GetThreadFacetsInput{
-		Threads: []mcpcontract.ThreadRef{{Owner: "acme", Repo: "rocket", Kind: corpus.ThreadKindIssue, Number: 7}},
+		Threads: []mcpcontract.ThreadRef{{Owner: "acme", Repo: "rocket", Kind: string(domain.IssueKind), Number: 7}},
 		Facets:  []string{FacetIssueTimeline},
 	})
 	if err != nil {
@@ -71,7 +75,7 @@ func TestGetThreadFacetsIsOfflineAndReturnsCanonicalResources(t *testing.T) {
 		t.Fatalf("missing facet recovery = %+v", missing.Items[0])
 	}
 
-	resource, err := reader.ThreadFacetResource(ctx, "acme", "rocket", corpus.ThreadKindPullRequest, 7, FacetPRDetails)
+	resource, err := reader.ThreadFacetResource(ctx, "acme", "rocket", string(domain.PullRequestKind), 7, FacetPRDetails)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +83,7 @@ func TestGetThreadFacetsIsOfflineAndReturnsCanonicalResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) == "" || resource["schema_version"] != "gitcontribute.thread-facet.v1" || len(resource["observations"].([]any)) != 1 {
+	if string(data) == "" || resource.SchemaVersion != "gitcontribute.thread-facet.v1" || len(resource.Observations) != 1 {
 		t.Fatalf("facet resource = %s", data)
 	}
 }

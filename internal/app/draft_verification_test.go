@@ -42,7 +42,7 @@ func TestVerifyPublishedDraftExactMismatchAndStale(t *testing.T) {
 	}
 	observedAt := time.Now().UTC().Add(time.Minute)
 	_, err = fixture.svc.corpus.UpsertThread(fixture.ctx, corpus.Thread{
-		RepositoryID: fixture.repoID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open",
+		RepositoryID: fixture.repoID, Kind: domain.IssueKind, Number: 1, State: "open",
 		Title: draft.Title, Body: draft.Body, SourceUpdatedAt: observedAt,
 	}, `{}`)
 	if err != nil {
@@ -52,7 +52,7 @@ func TestVerifyPublishedDraftExactMismatchAndStale(t *testing.T) {
 		t.Fatalf("exact result = %+v", result)
 	}
 	_, err = fixture.svc.corpus.UpsertThread(fixture.ctx, corpus.Thread{
-		RepositoryID: fixture.repoID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open",
+		RepositoryID: fixture.repoID, Kind: domain.IssueKind, Number: 1, State: "open",
 		Title: draft.Title, Body: draft.Body + "\nliteral change", SourceUpdatedAt: observedAt.Add(time.Minute),
 	}, `{}`)
 	if err != nil {

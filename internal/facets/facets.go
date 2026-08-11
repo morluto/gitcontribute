@@ -3,10 +3,11 @@
 // repeating facet names or default sets.
 package facets
 
-// Thread kinds used by facet selection policy.
-const (
-	IssueKind       = "issue"
-	PullRequestKind = "pull_request"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 // Facet names are stable corpus keys. Health-only facets are included here so
@@ -26,48 +27,141 @@ const (
 )
 
 type definition struct {
-	name                  string
-	hydratable            bool
-	defaultForIssue       bool
-	defaultForPullRequest bool
-	explicitOnly          bool
+	name   Name
+	policy hydrationPolicy
 }
+
+type hydrationPolicy uint8
+
+const (
+	healthOnly hydrationPolicy = iota
+	defaultForAllThreads
+	defaultForPullRequests
+	explicitForAllThreads
+)
 
 var catalog = [...]definition{
-	{name: IssueComments, hydratable: true, defaultForIssue: true, defaultForPullRequest: true},
-	{name: PRDetails, hydratable: true, defaultForPullRequest: true},
-	{name: PRReviews, hydratable: true, defaultForPullRequest: true},
-	{name: PRReviewComments, hydratable: true, defaultForPullRequest: true},
-	{name: PRChecks},
-	{name: PRReviewThreads},
-	{name: PRMergeState},
-	{name: PRMergeQueue},
-	{name: PRClosingIssues},
-	{name: PRFiles},
-	{name: IssueTimeline, hydratable: true, explicitOnly: true},
+	{name: Name(IssueComments), policy: defaultForAllThreads},
+	{name: Name(PRDetails), policy: defaultForPullRequests},
+	{name: Name(PRReviews), policy: defaultForPullRequests},
+	{name: Name(PRReviewComments), policy: defaultForPullRequests},
+	{name: Name(PRChecks)},
+	{name: Name(PRReviewThreads)},
+	{name: Name(PRMergeState)},
+	{name: Name(PRMergeQueue)},
+	{name: Name(PRClosingIssues)},
+	{name: Name(PRFiles)},
+	{name: Name(IssueTimeline), policy: explicitForAllThreads},
 }
 
-// DefaultFor returns the default hydration facets for a thread kind.
-func DefaultFor(kind string) []string {
-	result := make([]string, 0, len(catalog))
+// Name is a parsed catalog-backed facet name.
+type Name string
+
+// String returns the stable corpus and protocol key.
+func (n Name) String() string { return string(n) }
+
+// Selection is an immutable parsed hydration selection. Its zero value means
+// the default facets for the resolved thread kind.
+type Selection struct {
+	requested []Name
+}
+
+// ParseSelection parses and deduplicates selectable hydration facets while
+// preserving caller order. Applicability is checked after the thread kind is
+// resolved.
+func ParseSelection(values []string) (Selection, error) {
+	requested := make([]Name, 0, len(values))
+	seen := make(map[Name]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		definition, ok := definitionByName(value)
+		if !ok || definition.policy == healthOnly {
+			return Selection{}, fmt.Errorf("unknown facet %q", value)
+		}
+		if _, duplicate := seen[definition.name]; duplicate {
+			continue
+		}
+		seen[definition.name] = struct{}{}
+		requested = append(requested, definition.name)
+	}
+	return Selection{requested: requested}, nil
+}
+
+// Explicit reports whether the caller selected facets rather than requesting
+// the defaults for each thread kind.
+func (s Selection) Explicit() bool { return len(s.requested) > 0 }
+
+// For returns the selected facets for one exact thread kind. An explicit facet
+// that cannot apply to that kind is rejected.
+func (s Selection) For(kind domain.ThreadKind) ([]Name, error) {
+	if !s.Explicit() {
+		return defaultNamesFor(kind), nil
+	}
+	result := make([]Name, 0, len(s.requested))
+	for _, name := range s.requested {
+		definition, _ := definitionByName(name.String())
+		if !selectableFor(definition, kind) {
+			return nil, fmt.Errorf("facet %q is not applicable to %s threads", name, kind)
+		}
+		result = append(result, name)
+	}
+	return result, nil
+}
+
+func definitionByName(name string) (definition, bool) {
 	for _, facet := range catalog {
-		if (kind == IssueKind && facet.defaultForIssue) || (kind == PullRequestKind && facet.defaultForPullRequest) {
+		if facet.name.String() == name {
+			return facet, true
+		}
+	}
+	return definition{}, false
+}
+
+func defaultNamesFor(kind domain.ThreadKind) []Name {
+	result := make([]Name, 0, len(catalog))
+	for _, facet := range catalog {
+		if defaultFor(facet, kind) {
 			result = append(result, facet.name)
 		}
 	}
 	return result
 }
 
+func defaultFor(facet definition, kind domain.ThreadKind) bool {
+	switch facet.policy {
+	case defaultForAllThreads:
+		return true
+	case defaultForPullRequests:
+		return kind == domain.PullRequestKind
+	default:
+		return false
+	}
+}
+
+func selectableFor(facet definition, kind domain.ThreadKind) bool {
+	return defaultFor(facet, kind) || facet.policy == explicitForAllThreads
+}
+
+// DefaultFor returns the default hydration facets for a thread kind.
+func DefaultFor(kind domain.ThreadKind) []string {
+	names := defaultNamesFor(kind)
+	result := make([]string, len(names))
+	for index, name := range names {
+		result[index] = name.String()
+	}
+	return result
+}
+
 // SelectableFor returns facets accepted for explicit hydration of a thread
 // kind. Timeline is intentionally explicit-only because it may be large.
-func SelectableFor(kind string) []string {
+func SelectableFor(kind domain.ThreadKind) []string {
 	result := DefaultFor(kind)
 	if len(result) == 0 {
 		return nil
 	}
 	for _, facet := range catalog {
-		if facet.hydratable && facet.explicitOnly {
-			result = append(result, facet.name)
+		if facet.policy == explicitForAllThreads {
+			result = append(result, facet.name.String())
 		}
 	}
 	return result
@@ -78,7 +172,7 @@ func SelectableFor(kind string) []string {
 func SelectableNames() []string {
 	seen := make(map[string]struct{}, len(catalog))
 	result := make([]string, 0, len(catalog))
-	for _, kind := range []string{IssueKind, PullRequestKind} {
+	for _, kind := range []domain.ThreadKind{domain.IssueKind, domain.PullRequestKind} {
 		for _, facet := range SelectableFor(kind) {
 			if _, ok := seen[facet]; ok {
 				continue
@@ -94,7 +188,7 @@ func SelectableNames() []string {
 func AllNames() []string {
 	result := make([]string, 0, len(catalog))
 	for _, facet := range catalog {
-		result = append(result, facet.name)
+		result = append(result, facet.name.String())
 	}
 	return result
 }

@@ -52,29 +52,23 @@ func (d *Definition) UnmarshalJSON(data []byte) error {
 // MarshalJSON emits updated_within as a Go duration string so JSON lens
 // definitions round-trip with the same format used for input.
 func (f Filter) MarshalJSON() ([]byte, error) {
-	m := map[string]any{}
-	if len(f.Kinds) > 0 {
-		m["kinds"] = f.Kinds
-	}
-	if len(f.States) > 0 {
-		m["states"] = f.States
-	}
-	if len(f.Languages) > 0 {
-		m["languages"] = f.Languages
-	}
-	if f.ExcludeArchived {
-		m["exclude_archived"] = true
-	}
-	if f.Unassigned {
-		m["unassigned"] = true
-	}
+	updatedWithin := ""
 	if f.UpdatedWithin > 0 {
-		m["updated_within"] = f.UpdatedWithin.String()
+		updatedWithin = f.UpdatedWithin.String()
 	}
-	if f.MinStars > 0 {
-		m["min_stars"] = f.MinStars
-	}
-	return json.Marshal(m)
+	return json.Marshal(struct {
+		Kinds           []string `json:"kinds,omitempty"`
+		States          []string `json:"states,omitempty"`
+		Languages       []string `json:"languages,omitempty"`
+		ExcludeArchived bool     `json:"exclude_archived,omitempty"`
+		Unassigned      bool     `json:"unassigned,omitempty"`
+		UpdatedWithin   string   `json:"updated_within,omitempty"`
+		MinStars        int      `json:"min_stars,omitempty"`
+	}{
+		Kinds: f.Kinds, States: f.States, Languages: f.Languages,
+		ExcludeArchived: f.ExcludeArchived, Unassigned: f.Unassigned,
+		UpdatedWithin: updatedWithin, MinStars: f.MinStars,
+	})
 }
 
 // UnmarshalJSON supports duration strings for updated_within.

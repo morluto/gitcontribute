@@ -89,8 +89,8 @@ func (r DuplicateRule) Prepare(thread ThreadText) PreparedDuplicate {
 	labels := normalizedLabels(thread.Labels)
 	return PreparedDuplicate{
 		ref:        thread.Ref,
-		title:      Tokens(thread.Title, true),
-		body:       TokensLimited(thread.Body, true, r.maxBodyTokens),
+		title:      Tokens(thread.Title),
+		body:       TokensLimited(thread.Body, r.maxBodyTokens),
 		labels:     labels,
 		author:     thread.Author,
 		references: ExtractRefs(thread.Title+"\n"+thread.Body, thread.Ref.Repo),

@@ -19,7 +19,7 @@ func TestTUIActionsExposeOnlyContextualApplicationOperations(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(actions) != 1 || actions[0].ID != tuiActionStartInvestigation ||
-		actions[0].Capability != tuicontract.CapabilityLocalWrite || !actions[0].RequiresConfirmation {
+		actions[0].Capability != tuicontract.CapabilityLocalWrite || !actions[0].RequiresConfirmation() {
 		t.Fatalf("candidate actions = %+v", actions)
 	}
 
@@ -52,7 +52,7 @@ func TestTUIActionsExposeOnlyContextualApplicationOperations(t *testing.T) {
 		t.Fatalf("hypothesis actions = %+v", actions)
 	}
 	for _, action := range actions {
-		if action.Capability != tuicontract.CapabilityOfflineRead || action.RequiresConfirmation {
+		if action.Capability != tuicontract.CapabilityOfflineRead || action.RequiresConfirmation() {
 			t.Fatalf("research action crosses unexpected boundary: %+v", action)
 		}
 	}
@@ -128,7 +128,7 @@ func TestTUIActionsExposeOnlyContextualApplicationOperations(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(actions) != 1 || actions[0].ID != tuiActionRefreshClusters ||
-		actions[0].Capability != tuicontract.CapabilityLocalWrite || !actions[0].RequiresConfirmation {
+		actions[0].Capability != tuicontract.CapabilityLocalWrite || !actions[0].RequiresConfirmation() {
 		t.Fatalf("repository actions = %+v", actions)
 	}
 	result, err = fixture.svc.ExecuteAction(fixture.ctx, tuicontract.ActionRequest{

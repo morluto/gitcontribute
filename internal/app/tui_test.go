@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/tuicontract"
 )
 
@@ -32,7 +33,7 @@ func TestTUILoadReadsBoundedLocalData(t *testing.T) {
 	if len(data.Repositories) != 1 || data.Repositories[0].Ref != "owner/repo" {
 		t.Fatalf("repositories=%+v", data.Repositories)
 	}
-	if len(data.Threads) != 1 || data.Threads[0].Detail != "local body" || data.Threads[0].Kind != corpus.ThreadKindIssue {
+	if len(data.Threads) != 1 || data.Threads[0].Detail != "local body" || data.Threads[0].Kind != string(domain.IssueKind) {
 		t.Fatalf("threads=%+v", data.Threads)
 	}
 	if len(data.Candidates) != 1 || data.Candidates[0].Ref != "issue:owner/repo#7" || data.Candidates[0].Assessment == nil {

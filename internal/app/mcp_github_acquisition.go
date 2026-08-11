@@ -25,13 +25,140 @@ const (
 	maxSourceTotalBytes            = 4 * 1024 * 1024
 )
 
+type githubThreadSearchSort uint8
+
+const (
+	githubThreadSearchBestMatch githubThreadSearchSort = iota
+	githubThreadSearchComments
+	githubThreadSearchCreated
+	githubThreadSearchUpdated
+	githubThreadSearchReactions
+)
+
+func parseGitHubThreadSearchSort(value string) (githubThreadSearchSort, error) {
+	switch strings.TrimSpace(value) {
+	case "":
+		return githubThreadSearchBestMatch, nil
+	case "comments":
+		return githubThreadSearchComments, nil
+	case "created":
+		return githubThreadSearchCreated, nil
+	case "updated":
+		return githubThreadSearchUpdated, nil
+	case "reactions":
+		return githubThreadSearchReactions, nil
+	default:
+		return 0, errors.New("sort must be comments, created, updated, or reactions")
+	}
+}
+
+func (s githubThreadSearchSort) String() string {
+	return [...]string{"", "comments", "created", "updated", "reactions"}[s]
+}
+
+type githubThreadSearchRequest struct {
+	repository domain.RepoRef
+	query      string
+	kind       corpus.ThreadKindFilter
+	state      corpus.ThreadStateFilter
+	sort       githubThreadSearchSort
+	order      githubSearchOrder
+	page       githubSearchPage
+}
+
+type repositoryRelativePath string
+
+func parseRepositoryRelativePath(value string) (repositoryRelativePath, error) {
+	clean := strings.TrimSpace(value)
+	if clean == "" || strings.HasPrefix(clean, "/") || strings.Contains(clean, "\\") || clean != path.Clean(clean) || clean == "." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
+		return "", errors.New("must be a repository-relative path without traversal")
+	}
+	return repositoryRelativePath(clean), nil
+}
+
+type sourceFileSelection struct {
+	path               repositoryRelativePath
+	startLine, endLine int
+}
+
+func (s sourceFileSelection) githubRequest() github.SourceFileRequest {
+	return github.SourceFileRequest{Path: string(s.path), StartLine: s.startLine, EndLine: s.endLine}
+}
+
+func (s sourceFileSelection) canonical() mcpcontract.SourceFileRequest {
+	return mcpcontract.SourceFileRequest{Path: string(s.path), StartLine: s.startLine, EndLine: s.endLine}
+}
+
+type sourceFilesRequest struct {
+	repository   domain.RepoRef
+	ref          string
+	files        []sourceFileSelection
+	perFileBytes int
+	totalBytes   int
+}
+
+type githubThreadSearchSnapshotScope struct {
+	Repository string `json:"repository"`
+	Query      string `json:"query"`
+	Page       int    `json:"page"`
+}
+
+type githubThreadSearchSnapshotSource struct {
+	ProviderQuery string  `json:"provider_query"`
+	ItemIDs       []int64 `json:"item_ids"`
+}
+
+type githubThreadSearchSnapshotVersions struct {
+	GitHubThreadSearch string `json:"github_thread_search"`
+}
+
+type sourceBundleSnapshotScope struct {
+	Repository   string   `json:"repository"`
+	RequestedRef string   `json:"requested_ref"`
+	Paths        []string `json:"paths"`
+}
+
+type sourceBundleSnapshotSource struct {
+	CommitSHA    string   `json:"commit_sha"`
+	ItemStatuses []string `json:"item_statuses"`
+}
+
+type sourceBundleSnapshotVersions struct {
+	SourceBundle string `json:"source_bundle"`
+}
+
+func (r sourceFilesRequest) canonical() mcpcontract.ReadSourceFilesInput {
+	files := make([]mcpcontract.SourceFileRequest, len(r.files))
+	for i, file := range r.files {
+		files[i] = file.canonical()
+	}
+	return mcpcontract.ReadSourceFilesInput{
+		Repository: mcpcontract.RepositoryRef{Owner: r.repository.Owner(), Repo: r.repository.Repo()},
+		Ref:        r.ref, Files: files, PerFileBytes: r.perFileBytes, TotalBytes: r.totalBytes,
+	}
+}
+
+func (r githubThreadSearchRequest) canonical() mcpcontract.SearchGitHubThreadsInput {
+	state := r.state.String()
+	if r.state.IsAny() {
+		state = "all"
+	}
+	return mcpcontract.SearchGitHubThreadsInput{
+		Repository: mcpcontract.RepositoryRef{Owner: r.repository.Owner(), Repo: r.repository.Repo()},
+		Query:      r.query, Kind: r.kind.String(), State: state, Sort: r.sort.String(), Order: r.order.String(),
+		Page: r.page.number, Limit: r.page.limit,
+	}
+}
+
 // SearchGitHubThreads performs one bounded live issue-search request, records
 // returned thread observations, and creates an immutable query-result
 // artifact. It never claims repository-wide thread coverage.
 func (r *MCPReader) SearchGitHubThreads(ctx context.Context, in mcpcontract.SearchGitHubThreadsInput) (mcpcontract.SearchGitHubThreadsOutput, error) {
-	if err := validateGitHubThreadSearchInput(&in); err != nil {
+	request, err := parseGitHubThreadSearchInput(in)
+	if err != nil {
 		return mcpcontract.SearchGitHubThreadsOutput{}, err
 	}
+	canonical := request.canonical()
 	reader, err := r.githubReader() //nolint:contextcheck // construction does not perform a request
 	if err != nil {
 		return mcpcontract.SearchGitHubThreadsOutput{}, err
@@ -41,54 +168,51 @@ func (r *MCPReader) SearchGitHubThreads(ctx context.Context, in mcpcontract.Sear
 		return mcpcontract.SearchGitHubThreadsOutput{}, errors.New("configured GitHub reader does not support thread search")
 	}
 	result, err := searcher.SearchThreads(ctx, github.ThreadSearchOptions{
-		Owner: in.Repository.Owner, Repo: in.Repository.Repo, Query: in.Query, Kind: github.ThreadKind(in.Kind), State: in.State,
-		Sort: in.Sort, Order: in.Order, PageOptions: github.PageOptions{Page: in.Page, PerPage: in.Limit},
+		Owner: request.repository.Owner(), Repo: request.repository.Repo(), Query: request.query, Kind: domain.ThreadKind(request.kind.String()), State: canonical.State,
+		Sort: request.sort.String(), Order: request.order.String(), PageOptions: github.PageOptions{Page: request.page.number, PerPage: request.page.limit},
 	})
 	if err != nil {
 		return mcpcontract.SearchGitHubThreadsOutput{}, err
 	}
-	return r.persistGitHubThreadSearch(ctx, in, result)
+	return r.persistGitHubThreadSearch(ctx, canonical, result)
 }
 
-func validateGitHubThreadSearchInput(in *mcpcontract.SearchGitHubThreadsInput) error {
-	if _, err := domain.NewRepoRef(in.Repository.Owner, in.Repository.Repo); err != nil {
-		return err
+func parseGitHubThreadSearchInput(in mcpcontract.SearchGitHubThreadsInput) (githubThreadSearchRequest, error) {
+	repository, err := domain.NewRepoRef(in.Repository.Owner, in.Repository.Repo)
+	if err != nil {
+		return githubThreadSearchRequest{}, err
 	}
-	in.Query = strings.TrimSpace(in.Query)
-	if in.Query == "" {
-		return errors.New("query is required")
+	query := strings.TrimSpace(in.Query)
+	if query == "" {
+		return githubThreadSearchRequest{}, errors.New("query is required")
 	}
-	if in.Kind != "" && in.Kind != "issue" && in.Kind != "pull_request" {
-		return fmt.Errorf("kind must be issue or pull_request")
+	kind, err := corpus.ParseThreadKindFilter(in.Kind)
+	if err != nil {
+		return githubThreadSearchRequest{}, errors.New("kind must be issue or pull_request")
 	}
-	if in.State == "" {
-		in.State = "all"
+	state, err := corpus.ParseThreadStateFilter(in.State)
+	if err != nil {
+		return githubThreadSearchRequest{}, errors.New("state must be open, closed, or all")
 	}
-	if in.State != "open" && in.State != "closed" && in.State != "all" {
-		return fmt.Errorf("state must be open, closed, or all")
+	sortMode, err := parseGitHubThreadSearchSort(in.Sort)
+	if err != nil {
+		return githubThreadSearchRequest{}, err
 	}
-	if in.Sort != "" && in.Sort != "comments" && in.Sort != "created" && in.Sort != "updated" && in.Sort != "reactions" {
-		return fmt.Errorf("sort must be comments, created, updated, or reactions")
+	order, err := parseGitHubSearchOrder(in.Order, githubSearchDescending)
+	if err != nil {
+		return githubThreadSearchRequest{}, err
 	}
-	if in.Order == "" {
-		in.Order = "desc"
+	page, pageProblem := parseGitHubSearchPage(in.Limit, in.Page)
+	if pageProblem == githubSearchLimitInvalid {
+		return githubThreadSearchRequest{}, errors.New("limit must be between 1 and 100")
 	}
-	if in.Order != "asc" && in.Order != "desc" {
-		return fmt.Errorf("order must be asc or desc")
+	if pageProblem == githubSearchPageInvalid {
+		return githubThreadSearchRequest{}, errors.New("page must keep the requested result offset below GitHub's 1,000-result cap")
 	}
-	if in.Limit == 0 {
-		in.Limit = 20
-	}
-	if in.Limit < 1 || in.Limit > 100 {
-		return fmt.Errorf("limit must be between 1 and 100")
-	}
-	if in.Page == 0 {
-		in.Page = 1
-	}
-	if in.Page < 1 || in.Page > 1000 || (in.Page-1)*in.Limit >= 1000 {
-		return fmt.Errorf("page must keep the requested result offset below GitHub's 1,000-result cap")
-	}
-	return nil
+	return githubThreadSearchRequest{
+		repository: repository, query: query, kind: kind, state: state,
+		sort: sortMode, order: order, page: page,
+	}, nil
 }
 
 func (r *MCPReader) persistGitHubThreadSearch(ctx context.Context, in mcpcontract.SearchGitHubThreadsInput, result github.ThreadSearchResult) (mcpcontract.SearchGitHubThreadsOutput, error) {
@@ -181,15 +305,16 @@ func (r *MCPReader) persistGitHubThreadSearch(ctx context.Context, in mcpcontrac
 		artifact.Items[index] = githubThreadSearchArtifactItem(issue, index, in.Repository.Owner, in.Repository.Repo)
 	}
 
-	snapshot, err := c.MaterializeReadSnapshot(ctx, corpus.SnapshotMaterialization{
-		Kind:            githubThreadSearchArtifactKind,
-		Scope:           map[string]any{"repository": in.Repository.Owner + "/" + in.Repository.Repo, "query": in.Query, "page": in.Page},
-		SourceManifest:  map[string]any{"provider_query": result.Query, "item_ids": artifactItemIDs(artifact.Items)},
-		DerivedVersions: map[string]string{"github_thread_search": "v1"},
-		Completeness:    artifact.Completeness,
-		Provenance:      artifact.Provenance,
-		Payload:         artifact,
-	})
+	materialization, err := corpus.NewSnapshotMaterialization(
+		githubThreadSearchArtifactKind,
+		githubThreadSearchSnapshotScope{Repository: in.Repository.Owner + "/" + in.Repository.Repo, Query: in.Query, Page: in.Page},
+		githubThreadSearchSnapshotSource{ProviderQuery: result.Query, ItemIDs: artifactItemIDs(artifact.Items)},
+		githubThreadSearchSnapshotVersions{GitHubThreadSearch: "v1"}, artifact.Completeness, artifact.Provenance, artifact,
+	)
+	if err != nil {
+		return mcpcontract.SearchGitHubThreadsOutput{}, fmt.Errorf("prepare github thread search artifact: %w", err)
+	}
+	snapshot, err := c.MaterializeReadSnapshot(ctx, materialization)
 	if err != nil {
 		return mcpcontract.SearchGitHubThreadsOutput{}, fmt.Errorf("store github thread search artifact: %w", err)
 	}
@@ -225,9 +350,11 @@ func (r *MCPReader) ReadGitHubThreadSearchArtifact(ctx context.Context, digest s
 // resulting immutable source bundle. It does not touch thread facets or code
 // index projections.
 func (r *MCPReader) ReadSourceFiles(ctx context.Context, in mcpcontract.ReadSourceFilesInput) (mcpcontract.ReadSourceFilesOutput, error) {
-	if err := validateReadSourceFilesInput(&in); err != nil {
+	request, err := parseReadSourceFilesInput(in)
+	if err != nil {
 		return mcpcontract.ReadSourceFilesOutput{}, err
 	}
+	canonical := request.canonical()
 	reader, err := r.githubReader() //nolint:contextcheck // construction does not perform a request
 	if err != nil {
 		return mcpcontract.ReadSourceFilesOutput{}, err
@@ -236,27 +363,28 @@ func (r *MCPReader) ReadSourceFiles(ctx context.Context, in mcpcontract.ReadSour
 	if !ok {
 		return mcpcontract.ReadSourceFilesOutput{}, errors.New("configured GitHub reader does not support bounded source reads")
 	}
-	requests := make([]github.SourceFileRequest, len(in.Files))
-	for i, file := range in.Files {
-		requests[i] = github.SourceFileRequest{Path: file.Path, StartLine: file.StartLine, EndLine: file.EndLine}
+	requests := make([]github.SourceFileRequest, len(request.files))
+	for i, file := range request.files {
+		requests[i] = file.githubRequest()
 	}
-	result, err := fileReader.ReadSourceFiles(ctx, in.Repository.Owner, in.Repository.Repo, in.Ref, requests, github.SourceFileReadOptions{PerFileBytes: in.PerFileBytes, TotalBytes: in.TotalBytes})
+	result, err := fileReader.ReadSourceFiles(ctx, request.repository.Owner(), request.repository.Repo(), request.ref, requests, github.SourceFileReadOptions{PerFileBytes: request.perFileBytes, TotalBytes: request.totalBytes})
 	if err != nil {
 		return mcpcontract.ReadSourceFilesOutput{}, err
 	}
-	return r.persistSourceBundle(ctx, in, result)
+	return r.persistSourceBundle(ctx, canonical, result)
 }
 
-func validateReadSourceFilesInput(in *mcpcontract.ReadSourceFilesInput) error {
-	if _, err := domain.NewRepoRef(in.Repository.Owner, in.Repository.Repo); err != nil {
-		return err
+func parseReadSourceFilesInput(in mcpcontract.ReadSourceFilesInput) (sourceFilesRequest, error) {
+	repository, err := domain.NewRepoRef(in.Repository.Owner, in.Repository.Repo)
+	if err != nil {
+		return sourceFilesRequest{}, err
 	}
-	in.Ref = strings.TrimSpace(in.Ref)
-	if in.Ref == "" {
-		return errors.New("ref is required")
+	ref := strings.TrimSpace(in.Ref)
+	if ref == "" {
+		return sourceFilesRequest{}, errors.New("ref is required")
 	}
 	if len(in.Files) < 1 || len(in.Files) > maxSourceFileRequests {
-		return fmt.Errorf("files must contain 1 to %d items", maxSourceFileRequests)
+		return sourceFilesRequest{}, fmt.Errorf("files must contain 1 to %d items", maxSourceFileRequests)
 	}
 	if in.PerFileBytes == 0 {
 		in.PerFileBytes = defaultSourcePerFileBytes
@@ -265,27 +393,31 @@ func validateReadSourceFilesInput(in *mcpcontract.ReadSourceFilesInput) error {
 		in.TotalBytes = defaultSourceTotalBytes
 	}
 	if in.PerFileBytes < 1 || in.PerFileBytes > maxSourcePerFileBytes {
-		return fmt.Errorf("per_file_bytes must be between 1 and %d", maxSourcePerFileBytes)
+		return sourceFilesRequest{}, fmt.Errorf("per_file_bytes must be between 1 and %d", maxSourcePerFileBytes)
 	}
 	if in.TotalBytes < 1 || in.TotalBytes > maxSourceTotalBytes {
-		return fmt.Errorf("total_bytes must be between 1 and %d", maxSourceTotalBytes)
+		return sourceFilesRequest{}, fmt.Errorf("total_bytes must be between 1 and %d", maxSourceTotalBytes)
 	}
 	seen := make(map[string]struct{}, len(in.Files))
+	files := make([]sourceFileSelection, len(in.Files))
 	for i, file := range in.Files {
-		clean := strings.TrimSpace(file.Path)
-		if clean == "" || strings.HasPrefix(clean, "/") || strings.Contains(clean, "\\") || clean != path.Clean(clean) || clean == "." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
-			return fmt.Errorf("files[%d].path must be a repository-relative path without traversal", i)
+		parsedPath, err := parseRepositoryRelativePath(file.Path)
+		if err != nil {
+			return sourceFilesRequest{}, fmt.Errorf("files[%d].path %w", i, err)
 		}
 		if file.StartLine < 0 || file.EndLine < 0 || (file.StartLine > 0 && file.EndLine > 0 && file.EndLine < file.StartLine) {
-			return fmt.Errorf("files[%d] line range must be inclusive and ordered", i)
+			return sourceFilesRequest{}, fmt.Errorf("files[%d] line range must be inclusive and ordered", i)
 		}
-		if _, ok := seen[clean]; ok {
-			return fmt.Errorf("files[%d].path is duplicated", i)
+		if _, ok := seen[string(parsedPath)]; ok {
+			return sourceFilesRequest{}, fmt.Errorf("files[%d].path is duplicated", i)
 		}
-		seen[clean] = struct{}{}
-		in.Files[i].Path = clean
+		seen[string(parsedPath)] = struct{}{}
+		files[i] = sourceFileSelection{path: parsedPath, startLine: file.StartLine, endLine: file.EndLine}
 	}
-	return nil
+	return sourceFilesRequest{
+		repository: repository, ref: ref, files: files,
+		perFileBytes: in.PerFileBytes, totalBytes: in.TotalBytes,
+	}, nil
 }
 
 func (r *MCPReader) persistSourceBundle(ctx context.Context, in mcpcontract.ReadSourceFilesInput, result github.SourceFileReadResult) (mcpcontract.ReadSourceFilesOutput, error) {
@@ -309,12 +441,16 @@ func (r *MCPReader) persistSourceBundle(ctx context.Context, in mcpcontract.Read
 		Provenance: mcpcontract.GitHubAcquisitionProvenance{Provider: "github", Endpoint: "repos/contents", ObservedAt: formatTime(now)}, CreatedAt: formatTime(now),
 	}
 	for i, item := range result.Items {
+		status, err := sourceFileStatus(item.Status)
+		if err != nil {
+			return mcpcontract.ReadSourceFilesOutput{}, err
+		}
 		value := sourceFileOutput(item, result.Resolution, now)
-		artifactItem := mcpcontract.SourceFileBatchItem{Key: item.Request.Path, Status: mcpcontract.SourceFileStatus(item.Status), Value: &value, Message: item.Message}
+		artifactItem := mcpcontract.SourceFileBatchItem{Key: item.Request.Path, Status: status, Value: &value, Message: item.Message}
 		if item.RetryAfter > 0 {
 			artifactItem.RetryAfterMS = mcpcontract.NonNegativeInt(item.RetryAfter.Milliseconds())
 		}
-		if item.Status == "too_large" || item.Status == "retryable" {
+		if item.Status == github.SourceFileReadTooLarge || item.Status == github.SourceFileReadRetryable {
 			artifactItem.Recovery = sourceFileRecovery(in, item.Request, item.Status)
 		}
 		artifact.Items[i] = artifactItem
@@ -325,10 +461,10 @@ func (r *MCPReader) persistSourceBundle(ctx context.Context, in mcpcontract.Read
 			compact.Value = &copyValue
 		}
 		out.Items[i] = compact
-		if item.Status != "complete" {
+		if item.Status != github.SourceFileReadComplete {
 			out.Status = "partial"
 		}
-		if item.Status == "complete" {
+		if item.Status == github.SourceFileReadComplete {
 			artifact.Completeness.CompleteItems++
 		} else {
 			artifact.Completeness.FailedItems++
@@ -337,13 +473,16 @@ func (r *MCPReader) persistSourceBundle(ctx context.Context, in mcpcontract.Read
 	artifact.Completeness.RequestedItems = len(result.Items)
 	artifact.Completeness.Status = out.Status
 	artifact.Completeness.ContentsBounded = true
-	snapshot, err := c.MaterializeReadSnapshot(ctx, corpus.SnapshotMaterialization{
-		Kind:            sourceBundleArtifactKind,
-		Scope:           map[string]any{"repository": in.Repository.Owner + "/" + in.Repository.Repo, "requested_ref": in.Ref, "paths": sourceBundlePaths(in.Files)},
-		SourceManifest:  map[string]any{"commit_sha": result.Resolution.CommitSHA, "item_statuses": sourceBundleStatuses(result.Items)},
-		DerivedVersions: map[string]string{"source_bundle": "v1"}, Completeness: artifact.Completeness,
-		Provenance: artifact.Provenance, Payload: artifact,
-	})
+	materialization, err := corpus.NewSnapshotMaterialization(
+		sourceBundleArtifactKind,
+		sourceBundleSnapshotScope{Repository: in.Repository.Owner + "/" + in.Repository.Repo, RequestedRef: in.Ref, Paths: sourceBundlePaths(in.Files)},
+		sourceBundleSnapshotSource{CommitSHA: result.Resolution.CommitSHA, ItemStatuses: sourceBundleStatuses(result.Items)},
+		sourceBundleSnapshotVersions{SourceBundle: "v1"}, artifact.Completeness, artifact.Provenance, artifact,
+	)
+	if err != nil {
+		return mcpcontract.ReadSourceFilesOutput{}, fmt.Errorf("prepare source bundle artifact: %w", err)
+	}
+	snapshot, err := c.MaterializeReadSnapshot(ctx, materialization)
 	if err != nil {
 		return mcpcontract.ReadSourceFilesOutput{}, fmt.Errorf("store source bundle artifact: %w", err)
 	}
@@ -352,15 +491,34 @@ func (r *MCPReader) persistSourceBundle(ctx context.Context, in mcpcontract.Read
 	return out, nil
 }
 
-func sourceFileRecovery(in mcpcontract.ReadSourceFilesInput, request github.SourceFileRequest, status string) *mcpcontract.RecoveryPlan {
+func sourceFileRecovery(in mcpcontract.ReadSourceFilesInput, request github.SourceFileRequest, status github.SourceFileReadStatus) *mcpcontract.RecoveryPlan {
 	next := in
 	next.Files = []mcpcontract.SourceFileRequest{{Path: request.Path, StartLine: request.StartLine, EndLine: request.EndLine}}
-	if status == "too_large" {
+	if status == github.SourceFileReadTooLarge {
 		next.PerFileBytes = min(1024*1024, max(in.PerFileBytes*2, in.PerFileBytes+1))
 		next.TotalBytes = min(4*1024*1024, max(in.TotalBytes*2, in.TotalBytes+1))
 		return recoveryPlan("source_file_too_large", "The selected file exceeded the current byte bound. Retry this exact file with the returned larger bounds or narrow its line range.", mcpcontract.RecoveryAction(next))
 	}
 	return recoveryPlan("source_file_retryable", "The provider returned a retryable source-file outcome. Replay this exact file request after the returned retry delay.", mcpcontract.RecoveryAction(next))
+}
+
+func sourceFileStatus(status github.SourceFileReadStatus) (mcpcontract.SourceFileStatus, error) {
+	switch status {
+	case github.SourceFileReadComplete:
+		return mcpcontract.SourceFileComplete, nil
+	case github.SourceFileReadNotFound:
+		return mcpcontract.SourceFileNotFound, nil
+	case github.SourceFileReadTooLarge:
+		return mcpcontract.SourceFileTooLarge, nil
+	case github.SourceFileReadRetryable:
+		return mcpcontract.SourceFileRetryable, nil
+	case github.SourceFileReadUnavailable:
+		return mcpcontract.SourceFileUnavailable, nil
+	case github.SourceFileReadFailed:
+		return mcpcontract.SourceFileFailed, nil
+	default:
+		return "", fmt.Errorf("unsupported source-file read status %q", status)
+	}
 }
 
 // ReadSourceBundleArtifact is a local-only typed resource reader.
@@ -472,7 +630,7 @@ func sourceBundlePaths(files []mcpcontract.SourceFileRequest) []string {
 func sourceBundleStatuses(items []github.SourceFileReadItem) []string {
 	statuses := make([]string, len(items))
 	for i, item := range items {
-		statuses[i] = item.Status
+		statuses[i] = string(item.Status)
 	}
 	return statuses
 }

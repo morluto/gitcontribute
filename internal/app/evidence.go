@@ -95,27 +95,27 @@ func (s *Service) ShowValidation(ctx context.Context, id string) (*contracts.Val
 
 // RunValidation executes a stored validation definition against the base or candidate workspace.
 func (s *Service) RunValidation(ctx context.Context, id string, opts contracts.RunValidationOptions) (*contracts.ValidationRunResult, error) {
-	if !opts.Execute {
-		return nil, evidence.ErrExecutionNotAuthorized
+	request, err := parseValidationRunOptions(id, opts)
+	if err != nil {
+		return nil, err
 	}
-	runKind := evidence.RunKind(opts.Kind)
-	if runKind != evidence.RunKindBase && runKind != evidence.RunKindCandidate {
-		return nil, fmt.Errorf("invalid run kind %q: must be base or candidate", opts.Kind)
-	}
+	return s.runValidation(ctx, request)
+}
 
+func (s *Service) runValidation(ctx context.Context, request validationRunRequest) (*contracts.ValidationRunResult, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
-	def, err := c.GetValidationDefinition(ctx, id)
+	def, err := c.GetValidationDefinition(ctx, request.definitionID)
 	if err != nil {
 		return nil, mapEvidenceError(err)
 	}
 	workspaceID := def.WorkspaceID
-	if runKind == evidence.RunKindBase && def.BaseWorkspaceID != "" {
+	if request.kind == evidence.RunKindBase && def.BaseWorkspaceID != "" {
 		workspaceID = def.BaseWorkspaceID
 	}
-	if runKind == evidence.RunKindCandidate && def.CandidateWorkspaceID != "" {
+	if request.kind == evidence.RunKindCandidate && def.CandidateWorkspaceID != "" {
 		workspaceID = def.CandidateWorkspaceID
 	}
 	var before workspace.Snapshot
@@ -132,7 +132,7 @@ func (s *Service) RunValidation(ctx context.Context, id string, opts contracts.R
 		}
 	}
 	evSvc := evidence.NewService(c, evidence.NewExecRunner())
-	run, err := evSvc.RunValidation(ctx, id, runKind)
+	run, err := evSvc.RunValidation(ctx, request.definitionID, request.kind)
 	if err != nil {
 		return nil, mapEvidenceError(err)
 	}
@@ -192,7 +192,7 @@ func (s *Service) resolveValidationWorkspaces(ctx context.Context, c *corpus.Cor
 }
 
 func bindValidationWorkspace(ctx context.Context, service *Service, c *corpus.Corpus, run *evidence.ValidationRun, managed *workspace.Workspace, before workspace.Snapshot, beforeErr error) error {
-	run.WorkspaceBindingStatus = "unavailable"
+	run.WorkspaceBindingStatus = evidence.WorkspaceBindingUnavailable
 	switch {
 	case beforeErr != nil:
 		run.WorkspaceBindingReason = "capture pre-run workspace snapshot: " + beforeErr.Error()
@@ -214,14 +214,14 @@ func bindValidationWorkspace(ctx context.Context, service *Service, c *corpus.Co
 		}
 		run.WorkspaceSnapshotAfter = after.SHA256
 		switch {
-		case !before.Complete || !after.Complete:
-			run.WorkspaceBindingStatus = "incomplete"
+		case !before.Complete() || !after.Complete():
+			run.WorkspaceBindingStatus = evidence.WorkspaceBindingIncomplete
 			run.WorkspaceBindingReason = "workspace snapshot contains explicitly unbound content"
 		case before.SHA256 != after.SHA256:
-			run.WorkspaceBindingStatus = "changed"
+			run.WorkspaceBindingStatus = evidence.WorkspaceBindingChanged
 			run.WorkspaceBindingReason = "workspace changed while validation was running"
 		default:
-			run.WorkspaceBindingStatus = "bound"
+			run.WorkspaceBindingStatus = evidence.WorkspaceBindingBound
 			run.WorkspaceBindingReason = "pre-run and post-run workspace identities match"
 		}
 	}
@@ -235,21 +235,19 @@ func bindValidationWorkspace(ctx context.Context, service *Service, c *corpus.Co
 
 // RunValidationGroup executes a bounded repeat/stress validation group.
 func (s *Service) RunValidationGroup(ctx context.Context, id string, opts contracts.RepeatValidationOptions) (*contracts.ValidationRunGroupResult, error) {
-	if !opts.Execute {
-		return nil, evidence.ErrExecutionNotAuthorized
+	request, err := parseRepeatValidationOptions(id, opts)
+	if err != nil {
+		return nil, mapEvidenceError(err)
 	}
-	kinds := make([]evidence.RunKind, len(opts.Kinds))
-	for index, kind := range opts.Kinds {
-		kinds[index] = evidence.RunKind(kind)
-	}
+	return s.runValidationGroup(ctx, request)
+}
+
+func (s *Service) runValidationGroup(ctx context.Context, request repeatValidationRequest) (*contracts.ValidationRunGroupResult, error) {
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
 	}
-	group, err := evidence.NewService(c, evidence.NewExecRunner()).RunValidationGroup(ctx, id, evidence.RepeatValidationOptions{
-		Kinds: kinds, RunCount: opts.RunCount, Concurrency: opts.Concurrency,
-		PerRunTimeout: opts.PerRunTimeout, OverallTimeout: opts.OverallTimeout, SampleInterval: opts.SampleInterval,
-	})
+	group, err := evidence.NewService(c, evidence.NewExecRunner()).RunValidationGroup(ctx, request.definitionID, request.options)
 	if err != nil {
 		return nil, mapEvidenceError(err)
 	}
@@ -278,6 +276,14 @@ func (s *Service) CompareValidation(ctx context.Context, baseRunID, candidateRun
 // AttachValidationReceipt imports a structured external receipt without
 // executing its declared command.
 func (s *Service) AttachValidationReceipt(ctx context.Context, receipt contracts.ExternalValidationReceipt) (*contracts.ValidationRunResult, error) {
+	kind, err := evidence.ParseRunKind(receipt.Kind)
+	if err != nil {
+		return nil, err
+	}
+	classification, err := evidence.ParseRunClassification(receipt.Classification)
+	if err != nil {
+		return nil, err
+	}
 	c, err := s.openCorpus(ctx)
 	if err != nil {
 		return nil, err
@@ -298,11 +304,11 @@ func (s *Service) AttachValidationReceipt(ctx context.Context, receipt contracts
 	run, err := evidence.NewService(c, nil).AttachExternalReceipt(ctx, evidence.ExternalReceipt{
 		SchemaVersion: receipt.SchemaVersion, Producer: receipt.Producer, ReceiptSHA256: receipt.ReceiptSHA256,
 		ValidationID:    receipt.ValidationID,
-		InvestigationID: receipt.InvestigationID, OpportunityID: receipt.OpportunityID, Kind: evidence.RunKind(receipt.Kind),
+		InvestigationID: receipt.InvestigationID, OpportunityID: receipt.OpportunityID, Kind: kind,
 		Repository: receipt.Repository, Revision: receipt.Revision, ArtifactSHA256: receipt.ArtifactSHA256,
 		Provider: receipt.Provider, ExternalRunID: receipt.ExternalRunID, Command: receipt.Command, WorkingDir: receipt.WorkingDir,
 		Environment: receipt.Environment, Artifacts: receipt.Artifacts, StartedAt: receipt.StartedAt, CompletedAt: receipt.CompletedAt,
-		ExitCode: receipt.ExitCode, Classification: evidence.RunClassification(receipt.Classification),
+		ExitCode: receipt.ExitCode, Classification: classification,
 		Stdout: receipt.Stdout, Stderr: receipt.Stderr, Truncated: receipt.Truncated,
 		Limitations: receipt.Limitations, Incomplete: receipt.Incomplete,
 	})
@@ -366,6 +372,14 @@ func (s *Service) RecordEvidence(ctx context.Context, input contracts.RecordEvid
 	if strings.TrimSpace(input.Description) == "" {
 		return nil, errors.New("evidence description is required")
 	}
+	evidenceType, err := evidence.ParseEvidenceType(input.Type)
+	if err != nil {
+		return nil, err
+	}
+	relation, err := evidence.ParseRelation(input.Relation)
+	if err != nil {
+		return nil, err
+	}
 
 	invSvc, err := s.writeInvestigationSvc(ctx)
 	if err != nil {
@@ -401,8 +415,12 @@ func (s *Service) RecordEvidence(ctx context.Context, input contracts.RecordEvid
 
 	sourceRefs := append([]domain.SourceRef(nil), input.SourceRefs...)
 	provenance := append([]evidence.SourceRevision(nil), input.SourceProvenance...)
-	if len(provenance) == 0 && evidence.EvidenceType(input.Type) == evidence.EvidenceTypeGitHubSource && inv.ThreadBaseline != nil {
-		provenance = []evidence.SourceRevision{sourceRevisionFromThreadBaseline(*inv.ThreadBaseline)}
+	if len(provenance) == 0 && evidenceType == evidence.EvidenceTypeGitHubSource && inv.ThreadBaseline != nil {
+		revision, err := sourceRevisionFromThreadBaseline(*inv.ThreadBaseline)
+		if err != nil {
+			return nil, err
+		}
+		provenance = []evidence.SourceRevision{revision}
 		if len(sourceRefs) == 0 {
 			sourceRefs = []domain.SourceRef{inv.ThreadBaseline.Source}
 		}
@@ -412,8 +430,8 @@ func (s *Service) RecordEvidence(ctx context.Context, input contracts.RecordEvid
 		InvestigationID:  investigationID,
 		HypothesisID:     hypothesisID,
 		OpportunityID:    opportunityID,
-		Type:             evidence.EvidenceType(input.Type),
-		Relation:         evidence.Relation(input.Relation),
+		Type:             evidenceType,
+		Relation:         relation,
 		Description:      strings.TrimSpace(input.Description),
 		SourceRefs:       sourceRefs,
 		SourceProvenance: provenance,
@@ -486,15 +504,15 @@ func validationRunResult(run *evidence.ValidationRun) *contracts.ValidationRunRe
 		CompletedAt:             formatTime(run.CompletedAt),
 		WorkspaceSnapshotBefore: run.WorkspaceSnapshotBefore,
 		WorkspaceSnapshotAfter:  run.WorkspaceSnapshotAfter,
-		WorkspaceBindingStatus:  run.WorkspaceBindingStatus,
+		WorkspaceBindingStatus:  string(run.WorkspaceBindingStatus),
 		WorkspaceBindingReason:  run.WorkspaceBindingReason,
 		Process:                 validationProcessIdentity(run.Process),
 		Phases:                  validationPhases(run.Phases),
-		TimeoutPhase:            run.TimeoutPhase,
-		FailurePhase:            run.FailurePhase,
+		TimeoutPhase:            string(run.TimeoutPhase),
+		FailurePhase:            string(run.FailurePhase),
 		Resources:               validationResources(run.Resources),
 		Cleanup:                 validationCleanup(run.Cleanup),
-		ExecutionOrigin:         run.ExecutionOrigin,
+		ExecutionOrigin:         string(run.ExecutionOrigin),
 	}
 	if run.External != nil {
 		result.External = &contracts.ExternalValidationProvenance{
@@ -533,7 +551,7 @@ func validationRunGroupResult(group *evidence.ValidationRunGroup) *contracts.Val
 			Index: attempt.Index, Kind: string(attempt.Kind), RunID: attempt.RunID,
 			StartedAt: formatTime(attempt.StartedAt), CompletedAt: formatTime(attempt.CompletedAt), ExitCode: attempt.ExitCode,
 			Classification: string(attempt.Classification), ObservationStatus: string(attempt.ObservationStatus),
-			TimeoutPhase: attempt.TimeoutPhase, FailurePhase: attempt.FailurePhase,
+			TimeoutPhase: string(attempt.TimeoutPhase), FailurePhase: string(attempt.FailurePhase),
 			Error: attempt.Error, Process: validationProcessIdentity(attempt.Process),
 			Phases:    validationPhases(attempt.Phases),
 			Resources: validationResources(attempt.Resources), Cleanup: validationCleanup(attempt.Cleanup),
@@ -544,7 +562,7 @@ func validationRunGroupResult(group *evidence.ValidationRunGroup) *contracts.Val
 			Kind: string(aggregate.Kind), Requested: aggregate.Requested, Completed: aggregate.Completed,
 			Passing: aggregate.Passing, Failing: aggregate.Failing, Inconclusive: aggregate.Inconclusive,
 			Cancelled: aggregate.Cancelled, Classification: string(aggregate.Classification),
-			ResourceClassification: aggregate.ResourceClassification,
+			ResourceClassification: string(aggregate.ResourceClassification),
 		})
 	}
 	if group.Comparison != nil {
@@ -577,7 +595,7 @@ func validationResources(value evidence.ResourceTelemetry) contracts.ValidationR
 }
 
 func validationCleanup(value evidence.CleanupResult) contracts.ValidationCleanupResult {
-	result := contracts.ValidationCleanupResult{Status: value.Status, Reason: value.Reason, CheckedAt: formatTime(value.CheckedAt)}
+	result := contracts.ValidationCleanupResult{Status: string(value.Status), Reason: value.Reason, CheckedAt: formatTime(value.CheckedAt)}
 	for _, survivor := range value.Survivors {
 		result.Survivors = append(result.Survivors, validationProcessIdentity(survivor))
 	}

@@ -2,6 +2,7 @@ package evidence
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -55,7 +56,7 @@ func TestFreshnessEvaluatorReasonIsDeterministic(t *testing.T) {
 	b := testSourceRevision(SourceSubjectFacet, "issue", 1, "pr_reviews", time.Unix(100, 0).UTC(), 5)
 	reader := revisionReaderFunc(func(_ context.Context, subject SourceSubject) (*SourceRevision, error) {
 		current := a
-		if subject.Facet == b.Subject.Facet {
+		if subject.Facet() == b.Subject.Facet() {
 			current = b
 		}
 		current.ObservationSequence += 10
@@ -90,6 +91,56 @@ func TestNormalizeSourceRevisionsRejectsInvalidAndDuplicateSubjects(t *testing.T
 	}
 }
 
+func TestParseSourceSubjectRejectsMixedVariants(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                    string
+		kind, threadKind, facet string
+		number                  int
+	}{
+		{name: "repository thread", kind: "repository", threadKind: "issue", number: 1},
+		{name: "thread without number", kind: "thread", threadKind: "issue"},
+		{name: "facet without name", kind: "facet"},
+		{name: "guidance thread", kind: "guidance", threadKind: "issue", number: 1},
+		{name: "unknown kind", kind: "branch"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := ParseSourceSubject(tt.kind, "owner", "repo", tt.threadKind, tt.number, tt.facet); err == nil {
+				t.Fatal("mixed or unsupported source subject accepted")
+			}
+		})
+	}
+	if err := (SourceSubject{}).Validate(); err == nil {
+		t.Fatal("unparsed source subject accepted")
+	}
+}
+
+func TestSourceSubjectJSONParsesAndCanonicalizes(t *testing.T) {
+	t.Parallel()
+	var thread SourceSubject
+	if err := json.Unmarshal([]byte(`{"kind":"thread","owner":" Owner ","repo":" Repo ","thread_kind":" issue ","number":42}`), &thread); err != nil {
+		t.Fatal(err)
+	}
+	kind, number, ok := thread.Thread()
+	if thread.Kind() != SourceSubjectThread || thread.Repository().String() != "Owner/Repo" || !ok || kind != "issue" || number != 42 {
+		t.Fatalf("parsed thread subject = %v", thread)
+	}
+
+	var guidance SourceSubject
+	if err := json.Unmarshal([]byte(`{"kind":"guidance","owner":"Owner","repo":"Repo","facet":"contribution_guidance"}`), &guidance); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(guidance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(encoded), `{"kind":"guidance","owner":"Owner","repo":"Repo"}`; got != want {
+		t.Fatalf("canonical guidance JSON = %s, want %s", got, want)
+	}
+}
+
 func TestFreshnessEvaluatorHonorsCancellation(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -108,10 +159,12 @@ func TestFreshnessEvaluatorHonorsCancellation(t *testing.T) {
 }
 
 func testSourceRevision(kind SourceSubjectKind, threadKind string, number int, facet string, updated time.Time, sequence int64) SourceRevision {
+	subject, err := ParseSourceSubject(kind.String(), "Owner", "Repo", threadKind, number, facet)
+	if err != nil {
+		panic(err)
+	}
 	return SourceRevision{
-		Subject: SourceSubject{
-			Kind: kind, Owner: "Owner", Repo: "Repo", ThreadKind: threadKind, Number: number, Facet: facet,
-		},
+		Subject:         subject,
 		SourceUpdatedAt: updated, ObservationSequence: sequence, ObservedAt: time.Unix(200, 0).UTC(),
 	}
 }

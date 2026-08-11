@@ -156,7 +156,7 @@ func snapshotData() tuicontract.Data {
 			Related: []tuicontract.Fact{{Summary: "PR #45287 · non-closing"}},
 		},
 		Actions: []tuicontract.Action{
-			{ID: "start_investigation", Label: "Start investigation", Description: "Create a local investigation and initial hypothesis.", Capability: tuicontract.CapabilityLocalWrite, RequiresConfirmation: true},
+			{ID: "start_investigation", Label: "Start investigation", Description: "Create a local investigation and initial hypothesis.", Capability: tuicontract.CapabilityLocalWrite},
 			{ID: "check_duplicates", Label: "Check duplicates", Description: "Review stored issue and pull-request matches.", Capability: tuicontract.CapabilityOfflineRead},
 		},
 	}

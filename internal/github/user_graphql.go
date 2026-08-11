@@ -8,6 +8,8 @@ import (
 	"time"
 
 	gh "github.com/google/go-github/v89/github"
+
+	"github.com/morluto/gitcontribute/internal/domain"
 )
 
 const userOrganizationsQuery = `query UserOrganizations($login:String!,$first:Int!,$after:String){user(login:$login){organizations(first:$first,after:$after){totalCount nodes{id login avatarUrl} pageInfo{hasNextPage endCursor}}}}`
@@ -301,12 +303,12 @@ func (c *Client) GetUserContributions(ctx context.Context, login string, opts Us
 		total := 0
 		for _, node := range group.Contributions.Nodes {
 			total += node.CommitCount
-			out.Items = append(out.Items, UserContribution{Kind: "commit", OccurredAt: node.OccurredAt, RepositoryNodeID: group.Repository.ID, RepositoryNameOwner: group.Repository.NameWithOwner, Restricted: node.Restricted, Count: node.CommitCount})
+			out.Items = append(out.Items, UserContribution{Kind: domain.CommitContributionKind, OccurredAt: node.OccurredAt, RepositoryNodeID: group.Repository.ID, RepositoryNameOwner: group.Repository.NameWithOwner, Restricted: node.Restricted, Count: node.CommitCount})
 		}
-		out.RepositoryTotals = append(out.RepositoryTotals, RepositoryContributionTotal{RepositoryNodeID: group.Repository.ID, RepositoryNameOwner: group.Repository.NameWithOwner, Kind: "commit", Count: total})
+		out.RepositoryTotals = append(out.RepositoryTotals, RepositoryContributionTotal{RepositoryNodeID: group.Repository.ID, RepositoryNameOwner: group.Repository.NameWithOwner, Kind: domain.CommitContributionKind, Count: total})
 		out.Complete = out.Complete && !group.Contributions.PageInfo.HasNextPage
 	}
-	appendConnection := func(kind string, connection contributionConnection) {
+	appendConnection := func(kind domain.ContributionKind, connection contributionConnection) {
 		for _, node := range connection.Nodes {
 			item := UserContribution{Kind: kind, OccurredAt: node.OccurredAt, Restricted: node.Restricted, Count: 1}
 			switch {
@@ -336,10 +338,10 @@ func (c *Client) GetUserContributions(ctx context.Context, login string, opts Us
 			out.Complete = false
 		}
 	}
-	appendConnection("issue", d.Issues)
-	appendConnection("pull_request", d.PRs)
-	appendConnection("pull_request_review", d.Reviews)
-	appendConnection("repository", d.Repositories)
+	appendConnection(domain.IssueContributionKind, d.Issues)
+	appendConnection(domain.PullRequestContributionKind, d.PRs)
+	appendConnection(domain.PullRequestReviewContributionKind, d.Reviews)
+	appendConnection(domain.RepositoryContributionKind, d.Repositories)
 	return out, nil
 }
 

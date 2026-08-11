@@ -46,24 +46,24 @@ func (s *Service) contributionRadarAt(ctx context.Context, opts contracts.RadarO
 		return nil, fmt.Errorf("%w: %s", errRepositoryNotFound, ref)
 	}
 
-	totalOpenIssues, err := c.CountThreadsFiltered(ctx, stored.ID, corpus.ThreadKindIssue, "open")
+	totalOpenIssues, err := c.CountThreadsFiltered(ctx, stored.ID, corpus.IssueThreadKind(), corpus.OpenThreadState())
 	if err != nil {
 		return nil, fmt.Errorf("count radar issues: %w", err)
 	}
-	issues, err := c.ListThreadsFiltered(ctx, stored.ID, corpus.ThreadKindIssue, "open", radarCandidatePopulation)
+	issues, err := c.ListThreadsFiltered(ctx, stored.ID, corpus.IssueThreadKind(), corpus.OpenThreadState(), radarCandidatePopulation)
 	if err != nil {
 		return nil, fmt.Errorf("list radar issues: %w", err)
 	}
 
-	totalOpenPullRequests, err := c.CountThreadsFiltered(ctx, stored.ID, corpus.ThreadKindPullRequest, "open")
+	totalOpenPullRequests, err := c.CountThreadsFiltered(ctx, stored.ID, corpus.PullRequestThreadKind(), corpus.OpenThreadState())
 	if err != nil {
 		return nil, fmt.Errorf("count open pull requests: %w", err)
 	}
-	openPullRequests, err := c.ListThreadsFiltered(ctx, stored.ID, corpus.ThreadKindPullRequest, "open", radarPullRequestPopulation)
+	openPullRequests, err := c.ListThreadsFiltered(ctx, stored.ID, corpus.PullRequestThreadKind(), corpus.OpenThreadState(), radarPullRequestPopulation)
 	if err != nil {
 		return nil, fmt.Errorf("list open pull requests: %w", err)
 	}
-	relatedByIssue, relationshipScanCapped, err := radarPullRequestRelatedWork(ctx, c, stored, ref, issues, openPullRequests, "open")
+	relatedByIssue, relationshipScanCapped, err := radarPullRequestRelatedWork(ctx, c, stored, ref, issues, openPullRequests, corpus.OpenThreadState())
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func (s *Service) contributionRadarAt(ctx context.Context, opts contracts.RadarO
 		if cluster := duplicateByIssue[issue.Number]; cluster != nil {
 			related = append(related, radar.RelatedWork{
 				Ref: "duplicate_cluster:" + cluster.StableID, Kind: "duplicate_cluster", Title: cluster.CanonicalRef,
-				Relation: relatedwork.RelationClusterCandidate, Direction: "local", URL: "local://clusters/" + cluster.StableID,
+				Relation: relatedwork.RelationClusterCandidate, Direction: radar.RelatedWorkLocal, URL: "local://clusters/" + cluster.StableID,
 				Evidence:        []radar.RelatedWorkEvidence{{Kind: "duplicate_cluster", SourceURL: "local://clusters/" + cluster.StableID, SourceAsOf: cluster.SourceAsOf}},
 				SourceUpdatedAt: cluster.SourceAsOf,
 			})
@@ -114,7 +114,7 @@ func (s *Service) contributionRadarAt(ctx context.Context, opts contracts.RadarO
 		linked := radarLinkedPullRequests(related)
 		snapshots = append(snapshots, radar.IssueSnapshot{
 			Number:             issue.Number,
-			State:              issue.State,
+			State:              string(issue.State),
 			Title:              issue.Title,
 			Body:               issue.Body,
 			Labels:             issue.Labels,
@@ -152,7 +152,7 @@ func radarCoverage(items []corpus.Coverage, scope string) []radar.Coverage {
 	out := make([]radar.Coverage, 0, len(items))
 	for _, item := range items {
 		out = append(out, radar.Coverage{
-			Facet: item.Facet, Scope: scope, Present: true, Complete: item.Complete, AsOf: item.SourceUpdatedAt,
+			Facet: item.Facet, Scope: scope, Complete: item.Complete, AsOf: item.SourceUpdatedAt,
 		})
 	}
 	return out
@@ -174,12 +174,12 @@ func radarGuidanceStatus(coverage []corpus.Coverage, documentCount int) string {
 func radarLinkedPullRequests(values []radar.RelatedWork) []radar.LinkedPullRequest {
 	out := []radar.LinkedPullRequest{}
 	for _, value := range values {
-		if value.Kind != string(domain.PullRequestKind) || value.Direction != "inbound" || !strings.EqualFold(value.State, "open") {
+		if value.Kind != string(domain.PullRequestKind) || value.Direction != radar.RelatedWorkInbound || !strings.EqualFold(value.State, "open") {
 			continue
 		}
 		out = append(out, radar.LinkedPullRequest{
 			Number: value.Number, Title: value.Title, URL: value.URL,
-			Closing: value.Relation == "claims_to_close", SourceUpdatedAt: value.SourceUpdatedAt,
+			Closing: value.Relation == relatedwork.RelationClaimsToClose, SourceUpdatedAt: value.SourceUpdatedAt,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Number < out[j].Number })
@@ -209,7 +209,7 @@ func radarDuplicateClusterFacts(ref domain.RepoRef, projection clusterprojection
 			continue
 		}
 		for _, member := range cluster.Members {
-			if !member.Included || member.Ref.Kind != corpus.ThreadKindIssue || !strings.EqualFold(member.Ref.Owner, ref.Owner()) || !strings.EqualFold(member.Ref.Repo, ref.Repo()) {
+			if !member.Included || member.Ref.Kind != domain.IssueKind || !strings.EqualFold(member.Ref.Owner, ref.Owner()) || !strings.EqualFold(member.Ref.Repo, ref.Repo()) {
 				continue
 			}
 			fact := &radar.DuplicateCluster{

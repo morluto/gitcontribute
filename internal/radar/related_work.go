@@ -3,6 +3,18 @@ package radar
 import (
 	"strings"
 	"time"
+
+	"github.com/morluto/gitcontribute/internal/relatedwork"
+)
+
+// RelatedWorkDirection describes whether a relationship points toward, away
+// from, or stays within the candidate being evaluated.
+type RelatedWorkDirection string
+
+const (
+	RelatedWorkInbound  RelatedWorkDirection = "inbound"
+	RelatedWorkOutbound RelatedWorkDirection = "outbound"
+	RelatedWorkLocal    RelatedWorkDirection = "local"
 )
 
 // RelatedWorkEvidence identifies one stored source supporting a relationship.
@@ -21,8 +33,8 @@ type RelatedWork struct {
 	Number          int                   `json:"number,omitempty"`
 	Title           string                `json:"title,omitempty"`
 	State           string                `json:"state,omitempty"`
-	Relation        string                `json:"relation"`
-	Direction       string                `json:"direction,omitempty"`
+	Relation        relatedwork.Relation  `json:"relation"`
+	Direction       RelatedWorkDirection  `json:"direction,omitempty"`
 	URL             string                `json:"url,omitempty"`
 	Evidence        []RelatedWorkEvidence `json:"evidence"`
 	SourceUpdatedAt time.Time             `json:"source_updated_at,omitempty"`
@@ -46,7 +58,7 @@ func relatedWorkCollisions(values []RelatedWork) (closing, inbound, dependencies
 		if !strings.EqualFold(work.State, "open") {
 			continue
 		}
-		if work.Relation == "depends_on" && work.Direction == "outbound" {
+		if work.Relation == relatedwork.RelationDependsOn && work.Direction == RelatedWorkOutbound {
 			dependencies = append(dependencies, work)
 			continue
 		}
@@ -54,11 +66,11 @@ func relatedWorkCollisions(values []RelatedWork) (closing, inbound, dependencies
 			continue
 		}
 		switch {
-		case work.Direction == "inbound" && work.Relation == "claims_to_close":
+		case work.Direction == RelatedWorkInbound && work.Relation == relatedwork.RelationClaimsToClose:
 			closing = append(closing, work)
-		case work.Direction == "inbound":
+		case work.Direction == RelatedWorkInbound:
 			inbound = append(inbound, work)
-		case work.Direction == "outbound":
+		case work.Direction == RelatedWorkOutbound:
 			outboundPRs = append(outboundPRs, work)
 		}
 	}

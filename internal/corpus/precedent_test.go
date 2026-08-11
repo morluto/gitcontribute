@@ -18,9 +18,9 @@ func TestLoadPrecedentRepositoriesGroupsSourcesByRepository(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, thread := range []Thread{
-		{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 1, State: "open", Title: "source one", SourceUpdatedAt: time.Unix(3, 0)},
-		{RepositoryID: repo.ID, Kind: ThreadKindIssue, Number: 2, State: "open", Title: "source two", SourceUpdatedAt: time.Unix(2, 0)},
-		{RepositoryID: repo.ID, Kind: ThreadKindPullRequest, Number: 3, State: "closed", Title: "history", SourceUpdatedAt: time.Unix(1, 0)},
+		{RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1, State: "open", Title: "source one", SourceUpdatedAt: time.Unix(3, 0)},
+		{RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 2, State: "open", Title: "source two", SourceUpdatedAt: time.Unix(2, 0)},
+		{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 3, State: "closed", Title: "history", SourceUpdatedAt: time.Unix(1, 0)},
 	} {
 		if _, err := c.UpsertThread(ctx, thread, `{}`); err != nil {
 			t.Fatal(err)

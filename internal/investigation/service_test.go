@@ -93,7 +93,7 @@ func (r *fakeRepo) SaveOpportunity(_ context.Context, o *Opportunity) error {
 	return nil
 }
 
-func (r *fakeRepo) UpdateOpportunity(_ context.Context, _, next *Opportunity, _ bool) error {
+func (r *fakeRepo) UpdateOpportunity(_ context.Context, _, next *Opportunity, _ OpportunityUpdateConstraint) error {
 	r.opportunities[next.ID] = next
 	return nil
 }

@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/zalando/go-keyring"
 )
 
@@ -287,10 +288,10 @@ func TestIssueVsPRClassification(t *testing.T) {
 	if len(res.Items) != 2 {
 		t.Fatalf("got %d issues, want 2", len(res.Items))
 	}
-	if res.Items[0].Kind != ThreadKindIssue {
+	if res.Items[0].Kind != domain.IssueKind {
 		t.Errorf("first issue kind = %q, want issue", res.Items[0].Kind)
 	}
-	if res.Items[1].Kind != ThreadKindPullRequest {
+	if res.Items[1].Kind != domain.PullRequestKind {
 		t.Errorf("second issue kind = %q, want pull_request", res.Items[1].Kind)
 	}
 	if res.Items[1].PullRequestURL != "https://github.com/octocat/hello-world/pull/2" {
@@ -595,7 +596,7 @@ func TestRateLimiterTransport(t *testing.T) {
 
 func TestTokenResolution(t *testing.T) {
 	t.Run("explicit", func(t *testing.T) {
-		src := NewTokenSource("explicit-token", "GITHUB_TOKEN", nil)
+		src := ChainTokenSource(StaticTokenSource("explicit-token"), EnvTokenSource("GITHUB_TOKEN"))
 		tok, err := src.Token(context.Background())
 		if err != nil || tok != "explicit-token" {
 			t.Fatalf("got %q, %v", tok, err)
@@ -604,7 +605,7 @@ func TestTokenResolution(t *testing.T) {
 
 	t.Run("env", func(t *testing.T) {
 		t.Setenv("GITHUB_TOKEN", "env-token")
-		src := NewTokenSource("", "GITHUB_TOKEN", nil)
+		src := ChainTokenSource(StaticTokenSource(""), EnvTokenSource("GITHUB_TOKEN"))
 		tok, err := src.Token(context.Background())
 		if err != nil || tok != "env-token" {
 			t.Fatalf("got %q, %v", tok, err)
@@ -612,8 +613,9 @@ func TestTokenResolution(t *testing.T) {
 	})
 
 	t.Run("gh", func(t *testing.T) {
-		runner := fakeRunner{out: "gh-token\n"}
-		src := NewTokenSource("", "GITHUB_TOKEN", runner)
+		src := ChainTokenSource(StaticTokenSource(""), EnvTokenSource("GITHUB_TOKEN"), &ghTokenSource{
+			run: func(context.Context) (string, error) { return "gh-token\n", nil },
+		})
 		tok, err := src.Token(context.Background())
 		if err != nil || tok != "gh-token" {
 			t.Fatalf("got %q, %v", tok, err)
@@ -621,7 +623,7 @@ func TestTokenResolution(t *testing.T) {
 	})
 
 	t.Run("missing", func(t *testing.T) {
-		src := NewTokenSource("", "NOT_SET_ENV_VAR", nil)
+		src := ChainTokenSource(StaticTokenSource(""), EnvTokenSource("NOT_SET_ENV_VAR"))
 		tok, err := src.Token(context.Background())
 		if !errors.Is(err, ErrNoToken) || tok != "" {
 			t.Fatalf("got %q, %v", tok, err)
@@ -701,15 +703,6 @@ func TestTokenResolution(t *testing.T) {
 			t.Fatalf("got err=%v called=%t, want canceled without lookup", err, called)
 		}
 	})
-}
-
-type fakeRunner struct {
-	out string
-	err error
-}
-
-func (f fakeRunner) Run(_ context.Context, name string, args ...string) (string, error) {
-	return f.out, f.err
 }
 
 func TestNoTokenIsAllowed(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
@@ -315,28 +316,35 @@ type Server struct {
 	reader          mcpcontract.Reader
 	server          *mcp.Server
 	registrationErr error
-	readOnly        bool
+	access          serverAccess
 	version         string
 	catalogTools    map[string][]byte
 }
 
+type serverAccess uint8
+
+const (
+	fullServerAccess serverAccess = iota
+	readOnlyServerAccess
+)
+
 // New constructs an MCP server with the unified catalog.
 func New(reader mcpcontract.Reader, version string) (*Server, error) {
-	return newServer(reader, version, false)
+	return newServer(reader, version, fullServerAccess)
 }
 
 // NewReadOnly constructs an MCP server that advertises only read-only tools.
 func NewReadOnly(reader mcpcontract.Reader, version string) (*Server, error) {
-	return newServer(reader, version, true)
+	return newServer(reader, version, readOnlyServerAccess)
 }
 
-func newServer(reader mcpcontract.Reader, version string, readOnly bool) (*Server, error) {
+func newServer(reader mcpcontract.Reader, version string, access serverAccess) (*Server, error) {
 	if version == "" {
 		version = "dev"
 	}
 	s := &Server{
 		reader:       reader,
-		readOnly:     readOnly,
+		access:       access,
 		version:      version,
 		catalogTools: make(map[string][]byte),
 		server: mcp.NewServer(&mcp.Implementation{
@@ -562,11 +570,12 @@ func (s *Server) getCoverage(ctx context.Context, _ *mcp.CallToolRequest, in mcp
 	return nil, out, err
 }
 
-func validateRepo(in mcpcontract.RepoInput) error {
-	if strings.TrimSpace(in.Owner) == "" || strings.TrimSpace(in.Repo) == "" {
-		return mcpcontract.InvalidArgument("owner", "owner and repo are required together", map[string]any{"owner": "acme", "repo": "rocket"})
+func normalizeRepository(owner, repo string) (string, string, error) {
+	ref, err := domain.NewRepoRef(owner, repo)
+	if err != nil {
+		return "", "", mcpcontract.InvalidArgument("owner", "owner and repo are required together", map[string]any{"owner": "acme", "repo": "rocket"})
 	}
-	return nil
+	return ref.Owner(), ref.Repo(), nil
 }
 
 func normalizeID(field, value string) (string, error) {

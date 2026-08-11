@@ -1,5 +1,7 @@
 package mcpcontract
 
+import "fmt"
+
 const (
 	DefaultFixPatternCandidateLimit      = 100
 	DefaultFixPatternHydrationLimit      = 25
@@ -10,19 +12,52 @@ const (
 // GitHub; superseded requires an explicit replacement relationship.
 type FixPatternOutcome string
 
+const (
+	FixPatternMerged         FixPatternOutcome = "merged"
+	FixPatternClosedUnmerged FixPatternOutcome = "closed_unmerged"
+	FixPatternSuperseded     FixPatternOutcome = "superseded"
+	FixPatternOpen           FixPatternOutcome = "open"
+	FixPatternUnknown        FixPatternOutcome = "unknown"
+)
+
 // FixPatternRelationship describes evidence connecting an issue and pull
 // request. Similarity is intentionally distinct from an explicit link.
 type FixPatternRelationship string
+
+const (
+	FixPatternCloses              FixPatternRelationship = "closes"
+	FixPatternReferences          FixPatternRelationship = "references"
+	FixPatternExplicitReplacement FixPatternRelationship = "explicit_replacement"
+	FixPatternSimilarityOnly      FixPatternRelationship = "similarity_only"
+)
 
 // FixPatternReportStatus describes whether all bounded workflow evidence is
 // complete or whether coverage limits or failures remain.
 type FixPatternReportStatus string
 
+const (
+	FixPatternReportComplete FixPatternReportStatus = "complete"
+	FixPatternReportPartial  FixPatternReportStatus = "partial"
+)
+
 // FixPatternProofStyle is a bounded evidence style detected in stored PR text.
 type FixPatternProofStyle string
 
+const (
+	FixPatternRegressionTest FixPatternProofStyle = "regression_test"
+	FixPatternReproduction   FixPatternProofStyle = "reproduction"
+	FixPatternBenchmark      FixPatternProofStyle = "benchmark"
+	FixPatternBeforeAfter    FixPatternProofStyle = "before_after"
+	FixPatternScreenshot     FixPatternProofStyle = "screenshot"
+)
+
 // FixPatternRelatedKind identifies the stored thread kind of a related target.
 type FixPatternRelatedKind string
+
+const (
+	FixPatternRelatedIssue       FixPatternRelatedKind = "issue"
+	FixPatternRelatedPullRequest FixPatternRelatedKind = "pull_request"
+)
 
 // FixPatternTimeWindow bounds stored thread observations considered by a
 // repository pattern-mining workflow.
@@ -133,4 +168,27 @@ type FixPatternReport struct {
 	UnknownCoverage           bool                         `json:"unknown_coverage"`
 	ExternalContextProvenance []string                     `json:"external_context_provenance,omitempty"`
 	Recovery                  *RecoveryPlan                `json:"recovery,omitempty"`
+}
+
+// Validate parses the redundant public coverage fields into one consistent
+// report state before a persisted artifact is trusted.
+func (r FixPatternReport) Validate() error {
+	switch r.Status {
+	case FixPatternReportComplete, FixPatternReportPartial:
+	default:
+		return fmt.Errorf("unsupported fix-pattern report status %q", r.Status)
+	}
+	if r.Complete != (r.Status == FixPatternReportComplete) {
+		return fmt.Errorf("fix-pattern complete flag contradicts status %q", r.Status)
+	}
+	if r.Truncated != r.Coverage.CandidateTruncated {
+		return fmt.Errorf("fix-pattern truncation contradicts candidate coverage")
+	}
+	if r.UnknownCoverage != (r.Coverage.UnknownAfter > 0) {
+		return fmt.Errorf("fix-pattern unknown-coverage flag contradicts candidate outcomes")
+	}
+	if r.Complete && (r.Truncated || r.UnknownCoverage || len(r.Failures) > 0) {
+		return fmt.Errorf("complete fix-pattern report contains incomplete evidence")
+	}
+	return nil
 }

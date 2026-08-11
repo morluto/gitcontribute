@@ -27,6 +27,14 @@ type threadKey struct {
 	merged string
 }
 
+func mustFacetCoverage(facet string, complete bool, asOf time.Time, count int) domain.FacetCoverage {
+	coverage, err := domain.NewFacetCoverage(facet, complete, asOf, count)
+	if err != nil {
+		panic(err)
+	}
+	return coverage
+}
+
 func (f *fakeReader) ReadRepository(_ context.Context, ref domain.RepoRef) (domain.Repository, []domain.SourceRef, error) {
 	if !ref.IsValid() {
 		return domain.Repository{}, nil, errors.New("repository reference is not parsed")
@@ -95,8 +103,8 @@ func TestBuilderBuild(t *testing.T) {
 	coverage := domain.Coverage{
 		AsOf: now,
 		Facets: []domain.FacetCoverage{
-			domain.MustFacetCoverage("metadata", true, now, 0),
-			domain.MustFacetCoverage("threads", false, now.Add(-time.Hour), 0),
+			mustFacetCoverage("metadata", true, now, 0),
+			mustFacetCoverage("threads", false, now.Add(-time.Hour), 0),
 		},
 	}
 	guidance := "Please open an issue first."

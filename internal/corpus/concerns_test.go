@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,6 +69,47 @@ func TestDecodeConcernRejectsInvalidLifecycleState(t *testing.T) {
 	}
 }
 
+func TestGetConcernRejectsCorruptStoredLinkKind(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, err := Open(ctx, filepath.Join(t.TempDir(), "concerns.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	svc := concern.NewService(c)
+	item, err := svc.Create(ctx, &concern.Concern{
+		Repo: domain.MustRepoRef("owner", "repo"), CommitSHA: "abc",
+		Title: "typed links", ProblemStatement: "stored link kinds must remain valid", Confidence: 0.5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Link(ctx, item.ID, concern.Link{Kind: concern.LinkRelated, TargetType: "thread", TargetID: "owner/repo:issue#1"}); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := c.db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(ctx, `PRAGMA ignore_check_constraints=ON`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE concern_links SET kind='impossible' WHERE concern_id=?`, item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(ctx, `PRAGMA ignore_check_constraints=OFF`); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.Get(ctx, item.ID); !errors.Is(err, concern.ErrInvalidLink) || !strings.Contains(err.Error(), "parse concern link") {
+		t.Fatalf("get error = %v, want corrupt link kind", err)
+	}
+}
+
 func TestPromoteConcernIsAtomic(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -106,7 +148,7 @@ func TestPromoteConcernIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if promoted.Status != concern.StatusPromoted || promoted.Promotion == nil || promoted.Promotion.OpportunityID != opportunity.ID || len(promoted.Links) != 3 {
+	if promoted.Status != concern.StatusPromoted || promoted.Promotion == nil || promoted.Promotion.OpportunityID() != opportunity.ID || len(promoted.Links) != 3 {
 		t.Fatalf("unexpected promoted concern: %+v", promoted)
 	}
 	if got, err := c.GetOpportunity(ctx, opportunity.ID); err != nil || len(got.EvidenceIDs) != 1 {

@@ -23,11 +23,11 @@ func (c *Corpus) AddClusterOverride(ctx context.Context, clusterID int64, ref cl
 	if err := validateClusterMemberRef(ref); err != nil {
 		return err
 	}
-	switch action {
-	case clustering.OverrideInclude, clustering.OverrideExclude, clustering.OverrideSetCanonical:
-	default:
-		return fmt.Errorf("unsupported override action %q", action)
+	parsedAction, err := clustering.ParseOverrideAction(string(action))
+	if err != nil {
+		return err
 	}
+	action = parsedAction
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return errors.New("reason is required")
@@ -39,14 +39,22 @@ func (c *Corpus) AddClusterOverride(ctx context.Context, clusterID int64, ref cl
 	}
 	defer rollbackSQLOnReturn(tx, &err)
 	var owner, name string
+	var canonicalKind string
 	var canonical clustering.MemberRef
 	err = tx.QueryRowContext(ctx, `SELECT repo_owner, repo_name, canonical_kind, canonical_owner, canonical_repo, canonical_number
-		FROM clusters WHERE id=?`, clusterID).Scan(&owner, &name, &canonical.Kind, &canonical.Owner, &canonical.Repo, &canonical.Number)
+		FROM clusters WHERE id=?`, clusterID).Scan(&owner, &name, &canonicalKind, &canonical.Owner, &canonical.Repo, &canonical.Number)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("cluster %d not found", clusterID)
 	}
 	if err != nil {
 		return err
+	}
+	canonical.Kind, err = domain.ParseThreadKind(canonicalKind)
+	if err != nil {
+		return fmt.Errorf("decode cluster canonical member: %w", err)
+	}
+	if err := validateClusterMemberRef(canonical); err != nil {
+		return fmt.Errorf("decode cluster canonical member: %w", err)
 	}
 	repo, err := domain.NewRepoRef(owner, name)
 	if err != nil {
@@ -80,7 +88,7 @@ func validateClusterMemberRef(ref clustering.MemberRef) error {
 	if strings.TrimSpace(ref.Owner) == "" || strings.TrimSpace(ref.Repo) == "" {
 		return errors.New("member owner and repo are required")
 	}
-	if ref.Kind != ThreadKindIssue && ref.Kind != ThreadKindPullRequest {
+	if ref.Kind != domain.IssueKind && ref.Kind != domain.PullRequestKind {
 		return fmt.Errorf("unsupported member kind %q", ref.Kind)
 	}
 	if ref.Number < 1 {

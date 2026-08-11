@@ -19,13 +19,59 @@ var (
 )
 
 type SnapshotMaterialization struct {
-	Kind            string
-	Scope           any
-	SourceManifest  any
-	DerivedVersions any
-	Completeness    any
-	Provenance      any
-	Payload         any
+	kind            string
+	scope           json.RawMessage
+	sourceManifest  json.RawMessage
+	derivedVersions json.RawMessage
+	completeness    json.RawMessage
+	provenance      json.RawMessage
+	payload         json.RawMessage
+}
+
+// NewSnapshotMaterialization serializes one typed workflow result before it
+// reaches the storage transaction. Downstream token and artifact logic only
+// accepts this encoded form, so it cannot accidentally mix fields from
+// different loose maps or discover an encoding failure after writes begin.
+func NewSnapshotMaterialization[S, M, D, C, P, V any](kind string, scope S, sourceManifest M, derivedVersions D, completeness C, provenance P, payload V) (SnapshotMaterialization, error) {
+	if kind == "" {
+		return SnapshotMaterialization{}, errors.New("snapshot artifact kind is required")
+	}
+	encodedScope, err := encodeSnapshotPart("scope", scope)
+	if err != nil {
+		return SnapshotMaterialization{}, err
+	}
+	encodedSource, err := encodeSnapshotPart("source manifest", sourceManifest)
+	if err != nil {
+		return SnapshotMaterialization{}, err
+	}
+	encodedDerived, err := encodeSnapshotPart("derived versions", derivedVersions)
+	if err != nil {
+		return SnapshotMaterialization{}, err
+	}
+	encodedCompleteness, err := encodeSnapshotPart("completeness", completeness)
+	if err != nil {
+		return SnapshotMaterialization{}, err
+	}
+	encodedProvenance, err := encodeSnapshotPart("provenance", provenance)
+	if err != nil {
+		return SnapshotMaterialization{}, err
+	}
+	encodedPayload, err := encodeSnapshotPart("payload", payload)
+	if err != nil {
+		return SnapshotMaterialization{}, err
+	}
+	return SnapshotMaterialization{
+		kind: kind, scope: encodedScope, sourceManifest: encodedSource, derivedVersions: encodedDerived,
+		completeness: encodedCompleteness, provenance: encodedProvenance, payload: encodedPayload,
+	}, nil
+}
+
+func encodeSnapshotPart[T any](name string, value T) (json.RawMessage, error) {
+	out, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("encode snapshot %s: %w", name, err)
+	}
+	return out, nil
 }
 
 type ReadSnapshotArtifact struct {
@@ -44,41 +90,13 @@ type ReadSnapshotArtifact struct {
 }
 
 func (c *Corpus) MaterializeReadSnapshot(ctx context.Context, in SnapshotMaterialization) (ReadSnapshotArtifact, error) {
-	if in.Kind == "" {
+	if in.kind == "" {
 		return ReadSnapshotArtifact{}, errors.New("snapshot artifact kind is required")
 	}
-	marshal := func(name string, value any) ([]byte, error) {
-		out, err := json.Marshal(value)
-		if err != nil {
-			return nil, fmt.Errorf("encode snapshot %s: %w", name, err)
-		}
-		return out, nil
+	if len(in.scope) == 0 || len(in.sourceManifest) == 0 || len(in.derivedVersions) == 0 || len(in.completeness) == 0 || len(in.provenance) == 0 || len(in.payload) == 0 {
+		return ReadSnapshotArtifact{}, errors.New("snapshot materialization is not parsed")
 	}
-	scope, err := marshal("scope", in.Scope)
-	if err != nil {
-		return ReadSnapshotArtifact{}, err
-	}
-	source, err := marshal("source manifest", in.SourceManifest)
-	if err != nil {
-		return ReadSnapshotArtifact{}, err
-	}
-	derived, err := marshal("derived versions", in.DerivedVersions)
-	if err != nil {
-		return ReadSnapshotArtifact{}, err
-	}
-	complete, err := marshal("completeness", in.Completeness)
-	if err != nil {
-		return ReadSnapshotArtifact{}, err
-	}
-	provenance, err := marshal("provenance", in.Provenance)
-	if err != nil {
-		return ReadSnapshotArtifact{}, err
-	}
-	payload, err := marshal("payload", in.Payload)
-	if err != nil {
-		return ReadSnapshotArtifact{}, err
-	}
-	sourceHash, artifactHash := sha256.Sum256(source), sha256.Sum256(append([]byte(in.Kind+"\x00"), payload...))
+	sourceHash, artifactHash := sha256.Sum256(in.sourceManifest), sha256.Sum256(append([]byte(in.kind+"\x00"), in.payload...))
 	sourceDigest, artifactDigest := hex.EncodeToString(sourceHash[:]), hex.EncodeToString(artifactHash[:])
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -89,17 +107,17 @@ func (c *Corpus) MaterializeReadSnapshot(ctx context.Context, in SnapshotMateria
 	if err != nil {
 		return ReadSnapshotArtifact{}, err
 	}
-	tokenBody, err := json.Marshal([]any{ReadSnapshotContractVersion, watermark, json.RawMessage(scope), sourceDigest, json.RawMessage(derived), json.RawMessage(complete), artifactDigest})
+	tokenBody, err := json.Marshal([]any{ReadSnapshotContractVersion, watermark, in.scope, sourceDigest, in.derivedVersions, in.completeness, artifactDigest})
 	if err != nil {
 		return ReadSnapshotArtifact{}, fmt.Errorf("encode snapshot token: %w", err)
 	}
 	tokenHash := sha256.Sum256(tokenBody)
 	token := hex.EncodeToString(tokenHash[:])
 	created := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO corpus_read_artifacts (digest, kind, payload_json, created_at) VALUES (?, ?, ?, ?)`, artifactDigest, in.Kind, string(payload), encodeTime(created)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO corpus_read_artifacts (digest, kind, payload_json, created_at) VALUES (?, ?, ?, ?)`, artifactDigest, in.kind, string(in.payload), encodeTime(created)); err != nil {
 		return ReadSnapshotArtifact{}, fmt.Errorf("store read artifact: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO corpus_snapshot_tokens (token, contract_version, observation_watermark, scope_json, source_manifest_sha256, derived_versions_json, completeness_json, provenance_json, artifact_kind, artifact_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, token, ReadSnapshotContractVersion, watermark, string(scope), sourceDigest, string(derived), string(complete), string(provenance), in.Kind, artifactDigest, encodeTime(created)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO corpus_snapshot_tokens (token, contract_version, observation_watermark, scope_json, source_manifest_sha256, derived_versions_json, completeness_json, provenance_json, artifact_kind, artifact_digest, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, token, ReadSnapshotContractVersion, watermark, string(in.scope), sourceDigest, string(in.derivedVersions), string(in.completeness), string(in.provenance), in.kind, artifactDigest, encodeTime(created)); err != nil {
 		return ReadSnapshotArtifact{}, fmt.Errorf("store snapshot token: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

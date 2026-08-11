@@ -40,8 +40,14 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 	if in.State == "" {
 		in.State = "open"
 	}
-	if in.State != "open" && in.State != "closed" && in.State != "all" {
+	state, err := corpus.ParseThreadStateFilter(in.State)
+	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, errors.New("state must be open, closed, or all")
+	}
+	if state.IsAny() {
+		in.State = "all"
+	} else {
+		in.State = state.String()
 	}
 	if in.View == "" {
 		in.View = "compact"
@@ -63,11 +69,14 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
-	page, unavailable, err := portfolioPage(ctx, c, in)
+	page, unavailable, err := portfolioPage(ctx, c, in, state)
 	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
 	}
-	format := portfolioResponseFormat(map[string]string{"compact": "concise", "full": "detailed"}[in.View])
+	format := conciseResponse
+	if in.View == "full" {
+		format = detailedResponse
+	}
 	readSet, err := loadPortfolioReadSet(ctx, c, page.PullRequests, format)
 	if err != nil {
 		return mcpcontract.ListPullRequestPortfolioOutput{}, err
@@ -99,7 +108,7 @@ func (r *MCPReader) ListPullRequestPortfolio(ctx context.Context, in mcpcontract
 	return out, nil
 }
 
-func portfolioPage(ctx context.Context, c *corpus.Corpus, in mcpcontract.ListPullRequestPortfolioInput) (corpus.PortfolioPage, []mcpcontract.ThreadRef, error) {
+func portfolioPage(ctx context.Context, c *corpus.Corpus, in mcpcontract.ListPullRequestPortfolioInput, state corpus.ThreadStateFilter) (corpus.PortfolioPage, []mcpcontract.ThreadRef, error) {
 	if len(in.PullRequests) == 0 {
 		author := ""
 		if len(in.Authors) > 0 {
@@ -109,7 +118,7 @@ func portfolioPage(ctx context.Context, c *corpus.Corpus, in mcpcontract.ListPul
 		if in.Repository != nil {
 			repository = &corpus.RepositoryKey{Owner: in.Repository.Owner, Name: in.Repository.Repo}
 		}
-		page, err := c.ListPullRequestPortfolioPage(ctx, author, in.State, repository, in.Limit)
+		page, err := c.ListPullRequestPortfolioPage(ctx, author, state, repository, in.Limit)
 		return page, nil, err
 	}
 	repositoryKeys := make([]corpus.RepositoryKey, 0, len(in.PullRequests))
@@ -123,7 +132,7 @@ func portfolioPage(ctx context.Context, c *corpus.Corpus, in mcpcontract.ListPul
 	threadKeys := make([]corpus.ThreadKey, 0, len(in.PullRequests))
 	for _, ref := range in.PullRequests {
 		if repository := repositories[corpus.RepositoryKey{Owner: ref.Owner, Name: ref.Repo}]; repository != nil {
-			threadKeys = append(threadKeys, corpus.ThreadKey{RepositoryID: repository.ID, Kind: corpus.ThreadKindPullRequest, Number: ref.Number})
+			threadKeys = append(threadKeys, corpus.ThreadKey{RepositoryID: repository.ID, Kind: corpus.PullRequestThreadKind(), Number: ref.Number})
 		}
 	}
 	threads, err := c.GetThreadsBatch(ctx, threadKeys)
@@ -138,7 +147,7 @@ func portfolioPage(ctx context.Context, c *corpus.Corpus, in mcpcontract.ListPul
 			unavailable = append(unavailable, ref)
 			continue
 		}
-		thread := threads[corpus.ThreadKey{RepositoryID: repository.ID, Kind: corpus.ThreadKindPullRequest, Number: ref.Number}]
+		thread := threads[corpus.ThreadKey{RepositoryID: repository.ID, Kind: corpus.PullRequestThreadKind(), Number: ref.Number}]
 		if thread == nil {
 			unavailable = append(unavailable, ref)
 			continue

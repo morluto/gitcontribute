@@ -60,9 +60,9 @@ func (r *ExecRunner) Run(ctx context.Context, req RunRequest) (*RunResult, error
 	if err := cmd.Start(); err != nil {
 		if ctx.Err() != nil {
 			completed := time.Now().UTC()
-			timeoutPhase := ""
+			timeoutPhase := ValidationPhaseNone
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				timeoutPhase = "startup"
+				timeoutPhase = ValidationPhaseStartup
 			}
 			return &RunResult{
 				ExitCode:       -1,
@@ -72,16 +72,16 @@ func (r *ExecRunner) Run(ctx context.Context, req RunRequest) (*RunResult, error
 				Classification: RunClassificationCancelled,
 				Phases:         phases,
 				TimeoutPhase:   timeoutPhase,
-				FailurePhase:   "startup",
-				Cleanup:        CleanupResult{Status: "unavailable", Reason: "process did not start", CheckedAt: completed},
+				FailurePhase:   ValidationPhaseStartup,
+				Cleanup:        CleanupResult{Status: CleanupUnavailable, Reason: "process did not start", CheckedAt: completed},
 			}, nil
 		}
 		completed := time.Now().UTC()
 		return &RunResult{
 			ExitCode: -1, StartedAt: started, CompletedAt: completed,
 			Error: fmt.Sprintf("runner: start: %v", err), Classification: RunClassificationError,
-			Phases: phases, FailurePhase: "startup",
-			Cleanup: CleanupResult{Status: "unavailable", Reason: "process did not start", CheckedAt: completed},
+			Phases: phases, FailurePhase: ValidationPhaseStartup,
+			Cleanup: CleanupResult{Status: CleanupUnavailable, Reason: "process did not start", CheckedAt: completed},
 		}, nil
 	}
 	phases.ProcessStartedAt = time.Now().UTC()
@@ -96,9 +96,9 @@ func (r *ExecRunner) Run(ctx context.Context, req RunRequest) (*RunResult, error
 	phases.ShutdownCheckedAt = sampled.cleanup.CheckedAt
 
 	if ctx.Err() != nil {
-		timeoutPhase := ""
+		timeoutPhase := ValidationPhaseNone
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			timeoutPhase = "execution"
+			timeoutPhase = ValidationPhaseExecution
 		}
 		return &RunResult{
 			ExitCode:       -1,
@@ -112,7 +112,7 @@ func (r *ExecRunner) Run(ctx context.Context, req RunRequest) (*RunResult, error
 			Process:        sampled.identity,
 			Phases:         phases,
 			TimeoutPhase:   timeoutPhase,
-			FailurePhase:   "execution",
+			FailurePhase:   ValidationPhaseExecution,
 			Resources:      sampled.telemetry,
 			Cleanup:        sampled.cleanup,
 		}, nil
@@ -134,16 +134,16 @@ func (r *ExecRunner) Run(ctx context.Context, req RunRequest) (*RunResult, error
 		}
 		runErrStr = runErr.Error()
 	}
-	timeoutPhase := ""
+	timeoutPhase := ValidationPhaseNone
 	if errors.Is(runErr, exec.ErrWaitDelay) {
-		timeoutPhase = "shutdown"
+		timeoutPhase = ValidationPhaseShutdown
 	}
-	failurePhase := ""
+	failurePhase := ValidationPhaseNone
 	if runErr != nil {
-		failurePhase = "execution"
+		failurePhase = ValidationPhaseExecution
 	}
-	if timeoutPhase == "shutdown" {
-		failurePhase = "shutdown"
+	if timeoutPhase == ValidationPhaseShutdown {
+		failurePhase = ValidationPhaseShutdown
 	}
 
 	return &RunResult{

@@ -59,82 +59,39 @@ func decodeFeedbackCursor(value, filter string) (int, error) {
 
 // SearchPullRequestFeedback performs a deterministic local read over the
 // normalized feedback projection. It never refreshes facets or contacts GitHub.
-func (c *Corpus) SearchPullRequestFeedback(ctx context.Context, filter FeedbackSearchFilter) (FeedbackSearchPage, error) {
-	if filter.Limit == 0 {
-		filter.Limit = 20
-	}
-	if filter.Limit < 1 || filter.Limit > 100 {
-		return FeedbackSearchPage{}, errors.New("feedback search limit must be between 1 and 100")
-	}
-	if filter.State == "" {
-		filter.State = "all"
-	}
-	if filter.State != "open" && filter.State != "closed" && filter.State != "all" {
-		return FeedbackSearchPage{}, errors.New("feedback search state must be open, closed, or all")
-	}
-	if filter.Merged == "" {
-		filter.Merged = "any"
-	}
-	if filter.Merged != "true" && filter.Merged != "false" && filter.Merged != "unknown" && filter.Merged != "any" {
-		return FeedbackSearchPage{}, errors.New("feedback search merged must be true, false, unknown, or any")
-	}
-	if filter.ThreadState == "" {
-		filter.ThreadState = "all"
-	}
-	if filter.ThreadState != "resolved" && filter.ThreadState != "unresolved" && filter.ThreadState != "all" {
-		return FeedbackSearchPage{}, errors.New("feedback search thread_state must be resolved, unresolved, or all")
-	}
-	if filter.Sort == "" {
-		filter.Sort = "updated"
-	}
-	switch filter.Sort {
-	case "feedback_author", "pull_request_state", "merge_state", "created", "updated", "pull_request_number":
-	default:
-		return FeedbackSearchPage{}, errors.New("feedback search sort is unsupported")
-	}
-	if filter.Order == "" {
-		filter.Order = "desc"
-	}
-	if filter.Order != "asc" && filter.Order != "desc" {
-		return FeedbackSearchPage{}, errors.New("feedback search order must be asc or desc")
-	}
-	if filter.Channel != "" && !validFeedbackChannel(filter.Channel) {
-		return FeedbackSearchPage{}, fmt.Errorf("unsupported feedback channel %q", filter.Channel)
-	}
+func (c *Corpus) SearchPullRequestFeedback(ctx context.Context, request FeedbackSearchRequest) (FeedbackSearchPage, error) {
+	query := request.query
 	if err := c.RequireFreshProjection(ctx, ProjectionNamePullRequestFeedbackFTS, ProjectionVersionPullRequestFeedbackFTS); err != nil {
 		return FeedbackSearchPage{}, err
 	}
 	filterKeyBytes, _ := json.Marshal(feedbackSearchFilterKey{
-		RepositoryID: filter.RepositoryID, FeedbackAuthor: filter.FeedbackAuthor,
-		PullRequestAuthor: filter.PullRequestAuthor, State: filter.State, Merged: filter.Merged,
-		ThreadState: filter.ThreadState, Channel: filter.Channel, Text: filter.Text,
-		CreatedAfter: encodeTime(filter.CreatedAfter), CreatedBefore: encodeTime(filter.CreatedBefore),
-		UpdatedAfter: encodeTime(filter.UpdatedAfter), UpdatedBefore: encodeTime(filter.UpdatedBefore),
-		Sort: filter.Sort, Order: filter.Order, Limit: filter.Limit,
+		RepositoryID: request.repositoryID, FeedbackAuthor: query.feedbackAuthor,
+		PullRequestAuthor: query.pullRequestAuthor, State: query.state.String(), Merged: query.merge.BooleanString(),
+		ThreadState: query.threadState.String(), Channel: query.channel.String(), Text: query.text,
+		CreatedAfter: encodeTime(query.createdAfter), CreatedBefore: encodeTime(query.createdBefore),
+		UpdatedAfter: encodeTime(query.updatedAfter), UpdatedBefore: encodeTime(query.updatedBefore),
+		Sort: query.sort.String(), Order: query.order.String(), Limit: query.page.Limit(),
 	})
-	offset, err := decodeFeedbackCursor(filter.Cursor, string(filterKeyBytes))
+	offset, err := decodeFeedbackCursor(query.page.Cursor(), string(filterKeyBytes))
 	if err != nil {
 		return FeedbackSearchPage{}, err
 	}
 
-	where, args, ftsQuery := feedbackSearchWhere(filter, true)
+	where, args, ftsQuery := feedbackSearchWhere(request)
 	joinFTS := ""
 	if ftsQuery != "" {
 		joinFTS = " JOIN pull_request_feedback_fts ON pull_request_feedback_fts.rowid = p.id"
 		args = append([]any{ftsQuery}, args...)
 	}
 	from := ` FROM pull_request_feedback_projection p JOIN threads t ON t.id = p.thread_id` + joinFTS
-	orderExpr := feedbackSortExpression(filter.Sort)
-	direction := "ASC"
-	if filter.Order == "desc" {
-		direction = "DESC"
-	}
+	orderExpr := query.sort.expression()
+	direction := query.order.sqlDirection()
 	statement := `SELECT p.id, p.repository_id, p.thread_id, t.number, t.author, t.state, t.merged, t.merged_known,
 		p.channel, p.feedback_id, p.feedback_node_id, p.thread_external_id, p.in_reply_to_id, p.author, p.body, p.path, p.line, p.start_line, p.side, p.start_side, p.commit_oid, p.review_state,
 		p.created_at, p.updated_at, p.resolved_known, p.resolved, p.resolved_by, p.outdated, p.head_sha, p.source_updated_at,
 		p.source_observation_sequence, p.source_observation_id` + from + where + ` ORDER BY ` + orderExpr + ` ` + direction + `, p.id ` + direction + ` LIMIT ? OFFSET ?`
 	queryArgs := append([]any(nil), args...)
-	queryArgs = append(queryArgs, filter.Limit+1, offset)
+	queryArgs = append(queryArgs, query.page.Limit()+1, offset)
 	tx, err := c.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return FeedbackSearchPage{}, fmt.Errorf("begin feedback search: %w", err)
@@ -155,8 +112,10 @@ func (c *Corpus) SearchPullRequestFeedback(ctx context.Context, filter FeedbackS
 		return FeedbackSearchPage{}, fmt.Errorf("count pull-request feedback: %w", err)
 	}
 	page := FeedbackSearchPage{Items: items, Total: total}
-	if filter.Merged == "true" || filter.Merged == "false" {
-		unknownWhere, unknownArgs, unknownFTSQuery := feedbackSearchWhere(filter, false)
+	if query.merge.IsMerged() || query.merge.IsUnmerged() {
+		unknownRequest := request
+		unknownRequest.query.merge = AnyMergeState()
+		unknownWhere, unknownArgs, unknownFTSQuery := feedbackSearchWhere(unknownRequest)
 		unknownWhere += " AND t.merged_known = 0"
 		if unknownFTSQuery != "" {
 			unknownArgs = append([]any{unknownFTSQuery}, unknownArgs...)
@@ -177,12 +136,12 @@ func (c *Corpus) SearchPullRequestFeedback(ctx context.Context, filter FeedbackS
 			return FeedbackSearchPage{}, fmt.Errorf("iterate unknown pull-request merge states: %w", err)
 		}
 	}
-	if len(items) > filter.Limit {
-		page.Items = items[:filter.Limit]
-		page.NextCursor = encodeFeedbackCursor(feedbackSearchCursor{Scope: "pull_request_feedback", Filter: string(filterKeyBytes), Offset: offset + filter.Limit})
+	if len(items) > query.page.Limit() {
+		page.Items = items[:query.page.Limit()]
+		page.NextCursor = encodeFeedbackCursor(feedbackSearchCursor{Scope: "pull_request_feedback", Filter: string(filterKeyBytes), Offset: offset + query.page.Limit()})
 		page.Truncated = true
 	}
-	page.Coverage, err = c.feedbackCoverageTx(ctx, tx, filter.RepositoryID, filter.Channel, filter.ThreadState)
+	page.Coverage, err = c.feedbackCoverageTx(ctx, tx, request.repositoryID, query.channel, query.threadState)
 	if err != nil {
 		return FeedbackSearchPage{}, err
 	}
@@ -195,7 +154,7 @@ func (c *Corpus) SearchPullRequestFeedback(ctx context.Context, filter FeedbackS
 // GetPullRequestFeedbackItem returns one exact normalized feedback record.
 // It is an offline read over the same projection used by search; callers do
 // not need to parse a raw facet payload to follow a search match.
-func (c *Corpus) GetPullRequestFeedbackItem(ctx context.Context, repositoryID int64, number int, channel, feedbackID string) (*PullRequestFeedbackProjection, error) {
+func (c *Corpus) GetPullRequestFeedbackItem(ctx context.Context, repositoryID int64, number int, channel FeedbackChannel, feedbackID string) (*PullRequestFeedbackProjection, error) {
 	if err := c.RequireFreshProjection(ctx, ProjectionNamePullRequestFeedbackFTS, ProjectionVersionPullRequestFeedbackFTS); err != nil {
 		return nil, err
 	}
@@ -205,7 +164,7 @@ func (c *Corpus) GetPullRequestFeedbackItem(ctx context.Context, repositoryID in
 		p.source_observation_sequence, p.source_observation_id
 		FROM pull_request_feedback_projection p JOIN threads t ON t.id = p.thread_id
 		WHERE p.repository_id = ? AND t.number = ? AND p.channel = ? AND p.feedback_id = ?
-		ORDER BY p.id LIMIT 1`, repositoryID, number, channel, feedbackID)
+		ORDER BY p.id LIMIT 1`, repositoryID, number, channel.String(), feedbackID)
 	if err != nil {
 		return nil, fmt.Errorf("get pull-request feedback item: %w", err)
 	}
@@ -220,87 +179,63 @@ func (c *Corpus) GetPullRequestFeedbackItem(ctx context.Context, repositoryID in
 	return &items[0], nil
 }
 
-func validFeedbackChannel(value string) bool {
-	return feedbackFacetForChannel(value) != ""
-}
-
-func feedbackSearchWhere(filter FeedbackSearchFilter, applyMerge bool) (string, []any, string) {
+func feedbackSearchWhere(request FeedbackSearchRequest) (string, []any, string) {
+	query := request.query
 	where := " WHERE 1=1"
 	args := make([]any, 0, 12)
-	if filter.RepositoryID != 0 {
-		where += " AND p.repository_id = ?"
-		args = append(args, filter.RepositoryID)
-	}
-	if filter.FeedbackAuthor != "" {
+	where += " AND p.repository_id = ?"
+	args = append(args, request.repositoryID)
+	if query.feedbackAuthor != "" {
 		where += " AND lower(p.author) = lower(?)"
-		args = append(args, filter.FeedbackAuthor)
+		args = append(args, query.feedbackAuthor)
 	}
-	if filter.PullRequestAuthor != "" {
+	if query.pullRequestAuthor != "" {
 		where += " AND lower(t.author) = lower(?)"
-		args = append(args, filter.PullRequestAuthor)
+		args = append(args, query.pullRequestAuthor)
 	}
-	if filter.State != "all" {
+	if !query.state.IsAny() {
 		where += " AND t.state = ?"
-		args = append(args, filter.State)
+		args = append(args, query.state.String())
 	}
-	if applyMerge {
-		switch filter.Merged {
-		case "true":
-			where += " AND t.merged_known = 1 AND t.merged = 1"
-		case "false":
-			where += " AND t.merged_known = 1 AND t.merged = 0"
-		case "unknown":
-			where += " AND t.merged_known = 0"
-		}
+	switch {
+	case query.merge.IsMerged():
+		where += " AND t.merged_known = 1 AND t.merged = 1"
+	case query.merge.IsUnmerged():
+		where += " AND t.merged_known = 1 AND t.merged = 0"
+	case query.merge.IsUnknown():
+		where += " AND t.merged_known = 0"
 	}
-	if filter.ThreadState == "resolved" {
+	if query.threadState.isResolved() {
 		where += " AND p.resolved_known = 1 AND p.resolved = 1"
 	}
-	if filter.ThreadState == "unresolved" {
+	if !query.threadState.isAny() && !query.threadState.isResolved() {
 		where += " AND p.resolved_known = 1 AND p.resolved = 0"
 	}
-	if filter.Channel != "" {
+	if query.channel != 0 {
 		where += " AND p.channel = ?"
-		args = append(args, filter.Channel)
+		args = append(args, query.channel.String())
 	}
-	if !filter.CreatedAfter.IsZero() {
+	if !query.createdAfter.IsZero() {
 		where += " AND p.created_at >= ?"
-		args = append(args, encodeTime(filter.CreatedAfter))
+		args = append(args, encodeTime(query.createdAfter))
 	}
-	if !filter.CreatedBefore.IsZero() {
+	if !query.createdBefore.IsZero() {
 		where += " AND p.created_at <= ?"
-		args = append(args, encodeTime(filter.CreatedBefore))
+		args = append(args, encodeTime(query.createdBefore))
 	}
-	if !filter.UpdatedAfter.IsZero() {
+	if !query.updatedAfter.IsZero() {
 		where += " AND p.updated_at >= ?"
-		args = append(args, encodeTime(filter.UpdatedAfter))
+		args = append(args, encodeTime(query.updatedAfter))
 	}
-	if !filter.UpdatedBefore.IsZero() {
+	if !query.updatedBefore.IsZero() {
 		where += " AND p.updated_at <= ?"
-		args = append(args, encodeTime(filter.UpdatedBefore))
+		args = append(args, encodeTime(query.updatedBefore))
 	}
-	ftsQuery := literalFTSQueryMode(filter.Text, "all")
+	ftsQuery := literalFTSQueryMode(query.text, MatchAllTerms())
 	if ftsQuery != "" {
 		where = " WHERE pull_request_feedback_fts MATCH ?" + strings.TrimPrefix(where, " WHERE 1=1")
 	}
 	return where, args, ftsQuery
-}
-
-func feedbackSortExpression(sort string) string {
-	switch sort {
-	case "feedback_author":
-		return "lower(p.author)"
-	case "pull_request_state":
-		return "t.state"
-	case "merge_state":
-		return "CASE WHEN t.merged_known = 0 THEN 0 WHEN t.merged = 0 THEN 1 ELSE 2 END"
-	case "created":
-		return "p.created_at"
-	case "pull_request_number":
-		return "t.number"
-	default:
-		return "p.updated_at"
-	}
 }
 
 func scanFeedbackProjectionRows(rows *sql.Rows) ([]PullRequestFeedbackProjection, error) {

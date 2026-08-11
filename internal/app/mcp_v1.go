@@ -98,14 +98,14 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpcontract.ExplainMatc
 		if thread == nil {
 			return mcpcontract.ExplainMatchOutput{}, failure.NotFound(nil)
 		}
-		if in.Kind != "" && thread.Kind != in.Kind {
+		if in.Kind != "" && thread.Kind != domain.ThreadKind(in.Kind) {
 			return mcpcontract.ExplainMatchOutput{}, failure.NotFound(nil)
 		}
-		out.Kind = thread.Kind
+		out.Kind = string(thread.Kind)
 		out.Number = thread.Number
 		out.Title = thread.Title
 		out.Snippet = boundedText(thread.Body, 2000)
-		out.State = thread.State
+		out.State = string(thread.State)
 		sourceRevision := thread.SourceUpdatedAt
 		if in.Query != "" {
 			evidence, found, err := c.FindThreadSearchEvidence(ctx, thread.ID, in.Query)
@@ -337,10 +337,14 @@ func (r *MCPReader) RecordHypothesis(ctx context.Context, in mcpcontract.RecordH
 	if err != nil {
 		return mcpcontract.HypothesisOutput{}, err
 	}
+	category, err := investigation.ParseCategory(in.Category)
+	if err != nil {
+		return mcpcontract.HypothesisOutput{}, err
+	}
 	input := investigation.CreateHypothesisInput{
 		Title:              in.Title,
 		Description:        in.Description,
-		Category:           investigation.Category(in.Category),
+		Category:           category,
 		ExpectedBehavior:   in.ExpectedBehavior,
 		ObservedBehavior:   in.ObservedBehavior,
 		PotentialImpact:    in.PotentialImpact,
@@ -616,7 +620,7 @@ func draftResultToMCP(d *contracts.DraftResult) mcpcontract.DraftOutput {
 
 func draftArtifactToMCP(d *contribution.DraftArtifact) mcpcontract.DraftOutput {
 	out := mcpcontract.DraftOutput{
-		ID: d.ID, Revision: d.Revision, OpportunityID: d.OpportunityID, Kind: d.Kind,
+		ID: d.ID, Revision: d.Revision, OpportunityID: d.OpportunityID, Kind: string(d.Kind),
 		Repository: d.Repository, Title: d.Title, Body: d.Body,
 		TitleBytes: d.TitleBytes, BodyBytes: d.BodyBytes, TitleSHA256: d.TitleSHA256, BodySHA256: d.BodySHA256,
 		EvidenceIDs: append([]string(nil), d.EvidenceIDs...), RenderedAt: d.RenderedAt.UTC().Format(time.RFC3339Nano),
@@ -624,7 +628,7 @@ func draftArtifactToMCP(d *contribution.DraftArtifact) mcpcontract.DraftOutput {
 	}
 	for _, warning := range d.Warnings {
 		out.Warnings = append(out.Warnings, mcpcontract.DraftDiagnosticOutput{
-			Code: warning.Code, Severity: warning.Severity, Message: warning.Message, ByteOffset: warning.ByteOffset,
+			Code: warning.Code, Severity: string(warning.Severity), Message: warning.Message, ByteOffset: warning.ByteOffset,
 		})
 	}
 	return out
@@ -660,6 +664,6 @@ func manifestSnapshotRecovery(in mcpcontract.ExportManifestInput) mcpcontract.To
 func manifestStatementToMCP(statement *manifest.Statement, snapshotToken string) mcpcontract.ManifestOutput {
 	return mcpcontract.ManifestOutput{
 		ManifestID: statement.Predicate.ManifestID, ContentSHA256: statement.Predicate.ContentSHA256,
-		SchemaVersion: statement.Predicate.SchemaVersion, Status: statement.Predicate.Status, SnapshotToken: snapshotToken, Statement: *statement,
+		SchemaVersion: statement.Predicate.SchemaVersion, Status: string(statement.Predicate.Status), SnapshotToken: snapshotToken, Statement: *statement,
 	}
 }

@@ -1,7 +1,13 @@
 // Package tuicontract defines the product-owned offline workbench boundary.
 package tuicontract
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+)
 
 // Reader is a narrow local data source. Implementations must not perform
 // network I/O.
@@ -17,13 +23,102 @@ const (
 	CapabilityLocalWrite  Capability = "local_write"
 )
 
+// ParseCapability converts an action boundary value into one supported
+// side-effect class.
+func ParseCapability(value string) (Capability, error) {
+	switch Capability(strings.TrimSpace(value)) {
+	case CapabilityOfflineRead:
+		return CapabilityOfflineRead, nil
+	case CapabilityLocalWrite:
+		return CapabilityLocalWrite, nil
+	default:
+		return "", fmt.Errorf("unsupported action capability %q", value)
+	}
+}
+
 // Action is one contextual, currently executable application operation.
 type Action struct {
+	ID          string     `json:"id"`
+	Label       string     `json:"label"`
+	Description string     `json:"description,omitempty"`
+	Capability  Capability `json:"capability"`
+}
+
+// RequiresConfirmation derives the interaction guard from the action's
+// side-effect capability.
+func (a Action) RequiresConfirmation() bool { return a.Capability == CapabilityLocalWrite }
+
+// ParseAction canonicalizes one provider action before the TUI exposes or
+// executes it.
+func ParseAction(action Action) (Action, error) {
+	action.ID = strings.TrimSpace(action.ID)
+	action.Label = strings.TrimSpace(action.Label)
+	if action.ID == "" {
+		return Action{}, errors.New("action id is required")
+	}
+	if action.Label == "" {
+		return Action{}, errors.New("action label is required")
+	}
+	capability, err := ParseCapability(string(action.Capability))
+	if err != nil {
+		return Action{}, err
+	}
+	action.Capability = capability
+	return action, nil
+}
+
+// ParseActions validates one complete provider menu and rejects ambiguous
+// duplicate action identities.
+func ParseActions(actions []Action) ([]Action, error) {
+	parsed := make([]Action, len(actions))
+	seen := make(map[string]struct{}, len(actions))
+	for index, action := range actions {
+		var err error
+		parsed[index], err = ParseAction(action)
+		if err != nil {
+			return nil, fmt.Errorf("action %d: %w", index, err)
+		}
+		if _, duplicate := seen[parsed[index].ID]; duplicate {
+			return nil, fmt.Errorf("action %d duplicates id %q", index, parsed[index].ID)
+		}
+		seen[parsed[index].ID] = struct{}{}
+	}
+	return parsed, nil
+}
+
+type actionJSON struct {
 	ID                   string     `json:"id"`
 	Label                string     `json:"label"`
 	Description          string     `json:"description,omitempty"`
 	Capability           Capability `json:"capability"`
-	RequiresConfirmation bool       `json:"requires_confirmation"`
+	RequiresConfirmation *bool      `json:"requires_confirmation,omitempty"`
+}
+
+// MarshalJSON preserves the public confirmation field as a derived view.
+func (a Action) MarshalJSON() ([]byte, error) {
+	confirmation := a.RequiresConfirmation()
+	return json.Marshal(actionJSON{
+		ID: a.ID, Label: a.Label, Description: a.Description,
+		Capability: a.Capability, RequiresConfirmation: &confirmation,
+	})
+}
+
+// UnmarshalJSON rejects capability and confirmation combinations that cannot
+// be represented by Action in memory.
+func (a *Action) UnmarshalJSON(data []byte) error {
+	var raw actionJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	parsed, err := ParseAction(Action{ID: raw.ID, Label: raw.Label, Description: raw.Description, Capability: raw.Capability})
+	if err != nil {
+		return err
+	}
+	if raw.RequiresConfirmation != nil && *raw.RequiresConfirmation != parsed.RequiresConfirmation() {
+		return errors.New("action confirmation must match its capability")
+	}
+	*a = parsed
+	return nil
 }
 
 // ActionRequest binds an action to the item from which it was offered.

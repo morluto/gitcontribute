@@ -178,7 +178,7 @@ func CheckWriteAccessAtPath(ctx context.Context, path string) (returnErr error) 
 	if _, err := os.Stat(filePath); err != nil {
 		return fmt.Errorf("inspect corpus for write access: %w", err)
 	}
-	lease, err := acquireCorpusLease(path, false, "check corpus write access")
+	lease, err := acquireCorpusLease(path, sharedCorpusLease, "check corpus write access")
 	if err != nil {
 		return err
 	}

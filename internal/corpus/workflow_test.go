@@ -2,8 +2,10 @@ package corpus
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -230,6 +232,30 @@ func TestContributionWorkflowPersistsAcrossReopen(t *testing.T) {
 	gotDraft, err := c.GetIssueDraft(ctx, opportunity.ID)
 	if err != nil || gotDraft.Body != "proof" {
 		t.Fatalf("GetIssueDraft = (%+v, %v)", gotDraft, err)
+	}
+}
+
+func TestContributionDraftRevisionRejectsPayloadThatDisagreesWithImmutableMetadata(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	draft := &contribution.IssueDraft{
+		OpportunityID: "opp", Title: "original title", Body: "original body", RenderedAt: time.Unix(10, 0).UTC(),
+	}
+	if err := c.SaveIssueDraft(ctx, draft); err != nil {
+		t.Fatal(err)
+	}
+	draft.Body = "tampered but internally coherent body"
+	draft.BodyBytes = len([]byte(draft.Body))
+	draft.BodySHA256 = fmt.Sprintf("%x", sha256.Sum256([]byte(draft.Body)))
+	payload, err := marshalWorkflow(draft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.db.ExecContext(ctx, `UPDATE contribution_draft_revisions SET payload=? WHERE draft_id=? AND revision=?`, payload, draft.ID, draft.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.GetContributionDraftRevision(ctx, draft.ID, draft.Revision); err == nil {
+		t.Fatal("revision payload that disagreed with immutable metadata was accepted")
 	}
 }
 

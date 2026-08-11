@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
-	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 )
 
@@ -62,7 +62,7 @@ func TestSyncMapsIssueMetadataToThread(t *testing.T) {
 		repo: github.Repository{Owner: "owner", Name: "repo", NodeID: "R_1", UpdatedAt: now},
 		issues: []github.Issue{{
 			Number:            1,
-			Kind:              github.ThreadKindIssue,
+			Kind:              domain.IssueKind,
 			State:             "closed",
 			StateReason:       "completed",
 			Title:             "bug",
@@ -98,7 +98,7 @@ func TestSyncMapsIssueMetadataToThread(t *testing.T) {
 	if repo == nil {
 		t.Fatal("repository not found")
 	}
-	thread, err := c.GetThread(ctx, repo.ID, corpus.ThreadKindIssue, 1)
+	thread, err := c.GetThread(ctx, repo.ID, domain.IssueKind, 1)
 	if err != nil {
 		t.Fatalf("get thread: %v", err)
 	}

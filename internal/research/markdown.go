@@ -199,7 +199,7 @@ func writeCoverage(b *strings.Builder, section CoverageSection) {
 		fmt.Fprintln(b, "_No coverage facts stored._")
 	} else {
 		for _, facet := range section.Facets {
-			fmt.Fprintf(b, "- **%s:%s:** present=%t, complete=%t, truncated=%t, count=%d", inline(facet.Scope), inline(facet.Facet), facet.Present, facet.Complete, facet.Truncated, facet.Count)
+			fmt.Fprintf(b, "- **%s:%s:** present=%t, complete=%t, truncated=%t, count=%d", inline(facet.Scope), inline(facet.Facet), facet.Present(), facet.Complete(), facet.Truncated(), facet.Count)
 			if !facet.AsOf.IsZero() {
 				fmt.Fprintf(b, ", as_of=%s", formatMarkdownTime(facet.AsOf))
 			}

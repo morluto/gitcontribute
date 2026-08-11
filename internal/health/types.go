@@ -4,13 +4,12 @@
 package health
 
 import (
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/domain"
 )
-
-// RepoRef is the shared repository identifier.
-type RepoRef = domain.RepoRef
 
 // Window describes the time bounds and label for a metric group.
 type Window struct {
@@ -148,8 +147,77 @@ type ResponseTimeMetric struct {
 // CoverageSummary reports top-level data-availability notes.
 type CoverageSummary struct {
 	ThreadsLimit         int  `json:"threads_limit"`
-	ThreadsComplete      bool `json:"threads_complete"`
-	ThreadsTruncated     bool `json:"threads_truncated"`
 	ThreadsSampleSize    int  `json:"threads_sample_size"`
 	RepositoryProjection bool `json:"repository_projection"`
+	threads              ThreadCoverage
+}
+
+// ThreadCoverage is the mutually exclusive completeness state of the bounded
+// repository thread sample. The zero value represents an uncomputed report.
+type ThreadCoverage string
+
+const (
+	ThreadCoverageComplete  ThreadCoverage = "complete"
+	ThreadCoverageTruncated ThreadCoverage = "truncated"
+)
+
+// ThreadsComplete reports whether every stored thread was included.
+func (s CoverageSummary) ThreadsComplete() bool { return s.threads == ThreadCoverageComplete }
+
+// ThreadsTruncated reports whether the bounded sample omitted stored threads.
+func (s CoverageSummary) ThreadsTruncated() bool { return s.threads == ThreadCoverageTruncated }
+
+func newCoverageSummary(limit, sampleSize int, complete, repositoryProjection bool) CoverageSummary {
+	coverage := ThreadCoverageTruncated
+	if complete {
+		coverage = ThreadCoverageComplete
+	}
+	return CoverageSummary{
+		ThreadsLimit: limit, ThreadsSampleSize: sampleSize,
+		RepositoryProjection: repositoryProjection, threads: coverage,
+	}
+}
+
+// MarshalJSON preserves the public complementary boolean representation while
+// keeping one authoritative state in memory.
+func (s CoverageSummary) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		ThreadsLimit         int  `json:"threads_limit"`
+		ThreadsComplete      bool `json:"threads_complete"`
+		ThreadsTruncated     bool `json:"threads_truncated"`
+		ThreadsSampleSize    int  `json:"threads_sample_size"`
+		RepositoryProjection bool `json:"repository_projection"`
+	}{
+		ThreadsLimit: s.ThreadsLimit, ThreadsComplete: s.ThreadsComplete(),
+		ThreadsTruncated: s.ThreadsTruncated(), ThreadsSampleSize: s.ThreadsSampleSize,
+		RepositoryProjection: s.RepositoryProjection,
+	})
+}
+
+// UnmarshalJSON parses the legacy public booleans into one coverage state.
+func (s *CoverageSummary) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		ThreadsLimit         int  `json:"threads_limit"`
+		ThreadsComplete      bool `json:"threads_complete"`
+		ThreadsTruncated     bool `json:"threads_truncated"`
+		ThreadsSampleSize    int  `json:"threads_sample_size"`
+		RepositoryProjection bool `json:"repository_projection"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if raw.ThreadsComplete && raw.ThreadsTruncated {
+		return fmt.Errorf("thread coverage cannot be both complete and truncated")
+	}
+	coverage := ThreadCoverage("")
+	if raw.ThreadsComplete {
+		coverage = ThreadCoverageComplete
+	} else if raw.ThreadsTruncated {
+		coverage = ThreadCoverageTruncated
+	}
+	*s = CoverageSummary{
+		ThreadsLimit: raw.ThreadsLimit, ThreadsSampleSize: raw.ThreadsSampleSize,
+		RepositoryProjection: raw.RepositoryProjection, threads: coverage,
+	}
+	return nil
 }

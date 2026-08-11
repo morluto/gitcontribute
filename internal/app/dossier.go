@@ -178,7 +178,7 @@ func (s *Service) ExtractSeeds(ctx context.Context, repo contracts.RepoRef, opts
 		return nil, fmt.Errorf("%w: %s", errRepositoryNotFound, ref)
 	}
 
-	threads, err := c.ListThreads(ctx, repoProjection.ID, "", 10000)
+	threads, err := c.ListThreads(ctx, repoProjection.ID, corpus.AnyThreadKind(), 10000)
 	if err != nil {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
@@ -253,7 +253,7 @@ func selectedSeedPolarities(polarities []domain.SeedPolarity) (map[domain.SeedPo
 
 func classForThread(t corpus.Thread) (domain.SeedSourceClass, bool) {
 	switch t.Kind {
-	case corpus.ThreadKindPullRequest:
+	case domain.PullRequestKind:
 		if t.Merge.IsMerged() {
 			return domain.SeedSourceClassMergedPR, true
 		}
@@ -261,7 +261,7 @@ func classForThread(t corpus.Thread) (domain.SeedSourceClass, bool) {
 			return domain.SeedSourceClassClosedUnmergedPR, true
 		}
 		return "", false
-	case corpus.ThreadKindIssue:
+	case domain.IssueKind:
 		return domain.SeedSourceClassIssue, true
 	default:
 		return "", false
@@ -297,7 +297,7 @@ func buildSeed(ctx context.Context, c *corpus.Corpus, t corpus.Thread, class dom
 		Number:         t.Number,
 		Title:          t.Title,
 		Author:         t.Author,
-		State:          t.State,
+		State:          string(t.State),
 		Labels:         sortedCopy(t.Labels),
 		CreatedAt:      t.SourceCreatedAt,
 		UpdatedAt:      t.SourceUpdatedAt,
@@ -315,7 +315,7 @@ func buildSeed(ctx context.Context, c *corpus.Corpus, t corpus.Thread, class dom
 
 func latestPRPayload(ctx context.Context, c *corpus.Corpus, t corpus.Thread) (prPayloadFields, error) {
 	var out prPayloadFields
-	if t.Kind != corpus.ThreadKindPullRequest {
+	if t.Kind != domain.PullRequestKind {
 		return out, nil
 	}
 	obs, err := c.LatestThreadObservation(ctx, t.ID)
@@ -349,7 +349,7 @@ func extractEvidence(t corpus.Thread, class domain.SeedSourceClass, pr prPayload
 		ValidationIndicators:    sortedUnique(extractValidationIndicators(text, t.Labels)),
 		ApproximateScope:        extractApproximateScope(pr),
 		ScopeEvidence:           scopeEvidence(pr),
-		RejectionOrSupersession: extractRejectionContext(class, t.State, t.StateReason, t.Title, t.Body, t.Labels),
+		RejectionOrSupersession: extractRejectionContext(class, string(t.State), t.StateReason, t.Title, t.Body, t.Labels),
 		ProblemAreas:            sortedUnique(extractProblemAreas(t.Title, t.Body, t.Labels)),
 	}
 	return ev

@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/morluto/gitcontribute/internal/config"
@@ -18,47 +16,6 @@ import (
 	clientsetup "github.com/morluto/gitcontribute/internal/setup"
 	"golang.org/x/mod/semver"
 )
-
-var (
-	upgradeCommand = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-		if name != "npm" {
-			return nil, fmt.Errorf("unsupported upgrade command %q", name)
-		}
-		return runNPMCommand(ctx, args)
-	}
-	runtimeContractCommand = func(ctx context.Context, path string) ([]byte, error) {
-		return exec.CommandContext(ctx, path, "runtime-contract").CombinedOutput()
-	}
-	osExecutable = os.Executable
-	upgradeGOOS  = runtime.GOOS
-)
-
-func runNPMCommand(ctx context.Context, args []string) ([]byte, error) {
-	if len(args) == 0 {
-		return nil, errors.New("missing npm arguments")
-	}
-
-	var command *exec.Cmd
-	switch {
-	case len(args) == 3 && args[0] == "view" && args[1] == "gitcontribute" && args[2] == "version":
-		command = exec.CommandContext(ctx, "npm", "view", "gitcontribute", "version")
-	case len(args) == 2 && args[0] == "root" && args[1] == "--global":
-		command = exec.CommandContext(ctx, "npm", "root", "--global")
-	case len(args) == 3 && args[0] == "install" && args[1] == "--global":
-		version, err := clientsetup.ResolveNPMVersion(strings.TrimPrefix(args[2], "gitcontribute@"))
-		if err != nil || args[2] != "gitcontribute@"+version {
-			return nil, fmt.Errorf("unsupported npm install target %q", args[2])
-		}
-		command = exec.CommandContext(ctx, "npm")
-		command.Args = []string{"npm", "install", "--global", "gitcontribute@" + version}
-	default:
-		return nil, fmt.Errorf("unsupported npm arguments %q", args)
-	}
-	if args[0] != "install" {
-		return command.Output()
-	}
-	return command.CombinedOutput()
-}
 
 // Upgrade checks npm for the latest release and updates persistent npm
 // installations when explicitly authorized. It reports inspectable stages
@@ -73,21 +30,28 @@ func (s *Service) Upgrade(ctx context.Context, opts contracts.UpgradeOptions) (*
 	if s.paths == nil {
 		s.paths = config.NewPaths(nil)
 	}
+	environment := s.upgradeEnv.withDefaults()
+	executable := s.executable
+	if executable == nil {
+		executable = os.Executable
+	}
+	intent := parseUpgradeIntent(opts.Check, opts.Yes)
 
-	latest := ""
-	if opts.Check || opts.Yes {
+	var target npmVersion
+	if intent != upgradeInspect {
 		var err error
-		latest, err = latestNPMVersion(ctx)
+		target, err = latestNPMVersion(ctx, environment.npm)
 		if err != nil {
 			return nil, err
 		}
 	}
+	latest := target.String()
 
 	current := normalizeVersion(s.version)
-	details := discoverInstallation(ctx)
+	details := discoverInstallation(ctx, environment, executable)
 
 	report := &contracts.UpgradeReport{
-		Context: details.context,
+		Context: details.kind.String(),
 		Current: current,
 		Latest:  latest,
 	}
@@ -105,17 +69,17 @@ func (s *Service) Upgrade(ctx context.Context, opts contracts.UpgradeOptions) (*
 
 	report.Stages = append(report.Stages, s.schemaStage(ctx))
 
-	report.Stages = append(report.Stages, activationStage(report, opts))
-	report.Stages = append(report.Stages, rollbackStage(report))
+	report.Stages = append(report.Stages, activationStage(report, intent, environment.installPolicy, details.kind))
+	report.Stages = append(report.Stages, rollbackStage(report, details.kind))
 
-	setCommandAndStatus(report)
+	setCommandAndStatus(report, details.kind)
 	recoveringNewerCorpus := stageStatus(report, "corpus-schema") == "newer"
 
-	if shouldInstall(report, opts) {
-		if err := runNPMInstall(ctx, latest); err != nil {
+	if shouldInstall(report, intent, environment.installPolicy, details.kind) {
+		if err := runNPMInstall(ctx, environment.npm, target); err != nil {
 			return nil, err
 		}
-		if err := verifyGlobalNPMVersion(ctx, latest); err != nil {
+		if err := verifyGlobalNPMVersion(ctx, environment.npm, target); err != nil {
 			return nil, err
 		}
 		setStage(report, contracts.UpgradeStage{
@@ -128,75 +92,71 @@ func (s *Service) Upgrade(ctx context.Context, opts contracts.UpgradeOptions) (*
 		})
 		report.Status = "updated"
 		report.Command = ""
-		if recoveringNewerCorpus && !s.validateNewerCorpusTarget(ctx, report, details.executable, latest) {
+		if recoveringNewerCorpus && !s.validateNewerCorpusTarget(ctx, report, details.executable, latest, environment.runtimeContract) {
 			return report, nil
 		}
 	}
 
-	if opts.Yes && stageStatus(report, "corpus-schema") != "incompatible" && len(outdatedPrivateRuntimeClients(report)) > 0 {
-		s.activatePrivateRuntime(ctx, report, details)
+	if intent == upgradeApply && stageStatus(report, "corpus-schema") != "incompatible" && len(outdatedPrivateRuntimeClients(report)) > 0 {
+		s.activatePrivateRuntime(ctx, report, details, environment.runtimeContract)
 	}
-	if opts.Yes && registrationRepairAllowed(report) && len(staleRegistrationClients(report)) > 0 {
+	if intent == upgradeApply && registrationRepairAllowed(report) && len(staleRegistrationClients(report)) > 0 {
 		s.repairStaleRegistrations(ctx, report)
 	}
 
 	return report, nil
 }
 
-func verifyGlobalNPMVersion(ctx context.Context, want string) error {
-	root, err := upgradeCommand(ctx, "npm", "root", "--global")
+func verifyGlobalNPMVersion(ctx context.Context, npm npmUpgradeClient, want npmVersion) error {
+	root, err := npm.globalRoot(ctx)
 	if err != nil {
 		return fmt.Errorf("verify global npm root: %w", err)
 	}
 	packageRoot := filepath.Join(strings.TrimSpace(string(root)), "gitcontribute")
-	if got := readPackageVersion(packageRoot); got != want {
-		return fmt.Errorf("verify installed npm release: got %q, want %q", got, want)
+	if got := readPackageVersion(packageRoot); got != want.String() {
+		return fmt.Errorf("verify installed npm release: got %q, want %q", got, want.String())
 	}
 	return nil
 }
 
-func latestNPMVersion(ctx context.Context) (string, error) {
-	output, err := upgradeCommand(ctx, "npm", "view", "gitcontribute", "version")
+func latestNPMVersion(ctx context.Context, npm npmUpgradeClient) (npmVersion, error) {
+	output, err := npm.latestVersion(ctx)
 	if err != nil {
-		return "", fmt.Errorf("check latest npm release: %w", err)
+		return npmVersion{}, fmt.Errorf("check latest npm release: %w", err)
 	}
 	version := normalizeVersion(string(output))
-	resolved, err := clientsetup.ResolveNPMVersion(version)
+	resolved, err := parseNPMVersion(version)
 	if err != nil {
-		return "", fmt.Errorf("validate latest npm release: %w", err)
+		return npmVersion{}, fmt.Errorf("validate latest npm release: %w", err)
 	}
 	return resolved, nil
 }
 
-func runNPMInstall(ctx context.Context, version string) error {
-	resolved, err := clientsetup.ResolveNPMVersion(version)
-	if err != nil {
-		return fmt.Errorf("validate latest npm release: %w", err)
-	}
-	if _, err := upgradeCommand(ctx, "npm", "install", "--global", "gitcontribute@"+resolved); err != nil {
+func runNPMInstall(ctx context.Context, npm npmUpgradeClient, version npmVersion) error {
+	if _, err := npm.install(ctx, version); err != nil {
 		return fmt.Errorf("install latest npm release: %w", err)
 	}
 	return nil
 }
 
-func shouldInstall(report *contracts.UpgradeReport, opts contracts.UpgradeOptions) bool {
-	if !opts.Yes {
+func shouldInstall(report *contracts.UpgradeReport, intent upgradeIntent, policy npmInstallPolicy, kind installationKind) bool {
+	if intent != upgradeApply {
 		return false
 	}
-	if report.Context != "global-npm" {
+	if kind != installationGlobalNPM {
 		return false
 	}
-	if upgradeGOOS == "windows" {
+	if policy == npmInstallAfterExit {
 		return false
 	}
 	if status := stageStatus(report, "corpus-schema"); status == "migration_required" || status == "incompatible" || status == "failed" {
 		return false
 	}
-	disposition := reportVersionDisposition(report)
+	disposition := reportVersionDisposition(report, kind)
 	return disposition == versionUpgrade || disposition == versionPrerelease
 }
 
-func setCommandAndStatus(report *contracts.UpgradeReport) {
+func setCommandAndStatus(report *contracts.UpgradeReport, kind installationKind) {
 	if stageStatus(report, "corpus-schema") == "migration_required" {
 		report.Status = "schema migration required"
 		return
@@ -210,13 +170,13 @@ func setCommandAndStatus(report *contracts.UpgradeReport) {
 		return
 	}
 
-	switch report.Context {
-	case "npx":
+	switch kind {
+	case installationNPX:
 		report.Status = "npx"
-	case "other":
+	case installationOther:
 		report.Status = "not managed"
-	case "project-npm":
-		switch reportVersionDisposition(report) {
+	case installationProjectNPM:
+		switch reportVersionDisposition(report, kind) {
 		case versionUnavailable:
 			report.Status = "awaiting confirmation"
 		case versionCurrent:
@@ -232,8 +192,8 @@ func setCommandAndStatus(report *contracts.UpgradeReport) {
 		case versionInvalid:
 			report.Status = "version comparison unavailable"
 		}
-	case "global-npm":
-		switch reportVersionDisposition(report) {
+	case installationGlobalNPM:
+		switch reportVersionDisposition(report, kind) {
 		case versionUnavailable:
 			report.Status = "awaiting confirmation"
 		case versionCurrent:
@@ -304,9 +264,9 @@ func isNewerVersion(current, target string) bool {
 	return disposition == versionUpgrade || disposition == versionPrerelease
 }
 
-func reportVersionDisposition(report *contracts.UpgradeReport) versionDisposition {
+func reportVersionDisposition(report *contracts.UpgradeReport, kind installationKind) versionDisposition {
 	current := report.Current
-	if report.Context == "global-npm" || report.Context == "project-npm" {
+	if kind == installationGlobalNPM || kind == installationProjectNPM {
 		if installed := stageVersion(report, "npm-launcher"); installed != "" {
 			current = installed
 		}
@@ -317,65 +277,65 @@ func reportVersionDisposition(report *contracts.UpgradeReport) versionDispositio
 func installationStage(details installDetails, current string) contracts.UpgradeStage {
 	return contracts.UpgradeStage{
 		Name:    "installation",
-		Status:  details.context,
+		Status:  details.kind.String(),
 		Path:    details.executable,
 		Version: current,
-		Message: installMessage(details.context),
+		Message: installMessage(details.kind),
 	}
 }
 
-func installMessage(context string) string {
-	switch context {
-	case "npx":
+func installMessage(kind installationKind) string {
+	switch kind {
+	case installationNPX:
 		return "npx resolves versions on demand; no persistent installation to update"
-	case "project-npm":
+	case installationProjectNPM:
 		return "project-local npm installation"
-	case "global-npm":
+	case installationGlobalNPM:
 		return "global npm installation"
-	case "other":
+	case installationOther:
 		return "executable is not inside a managed npm package"
 	default:
 		return ""
 	}
 }
 
-func discoverInstallation(ctx context.Context) installDetails {
+func discoverInstallation(ctx context.Context, environment upgradeEnvironment, executablePath func() (string, error)) installDetails {
 	if os.Getenv("npm_command") == "exec" || os.Getenv("npm_lifecycle_event") == "npx" {
-		executable, _ := osExecutable()
-		return installDetails{context: "npx", executable: executable}
+		executable, _ := executablePath()
+		return installDetails{kind: installationNPX, executable: executable}
 	}
-	executable, err := osExecutable()
+	executable, err := executablePath()
 	if err != nil {
-		return installDetails{context: "other"}
+		return installDetails{kind: installationOther}
 	}
 	normalized := filepath.ToSlash(executable)
 	if !strings.Contains(normalized, "/node_modules/gitcontribute/") {
-		return installDetails{context: "other", executable: executable}
+		return installDetails{kind: installationOther, executable: executable}
 	}
-	globalRoot, err := upgradeCommand(ctx, "npm", "root", "--global")
+	globalRoot, err := environment.npm.globalRoot(ctx)
 	if err != nil {
-		return installDetails{context: "project-npm", executable: executable}
+		return installDetails{kind: installationProjectNPM, executable: executable}
 	}
 	root := strings.TrimSpace(string(globalRoot))
 	return installDetails{
-		context:    classifyNPMExecutable(executable, root),
+		kind:       installationKindFromExecutable(executable, root),
 		executable: executable,
 		npmRoot:    root,
 	}
 }
 
-func classifyNPMExecutable(executable, globalRoot string) string {
+func executableWithinNPMRoot(executable, globalRoot string) bool {
 	executable = filepath.Clean(executable)
 	globalPackage := filepath.Join(filepath.Clean(globalRoot), "gitcontribute")
 	relative, err := filepath.Rel(globalPackage, executable)
 	if err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-		return "global-npm"
+		return true
 	}
-	return "project-npm"
+	return false
 }
 
 func npmPackageRoot(details installDetails) string {
-	if details.context == "global-npm" && details.npmRoot != "" {
+	if details.kind == installationGlobalNPM && details.npmRoot != "" {
 		return filepath.Join(filepath.Clean(details.npmRoot), "gitcontribute")
 	}
 	normalized := filepath.ToSlash(details.executable)
@@ -390,8 +350,8 @@ func npmLauncherStage(details installDetails, _ string, latest string) contracts
 	stage := contracts.UpgradeStage{Name: "npm-launcher"}
 	root := npmPackageRoot(details)
 	if root == "" {
-		stage.Status = details.context
-		stage.Message = installMessage(details.context)
+		stage.Status = details.kind.String()
+		stage.Message = installMessage(details.kind)
 		return stage
 	}
 	stage.Path = root
@@ -571,7 +531,7 @@ func (s *Service) configuredRuntimesStage(ctx context.Context, current, latest s
 	outdated := 0
 	stale := 0
 	failed := 0
-	for _, client := range clientsetup.AllClients {
+	for _, client := range clientsetup.SupportedClients() {
 		c, err := inspectConfiguredClient(home, client, target)
 		if err != nil {
 			c = contracts.UpgradeConfiguredClient{Name: string(client), Status: "failed", Message: err.Error()}

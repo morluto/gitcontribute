@@ -212,9 +212,9 @@ func TestArchiveClientFetchContextCancellation(t *testing.T) {
 
 func TestArchiveClientDefaultUsesProductionURL(t *testing.T) {
 	f := NewArchiveClient()
-	client, ok := f.(*ArchiveClient)
+	client, ok := f.(*archiveClient)
 	if !ok {
-		t.Fatalf("expected *ArchiveClient, got %T", f)
+		t.Fatalf("expected *archiveClient, got %T", f)
 	}
 	if client.baseURL != DefaultArchiveBaseURL {
 		t.Fatalf("baseURL = %q, want %q", client.baseURL, DefaultArchiveBaseURL)

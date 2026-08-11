@@ -13,11 +13,22 @@ import (
 	"testing"
 )
 
+func TestReadClaudeCommandRejectsNonStringArguments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".claude.json")
+	data := `{"mcpServers":{"gitcontribute":{"command":"node","args":["mcp",123]}}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readCommandFile(Claude, path); err == nil || !strings.Contains(err.Error(), "args[1]") {
+		t.Fatalf("readClaudeCommand error = %v, want indexed non-string argument error", err)
+	}
+}
+
 func TestActivateExistingRestoresAllRegistrationsWhenInterrupted(t *testing.T) {
 	home := t.TempDir()
 	oldExecutable := filepath.Join(home, "bin", "1.2.3", "gitcontribute")
 	newExecutable := filepath.Join(home, "bin", "1.2.4", "gitcontribute")
-	opts := Options{Operation: Configure, All: true, Home: home, Executable: oldExecutable}
+	opts := Options{Operation: Configure, Clients: SupportedClients(), Home: home, Executable: oldExecutable}
 	if _, err := Run(opts); err != nil {
 		t.Fatal(err)
 	}
@@ -34,12 +45,7 @@ func TestActivateExistingRestoresAllRegistrationsWhenInterrupted(t *testing.T) {
 
 	interrupted := errors.New("activation interrupted")
 	opts.Executable = newExecutable
-	_, err = activateExisting(context.Background(), opts, func(_ context.Context, index int) error {
-		if index == 0 {
-			return interrupted
-		}
-		return nil
-	}, nil)
+	_, err = activateExisting(context.Background(), opts, func() error { return interrupted })
 	if !errors.Is(err, interrupted) {
 		t.Fatalf("activate error = %v, want interruption", err)
 	}
@@ -99,12 +105,12 @@ func TestActivateExistingPreservesConcurrentEditDuringRollback(t *testing.T) {
 	concurrentEdit := []byte("model = \"concurrent\"\n")
 	interrupted := errors.New("activation interrupted")
 	opts.Executable = newExecutable
-	_, err := activateExisting(context.Background(), opts, func(_ context.Context, _ int) error {
+	_, err := activateExisting(context.Background(), opts, func() error {
 		if writeErr := os.WriteFile(codexPath, concurrentEdit, 0o600); writeErr != nil {
 			t.Fatal(writeErr)
 		}
 		return interrupted
-	}, nil)
+	})
 	var rollbackFailure *ActivationRollbackError
 	if !errors.As(err, &rollbackFailure) {
 		t.Fatalf("activate error = %v, want ActivationRollbackError", err)
@@ -129,7 +135,7 @@ func TestRunConfiguresAndRemovesClientsIdempotently(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte("{\"theme\":\"dark\"}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	opts := Options{Operation: Configure, All: true, Home: home, Executable: filepath.Join(home, "bin", "gitcontribute")}
+	opts := Options{Operation: Configure, Clients: SupportedClients(), Home: home, Executable: filepath.Join(home, "bin", "gitcontribute")}
 	report, err := Run(opts)
 	if err != nil {
 		t.Fatal(err)
@@ -176,6 +182,46 @@ func TestRunConfiguresAndRemovesClientsIdempotently(t *testing.T) {
 	if !strings.Contains(string(codex), "model = \"test\"") || strings.Contains(string(codex), "gitcontribute") {
 		t.Fatalf("codex removal:\n%s", codex)
 	}
+}
+
+func TestEditJSONRegistrationPreservesUnrelatedIntegerPrecision(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".claude.json")
+	const largeInteger = "9007199254740993"
+	original := []byte(`{"opaque_id":` + largeInteger + `,"mcpServers":{"other":{"opaque_id":` + largeInteger + `}}}`)
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	launcher := Launcher{Command: "/managed/gitcontribute", Args: canonicalMCPArgs()}
+	if status, err := editJSONRegistration(path, Configure, launcher, false); err != nil || status != ChangeConfigured {
+		t.Fatalf("configure status = %q, error = %v", status, err)
+	}
+	assertPreserved := func() {
+		t.Helper()
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		root, err := parseJSONObject(data, "test config")
+		if err != nil {
+			t.Fatal(err)
+		}
+		servers, err := parseJSONObject(root["mcpServers"], "mcpServers")
+		if err != nil {
+			t.Fatal(err)
+		}
+		other, err := parseJSONObject(servers["other"], "other server")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(root["opaque_id"]) != largeInteger || string(other["opaque_id"]) != largeInteger {
+			t.Fatalf("unrelated integers changed: %s", data)
+		}
+	}
+	assertPreserved()
+	if status, err := editJSONRegistration(path, Remove, launcher, false); err != nil || status != ChangeRemoved {
+		t.Fatalf("remove status = %q, error = %v", status, err)
+	}
+	assertPreserved()
 }
 
 func TestDryRunDoesNotWrite(t *testing.T) {

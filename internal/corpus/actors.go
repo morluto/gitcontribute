@@ -1,12 +1,12 @@
 package corpus
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 )
@@ -66,15 +66,6 @@ type ActorProfileObservation struct {
 	ObservedAt         time.Time
 	AuthorizationScope string
 	RawPayload         json.RawMessage
-}
-
-// ActorSearchOptions scopes one local actor search page.
-type ActorSearchOptions struct {
-	Query  string
-	Kinds  []string
-	Sort   string
-	Limit  int
-	Cursor string
 }
 
 // ActorSearchPage is one bounded local result page.
@@ -176,6 +167,10 @@ func (c *Corpus) ApplyActorIdentityObservation(ctx context.Context, provider, lo
 	if len(raw) == 0 {
 		raw = json.RawMessage(`{}`)
 	}
+	raw, err := parseJSONPayload("actor identity observation", raw)
+	if err != nil {
+		return Actor{}, err
+	}
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Actor{}, fmt.Errorf("begin actor identity observation: %w", err)
@@ -250,6 +245,10 @@ func (c *Corpus) ApplyActorProfileObservation(ctx context.Context, input ActorPr
 			return Actor{}, fmt.Errorf("encode actor observation: %w", err)
 		}
 		payload = encoded
+	}
+	payload, err := parseJSONPayload("actor profile observation", payload)
+	if err != nil {
+		return Actor{}, err
 	}
 	tx, err := c.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -329,6 +328,14 @@ func (c *Corpus) ApplyActorProfileObservation(ctx context.Context, input ActorPr
 		return Actor{}, errors.New("actor projection missing after commit")
 	}
 	return *actor, nil
+}
+
+func parseJSONPayload(name string, payload json.RawMessage) (json.RawMessage, error) {
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, payload); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", name, err)
+	}
+	return append(json.RawMessage(nil), compact.Bytes()...), nil
 }
 
 func resolveActorID(ctx context.Context, tx *sql.Tx, input ActorProfileObservation, observedAt int64) (int64, error) {
@@ -541,30 +548,17 @@ func intPtrSQL(value sql.NullInt64) *int {
 }
 
 // SearchActors runs one bounded offline actor query.
-func (c *Corpus) SearchActors(ctx context.Context, options ActorSearchOptions) (ActorSearchPage, error) {
-	if options.Limit == 0 {
-		options.Limit = 20
-	}
-	if options.Limit < 1 || options.Limit > 100 {
-		return ActorSearchPage{}, errors.New("actor search limit must be between 1 and 100")
-	}
-	if options.Sort == "" {
-		options.Sort = "relevance"
-	}
-	validSort := map[string]bool{"relevance": true, "login": true, "followers": true, "public_repositories": true, "profile_updated_at": true, "observed_at": true}
-	if !validSort[options.Sort] {
-		return ActorSearchPage{}, errors.New("unsupported actor sort")
-	}
+func (c *Corpus) SearchActors(ctx context.Context, request ActorSearchRequest) (ActorSearchPage, error) {
 	offset := 0
-	filterKey := actorSearchFilterKey(options)
-	if options.Cursor != "" {
-		cursor, err := decodeCursor(options.Cursor)
-		if err != nil || cursor.Scope != "actors" || cursor.Query != options.Query || cursor.Filter != filterKey {
+	filterKey := request.sort.String() + "|" + request.kinds.key()
+	if request.page.Cursor() != "" {
+		cursor, err := decodeCursor(request.page.Cursor())
+		if err != nil || cursor.Scope != "actors" || cursor.Query != request.query || cursor.Filter != filterKey {
 			return ActorSearchPage{}, errors.New("invalid actor search cursor")
 		}
 		offset = int(cursor.ID)
 	}
-	ftsQuery := literalFTSQuery(options.Query)
+	ftsQuery := literalFTSQuery(request.query)
 	from := `actors a LEFT JOIN actor_profiles p ON p.actor_id=a.id`
 	where, args := ` WHERE 1=1`, []any{}
 	rank := `0.0`
@@ -576,22 +570,16 @@ func (c *Corpus) SearchActors(ctx context.Context, options ActorSearchOptions) (
 		args = append(args, ftsQuery)
 		rank = `bm25(actors_fts, 0.0, 10.0, 5.0, 2.0, 2.0, 1.0)`
 	}
-	if len(options.Kinds) > 0 {
-		placeholders := make([]string, len(options.Kinds))
-		for i, kind := range options.Kinds {
+	kinds := request.kinds.values()
+	if len(kinds) > 0 {
+		placeholders := make([]string, len(kinds))
+		for i, kind := range kinds {
 			placeholders[i] = "?"
 			args = append(args, kind)
 		}
 		where += ` AND a.kind IN (` + strings.Join(placeholders, ",") + `)`
 	}
-	order := map[string]string{
-		"relevance":           rank + `, a.source_updated_at DESC, a.id`,
-		"login":               `a.current_login COLLATE NOCASE, a.id`,
-		"followers":           `COALESCE(p.followers,-1) DESC, a.id`,
-		"public_repositories": `COALESCE(p.public_repositories,-1) DESC, a.id`,
-		"profile_updated_at":  `COALESCE(p.source_updated_at,0) DESC, a.id`,
-		"observed_at":         `COALESCE(p.observed_at,0) DESC, a.id`,
-	}[options.Sort]
+	order := request.sort.expression(rank)
 	// actorSelect includes its own FROM clause, so build the projection directly.
 	query := `SELECT ` + rank + `, a.id, a.actor_key, a.provider, COALESCE(a.node_id,''), a.database_id, a.kind, a.current_login,
 	 a.source_updated_at, a.observation_sequence, a.created_at, a.updated_at,
@@ -599,13 +587,13 @@ func (c *Corpus) SearchActors(ctx context.Context, options ActorSearchOptions) (
 	 p.hireable, p.followers, p.following, p.public_repositories, p.public_gists, p.provider_created_at,
 	 p.source_updated_at, p.observation_sequence, p.observed_at, p.authorization_scope
 	 FROM ` + from + where + ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
-	args = append(args, options.Limit+1, offset)
+	args = append(args, request.page.Limit()+1, offset)
 	rows, err := c.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return ActorSearchPage{}, fmt.Errorf("search actors: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	actors := make([]Actor, 0, options.Limit+1)
+	actors := make([]Actor, 0, request.page.Limit()+1)
 	for rows.Next() {
 		var rankValue float64
 		var actor Actor
@@ -636,9 +624,9 @@ func (c *Corpus) SearchActors(ctx context.Context, options ActorSearchOptions) (
 		return ActorSearchPage{}, err
 	}
 	page := ActorSearchPage{Actors: actors}
-	if len(page.Actors) > options.Limit {
-		page.Actors = page.Actors[:options.Limit]
-		page.NextCursor = encodeCursor(searchCursor{Scope: "actors", Query: options.Query, Filter: filterKey, ID: int64(offset + options.Limit)})
+	if len(page.Actors) > request.page.Limit() {
+		page.Actors = page.Actors[:request.page.Limit()]
+		page.NextCursor = encodeCursor(searchCursor{Scope: "actors", Query: request.query, Filter: filterKey, ID: int64(offset + request.page.Limit())})
 	}
 	countQuery := `SELECT COUNT(*) FROM ` + from + where
 	countArgs := args[:len(args)-2]
@@ -646,10 +634,4 @@ func (c *Corpus) SearchActors(ctx context.Context, options ActorSearchOptions) (
 		return ActorSearchPage{}, fmt.Errorf("count actors: %w", err)
 	}
 	return page, nil
-}
-
-func actorSearchFilterKey(options ActorSearchOptions) string {
-	kinds := append([]string(nil), options.Kinds...)
-	slices.Sort(kinds)
-	return options.Sort + "|" + strings.Join(kinds, ",")
 }

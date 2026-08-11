@@ -2,54 +2,24 @@ package app
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
 // RunValidation submits one bounded validation execution group.
 func (r *MCPReader) RunValidation(ctx context.Context, in mcpcontract.RunValidationInput) (mcpcontract.JobReference, error) {
-	if !in.Execute {
-		return mcpcontract.JobReference{}, errors.New("execute must be true to authorize host command execution")
-	}
-	if in.RunCount == 0 {
-		in.RunCount = 1
-	}
-	if in.Concurrency == 0 {
-		in.Concurrency = 1
-	}
-	if in.SampleInterval == "" {
-		in.SampleInterval = "100ms"
-	}
-	kinds := []string{in.Target}
-	if in.Target == "both" {
-		kinds = []string{"base", "candidate"}
-	}
-	perRunTimeout, err := parseOptionalDuration(in.PerRunTimeout)
+	request, canonical, err := parseMCPRepeatValidationInput(in)
 	if err != nil {
-		return mcpcontract.JobReference{}, fmt.Errorf("per_run_timeout: %w", err)
+		return mcpcontract.JobReference{}, err
 	}
-	overallTimeout, err := parseOptionalDuration(in.OverallTimeout)
-	if err != nil {
-		return mcpcontract.JobReference{}, fmt.Errorf("overall_timeout: %w", err)
-	}
-	sampleInterval, err := parseOptionalDuration(in.SampleInterval)
-	if err != nil {
-		return mcpcontract.JobReference{}, fmt.Errorf("sample_interval: %w", err)
-	}
-	opts := contracts.RepeatValidationOptions{
-		Kinds: kinds, RunCount: in.RunCount, Concurrency: in.Concurrency,
-		PerRunTimeout: perRunTimeout, OverallTimeout: overallTimeout, SampleInterval: sampleInterval, Execute: true,
-	}
-	id, err := r.submitJob(ctx, "run_validation_group", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
-		if err := report("validation", jobProgressCounts(0, in.RunCount*len(kinds))); err != nil {
+	total := request.options.RunCount * len(request.options.Kinds)
+	id, err := r.submitJob(ctx, "run_validation_group", canonical, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
+		if err := report("validation", jobProgressCounts(0, total)); err != nil {
 			return nil, err
 		}
-		result, err := r.RunValidationGroup(ctx, in.ID, opts)
+		result, err := r.runValidationGroup(ctx, request)
 		if err != nil {
 			return nil, err
 		}
@@ -65,7 +35,8 @@ func (r *MCPReader) RunValidation(ctx context.Context, in mcpcontract.RunValidat
 }
 
 func parseOptionalDuration(value string) (time.Duration, error) {
-	if strings.TrimSpace(value) == "" {
+	value = strings.TrimSpace(value)
+	if value == "" {
 		return 0, nil
 	}
 	return time.ParseDuration(value)

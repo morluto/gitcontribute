@@ -8,6 +8,8 @@ import (
 
 	"github.com/morluto/gitcontribute/internal/config"
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/corpus"
+	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
@@ -68,8 +70,8 @@ func (r *authoredHeaderReader) SearchAuthoredPullRequests(_ context.Context, opt
 		return r.searchResult, nil
 	}
 	return github.AuthoredPullRequestSearchResult{Items: []github.Issue{
-		{RepositoryOwner: "owner", RepositoryName: "repo", Kind: github.ThreadKindPullRequest, Number: 2, State: "open", Title: "first", CreatedAt: r.now, UpdatedAt: r.now},
-		{RepositoryOwner: "owner", RepositoryName: "repo", Kind: github.ThreadKindPullRequest, Number: 3, State: "open", Title: "second", CreatedAt: r.now, UpdatedAt: r.now},
+		{RepositoryOwner: "owner", RepositoryName: "repo", Kind: domain.PullRequestKind, Number: 2, State: "open", Title: "first", CreatedAt: r.now, UpdatedAt: r.now},
+		{RepositoryOwner: "owner", RepositoryName: "repo", Kind: domain.PullRequestKind, Number: 3, State: "open", Title: "second", CreatedAt: r.now, UpdatedAt: r.now},
 	}}, nil
 }
 
@@ -87,12 +89,12 @@ func TestAuthoredPullRequestSyncScopesDiscoveryBeforeLimit(t *testing.T) {
 	}
 	now := time.Date(2026, time.August, 8, 0, 0, 0, 0, time.UTC)
 	reader := &authoredHeaderReader{now: now, searchResult: github.AuthoredPullRequestSearchResult{Items: []github.Issue{
-		{RepositoryOwner: "acme", RepositoryName: "other", Kind: github.ThreadKindPullRequest, Number: 9, State: "open", Title: "newer unrelated", UpdatedAt: now.Add(time.Second)},
-		{RepositoryOwner: "acme", RepositoryName: "rocket", Kind: github.ThreadKindPullRequest, Number: 7, State: "open", Title: "selected", UpdatedAt: now},
+		{RepositoryOwner: "acme", RepositoryName: "other", Kind: domain.PullRequestKind, Number: 9, State: "open", Title: "newer unrelated", UpdatedAt: now.Add(time.Second)},
+		{RepositoryOwner: "acme", RepositoryName: "rocket", Kind: domain.PullRequestKind, Number: 7, State: "open", Title: "selected", UpdatedAt: now},
 	}}}
 	svc.SetGitHubReader(reader)
 	scope := &mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}
-	out, err := svc.syncAuthoredPullRequests(ctx, authoredPullRequestSyncOptions{Repository: scope, State: "open", Limit: 1, MaxRequests: 20}, func(string, string) error { return nil })
+	out, err := svc.syncAuthoredPullRequests(ctx, authoredPullRequestSyncOptions{Repository: scope, State: syncOpenThreads, Limit: 1, MaxRequests: 20}, func(string, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,11 +117,11 @@ func TestAuthoredPullRequestSyncReportsItemLimitTruncation(t *testing.T) {
 	}
 	now := time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC)
 	svc.SetGitHubReader(&authoredHeaderReader{now: now, searchResult: github.AuthoredPullRequestSearchResult{
-		Items: []github.Issue{{RepositoryOwner: "owner", RepositoryName: "repo", Kind: github.ThreadKindPullRequest, Number: 2, State: "open", Title: "first", CreatedAt: now, UpdatedAt: now}},
+		Items: []github.Issue{{RepositoryOwner: "owner", RepositoryName: "repo", Kind: domain.PullRequestKind, Number: 2, State: "open", Title: "first", CreatedAt: now, UpdatedAt: now}},
 		Total: 2,
 		Page:  github.PageInfo{HasNext: true, NextPage: 2},
 	}})
-	out, err := svc.syncAuthoredPullRequests(ctx, authoredPullRequestSyncOptions{State: "open", Limit: 1, MaxRequests: 20}, func(string, string) error { return nil })
+	out, err := svc.syncAuthoredPullRequests(ctx, authoredPullRequestSyncOptions{State: syncOpenThreads, Limit: 1, MaxRequests: 20}, func(string, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +146,7 @@ func TestAuthoredPullRequestSyncReusesSearchHeadersWithoutNPlusOne(t *testing.T)
 	reader := &authoredHeaderReader{now: now}
 	svc.SetGitHubReader(reader)
 
-	out, err := svc.syncAuthoredPullRequests(ctx, authoredPullRequestSyncOptions{State: "open", Limit: 2, MaxRequests: 20}, func(string, string) error { return nil })
+	out, err := svc.syncAuthoredPullRequests(ctx, authoredPullRequestSyncOptions{State: syncOpenThreads, Limit: 2, MaxRequests: 20}, func(string, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +177,7 @@ func TestAuthoredPullRequestSyncReusesSearchHeadersWithoutNPlusOne(t *testing.T)
 	if err != nil || repo == nil || repo.ExternalID != "R_repo" || !repo.SourceUpdatedAt.Equal(now) {
 		t.Fatalf("repository context did not replace authored identity: %+v, %v", repo, err)
 	}
-	threads, err := c.ListThreadsFiltered(ctx, repo.ID, "pull_request", "open", 10)
+	threads, err := c.ListThreadsFiltered(ctx, repo.ID, corpus.PullRequestThreadKind(), corpus.OpenThreadState(), 10)
 	if err != nil || len(threads) != 2 || threads[0].Number != 3 || threads[1].Number != 2 {
 		t.Fatalf("threads = %+v, %v", threads, err)
 	}
@@ -196,7 +198,7 @@ func TestAuthoredPullRequestMinimumBudgetMakesSyncProgress(t *testing.T) {
 	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
 	svc.SetGitHubReader(&authoredHeaderReader{now: now})
 	minimum := 2
-	out, err := svc.syncAuthoredPullRequests(ctx, authoredPullRequestSyncOptions{State: "open", Limit: 2, MaxRequests: minimum}, func(string, string) error { return nil })
+	out, err := svc.syncAuthoredPullRequests(ctx, authoredPullRequestSyncOptions{State: syncOpenThreads, Limit: 2, MaxRequests: minimum}, func(string, string) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,10 +226,14 @@ func TestSyncThreadsBatchReportsMissingRepositoryWithoutNetworkAccess(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, ok := out["items"].([]map[string]any)
-	if !ok || len(items) != 1 || items[0]["reason"] != "repository_not_indexed" || out["status"] != "partial" || out["requests"] != 0 {
+	items := out.Items
+	if len(items) != 1 || items[0].Status() != mcpcontract.BatchItemUnavailable || out.Status != batchOperationPartial || out.Requests != 0 {
 		t.Fatalf("result = %+v", out)
 	}
+	assertJSONDocumentEqual(t, items[0], `{
+		"key":"owner/repo","status":"unavailable","reason":"repository_not_indexed",
+		"message":"repository is not stored; call github.sync_repository_context first"
+	}`)
 }
 
 func TestSyncThreadsBatchThreadTotalCountsRequestedThreads(t *testing.T) {
@@ -253,8 +259,8 @@ func TestSyncThreadsBatchThreadTotalCountsRequestedThreads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	items, ok := out["items"].([]map[string]any)
-	if !ok || len(items) != 2 || out["total"] != 2 || out["completed"] != 0 || out["status"] != "partial" {
+	items := out.Items
+	if len(items) != 2 || out.Total != 2 || out.Completed != 0 || out.Status != batchOperationPartial {
 		t.Fatalf("thread-mode result = %+v", out)
 	}
 }

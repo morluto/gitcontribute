@@ -40,19 +40,19 @@ func TestMetadataIsLocalAndDoesNotCreateCorpus(t *testing.T) {
 	if result.SchemaVersion != 0 {
 		t.Fatalf("schema version = %d, want 0 before corpus open", result.SchemaVersion)
 	}
-	if !result.Features["contribution_radar"] || !containsString(result.Capabilities, "contribution-radar") {
+	if !result.Features.ContributionRadar || !containsString(result.Capabilities, "contribution-radar") {
 		t.Fatalf("radar capability missing from metadata: %+v", result)
 	}
-	if !result.Features["contribution_readiness"] || !containsString(result.Capabilities, "contribution-readiness") {
+	if !result.Features.ContributionReadiness || !containsString(result.Capabilities, "contribution-readiness") {
 		t.Fatalf("readiness capability missing from metadata: %+v", result)
 	}
-	if !result.Features["thread_research"] || !containsString(result.Capabilities, "thread-research-brief") {
+	if !result.Features.ThreadResearch || !containsString(result.Capabilities, "thread-research-brief") {
 		t.Fatalf("thread research capability missing from metadata: %+v", result)
 	}
-	if !result.Features["thread_investigation"] || !containsString(result.Capabilities, "thread-investigation-start") {
+	if !result.Features.ThreadInvestigation || !containsString(result.Capabilities, "thread-investigation-start") {
 		t.Fatalf("thread investigation capability missing from metadata: %+v", result)
 	}
-	if !result.Features["evidence_freshness"] || !containsString(result.Capabilities, "evidence-freshness") {
+	if !result.Features.EvidenceFreshness || !containsString(result.Capabilities, "evidence-freshness") {
 		t.Fatalf("evidence freshness capability missing from metadata: %+v", result)
 	}
 	if _, err := os.Stat(result.CorpusPath); !os.IsNotExist(err) {

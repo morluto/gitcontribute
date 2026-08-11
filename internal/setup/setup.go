@@ -80,6 +80,22 @@ const (
 	RegistrationStale   RegistrationStatus = "stale"
 )
 
+// ChangeStatus is the closed result vocabulary shared by client registration
+// and the managed Codex discovery skill.
+type ChangeStatus string
+
+const (
+	ChangeFailed            ChangeStatus = "failed"
+	ChangeNotConfigured     ChangeStatus = "not configured"
+	ChangeWouldRemove       ChangeStatus = "would remove"
+	ChangeRemoved           ChangeStatus = "removed"
+	ChangeAlreadyConfigured ChangeStatus = "already configured"
+	ChangeWouldUpdate       ChangeStatus = "would update"
+	ChangeUpdated           ChangeStatus = "updated"
+	ChangeWouldConfigure    ChangeStatus = "would configure"
+	ChangeConfigured        ChangeStatus = "configured"
+)
+
 // RegistrationInspection is a read-only, client-neutral view of one MCP entry.
 type RegistrationInspection struct {
 	Client   Client             `json:"client"`
@@ -93,7 +109,6 @@ type RegistrationInspection struct {
 type Options struct {
 	Operation  Operation
 	Clients    []Client
-	All        bool
 	DryRun     bool
 	Home       string
 	Executable string
@@ -101,17 +116,17 @@ type Options struct {
 
 // Result describes the registration effect for one coding client.
 type Result struct {
-	Client Client `json:"client"`
-	Path   string `json:"path"`
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
+	Client Client       `json:"client"`
+	Path   string       `json:"path"`
+	Status ChangeStatus `json:"status"`
+	Error  string       `json:"error,omitempty"`
 }
 
 // CodexSkillResult reports the managed discovery-skill effect.
 type CodexSkillResult struct {
-	Path   string `json:"path,omitempty"`
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
+	Path   string       `json:"path,omitempty"`
+	Status ChangeStatus `json:"status"`
+	Error  string       `json:"error,omitempty"`
 }
 
 type Report struct {
@@ -229,7 +244,7 @@ func Run(opts Options) (_ Report, returnErr error) {
 			return Report{}, fmt.Errorf("resolve home directory: %w", err)
 		}
 	}
-	clients, err := selectedClients(opts)
+	clients, err := selectedClients(opts.Clients)
 	if err != nil {
 		return Report{}, err
 	}
@@ -255,14 +270,6 @@ func Run(opts Options) (_ Report, returnErr error) {
 	return report, nil
 }
 
-// ActivateExisting updates a set of existing GitContribute registrations as
-// one rollback-safe operation. It never creates a new client registration or
-// changes the optional Codex discovery skill. If activation or verification is
-// interrupted, every selected client configuration is restored.
-func ActivateExisting(ctx context.Context, opts Options) (Report, error) {
-	return ActivateExistingAndVerify(ctx, opts, nil)
-}
-
 // ActivateExistingAndVerify keeps the registration snapshots until verify
 // succeeds, allowing callers to include executable and schema checks in the
 // same rollback boundary.
@@ -279,7 +286,7 @@ func ActivateExistingAndVerify(ctx context.Context, opts Options, verify func() 
 		return Report{}, err
 	}
 	defer func() { returnErr = errors.Join(returnErr, lease.Unlock()) }()
-	return activateExisting(ctx, opts, func(ctx context.Context, _ int) error { return ctx.Err() }, verify)
+	return activateExisting(ctx, opts, verify)
 }
 
 // RepairExisting rewrites existing registrations to the canonical MCP
@@ -299,7 +306,7 @@ func RepairExisting(ctx context.Context, home string, clients []Client) (_ Repor
 	}
 	defer func() { returnErr = errors.Join(returnErr, lease.Unlock()) }()
 
-	selected, err := selectedClients(Options{Clients: clients})
+	selected, err := selectedClients(clients)
 	if err != nil {
 		return Report{}, err
 	}
@@ -323,7 +330,6 @@ func RepairExisting(ctx context.Context, home string, clients []Client) (_ Repor
 		home,
 		selected,
 		launchers,
-		func(ctx context.Context, _ int) error { return ctx.Err() },
 		nil,
 	)
 }
@@ -341,23 +347,26 @@ func acquireSetupLease(home string) (*flock.Flock, error) {
 }
 
 type registrationSnapshot struct {
-	adapter    *clientAdapter
-	client     Client
-	path       string
-	mode       os.FileMode
-	codexBlock string
-	jsonEntry  any
-	activated  Launcher
-	changed    bool
+	path      string
+	mode      os.FileMode
+	state     registrationState
+	activated *Launcher
 }
 
-func activateExisting(ctx context.Context, opts Options, checkpoint func(context.Context, int) error, verify func() error) (Report, error) {
+type registrationState interface {
+	restore(path string, activated Launcher) error
+}
+
+type codexRegistrationState struct{ block string }
+type jsonRegistrationState struct{ entry json.RawMessage }
+
+func activateExisting(ctx context.Context, opts Options, verify func() error) (Report, error) {
 	if err := ctx.Err(); err != nil {
 		return Report{}, err
 	}
 	opts.Operation = Configure
 	opts.DryRun = false
-	clients, err := selectedClients(opts)
+	clients, err := selectedClients(opts.Clients)
 	if err != nil {
 		return Report{}, err
 	}
@@ -369,7 +378,7 @@ func activateExisting(ctx context.Context, opts Options, checkpoint func(context
 	for _, client := range clients {
 		launchers[client] = launcher
 	}
-	return activateExistingLaunchers(ctx, opts.Home, clients, launchers, checkpoint, verify)
+	return activateExistingLaunchers(ctx, opts.Home, clients, launchers, verify)
 }
 
 func activateExistingLaunchers(
@@ -377,7 +386,6 @@ func activateExistingLaunchers(
 	home string,
 	clients []Client,
 	launchers map[Client]Launcher,
-	checkpoint func(context.Context, int) error,
 	verify func() error,
 ) (Report, error) {
 	snapshots, err := snapshotRegistrations(clients, home)
@@ -397,7 +405,7 @@ func activateExistingLaunchers(
 		return report, cause
 	}
 
-	if err := activateRegistrations(ctx, home, clients, launchers, checkpoint, &report, snapshots); err != nil {
+	if err := activateRegistrations(ctx, home, clients, launchers, &report, snapshots); err != nil {
 		return rollback(err)
 	}
 	if err := verifyRegistrations(home, clients, launchers, verify); err != nil {
@@ -428,11 +436,11 @@ func snapshotRegistrations(clients []Client, home string) ([]registrationSnapsho
 		if err != nil {
 			return nil, err
 		}
-		snapshot := registrationSnapshot{adapter: adapter, client: client, path: path, mode: mode}
-		if err := adapter.snapshotData(data, &snapshot); err != nil {
+		state, err := adapter.snapshotData(data)
+		if err != nil {
 			return nil, err
 		}
-		snapshots = append(snapshots, snapshot)
+		snapshots = append(snapshots, registrationSnapshot{path: path, mode: mode, state: state})
 	}
 	return snapshots, nil
 }
@@ -441,7 +449,7 @@ func restoreRegistrationSnapshots(snapshots []registrationSnapshot) error {
 	var restoreErrs []error
 	for i := len(snapshots) - 1; i >= 0; i-- {
 		snapshot := snapshots[i]
-		if !snapshot.changed {
+		if snapshot.activated == nil {
 			continue
 		}
 		currentInfo, err := os.Stat(snapshot.path)
@@ -453,7 +461,7 @@ func restoreRegistrationSnapshots(snapshots []registrationSnapshot) error {
 			restoreErrs = append(restoreErrs, fmt.Errorf("preserve concurrently changed registration %s", snapshot.path))
 			continue
 		}
-		restoreErr := snapshot.adapter.restore(snapshot, snapshot.activated)
+		restoreErr := snapshot.state.restore(snapshot.path, *snapshot.activated)
 		if restoreErr != nil {
 			restoreErrs = append(restoreErrs, fmt.Errorf("restore %s: %w", snapshot.path, restoreErr))
 			continue
@@ -465,8 +473,8 @@ func restoreRegistrationSnapshots(snapshots []registrationSnapshot) error {
 	return errors.Join(restoreErrs...)
 }
 
-func restoreCodexRegistration(snapshot registrationSnapshot, activated Launcher) error {
-	data, err := readFileWithinParent(snapshot.path)
+func (state codexRegistrationState) restore(path string, activated Launcher) error {
+	data, err := readFileWithinParent(path)
 	if err != nil {
 		return err
 	}
@@ -475,28 +483,31 @@ func restoreCodexRegistration(snapshot registrationSnapshot, activated Launcher)
 	if !present || strings.TrimSpace(text[start:end]) != strings.TrimSpace(codexTOMLBlock(activated)) {
 		return errors.New("preserve concurrently changed GitContribute entry")
 	}
-	return writeAtomic(snapshot.path, []byte(text[:start]+snapshot.codexBlock+text[end:]))
+	return writeAtomic(path, []byte(text[:start]+state.block+text[end:]))
 }
 
-func restoreJSONRegistration(snapshot registrationSnapshot, activated Launcher) error {
-	data, err := readFileWithinParent(snapshot.path)
+func (state jsonRegistrationState) restore(path string, activated Launcher) error {
+	data, err := readFileWithinParent(path)
 	if err != nil {
 		return err
 	}
-	var root map[string]any
-	if err := json.Unmarshal(data, &root); err != nil {
+	root, err := parseJSONObject(data, "client config")
+	if err != nil {
 		return err
 	}
-	servers, ok := root["mcpServers"].(map[string]any)
-	if !ok || !equalJSON(servers[serverName], map[string]any{"command": activated.Command, "args": activated.Args}) {
+	servers, err := parseJSONObject(root["mcpServers"], "mcpServers")
+	if err != nil || !exactLauncherEntry(servers[serverName], activated) {
 		return errors.New("preserve concurrently changed GitContribute entry")
 	}
-	servers[serverName] = snapshot.jsonEntry
-	root["mcpServers"] = servers
-	return writeJSON(snapshot.path, root)
+	servers[serverName] = append(json.RawMessage(nil), state.entry...)
+	root["mcpServers"], err = json.Marshal(servers)
+	if err != nil {
+		return err
+	}
+	return writeJSON(path, root)
 }
 
-func activateRegistrations(ctx context.Context, home string, clients []Client, launchers map[Client]Launcher, checkpoint func(context.Context, int) error, report *Report, snapshots []registrationSnapshot) error {
+func activateRegistrations(ctx context.Context, home string, clients []Client, launchers map[Client]Launcher, report *Report, snapshots []registrationSnapshot) error {
 	for i, client := range clients {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -510,9 +521,9 @@ func activateRegistrations(ctx context.Context, home string, clients []Client, l
 		if result.Error != "" {
 			return fmt.Errorf("activate %s registration: %s", client, result.Error)
 		}
-		snapshots[i].activated = launcher
-		snapshots[i].changed = true
-		if err := checkpoint(ctx, i); err != nil {
+		activated := launcher
+		snapshots[i].activated = &activated
+		if err := ctx.Err(); err != nil {
 			return err
 		}
 	}
@@ -526,7 +537,7 @@ func verifyRegistrations(home string, clients []Client, launchers map[Client]Lau
 			return fmt.Errorf("verify %s registration: launcher is missing", client)
 		}
 		result := configureClient(Configure, client, home, launcher, true)
-		if result.Error != "" || result.Status != "already configured" {
+		if result.Error != "" || result.Status != ChangeAlreadyConfigured {
 			return fmt.Errorf("verify %s registration: status %q: %s", client, result.Status, result.Error)
 		}
 	}
@@ -559,11 +570,7 @@ func containsClient(clients []Client, want Client) bool {
 	return false
 }
 
-func selectedClients(opts Options) ([]Client, error) {
-	wanted := opts.Clients
-	if opts.All {
-		wanted = AllClients
-	}
+func selectedClients(wanted []Client) ([]Client, error) {
 	seen := map[Client]bool{}
 	for _, client := range wanted {
 		if _, err := clientAdapterFor(client); err != nil {
@@ -572,7 +579,7 @@ func selectedClients(opts Options) ([]Client, error) {
 		seen[client] = true
 	}
 	var out []Client
-	for _, client := range AllClients {
+	for _, client := range allClients {
 		if seen[client] {
 			out = append(out, client)
 		}
@@ -581,4 +588,14 @@ func selectedClients(opts Options) ([]Client, error) {
 		return nil, errors.New("no setup clients selected")
 	}
 	return out, nil
+}
+
+// ParseClients resolves loose CLI or protocol names into one deterministic,
+// deduplicated client set.
+func ParseClients(values []string) ([]Client, error) {
+	clients := make([]Client, 0, len(values))
+	for _, value := range values {
+		clients = append(clients, Client(strings.ToLower(strings.TrimSpace(value))))
+	}
+	return selectedClients(clients)
 }

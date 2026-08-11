@@ -24,19 +24,19 @@ func TestMineRepositoryFixPatternsSeparatesAcceptedFixesFromSimilarity(t *testin
 		t.Fatal(err)
 	}
 	for _, thread := range []corpus.Thread{
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindIssue, Number: 1, State: "open", Title: "Numeric drift on RDNA", Body: "split cumsum produces the wrong result", SourceUpdatedAt: now},
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed", Title: "Restrict barrier conversion to CDNA", Body: "Fixes #1.\n\nRegression test covers numeric drift.", Merge: domain.MergedStatus(time.Time{}), SourceUpdatedAt: now.Add(time.Hour)},
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 3, State: "closed", Title: "Try a different barrier lowering", Body: "Similar numeric drift was observed, with a reproduction.", Merge: domain.UnmergedStatus(), SourceUpdatedAt: now.Add(2 * time.Hour)},
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 4, State: "closed", Title: "Investigate numeric drift", Body: "Numeric drift investigation.", SourceUpdatedAt: now.Add(3 * time.Hour)},
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 5, State: "closed", Title: "Earlier numeric drift attempt", Body: "Numeric drift attempt. Superseded by #2.", Merge: domain.UnmergedStatus(), SourceUpdatedAt: now.Add(3 * time.Hour)},
-		{RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 6, State: "open", Title: "New numeric drift approach", Body: "Numeric drift work remains open.", SourceUpdatedAt: now.Add(3 * time.Hour)},
+		{RepositoryID: repo.ID, Kind: domain.IssueKind, Number: 1, State: "open", Title: "Numeric drift on RDNA", Body: "split cumsum produces the wrong result", SourceUpdatedAt: now},
+		{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 2, State: "closed", Title: "Restrict barrier conversion to CDNA", Body: "Fixes #1.\n\nRegression test covers numeric drift.", Merge: domain.MergedStatus(time.Time{}), SourceUpdatedAt: now.Add(time.Hour)},
+		{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 3, State: "closed", Title: "Try a different barrier lowering", Body: "Similar numeric drift was observed, with a reproduction.", Merge: domain.UnmergedStatus(), SourceUpdatedAt: now.Add(2 * time.Hour)},
+		{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 4, State: "closed", Title: "Investigate numeric drift", Body: "Numeric drift investigation.", SourceUpdatedAt: now.Add(3 * time.Hour)},
+		{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 5, State: "closed", Title: "Earlier numeric drift attempt", Body: "Numeric drift attempt. Superseded by #2.", Merge: domain.UnmergedStatus(), SourceUpdatedAt: now.Add(3 * time.Hour)},
+		{RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 6, State: "open", Title: "New numeric drift approach", Body: "Numeric drift work remains open.", SourceUpdatedAt: now.Add(3 * time.Hour)},
 	} {
 		if _, err := svc.corpus.UpsertThread(ctx, thread, `{}`); err != nil {
 			t.Fatal(err)
 		}
 	}
 	zero := 0
-	input, err := normalizeFixPatternInput(mcpcontract.MineRepositoryFixPatternsInput{
+	request, _, err := parseFixPatternInput(mcpcontract.MineRepositoryFixPatternsInput{
 		Repository: mcpcontract.RepositoryRef{Owner: "owner", Repo: "repo"},
 		TimeWindow: mcpcontract.FixPatternTimeWindow{
 			UpdatedAfter:  now.Add(-time.Hour).Format(time.RFC3339),
@@ -50,7 +50,7 @@ func TestMineRepositoryFixPatternsSeparatesAcceptedFixesFromSimilarity(t *testin
 		t.Fatal(err)
 	}
 
-	report, err := (&MCPReader{Service: svc}).mineRepositoryFixPatterns(ctx, input, func(string, string) error { return nil })
+	report, err := (&MCPReader{Service: svc}).runFixPatternOperation(ctx, request, func(string, string) error { return nil }, fixPatternWorkflow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestMineRepositoryFixPatternsHydratesOnlyUnknownFinalists(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed",
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 2, State: "closed",
 		Title: "Fix numeric drift", Body: "Fixes #1 with a regression test.", SourceUpdatedAt: now,
 	}, `{}`); err != nil {
 		t.Fatal(err)
@@ -106,14 +106,14 @@ func TestMineRepositoryFixPatternsHydratesOnlyUnknownFinalists(t *testing.T) {
 			Merged: true, MergedAt: &mergedAt, UpdatedAt: mergedAt,
 		}},
 		header: github.Issue{
-			RepositoryOwner: "owner", RepositoryName: "repo", Number: 2, Kind: github.ThreadKindPullRequest,
+			RepositoryOwner: "owner", RepositoryName: "repo", Number: 2, Kind: domain.PullRequestKind,
 			State: "closed", Title: "Fix numeric drift", Body: "Fixes #1 with a regression test.",
 			UpdatedAt: mergedAt,
 		},
 	}
 	svc.SetGitHubReader(reader)
 	one := 1
-	input, err := normalizeFixPatternInput(mcpcontract.MineRepositoryFixPatternsInput{
+	request, _, err := parseFixPatternInput(mcpcontract.MineRepositoryFixPatternsInput{
 		Repository:      mcpcontract.RepositoryRef{Owner: "owner", Repo: "repo"},
 		TimeWindow:      mcpcontract.FixPatternTimeWindow{UpdatedAfter: now.Add(-time.Hour).Format(time.RFC3339)},
 		SymptomTaxonomy: []mcpcontract.FixPatternSymptom{{Name: "numeric drift", Terms: []string{"numeric drift"}}},
@@ -123,7 +123,7 @@ func TestMineRepositoryFixPatternsHydratesOnlyUnknownFinalists(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report, err := (&MCPReader{Service: svc}).mineRepositoryFixPatterns(ctx, input, func(string, string) error { return nil })
+	report, err := (&MCPReader{Service: svc}).runFixPatternOperation(ctx, request, func(string, string) error { return nil }, fixPatternWorkflow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestPreviewRepositoryFixPatternsIsReadOnlyAndNeverHydrates(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-		RepositoryID: repo.ID, Kind: corpus.ThreadKindPullRequest, Number: 2, State: "closed",
+		RepositoryID: repo.ID, Kind: domain.PullRequestKind, Number: 2, State: "closed",
 		Title: "Fix numeric drift", Body: "Numeric drift reproduction", SourceUpdatedAt: now,
 	}, `{}`); err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func TestPreviewRepositoryFixPatternsIsReadOnlyAndNeverHydrates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	beforeJobs, err := svc.corpus.ListJobs(ctx, "", 100)
+	beforeJobs, err := svc.corpus.ListJobs(ctx, corpus.JobStatus(""), 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestPreviewRepositoryFixPatternsIsReadOnlyAndNeverHydrates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	afterJobs, err := svc.corpus.ListJobs(ctx, "", 100)
+	afterJobs, err := svc.corpus.ListJobs(ctx, corpus.JobStatus(""), 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestGetFixPatternReportRejectsLegacyUnboundArtifact(t *testing.T) {
 	if err := svc.corpus.StartJob(ctx, job.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.corpus.TransitionJob(ctx, job.ID, corpus.JobStatusRunning, corpus.JobStatusSucceeded, `{"status":"complete","persisted":true}`, ""); err != nil {
+	if err := svc.corpus.TransitionJob(ctx, job.ID, corpus.JobRunningToSucceeded, `{"status":"complete","persisted":true}`, ""); err != nil {
 		t.Fatal(err)
 	}
 	_, err = (&MCPReader{svc}).GetFixPatternReport(ctx, job.ID)
@@ -225,7 +225,7 @@ func TestNormalizeFixPatternInputRejectsInvalidWindow(t *testing.T) {
 		{UpdatedAfter: "not-a-date"},
 		{UpdatedAfter: "2026-07-02T00:00:00Z", UpdatedBefore: "2026-07-01T00:00:00Z"},
 	} {
-		_, err := normalizeFixPatternInput(mcpcontract.MineRepositoryFixPatternsInput{
+		_, _, err := parseFixPatternInput(mcpcontract.MineRepositoryFixPatternsInput{
 			Repository:      mcpcontract.RepositoryRef{Owner: "owner", Repo: "repo"},
 			TimeWindow:      window,
 			SymptomTaxonomy: []mcpcontract.FixPatternSymptom{{Name: "drift", Terms: []string{"drift"}}},

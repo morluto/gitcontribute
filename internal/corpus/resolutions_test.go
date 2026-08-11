@@ -29,7 +29,7 @@ func TestResolutionRecordsAreAppendOnlyAndStaleSafe(t *testing.T) {
 	newer := ResolutionRecord{
 		ThreadID: threadID, Kind: "fixed", Summary: "observed closing PR",
 		RuleVersion: "resolution-v2", SourceUpdatedAt: time.Unix(500, 0).UTC(),
-		SourceObservationRefs: []ObservationRef{{Kind: "thread", ID: threadObservation.ID}, {Kind: "facet", ID: facetObservations[0].ID}},
+		SourceObservationRefs: []ObservationRef{mustObservationRef(t, "thread", threadObservation.ID), mustObservationRef(t, "facet", facetObservations[0].ID)},
 	}
 	if _, err := c.SaveResolutionRecord(ctx, newer); err != nil {
 		t.Fatalf("save newer resolution: %v", err)
