@@ -53,6 +53,7 @@ type FeedbackDiscovery struct {
 	State                  FeedbackDiscoveryState
 	DiscoveredPullRequests int
 	Requests               int
+	PullRequestState       ThreadStateFilter
 	Selection              FeedbackSelection
 	LastError              string
 	SourceUpdatedAt        time.Time

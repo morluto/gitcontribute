@@ -11,6 +11,12 @@ import (
 
 func (s *Server) registerActorTools() {
 	readOnly := readOnlyAnnotations()
+	addCatalogTool(s, catalogTool[mcpcontract.GetAuthenticatedIdentityInput, mcpcontract.AuthenticatedIdentityOutput]{
+		name: mcpcontract.ToolGetAuthenticatedIdentity, title: "Get authenticated GitHub identity",
+		description: "Resolve the configured GitHub account. Performs one explicit provider read and does not persist actor data or discover contributions.",
+		annotations: externalReadAnnotations(), supportedBy: supports[AuthenticatedIdentityReader], input: inputSchema[mcpcontract.GetAuthenticatedIdentityInput](noSchemaCustomization),
+		output: outputSchema[mcpcontract.AuthenticatedIdentityOutput]("Authenticated GitHub identity and provider rate state."), handler: s.getAuthenticatedIdentity,
+	})
 	addCatalogTool(s, catalogTool[mcpcontract.SearchActorsInput, mcpcontract.SearchActorsOutput]{
 		name: mcpcontract.ToolSearchActors, title: "Search stored GitHub actors",
 		description: "Search indexed GitHub users, bots, organizations, and other actors by stored profile facts. Offline; returns snapshot-bound facts and coverage.",
@@ -138,6 +144,15 @@ func (s *Server) registerActorTools() {
 		}),
 		output: outputSchema[mcpcontract.SearchContributionsOutput]("Snapshot-bound contribution facts and acquisition coverage."), handler: s.searchContributions,
 	})
+}
+
+func (s *Server) getAuthenticatedIdentity(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.GetAuthenticatedIdentityInput) (*mcp.CallToolResult, mcpcontract.AuthenticatedIdentityOutput, error) {
+	reader, ok := s.reader.(AuthenticatedIdentityReader)
+	if !ok {
+		return nil, mcpcontract.AuthenticatedIdentityOutput{}, errors.New("authenticated GitHub identity lookup is not available")
+	}
+	out, err := reader.GetAuthenticatedIdentity(ctx, in)
+	return nil, out, err
 }
 
 func (s *Server) searchActors(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SearchActorsInput) (*mcp.CallToolResult, mcpcontract.SearchActorsOutput, error) {

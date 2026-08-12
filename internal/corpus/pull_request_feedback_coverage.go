@@ -12,7 +12,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/domain"
 )
 
-func (c *Corpus) feedbackCoverageTx(ctx context.Context, tx *sql.Tx, repositoryID int64, selectedChannel FeedbackChannel, threadState feedbackThreadState) (FeedbackCoverageSummary, error) {
+func (c *Corpus) feedbackCoverageTx(ctx context.Context, tx *sql.Tx, repositoryID int64, selectedChannel FeedbackChannel, threadState feedbackThreadState, pullRequestState ThreadStateFilter) (FeedbackCoverageSummary, error) {
 	coverage := FeedbackCoverageSummary{State: FeedbackCoverageUnknown, Channels: AllFeedbackSelection().Channels()}
 	discovery, err := scanFeedbackDiscovery(tx.QueryRowContext(ctx, `SELECT repository_id,generation,state,next_page,complete,truncated,discovered_pull_requests,requests,channels_json,thread_state,last_error,source_updated_at,updated_at FROM pull_request_feedback_discovery WHERE repository_id=?`, repositoryID))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -25,11 +25,20 @@ func (c *Corpus) feedbackCoverageTx(ctx context.Context, tx *sql.Tx, repositoryI
 		coverage.Channels = []string{selectedChannel.String()}
 	}
 	var total int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM threads WHERE repository_id=? AND kind=?`, repositoryID, domain.PullRequestKind).Scan(&total); err != nil {
+	totalQuery := `SELECT COUNT(*) FROM threads WHERE repository_id=? AND kind=?`
+	totalArgs := []any{repositoryID, domain.PullRequestKind}
+	if !pullRequestState.IsAny() {
+		totalQuery += ` AND state=?`
+		totalArgs = append(totalArgs, pullRequestState.String())
+	}
+	if err := tx.QueryRowContext(ctx, totalQuery, totalArgs...).Scan(&total); err != nil {
 		return coverage, err
 	}
 	coverage.TotalPullRequests = total
 	discoveryComplete := discovery.IsComplete()
+	if !discovery.PullRequestState.IsAny() && discovery.PullRequestState.String() != pullRequestState.String() {
+		discoveryComplete = false
+	}
 	if (threadState.isAny() || threadState.isResolved()) && discovery.Selection.threadState != AllFeedbackThreads {
 		discoveryComplete = false
 	}
@@ -37,6 +46,11 @@ func (c *Corpus) feedbackCoverageTx(ctx context.Context, tx *sql.Tx, repositoryI
 	var incomplete int
 	predicates := make([]string, 0, len(channels))
 	coverageArgs := []any{repositoryID, domain.PullRequestKind}
+	statePredicate := ""
+	if !pullRequestState.IsAny() {
+		statePredicate = " AND t.state=?"
+		coverageArgs = append(coverageArgs, pullRequestState.String())
+	}
 	for _, value := range channels {
 		channel, err := ParseFeedbackChannel(value)
 		if err != nil {
@@ -50,7 +64,7 @@ func (c *Corpus) feedbackCoverageTx(ctx context.Context, tx *sql.Tx, repositoryI
 		coverageArgs = append(coverageArgs, args...)
 	}
 	if len(predicates) > 0 {
-		query := `SELECT COUNT(DISTINCT t.id) FROM threads t WHERE t.repository_id=? AND t.kind=? AND (` + strings.Join(predicates, " OR ") + `)`
+		query := `SELECT COUNT(DISTINCT t.id) FROM threads t WHERE t.repository_id=? AND t.kind=?` + statePredicate + ` AND (` + strings.Join(predicates, " OR ") + `)`
 		if err := tx.QueryRowContext(ctx, query, coverageArgs...).Scan(&incomplete); err != nil {
 			return coverage, err
 		}
@@ -177,7 +191,7 @@ func (c *Corpus) UpsertFeedbackDiscovery(ctx context.Context, value FeedbackDisc
 		   OR (excluded.generation = pull_request_feedback_discovery.generation
 		       AND excluded.source_updated_at >= pull_request_feedback_discovery.source_updated_at
 		       AND excluded.next_page >= pull_request_feedback_discovery.next_page)
-	`, value.RepositoryID, value.Generation, "all", value.NextPage, boolToInt(value.IsComplete()), boolToInt(value.IsTruncated()),
+	`, value.RepositoryID, value.Generation, feedbackDiscoveryStateValue(value.PullRequestState), value.NextPage, boolToInt(value.IsComplete()), boolToInt(value.IsTruncated()),
 		value.DiscoveredPullRequests, value.Requests, string(channels), value.Selection.ThreadState(), value.LastError,
 		encodeTime(value.SourceUpdatedAt), encodeTime(value.UpdatedAt))
 	if err != nil {
@@ -218,9 +232,11 @@ func scanFeedbackDiscovery(row rowScanner) (*FeedbackDiscovery, error) {
 		&value.DiscoveredPullRequests, &value.Requests, &channels, &threadState, &value.LastError, &source, &updated); err != nil {
 		return nil, err
 	}
-	if state != "all" {
-		return nil, fmt.Errorf("parse stored feedback discovery: unsupported pull-request state %q", state)
+	pullRequestState, err := parseFeedbackDiscoveryState(state)
+	if err != nil {
+		return nil, fmt.Errorf("parse stored feedback discovery: %w", err)
 	}
+	value.PullRequestState = pullRequestState
 	var channelValues []string
 	if err := json.Unmarshal([]byte(channels), &channelValues); err != nil {
 		return nil, fmt.Errorf("decode feedback discovery channels: %w", err)
@@ -242,4 +258,18 @@ func scanFeedbackDiscovery(row rowScanner) (*FeedbackDiscovery, error) {
 	}
 	value.SourceUpdatedAt, value.UpdatedAt = scanTime(source), scanTime(updated)
 	return &value, nil
+}
+
+func parseFeedbackDiscoveryState(value string) (ThreadStateFilter, error) {
+	if value == "" || value == "all" {
+		return AnyThreadState(), nil
+	}
+	return ParseThreadStateFilter(value)
+}
+
+func feedbackDiscoveryStateValue(state ThreadStateFilter) string {
+	if state.IsAny() {
+		return "all"
+	}
+	return state.String()
 }

@@ -30,20 +30,31 @@ type NeighborReader interface {
 type ScalableReader interface {
 	GetRepositories(context.Context, mcpcontract.GetRepositoriesInput) (mcpcontract.GetRepositoriesOutput, error)
 	GetThreads(context.Context, mcpcontract.GetThreadsInput) (mcpcontract.GetThreadsOutput, error)
-	RankOpportunities(context.Context, mcpcontract.RankOpportunitiesInput) (mcpcontract.RankOpportunitiesOutput, error)
 	FindPrecedents(context.Context, mcpcontract.FindPrecedentsInput) (mcpcontract.FindPrecedentsOutput, error)
 	GetJobs(context.Context, mcpcontract.GetJobsInput) (mcpcontract.GetJobsOutput, error)
+}
+
+// DossierMaterializer owns the explicit local write that refreshes a derived
+// dossier projection. It must remain offline.
+type DossierMaterializer interface {
+	MaterializeRepositoryDossier(context.Context, mcpcontract.MaterializeRepositoryDossierInput) (mcpcontract.DossierOutput, error)
+}
+
+// FixPatternAnalyzer exposes reusable deterministic repository-history
+// analysis without acquiring or persisting source data.
+type FixPatternAnalyzer interface {
+	AnalyzeFixPatterns(context.Context, mcpcontract.AnalyzeFixPatternsInput) (mcpcontract.AnalyzeFixPatternsOutput, error)
+}
+
+// ContributionCandidateRanker exposes the application-owned deterministic
+// cross-repository Radar use case as an offline read.
+type ContributionCandidateRanker interface {
+	RankContributionCandidates(context.Context, mcpcontract.RankContributionCandidatesInput) (mcpcontract.RankContributionCandidatesOutput, error)
 }
 
 // ThreadFacetReader exposes the bounded offline facet metadata surface.
 type ThreadFacetReader interface {
 	GetThreadFacets(context.Context, mcpcontract.GetThreadFacetsInput) (mcpcontract.GetThreadFacetsOutput, error)
-}
-
-// IssueSetReader prepares bounded contribution evidence from exact stored
-// issues without requiring or creating durable workflow state.
-type IssueSetReader interface {
-	PrepareIssueSet(context.Context, mcpcontract.PrepareIssueSetInput) (mcpcontract.PrepareIssueSetOutput, error)
 }
 
 // PortfolioReader exposes bounded offline pull-request portfolio reads.
@@ -56,12 +67,6 @@ type PortfolioReader interface {
 // and contribution workflow state. It never mutates GitHub.
 type PortfolioOperator interface {
 	LinkPullRequest(context.Context, mcpcontract.LinkPullRequestInput) (mcpcontract.LinkPullRequestOutput, error)
-}
-
-// ContributionPreflightReader performs a bounded live read plus local
-// worktree inspection without creating or mutating workflow state.
-type ContributionPreflightReader interface {
-	PreflightContribution(context.Context, mcpcontract.ContributionPreflightInput) (mcpcontract.ContributionPreflightOutput, error)
 }
 
 // GitHubOperator exposes bounded GitHub reads that update only the local corpus.
@@ -92,18 +97,23 @@ type GitHubActorOperator interface {
 	SyncUserContributions(context.Context, mcpcontract.SyncUserContributionsInput) (mcpcontract.JobReference, error)
 }
 
+// AuthenticatedIdentityReader exposes the configured GitHub account as one
+// explicit provider read.
+type AuthenticatedIdentityReader interface {
+	GetAuthenticatedIdentity(context.Context, mcpcontract.GetAuthenticatedIdentityInput) (mcpcontract.AuthenticatedIdentityOutput, error)
+}
+
+// ForkComparisonReader verifies one explicit upstream/fork relationship and
+// its default-branch ancestry without mutating either repository.
+type ForkComparisonReader interface {
+	CompareFork(context.Context, mcpcontract.CompareForkInput) (mcpcontract.ForkFreshnessOutput, error)
+}
+
 type ActorReader interface {
 	SearchActors(context.Context, mcpcontract.SearchActorsInput) (mcpcontract.SearchActorsOutput, error)
 	GetActors(context.Context, mcpcontract.GetActorsInput) (mcpcontract.GetActorsOutput, error)
 	GetActorFacets(context.Context, mcpcontract.GetActorFacetsInput) (mcpcontract.GetActorFacetsOutput, error)
 	SearchContributions(context.Context, mcpcontract.SearchContributionsInput) (mcpcontract.SearchContributionsOutput, error)
-}
-
-// CodeSearchBatchReader exposes one bounded offline batch over a shared code
-// snapshot scope. It remains separate from Reader so existing local readers
-// can retain the single-query compatibility tool.
-type CodeSearchBatchReader interface {
-	SearchCodeBatch(context.Context, mcpcontract.SearchCodeBatchInput) (mcpcontract.SearchCodeBatchOutput, error)
 }
 
 type CoverageOperator interface {
@@ -127,31 +137,6 @@ type PullRequestFeedbackSearcher interface {
 
 type CIFailureOperator interface {
 	SyncCIFailures(context.Context, mcpcontract.SyncCIFailuresInput) (mcpcontract.JobReference, error)
-}
-
-// FixPatternOperator owns the bounded repository-level search, finalist
-// hydration, and typed report workflow. It performs GitHub reads and updates
-// only the local corpus.
-type FixPatternOperator interface {
-	MineRepositoryFixPatterns(context.Context, mcpcontract.MineRepositoryFixPatternsInput) (mcpcontract.JobReference, error)
-}
-
-// FixPatternReader exposes only terminal persisted reports and remains offline.
-type FixPatternReader interface {
-	GetFixPatternReport(context.Context, string) (mcpcontract.FixPatternReport, error)
-}
-
-// FixPatternPreviewReader exposes bounded analytical fix-pattern reads without
-// job creation, hydration, persistence, or network access.
-type FixPatternPreviewReader interface {
-	PreviewRepositoryFixPatterns(context.Context, mcpcontract.PreviewRepositoryFixPatternsInput) (mcpcontract.FixPatternReport, error)
-}
-
-// FixPatternWorkflow keeps submission and persisted report retrieval together
-// so an advertised workflow never returns an unreadable resource link.
-type FixPatternWorkflow interface {
-	FixPatternOperator
-	FixPatternReader
 }
 
 // CodeIndexer safely acquires and indexes repository code.
@@ -200,7 +185,6 @@ type ResearchReader interface {
 
 // Operator is the optional explicit network-read/local-write capability.
 type Operator interface {
-	BuildRepositoryDossier(context.Context, mcpcontract.BuildRepositoryDossierInput) (mcpcontract.JobReference, error)
 	StartInvestigation(context.Context, mcpcontract.StartInvestigationInput) (mcpcontract.InvestigationOutput, error)
 	RecordHypothesis(context.Context, mcpcontract.RecordHypothesisInput) (mcpcontract.HypothesisOutput, error)
 	CheckDuplicates(context.Context, mcpcontract.CheckDuplicatesInput) (mcpcontract.CheckOutput, error)
@@ -250,8 +234,6 @@ type PublishedDraftVerifier interface {
 // DossierOutput contains a persisted repository dossier snapshot.
 
 // SourceRef records provenance for an MCP result or workflow artifact.
-
-// SearchCodeInput describes an offline code search page.
 
 // CodeMatchOutput identifies one stored code match.
 
@@ -408,20 +390,11 @@ func (s *Server) ServeStdio(ctx context.Context) error {
 
 func (s *Server) register() {
 	readOnly := readOnlyAnnotations()
-	addCatalogTool(s, catalogTool[mcpcontract.SearchCodeInput, mcpcontract.SearchCodeOutput]{
-		name: mcpcontract.ToolSearchCode, title: "Search stored code",
-		description: "Search indexed code and return bounded snippets plus selected-snapshot coverage, including for zero scoped matches. Missing, unknown, or truncated indexes include an exact typed code.index_repositories recovery action, while additional result pages include a typed cursor action. Optional owner/repo scope; offline.",
-		annotations: readOnly, input: inputSchema[mcpcontract.SearchCodeInput](func(schema *schemaBuilder) {
-			setRange(schema, "limit", 1, 100)
-			setDefault(schema, "limit", 20)
-			requireTogether(schema, "owner", "repo")
-		}), output: outputSchema[mcpcontract.SearchCodeOutput]("One page of stored code matches."), handler: s.searchCode,
-	})
 	addCatalogTool(s, catalogTool[mcpcontract.SearchCodeBatchInput, mcpcontract.SearchCodeBatchOutput]{
 		name:        mcpcontract.ToolSearchCodeBatch,
 		title:       "Search stored code in one batch",
-		description: "Run up to 20 ordered code searches against one shared immutable local corpus revision. This is offline, performs no GitHub fallback or mutation, and preserves each query's coverage and truncation semantics; corpus.search_code remains available for one query.",
-		annotations: readOnly, supportedBy: supports[CodeSearchBatchReader],
+		description: "Run 1-20 ordered code searches against one shared immutable local corpus revision. This is the canonical single-query and batch route; one-query calls may continue with the returned cursor. Offline, with no GitHub fallback or mutation.",
+		annotations: readOnly,
 		input: inputSchema[mcpcontract.SearchCodeBatchInput](func(sc *schemaBuilder) {
 			requireTogether(sc, "owner", "repo")
 			setArrayBounds(sc, "queries", 1, 20)
@@ -478,27 +451,18 @@ func (s *Server) register() {
 
 func boolPtr(v bool) *bool { return &v }
 
-func (s *Server) searchCode(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SearchCodeInput) (*mcp.CallToolResult, mcpcontract.SearchCodeOutput, error) {
-	in.Query = strings.TrimSpace(in.Query)
-	if in.Query == "" {
-		return nil, mcpcontract.SearchCodeOutput{}, mcpcontract.InvalidArgument("query", "is required", map[string]any{"query": "MIDI"})
-	}
-	if in.Limit == 0 {
-		in.Limit = 20
-	}
-	if in.Limit < 1 || in.Limit > 100 {
-		return nil, mcpcontract.SearchCodeOutput{}, mcpcontract.InvalidArgument("limit", "must be between 1 and 100", map[string]any{"limit": 20})
-	}
-	if (in.Owner == "") != (in.Repo == "") {
-		return nil, mcpcontract.SearchCodeOutput{}, mcpcontract.InvalidArgument("owner", "owner and repo must be provided together", map[string]any{"owner": "acme", "repo": "synth"})
-	}
-	out, err := s.reader.SearchCode(ctx, in)
-	return nil, out, err
-}
-
 func (s *Server) searchCodeBatch(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SearchCodeBatchInput) (*mcp.CallToolResult, mcpcontract.SearchCodeBatchOutput, error) {
 	if len(in.Queries) < 1 || len(in.Queries) > 20 {
 		return nil, mcpcontract.SearchCodeBatchOutput{}, mcpcontract.InvalidArgument("queries", "must contain 1 to 20 items", map[string]any{"queries": []string{"MIDI", "latency"}})
+	}
+	for i := range in.Queries {
+		in.Queries[i] = strings.TrimSpace(in.Queries[i])
+		if in.Queries[i] == "" {
+			return nil, mcpcontract.SearchCodeBatchOutput{}, mcpcontract.InvalidArgument("queries", "must not contain empty queries", map[string]any{"queries": []string{"MIDI", "latency"}})
+		}
+	}
+	if in.Cursor != "" && len(in.Queries) != 1 {
+		return nil, mcpcontract.SearchCodeBatchOutput{}, mcpcontract.InvalidArgument("cursor", "requires exactly one query", nil)
 	}
 	if in.Limit == 0 {
 		in.Limit = 20
@@ -509,11 +473,7 @@ func (s *Server) searchCodeBatch(ctx context.Context, _ *mcp.CallToolRequest, in
 	if in.Owner == "" || in.Repo == "" {
 		return nil, mcpcontract.SearchCodeBatchOutput{}, mcpcontract.InvalidArgument("owner", "owner and repo are required", map[string]any{"owner": "acme", "repo": "synth"})
 	}
-	reader, ok := s.reader.(CodeSearchBatchReader)
-	if !ok {
-		return nil, mcpcontract.SearchCodeBatchOutput{}, errors.New("batched offline code search is not available")
-	}
-	out, err := reader.SearchCodeBatch(ctx, in)
+	out, err := s.reader.SearchCodeBatch(ctx, in)
 	return nil, out, err
 }
 

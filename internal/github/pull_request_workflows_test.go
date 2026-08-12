@@ -17,6 +17,17 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
 }
 
+func TestReviewThreadQueriesUseCurrentPullRequestReviewCommentFields(t *testing.T) {
+	for name, query := range map[string]string{
+		"thread page":  pullRequestFeedbackThreadsQuery,
+		"comment page": reviewThreadCommentsQuery,
+	} {
+		if strings.Contains(query, " side") || strings.Contains(query, " startSide") {
+			t.Fatalf("%s selects a field removed from GitHub's PullRequestReviewComment schema: %s", name, query)
+		}
+	}
+}
+
 func TestGetPullRequestFeedbackPreservesChannelsAndThreadState(t *testing.T) {
 	requests := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

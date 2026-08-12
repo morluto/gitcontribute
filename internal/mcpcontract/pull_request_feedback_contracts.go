@@ -5,7 +5,7 @@ package mcpcontract
 // operation also persists the local repository and pull-request identities
 // required by those exact facet writes; it does not require prior broad sync.
 type SyncPullRequestFeedbackInput struct {
-	PullRequests       []ThreadRef `json:"pull_requests" jsonschema:"One to 50 exact pull requests"`
+	PullRequests       []ThreadRef `json:"pull_requests" jsonschema:"One to 100 exact pull requests"`
 	ThreadState        string      `json:"thread_state,omitempty" jsonschema:"Review threads to return: unresolved or all"`
 	Channels           []string    `json:"channels" jsonschema:"One or more of issue_comments, submitted_reviews, inline_comments, review_threads"`
 	MaxItemsPerChannel int         `json:"max_items_per_channel,omitempty" jsonschema:"Maximum items per requested channel from 1 to 1000"`
@@ -17,6 +17,7 @@ type SyncPullRequestFeedbackInput struct {
 // the durable discovery checkpoint for the repository.
 type IndexPullRequestFeedbackInput struct {
 	Repository         RepositoryRef `json:"repository" jsonschema:"One GitHub repository"`
+	State              string        `json:"state,omitempty" jsonschema:"Pull requests to discover: open, closed, or all"`
 	Channels           []string      `json:"channels" jsonschema:"Feedback channels: issue_comments, submitted_reviews, inline_comments, review_threads"`
 	ThreadState        string        `json:"thread_state,omitempty" jsonschema:"Review threads to index: unresolved or all"`
 	MaxPullRequests    int           `json:"max_pull_requests,omitempty" jsonschema:"Maximum pull requests retained in one job from 1 to 1000"`

@@ -330,7 +330,7 @@ type Reader interface {
 	Thread(context.Context, ThreadInput) (ThreadOutput, error)
 	ThreadByNumber(context.Context, ThreadByNumberInput) (ThreadOutput, error)
 	Dossier(context.Context, RepoInput) (DossierOutput, error)
-	SearchCode(context.Context, SearchCodeInput) (SearchCodeOutput, error)
+	SearchCodeBatch(context.Context, SearchCodeBatchInput) (SearchCodeBatchOutput, error)
 	ExplainMatch(context.Context, ExplainMatchInput) (ExplainMatchOutput, error)
 	GetJob(context.Context, GetJobInput) (GetJobOutput, error)
 	Investigation(context.Context, InvestigationInput) (InvestigationOutput, error)
@@ -345,6 +345,13 @@ type Reader interface {
 
 // RepoInput identifies a repository for an MCP operation.
 type RepoInput struct {
+	Owner string `json:"owner" jsonschema:"GitHub repository owner"`
+	Repo  string `json:"repo" jsonschema:"GitHub repository name"`
+}
+
+// MaterializeRepositoryDossierInput selects one stored repository whose
+// deterministic dossier projection should be refreshed from local corpus data.
+type MaterializeRepositoryDossierInput struct {
 	Owner string `json:"owner" jsonschema:"GitHub repository owner"`
 	Repo  string `json:"repo" jsonschema:"GitHub repository name"`
 }
@@ -568,16 +575,6 @@ func (p *CorpusReadProvenance) UnmarshalJSON(data []byte) error {
 	parsed.Limitations, parsed.ExternalContext, parsed.Recovery = raw.Limitations, raw.ExternalContext, raw.Recovery
 	*p = parsed
 	return nil
-}
-
-// SearchCodeInput describes an offline code search page.
-type SearchCodeInput struct {
-	Query         string `json:"query" jsonschema:"Code search query"`
-	Owner         string `json:"owner,omitempty" jsonschema:"Optional repository owner"`
-	Repo          string `json:"repo,omitempty" jsonschema:"Optional repository name"`
-	Limit         int    `json:"limit,omitempty" jsonschema:"Maximum results from 1 to 100"`
-	Cursor        string `json:"cursor,omitempty" jsonschema:"Opaque cursor returned by the previous page"`
-	SnapshotToken string `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token from a previous offline read"`
 }
 
 // CodeMatchOutput identifies one stored code match.

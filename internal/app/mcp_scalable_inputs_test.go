@@ -169,9 +169,6 @@ func TestScalableRuntimeRejectsPageBoundsBeforeSubmittingJob(t *testing.T) {
 func TestScalableRuntimeBoundsMatchSchemas(t *testing.T) {
 	t.Parallel()
 	reader := &MCPReader{newSearchTestService(t)}
-	if _, err := reader.RankOpportunities(context.Background(), mcpcontract.RankOpportunitiesInput{Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, Limit: 101}); err == nil {
-		t.Fatal("rank opportunities accepted limit above schema maximum")
-	}
 	if _, err := reader.FindPrecedents(context.Background(), mcpcontract.FindPrecedentsInput{Threads: []mcpcontract.ThreadRef{{Owner: "acme", Repo: "rocket", Number: 1}}, Limit: 101}); err == nil {
 		t.Fatal("find precedents accepted limit above schema maximum")
 	}

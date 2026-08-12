@@ -7,10 +7,8 @@ import (
 )
 
 type fakeOptionalCapabilities struct {
-	base                  *fakeReader
-	syncThreadsInput      mcpcontract.SyncThreadsInput
-	fixPatternCalls       int
-	lastFixPatternRequest mcpcontract.MineRepositoryFixPatternsInput
+	base             *fakeReader
+	syncThreadsInput mcpcontract.SyncThreadsInput
 }
 
 func (*fakeOptionalCapabilities) FindNeighbors(context.Context, mcpcontract.FindNeighborsInput) (mcpcontract.FindNeighborsOutput, error) {
@@ -50,32 +48,17 @@ func (*fakeOptionalCapabilities) GetThreads(_ context.Context, in mcpcontract.Ge
 func (*fakeOptionalCapabilities) GetThreadFacets(context.Context, mcpcontract.GetThreadFacetsInput) (mcpcontract.GetThreadFacetsOutput, error) {
 	return mcpcontract.GetThreadFacetsOutput{Status: "complete"}, nil
 }
-func (f *fakeOptionalCapabilities) RankOpportunities(context.Context, mcpcontract.RankOpportunitiesInput) (mcpcontract.RankOpportunitiesOutput, error) {
-	score := 87
-	if f.base.radarScore != 0 {
-		score = f.base.radarScore
-	}
-	return mcpcontract.RankOpportunitiesOutput{
-		Status: "complete",
-		Candidates: []mcpcontract.OpportunityCandidateOutput{{
-			Rank:        1,
-			Ref:         "thread:acme/rocket/issue/7",
-			Repo:        "acme/rocket",
-			Number:      7,
-			Title:       "engine stalls",
-			URL:         "https://github.com/acme/rocket/issues/7",
-			Score:       mcpcontract.RadarScore(score),
-			Eligibility: "needs_coordination",
-			Confidence:  "medium",
-		}},
-		Total: 1,
-	}, nil
-}
 func (*fakeOptionalCapabilities) FindPrecedents(context.Context, mcpcontract.FindPrecedentsInput) (mcpcontract.FindPrecedentsOutput, error) {
 	return mcpcontract.FindPrecedentsOutput{Status: "complete"}, nil
 }
-func (*fakeOptionalCapabilities) PrepareIssueSet(context.Context, mcpcontract.PrepareIssueSetInput) (mcpcontract.PrepareIssueSetOutput, error) {
-	return mcpcontract.PrepareIssueSetOutput{Status: "complete"}, nil
+func (*fakeOptionalCapabilities) MaterializeRepositoryDossier(_ context.Context, in mcpcontract.MaterializeRepositoryDossierInput) (mcpcontract.DossierOutput, error) {
+	return mcpcontract.DossierOutput{Owner: in.Owner, Repo: in.Repo}, nil
+}
+func (*fakeOptionalCapabilities) AnalyzeFixPatterns(_ context.Context, in mcpcontract.AnalyzeFixPatternsInput) (mcpcontract.AnalyzeFixPatternsOutput, error) {
+	return mcpcontract.AnalyzeFixPatternsOutput{Status: "complete", Repository: in.Repository}, nil
+}
+func (*fakeOptionalCapabilities) RankContributionCandidates(_ context.Context, _ mcpcontract.RankContributionCandidatesInput) (mcpcontract.RankContributionCandidatesOutput, error) {
+	return mcpcontract.RankContributionCandidatesOutput{Status: "complete"}, nil
 }
 func (f *fakeOptionalCapabilities) GetJobs(ctx context.Context, in mcpcontract.GetJobsInput) (mcpcontract.GetJobsOutput, error) {
 	items := make([]mcpcontract.BatchItem[mcpcontract.GetJobOutput], len(in.IDs))
@@ -112,11 +95,6 @@ func (f *fakeOptionalCapabilities) SyncThreads(_ context.Context, in mcpcontract
 func (*fakeOptionalCapabilities) HydrateThreads(context.Context, mcpcontract.HydrateThreadsInput) (mcpcontract.JobReference, error) {
 	return mcpcontract.JobReference{ID: "job-hydrate", Status: "queued"}, nil
 }
-func (f *fakeOptionalCapabilities) MineRepositoryFixPatterns(_ context.Context, in mcpcontract.MineRepositoryFixPatternsInput) (mcpcontract.JobReference, error) {
-	f.fixPatternCalls++
-	f.lastFixPatternRequest = in
-	return mcpcontract.JobReference{ID: "job-fix-patterns", Kind: "mine_repository_fix_patterns", Status: "queued"}, nil
-}
 func (*fakeOptionalCapabilities) SyncPortfolio(context.Context, mcpcontract.SyncPortfolioInput) (mcpcontract.JobReference, error) {
 	return mcpcontract.JobReference{ID: "job-portfolio", Kind: "sync_pull_request_portfolio", Status: "queued"}, nil
 }
@@ -145,14 +123,22 @@ func (f *fakeOptionalCapabilities) DeepWiki(context.Context, mcpcontract.DeepWik
 func (*fakeOptionalCapabilities) LinkPullRequest(context.Context, mcpcontract.LinkPullRequestInput) (mcpcontract.LinkPullRequestOutput, error) {
 	return mcpcontract.LinkPullRequestOutput{}, nil
 }
+func (*fakeOptionalCapabilities) GetAuthenticatedIdentity(context.Context, mcpcontract.GetAuthenticatedIdentityInput) (mcpcontract.AuthenticatedIdentityOutput, error) {
+	return mcpcontract.AuthenticatedIdentityOutput{Login: "octocat"}, nil
+}
+func (*fakeOptionalCapabilities) CompareFork(_ context.Context, in mcpcontract.CompareForkInput) (mcpcontract.ForkFreshnessOutput, error) {
+	return mcpcontract.ForkFreshnessOutput{Status: "current", Coverage: "verified", Upstream: in.Upstream, Fork: in.Fork}, nil
+}
 
 type completeTestReader struct {
 	mcpcontract.Reader
 	NeighborReader
 	ScalableReader
+	DossierMaterializer
+	FixPatternAnalyzer
+	ContributionCandidateRanker
 	ThreadFacetReader
 	threadFacetResourceReader
-	IssueSetReader
 	PortfolioReader
 	GitHubOperator
 	CoverageOperator
@@ -160,14 +146,13 @@ type completeTestReader struct {
 	PullRequestFeedbackIndexer
 	PullRequestFeedbackSearcher
 	CIFailureOperator
-	FixPatternOperator
-	FixPatternReader
-	FixPatternPreviewReader
 	CodeIndexer
 	MergeConflictReader
 	CommitPlannerReader
 	ResearchReader
 	PortfolioOperator
+	AuthenticatedIdentityReader
+	ForkComparisonReader
 	Operator
 	ConcernReader
 	ConcernOperator
@@ -180,13 +165,14 @@ type completeTestReader struct {
 func completeFakeReader(base *fakeReader) mcpcontract.Reader {
 	optional := &fakeOptionalCapabilities{base: base}
 	return completeTestReader{
-		Reader: base, NeighborReader: optional, ScalableReader: optional, ThreadFacetReader: optional, threadFacetResourceReader: base, IssueSetReader: optional,
+		Reader: base, NeighborReader: optional, ScalableReader: optional, DossierMaterializer: optional, FixPatternAnalyzer: optional, ContributionCandidateRanker: optional, ThreadFacetReader: optional, threadFacetResourceReader: base,
 		PortfolioReader: optional, GitHubOperator: optional, PullRequestFeedbackOperator: optional, PullRequestFeedbackIndexer: optional, PullRequestFeedbackSearcher: optional, CIFailureOperator: optional,
-		CoverageOperator:   optional,
-		FixPatternOperator: optional, FixPatternReader: base, CodeIndexer: optional,
+		CoverageOperator:    optional,
+		CodeIndexer:         optional,
 		MergeConflictReader: optional, ResearchReader: optional,
 		CommitPlannerReader: base,
 		PortfolioOperator:   optional, Operator: base,
+		AuthenticatedIdentityReader: optional, ForkComparisonReader: optional,
 		ConcernReader: base, ConcernOperator: base,
 		WorkspaceCreator: base, WorkspaceAdopter: base,
 		ValidationReceiptOperator: base, PublishedDraftVerifier: base,

@@ -542,7 +542,7 @@ type ListIssueOptions struct {
 }
 
 // PullRequestListOptions selects one bounded repository-wide pull-request
-// discovery page. State=all is required by repository feedback indexing.
+// discovery page.
 type PullRequestListOptions struct {
 	State     string
 	Sort      string

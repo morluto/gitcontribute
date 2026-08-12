@@ -68,6 +68,7 @@ func RecoveryActionPrototypes() []ToolCall {
 		RecoveryAction(GetThreadFacetsInput{}),
 		RecoveryAction(SearchPullRequestFeedbackInput{}),
 		RecoveryAction(GetRepositoriesInput{}),
+		RecoveryAction(MaterializeRepositoryDossierInput{}),
 		RecoveryAction(EnsureCoverageInput{}),
 		RecoveryAction(SyncRepositoryContextInput{}),
 		RecoveryAction(SyncThreadsInput{}),
@@ -80,16 +81,16 @@ func RecoveryActionPrototypes() []ToolCall {
 		RecoveryAction(IndexRepositoriesInput{}),
 		RecoveryAction(FindClustersInput{}),
 		RecoveryAction(FindNeighborsInput{}),
-		RecoveryAction(RankOpportunitiesInput{}),
-		RecoveryAction(MineRepositoryFixPatternsInput{}),
-		RecoveryAction(PreviewRepositoryFixPatternsInput{}),
 		RecoveryAction(SearchGitHubRepositoriesInput{}),
 		RecoveryAction(SearchGitHubThreadsInput{}),
-		RecoveryAction(SearchCodeInput{}),
+		RecoveryAction(SearchCodeBatchInput{}),
+		RecoveryAction(AnalyzeFixPatternsInput{}),
+		RecoveryAction(RankContributionCandidatesInput{}),
 		RecoveryAction(ReadSourceFilesInput{}),
 		RecoveryAction(InspectCommitChangesInput{}),
 		RecoveryAction(CheckMergeConflictsInput{}),
-		RecoveryAction(FindRelatedWorkInput{}),
+		RecoveryAction(CheckDuplicatesInput{}),
+		RecoveryAction(CheckCollisionsInput{}),
 		RecoveryAction(ListConcernsInput{}),
 		RecoveryAction(ListPullRequestPortfolioInput{}),
 		RecoveryAction(ExportManifestInput{}),
@@ -97,7 +98,7 @@ func RecoveryActionPrototypes() []ToolCall {
 }
 
 type recoveryActionInput interface {
-	GetJobsInput | GetRepositoriesInput | EnsureCoverageInput | SyncRepositoryContextInput | SyncThreadsInput | HydrateThreadsInput | SyncPortfolioInput | SyncPullRequestFeedbackInput | IndexPullRequestFeedbackInput | SyncCIFailuresInput | DeepWikiInput | IndexRepositoriesInput | FindClustersInput | FindNeighborsInput | RankOpportunitiesInput | MineRepositoryFixPatternsInput | PreviewRepositoryFixPatternsInput | SearchGitHubRepositoriesInput | SearchGitHubThreadsInput | SearchCodeInput | ReadSourceFilesInput | InspectCommitChangesInput | CheckMergeConflictsInput | FindRelatedWorkInput | ListConcernsInput | ListPullRequestPortfolioInput | ExportManifestInput | ResourceReadAction | SnapshotReadAction | GetThreadsInput | GetThreadFacetsInput | SearchPullRequestFeedbackInput
+	GetJobsInput | GetRepositoriesInput | MaterializeRepositoryDossierInput | EnsureCoverageInput | SyncRepositoryContextInput | SyncThreadsInput | HydrateThreadsInput | SyncPortfolioInput | SyncPullRequestFeedbackInput | IndexPullRequestFeedbackInput | SyncCIFailuresInput | DeepWikiInput | IndexRepositoriesInput | FindClustersInput | FindNeighborsInput | SearchGitHubRepositoriesInput | SearchGitHubThreadsInput | SearchCodeBatchInput | AnalyzeFixPatternsInput | RankContributionCandidatesInput | ReadSourceFilesInput | InspectCommitChangesInput | CheckMergeConflictsInput | CheckDuplicatesInput | CheckCollisionsInput | ListConcernsInput | ListPullRequestPortfolioInput | ExportManifestInput | ResourceReadAction | SnapshotReadAction | GetThreadsInput | GetThreadFacetsInput | SearchPullRequestFeedbackInput
 }
 
 type followUpActionInput interface {
@@ -207,6 +208,8 @@ func recoveryActionName(input any) (string, bool) {
 		return "search_pull_request_feedback", true
 	case GetRepositoriesInput:
 		return "get_repositories", true
+	case MaterializeRepositoryDossierInput:
+		return "materialize_repository_dossier", true
 	case EnsureCoverageInput:
 		return "ensure_coverage", true
 	case SyncRepositoryContextInput:
@@ -231,26 +234,26 @@ func recoveryActionName(input any) (string, bool) {
 		return "find_clusters", true
 	case FindNeighborsInput:
 		return "find_neighbors", true
-	case RankOpportunitiesInput:
-		return "rank_opportunities", true
-	case MineRepositoryFixPatternsInput:
-		return "mine_repository_fix_patterns", true
-	case PreviewRepositoryFixPatternsInput:
-		return "preview_fix_patterns", true
 	case SearchGitHubRepositoriesInput:
 		return "search_github_repositories", true
 	case SearchGitHubThreadsInput:
 		return "search_github_threads", true
-	case SearchCodeInput:
+	case SearchCodeBatchInput:
 		return "search_code", true
+	case AnalyzeFixPatternsInput:
+		return "analyze_fix_patterns", true
+	case RankContributionCandidatesInput:
+		return "rank_contribution_candidates", true
 	case ReadSourceFilesInput:
 		return "read_source_files", true
 	case InspectCommitChangesInput:
 		return "inspect_commit_changes", true
 	case CheckMergeConflictsInput:
 		return "check_merge_conflicts", true
-	case FindRelatedWorkInput:
-		return "find_related_work", true
+	case CheckDuplicatesInput:
+		return "find_duplicates", true
+	case CheckCollisionsInput:
+		return "find_competing_pull_requests", true
 	case ListConcernsInput:
 		return "list_concerns", true
 	case ListPullRequestPortfolioInput:
@@ -293,6 +296,8 @@ func parseRecoveryAction(data []byte) (ToolCall, error) {
 		return decodeRecoveryAction[SearchPullRequestFeedbackInput](input)
 	case "get_repositories":
 		return decodeRecoveryAction[GetRepositoriesInput](input)
+	case "materialize_repository_dossier":
+		return decodeRecoveryAction[MaterializeRepositoryDossierInput](input)
 	case "ensure_coverage":
 		return decodeRecoveryAction[EnsureCoverageInput](input)
 	case "sync_repository_context":
@@ -317,26 +322,26 @@ func parseRecoveryAction(data []byte) (ToolCall, error) {
 		return decodeRecoveryAction[FindClustersInput](input)
 	case "find_neighbors":
 		return decodeRecoveryAction[FindNeighborsInput](input)
-	case "rank_opportunities":
-		return decodeRecoveryAction[RankOpportunitiesInput](input)
-	case "mine_repository_fix_patterns":
-		return decodeRecoveryAction[MineRepositoryFixPatternsInput](input)
-	case "preview_fix_patterns":
-		return decodeRecoveryAction[PreviewRepositoryFixPatternsInput](input)
 	case "search_github_repositories":
 		return decodeRecoveryAction[SearchGitHubRepositoriesInput](input)
 	case "search_github_threads":
 		return decodeRecoveryAction[SearchGitHubThreadsInput](input)
 	case "search_code":
-		return decodeRecoveryAction[SearchCodeInput](input)
+		return decodeRecoveryAction[SearchCodeBatchInput](input)
+	case "analyze_fix_patterns":
+		return decodeRecoveryAction[AnalyzeFixPatternsInput](input)
+	case "rank_contribution_candidates":
+		return decodeRecoveryAction[RankContributionCandidatesInput](input)
 	case "read_source_files":
 		return decodeRecoveryAction[ReadSourceFilesInput](input)
 	case "inspect_commit_changes":
 		return decodeRecoveryAction[InspectCommitChangesInput](input)
 	case "check_merge_conflicts":
 		return decodeRecoveryAction[CheckMergeConflictsInput](input)
-	case "find_related_work":
-		return decodeRecoveryAction[FindRelatedWorkInput](input)
+	case "find_duplicates":
+		return decodeRecoveryAction[CheckDuplicatesInput](input)
+	case "find_competing_pull_requests":
+		return decodeRecoveryAction[CheckCollisionsInput](input)
 	case "list_concerns":
 		return decodeRecoveryAction[ListConcernsInput](input)
 	case "list_pull_request_portfolio":

@@ -15,10 +15,6 @@ const maxJobArtifactItems = 100
 
 func jobArtifactsAndFollowUp(job *contracts.JobResult, total int) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
 	switch job.Kind {
-	case "mine_repository_fix_patterns":
-		return fixPatternJobArtifact(job)
-	case "build_repository_dossier":
-		return dossierJobArtifact(job)
 	case "create_workspace":
 		return workspaceJobArtifact(job)
 	case "run_validation":
@@ -57,25 +53,6 @@ func ensureCoverageJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtif
 
 func resourceFollowUp(uri, reason string) *mcpcontract.JobFollowUp {
 	return &mcpcontract.JobFollowUp{Action: mcpcontract.FollowUpActionFor(mcpcontract.ResourceReadAction{URI: uri}), Reason: reason}
-}
-
-func fixPatternJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
-	uri := "gitcontribute://fix-pattern-report/" + job.ID
-	return []mcpcontract.JobArtifactReference{{Kind: "fix_pattern_report", ID: job.ID, URI: uri}},
-		resourceFollowUp(uri, "Read the persisted typed fix-pattern report.")
-}
-
-func dossierJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {
-	var request struct {
-		Owner string `json:"owner"`
-		Repo  string `json:"repo"`
-	}
-	if json.Unmarshal([]byte(job.Request), &request) != nil || request.Owner == "" || request.Repo == "" {
-		return nil, nil
-	}
-	uri := fmt.Sprintf("gitcontribute://dossier/%s/%s", request.Owner, request.Repo)
-	return []mcpcontract.JobArtifactReference{{Kind: "dossier", ID: request.Owner + "/" + request.Repo, URI: uri}},
-		resourceFollowUp(uri, "Read the persisted typed dossier resource.")
 }
 
 func workspaceJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobArtifactReference, *mcpcontract.JobFollowUp) {

@@ -32,6 +32,7 @@ type pullRequestFeedbackIndexItem struct {
 type pullRequestFeedbackIndexResult struct {
 	Status          batchOperationStatus           `json:"status"`
 	DiscoveryStatus batchOperationStatus           `json:"discovery_status"`
+	State           string                         `json:"state"`
 	NextPage        int                            `json:"next_page,omitempty"`
 	PullRequests    int                            `json:"pull_requests"`
 	FeedbackItems   int                            `json:"feedback_items"`
@@ -50,6 +51,11 @@ func (r *MCPReader) IndexPullRequestFeedback(ctx context.Context, in mcpcontract
 	}
 	in.Repository.Owner = ref.Owner()
 	in.Repository.Repo = ref.Repo()
+	pullRequestState, err := parsePullRequestFeedbackIndexState(in.State)
+	if err != nil {
+		return mcpcontract.JobReference{}, err
+	}
+	in.State = feedbackIndexStateValue(pullRequestState)
 	if len(in.Channels) == 0 {
 		in.Channels = corpus.AllFeedbackSelection().Channels()
 	}
@@ -96,6 +102,11 @@ func (r *MCPReader) IndexPullRequestFeedback(ctx context.Context, in mcpcontract
 
 func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract.IndexPullRequestFeedbackInput, selection corpus.FeedbackSelection, report func(string, string) error) (pullRequestFeedbackIndexResult, error) {
 	in.Channels, in.ThreadState = selection.Channels(), selection.ThreadState()
+	pullRequestState, err := parsePullRequestFeedbackIndexState(in.State)
+	if err != nil {
+		return pullRequestFeedbackIndexResult{}, err
+	}
+	in.State = feedbackIndexStateValue(pullRequestState)
 	reader, err := r.githubReader() //nolint:contextcheck // Client construction performs no request; operations below receive ctx.
 	if err != nil {
 		return pullRequestFeedbackIndexResult{}, err
@@ -108,6 +119,11 @@ func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract
 	if !ok {
 		return pullRequestFeedbackIndexResult{}, errors.New("GitHub reader does not support pull-request feedback")
 	}
+	release, err := r.acquireFeedbackWorkflow(ctx)
+	if err != nil {
+		return pullRequestFeedbackIndexResult{}, err
+	}
+	defer release()
 	c, err := r.openCorpus(ctx)
 	if err != nil {
 		return pullRequestFeedbackIndexResult{}, err
@@ -130,20 +146,21 @@ func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract
 	if err != nil {
 		return pullRequestFeedbackIndexResult{}, err
 	}
-	if discovery == nil || discovery.IsComplete() || !discovery.Selection.Equal(selection) {
+	if discovery == nil || discovery.IsComplete() || !discovery.Selection.Equal(selection) || discovery.PullRequestState.String() != pullRequestState.String() {
 		generation := int64(1)
 		if discovery != nil {
 			generation = discovery.Generation + 1
 		}
-		discovery = &corpus.FeedbackDiscovery{RepositoryID: repo.ID, Generation: generation, NextPage: 1, Selection: selection}
+		discovery = &corpus.FeedbackDiscovery{RepositoryID: repo.ID, Generation: generation, NextPage: 1, Selection: selection, PullRequestState: pullRequestState}
 	} else {
 		discovery.Selection = selection
+		discovery.PullRequestState = pullRequestState
 	}
 	if discovery.NextPage < 1 {
 		discovery.NextPage = 1
 	}
 	budget := github.NewRequestBudget(in.MaxRequests)
-	result := pullRequestFeedbackIndexResult{Status: batchOperationComplete, DiscoveryStatus: batchOperationComplete, Items: make([]pullRequestFeedbackIndexItem, 0, in.MaxPullRequests)}
+	result := pullRequestFeedbackIndexResult{Status: batchOperationComplete, DiscoveryStatus: batchOperationComplete, State: in.State, Items: make([]pullRequestFeedbackIndexItem, 0, in.MaxPullRequests)}
 	page := discovery.NextPage
 	initialRequests := discovery.Requests
 	pages := 0
@@ -154,7 +171,7 @@ func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract
 			stopReason = "request_budget_exhausted"
 			break
 		}
-		listed, listErr := indexer.ListPullRequests(ctx, in.Repository.Owner, in.Repository.Repo, github.PullRequestListOptions{State: "all", Sort: "updated", Direction: "desc", PageOptions: github.PageOptions{Page: page, PerPage: feedbackDiscoveryPageSize}})
+		listed, listErr := indexer.ListPullRequests(ctx, in.Repository.Owner, in.Repository.Repo, github.PullRequestListOptions{State: in.State, Sort: "updated", Direction: "desc", PageOptions: github.PageOptions{Page: page, PerPage: feedbackDiscoveryPageSize}})
 		if listErr != nil {
 			stopReason = classifyIndexError(listErr)
 			break
@@ -198,7 +215,7 @@ func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract
 			stopReason = "discovery_page_bound"
 			break
 		}
-		discovery.DiscoveredPullRequests, err = c.CountThreadsFiltered(ctx, repo.ID, corpus.PullRequestThreadKind(), corpus.AnyThreadState())
+		discovery.DiscoveredPullRequests, err = c.CountThreadsFiltered(ctx, repo.ID, corpus.PullRequestThreadKind(), pullRequestState)
 		if err != nil {
 			return pullRequestFeedbackIndexResult{}, err
 		}
@@ -227,7 +244,7 @@ func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract
 			}
 		}
 	}
-	discovery.DiscoveredPullRequests, err = c.CountThreadsFiltered(ctx, repo.ID, corpus.PullRequestThreadKind(), corpus.AnyThreadState())
+	discovery.DiscoveredPullRequests, err = c.CountThreadsFiltered(ctx, repo.ID, corpus.PullRequestThreadKind(), pullRequestState)
 	if err != nil {
 		return pullRequestFeedbackIndexResult{}, err
 	}
@@ -245,6 +262,24 @@ func (r *MCPReader) indexPullRequestFeedback(ctx context.Context, in mcpcontract
 	}
 	result.Requests = budget.Completed()
 	return result, nil
+}
+
+func parsePullRequestFeedbackIndexState(value string) (corpus.ThreadStateFilter, error) {
+	if value == "" || value == "all" {
+		return corpus.AnyThreadState(), nil
+	}
+	state, err := corpus.ParseThreadStateFilter(value)
+	if err != nil {
+		return corpus.ThreadStateFilter{}, fmt.Errorf("feedback index state: %w", err)
+	}
+	return state, nil
+}
+
+func feedbackIndexStateValue(state corpus.ThreadStateFilter) string {
+	if state.IsAny() {
+		return "all"
+	}
+	return state.String()
 }
 
 func (r *MCPReader) indexOnePullRequestFeedback(ctx context.Context, feedbackReader github.PullRequestFeedbackReader, ref mcpcontract.ThreadRef, in mcpcontract.IndexPullRequestFeedbackInput, selection corpus.FeedbackSelection, budget *github.RequestBudget) pullRequestFeedbackIndexItem {

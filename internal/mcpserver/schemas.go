@@ -102,31 +102,6 @@ func inferredSchema[T any]() schemaDefinition {
 			Description: "Terminal job outcome; omitted until execution is terminal.",
 			Enum:        []any{mcpcontract.JobOutcomeSucceeded, mcpcontract.JobOutcomePartial, mcpcontract.JobOutcomeFailed, mcpcontract.JobOutcomeCancelled},
 		},
-		reflect.TypeFor[mcpcontract.FixPatternOutcome](): {
-			Type:        "string",
-			Description: "Pull-request outcome; merged state comes from GitHub and superseded requires an explicit replacement relationship.",
-			Enum:        []any{mcpcontract.FixPatternMerged, mcpcontract.FixPatternClosedUnmerged, mcpcontract.FixPatternSuperseded, mcpcontract.FixPatternOpen, mcpcontract.FixPatternUnknown},
-		},
-		reflect.TypeFor[mcpcontract.FixPatternRelationship](): {
-			Type:        "string",
-			Description: "Evidence connecting a pull request to an issue.",
-			Enum:        []any{mcpcontract.FixPatternCloses, mcpcontract.FixPatternReferences, mcpcontract.FixPatternExplicitReplacement, mcpcontract.FixPatternSimilarityOnly},
-		},
-		reflect.TypeFor[mcpcontract.FixPatternReportStatus](): {
-			Type:        "string",
-			Description: "Whether the bounded report is complete or retains coverage limits or failures.",
-			Enum:        []any{mcpcontract.FixPatternReportComplete, mcpcontract.FixPatternReportPartial},
-		},
-		reflect.TypeFor[mcpcontract.FixPatternProofStyle](): {
-			Type:        "string",
-			Description: "Evidence style detected in stored pull-request text.",
-			Enum:        []any{mcpcontract.FixPatternRegressionTest, mcpcontract.FixPatternReproduction, mcpcontract.FixPatternBenchmark, mcpcontract.FixPatternBeforeAfter, mcpcontract.FixPatternScreenshot},
-		},
-		reflect.TypeFor[mcpcontract.FixPatternRelatedKind](): {
-			Type:        "string",
-			Description: "Stored thread kind of a related target.",
-			Enum:        []any{mcpcontract.FixPatternRelatedIssue, mcpcontract.FixPatternRelatedPullRequest},
-		},
 	}
 	provenanceSchema, err := jsonschema.For[corpusReadProvenanceSchemaShape](&jsonschema.ForOptions{TypeSchemas: typeSchemas})
 	if err != nil {
@@ -245,6 +220,48 @@ func constrainPullRequestRefs(builder *schemaBuilder, name string) {
 		if value != nil {
 			value.MinLength = jsonschema.Ptr(1)
 			value.Pattern = nonWhitespacePattern
+		}
+	}
+}
+
+func configureFixPatternAnalysisSchema(builder *schemaBuilder) {
+	symptom := builder.schema.Defs["FixPatternSymptom"]
+	if symptom == nil {
+		if taxonomy := property(builder, "symptom_taxonomy"); taxonomy != nil {
+			symptom = taxonomy.Items
+		}
+	}
+	if symptom == nil {
+		*builder.err = fmt.Errorf("MCP schema definition %q not found", "FixPatternSymptom")
+		return
+	}
+	symptomBuilder := &schemaBuilder{schema: symptom, err: builder.err}
+	if name := property(symptomBuilder, "name"); name != nil {
+		name.MinLength = jsonschema.Ptr(1)
+		name.Pattern = nonWhitespacePattern
+	}
+	if terms := property(symptomBuilder, "terms"); terms != nil {
+		terms.MinItems = jsonschema.Ptr(1)
+		terms.MaxItems = jsonschema.Ptr(12)
+		terms.UniqueItems = true
+		if terms.Items != nil {
+			terms.Items.MinLength = jsonschema.Ptr(1)
+			terms.Items.Pattern = nonWhitespacePattern
+		}
+	}
+
+	window := builder.schema.Defs["FixPatternTimeWindow"]
+	if window == nil {
+		window = property(builder, "time_window")
+	}
+	if window == nil {
+		*builder.err = fmt.Errorf("MCP schema definition %q not found", "FixPatternTimeWindow")
+		return
+	}
+	windowBuilder := &schemaBuilder{schema: window, err: builder.err}
+	for _, name := range []string{"updated_after", "updated_before"} {
+		if value := property(windowBuilder, name); value != nil {
+			value.Format = "date-time"
 		}
 	}
 }

@@ -131,7 +131,7 @@ func TestWriteBoundariesPassCanonicalIDsToOperators(t *testing.T) {
 	if _, _, err := server.recordHypothesis(ctx, nil, mcpcontract.RecordHypothesisInput{InvestigationID: " inv-1 ", Title: "title", Description: "description", Category: "bug"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := server.findRelatedWork(ctx, nil, mcpcontract.FindRelatedWorkInput{Target: " HYPOTHESIS ", ID: " hyp-1 ", Kinds: []string{"duplicates"}, Limit: 1}); err != nil {
+	if _, _, err := server.findDuplicates(ctx, nil, mcpcontract.CheckDuplicatesInput{Target: " HYPOTHESIS ", ID: " hyp-1 ", Limit: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := server.promoteOpportunity(ctx, nil, mcpcontract.PromoteOpportunityInput{HypothesisID: " hyp-1 ", ProblemStatement: " problem ", Scope: " scope ", Impact: " impact ", ExpectedEffort: " small "}); err != nil {
@@ -150,9 +150,6 @@ func TestWriteBoundariesPassCanonicalIDsToOperators(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, _, err := server.explainMatch(ctx, nil, mcpcontract.ExplainMatchInput{Owner: " acme ", Repo: " rocket ", Kind: " code ", Path: " main.go ", Commit: " abc123 "}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := server.buildRepositoryDossier(ctx, nil, mcpcontract.BuildRepositoryDossierInput{Owner: " acme ", Repo: " rocket "}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := server.startInvestigation(ctx, nil, mcpcontract.StartInvestigationInput{Owner: " acme ", Repo: " rocket ", CommitSHA: " abc123 ", Lens: " reliability "}); err != nil {
@@ -180,8 +177,8 @@ func TestWriteBoundariesPassCanonicalIDsToOperators(t *testing.T) {
 	if reader.explanation.Owner != "acme" || reader.explanation.Repo != "rocket" || reader.explanation.Path != "main.go" || reader.explanation.Commit != "abc123" {
 		t.Fatalf("explanation identity was not canonical: %+v", reader.explanation)
 	}
-	if reader.dossier.Owner != "acme" || reader.dossier.Repo != "rocket" || reader.investigation.Owner != "acme" || reader.investigation.Repo != "rocket" || reader.investigation.CommitSHA != "abc123" || reader.investigation.Lens != "reliability" {
-		t.Fatalf("repository workflow identities were not canonical: dossier=%+v investigation=%+v", reader.dossier, reader.investigation)
+	if reader.investigation.Owner != "acme" || reader.investigation.Repo != "rocket" || reader.investigation.CommitSHA != "abc123" || reader.investigation.Lens != "reliability" {
+		t.Fatalf("repository workflow identity was not canonical: investigation=%+v", reader.investigation)
 	}
 	if reader.concern.Owner != "acme" || reader.concern.Repo != "rocket" || reader.concern.CommitSHA != "abc123" {
 		t.Fatalf("concern identity was not canonical: %+v", reader.concern)
@@ -337,6 +334,11 @@ func TestV1ParityToolsAndResources(t *testing.T) {
 		if _, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: uri}); err == nil {
 			t.Errorf("unadvertised alias %q was routed", uri)
 		}
+	}
+
+	dossier, err := client.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: "gitcontribute://dossier/acme/rocket"})
+	if err != nil || len(dossier.Contents) != 1 || dossier.Contents[0].Text == "" {
+		t.Fatalf("read canonical dossier resource: result=%+v err=%v", dossier, err)
 	}
 
 	templates := map[string]bool{}

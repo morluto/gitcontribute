@@ -16,6 +16,7 @@ type feedbackIndexTestReader struct {
 	panicRadarReader
 	pages      map[int]github.ListResult[github.Issue]
 	perPage    []int
+	states     []string
 	withThread bool
 }
 
@@ -33,6 +34,7 @@ func (r *cancelledPartialFeedbackReader) GetPullRequestFeedback(_ context.Contex
 
 func (r *feedbackIndexTestReader) ListPullRequests(_ context.Context, _, _ string, opts github.PullRequestListOptions) (github.ListResult[github.Issue], error) {
 	r.perPage = append(r.perPage, opts.PerPage)
+	r.states = append(r.states, opts.State)
 	return r.pages[opts.Page], nil
 }
 
@@ -105,6 +107,9 @@ func TestPullRequestFeedbackIndexResumesDiscoveryAndBuildsOfflineProjection(t *t
 	if len(githubReader.perPage) != 2 || githubReader.perPage[0] != feedbackDiscoveryPageSize || githubReader.perPage[1] != feedbackDiscoveryPageSize {
 		t.Fatalf("discovery page sizes = %v, want stable size %d", githubReader.perPage, feedbackDiscoveryPageSize)
 	}
+	if len(githubReader.states) != 2 || githubReader.states[0] != "all" || githubReader.states[1] != "all" {
+		t.Fatalf("discovery states = %v, want all", githubReader.states)
+	}
 	discovery, err = svc.corpus.GetFeedbackDiscovery(ctx, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +127,88 @@ func TestPullRequestFeedbackIndexResumesDiscoveryAndBuildsOfflineProjection(t *t
 	if result.Status != "complete" || result.Coverage != "complete" || result.Total != 1 || len(result.Matches) != 1 || result.Matches[0].PullRequest.Number != 2 {
 		t.Fatalf("offline feedback search = %+v", result)
 	}
+}
+
+func TestPullRequestFeedbackIndexPreservesOpenDiscoveryScope(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	t.Cleanup(func() { _ = svc.Close() })
+	githubReader := &feedbackIndexTestReader{pages: map[int]github.ListResult[github.Issue]{
+		1: {Items: []github.Issue{{Number: 1, Kind: domain.PullRequestKind}}, Page: github.PageInfo{Page: 1, HasNext: false}},
+	}}
+	svc.SetGitHubReader(githubReader)
+	reader := &MCPReader{Service: svc}
+	in := mcpcontract.IndexPullRequestFeedbackInput{
+		Repository: mcpcontract.RepositoryRef{Owner: "acme", Repo: "rocket"}, State: "open",
+		Channels: []string{"issue_comments"}, ThreadState: "all", MaxPullRequests: 10, MaxItemsPerChannel: 10, MaxPages: 10, MaxRequests: 20,
+	}
+	result, err := reader.indexPullRequestFeedback(ctx, in, mustFeedbackSelection(t, in.Channels, in.ThreadState), func(string, string) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.State != "open" || len(githubReader.states) != 1 || githubReader.states[0] != "open" {
+		t.Fatalf("state-scoped provider request/result = states %v result %+v", githubReader.states, result)
+	}
+	discovery, err := svc.corpus.GetFeedbackDiscovery(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if discovery == nil || !discovery.IsComplete() || !discovery.PullRequestState.IsOpen() {
+		t.Fatalf("open discovery checkpoint = %+v", discovery)
+	}
+	openResult, err := reader.SearchPullRequestFeedback(ctx, mcpcontract.SearchPullRequestFeedbackInput{Repository: in.Repository, State: "open", Channel: "issue_comments", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if openResult.Coverage != "complete" {
+		t.Fatalf("open search coverage = %+v", openResult)
+	}
+	allResult, err := reader.SearchPullRequestFeedback(ctx, mcpcontract.SearchPullRequestFeedbackInput{Repository: in.Repository, State: "all", Channel: "issue_comments", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allResult.Coverage == "complete" || allResult.Recovery == nil {
+		t.Fatalf("open-only discovery was presented as historical coverage: %+v", allResult)
+	}
+}
+
+func TestExactFeedbackSyncAcceptsSixtyTwoPullRequestsAsOneJob(t *testing.T) {
+	ctx := context.Background()
+	svc := newLocalService(t)
+	t.Cleanup(func() { _ = svc.Close() })
+	svc.SetGitHubReader(&feedbackIndexTestReader{})
+	refs := make([]mcpcontract.ThreadRef, 62)
+	for i := range refs {
+		refs[i] = mcpcontract.ThreadRef{Owner: "acme", Repo: "rocket", Kind: "pull_request", Number: i + 1}
+	}
+	job, err := (&MCPReader{Service: svc}).SyncPullRequestFeedback(ctx, mcpcontract.SyncPullRequestFeedbackInput{
+		PullRequests: refs, Channels: []string{"issue_comments"}, ThreadState: "all", MaxItemsPerChannel: 10, MaxRequests: 100,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.ID == "" || job.Kind != "sync_pull_request_feedback" {
+		t.Fatalf("62-PR exact feedback job = %+v", job)
+	}
+}
+
+func TestFeedbackWorkflowSlotWaitIsCancellable(t *testing.T) {
+	svc := &Service{}
+	release, err := svc.acquireFeedbackWorkflow(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := svc.acquireFeedbackWorkflow(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("waiting feedback workflow error = %v, want cancellation", err)
+	}
+	release()
+	secondRelease, err := svc.acquireFeedbackWorkflow(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondRelease()
 }
 
 func TestPullRequestFeedbackSearchKeepsThreadResourceReadable(t *testing.T) {

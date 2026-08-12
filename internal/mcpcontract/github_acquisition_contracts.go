@@ -217,6 +217,7 @@ type SearchCodeBatchInput struct {
 	Repo          string   `json:"repo" jsonschema:"Repository name"`
 	Queries       []string `json:"queries" jsonschema:"One to 20 code queries, returned in input order"`
 	Limit         int      `json:"limit,omitempty" jsonschema:"Shared per-query result limit from 1 to 100"`
+	Cursor        string   `json:"cursor,omitempty" jsonschema:"Opaque cursor for a one-query continuation"`
 	SnapshotToken string   `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token"`
 }
 

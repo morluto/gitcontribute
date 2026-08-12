@@ -43,24 +43,26 @@ func Unavailable(code, message string, actions ...ToolCall) error {
 const (
 	ToolSearchRepositories           = "corpus.search_repositories"
 	ToolSearchThreads                = "corpus.search_threads"
-	ToolSearchCode                   = "corpus.search_code_legacy"
 	ToolSearchCodeBatch              = "corpus.search_code"
 	ToolGetRepositories              = "corpus.get_repositories"
+	ToolMaterializeRepositoryDossier = "corpus.materialize_repository_dossier"
 	ToolGetThreads                   = "corpus.get_threads"
 	ToolGetThreadFacets              = "corpus.get_thread_facets"
-	ToolRankThreads                  = "corpus.rank_contribution_candidates"
+	ToolRankContributionCandidates   = "corpus.rank_contribution_candidates"
 	ToolFindPrecedents               = "corpus.find_precedents"
-	ToolPrepareIssueSet              = "workflow.prepare_issue_set"
+	ToolAnalyzeFixPatterns           = "corpus.analyze_fix_patterns"
 	ToolExplainMatch                 = "corpus.explain_match"
 	ToolFindClusters                 = "corpus.find_clusters"
 	ToolFindNeighbors                = "corpus.find_neighbors"
+	ToolFindDuplicates               = "corpus.find_duplicates"
+	ToolFindCompetingPullRequests    = "corpus.find_competing_pull_requests"
 	ToolGetCoverage                  = "corpus.get_coverage"
 	ToolEnsureCoverage               = "corpus.ensure_coverage"
 	ToolGetSourceAuditWorkflow       = "workflow.get_source_audit_contract"
 	ToolGetCatalogContract           = "workflow.get_catalog_contract"
-	ToolBuildRepositoryDossier       = "workflow.build_repository_dossier"
-	ToolMineRepositoryFixPatterns    = "workflow.mine_repository_fix_patterns"
-	ToolPreviewRepositoryFixPatterns = "corpus.preview_fix_patterns"
+	ToolQueryDeepWiki                = "research.query_deepwiki"
+	ToolGetAuthenticatedIdentity     = "github.get_authenticated_identity"
+	ToolCompareFork                  = "github.compare_fork"
 	ToolGetJob                       = "jobs.get"
 	ToolCancelJob                    = "jobs.cancel"
 	ToolSearchGitHubRepositories     = "github.search_repositories"
@@ -70,7 +72,6 @@ const (
 	ToolSyncThreads                  = "github.sync_threads"
 	ToolHydrateThreads               = "github.sync_thread_facets"
 	ToolSyncPortfolio                = "github.sync_pull_request_portfolio"
-	ToolPreflightContribution        = "workflow.preflight_contribution"
 	ToolSyncPullRequestFeedback      = "github.sync_pull_request_feedback"
 	ToolWaitPullRequestChecks        = "github.wait_pull_request_checks"
 	ToolIndexPullRequestFeedback     = "github.index_pull_request_feedback"
@@ -83,7 +84,6 @@ const (
 	ToolCheckMergeConflicts          = "workspace.check_merge_conflicts"
 	ToolInspectCommitChanges         = "workspace.inspect_commit_changes"
 	ToolPlanSemanticCommits          = "workspace.plan_semantic_commits"
-	ToolQueryDeepWiki                = "research.query_deepwiki"
 	ToolCreateWorkspace              = "workspace.create"
 	ToolAdoptWorkspace               = "workspace.adopt"
 	ToolDefineValidation             = "validation.define"
@@ -93,7 +93,6 @@ const (
 	ToolAttachJUnitReport            = "validation.attach_junit_report"
 	ToolStartInvestigation           = "workflow.start_investigation"
 	ToolRecordHypothesis             = "workflow.record_hypothesis"
-	ToolFindRelatedWork              = "workflow.find_related_work"
 	ToolPromoteOpportunity           = "workflow.promote_opportunity"
 	ToolPrepareContribution          = "workflow.prepare_contribution"
 	ToolVerifyPublishedDraft         = "workflow.verify_published_draft"
@@ -478,25 +477,24 @@ type EvidenceOutput struct {
 	Evidence        []EvidenceItem `json:"evidence"`
 }
 
-// RankOpportunitiesInput bounds ranking across stored repositories.
-type RankOpportunitiesInput struct {
+// RankContributionCandidatesInput bounds deterministic ranking across stored repositories.
+type RankContributionCandidatesInput struct {
 	Repositories            []RepositoryRef `json:"repositories" jsonschema:"Required 1-50 stored repositories"`
 	Limit                   int             `json:"limit,omitempty" jsonschema:"Result bound from 1-100"`
 	MaxResultsPerRepository int             `json:"max_results_per_repository,omitempty" jsonschema:"Per-repository bound from 1-100"`
 	SnapshotToken           string          `json:"snapshot_token,omitempty" jsonschema:"Optional immutable corpus snapshot token"`
 }
 
-// OpportunityCandidateOutput describes one ranked contribution candidate.
-type OpportunityCandidateOutput struct {
+type ContributionCandidateOutput struct {
 	Rank               int                            `json:"rank"`
 	Ref                string                         `json:"ref"`
 	Repo               string                         `json:"repo"`
 	Number             int                            `json:"number"`
 	Title              string                         `json:"title"`
 	URL                string                         `json:"url"`
-	Score              RadarScore                     `json:"score" jsonschema:"Deterministic Contribution Radar score from 0 to 100"`
+	Score              RadarScore                     `json:"score"`
 	Eligibility        string                         `json:"eligibility"`
-	Confidence         string                         `json:"confidence" jsonschema:"Categorical evidence confidence such as low, medium, or high"`
+	Confidence         string                         `json:"confidence"`
 	PositiveSignals    []string                       `json:"positive_signals,omitempty"`
 	Risks              []string                       `json:"risks,omitempty"`
 	Blockers           []string                       `json:"blockers,omitempty"`
@@ -506,8 +504,7 @@ type OpportunityCandidateOutput struct {
 	SourceUpdatedAt    string                         `json:"source_updated_at,omitempty"`
 }
 
-// RepositoryOpportunitySummaryOutput reports ranking coverage for one repository.
-type RepositoryOpportunitySummaryOutput struct {
+type RepositoryCandidateRankingOutput struct {
 	Repo             string        `json:"repo"`
 	TotalOpenIssues  int           `json:"total_open_issues"`
 	Considered       int           `json:"considered"`
@@ -517,17 +514,16 @@ type RepositoryOpportunitySummaryOutput struct {
 	Recovery         *RecoveryPlan `json:"recovery,omitempty"`
 }
 
-// RankOpportunitiesOutput combines deterministic cross-repository ranking with
-// per-repository coverage or availability results.
-type RankOpportunitiesOutput struct {
-	Status        string                                          `json:"status"`
-	Candidates    []OpportunityCandidateOutput                    `json:"candidates"`
-	Repositories  []BatchItem[RepositoryOpportunitySummaryOutput] `json:"repositories"`
-	GeneratedAt   string                                          `json:"generated_at"`
-	Total         int                                             `json:"total"`
-	Truncated     bool                                            `json:"truncated"`
-	SnapshotToken string                                          `json:"snapshot_token"`
-	Recovery      *RecoveryPlan                                   `json:"recovery,omitempty"`
+type RankContributionCandidatesOutput struct {
+	Status        string                                        `json:"status"`
+	Candidates    []ContributionCandidateOutput                 `json:"candidates"`
+	Repositories  []BatchItem[RepositoryCandidateRankingOutput] `json:"repositories"`
+	GeneratedAt   string                                        `json:"generated_at"`
+	Total         int                                           `json:"total"`
+	Truncated     bool                                          `json:"truncated"`
+	SnapshotToken string                                        `json:"snapshot_token"`
+	Recovery      *RecoveryPlan                                 `json:"recovery,omitempty"`
+	Provenance    CorpusReadProvenance                          `json:"provenance"`
 }
 
 // ReadinessInput selects a contribution opportunity readiness report.

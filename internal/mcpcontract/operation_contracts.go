@@ -196,9 +196,6 @@ type JobReference struct {
 	FollowUp    *JobFollowUp   `json:"follow_up,omitempty"`
 }
 
-// BuildRepositoryDossierInput selects a repository for durable dossier generation.
-type BuildRepositoryDossierInput RepoInput
-
 // DurableArtifactReference identifies a persisted object whose canonical
 // detailed representation is available through MCP resources.
 type DurableArtifactReference struct {
@@ -273,20 +270,6 @@ type CheckOutput struct {
 	Limit          int            `json:"limit"`
 	Truncated      bool           `json:"truncated"`
 	Recovery       *RecoveryPlan  `json:"recovery,omitempty"`
-}
-
-// FindRelatedWorkInput selects one workflow target and related-work populations.
-type FindRelatedWorkInput struct {
-	Target string   `json:"target" jsonschema:"Target scope: hypothesis or opportunity"`
-	ID     string   `json:"id" jsonschema:"Hypothesis or opportunity ID"`
-	Kinds  []string `json:"kinds,omitempty" jsonschema:"Related-work populations: duplicates and/or competing_pull_requests; defaults to both"`
-	Limit  int      `json:"limit,omitempty" jsonschema:"Maximum findings per population from 1 to 100"`
-}
-
-// FindRelatedWorkOutput groups independently derived related-work populations.
-type FindRelatedWorkOutput struct {
-	Duplicates            *CheckOutput `json:"duplicates,omitempty"`
-	CompetingPullRequests *CheckOutput `json:"competing_pull_requests,omitempty"`
 }
 
 // PromoteOpportunityInput converts a hypothesis into a scoped opportunity.

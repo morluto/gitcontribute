@@ -35,13 +35,6 @@ func (k relatedWorkCheckKind) resultName() string {
 	return "duplicate"
 }
 
-func (k relatedWorkCheckKind) recoveryKind() string {
-	if k == competingPullRequests {
-		return "competing_pull_requests"
-	}
-	return "duplicates"
-}
-
 func (r *MCPReader) checkRelatedWorkInput(ctx context.Context, rawTarget, rawID string, limit int, check relatedWorkCheckKind) (mcpcontract.CheckOutput, error) {
 	target, err := parseRelatedWorkSubjectKind(rawTarget)
 	if err != nil {
@@ -139,7 +132,12 @@ func collisionCheckResultToMCP(subject relatedWorkSubject, result *contracts.Col
 
 func relatedWorkLimitRecovery(subject relatedWorkSubject, limit int, check relatedWorkCheckKind) *mcpcontract.RecoveryPlan {
 	nextLimit := min(100, max(limit*2, limit+1))
-	return recoveryPlan("related_work_truncated", "The related-work result reached its bound. Rerun workflow.find_related_work with a larger limit before treating the returned findings as exhaustive.", mcpcontract.RecoveryAction(mcpcontract.FindRelatedWorkInput{Target: subject.kind.String(), ID: subject.id, Kinds: []string{check.recoveryKind()}, Limit: nextLimit}))
+	message := "The related-work result reached its bound. Rerun the same exact check with a larger limit before treating the findings as exhaustive."
+	input := mcpcontract.CheckDuplicatesInput{Target: subject.kind.String(), ID: subject.id, Limit: nextLimit}
+	if check == competingPullRequests {
+		return recoveryPlan("related_work_truncated", message, mcpcontract.RecoveryAction(mcpcontract.CheckCollisionsInput(input)))
+	}
+	return recoveryPlan("related_work_truncated", message, mcpcontract.RecoveryAction(input))
 }
 
 func (r *MCPReader) relatedWorkRepositoryIndexed(ctx context.Context, repo domain.RepoRef) (bool, error) {

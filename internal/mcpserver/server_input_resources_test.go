@@ -103,7 +103,7 @@ func TestReadResourceRoutesEscapedFeedbackIDAsOneOpaqueSegment(t *testing.T) {
 
 func TestSearchCodeRejectsWhitespaceOnlyQuery(t *testing.T) {
 	server := &Server{reader: &fakeReader{}}
-	_, _, err := server.searchCode(context.Background(), nil, mcpcontract.SearchCodeInput{Query: " \t "})
+	_, _, err := server.searchCodeBatch(context.Background(), nil, mcpcontract.SearchCodeBatchInput{Owner: "acme", Repo: "rocket", Queries: []string{" \t "}})
 	if err == nil {
 		t.Fatal("whitespace-only code search query was accepted")
 	}

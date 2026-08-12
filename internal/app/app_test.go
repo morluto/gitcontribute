@@ -333,7 +333,7 @@ func TestMCPReaderLocalReads(t *testing.T) {
 
 	_, err = reader.Dossier(ctx, mcpcontract.RepoInput{Owner: "acme", Repo: "rocket"})
 	var dossierErr *mcpcontract.ToolError
-	if !errors.As(err, &dossierErr) || dossierErr.Code != "dossier_not_persisted" || dossierErr.Recovery == nil || len(dossierErr.Recovery.Then) != 1 || dossierErr.Recovery.Then[0].Type() != "get_repositories" {
+	if !errors.As(err, &dossierErr) || dossierErr.Code != "dossier_not_persisted" || dossierErr.Recovery == nil || len(dossierErr.Recovery.Then) != 1 || dossierErr.Recovery.Then[0].Type() != "materialize_repository_dossier" {
 		t.Fatalf("MCP dossier before build error = %+v", err)
 	}
 	_, err = reader.Dossier(ctx, mcpcontract.RepoInput{Owner: "acme", Repo: "missing"})
@@ -341,8 +341,8 @@ func TestMCPReaderLocalReads(t *testing.T) {
 	if !errors.As(err, &repositoryErr) || repositoryErr.Code != "repository_not_indexed" || repositoryErr.Recovery == nil || len(repositoryErr.Recovery.Then) != 1 || repositoryErr.Recovery.Then[0].Type() != "sync_repository_context" {
 		t.Fatalf("MCP dossier for missing repository error = %+v", err)
 	}
-	if _, err := svc.BuildRepositoryDossier(ctx, contracts.RepoRef{Owner: "acme", Repo: "rocket"}); err != nil {
-		t.Fatalf("build dossier: %v", err)
+	if _, err := reader.(*MCPReader).MaterializeRepositoryDossier(ctx, mcpcontract.MaterializeRepositoryDossierInput{Owner: "acme", Repo: "rocket"}); err != nil {
+		t.Fatalf("materialize dossier: %v", err)
 	}
 	dossier, err := reader.Dossier(ctx, mcpcontract.RepoInput{Owner: "acme", Repo: "rocket"})
 	if err != nil {

@@ -5,16 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
-	"github.com/morluto/gitcontribute/internal/radar"
 )
 
 // GetRepositories performs an offline, input-ordered corpus read and clears
@@ -585,128 +582,4 @@ func classifyChecks(checks []github.PullRequestCheck) string {
 		}
 	}
 	return status
-}
-
-// RankOpportunities performs deterministic offline Radar ranking across stored repositories.
-func (r *MCPReader) RankOpportunities(ctx context.Context, in mcpcontract.RankOpportunitiesInput) (mcpcontract.RankOpportunitiesOutput, error) {
-	if len(in.Repositories) < 1 || len(in.Repositories) > 50 {
-		return mcpcontract.RankOpportunitiesOutput{}, errors.New("repositories must contain 1 to 50 items")
-	}
-	if in.Limit == 0 {
-		in.Limit = 20
-	}
-	if in.MaxResultsPerRepository == 0 {
-		in.MaxResultsPerRepository = 10
-	}
-	if in.Limit < 1 || in.Limit > 100 {
-		return mcpcontract.RankOpportunitiesOutput{}, errors.New("limit must be between 1 and 100")
-	}
-	if in.MaxResultsPerRepository < 1 || in.MaxResultsPerRepository > 100 {
-		return mcpcontract.RankOpportunitiesOutput{}, errors.New("max_results_per_repository must be between 1 and 100")
-	}
-	evaluationTime := r.now().UTC()
-	c, err := r.openReadOnlyCorpus(ctx)
-	if err != nil {
-		return mcpcontract.RankOpportunitiesOutput{}, err
-	}
-	revision, err := beginCorpusRead(ctx, c, in.SnapshotToken)
-	if err != nil {
-		return mcpcontract.RankOpportunitiesOutput{}, err
-	}
-	out := mcpcontract.RankOpportunitiesOutput{
-		Status: "complete", GeneratedAt: formatTime(evaluationTime),
-		Candidates:    make([]mcpcontract.OpportunityCandidateOutput, 0, in.Limit),
-		Repositories:  make([]mcpcontract.BatchItem[mcpcontract.RepositoryOpportunitySummaryOutput], len(in.Repositories)),
-		SnapshotToken: snapshotIdentity(in.SnapshotToken, revision),
-	}
-	var candidates []radar.Candidate
-	for i, input := range in.Repositories {
-		key := input.Owner + "/" + input.Repo
-		item := mcpcontract.BatchItem[mcpcontract.RepositoryOpportunitySummaryOutput]{Key: key, Status: "complete"}
-		report, err := r.contributionRadarAt(ctx, contracts.RadarOptions{Repo: contracts.RepoRef{Owner: input.Owner, Repo: input.Repo}, Limit: in.MaxResultsPerRepository}, evaluationTime)
-		if err != nil {
-			item.Status, item.Reason, item.Message = "unavailable", "repository_not_indexed", err.Error()
-			item.Recovery = recoveryPlan(item.Reason, item.Message, syncRepositoryContextCall(input.Owner, input.Repo), mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{Selection: "repositories", Repositories: []mcpcontract.RepositoryRef{{Owner: input.Owner, Repo: input.Repo}}, Kind: "issue", State: "open"}))
-			out.Repositories[i] = item
-			out.Status = "partial"
-			continue
-		}
-		summary := mcpcontract.RepositoryOpportunitySummaryOutput{
-			Repo: report.Repo, TotalOpenIssues: report.TotalOpenIssues, Considered: report.CandidatePopulation,
-			Returned: len(report.Candidates), Truncated: len(report.Candidates) < report.CandidatePopulation,
-			PopulationCapped: report.PopulationCapped,
-		}
-		if summary.Truncated || summary.PopulationCapped {
-			item.Status, item.Reason, item.Message = "partial", "ranking_population_truncated", "the repository ranking population exceeded the requested bound"
-			out.Status = "partial"
-			nextLimit := min(100, max(in.MaxResultsPerRepository*2, in.MaxResultsPerRepository+1))
-			summary.Recovery = recoveryPlan("ranking_population_truncated", "The repository ranking population was bounded. Refresh issue headers, then rerun with a larger per-repository result bound before treating the ranking as exhaustive.", mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{Selection: "repositories", Repositories: []mcpcontract.RepositoryRef{{Owner: input.Owner, Repo: input.Repo}}, Kind: "issue", State: "open"}), mcpcontract.RecoveryAction(mcpcontract.RankOpportunitiesInput{Repositories: []mcpcontract.RepositoryRef{{Owner: input.Owner, Repo: input.Repo}}, Limit: in.Limit, MaxResultsPerRepository: nextLimit}))
-		}
-		out.Total += report.CandidatePopulation
-		out.Truncated = out.Truncated || summary.Truncated || summary.PopulationCapped
-		item.Value = &summary
-		out.Repositories[i] = item
-		candidates = append(candidates, report.Candidates...)
-	}
-	sort.SliceStable(candidates, func(i, j int) bool {
-		if candidates[i].Eligibility != candidates[j].Eligibility {
-			return eligibilityRank(candidates[i].Eligibility) < eligibilityRank(candidates[j].Eligibility)
-		}
-		if candidates[i].Score != candidates[j].Score {
-			return candidates[i].Score > candidates[j].Score
-		}
-		return candidates[i].Ref < candidates[j].Ref
-	})
-	out.Truncated = out.Truncated || len(candidates) > in.Limit
-	end := min(in.Limit, len(candidates))
-	for i, candidate := range candidates[:end] {
-		mapped := radarCandidateToMCP(candidate)
-		mapped.Rank = i + 1
-		out.Candidates = append(out.Candidates, mapped)
-	}
-	if out.Truncated {
-		nextLimit := min(100, max(in.Limit*2, in.Limit+1))
-		out.Recovery = recoveryPlan("ranking_truncated", "The cross-repository ranking is bounded. Refresh issue headers, then rerun with a larger result limit before treating the returned candidates as exhaustive.", mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{Selection: "repositories", Repositories: append([]mcpcontract.RepositoryRef(nil), in.Repositories...), Kind: "issue", State: "open"}), mcpcontract.RecoveryAction(mcpcontract.RankOpportunitiesInput{Repositories: append([]mcpcontract.RepositoryRef(nil), in.Repositories...), Limit: nextLimit, MaxResultsPerRepository: in.MaxResultsPerRepository}))
-	}
-	if err := finishCorpusRead(ctx, c, revision); err != nil {
-		return mcpcontract.RankOpportunitiesOutput{}, err
-	}
-	return out, nil
-}
-
-func radarCandidateToMCP(c radar.Candidate) mcpcontract.OpportunityCandidateOutput {
-	out := mcpcontract.OpportunityCandidateOutput{Ref: c.Ref, Repo: c.Repo, Number: c.Number, Title: c.Title, URL: c.URL, Score: mcpcontract.RadarScore(c.Score), Eligibility: string(c.Eligibility), Confidence: c.Confidence, SourceUpdatedAt: formatTime(c.SourceUpdatedAt)}
-	for _, signal := range c.PositiveSignals {
-		out.PositiveSignals = append(out.PositiveSignals, signal.Summary)
-	}
-	for _, signal := range c.Risks {
-		out.Risks = append(out.Risks, signal.Summary)
-	}
-	for _, signal := range c.Blockers {
-		out.Blockers = append(out.Blockers, signal.Summary)
-	}
-	for _, unknown := range c.Unknowns {
-		out.Unknowns = append(out.Unknowns, unknown.Summary)
-	}
-	for _, linked := range c.LinkedPullRequests {
-		out.LinkedPullRequests = append(out.LinkedPullRequests, linked.Number)
-	}
-	for _, work := range c.RelatedWork {
-		out.RelatedWork = append(out.RelatedWork, mcpcontract.OpportunityRelatedWorkOutput{
-			Ref: work.Ref, Relation: string(work.Relation), Direction: string(work.Direction), State: work.State,
-		})
-	}
-	return out
-}
-func eligibilityRank(v radar.Eligibility) int {
-	switch v {
-	case radar.EligibilityReadyToCode:
-		return 0
-	case radar.EligibilityNeedsDiagnosis:
-		return 1
-	case radar.EligibilityNeedsCoordination:
-		return 2
-	default:
-		return 3
-	}
 }

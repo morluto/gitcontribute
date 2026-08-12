@@ -228,28 +228,6 @@ func (r *MCPReader) ExplainMatch(ctx context.Context, in mcpcontract.ExplainMatc
 	return out, nil
 }
 
-// BuildRepositoryDossier submits a durable job that builds a repository dossier.
-func (r *MCPReader) BuildRepositoryDossier(ctx context.Context, in mcpcontract.BuildRepositoryDossierInput) (mcpcontract.JobReference, error) {
-	repo := contracts.RepoRef{Owner: in.Owner, Repo: in.Repo}
-	id, err := r.submitJob(ctx, "build_repository_dossier", in, func(ctx context.Context, report func(progress, statistics string) error) (any, error) {
-		if err := report("repository_dossier", jobProgressCounts(0, 1)); err != nil {
-			return nil, err
-		}
-		res, err := r.application().BuildRepositoryDossier(ctx, repo)
-		if err != nil {
-			return nil, err
-		}
-		if err := report("repository_dossier", jobProgressCounts(1, 1)); err != nil {
-			return nil, err
-		}
-		return res, nil
-	})
-	if err != nil {
-		return mcpcontract.JobReference{}, err
-	}
-	return queuedJobReference(id, "build_repository_dossier", "dossier build job started"), nil
-}
-
 // CreateWorkspace submits a durable job that clones a remote and creates a worktree.
 func (r *MCPReader) CreateWorkspace(ctx context.Context, in mcpcontract.CreateWorkspaceInput) (mcpcontract.JobReference, error) {
 	opts := contracts.WorkspaceCreateOptions{
