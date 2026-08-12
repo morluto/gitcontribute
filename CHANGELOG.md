@@ -276,7 +276,7 @@
 
 * **mcp:** `github.search_threads` and `github.read_source_files` now require
   `repository: {owner, repo}`. Flat `owner` and `repo` request fields are no
-  longer accepted. See [the v2 MCP migration guide](docs/mcp-v2-migration.md).
+  longer accepted.
 
 ### Features
 

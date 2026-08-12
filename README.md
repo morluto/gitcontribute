@@ -239,9 +239,9 @@ To start the stdio server directly:
 gitcontribute mcp serve --transport=stdio
 ```
 
-Add `--read-only` to remove tools that permit local writes or execution. See
-[Scalable MCP workflows](docs/mcp-scalable-workflows.md) for the tool sequence,
-coverage model, partial-result recovery, and side-effect boundaries.
+Add `--read-only` to remove tools that permit network access, local writes, or
+execution. See [MCP catalog and composition](docs/mcp.md) for capability
+boundaries, snapshot recovery, resource handoffs, and common tool sequences.
 
 GitHub users are stored as first-class actors. Live discovery records identity
 only; profile, social-account, organization, pinned-item, repository, and
@@ -272,7 +272,7 @@ See [Architecture](docs/architecture.md) for the complete boundary definitions.
 ## Documentation
 
 - [Onboarding and configuration](docs/onboarding.md)
-- [Scalable MCP workflows](docs/mcp-scalable-workflows.md)
+- [MCP catalog and composition](docs/mcp.md)
 - [Actor corpus](docs/actor-corpus.md)
 - [Architecture and side-effect boundaries](docs/architecture.md)
 - [Operational runbooks](docs/runbooks.md)

@@ -19,7 +19,10 @@ application services, storage, and documentation.
   as repository metadata, thread headers, comments, reviews, or PR details.
 
 Tool namespaces describe authority and effects: `corpus.*` reads stored local
-facts or deterministic derivations; `github.*` performs explicit GitHub reads
-and persists observations; `jobs.*` manages durable asynchronous work;
-`workflow.*` reads or changes local investigation state. Provider-derived prose
-must carry provenance and must not override GitHub facts.
+facts or computes deterministic derivations, except explicitly named
+`corpus.materialize_*` tools that update derived local projections and the
+durable `corpus.ensure_coverage` acquisition workflow; `github.*` performs
+explicit GitHub reads and persists observations; `jobs.*` manages durable
+asynchronous work; `workflow.*` reads or changes local investigation state.
+Provider-derived prose must carry provenance and must not override GitHub
+facts.
