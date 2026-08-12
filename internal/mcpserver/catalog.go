@@ -18,9 +18,6 @@ type catalogTool[In, Out any] struct {
 }
 
 func addCatalogTool[In, Out any](server *Server, tool catalogTool[In, Out]) {
-	if removedCompositeTools[tool.name] {
-		return
-	}
 	if tool.supportedBy != nil && !tool.supportedBy(server.reader) {
 		return
 	}
@@ -45,21 +42,6 @@ func addCatalogTool[In, Out any](server *Server, tool catalogTool[In, Out]) {
 	}
 	server.recordCatalogTool(mcpTool)
 	mcp.AddTool(server.server, mcpTool, structuredToolErrors(tool.handler))
-}
-
-// removedCompositeTools is the breaking facts-first catalog boundary. The
-// implementations remain temporarily available to internal callers while
-// agents compose the smaller acquisition and corpus primitives instead.
-var removedCompositeTools = map[string]bool{
-	mcpcontract.ToolSearchCode:                   true,
-	mcpcontract.ToolRankThreads:                  true,
-	mcpcontract.ToolPrepareIssueSet:              true,
-	mcpcontract.ToolBuildRepositoryDossier:       true,
-	mcpcontract.ToolMineRepositoryFixPatterns:    true,
-	mcpcontract.ToolPreviewRepositoryFixPatterns: true,
-	mcpcontract.ToolPreflightContribution:        true,
-	mcpcontract.ToolQueryDeepWiki:                true,
-	mcpcontract.ToolFindRelatedWork:              true,
 }
 
 func supports[T any](reader mcpcontract.Reader) bool {
@@ -135,10 +117,6 @@ func executionAnnotations() *mcp.ToolAnnotations {
 
 func processReadAnnotations() *mcp.ToolAnnotations {
 	return &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: boolPtr(false), DestructiveHint: boolPtr(false)}
-}
-
-func preflightAnnotations() *mcp.ToolAnnotations {
-	return &mcp.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: boolPtr(true), DestructiveHint: boolPtr(false)}
 }
 
 func cancellationAnnotations() *mcp.ToolAnnotations {

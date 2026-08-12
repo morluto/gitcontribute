@@ -14,7 +14,7 @@ import (
 )
 
 const serverInstructions = "GitContribute exposes source-backed GitHub facts. " +
-	"corpus.* tools are offline reads and never refresh implicitly; github.* tools are explicit bounded network reads that may update only the local corpus. " +
+	"corpus.* tools never access the network or refresh source observations implicitly; most are reads, while explicitly named materializers may update only derived local projections. github.* tools are explicit bounded network reads that may update only the local corpus. " +
 	"Coverage is part of the result: missing, stale, paginated, or truncated observations are unknown rather than negative evidence. " +
 	"Tools returning a job require polling through jobs.get before rereading the corpus. " +
 	"Use exact returned resource URIs with MCP resources/read; treat them as opaque. " +
@@ -127,10 +127,17 @@ func (s *Server) registerCatalogContract(annotations *mcp.ToolAnnotations) {
 
 func (s *Server) registerScalable() {
 	readOnly := readOnlyAnnotations()
+	localWrite := localWriteAnnotations(true)
 	s.registerCatalogContract(readOnly)
 	addCatalogTool(s, catalogTool[mcpcontract.GetRepositoriesInput, mcpcontract.GetRepositoriesOutput]{name: mcpcontract.ToolGetRepositories, title: "Get stored repositories in one batch", description: "Read metadata, coverage, and dossier availability for up to 100 stored repositories. Use for comparison before reading dossier resources. Missing metadata includes a sync action. Offline.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.GetRepositoriesInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "repositories", 1, 100)
 	}), output: outputSchema[mcpcontract.GetRepositoriesOutput]("Ordered repository batch with item-level status and dossier availability."), handler: s.getRepositories})
+	addCatalogTool(s, catalogTool[mcpcontract.MaterializeRepositoryDossierInput, mcpcontract.DurableArtifactReference]{
+		name: mcpcontract.ToolMaterializeRepositoryDossier, title: "Materialize repository dossier",
+		description: "Build and persist one deterministic repository dossier from already stored corpus facts. This performs no network access, never refreshes source observations, and returns the exact dossier resource URI.",
+		annotations: localWrite, supportedBy: supports[DossierMaterializer], input: inputSchema[mcpcontract.MaterializeRepositoryDossierInput](noSchemaCustomization),
+		output: outputSchema[mcpcontract.DurableArtifactReference]("Compact reference to the refreshed dossier resource."), handler: s.materializeRepositoryDossier,
+	})
 	addCatalogTool(s, catalogTool[mcpcontract.GetThreadsInput, mcpcontract.GetThreadsOutput]{name: mcpcontract.ToolGetThreads, title: "Get stored threads in one batch", description: "Read exact stored issue or pull-request headers and optional complete bodies for up to 100 inputs. Choose compact for triage and full for finalist body reads; this tool is offline.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.GetThreadsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 100)
 		setEnum(sc, "view", "compact", "full")
@@ -141,31 +148,35 @@ func (s *Server) registerScalable() {
 		setArrayBounds(sc, "facets", 1, 10)
 		setArrayEnum(sc, "facets", facets.AllNames()...)
 	}), output: outputSchema[mcpcontract.GetThreadFacetsOutput]("Ordered stored-facet metadata with canonical resource links."), handler: s.getThreadFacets})
-	addCatalogTool(s, catalogTool[mcpcontract.RankOpportunitiesInput, mcpcontract.RankOpportunitiesOutput]{name: mcpcontract.ToolRankThreads, title: "Rank stored threads for contribution", description: "Rank open issues across 1-50 required stored repositories. Bounded or population-capped results include typed sync-and-rerank recovery; this operation never persists opportunities.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.RankOpportunitiesInput](func(sc *schemaBuilder) {
-		setArrayBounds(sc, "repositories", 1, 50)
-		setRange(sc, "limit", 1, 100)
-		setDefault(sc, "limit", 20)
-		setRange(sc, "max_results_per_repository", 1, 100)
-		setDefault(sc, "max_results_per_repository", 10)
-	}), output: outputSchema[mcpcontract.RankOpportunitiesOutput]("Bounded cross-repository Radar ranking."), handler: s.rankOpportunities})
+	addCatalogTool(s, catalogTool[mcpcontract.RankContributionCandidatesInput, mcpcontract.RankContributionCandidatesOutput]{
+		name: mcpcontract.ToolRankContributionCandidates, title: "Rank contribution candidates",
+		description: "Rank open issues across 1 to 50 stored repositories using the deterministic Contribution Radar domain service. Returns transparent signals, blockers, unknowns, per-repository coverage, and one shared snapshot identity. Offline; acquire repository context and issue headers separately.",
+		annotations: readOnly, supportedBy: supports[ContributionCandidateRanker], input: inputSchema[mcpcontract.RankContributionCandidatesInput](func(sc *schemaBuilder) {
+			setArrayBounds(sc, "repositories", 1, 50)
+			setRange(sc, "limit", 1, 100)
+			setDefault(sc, "limit", 20)
+			setRange(sc, "max_results_per_repository", 1, 100)
+			setDefault(sc, "max_results_per_repository", 10)
+		}), output: outputSchema[mcpcontract.RankContributionCandidatesOutput]("Deterministic cross-repository candidate ranking with explicit per-repository coverage."), handler: s.rankContributionCandidates,
+	})
 	addCatalogTool(s, catalogTool[mcpcontract.FindPrecedentsInput, mcpcontract.FindPrecedentsOutput]{name: mcpcontract.ToolFindPrecedents, title: "Find historical issue and pull-request precedents", description: "Find similar closed issues and pull requests for up to 20 source threads, including completed, not-planned, duplicate, and merged evidence. This is an offline historical read, not a current opportunity search. Missing or incomplete repository history returns item-level ensure_coverage recovery; poll jobs.get and retry before treating the result as exhaustive.", annotations: readOnly, supportedBy: supports[ScalableReader], input: inputSchema[mcpcontract.FindPrecedentsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "threads", 1, 20)
 		setRange(sc, "limit", 1, 100)
 		setDefault(sc, "limit", 20)
 	}), output: outputSchema[mcpcontract.FindPrecedentsOutput]("Historical precedents grouped by source thread."), handler: s.findPrecedents})
-	addCatalogTool(s, catalogTool[mcpcontract.PrepareIssueSetInput, mcpcontract.PrepareIssueSetOutput]{name: mcpcontract.ToolPrepareIssueSet, title: "Prepare contribution evidence from exact issues", description: "Compose stored facts, coverage gaps, related work, merged precedents, and linkage candidates for 1-20 exact issues. Prefer this canonical issue-audit entrypoint to manual reads. Offline; creates no opportunity or draft. If coverage is partial, follow each returned typed recovery action, poll its job, then retry this read.", annotations: readOnly, supportedBy: supports[IssueSetReader], input: inputSchema[mcpcontract.PrepareIssueSetInput](func(sc *schemaBuilder) {
-		setArrayBounds(sc, "issue_numbers", 1, 20)
-		if numbers := property(sc, "issue_numbers"); numbers != nil {
-			numbers.UniqueItems = true
-			if numbers.Items != nil {
-				numbers.Items.Minimum = jsonschema.Ptr(1.0)
-			}
-		}
-		setRange(sc, "precedent_limit", 1, 10)
-		setDefault(sc, "precedent_limit", 3)
-		setEnum(sc, "response_format", "concise", "detailed")
-		setDefault(sc, "response_format", "concise")
-	}), output: outputSchema[mcpcontract.PrepareIssueSetOutput]("Contribution-facing evidence for an exact stored issue set."), handler: s.prepareIssueSet})
+	addCatalogTool(s, catalogTool[mcpcontract.AnalyzeFixPatternsInput, mcpcontract.AnalyzeFixPatternsOutput]{
+		name: mcpcontract.ToolAnalyzeFixPatterns, title: "Analyze repository fix patterns",
+		description: "Analyze bounded stored pull-request history by caller-defined symptom categories. Classifies observed outcomes, explicit closing or replacement relationships, and proof styles. Offline and snapshot-bound: it never hydrates unknown pull requests or persists a report; typed recovery identifies exact acquisition and rerun steps.",
+		annotations: readOnly, supportedBy: supports[FixPatternAnalyzer], input: inputSchema[mcpcontract.AnalyzeFixPatternsInput](func(sc *schemaBuilder) {
+			setArrayBounds(sc, "symptom_taxonomy", 1, 12)
+			configureFixPatternAnalysisSchema(sc)
+			setRange(sc, "candidate_limit", 1, 100)
+			setDefault(sc, "candidate_limit", mcpcontract.DefaultFixPatternCandidateLimit)
+			setRange(sc, "representative_limit", 1, 20)
+			setDefault(sc, "representative_limit", mcpcontract.DefaultFixPatternRepresentativeLimit)
+			setArrayEnum(sc, "merge_outcomes", "merged", "closed_unmerged", "superseded", "open", "unknown")
+		}), output: outputSchema[mcpcontract.AnalyzeFixPatternsOutput]("Source-bound fix-pattern analysis with explicit coverage and recovery."), handler: s.analyzeFixPatterns,
+	})
 	addCatalogTool(s, catalogTool[mcpcontract.GetJobsInput, mcpcontract.GetJobsOutput]{name: mcpcontract.ToolGetJob, title: "Get durable jobs in one batch", description: "Poll up to 100 jobs with execution state, terminal outcome, progress, and artifact links. Use concise while polling and detailed after completion. Offline; executor blobs stay hidden.", annotations: readOnly, input: inputSchema[mcpcontract.GetJobsInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "ids", 1, 100)
 		setEnum(sc, "response_format", "concise", "detailed")
@@ -217,66 +228,6 @@ func (s *Server) registerScalable() {
 		setRange(sc, "max_pages", 1, 100)
 		setDefault(sc, "max_pages", 3)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded exact-thread hydration job."), handler: s.hydrateThreads})
-	addCatalogTool(s, catalogTool[mcpcontract.MineRepositoryFixPatternsInput, mcpcontract.JobReference]{
-		name: mcpcontract.ToolMineRepositoryFixPatterns, title: "Mine repository fix patterns",
-		description: "Mine repository-level evidence about how similar problems were accepted, rejected, or superseded. Searches stored pull requests, refreshes only bounded unknown-state finalists, and persists a report separating explicit links from similarity. Prefer this over repeated search and hydration loops; not for live competing-work checks. Performs GitHub reads and local writes, never GitHub mutation.",
-		annotations: networkReadAnnotations(), supportedBy: supports[FixPatternWorkflow],
-		input: inputSchema[mcpcontract.MineRepositoryFixPatternsInput](func(sc *schemaBuilder) {
-			setArrayBounds(sc, "symptom_taxonomy", 1, 12)
-			setArrayBounds(sc, "merge_outcomes", 1, 5)
-			property(sc, "merge_outcomes").UniqueItems = true
-			setRange(sc, "candidate_limit", 1, 100)
-			setDefault(sc, "candidate_limit", mcpcontract.DefaultFixPatternCandidateLimit)
-			setRange(sc, "hydration_limit", 0, 100)
-			setDefault(sc, "hydration_limit", mcpcontract.DefaultFixPatternHydrationLimit)
-			setRange(sc, "representative_limit", 1, 20)
-			setDefault(sc, "representative_limit", mcpcontract.DefaultFixPatternRepresentativeLimit)
-			symptoms := property(sc, "symptom_taxonomy")
-			if symptoms != nil && symptoms.Items != nil {
-				name := symptoms.Items.Properties["name"]
-				if name != nil {
-					name.MinLength = jsonschema.Ptr(1)
-					name.Pattern = nonWhitespacePattern
-				}
-				terms := symptoms.Items.Properties["terms"]
-				if terms != nil {
-					terms.MinItems = jsonschema.Ptr(1)
-					terms.MaxItems = jsonschema.Ptr(12)
-					terms.UniqueItems = true
-					if terms.Items != nil {
-						terms.Items.MinLength = jsonschema.Ptr(1)
-						terms.Items.Pattern = nonWhitespacePattern
-					}
-				}
-			}
-			window := property(sc, "time_window")
-			if window != nil {
-				for _, field := range []string{"updated_after", "updated_before"} {
-					if value := window.Properties[field]; value != nil {
-						value.Format = "date-time"
-					}
-				}
-			}
-		}),
-		output:  outputSchema[mcpcontract.JobReference]("Reference to a bounded repository fix-pattern mining job."),
-		handler: s.mineRepositoryFixPatterns,
-	})
-	addCatalogTool(s, catalogTool[mcpcontract.PreviewRepositoryFixPatternsInput, mcpcontract.FixPatternReport]{
-		name: mcpcontract.ToolPreviewRepositoryFixPatterns, title: "Preview repository fix patterns",
-		description: "Analyze bounded stored pull-request patterns without network access, hydration, jobs, artifacts, or persistence. The result is explicitly marked persisted=false and includes its snapshot token.",
-		annotations: readOnly, supportedBy: supports[FixPatternPreviewReader],
-		input: inputSchema[mcpcontract.PreviewRepositoryFixPatternsInput](func(sc *schemaBuilder) {
-			setArrayBounds(sc, "symptom_taxonomy", 1, 12)
-			setArrayBounds(sc, "merge_outcomes", 1, 5)
-			property(sc, "merge_outcomes").UniqueItems = true
-			setRange(sc, "candidate_limit", 1, 100)
-			setDefault(sc, "candidate_limit", mcpcontract.DefaultFixPatternCandidateLimit)
-			setConst(sc, "hydration_limit", 0)
-			setRange(sc, "representative_limit", 1, 20)
-			setDefault(sc, "representative_limit", mcpcontract.DefaultFixPatternRepresentativeLimit)
-		}),
-		output: outputSchema[mcpcontract.FixPatternReport]("Bounded offline fix-pattern analysis; never persisted."), handler: s.previewRepositoryFixPatterns,
-	})
 	addCatalogTool(s, catalogTool[mcpcontract.SyncPortfolioInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPortfolio, title: "Synchronize a pull-request portfolio", description: "selection is required: use authored only for the authenticated user's PR portfolio, optionally scoped to one repository, or explicit with 1-100 exact pull_requests. This tool is not repository-wide comment discovery; for all feedback by a reviewer use github.index_pull_request_feedback, jobs.get, and corpus.search_pull_request_feedback with feedback_author. Refreshes PR details, merge state, checks, review state, unresolved threads, merge queue, files, and closing issues in one durable job; incomplete discovery is surfaced with a typed retry action.", annotations: networkReadAnnotations(), supportedBy: supports[GitHubOperator], input: inputSchema[mcpcontract.SyncPortfolioInput](func(sc *schemaBuilder) {
 		setEnum(sc, "selection", "authored", "explicit")
 		setArrayBounds(sc, "pull_requests", 1, 100)
@@ -288,20 +239,9 @@ func (s *Server) registerScalable() {
 		setDefault(sc, "status_max_pages", 3)
 		configureSyncPortfolioModes(sc)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a pull-request portfolio synchronization job."), handler: s.syncPortfolio})
-	addCatalogTool(s, catalogTool[mcpcontract.ContributionPreflightInput, mcpcontract.ContributionPreflightOutput]{name: mcpcontract.ToolPreflightContribution, title: "Preflight an existing contribution", description: "Before creating local contribution work, resolve the authenticated identity, search bounded open authored pull requests and related repository threads, inspect optional local worktrees, and report fork freshness when a fork is supplied or unambiguously inferred. Returns existing_pr, new_work only after live absence is verified, or coverage_unknown when identity, search, local inspection, or fork freshness is incomplete. Read-only; creates no GitHub or workflow state.", annotations: preflightAnnotations(), supportedBy: supports[ContributionPreflightReader], input: inputSchema[mcpcontract.ContributionPreflightInput](func(sc *schemaBuilder) {
-		setRange(sc, "limit", 1, 100)
-		setDefault(sc, "limit", 20)
-		setRange(sc, "max_requests", 2, 1000)
-		setDefault(sc, "max_requests", 100)
-		setArrayBounds(sc, "workspace_paths", 0, 20)
-		if candidate := sc.schema.Defs["ContributionPreflightCandidate"]; candidate != nil {
-			candidateBuilder := &schemaBuilder{schema: candidate, err: sc.err}
-			setMinimum(candidateBuilder, "issue_number", 1)
-			setArrayBounds(candidateBuilder, "changed_files", 0, 200)
-		}
-	}), output: outputSchema[mcpcontract.ContributionPreflightOutput]("Bounded contribution routing decision with explicit live coverage."), handler: s.preflightContribution})
-	addCatalogTool(s, catalogTool[mcpcontract.SyncPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPullRequestFeedback, title: "Synchronize feedback for exact pull requests", description: "Use this when the pull-request numbers are already known and you need current issue comments, submitted reviews, inline comments, or review-thread topology for 1-50 exact pull requests. It performs bounded GitHub network reads and writes only local corpus observations; it never mutates GitHub and does not discover other PRs. Poll jobs.get, then read the returned feedback resources; for repository-wide author or state audits, use github.index_pull_request_feedback instead.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackOperator], input: inputSchema[mcpcontract.SyncPullRequestFeedbackInput](func(sc *schemaBuilder) {
-		setArrayBounds(sc, "pull_requests", 1, 50)
+	addCatalogTool(s, catalogTool[mcpcontract.CompareForkInput, mcpcontract.ForkFreshnessOutput]{name: mcpcontract.ToolCompareFork, title: "Compare a contributor fork", description: "Verify one explicit contributor fork relationship and compare its default branch with the upstream default branch. Performs bounded GitHub reads, never updates either repository, and reports unavailable evidence as unknown rather than current.", annotations: externalReadAnnotations(), supportedBy: supports[ForkComparisonReader], input: inputSchema[mcpcontract.CompareForkInput](noSchemaCustomization), output: outputSchema[mcpcontract.ForkFreshnessOutput]("Explicit upstream/fork relationship and default-branch ancestry evidence."), handler: s.compareFork})
+	addCatalogTool(s, catalogTool[mcpcontract.SyncPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolSyncPullRequestFeedback, title: "Synchronize feedback for exact pull requests", description: "Use this when the pull-request numbers are already known and you need current issue comments, submitted reviews, inline comments, or review-thread topology for 1-100 exact pull requests. One durable job preserves ordered outcomes and serializes feedback persistence, so callers do not need to split and parallelize a known set. It performs bounded GitHub network reads and writes only local corpus observations; it never mutates GitHub and does not discover other PRs. Poll jobs.get, then read the returned feedback resources; for repository-wide author or state audits, use github.index_pull_request_feedback instead.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackOperator], input: inputSchema[mcpcontract.SyncPullRequestFeedbackInput](func(sc *schemaBuilder) {
+		setArrayBounds(sc, "pull_requests", 1, 100)
 		constrainPullRequestRefs(sc, "pull_requests")
 		setArrayBounds(sc, "channels", 1, 4)
 		setArrayEnum(sc, "channels", "issue_comments", "submitted_reviews", "inline_comments", "review_threads")
@@ -310,10 +250,11 @@ func (s *Server) registerScalable() {
 		setRange(sc, "max_items_per_channel", 1, 1000)
 		setRange(sc, "max_requests", 1, 1000)
 	}), output: outputSchema[mcpcontract.JobReference]("Reference to a bounded pull-request feedback job."), handler: s.syncPullRequestFeedback})
-	addCatalogTool(s, catalogTool[mcpcontract.IndexPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolIndexPullRequestFeedback, title: "Find every repository feedback comment by exact author", description: "Use this for repository-wide audits such as finding every pull-request comment written by a reviewer or bot. It discovers every reachable PR with state=all, then performs bounded GitHub reads and writes only local feedback observations; it never mutates GitHub. Poll jobs.get, then call corpus.search_pull_request_feedback with the exact feedback_author login. Missing, truncated, or partial discovery is unknown, not absence; follow the returned recovery action and retry the offline search.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackIndexer], input: inputSchema[mcpcontract.IndexPullRequestFeedbackInput](func(sc *schemaBuilder) {
+	addCatalogTool(s, catalogTool[mcpcontract.IndexPullRequestFeedbackInput, mcpcontract.JobReference]{name: mcpcontract.ToolIndexPullRequestFeedback, title: "Find repository feedback comments by exact author", description: "Use this for repository-wide audits such as finding pull-request comments written by a reviewer or bot. It discovers pull requests in the selected state (open, closed, or all; default all), then performs bounded GitHub reads and writes only local feedback observations; it never mutates GitHub. Poll jobs.get, then call corpus.search_pull_request_feedback with the exact feedback_author login. Missing, truncated, or partial discovery is unknown, not absence; follow the returned recovery action and retry the offline search.", annotations: networkReadAnnotations(), supportedBy: supports[PullRequestFeedbackIndexer], input: inputSchema[mcpcontract.IndexPullRequestFeedbackInput](func(sc *schemaBuilder) {
 		setArrayBounds(sc, "channels", 1, 4)
 		setArrayEnum(sc, "channels", "issue_comments", "submitted_reviews", "inline_comments", "review_threads")
 		property(sc, "channels").UniqueItems = true
+		setEnum(sc, "state", "open", "closed", "all")
 		setEnum(sc, "thread_state", "unresolved", "all")
 		setRange(sc, "max_pull_requests", 1, 1000)
 		setRange(sc, "max_items_per_channel", 1, 1000)
@@ -447,20 +388,6 @@ func (s *Server) getThreadFacets(ctx context.Context, _ *mcp.CallToolRequest, in
 	out, err := r.GetThreadFacets(ctx, in)
 	return nil, out, err
 }
-func (s *Server) rankOpportunities(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.RankOpportunitiesInput) (*mcp.CallToolResult, mcpcontract.RankOpportunitiesOutput, error) {
-	if in.Limit == 0 {
-		in.Limit = 20
-	}
-	if in.MaxResultsPerRepository == 0 {
-		in.MaxResultsPerRepository = 10
-	}
-	r, err := s.scalableReader()
-	if err != nil {
-		return nil, mcpcontract.RankOpportunitiesOutput{}, err
-	}
-	out, err := r.RankOpportunities(ctx, in)
-	return nil, out, err
-}
 func (s *Server) findPrecedents(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.FindPrecedentsInput) (*mcp.CallToolResult, mcpcontract.FindPrecedentsOutput, error) {
 	if in.Limit == 0 {
 		in.Limit = 20
@@ -563,15 +490,6 @@ func (s *Server) ensureCoverage(ctx context.Context, _ *mcp.CallToolRequest, in 
 	return nil, out, err
 }
 
-func (s *Server) prepareIssueSet(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.PrepareIssueSetInput) (*mcp.CallToolResult, mcpcontract.PrepareIssueSetOutput, error) {
-	r, ok := s.reader.(IssueSetReader)
-	if !ok {
-		return nil, mcpcontract.PrepareIssueSetOutput{}, errors.New("issue-set preparation is not available")
-	}
-	out, err := r.PrepareIssueSet(ctx, in)
-	return nil, out, err
-}
-
 func (s *Server) searchGitHubRepositories(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SearchGitHubRepositoriesInput) (*mcp.CallToolResult, mcpcontract.SearchGitHubRepositoriesOutput, error) {
 	if err := validateRepositorySearchInput(in); err != nil {
 		return nil, mcpcontract.SearchGitHubRepositoriesOutput{}, err
@@ -636,23 +554,6 @@ func (s *Server) hydrateThreads(ctx context.Context, _ *mcp.CallToolRequest, in 
 	return nil, out, err
 }
 
-func (s *Server) mineRepositoryFixPatterns(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.MineRepositoryFixPatternsInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
-	operator, ok := s.reader.(FixPatternOperator)
-	if !ok {
-		return nil, mcpcontract.JobReference{}, errors.New("repository fix-pattern mining is not available")
-	}
-	out, err := operator.MineRepositoryFixPatterns(ctx, in)
-	return nil, out, err
-}
-
-func (s *Server) previewRepositoryFixPatterns(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.PreviewRepositoryFixPatternsInput) (*mcp.CallToolResult, mcpcontract.FixPatternReport, error) {
-	reader, ok := s.reader.(FixPatternPreviewReader)
-	if !ok {
-		return nil, mcpcontract.FixPatternReport{}, errors.New("fix-pattern preview is not available")
-	}
-	out, err := reader.PreviewRepositoryFixPatterns(ctx, in)
-	return nil, out, err
-}
 func (s *Server) syncPortfolio(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.SyncPortfolioInput) (*mcp.CallToolResult, mcpcontract.JobReference, error) {
 	if in.Repository != nil {
 		repository, err := normalizeLiveRepository(*in.Repository)
@@ -755,6 +656,7 @@ func (s *Server) checkMergeConflicts(ctx context.Context, _ *mcp.CallToolRequest
 	out, err := op.CheckMergeConflicts(ctx, in)
 	return nil, out, err
 }
+
 func (s *Server) deepWiki(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.DeepWikiInput) (*mcp.CallToolResult, mcpcontract.DeepWikiOutput, error) {
 	op, ok := s.reader.(ResearchReader)
 	if !ok {
@@ -763,7 +665,6 @@ func (s *Server) deepWiki(ctx context.Context, _ *mcp.CallToolRequest, in mcpcon
 	out, err := op.DeepWiki(ctx, in)
 	return nil, out, err
 }
-
 func setArrayBounds(schema *schemaBuilder, name string, minimum, maximum int) {
 	p := property(schema, name)
 	if p == nil {

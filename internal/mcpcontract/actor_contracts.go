@@ -14,6 +14,16 @@ const (
 	ToolSearchContributions    = "corpus.search_contributions"
 )
 
+type GetAuthenticatedIdentityInput struct{}
+
+type AuthenticatedIdentityOutput struct {
+	Login      string           `json:"login"`
+	DatabaseID int64            `json:"database_id,omitempty"`
+	NodeID     string           `json:"node_id,omitempty"`
+	ObservedAt string           `json:"observed_at"`
+	Rate       GitHubRateOutput `json:"rate"`
+}
+
 // ActorSelector is a discriminated exact GitHub identity selector.
 type ActorSelector struct {
 	Type   string `json:"type" jsonschema:"Identity selector: login or node_id"`

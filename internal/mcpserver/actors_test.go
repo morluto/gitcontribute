@@ -60,11 +60,6 @@ func TestActorCapabilitiesAdvertiseAtomicTools(t *testing.T) {
 			t.Errorf("atomic actor tool %q was not advertised", name)
 		}
 	}
-	for _, removed := range []string{mcpcontract.ToolRankThreads, mcpcontract.ToolBuildRepositoryDossier, mcpcontract.ToolFindRelatedWork} {
-		if tools[removed] != nil {
-			t.Errorf("removed composite tool %q was advertised", removed)
-		}
-	}
 }
 
 func TestSearchGitHubUsersRejectsWhitespaceOnlyQuery(t *testing.T) {

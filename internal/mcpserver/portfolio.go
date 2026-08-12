@@ -94,38 +94,24 @@ func (s *Server) linkPullRequest(ctx context.Context, _ *mcp.CallToolRequest, in
 	return nil, out, err
 }
 
-func (s *Server) preflightContribution(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.ContributionPreflightInput) (*mcp.CallToolResult, mcpcontract.ContributionPreflightOutput, error) {
-	owner, repo, err := normalizeRepository(in.Repository.Owner, in.Repository.Repo)
+func (s *Server) compareFork(ctx context.Context, _ *mcp.CallToolRequest, in mcpcontract.CompareForkInput) (*mcp.CallToolResult, mcpcontract.ForkFreshnessOutput, error) {
+	upstreamOwner, upstreamRepo, err := normalizeRepository(in.Upstream.Owner, in.Upstream.Repo)
 	if err != nil {
-		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("repository", "owner and repo are required", map[string]any{"owner": "acme", "repo": "rocket"})
+		return nil, mcpcontract.ForkFreshnessOutput{}, mcpcontract.InvalidArgument("upstream", "owner and repo are required", map[string]any{"owner": "acme", "repo": "rocket"})
 	}
-	in.Repository = mcpcontract.RepositoryRef{Owner: owner, Repo: repo}
-	if in.Fork != nil {
-		forkOwner, forkRepo, forkErr := normalizeRepository(in.Fork.Owner, in.Fork.Repo)
-		if forkErr != nil {
-			return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("fork", "owner and repo are required when fork is provided", map[string]any{"owner": "alice", "repo": "rocket"})
-		}
-		in.Fork = &mcpcontract.RepositoryRef{Owner: forkOwner, Repo: forkRepo}
-		if strings.EqualFold(forkOwner, owner) && strings.EqualFold(forkRepo, repo) {
-			return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("fork", "fork must differ from the upstream repository", nil)
-		}
+	forkOwner, forkRepo, err := normalizeRepository(in.Fork.Owner, in.Fork.Repo)
+	if err != nil {
+		return nil, mcpcontract.ForkFreshnessOutput{}, mcpcontract.InvalidArgument("fork", "owner and repo are required", map[string]any{"owner": "alice", "repo": "rocket"})
 	}
-	if strings.TrimSpace(in.Candidate.Title) == "" && strings.TrimSpace(in.Candidate.Query) == "" && strings.TrimSpace(in.Candidate.Body) == "" && in.Candidate.IssueNumber < 1 && strings.TrimSpace(in.Candidate.HeadRef) == "" && strings.TrimSpace(in.Candidate.HeadSHA) == "" && len(in.Candidate.ChangedFiles) == 0 && len(in.WorkspacePaths) == 0 {
-		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("candidate", "candidate or workspace_paths must provide title, query, body, issue_number, head_ref, head_sha, or changed_files", nil)
+	if strings.EqualFold(upstreamOwner, forkOwner) && strings.EqualFold(upstreamRepo, forkRepo) {
+		return nil, mcpcontract.ForkFreshnessOutput{}, mcpcontract.InvalidArgument("fork", "fork must differ from the upstream repository", nil)
 	}
-	if in.Candidate.IssueNumber < 0 {
-		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("candidate.issue_number", "issue_number must be positive when provided", map[string]any{"issue_number": 1})
-	}
-	if in.Limit < 0 || in.Limit > 100 {
-		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("limit", "limit must be between 1 and 100 when provided", map[string]any{"limit": 20})
-	}
-	if in.MaxRequests < 0 || in.MaxRequests > 1000 || (in.MaxRequests > 0 && in.MaxRequests < 2) {
-		return nil, mcpcontract.ContributionPreflightOutput{}, mcpcontract.InvalidArgument("max_requests", "max_requests must be between 2 and 1000 when provided", map[string]any{"max_requests": 100})
-	}
-	reader, ok := s.reader.(ContributionPreflightReader)
+	in.Upstream = mcpcontract.RepositoryRef{Owner: upstreamOwner, Repo: upstreamRepo}
+	in.Fork = mcpcontract.RepositoryRef{Owner: forkOwner, Repo: forkRepo}
+	reader, ok := s.reader.(ForkComparisonReader)
 	if !ok {
-		return nil, mcpcontract.ContributionPreflightOutput{}, errors.New("contribution preflight is not available")
+		return nil, mcpcontract.ForkFreshnessOutput{}, errors.New("fork comparison is not available")
 	}
-	out, err := reader.PreflightContribution(ctx, in)
+	out, err := reader.CompareFork(ctx, in)
 	return nil, out, err
 }

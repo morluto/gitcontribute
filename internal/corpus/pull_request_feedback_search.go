@@ -141,7 +141,7 @@ func (c *Corpus) SearchPullRequestFeedback(ctx context.Context, request Feedback
 		page.NextCursor = encodeFeedbackCursor(feedbackSearchCursor{Scope: "pull_request_feedback", Filter: string(filterKeyBytes), Offset: offset + query.page.Limit()})
 		page.Truncated = true
 	}
-	page.Coverage, err = c.feedbackCoverageTx(ctx, tx, request.repositoryID, query.channel, query.threadState)
+	page.Coverage, err = c.feedbackCoverageTx(ctx, tx, request.repositoryID, query.channel, query.threadState, query.state)
 	if err != nil {
 		return FeedbackSearchPage{}, err
 	}

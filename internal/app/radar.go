@@ -27,6 +27,38 @@ func (s *Service) ContributionRadar(ctx context.Context, opts contracts.RadarOpt
 	return s.contributionRadarAt(ctx, opts, s.now())
 }
 
+// RankContributionCandidates evaluates each repository at one instant and
+// delegates cross-repository ordering to the storage-free Radar domain.
+func (s *Service) RankContributionCandidates(ctx context.Context, opts contracts.RadarBatchOptions) (*contracts.RadarBatchResult, error) {
+	if len(opts.Repositories) < 1 || len(opts.Repositories) > 50 {
+		return nil, fmt.Errorf("repositories must contain 1 to 50 items")
+	}
+	if opts.Limit < 1 || opts.Limit > 100 {
+		return nil, fmt.Errorf("limit must be between 1 and 100")
+	}
+	if opts.MaxResultsPerRepository < 1 || opts.MaxResultsPerRepository > 100 {
+		return nil, fmt.Errorf("max results per repository must be between 1 and 100")
+	}
+	evaluationTime := s.now().UTC()
+	result := &contracts.RadarBatchResult{
+		GeneratedAt:  evaluationTime,
+		Repositories: make([]contracts.RadarBatchRepositoryResult, len(opts.Repositories)),
+	}
+	reports := make([]*radar.Report, 0, len(opts.Repositories))
+	for index, repository := range opts.Repositories {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		report, err := s.contributionRadarAt(ctx, contracts.RadarOptions{Repo: repository, Limit: opts.MaxResultsPerRepository}, evaluationTime)
+		result.Repositories[index] = contracts.RadarBatchRepositoryResult{Repository: repository, Report: report, Err: err}
+		if err == nil {
+			reports = append(reports, report)
+		}
+	}
+	result.Ranking = radar.RankAcrossRepositories(reports, opts.Limit)
+	return result, nil
+}
+
 // contributionRadarAt lets one cross-repository ranking use a single scoring
 // instant while keeping the public CLI service contract small.
 func (s *Service) contributionRadarAt(ctx context.Context, opts contracts.RadarOptions, evaluationTime time.Time) (*radar.Report, error) {

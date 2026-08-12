@@ -81,24 +81,15 @@ func (r *heldOutReader) GetCoverage(ctx context.Context, in mcpcontract.GetCover
 	return out, nil
 }
 
-func (*heldOutReader) PreviewRepositoryFixPatterns(_ context.Context, in mcpcontract.PreviewRepositoryFixPatternsInput) (mcpcontract.FixPatternReport, error) {
-	return mcpcontract.FixPatternReport{
-		Status: "complete", Repository: in.Repository, Persisted: false,
-		SnapshotToken: "ephemeral:heldout", Complete: true,
-		Limitations: []string{"preview is read-only"},
-	}, nil
-}
-
 func connectHeldOut(t *testing.T, base *heldOutReader) (*mcp.ClientSession, func()) {
 	t.Helper()
 	optional := &fakeOptionalCapabilities{base: base.fakeReader}
 	reader := completeTestReader{
 		Reader: base, NeighborReader: optional, ScalableReader: optional, ThreadFacetReader: optional,
-		threadFacetResourceReader: base.fakeReader, IssueSetReader: optional,
-		PortfolioReader: optional, GitHubOperator: optional, PullRequestFeedbackOperator: optional,
+		threadFacetResourceReader: base.fakeReader,
+		PortfolioReader:           optional, GitHubOperator: optional, PullRequestFeedbackOperator: optional,
 		CoverageOperator:  optional,
-		CIFailureOperator: optional, FixPatternOperator: optional, FixPatternReader: base.fakeReader,
-		FixPatternPreviewReader: base, CodeIndexer: optional, MergeConflictReader: optional,
+		CIFailureOperator: optional, CodeIndexer: optional, MergeConflictReader: optional,
 		ResearchReader: optional, CommitPlannerReader: base.fakeReader, PortfolioOperator: optional,
 		Operator: base.fakeReader, ConcernReader: base.fakeReader, ConcernOperator: base.fakeReader,
 		WorkspaceCreator: base.fakeReader, WorkspaceAdopter: base.fakeReader,

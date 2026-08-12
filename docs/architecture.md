@@ -53,7 +53,7 @@ product-owned types, errors, or constants.
 | --- | --- | ---: | ---: | ---: | ---: |
 | Corpus read | search, health, dossier show, research brief, readiness, MCP resources | no | no | no | no |
 | Corpus write | investigations, start-thread, evidence, lenses, tracking, cluster governance | no | yes | no | no |
-| Derived projection refresh | explicit `clusters refresh OWNER/REPO` | no | yes | no | no |
+| Derived projection refresh | explicit cluster refresh and `corpus.materialize_repository_dossier` | no | yes | no | no |
 | Private MCP runtime installation | explicit setup `--mode mcp` | no | yes | no | no |
 | Global CLI installation | explicit setup `--mode cli` or `--mode both` | npm registry dependent | yes | `npm` only | no |
 | Setup verification | all applied setup modes | no | no | `git --version` | no |
@@ -64,7 +64,7 @@ product-owned types, errors, or constants.
 | Local merge check | compare already-fetched revisions | no | no | `git` only | no |
 | Validation | validation run/repeat with explicit execution | no by default | yes | yes | no |
 
-Version 1 has no GitHub mutation path. Adding one requires a separate
+GitContribute has no GitHub mutation path. Adding one requires a separate
 application capability and protocol annotation; it must not be hidden behind a
 read operation.
 
@@ -139,9 +139,10 @@ known zero merge rate remains distinct from an unknown rate.
 Pull-request portfolios use the ordinary repository and thread projections.
 `github.sync_pull_request_portfolio` is the only public portfolio producer. Its
 discriminated selection is either authored discovery (optionally scoped to one
-repository) or an explicit bounded set; identity lookup, authored discovery,
-and scalar status refresh are
-internal phases rather than separately advertised operations.
+repository) or an explicit bounded set; authored discovery and scalar status
+refresh are internal phases rather than separately advertised operations.
+`github.get_authenticated_identity` separately exposes the authenticated account
+without starting portfolio discovery or persisting actor facts.
 REST `pr_details` and `pr_reviews` facets are combined with typed GraphQL
 facets for checks, unresolved review threads, detailed merge state, merge queue,
 closing issues, and changed files. Each facet has independent coverage; an
@@ -166,9 +167,11 @@ github.index_pull_request_feedback
   -> gitcontribute://pull-request-feedback/{owner}/{repo}/{number}/{channel}/{feedback_id}
 ```
 
-The index job enumerates provider pull-request pages with `state=all` and
-stores its next page, request count, item bound, and completeness in a
-repository-scoped discovery checkpoint. Each discovered PR is then passed
+The index job enumerates provider pull-request pages with an explicit `open`,
+`closed`, or `all` scope (default `all`) and stores that scope with its next
+page, request count, item bound, and completeness in a repository-scoped
+discovery checkpoint. State-scoped completion is never reported as historical
+`all` coverage. Each discovered PR is then passed
 through the exact feedback adapter, so open, closed, and merged PRs retain
 their observed head SHA, merge state, channel coverage, and raw facet payloads.
 The normalized `pull_request_feedback_fts` projection is rebuildable from
@@ -178,6 +181,11 @@ search reports discovery and facet coverage separately from match count and
 returns the exact index, feedback-sync, or PR-details recovery action needed
 to resolve an unknown. Search never performs network access.
 
+Exact feedback sync accepts up to 100 already-known pull requests as one
+ordered durable job. Feedback producers share one cancellable application
+slot, so exact sync, repository indexing, checkpoint writes, and projection
+rebuilds do not compete as independent SQLite writers inside one server.
+
 The live MCP server exposes `workflow.get_catalog_contract` as a read-only
 catalog-parity contract. It reports the running version, whether the server is
 in `all` or `read_only` mode, a deterministic fingerprint of the registered
@@ -186,9 +194,8 @@ This makes a stale registration distinguishable from an intentionally
 restricted catalog. Clients must create a fresh MCP connection after setup,
 upgrade, or registration changes before comparing the contract.
 
-Thread resolution remains outside this read/index workflow. A future mutation
-must accept exact repository, PR, and thread identifiers plus the expected head
-SHA and must be separately authorized; indexing never auto-resolves a thread.
+Thread resolution remains outside this read/index workflow. Indexing never
+auto-resolves a thread or gains mutation authority.
 
 Portfolio relationships and derived resolution records are local product
 contracts. Their normalized snapshots carry rule versions and exact source
@@ -380,8 +387,9 @@ manifest, derived versions, completeness, provenance, and an immutable payload
 digest. Resolution fails closed with `snapshot_unavailable` or
 `snapshot_expired`; current mutable projections are never substituted.
 
-Read-only search, precedent, coverage, code-search, fix-pattern preview, and
-research-brief responses also bind their query digest to an observation
+Read-only search, precedent, coverage, code-search, fix-pattern analysis,
+cross-repository candidate ranking, and research-brief responses also bind
+their query digest to an observation
 watermark. Because these operations have no local-write capability, their
 `ephemeral:` identities are explicitly non-durable and report completeness,
 truncation, and unknown coverage inline. A caller that needs reuse across calls
@@ -405,15 +413,16 @@ live GitHub request
   -> local resources/read
 ```
 
-`github.search_threads` accepts a required nested repository reference and persists the returned issue or pull-request
-observations and an exact `github-thread-search.v1` result artifact. A search
-page never advances repository-wide thread coverage and an empty page is not
-proof that no matching live thread exists. `github.read_source_files` accepts
-the same required nested repository reference, resolves
-one named ref to a commit, reads bounded repository-relative files in input
-order, and stores a `source-bundle.v1` artifact. Commit SHA is the authoritative
-revision; GitHub blob SHA remains a separate file identity. Source content is
-untrusted text and is never merged into thread facets or code-index snapshots.
+`github.search_threads` accepts a required nested repository reference and
+persists the returned issue or pull-request observations and an exact
+`github-thread-search.v1` result artifact. A search page never advances
+repository-wide thread coverage, and an empty page is not proof that no
+matching live thread exists. `github.read_source_files` accepts the same
+required nested repository reference, resolves one named ref to a commit,
+reads bounded repository-relative files in input order, and stores a
+`source-bundle.v1` artifact. Commit SHA is the authoritative revision; GitHub
+blob SHA remains a separate file identity. Source content is untrusted text and
+is never merged into thread facets or code-index snapshots.
 
 The two artifact resource families are
 `gitcontribute://artifact/github-thread-search/<digest>` and
@@ -543,9 +552,8 @@ authority; duplicated query columns are checked against that manifest while
 decoding and discarded rather than exposed as a second source of truth.
 
 Title, labels, body, and hydrated evidence are materialized into one search
-document per thread and ranked by one BM25 invocation. Ranks from the legacy
-thread and facet indexes are never compared; the facet index is used only to
-identify the matching evidence source and excerpt. A thread page and its exact
+document per thread and ranked by one BM25 invocation. The facet index only
+identifies the matching evidence source and excerpt. A thread page and its exact
 count share one read transaction. Counts use a lean FTS match set rather than
 recomputing ranking and excerpts, and the first-page no-overflow case derives
 its total directly from the returned rows.
@@ -735,9 +743,8 @@ rejects stale inventories, unknown or duplicate unit assignments, and invalid
 dependency graphs. Ambiguous units remain explicit. A verified reconstruction
 record binds one-to-one unit coverage to the exact source patch and untracked
 content identities. Neither operation stages files, applies patches, creates
-commits, changes refs, executes repository code, or contacts GitHub. Applying a
-plan is intentionally a separate future capability with an explicit mutation
-boundary.
+commits, changes refs, executes repository code, or contacts GitHub. No
+plan-application operation is exposed.
 
 Storage changes should include tests for upgrade behavior, rollback when
 supported, stale-write rejection, transaction atomicity, and deterministic
@@ -749,3 +756,5 @@ query ordering.
 - [ADR 0002: Application and corpus boundaries](adr/0002-application-and-corpus-boundaries.md)
 - [ADR 0003: Explicit execution boundaries](adr/0003-execution-safety.md)
 - [ADR 0004: Duplicate clusters are explicit derived projections](adr/0004-derived-cluster-projections.md)
+- [ADR 0005: Immutable snapshot and artifact identity](adr/0005-immutable-snapshot-and-artifact-identity.md)
+- [ADR 0006: Retire the orphaned crawl frontier](adr/0006-retire-crawl-frontier.md)

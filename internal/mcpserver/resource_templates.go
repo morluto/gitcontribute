@@ -11,6 +11,7 @@ type resourceTemplateDefinition struct {
 func (s *Server) registerResourceTemplates() {
 	templates := []resourceTemplateDefinition{
 		{"gitcontribute://repository/{owner}/{repo}", "Repository", "Local repository record"},
+		{"gitcontribute://dossier/{owner}/{repo}", "Repository dossier", "Persisted deterministic repository dossier"},
 		{"gitcontribute://thread/{owner}/{repo}/{kind}/{number}", "Thread", "Local issue or pull request"},
 		{"gitcontribute://investigation/{id}", "Investigation", "Local investigation workspace"},
 		{"gitcontribute://opportunity/{id}", "Opportunity", "Local contribution opportunity"},

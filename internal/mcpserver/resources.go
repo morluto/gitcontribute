@@ -108,6 +108,8 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 	switch req.host {
 	case "repository":
 		return s.readRepositoryResource(ctx, req)
+	case "dossier":
+		return s.readDossierResource(ctx, req)
 	case "thread":
 		if len(req.parts) == 6 && req.parts[4] == "facet" {
 			return s.readThreadFacetResource(ctx, req)
@@ -166,6 +168,13 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 	default:
 		return nil, mcp.ResourceNotFoundError(req.uri)
 	}
+}
+
+func (s *Server) readDossierResource(ctx context.Context, req resourceRequest) (any, error) {
+	if len(req.parts) != 2 {
+		return nil, mcp.ResourceNotFoundError(req.uri)
+	}
+	return s.reader.Dossier(ctx, mcpcontract.RepoInput{Owner: req.parts[0], Repo: req.parts[1]})
 }
 
 func (s *Server) readActorResource(ctx context.Context, req resourceRequest) (any, error) {

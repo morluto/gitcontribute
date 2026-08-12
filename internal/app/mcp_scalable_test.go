@@ -13,18 +13,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
-	"github.com/morluto/gitcontribute/internal/radar"
 )
-
-func TestRadarCandidateToMCPPreservesRelatedWorkSemantics(t *testing.T) {
-	t.Parallel()
-	out := radarCandidateToMCP(radar.Candidate{RelatedWork: []radar.RelatedWork{{
-		Ref: "pull_request:owner/repo#9", Relation: "depends_on", Direction: "outbound", State: "open",
-	}}})
-	if len(out.RelatedWork) != 1 || out.RelatedWork[0].Ref != "pull_request:owner/repo#9" || out.RelatedWork[0].Relation != "depends_on" || out.RelatedWork[0].Direction != "outbound" || out.RelatedWork[0].State != "open" {
-		t.Fatalf("related work = %+v", out.RelatedWork)
-	}
-}
 
 func TestTypedBatchResultsPreserveDurableJSONShapes(t *testing.T) {
 	t.Parallel()
@@ -152,114 +141,6 @@ func assertJSONDocumentEqual(t *testing.T, value any, expected string) {
 	}
 	if !reflect.DeepEqual(gotDocument, expectedDocument) {
 		t.Fatalf("JSON = %s, want %s", encoded, expected)
-	}
-}
-
-func TestRankOpportunitiesReportsBoundedNonPaginatedTruncation(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	svc := newSearchTestService(t)
-	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
-	svc.SetClock(func() time.Time { return now })
-	svc.SetGitHubReader(panicRadarReader{})
-	seedRadarRepository(ctx, t, svc, "rocket", 5, now)
-
-	reader := &MCPReader{svc}
-	bounded, err := reader.RankOpportunities(ctx, mcpcontract.RankOpportunitiesInput{
-		Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "rocket"}},
-		Limit:        2, MaxResultsPerRepository: 5,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bounded.Total != 5 || len(bounded.Candidates) != 2 || !bounded.Truncated {
-		t.Fatalf("bounded radar result = %+v", bounded)
-	}
-	if bounded.Recovery == nil || len(bounded.Recovery.Then) != 2 || bounded.Recovery.Then[0].Type() != "sync_threads" || bounded.Recovery.Then[1].Type() != "rank_opportunities" {
-		t.Fatalf("bounded radar recovery = %+v", bounded.Recovery)
-	}
-	if summary := bounded.Repositories[0].Value; summary == nil || summary.Considered != 5 || summary.Returned != 5 || summary.Truncated || summary.PopulationCapped {
-		t.Fatalf("bounded repository summary = %+v", summary)
-	}
-	perRepositoryBound, err := reader.RankOpportunities(ctx, mcpcontract.RankOpportunitiesInput{
-		Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, Limit: 100, MaxResultsPerRepository: 3,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if perRepositoryBound.Total != 5 || len(perRepositoryBound.Candidates) != 3 || !perRepositoryBound.Truncated {
-		t.Fatalf("per-repository bounded result = %+v", perRepositoryBound)
-	}
-	if summary := perRepositoryBound.Repositories[0].Value; summary == nil || summary.Considered != 5 || summary.Returned != 3 || !summary.Truncated {
-		t.Fatalf("per-repository bounded summary = %+v", summary)
-	}
-	if summary := perRepositoryBound.Repositories[0].Value; summary == nil || summary.Recovery == nil || len(summary.Recovery.Then) != 2 {
-		t.Fatalf("per-repository recovery = %+v", summary)
-	}
-	full, err := reader.RankOpportunities(ctx, mcpcontract.RankOpportunitiesInput{
-		Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "rocket"}}, Limit: 100, MaxResultsPerRepository: 5,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if full.Total != 5 || len(full.Candidates) != 5 || full.Truncated {
-		t.Fatalf("full radar result = %+v", full)
-	}
-	assertRadarCandidateRanks(t, full.Candidates)
-	for i := range bounded.Candidates {
-		if bounded.Candidates[i].Ref != full.Candidates[i].Ref {
-			t.Fatalf("bounded order = %+v, full order = %+v", bounded.Candidates, full.Candidates)
-		}
-	}
-}
-
-func seedRadarRepository(ctx context.Context, t *testing.T, svc *Service, name string, candidates int, now time.Time) {
-	t.Helper()
-	repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "acme", Name: name, SourceUpdatedAt: now}, `{}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for number := 1; number <= candidates; number++ {
-		if _, err := svc.corpus.UpsertThread(ctx, corpus.Thread{
-			RepositoryID: repo.ID, Kind: domain.IssueKind, Number: number, State: "open",
-			Title: "same-score candidate", SourceUpdatedAt: now.Add(-time.Hour),
-		}, `{}`); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
-
-func assertRadarCandidateRanks(t *testing.T, candidates []mcpcontract.OpportunityCandidateOutput) {
-	t.Helper()
-	for index, candidate := range candidates {
-		if candidate.Rank != index+1 {
-			t.Fatalf("candidate %s rank = %d, want %d", candidate.Ref, candidate.Rank, index+1)
-		}
-	}
-}
-
-func TestRankOpportunitiesUsesOneEvaluationTimeAcrossRepositories(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	svc := newSearchTestService(t)
-	now := time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC)
-	clockCalls := 0
-	svc.SetClock(func() time.Time {
-		clockCalls++
-		return now.Add(time.Duration(clockCalls) * time.Hour)
-	})
-	for _, name := range []string{"one", "two"} {
-		seedRadarRepository(ctx, t, svc, name, 1, now)
-	}
-	out, err := (&MCPReader{svc}).RankOpportunities(ctx, mcpcontract.RankOpportunitiesInput{
-		Repositories: []mcpcontract.RepositoryRef{{Owner: "acme", Repo: "one"}, {Owner: "acme", Repo: "two"}},
-		Limit:        2, MaxResultsPerRepository: 1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if clockCalls != 1 || out.GeneratedAt != now.Add(time.Hour).Format(time.RFC3339) || len(out.Candidates) != 2 {
-		t.Fatalf("cross-repository evaluation = calls:%d output:%+v", clockCalls, out)
 	}
 }
 
@@ -547,64 +428,6 @@ func TestJobResultToMCPPreservesEmptyAndPartialTypedOutcomes(t *testing.T) {
 		len(partial.Artifacts[0].Failures) != 1 || partial.Artifacts[0].Failures[0].Reason != "facet_incomplete" ||
 		partial.Artifacts[0].Recovery == nil || len(partial.Artifacts[0].Recovery.Then) != 1 || partial.Artifacts[0].Recovery.Then[0].Type() != "sync_portfolio" {
 		t.Fatalf("partial portfolio outcome = %+v", partial)
-	}
-
-	fixPatterns := jobResultToMCP(&contracts.JobResult{
-		ID: "job-patterns", Kind: "mine_repository_fix_patterns", Status: "succeeded",
-		Result: `{"status":"complete","coverage":{"unique_candidates":21}}`, CreatedAt: "2026-07-19T00:00:00Z",
-	}, detailedResponse)
-	if fixPatterns.ExecutionState != "terminal" || fixPatterns.Outcome != "succeeded" ||
-		len(fixPatterns.Artifacts) != 1 || fixPatterns.Artifacts[0].Kind != "fix_pattern_report" ||
-		fixPatterns.Artifacts[0].URI != "gitcontribute://fix-pattern-report/job-patterns" {
-		t.Fatalf("fix-pattern job outcome = %+v", fixPatterns)
-	}
-
-	runningPatterns := jobResultToMCP(&contracts.JobResult{
-		ID: "job-running-patterns", Kind: "mine_repository_fix_patterns", Status: "running",
-	}, detailedResponse)
-	if len(runningPatterns.Artifacts) != 0 || runningPatterns.FollowUp == nil ||
-		runningPatterns.FollowUp.Action.Type() != "poll_job" {
-		t.Fatalf("running fix-pattern job advertised unavailable artifacts: %+v", runningPatterns)
-	}
-}
-
-func TestGetJobsDetailedReturnsTypedArtifactsWithoutStoredPayloads(t *testing.T) {
-	t.Parallel()
-	ctx := context.Background()
-	svc := newSearchTestService(t)
-	job, err := svc.corpus.CreateJob(ctx, "build_repository_dossier", `{"owner":"acme","repo":"rocket"}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.corpus.StartJob(ctx, job.ID); err != nil {
-		t.Fatal(err)
-	}
-	if err := svc.corpus.TransitionJob(ctx, job.ID, corpus.JobRunningToSucceeded, `{"status":"complete"}`, ""); err != nil {
-		t.Fatal(err)
-	}
-	reader := &MCPReader{svc}
-	concise, err := reader.GetJobs(ctx, mcpcontract.GetJobsInput{IDs: []string{job.ID}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(concise.Items) != 1 || concise.Items[0].Value == nil || len(concise.Items[0].Value.Artifacts) != 0 {
-		t.Fatalf("concise jobs output should remain a bounded state summary: %+v", concise)
-	}
-	if concise.Items[0].Recovery == nil || len(concise.Items[0].Recovery.Then) != 1 {
-		t.Fatalf("default concise terminal result lacks detailed recovery hint: %+v", concise)
-	}
-	detailed, err := reader.GetJobs(ctx, mcpcontract.GetJobsInput{IDs: []string{job.ID}, ResponseFormat: "detailed"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	value := detailed.Items[0].Value
-	if value == nil || len(value.Artifacts) != 1 || value.Artifacts[0].Kind != "dossier" ||
-		value.Artifacts[0].URI != "gitcontribute://dossier/acme/rocket" || value.FollowUp == nil {
-		t.Fatalf("detailed jobs output lost typed artifact reference: %+v", detailed)
-	}
-	read, ok := mcpcontract.RecoveryInput[mcpcontract.ResourceReadAction](value.FollowUp.Action)
-	if value.FollowUp.Action.Type() != "read_resource" || !ok || read.URI != "gitcontribute://dossier/acme/rocket" {
-		t.Fatalf("detailed jobs output lost typed follow-up: %+v", detailed)
 	}
 }
 

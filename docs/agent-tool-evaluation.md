@@ -61,20 +61,6 @@ and failures. At least three repeated runs per scenario are needed before
 making tool-choice claims; deterministic Go tests validate contracts but never
 count as model runs.
 
-## Current decisions
-
-The durable-job scenario requires one submission and one poll. The current
-surface already polls multiple IDs through one `jobs.get` call, so current
-evidence does not justify merging job submission and status reads. Job references now
-carry a polling delay and a suggested `jobs.get` call; further consolidation is
-deferred until agent traces show missed, redundant, or premature polling.
-
-There is no current evidence that an opinionated repository-search preset
-improves held-out task completion. The surface therefore has validated
-structured filters but no `trending`, `active`, or `contribution_friendly`
-preset. A preset should be introduced only with a disclosed definition and a
-measurable improvement on repeated model-backed or human-agent traces.
-
 ## Extending the suite
 
 Keep public scenarios small and representative. Add held-out cases with
@@ -85,7 +71,7 @@ contracts include:
 - rejecting simultaneous structured filters and `raw_query`;
 - preserving semantic references across concise and detailed responses;
 - returning stable, duplicate-free pagination;
-- avoiding poll suggestions for terminal jobs.
+- avoiding poll suggestions for terminal jobs;
 - comparing bounded atomic search/select/hydrate loops on a repository where
   closed PR headers have unknown merge state; score confirmed merged,
   closed-unmerged, superseded, open, and unknown outcomes separately.

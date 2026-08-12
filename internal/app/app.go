@@ -39,6 +39,7 @@ type Service struct {
 	corpus          *corpus.Corpus
 	readCorpus      *corpus.Corpus
 	jobs            *JobExecutor
+	feedbackWriter  workflowGate
 	ghReader        github.Reader
 	archiveFetcher  discovery.ArchiveFetcher
 	deepWikiReader  deepwiki.Reader
@@ -49,6 +50,10 @@ type Service struct {
 	logger          *slog.Logger
 	lifecycleCtx    context.Context
 	cancelLifecycle context.CancelFunc
+}
+
+func (s *Service) acquireFeedbackWorkflow(ctx context.Context) (func(), error) {
+	return s.feedbackWriter.acquire(ctx)
 }
 
 // New creates a Service and resolves local configuration. GitHub credentials

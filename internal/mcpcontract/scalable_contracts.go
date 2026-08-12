@@ -290,46 +290,6 @@ type SyncPortfolioInput struct {
 	StatusMaxPages       int            `json:"status_max_pages,omitempty" jsonschema:"Maximum pages per pull-request health facet from 1 to 20; defaults to 3"`
 }
 
-// ContributionPreflightInput describes one prospective contribution before
-// any local opportunity or workspace is created. The operation is deliberately
-// bounded and does not persist its observations.
-type ContributionPreflightInput struct {
-	Repository     RepositoryRef                  `json:"repository" jsonschema:"Repository being considered"`
-	Fork           *RepositoryRef                 `json:"fork,omitempty" jsonschema:"Optional contributor fork; otherwise inferred from an inspected workspace or existing pull request"`
-	Candidate      ContributionPreflightCandidate `json:"candidate" jsonschema:"Candidate title, issue, branch, or change context"`
-	WorkspacePaths []string                       `json:"workspace_paths,omitempty" jsonschema:"Optional local Git worktree roots to inspect"`
-	Limit          int                            `json:"limit,omitempty" jsonschema:"Maximum authored pull requests and related threads to inspect from 1 to 100"`
-	MaxRequests    int                            `json:"max_requests,omitempty" jsonschema:"Maximum bounded GitHub reads from 2 to 1000"`
-}
-
-// ContributionPreflightCandidate is intentionally descriptive rather than a
-// durable workflow identity. At least one field should identify the proposed
-// work; local branch and commit hints are especially useful for existing PRs.
-type ContributionPreflightCandidate struct {
-	Title        string   `json:"title,omitempty" jsonschema:"Proposed issue or change title"`
-	Query        string   `json:"query,omitempty" jsonschema:"Optional focused search text; defaults to title"`
-	Body         string   `json:"body,omitempty" jsonschema:"Optional concise problem or change context"`
-	IssueNumber  int      `json:"issue_number,omitempty" jsonschema:"Related issue number when known"`
-	HeadRef      string   `json:"head_ref,omitempty" jsonschema:"Expected local or pull-request branch"`
-	HeadSHA      string   `json:"head_sha,omitempty" jsonschema:"Expected candidate commit SHA"`
-	ChangedFiles []string `json:"changed_files,omitempty" jsonschema:"Optional changed paths for local context"`
-}
-
-// ContributionPreflightOutput is a routing decision, not a claim that all
-// related work has been exhaustively enumerated.
-type ContributionPreflightOutput struct {
-	Status          string                      `json:"status" jsonschema:"new_work, existing_pr, or coverage_unknown"`
-	Repository      RepositoryRef               `json:"repository"`
-	Identity        string                      `json:"identity,omitempty"`
-	Existing        *ExistingContributionOutput `json:"existing,omitempty"`
-	LocalMatches    []LocalContributionMatch    `json:"local_matches,omitempty"`
-	Related         []RelatedContributionThread `json:"related,omitempty"`
-	ForkFreshness   *ForkFreshnessOutput        `json:"fork_freshness,omitempty"`
-	Coverage        string                      `json:"coverage" jsonschema:"live_verified or coverage_unknown"`
-	CoverageReasons []string                    `json:"coverage_reasons,omitempty"`
-	NextAction      string                      `json:"next_action"`
-}
-
 // ForkFreshnessOutput reports whether the contributor fork's default branch
 // can safely serve as the base for the current contribution branch. It is
 // present only when a fork can be identified from the input or live context.
@@ -352,34 +312,11 @@ type ForkFreshnessOutput struct {
 	NextAction         string        `json:"next_action"`
 }
 
-// ExistingContributionOutput identifies an authored pull request that may
-// already implement the candidate. Issue is populated only when the input or
-// live related-thread search supplied an exact related issue.
-type ExistingContributionOutput struct {
-	Issue       int    `json:"issue,omitempty"`
-	PullRequest int    `json:"pull_request"`
-	Head        string `json:"head,omitempty"`
-	HeadSHA     string `json:"head_sha,omitempty"`
-	URL         string `json:"url,omitempty"`
-}
-
-// LocalContributionMatch associates an inspected local worktree with an
-// existing authored pull request without taking ownership of the path.
-type LocalContributionMatch struct {
-	Path        string `json:"path"`
-	Branch      string `json:"branch,omitempty"`
-	Remote      string `json:"remote,omitempty"`
-	PullRequest int    `json:"pull_request"`
-}
-
-// RelatedContributionThread is a bounded live-search result retained as
-// context for the routing decision.
-type RelatedContributionThread struct {
-	Kind   string `json:"kind"`
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	Author string `json:"author,omitempty"`
-	URL    string `json:"url,omitempty"`
+type CompareForkInput struct {
+	Upstream           RepositoryRef `json:"upstream" jsonschema:"Upstream GitHub repository"`
+	Fork               RepositoryRef `json:"fork" jsonschema:"Contributor fork repository"`
+	ContributionBranch string        `json:"contribution_branch,omitempty" jsonschema:"Optional contribution branch for provenance"`
+	ContributionSHA    string        `json:"contribution_sha,omitempty" jsonschema:"Optional contribution commit SHA for provenance"`
 }
 
 // SyncCIFailuresInput refreshes normalized CI observations for exact pull

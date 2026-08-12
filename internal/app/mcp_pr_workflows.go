@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	facetPRCIReport            = "pr_ci_report"
-	maxFeedbackItemsPerChannel = 1000
+	facetPRCIReport              = "pr_ci_report"
+	maxFeedbackItemsPerChannel   = 1000
+	maxExactFeedbackPullRequests = 100
 )
 
 var (
@@ -46,8 +47,8 @@ func (r *MCPReader) SyncPullRequestFeedback(ctx context.Context, in mcpcontract.
 		return mcpcontract.JobReference{}, err
 	}
 	in.PullRequests = refs
-	if len(in.PullRequests) < 1 || len(in.PullRequests) > 50 {
-		return mcpcontract.JobReference{}, errors.New("pull_requests must contain 1 to 50 items")
+	if len(in.PullRequests) < 1 || len(in.PullRequests) > maxExactFeedbackPullRequests {
+		return mcpcontract.JobReference{}, errors.New("pull_requests must contain 1 to 100 items")
 	}
 	if in.ThreadState == "" {
 		in.ThreadState = "unresolved"
@@ -88,6 +89,11 @@ func (r *MCPReader) syncPullRequestFeedback(ctx context.Context, in mcpcontract.
 	if !ok {
 		return pullRequestWorkflowResult{}, errors.New("GitHub reader does not support pull-request feedback")
 	}
+	release, err := r.acquireFeedbackWorkflow(ctx)
+	if err != nil {
+		return pullRequestWorkflowResult{}, err
+	}
+	defer release()
 	budget := github.NewRequestBudget(in.MaxRequests)
 	channels, providerChannels, threadState := selection.ChannelValues(), selection.Channels(), selection.ThreadState()
 	out := pullRequestWorkflowResult{BatchStatus: batchOperationComplete, Items: make([]pullRequestWorkflowItem, len(in.PullRequests))}

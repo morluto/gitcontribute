@@ -244,7 +244,7 @@ const pullRequestFeedbackThreadsQuery = `query PullRequestFeedback($owner: Strin
           id isResolved isOutdated path line startLine resolvedBy { login }
           comments(first: $commentFirst) {
             totalCount
-            nodes { id databaseId body createdAt updatedAt path line startLine side startSide outdated commit { oid } author { login } replyTo { databaseId } }
+		    nodes { id databaseId body createdAt updatedAt path line startLine outdated commit { oid } author { login } replyTo { databaseId } }
             pageInfo { hasNextPage endCursor }
           }
         }
@@ -291,13 +291,13 @@ type feedbackCommentConnection struct {
 }
 
 type feedbackCommentNode struct {
-	ID                          string
-	DatabaseID                  int64 `json:"databaseId"`
-	Body, Path, Side, StartSide string
-	CreatedAt, UpdatedAt        time.Time
-	Line, StartLine             *int
-	Outdated                    bool
-	Commit                      *struct {
+	ID                   string
+	DatabaseID           int64 `json:"databaseId"`
+	Body, Path           string
+	CreatedAt, UpdatedAt time.Time
+	Line, StartLine      *int
+	Outdated             bool
+	Commit               *struct {
 		OID string `json:"oid"`
 	}
 	Author *struct {
@@ -313,7 +313,7 @@ const reviewThreadCommentsQuery = `query PullRequestReviewThreadComments($id: ID
     ... on PullRequestReviewThread {
       comments(first: $first, after: $after) {
         totalCount
-        nodes { id databaseId body createdAt updatedAt path line startLine side startSide outdated commit { oid } author { login } replyTo { databaseId } }
+		nodes { id databaseId body createdAt updatedAt path line startLine outdated commit { oid } author { login } replyTo { databaseId } }
         pageInfo { hasNextPage endCursor }
       }
     }
@@ -403,7 +403,7 @@ func (c *Client) feedbackReviewThreads(ctx context.Context, owner, repo string, 
 
 func appendFeedbackComments(dst []FeedbackComment, comments []feedbackCommentNode) []FeedbackComment {
 	for _, comment := range comments {
-		value := FeedbackComment{ID: comment.DatabaseID, NodeID: comment.ID, Body: comment.Body, Path: comment.Path, Line: comment.Line, StartLine: comment.StartLine, Side: comment.Side, StartSide: comment.StartSide, CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt, Outdated: comment.Outdated}
+		value := FeedbackComment{ID: comment.DatabaseID, NodeID: comment.ID, Body: comment.Body, Path: comment.Path, Line: comment.Line, StartLine: comment.StartLine, CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt, Outdated: comment.Outdated}
 		if comment.Author != nil {
 			value.Author = comment.Author.Login
 		}

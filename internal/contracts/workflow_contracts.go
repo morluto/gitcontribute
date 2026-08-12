@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"time"
 
 	"github.com/morluto/gitcontribute/internal/radar"
 	"github.com/morluto/gitcontribute/internal/research"
@@ -180,6 +181,29 @@ type RadarService interface {
 type RadarOptions struct {
 	Repo  RepoRef
 	Limit int
+}
+
+// RadarBatchOptions bounds one deterministic cross-repository ranking.
+type RadarBatchOptions struct {
+	Repositories            []RepoRef
+	Limit                   int
+	MaxResultsPerRepository int
+}
+
+// RadarBatchRepositoryResult preserves per-repository availability without
+// discarding successful reports from the same batch.
+type RadarBatchRepositoryResult struct {
+	Repository RepoRef
+	Report     *radar.Report
+	Err        error
+}
+
+// RadarBatchResult contains reports computed at one shared evaluation time and
+// their deterministic cross-repository ranking.
+type RadarBatchResult struct {
+	GeneratedAt  time.Time
+	Repositories []RadarBatchRepositoryResult
+	Ranking      radar.CrossRepositoryRanking
 }
 
 // ReadinessService is the optional contribution readiness capability used by the CLI.

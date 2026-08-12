@@ -442,6 +442,9 @@ func TestRunInstallsAndRemovesCodexSkillIdempotently(t *testing.T) {
 		!bytes.Contains(written, []byte("inspect corpus coverage and freshness")) {
 		t.Fatalf("skill lacks issue-triage routing:\n%s", written)
 	}
+	if bytes.Contains(written, []byte("workflow.prepare_issue_set")) {
+		t.Fatalf("skill references a removed MCP operation:\n%s", written)
+	}
 
 	report, err = Run(Options{Operation: Configure, Clients: []Client{Codex}, Home: home, Executable: "/bin/gitcontribute"})
 	if err != nil {

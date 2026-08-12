@@ -1,6 +1,10 @@
 package mcpserver
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/morluto/gitcontribute/internal/mcpcontract"
+)
 
 func TestToolCallSchemaUsesExclusiveVariants(t *testing.T) {
 	t.Parallel()
@@ -8,8 +12,8 @@ func TestToolCallSchemaUsesExclusiveVariants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(schema.OneOf) != 32 {
-		t.Fatalf("tool-call variants = %d, want 32", len(schema.OneOf))
+	if len(schema.OneOf) != len(mcpcontract.RecoveryActionPrototypes()) {
+		t.Fatalf("tool-call variants = %d, want %d", len(schema.OneOf), len(mcpcontract.RecoveryActionPrototypes()))
 	}
 	seen := make(map[string]bool, len(schema.OneOf))
 	for _, variant := range schema.OneOf {

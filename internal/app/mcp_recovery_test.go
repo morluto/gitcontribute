@@ -27,14 +27,6 @@ func TestMCPThreadAndRepositorySearchExposeCoverageRecovery(t *testing.T) {
 		t.Fatalf("thread recovery target = %+v", got)
 	}
 
-	code, err := reader.SearchCode(ctx, mcpcontract.SearchCodeInput{Query: "missing", Limit: 10})
-	if err != nil {
-		t.Fatalf("unscoped code search: %v", err)
-	}
-	if !code.Provenance.UnknownCoverage() || code.Recovery == nil || len(code.Recovery.Then) != 1 || code.Recovery.Then[0].Type() != "search_github_repositories" {
-		t.Fatalf("unscoped code recovery = %+v", code)
-	}
-
 	repositories, err := reader.SearchRepositories(ctx, mcpcontract.SearchRepositoriesInput{Owner: "owner", Repo: "repo", Query: "missing", Limit: 10})
 	if err != nil {
 		t.Fatalf("repository search: %v", err)
@@ -43,7 +35,6 @@ func TestMCPThreadAndRepositorySearchExposeCoverageRecovery(t *testing.T) {
 		t.Fatalf("repository search recovery = %+v", repositories)
 	}
 }
-
 func TestMCPRelatedWorkDoesNotTreatAbsentRepositoryAsNoFindings(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

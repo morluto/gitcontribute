@@ -18,28 +18,11 @@ type mcpCodeSearchRequest struct {
 	snapshotToken string
 }
 
-func parseMCPCodeSearchInput(in mcpcontract.SearchCodeInput) (mcpCodeSearchRequest, error) {
-	query := strings.TrimSpace(in.Query)
-	if query == "" {
-		return mcpCodeSearchRequest{}, errors.New("query is required")
+func (r mcpCodeSearchRequest) canonical() mcpcontract.SearchCodeBatchInput {
+	return mcpcontract.SearchCodeBatchInput{
+		Owner: r.repository.Owner(), Repo: r.repository.Repo(), Queries: []string{r.query},
+		Limit: r.page.Limit(), Cursor: r.page.Cursor(), SnapshotToken: r.snapshotToken,
 	}
-	page, err := corpus.ParseSearchPage(in.Limit, in.Cursor)
-	if err != nil {
-		return mcpCodeSearchRequest{}, err
-	}
-	repository, err := optionalRepoRef(in.Owner, in.Repo)
-	if err != nil {
-		return mcpCodeSearchRequest{}, err
-	}
-	return mcpCodeSearchRequest{query: query, repository: repository, page: page, snapshotToken: in.SnapshotToken}, nil
-}
-
-func (r mcpCodeSearchRequest) canonical() mcpcontract.SearchCodeInput {
-	in := mcpcontract.SearchCodeInput{Query: r.query, Limit: r.page.Limit(), Cursor: r.page.Cursor(), SnapshotToken: r.snapshotToken}
-	if r.repository.IsValid() {
-		in.Owner, in.Repo = r.repository.Owner(), r.repository.Repo()
-	}
-	return in
 }
 
 type mcpCodeSearchBatchRequest struct {
@@ -59,7 +42,10 @@ func parseMCPCodeSearchBatchInput(in mcpcontract.SearchCodeBatchInput) (mcpCodeS
 	if in.Limit < 1 || in.Limit > 100 {
 		return mcpCodeSearchBatchRequest{}, errors.New("limit must be between 1 and 100")
 	}
-	page, err := corpus.ParseSearchPage(in.Limit, "")
+	if in.Cursor != "" && len(in.Queries) != 1 {
+		return mcpCodeSearchBatchRequest{}, errors.New("cursor requires exactly one query")
+	}
+	page, err := corpus.ParseSearchPage(in.Limit, in.Cursor)
 	if err != nil {
 		return mcpCodeSearchBatchRequest{}, err
 	}
@@ -83,44 +69,8 @@ func parseMCPCodeSearchBatchInput(in mcpcontract.SearchCodeBatchInput) (mcpCodeS
 func (r mcpCodeSearchBatchRequest) canonical() mcpcontract.SearchCodeBatchInput {
 	return mcpcontract.SearchCodeBatchInput{
 		Owner: r.repository.Owner(), Repo: r.repository.Repo(), Queries: append([]string(nil), r.queries...),
-		Limit: r.page.Limit(), SnapshotToken: r.snapshotToken,
+		Limit: r.page.Limit(), Cursor: r.page.Cursor(), SnapshotToken: r.snapshotToken,
 	}
-}
-
-// SearchCode searches indexed code snapshots in the local corpus.
-func (r *MCPReader) SearchCode(ctx context.Context, in mcpcontract.SearchCodeInput) (mcpcontract.SearchCodeOutput, error) {
-	request, err := parseMCPCodeSearchInput(in)
-	if err != nil {
-		return mcpcontract.SearchCodeOutput{}, err
-	}
-	canonical := request.canonical()
-	c, err := r.openReadOnlyCorpus(ctx)
-	if err != nil {
-		return mcpcontract.SearchCodeOutput{}, err
-	}
-	revision, err := beginCorpusRead(ctx, c, request.snapshotToken)
-	if err != nil {
-		return mcpcontract.SearchCodeOutput{}, err
-	}
-	out, coverage, page, truncated, unknownCoverage, err := r.searchCodeAtRevision(ctx, c, request)
-	if err != nil {
-		return mcpcontract.SearchCodeOutput{}, err
-	}
-	if err := finishCorpusRead(ctx, c, revision); err != nil {
-		return mcpcontract.SearchCodeOutput{}, err
-	}
-	provenance, err := offlineReadProvenance("code_search", revision, canonical, truncated, unknownCoverage)
-	if err != nil {
-		return mcpcontract.SearchCodeOutput{}, err
-	}
-	var recovery *mcpcontract.RecoveryPlan
-	if unknownCoverage || codeCoverageTruncated(coverage) {
-		recovery = codeSearchRecovery(canonical, coverage, truncated, unknownCoverage)
-	} else if page.NextCursor != "" {
-		recovery = codeSearchPageRecovery(canonical, page.NextCursor, request.snapshotToken)
-	}
-	provenance.Recovery = recovery
-	return mcpcontract.SearchCodeOutput{Query: request.query, Total: page.Total, Matches: out, Coverage: coverage, NextCursor: page.NextCursor, SnapshotToken: snapshotIdentity(request.snapshotToken, revision), Recovery: recovery, Provenance: provenance}, nil
 }
 
 func (r *MCPReader) searchCodeAtRevision(ctx context.Context, c *corpus.Corpus, request mcpCodeSearchRequest) (
@@ -171,14 +121,11 @@ func (r *MCPReader) searchCodeAtRevision(ctx context.Context, c *corpus.Corpus, 
 	return matches, coverage, page, truncated, unknownCoverage, nil
 }
 
-func codeSearchRecovery(in mcpcontract.SearchCodeInput, coverage []mcpcontract.CodeIndexCoverageOutput, truncated, unknown bool) *mcpcontract.RecoveryPlan {
-	if (in.Owner != "" && in.Repo != "") || len(coverage) > 0 {
-		return codeIndexRecovery(in, coverage, truncated, unknown)
-	}
-	return recoveryPlan("code_index_coverage_unknown", "Code search is limited to locally indexed snapshots. Select a repository, index it, then repeat before inferring absence.", mcpcontract.RecoveryAction(mcpcontract.SearchGitHubRepositoriesInput{Text: in.Query, Limit: searchRecoveryLimit(in.Limit)}))
+func codeSearchRecovery(in mcpcontract.SearchCodeBatchInput, coverage []mcpcontract.CodeIndexCoverageOutput, truncated, unknown bool) *mcpcontract.RecoveryPlan {
+	return codeIndexRecovery(in, coverage, truncated, unknown)
 }
 
-func codeIndexRecovery(in mcpcontract.SearchCodeInput, coverage []mcpcontract.CodeIndexCoverageOutput, truncated, unknown bool) *mcpcontract.RecoveryPlan {
+func codeIndexRecovery(in mcpcontract.SearchCodeBatchInput, coverage []mcpcontract.CodeIndexCoverageOutput, truncated, unknown bool) *mcpcontract.RecoveryPlan {
 	refs := make([]mcpcontract.IndexRepositoryInput, 0, len(coverage))
 	seen := make(map[string]struct{}, len(coverage))
 	if in.Owner != "" && in.Repo != "" {
@@ -203,7 +150,7 @@ func codeIndexRecovery(in mcpcontract.SearchCodeInput, coverage []mcpcontract.Co
 		}
 	}
 	if len(refs) == 0 {
-		return codeSearchRecovery(in, nil, truncated, unknown)
+		return recoveryPlan("code_index_coverage_unknown", "The selected repository has no complete local code index. Index it, then repeat this exact search before inferring absence.", mcpcontract.RecoveryAction(mcpcontract.IndexRepositoriesInput{Repositories: []mcpcontract.IndexRepositoryInput{{Owner: in.Owner, Repo: in.Repo}}}))
 	}
 	reason, message := "code_index_coverage_unknown", "Re-index the exact repositories, poll the job, then repeat code search before inferring absence."
 	if truncated && !unknown {
@@ -299,7 +246,7 @@ func codeCoverageTruncated(coverage []mcpcontract.CodeIndexCoverageOutput) bool 
 	return false
 }
 
-func codeSearchPageRecovery(in mcpcontract.SearchCodeInput, cursor, snapshotToken string) *mcpcontract.RecoveryPlan {
+func codeSearchPageRecovery(in mcpcontract.SearchCodeBatchInput, cursor, snapshotToken string) *mcpcontract.RecoveryPlan {
 	next := in
 	next.Cursor = cursor
 	next.SnapshotToken = snapshotToken

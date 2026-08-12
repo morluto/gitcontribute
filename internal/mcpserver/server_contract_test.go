@@ -181,6 +181,13 @@ func TestDurableProducerReferencesRoundTripThroughResources(t *testing.T) {
 		kind string
 	}{
 		{
+			name: "materialize dossier",
+			tool: mcpcontract.ToolMaterializeRepositoryDossier,
+			args: map[string]any{"owner": "acme", "repo": "rocket"},
+			uri:  "gitcontribute://dossier/acme/rocket",
+			kind: "repository_dossier",
+		},
+		{
 			name: "record hypothesis returns parent investigation",
 			tool: mcpcontract.ToolRecordHypothesis,
 			args: map[string]any{"investigation_id": "inv-1", "title": "leak", "description": "memory leak", "category": "bug"},
@@ -431,22 +438,6 @@ func TestToolsAreReadOnlyAndReturnStructuredOutput(t *testing.T) {
 	}
 	if out.Total != 1 || len(out.Matches) != 1 || out.Matches[0].Number != 7 {
 		t.Fatalf("search output = %+v", out)
-	}
-}
-
-func TestRankOpportunitiesAcceptsPercentageScoreAndCategoricalConfidence(t *testing.T) {
-	tools, closeSessions := listedTools(t)
-	defer closeSessions()
-	if tools[mcpcontract.ToolRankThreads] != nil {
-		t.Fatal("removed ranking workflow was advertised")
-	}
-}
-
-func TestRankOpportunitiesRejectsOutOfRangeOutputAtProtocolBoundary(t *testing.T) {
-	tools, closeSessions := listedTools(t)
-	defer closeSessions()
-	if tools[mcpcontract.ToolRankThreads] != nil {
-		t.Fatal("removed ranking workflow was advertised")
 	}
 }
 

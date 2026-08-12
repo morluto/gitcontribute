@@ -119,6 +119,21 @@ func TestReadOnlyModeFiltersEverySideEffectingTool(t *testing.T) {
 	}
 }
 
+func TestAnalysisAndMaterializerAnnotationsMatchTheirEffects(t *testing.T) {
+	tools, closeSessions := listedToolsFromReader(t, completeFakeReader(&fakeReader{searchStarted: make(chan struct{})}))
+	defer closeSessions()
+	for _, name := range []string{mcpcontract.ToolAnalyzeFixPatterns, mcpcontract.ToolRankContributionCandidates} {
+		tool := tools[name]
+		if tool == nil || tool.Annotations == nil || !tool.Annotations.ReadOnlyHint || !tool.Annotations.IdempotentHint || tool.Annotations.OpenWorldHint == nil || *tool.Annotations.OpenWorldHint {
+			t.Fatalf("offline analysis annotations for %s = %+v", name, tool)
+		}
+	}
+	materializer := tools[mcpcontract.ToolMaterializeRepositoryDossier]
+	if materializer == nil || materializer.Annotations == nil || materializer.Annotations.ReadOnlyHint || !materializer.Annotations.IdempotentHint || materializer.Annotations.DestructiveHint == nil || *materializer.Annotations.DestructiveHint || materializer.Annotations.OpenWorldHint == nil || *materializer.Annotations.OpenWorldHint {
+		t.Fatalf("dossier materializer annotations = %+v", materializer)
+	}
+}
+
 func TestUnsupportedOptionalCapabilitiesAreNotAdvertised(t *testing.T) {
 	base := &fakeReader{searchStarted: make(chan struct{})}
 	server, err := New(struct{ mcpcontract.Reader }{Reader: base}, "test")
@@ -163,13 +178,46 @@ func TestOptionalCapabilitiesAreAdvertisedIndependently(t *testing.T) {
 	}{Reader: base, ResearchReader: research}
 	tools, closeSessions := listedToolsFromReader(t, reader)
 	defer closeSessions()
-
-	if tools[mcpcontract.ToolQueryDeepWiki] != nil {
-		t.Fatal("removed derived-research workflow was advertised")
+	if tools[mcpcontract.ToolQueryDeepWiki] == nil {
+		t.Fatal("supported derived-research tool was not advertised")
 	}
 	for _, name := range []string{mcpcontract.ToolSearchGitHubRepositories, mcpcontract.ToolIndexRepositories, mcpcontract.ToolCheckMergeConflicts, mcpcontract.ToolListPullRequestPortfolio} {
 		if tools[name] != nil {
 			t.Errorf("unrelated unsupported tool %q was advertised", name)
+		}
+	}
+}
+
+func TestContributionFactsAreAdvertisedIndependently(t *testing.T) {
+	base := &fakeReader{searchStarted: make(chan struct{})}
+	optional := &fakeOptionalCapabilities{base: base}
+	reader := struct {
+		mcpcontract.Reader
+		AuthenticatedIdentityReader
+		ForkComparisonReader
+	}{Reader: base, AuthenticatedIdentityReader: optional, ForkComparisonReader: optional}
+	tools, closeSessions := listedToolsFromReader(t, reader)
+	defer closeSessions()
+
+	for _, name := range []string{mcpcontract.ToolGetAuthenticatedIdentity, mcpcontract.ToolCompareFork} {
+		if tools[name] == nil {
+			t.Errorf("supported contribution fact tool %q was not advertised", name)
+		} else if tools[name].Annotations == nil || !tools[name].Annotations.ReadOnlyHint || tools[name].Annotations.OpenWorldHint == nil || !*tools[name].Annotations.OpenWorldHint {
+			t.Errorf("contribution fact tool %q annotations = %+v", name, tools[name].Annotations)
+		}
+	}
+	client, closeReadOnly := connectServer(t, reader, true)
+	defer closeReadOnly()
+	readOnlyTools := make(map[string]bool)
+	for tool, err := range client.Tools(context.Background(), nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		readOnlyTools[tool.Name] = true
+	}
+	for _, name := range []string{mcpcontract.ToolGetAuthenticatedIdentity, mcpcontract.ToolCompareFork} {
+		if !readOnlyTools[name] {
+			t.Errorf("read-only catalog omitted external fact tool %q", name)
 		}
 	}
 }
@@ -301,7 +349,7 @@ func TestInvalidToolCallEvaluation(t *testing.T) {
 		{mcpcontract.ToolSearchThreads, map[string]any{"query": "race", "kind": "discussion"}},
 		{mcpcontract.ToolSearchThreads, map[string]any{"query": "race", "limit": 101}},
 		{mcpcontract.ToolSearchGitHubRepositories, map[string]any{"limit": 20}},
-		{mcpcontract.ToolSearchCode, map[string]any{"query": "race", "owner": "acme"}},
+		{mcpcontract.ToolSearchCodeBatch, map[string]any{"queries": []any{"race"}, "owner": "acme"}},
 		{mcpcontract.ToolGetThreads, map[string]any{"threads": []any{map[string]any{"owner": "acme", "repo": "rocket", "kind": "issue", "number": 0}}}},
 		{mcpcontract.ToolGetCoverage, map[string]any{"targets": []any{}}},
 		{mcpcontract.ToolCancelJob, map[string]any{"ids": []any{}}},
@@ -362,14 +410,6 @@ func TestCoverageTargetSchemaAcceptsRepositoryAndExactThreadOnly(t *testing.T) {
 		if err == nil && result != nil && !result.IsError {
 			t.Errorf("invalid coverage target was accepted: %#v", args)
 		}
-	}
-}
-
-func TestFixPatternWorkflowSchemaRejectsInvalidNestedInputBeforeHandler(t *testing.T) {
-	tools, closeSessions := listedTools(t)
-	defer closeSessions()
-	if tools[mcpcontract.ToolMineRepositoryFixPatterns] != nil {
-		t.Fatal("removed fix-pattern workflow was advertised")
 	}
 }
 

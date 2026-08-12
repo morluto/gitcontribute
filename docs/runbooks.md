@@ -1,79 +1,135 @@
-# Runbooks
+# Operational runbooks
 
-## Health Check
+These procedures use supported GitContribute commands. Run commands with
+`--json` when the result will be inspected by automation.
+
+## Diagnose a local installation
 
 ```sh
-gitcontribute health
+gitcontribute metadata --json
+gitcontribute status --json
+gitcontribute doctor --strict --json
 ```
 
-Checks SQLite database integrity, GitHub API connectivity, and local filesystem state.
+`doctor` checks local configuration, the corpus, Git, and installed MCP
+registrations. It does not synchronize repositories. A diagnostic timeout is a
+warning unless a required check reports an error.
 
-## Deployment Observability
+After setup or upgrade changes an MCP registration, restart the affected client
+and call `workflow.get_catalog_contract` in the new session. Compare the server
+version, mode, and catalog fingerprint with the expected installation.
 
-**CI Pipeline**: https://github.com/morluto/gitcontribute/actions
+## Inspect repository health
 
-Monitor the CI workflow for build status, test coverage trends, and lint results.
-Coverage reports are uploaded as artifacts on each run.
+Repository health is an offline computation over stored observations:
 
-**Release Dashboard**: https://github.com/morluto/gitcontribute/releases
+```sh
+gitcontribute health owner/repo --json
+gitcontribute coverage owner/repo --json
+```
 
-Track version history and release notes. Each release is built via GoReleaser
-with cross-platform binaries and checksums.
+Incomplete or stale coverage remains unknown. Synchronize the required source
+facts explicitly before rerunning health; the health command itself never
+contacts GitHub.
 
-## Database Integrity
+## Recover a durable job
 
-If SQLite corruption is detected:
+List and inspect jobs without changing them:
 
-1. Stop all running GitContribute and MCP processes.
-2. Run `gitcontribute doctor --strict`. A timeout warning is not proof of
-   corruption; an actual SQLite quick-check error is.
-3. Inspect the candidate backup independently.
-4. Restore through the supported command, which first creates a safety backup:
+```sh
+gitcontribute jobs list --status running --json
+gitcontribute jobs get JOB_ID --json
+```
+
+Request cancellation only when the operation should stop:
+
+```sh
+gitcontribute jobs cancel JOB_ID --json
+```
+
+Cancellation is cooperative and bounded. Inspect the job again to confirm its
+terminal state. There is no manual lock-release or job-reconciliation command;
+restart recovery is owned by the application.
+
+## Diagnose GitHub acquisition failures
+
+GitHub acquisition is explicit. First inspect the returned typed error and
+item-level recovery. For provider rate limits, verify the authenticated
+account's live limit independently when `gh` is configured:
+
+```sh
+gh api /rate_limit
+```
+
+Wait for the reported reset or retry only the affected bounded inputs. Reduce a
+command's documented request/page bounds rather than launching parallel manual
+chunks. Repeated provider failures may open the in-process circuit breaker for
+30 seconds; retries during that interval fail fast. Debug logging can show the
+request and retry boundary:
+
+```sh
+GITCONTRIBUTE_LOG_LEVEL=debug gitcontribute archive sync owner/repo
+```
+
+## Recover from database corruption
+
+Do not replace a corpus until an actual SQLite check reports corruption. A
+timeout warning alone is not proof.
+
+1. Stop GitContribute CLI, TUI, and MCP processes using the corpus.
+2. Run `gitcontribute doctor --strict --json` and
+   `gitcontribute corpus inspect --json`.
+3. Inspect the proposed backup independently.
+4. Restore it through the supported lifecycle; restore first creates a safety
+   backup of the current database:
 
    ```sh
    gitcontribute corpus restore /safe/path/corpus.db --yes
    ```
 
-5. Run `gitcontribute corpus inspect` and `gitcontribute doctor --strict`.
+5. Repeat `corpus inspect` and `doctor --strict`.
 
-## Rate Limiting
+## Recover from a schema migration failure
 
-If GitHub API rate limits are hit:
+Never run Goose directly against a user corpus or edit an already released
+migration.
 
-1. Check current limits: `gh api /rate_limit`
-2. Wait for the reset window (shown in `X-RateLimit-Reset` header)
-3. Reduce concurrent operations via `--concurrency` flag
+1. Stop processes holding corpus leases.
+2. Inspect without mutation: `gitcontribute corpus inspect --json`.
+3. Preserve the backup path and checksum reported by the failed migration.
+4. Fix the migration in a newer binary and retry:
 
-## Circuit Breaker
+   ```sh
+   gitcontribute corpus migrate --yes
+   ```
 
-The GitHub client uses a circuit breaker that opens after 5 consecutive failures.
-When the circuit is open, all requests fail fast with `ErrCircuitOpen` rather
-than retrying. After a 30-second cooldown, a single probe request is allowed.
-If the probe succeeds, the circuit closes; if it fails, the circuit re-opens.
+5. To return to the pre-migration database, restore the verified backup:
 
-To check circuit status, enable debug logging:
+   ```sh
+   gitcontribute corpus restore BACKUP --yes
+   ```
+
+Installing an older binary does not roll back an advanced schema.
+
+## Inspect or remove stored data
+
+Inspect scope before any deletion:
+
 ```sh
-GITCONTRIBUTE_LOG_LEVEL=debug gitcontribute archive sync owner/repo
+gitcontribute corpus list --json
+gitcontribute corpus inventory owner/repo --json
+gitcontribute corpus prune-code owner/repo
+gitcontribute corpus remove-repository owner/repo
 ```
 
-## Job Reconciliation
+The prune and repository-removal commands show a plan by default. Review it,
+then use their documented confirmation flag when deletion is intended. Code
+pruning removes derived snapshots, not GitHub observations.
 
-If jobs appear stuck:
+## Release failures
 
-1. List active jobs: `gitcontribute jobs list --status running`
-2. Check for lock conflicts: `gitcontribute jobs reconcile`
-3. Force-release stale locks if the owning process is confirmed dead
-
-## Migration Failures
-
-Do not run Goose directly against a user corpus. Use the product-owned lifecycle:
-
-1. Stop running MCP processes and inspect without mutation:
-   `gitcontribute corpus inspect --json`.
-2. Preserve the backup path and checksum printed by the failed migration.
-3. Fix the migration in a newer binary; never edit an already released
-   migration in place.
-4. Retry with `gitcontribute corpus migrate --yes`.
-5. If recovery requires returning to the pre-migration database, use
-   `gitcontribute corpus restore BACKUP --yes`. Reinstalling an older binary
-   alone cannot roll back an advanced schema.
+Releases are tag-triggered. Inspect the GitHub Actions run and the matching
+GitHub release. One tag version must agree across the Go binaries, npm package,
+`server.json`, MCP Registry metadata, and GitHub release. Do not repair a
+partially published release by changing an immutable tag; fix the workflow and
+publish a new version.

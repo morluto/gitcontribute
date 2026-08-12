@@ -15,11 +15,11 @@ func TestInferredSchemaIsFreshByType(t *testing.T) {
 }
 
 func TestCustomizedSchemasDoNotShareMutableState(t *testing.T) {
-	first := inputSchema[mcpcontract.SearchCodeInput](func(schema *schemaBuilder) {
+	first := inputSchema[mcpcontract.SearchCodeBatchInput](func(schema *schemaBuilder) {
 		setRange(schema, "limit", 1, 7)
 		requireTogether(schema, "owner", "repo")
 	})
-	second := inputSchema[mcpcontract.SearchCodeInput](func(schema *schemaBuilder) {
+	second := inputSchema[mcpcontract.SearchCodeBatchInput](func(schema *schemaBuilder) {
 		setRange(schema, "limit", 1, 99)
 	})
 	if first.err != nil || second.err != nil {
@@ -54,6 +54,28 @@ func TestNestedDefinitionsAndArrayItemsRemainCustomizable(t *testing.T) {
 	}
 	if target == nil || len(target.Properties["type"].Enum) != 2 {
 		t.Fatalf("nested target definition lost enum customization: %#v", target)
+	}
+}
+
+func TestFixPatternSchemaAdvertisesNestedHandlerConstraints(t *testing.T) {
+	definition := inputSchema[mcpcontract.AnalyzeFixPatternsInput](configureFixPatternAnalysisSchema)
+	if definition.err != nil {
+		t.Fatal(definition.err)
+	}
+	symptom := definition.schema.Defs["FixPatternSymptom"]
+	if symptom == nil {
+		symptom = definition.schema.Properties["symptom_taxonomy"].Items
+	}
+	name, terms := symptom.Properties["name"], symptom.Properties["terms"]
+	if name == nil || name.Pattern != nonWhitespacePattern || terms == nil || terms.MinItems == nil || *terms.MinItems != 1 || terms.MaxItems == nil || *terms.MaxItems != 12 || !terms.UniqueItems || terms.Items == nil || terms.Items.Pattern != nonWhitespacePattern {
+		t.Fatalf("symptom schema = %#v", symptom)
+	}
+	window := definition.schema.Defs["FixPatternTimeWindow"]
+	if window == nil {
+		window = definition.schema.Properties["time_window"]
+	}
+	if window.Properties["updated_after"].Format != "date-time" || window.Properties["updated_before"].Format != "date-time" {
+		t.Fatalf("time-window schema = %#v", window)
 	}
 }
 

@@ -13,7 +13,7 @@ Treat missing, stale, incomplete, or superseded coverage as unknown rather than
 as negative evidence. Keep imported external claims distinct from validation
 reproduced by GitContribute. For the detailed contracts, read
 `docs/architecture.md`, `CONTRIBUTING.md`, and, for MCP or evidence changes,
-`docs/mcp-composed-workflows.md` and `docs/external-evidence-manifests.md`.
+`docs/mcp.md` and `docs/external-evidence-manifests.md`.
 
 ## Product boundaries
 

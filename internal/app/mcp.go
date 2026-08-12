@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/morluto/gitcontribute/internal/clustering"
+	"github.com/morluto/gitcontribute/internal/contracts"
 	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/domain"
 	"github.com/morluto/gitcontribute/internal/evidence"
@@ -148,10 +149,21 @@ func (r *MCPReader) Dossier(ctx context.Context, in mcpcontract.RepoInput) (mcpc
 		return mcpcontract.DossierOutput{}, mcpcontract.Unavailable(
 			"dossier_not_persisted",
 			fmt.Sprintf("No persisted dossier exists for %s.", ref),
-			mcpcontract.RecoveryAction(mcpcontract.GetRepositoriesInput{Repositories: []mcpcontract.RepositoryRef{{Owner: ref.Owner(), Repo: ref.Repo()}}}),
+			mcpcontract.RecoveryAction(mcpcontract.MaterializeRepositoryDossierInput{Owner: ref.Owner(), Repo: ref.Repo()}),
 		)
 	}
 	d, err := dossierFromRecord(record, sources)
+	if err != nil {
+		return mcpcontract.DossierOutput{}, err
+	}
+	return dossierToMCPOutput(d), nil
+}
+
+// MaterializeRepositoryDossier refreshes one deterministic dossier from local
+// corpus facts. It performs no network access and writes only the derived
+// dossier projection.
+func (r *MCPReader) MaterializeRepositoryDossier(ctx context.Context, in mcpcontract.MaterializeRepositoryDossierInput) (mcpcontract.DossierOutput, error) {
+	d, err := r.application().BuildRepositoryDossier(ctx, contracts.RepoRef{Owner: in.Owner, Repo: in.Repo})
 	if err != nil {
 		return mcpcontract.DossierOutput{}, err
 	}

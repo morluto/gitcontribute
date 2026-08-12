@@ -34,13 +34,21 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	}
 
 	reader := svc.MCPReader()
-	if _, err := reader.SearchCode(ctx, mcpcontract.SearchCodeInput{Owner: "owner", Repo: "repo", Query: " \t "}); err == nil {
+	if _, err := reader.SearchCodeBatch(ctx, mcpcontract.SearchCodeBatchInput{Owner: "owner", Repo: "repo", Queries: []string{" \t "}}); err == nil {
 		t.Fatal("whitespace-only code query was accepted")
 	}
-	out, err := reader.SearchCode(ctx, mcpcontract.SearchCodeInput{Query: "searchableParser", Limit: 10})
-	if err != nil {
-		t.Fatalf("search code: %v", err)
+	search := func(repo, query string) mcpcontract.SearchCodeOutput {
+		t.Helper()
+		batch, err := reader.SearchCodeBatch(ctx, mcpcontract.SearchCodeBatchInput{Owner: "owner", Repo: repo, Queries: []string{query}, Limit: 10})
+		if err != nil {
+			t.Fatalf("search code: %v", err)
+		}
+		if len(batch.Items) != 1 || batch.Items[0].Value == nil {
+			t.Fatalf("search code batch: %+v", batch)
+		}
+		return *batch.Items[0].Value
 	}
+	out := search("repo", "searchableParser")
 	if out.Total != 1 || len(out.Matches) != 1 {
 		t.Fatalf("unexpected output: %+v", out)
 	}
@@ -57,20 +65,14 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	if !out.Provenance.Truncated() || out.Provenance.Complete() || out.Provenance.QueryDigestSHA256 == "" {
 		t.Fatalf("unexpected code-search provenance: %+v", out.Provenance)
 	}
-	missing, err := reader.SearchCode(ctx, mcpcontract.SearchCodeInput{Owner: "owner", Repo: "repo", Query: "doesNotExist", Limit: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
+	missing := search("repo", "doesNotExist")
 	if len(missing.Matches) != 0 || len(missing.Coverage) != 1 || missing.Coverage[0].Status != "indexed" || !missing.Coverage[0].Truncated {
 		t.Fatalf("zero-match search lost index coverage: %+v", missing)
 	}
 	if missing.Recovery == nil || len(missing.Recovery.Then) != 1 || missing.Recovery.Then[0].Type() != "index_repositories" || missing.Coverage[0].Recovery == nil {
 		t.Fatalf("truncated code search recovery = %+v", missing)
 	}
-	unindexed, err := reader.SearchCode(ctx, mcpcontract.SearchCodeInput{Owner: "owner", Repo: "unindexed", Query: "anything", Limit: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
+	unindexed := search("unindexed", "anything")
 	if len(unindexed.Coverage) != 1 || unindexed.Coverage[0].Status != "missing" {
 		t.Fatalf("unindexed repository coverage = %+v", unindexed.Coverage)
 	}
@@ -82,10 +84,7 @@ func TestMCPReaderSearchCodeIntegration(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	legacy, err := reader.SearchCode(ctx, mcpcontract.SearchCodeInput{Owner: "owner", Repo: "legacy", Query: "anything", Limit: 10})
-	if err != nil {
-		t.Fatal(err)
-	}
+	legacy := search("legacy", "anything")
 	if len(legacy.Coverage) != 1 || legacy.Coverage[0].Status != "indexed_coverage_unknown" {
 		t.Fatalf("legacy snapshot coverage = %+v", legacy.Coverage)
 	}
@@ -320,13 +319,16 @@ func TestMCPReaderExplainCodeExactPathNotOnFirstSearchPage(t *testing.T) {
 	}
 
 	// Confirm the target is not on the first search page.
-	searchOut, err := svc.MCPReader().SearchCode(ctx, mcpcontract.SearchCodeInput{
-		Owner: ref.Owner(), Repo: ref.Repo(), Query: "searchableParser", Limit: 20,
+	searchBatch, err := svc.MCPReader().SearchCodeBatch(ctx, mcpcontract.SearchCodeBatchInput{
+		Owner: ref.Owner(), Repo: ref.Repo(), Queries: []string{"searchableParser"}, Limit: 20,
 	})
 	if err != nil {
 		t.Fatalf("search code: %v", err)
 	}
-	for _, m := range searchOut.Matches {
+	if len(searchBatch.Items) != 1 || searchBatch.Items[0].Value == nil {
+		t.Fatalf("search code batch = %+v", searchBatch)
+	}
+	for _, m := range searchBatch.Items[0].Value.Matches {
 		if m.Path == "target.go" {
 			t.Fatal("target.go unexpectedly on first search page")
 		}
