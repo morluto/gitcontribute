@@ -22,8 +22,11 @@ func TestReviewThreadQueriesUseCurrentPullRequestReviewCommentFields(t *testing.
 		"thread page":  pullRequestFeedbackThreadsQuery,
 		"comment page": reviewThreadCommentsQuery,
 	} {
-		if strings.Contains(query, " side") || strings.Contains(query, " startSide") {
+		if strings.Contains(query, " databaseId") || strings.Contains(query, " side") || strings.Contains(query, " startSide") {
 			t.Fatalf("%s selects a field removed from GitHub's PullRequestReviewComment schema: %s", name, query)
+		}
+		if !strings.Contains(query, "fullDatabaseId") {
+			t.Fatalf("%s does not select PullRequestReviewComment.fullDatabaseId: %s", name, query)
 		}
 	}
 }
@@ -43,7 +46,7 @@ func TestGetPullRequestFeedbackPreservesChannelsAndThreadState(t *testing.T) {
 			writeJSON(w, []any{map[string]any{"id": 13, "node_id": "C13", "body": "inline", "path": "main.go", "line": 8, "commit_id": "head-7", "in_reply_to_id": 10, "user": map[string]any{"login": "carol"}, "created_at": "2026-07-30T10:03:00Z", "updated_at": "2026-07-30T10:03:00Z"}})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v3/graphql":
 			comments := map[string]any{"totalCount": 1, "nodes": []any{
-				map[string]any{"id": "C13", "databaseId": 13, "body": "inline", "outdated": true, "replyTo": map[string]any{"databaseId": 10}, "author": map[string]any{"login": "carol"}, "commit": map[string]any{"oid": "head-7"}},
+				map[string]any{"id": "C13", "fullDatabaseId": "9223372036854775808", "body": "inline", "outdated": true, "replyTo": map[string]any{"fullDatabaseId": "9223372036854775807"}, "author": map[string]any{"login": "carol"}, "commit": map[string]any{"oid": "head-7"}},
 			}}
 			threads := map[string]any{"totalCount": 2, "pageInfo": map[string]any{"hasNextPage": false}, "nodes": []any{
 				map[string]any{"id": "T1", "isResolved": false, "isOutdated": true, "path": "main.go", "line": 8, "comments": comments},
@@ -70,7 +73,7 @@ func TestGetPullRequestFeedbackPreservesChannelsAndThreadState(t *testing.T) {
 		t.Fatalf("requests=%d feedback=%+v", requests, got)
 	}
 	thread := got.ReviewThreads[0]
-	if !thread.Outdated || thread.Resolved || thread.Comments[0].InReplyToID != 10 || !thread.Comments[0].Outdated {
+	if !thread.Outdated || thread.Resolved || thread.Comments[0].ID != "9223372036854775808" || thread.Comments[0].InReplyToID != "9223372036854775807" || !thread.Comments[0].Outdated {
 		t.Fatalf("thread topology not preserved: %+v", thread)
 	}
 }
@@ -117,8 +120,8 @@ func TestGetPullRequestFeedbackCapsNestedReviewThreadComments(t *testing.T) {
 			writeJSON(w, map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{
 				"headRefOid": "head-7", "updatedAt": "2026-07-30T10:00:00Z",
 				"reviewThreads": map[string]any{"totalCount": 2, "pageInfo": map[string]any{"hasNextPage": false}, "nodes": []any{
-					map[string]any{"id": "T1", "comments": map[string]any{"totalCount": 2, "nodes": []any{map[string]any{"id": "C1", "databaseId": 1}}, "pageInfo": map[string]any{"hasNextPage": true, "endCursor": "next"}}},
-					map[string]any{"id": "T2", "comments": map[string]any{"totalCount": 1, "nodes": []any{map[string]any{"id": "C2", "databaseId": 2}}, "pageInfo": map[string]any{"hasNextPage": false}}},
+					map[string]any{"id": "T1", "comments": map[string]any{"totalCount": 2, "nodes": []any{map[string]any{"id": "C1", "fullDatabaseId": "1"}}, "pageInfo": map[string]any{"hasNextPage": true, "endCursor": "next"}}},
+					map[string]any{"id": "T2", "comments": map[string]any{"totalCount": 1, "nodes": []any{map[string]any{"id": "C2", "fullDatabaseId": "2"}}, "pageInfo": map[string]any{"hasNextPage": false}}},
 				}},
 			}}}})
 		default:

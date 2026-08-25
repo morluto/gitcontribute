@@ -32,6 +32,24 @@ func mustFeedbackSelection(t *testing.T, channels []string, threadState string) 
 	return selection
 }
 
+func TestNormalizeFeedbackPayloadPreservesBigIntCommentIDs(t *testing.T) {
+	items, complete, err := normalizeFeedbackPayload(feedbackFacetReviewThreads, `{
+		"head_sha":"abc",
+		"coverage":{"complete":true},
+		"items":[{"id":"thread-1","comments":[{
+			"id":"9223372036854775808",
+			"node_id":"PRRC_1",
+			"in_reply_to_id":"9223372036854775807"
+		}]}]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !complete || len(items) != 1 || items[0].FeedbackID != "9223372036854775808" || items[0].InReplyToID != "9223372036854775807" {
+		t.Fatalf("normalized items = %+v, complete=%t", items, complete)
+	}
+}
+
 func TestPullRequestFeedbackProjectionRebuildAndSearch(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
