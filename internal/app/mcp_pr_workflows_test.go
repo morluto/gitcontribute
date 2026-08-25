@@ -102,7 +102,7 @@ func TestFeedbackSyncSeedsMissingRepositoryAndPullRequest(t *testing.T) {
 				HeadSHA: "head-7",
 			},
 			HeadSHA: "head-7", SourceUpdatedAt: now,
-			IssueComments: []github.FeedbackComment{{ID: 10, Body: "comment"}},
+			IssueComments: []github.FeedbackComment{{ID: "10", Body: "comment"}},
 			Coverage: map[string]github.FeedbackCoverage{
 				"issue_comments": {Complete: true, Fetched: 1, Total: 1},
 			},

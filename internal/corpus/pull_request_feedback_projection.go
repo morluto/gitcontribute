@@ -117,20 +117,39 @@ type feedbackPayloadEnvelope struct {
 }
 
 type feedbackCommentJSON struct {
-	ID          int64     `json:"id"`
-	NodeID      string    `json:"node_id"`
-	Author      string    `json:"author"`
-	Body        string    `json:"body"`
-	Path        string    `json:"path"`
-	Line        *int      `json:"line"`
-	StartLine   *int      `json:"start_line"`
-	Side        string    `json:"side"`
-	StartSide   string    `json:"start_side"`
-	CommitOID   string    `json:"commit_oid"`
-	InReplyToID int64     `json:"in_reply_to_id"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	Outdated    bool      `json:"outdated"`
+	ID          feedbackID `json:"id"`
+	NodeID      string     `json:"node_id"`
+	Author      string     `json:"author"`
+	Body        string     `json:"body"`
+	Path        string     `json:"path"`
+	Line        *int       `json:"line"`
+	StartLine   *int       `json:"start_line"`
+	Side        string     `json:"side"`
+	StartSide   string     `json:"start_side"`
+	CommitOID   string     `json:"commit_oid"`
+	InReplyToID feedbackID `json:"in_reply_to_id"`
+	CreatedAt   time.Time  `json:"created_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	Outdated    bool       `json:"outdated"`
+}
+
+// feedbackID preserves the opaque provider identifier in new observations and
+// accepts numeric IDs from observations written before the GraphQL adapter
+// moved to GitHub's BigInt-backed fullDatabaseId field.
+type feedbackID string
+
+func (id *feedbackID) UnmarshalJSON(data []byte) error {
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		*id = feedbackID(text)
+		return nil
+	}
+	var number json.Number
+	if err := json.Unmarshal(data, &number); err != nil {
+		return fmt.Errorf("decode feedback ID: %w", err)
+	}
+	*id = feedbackID(number.String())
+	return nil
 }
 
 type feedbackReviewJSON struct {
@@ -178,16 +197,16 @@ func normalizeFeedbackPayload(facet, payload string) ([]normalizedFeedbackItem, 
 			return nil, false, err
 		}
 		for index, value := range values {
-			id := strconv.FormatInt(value.ID, 10)
-			if value.ID == 0 {
+			id := string(value.ID)
+			if id == "" {
 				id = value.NodeID
 			}
 			if id == "" {
 				id = fmt.Sprintf("item:%d", index)
 			}
 			inReplyTo := ""
-			if value.InReplyToID != 0 {
-				inReplyTo = strconv.FormatInt(value.InReplyToID, 10)
+			if value.InReplyToID != "" {
+				inReplyTo = string(value.InReplyToID)
 			}
 			out = append(out, normalizedFeedbackItem{FeedbackID: id, FeedbackNodeID: value.NodeID, InReplyToID: inReplyTo, Author: value.Author, Body: value.Body, Path: value.Path, Line: value.Line, StartLine: value.StartLine, Side: value.Side, StartSide: value.StartSide, CommitOID: value.CommitOID, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt, Outdated: value.Outdated, HeadSHA: envelope.HeadSHA})
 		}
@@ -217,8 +236,8 @@ func normalizeFeedbackPayload(facet, payload string) ([]normalizedFeedbackItem, 
 				continue
 			}
 			for index, comment := range thread.Comments {
-				id := strconv.FormatInt(comment.ID, 10)
-				if comment.ID == 0 {
+				id := string(comment.ID)
+				if id == "" {
 					id = comment.NodeID
 				}
 				if id == "" {
@@ -236,8 +255,8 @@ func normalizeFeedbackPayload(facet, payload string) ([]normalizedFeedbackItem, 
 					startLine = thread.StartLine
 				}
 				inReplyTo := ""
-				if comment.InReplyToID != 0 {
-					inReplyTo = strconv.FormatInt(comment.InReplyToID, 10)
+				if comment.InReplyToID != "" {
+					inReplyTo = string(comment.InReplyToID)
 				}
 				out = append(out, normalizedFeedbackItem{FeedbackID: id, FeedbackNodeID: comment.NodeID, ThreadExternalID: thread.ID, InReplyToID: inReplyTo, Author: comment.Author, Body: comment.Body, Path: path, Line: line, StartLine: startLine, Side: comment.Side, StartSide: comment.StartSide, CommitOID: comment.CommitOID, CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt, ResolvedKnown: true, Resolved: thread.Resolved, ResolvedBy: thread.ResolvedBy, Outdated: thread.Outdated || comment.Outdated, HeadSHA: envelope.HeadSHA})
 			}

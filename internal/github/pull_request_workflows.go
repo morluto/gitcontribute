@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -57,7 +58,7 @@ type FeedbackCoverage struct {
 }
 
 type FeedbackComment struct {
-	ID          int64     `json:"id"`
+	ID          string    `json:"id"`
 	NodeID      string    `json:"node_id,omitempty"`
 	Author      string    `json:"author,omitempty"`
 	Body        string    `json:"body,omitempty"`
@@ -67,7 +68,7 @@ type FeedbackComment struct {
 	Side        string    `json:"side,omitempty"`
 	StartSide   string    `json:"start_side,omitempty"`
 	CommitOID   string    `json:"commit_oid,omitempty"`
-	InReplyToID int64     `json:"in_reply_to_id,omitempty"`
+	InReplyToID string    `json:"in_reply_to_id,omitempty"`
 	CreatedAt   time.Time `json:"created_at,omitempty"`
 	UpdatedAt   time.Time `json:"updated_at,omitempty"`
 	Outdated    bool      `json:"outdated,omitempty"`
@@ -174,7 +175,7 @@ func (c *Client) feedbackIssueComments(ctx context.Context, owner, repo string, 
 			return items, FeedbackCoverage{Fetched: len(items)}, classifyError(err)
 		}
 		for _, value := range values {
-			items = append(items, FeedbackComment{ID: value.GetID(), NodeID: value.GetNodeID(), Author: value.GetUser().GetLogin(), Body: value.GetBody(), CreatedAt: value.GetCreatedAt().Time, UpdatedAt: value.GetUpdatedAt().Time})
+			items = append(items, FeedbackComment{ID: formatFeedbackID(value.GetID()), NodeID: value.GetNodeID(), Author: value.GetUser().GetLogin(), Body: value.GetBody(), CreatedAt: value.GetCreatedAt().Time, UpdatedAt: value.GetUpdatedAt().Time})
 		}
 		if resp == nil || resp.NextPage == 0 {
 			return items, FeedbackCoverage{Complete: true, Fetched: len(items), Total: len(items)}, nil
@@ -219,9 +220,9 @@ func (c *Client) feedbackInlineComments(ctx context.Context, owner, repo string,
 		}
 		for _, value := range values {
 			items = append(items, FeedbackComment{
-				ID: value.GetID(), NodeID: value.GetNodeID(), Author: value.GetUser().GetLogin(), Body: value.GetBody(),
+				ID: formatFeedbackID(value.GetID()), NodeID: value.GetNodeID(), Author: value.GetUser().GetLogin(), Body: value.GetBody(),
 				Path: value.GetPath(), Line: value.Line, StartLine: value.StartLine, Side: value.GetSide(), StartSide: value.GetStartSide(), CommitOID: value.GetCommitID(),
-				InReplyToID: value.GetInReplyTo(), CreatedAt: value.GetCreatedAt().Time, UpdatedAt: value.GetUpdatedAt().Time,
+				InReplyToID: formatFeedbackID(value.GetInReplyTo()), CreatedAt: value.GetCreatedAt().Time, UpdatedAt: value.GetUpdatedAt().Time,
 				Outdated: value.GetPosition() == 0 && value.Position != nil,
 			})
 		}
@@ -231,6 +232,13 @@ func (c *Client) feedbackInlineComments(ctx context.Context, owner, repo string,
 		page = resp.NextPage
 	}
 	return items, FeedbackCoverage{Fetched: len(items), Total: 0, Reason: "item_limit_reached"}, nil
+}
+
+func formatFeedbackID(id int64) string {
+	if id == 0 {
+		return ""
+	}
+	return strconv.FormatInt(id, 10)
 }
 
 const pullRequestFeedbackThreadsQuery = `query PullRequestFeedback($owner: String!, $repo: String!, $number: Int!, $first: Int!, $after: String, $commentFirst: Int!) {
@@ -244,7 +252,7 @@ const pullRequestFeedbackThreadsQuery = `query PullRequestFeedback($owner: Strin
           id isResolved isOutdated path line startLine resolvedBy { login }
           comments(first: $commentFirst) {
             totalCount
-		    nodes { id databaseId body createdAt updatedAt path line startLine outdated commit { oid } author { login } replyTo { databaseId } }
+			    nodes { id fullDatabaseId body createdAt updatedAt path line startLine outdated commit { oid } author { login } replyTo { fullDatabaseId } }
             pageInfo { hasNextPage endCursor }
           }
         }
@@ -292,7 +300,7 @@ type feedbackCommentConnection struct {
 
 type feedbackCommentNode struct {
 	ID                   string
-	DatabaseID           int64 `json:"databaseId"`
+	FullDatabaseID       string `json:"fullDatabaseId"`
 	Body, Path           string
 	CreatedAt, UpdatedAt time.Time
 	Line, StartLine      *int
@@ -304,7 +312,7 @@ type feedbackCommentNode struct {
 		Login string `json:"login"`
 	}
 	ReplyTo *struct {
-		DatabaseID int64 `json:"databaseId"`
+		FullDatabaseID string `json:"fullDatabaseId"`
 	}
 }
 
@@ -313,7 +321,7 @@ const reviewThreadCommentsQuery = `query PullRequestReviewThreadComments($id: ID
     ... on PullRequestReviewThread {
       comments(first: $first, after: $after) {
         totalCount
-		nodes { id databaseId body createdAt updatedAt path line startLine outdated commit { oid } author { login } replyTo { databaseId } }
+		nodes { id fullDatabaseId body createdAt updatedAt path line startLine outdated commit { oid } author { login } replyTo { fullDatabaseId } }
         pageInfo { hasNextPage endCursor }
       }
     }
@@ -403,7 +411,7 @@ func (c *Client) feedbackReviewThreads(ctx context.Context, owner, repo string, 
 
 func appendFeedbackComments(dst []FeedbackComment, comments []feedbackCommentNode) []FeedbackComment {
 	for _, comment := range comments {
-		value := FeedbackComment{ID: comment.DatabaseID, NodeID: comment.ID, Body: comment.Body, Path: comment.Path, Line: comment.Line, StartLine: comment.StartLine, CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt, Outdated: comment.Outdated}
+		value := FeedbackComment{ID: comment.FullDatabaseID, NodeID: comment.ID, Body: comment.Body, Path: comment.Path, Line: comment.Line, StartLine: comment.StartLine, CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt, Outdated: comment.Outdated}
 		if comment.Author != nil {
 			value.Author = comment.Author.Login
 		}
@@ -411,7 +419,7 @@ func appendFeedbackComments(dst []FeedbackComment, comments []feedbackCommentNod
 			value.CommitOID = comment.Commit.OID
 		}
 		if comment.ReplyTo != nil {
-			value.InReplyToID = comment.ReplyTo.DatabaseID
+			value.InReplyToID = comment.ReplyTo.FullDatabaseID
 		}
 		dst = append(dst, value)
 	}

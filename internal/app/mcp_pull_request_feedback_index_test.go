@@ -47,14 +47,14 @@ func (r *feedbackIndexTestReader) GetPullRequestFeedback(_ context.Context, _, _
 	head := fmt.Sprintf("head-%d", number)
 	threads := []github.FeedbackThread(nil)
 	if r.withThread {
-		threads = []github.FeedbackThread{{ID: "thread-2", Resolved: false, Comments: []github.FeedbackComment{{ID: 202, Author: "reviewer", Body: "thread feedback", CreatedAt: now, UpdatedAt: now}}}}
+		threads = []github.FeedbackThread{{ID: "thread-2", Resolved: false, Comments: []github.FeedbackComment{{ID: "202", Author: "reviewer", Body: "thread feedback", CreatedAt: now, UpdatedAt: now}}}}
 	}
 	return github.PullRequestFeedback{
 		Header:          github.PullRequestDetails{Number: number, State: map[int]string{1: "open", 2: "closed"}[number], Author: map[int]string{1: "alice", 2: "bob"}[number], CreatedAt: now.Add(-time.Hour), UpdatedAt: now, Merged: number == 2, HeadSHA: head},
 		HeadSHA:         head,
 		SourceUpdatedAt: now,
 		ThreadState:     opts.ThreadState,
-		IssueComments:   []github.FeedbackComment{{ID: int64(number), Author: "reviewer", Body: "please address latency", CreatedAt: now, UpdatedAt: now}},
+		IssueComments:   []github.FeedbackComment{{ID: fmt.Sprintf("%d", number), Author: "reviewer", Body: "please address latency", CreatedAt: now, UpdatedAt: now}},
 		ReviewThreads:   threads,
 		Coverage:        coverage,
 	}, nil
