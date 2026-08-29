@@ -17,6 +17,7 @@ GOTESTSUM ?= $(shell command -v gotestsum 2>/dev/null || printf '%s/bin/gotestsu
 # use more than the historical four-test cap.
 TEST_PARALLELISM ?= 8
 TEST_PACKAGE_PARALLELISM ?= 8
+RACE_TEST_PACKAGE_PARALLELISM ?= 1
 RACE_TEST_PARALLELISM ?= 4
 INTEGRATION_PARALLELISM ?= 4
 GOTESTSUM_FLAGS ?= --rerun-fails=2 --rerun-fails-max-failures=5
@@ -78,14 +79,14 @@ test-uncached:
 	$(GO) test -short -p=$(TEST_PACKAGE_PARALLELISM) -parallel=$(TEST_PARALLELISM) -count=1 -timeout 120s ./...
 
 test-race:
-	# Keep package-level overlap for cross-package race coverage while bounding
-	# in-process test concurrency for the CPU-heavy SQLite tests.
-	$(GO) test -short -race -p=4 -parallel=$(RACE_TEST_PARALLELISM) -timeout 600s ./internal/app ./internal/corpus ./internal/mcpserver ./internal/workspace
+	# Race tests run each package in a separate process, so package overlap adds
+	# CPU contention without extending race coverage across package boundaries.
+	$(GO) test -short -race -p=$(RACE_TEST_PACKAGE_PARALLELISM) -parallel=$(RACE_TEST_PARALLELISM) -timeout 600s ./internal/app ./internal/corpus ./internal/mcpserver ./internal/workspace
 
 test-race-full:
-	# Keep package-level overlap for cross-package race coverage while bounding
-	# in-process test concurrency for the CPU-heavy SQLite tests.
-	$(GO) test -race -p=4 -parallel=$(RACE_TEST_PARALLELISM) -count=1 -timeout 900s ./...
+	# Keep the same package isolation for the full race suite; callers can raise
+	# package concurrency explicitly on hosts with enough CPU and memory.
+	$(GO) test -race -p=$(RACE_TEST_PACKAGE_PARALLELISM) -parallel=$(RACE_TEST_PARALLELISM) -count=1 -timeout 900s ./...
 
 test-verbose:
 	$(GO) test -short -v -p=$(TEST_PACKAGE_PARALLELISM) -parallel=$(TEST_PARALLELISM) -timeout 120s ./...
