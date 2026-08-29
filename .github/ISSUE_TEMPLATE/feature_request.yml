@@ -1,0 +1,87 @@
+name: Feature request
+description: Propose a focused improvement to GitContribute
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep one primary capability or workflow outcome per request. For a
+        storage, provider, or public protocol change, make the decision and
+        invariants explicit before implementation.
+
+  - type: checkboxes
+    id: before-submitting
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the open and closed issues and pull requests for a related proposal.
+          required: true
+        - label: I removed tokens, private repository data, local paths, and other sensitive values.
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - GitHub acquisition or synchronization
+        - Corpus storage or projection
+        - Search, coverage, or analysis
+        - Code indexing or source bundles
+        - Jobs, retry, or recovery
+        - CLI or TUI
+        - MCP or resources
+        - Validation or workspace management
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: current-limitation
+    attributes:
+      label: Current limitation
+      description: What user, agent, or maintainer workflow is blocked, ambiguous, or unnecessarily difficult today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-cases
+    attributes:
+      label: Use cases
+      description: Give concrete repository workflows, callers, or data shapes. Explain why current operations are insufficient.
+    validations:
+      required: true
+
+  - type: textarea
+    id: desired-outcome
+    attributes:
+      label: Desired outcome and success criteria
+      description: Describe observable behavior, output, coverage, recovery, and compatibility criteria that would make this useful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: invariants
+    attributes:
+      label: Invariants and constraints
+      description: Call out transaction ordering, pagination, source provenance, no-execution rules, network boundaries, schema compatibility, or other constraints.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe existing commands, upstream APIs, or workarounds considered and why they do not meet the need.
+
+  - type: textarea
+    id: possible-direction
+    attributes:
+      label: Possible direction
+      description: Optional implementation idea. Treat it as a proposal, not a requirement.
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Link relevant architecture, API contracts, source, measurements, issues, or discussions.

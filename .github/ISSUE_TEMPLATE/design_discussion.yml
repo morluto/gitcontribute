@@ -1,0 +1,68 @@
+name: Design discussion
+description: Resolve a GitContribute architecture, storage, or protocol decision before implementation
+title: "[Design] "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for a substantial provider, storage, public protocol, or
+        execution-boundary decision. Keep one decision per discussion.
+
+  - type: checkboxes
+    id: before-submitting
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the open and closed issues and pull requests for a related discussion.
+          required: true
+        - label: I removed tokens, private repository data, local paths, and other sensitive values.
+          required: true
+
+  - type: textarea
+    id: decision
+    attributes:
+      label: Decision needed
+      description: State the exact question maintainers need to resolve.
+      placeholder: Should GitContribute ... or ...?
+    validations:
+      required: true
+
+  - type: textarea
+    id: context-evidence
+    attributes:
+      label: Context and evidence
+      description: Explain why the decision is needed now. Separate observed behavior, derived evidence, and inference.
+    validations:
+      required: true
+
+  - type: textarea
+    id: invariants-ownership
+    attributes:
+      label: Invariants and ownership
+      description: Identify the owning package and the rules for acquisition, persistence, ordering, pagination, recovery, resources, and side effects.
+    validations:
+      required: true
+
+  - type: textarea
+    id: options
+    attributes:
+      label: Options and tradeoffs
+      description: Compare a small number of viable approaches, including correctness, freshness, safety, compatibility, and maintenance costs.
+    validations:
+      required: true
+
+  - type: textarea
+    id: success-criteria
+    attributes:
+      label: Success criteria and open questions
+      description: State what outcome would settle the decision and list only unresolved questions that could change the choice.
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Link relevant architecture, ADRs, APIs, tests, measurements, or prior discussions.

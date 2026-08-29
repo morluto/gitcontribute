@@ -1,0 +1,134 @@
+name: Bug report
+description: Report a reproducible problem in GitContribute
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please report one primary behavior per issue. Keep observed facts
+        separate from suspected causes, and remove credentials and private data.
+
+  - type: checkboxes
+    id: before-submitting
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the open and closed issues for a related report.
+          required: true
+        - label: I removed tokens, private repository data, local paths, and other sensitive values.
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - GitHub acquisition or synchronization
+        - Corpus storage or projection
+        - Search, coverage, or analysis
+        - Code indexing or source bundles
+        - Jobs, retry, or recovery
+        - CLI or TUI
+        - MCP or resources
+        - Validation or workspace management
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed-behavior
+    attributes:
+      label: Observed behavior
+      description: What happened? Include the command, API/MCP operation, repository scope, and relevant state.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Give the smallest realistic command, configuration, input, or event sequence that demonstrates the problem.
+      placeholder: |
+        1. Start with ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: What result, invariant, ordering rule, recovery action, or state transition should have occurred?
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact-scope
+    attributes:
+      label: Impact and scope
+      description: What is affected, what is not affected, and does this risk stale, incomplete, reordered, duplicated, or unsafe evidence?
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: GitContribute version or revision
+      description: Use `gitcontribute version` or provide the source revision.
+      placeholder: 0.1.0 or git revision
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, architecture, Go version, and interface/client when relevant.
+      placeholder: Linux x86_64; Go 1.24; MCP stdio
+    validations:
+      required: true
+
+  - type: dropdown
+    id: failure-stage
+    attributes:
+      label: Earliest failure stage
+      description: Select where the incorrect behavior first becomes observable.
+      options:
+        - Request parsing or validation
+        - GitHub acquisition or provider mapping
+        - Job scheduling, retry, or cancellation
+        - Persistence or transaction boundary
+        - Projection, pagination, or query scope
+        - Resource or transport projection
+        - CLI or TUI presentation
+        - Unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-typed-outcome
+    attributes:
+      label: Typed outcome or recovery expected
+      description: Optional. What typed result, error, retry action, recovery step, or limitation should the caller have received?
+
+  - type: textarea
+    id: relevant-evidence
+    attributes:
+      label: Relevant output or evidence
+      description: Paste the smallest useful output, error, resource result, database state, or trace. Redact sensitive values.
+      render: text
+
+  - type: textarea
+    id: analysis
+    attributes:
+      label: Analysis or suspected cause
+      description: Optional. Clearly mark source-derived reasoning or a hypothesis; do not present an unverified cause as fact.
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add links, reduced fixtures, or a proposed regression test.
