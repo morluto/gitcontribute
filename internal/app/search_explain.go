@@ -56,5 +56,8 @@ func explainMatchReasons(query string, match contracts.SearchMatch, freshness, n
 		reasons = append(reasons, "no coverage recorded")
 	}
 	reasons = append(reasons, "score is weighted FTS5 BM25 rank converted from lower-is-better to higher-is-better relevance")
+	if match.Kind == "issue" || match.Kind == "pull_request" {
+		reasons = append(reasons, "thread relevance places all-term title matches first, then orders each group by score")
+	}
 	return reasons
 }

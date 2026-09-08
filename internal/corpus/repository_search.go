@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const repositorySearchRankSQL = "bm25(repositories_fts, 10.0, 10.0, 5.0, 2.0)"
+
 // RepositorySearchOptions scopes a paginated repository search.
 type RepositorySearchOptions struct {
 	Page  SearchPage
@@ -94,7 +96,7 @@ func repositorySearchStatement(ftsQuery string, opts RepositorySearchOptions, cu
 	if ftsQuery != "" {
 		from = "FROM repositories_fts JOIN repositories ON repositories.id = repositories_fts.rowid"
 		where = `WHERE repositories_fts MATCH ?`
-		rankSelect = "bm25(repositories_fts, 10.0, 10.0, 5.0, 2.0)"
+		rankSelect = repositorySearchRankSQL
 		args = append(args, ftsQuery)
 	}
 	if cursor != nil {
@@ -144,7 +146,7 @@ func scanRepositorySearchRows(rows *sql.Rows) ([]Repository, error) {
 
 func repositoryOrder(ftsQuery string, order SearchOrder) string {
 	if ftsQuery != "" && !order.IsUpdated() {
-		return "bm25(repositories_fts, 10.0, 10.0, 5.0, 2.0), repositories.source_updated_at DESC, repositories.id"
+		return repositorySearchRankSQL + ", repositories.source_updated_at DESC, repositories.id"
 	}
 	return "repositories.source_updated_at DESC, repositories.id DESC"
 }
@@ -164,7 +166,7 @@ func (c *Corpus) FindRepositorySearchEvidence(ctx context.Context, id int64, que
 	}
 	var evidence RepositorySearchEvidence
 	err := c.db.QueryRowContext(ctx, `
-		SELECT bm25(repositories_fts, 10.0, 10.0, 5.0, 2.0),
+		SELECT `+repositorySearchRankSQL+`,
 		       snippet(repositories_fts, -1, '', '', ' … ', 48)
 		FROM repositories_fts
 		WHERE repositories_fts MATCH ? AND rowid = ?
