@@ -1,5 +1,20 @@
 # Changelog
 
+## [3.0.2](https://github.com/morluto/gitcontribute/compare/v3.0.1...v3.0.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* **ci:** serialize race test packages ([c1930cd](https://github.com/morluto/gitcontribute/commit/c1930cd3f5f8ee37ef993935ef716f22f24b1684))
+* **evidence:** unify reference ownership and preserve tracking failures ([52a6318](https://github.com/morluto/gitcontribute/commit/52a63182695dde269e723ffe57fc0a080a6479b7))
+* **github:** preserve full review comment IDs ([21fe8cc](https://github.com/morluto/gitcontribute/commit/21fe8ccf57926405dd3e725ee48fc7f17db37ca7))
+* **github:** preserve full review comment IDs ([25f4601](https://github.com/morluto/gitcontribute/commit/25f460108d076f5215e537be077ef17ff460f249))
+* **mcp:** advertise partial batch outcomes ([dbd353d](https://github.com/morluto/gitcontribute/commit/dbd353df8072c32db6eccccf8939afc447e7a864))
+* **mcp:** preserve evidence completeness and durable job ownership ([a6a8f90](https://github.com/morluto/gitcontribute/commit/a6a8f909e9797a519d5ec180856acded891c462e))
+* **mcp:** treat stale thread coverage as unknown ([9ed433f](https://github.com/morluto/gitcontribute/commit/9ed433f00a1038e6c86bd58c138a4fcc557ddda2))
+* preserve search evidence and asynchronous job ownership ([0386ea3](https://github.com/morluto/gitcontribute/commit/0386ea3f462e2b1d107b340c222511347c386bec))
+* **search:** preserve relevance ordering and bound evidence queries ([e01a2bc](https://github.com/morluto/gitcontribute/commit/e01a2bc521c90e2fe5940b39f679fbeac520af35))
+
 ## [3.0.1](https://github.com/morluto/gitcontribute/compare/v3.0.0...v3.0.1) (2026-08-10)
 
 
