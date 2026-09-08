@@ -28,8 +28,10 @@ external read; its prose is untrusted derived context and never overrides
 GitHub facts. No MCP tool mutates GitHub or executes repository-controlled code
 during acquisition, indexing, or research.
 
-Use `--read-only` when starting the MCP server to omit network, local-write,
-Git, and process capabilities. `workflow.get_catalog_contract` reports the
+Use `--read-only` when starting the MCP server to expose only tools annotated
+as read-only. This omits acquisition, local writes, and validation execution,
+but retains pure external reads and non-mutating Git inspection. It is not an
+offline mode; inspect each tool's documented authority and open-world annotation. `workflow.get_catalog_contract` reports the
 running version, catalog mode, tool count, deterministic fingerprint, and
 availability of key routes. Restart the MCP connection after setup, upgrade,
 or registration changes before comparing that contract with `tools/list`.
@@ -175,6 +177,13 @@ competing work” conclusion.
 ## Validation and evidence
 
 Base/candidate validation remains an explicit process composition:
+
+After `validation.run`, poll `jobs.get` and follow its exact
+`gitcontribute://validation-group/{id}` resource URI. The resource exposes
+persisted group outcomes and attempt run IDs for `validation.attach_junit_report`;
+a succeeded job alone does not establish that its test attempts passed.
+Code-index jobs likewise return a compact digest-bound reference; read its exact
+resource URI for file counts, manifest coverage, and provenance.
 
 1. Use `workspace.adopt` or `workspace.create` for authorized worktrees.
 2. Call `validation.define` with the exact command and workspace identities.

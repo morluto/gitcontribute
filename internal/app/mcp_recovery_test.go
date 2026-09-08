@@ -3,8 +3,10 @@ package app
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/morluto/gitcontribute/internal/contracts"
+	"github.com/morluto/gitcontribute/internal/corpus"
 	"github.com/morluto/gitcontribute/internal/investigation"
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
@@ -74,5 +76,44 @@ func assertRelatedWorkRecovery(t *testing.T, output mcpcontract.CheckOutput, kin
 	action, ok := mcpcontract.RecoveryInput[mcpcontract.SyncRepositoryContextInput](output.Recovery.Then[0])
 	if !ok || len(action.Repositories) != 1 || action.Repositories[0].Owner != "owner" || action.Repositories[0].Repo != "absent" {
 		t.Fatalf("%s recovery = %+v", kind, output.Recovery)
+	}
+}
+
+func TestMCPRelatedWorkPreservesUnknownThreadCoverage(t *testing.T) {
+	for _, coverage := range []string{"missing", "incomplete", "complete"} {
+		t.Run(coverage, func(t *testing.T) {
+			ctx := context.Background()
+			svc := newSearchTestService(t)
+			repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "owner", Name: "repo"}, `{}`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if coverage != "missing" {
+				if err := svc.corpus.AdvanceFacet(ctx, repo.ID, nil, "threads", time.Now(), coverage == "complete", 0); err != nil {
+					t.Fatal(err)
+				}
+			}
+			inv, err := svc.StartInvestigation(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, "abc", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			hypothesis, err := svc.CreateHypothesis(ctx, inv.ID, investigation.CreateHypothesisInput{Title: "parser", Description: "cancellation", Category: investigation.CategoryBug})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, tool := range []string{"corpus.find_duplicates", "corpus.find_competing_pull_requests"} {
+				session := connectAuditMCP(t, svc)
+				out := callMCPTool[mcpcontract.CheckOutput](ctx, t, session, tool, map[string]any{"target": "hypothesis", "id": hypothesis.ID, "limit": 10})
+				if coverage == "complete" {
+					if out.Coverage != "complete" {
+						t.Fatalf("complete corpus: %+v", out)
+					}
+					continue
+				}
+				if out.Coverage == "complete" || out.Status == "complete" || out.Recovery == nil {
+					t.Fatalf("incomplete corpus became negative evidence: %+v", out)
+				}
+			}
+		})
 	}
 }

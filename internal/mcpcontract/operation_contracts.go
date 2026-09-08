@@ -72,20 +72,20 @@ type GetJobInput struct {
 // JobArtifactReference identifies a bounded durable result without exposing the
 // job executor's stored request or result representation.
 type JobArtifactReference struct {
-	Kind                string               `json:"kind" jsonschema:"Artifact kind owned by GitContribute"`
-	ID                  string               `json:"id,omitempty" jsonschema:"Stable artifact identifier when one exists"`
-	URI                 string               `json:"uri,omitempty" jsonschema:"MCP resource URI when the artifact is readable as a resource"`
-	Count               *NonNegativeInt      `json:"count,omitempty" jsonschema:"Known number of affected objects for a bounded collection, including zero"`
-	References          []string             `json:"references,omitempty" jsonschema:"Bounded exact repository, thread, or pull-request references produced by the job"`
-	ReferencesTruncated bool                 `json:"references_truncated,omitempty" jsonschema:"Whether more exact references exist than this bounded response includes"`
-	Failures            []JobArtifactFailure `json:"failures,omitempty" jsonschema:"Bounded per-reference outcomes that require retry or recovery"`
-	FailuresTruncated   bool                 `json:"failures_truncated,omitempty" jsonschema:"Whether more failed outcomes exist than this bounded response includes"`
-	CodeIndex           *CodeIndexArtifact   `json:"code_index,omitempty" jsonschema:"Revision-bound indexed-commit artifact"`
-	Status              string               `json:"status,omitempty" jsonschema:"Artifact completeness status"`
-	DiscoveryStatus     string               `json:"discovery_status,omitempty"`
-	SearchIncomplete    bool                 `json:"search_incomplete,omitempty"`
-	RequestCapped       bool                 `json:"request_capped,omitempty"`
-	Recovery            *RecoveryPlan        `json:"recovery,omitempty"`
+	Kind                string                      `json:"kind" jsonschema:"Artifact kind owned by GitContribute"`
+	ID                  string                      `json:"id,omitempty" jsonschema:"Stable artifact identifier when one exists"`
+	URI                 string                      `json:"uri,omitempty" jsonschema:"MCP resource URI when the artifact is readable as a resource"`
+	Count               *NonNegativeInt             `json:"count,omitempty" jsonschema:"Known number of affected objects for a bounded collection, including zero"`
+	References          []string                    `json:"references,omitempty" jsonschema:"Bounded exact repository, thread, or pull-request references produced by the job"`
+	ReferencesTruncated bool                        `json:"references_truncated,omitempty" jsonschema:"Whether more exact references exist than this bounded response includes"`
+	Failures            []JobArtifactFailure        `json:"failures,omitempty" jsonschema:"Bounded per-reference outcomes that require retry or recovery"`
+	FailuresTruncated   bool                        `json:"failures_truncated,omitempty" jsonschema:"Whether more failed outcomes exist than this bounded response includes"`
+	CodeIndex           *CodeIndexArtifactReference `json:"code_index,omitempty" jsonschema:"Revision-bound indexed-commit artifact"`
+	Status              string                      `json:"status,omitempty" jsonschema:"Artifact completeness status"`
+	DiscoveryStatus     string                      `json:"discovery_status,omitempty"`
+	SearchIncomplete    bool                        `json:"search_incomplete,omitempty"`
+	RequestCapped       bool                        `json:"request_capped,omitempty"`
+	Recovery            *RecoveryPlan               `json:"recovery,omitempty"`
 }
 
 // JobArtifactFailure preserves one actionable item-level outcome without

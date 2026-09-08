@@ -460,6 +460,19 @@ type IndexRepositoriesInput struct {
 	Repositories []IndexRepositoryInput `json:"repositories" jsonschema:"One to 10 repositories to acquire and index"`
 }
 
+// CodeIndexArtifactReference carries only facts available in a completed job.
+// Full manifest metadata is owned by the exact resource at ResourceURI.
+type CodeIndexArtifactReference struct {
+	Kind           string        `json:"kind"`
+	ID             string        `json:"id"`
+	Repository     RepositoryRef `json:"repository"`
+	CommitSHA      string        `json:"commit_sha"`
+	ManifestSHA256 string        `json:"manifest_sha256"`
+	SnapshotToken  string        `json:"snapshot_token"`
+	ResourceURI    string        `json:"resource_uri"`
+	FollowUp       *JobFollowUp  `json:"follow_up"`
+}
+
 // CodeIndexArtifact is the typed, revision-bound handoff for one immutable
 // indexed commit. The resource URI is canonical; callers must consume it with
 // MCP resources/read rather than reconstructing a larger payload from fields.

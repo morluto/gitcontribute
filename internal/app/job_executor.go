@@ -25,7 +25,7 @@ var ErrJobQueueFull = errors.New("job executor queue is full")
 
 type jobStore interface {
 	StoppedJobIDs(context.Context, []string) (map[string]struct{}, error)
-	CreateJob(context.Context, string, string) (*corpus.Job, error)
+	CreateJobAs(context.Context, string, string, string) (*corpus.Job, error)
 	DeleteJobOwner(context.Context, string) error
 	GetJob(context.Context, string) (*corpus.Job, error)
 	HeartbeatJobOwner(context.Context, string, time.Time) error
@@ -152,6 +152,10 @@ func (e *JobExecutor) Submit(ctx context.Context, kind string, request any, fn J
 		e.mu.Unlock()
 		return "", errors.New("job executor is closed")
 	}
+	if err := e.rootCtx.Err(); err != nil {
+		e.mu.Unlock()
+		return "", err
+	}
 	if e.admittedCount >= e.cfg.maxAdmittedJobs {
 		e.mu.Unlock()
 		return "", ErrJobQueueFull
@@ -165,7 +169,7 @@ func (e *JobExecutor) Submit(ctx context.Context, kind string, request any, fn J
 		return "", fmt.Errorf("marshal job request: %w", err)
 	}
 
-	job, err := e.corpus.CreateJob(ctx, kind, string(reqJSON))
+	job, err := e.corpus.CreateJobAs(ctx, kind, string(reqJSON), e.ownerID)
 	if err != nil {
 		e.releaseAdmission()
 		return "", err
@@ -292,7 +296,8 @@ func (e *JobExecutor) heartbeat() {
 			}
 			if errors.Is(err, corpus.ErrJobOwnerNotFound) || errors.Is(err, context.Canceled) {
 				// The owner row was removed (abandoned) or the executor is shutting
-				// down; stop heartbeating.
+				// down; stop work as well as heartbeating.
+				e.cancel()
 				return
 			}
 			// Wait a full interval after a transient failure. A fixed-rate ticker

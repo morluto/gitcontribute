@@ -473,6 +473,7 @@ func (r *MCPReader) persistSourceBundle(ctx context.Context, in mcpcontract.Read
 	artifact.Completeness.RequestedItems = len(result.Items)
 	artifact.Completeness.Status = out.Status
 	artifact.Completeness.ContentsBounded = true
+	out.Completeness = artifact.Completeness
 	materialization, err := corpus.NewSnapshotMaterialization(
 		sourceBundleArtifactKind,
 		sourceBundleSnapshotScope{Repository: in.Repository.Owner + "/" + in.Repository.Repo, RequestedRef: in.Ref, Paths: sourceBundlePaths(in.Files)},

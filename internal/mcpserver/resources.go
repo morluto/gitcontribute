@@ -12,6 +12,10 @@ import (
 	"github.com/morluto/gitcontribute/internal/mcpcontract"
 )
 
+type validationGroupResourceReader interface {
+	ValidationGroupResource(context.Context, string) (mcpcontract.ValidationGroupResource, error)
+}
+
 type concernResourceReader interface {
 	Concern(context.Context, mcpcontract.ConcernInput) (mcpcontract.ConcernOutput, error)
 }
@@ -133,6 +137,8 @@ func (s *Server) readResourceValue(ctx context.Context, req resourceRequest) (an
 		return s.readDraftResource(ctx, req)
 	case "manifest":
 		return s.readManifestResource(ctx, req)
+	case "validation-group":
+		return s.readValidationGroupResource(ctx, req)
 	case "workspace":
 		return s.readWorkspaceResource(ctx, req)
 	case "pull-request-feedback":
@@ -411,4 +417,15 @@ func evidenceResourceInput(_ string, parts []string) (mcpcontract.EvidenceInput,
 	}
 	in.Limit = 100
 	return in, true
+}
+
+func (s *Server) readValidationGroupResource(ctx context.Context, req resourceRequest) (mcpcontract.ValidationGroupResource, error) {
+	if len(req.parts) != 1 || strings.TrimSpace(req.parts[0]) == "" {
+		return mcpcontract.ValidationGroupResource{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	reader, ok := s.reader.(validationGroupResourceReader)
+	if !ok {
+		return mcpcontract.ValidationGroupResource{}, mcp.ResourceNotFoundError(req.uri)
+	}
+	return reader.ValidationGroupResource(ctx, req.parts[0])
 }
