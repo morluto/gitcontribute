@@ -51,10 +51,10 @@ make check
 make verify
 ```
 
-`make verify` runs uncached tests, changed-code linting, module-tidiness checks,
+`make verify` runs uncached tests, full-repository linting, module-tidiness checks,
 generated-output verification, and documentation validation. It is the complete
 local check, while CI adds platform, coverage, security, and focused race jobs.
-`make lint-full` is available for auditing existing repository-wide lint debt.
+`make lint-full` runs the full lint check on its own.
 Use `make test-uncached` when only a fresh test run is needed.
 
 Use focused race tests for changes involving SQLite transactions, goroutines,

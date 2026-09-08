@@ -247,3 +247,46 @@ func assertResearchHealth(t *testing.T, section research.HealthSection) {
 		t.Fatalf("health = %+v", section)
 	}
 }
+
+func TestThreadResearchBriefInboundReferencesUseUnquotedProse(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, relation string
+	}{
+		{"bare", "Fixes #1", "claims_to_close"},
+		{"colon", "Fixes: #1", "claims_to_close"},
+		{"URL", "Fixes https://github.com/owner/repo/issues/1", "claims_to_close"},
+		{"mention", "See #1", "mentions"},
+		{"blockquote", "> Fixes #1", ""},
+		{"inline code", "Example: `Fixes #1`", ""},
+		{"fenced code", "```\nFixes #1\n```", ""},
+		{"different repository", "Fixes other/repo#1", ""},
+		{"different kind", "Fixes https://github.com/owner/repo/pull/1", ""},
+		{"quoted closing with real mention", "> Fixes #1\n\nSee #1", "mentions"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture := newResearchFixture(t)
+			_, err := fixture.svc.corpus.UpsertThread(fixture.ctx, corpus.Thread{
+				RepositoryID: fixture.repoID, Kind: domain.PullRequestKind, Number: 9,
+				State: "open", Title: "Implementation", Body: tc.body, SourceUpdatedAt: fixture.now,
+			}, `{}`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			brief, err := fixture.svc.ThreadResearchBrief(fixture.ctx, research.ThreadRef{
+				Repo: domain.MustRepoRef("owner", "repo"), Number: 1,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got string
+			for _, pr := range brief.Sections.PullRequests.PullRequests {
+				if pr.Number == 9 {
+					got = pr.Relation
+				}
+			}
+			if got != tc.relation {
+				t.Fatalf("relation = %q, want %q", got, tc.relation)
+			}
+		})
+	}
+}

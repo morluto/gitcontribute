@@ -267,7 +267,7 @@ func (r ThreadStateReason) String() string {
 	}
 }
 
-// MergeFilter is the three-way merged, unmerged, or unrestricted predicate.
+// MergeFilter selects merged, unmerged, unknown, or unrestricted outcomes.
 // Its zero value is unrestricted.
 type MergeFilter struct {
 	value uint8

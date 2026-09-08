@@ -51,7 +51,7 @@ func (r *MCPReader) checkRelatedWork(ctx context.Context, subject relatedWorkSub
 	repo := subject.investigation.Repo
 	target := subject.kind.String()
 	id := subject.id
-	indexed, err := r.relatedWorkRepositoryIndexed(ctx, repo)
+	indexed, complete, err := r.relatedWorkRepositoryCoverage(ctx, repo)
 	if err != nil {
 		return mcpcontract.CheckOutput{}, err
 	}
@@ -79,11 +79,17 @@ func (r *MCPReader) checkRelatedWork(ctx context.Context, subject relatedWorkSub
 	if errors.Is(err, errRepositoryNotFound) {
 		return unavailableRelatedWorkOutput(target, id, repo, limit, "repository_not_indexed", message, syncRepositoryContextCall(repo.Owner(), repo.Repo())), nil
 	}
+	if err == nil && !complete {
+		result.Status, result.Coverage = "partial", "unknown"
+		result.Recovery = recoveryPlan("thread_coverage_incomplete", "Stored thread coverage is missing or incomplete. Synchronize repository threads, poll the job, and repeat this check before inferring absence.", mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{
+			Selection: "repositories", Repositories: []mcpcontract.RepositoryRef{{Owner: repo.Owner(), Repo: repo.Repo()}}, Kind: "both", State: "all",
+		}))
+	}
 	return result, err
 }
 
 func duplicateCheckResultToMCP(subject relatedWorkSubject, result *contracts.DuplicateCheckResult) mcpcontract.CheckOutput {
-	truncated := result.Total >= result.Limit
+	truncated := result.Truncated
 	var recovery *mcpcontract.RecoveryPlan
 	if truncated {
 		recovery = relatedWorkLimitRecovery(subject, result.Limit, duplicateRelatedWork)
@@ -108,7 +114,7 @@ func duplicateCheckResultToMCP(subject relatedWorkSubject, result *contracts.Dup
 func collisionCheckResultToMCP(subject relatedWorkSubject, result *contracts.CollisionCheckResult) mcpcontract.CheckOutput {
 	findings := make([]evidence.Evidence, len(result.Findings))
 	copy(findings, result.Findings)
-	truncated := result.Total >= result.Limit
+	truncated := result.Truncated
 	var recovery *mcpcontract.RecoveryPlan
 	if truncated {
 		recovery = relatedWorkLimitRecovery(subject, result.Limit, competingPullRequests)
@@ -131,7 +137,10 @@ func collisionCheckResultToMCP(subject relatedWorkSubject, result *contracts.Col
 }
 
 func relatedWorkLimitRecovery(subject relatedWorkSubject, limit int, check relatedWorkCheckKind) *mcpcontract.RecoveryPlan {
-	nextLimit := min(100, max(limit*2, limit+1))
+	if limit >= maxResultLimit {
+		return recoveryPlan("related_work_truncated", "The related-work check reached its maximum bound. Use targeted thread search and inspect exact candidates; this result does not establish absence.")
+	}
+	nextLimit := min(maxResultLimit, max(limit*2, limit+1))
 	message := "The related-work result reached its bound. Rerun the same exact check with a larger limit before treating the findings as exhaustive."
 	input := mcpcontract.CheckDuplicatesInput{Target: subject.kind.String(), ID: subject.id, Limit: nextLimit}
 	if check == competingPullRequests {
@@ -140,16 +149,20 @@ func relatedWorkLimitRecovery(subject relatedWorkSubject, limit int, check relat
 	return recoveryPlan("related_work_truncated", message, mcpcontract.RecoveryAction(input))
 }
 
-func (r *MCPReader) relatedWorkRepositoryIndexed(ctx context.Context, repo domain.RepoRef) (bool, error) {
+func (r *MCPReader) relatedWorkRepositoryCoverage(ctx context.Context, repo domain.RepoRef) (indexed, complete bool, err error) {
 	c, err := r.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	stored, err := c.GetRepository(ctx, repo.Owner(), repo.Repo())
-	if err != nil {
-		return false, err
+	if err != nil || stored == nil {
+		return false, false, err
 	}
-	return stored != nil, nil
+	coverage, err := c.GetCoverage(ctx, stored.ID, nil, "threads")
+	if err != nil {
+		return true, false, err
+	}
+	return true, coverage != nil && coverage.Complete, nil
 }
 
 func unavailableRelatedWorkOutput(target, id string, repo domain.RepoRef, limit int, reason, message string, action mcpcontract.ToolCall) mcpcontract.CheckOutput {

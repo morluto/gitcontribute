@@ -55,6 +55,7 @@ type DuplicateCheckResult struct {
 	SourceRevision string              `json:"source_revision"`
 	Limit          int                 `json:"limit"`
 	Total          int                 `json:"total"`
+	Truncated      bool                `json:"truncated"`
 }
 
 type CollisionCheckResult struct {
@@ -66,6 +67,7 @@ type CollisionCheckResult struct {
 	SourceRevision string              `json:"source_revision"`
 	Limit          int                 `json:"limit"`
 	Total          int                 `json:"total"`
+	Truncated      bool                `json:"truncated"`
 }
 
 type PrepareReviewReportInput struct {

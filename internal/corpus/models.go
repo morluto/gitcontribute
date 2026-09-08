@@ -71,6 +71,7 @@ type Thread struct {
 	UpdatedAt           time.Time
 	// Rank and match fields are query-specific and populated only by search results.
 	Rank           float64
+	MatchTitle     bool
 	MatchSource    string
 	MatchExcerpt   string
 	MatchUpdatedAt time.Time

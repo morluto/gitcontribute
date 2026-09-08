@@ -490,9 +490,11 @@ func (c *Corpus) prepareCodeSearch(ctx context.Context, query string, opts CodeS
 	return opts, ftsQuery, repo, cursor, err
 }
 
+const codeSearchRankSQL = "bm25(code_documents_fts, 5.0, 1.0)"
+
 func codeSearchStatement(ftsQuery string, opts CodeSearchOptions, cursor *searchCursor) (string, []any) {
 	statement := `
-		SELECT bm25(code_documents_fts, 5.0, 1.0), d.id, s.repo_owner, s.repo_name, s.commit_sha, d.path,
+		SELECT ` + codeSearchRankSQL + `, d.id, s.repo_owner, s.repo_name, s.commit_sha, d.path,
 		       snippet(code_documents_fts, -1, '', '', ' … ', 48), d.bytes, d.language, s.id, s.created_at
 		FROM code_documents_fts
 		JOIN code_documents d ON d.id = code_documents_fts.rowid
@@ -507,10 +509,10 @@ func codeSearchStatement(ftsQuery string, opts CodeSearchOptions, cursor *search
 		args = append(args, opts.Ref.Owner(), opts.Ref.Repo())
 	}
 	if cursor != nil {
-		statement += ` AND (bm25(code_documents_fts, 5.0, 1.0) > ? OR (bm25(code_documents_fts, 5.0, 1.0) = ? AND d.id > ?))`
+		statement += ` AND (` + codeSearchRankSQL + ` > ? OR (` + codeSearchRankSQL + ` = ? AND d.id > ?))`
 		args = append(args, cursor.Rank, cursor.Rank, cursor.ID)
 	}
-	statement += ` ORDER BY bm25(code_documents_fts, 5.0, 1.0), d.id LIMIT ?`
+	statement += ` ORDER BY ` + codeSearchRankSQL + `, d.id LIMIT ?`
 	return statement, append(args, opts.Page.Limit()+1)
 }
 
@@ -659,7 +661,7 @@ func (c *Corpus) FindCodeSearchEvidence(ctx context.Context, docID int64, query 
 	}
 	var evidence CodeSearchEvidence
 	err := c.db.QueryRowContext(ctx, `
-		SELECT bm25(code_documents_fts, 5.0, 1.0),
+		SELECT `+codeSearchRankSQL+`,
 		       snippet(code_documents_fts, -1, '', '', ' … ', 48)
 		FROM code_documents_fts
 		WHERE code_documents_fts MATCH ? AND rowid = ?

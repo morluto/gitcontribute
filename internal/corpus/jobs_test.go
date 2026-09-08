@@ -682,3 +682,26 @@ func TestZeroRowTransitionPropagatesGetJobError(t *testing.T) {
 		t.Fatalf("expected GetJob error to be propagated, got: %v", err)
 	}
 }
+
+func TestQueuedJobOwnerCannotBeReplaced(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	for _, owner := range []string{"first", "second"} {
+		if err := c.RegisterJobOwner(ctx, owner, 1, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	job, err := c.CreateJobAs(ctx, "owned", "{}", "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, other := range []string{"second", ""} {
+		if err := c.StartJobAs(ctx, job.ID, other); err == nil {
+			t.Fatalf("owner %q stole queued work", other)
+		}
+	}
+	if err := c.StartJobAs(ctx, job.ID, "first"); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -75,6 +76,10 @@ func validationJobArtifact(job *contracts.JobResult, kind string) ([]mcpcontract
 	}
 	if json.Unmarshal([]byte(job.Result), &result) != nil || result.ID == "" {
 		return nil, nil
+	}
+	if kind == "validation_group" {
+		uri := "gitcontribute://validation-group/" + url.PathEscape(result.ID)
+		return []mcpcontract.JobArtifactReference{{Kind: kind, ID: result.ID, URI: uri}}, resourceFollowUp(uri, "Read execution outcomes and exact attempt run IDs before attaching test reports.")
 	}
 	return []mcpcontract.JobArtifactReference{{Kind: kind, ID: result.ID}}, nil
 }
@@ -495,7 +500,7 @@ func indexRepositoriesJobArtifact(job *contracts.JobResult) ([]mcpcontract.JobAr
 			continue
 		}
 		completed++
-		artifact := mcpcontract.CodeIndexArtifact{Kind: "code_index", ID: "code-index:" + item.ArtifactDigest,
+		artifact := mcpcontract.CodeIndexArtifactReference{Kind: "code_index", ID: "code-index:" + item.ArtifactDigest,
 			Repository: mcpcontract.RepositoryRef{Owner: owner, Repo: repo}, CommitSHA: item.CommitSHA,
 			SnapshotToken:  item.SnapshotToken,
 			ManifestSHA256: item.ManifestDigest, ResourceURI: "gitcontribute://artifact/code-index/" + item.ArtifactDigest}

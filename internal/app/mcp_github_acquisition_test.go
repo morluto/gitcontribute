@@ -163,6 +163,10 @@ func TestMCPReaderReadSourceFilesStoresCommitAndBlobProvenanceAndReadsLocally(t 
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantCompleteness := mcpcontract.SourceBundleCompleteness{Status: "partial", RequestedItems: 2, CompleteItems: 1, FailedItems: 1, ContentsBounded: true}
+	if out.Completeness != wantCompleteness || out.Completeness != artifact.Completeness {
+		t.Fatalf("source response completeness = %+v, artifact = %+v", out.Completeness, artifact.Completeness)
+	}
 	if artifact.SchemaVersion != sourceBundleArtifactKind || artifact.CommitSHA != "commit-9" || artifact.Items[0].Value == nil || artifact.Items[0].Value.Content != "second\n" || artifact.Items[0].Value.ContentSHA256 == "" || artifact.Items[1].Status != "not_found" {
 		t.Fatalf("source artifact = %+v", artifact)
 	}

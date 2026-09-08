@@ -368,6 +368,7 @@ func TestExplainMatchReturnsFactualReasons(t *testing.T) {
 
 	want := []string{
 		"stored FTS5 index matched the query in thread",
+		"thread relevance places all-term title matches first",
 		"source updated",
 		"coverage includes metadata",
 	}

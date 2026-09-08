@@ -21,6 +21,12 @@ var ErrJobOwnerNotFound = errors.New("job owner not found")
 
 // CreateJob creates a new job in the queued state with an opaque stable ID.
 func (c *Corpus) CreateJob(ctx context.Context, kind, request string) (*Job, error) {
+	return c.CreateJobAs(ctx, kind, request, "")
+}
+
+// CreateJobAs atomically persists queued work with its executor owner so a
+// restart can distinguish live admission from an abandoned queue.
+func (c *Corpus) CreateJobAs(ctx context.Context, kind, request, ownerID string) (*Job, error) {
 	if strings.TrimSpace(kind) == "" {
 		return nil, errors.New("job kind is required")
 	}
@@ -30,9 +36,9 @@ func (c *Corpus) CreateJob(ctx context.Context, kind, request string) (*Job, err
 	now := time.Now().UTC()
 	id := uuid.NewString()
 	if _, err := c.db.ExecContext(ctx, `
-		INSERT INTO jobs (id, kind, status, request, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, id, kind, JobStatusQueued, request, encodeTime(now), encodeTime(now)); err != nil {
+		INSERT INTO jobs (id, kind, status, request, created_at, updated_at, owner_id)
+		VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''))
+	`, id, kind, JobStatusQueued, request, encodeTime(now), encodeTime(now), ownerID); err != nil {
 		return nil, fmt.Errorf("create job: %w", err)
 	}
 	return c.GetJob(ctx, id)
@@ -51,8 +57,8 @@ func (c *Corpus) GetJob(ctx context.Context, id string) (*Job, error) {
 	return job, nil
 }
 
-// StoppedJobIDs returns job IDs with a persisted cancellation request or no
-// durable row. Workers must stop in either case.
+// StoppedJobIDs returns job IDs that are terminal, cancelled, or missing.
+// Workers must stop when another executor has reconciled their durable state.
 func (c *Corpus) StoppedJobIDs(ctx context.Context, ids []string) (_ map[string]struct{}, err error) {
 	stopped := make(map[string]struct{})
 	if len(ids) == 0 {
@@ -64,7 +70,7 @@ func (c *Corpus) StoppedJobIDs(ctx context.Context, ids []string) (_ map[string]
 		args[i] = ids[i]
 	}
 	rows, err := c.db.QueryContext(ctx, `
-		SELECT id, cancelled_at
+		SELECT id, cancelled_at, status
 		FROM jobs
 		WHERE id IN (`+placeholders+`)
 	`, args...)
@@ -80,11 +86,12 @@ func (c *Corpus) StoppedJobIDs(ctx context.Context, ids []string) (_ map[string]
 	for rows.Next() {
 		var id string
 		var cancelledAt sql.NullInt64
-		if err := rows.Scan(&id, &cancelledAt); err != nil {
+		var status JobStatus
+		if err := rows.Scan(&id, &cancelledAt, &status); err != nil {
 			return nil, err
 		}
 		found[id] = struct{}{}
-		if cancelledAt.Valid {
+		if cancelledAt.Valid || status.Terminal() {
 			stopped[id] = struct{}{}
 		}
 	}
@@ -201,7 +208,8 @@ func (c *Corpus) StartJobAs(ctx context.Context, id, ownerID string) error {
 		UPDATE jobs
 		SET status = ?, started_at = ?, updated_at = ?, owner_id = NULLIF(?, '')
 		WHERE id = ? AND status = ? AND COALESCE(cancelled_at, 0) = 0
-	`, JobStatusRunning, encodeTime(now), encodeTime(now), ownerID, id, JobStatusQueued)
+		  AND (owner_id IS NULL OR owner_id = ?)
+	`, JobStatusRunning, encodeTime(now), encodeTime(now), ownerID, id, JobStatusQueued, ownerID)
 	if err != nil {
 		return fmt.Errorf("start job: %w", err)
 	}
@@ -392,7 +400,7 @@ func (c *Corpus) ListJobEvents(ctx context.Context, jobID string) ([]JobEvent, e
 	return out, rows.Err()
 }
 
-// ReconcileInterruptedJobs marks running jobs as failed or cancelled when
+// ReconcileInterruptedJobs marks queued and running jobs as failed or cancelled when
 // their owning process has not heartbeated within leaseTimeout. Live owners
 // are left untouched, and stale owner records are removed.
 //
@@ -424,8 +432,8 @@ func (c *Corpus) ReconcileInterruptedJobs(ctx context.Context, leaseTimeout time
 		SELECT j.id, j.cancelled_at, j.owner_id, COALESCE(o.heartbeat_at, 0)
 		FROM jobs j
 		LEFT JOIN job_owners o ON j.owner_id = o.owner_id
-		WHERE j.status = ?
-	`, JobStatusRunning)
+		WHERE j.status IN (?, ?)
+	`, JobStatusQueued, JobStatusRunning)
 	if err != nil {
 		return fmt.Errorf("select interrupted jobs: %w", err)
 	}
@@ -467,8 +475,8 @@ func (c *Corpus) ReconcileInterruptedJobs(ctx context.Context, leaseTimeout time
 		if _, err := conn.ExecContext(ctx, `
 			UPDATE jobs
 			SET status = ?, completed_at = ?, error = ?, updated_at = ?, owner_id = NULL
-			WHERE id = ? AND status = ?
-		`, status, nowEncoded, msg, nowEncoded, j.id, JobStatusRunning); err != nil {
+			WHERE id = ? AND status IN (?, ?)
+		`, status, nowEncoded, msg, nowEncoded, j.id, JobStatusQueued, JobStatusRunning); err != nil {
 			return fmt.Errorf("reconcile interrupted job %s: %w", j.id, err)
 		}
 		if _, err := conn.ExecContext(ctx, `

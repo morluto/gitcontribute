@@ -31,10 +31,15 @@ var _ tracking.Repository = (*Corpus)(nil)
 
 // RecordTriageEvent stores a triage event with optional foreign-key-safe links.
 func (c *Corpus) RecordTriageEvent(ctx context.Context, e *tracking.TriageEvent) error {
-	if err := resolveTriageLinks(ctx, c, e); err != nil {
+	resolved := *e
+	if err := resolveTriageLinks(ctx, c, &resolved); err != nil {
 		return err
 	}
-	return c.recordTriageEventTx(ctx, c.db, e)
+	if err := c.recordTriageEventTx(ctx, c.db, &resolved); err != nil {
+		return err
+	}
+	*e = resolved
+	return nil
 }
 
 func (c *Corpus) recordTriageEventTx(ctx context.Context, db dbExecer, e *tracking.TriageEvent) error {
@@ -124,23 +129,51 @@ func (c *Corpus) importTriageEventTx(ctx context.Context, tx *sql.Tx, e *trackin
 func resolveTriageLinks(ctx context.Context, c *Corpus, e *tracking.TriageEvent) error {
 	// Verify any carried foreign keys still exist in this corpus and clear stale
 	// ones so imports remain safe across corpora.
-	if e.RepositoryID != nil && !c.repoExists(ctx, *e.RepositoryID) {
-		e.RepositoryID = nil
+	if e.RepositoryID != nil {
+		exists, err := c.repoExists(ctx, *e.RepositoryID)
+		if err != nil {
+			return fmt.Errorf("verify triage repository link: %w", err)
+		}
+		if !exists {
+			e.RepositoryID = nil
+		}
 	}
-	if e.ThreadID != nil && !c.threadExists(ctx, *e.ThreadID) {
-		e.ThreadID = nil
+	if e.ThreadID != nil {
+		exists, err := c.threadExists(ctx, *e.ThreadID)
+		if err != nil {
+			return fmt.Errorf("verify triage thread link: %w", err)
+		}
+		if !exists {
+			e.ThreadID = nil
+		}
 	}
-	if e.InvestigationID != "" && !c.investigationExists(ctx, e.InvestigationID) {
-		e.InvestigationID = ""
+	if e.InvestigationID != "" {
+		exists, err := c.investigationExists(ctx, e.InvestigationID)
+		if err != nil {
+			return fmt.Errorf("verify triage investigation link: %w", err)
+		}
+		if !exists {
+			e.InvestigationID = ""
+		}
 	}
-	if e.OpportunityID != "" && !c.opportunityExists(ctx, e.OpportunityID) {
-		e.OpportunityID = ""
+	if e.OpportunityID != "" {
+		exists, err := c.opportunityExists(ctx, e.OpportunityID)
+		if err != nil {
+			return fmt.Errorf("verify triage opportunity link: %w", err)
+		}
+		if !exists {
+			e.OpportunityID = ""
+		}
 	}
 
 	if e.RepositoryID == nil && e.TargetKind == tracking.TargetRepository {
-		ref, err := parseRepoRef(e.TargetRef)
+		ref, err := domain.ParseRepoRef(e.TargetRef)
 		if err == nil {
-			if repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo()); err == nil && repo != nil {
+			repo, err := c.GetRepository(ctx, ref.Owner(), ref.Repo())
+			if err != nil {
+				return fmt.Errorf("resolve repository link: %w", err)
+			}
+			if repo != nil {
 				e.RepositoryID = &repo.ID
 			}
 		}
@@ -162,7 +195,11 @@ func resolveTriageLinks(ctx context.Context, c *Corpus, e *tracking.TriageEvent)
 	if e.ThreadID == nil && (e.TargetKind == tracking.TargetIssue || e.TargetKind == tracking.TargetPullRequest || e.TargetKind == tracking.TargetThread) {
 		repoRef, number, ok := parseThreadRef(e.TargetRef)
 		if ok {
-			if repo, err := c.GetRepository(ctx, repoRef.Owner(), repoRef.Repo()); err == nil && repo != nil {
+			repo, err := c.GetRepository(ctx, repoRef.Owner(), repoRef.Repo())
+			if err != nil {
+				return fmt.Errorf("resolve thread repository link: %w", err)
+			}
+			if repo != nil {
 				e.RepositoryID = &repo.ID
 				var kind domain.ThreadKind
 				switch e.TargetKind {
@@ -171,14 +208,17 @@ func resolveTriageLinks(ctx context.Context, c *Corpus, e *tracking.TriageEvent)
 				case tracking.TargetPullRequest:
 					kind = domain.PullRequestKind
 				}
+				var thread *Thread
 				if kind != "" {
-					if thread, err := c.GetThread(ctx, repo.ID, kind, number); err == nil && thread != nil {
-						e.ThreadID = &thread.ID
-					}
+					thread, err = c.GetThread(ctx, repo.ID, kind, number)
 				} else {
-					if thread, err := c.GetThreadByNumber(ctx, repo.ID, number); err == nil && thread != nil {
-						e.ThreadID = &thread.ID
-					}
+					thread, err = c.GetThreadByNumber(ctx, repo.ID, number)
+				}
+				if err != nil {
+					return fmt.Errorf("resolve thread link: %w", err)
+				}
+				if thread != nil {
+					e.ThreadID = &thread.ID
 				}
 			}
 		}
@@ -186,16 +226,12 @@ func resolveTriageLinks(ctx context.Context, c *Corpus, e *tracking.TriageEvent)
 	return nil
 }
 
-func parseRepoRef(ref string) (domain.RepoRef, error) {
-	return domain.ParseRepoRef(ref)
-}
-
 func parseThreadRef(ref string) (domain.RepoRef, int, bool) {
 	repoRef, numText, ok := strings.Cut(ref, "#")
 	if !ok {
 		return domain.RepoRef{}, 0, false
 	}
-	repo, err := parseRepoRef(repoRef)
+	repo, err := domain.ParseRepoRef(repoRef)
 	if err != nil {
 		return domain.RepoRef{}, 0, false
 	}
@@ -206,28 +242,40 @@ func parseThreadRef(ref string) (domain.RepoRef, int, bool) {
 	return repo, number, true
 }
 
-func (c *Corpus) repoExists(ctx context.Context, id int64) bool {
+func (c *Corpus) repoExists(ctx context.Context, id int64) (bool, error) {
 	var one int
 	err := c.db.QueryRowContext(ctx, `SELECT 1 FROM repositories WHERE id=?`, id).Scan(&one)
-	return err == nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
-func (c *Corpus) threadExists(ctx context.Context, id int64) bool {
+func (c *Corpus) threadExists(ctx context.Context, id int64) (bool, error) {
 	var one int
 	err := c.db.QueryRowContext(ctx, `SELECT 1 FROM threads WHERE id=?`, id).Scan(&one)
-	return err == nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
-func (c *Corpus) investigationExists(ctx context.Context, id string) bool {
+func (c *Corpus) investigationExists(ctx context.Context, id string) (bool, error) {
 	var one int
 	err := c.db.QueryRowContext(ctx, `SELECT 1 FROM investigations WHERE id=?`, id).Scan(&one)
-	return err == nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
-func (c *Corpus) opportunityExists(ctx context.Context, id string) bool {
+func (c *Corpus) opportunityExists(ctx context.Context, id string) (bool, error) {
 	var one int
 	err := c.db.QueryRowContext(ctx, `SELECT 1 FROM opportunities WHERE id=?`, id).Scan(&one)
-	return err == nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func nullInt64(v *int64) sql.NullInt64 {

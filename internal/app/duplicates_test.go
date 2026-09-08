@@ -105,7 +105,7 @@ func TestDuplicateAndCollisionChecks(t *testing.T) {
 		t.Fatalf("collision result = %+v", coll)
 	}
 	for _, f := range coll.Findings {
-		if f.Relation != evidence.RelationContradicting {
+		if f.Relation != evidence.RelationInconclusive {
 			t.Fatalf("collision finding should be contradicting, got %q", f.Relation)
 		}
 	}

@@ -91,12 +91,12 @@ func (s *Service) loadRelatedWorkSubject(ctx context.Context, kind relatedWorkSu
 }
 
 func (s *Service) duplicatesForRelatedWorkSubject(ctx context.Context, subject relatedWorkSubject, limit int) (*contracts.DuplicateCheckResult, error) {
-	neighbors, revision, effectiveLimit, err := s.findSimilarThreads(ctx, subject.investigation.Repo, subject.query, allSimilarThreads, limit)
+	matches, err := s.findSimilarThreads(ctx, subject.investigation.Repo, subject.query, allSimilarThreads, limit)
 	if err != nil {
 		return nil, err
 	}
-	findings := make([]evidence.Evidence, 0, len(neighbors))
-	for _, n := range neighbors {
+	findings := make([]evidence.Evidence, 0, len(matches.Neighbors))
+	for _, n := range matches.Neighbors {
 		findings = append(findings, evidenceFromNeighbor(n, subject.investigation.Repo, subject.investigation.ID, subject.hypothesisID, subject.opportunityID, evidence.RelationInconclusive))
 	}
 	hypothesisID := ""
@@ -109,8 +109,9 @@ func (s *Service) duplicatesForRelatedWorkSubject(ctx context.Context, subject r
 		Repo:           subject.investigation.Repo,
 		Query:          subject.query.Title,
 		Findings:       findings,
-		SourceRevision: revision,
-		Limit:          effectiveLimit,
+		SourceRevision: matches.SourceRevision,
+		Limit:          matches.Limit,
+		Truncated:      matches.Truncated,
 		Total:          len(findings),
 	}, nil
 }
@@ -156,13 +157,13 @@ func (s *Service) CheckOpportunityCollisions(ctx context.Context, opportunityID 
 }
 
 func (s *Service) collisionsForRelatedWorkSubject(ctx context.Context, subject relatedWorkSubject, limit int) (*contracts.CollisionCheckResult, error) {
-	neighbors, revision, effectiveLimit, err := s.findSimilarThreads(ctx, subject.investigation.Repo, subject.query, openPullRequestsOnly, limit)
+	matches, err := s.findSimilarThreads(ctx, subject.investigation.Repo, subject.query, openPullRequestsOnly, limit)
 	if err != nil {
 		return nil, err
 	}
-	findings := make([]evidence.Evidence, 0, len(neighbors))
-	for _, n := range neighbors {
-		findings = append(findings, evidenceFromNeighbor(n, subject.investigation.Repo, subject.investigation.ID, subject.hypothesisID, subject.opportunityID, evidence.RelationContradicting))
+	findings := make([]evidence.Evidence, 0, len(matches.Neighbors))
+	for _, n := range matches.Neighbors {
+		findings = append(findings, evidenceFromNeighbor(n, subject.investigation.Repo, subject.investigation.ID, subject.hypothesisID, subject.opportunityID, evidence.RelationInconclusive))
 	}
 	return &contracts.CollisionCheckResult{
 		HypothesisID:   subject.hypothesisID,
@@ -170,8 +171,9 @@ func (s *Service) collisionsForRelatedWorkSubject(ctx context.Context, subject r
 		Repo:           subject.investigation.Repo,
 		Query:          subject.query.Title,
 		Findings:       findings,
-		SourceRevision: revision,
-		Limit:          effectiveLimit,
+		SourceRevision: matches.SourceRevision,
+		Limit:          matches.Limit,
+		Truncated:      matches.Truncated,
 		Total:          len(findings),
 	}, nil
 }
@@ -190,31 +192,39 @@ func (s similarThreadScope) filters() (corpus.ThreadKindFilter, corpus.ThreadSta
 	return corpus.AnyThreadKind(), corpus.AnyThreadState()
 }
 
-func (s *Service) findSimilarThreads(ctx context.Context, repo domain.RepoRef, query clustering.Candidate, scope similarThreadScope, limit int) ([]clustering.Neighbor, string, int, error) {
+type similarThreadsResult struct {
+	Neighbors      []clustering.Neighbor
+	SourceRevision string
+	Limit          int
+	Truncated      bool
+}
+
+func (s *Service) findSimilarThreads(ctx context.Context, repo domain.RepoRef, query clustering.Candidate, scope similarThreadScope, limit int) (similarThreadsResult, error) {
 	if !repo.IsValid() {
-		return nil, "", 0, errors.New("repository is required")
+		return similarThreadsResult{}, errors.New("repository is required")
 	}
 	limit, err := normalizeSimilarityLimit(limit)
 	if err != nil {
-		return nil, "", 0, err
+		return similarThreadsResult{}, err
 	}
 	c, err := s.openReadOnlyCorpus(ctx)
 	if err != nil {
-		return nil, "", 0, err
+		return similarThreadsResult{}, err
 	}
 	repository, err := c.GetRepository(ctx, repo.Owner(), repo.Repo())
 	if err != nil {
-		return nil, "", 0, err
+		return similarThreadsResult{}, err
 	}
 	if repository == nil {
 		// No local corpus data for this repository; return an empty result without
 		// performing network access.
-		return nil, "", limit, nil
+		return similarThreadsResult{Limit: limit}, nil
 	}
 	kind, state := scope.filters()
-	threads, err := c.ListThreadsFiltered(ctx, repository.ID, kind, state, similarityCandidateLimit(limit))
+	candidateLimit := similarityCandidateLimit(limit)
+	threads, err := c.ListThreadsFiltered(ctx, repository.ID, kind, state, candidateLimit)
 	if err != nil {
-		return nil, "", 0, err
+		return similarThreadsResult{}, err
 	}
 	candidates := make([]clustering.Candidate, 0, len(threads))
 	for _, t := range threads {
@@ -223,9 +233,18 @@ func (s *Service) findSimilarThreads(ctx context.Context, repo domain.RepoRef, q
 	all := append([]clustering.Candidate{query}, candidates...)
 	neighbors, err := clustering.Neighbors(ctx, query, candidates, limit)
 	if err != nil {
-		return nil, "", 0, err
+		return similarThreadsResult{}, err
 	}
-	return neighbors, clustering.SourceRevision(all), limit, nil
+	// A bounded population is unknown even if none of the scored candidates
+	// has signal. Keep this separate from the displayed finding count.
+	positive := neighbors[:0]
+	for _, n := range neighbors {
+		if n.Score > 0 {
+			positive = append(positive, n)
+		}
+	}
+	truncated := len(threads) >= candidateLimit || len(positive) >= limit
+	return similarThreadsResult{Neighbors: positive, SourceRevision: clustering.SourceRevision(all), Limit: limit, Truncated: truncated}, nil
 }
 
 func normalizeSimilarityLimit(limit int) (int, error) {

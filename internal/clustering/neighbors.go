@@ -51,7 +51,7 @@ func Neighbors(ctx context.Context, query Candidate, candidates []Candidate, lim
 				return nil, err
 			}
 		}
-		if sameMemberRef(c.Ref(), query.Ref()) {
+		if c.Ref().Equal(query.Ref()) {
 			continue
 		}
 		score := rule.Compare(preparedQuery, rule.Prepare(duplicateThread(c)))

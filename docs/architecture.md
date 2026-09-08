@@ -288,8 +288,10 @@ The agent may inspect the stored request and explicitly resubmit an idempotent
 operation after reviewing the failure.
 
 Each `JobExecutor` registers an opaque owner ID and periodically updates its
-lease. A new executor reconciles only running jobs whose owner is absent or
-stale. It must never fail jobs owned by another live process.
+lease. Queued work is persisted with its owner atomically at admission. A new
+executor reconciles queued and running jobs whose owner is absent or stale; it
+must never fail jobs owned by another live process. Reconciled terminal state
+also stops the original worker, and losing the owner stops further admission.
 
 ```text
 queued -> running -> succeeded
@@ -297,6 +299,7 @@ queued -> running -> succeeded
                   -> cancelled
 ```
 
+Queued work can also fail on restart or be cancelled before it starts.
 Terminal states do not transition again. Cancellation is first persisted, then
 delivered to an in-process worker directly or observed by one executor-wide
 poll that checks all active job IDs together. Executors cap both running and
@@ -552,9 +555,20 @@ authority; duplicated query columns are checked against that manifest while
 decoding and discarded rather than exposed as a second source of truth.
 
 Title, labels, body, and hydrated evidence are materialized into one search
-document per thread and ranked by one BM25 invocation. The facet index only
+document per thread. Relevance puts threads whose titles match every query
+term first, including in `match_mode=any`; one BM25 invocation orders matches
+within each group. This prevents unrelated hydrated discussion from pushing a
+full title match below an incidental body or facet mention through document
+length normalization. The title group uses the same FTS tokenizer and literal
+query terms as retrieval, without a second string matcher. The facet index only
 identifies the matching evidence source and excerpt. A thread page and its exact
-count share one read transaction. Counts use a lean FTS match set rather than
+count share one read transaction. Search selects ranked, filtered thread IDs
+and the page boundary before generating hydrated excerpts. A materialized page
+limits excerpt work to the requested page plus its next-page sentinel. Exact
+evidence lookup uses the same attribution SQL over one selected thread, without
+constructing evidence for other matching threads. Each search index defines its
+BM25 weights once for selection, ordering, pagination, and explanations.
+Counts use a lean FTS match set rather than
 recomputing ranking and excerpts, and the first-page no-overflow case derives
 its total directly from the returned rows.
 
@@ -571,7 +585,9 @@ partial search document. Transport pages are collapsed into one semantic facet
 document, and matches report the source facet plus a bounded excerpt. Untrusted
 discussion remains searchable data and cannot grant capabilities. Cursors
 encode their query and scope so they cannot be reused for a different search.
-Ordering always has a deterministic tie-breaker.
+Thread cursors include the title group and encode filter values structurally,
+so punctuation within a label cannot alias a different label set. Ordering
+always has a deterministic tie-breaker.
 Hydrated search text is materialized once per complete facet replacement and
 bounded to 262,144 characters per thread. Results expose
 `match_truncated=true` when that bound omitted text; complete API coverage must
@@ -579,7 +595,8 @@ not be mistaken for complete search-text coverage.
 
 FTS rank is retrieval evidence and must not be relabeled as a separately
 hand-written score. Match explanations report the actual lower-is-better BM25
-rank and the indexed document or hydrated facet that supplied the excerpt;
+rank (within the title group for thread relevance) and the indexed document
+or hydrated facet that supplied the excerpt;
 they do not guess token matches with a second string matcher. Freshness and
 coverage are separate facts. Lens ranking
 uses a bounded population and therefore does not support cursor pagination.

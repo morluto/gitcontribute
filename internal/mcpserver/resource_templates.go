@@ -73,6 +73,12 @@ func (s *Server) registerResourceTemplates() {
 			name:     "Manifest", description: "Persisted contribution evidence manifest",
 		})
 	}
+	if _, ok := s.reader.(validationGroupResourceReader); ok {
+		templates = append(templates, resourceTemplateDefinition{
+			template: "gitcontribute://validation-group/{id}",
+			name:     "Validation group", description: "Persisted execution outcomes and exact validation run IDs; no execution",
+		})
+	}
 	if _, ok := s.reader.(workspaceResourceReader); ok {
 		templates = append(templates, resourceTemplateDefinition{
 			template: "gitcontribute://workspace/{id}",
