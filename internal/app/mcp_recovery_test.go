@@ -80,16 +80,24 @@ func assertRelatedWorkRecovery(t *testing.T, output mcpcontract.CheckOutput, kin
 }
 
 func TestMCPRelatedWorkPreservesUnknownThreadCoverage(t *testing.T) {
-	for _, coverage := range []string{"missing", "incomplete", "complete"} {
+	for _, coverage := range []string{"missing", "incomplete", "stale", "equal", "newer"} {
 		t.Run(coverage, func(t *testing.T) {
 			ctx := context.Background()
 			svc := newSearchTestService(t)
-			repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "owner", Name: "repo"}, `{}`)
+			observedAt := time.Date(2026, time.September, 8, 12, 0, 0, 0, time.UTC)
+			repo, err := svc.corpus.UpsertRepository(ctx, corpus.Repository{Owner: "owner", Name: "repo", SourceUpdatedAt: observedAt}, `{}`)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if coverage != "missing" {
-				if err := svc.corpus.AdvanceFacet(ctx, repo.ID, nil, "threads", time.Now(), coverage == "complete", 0); err != nil {
+				coverageAt := observedAt
+				switch coverage {
+				case "stale":
+					coverageAt = observedAt.Add(-time.Second)
+				case "newer":
+					coverageAt = observedAt.Add(time.Second)
+				}
+				if err := svc.corpus.AdvanceFacet(ctx, repo.ID, nil, "threads", coverageAt, coverage != "incomplete", 0); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -104,13 +112,16 @@ func TestMCPRelatedWorkPreservesUnknownThreadCoverage(t *testing.T) {
 			for _, tool := range []string{"corpus.find_duplicates", "corpus.find_competing_pull_requests"} {
 				session := connectAuditMCP(t, svc)
 				out := callMCPTool[mcpcontract.CheckOutput](ctx, t, session, tool, map[string]any{"target": "hypothesis", "id": hypothesis.ID, "limit": 10})
-				if coverage == "complete" {
-					if out.Coverage != "complete" {
+				if out.Total != 0 || len(out.Findings) != 0 {
+					t.Fatalf("expected empty findings: %+v", out)
+				}
+				if coverage == "equal" || coverage == "newer" {
+					if out.Coverage != "complete" || out.Status != "complete" || out.Recovery != nil {
 						t.Fatalf("complete corpus: %+v", out)
 					}
 					continue
 				}
-				if out.Coverage == "complete" || out.Status == "complete" || out.Recovery == nil {
+				if out.Coverage != "unknown" || out.Status != "partial" || out.Recovery == nil || len(out.Recovery.Then) != 1 || out.Recovery.Then[0].Type() != "sync_threads" {
 					t.Fatalf("incomplete corpus became negative evidence: %+v", out)
 				}
 			}

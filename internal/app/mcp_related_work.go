@@ -81,7 +81,7 @@ func (r *MCPReader) checkRelatedWork(ctx context.Context, subject relatedWorkSub
 	}
 	if err == nil && !complete {
 		result.Status, result.Coverage = "partial", "unknown"
-		result.Recovery = recoveryPlan("thread_coverage_incomplete", "Stored thread coverage is missing or incomplete. Synchronize repository threads, poll the job, and repeat this check before inferring absence.", mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{
+		result.Recovery = recoveryPlan("thread_coverage_incomplete", "Stored thread coverage is missing, incomplete, or stale. Synchronize repository threads, poll the job, and repeat this check before inferring absence.", mcpcontract.RecoveryAction(mcpcontract.SyncThreadsInput{
 			Selection: "repositories", Repositories: []mcpcontract.RepositoryRef{{Owner: repo.Owner(), Repo: repo.Repo()}}, Kind: "both", State: "all",
 		}))
 	}
@@ -162,7 +162,7 @@ func (r *MCPReader) relatedWorkRepositoryCoverage(ctx context.Context, repo doma
 	if err != nil {
 		return true, false, err
 	}
-	return true, coverage != nil && coverage.Complete, nil
+	return true, coverage != nil && coverage.Complete && !coverage.SourceUpdatedAt.Before(stored.SourceUpdatedAt), nil
 }
 
 func unavailableRelatedWorkOutput(target, id string, repo domain.RepoRef, limit int, reason, message string, action mcpcontract.ToolCall) mcpcontract.CheckOutput {
