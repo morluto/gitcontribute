@@ -298,8 +298,8 @@ func Rank(repo RepositorySnapshot, issues []IssueSnapshot, opts Options) (*Repor
 
 	sort.SliceStable(report.Candidates, func(i, j int) bool {
 		left, right := report.Candidates[i], report.Candidates[j]
-		if eligibilityOrder(left.Eligibility) != eligibilityOrder(right.Eligibility) {
-			return eligibilityOrder(left.Eligibility) < eligibilityOrder(right.Eligibility)
+		if eligibilitySeverity(left.Eligibility) != eligibilitySeverity(right.Eligibility) {
+			return eligibilitySeverity(left.Eligibility) < eligibilitySeverity(right.Eligibility)
 		}
 		if left.Score != right.Score {
 			return left.Score > right.Score
@@ -761,18 +761,5 @@ func confidence(metadataComplete, threadsComplete, commentsComplete, guidanceAva
 		return "medium"
 	default:
 		return "low"
-	}
-}
-
-func eligibilityOrder(value Eligibility) int {
-	switch value {
-	case EligibilityReadyToCode:
-		return 0
-	case EligibilityNeedsDiagnosis:
-		return 1
-	case EligibilityNeedsCoordination:
-		return 2
-	default:
-		return 3
 	}
 }

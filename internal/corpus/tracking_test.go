@@ -586,3 +586,101 @@ func containsAny(s string, subs []string) bool {
 func contains(s, sub string) bool {
 	return len(sub) > 0 && strings.Contains(s, sub)
 }
+
+func TestRecordTriageEventPreservesInputOnFailure(t *testing.T) {
+	for _, failure := range []string{"canceled lookup", "rejected insert"} {
+		t.Run(failure, func(t *testing.T) {
+			c, _ := openTestCorpus(t)
+			ctx := context.Background()
+			if failure == "canceled lookup" {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithCancel(ctx)
+				cancel()
+			} else if _, err := c.db.ExecContext(ctx, `CREATE TRIGGER reject_triage BEFORE INSERT ON triage_events BEGIN SELECT RAISE(ABORT, 'rejected'); END`); err != nil {
+				t.Fatal(err)
+			}
+			missingID := int64(99999)
+			event := tracking.TriageEvent{ID: "failed", TargetKind: tracking.TargetRepository, TargetRef: "owner/repo", Outcome: tracking.OutcomeViewed,
+				RepositoryID: &missingID, ThreadID: &missingID, InvestigationID: "missing", OpportunityID: "missing"}
+			before := event
+			if err := c.RecordTriageEvent(ctx, &event); err == nil {
+				t.Fatal("expected failure")
+			}
+			if event != before {
+				t.Fatalf("failed record changed caller input: before %+v, after %+v", before, event)
+			}
+		})
+	}
+}
+
+func TestRecordTriageEventRejectsUnreadableTarget(t *testing.T) {
+	ctx := context.Background()
+	c, _ := openTestCorpus(t)
+	repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "123", time.Unix(1, 0).UTC(), `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// SQLite's dynamic typing permits malformed imported numeric values; a
+	// projection decoding failure must not be interpreted as a missing target.
+	if _, err := c.db.ExecContext(ctx, `UPDATE repositories SET stars='invalid' WHERE id=?`, repo.ID); err != nil {
+		t.Fatal(err)
+	}
+	event := tracking.TriageEvent{ID: "unreadable", TargetKind: tracking.TargetRepository, TargetRef: "owner/repo", Outcome: tracking.OutcomeViewed}
+	if err := c.RecordTriageEvent(ctx, &event); err == nil {
+		t.Fatal("unreadable repository was treated as missing")
+	}
+	events, err := c.ListTriageEvents(ctx, tracking.TriageEventFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("persisted events after failed resolution: %+v", events)
+	}
+}
+
+func TestRecordTriageEventClearsMissingLinksAfterSuccessfulWrite(t *testing.T) {
+	c, _ := openTestCorpus(t)
+	missingID := int64(99999)
+	event := tracking.TriageEvent{ID: "missing", TargetKind: tracking.TargetRepository, TargetRef: "owner/repo", Outcome: tracking.OutcomeViewed,
+		RepositoryID: &missingID, ThreadID: &missingID, InvestigationID: "missing", OpportunityID: "missing"}
+	if err := c.RecordTriageEvent(context.Background(), &event); err != nil {
+		t.Fatal(err)
+	}
+	if event.RepositoryID != nil || event.ThreadID != nil || event.InvestigationID != "" || event.OpportunityID != "" {
+		t.Fatalf("stale links remain: %+v", event)
+	}
+}
+
+func TestRecordTriageEventRejectsUnreadableThread(t *testing.T) {
+	for _, kind := range []tracking.TargetKind{tracking.TargetIssue, tracking.TargetThread} {
+		t.Run(string(kind), func(t *testing.T) {
+			ctx := context.Background()
+			c, _ := openTestCorpus(t)
+			repo, err := c.ApplyRepositoryObservation(ctx, "owner", "repo", "123", time.Unix(1, 0).UTC(), `{}`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			thread, err := c.ApplyThreadObservation(ctx, repo.ID, domain.IssueKind, 1, "open", "bug", "body", "alice", time.Unix(2, 0).UTC(), `{}`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := c.db.ExecContext(ctx, `UPDATE threads SET source_updated_at='invalid' WHERE id=?`, thread.ID); err != nil {
+				t.Fatal(err)
+			}
+			event := tracking.TriageEvent{ID: "unreadable", TargetKind: kind, TargetRef: "owner/repo#1", Outcome: tracking.OutcomeViewed}
+			if err := c.RecordTriageEvent(ctx, &event); err == nil {
+				t.Fatal("unreadable thread was treated as missing")
+			}
+			if event.RepositoryID != nil {
+				t.Fatal("failed resolution changed repository link")
+			}
+			events, err := c.ListTriageEvents(ctx, tracking.TriageEventFilter{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(events) != 0 {
+				t.Fatalf("persisted events after failed resolution: %+v", events)
+			}
+		})
+	}
+}

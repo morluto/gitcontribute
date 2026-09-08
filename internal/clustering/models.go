@@ -16,6 +16,11 @@ type MemberRef struct {
 	Number int
 }
 
+// Equal compares thread identity, treating repository owner and name as case-insensitive.
+func (m MemberRef) Equal(other MemberRef) bool {
+	return m.Number == other.Number && m.Kind == other.Kind && strings.EqualFold(m.Owner, other.Owner) && strings.EqualFold(m.Repo, other.Repo)
+}
+
 func (m MemberRef) String() string {
 	return fmt.Sprintf("%s/%s:%s#%d", m.Owner, m.Repo, m.Kind, m.Number)
 }

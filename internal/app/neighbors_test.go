@@ -467,3 +467,31 @@ func TestSimilarityCandidateWindowScalesWithRequestedLimit(t *testing.T) {
 		t.Fatal("oversized similarity limit was accepted")
 	}
 }
+
+func TestPullRequestCollisionsIgnoreQuotedReferences(t *testing.T) {
+	for _, direction := range []string{"inbound", "outbound"} {
+		t.Run(direction, func(t *testing.T) {
+			ctx := context.Background()
+			svc := newNeighborService(t)
+			t.Cleanup(func() { _ = svc.Close() })
+			c, err := svc.openCorpus(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			repo := seedRepoForNeighbors(t, c)
+			queryBody, otherBody := "Implementation", "> depends on #1"
+			if direction == "outbound" {
+				queryBody, otherBody = "Example: `depends on #2`", "Implementation"
+			}
+			seedPullRequestForNeighbors(t, c, repo.ID, 1, "Parser", queryBody, "alice", "open", "main")
+			seedPullRequestForNeighbors(t, c, repo.ID, 2, "Theme", otherBody, "bob", "open", "dev")
+			result, err := svc.PullRequestCollisions(ctx, contracts.RepoRef{Owner: "owner", Repo: "repo"}, 1, 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Collisions) != 0 {
+				t.Fatalf("quoted example produced collisions: %+v", result.Collisions)
+			}
+		})
+	}
+}

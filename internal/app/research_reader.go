@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +14,7 @@ import (
 	"github.com/morluto/gitcontribute/internal/facets"
 	"github.com/morluto/gitcontribute/internal/github"
 	"github.com/morluto/gitcontribute/internal/health"
+	"github.com/morluto/gitcontribute/internal/relatedwork"
 	"github.com/morluto/gitcontribute/internal/research"
 )
 
@@ -191,13 +190,12 @@ func appendOpenPRResearchRelations(ctx context.Context, c *corpus.Corpus, stored
 		if pullRequest.Number == ref.Number && ref.Kind == domain.PullRequestKind {
 			continue
 		}
-		if !researchTextReferences(pullRequest.Title+"\n"+pullRequest.Body, ref) {
+		relation := researchPRRelation(pullRequest.Title+"\n"+pullRequest.Body, ref)
+		if relation == "" {
 			continue
 		}
-		relation := "mentions"
 		basis := "open pull request explicitly references the target"
-		if researchPRCloses(pullRequest.Title+"\n"+pullRequest.Body, ref) {
-			relation = "claims_to_close"
+		if relation == "claims_to_close" {
 			basis = "open pull request uses a closing keyword for the target"
 		}
 		source := research.SourceRef{
@@ -529,20 +527,19 @@ func researchReferenceURL(ref research.ThreadRef) string {
 	return fmt.Sprintf("https://github.com/%s/%s/%d", ref.Repo, segment, ref.Number)
 }
 
-func researchTextReferences(text string, target research.ThreadRef) bool {
-	for _, ref := range clustering.ExtractMemberRefs(text, target.Repo) {
-		if strings.EqualFold(ref.Owner, target.Repo.Owner()) && strings.EqualFold(ref.Repo, target.Repo.Repo()) && ref.Number == target.Number {
-			return true
+func researchPRRelation(text string, target research.ThreadRef) string {
+	relation := ""
+	for _, ref := range relatedwork.Extract(text, target.Repo) {
+		if !strings.EqualFold(ref.Repo.String(), target.Repo.String()) || ref.Number != target.Number ||
+			(ref.Kind != "" && ref.Kind != target.Kind) {
+			continue
 		}
+		if ref.Relation == relatedwork.RelationClaimsToClose {
+			return "claims_to_close"
+		}
+		relation = "mentions"
 	}
-	return false
-}
-
-func researchPRCloses(text string, target research.ThreadRef) bool {
-	repo := regexp.QuoteMeta(target.Repo.String())
-	number := regexp.QuoteMeta(strconv.Itoa(target.Number))
-	pattern := regexp.MustCompile(`(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+(?:` + repo + `)?#` + number + `\b`)
-	return pattern.MatchString(text)
+	return relation
 }
 
 func normalizeResearchRelated(values []research.RelatedThread, limit int, capped *bool) []research.RelatedThread {

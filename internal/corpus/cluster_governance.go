@@ -60,7 +60,7 @@ func (c *Corpus) AddClusterOverride(ctx context.Context, clusterID int64, ref cl
 	if err != nil {
 		return fmt.Errorf("decode cluster repository: %w", err)
 	}
-	if action == clustering.OverrideExclude && sameClusterMemberRef(ref, canonical) {
+	if action == clustering.OverrideExclude && ref.Equal(canonical) {
 		return errors.New("cannot exclude the canonical member")
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cluster_overrides
@@ -95,8 +95,4 @@ func validateClusterMemberRef(ref clustering.MemberRef) error {
 		return errors.New("member number must be positive")
 	}
 	return nil
-}
-
-func sameClusterMemberRef(a, b clustering.MemberRef) bool {
-	return a.Number == b.Number && a.Kind == b.Kind && strings.EqualFold(a.Owner, b.Owner) && strings.EqualFold(a.Repo, b.Repo)
 }
