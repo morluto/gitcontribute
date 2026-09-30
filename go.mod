@@ -4,7 +4,7 @@ go 1.26.5
 
 require (
 	charm.land/huh/v2 v2.0.3
-	github.com/alecthomas/kong v1.16.0
+	github.com/alecthomas/kong v1.16.1
 	github.com/gofrs/flock v0.13.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/go-github/v89 v89.0.0
